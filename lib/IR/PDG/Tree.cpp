@@ -25,10 +25,17 @@
 using namespace llvm;
 
 pdg::TreeNode::TreeNode(const TreeNode &tree_node)
-    : Node(tree_node.getNodeType()) {
+    : Node(tree_node.getNodeType()),
+      _tree(nullptr), // Will be set by tree during tree copy
+      _parent_node(nullptr), // Will be set by parent during tree copy
+      _depth(tree_node._depth),
+      _di_local_var(tree_node._di_local_var),
+      _addr_vars(tree_node._addr_vars),
+      _acc_tag_set(tree_node._acc_tag_set) {
   _func = tree_node.getFunc();
   _node_di_type = tree_node.getDIType();
   _node_type = tree_node.getNodeType();
+  // Children will be copied recursively by Tree copy constructor
 }
 
 pdg::TreeNode::TreeNode(DIType *di_type, int depth, TreeNode *parent_node,
@@ -64,6 +71,10 @@ int pdg::TreeNode::expandNode() {
   // expand debugging information here
   if (_node_di_type == nullptr)
     return 0;
+  if (_func == nullptr) {
+    // Cannot expand node without function context
+    return 0;
+  }
   DIType *dt = dbgutils::stripAttributes(*_node_di_type);
   dt = dbgutils::stripMemberTag(*dt);
   // iterate through all the child nodes, build a tree node for each of them.
@@ -74,6 +85,8 @@ int pdg::TreeNode::expandNode() {
   // expand the referenced object type
   if (dbgutils::isPointerType(*dt) || dbgutils::isReferenceType(*dt)) {
     DIType *pointed_obj_dt = dbgutils::getLowestDIType(*dt);
+    if (pointed_obj_dt == nullptr)
+      return 0;
     TreeNode *new_child_node = new TreeNode(*_func, pointed_obj_dt, _depth + 1,
                                             this, _tree, getNodeType());
     new_child_node->computeDerivedAddrVarsFromParent();
@@ -83,9 +96,14 @@ int pdg::TreeNode::expandNode() {
   }
   // TODO: should change to aggregate type later
   if (dbgutils::isStructType(*dt) || dbgutils::isClassType(*dt)) {
-    auto di_node_arr = dyn_cast<DICompositeType>(dt)->getElements();
+    auto *composite_type = dyn_cast<DICompositeType>(dt);
+    if (composite_type == nullptr)
+      return 0;
+    auto di_node_arr = composite_type->getElements();
     for (unsigned i = 0; i < di_node_arr.size(); i++) {
       DIType *field_di_type = dyn_cast<DIType>(di_node_arr[i]);
+      if (field_di_type == nullptr)
+        continue;
       TreeNode *new_child_node = new TreeNode(*_func, field_di_type, _depth + 1,
                                               this, _tree, getNodeType());
       new_child_node->computeDerivedAddrVarsFromParent();
@@ -138,11 +156,34 @@ void pdg::TreeNode::computeDerivedAddrVarsFromParent() {
 }
 
 //  ====== Tree =======
-pdg::Tree::Tree(const Tree &src_tree) {
+pdg::Tree::Tree(const Tree &src_tree)
+    : _base_val(src_tree._base_val), _root_node(nullptr), _size(0) {
   TreeNode *src_tree_root_node = src_tree.getRootNode();
+  if (src_tree_root_node == nullptr) {
+    return;
+  }
   TreeNode *new_root_node = new TreeNode(*src_tree_root_node);
+  new_root_node->setParentTreeNode(nullptr);
+  new_root_node->setTree(this);
   _root_node = new_root_node;
-  _size = 0;
+  
+  // Recursively copy all children
+  std::queue<std::pair<TreeNode*, TreeNode*>> node_queue;
+  node_queue.push(std::make_pair(src_tree_root_node, new_root_node));
+  
+  while (!node_queue.empty()) {
+    TreeNode *src_node = node_queue.front().first;
+    TreeNode *dst_node = node_queue.front().second;
+    node_queue.pop();
+    
+    for (TreeNode *src_child : src_node->getChildNodes()) {
+      TreeNode *new_child = new TreeNode(*src_child);
+      new_child->setParentTreeNode(dst_node);
+      new_child->setTree(this);
+      dst_node->insertChildNode(new_child);
+      node_queue.push(std::make_pair(src_child, new_child));
+    }
+  }
 }
 
 bool pdg::Tree::isShapeCompatible(const Tree &other) const {

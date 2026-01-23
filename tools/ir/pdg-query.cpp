@@ -14,14 +14,19 @@
  */
 
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
+#include "llvm/InitializePasses.h"
+#include "llvm/PassRegistry.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "IR/PDG/ControlDependencyGraph.h"
 #include "IR/PDG/CypherQuery.h"
+#include "IR/PDG/DataDependencyGraph.h"
 #include "IR/PDG/ProgramDependencyGraph.h"
 
 #include <algorithm>
@@ -29,9 +34,44 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <unordered_set>
 
 using namespace llvm;
 using namespace pdg;
+
+static std::string describeNode(CypherQueryExecutor &executor, Node *node) {
+  if (!node)
+    return "<null>";
+  std::string s;
+  s += executor.getNodePropertyString(node, "label");
+  const std::string func = executor.getNodePropertyString(node, "func");
+  if (!func.empty())
+    s += " func=" + func;
+  const std::string opcode = executor.getNodePropertyString(node, "opcode");
+  if (!opcode.empty())
+    s += " opcode=" + opcode;
+  const std::string callee = executor.getNodePropertyString(node, "callee");
+  if (!callee.empty())
+    s += " callee=" + callee;
+  const std::string src = executor.getNodePropertyString(node, "src");
+  if (!src.empty())
+    s += " @" + src;
+  return s;
+}
+
+static std::string describeEdge(CypherQueryExecutor &executor, Edge *edge) {
+  if (!edge)
+    return "<null>";
+  std::string s;
+  s += executor.getEdgePropertyString(edge, "label");
+  const std::string src = executor.getEdgePropertyString(edge, "src_src");
+  const std::string dst = executor.getEdgePropertyString(edge, "dst_src");
+  if (!src.empty())
+    s += " src@" + src;
+  if (!dst.empty())
+    s += " dst@" + dst;
+  return s;
+}
 
 static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
@@ -57,6 +97,11 @@ static cl::opt<bool> Explain("explain", "e",
 static cl::opt<int> Timeout("timeout", "t",
                             cl::desc("Query timeout in seconds (default: 30)"),
                             cl::init(30));
+
+static cl::opt<bool>
+    BuildPDG("build-pdg",
+             cl::desc("Build full PDG (adds data/control/param edges)"),
+             cl::init(true));
 
 static cl::opt<std::string>
     TargetFunction("function", cl::desc("Target function for analysis"),
@@ -90,20 +135,7 @@ void printUsage(const char *programName) {
   errs() << "  -v, --verbose             Enable verbose output\n";
   errs() << "  -e, --explain             Show query execution plan\n";
   errs() << "  -t, --timeout <seconds>   Query timeout (default: 30)\n";
-  errs() << "  --function <name>         Target function for analysis\n";
   errs() << "  --limit <num>             Maximum results (default: 100)\n";
-  errs() << "  --output-format <format>  Output format: text, json\n";
-  errs() << "  --version                 Show version\n";
-  errs() << "\nCypher Query Examples:\n";
-  errs() << "  MATCH (n) RETURN n                              # All nodes\n";
-  errs()
-      << "  MATCH (n:INST_FUNCALL) RETURN n                 # Function calls\n";
-  errs() << "  MATCH (a)-[r]->(b) RETURN a, b                  # Connected "
-            "nodes\n";
-  errs()
-      << "  MATCH (n:FUNC_ENTRY) WHERE n.name = 'main'      # Filtered nodes\n";
-  errs() << "  MATCH (a)-[*]->(b) RETURN a, b                  # "
-            "Variable-length paths\n";
 }
 
 void printPDGInfo(ProgramGraph &pdg) {
@@ -113,25 +145,6 @@ void printPDGInfo(ProgramGraph &pdg) {
   outs() << "  Functions: " << pdg.getFuncWrapperMap().size() << "\n";
 }
 
-void printQueryStats(const CypherQuery &query, const CypherResult &result,
-                     std::chrono::microseconds duration) {
-  outs() << "Query completed in " << duration.count() << "µs\n";
-  outs() << "Result: " << result.toString() << "\n";
-
-  if (Explain) {
-    outs() << "Query plan hints:\n";
-    outs() << "  - Patterns: " << query.getPatterns().size() << "\n";
-    outs() << "  - Has WHERE: " << (query.getWhereClause() ? "yes" : "no")
-           << "\n";
-    outs() << "  - Return items: " << query.getReturnItems().size() << "\n";
-    if (query.getOrderBy()) {
-      outs() << "  - Ordered by: " << query.getOrderBy()->getVariable() << "\n";
-    }
-    if (query.getLimit() > 0) {
-      outs() << "  - Limited to: " << query.getLimit() << " results\n";
-    }
-  }
-}
 
 bool executeQuery(CypherQueryExecutor &executor, const std::string &queryStr) {
   if (Verbose) {
@@ -145,30 +158,19 @@ bool executeQuery(CypherQueryExecutor &executor, const std::string &queryStr) {
 
   if (!query) {
     const auto &error = parser.getLastError();
-    errs() << "Parse error: " << error.message << "\n";
-    if (error.line > 0 || error.column > 0) {
-      errs() << "  at line " << error.line;
-      if (error.column > 0) {
-        errs() << ", column " << error.column;
-      }
-      errs() << "\n";
-    }
-    if (!error.suggestion.empty()) {
-      errs() << "  Suggestion: " << error.suggestion << "\n";
-    }
+    errs() << "Parse error: " << error.message;
+    if (error.line > 0) errs() << " (line " << error.line << ")";
+    if (!error.suggestion.empty()) errs() << " - " << error.suggestion;
+    errs() << "\n";
     return false;
   }
 
   if (Explain) {
-    outs() << "Parsed query:\n";
-    outs() << "  - Patterns: " << query->getPatterns().size() << "\n";
-    outs() << "  - Return items: " << query->getReturnItems().size() << "\n";
-    if (query->hasWhere()) {
-      outs() << "  - Has WHERE clause\n";
-    }
-    if (query->hasLimit()) {
-      outs() << "  - Limit: " << query->getLimit() << "\n";
-    }
+    outs() << "Plan: " << query->getPatterns().size() << " patterns, "
+           << query->getReturnItems().size() << " returns";
+    if (query->hasWhere()) outs() << ", WHERE";
+    if (query->hasLimit()) outs() << ", LIMIT " << query->getLimit();
+    outs() << "\n";
   }
 
   // Apply limit from command line if query doesn't have one
@@ -183,28 +185,134 @@ bool executeQuery(CypherQueryExecutor &executor, const std::string &queryStr) {
       std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   if (result) {
-    const auto &stats = executor.getLastStats();
-    outs() << "Query completed in " << duration.count() << "µs\n";
     outs() << "Result: " << result->toString() << "\n";
 
+    const bool wantDetails = Verbose || !query->getReturnItems().empty();
+    if (wantDetails && result->getType() == CypherResult::ResultType::NODES) {
+      // Group RETURN items by variable name (e.g., "n", "m").
+      struct Item {
+        std::string var;
+        std::string prop;
+        std::string header;
+      };
+      std::vector<Item> items;
+      std::vector<std::string> varsInOrder;
+      std::unordered_set<std::string> seenVars;
+
+      if (query->getReturnItems().empty()) {
+        items.push_back({"n", "", "n"});
+        items.push_back({"n", "func", "func"});
+        items.push_back({"n", "opcode", "opcode"});
+        items.push_back({"n", "callee", "callee"});
+        items.push_back({"n", "src", "src"});
+        varsInOrder.push_back("n");
+        seenVars.insert("n");
+      } else {
+        for (const auto &ri : query->getReturnItems()) {
+          std::string expr = ri->getVariable();
+          std::string var = expr;
+          std::string prop;
+          auto dot = expr.find('.');
+          if (dot != std::string::npos) {
+            var = expr.substr(0, dot);
+            prop = expr.substr(dot + 1);
+          }
+          const std::string header =
+              ri->hasAlias() ? ri->getAlias() : ri->getVariable();
+          items.push_back({var, prop, header});
+          if (!var.empty() && !seenVars.count(var)) {
+            varsInOrder.push_back(var);
+            seenVars.insert(var);
+          }
+        }
+      }
+
+      for (const auto &var : varsInOrder) {
+        const auto *boundEdges = executor.getBoundRelationship(var);
+        const auto *boundNodes = executor.getBoundVariable(var);
+
+        if (varsInOrder.size() > 1) {
+          outs() << "RETURN " << var << ":\n";
+        }
+
+        // Header
+        bool first = true;
+        for (const auto &it : items) {
+          if (it.var != var)
+            continue;
+          if (!first)
+            outs() << "\t";
+          outs() << it.header;
+          first = false;
+        }
+        outs() << "\n";
+
+        if (boundEdges) {
+          const auto &edges = *boundEdges;
+          const size_t limit =
+              std::min(edges.size(), static_cast<size_t>(ResultLimit));
+          for (size_t i = 0; i < limit; ++i) {
+            Edge *e = edges[i];
+            bool colFirst = true;
+            for (const auto &it : items) {
+              if (it.var != var)
+                continue;
+              if (!colFirst)
+                outs() << "\t";
+              if (it.prop.empty())
+                outs() << describeEdge(executor, e);
+              else
+                outs() << executor.getEdgePropertyString(e, it.prop);
+              colFirst = false;
+            }
+            outs() << "\n";
+          }
+          if (edges.size() > limit) {
+            outs() << "... (" << (edges.size() - limit) << " more)\n";
+          }
+        } else {
+          const auto &nodes = boundNodes ? *boundNodes : result->getNodes();
+          const size_t limit =
+              std::min(nodes.size(), static_cast<size_t>(ResultLimit));
+          for (size_t i = 0; i < limit; ++i) {
+            Node *n = nodes[i];
+            bool colFirst = true;
+            for (const auto &it : items) {
+              if (it.var != var)
+                continue;
+              if (!colFirst)
+                outs() << "\t";
+              if (it.prop.empty())
+                outs() << describeNode(executor, n);
+              else
+                outs() << executor.getNodePropertyString(n, it.prop);
+              colFirst = false;
+            }
+            outs() << "\n";
+          }
+          if (nodes.size() > limit) {
+            outs() << "... (" << (nodes.size() - limit) << " more)\n";
+          }
+        }
+      }
+    }
+
     if (Verbose) {
-      outs() << "Stats:\n";
-      outs() << "  - Nodes visited: " << stats.nodesVisited << "\n";
-      outs() << "  - Edges visited: " << stats.edgesVisited << "\n";
-      outs() << "  - Results returned: " << stats.resultsReturned << "\n";
+      const auto &stats = executor.getLastStats();
+      outs() << "Time: " << duration.count() << "µs, "
+             << "Nodes: " << stats.nodesVisited << ", "
+             << "Edges: " << stats.edgesVisited << ", "
+             << "Results: " << stats.resultsReturned << "\n";
     }
     return true;
   } else {
-    errs() << "Execution error: " << executor.getLastError() << "\n";
+    errs() << "Error: " << executor.getLastError() << "\n";
     return false;
   }
 }
 
 void runInteractiveMode(CypherQueryExecutor &executor) {
-  outs() << "PDG Cypher Query Interactive Mode\n";
-  outs() << "Type 'help' for commands, 'quit' to exit\n";
-  outs() << "Cypher syntax: MATCH (n:Label) WHERE n.prop = 'value' RETURN n\n";
-  outs() << "> ";
+  outs() << "PDG Query (type 'help' or 'quit')\n> ";
 
   std::string line;
   while (std::getline(std::cin, line)) {
@@ -218,28 +326,13 @@ void runInteractiveMode(CypherQueryExecutor &executor) {
     }
 
     if (line == "help") {
-      outs() << "Commands:\n";
-      outs() << "  help       Show this help message\n";
-      outs() << "  quit       Exit interactive mode\n";
-      outs() << "  info       Show PDG information\n";
-      outs() << "  stats      Show query execution statistics\n";
-      outs() << "  clear      Clear screen\n";
-      outs() << "  <query>    Execute Cypher query\n";
-      outs() << "\nNode Labels:\n";
-      outs() << "  :INST_FUNCALL, :INST_RET, :INST_BR, :FUNC_ENTRY\n";
-      outs() << "  :PARAM_FORMALIN, :PARAM_FORMALOUT, :FUNC, :CLASS\n";
-      outs() << "\nRelationship Types:\n";
-      outs() << "  :DATA_DEP, :CONTROL_DEP, :CALL_INV, :CALL_RET\n";
-      outs() << "  :PARAM_IN, :PARAM_OUT\n";
+      outs() << "Commands: help, quit, info, clear\n";
+      outs() << "Labels: :INST, :INST_FUNCALL, :INST_RET, :INST_BR, :FUNC_ENTRY, :PARAM, :VAR, :ANNO\n";
+      outs() << "Edges: :DATA_DEP, :DATA_RAW, :DATA_READ, :DATA_ALIAS, :CONTROL_DEP, :CALL_INV, :CALL_RET, :PARAM_IN, :PARAM_OUT\n";
     } else if (line == "info") {
       printPDGInfo(executor.getPDG());
-    } else if (line == "stats") {
-      outs() << "Use -v (verbose) flag for detailed statistics\n";
     } else if (line == "clear") {
-      // Simple clear - just print newlines
-      for (int i = 0; i < 50; ++i) {
-        outs() << "\n";
-      }
+      for (int i = 0; i < 50; ++i) outs() << "\n";
     } else {
       executeQuery(executor, line);
     }
@@ -255,36 +348,22 @@ void runBatchMode(CypherQueryExecutor &executor, const std::string &filename) {
     return;
   }
 
-  outs() << "Executing queries from: " << filename << "\n";
-
   std::string line;
-  int queryCount = 0;
-  int successCount = 0;
+  int queryCount = 0, successCount = 0;
 
   while (std::getline(file, line)) {
-    // Skip empty lines and comments
-    if (line.empty() || line[0] == '#') {
-      continue;
-    }
+    if (line.empty() || line[0] == '#') continue;
 
-    // Trim whitespace
     size_t start = line.find_first_not_of(" \t");
     size_t end = line.find_last_not_of(" \t\r\n");
-    if (start == std::string::npos) {
-      continue;
-    }
+    if (start == std::string::npos) continue;
     line = line.substr(start, end - start + 1);
 
-    outs() << "\nQuery " << (++queryCount) << ": " << line << "\n";
-    outs() << "-----\n";
-
-    if (executeQuery(executor, line)) {
-      successCount++;
-    }
+    outs() << "\n[" << (++queryCount) << "] " << line << "\n";
+    if (executeQuery(executor, line)) successCount++;
   }
 
-  outs() << "\nBatch execution complete: " << successCount << "/" << queryCount
-         << " queries succeeded\n";
+  outs() << "\nComplete: " << successCount << "/" << queryCount << "\n";
 }
 
 int main(int argc, char **argv) {
@@ -312,14 +391,28 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  outs() << "Loaded module: " << InputFilename << "\n";
-
-  // Build PDG
   ProgramGraph &pdg = ProgramGraph::getInstance();
-  pdg.build(*M);
-  pdg.bindDITypeToNodes(*M);
+  if (BuildPDG) {
+    // Ensure LLVM analysis passes are registered (required by PDG passes).
+    auto &registry = *llvm::PassRegistry::getPassRegistry();
+    llvm::initializeCore(registry);
+    llvm::initializeAnalysis(registry);
+    llvm::initializeTransformUtils(registry);
+
+    llvm::legacy::PassManager PM;
+    // Add required passes in order: DataDependencyGraph and ControlDependencyGraph
+    // must run before ProgramDependencyGraph
+    PM.add(new pdg::DataDependencyGraph());
+    PM.add(new pdg::ControlDependencyGraph());
+    PM.add(new pdg::ProgramDependencyGraph());
+    PM.run(*M);
+  } else {
+    pdg.build(*M);
+    pdg.bindDITypeToNodes(*M);
+  }
 
   if (Verbose) {
+    outs() << "Loaded: " << InputFilename << "\n";
     printPDGInfo(pdg);
   }
 
@@ -334,16 +427,8 @@ int main(int argc, char **argv) {
   } else if (!QueryFile.empty()) {
     runBatchMode(executor, QueryFile);
   } else {
-    outs() << "No query specified. Use -q for a single query, -i for "
-              "interactive mode, or -f for batch file.\n";
-    outs() << "Example: " << argv[0] << " -q \"MATCH (n) RETURN n\" "
-           << InputFilename << "\n";
-    outs() << "\nAvailable node labels:\n";
-    outs() << "  :INST_FUNCALL - Function call instructions\n";
-    outs() << "  :INST_RET     - Return instructions\n";
-    outs() << "  :INST_BR      - Branch instructions\n";
-    outs() << "  :FUNC_ENTRY   - Function entry points\n";
-    outs() << "  :PARAM_FORMALIN - Formal input parameters\n";
+    errs() << "No query specified. Use -q, -i, or -f\n";
+    return 1;
   }
 
   return 0;

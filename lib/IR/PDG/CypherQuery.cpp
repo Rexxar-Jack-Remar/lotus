@@ -1,11 +1,111 @@
 #include "IR/PDG/CypherQuery.h"
+#include "IR/PDG/DebugInfoUtils.h"
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <sstream>
 
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/raw_ostream.h"
+
 namespace pdg {
+
+static std::string toLower(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return s;
+}
+
+static const char *graphNodeTypeName(GraphNodeType t) {
+  switch (t) {
+  case GraphNodeType::INST_FUNCALL:
+    return "INST_FUNCALL";
+  case GraphNodeType::INST_RET:
+    return "INST_RET";
+  case GraphNodeType::INST_BR:
+    return "INST_BR";
+  case GraphNodeType::INST_OTHER:
+    return "INST_OTHER";
+  case GraphNodeType::FUNC_ENTRY:
+    return "FUNC_ENTRY";
+  case GraphNodeType::PARAM_FORMALIN:
+    return "PARAM_FORMALIN";
+  case GraphNodeType::PARAM_FORMALOUT:
+    return "PARAM_FORMALOUT";
+  case GraphNodeType::PARAM_ACTUALIN:
+    return "PARAM_ACTUALIN";
+  case GraphNodeType::PARAM_ACTUALOUT:
+    return "PARAM_ACTUALOUT";
+  case GraphNodeType::VAR_STATICALLOCGLOBALSCOPE:
+    return "VAR_STATICALLOCGLOBALSCOPE";
+  case GraphNodeType::VAR_STATICALLOCMODULESCOPE:
+    return "VAR_STATICALLOCMODULESCOPE";
+  case GraphNodeType::VAR_STATICALLOCFUNCTIONSCOPE:
+    return "VAR_STATICALLOCFUNCTIONSCOPE";
+  case GraphNodeType::VAR_OTHER:
+    return "VAR_OTHER";
+  case GraphNodeType::FUNC:
+    return "FUNC";
+  case GraphNodeType::CLASS:
+    return "CLASS";
+  case GraphNodeType::ANNO_VAR:
+    return "ANNO_VAR";
+  case GraphNodeType::ANNO_GLOBAL:
+    return "ANNO_GLOBAL";
+  case GraphNodeType::ANNO_OTHER:
+    return "ANNO_OTHER";
+  }
+  return "UNKNOWN";
+}
+
+static const char *edgeTypeName(EdgeType t) {
+  switch (t) {
+  case EdgeType::IND_CALL:
+    return "IND_CALL";
+  case EdgeType::CONTROLDEP_CALLINV:
+    return "CONTROLDEP_CALLINV";
+  case EdgeType::CONTROLDEP_CALLRET:
+    return "CONTROLDEP_CALLRET";
+  case EdgeType::CONTROLDEP_ENTRY:
+    return "CONTROLDEP_ENTRY";
+  case EdgeType::CONTROLDEP_BR:
+    return "CONTROLDEP_BR";
+  case EdgeType::CONTROLDEP_IND_BR:
+    return "CONTROLDEP_IND_BR";
+  case EdgeType::DATA_DEF_USE:
+    return "DATA_DEF_USE";
+  case EdgeType::DATA_RAW:
+    return "DATA_RAW";
+  case EdgeType::DATA_READ:
+    return "DATA_READ";
+  case EdgeType::DATA_ALIAS:
+    return "DATA_ALIAS";
+  case EdgeType::DATA_RET:
+    return "DATA_RET";
+  case EdgeType::PARAMETER_IN:
+    return "PARAMETER_IN";
+  case EdgeType::PARAMETER_OUT:
+    return "PARAMETER_OUT";
+  case EdgeType::PARAMETER_FIELD:
+    return "PARAMETER_FIELD";
+  case EdgeType::GLOBAL_DEP:
+    return "GLOBAL_DEP";
+  case EdgeType::VAL_DEP:
+    return "VAL_DEP";
+  case EdgeType::CLS_MTH:
+    return "CLS_MTH";
+  case EdgeType::ANNO_VAR:
+    return "ANNO_VAR";
+  case EdgeType::ANNO_GLOBAL:
+    return "ANNO_GLOBAL";
+  case EdgeType::ANNO_OTHER:
+    return "ANNO_OTHER";
+  case EdgeType::TYPE_OTHEREDGE:
+    return "TYPE_OTHEREDGE";
+  }
+  return "UNKNOWN";
+}
 
 // ============================================================================
 // CypherParser implementation
@@ -316,6 +416,7 @@ CypherParser::parseNodePattern(std::vector<std::string> &tokens, size_t &pos) {
 
   std::string variable;
   std::string label;
+  std::unordered_map<std::string, std::string> properties;
 
   if (hasMore(tokens, pos)) {
     std::string next = peek(tokens, pos);
@@ -343,12 +444,14 @@ CypherParser::parseNodePattern(std::vector<std::string> &tokens, size_t &pos) {
     consume(tokens, pos);
     while (hasMore(tokens, pos) && peek(tokens, pos) != "}") {
       std::string key = consume(tokens, pos);
+      std::string value;
       if (hasMore(tokens, pos) && peek(tokens, pos) == ":") {
         consume(tokens, pos);
-        std::string value = consume(tokens, pos);
+        value = consume(tokens, pos);
         if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
           value = value.substr(1, value.size() - 2);
         }
+        properties[key] = value;
       }
       if (hasMore(tokens, pos) && peek(tokens, pos) == ",") {
         consume(tokens, pos);
@@ -366,7 +469,11 @@ CypherParser::parseNodePattern(std::vector<std::string> &tokens, size_t &pos) {
   }
   consume(tokens, pos);
 
-  return std::make_unique<CypherNodePattern>(variable, label);
+  auto pat = std::make_unique<CypherNodePattern>(variable, label);
+  for (const auto &kv : properties) {
+    pat->addProperty(kv.first, kv.second);
+  }
+  return pat;
 }
 
 std::unique_ptr<CypherRelationshipPattern>
@@ -393,40 +500,49 @@ CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
     std::string type;
     int minHops = 1;
     int maxHops = 1;
+    std::unordered_map<std::string, std::string> properties;
 
-    // Check for variable-length pattern [*] or [*0..5]
+    // Check for variable-length pattern [*] or [*1..5]
     if (hasMore(tokens, pos) && peek(tokens, pos) == "*") {
       consume(tokens, pos); // consume '*'
       minHops = 1;
       maxHops = -1; // -1 means unlimited
 
-      // Check for range notation [min..max]
-      if (hasMore(tokens, pos) && peek(tokens, pos) == "[") {
-        consume(tokens, pos); // consume '['
-        if (hasMore(tokens, pos)) {
+      // Standard Cypher-style range: *min..max (both optional)
+      if (hasMore(tokens, pos)) {
+        const std::string &t0 = peek(tokens, pos);
+        if (!t0.empty() && std::isdigit(static_cast<unsigned char>(t0[0]))) {
           std::string minStr = consume(tokens, pos);
           try {
             minHops = std::stoi(minStr);
           } catch (...) {
-            minHops = 0;
+            minHops = 1;
           }
         }
+
         if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
-          consume(tokens, pos); // consume '.'
+          consume(tokens, pos); // '.'
           if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
-            consume(tokens, pos); // consume '.'
+            consume(tokens, pos); // '.'
             if (hasMore(tokens, pos)) {
-              std::string maxStr = consume(tokens, pos);
-              try {
-                maxHops = std::stoi(maxStr);
-              } catch (...) {
+              const std::string &t1 = peek(tokens, pos);
+              if (!t1.empty() &&
+                  std::isdigit(static_cast<unsigned char>(t1[0]))) {
+                std::string maxStr = consume(tokens, pos);
+                try {
+                  maxHops = std::stoi(maxStr);
+                } catch (...) {
+                  maxHops = -1;
+                }
+              } else {
                 maxHops = -1;
               }
             }
           }
-        }
-        if (hasMore(tokens, pos) && peek(tokens, pos) == "]") {
-          consume(tokens, pos); // consume ']'
+        } else {
+          // "*N" means exactly N hops.
+          if (maxHops == -1 && minHops > 1)
+            maxHops = minHops;
         }
       }
 
@@ -475,10 +591,14 @@ CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
     if (hasMore(tokens, pos) && peek(tokens, pos) == "{") {
       consume(tokens, pos);
       while (hasMore(tokens, pos) && peek(tokens, pos) != "}") {
-        consume(tokens, pos);
+        std::string key = consume(tokens, pos);
         if (hasMore(tokens, pos) && peek(tokens, pos) == ":") {
           consume(tokens, pos);
-          consume(tokens, pos);
+          std::string value = consume(tokens, pos);
+          if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+            value = value.substr(1, value.size() - 2);
+          }
+          properties[key] = value;
         }
         if (hasMore(tokens, pos) && peek(tokens, pos) == ",") {
           consume(tokens, pos);
@@ -516,6 +636,9 @@ CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
                                                            bidirectional);
     rel->setMinHops(1);
     rel->setMaxHops(1);
+    for (const auto &kv : properties) {
+      rel->addProperty(kv.first, kv.second);
+    }
     return rel;
   }
 
@@ -610,10 +733,81 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
   }
 
   if (!hasMore(tokens, pos)) {
-    return CypherWhereClause::makeExists(variable);
+    return CypherWhereClause::makeExists(variable, property);
   }
 
   std::string op = consume(tokens, pos);
+  std::string upperOp = op;
+  std::transform(upperOp.begin(), upperOp.end(), upperOp.begin(), ::toupper);
+
+  // Handle "IS NULL" / "IS NOT NULL"
+  if (upperOp == "IS") {
+    if (!hasMore(tokens, pos)) {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected NULL after IS", 0, 0);
+      return nullptr;
+    }
+    std::string t1 = consume(tokens, pos);
+    std::string upperT1 = t1;
+    std::transform(upperT1.begin(), upperT1.end(), upperT1.begin(), ::toupper);
+
+    if (upperT1 == "NOT") {
+      if (!hasMore(tokens, pos)) {
+        setError(CypherErrorCode::SYNTAX_ERROR, "Expected NULL after IS NOT", 0,
+                 0);
+        return nullptr;
+      }
+      std::string t2 = consume(tokens, pos);
+      std::string upperT2 = t2;
+      std::transform(upperT2.begin(), upperT2.end(), upperT2.begin(),
+                     ::toupper);
+      if (upperT2 != "NULL") {
+        setError(CypherErrorCode::SYNTAX_ERROR, "Expected NULL after IS NOT", 0,
+                 0);
+        return nullptr;
+      }
+      return CypherWhereClause::makeComparison(
+          variable, property, CypherComparisonOp::IS_NOT_NULL, "");
+    }
+
+    if (upperT1 != "NULL") {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected NULL after IS", 0, 0);
+      return nullptr;
+    }
+    return CypherWhereClause::makeComparison(variable, property,
+                                             CypherComparisonOp::IS_NULL, "");
+  }
+
+  // Handle "STARTS WITH" / "ENDS WITH"
+  if (upperOp == "STARTS" || upperOp == "ENDS") {
+    if (!hasMore(tokens, pos)) {
+      setError(CypherErrorCode::SYNTAX_ERROR,
+               "Expected WITH after " + op, 0, 0);
+      return nullptr;
+    }
+    std::string maybeWith = consume(tokens, pos);
+    std::string upperWith = maybeWith;
+    std::transform(upperWith.begin(), upperWith.end(), upperWith.begin(),
+                   ::toupper);
+    if (upperWith != "WITH") {
+      setError(CypherErrorCode::SYNTAX_ERROR,
+               "Expected WITH after " + op, 0, 0);
+      return nullptr;
+    }
+
+    std::string value;
+    if (hasMore(tokens, pos)) {
+      value = consume(tokens, pos);
+      if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        value = value.substr(1, value.size() - 2);
+      }
+    }
+
+    return CypherWhereClause::makeComparison(
+        variable, property,
+        (upperOp == "STARTS") ? CypherComparisonOp::STARTS_WITH
+                              : CypherComparisonOp::ENDS_WITH,
+        value);
+  }
 
   std::string value;
   if (hasMore(tokens, pos)) {
@@ -624,8 +818,6 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
   }
 
   CypherComparisonOp comparisonOp = CypherComparisonOp::EQUALS;
-  std::string upperOp = op;
-  std::transform(upperOp.begin(), upperOp.end(), upperOp.begin(), ::toupper);
 
   if (upperOp == "=" || upperOp == "==") {
     comparisonOp = CypherComparisonOp::EQUALS;
@@ -809,6 +1001,11 @@ CypherQueryExecutor::execute(const CypherQuery &query,
     resultNodes = filtered->getNodes();
   }
 
+  if (query.hasLimit() && query.getLimit() > 0 &&
+      resultNodes.size() > static_cast<size_t>(query.getLimit())) {
+    resultNodes.resize(static_cast<size_t>(query.getLimit()));
+  }
+
   auto result = std::make_unique<CypherResult>(CypherResult::ResultType::NODES);
   for (auto *node : resultNodes) {
     result->addNode(node);
@@ -839,19 +1036,91 @@ CypherQueryExecutor::matchPattern(const CypherPatternElement *pattern) {
   if (!startNodePattern)
     return result;
 
-  auto startNodes =
-      matchNodes(startNodePattern->getLabel(), startNodePattern->getVariable());
+  auto startNodes = matchNodes(startNodePattern->getLabel(), "");
   if (startNodes) {
-    for (auto *node : startNodes->getNodes()) {
+    std::vector<Node *> startMatches = startNodes->getNodes();
+    const auto &startProps = startNodePattern->getProperties();
+    if (!startProps.empty()) {
+      std::vector<Node *> filtered;
+      filtered.reserve(startMatches.size());
+      for (auto *n : startMatches) {
+        bool ok = true;
+        for (const auto &kv : startProps) {
+          if (getNodeProperty(n, kv.first) != kv.second) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok)
+          filtered.push_back(n);
+      }
+      startMatches = std::move(filtered);
+    }
+
+    if (!startNodePattern->getVariable().empty()) {
+      boundVariables_[startNodePattern->getVariable()] = startMatches;
+    }
+
+    for (auto *node : startMatches) {
       result->addNode(node);
 
       const auto *rel = pattern->getRelationship();
       if (rel) {
         int maxHops = rel->hasVariableLength() ? rel->getMaxHops() : 1;
+        if (maxHops < 0)
+          maxHops = 5;
         auto traversed = traverse(node, *rel, maxHops);
         if (traversed) {
+          for (auto *e : traversed->getRelationships())
+            result->addEdge(e);
+
+          if (!rel->getVariable().empty()) {
+            auto &bucket = boundRelationships_[rel->getVariable()];
+            const auto &edges = traversed->getRelationships();
+            bucket.insert(bucket.end(), edges.begin(), edges.end());
+            std::sort(bucket.begin(), bucket.end());
+            bucket.erase(std::unique(bucket.begin(), bucket.end()),
+                         bucket.end());
+          }
+
+          const auto *endNodePattern = pattern->getEndNode();
+          std::string endLabel = endNodePattern ? endNodePattern->getLabel() : "";
+          std::unordered_map<std::string, std::string> endProps =
+              endNodePattern ? endNodePattern->getProperties()
+                             : std::unordered_map<std::string, std::string>{};
+
+          std::unordered_set<Node *> labelAllowed;
+          if (endNodePattern && !endLabel.empty()) {
+            auto labelNodes = matchNodes(endLabel, "");
+            for (auto *ln : labelNodes->getNodes())
+              labelAllowed.insert(ln);
+          }
+
+          std::vector<Node *> endMatches;
           for (auto *tNode : traversed->getNodes()) {
-            result->addNode(tNode);
+            if (endNodePattern) {
+              if (!endLabel.empty() && labelAllowed.find(tNode) == labelAllowed.end())
+                continue;
+              bool ok = true;
+              for (const auto &kv : endProps) {
+                if (getNodeProperty(tNode, kv.first) != kv.second) {
+                  ok = false;
+                  break;
+                }
+              }
+              if (!ok)
+                continue;
+              endMatches.push_back(tNode);
+              result->addNode(tNode);
+            } else {
+              result->addNode(tNode);
+            }
+          }
+          if (endNodePattern && !endNodePattern->getVariable().empty()) {
+            auto &bucket = boundVariables_[endNodePattern->getVariable()];
+            bucket.insert(bucket.end(), endMatches.begin(), endMatches.end());
+            std::sort(bucket.begin(), bucket.end());
+            bucket.erase(std::unique(bucket.begin(), bucket.end()), bucket.end());
           }
         }
       }
@@ -876,21 +1145,57 @@ CypherQueryExecutor::matchNodes(const std::string &label,
       {"PARAM_FORMALOUT", GraphNodeType::PARAM_FORMALOUT},
       {"PARAM_ACTUALIN", GraphNodeType::PARAM_ACTUALIN},
       {"PARAM_ACTUALOUT", GraphNodeType::PARAM_ACTUALOUT},
-      {"VAR", GraphNodeType::VAR_OTHER},
+      {"VAR_OTHER", GraphNodeType::VAR_OTHER},
+      {"VAR_STATICALLOCGLOBALSCOPE", GraphNodeType::VAR_STATICALLOCGLOBALSCOPE},
+      {"VAR_STATICALLOCMODULESCOPE", GraphNodeType::VAR_STATICALLOCMODULESCOPE},
+      {"VAR_STATICALLOCFUNCTIONSCOPE",
+       GraphNodeType::VAR_STATICALLOCFUNCTIONSCOPE},
       {"FUNC", GraphNodeType::FUNC},
-      {"CLASS", GraphNodeType::CLASS}};
+      {"CLASS", GraphNodeType::CLASS},
+      {"ANNO_VAR", GraphNodeType::ANNO_VAR},
+      {"ANNO_GLOBAL", GraphNodeType::ANNO_GLOBAL},
+      {"ANNO_OTHER", GraphNodeType::ANNO_OTHER}};
 
   if (label.empty()) {
     for (auto it = pdg_.begin(); it != pdg_.end(); ++it) {
       result->addNode(*it);
     }
   } else {
-    auto it = labelMap.find(label);
-    if (it != labelMap.end()) {
-      for (auto iter = pdg_.begin(); iter != pdg_.end(); ++iter) {
-        if ((*iter)->getNodeType() == it->second) {
-          result->addNode(*iter);
-        }
+    const std::string upperLabel = [&]() {
+      std::string t = label;
+      std::transform(t.begin(), t.end(), t.begin(), ::toupper);
+      return t;
+    }();
+
+    auto matchesGroup = [&](GraphNodeType t) -> bool {
+      if (upperLabel == "INST") {
+        return t == GraphNodeType::INST_FUNCALL || t == GraphNodeType::INST_RET ||
+               t == GraphNodeType::INST_BR || t == GraphNodeType::INST_OTHER;
+      }
+      if (upperLabel == "VAR") {
+        return t == GraphNodeType::VAR_OTHER ||
+               t == GraphNodeType::VAR_STATICALLOCGLOBALSCOPE ||
+               t == GraphNodeType::VAR_STATICALLOCMODULESCOPE ||
+               t == GraphNodeType::VAR_STATICALLOCFUNCTIONSCOPE;
+      }
+      if (upperLabel == "PARAM") {
+        return t == GraphNodeType::PARAM_FORMALIN ||
+               t == GraphNodeType::PARAM_FORMALOUT ||
+               t == GraphNodeType::PARAM_ACTUALIN ||
+               t == GraphNodeType::PARAM_ACTUALOUT;
+      }
+      if (upperLabel == "ANNO") {
+        return t == GraphNodeType::ANNO_VAR || t == GraphNodeType::ANNO_GLOBAL ||
+               t == GraphNodeType::ANNO_OTHER;
+      }
+      return false;
+    };
+
+    auto it = labelMap.find(upperLabel);
+    for (auto iter = pdg_.begin(); iter != pdg_.end(); ++iter) {
+      const auto t = (*iter)->getNodeType();
+      if ((it != labelMap.end() && t == it->second) || matchesGroup(t)) {
+        result->addNode(*iter);
       }
     }
   }
@@ -912,10 +1217,13 @@ CypherQueryExecutor::matchEdges(const std::string &type,
       {"DATA_DEF_USE", EdgeType::DATA_DEF_USE},
       {"DATA_RAW", EdgeType::DATA_RAW},
       {"DATA_READ", EdgeType::DATA_READ},
+      {"DATA_ALIAS", EdgeType::DATA_ALIAS},
+      {"DATA_RET", EdgeType::DATA_RET},
       {"CONTROLDEP_BR", EdgeType::CONTROLDEP_BR},
       {"CONTROLDEP_ENTRY", EdgeType::CONTROLDEP_ENTRY},
       {"CONTROLDEP_CALLINV", EdgeType::CONTROLDEP_CALLINV},
       {"CONTROLDEP_CALLRET", EdgeType::CONTROLDEP_CALLRET},
+      {"IND_CALL", EdgeType::IND_CALL},
       {"PARAMETER_IN", EdgeType::PARAMETER_IN},
       {"PARAMETER_OUT", EdgeType::PARAMETER_OUT}};
 
@@ -957,11 +1265,18 @@ CypherQueryExecutor::traverse(Node *start, const CypherRelationshipPattern &rel,
       {"DATA_DEP", EdgeType::DATA_DEF_USE},
       {"CONTROL_DEP", EdgeType::CONTROLDEP_BR},
       {"CALL", EdgeType::CONTROLDEP_CALLINV},
+      {"CALL_INV", EdgeType::CONTROLDEP_CALLINV},
+      {"CALL_RET", EdgeType::CONTROLDEP_CALLRET},
+      {"IND_CALL", EdgeType::IND_CALL},
       {"PARAM_IN", EdgeType::PARAMETER_IN},
-      {"PARAM_OUT", EdgeType::PARAMETER_OUT}};
+      {"PARAM_OUT", EdgeType::PARAMETER_OUT},
+      {"DATA_RAW", EdgeType::DATA_RAW},
+      {"DATA_READ", EdgeType::DATA_READ},
+      {"DATA_ALIAS", EdgeType::DATA_ALIAS}};
 
   std::vector<Node *> currentLevel = {start};
   std::unordered_set<Node *> visited;
+  std::unordered_set<Edge *> visitedEdges;
   visited.insert(start);
 
   EdgeType edgeType = EdgeType::DATA_DEF_USE;
@@ -978,6 +1293,8 @@ CypherQueryExecutor::traverse(Node *start, const CypherRelationshipPattern &rel,
     for (auto *node : currentLevel) {
       for (auto *edge : node->getOutEdgeSet()) {
         if (edge->getEdgeType() == edgeType || rel.getType().empty()) {
+          if (visitedEdges.insert(edge).second)
+            result->addEdge(edge);
           auto *neighbor = edge->getDstNode();
           if (visited.find(neighbor) == visited.end()) {
             visited.insert(neighbor);
@@ -990,6 +1307,8 @@ CypherQueryExecutor::traverse(Node *start, const CypherRelationshipPattern &rel,
       if (rel.isBidirectional()) {
         for (auto *edge : node->getInEdgeSet()) {
           if (edge->getEdgeType() == edgeType || rel.getType().empty()) {
+            if (visitedEdges.insert(edge).second)
+              result->addEdge(edge);
             auto *neighbor = edge->getSrcNode();
             if (visited.find(neighbor) == visited.end()) {
               visited.insert(neighbor);
@@ -1058,6 +1377,12 @@ bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
     }
   }
 
+  if (condition.isExists()) {
+    if (condition.getProperty().empty())
+      return true; // Variable existence (row semantics) not modeled yet.
+    return !getNodeProperty(node, condition.getProperty()).empty();
+  }
+
   const auto &property = condition.getProperty();
   const auto &value = condition.getValue();
   std::string nodeValue = getNodeProperty(node, property);
@@ -1085,6 +1410,12 @@ bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
         return leftResult || rightResult;
       }
     }
+  }
+
+  if (condition.isExists()) {
+    if (condition.getProperty().empty())
+      return true;
+    return !getEdgeProperty(edge, condition.getProperty()).empty();
   }
 
   const auto &property = condition.getProperty();
@@ -1148,14 +1479,134 @@ std::string CypherQueryExecutor::getNodeProperty(Node *node,
   if (!node)
     return "";
 
-  if (property == "type" || property == "TYPE") {
+  const std::string prop = toLower(property);
+  if (prop.empty())
+    return "";
+
+  if (prop == "type" || prop == "type_id" || prop == "node_type" ||
+      prop == "node_type_id") {
     return std::to_string(static_cast<int>(node->getNodeType()));
-  } else if (property == "label" || property == "LABEL") {
-    return std::to_string(static_cast<int>(node->getNodeType()));
-  } else if (property == "func" || property == "FUNC") {
-    if (auto *func = node->getFunc()) {
+  }
+
+  if (prop == "label" || prop == "kind") {
+    return graphNodeTypeName(node->getNodeType());
+  }
+
+  if (prop == "func" || prop == "function") {
+    if (auto *func = node->getFunc())
       return func->getName().str();
+    if (auto *v = node->getValue())
+      if (auto *f = llvm::dyn_cast<llvm::Function>(v))
+        return f->getName().str();
+    return "";
+  }
+
+  if (prop == "name") {
+    if (auto *v = node->getValue()) {
+      if (v->hasName())
+        return v->getName().str();
+      if (auto *i = llvm::dyn_cast<llvm::Instruction>(v)) {
+        if (i->hasName())
+          return i->getName().str();
+      }
     }
+    return "";
+  }
+
+  if (prop == "opcode") {
+    if (auto *v = node->getValue()) {
+      if (auto *i = llvm::dyn_cast<llvm::Instruction>(v)) {
+        return i->getOpcodeName();
+      }
+    }
+    return "";
+  }
+
+  if (prop == "callee") {
+    if (auto *v = node->getValue()) {
+      if (auto *cb = llvm::dyn_cast<llvm::CallBase>(v)) {
+        if (auto *f = cb->getCalledFunction()) {
+          return f->getName().str();
+        }
+        return "<indirect>";
+      }
+    }
+    return "";
+  }
+
+  if (prop == "src_file" || prop == "source_file") {
+    if (auto *v = node->getValue()) {
+      if (auto *i = llvm::dyn_cast<llvm::Instruction>(v)) {
+        if (const llvm::DebugLoc &dl = i->getDebugLoc()) {
+          auto *loc = dl.get();
+          if (!loc)
+            return "";
+          return loc->getFilename().str();
+        }
+      }
+    }
+    return "";
+  }
+
+  if (prop == "src_line" || prop == "source_line") {
+    if (auto *v = node->getValue()) {
+      if (auto *i = llvm::dyn_cast<llvm::Instruction>(v)) {
+        if (const llvm::DebugLoc &dl = i->getDebugLoc()) {
+          auto *loc = dl.get();
+          if (!loc)
+            return "";
+          return std::to_string(loc->getLine());
+        }
+      }
+    }
+    return "";
+  }
+
+  if (prop == "src_col" || prop == "source_col" || prop == "source_column") {
+    if (auto *v = node->getValue()) {
+      if (auto *i = llvm::dyn_cast<llvm::Instruction>(v)) {
+        if (const llvm::DebugLoc &dl = i->getDebugLoc()) {
+          auto *loc = dl.get();
+          if (!loc)
+            return "";
+          return std::to_string(loc->getColumn());
+        }
+      }
+    }
+    return "";
+  }
+
+  if (prop == "src" || prop == "source") {
+    const std::string file = getNodeProperty(node, "src_file");
+    const std::string line = getNodeProperty(node, "src_line");
+    const std::string col = getNodeProperty(node, "src_col");
+    if (file.empty() && line.empty() && col.empty())
+      return "";
+    std::ostringstream oss;
+    oss << file;
+    if (!line.empty())
+      oss << ":" << line;
+    if (!col.empty())
+      oss << ":" << col;
+    return oss.str();
+  }
+
+  if (prop == "di_type" || prop == "dtype" || prop == "type_name") {
+    if (auto *dt = node->getDIType()) {
+      return dbgutils::getSourceLevelTypeName(*dt);
+    }
+    return "";
+  }
+
+  if (prop == "llvm" || prop == "ir") {
+    if (auto *v = node->getValue()) {
+      std::string s;
+      llvm::raw_string_ostream os(s);
+      v->print(os);
+      os.flush();
+      return s;
+    }
+    return "";
   }
 
   return "";
@@ -1166,8 +1617,27 @@ std::string CypherQueryExecutor::getEdgeProperty(Edge *edge,
   if (!edge)
     return "";
 
-  if (property == "type" || property == "TYPE") {
+  const std::string prop = toLower(property);
+  if (prop == "type" || prop == "type_id" || prop == "edge_type" ||
+      prop == "edge_type_id") {
     return std::to_string(static_cast<int>(edge->getEdgeType()));
+  }
+  if (prop == "label" || prop == "kind") {
+    return edgeTypeName(edge->getEdgeType());
+  }
+
+  if (prop == "src") {
+    return getNodeProperty(edge->getSrcNode(), "label");
+  }
+  if (prop == "dst") {
+    return getNodeProperty(edge->getDstNode(), "label");
+  }
+
+  if (prop.rfind("src_", 0) == 0) {
+    return getNodeProperty(edge->getSrcNode(), prop.substr(4));
+  }
+  if (prop.rfind("dst_", 0) == 0) {
+    return getNodeProperty(edge->getDstNode(), prop.substr(4));
   }
 
   return "";

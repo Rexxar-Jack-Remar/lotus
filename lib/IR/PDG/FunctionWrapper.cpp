@@ -21,6 +21,7 @@
  */
 
 #include "IR/PDG/FunctionWrapper.h"
+#include "IR/PDG/PDGCommandLineOptions.h"
 
 using namespace llvm;
 
@@ -84,9 +85,10 @@ void pdg::FunctionWrapper::buildFormalTreeForArgs() {
     DILocalVariable *di_local_var = getArgDILocalVar(*arg);
     AllocaInst *arg_alloca_inst = getArgAllocaInst(*arg);
     if (di_local_var == nullptr || arg_alloca_inst == nullptr) {
-      errs() << "empty di local var: " << _func->getName().str()
-             << (di_local_var == nullptr) << " - "
-             << (arg_alloca_inst == nullptr) << "\n";
+      if (pdg::DEBUG)
+        errs() << "empty di local var: " << _func->getName().str()
+               << (di_local_var == nullptr) << " - "
+               << (arg_alloca_inst == nullptr) << "\n";
       continue;
     }
     Tree *arg_formal_in_tree = new Tree(*arg);

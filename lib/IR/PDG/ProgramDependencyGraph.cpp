@@ -209,9 +209,8 @@ void pdg::ProgramDependencyGraph::connectCallerAndCallee(CallWrapper &cw,
   // step 2: connect actual in -> formal in, formal out -> actual out
   auto actual_arg_list = cw.getArgList();
   auto formal_arg_list = fw.getArgList();
-  assert(actual_arg_list.size() == formal_arg_list.size() &&
-         "cannot connect tree edges due to inequal arg num! "
-         "(connectCallerandCallee)");
+  if (actual_arg_list.size() != formal_arg_list.size())
+    return;
   if (DEBUG && cw.getCalledFunc())
     errs() << "connecting interproc call: " << cw.getCalledFunc()->getName()
            << " - " << cw.getCallInst()->getFunction()->getName() << "\n";
@@ -222,6 +221,8 @@ void pdg::ProgramDependencyGraph::connectCallerAndCallee(CallWrapper &cw,
     // step 2: connect actual in -> formal in
     auto *actual_in_tree = cw.getArgActualInTree(*actual_arg);
     auto *formal_in_tree = fw.getArgFormalInTree(*formal_arg);
+    if (!actual_in_tree || !formal_in_tree)
+      continue;
     if (DEBUG)
       errs() << "tree size compare: " << actual_in_tree->size() << " - "
              << formal_in_tree->size() << "\n";
@@ -230,6 +231,8 @@ void pdg::ProgramDependencyGraph::connectCallerAndCallee(CallWrapper &cw,
     // step 3: connect actual out -> formal out
     auto *actual_out_tree = cw.getArgActualOutTree(*actual_arg);
     auto *formal_out_tree = fw.getArgFormalOutTree(*formal_arg);
+    if (!actual_out_tree || !formal_out_tree)
+      continue;
     _PDG->addTreeNodesToGraph(*actual_out_tree);
     connectOutTrees(formal_out_tree, actual_out_tree, EdgeType::PARAMETER_OUT);
   }
@@ -241,18 +244,20 @@ void pdg::ProgramDependencyGraph::connectCallerAndCallee(CallWrapper &cw,
     Tree *ret_formal_out_tree = fw.getRetFormalOutTree();
     Tree *ret_actual_in_tree = cw.getRetActualInTree();
     Tree *ret_actual_out_tree = cw.getRetActualOutTree();
-    connectInTrees(ret_actual_in_tree, ret_formal_in_tree,
-                   EdgeType::PARAMETER_IN);
-    connectInTrees(ret_actual_out_tree, ret_formal_out_tree,
-                   EdgeType::PARAMETER_OUT);
+    if (ret_formal_in_tree && ret_actual_in_tree)
+      connectInTrees(ret_actual_in_tree, ret_formal_in_tree,
+                     EdgeType::PARAMETER_IN);
+    if (ret_formal_out_tree && ret_actual_out_tree)
+      connectInTrees(ret_actual_out_tree, ret_formal_out_tree,
+                     EdgeType::PARAMETER_OUT);
   }
 
   // step4: connect both control/data return edges of callee to the call site
   auto ret_insts = fw.getReturnInsts();
   auto *call_inst = cw.getCallInst();
   auto *dst = _PDG->getNode(*call_inst);
-  assert(dst != nullptr &&
-         "cannot add control edge to call node on nullptr!\n");
+  if (!dst)
+    return;
   // add control return edge
   for (auto *ret_inst : ret_insts) {
     Node *src = _PDG->getNode(*ret_inst);
@@ -290,9 +295,11 @@ void pdg::ProgramDependencyGraph::connectIntraprocDependencies(Function &F) {
   for (auto *arg : func_w->getArgList()) {
     Tree *formal_in_tree = func_w->getArgFormalInTree(*arg);
     if (!formal_in_tree)
-      return;
+      continue;
 
     Tree *formal_out_tree = func_w->getArgFormalOutTree(*arg);
+    if (!formal_out_tree)
+      continue;
     entry_node->addNeighbor(*formal_in_tree->getRootNode(),
                             EdgeType::PARAMETER_IN);
     entry_node->addNeighbor(*formal_out_tree->getRootNode(),
@@ -319,7 +326,9 @@ void pdg::ProgramDependencyGraph::connectInterprocDependencies(Function &F) {
   auto *func_w = getFuncWrapper(F);
   if (!func_w)
     return;
-  // obtain call graph
+
+  // Use the call graph for indirect-call candidate discovery, but connect
+  // inter-procedural edges per-callsite (rather than per-caller-function).
   PDGCallGraph &call_g = PDGCallGraph::getInstance();
   auto call_insts = func_w->getCallInsts();
   for (auto *call_inst : call_insts) {
@@ -331,54 +340,43 @@ void pdg::ProgramDependencyGraph::connectInterprocDependencies(Function &F) {
       if (!call_site_node)
         continue;
 
-      // lazy build actuall param trees for indirect call sites
-      auto *caller_func_node = call_g.getNode(F);
-      assert(caller_func_node != nullptr &&
-             "func node not found when connecting interproc dependencies\n");
-      // this return both direct call and indirect call targets
-      auto called_func_nodes = caller_func_node->getOutNeighbors();
-      assert(called_func_nodes.size() > 0 &&
-             "find call site with 0 call targets, cannot connect. Aborting\n");
-      if (auto *called_func =
-              dyn_cast<Function>((*called_func_nodes.begin())->getValue())) {
-        auto *called_func_w = getFuncWrapper(*called_func);
-        if (!call_w->hasParamTrees()) {
-          call_w->buildActualTreeForArgs(*called_func_w);
-          call_w->buildActualTreesForRetVal(*called_func_w);
+      auto connectToCallee = [&](FunctionWrapper &callee_fw,
+                                 EdgeType callEdgeType) {
+        if (auto *entry = callee_fw.getEntryNode()) {
+          call_site_node->addNeighbor(*entry, callEdgeType);
         }
-      }
 
-      for (auto *arg : call_w->getArgList()) {
-        Tree *actual_in_tree = call_w->getArgActualInTree(*arg);
-        if (!actual_in_tree) {
-          // errs() << "[WARNING]: empty actual tree for callsite " <<
-          // *call_inst << "\n";
+        auto *dst = _PDG->getNode(*call_inst);
+        if (!dst)
           return;
+
+        // Always connect return->call edges when possible; parameter-tree
+        // connections are optional and may be absent without debug info.
+        for (auto *ret_inst : callee_fw.getReturnInsts()) {
+          Node *src = _PDG->getNode(*ret_inst);
+          if (!src)
+            continue;
+          src->addNeighbor(*dst, EdgeType::CONTROLDEP_CALLRET);
+          src->addNeighbor(*dst, EdgeType::DATA_RET);
         }
-        Tree *actual_out_tree = call_w->getArgActualOutTree(*arg);
-        // connect call site with actual parameter tree root node
-        call_site_node->addNeighbor(*actual_in_tree->getRootNode(),
-                                    EdgeType::PARAMETER_IN);
-        call_site_node->addNeighbor(*actual_out_tree->getRootNode(),
-                                    EdgeType::PARAMETER_OUT);
-        connectActualInTreeWithAddrVars(*actual_in_tree, *call_inst);
-        connectActualOutTreeWithAddrVars(*actual_out_tree, *call_inst);
-      }
-      // connect return trees
-      // TODO: should change the name here. for return value, we should only
-      // connect the tree node with vars after the call instruction
-      if (!call_w->hasNullRetVal()) {
-        connectActualOutTreeWithAddrVars(*call_w->getRetActualInTree(),
-                                         *call_inst);
-        connectActualOutTreeWithAddrVars(*call_w->getRetActualOutTree(),
-                                         *call_inst);
+      };
+
+      if (auto *direct = call_w->getCalledFunc()) {
+        if (auto *callee_fw = getFuncWrapper(*direct)) {
+          connectToCallee(*callee_fw, EdgeType::CONTROLDEP_CALLINV);
+        }
+        continue;
       }
 
-      // connect call sites and call targets
-      for (auto *f_node : called_func_nodes) {
-        if (auto *called_func = dyn_cast<Function>(f_node->getValue())) {
-          auto *called_func_w = getFuncWrapper(*called_func);
-          connectCallerAndCallee(*call_w, *called_func_w);
+      // Indirect call: connect to all signature-compatible candidates.
+      if (!_module)
+        continue;
+      auto candidates = call_g.getIndirectCallCandidates(*call_inst, *_module);
+      for (auto *cand : candidates) {
+        if (!cand)
+          continue;
+        if (auto *callee_fw = getFuncWrapper(*cand)) {
+          connectToCallee(*callee_fw, EdgeType::IND_CALL);
         }
       }
     }

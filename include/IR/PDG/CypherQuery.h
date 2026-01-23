@@ -277,9 +277,10 @@ public:
   }
 
   static std::unique_ptr<CypherWhereClause>
-  makeExists(const std::string &variable) {
+  makeExists(const std::string &variable, const std::string &property = "") {
     auto clause = std::make_unique<CypherWhereClause>();
     clause->variableName_ = variable;
+    clause->property_ = property;
     clause->type_ = CypherWhereType::EXISTS;
     return clause;
   }
@@ -552,21 +553,15 @@ public:
   CypherResult(ResultType type = ResultType::NODES) : type_(type) {}
 
   void addNode(Node *node) {
-    if (type_ == ResultType::NODES) {
-      nodes_.push_back(node);
-    }
+    nodes_.push_back(node);
   }
 
   void addEdge(Edge *edge) {
-    if (type_ == ResultType::RELATIONSHIPS) {
-      relationships_.push_back(edge);
-    }
+    relationships_.push_back(edge);
   }
 
   void addRelationship(Edge *edge) {
-    if (type_ == ResultType::RELATIONSHIPS) {
-      relationships_.push_back(edge);
-    }
+    relationships_.push_back(edge);
   }
 
   void setScalarValue(const std::string &value) {
@@ -662,6 +657,31 @@ public:
   // Utility
   ProgramGraph &getPDG() { return pdg_; }
   const ProgramGraph &getPDG() const { return pdg_; }
+
+  // Introspection helpers (useful for tooling / result rendering)
+  const std::vector<Node *> *getBoundVariable(const std::string &name) const {
+    auto it = boundVariables_.find(name);
+    if (it == boundVariables_.end())
+      return nullptr;
+    return &it->second;
+  }
+
+  const std::vector<Edge *> *
+  getBoundRelationship(const std::string &name) const {
+    auto it = boundRelationships_.find(name);
+    if (it == boundRelationships_.end())
+      return nullptr;
+    return &it->second;
+  }
+
+  std::string getNodePropertyString(Node *node,
+                                    const std::string &property) {
+    return getNodeProperty(node, property);
+  }
+
+  std::string getEdgePropertyString(Edge *edge, const std::string &property) {
+    return getEdgeProperty(edge, property);
+  }
 
   void setError(const std::string &error) { lastError_ = error; }
   const std::string &getLastError() const { return lastError_; }

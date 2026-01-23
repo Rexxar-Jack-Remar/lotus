@@ -6,8 +6,8 @@
 #pragma once
 #include "IR/PDG/LLVMEssentials.h"
 #include "IR/PDG/DebugInfoUtils.h"
-#include "IR/PDG/PDGNode.h"
 #include "IR/PDG/PDGEnums.h"
+#include "IR/PDG/PDGNode.h"
 #include "IR/PDG/PDGUtils.h"
 
 #include <set>
@@ -51,6 +51,7 @@ namespace pdg
       
       TreeNode *getParentNode() { return _parent_node; }
       Tree *getTree() { return _tree; }
+      void setTree(Tree *tree) { _tree = tree; }
       int getDepth() { return _depth; }
       void addAccessTag(AccessTag acc_tag) { _acc_tag_set.insert(acc_tag); }
       std::set<AccessTag> &getAccessTags() { return _acc_tag_set; }

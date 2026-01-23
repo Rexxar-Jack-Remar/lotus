@@ -5,5 +5,7 @@ add_executable(pdg-query
 target_link_libraries(pdg-query
   PRIVATE
   CanaryPDG
+  CanaryCUDD
+  CanaryAliasAnalysisWrapper
   LLVMIRReader
 )
