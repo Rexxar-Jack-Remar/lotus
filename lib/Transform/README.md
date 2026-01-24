@@ -50,6 +50,7 @@ Transformations that restructure and clean up control flow.
 - **`RemoveNoRetFunction.cpp`**: Remove calls to known non-returning functions and tidy up unreachable code
 - **`SimplifyLatch.cpp`**: Normalize loop latch structure to a canonical form
 - **`NameBlock.cpp`**: Assign stable, human-readable names to basic blocks
+- **Failure-directed trimming**: Implemented in `lib/Verification/FailureDirectedTrimming/` (adds `verifier.assume` conditions derived from inferred safety conditions). Header: `include/Verification/FailureDirectedTrimming/FailureDirectedTrimming.h`.
 - **`ReplaceAsserts.cpp`**: Replace assertion calls with appropriate handling
 - **`ReplaceUBSan.cpp`**: Replace undefined behavior sanitizer checks
 

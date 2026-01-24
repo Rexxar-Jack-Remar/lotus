@@ -1,0 +1,1 @@
+add_lotus_test(failure_directed_trimming_test FailureDirectedTrimmingTest.cpp)

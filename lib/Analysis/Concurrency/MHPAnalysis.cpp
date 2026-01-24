@@ -943,10 +943,17 @@ bool MHPAnalysis::hasHappenBeforeRelation(const Instruction *i1,
         continue;
       }
 
-      if (current->getThreadID() == succ->getThreadID() &&
-          !isMustIntraThreadEdge(current, succ)) {
-        continue;
+      // For intra-thread edges, we need to follow all edges in the TFG to find
+      // paths through the program. The "must" check is too restrictive and would
+      // prevent us from finding valid happens-before relationships established
+      // through atomic synchronization.
+      // For inter-thread edges, always follow them (they represent synchronization).
+      if (current->getThreadID() == succ->getThreadID()) {
+        // For intra-thread edges, follow all edges that exist in the TFG
+        // (they represent valid control flow)
       }
+      // Inter-thread edges are always followed (they represent synchronization)
+      
       if (visited.find(succ) == visited.end()) {
         visited.insert(succ);
         worklist.push_back(succ);
@@ -1281,21 +1288,28 @@ void MHPAnalysis::computeAtomicHappensBefore() {
   size_t pairs_found = 0;
 
   // Phase 2: Find release-acquire pairs for synchronizing variables
+  // A release operation synchronizes with an acquire operation on the same variable
   for (const Instruction *release_inst : m_atomic_instructions) {
     auto release_order = Cpp11Atomics::getMemoryOrder(release_inst);
-    if (!Cpp11Atomics::isStore(release_inst) ||
-        (release_order != Cpp11Atomics::MemoryOrder::Release &&
-         release_order != Cpp11Atomics::MemoryOrder::AcquireRelease &&
-         release_order != Cpp11Atomics::MemoryOrder::SequentiallyConsistent)) {
+    // Check if this instruction has release semantics
+    bool has_release = (release_order == Cpp11Atomics::MemoryOrder::Release ||
+                        release_order == Cpp11Atomics::MemoryOrder::AcquireRelease ||
+                        release_order == Cpp11Atomics::MemoryOrder::SequentiallyConsistent);
+    
+    // Must be a store (or RMW/cmpxchg which includes store semantics)
+    if (!Cpp11Atomics::isStore(release_inst) || !has_release) {
       continue;
     }
 
     for (const Instruction *acquire_inst : m_atomic_instructions) {
       auto acquire_order = Cpp11Atomics::getMemoryOrder(acquire_inst);
-      if (!Cpp11Atomics::isLoad(acquire_inst) ||
-          (acquire_order != Cpp11Atomics::MemoryOrder::Acquire &&
-           acquire_order != Cpp11Atomics::MemoryOrder::AcquireRelease &&
-           acquire_order != Cpp11Atomics::MemoryOrder::SequentiallyConsistent)) {
+      // Check if this instruction has acquire semantics
+      bool has_acquire = (acquire_order == Cpp11Atomics::MemoryOrder::Acquire ||
+                          acquire_order == Cpp11Atomics::MemoryOrder::AcquireRelease ||
+                          acquire_order == Cpp11Atomics::MemoryOrder::SequentiallyConsistent);
+      
+      // Must be a load (or RMW/cmpxchg which includes load semantics)
+      if (!Cpp11Atomics::isLoad(acquire_inst) || !has_acquire) {
         continue;
       }
       
@@ -1309,6 +1323,14 @@ void MHPAnalysis::computeAtomicHappensBefore() {
         // Only a reads-from relation establishes synchronization. Without it,
         // we cannot add a must-HB edge for sound MHP.
         m_atomic_hb_pairs.insert({release_inst, acquire_inst});
+        
+        // Add edge to Thread Flow Graph so that hasHappenBeforeRelation can find it
+        SyncNode *release_node = m_tfg->getNode(release_inst);
+        SyncNode *acquire_node = m_tfg->getNode(acquire_inst);
+        if (release_node && acquire_node) {
+          m_tfg->addInterThreadEdge(release_node, acquire_node);
+        }
+        
         pairs_found++;
       }
     }
