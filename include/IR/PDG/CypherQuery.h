@@ -145,18 +145,25 @@ private:
  */
 class CypherRelationshipPattern {
 public:
+  enum class Direction {
+    OUT,  // (a)-[:T]->(b)
+    IN,   // (a)<-[:T]-(b)
+    BOTH  // (a)-[:T]-(b) or (a)<-[:T]->(b)
+  };
+
   CypherRelationshipPattern(const std::string &variable = "",
                             const std::string &type = "",
-                            bool bidirectional = false)
-      : variable_(variable), type_(type), bidirectional_(bidirectional) {}
+                            Direction direction = Direction::OUT)
+      : variable_(variable), type_(type), direction_(direction) {}
 
   const std::string &getVariable() const { return variable_; }
   const std::string &getType() const { return type_; }
-  bool isBidirectional() const { return bidirectional_; }
+  Direction getDirection() const { return direction_; }
+  bool isBidirectional() const { return direction_ == Direction::BOTH; }
 
   void setVariable(const std::string &v) { variable_ = v; }
   void setType(const std::string &t) { type_ = t; }
-  void setBidirectional(bool b) { bidirectional_ = b; }
+  void setDirection(Direction d) { direction_ = d; }
 
   void setMinHops(int min) { minHops_ = std::max(1, min); }
   void setMaxHops(int max) { maxHops_ = max; }
@@ -175,7 +182,7 @@ public:
 private:
   std::string variable_;
   std::string type_;
-  bool bidirectional_;
+  Direction direction_ = Direction::OUT;
   int minHops_ = 1;
   int maxHops_ = 1;
   std::unordered_map<std::string, std::string> properties_;
@@ -277,6 +284,18 @@ public:
   }
 
   static std::unique_ptr<CypherWhereClause>
+  makeInList(const std::string &variable, const std::string &property,
+             std::vector<std::string> values) {
+    auto clause = std::make_unique<CypherWhereClause>();
+    clause->variableName_ = variable;
+    clause->property_ = property;
+    clause->comparisonOp_ = CypherComparisonOp::IN;
+    clause->listValues_ = std::move(values);
+    clause->type_ = CypherWhereType::COMPARISON;
+    return clause;
+  }
+
+  static std::unique_ptr<CypherWhereClause>
   makeExists(const std::string &variable, const std::string &property = "") {
     auto clause = std::make_unique<CypherWhereClause>();
     clause->variableName_ = variable;
@@ -290,6 +309,7 @@ public:
   const std::string &getVariableName() const { return variableName_; }
   const std::string &getProperty() const { return property_; }
   const std::string &getValue() const { return value_; }
+  const std::vector<std::string> &getListValues() const { return listValues_; }
   CypherComparisonOp getComparisonOp() const { return comparisonOp_; }
   const std::string &getBoolOp() const { return boolOp_; }
 
@@ -306,6 +326,7 @@ private:
   std::string variableName_;
   std::string property_;
   std::string value_;
+  std::vector<std::string> listValues_;
   CypherComparisonOp comparisonOp_ = CypherComparisonOp::EQUALS;
   std::string boolOp_;
 
@@ -319,19 +340,40 @@ private:
  */
 class CypherReturnItem {
 public:
-  CypherReturnItem(const std::string &variable, const std::string &alias = "")
-      : variable_(variable), alias_(alias) {}
+  enum class Kind {
+    VARIABLE_OR_PROPERTY, // "n" or "n.prop"
+    COUNT                 // "COUNT(*)", "COUNT(n)", "COUNT(DISTINCT n.prop)"
+  };
 
+  CypherReturnItem(const std::string &variable, const std::string &alias = "")
+      : kind_(Kind::VARIABLE_OR_PROPERTY), variable_(variable), alias_(alias) {}
+
+  static std::unique_ptr<CypherReturnItem>
+  makeCount(const std::string &arg, bool distinct = false,
+            const std::string &alias = "") {
+    auto item = std::make_unique<CypherReturnItem>("", alias);
+    item->kind_ = Kind::COUNT;
+    item->aggArg_ = arg;
+    item->aggDistinct_ = distinct;
+    return item;
+  }
+
+  Kind getKind() const { return kind_; }
   const std::string &getVariable() const { return variable_; }
   const std::string &getAlias() const { return alias_; }
   bool hasAlias() const { return !alias_.empty(); }
+  const std::string &getAggArg() const { return aggArg_; }
+  bool isAggDistinct() const { return aggDistinct_; }
 
   void setVariable(const std::string &v) { variable_ = v; }
   void setAlias(const std::string &a) { alias_ = a; }
 
 private:
+  Kind kind_{Kind::VARIABLE_OR_PROPERTY};
   std::string variable_;
   std::string alias_;
+  std::string aggArg_;
+  bool aggDistinct_{false};
 };
 
 /**
@@ -341,15 +383,18 @@ class CypherOrderBy {
 public:
   enum class Direction { ASC, DESC };
 
-  CypherOrderBy(const std::string &variable, Direction dir = Direction::ASC)
-      : variable_(variable), direction_(dir) {}
+  CypherOrderBy(const std::string &variable, const std::string &property = "",
+                Direction dir = Direction::ASC)
+      : variable_(variable), property_(property), direction_(dir) {}
 
   const std::string &getVariable() const { return variable_; }
+  const std::string &getProperty() const { return property_; }
   Direction getDirection() const { return direction_; }
   bool isAscending() const { return direction_ == Direction::ASC; }
 
 private:
   std::string variable_;
+  std::string property_;
   Direction direction_;
 };
 
@@ -486,6 +531,7 @@ public:
 
 private:
   CypherError lastError_;
+  const CypherQueryParameters *activeParams_ = nullptr;
 
   void setError(CypherErrorCode code, const std::string &message, int line = 0,
                 int col = 0) {
@@ -517,6 +563,12 @@ private:
   parseWhereClause(std::vector<std::string> &tokens, size_t &pos);
   std::unique_ptr<CypherWhereClause>
   parseBooleanExpression(std::vector<std::string> &tokens, size_t &pos);
+  std::unique_ptr<CypherWhereClause>
+  parseOrExpression(std::vector<std::string> &tokens, size_t &pos);
+  std::unique_ptr<CypherWhereClause>
+  parseAndExpression(std::vector<std::string> &tokens, size_t &pos);
+  std::unique_ptr<CypherWhereClause>
+  parseUnaryExpression(std::vector<std::string> &tokens, size_t &pos);
   std::unique_ptr<CypherWhereClause>
   parseComparison(std::vector<std::string> &tokens, size_t &pos);
   std::unique_ptr<CypherReturnItem>
@@ -693,6 +745,10 @@ public:
     queryTimeout_ = timeout;
   }
 
+  void setUnboundedMaxHops(int maxHops) {
+    unboundedMaxHops_ = std::max(1, maxHops);
+  }
+
   const CypherQueryStats &getLastStats() const { return lastStats_; }
 
 private:
@@ -707,6 +763,7 @@ private:
 
   std::unordered_map<std::string, std::vector<Node *>> boundVariables_;
   std::unordered_map<std::string, std::vector<Edge *>> boundRelationships_;
+  int unboundedMaxHops_ = 5;
 
   // Helper methods
   bool evaluateCondition(const CypherWhereClause &condition, Node *node);

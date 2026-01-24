@@ -6,6 +6,7 @@ These files are meant to be run with `pdg-query` (one query per line; `#` starts
 
 - Build: `cmake --build build --target pdg-query`
 - Execute a query file: `./build/bin/pdg-query -f tools/ir/examples/metrics.cypher <input.bc>`
+- New primitives demo: `./build/bin/pdg-query -f tools/ir/examples/primitives.cypher <input.bc>`
 
 For metric-style queries where you want the full count, run with `--limit 0` (otherwise `Result(N nodes)` reflects the limited result set).
 
@@ -25,6 +26,14 @@ By default, `pdg-query` runs the `ProgramDependencyGraph` pass (`--build-pdg`) s
 - `:CONTROL_DEP`
 - `:CALL_INV`, `:CALL_RET`, `:IND_CALL`
 - `:PARAM_IN`, `:PARAM_OUT`
+
+## Extended query primitives
+
+- **Directional traversals:** `-[:T]->` follows outgoing edges; `<-[:T]-` follows incoming edges; `-[:T]-` or `<-[:T]->` follows both.
+- **Multi-edge-type traversals:** `:T1|T2` matches either edge type (e.g., `:DATA_DEP|CONTROL_DEP`).
+- **List filters:** `WHERE n.opcode IN ["load","store"]`.
+- **Aggregation:** `RETURN COUNT(*)`, `COUNT(n)`, `COUNT(DISTINCT n.prop)`.
+- **Parameters:** pass `--param key=value` and reference as `$key` (works in `{prop:$key}` and `WHERE`).
 
 **Common node properties (usable in `WHERE` and `RETURN`)**
 - `func`, `label`

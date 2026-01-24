@@ -112,10 +112,21 @@ static cl::opt<int>
                 cl::desc("Maximum number of results to return (default: 100)"),
                 cl::init(100));
 
+static cl::opt<int>
+    UnboundedMaxHops("max-unbounded-hops",
+                     cl::desc("Default cap for unbounded traversals (e.g. *..), default: 5"),
+                     cl::init(5));
+
 static cl::opt<std::string>
     OutputFormat("output-format",
                  cl::desc("Output format: text, json (default: text)"),
                  cl::init("text"));
+
+static cl::list<std::string>
+    QueryParams("param",
+                cl::desc("Query parameter key=value (repeatable); referenced as $key"),
+                cl::ZeroOrMore,
+                cl::value_desc("key=value"));
 
 static cl::opt<bool> ShowVersion("show-version",
                                  cl::desc("Show version information"));
@@ -154,7 +165,29 @@ bool executeQuery(CypherQueryExecutor &executor, const std::string &queryStr) {
   auto start = std::chrono::high_resolution_clock::now();
 
   CypherParser parser;
-  auto query = parser.parse(queryStr);
+  CypherQueryParameters params;
+  for (const auto &kv : QueryParams) {
+    const auto eq = kv.find('=');
+    if (eq == std::string::npos || eq == 0) {
+      errs() << "Invalid --param (expected key=value): " << kv << "\n";
+      return false;
+    }
+    params[kv.substr(0, eq)] = kv.substr(eq + 1);
+  }
+
+  if (params.empty()) {
+    const auto dollar = queryStr.find('$');
+    if (dollar != std::string::npos && dollar + 1 < queryStr.size()) {
+      const char next = queryStr[dollar + 1];
+      if (std::isalnum(static_cast<unsigned char>(next)) || next == '_') {
+        errs() << "Warning: query references parameters ($...), but no "
+                  "--param key=value was provided; unbound params match as "
+                  "empty strings.\n";
+      }
+    }
+  }
+
+  auto query = params.empty() ? parser.parse(queryStr) : parser.parse(queryStr, params);
 
   if (!query) {
     const auto &error = parser.getLastError();
@@ -329,6 +362,7 @@ void runInteractiveMode(CypherQueryExecutor &executor) {
       outs() << "Commands: help, quit, info, clear\n";
       outs() << "Labels: :INST, :INST_FUNCALL, :INST_RET, :INST_BR, :FUNC_ENTRY, :PARAM, :VAR, :ANNO\n";
       outs() << "Edges: :DATA_DEP, :DATA_RAW, :DATA_READ, :DATA_ALIAS, :CONTROL_DEP, :CALL_INV, :CALL_RET, :PARAM_IN, :PARAM_OUT\n";
+      outs() << "Notes: direction is respected (-[:T]-> vs <-[:T]-); list filters via IN [..]; COUNT(*)/COUNT(n)/COUNT(DISTINCT n.prop); params via --param k=v and $k\n";
     } else if (line == "info") {
       printPDGInfo(executor.getPDG());
     } else if (line == "clear") {
@@ -418,6 +452,7 @@ int main(int argc, char **argv) {
 
   // Create query executor
   CypherQueryExecutor executor(pdg);
+  executor.setUnboundedMaxHops(UnboundedMaxHops);
 
   // Execute queries based on mode
   if (Interactive) {

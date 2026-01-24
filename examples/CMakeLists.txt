@@ -32,8 +32,12 @@ foreach(idx RANGE 0 2)
 endforeach()
 
 
-# PDGExample needs CanaryPDG and LLVM libs
-target_link_libraries(PDGExample PRIVATE CanaryPDG ${llvm_libs})
+# PDGExample needs CanaryPDG, AliasAnalysisWrapper (for DataDependencyGraph), and LLVM libs
+target_link_libraries(PDGExample PRIVATE 
+    CanaryPDG 
+    CanaryAliasAnalysisWrapper
+    ${llvm_libs}
+)
 
 # PointerAnalysisExample needs AliasAnalysisWrapper and all its dependencies
 target_link_libraries(PointerAnalysisExample PRIVATE 

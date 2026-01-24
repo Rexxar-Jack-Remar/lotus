@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <sstream>
 
 #include "llvm/IR/Instructions.h"
@@ -15,6 +16,15 @@ static std::string toLower(std::string s) {
   std::transform(s.begin(), s.end(), s.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   return s;
+}
+
+static std::string unquoteStringToken(std::string token) {
+  if (token.size() >= 2 &&
+      ((token.front() == '"' && token.back() == '"') ||
+       (token.front() == '\'' && token.back() == '\''))) {
+    token = token.substr(1, token.size() - 2);
+  }
+  return token;
 }
 
 static const char *graphNodeTypeName(GraphNodeType t) {
@@ -128,7 +138,30 @@ std::unique_ptr<CypherQuery> CypherParser::parse(const std::string &query) {
     return nullptr;
   }
 
+  activeParams_ = nullptr;
   return parseQuery(tokens, pos, CypherQueryParameters{});
+}
+
+std::unique_ptr<CypherQuery>
+CypherParser::parse(const std::string &query, const CypherQueryParameters &params) {
+  clearError();
+  trim(const_cast<std::string &>(query));
+
+  if (query.empty()) {
+    setError(CypherErrorCode::PARSE_ERROR, "Empty query", 1, 1);
+    return nullptr;
+  }
+
+  size_t pos = 0;
+  std::vector<std::string> tokens = tokenize(query);
+
+  if (tokens.empty()) {
+    setError(CypherErrorCode::PARSE_ERROR, "No valid tokens found", 1, 1);
+    return nullptr;
+  }
+
+  activeParams_ = &params;
+  return parseQuery(tokens, pos, params);
 }
 
 void CypherParser::trim(std::string &s) {
@@ -206,7 +239,7 @@ std::vector<std::string> CypherParser::tokenize(const std::string &s) {
 
     if (c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' ||
         c == ',' || c == ';' || c == ':' || c == '-' || c == '>' || c == '<' ||
-        c == '=' || c == '!' || c == '.' || c == '@' || c == '#') {
+        c == '=' || c == '!' || c == '.' || c == '@' || c == '#' || c == '*') {
       if (!current.empty()) {
         tokens.push_back(current);
         current.clear();
@@ -448,9 +481,12 @@ CypherParser::parseNodePattern(std::vector<std::string> &tokens, size_t &pos) {
       if (hasMore(tokens, pos) && peek(tokens, pos) == ":") {
         consume(tokens, pos);
         value = consume(tokens, pos);
-        if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-          value = value.substr(1, value.size() - 2);
+        if (!value.empty() && value.front() == '$') {
+          value = substituteParameter(value.substr(1),
+                                      activeParams_ ? *activeParams_
+                                                    : CypherQueryParameters{});
         }
+        value = unquoteStringToken(std::move(value));
         properties[key] = value;
       }
       if (hasMore(tokens, pos) && peek(tokens, pos) == ",") {
@@ -479,18 +515,100 @@ CypherParser::parseNodePattern(std::vector<std::string> &tokens, size_t &pos) {
 std::unique_ptr<CypherRelationshipPattern>
 CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
                                        size_t &pos) {
-  bool bidirectional = false;
+  bool arrowAtStart = false; // arrowhead pointing to start node
+  bool arrowAtEnd = false;   // arrowhead pointing to end node
 
-  // Handle leading direction
+  // Handle leading direction marker: "<-" or "-"
   if (hasMore(tokens, pos)) {
-    std::string token = peek(tokens, pos);
+    const std::string token = peek(tokens, pos);
     if (token == "<-") {
-      bidirectional = true;
+      arrowAtStart = true;
       consume(tokens, pos);
     } else if (token == "-") {
       consume(tokens, pos);
     }
   }
+
+  auto consumeTrailingDirection = [&]() {
+    if (!hasMore(tokens, pos))
+      return;
+    const std::string next = peek(tokens, pos);
+    if (next == "<-") {
+      consume(tokens, pos);
+      arrowAtStart = true;
+      return;
+    }
+    if (next == "->") {
+      consume(tokens, pos);
+      arrowAtEnd = true;
+      return;
+    }
+    if (next == "-") {
+      consume(tokens, pos);
+      if (hasMore(tokens, pos) && peek(tokens, pos) == ">") {
+        consume(tokens, pos);
+        arrowAtEnd = true;
+      }
+      return;
+    }
+  };
+
+  auto inferDirection = [&]() -> CypherRelationshipPattern::Direction {
+    if (arrowAtStart && arrowAtEnd)
+      return CypherRelationshipPattern::Direction::BOTH;
+    if (arrowAtStart)
+      return CypherRelationshipPattern::Direction::IN;
+    if (arrowAtEnd)
+      return CypherRelationshipPattern::Direction::OUT;
+    // Undirected (-[]-) defaults to BOTH for traversal convenience.
+    return CypherRelationshipPattern::Direction::BOTH;
+  };
+
+  auto parseVarLength = [&]() -> std::pair<int, int> {
+    int minHops = 1;
+    int maxHops = -1; // -1 means unbounded (executor will cap)
+    bool haveExplicitMin = false;
+
+    if (!hasMore(tokens, pos))
+      return {minHops, maxHops};
+
+    // "*N" or "*min..max" (both optional)
+    const std::string &t0 = peek(tokens, pos);
+    if (!t0.empty() && std::isdigit(static_cast<unsigned char>(t0[0]))) {
+      std::string minStr = consume(tokens, pos);
+      try {
+        minHops = std::stoi(minStr);
+        haveExplicitMin = true;
+      } catch (...) {
+        minHops = 1;
+      }
+    }
+
+    if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
+      consume(tokens, pos); // '.'
+      if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
+        consume(tokens, pos); // '.'
+        if (hasMore(tokens, pos)) {
+          const std::string &t1 = peek(tokens, pos);
+          if (!t1.empty() && std::isdigit(static_cast<unsigned char>(t1[0]))) {
+            std::string maxStr = consume(tokens, pos);
+            try {
+              maxHops = std::stoi(maxStr);
+            } catch (...) {
+              maxHops = -1;
+            }
+          } else {
+            maxHops = -1;
+          }
+        }
+      }
+    } else if (haveExplicitMin) {
+      // Exact length "*N".
+      maxHops = minHops;
+    }
+
+    return {std::max(1, minHops), maxHops};
+  };
 
   // Check for relationship pattern in brackets
   if (hasMore(tokens, pos) && peek(tokens, pos) == "[") {
@@ -502,75 +620,26 @@ CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
     int maxHops = 1;
     std::unordered_map<std::string, std::string> properties;
 
-    // Check for variable-length pattern [*] or [*1..5]
+    // Pure variable-length pattern: "[*]" / "[*1..3]" (no var / no type).
     if (hasMore(tokens, pos) && peek(tokens, pos) == "*") {
-      consume(tokens, pos); // consume '*'
-      minHops = 1;
-      maxHops = -1; // -1 means unlimited
+      consume(tokens, pos); // '*'
+      const auto range = parseVarLength();
+      minHops = range.first;
+      maxHops = range.second;
 
-      // Standard Cypher-style range: *min..max (both optional)
-      if (hasMore(tokens, pos)) {
-        const std::string &t0 = peek(tokens, pos);
-        if (!t0.empty() && std::isdigit(static_cast<unsigned char>(t0[0]))) {
-          std::string minStr = consume(tokens, pos);
-          try {
-            minHops = std::stoi(minStr);
-          } catch (...) {
-            minHops = 1;
-          }
-        }
-
-        if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
-          consume(tokens, pos); // '.'
-          if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
-            consume(tokens, pos); // '.'
-            if (hasMore(tokens, pos)) {
-              const std::string &t1 = peek(tokens, pos);
-              if (!t1.empty() &&
-                  std::isdigit(static_cast<unsigned char>(t1[0]))) {
-                std::string maxStr = consume(tokens, pos);
-                try {
-                  maxHops = std::stoi(maxStr);
-                } catch (...) {
-                  maxHops = -1;
-                }
-              } else {
-                maxHops = -1;
-              }
-            }
-          }
-        } else {
-          // "*N" means exactly N hops.
-          if (maxHops == -1 && minHops > 1)
-            maxHops = minHops;
-        }
+      if (!hasMore(tokens, pos) || peek(tokens, pos) != "]") {
+        setError(CypherErrorCode::SYNTAX_ERROR,
+                 "Expected ']' to close relationship pattern", 0, 0);
+        return nullptr;
       }
+      consume(tokens, pos); // ']'
+      consumeTrailingDirection();
 
-      if (hasMore(tokens, pos) && peek(tokens, pos) == "]") {
-        consume(tokens, pos); // consume ']'
-
-        // Handle trailing direction
-        if (hasMore(tokens, pos)) {
-          std::string next = peek(tokens, pos);
-          if (next == "<-") {
-            consume(tokens, pos);
-            bidirectional = true;
-          } else if (next == "->") {
-            consume(tokens, pos);
-          } else if (next == "-") {
-            consume(tokens, pos);
-            if (hasMore(tokens, pos) && peek(tokens, pos) == ">") {
-              consume(tokens, pos);
-            }
-          }
-        }
-
-        auto rel = std::make_unique<CypherRelationshipPattern>(variable, type,
-                                                               bidirectional);
-        rel->setMinHops(minHops);
-        rel->setMaxHops(maxHops);
-        return rel;
-      }
+      auto rel = std::make_unique<CypherRelationshipPattern>(
+          "", "", inferDirection());
+      rel->setMinHops(minHops);
+      rel->setMaxHops(maxHops);
+      return rel;
     }
 
     if (hasMore(tokens, pos)) {
@@ -587,6 +656,14 @@ CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
       }
     }
 
+    // Optional variable-length hop bounds: "[:T*1..3]" or "[*1..3]"
+    if (hasMore(tokens, pos) && peek(tokens, pos) == "*") {
+      consume(tokens, pos); // '*'
+      const auto range = parseVarLength();
+      minHops = range.first;
+      maxHops = range.second;
+    }
+
     // Handle properties in braces
     if (hasMore(tokens, pos) && peek(tokens, pos) == "{") {
       consume(tokens, pos);
@@ -595,9 +672,12 @@ CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
         if (hasMore(tokens, pos) && peek(tokens, pos) == ":") {
           consume(tokens, pos);
           std::string value = consume(tokens, pos);
-          if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-            value = value.substr(1, value.size() - 2);
+          if (!value.empty() && value.front() == '$') {
+            value = substituteParameter(
+                value.substr(1),
+                activeParams_ ? *activeParams_ : CypherQueryParameters{});
           }
+          value = unquoteStringToken(std::move(value));
           properties[key] = value;
         }
         if (hasMore(tokens, pos) && peek(tokens, pos) == ",") {
@@ -617,25 +697,12 @@ CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
     consume(tokens, pos); // consume ']'
 
     // Handle trailing direction
-    if (hasMore(tokens, pos)) {
-      std::string next = peek(tokens, pos);
-      if (next == "<-") {
-        consume(tokens, pos);
-        bidirectional = true;
-      } else if (next == "->") {
-        consume(tokens, pos);
-      } else if (next == "-") {
-        consume(tokens, pos);
-        if (hasMore(tokens, pos) && peek(tokens, pos) == ">") {
-          consume(tokens, pos);
-        }
-      }
-    }
+    consumeTrailingDirection();
 
     auto rel = std::make_unique<CypherRelationshipPattern>(variable, type,
-                                                           bidirectional);
-    rel->setMinHops(1);
-    rel->setMaxHops(1);
+                                                           inferDirection());
+    rel->setMinHops(minHops);
+    rel->setMaxHops(maxHops);
     for (const auto &kv : properties) {
       rel->addProperty(kv.first, kv.second);
     }
@@ -643,22 +710,8 @@ CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
   }
 
   // No bracket pattern, just direction
-  if (hasMore(tokens, pos)) {
-    std::string token = peek(tokens, pos);
-    if (token == "<-") {
-      consume(tokens, pos);
-      bidirectional = true;
-    } else if (token == "->") {
-      consume(tokens, pos);
-    } else if (token == "-") {
-      consume(tokens, pos);
-      if (hasMore(tokens, pos) && peek(tokens, pos) == ">") {
-        consume(tokens, pos);
-      }
-    }
-  }
-
-  return std::make_unique<CypherRelationshipPattern>("", "", bidirectional);
+  consumeTrailingDirection();
+  return std::make_unique<CypherRelationshipPattern>("", "", inferDirection());
 }
 
 std::unique_ptr<CypherWhereClause>
@@ -669,6 +722,58 @@ CypherParser::parseWhereClause(std::vector<std::string> &tokens, size_t &pos) {
 std::unique_ptr<CypherWhereClause>
 CypherParser::parseBooleanExpression(std::vector<std::string> &tokens,
                                      size_t &pos) {
+  return parseOrExpression(tokens, pos);
+}
+
+std::unique_ptr<CypherWhereClause>
+CypherParser::parseOrExpression(std::vector<std::string> &tokens, size_t &pos) {
+  auto left = parseAndExpression(tokens, pos);
+  if (!left)
+    return nullptr;
+
+  while (hasMore(tokens, pos)) {
+    std::string op = peek(tokens, pos);
+    std::string upperOp = op;
+    std::transform(upperOp.begin(), upperOp.end(), upperOp.begin(), ::toupper);
+    if (upperOp != "OR")
+      break;
+    consume(tokens, pos);
+
+    auto right = parseAndExpression(tokens, pos);
+    if (!right)
+      return nullptr;
+    left = CypherWhereClause::makeOr(std::move(left), std::move(right));
+  }
+
+  return left;
+}
+
+std::unique_ptr<CypherWhereClause>
+CypherParser::parseAndExpression(std::vector<std::string> &tokens, size_t &pos) {
+  auto left = parseUnaryExpression(tokens, pos);
+  if (!left)
+    return nullptr;
+
+  while (hasMore(tokens, pos)) {
+    std::string op = peek(tokens, pos);
+    std::string upperOp = op;
+    std::transform(upperOp.begin(), upperOp.end(), upperOp.begin(), ::toupper);
+    if (upperOp != "AND")
+      break;
+    consume(tokens, pos);
+
+    auto right = parseUnaryExpression(tokens, pos);
+    if (!right)
+      return nullptr;
+    left = CypherWhereClause::makeAnd(std::move(left), std::move(right));
+  }
+
+  return left;
+}
+
+std::unique_ptr<CypherWhereClause>
+CypherParser::parseUnaryExpression(std::vector<std::string> &tokens,
+                                   size_t &pos) {
   if (!hasMore(tokens, pos)) {
     setError(CypherErrorCode::SYNTAX_ERROR,
              "Expected expression in WHERE clause", 0, 0);
@@ -676,39 +781,30 @@ CypherParser::parseBooleanExpression(std::vector<std::string> &tokens,
   }
 
   std::string token = peek(tokens, pos);
+  std::string upperToken = token;
+  std::transform(upperToken.begin(), upperToken.end(), upperToken.begin(),
+                 ::toupper);
 
-  if (token == "NOT" || token == "not") {
+  if (upperToken == "NOT") {
     consume(tokens, pos);
-    auto expr = parseBooleanExpression(tokens, pos);
+    auto expr = parseUnaryExpression(tokens, pos);
+    if (!expr)
+      return nullptr;
     return CypherWhereClause::makeNot(std::move(expr));
   }
 
   if (token == "(") {
     consume(tokens, pos);
-    auto left = parseBooleanExpression(tokens, pos);
-    if (!left)
+    auto expr = parseOrExpression(tokens, pos);
+    if (!expr)
       return nullptr;
-
-    if (hasMore(tokens, pos)) {
-      std::string op = peek(tokens, pos);
-      if (op == "AND" || op == "and" || op == "OR" || op == "or") {
-        consume(tokens, pos);
-        auto right = parseBooleanExpression(tokens, pos);
-        if (!right)
-          return nullptr;
-
-        if (op == "AND" || op == "and") {
-          return CypherWhereClause::makeAnd(std::move(left), std::move(right));
-        } else {
-          return CypherWhereClause::makeOr(std::move(left), std::move(right));
-        }
-      }
+    if (!hasMore(tokens, pos) || peek(tokens, pos) != ")") {
+      setError(CypherErrorCode::SYNTAX_ERROR,
+               "Expected ')' to close parenthesized WHERE expression", 0, 0);
+      return nullptr;
     }
-
-    if (hasMore(tokens, pos) && peek(tokens, pos) == ")") {
-      consume(tokens, pos);
-    }
-    return left;
+    consume(tokens, pos);
+    return expr;
   }
 
   return parseComparison(tokens, pos);
@@ -739,6 +835,39 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
   std::string op = consume(tokens, pos);
   std::string upperOp = op;
   std::transform(upperOp.begin(), upperOp.end(), upperOp.begin(), ::toupper);
+
+  // Handle "IN [..]" / "IN [.., ..]" list membership.
+  if (upperOp == "IN") {
+    if (!hasMore(tokens, pos) || peek(tokens, pos) != "[") {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected '[' after IN", 0, 0);
+      return nullptr;
+    }
+    consume(tokens, pos); // '['
+
+    std::vector<std::string> values;
+    while (hasMore(tokens, pos) && peek(tokens, pos) != "]") {
+      std::string v = consume(tokens, pos);
+      if (!v.empty() && v.front() == '$') {
+        v = substituteParameter(
+            v.substr(1), activeParams_ ? *activeParams_ : CypherQueryParameters{});
+      }
+      v = unquoteStringToken(std::move(v));
+      values.push_back(std::move(v));
+
+      if (hasMore(tokens, pos) && peek(tokens, pos) == ",") {
+        consume(tokens, pos);
+      }
+    }
+
+    if (!hasMore(tokens, pos) || peek(tokens, pos) != "]") {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected ']' to close IN list", 0,
+               0);
+      return nullptr;
+    }
+    consume(tokens, pos); // ']'
+
+    return CypherWhereClause::makeInList(variable, property, std::move(values));
+  }
 
   // Handle "IS NULL" / "IS NOT NULL"
   if (upperOp == "IS") {
@@ -797,9 +926,11 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
     std::string value;
     if (hasMore(tokens, pos)) {
       value = consume(tokens, pos);
-      if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-        value = value.substr(1, value.size() - 2);
+      if (!value.empty() && value.front() == '$') {
+        value = substituteParameter(
+            value.substr(1), activeParams_ ? *activeParams_ : CypherQueryParameters{});
       }
+      value = unquoteStringToken(std::move(value));
     }
 
     return CypherWhereClause::makeComparison(
@@ -812,9 +943,11 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
   std::string value;
   if (hasMore(tokens, pos)) {
     value = consume(tokens, pos);
-    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-      value = value.substr(1, value.size() - 2);
+    if (!value.empty() && value.front() == '$') {
+      value = substituteParameter(
+          value.substr(1), activeParams_ ? *activeParams_ : CypherQueryParameters{});
     }
+    value = unquoteStringToken(std::move(value));
   }
 
   CypherComparisonOp comparisonOp = CypherComparisonOp::EQUALS;
@@ -846,10 +979,68 @@ CypherParser::parseReturnItem(std::vector<std::string> &tokens, size_t &pos) {
     return nullptr;
   }
 
-  std::string variable = consume(tokens, pos);
+  std::string token = consume(tokens, pos);
   std::string alias;
 
+  std::string upperToken = token;
+  std::transform(upperToken.begin(), upperToken.end(), upperToken.begin(),
+                 ::toupper);
+
+  if (upperToken == "COUNT") {
+    if (!hasMore(tokens, pos) || peek(tokens, pos) != "(") {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected '(' after COUNT", 0, 0);
+      return nullptr;
+    }
+    consume(tokens, pos); // '('
+
+    bool distinct = false;
+    if (hasMore(tokens, pos)) {
+      std::string maybeDistinct = peek(tokens, pos);
+      std::string upperDistinct = maybeDistinct;
+      std::transform(upperDistinct.begin(), upperDistinct.end(),
+                     upperDistinct.begin(), ::toupper);
+      if (upperDistinct == "DISTINCT") {
+        distinct = true;
+        consume(tokens, pos);
+      }
+    }
+
+    if (!hasMore(tokens, pos)) {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected COUNT argument", 0, 0);
+      return nullptr;
+    }
+
+    std::string arg = consume(tokens, pos);
+    if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
+      consume(tokens, pos); // '.'
+      if (!hasMore(tokens, pos)) {
+        setError(CypherErrorCode::SYNTAX_ERROR,
+                 "Expected property after '.' in COUNT argument", 0, 0);
+        return nullptr;
+      }
+      arg += ".";
+      arg += consume(tokens, pos);
+    }
+
+    if (!hasMore(tokens, pos) || peek(tokens, pos) != ")") {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected ')' after COUNT", 0, 0);
+      return nullptr;
+    }
+    consume(tokens, pos); // ')'
+
+    if (hasMore(tokens, pos) &&
+        (peek(tokens, pos) == "AS" || peek(tokens, pos) == "as")) {
+      consume(tokens, pos);
+      if (hasMore(tokens, pos)) {
+        alias = consume(tokens, pos);
+      }
+    }
+
+    return CypherReturnItem::makeCount(arg, distinct, alias);
+  }
+
   // Handle property access (e.g., n.id -> consume . and property)
+  std::string variable = token;
   if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
     consume(tokens, pos); // consume '.'
     if (hasMore(tokens, pos)) {
@@ -878,12 +1069,13 @@ CypherParser::parseOrderBy(std::vector<std::string> &tokens, size_t &pos) {
   }
 
   std::string variable = consume(tokens, pos);
+  std::string property;
 
   // Handle property access (e.g., n.id -> consume . and property)
   if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
     consume(tokens, pos); // consume '.'
     if (hasMore(tokens, pos)) {
-      consume(tokens, pos); // consume property name
+      property = consume(tokens, pos); // consume property name
     }
   }
 
@@ -902,7 +1094,7 @@ CypherParser::parseOrderBy(std::vector<std::string> &tokens, size_t &pos) {
     }
   }
 
-  return std::make_unique<CypherOrderBy>(variable, dir);
+  return std::make_unique<CypherOrderBy>(variable, property, dir);
 }
 
 bool CypherParser::hasMore(const std::vector<std::string> &tokens, size_t pos) {
@@ -925,6 +1117,20 @@ const std::string &CypherParser::consume(std::vector<std::string> &tokens,
     return tokens[pos++];
   }
   return empty;
+}
+
+std::string
+CypherParser::substituteParameter(const std::string &name,
+                                  const CypherQueryParameters &params) {
+  auto it = params.find(name);
+  if (it == params.end()) {
+    setError(CypherErrorCode::INVALID_PARAMETER,
+             "Unknown parameter: $" + name, 0, 0);
+    lastError_.suggestion =
+        "Pass it via --param " + name + "=<value> (repeatable).";
+    return "";
+  }
+  return it->second;
 }
 
 // ============================================================================
@@ -974,6 +1180,10 @@ CypherQueryExecutor::execute(const CypherQuery &query,
   auto startTime = std::chrono::high_resolution_clock::now();
   lastStats_ = CypherQueryStats();
 
+  // Bindings are per-query; don't let interactive sessions leak state.
+  boundVariables_.clear();
+  boundRelationships_.clear();
+
   std::vector<Node *> resultNodes;
   std::vector<Edge *> resultEdges;
 
@@ -996,18 +1206,181 @@ CypherQueryExecutor::execute(const CypherQuery &query,
   resultEdges.erase(std::unique(resultEdges.begin(), resultEdges.end()),
                     resultEdges.end());
 
+  // WHERE filters apply to the overall result node set.
+  std::vector<Node *> filteredNodes = resultNodes;
   if (query.getWhereClause() && !resultNodes.empty()) {
     auto filtered = filterByWhere(resultNodes, *query.getWhereClause());
-    resultNodes = filtered->getNodes();
+    filteredNodes = filtered->getNodes();
+  }
+
+  // Aggregations (currently: COUNT) return a scalar result.
+  if (query.getReturnItems().size() == 1 &&
+      query.getReturnItems()[0]->getKind() == CypherReturnItem::Kind::COUNT) {
+    const auto &item = *query.getReturnItems()[0];
+
+    auto result =
+        std::make_unique<CypherResult>(CypherResult::ResultType::INTEGER);
+
+    auto splitVarProp = [](const std::string &expr) {
+      std::string var = expr;
+      std::string prop;
+      auto dot = expr.find('.');
+      if (dot != std::string::npos) {
+        var = expr.substr(0, dot);
+        prop = expr.substr(dot + 1);
+      }
+      return std::pair<std::string, std::string>(std::move(var),
+                                                 std::move(prop));
+    };
+
+    const auto argParts = splitVarProp(item.getAggArg());
+    const std::string &argVar = argParts.first;
+    const std::string &argProp = argParts.second;
+    const bool wantDistinct = item.isAggDistinct();
+
+    int64_t count = 0;
+
+    if (argVar == "*") {
+      count = static_cast<int64_t>(filteredNodes.size());
+    } else {
+      auto it = boundVariables_.find(argVar);
+      if (it != boundVariables_.end()) {
+        std::unordered_set<Node *> allowed(filteredNodes.begin(),
+                                           filteredNodes.end());
+        const auto &bucket = it->second;
+        if (argProp.empty()) {
+          if (wantDistinct) {
+            std::unordered_set<Node *> uniq;
+            for (auto *n : bucket) {
+              if (allowed.count(n))
+                uniq.insert(n);
+            }
+            count = static_cast<int64_t>(uniq.size());
+          } else {
+            for (auto *n : bucket) {
+              if (allowed.count(n))
+                ++count;
+            }
+          }
+        } else {
+          if (wantDistinct) {
+            std::unordered_set<std::string> uniq;
+            for (auto *n : bucket) {
+              if (!allowed.count(n))
+                continue;
+              const std::string v = getNodeProperty(n, argProp);
+              if (!v.empty())
+                uniq.insert(v);
+            }
+            count = static_cast<int64_t>(uniq.size());
+          } else {
+            for (auto *n : bucket) {
+              if (!allowed.count(n))
+                continue;
+              if (!getNodeProperty(n, argProp).empty())
+                ++count;
+            }
+          }
+        }
+      } else {
+        auto itRel = boundRelationships_.find(argVar);
+        if (itRel != boundRelationships_.end()) {
+          const auto &bucket = itRel->second;
+          if (argProp.empty()) {
+            if (wantDistinct) {
+              std::unordered_set<Edge *> uniq(bucket.begin(), bucket.end());
+              count = static_cast<int64_t>(uniq.size());
+            } else {
+              count = static_cast<int64_t>(bucket.size());
+            }
+          } else {
+            if (wantDistinct) {
+              std::unordered_set<std::string> uniq;
+              for (auto *e : bucket) {
+                const std::string v = getEdgeProperty(e, argProp);
+                if (!v.empty())
+                  uniq.insert(v);
+              }
+              count = static_cast<int64_t>(uniq.size());
+            } else {
+              for (auto *e : bucket) {
+                if (!getEdgeProperty(e, argProp).empty())
+                  ++count;
+              }
+            }
+          }
+        } else {
+          // Unknown variable: fall back to the filtered node set.
+          count = static_cast<int64_t>(filteredNodes.size());
+        }
+      }
+    }
+
+    result->setIntegerValue(count);
+    lastStats_.resultsReturned = result->getCount();
+
+    auto endTime = std::chrono::high_resolution_clock::now();
+    lastStats_.executionTime =
+        std::chrono::duration_cast<std::chrono::microseconds>(endTime -
+                                                              startTime);
+    stats = lastStats_;
+    return result;
+  }
+
+  // ORDER BY applies to the output node list (best-effort).
+  if (query.getOrderBy() && !filteredNodes.empty()) {
+    const auto &ob = *query.getOrderBy();
+    const std::string prop =
+        ob.getProperty().empty() ? "label" : ob.getProperty();
+
+    auto tryParseInt = [](const std::string &s, int64_t &out) -> bool {
+      if (s.empty())
+        return false;
+      char *end = nullptr;
+      const long long v = std::strtoll(s.c_str(), &end, 10);
+      if (!end || *end != '\0')
+        return false;
+      out = static_cast<int64_t>(v);
+      return true;
+    };
+
+    auto cmp = [&](Node *a, Node *b) {
+      const std::string va = getNodeProperty(a, prop);
+      const std::string vb = getNodeProperty(b, prop);
+      int64_t ia = 0, ib = 0;
+      const bool na = tryParseInt(va, ia);
+      const bool nb = tryParseInt(vb, ib);
+      if (na && nb)
+        return ia < ib;
+      return va < vb;
+    };
+
+    std::sort(filteredNodes.begin(), filteredNodes.end(), cmp);
+    if (ob.getDirection() == CypherOrderBy::Direction::DESC) {
+      std::reverse(filteredNodes.begin(), filteredNodes.end());
+    }
   }
 
   if (query.hasLimit() && query.getLimit() > 0 &&
-      resultNodes.size() > static_cast<size_t>(query.getLimit())) {
-    resultNodes.resize(static_cast<size_t>(query.getLimit()));
+      filteredNodes.size() > static_cast<size_t>(query.getLimit())) {
+    filteredNodes.resize(static_cast<size_t>(query.getLimit()));
+  }
+
+  // Keep bound variables consistent with the final node result set so
+  // printing `RETURN n.prop` reflects WHERE/ORDER/LIMIT.
+  if (!boundVariables_.empty()) {
+    std::unordered_set<Node *> allowed(filteredNodes.begin(),
+                                       filteredNodes.end());
+    for (auto &kv : boundVariables_) {
+      auto &bucket = kv.second;
+      bucket.erase(std::remove_if(bucket.begin(), bucket.end(),
+                                  [&](Node *n) { return !allowed.count(n); }),
+                   bucket.end());
+    }
   }
 
   auto result = std::make_unique<CypherResult>(CypherResult::ResultType::NODES);
-  for (auto *node : resultNodes) {
+  for (auto *node : filteredNodes) {
     result->addNode(node);
   }
   for (auto *edge : resultEdges) {
@@ -1068,7 +1441,7 @@ CypherQueryExecutor::matchPattern(const CypherPatternElement *pattern) {
       if (rel) {
         int maxHops = rel->hasVariableLength() ? rel->getMaxHops() : 1;
         if (maxHops < 0)
-          maxHops = 5;
+          maxHops = unboundedMaxHops_;
         auto traversed = traverse(node, *rel, maxHops);
         if (traversed) {
           for (auto *e : traversed->getRelationships())
@@ -1261,67 +1634,126 @@ CypherQueryExecutor::traverse(Node *start, const CypherRelationshipPattern &rel,
   if (!start)
     return result;
 
-  static const std::unordered_map<std::string, EdgeType> typeMap = {
-      {"DATA_DEP", EdgeType::DATA_DEF_USE},
-      {"CONTROL_DEP", EdgeType::CONTROLDEP_BR},
-      {"CALL", EdgeType::CONTROLDEP_CALLINV},
-      {"CALL_INV", EdgeType::CONTROLDEP_CALLINV},
-      {"CALL_RET", EdgeType::CONTROLDEP_CALLRET},
-      {"IND_CALL", EdgeType::IND_CALL},
-      {"PARAM_IN", EdgeType::PARAMETER_IN},
-      {"PARAM_OUT", EdgeType::PARAMETER_OUT},
-      {"DATA_RAW", EdgeType::DATA_RAW},
-      {"DATA_READ", EdgeType::DATA_READ},
-      {"DATA_ALIAS", EdgeType::DATA_ALIAS}};
+  const int minHops = std::max(1, rel.getMinHops());
+  const int effectiveMaxHops = std::max(1, maxHops);
 
-  std::vector<Node *> currentLevel = {start};
-  std::unordered_set<Node *> visited;
+  // Support "TYPE1|TYPE2|..." (OR) for convenience.
+  const std::string typeUpper = [&]() {
+    std::string t = rel.getType();
+    std::transform(t.begin(), t.end(), t.begin(), ::toupper);
+    return t;
+  }();
+
+  std::vector<std::string> typeAlts;
+  if (!typeUpper.empty()) {
+    size_t startPos = 0;
+    while (startPos <= typeUpper.size()) {
+      size_t bar = typeUpper.find('|', startPos);
+      if (bar == std::string::npos) {
+        typeAlts.push_back(typeUpper.substr(startPos));
+        break;
+      }
+      typeAlts.push_back(typeUpper.substr(startPos, bar - startPos));
+      startPos = bar + 1;
+    }
+  }
+
+  auto matchesAlt = [&](EdgeType t, const std::string &alt) -> bool {
+    if (alt.empty())
+      return true;
+    if (alt == "CONTROL_DEP") {
+      return t == EdgeType::CONTROLDEP_ENTRY || t == EdgeType::CONTROLDEP_BR ||
+             t == EdgeType::CONTROLDEP_IND_BR ||
+             t == EdgeType::CONTROLDEP_CALLINV ||
+             t == EdgeType::CONTROLDEP_CALLRET;
+    }
+    if (alt == "CALL") {
+      return t == EdgeType::CONTROLDEP_CALLINV ||
+             t == EdgeType::CONTROLDEP_CALLRET || t == EdgeType::IND_CALL;
+    }
+    if (alt == "DATA_DEP") {
+      return t == EdgeType::DATA_DEF_USE;
+    }
+
+    static const std::unordered_map<std::string, EdgeType> typeMap = {
+        {"DATA_DEF_USE", EdgeType::DATA_DEF_USE},
+        {"DATA_RAW", EdgeType::DATA_RAW},
+        {"DATA_READ", EdgeType::DATA_READ},
+        {"DATA_ALIAS", EdgeType::DATA_ALIAS},
+        {"DATA_RET", EdgeType::DATA_RET},
+        {"CONTROLDEP_ENTRY", EdgeType::CONTROLDEP_ENTRY},
+        {"CONTROLDEP_BR", EdgeType::CONTROLDEP_BR},
+        {"CONTROLDEP_IND_BR", EdgeType::CONTROLDEP_IND_BR},
+        {"CONTROLDEP_CALLINV", EdgeType::CONTROLDEP_CALLINV},
+        {"CONTROLDEP_CALLRET", EdgeType::CONTROLDEP_CALLRET},
+        {"CALL_INV", EdgeType::CONTROLDEP_CALLINV},
+        {"CALL_RET", EdgeType::CONTROLDEP_CALLRET},
+        {"IND_CALL", EdgeType::IND_CALL},
+        {"PARAM_IN", EdgeType::PARAMETER_IN},
+        {"PARAM_OUT", EdgeType::PARAMETER_OUT},
+        {"PARAMETER_IN", EdgeType::PARAMETER_IN},
+        {"PARAMETER_OUT", EdgeType::PARAMETER_OUT},
+    };
+
+    auto it = typeMap.find(alt);
+    return it != typeMap.end() && t == it->second;
+  };
+
+  auto edgeMatches = [&](EdgeType t) -> bool {
+    if (typeAlts.empty())
+      return true;
+    for (const auto &alt : typeAlts) {
+      if (matchesAlt(t, alt))
+        return true;
+    }
+    return false;
+  };
+
+  std::unordered_map<Node *, int> dist;
+  dist.emplace(start, 0);
+
+  std::vector<Node *> frontier = {start};
   std::unordered_set<Edge *> visitedEdges;
-  visited.insert(start);
 
-  EdgeType edgeType = EdgeType::DATA_DEF_USE;
-  if (!rel.getType().empty()) {
-    auto it = typeMap.find(rel.getType());
-    if (it != typeMap.end()) {
-      edgeType = it->second;
-    }
-  }
+  for (int hop = 0; hop < effectiveMaxHops && !frontier.empty(); ++hop) {
+    std::vector<Node *> next;
+    next.reserve(frontier.size() * 2);
 
-  for (int hop = 0; hop < maxHops && !currentLevel.empty(); ++hop) {
-    std::vector<Node *> nextLevel;
+    auto visitNeighbor = [&](Edge *edge, Node *neighbor) {
+      if (!edgeMatches(edge->getEdgeType()))
+        return;
+      visitedEdges.insert(edge);
+      auto it = dist.find(neighbor);
+      if (it != dist.end())
+        return;
+      const int nd = hop + 1;
+      dist.emplace(neighbor, nd);
+      if (nd >= minHops)
+        result->addNode(neighbor);
+      next.push_back(neighbor);
+    };
 
-    for (auto *node : currentLevel) {
-      for (auto *edge : node->getOutEdgeSet()) {
-        if (edge->getEdgeType() == edgeType || rel.getType().empty()) {
-          if (visitedEdges.insert(edge).second)
-            result->addEdge(edge);
-          auto *neighbor = edge->getDstNode();
-          if (visited.find(neighbor) == visited.end()) {
-            visited.insert(neighbor);
-            result->addNode(neighbor);
-            nextLevel.push_back(neighbor);
-          }
+    for (auto *node : frontier) {
+      if (rel.getDirection() == CypherRelationshipPattern::Direction::OUT ||
+          rel.getDirection() == CypherRelationshipPattern::Direction::BOTH) {
+        for (auto *edge : node->getOutEdgeSet()) {
+          visitNeighbor(edge, edge->getDstNode());
         }
       }
 
-      if (rel.isBidirectional()) {
+      if (rel.getDirection() == CypherRelationshipPattern::Direction::IN ||
+          rel.getDirection() == CypherRelationshipPattern::Direction::BOTH) {
         for (auto *edge : node->getInEdgeSet()) {
-          if (edge->getEdgeType() == edgeType || rel.getType().empty()) {
-            if (visitedEdges.insert(edge).second)
-              result->addEdge(edge);
-            auto *neighbor = edge->getSrcNode();
-            if (visited.find(neighbor) == visited.end()) {
-              visited.insert(neighbor);
-              result->addNode(neighbor);
-              nextLevel.push_back(neighbor);
-            }
-          }
+          visitNeighbor(edge, edge->getSrcNode());
         }
       }
     }
 
-    currentLevel = std::move(nextLevel);
+    frontier = std::move(next);
   }
+
+  for (auto *e : visitedEdges)
+    result->addEdge(e);
 
   return result;
 }
@@ -1387,6 +1819,14 @@ bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
   const auto &value = condition.getValue();
   std::string nodeValue = getNodeProperty(node, property);
 
+  if (condition.getComparisonOp() == CypherComparisonOp::IN) {
+    for (const auto &v : condition.getListValues()) {
+      if (nodeValue == v)
+        return true;
+    }
+    return false;
+  }
+
   return applyComparison(nodeValue, condition.getComparisonOp(), value);
 }
 
@@ -1421,6 +1861,14 @@ bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
   const auto &property = condition.getProperty();
   const auto &value = condition.getValue();
   std::string edgeValue = getEdgeProperty(edge, property);
+
+  if (condition.getComparisonOp() == CypherComparisonOp::IN) {
+    for (const auto &v : condition.getListValues()) {
+      if (edgeValue == v)
+        return true;
+    }
+    return false;
+  }
 
   return applyComparison(edgeValue, condition.getComparisonOp(), value);
 }
