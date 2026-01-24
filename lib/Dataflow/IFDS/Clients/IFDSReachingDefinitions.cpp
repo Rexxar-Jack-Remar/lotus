@@ -6,8 +6,8 @@
 
 #include "Dataflow/IFDS/Clients/IFDSReachingDefinitions.h"
 
-#include <iostream>
 #include <llvm/Support/raw_ostream.h>
+#include <iostream>
 
 namespace ifds {
 

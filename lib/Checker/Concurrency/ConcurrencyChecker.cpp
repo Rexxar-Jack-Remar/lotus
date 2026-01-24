@@ -3,6 +3,7 @@
 #include "Checker/Concurrency/ConcurrencyChecker.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/ThreadAPI.h"
+#include "Checker/Concurrency/ConcurrencyAnalysisDumper.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/InstIterator.h>
@@ -195,6 +196,17 @@ void ConcurrencyChecker::reportBug(const ConcurrencyBugReport& bug_report, int b
     
     // Report to the manager with deduplication enabled
     BugReportMgr::get_instance().insert_report(bug_type_id, report, true);
+}
+
+void ConcurrencyChecker::dumpAnalysisResults(raw_ostream& os, bool jsonFormat) const {
+    ConcurrencyAnalysisDumper dumper(
+        m_module,
+        m_mhpAnalysis.get(),
+        m_locksetAnalysis.get(),
+        m_escapeAnalysis.get(),
+        m_threadAPI
+    );
+    dumper.dump(os, jsonFormat);
 }
 
 } // namespace concurrency

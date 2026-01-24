@@ -1,6 +1,7 @@
 # Concurrency checker library
 add_library(ConcurrencyChecker STATIC
     ConcurrencyChecker.cpp
+    ConcurrencyAnalysisDumper.cpp
     DataRaceChecker.cpp
     DeadlockChecker.cpp
     AtomicityChecker.cpp

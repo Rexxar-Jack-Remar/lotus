@@ -101,6 +101,18 @@ public:
 
     Statistics getStatistics() const { return m_stats; }
 
+    /**
+     * @brief Dump analysis results with source-level debug information
+     * 
+     * This method dumps the results of fundamental concurrency analyses
+     * (MHP, LockSet, Escape) at the source-code level using debug information.
+     * Used in analysis-only mode to report facts without performing bug checking.
+     * 
+     * @param os Output stream to write results to
+     * @param jsonFormat If true, output in JSON format; otherwise, human-readable text
+     */
+    void dumpAnalysisResults(llvm::raw_ostream& os, bool jsonFormat = false) const;
+
 private:
     // Analysis components
     llvm::Module& m_module;
