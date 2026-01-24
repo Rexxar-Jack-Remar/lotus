@@ -5,6 +5,7 @@
 
 #include "Analysis/Concurrency/StaticVectorClockMHP.h"
 
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
@@ -246,29 +247,56 @@ bool StaticVectorClockMHP::happensBefore(const Instruction *i1,
   if (!m_tfg)
     return false;
 
-  if (i1 == i2)
+  if (!i1 || !i2 || i1 == i2)
     return false;
+
+  if (isInstructionThreadAmbiguous(i1) || isInstructionThreadAmbiguous(i2)) {
+    return false;
+  }
 
   const SyncNode *n1 = m_tfg->getNode(i1);
   const SyncNode *n2 = m_tfg->getNode(i2);
   if (!n1 || !n2)
     return false;
 
-  auto c1_it = m_node_clocks.find(n1);
-  auto c2_it = m_node_clocks.find(n2);
-  if (c1_it == m_node_clocks.end() || c2_it == m_node_clocks.end())
-    return false;
+  std::deque<const SyncNode *> worklist;
+  std::unordered_set<const SyncNode *> visited;
+  worklist.push_back(n1);
+  visited.insert(n1);
 
-  return happensBefore(c1_it->second, c2_it->second);
+  while (!worklist.empty()) {
+    const SyncNode *current = worklist.front();
+    worklist.pop_front();
+
+    if (current == n2) {
+      return true;
+    }
+
+    for (const SyncNode *succ : current->getSuccessors()) {
+      const Instruction *succ_inst = succ->getInstruction();
+      if (succ_inst && isInstructionThreadAmbiguous(succ_inst)) {
+        continue;
+      }
+      if (current->getThreadID() == succ->getThreadID() &&
+          !isMustIntraThreadEdge(current, succ)) {
+        continue;
+      }
+      if (visited.insert(succ).second) {
+        worklist.push_back(succ);
+      }
+    }
+  }
+
+  return false;
 }
 
 void StaticVectorClockMHP::computeMHPPairs() {
   std::vector<const Instruction *> all_insts;
-  all_insts.reserve(m_inst_to_static_thread.size());
+  all_insts.reserve(m_inst_to_thread.size());
   for (Function &func : m_module) {
     for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
       const Instruction *inst = &*I;
-      if (m_inst_to_static_thread.count(inst)) {
+      if (m_inst_to_thread.count(inst)) {
         all_insts.push_back(inst);
       }
     }
@@ -352,89 +380,222 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid) {
   if (!visited.insert(func).second)
     return;
 
-  SyncNode *prev_node = nullptr;
-  SyncNode *entry_node = nullptr;
-
-  if (const SyncNode *existing = m_tfg->getThreadEntryNode(tid)) {
-    entry_node = const_cast<SyncNode *>(existing);
-    prev_node = entry_node;
-  }
-
+  // --- Pass 1: Create all nodes for this function ---
   for (const BasicBlock &bb : *func) {
     for (const Instruction &inst : bb) {
       mapInstructionToThread(&inst, tid);
+      SyncNodeType node_type = SyncNodeType::REGULAR_INST;
 
-      SyncNode *node = nullptr;
+      if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
+        (void)cb;
+        if (m_thread_api->isTDFork(&inst)) {
+          node_type = SyncNodeType::THREAD_FORK;
+        } else if (m_thread_api->isTDJoin(&inst)) {
+          node_type = SyncNodeType::THREAD_JOIN;
+        } else if (m_thread_api->isTDAcquire(&inst)) {
+          node_type = SyncNodeType::LOCK_ACQUIRE;
+        } else if (m_thread_api->isTDRelease(&inst)) {
+          node_type = SyncNodeType::LOCK_RELEASE;
+        } else if (m_thread_api->isTDExit(&inst)) {
+          node_type = SyncNodeType::THREAD_EXIT;
+        } else if (m_thread_api->isTDCondWait(&inst)) {
+          node_type = SyncNodeType::COND_WAIT;
+        } else if (m_thread_api->isTDCondSignal(&inst)) {
+          node_type = SyncNodeType::COND_SIGNAL;
+        } else if (m_thread_api->isTDCondBroadcast(&inst)) {
+          node_type = SyncNodeType::COND_BROADCAST;
+        } else if (m_thread_api->isTDBarWait(&inst)) {
+          node_type = SyncNodeType::BARRIER_WAIT;
+        }
+      }
+      m_tfg->createNode(&inst, node_type, tid);
+    }
+  }
+
+  // --- Pass 2: Add edges and handle synchronization logic ---
+  SyncNode *entry_node = nullptr;
+  if (!func->empty() && !func->front().empty()) {
+    entry_node = m_tfg->getNode(&func->front().front());
+    if (entry_node) {
+      m_tfg->setThreadEntryNode(tid, entry_node);
+    }
+  }
+
+  SyncNode *exit_node = nullptr;
+
+  for (const BasicBlock &bb : *func) {
+    for (const Instruction &inst : bb) {
+      SyncNode *node = m_tfg->getNode(&inst);
+      if (!node) {
+        continue;
+      }
+
+      exit_node = node;
+
+      if (&inst != &bb.front()) {
+        const Instruction *prev_inst = inst.getPrevNode();
+        if (prev_inst) {
+          SyncNode *prev_node = m_tfg->getNode(prev_inst);
+          if (prev_node) {
+            m_tfg->addIntraThreadEdge(prev_node, node);
+          }
+        }
+      }
+
+      if (inst.isTerminator()) {
+        for (const BasicBlock *succ : successors(inst.getParent())) {
+          if (!succ->empty()) {
+            SyncNode *succ_node = m_tfg->getNode(&succ->front());
+            if (succ_node) {
+              m_tfg->addIntraThreadEdge(node, succ_node);
+            }
+          }
+        }
+      }
 
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
         if (m_thread_api->isTDFork(&inst)) {
-          node = m_tfg->createNode(&inst, SyncNodeType::THREAD_FORK, tid);
-          handleThreadFork(&inst, node);
+          handleThreadFork(&inst, node, tid);
         } else if (m_thread_api->isTDJoin(&inst)) {
-          node = m_tfg->createNode(&inst, SyncNodeType::THREAD_JOIN, tid);
-          handleThreadJoin(&inst, node);
+          handleThreadJoin(&inst, node, tid);
         } else if (m_thread_api->isTDAcquire(&inst)) {
-          node = m_tfg->createNode(&inst, SyncNodeType::LOCK_ACQUIRE, tid);
           handleLockAcquire(&inst, node);
         } else if (m_thread_api->isTDRelease(&inst)) {
-          node = m_tfg->createNode(&inst, SyncNodeType::LOCK_RELEASE, tid);
           handleLockRelease(&inst, node);
-        } else if (m_thread_api->isTDExit(&inst)) {
-          node = m_tfg->createNode(&inst, SyncNodeType::THREAD_EXIT, tid);
         } else if (m_thread_api->isTDCondWait(&inst)) {
-          node = m_tfg->createNode(&inst, SyncNodeType::COND_WAIT, tid);
           handleCondWait(&inst, node);
         } else if (m_thread_api->isTDCondSignal(&inst)) {
-          node = m_tfg->createNode(&inst, SyncNodeType::COND_SIGNAL, tid);
           handleCondSignal(&inst, node);
         } else if (m_thread_api->isTDCondBroadcast(&inst)) {
-          node = m_tfg->createNode(&inst, SyncNodeType::COND_BROADCAST, tid);
           handleCondSignal(&inst, node);
         } else if (m_thread_api->isTDBarWait(&inst)) {
-          node = m_tfg->createNode(&inst, SyncNodeType::BARRIER_WAIT, tid);
           handleBarrier(&inst, node);
         } else {
-          // Non-thread API call: process callee in same thread
           const Function *callee = cb->getCalledFunction();
           if (callee && !callee->isDeclaration()) {
             processFunction(callee, tid);
           }
         }
       }
-
-      if (!node) {
-        node = m_tfg->createNode(&inst, SyncNodeType::REGULAR_INST, tid);
-      }
-
-      if (prev_node) {
-        m_tfg->addIntraThreadEdge(prev_node, node);
-      }
-
-      if (!entry_node) {
-        entry_node = node;
-        m_tfg->setThreadEntryNode(tid, entry_node);
-      }
-
-      prev_node = node;
     }
   }
 
-  if (prev_node && !m_tfg->getThreadExitNode(tid)) {
-    m_tfg->setThreadExitNode(tid, prev_node);
+  if (exit_node && !m_tfg->getThreadExitNode(tid)) {
+    m_tfg->setThreadExitNode(tid, exit_node);
   }
 }
 
 void StaticVectorClockMHP::mapInstructionToThread(const Instruction *inst,
                                                   ThreadID tid) {
-  m_inst_to_thread[inst] = tid;
+  if (!inst) {
+    return;
+  }
+
+  if (m_has_unresolved_fork &&
+      m_thread_entry_candidates.find(inst->getFunction()) !=
+          m_thread_entry_candidates.end()) {
+    m_inst_to_thread[inst] = kUnknownThread;
+    return;
+  }
+
+  auto it = m_inst_to_thread.find(inst);
+  if (it == m_inst_to_thread.end()) {
+    m_inst_to_thread[inst] = tid;
+    return;
+  }
+
+  if (it->second == kUnknownThread || it->second == tid) {
+    return;
+  }
+
+  it->second = kUnknownThread;
+}
+
+bool StaticVectorClockMHP::isInstructionThreadAmbiguous(
+    const Instruction *inst) const {
+  if (!inst) {
+    return true;
+  }
+  auto it = m_inst_to_thread.find(inst);
+  if (it == m_inst_to_thread.end()) {
+    return true;
+  }
+  return it->second == kUnknownThread;
+}
+
+bool StaticVectorClockMHP::isMustIntraThreadEdge(const SyncNode *from,
+                                                 const SyncNode *to) const {
+  if (!from || !to) {
+    return false;
+  }
+  if (from->getThreadID() != to->getThreadID()) {
+    return false;
+  }
+
+  const Instruction *from_inst = from->getInstruction();
+  const Instruction *to_inst = to->getInstruction();
+  if (!from_inst || !to_inst) {
+    return false;
+  }
+
+  if (from_inst->getParent() == to_inst->getParent()) {
+    return from_inst->getNextNode() == to_inst;
+  }
+
+  const Function *func = from_inst->getFunction();
+  if (!func || func != to_inst->getFunction()) {
+    return false;
+  }
+
+  const PostDominatorTree &PDT = getPostDomTree(func);
+  return PDT.dominates(to_inst->getParent(), from_inst->getParent());
+}
+
+const PostDominatorTree &
+StaticVectorClockMHP::getPostDomTree(const Function *func) const {
+  auto it = m_post_dom_cache.find(func);
+  if (it != m_post_dom_cache.end()) {
+    return *(it->second);
+  }
+  auto PDT = std::make_unique<PostDominatorTree>();
+  PDT->recalculate(*const_cast<Function *>(func));
+  auto *pdtPtr = PDT.get();
+  m_post_dom_cache[func] = std::move(PDT);
+  return *pdtPtr;
+}
+
+void StaticVectorClockMHP::enableIndirectForkConservatism() {
+  if (m_has_unresolved_fork) {
+    return;
+  }
+  m_has_unresolved_fork = true;
+
+  for (Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+    if (!func.hasAddressTaken()) {
+      continue;
+    }
+
+    m_thread_entry_candidates.insert(&func);
+    for (Instruction &inst : instructions(func)) {
+      auto it = m_inst_to_thread.find(&inst);
+      if (it == m_inst_to_thread.end()) {
+        m_inst_to_thread[&inst] = kUnknownThread;
+      } else if (it->second != kUnknownThread) {
+        it->second = kUnknownThread;
+      }
+    }
+  }
 }
 
 ThreadID StaticVectorClockMHP::allocateThreadID() { return m_next_thread_id++; }
 
 void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
-                                            SyncNode *node) {
+                                            SyncNode *node,
+                                            ThreadID parent_tid) {
   ThreadID new_tid = allocateThreadID();
-  ThreadID parent_tid = m_inst_to_thread[fork_inst];
 
   node->setForkedThread(new_tid);
 
@@ -455,11 +616,14 @@ void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
     if (SyncNode *child_entry = m_tfg->getThreadEntryNode(new_tid)) {
       m_tfg->addInterThreadEdge(node, child_entry);
     }
+  } else {
+    enableIndirectForkConservatism();
   }
 }
 
 void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
-                                            SyncNode *node) {
+                                            SyncNode *node,
+                                            ThreadID parent_tid) {
   const Value *joined_thread_val = m_thread_api->getJoinedThread(join_inst);
   ThreadID joined_tid = 0;
   bool found = false;
@@ -491,12 +655,8 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
   if (found && joined_tid != 0) {
     add_edge_to_join(joined_tid);
   } else {
-    ThreadID parent_tid = m_inst_to_thread[join_inst];
-    if (m_thread_children.count(parent_tid)) {
-      for (ThreadID child_tid : m_thread_children[parent_tid]) {
-        add_edge_to_join(child_tid);
-      }
-    }
+    (void)parent_tid;
+    // Unknown join target: skip adding HB edges to avoid unsound ordering.
   }
 }
 

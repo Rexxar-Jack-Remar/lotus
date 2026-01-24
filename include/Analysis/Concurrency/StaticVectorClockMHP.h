@@ -15,10 +15,12 @@
 #include "Analysis/Concurrency/ThreadAPI.h"
 #include "Analysis/Concurrency/ThreadFlowGraph.h"
 
+#include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <limits>
 #include <memory>
 #include <set>
 #include <unordered_map>
@@ -139,8 +141,10 @@ private:
   void processFunction(const llvm::Function *func, ThreadID tid);
   void mapInstructionToThread(const llvm::Instruction *inst, ThreadID tid);
   ThreadID allocateThreadID();
-  void handleThreadFork(const llvm::Instruction *fork_inst, SyncNode *node);
-  void handleThreadJoin(const llvm::Instruction *join_inst, SyncNode *node);
+  void handleThreadFork(const llvm::Instruction *fork_inst, SyncNode *node,
+                        ThreadID parent_tid);
+  void handleThreadJoin(const llvm::Instruction *join_inst, SyncNode *node,
+                        ThreadID parent_tid);
   void handleLockAcquire(const llvm::Instruction *lock_inst, SyncNode *node);
   void handleLockRelease(const llvm::Instruction *unlock_inst, SyncNode *node);
   void handleCondWait(const llvm::Instruction *wait_inst, SyncNode *node);
@@ -161,6 +165,11 @@ private:
   // Queries
   void computeMHPPairs();
 
+  bool isInstructionThreadAmbiguous(const llvm::Instruction *inst) const;
+  bool isMustIntraThreadEdge(const SyncNode *from, const SyncNode *to) const;
+  const llvm::PostDominatorTree &getPostDomTree(const llvm::Function *func) const;
+  void enableIndirectForkConservatism();
+
   // Thread bookkeeping reused from the TFG builder
   ThreadID m_next_thread_id = 1; // 0 reserved for main
   std::unordered_map<const llvm::Instruction *, ThreadID> m_inst_to_thread;
@@ -174,6 +183,16 @@ private:
   std::unordered_map<const llvm::Value *, std::vector<const llvm::Instruction *>> m_condvar_signals;
   std::unordered_map<const llvm::Value *, std::vector<const llvm::Instruction *>> m_condvar_waits;
   std::unordered_map<const llvm::Value *, std::vector<const llvm::Instruction *>> m_barrier_waits;
+
+  // Indirect fork handling (conservative)
+  bool m_has_unresolved_fork = false;
+  std::unordered_set<const llvm::Function *> m_thread_entry_candidates;
+
+  mutable std::unordered_map<const llvm::Function *, std::unique_ptr<llvm::PostDominatorTree>>
+      m_post_dom_cache;
+
+  static constexpr ThreadID kUnknownThread =
+      std::numeric_limits<ThreadID>::max();
 };
 
 } // namespace mhp

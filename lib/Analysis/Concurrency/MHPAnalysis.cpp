@@ -13,7 +13,7 @@
  *   - Locks: Uses LockSet analysis (if enabled) to rule out parallelism guarded by common locks.
  *   - Condition Variables: Conservatively assumes a signal may wake any wait.
  *   - Barriers: Enforces program order across barriers.
- * - Loop Handling: Detects threads created in loops and treats them as having multiple instances.
+ * - Thread Instances: Conservatively assumes spawned threads may have multiple instances.
  *
  * Author: rainoftime
  */
@@ -445,9 +445,9 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid) {
       // Handle synchronization logic for special instructions
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
         if (m_thread_api->isTDFork(&inst)) {
-          handleThreadFork(&inst, node);
+          handleThreadFork(&inst, node, tid);
         } else if (m_thread_api->isTDJoin(&inst)) {
-          handleThreadJoin(&inst, node);
+          handleThreadJoin(&inst, node, tid);
         } else if (m_thread_api->isTDAcquire(&inst)) {
           handleLockAcquire(&inst, node);
         } else if (m_thread_api->isTDRelease(&inst)) {
@@ -475,37 +475,13 @@ void MHPAnalysis::processInstruction(const Instruction * /*inst*/, ThreadID /*ti
 }
 
 void MHPAnalysis::handleThreadFork(const Instruction *fork_inst,
-                                    SyncNode *node) {
+                                    SyncNode *node, ThreadID parent_tid) {
   // Allocate new thread ID
   ThreadID new_tid = allocateThreadID();
-  ThreadID parent_tid = getThreadID(fork_inst);
   
-  // Check if this fork site is inside a loop or part of recursion
-  const Function *func = fork_inst->getFunction();
-  const DominatorTree &DT = getDomTree(func);
-  
-  // Simple loop detection: check if fork_inst is in a loop
-  // We use a basic check: is there a backedge to a block that dominates fork_inst?
-  bool in_loop = false;
-  const BasicBlock *fork_bb = fork_inst->getParent();
-  
-  // Check for natural loops using dominance
-  for (const BasicBlock &bb : *func) {
-    for (const BasicBlock *succ : successors(&bb)) {
-      if (DT.dominates(succ, &bb)) { // Backedge found
-        // Check if this loop contains our fork_inst
-        if (DT.dominates(succ, fork_bb) && DT.dominates(fork_bb, &bb)) {
-           in_loop = true;
-           break;
-        }
-      }
-    }
-    if (in_loop) break;
-  }
-  
-  if (in_loop) {
-    m_multi_instance_threads.insert(new_tid);
-  }
+  // Be conservative: unless we can prove single instancing, assume multiple instances.
+  // This preserves soundness for MHP when forks may execute multiple times.
+  m_multi_instance_threads.insert(new_tid);
   
   node->setForkedThread(new_tid);
 
@@ -540,6 +516,34 @@ void MHPAnalysis::handleThreadFork(const Instruction *fork_inst,
     SyncNode *new_thread_entry = m_tfg->getThreadEntryNode(new_tid);
     if (new_thread_entry) {
       m_tfg->addInterThreadEdge(node, new_thread_entry);
+    }
+  } else {
+    enableIndirectForkConservatism();
+  }
+}
+
+void MHPAnalysis::enableIndirectForkConservatism() {
+  if (m_has_unresolved_fork) {
+    return;
+  }
+  m_has_unresolved_fork = true;
+
+  for (Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+    if (!func.hasAddressTaken()) {
+      continue;
+    }
+
+    m_thread_entry_candidates.insert(&func);
+    for (Instruction &inst : instructions(func)) {
+      auto it = m_inst_to_thread.find(&inst);
+      if (it == m_inst_to_thread.end()) {
+        m_inst_to_thread[&inst] = kUnknownThread;
+      } else if (it->second != kUnknownThread) {
+        it->second = kUnknownThread;
+      }
     }
   }
 }
@@ -595,7 +599,7 @@ const Value *MHPAnalysis::tracePthreadT(const Value *val) const {
 }
 
 void MHPAnalysis::handleThreadJoin(const Instruction *join_inst,
-                                    SyncNode *node) {
+                                    SyncNode *node, ThreadID parent_tid) {
   // Track which thread is being joined using value analysis
   // pthread_join takes the pthread_t value (not pointer) as first argument
   
@@ -631,20 +635,8 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst,
   } else {
     // Fallback: couldn't determine specific thread, so conservatively
     // assume it could be any child thread of the current thread
-    ThreadID parent_tid = getThreadID(join_inst);
-    
-    if (m_thread_children.find(parent_tid) != m_thread_children.end()) {
-      for (ThreadID child_tid : m_thread_children[parent_tid]) {
-        SyncNode *child_exit = m_tfg->getThreadExitNode(child_tid);
-        if (child_exit) {
-          m_tfg->addInterThreadEdge(child_exit, node);
-          // Note: We set joined thread even in fallback case
-          // In reality, only one thread is joined, but we're conservative
-          node->setJoinedThread(child_tid);
-          m_join_to_thread[join_inst] = child_tid;
-        }
-      }
-    }
+    (void)parent_tid;
+    // Unknown join target: skip adding HB edges to avoid unsound ordering.
   }
 }
 
@@ -675,17 +667,7 @@ void MHPAnalysis::handleCondWait(const Instruction *wait_inst,
   // Track this wait for happens-before analysis
   m_condvar_waits[cond].push_back(wait_inst);
   
-  // Conservative: add happens-before edges from all prior signals to this wait
-  // In reality, only the most recent signal(s) matter, but we're being conservative
-  if (m_condvar_signals.find(cond) != m_condvar_signals.end()) {
-    for (const Instruction *signal_inst : m_condvar_signals[cond]) {
-      SyncNode *signal_node = m_tfg->getNode(signal_inst);
-      if (signal_node) {
-        // Add inter-thread edge: signal happens-before wait wake-up
-        m_tfg->addInterThreadEdge(signal_node, node);
-      }
-    }
-  }
+  // Do not add HB edges here: a prior signal is not guaranteed to wake this wait.
 }
 
 void MHPAnalysis::handleCondSignal(const Instruction *signal_inst,
@@ -839,7 +821,7 @@ bool MHPAnalysis::mustPrecede(const Instruction *i1,
 
 ThreadID MHPAnalysis::getThreadID(const Instruction *inst) const {
   auto it = m_inst_to_thread.find(inst);
-  return it != m_inst_to_thread.end() ? it->second : 0;
+  return it != m_inst_to_thread.end() ? it->second : kUnknownThread;
 }
 
 InstructionSet MHPAnalysis::getInstructionsInThread(ThreadID tid) const {
@@ -865,11 +847,75 @@ ThreadID MHPAnalysis::allocateThreadID() { return m_next_thread_id++; }
 
 void MHPAnalysis::mapInstructionToThread(const Instruction *inst,
                                           ThreadID tid) {
-  m_inst_to_thread[inst] = tid;
+  if (!inst) {
+    return;
+  }
+
+  if (m_has_unresolved_fork &&
+      m_thread_entry_candidates.find(inst->getFunction()) !=
+          m_thread_entry_candidates.end()) {
+    m_inst_to_thread[inst] = kUnknownThread;
+    return;
+  }
+
+  auto it = m_inst_to_thread.find(inst);
+  if (it == m_inst_to_thread.end()) {
+    m_inst_to_thread[inst] = tid;
+    return;
+  }
+
+  if (it->second == kUnknownThread || it->second == tid) {
+    return;
+  }
+
+  it->second = kUnknownThread;
+}
+
+bool MHPAnalysis::isInstructionThreadAmbiguous(const Instruction *inst) const {
+  if (!inst) {
+    return true;
+  }
+  auto it = m_inst_to_thread.find(inst);
+  if (it == m_inst_to_thread.end()) {
+    return true;
+  }
+  return it->second == kUnknownThread;
+}
+
+bool MHPAnalysis::isMustIntraThreadEdge(const SyncNode *from,
+                                         const SyncNode *to) const {
+  if (!from || !to) {
+    return false;
+  }
+  if (from->getThreadID() != to->getThreadID()) {
+    return false;
+  }
+
+  const Instruction *from_inst = from->getInstruction();
+  const Instruction *to_inst = to->getInstruction();
+  if (!from_inst || !to_inst) {
+    return false;
+  }
+
+  if (from_inst->getParent() == to_inst->getParent()) {
+    return from_inst->getNextNode() == to_inst;
+  }
+
+  const Function *func = from_inst->getFunction();
+  if (!func || func != to_inst->getFunction()) {
+    return false;
+  }
+
+  const PostDominatorTree &PDT = getPostDomTree(func);
+  return PDT.dominates(to_inst->getParent(), from_inst->getParent());
 }
 
 bool MHPAnalysis::hasHappenBeforeRelation(const Instruction *i1,
                                            const Instruction *i2) const {
+  if (isInstructionThreadAmbiguous(i1) || isInstructionThreadAmbiguous(i2)) {
+    return false;
+  }
+
   SyncNode *startNode = m_tfg->getNode(i1);
   SyncNode *endNode = m_tfg->getNode(i2);
 
@@ -892,6 +938,15 @@ bool MHPAnalysis::hasHappenBeforeRelation(const Instruction *i1,
     }
 
     for (SyncNode *succ : current->getSuccessors()) {
+      const Instruction *succ_inst = succ->getInstruction();
+      if (succ_inst && isInstructionThreadAmbiguous(succ_inst)) {
+        continue;
+      }
+
+      if (current->getThreadID() == succ->getThreadID() &&
+          !isMustIntraThreadEdge(current, succ)) {
+        continue;
+      }
       if (visited.find(succ) == visited.end()) {
         visited.insert(succ);
         worklist.push_back(succ);
@@ -910,6 +965,10 @@ bool MHPAnalysis::isInSameThread(const Instruction *i1,
   ThreadID t1 = getThreadID(i1);
   ThreadID t2 = getThreadID(i2);
   
+  if (t1 == kUnknownThread || t2 == kUnknownThread) {
+    return false;
+  }
+
   if (t1 != t2) {
     return false;
   }
@@ -1094,6 +1153,18 @@ const DominatorTree &MHPAnalysis::getDomTree(const Function *func) const {
   return *dtPtr;
 }
 
+const PostDominatorTree &MHPAnalysis::getPostDomTree(const Function *func) const {
+  auto it = m_post_dom_cache.find(func);
+  if (it != m_post_dom_cache.end()) {
+    return *(it->second);
+  }
+  auto PDT = std::make_unique<PostDominatorTree>();
+  PDT->recalculate(*const_cast<Function *>(func));
+  auto *pdtPtr = PDT.get();
+  m_post_dom_cache[func] = std::move(PDT);
+  return *pdtPtr;
+}
+
 bool MHPAnalysis::dominates(const Instruction *a, const Instruction *b) const {
   if (!a || !b)
     return false;
@@ -1235,12 +1306,10 @@ void MHPAnalysis::computeAtomicHappensBefore() {
       const Value *ptr1 = Cpp11Atomics::getAtomicPointer(release_inst);
       const Value *ptr2 = Cpp11Atomics::getAtomicPointer(acquire_inst);
       if (ptr1 && ptr2 && m_alias_analysis->mayAlias(ptr1, ptr2)) {
-        SyncNode *rel_node = m_tfg->getNode(release_inst);
-        SyncNode *acq_node = m_tfg->getNode(acquire_inst);
-        if (rel_node && acq_node) {
-            m_tfg->addInterThreadEdge(rel_node, acq_node);
-            pairs_found++;
-        }
+        // Only a reads-from relation establishes synchronization. Without it,
+        // we cannot add a must-HB edge for sound MHP.
+        m_atomic_hb_pairs.insert({release_inst, acquire_inst});
+        pairs_found++;
       }
     }
   }

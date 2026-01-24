@@ -68,6 +68,12 @@ ThreadFlowGraph::~ThreadFlowGraph() {
 
 SyncNode *ThreadFlowGraph::createNode(const Instruction *inst,
                                       SyncNodeType type, ThreadID tid) {
+  if (inst) {
+    auto it = m_inst_to_node.find(inst);
+    if (it != m_inst_to_node.end()) {
+      return it->second;
+    }
+  }
   auto *node = new SyncNode(inst, type, tid);
   m_all_nodes.push_back(node);
 

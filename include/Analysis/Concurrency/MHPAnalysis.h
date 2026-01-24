@@ -22,14 +22,15 @@
 #define MHP_ANALYSIS_H
 
 #include "Analysis/Concurrency/LockSetAnalysis.h"
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Analysis/Concurrency/Cpp11Atomics.h"
 #include "Analysis/Concurrency/ThreadAPI.h"
 #include "Analysis/Concurrency/ThreadFlowGraph.h"
-#include "Analysis/Concurrency/Cpp11Atomics.h"
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Function.h>
@@ -38,6 +39,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <limits>
 #include <memory>
 #include <set>
 #include <unordered_map>
@@ -205,7 +207,7 @@ public:
    * @brief Get the thread ID that an instruction belongs to
    * 
    * @param inst Target instruction
-   * @return Thread ID, or 0 if main thread
+   * @return Thread ID, or kUnknownThread if the instruction is thread-ambiguous
    */
   ThreadID getThreadID(const llvm::Instruction *inst) const;
 
@@ -326,9 +328,15 @@ private:
   std::unordered_map<ThreadID, std::unordered_set<const llvm::Function *>>
       m_visited_functions_by_thread;
 
+  // Indirect fork handling (conservative)
+  bool m_has_unresolved_fork = false;
+  std::unordered_set<const llvm::Function *> m_thread_entry_candidates;
+
   // Dominator tree cache for HB queries within a function
   mutable std::unordered_map<const llvm::Function *, std::unique_ptr<DominatorTree>>
       m_dom_cache;
+  mutable std::unordered_map<const llvm::Function *, std::unique_ptr<llvm::PostDominatorTree>>
+      m_post_dom_cache;
 
   // ========================================================================
   // Analysis Phases
@@ -383,8 +391,10 @@ private:
   void mapInstructionToThread(const llvm::Instruction *inst, ThreadID tid);
 
   // Fork-join analysis
-  void handleThreadFork(const llvm::Instruction *fork_inst, SyncNode *node);
-  void handleThreadJoin(const llvm::Instruction *join_inst, SyncNode *node);
+  void handleThreadFork(const llvm::Instruction *fork_inst, SyncNode *node,
+                        ThreadID parent_tid);
+  void handleThreadJoin(const llvm::Instruction *join_inst, SyncNode *node,
+                        ThreadID parent_tid);
 
   // Value-tracing helper for pthread_t
   const llvm::Value *tracePthreadT(const llvm::Value *val) const;
@@ -403,6 +413,8 @@ private:
                       const llvm::Instruction *i2) const;
   bool isOrderedByLocks(const llvm::Instruction *i1,
                         const llvm::Instruction *i2) const;
+  bool isInstructionThreadAmbiguous(const llvm::Instruction *inst) const;
+  bool isMustIntraThreadEdge(const SyncNode *from, const SyncNode *to) const;
 
 
   // Alias analysis helper
@@ -418,6 +430,7 @@ private:
 
   // Dominator helpers (intra-function)
   const DominatorTree &getDomTree(const llvm::Function *func) const;
+  const llvm::PostDominatorTree &getPostDomTree(const llvm::Function *func) const;
   bool dominates(const llvm::Instruction *a, const llvm::Instruction *b) const;
   
   // Program order helpers (precise happens-before for same thread)
@@ -425,6 +438,11 @@ private:
                                     const llvm::Instruction *to) const;
   bool isBackEdge(const llvm::BasicBlock *from, const llvm::BasicBlock *to,
                   const DominatorTree &DT) const;
+
+  void enableIndirectForkConservatism();
+
+  static constexpr ThreadID kUnknownThread =
+      std::numeric_limits<ThreadID>::max();
 };
 
 } // namespace mhp

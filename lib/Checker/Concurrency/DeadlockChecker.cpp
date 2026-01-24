@@ -46,8 +46,7 @@ std::vector<ConcurrencyBugReport> DeadlockChecker::checkDeadlocks() {
         // Check all pairs of acquires to see if any can happen in parallel
         for (const auto* a1 : lockAcquires1) {
             for (const auto* a2 : lockAcquires2) {
-                if (m_mhpAnalysis->mayHappenInParallel(a1, a2) &&
-                    m_mhpAnalysis->getThreadID(a1) != m_mhpAnalysis->getThreadID(a2)) {
+                if (m_mhpAnalysis->mayHappenInParallel(a1, a2)) {
                     canRunInParallel = true;
                     inst1 = a1;
                     inst2 = a2;
@@ -259,10 +258,6 @@ std::vector<ConcurrencyBugReport> DeadlockChecker::detectBarrierDivergence() con
                 const Instruction *w1 = waits[i];
                 const Instruction *w2 = waits[j];
                 if (m_mhpAnalysis) {
-                    auto tid1 = m_mhpAnalysis->getThreadID(w1);
-                    auto tid2 = m_mhpAnalysis->getThreadID(w2);
-                    if (tid1 == tid2)
-                        continue; // Same thread; not a synchronizing partner.
                     if (m_mhpAnalysis->mayHappenInParallel(w1, w2)) {
                         hasParallelPair = true;
                         partnerA = w1;
