@@ -1,6 +1,19 @@
 /**
  * Internal implementation details for FailureDirectedTrimming.
  * Shared types and declarations across FDTrim .cpp sources.
+ *
+ * This module implements the "safety conditions → trimming conditions" pipeline
+ * from Ferles et al. (ESEC/FSE'17):
+ *   - Safety condition: sufficient condition for avoiding assertion failure
+ *     from a program point onward.
+ *   - Trimming condition: negation of the safety condition, inserted as an
+ *     assume(...) to prune provably safe paths while preserving equi-safety.
+ *
+ * Core invariants produced by computeSafetyConditions():
+ *   - BeforeInst[I] is a sufficient condition that must hold immediately before
+ *     executing instruction I for the remainder of the (terminating) execution
+ *     to be free of assertion failures.
+ *   - Summary is the entry condition (a function summary) used at callsites.
  */
 #ifndef VERIFICATION_FAILUREDIRECTEDTRIMMING_IMPL_H
 #define VERIFICATION_FAILUREDIRECTEDTRIMMING_IMPL_H
@@ -32,7 +45,7 @@ using namespace llvm;
 // ---------------------------------------------------------------------------
 // LLVM helpers
 // ---------------------------------------------------------------------------
-static inline Function *getDirectCalledFunction(const CallBase &CB) {
+inline Function *getDirectCalledFunction(const CallBase &CB) {
   Value *Callee = CB.getCalledOperand();
   if (!Callee)
     return nullptr;
@@ -40,7 +53,7 @@ static inline Function *getDirectCalledFunction(const CallBase &CB) {
   return dyn_cast<Function>(Callee);
 }
 
-static inline Function *getDirectCalledFunctionMatchingType(const CallBase &CB) {
+inline Function *getDirectCalledFunctionMatchingType(const CallBase &CB) {
   Function *F = getDirectCalledFunction(CB);
   if (!F)
     return nullptr;
@@ -256,8 +269,7 @@ ExprRef callTransfer(const ExprFactory &F, BoundVarManager &BVM,
                      lotus::AliasAnalysisWrapper &AA, const SummaryEnv &Env,
                      const HasAsrtsEnv &Has, const CallBase *CB, ExprRef Phi);
 Instruction *firstNonPhiNonDbg(BasicBlock &B);
-ExprRef edgePre(const ExprFactory &F, const SummaryEnv &Env,
-                const HasAsrtsEnv &Has, const HasAsrtsEnv &,
+ExprRef edgePre(const ExprFactory &F,
                 const DenseMap<const BasicBlock *, ExprRef> &PreAfterPhi,
                 const BasicBlock *Succ, const BasicBlock *Pred);
 FunctionSCResult computeSafetyConditions(
@@ -269,7 +281,6 @@ HasAsrtsEnv computeHasAsrts(Module &M);
 // -----------------------------------------------------------------------------
 // Clone & wrap (CloneAndWrap.cpp)
 // -----------------------------------------------------------------------------
-bool shouldCloneSafeVersion(const Function &F);
 DenseMap<Function *, Function *> cloneSafeFunctions(Module &M,
                                                     FunctionCallee AssumeFn);
 bool wrapCallsInOriginalFunctions(Module &M, FunctionCallee AssumeFn,

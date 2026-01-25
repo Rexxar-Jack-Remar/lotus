@@ -7,6 +7,12 @@
 
 using namespace llvm;
 
+// Lower Expr formulas into LLVM IR Values that can be passed to verifier.assume.
+//
+// A trimming condition must be a necessary condition for failure. When the
+// condition cannot be represented precisely in LLVM IR (e.g., unresolved
+// quantifiers), we conservatively avoid pruning by producing "true".
+
 Value *codegenValue(const ExprFactory &F, const ExprRef &E, IRBuilder<> &B,
                     DenseMap<uint32_t, Value *> &BoundVals, Module &M,
                     NondetFactory &Nondet, DerefUFFactory &DerefUF) {
@@ -69,6 +75,11 @@ Value *codegenValue(const ExprFactory &F, const ExprRef &E, IRBuilder<> &B,
     return B.CreateICmp(E->Pred, A, C);
   }
   case ExprKind::Deref: {
+    // Deref terms drf(ptr) appear due to modeling of loads and heap effects.
+    // Their lowering is controlled by -fdtrim-deref-mode:
+    //   - nondet: treat every dereference as an unconstrained value
+    //   - load  : emit an actual LLVM load (may be unsound if ptr is invalid)
+    //   - uf    : call an uninterpreted function drf_trim(ptr) to keep it pure
     Value *Ptr = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
     Type *ValTy = E->DerefValueTy;
     if (!Ptr->getType()->isPointerTy()) {
@@ -129,7 +140,10 @@ Value *codegenValue(const ExprFactory &F, const ExprRef &E, IRBuilder<> &B,
   }
   case ExprKind::Forall:
   case ExprKind::Exists:
-    return Nondet.nondetBool(B);
+    // Trimming assumptions must be a necessary condition for failure.
+    // If quantifiers remain at this stage, conservatively keep all paths by
+    // treating them as true (i.e., do not prune based on an unresolved binder).
+    return ConstantInt::getTrue(M.getContext());
   }
   return nullptr;
 }
@@ -137,6 +151,12 @@ Value *codegenValue(const ExprFactory &F, const ExprRef &E, IRBuilder<> &B,
 ExprRef eliminateExistsByNondet(const ExprFactory &F, const ExprRef &E,
                                 IRBuilder<> &B, Module &M, NondetFactory &Nondet,
                                 DenseMap<uint32_t, Value *> &BoundVals) {
+  // Eliminates existential quantifiers by choosing a nondet witness value.
+  //
+  // This is the key step that makes trimming conditions executable: after
+  // negating safety conditions, existentials often appear (due to havoc being
+  // represented with forall). We turn ∃x.φ(x) into φ(w) where w is a fresh
+  // nondeterministic SSA value.
   if (!E)
     return nullptr;
   if (E->Kind == ExprKind::Exists) {

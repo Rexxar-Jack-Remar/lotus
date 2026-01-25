@@ -9,10 +9,39 @@
 
 using namespace llvm;
 
+// Safety condition inference.
+//
+// The analysis computes formulas that are sufficient for avoiding assertion
+// failures from a given program point onward (assuming the verifier's model
+// where executions terminate when an assert/assume condition is violated).
+//
+// Key result maps:
+//   - Res.BeforeInst[I]  : safety condition that must hold immediately before I
+//   - Res.PreAfterPhi[BB]: safety condition at BB entry after PHIs
+//   - Res.Summary        : safety condition at the function entry block
+//
+// The formulas are intentionally conservative (often stronger than necessary),
+// so it is sound to stop the iteration early. The trimming pass will negate
+// these formulas to obtain necessary conditions for failure and insert them as
+// assume(...) statements.
+
 ExprRef storeOp(const ExprFactory &F, BoundVarManager &BVM,
                 lotus::AliasAnalysisWrapper &AA, const Instruction *CtxI,
                 uint64_t TagBase, ExprRef Ptr, Type *StoredValTy, ExprRef NewVal,
                 ExprRef Phi) {
+  // Conservative heap-store transfer.
+  //
+  // This is the LLVM-IR analogue of the paper's store(drf(v), e, Λ, Φ) rule:
+  // we rewrite the postcondition Φ into a precondition that is sound in the
+  // presence of aliasing, while remaining lightweight.
+  //
+  // 1) Syntactically replace occurrences of drf(Ptr) in Φ with NewVal.
+  // 2) For every other dereference location drf(Loc) that may alias Ptr, add
+  //    the conjunct Loc != Ptr. This strengthens the condition, effectively
+  //    discarding executions where a different dereference could be affected by
+  //    the store (avoids needing a full heap update).
+  // 3) If Φ contains drf(Ptr) with a different value type than this store, we
+  //    treat that view as arbitrary by introducing fresh bound variables.
   if (!Ptr || !StoredValTy || !NewVal || !Phi)
     return Phi;
 
@@ -290,6 +319,18 @@ ExprRef callTransfer(const ExprFactory &F, BoundVarManager &BVM,
     return Phi;
   const Function *Callee = getDirectCalledFunctionMatchingType(*CB);
 
+  // Modular call rule (lightweight summary + havoc).
+  //
+  // We conservatively model the call by:
+  //   - universally quantifying the return value (havoc) when non-void
+  //   - universally quantifying dereference locations that appear in the
+  //     current formula and may be affected by the call
+  //   - conjoining a summary for the callee (if known), instantiated with
+  //     actual arguments
+  //
+  // This is sound but incomplete: it is not a full mod/ref analysis. In
+  // particular, we only havoc locations that are relevant to the current Φ,
+  // which keeps formulas small and makes trimming effective as a pre-pass.
   ExprRef Out = Phi;
   if (!CB->getType()->isVoidTy()) {
     Out = havocVar(F, BVM, CB, /*Tag=*/1, CB->getType(), CB, Out);
@@ -385,8 +426,7 @@ Instruction *firstNonPhiNonDbg(BasicBlock &B) {
   return B.getTerminator();
 }
 
-ExprRef edgePre(const ExprFactory &F, const SummaryEnv &Env,
-                const HasAsrtsEnv &Has, const HasAsrtsEnv &,
+ExprRef edgePre(const ExprFactory &F,
                 const DenseMap<const BasicBlock *, ExprRef> &PreAfterPhi,
                 const BasicBlock *Succ, const BasicBlock *Pred) {
   auto It = PreAfterPhi.find(Succ);
@@ -415,7 +455,12 @@ FunctionSCResult computeSafetyConditions(
 
   DenseMap<const BasicBlock *, ExprRef> PreAfterPhi;
   for (BasicBlock &BB : Fn) {
-    // Conservative initialization: safe to stop at any point.
+    // Conservative initialization: start from "no known safe states".
+    //
+    // Intuition: these safety conditions describe a subset of states from which
+    // the remainder of the execution is guaranteed to be failure-free. Starting
+    // from false and iterating grows that subset; stopping early is sound but
+    // may prune less after negation.
     PreAfterPhi[&BB] = F.boolConst(false);
   }
 
@@ -427,6 +472,7 @@ FunctionSCResult computeSafetyConditions(
       return F.boolConst(true);
 
     if (isa<ReturnInst>(Term) || isa<UnreachableInst>(Term))
+      // Past a terminal, there are no further assertions to satisfy.
       return F.boolConst(true);
 
     // Invoke/callbr are terminators with call side effects.
@@ -434,7 +480,7 @@ FunctionSCResult computeSafetyConditions(
       std::vector<ExprRef> All;
       for (unsigned i = 0; i < Term->getNumSuccessors(); ++i) {
         All.push_back(
-            edgePre(F, Env, Has, Has, CurPre, Term->getSuccessor(i), &BB));
+            edgePre(F, CurPre, Term->getSuccessor(i), &BB));
       }
       ExprRef After = F.and_(All);
 
@@ -471,14 +517,14 @@ FunctionSCResult computeSafetyConditions(
     if (auto *Br = dyn_cast<BranchInst>(Term)) {
       if (Br->isUnconditional()) {
         BasicBlock *Succ = Br->getSuccessor(0);
-        return edgePre(F, Env, Has, Has, CurPre, Succ, &BB);
+        return edgePre(F, CurPre, Succ, &BB);
       }
 
       ExprRef Cond = buildValueExpr(F, Br->getCondition());
       BasicBlock *T = Br->getSuccessor(0);
       BasicBlock *E = Br->getSuccessor(1);
-      ExprRef PreT = edgePre(F, Env, Has, Has, CurPre, T, &BB);
-      ExprRef PreE = edgePre(F, Env, Has, Has, CurPre, E, &BB);
+      ExprRef PreT = edgePre(F, CurPre, T, &BB);
+      ExprRef PreE = edgePre(F, CurPre, E, &BB);
       return F.and_({F.implies(Cond, PreT), F.implies(F.not_(Cond), PreE)});
     }
 
@@ -493,7 +539,7 @@ FunctionSCResult computeSafetyConditions(
         ExprRef CaseExpr = buildValueExpr(F, CaseVal);
         ExprRef Eq = F.icmp(CmpInst::ICMP_EQ, Cond, CaseExpr);
         Conjs.push_back(
-            F.implies(Eq, edgePre(F, Env, Has, Has, CurPre, Succ, &BB)));
+            F.implies(Eq, edgePre(F, CurPre, Succ, &BB)));
       }
 
       std::vector<ExprRef> NegCases;
@@ -504,14 +550,14 @@ FunctionSCResult computeSafetyConditions(
       ExprRef NoneMatch = F.and_(NegCases);
       Conjs.push_back(F.implies(
           NoneMatch,
-          edgePre(F, Env, Has, Has, CurPre, Sw->getDefaultDest(), &BB)));
+          edgePre(F, CurPre, Sw->getDefaultDest(), &BB)));
       return F.and_(Conjs);
     }
 
     std::vector<ExprRef> All;
     for (unsigned i = 0; i < Term->getNumSuccessors(); ++i) {
       All.push_back(
-          edgePre(F, Env, Has, Has, CurPre, Term->getSuccessor(i), &BB));
+          edgePre(F, CurPre, Term->getSuccessor(i), &BB));
     }
     return F.and_(All);
   };
@@ -599,6 +645,11 @@ FunctionSCResult computeSafetyConditions(
     for (auto &KV : NewPre) {
       const BasicBlock *BB = KV.first;
       ExprRef Old = PreAfterPhi[BB];
+      // Fixpoint detection: compare canonicalized strings.
+      //
+      // exprToString sorts And/Or children, which provides a stable-ish textual
+      // representation for many formulas. This is a pragmatic equality check,
+      // not a complete normalization proof.
       if (exprToString(Old) != exprToString(KV.second)) {
         Changed = true;
         break;
@@ -631,8 +682,11 @@ HasAsrtsEnv computeHasAsrts(Module &M) {
       if (!CB)
         continue;
       const Function *CF = getDirectCalledFunction(*CB);
-      if (!CF)
+      if (!CF) {
+        if (!CB->isInlineAsm())
+          HasDirect = true;
         continue;
+      }
       if (isErrorFunctionName(CF->getName()) ||
           isAssertFunctionName(CF->getName()))
         HasDirect = true;

@@ -5,6 +5,15 @@
  * Implements the program transformation and lightweight safety condition
  * inference described in "Failure-Directed Program Trimming" (Ferles et al.,
  * ESEC/FSE 2017).
+ *
+ * The pass instruments LLVM IR with verifier.assume(...) statements that prune
+ * execution paths that cannot lead to assertion failure, while preserving
+ * equi-safety: the instrumented program has a failing assertion iff the
+ * original program has one (under the verification tool's termination model
+ * where assert/assume violations terminate execution).
+ *
+ * The implementation is documented in:
+ *   - lib/Verification/FailureDirectedTrimming/README.md
  */
 #ifndef VERIFICATION_FAILUREDIRECTEDTRIMMING_FAILUREDIRECTEDTRIMMING_H
 #define VERIFICATION_FAILUREDIRECTEDTRIMMING_FAILUREDIRECTEDTRIMMING_H

@@ -9,6 +9,13 @@
 
 using namespace llvm;
 
+// Optional quantifier elimination for trimming conditions using Z3.
+//
+// The trimming pipeline often introduces existential quantifiers when negating
+// safety conditions (because havoc is represented with universal quantification
+// in the safety-condition analysis). Z3QE attempts to eliminate those exists
+// binders to reduce nondeterminism in the inserted assume conditions.
+
 namespace {
 
 enum class Z3IntSemanticsKind { BV, Math };

@@ -1,5 +1,25 @@
-// FailureDirectedTrimmingPass: Implements failure-directed program trimming
-// (Ferles et al., ESEC/FSE'17) as an LLVM IR instrumentation pass.
+// FailureDirectedTrimmingPass: failure-directed program trimming (FDTrim).
+//
+// The pass inserts verifier.assume(...) statements that prune execution paths
+// that are provably irrelevant to assertion failures, while preserving
+// equi-safety with the original program.
+//
+// Core idea (Ferles et al., ESEC/FSE'17):
+//   - infer a safety condition SC(π) at a program point π (sufficient for safety)
+//   - insert assume(¬SC(π)) as a trimming condition (necessary for failure)
+//
+// This implementation follows the paper's modular instrumentation approach:
+//   1) Create a "safe clone" f.fdtrim.safe for each eligible function f.
+//      The safe clone cannot fail: assert(c) becomes assume(c) and error()
+//      becomes assume(false). Calls inside safe clones are rewritten to safe
+//      clones.
+//   2) Wrap each direct call to an instrumentable function with a nondet split:
+//        if (*) call f.safe(...)
+//        else { call f(...); assume(false); unreachable }
+//      Executions that intend to reach a failing assertion must take the "else"
+//      branch at least once, which makes local trimming assumptions sound.
+//   3) Compute lightweight safety conditions by a bounded backward analysis
+//      (an under-approximation of safe states), negate them, and insert assumes.
 
 #include "Verification/FailureDirectedTrimming/FailureDirectedTrimming.h"
 #include "FailureDirectedTrimmingImpl.h"
@@ -31,6 +51,15 @@ bool runFailureDirectedTrimming(Module &M) {
   Changed |= wrapCallsInOriginalFunctions(M, AssumeFn, SafeOf, Nondet);
 
   auto isFailContextCall = [&](const CallBase &CB) -> bool {
+    // A "failure-context" call is one created by wrapCallsInOriginalFunctions:
+    // in the failure branch we emit:
+    //   call f(...)
+    //   assume(false)
+    //   unreachable
+    //
+    // We use this predicate to detect functions that are ever called outside a
+    // failure context; such functions are not instrumented because safe-clone
+    // wrapping does not give us the same modular guarantee for their callees.
     const BasicBlock *BB = CB.getParent();
     if (!BB)
       return false;
@@ -83,6 +112,9 @@ bool runFailureDirectedTrimming(Module &M) {
   }
 
   if (HasIndirectCalls) {
+    // If the module contains indirect calls, any function with its address
+    // taken may be invoked without going through our call wrappers.
+    // Conservatively skip instrumentation of such functions.
     for (auto &KV : SafeOf) {
       Function *F = KV.first;
       if (F && F->hasAddressTaken())
@@ -101,6 +133,9 @@ bool runFailureDirectedTrimming(Module &M) {
   SummaryEnv Env;
 
   if (FDTrimSummaryIterations > 0) {
+    // Bounded refinement of summaries. The analysis is conservative, so it is
+    // sound to stop early; more iterations may improve precision by propagating
+    // stronger summaries along the call graph.
     for (unsigned It = 0; It < FDTrimSummaryIterations; ++It) {
       for (Function &F : M) {
         if (F.isDeclaration())
@@ -120,6 +155,8 @@ bool runFailureDirectedTrimming(Module &M) {
     if (F.isDeclaration())
       continue;
     if (F.getName().endswith(".fdtrim.safe"))
+      continue;
+    if (!SafeOf.count(&F))
       continue;
     if (DoNotInstrument.count(&F))
       continue;
@@ -192,6 +229,8 @@ bool runFailureDirectedTrimming(Module &M) {
       TrimCond = boundConjuncts(EF, TrimCond, FDTrimMaxConjuncts);
 
       if (FDTrimQuantElim == "z3") {
+        // Optional Z3 quantifier elimination on the trimming condition.
+        // This can reduce the amount of nondeterminism introduced later.
         if (ExprRef QE = tryEliminateExistsByZ3QE(EF, M, TrimCond))
           TrimCond = QE;
       }

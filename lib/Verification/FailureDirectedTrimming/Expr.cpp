@@ -4,6 +4,22 @@
 
 using namespace llvm;
 
+// Expression language for safety/trimming conditions.
+//
+// Expr is a small, typed AST used by the safety-condition analysis and the
+// trimming instrumentation pipeline.
+//
+// Notes on normalization:
+//   - ExprFactory::{and_,or_} flatten nested nodes, drop neutral elements, and
+//     (for sharing) deduplicate identical children by pointer identity.
+//   - exprToString additionally sorts And/Or children, which is used as a
+//     pragmatic "stability" check during CFG iteration.
+//
+// Notes on quantified variables:
+//   - BoundVarManager assigns stable numeric ids to quantifier binders, keyed by
+//     (instruction, tag, type). These ids are later used to map binders to
+//     nondeterministic witness values during instrumentation.
+
 namespace {
 
 static void flatten(ExprKind K, std::vector<ExprRef> &Out, ExprRef In) {
@@ -38,6 +54,9 @@ bool BoundKeyInfo::isEqual(const BoundKey &LHS, const BoundKey &RHS) {
 }
 
 uint32_t BoundVarManager::getId(const Instruction *I, uint64_t Tag, Type *Ty) {
+  // Returns a stable id for a (binder) variable identified by the IR context.
+  // Stability matters because we later refer to the same binder by id when
+  // eliminating quantifiers and generating LLVM IR.
   BoundKey K{I, Tag, Ty};
   auto It = Ids.find(K);
   if (It != Ids.end())
@@ -606,6 +625,15 @@ void collectPointerVars(const ExprRef &E, SmallVectorImpl<const Value *> &Out) {
 }
 
 ExprRef negateForTrimming(const ExprFactory &F, const ExprRef &E) {
+  // Negation used to turn a safety condition into a trimming condition.
+  //
+  // This is more than just wrapping with Not:
+  //   - it applies De Morgan over And/Or
+  //   - it flips quantifiers (¬∀x.φ = ∃x.¬φ, ¬∃x.φ = ∀x.¬φ)
+  //
+  // Flipping quantifiers is important: the safety-condition analysis uses
+  // universal quantification to represent havoc; after negation, existentials
+  // appear and must be eliminated before we can emit assume(...) code.
   if (!E)
     return nullptr;
   switch (E->Kind) {
@@ -639,6 +667,11 @@ ExprRef negateForTrimming(const ExprFactory &F, const ExprRef &E) {
 }
 
 ExprRef boundConjuncts(const ExprFactory &F, const ExprRef &E, unsigned Max) {
+  // Caps the size of an And(...) formula by keeping only the first Max conjuncts
+  // in lexicographic order of exprToString.
+  //
+  // This is a precision knob that keeps inserted assume conditions smaller and
+  // typically more solver-friendly, at the cost of pruning fewer safe paths.
   if (!E || Max == 0)
     return E;
   if (E->Kind != ExprKind::And)

@@ -1,5 +1,6 @@
 #include "FailureDirectedTrimmingImpl.h"
 
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -8,7 +9,10 @@
 
 using namespace llvm;
 
-bool shouldCloneSafeVersion(const Function &F) {
+static bool passesNameFiltersForSafeClone(const Function &F) {
+  // Safe clones are intended to represent "cannot fail" executions.
+  // We exclude verifier intrinsics/annotations and other special functions from
+  // cloning to avoid interfering with the verification/runtime API.
   if (F.isDeclaration())
     return false;
   StringRef Name = F.getName();
@@ -26,15 +30,86 @@ bool shouldCloneSafeVersion(const Function &F) {
 
 DenseMap<Function *, Function *> cloneSafeFunctions(Module &M,
                                                     FunctionCallee AssumeFn) {
+  // Create safe clones f.fdtrim.safe for a subset of functions f.
+  //
+  // The clone is "safe" in the sense that it cannot exhibit assertion failure:
+  //   - assert(c) is rewritten into assume(c)
+  //   - error() is rewritten into assume(false)
+  //
+  // This is the key ingredient for modular trimming: after we wrap calls (see
+  // wrapCallsInOriginalFunctions), an execution either follows only safe clones
+  // (success context) or intentionally enters a failure context.
   DenseMap<Function *, Function *> SafeOf;
 
+  DenseSet<Function *> Candidates;
   for (Function &F : M) {
-    if (!shouldCloneSafeVersion(F))
+    if (!passesNameFiltersForSafeClone(F))
       continue;
+
+    // The safe clone transformation below assumes simple direct calls.
+    // If a function contains indirect calls, invoke/callbr, or inline asm, we
+    // conservatively skip it to avoid changing exception edges or unknown
+    // side effects.
+    bool Unsupported = false;
+    for (Instruction &I : instructions(F)) {
+      if (isa<InvokeInst>(&I) || isa<CallBrInst>(&I)) {
+        Unsupported = true;
+        break;
+      }
+      auto *CB = dyn_cast<CallBase>(&I);
+      if (!CB)
+        continue;
+      if (CB->isInlineAsm()) {
+        Unsupported = true;
+        break;
+      }
+      if (!getDirectCalledFunctionMatchingType(*CB)) {
+        Unsupported = true;
+        break;
+      }
+    }
+    if (Unsupported)
+      continue;
+    Candidates.insert(&F);
+  }
+
+  // Ensure safe-clone candidates are closed under direct calls to defined
+  // functions: if a candidate calls a defined non-special function that we
+  // can't safely clone, the candidate itself can't be made safe.
+  bool Changed = true;
+  while (Changed) {
+    Changed = false;
+    for (Function *F : llvm::make_early_inc_range(Candidates)) {
+      bool Remove = false;
+      for (Instruction &I : instructions(*F)) {
+        auto *CB = dyn_cast<CallBase>(&I);
+        if (!CB)
+          continue;
+        Function *CF = getDirectCalledFunctionMatchingType(*CB);
+        if (!CF)
+          continue;
+
+        if (CF->isDeclaration())
+          continue;
+        if (!passesNameFiltersForSafeClone(*CF))
+          continue;
+        if (!Candidates.count(CF)) {
+          Remove = true;
+          break;
+        }
+      }
+      if (Remove) {
+        Candidates.erase(F);
+        Changed = true;
+      }
+    }
+  }
+
+  for (Function *F : Candidates) {
     ValueToValueMapTy VMap;
-    Function *Clone = CloneFunction(&F, VMap);
-    Clone->setName(F.getName() + ".fdtrim.safe");
-    SafeOf[&F] = Clone;
+    Function *Clone = CloneFunction(F, VMap);
+    Clone->setName(F->getName() + ".fdtrim.safe");
+    SafeOf[F] = Clone;
   }
 
   for (auto &KV : SafeOf) {
@@ -55,6 +130,7 @@ DenseMap<Function *, Function *> cloneSafeFunctions(Module &M,
         continue;
 
       if (isErrorFunctionName(CF->getName())) {
+        // error() in the safe clone becomes assume(false): block the path.
         IRBuilder<> B(CI);
         Value *False = ConstantInt::getFalse(M.getContext());
         B.CreateCall(AssumeFn, False);
@@ -63,6 +139,8 @@ DenseMap<Function *, Function *> cloneSafeFunctions(Module &M,
       }
 
       if (isAssertFunctionName(CF->getName())) {
+        // assert(c) in the safe clone becomes assume(c): the safe clone cannot
+        // fail via this check.
         IRBuilder<> B(CI);
         Value *CondV = nullptr;
         if (CI->arg_size() >= 1)
@@ -90,6 +168,8 @@ DenseMap<Function *, Function *> cloneSafeFunctions(Module &M,
           isNondetFunctionName(CF->getName()))
         continue;
 
+      // Rewrite regular direct calls to other instrumented functions to call
+      // their safe clones.
       for (auto &MapEntry : SafeOf) {
         if (CF == MapEntry.first) {
           CI->setCalledFunction(MapEntry.second);
@@ -105,6 +185,14 @@ DenseMap<Function *, Function *> cloneSafeFunctions(Module &M,
 bool wrapCallsInOriginalFunctions(Module &M, FunctionCallee AssumeFn,
                                   DenseMap<Function *, Function *> &SafeOf,
                                   NondetFactory &Nondet) {
+  // Wrap calls so that each call has a nondet "success vs failure" split.
+  //
+  // For a callsite "call f(args)" with a safe clone f.safe, we create:
+  //   if (nondet) call f.safe(args) else { call f(args); assume(false); unreachable }
+  //
+  // The failure branch executes the original call and then terminates the path
+  // immediately. This is used later to identify "failure contexts" and to
+  // justify modular trimming assumptions.
   bool Changed = false;
 
   for (Function &F : M) {
