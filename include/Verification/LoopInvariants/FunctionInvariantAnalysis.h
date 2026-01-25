@@ -20,7 +20,13 @@ class DominatorTree;
 namespace lotus {
 
 struct FunctionInvariant {
-  enum Kind { ReturnBound, ReturnNonNegative, ReturnComparison, Unknown };
+  enum Kind {
+    ReturnBound,
+    ReturnEquality,
+    ReturnNonNegative,
+    ReturnComparison,
+    Unknown
+  };
 
   Kind InvKind;
   Z3Expr Formula;

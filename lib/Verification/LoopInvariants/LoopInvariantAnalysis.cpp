@@ -1,12 +1,12 @@
-#include "Analysis/LoopInvariants/LoopInvariantAnalysis.h"
+#include "Verification/LoopInvariants/LoopInvariantAnalysis.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Analysis/LoopInvariants/InvariantCandidateGenerator.h"
-#include "Analysis/LoopInvariants/InvariantProver.h"
+#include "Verification/LoopInvariants/InvariantCandidateGenerator.h"
+#include "Verification/LoopInvariants/InvariantProver.h"
 
 using namespace llvm;
 using namespace lotus;
@@ -60,7 +60,15 @@ LoopInvariantAnalysis::run(Function &F, FunctionAnalysisManager &AM) {
   auto &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
   auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
 
-  for (Loop *L : LI) {
+  SmallVector<Loop *, 16> Worklist;
+  for (Loop *Top : LI)
+    Worklist.push_back(Top);
+
+  while (!Worklist.empty()) {
+    Loop *L = Worklist.pop_back_val();
+    for (Loop *Sub : L->getSubLoops())
+      Worklist.push_back(Sub);
+
     auto InvSet = std::make_unique<LoopInvariantSet>(L);
 
     InvariantCandidateGenerator Generator(*L, SE, LI, DT);

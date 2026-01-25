@@ -1,11 +1,16 @@
-#include "Analysis/LoopInvariants/InvariantCandidateGenerator.h"
+#include "Verification/LoopInvariants/InvariantCandidateGenerator.h"
+#include "Verification/LoopInvariants/Z3ValueNaming.h"
 
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 //#include "llvm/Support/raw_ostream.h"
+
+#include <cstdint>
 
 using namespace llvm;
 using namespace lotus;
@@ -89,6 +94,10 @@ void InvariantCandidateGenerator::analyzeInductionVariables() {
     if (!Phi)
       break;
 
+    Type *PhiType = Phi->getType();
+    if (!PhiType->isIntegerTy() && !PhiType->isPointerTy())
+      continue;
+
     const SCEV *S = SE.getSCEV(Phi);
     const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(S);
 
@@ -99,8 +108,6 @@ void InvariantCandidateGenerator::analyzeInductionVariables() {
     Info.Phi = Phi;
     Info.InitialValue = AR->getStart();
     Info.Step = AR->getStepRecurrence(SE);
-
-    Type *PhiType = Phi->getType();
 
     if (PhiType->isPointerTy()) {
       Info.IsPointerInduction = true;
@@ -374,46 +381,110 @@ void InvariantCandidateGenerator::generateBoundInvariants(
       BoundExpr = valueToZ3Expr(BoundInfo.BoundValue);
     }
 
-    InvariantCandidate Candidate(InvariantCandidate::UpperBound);
+    const bool HasStep = IVInfo->HasConstantStep;
+    const int64_t Step = IVInfo->ConstantStep;
+    const int64_t AbsStep = Step >= 0 ? Step : -Step;
+
+    auto mkConst = [](int64_t V) { return Z3Expr(V); };
 
     switch (BoundInfo.Predicate) {
     case CmpInst::ICMP_SLT:
     case CmpInst::ICMP_ULT:
-      Candidate.Formula = IVExpr < BoundExpr;
-      Candidate.Description = IVInfo->IsPointerInduction
-                                  ? "Pointer less than bound"
-                                  : "Induction variable less than bound";
+      if (HasStep && Step > 0 && AbsStep > 0) {
+        InvariantCandidate Candidate(InvariantCandidate::UpperBound);
+        Candidate.Formula = IVExpr <= (BoundExpr + mkConst(AbsStep - 1));
+        Candidate.Description =
+            IVInfo->IsPointerInduction
+                ? "Pointer upper bound (adjusted from <)"
+                : "Induction variable upper bound (adjusted from <)";
+        Candidate.InvolvedValues.push_back(BoundInfo.InductionVar);
+        Candidate.InvolvedValues.push_back(BoundInfo.BoundValue);
+        Candidates.push_back(Candidate);
+      } else {
+        InvariantCandidate Candidate(InvariantCandidate::UpperBound);
+        Candidate.Formula = IVExpr < BoundExpr;
+        Candidate.Description = IVInfo->IsPointerInduction
+                                    ? "Pointer less than bound"
+                                    : "Induction variable less than bound";
+        Candidate.InvolvedValues.push_back(BoundInfo.InductionVar);
+        Candidate.InvolvedValues.push_back(BoundInfo.BoundValue);
+        Candidates.push_back(Candidate);
+      }
       break;
     case CmpInst::ICMP_SLE:
     case CmpInst::ICMP_ULE:
-      Candidate.Formula = IVExpr <= BoundExpr;
-      Candidate.Description =
-          IVInfo->IsPointerInduction
-              ? "Pointer less than or equal to bound"
-              : "Induction variable less than or equal to bound";
+      if (HasStep && Step > 0 && AbsStep > 0) {
+        InvariantCandidate Candidate(InvariantCandidate::UpperBound);
+        Candidate.Formula = IVExpr <= (BoundExpr + mkConst(AbsStep));
+        Candidate.Description =
+            IVInfo->IsPointerInduction
+                ? "Pointer upper bound (adjusted from <=)"
+                : "Induction variable upper bound (adjusted from <=)";
+        Candidate.InvolvedValues.push_back(BoundInfo.InductionVar);
+        Candidate.InvolvedValues.push_back(BoundInfo.BoundValue);
+        Candidates.push_back(Candidate);
+      } else {
+        InvariantCandidate Candidate(InvariantCandidate::UpperBound);
+        Candidate.Formula = IVExpr <= BoundExpr;
+        Candidate.Description =
+            IVInfo->IsPointerInduction
+                ? "Pointer less than or equal to bound"
+                : "Induction variable less than or equal to bound";
+        Candidate.InvolvedValues.push_back(BoundInfo.InductionVar);
+        Candidate.InvolvedValues.push_back(BoundInfo.BoundValue);
+        Candidates.push_back(Candidate);
+      }
       break;
     case CmpInst::ICMP_SGT:
     case CmpInst::ICMP_UGT:
-      Candidate.Formula = IVExpr > BoundExpr;
-      Candidate.Description = IVInfo->IsPointerInduction
-                                  ? "Pointer greater than bound"
-                                  : "Induction variable greater than bound";
+      if (HasStep && Step < 0 && AbsStep > 0) {
+        InvariantCandidate Candidate(InvariantCandidate::LowerBound);
+        Candidate.Formula = IVExpr >= (BoundExpr - mkConst(AbsStep - 1));
+        Candidate.Description =
+            IVInfo->IsPointerInduction
+                ? "Pointer lower bound (adjusted from >)"
+                : "Induction variable lower bound (adjusted from >)";
+        Candidate.InvolvedValues.push_back(BoundInfo.InductionVar);
+        Candidate.InvolvedValues.push_back(BoundInfo.BoundValue);
+        Candidates.push_back(Candidate);
+      } else {
+        InvariantCandidate Candidate(InvariantCandidate::LowerBound);
+        Candidate.Formula = IVExpr > BoundExpr;
+        Candidate.Description = IVInfo->IsPointerInduction
+                                    ? "Pointer greater than bound"
+                                    : "Induction variable greater than bound";
+        Candidate.InvolvedValues.push_back(BoundInfo.InductionVar);
+        Candidate.InvolvedValues.push_back(BoundInfo.BoundValue);
+        Candidates.push_back(Candidate);
+      }
       break;
     case CmpInst::ICMP_SGE:
     case CmpInst::ICMP_UGE:
-      Candidate.Formula = IVExpr >= BoundExpr;
-      Candidate.Description =
-          IVInfo->IsPointerInduction
-              ? "Pointer greater than or equal to bound"
-              : "Induction variable greater than or equal to bound";
+      if (HasStep && Step < 0 && AbsStep > 0) {
+        InvariantCandidate Candidate(InvariantCandidate::LowerBound);
+        Candidate.Formula = IVExpr >= (BoundExpr - mkConst(AbsStep));
+        Candidate.Description =
+            IVInfo->IsPointerInduction
+                ? "Pointer lower bound (adjusted from >=)"
+                : "Induction variable lower bound (adjusted from >=)";
+        Candidate.InvolvedValues.push_back(BoundInfo.InductionVar);
+        Candidate.InvolvedValues.push_back(BoundInfo.BoundValue);
+        Candidates.push_back(Candidate);
+      } else {
+        InvariantCandidate Candidate(InvariantCandidate::LowerBound);
+        Candidate.Formula = IVExpr >= BoundExpr;
+        Candidate.Description =
+            IVInfo->IsPointerInduction
+                ? "Pointer greater than or equal to bound"
+                : "Induction variable greater than or equal to bound";
+        Candidate.InvolvedValues.push_back(BoundInfo.InductionVar);
+        Candidate.InvolvedValues.push_back(BoundInfo.BoundValue);
+        Candidates.push_back(Candidate);
+      }
       break;
     default:
       continue;
     }
-
-    Candidate.InvolvedValues.push_back(BoundInfo.InductionVar);
-    Candidate.InvolvedValues.push_back(BoundInfo.BoundValue);
-    Candidates.push_back(Candidate);
   }
 }
 
@@ -605,18 +676,82 @@ void InvariantCandidateGenerator::tryImplicationWeakening(
 }
 
 Z3Expr InvariantCandidateGenerator::scevToZ3Expr(const SCEV *S) {
+  if (!S)
+    return Z3Expr(0);
+
   if (const SCEVConstant *SC = dyn_cast<SCEVConstant>(S)) {
     const APInt &Val = SC->getAPInt();
     if (Val.getBitWidth() <= 64) {
-      return Z3Expr(static_cast<int>(Val.getSExtValue()));
+      return Z3Expr(Val.getSExtValue());
     }
+
+    llvm::SmallString<64> Tmp;
+    Val.toStringSigned(Tmp);
+    return Z3Expr(Z3Expr::getContext().int_val(Tmp.c_str()));
   }
 
-  return Z3Expr::getFalseCond();
+  if (const SCEVUnknown *SU = dyn_cast<SCEVUnknown>(S)) {
+    return valueToZ3Expr(SU->getValue());
+  }
+
+  if (const SCEVAddExpr *Add = dyn_cast<SCEVAddExpr>(S)) {
+    Z3Expr Acc(0);
+    for (const SCEV *Op : Add->operands())
+      Acc = Acc + scevToZ3Expr(Op);
+    return Acc;
+  }
+
+  if (const SCEVMulExpr *Mul = dyn_cast<SCEVMulExpr>(S)) {
+    bool First = true;
+    Z3Expr Acc(1);
+    for (const SCEV *Op : Mul->operands()) {
+      if (First) {
+        Acc = scevToZ3Expr(Op);
+        First = false;
+      } else {
+        Acc = Acc * scevToZ3Expr(Op);
+      }
+    }
+    return Acc;
+  }
+
+  if (const SCEVUDivExpr *Div = dyn_cast<SCEVUDivExpr>(S)) {
+    return scevToZ3Expr(Div->getLHS()) / scevToZ3Expr(Div->getRHS());
+  }
+
+  if (const SCEVSignExtendExpr *Ext = dyn_cast<SCEVSignExtendExpr>(S)) {
+    return scevToZ3Expr(Ext->getOperand());
+  }
+  if (const SCEVZeroExtendExpr *Ext = dyn_cast<SCEVZeroExtendExpr>(S)) {
+    return scevToZ3Expr(Ext->getOperand());
+  }
+  if (const SCEVTruncateExpr *Tr = dyn_cast<SCEVTruncateExpr>(S)) {
+    return scevToZ3Expr(Tr->getOperand());
+  }
+
+  // Conservative fallback: treat as an uninterpreted integer (stable per SCEV).
+  std::string Name =
+      "scev_" + std::to_string(reinterpret_cast<uintptr_t>(S));
+  return Z3Expr(Z3Expr::getContext().int_const(Name.c_str()));
 }
 
 Z3Expr InvariantCandidateGenerator::valueToZ3Expr(const Value *V) {
-  std::string VarName = V->hasName() ? V->getName().str() : "var";
+  if (!V)
+    return Z3Expr(0);
+
+  if (const ConstantInt *CI = dyn_cast<ConstantInt>(V)) {
+    const APInt &Val = CI->getValue();
+    if (Val.getBitWidth() <= 64)
+      return Z3Expr(Val.getSExtValue());
+    llvm::SmallString<64> Tmp;
+    Val.toStringSigned(Tmp);
+    return Z3Expr(Z3Expr::getContext().int_val(Tmp.c_str()));
+  }
+
+  if (isa<ConstantPointerNull>(V))
+    return Z3Expr(0);
+
+  std::string VarName = z3NameForValue(V);
   z3::context &Ctx = Z3Expr::getContext();
   return Z3Expr(Ctx.int_const(VarName.c_str()));
 }
@@ -639,15 +774,32 @@ Z3Expr InvariantCandidateGenerator::pointerToZ3Expr(const Value *V,
 }
 
 Z3Expr InvariantCandidateGenerator::getInitialValue(const Value *V) {
-  BasicBlock *Preheader = L.getLoopPreheader();
-  if (!Preheader) {
-    z3::context &Ctx = Z3Expr::getContext();
-    return Z3Expr(Ctx.int_val(0));
-  }
+  if (!V)
+    return Z3Expr(0);
 
   for (const auto &IVInfo : InductionVars) {
     if (IVInfo.Phi == V) {
       return scevToZ3Expr(IVInfo.InitialValue);
+    }
+  }
+
+  if (const PHINode *Phi = dyn_cast<PHINode>(V)) {
+    if (Phi->getParent() == L.getHeader()) {
+      const Value *UniqueIncoming = nullptr;
+      for (unsigned I = 0; I < Phi->getNumIncomingValues(); ++I) {
+        const BasicBlock *IncomingBB = Phi->getIncomingBlock(I);
+        if (L.contains(IncomingBB))
+          continue;
+        const Value *IncomingV = Phi->getIncomingValue(I);
+        if (!UniqueIncoming) {
+          UniqueIncoming = IncomingV;
+        } else if (UniqueIncoming != IncomingV) {
+          UniqueIncoming = nullptr;
+          break;
+        }
+      }
+      if (UniqueIncoming)
+        return valueToZ3Expr(UniqueIncoming);
     }
   }
 

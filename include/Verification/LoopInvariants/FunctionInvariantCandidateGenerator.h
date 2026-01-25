@@ -22,6 +22,7 @@ namespace lotus {
 struct FunctionInvariantCandidate {
   enum CandidateKind {
     ReturnBound,
+    ReturnEquality,
     ReturnNonNegative,
     ReturnComparison,
     ReturnPlusComponents,
@@ -55,6 +56,9 @@ private:
   void collectReturnValues();
 
   void generateReturnBoundInvariants(
+      llvm::SmallVectorImpl<FunctionInvariantCandidate> &Candidates);
+
+  void generateReturnEqualityInvariants(
       llvm::SmallVectorImpl<FunctionInvariantCandidate> &Candidates);
 
   void generateReturnNonNegativeInvariants(

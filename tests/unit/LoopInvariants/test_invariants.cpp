@@ -6,8 +6,8 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Analysis/LoopInvariants/FunctionInvariantAnalysis.h"
-#include "Analysis/LoopInvariants/LoopInvariantAnalysis.h"
+#include "Verification/LoopInvariants/FunctionInvariantAnalysis.h"
+#include "Verification/LoopInvariants/LoopInvariantAnalysis.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -335,21 +335,18 @@ TEST_F(LoopInvariantTest, NestedLoops) {
   FAM.registerPass([&] { return LoopInvariantAnalysis(); });
 
   auto &LI = FAM.getResult<LoopAnalysis>(*F);
+  auto &Result = FAM.getResult<LoopInvariantAnalysis>(*F);
 
-  ASSERT_FALSE(LI.empty()) << "No loops found in function";
+  auto Loops = LI.getLoopsInPreorder();
+  ASSERT_GE(Loops.size(), 2u) << "Expected at least 2 loops (nested)";
 
-  llvm::outs() << "Found " << std::distance(LI.begin(), LI.end())
-               << " loops in nested test\n";
-
-  for (Loop *L : LI) {
-    auto &Result = FAM.getResult<LoopInvariantAnalysis>(*F);
+  for (Loop *L : Loops) {
     const LoopInvariantSet *Invs = Result.getInvariants(L);
-
-    if (Invs && !Invs->empty()) {
-      llvm::outs() << "Loop invariants:\n";
-      for (const auto &Inv : Invs->Invariants) {
-        llvm::outs() << "  - " << Inv.DebugText << "\n";
-      }
+    EXPECT_TRUE(Invs != nullptr) << "No invariants found for a nested loop";
+    if (Invs) {
+      llvm::outs() << "Found " << Invs->size()
+                   << " invariants for loop at depth " << L->getLoopDepth()
+                   << "\n";
     }
   }
 }

@@ -60,7 +60,7 @@ The analysis follows a two-phase approach:
 The analysis is registered as an LLVM FunctionAnalysis pass:
 
 ```cpp
-#include "Analysis/LoopInvariants/LoopInvariantAnalysis.h"
+#include "Verification/LoopInvariants/LoopInvariantAnalysis.h"
 
 // In a pass manager
 FAM.registerPass([&] { return LoopInvariantAnalysis(); });
@@ -86,5 +86,5 @@ opt -passes="function(loop-invariant-printer)" <input.ll>
 
 ## See Also
 
-- Header files: `include/Analysis/LoopInvariants/`
+- Header files: `include/Verification/LoopInvariants/`
 - Tests: `tests/unit/LoopInvariants/`

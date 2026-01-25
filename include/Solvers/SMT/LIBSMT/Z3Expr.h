@@ -4,6 +4,8 @@
  #define Z3_EXAMPLE_Z3EXPR_H
  
  #include "z3++.h"
+ #include <cstdint>
+ #include <string>
 
  
  class Z3Expr
@@ -28,7 +30,11 @@
      Z3Expr(int i) : e(getContext().int_val(i))
      {
      }
- 
+
+     Z3Expr(int64_t i) : e(getContext().int_val(std::to_string(i).c_str()))
+     {
+     }
+
      Z3Expr(const Z3Expr &z3Expr) : e(z3Expr.getExpr())
      {
      }
