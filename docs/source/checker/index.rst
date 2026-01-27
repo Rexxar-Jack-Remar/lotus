@@ -12,11 +12,12 @@ The Checker Framework provides a unified infrastructure for static bug detection
 Overview
 --------
 
-The Checker Framework consists of three main checker categories, all unified through a centralized bug reporting system:
+The Checker Framework consists of four main checker categories, all unified through a centralized bug reporting system:
 
 * **GVFA Checkers** – Memory safety vulnerabilities using Global Value Flow Analysis
 * **KINT Checkers** – Numerical bugs (overflow, division by zero, array bounds) using range analysis and SMT solving
 * **Concurrency Checkers** – Thread safety issues (data races, deadlocks, atomicity violations) using MHP and lock set analysis
+* **Pulse Checker** – Memory safety and other bugs using biabductive analysis with path-sensitive interprocedural reasoning
 
 All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools.
 
@@ -50,6 +51,19 @@ Components
 * ``Log.cpp`` – Logging utilities
 * ``Utils.cpp`` – Utility functions
 
+**Pulse Checker** (``lib/Checker/Pulse/``):
+
+* ``PulseChecker.cpp`` – Main bug finder using biabductive analysis
+* ``PulseDomain.cpp`` – Execution domain abstraction
+* ``PulseAbductiveDomain.h`` – Core abstract domain with biabduction
+* ``PulseOperations.cpp`` – Core memory operations (readDeref, writeDeref, etc.)
+* ``PulseDisjunctiveDomain.cpp`` – Disjunctive analysis for path-sensitive reasoning
+* ``PulseLoopAbstraction.cpp`` – Loop abstraction with widening
+* ``PulseSummary.cpp`` – Function summary representation and application
+* ``PulseTaint.cpp`` – Taint analysis for security vulnerabilities
+* ``PulseModels.cpp`` – Library function models
+* ``PulseDiagnostic.cpp`` – Rich diagnostic reporting with traces
+
 **Report System** (``lib/Checker/Report/``):
 
 * ``BugReport.cpp`` – Bug report data structures with source location information
@@ -66,9 +80,11 @@ Build Targets
 -------------
 
 * ``GVFAChecker`` – GVFA vulnerability checker library
+* ``PulseChecker`` – Pulse biabductive analysis checker library
 * ``lotus-gvfa`` – Global value flow analysis tool (``tools/checker/lotus_gvfa.cpp``)
 * ``lotus-kint`` – KINT numerical bug detection tool (``tools/checker/lotus_kint.cpp``)
 * ``lotus-concur`` – Concurrency checker tool (``tools/checker/lotus_concur.cpp``)
+* ``lotus-pulse`` – Pulse biabductive analysis tool (``tools/checker/lotus_pulse.cpp``)
 * ``lotus-taint`` – Taint analysis tool (``tools/checker/lotus_taint.cpp``)
 
 Usage
@@ -98,6 +114,14 @@ Usage
    ./build/bin/lotus-concur --check-deadlocks --check-atomicity input.bc
    ./build/bin/lotus-concur --report-json=report.json input.bc
 
+**Pulse Tool**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-pulse input.bc
+   ./build/bin/lotus-pulse -v input.bc
+   ./build/bin/lotus-pulse --log-level=debug input.bc
+
 Programmatic Usage
 ------------------
 
@@ -124,9 +148,11 @@ Bug Types
 
 The framework detects the following bug categories:
 
-* **Memory Safety**: Null pointer dereference, use-after-free, uninitialized variables, invalid free, stack address misuse
+* **Memory Safety**: Null pointer dereference, use-after-free, uninitialized variables, invalid free, stack address misuse, memory leaks
 * **Numerical Errors**: Integer overflow, division by zero, bad shift, array out-of-bounds, dead branches
 * **Concurrency**: Data races, deadlocks, atomicity violations
+* **Security**: Taint errors (untrusted data flows), use-after-free, null dereferences
+* **Performance**: Unnecessary copies, const-refable parameters
 
 All bug types are classified by importance (LOW, MEDIUM, HIGH) and category (SECURITY, ERROR, WARNING, PERFORMANCE) with CWE mappings.
 
@@ -135,8 +161,10 @@ Integration Points
 
 * **Global Value Flow Analysis**: Used by GVFA checkers for source-sink reachability
 * **Dyck Alias Analysis**: Pointer analysis for GVFA
+* **UnderApproxAA**: Used by PulseChecker for must-alias canonicalization
 * **Null Check Analysis**: Optional precision improvement for null pointer checker
 * **Z3 SMT Solver**: Used by KINT for path-sensitive verification
+* **Biabductive Analysis**: Used by PulseChecker for precise bug detection
 * **LLVM Pass Infrastructure**: Standard pass registration for integration
 
 See Also
@@ -148,3 +176,4 @@ See Also
    concurrency
    gvfa
    kint
+   pulse

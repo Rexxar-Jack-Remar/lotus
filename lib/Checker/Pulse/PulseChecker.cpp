@@ -387,8 +387,73 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst* LI,
                                          ExecutionDomain exec_state,
                                          const llvm::BasicBlock* pred) {
     auto* astate = exec_state.getAstate();
-    auto ptr_opt =
-        ops_.eval(*astate, LI->getPointerOperand(), LI, pred);
+    const llvm::Value* ptr_operand = LI->getPointerOperand();
+    
+    // Check if this is a direct load from a stack variable (alloca)
+    if (auto* AI = llvm::dyn_cast<llvm::AllocaInst>(ptr_operand)) {
+        // Direct load from alloca - read from stack
+        AbstractValue stack_var = factory_.getOrCreate(AI);
+        AbstractValue canon_var = astate->getCanonical(stack_var);
+        
+        // Check if variable is uninitialized (only for reads, not writes)
+        if (astate->getPostAttrs().has(canon_var, Attribute::Uninitialized)) {
+            Trace trace;
+            trace.addEvent(LI, "Load from uninitialized variable");
+            if (LatentIssue::isManifest(*astate)) {
+                reportBug(OperationResult::UninitializedRead, LI, canon_var, trace, astate);
+                return ExecutionDomain::abortProgram(
+                    std::make_unique<AbductiveDomain>(astate->clone()),
+                    OperationResult::UninitializedRead, std::move(trace));
+            } else {
+                latent_issues_.emplace_back(OperationResult::UninitializedRead,
+                                            LatentIssue::issueKindFromResult(OperationResult::UninitializedRead),
+                                            canon_var, LI, std::move(trace));
+                return ExecutionDomain::latentAbortProgram(
+                    std::make_unique<AbductiveDomain>(astate->clone()),
+                    &latent_issues_.back());
+            }
+        }
+        
+        // Variable is initialized - get value from stack
+        if (auto* stack_addr = astate->getPostStack().find(AI)) {
+            astate->getPostStack().add(LI, *stack_addr);
+        } else {
+            // Variable not in stack yet - create fresh value (shouldn't happen for initialized)
+            AbstractValue fresh = factory_.createFresh(LI);
+            Address addr(fresh);
+            astate->getPostStack().add(LI, addr);
+        }
+        return exec_state;
+    }
+    
+    // Check if pointer operand is in stack map (indirect stack variable)
+    if (auto* stack_addr = astate->getPostStack().find(ptr_operand)) {
+        // Load from stack variable - check if uninitialized
+        AbstractValue canon_ptr = astate->getCanonical(stack_addr->addr);
+        if (astate->getPostAttrs().has(canon_ptr, Attribute::Uninitialized)) {
+            Trace trace = Trace::fromValueHistory(stack_addr->history);
+            trace.addEvent(LI, "Load from uninitialized variable");
+            if (LatentIssue::isManifest(*astate)) {
+                reportBug(OperationResult::UninitializedRead, LI, canon_ptr, trace, astate);
+                return ExecutionDomain::abortProgram(
+                    std::make_unique<AbductiveDomain>(astate->clone()),
+                    OperationResult::UninitializedRead, std::move(trace));
+            } else {
+                latent_issues_.emplace_back(OperationResult::UninitializedRead,
+                                            LatentIssue::issueKindFromResult(OperationResult::UninitializedRead),
+                                            canon_ptr, LI, std::move(trace));
+                return ExecutionDomain::latentAbortProgram(
+                    std::make_unique<AbductiveDomain>(astate->clone()),
+                    &latent_issues_.back());
+            }
+        }
+        // Variable is initialized - use value from stack
+        astate->getPostStack().add(LI, *stack_addr);
+        return exec_state;
+    }
+    
+    // Heap load (pointer dereference) - use readDeref
+    auto ptr_opt = ops_.eval(*astate, ptr_operand, LI, pred);
     if (!ptr_opt)
         return exec_state;
     auto read_result = ops_.readDeref(*astate, *ptr_opt, LI);
@@ -430,8 +495,42 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst* SI,
         ops_.eval(*astate, SI->getValueOperand(), SI, pred);
     if (!value_opt)
         return exec_state;
-    auto ptr_opt =
-        ops_.eval(*astate, SI->getPointerOperand(), SI, pred);
+    
+    const llvm::Value* ptr_operand = SI->getPointerOperand();
+    
+    // Check if this is a direct store to a stack variable (alloca)
+    // Stack variables are in the stack map, and we can store to them directly
+    // without checking for uninitialized (storing initializes them)
+    if (auto* AI = llvm::dyn_cast<llvm::AllocaInst>(ptr_operand)) {
+        // Direct store to alloca - update stack and clear Uninitialized
+        AbstractValue stack_var = factory_.getOrCreate(AI);
+        AbstractValue canon_var = astate->getCanonical(stack_var);
+        
+        // Clear Uninitialized attribute (storing initializes the variable)
+        astate->getPostAttrs().remove(canon_var, Attribute::Uninitialized);
+        
+        // Update stack with new value
+        astate->getPostStack().add(AI, *value_opt);
+        
+        analysis_non_disj_.recordCopy(SI);
+        return exec_state;
+    }
+    
+    // Check if pointer operand is in stack map (indirect stack variable)
+    if (astate->getPostStack().find(ptr_operand)) {
+        // Store to stack variable - clear Uninitialized and update
+        auto ptr_opt = ops_.eval(*astate, ptr_operand, SI, pred);
+        if (ptr_opt) {
+            AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
+            astate->getPostAttrs().remove(canon_ptr, Attribute::Uninitialized);
+            astate->getPostStack().add(ptr_operand, *value_opt);
+        }
+        analysis_non_disj_.recordCopy(SI);
+        return exec_state;
+    }
+    
+    // Heap store (pointer dereference) - use writeDeref
+    auto ptr_opt = ops_.eval(*astate, ptr_operand, SI, pred);
     if (!ptr_opt)
         return exec_state;
     auto res = ops_.writeDeref(*astate, *ptr_opt, *value_opt, SI);
