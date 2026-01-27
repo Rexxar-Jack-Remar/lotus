@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.10)
+
+add_lotus_test(PulseFormulaTest PulseFormulaTest.cpp)
+target_link_libraries(PulseFormulaTest PulseChecker)
+set_target_properties(PulseFormulaTest PROPERTIES CXX_STANDARD 17)

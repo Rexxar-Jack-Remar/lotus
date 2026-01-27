@@ -17,6 +17,8 @@ target_link_libraries(lotus-opt PRIVATE ${LOTUS_OPT_COMMON_LIBS})
 
 if(APPLE)
   # On macOS, use -force_load to ensure all symbols are included
+  # Explicitly add dependency to ensure CanaryOptimization is built first
+  target_link_libraries(lotus-opt PRIVATE CanaryOptimization)
   target_link_options(lotus-opt PRIVATE
     -Wl,-force_load,$<TARGET_FILE:CanaryOptimization>
   )

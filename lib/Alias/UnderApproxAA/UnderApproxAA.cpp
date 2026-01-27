@@ -101,6 +101,17 @@ bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {
   if (F1 != F2)
     return false;
 
+  // Safety check: if no parent function found, cannot prove must-alias
+  if (!F1)
+    return false;
+
+  // Safety check: ensure function has a parent module before building EquivDB
+  if (!F1->getParent()) {
+    // Function without parent module - cannot build EquivDB
+    // Return false (no must-alias)
+    return false;
+  }
+
   // Lazy initialization: build EquivDB for F1 on first query
   // The cache ensures we only build it once per function
   auto &Ptr = EquivCache[F1];
@@ -108,8 +119,17 @@ bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {
     // Note: const_cast is necessary because EquivDB constructor takes
     // a non-const Function&, but we only have const Function* from
     // getParentFunction. This is safe because EquivDB only reads the IR.
-    Ptr = std::make_unique<EquivDB>(*const_cast<Function *>(F1));
+    try {
+      Ptr = std::make_unique<EquivDB>(*const_cast<Function *>(F1));
+    } catch (...) {
+      // If EquivDB construction fails, return false (no must-alias)
+      return false;
+    }
   }
+
+  // Safety check: ensure EquivDB was successfully created
+  if (!Ptr)
+    return false;
 
   // Query the equivalence database for this function
   return Ptr->mustAlias(V1, V2);

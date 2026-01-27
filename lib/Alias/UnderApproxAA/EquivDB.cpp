@@ -270,6 +270,9 @@ static bool atomicMustAlias(const DataLayout &DL,
 ///
 /// Time complexity: O(1) amortized (hash map lookup/insert + vector append)
 EquivDB::IdTy EquivDB::id(const Value *V) {
+  // Safety check: ensure V is not null
+  if (!V) return 0;  // Return invalid ID 0 for null values
+  
   // Check if this value already has an ID
   auto It = Val2Id.find(V);
   if (It != Val2Id.end()) return It->second;
@@ -302,8 +305,18 @@ EquivDB::IdTy EquivDB::id(const Value *V) {
 /// Time complexity: O(α(N)) amortized where α is the inverse Ackermann function
 /// (effectively constant for all practical purposes)
 EquivDB::IdTy EquivDB::find(IdTy X) {
+  // Safety check: ensure X is within bounds
+  if (X >= Nodes.size()) return X;  // Invalid ID, return as-is
+  
   // Base case: X is the root (parent points to itself)
   if (Nodes[X].Parent == X) return X;
+  
+  // Safety check: ensure parent is within bounds
+  if (Nodes[X].Parent >= Nodes.size()) {
+    // Invalid parent, fix it to point to self
+    Nodes[X].Parent = X;
+    return X;
+  }
   
   // Recursive case: find root and compress path
   // Path compression: set parent directly to root (flattening the tree)
@@ -490,6 +503,22 @@ static constexpr RuleTy SemanticRules[] = {
 /// instructions. In practice, the α(N) factor is effectively constant.
 EquivDB::EquivDB(Function &Func)
     : DL(Func.getParent()->getDataLayout()), F(Func) {
+  
+  // Safety check: ensure function has a parent module
+  if (!Func.getParent()) {
+    // Function without a parent module - cannot build equivalence database
+    // Return empty database (all queries will return false)
+    // Note: DL reference is invalid in this case, but we won't use it since
+    // we return early. This is safe because we check Func.empty() before using DL.
+    return;
+  }
+
+  // Safety check: ensure function has basic blocks (not a declaration)
+  if (Func.empty()) {
+    // Function declaration without body - cannot build equivalence database
+    // Return empty database (all queries will return false)
+    return;
+  }
 
   // Worklist stores pairs of values that must alias (to be unified)
   std::vector<std::pair<const Value *, const Value *>> WorkList;

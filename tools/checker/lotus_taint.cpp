@@ -5,12 +5,12 @@
  * A command-line tool for running IFDS/IDE interprocedural dataflow analysis
  */
 
+#include "lotus_taint_microbench.h"
 #include <Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
 #include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/IFDSFramework.h>
 #include <Dataflow/IFDS/IFDSSolvers.h>
 #include <Utils/LLVM/Demangle.h>
-#include "lotus_taint_microbench.h"
 
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/InstIterator.h>

@@ -19,3 +19,4 @@ target_link_libraries(GVFAChecker
 add_subdirectory(Report)
 add_subdirectory(KINT)
 add_subdirectory(Concurrency)
+add_subdirectory(Pulse)

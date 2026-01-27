@@ -82,8 +82,8 @@ AliasResult AliasAnalysisWrapper::queryBackend(const Value *v1, const Value *v2)
   if (!_initialized) return AliasResult::MayAlias;
 
   // stripPointerCasts() should not return null for valid pointers, but be defensive
-  auto v1s = v1->stripPointerCasts();
-  auto v2s = v2->stripPointerCasts();
+  const auto *v1s = v1->stripPointerCasts();
+  const auto *v2s = v2->stripPointerCasts();
   if (!v1s || !v2s) return AliasResult::MayAlias; // Conservative fallback
   if (v1s == v2s) return AliasResult::MustAlias;
 

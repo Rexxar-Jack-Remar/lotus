@@ -8,7 +8,7 @@
 namespace llvm
 {
 	class StringRef;
-}
+} // namespace llvm
 
 namespace annotation
 {
@@ -34,4 +34,4 @@ public:
 	static ExternalModRefTable loadFromFile(const char* fileName);
 };
 
-}
+} // namespace annotation

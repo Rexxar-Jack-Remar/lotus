@@ -46,3 +46,12 @@ target_link_libraries(lotus-concur
   ConcurrencyChecker
   CanaryReport
 )
+
+# Pulse Bug Finder Tool
+add_executable(lotus-pulse lotus_pulse.cpp)
+target_link_libraries(lotus-pulse PRIVATE
+  PulseChecker
+  CanaryAliasAnalysisWrapper
+  CanaryReport
+  ${LLVM_LINK_COMPONENTS}
+)
