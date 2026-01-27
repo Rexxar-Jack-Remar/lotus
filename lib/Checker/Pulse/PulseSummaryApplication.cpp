@@ -3,6 +3,8 @@
 #include "Checker/Pulse/PulseOperations.h"
 #include "Checker/Pulse/PulseSubstitution.h"
 #include "Checker/Pulse/PulseSummary.h"
+#include "Checker/Pulse/PulseValueHistory.h"
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <algorithm>
 #include <set>
@@ -143,7 +145,12 @@ static void applyPostCondition(
     const AbductiveDomain* callee_pre,
     AbductiveDomain& caller_astate,
     Substitution& substitution,
-    AbstractValueFactory& factory) {
+    AbstractValueFactory& factory,
+    PulseOperations& ops,
+    const llvm::Function* callee,
+    const llvm::CallInst* CI,
+    const llvm::BasicBlock* pred,
+    const PulseSummary& summary) {
     
     // Collect pre edges for read-only optimization
     std::set<std::pair<AbstractValue, Access>> pre_edges;
@@ -193,19 +200,56 @@ static void applyPostCondition(
         }
     }
     
-    // Apply post attributes (with substitution)
+    // Apply post attributes (with substitution) - CRITICAL for Invalid propagation
+    // The substitution should already contain formal->actual mappings from earlier
     for (const auto& kv : callee_post->getPostAttrs().getAttrs()) {
         AbstractValue formal_av = kv.first;
         AbstractValue formal_av_canon = callee_post->getCanonical(formal_av);
+        
+        // Try to find this formal value in the substitution map
         auto caller_av_opt = substitution.substitute(formal_av_canon);
-        AbstractValue caller_av = caller_av_opt ? *caller_av_opt : factory.createFresh();
+        
+        // If not found, skip (this attribute doesn't apply to caller)
         if (!caller_av_opt) {
-            substitution.add(formal_av_canon, caller_av);
+            continue;
         }
-        caller_av = caller_astate.getCanonical(caller_av);
+        
+        AbstractValue caller_av = caller_astate.getCanonical(*caller_av_opt);
         
         for (Attribute attr : kv.second) {
             caller_astate.getPostAttrs().add(caller_av, attr);
+            
+            // Special handling for Invalid attribute: also propagate to aliases
+            if (attr == Attribute::Invalid) {
+                // Find all values that canonicalize to the same value (aliases)
+                // Check stack variables
+                for (auto& stack_kv : caller_astate.getPostStack().getMap()) {
+                    AbstractValue stack_canon = caller_astate.getCanonical(stack_kv.second.addr);
+                    if (stack_canon == caller_av) {
+                        // This is an alias - also mark as invalid
+                        caller_astate.getPostAttrs().add(stack_canon, Attribute::Invalid);
+                        caller_astate.getPostAttrs().remove(stack_canon, Attribute::Allocated);
+                    }
+                }
+                
+                // Also check heap edges - if caller_av is stored in heap, propagate Invalid there too
+                // This handles cases where the pointer is stored in a variable and then loaded
+                for (const auto& heap_kv : caller_astate.getPostHeap().getEdges()) {
+                    for (const auto& edge_kv : heap_kv.second) {
+                        AbstractValue target_canon = caller_astate.getCanonical(edge_kv.second.addr);
+                        if (target_canon == caller_av) {
+                            // This heap location points to the invalid value - mark it as invalid
+                            caller_astate.getPostAttrs().add(target_canon, Attribute::Invalid);
+                            caller_astate.getPostAttrs().remove(target_canon, Attribute::Allocated);
+                        }
+                    }
+                }
+                
+                // Use invalidate() to properly propagate Invalid to all aliases
+                // This ensures transitive invalidation
+                Address invalid_addr(caller_av);
+                ops.invalidate(caller_astate, invalid_addr, nullptr, InvalidationKind::Other);
+            }
         }
     }
 }
@@ -337,6 +381,10 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
             // }
         }
         
+        // Build formal-to-actual mapping for ALL pointer arguments first
+        // This ensures substitution is complete before applying post conditions
+        // Match formal parameters to actual arguments by position (not by pointer index)
+        arg_idx = 0;
         for (const auto& Arg : callee->args()) {
             if (arg_idx >= CI->arg_size()) {
                 break;
@@ -349,7 +397,8 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
 
             auto actual_opt = ops_.eval(*new_astate, CI->getArgOperand(arg_idx), CI, pred);
             if (!actual_opt) {
-                return handleCall(CI, caller_state, pred, 0);
+                arg_idx++;
+                continue;
             }
 
             AbstractValue actual_addr = new_astate->getCanonical(actual_opt->addr);
@@ -370,25 +419,6 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
                 }
             }
             
-            // Handle captured variables: if this is a captured variable access in the callee,
-            // we need to map it to the corresponding value from the closure
-            // Infer handles this via:
-            // 1. Extracting captured formals from callee signature
-            // 2. Extracting captured actuals from closure structure
-            // 3. Mapping them in substitution
-            // 4. Checking CapturedFormalActualLength contradiction
-            if (is_closure_call && captured_vars.count(CI->getArgOperand(0)) > 0) {
-                // In full implementation, we'd:
-                // 1. Identify which captured variables the callee accesses (from function signature)
-                // 2. Extract them from the closure structure (traverse closure fields)
-                // 3. Add them to the substitution (map captured formal -> captured actual)
-                // 4. Check length match (captured_formals.length == captured_actuals.length)
-                // For now, we mark that captured variables exist and handle generically
-                
-                // Simplified: if we have a closure, assume captured variables are accessible
-                // Full implementation would properly extract and map them
-            }
-
             arg_idx++;
         }
 
@@ -485,7 +515,9 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
             continue;
         }
 
-        applyPostCondition(post, pre, *new_astate, substitution, factory_);
+        // Apply post condition - this propagates Invalid attributes from callee to caller
+        // The substitution should already map formal parameters to actual arguments
+        applyPostCondition(post, pre, *new_astate, substitution, factory_, ops_, callee, CI, pred, summary);
 
         PulseFormula post_formula = entry.getPostFormula().applySubstitution(substitution);
         if (!post_formula.isConsistent()) {
@@ -537,15 +569,61 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
             AbstractValue caller_ret = substitution.substituteOrIdentity(formal_ret);
 
             if (caller_ret == formal_ret && !substitution.substitute(formal_ret)) {
-                caller_ret = factory_.createFresh(CI);
+                // Check if the function returns a null constant
+                const llvm::Function* callee = summary.getFunction();
+                const llvm::Value* null_constant_ret = nullptr;
+                
+                // Check if any ReturnInst in the function returns a null constant
+                for (const auto& BB : *callee) {
+                    if (auto* RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
+                        if (RI->getNumOperands() > 0) {
+                            const llvm::Value* ret_val = RI->getReturnValue();
+                            if (ret_val && ret_val->getType()->isPointerTy()) {
+                                if (llvm::isa<llvm::ConstantPointerNull>(ret_val) ||
+                                    (llvm::isa<llvm::ConstantInt>(ret_val) &&
+                                     llvm::cast<llvm::ConstantInt>(ret_val)->isZero())) {
+                                    null_constant_ret = ret_val;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Create return value: use null constant as source if function returns null
+                if (null_constant_ret) {
+                    caller_ret = factory_.createFresh(null_constant_ret);
+                } else {
+                    caller_ret = factory_.createFresh(CI);
+                }
 
                 const auto& ret_attrs = post->getPostAttrs().get(formal_ret);
                 for (Attribute attr : ret_attrs) {
                     new_astate->getPostAttrs().add(caller_ret, attr);
+                    
+                    // Propagate Invalid to aliases
+                    if (attr == Attribute::Invalid) {
+                        for (auto& stack_kv : new_astate->getPostStack().getMap()) {
+                            AbstractValue stack_canon = new_astate->getCanonical(stack_kv.second.addr);
+                            if (stack_canon == caller_ret) {
+                                new_astate->getPostAttrs().add(stack_canon, Attribute::Invalid);
+                                new_astate->getPostAttrs().remove(stack_canon, Attribute::Allocated);
+                            }
+                        }
+                    }
+                }
+                
+                // If function returns null constant, also set Null attribute and path formula
+                if (null_constant_ret) {
+                    new_astate->getPostAttrs().add(caller_ret, Attribute::Null);
+                    new_astate->getPathFormula().addNull(caller_ret);
                 }
             }
 
-            new_astate->getPostStack().add(CI, Address(caller_ret));
+            Address ret_addr(caller_ret);
+            // Add FunctionCall event to history so isNullConstantSource can detect it
+            ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI, CI->getFunction());
+            new_astate->getPostStack().add(CI, ret_addr);
         }
 
         results.push_back(std::move(new_state));

@@ -25,9 +25,20 @@ ModelResult PulseModels::dispatch(const llvm::CallInst* call,
     }
     
     std::string funcName = func->getName().str();
+    
+    // Try exact match first
     auto it = models_.find(funcName);
     if (it != models_.end()) {
         return it->second(checker_, call, state, pred);
+    }
+    
+    // Try pattern matching for C++ mangled names (e.g., _ZNSt10unique_ptrI*ED1Ev)
+    // For now, just check for common C++ operators
+    if (funcName == "_ZdlPv" || funcName == "_ZdaPv") {
+        // These should have been registered, but check anyway
+        if (funcName == "_ZdlPv" || funcName == "_ZdaPv") {
+            return modelFree(call, state, pred);
+        }
     }
     
     return ModelResult::notHandled();
@@ -183,6 +194,20 @@ void PulseModels::registerTaintModels() {
 }
 
 void PulseModels::registerCppModels() {
+    // C++ new/delete operators
+    models_["_Znwm"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+        return modelMalloc(call, state, pred); // operator new
+    };
+    models_["_Znam"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+        return modelMalloc(call, state, pred); // operator new[]
+    };
+    models_["_ZdlPv"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+        return modelFree(call, state, pred); // operator delete
+    };
+    models_["_ZdaPv"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+        return modelFree(call, state, pred); // operator delete[]
+    };
+    
     // std::vector
     models_["_ZNSt6vectorI*E9push_backERK*"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
         return modelStdVectorPushBack(call, state, pred);
@@ -216,8 +241,8 @@ ModelResult PulseModels::modelMalloc(const llvm::CallInst* call, ExecutionDomain
     // Mark as allocated
     ops_.allocate(*astate, ret_val, call);
     
-    // Initialize history
-    ret_addr.history.addAllocationEvent(call, &ret_val);
+    // Initialize history with allocation event
+    ret_addr.history.addEvent(ValueHistory::EventKind::Allocation, call, call->getFunction());
     
     // Track size if available
     if (call->arg_size() > 0) {
@@ -242,10 +267,54 @@ ModelResult PulseModels::modelFree(const llvm::CallInst* call, ExecutionDomain& 
     if (call->arg_size() < 1) return ModelResult::success({state});
     
     auto* astate = state.getAstate();
-    auto ptr_opt = ops_.eval(*astate, call->getArgOperand(0), call, pred);
-    if (!ptr_opt) return ModelResult::success({state});
+    if (!astate) return ModelResult::success({state});
     
-    // Check for double free or use-after-free is handled by invalidate
+    // Evaluate the pointer argument - handle bitcasts properly
+    const llvm::Value* arg = call->getArgOperand(0);
+    
+    // If it's a bitcast, get the source value
+    if (auto* BC = llvm::dyn_cast<llvm::BitCastInst>(arg)) {
+        arg = BC->getOperand(0);
+    } else if (auto* CE = llvm::dyn_cast<llvm::ConstantExpr>(arg)) {
+        if (CE->getOpcode() == llvm::Instruction::BitCast) {
+            arg = CE->getOperand(0);
+        }
+    }
+    
+    auto ptr_opt = ops_.eval(*astate, arg, call, pred);
+    if (!ptr_opt) {
+        // Try evaluating the original argument if bitcast eval failed
+        ptr_opt = ops_.eval(*astate, call->getArgOperand(0), call, pred);
+        if (!ptr_opt) return ModelResult::success({state});
+    }
+    
+    AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
+    
+    // Check for double free: if pointer is already invalid, report double free
+    if (astate->getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
+        // Double free detected!
+        Trace trace = Trace::fromValueHistory(ptr_opt->history);
+        trace.addEvent(call, "Double free: freeing already freed pointer");
+        
+        // Get the original invalidation info to show where it was first freed
+        auto inv_info = astate->getInvalidationInfo(canon_ptr);
+        if (inv_info) {
+            trace.addEvent(inv_info->second, "First free");
+        }
+        
+        // Report as UseAfterFree (double free is a form of use-after-free)
+        // We could add a specific DoubleFree type, but UseAfterFree works
+        auto diag = std::make_unique<AccessToInvalidAddress>(
+            call, "Double free detected", "Freeing already freed memory",
+            "Ensure each allocation is freed exactly once",
+            IssueType::UseAfterFree, std::move(trace), InvalidationKind::CFree);
+        DiagnosticManager::getInstance().report(std::move(diag));
+        
+        // Still invalidate (though it's already invalid)
+        // This ensures the state is consistent
+    }
+    
+    // Invalidate the canonical pointer value
     ops_.invalidate(*astate, *ptr_opt, call, InvalidationKind::CFree);
     
     return ModelResult::success({state});

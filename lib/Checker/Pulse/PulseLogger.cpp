@@ -119,9 +119,6 @@ void PulseLogger::logBug(OperationResult kind, const llvm::Instruction* loc, con
         case OperationResult::UninitializedRead:
             oss << "UninitializedRead";
             break;
-        case OperationResult::MemoryLeak:
-            oss << "MemoryLeak";
-            break;
         case OperationResult::TaintError:
             oss << "TaintError";
             break;
@@ -139,7 +136,6 @@ void PulseLogger::logBug(OperationResult kind, const llvm::Instruction* loc, con
     incrementCounter("bugs." + std::string(kind == OperationResult::UseAfterFree ? "use_after_free" :
                                           kind == OperationResult::NullDereference ? "null_deref" :
                                           kind == OperationResult::UninitializedRead ? "uninit_read" :
-                                          kind == OperationResult::MemoryLeak ? "memory_leak" :
                                           kind == OperationResult::TaintError ? "taint_error" : "unknown"));
 }
 
@@ -180,9 +176,8 @@ void PulseLogger::printStats() {
         unsigned use_after_free = getCounter("bugs.use_after_free");
         unsigned null_deref = getCounter("bugs.null_deref");
         unsigned uninit_read = getCounter("bugs.uninit_read");
-        unsigned memory_leak = getCounter("bugs.memory_leak");
         unsigned taint_error = getCounter("bugs.taint_error");
-        unsigned total_bugs = use_after_free + null_deref + uninit_read + memory_leak + taint_error;
+        unsigned total_bugs = use_after_free + null_deref + uninit_read + taint_error;
         
         if (total_bugs > 0) {
             std::ostringstream oss;
@@ -190,7 +185,6 @@ void PulseLogger::printStats() {
                 << " (UseAfterFree: " << use_after_free
                 << ", NullDeref: " << null_deref
                 << ", UninitRead: " << uninit_read
-                << ", MemoryLeak: " << memory_leak
                 << ", TaintError: " << taint_error << ")";
             info(oss.str());
         }

@@ -114,6 +114,12 @@ public:
                               const llvm::Instruction* loc);
     
     /**
+     * Check if an Address originated from a null constant
+     * Used by NPD checker to only report null dereferences from null constants
+     */
+    static bool isNullConstantSource(const Address& addr);
+    
+    /**
      * Shallow copy: create a new cell with the same edges as the original
      * Returns the address of the new cell
      */

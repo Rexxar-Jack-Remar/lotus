@@ -4,6 +4,8 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Instructions.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -172,6 +174,33 @@ public:
                 desc = event.function->getName().str() + ": " + desc;
             }
             t.addEvent(event.location, desc);
+        }
+        return t;
+    }
+
+    /** Build a trace from ValueHistory, filtering to only include null constant sources. */
+    static Trace fromValueHistoryNullSourceOnly(const ValueHistory& history) {
+        Trace t;
+        for (const auto& event : history.getEvents()) {
+            if (!event.location)
+                continue;
+            
+            // Only include Store events where a null constant is stored
+            if (event.kind == ValueHistory::EventKind::Store) {
+                if (auto* SI = llvm::dyn_cast<llvm::StoreInst>(event.location)) {
+                    const llvm::Value* stored_value = SI->getValueOperand();
+                    // Check if storing a null constant
+                    if (llvm::isa<llvm::ConstantPointerNull>(stored_value) ||
+                        (llvm::isa<llvm::ConstantInt>(stored_value) &&
+                         llvm::cast<llvm::ConstantInt>(stored_value)->isZero())) {
+                        std::string desc = "Null constant stored";
+                        if (event.function) {
+                            desc = event.function->getName().str() + ": " + desc;
+                        }
+                        t.addEvent(event.location, desc);
+                    }
+                }
+            }
         }
         return t;
     }

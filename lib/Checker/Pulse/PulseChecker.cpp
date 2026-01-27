@@ -43,6 +43,18 @@ PulseChecker::PulseChecker(llvm::Module* M, lotus::AliasAnalysisWrapper* AA)
 }
 
 PulseChecker::~PulseChecker() {
+    // Report any remaining latent issues before flushing
+    for (const auto& latent : latent_issues_) {
+        Trace trace = latent.getTrace();
+        OperationResult kind = latent.getDiagnostic();
+        const llvm::Instruction* loc = latent.getLocation();
+        AbstractValue addr = latent.getAddress();
+        
+        // Create a dummy astate for reporting (latent issues don't have astate)
+        // We'll report without astate context
+        reportBug(kind, loc, addr, trace, nullptr);
+    }
+    
     // Flush diagnostics at end of analysis
     DiagnosticManager::getInstance().flush();
 }
@@ -66,10 +78,6 @@ void PulseChecker::registerBugTypes() {
         BugDescription::BC_ERROR, "CWE-457");
     diagMgr.registerBugType(IssueType::UninitializedRead, uninitializedReadTypeId_);
 
-    memoryLeakTypeId_ = mgr.register_bug_type(
-        IssueType::MemoryLeak, BugDescription::BI_MEDIUM, BugDescription::BC_ERROR,
-        "CWE-401");
-    diagMgr.registerBugType(IssueType::MemoryLeak, memoryLeakTypeId_);
 
     unnecessaryCopyTypeId_ = mgr.register_bug_type(
         IssueType::UnnecessaryCopy, BugDescription::BI_LOW, BugDescription::BC_PERFORMANCE, "");
@@ -269,7 +277,7 @@ void PulseChecker::analyzeFunction(const llvm::Function* F) {
     
     if (!exit_states.empty() || !latent_exit_states.empty())
         createSummary(F, exit_states, latent_exit_states);
-
+    
     reportUnnecessaryCopies(F);
     reportConstRefableParams(F);
     
@@ -430,23 +438,64 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst* LI,
     if (auto* stack_addr = astate->getPostStack().find(ptr_operand)) {
         // Load from stack variable - check if uninitialized
         AbstractValue canon_ptr = astate->getCanonical(stack_addr->addr);
-        if (astate->getPostAttrs().has(canon_ptr, Attribute::Uninitialized)) {
+        AbstractValue loaded_ptr = canon_ptr;
+        
+        // PRIORITY ORDER: Invalid > Null > Uninitialized
+        // Check Invalid FIRST (UseAfterFree is most severe)
+        if (astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid)) {
             Trace trace = Trace::fromValueHistory(stack_addr->history);
-            trace.addEvent(LI, "Load from uninitialized variable");
+            trace.addEvent(LI, "Load of invalid pointer");
             if (LatentIssue::isManifest(*astate)) {
-                reportBug(OperationResult::UninitializedRead, LI, canon_ptr, trace, astate);
+                reportBug(OperationResult::UseAfterFree, LI, loaded_ptr, trace, astate);
                 return ExecutionDomain::abortProgram(
                     std::make_unique<AbductiveDomain>(astate->clone()),
-                    OperationResult::UninitializedRead, std::move(trace));
+                    OperationResult::UseAfterFree, std::move(trace));
             } else {
-                latent_issues_.emplace_back(OperationResult::UninitializedRead,
-                                            LatentIssue::issueKindFromResult(OperationResult::UninitializedRead),
-                                            canon_ptr, LI, std::move(trace));
+                latent_issues_.emplace_back(OperationResult::UseAfterFree,
+                                            LatentIssue::issueKindFromResult(OperationResult::UseAfterFree),
+                                            loaded_ptr, LI, std::move(trace));
                 return ExecutionDomain::latentAbortProgram(
                     std::make_unique<AbductiveDomain>(astate->clone()),
                     &latent_issues_.back());
             }
         }
+        
+        // Check for null pointer (only if not invalid)
+        // DON'T report NullDereference if Invalid is present (UseAfterFree takes priority)
+        // NPD checker: only report if source is a null constant
+        if (!astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid)) {
+            if (astate->getPathFormula().isNull(loaded_ptr) ||
+                (astate->getPostAttrs().has(loaded_ptr, Attribute::Null) &&
+                 !astate->getPathFormula().isNonNull(loaded_ptr))) {
+                // Check if this pointer originated from a null constant
+                // Check both the stack address and the loaded pointer's AbstractValue source
+                bool is_null_source = PulseOperations::isNullConstantSource(*stack_addr);
+                if (!is_null_source) {
+                    // Also check if the AbstractValue itself has a null constant source
+                    Address loaded_addr(loaded_ptr);
+                    loaded_addr.history = stack_addr->history;
+                    is_null_source = PulseOperations::isNullConstantSource(loaded_addr);
+                }
+                if (is_null_source) {
+                    Trace trace = Trace::fromValueHistory(stack_addr->history);
+                    trace.addEvent(LI, "Load of null pointer");
+                    if (LatentIssue::isManifest(*astate)) {
+                        reportBug(OperationResult::NullDereference, LI, loaded_ptr, trace, astate);
+                        return ExecutionDomain::abortProgram(
+                            std::make_unique<AbductiveDomain>(astate->clone()),
+                            OperationResult::NullDereference, std::move(trace));
+                    } else {
+                        latent_issues_.emplace_back(OperationResult::NullDereference,
+                                                    LatentIssue::issueKindFromResult(OperationResult::NullDereference),
+                                                    loaded_ptr, LI, std::move(trace));
+                        return ExecutionDomain::latentAbortProgram(
+                            std::make_unique<AbductiveDomain>(astate->clone()),
+                            &latent_issues_.back());
+                    }
+                }
+            }
+        }
+        
         // Variable is initialized - use value from stack
         astate->getPostStack().add(LI, *stack_addr);
         return exec_state;
@@ -454,11 +503,68 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst* LI,
     
     // Heap load (pointer dereference) - use readDeref
     auto ptr_opt = ops_.eval(*astate, ptr_operand, LI, pred);
-    if (!ptr_opt)
+    if (!ptr_opt) {
+        // Eval failed - could be null/invalid pointer in GEP or other operation
+        // Check if ptr_operand is a GEP that failed due to null/invalid base
+        if (auto* GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(ptr_operand)) {
+            auto base_opt = ops_.eval(*astate, GEP->getPointerOperand(), LI, pred);
+            if (base_opt) {
+                AbstractValue base_canon = astate->getCanonical(base_opt->addr);
+                // PRIORITY: Check Invalid FIRST (UseAfterFree > NullDereference)
+                if (astate->getPostAttrs().has(base_canon, Attribute::Invalid)) {
+                    Trace trace = Trace::fromValueHistory(base_opt->history);
+                    trace.addEvent(LI, "Array access through invalid pointer");
+                    reportBug(OperationResult::UseAfterFree, LI, base_canon, trace, astate);
+                    return ExecutionDomain::abortProgram(
+                        std::make_unique<AbductiveDomain>(astate->clone()),
+                        OperationResult::UseAfterFree, std::move(trace));
+                }
+                // Check if base is null (only if not invalid)
+                // DON'T report NullDereference if Invalid is present (UseAfterFree takes priority)
+                // NPD checker: only report if source is a null constant
+                if (!astate->getPostAttrs().has(base_canon, Attribute::Invalid)) {
+                    if (astate->getPathFormula().isNull(base_canon) ||
+                        (astate->getPostAttrs().has(base_canon, Attribute::Null) &&
+                         !astate->getPathFormula().isNonNull(base_canon))) {
+                        // Check if this pointer originated from a null constant
+                        if (PulseOperations::isNullConstantSource(*base_opt)) {
+                            Trace trace = Trace::fromValueHistory(base_opt->history);
+                            trace.addEvent(LI, "Array access through null pointer");
+                            reportBug(OperationResult::NullDereference, LI, base_canon, trace, astate);
+                            return ExecutionDomain::abortProgram(
+                                std::make_unique<AbductiveDomain>(astate->clone()),
+                                OperationResult::NullDereference, std::move(trace));
+                        }
+                    }
+                }
+            }
+        }
         return exec_state;
+    }
+    // PRIORITY: Check Invalid FIRST before dereferencing (UseAfterFree > NullDereference)
+    AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
+    if (astate->getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
+        Trace trace = Trace::fromValueHistory(ptr_opt->history);
+        trace.addEvent(LI, "Dereference of invalid pointer");
+        if (LatentIssue::isManifest(*astate)) {
+            reportBug(OperationResult::UseAfterFree, LI, canon_ptr, trace, astate);
+            return ExecutionDomain::abortProgram(
+                std::make_unique<AbductiveDomain>(astate->clone()),
+                OperationResult::UseAfterFree, std::move(trace));
+        } else {
+            latent_issues_.emplace_back(OperationResult::UseAfterFree,
+                                        LatentIssue::issueKindFromResult(OperationResult::UseAfterFree),
+                                        canon_ptr, LI, std::move(trace));
+            return ExecutionDomain::latentAbortProgram(
+                std::make_unique<AbductiveDomain>(astate->clone()),
+                &latent_issues_.back());
+        }
+    }
+    
     auto read_result = ops_.readDeref(*astate, *ptr_opt, LI);
     OperationResult result = read_result.first;
     llvm::Optional<Address> value_opt = read_result.second;
+    
     if (result != OperationResult::Success) {
         Trace trace = Trace::fromValueHistory(ptr_opt->history);
         trace.addEvent(LI, "Load from invalid address");
@@ -509,10 +615,31 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst* SI,
         // Clear Uninitialized attribute (storing initializes the variable)
         astate->getPostAttrs().remove(canon_var, Attribute::Uninitialized);
         
-        // Update stack with new value
-        astate->getPostStack().add(AI, *value_opt);
+        // When storing a pointer value, preserve its attributes (Null, Invalid, Allocated)
+        AbstractValue canon_value = astate->getCanonical(value_opt->addr);
+        if (astate->getPostAttrs().has(canon_value, Attribute::Null)) {
+            // Preserve null attribute on the stored value
+            astate->getPostAttrs().add(canon_value, Attribute::Null);
+        }
+        if (astate->getPostAttrs().has(canon_value, Attribute::Invalid)) {
+            // Preserve invalid attribute on the stored value
+            astate->getPostAttrs().add(canon_value, Attribute::Invalid);
+        }
+        if (astate->getPostAttrs().has(canon_value, Attribute::Allocated)) {
+            // Preserve allocated attribute on the stored value
+            astate->getPostAttrs().add(canon_value, Attribute::Allocated);
+        }
         
-        analysis_non_disj_.recordCopy(SI);
+        // Update stack with new value
+        // Add Store event to history so isNullConstantSource can detect null constants stored via CallInst
+        Address stored_addr = *value_opt;
+        stored_addr.history.addEvent(ValueHistory::EventKind::Store, SI, SI->getFunction());
+        astate->getPostStack().add(AI, stored_addr);
+        
+        // Only record copy if it's not a pointer type (to reduce false positives)
+        if (!SI->getValueOperand()->getType()->isPointerTy()) {
+            analysis_non_disj_.recordCopy(SI);
+        }
         return exec_state;
     }
     
@@ -523,9 +650,17 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst* SI,
         if (ptr_opt) {
             AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
             astate->getPostAttrs().remove(canon_ptr, Attribute::Uninitialized);
+            
+            // When storing a pointer value, preserve its attributes (Null, Invalid, Allocated)
+            AbstractValue canon_value = astate->getCanonical(value_opt->addr);
+            // Attributes are already on canon_value, they'll be preserved when we store it
+            
             astate->getPostStack().add(ptr_operand, *value_opt);
         }
-        analysis_non_disj_.recordCopy(SI);
+        // Only record copy if it's not a pointer type
+        if (!SI->getValueOperand()->getType()->isPointerTy()) {
+            analysis_non_disj_.recordCopy(SI);
+        }
         return exec_state;
     }
     
@@ -553,7 +688,10 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst* SI,
                 &latent_issues_.back());
         }
     }
-    analysis_non_disj_.recordCopy(SI);
+    // Only record copy if it's not a pointer type (to reduce false positives)
+    if (!SI->getValueOperand()->getType()->isPointerTy()) {
+        analysis_non_disj_.recordCopy(SI);
+    }
     return exec_state;
 }
 
@@ -624,8 +762,19 @@ std::vector<ExecutionDomain> PulseChecker::handleCall(
         if (CI->arg_size() > 0) {
             auto ptr_opt =
                 ops_.eval(*astate, CI->getArgOperand(0), CI, pred);
-            if (ptr_opt)
+            if (ptr_opt) {
                 ops_.invalidate(*astate, *ptr_opt, CI, InvalidationKind::CFree);
+                
+                // Also invalidate aliases
+                AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
+                for (auto& stack_kv : astate->getPostStack().getMap()) {
+                    AbstractValue stack_canon = astate->getCanonical(stack_kv.second.addr);
+                    if (stack_canon == canon_ptr) {
+                        astate->getPostAttrs().add(stack_canon, Attribute::Invalid);
+                        astate->getPostAttrs().remove(stack_canon, Attribute::Allocated);
+                    }
+                }
+            }
         }
         return {exec_state};
     }
@@ -640,7 +789,11 @@ std::vector<ExecutionDomain> PulseChecker::handleCall(
     if (summary_manager_.hasSummary(F)) {
         PulseLogger::debug("Applying summary for " + F->getName().str());
         PulseLogger::incrementCounter("summaries.applied");
-        return applySummaryImproved(F, exec_state, CI, pred);
+        auto summary_results = applySummaryImproved(F, exec_state, CI, pred);
+        if (!summary_results.empty()) {
+            return summary_results;
+        }
+        // If summary application failed, fall through to inlining
     }
 
     // Otherwise, inline (with depth limit)
@@ -866,21 +1019,36 @@ void PulseChecker::reportBug(OperationResult kind,
                 IssueType::UseAfterFree, trace.clone(), invKind);
             break;
         }
-        case OperationResult::NullDereference:
+        case OperationResult::NullDereference: {
+            // For NPD checker, only show null constant sources in the trace
+            Trace filtered_trace;
+            for (const auto& event : trace.getEvents()) {
+                if (!event.location)
+                    continue;
+                // Only include Store events where a null constant is stored
+                if (auto* SI = llvm::dyn_cast<llvm::StoreInst>(event.location)) {
+                    const llvm::Value* stored_value = SI->getValueOperand();
+                    // Check if storing a null constant
+                    if (llvm::isa<llvm::ConstantPointerNull>(stored_value) ||
+                        (llvm::isa<llvm::ConstantInt>(stored_value) &&
+                         llvm::cast<llvm::ConstantInt>(stored_value)->isZero())) {
+                        filtered_trace.addEvent(event.location, event.function, "Null constant stored");
+                    }
+                }
+            }
+            // Always add the dereference location as the sink
+            filtered_trace.addEvent(loc, loc ? loc->getFunction() : nullptr, "Null pointer dereference");
             diagnostic = std::make_unique<AccessToInvalidAddress>(
                 loc, "Null pointer dereference", "Pointer is null", 
                 "Check for null before dereferencing",
-                IssueType::NullDereference, trace.clone());
+                IssueType::NullDereference, std::move(filtered_trace));
             break;
+        }
         case OperationResult::UninitializedRead:
             diagnostic = std::make_unique<AccessToInvalidAddress>(
                 loc, "Uninitialized read", "Reading uninitialized memory", 
                 "Initialize variable before use",
                 IssueType::UninitializedRead, trace.clone());
-            break;
-        case OperationResult::MemoryLeak:
-            diagnostic = std::make_unique<MemoryLeak>(
-                loc, nullptr, "malloc", trace.clone());
             break;
         case OperationResult::TaintError:
             diagnostic = std::make_unique<TaintFlow>(
@@ -895,10 +1063,27 @@ void PulseChecker::reportBug(OperationResult kind,
     }
 }
 
+
 void PulseChecker::reportUnnecessaryCopies(const llvm::Function* F) {
     (void)F;
     const auto& stores = analysis_non_disj_.getCopiedStores();
     for (const llvm::StoreInst* SI : stores) {
+        // Skip reporting unnecessary copies for pointer types (reduce false positives)
+        if (SI->getValueOperand()->getType()->isPointerTy())
+            continue;
+        
+        // Skip if storing a constant (not really a copy)
+        if (llvm::isa<llvm::Constant>(SI->getValueOperand()))
+            continue;
+        
+        // Skip if storing to/from alloca (local variable initialization)
+        if (llvm::isa<llvm::AllocaInst>(SI->getPointerOperand()))
+            continue;
+        
+        // Skip if this is a PHI node result (common in SSA form)
+        if (llvm::isa<llvm::PHINode>(SI->getValueOperand()))
+            continue;
+            
         // Create Diagnostic for unnecessary copy
         // For now, assume variable name extraction from IR
         std::string varName = "variable";
@@ -1258,16 +1443,54 @@ std::vector<ExecutionDomain> PulseChecker::applySummary(
         
         // If return value was substituted, use it; otherwise create fresh
         if (substitution.substitute(formal_ret)) {
-            new_astate->getPostStack().add(CI, Address(actual_ret));
+            Address ret_addr(actual_ret);
+            ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI, CI->getFunction());
+            new_astate->getPostStack().add(CI, ret_addr);
         } else {
             // Return value not in substitution (fresh value from callee)
-            AbstractValue fresh_ret = factory_.createFresh(CI);
-            new_astate->getPostStack().add(CI, Address(fresh_ret));
+            // Check if the function returns a null constant
+            const llvm::Function* callee = summary.getFunction();
+            const llvm::Value* null_constant_ret = nullptr;
+            
+            // Check if any ReturnInst in the function returns a null constant
+            for (const auto& BB : *callee) {
+                if (auto* RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
+                    if (RI->getNumOperands() > 0) {
+                        const llvm::Value* ret_val = RI->getReturnValue();
+                        if (ret_val && ret_val->getType()->isPointerTy()) {
+                            if (llvm::isa<llvm::ConstantPointerNull>(ret_val) ||
+                                (llvm::isa<llvm::ConstantInt>(ret_val) &&
+                                 llvm::cast<llvm::ConstantInt>(ret_val)->isZero())) {
+                                null_constant_ret = ret_val;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Create return value: use null constant as source if function returns null
+            AbstractValue fresh_ret;
+            if (null_constant_ret) {
+                fresh_ret = factory_.createFresh(null_constant_ret);
+            } else {
+                fresh_ret = factory_.createFresh(CI);
+            }
+            
+            Address ret_addr(fresh_ret);
+            ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI, CI->getFunction());
+            new_astate->getPostStack().add(CI, ret_addr);
             
             // Copy attributes from formal return to fresh return
             const auto& ret_attrs = post->getPostAttrs().get(formal_ret);
             for (Attribute attr : ret_attrs) {
                 new_astate->getPostAttrs().add(fresh_ret, attr);
+            }
+            
+            // If function returns null constant, also set Null attribute and path formula
+            if (null_constant_ret) {
+                new_astate->getPostAttrs().add(fresh_ret, Attribute::Null);
+                new_astate->getPathFormula().addNull(fresh_ret);
             }
         }
     }
@@ -1300,16 +1523,49 @@ ExecutionDomain PulseChecker::handleComparison(const llvm::Instruction* I,
             llvm::Value* ptr = op0_is_null ? op1 : op0;
             auto ptr_opt = ops_.eval(*astate, ptr, I, pred_bb);
             if (ptr_opt) {
-                AbstractValue ptr_av = ptr_opt->addr;
+                AbstractValue ptr_av = astate->getCanonical(ptr_opt->addr);
+                
+                // PRIORITY: Don't set Null attribute if pointer is already Invalid
+                // This prevents false positives where we report NullDereference when UseAfterFree is correct
+                bool is_invalid = astate->getPostAttrs().has(ptr_av, Attribute::Invalid);
                 
                 if (cmp_pred == llvm::ICmpInst::ICMP_EQ) {
-                    // ptr == null
+                    // ptr == null: mark as null in path formula only (for path-sensitive analysis)
+                    // Don't set Null attribute here - only null constants set the Null attribute
+                    // This ensures NPD checker only tracks null constants as sources
                     astate->getPathFormula().addNull(ptr_av);
-                    astate->getPostAttrs().add(ptr_av, Attribute::Null);
                 } else if (cmp_pred == llvm::ICmpInst::ICMP_NE) {
-                    // ptr != null
+                    // ptr != null: mark as non-null in formula
                     astate->getPathFormula().addNonNull(ptr_av);
-                    astate->getPostAttrs().remove(ptr_av, Attribute::Null);
+                    // Don't remove Null attribute here - it should only be set by null constants
+                }
+            }
+        }
+        
+        // Also handle comparisons where we check if a pointer is null indirectly
+        // e.g., if (ptr) or if (!ptr)
+        if (op0->getType()->isPointerTy() && op1->getType()->isPointerTy()) {
+            auto ptr0_opt = ops_.eval(*astate, op0, I, pred_bb);
+            auto ptr1_opt = ops_.eval(*astate, op1, I, pred_bb);
+            
+            if (ptr0_opt && ptr1_opt) {
+                AbstractValue av0 = astate->getCanonical(ptr0_opt->addr);
+                AbstractValue av1 = astate->getCanonical(ptr1_opt->addr);
+                
+                // If comparing with zero constant (null check)
+                if (op0_is_null || op1_is_null) {
+                    AbstractValue ptr_av = op0_is_null ? av1 : av0;
+                    // PRIORITY: Don't set Null attribute if pointer is already Invalid
+                    bool is_invalid = astate->getPostAttrs().has(ptr_av, Attribute::Invalid);
+                    if (cmp_pred == llvm::ICmpInst::ICMP_EQ) {
+                        // ptr == null: mark as null in path formula only
+                        // Don't set Null attribute here - only null constants set the Null attribute
+                        astate->getPathFormula().addNull(ptr_av);
+                    } else if (cmp_pred == llvm::ICmpInst::ICMP_NE) {
+                        // ptr != null: mark as non-null in formula
+                        astate->getPathFormula().addNonNull(ptr_av);
+                        // Don't remove Null attribute here - it should only be set by null constants
+                    }
                 }
             }
         }
@@ -1369,24 +1625,43 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
         if (!ptr_opt)
             return llvm::Optional<ExecutionDomain>(std::move(state));
         AbstractValue ptr_av = ptr_opt->addr;
+        AbstractValue canon_ptr_av = astate->getCanonical(ptr_av);
+
+        // PRIORITY: If pointer is already Invalid, skip null path entirely
+        // This prevents false positives where we report NullDereference when UseAfterFree is correct
+        bool is_invalid = astate->getPostAttrs().has(canon_ptr_av, Attribute::Invalid);
+        
+        if (is_invalid) {
+            // Pointer is invalid - only take the non-null path (where we'll report UseAfterFree)
+            // Skip the null path to avoid false positive NullDereference
+            if (pred == llvm::ICmpInst::ICMP_EQ && is_then) {
+                // This is the null path (ptr == null) - skip it
+                return llvm::None;
+            }
+            if (pred == llvm::ICmpInst::ICMP_NE && !is_then) {
+                // This is the null path (ptr != null, else branch) - skip it
+                return llvm::None;
+            }
+        }
 
         if (pred == llvm::ICmpInst::ICMP_EQ) {
             if (is_then) {
-                if (!astate->getPathFormula().addNull(ptr_av))
+                if (!astate->getPathFormula().addNull(canon_ptr_av))
                     return llvm::None;
-                astate->getPostAttrs().add(ptr_av, Attribute::Null);
+                // Don't set Null attribute here - only null constants set the Null attribute
+                // This ensures NPD checker only tracks null constants as sources
             } else {
-                astate->getPathFormula().addNonNull(ptr_av);
-                astate->getPostAttrs().remove(ptr_av, Attribute::Null);
+                astate->getPathFormula().addNonNull(canon_ptr_av);
+                // Don't remove Null attribute here - it should only be set by null constants
             }
         } else if (pred == llvm::ICmpInst::ICMP_NE) {
             if (is_then) {
-                astate->getPathFormula().addNonNull(ptr_av);
-                astate->getPostAttrs().remove(ptr_av, Attribute::Null);
+                astate->getPathFormula().addNonNull(canon_ptr_av);
+                // Don't remove Null attribute here - it should only be set by null constants
             } else {
-                if (!astate->getPathFormula().addNull(ptr_av))
+                if (!astate->getPathFormula().addNull(canon_ptr_av))
                     return llvm::None;
-                astate->getPostAttrs().add(ptr_av, Attribute::Null);
+                // Don't set Null attribute here - only null constants set the Null attribute
             }
         } else {
             return llvm::Optional<ExecutionDomain>(std::move(state));

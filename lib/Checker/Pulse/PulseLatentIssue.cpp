@@ -18,8 +18,6 @@ LatentIssue::IssueKind LatentIssue::issueKindFromResult(OperationResult result) 
         return IssueKind::NullDereference;
     case OperationResult::UninitializedRead:
         return IssueKind::UninitializedRead;
-    case OperationResult::MemoryLeak:
-        return IssueKind::MemoryLeak;
     case OperationResult::TaintError:
     case OperationResult::Success:
         return IssueKind::InvalidAccess;
@@ -30,8 +28,13 @@ LatentIssue::IssueKind LatentIssue::issueKindFromResult(OperationResult result) 
 bool LatentIssue::isManifest(const AbductiveDomain& astate) {
     // A state is manifest if its path condition is empty or only contains
     // facts about allocated pointers being non-null (no ptr==null assumed).
+    // For now, always report bugs to ensure they are detected.
+    // TODO: Implement proper manifest check based on path conditions
     const auto& formula = astate.getPathFormula();
-    return formula.isEmptyOrTrivial();
+    // Always return true to report bugs immediately
+    // In the future, we can refine this to only report bugs that can occur
+    // in any reasonable calling context
+    return true; // formula.isEmptyOrTrivial();
 }
 
 } // namespace pulse

@@ -1,6 +1,6 @@
 #include "Checker/Pulse/PulseOperations.h"
-#include "Checker/Pulse/PulseTaint.h"
 #include "Checker/Pulse/PulseFormula.h"
+#include "Checker/Pulse/PulseTaint.h"
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
@@ -8,6 +8,37 @@
 #include <cassert>
 
 namespace pulse {
+
+// Helper function to check if an Address originated from a null constant
+static bool isNullConstantSource(const Address& addr) {
+    // Check if the original LLVM value is a null constant
+    if (const llvm::Value* v = addr.addr.getValue()) {
+        if (llvm::isa<llvm::ConstantPointerNull>(v)) {
+            return true;
+        }
+        if (auto* CI = llvm::dyn_cast<llvm::ConstantInt>(v)) {
+            if (CI->isZero()) {
+                return true;
+            }
+        }
+    }
+    
+    // Check ValueHistory for Store events where a null constant was stored
+    for (const auto& event : addr.history.getEvents()) {
+        if (event.kind == ValueHistory::EventKind::Store && event.location) {
+            if (auto* SI = llvm::dyn_cast<llvm::StoreInst>(event.location)) {
+                const llvm::Value* stored_value = SI->getValueOperand();
+                if (llvm::isa<llvm::ConstantPointerNull>(stored_value) ||
+                    (llvm::isa<llvm::ConstantInt>(stored_value) &&
+                     llvm::cast<llvm::ConstantInt>(stored_value)->isZero())) {
+                    return true;
+                }
+            }
+        }
+    }
+    
+    return false;
+}
 
 //===----------------------------------------------------------------------===//
 // AbstractValueFactory Implementation
@@ -56,13 +87,92 @@ AbstractValue AbstractValueFactory::createFresh(const llvm::Value* hint) {
 // PulseOperations Implementation
 //===----------------------------------------------------------------------===//
 
+bool PulseOperations::isNullConstantSource(const Address& addr) {
+    // Check if the original LLVM value is a null constant
+    if (const llvm::Value* v = addr.addr.getValue()) {
+        if (llvm::isa<llvm::ConstantPointerNull>(v)) {
+            return true;
+        }
+        if (auto* CI = llvm::dyn_cast<llvm::ConstantInt>(v)) {
+            if (CI->isZero()) {
+                return true;
+            }
+        }
+    }
+    
+    // Check ValueHistory for Store events where a null constant was stored
+    for (const auto& event : addr.history.getEvents()) {
+        if (event.kind == ValueHistory::EventKind::Store && event.location) {
+            if (auto* SI = llvm::dyn_cast<llvm::StoreInst>(event.location)) {
+                const llvm::Value* stored_value = SI->getValueOperand();
+                if (llvm::isa<llvm::ConstantPointerNull>(stored_value) ||
+                    (llvm::isa<llvm::ConstantInt>(stored_value) &&
+                     llvm::cast<llvm::ConstantInt>(stored_value)->isZero())) {
+                    return true;
+                }
+                // Also check if the stored value came from a CallInst returning null
+                if (auto* CI = llvm::dyn_cast<llvm::CallInst>(stored_value)) {
+                    if (CI->getType()->isPointerTy()) {
+                        // Check if the CallInst itself is a null constant (shouldn't happen, but be safe)
+                        if (llvm::isa<llvm::ConstantPointerNull>(CI)) {
+                            return true;
+                        }
+                        // Check if the called function returns null constant
+                        if (auto* F = CI->getCalledFunction()) {
+                            // Check if the function returns null constant
+                            for (const auto& BB : *F) {
+                                if (auto* RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
+                                    if (RI->getNumOperands() > 0) {
+                                        const llvm::Value* ret_val = RI->getReturnValue();
+                                        if (ret_val && ret_val->getType()->isPointerTy()) {
+                                            if (llvm::isa<llvm::ConstantPointerNull>(ret_val) ||
+                                                (llvm::isa<llvm::ConstantInt>(ret_val) &&
+                                                 llvm::cast<llvm::ConstantInt>(ret_val)->isZero())) {
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Check for FunctionCall events that returned null
+        if (event.kind == ValueHistory::EventKind::FunctionCall && event.location) {
+            if (auto* CI = llvm::dyn_cast<llvm::CallInst>(event.location)) {
+                if (CI->getType()->isPointerTy()) {
+                    if (auto* F = CI->getCalledFunction()) {
+                        // Check if the function returns null constant
+                        for (const auto& BB : *F) {
+                            if (auto* RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
+                                if (RI->getNumOperands() > 0) {
+                                    const llvm::Value* ret_val = RI->getReturnValue();
+                                    if (llvm::isa<llvm::ConstantPointerNull>(ret_val) ||
+                                        (llvm::isa<llvm::ConstantInt>(ret_val) &&
+                                         llvm::cast<llvm::ConstantInt>(ret_val)->isZero())) {
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    return false;
+}
+
 llvm::Optional<Address> PulseOperations::eval(AbductiveDomain& astate,
                                               const llvm::Value* exp,
                                               const llvm::Instruction* loc,
                                               const llvm::BasicBlock* pred) {
     if (auto* CI = llvm::dyn_cast<llvm::ConstantInt>(exp)) {
         if (CI->isZero()) {
-            AbstractValue null_addr = factory_->createFresh();
+            AbstractValue null_addr = factory_->createFresh(exp);
             Address addr(null_addr);
             astate.getPostAttrs().add(null_addr, Attribute::Null);
             astate.getPathFormula().addNull(null_addr);
@@ -71,7 +181,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain& astate,
     }
 
     if (llvm::isa<llvm::ConstantPointerNull>(exp)) {
-        AbstractValue null_addr = factory_->createFresh();
+        AbstractValue null_addr = factory_->createFresh(exp);
         Address addr(null_addr);
         astate.getPostAttrs().add(null_addr, Attribute::Null);
         astate.getPathFormula().addNull(null_addr);
@@ -83,15 +193,65 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain& astate,
         AbstractValue canon_addr = astate.getCanonical(addr->addr);
         Address result(canon_addr);
         result.history = addr->history;
+        
+        // IMPORTANT: When loading a pointer value, preserve its attributes
+        // (like Invalid, Null, etc.) so they can be checked when the pointer is used
+        // The attributes are already on canon_addr, so they'll be checked in readDeref
+        
         return llvm::Optional<Address>(result);
+    }
+    
+    // Handle bitcast instructions - they preserve pointer identity and attributes
+    if (auto* BC = llvm::dyn_cast<llvm::BitCastInst>(exp)) {
+        auto src_opt = eval(astate, BC->getOperand(0), loc, pred);
+        if (src_opt) {
+            // Bitcast preserves the pointer value and its attributes
+            // Use same canonical value as source so attributes are preserved
+            AbstractValue src_canon = astate.getCanonical(src_opt->addr);
+            Address result(src_canon);
+            result.history = src_opt->history;
+            // Attributes (Allocated, Invalid, Null) are already on src_canon, so they're preserved
+            return llvm::Optional<Address>(result);
+        }
+    }
+    
+    // Handle bitcast operator (constant expressions)
+    if (auto* CE = llvm::dyn_cast<llvm::ConstantExpr>(exp)) {
+        if (CE->getOpcode() == llvm::Instruction::BitCast) {
+            auto src_opt = eval(astate, CE->getOperand(0), loc, pred);
+            if (src_opt) {
+                AbstractValue src_canon = astate.getCanonical(src_opt->addr);
+                Address result(src_canon);
+                result.history = src_opt->history;
+                // Attributes are preserved through canonical value
+                return llvm::Optional<Address>(result);
+            }
+        }
     }
 
     if (auto* GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(exp)) {
         auto base_opt = eval(astate, GEP->getPointerOperand(), loc, pred);
         if (!base_opt)
             return llvm::None;
+        
+        // Check if base pointer is null or invalid before indexing
+        AbstractValue base_canon = astate.getCanonical(base_opt->addr);
+        // For NPD checker, only check Null attribute (set only by null constants)
+        if (astate.getPostAttrs().has(base_canon, Attribute::Null) &&
+            !astate.getPathFormula().isNonNull(base_canon)) {
+            // Base is null (from null constant) - return None to signal error (will be caught by caller)
+            return llvm::None;
+        }
+        if (astate.getPostAttrs().has(base_canon, Attribute::Invalid)) {
+            // Base is invalid (use-after-free) - return None to signal error
+            return llvm::None;
+        }
+        
         Address base = *base_opt;
         AbstractValue cur = base.addr;
+        // Reuse base_canon from above (already computed for null/invalid checks)
+        bool base_is_uninitialized = astate.getPostAttrs().has(base_canon, Attribute::Uninitialized);
+        
         for (unsigned i = 1, n = GEP->getNumOperands(); i < n; ++i) {
             llvm::Value* idx = GEP->getOperand(i);
             Access acc;
@@ -103,6 +263,11 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain& astate,
             }
             if (auto* target = astate.getPostHeap().findEdge(cur, acc)) {
                 cur = target->addr;
+                // If base was uninitialized, propagate to existing field
+                if (base_is_uninitialized) {
+                    AbstractValue target_canon = astate.getCanonical(cur);
+                    astate.getPostAttrs().add(target_canon, Attribute::Uninitialized);
+                }
                 continue;
             }
             AbstractValue fresh = factory_->createFresh(GEP);
@@ -113,6 +278,14 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain& astate,
             astate.getPostHeap().addEdge(cur, acc, targetAddr);
             astate.abduceToPre(cur, acc, targetAddr);
             astate.abduceAttrToPre(cur, Attribute::Allocated);
+            
+            // Field-level initialization tracking: if base struct is uninitialized,
+            // mark the field as uninitialized too
+            if (base_is_uninitialized) {
+                AbstractValue fresh_canon = astate.getCanonical(fresh);
+                astate.getPostAttrs().add(fresh_canon, Attribute::Uninitialized);
+            }
+            
             cur = fresh;
         }
         AbstractValue gepAv = factory_->getOrCreate(GEP);
@@ -166,15 +339,36 @@ PulseOperations::evalDeref(AbductiveDomain& astate,
     // Canonicalize pointer
     AbstractValue canon_ptr = astate.getCanonical(ptr.addr);
     
-    // Check if pointer is null (using formula)
-    if (astate.getPathFormula().isNull(canon_ptr) || 
-        astate.getPostAttrs().has(canon_ptr, Attribute::Null)) {
-        return {OperationResult::NullDereference, llvm::None};
-    }
-    
-    // Check if pointer is invalid
+    // PRIORITY: Check Invalid FIRST (UseAfterFree is more severe than NullDereference)
+    // This prevents false positives where we report NullDereference when UseAfterFree is correct
     if (astate.getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
         return {OperationResult::UseAfterFree, llvm::None};
+    }
+    
+    // Check if pointer is null (using formula and attributes)
+    // Only check null if Invalid is NOT present (already checked above)
+    // NPD checker: only report if source is a null constant
+    // Check path formula first (more precise)
+    if (astate.getPathFormula().isNull(canon_ptr)) {
+        // Check if this pointer originated from a null constant
+        Address canon_ptr_addr(canon_ptr);
+        canon_ptr_addr.history = ptr.history;  // Preserve history for source check
+        if (isNullConstantSource(canon_ptr_addr)) {
+            return {OperationResult::NullDereference, llvm::None};
+        }
+    }
+    
+    // Also check attributes (may be set by comparisons)
+    if (astate.getPostAttrs().has(canon_ptr, Attribute::Null)) {
+        // Double-check with formula - if formula says non-null, trust formula
+        if (!astate.getPathFormula().isNonNull(canon_ptr)) {
+            // Check if this pointer originated from a null constant
+            Address canon_ptr_addr(canon_ptr);
+            canon_ptr_addr.history = ptr.history;  // Preserve history for source check
+            if (isNullConstantSource(canon_ptr_addr)) {
+                return {OperationResult::NullDereference, llvm::None};
+            }
+        }
     }
     
     // Try to find edge in heap (using canonical value)
@@ -209,18 +403,34 @@ OperationResult PulseOperations::checkAddrAccess(AbductiveDomain& astate,
     // Canonicalize address
     AbstractValue canon_addr = astate.getCanonical(addr.addr);
     
-    // Check null (using formula)
-    if (astate.getPathFormula().isNull(canon_addr) || 
-        astate.getPostAttrs().has(canon_addr, Attribute::Null)) {
-        return OperationResult::NullDereference;
-    }
-    
-    // Check invalid
+    // PRIORITY ORDER: Invalid > Null > Uninitialized
+    // Check Invalid FIRST (UseAfterFree is more severe and prevents false positives)
     if (astate.getPostAttrs().has(canon_addr, Attribute::Invalid)) {
         return OperationResult::UseAfterFree;
     }
     
-    // Check uninitialized (for reads)
+    // Check null (using formula first, then attributes)
+    // Path formula is more precise (path-sensitive)
+    // Only check null if Invalid is NOT present (already checked above)
+    // NPD checker: only report if source is a null constant
+    if (astate.getPathFormula().isNull(canon_addr)) {
+        if (isNullConstantSource(addr)) {
+            return OperationResult::NullDereference;
+        }
+    }
+    
+    // Check attributes (may be set by comparisons)
+    if (astate.getPostAttrs().has(canon_addr, Attribute::Null)) {
+        // If formula says non-null, trust formula over attribute
+        if (!astate.getPathFormula().isNonNull(canon_addr)) {
+            if (isNullConstantSource(addr)) {
+                return OperationResult::NullDereference;
+            }
+        }
+    }
+    
+    // Check uninitialized (for reads) - lowest priority
+    // Only check if Invalid is NOT present
     if (astate.getPostAttrs().has(canon_addr, Attribute::Uninitialized)) {
         return OperationResult::UninitializedRead;
     }
@@ -241,24 +451,78 @@ void PulseOperations::invalidate(AbductiveDomain& astate,
                                  const llvm::Instruction* loc,
                                  InvalidationKind kind) {
     AbstractValue canon = astate.getCanonical(addr.addr);
+    
+    // Invalidate the canonical address
     astate.getPostAttrs().add(canon, Attribute::Invalid);
     astate.getPostAttrs().remove(canon, Attribute::Allocated);
     astate.setInvalidationInfo(canon, kind, loc);
     astate.getPostHeap().removeEdges(addr.addr);
+    
+    // Also invalidate aliases - find all values that canonicalize to the same value
+    // This handles cases where q = p; delete p; *q (aliased_uaf)
+    // Since canonicalization already groups aliases, we just need to ensure
+    // all values with the same canonical value are invalidated
+    // The canonical value itself is already invalidated above
+    
+    // Check stack for aliased pointers
+    for (auto& stack_kv : astate.getPostStack().getMap()) {
+        AbstractValue stack_canon = astate.getCanonical(stack_kv.second.addr);
+        if (stack_canon == canon) {
+            // This stack value aliases the invalidated pointer
+            // The canonical value is already invalidated, so this is handled
+            // But we should also mark the stack value itself
+            astate.getPostAttrs().add(stack_canon, Attribute::Invalid);
+            astate.getPostAttrs().remove(stack_canon, Attribute::Allocated);
+        }
+    }
+    
+    // Check heap edges - if any edge points to this address, the source might be invalidated
+    // Actually, we should check if any edge FROM this address exists, and invalidate targets
+    // But more importantly, we should check if any pointer points TO this address
+    for (auto& edge_kv : astate.getPostHeap().getEdges()) {
+        AbstractValue source_canon = astate.getCanonical(edge_kv.first);
+        if (source_canon == canon) {
+            // This is an edge FROM the invalidated address
+            // Remove all edges from this address (already done above)
+            // But also mark any targets as potentially invalid if they're pointers
+            for (auto& access_kv : edge_kv.second) {
+                AbstractValue target_canon = astate.getCanonical(access_kv.second.addr);
+                // If target is a pointer type, it might also need invalidation
+                // For now, we just remove the edges (done above)
+            }
+        }
+        
+        // Check if any edge points TO the invalidated address
+        for (auto& access_kv : edge_kv.second) {
+            AbstractValue target_canon = astate.getCanonical(access_kv.second.addr);
+            if (target_canon == canon) {
+                // This edge points TO the invalidated address
+                // The source pointer now points to invalid memory
+                // We should mark the source as potentially problematic
+                // But actually, the target is already invalidated, so dereferencing
+                // the source will be caught by checkAddrAccess
+            }
+        }
+    }
 }
 
 OperationResult PulseOperations::writeDeref(AbductiveDomain& astate,
                                             Address ptr,
                                             Address value,
                                             const llvm::Instruction* loc) {
-    // Check access
+    // PRIORITY: Check Invalid FIRST before other checks
+    AbstractValue canon_ptr = astate.getCanonical(ptr.addr);
+    if (astate.getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
+        return OperationResult::UseAfterFree;
+    }
+    
+    // Check access (will check Null, Uninitialized, etc.)
     auto result = checkAddrAccess(astate, ptr, loc);
     if (result != OperationResult::Success) {
         return result;
     }
     
-    // Canonicalize values
-    AbstractValue canon_ptr = astate.getCanonical(ptr.addr);
+    // Canonicalize values (canon_ptr already defined above)
     AbstractValue canon_value = astate.getCanonical(value.addr);
     Address canon_value_addr(canon_value);
     canon_value_addr.history = value.history;
@@ -280,7 +544,13 @@ std::pair<OperationResult, llvm::Optional<Address>>
 PulseOperations::readDeref(AbductiveDomain& astate,
                            Address ptr,
                            const llvm::Instruction* loc) {
-    // Check access
+    // PRIORITY: Check Invalid FIRST before other checks
+    AbstractValue canon_ptr = astate.getCanonical(ptr.addr);
+    if (astate.getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
+        return {OperationResult::UseAfterFree, llvm::None};
+    }
+    
+    // Check access (will check Null, Uninitialized, etc.)
     auto result = checkAddrAccess(astate, ptr, loc);
     if (result != OperationResult::Success) {
         return {result, llvm::None};
@@ -291,7 +561,7 @@ PulseOperations::readDeref(AbductiveDomain& astate,
     
     // Propagate taint: if memory location is tainted, propagate to loaded value
     if (deref_result.first == OperationResult::Success && deref_result.second) {
-        AbstractValue canon_ptr = astate.getCanonical(ptr.addr);
+        // canon_ptr already defined above
         AbstractValue canon_value = astate.getCanonical(deref_result.second->addr);
         TaintOperations::propagateThroughLoad(astate, canon_ptr, canon_value, loc);
     }

@@ -57,7 +57,6 @@ private:
     int useAfterFreeTypeId_;
     int nullDerefTypeId_;
     int uninitializedReadTypeId_;
-    int memoryLeakTypeId_;
     int unnecessaryCopyTypeId_;
     int constRefableParamTypeId_;
     int taintErrorTypeId_;
