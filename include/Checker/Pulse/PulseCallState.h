@@ -2,13 +2,14 @@
 #define CHECKER_PULSE_PULSECALLSTATE_H
 
 #include "Checker/Pulse/PulseMemory.h"
+#include "Checker/Pulse/PulseSpecialization.h"
 #include "Checker/Pulse/PulseSubstitution.h"
 #include "Checker/Pulse/PulseValueHistory.h"
-#include "Checker/Pulse/PulseSpecialization.h"
 #include <llvm/ADT/Optional.h>
 #include <llvm/IR/Value.h>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 // Forward declarations
@@ -95,12 +96,26 @@ public:
             if (kind_ == Kind::Unsupported || !pvar_) {
                 return llvm::None;
             }
-            // Convert to HeapPath (reverse stack_ since HeapPath stores reversed)
             std::vector<HeapPath::Element> path_elements;
-            // Start with Pvar
-            // Then add elements from stack_ in reverse order
-            // Implementation depends on HeapPath structure
-            return llvm::None;  // TODO: Implement conversion
+            path_elements.push_back(HeapPath::Element(HeapPath::PathElement::Pvar));
+            for (const Access& acc : stack_) {
+                switch (acc.kind) {
+                    case AccessKind::Dereference:
+                        path_elements.push_back(
+                            HeapPath::Element(HeapPath::PathElement::Dereference));
+                        break;
+                    case AccessKind::Field:
+                        path_elements.push_back(HeapPath::Element(
+                            HeapPath::PathElement::FieldAccess,
+                            "f" + std::to_string(acc.field_idx)));
+                        break;
+                    case AccessKind::ArrayIndex:
+                        path_elements.push_back(HeapPath::Element(
+                            HeapPath::PathElement::ArrayIndex, acc.index));
+                        break;
+                }
+            }
+            return HeapPath(path_elements);
         }
         
         bool isSupported() const { return kind_ == Kind::Supported; }

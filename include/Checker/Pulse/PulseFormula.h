@@ -77,8 +77,11 @@ private:
     // Track if a value is known to be an integer
     std::set<AbstractValue> integer_values_;
     
-    // Find canonical representative (with path compression)
+    // Find canonical representative (with path compression). Mutates equalities_.
     AbstractValue findRep(AbstractValue v);
+
+    // Follow equality chain without mutating. For use in const methods (e.g. isConsistent).
+    AbstractValue findRepReadOnly(AbstractValue v) const;
 
     static std::pair<AbstractValue, AbstractValue> normalizePair(AbstractValue v1,
                                                                  AbstractValue v2);

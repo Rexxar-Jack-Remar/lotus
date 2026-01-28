@@ -1,6 +1,6 @@
 #include "Checker/Pulse/PulseContradiction.h"
-#include "Checker/Pulse/PulseFormula.h"
 #include "Checker/Pulse/PulseCallState.h"
+#include "Checker/Pulse/PulseFormula.h"
 #include <algorithm>
 
 namespace pulse {
@@ -263,7 +263,7 @@ llvm::Optional<Contradiction> checkAliasingWithAllAliases(
         }
         
         if (all_distinct) {
-            // Try to get heap paths from call_state
+            // Try to get heap paths from call_state when available
             std::vector<HeapPath> paths;
             if (call_state) {
                 AbstractValue actual = kv.first;
@@ -275,13 +275,9 @@ llvm::Optional<Contradiction> checkAliasingWithAllAliases(
                     }
                 }
             }
-            
-            // If we have paths, add to alias classes
-            if (!paths.empty() || !call_state) {
-                // For now, create empty paths if call_state not available
-                // In full implementation, would extract paths properly
-                alias_classes.push_back(paths);
-            }
+            // Always add alias class when formals are distinct (aliasing contradiction).
+            // Use heap paths when available from call_state; otherwise empty (legacy).
+            alias_classes.push_back(paths);
         }
     }
     

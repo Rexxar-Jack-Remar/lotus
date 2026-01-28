@@ -5,6 +5,7 @@
 #include "Checker/KINT/Options.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
+#include "Checker/Report/SuppressionManager.h"
 
 #include <llvm/IR/PassManager.h>
 #include <llvm/IRReader/IRReader.h>
@@ -141,11 +142,31 @@ int main(int argc, char **argv) {
     // Run analysis pipeline (bugs are automatically reported to BugReportMgr)
     MPM.run(*M, MAM);
     
-    // Print bug report summary
+    // Post-processing: Suppression and Deduplication
     BugReportMgr& mgr = BugReportMgr::get_instance();
+    
+    // 1. Load and apply suppressions
+    if (!report_options::SuppressionFile.empty()) {
+        SuppressionManager suppMgr;
+        if (suppMgr.loadFromFile(report_options::SuppressionFile)) {
+            mgr.setSuppressionManager(&suppMgr);
+            mgr.filterSuppressed();
+            auto stats = suppMgr.getStats();
+            llvm::outs() << "\nApplied suppressions: " << stats.totalSuppressions 
+                        << " across " << stats.totalFiles << " files\n";
+        } else {
+            llvm::errs() << "Warning: Could not load suppressions from: " 
+                        << report_options::SuppressionFile << "\n";
+        }
+    }
+    
+    // 2. Final deduplication (enhanced algorithm)
+    mgr.deduplicate_reports(true);
+    
+    // 3. Print bug report summary
     mgr.print_summary(llvm::outs());
     
-    // Handle centralized output formats (applies to all checkers)
+    // 4. Handle centralized output formats (applies to all checkers)
     if (!report_options::JsonOutputFile.empty()) {
         std::error_code EC;
         llvm::raw_fd_ostream json_out(report_options::JsonOutputFile, EC, llvm::sys::fs::OF_None);
@@ -157,9 +178,16 @@ int main(int argc, char **argv) {
         }
     }
     
+    // 5. Generate SARIF report if requested
     if (!report_options::SarifOutputFile.empty()) {
-        // SARIF output would be implemented in BugReportMgr
-        llvm::outs() << "\nNote: SARIF output support coming soon (centralized in BugReportMgr)\n";
+        std::error_code EC;
+        llvm::raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC, llvm::sys::fs::OF_None);
+        if (!EC) {
+            mgr.generate_sarif_report(sarif_out, report_options::MinConfidenceScore);
+            llvm::outs() << "\nSARIF report written to: " << report_options::SarifOutputFile << "\n";
+        } else {
+            llvm::errs() << "Error writing SARIF report: " << EC.message() << "\n";
+        }
     }
     
     return 0;

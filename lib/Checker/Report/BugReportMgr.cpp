@@ -1,6 +1,8 @@
 #include "Checker/Report/BugReportMgr.h"
+#include "Checker/Report/SARIF.h"
 #include <llvm/Support/ManagedStatic.h>
 #include <algorithm>
+#include <set>
 #include <unordered_set>
 
 static llvm::ManagedStatic<BugReportMgr> global_bug_report_mgr;
@@ -99,32 +101,181 @@ bool BugReportMgr::is_duplicate(int ty_id, const BugReport* report, bool use_tra
     return false;
 }
 
+BugReportMgr::Location BugReportMgr::getPrimaryLocation(const BugReport* report) const {
+    Location loc;
+    const auto& steps = report->get_steps();
+    if (!steps.empty()) {
+        const BugDiagStep* primary = steps[0];
+        loc.file = primary->src_file;
+        loc.line = primary->src_line;
+        loc.column = primary->src_column;
+    }
+    return loc;
+}
+
+std::vector<BugReportMgr::Location> BugReportMgr::getTraceEndLocations(const BugReport* report) const {
+    std::vector<Location> endLocs;
+    const auto& steps = report->get_steps();
+    
+    // Get the last step (end of trace)
+    if (!steps.empty()) {
+        const BugDiagStep* last = steps.back();
+        Location loc;
+        loc.file = last->src_file;
+        loc.line = last->src_line;
+        loc.column = last->src_column;
+        endLocs.push_back(loc);
+    }
+    
+    return endLocs;
+}
+
+void BugReportMgr::sortByDecreasingPreference(std::vector<BugReport*>& reports) const {
+    // Sort by trace length (shorter = preferred), then by hash, then by full comparison
+    std::sort(reports.begin(), reports.end(), 
+        [](const BugReport* a, const BugReport* b) {
+            // Prefer shorter traces
+            int lenA = a->get_steps().size();
+            int lenB = b->get_steps().size();
+            if (lenA != lenB) {
+                return lenA < lenB;
+            }
+            
+            // Then by hash
+            size_t hashA = a->compute_hash(true);
+            size_t hashB = b->compute_hash(true);
+            if (hashA != hashB) {
+                return hashA < hashB;
+            }
+            
+            // Finally by primary location
+            Location locA, locB;
+            if (!a->get_steps().empty()) {
+                const auto* stepA = a->get_steps()[0];
+                locA.file = stepA->src_file;
+                locA.line = stepA->src_line;
+                locA.column = stepA->src_column;
+            }
+            if (!b->get_steps().empty()) {
+                const auto* stepB = b->get_steps()[0];
+                locB.file = stepB->src_file;
+                locB.line = stepB->src_line;
+                locB.column = stepB->src_column;
+            }
+            return locA < locB;
+        });
+}
+
+void BugReportMgr::sortByLocation(std::vector<BugReport*>& reports) const {
+    std::sort(reports.begin(), reports.end(),
+        [this](const BugReport* a, const BugReport* b) {
+            Location locA = getPrimaryLocation(a);
+            Location locB = getPrimaryLocation(b);
+            return locA < locB;
+        });
+}
+
 void BugReportMgr::deduplicate_reports(bool use_trace) {
     // Clear existing hash map
     report_hashes.clear();
     
-    // Rebuild with deduplication
+    // Enhanced deduplication inspired by Infer's dedup function
     for (auto& pair : reports) {
         int ty_id = pair.first;
         std::vector<BugReport*>& report_list = pair.second;
         
-        std::unordered_set<size_t> seen_hashes;
+        if (report_list.empty()) {
+            continue;
+        }
+        
+        // Step 1: Sort by decreasing preference (shorter traces first)
+        sortByDecreasingPreference(report_list);
+        
+        // Step 2: Deduplicate using location-based tracking
+        std::set<std::vector<Location>> reportedEnds;  // Set of location lists
         std::vector<BugReport*> deduplicated;
         
         for (BugReport* report : report_list) {
-            size_t hash = report->compute_hash(use_trace);
+            bool isDuplicate = false;
             
-            if (seen_hashes.find(hash) == seen_hashes.end()) {
-                seen_hashes.insert(hash);
-                deduplicated.push_back(report);
-                report_hashes[hash] = report;
+            if (use_trace) {
+                // Check trace end locations
+                std::vector<Location> endLocs = getTraceEndLocations(report);
+                if (!endLocs.empty()) {
+                    // Sort locations for consistent comparison
+                    std::sort(endLocs.begin(), endLocs.end());
+                    
+                    if (reportedEnds.find(endLocs) != reportedEnds.end()) {
+                        isDuplicate = true;
+                    } else {
+                        reportedEnds.insert(endLocs);
+                    }
+                }
             } else {
-                // Duplicate found, delete it
+                // Check primary location
+                Location primary = getPrimaryLocation(report);
+                std::vector<Location> singleLoc = {primary};
+                if (reportedEnds.find(singleLoc) != reportedEnds.end()) {
+                    isDuplicate = true;
+                } else {
+                    reportedEnds.insert(singleLoc);
+                }
+            }
+            
+            if (!isDuplicate) {
+                // Also check hash-based deduplication
+                size_t hash = report->compute_hash(use_trace);
+                if (report_hashes.find(hash) == report_hashes.end()) {
+                    deduplicated.push_back(report);
+                    report_hashes[hash] = report;
+                } else {
+                    isDuplicate = true;
+                }
+            }
+            
+            if (isDuplicate) {
                 delete report;
             }
         }
         
+        // Step 3: Sort by location for final output
+        sortByLocation(deduplicated);
+        
         report_list = std::move(deduplicated);
+    }
+}
+
+void BugReportMgr::filterSuppressed() {
+    if (!suppressionMgr) {
+        return;
+    }
+    
+    for (auto& pair : reports) {
+        int ty_id = pair.first;
+        std::vector<BugReport*>& report_list = pair.second;
+        
+        if (report_list.empty()) {
+            continue;
+        }
+        
+        // Get bug type name
+        const BugType& bugType = get_bug_type_info(ty_id);
+        std::string issueType = bugType.bug_name.str();
+        
+        std::vector<BugReport*> filtered;
+        
+        for (BugReport* report : report_list) {
+            Location primary = getPrimaryLocation(report);
+            
+            if (!suppressionMgr->isSuppressed(issueType, primary.file, primary.line)) {
+                filtered.push_back(report);
+            } else {
+                // Suppressed, delete it
+                delete report;
+            }
+        }
+        
+        report_list = std::move(filtered);
     }
 }
 
@@ -252,5 +403,104 @@ int BugReportMgr::get_total_reports() const {
         total += pair.second.size();
     }
     return total;
+}
+
+void BugReportMgr::generate_sarif_report(llvm::raw_ostream& OS, int min_score) const {
+    sarif::SarifLog sarifLog("Lotus", "1.0.0");
+    sarifLog.setToolInformationUri("https://github.com/ZJU-PL/lotus");
+    
+    // Add rules for all bug types
+    for (size_t i = 0; i < bug_types.size(); ++i) {
+        const BugType& bugType = bug_types[i];
+        std::string helpUri = "https://zju-pl.github.io/lotus/docs/bugs/" + 
+                             bugType.bug_name.str();
+        std::string category = BugDescription::to_string(bugType.classification);
+        
+        sarif::Rule rule(bugType.bug_name.str(), 
+                        bugType.bug_name.str(),
+                        bugType.desc.str(),
+                        helpUri,
+                        category);
+        sarifLog.addRule(rule);
+    }
+    
+    // Add results
+    for (size_t ty_id = 0; ty_id < bug_types.size(); ++ty_id) {
+        const auto* reportList = get_reports_for_type(ty_id);
+        if (!reportList || reportList->empty()) continue;
+        
+        const BugType& bugType = get_bug_type_info(ty_id);
+        std::string category = BugDescription::to_string(bugType.classification);
+        
+        for (const BugReport* report : *reportList) {
+            if (report->get_conf_score() < min_score) continue;
+            
+            const auto& steps = report->get_steps();
+            if (steps.empty()) continue;
+            
+            // Create SARIF result
+            std::string message = steps[0]->tip;
+            if (report->get_extras() && !report->get_extras()->suggestion.empty()) {
+                message += ". Suggestion: " + report->get_extras()->suggestion;
+            }
+            
+            sarif::Result result(bugType.bug_name.str(), message);
+            
+            // Determine severity based on importance
+            sarif::Level level = sarif::Level::Warning;
+            if (bugType.importance == BugDescription::BI_HIGH) {
+                level = sarif::Level::Error;
+            } else if (bugType.importance == BugDescription::BI_LOW) {
+                level = sarif::Level::Note;
+            }
+            result.level = level;
+            
+            // Add primary location
+            if (!steps[0]->src_file.empty()) {
+                sarif::Location primaryLoc(steps[0]->src_file, 
+                                          steps[0]->src_line, 
+                                          steps[0]->src_column);
+                if (!steps[0]->func_name.empty()) {
+                    primaryLoc.function = steps[0]->func_name;
+                }
+                result.locations.push_back(primaryLoc);
+            }
+            
+            // Add code flow (trace)
+            if (steps.size() > 1) {
+                sarif::CodeFlow codeFlow;
+                codeFlow.message = "Execution trace leading to issue";
+                
+                for (size_t i = 0; i < steps.size(); ++i) {
+                    const auto* step = steps[i];
+                    if (step->src_file.empty()) continue;
+                    
+                    sarif::Location tflLoc(step->src_file, step->src_line, step->src_column);
+                    if (!step->func_name.empty()) {
+                        tflLoc.function = step->func_name;
+                    }
+                    sarif::ThreadFlowLocation tfl(tflLoc, step->tip);
+                    tfl.nestingLevel = step->trace_level;
+                    tfl.executionOrder = static_cast<int>(i);
+                    if (!step->func_name.empty()) {
+                        tfl.location.function = step->func_name;
+                    }
+                    codeFlow.threadFlowLocations.push_back(tfl);
+                }
+                
+                if (!codeFlow.threadFlowLocations.empty()) {
+                    result.codeFlows.push_back(codeFlow);
+                }
+            }
+            
+            // Set category
+            result.category = category;
+            
+            sarifLog.addResult(result);
+        }
+    }
+    
+    // Write SARIF
+    sarifLog.writeToStream(OS, true);
 }
 

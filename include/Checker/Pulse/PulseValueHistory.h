@@ -1,11 +1,11 @@
 #ifndef CHECKER_PULSE_PULSEVALUEHISTORY_H
 #define CHECKER_PULSE_PULSEVALUEHISTORY_H
 
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
-#include <llvm/IR/Value.h>
-#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Value.h>
 #include <memory>
 #include <string>
 #include <vector>

@@ -9,6 +9,8 @@
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Checker/Pulse/PulseLogger.h"
 #include "Checker/Report/BugReportMgr.h"
+#include "Checker/Report/ReportOptions.h"
+#include "Checker/Report/SuppressionManager.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -85,14 +87,34 @@ int main(int argc, char** argv) {
         PulseLogger::printStats();
     }
 
-    // Print bug summary
+    // Post-processing: Suppression and Deduplication
     BugReportMgr& mgr = BugReportMgr::get_instance();
+    
+    // 1. Load and apply suppressions
+    if (!report_options::SuppressionFile.empty()) {
+        SuppressionManager suppMgr;
+        if (suppMgr.loadFromFile(report_options::SuppressionFile)) {
+            mgr.setSuppressionManager(&suppMgr);
+            mgr.filterSuppressed();
+            auto stats = suppMgr.getStats();
+            outs() << "\nApplied suppressions: " << stats.totalSuppressions 
+                   << " across " << stats.totalFiles << " files\n";
+        } else {
+            errs() << "Warning: Could not load suppressions from: " 
+                   << report_options::SuppressionFile << "\n";
+        }
+    }
+    
+    // 2. Final deduplication (enhanced algorithm)
+    mgr.deduplicate_reports(true);
+    
+    // 3. Print bug summary
     if (mgr.get_total_reports() > 0) {
         outs() << "\n";
         mgr.print_summary(outs());
     }
 
-    // Generate JSON report if requested
+    // 4. Generate JSON report if requested
     if (!JsonOutput.empty()) {
         std::error_code EC;
         raw_fd_ostream json_out(JsonOutput, EC);
@@ -103,6 +125,19 @@ int main(int argc, char** argv) {
         mgr.generate_json_report(json_out, MinScore);
         json_out.close();
         outs() << "\nJSON report written to: " << JsonOutput << "\n";
+    }
+    
+    // 5. Generate SARIF report if requested
+    if (!report_options::SarifOutputFile.empty()) {
+        std::error_code EC;
+        raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC);
+        if (EC) {
+            errs() << "Error opening SARIF output file: " << EC.message() << "\n";
+            return 1;
+        }
+        mgr.generate_sarif_report(sarif_out, std::max(MinScore, report_options::MinConfidenceScore));
+        sarif_out.close();
+        outs() << "\nSARIF report written to: " << report_options::SarifOutputFile << "\n";
     }
 
     PulseLogger::info("Analysis complete");

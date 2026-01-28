@@ -2,8 +2,8 @@
 #define CHECKER_PULSE_PULSETAINT_H
 
 #include "Checker/Pulse/PulseAbstractValue.h"
-#include "Checker/Pulse/PulseValueHistory.h"
 #include "Checker/Pulse/PulseTaintConfig.h"
+#include "Checker/Pulse/PulseValueHistory.h"
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <map>

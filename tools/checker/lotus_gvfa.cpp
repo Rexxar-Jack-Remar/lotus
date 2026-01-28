@@ -14,6 +14,8 @@
 #include "Checker/GVFA/UseAfterFreeChecker.h"
 #include "Checker/GVFA/UseOfUninitializedVariableChecker.h"
 #include "Checker/Report/BugReportMgr.h"
+#include "Checker/Report/ReportOptions.h"
+#include "Checker/Report/SuppressionManager.h"
 #include "Utils/LLVM/RecursiveTimer.h"
 
 #include <llvm/IR/LegacyPassManager.h>
@@ -125,27 +127,64 @@ int main(int argc, char **argv) {
         GVFA.printOnlineQueryTime(outs(), "Online Query");
     }
     
-    // Print bug report summary
+    // Post-processing: Suppression and Deduplication
     BugReportMgr& bugMgr = BugReportMgr::get_instance();
+    
+    // 1. Load and apply suppressions
+    if (!report_options::SuppressionFile.empty()) {
+        SuppressionManager suppMgr;
+        if (suppMgr.loadFromFile(report_options::SuppressionFile)) {
+            bugMgr.setSuppressionManager(&suppMgr);
+            bugMgr.filterSuppressed();
+            auto stats = suppMgr.getStats();
+            outs() << "\nApplied suppressions: " << stats.totalSuppressions 
+                   << " across " << stats.totalFiles << " files\n";
+        } else {
+            errs() << "Warning: Could not load suppressions from: " 
+                   << report_options::SuppressionFile << "\n";
+        }
+    }
+    
+    // 2. Final deduplication (enhanced algorithm)
+    bugMgr.deduplicate_reports(true);
+    
+    // 3. Print bug report summary
     outs() << "\n=== Bug Report Summary ===\n";
     {
         RecursiveTimer Timer("PrintBugReportSummary");
         bugMgr.print_summary(outs());
     }
     
-    // Generate JSON report if requested
-    if (!JsonOutput.empty()) {
+    // 4. Generate JSON report if requested
+    int effectiveMinScore = std::max(MinScore, report_options::MinConfidenceScore);
+    if (!JsonOutput.empty() || !report_options::JsonOutputFile.empty()) {
+        std::string jsonFile = !JsonOutput.empty() ? JsonOutput : report_options::JsonOutputFile;
         std::error_code EC;
-        llvm::raw_fd_ostream JsonFile(JsonOutput, EC);
+        llvm::raw_fd_ostream JsonFile(jsonFile, EC);
         if (EC) {
             errs() << "Error opening JSON output file: " << EC.message() << "\n";
             return 1;
         }
         {
             RecursiveTimer Timer("GenerateJSONReport");
-            bugMgr.generate_json_report(JsonFile, MinScore);
+            bugMgr.generate_json_report(JsonFile, effectiveMinScore);
         }
-        outs() << "JSON report written to: " << JsonOutput << "\n";
+        outs() << "JSON report written to: " << jsonFile << "\n";
+    }
+    
+    // 5. Generate SARIF report if requested
+    if (!report_options::SarifOutputFile.empty()) {
+        std::error_code EC;
+        llvm::raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC);
+        if (EC) {
+            errs() << "Error opening SARIF output file: " << EC.message() << "\n";
+            return 1;
+        }
+        {
+            RecursiveTimer Timer("GenerateSARIFReport");
+            bugMgr.generate_sarif_report(sarif_out, effectiveMinScore);
+        }
+        outs() << "SARIF report written to: " << report_options::SarifOutputFile << "\n";
     }
     
     return 0;

@@ -5,6 +5,7 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 #include <fstream>
+#include <map>
 
 namespace sarif {
 
@@ -125,7 +126,7 @@ cJSON* CodeFlow::toJson() const {
     return codeFlow;
 }
 
-// Result implementation
+// Enhanced Result implementation
 cJSON* Result::toJson() const {
     cJSON* result = cJSON_CreateObject();
     
@@ -165,10 +166,38 @@ cJSON* Result::toJson() const {
         cJSON_AddItemToObject(result, "codeFlows", codeFlowsArray);
     }
     
+    // Enhanced fields
+    if (!fingerprint.empty()) {
+        cJSON_AddStringToObject(result, "fingerprints", fingerprint.c_str());
+    }
+    
+    if (!suppressionState.empty()) {
+        cJSON* suppressionsArray = cJSON_CreateArray();
+        cJSON* suppressionStateObj = cJSON_CreateObject();
+        cJSON_AddStringToObject(suppressionStateObj, "kind", suppressionState.c_str());
+        cJSON_AddItemToArray(suppressionsArray, suppressionStateObj);
+        cJSON_AddItemToObject(result, "suppressions", suppressionsArray);
+    }
+    
+    // Properties for additional metadata
+    cJSON* properties = cJSON_CreateObject();
+    if (!category.empty()) {
+        cJSON_AddStringToObject(properties, "category", category.c_str());
+    }
+    if (!censoredReason.empty()) {
+        cJSON_AddStringToObject(properties, "censoredReason", censoredReason.c_str());
+    }
+    
+    if (!category.empty() || !censoredReason.empty()) {
+        cJSON_AddItemToObject(result, "properties", properties);
+    } else {
+        cJSON_Delete(properties);
+    }
+    
     return result;
 }
 
-// Rule implementation
+// Enhanced Rule implementation
 cJSON* Rule::toJson() const {
     cJSON* rule = cJSON_CreateObject();
     
@@ -180,10 +209,46 @@ cJSON* Rule::toJson() const {
         cJSON_AddStringToObject(rule, "name", name.c_str());
     }
     
-    if (!description.empty()) {
+    // Short description (required by SARIF)
+    if (!shortDescription.empty()) {
+        cJSON* shortDesc = cJSON_CreateObject();
+        cJSON_AddStringToObject(shortDesc, "text", shortDescription.c_str());
+        cJSON_AddItemToObject(rule, "shortDescription", shortDesc);
+    } else if (!description.empty()) {
+        // Fallback to full description
         cJSON* shortDesc = cJSON_CreateObject();
         cJSON_AddStringToObject(shortDesc, "text", description.c_str());
         cJSON_AddItemToObject(rule, "shortDescription", shortDesc);
+    }
+    
+    // Full description (optional but recommended)
+    if (!description.empty() && description != shortDescription) {
+        cJSON* fullDesc = cJSON_CreateObject();
+        cJSON_AddStringToObject(fullDesc, "text", description.c_str());
+        cJSON_AddItemToObject(rule, "fullDescription", fullDesc);
+    }
+    
+    // Help URI (link to documentation)
+    if (!helpUri.empty()) {
+        cJSON_AddStringToObject(rule, "helpUri", helpUri.c_str());
+    }
+    
+    // Properties for additional metadata
+    cJSON* properties = cJSON_CreateObject();
+    bool hasProperties = false;
+    if (!category.empty()) {
+        cJSON_AddStringToObject(properties, "category", category.c_str());
+        hasProperties = true;
+    }
+    if (!severity.empty()) {
+        cJSON_AddStringToObject(properties, "defaultSeverity", severity.c_str());
+        hasProperties = true;
+    }
+    
+    if (hasProperties) {
+        cJSON_AddItemToObject(rule, "properties", properties);
+    } else {
+        cJSON_Delete(properties);
     }
     
     return rule;
@@ -191,7 +256,7 @@ cJSON* Rule::toJson() const {
 
 // SarifLog implementation
 SarifLog::SarifLog(const std::string& toolName, const std::string& version) 
-    : toolName(toolName), toolVersion(version) {}
+    : toolName(toolName), toolVersion(version), toolInformationUri("") {}
 
 void SarifLog::addRule(const Rule& rule) {
     rules.push_back(rule);
@@ -242,11 +307,15 @@ cJSON* SarifLog::toJsonDocument() const {
     cJSON* runsArray = cJSON_CreateArray();
     cJSON* run = cJSON_CreateObject();
     
-    // Tool information
+    // Tool information (enhanced)
     cJSON* tool = cJSON_CreateObject();
     cJSON* driver = cJSON_CreateObject();
     cJSON_AddStringToObject(driver, "name", toolName.c_str());
     cJSON_AddStringToObject(driver, "version", toolVersion.c_str());
+    
+    if (!toolInformationUri.empty()) {
+        cJSON_AddStringToObject(driver, "informationUri", toolInformationUri.c_str());
+    }
     
     if (!rules.empty()) {
         cJSON* rulesArray = cJSON_CreateArray();
@@ -258,6 +327,24 @@ cJSON* SarifLog::toJsonDocument() const {
     
     cJSON_AddItemToObject(tool, "driver", driver);
     cJSON_AddItemToObject(run, "tool", tool);
+    
+    // Add rule summary to run properties
+    if (!results.empty()) {
+        cJSON* runProperties = cJSON_CreateObject();
+        cJSON* ruleCounts = cJSON_CreateObject();
+        
+        std::map<std::string, int> counts;
+        for (const auto& result : results) {
+            counts[result.ruleId]++;
+        }
+        
+        for (const auto& pair : counts) {
+            cJSON_AddNumberToObject(ruleCounts, pair.first.c_str(), static_cast<int>(pair.second));
+        }
+        
+        cJSON_AddItemToObject(runProperties, "ruleCounts", ruleCounts);
+        cJSON_AddItemToObject(run, "properties", runProperties);
+    }
     
     // Results
     if (!results.empty()) {
@@ -281,8 +368,8 @@ Location createLocationFromDebugLoc(const llvm::DebugLoc& debugLoc) {
     Location location;
     
     if (debugLoc) {
-        location.line = debugLoc.getLine();
-        location.column = debugLoc.getCol();
+        location.line = static_cast<int>(debugLoc.getLine());
+        location.column = static_cast<int>(debugLoc.getCol());
         
         if (auto* scope = debugLoc.getScope()) {
             if (auto* diScope = llvm::dyn_cast<llvm::DIScope>(scope)) {
@@ -345,6 +432,13 @@ SarifBuilder& SarifBuilder::addRule(const std::string& id, const std::string& na
     return *this;
 }
 
+SarifBuilder& SarifBuilder::addRule(const std::string& id, const std::string& name,
+                                   const std::string& description, const std::string& helpUri,
+                                   const std::string& category) {
+    log.addRule(Rule(id, name, description, helpUri, category));
+    return *this;
+}
+
 SarifBuilder& SarifBuilder::addResult(const std::string& ruleId, const std::string& message,
                                      const std::string& file, int line, int column,
                                      Level level) {
@@ -355,8 +449,47 @@ SarifBuilder& SarifBuilder::addResult(const std::string& ruleId, const std::stri
     return *this;
 }
 
+SarifBuilder& SarifBuilder::addResult(const std::string& ruleId, const std::string& message,
+                                     const std::string& file, int line, int column,
+                                     Level level, const std::string& category) {
+    Result result(ruleId, message);
+    result.level = level;
+    result.category = category;
+    result.locations.push_back(Location(file, line, column));
+    log.addResult(result);
+    return *this;
+}
+
 SarifLog SarifBuilder::build() {
     return log;
+}
+
+std::vector<SarifLog::RuleSummary> SarifLog::getRuleSummary() const {
+    std::map<std::string, int> counts;
+    std::map<std::string, std::string> ruleNames;
+    
+    // Count results by rule ID
+    for (const auto& result : results) {
+        counts[result.ruleId]++;
+    }
+    
+    // Get rule names
+    for (const auto& rule : rules) {
+        ruleNames[rule.id] = rule.name;
+    }
+    
+    // Build summary
+    std::vector<RuleSummary> summary;
+    for (const auto& pair : counts) {
+        RuleSummary rs;
+        rs.ruleId = pair.first;
+        rs.count = pair.second;
+        auto it = ruleNames.find(pair.first);
+        rs.ruleName = (it != ruleNames.end()) ? it->second : pair.first;
+        summary.push_back(rs);
+    }
+    
+    return summary;
 }
 
 } // namespace sarif

@@ -24,6 +24,14 @@ llvm::cl::opt<std::string> SarifOutputFile(
     llvm::cl::cat(OutputCategory)
 );
 
+// Suppression file
+llvm::cl::opt<std::string> SuppressionFile(
+    "suppressions",
+    llvm::cl::desc("Path to suppression JSON file"),
+    llvm::cl::value_desc("filename"),
+    llvm::cl::cat(OutputCategory)
+);
+
 // Minimum confidence score filter
 llvm::cl::opt<int> MinConfidenceScore(
     "report-min-score",

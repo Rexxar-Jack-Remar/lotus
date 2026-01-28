@@ -3,9 +3,11 @@
 
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugTypes.h"
+#include "Checker/Report/SuppressionManager.h"
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Support/raw_ostream.h>
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -86,9 +88,19 @@ public:
     
     /**
      * Deduplicate reports based on location or trace
-     * Inspired by Infer's deduplication logic
+     * Enhanced with Infer-inspired location-based sorting and preference
      */
     void deduplicate_reports(bool use_trace = false);
+    
+    /**
+     * Set suppression manager for filtering suppressed issues
+     */
+    void setSuppressionManager(SuppressionManager* mgr) { suppressionMgr = mgr; }
+    
+    /**
+     * Filter out suppressed reports
+     */
+    void filterSuppressed();
     
     /**
      * Generate JSON report file
@@ -104,6 +116,16 @@ public:
      * Get total number of reports across all types
      */
     int get_total_reports() const;
+    
+    /**
+     * Get number of registered bug types
+     */
+    size_t get_bug_type_count() const { return bug_types.size(); }
+    
+    /**
+     * Generate SARIF report file
+     */
+    void generate_sarif_report(llvm::raw_ostream& OS, int min_score = 0) const;
     
     /**
      * Get singleton instance
@@ -127,10 +149,35 @@ private:
     // Deduplication tracking (maps hash to report)
     std::unordered_map<size_t, BugReport*> report_hashes;
     
+    // Suppression manager (optional)
+    SuppressionManager* suppressionMgr = nullptr;
+    
     int get_src_file_id(llvm::StringRef src_file);
     
     // Helper to check if a report is a duplicate
     bool is_duplicate(int ty_id, const BugReport* report, bool use_trace) const;
+    
+    // Helper to get primary location from report
+    struct Location {
+        std::string file;
+        int line;
+        int column;
+        bool operator<(const Location& other) const {
+            if (file != other.file) return file < other.file;
+            if (line != other.line) return line < other.line;
+            return column < other.column;
+        }
+    };
+    Location getPrimaryLocation(const BugReport* report) const;
+    
+    // Helper to get trace end locations (for Infer-style deduplication)
+    std::vector<Location> getTraceEndLocations(const BugReport* report) const;
+    
+    // Sort reports by decreasing preference (shorter traces preferred)
+    void sortByDecreasingPreference(std::vector<BugReport*>& reports) const;
+    
+    // Sort reports by location
+    void sortByLocation(std::vector<BugReport*>& reports) const;
 };
 
 #endif // CHECKER_REPORT_BUGREPORTMGR_H

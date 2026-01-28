@@ -27,14 +27,34 @@ namespace {
 } // namespace
 
 AbstractValue PulseFormula::findRep(AbstractValue v) {
-    auto it = equalities_.find(v);
-    if (it == equalities_.end() || it->second == v) {
-        return v;
+    // Find root iteratively (avoid stack overflow on long chains)
+    std::vector<AbstractValue> path;
+    AbstractValue cur = v;
+    while (true) {
+        auto it = equalities_.find(cur);
+        if (it == equalities_.end() || it->second == cur) {
+            break;
+        }
+        path.push_back(cur);
+        cur = it->second;
     }
-    // Path compression
-    AbstractValue rep = findRep(it->second);
-    equalities_[v] = rep;
+    AbstractValue rep = cur;
+    // Path compression: point all nodes on path to root
+    for (AbstractValue u : path) {
+        equalities_[u] = rep;
+    }
     return rep;
+}
+
+AbstractValue PulseFormula::findRepReadOnly(AbstractValue v) const {
+    AbstractValue cur = v;
+    while (true) {
+        auto it = equalities_.find(cur);
+        if (it == equalities_.end() || it->second == cur) {
+            return cur;
+        }
+        cur = it->second;
+    }
 }
 
 std::pair<AbstractValue, AbstractValue> PulseFormula::normalizePair(AbstractValue v1,
@@ -171,8 +191,8 @@ bool PulseFormula::isConsistent() const {
         }
     }
     for (const auto& p : disequalities_) {
-        AbstractValue rep1 = const_cast<PulseFormula*>(this)->findRep(p.first);
-        AbstractValue rep2 = const_cast<PulseFormula*>(this)->findRep(p.second);
+        AbstractValue rep1 = findRepReadOnly(p.first);
+        AbstractValue rep2 = findRepReadOnly(p.second);
         if (rep1 == rep2) {
             return false;
         }

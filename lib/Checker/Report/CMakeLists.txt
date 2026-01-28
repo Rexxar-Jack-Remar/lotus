@@ -4,5 +4,6 @@ add_library(CanaryReport STATIC
     BugReportMgr.cpp
     BugTypes.cpp
     ReportOptions.cpp
+    SuppressionManager.cpp
 )
-target_link_libraries(CanaryReport CanaryLLVMUtils CanaryDebugInfo)
+target_link_libraries(CanaryReport CanaryDebugInfo CanarySupport)

@@ -1,7 +1,7 @@
 #include "Checker/Concurrency/ConcurrencyChecker.h"
-#include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
+#include "Checker/Report/SuppressionManager.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -87,11 +87,31 @@ int main(int argc, char** argv) {
     outs() << "Deadlocks Found: " << stats.deadlocksFound << "\n";
     outs() << "Atomicity Violations Found: " << stats.atomicityViolationsFound << "\n";
 
-    // Print bug report summary (Clearblue pattern - applies to all checkers)
+    // Post-processing: Suppression and Deduplication
     BugReportMgr& mgr = BugReportMgr::get_instance();
+    
+    // 1. Load and apply suppressions
+    if (!report_options::SuppressionFile.empty()) {
+        SuppressionManager suppMgr;
+        if (suppMgr.loadFromFile(report_options::SuppressionFile)) {
+            mgr.setSuppressionManager(&suppMgr);
+            mgr.filterSuppressed();
+            auto stats = suppMgr.getStats();
+            outs() << "\nApplied suppressions: " << stats.totalSuppressions 
+                   << " across " << stats.totalFiles << " files\n";
+        } else {
+            errs() << "Warning: Could not load suppressions from: " 
+                   << report_options::SuppressionFile << "\n";
+        }
+    }
+    
+    // 2. Final deduplication (enhanced algorithm)
+    mgr.deduplicate_reports(true);
+    
+    // 3. Print bug report summary (Clearblue pattern - applies to all checkers)
     mgr.print_summary(outs());
     
-    // Handle centralized output formats (applies to all checkers)
+    // 4. Handle centralized output formats (applies to all checkers)
     if (!report_options::JsonOutputFile.empty()) {
         std::error_code EC;
         raw_fd_ostream json_out(report_options::JsonOutputFile, EC, sys::fs::OF_None);
@@ -103,9 +123,16 @@ int main(int argc, char** argv) {
         }
     }
     
+    // 5. Generate SARIF report if requested
     if (!report_options::SarifOutputFile.empty()) {
-        // SARIF output would be implemented in BugReportMgr
-        outs() << "\nNote: SARIF output support coming soon (centralized in BugReportMgr)\n";
+        std::error_code EC;
+        raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC, sys::fs::OF_None);
+        if (!EC) {
+            mgr.generate_sarif_report(sarif_out, report_options::MinConfidenceScore);
+            outs() << "\nSARIF report written to: " << report_options::SarifOutputFile << "\n";
+        } else {
+            errs() << "Error writing SARIF report: " << EC.message() << "\n";
+        }
     }
     
     size_t total_bugs = stats.dataRacesFound + stats.deadlocksFound + stats.atomicityViolationsFound;
