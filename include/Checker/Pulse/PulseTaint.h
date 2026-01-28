@@ -3,6 +3,7 @@
 
 #include "Checker/Pulse/PulseAbstractValue.h"
 #include "Checker/Pulse/PulseValueHistory.h"
+#include "Checker/Pulse/PulseTaintConfig.h"
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <map>
@@ -14,24 +15,90 @@ namespace pulse {
 
 class AbductiveDomain;
 
+// TaintKind is now defined in PulseTaintConfig.h
+
 /**
- * Taint kind: category of taint source
+ * TaintOrigin: where the taint originated from
+ * Aligned with Infer's TaintItem.origin
  */
-enum class TaintKind {
-    Unknown,
-    UserInput,      // Data from user (CLI, etc.)
-    Network,        // Data from network
-    FileSystem,     // Data from file system
-    Environment,    // Environment variables
-    Sensitive       // Sensitive data (passwords, keys)
+enum class TaintOrigin {
+    Argument,           // From function argument
+    InstanceReference,  // From instance reference (this/self)
+    ReturnValue,        // From return value
+    Allocation,         // From allocation
+    GetField,           // From field read
+    SetField,           // From field write
+    FieldOfValue        // From field of a value
+};
+
+/**
+ * TaintValue: what is tainted
+ * Aligned with Infer's TaintItem.value
+ */
+struct TaintValue {
+    enum class Type {
+        TaintBlockPassedTo,  // Block/closure passed to function
+        TaintField,          // Field is tainted
+        TaintProcedure       // Procedure is tainted
+    };
+    
+    Type type;
+    std::string procedure_name;  // For TaintProcedure
+    std::string field_name;       // For TaintField
+    
+    TaintValue(Type t) : type(t) {}
+    TaintValue(Type t, const std::string& name) : type(t), procedure_name(name) {}
+};
+
+/**
+ * TaintValueTuple: structured representation of what is tainted
+ * Aligned with Infer's TaintItem.value_tuple
+ */
+struct TaintValueTuple {
+    enum class Type {
+        Basic,      // Basic value with origin
+        FieldOf,    // Field of a value tuple
+        PointedToBy // Pointed to by a value tuple
+    };
+    
+    Type type;
+    TaintValue value;
+    TaintOrigin origin;
+    std::unique_ptr<TaintValueTuple> nested;  // For FieldOf and PointedToBy
+    
+    TaintValueTuple(const TaintValue& v, TaintOrigin o) 
+        : type(Type::Basic), value(v), origin(o), nested(nullptr) {}
+    
+    // Copy constructor
+    TaintValueTuple(const TaintValueTuple& other)
+        : type(other.type), value(other.value), origin(other.origin),
+          nested(other.nested ? std::make_unique<TaintValueTuple>(*other.nested) : nullptr) {}
+    
+    // Move constructor
+    TaintValueTuple(TaintValueTuple&&) noexcept = default;
+    
+    // Copy assignment
+    TaintValueTuple& operator=(const TaintValueTuple& other) {
+        if (this != &other) {
+            type = other.type;
+            value = other.value;
+            origin = other.origin;
+            nested = other.nested ? std::make_unique<TaintValueTuple>(*other.nested) : nullptr;
+        }
+        return *this;
+    }
+    
+    // Move assignment
+    TaintValueTuple& operator=(TaintValueTuple&&) noexcept = default;
 };
 
 /**
  * Taint item: represents a specific instance of taint on a value
- * Production-ready implementation aligned with Infer's TaintItem
+ * Enhanced to align with Infer's TaintItem structure
  */
 struct TaintItem {
-    TaintKind kind;
+    std::vector<TaintKind> kinds;  // Multiple kinds can apply
+    TaintValueTuple value_tuple;    // Structured representation
     const llvm::Instruction* source_instruction;
     const llvm::Function* source_function;
     ValueHistory history;  // How the taint propagated to current value
@@ -49,12 +116,50 @@ struct TaintItem {
     };
     std::vector<Sanitizer> sanitizers;  // Sanitizers that have been applied
 
-    TaintItem(TaintKind k, const llvm::Instruction* inst, const llvm::Function* func, unsigned ts = 0)
-        : kind(k), source_instruction(inst), source_function(func), timestamp(ts), 
+    TaintItem(const std::vector<TaintKind>& k, const TaintValueTuple& vt,
+              const llvm::Instruction* inst, const llvm::Function* func, unsigned ts = 0)
+        : kinds(k), value_tuple(vt), source_instruction(inst), source_function(func), 
+          timestamp(ts), intra_procedural_only(false) {}
+    
+    // Legacy constructor for backward compatibility
+    TaintItem(const TaintKind& k, const llvm::Instruction* inst, const llvm::Function* func, unsigned ts = 0)
+        : kinds({k}), 
+          value_tuple(TaintValueTuple(TaintValue(TaintValue::Type::TaintProcedure, 
+                                                 func ? func->getName().str() : ""),
+                                     TaintOrigin::ReturnValue)),
+          source_instruction(inst), source_function(func), timestamp(ts), 
           intra_procedural_only(false) {}
+    
+    // Copy constructor
+    TaintItem(const TaintItem& other)
+        : kinds(other.kinds), value_tuple(other.value_tuple),
+          source_instruction(other.source_instruction), source_function(other.source_function),
+          history(other.history), timestamp(other.timestamp),
+          intra_procedural_only(other.intra_procedural_only), sanitizers(other.sanitizers) {}
+    
+    // Move constructor
+    TaintItem(TaintItem&&) noexcept = default;
+    
+    // Copy assignment
+    TaintItem& operator=(const TaintItem& other) {
+        if (this != &other) {
+            kinds = other.kinds;
+            value_tuple = other.value_tuple;
+            source_instruction = other.source_instruction;
+            source_function = other.source_function;
+            history = other.history;
+            timestamp = other.timestamp;
+            intra_procedural_only = other.intra_procedural_only;
+            sanitizers = other.sanitizers;
+        }
+        return *this;
+    }
+    
+    // Move assignment
+    TaintItem& operator=(TaintItem&&) noexcept = default;
 
     bool operator<(const TaintItem& other) const {
-        if (kind != other.kind) return kind < other.kind;
+        if (kinds != other.kinds) return kinds < other.kinds;
         if (source_instruction != other.source_instruction) 
             return source_instruction < other.source_instruction;
         if (timestamp != other.timestamp) return timestamp < other.timestamp;
@@ -69,10 +174,31 @@ struct TaintItem {
     }
     
     /**
+     * Check if sanitized by specific kinds
+     */
+    bool isSanitizedBy(const std::vector<TaintKind>& sanitizer_kinds) const {
+        for (const auto& sanitizer : sanitizers) {
+            for (const auto& kind : sanitizer_kinds) {
+                if (sanitizer.sanitizer_kind == kind) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
      * Add a sanitizer to this taint item
      */
     void addSanitizer(TaintKind sanitizer_kind, const llvm::Instruction* loc, unsigned ts) {
         sanitizers.emplace_back(sanitizer_kind, loc, ts);
+    }
+    
+    /**
+     * Get primary kind (first kind, or Unknown if empty)
+     */
+    TaintKind getPrimaryKind() const {
+        return kinds.empty() ? TaintKind::Unknown() : kinds[0];
     }
 };
 
@@ -97,20 +223,45 @@ public:
 
 /**
  * Taint operations: high-level taint analysis logic
- * Production-ready implementation aligned with Infer's PulseTaintOperations
+ * Enhanced to use TaintConfig and align with Infer's PulseTaintOperations
  */
 class TaintOperations {
 private:
     static unsigned global_timestamp_;  // Global timestamp counter
+    static const TaintConfig* config_;  // Taint configuration
     
 public:
+    /**
+     * Set taint configuration
+     */
+    static void setConfig(const TaintConfig* config) { config_ = config; }
+    
+    /**
+     * Get taint configuration (returns default if not set)
+     */
+    static const TaintConfig& getConfig() {
+        if (!config_) {
+            return TaintConfig::getDefault();
+        }
+        return *config_;
+    }
     /**
      * Mark a value as tainted
      */
     static void taint(AbductiveDomain& astate,
                       AbstractValue v,
-                      TaintKind kind,
+                      const std::vector<TaintKind>& kinds,
                       const llvm::Instruction* source);
+    
+    /**
+     * Mark a value as tainted (legacy single-kind version)
+     */
+    static void taint(AbductiveDomain& astate,
+                      AbstractValue v,
+                      TaintKind kind,
+                      const llvm::Instruction* source) {
+        taint(astate, v, {kind}, source);
+    }
 
     /**
      * Check if a value is tainted and report if it flows to a sink

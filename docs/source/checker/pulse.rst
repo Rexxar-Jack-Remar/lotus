@@ -97,14 +97,6 @@ Bug Types Detected
 * **Description**: Reading from uninitialized memory
 * **Detection**: Tracks initialization state of variables, detects reads before initialization
 
-**Memory Leak** (``MemoryLeak``):
-
-* **CWE**: CWE-401
-* **Importance**: MEDIUM
-* **Classification**: ERROR
-* **Description**: Allocated memory that is never freed
-* **Detection**: Tracks allocations and deallocations, detects unreachable allocations
-
 **Unnecessary Copy** (``UnnecessaryCopy``):
 
 * **Importance**: LOW

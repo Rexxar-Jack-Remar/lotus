@@ -23,7 +23,6 @@ enum class OperationResult {
     NullDereference,     // Null pointer dereference
     UseAfterFree,        // Use after free
     UninitializedRead,   // Read from uninitialized memory
-    MemoryLeak,          // Memory leak detected
     TaintError           // Taint error detected
 };
 

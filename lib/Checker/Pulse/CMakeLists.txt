@@ -13,6 +13,7 @@ set(PulseChecker_SOURCES
   PulseTransitiveInfo.cpp
   PulseContradiction.cpp
   PulseTaint.cpp
+  PulseTaintConfig.cpp
   PulseModels.cpp
   PulseDiagnostic.cpp
   PulseReport.cpp

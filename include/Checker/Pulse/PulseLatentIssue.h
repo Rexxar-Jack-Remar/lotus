@@ -27,8 +27,7 @@ public:
         InvalidAccess,      // Access to invalid address
         NullDereference,    // Null pointer dereference
         UseAfterFree,       // Use after free
-        UninitializedRead,  // Read from uninitialized memory
-        MemoryLeak          // Memory leak
+        UninitializedRead   // Read from uninitialized memory
     };
     
 private:

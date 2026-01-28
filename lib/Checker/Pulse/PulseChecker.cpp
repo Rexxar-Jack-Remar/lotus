@@ -708,13 +708,13 @@ std::vector<ExecutionDomain> PulseChecker::handleCall(
     if (models_->isTaintSource(func_name)) {
         // Mark return value as tainted
         AbstractValue ret_val = factory_.createFresh(CI);
-        TaintKind kind = TaintKind::UserInput;
+        TaintKind kind = TaintKind::UserInput();
         if (func_name == "recv" || func_name == "recvfrom" || func_name == "recvmsg") {
-            kind = TaintKind::Network;
+            kind = TaintKind::Network();
         } else if (func_name == "getenv") {
-            kind = TaintKind::Environment;
+            kind = TaintKind::Environment();
         } else if (func_name == "getcwd") {
-            kind = TaintKind::FileSystem;
+            kind = TaintKind::FileSystem();
         }
         TaintOperations::taint(*astate, ret_val, kind, CI);
         astate->getPostStack().add(CI, Address(ret_val));
@@ -738,7 +738,7 @@ std::vector<ExecutionDomain> PulseChecker::handleCall(
             auto arg_opt = ops_.eval(*astate, CI->getArgOperand(i), CI, pred);
             if (arg_opt) {
                 AbstractValue canon_arg = astate->getCanonical(arg_opt->addr);
-                TaintKind sanitizer_kind = TaintKind::Unknown;  // Generic sanitizer
+                TaintKind sanitizer_kind = TaintKind::Unknown();  // Generic sanitizer
                 TaintOperations::sanitize(*astate, canon_arg, sanitizer_kind, CI);
             }
         }

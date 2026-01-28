@@ -23,32 +23,6 @@ bool AccessToInvalidAddress::equals(const Diagnostic& other) const {
            invalidation_kind_ == o->invalidation_kind_;
 }
 
-// --- MemoryLeak ---
-
-std::string MemoryLeak::getMessage() const {
-    return "Memory leak detected";
-}
-
-std::string MemoryLeak::getDescription() const {
-    std::string desc = "Memory allocated by " + allocator_name_;
-    if (allocation_site_) {
-        // Add line number if available
-    }
-    desc += " is not reachable after this point";
-    return desc;
-}
-
-size_t MemoryLeak::getHash() const {
-    size_t h = std::hash<const llvm::Instruction*>{}(allocation_site_); // Group by allocation site
-    return h;
-}
-
-bool MemoryLeak::equals(const Diagnostic& other) const {
-    const auto* o = dynamic_cast<const MemoryLeak*>(&other);
-    if (!o) return false;
-    return allocation_site_ == o->allocation_site_;
-}
-
 // --- ResourceLeak ---
 
 std::string ResourceLeak::getMessage() const {

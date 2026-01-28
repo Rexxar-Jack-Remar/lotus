@@ -12,8 +12,7 @@ namespace pulse {
 //===----------------------------------------------------------------------===//
 
 static ValueHistory joinHistories(const ValueHistory& hist1, const ValueHistory& hist2) {
-    // Compare histories by checking if they're empty or have same events
-    // Simplified comparison - full implementation would do deep comparison
+    // If histories are equal, return one of them
     if (hist1.isEmpty() && hist2.isEmpty()) {
         return hist1;
     }
@@ -23,8 +22,53 @@ static ValueHistory joinHistories(const ValueHistory& hist1, const ValueHistory&
     if (hist2.isEmpty()) {
         return hist1;
     }
-    // For now, return epoch (simplified - full implementation would merge histories)
-    return ValueHistory();  // Empty history (epoch)
+    
+    // Check if histories are equal by comparing events
+    const auto& events1 = hist1.getEvents();
+    const auto& events2 = hist2.getEvents();
+    
+    if (events1.size() == events2.size()) {
+        bool equal = true;
+        for (size_t i = 0; i < events1.size(); ++i) {
+            if (events1[i].kind != events2[i].kind ||
+                events1[i].location != events2[i].location ||
+                events1[i].function != events2[i].function) {
+                equal = false;
+                break;
+            }
+        }
+        if (equal) {
+            return hist1;  // Histories are equal
+        }
+    }
+    
+    // Histories differ: find common prefix and merge
+    // Find the longest common prefix
+    size_t common_prefix = 0;
+    size_t min_size = std::min(events1.size(), events2.size());
+    for (size_t i = 0; i < min_size; ++i) {
+        if (events1[i].kind == events2[i].kind &&
+            events1[i].location == events2[i].location &&
+            events1[i].function == events2[i].function) {
+            common_prefix++;
+        } else {
+            break;
+        }
+    }
+    
+    // If there's a common prefix, return history with that prefix
+    // Otherwise, return epoch (empty history)
+    if (common_prefix > 0) {
+        ValueHistory result;
+        // Rebuild history with common prefix events
+        for (size_t i = 0; i < common_prefix; ++i) {
+            result.addEvent(events1[i].kind, events1[i].location, events1[i].function, events1[i].description);
+        }
+        return result;
+    }
+    
+    // No common prefix: return epoch (conservative)
+    return ValueHistory();
 }
 
 static ValueHistory joinHistoriesOpts(llvm::Optional<ValueHistory> hist1_opt,
@@ -65,7 +109,7 @@ PulseJoin::joinValuesHists(JoinState& state,
     }
     
     // Create fresh joined value
-    AbstractValue v_join = state.factory->createFresh();
+    AbstractValue v_join = state.factory->createFresh(nullptr);
     state.subst[key] = v_join;
     state.rev_subst[v_join] = key;
     
@@ -90,8 +134,7 @@ PulseJoin::joinValuesHistsOpts(JoinState& state,
     
     if (!lhs_opt || !rhs_opt) {
         // One-sided: x↦v ⊔ emp = x↦v' (v' fresh)
-        AbstractValue v_join = state.factory->createFresh();
-        ValueHistory hist = lhs_opt ? lhs_opt->second : rhs_opt->second;
+        AbstractValue v_join = state.factory->createFresh(nullptr);
         ValueHistory hist_join = joinHistoriesOpts(
             lhs_opt ? llvm::Optional<ValueHistory>(lhs_opt->second) : llvm::None,
             rhs_opt ? llvm::Optional<ValueHistory>(rhs_opt->second) : llvm::None);
@@ -216,22 +259,22 @@ std::pair<PulseJoin::JoinState&, std::pair<Stack, Heap>>
 PulseJoin::joinStacks(JoinState& state,
                       const AbductiveDomain& lhs_astate,
                       const AbductiveDomain& rhs_astate) {
-    Stack stack_pre_join, stack_post_join;
-    Heap heap_pre_join, heap_post_join;
+    Stack stack_pre_join;
+    Heap heap_pre_join;
     
-    // Collect all variables from both sides
-    std::set<const llvm::Value*> all_vars;
-    for (const auto& kv : lhs_astate.getPostStack().getMap()) {
-        all_vars.insert(kv.first);
+    // Collect all variables from both pre stacks
+    std::set<const llvm::Value*> all_pre_vars;
+    for (const auto& kv : lhs_astate.getPreStack().getMap()) {
+        all_pre_vars.insert(kv.first);
     }
-    for (const auto& kv : rhs_astate.getPostStack().getMap()) {
-        all_vars.insert(kv.first);
+    for (const auto& kv : rhs_astate.getPreStack().getMap()) {
+        all_pre_vars.insert(kv.first);
     }
     
-    // Join post stack
-    for (const llvm::Value* var : all_vars) {
-        const Address* lhs_addr = lhs_astate.getPostStack().find(var);
-        const Address* rhs_addr = rhs_astate.getPostStack().find(var);
+    // Join pre stack
+    for (const llvm::Value* var : all_pre_vars) {
+        const Address* lhs_addr = lhs_astate.getPreStack().find(var);
+        const Address* rhs_addr = rhs_astate.getPreStack().find(var);
         
         llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_opt;
         llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_opt;
@@ -248,43 +291,18 @@ PulseJoin::joinStacks(JoinState& state,
         state = result.first;
         auto v_hist_join = result.second;
         
-        // Join heaps from stack values
-        auto heap_result = joinHeaps(state, heap_post_join, lhs_astate, lhs_opt, rhs_astate, rhs_opt);
+        // Join heaps from pre stack values
+        auto heap_result = joinHeaps(state, heap_pre_join, lhs_astate, lhs_opt, rhs_astate, rhs_opt);
         state = heap_result.first;
-        heap_post_join = heap_result.second;
+        heap_pre_join = heap_result.second;
         
-        // Add to joined stack
+        // Add to joined pre stack
         Address joined_addr(v_hist_join.first);
         joined_addr.history = v_hist_join.second;
-        stack_post_join.add(var, joined_addr);
+        stack_pre_join.add(var, joined_addr);
     }
     
-    // Join pre stack similarly (simplified - full implementation would handle pre separately)
-    for (const llvm::Value* var : all_vars) {
-        const Address* lhs_addr = lhs_astate.getPreStack().find(var);
-        const Address* rhs_addr = rhs_astate.getPreStack().find(var);
-        
-        if (lhs_addr || rhs_addr) {
-            llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_opt;
-            llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_opt;
-            
-            if (lhs_addr) {
-                lhs_opt = {{lhs_addr->addr, lhs_addr->history}};
-            }
-            if (rhs_addr) {
-                rhs_opt = {{rhs_addr->addr, rhs_addr->history}};
-            }
-            
-            auto pre_result = joinValuesHistsOpts(state, lhs_astate, lhs_opt, rhs_astate, rhs_opt);
-            state = pre_result.first;
-            auto v_hist_join = pre_result.second;
-            
-            Address joined_addr(v_hist_join.first);
-            joined_addr.history = v_hist_join.second;
-            stack_pre_join.add(var, joined_addr);
-        }
-    }
-    
+    // Return pre stack and heap
     return {state, {stack_pre_join, heap_pre_join}};
 }
 
@@ -293,20 +311,30 @@ PulseJoin::joinStacks(JoinState& state,
 //===----------------------------------------------------------------------===//
 
 llvm::Optional<Attribute> PulseJoin::joinOneSidedAttribute(Attribute attr) {
-    // Some attributes are kept even if only one-sided
+    // One-sided attributes: keep if they're "weak" (true in some branches),
+    // drop if they're "strong" (must be true in all branches)
     switch (attr) {
         case Attribute::Allocated:
-            return attr;  // Keep allocated
+            // Keep: if allocated in one branch, it might be allocated
+            return attr;
+            
         case Attribute::Invalid:
         case Attribute::Null:
         case Attribute::Uninitialized:
-            return llvm::None;  // Drop these (too strong)
+            // Drop: these are "strong" - if only in one branch, we can't assume them
+            return llvm::None;
+            
         case Attribute::Tainted:
-            return llvm::None;  // Drop (conservative)
+            // Keep: if tainted in one branch, conservatively assume tainted
+            // (matches Infer's approach of weakening one-sided attributes)
+            return attr;
+            
         case Attribute::FileHandle:
         case Attribute::Lock:
         case Attribute::AsyncResource:
-            return llvm::None;  // Drop resource attributes (too strong)
+            // Drop: resource attributes are too strong for one-sided join
+            return llvm::None;
+            
         default:
             return llvm::None;
     }
@@ -321,13 +349,57 @@ llvm::Optional<Attribute> PulseJoin::joinTwoSidedAttribute(JoinState& state,
         return attr1;  // Same attribute
     }
     
-    // Different attributes - check if compatible
-    if (attr1 == Attribute::Allocated && attr2 == Attribute::Allocated) {
-        return Attribute::Allocated;
+    // Handle specific attribute types
+    switch (attr1) {
+        case Attribute::Allocated:
+            if (attr2 == Attribute::Allocated) {
+                return Attribute::Allocated;  // Both allocated
+            }
+            // Allocated vs Invalid/Null - incompatible
+            return llvm::None;
+            
+        case Attribute::Invalid:
+            if (attr2 == Attribute::Invalid) {
+                return Attribute::Invalid;  // Both invalid
+            }
+            // Invalid vs Allocated - incompatible
+            return llvm::None;
+            
+        case Attribute::Null:
+            if (attr2 == Attribute::Null) {
+                return Attribute::Null;  // Both null
+            }
+            // Null vs NonNull - incompatible
+            return llvm::None;
+            
+        case Attribute::Uninitialized:
+            if (attr2 == Attribute::Uninitialized) {
+                return Attribute::Uninitialized;  // Both uninitialized
+            }
+            // Uninitialized vs Initialized - incompatible
+            return llvm::None;
+            
+        case Attribute::Tainted:
+            if (attr2 == Attribute::Tainted) {
+                return Attribute::Tainted;  // Both tainted (union of taint sources)
+            }
+            // Tainted vs NotTainted - keep tainted (conservative)
+            return Attribute::Tainted;
+            
+        case Attribute::FileHandle:
+        case Attribute::Lock:
+        case Attribute::AsyncResource:
+            // Resource attributes: if both have same resource, keep it
+            if (attr1 == attr2) {
+                return attr1;
+            }
+            // Different resources - incompatible
+            return llvm::None;
+            
+        default:
+            // Unknown attribute type - incompatible
+            return llvm::None;
     }
-    
-    // Incompatible attributes - return None
-    return llvm::None;
 }
 
 AttributeSet PulseJoin::joinAttributes(JoinState& state,
@@ -390,7 +462,19 @@ AttributeSet PulseJoin::joinAttributes(JoinState& state,
 PulseFormula PulseJoin::joinFormulas(const AbductiveDomain& lhs, const AbductiveDomain& rhs) {
     const PulseFormula& lhs_formula = lhs.getPathFormula();
     const PulseFormula& rhs_formula = rhs.getPathFormula();
-    return PulseFormula::merge(lhs_formula, rhs_formula);
+    
+    // Join formulas (conjunction of both path conditions)
+    // This is different from merge - join creates a formula that represents
+    // "either lhs path condition OR rhs path condition"
+    // For now, we use merge as a conservative approximation
+    PulseFormula joined = PulseFormula::merge(lhs_formula, rhs_formula);
+    
+    // TODO: Add equalities from rev_subst to formula
+    // For each v_join in rev_subst mapping to (v_lhs, v_rhs),
+    // we should add: v_join = v_lhs ∨ v_join = v_rhs
+    // This requires access to join_state, which we'll add in the main join function
+    
+    return joined;
 }
 
 //===----------------------------------------------------------------------===//
@@ -402,32 +486,178 @@ PulseJoin::joinAbductive(const AbductiveDomain& lhs, const AbductiveDomain& rhs)
     PulseLogger::trace("Joining abductive domains");
     PulseLogger::incrementCounter("joins.performed");
     
-    // Check formula consistency first
-    PulseFormula merged_formula = joinFormulas(lhs, rhs);
-    if (!merged_formula.isConsistent() || merged_formula.isUnsat()) {
+    // Check formula consistency first (preliminary check)
+    PulseFormula preliminary_formula = joinFormulas(lhs, rhs);
+    if (!preliminary_formula.isConsistent() || preliminary_formula.isUnsat()) {
         PulseLogger::debug("Join failed: formula contradiction");
         PulseLogger::incrementCounter("joins.failed");
         return llvm::None;  // Contradiction
     }
     
-    // Use the existing merge implementation
-    // merge returns Optional<AbductiveDomain> which we can return directly
-    auto merged_opt = AbductiveDomain::merge(lhs, rhs);
-    if (!merged_opt) {
-        return llvm::None;
+    // Create join state with factory
+    // We need a factory - create a temporary one
+    AbstractValueFactory factory;
+    JoinState join_state(&factory);
+    
+    // Join pre stacks (this also joins pre heaps recursively)
+    auto pre_result = joinStacks(join_state, lhs, rhs);
+    join_state = pre_result.first;
+    Stack stack_pre_join = pre_result.second.first;
+    Heap heap_pre_join = pre_result.second.second;
+    
+    // Join post stacks and heaps separately
+    Stack stack_post_join;
+    Heap heap_post_join;
+    
+    // Collect all variables from both post stacks
+    std::set<const llvm::Value*> all_post_vars;
+    for (const auto& kv : lhs.getPostStack().getMap()) {
+        all_post_vars.insert(kv.first);
+    }
+    for (const auto& kv : rhs.getPostStack().getMap()) {
+        all_post_vars.insert(kv.first);
     }
     
-    // AbductiveDomain::merge now handles all additional fields:
-    // - TransitiveInfo.join
-    // - Loop header info (preserved from lhs)
-    // - Unknown values flag (OR of both)
-    // - Skipped calls (union)
-    // - Dynamic type specialization needs (union)
-    // - Recursive calls (union)
-    // - Loop invariant under inference (preserved from lhs)
+    // Reset visited set for post join (as in Infer)
+    join_state.visited.clear();
     
-    // Move the merged domain to avoid copy
-    return std::move(*merged_opt);
+    // Join post stack
+    for (const llvm::Value* var : all_post_vars) {
+        const Address* lhs_addr = lhs.getPostStack().find(var);
+        const Address* rhs_addr = rhs.getPostStack().find(var);
+        
+        llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_opt;
+        llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_opt;
+        
+        if (lhs_addr) {
+            lhs_opt = {{lhs_addr->addr, lhs_addr->history}};
+        }
+        if (rhs_addr) {
+            rhs_opt = {{rhs_addr->addr, rhs_addr->history}};
+        }
+        
+        // Join values
+        auto result = joinValuesHistsOpts(join_state, lhs, lhs_opt, rhs, rhs_opt);
+        join_state = result.first;
+        auto v_hist_join = result.second;
+        
+        // Join heaps from stack values
+        auto heap_result = joinHeaps(join_state, heap_post_join, lhs, lhs_opt, rhs, rhs_opt);
+        join_state = heap_result.first;
+        heap_post_join = heap_result.second;
+        
+        // Add to joined stack
+        Address joined_addr(v_hist_join.first);
+        joined_addr.history = v_hist_join.second;
+        stack_post_join.add(var, joined_addr);
+    }
+    
+    // Join attributes using rev_subst
+    AddressAttributes attrs_pre_join, attrs_post_join;
+    
+    // For each joined value in rev_subst, join its attributes
+    // This follows Infer's pattern: iterate through rev_subst to join attributes
+    for (const auto& kv : join_state.rev_subst) {
+        AbstractValue v_join = kv.first;
+        const auto& pair_opt = kv.second;
+        llvm::Optional<AbstractValue> lhs_addr_opt = pair_opt.first;
+        llvm::Optional<AbstractValue> rhs_addr_opt = pair_opt.second;
+        
+        // Join post attributes
+        AttributeSet joined_post_attrs = joinAttributes(join_state, lhs, rhs, v_join, lhs_addr_opt, rhs_addr_opt);
+        for (Attribute attr : joined_post_attrs) {
+            attrs_post_join.add(v_join, attr);
+        }
+        
+        // Join pre attributes
+        AttributeSet joined_pre_attrs = joinAttributes(join_state, lhs, rhs, v_join, lhs_addr_opt, rhs_addr_opt);
+        for (Attribute attr : joined_pre_attrs) {
+            attrs_pre_join.add(v_join, attr);
+        }
+    }
+    
+    // Join formulas
+    PulseFormula joined_formula = joinFormulas(lhs, rhs);
+    
+    // Add equalities from rev_subst: for each v_join mapping to (v_lhs, v_rhs),
+    // we should add v_join = v_lhs ∨ v_join = v_rhs
+    // However, our formula system doesn't support disjunction yet, so we add both equalities
+    // This is conservative (weaker than ideal) but safe
+    // TODO: When formula system supports disjunction, add proper disjunctive constraints
+    for (const auto& kv : join_state.rev_subst) {
+        AbstractValue v_join = kv.first;
+        const auto& pair_opt = kv.second;
+        if (pair_opt.first && pair_opt.second) {
+            // Both sides exist: v_join could be either
+            // For now, we don't add constraints (would require disjunction)
+            // In a full implementation, we'd add: v_join = v_lhs ∨ v_join = v_rhs
+            (void)v_join;  // Suppress unused warning
+        } else if (pair_opt.first) {
+            // Only lhs: v_join = v_lhs
+            joined_formula.addEquality(v_join, *pair_opt.first);
+        } else if (pair_opt.second) {
+            // Only rhs: v_join = v_rhs
+            joined_formula.addEquality(v_join, *pair_opt.second);
+        }
+    }
+    
+    // Create joined domain
+    AbductiveDomain joined;
+    joined.getPostStack() = std::move(stack_post_join);
+    joined.getPreStack() = std::move(stack_pre_join);
+    joined.getPostHeap() = std::move(heap_post_join);
+    joined.getPreHeap() = std::move(heap_pre_join);
+    joined.getPostAttrs() = std::move(attrs_post_join);
+    joined.getPreAttrs() = std::move(attrs_pre_join);
+    joined.setPathFormula(std::make_unique<PulseFormula>(std::move(joined_formula)));
+    
+    // Join additional fields (from AbductiveDomain::merge logic)
+    // Merge transitive info
+    joined.setTransitiveInfo(TransitiveInfo::merge(lhs.getTransitiveInfo(), rhs.getTransitiveInfo()));
+    
+    // Merge unknown values flag (OR operation)
+    joined.setUnknownValues(lhs.hasUnknownValues() || rhs.hasUnknownValues());
+    
+    // Merge skipped calls (union)
+    for (const std::string& call : lhs.getSkippedCalls()) {
+        joined.addSkippedCall(call);
+    }
+    for (const std::string& call : rhs.getSkippedCalls()) {
+        joined.addSkippedCall(call);
+    }
+    
+    // Merge need_dynamic_type_specialization (union)
+    for (AbstractValue av : lhs.getNeedDynamicTypeSpecialization()) {
+        joined.addNeedDynamicTypeSpecialization(av);
+    }
+    for (AbstractValue av : rhs.getNeedDynamicTypeSpecialization()) {
+        joined.addNeedDynamicTypeSpecialization(av);
+    }
+    
+    // Merge recursive calls (union)
+    for (const std::string& call : lhs.getRecursiveCalls()) {
+        joined.addRecursiveCall(call);
+    }
+    for (const std::string& call : rhs.getRecursiveCalls()) {
+        joined.addRecursiveCall(call);
+    }
+    
+    // Loop header info: preserve from lhs (as in Infer)
+    for (const auto& kv : lhs.getLoopHeaderInfo()) {
+        joined.pushLoopHeaderInfo(kv.first, kv.second);
+    }
+    
+    // Loop invariant under inference: preserve from lhs if present (as in Infer)
+    // Note: This requires access to the private field, which we don't have
+    // For now, we skip this - it will be preserved if we clone from lhs
+    // TODO: Add getter method or friend class access
+    
+    // Merge invalidation info (union)
+    // Note: getInvalidationInfo() only returns one entry, so we need to access the map directly
+    // For now, we'll skip this - it requires exposing the map or adding an iterator
+    // The invalidation info will be preserved through the heap join process
+    
+    return joined;
 }
 
 llvm::Optional<std::pair<AbductiveDomain, PathContext>>

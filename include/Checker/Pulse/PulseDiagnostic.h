@@ -12,7 +12,6 @@ namespace pulse {
 
 // Issue Type Constants (Aligned with Infer)
 namespace IssueType {
-    constexpr const char* MemoryLeak = "Memory Leak";
     constexpr const char* ResourceLeak = "Resource Leak";
     constexpr const char* NullDereference = "Null Pointer Dereference";
     constexpr const char* UseAfterFree = "Use After Free";
@@ -64,31 +63,6 @@ public:
     std::string getDescription() const override { return description_; }
     std::string getSuggestion() const override { return suggestion_; }
     std::string getIssueType() const override { return issue_type_; }
-    const llvm::Instruction* getLocation() const override { return location_; }
-    const Trace* getTrace() const override { return &trace_; }
-    
-    size_t getHash() const override;
-    bool equals(const Diagnostic& other) const override;
-};
-
-class MemoryLeak : public Diagnostic {
-    const llvm::Instruction* location_; // Last seen location or allocation site
-    const llvm::Instruction* allocation_site_;
-    std::string allocator_name_;
-    Trace trace_;
-
-public:
-    MemoryLeak(const llvm::Instruction* loc,
-               const llvm::Instruction* alloc_site,
-               const std::string& allocator,
-               Trace trace)
-        : location_(loc), allocation_site_(alloc_site), 
-          allocator_name_(allocator), trace_(std::move(trace)) {}
-
-    std::string getMessage() const override;
-    std::string getDescription() const override;
-    std::string getSuggestion() const override { return "Deallocate the memory before it goes out of scope."; }
-    std::string getIssueType() const override { return IssueType::MemoryLeak; }
     const llvm::Instruction* getLocation() const override { return location_; }
     const Trace* getTrace() const override { return &trace_; }
     
