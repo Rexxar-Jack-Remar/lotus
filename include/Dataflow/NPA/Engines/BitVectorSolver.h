@@ -13,6 +13,9 @@ enum class SolverStrategy {
     Newton
 };
 
+/// Linear solver strategy for Newton iteration (TOPLAS 2016: LCFL / tensor product).
+using LinearStrategy = npa::LinearStrategy;
+
 /**
  * @brief Generic solver for bit-vector dataflow problems using NPA
  */
@@ -31,12 +34,15 @@ public:
      * @param F The target function
      * @param info The problem definition
      * @param strategy The solver strategy (Kleene or Newton)
+     * @param linearStrategy When strategy==Newton, which linear solver to use:
+     *        Worklist (default), SCC (LCFL-aware), or TensorProduct (TOPLAS 2016)
      * @param verbose Enable verbose logging
      * @return The dataflow result (IN/OUT sets for each block)
      */
-    static Result run(llvm::Function &F, 
-                      const BitVectorInfo &info, 
+    static Result run(llvm::Function &F,
+                      const BitVectorInfo &info,
                       SolverStrategy strategy = SolverStrategy::Newton,
+                      LinearStrategy linearStrategy = LinearStrategy::Worklist,
                       bool verbose = false);
 };
 

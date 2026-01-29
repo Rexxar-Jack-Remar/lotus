@@ -14,6 +14,7 @@
 #ifndef NPA_HPP
 #define NPA_HPP
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <deque>
@@ -26,13 +27,20 @@
 #include <utility>
 #include <vector>
 
+#include "Dataflow/NPA/Domains/TensorProductDomain.h"
+
 namespace npa {
 
  /**********************************************************************
   * 0. helpers
   *********************************************************************/
  using Symbol = std::string;
- enum class LinearStrategy { Naive, Worklist };
+ enum class LinearStrategy {
+   Naive,         ///< Vector fixpoint (all vars updated each round)
+   Worklist,     ///< Dependency-driven worklist
+   SCC,          ///< SCC-based: solve in topological order, fixpoint per SCC (LCFL-aware)
+   TensorProduct  ///< Lift to tensor space, solve, project back (TOPLAS 2016)
+ };
 
  template <class T> inline void hash_combine(std::size_t& h,const T& v){
      h ^= std::hash<T>{}(v)+0x9e3779b9+(h<<6)+(h>>2);}
@@ -180,12 +188,7 @@ struct Exp1 : Dirty{
      using K = typename Exp1<D>::K;
      switch(e->k) {
        case K::Hole: deps.insert(e->sym); break;
-       // Call in Exp1 is typically 'c . dArg + c2'. 
-       // If Call(f, c) node in Exp1 was created from differential, it depends on 'f' if 'f' is a variable?
-       // But in Exp1::Call(sym, c), 'sym' is function name and 'c' is constant. 
-       // Wait, Diff::aux generates Exp1::call(o->sym, ...) where o->sym is function name.
-       // However, for Interprocedural analysis, we might treat function summaries as variables.
-       // For now, Hole is the primary variable dependency.
+       case K::Call: deps.insert(e->sym); break;  // I1::eval uses nu.at(sym); equation depends on sym
        case K::Concat: 
            deps.insert(e->sym); // Loop/Concat variable
            find(e->t1, deps); find(e->t2, deps); 
@@ -202,7 +205,29 @@ struct Exp1 : Dirty{
      }
    }
  };
- 
+
+ /**********************************************************************
+  * 4.6 LCFL structure detection (TOPLAS 2016)
+  *********************************************************************/
+ template <class D>
+ struct LCFLDetector {
+   static bool has_lcfl_structure(const E1<D>& e) {
+     if (!e) return false;
+     using K = typename Exp1<D>::K;
+     switch (e->k) {
+       case K::Call:
+       case K::Concat:
+       case K::InfClos:
+         return true;
+       default:
+         if (e->t  && has_lcfl_structure(e->t))  return true;
+         if (e->t1 && has_lcfl_structure(e->t1)) return true;
+         if (e->t2 && has_lcfl_structure(e->t2)) return true;
+         return false;
+     }
+   }
+ };
+
  /**********************************************************************
   * 5. Fixed-point helper (scalar / vector)
   *********************************************************************/
@@ -449,7 +474,112 @@ auto fix(bool verbose, DomVal<D> init, F f){
     return init;
  }
 
- 
+ /**********************************************************************
+  * 8.6 SCC-based linear solver (LCFL-aware, TOPLAS 2016)
+  * Solves in topological order of SCCs; within each SCC runs fixpoint.
+  *********************************************************************/
+ template <class D>
+ std::vector<DomVal<D>> solve_linear_scc_impl(
+     bool verbose,
+     const std::vector<std::pair<Symbol, E1<D>>>& rhs,
+     std::vector<DomVal<D>> init) {
+   using V = DomVal<D>;
+   const int n = static_cast<int>(rhs.size());
+   std::unordered_map<Symbol, int> sym_to_idx;
+   for (int i = 0; i < n; ++i) sym_to_idx[rhs[i].first] = i;
+
+   std::vector<std::vector<int>> out_edges(n);
+   for (int i = 0; i < n; ++i) {
+     std::unordered_set<Symbol> deps;
+     DepFinder<D>::find(rhs[i].second, deps);
+     for (const auto& d : deps) {
+       auto it = sym_to_idx.find(d);
+       if (it != sym_to_idx.end()) out_edges[i].push_back(it->second);
+     }
+   }
+
+   std::vector<int> index(n, -1), low(n, -1), scc_id(n, -1);
+   std::vector<int> stack;
+   int idx = 0, scc_count = 0;
+
+   std::function<void(int)> tarjan = [&](int v) {
+     index[v] = low[v] = idx++;
+     stack.push_back(v);
+     for (int w : out_edges[v]) {
+       if (index[w] == -1) { tarjan(w); low[v] = std::min(low[v], low[w]); }
+       else if (scc_id[w] == -1) low[v] = std::min(low[v], index[w]);
+     }
+     if (low[v] == index[v]) {
+       for (;;) {
+         int u = stack.back(); stack.pop_back();
+         scc_id[u] = scc_count;
+         if (u == v) break;
+       }
+       ++scc_count;
+     }
+   };
+   for (int i = 0; i < n; ++i) if (index[i] == -1) tarjan(i);
+
+   std::vector<std::vector<int>> sccs(scc_count);
+   for (int i = 0; i < n; ++i) sccs[scc_id[i]].push_back(i);
+
+   // Condensation: edge A->B when some equation in A depends on variable in B (v->w, v in A, w in B).
+   // We must solve B before A. So we need topological order of the *reversed* condensation.
+   std::vector<std::vector<int>> rev_cond(scc_count);
+   for (int v = 0; v < n; ++v)
+     for (int w : out_edges[v])
+       if (scc_id[v] != scc_id[w])
+         rev_cond[scc_id[w]].push_back(scc_id[v]);
+   std::vector<int> rev_in_degree(scc_count, 0);
+   for (int a = 0; a < scc_count; ++a)
+     for (int b : rev_cond[a]) ++rev_in_degree[b];
+   std::deque<int> q;
+   for (int i = 0; i < scc_count; ++i)
+     if (rev_in_degree[i] == 0) q.push_back(i);
+   std::vector<int> scc_order;
+   scc_order.reserve(scc_count);
+   while (!q.empty()) {
+     int a = q.front();
+     q.pop_front();
+     scc_order.push_back(a);
+     for (int b : rev_cond[a]) {
+       if (--rev_in_degree[b] == 0) q.push_back(b);
+     }
+   }
+
+   std::unordered_map<Symbol, V> env;
+   for (int i = 0; i < n; ++i) env[rhs[i].first] = init[i];
+
+   long steps = 0;
+   for (int sid : scc_order) {
+     const auto& scc = sccs[sid];
+     for (;;) {
+       bool stable = true;
+       for (int i : scc) {
+         V new_val = I1<D>::eval(false, env, rhs[i].second);
+         if (!D::equal(env[rhs[i].first], new_val)) {
+           env[rhs[i].first] = new_val;
+           init[i] = new_val;
+           stable = false;
+         }
+         ++steps;
+       }
+       if (stable) break;
+     }
+   }
+   if (verbose) std::cerr << "[linear-scc] steps=" << steps << " sccs=" << scc_count << "\n";
+   return init;
+ }
+
+ /**********************************************************************
+  * 8.7 Tensor-product linear solver (TOPLAS 2016) – declared here, impl in §13
+  *********************************************************************/
+ template <class D>
+ std::vector<DomVal<D>> solve_linear_tensor_impl(
+     bool verbose,
+     const std::vector<std::pair<Symbol, E1<D>>>& rhs,
+     std::vector<DomVal<D>> init);
+
  /**********************************************************************
   * 9. Generic solver driver
   *********************************************************************/
@@ -525,16 +655,18 @@ auto fix(bool verbose, DomVal<D> init, F f){
      std::vector<V> delta;
      
      if (linStrat == LinearStrategy::Naive) {
-         // Old Naive Solver (fix_vec)
          delta = fix_vec<D>(verbose,init,[&](const std::vector<V>& cur){
              std::unordered_map<Symbol,V> env;
              for(size_t i=0;i<cur.size();++i) env[rhs[i].first]=cur[i];
              std::vector<V> nxt;
-             for(auto& p:rhs) nxt.push_back(I1<D>::eval(false,env,p.second)); // verbose=false for inner loops
+             for(auto& p:rhs) nxt.push_back(I1<D>::eval(false,env,p.second));
              return nxt;
            });
+     } else if (linStrat == LinearStrategy::SCC) {
+         delta = solve_linear_scc_impl<D>(verbose, rhs, init);
+     } else if (linStrat == LinearStrategy::TensorProduct) {
+         delta = solve_linear_tensor_impl<D>(verbose, rhs, init);
      } else {
-         // New Worklist Solver
          delta = solve_linear_worklist_impl<D>(verbose, rhs, init);
      }
  
@@ -554,6 +686,56 @@ auto fix(bool verbose, DomVal<D> init, F f){
   *********************************************************************/
  template<class D> using KleeneSolver = Solver<D,KleeneIter<D>>;
  template<class D> using NewtonSolver = Solver<D,NewtonIter<D>>;
+
+ /**********************************************************************
+  * 13. Tensor-product linear solver (TOPLAS 2016) – implementation
+  *********************************************************************/
+ template <class D>
+ struct Exp1ToTensor {
+   using TD = TensorProductDomain<D>;
+   using E1D = E1<D>;
+   using E1T = E1<TD>;
+   static E1T convert(const E1D& e) {
+     if (!e) return nullptr;
+     using K = typename Exp1<D>::K;
+     using VT = typename TD::value_type;
+     switch (e->k) {
+       case K::Term:   return Exp1<TD>::term(VT(e->c, e->c)); break;
+       case K::Seq:    return Exp1<TD>::seq(VT(e->c, e->c), convert(e->t)); break;
+       case K::Call:   return Exp1<TD>::call(e->sym, VT(e->c, e->c)); break;
+       case K::Cond:   return Exp1<TD>::cond(e->phi, convert(e->t1), convert(e->t2)); break;
+       case K::Add:    return Exp1<TD>::add(convert(e->t1), convert(e->t2)); break;
+       case K::Sub:    return Exp1<TD>::sub(convert(e->t1), convert(e->t2)); break;
+       case K::Ndet:   return Exp1<TD>::ndet(convert(e->t1), convert(e->t2)); break;
+       case K::Hole:   return Exp1<TD>::hole(e->sym); break;
+       case K::Concat: return Exp1<TD>::concat(convert(e->t1), e->sym, convert(e->t2)); break;
+       case K::InfClos: return Exp1<TD>::inf(convert(e->t), e->sym); break;
+       default: return nullptr;
+     }
+   }
+ };
+
+ template <class D>
+ std::vector<DomVal<D>> solve_linear_tensor_impl(
+     bool verbose,
+     const std::vector<std::pair<Symbol, E1<D>>>& rhs,
+     std::vector<DomVal<D>> init) {
+   using TD = TensorProductDomain<D>;
+   using VT = typename TD::value_type;
+   std::vector<std::pair<Symbol, E1<TD>>> rhs_tensor;
+   rhs_tensor.reserve(rhs.size());
+   for (const auto& p : rhs)
+     rhs_tensor.emplace_back(p.first, Exp1ToTensor<D>::convert(p.second));
+   std::vector<VT> init_tensor;
+   init_tensor.reserve(init.size());
+   for (const auto& v : init) init_tensor.emplace_back(v, v);
+   std::vector<VT> delta_tensor =
+       solve_linear_worklist_impl<TD>(verbose, rhs_tensor, init_tensor);
+   std::vector<DomVal<D>> delta;
+   delta.reserve(delta_tensor.size());
+   for (const auto& p : delta_tensor) delta.push_back(TD::project(p));
+   return delta;
+ }
 
 } // namespace npa
 

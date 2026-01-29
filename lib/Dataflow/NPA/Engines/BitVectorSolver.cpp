@@ -19,9 +19,10 @@ static std::string getBlockSymbol(const llvm::BasicBlock *BB, const char* suffix
     return s;
 }
 
-BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F, 
-                                             const BitVectorInfo &info, 
+BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F,
+                                             const BitVectorInfo &info,
                                              SolverStrategy strategy,
+                                             LinearStrategy linearStrategy,
                                              bool verbose) {
     // 1. Setup Domain
     // Note: This sets global state for BitSetDomain (bitvector fact domain). 
@@ -112,7 +113,7 @@ BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F,
     // 3. Solve
     std::pair<std::vector<std::pair<Symbol, D::value_type>>, Stat> rawRes;
     if (strategy == SolverStrategy::Newton) {
-        rawRes = NewtonSolver<D>::solve(eqns, verbose);
+        rawRes = NewtonSolver<D>::solve(eqns, verbose, -1, linearStrategy);
     } else {
         rawRes = KleeneSolver<D>::solve(eqns, verbose);
     }
