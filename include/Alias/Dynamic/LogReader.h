@@ -2,7 +2,8 @@
 
 #include "Alias/Dynamic/LogRecord.h"
 
-#include <boost/optional.hpp>
+#include "llvm/ADT/Optional.h"
+
 #include <fstream>
 #include <vector>
 
@@ -24,7 +25,7 @@ private:
 public:
 	LazyLogReader(const char* fileName);
 
-	boost::optional<LogRecord> readLogRecord();
+	llvm::Optional<LogRecord> readLogRecord();
 };
 
 } // namespace dynamic

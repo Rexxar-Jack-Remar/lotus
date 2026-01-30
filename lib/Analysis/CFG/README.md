@@ -58,7 +58,6 @@ Computes code complexity metrics:
 ## Dependencies
 
 - **LLVM**: Core IR, CFG utilities, LoopInfo, DominatorTree
-- **Boost**: Range algorithms (for topological sorting)
 
 ## See Also
 

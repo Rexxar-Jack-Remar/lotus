@@ -188,20 +188,6 @@ public:
 };
 class ArgInfo {
 private:
-#ifdef SER
-  friend class boost::serialization::access;
-  template <class Archive>
-  void serialize(Archive &ar, const unsigned int version) {
-    ar & argNo;
-    ar & idx;
-    ar & offset;
-    ar & objSize;
-    ar & blackList;
-    ar & whiteList;
-    ar & relatedArg;
-    // ar & mayNull;
-  }
-#endif
   // argNo: which argNo it belongs to
   NodeIndex argNo;
   // idx: the pointer or the first argument of the arg
@@ -243,24 +229,6 @@ class Summary {
   typedef std::unordered_map<std::string, llvm::GlobalVariable *> GObjMap;
 
 private:
-#ifdef SER
-  friend class boost::serialization::access;
-  template <class Archive>
-  void serialize(Archive &ar, const unsigned int version) {
-    ar & fname;
-    ar & args;
-    ar & noNodes;
-    ar & sumPtsGraph;
-    ar & reqVec;
-    ar & updateVec;
-    ar & relatedBC;
-    ar & changeVec;
-#ifdef CAL_STACKVAR
-    ar & stackVar;
-    ar & uninitStackVar;
-#endif
-  }
-#endif
   int retSize;
   int retOffset;
   int stackVar;

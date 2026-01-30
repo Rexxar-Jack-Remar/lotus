@@ -186,7 +186,7 @@ Graph Utilities
 
 * **GenericGraph.h** - Generic graph data structure
 * **GraphWriter.h** - Graph visualization utilities
-* **LLVMBgl.h** - LLVM Boost Graph Library integration
+* **LLVMBgl.h** - LLVM CFG iteration adapters
 
 Scheduler
 ~~~~~~~~~

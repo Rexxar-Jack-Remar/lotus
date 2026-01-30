@@ -1,35 +1,29 @@
 /**
  * \file LLVMBgl.h
- * \brief BGL (Boost Graph Library) interface to LLVM Control Flow Graph
+ * \brief LLVM control-flow graph (CFG) adapters
  * \author Lotus Team
  *
- * This file provides Boost Graph Library interface traits and functions
- * for LLVM's Function and BasicBlock types, enabling the use of BGL
- * algorithms on LLVM control flow graphs.
- *
- * The following graph concepts are supported:
- * - Vertex descriptors: BasicBlock*
- * - Edge descriptors: BBPair (pair of BasicBlock*)
- * - Directed edges with bidirectional traversal
- * - Vertex list graph operations
+ * This file provides lightweight adapters for iterating over CFG vertices
+ * and edges without relying on Boost.
  */
 #ifndef __LLVM_BGL_HPP_
 #define __LLVM_BGL_HPP_
 
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/CFG.h"
 
-#include <boost/graph/graph_traits.hpp>
-#include <boost/graph/properties.hpp>
-#include <boost/iterator/transform_iterator.hpp>
-#include <boost/property_map/property_map.hpp>
+#include <cassert>
+#include <cstddef>
+#include <utility>
 
 namespace llvm {
 typedef std::pair<BasicBlock *, BasicBlock *> BBPair;
 namespace bgl {
-struct MkOutEdgePair : public std::unary_function<BasicBlock *, BBPair> {
-  BasicBlock *src;
-  MkOutEdgePair() : src(NULL) {}
-  MkOutEdgePair(BasicBlock *u) : src(u) {}
+struct MkOutEdgePair {
+  BasicBlock *src = nullptr;
+  MkOutEdgePair() = default;
+  explicit MkOutEdgePair(BasicBlock *u) : src(u) {}
 
   BBPair operator()(BasicBlock *v) const {
     assert(src);
@@ -37,104 +31,51 @@ struct MkOutEdgePair : public std::unary_function<BasicBlock *, BBPair> {
   }
 };
 
-struct MkInEdgePair : public std::unary_function<BasicBlock *, BBPair> {
-  BasicBlock *dst;
-
-  MkInEdgePair() : dst(NULL) {}
-
-  MkInEdgePair(BasicBlock *v) : dst(v) {}
+struct MkInEdgePair {
+  BasicBlock *dst = nullptr;
+  MkInEdgePair() = default;
+  explicit MkInEdgePair(BasicBlock *v) : dst(v) {}
   BBPair operator()(BasicBlock *u) const {
     assert(dst);
     return std::make_pair(u, dst);
   }
 };
 
-} // namespace bgl
-} // namespace llvm
+using out_edge_iterator = llvm::mapped_iterator<llvm::succ_iterator, MkOutEdgePair>;
+using in_edge_iterator = llvm::mapped_iterator<llvm::pred_iterator, MkInEdgePair>;
 
-namespace boost {
-template <> struct graph_traits<llvm::Function> {
-  typedef llvm::BasicBlock *vertex_descriptor;
-  typedef llvm::BBPair edge_descriptor;
-
-  typedef disallow_parallel_edge_tag edge_parallel_category;
-  typedef bidirectional_tag directed_category;
-  struct this_graph_tag : virtual bidirectional_graph_tag,
-                          virtual vertex_list_graph_tag {};
-  typedef this_graph_tag traversal_category;
-
-  typedef size_t vertices_size_type;
-  typedef size_t edges_size_type;
-  typedef size_t degree_size_type;
-
-  typedef boost::transform_iterator<llvm::bgl::MkOutEdgePair,
-                                    llvm::succ_iterator>
-      out_edge_iterator;
-
-  typedef boost::transform_iterator<llvm::bgl::MkInEdgePair,
-                                    llvm::pred_iterator>
-      in_edge_iterator;
-
-  typedef llvm::Function::const_iterator vertex_iterator;
-
-  /** unimplemented iterator over edges to make filtered_graph happy */
-  typedef in_edge_iterator edge_iterator;
-
-  static vertex_descriptor null_vertex() { return NULL; }
-};
-
-inline llvm::BasicBlock *source(const llvm::BBPair e, const llvm::Function &f) {
-  return e.first;
+inline llvm::iterator_range<out_edge_iterator> out_edges(BasicBlock *bb) {
+  return llvm::make_range(out_edge_iterator(succ_begin(bb), MkOutEdgePair(bb)),
+                          out_edge_iterator(succ_end(bb), MkOutEdgePair(bb)));
 }
 
-inline llvm::BasicBlock *target(const llvm::BBPair e, const llvm::Function &f) {
-  return e.second;
-}
-} // namespace boost
-
-namespace llvm {
-namespace bgl {
-typedef
-    typename boost::graph_traits<::llvm::Function>::out_edge_iterator out_eit;
-typedef typename boost::graph_traits<::llvm::Function>::in_edge_iterator in_eit;
-typedef llvm::Function::const_iterator vit;
-} // namespace bgl
-} // namespace llvm
-
-namespace boost {
-inline std::pair<llvm::bgl::out_eit, llvm::bgl::out_eit>
-out_edges(llvm::BasicBlock *bb, const llvm::Function &f) {
-  return std::make_pair(
-      make_transform_iterator(succ_begin(bb), llvm::bgl::MkOutEdgePair(bb)),
-      make_transform_iterator(succ_end(bb), llvm::bgl::MkOutEdgePair(bb)));
-}
-
-inline size_t out_degree(const llvm::BasicBlock *bb, const llvm::Function &f) {
+inline std::size_t out_degree(const BasicBlock *bb) {
   return bb->getTerminator()->getNumSuccessors();
 }
 
-inline std::pair<llvm::bgl::in_eit, llvm::bgl::in_eit>
-in_edges(llvm::BasicBlock *bb, const llvm::Function &f) {
-  return std::make_pair(
-      make_transform_iterator(pred_begin(bb), llvm::bgl::MkInEdgePair(bb)),
-      make_transform_iterator(pred_end(bb), llvm::bgl::MkInEdgePair(bb)));
+inline llvm::iterator_range<in_edge_iterator> in_edges(BasicBlock *bb) {
+  return llvm::make_range(in_edge_iterator(pred_begin(bb), MkInEdgePair(bb)),
+                          in_edge_iterator(pred_end(bb), MkInEdgePair(bb)));
 }
 
-inline size_t in_degree(const llvm::BasicBlock *bb, const llvm::Function &f) {
-  return bb->getNumUses();
+inline std::size_t in_degree(const BasicBlock *bb) { return bb->getNumUses(); }
+
+inline std::size_t degree(const BasicBlock *bb) {
+  return in_degree(bb) + out_degree(bb);
 }
 
-inline size_t degree(const llvm::BasicBlock *bb, const llvm::Function &f) {
-  return bb->getNumUses() + bb->getTerminator()->getNumSuccessors();
+inline llvm::iterator_range<Function::iterator> vertices(Function &f) {
+  return llvm::make_range(f.begin(), f.end());
 }
 
-inline std::pair<llvm::bgl::vit, llvm::bgl::vit>
-vertices(const llvm::Function &f) {
-  return std::make_pair(f.begin(), f.end());
+inline llvm::iterator_range<Function::const_iterator>
+vertices(const Function &f) {
+  return llvm::make_range(f.begin(), f.end());
 }
 
-inline size_t num_vertices(const llvm::Function &f) { return f.size(); }
+inline std::size_t num_vertices(const Function &f) { return f.size(); }
 
-} // namespace boost
+} // namespace bgl
+} // namespace llvm
 
 #endif

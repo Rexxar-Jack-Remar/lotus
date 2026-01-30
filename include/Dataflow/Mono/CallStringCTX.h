@@ -3,12 +3,12 @@
 
 
 #include "llvm/Support/raw_ostream.h"
-
-#include "boost/functional/hash.hpp"
+#include "llvm/ADT/Hashing.h"
 
 #include <deque>
 #include <functional>
 #include <initializer_list>
+#include <stdexcept>
 
 
 template <typename N, unsigned K> class CallStringCTX {
@@ -87,11 +87,11 @@ namespace std {
 
 template <typename N, unsigned K> struct hash<CallStringCTX<N, K>> {
   size_t operator()(const CallStringCTX<N, K> &CS) const noexcept {
-    boost::hash<std::deque<N>> HashDeque;
     std::hash<unsigned> HashUnsigned;
-    size_t U = HashUnsigned(K);
-    size_t H = HashDeque(CS.CallString);
-    return U ^ (H << 1);
+    llvm::hash_code CallStringHash =
+        llvm::hash_combine_range(CS.CallString.begin(), CS.CallString.end());
+    llvm::hash_code Combined = llvm::hash_combine(HashUnsigned(K), CallStringHash);
+    return static_cast<size_t>(Combined);
   }
 };
 

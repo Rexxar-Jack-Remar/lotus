@@ -16,7 +16,7 @@ static bool readData(std::istream& is, T* data)
 }
 
 /// Reads a single log record from the binary stream based on its type tag
-static boost::optional<LogRecord> readRecord(std::istream& is)
+static llvm::Optional<LogRecord> readRecord(std::istream& is)
 {
 	LogRecord rec;
 
@@ -53,8 +53,8 @@ static boost::optional<LogRecord> readRecord(std::istream& is)
 	rec.type = static_cast<LogRecordType>(type);
 
 	if (!succ)
-		return boost::optional<LogRecord>();
-	return boost::make_optional(std::move(rec));
+		return llvm::None;
+	return llvm::Optional<LogRecord>(std::move(rec));
 }
 
 /// Reads all log records from a file into memory (eager loading)
@@ -92,7 +92,7 @@ LazyLogReader::LazyLogReader(const char* fileName): ifs(fileName, std::ios::in|s
 }
 
 /// Reads the next log record from the file (lazy loading, one at a time)
-boost::optional<LogRecord> LazyLogReader::readLogRecord()
+llvm::Optional<LogRecord> LazyLogReader::readLogRecord()
 {
 	return readRecord(ifs);
 }

@@ -12,8 +12,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "Utils/LLVM/Demangle.h"
 
-#include <boost/algorithm/string/find.hpp>
-#include <boost/algorithm/string/predicate.hpp>
 #include <sstream>
 
 /*

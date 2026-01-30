@@ -5,21 +5,18 @@
 /// This file provides utilities for parsing and representing S-expressions,
 /// a notation for nested list data commonly used in Lisp family languages.
 ///
-/// The implementation uses Boost.Variant to represent the three possible
-/// types of S-expression elements: tokens, integers, and lists.
-///
 ///===----------------------------------------------------------------------===//
 
 #ifndef __SEXPR_H__
 #define __SEXPR_H__
 
+#include <cassert>
+#include <initializer_list>
 #include <istream>
 #include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include <boost/variant.hpp>
 
 /// @brief S-Expression representation
 ///
@@ -33,7 +30,7 @@
 class SExpr final {
 public:
   /// @brief Default constructor creates an empty list
-  SExpr() : SExpr(List{{}}) {}
+  SExpr() : SExpr(List{}) {}
 
   /// @brief Construct from integer
   /// @param i The integer value
@@ -82,36 +79,49 @@ public:
 
   /// @brief Get the kind of this S-expression
   /// @return The Kind (TOKEN, INT, or LIST)
-  Kind kind() const { return Kind(variant.which()); }
+  Kind kind() const { return m_kind; }
 
   /// @brief Get the token value
   /// @return Const reference to the token
   /// @pre kind() == TOKEN
-  const Token &token() const { return boost::get<Token>(variant); }
+  const Token &token() const {
+    assert(kind() == TOKEN);
+    return m_token;
+  }
 
   /// @brief Get the integer value
   /// @return Const reference to the integer
   /// @pre kind() == INT
-  const Int &num() const { return boost::get<Int>(variant); }
+  const Int &num() const {
+    assert(kind() == INT);
+    return m_int;
+  }
 
   /// @brief Get the list value (non-const)
   /// @return Reference to the list
   /// @pre kind() == LIST
-  List &list() { return boost::get<List>(variant); }
+  List &list() {
+    assert(kind() == LIST);
+    return m_list;
+  }
 
   /// @brief Get the list value (const)
   /// @return Const reference to the list
   /// @pre kind() == LIST
-  const List &list() const { return boost::get<List>(variant); }
+  const List &list() const {
+    assert(kind() == LIST);
+    return m_list;
+  }
 
 private:
-  /// Internal variant type
-  typedef boost::variant<Token, Int, List> vartype;
+  explicit SExpr(Token token) : m_kind(TOKEN), m_token(std::move(token)) {}
+  explicit SExpr(Int num) : m_kind(INT), m_int(std::move(num)) {}
+  explicit SExpr(List list) : m_kind(LIST), m_list(std::move(list)) {}
 
-  /// @brief Private constructor from variant
-  SExpr(vartype variant) : variant(std::move(variant)) {}
-
-  vartype variant; ///< The internal variant storage
+  Kind m_kind = LIST;
+  Token m_token;
+  Int m_int;
+  List m_list;
 };
 
 /// @brief Parse an S-expression from a stream

@@ -59,8 +59,9 @@
 #include "Alias/seadsa/ShadowMem.hh"
 #include "IR/MemorySSA/MemorySSA.h"
 
-#include <boost/functional/hash.hpp>
-#include <boost/unordered_set.hpp>
+#include <cstddef>
+#include <functional>
+#include <unordered_set>
 
 static llvm::cl::opt<bool> OnlySingleton(
     "ipdse-only-singleton",
@@ -100,6 +101,11 @@ static bool hasFunctionPtrParam(Function *F) {
 
 class IPDeadStoreElimination : public ModulePass {
 
+  static inline void hashCombine(std::size_t &seed, std::size_t value) {
+    seed ^= value + static_cast<std::size_t>(0x9e3779b97f4a7c15ULL) +
+            (seed << 6U) + (seed >> 2U);
+  }
+
   /// @brief Worklist element for tracking stores during analysis
   ///
   /// This structure represents an element in the worklist used by the DSE
@@ -119,10 +125,10 @@ class IPDeadStoreElimination : public ModulePass {
         : shadowMemInst(I), storeInstOrGvInit(V), length(Len) {}
 
     size_t hash() const {
-      size_t val = 0;
-      boost::hash_combine(val, shadowMemInst);
-      boost::hash_combine(val, storeInstOrGvInit);
-      return val;
+      std::size_t seed = 0;
+      hashCombine(seed, std::hash<const void *>{}(shadowMemInst));
+      hashCombine(seed, std::hash<const void *>{}(storeInstOrGvInit));
+      return seed;
     }
 
     bool operator==(const QueueElem &o) const {
@@ -281,7 +287,7 @@ public:
       // A store is not useless if there is a def-use chain between a
       // store and a load instruction and there is not any other store
       // in between.
-      boost::unordered_set<QueueElem, QueueElemHasher> visited;
+      std::unordered_set<QueueElem, QueueElemHasher> visited;
       while (!queue.empty()) {
         QueueElem w = queue.back();
         DSE_LOG(errs() << "[IPDSE] Processing " << *(w.shadowMemInst) << "\n");

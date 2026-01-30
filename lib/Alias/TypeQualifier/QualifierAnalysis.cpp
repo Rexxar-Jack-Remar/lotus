@@ -89,23 +89,8 @@ void QualifierAnalysis::getGlobals() {
       OP << "sFile:" << sFile << "\n";
       if (ifile) {
         OP << "file exists!\n";
-        // std::ifstream ifile(sFile);
-        boost::archive::text_iarchive ia(ifile);
-        ia >> Ctx->FSummaries[F];
-        Ctx->Visit[F] = true;
-        Ctx->ReadyList.insert(F);
-        // Ctx->FSummaries[F].summary();
+        // Loading from .sum files disabled (Boost dependency removed).
         ifile.close();
-        FCounter++;
-        OP << "load function " << fname << "\n";
-        // Ctx->FSummaries[F].summary();
-        OP << FCounter << " Function Summaries Loaded!\n";
-        for (Function *caller : Ctx->CalledMaps[F]) {
-          Ctx->RemainedFunction[caller]--;
-          if (Ctx->RemainedFunction[caller] == 0) {
-            Ctx->ReadyList.insert(caller);
-          }
-        }
       }
     }
 #endif
@@ -214,9 +199,8 @@ void QualifierAnalysis::calSumForRec(std::vector<llvm::Function *> &rec) {
       std::ifstream ifile(sFile);
       if (ifile) {
         OP << "file exists!\n";
-        // std::ifstream ifile(sFile);
-        boost::archive::text_iarchive ia(ifile);
-        ia >> Ctx->FSummaries[func];
+        // Loading from .sum files disabled (Boost dependency removed).
+        ifile.close();
       }
     }
 #endif
