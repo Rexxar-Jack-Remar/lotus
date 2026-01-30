@@ -11,6 +11,26 @@
 
 namespace pulse {
 
+namespace {
+static bool isNullPointerConstantValue(const llvm::Value* v) {
+  if (!v)
+    return false;
+  if (llvm::isa<llvm::ConstantPointerNull>(v))
+    return true;
+  if (auto* CE = llvm::dyn_cast<llvm::ConstantExpr>(v)) {
+    if (CE->getOpcode() == llvm::Instruction::IntToPtr) {
+      if (auto* CI = llvm::dyn_cast<llvm::ConstantInt>(CE->getOperand(0)))
+        return CI->isZero();
+    }
+  }
+  if (auto* I2P = llvm::dyn_cast<llvm::IntToPtrInst>(v)) {
+    if (auto* CI = llvm::dyn_cast<llvm::ConstantInt>(I2P->getOperand(0)))
+      return CI->isZero();
+  }
+  return false;
+}
+} // namespace
+
 /**
  * Materialize pre-condition: recursively explore the pre-condition subgraph
  * starting from a formal parameter, materializing it in the caller's state.
@@ -265,7 +285,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
     
     const PulseSummary* summary_ptr = summary_manager_.getSummary(callee);
     if (!summary_ptr || !summary_ptr->isValid()) {
-        return handleCall(CI, caller_state, pred, 0);
+        return {};
     }
     
     const PulseSummary& summary = *summary_ptr;
@@ -541,7 +561,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
             Trace issue_trace = latent.trace.clone();
             issue_trace.addEvent(CI, "Call");
 
-            if (LatentIssue::isManifest(*new_astate)) {
+            if (LatentIssue::isManifest(latent.diagnostic, *new_astate, caller_addr)) {
                 reportBug(latent.diagnostic, CI, caller_addr, issue_trace, new_astate);
                 results.push_back(ExecutionDomain::abortProgram(
                     std::make_unique<AbductiveDomain>(new_astate->clone()),
@@ -579,9 +599,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
                         if (RI->getNumOperands() > 0) {
                             const llvm::Value* ret_val = RI->getReturnValue();
                             if (ret_val && ret_val->getType()->isPointerTy()) {
-                                if (llvm::isa<llvm::ConstantPointerNull>(ret_val) ||
-                                    (llvm::isa<llvm::ConstantInt>(ret_val) &&
-                                     llvm::cast<llvm::ConstantInt>(ret_val)->isZero())) {
+                                if (isNullPointerConstantValue(ret_val)) {
                                     null_constant_ret = ret_val;
                                     break;
                                 }
@@ -636,7 +654,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
         return results;
     }
 
-    return handleCall(CI, caller_state, pred, 0);
+    return {};
 }
 
 } // namespace pulse

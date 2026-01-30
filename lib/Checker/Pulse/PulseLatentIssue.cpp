@@ -1,6 +1,8 @@
 #include "Checker/Pulse/PulseLatentIssue.h"
 #include "Checker/Pulse/PulseSummary.h"
 
+#include <llvm/IR/Argument.h>
+
 namespace pulse {
 
 bool LatentIssue::shouldReport(const PulseSummary& /*summary*/, const LatentIssue& /*issue*/) {
@@ -26,15 +28,36 @@ LatentIssue::IssueKind LatentIssue::issueKindFromResult(OperationResult result) 
 }
 
 bool LatentIssue::isManifest(const AbductiveDomain& astate) {
-    // A state is manifest if its path condition is empty or only contains
-    // facts about allocated pointers being non-null (no ptr==null assumed).
-    // For now, always report bugs to ensure they are detected.
-    // TODO: Implement proper manifest check based on path conditions
-    const auto& formula = astate.getPathFormula();
-    // Always return true to report bugs immediately
-    // In the future, we can refine this to only report bugs that can occur
-    // in any reasonable calling context
-    return true; // formula.isEmptyOrTrivial();
+    // A state is manifest if it doesn't rely on restrictive assumptions
+    // (e.g., ptr == null) and we haven't introduced unknown values.
+    return !astate.hasUnknownValues() && astate.getPathFormula().isEmptyOrTrivial();
+}
+
+bool LatentIssue::isManifest(OperationResult diagnostic,
+                             const AbductiveDomain& astate,
+                             AbstractValue address) {
+    // Null dereferences are only reported when we can trace the nullness to a
+    // null pointer constant (see PulseOperations::isNullConstantSource), so they
+    // are manifest by construction.
+    if (diagnostic == OperationResult::NullDereference) {
+        return true;
+    }
+
+    // Use-after-free is manifest once we have observed the invalidation along
+    // the current path.
+    if (diagnostic == OperationResult::UseAfterFree) {
+        return true;
+    }
+
+    // Uninitialized reads from parameters are highly dependent on caller
+    // context; delay them as latent. Local uninitialized reads are manifest.
+    if (diagnostic == OperationResult::UninitializedRead) {
+        const llvm::Value* v = address.getValue();
+        return v ? !llvm::isa<llvm::Argument>(v) : false;
+    }
+
+    // Default: use the state-level heuristic.
+    return isManifest(astate);
 }
 
 } // namespace pulse

@@ -18,6 +18,7 @@
 #include <memory>
 #include <queue>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 #include <llvm/IR/Function.h>
@@ -76,6 +77,10 @@ private:
 
   // Latent issues tracking
   std::vector<LatentIssue> latent_issues_;
+
+  // During SCC-based scheduling, we treat calls within the current SCC as
+  // unknown/unstable (no summaries available yet).
+  std::unordered_set<const llvm::Function *> current_scc_;
 
 public:
   explicit PulseChecker(llvm::Module *M,

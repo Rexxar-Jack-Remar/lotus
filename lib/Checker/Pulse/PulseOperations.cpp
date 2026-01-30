@@ -12,6 +12,36 @@
 
 namespace pulse {
 
+namespace {
+static bool isNullPointerConstantValue(const llvm::Value *v) {
+  if (!v)
+    return false;
+  if (llvm::isa<llvm::ConstantPointerNull>(v))
+    return true;
+  if (auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(v)) {
+    if (CE->getOpcode() == llvm::Instruction::IntToPtr) {
+      if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(CE->getOperand(0)))
+        return CI->isZero();
+    }
+  }
+  if (auto *I2P = llvm::dyn_cast<llvm::IntToPtrInst>(v)) {
+    if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(I2P->getOperand(0)))
+      return CI->isZero();
+  }
+  return false;
+}
+
+static llvm::Optional<int64_t> getI64Constant(const llvm::Value *v) {
+  if (!v)
+    return llvm::None;
+  if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(v)) {
+    if (CI->getBitWidth() <= 64)
+      return CI->getSExtValue();
+  }
+  return llvm::None;
+}
+} // namespace
+
 //===----------------------------------------------------------------------===//
 // AbstractValueFactory Implementation
 //===----------------------------------------------------------------------===//
@@ -62,14 +92,8 @@ AbstractValue AbstractValueFactory::createFresh(const llvm::Value *hint) {
 bool PulseOperations::isNullConstantSource(const Address &addr) {
   // Check if the original LLVM value is a null constant
   if (const llvm::Value *v = addr.addr.getValue()) {
-    if (llvm::isa<llvm::ConstantPointerNull>(v)) {
+    if (isNullPointerConstantValue(v))
       return true;
-    }
-    if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(v)) {
-      if (CI->isZero()) {
-        return true;
-      }
-    }
   }
 
   // Check ValueHistory for Store events where a null constant was stored
@@ -77,9 +101,7 @@ bool PulseOperations::isNullConstantSource(const Address &addr) {
     if (event.kind == ValueHistory::EventKind::Store && event.location) {
       if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(event.location)) {
         const llvm::Value *stored_value = SI->getValueOperand();
-        if (llvm::isa<llvm::ConstantPointerNull>(stored_value) ||
-            (llvm::isa<llvm::ConstantInt>(stored_value) &&
-             llvm::cast<llvm::ConstantInt>(stored_value)->isZero())) {
+        if (isNullPointerConstantValue(stored_value)) {
           return true;
         }
         // Also check if the stored value came from a CallInst returning null
@@ -99,9 +121,7 @@ bool PulseOperations::isNullConstantSource(const Address &addr) {
                   if (RI->getNumOperands() > 0) {
                     const llvm::Value *ret_val = RI->getReturnValue();
                     if (ret_val && ret_val->getType()->isPointerTy()) {
-                      if (llvm::isa<llvm::ConstantPointerNull>(ret_val) ||
-                          (llvm::isa<llvm::ConstantInt>(ret_val) &&
-                           llvm::cast<llvm::ConstantInt>(ret_val)->isZero())) {
+                      if (isNullPointerConstantValue(ret_val)) {
                         return true;
                       }
                     }
@@ -124,9 +144,7 @@ bool PulseOperations::isNullConstantSource(const Address &addr) {
                       llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
                 if (RI->getNumOperands() > 0) {
                   const llvm::Value *ret_val = RI->getReturnValue();
-                  if (llvm::isa<llvm::ConstantPointerNull>(ret_val) ||
-                      (llvm::isa<llvm::ConstantInt>(ret_val) &&
-                       llvm::cast<llvm::ConstantInt>(ret_val)->isZero())) {
+                  if (isNullPointerConstantValue(ret_val)) {
                     return true;
                   }
                 }
@@ -145,22 +163,21 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
                                               const llvm::Value *exp,
                                               const llvm::Instruction *loc,
                                               const llvm::BasicBlock *pred) {
-  if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(exp)) {
-    if (CI->isZero()) {
-      AbstractValue null_addr = factory_->createFresh(exp);
-      Address addr(null_addr);
-      astate.getPostAttrs().add(null_addr, Attribute::Null);
-      astate.getPathFormula().addNull(null_addr);
-      return addr;
-    }
-  }
-
-  if (llvm::isa<llvm::ConstantPointerNull>(exp)) {
+  // Pointer-typed null constants.
+  if (isNullPointerConstantValue(exp)) {
     AbstractValue null_addr = factory_->createFresh(exp);
     Address addr(null_addr);
     astate.getPostAttrs().add(null_addr, Attribute::Null);
     astate.getPathFormula().addNull(null_addr);
     return llvm::Optional<Address>(addr);
+  }
+
+  // Integer constants: treat as integers, not null pointers.
+  if (auto c = getI64Constant(exp)) {
+    AbstractValue av = factory_->getOrCreate(exp);
+    astate.getPathFormula().addIntegerConstraint(av);
+    (void)astate.getPathFormula().addBounds(av, *c, *c);
+    return llvm::Optional<Address>(Address(av));
   }
 
   if (auto *addr = astate.getPostStack().find(exp)) {

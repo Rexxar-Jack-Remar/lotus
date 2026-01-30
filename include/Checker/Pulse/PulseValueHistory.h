@@ -181,6 +181,23 @@ public:
     /** Build a trace from ValueHistory, filtering to only include null constant sources. */
     static Trace fromValueHistoryNullSourceOnly(const ValueHistory& history) {
         Trace t;
+        auto is_null_ptr_const = [](const llvm::Value* v) -> bool {
+            if (!v) return false;
+            if (llvm::isa<llvm::ConstantPointerNull>(v)) return true;
+            if (auto* CE = llvm::dyn_cast<llvm::ConstantExpr>(v)) {
+                if (CE->getOpcode() == llvm::Instruction::IntToPtr) {
+                    if (auto* CI = llvm::dyn_cast<llvm::ConstantInt>(CE->getOperand(0))) {
+                        return CI->isZero();
+                    }
+                }
+            }
+            if (auto* I2P = llvm::dyn_cast<llvm::IntToPtrInst>(v)) {
+                if (auto* CI = llvm::dyn_cast<llvm::ConstantInt>(I2P->getOperand(0))) {
+                    return CI->isZero();
+                }
+            }
+            return false;
+        };
         for (const auto& event : history.getEvents()) {
             if (!event.location)
                 continue;
@@ -189,10 +206,8 @@ public:
             if (event.kind == ValueHistory::EventKind::Store) {
                 if (auto* SI = llvm::dyn_cast<llvm::StoreInst>(event.location)) {
                     const llvm::Value* stored_value = SI->getValueOperand();
-                    // Check if storing a null constant
-                    if (llvm::isa<llvm::ConstantPointerNull>(stored_value) ||
-                        (llvm::isa<llvm::ConstantInt>(stored_value) &&
-                         llvm::cast<llvm::ConstantInt>(stored_value)->isZero())) {
+                    // Check if storing a null pointer constant (not integer 0).
+                    if (is_null_ptr_const(stored_value)) {
                         std::string desc = "Null constant stored";
                         if (event.function) {
                             desc = event.function->getName().str() + ": " + desc;

@@ -425,17 +425,15 @@ bool PulseFormula::addBounds(AbstractValue v, int64_t lower, int64_t upper) {
     auto upper_it = upper_bounds_.find(rep);
     
     if (lower_it != lower_bounds_.end()) {
-        if (lower < lower_it->second) {
-            lower_bounds_[rep] = lower;
-        }
+        // Tighten lower bound (take max).
+        lower_bounds_[rep] = std::max(lower_it->second, lower);
     } else {
         lower_bounds_[rep] = lower;
     }
     
     if (upper_it != upper_bounds_.end()) {
-        if (upper > upper_it->second) {
-            upper_bounds_[rep] = upper;
-        }
+        // Tighten upper bound (take min).
+        upper_bounds_[rep] = std::min(upper_it->second, upper);
     } else {
         upper_bounds_[rep] = upper;
     }
@@ -708,12 +706,12 @@ bool PulseFormula::addArithmeticOperation(AbstractValue result, AbstractValue op
     // For + and -, use linear constraints
     if (op == "+" || op == "-") {
         LinearConstraint constraint;
-        constraint.terms.emplace_back(op1, op == "+" ? 1 : -1);
-        constraint.terms.emplace_back(op2, 1);
-        constraint.constant = op == "+" ? 0 : 0;
+        // result = op1 (+|-) op2  <=>  result - op1 -/+ op2 = 0
+        constraint.terms.emplace_back(result, 1);
+        constraint.terms.emplace_back(op1, -1);
+        constraint.terms.emplace_back(op2, op == "+" ? -1 : 1);
+        constraint.constant = 0;
         constraint.kind = ConstraintKind::Equal;
-        // Adjust: result = op1 + op2 becomes result - op1 - op2 = 0
-        constraint.terms.emplace_back(result, -1);
         return addLinearConstraint(constraint);
     }
     

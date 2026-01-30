@@ -13,10 +13,14 @@
 #include "Checker/Pulse/PulseTaint.h"
 #include "Checker/Report/BugReportMgr.h"
 
+#include <functional>
+#include <limits>
 #include <map>
 #include <queue>
 #include <set>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/CFG.h>
@@ -27,6 +31,184 @@
 #include <llvm/Support/raw_ostream.h>
 
 namespace pulse {
+
+namespace {
+static bool isNullPointerConstantValue(const llvm::Value *v) {
+  if (!v)
+    return false;
+  if (llvm::isa<llvm::ConstantPointerNull>(v))
+    return true;
+  if (auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(v)) {
+    if (CE->getOpcode() == llvm::Instruction::IntToPtr) {
+      if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(CE->getOperand(0)))
+        return CI->isZero();
+    }
+  }
+  if (auto *I2P = llvm::dyn_cast<llvm::IntToPtrInst>(v)) {
+    if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(I2P->getOperand(0)))
+      return CI->isZero();
+  }
+  return false;
+}
+
+static llvm::Optional<int64_t> getI64Constant(const llvm::Value *v,
+                                              bool is_signed) {
+  if (!v)
+    return llvm::None;
+  auto *CI = llvm::dyn_cast<llvm::ConstantInt>(v);
+  if (!CI)
+    return llvm::None;
+  if (CI->getBitWidth() > 64)
+    return llvm::None;
+  if (is_signed)
+    return CI->getSExtValue();
+  // For unsigned, reject values that don't fit in signed int64_t (we keep
+  // int64_t bounds in the formula).
+  if (CI->getBitWidth() == 64 && CI->isNegative())
+    return llvm::None;
+  return static_cast<int64_t>(CI->getZExtValue());
+}
+
+static llvm::ICmpInst::Predicate invertIcmpPred(llvm::ICmpInst::Predicate p) {
+  using P = llvm::ICmpInst::Predicate;
+  switch (p) {
+  case P::ICMP_EQ:
+    return P::ICMP_NE;
+  case P::ICMP_NE:
+    return P::ICMP_EQ;
+  case P::ICMP_SLT:
+    return P::ICMP_SGE;
+  case P::ICMP_SLE:
+    return P::ICMP_SGT;
+  case P::ICMP_SGT:
+    return P::ICMP_SLE;
+  case P::ICMP_SGE:
+    return P::ICMP_SLT;
+  case P::ICMP_ULT:
+    return P::ICMP_UGE;
+  case P::ICMP_ULE:
+    return P::ICMP_UGT;
+  case P::ICMP_UGT:
+    return P::ICMP_ULE;
+  case P::ICMP_UGE:
+    return P::ICMP_ULT;
+  default:
+    return p;
+  }
+}
+
+static llvm::ICmpInst::Predicate swapIcmpSides(llvm::ICmpInst::Predicate p) {
+  using P = llvm::ICmpInst::Predicate;
+  switch (p) {
+  case P::ICMP_SLT:
+    return P::ICMP_SGT;
+  case P::ICMP_SLE:
+    return P::ICMP_SGE;
+  case P::ICMP_SGT:
+    return P::ICMP_SLT;
+  case P::ICMP_SGE:
+    return P::ICMP_SLE;
+  case P::ICMP_ULT:
+    return P::ICMP_UGT;
+  case P::ICMP_ULE:
+    return P::ICMP_UGE;
+  case P::ICMP_UGT:
+    return P::ICMP_ULT;
+  case P::ICMP_UGE:
+    return P::ICMP_ULE;
+  default:
+    return p;
+  }
+}
+
+static bool applyIntegerIcmpConstraint(PulseFormula &formula,
+                                       llvm::ICmpInst::Predicate p,
+                                       AbstractValue lhs, AbstractValue rhs) {
+  using P = llvm::ICmpInst::Predicate;
+  formula.addIntegerConstraint(lhs);
+  formula.addIntegerConstraint(rhs);
+
+  // If comparing against a constant, tighten bounds.
+  const llvm::Value *rhs_v = rhs.getValue();
+  const llvm::Value *lhs_v = lhs.getValue();
+
+  // Normalize to keep the constant on the RHS when possible.
+  bool rhs_is_const = llvm::isa<llvm::ConstantInt>(rhs_v);
+  bool lhs_is_const = llvm::isa<llvm::ConstantInt>(lhs_v);
+  if (lhs_is_const && !rhs_is_const) {
+    std::swap(lhs, rhs);
+    std::swap(lhs_v, rhs_v);
+    p = swapIcmpSides(p);
+    rhs_is_const = llvm::isa<llvm::ConstantInt>(rhs_v);
+  }
+
+  if (p == P::ICMP_EQ)
+    return formula.addEquality(lhs, rhs);
+  if (p == P::ICMP_NE)
+    return formula.addDisequality(lhs, rhs);
+
+  const bool is_signed = (p == P::ICMP_SLT || p == P::ICMP_SLE ||
+                          p == P::ICMP_SGT || p == P::ICMP_SGE);
+
+  if (rhs_is_const) {
+    auto c_opt = getI64Constant(rhs_v, is_signed);
+    if (!c_opt)
+      return true; // Can't encode precisely.
+    const int64_t c = *c_opt;
+
+    auto add_lower = [&](int64_t lb) { return formula.addBounds(lhs, lb, std::numeric_limits<int64_t>::max()); };
+    auto add_upper = [&](int64_t ub) { return formula.addBounds(lhs, std::numeric_limits<int64_t>::min(), ub); };
+
+    switch (p) {
+    case P::ICMP_SLT:
+    case P::ICMP_ULT:
+      if (c == std::numeric_limits<int64_t>::min())
+        return false;
+      return add_upper(c - 1);
+    case P::ICMP_SLE:
+    case P::ICMP_ULE:
+      return add_upper(c);
+    case P::ICMP_SGT:
+    case P::ICMP_UGT:
+      if (c == std::numeric_limits<int64_t>::max())
+        return false;
+      return add_lower(c + 1);
+    case P::ICMP_SGE:
+    case P::ICMP_UGE:
+      return add_lower(c);
+    default:
+      return true;
+    }
+  }
+
+  // Variable-vs-variable inequalities: encode as linear constraint lhs - rhs ? 0.
+  LinearConstraint c;
+  c.terms.emplace_back(lhs, 1);
+  c.terms.emplace_back(rhs, -1);
+  c.constant = 0;
+  switch (p) {
+  case P::ICMP_SLT:
+  case P::ICMP_ULT:
+    c.kind = ConstraintKind::Less;
+    break;
+  case P::ICMP_SLE:
+  case P::ICMP_ULE:
+    c.kind = ConstraintKind::LessEqual;
+    break;
+  case P::ICMP_SGT:
+  case P::ICMP_UGT:
+    c.kind = ConstraintKind::Greater;
+    break;
+  case P::ICMP_SGE:
+  case P::ICMP_UGE:
+    c.kind = ConstraintKind::GreaterEqual;
+    break;
+  default:
+    return true;
+  }
+  return formula.addLinearConstraint(c);
+}
+} // namespace
 
 constexpr unsigned PulseChecker::kMaxDisjuncts;
 constexpr unsigned PulseChecker::kMaxCallDepth;
@@ -101,15 +283,160 @@ void PulseChecker::analyze() {
   PulseLogger::info("Starting module analysis");
   PulseLogger::incrementCounter("modules.analyzed");
 
-  unsigned function_count = 0;
+  std::vector<const llvm::Function *> functions;
+  functions.reserve(module_->size());
   for (auto &F : *module_) {
-    if (F.isDeclaration())
-      continue;
-    function_count++;
-    analyzeFunction(&F);
+    if (!F.isDeclaration())
+      functions.push_back(&F);
   }
 
-  PulseLogger::info("Completed analysis of " + std::to_string(function_count) +
+  std::unordered_set<const llvm::Function *> function_set(functions.begin(),
+                                                          functions.end());
+
+  // Build direct call graph: caller -> callee (only for defined functions).
+  std::unordered_map<const llvm::Function *, std::vector<const llvm::Function *>>
+      edges;
+  edges.reserve(functions.size());
+  for (const llvm::Function *F : functions) {
+    std::vector<const llvm::Function *> callees;
+    for (const auto &BB : *F) {
+      for (const auto &I : BB) {
+        auto *CI = llvm::dyn_cast<llvm::CallInst>(&I);
+        if (!CI)
+          continue;
+        const llvm::Function *Callee = CI->getCalledFunction();
+        if (!Callee || Callee->isDeclaration())
+          continue;
+        if (function_set.count(Callee) == 0)
+          continue;
+        callees.push_back(Callee);
+      }
+    }
+    edges.emplace(F, std::move(callees));
+  }
+
+  // Reverse edges for SCC computation (Kosaraju).
+  std::unordered_map<const llvm::Function *, std::vector<const llvm::Function *>>
+      rev_edges;
+  rev_edges.reserve(functions.size());
+  for (const llvm::Function *F : functions) {
+    (void)rev_edges[F];
+  }
+  for (const auto &kv : edges) {
+    const llvm::Function *caller = kv.first;
+    for (const llvm::Function *callee : kv.second) {
+      rev_edges[callee].push_back(caller);
+    }
+  }
+
+  // First DFS pass: finish order.
+  std::vector<const llvm::Function *> order;
+  order.reserve(functions.size());
+  std::unordered_set<const llvm::Function *> visited;
+  visited.reserve(functions.size());
+
+  std::function<void(const llvm::Function *)> dfs1 =
+      [&](const llvm::Function *F) {
+        if (visited.count(F))
+          return;
+        visited.insert(F);
+        auto it = edges.find(F);
+        if (it != edges.end()) {
+          for (const llvm::Function *callee : it->second) {
+            dfs1(callee);
+          }
+        }
+        order.push_back(F);
+      };
+
+  for (const llvm::Function *F : functions)
+    dfs1(F);
+
+  // Second DFS pass on reverse graph: collect SCCs.
+  std::unordered_set<const llvm::Function *> visited2;
+  visited2.reserve(functions.size());
+  std::vector<std::vector<const llvm::Function *>> sccs;
+  sccs.reserve(functions.size());
+
+  std::function<void(const llvm::Function *, std::vector<const llvm::Function *> &)>
+      dfs2 = [&](const llvm::Function *F,
+                 std::vector<const llvm::Function *> &scc) {
+        if (visited2.count(F))
+          return;
+        visited2.insert(F);
+        scc.push_back(F);
+        auto it = rev_edges.find(F);
+        if (it != rev_edges.end()) {
+          for (const llvm::Function *pred : it->second) {
+            dfs2(pred, scc);
+          }
+        }
+      };
+
+  for (auto it = order.rbegin(); it != order.rend(); ++it) {
+    const llvm::Function *F = *it;
+    if (visited2.count(F))
+      continue;
+    std::vector<const llvm::Function *> scc;
+    dfs2(F, scc);
+    sccs.push_back(std::move(scc));
+  }
+
+  // Map function -> SCC id.
+  std::unordered_map<const llvm::Function *, size_t> scc_id;
+  scc_id.reserve(functions.size());
+  for (size_t i = 0; i < sccs.size(); ++i) {
+    for (const llvm::Function *F : sccs[i])
+      scc_id[F] = i;
+  }
+
+  // Build SCC DAG (caller SCC -> callee SCC), then topo-sort it.
+  std::vector<std::unordered_set<size_t>> scc_edges(sccs.size());
+  std::vector<size_t> indeg(sccs.size(), 0);
+  for (const auto &kv : edges) {
+    const llvm::Function *caller = kv.first;
+    size_t c_id = scc_id[caller];
+    for (const llvm::Function *callee : kv.second) {
+      size_t d_id = scc_id[callee];
+      if (c_id == d_id)
+        continue;
+      if (scc_edges[c_id].insert(d_id).second) {
+        indeg[d_id]++;
+      }
+    }
+  }
+
+  std::queue<size_t> q;
+  for (size_t i = 0; i < indeg.size(); ++i) {
+    if (indeg[i] == 0)
+      q.push(i);
+  }
+  std::vector<size_t> topo;
+  topo.reserve(sccs.size());
+  while (!q.empty()) {
+    size_t id = q.front();
+    q.pop();
+    topo.push_back(id);
+    for (size_t succ : scc_edges[id]) {
+      if (--indeg[succ] == 0)
+        q.push(succ);
+    }
+  }
+
+  // Analyze SCCs in reverse-topological order (callees first).
+  for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
+    size_t id = *it;
+    current_scc_.clear();
+    for (const llvm::Function *F : sccs[id])
+      current_scc_.insert(F);
+    for (const llvm::Function *F : sccs[id]) {
+      analyzeFunction(F);
+    }
+  }
+  current_scc_.clear();
+
+  PulseLogger::info("Completed analysis of " +
+                    std::to_string(functions.size()) +
                     " functions");
 
   // Flush periodically or at end
@@ -374,6 +701,66 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
   if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(I))
     return {handleReturn(RI, exec_state)};
 
+  // Integer arithmetic: record constraints linking SSA values.
+  if (auto *BO = llvm::dyn_cast<llvm::BinaryOperator>(I)) {
+    if (BO->getType()->isIntegerTy()) {
+      auto lhs_opt = ops_.eval(*astate, BO->getOperand(0), BO, pred);
+      auto rhs_opt = ops_.eval(*astate, BO->getOperand(1), BO, pred);
+      if (lhs_opt && rhs_opt) {
+        AbstractValue res_av = factory_.getOrCreate(BO);
+        AbstractValue lhs_av = astate->getCanonical(lhs_opt->addr);
+        AbstractValue rhs_av = astate->getCanonical(rhs_opt->addr);
+        astate->getPathFormula().addIntegerConstraint(res_av);
+        astate->getPathFormula().addIntegerConstraint(lhs_av);
+        astate->getPathFormula().addIntegerConstraint(rhs_av);
+
+        std::string op;
+        switch (BO->getOpcode()) {
+        case llvm::Instruction::Add:
+          op = "+";
+          break;
+        case llvm::Instruction::Sub:
+          op = "-";
+          break;
+        case llvm::Instruction::Mul:
+          op = "*";
+          break;
+        case llvm::Instruction::SDiv:
+        case llvm::Instruction::UDiv:
+          op = "/";
+          break;
+        case llvm::Instruction::SRem:
+        case llvm::Instruction::URem:
+          op = "%";
+          break;
+        case llvm::Instruction::And:
+          op = "&";
+          break;
+        case llvm::Instruction::Or:
+          op = "|";
+          break;
+        case llvm::Instruction::Xor:
+          op = "^";
+          break;
+        case llvm::Instruction::Shl:
+          op = "<<";
+          break;
+        case llvm::Instruction::LShr:
+        case llvm::Instruction::AShr:
+          op = ">>";
+          break;
+        default:
+          break;
+        }
+        if (!op.empty()) {
+          (void)astate->getPathFormula().addArithmeticOperation(res_av, lhs_av,
+                                                               rhs_av, op);
+        }
+      }
+    }
+    return {exec_state};
+  }
+
   // Handle comparisons for path conditions. Skip when used as branch condition:
   // we fork and apply per-branch in applyBranchCondition.
   if (llvm::isa<llvm::ICmpInst>(I) || llvm::isa<llvm::FCmpInst>(I)) {
@@ -419,14 +806,15 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
     AbstractValue canon_var = astate->getCanonical(stack_var);
 
     // Check if variable is uninitialized (only for reads, not writes)
-    if (astate->getPostAttrs().has(canon_var, Attribute::Uninitialized)) {
-      Trace trace;
-      trace.addEvent(LI, "Load from uninitialized variable");
-      if (LatentIssue::isManifest(*astate)) {
-        reportBug(OperationResult::UninitializedRead, LI, canon_var, trace,
-                  astate);
-        return ExecutionDomain::abortProgram(
-            std::make_unique<AbductiveDomain>(astate->clone()),
+	    if (astate->getPostAttrs().has(canon_var, Attribute::Uninitialized)) {
+	      Trace trace;
+	      trace.addEvent(LI, "Load from uninitialized variable");
+	      if (LatentIssue::isManifest(OperationResult::UninitializedRead, *astate,
+	                                  canon_var)) {
+	        reportBug(OperationResult::UninitializedRead, LI, canon_var, trace,
+	                  astate);
+	        return ExecutionDomain::abortProgram(
+	            std::make_unique<AbductiveDomain>(astate->clone()),
             OperationResult::UninitializedRead, std::move(trace));
       } else {
         latent_issues_.emplace_back(OperationResult::UninitializedRead,
@@ -460,13 +848,14 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
 
     // PRIORITY ORDER: Invalid > Null > Uninitialized
     // Check Invalid FIRST (UseAfterFree is most severe)
-    if (astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid)) {
-      Trace trace = Trace::fromValueHistory(stack_addr->history);
-      trace.addEvent(LI, "Load of invalid pointer");
-      if (LatentIssue::isManifest(*astate)) {
-        reportBug(OperationResult::UseAfterFree, LI, loaded_ptr, trace, astate);
-        return ExecutionDomain::abortProgram(
-            std::make_unique<AbductiveDomain>(astate->clone()),
+	    if (astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid)) {
+	      Trace trace = Trace::fromValueHistory(stack_addr->history);
+	      trace.addEvent(LI, "Load of invalid pointer");
+	      if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
+	                                  loaded_ptr)) {
+	        reportBug(OperationResult::UseAfterFree, LI, loaded_ptr, trace, astate);
+	        return ExecutionDomain::abortProgram(
+	            std::make_unique<AbductiveDomain>(astate->clone()),
             OperationResult::UseAfterFree, std::move(trace));
       } else {
         latent_issues_.emplace_back(
@@ -497,13 +886,14 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
           loaded_addr.history = stack_addr->history;
           is_null_source = PulseOperations::isNullConstantSource(loaded_addr);
         }
-        if (is_null_source) {
-          Trace trace = Trace::fromValueHistory(stack_addr->history);
-          trace.addEvent(LI, "Load of null pointer");
-          if (LatentIssue::isManifest(*astate)) {
-            reportBug(OperationResult::NullDereference, LI, loaded_ptr, trace,
-                      astate);
-            return ExecutionDomain::abortProgram(
+	        if (is_null_source) {
+	          Trace trace = Trace::fromValueHistory(stack_addr->history);
+	          trace.addEvent(LI, "Load of null pointer");
+	          if (LatentIssue::isManifest(OperationResult::NullDereference, *astate,
+	                                      loaded_ptr)) {
+	            reportBug(OperationResult::NullDereference, LI, loaded_ptr, trace,
+	                      astate);
+	            return ExecutionDomain::abortProgram(
                 std::make_unique<AbductiveDomain>(astate->clone()),
                 OperationResult::NullDereference, std::move(trace));
           } else {
@@ -569,13 +959,14 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
   // PRIORITY: Check Invalid FIRST before dereferencing (UseAfterFree >
   // NullDereference)
   AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
-  if (astate->getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
-    Trace trace = Trace::fromValueHistory(ptr_opt->history);
-    trace.addEvent(LI, "Dereference of invalid pointer");
-    if (LatentIssue::isManifest(*astate)) {
-      reportBug(OperationResult::UseAfterFree, LI, canon_ptr, trace, astate);
-      return ExecutionDomain::abortProgram(
-          std::make_unique<AbductiveDomain>(astate->clone()),
+	  if (astate->getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
+	    Trace trace = Trace::fromValueHistory(ptr_opt->history);
+	    trace.addEvent(LI, "Dereference of invalid pointer");
+	    if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
+	                                canon_ptr)) {
+	      reportBug(OperationResult::UseAfterFree, LI, canon_ptr, trace, astate);
+	      return ExecutionDomain::abortProgram(
+	          std::make_unique<AbductiveDomain>(astate->clone()),
           OperationResult::UseAfterFree, std::move(trace));
     } else {
       latent_issues_.emplace_back(
@@ -592,14 +983,15 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
   OperationResult result = read_result.first;
   llvm::Optional<Address> value_opt = read_result.second;
 
-  if (result != OperationResult::Success) {
-    Trace trace = Trace::fromValueHistory(ptr_opt->history);
-    trace.addEvent(LI, "Load from invalid address");
+	  if (result != OperationResult::Success) {
+	    Trace trace = Trace::fromValueHistory(ptr_opt->history);
+	    trace.addEvent(LI, "Load from invalid address");
 
-    if (LatentIssue::isManifest(*astate)) {
-      // Manifest error - report immediately
-      reportBug(result, LI, ptr_opt->addr, trace, astate);
-      return ExecutionDomain::abortProgram(
+	    if (LatentIssue::isManifest(result, *astate,
+	                                astate->getCanonical(ptr_opt->addr))) {
+	      // Manifest error - report immediately
+	      reportBug(result, LI, ptr_opt->addr, trace, astate);
+	      return ExecutionDomain::abortProgram(
           std::make_unique<AbductiveDomain>(astate->clone()), result,
           std::move(trace));
     } else {
@@ -700,10 +1092,11 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
     Trace trace = Trace::fromValueHistory(ptr_opt->history);
     trace.addEvent(SI, "Store to invalid address");
 
-    if (LatentIssue::isManifest(*astate)) {
-      // Manifest error - report immediately
-      reportBug(res, SI, ptr_opt->addr, trace, astate);
-      return ExecutionDomain::abortProgram(
+	    if (LatentIssue::isManifest(res, *astate,
+	                                astate->getCanonical(ptr_opt->addr))) {
+	      // Manifest error - report immediately
+	      reportBug(res, SI, ptr_opt->addr, trace, astate);
+	      return ExecutionDomain::abortProgram(
           std::make_unique<AbductiveDomain>(astate->clone()), res,
           std::move(trace));
     } else {
@@ -807,9 +1200,32 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
     return {exec_state};
   }
 
+  // Calls within the current SCC are treated as unknown to avoid
+  // order-dependent interprocedural behavior in recursive cycles.
+  if (current_scc_.count(F) > 0) {
+    astate->addSkippedCall(F->getName().str());
+    astate->declareUnknownValues();
+    if (CI->getType()->isPointerTy()) {
+      AbstractValue ret_val = factory_.createFresh(CI);
+      Address ret_addr(ret_val);
+      ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI,
+                                CI->getFunction());
+      astate->getPostStack().add(CI, ret_addr);
+    }
+    return {exec_state};
+  }
+
   if (F->isDeclaration()) {
     // External function with no model - record as skipped
     astate->addSkippedCall(F->getName().str());
+    astate->declareUnknownValues();
+    if (CI->getType()->isPointerTy()) {
+      AbstractValue ret_val = factory_.createFresh(CI);
+      Address ret_addr(ret_val);
+      ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI,
+                                CI->getFunction());
+      astate->getPostStack().add(CI, ret_addr);
+    }
     return {exec_state};
   }
 
@@ -821,40 +1237,25 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
     if (!summary_results.empty()) {
       return summary_results;
     }
-    // If summary application failed, fall through to inlining
-  }
-
-  // Otherwise, inline (with depth limit)
-  if (call_depth >= kMaxCallDepth)
-    return {exec_state};
-
-  auto exits = runCallee(F, exec_state, CI, pred, call_depth);
-  std::vector<ExecutionDomain> out;
-  const llvm::Instruction *next = CI->getNextNode();
-  const llvm::BasicBlock *BB = CI->getParent();
-  for (auto &exit_pair : exits) {
-    ExecutionDomain &exit_state = exit_pair.first;
-    llvm::Optional<AbstractValue> &ret_av = exit_pair.second;
-    if (exit_state.isStopped())
-      continue;
-    ExecutionDomain caller_state = exec_state.clone();
-    auto *cas = caller_state.getAstate();
-    if (ret_av && cas) {
-      cas->getPostStack().add(CI, Address(*ret_av));
-    }
-    if (next)
-      out.push_back(std::move(caller_state));
-    else if (CI->isTerminator()) {
-      for (const llvm::BasicBlock *succ : llvm::successors(BB)) {
-        if (succ->empty())
-          continue;
-        out.push_back(caller_state.clone());
-      }
+    // Fall back to legacy summary application if the improved engine cannot
+    // apply any entry.
+    auto legacy_results = applySummary(F, exec_state, CI, pred);
+    if (!legacy_results.empty()) {
+      return legacy_results;
     }
   }
-  if (out.empty())
-    return {exec_state};
-  return out;
+
+  // No summary could be applied. Conservatively treat the call as unknown.
+  astate->addSkippedCall(F->getName().str());
+  astate->declareUnknownValues();
+  if (CI->getType()->isPointerTy()) {
+    AbstractValue ret_val = factory_.createFresh(CI);
+    Address ret_addr(ret_val);
+    ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI,
+                              CI->getFunction());
+    astate->getPostStack().add(CI, ret_addr);
+  }
+  return {exec_state};
 }
 
 ExecutionDomain PulseChecker::handleAlloca(const llvm::AllocaInst *AI,
@@ -889,8 +1290,9 @@ PulseChecker::runCallee(const llvm::Function *callee,
 
   ExecutionDomain init = initializeFunction(callee);
   auto *init_astate = init.getAstate();
-  const AbductiveDomain *caller_astate = caller_state.getAstate();
-  if (!init_astate || !caller_astate)
+  ExecutionDomain caller_eval_state = caller_state.clone();
+  auto *caller_eval_astate = caller_eval_state.getAstate();
+  if (!init_astate || !caller_eval_astate)
     return result;
 
   const auto *ai = callee->arg_begin();
@@ -899,9 +1301,8 @@ PulseChecker::runCallee(const llvm::Function *callee,
   for (; ai != ae && i < CI->arg_size(); ++ai, ++i) {
     if (!ai->getType()->isPointerTy())
       continue;
-    // Use init_astate for eval (it's non-const and we're setting it up anyway)
-    // We'll evaluate in the init state context
-    auto opt = ops_.eval(*init_astate, CI->getArgOperand(i), CI, pred);
+    // Evaluate actuals in the caller's state (not in the fresh callee state).
+    auto opt = ops_.eval(*caller_eval_astate, CI->getArgOperand(i), CI, pred);
     if (opt) {
       init_astate->getPostStack().add(&*ai, *opt);
       AbstractValue formal_av = factory_.getOrCreate(&*ai);
@@ -1060,10 +1461,8 @@ void PulseChecker::reportBug(OperationResult kind, const llvm::Instruction *loc,
       // Only include Store events where a null constant is stored
       if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(event.location)) {
         const llvm::Value *stored_value = SI->getValueOperand();
-        // Check if storing a null constant
-        if (llvm::isa<llvm::ConstantPointerNull>(stored_value) ||
-            (llvm::isa<llvm::ConstantInt>(stored_value) &&
-             llvm::cast<llvm::ConstantInt>(stored_value)->isZero())) {
+        // Check if storing a null pointer constant (not integer 0).
+        if (isNullPointerConstantValue(stored_value)) {
           filtered_trace.addEvent(event.location, event.function,
                                   "Null constant stored");
         }
@@ -1307,8 +1706,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummary(
 
   const PulseSummary *summary_ptr = summary_manager_.getSummary(callee);
   if (!summary_ptr || !summary_ptr->isValid()) {
-    // Fall back to inlining
-    return handleCall(CI, caller_state, pred, 0);
+    return {};
   }
 
   const PulseSummary &summary = *summary_ptr;
@@ -1431,8 +1829,8 @@ std::vector<ExecutionDomain> PulseChecker::applySummary(
   }
 
   if (has_contradiction) {
-    // Contradiction detected - cannot apply summary, fall back to inlining
-    return handleCall(CI, caller_state, pred, 0);
+    // Contradiction detected - cannot apply this summary.
+    return {};
   }
 
   // Apply post-condition from summary with substitution
@@ -1497,15 +1895,13 @@ std::vector<ExecutionDomain> PulseChecker::applySummary(
       for (const auto &BB : *callee) {
         if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
           if (RI->getNumOperands() > 0) {
-            const llvm::Value *ret_val = RI->getReturnValue();
-            if (ret_val && ret_val->getType()->isPointerTy()) {
-              if (llvm::isa<llvm::ConstantPointerNull>(ret_val) ||
-                  (llvm::isa<llvm::ConstantInt>(ret_val) &&
-                   llvm::cast<llvm::ConstantInt>(ret_val)->isZero())) {
-                null_constant_ret = ret_val;
-                break;
-              }
-            }
+                  const llvm::Value *ret_val = RI->getReturnValue();
+                  if (ret_val && ret_val->getType()->isPointerTy()) {
+                    if (isNullPointerConstantValue(ret_val)) {
+                      null_constant_ret = ret_val;
+                      break;
+                    }
+                  }
           }
         }
       }
@@ -1557,12 +1953,8 @@ PulseChecker::handleComparison(const llvm::Instruction *I,
     llvm::Value *op1 = ICmp->getOperand(1);
 
     // Handle null pointer comparisons
-    bool op0_is_null = llvm::isa<llvm::ConstantPointerNull>(op0) ||
-                       (llvm::isa<llvm::ConstantInt>(op0) &&
-                        llvm::cast<llvm::ConstantInt>(op0)->isZero());
-    bool op1_is_null = llvm::isa<llvm::ConstantPointerNull>(op1) ||
-                       (llvm::isa<llvm::ConstantInt>(op1) &&
-                        llvm::cast<llvm::ConstantInt>(op1)->isZero());
+    bool op0_is_null = isNullPointerConstantValue(op0);
+    bool op1_is_null = isNullPointerConstantValue(op1);
 
     if (op0_is_null || op1_is_null) {
       llvm::Value *ptr = op0_is_null ? op1 : op0;
@@ -1657,13 +2049,9 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
     return state;
   llvm::Value *op0 = ICmp->getOperand(0);
   llvm::Value *op1 = ICmp->getOperand(1);
-  llvm::ICmpInst::Predicate pred = ICmp->getPredicate();
-  bool op0_null = llvm::isa<llvm::ConstantPointerNull>(op0) ||
-                  (llvm::isa<llvm::ConstantInt>(op0) &&
-                   llvm::cast<llvm::ConstantInt>(op0)->isZero());
-  bool op1_null = llvm::isa<llvm::ConstantPointerNull>(op1) ||
-                  (llvm::isa<llvm::ConstantInt>(op1) &&
-                   llvm::cast<llvm::ConstantInt>(op1)->isZero());
+  llvm::ICmpInst::Predicate cmp_pred = ICmp->getPredicate();
+  bool op0_null = isNullPointerConstantValue(op0);
+  bool op1_null = isNullPointerConstantValue(op1);
   bool is_then = (successor_index == 0);
 
   if (op0_null || op1_null) {
@@ -1684,17 +2072,17 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
       // Pointer is invalid - only take the non-null path (where we'll report
       // UseAfterFree) Skip the null path to avoid false positive
       // NullDereference
-      if (pred == llvm::ICmpInst::ICMP_EQ && is_then) {
+      if (cmp_pred == llvm::ICmpInst::ICMP_EQ && is_then) {
         // This is the null path (ptr == null) - skip it
         return llvm::None;
       }
-      if (pred == llvm::ICmpInst::ICMP_NE && !is_then) {
+      if (cmp_pred == llvm::ICmpInst::ICMP_NE && !is_then) {
         // This is the null path (ptr != null, else branch) - skip it
         return llvm::None;
       }
     }
 
-    if (pred == llvm::ICmpInst::ICMP_EQ) {
+    if (cmp_pred == llvm::ICmpInst::ICMP_EQ) {
       if (is_then) {
         // If we already have evidence this pointer is allocated (post or pre),
         // then taking the [ptr == 0] branch makes the current path
@@ -1726,7 +2114,7 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
         // Don't remove Null attribute here - it should only be set by null
         // constants
       }
-    } else if (pred == llvm::ICmpInst::ICMP_NE) {
+    } else if (cmp_pred == llvm::ICmpInst::ICMP_NE) {
       if (is_then) {
         astate->getPathFormula().addNonNull(canon_ptr_av);
         // Don't remove Null attribute here - it should only be set by null
@@ -1743,7 +2131,26 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
     return llvm::Optional<ExecutionDomain>(std::move(forked));
   }
 
-  if (pred != llvm::ICmpInst::ICMP_EQ && pred != llvm::ICmpInst::ICMP_NE)
+  // Integer comparisons contribute to path constraints too.
+  if (op0->getType()->isIntegerTy() && op1->getType()->isIntegerTy()) {
+    auto a0_opt = ops_.eval(*astate, op0, ICmp, pred_bb);
+    auto a1_opt = ops_.eval(*astate, op1, ICmp, pred_bb);
+    if (!a0_opt || !a1_opt)
+      return llvm::Optional<ExecutionDomain>(std::move(state));
+    AbstractValue av0 = astate->getCanonical(a0_opt->addr);
+    AbstractValue av1 = astate->getCanonical(a1_opt->addr);
+
+    llvm::ICmpInst::Predicate eff_pred =
+        is_then ? cmp_pred : invertIcmpPred(cmp_pred);
+    if (!applyIntegerIcmpConstraint(astate->getPathFormula(), eff_pred, av0,
+                                    av1)) {
+      return llvm::None;
+    }
+    return llvm::Optional<ExecutionDomain>(std::move(forked));
+  }
+
+  if (cmp_pred != llvm::ICmpInst::ICMP_EQ &&
+      cmp_pred != llvm::ICmpInst::ICMP_NE)
     return llvm::Optional<ExecutionDomain>(std::move(state));
 
   if (op0->getType()->isPointerTy() && op1->getType()->isPointerTy()) {
@@ -1755,7 +2162,7 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
     AbstractValue av1 = av1_opt->addr;
 
     bool should_be_equal =
-        (pred == llvm::ICmpInst::ICMP_EQ) ? is_then : !is_then;
+        (cmp_pred == llvm::ICmpInst::ICMP_EQ) ? is_then : !is_then;
     if (should_be_equal) {
       if (!astate->getPathFormula().addEquality(av0, av1))
         return llvm::None;

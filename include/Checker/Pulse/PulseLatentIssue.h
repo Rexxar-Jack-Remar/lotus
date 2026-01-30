@@ -74,6 +74,15 @@ public:
      * facts about allocated pointers being non-null
      */
     static bool isManifest(const AbductiveDomain& astate);
+
+    /**
+     * Operation-specific manifest check.
+     * Used at reporting sites to avoid over-approximating manifestness from the
+     * whole state only.
+     */
+    static bool isManifest(OperationResult diagnostic,
+                           const AbductiveDomain& astate,
+                           AbstractValue address);
 };
 
 } // namespace pulse
