@@ -21,6 +21,8 @@
 #include <unordered_map>
 #include <vector>
 
+namespace llvm { class raw_ostream; }
+
 namespace lotus {
 class AliasAnalysisWrapper;
 namespace sifa {
@@ -121,6 +123,9 @@ public:
     return isBottom_ == o.isBottom_ && varToIndex_ == o.varToIndex_ &&
            matrix_.dim() == o.matrix_.dim() && memory_ == o.memory_;
   }
+
+  /// Print the state summary to an output stream.
+  void print(llvm::raw_ostream &out) const;
 
   /// True if strong closure has a negative self-loop.
   bool hasNegativeSelfLoop() const {

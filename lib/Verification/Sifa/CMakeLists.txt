@@ -20,6 +20,8 @@
 set(SIFA_SOURCES
   # Call graph (interprocedural)
   CallGraph.cpp
+  # Log
+  Log/SifaLogger.cpp
   # Caches
   Caches/ProcedureResourceCache.cpp
   Caches/StarDagCache.cpp

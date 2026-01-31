@@ -17,6 +17,7 @@
 
 #include "llvm/ADT/Optional.h"
 
+namespace llvm { class raw_ostream; }
 namespace lotus { class AliasAnalysisWrapper; }
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Value.h"
@@ -208,6 +209,9 @@ public:
     return isBottom_ == o.isBottom_ && intervals_ == o.intervals_ &&
            memory_ == o.memory_;
   }
+
+  /// Print the state to an output stream.
+  void print(llvm::raw_ostream &out) const;
 
 private:
   bool isBottom_ = false;

@@ -24,6 +24,7 @@
 #include "Verification/Sifa/Domain/OctagonDomain.h"
 #include "Verification/Sifa/Domain/ReachabilityDomain.h"
 #include "Verification/Sifa/Interpreter/RegexInterpreter.h"
+#include "Verification/Sifa/Log/SifaLogger.h"
 #include "Verification/Sifa/Procedure/ProcedureGraph.h"
 
 #include "Utils/General/PathExpressions/PathExpressionComputer.h"
@@ -71,6 +72,9 @@ struct SifaOptions {
   /// Octagon, etc.), enables region-based memory: Load/Store use AA to resolve
   /// pointers to regions (allocas, globals) for sound transfer. IKOS/CLAM style.
   lotus::AliasAnalysisWrapper *aliasAnalysis = nullptr;
+
+  /// Log verbosity for Sifa analysis. Use SifaLogger::setLevel/setOutputStream.
+  SifaLogLevel logLevel = SifaLogLevel::None;
 };
 
 /// Analyze all paths from entry to \p target and return the resulting abstract state.

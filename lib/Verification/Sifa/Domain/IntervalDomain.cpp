@@ -17,6 +17,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <climits>
@@ -371,4 +372,58 @@ IntervalState IntervalDomain::post(const Transition &t,
   if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source))
     return applyBlockWiseHavoc(t.source, in);
   return applyBlockTransfer(t.source, in);
+}
+
+void IntervalState::print(llvm::raw_ostream &out) const {
+  if (isBottom_) {
+    out << "  (bottom)\n";
+    return;
+  }
+  for (const auto &kv : intervals_) {
+    const llvm::Value *V = kv.first;
+    std::string name = V->getName().str();
+    if (name.empty()) {
+      llvm::raw_string_ostream os(name);
+      V->print(os);
+      if (name.size() > 40)
+        name = name.substr(0, 37) + "...";
+    }
+    const Interval &i = kv.second;
+    if (i.isBottom())
+      out << "  " << name << " : bottom\n";
+    else if (i.isTop())
+      out << "  " << name << " : [-inf, +inf]\n";
+    else {
+      out << "  " << name << " : [";
+      if (i.lo.hasValue())
+        out << *i.lo;
+      else
+        out << "-inf";
+      out << ", ";
+      if (i.hi.hasValue())
+        out << *i.hi;
+      else
+        out << "+inf";
+      out << "]\n";
+    }
+  }
+  for (const auto &kv : memory_) {
+    const llvm::Value *R = kv.first;
+    std::string regName = R->getName().str();
+    if (regName.empty()) {
+      llvm::raw_string_ostream os(regName);
+      R->print(os);
+      if (regName.size() > 40)
+        regName = regName.substr(0, 37) + "...";
+    }
+    const Interval &i = kv.second;
+    out << "  mem(" << regName << ") : ";
+    if (i.isBottom())
+      out << "bottom\n";
+    else if (i.isTop())
+      out << "[-inf, +inf]\n";
+    else
+      out << "[" << (i.lo.hasValue() ? std::to_string(*i.lo) : "-inf") << ", "
+          << (i.hi.hasValue() ? std::to_string(*i.hi) : "+inf") << "]\n";
+  }
 }

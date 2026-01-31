@@ -18,7 +18,7 @@
 #include "Verification/Sifa/Statistics/SifaStats.h"
 #include "Verification/Sifa/Summarizers/ICallSummarizer.h"
 
-#include <optional>
+#include "llvm/ADT/Optional.h"
 #include <string>
 #include <unordered_map>
 
@@ -79,7 +79,7 @@ private:
   }
 
   bool useStub_ = true;
-  std::optional<StateT> topState_; // stub only
+  llvm::Optional<StateT> topState_; // stub only
 
   SifaStats *stats_ = nullptr;
   const Domain *domain_ = nullptr;

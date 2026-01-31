@@ -16,6 +16,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <unordered_map>
 
@@ -294,4 +295,15 @@ OctagonState OctagonDomain::post(const Transition &t,
   if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source))
     return applyBlockWiseHavoc(t.source, in);
   return applyBlockTransfer(t.source, in);
+}
+
+void OctagonState::print(llvm::raw_ostream &out) const {
+  if (isBottom_) {
+    out << "  (bottom)\n";
+    return;
+  }
+  out << "  variables: " << varToIndex_.size();
+  if (!memory_.empty())
+    out << ", memory regions: " << memory_.size();
+  out << "\n";
 }

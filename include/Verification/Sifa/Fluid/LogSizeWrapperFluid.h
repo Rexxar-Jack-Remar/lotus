@@ -13,9 +13,9 @@
 
 #include "Verification/Sifa/Fluid/IFluid.h"
 
+#include "llvm/ADT/Optional.h"
 #include <cstddef>
 #include <functional>
-#include <optional>
 
 namespace lotus {
 namespace sifa {
@@ -30,8 +30,8 @@ public:
   explicit LogSizeWrapperFluid(IFluid<StateT> &inner) : inner_(inner) {}
 
   /// Ultimate-aligned: optional size/disjunct and log callback for debug logging.
-  LogSizeWrapperFluid(IFluid<StateT> &inner, std::optional<SizeFn> sizeFn,
-                     std::optional<SizeFn> disjunctFn, std::optional<LogFn> logFn)
+  LogSizeWrapperFluid(IFluid<StateT> &inner, llvm::Optional<SizeFn> sizeFn,
+                     llvm::Optional<SizeFn> disjunctFn, llvm::Optional<LogFn> logFn)
       : inner_(inner), sizeFn_(std::move(sizeFn)), disjunctFn_(std::move(disjunctFn)),
         logFn_(std::move(logFn)) {}
 
@@ -46,9 +46,9 @@ public:
 
 private:
   IFluid<StateT> &inner_;
-  std::optional<SizeFn> sizeFn_;
-  std::optional<SizeFn> disjunctFn_;
-  std::optional<LogFn> logFn_;
+  llvm::Optional<SizeFn> sizeFn_;
+  llvm::Optional<SizeFn> disjunctFn_;
+  llvm::Optional<LogFn> logFn_;
 };
 
 } // namespace sifa

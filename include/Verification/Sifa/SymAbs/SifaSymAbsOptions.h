@@ -7,11 +7,12 @@
 #ifndef LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSOPTIONS_H
 #define LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSOPTIONS_H
 
+#include "Verification/Sifa/Log/SifaLogger.h"
 #include <string>
 
 namespace llvm {
 class raw_ostream;
-}
+} // namespace llvm
 
 namespace lotus {
 namespace sifa {
@@ -45,7 +46,12 @@ struct SifaSymAbsOptions {
   bool allowDouble = false;
 
   /// When non-null, progress messages are written here during analysis.
+  /// Also configures SifaLogger output when provided.
   llvm::raw_ostream *progressStream = nullptr;
+
+  /// Log verbosity. When progressStream is set, defaults to Progress.
+  /// Use SifaLogger::setLevel/setOutputStream for finer control.
+  SifaLogLevel logLevel = SifaLogLevel::None;
 };
 
 } // namespace sifa
