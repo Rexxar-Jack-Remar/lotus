@@ -9,10 +9,12 @@
 #ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONDOMAIN_H
 #define LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONDOMAIN_H
 
+#include "Verification/Sifa/BlockTransferPolicy.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 #include "Verification/Sifa/Domain/OctagonMatrix.h"
 
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Value.h"
 
 #include <unordered_map>
@@ -26,6 +28,12 @@ class OctagonState {
 public:
   OctagonState() = default;
   explicit OctagonState(bool isBottom) : isBottom_(isBottom) {}
+
+  /// Build state from explicit varToIndex and matrix (for block transfer).
+  OctagonState(std::unordered_map<const llvm::Value *, std::size_t> varToIndex,
+               OctagonMatrix matrix, bool isBottom = false)
+      : isBottom_(isBottom), varToIndex_(std::move(varToIndex)),
+        matrix_(std::move(matrix)) {}
 
   bool isBottom() const { return isBottom_; }
   void setBottom(bool b) { isBottom_ = b; }
@@ -112,8 +120,18 @@ private:
 };
 
 /// Octagon domain implementing AbstractDomain<Transition, OctagonState>.
+/// When BlockTransferPolicy marks a block as block-wise, post(Edge) uses
+/// applyBlockWiseHavoc (add all defined values as unconstrained).
 class OctagonDomain final : public AbstractDomain<Transition, OctagonState> {
 public:
+  OctagonDomain() = default;
+  explicit OctagonDomain(const BlockTransferPolicy *policy) : blockTransferPolicy_(policy) {}
+
+  void setBlockTransferPolicy(const BlockTransferPolicy *policy) {
+    blockTransferPolicy_ = policy;
+  }
+  const BlockTransferPolicy *getBlockTransferPolicy() const { return blockTransferPolicy_; }
+
   OctagonState top() const override { return OctagonState(false); }
   OctagonState bottom() const override { return OctagonState(true); }
   bool isBottom(const OctagonState &s) const override {
@@ -131,10 +149,14 @@ public:
   OctagonState widen(const OctagonState &prev, const OctagonState &next) const override {
     return prev.widen(next);
   }
-  OctagonState post(const Transition &t, const OctagonState &in) const override {
-    (void)t;
-    return in;
-  }
+  /// Apply block transfer (copy/constant/affine; non-linear ops havoc). Implemented in OctagonDomain.cpp.
+  OctagonState applyBlockTransfer(llvm::BasicBlock *bb, const OctagonState &in) const;
+  /// Block-wise fast path: add all values defined in \p bb as unconstrained (top).
+  OctagonState applyBlockWiseHavoc(llvm::BasicBlock *bb, const OctagonState &in) const;
+  OctagonState post(const Transition &t, const OctagonState &in) const override;
+
+private:
+  const BlockTransferPolicy *blockTransferPolicy_ = nullptr;
 };
 
 } // namespace sifa

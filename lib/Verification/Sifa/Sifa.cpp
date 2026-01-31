@@ -1,5 +1,9 @@
 #include "Verification/Sifa/Sifa.h"
 
+#include "Verification/Sifa/Domain/EqDomain.h"
+#include "Verification/Sifa/Domain/ExplicitValueDomain.h"
+#include "Verification/Sifa/Domain/IntervalDomain.h"
+#include "Verification/Sifa/Domain/OctagonDomain.h"
 #include "Verification/Sifa/Fluid/NeverFluid.h"
 #include "Verification/Sifa/Interpreter/DagInterpreter.h"
 #include "Verification/Sifa/Interpreter/IcfgInterpreter.h"
@@ -49,4 +53,43 @@ bool lotus::sifa::isReachableInterprocedural(const llvm::Module &M, const llvm::
   auto *bb = const_cast<llvm::BasicBlock *>(&targetBlock);
   auto it = storage.getMap().find(bb);
   return it != storage.getMap().end() && it->second;
+}
+
+IntervalState lotus::sifa::analyzeToWithIntervalDomain(const llvm::Function &F,
+                                                      const llvm::BasicBlock &target,
+                                                      const IntervalState &initial,
+                                                      SifaOptions options) {
+  IntervalDomain domain(options.blockTransferPolicy.hasValue()
+                            ? &*options.blockTransferPolicy
+                            : nullptr);
+  return analyzeTo<IntervalState>(F, target, initial, domain, options);
+}
+
+OctagonState lotus::sifa::analyzeToWithOctagonDomain(const llvm::Function &F,
+                                                    const llvm::BasicBlock &target,
+                                                    const OctagonState &initial,
+                                                    SifaOptions options) {
+  OctagonDomain domain(options.blockTransferPolicy.hasValue()
+                           ? &*options.blockTransferPolicy
+                           : nullptr);
+  return analyzeTo<OctagonState>(F, target, initial, domain, options);
+}
+
+EqState lotus::sifa::analyzeToWithEqDomain(const llvm::Function &F,
+                                           const llvm::BasicBlock &target,
+                                           const EqState &initial,
+                                           SifaOptions options) {
+  EqDomain domain(options.blockTransferPolicy.hasValue()
+                      ? &*options.blockTransferPolicy
+                      : nullptr);
+  return analyzeTo<EqState>(F, target, initial, domain, options);
+}
+
+ExplicitValueState lotus::sifa::analyzeToWithExplicitValueDomain(
+    const llvm::Function &F, const llvm::BasicBlock &target,
+    const ExplicitValueState &initial, SifaOptions options) {
+  ExplicitValueDomain domain(options.blockTransferPolicy.hasValue()
+                                  ? &*options.blockTransferPolicy
+                                  : nullptr);
+  return analyzeTo<ExplicitValueState>(F, target, initial, domain, options);
 }

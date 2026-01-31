@@ -9,9 +9,10 @@
 #ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONMATRIX_H
 #define LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONMATRIX_H
 
+#include "llvm/ADT/Optional.h"
+
 #include <cstddef>
 #include <limits>
-#include <optional>
 #include <vector>
 
 namespace lotus {
@@ -22,14 +23,14 @@ class OctagonMatrix {
 public:
   explicit OctagonMatrix(std::size_t nVars = 0) : n_(nVars) {
     std::size_t dim = 2 * nVars;
-    matrix_.assign(dim, std::vector<std::optional<int64_t>>(dim, std::nullopt));
+    matrix_.assign(dim, std::vector<llvm::Optional<int64_t>>(dim, llvm::None));
   }
 
   std::size_t numVars() const { return n_; }
   std::size_t dim() const { return matrix_.size(); }
 
-  std::optional<int64_t> get(std::size_t i, std::size_t j) const {
-    if (i >= matrix_.size() || j >= matrix_.size()) return std::nullopt;
+  llvm::Optional<int64_t> get(std::size_t i, std::size_t j) const {
+    if (i >= matrix_.size() || j >= matrix_.size()) return llvm::None;
     return matrix_[i][j];
   }
   void set(std::size_t i, std::size_t j, int64_t c) {
@@ -96,6 +97,22 @@ public:
     return false;
   }
 
+  /// Relax variable \p varIdx: return new matrix with all constraints involving
+  /// ±v set to +∞ (sound over-approximation for havoc).
+  OctagonMatrix relaxVar(std::size_t varIdx) const {
+    if (varIdx >= n_) return *this;
+    OctagonMatrix out(n_);
+    const std::size_t d = dim();
+    const std::size_t lo = 2 * varIdx, hi = 2 * varIdx + 1;
+    for (std::size_t i = 0; i < d; ++i)
+      for (std::size_t j = 0; j < d; ++j) {
+        if (i == lo || i == hi || j == lo || j == hi) continue;
+        auto c = get(i, j);
+        if (c) out.set(i, j, *c);
+      }
+    return out;
+  }
+
   /// Rearrange to new variable order. \p copyInstructions[newIdx] = oldIdx (or dim() for unbounded).
   OctagonMatrix rearrange(const std::vector<std::size_t> &copyInstructions) const {
     const std::size_t d = copyInstructions.size();
@@ -114,7 +131,7 @@ public:
 
 private:
   std::size_t n_;
-  std::vector<std::vector<std::optional<int64_t>>> matrix_;
+  std::vector<std::vector<llvm::Optional<int64_t>>> matrix_;
 };
 
 } // namespace sifa

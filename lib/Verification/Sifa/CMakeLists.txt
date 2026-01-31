@@ -26,6 +26,9 @@ set(SIFA_SOURCES
   Caches/TopsortCache.cpp
   # Cfg
   Cfg/Transition.cpp
+  # Domain (instruction-level block transfer)
+  Domain/IntervalDomain.cpp
+  Domain/OctagonDomain.cpp
   # Fluid (explicit instantiations)
   Fluid/Instances.cpp
   # Interpreter (explicit instantiations)

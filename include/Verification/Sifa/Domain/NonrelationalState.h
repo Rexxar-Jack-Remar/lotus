@@ -12,6 +12,7 @@
 
 #include "Verification/Sifa/Domain/INonrelationalValue.h"
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/IR/Value.h"
 
 #include <unordered_map>
@@ -34,9 +35,9 @@ public:
   const Map &getMap() const { return map_; }
   Map &getMap() { return map_; }
 
-  std::optional<V> get(const llvm::Value *v) const {
+  llvm::Optional<V> get(const llvm::Value *v) const {
     auto it = map_.find(v);
-    if (it == map_.end()) return std::nullopt;
+    if (it == map_.end()) return llvm::None;
     return it->second;
   }
   void set(const llvm::Value *v, V val) { map_[v] = std::move(val); }
