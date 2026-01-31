@@ -3,6 +3,7 @@ set(CanaryCFG_SOURCES
   Dominator.cpp
   DominatorForest.cpp
   DominatorNode.cpp
+  SotoTopo.cpp
   TopologicalOrder.cpp
 )
 add_library(CanaryCFG STATIC ${CanaryCFG_SOURCES})

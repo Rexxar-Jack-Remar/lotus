@@ -12,9 +12,9 @@
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/AllocAA/AllocAA.h"
-#include "Alias/CFLAA/CFLAndersAliasAnalysis.h"
-#include "Alias/CFLAA/CFLSteensAliasAnalysis.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
+#include <llvm/Analysis/CFLAndersAliasAnalysis.h>
+#include <llvm/Analysis/CFLSteensAliasAnalysis.h>
 #include "Alias/SparrowAA/AndersenAA.h"
 #include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
 #include "Alias/TPA/PointerAnalysis/Support/PtsSet.h"
@@ -108,8 +108,8 @@ AliasResult AliasAnalysisWrapper::queryBackend(const Value *v1, const Value *v2)
                        ? AliasResult::MayAlias : AliasResult::NoAlias;
   if (_llvm_aa) return _llvm_aa->alias(mkLoc(v1), mkLoc(v2));
   if (_underapprox_aa) return _underapprox_aa->mustAlias(v1, v2) ? AliasResult::MustAlias : AliasResult::NoAlias;
-  if (_cflanders_aa) return _cflanders_aa->query(mkLoc(v1), mkLoc(v2));
-  if (_cflsteens_aa) return _cflsteens_aa->query(mkLoc(v1), mkLoc(v2));
+  if (_cflanders_pass) return _cflanders_pass->getResult().query(mkLoc(v1), mkLoc(v2));
+  if (_cflsteens_pass) return _cflsteens_pass->getResult().query(mkLoc(v1), mkLoc(v2));
   if (_seadsa_aa) { SimpleAAQueryInfo AAQI; return _seadsa_aa->alias(mkLoc(v1), mkLoc(v2), AAQI); }
   if (_alloc_aa) return _alloc_aa->canPointToTheSameObject(const_cast<Value *>(v1), const_cast<Value *>(v2))
                         ? AliasResult::MayAlias : AliasResult::NoAlias;

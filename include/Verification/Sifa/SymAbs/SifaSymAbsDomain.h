@@ -17,8 +17,13 @@
 #include "Verification/SymbolicAbstraction/Core/DomainConstructor.h"
 #include "Verification/SymbolicAbstraction/Core/Fragment.h"
 
+#include <cstdint>
 #include <memory>
 #include <set>
+
+namespace llvm {
+class raw_ostream;
+}
 
 namespace symbolic_abstraction {
 class FunctionContext;
@@ -34,10 +39,13 @@ public:
   using Label = Transition;
   using State = SymAbsState;
 
+  /// When \p progressStream is non-null, post() will periodically print progress (SMT/post count).
   SifaSymAbsDomain(const symbolic_abstraction::FunctionContext &fctx,
                    const symbolic_abstraction::DomainConstructor &domainCtor,
-                   const symbolic_abstraction::Analyzer &analyzer)
-      : fctx_(fctx), domainCtor_(domainCtor), analyzer_(analyzer) {}
+                   const symbolic_abstraction::Analyzer &analyzer,
+                   llvm::raw_ostream *progressStream = nullptr)
+      : fctx_(fctx), domainCtor_(domainCtor), analyzer_(analyzer),
+        progressStream_(progressStream) {}
 
   State top() const override;
   State bottom() const override { return nullptr; }
@@ -78,6 +86,8 @@ private:
   const symbolic_abstraction::FunctionContext &fctx_;
   const symbolic_abstraction::DomainConstructor &domainCtor_;
   const symbolic_abstraction::Analyzer &analyzer_;
+  llvm::raw_ostream *progressStream_ = nullptr;
+  mutable std::uint64_t postCount_ = 0;
 };
 
 } // namespace sifa

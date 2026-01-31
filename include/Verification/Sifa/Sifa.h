@@ -120,6 +120,15 @@ ExplicitValueState analyzeToWithExplicitValueDomain(const llvm::Function &F,
                                                     const ExplicitValueState &initial,
                                                     SifaOptions options = {});
 
+/// Analyze to procedure exit (join of all return paths). Instruction-by-instruction
+/// transfer, no SMT. Use these for fast default analysis.
+IntervalState analyzeToReturnWithIntervalDomain(const llvm::Function &F,
+                                               const IntervalState &initial,
+                                               SifaOptions options = {});
+OctagonState analyzeToReturnWithOctagonDomain(const llvm::Function &F,
+                                               const OctagonState &initial,
+                                               SifaOptions options = {});
+
 } // namespace sifa
 } // namespace lotus
 

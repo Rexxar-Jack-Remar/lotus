@@ -17,7 +17,7 @@ Cmd options:
 #include "Alias/TPA/Transforms/RunPrepass.h"
 #include "Alias/TPA/Util/IO/PointerAnalysis/Printer.h"
 #include "Alias/TPA/Util/IO/PointerAnalysis/WriteDotFile.h"
-#include "Alias/TPA/Util/IO/WriteIR.h"
+#include "Utils/LLVM/IO/WriteIR.h"
 #include "Alias/TPA/Util/Log.h"
 
 #include <llvm/IR/LLVMContext.h>

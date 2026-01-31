@@ -14,8 +14,7 @@ See :doc:`../alias/alias_analysis` for detailed instructions and command example
   allocation tracking.
 * **DyckAA** – Unification-based exhaustive alias analysis
   (``lib/Alias/DyckAA``).
-* **CFLAA** – Context-Free Language alias analysis taken from LLVM 14.0.6 and
-  preserved in Lotus for LLVM 15+ users.
+* **CFL (via LLVM)** – Context-Free Language alias analysis from LLVM (used by the alias wrapper).
 * **Sea-DSA** – Context-sensitive and field-sensitive analysis with
   Sea-DSA (``lib/Alias/seadsa``) requiring Boost.
 * **SparrowAA** – Inclusion-based pointer analysis without on-the-fly

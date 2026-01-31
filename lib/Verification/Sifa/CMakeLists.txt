@@ -55,13 +55,6 @@ set(SIFA_SOURCES
 )
 
 add_library(SifaAnalysis STATIC ${SIFA_SOURCES})
-
-target_link_libraries(SifaAnalysis PUBLIC
-  SymbolicAbstractionAnalysis
-)
-# Region-based memory (Load/Store) uses lib/Alias when options.aliasAnalysis is set.
-target_link_libraries(SifaAnalysis PRIVATE
-  CanaryAliasAnalysisWrapper
-)
+target_link_libraries(SifaAnalysis PUBLIC SymbolicAbstractionAnalysis)
 
 install(TARGETS SifaAnalysis DESTINATION lib)

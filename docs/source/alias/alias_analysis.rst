@@ -31,7 +31,6 @@ For detailed information about each analysis, see the corresponding documentatio
 
 * :doc:`allocaa` - Lightweight heuristic-based alias analysis
 * :doc:`aserpta` - High-performance pointer analysis with multiple context sensitivities
-* :doc:`cflaa` - Context-Free Language Alias Analysis from LLVM 14.0.6
 * :doc:`dyckaa` - Unification-based alias analysis with Dyck-CFL reachability
 * :doc:`seadsa` - Context-sensitive, field-sensitive alias analysis based on DSA
 * :doc:`sparrowaa` - Inclusion-based points-to analysis

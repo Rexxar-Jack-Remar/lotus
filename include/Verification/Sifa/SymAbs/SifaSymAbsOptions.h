@@ -9,6 +9,10 @@
 
 #include <string>
 
+namespace llvm {
+class raw_ostream;
+}
+
 namespace lotus {
 namespace sifa {
 
@@ -39,6 +43,9 @@ struct SifaSymAbsOptions {
   ///
   /// Note: `float` and FP trunc/ext are currently not supported.
   bool allowDouble = false;
+
+  /// When non-null, progress messages are written here during analysis.
+  llvm::raw_ostream *progressStream = nullptr;
 };
 
 } // namespace sifa

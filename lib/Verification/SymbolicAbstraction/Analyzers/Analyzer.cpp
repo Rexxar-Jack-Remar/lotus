@@ -23,7 +23,26 @@
 #include <llvm/IR/CFG.h>
 #include <llvm/Support/Timer.h>
 
+#include <atomic>
+
 namespace symbolic_abstraction {
+
+namespace {
+std::atomic<std::uint64_t> g_bestTransformerCalls{0};
+std::atomic<std::uint64_t> g_smtSolverCalls{0};
+} // namespace
+
+void Analyzer::resetBestTransformerCallCount() { g_bestTransformerCalls = 0; }
+std::uint64_t Analyzer::getBestTransformerCallCount() {
+  return g_bestTransformerCalls.load();
+}
+void Analyzer::countBestTransformerCall() { ++g_bestTransformerCalls; }
+
+void Analyzer::resetSmtSolverCallCount() { g_smtSolverCalls = 0; }
+std::uint64_t Analyzer::getSmtSolverCallCount() {
+  return g_smtSolverCalls.load();
+}
+void Analyzer::countSmtSolverCall() { ++g_smtSolverCalls; }
 Analyzer::Analyzer(const FunctionContext &fctx, const FragmentDecomposition &fd,
                    const DomainConstructor &dom, mode_t mode)
     : FunctionContext_(fctx), Fragments_(fd), Domain_(dom), Mode_(mode),
@@ -82,6 +101,7 @@ bool Analyzer::bestTransformer(const AbstractValue *input,
                                const Fragment &fragment,
                                AbstractValue *result) const {
   assert(Mode_ != ONLY_DYNAMIC);
+  countBestTransformerCall();
 
   VOutBlock vout_block("best transformer for " + repr(fragment));
   CurrentFragment_ = &fragment;
@@ -278,6 +298,7 @@ AbstractValue *Analyzer::after(llvm::BasicBlock *location) {
 z3::check_result
 Analyzer::checkWithStats(z3::solver *solver,
                          std::vector<z3::expr> *assumptions) const {
+  countSmtSolverCall();
   z3::check_result z3_answer;
 
   // wrap the solver inside time measurements

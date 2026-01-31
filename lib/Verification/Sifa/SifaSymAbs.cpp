@@ -124,7 +124,7 @@ static void validateLlvmSubsetOrThrow(const llvm::Module &M, const llvm::Functio
 
       // Avoid known crash in getelementptr encoding when index bitwidth > ptr bitwidth.
       if (const auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(&I)) {
-        for (auto idxIt = GEP->idx_begin(); idxIt != GEP->idx_end(); ++idxIt) {
+        for (const auto *idxIt = GEP->idx_begin(); idxIt != GEP->idx_end(); ++idxIt) {
           llvm::Value *Idx = idxIt->get();
           if (!Idx) continue;
           llvm::Type *Ty = Idx->getType();
@@ -167,6 +167,8 @@ static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
                                 llvm::BasicBlock *target,
                                 const SifaSymAbsOptions &options) {
   validateLlvmSubsetOrThrow(M, F, options);
+  symbolic_abstraction::Analyzer::resetBestTransformerCallCount();
+  symbolic_abstraction::Analyzer::resetSmtSolverCallCount();
   auto cfg = makeConfig(options);
 
   // SymbolicAbstraction expects non-const pointers (it mutates analysis state
@@ -174,7 +176,11 @@ static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
   auto *mod = const_cast<llvm::Module *>(&M);
   auto *fun = const_cast<llvm::Function *>(&F);
 
+  if (options.progressStream)
+    *options.progressStream << "  Building module context...\n";
   symbolic_abstraction::ModuleContext mctx(mod, cfg);
+  if (options.progressStream)
+    *options.progressStream << "  Building function context and analyzer...\n";
   auto fctxPtr = mctx.createFunctionContext(fun);
   auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctxPtr);
   const auto fcfg = fctxPtr->getConfig();
@@ -182,31 +188,47 @@ static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
   auto analyzer = symbolic_abstraction::Analyzer::New(*fctxPtr, fragDecomp, dom);
 
   SifaStats stats;
-  SifaSymAbsDomain domain(*fctxPtr, dom, *analyzer);
+  SifaSymAbsDomain domain(*fctxPtr, dom, *analyzer,
+                          options.progressStream);
   NeverFluid<SymAbsState> fluid;
 
   DagInterpreter<Transition, SymAbsState> ipr(stats, domain, fluid);
   FixpointLoopSummarizer<Transition, SymAbsState> loopSum(stats, domain, fluid, ipr);
   ipr.setLoopSummarizer(loopSum);
 
+  if (options.progressStream)
+    *options.progressStream << "  Building procedure resources (regex DAG)...\n";
   ProcedureResources res(stats, *fun, {target});
   auto initial = domain.makeTopAt(&fun->getEntryBlock(), /*after=*/false);
 
+  if (options.progressStream)
+    *options.progressStream << "  Running fixpoint interpretation...\n";
   // Interpret for the unique marker in the LOI overlay.
   SymAbsState out =
       ipr.interpretForSingleMarker(res.getRegexDag(), res.getDagOverlayPathToLois(), initial);
+  if (options.progressStream)
+    *options.progressStream << "  bestTransformer calls: "
+                            << symbolic_abstraction::Analyzer::getBestTransformerCallCount()
+                            << ", SMT solver calls: "
+                            << symbolic_abstraction::Analyzer::getSmtSolverCallCount() << "\n";
   return out;
 }
 
 static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
                                 const SifaSymAbsOptions &options) {
   validateLlvmSubsetOrThrow(M, F, options);
+  symbolic_abstraction::Analyzer::resetBestTransformerCallCount();
+  symbolic_abstraction::Analyzer::resetSmtSolverCallCount();
   auto cfg = makeConfig(options);
 
   auto *mod = const_cast<llvm::Module *>(&M);
   auto *fun = const_cast<llvm::Function *>(&F);
 
+  if (options.progressStream)
+    *options.progressStream << "  Building module context...\n";
   symbolic_abstraction::ModuleContext mctx(mod, cfg);
+  if (options.progressStream)
+    *options.progressStream << "  Building function context and analyzer...\n";
   auto fctxPtr = mctx.createFunctionContext(fun);
   auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctxPtr);
   const auto fcfg = fctxPtr->getConfig();
@@ -214,18 +236,30 @@ static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
   auto analyzer = symbolic_abstraction::Analyzer::New(*fctxPtr, fragDecomp, dom);
 
   SifaStats stats;
-  SifaSymAbsDomain domain(*fctxPtr, dom, *analyzer);
+  SifaSymAbsDomain domain(*fctxPtr, dom, *analyzer,
+                          options.progressStream);
   NeverFluid<SymAbsState> fluid;
 
   DagInterpreter<Transition, SymAbsState> ipr(stats, domain, fluid);
   FixpointLoopSummarizer<Transition, SymAbsState> loopSum(stats, domain, fluid, ipr);
   ipr.setLoopSummarizer(loopSum);
 
+  if (options.progressStream)
+    *options.progressStream << "  Building procedure resources (regex DAG)...\n";
   // No LOIs needed; ProcedureResources always adds an EXIT marker.
   ProcedureResources res(stats, *fun, std::vector<llvm::BasicBlock *>{});
   auto initial = domain.makeTopAt(&fun->getEntryBlock(), /*after=*/false);
 
-  return ipr.interpretForSingleMarker(res.getRegexDag(), res.getDagOverlayPathToReturn(), initial);
+  if (options.progressStream)
+    *options.progressStream << "  Running fixpoint interpretation...\n";
+  SymAbsState out =
+      ipr.interpretForSingleMarker(res.getRegexDag(), res.getDagOverlayPathToReturn(), initial);
+  if (options.progressStream)
+    *options.progressStream << "  bestTransformer calls: "
+                            << symbolic_abstraction::Analyzer::getBestTransformerCallCount()
+                            << ", SMT solver calls: "
+                            << symbolic_abstraction::Analyzer::getSmtSolverCallCount() << "\n";
+  return out;
 }
 
 SymAbsState lotus::sifa::analyzeSymAbsTo(const llvm::Module &M, const llvm::Function &F,

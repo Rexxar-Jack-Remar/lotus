@@ -8,7 +8,7 @@ This directory contains various alias analysis implementations and toolkits used
 |----------|--------------|---------------|----------------|-------------------|-----------------|-------|
 | **SparrowAA** | `sparrow-aa` | Inclusion-based | ❌ No | ✅ Yes (CI, 1-CFA, 2-CFA) | ❌ No | More graph simplification algorithms; no on-the-fly callgraph construction |
 | **AserPTA** | `aser-aa` | Inclusion-based | ❌ No | ✅ Yes (CI, 1-CFA, 2-CFA, Origin) | ✅ Yes | On-the-fly callgraph construction; supports both field-insensitive and field-sensitive modes |
-| **CFLAA** | - | - | ❌ No | ❌ No | - | From LLVM |
+| **CFL (LLVM)** | - | CFL-reachability | ❌ No | ❌ No | - | Via alias wrapper (libLLVMAnalysis) |
 | **DyckAA** | - | Unification-based | ❌ No | ❌ No | - | - |
 | **Dynamic** | - | Dynamic | - | - | - | Runtime analysis |
 | **FPA** | `fpa` | Type-based | - | - | - | Function pointer analysis |

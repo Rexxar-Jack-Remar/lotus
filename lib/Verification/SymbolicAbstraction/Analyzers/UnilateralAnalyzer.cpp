@@ -13,6 +13,9 @@
 #include "Verification/SymbolicAbstraction/Utils/Config.h"
 #include "Verification/SymbolicAbstraction/Utils/Utils.h"
 
+#include <cstdlib>
+#include <iostream>
+
 namespace symbolic_abstraction {
 /**
  * Computes the best transformer for a fragment using a unilateral (forward)
@@ -28,6 +31,11 @@ namespace symbolic_abstraction {
 bool UnilateralAnalyzer::bestTransformer(const AbstractValue *input,
                                          const Fragment &fragment,
                                          AbstractValue *result) const {
+  Analyzer::countBestTransformerCall();
+  if (std::getenv("LOTUS_TRACE_BEST_TRANSFORMER")) {
+    std::cerr << "  [UnilateralAnalyzer::bestTransformer entered #"
+              << Analyzer::getBestTransformerCallCount() << "]\n";
+  }
   VOutBlock vout_block("best transformer for " + repr(fragment));
   CurrentFragment_ = &fragment;
   z3::context &ctx = FunctionContext_.getZ3();

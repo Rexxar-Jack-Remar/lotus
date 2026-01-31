@@ -1,6 +1,5 @@
 add_subdirectory(Spec)
 add_subdirectory(DyckAA)
-add_subdirectory(CFLAA)
 add_subdirectory(seadsa)
 add_subdirectory(SparrowAA)
 add_subdirectory(BDD)

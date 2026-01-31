@@ -3,6 +3,7 @@
 #include "Verification/SymbolicAbstraction/Core/FunctionContext.h"
 
 #include "llvm/IR/Function.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace lotus::sifa;
 
@@ -42,6 +43,14 @@ SymAbsState SifaSymAbsDomain::post(const Label &t, const State &in) const {
 
   // Result is a bottom at the end location (state at dst after phi nodes).
   auto out = domainCtor_.makeBottom(fctx_, dst, /*after=*/false);
+  if (progressStream_) {
+    ++postCount_;
+    if (postCount_ <= 10 || postCount_ % 25 == 0 || postCount_ == 11) {
+      auto srcName = src ? (src->getName().empty() ? "(entry)" : src->getName().str()) : "?";
+      auto dstName = dst ? (dst->getName().empty() ? "(exit)" : dst->getName().str()) : "EXIT";
+      *progressStream_ << "  (bestTransformer #" << postCount_ << ": " << srcName << " -> " << dstName << ")\n";
+    }
+  }
   analyzer_.bestTransformer(in.get(), frag, out.get());
   return SymAbsState(out.release());
 }

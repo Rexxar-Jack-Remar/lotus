@@ -97,3 +97,51 @@ ExplicitValueState lotus::sifa::analyzeToWithExplicitValueDomain(
                               options.aliasAnalysis);
   return analyzeTo<ExplicitValueState>(F, target, initial, domain, options);
 }
+
+static IntervalState runToReturnWithIntervalDomain(const llvm::Function &F,
+                                                   const IntervalState &initial,
+                                                   SifaOptions options) {
+  SifaStats stats;
+  IntervalDomain domain(
+      options.blockTransferPolicy.hasValue() ? &*options.blockTransferPolicy
+                                             : nullptr,
+      options.aliasAnalysis);
+  NeverFluid<IntervalState> fluid;
+  DagInterpreter<Transition, IntervalState> ipr(stats, domain, fluid);
+  FixpointLoopSummarizer<Transition, IntervalState> loopSum(stats, domain, fluid, ipr);
+  ipr.setLoopSummarizer(loopSum);
+  ProcedureResources res(stats, F, std::vector<llvm::BasicBlock *>{});
+  IntervalState entryState = initial.isBottom() ? domain.top() : initial;
+  return ipr.interpretForSingleMarker(res.getRegexDag(),
+                                      res.getDagOverlayPathToReturn(), entryState);
+}
+
+IntervalState lotus::sifa::analyzeToReturnWithIntervalDomain(const llvm::Function &F,
+                                                             const IntervalState &initial,
+                                                             SifaOptions options) {
+  return runToReturnWithIntervalDomain(F, initial, options);
+}
+
+static OctagonState runToReturnWithOctagonDomain(const llvm::Function &F,
+                                                 const OctagonState &initial,
+                                                 SifaOptions options) {
+  SifaStats stats;
+  OctagonDomain domain(
+      options.blockTransferPolicy.hasValue() ? &*options.blockTransferPolicy
+                                             : nullptr,
+      options.aliasAnalysis);
+  NeverFluid<OctagonState> fluid;
+  DagInterpreter<Transition, OctagonState> ipr(stats, domain, fluid);
+  FixpointLoopSummarizer<Transition, OctagonState> loopSum(stats, domain, fluid, ipr);
+  ipr.setLoopSummarizer(loopSum);
+  ProcedureResources res(stats, F, std::vector<llvm::BasicBlock *>{});
+  OctagonState entryState = initial.isBottom() ? domain.top() : initial;
+  return ipr.interpretForSingleMarker(res.getRegexDag(),
+                                      res.getDagOverlayPathToReturn(), entryState);
+}
+
+OctagonState lotus::sifa::analyzeToReturnWithOctagonDomain(const llvm::Function &F,
+                                                          const OctagonState &initial,
+                                                          SifaOptions options) {
+  return runToReturnWithOctagonDomain(F, initial, options);
+}

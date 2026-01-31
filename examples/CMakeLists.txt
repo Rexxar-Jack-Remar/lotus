@@ -46,7 +46,6 @@ target_link_libraries(PointerAnalysisExample PRIVATE
     CanaryDyckAA
     CanaryAllocAA
     SeaDsaAnalysis
-    CFLAA
     ${llvm_libs}
 )
 

@@ -11,6 +11,7 @@
 .cproject
 .project
 venv
+tmp
 tmp.md
 rebuild.sh
 pta_regress.sh

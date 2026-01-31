@@ -11,9 +11,10 @@
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/AllocAA/AllocAA.h"
-#include "Alias/CFLAA/CFLAndersAliasAnalysis.h"
-#include "Alias/CFLAA/CFLSteensAliasAnalysis.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
+#include <llvm/Analysis/CFLAndersAliasAnalysis.h>
+#include <llvm/Analysis/CFLSteensAliasAnalysis.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include "Alias/SparrowAA/AndersenAA.h"
 #include "Alias/TPA/Context/KLimitContext.h"
 #include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
@@ -204,19 +205,19 @@ void AliasAnalysisWrapper::initialize() {
   
   case AAConfig::Implementation::CFLAnders:
     _initialized = initAA([this]{
-      auto TLII = std::make_shared<TargetLibraryInfoImpl>(Triple(_module->getTargetTriple()));
-      _cflanders_aa = std::make_unique<CFLAndersAAResult>([TLII](Function &) -> const TargetLibraryInfo & {
-        static TargetLibraryInfo TLI(*TLII); return TLI;
-      });
+      _cflanders_pass.reset(static_cast<CFLAndersAAWrapperPass *>(createCFLAndersAAWrapperPass()));
+      legacy::PassManager PM;
+      PM.add(_cflanders_pass.get());
+      PM.run(*_module);
     }, "CFLAnders");
     break;
   
   case AAConfig::Implementation::CFLSteens:
     _initialized = initAA([this]{
-      auto TLII = std::make_shared<TargetLibraryInfoImpl>(Triple(_module->getTargetTriple()));
-      _cflsteens_aa = std::make_unique<CFLSteensAAResult>([TLII](Function &) -> const TargetLibraryInfo & {
-        static TargetLibraryInfo TLI(*TLII); return TLI;
-      });
+      _cflsteens_pass.reset(static_cast<CFLSteensAAWrapperPass *>(createCFLSteensAAWrapperPass()));
+      legacy::PassManager PM;
+      PM.add(_cflsteens_pass.get());
+      PM.run(*_module);
     }, "CFLSteens");
     break;
   

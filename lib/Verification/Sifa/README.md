@@ -104,7 +104,7 @@ When you pass an **alias analysis** via **SifaOptions::aliasAnalysis**, **all va
 - **Store**: For each region the pointer may alias, join the stored value with the value being stored.
 - **Alloca**: Region is initialized to top; the alloca instruction result remains top (pointer not tracked as value).
 
-This matches the “Option 2” style used in IKOS and CLAM: one abstract cell per region, with AA used to resolve pointers. Any backend from **lib/Alias** (SparrowAA, AllocAA, DyckAA, CFLAA, SeaDsa, TPA, etc.) can be used; precision depends on the AA.
+This matches the “Option 2” style used in IKOS and CLAM: one abstract cell per region, with AA used to resolve pointers. Any backend from **lib/Alias** (SparrowAA, AllocAA, DyckAA, CFL via LLVM, SeaDsa, TPA, etc.) can be used; precision depends on the AA.
 
 Example: run interval analysis with region memory using SparrowAA.
 
@@ -135,7 +135,7 @@ Sifa’s region model is simpler and AA-driven:
 | Pointer resolution | **One** region per pointer via `getRegion(F, ptr)` (or unknown) | **Set** of regions via getPointsToSet or mayAlias; **join** over set for Load, **join into each** for Store |
 | Type info | RegionInfo (type, bitwidth, is_sequence, is_heap) | None (all regions treated uniformly; value domain tracks scalar type) |
 | Field-sensitive | Yes: `getRegion(F, V, offset, AccessedType)` | No (one cell per alloca/global) |
-| Backend | SeaDsa (HeapAbstraction) | Any **lib/Alias** backend (SparrowAA, AllocAA, DyckAA, CFLAA, SeaDsa, TPA, …) |
+| Backend | SeaDsa (HeapAbstraction) | Any **lib/Alias** backend (SparrowAA, AllocAA, DyckAA, CFL via LLVM, SeaDsa, TPA, …) |
 
 Both designs are **sound** (over-approximate). CLAM’s model is more precise when SeaDsa gives a single region and type/offset info; Sifa’s model is lightweight and works with any AA. To use a CLAM-style heap abstraction from Sifa you would need an adapter that implements “pointer → set of regions” (e.g. one region from HeapAbstraction when not unknown) and maps RegionId to Sifa’s memory map; that could live in a separate integration layer.
 

@@ -13,6 +13,9 @@
 # SymbolicAbstraction
 add_subdirectory(symbolic-abstraction)
 
+# Sifa (Symbolic Interpretation with Fluid Abstractions)
+add_subdirectory(sifa)
+
 # CLAM tools (clam, clam-diff, clam-pp) (optional)
 if(ENABLE_CLAM)
     add_subdirectory(clam)
