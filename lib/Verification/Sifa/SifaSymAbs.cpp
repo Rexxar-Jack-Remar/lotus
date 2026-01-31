@@ -16,11 +16,143 @@
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/Support/raw_ostream.h"
 
+#include <algorithm>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace lotus::sifa;
+
+static bool isSupportedSymAbsValueType(llvm::Type *ty, const SifaSymAbsOptions &opt) {
+  if (!ty) return false;
+  if (ty->isVoidTy()) return true;
+  // Non-value/control-only types that can appear as operands (e.g., branch targets).
+  if (ty->isLabelTy() || ty->isMetadataTy() || ty->isTokenTy()) return true;
+  if (ty->isPointerTy()) return true;
+  if (ty->isIntegerTy()) return ty->getIntegerBitWidth() <= 64;
+  if (opt.allowDouble && ty->isDoubleTy()) return true;
+  return false;
+}
+
+static bool isUnsupportedSymAbsInstruction(const llvm::Instruction &I) {
+  // These are either not encoded at all (placeholder `true`) or rely on LLVM
+  // exception handling machinery we currently don't model.
+  return llvm::isa<llvm::IndirectBrInst>(I) || llvm::isa<llvm::InvokeInst>(I) ||
+         llvm::isa<llvm::ResumeInst>(I) || llvm::isa<llvm::LandingPadInst>(I) ||
+         llvm::isa<llvm::CleanupReturnInst>(I) || llvm::isa<llvm::CatchReturnInst>(I) ||
+         llvm::isa<llvm::CatchSwitchInst>(I) || llvm::isa<llvm::FuncletPadInst>(I) ||
+         llvm::isa<llvm::CleanupPadInst>(I) || llvm::isa<llvm::CatchPadInst>(I) ||
+         llvm::isa<llvm::FenceInst>(I) || llvm::isa<llvm::AtomicCmpXchgInst>(I) ||
+         llvm::isa<llvm::AtomicRMWInst>(I) || llvm::isa<llvm::VAArgInst>(I) ||
+         llvm::isa<llvm::ExtractElementInst>(I) || llvm::isa<llvm::InsertElementInst>(I) ||
+         llvm::isa<llvm::ShuffleVectorInst>(I) || llvm::isa<llvm::ExtractValueInst>(I) ||
+         llvm::isa<llvm::InsertValueInst>(I) || llvm::isa<llvm::AddrSpaceCastInst>(I);
+}
+
+static void validateLlvmSubsetOrThrow(const llvm::Module &M, const llvm::Function &F,
+                                      const SifaSymAbsOptions &opt) {
+  if (!opt.validateLlvmSubset) return;
+
+  std::vector<std::string> issues;
+  issues.reserve(16);
+
+  auto addIssue = [&](llvm::Twine msg) {
+    if (issues.size() < 20) issues.push_back(msg.str());
+  };
+
+  // Fast signature checks (C/C++-friendly: integers/pointers, optional double).
+  for (const llvm::Argument &A : F.args()) {
+    if (!isSupportedSymAbsValueType(A.getType(), opt)) {
+      std::string s;
+      llvm::raw_string_ostream os(s);
+      os << "unsupported argument type: ";
+      A.getType()->print(os);
+      addIssue(os.str());
+    }
+  }
+  if (!isSupportedSymAbsValueType(F.getReturnType(), opt)) {
+    std::string s;
+    llvm::raw_string_ostream os(s);
+    os << "unsupported return type: ";
+    F.getReturnType()->print(os);
+    addIssue(os.str());
+  }
+
+  // Instruction-level checks.
+  const llvm::DataLayout &DL = M.getDataLayout();
+  const unsigned ptrBits = std::max(1u, DL.getPointerSizeInBits(0));
+
+  for (const llvm::BasicBlock &BB : F) {
+    for (const llvm::Instruction &I : BB) {
+      if (isUnsupportedSymAbsInstruction(I)) {
+        addIssue(llvm::Twine("unsupported instruction: ") +
+                 llvm::Twine(llvm::Instruction::getOpcodeName(I.getOpcode())));
+        continue;
+      }
+
+      // Types must be representable by SymbolicAbstraction's Z3 encoding.
+      if (!isSupportedSymAbsValueType(I.getType(), opt)) {
+        std::string s;
+        llvm::raw_string_ostream os(s);
+        os << "unsupported instruction result type in " << I.getOpcodeName() << ": ";
+        I.getType()->print(os);
+        addIssue(os.str());
+      }
+
+      for (const llvm::Use &U : I.operands()) {
+        llvm::Value *V = U.get();
+        if (!V) continue;
+        if (!isSupportedSymAbsValueType(V->getType(), opt)) {
+          std::string s;
+          llvm::raw_string_ostream os(s);
+          os << "unsupported operand type used by " << I.getOpcodeName() << ": ";
+          V->getType()->print(os);
+          addIssue(os.str());
+        }
+      }
+
+      // Floating-point casts are not supported (double-only model).
+      if (llvm::isa<llvm::FPTruncInst>(I) || llvm::isa<llvm::FPExtInst>(I)) {
+        addIssue(llvm::Twine("unsupported floating-point cast: ") +
+                 llvm::Twine(llvm::Instruction::getOpcodeName(I.getOpcode())));
+      }
+
+      // Avoid known crash in getelementptr encoding when index bitwidth > ptr bitwidth.
+      if (const auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(&I)) {
+        for (auto idxIt = GEP->idx_begin(); idxIt != GEP->idx_end(); ++idxIt) {
+          llvm::Value *Idx = idxIt->get();
+          if (!Idx) continue;
+          llvm::Type *Ty = Idx->getType();
+          if (Ty->isIntegerTy() && Ty->getIntegerBitWidth() > ptrBits) {
+            addIssue("unsupported gep index width (> pointer width)");
+            break;
+          }
+        }
+      }
+
+      // Stop early once we have enough context.
+      if (issues.size() >= 20) break;
+    }
+    if (issues.size() >= 20) break;
+  }
+
+  if (issues.empty()) return;
+
+  std::string msg;
+  llvm::raw_string_ostream os(msg);
+  os << "SifaSymAbs: unsupported LLVM IR for function `" << F.getName() << "`.\n";
+  os << "Supported subset: integers (<=64-bit), pointers";
+  if (opt.allowDouble) os << ", and double";
+  os << ".\n";
+  os << "Issues (first " << issues.size() << "):\n";
+  for (const auto &s : issues) os << "  - " << s << "\n";
+  throw std::invalid_argument(os.str());
+}
 
 static symbolic_abstraction::configparser::Config
 makeConfig(const SifaSymAbsOptions &opt) {
@@ -34,6 +166,7 @@ makeConfig(const SifaSymAbsOptions &opt) {
 static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
                                 llvm::BasicBlock *target,
                                 const SifaSymAbsOptions &options) {
+  validateLlvmSubsetOrThrow(M, F, options);
   auto cfg = makeConfig(options);
 
   // SymbolicAbstraction expects non-const pointers (it mutates analysis state
@@ -67,6 +200,7 @@ static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
 
 static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
                                 const SifaSymAbsOptions &options) {
+  validateLlvmSubsetOrThrow(M, F, options);
   auto cfg = makeConfig(options);
 
   auto *mod = const_cast<llvm::Module *>(&M);

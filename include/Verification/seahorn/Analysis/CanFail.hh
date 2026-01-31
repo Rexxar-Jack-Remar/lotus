@@ -5,9 +5,9 @@
  * Identifies which functions may fail because of a call to verifier.error()
  */
 #include "llvm/Pass.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Function.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 
 namespace seahorn
 {
@@ -33,5 +33,5 @@ namespace seahorn
 
     StringRef getPassName () const override {return "Can Fail";}
   };
-}
+} // namespace seahorn
 #endif /* _CAN_FAIL__HH_ */

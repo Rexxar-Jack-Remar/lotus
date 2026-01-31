@@ -22,5 +22,5 @@ public:
   }
   
 };
-}
-}
+} // namespace solver
+} // namespace seahorn

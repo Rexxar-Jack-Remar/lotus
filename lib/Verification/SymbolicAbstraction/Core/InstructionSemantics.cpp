@@ -1173,7 +1173,9 @@ z3::expr InstructionSemantics::visitFreezeInst(llvm::FreezeInst &I) {
 }
 
 z3::expr InstructionSemantics::visitFNeg(llvm::UnaryOperator &I) {
-  // FNeg - floating point negation - preserve for now
-  return preserve(I);
+  z3::expr in = rValue(I.getOperand(0));
+  z3::expr out_var = lValue();
+  Z3_ast ast = Z3_mk_fpa_neg(*Z3Context_, in);
+  return out_var == to_expr(*Z3Context_, ast);
 }
 } // namespace symbolic_abstraction

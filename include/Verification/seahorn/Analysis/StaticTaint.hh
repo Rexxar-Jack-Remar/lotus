@@ -1,13 +1,13 @@
 #pragma once 
 
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/ADT/DenseSet.h"
 
 namespace seahorn {
 
@@ -32,5 +32,5 @@ public:
   void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
   llvm::StringRef getPassName() const override { return "StaticTaint"; }
 };
-}
+} // namespace seahorn
 

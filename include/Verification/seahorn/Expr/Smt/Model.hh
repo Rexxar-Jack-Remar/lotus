@@ -19,5 +19,5 @@ public:
     return o;
   }
 };
-}
-}
+} // namespace solver
+} // namespace seahorn

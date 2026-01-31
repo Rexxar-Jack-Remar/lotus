@@ -6,9 +6,9 @@
  */
 
 #include "llvm/Pass.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Function.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 
 namespace seahorn
 {
@@ -34,5 +34,5 @@ namespace seahorn
     virtual StringRef getPassName () const override {return "CanAccessMemory";}
     
   };
-}
+} // namespace seahorn
 #endif 

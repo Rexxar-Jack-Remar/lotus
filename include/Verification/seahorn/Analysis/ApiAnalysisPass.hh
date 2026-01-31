@@ -8,14 +8,14 @@
 #include <sstream>
 
 #include "llvm/Pass.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/SetVector.h"
 #include "seahorn/Support/SeaDebug.h"
 #include "seahorn/Support/SortTopo.hh" 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/PostOrderIterator.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Module.h"
 
 namespace seahorn
 {
@@ -125,5 +125,5 @@ namespace seahorn
     virtual StringRef getPassName () const
     { return "ApiAnalysisPass"; }
   };
-}
+} // namespace seahorn
 #endif /* _CALL_API_PASS_HH_ */

@@ -9,7 +9,7 @@
 
 namespace llvm {
 class raw_ostream;
-}
+} // namespace llvm
 
 namespace seahorn {
 namespace solver {
@@ -70,5 +70,5 @@ public:
   virtual void to_smt_lib(llvm::raw_ostream& o) = 0;
     
 };
-}
-}
+} // namespace solver
+} // namespace seahorn
