@@ -1,0 +1,52 @@
+#include "Verification/Sifa/Sifa.h"
+
+#include "Verification/Sifa/Fluid/NeverFluid.h"
+#include "Verification/Sifa/Interpreter/DagInterpreter.h"
+#include "Verification/Sifa/Interpreter/IcfgInterpreter.h"
+#include "Verification/Sifa/Procedure/ProcedureResources.h"
+#include "Verification/Sifa/Statistics/SifaStats.h"
+#include "Verification/Sifa/Storage/MapBasedStorage.h"
+#include "Verification/Sifa/Summarizers/FixpointLoopSummarizer.h"
+
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
+
+using namespace lotus::sifa;
+
+bool lotus::sifa::isReachable(const llvm::Function &F, const llvm::BasicBlock &target,
+                              SifaOptions options) {
+  (void)options;
+
+  SifaStats stats;
+  ReachabilityDomain<Transition> domain;
+  NeverFluid<bool> fluid;
+
+  DagInterpreter<Transition, bool> ipr(stats, domain, fluid);
+  FixpointLoopSummarizer<Transition, bool> loopSum(stats, domain, fluid, ipr);
+  ipr.setLoopSummarizer(loopSum);
+
+  const ProcedureResources res(stats, F, {const_cast<llvm::BasicBlock *>(&target)});
+  const bool out = ipr.interpretForSingleMarker(res.getRegexDag(), res.getDagOverlayPathToLois(), /*in=*/true);
+  return out;
+}
+
+bool lotus::sifa::isReachableInterprocedural(const llvm::Module &M, const llvm::Function *entry,
+                                             const llvm::Function &targetFunc,
+                                             const llvm::BasicBlock &targetBlock,
+                                             SifaOptions options) {
+  (void)options;
+
+  SifaStats stats;
+  ReachabilityDomain<Transition> domain;
+  NeverFluid<bool> fluid;
+
+  std::vector<std::pair<const llvm::Function *, const llvm::BasicBlock *>> lois = {
+      {&targetFunc, &targetBlock}};
+  IcfgInterpreter<bool> icfg(M, entry, lois, stats, domain, fluid, /*initialState=*/true);
+  MapBasedStorage<const llvm::BasicBlock *, bool> storage;
+  icfg.interpret(storage);
+  auto *bb = const_cast<llvm::BasicBlock *>(&targetBlock);
+  auto it = storage.getMap().find(bb);
+  return it != storage.getMap().end() && it->second;
+}

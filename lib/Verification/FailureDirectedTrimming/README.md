@@ -2,7 +2,7 @@
 
 This directory implements **failure-directed program trimming** as an LLVM IR instrumentation pass, based on:
 
-- Kostas Ferles, Valentin Wüstholz, Maria Christakis, Isil Dillig. *Failure-Directed Program Trimming*. ESEC/FSE 2017. (See [trimming.md](file:///Users/rainoftime/Work/analysis/lotus/trimming.md))
+- Kostas Ferles, Valentin Wüstholz, Maria Christakis, Isil Dillig. *Failure-Directed Program Trimming*. ESEC/FSE 2017.
 
 The goal is to produce a program `P'` that is **equi-safe** with the original `P` (it has an assertion violation iff `P` has one) while pruning many paths that are provably irrelevant to failures.
 
@@ -14,9 +14,9 @@ The goal is to produce a program `P'` that is **equi-safe** with the original `P
 
 ## What the pass actually does
 
-At a high level ([Pass.cpp](file:///Users/rainoftime/Work/analysis/lotus/lib/Verification/FailureDirectedTrimming/Pass.cpp)):
+At a high level ([Pass.cpp]
 
-1. **Interprocedural transformation (modularity trick)** ([CloneAndWrap.cpp](file:///Users/rainoftime/Work/analysis/lotus/lib/Verification/FailureDirectedTrimming/CloneAndWrap.cpp)):
+1. **Interprocedural transformation (modularity trick)**:
    - Clone each eligible function `f` into a *safe clone* `f.fdtrim.safe`.
      - In the safe clone, `assert(c)` is rewritten to `assume(c)` and `error()` is rewritten to `assume(false)` so the clone cannot exhibit assertion failure.
      - Calls inside safe clones are rewired to other safe clones.
@@ -25,7 +25,7 @@ At a high level ([Pass.cpp](file:///Users/rainoftime/Work/analysis/lotus/lib/Ver
      - **failure branch** calls the original `f(args)` and then executes `assume(false); unreachable`.
    - Intuition: every execution in the transformed program either (a) follows "safe behavior" through safe clones or (b) explicitly enters a "failure context". This makes it sound to compute and insert trimming conditions locally while still preserving failing behaviors.
 
-2. **Compute safety conditions** with a lightweight backward analysis over the CFG ([SafetyConditions.cpp](file:///Users/rainoftime/Work/analysis/lotus/lib/Verification/FailureDirectedTrimming/SafetyConditions.cpp)).
+2. **Compute safety conditions** with a lightweight backward analysis over the CFG ([SafetyConditions.cpp]
 
 3. **Insert trimming assumptions**:
    - Choose instrumentation points (calls / conditionals / loop headers) depending on options.
@@ -33,7 +33,7 @@ At a high level ([Pass.cpp](file:///Users/rainoftime/Work/analysis/lotus/lib/Ver
 
 ## Semantics of the computed formulas
 
-The analysis computes formulas in a small AST ([FailureDirectedTrimmingImpl.h](file:///Users/rainoftime/Work/analysis/lotus/lib/Verification/FailureDirectedTrimming/FailureDirectedTrimmingImpl.h)) representing (typed) boolean and integer expressions, pointer dereferences, and quantifiers:
+The analysis computes formulas in a small AST ([FailureDirectedTrimmingImpl.h] representing (typed) boolean and integer expressions, pointer dereferences, and quantifiers:
 
 - `BeforeInst[I]` is a **sufficient safety condition** for the execution starting *at instruction `I`* to avoid assertion failure (assuming the execution terminates according to the IR model used by the verifier).
 - `PreAfterPhi[BB]` is the safety condition **at the block entry after PHIs** (used for edge transfer through PHI substitution).
@@ -77,7 +77,7 @@ As a last-resort safety measure, if quantifiers still reach code generation, the
 
 ## Options (selected)
 
-Options are declared in [Options.cpp](file:///Users/rainoftime/Work/analysis/lotus/lib/Verification/FailureDirectedTrimming/Options.cpp).
+Options are declared in [Options.cpp]
 
 - `-fdtrim-instrument-calls / -conditionals / -loops`: where to insert trimming assumes.
 - `-fdtrim-summary-iterations`: bounded refinement of summaries (not a full SCC fixpoint).

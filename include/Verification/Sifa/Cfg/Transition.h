@@ -1,0 +1,111 @@
+//===-- Verification/Sifa/Cfg/Transition.h --------------------------------===//
+//
+// Transition labels used for path expressions and Sifa's regex/DAG interpretation.
+//
+// Ultimate-aligned: Ultimate has separate classes LocationMarkerTransition and
+// CallReturnSummary (cfgpreprocessing). We provide those as named structs and
+// a unified Transition (tagged union) for the path-expression alphabet.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef LOTUS_VERIFICATION_SIFA_CFG_TRANSITION_H
+#define LOTUS_VERIFICATION_SIFA_CFG_TRANSITION_H
+
+#include "llvm/ADT/Optional.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Function.h"
+
+#include <cstdint>
+#include <ostream>
+#include <string>
+
+namespace lotus {
+namespace sifa {
+
+enum class TransitionKind : std::uint8_t {
+  Edge = 0,
+  Marker = 1,
+  ReturnSummary = 2,
+};
+
+//--- Ultimate cfgpreprocessing/LocationMarkerTransition (aligned) -------------
+/// Transition to mark paths uniquely in RegexDag (Ultimate LocationMarkerTransition).
+/// getSource() returns nullptr for markers; getTarget() returns the marked location.
+struct LocationMarkerTransition {
+  llvm::BasicBlock *markedTarget = nullptr;
+  std::uint32_t uniqueId = 0;
+
+  llvm::BasicBlock *getSource() const { return nullptr; }
+  llvm::BasicBlock *getTarget() const { return markedTarget; }
+  std::uint32_t getUniqueId() const { return uniqueId; }
+};
+
+//--- Ultimate cfgpreprocessing/CallReturnSummary (aligned) -------------------
+/// One transition representing: enter callee, execute body, return (Ultimate CallReturnSummary).
+/// correspondingCall() / correspondingReturn() in Ultimate return ICFG edges; we expose callee.
+struct CallReturnSummary {
+  llvm::BasicBlock *source = nullptr;
+  llvm::BasicBlock *target = nullptr;
+  llvm::Function *callee = nullptr;
+  std::uint32_t id = 0;
+
+  llvm::BasicBlock *getSource() const { return source; }
+  llvm::BasicBlock *getTarget() const { return target; }
+  llvm::Function *getCallee() const { return callee; }
+  /// Ultimate: calledProcedure() / getSucceedingProcedure()
+  std::string calledProcedure() const;
+};
+
+//--- Unified transition (path-expression alphabet) ---------------------------
+/// A labeled transition used as a PathExpressions "letter".
+/// - Edge: regular CFG edge (source → target).
+/// - Marker: LocationMarkerTransition; target = marked location, source = null.
+/// - ReturnSummary: CallReturnSummary; synthetic call+return edge.
+struct Transition {
+  TransitionKind kind = TransitionKind::Edge;
+  std::uint32_t id = 0;
+  llvm::BasicBlock *source = nullptr;
+  llvm::BasicBlock *target = nullptr;
+  llvm::Function *callee = nullptr;
+
+  static Transition makeEdge(std::uint32_t id, const llvm::BasicBlock *src,
+                             const llvm::BasicBlock *dst);
+  static Transition makeMarker(std::uint32_t id, const llvm::BasicBlock *markedTarget);
+  static Transition makeReturnSummary(std::uint32_t id, const llvm::BasicBlock *src,
+                                      const llvm::BasicBlock *dst,
+                                      const llvm::Function *calleeFn);
+
+  /// Ultimate-aligned: build from LocationMarkerTransition.
+  static Transition from(const LocationMarkerTransition &m);
+  /// Ultimate-aligned: build from CallReturnSummary.
+  static Transition from(const CallReturnSummary &c);
+
+  /// When kind == Marker, view as LocationMarkerTransition.
+  llvm::Optional<LocationMarkerTransition> getLocationMarkerTransition() const;
+  /// When kind == ReturnSummary, view as CallReturnSummary.
+  llvm::Optional<CallReturnSummary> getCallReturnSummary() const;
+
+  bool operator==(const Transition &o) const;
+};
+
+std::size_t hashValue(const Transition &t);
+
+struct TransitionHash {
+  std::size_t operator()(const Transition &t) const { return hashValue(t); }
+};
+
+std::ostream &operator<<(std::ostream &os, const Transition &t);
+
+} // namespace sifa
+} // namespace lotus
+
+namespace std {
+template <>
+struct hash<lotus::sifa::Transition> {
+  std::size_t operator()(const lotus::sifa::Transition &t) const {
+    return lotus::sifa::hashValue(t);
+  }
+};
+} // namespace std
+
+#endif // LOTUS_VERIFICATION_SIFA_CFG_TRANSITION_H

@@ -1,1 +1,4 @@
 add_lotus_test(failure_directed_trimming_test FailureDirectedTrimmingTest.cpp)
+add_lotus_test(sifa_reachability_test SifaReachabilityTest.cpp)
+add_lotus_test(sifa_symabs_smoke_test SifaSymAbsSmokeTest.cpp)
+add_lotus_test(sifa_dag_interpreter_test SifaDagInterpreterTest.cpp)

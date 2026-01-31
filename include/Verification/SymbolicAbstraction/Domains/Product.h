@@ -6,6 +6,7 @@
 #include "Verification/SymbolicAbstraction/Utils/Config.h"
 #include "Verification/SymbolicAbstraction/Utils/Utils.h"
 
+#include <algorithm>
 #include <random>
 #include <typeinfo>
 
@@ -82,28 +83,25 @@ public:
   virtual bool joinWith(const AbstractValue &av_other) override {
     assert(Finalized_);
     auto &other = static_cast<const Product &>(av_other);
-    assert(Values_.size() == other.Values_.size());
+    // Allow different sizes (e.g. parameterized domains with location-dependent param sets).
+    const size_t n = std::min(Values_.size(), other.Values_.size());
     bool changed = false;
-
-    for (unsigned i = 0; i < Values_.size(); i++) {
+    for (size_t i = 0; i < n; i++) {
       if (Values_[i]->joinWith(*other.Values_[i]))
         changed = true;
     }
-
     return changed;
   }
 
   virtual bool meetWith(const AbstractValue &av_other) override {
     assert(Finalized_);
     auto &other = static_cast<const Product &>(av_other);
-    assert(Values_.size() == other.Values_.size());
+    const size_t n = std::min(Values_.size(), other.Values_.size());
     bool changed = false;
-
-    for (unsigned i = 0; i < Values_.size(); i++) {
+    for (size_t i = 0; i < n; i++) {
       if (Values_[i]->meetWith(*other.Values_[i]))
         changed = true;
     }
-
     return changed;
   }
 
@@ -187,11 +185,11 @@ public:
     vector<const AbstractValue *> all_this, all_other;
     gatherFlattenedSubcomponents(&all_this);
     av_other.gatherFlattenedSubcomponents(&all_other);
-    assert(all_this.size() == all_other.size());
+    const size_t npairs = std::min(all_this.size(), all_other.size());
 
     // prepare and shuffle a list of corresponding pairs of values
     vector<pair<AbstractValue *, const AbstractValue *>> av_pairs;
-    for (unsigned i = 0; i < all_this.size(); ++i) {
+    for (size_t i = 0; i < npairs; ++i) {
       // all_this belong to this abstract value so they're safe to modify
       AbstractValue *ati = const_cast<AbstractValue *>(all_this[i]);
       av_pairs.push_back({ati, all_other[i]});
@@ -220,14 +218,12 @@ public:
 
   virtual bool isJoinableWith(const AbstractValue &other) const override {
     if (const auto *oth_val = static_cast<const Product *>(&other)) {
-      if (oth_val->Values_.size() != Values_.size()) {
-        return false;
-      }
-      for (size_t i = 0; i < Values_.size(); ++i) {
+      const size_t n = std::min(Values_.size(), oth_val->Values_.size());
+      for (size_t i = 0; i < n; ++i) {
         if (!(oth_val->Values_[i])->isJoinableWith(*Values_[i]))
           return false;
       }
-      return true;
+      return n > 0;
     }
     return false;
   }

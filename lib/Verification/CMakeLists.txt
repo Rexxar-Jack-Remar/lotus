@@ -7,4 +7,4 @@ endif()
 
 add_subdirectory(FailureDirectedTrimming)
 add_subdirectory(SymbolicAbstraction)
-add_subdirectory(LoopInvariants)
+add_subdirectory(Sifa)

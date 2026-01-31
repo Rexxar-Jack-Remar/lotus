@@ -1,0 +1,143 @@
+//===-- Verification/Sifa/Domain/OctagonDomain.h ---------------------------===//
+//
+// Octagon domain (ported from Ultimate Library-Sifa). Miné's octagon:
+// ±vi ± vj ≤ c; OctagonState holds varToIndex + OctagonMatrix; join = max,
+// widen = widenSimple, isBottom = strongClosure then hasNegativeSelfLoop.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONDOMAIN_H
+#define LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONDOMAIN_H
+
+#include "Verification/Sifa/Cfg/Transition.h"
+#include "Verification/Sifa/Domain/AbstractDomain.h"
+#include "Verification/Sifa/Domain/OctagonMatrix.h"
+
+#include "llvm/IR/Value.h"
+
+#include <unordered_map>
+#include <vector>
+
+namespace lotus {
+namespace sifa {
+
+/// Octagon state: varToIndex (Value* -> block index), matrix (Ultimate-aligned).
+class OctagonState {
+public:
+  OctagonState() = default;
+  explicit OctagonState(bool isBottom) : isBottom_(isBottom) {}
+
+  bool isBottom() const { return isBottom_; }
+  void setBottom(bool b) { isBottom_ = b; }
+
+  const std::unordered_map<const llvm::Value *, std::size_t> &varToIndex() const {
+    return varToIndex_;
+  }
+  const OctagonMatrix &matrix() const { return matrix_; }
+
+  OctagonState join(const OctagonState &other) const {
+    if (isBottom_) return other;
+    if (other.isBottom_) return *this;
+    std::vector<const llvm::Value *> allVars;
+    for (const auto &p : varToIndex_) allVars.push_back(p.first);
+    for (const auto &p : other.varToIndex_) {
+      if (varToIndex_.count(p.first)) continue;
+      allVars.push_back(p.first);
+    }
+    const std::size_t n = allVars.size();
+    std::unordered_map<const llvm::Value *, std::size_t> newVarToIndex;
+    for (std::size_t i = 0; i < n; ++i) newVarToIndex[allVars[i]] = i;
+
+    std::vector<std::size_t> copy1(2 * n, 2 * n), copy2(2 * n, 2 * n);
+    for (std::size_t i = 0; i < n; ++i) {
+      auto it1 = varToIndex_.find(allVars[i]);
+      auto it2 = other.varToIndex_.find(allVars[i]);
+      if (it1 != varToIndex_.end()) {
+        copy1[2 * i] = 2 * it1->second;
+        copy1[2 * i + 1] = 2 * it1->second + 1;
+      }
+      if (it2 != other.varToIndex_.end()) {
+        copy2[2 * i] = 2 * it2->second;
+        copy2[2 * i + 1] = 2 * it2->second + 1;
+      }
+    }
+    OctagonMatrix m1 = (matrix_.dim() == 2 * n) ? matrix_.rearrange(copy1) : expandAndRearrange(matrix_, copy1, n);
+    OctagonMatrix m2 = (other.matrix_.dim() == 2 * n) ? other.matrix_.rearrange(copy2) : expandAndRearrange(other.matrix_, copy2, n);
+    OctagonState out;
+    out.varToIndex_ = newVarToIndex;
+    out.matrix_ = m1.max(m2);
+    return out;
+  }
+
+  OctagonState widen(const OctagonState &other) const {
+    if (isBottom_) return other;
+    if (other.isBottom_) return *this;
+    if (varToIndex_ != other.varToIndex_) return join(other);
+    OctagonState out;
+    out.varToIndex_ = varToIndex_;
+    out.matrix_ = matrix_.widenSimple(other.matrix_);
+    return out;
+  }
+
+  bool operator==(const OctagonState &o) const {
+    return isBottom_ == o.isBottom_ && varToIndex_ == o.varToIndex_ &&
+           matrix_.dim() == o.matrix_.dim();
+  }
+
+  /// True if strong closure has a negative self-loop.
+  bool hasNegativeSelfLoop() const {
+    return matrix_.strongClosure().hasNegativeSelfLoop();
+  }
+
+private:
+  static OctagonMatrix expandAndRearrange(const OctagonMatrix &m,
+                                          const std::vector<std::size_t> &copy,
+                                          std::size_t n) {
+    OctagonMatrix out(n);
+    const std::size_t d = 2 * n;
+    for (std::size_t i = 0; i < d; ++i)
+      for (std::size_t j = 0; j < d; ++j) {
+        std::size_t si = copy[i], sj = copy[j];
+        if (si < m.dim() && sj < m.dim()) {
+          auto c = m.get(si, sj);
+          if (c) out.set(i, j, *c);
+        }
+      }
+    return out;
+  }
+
+  bool isBottom_ = false;
+  std::unordered_map<const llvm::Value *, std::size_t> varToIndex_;
+  OctagonMatrix matrix_;
+};
+
+/// Octagon domain implementing AbstractDomain<Transition, OctagonState>.
+class OctagonDomain final : public AbstractDomain<Transition, OctagonState> {
+public:
+  OctagonState top() const override { return OctagonState(false); }
+  OctagonState bottom() const override { return OctagonState(true); }
+  bool isBottom(const OctagonState &s) const override {
+    return s.isBottom() || s.hasNegativeSelfLoop();
+  }
+  bool leq(const OctagonState &a, const OctagonState &b) const override {
+    if (a.isBottom()) return true;
+    if (b.isBottom()) return false;
+    OctagonState j = a.join(b);
+    return j.matrix().dim() == b.matrix().dim();
+  }
+  OctagonState join(const OctagonState &a, const OctagonState &b) const override {
+    return a.join(b);
+  }
+  OctagonState widen(const OctagonState &prev, const OctagonState &next) const override {
+    return prev.widen(next);
+  }
+  OctagonState post(const Transition &t, const OctagonState &in) const override {
+    (void)t;
+    return in;
+  }
+};
+
+} // namespace sifa
+} // namespace lotus
+
+#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONDOMAIN_H

@@ -1,3 +1,0 @@
-add_lotus_test(test_invariants test_invariants.cpp)
-llvm_map_components_to_libnames(test_invariants_llvm_libs Passes)
-target_link_libraries(test_invariants LotusLoopInvariants CanarySMT ${test_invariants_llvm_libs})
