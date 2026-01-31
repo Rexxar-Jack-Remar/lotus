@@ -1,13 +1,14 @@
-# NPA sources 
+# NPA sources
 set(NPA_SOURCES
   Domains/BitVectorDomain.cpp
   Domains/GenKillDomain.cpp
   Domains/TaintTransferDomain.cpp
-  Engines/BitVectorSolver.cpp
-  Clients/ReachingDefinitions.cpp
-  Clients/ReachableBlocks.cpp
-  Clients/InterproceduralRD.cpp
-  Clients/InterproceduralTaint.cpp
+
+  Analyses/BitVectorSolver.cpp
+  Analyses/Intraprocedural/ReachingDefinitions.cpp
+  Analyses/Intraprocedural/ReachableBlocks.cpp
+  Analyses/Interprocedural/InterproceduralRD.cpp
+  Analyses/Interprocedural/InterproceduralTaint.cpp
 )
 
 add_library(NPADataFlow STATIC ${NPA_SOURCES})

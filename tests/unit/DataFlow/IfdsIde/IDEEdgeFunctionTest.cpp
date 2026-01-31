@@ -1,4 +1,4 @@
-#include <Dataflow/IFDS/IDESolver.h>
+#include <Dataflow/IFDS/Solvers/IDESolver.h>
 #include <gtest/gtest.h>
 
 namespace ifds {

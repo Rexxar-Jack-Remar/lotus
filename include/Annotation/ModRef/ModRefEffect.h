@@ -36,4 +36,4 @@ public:
 	bool onReachableMemory() const { return mClass == ModRefClass::ReachableMemory; }
 };
 
-}
+} // namespace annotation

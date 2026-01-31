@@ -3,7 +3,7 @@
  * @brief Unit tests for Mono (monotone dataflow framework)
  */
 
-#include "Dataflow/Mono/Clients/LiveVariablesAnalysis.h"
+#include "Dataflow/Mono/Analyses/Intraprocedural/LiveVariablesAnalysis.h"
 #include "Dataflow/Mono/DataFlowResult.h"
 
 #include <gtest/gtest.h>

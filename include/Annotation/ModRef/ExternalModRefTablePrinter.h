@@ -3,7 +3,7 @@
 namespace llvm
 {
 	class raw_ostream;
-}
+} // namespace llvm
 
 namespace annotation
 {
@@ -20,4 +20,4 @@ public:
 	void printTable(const ExternalModRefTable&);
 };
 
-}
+} // namespace annotation

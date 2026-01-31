@@ -1,7 +1,6 @@
-
 # Newtonian Program Analysis
 
-We use the engine in include/Dataflow/NPA/NPA.h.
+We use the engine in `include/Dataflow/NPA/NPA.h`.
 
 A generic method for solving *interprocedural dataflow equations* by *generalizing Newton’s method** to **ω-continuous semirings*.
 
@@ -28,7 +27,7 @@ The engine supports **TOPLAS 2016**-style algorithms for LCFL (linear context-fr
 
 - **LinearStrategy**: `Naive`, `Worklist`, `SCC`, `TensorProduct`
 - **SCC**: Solve in topological order of strongly connected components; fixpoint per SCC.
-- **TensorProduct**: Lift the linear system to the tensor-product semiring, solve there, project back (see `include/Dataflow/NPA/Domains/TensorProductDomain.h`).
+- **TensorProduct**: Lift the linear system to the tensor-product semiring, solve there, project back (see `TensorProductDomain.h`).
 - **LCFLDetector**: `has_lcfl_structure(E1)` detects Call/Concat/InfClos in linear RHS.
 
 Use `NewtonSolver<D>::solve(eqns, verbose, -1, LinearStrategy::SCC)` or `LinearStrategy::TensorProduct`; or pass `LinearStrategy` into `BitVectorSolver::run` (optional 5th parameter).

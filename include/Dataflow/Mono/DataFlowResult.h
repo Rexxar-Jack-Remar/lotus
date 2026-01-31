@@ -25,9 +25,6 @@ private:
 
 class DataFlowResult {
 public:
-  /*
-   * Methods
-   */
   DataFlowResult() = default;
 
   std::set<Value *> &GEN(Instruction *inst) { return gens[inst]; }

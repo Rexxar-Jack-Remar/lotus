@@ -4,7 +4,7 @@
 namespace llvm
 {
 	class raw_ostream;
-}
+} // namespace llvm
 
 namespace annotation
 {
@@ -21,6 +21,6 @@ public:
 	void printTable(const ExternalPointerTable&);
 };
 
-}
+} // namespace annotation
 
 #endif

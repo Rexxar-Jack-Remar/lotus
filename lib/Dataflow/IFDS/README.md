@@ -1,5 +1,20 @@
 # IFDS/IDE Dataflow Analysis
 
+## Directory Layout
+
+### include/Dataflow/IFDS/
+
+- **IFDSFramework.h** – Core framework (path edges, summary edges, problem interfaces).
+- **Solvers/** – Header-only solver implementations:
+  - **IFDSSolver.h** / **IFDSSolver.tpp** – Sequential IFDS tabulation solver.
+  - **IDESolver.h** / **IDESolver.tpp** – IDE solver.
+- **Clients/** – Analysis problem definitions (IFDSTaintAnalysis, IDEConstantPropagation, etc.).
+
+### lib/Dataflow/IFDS/
+
+- **Debug/** – Framework debug helpers (e.g. IFDSDebugUtils).
+- **Clients/** – Concrete analyses built on the framework.
+
 ## Writing An Analysis
 
 *Use IFDS**, if

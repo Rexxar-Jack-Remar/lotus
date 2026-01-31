@@ -5,8 +5,8 @@ Overview
 ========
 
 The **monotone dataflow engine** in ``lib/Dataflow/Mono`` implements a
-classic **bit-vector style** framework for intraprocedural analyses
-over LLVM IR.
+classic **bit-vector style** framework for intraprocedural and
+interprocedural analyses over LLVM IR.
 
 * **Location**: ``lib/Dataflow/Mono``
 * **Main classes**: ``DataFlowEngine``, ``DataFlowResult``

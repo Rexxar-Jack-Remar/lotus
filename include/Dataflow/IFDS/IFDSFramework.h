@@ -297,12 +297,10 @@ private:
 
 
 // ============================================================================
-// IFDS Solver (Declarations moved to IFDSSolvers.h)
+// IFDS/IDE Solvers
 // ============================================================================
-
-// Note: IFDSSolver class definitions have been moved to
-// include/Dataflow/IFDS/IFDSSolvers.h to avoid duplication and improve
-// modularity. Include that header for solver implementations.
+// Solver declarations: include/Dataflow/IFDS/Solvers/IFDSSolver.h and
+// include/Dataflow/IFDS/Solvers/IDESolver.h
 
 } // namespace ifds
 

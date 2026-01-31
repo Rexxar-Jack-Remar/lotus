@@ -1,8 +1,8 @@
-#ifndef ANALYSIS_INTERMONOSOLVER_H_
-#define ANALYSIS_INTERMONOSOLVER_H_
+#ifndef ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
+#define ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
 
-#include "Dataflow/Mono/CallStringInterProceduralDataFlow.h"
-#include "Dataflow/Mono/InterMonoProblem.h"
+#include "Dataflow/Mono/MonoFramework.h"
+#include "Dataflow/Mono/Solver/CallStringInterProceduralDataFlow.h"
 
 #include "llvm/IR/Instructions.h"
 
@@ -161,4 +161,4 @@ private:
 
 } // namespace mono
 
-#endif // ANALYSIS_INTERMONOSOLVER_H_
+#endif // ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_

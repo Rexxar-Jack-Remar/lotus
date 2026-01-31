@@ -12,7 +12,7 @@
 
 #include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/IFDSFramework.h>
-#include <Dataflow/IFDS/IFDSSolvers.h>
+#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
 
 using namespace ifds;
 using namespace llvm;

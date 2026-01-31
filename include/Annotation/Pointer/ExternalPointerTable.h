@@ -8,7 +8,7 @@
 namespace llvm
 {
 	class StringRef;
-}
+} // namespace llvm
 
 namespace annotation
 {
@@ -35,4 +35,4 @@ public:
 	static ExternalPointerTable loadFromFile(const char* fileName);
 };
 
-}
+} // namespace annotation

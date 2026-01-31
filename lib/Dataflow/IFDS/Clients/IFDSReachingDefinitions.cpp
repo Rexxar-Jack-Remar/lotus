@@ -325,4 +325,4 @@ size_t hash<ifds::DefinitionFact>::operator()(const ifds::DefinitionFact& fact) 
     size_t h2 = std::hash<const llvm::Instruction*>{}(fact.get_definition_site());
     return h1 ^ (h2 << 1);
 }
-}
+} // namespace std

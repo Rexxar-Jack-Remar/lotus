@@ -233,4 +233,4 @@ public:
 	}
 };
 
-}
+} // namespace annotation

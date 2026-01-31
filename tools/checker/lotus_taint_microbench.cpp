@@ -1,7 +1,7 @@
 #include "lotus_taint_microbench.h"
 
 #include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/IFDSSolvers.h>
+#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>

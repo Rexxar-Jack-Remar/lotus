@@ -10,7 +10,7 @@ recurrence-based data-flow reasoning.
 It is designed for **numeric** and **relational** analyses that go
 beyond classical bit-vector or IFDS/IDE formulations.
 
-* **Location**: ``lib/Dataflow/NPA``
+* **Location**: ``lib/Dataflow/NPA`` (implementation), ``include/Dataflow/NPA`` (headers)
 * **Purpose**: library infrastructure for Newton-style program analyses
 
 Conceptual Background

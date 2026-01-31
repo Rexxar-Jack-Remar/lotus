@@ -1,5 +1,5 @@
 #include <Dataflow/IFDS/Clients/IDEConstantPropagation.h>
-#include <Dataflow/IFDS/IDESolver.h>
+#include <Dataflow/IFDS/Solvers/IDESolver.h>
 #include <gtest/gtest.h>
 
 #include <llvm/IR/BasicBlock.h>

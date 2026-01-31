@@ -1,0 +1,43 @@
+#ifndef ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_CONSTANTPROPAGATION_H_
+#define ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_CONSTANTPROPAGATION_H_
+
+#include "Dataflow/Mono/MonoFramework.h"
+
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Value.h"
+
+#include <cstdint>
+#include <unordered_map>
+
+namespace mono {
+
+enum class ConstantPropagationTag {
+  Top,
+  Const,
+  Bottom,
+};
+
+struct ConstantPropagationValue {
+  ConstantPropagationTag Tag = ConstantPropagationTag::Top;
+  int64_t ConstValue = 0;
+
+  bool operator==(const ConstantPropagationValue &Other) const {
+    return Tag == Other.Tag && ConstValue == Other.ConstValue;
+  }
+};
+
+using ConstantPropagationMap =
+    std::unordered_map<const llvm::Value *, ConstantPropagationValue>;
+
+struct ConstantPropagationDomain
+    : LLVMMonoAnalysisDomain<ConstantPropagationMap> {};
+
+using ConstantPropagationSolver = IntraMonoSolver<ConstantPropagationDomain>;
+
+[[nodiscard]] std::unordered_map<llvm::Instruction *, ConstantPropagationMap>
+runIntraMonoConstantPropagation(llvm::Function *F);
+
+} // namespace mono
+
+#endif // ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_CONSTANTPROPAGATION_H_

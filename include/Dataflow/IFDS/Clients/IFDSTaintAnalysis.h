@@ -7,7 +7,7 @@
 #pragma once
 
 #include "Dataflow/IFDS/IFDSFramework.h"
-#include "Dataflow/IFDS/IFDSSolvers.h"
+#include "Dataflow/IFDS/Solvers/IFDSSolver.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>
