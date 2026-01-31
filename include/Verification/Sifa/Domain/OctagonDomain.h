@@ -12,6 +12,7 @@
 #include "Verification/Sifa/BlockTransferPolicy.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
+#include "Verification/Sifa/Domain/IntervalDomain.h"
 #include "Verification/Sifa/Domain/OctagonMatrix.h"
 
 #include "llvm/IR/BasicBlock.h"
@@ -21,6 +22,7 @@
 #include <vector>
 
 namespace lotus {
+class AliasAnalysisWrapper;
 namespace sifa {
 
 /// Octagon state: varToIndex (Value* -> block index), matrix (Ultimate-aligned).
@@ -42,6 +44,16 @@ public:
     return varToIndex_;
   }
   const OctagonMatrix &matrix() const { return matrix_; }
+
+  llvm::Optional<Interval> getMemory(const llvm::Value *region) const {
+    auto it = memory_.find(region);
+    if (it == memory_.end()) return llvm::None;
+    return it->second;
+  }
+  void setMemory(const llvm::Value *region, Interval i) { memory_[region] = std::move(i); }
+  const std::unordered_map<const llvm::Value *, Interval> &memory() const {
+    return memory_;
+  }
 
   OctagonState join(const OctagonState &other) const {
     if (isBottom_) return other;
@@ -74,6 +86,15 @@ public:
     OctagonState out;
     out.varToIndex_ = newVarToIndex;
     out.matrix_ = m1.max(m2);
+    for (const auto &kv : memory_)
+      out.memory_[kv.first] = kv.second;
+    for (const auto &kv : other.memory_) {
+      auto it = out.memory_.find(kv.first);
+      if (it != out.memory_.end())
+        it->second = it->second.join(kv.second);
+      else
+        out.memory_[kv.first] = kv.second;
+    }
     return out;
   }
 
@@ -84,12 +105,21 @@ public:
     OctagonState out;
     out.varToIndex_ = varToIndex_;
     out.matrix_ = matrix_.widenSimple(other.matrix_);
+    for (const auto &kv : memory_)
+      out.memory_[kv.first] = kv.second;
+    for (const auto &kv : other.memory_) {
+      auto it = out.memory_.find(kv.first);
+      if (it != out.memory_.end())
+        it->second = it->second.widen(kv.second);
+      else
+        out.memory_[kv.first] = kv.second;
+    }
     return out;
   }
 
   bool operator==(const OctagonState &o) const {
     return isBottom_ == o.isBottom_ && varToIndex_ == o.varToIndex_ &&
-           matrix_.dim() == o.matrix_.dim();
+           matrix_.dim() == o.matrix_.dim() && memory_ == o.memory_;
   }
 
   /// True if strong closure has a negative self-loop.
@@ -117,6 +147,7 @@ private:
   bool isBottom_ = false;
   std::unordered_map<const llvm::Value *, std::size_t> varToIndex_;
   OctagonMatrix matrix_;
+  std::unordered_map<const llvm::Value *, Interval> memory_;
 };
 
 /// Octagon domain implementing AbstractDomain<Transition, OctagonState>.
@@ -126,11 +157,16 @@ class OctagonDomain final : public AbstractDomain<Transition, OctagonState> {
 public:
   OctagonDomain() = default;
   explicit OctagonDomain(const BlockTransferPolicy *policy) : blockTransferPolicy_(policy) {}
+  OctagonDomain(const BlockTransferPolicy *policy,
+                lotus::AliasAnalysisWrapper *aliasAnalysis)
+      : blockTransferPolicy_(policy), aliasAnalysis_(aliasAnalysis) {}
 
   void setBlockTransferPolicy(const BlockTransferPolicy *policy) {
     blockTransferPolicy_ = policy;
   }
   const BlockTransferPolicy *getBlockTransferPolicy() const { return blockTransferPolicy_; }
+  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) { aliasAnalysis_ = aa; }
+  lotus::AliasAnalysisWrapper *getAliasAnalysis() const { return aliasAnalysis_; }
 
   OctagonState top() const override { return OctagonState(false); }
   OctagonState bottom() const override { return OctagonState(true); }
@@ -157,6 +193,7 @@ public:
 
 private:
   const BlockTransferPolicy *blockTransferPolicy_ = nullptr;
+  lotus::AliasAnalysisWrapper *aliasAnalysis_ = nullptr;
 };
 
 } // namespace sifa

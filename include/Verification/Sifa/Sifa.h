@@ -42,6 +42,7 @@ class Module;
 } // namespace llvm
 
 namespace lotus {
+class AliasAnalysisWrapper;
 namespace sifa {
 
 /// Domain kind for Sifa (Ultimate-aligned: SifaPreferences.LABEL_ABSTRACT_DOMAIN).
@@ -66,6 +67,10 @@ struct SifaOptions {
   /// "block-wise" set use a fast havoc transfer; others use instruction-by-instruction.
   /// Enables precision-performance trade-offs (e.g. block-wise for hot/large blocks).
   llvm::Optional<BlockTransferPolicy> blockTransferPolicy;
+  /// Optional alias analysis (lib/Alias). When set with a value domain (Interval,
+  /// Octagon, etc.), enables region-based memory: Load/Store use AA to resolve
+  /// pointers to regions (allocas, globals) for sound transfer. IKOS/CLAM style.
+  lotus::AliasAnalysisWrapper *aliasAnalysis = nullptr;
 };
 
 /// Analyze all paths from entry to \p target and return the resulting abstract state.

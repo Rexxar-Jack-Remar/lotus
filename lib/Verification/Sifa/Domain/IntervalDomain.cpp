@@ -3,10 +3,15 @@
 // Instruction-level block transfer for Sifa Interval domain.
 // Applies sound over-approximating transfer for each LLVM instruction in a
 // basic block so that post(Edge) models real program semantics.
+// When alias analysis is set, Load/Store use region-based memory (IKOS/CLAM
+// style) reusing lib/Alias.
 //
 //===----------------------------------------------------------------------===//
 
 #include "Verification/Sifa/Domain/IntervalDomain.h"
+#include "Verification/Sifa/RegionMemory.h"
+
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
@@ -57,7 +62,7 @@ Interval restrictToUnsigned(const Interval &i, unsigned bits) {
   if (bits >= 64) return i;
   int64_t maxVal = (bits == 64) ? INT64_MAX : ((1LL << bits) - 1);
   llvm::Optional<int64_t> lo = i.lo.hasValue()
-                                   ? std::max(*i.lo, 0LL)
+                                   ? std::max(*i.lo, int64_t{0})
                                    : llvm::Optional<int64_t>(0);
   llvm::Optional<int64_t> hi = i.hi.hasValue()
                                    ? std::min(*i.hi, maxVal)
@@ -138,7 +143,7 @@ Interval transferInstruction(const llvm::Instruction &I,
     if (L.isBottom() || R.isBottom()) return Interval::bottom();
     if (!L.lo || !L.hi || !R.lo || !R.hi) return restrictToSigned(Interval::top(), getBitWidth(&I));
     if (*R.hi < 0 || *R.lo > 63) return restrictToSigned(Interval::top(), getBitWidth(&I));
-    int64_t shAmtLo = *R.lo, shAmtHi = std::min(*R.hi, 63LL);
+    int64_t shAmtLo = *R.lo, shAmtHi = std::min(*R.hi, int64_t{63});
     int64_t v00 = *L.lo << shAmtLo, v01 = *L.lo << shAmtHi;
     int64_t v10 = *L.hi << shAmtLo, v11 = *L.hi << shAmtHi;
     return restrictToSigned(
@@ -155,7 +160,7 @@ Interval transferInstruction(const llvm::Instruction &I,
     uint64_t mask = (w >= 64) ? UINT64_MAX : ((1ULL << w) - 1);
     uint64_t uLo = static_cast<uint64_t>(*L.lo) & mask;
     uint64_t uHi = static_cast<uint64_t>(*L.hi) & mask;
-    int64_t shAmt = std::min(*R.lo, 63LL);
+    int64_t shAmt = std::min(*R.lo, int64_t{63});
     uint64_t rLo = uLo >> shAmt, rHi = uHi >> shAmt;
     return restrictToUnsigned(
         Interval{static_cast<int64_t>(std::min(rLo, rHi)), static_cast<int64_t>(std::max(rLo, rHi)), false},
@@ -167,7 +172,7 @@ Interval transferInstruction(const llvm::Instruction &I,
     if (L.isBottom() || R.isBottom()) return Interval::bottom();
     if (!L.lo || !L.hi || !R.lo || !R.hi) return restrictToSigned(Interval::top(), getBitWidth(&I));
     if (*R.hi < 0 || *R.lo > 63) return restrictToSigned(Interval::top(), getBitWidth(&I));
-    int64_t shAmt = std::min(*R.lo, 63LL);
+    int64_t shAmt = std::min(*R.lo, int64_t{63});
     int64_t vLo = *L.lo >> shAmt, vHi = *L.hi >> shAmt;
     return restrictToSigned(Interval{std::min(vLo, vHi), std::max(vLo, vHi), false}, getBitWidth(&I));
   }
@@ -286,12 +291,54 @@ IntervalState IntervalDomain::applyBlockTransfer(llvm::BasicBlock *bb,
   IntervalState out(false);
   for (const auto &kv : in.intervals())
     out.set(kv.first, kv.second);
+  for (const auto &kv : in.memory())
+    out.setMemory(kv.first, kv.second);
+
+  lotus::AliasAnalysisWrapper *AA = getAliasAnalysis();
+  const llvm::Function &F = *bb->getParent();
+  std::vector<const llvm::Value *> regions;
+  std::vector<const llvm::Value *> resolved;
+  if (AA)
+    regions = getRegionsForFunction(F);
 
   for (llvm::Instruction &I : *bb) {
     if (I.isTerminator()) break;
-    if (I.getType()->isVoidTy()) continue;
+    if (I.getType()->isVoidTy()) {
+      if (AA && llvm::isa<llvm::StoreInst>(&I)) {
+        auto *SI = llvm::cast<llvm::StoreInst>(&I);
+        const llvm::Value *ptr = SI->getPointerOperand();
+        Interval val = getInterval(out, SI->getValueOperand());
+        resolvePointerToRegions(AA, ptr, regions, resolved);
+        for (const llvm::Value *r : resolved) {
+          auto cur = out.getMemory(r);
+          out.setMemory(r, cur ? cur->join(val) : val);
+        }
+      }
+      continue;
+    }
     if (I.getType()->isIntegerTy() || I.getType()->isPointerTy()) {
-      Interval res = transferInstruction(I, out);
+      Interval res;
+      if (AA && llvm::isa<llvm::AllocaInst>(&I)) {
+        out.setMemory(&I, Interval::top());
+        res = Interval::top();
+      } else if (AA && llvm::isa<llvm::LoadInst>(&I) &&
+                 I.getType()->isIntegerTy()) {
+        const llvm::Value *ptr =
+            llvm::cast<llvm::LoadInst>(&I)->getPointerOperand();
+        resolvePointerToRegions(AA, ptr, regions, resolved);
+        res = Interval::bottom();
+        for (const llvm::Value *r : resolved) {
+          auto cur = out.getMemory(r);
+          Interval ir = cur ? *cur : Interval::top();
+          res = res.isBottom() ? ir : res.join(ir);
+        }
+        if (res.isBottom())
+          res = Interval::top();
+      } else if (AA && llvm::isa<llvm::GetElementPtrInst>(&I)) {
+        res = Interval::top();
+      } else {
+        res = transferInstruction(I, out);
+      }
       out.set(&I, std::move(res));
     }
   }
@@ -304,6 +351,8 @@ IntervalState IntervalDomain::applyBlockWiseHavoc(llvm::BasicBlock *bb,
   IntervalState out(false);
   for (const auto &kv : in.intervals())
     out.set(kv.first, kv.second);
+  for (const auto &kv : in.memory())
+    out.setMemory(kv.first, kv.second);
   for (llvm::Instruction &I : *bb) {
     if (I.isTerminator()) break;
     if (I.getType()->isVoidTy()) continue;

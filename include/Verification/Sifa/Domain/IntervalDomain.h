@@ -16,6 +16,8 @@
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 
 #include "llvm/ADT/Optional.h"
+
+namespace lotus { class AliasAnalysisWrapper; }
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Value.h"
 
@@ -169,7 +171,8 @@ inline SatisfyingInputs Interval::satisfyGreaterOrEqual(const Interval &rhs) con
   return rhs.satisfyLessOrEqual(*this).swap();
 }
 
-/// Interval state: map from Value* to Interval. Used as Sifa abstract state.
+/// Interval state: map from Value* to Interval (registers) + optional region memory
+/// (region -> Interval for Load/Store when alias analysis is used).
 class IntervalState {
 public:
   IntervalState() = default;
@@ -188,13 +191,28 @@ public:
     return intervals_;
   }
 
+  /// Region memory (allocas, globals). Used when alias analysis is set.
+  llvm::Optional<Interval> getMemory(const llvm::Value *region) const {
+    auto it = memory_.find(region);
+    if (it == memory_.end()) return llvm::None;
+    return it->second;
+  }
+  void setMemory(const llvm::Value *region, Interval i) {
+    memory_[region] = std::move(i);
+  }
+  const std::unordered_map<const llvm::Value *, Interval> &memory() const {
+    return memory_;
+  }
+
   bool operator==(const IntervalState &o) const {
-    return isBottom_ == o.isBottom_ && intervals_ == o.intervals_;
+    return isBottom_ == o.isBottom_ && intervals_ == o.intervals_ &&
+           memory_ == o.memory_;
   }
 
 private:
   bool isBottom_ = false;
   std::unordered_map<const llvm::Value *, Interval> intervals_;
+  std::unordered_map<const llvm::Value *, Interval> memory_;
 };
 
 /// Interval domain implementing AbstractDomain<Transition, IntervalState>.
@@ -207,11 +225,17 @@ public:
 
   IntervalDomain() = default;
   explicit IntervalDomain(const BlockTransferPolicy *policy) : blockTransferPolicy_(policy) {}
+  /// When \p aliasAnalysis is non-null, Load/Store use region-based memory (IKOS/CLAM style).
+  IntervalDomain(const BlockTransferPolicy *policy,
+                 class lotus::AliasAnalysisWrapper *aliasAnalysis)
+      : blockTransferPolicy_(policy), aliasAnalysis_(aliasAnalysis) {}
 
   void setBlockTransferPolicy(const BlockTransferPolicy *policy) {
     blockTransferPolicy_ = policy;
   }
   const BlockTransferPolicy *getBlockTransferPolicy() const { return blockTransferPolicy_; }
+  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) { aliasAnalysis_ = aa; }
+  lotus::AliasAnalysisWrapper *getAliasAnalysis() const { return aliasAnalysis_; }
 
   /// Apply transfer for all non-terminator instructions in \p bb (sound over-approximation).
   /// Implemented in IntervalDomain.cpp.
@@ -231,6 +255,14 @@ public:
     if (b.isBottom()) return false;
     for (const auto &kv : a.intervals()) {
       auto ob = b.get(kv.first);
+      if (!ob) continue;
+      const Interval &ia = kv.second;
+      const Interval &ib = *ob;
+      if (ia.lo.hasValue() && (!ib.lo.hasValue() || *ia.lo < *ib.lo)) return false;
+      if (ia.hi.hasValue() && (!ib.hi.hasValue() || *ia.hi > *ib.hi)) return false;
+    }
+    for (const auto &kv : a.memory()) {
+      auto ob = b.getMemory(kv.first);
       if (!ob) continue;
       const Interval &ia = kv.second;
       const Interval &ib = *ob;
@@ -259,6 +291,21 @@ public:
       hull.hi = (oa->hi && i.hi) ? llvm::Optional<int64_t>(std::max(*oa->hi, *i.hi)) : llvm::None;
       r.set(v, hull);
     }
+    for (const auto &kv : a.memory())
+      r.setMemory(kv.first, kv.second);
+    for (const auto &kv : b.memory()) {
+      const llvm::Value *reg = kv.first;
+      const Interval &i = kv.second;
+      auto oa = r.getMemory(reg);
+      if (!oa) {
+        r.setMemory(reg, i);
+        continue;
+      }
+      Interval hull;
+      hull.lo = (oa->lo && i.lo) ? llvm::Optional<int64_t>(std::min(*oa->lo, *i.lo)) : llvm::None;
+      hull.hi = (oa->hi && i.hi) ? llvm::Optional<int64_t>(std::max(*oa->hi, *i.hi)) : llvm::None;
+      r.setMemory(reg, hull);
+    }
     return r;
   }
 
@@ -285,6 +332,25 @@ public:
         w.hi = in.hi;
       r.set(v, w);
     }
+    for (const auto &kv : next.memory()) {
+      const llvm::Value *reg = kv.first;
+      const Interval &in = kv.second;
+      auto op = previous.getMemory(reg);
+      if (!op) {
+        r.setMemory(reg, in);
+        continue;
+      }
+      Interval w;
+      if (op->lo.hasValue() && in.lo.hasValue() && *in.lo < *op->lo)
+        w.lo = llvm::None;
+      else
+        w.lo = in.lo;
+      if (op->hi.hasValue() && in.hi.hasValue() && *in.hi > *op->hi)
+        w.hi = llvm::None;
+      else
+        w.hi = in.hi;
+      r.setMemory(reg, w);
+    }
     return r;
   }
 
@@ -297,6 +363,7 @@ public:
 
 private:
   const BlockTransferPolicy *blockTransferPolicy_ = nullptr;
+  lotus::AliasAnalysisWrapper *aliasAnalysis_ = nullptr;
 };
 
 } // namespace sifa

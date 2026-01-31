@@ -89,14 +89,55 @@ auto state = analyzeToWithIntervalDomain(F, target, IntervalState(false), option
 
 The value domains (Interval, Eq, ExplicitValue) apply **real instruction-level transfer** on CFG edges so that `post(Edge)` models program semantics (sound over-approximation):
 
-- **IntervalDomain**: Full block transfer in `lib/Verification/Sifa/Domain/IntervalDomain.cpp` — binary ops (add/sub/mul/div/rem/shifts/and/or/xor), casts (trunc/zext/sext), icmp, select, phi; load/store/call/gep/alloca yield top.
-- **EqDomain**: Copy/phi/select equality propagation (unite result with operands); other instructions ensure the result is in the state.
-- **ExplicitValueDomain**: Constant propagation over instructions (constants, arithmetic, casts, phi, select).
-- **OctagonDomain**: Block transfer in `lib/Verification/Sifa/Domain/OctagonDomain.cpp` — copy/constant/affine (res = src, res = c, res = src + k); phi/select/non-linear ops havoc the result.
+- **IntervalDomain**: Full block transfer in `lib/Verification/Sifa/Domain/IntervalDomain.cpp` — binary ops (add/sub/mul/div/rem/shifts/and/or/xor), casts (trunc/zext/sext), icmp, select, phi; call/gep yield top. With **SifaOptions::aliasAnalysis**, load/store/alloca use **region-based memory**.
+- **EqDomain**: Copy/phi/select equality propagation (unite result with operands); other instructions ensure the result is in the state. With **SifaOptions::aliasAnalysis**, load/store/alloca use **region-based memory** (content = representative value, load unites with content).
+- **ExplicitValueDomain**: Constant propagation over instructions (constants, arithmetic, casts, phi, select). With **SifaOptions::aliasAnalysis**, load/store/alloca use **region-based memory** (content = constant or top).
+- **OctagonDomain**: Block transfer in `lib/Verification/Sifa/Domain/OctagonDomain.cpp` — copy/constant/affine (res = src, res = c, res = src + k); phi/select/non-linear ops havoc the result. With **SifaOptions::aliasAnalysis**, load/store/alloca use **region-based memory** (memory content stored as intervals, load result constrained to joined interval).
+
+### Region-based memory (lib/Alias, IKOS/CLAM style)
+
+When you pass an **alias analysis** via **SifaOptions::aliasAnalysis**, **all value domains** (Interval, Octagon, Eq, ExplicitValue) use a **region-based memory model** that reuses pointer/alias analyses from **lib/Alias**. For a richer, CLAM-aligned model (one region per pointer, type info, field-sensitive), see **lib/Verification/clam** (HeapAbstraction, SeaDsa).
+
+- **Regions**: allocas in the function + globals in the module (see `include/Verification/Sifa/RegionMemory.h`).
+- **Resolve pointer**: Uses `AliasAnalysisWrapper::getPointsToSet()` when the backend supports it (e.g. SparrowAA); otherwise `mayAlias(ptr, region)` over all regions.
+- **Load**: Result = join of abstract values stored in the regions the pointer may point to (sound over-approximation).
+- **Store**: For each region the pointer may alias, join the stored value with the value being stored.
+- **Alloca**: Region is initialized to top; the alloca instruction result remains top (pointer not tracked as value).
+
+This matches the “Option 2” style used in IKOS and CLAM: one abstract cell per region, with AA used to resolve pointers. Any backend from **lib/Alias** (SparrowAA, AllocAA, DyckAA, CFLAA, SeaDsa, TPA, etc.) can be used; precision depends on the AA.
+
+Example: run interval analysis with region memory using SparrowAA.
+
+```cpp
+#include "Verification/Sifa/Sifa.h"
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+
+lotus::AAConfig aaConfig = lotus::AAConfig::SparrowAA_NoCtx();
+auto AA = lotus::AliasAnalysisFactory::create(M, aaConfig);
+lotus::sifa::SifaOptions options;
+options.aliasAnalysis = AA.get();
+auto state = lotus::sifa::analyzeToWithIntervalDomain(F, target, lotus::sifa::IntervalState(false), options);
+```
 
 ### Domains and precision (memory)
 
-The domain string (`SifaSymAbsOptions::abstractDomain`) controls what information is tracked precisely. For programs that use memory heavily (typical unoptimized C/C++), consider including a memory-aware domain (e.g. `MemRange` / `ValidRegion`) instead of only numeric domains like `Interval, Octagon`.
+The domain string (`SifaSymAbsOptions::abstractDomain`) controls what information is tracked precisely. For programs that use memory heavily (typical unoptimized C/C++), consider including a memory-aware domain (e.g. `MemRange` / `ValidRegion`) instead of only numeric domains like `Interval, Octagon`. For native Sifa value domains (e.g. Interval), set **SifaOptions::aliasAnalysis** to enable region-based memory via lib/Alias.
+
+### Comparison with CLAM (lib/Verification/clam)
+
+CLAM uses a **HeapAbstraction** (see `include/Verification/clam/HeapAbstraction.hh`) that maps **(function, pointer) → one Region** with a unique **RegionId**, **RegionInfo** (type: INT_REGION, BOOL_REGION, PTR_REGION, UNTYPED; bitwidth; is_sequence, is_heap, is_cyclic), and optional **singleton Value\***. Load/Store in CLAM call `getRegion(mem, regions, params, I, ptr)` and get **one** region; if unknown they handle conservatively. The default implementation is **SeaDsaHeapAbstraction** (SeaDsa), which builds regions from SeaDsa’s graph (nodes/fields). CLAM also supports **getRegion(F, V, offset, AccessedType)** for field-sensitive access.
+
+Sifa’s region model is simpler and AA-driven:
+
+| Aspect | CLAM (lib/Verification/clam) | Sifa (RegionMemory.h + lib/Alias) |
+|--------|------------------------------|------------------------------------|
+| Region set | From HeapAbstraction (SeaDsa): nodes/fields, unique RegionId | Fixed set: **allocas** in function + **globals** in module (Value* as id) |
+| Pointer resolution | **One** region per pointer via `getRegion(F, ptr)` (or unknown) | **Set** of regions via getPointsToSet or mayAlias; **join** over set for Load, **join into each** for Store |
+| Type info | RegionInfo (type, bitwidth, is_sequence, is_heap) | None (all regions treated uniformly; value domain tracks scalar type) |
+| Field-sensitive | Yes: `getRegion(F, V, offset, AccessedType)` | No (one cell per alloca/global) |
+| Backend | SeaDsa (HeapAbstraction) | Any **lib/Alias** backend (SparrowAA, AllocAA, DyckAA, CFLAA, SeaDsa, TPA, …) |
+
+Both designs are **sound** (over-approximate). CLAM’s model is more precise when SeaDsa gives a single region and type/offset info; Sifa’s model is lightweight and works with any AA. To use a CLAM-style heap abstraction from Sifa you would need an adapter that implements “pointer → set of regions” (e.g. one region from HeapAbstraction when not unknown) and maps RegionId to Sifa’s memory map; that could live in a separate integration layer.
 
 ### Roadmap
 

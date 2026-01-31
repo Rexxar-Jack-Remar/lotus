@@ -3,10 +3,14 @@
 // Instruction-level block transfer for Sifa Octagon domain.
 // Applies sound over-approximating transfer: copy/constant/affine assignments
 // update octagon constraints; non-linear ops and memory havoc the result.
+// When alias analysis is set, Load/Store use region-based memory (IKOS/CLAM style).
 //
 //===----------------------------------------------------------------------===//
 
 #include "Verification/Sifa/Domain/OctagonDomain.h"
+#include "Verification/Sifa/RegionMemory.h"
+
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/ADT/Optional.h"
 #include "llvm/IR/Constants.h"
@@ -107,6 +111,31 @@ llvm::Optional<int64_t> getConstant(const llvm::Value *V) {
   return C->getSExtValue();
 }
 
+/// Constrain result variable to interval [lo, hi]. Point => assignConstant; top => havoc.
+OctagonState assignInterval(const OctagonState &s, const llvm::Value *res,
+                            const Interval &interval) {
+  auto ri = getVarIndex(s, res);
+  if (!ri) return s;
+  std::size_t r = *ri;
+  if (interval.isBottom()) return OctagonState(true);
+  if (interval.isPoint() && interval.lo) return assignConstant(s, res, *interval.lo);
+  if (interval.isTop()) return havocVar(s, res);
+  OctagonMatrix m = s.matrix();
+  if (interval.hi) {
+    int64_t twoHi;
+    if (__builtin_mul_overflow(*interval.hi, 2, &twoHi)) return havocVar(s, res);
+    m.set(2 * r + 1, 2 * r, twoHi);
+  }
+  if (interval.lo) {
+    int64_t twoLo;
+    if (__builtin_mul_overflow(*interval.lo, 2, &twoLo)) return havocVar(s, res);
+    m.set(2 * r, 2 * r + 1, -twoLo);
+  }
+  m = m.strongClosure();
+  if (m.hasNegativeSelfLoop()) return OctagonState(true);
+  return OctagonState(s.varToIndex(), std::move(m), false);
+}
+
 } // namespace
 
 OctagonState OctagonDomain::applyBlockTransfer(llvm::BasicBlock *bb,
@@ -114,12 +143,54 @@ OctagonState OctagonDomain::applyBlockTransfer(llvm::BasicBlock *bb,
   if (in.isBottom()) return in;
   OctagonState out = in;
 
+  lotus::AliasAnalysisWrapper *AA = getAliasAnalysis();
+  std::vector<const llvm::Value *> regions;
+  std::vector<const llvm::Value *> resolved;
+  if (AA)
+    regions = getRegionsForFunction(*bb->getParent());
+
   for (llvm::Instruction &I : *bb) {
     if (I.isTerminator()) break;
-    if (I.getType()->isVoidTy()) continue;
+    if (I.getType()->isVoidTy()) {
+      if (AA && llvm::isa<llvm::StoreInst>(&I)) {
+        auto *SI = llvm::cast<llvm::StoreInst>(&I);
+        const llvm::Value *ptr = SI->getPointerOperand();
+        Interval val = Interval::top(); // Conservative: don't extract interval from octagon yet
+        resolvePointerToRegions(AA, ptr, regions, resolved);
+        for (const llvm::Value *r : resolved) {
+          auto cur = out.getMemory(r);
+          out.setMemory(r, cur ? cur->join(val) : val);
+        }
+      }
+      continue;
+    }
     if (!I.getType()->isIntegerTy() && !I.getType()->isPointerTy()) continue;
 
     const llvm::Value *res = &I;
+    if (AA && llvm::isa<llvm::AllocaInst>(&I)) {
+      out = addVarUnconstrained(out, res);
+      out.setMemory(&I, Interval::top());
+      continue;
+    }
+    if (AA && llvm::isa<llvm::LoadInst>(&I) && I.getType()->isIntegerTy()) {
+      const llvm::Value *ptr = llvm::cast<llvm::LoadInst>(&I)->getPointerOperand();
+      resolvePointerToRegions(AA, ptr, regions, resolved);
+      Interval loadVal = Interval::bottom();
+      for (const llvm::Value *r : resolved) {
+        auto cur = out.getMemory(r);
+        Interval ir = cur ? *cur : Interval::top();
+        loadVal = loadVal.isBottom() ? ir : loadVal.join(ir);
+      }
+      if (loadVal.isBottom()) loadVal = Interval::top();
+      out = addVarUnconstrained(out, res);
+      out = assignInterval(out, res, loadVal);
+      continue;
+    }
+    if (AA && llvm::isa<llvm::GetElementPtrInst>(&I)) {
+      out = addVarUnconstrained(out, res);
+      out = havocVar(out, res);
+      continue;
+    }
     switch (I.getOpcode()) {
     case llvm::Instruction::PHI:
       out = addVarUnconstrained(out, res);
@@ -204,6 +275,7 @@ OctagonState OctagonDomain::applyBlockWiseHavoc(llvm::BasicBlock *bb,
                                                 const OctagonState &in) const {
   if (in.isBottom()) return in;
   OctagonState out = in;
+  // memory_ already copied from in
   for (llvm::Instruction &I : *bb) {
     if (I.isTerminator()) break;
     if (I.getType()->isVoidTy()) continue;

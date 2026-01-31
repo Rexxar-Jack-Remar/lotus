@@ -15,6 +15,7 @@
 #include "Verification/Sifa/BlockTransferPolicy.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
+#include "Verification/Sifa/RegionMemory.h"
 
 #include "llvm/ADT/Optional.h"
 #include "llvm/IR/BasicBlock.h"
@@ -26,6 +27,7 @@
 #include <unordered_map>
 
 namespace lotus {
+class AliasAnalysisWrapper;
 namespace sifa {
 
 /// Single explicit value: constant or top (no info). Ultimate INonrelationalValue for constants.
@@ -45,9 +47,10 @@ struct ExplicitValue {
   ExplicitValue widen(const ExplicitValue &rhs) const { return join(rhs); }
 };
 
-/// State: map Value* -> optional constant. Join: same var same constant => keep; else => top.
+/// State: map Value* -> optional constant + optional region memory (when AA is set).
 struct ExplicitValueState {
   std::unordered_map<const llvm::Value *, ExplicitValue> map_;
+  std::unordered_map<const llvm::Value *, ExplicitValue> memory_;
 
   bool isBottom() const { return false; }
   llvm::Optional<ExplicitValue> get(const llvm::Value *v) const {
@@ -59,6 +62,15 @@ struct ExplicitValueState {
     if (val.isTop()) map_.erase(v);
     else map_[v] = std::move(val);
   }
+  llvm::Optional<ExplicitValue> getMemory(const llvm::Value *region) const {
+    auto it = memory_.find(region);
+    if (it == memory_.end()) return llvm::Optional<ExplicitValue>(ExplicitValue::top());
+    return it->second;
+  }
+  void setMemory(const llvm::Value *region, ExplicitValue val) {
+    if (val.isTop()) memory_.erase(region);
+    else memory_[region] = std::move(val);
+  }
 };
 
 /// Explicit value domain (constant propagation style). post(Edge): applies block transfer (constant propagation).
@@ -69,11 +81,16 @@ public:
 
   ExplicitValueDomain() = default;
   explicit ExplicitValueDomain(const BlockTransferPolicy *policy) : blockTransferPolicy_(policy) {}
+  ExplicitValueDomain(const BlockTransferPolicy *policy,
+                      lotus::AliasAnalysisWrapper *aliasAnalysis)
+      : blockTransferPolicy_(policy), aliasAnalysis_(aliasAnalysis) {}
 
   void setBlockTransferPolicy(const BlockTransferPolicy *policy) {
     blockTransferPolicy_ = policy;
   }
   const BlockTransferPolicy *getBlockTransferPolicy() const { return blockTransferPolicy_; }
+  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) { aliasAnalysis_ = aa; }
+  lotus::AliasAnalysisWrapper *getAliasAnalysis() const { return aliasAnalysis_; }
 
   State top() const override { return State{}; }
   State bottom() const override { return State{}; }
@@ -82,6 +99,12 @@ public:
   bool leq(const State &a, const State &b) const override {
     for (const auto &kv : a.map_) {
       auto ob = b.get(kv.first);
+      if (!ob.hasValue() || ob.getValue().isTop()) continue;
+      if (kv.second.isTop()) return false;
+      if (kv.second.value != ob.getValue().value) return false;
+    }
+    for (const auto &kv : a.memory_) {
+      auto ob = b.getMemory(kv.first);
       if (!ob.hasValue() || ob.getValue().isTop()) continue;
       if (kv.second.isTop()) return false;
       if (kv.second.value != ob.getValue().value) return false;
@@ -103,6 +126,19 @@ public:
       if (oa.hasValue()) j = j.join(oa.getValue());
       if (!j.isTop()) r.set(kv.first, j);
     }
+    for (const auto &kv : a.memory_) {
+      auto ob = b.getMemory(kv.first);
+      ExplicitValue j = kv.second;
+      if (ob.hasValue()) j = j.join(ob.getValue());
+      if (!j.isTop()) r.setMemory(kv.first, j);
+    }
+    for (const auto &kv : b.memory_) {
+      if (r.memory_.find(kv.first) != r.memory_.end()) continue;
+      auto oa = a.getMemory(kv.first);
+      ExplicitValue j = kv.second;
+      if (oa.hasValue()) j = j.join(oa.getValue());
+      if (!j.isTop()) r.setMemory(kv.first, j);
+    }
     return r;
   }
   State widen(const State &prev, const State &next) const override {
@@ -119,11 +155,50 @@ public:
     if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source))
       return applyBlockWiseHavoc(t.source, in);
     State out = in;
+    lotus::AliasAnalysisWrapper *AA = getAliasAnalysis();
+    std::vector<const llvm::Value *> regions;
+    std::vector<const llvm::Value *> resolved;
+    if (AA)
+      regions = getRegionsForFunction(*t.source->getParent());
     for (llvm::Instruction &I : *t.source) {
       if (I.isTerminator()) break;
-      if (I.getType()->isVoidTy()) continue;
-      ExplicitValue res = transferInstruction(I, out);
-      if (!res.isTop()) out.set(&I, res);
+      if (I.getType()->isVoidTy()) {
+        if (AA && llvm::isa<llvm::StoreInst>(&I)) {
+          auto *SI = llvm::cast<llvm::StoreInst>(&I);
+          const llvm::Value *ptr = SI->getPointerOperand();
+          ExplicitValue val = getConst(out, SI->getValueOperand());
+          resolvePointerToRegions(AA, ptr, regions, resolved);
+          for (const llvm::Value *r : resolved) {
+            auto cur = out.getMemory(r);
+            ExplicitValue j = cur ? cur->join(val) : val;
+            if (!j.isTop()) out.setMemory(r, j);
+          }
+        }
+        continue;
+      }
+      if (I.getType()->isIntegerTy() || I.getType()->isPointerTy()) {
+        ExplicitValue res;
+        if (AA && llvm::isa<llvm::AllocaInst>(&I)) {
+          out.setMemory(&I, ExplicitValue::top());
+          res = ExplicitValue::top();
+        } else if (AA && llvm::isa<llvm::LoadInst>(&I) &&
+                   I.getType()->isIntegerTy()) {
+          const llvm::Value *ptr =
+              llvm::cast<llvm::LoadInst>(&I)->getPointerOperand();
+          resolvePointerToRegions(AA, ptr, regions, resolved);
+          res = ExplicitValue::top();
+          for (const llvm::Value *r : resolved) {
+            auto cur = out.getMemory(r);
+            ExplicitValue ir = cur ? *cur : ExplicitValue::top();
+            res = res.join(ir);
+          }
+        } else if (AA && llvm::isa<llvm::GetElementPtrInst>(&I)) {
+          res = ExplicitValue::top();
+        } else {
+          res = transferInstruction(I, out);
+        }
+        if (!res.isTop()) out.set(&I, res);
+      }
     }
     return out;
   }
@@ -213,6 +288,7 @@ private:
 
 private:
   const BlockTransferPolicy *blockTransferPolicy_ = nullptr;
+  lotus::AliasAnalysisWrapper *aliasAnalysis_ = nullptr;
 };
 
 } // namespace sifa

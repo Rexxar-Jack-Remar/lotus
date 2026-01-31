@@ -59,9 +59,10 @@ IntervalState lotus::sifa::analyzeToWithIntervalDomain(const llvm::Function &F,
                                                       const llvm::BasicBlock &target,
                                                       const IntervalState &initial,
                                                       SifaOptions options) {
-  IntervalDomain domain(options.blockTransferPolicy.hasValue()
-                            ? &*options.blockTransferPolicy
-                            : nullptr);
+  IntervalDomain domain(
+      options.blockTransferPolicy.hasValue() ? &*options.blockTransferPolicy
+                                             : nullptr,
+      options.aliasAnalysis);
   return analyzeTo<IntervalState>(F, target, initial, domain, options);
 }
 
@@ -69,9 +70,10 @@ OctagonState lotus::sifa::analyzeToWithOctagonDomain(const llvm::Function &F,
                                                     const llvm::BasicBlock &target,
                                                     const OctagonState &initial,
                                                     SifaOptions options) {
-  OctagonDomain domain(options.blockTransferPolicy.hasValue()
-                           ? &*options.blockTransferPolicy
-                           : nullptr);
+  OctagonDomain domain(
+      options.blockTransferPolicy.hasValue() ? &*options.blockTransferPolicy
+                                             : nullptr,
+      options.aliasAnalysis);
   return analyzeTo<OctagonState>(F, target, initial, domain, options);
 }
 
@@ -81,7 +83,8 @@ EqState lotus::sifa::analyzeToWithEqDomain(const llvm::Function &F,
                                            SifaOptions options) {
   EqDomain domain(options.blockTransferPolicy.hasValue()
                       ? &*options.blockTransferPolicy
-                      : nullptr);
+                      : nullptr,
+                  options.aliasAnalysis);
   return analyzeTo<EqState>(F, target, initial, domain, options);
 }
 
@@ -90,6 +93,7 @@ ExplicitValueState lotus::sifa::analyzeToWithExplicitValueDomain(
     const ExplicitValueState &initial, SifaOptions options) {
   ExplicitValueDomain domain(options.blockTransferPolicy.hasValue()
                                   ? &*options.blockTransferPolicy
-                                  : nullptr);
+                                  : nullptr,
+                              options.aliasAnalysis);
   return analyzeTo<ExplicitValueState>(F, target, initial, domain, options);
 }

@@ -14,6 +14,7 @@
 #include "Verification/Sifa/BlockTransferPolicy.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
+#include "Verification/Sifa/RegionMemory.h"
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Instructions.h"
@@ -24,6 +25,7 @@
 #include <unordered_set>
 
 namespace lotus {
+class AliasAnalysisWrapper;
 namespace sifa {
 
 /// Equality state: union-find over Value* (Ultimate EqState wraps EqConstraint).
@@ -69,6 +71,20 @@ public:
     return k;
   }
 
+  /// Region memory: content of region is equivalent to representative.
+  const llvm::Value *getMemory(const llvm::Value *region) const {
+    auto it = memory_.find(region);
+    if (it == memory_.end()) return nullptr;
+    return find(it->second);
+  }
+  void setMemory(const llvm::Value *region, const llvm::Value *rep) {
+    if (rep) memory_[region] = find(rep);
+    else memory_.erase(region);
+  }
+  const std::unordered_map<const llvm::Value *, const llvm::Value *> &memory() const {
+    return memory_;
+  }
+
   EqState join(const EqState &other) const {
     if (isBottom_) return other;
     if (other.isBottom_) return *this;
@@ -77,6 +93,18 @@ public:
     for (const llvm::Value *v : other.keys()) out.ensure(v);
     for (const llvm::Value *v : keys()) out.unite(v, find(v));
     for (const llvm::Value *v : other.keys()) out.unite(v, other.find(v));
+    for (const auto &kv : memory_) out.ensure(kv.second);
+    for (const auto &kv : other.memory_) out.ensure(kv.second);
+    for (const auto &kv : memory_) {
+      auto it = other.memory_.find(kv.first);
+      if (it != other.memory_.end())
+        out.unite(kv.second, it->second);
+      out.setMemory(kv.first, out.find(kv.second));
+    }
+    for (const auto &kv : other.memory_) {
+      if (out.memory_.find(kv.first) != out.memory_.end()) continue;
+      out.setMemory(kv.first, out.find(kv.second));
+    }
     return out;
   }
 
@@ -90,12 +118,19 @@ public:
       if (!k2.count(v)) return false;
       if (find(v) != o.find(v)) return false;
     }
+    if (memory_.size() != o.memory_.size()) return false;
+    for (const auto &kv : memory_) {
+      auto it = o.memory_.find(kv.first);
+      if (it == o.memory_.end()) return false;
+      if (find(kv.second) != o.find(it->second)) return false;
+    }
     return true;
   }
 
 private:
   bool isBottom_ = false;
   mutable std::unordered_map<const llvm::Value *, const llvm::Value *> parent_; // path compression in find()
+  std::unordered_map<const llvm::Value *, const llvm::Value *> memory_;         // region -> representative
 };
 
 /// Equality domain implementing AbstractDomain<Transition, EqState>.
@@ -105,11 +140,16 @@ class EqDomain final : public AbstractDomain<Transition, EqState> {
 public:
   EqDomain() = default;
   explicit EqDomain(const BlockTransferPolicy *policy) : blockTransferPolicy_(policy) {}
+  EqDomain(const BlockTransferPolicy *policy,
+           lotus::AliasAnalysisWrapper *aliasAnalysis)
+      : blockTransferPolicy_(policy), aliasAnalysis_(aliasAnalysis) {}
 
   void setBlockTransferPolicy(const BlockTransferPolicy *policy) {
     blockTransferPolicy_ = policy;
   }
   const BlockTransferPolicy *getBlockTransferPolicy() const { return blockTransferPolicy_; }
+  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) { aliasAnalysis_ = aa; }
+  lotus::AliasAnalysisWrapper *getAliasAnalysis() const { return aliasAnalysis_; }
 
   EqState top() const override { return EqState(false); }
   EqState bottom() const override { return EqState(true); }
@@ -120,6 +160,11 @@ public:
     for (const llvm::Value *v : a.keys()) {
       if (!b.keys().count(v)) continue;
       if (a.find(v) != b.find(v)) return false;
+    }
+    for (const auto &kv : a.memory()) {
+      auto it = b.memory().find(kv.first);
+      if (it == b.memory().end()) continue;
+      if (a.find(kv.second) != b.find(it->second)) return false;
     }
     return true;
   }
@@ -143,19 +188,51 @@ public:
     if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source))
       return applyBlockWiseHavoc(t.source, in);
     EqState out = in;
+    lotus::AliasAnalysisWrapper *AA = getAliasAnalysis();
+    std::vector<const llvm::Value *> regions;
+    std::vector<const llvm::Value *> resolved;
+    if (AA)
+      regions = getRegionsForFunction(*t.source->getParent());
     for (llvm::Instruction &I : *t.source) {
       if (I.isTerminator()) break;
-      if (I.getType()->isVoidTy()) continue;
-      if (auto *Phi = llvm::dyn_cast<llvm::PHINode>(&I)) {
-        for (unsigned i = 0, e = Phi->getNumIncomingValues(); i < e; ++i)
-          out.unite(&I, Phi->getIncomingValue(i));
-      } else if (auto *Cast = llvm::dyn_cast<llvm::CastInst>(&I)) {
-        out.unite(&I, Cast->getOperand(0));
-      } else if (auto *Sel = llvm::dyn_cast<llvm::SelectInst>(&I)) {
-        out.unite(&I, Sel->getTrueValue());
-        out.unite(&I, Sel->getFalseValue());
-      } else {
-        out.ensure(&I);
+      if (I.getType()->isVoidTy()) {
+        if (AA && llvm::isa<llvm::StoreInst>(&I)) {
+          auto *SI = llvm::cast<llvm::StoreInst>(&I);
+          const llvm::Value *ptr = SI->getPointerOperand();
+          const llvm::Value *val = SI->getValueOperand();
+          resolvePointerToRegions(AA, ptr, regions, resolved);
+          for (const llvm::Value *r : resolved)
+            out.setMemory(r, val);
+        }
+        continue;
+      }
+      if (I.getType()->isIntegerTy() || I.getType()->isPointerTy()) {
+        if (AA && llvm::isa<llvm::AllocaInst>(&I)) {
+          out.ensure(&I);
+          // Region exists; content unknown until first store (no setMemory).
+        } else if (AA && llvm::isa<llvm::LoadInst>(&I) &&
+                   I.getType()->isIntegerTy()) {
+          const llvm::Value *ptr =
+              llvm::cast<llvm::LoadInst>(&I)->getPointerOperand();
+          resolvePointerToRegions(AA, ptr, regions, resolved);
+          out.ensure(&I);
+          for (const llvm::Value *r : resolved) {
+            const llvm::Value *rep = out.getMemory(r);
+            if (rep) out.unite(&I, rep);
+          }
+        } else if (AA && llvm::isa<llvm::GetElementPtrInst>(&I)) {
+          out.ensure(&I);
+        } else if (auto *Phi = llvm::dyn_cast<llvm::PHINode>(&I)) {
+          for (unsigned i = 0, e = Phi->getNumIncomingValues(); i < e; ++i)
+            out.unite(&I, Phi->getIncomingValue(i));
+        } else if (auto *Cast = llvm::dyn_cast<llvm::CastInst>(&I)) {
+          out.unite(&I, Cast->getOperand(0));
+        } else if (auto *Sel = llvm::dyn_cast<llvm::SelectInst>(&I)) {
+          out.unite(&I, Sel->getTrueValue());
+          out.unite(&I, Sel->getFalseValue());
+        } else {
+          out.ensure(&I);
+        }
       }
     }
     return out;
@@ -163,6 +240,7 @@ public:
 
 private:
   const BlockTransferPolicy *blockTransferPolicy_ = nullptr;
+  lotus::AliasAnalysisWrapper *aliasAnalysis_ = nullptr;
 };
 
 } // namespace sifa
