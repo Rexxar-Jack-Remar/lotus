@@ -51,6 +51,13 @@ public:
     bool areIndependent(const llvm::Instruction* inst1,
                        const llvm::Instruction* inst2) const;
 
+    /**
+     * @brief Single predicate: would we report a data race for this pair?
+     * Encapsulates MHP + happens-before + lock + alias so the definition lives in one place.
+     */
+    bool wouldReportDataRace(const llvm::Instruction* inst1,
+                             const llvm::Instruction* inst2) const;
+
 private:
     llvm::Module& m_module;
     mhp::MHPAnalysis* m_mhpAnalysis;

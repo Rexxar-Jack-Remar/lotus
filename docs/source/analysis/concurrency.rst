@@ -355,6 +355,45 @@ Usage
      }
    }
 
+Data race detection: when we report
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The data race checker reports one bug per **racy component** (a connected set of
+conflicting accesses), not one per instruction pair. This reduces noise and
+matches the “one report per logical race” idea used in tools like Goblint.
+
+**When two accesses are considered a race**
+
+A potential data race is reported only when all of the following hold:
+
+1. **May happen in parallel (MHP)** – The two instructions may execute concurrently.
+2. **At least one is a write** – Read-only pairs are not races.
+3. **Not ordered by happens-before** – e.g. C11 synchronizes-with; if one is guaranteed to happen before the other, no race.
+4. **May access the same location** – Alias analysis says the two memory locations may overlap.
+5. **Not protected by a common lock** – Lock-set analysis shows no lock is held for both.
+6. **Location is shared** – Escape analysis says the memory may be shared (e.g. escaped, or global).
+
+**Same location**
+
+“Same location” means: the two instructions’ memory locations **may alias** and the
+location is **escaped** (or otherwise shared). Accesses to thread-local, non-escaped
+storage are skipped. Accesses to **ignorable types** (sync objects, ``FILE``, atomics,
+etc.) are never considered for races; see the checker’s ignorable-type list.
+
+**One report per component**
+
+Racy pairs are grouped into **components**: two accesses are in the same component if
+they are connected by a chain of “may race” pairs. The checker emits **one report per
+component**, with a representative pair and a step for each conflicting access. So
+multiple overlapping pairs on the same variable yield a single report.
+
+**Example**
+
+Two threads both write to ``shared_counter`` without a lock: the checker finds one
+racy component (both writes), and reports one data race with two steps (one per
+write). If a third thread also wrote to ``shared_counter``, the same single report
+would list all three accesses as steps.
+
 **Typical use cases**:
 
 - Data race detection in multithreaded programs

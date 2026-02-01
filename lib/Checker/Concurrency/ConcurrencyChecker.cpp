@@ -21,37 +21,9 @@ namespace concurrency {
 ConcurrencyChecker::ConcurrencyChecker(Module& module)
     : m_module(module), m_aliasAnalysis(nullptr), m_threadAPI(ThreadAPI::getThreadAPI()) {
 
-    // Initialize analyses
-    m_mhpAnalysis = std::make_unique<MHPAnalysis>(module);
-    m_mhpAnalysis->enableLockSetAnalysis();
-    m_mhpAnalysis->analyze();
-
-    m_locksetAnalysis = std::make_unique<LockSetAnalysis>(module);
-    m_locksetAnalysis->analyze();
-
-    m_escapeAnalysis = std::make_unique<EscapeAnalysis>(module);
-    m_escapeAnalysis->analyze();
-
-    m_happensBeforeAnalysis =
-        std::make_unique<HappensBeforeAnalysis>(module, *m_mhpAnalysis);
-    m_happensBeforeAnalysis->analyze();
-    if (m_aliasAnalysis)
-        m_happensBeforeAnalysis->setAliasAnalysis(m_aliasAnalysis);
-
-    m_dataRaceChecker = std::make_unique<DataRaceChecker>(
-        module, m_mhpAnalysis.get(), m_locksetAnalysis.get(),
-        m_escapeAnalysis.get(), m_aliasAnalysis,
-        m_happensBeforeAnalysis.get());
-    m_deadlockChecker = std::make_unique<DeadlockChecker>(module, m_locksetAnalysis.get(),
-                                                         m_mhpAnalysis.get(), m_threadAPI);
-    m_atomicityChecker = std::make_unique<AtomicityChecker>(module, m_mhpAnalysis.get(),
-                                                           m_locksetAnalysis.get(), m_threadAPI);
-    m_condVarChecker = std::make_unique<ConditionVariableChecker>(module, m_threadAPI, m_locksetAnalysis.get());
-    m_lockMismatchChecker = std::make_unique<LockMismatchChecker>(module, m_locksetAnalysis.get(), m_threadAPI);
-
     // Register bug types with BugReportMgr (Clearblue pattern)
     BugReportMgr& mgr = BugReportMgr::get_instance();
-    m_dataRaceTypeId = mgr.register_bug_type("Data Race", BugDescription::BI_HIGH, 
+    m_dataRaceTypeId = mgr.register_bug_type("Data Race", BugDescription::BI_HIGH,
                                               BugDescription::BC_SECURITY, "CWE-362");
     m_deadlockTypeId = mgr.register_bug_type("Deadlock", BugDescription::BI_HIGH,
                                               BugDescription::BC_ERROR, "Deadlock potential");
@@ -62,24 +34,66 @@ ConcurrencyChecker::ConcurrencyChecker(Module& module)
     m_lockMismatchTypeId = mgr.register_bug_type("Lock Mismatch", BugDescription::BI_HIGH,
                                                   BugDescription::BC_ERROR, "Lock acquisition/release mismatch");
 
-    // Collect statistics
     m_stats.totalInstructions = 0;
-    m_stats.mhpPairs = m_mhpAnalysis->getStatistics().num_mhp_pairs;
-    m_stats.locksAnalyzed = m_locksetAnalysis->getStatistics().num_locks;
+    m_stats.mhpPairs = 0;
+    m_stats.locksAnalyzed = 0;
     m_stats.dataRacesFound = 0;
     m_stats.deadlocksFound = 0;
     m_stats.atomicityViolationsFound = 0;
     m_stats.condVarBugsFound = 0;
     m_stats.lockMismatchesFound = 0;
 
-    // Count total instructions
     for (Function& func : module) {
         if (!func.isDeclaration()) {
-            for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
+            for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I)
                 m_stats.totalInstructions++;
-            }
         }
     }
+}
+
+void ConcurrencyChecker::runAnalyses() {
+    // Config-driven activation: run only analyses required by enabled checks (Goblint-style)
+    bool needMHP = m_checkDataRaces || m_checkDeadlocks || m_checkAtomicityViolations || m_checkCondVars;
+    bool needLockSet = m_checkDataRaces || m_checkDeadlocks || m_checkAtomicityViolations ||
+                       m_checkCondVars || m_checkLockMismatches;
+    bool needEscape = m_checkDataRaces;
+    bool needHappensBefore = m_checkDataRaces;
+
+    if (needMHP) {
+        m_mhpAnalysis = std::make_unique<MHPAnalysis>(m_module);
+        m_mhpAnalysis->enableLockSetAnalysis();
+        m_mhpAnalysis->analyze();
+        m_stats.mhpPairs = m_mhpAnalysis->getStatistics().num_mhp_pairs;
+    }
+
+    if (needLockSet) {
+        m_locksetAnalysis = std::make_unique<LockSetAnalysis>(m_module);
+        m_locksetAnalysis->analyze();
+        m_stats.locksAnalyzed = m_locksetAnalysis->getStatistics().num_locks;
+    }
+
+    if (needEscape) {
+        m_escapeAnalysis = std::make_unique<EscapeAnalysis>(m_module);
+        m_escapeAnalysis->analyze();
+    }
+
+    if (needHappensBefore && m_mhpAnalysis) {
+        m_happensBeforeAnalysis = std::make_unique<HappensBeforeAnalysis>(m_module, *m_mhpAnalysis);
+        m_happensBeforeAnalysis->analyze();
+        if (m_aliasAnalysis)
+            m_happensBeforeAnalysis->setAliasAnalysis(m_aliasAnalysis);
+    }
+
+    m_dataRaceChecker = std::make_unique<DataRaceChecker>(
+        m_module, m_mhpAnalysis.get(), m_locksetAnalysis.get(),
+        m_escapeAnalysis.get(), m_aliasAnalysis,
+        m_happensBeforeAnalysis.get());
+    m_deadlockChecker = std::make_unique<DeadlockChecker>(m_module, m_locksetAnalysis.get(),
+                                                         m_mhpAnalysis.get(), m_threadAPI);
+    m_atomicityChecker = std::make_unique<AtomicityChecker>(m_module, m_mhpAnalysis.get(),
+                                                            m_locksetAnalysis.get(), m_threadAPI);
+    m_condVarChecker = std::make_unique<ConditionVariableChecker>(m_module, m_threadAPI, m_locksetAnalysis.get());
+    m_lockMismatchChecker = std::make_unique<LockMismatchChecker>(m_module, m_locksetAnalysis.get(), m_threadAPI);
 }
 
 void ConcurrencyChecker::runChecks() {
@@ -105,7 +119,7 @@ void ConcurrencyChecker::runChecks() {
 }
 
 void ConcurrencyChecker::checkDataRaces() {
-    if (m_dataRaceChecker) {
+    if (m_dataRaceChecker && m_mhpAnalysis) {
         auto reports = m_dataRaceChecker->checkDataRaces();
         m_stats.dataRacesFound = reports.size();
         for (const auto& report : reports) {
@@ -115,7 +129,7 @@ void ConcurrencyChecker::checkDataRaces() {
 }
 
 void ConcurrencyChecker::checkDeadlocks() {
-    if (m_deadlockChecker) {
+    if (m_deadlockChecker && m_mhpAnalysis && m_locksetAnalysis) {
         auto reports = m_deadlockChecker->checkDeadlocks();
         m_stats.deadlocksFound = reports.size();
         for (const auto& report : reports) {
@@ -125,7 +139,7 @@ void ConcurrencyChecker::checkDeadlocks() {
 }
 
 void ConcurrencyChecker::checkAtomicityViolations() {
-    if (m_atomicityChecker) {
+    if (m_atomicityChecker && m_mhpAnalysis && m_locksetAnalysis) {
         auto reports = m_atomicityChecker->checkAtomicityViolations();
         m_stats.atomicityViolationsFound = reports.size();
         for (const auto& report : reports) {
@@ -135,7 +149,7 @@ void ConcurrencyChecker::checkAtomicityViolations() {
 }
 
 void ConcurrencyChecker::checkConditionVariables() {
-    if (m_condVarChecker) {
+    if (m_condVarChecker && m_locksetAnalysis) {
         auto reports = m_condVarChecker->checkConditionVariables();
         m_stats.condVarBugsFound = reports.size();
         for (const auto& report : reports) {
@@ -145,7 +159,7 @@ void ConcurrencyChecker::checkConditionVariables() {
 }
 
 void ConcurrencyChecker::checkLockMismatches() {
-    if (m_lockMismatchChecker) {
+    if (m_lockMismatchChecker && m_locksetAnalysis) {
         auto reports = m_lockMismatchChecker->checkLockMisuse();
         m_stats.lockMismatchesFound = reports.size();
         for (const auto& report : reports) {
@@ -205,6 +219,10 @@ void ConcurrencyChecker::reportBug(const ConcurrencyBugReport& bug_report, int b
 }
 
 void ConcurrencyChecker::dumpAnalysisResults(raw_ostream& os, bool jsonFormat) const {
+    if (!m_mhpAnalysis || !m_locksetAnalysis) {
+        os << "No analysis results (runAnalyses() not run or no analyses enabled).\n";
+        return;
+    }
     ConcurrencyAnalysisDumper dumper(
         m_module,
         m_mhpAnalysis.get(),

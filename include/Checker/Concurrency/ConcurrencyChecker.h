@@ -43,6 +43,12 @@ public:
     ~ConcurrencyChecker() = default;
 
     /**
+     * @brief Run only the analyses required by the currently enabled checks
+     * (Goblint-style config-driven activation). Call after enable*Check() and before runChecks() or dumpAnalysisResults().
+     */
+    void runAnalyses();
+
+    /**
      * @brief Run all concurrency checks and report bugs to BugReportMgr
      */
     void runChecks();

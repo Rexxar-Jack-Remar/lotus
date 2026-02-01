@@ -18,9 +18,12 @@ using namespace llvm;
 using namespace concurrency;
 
 static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<input file>"), cl::Required);
+static cl::opt<std::string> ChecksList("checks", cl::desc("Comma-separated checks to run: race,deadlock,atomicity,condvar,lock-mismatch (overrides individual flags)"), cl::value_desc("list"));
 static cl::opt<bool> EnableDataRaces("check-data-races", cl::desc("Enable data race detection"), cl::init(true));
 static cl::opt<bool> EnableDeadlocks("check-deadlocks", cl::desc("Enable deadlock detection"), cl::init(true));
 static cl::opt<bool> EnableAtomicity("check-atomicity", cl::desc("Enable atomicity violation detection"), cl::init(true));
+static cl::opt<bool> EnableCondVar("check-condvar", cl::desc("Enable condition variable misuse detection"), cl::init(true));
+static cl::opt<bool> EnableLockMismatch("check-lock-mismatch", cl::desc("Enable lock acquisition/release mismatch detection"), cl::init(true));
 static cl::opt<bool> AnalysisOnly("analysis-only", cl::desc("Run analysis only (no bug checking), dump analysis results"), cl::init(false));
 static cl::opt<std::string> AnalysisJsonOutput("analysis-json", cl::desc("Output analysis results as JSON to specified file (requires --analysis-only)"), cl::value_desc("filename"));
 
@@ -43,18 +46,36 @@ int main(int argc, char** argv) {
 
     outs() << "Analyzing module: " << module->getModuleIdentifier() << "\n";
 
-    // Create the concurrency checker
     ConcurrencyChecker checker(*module);
 
-    // Enable/disable specific checks based on command line options
-    checker.enableDataRaceCheck(EnableDataRaces);
-    checker.enableDeadlockCheck(EnableDeadlocks);
-    checker.enableAtomicityCheck(EnableAtomicity);
+    // Config-driven activation: --checks=race,deadlock,... overrides individual flags (Goblint-style)
+    if (!ChecksList.empty()) {
+        std::string list = ChecksList;
+        checker.enableDataRaceCheck(list.find("race") != std::string::npos);
+        checker.enableDeadlockCheck(list.find("deadlock") != std::string::npos);
+        checker.enableAtomicityCheck(list.find("atomicity") != std::string::npos);
+        checker.enableCondVarCheck(list.find("condvar") != std::string::npos);
+        checker.enableLockMismatchCheck(list.find("lock-mismatch") != std::string::npos);
+    } else {
+        checker.enableDataRaceCheck(EnableDataRaces);
+        checker.enableDeadlockCheck(EnableDeadlocks);
+        checker.enableAtomicityCheck(EnableAtomicity);
+        checker.enableCondVarCheck(EnableCondVar);
+        checker.enableLockMismatchCheck(EnableLockMismatch);
+    }
 
     if (AnalysisOnly) {
-        // Analysis-only mode: dump analysis results without bug checking
+        checker.enableDataRaceCheck(true);
+        checker.enableDeadlockCheck(true);
+        checker.enableAtomicityCheck(true);
+        checker.enableCondVarCheck(true);
+        checker.enableLockMismatchCheck(true);
+    }
+
+    checker.runAnalyses();
+
+    if (AnalysisOnly) {
         outs() << "Running concurrency analyses (analysis-only mode)...\n";
-        
         if (!AnalysisJsonOutput.empty()) {
             // Output to JSON file
             std::error_code EC;
@@ -73,7 +94,6 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // Normal mode: Run the checks (bugs are automatically reported to BugReportMgr)
     outs() << "Running concurrency checks...\n";
     checker.runChecks();
 
@@ -86,6 +106,8 @@ int main(int argc, char** argv) {
     outs() << "Data Races Found: " << stats.dataRacesFound << "\n";
     outs() << "Deadlocks Found: " << stats.deadlocksFound << "\n";
     outs() << "Atomicity Violations Found: " << stats.atomicityViolationsFound << "\n";
+    outs() << "Cond Var Bugs Found: " << stats.condVarBugsFound << "\n";
+    outs() << "Lock Mismatches Found: " << stats.lockMismatchesFound << "\n";
 
     // Post-processing: Suppression and Deduplication
     BugReportMgr& mgr = BugReportMgr::get_instance();
@@ -135,6 +157,7 @@ int main(int argc, char** argv) {
         }
     }
     
-    size_t total_bugs = stats.dataRacesFound + stats.deadlocksFound + stats.atomicityViolationsFound;
+    size_t total_bugs = stats.dataRacesFound + stats.deadlocksFound + stats.atomicityViolationsFound
+                        + stats.condVarBugsFound + stats.lockMismatchesFound;
     return total_bugs > 0 ? 1 : 0;
 }

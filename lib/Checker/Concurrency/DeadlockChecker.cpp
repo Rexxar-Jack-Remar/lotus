@@ -1,13 +1,21 @@
 /*
  *
  * Author: rainoftime
-*/
+ *
+ * Deadlock detection revised to follow Goblint:
+ * - Build lock-order graph (edge L' -> L when L acquired while holding L')
+ * - Find cycles via DFS
+ * - Report deadlock only when all acquire events in the cycle may happen in parallel (MHP)
+ */
 #include "Checker/Concurrency/DeadlockChecker.h"
 
 #include <llvm/Support/raw_ostream.h>
 
-//#include <algorithm>
+#include <algorithm>
+#include <functional>
+#include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 using namespace llvm;
 using namespace mhp;
@@ -21,70 +29,128 @@ DeadlockChecker::DeadlockChecker(Module& module,
     : m_module(module), m_locksetAnalysis(locksetAnalysis),
       m_mhpAnalysis(mhpAnalysis), m_threadAPI(threadAPI) {}
 
-std::vector<ConcurrencyBugReport> DeadlockChecker::checkDeadlocks() {
-    std::vector<ConcurrencyBugReport> reports;
-
-    auto lockOrderViolations = detectLockOrderViolations();
-    auto lostWakeups = detectLostWakeups();
-    auto barrierIssues = detectBarrierDivergence();
-
-    for (const auto& violation : lockOrderViolations) {
-        mhp::LockID lock1 = violation.first;
-        mhp::LockID lock2 = violation.second;
-
-        // Find instructions that acquire these locks
-        auto lockAcquires1 = m_locksetAnalysis->getLockAcquires(lock1);
-        auto lockAcquires2 = m_locksetAnalysis->getLockAcquires(lock2);
-        
-        if (lockAcquires1.empty() || lockAcquires2.empty()) continue;
-
-        // Check if threads using these locks can run in parallel
-        bool canRunInParallel = false;
-        const Instruction* inst1 = nullptr;
-        const Instruction* inst2 = nullptr;
-
-        // Check all pairs of acquires to see if any can happen in parallel
-        for (const auto* a1 : lockAcquires1) {
-            for (const auto* a2 : lockAcquires2) {
-                if (m_mhpAnalysis->mayHappenInParallel(a1, a2)) {
-                    canRunInParallel = true;
-                    inst1 = a1;
-                    inst2 = a2;
-                    break;
-                }
-            }
-            if (canRunInParallel) break;
+void DeadlockChecker::buildLockOrderGraph(LockOrderGraph& graph) const {
+  for (Function& F : m_module) {
+    if (F.isDeclaration()) continue;
+    for (LockID lock : m_locksetAnalysis->getAllLocksInFunction(&F)) {
+      if (!lock) continue;
+      auto acquires = m_locksetAnalysis->getLockAcquires(lock);
+      for (const Instruction* inst : acquires) {
+        LockSet mayHeld = m_locksetAnalysis->getMayLockSetAt(inst);
+        for (LockID held : mayHeld) {
+          if (!held || held == lock) continue;
+          graph[held].push_back({lock, inst});
         }
-
-        if (!canRunInParallel) continue;
-
-        std::string description = "Potential deadlock: inconsistent lock acquisition order between ";
-        description += getLockDescription(lock1);
-        description += " and ";
-        description += getLockDescription(lock2);
-        description += ". Threads acquiring these locks may run in parallel.";
-
-        ConcurrencyBugReport report(
-            ConcurrencyBugType::DEADLOCK,
-            description,
-            BugDescription::BI_HIGH,
-            BugDescription::BC_ERROR
-        );
-
-        if (inst1) report.addStep(inst1, "Lock 1 acquisition");
-        if (inst2) report.addStep(inst2, "Lock 2 acquisition");
-        
-        reports.push_back(report);
+      }
     }
-
-    reports.insert(reports.end(), lostWakeups.begin(), lostWakeups.end());
-    reports.insert(reports.end(), barrierIssues.begin(), barrierIssues.end());
-
-    return reports;
+  }
 }
 
-std::vector<std::pair<mhp::LockID, mhp::LockID>> DeadlockChecker::detectLockOrderViolations() const {
-    return m_locksetAnalysis->detectLockOrderInversions();
+bool DeadlockChecker::cycleCanHappenInParallel(
+    const std::vector<const Instruction*>& acquireInsts) const {
+  if (acquireInsts.size() < 2) return false;
+  for (size_t i = 0; i < acquireInsts.size(); ++i) {
+    for (size_t j = i + 1; j < acquireInsts.size(); ++j) {
+      if (!m_mhpAnalysis->mayHappenInParallel(acquireInsts[i], acquireInsts[j]))
+        return false;
+    }
+  }
+  return true;
+}
+
+static std::vector<std::pair<mhp::LockID, const llvm::Instruction*>>
+rotateCycleToMin(const std::vector<std::pair<mhp::LockID, const llvm::Instruction*>>& cycle) {
+  if (cycle.empty()) return cycle;
+  size_t minIdx = 0;
+  for (size_t i = 1; i < cycle.size(); ++i) {
+    if (cycle[i].first < cycle[minIdx].first) minIdx = i;
+  }
+  std::vector<std::pair<mhp::LockID, const llvm::Instruction*>> out;
+  out.reserve(cycle.size());
+  for (size_t i = 0; i < cycle.size(); ++i)
+    out.push_back(cycle[(minIdx + i) % cycle.size()]);
+  return out;
+}
+
+std::vector<std::vector<std::pair<mhp::LockID, const llvm::Instruction*>>>
+DeadlockChecker::findLockOrderCycles(const LockOrderGraph& graph) const {
+  using Cycle = std::vector<std::pair<LockID, const Instruction*>>;
+  std::set<Cycle> uniqueCycles;
+  std::vector<std::pair<LockID, const Instruction*>> path;
+  std::unordered_set<LockID> pathLocks;
+
+  std::function<void(LockID)> dfs = [&](LockID cur) {
+    auto it = graph.find(cur);
+    if (it == graph.end()) return;
+    for (const LockOrderEdge& edge : it->second) {
+      LockID next = edge.first;
+      const Instruction* inst = edge.second;
+      if (pathLocks.count(next)) {
+        size_t idx = 0;
+        for (; idx < path.size() && path[idx].first != next; ++idx) {}
+        if (idx >= path.size()) continue;
+        Cycle cycle(path.begin() + idx, path.end());
+        cycle.push_back({next, inst});
+        if (cycle.size() >= 2)
+          uniqueCycles.insert(rotateCycleToMin(cycle));
+        continue;
+      }
+      path.push_back({next, inst});
+      pathLocks.insert(next);
+      dfs(next);
+      pathLocks.erase(next);
+      path.pop_back();
+    }
+  };
+
+  for (const auto& kv : graph) {
+    path.clear();
+    pathLocks.clear();
+    path.push_back({kv.first, nullptr});
+    pathLocks.insert(kv.first);
+    dfs(kv.first);
+  }
+
+  return std::vector<Cycle>(uniqueCycles.begin(), uniqueCycles.end());
+}
+
+std::vector<ConcurrencyBugReport> DeadlockChecker::checkDeadlocks() {
+  std::vector<ConcurrencyBugReport> reports;
+
+  LockOrderGraph graph;
+  buildLockOrderGraph(graph);
+
+  auto cycles = findLockOrderCycles(graph);
+  for (const auto& cycle : cycles) {
+    std::vector<const Instruction*> acquireInsts;
+    for (const auto& p : cycle)
+      if (p.second) acquireInsts.push_back(p.second);
+    if (acquireInsts.size() < 2 || !cycleCanHappenInParallel(acquireInsts))
+      continue;
+
+    std::string description = "Potential deadlock: locking order cycle (";
+    for (size_t i = 0; i < cycle.size(); ++i) {
+      if (i > 0) description += " -> ";
+      description += getLockDescription(cycle[i].first);
+    }
+    description += "). All acquires may happen in parallel.";
+
+    ConcurrencyBugReport report(ConcurrencyBugType::DEADLOCK, description,
+                               BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+    for (size_t i = 0; i < cycle.size(); ++i) {
+      if (cycle[i].second)
+        report.addStep(cycle[i].second,
+                       "Acquire " + getLockDescription(cycle[i].first));
+    }
+    reports.push_back(std::move(report));
+  }
+
+  auto lostWakeups = detectLostWakeups();
+  auto barrierIssues = detectBarrierDivergence();
+  reports.insert(reports.end(), lostWakeups.begin(), lostWakeups.end());
+  reports.insert(reports.end(), barrierIssues.begin(), barrierIssues.end());
+
+  return reports;
 }
 
 std::string DeadlockChecker::getLockDescription(mhp::LockID lock) const {

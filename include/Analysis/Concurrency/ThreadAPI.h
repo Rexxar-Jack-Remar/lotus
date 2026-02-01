@@ -26,6 +26,9 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 
+#include <string>
+#include <unordered_map>
+
 using namespace llvm;
 
 typedef unsigned u32_t;
@@ -84,9 +87,25 @@ public:
   /// Map type for API name to TD_TYPE conversion
   typedef llvm::StringMap<TD_TYPE> TDAPIMap;
 
+  /// Argument indices for TD_FORK (Goblint-style; default pthread_create: 0,2,3)
+  struct ForkArgIndices {
+    unsigned thread_arg = 0;
+    unsigned start_routine_arg = 2;
+    unsigned arg_arg = 3;
+  };
+  /// Argument indices for TD_JOIN (default pthread_join: 0,1)
+  struct JoinArgIndices {
+    unsigned thread_arg = 0;
+    unsigned ret_arg = 1;
+  };
+  ForkArgIndices getForkArgIndices(const llvm::Function *F) const;
+  JoinArgIndices getJoinArgIndices(const llvm::Function *F) const;
+
 private:
   /// API map, from a string to threadAPI type
   TDAPIMap tdAPIMap;
+  std::unordered_map<std::string, ForkArgIndices> m_fork_args;
+  std::unordered_map<std::string, JoinArgIndices> m_join_args;
 
   /// Constructor
   ThreadAPI() { init(); }
@@ -146,34 +165,34 @@ public:
 
   /// Return arguments/attributes of pthread_create / hare_parallel_for
   //@{
-  /// Return the first argument of the call,
-  /// Note that, it is the pthread_t pointer
+  /// Return the thread handle argument (configurable via thread.spec; default 0)
   inline const Value *getForkedThread(const Instruction *inst) const {
     assert(isTDFork(inst) && "not a thread fork function!");
     const CallBase *cb = getLLVMCallSite(inst);
-    return cb->getArgOperand(0);
+    unsigned idx = getForkArgIndices(getCallee(inst)).thread_arg;
+    return cb->getArgOperand(idx);
   }
   inline const Value *getForkedThread(const CallBase *cb) const {
     return getForkedThread(dyn_cast<Instruction>(cb));
   }
 
-  /// Return the third argument of the call,
-  /// Note that, it could be function type or a void* pointer
+  /// Return the start-routine argument (configurable; default 2)
   inline const Value *getForkedFun(const Instruction *inst) const {
     assert(isTDFork(inst) && "not a thread fork function!");
     const CallBase *cb = getLLVMCallSite(inst);
-    return cb->getArgOperand(2)->stripPointerCasts();
+    unsigned idx = getForkArgIndices(getCallee(inst)).start_routine_arg;
+    return cb->getArgOperand(idx)->stripPointerCasts();
   }
   inline const Value *getForkedFun(const CallBase *cb) const {
     return getForkedFun(dyn_cast<Instruction>(cb));
   }
 
-  /// Return the forth argument of the call,
-  /// Note that, it is the sole argument of start routine ( a void* pointer )
+  /// Return the user-argument passed to the start routine (configurable; default 3)
   inline const Value *getActualParmAtForkSite(const Instruction *inst) const {
     assert(isTDFork(inst) && "not a thread fork function!");
     const CallBase *cb = getLLVMCallSite(inst);
-    return cb->getArgOperand(3);
+    unsigned idx = getForkArgIndices(getCallee(inst)).arg_arg;
+    return cb->getArgOperand(idx);
   }
   inline const Value *getActualParmAtForkSite(const CallBase *cb) const {
     return getActualParmAtForkSite(dyn_cast<Instruction>(cb));
@@ -220,12 +239,12 @@ public:
 
   /// Return arguments/attributes of pthread_join
   //@{
-  /// Return the first argument of the call,
-  /// Note that, it is the pthread_t pointer
+  /// Return the thread handle argument (configurable via thread.spec; default 0)
   inline const Value *getJoinedThread(const Instruction *inst) const {
     assert(isTDJoin(inst) && "not a thread join function!");
     const CallBase *cb = getLLVMCallSite(inst);
-    Value *join = cb->getArgOperand(0);
+    unsigned idx = getJoinArgIndices(getCallee(inst)).thread_arg;
+    Value *join = cb->getArgOperand(idx);
     if (llvm::isa<LoadInst>(join))
       return llvm::cast<LoadInst>(join)->getPointerOperand();
     Value *stripped = join->stripPointerCasts();
@@ -239,12 +258,12 @@ public:
   inline const Value *getJoinedThread(const CallBase *cb) const {
     return getJoinedThread(dyn_cast<Instruction>(cb));
   }
-  /// Return the send argument of the call,
-  /// Note that, it is the pthread_t pointer
+  /// Return the return-value argument (configurable; default 1)
   inline const Value *getRetParmAtJoinedSite(const Instruction *inst) const {
     assert(isTDJoin(inst) && "not a thread join function!");
     const CallBase *cb = getLLVMCallSite(inst);
-    return cb->getArgOperand(1);
+    unsigned idx = getJoinArgIndices(getCallee(inst)).ret_arg;
+    return cb->getArgOperand(idx);
   }
   inline const Value *getRetParmAtJoinedSite(const CallBase *cb) const {
     return getRetParmAtJoinedSite(dyn_cast<Instruction>(cb));

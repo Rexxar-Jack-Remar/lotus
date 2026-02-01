@@ -124,6 +124,9 @@ void ThreadAPI::init() {
     }
     tdAPIMap[p->n] = p->t;
   }
+  // Load optional thread.spec so custom APIs (e.g. kernel mutex_lock) are recognized
+  loadConfig("config/thread.spec");
+  loadConfig("../config/thread.spec");
 }
 
 void ThreadAPI::addEntry(const std::string &name, TD_TYPE type) {
@@ -174,10 +177,23 @@ static ThreadAPI::TD_TYPE stringToType(const std::string &s) {
   return ThreadAPI::TD_DUMMY;
 }
 
+ThreadAPI::ForkArgIndices ThreadAPI::getForkArgIndices(const Function *F) const {
+  if (!F) return ForkArgIndices{};
+  auto it = m_fork_args.find(F->getName().str());
+  if (it != m_fork_args.end()) return it->second;
+  return ForkArgIndices{};
+}
+
+ThreadAPI::JoinArgIndices ThreadAPI::getJoinArgIndices(const Function *F) const {
+  if (!F) return JoinArgIndices{};
+  auto it = m_join_args.find(F->getName().str());
+  if (it != m_join_args.end()) return it->second;
+  return JoinArgIndices{};
+}
+
 void ThreadAPI::loadConfig(const std::string &filename) {
   std::ifstream file(filename);
   if (!file.is_open()) {
-    // It's okay if config file doesn't exist, we have defaults
     return;
   }
 
@@ -191,6 +207,15 @@ void ThreadAPI::loadConfig(const std::string &filename) {
       TD_TYPE type = stringToType(typeStr);
       if (type != TD_DUMMY) {
         addEntry(name, type);
+        if (type == TD_FORK) {
+          unsigned t = 0, s = 2, a = 3;
+          if (ss >> t >> s >> a)
+            m_fork_args[name] = ForkArgIndices{t, s, a};
+        } else if (type == TD_JOIN) {
+          unsigned t = 0, r = 1;
+          if (ss >> t >> r)
+            m_join_args[name] = JoinArgIndices{t, r};
+        }
       }
     }
   }

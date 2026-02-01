@@ -5,8 +5,13 @@
 #include "Checker/Concurrency/DataRaceChecker.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/HappensBeforeAnalysis.h"
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Type.h>
 #include <llvm/Support/raw_ostream.h>
+
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace llvm;
 using namespace mhp;
@@ -29,6 +34,45 @@ bool DataRaceChecker::areIndependent(const Instruction* inst1,
   return !mayAccessSameLocation(inst1, inst2);
 }
 
+// Types that are never considered racy (sync objects, FILE, etc.). Borrowed from Goblint.
+static bool isIgnorableTypeForRace(const Type* ty) {
+  if (!ty || !ty->isPointerTy()) return false;
+  const Type* elem = cast<PointerType>(ty)->getPointerElementType();
+  const StructType* st = dyn_cast<StructType>(elem);
+  if (!st || !st->hasName()) return false;
+  StringRef name = st->getName();
+  // Strip LLVM name prefix if present
+  if (name.startswith("\01")) name = name.drop_front(1);
+  static const char* ignorable[] = {
+      "pthread_mutex_t", "pthread_cond_t", "pthread_barrier_t", "pthread_rwlock_t",
+      "pthread_spinlock_t", "pthread_once_t", "__pthread_mutex_s",
+      "__pthread_cond_s", "__pthread_rwlock_arch_t", "FILE", "__FILE", "_IO_FILE",
+      "atomic_flag", "atomic_t", "spinlock_t", "pthread_condattr_t",
+      "pthread_mutexattr_t", "pthread_barrierattr_t", "__jmp_buf_tag",
+      "_pthread_cleanup_buffer", "__cancel_jmp_buf_tag", "lock_class_key",
+  };
+  for (const char* ig : ignorable)
+    if (name.equals(ig)) return true;
+  if (name.startswith("__anon")) return true;  // anonymous sync structs
+  return false;
+}
+
+// Single predicate for "would we report a data race for this pair?" (borrowed from Goblint MCP idea).
+bool DataRaceChecker::wouldReportDataRace(const Instruction* inst1,
+                                          const Instruction* inst2) const {
+  if (isAtomicOperation(inst1) || isAtomicOperation(inst2)) return false;
+  if (!isWriteAccess(inst1) && !isWriteAccess(inst2)) return false;
+  if (!m_mhpAnalysis->mayHappenInParallel(inst1, inst2)) return false;
+  if (m_happensBeforeAnalysis &&
+      (m_happensBeforeAnalysis->happensBefore(inst1, inst2) ||
+       m_happensBeforeAnalysis->happensBefore(inst2, inst1)))
+    return false;
+  if (areIndependent(inst1, inst2)) return false;
+  if (m_locksetAnalysis && m_locksetAnalysis->mayHoldCommonLock(inst1, inst2)) return false;
+  if (!mayAccessSameLocation(inst1, inst2)) return false;
+  return true;
+}
+
 // Detects data races by checking all pairs of memory accesses.
 // A data race occurs when:
 //   1. Two instructions may happen in parallel (MHP analysis)
@@ -37,57 +81,78 @@ bool DataRaceChecker::areIndependent(const Instruction* inst1,
 //   4. Neither operation is atomic
 //   5. They are not protected by a common lock (LockSet analysis)
 //   6. The memory location is shared/escaped (Escape analysis)
+// Reports one bug per "racy component" (connected set of conflicting accesses), not per pair (borrowed from Goblint).
 std::vector<ConcurrencyBugReport> DataRaceChecker::checkDataRaces() {
     buildSyncObjectSet();
-    std::vector<ConcurrencyBugReport> reports;
     std::vector<const Instruction*> accesses;
     collectVariableAccesses(accesses);
 
-    // Compare all accesses pairwise with alias + MHP filters to avoid
-    // missing distinct pointers that still alias.
+    // Collect racy pairs using single predicate
+    using Pair = std::pair<const Instruction*, const Instruction*>;
+    std::vector<Pair> racyPairs;
     for (size_t i = 0; i < accesses.size(); ++i) {
         const Instruction* inst1 = accesses[i];
-        if (isAtomicOperation(inst1)) continue;  // Atomic operations prevent races.
-
         for (size_t j = i + 1; j < accesses.size(); ++j) {
             const Instruction* inst2 = accesses[j];
-            if (isAtomicOperation(inst2)) continue;
-
-            // 1. At least one is a write
-            if (!isWriteAccess(inst1) && !isWriteAccess(inst2)) continue;
-
-            // 2. May run in parallel
-            if (!m_mhpAnalysis->mayHappenInParallel(inst1, inst2)) continue;
-
-            // 2b. Ordered by happens-before (e.g. C11 synchronizes-with)?
-            if (m_happensBeforeAnalysis &&
-                (m_happensBeforeAnalysis->happensBefore(inst1, inst2) ||
-                 m_happensBeforeAnalysis->happensBefore(inst2, inst1)))
-              continue;
-
-            // 2c. Independent (provably different locations)?
-            if (areIndependent(inst1, inst2)) continue;
-
-            // 3. Protected by common lock?
-            if (m_locksetAnalysis && m_locksetAnalysis->mayHoldCommonLock(inst1, inst2)) continue;
-
-            // 4. May access same location (alias); independence already skipped above
-            if (!mayAccessSameLocation(inst1, inst2)) continue;
-
-            ConcurrencyBugReport report(
-                ConcurrencyBugType::DATA_RACE,
-                "Potential data race between " + getInstructionLocation(inst1) +
-                " and " + getInstructionLocation(inst2),
-                BugDescription::BI_HIGH, BugDescription::BC_ERROR);
-
-            report.setDataRaceInfo(getAccessPath(inst1), getAccessPath(inst2),
-                                  isWriteAccess(inst1), isWriteAccess(inst2),
-                                  getAccessPath(inst1) + " / " + getAccessPath(inst2));
-            report.addStep(inst1, isWriteAccess(inst1) ? "Write" : "Read");
-            report.addStep(inst2, isWriteAccess(inst2) ? "Write" : "Read");
-
-            reports.push_back(std::move(report));
+            if (wouldReportDataRace(inst1, inst2))
+                racyPairs.emplace_back(inst1, inst2);
         }
+    }
+
+    // Build union-find over instructions that appear in any racy pair (one report per component)
+    std::unordered_map<const Instruction*, const Instruction*> parent;
+    auto findRoot = [&parent](const Instruction* i) -> const Instruction* {
+        const Instruction* cur = i;
+        std::vector<const Instruction*> path;
+        for (;;) {
+            auto it = parent.find(cur);
+            if (it == parent.end()) return cur;
+            if (it->second == cur) {  // root
+                for (const Instruction* p : path) parent[p] = cur;
+                return cur;
+            }
+            path.push_back(cur);
+            cur = it->second;
+        }
+    };
+    auto unite = [&findRoot, &parent](const Instruction* a, const Instruction* b) {
+        const Instruction* ra = findRoot(a);
+        const Instruction* rb = findRoot(b);
+        if (ra != rb) parent[ra] = rb;
+    };
+    for (const Pair& p : racyPairs) {
+        if (parent.find(p.first) == parent.end()) parent[p.first] = p.first;
+        if (parent.find(p.second) == parent.end()) parent[p.second] = p.second;
+        unite(p.first, p.second);
+    }
+
+    // Group by root: root -> list of instructions in component
+    std::unordered_map<const Instruction*, std::vector<const Instruction*>> components;
+    for (auto& kv : parent) {
+        const Instruction* root = findRoot(kv.first);
+        components[root].push_back(kv.first);
+    }
+
+    // One report per component (representative pair = first two in component)
+    std::vector<ConcurrencyBugReport> reports;
+    for (auto& kv : components) {
+        std::vector<const Instruction*>& comp = kv.second;
+        if (comp.empty()) continue;
+        const Instruction* rep1 = comp[0];
+        const Instruction* rep2 = comp.size() > 1 ? comp[1] : comp[0];
+        std::string desc = "Potential data race between " + getInstructionLocation(rep1) +
+                          " and " + getInstructionLocation(rep2);
+        if (comp.size() > 2)
+            desc += " (" + std::to_string(comp.size()) + " conflicting accesses)";
+
+        ConcurrencyBugReport report(ConcurrencyBugType::DATA_RACE, desc,
+                                    BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+        report.setDataRaceInfo(getAccessPath(rep1), getAccessPath(rep2),
+                              isWriteAccess(rep1), isWriteAccess(rep2),
+                              getAccessPath(rep1) + " / " + getAccessPath(rep2));
+        for (const Instruction* inst : comp)
+            report.addStep(inst, isWriteAccess(inst) ? "Write" : "Read");
+        reports.push_back(std::move(report));
     }
     return reports;
 }
@@ -103,6 +168,7 @@ void DataRaceChecker::collectVariableAccesses(
                 const Value* memLoc = getMemoryLocation(&*I);
                     if (memLoc) {
                     if (isSyncObjectAccess(memLoc)) continue;
+                    if (isIgnorableTypeForRace(memLoc->getType())) continue;
                     if (m_escapeAnalysis && !m_escapeAnalysis->isEscaped(memLoc)) {
                         // If it's a local variable that hasn't escaped, it can't race
                         // Check if it's a stack allocation (AllocaInst)
