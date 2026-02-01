@@ -5,6 +5,7 @@
 #include "Checker/Concurrency/DataRaceChecker.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/HappensBeforeAnalysis.h"
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
@@ -68,8 +69,28 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction* inst1,
        m_happensBeforeAnalysis->happensBefore(inst2, inst1)))
     return false;
   if (areIndependent(inst1, inst2)) return false;
-  if (m_locksetAnalysis && m_locksetAnalysis->mayHoldCommonLock(inst1, inst2)) return false;
-  if (!mayAccessSameLocation(inst1, inst2)) return false;
+
+  // Suppress only with MUST mutual exclusion (sound for recall).
+  if (m_locksetAnalysis) {
+    const bool w1 = isWriteAccess(inst1);
+    const bool w2 = isWriteAccess(inst2);
+
+    if (w1 || w2) {
+      // A write must be protected by a write-lock; a read can be protected by
+      // either a mutex/write-lock or an rwlock read-lock.
+      const auto mustProtectedSet = [this](const Instruction *I, bool isWrite) {
+        return isWrite ? m_locksetAnalysis->getMustWriteLockSetAt(I)
+                       : m_locksetAnalysis->getMustLockSetAt(I);
+      };
+
+      const LockSet s1 = mustProtectedSet(inst1, w1);
+      const LockSet s2 = mustProtectedSet(inst2, w2);
+      for (const auto *l : s1) {
+        if (s2.find(l) != s2.end())
+          return false;
+      }
+    }
+  }
   return true;
 }
 
@@ -87,16 +108,30 @@ std::vector<ConcurrencyBugReport> DataRaceChecker::checkDataRaces() {
     std::vector<const Instruction*> accesses;
     collectVariableAccesses(accesses);
 
-    // Collect racy pairs using single predicate
     using Pair = std::pair<const Instruction*, const Instruction*>;
     std::vector<Pair> racyPairs;
-    for (size_t i = 0; i < accesses.size(); ++i) {
-        const Instruction* inst1 = accesses[i];
-        for (size_t j = i + 1; j < accesses.size(); ++j) {
-            const Instruction* inst2 = accesses[j];
-            if (wouldReportDataRace(inst1, inst2))
-                racyPairs.emplace_back(inst1, inst2);
+
+    // Group accesses by underlying base object to avoid quadratic scans across unrelated objects.
+    std::unordered_map<const Value *, std::vector<const Instruction *>> byBase;
+    byBase.reserve(accesses.size());
+    for (const Instruction *I : accesses) {
+      const Value *loc = getMemoryLocation(I);
+      if (!loc) continue;
+      const Value *base = llvm::getUnderlyingObject(loc);
+      byBase[base].push_back(I);
+    }
+
+    // Collect racy pairs using single predicate (within each base object group).
+    for (auto &kv : byBase) {
+      auto &vec = kv.second;
+      for (size_t i = 0; i < vec.size(); ++i) {
+        const Instruction *inst1 = vec[i];
+        for (size_t j = i + 1; j < vec.size(); ++j) {
+          const Instruction *inst2 = vec[j];
+          if (wouldReportDataRace(inst1, inst2))
+            racyPairs.emplace_back(inst1, inst2);
         }
+      }
     }
 
     // Build union-find over instructions that appear in any racy pair (one report per component)
@@ -213,7 +248,10 @@ bool DataRaceChecker::isWriteAccess(const Instruction* inst) const {
 }
 
 bool DataRaceChecker::isAtomicOperation(const Instruction* inst) const {
-    return isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst);
+    if (isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst)) return true;
+    if (const auto *L = dyn_cast<LoadInst>(inst)) return L->isAtomic();
+    if (const auto *S = dyn_cast<StoreInst>(inst)) return S->isAtomic();
+    return false;
 }
 
 // Extracts the memory location (pointer operand) from a memory access instruction.

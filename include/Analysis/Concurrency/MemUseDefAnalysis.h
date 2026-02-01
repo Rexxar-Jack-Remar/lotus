@@ -18,9 +18,9 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 
+#include <map>
 #include <queue>
 #include <set>
-#include <map>
 
 // TODO: Verify if the analysis converge mechanism works, if we can identify
 // when no new defs are added.

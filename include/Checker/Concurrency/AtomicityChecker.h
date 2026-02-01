@@ -15,6 +15,10 @@
 #include <string>
 #include <vector>
 
+namespace lotus {
+class AliasAnalysisWrapper;
+} // namespace lotus
+
 namespace concurrency {
 
 /**
@@ -38,7 +42,8 @@ public:
     explicit AtomicityChecker(llvm::Module& module,
                             mhp::MHPAnalysis* mhpAnalysis,
                             mhp::LockSetAnalysis* locksetAnalysis,
-                            ThreadAPI* threadAPI);
+                            ThreadAPI* threadAPI,
+                            lotus::AliasAnalysisWrapper* aliasAnalysis = nullptr);
 
     /**
      * @brief Check for atomicity violations in the module
@@ -52,6 +57,7 @@ private:
     mhp::MHPAnalysis* m_mhpAnalysis;
     mhp::LockSetAnalysis* m_locksetAnalysis;
     ThreadAPI* m_threadAPI;
+    lotus::AliasAnalysisWrapper* m_aliasAnalysis;
 
     // Cache of critical sections per function
     llvm::DenseMap<llvm::Function*, llvm::SmallVector<CriticalSection, 4>> m_csPerFunc;
@@ -67,6 +73,8 @@ private:
     const llvm::Instruction* findMatchingUnlock(const llvm::Instruction* lockInst) const;
     bool isMemoryAccess(const llvm::Instruction* inst) const;
     bool isAtomicOperation(const llvm::Instruction* inst) const;
+    const llvm::Value* getMemoryLocation(const llvm::Instruction* inst) const;
+    bool mayAlias(const llvm::Value* v1, const llvm::Value* v2) const;
 
     // Atomicity violation detection logic
     void checkCriticalSectionForAtomicityViolations(

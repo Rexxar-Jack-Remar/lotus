@@ -14,6 +14,7 @@
 
 
 #include "Checker/Concurrency/AtomicityChecker.h"
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/Optional.h>
@@ -55,9 +56,10 @@ static std::string formatLoc(const Instruction &I) {
 //―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
 AtomicityChecker::AtomicityChecker(Module &M, MHPAnalysis *MHP,
-                                   LockSetAnalysis *LSA, ThreadAPI *TAPI)
+                                   LockSetAnalysis *LSA, ThreadAPI *TAPI,
+                                   lotus::AliasAnalysisWrapper *AA)
     : m_module(M), m_mhpAnalysis(MHP), m_locksetAnalysis(LSA),
-      m_threadAPI(TAPI) {}
+      m_threadAPI(TAPI), m_aliasAnalysis(AA) {}
 
 //―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 // Phase 0 – collect critical sections
@@ -134,6 +136,25 @@ bool AtomicityChecker::isMemoryAccess(const Instruction *inst) const {
          isa<AtomicCmpXchgInst>(inst);
 }
 
+const Value *AtomicityChecker::getMemoryLocation(const Instruction *inst) const {
+  if (!inst) return nullptr;
+  if (const auto *L = dyn_cast<LoadInst>(inst)) return L->getPointerOperand();
+  if (const auto *S = dyn_cast<StoreInst>(inst)) return S->getPointerOperand();
+  if (const auto *RMW = dyn_cast<AtomicRMWInst>(inst)) return RMW->getPointerOperand();
+  if (const auto *CAS = dyn_cast<AtomicCmpXchgInst>(inst)) return CAS->getPointerOperand();
+  return nullptr;
+}
+
+bool AtomicityChecker::mayAlias(const Value *v1, const Value *v2) const {
+  if (!v1 || !v2) return false;
+  if (v1 == v2) return true;
+  const Value *s1 = v1->stripPointerCasts();
+  const Value *s2 = v2->stripPointerCasts();
+  if (s1 == s2) return true;
+  if (m_aliasAnalysis) return m_aliasAnalysis->mayAlias(s1, s2);
+  return true; // conservative if no AA
+}
+
 static bool isWrite(const Instruction &I) {
   if (auto *S = dyn_cast<StoreInst>(&I))
     return !S->isVolatile();
@@ -188,6 +209,10 @@ std::vector<ConcurrencyBugReport> AtomicityChecker::checkAtomicityViolations() {
 
           // At least one write?
           if (!(isWrite(*I1) || isWrite(*I2)))
+            continue;
+
+          // Precision: only report when the two accesses may target the same location.
+          if (!mayAlias(getMemoryLocation(I1), getMemoryLocation(I2)))
             continue;
 
           // Found a potential violation.

@@ -20,6 +20,7 @@
 
 #include "Analysis/Concurrency/MHPAnalysis.h"
 
+#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
@@ -343,9 +344,11 @@ void MHPAnalysis::analyze() {
     analyzeLockSets();
   }
   
-  analyzeThreadRegions();
   computeAtomicHappensBefore();
-  computeMHPPairs();
+  analyzeThreadRegions();
+  if (m_precompute_mhp_pairs) {
+    computeMHPPairs();
+  }
 
   errs() << "MHP Analysis Complete!\n";
 }
@@ -479,9 +482,19 @@ void MHPAnalysis::handleThreadFork(const Instruction *fork_inst,
   // Allocate new thread ID
   ThreadID new_tid = allocateThreadID();
   
-  // Be conservative: unless we can prove single instancing, assume multiple instances.
-  // This preserves soundness for MHP when forks may execute multiple times.
-  m_multi_instance_threads.insert(new_tid);
+  // Mark as multi-instance only when the fork site is in a loop.
+  // This reduces false positives for common "fork once" patterns.
+  bool in_loop = false;
+  if (fork_inst && fork_inst->getFunction()) {
+    const Function *F = fork_inst->getFunction();
+    DominatorTree &DT = const_cast<DominatorTree &>(getDomTree(F));
+    LoopInfo LI;
+    LI.analyze(DT);
+    in_loop = (LI.getLoopFor(fork_inst->getParent()) != nullptr);
+  }
+  if (in_loop) {
+    m_multi_instance_threads.insert(new_tid);
+  }
   
   node->setForkedThread(new_tid);
 
@@ -707,6 +720,7 @@ void MHPAnalysis::handleBarrier(const Instruction *barrier_inst,
 void MHPAnalysis::analyzeLockSets() {
   errs() << "Analyzing Lock Sets...\n";
   m_lockset = std::make_unique<LockSetAnalysis>(m_module);
+  m_lockset->setAliasAnalysis(m_alias_analysis.get());
   m_lockset->analyze();
 }
 
@@ -758,13 +772,22 @@ void MHPAnalysis::computeMHPPairs() {
 
 bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
                                        const Instruction *i2) const {
+  // Symmetric memoization (keyed by pointer identity, order-independent).
+  const Instruction *a = i1 < i2 ? i1 : i2;
+  const Instruction *b = i1 < i2 ? i2 : i1;
+  if (a && b) {
+    auto it = m_mhp_cache.find({a, b});
+    if (it != m_mhp_cache.end())
+      return it->second;
+  }
+
   // Basic checks: same instruction or same thread (accounting for multi-instance threads)
   if (i1 == i2 || isInSameThread(i1, i2))
-    return false;
+    return (a && b) ? (m_mhp_cache[{a, b}] = false) : false;
 
   // Fast path: check precomputed MHP pairs
   if (isPrecomputedMHP(i1, i2))
-    return true;
+    return (a && b) ? (m_mhp_cache[{a, b}] = true) : true;
 
   // Special case: if both instructions are from the same multi-instance thread,
   // they can run in parallel (different instances) unless explicitly ordered
@@ -772,20 +795,21 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
   ThreadID t1 = getThreadID(i1);
   ThreadID t2 = getThreadID(i2);
   if (t1 == t2 && t1 != 0 && m_multi_instance_threads.count(t1)) {
-    // For multi-instance threads, intra-thread program order doesn't prevent
-    // parallelism between different instances. Only check for explicit
-    // inter-thread synchronization ordering.
-    // For now, conservatively allow parallelism (different instances can run in parallel)
-    return true;
+    // For multi-instance threads, intra-thread program order does not prevent
+    // parallelism between different dynamic thread instances.
+    // However, mutual exclusion via locks still applies.
+    bool r = !isOrderedByLocks(i1, i2);
+    return (a && b) ? (m_mhp_cache[{a, b}] = r) : r;
   }
 
   // Soundness: This is the core conservative check.
   // If we cannot PROVE a happens-before relation, and we cannot PROVE they are
   // mutually exclusive (via locks), we MUST assume they can run in parallel.
   // This ensures we don't miss any potential races (over-approximation).
-  return !hasHappenBeforeRelation(i1, i2) &&
+  bool r = !hasHappenBeforeRelation(i1, i2) &&
          !hasHappenBeforeRelation(i2, i1) &&
          !isOrderedByLocks(i1, i2);
+  return (a && b) ? (m_mhp_cache[{a, b}] = r) : r;
 }
 
 bool MHPAnalysis::isPrecomputedMHP(const Instruction *i1,
@@ -916,17 +940,21 @@ bool MHPAnalysis::hasHappenBeforeRelation(const Instruction *i1,
     return false;
   }
 
+  auto it = m_hb_cache.find({i1, i2});
+  if (it != m_hb_cache.end())
+    return it->second;
+
   SyncNode *startNode = m_tfg->getNode(i1);
   SyncNode *endNode = m_tfg->getNode(i2);
 
   if (!startNode || !endNode || i1 == i2) {
-    return false;
+    return (m_hb_cache[{i1, i2}] = false);
   }
   
   // Perform a BFS on the ThreadFlowGraph to find if endNode is reachable from startNode
   std::deque<SyncNode *> worklist;
   worklist.push_back(startNode);
-  std::set<SyncNode *> visited;
+  std::unordered_set<SyncNode *> visited;
   visited.insert(startNode);
 
   while (!worklist.empty()) {
@@ -934,7 +962,7 @@ bool MHPAnalysis::hasHappenBeforeRelation(const Instruction *i1,
     worklist.pop_front();
 
     if (current == endNode) {
-      return true;
+      return (m_hb_cache[{i1, i2}] = true);
     }
 
     for (SyncNode *succ : current->getSuccessors()) {
@@ -954,14 +982,12 @@ bool MHPAnalysis::hasHappenBeforeRelation(const Instruction *i1,
       }
       // Inter-thread edges are always followed (they represent synchronization)
       
-      if (visited.find(succ) == visited.end()) {
-        visited.insert(succ);
+      if (visited.insert(succ).second)
         worklist.push_back(succ);
-      }
     }
   }
 
-  return false;
+  return (m_hb_cache[{i1, i2}] = false);
 }
 
 
@@ -1287,52 +1313,77 @@ void MHPAnalysis::computeAtomicHappensBefore() {
   m_atomic_hb_pairs.clear();
   size_t pairs_found = 0;
 
-  // Phase 2: Find release-acquire pairs for synchronizing variables
-  // A release operation synchronizes with an acquire operation on the same variable
-  for (const Instruction *release_inst : m_atomic_instructions) {
-    auto release_order = Cpp11Atomics::getMemoryOrder(release_inst);
-    // Check if this instruction has release semantics
-    bool has_release = (release_order == Cpp11Atomics::MemoryOrder::Release ||
-                        release_order == Cpp11Atomics::MemoryOrder::AcquireRelease ||
-                        release_order == Cpp11Atomics::MemoryOrder::SequentiallyConsistent);
-    
-    // Must be a store (or RMW/cmpxchg which includes store semantics)
-    if (!Cpp11Atomics::isStore(release_inst) || !has_release) {
-      continue;
-    }
+  // Phase 2: Find release-acquire pairs for synchronizing variables.
+  // This used to be O(#atomic_insts^2). We reduce AA queries by bucketing
+  // by atomic pointer value and querying aliasing per-pointer-bucket pair.
+  using InstVec = std::vector<const Instruction *>;
+  std::unordered_map<const Value *, InstVec> releasesByPtr;
+  std::unordered_map<const Value *, InstVec> acquiresByPtr;
+  releasesByPtr.reserve(m_atomic_instructions.size());
+  acquiresByPtr.reserve(m_atomic_instructions.size());
 
-    for (const Instruction *acquire_inst : m_atomic_instructions) {
-      auto acquire_order = Cpp11Atomics::getMemoryOrder(acquire_inst);
-      // Check if this instruction has acquire semantics
-      bool has_acquire = (acquire_order == Cpp11Atomics::MemoryOrder::Acquire ||
-                          acquire_order == Cpp11Atomics::MemoryOrder::AcquireRelease ||
-                          acquire_order == Cpp11Atomics::MemoryOrder::SequentiallyConsistent);
-      
-      // Must be a load (or RMW/cmpxchg which includes load semantics)
-      if (!Cpp11Atomics::isLoad(acquire_inst) || !has_acquire) {
+  auto canonPtr = [](const Value *p) -> const Value * {
+    return p ? p->stripPointerCasts() : nullptr;
+  };
+
+  for (const Instruction *inst : m_atomic_instructions) {
+    const Value *ptr = canonPtr(Cpp11Atomics::getAtomicPointer(inst));
+    if (!ptr) continue;
+
+    const auto mo = Cpp11Atomics::getMemoryOrder(inst);
+    const bool has_release = (mo == Cpp11Atomics::MemoryOrder::Release ||
+                              mo == Cpp11Atomics::MemoryOrder::AcquireRelease ||
+                              mo == Cpp11Atomics::MemoryOrder::SequentiallyConsistent);
+    const bool has_acquire = (mo == Cpp11Atomics::MemoryOrder::Acquire ||
+                              mo == Cpp11Atomics::MemoryOrder::AcquireRelease ||
+                              mo == Cpp11Atomics::MemoryOrder::SequentiallyConsistent);
+
+    if (Cpp11Atomics::isStore(inst) && has_release)
+      releasesByPtr[ptr].push_back(inst);
+    if (Cpp11Atomics::isLoad(inst) && has_acquire)
+      acquiresByPtr[ptr].push_back(inst);
+  }
+
+  std::vector<const Value *> releasePtrs;
+  std::vector<const Value *> acquirePtrs;
+  releasePtrs.reserve(releasesByPtr.size());
+  acquirePtrs.reserve(acquiresByPtr.size());
+  for (auto &kv : releasesByPtr) releasePtrs.push_back(kv.first);
+  for (auto &kv : acquiresByPtr) acquirePtrs.push_back(kv.first);
+
+  auto addEdge = [&](const Instruction *release_inst, const Instruction *acquire_inst) {
+    if (isInSameThread(release_inst, acquire_inst))
+      return;
+    m_atomic_hb_pairs.insert({release_inst, acquire_inst});
+    SyncNode *release_node = m_tfg->getNode(release_inst);
+    SyncNode *acquire_node = m_tfg->getNode(acquire_inst);
+    if (release_node && acquire_node)
+      m_tfg->addInterThreadEdge(release_node, acquire_node);
+    ++pairs_found;
+  };
+
+  // First, handle identical-pointer buckets without AA queries.
+  for (const Value *p : releasePtrs) {
+    auto itA = acquiresByPtr.find(p);
+    if (itA == acquiresByPtr.end()) continue;
+    const InstVec &rels = releasesByPtr[p];
+    const InstVec &acqs = itA->second;
+    for (const Instruction *r : rels)
+      for (const Instruction *a : acqs)
+        addEdge(r, a);
+  }
+
+  // Then, handle cross-pointer aliasing (AA query per pointer-pair).
+  for (const Value *rp : releasePtrs) {
+    for (const Value *ap : acquirePtrs) {
+      if (rp == ap) continue; // already handled
+      if (m_alias_analysis && !m_alias_analysis->mayAlias(rp, ap))
         continue;
-      }
-      
-      if (isInSameThread(release_inst, acquire_inst)) {
-          continue;
-      }
-
-      const Value *ptr1 = Cpp11Atomics::getAtomicPointer(release_inst);
-      const Value *ptr2 = Cpp11Atomics::getAtomicPointer(acquire_inst);
-      if (ptr1 && ptr2 && m_alias_analysis->mayAlias(ptr1, ptr2)) {
-        // Only a reads-from relation establishes synchronization. Without it,
-        // we cannot add a must-HB edge for sound MHP.
-        m_atomic_hb_pairs.insert({release_inst, acquire_inst});
-        
-        // Add edge to Thread Flow Graph so that hasHappenBeforeRelation can find it
-        SyncNode *release_node = m_tfg->getNode(release_inst);
-        SyncNode *acquire_node = m_tfg->getNode(acquire_inst);
-        if (release_node && acquire_node) {
-          m_tfg->addInterThreadEdge(release_node, acquire_node);
-        }
-        
-        pairs_found++;
-      }
+      const InstVec &rels = releasesByPtr[rp];
+      const InstVec &acqs = acquiresByPtr[ap];
+      for (const Instruction *r : rels)
+        for (const Instruction *a : acqs)
+          addEdge(r, a);
     }
   }
 

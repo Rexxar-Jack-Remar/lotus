@@ -89,25 +89,33 @@ void ConcurrencyAnalysisDumper::dumpText(raw_ostream& os, DebugInfoAnalysis& deb
     os << "=== May-Happen-in-Parallel (MHP) Pairs ===\n";
     size_t mhpPairCount = 0;
     const size_t maxMhpPairsToShow = 100; // Limit output size
-    
+    const size_t maxMhpChecks = 200000;   // Limit query work
+    size_t mhpChecks = 0;
+
+    std::vector<const Instruction*> allInsts;
     for (Function& func : m_module) {
         if (func.isDeclaration()) continue;
-        
-        for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
-            const Instruction* inst1 = &*I;
-            
-            // Get instructions that may run in parallel with this one
-            auto parallelInsts = m_mhpAnalysis->getParallelInstructions(inst1);
-            
-            for (const Instruction* inst2 : parallelInsts) {
-                // Only show each pair once (inst1 < inst2 by pointer comparison)
-                if (inst1 >= inst2) continue;
-                
-                if (mhpPairCount++ >= maxMhpPairsToShow) {
-                    os << "... (showing first " << maxMhpPairsToShow << " MHP pairs)\n";
-                    goto mhp_done;
-                }
-                
+        for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I)
+            allInsts.push_back(&*I);
+    }
+    
+    for (size_t i = 0; i < allInsts.size(); ++i) {
+        const Instruction* inst1 = allInsts[i];
+        for (size_t j = i + 1; j < allInsts.size(); ++j) {
+            if (mhpPairCount >= maxMhpPairsToShow) {
+                os << "... (showing first " << maxMhpPairsToShow << " MHP pairs)\n";
+                goto mhp_done;
+            }
+            if (mhpChecks++ >= maxMhpChecks) {
+                os << "... (stopped after " << maxMhpChecks << " MHP queries)\n";
+                goto mhp_done;
+            }
+
+            const Instruction* inst2 = allInsts[j];
+            if (!m_mhpAnalysis->mayHappenInParallel(inst1, inst2))
+                continue;
+            ++mhpPairCount;
+
                 std::string func1 = debugInfo.getFunctionName(inst1);
                 std::string func2 = debugInfo.getFunctionName(inst2);
                 std::string loc1 = improveLocation(inst1, debugInfo, func1);
@@ -155,7 +163,6 @@ void ConcurrencyAnalysisDumper::dumpText(raw_ostream& os, DebugInfoAnalysis& deb
                     os << "    Thread 2 ID: " << tid2 << "\n";
                 }
                 os << "\n";
-            }
         }
     }
 mhp_done:
@@ -437,19 +444,27 @@ void ConcurrencyAnalysisDumper::dumpJSON(raw_ostream& os, DebugInfoAnalysis& deb
     os << "  \"mhp_pairs\": [\n";
     size_t mhpPairCount = 0;
     const size_t maxMhpPairsToShow = 1000;
+    const size_t maxMhpChecks = 500000;
+    size_t mhpChecks = 0;
     bool firstMhp = true;
     
+    std::vector<const Instruction*> allInsts;
     for (Function& func : m_module) {
         if (func.isDeclaration()) continue;
-        
-        for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
-            const Instruction* inst1 = &*I;
-            auto parallelInsts = m_mhpAnalysis->getParallelInstructions(inst1);
-            
-            for (const Instruction* inst2 : parallelInsts) {
-                if (inst1 >= inst2) continue;
-                if (mhpPairCount++ >= maxMhpPairsToShow) goto mhp_json_done;
-                
+        for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I)
+            allInsts.push_back(&*I);
+    }
+
+    for (size_t i = 0; i < allInsts.size(); ++i) {
+        const Instruction* inst1 = allInsts[i];
+        for (size_t j = i + 1; j < allInsts.size(); ++j) {
+            if (mhpPairCount >= maxMhpPairsToShow) goto mhp_json_done;
+            if (mhpChecks++ >= maxMhpChecks) goto mhp_json_done;
+            const Instruction* inst2 = allInsts[j];
+            if (!m_mhpAnalysis->mayHappenInParallel(inst1, inst2))
+                continue;
+            ++mhpPairCount;
+
                 if (!firstMhp) os << ",\n";
                 firstMhp = false;
                 
@@ -510,7 +525,6 @@ void ConcurrencyAnalysisDumper::dumpJSON(raw_ostream& os, DebugInfoAnalysis& deb
                 os << "        \"type\": \"" << (isa<LoadInst>(inst2) ? "load" : isa<StoreInst>(inst2) ? "store" : "other") << "\"\n";
                 os << "      }\n";
                 os << "    }";
-            }
         }
     }
 mhp_json_done:

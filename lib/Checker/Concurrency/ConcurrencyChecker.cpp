@@ -66,10 +66,18 @@ void ConcurrencyChecker::runAnalyses() {
         m_stats.mhpPairs = m_mhpAnalysis->getStatistics().num_mhp_pairs;
     }
 
-    if (needLockSet) {
+    // Prefer reusing the lockset computed inside MHPAnalysis (avoids duplicate work).
+    m_locksetAnalysisView = nullptr;
+    if (needMHP && needLockSet && m_mhpAnalysis && m_mhpAnalysis->getLockSetAnalysis()) {
+        m_locksetAnalysisView = m_mhpAnalysis->getLockSetAnalysis();
+        m_stats.locksAnalyzed = m_locksetAnalysisView->getStatistics().num_locks;
+    } else if (needLockSet) {
         m_locksetAnalysis = std::make_unique<LockSetAnalysis>(m_module);
+        if (m_aliasAnalysis)
+            m_locksetAnalysis->setAliasAnalysis(m_aliasAnalysis);
         m_locksetAnalysis->analyze();
-        m_stats.locksAnalyzed = m_locksetAnalysis->getStatistics().num_locks;
+        m_locksetAnalysisView = m_locksetAnalysis.get();
+        m_stats.locksAnalyzed = m_locksetAnalysisView->getStatistics().num_locks;
     }
 
     if (needEscape) {
@@ -80,20 +88,27 @@ void ConcurrencyChecker::runAnalyses() {
     if (needHappensBefore && m_mhpAnalysis) {
         m_happensBeforeAnalysis = std::make_unique<HappensBeforeAnalysis>(m_module, *m_mhpAnalysis);
         m_happensBeforeAnalysis->analyze();
-        if (m_aliasAnalysis)
-            m_happensBeforeAnalysis->setAliasAnalysis(m_aliasAnalysis);
+        lotus::AliasAnalysisWrapper* aa = m_aliasAnalysis;
+        if (!aa)
+            aa = m_mhpAnalysis->getAliasAnalysis();
+        if (aa)
+            m_happensBeforeAnalysis->setAliasAnalysis(aa);
     }
 
+    lotus::AliasAnalysisWrapper* aa = m_aliasAnalysis;
+    if (!aa && m_mhpAnalysis)
+        aa = m_mhpAnalysis->getAliasAnalysis();
+
     m_dataRaceChecker = std::make_unique<DataRaceChecker>(
-        m_module, m_mhpAnalysis.get(), m_locksetAnalysis.get(),
-        m_escapeAnalysis.get(), m_aliasAnalysis,
+        m_module, m_mhpAnalysis.get(), m_locksetAnalysisView,
+        m_escapeAnalysis.get(), aa,
         m_happensBeforeAnalysis.get());
-    m_deadlockChecker = std::make_unique<DeadlockChecker>(m_module, m_locksetAnalysis.get(),
+    m_deadlockChecker = std::make_unique<DeadlockChecker>(m_module, m_locksetAnalysisView,
                                                          m_mhpAnalysis.get(), m_threadAPI);
     m_atomicityChecker = std::make_unique<AtomicityChecker>(m_module, m_mhpAnalysis.get(),
-                                                            m_locksetAnalysis.get(), m_threadAPI);
-    m_condVarChecker = std::make_unique<ConditionVariableChecker>(m_module, m_threadAPI, m_locksetAnalysis.get());
-    m_lockMismatchChecker = std::make_unique<LockMismatchChecker>(m_module, m_locksetAnalysis.get(), m_threadAPI);
+                                                            m_locksetAnalysisView, m_threadAPI, aa);
+    m_condVarChecker = std::make_unique<ConditionVariableChecker>(m_module, m_threadAPI, m_locksetAnalysisView);
+    m_lockMismatchChecker = std::make_unique<LockMismatchChecker>(m_module, m_locksetAnalysisView, m_threadAPI);
 }
 
 void ConcurrencyChecker::runChecks() {
@@ -129,7 +144,7 @@ void ConcurrencyChecker::checkDataRaces() {
 }
 
 void ConcurrencyChecker::checkDeadlocks() {
-    if (m_deadlockChecker && m_mhpAnalysis && m_locksetAnalysis) {
+    if (m_deadlockChecker && m_mhpAnalysis && m_locksetAnalysisView) {
         auto reports = m_deadlockChecker->checkDeadlocks();
         m_stats.deadlocksFound = reports.size();
         for (const auto& report : reports) {
@@ -139,7 +154,7 @@ void ConcurrencyChecker::checkDeadlocks() {
 }
 
 void ConcurrencyChecker::checkAtomicityViolations() {
-    if (m_atomicityChecker && m_mhpAnalysis && m_locksetAnalysis) {
+    if (m_atomicityChecker && m_mhpAnalysis && m_locksetAnalysisView) {
         auto reports = m_atomicityChecker->checkAtomicityViolations();
         m_stats.atomicityViolationsFound = reports.size();
         for (const auto& report : reports) {
@@ -149,7 +164,7 @@ void ConcurrencyChecker::checkAtomicityViolations() {
 }
 
 void ConcurrencyChecker::checkConditionVariables() {
-    if (m_condVarChecker && m_locksetAnalysis) {
+    if (m_condVarChecker && m_locksetAnalysisView) {
         auto reports = m_condVarChecker->checkConditionVariables();
         m_stats.condVarBugsFound = reports.size();
         for (const auto& report : reports) {
@@ -159,7 +174,7 @@ void ConcurrencyChecker::checkConditionVariables() {
 }
 
 void ConcurrencyChecker::checkLockMismatches() {
-    if (m_lockMismatchChecker && m_locksetAnalysis) {
+    if (m_lockMismatchChecker && m_locksetAnalysisView) {
         auto reports = m_lockMismatchChecker->checkLockMisuse();
         m_stats.lockMismatchesFound = reports.size();
         for (const auto& report : reports) {
@@ -219,14 +234,14 @@ void ConcurrencyChecker::reportBug(const ConcurrencyBugReport& bug_report, int b
 }
 
 void ConcurrencyChecker::dumpAnalysisResults(raw_ostream& os, bool jsonFormat) const {
-    if (!m_mhpAnalysis || !m_locksetAnalysis) {
+    if (!m_mhpAnalysis || !m_locksetAnalysisView) {
         os << "No analysis results (runAnalyses() not run or no analyses enabled).\n";
         return;
     }
     ConcurrencyAnalysisDumper dumper(
         m_module,
         m_mhpAnalysis.get(),
-        m_locksetAnalysis.get(),
+        m_locksetAnalysisView,
         m_escapeAnalysis.get(),
         m_threadAPI
     );

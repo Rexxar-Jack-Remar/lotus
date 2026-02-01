@@ -85,6 +85,10 @@ public:
         m_aliasAnalysis = aa;
         if (m_happensBeforeAnalysis)
             m_happensBeforeAnalysis->setAliasAnalysis(aa);
+        if (m_locksetAnalysis)
+            m_locksetAnalysis->setAliasAnalysis(aa);
+        if (m_locksetAnalysisView && m_locksetAnalysisView != m_locksetAnalysis.get())
+            m_locksetAnalysisView->setAliasAnalysis(aa);
     }
 
     /**
@@ -128,6 +132,7 @@ private:
     llvm::Module& m_module;
     std::unique_ptr<mhp::MHPAnalysis> m_mhpAnalysis;
     std::unique_ptr<mhp::LockSetAnalysis> m_locksetAnalysis;
+    mhp::LockSetAnalysis* m_locksetAnalysisView = nullptr;
     std::unique_ptr<lotus::EscapeAnalysis> m_escapeAnalysis;
     std::unique_ptr<lotus::HappensBeforeAnalysis> m_happensBeforeAnalysis;
     lotus::AliasAnalysisWrapper* m_aliasAnalysis;

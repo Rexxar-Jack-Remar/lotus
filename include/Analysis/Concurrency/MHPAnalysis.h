@@ -151,6 +151,9 @@ public:
   // Main analysis entry point
   void analyze();
 
+  // Alias analysis used internally (also useful for other analyses/checkers).
+  lotus::AliasAnalysisWrapper *getAliasAnalysis() const { return m_alias_analysis.get(); }
+
   // ========================================================================
   // Query Interface
   // ========================================================================
@@ -258,11 +261,28 @@ public:
   LockSetAnalysis *getLockSetAnalysis() const { return m_lockset.get(); }
   void enableLockSetAnalysis();
 
+  // Optional: precompute and store the full MHP pair relation.
+  // Warning: can be O(N^2) in number of instructions.
+  void enableMHPPrecomputation(bool enable = true) { m_precompute_mhp_pairs = enable; }
+
   // Visualization
   void dumpThreadFlowGraph(const std::string &filename) const;
   void dumpMHPMatrix(llvm::raw_ostream &os) const;
 
 private:
+  struct InstPair {
+    const llvm::Instruction *a;
+    const llvm::Instruction *b;
+    bool operator==(const InstPair &o) const { return a == o.a && b == o.b; }
+  };
+  struct InstPairHash {
+    size_t operator()(const InstPair &p) const {
+      size_t h1 = std::hash<const void *>{}(p.a);
+      size_t h2 = std::hash<const void *>{}(p.b);
+      return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
+    }
+  };
+
   llvm::Module &m_module;
   ThreadAPI *m_thread_api;
 
@@ -273,6 +293,7 @@ private:
   
   // Configuration
   bool m_enable_lockset_analysis = false;
+  bool m_precompute_mhp_pairs = false;
 
   // MHP results
   std::set<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
@@ -337,6 +358,10 @@ private:
       m_dom_cache;
   mutable std::unordered_map<const llvm::Function *, std::unique_ptr<llvm::PostDominatorTree>>
       m_post_dom_cache;
+
+  // Query caches (keyed by instruction pointer identity).
+  mutable std::unordered_map<InstPair, bool, InstPairHash> m_hb_cache;
+  mutable std::unordered_map<InstPair, bool, InstPairHash> m_mhp_cache;
 
   // ========================================================================
   // Analysis Phases
