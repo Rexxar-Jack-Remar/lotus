@@ -15,6 +15,13 @@
 - **StaticThreadSharingAnalysis**: Analyzes which memory locations are shared between threads using static analysis.
 - **MemUseDefAnalysis**: Performs memory use-def analysis based on MemorySSA to track memory dependencies.
 - **EscapeAnalysis**: Determines which values escape their thread-local scope and become shared between threads.
+- **JoinTargetAnalysis**: For each pthread_join, computes the set of pthread_create calls that may be joined (join's arg0 may alias fork's arg0). Supports unambiguous-join reasoning for MHP refinement.
+
+
+## Data-race checker (Ultimate borrows)
+
+- **Sync object exclusion**: Accesses to lock/cond/barrier objects (first arg of pthread_mutex_*, pthread_cond_*, pthread_barrier_*) are excluded from race checking.
+- **Data-race report schema**: ConcurrencyBugReport supports optional **DataRaceInfo** (access path, read/write, conflicting pair) for witness/SARIF.
 
 
 ## Limitations

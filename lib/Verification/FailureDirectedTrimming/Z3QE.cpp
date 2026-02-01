@@ -1,3 +1,6 @@
+// Optional quantifier elimination for trimming conditions (paper §6 Eliminating quantifiers).
+// Negation of safety conditions yields ∃ from ∀ (havoc); Z3 QE eliminates existentials
+// to reduce nondeterminism in inserted assume conditions.
 #include "FailureDirectedTrimmingImpl.h"
 
 #include <llvm/IR/DerivedTypes.h>
@@ -9,12 +12,7 @@
 
 using namespace llvm;
 
-// Optional quantifier elimination for trimming conditions using Z3.
-//
-// The trimming pipeline often introduces existential quantifiers when negating
-// safety conditions (because havoc is represented with universal quantification
-// in the safety-condition analysis). Z3QE attempts to eliminate those exists
-// binders to reduce nondeterminism in the inserted assume conditions.
+// Z3-based QE: eliminate exists binders from trimming conditions (paper §6, first alternative).
 
 namespace {
 
@@ -169,6 +167,166 @@ struct Z3QESession {
     case ExprKind::Mul:
       Out = toZ3(E->Args[0]) * toZ3(E->Args[1]);
       break;
+    case ExprKind::BAnd: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.band." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast; // UF is never decoded in math mode
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvand(Ctx, A, B));
+      }
+      break;
+    }
+    case ExprKind::BOr: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.bor." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast;
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvor(Ctx, A, B));
+      }
+      break;
+    }
+    case ExprKind::BXor: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.bxor." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast;
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvxor(Ctx, A, B));
+      }
+      break;
+    }
+    case ExprKind::Shl: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.shl." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast;
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvshl(Ctx, A, B));
+      }
+      break;
+    }
+    case ExprKind::LShr: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.lshr." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast;
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvlshr(Ctx, A, B));
+      }
+      break;
+    }
+    case ExprKind::AShr: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.ashr." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast;
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvashr(Ctx, A, B));
+      }
+      break;
+    }
+    case ExprKind::UDiv: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.udiv." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast;
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvudiv(Ctx, A, B));
+      }
+      break;
+    }
+    case ExprKind::SDiv: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.sdiv." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast;
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvsdiv(Ctx, A, B));
+      }
+      break;
+    }
+    case ExprKind::URem: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.urem." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast;
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvurem(Ctx, A, B));
+      }
+      break;
+    }
+    case ExprKind::SRem: {
+      z3::expr A = toZ3(E->Args[0]);
+      z3::expr B = toZ3(E->Args[1]);
+      if (IntSem == Z3IntSemanticsKind::Math) {
+        std::string Name =
+            "fdtrim.srem." + std::to_string(reinterpret_cast<uintptr_t>(E->Ty));
+        Z3UFInfo Info;
+        Info.K = Z3UFInfo::Kind::Cast;
+        z3::func_decl D = uf(Name, sortOf(E->Ty), {sortOf(E->Ty), sortOf(E->Ty)},
+                             Info);
+        Out = D(A, B);
+      } else {
+        Out = z3::to_expr(Ctx, Z3_mk_bvsrem(Ctx, A, B));
+      }
+      break;
+    }
     case ExprKind::ICmp: {
       z3::expr A = toZ3(E->Args[0]);
       z3::expr B = toZ3(E->Args[1]);
@@ -239,6 +397,13 @@ struct Z3QESession {
         }
       };
       Out = mkBVcmp(E->Pred, A, B);
+      break;
+    }
+    case ExprKind::Select: {
+      z3::expr Cond = toZ3(E->Args[0]);
+      z3::expr T = toZ3(E->Args[1]);
+      z3::expr Fv = toZ3(E->Args[2]);
+      Out = z3::ite(Cond, T, Fv);
       break;
     }
     case ExprKind::Deref: {
@@ -415,6 +580,26 @@ struct Z3QESession {
     case Z3_OP_BMUL:
     case Z3_OP_MUL:
       return F.mul(arg(0), arg(1));
+    case Z3_OP_BAND:
+      return F.band(arg(0), arg(1));
+    case Z3_OP_BOR:
+      return F.bor(arg(0), arg(1));
+    case Z3_OP_BXOR:
+      return F.bxor(arg(0), arg(1));
+    case Z3_OP_BSHL:
+      return F.shl(arg(0), arg(1));
+    case Z3_OP_BLSHR:
+      return F.lshr(arg(0), arg(1));
+    case Z3_OP_BASHR:
+      return F.ashr(arg(0), arg(1));
+    case Z3_OP_BUDIV:
+      return F.udiv(arg(0), arg(1));
+    case Z3_OP_BSDIV:
+      return F.sdiv(arg(0), arg(1));
+    case Z3_OP_BUREM:
+      return F.urem(arg(0), arg(1));
+    case Z3_OP_BSREM:
+      return F.srem(arg(0), arg(1));
     case Z3_OP_ULT:
       return F.icmp(CmpInst::ICMP_ULT, arg(0), arg(1));
     case Z3_OP_ULEQ:
@@ -431,6 +616,11 @@ struct Z3QESession {
       return F.icmp(CmpInst::ICMP_SGT, arg(0), arg(1));
     case Z3_OP_SGEQ:
       return F.icmp(CmpInst::ICMP_SGE, arg(0), arg(1));
+    case Z3_OP_ITE: {
+      if (E.num_args() != 3)
+        throw std::runtime_error("ite arity");
+      return F.select(arg(0), arg(1), arg(2));
+    }
     case Z3_OP_UNINTERPRETED: {
       auto UI = UFInfo.find(Name);
       if (UI == UFInfo.end())

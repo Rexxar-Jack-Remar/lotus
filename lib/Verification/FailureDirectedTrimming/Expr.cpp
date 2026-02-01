@@ -223,6 +223,56 @@ ExprRef ExprFactory::mul(ExprRef A, ExprRef B) const {
   return E;
 }
 
+static ExprRef mkBin(ExprKind K, ExprRef A, ExprRef B) {
+  if (!A || !B)
+    return nullptr;
+  auto E = std::make_shared<Expr>();
+  E->Kind = K;
+  E->Ty = A->Ty;
+  E->Args = {A, B};
+  return E;
+}
+
+ExprRef ExprFactory::band(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::BAnd, A, B);
+}
+
+ExprRef ExprFactory::bor(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::BOr, A, B);
+}
+
+ExprRef ExprFactory::bxor(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::BXor, A, B);
+}
+
+ExprRef ExprFactory::shl(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::Shl, A, B);
+}
+
+ExprRef ExprFactory::lshr(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::LShr, A, B);
+}
+
+ExprRef ExprFactory::ashr(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::AShr, A, B);
+}
+
+ExprRef ExprFactory::udiv(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::UDiv, A, B);
+}
+
+ExprRef ExprFactory::sdiv(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::SDiv, A, B);
+}
+
+ExprRef ExprFactory::urem(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::URem, A, B);
+}
+
+ExprRef ExprFactory::srem(ExprRef A, ExprRef B) const {
+  return mkBin(ExprKind::SRem, A, B);
+}
+
 ExprRef ExprFactory::icmp(CmpInst::Predicate P, ExprRef A, ExprRef B) const {
   if (!A || !B)
     return nullptr;
@@ -236,6 +286,16 @@ ExprRef ExprFactory::icmp(CmpInst::Predicate P, ExprRef A, ExprRef B) const {
 
 ExprRef ExprFactory::implies(ExprRef Cond, ExprRef Then) const {
   return or_({not_(Cond), Then});
+}
+
+ExprRef ExprFactory::select(ExprRef Cond, ExprRef T, ExprRef F) const {
+  if (!Cond || !T || !F)
+    return nullptr;
+  auto E = std::make_shared<Expr>();
+  E->Kind = ExprKind::Select;
+  E->Ty = T->Ty;
+  E->Args = {Cond, T, F};
+  return E;
 }
 
 ExprRef ExprFactory::deref(ExprRef Ptr, Type *ValueTy) const {
@@ -359,11 +419,44 @@ std::string exprToString(const ExprRef &E) {
   case ExprKind::Mul:
     return "(" + exprToString(E->Args[0]) + " * " + exprToString(E->Args[1]) +
            ")";
+  case ExprKind::BAnd:
+    return "(" + exprToString(E->Args[0]) + " & " + exprToString(E->Args[1]) +
+           ")";
+  case ExprKind::BOr:
+    return "(" + exprToString(E->Args[0]) + " | " + exprToString(E->Args[1]) +
+           ")";
+  case ExprKind::BXor:
+    return "(" + exprToString(E->Args[0]) + " ^ " + exprToString(E->Args[1]) +
+           ")";
+  case ExprKind::Shl:
+    return "(" + exprToString(E->Args[0]) + " << " + exprToString(E->Args[1]) +
+           ")";
+  case ExprKind::LShr:
+    return "(" + exprToString(E->Args[0]) + " l>> " + exprToString(E->Args[1]) +
+           ")";
+  case ExprKind::AShr:
+    return "(" + exprToString(E->Args[0]) + " a>> " + exprToString(E->Args[1]) +
+           ")";
+  case ExprKind::UDiv:
+    return "(" + exprToString(E->Args[0]) + " u/ " + exprToString(E->Args[1]) +
+           ")";
+  case ExprKind::SDiv:
+    return "(" + exprToString(E->Args[0]) + " s/ " + exprToString(E->Args[1]) +
+           ")";
+  case ExprKind::URem:
+    return "(" + exprToString(E->Args[0]) + " u% " + exprToString(E->Args[1]) +
+           ")";
+  case ExprKind::SRem:
+    return "(" + exprToString(E->Args[0]) + " s% " + exprToString(E->Args[1]) +
+           ")";
   case ExprKind::ICmp: {
     std::string Op = CmpInst::getPredicateName(E->Pred).str();
     return "(" + exprToString(E->Args[0]) + " " + Op + " " +
            exprToString(E->Args[1]) + ")";
   }
+  case ExprKind::Select:
+    return "(select " + exprToString(E->Args[0]) + " ? " +
+           exprToString(E->Args[1]) + " : " + exprToString(E->Args[2]) + ")";
   case ExprKind::Deref:
     return "(*" + exprToString(E->Args[0]) + ")";
   case ExprKind::Cast:
@@ -413,10 +506,22 @@ bool exprEquals(const ExprRef &A, const ExprRef &B) {
   case ExprKind::Add:
   case ExprKind::Sub:
   case ExprKind::Mul:
+  case ExprKind::BAnd:
+  case ExprKind::BOr:
+  case ExprKind::BXor:
+  case ExprKind::Shl:
+  case ExprKind::LShr:
+  case ExprKind::AShr:
+  case ExprKind::UDiv:
+  case ExprKind::SDiv:
+  case ExprKind::URem:
+  case ExprKind::SRem:
     break;
   case ExprKind::ICmp:
     if (A->Pred != B->Pred)
       return false;
+    break;
+  case ExprKind::Select:
     break;
   case ExprKind::Deref:
     if (A->DerefValueTy != B->DerefValueTy)
@@ -544,7 +649,18 @@ static ExprRef substituteImpl(const ExprFactory &F, const ExprRef &E,
   case ExprKind::Add:
   case ExprKind::Sub:
   case ExprKind::Mul:
+  case ExprKind::BAnd:
+  case ExprKind::BOr:
+  case ExprKind::BXor:
+  case ExprKind::Shl:
+  case ExprKind::LShr:
+  case ExprKind::AShr:
+  case ExprKind::UDiv:
+  case ExprKind::SDiv:
+  case ExprKind::URem:
+  case ExprKind::SRem:
   case ExprKind::ICmp:
+  case ExprKind::Select:
   case ExprKind::Deref:
   case ExprKind::Cast:
   case ExprKind::Gep: {
@@ -560,8 +676,30 @@ static ExprRef substituteImpl(const ExprFactory &F, const ExprRef &E,
       Out = F.sub(Kids[0], Kids[1]);
     else if (E->Kind == ExprKind::Mul)
       Out = F.mul(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::BAnd)
+      Out = F.band(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::BOr)
+      Out = F.bor(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::BXor)
+      Out = F.bxor(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::Shl)
+      Out = F.shl(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::LShr)
+      Out = F.lshr(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::AShr)
+      Out = F.ashr(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::UDiv)
+      Out = F.udiv(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::SDiv)
+      Out = F.sdiv(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::URem)
+      Out = F.urem(Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::SRem)
+      Out = F.srem(Kids[0], Kids[1]);
     else if (E->Kind == ExprKind::ICmp)
       Out = F.icmp(E->Pred, Kids[0], Kids[1]);
+    else if (E->Kind == ExprKind::Select)
+      Out = F.select(Kids[0], Kids[1], Kids[2]);
     else if (E->Kind == ExprKind::Deref)
       Out = F.deref(Kids[0], E->DerefValueTy);
     else if (E->Kind == ExprKind::Cast)
@@ -624,16 +762,10 @@ void collectPointerVars(const ExprRef &E, SmallVectorImpl<const Value *> &Out) {
     collectPointerVars(C, Out);
 }
 
+// Paper §5: trimming condition = ¬(safety condition). De Morgan for ∧/∨;
+// quantifier flip: ¬∀x.φ → ∃x.¬φ, ¬∃x.φ → ∀x.¬φ (safety uses ∀ for havoc; negation yields ∃).
 ExprRef negateForTrimming(const ExprFactory &F, const ExprRef &E) {
-  // Negation used to turn a safety condition into a trimming condition.
-  //
-  // This is more than just wrapping with Not:
-  //   - it applies De Morgan over And/Or
-  //   - it flips quantifiers (¬∀x.φ = ∃x.¬φ, ¬∃x.φ = ∀x.¬φ)
-  //
-  // Flipping quantifiers is important: the safety-condition analysis uses
-  // universal quantification to represent havoc; after negation, existentials
-  // appear and must be eliminated before we can emit assume(...) code.
+  // Turn SC(π) into TC(π) = ¬SC(π). Existentials must be eliminated before codegen (QE or nondet).
   if (!E)
     return nullptr;
   switch (E->Kind) {
@@ -666,12 +798,10 @@ ExprRef negateForTrimming(const ExprFactory &F, const ExprRef &E) {
   }
 }
 
+// Paper §6 Bounding the instrumentation: cap conjuncts so simplified formula is weaker than
+// original (subset of conjuncts ⇒ weaker trimming condition ⇒ prune fewer paths, still sound).
 ExprRef boundConjuncts(const ExprFactory &F, const ExprRef &E, unsigned Max) {
-  // Caps the size of an And(...) formula by keeping only the first Max conjuncts
-  // in lexicographic order of exprToString.
-  //
-  // This is a precision knob that keeps inserted assume conditions smaller and
-  // typically more solver-friendly, at the cost of pruning fewer safe paths.
+  // Keep at most Max conjuncts (lex order of exprToString). Smaller assumes, less pruning.
   if (!E || Max == 0)
     return E;
   if (E->Kind != ExprKind::And)

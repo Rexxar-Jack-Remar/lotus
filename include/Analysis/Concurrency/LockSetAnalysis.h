@@ -19,8 +19,8 @@
  * - Reentrant lock handling
  * - Support for try-lock operations
  * 
- * @author Lotus Analysis Framework
- * @date 2025
+ * @author rainoftime
+ * @date 2026
  */
 
 #ifndef LOCKSET_ANALYSIS_H
@@ -122,18 +122,36 @@ public:
   // ========================================================================
 
   /**
-   * @brief Get locks that may be held at instruction
+   * @brief Get locks that may be held at instruction (union of read + write)
    * @param inst Target instruction
    * @return Set of locks that may be held
    */
   LockSet getMayLockSetAt(const llvm::Instruction *inst) const;
 
   /**
+   * @brief Get read locks that may be held (rwlock_rdlock)
+   */
+  LockSet getMayReadLockSetAt(const llvm::Instruction *inst) const;
+
+  /**
+   * @brief Get write locks that may be held (mutex or rwlock_wrlock)
+   */
+  LockSet getMayWriteLockSetAt(const llvm::Instruction *inst) const;
+
+  /**
    * @brief Get locks that must be held at instruction
-   * @param inst Target instruction
-   * @return Set of locks that must be held
    */
   LockSet getMustLockSetAt(const llvm::Instruction *inst) const;
+
+  /**
+   * @brief Get read locks that must be held
+   */
+  LockSet getMustReadLockSetAt(const llvm::Instruction *inst) const;
+
+  /**
+   * @brief Get write locks that must be held
+   */
+  LockSet getMustWriteLockSetAt(const llvm::Instruction *inst) const;
 
   /**
    * @brief Check if a lock may be held at instruction
@@ -160,7 +178,8 @@ public:
   getInstructionsHoldingLock(LockID lock) const;
 
   /**
-   * @brief Check if two instructions may hold a common lock
+   * @brief Check if two instructions may hold a common lock (mutex or rwlock).
+   * For rwlocks: true if both hold same lock in write mode, or both in read mode.
    * @param i1 First instruction
    * @param i2 Second instruction
    * @return true if they may hold a common lock
@@ -272,11 +291,19 @@ private:
   lotus::AliasAnalysisWrapper *m_alias_analysis;
   llvm::CallGraph *m_call_graph;  // For interprocedural analysis
 
-  // Lockset results
+  // Lockset results (combined for backward compat; read/write for rwlock)
   std::unordered_map<const llvm::Instruction *, LockSet> m_may_locksets_entry;
   std::unordered_map<const llvm::Instruction *, LockSet> m_may_locksets_exit;
   std::unordered_map<const llvm::Instruction *, LockSet> m_must_locksets_entry;
   std::unordered_map<const llvm::Instruction *, LockSet> m_must_locksets_exit;
+  std::unordered_map<const llvm::Instruction *, LockSet> m_may_read_locks_entry;
+  std::unordered_map<const llvm::Instruction *, LockSet> m_may_read_locks_exit;
+  std::unordered_map<const llvm::Instruction *, LockSet> m_may_write_locks_entry;
+  std::unordered_map<const llvm::Instruction *, LockSet> m_may_write_locks_exit;
+  std::unordered_map<const llvm::Instruction *, LockSet> m_must_read_locks_entry;
+  std::unordered_map<const llvm::Instruction *, LockSet> m_must_read_locks_exit;
+  std::unordered_map<const llvm::Instruction *, LockSet> m_must_write_locks_entry;
+  std::unordered_map<const llvm::Instruction *, LockSet> m_must_write_locks_exit;
 
   // Lock tracking
   std::unordered_set<LockID> m_all_locks;
@@ -339,14 +366,17 @@ private:
   void computeInterproceduralLockSets();
 
   /**
-   * @brief Transfer function for lockset analysis
-   * @param inst Instruction
-   * @param in_set Input lockset
-   * @param is_must True for must-analysis, false for may-analysis
-   * @return Output lockset
+   * @brief Transfer function for lockset analysis (combined set for backward compat)
    */
   LockSet transfer(const llvm::Instruction *inst, const LockSet &in_set,
                    bool is_must) const;
+
+  /**
+   * @brief Transfer for read/write locks (rdlock, wrlock, unlock)
+   */
+  void transferReadWrite(const llvm::Instruction *inst,
+                         const LockSet &in_read, const LockSet &in_write,
+                         LockSet &out_read, LockSet &out_write, bool is_must) const;
 
   /**
    * @brief Merge locksets from multiple predecessors

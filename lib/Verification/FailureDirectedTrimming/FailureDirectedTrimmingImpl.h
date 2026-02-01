@@ -2,18 +2,17 @@
  * Internal implementation details for FailureDirectedTrimming.
  * Shared types and declarations across FDTrim .cpp sources.
  *
- * This module implements the "safety conditions → trimming conditions" pipeline
- * from Ferles et al. (ESEC/FSE'17):
- *   - Safety condition: sufficient condition for avoiding assertion failure
- *     from a program point onward.
- *   - Trimming condition: negation of the safety condition, inserted as an
- *     assume(...) to prune provably safe paths while preserving equi-safety.
+ * Implements the "safety conditions → trimming conditions" pipeline from
+ * Ferles et al., ESEC/FSE'17 (paper §4 Static Analysis, §5 Program Instrumentation):
+ *   - Safety condition (paper: φ s.t. φ ⇒ wp(s, true)): sufficient condition
+ *     for avoiding assertion failure from a program point onward.
+ *   - Trimming condition = ¬(safety condition) (paper §5): necessary for failure;
+ *     inserted as assume(...) to prune provably safe paths (Theorem 5.1).
  *
- * Core invariants produced by computeSafetyConditions():
- *   - BeforeInst[I] is a sufficient condition that must hold immediately before
- *     executing instruction I for the remainder of the (terminating) execution
- *     to be free of assertion failures.
- *   - Summary is the entry condition (a function summary) used at callsites.
+ * Core invariants from computeSafetyConditions() (paper Figure 3, rules (1)–(10)):
+ *   - BeforeInst[I]: sufficient condition immediately before I.
+ *   - PreAfterPhi[BB]: condition at block entry after PHIs (for edge transfer).
+ *   - Summary: procedure summary Υ(prc) used at callsites (rule (6), Def. Procedure summary).
  */
 #ifndef VERIFICATION_FAILUREDIRECTEDTRIMMING_IMPL_H
 #define VERIFICATION_FAILUREDIRECTEDTRIMMING_IMPL_H
@@ -76,9 +75,11 @@ extern cl::opt<unsigned> FDTrimQETTimeoutMs;
 extern cl::opt<std::string> FDTrimIntSemantics;
 extern cl::opt<std::string> FDTrimDerefMode;
 extern cl::opt<std::string> FDTrimAA;
+extern cl::opt<bool> FDTrimModelUBOps;
 
 // -----------------------------------------------------------------------------
-// Expression language for safety/trimming conditions
+// Expression language for safety/trimming conditions (paper §4.1: predicates
+// p, expressions e; we add drf(α) for heap, Forall/Exists for havoc/negation)
 // -----------------------------------------------------------------------------
 enum class ExprKind : uint8_t {
   BoolConst,
@@ -91,7 +92,18 @@ enum class ExprKind : uint8_t {
   Add,
   Sub,
   Mul,
+  BAnd,
+  BOr,
+  BXor,
+  Shl,
+  LShr,
+  AShr,
+  UDiv,
+  SDiv,
+  URem,
+  SRem,
   ICmp,
+  Select,
   Deref,
   Cast,
   Gep,
@@ -135,8 +147,19 @@ struct ExprFactory {
   ExprRef add(ExprRef A, ExprRef B) const;
   ExprRef sub(ExprRef A, ExprRef B) const;
   ExprRef mul(ExprRef A, ExprRef B) const;
+  ExprRef band(ExprRef A, ExprRef B) const;
+  ExprRef bor(ExprRef A, ExprRef B) const;
+  ExprRef bxor(ExprRef A, ExprRef B) const;
+  ExprRef shl(ExprRef A, ExprRef B) const;
+  ExprRef lshr(ExprRef A, ExprRef B) const;
+  ExprRef ashr(ExprRef A, ExprRef B) const;
+  ExprRef udiv(ExprRef A, ExprRef B) const;
+  ExprRef sdiv(ExprRef A, ExprRef B) const;
+  ExprRef urem(ExprRef A, ExprRef B) const;
+  ExprRef srem(ExprRef A, ExprRef B) const;
   ExprRef icmp(CmpInst::Predicate P, ExprRef A, ExprRef B) const;
   ExprRef implies(ExprRef Cond, ExprRef Then) const;
+  ExprRef select(ExprRef Cond, ExprRef T, ExprRef F) const;
   ExprRef deref(ExprRef Ptr, Type *ValueTy) const;
   ExprRef cast(Instruction::CastOps Op, Type *DstTy, ExprRef Src) const;
   ExprRef gep(Type *SourceEltTy, bool InBounds, ExprRef BasePtr,
@@ -169,16 +192,20 @@ struct Subst {
   DenseMap<uint32_t, ExprRef> Bound;
 };
 
+/// Result of safety-condition analysis for one function (paper Figure 3).
+/// Summary = PreAfterPhi[entry], used as callee summary at call sites (rule (10)).
 struct FunctionSCResult {
   ExprRef Summary;
   DenseMap<const Instruction *, ExprRef> BeforeInst;
   DenseMap<const BasicBlock *, ExprRef> PreAfterPhi;
 };
 
+/// Maps each procedure to its safety-condition summary (paper Υ, Def. Procedure summary).
 struct SummaryEnv {
   DenseMap<const Function *, ExprRef> Summaries;
 };
 
+/// hasAsrts(f): true iff f or any (transitive) callee contains an assertion (paper Def. Procedure summary).
 struct HasAsrtsEnv {
   DenseMap<const Function *, bool> HasAsrts;
 };

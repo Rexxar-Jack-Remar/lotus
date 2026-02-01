@@ -1,6 +1,7 @@
 #ifndef HAPPENS_BEFORE_ANALYSIS_H
 #define HAPPENS_BEFORE_ANALYSIS_H
 
+#include "Analysis/Concurrency/Cpp11Atomics.h"
 #include "Analysis/Concurrency/MHPAnalysis.h"
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
@@ -9,6 +10,8 @@
 
 namespace lotus {
 
+class AliasAnalysisWrapper;
+
 class HappensBeforeAnalysis {
 public:
   explicit HappensBeforeAnalysis(llvm::Module &module, mhp::MHPAnalysis &mhp);
@@ -16,7 +19,13 @@ public:
   void analyze();
 
   /**
+   * @brief Set optional alias analysis for synchronizes-with same-location check
+   */
+  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) { m_alias_analysis = aa; }
+
+  /**
    * @brief Check if instruction A happens-before instruction B
+   * Includes program order (TFG) and C11 synchronizes-with from atomics.
    * @param A The first instruction
    * @param B The second instruction
    * @return true if A happens-before B
@@ -24,19 +33,31 @@ public:
   bool happensBefore(const llvm::Instruction *A, const llvm::Instruction *B) const;
 
 private:
+  void buildSynchronizesWith();
+
+  bool sameAtomicLocation(const llvm::Instruction *store_inst,
+                          const llvm::Instruction *load_inst) const;
+
   llvm::Module &m_module;
   mhp::MHPAnalysis &m_mhp;
-  
-  // Vector clock or similar timestamp mechanism could be used here
-  // For static analysis, we often use graph reachability on the TFG
-  
-  // Cache for HB queries
+  lotus::AliasAnalysisWrapper *m_alias_analysis = nullptr;
+
+  /// Pairs (release/seq_cst store, acquire/seq_cst load) on same location
+  std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+      m_sync_with;
+
   struct InstPairHash {
-    size_t operator()(const std::pair<const llvm::Instruction *, const llvm::Instruction *> &p) const {
-      return std::hash<const llvm::Instruction *>()(p.first) ^ std::hash<const llvm::Instruction *>()(p.second);
+    size_t operator()(
+        const std::pair<const llvm::Instruction *, const llvm::Instruction *>
+            &p) const {
+      return std::hash<const llvm::Instruction *>()(p.first) ^
+             std::hash<const llvm::Instruction *>()(p.second);
     }
   };
-  mutable std::unordered_map<std::pair<const llvm::Instruction *, const llvm::Instruction *>, bool, InstPairHash> m_hb_cache;
+  mutable std::unordered_map<
+      std::pair<const llvm::Instruction *, const llvm::Instruction *>, bool,
+      InstPairHash>
+      m_hb_cache;
 };
 
 } // namespace lotus

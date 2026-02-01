@@ -1,3 +1,6 @@
+// Command-line options for failure-directed trimming (paper §6 Implementation).
+// Instrumentation strategy, bound sizes, and QE/nondet for existentials.
+
 #include "FailureDirectedTrimmingImpl.h"
 
 #include <llvm/IR/Attributes.h>
@@ -7,7 +10,7 @@
 using namespace llvm;
 
 // -----------------------------------------------------------------------------
-// Command-line options
+// Command-line options (paper §6: where to instrument, max conjuncts, QE)
 // -----------------------------------------------------------------------------
 cl::opt<bool> FDTrimInstrumentCalls(
     "fdtrim-instrument-calls",
@@ -63,6 +66,11 @@ cl::opt<std::string> FDTrimAA(
     "fdtrim-aa",
     cl::desc("Alias analysis backend for trimming (e.g., seadsa, andersen, tpa)"),
     cl::init("seadsa"));
+
+cl::opt<bool> FDTrimModelUBOps(
+    "fdtrim-model-ub-ops",
+    cl::desc("Model potentially-UB/poisoning integer ops (div/rem/shifts) instead of havocing them"),
+    cl::init(false));
 
 // -----------------------------------------------------------------------------
 // Name predicates and getVerifierAssume

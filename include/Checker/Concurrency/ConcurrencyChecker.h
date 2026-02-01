@@ -1,9 +1,10 @@
 #ifndef CONCURRENCY_CHECKER_H
 #define CONCURRENCY_CHECKER_H
 
-#include "Analysis/Concurrency/MHPAnalysis.h"
 #include "Analysis/Concurrency/EscapeAnalysis.h"
+#include "Analysis/Concurrency/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/LockSetAnalysis.h"
+#include "Analysis/Concurrency/MHPAnalysis.h"
 #include "Checker/Concurrency/AtomicityChecker.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 #include "Checker/Concurrency/ConditionVariableChecker.h"
@@ -74,7 +75,11 @@ public:
     /**
      * @brief Set alias analysis wrapper for better precision
      */
-    void setAliasAnalysis(lotus::AliasAnalysisWrapper* aa) { m_aliasAnalysis = aa; }
+    void setAliasAnalysis(lotus::AliasAnalysisWrapper* aa) {
+        m_aliasAnalysis = aa;
+        if (m_happensBeforeAnalysis)
+            m_happensBeforeAnalysis->setAliasAnalysis(aa);
+    }
 
     /**
      * @brief Enable/disable specific checks
@@ -114,11 +119,11 @@ public:
     void dumpAnalysisResults(llvm::raw_ostream& os, bool jsonFormat = false) const;
 
 private:
-    // Analysis components
     llvm::Module& m_module;
     std::unique_ptr<mhp::MHPAnalysis> m_mhpAnalysis;
     std::unique_ptr<mhp::LockSetAnalysis> m_locksetAnalysis;
     std::unique_ptr<lotus::EscapeAnalysis> m_escapeAnalysis;
+    std::unique_ptr<lotus::HappensBeforeAnalysis> m_happensBeforeAnalysis;
     lotus::AliasAnalysisWrapper* m_aliasAnalysis;
     ThreadAPI* m_threadAPI;
 

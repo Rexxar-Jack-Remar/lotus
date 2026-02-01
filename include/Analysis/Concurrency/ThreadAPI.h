@@ -63,6 +63,8 @@ public:
     TD_ACQUIRE,     ///< Acquire a lock (e.g., pthread_mutex_lock)
     TD_TRY_ACQUIRE, ///< Try to acquire a lock without blocking (e.g.,
                     ///< pthread_mutex_trylock)
+    TD_RWLOCK_RDLOCK, ///< Acquire read lock (e.g., pthread_rwlock_rdlock)
+    TD_RWLOCK_WRLOCK, ///< Acquire write lock (e.g., pthread_rwlock_wrlock)
     TD_RELEASE,     ///< Release a lock (e.g., pthread_mutex_unlock)
     TD_EXIT,        ///< Exit/kill a thread (e.g., pthread_exit)
     TD_CANCEL,      ///< Cancel a thread by another (e.g., pthread_cancel)
@@ -260,14 +262,18 @@ public:
   }
   //@}
 
-  /// Return true if this call acquire a lock
+  /// Return true if this call acquire a lock (mutex or rwlock read/write)
   //@{
   inline bool isTDAcquire(const Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_ACQUIRE;
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_RDLOCK ||
+           t == TD_RWLOCK_WRLOCK;
   }
 
   inline bool isTDAcquire(const CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_ACQUIRE;
+    TD_TYPE t = getType(getCallee(cb));
+    return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_RDLOCK ||
+           t == TD_RWLOCK_WRLOCK;
   }
   //@}
 
@@ -282,9 +288,29 @@ public:
   }
   //@}
 
+  /// Return true if this call acquires a read lock (rwlock_rdlock)
+  //@{
+  inline bool isReadLockAcquire(const Instruction *inst) const {
+    return getType(getCallee(inst)) == TD_RWLOCK_RDLOCK;
+  }
+  inline bool isReadLockAcquire(const CallBase *cb) const {
+    return getType(getCallee(cb)) == TD_RWLOCK_RDLOCK;
+  }
+  //@}
+
+  /// Return true if this call acquires a write lock (rwlock_wrlock)
+  //@{
+  inline bool isWriteLockAcquire(const Instruction *inst) const {
+    return getType(getCallee(inst)) == TD_RWLOCK_WRLOCK;
+  }
+  inline bool isWriteLockAcquire(const CallBase *cb) const {
+    return getType(getCallee(cb)) == TD_RWLOCK_WRLOCK;
+  }
+  //@}
+
   /// Return lock value
   //@{
-  /// First argument of pthread_mutex_lock/pthread_mutex_unlock
+  /// First argument of pthread_mutex_lock/pthread_mutex_unlock/pthread_rwlock_*
   inline const Value *getLockVal(const Instruction *inst) const {
     assert((isTDAcquire(inst) || isTDRelease(inst)) &&
            "not a lock acquire or release function");

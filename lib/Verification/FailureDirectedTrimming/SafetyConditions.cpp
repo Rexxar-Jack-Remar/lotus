@@ -9,39 +9,31 @@
 
 using namespace llvm;
 
-// Safety condition inference.
+// Safety condition inference (paper §4, Figure 3).
 //
-// The analysis computes formulas that are sufficient for avoiding assertion
-// failures from a given program point onward (assuming the verifier's model
-// where executions terminate when an assert/assume condition is violated).
+// Judgment: Λ, Υ, Φ ⊢ s : Φ'  (with aliasing oracle Λ, summary env Υ; Φ' ⇒ wp(s, Φ) if s terminates).
+// The analysis computes formulas sufficient for avoiding assertion failures from
+// a given program point onward (verifier model: executions terminate on assert/assume violation).
 //
 // Key result maps:
-//   - Res.BeforeInst[I]  : safety condition that must hold immediately before I
-//   - Res.PreAfterPhi[BB]: safety condition at BB entry after PHIs
-//   - Res.Summary        : safety condition at the function entry block
+//   - Res.BeforeInst[I]  : safety condition immediately before I (paper Φ' at each statement)
+//   - Res.PreAfterPhi[BB]: safety condition at BB entry after PHIs (for edge merge + PHI substitution)
+//   - Res.Summary        : procedure summary (paper rule (10); used at callsites per rule (6))
 //
-// The formulas are intentionally conservative (often stronger than necessary),
-// so it is sound to stop the iteration early. The trimming pass will negate
-// these formulas to obtain necessary conditions for failure and insert them as
-// assume(...) statements.
+// Formulas are intentionally conservative (stronger than necessary), so bounded iteration is sound.
+// The trimming pass negates them to obtain necessary conditions for failure (paper §5, Theorem 5.1).
 
 ExprRef storeOp(const ExprFactory &F, BoundVarManager &BVM,
                 lotus::AliasAnalysisWrapper &AA, const Instruction *CtxI,
                 uint64_t TagBase, ExprRef Ptr, Type *StoredValTy, ExprRef NewVal,
                 ExprRef Phi) {
-  // Conservative heap-store transfer.
+  // Paper rule (4) and Def. *Store operation*: store(drf(α), e, Λ, Φ) =
+  //   Φ[e/drf(α)] ∧ ⋀_{αᵢ ∈ A \ {α}} αᵢ ≠ α,  where A = aliases(α, Λ) ∩ derefs(Φ).
+  // LLVM-IR analogue: rewrite Φ into a precondition sound under aliasing.
   //
-  // This is the LLVM-IR analogue of the paper's store(drf(v), e, Λ, Φ) rule:
-  // we rewrite the postcondition Φ into a precondition that is sound in the
-  // presence of aliasing, while remaining lightweight.
-  //
-  // 1) Syntactically replace occurrences of drf(Ptr) in Φ with NewVal.
-  // 2) For every other dereference location drf(Loc) that may alias Ptr, add
-  //    the conjunct Loc != Ptr. This strengthens the condition, effectively
-  //    discarding executions where a different dereference could be affected by
-  //    the store (avoids needing a full heap update).
-  // 3) If Φ contains drf(Ptr) with a different value type than this store, we
-  //    treat that view as arbitrary by introducing fresh bound variables.
+  // 1) Replace drf(Ptr) in Φ with NewVal (same stored type).
+  // 2) For every other drf(Loc) in Φ that may alias Ptr, add Loc ≠ Ptr (disambiguation).
+  // 3) If Φ contains drf(Ptr) with a different value type, use fresh bound var + outer ∀.
   if (!Ptr || !StoredValTy || !NewVal || !Phi)
     return Phi;
 
@@ -88,8 +80,30 @@ ExprRef storeOp(const ExprFactory &F, BoundVarManager &BVM,
       return F.sub(Kids[0], Kids[1]);
     case ExprKind::Mul:
       return F.mul(Kids[0], Kids[1]);
+    case ExprKind::BAnd:
+      return F.band(Kids[0], Kids[1]);
+    case ExprKind::BOr:
+      return F.bor(Kids[0], Kids[1]);
+    case ExprKind::BXor:
+      return F.bxor(Kids[0], Kids[1]);
+    case ExprKind::Shl:
+      return F.shl(Kids[0], Kids[1]);
+    case ExprKind::LShr:
+      return F.lshr(Kids[0], Kids[1]);
+    case ExprKind::AShr:
+      return F.ashr(Kids[0], Kids[1]);
+    case ExprKind::UDiv:
+      return F.udiv(Kids[0], Kids[1]);
+    case ExprKind::SDiv:
+      return F.sdiv(Kids[0], Kids[1]);
+    case ExprKind::URem:
+      return F.urem(Kids[0], Kids[1]);
+    case ExprKind::SRem:
+      return F.srem(Kids[0], Kids[1]);
     case ExprKind::ICmp:
       return F.icmp(E->Pred, Kids[0], Kids[1]);
+    case ExprKind::Select:
+      return F.select(Kids[0], Kids[1], Kids[2]);
     case ExprKind::Deref:
       return F.deref(Kids[0], E->DerefValueTy);
     case ExprKind::Cast:
@@ -189,6 +203,40 @@ ExprRef buildRhsExpr(const ExprFactory &F, const Instruction *I) {
       return F.sub(A, B);
     case Instruction::Mul:
       return F.mul(A, B);
+    case Instruction::And:
+      return F.band(A, B);
+    case Instruction::Or:
+      return F.bor(A, B);
+    case Instruction::Xor:
+      return F.bxor(A, B);
+    case Instruction::Shl:
+      if (!FDTrimModelUBOps)
+        return nullptr;
+      return F.shl(A, B);
+    case Instruction::LShr:
+      if (!FDTrimModelUBOps)
+        return nullptr;
+      return F.lshr(A, B);
+    case Instruction::AShr:
+      if (!FDTrimModelUBOps)
+        return nullptr;
+      return F.ashr(A, B);
+    case Instruction::UDiv:
+      if (!FDTrimModelUBOps)
+        return nullptr;
+      return F.udiv(A, B);
+    case Instruction::SDiv:
+      if (!FDTrimModelUBOps)
+        return nullptr;
+      return F.sdiv(A, B);
+    case Instruction::URem:
+      if (!FDTrimModelUBOps)
+        return nullptr;
+      return F.urem(A, B);
+    case Instruction::SRem:
+      if (!FDTrimModelUBOps)
+        return nullptr;
+      return F.srem(A, B);
     default:
       return nullptr;
     }
@@ -198,6 +246,13 @@ ExprRef buildRhsExpr(const ExprFactory &F, const Instruction *I) {
     ExprRef A = buildValueExpr(F, Cmp->getOperand(0));
     ExprRef B = buildValueExpr(F, Cmp->getOperand(1));
     return F.icmp(Cmp->getPredicate(), A, B);
+  }
+
+  if (auto *SI = dyn_cast<SelectInst>(I)) {
+    ExprRef Cond = buildValueExpr(F, SI->getCondition());
+    ExprRef T = buildValueExpr(F, SI->getTrueValue());
+    ExprRef Fv = buildValueExpr(F, SI->getFalseValue());
+    return F.select(Cond, T, Fv);
   }
 
   if (auto *LI = dyn_cast<LoadInst>(I)) {
@@ -275,6 +330,7 @@ ExprRef storeTransfer(const ExprFactory &F, BoundVarManager &BVM,
                  SI->getValueOperand()->getType(), Val, Phi);
 }
 
+// Paper Def. *Havoc operation*: havoc(drf(α), Λ, Φ) = ∀v_new . store(drf(α), v_new, Λ, Φ).
 ExprRef havocDerefLocation(const ExprFactory &F, BoundVarManager &BVM,
                            lotus::AliasAnalysisWrapper &AA,
                            const Instruction *I, uint64_t Tag, ExprRef Ptr,
@@ -288,6 +344,8 @@ ExprRef havocDerefLocation(const ExprFactory &F, BoundVarManager &BVM,
   return F.forall(Id, ValTy, Body);
 }
 
+// Paper Def. *Procedure summary*: summary(f, Υ, v̄) = Υ(f)[v̄/v_in] if f ∈ dom(Υ),
+// else false if hasAsrts(f), else true.
 ExprRef summaryOf(const ExprFactory &F, const SummaryEnv &Env,
                   const HasAsrtsEnv &Has, const Function *Callee,
                   ArrayRef<ExprRef> Actuals) {
@@ -312,6 +370,9 @@ ExprRef summaryOf(const ExprFactory &F, const SummaryEnv &Env,
   return CalleeHasAsrts ? F.boolConst(false) : F.boolConst(true);
 }
 
+// Paper rule (6): v := call prc(v_act) → Φ' = Φ_s ∧ summary(prc, Υ, v_act),
+// where Φ_s = ∀v . havoc(ᾱ, Λ, Φ), ᾱ = modLocs(prc, Λ). We approximate ᾱ by
+// havocking return value and derefs in Φ that may be modified (onlyAccessesArgMemory heuristic).
 ExprRef callTransfer(const ExprFactory &F, BoundVarManager &BVM,
                      lotus::AliasAnalysisWrapper &AA, const SummaryEnv &Env,
                      const HasAsrtsEnv &Has, const CallBase *CB, ExprRef Phi) {
@@ -319,18 +380,8 @@ ExprRef callTransfer(const ExprFactory &F, BoundVarManager &BVM,
     return Phi;
   const Function *Callee = getDirectCalledFunctionMatchingType(*CB);
 
-  // Modular call rule (lightweight summary + havoc).
-  //
-  // We conservatively model the call by:
-  //   - universally quantifying the return value (havoc) when non-void
-  //   - universally quantifying dereference locations that appear in the
-  //     current formula and may be affected by the call
-  //   - conjoining a summary for the callee (if known), instantiated with
-  //     actual arguments
-  //
-  // This is sound but incomplete: it is not a full mod/ref analysis. In
-  // particular, we only havoc locations that are relevant to the current Φ,
-  // which keeps formulas small and makes trimming effective as a pre-pass.
+  // Modular call: havoc return (rule (5)-style), havoc modified derefs (Def. Havoc),
+  // then conjoin summary (Def. Procedure summary). Sound; not full mod/ref.
   ExprRef Out = Phi;
   if (!CB->getType()->isVoidTy()) {
     Out = havocVar(F, BVM, CB, /*Tag=*/1, CB->getType(), CB, Out);
@@ -426,6 +477,7 @@ Instruction *firstNonPhiNonDbg(BasicBlock &B) {
   return B.getTerminator();
 }
 
+// Condition on edge Pred→Succ: PreAfterPhi[Succ] with PHI operands substituted by values from Pred (rule (1) sequencing across CFG edges).
 ExprRef edgePre(const ExprFactory &F,
                 const DenseMap<const BasicBlock *, ExprRef> &PreAfterPhi,
                 const BasicBlock *Succ, const BasicBlock *Pred) {
@@ -447,6 +499,9 @@ ExprRef edgePre(const ExprFactory &F,
   return substitute(F, Phi, S);
 }
 
+// Backward analysis over the CFG (paper rules (1)–(10)). Block entries initialized
+// to false (no known safe states); fixpoint grows the set. Rule (10): procedure
+// analyzed with postcondition true; summary = entry condition.
 FunctionSCResult computeSafetyConditions(
     Function &Fn, const ExprFactory &F, BoundVarManager &BVM,
     lotus::AliasAnalysisWrapper &AA, const SummaryEnv &Env,
@@ -455,12 +510,7 @@ FunctionSCResult computeSafetyConditions(
 
   DenseMap<const BasicBlock *, ExprRef> PreAfterPhi;
   for (BasicBlock &BB : Fn) {
-    // Conservative initialization: start from "no known safe states".
-    //
-    // Intuition: these safety conditions describe a subset of states from which
-    // the remainder of the execution is guaranteed to be failure-free. Starting
-    // from false and iterating grows that subset; stopping early is sound but
-    // may prune less after negation.
+    // Conservative init (paper: analysis can terminate at any point; init to false is sound).
     PreAfterPhi[&BB] = F.boolConst(false);
   }
 
@@ -485,6 +535,7 @@ FunctionSCResult computeSafetyConditions(
       ExprRef After = F.and_(All);
 
       Function *CF = getDirectCalledFunction(*CB);
+      // Paper rule (8): assume p → Φ' = p ⇒ Φ.
       if (CF && (isAssumeFunctionName(CF->getName()) ||
                  isAssumeNotFunctionName(CF->getName()))) {
         if (CB->arg_size() >= 1) {
@@ -498,6 +549,7 @@ FunctionSCResult computeSafetyConditions(
         }
         return After;
       }
+      // Paper rule (7): assert p → Φ' = p ∧ Φ.
       if (CF && isAssertFunctionName(CF->getName())) {
         if (CB->arg_size() >= 1) {
           ExprRef Arg0 = buildValueExpr(F, CB->getArgOperand(0));
@@ -514,6 +566,7 @@ FunctionSCResult computeSafetyConditions(
       return callTransfer(F, BVM, AA, Env, Has, CB, After);
     }
 
+    // Paper rule (9): if(⋆){s1}else{s2} → Φ' = Φ₁ ∧ Φ₂; we use path-sensitive (Cond⇒PreT)∧(¬Cond⇒PreE).
     if (auto *Br = dyn_cast<BranchInst>(Term)) {
       if (Br->isUnconditional()) {
         BasicBlock *Succ = Br->getSuccessor(0);
@@ -666,6 +719,7 @@ FunctionSCResult computeSafetyConditions(
   return Res;
 }
 
+// Paper Def. *Procedure summary*: hasAsrts(f) = true iff f or any (transitive) callee contains an assertion.
 HasAsrtsEnv computeHasAsrts(Module &M) {
   HasAsrtsEnv Out;
 

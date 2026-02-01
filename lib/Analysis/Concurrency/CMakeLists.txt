@@ -2,6 +2,7 @@ set(Concurrency_SOURCES
   Cpp11Atomics.cpp
   EscapeAnalysis.cpp
   HappensBeforeAnalysis.cpp
+  JoinTargetAnalysis.cpp
   LockSetAnalysis.cpp
   MemUseDefAnalysis.cpp
   MHPAnalysis.cpp

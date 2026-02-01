@@ -63,7 +63,8 @@ static const ei_pair ei_pairs[] = {
     {"\01_pthread_join", ThreadAPI::TD_JOIN},
     {"pthread_cancel", ThreadAPI::TD_JOIN},
     {"pthread_mutex_lock", ThreadAPI::TD_ACQUIRE},
-    {"pthread_rwlock_rdlock", ThreadAPI::TD_ACQUIRE},
+    {"pthread_rwlock_rdlock", ThreadAPI::TD_RWLOCK_RDLOCK},
+    {"pthread_rwlock_wrlock", ThreadAPI::TD_RWLOCK_WRLOCK},
     {"sem_wait", ThreadAPI::TD_ACQUIRE},
     {"_spin_lock", ThreadAPI::TD_ACQUIRE},
     {"SRE_SplSpecLockEx", ThreadAPI::TD_ACQUIRE},
@@ -140,6 +141,10 @@ static ThreadAPI::TD_TYPE stringToType(const std::string &s) {
     return ThreadAPI::TD_ACQUIRE;
   if (s == "TD_TRY_ACQUIRE")
     return ThreadAPI::TD_TRY_ACQUIRE;
+  if (s == "TD_RWLOCK_RDLOCK")
+    return ThreadAPI::TD_RWLOCK_RDLOCK;
+  if (s == "TD_RWLOCK_WRLOCK")
+    return ThreadAPI::TD_RWLOCK_WRLOCK;
   if (s == "TD_RELEASE")
     return ThreadAPI::TD_RELEASE;
   if (s == "TD_EXIT")
@@ -336,6 +341,14 @@ void ThreadAPI::performAPIStat(Module *module) {
       }
       case TD_TRY_ACQUIRE: {
         tdAPIStatMap["pthread_mutex_trylock"]++;
+        break;
+      }
+      case TD_RWLOCK_RDLOCK: {
+        tdAPIStatMap["pthread_rwlock_rdlock"]++;
+        break;
+      }
+      case TD_RWLOCK_WRLOCK: {
+        tdAPIStatMap["pthread_rwlock_wrlock"]++;
         break;
       }
       case TD_RELEASE: {

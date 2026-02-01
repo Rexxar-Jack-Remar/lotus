@@ -77,17 +77,43 @@ void LockSetAnalysis::analyze() {
 
 LockSet LockSetAnalysis::getMayLockSetAt(const Instruction *inst) const {
   auto it = m_may_locksets_entry.find(inst);
-  if (it != m_may_locksets_entry.end()) {
+  if (it != m_may_locksets_entry.end())
     return it->second;
-  }
+  return LockSet();
+}
+
+LockSet LockSetAnalysis::getMayReadLockSetAt(const Instruction *inst) const {
+  auto it = m_may_read_locks_entry.find(inst);
+  if (it != m_may_read_locks_entry.end())
+    return it->second;
+  return LockSet();
+}
+
+LockSet LockSetAnalysis::getMayWriteLockSetAt(const Instruction *inst) const {
+  auto it = m_may_write_locks_entry.find(inst);
+  if (it != m_may_write_locks_entry.end())
+    return it->second;
   return LockSet();
 }
 
 LockSet LockSetAnalysis::getMustLockSetAt(const Instruction *inst) const {
   auto it = m_must_locksets_entry.find(inst);
-  if (it != m_must_locksets_entry.end()) {
+  if (it != m_must_locksets_entry.end())
     return it->second;
-  }
+  return LockSet();
+}
+
+LockSet LockSetAnalysis::getMustReadLockSetAt(const Instruction *inst) const {
+  auto it = m_must_read_locks_entry.find(inst);
+  if (it != m_must_read_locks_entry.end())
+    return it->second;
+  return LockSet();
+}
+
+LockSet LockSetAnalysis::getMustWriteLockSetAt(const Instruction *inst) const {
+  auto it = m_must_write_locks_entry.find(inst);
+  if (it != m_must_write_locks_entry.end())
+    return it->second;
   return LockSet();
 }
 
@@ -119,21 +145,18 @@ LockSetAnalysis::getInstructionsHoldingLock(LockID lock) const {
 
 bool LockSetAnalysis::mayHoldCommonLock(const Instruction *i1,
                                          const Instruction *i2) const {
-  auto locks1 = getMayLockSetAt(i1);
-  auto locks2 = getMayLockSetAt(i2);
-
-  for (const auto *lock : locks1) {
-    if (locks2.find(lock) != locks2.end()) {
-      return true;
-    }
-    // Check for aliasing
-    for (const auto *lock2 : locks2) {
-      if (mayAlias(lock, lock2)) {
-        return true;
+  auto common = [this](const LockSet &a, const LockSet &b) {
+    for (const auto *lock : a) {
+      if (b.find(lock) != b.end()) return true;
+      for (const auto *lock2 : b) {
+        if (mayAlias(lock, lock2)) return true;
       }
     }
-  }
-  return false;
+    return false;
+  };
+  LockSet r1 = getMayReadLockSetAt(i1), r2 = getMayReadLockSetAt(i2);
+  LockSet w1 = getMayWriteLockSetAt(i1), w2 = getMayWriteLockSetAt(i2);
+  return common(w1, w2) || common(r1, r2);
 }
 
 LockSet LockSetAnalysis::getAllLocksInFunction(const Function *func) const {
@@ -419,93 +442,102 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
   std::queue<const Instruction *> worklist;
   std::set<const Instruction *> in_worklist;
 
-  // Initialize entry with empty lockset
   const Instruction *entry = &func->getEntryBlock().front();
   m_may_locksets_entry[entry] = LockSet();
   m_must_locksets_entry[entry] = LockSet();
+  m_may_read_locks_entry[entry] = LockSet();
+  m_may_read_locks_exit[entry] = LockSet();
+  m_may_write_locks_entry[entry] = LockSet();
+  m_may_write_locks_exit[entry] = LockSet();
+  m_must_read_locks_entry[entry] = LockSet();
+  m_must_read_locks_exit[entry] = LockSet();
+  m_must_write_locks_entry[entry] = LockSet();
+  m_must_write_locks_exit[entry] = LockSet();
   worklist.push(entry);
   in_worklist.insert(entry);
 
-  // Iterate to fixed point
   while (!worklist.empty()) {
     const Instruction *inst = worklist.front();
     worklist.pop();
     in_worklist.erase(inst);
 
-    // Get input locksets from predecessors
     std::vector<LockSet> may_inputs, must_inputs;
+    std::vector<LockSet> may_read_inputs, may_write_inputs;
+    std::vector<LockSet> must_read_inputs, must_write_inputs;
 
     if (inst == entry) {
-      // Entry has empty lockset
       may_inputs.push_back(LockSet());
       must_inputs.push_back(LockSet());
+      may_read_inputs.push_back(LockSet());
+      may_write_inputs.push_back(LockSet());
+      must_read_inputs.push_back(LockSet());
+      must_write_inputs.push_back(LockSet());
     } else {
-      // Collect from predecessors
       const BasicBlock *bb = inst->getParent();
-
       if (inst == &bb->front()) {
-        // First instruction in block - get from predecessor blocks
         for (const BasicBlock *pred : predecessors(bb)) {
           const Instruction *pred_term = pred->getTerminator();
           if (pred_term) {
             auto it_may = m_may_locksets_exit.find(pred_term);
             auto it_must = m_must_locksets_exit.find(pred_term);
-
-            if (it_may != m_may_locksets_exit.end()) {
-              may_inputs.push_back(it_may->second);
-            }
-            if (it_must != m_must_locksets_exit.end()) {
-              must_inputs.push_back(it_must->second);
-            }
+            auto it_mr = m_may_read_locks_exit.find(pred_term);
+            auto it_mw = m_may_write_locks_exit.find(pred_term);
+            auto it_ur = m_must_read_locks_exit.find(pred_term);
+            auto it_uw = m_must_write_locks_exit.find(pred_term);
+            if (it_may != m_may_locksets_exit.end()) may_inputs.push_back(it_may->second);
+            if (it_must != m_must_locksets_exit.end()) must_inputs.push_back(it_must->second);
+            if (it_mr != m_may_read_locks_exit.end()) may_read_inputs.push_back(it_mr->second);
+            if (it_mw != m_may_write_locks_exit.end()) may_write_inputs.push_back(it_mw->second);
+            if (it_ur != m_must_read_locks_exit.end()) must_read_inputs.push_back(it_ur->second);
+            if (it_uw != m_must_write_locks_exit.end()) must_write_inputs.push_back(it_uw->second);
           }
         }
       } else {
-        // Get from previous instruction in same block
         const Instruction *prev = inst->getPrevNode();
         auto it_may = m_may_locksets_exit.find(prev);
         auto it_must = m_must_locksets_exit.find(prev);
-
-        if (it_may != m_may_locksets_exit.end()) {
-          may_inputs.push_back(it_may->second);
-        }
-        if (it_must != m_must_locksets_exit.end()) {
-          must_inputs.push_back(it_must->second);
-        }
+        auto it_mr = m_may_read_locks_exit.find(prev);
+        auto it_mw = m_may_write_locks_exit.find(prev);
+        auto it_ur = m_must_read_locks_exit.find(prev);
+        auto it_uw = m_must_write_locks_exit.find(prev);
+        if (it_may != m_may_locksets_exit.end()) may_inputs.push_back(it_may->second);
+        if (it_must != m_must_locksets_exit.end()) must_inputs.push_back(it_must->second);
+        if (it_mr != m_may_read_locks_exit.end()) may_read_inputs.push_back(it_mr->second);
+        if (it_mw != m_may_write_locks_exit.end()) may_write_inputs.push_back(it_mw->second);
+        if (it_ur != m_must_read_locks_exit.end()) must_read_inputs.push_back(it_ur->second);
+        if (it_uw != m_must_write_locks_exit.end()) must_write_inputs.push_back(it_uw->second);
       }
     }
 
-    // Merge inputs
-    LockSet may_in =
-        may_inputs.empty() ? LockSet() : merge(may_inputs, false);
-    LockSet must_in =
-        must_inputs.empty() ? LockSet() : merge(must_inputs, true);
+    LockSet may_read_in = may_read_inputs.empty() ? LockSet() : merge(may_read_inputs, false);
+    LockSet may_write_in = may_write_inputs.empty() ? LockSet() : merge(may_write_inputs, false);
+    LockSet must_read_in = must_read_inputs.empty() ? LockSet() : merge(must_read_inputs, true);
+    LockSet must_write_in = must_write_inputs.empty() ? LockSet() : merge(must_write_inputs, true);
+    LockSet may_in = may_read_in;
+    may_in.insert(may_write_in.begin(), may_write_in.end());
+    LockSet must_in = must_read_in;
+    must_in.insert(must_write_in.begin(), must_write_in.end());
 
-    // Apply transfer function
+    LockSet may_read_out, may_write_out, must_read_out, must_write_out;
+    transferReadWrite(inst, may_read_in, may_write_in, may_read_out, may_write_out, false);
+    transferReadWrite(inst, must_read_in, must_write_in, must_read_out, must_write_out, true);
+
     LockSet may_out = transfer(inst, may_in, false);
     LockSet must_out = transfer(inst, must_in, true);
 
-    // Check for changes
     bool changed = false;
-
-    if (m_may_locksets_entry[inst] != may_in) {
-      m_may_locksets_entry[inst] = may_in;
-      changed = true;
-    }
-
-    if (m_must_locksets_entry[inst] != must_in) {
-      m_must_locksets_entry[inst] = must_in;
-      changed = true;
-    }
-
-    if (m_may_locksets_exit[inst] != may_out) {
-      m_may_locksets_exit[inst] = may_out;
-      changed = true;
-    }
-
-    if (m_must_locksets_exit[inst] != must_out) {
-      m_must_locksets_exit[inst] = must_out;
-      changed = true;
-    }
+    if (m_may_read_locks_entry[inst] != may_read_in) { m_may_read_locks_entry[inst] = may_read_in; changed = true; }
+    if (m_may_read_locks_exit[inst] != may_read_out) { m_may_read_locks_exit[inst] = may_read_out; changed = true; }
+    if (m_may_write_locks_entry[inst] != may_write_in) { m_may_write_locks_entry[inst] = may_write_in; changed = true; }
+    if (m_may_write_locks_exit[inst] != may_write_out) { m_may_write_locks_exit[inst] = may_write_out; changed = true; }
+    if (m_must_read_locks_entry[inst] != must_read_in) { m_must_read_locks_entry[inst] = must_read_in; changed = true; }
+    if (m_must_read_locks_exit[inst] != must_read_out) { m_must_read_locks_exit[inst] = must_read_out; changed = true; }
+    if (m_must_write_locks_entry[inst] != must_write_in) { m_must_write_locks_entry[inst] = must_write_in; changed = true; }
+    if (m_must_write_locks_exit[inst] != must_write_out) { m_must_write_locks_exit[inst] = must_write_out; changed = true; }
+    if (m_may_locksets_entry[inst] != may_in) { m_may_locksets_entry[inst] = may_in; changed = true; }
+    if (m_may_locksets_exit[inst] != may_out) { m_may_locksets_exit[inst] = may_out; changed = true; }
+    if (m_must_locksets_entry[inst] != must_in) { m_must_locksets_entry[inst] = must_in; changed = true; }
+    if (m_must_locksets_exit[inst] != must_out) { m_must_locksets_exit[inst] = must_out; changed = true; }
 
     // Add successors to worklist if changed
     if (changed) {
@@ -629,6 +661,48 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
   }
 
   return out_set;
+}
+
+void LockSetAnalysis::transferReadWrite(const Instruction *inst,
+                                         const LockSet &in_read,
+                                         const LockSet &in_write,
+                                         LockSet &out_read, LockSet &out_write,
+                                         bool is_must) const {
+  out_read = in_read;
+  out_write = in_write;
+
+  if (m_thread_api->isReadLockAcquire(inst)) {
+    LockID lock = getLockValue(inst);
+    if (lock) out_read.insert(lock);
+  } else if (m_thread_api->isWriteLockAcquire(inst)) {
+    LockID lock = getLockValue(inst);
+    if (lock) {
+      out_write.insert(lock);
+      for (const auto *l : in_read) {
+        if (mayAlias(l, lock)) out_read.erase(l);
+      }
+    }
+  } else if (m_thread_api->isTDAcquire(inst)) {
+    LockID lock = getLockValue(inst);
+    if (lock) out_write.insert(lock);
+  } else if (m_thread_api->isTDRelease(inst)) {
+    LockID lock = getLockValue(inst);
+    if (lock) {
+      out_read.erase(lock);
+      out_write.erase(lock);
+      if (is_must && m_alias_analysis) {
+        LockSet to_remove_r, to_remove_w;
+        for (const auto *l : out_read) {
+          if (mayAlias(l, lock)) to_remove_r.insert(l);
+        }
+        for (const auto *l : out_write) {
+          if (mayAlias(l, lock)) to_remove_w.insert(l);
+        }
+        for (const auto *l : to_remove_r) out_read.erase(l);
+        for (const auto *l : to_remove_w) out_write.erase(l);
+      }
+    }
+  }
 }
 
 LockSet LockSetAnalysis::merge(const std::vector<LockSet> &sets,

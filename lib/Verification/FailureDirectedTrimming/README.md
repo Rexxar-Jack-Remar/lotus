@@ -4,19 +4,19 @@ This directory implements **failure-directed program trimming** as an LLVM IR in
 
 - Kostas Ferles, Valentin Wüstholz, Maria Christakis, Isil Dillig. *Failure-Directed Program Trimming*. ESEC/FSE 2017.
 
-The goal is to produce a program `P'` that is **equi-safe** with the original `P` (it has an assertion violation iff `P` has one) while pruning many paths that are provably irrelevant to failures.
+The goal is to produce a program `P'` that is **equi-safe** with the original `P` (paper §3, Definition: equi-safety; Def. *Trimmed program*): `P'` has an assertion violation iff `P` has one, while pruning many paths that are provably irrelevant to failures.
 
-## Key ideas
+## Key ideas (paper §1, §4)
 
-- A **safety condition** `SC(π)` at a program point `π` is a *sufficient* condition for executions starting at `π` to avoid assertion failure (under the tool's termination model).
-- A **trimming condition** `TC(π)` is obtained as `¬SC(π)`. Since `SC(π)` is sufficient for safety, `¬SC(π)` is a necessary condition for failure; instrumenting `assume(¬SC(π))` can only remove safe paths.
+- A **safety condition** `SC(π)` at a program point `π` is a *sufficient* condition for executions starting at `π` to avoid assertion failure (paper: φ ⇒ wp(s, true); under the tool's termination model).
+- A **trimming condition** `TC(π)` is obtained as `¬SC(π)` (paper §5). Since `SC(π)` is sufficient for safety, `¬SC(π)` is a necessary condition for failure; instrumenting `assume(¬SC(π))` can only remove safe paths (Theorem 5.1).
 - The safety conditions computed here are intentionally **stronger than necessary** (an under-approximation of the safe states) so they can be inferred cheaply and still prune many paths.
 
-## What the pass actually does
+## What the pass actually does (paper §5 Program Instrumentation)
 
-At a high level ([Pass.cpp]
+At a high level ([Pass.cpp]):
 
-1. **Interprocedural transformation (modularity trick)**:
+1. **Interprocedural transformation (paper §5, Interprocedural instrumentation)**:
    - Clone each eligible function `f` into a *safe clone* `f.fdtrim.safe`.
      - In the safe clone, `assert(c)` is rewritten to `assume(c)` and `error()` is rewritten to `assume(false)` so the clone cannot exhibit assertion failure.
      - Calls inside safe clones are rewired to other safe clones.
@@ -25,11 +25,11 @@ At a high level ([Pass.cpp]
      - **failure branch** calls the original `f(args)` and then executes `assume(false); unreachable`.
    - Intuition: every execution in the transformed program either (a) follows "safe behavior" through safe clones or (b) explicitly enters a "failure context". This makes it sound to compute and insert trimming conditions locally while still preserving failing behaviors.
 
-2. **Compute safety conditions** with a lightweight backward analysis over the CFG ([SafetyConditions.cpp]
+2. **Compute safety conditions** (paper §4, Figure 3 rules (1)–(10)) with a lightweight backward analysis over the CFG ([SafetyConditions.cpp]).
 
-3. **Insert trimming assumptions**:
-   - Choose instrumentation points (calls / conditionals / loop headers) depending on options.
-   - For each point `π`, obtain `SC(π)` from the analysis, form `TC(π) = ¬SC(π)`, simplify/limit it, and insert `verifier.assume(TC(π))` before `π`.
+3. **Insert trimming assumptions** (paper §5, Intraprocedural instrumentation):
+   - Choose instrumentation points (calls / conditionals / loop headers) depending on options (paper §6, Bounding the instrumentation).
+   - For each point `π`, obtain `SC(π)` from the analysis, form `TC(π) = ¬SC(π)`, simplify/limit it (e.g. bound conjuncts; paper §6), and insert `verifier.assume(TC(π))` before `π`.
 
 ## Semantics of the computed formulas
 
@@ -41,27 +41,24 @@ The analysis computes formulas in a small AST ([FailureDirectedTrimmingImpl.h] r
 
 These safety conditions are an under-approximation of safe states (i.e., they may be too strong). Negating them produces trimming conditions that may be too weak (i.e., may not prune as much) but remain sound for equi-safety when instrumented as `assume`.
 
-## Transfer functions and how they relate to the paper
+## Transfer functions and how they relate to the paper (Figure 3, §4.2)
 
-The analysis is a backward condition inference reminiscent of weakest-precondition rules but deliberately approximate:
+The analysis is a backward condition inference (judgment Λ, Υ, Φ ⊢ s : Φ') reminiscent of weakest-precondition rules but deliberately approximate:
 
-- **Assertions / errors**:
-  - `assert(p)` strengthens the safety condition with `p` (a failing execution must satisfy `p` at that point).
-  - `error()` makes the safety condition `false` (no safe state can reach error).
-- **Assumptions**:
-  - `assume(p)` yields `p ⇒ Φ` (if `p` holds, the rest must be safe; otherwise the execution ends with assumption violation, which is not considered a failure).
-- **Assignments / pure instructions**:
-  - Substitute RHS expressions into `Φ` when representable; otherwise conservatively "havoc" the result.
-- **Heap reads/writes**:
-  - Loads are modeled as `drf(ptr)` terms.
-  - Stores use a conservative `store()` rule that replaces matching `drf(ptr)` terms and adds alias-disambiguation constraints against other dereference locations already mentioned in `Φ`.
-- **Procedure calls**:
-  - Conjoin the (possibly substituted) callee summary.
-  - Havoc the return value, and havoc dereference locations that appear in the current formula and may be modified by the call (heuristics around `onlyAccessesArgMemory`).
+- **Rule (7) Assertions / Rule (8) Assumptions / errors**:
+  - `assert(p)` → Φ' = p ∧ Φ (paper rule (7)).
+  - `assume(p)` → Φ' = p ⇒ Φ (paper rule (8)).
+  - `error()` → Φ' = false (no safe state can reach error).
+- **Rule (2) Assignments / pure instructions**:
+  - Substitute RHS expressions into Φ when representable (Φ[e/v]); otherwise conservatively havoc the result (paper rule (2)).
+- **Rule (3) Heap read**: v₁ := *v₂ → Φ[drf(v₂)/v₁].
+- **Rule (4) Heap write**: paper *store*(drf(α), e, Λ, Φ) = Φ[e/drf(α)] ∧ ⋀_{αᵢ∈A\{α}} αᵢ≠α, A = aliases(α)∩derefs(Φ); impl. `storeOp` / `storeTransfer`.
+- **Rule (5) Malloc**: Φ' = ∀v. Φ (havoc assigned variable).
+- **Rule (6) Procedure calls**: Φ_s = ∀v. havoc(ᾱ, Φ), Φ' = Φ_s ∧ summary(prc, Υ, v_act); paper Def. *Procedure summary* and Def. *Havoc operation*. We approximate modLocs (ᾱ) by havocking derefs in Φ that may be modified (onlyAccessesArgMemory heuristic).
 
 The main implementation points are:
-- heap store modeling: `storeOp` / `storeTransfer`
-- call modeling: `callTransfer` / `summaryOf`
+- heap store: `storeOp` / `storeTransfer` (paper Def. *Store operation*)
+- call: `callTransfer` / `summaryOf` (paper Def. *Procedure summary*, *Havoc operation*)
 
 ## Quantifiers: why they appear and how they are handled
 
@@ -75,7 +72,7 @@ The instrumentation pipeline handles existentials in three steps:
 
 As a last-resort safety measure, if quantifiers still reach code generation, they are treated as `true` (i.e., no pruning) so that the inserted assumptions remain a necessary condition for failure.
 
-## Options (selected)
+## Options (selected) (paper §6 Implementation)
 
 Options are declared in [Options.cpp]
 
@@ -85,6 +82,7 @@ Options are declared in [Options.cpp]
 - `-fdtrim-max-conjuncts`: limit size of inserted conditions.
 - `-fdtrim-qe={nondet,z3}` and `-fdtrim-qe-timeout-ms`: existential elimination strategy.
 - `-fdtrim-deref-mode={uf,load,nondet}`: how `drf(ptr)` terms are lowered into LLVM IR.
+- `-fdtrim-model-ub-ops`: model div/rem/shifts instead of havocing them (off by default).
 
 ## Important limitations / assumptions
 
@@ -92,4 +90,3 @@ Options are declared in [Options.cpp]
 - Safe cloning currently excludes functions containing `invoke`, `callbr`, inline asm, and indirect calls (or direct calls with mismatched function types).
 - Indirect calls and address-taken functions limit where safe clones can be used; the pass may conservatively skip instrumentation for such functions.
 - Alias and mod/ref reasoning is approximate and depends on the configured alias-analysis backend.
-

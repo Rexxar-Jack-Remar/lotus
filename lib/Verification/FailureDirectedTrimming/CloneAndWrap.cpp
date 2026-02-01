@@ -1,3 +1,9 @@
+// Clone-and-wrap transformation for modular trimming (paper §5, Interprocedural instrumentation).
+//
+// Paper: create prc' (safe clone) with assert→assume and calls→prc'; at each call site replace
+//   v := call prc(e)  by  if(⋆) { v := call prc'(e) } else { v := call prc(e); assume false }.
+// This allows local trimming assumptions inside prc while preserving failing executions.
+
 #include "FailureDirectedTrimmingImpl.h"
 
 #include <llvm/ADT/STLExtras.h>
@@ -28,17 +34,12 @@ static bool passesNameFiltersForSafeClone(const Function &F) {
   return true;
 }
 
+// Paper §5: create prc' for each prc with assert φ → assume φ, error → assume false;
+// replace calls to prc inside prc' with calls to prc'.
 DenseMap<Function *, Function *> cloneSafeFunctions(Module &M,
                                                     FunctionCallee AssumeFn) {
-  // Create safe clones f.fdtrim.safe for a subset of functions f.
-  //
-  // The clone is "safe" in the sense that it cannot exhibit assertion failure:
-  //   - assert(c) is rewritten into assume(c)
-  //   - error() is rewritten into assume(false)
-  //
-  // This is the key ingredient for modular trimming: after we wrap calls (see
-  // wrapCallsInOriginalFunctions), an execution either follows only safe clones
-  // (success context) or intentionally enters a failure context.
+  // Safe clone f.fdtrim.safe: cannot exhibit assertion failure (assert→assume, error→assume(false)).
+  // After wrapCallsInOriginalFunctions, executions either follow safe clones or enter failure context.
   DenseMap<Function *, Function *> SafeOf;
 
   DenseSet<Function *> Candidates;
@@ -182,17 +183,13 @@ DenseMap<Function *, Function *> cloneSafeFunctions(Module &M,
   return SafeOf;
 }
 
+// Paper §5: at call site v := call prc(e), replace with
+//   if(⋆) v := call prc'(e) else { v := call prc(e); assume false }; unreachable on else.
+// Failure branch ensures every entry to prc is followed by assume false (justifies local trimming).
 bool wrapCallsInOriginalFunctions(Module &M, FunctionCallee AssumeFn,
                                   DenseMap<Function *, Function *> &SafeOf,
                                   NondetFactory &Nondet) {
-  // Wrap calls so that each call has a nondet "success vs failure" split.
-  //
-  // For a callsite "call f(args)" with a safe clone f.safe, we create:
-  //   if (nondet) call f.safe(args) else { call f(args); assume(false); unreachable }
-  //
-  // The failure branch executes the original call and then terminates the path
-  // immediately. This is used later to identify "failure contexts" and to
-  // justify modular trimming assumptions.
+  // For each call f(args) with safe clone: if (nondet) call f.safe(args) else { call f(args); assume(false); unreachable }.
   bool Changed = false;
 
   for (Function &F : M) {

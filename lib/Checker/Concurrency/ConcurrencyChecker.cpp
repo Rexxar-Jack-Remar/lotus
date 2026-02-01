@@ -2,6 +2,7 @@
 
 #include "Checker/Concurrency/ConcurrencyChecker.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Analysis/Concurrency/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyAnalysisDumper.h"
 
@@ -31,11 +32,16 @@ ConcurrencyChecker::ConcurrencyChecker(Module& module)
     m_escapeAnalysis = std::make_unique<EscapeAnalysis>(module);
     m_escapeAnalysis->analyze();
 
-    // Initialize specialized checkers
-    m_dataRaceChecker = std::make_unique<DataRaceChecker>(module, m_mhpAnalysis.get(), 
-                                                         m_locksetAnalysis.get(), 
-                                                         m_escapeAnalysis.get(), 
-                                                         m_aliasAnalysis);
+    m_happensBeforeAnalysis =
+        std::make_unique<HappensBeforeAnalysis>(module, *m_mhpAnalysis);
+    m_happensBeforeAnalysis->analyze();
+    if (m_aliasAnalysis)
+        m_happensBeforeAnalysis->setAliasAnalysis(m_aliasAnalysis);
+
+    m_dataRaceChecker = std::make_unique<DataRaceChecker>(
+        module, m_mhpAnalysis.get(), m_locksetAnalysis.get(),
+        m_escapeAnalysis.get(), m_aliasAnalysis,
+        m_happensBeforeAnalysis.get());
     m_deadlockChecker = std::make_unique<DeadlockChecker>(module, m_locksetAnalysis.get(),
                                                          m_mhpAnalysis.get(), m_threadAPI);
     m_atomicityChecker = std::make_unique<AtomicityChecker>(module, m_mhpAnalysis.get(),

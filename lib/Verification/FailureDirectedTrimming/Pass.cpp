@@ -1,25 +1,16 @@
 // FailureDirectedTrimmingPass: failure-directed program trimming (FDTrim).
+// Ferles et al., ESEC/FSE'17.
 //
-// The pass inserts verifier.assume(...) statements that prune execution paths
-// that are provably irrelevant to assertion failures, while preserving
-// equi-safety with the original program.
+// Inserts verifier.assume(...) that prune paths provably irrelevant to assertion
+// failures while preserving equi-safety (paper §3 Def. Equi-safety, Def. Trimmed program).
 //
-// Core idea (Ferles et al., ESEC/FSE'17):
-//   - infer a safety condition SC(π) at a program point π (sufficient for safety)
-//   - insert assume(¬SC(π)) as a trimming condition (necessary for failure)
+// Core: infer safety condition SC(π) (φ ⇒ wp(s, true)); insert assume(¬SC(π)) as
+// trimming condition (necessary for failure; paper §5, Theorem 5.1).
 //
-// This implementation follows the paper's modular instrumentation approach:
-//   1) Create a "safe clone" f.fdtrim.safe for each eligible function f.
-//      The safe clone cannot fail: assert(c) becomes assume(c) and error()
-//      becomes assume(false). Calls inside safe clones are rewritten to safe
-//      clones.
-//   2) Wrap each direct call to an instrumentable function with a nondet split:
-//        if (*) call f.safe(...)
-//        else { call f(...); assume(false); unreachable }
-//      Executions that intend to reach a failing assertion must take the "else"
-//      branch at least once, which makes local trimming assumptions sound.
-//   3) Compute lightweight safety conditions by a bounded backward analysis
-//      (an under-approximation of safe states), negate them, and insert assumes.
+// Paper §5 Program Instrumentation (modular):
+//   1) Safe clone f.fdtrim.safe: assert→assume, error→assume(false); internal calls→safe clones.
+//   2) Wrap call f(args): if(⋆) call f.safe(args) else { call f(args); assume(false); unreachable }.
+//   3) Compute safety conditions (paper §4 Fig. 3), negate, bound/simplify (paper §6), insert assumes.
 
 #include "Verification/FailureDirectedTrimming/FailureDirectedTrimming.h"
 #include "FailureDirectedTrimmingImpl.h"
@@ -224,6 +215,7 @@ bool runFailureDirectedTrimming(Module &M) {
       if (It == R.BeforeInst.end())
         continue;
 
+      // Paper §5: TC(π) = ¬SC(π); paper §6: bound conjuncts (weaker = sound).
       ExprRef Safety = It->second;
       ExprRef TrimCond = negateForTrimming(EF, Safety);
       TrimCond = boundConjuncts(EF, TrimCond, FDTrimMaxConjuncts);

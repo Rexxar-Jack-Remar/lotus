@@ -1,3 +1,6 @@
+// Lower Expr (trimming-condition) formulas into LLVM IR for verifier.assume.
+// Paper §6 Eliminating quantifiers: existentials from negateForTrimming are
+// eliminated by QE or nondet witnesses; remaining quantifiers → "true" (no pruning).
 #include "FailureDirectedTrimmingImpl.h"
 
 #include <llvm/IR/Constants.h>
@@ -7,11 +10,8 @@
 
 using namespace llvm;
 
-// Lower Expr formulas into LLVM IR Values that can be passed to verifier.assume.
-//
-// A trimming condition must be a necessary condition for failure. When the
-// condition cannot be represented precisely in LLVM IR (e.g., unresolved
-// quantifiers), we conservatively avoid pruning by producing "true".
+// Trimming condition must remain a necessary condition for failure; if we cannot
+// represent it (e.g. unresolved quantifiers), produce "true" to avoid unsound pruning.
 
 Value *codegenValue(const ExprFactory &F, const ExprRef &E, IRBuilder<> &B,
                     DenseMap<uint32_t, Value *> &BoundVals, Module &M,
@@ -69,10 +69,69 @@ Value *codegenValue(const ExprFactory &F, const ExprRef &E, IRBuilder<> &B,
     Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
     return B.CreateMul(A, C);
   }
+  case ExprKind::BAnd: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateAnd(A, C);
+  }
+  case ExprKind::BOr: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateOr(A, C);
+  }
+  case ExprKind::BXor: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateXor(A, C);
+  }
+  case ExprKind::Shl: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateShl(A, C);
+  }
+  case ExprKind::LShr: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateLShr(A, C);
+  }
+  case ExprKind::AShr: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateAShr(A, C);
+  }
+  case ExprKind::UDiv: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateUDiv(A, C);
+  }
+  case ExprKind::SDiv: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateSDiv(A, C);
+  }
+  case ExprKind::URem: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateURem(A, C);
+  }
+  case ExprKind::SRem: {
+    Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    return B.CreateSRem(A, C);
+  }
   case ExprKind::ICmp: {
     Value *A = codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
     Value *C = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
     return B.CreateICmp(E->Pred, A, C);
+  }
+  case ExprKind::Select: {
+    Value *Cond =
+        codegenValue(F, E->Args[0], B, BoundVals, M, Nondet, DerefUF);
+    Value *T = codegenValue(F, E->Args[1], B, BoundVals, M, Nondet, DerefUF);
+    Value *Fv = codegenValue(F, E->Args[2], B, BoundVals, M, Nondet, DerefUF);
+    if (!Cond || !Cond->getType()->isIntegerTy(1))
+      Cond = ConstantInt::getTrue(M.getContext());
+    return B.CreateSelect(Cond, T, Fv);
   }
   case ExprKind::Deref: {
     // Deref terms drf(ptr) appear due to modeling of loads and heap effects.
@@ -191,8 +250,30 @@ ExprRef eliminateExistsByNondet(const ExprFactory &F, const ExprRef &E,
     return F.sub(Kids[0], Kids[1]);
   case ExprKind::Mul:
     return F.mul(Kids[0], Kids[1]);
+  case ExprKind::BAnd:
+    return F.band(Kids[0], Kids[1]);
+  case ExprKind::BOr:
+    return F.bor(Kids[0], Kids[1]);
+  case ExprKind::BXor:
+    return F.bxor(Kids[0], Kids[1]);
+  case ExprKind::Shl:
+    return F.shl(Kids[0], Kids[1]);
+  case ExprKind::LShr:
+    return F.lshr(Kids[0], Kids[1]);
+  case ExprKind::AShr:
+    return F.ashr(Kids[0], Kids[1]);
+  case ExprKind::UDiv:
+    return F.udiv(Kids[0], Kids[1]);
+  case ExprKind::SDiv:
+    return F.sdiv(Kids[0], Kids[1]);
+  case ExprKind::URem:
+    return F.urem(Kids[0], Kids[1]);
+  case ExprKind::SRem:
+    return F.srem(Kids[0], Kids[1]);
   case ExprKind::ICmp:
     return F.icmp(E->Pred, Kids[0], Kids[1]);
+  case ExprKind::Select:
+    return F.select(Kids[0], Kids[1], Kids[2]);
   case ExprKind::Deref:
     return F.deref(Kids[0], E->DerefValueTy);
   case ExprKind::Cast:
