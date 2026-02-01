@@ -13,6 +13,7 @@ set (USED_LIBS
   ${Z3_LIBRARIES}
   ${GMP_LIB}
   ${RT_LIB}
+  seahorn.KInduction
   )
 
 

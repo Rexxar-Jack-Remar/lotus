@@ -32,6 +32,7 @@ The SeaHorn framework is organized into the following subdirectories:
   * Horn clause generation and solving (HornifyFunction, HornifyModule)
   * Symbolic execution engines (BvOpSem, ClpOpSem, UfoOpSem)
   * Bounded model checking (Bmc, PathBmc)
+  * **K-Induction** – Production k-induction engine reusing PathBMC (in ``KInduction/``)
   * Counterexample generation (CexHarness, CexExeGenerator)
   * **Smt/** – SMT solver integration (Z3, Yices2)
 
@@ -94,6 +95,8 @@ Main verification tool for C programs.
 **Common modes**:
 
 - ``--bmc=<N>`` – Bounded model checking up to ``N`` steps.
+- ``--horn-kinduction`` – K-induction (PathBMC-based): incrementally peel loops
+  and run PathBMC until UNSAT (safe) or SAT (bug). Requires CLAM.
 - ``--horn`` – CHC-based (unbounded) verification.
 - ``--abstractor=clam`` – Use CLAM-based abstract interpretation as an
   abstractor.
