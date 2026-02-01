@@ -39,7 +39,7 @@ namespace {
     virtual void getAnalysisUsage(AnalysisUsage &AU) const;
 
   };
-}
+} // namespace
 
 bool LLPEPass::runOnModule(Module& M) {
   LLPEAnalysisPass* IHP = &getAnalysis<LLPEAnalysisPass>();

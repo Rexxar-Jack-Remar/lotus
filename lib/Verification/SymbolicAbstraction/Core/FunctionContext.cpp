@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <queue>
+#include <string>
 
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
@@ -65,7 +66,10 @@ FunctionContext::FunctionContext(llvm::Function *func,
   // the order determines RepresentedValue::id()
   std::set<Value *, ValueNameCompare> represented;
 
-  // add all instructions and parameters to represented values
+  // add all instructions and parameters to represented values (only those
+  // that appear in the function's ValueSymbolTable, i.e. have a name).
+  // Unnamed SSA values (e.g. many PHIs) are omitted unless
+  // RepresentAllInstructions is true.
   for (auto &entry : *Function_->getValueSymbolTable()) {
     Value *val = entry.getValue();
 
@@ -81,6 +85,24 @@ FunctionContext::FunctionContext(llvm::Function *func,
 
     if (type->isFloatingPointTy() && FloatingPointModel_->supportsType(type)) {
       represented.insert(val);
+    }
+  }
+
+  if (Config_.get<bool>("FunctionContext", "RepresentAllInstructions", false)) {
+    unsigned symabsId = 0;
+    for (auto &BB : *Function_) {
+      for (auto &I : BB) {
+        if (represented.count(&I))
+          continue;
+        if (isa<InvokeInst>(&I))
+          continue;
+        Type *type = I.getType();
+        if (type->isIntegerTy() || type->isPointerTy()) {
+          if (I.getName().empty())
+            I.setName("symabs." + std::to_string(symabsId++));
+          represented.insert(&I);
+        }
+      }
     }
   }
 

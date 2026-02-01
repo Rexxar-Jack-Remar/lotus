@@ -1,7 +1,7 @@
 #pragma once
 
-#include <array>
 #include <llvm/ADT/StringRef.h>
+#include <array>
 #include <string>
 
 namespace clam {

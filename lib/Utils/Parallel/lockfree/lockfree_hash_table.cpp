@@ -1,7 +1,7 @@
 #include "Utils/Parallel/lockfree/lockfree_hash_table.h"
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
-#include <algorithm>
 
 #define THRESHOLD   50
 #define R           25

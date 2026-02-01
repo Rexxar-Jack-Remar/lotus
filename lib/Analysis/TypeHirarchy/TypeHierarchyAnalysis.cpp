@@ -1,5 +1,6 @@
 #include "Analysis/TypeHirarchy/TypeHierarchyAnalysis.h"
 #include "Utils/General/spdlog/spdlog.h"
+#include "Utils/LLVM/Demangle.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -10,7 +11,6 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
-#include "Utils/LLVM/Demangle.h"
 
 #include <sstream>
 

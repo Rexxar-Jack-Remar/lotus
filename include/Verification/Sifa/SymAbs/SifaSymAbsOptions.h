@@ -45,6 +45,20 @@ struct SifaSymAbsOptions {
   /// Note: `float` and FP trunc/ext are currently not supported.
   bool allowDouble = false;
 
+  /// When true, represent all instructions (including unnamed SSA values) so
+  /// that the final invariant shows variables like loop indices and
+  /// accumulators (e.g. i, s). When false, only named values from the
+  /// ValueSymbolTable are represented (e.g. parameters and named temps).
+  bool representAllInstructions = false;
+
+  /// Delay before first widening in the SMT strongest-consequence loop.
+  /// Higher values allow more models to be joined before widening, often
+  /// yielding non-top intervals. Set to -1 to use SymbolicAbstraction default.
+  int wideningDelay = -1;
+
+  /// Frequency of widening after the delay. Set to -1 to use default.
+  int wideningFrequency = -1;
+
   /// When non-null, progress messages are written here during analysis.
   /// Also configures SifaLogger output when provided.
   llvm::raw_ostream *progressStream = nullptr;

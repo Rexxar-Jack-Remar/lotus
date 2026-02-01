@@ -8,9 +8,9 @@
 #pragma once
 
 #include <deque>
-#include <vector>
 #include <math.h>
 #include <stddef.h>
+#include <vector>
 
 using namespace std;
 

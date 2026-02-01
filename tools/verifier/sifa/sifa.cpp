@@ -1,5 +1,6 @@
 // Sifa (Symbolic Interpretation with Fluid Abstractions) verifier tool.
 // ./build/bin/sifa tmp/sifa-demo/loop.bc --log-level=progress --symabs
+//  Build bitcode without optnone so mem2reg can promote allocas to SSA
 
 #include "Verification/Sifa/Log/SifaLogger.h"
 #include "Verification/Sifa/Sifa.h"
@@ -29,6 +30,21 @@ static cl::opt<std::string> BlockLabel("block", cl::desc("Block to analyze to (d
 static cl::opt<std::string> DomainOpt("abstract-domain", cl::desc("Interval, Octagon, or both"), cl::value_desc("domain"), cl::init("Interval"));
 
 static cl::opt<bool> UseSymAbs("symabs", cl::desc("Use SMT-backed SymbolicAbstraction"), cl::init(false));
+
+static cl::opt<bool> RepresentAll(
+    "represent-all",
+    cl::desc("Represent all SSA values in the invariant (e.g. i, s); otherwise only named values"),
+    cl::init(false));
+
+static cl::opt<int> WideningDelay(
+    "widening-delay",
+    cl::desc("Delay before first widening in SMT loop (higher => more precise intervals); default 9999 for --symabs"),
+    cl::init(-1));
+
+static cl::opt<int> WideningFrequency(
+    "widening-frequency",
+    cl::desc("Widening frequency after delay (only with --symabs)"),
+    cl::init(-1));
 
 static cl::opt<bool> ReachabilityOnly("reachability", cl::desc("Only check reachability"), cl::init(false));
 
@@ -110,12 +126,17 @@ int main(int argc, char **argv) {
     if (UseSymAbs) {
       SifaSymAbsOptions options;
       options.abstractDomain = DomainOpt.getValue();
+      options.representAllInstructions = RepresentAll;
+      options.wideningDelay =
+          WideningDelay.getNumOccurrences() ? WideningDelay : (UseSymAbs ? 9999 : -1);
+      options.wideningFrequency = WideningFrequency;
       options.validateLlvmSubset = !NoValidateSubset;
       options.logLevel = logLevel;
       if (logLevel >= SifaLogLevel::Progress) options.progressStream = &errs();
 
       unsigned nBlocks = 0;
       for (auto &BB : *targetFunc) (void)BB, ++nBlocks;
+      outs() << "Abstract domain(s): " << options.abstractDomain << "\n";
       SifaLogger::progress("Analyzing (SymAbs/SMT) function '" + targetFunc->getName().str() + "' (" +
                           std::to_string(nBlocks) + " blocks, domain: " + options.abstractDomain + ")");
 
@@ -130,11 +151,10 @@ int main(int argc, char **argv) {
           return 0;
         }
         outs() << label << ": state (top/non-bottom)\n";
-        if (Verbose) {
-          symbolic_abstraction::PrettyPrinter pp(/*output_html=*/true);
-          state->prettyPrint(pp);
-          outs() << pp.str() << "\n";
-        }
+        outs() << "Final invariant:\n";
+        symbolic_abstraction::PrettyPrinter pp(/*output_html=*/Verbose);
+        state->prettyPrint(pp);
+        outs() << pp.str() << "\n";
         return 0;
       };
 

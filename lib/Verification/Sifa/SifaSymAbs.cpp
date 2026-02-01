@@ -1,8 +1,8 @@
 #include "Verification/Sifa/SifaSymAbs.h"
 
 #include "Verification/Sifa/Fluid/NeverFluid.h"
-#include "Verification/Sifa/Log/SifaLogger.h"
 #include "Verification/Sifa/Interpreter/DagInterpreter.h"
+#include "Verification/Sifa/Log/SifaLogger.h"
 #include "Verification/Sifa/Procedure/ProcedureResources.h"
 #include "Verification/Sifa/Statistics/SifaStats.h"
 #include "Verification/Sifa/Summarizers/FixpointLoopSummarizer.h"
@@ -161,6 +161,11 @@ makeConfig(const SifaSymAbsOptions &opt) {
   cfg.set("ModuleContext", "Recursive", opt.recursive);
   cfg.set("Analyzer", "Variant", opt.analyzerVariant);
   cfg.set("AbstractDomain", "Variant", opt.abstractDomain);
+  cfg.set("FunctionContext", "RepresentAllInstructions", opt.representAllInstructions);
+  if (opt.wideningDelay >= 0)
+    cfg.set("Analyzer", "WideningDelay", opt.wideningDelay);
+  if (opt.wideningFrequency >= 0)
+    cfg.set("Analyzer", "WideningFrequency", opt.wideningFrequency);
   return cfg;
 }
 

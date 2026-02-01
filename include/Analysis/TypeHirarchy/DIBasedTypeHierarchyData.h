@@ -15,8 +15,8 @@
 
 #include <cstdint>
 #include <deque>
-#include <utility>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace lotus {

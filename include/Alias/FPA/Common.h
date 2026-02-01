@@ -5,24 +5,24 @@
 #ifndef TYPEDIVE_COMMON_H
 #define TYPEDIVE_COMMON_H
 
-#include <llvm/IR/Module.h>
-#include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/ADT/Triple.h>
-#include <llvm/Support/raw_ostream.h>
-#include <llvm/Support/CommandLine.h>
+#include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/IR/DebugInfo.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Support/CommandLine.h>
+#include <llvm/Support/raw_ostream.h>
 
-#include <unistd.h>
 #include <bitset>
 #include <chrono>
-#include <set>
-#include <map>
-#include <unordered_map>
-#include <unordered_set>
-#include <iostream>
 #include <fstream>
+#include <iostream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <string>
+#include <unistd.h>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace llvm;
 using namespace std;

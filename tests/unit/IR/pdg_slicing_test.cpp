@@ -7,13 +7,13 @@
  */
 
 #include <gtest/gtest.h>
-#include <memory>
-#include <string>
-#include <vector>
-#include <set>
 #include <cstdlib>
+#include <memory>
+#include <set>
+#include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 #include "IR/PDG/Slicing.h"
 #include "IR/PDG/ContextSensitiveSlicing.h"
@@ -22,8 +22,8 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/SourceMgr.h"
 
 using namespace llvm;
 using namespace pdg;

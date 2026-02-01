@@ -38,10 +38,10 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //////////////////////////////////////////////////////////////////////////////
 
-#include <cassert>
 #include "dictionary.h"
 #include "key_source.h"
 #include "keys.h"
+#include <cassert>
 
 
 using namespace wpds;

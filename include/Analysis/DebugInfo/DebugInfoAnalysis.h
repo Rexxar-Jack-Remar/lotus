@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include <map>
 #include <string>
 #include <unordered_map>
-#include <map>
 #include <vector>
 
 namespace llvm {
@@ -13,7 +13,7 @@ namespace llvm {
     class Value;
     class Function;
     class MDNode;
-}
+} // namespace llvm
 
 class DebugInfoAnalysis {
 public:

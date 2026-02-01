@@ -85,7 +85,7 @@ class formatter;
 
 namespace sinks {
 class sink;
-}
+} // namespace sinks
 
 #if defined(_WIN32) && defined(SPDLOG_WCHAR_FILENAMES)
 using filename_t = std::wstring;

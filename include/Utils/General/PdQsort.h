@@ -20,8 +20,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
-#include <utility>
 #include <iterator>
+#include <utility>
 
 #if __cplusplus >= 201103L
 #include <cstdint>
@@ -495,7 +495,7 @@ namespace pdqsort_detail {
             leftmost = false;
         }
     }
-}
+} // namespace pdqsort_detail
 
 
 template<class Iter, class Compare>

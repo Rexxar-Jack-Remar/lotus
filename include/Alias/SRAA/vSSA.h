@@ -52,4 +52,4 @@ private:
 		std::set<BasicBlock*> computeDominanceFrontier(BasicBlock *B) const;
 };
 
-}
+} // namespace llvm

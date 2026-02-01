@@ -16,16 +16,16 @@
 #ifndef EGRAPHS_HPP
 #define EGRAPHS_HPP
 
-#include <vector>
 #include <deque>
-#include <queue>
-#include <unordered_set>
-#include <unordered_map>
 #include <fstream>
+#include <functional>
+#include <queue>
 #include <sstream>
 #include <stdexcept>
-#include <functional>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include <cassert>
 #include <cinttypes>
@@ -124,7 +124,7 @@ namespace egraphs {
     }
   };
   
-}
+} // namespace egraphs
 
 template <class NodeKind>
 struct std::hash<egraphs::SimpleNodeData<NodeKind>> {
@@ -922,7 +922,7 @@ namespace egraphs {
     }
     
   };
-};
+} // namespace egraphs
 
 #undef owned
 #undef throw_error

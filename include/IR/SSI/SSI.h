@@ -24,21 +24,21 @@ Static Single Information (SSI) form = SSA + σ-functions
  #define SSIFY_H_
  
  #include "llvm/ADT/Statistic.h"
- #include "llvm/ADT/SmallVector.h"
  #include "llvm/ADT/SmallPtrSet.h"
- #include "llvm/IR/Function.h"
- #include "llvm/IR/Instructions.h"
- #include "llvm/IR/Constants.h"
- #include "llvm/Support/raw_ostream.h"
- #include "llvm/IR/CFG.h"
- #include "llvm/IR/Dominators.h"
- #include "llvm/Analysis/PostDominators.h"
+ #include "llvm/ADT/SmallVector.h"
  #include "llvm/Analysis/DominanceFrontier.h"
+ #include "llvm/Analysis/PostDominators.h"
+ #include "llvm/IR/CFG.h"
+ #include "llvm/IR/Constants.h"
+ #include "llvm/IR/Dominators.h"
+ #include "llvm/IR/Function.h"
  #include "llvm/IR/InstIterator.h"
+ #include "llvm/IR/Instructions.h"
  #include "llvm/Support/CommandLine.h"
+ #include "llvm/Support/raw_ostream.h"
+ #include <algorithm>
  #include <set>
  #include <string>
- #include <algorithm>
  //#include <cstdlib>
  
  #define DEBUG_TYPE "SSIfy"
@@ -454,6 +454,6 @@ public:
              const DomTreeNode *Node);
  };
  
- }
+ } // namespace llvm
  
  #endif /* SSIFY_H_ */

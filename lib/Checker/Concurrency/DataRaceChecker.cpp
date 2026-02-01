@@ -3,8 +3,8 @@
  * Author: rainoftime
 */
 #include "Checker/Concurrency/DataRaceChecker.h"
-#include "Analysis/Concurrency/HappensBeforeAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Analysis/Concurrency/HappensBeforeAnalysis.h"
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
 

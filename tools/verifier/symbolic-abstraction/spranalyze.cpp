@@ -1,12 +1,12 @@
 // SymbolicAbstraction static analysis tool
 #include "Verification/SymbolicAbstraction/Utils/Utils.h"
 #include "Verification/SymbolicAbstraction/Analyzers/Analyzer.h"
-#include "Verification/SymbolicAbstraction/Utils/Config.h"
+#include "Verification/SymbolicAbstraction/Core/Checks.h"
 #include "Verification/SymbolicAbstraction/Core/DomainConstructor.h"
 #include "Verification/SymbolicAbstraction/Core/FragmentDecomposition.h"
 #include "Verification/SymbolicAbstraction/Core/FunctionContext.h"
 #include "Verification/SymbolicAbstraction/Core/ModuleContext.h"
-#include "Verification/SymbolicAbstraction/Core/Checks.h"
+#include "Verification/SymbolicAbstraction/Utils/Config.h"
 #include "Verification/SymbolicAbstraction/Utils/Reporting.h"
 
 #include <llvm/IR/LLVMContext.h>
