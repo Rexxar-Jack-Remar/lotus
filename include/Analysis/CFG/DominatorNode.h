@@ -29,7 +29,7 @@
  
  namespace DTAliases {
  using Node = DomTreeNodeBase<BasicBlock>;
- }
+ } // namespace DTAliases
  
  class DominatorNode {
  public:
@@ -53,6 +53,6 @@
    std::vector<DominatorNode *> children;
  };
  
- } // namespace lotus
+ } // namespace noelle
  
  #endif // NOELLE_SRC_CORE_DOMINATORS_DOMINATORNODE_H_

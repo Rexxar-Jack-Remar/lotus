@@ -1,0 +1,41 @@
+# Partial Evaluation (LLPE) - upgraded to LLVM 14.x for Lotus
+add_library(CanaryPE STATIC
+  ArgSpec.cpp
+  BytewiseReinterpret.cpp
+  CFGEval.cpp
+  CommandLine.cpp
+  ConditionalSpec.cpp
+  CopyPaste.cpp
+  CreateSpecialisationContext.cpp
+  DIE.cpp
+  DOT.cpp
+  DriverInterface.cpp
+  DSE.cpp
+  DumpType.cpp
+  Eval.cpp
+  FunctionSharing.cpp
+  IAWalkers.cpp
+  IntBenefit.cpp
+  IntConstFold.cpp
+  IntegratorShared.cpp
+  Integrator.cpp
+  LLIO.cpp
+  LoadForward.cpp
+  MainLoop.cpp
+  Misc.cpp
+  NameBlocks.cpp
+  NewStats.cpp
+  PartialLoadForward.cpp
+  PostCommit.cpp
+  Print.cpp
+  Save.cpp
+  SaveSplit.cpp
+  Selective.cpp
+  Shadows.cpp
+  TentativeLoads.cpp
+  TLDump.cpp
+  TopLevel.cpp
+  VFSCallModRef.cpp
+  VFSOps.cpp
+)
+target_link_libraries(CanaryPE PUBLIC CanaryLLVMUtils)

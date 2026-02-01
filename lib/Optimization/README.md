@@ -22,3 +22,11 @@ https://github.com/llvm/llvm-project/tree/main/llvm/test/Transforms/LoopDataPref
 
 Taken from LLVM 14.
 Used to evaluate alias analsyes inside Lotus.
+
+## Inter-procedural (IP)
+
+The **IP** subdirectory holds inter-procedural memory optimizations built on ShadowMem/MemorySSA: dead store elimination, redundant load elimination, store sinking, and store-to-load forwarding. See [IP/README.md](IP/README.md).
+
+## Partial Evaluation (PE)
+
+The **PE** subdirectory contains LLPE (LLVM Partial Evaluator), upgraded from LLVM 5.0 to LLVM 14.x and integrated into Lotus. It provides specialisation of LLVM IR (function inlining, loop peeling, load forwarding, dead code elimination). See [PE/README.md](PE/README.md) for details and usage.

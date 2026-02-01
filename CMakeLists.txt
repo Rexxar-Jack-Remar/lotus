@@ -47,6 +47,12 @@ if (ENABLE_SEAHORN)
     include(cmake/ConfigureSeaHorn.cmake)
 endif()
 
+# Optional cclyzer++ Datalog-based alias analysis (standalone backend, not in AliasAnalysisWrapper)
+option(LOTUS_USE_CCLYZER "Enable optional cclyzer++ alias analysis backend" OFF)
+if (LOTUS_USE_CCLYZER)
+    include(cmake/ConfigureCclyzerpp.cmake)
+endif()
+
 # Add subdirectories
 add_subdirectory(lib)
 add_subdirectory(tools)

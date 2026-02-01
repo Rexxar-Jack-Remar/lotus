@@ -12,5 +12,8 @@ add_subdirectory(LotusAA)
 add_subdirectory(AserPTA)
 # add_subdirectory(TypeQualifier) # not used for now
 add_subdirectory(AliasAnalysisWrapper)
+if(LOTUS_CCLYZERPP_AVAILABLE)
+  add_subdirectory(CclyzerAA)
+endif()
 # add_subdirectory(Pestrie)  # not used fow now
 add_subdirectory(TPA)
