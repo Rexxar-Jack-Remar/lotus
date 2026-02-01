@@ -556,6 +556,32 @@ TEST_F(PDGSlicingTest, ContextSensitiveVsCFLComparison) {
   }
 }
 
+TEST_F(PDGSlicingTest, ContextSensitiveSliceOptions) {
+  if (!hasMinimumNodes(1)) {
+    GTEST_SKIP() << "No PDG or test nodes available";
+    return;
+  }
+
+  ContextSensitiveSlicing csSlicer(*PDG);
+  pdg::SliceOptions options;
+  options.include_data_deps = true;
+  options.include_control_deps = true;
+  options.include_param_edges = true;
+  options.include_call_return_edges = true;
+  options.use_summary_cache = true;
+
+  ContextSensitiveSlicing::CFLDiagnostics diagnostics;
+  auto sliceWithOptions = csSlicer.computeForwardSlice(
+      ContextSensitiveSlicing::NodeSet{testNodes[0]}, options, &diagnostics);
+  auto sliceLegacy = csSlicer.computeForwardSlice(*testNodes[0]);
+
+  EXPECT_GT(sliceWithOptions.size(), 0) << "Slice via SliceOptions should not be empty";
+  EXPECT_LE(sliceWithOptions.size(), sliceLegacy.size() + 1)
+      << "Slice with options should be comparable to legacy (same or smaller with summaries)";
+  EXPECT_TRUE(sliceWithOptions.find(testNodes[0]) != sliceWithOptions.end())
+      << "Start node should be in slice";
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   cl::ParseCommandLineOptions(argc, argv, "PDG Slicing Test\n");

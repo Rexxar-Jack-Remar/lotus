@@ -54,6 +54,9 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     using Fact = typename Problem::FactType;
     using Value = typename Problem::ValueType;
 
+    m_steps_performed = 0;
+    m_bound_reached = false;
+
     // Clear previous results and caches
     m_values.clear();
     m_jump_functions.clear();
@@ -236,6 +239,11 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
 
     // Phase 1: compute jump functions
     while (!m_worklist.empty()) {
+        if (m_max_steps != 0 && m_steps_performed >= m_max_steps) {
+            m_bound_reached = true;
+            break;
+        }
+
         auto work_item = m_worklist.back();
         m_worklist.pop_back();
 
@@ -341,6 +349,8 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                 }
             }
         }
+
+        m_steps_performed++;
     }
 
     // Phase 2: compute values using jump functions

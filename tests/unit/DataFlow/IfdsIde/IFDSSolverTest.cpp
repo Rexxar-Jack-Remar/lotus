@@ -255,6 +255,42 @@ TEST_F(IFDSSolverTest, BranchMerge) {
     EXPECT_GT(sinkCallCount, 0) << "Taint should reach sink after merge";
 }
 
+TEST_F(IFDSSolverTest, BoundedSolver) {
+    // Bounded solver: set a small step limit; solver stops and returns partial result.
+    auto module = createLinearFlow();
+    TaintAnalysis analysis;
+    analysis.add_source_function("source");
+    analysis.add_sink_function("sink");
+
+    IFDSSolver<TaintAnalysis> solver(analysis);
+    solver.set_max_steps(3);
+    solver.solve(*module);
+
+    EXPECT_TRUE(solver.bound_reached()) << "Step bound should have been reached";
+    EXPECT_EQ(solver.get_steps_performed(), 3u) << "Should have performed exactly 3 steps";
+    EXPECT_EQ(solver.get_max_steps(), 3u);
+
+    // Partial result: we should have at least some path edges from the first few steps
+    std::vector<PathEdge<typename TaintAnalysis::FactType>> paths;
+    solver.get_path_edges(paths);
+    EXPECT_GT(paths.size(), 0) << "Bounded run should still produce partial path edges";
+}
+
+TEST_F(IFDSSolverTest, UnboundedSolver) {
+    // Default (unbounded) behavior unchanged
+    auto module = createLinearFlow();
+    TaintAnalysis analysis;
+    analysis.add_source_function("source");
+    analysis.add_sink_function("sink");
+
+    IFDSSolver<TaintAnalysis> solver(analysis);
+    solver.solve(*module);
+
+    EXPECT_FALSE(solver.bound_reached());
+    EXPECT_GT(solver.get_steps_performed(), 0u);
+    EXPECT_EQ(solver.get_max_steps(), 0u);
+}
+
 // ============================================================================
 // Main function for running tests
 // ============================================================================

@@ -1,35 +1,11 @@
 /**
  * @file ContextSensitiveSlicing.cpp
- * @brief Implementation of context-sensitive slicing using CFL-reachability
+ * @brief Implementation of context-sensitive slicing (tabulation-style CFL-reachability)
  *
- * This file implements context-sensitive slicing primitives for the Program
- * Dependency Graph using Context-Free Language (CFL) reachability. The key
- * innovation is maintaining a call stack during traversal to ensure that data
- * flows are tracked correctly across function boundaries, preventing spurious
- * dependencies from merging at function entry/exit points.
- *
- * CFL-Reachability Algorithm:
- * - Uses a context-free grammar to define valid paths through the program
- * - Call edges (CONTROLDEP_CALLINV) push call sites onto the stack
- * - Return edges (CONTROLDEP_CALLRET) pop matching call sites from the stack
- * - Only allows traversal when call/return pairs are properly matched
- * - Prevents data flows that cross unmatched call/return boundaries
- *
- * Features:
- * - Context-sensitive forward slicing: Find all nodes reachable from criteria
- * with proper call/return matching
- * - Context-sensitive backward slicing: Find all nodes that can reach criteria
- * with proper call/return matching
- * - Context-sensitive program chopping: Find nodes on paths between source and
- * sink with context sensitivity
- * - Call stack tracking: Maintains stack of call sites to match with return
- * sites
- * - CFL-reachability: Uses context-free language reachability for precise
- * inter-procedural analysis
- * - Edge type filtering: Configurable edge type filtering for different
- * analysis needs
- * - Proper call-return matching: Uses PDG's existing call-return edge
- * connections
+ * Implements context-sensitive slicing by tabulation over the PDG: valid paths
+ * are those with properly matched call/return pairs (CFL-reachability). Optional
+ * procedure summary caching avoids re-exploring the same callee for the same
+ * caller context ("summary edges at callee"), matching IFDS-based slicer designs.
  */
 
 #include "IR/PDG/ContextSensitiveSlicing.h"
@@ -43,8 +19,38 @@ using namespace llvm;
 
 namespace pdg {
 
-// ==================== ContextSensitiveSlicing Implementation
-// ====================
+// ==================== SliceOptions ====================
+
+std::set<EdgeType> SliceOptions::getEdgeTypes() const {
+  std::set<EdgeType> types;
+  if (include_data_deps) {
+    types.insert(EdgeType::DATA_DEF_USE);
+    types.insert(EdgeType::DATA_RAW);
+    types.insert(EdgeType::DATA_READ);
+    types.insert(EdgeType::DATA_ALIAS);
+    types.insert(EdgeType::DATA_RET);
+    types.insert(EdgeType::VAL_DEP);
+    types.insert(EdgeType::GLOBAL_DEP);
+  }
+  if (include_control_deps) {
+    types.insert(EdgeType::CONTROLDEP_BR);
+    types.insert(EdgeType::CONTROLDEP_IND_BR);
+    types.insert(EdgeType::CONTROLDEP_ENTRY);
+  }
+  if (include_param_edges) {
+    types.insert(EdgeType::PARAMETER_IN);
+    types.insert(EdgeType::PARAMETER_OUT);
+    types.insert(EdgeType::PARAMETER_FIELD);
+    types.insert(EdgeType::DATA_RET);
+  }
+  if (include_call_return_edges) {
+    types.insert(EdgeType::CONTROLDEP_CALLINV);
+    types.insert(EdgeType::CONTROLDEP_CALLRET);
+  }
+  return types;
+}
+
+// ==================== ContextSensitiveSlicing Implementation ====================
 
 ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::computeForwardSlice(
     Node &start_node, const std::set<EdgeType> &edge_types) {
@@ -90,6 +96,30 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::computeBackwardSlice(
   return traverseWithStack(end_nodes, edge_types, false, limits, diagnostics);
 }
 
+ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::computeForwardSlice(
+    const NodeSet &start_nodes, const SliceOptions &options,
+    CFLDiagnostics *diagnostics) {
+  CFLTraversalLimits limits;
+  limits.max_states = options.max_states;
+  limits.max_stack_depth = options.max_stack_depth;
+  std::set<EdgeType> edge_types = options.getEdgeTypes();
+  SummaryCache cache;
+  return traverseWithStack(start_nodes, edge_types, true, limits, diagnostics,
+                          options.use_summary_cache, options.use_summary_cache ? &cache : nullptr);
+}
+
+ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::computeBackwardSlice(
+    const NodeSet &end_nodes, const SliceOptions &options,
+    CFLDiagnostics *diagnostics) {
+  CFLTraversalLimits limits;
+  limits.max_states = options.max_states;
+  limits.max_stack_depth = options.max_stack_depth;
+  std::set<EdgeType> edge_types = options.getEdgeTypes();
+  SummaryCache cache;
+  return traverseWithStack(end_nodes, edge_types, false, limits, diagnostics,
+                          options.use_summary_cache, options.use_summary_cache ? &cache : nullptr);
+}
+
 ContextSensitiveSlicing::NodeSet
 ContextSensitiveSlicing::computeChop(Node &source_node, Node &sink_node,
                                      const std::set<EdgeType> &edge_types) {
@@ -115,21 +145,28 @@ ContextSensitiveSlicing::traverseWithStack(const NodeSet &start_nodes,
                                            const std::set<EdgeType> &edge_types,
                                            bool forward) {
   return traverseWithStack(start_nodes, edge_types, forward,
-                           CFLTraversalLimits{}, nullptr);
+                           CFLTraversalLimits{}, nullptr, false, nullptr);
 }
 
 ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
     const NodeSet &start_nodes, const std::set<EdgeType> &edge_types,
     bool forward, const CFLTraversalLimits &limits,
     CFLDiagnostics *diagnostics) {
+  return traverseWithStack(start_nodes, edge_types, forward, limits,
+                           diagnostics, false, nullptr);
+}
+
+ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
+    const NodeSet &start_nodes, const std::set<EdgeType> &edge_types,
+    bool forward, const CFLTraversalLimits &limits,
+    CFLDiagnostics *diagnostics, bool use_summary_cache,
+    SummaryCache *summary_cache) {
   NodeSet slice;
   VisitedSet visited;
-  std::queue<std::pair<Node *, std::vector<Node *>>>
-      worklist; // <node, call_stack>
+  std::queue<std::pair<Node *, std::vector<Node *>>> worklist;
   if (diagnostics != nullptr)
     *diagnostics = CFLDiagnostics{};
 
-  // Initialize worklist with starting nodes and empty call stacks
   for (auto *node : start_nodes) {
     if (node != nullptr) {
       worklist.push({node, std::vector<Node *>()});
@@ -137,7 +174,6 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
     }
   }
 
-  // BFS traversal with CFL-reachability constraints; visited set avoids cycles.
   while (!worklist.empty()) {
     auto current_pair = worklist.front();
     Node *current = current_pair.first;
@@ -155,7 +191,6 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
       continue;
     }
 
-    // Check if this (node, call_stack) state has been visited
     auto state = std::make_pair(current, call_stack);
     if (visited.find(state) != visited.end()) {
       continue;
@@ -167,11 +202,36 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
     }
     visited.insert(state);
 
+    // Summary cache: when we enter a callee (stack = [call_site]), reuse or compute summary.
+    if (use_summary_cache && summary_cache != nullptr &&
+        call_stack.size() == 1u) {
+      Node *call_site = call_stack.back();
+      auto key = std::make_pair(current, call_site);
+      auto it = summary_cache->find(key);
+      if (it != summary_cache->end()) {
+        if (diagnostics != nullptr)
+          diagnostics->summary_hits++;
+        for (Node *n : it->second.reachable)
+          slice.insert(n);
+        if (it->second.returns_to_caller) {
+          auto new_state_return = std::make_pair(call_site, std::vector<Node *>());
+          if (visited.find(new_state_return) == visited.end()) {
+            slice.insert(call_site);
+            worklist.push({call_site, std::vector<Node *>()});
+          }
+        }
+        continue;
+      }
+      if (diagnostics != nullptr)
+        diagnostics->summary_misses++;
+      // Cache miss: compute summary for (current, call_site) for future hits.
+      (*summary_cache)[key] = computeProcedureSummary(current, call_site, edge_types, forward);
+    }
+
     try {
       auto &edges =
           forward ? current->getOutEdgeSet() : current->getInEdgeSet();
       for (auto *edge : edges) {
-        // Skip null edges or edges not in allowed types
         if (edge == nullptr ||
             (!edge_types.empty() &&
              edge_types.find(edge->getEdgeType()) == edge_types.end())) {
@@ -183,39 +243,27 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
           continue;
         }
 
-        // Create a copy of the call stack for this traversal path
         std::vector<Node *> new_stack = call_stack;
 
         if (forward) {
-          // Forward traversal: call edges push, return edges pop
           if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLINV &&
               current->getNodeType() == GraphNodeType::INST_FUNCALL) {
-            // Push call site onto stack when traversing call invocation edge
             new_stack.push_back(current);
           } else if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLRET) {
-            // Pop matching call site from stack when traversing return edge
             if (!new_stack.empty() && neighbor == new_stack.back()) {
               new_stack.pop_back();
             } else {
-              // Skip this edge if call/return don't match (CFL-reachability
-              // constraint)
               continue;
             }
           }
         } else {
-          // Backward traversal: return edges push, call edges pop
           if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLRET &&
               current->getNodeType() == GraphNodeType::INST_RET) {
-            // Push return site onto stack when traversing return edge backward
             new_stack.push_back(current);
           } else if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLINV) {
-            // Pop matching return site from stack when traversing call edge
-            // backward
             if (!new_stack.empty() && neighbor == new_stack.back()) {
               new_stack.pop_back();
             } else {
-              // Skip this edge if call/return don't match (CFL-reachability
-              // constraint)
               continue;
             }
           }
@@ -228,16 +276,13 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
           continue;
         }
 
-        // Check if this (node, call_stack) state has been visited
         auto new_state = std::make_pair(neighbor, new_stack);
         if (visited.find(new_state) == visited.end()) {
-          // Add neighbor to slice and queue for further exploration
           slice.insert(neighbor);
           worklist.push({neighbor, new_stack});
         }
       }
     } catch (...) {
-      // Skip this node if there's an error accessing its edges
       continue;
     }
   }
@@ -245,6 +290,77 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
   if (diagnostics != nullptr)
     diagnostics->states_explored = visited.size();
   return slice;
+}
+
+ContextSensitiveSlicing::ProcedureSummary
+ContextSensitiveSlicing::computeProcedureSummary(Node *entry_node, Node *call_site,
+                                                 const std::set<EdgeType> &edge_types,
+                                                 bool forward) {
+  ProcedureSummary sum;
+  VisitedSet visited;
+  std::queue<std::pair<Node *, std::vector<Node *>>> worklist;
+  std::vector<Node *> stack = {call_site};
+  worklist.push({entry_node, stack});
+  sum.reachable.insert(entry_node);
+
+  while (!worklist.empty()) {
+    Node *current = worklist.front().first;
+    std::vector<Node *> call_stack = worklist.front().second;
+    worklist.pop();
+
+    auto state = std::make_pair(current, call_stack);
+    if (visited.count(state))
+      continue;
+    visited.insert(state);
+    sum.reachable.insert(current);
+
+    auto &edges = forward ? current->getOutEdgeSet() : current->getInEdgeSet();
+    for (auto *edge : edges) {
+      if (edge == nullptr ||
+          (!edge_types.empty() &&
+           edge_types.find(edge->getEdgeType()) == edge_types.end())) {
+        continue;
+      }
+      Node *neighbor = forward ? edge->getDstNode() : edge->getSrcNode();
+      if (neighbor == nullptr)
+        continue;
+
+      std::vector<Node *> new_stack = call_stack;
+      if (forward) {
+        if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLINV &&
+            current->getNodeType() == GraphNodeType::INST_FUNCALL) {
+          new_stack.push_back(current);
+        } else if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLRET) {
+          if (!new_stack.empty() && neighbor == new_stack.back()) {
+            new_stack.pop_back();
+            if (new_stack.empty())
+              sum.returns_to_caller = true;
+          } else {
+            continue;
+          }
+        }
+      } else {
+        if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLRET &&
+            current->getNodeType() == GraphNodeType::INST_RET) {
+          new_stack.push_back(current);
+        } else if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLINV) {
+          if (!new_stack.empty() && neighbor == new_stack.back()) {
+            new_stack.pop_back();
+            if (new_stack.empty())
+              sum.returns_to_caller = true;
+          } else {
+            continue;
+          }
+        }
+      }
+      auto new_state = std::make_pair(neighbor, new_stack);
+      if (visited.find(new_state) == visited.end()) {
+        sum.reachable.insert(neighbor);
+        worklist.push({neighbor, new_stack});
+      }
+    }
+  }
+  return sum;
 }
 
 // Note: getAssociatedCallNode is no longer needed in the full CFL-reachability
@@ -434,7 +550,8 @@ bool ContextSensitiveSlicingUtils::isCFLValidPath(
     if (edge_type == EdgeType::CONTROLDEP_CALLINV) {
       call_stack.push_back(current);
     } else if (edge_type == EdgeType::CONTROLDEP_CALLRET) {
-      if (call_stack.empty() || call_stack.back() != current) {
+      // Return edge: current (callee) -> next (call site); stack top must be the call site we return to.
+      if (call_stack.empty() || call_stack.back() != next) {
         return false;
       }
       call_stack.pop_back();

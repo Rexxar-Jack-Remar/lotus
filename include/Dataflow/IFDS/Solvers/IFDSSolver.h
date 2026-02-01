@@ -29,6 +29,13 @@ public:
     // Enable/disable progress bar display during analysis
     void set_show_progress(bool show) { m_show_progress = show; }
 
+    // Bounded solver: optional step limit (0 = unbounded). When the bound is reached,
+    // the solver stops and returns a partial result; no exception is thrown.
+    void set_max_steps(size_t max_steps) { m_max_steps = max_steps; }
+    size_t get_max_steps() const { return m_max_steps; }
+    size_t get_steps_performed() const { return m_steps_performed; }
+    bool bound_reached() const { return m_bound_reached; }
+
     // Query interface for analysis results
     FactSet get_facts_at_entry(const llvm::Instruction* inst) const;
     FactSet get_facts_at_exit(const llvm::Instruction* inst) const;
@@ -53,6 +60,11 @@ private:
     Problem& m_problem;
     bool m_show_progress = false;
 
+    // Bounded solver state (0 = unbounded)
+    size_t m_max_steps = 0;
+    size_t m_steps_performed = 0;
+    bool m_bound_reached = false;
+
     // Simple sequential data structures (no thread-safety needed)
     std::set<PathEdgeType> m_path_edges;
     std::set<SummaryEdgeType> m_summary_edges;
@@ -60,8 +72,16 @@ private:
     std::unordered_map<const llvm::Instruction*, FactSet> m_entry_facts;
     std::unordered_map<const llvm::Instruction*, FactSet> m_exit_facts;
 
-    // Indexed data structures for fast lookup
-    std::unordered_map<const llvm::CallInst*, std::set<SummaryEdgeType>> m_summary_index;
+    // Summary edges at callee: (callee, call_fact) -> set of return_fact (one entry per callee, reused at all call sites)
+    using CalleeSummaryKey = std::pair<const llvm::Function*, Fact>;
+    struct CalleeSummaryKeyHash {
+      size_t operator()(const CalleeSummaryKey& k) const {
+        return std::hash<const llvm::Function*>{}(k.first) ^
+               (std::hash<Fact>{}(k.second) << 1);
+      }
+    };
+    std::unordered_map<CalleeSummaryKey, std::set<Fact>, CalleeSummaryKeyHash> m_summary_by_callee;
+
     std::unordered_map<const llvm::Instruction*, std::set<PathEdgeType>> m_path_edges_at;
 
     // Call graph information (read-only after initialization)

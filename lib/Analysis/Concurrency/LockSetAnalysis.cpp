@@ -590,10 +590,12 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
 
   // Check if this is a lock operation
   if (m_thread_api->isTDAcquire(inst)) {
-    // Lock acquire - add lock to set
-    LockID lock = getLockValue(inst);
-    if (lock) {
-      out_set.insert(lock);
+    // Try-lock may fail; without checking return value we don't add to either set
+    if (!m_thread_api->isTryLock(inst)) {
+      LockID lock = getLockValue(inst);
+      if (lock) {
+        out_set.insert(lock);
+      }
     }
   } else if (m_thread_api->isTDRelease(inst)) {
     // Lock release - remove lock from set
@@ -619,24 +621,8 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
       }
     }
   } else if (const CallInst *call = dyn_cast<CallInst>(inst)) {
-    // For try-lock, conservatively assume it may fail (may-analysis)
-    // For must-analysis, we can't assume lock is acquired
-    if (m_thread_api->isTDAcquire(call) &&
-        call->getCalledFunction() &&
-        call->getCalledFunction()->getName().contains("trylock")) {
-      if (!is_must) {
-        // May-analysis: assume try-lock may succeed.
-        // We want to know if it's *possible* to hold the lock.
-        LockID lock = getLockValue(inst);
-        if (lock) {
-          out_set.insert(lock);
-        }
-      }
-      // Must-analysis: don't add lock (can't guarantee acquisition).
-      // We want to know if we *definitely* hold the lock. Since try-lock can fail,
-      // we must assume it failed.
-    } else if (!m_thread_api->isTDAcquire(call) && 
-               !m_thread_api->isTDRelease(call)) {
+    // Try-lock is handled above (not added to set). Handle other calls.
+    if (!m_thread_api->isTDAcquire(call) && !m_thread_api->isTDRelease(call)) {
       // Handle regular function calls with interprocedural summaries
       if (m_call_graph) {
         auto callees = getCallees(call);
@@ -683,8 +669,11 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       }
     }
   } else if (m_thread_api->isTDAcquire(inst)) {
-    LockID lock = getLockValue(inst);
-    if (lock) out_write.insert(lock);
+    // Try-lock may fail; don't add to write set
+    if (!m_thread_api->isTryLock(inst)) {
+      LockID lock = getLockValue(inst);
+      if (lock) out_write.insert(lock);
+    }
   } else if (m_thread_api->isTDRelease(inst)) {
     LockID lock = getLockValue(inst);
     if (lock) {

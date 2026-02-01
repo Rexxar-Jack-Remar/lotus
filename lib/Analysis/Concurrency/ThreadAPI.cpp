@@ -6,7 +6,7 @@
  * categorizing thread-related API calls in multithreaded programs.
  *
  * @author Lotus Analysis Framework
- * @date 2025
+ * @date 2026 
  * @ingroup Concurrency
  */
 
@@ -63,11 +63,11 @@ static const ei_pair ei_pairs[] = {
     {"\01_pthread_join", ThreadAPI::TD_JOIN},
     {"pthread_cancel", ThreadAPI::TD_JOIN},
     {"pthread_mutex_lock", ThreadAPI::TD_ACQUIRE},
-    {"pthread_rwlock_rdlock", ThreadAPI::TD_RWLOCK_RDLOCK},
-    {"pthread_rwlock_wrlock", ThreadAPI::TD_RWLOCK_WRLOCK},
     {"sem_wait", ThreadAPI::TD_ACQUIRE},
     {"_spin_lock", ThreadAPI::TD_ACQUIRE},
     {"SRE_SplSpecLockEx", ThreadAPI::TD_ACQUIRE},
+    {"pthread_rwlock_rdlock", ThreadAPI::TD_RWLOCK_RDLOCK},
+    {"pthread_rwlock_wrlock", ThreadAPI::TD_RWLOCK_WRLOCK},
     {"pthread_mutex_trylock", ThreadAPI::TD_TRY_ACQUIRE},
     {"pthread_mutex_unlock", ThreadAPI::TD_RELEASE},
     {"pthread_rwlock_unlock", ThreadAPI::TD_RELEASE},

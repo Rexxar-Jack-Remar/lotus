@@ -13,10 +13,6 @@ namespace pdg
 {
   /**
    * @brief Hash function for (Node*, call_stack) pairs used in visited set
-   * 
-   * This hash function combines the hash of the node pointer with the hash of
-   * the call stack vector. It uses a combination of XOR and bit shifting to
-   * create a good distribution of hash values for the visited set.
    */
   struct NodeStackHash {
     size_t operator()(const std::pair<Node *, std::vector<Node *>> &p) const {
@@ -28,13 +24,46 @@ namespace pdg
     }
   };
 
+  struct NodePairHash {
+    size_t operator()(const std::pair<Node *, Node *> &p) const {
+      return std::hash<Node *>{}(p.first) ^ (std::hash<Node *>{}(p.second) << 1);
+    }
+  };
+
   /**
-   * @brief Context-sensitive slicing using CFL-reachability
-   * 
-   * This class implements context-sensitive slicing using Context-Free Language (CFL)
-   * reachability. It maintains a stack of call/return pairs to ensure that data flows
-   * are tracked correctly across function boundaries, preventing spurious dependencies
-   * from merging at function entry/exit points.
+   * @brief Data and control dependence options for context-sensitive slicing.
+   *
+   * Mirrors the declarative options used in tabulation-based slicers (e.g. WALA):
+   * choose which edges contribute to the slice. Empty edge_types means "all
+   * allowed types"; use getEdgeTypes() to resolve presets or custom sets.
+   */
+  struct SliceOptions {
+    /// Include data dependence edges (DEF_USE, RAW, READ, ALIAS, RET, etc.).
+    bool include_data_deps = true;
+    /// Include control dependence edges (BR, CALLINV, CALLRET, ENTRY).
+    bool include_control_deps = true;
+    /// Include parameter/return edges (PARAMETER_IN, PARAMETER_OUT, DATA_RET).
+    bool include_param_edges = true;
+    /// Include call-invocation and return edges (required for context sensitivity).
+    bool include_call_return_edges = true;
+    /// Optional traversal limits (0 means unlimited).
+    size_t max_states = 0;
+    size_t max_stack_depth = 0;
+    /// Use summary cache (tabulation-style): reuse procedure summaries for same (entry, call_site).
+    bool use_summary_cache = true;
+
+    /// Build the set of edge types allowed by current options.
+    std::set<EdgeType> getEdgeTypes() const;
+  };
+
+  /**
+   * @brief Context-sensitive slicing using CFL-reachability (tabulation-style).
+   *
+   * Implements context-sensitive slicing by tabulation over the PDG: valid paths
+   * are those with properly matched call/return pairs (CFL-reachability). Optional
+   * summary caching avoids re-exploring the same procedure for the same caller
+   * context, matching the "summary edges at callee" design used in IFDS-based
+   * slicers.
    */
   class ContextSensitiveSlicing
   {
@@ -50,6 +79,8 @@ namespace pdg
       bool stack_depth_limit_hit = false;
       size_t states_explored = 0;
       size_t max_stack_depth_reached = 0;
+      size_t summary_hits = 0;
+      size_t summary_misses = 0;
     };
     
     /**
@@ -133,6 +164,18 @@ namespace pdg
      */
     NodeSet computeBackwardSlice(const NodeSet &end_nodes, const std::set<EdgeType> &edge_types,
                                  const CFLTraversalLimits &limits, CFLDiagnostics *diagnostics);
+
+    /**
+     * @brief Compute context-sensitive forward slice using options (preferred API).
+     */
+    NodeSet computeForwardSlice(const NodeSet &start_nodes, const SliceOptions &options,
+                                CFLDiagnostics *diagnostics = nullptr);
+
+    /**
+     * @brief Compute context-sensitive backward slice using options (preferred API).
+     */
+    NodeSet computeBackwardSlice(const NodeSet &end_nodes, const SliceOptions &options,
+                                 CFLDiagnostics *diagnostics = nullptr);
     
     /**
      * @brief Compute context-sensitive chop between source and sink nodes
@@ -154,19 +197,30 @@ namespace pdg
     
   private:
     GenericGraph &_pdg;
-    
+
+    /// Summary for one (callee-entry, call_site): nodes reachable within callee and whether we return to caller.
+    struct ProcedureSummary {
+      NodeSet reachable;
+      bool returns_to_caller = false;
+    };
+    using SummaryCache = std::unordered_map<std::pair<Node *, Node *>, ProcedureSummary, NodePairHash>;
+
     /**
-     * @brief Context-sensitive traversal with call stack (unified forward/backward)
-     * @param start_nodes Starting nodes
-     * @param edge_types Allowed edge types
-     * @param forward True for forward traversal, false for backward
-     * @return Set of reachable nodes
+     * @brief Context-sensitive traversal with call stack (unified forward/backward).
+     * When summary_cache is non-null and use_summary_cache is true, reuses procedure summaries.
      */
     NodeSet traverseWithStack(const NodeSet &start_nodes, const std::set<EdgeType> &edge_types, bool forward);
 
     NodeSet traverseWithStack(const NodeSet &start_nodes, const std::set<EdgeType> &edge_types, bool forward,
                               const CFLTraversalLimits &limits, CFLDiagnostics *diagnostics);
-    
+
+    NodeSet traverseWithStack(const NodeSet &start_nodes, const std::set<EdgeType> &edge_types, bool forward,
+                              const CFLTraversalLimits &limits, CFLDiagnostics *diagnostics,
+                              bool use_summary_cache, SummaryCache *summary_cache);
+
+    /// Compute and cache procedure summary from (entry_node, call_site); used when summary cache is enabled.
+    ProcedureSummary computeProcedureSummary(Node *entry_node, Node *call_site,
+                                             const std::set<EdgeType> &edge_types, bool forward);
   };
 
   /**

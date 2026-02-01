@@ -288,6 +288,16 @@ public:
   }
   //@}
 
+  /// Return true if this call is a try-lock (e.g., pthread_mutex_trylock)
+  //@{
+  inline bool isTryLock(const Instruction *inst) const {
+    return getType(getCallee(inst)) == TD_TRY_ACQUIRE;
+  }
+  inline bool isTryLock(const CallBase *cb) const {
+    return getType(getCallee(cb)) == TD_TRY_ACQUIRE;
+  }
+  //@}
+
   /// Return true if this call acquires a read lock (rwlock_rdlock)
   //@{
   inline bool isReadLockAcquire(const Instruction *inst) const {

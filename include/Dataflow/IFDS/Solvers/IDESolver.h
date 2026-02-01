@@ -48,6 +48,13 @@ public:
 
     void solve(const llvm::Module& module);
 
+    // Bounded solver: optional step limit (0 = unbounded). When the bound is reached,
+    // the solver stops and returns a partial result.
+    void set_max_steps(size_t max_steps) { m_max_steps = max_steps; }
+    size_t get_max_steps() const { return m_max_steps; }
+    size_t get_steps_performed() const { return m_steps_performed; }
+    bool bound_reached() const { return m_bound_reached; }
+
     // Query interface
     Value get_value_at(const llvm::Instruction* inst, const Fact& fact) const;
     const std::unordered_map<const llvm::Instruction*,
@@ -111,6 +118,11 @@ private:
     EdgeFunctionPtr make_edge_function(const EdgeFunction& ef);
 
     Problem& m_problem;
+
+    // Bounded solver state (0 = unbounded)
+    size_t m_max_steps = 0;
+    size_t m_steps_performed = 0;
+    bool m_bound_reached = false;
 
     // Results: instruction -> fact -> value
     std::unordered_map<const llvm::Instruction*, std::unordered_map<Fact, Value>> m_values;
