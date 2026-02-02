@@ -18,9 +18,9 @@ TEST(PathExpressionsTest, TwoNodesOneEdge) {
   auto expr_0_1 = comp.exprBetween(0, 1);
   auto expr_1_0 = comp.exprBetween(1, 0);
 
-  EXPECT_TRUE(expr_0_0->isEpsilon());   // empty path
+  EXPECT_TRUE(expr_0_0->isEpsilon()); // empty path
   EXPECT_FALSE(expr_0_1->isEpsilon());
-  EXPECT_FALSE(expr_0_1->isEmptySet());  // path 0 -a-> 1
+  EXPECT_FALSE(expr_0_1->isEmptySet()); // path 0 -a-> 1
   EXPECT_TRUE(expr_1_0->isEmptySet());  // no path 1 -> 0
 }
 
@@ -52,7 +52,42 @@ TEST(PathExpressionsTest, SelfLoop) {
   auto expr_0_0 = comp.exprBetween(0, 0);
   // Paths: ε, x, xx, xxx, ...  =>  x*
   EXPECT_FALSE(expr_0_0->isEmptySet());
-  EXPECT_FALSE(expr_0_0->isEpsilon());  // we get star(literal('x')) which is not epsilon
+  EXPECT_FALSE(
+      expr_0_0->isEpsilon()); // we get star(literal('x')) which is not epsilon
+}
+
+TEST(PathExpressionsTest, RegexSimplifications) {
+  auto empty = Regex<char>::emptySet();
+  auto eps = Regex<char>::epsilon();
+  auto a = Regex<char>::literal('a');
+
+  auto union_left = Regex<char>::simplifiedUnion(empty, a);
+  EXPECT_TRUE(union_left->equals(*a));
+
+  auto union_right = Regex<char>::simplifiedUnion(a, empty);
+  EXPECT_TRUE(union_right->equals(*a));
+
+  auto union_same = Regex<char>::simplifiedUnion(a, a);
+  EXPECT_TRUE(union_same->equals(*a));
+
+  auto concat_empty = Regex<char>::simplifiedConcatenation(empty, a);
+  EXPECT_TRUE(concat_empty->isEmptySet());
+
+  auto concat_eps_left = Regex<char>::simplifiedConcatenation(eps, a);
+  EXPECT_TRUE(concat_eps_left->equals(*a));
+
+  auto concat_eps_right = Regex<char>::simplifiedConcatenation(a, eps);
+  EXPECT_TRUE(concat_eps_right->equals(*a));
+
+  auto star_empty = Regex<char>::simplifiedStar(empty);
+  EXPECT_TRUE(star_empty->isEpsilon());
+
+  auto star_eps = Regex<char>::simplifiedStar(eps);
+  EXPECT_TRUE(star_eps->isEpsilon());
+
+  auto star_literal = Regex<char>::simplifiedStar(a);
+  EXPECT_FALSE(star_literal->isEpsilon());
+  EXPECT_FALSE(star_literal->isEmptySet());
 }
 
 TEST(PathExpressionsTest, RegexToTgf) {

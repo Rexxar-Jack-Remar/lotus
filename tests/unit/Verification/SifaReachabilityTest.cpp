@@ -64,4 +64,57 @@ TEST(SifaReachability, ReachableAndUnreachableBlocks) {
   EXPECT_FALSE(lotus::sifa::isReachable(*F, *unreach));
 }
 
+TEST(SifaReachability, SingleBlockReachable) {
+  const char *ir = R"IR(
+    define i32 @f(i32 %x) {
+    entry:
+      %y = add i32 %x, 1
+      ret i32 %y
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  llvm::Function *F = M->getFunction("f");
+  ASSERT_NE(F, nullptr);
+  const llvm::BasicBlock *entry = &F->getEntryBlock();
+
+  EXPECT_TRUE(lotus::sifa::isReachable(*F, *entry));
+}
+
+TEST(SifaReachability, ConditionalBranchBothTargetsReachable) {
+  const char *ir = R"IR(
+    define i32 @f(i32 %x) {
+    entry:
+      %c = icmp eq i32 %x, 0
+      br i1 %c, label %then, label %else
+
+    then:
+      ret i32 1
+
+    else:
+      ret i32 2
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  llvm::Function *F = M->getFunction("f");
+  ASSERT_NE(F, nullptr);
+
+  const llvm::BasicBlock *thenBB = getBlockByName(*F, "then");
+  const llvm::BasicBlock *elseBB = getBlockByName(*F, "else");
+  ASSERT_NE(thenBB, nullptr);
+  ASSERT_NE(elseBB, nullptr);
+
+  EXPECT_TRUE(lotus::sifa::isReachable(*F, *thenBB));
+  EXPECT_TRUE(lotus::sifa::isReachable(*F, *elseBB));
+}
+
 } // namespace

@@ -1,11 +1,12 @@
 //
 // Updated for modern LLVM compatibility
 //
-#include <gtest/gtest.h>
+#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/SourceMgr.h>
+#include <gtest/gtest.h>
 
 #include "Alias/AserPTA/PointerAnalysis/Context/NoCtx.h"
 #include "Alias/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
@@ -31,6 +32,22 @@ using Solver = PartialUpdateSolver<Model>;
 cl::opt<std::string> TestIR(cl::Positional, cl::desc("path to input bitcode file"));
 
 namespace {
+
+std::unique_ptr<Module> parseAssembly(LLVMContext &ctx, const char *ir) {
+  SMDiagnostic err;
+  auto M = parseAssemblyString(ir, err, ctx);
+  if (!M)
+    err.print("AserPTATest", errs());
+  return M;
+}
+
+void addAserPTAPasses(llvm::legacy::PassManager &passes) {
+  passes.add(new CanonicalizeGEPPass());
+  passes.add(new LoweringMemCpyPass());
+  passes.add(new RemoveExceptionHandlerPass());
+  passes.add(new InsertGlobalCtorCallPass());
+  passes.add(new PointerAnalysisPass<Solver>());
+}
 
 class AserMarkerCallSite {
 private:
@@ -104,13 +121,123 @@ public:
 template <typename PTA>
 char PTAVerificationPass<PTA>::ID = 0;
 
-// C++11 does not support template variables
+// Query pass: expects two distinct allocas in main to be no-alias.
+class AserPTAQueryNoAliasPass : public llvm::ModulePass {
+public:
+  static char ID;
+  AserPTAQueryNoAliasPass() : llvm::ModulePass(ID) {}
 
-// template <typename PTA>
-// static llvm::RegisterPass<PTAVerificationPass<PTA>>
-//    PVP("", "", true, true);
+  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override {
+    AU.addRequired<PointerAnalysisPass<Solver>>();
+    AU.setPreservesAll();
+  }
+
+  bool runOnModule(llvm::Module &M) override {
+    getAnalysis<PointerAnalysisPass<Solver>>().analyze(&M, "main");
+    Solver &pta = *getAnalysis<PointerAnalysisPass<Solver>>().getPTA();
+
+    llvm::Function *mainFn = M.getFunction("main");
+    if (!mainFn) { ADD_FAILURE() << "main not found"; return false; }
+
+    const llvm::Value *a1 = nullptr, *a2 = nullptr;
+    for (auto &BB : *mainFn) {
+      for (auto &I : BB) {
+        if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(&I)) {
+          if (!a1) a1 = AI;
+          else if (!a2) { a2 = AI; break; }
+        }
+      }
+      if (a2) break;
+    }
+    if (!a1 || !a2) { ADD_FAILURE() << "expected two allocas in main"; return false; }
+    EXPECT_FALSE(pta.alias(nullptr, a1, nullptr, a2));
+    return false;  // no IR change
+  }
+};
+char AserPTAQueryNoAliasPass::ID = 0;
+
+// Query pass: expects store x to p, load q from p; x and q should alias.
+class AserPTAQueryAliasPass : public llvm::ModulePass {
+public:
+  static char ID;
+  AserPTAQueryAliasPass() : llvm::ModulePass(ID) {}
+
+  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override {
+    AU.addRequired<PointerAnalysisPass<Solver>>();
+    AU.setPreservesAll();
+  }
+
+  bool runOnModule(llvm::Module &M) override {
+    getAnalysis<PointerAnalysisPass<Solver>>().analyze(&M, "main");
+    Solver &pta = *getAnalysis<PointerAnalysisPass<Solver>>().getPTA();
+
+    llvm::Function *mainFn = M.getFunction("main");
+    if (!mainFn) { ADD_FAILURE() << "main not found"; return false; }
+
+    const llvm::AllocaInst *xAlloca = nullptr;
+    const llvm::LoadInst *qLoad = nullptr;
+    for (auto &BB : *mainFn) {
+      for (auto &I : BB) {
+        if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(&I)) {
+          if (AI->getAllocatedType()->isIntegerTy(32))
+            xAlloca = AI;
+        }
+        if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(&I)) {
+          if (LI->getType()->isPointerTy())
+            qLoad = LI;
+        }
+      }
+    }
+    if (!xAlloca || !qLoad) { ADD_FAILURE() << "expected alloca and load in main"; return false; }
+    EXPECT_TRUE(pta.alias(nullptr, xAlloca, nullptr, qLoad));
+    return false;  // no IR change
+  }
+};
+char AserPTAQueryAliasPass::ID = 0;
+
+// Pass registration for optional use by opt; unit tests run the pass directly.
+// static llvm::RegisterPass<PointerAnalysisPass<Solver>> PAP("Pointer Analysis Wrapper Pass",
+//                                                            "Pointer Analysis Wrapper Pass", true, true);
 
 }  // namespace
+
+TEST(AserPTA, NoAliasTwoAllocas) {
+  const char *ir = R"(
+    define i32 @main() {
+      %x = alloca i32
+      %y = alloca i32
+      ret i32 0
+    }
+  )";
+  LLVMContext ctx;
+  auto module = parseAssembly(ctx, ir);
+  ASSERT_NE(module, nullptr);
+
+  llvm::legacy::PassManager passes;
+  addAserPTAPasses(passes);
+  passes.add(new AserPTAQueryNoAliasPass());
+  passes.run(*module);
+}
+
+TEST(AserPTA, AliasStoreLoad) {
+  const char *ir = R"(
+    define i32 @main() {
+      %x = alloca i32
+      %p = alloca i32*
+      store i32* %x, i32** %p
+      %q = load i32*, i32** %p
+      ret i32 0
+    }
+  )";
+  LLVMContext ctx;
+  auto module = parseAssembly(ctx, ir);
+  ASSERT_NE(module, nullptr);
+
+  llvm::legacy::PassManager passes;
+  addAserPTAPasses(passes);
+  passes.add(new AserPTAQueryAliasPass());
+  passes.run(*module);
+}
 
 TEST(PTACorrectness, pta_correctness) {
     SMDiagnostic Err;
@@ -135,6 +262,3 @@ TEST(PTACorrectness, pta_correctness) {
 
     passes.run(*module);
 }
-
-static llvm::RegisterPass<PointerAnalysisPass<Solver>> PAP("Pointer Analysis Wrapper Pass",
-                                                           "Pointer Analysis Wrapper Pass", true, true);

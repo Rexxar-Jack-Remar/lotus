@@ -10,6 +10,7 @@ set(LOTUS_SRC_DIR ${CMAKE_SOURCE_DIR})
 include_directories(TestUtils)
 
 # Add subdirectories
+add_subdirectory(Checker)
 add_subdirectory(Concurrency)
 add_subdirectory(ControlFlow)
 add_subdirectory(DataFlow)

@@ -63,5 +63,29 @@ TEST(SifaSymAbs, RejectsFirstClassAggregatesByDefaultSubset) {
   EXPECT_THROW((void)lotus::sifa::analyzeSymAbsToReturn(*M, *F, opt), std::invalid_argument);
 }
 
+TEST(SifaSymAbs, ValidSubsetDoesNotThrow) {
+  const char *ir = R"IR(
+    define i32 @f(i32 %x) {
+    entry:
+      %y = add i32 %x, 1
+      ret i32 %y
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  llvm::Function *F = M->getFunction("f");
+  ASSERT_NE(F, nullptr);
+
+  lotus::sifa::SifaSymAbsOptions opt;
+  opt.validateLlvmSubset = true;
+
+  EXPECT_NO_THROW((void)lotus::sifa::analyzeSymAbsToReturn(*M, *F, opt));
+  EXPECT_NO_THROW((void)lotus::sifa::isReachableSymAbs(*M, *F, F->getEntryBlock(), opt));
+}
+
 } // namespace
 
