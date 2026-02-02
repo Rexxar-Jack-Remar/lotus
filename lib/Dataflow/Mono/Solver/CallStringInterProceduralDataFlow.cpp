@@ -273,7 +273,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
     auto &InSet = DF->IN(Current);
     auto OldIn = InSet;
 
-    for (auto PredKey :
+    for (const auto& PredKey :
          predecessors(Current, CallToReturns, ContinuationToCalls)) {
       ensureInitialized(PredKey, initializeIN, initializeOUT, DF);
       computeIN(Current.Inst, PredKey.Inst, PredKey.Ctx, InSet, DF);
@@ -284,7 +284,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
     computeOUT(Current.Inst, Current.Ctx, OutSet, DF);
 
     if (!(OutSet == OldOut) || !(InSet == OldIn)) {
-      for (auto SuccKey : successors(Current)) {
+      for (const auto& SuccKey : successors(Current)) {
         Enqueue(SuccKey);
       }
     }
