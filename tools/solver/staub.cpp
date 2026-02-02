@@ -1,9 +1,9 @@
 #include "Solvers/SMT/STAUB/SMTFormula.h"
-#include <fstream>
-#include <streambuf>
-#include <sstream>
-#include <limits.h>
 #include "Solvers/SMT/STAUB/STAUBUtil.h"
+#include <fstream>
+#include <limits.h>
+#include <sstream>
+#include <streambuf>
 
 
 #ifndef PAIR

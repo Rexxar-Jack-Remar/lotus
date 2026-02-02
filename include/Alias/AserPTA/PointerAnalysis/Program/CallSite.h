@@ -5,8 +5,8 @@
 #ifndef ASER_PTA_CALLSITE_H
 #define ASER_PTA_CALLSITE_H
 
-#include <llvm/IR/Instructions.h>
 #include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Instructions.h>
 
 #include "Alias/AserPTA/Util/Util.h"
 
@@ -32,8 +32,8 @@ public:
             return true;
         }
 
-        auto V = CB->getCalledOperand();
-        if (auto C = llvm::dyn_cast<llvm::Constant>(V)) {
+        auto *V = CB->getCalledOperand();
+        if (auto *C = llvm::dyn_cast<llvm::Constant>(V)) {
             if (C->isNullValue()) {
                 return true;
             }
@@ -54,7 +54,7 @@ public:
         if (!CB || this->isIndirectCall()) {
             return nullptr;
         }
-        auto targetFunction = CB->getCalledFunction();
+        auto *targetFunction = CB->getCalledFunction();
         if (targetFunction != nullptr) {
             return targetFunction;
         }

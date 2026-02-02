@@ -71,15 +71,15 @@ void arrayreach(CFLHashMap &cm, unordered_map<string, unsigned> &edgeStrToID,
   // vector<colorcountmap> NodeColorCount(NodeNum);
   //     unsigned edgelabels=9;
 
-  // cout<<cm.GetEdgNum()<<endl;
+  // cout<<cm.GetEdgNum()<<'\n';
 
   gettimeofday(&begin, NULL);
 
   // preprocessing all nodes
 
   for (unsigned i = 0; i < NodeNum; i++) {
-    // cout<<"doing"<<endl;
-    // cout<<"degree "<<cm.GetNodeDegree(i)<<endl;
+    // cout<<"doing"<<'\n';
+    // cout<<"degree "<<cm.GetNodeDegree(i)<<'\n';
 
     s_sets[i].push_back(i);
 
@@ -126,7 +126,7 @@ void arrayreach(CFLHashMap &cm, unordered_map<string, unsigned> &edgeStrToID,
 
   while (!fdll.empty()) {
     mergeNum++;
-    // cout << "MergeNum is: " << mergeNum << endl;
+    // cout << "MergeNum is: " << mergeNum << '\n';
 
     const string z_string = fdll.front();
 
@@ -137,10 +137,10 @@ void arrayreach(CFLHashMap &cm, unordered_map<string, unsigned> &edgeStrToID,
     interNodes.push(interNd);
 
     fdll.pop_front();
-    // cout<<(fdllitem.first)<<" and "<<(fdllitem.second)<<endl;
+    // cout<<(fdllitem.first)<<" and "<<(fdllitem.second)<<'\n';
     if (debug) {
       // cout<<"[fdll pop] "<<z_string<<" and
-      // "<<ColorInNodes[z_string].size()<<endl;
+      // "<<ColorInNodes[z_string].size()<<'\n';
     }
 
     // string s = fdllitem.first;
@@ -181,7 +181,7 @@ void arrayreach(CFLHashMap &cm, unordered_map<string, unsigned> &edgeStrToID,
 
     // s_set[y]
     // if(cm.GetNodeDegree(y) == 0)
-    // cout<<"error!"<<endl;
+    // cout<<"error!"<<'\n';
 
     // first we handle cycle
 
@@ -373,7 +373,7 @@ void arrayreach(CFLHashMap &cm, unordered_map<string, unsigned> &edgeStrToID,
         convert << w << "_" << (c->first);
         s = convert.str();
         // cout<<"hehe "<<x<<" "<<w<< " c "<<c->first <<" has "
-        // <<cm.HasEdgeBetween(x, w, c->first)<<endl;
+        // <<cm.HasEdgeBetween(x, w, c->first)<<'\n';
 
         if (!cm.HasEdgeBetween(x, w, c->first)) {
           if (debug)
@@ -438,28 +438,28 @@ void arrayreach(CFLHashMap &cm, unordered_map<string, unsigned> &edgeStrToID,
       }
     }
 
-    // cout<<"at the end: "<<z_string<<" "<<fdll.isInFDLL(z_string)<<endl;
+    // cout<<"at the end: "<<z_string<<" "<<fdll.isInFDLL(z_string)<<'\n';
   }
 
   gettimeofday(&end, NULL);
   elapsed += ((end.tv_sec - begin.tv_sec) +
               ((end.tv_usec - begin.tv_usec) / 1000000.0));
 
-  // cout<<"total S sets "<<s_sets.size()<<endl;
+  // cout<<"total S sets "<<s_sets.size()<<'\n';
 
   unsigned s_set_size = 0;
   for (unordered_map<unsigned, list<unsigned>>::iterator sit = s_sets.begin();
        sit != s_sets.end(); ++sit) {
-    // cout<<"set "<<sit->first<<endl;;
+    // cout<<"set "<<sit->first<<'\n';;
     unsigned tmps = sit->second.size();
     s_set_size = s_set_size + tmps * tmps;
     /*
     for(list<unsigned>::iterator it = (sit->second).begin(); it!=
-    (sit->second).end(); ++it ) cout<<*it<<endl;
+    (sit->second).end(); ++it ) cout<<*it<<'\n';
     */
   }
-  // cout<<"nodes "<<NodeNum<<endl;
-  // cout<<"s edges "<<s_set_size<<endl;
+  // cout<<"nodes "<<NodeNum<<'\n';
+  // cout<<"s edges "<<s_set_size<<'\n';
   // yuanbo
   // produce the merged graph
   //
@@ -546,7 +546,7 @@ void arrayreach(CFLHashMap &cm, unordered_map<string, unsigned> &edgeStrToID,
 
 int arrayversion() {
 
-  // cout<<version<<endl;
+  // cout<<version<<'\n';
   string line;
 
   // string line contains the filename
@@ -563,22 +563,22 @@ int arrayversion() {
 
     // vector<CFLGrammar> CGVec;
 
-    // cout<<"Processing "<<line<<endl;
-    // cout<<"doing "<<line<<endl;
+    // cout<<"Processing "<<line<<'\n';
+    // cout<<"doing "<<line<<'\n';
     NodeNum = dotparser.BuildNodeMap(line, NodeID);
-    // cout<<"doing "<<line<<" of size "<<NodeNum<<endl;
+    // cout<<"doing "<<line<<" of size "<<NodeNum<<'\n';
     // NodeNum = dotparser.BuildMatrix(line, NodeID);
 
     // CFLBitTable bt(NodeNum);
-    // cout<<"node "<<NodeNum<<endl;
+    // cout<<"node "<<NodeNum<<'\n';
     // CFLMatrix cm(NodeNum);
     // unsigned long abc = 100000;
-    // cout<<"lala" << abc*abc<<endl;
+    // cout<<"lala" << abc*abc<<'\n';
     // CFLMatrix cm(NodeNum);
     CFLHashMap cm1(NodeNum);
 
     /*if(NodeNum>nodemax){
-      cout<<"max: "<<nodemax<<" new: "<<NodeNum<<"   "<<line<<endl;
+      cout<<"max: "<<nodemax<<" new: "<<NodeNum<<"   "<<line<<'\n';
       nodemax = NodeNum;
       }*/
 
@@ -586,8 +586,8 @@ int arrayversion() {
     // dotparser.BuildMatrix(line, NodeID, cm1);
     // dotparser.BuildBitTable(line, NodeID, cm1);
 
-    // cout<<"Node: "<<cm1.GetVtxNum()<<" Edge "<<cm1.GetEdgNum()<<endl;
-    // cout<<"Para "<<EdgeID.size()<<endl;
+    // cout<<"Node: "<<cm1.GetVtxNum()<<" Edge "<<cm1.GetEdgNum()<<'\n';
+    // cout<<"Para "<<EdgeID.size()<<'\n';
 
     // EdgeID.clear();
     // NodeID.clear();
@@ -597,7 +597,7 @@ int arrayversion() {
   // SimpleDotParser dotparser;
   // dotparser.ParsingFile("./data/CINT2000/254.gap/plist.o.lala.dot");
 
-  // cout<<"Runtime: "<<elapsed<<endl;
+  // cout<<"Runtime: "<<elapsed<<'\n';
 
   // MEM_USAGE();
 

@@ -34,7 +34,7 @@ PathTree::PathTree(Graph& graph): g(graph) {
 PathTree::PathTree(Graph& graph, vector<int> ts): g(graph) {
 	grts = ts;
 	int maxid = g.num_vertices();
-	cout << "debug: maxid " << maxid << endl;
+	cout << "debug: maxid " << maxid << '\n';
 	labels = new int*[maxid];
 	for (int i = 0; i < maxid; i++)
 		labels[i] = new int[3];
@@ -73,11 +73,11 @@ void PathTree::compute_tcm() {
 		for (eit = el.begin(); eit != el.end(); eit++)
 			tcm[make_pair(i,*eit)] = true;
 	}
-	cout << "#TC size=" << tcsize << endl;
-	cout << "#Ratio=" << tcsize/(g.num_vertices()*1.0) << endl; 
+	cout << "#TC size=" << tcsize << '\n';
+	cout << "#Ratio=" << tcsize/(g.num_vertices()*1.0) << '\n'; 
 	// for test
 /*
-	cout << "=======================TC===================" << endl;
+	cout << "=======================TC===================" << '\n';
 	tc.printGraph();
 */
 }
@@ -90,7 +90,7 @@ void PathTree::index_size(int* ind_size) {
 	for (vit = out_uncover.begin(); vit != out_uncover.end(); vit++) {
 		uncover_size += vit->size();
 	}
-	cout << "uncover_size=" << uncover_size << endl;
+	cout << "uncover_size=" << uncover_size << '\n';
 	isize += uncover_size;
 	isize += g.num_vertices();
 	isize += pathMap.size()*2;	
@@ -100,8 +100,8 @@ void PathTree::index_size(int* ind_size) {
 	for (mit = comp_table.begin(); mit != comp_table.end(); mit++)
 		uncover_size_tab += mit->second.size();
 /*	
-	cout << "uncover set rate: " << uncover_size*1.00/(isize*1.00) << endl; 
-	cout << "path tree cover set size percentage: " << pathMap.size()*2.00/(isize*1.00) << endl;
+	cout << "uncover set rate: " << uncover_size*1.00/(isize*1.00) << '\n'; 
+	cout << "path tree cover set size percentage: " << pathMap.size()*2.00/(isize*1.00) << '\n';
 */
 	ind_size[0] = isize; //total size
 	ind_size[1] = uncover_size_tab; //transitive closure size
@@ -110,7 +110,7 @@ void PathTree::index_size(int* ind_size) {
 	int psize = 0;
 	for (int i = 0; i < pathMap.size(); i++)
 		psize += pathMap[i].size()-1;
-	cout << "path cover edge size: " << psize << endl;
+	cout << "path cover edge size: " << psize << '\n';
 */
 }
 
@@ -128,7 +128,7 @@ void PathTree::transform(DWGraph branch, Graph& graph) {
 		}
 	}
 /*
-	cout << "------------------------------------" <<endl;
+	cout << "------------------------------------" <<'\n';
 	graph.printGraph();
 */
 }
@@ -140,16 +140,16 @@ void PathTree::buildWeightPathGraph_Pred() {
 	Graph tree(gs);
 	for (int i = 0; i < gs; i++)
 		tree.addVertex(i);
-	cout << "complete tree init" << endl;
+	cout << "complete tree init" << '\n';
 
 	gettimeofday(&before_time, NULL);
 	vector<set<int> > predMap(g.num_vertices(), set<int>());
-	cout << "start find tree cover" << endl;
+	cout << "start find tree cover" << '\n';
 	GraphUtil::findTreeCover(g, tree, predMap, grts);
 	gettimeofday(&after_time, NULL);
 	run_time = (after_time.tv_sec - before_time.tv_sec)*1000.0 + 
 		(after_time.tv_usec - before_time.tv_usec)*1.0/1000.0;
-	cout << "find tree cover time:" << run_time << " (ms)" << endl;
+	cout << "find tree cover time:" << run_time << " (ms)" << '\n';
 
 	gettimeofday(&before_time, NULL);
 	
@@ -158,7 +158,7 @@ void PathTree::buildWeightPathGraph_Pred() {
 	gettimeofday(&after_time, NULL);
 	run_time = (after_time.tv_sec - before_time.tv_sec)*1000.0 + 
 		(after_time.tv_usec - before_time.tv_usec)*1.0/1000.0;
-	cout << "path decomposition time:" << run_time << " (ms)" << endl;
+	cout << "path decomposition time:" << run_time << " (ms)" << '\n';
 
 	// build weight path graph
 	unordered_map<int, int> fastMap;
@@ -208,7 +208,7 @@ void PathTree::buildWeightPathGraph_Pred() {
 						fastMap[index] = edgeid;
 						pg.addEdge(g[*eit].path_id, k, weightMap[index], edgeid);
 						if(edgeid == 475268){
-							cout << "found: " << edgeid << endl;
+							cout << "found: " << edgeid << '\n';
 						}
 						edgeid++;
 					}
@@ -234,7 +234,7 @@ void PathTree::buildWeightPathGraph_Pred() {
 							fastMap[index] = edgeid;
 							pg.addEdge(g[*eit].path_id, k, weightMap[index], edgeid);
 							if(edgeid == 475268){
-								cout << "found: " << edgeid << endl;
+								cout << "found: " << edgeid << '\n';
 							}
 							edgeid++;
 						}
@@ -245,7 +245,7 @@ void PathTree::buildWeightPathGraph_Pred() {
 		}
 	}
 	maxeid = edgeid;
-	cout << "debug: maxedi: " << maxeid << endl;
+	cout << "debug: maxedi: " << maxeid << '\n';
 }
 
 // build weighted path graph
@@ -430,7 +430,7 @@ void PathTree::readPathMap(ifstream& cfile) {
 		cout << "Path " << i << ": ";
 		for (int j = 0; j < pathMap[i].size(); j++) 
 			cout << pathMap[i][j] << ", ";
-		cout << endl;
+		cout << '\n';
 	}
 	*/
 }
@@ -439,7 +439,7 @@ void PathTree::readPathMap(ifstream& cfile) {
 void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 	struct timeval after_time1, before_time1;
 	// build weighted path graph
-	cout << "building weighted path graph" << endl;
+	cout << "building weighted path graph" << '\n';
 	gettimeofday(&before_time1, NULL);
 	if (type == 1) {
 		buildWeightPathGraph_Pred();
@@ -454,11 +454,11 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 	gettimeofday(&after_time1, NULL);
 	run_time = (after_time1.tv_sec - before_time1.tv_sec)*1000.0 + 
 		(after_time1.tv_usec - before_time1.tv_usec)*1.0/1000.0;
-	cout << "building weighted path graph time:" << run_time << " (ms)" << endl;
+	cout << "building weighted path graph time:" << run_time << " (ms)" << '\n';
 
 /*
 	pg.printGraph();
-	cout << "path size " << pathMap.size() << endl;
+	cout << "path size " << pathMap.size() << '\n';
 */
 	
 	// Mar. 12nd by Ning
@@ -474,18 +474,18 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 	*/
 
 /*		
-	cout << "after add virtual super node" << endl;
+	cout << "after add virtual super node" << '\n';
 	pg.printGraph();
 */
 
 	// find maximum branching
-	cout << "finding max branching" << endl;
+	cout << "finding max branching" << '\n';
 	gettimeofday(&before_time, NULL);
 	if (type == 1) {
 	#ifdef DEBUG
 		pg.printGraph();
 		DWGraphUtil::checkBranching(pg, branch);
-		cout << "***********************************************" << endl;
+		cout << "***********************************************" << '\n';
 		branch.printGraph();
 	//	exit(0);
 	#else
@@ -503,10 +503,10 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 	gettimeofday(&after_time, NULL);
 	run_time = (after_time.tv_sec - before_time.tv_sec)*1000.0 + 
 		(after_time.tv_usec - before_time.tv_usec)*1.0/1000.0;
-	cout << "finding max branching time:" << run_time << " (ms)" << endl;
+	cout << "finding max branching time:" << run_time << " (ms)" << '\n';
 
 /*
-	cout << "find max branching" << endl;
+	cout << "find max branching" << '\n';
 	branch.printGraph();
 */
 
@@ -515,7 +515,7 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 //	branch.removeVertex(maxid+1);
 	
 /*
-	cout << "after remove super node" << endl;
+	cout << "after remove super node" << '\n';
 	branch.printGraph();
 */
 
@@ -527,40 +527,40 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 	gettimeofday(&after_time, NULL);
 	run_time = (after_time.tv_sec - before_time.tv_sec)*1000.0 + 
 		(after_time.tv_usec - before_time.tv_usec)*1.0/1000.0;
-	cout << "weighted graph transformation time:" << run_time << " (ms)" << endl;
+	cout << "weighted graph transformation time:" << run_time << " (ms)" << '\n';
 /*
-	cout << "++++++++++++++++++++++++++++++++++++++++++++" << endl;
+	cout << "++++++++++++++++++++++++++++++++++++++++++++" << '\n';
 	newbranch.printGraph();
 */
 	// calculate minimal equivalent EdgeSet
-	cout << "calculating equivalent edgeset" << endl;
+	cout << "calculating equivalent edgeset" << '\n';
 	gettimeofday(&before_time, NULL);
 	buildEquGraph();
 	gettimeofday(&after_time, NULL);
 	run_time = (after_time.tv_sec - before_time.tv_sec)*1000.0 + 
 		(after_time.tv_usec - before_time.tv_usec)*1.0/1000.0;
-	cout << "building equivalent graph time:" << run_time << " (ms)" << endl;
+	cout << "building equivalent graph time:" << run_time << " (ms)" << '\n';
 /*
-	cout << "equivalent graph" << endl;
+	cout << "equivalent graph" << '\n';
 	ng.printGraph();
 */
 	// labeling branch by GRIPP's algorithm
-	cout << "labeling found max branching" << endl;
+	cout << "labeling found max branching" << '\n';
 	gettimeofday(&before_time, NULL);
 	GraphUtil::pre_post_labeling(newbranch);
 
 	gettimeofday(&after_time, NULL);
 	run_time = (after_time.tv_sec - before_time.tv_sec)*1000.0 + 
 		(after_time.tv_usec - before_time.tv_usec)*1.0/1000.0;
-	cout << "labeling branching time:" << run_time << " (ms)" << endl;
+	cout << "labeling branching time:" << run_time << " (ms)" << '\n';
 /*
 	// for test
-	cout << "pre post labeling" << endl;
+	cout << "pre post labeling" << '\n';
 	newbranch.printGraph();
 */
 	
 	// create labels for every vertex
-	cout << "labeling equivalent graph by depth-first-search" << endl;
+	cout << "labeling equivalent graph by depth-first-search" << '\n';
 	vector<int> reverse_topo_sort;
 	GraphUtil::topological_sort(newbranch, reverse_topo_sort);
 	gettimeofday(&before_time, NULL);
@@ -583,7 +583,7 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 	gettimeofday(&after_time, NULL);
 	run_time = (after_time.tv_sec - before_time.tv_sec)*1000.0 + 
 		(after_time.tv_usec - before_time.tv_usec)*1.0/1000.0;
-	cout << "labeling equivalent graph by DFS time:" << run_time << " (ms)" << endl;
+	cout << "labeling equivalent graph by DFS time:" << run_time << " (ms)" << '\n';
 	
 	// update label vector
 	int gsize = g.num_vertices();
@@ -594,7 +594,7 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 	}
 
 	// handling edges not covered
-	cout << "collecting path-tree uncovered vertices" << endl;
+	cout << "collecting path-tree uncovered vertices" << '\n';
 	gettimeofday(&before_time, NULL);
 //	reverse_topo_sort = vector<int>();
 //	GraphUtil::topological_sort(g, reverse_topo_sort);
@@ -606,7 +606,7 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 		pre1 = labels[*vit][0];
 		post1 = labels[*vit][1];
 		// Nov 9 10 2010 for tods correction
-//		cout << "current vit: " << *vit << endl;
+//		cout << "current vit: " << *vit << '\n';
 		out_uncover[*vit].push_back(*vit);
 		for (eit = el.begin(); eit != el.end(); eit++) {
 		//	insertSet(out_uncover[*vit], out_uncover[*eit]);
@@ -634,14 +634,14 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 	gettimeofday(&after_time, NULL);
 	run_time = (after_time.tv_sec - before_time.tv_sec)*1000.0 + 
 		(after_time.tv_usec - before_time.tv_usec)*1.0/1000.0;
-	cout << "computing uncover set time:" << run_time << " (ms)" << endl;
+	cout << "computing uncover set time:" << run_time << " (ms)" << '\n';
 
 	if (compress) {
-		cout << "post-processing on data compression" << endl;
+		cout << "post-processing on data compression" << '\n';
 		gettimeofday(&before_time, NULL);
 		
 		double size_ratio = 0.9;
-		cout << "init cl=" << g.num_vertices()*size_ratio << endl;
+		cout << "init cl=" << g.num_vertices()*size_ratio << '\n';
 		int num_cluster = (int)(g.num_vertices()*size_ratio>10?g.num_vertices()*size_ratio:10);
 		DataComp dc(out_uncover, grts, num_cluster, g.num_vertices());
 		dc.comp_kmeans();
@@ -658,7 +658,7 @@ void PathTree::createLabels(int type, ifstream& cfile, bool compress) {
 		gettimeofday(&after_time, NULL);
 		run_time = (after_time.tv_sec - before_time.tv_sec)*1000.0 + 
 			(after_time.tv_usec - before_time.tv_usec)*1.0/1000.0;
-		cout << "data compression time:" << run_time << " (ms)" << endl;
+		cout << "data compression time:" << run_time << " (ms)" << '\n';
 	}
 }
 
@@ -776,7 +776,7 @@ void PathTree::displayLabels() {
 		cout << *vit << ": ";
 		for (sit = pset.begin(); sit != pset.end(); sit++)
 			cout << *sit << " ";
-		cout << endl;	
+		cout << '\n';	
 	}
 }
 
@@ -808,7 +808,7 @@ double PathTree::cover_ratio() {
 		}
 	}	
 	
-//	cout << "# TC is covered by ChainTree(PathTree) = " << counter << endl;
+//	cout << "# TC is covered by ChainTree(PathTree) = " << counter << '\n';
 	
 	return (counter*1.0)/(tcsize*1.0);
 }
@@ -827,7 +827,7 @@ double PathTree::compress_ratio() {
 		el = tc.out_edges(i);
 		tcsize +=  el.size();
 	}
-	cout << "#TC size = " << tcsize << endl;
+	cout << "#TC size = " << tcsize << '\n';
 	int uncover_size = 0;
 	vector<vector<int> >::iterator vit;
 	for (vit = out_uncover.begin(); vit != out_uncover.end(); vit++) {
@@ -900,7 +900,7 @@ bool PathTree::reach_dc(int src, int trg) {
 			back_inserter(tmp_si));
 	
 	// for test
-//	cout << "query " << src << "->" << trg << endl;
+//	cout << "query " << src << "->" << trg << '\n';
 	for (vit = tmp_si.begin(); vit != tmp_si.end(); vit++) {
 	//	if (*vit>=0) 
 		{
@@ -918,7 +918,7 @@ bool PathTree::reach_dc(int src, int trg) {
 bool PathTree::test_reach(int src, int trg) {
 	bool r = reach(src, trg);
 	if (r != tcm[make_pair(src, trg)]) {
-		cout << "Wrong: [" << src << "] to [" << trg << "] reach = " << r << endl;
+		cout << "Wrong: [" << src << "] to [" << trg << "] reach = " << r << '\n';
 		return false;
 	}
 	
@@ -928,7 +928,7 @@ bool PathTree::test_reach(int src, int trg) {
 bool PathTree::test_reach_dc(int src, int trg) {
 	bool r = reach_dc(src, trg);
 	if (r != tcm[make_pair(src, trg)]) {
-		cout << "Wrong: [" << src << "] to [" << trg << "] reach = " << r << endl;
+		cout << "Wrong: [" << src << "] to [" << trg << "] reach = " << r << '\n';
 		return false;
 	}
 	
@@ -936,7 +936,7 @@ bool PathTree::test_reach_dc(int src, int trg) {
 }
 
 void PathTree::save_labels(ofstream& label_file){
-	label_file << g.num_vertices() << " " << 1 << " " << 1 << " " << endl;
+	label_file << g.num_vertices() << " " << 1 << " " << 1 << " " << '\n';
 
 	for(int vid = 0; vid < out_uncover.size(); vid++){
 		vector<int>& si = out_uncover[vid];
@@ -944,15 +944,15 @@ void PathTree::save_labels(ofstream& label_file){
 		for(auto sit = si.begin(); sit != si.end(); sit++){
 			label_file << (*sit) << " ";
 		}
-		label_file << '#' << endl;
+		label_file << '#' << '\n';
 	}
-	label_file << endl;
+	label_file << '\n';
 	for (int i = 0; i < g.num_vertices(); i++) {
 		label_file << i << ": ";
 		for(int j = 0; j < 3; j++){
 			label_file << labels[i][j] << " ";
 		}
-		label_file << endl;
+		label_file << '\n';
 	}
 	label_file.close();
 }

@@ -94,6 +94,7 @@ jobs:
                     -DLLVM_CONFIG_PATH="${LLVM_CONFIG}" \
                     -DLLVM_DIR="${LLVM_CMAKE_DIR}" \
                     -DZ3_DIR=/usr \
+                    -DENABLE_SEAHORN=OFF \
                     ..
 
               cmake --build . -j"$(nproc)"

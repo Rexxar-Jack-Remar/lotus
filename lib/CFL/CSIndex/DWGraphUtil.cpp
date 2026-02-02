@@ -88,7 +88,7 @@ void DWGraphUtil::findMaxBranching1(DWGraph& g, DWGraph& maxBranch) {
 	DWEdgeList::iterator eit, eit1;
 
 	// for test
-//	cout << "read graph" << endl;
+//	cout << "read graph" << '\n';
 //	g.printGraph();
 	static int branch_depth = 0;
 	branch_depth++;
@@ -115,7 +115,7 @@ void DWGraphUtil::findMaxBranching1(DWGraph& g, DWGraph& maxBranch) {
 
 	// for test
 /*
-	cout << "max branch" << endl;
+	cout << "max branch" << '\n';
 	maxBranch.printGraph();
 */
 	// find strongly connected component
@@ -145,7 +145,7 @@ void DWGraphUtil::findMaxBranching1(DWGraph& g, DWGraph& maxBranch) {
 	for (mit = sccmap.begin(); mit != sccmap.end(); mit++) {
 		num_comp = mit->first;
 	
-	//	cout << "scc " << num_comp << " size=" << mit->second.size() << endl;
+	//	cout << "scc " << num_comp << " size=" << mit->second.size() << '\n';
 
 		if (mit->second.size() == 1)
 			continue;
@@ -237,7 +237,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 
 	// for test
 	/*
-	cout << "max branch" << endl;
+	cout << "max branch" << '\n';
 	maxBranch.printGraph();
 	*/
 
@@ -277,7 +277,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 	for (mit = sccmap.begin(); mit != sccmap.end(); mit++) {
 		num_comp = mit->first;
 	#ifdef DEBUG
-		cout << "scc " << num_comp << " size=" << mit->second.size() << endl;
+		cout << "scc " << num_comp << " size=" << mit->second.size() << '\n';
 	#endif
 
 		if (mit->second.size() == 1)
@@ -286,7 +286,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 			
 		// for test
 	#ifdef DEBUG
-		cout << "Before next scc operation " << endl;
+		cout << "Before next scc operation " << '\n';
 		ng.printGraph();
 		char ch1;
 	//	cin >> ch1;
@@ -333,7 +333,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 		
 		// for test
 	#ifdef DEBUG
-		cout << endl;		
+		cout << '\n';		
 	#endif
 
 		// Dec 15
@@ -367,7 +367,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 			
 			// for test
 		#ifdef DEBUG	
-			cout << "after process outedges of " << *vit << endl;
+			cout << "after process outedges of " << *vit << '\n';
 			ng.printGraph();
 			char ch;
 		//	cin >> ch;
@@ -422,7 +422,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 			
 			// for test
 		#ifdef DEBUG	
-			cout << "after process inedges of " << *vit << endl;
+			cout << "after process inedges of " << *vit << '\n';
 			ng.printGraph();
 		//	cin >> ch;
 		#endif	
@@ -431,7 +431,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 	
 	//for test
 	#ifdef DEBUG
-	cout << "before return " << endl;
+	cout << "before return " << '\n';
 	ng.printGraph();
 	#endif
 
@@ -442,7 +442,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 
 	// for test
 	#ifdef DEBUG
-	cout << "recursive " << endl;
+	cout << "recursive " << '\n';
 	maxBranch.printGraph();
 	#endif
 	
@@ -459,7 +459,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 	for (rvit2 = list_s.rbegin(); rvit2 != list_s.rend(); rvit2++) {
 		// for test
 	#ifdef DEBUG
-		cout << "open cycle " << *rvit2 << endl;
+		cout << "open cycle " << *rvit2 << '\n';
 	#endif
 	
 		vec1 = newVertex[*rvit2];
@@ -467,7 +467,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 			maxBranch.addVertex(*vit1);	
 			// for test
 		#ifdef DEBUG
-			cout << "add vertex " << *vit1 << endl;
+			cout << "add vertex " << *vit1 << '\n';
 		#endif
 		}
 		
@@ -476,7 +476,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 		if (maxBranch.in_edges(*rvit2).size() == 0) {
 			// for test
 		#ifdef DEBUG
-			cout << *rvit2 << " no inedges" << endl;
+			cout << *rvit2 << " no inedges" << '\n';
 		#endif
 		
 			keep = false;
@@ -484,7 +484,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 				DWVertexProp dwep = sccPropMap[*rvit1];
 				// for test
 			#ifdef DEBUG
-				cout << "edge " << *rvit1 << "->" << dwep.id << " edgeid " << dwep.edgeid << endl;
+				cout << "edge " << *rvit1 << "->" << dwep.id << " edgeid " << dwep.edgeid << '\n';
 			#endif
 				
 				if (dwep.weight == minWeight[*rvit2] && !keep) {
@@ -494,7 +494,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 				
 				// for test
 			#ifdef DEBUG
-				cout << "in add edge " << *rvit1 << "->" << dwep.id << " eid " << dwep.edgeid << endl;
+				cout << "in add edge " << *rvit1 << "->" << dwep.id << " eid " << dwep.edgeid << '\n';
 			#endif
 				maxBranch.addEdge(*rvit1, dwep.id, dwep.weight, dwep.edgeid);
 			}
@@ -503,7 +503,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 			el = maxBranch.in_edges(*rvit2);
 			// for test
 		#ifdef DEBUG
-			cout << "search edge " << maxBranch.source(el.front()) << "->" << *rvit2 << endl; 
+			cout << "search edge " << maxBranch.source(el.front()) << "->" << *rvit2 << '\n'; 
 		#endif
 			
 			// Dec 15
@@ -518,12 +518,12 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 		#ifdef DEBUG
 			if (newedge == edgemap.end()) {
 				EdgeMap::iterator iter;
-				cout << "edgemap list: " << endl;
+				cout << "edgemap list: " << '\n';
 				for (iter = edgemap.begin(); iter != edgemap.end(); iter++)
 					cout << iter->first.first << "->" << iter->first.second.id << " eid " << iter->first.second.edgeid
 						<< " mapping " << iter->second.first << "->" << iter->second.second.id << " eid " 
-						<< iter->second.second.edgeid << endl;
-				cout << "in search edge " << edge.first << "->" << edge.second.id << " eid " << edge.second.edgeid << endl;
+						<< iter->second.second.edgeid << '\n';
+				cout << "in search edge " << edge.first << "->" << edge.second.id << " eid " << edge.second.edgeid << '\n';
 				exit(0);
 			}
 		#endif
@@ -537,7 +537,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 				
 				// for test
 			#ifdef DEBUG
-				cout << "process edge " << *rvit1 << "->" << dwep.id << " eid " << dwep.edgeid << endl;
+				cout << "process edge " << *rvit1 << "->" << dwep.id << " eid " << dwep.edgeid << '\n';
 			#endif
 				if (dwep.id == dwep1.id && !keep) { 
 					keep = true;
@@ -545,7 +545,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 				}
 				// for test
 			#ifdef DEBUG
-				cout << "add edge " << *rvit1 << "->" << dwep.id << " eid " << dwep.edgeid << endl;
+				cout << "add edge " << *rvit1 << "->" << dwep.id << " eid " << dwep.edgeid << '\n';
 			#endif
 				maxBranch.addEdge(*rvit1, dwep.id, dwep.weight, dwep.edgeid);
 			}
@@ -568,12 +568,12 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 			#ifdef DEBUG
 				if (newedge == edgemap.end()) {
 					EdgeMap::iterator iter;
-					cout << "edgemap list: " << endl;
+					cout << "edgemap list: " << '\n';
 					for (iter = edgemap.begin(); iter != edgemap.end(); iter++)
 						cout << iter->first.first << "->" << iter->first.second.id << " eid " << iter->first.second.edgeid
 							<< " mapping " << iter->second.first << "->" << iter->second.second.id << " eid " 
-							<< iter->second.second.edgeid << endl;
-					cout << "search edge " << edge.first << "->" << edge.second.id << " eid " << edge.second.edgeid << endl;
+							<< iter->second.second.edgeid << '\n';
+					cout << "search edge " << edge.first << "->" << edge.second.id << " eid " << edge.second.edgeid << '\n';
 					exit(0);
 				}
 			#endif
@@ -584,7 +584,7 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 				
 				// for test
 			#ifdef DEBUG
-				cout << "add out edge " << src << "->" << dwep1.id << " eid " << dwep1.edgeid << endl;
+				cout << "add out edge " << src << "->" << dwep1.id << " eid " << dwep1.edgeid << '\n';
 			#endif
 			}
 		}
@@ -596,14 +596,14 @@ void DWGraphUtil::findMaxBranching(DWGraph& g, DWGraph& maxBranch) {
 		
 		// for test
 	#ifdef DEBUG
-		cout << "after open cycle " << *rvit2 << endl;
+		cout << "after open cycle " << *rvit2 << '\n';
 		maxBranch.printGraph();
 	#endif
 	}
 	
 	// for test
 	#ifdef DEBUG
-	cout << "after unfold scc" << endl;
+	cout << "after unfold scc" << '\n';
 	maxBranch.printGraph();
 	char ch2;
 //	cin >> ch2;
@@ -620,7 +620,7 @@ bool DWGraphUtil::checkBranching(DWGraph& graph, DWGraph& branch) {
 	int src = -1, trg = -1;
 	for (vlit = bvl.begin(); vlit != bvl.end(); vlit++) {
 		if (vlit->first > gsize-1) {
-			cout << "error: vertex " << vlit->first << " not existed!" << endl;
+			cout << "error: vertex " << vlit->first << " not existed!" << '\n';
 			return false;
 		//	branch.removeVertex(vlit->first);
 		}
@@ -637,7 +637,7 @@ bool DWGraphUtil::checkBranching(DWGraph& graph, DWGraph& branch) {
 				}
 			*/
 				if (graph.edgeOpMap.find(*eit) == graph.edgeOpMap.end() || graph.edgeOpMap[*eit].trg != vlit->first) {
-					cout << "error: edge [" << branch.edgeOpMap[*eit].src << "-->>" << branch.edgeOpMap[*eit].trg << "] not existed!" << endl;
+					cout << "error: edge [" << branch.edgeOpMap[*eit].src << "-->>" << branch.edgeOpMap[*eit].trg << "] not existed!" << '\n';
 					return false;
 				}
 			}
@@ -648,7 +648,7 @@ bool DWGraphUtil::checkBranching(DWGraph& graph, DWGraph& branch) {
 		}
 	}
 	bool result = checkBranch(branch);
-	if (!result) { cout << "error: More than one incoming edges!" << endl; return false; }
+	if (!result) { cout << "error: More than one incoming edges!" << '\n'; return false; }
 	int index = 0;
 	vector<int> sn;
 	vector<int>::iterator vit;
@@ -668,14 +668,14 @@ bool DWGraphUtil::checkBranching(DWGraph& graph, DWGraph& branch) {
 	
 	int prev = -1;
 	if (sccmap.size() != gsize) {
-		cout << "scc_num = " << scc_num << endl;
-		cout << "error: loop exists!" << endl;
+		cout << "scc_num = " << scc_num << '\n';
+		cout << "error: loop exists!" << '\n';
 		map<int, vector<int> >::iterator mit = sccmap.begin();
 		int num_comp;
 		for (mit = sccmap.begin(); mit != sccmap.end(); mit++) {
 			num_comp = mit->first;
 		
-		//	cout << "scc " << num_comp << " size=" << mit->second.size() << endl;
+		//	cout << "scc " << num_comp << " size=" << mit->second.size() << '\n';
 
 			if (mit->second.size() == 1)
 				continue;
@@ -687,7 +687,7 @@ bool DWGraphUtil::checkBranching(DWGraph& graph, DWGraph& branch) {
 			for (rvit = sccvec.rbegin(); rvit != sccvec.rend(); rvit++) {
 				cout << *rvit << ", ";
 			}
-			cout << endl;
+			cout << '\n';
 			
 		}
 		return false;
@@ -705,7 +705,7 @@ bool DWGraphUtil::checkBranching1(DWGraph& graph, DWGraph& branch) {
 	int src = -1, trg = -1;
 	for (vlit = bvl.begin(); vlit != bvl.end(); vlit++) {
 		if (vlit->first > gsize-1) {
-			cout << "error: vertex " << vlit->first << " not existed!" << endl;
+			cout << "error: vertex " << vlit->first << " not existed!" << '\n';
 			return false;
 		//	branch.removeVertex(vlit->first);
 		}
@@ -722,7 +722,7 @@ bool DWGraphUtil::checkBranching1(DWGraph& graph, DWGraph& branch) {
 				}
 			*/
 				if (graph.edgeOpMap.find(*eit) == graph.edgeOpMap.end() || graph.edgeOpMap[*eit].trg != vlit->first) {
-					cout << "error: edge [" << branch.edgeOpMap[*eit].src << "-->>" << branch.edgeOpMap[*eit].trg << "] not existed!" << endl;
+					cout << "error: edge [" << branch.edgeOpMap[*eit].src << "-->>" << branch.edgeOpMap[*eit].trg << "] not existed!" << '\n';
 					return false;
 				}
 			}
@@ -733,7 +733,7 @@ bool DWGraphUtil::checkBranching1(DWGraph& graph, DWGraph& branch) {
 		}
 	}
 	bool result = checkBranch(branch);
-	if (!result) { cout << "error: More than one incoming edges!" << endl; return false; }
+	if (!result) { cout << "error: More than one incoming edges!" << '\n'; return false; }
 	int index = 0;
 	vector<int> sn;
 	vector<int>::iterator vit;
@@ -753,14 +753,14 @@ bool DWGraphUtil::checkBranching1(DWGraph& graph, DWGraph& branch) {
 	
 	int prev = -1;
 	if (sccmap.size() != gsize) {
-		cout << "scc_num = " << scc_num << endl;
-		cout << "error: loop exists!" << endl;
+		cout << "scc_num = " << scc_num << '\n';
+		cout << "error: loop exists!" << '\n';
 		map<int, vector<int> >::iterator mit = sccmap.begin();
 		int num_comp;
 		for (mit = sccmap.begin(); mit != sccmap.end(); mit++) {
 			num_comp = mit->first;
 		
-		//	cout << "scc " << num_comp << " size=" << mit->second.size() << endl;
+		//	cout << "scc " << num_comp << " size=" << mit->second.size() << '\n';
 
 			if (mit->second.size() == 1)
 				continue;
@@ -772,7 +772,7 @@ bool DWGraphUtil::checkBranching1(DWGraph& graph, DWGraph& branch) {
 			for (rvit = sccvec.rbegin(); rvit != sccvec.rend(); rvit++) {
 				cout << *rvit << ", ";
 			}
-			cout << endl;
+			cout << '\n';
 			
 		}
 		return false;
@@ -788,7 +788,7 @@ bool DWGraphUtil::checkBranch(DWGraph branch) {
 	for (vlit = vl.begin(); vlit != vl.end(); vlit++) {
 		if (branch.in_degree(vlit->first) > 1) {
 			el = branch.in_edges(vlit->first);
-			cout << "Max Branch Wrong" << endl;
+			cout << "Max Branch Wrong" << '\n';
 			return false;
 		}
 	}

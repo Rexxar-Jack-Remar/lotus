@@ -30,6 +30,7 @@ jobs:
             -DCMAKE_BUILD_TYPE="Release" \
             -DLLVM_BUILD_PATH="/opt/homebrew/opt/llvm@14/lib/cmake/llvm" \
             -DZ3_DIR="/usr/local" \
+            -DENABLE_SEAHORN=OFF \
             ..
           make -j$(nproc || sysctl -n hw.ncpu)
           make install

@@ -151,7 +151,7 @@ int ReachBackbone::MaterializeNeighbors(int vid, int step, bool out, bit_vector*
 
 
 void ReachBackbone::blockOrdering(vector<int>& ranks) {
-	cout << "block ordering..." << endl;
+	cout << "block ordering..." << '\n';
 	vector<int> ts;
 	GraphUtil::topological_sort(g, ts);
 	multimap<int,int> rankmap;
@@ -232,12 +232,12 @@ void ReachBackbone::vertexRanking(vector<int>& ranks, int type) {
  */
 bool ReachBackbone::backboneByNode(int vid) {
 	#ifdef RBDEBUG
-	cout << "here check " << vid << endl;
+	cout << "here check " << vid << '\n';
 	cout << "gates: ";
 	set<int>::iterator iter;
 	for (iter = bbvertices.begin(); iter != bbvertices.end(); iter++)
 		cout << *iter << " ";
-	cout << endl;
+	cout << '\n';
 	#endif
 
 	bool updated=false, touch=false; // touch is used to check wheather there is epsilon+1 local neighbors
@@ -250,13 +250,13 @@ bool ReachBackbone::backboneByNode(int vid) {
 	EdgeList el;
 	EdgeList::iterator eit;
 	#ifdef RBDEBUG
-	cout << "ref=" << ref << " opCnt=" << opCnt << endl;
+	cout << "ref=" << ref << " opCnt=" << opCnt << '\n';
 	#endif
 	while (begin<end) {
 		u = que[begin++];
 		visited[u] = opCnt;
 		#ifdef RBDEBUG
-		cout << "visit " << u << " life=" << life[u] << " dist=" << dist[u] << endl;
+		cout << "visit " << u << " life=" << life[u] << " dist=" << dist[u] << '\n';
 		#endif
 		if (gates->get(u)) life[u] = ref; //NR
 		if (dist[u]==ref+epsilon+1) {
@@ -268,7 +268,7 @@ bool ReachBackbone::backboneByNode(int vid) {
 				if (index>=hubnodes.size()) {
 					localneis.push_back(u);
 					#ifdef RBDEBUG
-					cout << "localneis insert " << u << " life=" << life[u] << " dist=" << dist[u] << endl;
+					cout << "localneis insert " << u << " life=" << life[u] << " dist=" << dist[u] << '\n';
 					#endif
 				}
 			}
@@ -285,7 +285,7 @@ bool ReachBackbone::backboneByNode(int vid) {
 		}
 //		if (gates->get(u)) life[u] = ref; //NR
 		#ifdef RBDEBUG
-		cout << "after update visit " << u << " life=" << life[u] << " dist=" << dist[u] << endl;
+		cout << "after update visit " << u << " life=" << life[u] << " dist=" << dist[u] << '\n';
 		#endif
 		val = dist[u];
 		lifeval = life[u];
@@ -295,19 +295,19 @@ bool ReachBackbone::backboneByNode(int vid) {
 			// reach the lowest level NR
 			if (val==ref+epsilon+1) {
 				#ifdef RBDEBUG
-				cout << "\tReach lowest level" << endl;
+				cout << "\tReach lowest level" << '\n';
 				#endif
 				if (dist[nid]<ref) continue;
 			}
 			#ifdef RBDEBUG
-			cout << "\ttouch " << nid << " life=" << life[nid] << " dist=" << dist[nid] << endl;
+			cout << "\ttouch " << nid << " life=" << life[nid] << " dist=" << dist[nid] << '\n';
 			#endif
 			// update life time
 			updated = false;
 			if (lifeval>=ref && lifeval<epsilon+ref) {
 				if (life[nid]>lifeval+1 || life[nid]<ref) {
 					#ifdef RBDEBUG
-					cout << "update " << nid << "'s life from " << life[nid] << " to " << lifeval+1 << endl;
+					cout << "update " << nid << "'s life from " << life[nid] << " to " << lifeval+1 << '\n';
 					#endif
 					life[nid] = lifeval+1;
 					updated = true;
@@ -320,13 +320,13 @@ bool ReachBackbone::backboneByNode(int vid) {
 					if (materialized->get(nid)) { //  && val+1-ref<=epsilon) {   //NR
 						hubnodes.push_back(nid); // it is not helpful if hubnode in the epsilon+1 level
 						#ifdef RBDEBUG
-						cout << "==find hubnode " << nid << endl;
+						cout << "==find hubnode " << nid << '\n';
 						#endif
 					}
 					else {
 						que[end++] = nid;
 						#ifdef RBDEBUG
-						cout << "=====insert " << nid << " to current que" << endl;
+						cout << "=====insert " << nid << " to current que" << '\n';
 						#endif
 					}
 					/*
@@ -342,14 +342,14 @@ bool ReachBackbone::backboneByNode(int vid) {
 				if (!materialized->get(nid))
 					que2[end2++] = nid;
 				#ifdef RBDEBUG
-				cout << "=====insert " << nid << " to que2 for further update" << endl;
+				cout << "=====insert " << nid << " to que2 for further update" << '\n';
 				#endif
 			}
 		}
 	}
 	
 	#ifdef RBDEBUG
-	cout << "*******start rescan procedure*******" << endl;
+	cout << "*******start rescan procedure*******" << '\n';
 	#endif
 	
 	// iteratively rescan the vertex influenced by reversed edges with respect to BFS tree
@@ -360,7 +360,7 @@ bool ReachBackbone::backboneByNode(int vid) {
 		if (useque2) u = que2[begin2++];
 		else u = que[begin++];
 		#ifdef RBDEBUG
-		cout << " second visit " << u << " life=" << life[u] << " dist=" << dist[u] << " useque2=" << useque2 << endl;
+		cout << " second visit " << u << " life=" << life[u] << " dist=" << dist[u] << " useque2=" << useque2 << '\n';
 		#endif
 //		if (life[u]-ref==epsilon || dist[u]==ref+epsilon+1) {  // NR
 			if (useque2 && begin2>=end2) {
@@ -368,7 +368,7 @@ bool ReachBackbone::backboneByNode(int vid) {
 				useque2 = false;
 				opCnt++;
 				#ifdef RBDEBUG
-				cout << "===========================switch to que1" << endl;
+				cout << "===========================switch to que1" << '\n';
 				#endif
 				continue; // NR
 			}
@@ -377,7 +377,7 @@ bool ReachBackbone::backboneByNode(int vid) {
 				useque2 = true;
 				opCnt++;
 				#ifdef RBDEBUG
-				cout << "===========================switch to que2" << endl;
+				cout << "===========================switch to que2" << '\n';
 				#endif
 				continue; // NR
 			}
@@ -391,19 +391,19 @@ bool ReachBackbone::backboneByNode(int vid) {
 			// reach the lowest level NR
 			if (val==ref+epsilon+1) {
 				#ifdef RBDEBUG
-				cout << "\tReach lowest level and check its available neighbors" << endl;
+				cout << "\tReach lowest level and check its available neighbors" << '\n';
 				#endif
 				if (dist[nid]<ref) continue;
 			}			
 			#ifdef RBDEBUG
-			cout << "\tsecond touch " << nid << " life=" << life[nid] << " dist=" << dist[nid] << endl;
+			cout << "\tsecond touch " << nid << " life=" << life[nid] << " dist=" << dist[nid] << '\n';
 			#endif
 			// update life time
 			updated = false;
 			if (lifeval>=ref && lifeval<epsilon+ref) {
 				if (life[nid]>lifeval+1 || life[nid]<ref) {
 					#ifdef RBDEBUG
-					cout << "second update " << nid << "'s life from " << life[nid] << " to " << lifeval+1 << endl;
+					cout << "second update " << nid << "'s life from " << life[nid] << " to " << lifeval+1 << '\n';
 					#endif
 					life[nid] = lifeval+1;
 					updated = true;
@@ -414,7 +414,7 @@ bool ReachBackbone::backboneByNode(int vid) {
 			if (updated && dist[nid]<=epsilon+ref+1) { // NR
 				if (dist[nid]>dist[u]) {
 					#ifdef RBDEBUG
-					cout << "\tsecond insert " << nid << " into que useque2=" << useque2 << endl;
+					cout << "\tsecond insert " << nid << " into que useque2=" << useque2 << '\n';
 					#endif
 					if (!materialized->get(nid)) {
 						if (useque2) que2[end2++] = nid;
@@ -423,7 +423,7 @@ bool ReachBackbone::backboneByNode(int vid) {
 				}
 				else if (visited[nid]!=opCnt) {
 					#ifdef RBDEBUG
-					cout << "\tsecond further update " << nid << " into que useque2=" << useque2 << endl;
+					cout << "\tsecond further update " << nid << " into que useque2=" << useque2 << '\n';
 					#endif
 					// need to rescan and propogate life
 					if (!materialized->get(nid)) {
@@ -440,7 +440,7 @@ bool ReachBackbone::backboneByNode(int vid) {
 			useque2 = false;
 			opCnt++;
 			#ifdef RBDEBUG
-			cout << "===========================switch to que1" << endl;
+			cout << "===========================switch to que1" << '\n';
 			#endif
 		}
 		else if (!useque2 && begin>=end) {
@@ -448,7 +448,7 @@ bool ReachBackbone::backboneByNode(int vid) {
 			useque2 = true;
 			opCnt++;
 			#ifdef RBDEBUG
-			cout << "===========================switch to que2" << endl;
+			cout << "===========================switch to que2" << '\n';
 			#endif
 		}		
 	}
@@ -467,13 +467,13 @@ bool ReachBackbone::backboneByNode(int vid) {
 		if (index<hubnodes.size()) continue;
 		if (life[localneis[i]]<ref||life[localneis[i]]-ref>epsilon) {
 			#ifdef RBDEBUG
-			cout << endl;
+			cout << '\n';
 			#endif
 			return true;
 		}
 	}
 	#ifdef RBDEBUG
-	cout << endl;
+	cout << '\n';
 	#endif
 	// check its potential importance
 	/*
@@ -501,12 +501,12 @@ bool ReachBackbone::backboneByNode(int vid) {
 void ReachBackbone::backboneDiscovery(int type) {
 	vector<int> ranks;
 	vector<int>::iterator iter;
-	cout << "vertex ranking with type=" << type << "..." << endl;
+	cout << "vertex ranking with type=" << type << "..." << '\n';
 	vertexRanking(ranks,type);
-	cout << "preselecting highest in-degree and out-degree vertices with ratio=" << preselectratio << "..." << endl;
+	cout << "preselecting highest in-degree and out-degree vertices with ratio=" << preselectratio << "..." << '\n';
 	int size = (int)(gsize*preselectratio), inval, outval;
 	size = min(size,gsize);
-	cout << "preselecting " << size << " vertices..." << endl;
+	cout << "preselecting " << size << " vertices..." << '\n';
 	multimap<int,int> indegmap, outdegmap, inoutmap;
 	multimap<int,int>::reverse_iterator inrit, outrit, inoutit;
 	for (int i = 0; i < gsize; i++) {
@@ -533,7 +533,7 @@ void ReachBackbone::backboneDiscovery(int type) {
 	inoutmap.clear();
 	int hubsize = min(200,gsize);
 	int hubcounter = 0;
-	cout << "materializing hub vertices with in-degree or out-degree larger than 400..." << endl;
+	cout << "materializing hub vertices with in-degree or out-degree larger than 400..." << '\n';
 	inrit = indegmap.rbegin();
 	outrit = outdegmap.rbegin();
 	index = 0;
@@ -561,32 +561,32 @@ void ReachBackbone::backboneDiscovery(int type) {
 	}
 	indegmap.clear();
 	outdegmap.clear();
-	cout << "materialized " << hubcounter << " hubnodes" << endl;
+	cout << "materialized " << hubcounter << " hubnodes" << '\n';
 	
-	cout << "selecting backbone vertex based on vertex ranking..." << endl;
+	cout << "selecting backbone vertex based on vertex ranking..." << '\n';
 	index = 0;
 	for (iter = ranks.begin(); iter != ranks.end(); iter++, index++) {
 		if (gates->get(*iter)) continue;
 		#ifdef RBDEBUG
-		cout << "processing node " << *iter << endl;
+		cout << "processing node " << *iter << '\n';
 		#endif
 		if (backboneByNode(*iter)) {
 			bbvertices.insert(*iter);
 			gates->set_one(*iter);
 		}
-		if (index%100000==0) cout << "Processed " << index << " nodes and selected " << bbvertices.size() << " backbone nodes" << endl; 
+		if (index%100000==0) cout << "Processed " << index << " nodes and selected " << bbvertices.size() << " backbone nodes" << '\n'; 
 		
 	//	if (*iter==23) exit(0);
 	}
 	
 //	// output backbone
 //	outputBackbone(filestem);
-//	cout << "#backbone vertex set=" << bbvertices.size() << endl;
+//	cout << "#backbone vertex set=" << bbvertices.size() << '\n';
 	
 	/*
 	char ch;
 	cin >> ch;
-	cout << "checkbone=" << checkBackbone() << endl;
+	cout << "checkbone=" << checkBackbone() << '\n';
 	*/
 }
 
@@ -601,7 +601,7 @@ void ReachBackbone::outputBackbone(const char* filestem) {
 	if (level>1) {
 		string preggfile = filestr+"."+to_string(radius)+to_string(pr)+"gates"+to_string(level-1);
 		ifstream levelin(preggfile.c_str());
-		cout << "reading ggfile of previous level " << preggfile << endl;
+		cout << "reading ggfile of previous level " << preggfile << '\n';
 		levelin >> size >> tmp;
 		for (int i = 0; i < size; i++) {
 			levelin >> tmp;
@@ -610,26 +610,26 @@ void ReachBackbone::outputBackbone(const char* filestem) {
 		levelin.close();
 	}
 	string indexfile = filestr+"."+to_string(radius)+to_string(pr)+"gates"; 
-	cout << "writing backbone nodes to " << indexfile << endl;
+	cout << "writing backbone nodes to " << indexfile << '\n';
 	ofstream out(indexfile.c_str());
-	out << bbvertices.size() << "\t" << radius << endl;
+	out << bbvertices.size() << "\t" << radius << '\n';
 	for (sit = bbvertices.begin(); sit != bbvertices.end(); sit++) {
 		isgate->set_one(*sit);
-		if (levelmap.empty()) out << *sit << endl;
-		else out << levelmap[*sit] << endl;
+		if (levelmap.empty()) out << *sit << '\n';
+		else out << levelmap[*sit] << '\n';
 	}
 	out.close();
 
 	string ggfile = filestr+"."+to_string(radius)+to_string(pr)+"gg";
-	cout << "generating backbone and writing into " << ggfile << endl;
+	cout << "generating backbone and writing into " << ggfile << '\n';
 	ofstream ggout(ggfile.c_str());	
 
-//	cout << "#E(gate graph)=" << genGateGraph(ggout,radius+1,false) << endl;
-	cout << "#V(gate graph)=" << bbvertices.size() << endl;
+//	cout << "#E(gate graph)=" << genGateGraph(ggout,radius+1,false) << '\n';
+	cout << "#V(gate graph)=" << bbvertices.size() << '\n';
 	
 	bbedgesize = GraphUtil::buildGateGraphWrite(g, isgate, radius+1, ggout);
 
-//	cout << "#E(gate graph): " << GraphUtil::buildGateGraph(g, isgate, radius+1, gategraph) << endl;
+//	cout << "#E(gate graph): " << GraphUtil::buildGateGraph(g, isgate, radius+1, gategraph) << '\n';
 //	gategraph.writeGraph(ggout);
 	
 //	printBBvertex(cout);
@@ -655,8 +655,8 @@ int ReachBackbone::genGateGraph(ostream& out, int radius, bool check) {
 			gategraph.addVertex(i);
 		}
 	}
-	out << "graph_for_reach" << endl;
-	out << bbvertices.size() << endl;
+	out << "graph_for_reach" << '\n';
+	out << bbvertices.size() << '\n';
 	int edgenum = 0;
 	for (sit = bbvertices.begin(); sit != bbvertices.end(); sit++) {
 		edgenum += genGateGraphByNode(*sit,radius,out,check,gateindex);
@@ -667,7 +667,7 @@ int ReachBackbone::genGateGraph(ostream& out, int radius, bool check) {
 
 int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool check, map<int,int>& gateindex) {
 	#ifdef RBDEBUG1	
-	cout << "here check " << vid << endl;
+	cout << "here check " << vid << '\n';
 	#endif
 
 	bool updated=false, valid=false;
@@ -680,13 +680,13 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 	EdgeList el;
 	EdgeList::iterator eit;
 	#ifdef RBDEBUG1
-	cout << "ref=" << ref << " opCnt=" << opCnt << endl;
+	cout << "ref=" << ref << " opCnt=" << opCnt << '\n';
 	#endif
 	while (begin<end) {
 		u = que[begin++];
 		visited[u] = opCnt;
 		#ifdef RBDEBUG1
-		cout << "visit " << u << " life=" << life[u] << " dist=" << dist[u] << endl;
+		cout << "visit " << u << " life=" << life[u] << " dist=" << dist[u] << '\n';
 		#endif
 		if (u!=vid&&gates->get(u)&&life[u]<ref) {
 			localneis.push_back(u);
@@ -700,7 +700,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 				if (index>=hubnodes.size()) {
 					localneis.push_back(u);
 					#ifdef RBDEBUG
-					cout << "localneis insert " << u << " life=" << life[u] << " dist=" << dist[u] << endl;
+					cout << "localneis insert " << u << " life=" << life[u] << " dist=" << dist[u] << '\n';
 					#endif
 				}
 			}
@@ -709,7 +709,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 		if (gates->get(u)) life[u] = ref;
 */
 		#ifdef RBDEBUG1
-		cout << "after update visit " << u << " life=" << life[u] << " dist=" << dist[u] << endl;
+		cout << "after update visit " << u << " life=" << life[u] << " dist=" << dist[u] << '\n';
 		#endif
 		val = dist[u];
 		lifeval = life[u];
@@ -722,19 +722,19 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 			// reach the lowest level NR
 			if (val==ref+radius) {
 				#ifdef RBDEBUG1
-				cout << "\tReach lowest level" << endl;
+				cout << "\tReach lowest level" << '\n';
 				#endif
 				if (dist[nid]<ref) continue;
 			}
 			#ifdef RBDEBUG1
-			cout << "\ttouch " << nid << " life=" << life[nid] << " dist=" << dist[nid] << endl;
+			cout << "\ttouch " << nid << " life=" << life[nid] << " dist=" << dist[nid] << '\n';
 			#endif
 			// update life time
 			updated = false;
 			if (valid) {
 				if (life[nid]<ref) {
 					#ifdef RBDEBUG1
-					cout << "update " << nid << "'s life from " << life[nid] << " to " << lifeval << endl;
+					cout << "update " << nid << "'s life from " << life[nid] << " to " << lifeval << '\n';
 					#endif
 					life[nid] = ref;
 					updated = true;
@@ -747,13 +747,13 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 					if (materialized->get(nid)) { // && val+1-ref<=epsilon) { // NR
 						hubnodes.push_back(nid); // it is not helpful if hubnode in the epsilon+1 level
 						#ifdef RBDEBUG1
-						cout << "==find hubnode " << nid << endl;
+						cout << "==find hubnode " << nid << '\n';
 						#endif
 					}
 					else {
 						que[end++] = nid;
 						#ifdef RBDEBUG1
-						cout << "=====insert " << nid << " to current que" << endl;
+						cout << "=====insert " << nid << " to current que" << '\n';
 						#endif
 					}
 				}
@@ -763,14 +763,14 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 				if (!materialized->get(nid))
 					que2[end2++] = nid;
 				#ifdef RBDEBUG1
-				cout << "=====insert " << nid << " to que2 for further update" << endl;
+				cout << "=====insert " << nid << " to que2 for further update" << '\n';
 				#endif
 			}
 		}
 	}
 	
 	#ifdef RBDEBUG1
-	cout << "*******start rescan procedure*******" << endl;
+	cout << "*******start rescan procedure*******" << '\n';
 	#endif
 	
 	// iteratively rescan the vertex influenced by reversed edges with respect to BFS tree
@@ -781,7 +781,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 		if (useque2) u = que2[begin2++];
 		else u = que[begin++];
 		#ifdef RBDEBUG1
-		cout << " second visit " << u << " life=" << life[u] << " dist=" << dist[u] << " useque2=" << useque2 << endl;
+		cout << " second visit " << u << " life=" << life[u] << " dist=" << dist[u] << " useque2=" << useque2 << '\n';
 		#endif
 //		if (life[u]-ref==epsilon || dist[u]==ref+epsilon+1) {
 			if (useque2 && begin2>=end2) {
@@ -789,7 +789,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 				useque2 = false;
 				opCnt++;
 				#ifdef RBDEBUG1
-				cout << "===========================switch to que1" << endl;
+				cout << "===========================switch to que1" << '\n';
 				#endif
 				continue;
 			}
@@ -798,7 +798,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 				useque2 = true;
 				opCnt++;
 				#ifdef RBDEBUG1
-				cout << "===========================switch to que2" << endl;
+				cout << "===========================switch to que2" << '\n';
 				#endif
 				continue;
 			}
@@ -815,19 +815,19 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 			// reach the lowest level NR
 			if (val==ref+radius) {
 				#ifdef RBDEBUG1
-				cout << "\tReach lowest level" << endl;
+				cout << "\tReach lowest level" << '\n';
 				#endif
 				if (dist[nid]<ref) continue;
 			}
 			#ifdef RBDEBUG1
-			cout << "\tsecond touch " << nid << " life=" << life[nid] << " dist=" << dist[nid] << endl;
+			cout << "\tsecond touch " << nid << " life=" << life[nid] << " dist=" << dist[nid] << '\n';
 			#endif
 			// update life time
 			updated = false;
 			if (valid) {
 				if (life[nid]<ref) { // NR life[nid]>lifeval+1 || 
 					#ifdef RBDEBUG1
-					cout << "second update " << nid << "'s life from " << life[nid] << " to " << lifeval+1 << endl;
+					cout << "second update " << nid << "'s life from " << life[nid] << " to " << lifeval+1 << '\n';
 					#endif
 					life[nid] = ref;
 					updated = true;
@@ -837,7 +837,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 			if (updated && dist[nid]<=radius+ref) {
 				if (dist[nid]>dist[u]) {
 					#ifdef RBDEBUG1
-					cout << "\tsecond insert " << nid << " into que useque2=" << useque2 << endl;
+					cout << "\tsecond insert " << nid << " into que useque2=" << useque2 << '\n';
 					#endif
 					if (!materialized->get(nid)) {
 						if (useque2) que2[end2++] = nid;
@@ -846,7 +846,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 				}
 				else if (visited[nid]!=opCnt) {
 					#ifdef RBDEBUG1
-					cout << "\tsecond further update " << nid << " into que useque2=" << useque2 << endl;
+					cout << "\tsecond further update " << nid << " into que useque2=" << useque2 << '\n';
 					#endif
 					// need to rescan and propogate life
 					if (!materialized->get(nid)) {
@@ -863,7 +863,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 			useque2 = false;
 			opCnt++;
 			#ifdef RBDEBUG1
-			cout << "===========================switch to que1" << endl;
+			cout << "===========================switch to que1" << '\n';
 			#endif
 		}
 		else if (!useque2 && begin>=end) {
@@ -871,7 +871,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 			useque2 = true;
 			opCnt++;
 			#ifdef RBDEBUG1
-			cout << "===========================switch to que2" << endl;
+			cout << "===========================switch to que2" << '\n';
 			#endif
 		}		
 	}
@@ -900,7 +900,7 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 		// no other local gates can reach this gate
 		if (life[localneis[i]]<ref) {
 			#ifdef RBDEBUG1
-			cout << endl;
+			cout << '\n';
 			#endif
 			if (check) gategraph.addEdge(gateindex[vid],gateindex[localneis[i]]);
 			out << gateindex[localneis[i]] << " ";	
@@ -908,9 +908,9 @@ int ReachBackbone::genGateGraphByNode(int vid, int radius, ostream& out, bool ch
 		}
 	}
 	#ifdef RBDEBUG1
-	cout << endl;
+	cout << '\n';
 	#endif
-	out << "#" << endl;
+	out << "#" << '\n';
 	return edgenum;
 }
 
@@ -930,7 +930,7 @@ void ReachBackbone::printBBvertex(ostream& out) {
 	out << "backbone vertices: ";
 	for (sit = bbvertices.begin(); sit != bbvertices.end(); sit++)
 		out << *sit << " ";
-	out << endl;
+	out << '\n';
 }
 
 int ReachBackbone::getBBsize() const {
@@ -953,7 +953,7 @@ bool ReachBackbone::checkBackbone() {
 	}
 	
 	/*
-	cout << "reach=" << reach(1751,769,gateindex) << endl;
+	cout << "reach=" << reach(1751,769,gateindex) << '\n';
 	if (true) exit(0);
 	*/
 	/*
@@ -962,7 +962,7 @@ bool ReachBackbone::checkBackbone() {
 			bool ans = GraphUtil::DFSReachCnt(g, i, j, visited, opCnt);
 			bool r = reach(i,j,gateindex);
 			if (ans!=r) {
-				cout << "wrong " << i << " -> " << j << " r=" << r << endl;
+				cout << "wrong " << i << " -> " << j << " r=" << r << '\n';
 				exit(0);
 			}
 		}
@@ -973,11 +973,11 @@ bool ReachBackbone::checkBackbone() {
 		int s = lrand48() % gsize;
 		int t = lrand48() % gsize;
 		if (s!=t) {
-			cout << "check reach between " << s << " and " << t << " " << i << endl;
+			cout << "check reach between " << s << " and " << t << " " << i << '\n';
 			bool ans = GraphUtil::DFSReachCnt(g, s, t, visited, opCnt);
 			bool r = reach(s,t,gateindex);
 			if (ans!=r) {
-				cout << "wrong " << s << " -> " << t << " r=" << r << " outdeg=" << g.out_degree(t) << endl;
+				cout << "wrong " << s << " -> " << t << " r=" << r << " outdeg=" << g.out_degree(t) << '\n';
 			//	char ch;
 			//	cin >> ch;
 				exit(0);
@@ -997,15 +997,15 @@ bool ReachBackbone::reach(int src, int trg, map<int,int> gateindex) {
 	cout << "out[" << src << "]: ";
 	for (outit = out.begin(); outit != out.end(); outit++)
 		cout << *outit << " ";
-	cout << endl;
+	cout << '\n';
 	cout << "in[" << trg << "]: ";
 	for (init = in.begin(); init != in.end(); init++)
 		cout << *init << " ";
-	cout << endl;
+	cout << '\n';
 	*/
 	for (outit = out.begin(); outit != out.end(); outit++) {
 		for (init = in.begin(); init != in.end(); init++) {
-	//		cout << "check " << *outit << " to " << *init << endl;
+	//		cout << "check " << *outit << " to " << *init << '\n';
 			if (GraphUtil::DFSReachCnt(gategraph, gateindex[*outit], gateindex[*init], visited, opCnt))
 				return true;
 		}

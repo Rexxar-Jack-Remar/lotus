@@ -128,13 +128,13 @@ void Graph::readGraph(istream &in) {
 
     strTrimRight(buf);
     if (buf.length() < strlen("graph_for_greach")) {
-        cerr << "BAD FILE FORMAT!" << endl;
+        cerr << "BAD FILE FORMAT!" << '\n';
         exit(1);
     }
 
     string tag = buf.substr(0, strlen("graph_for_greach"));
     if (tag != "graph_for_greach") {
-        cerr << "BAD FILE FORMAT!" << endl;
+        cerr << "BAD FILE FORMAT!" << '\n';
         exit(2);
     }
 
@@ -187,9 +187,9 @@ void Graph::readGraph(istream &in) {
 
 
 void Graph::writeGraph(ostream &out) {
-    cout << "Graph size = " << graph.size() << endl;
-    out << "graph_for_greach" << endl;
-    out << vl.size() << endl;
+    cout << "Graph size = " << graph.size() << '\n';
+    out << "graph_for_greach" << '\n';
+    out << vl.size() << '\n';
 
     GRA::iterator git;
     EdgeList el;
@@ -199,7 +199,7 @@ void Graph::writeGraph(ostream &out) {
         el = graph[i].outList;
         for (eit = el.begin(); eit != el.end(); eit++)
             out << (*eit) << " ";
-        out << "#" << endl;
+        out << "#" << '\n';
     }
 }
 
@@ -228,11 +228,11 @@ void Graph::addVertex(int vid) {
 }
 
 void Graph::remove_vertex(int vid) {
-    cout << vid << endl;
+    cout << vid << '\n';
     EdgeList preds = graph[vid].inList;
-    cout << vid << endl;
+    cout << vid << '\n';
     for (const auto &pred_it : preds) {
-        cout << pred_it << endl;
+        cout << pred_it << '\n';
         auto pred = graph[pred_it].outList;
         auto f_it = find(pred.begin(), pred.end(), vid);
         assert(f_it != pred.end());
@@ -360,14 +360,14 @@ Vertex &Graph::at(int vid) {
 
 Graph::Graph(unordered_map<int, vector<int> > &inlist, unordered_map<int, vector<int> > &outlist) {
     n_vertices = inlist.size();
-    cout << "inlist size: " << inlist.size() << endl;
-    cout << "outlist size: " << outlist.size() << endl;
+    cout << "inlist size: " << inlist.size() << '\n';
+    cout << "outlist size: " << outlist.size() << '\n';
     vl = VertexList(n_vertices);
     graph = GRA(n_vertices, In_OutList());
     for (int i = 0; i < n_vertices; i++)
         addVertex(i);
-    cout << "inlist size: " << inlist.size() << endl;
-    cout << "outlist size: " << outlist.size() << endl;
+    cout << "inlist size: " << inlist.size() << '\n';
+    cout << "outlist size: " << outlist.size() << '\n';
     unordered_map<int, vector<int> >::iterator hit, hit1;
     unordered_map<int, int> indexmap;
     vector<int> vec;
@@ -376,7 +376,7 @@ Graph::Graph(unordered_map<int, vector<int> > &inlist, unordered_map<int, vector
     for (hit = inlist.begin(), k = 0; hit != inlist.end(); hit++, k++) {
         indexmap[hit->first] = k;
     }
-    cout << "k: " << k << endl;
+    cout << "k: " << k << '\n';
     for (hit = inlist.begin(), hit1 = outlist.begin(), k = 0; hit != inlist.end(); hit++, hit1++, k++) {
         vec = hit->second;
         for (vit = vec.begin(); vit != vec.end(); vit++)
@@ -397,7 +397,7 @@ void Graph::extract(unordered_map<int, vector<int> > &inlist, unordered_map<int,
 
 // for test
 void Graph::printMap(unordered_map<int, vector<int> > &inlist, unordered_map<int, vector<int> > &outlist) {
-    cout << "==============================================" << endl;
+    cout << "==============================================" << '\n';
     unordered_map<int, vector<int> >::iterator hit;
     vector<int>::iterator vit;
     for (hit = outlist.begin(); hit != outlist.end(); hit++) {
@@ -405,29 +405,29 @@ void Graph::printMap(unordered_map<int, vector<int> > &inlist, unordered_map<int
         vector<int> vec = hit->second;
         for (vit = vec.begin(); vit != vec.end(); vit++)
             cout << *vit << " ";
-        cout << "#" << endl;
+        cout << "#" << '\n';
     }
-    cout << "In List for graph" << endl;
+    cout << "In List for graph" << '\n';
     for (hit = inlist.begin(); hit != inlist.end(); hit++) {
         cout << hit->first << ": ";
         vector<int> vec = hit->second;
         for (vit = vec.begin(); vit != vec.end(); vit++)
             cout << *vit << " ";
-        cout << "#" << endl;
+        cout << "#" << '\n';
     }
-    cout << "================================================" << endl;
+    cout << "================================================" << '\n';
 }
 
 void Graph::print_edges() {
-    cout << "----Current Edge sets: ----" << endl;
+    cout << "----Current Edge sets: ----" << '\n';
     EdgeList el;
     for (int i = 0; i < num_vertices(); i++) {
         el = graph[i].outList;
         for (const auto &e_it:el) {
-            cout << i << "->" << e_it << endl;
+            cout << i << "->" << e_it << '\n';
         }
     }
-    cout << "---------------------------" << endl;
+    cout << "---------------------------" << '\n';
 }
 
 double Graph::tcs(const int vid) {
@@ -629,7 +629,7 @@ void Graph::removeEdge(int s, int t) {
  * for context-sensitive flow analysis.
  */
 void Graph::check() {
-    cout << "Checking correctness of the input graph..." << endl;
+    cout << "Checking correctness of the input graph..." << '\n';
     CSProgressBar bar(n_vertices);
     // Check: labeled edges should not cross function boundaries
     for (int i = 0; i < n_vertices; ++i) {
@@ -638,7 +638,7 @@ void Graph::check() {
         for (auto t : inList) {
             Vertex& u = at(t);
             if (label(t , i) == 0 && v.func_id != u.func_id) {
-                cerr << "invalid graph where a labeled edge is cross funcs" << endl;
+                cerr << "invalid graph where a labeled edge is cross funcs" << '\n';
                 cerr << t << " -> " << i << "\n";
                 exit(8);
             }
@@ -648,14 +648,14 @@ void Graph::check() {
         for (auto t : outList) {
             Vertex& u = at(t);
             if (label(i , t) == 0 && v.func_id != u.func_id) {
-                cerr << "invalid graph where a labeled edge is cross funcs" << endl;
+                cerr << "invalid graph where a labeled edge is cross funcs" << '\n';
                 cerr << i << " -> " << t << "\n";
                 exit(18);
             }
         }
         bar.update();
     }
-    cout << endl;
+    cout << '\n';
 
     std::map<int, std::set<int>> func_arg_map;
     CSProgressBar bar2(pos_label_map.size());
@@ -667,7 +667,7 @@ void Graph::check() {
         auto &inList = graph[formalin].inList;
         for (auto actualin : inList) {
             if (!pos_label_map.count(std::make_pair(actualin, formalin))) {
-                cerr << "actualin -> formalin does not have a positive label" << endl;
+                cerr << "actualin -> formalin does not have a positive label" << '\n';
                 cerr << actualin << " -> " << formalin << "\n";
                 exit(28);
             }
@@ -684,9 +684,9 @@ void Graph::check() {
             max_arg = it.second.size();
         }
     }
-    cout << endl;
-    cout << "# max arg " << max_arg << " in func " << max_arg_func << endl;
-    cout << "Checking done!" << endl;
+    cout << '\n';
+    cout << "# max arg " << max_arg << " in func " << max_arg_func << '\n';
+    cout << "Checking done!" << '\n';
 }
 
 size_t Graph::summary_edge_size() {

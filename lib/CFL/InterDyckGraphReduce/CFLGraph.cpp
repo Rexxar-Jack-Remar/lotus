@@ -31,7 +31,7 @@ int CFLMatrix::DeleteAllEdgesAndJ(unsigned i, unsigned j) {
           InsertEdge(tmp_i, i, (EdgeTy)c);
           if (c == A)
             intronewAedge = 1;
-          // cout<<"** insert "<<tmp_i<<" to "<<i<<endl;
+          // cout<<"** insert "<<tmp_i<<" to "<<i<<'\n';
         }
       }
     }
@@ -49,7 +49,7 @@ int CFLMatrix::DeleteAllEdgesAndJ(unsigned i, unsigned j) {
           InsertEdge(i, tmp_i, (EdgeTy)c);
           if (c == A)
             intronewAedge = 1;
-          // cout<<"** insert "<<tmp_i<<" to "<<i<<endl;
+          // cout<<"** insert "<<tmp_i<<" to "<<i<<'\n';
         }
       }
     }

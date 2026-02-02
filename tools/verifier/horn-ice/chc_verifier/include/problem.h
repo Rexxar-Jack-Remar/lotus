@@ -40,7 +40,7 @@ namespace chc_teacher
 		{
 
 			// Output uninterpreted predicates that need to be synthesized
-			out << "---------- Relations to synthesize ----------" << std::endl;
+			out << "---------- Relations to synthesize ----------" << '\n';
 			for (const auto & r : p.relations)
 			{
 				out << r << std::endl;
@@ -48,7 +48,7 @@ namespace chc_teacher
 			
 		
 			// Output CHCs
-			out << "---------- CHCs ----------" << std::endl;
+			out << "---------- CHCs ----------" << '\n';
 			for (const auto & chc : p.chcs)
 			{
 				out << chc << std::endl;

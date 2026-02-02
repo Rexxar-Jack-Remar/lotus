@@ -9,11 +9,11 @@
 #include <llvm/Pass.h>
 
 #include "Alias/AserPTA/PointerAnalysis/Graph/ConstraintGraph/ConstraintGraph.h"
+#include "Alias/AserPTA/PointerAnalysis/Graph/CallGraph.h"
 #include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/MemModelTrait.h"
 #include "Alias/AserPTA/PointerAnalysis/Solver/PointsTo/PointsToSelector.h"
-#include "Alias/AserPTA/PointerAnalysis/Graph/CallGraph.h"
-#include "Alias/AserPTA/Util/Statistics.h"
 #include "Alias/AserPTA/Util/Log.h"
+#include "Alias/AserPTA/Util/Statistics.h"
 
 extern llvm::cl::opt<bool> ConfigPrintConstraintGraph;
 extern llvm::cl::opt<bool> ConfigPrintCallGraph;
@@ -153,7 +153,7 @@ protected:
         // assert(ptrNode);
 
         // we must be handling a getelemntptr instruction if we are indexing a object
-        auto gep = static_cast<const llvm::GetElementPtrInst *>(ptrNode->getPointer()->getValue());
+        const auto *gep = static_cast<const llvm::GetElementPtrInst *>(ptrNode->getPointer()->getValue());
         // assert(gep);
 
         // TODO: the intersection on pts should be done through PtsTrait for better extensibility

@@ -4,12 +4,12 @@ The software is provided on an as is basis for research purposes.
 There is no additional support offered, nor are the author(s) 
 or their institutions liable under any circumstances.
 */
-#include <queue>
-#include <random>
-#include <iostream>
-#include <cstdlib>
 #include "CFL/CSIndex/Grail.h"
 #include "CFL/CSIndex/TCSEstimator.h"
+#include <cstdlib>
+#include <iostream>
+#include <queue>
+#include <random>
 
 vector<int> _index;           ///< Global index vector for labeling
 vector<double> customIndex;   ///< Global custom index vector
@@ -255,7 +255,7 @@ int Grail::customvisit(Graph& tree, int vid, int& pre_post, vector<bool>& visite
 		tree[vid].mingap = pre_post - pre_order;
 	}	
 	pre_post++;
-//	cout << "exiting " << vid << endl;
+//	cout << "exiting " << vid << '\n';
 	return pre_order;
 }
 
@@ -276,7 +276,7 @@ void Grail::randomlabeling(Graph& tree) {
 
 // traverse tree to label node with pre and post order by giving a start node
 int Grail::visit(Graph& tree, int vid, int& pre_post, vector<bool>& visited) {
-//	cout << "entering " << vid << endl;
+//	cout << "entering " << vid << '\n';
 	visited[vid] = true;
 	EdgeList el = tree.out_edges(vid);
 	std::random_device rd;
@@ -302,7 +302,7 @@ int Grail::visit(Graph& tree, int vid, int& pre_post, vector<bool>& visited) {
 
 // traverse tree to label node with pre and post order by giving a start node
 int Grail::fixedreversevisit(Graph& tree, int vid, int& pre_post, vector<bool>& visited, int traversal) {
-//	cout << "entering " << vid << endl;
+//	cout << "entering " << vid << '\n';
 	visited[vid] = true;
 	EdgeList el = tree.out_edges(vid);
 	sort(el.begin(),el.end(),index_cmp<vector<int>&>(_index));	
@@ -323,7 +323,7 @@ int Grail::fixedreversevisit(Graph& tree, int vid, int& pre_post, vector<bool>& 
 	tree[vid].pre->push_back(pre_order);
 	tree[vid].post->push_back(pre_post);
 	pre_post++;
-//	cout << "exiting " << vid << endl;
+//	cout << "exiting " << vid << '\n';
 	return pre_order;
 }
 
@@ -348,16 +348,16 @@ bool Grail::contains(int src,int trg){
 //	for(int i = 0; i < g[src].pre->size(); i++){
 //		std::cout << g[src].pre->at(i) << std::endl;
 //	}
-//	cout << endl;
+//	cout << '\n';
 //	for(int i = 0; i < g[trg].pre->size(); i++){
 //		std::cout << g[trg].pre->at(i) << std::endl;
 //	}
-//	cout << endl;
+//	cout << '\n';
 //
 //	for(int i = 0; i < g[src].post->size(); i++){
 //		std::cout << g[src].post->at(i) << std::endl;
 //	}
-//	cout << endl;
+//	cout << '\n';
 //	for(int i = 0; i < g[trg].post->size(); i++){
 //		std::cout << g[trg].post->at(i) << std::endl;
 //	}

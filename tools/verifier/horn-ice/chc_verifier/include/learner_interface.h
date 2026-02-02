@@ -6,10 +6,10 @@
 #define __CHCTEACHER_LEARNER_INTERFACE_H__
 
 // C++ includes
+#include <iostream>
 #include <list>
 #include <stdexcept>
 #include <vector>
-#include <iostream>
 
 // C includes
 #include <cassert>
@@ -18,16 +18,16 @@
 #include "z3++.h"
 
 // Project includes
+#include "../../hice-dt/include/datapoint.h"
+#include "api.h"
 #include "conjecture.h"
+#include "datapoint.h"
 #include "decision_tree.h"
+#include "dt_to_z3_exp.h"
 #include "horn_constraint.h"
 #include "horn_counterexample.h"
-#include "z3_helper.h"
-#include "../../hice-dt/include/datapoint.h"
-#include "datapoint.h"
-#include "api.h"
-#include "dt_to_z3_exp.h"
 #include "pretty_print_visitor.h" // DEBUG
+#include "z3_helper.h"
 
 
 namespace chc_teacher

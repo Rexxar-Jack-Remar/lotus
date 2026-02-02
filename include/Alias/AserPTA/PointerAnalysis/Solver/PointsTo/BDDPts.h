@@ -11,8 +11,8 @@
 #include <llvm/Support/ErrorHandling.h>
 
 #include "Alias/BDD/BDDPtsSet.h"
-#include "Alias/SparrowAA/PtsSet.h"
 #include "Alias/AserPTA/PointerAnalysis/Solver/PointsTo/PTSTrait.h"
+#include "Alias/SparrowAA/PtsSet.h"
 
 namespace aser {
 

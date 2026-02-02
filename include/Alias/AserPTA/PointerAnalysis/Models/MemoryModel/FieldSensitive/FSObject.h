@@ -142,6 +142,6 @@ public:
     friend CGObjNode<FSMemModel<ctx>>;
 };
 
-}
+} // namespace aser
 
 #endif  // ASER_PTA_FSOBJECT_H

@@ -36,7 +36,7 @@ void arrayreach(CFLHashMap &cm, vector<CFLGrammar> &CGVec) {
   queue<ReachabilityItem> worklist;
   gettimeofday(&begin, NULL);
 
-  // cout<<"edge is "<<cm.GetEdgNum()<<endl;
+  // cout<<"edge is "<<cm.GetEdgNum()<<'\n';
 
   // insert origian edge to reachQ
   for (unsigned i = 0; i < NodeNum; i++) {
@@ -52,26 +52,26 @@ void arrayreach(CFLHashMap &cm, vector<CFLGrammar> &CGVec) {
 
       for (unordered_map<unsigned, char>::iterator c = color.begin();
            c != color.end(); ++c) {
-        // cout<<"lala"<<endl;
-        // cout<<"[debug] "<<i<<" "<<j<<" c "<<c->first<<endl;
+        // cout<<"lala"<<'\n';
+        // cout<<"[debug] "<<i<<" "<<j<<" c "<<c->first<<'\n';
         ReachabilityItem item(i, j, c->first);
 
         worklist.push(item);
       }
 
       // Matrix *q = p + i * NodeNum + j;
-      // cout<<q->colors.count()<<endl;
+      // cout<<q->colors.count()<<'\n';
     }
   }
 
   // X = e phrase
   vector<CFLGrammar>::iterator it;
   for (it = CGVec.begin(); it != CGVec.end(); it++) { // for every grammar
-    // cout<<"rules "<<(*it).IsEpsilonRule()<<endl;
+    // cout<<"rules "<<(*it).IsEpsilonRule()<<'\n';
 
     if ((*it).IsEpsilonRule()) {
-      // cout<<(*it).GetLTerm()<<endl;
-      // cout<<"is epsilone"<<endl;
+      // cout<<(*it).GetLTerm()<<'\n';
+      // cout<<"is epsilone"<<'\n';
       unsigned edgTy = (*it).GetLTerm();
       for (unsigned i = 0; i < NodeNum; i++) {
 
@@ -84,7 +84,7 @@ void arrayreach(CFLHashMap &cm, vector<CFLGrammar> &CGVec) {
       }
     }
   }
-  // cout<<"size is "<<cm.GetEdgNum()<<endl;
+  // cout<<"size is "<<cm.GetEdgNum()<<'\n';
 
   while (!worklist.empty()) {
     // cout << " " << worklist.front().GetEdgeTy();
@@ -97,7 +97,7 @@ void arrayreach(CFLHashMap &cm, vector<CFLGrammar> &CGVec) {
 
       // it->PrintGrammar();
 
-      // cout<<"processing "<<i<<" "<<j<<" c "<<wedg<<endl;
+      // cout<<"processing "<<i<<" "<<j<<" c "<<wedg<<'\n';
       if ((*it).IsSingleRule() && !(*it).IsEpsilonRule()) { // handle A->B
         if ((*it).GetRTerm1() == wedg) {
 
@@ -107,7 +107,7 @@ void arrayreach(CFLHashMap &cm, vector<CFLGrammar> &CGVec) {
             if (edgTy == S_edge)
               sedges++;
 
-            // cout<<"insert "<<i<<" "<<j<<" c "<<edgTy<<endl;
+            // cout<<"insert "<<i<<" "<<j<<" c "<<edgTy<<'\n';
             ReachabilityItem item(i, j, edgTy);
             worklist.push(item);
           }
@@ -131,13 +131,13 @@ void arrayreach(CFLHashMap &cm, vector<CFLGrammar> &CGVec) {
               cm.InsertEdge(vtx, j, edgTy);
 
               ReachabilityItem item(vtx, j, edgTy);
-              // cout<<"insert "<<vtx<<" "<<j<<" c "<<edgTy<<endl;
+              // cout<<"insert "<<vtx<<" "<<j<<" c "<<edgTy<<'\n';
               if (edgTy == S_edge)
                 sedges++;
 
               // if(edgTy == M){
               // cout<<vtx<<" and "<<i<<" has "<<(*it).GetRTerm1()<<" while
-              // "<<i<<" and "<<j<<" has "<<wedg<<" to form "<<edgTy<<endl;
+              // "<<i<<" and "<<j<<" has "<<wedg<<" to form "<<edgTy<<'\n';
               // }
 
               worklist.push(item);
@@ -162,11 +162,11 @@ void arrayreach(CFLHashMap &cm, vector<CFLGrammar> &CGVec) {
               if (edgTy == S_edge)
                 sedges++;
 
-              // cout<<"insert "<<i<<" "<<vtx<<" c "<<edgTy<<endl;
+              // cout<<"insert "<<i<<" "<<vtx<<" c "<<edgTy<<'\n';
               ReachabilityItem item(i, vtx, edgTy);
               // if(edgTy == M){
               // cout<<i<<" and "<<j<<" has "<<wedg<<" while "<<j<<" and
-              // "<<vtx<<" has "<<(*it).GetRTerm2()<<" to form "<<edgTy<<endl;
+              // "<<vtx<<" has "<<(*it).GetRTerm2()<<" to form "<<edgTy<<'\n';
               // }
               worklist.push(item);
             }
@@ -176,18 +176,18 @@ void arrayreach(CFLHashMap &cm, vector<CFLGrammar> &CGVec) {
     }
     worklist.pop();
 
-    // cout<<"poped"<<endl;
+    // cout<<"poped"<<'\n';
   }
 
   gettimeofday(&end, NULL);
   elapsed += ((end.tv_sec - begin.tv_sec) +
               ((end.tv_usec - begin.tv_usec) / 1000000.0));
   // double elapsed = (end.tv_sec - begin.tv_sec) + ((end.tv_usec -
-  // begin.tv_usec) / 1000000.0); cout<<"runtime: "<<elapsed<<endl;
+  // begin.tv_usec) / 1000000.0); cout<<"runtime: "<<elapsed<<'\n';
 
   // FindTreeNodes(cm);
   if (debug) {
-    // cout<<"size " <<cm.GetEdgNum()<<endl;
+    // cout<<"size " <<cm.GetEdgNum()<<'\n';
 
     unsigned sssize = 0;
 
@@ -199,20 +199,20 @@ void arrayreach(CFLHashMap &cm, vector<CFLGrammar> &CGVec) {
           sssize = sssize + 2;
           // msize++;
           cout << "i " << i << " j " << j << '\n';
-          // cout<<"have "<<j<<endl;
+          // cout<<"have "<<j<<'\n';
         }
         if (i == j)
           sssize++;
 
         // Matrix *q = p + i * NodeNum + j;
-        // cout<<q->colors.count()<<endl;
+        // cout<<q->colors.count()<<'\n';
       }
     }
     // cout << "node: "<<cm.GetVtxNum()<<" longest length is "
-    // <<maxlength<<endl;
+    // <<maxlength<<'\n';
 
-    // cout<<"msize "<<msize<<endl;
-    // cout<<"psize "<<psize<<endl;
+    // cout<<"msize "<<msize<<'\n';
+    // cout<<"psize "<<psize<<'\n';
     cout << "s size " << sssize << '\n';
   }
 
@@ -235,21 +235,21 @@ int arrayversion() {
     vector<CFLGrammar> CGVec;
 
     cout << "Processing " << line << '\n';
-    // cout<<"doing "<<line<<endl;
+    // cout<<"doing "<<line<<'\n';
     NodeNum = dotparser.BuildNodeMap(line, NodeID);
-    // cout<<"doing "<<line<<" of size "<<NodeNum<<endl;
+    // cout<<"doing "<<line<<" of size "<<NodeNum<<'\n';
     // NodeNum = dotparser.BuildMatrix(line, NodeID);
 
     // CFLBitTable bt(NodeNum);
-    // cout<<"node "<<NodeNum<<endl;
+    // cout<<"node "<<NodeNum<<'\n';
     // CFLMatrix cm(NodeNum);
     // unsigned long abc = 100000;
-    // cout<<"lala" << abc*abc<<endl;
+    // cout<<"lala" << abc*abc<<'\n';
     // CFLMatrix cm(NodeNum);
     CFLHashMap cm1(NodeNum);
 
     /*if(NodeNum>nodemax){
-      cout<<"max: "<<nodemax<<" new: "<<NodeNum<<"   "<<line<<endl;
+      cout<<"max: "<<nodemax<<" new: "<<NodeNum<<"   "<<line<<'\n';
       nodemax = NodeNum;
       }*/
 
@@ -259,7 +259,7 @@ int arrayversion() {
 
     cout << "Node: " << cm1.GetVtxNum() << " Edge " << cm1.GetEdgNum() << '\n';
     cout << "Grammar: " << CGVec.size() << '\n';
-    // cout<<"para: "<<EdgeID.size()<<endl;
+    // cout<<"para: "<<EdgeID.size()<<'\n';
 
     arrayreach(cm1, CGVec);
   }

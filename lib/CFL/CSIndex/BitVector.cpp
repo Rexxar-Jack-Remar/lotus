@@ -1,5 +1,5 @@
-#include <iostream>
 #include "CFL/CSIndex/BitVector.h"
+#include <iostream>
 
 bool findCommonOne(bit_vector* a, bit_vector* b) {
 	int num_int64 = a->num_bytes/8;

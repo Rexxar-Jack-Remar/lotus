@@ -9,8 +9,8 @@
 #include <llvm/Support/ErrorHandling.h>
 
 #include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/AllocSite.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/Layout/MemLayout.h"
 #include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSObject.h"
+#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/Layout/MemLayout.h"
 
 namespace aser {
 

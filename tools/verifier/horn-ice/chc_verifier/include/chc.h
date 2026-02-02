@@ -47,25 +47,25 @@ namespace chc_teacher
 		friend std::ostream & operator<<(std::ostream & out, const constrainted_horn_clause & chc)
 		{
 			
-			out << " -- CHC" << std::endl;
-			out << chc.expr << std::endl;
+			out << " -- CHC" << '\n';
+			out << chc.expr << '\n';
 			
-			out << " -- Uninterpreted predicates" << std::endl;
+			out << " -- Uninterpreted predicates" << '\n';
 			for (const auto & decl : chc.uninterpreted_predicates)
 			{
-				out << decl << std::endl;
+				out << decl << '\n';
 			}
 			
-			out << " -- LHS" << std::endl;
+			out << " -- LHS" << '\n';
 			for (const auto & expr : chc.predicates_in_lhs)
 			{
-				out << expr << std::endl;
+				out << expr << '\n';
 			}
 			
-			out << " -- RHS" << std::endl;
+			out << " -- RHS" << '\n';
 			for (const auto & expr : chc.predicates_in_rhs)
 			{
-				out << expr << std::endl;
+				out << expr << '\n';
 			}
 			
 			return out;

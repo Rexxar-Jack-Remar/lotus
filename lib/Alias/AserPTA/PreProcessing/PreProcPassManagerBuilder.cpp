@@ -46,9 +46,9 @@
 //#include "llvm/Transforms/IPO/Inliner.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 
-#include "Alias/AserPTA/PreProcessing/PreProcPassManagerBuilder.h"
-#include "Alias/AserPTA/PreProcessing/Passes/WrapperFunIdentifyPass.h"
 #include "Alias/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
+#include "Alias/AserPTA/PreProcessing/Passes/WrapperFunIdentifyPass.h"
+#include "Alias/AserPTA/PreProcessing/PreProcPassManagerBuilder.h"
 
 using namespace aser;
 using namespace llvm;

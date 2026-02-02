@@ -7,23 +7,23 @@ using std::string;
 int main() {
   VarSet v, w, x, y;
 
-  cout << VarSet::UniverseSet() << endl;
-  cout << VarSet::EmptySet() << endl;
+  cout << VarSet::UniverseSet() << '\n';
+  cout << VarSet::EmptySet() << '\n';
 
   v = VarSet::EmptySet();
   w = VarSet::EmptySet();
-  cout << VarSet::Diff(v,w) << endl;
-  cout << VarSet::Diff(w,v) << endl;
-  cout << VarSet::Union(v,w) << endl;
-  cout << VarSet::Union(w,v) << endl;
-  cout << VarSet::Intersect(v,w) << endl;
-  cout << VarSet::Intersect(w,v) << endl;
-  cout << v << endl;
-  cout << w << endl;
-  cout << VarSet::Eq(v,w) << endl;
+  cout << VarSet::Diff(v,w) << '\n';
+  cout << VarSet::Diff(w,v) << '\n';
+  cout << VarSet::Union(v,w) << '\n';
+  cout << VarSet::Union(w,v) << '\n';
+  cout << VarSet::Intersect(v,w) << '\n';
+  cout << VarSet::Intersect(w,v) << '\n';
+  cout << v << '\n';
+  cout << w << '\n';
+  cout << VarSet::Eq(v,w) << '\n';
   x = VarSet::Union(VarSet::Diff(v,w), VarSet::Union(VarSet::Diff(w,v), VarSet::Intersect(v,w)));
   y = VarSet::Union(v,w);
-  cout << x << " == " << y << ": " << VarSet::Eq(x,y) << endl;
+  cout << x << " == " << y << ": " << VarSet::Eq(x,y) << '\n';
 
 
   v.Insert("a" );
@@ -31,18 +31,18 @@ int main() {
   v.Insert("c" );
   v.Insert("d" );
   w = mkVarSet("c", "d", "e", "f");
-  cout << VarSet::Diff(v,w) << endl;
-  cout << VarSet::Diff(w,v) << endl;
-  cout << VarSet::Union(v,w) << endl;
-  cout << VarSet::Union(w,v) << endl;
-  cout << VarSet::Intersect(v,w) << endl;
-  cout << VarSet::Intersect(w,v) << endl;
-  cout << v << endl;
-  cout << w << endl;
-  cout << VarSet::Eq(v,w) << endl;
+  cout << VarSet::Diff(v,w) << '\n';
+  cout << VarSet::Diff(w,v) << '\n';
+  cout << VarSet::Union(v,w) << '\n';
+  cout << VarSet::Union(w,v) << '\n';
+  cout << VarSet::Intersect(v,w) << '\n';
+  cout << VarSet::Intersect(w,v) << '\n';
+  cout << v << '\n';
+  cout << w << '\n';
+  cout << VarSet::Eq(v,w) << '\n';
   x = VarSet::Union(VarSet::Diff(v,w), VarSet::Union(VarSet::Diff(w,v), VarSet::Intersect(v,w)));
   y = VarSet::Union(v,w);
-  cout << x << " == " << y << ": " << VarSet::Eq(x,y) << endl;
+  cout << x << " == " << y << ": " << VarSet::Eq(x,y) << '\n';
 
   return(0);
 }

@@ -5,10 +5,10 @@
 #ifndef ASER_PTA_ARRAYLAYOUT_H
 #define ASER_PTA_ARRAYLAYOUT_H
 
-#include <cstddef>
-#include <map>
 #include <cassert>
+#include <cstddef>
 #include <limits>
+#include <map>
 
 namespace aser {
 
@@ -73,6 +73,6 @@ public:
     friend MemLayoutManager;
 };
 
-}
+} // namespace aser
 
 #endif  // ASER_PTA_ARRAYLAYOUT_H

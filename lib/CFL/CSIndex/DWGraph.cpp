@@ -532,7 +532,7 @@ set<int> DWGraph::getRoots() {
 // check whether the edge from src to trg is in the graph
 bool DWGraph::hasEdgeWithID(int src, int trg, int edgeid) {
 	if (graph.find(src) == graph.end()) {
-	//	cout << "Source vertex [" << src << "] is not existed!" << endl;
+	//	cout << "Source vertex [" << src << "] is not existed!" << '\n';
 		return false;
 	}
 	
@@ -585,9 +585,9 @@ DWVertex& DWGraph::operator[](const int edgeid) {
 // Dec 15
 int DWGraph::weight(int eid) {
 	if (edgeOpMap.find(eid) == edgeOpMap.end()) {
-//		cerr << "WARNING on weight: eid " << eid << " is not existed!" << endl;
+//		cerr << "WARNING on weight: eid " << eid << " is not existed!" << '\n';
 //		if(edgeOpMap.count(eid) > 0){
-//			cerr << eid << endl;
+//			cerr << eid << '\n';
 //		}
 //		throw out_of_range("Error");
 		return edgeOpMap[eid].weight;

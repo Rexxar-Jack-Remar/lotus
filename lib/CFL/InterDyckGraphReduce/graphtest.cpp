@@ -76,7 +76,7 @@ void mergeNodes(unsigned anodeID, unsigned bnodeID, SummaryGraph &sGraph) {
     // do not care duplicate
     anode->outRedEdgeNodes.push_back(newEidNode);
     // cout << "add new red edge " << anode->id << "->" << tonodeID << " with
-    // eid " << eid << endl;
+    // eid " << eid << '\n';
   }
   bnode->outRedEdgeNodes.clear();
 
@@ -88,11 +88,11 @@ void mergeNodes(unsigned anodeID, unsigned bnodeID, SummaryGraph &sGraph) {
     // do not care duplicate
     anode->outBlueEdgeNodes.push_back(newEidNode);
     // cout << "add new blue edge " << anode->id << "->" << tonodeID << " with
-    // eid " << eid << endl;
+    // eid " << eid << '\n';
   }
   bnode->outBlueEdgeNodes.clear();
 
-  // cout << "Merge " << anodeID << " with " << bnodeID << endl;
+  // cout << "Merge " << anodeID << " with " << bnodeID << '\n';
 }
 
 void printGraphBlue(SummaryGraph &sGraph) {
@@ -221,7 +221,7 @@ int main() {
           continue;
         }
         mergeNodes(prev, cur, sGraph);
-        // cout << "merge " << prev << " with " << cur << endl;
+        // cout << "merge " << prev << " with " << cur << '\n';
         //  last line
         prev = cur;
       }

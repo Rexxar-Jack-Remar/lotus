@@ -12,9 +12,6 @@
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/AllocAA/AllocAA.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include <llvm/Analysis/CFLAndersAliasAnalysis.h>
-#include <llvm/Analysis/CFLSteensAliasAnalysis.h>
-#include <llvm/IR/LegacyPassManager.h>
 #include "Alias/SparrowAA/AndersenAA.h"
 #include "Alias/TPA/Context/KLimitContext.h"
 #include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
@@ -23,7 +20,10 @@
 #include "Alias/TPA/Transforms/RunPrepass.h"
 #include "Alias/UnderApproxAA/UnderApproxAA.h"
 #include "Alias/seadsa/SeaDsaAliasAnalysis.hh"
+#include <llvm/Analysis/CFLAndersAliasAnalysis.h>
+#include <llvm/Analysis/CFLSteensAliasAnalysis.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 #include <sstream>

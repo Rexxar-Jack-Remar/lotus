@@ -3,22 +3,22 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // C++ includes
-#include <functional>
-#include <iostream>
-#include <list>
 #include <chrono>
 #include <ctime>
+#include <functional>
 #include <getopt.h>
+#include <iostream>
+#include <list>
 #include <unistd.h>
 
 // Z3 includes
 #include "z3++.h"
 
 // Project includes
-#include "seahorn_smtlib2_parser.h"
 #include "chc_verifier.h"
 #include "conjecture.h"
 #include "learner_interface.h"
+#include "seahorn_smtlib2_parser.h"
 
 
 using namespace chc_teacher;
@@ -261,7 +261,7 @@ void learn2(z3::context & ctx, const problem & p, bool do_horndini_prephase, boo
 	//
 	// Output solution
 	//
-	std::cout << "Success (checked " << checked_chcs << " CHCs, invoked learner " << learner_invocations << " times)" << std::endl;
+	std::cout << "Success (checked " << checked_chcs << " CHCs, invoked learner " << learner_invocations << " times)" << '\n';
 	for (const auto & c : previous_conjectures)
 	{
 		std::cout << c.first << " => " << c.second << std::endl;
@@ -279,10 +279,10 @@ void learn2(z3::context & ctx, const problem & p, bool do_horndini_prephase, boo
  */
 void print_help(std::ostream & out, const char * name)
 {
-	out << "Usage: " << name << " [options] file" << std::endl;
-	out << "Options are:" << std::endl;
-	out << "  -b\t\tBound the learner" << std::endl;
-	out << "  -h\t\tRun Horndini pre-phase" << std::endl;
+	out << "Usage: " << name << " [options] file" << '\n';
+	out << "Options are:" << '\n';
+	out << "  -b\t\tBound the learner" << '\n';
+	out << "  -h\t\tRun Horndini pre-phase" << '\n';
 }
 
 
@@ -323,7 +323,7 @@ int main(int argc, char * argv[])
 
 	if (optind != argc-1)
 	{
-		std::cout << "Invalid input file specified" << std::endl;
+		std::cout << "Invalid input file specified" << '\n';
 		print_help(std::cout, argv[0]);
 		return EXIT_FAILURE;
 	}
@@ -349,6 +349,6 @@ int main(int argc, char * argv[])
 	/// Store the finishing time of execution.
 	std::clock_t c_end = std::clock();
 
-	std::cout << "Total time: " << ((c_end-c_start)*100 / CLOCKS_PER_SEC)/100.00 << std::endl;
+	std::cout << "Total time: " << ((c_end-c_start)*100 / CLOCKS_PER_SEC)/100.00 << '\n';
 
 }

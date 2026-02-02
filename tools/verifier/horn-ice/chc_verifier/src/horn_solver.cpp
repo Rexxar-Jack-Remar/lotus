@@ -244,7 +244,7 @@ namespace horn_verification
 			gettimeofday(&end_time, NULL);
 			std::ofstream outfile;
 			outfile.open("horn_solver.log", std::ios_base::app);
-			outfile << endl << "The given horn constraints are:" << endl << endl;
+			outfile << '\n' << "The given horn constraints are:" << '\n' << '\n';
 			for(unsigned i = 0; i < horn_constraints.size(); i++){
 				std::stringstream ss_horn_constriant;
 				ss_horn_constriant << "(";
@@ -258,31 +258,31 @@ namespace horn_verification
 					ss_horn_constriant << "NULL";
 				}
 				ss_horn_constriant << ")";
-				outfile<< ss_horn_constriant.str() << endl;
+				outfile<< ss_horn_constriant.str() << '\n';
 			}
-			outfile << endl << "The initial classification of data points is:" << endl << endl;
+			outfile << '\n' << "The initial classification of data points is:" << '\n' << '\n';
 			std::string datapoint_classification;
 			for(unsigned i = 0; i < _copy_of_datapoints.size(); i++){
 				if(_copy_of_datapoints.at(i)._is_classified){
 					datapoint_classification = _copy_of_datapoints.at(i)._classification?"true)":"false)";
-					outfile << "(" << _copy_of_datapoints.at(i)._identifier << "," << datapoint_classification << endl;
+					outfile << "(" << _copy_of_datapoints.at(i)._identifier << "," << datapoint_classification << '\n';
 				}
 			}
-			outfile << endl << "The initial positive classification of data points is:" << endl << endl;
+			outfile << '\n' << "The initial positive classification of data points is:" << '\n' << '\n';
 			for(unsigned i = 0; i < _copy_of_positive.size(); i++) {
-				outfile << "(" << _copy_of_positive.at(i)._identifier << "," << "true)" << endl;
+				outfile << "(" << _copy_of_positive.at(i)._identifier << "," << "true)" << '\n';
 			}
-			outfile << endl << "The initial negative classification of data points is:" << endl << endl;
+			outfile << '\n' << "The initial negative classification of data points is:" << '\n' << '\n';
 			for(unsigned i = 0; i < _copy_of_negative.size(); i++) {
-				outfile << "(" << _copy_of_negative.at(i)._identifier << "," << "false)" << endl;
+				outfile << "(" << _copy_of_negative.at(i)._identifier << "," << "false)" << '\n';
 			}
 
 			if(horn_constraints_satisfiability){
-				outfile << endl << "The given horn constraints are SATISFIABLE." << endl << endl;
+				outfile << '\n' << "The given horn constraints are SATISFIABLE." << '\n' << '\n';
 			} else {
-				outfile << endl << "The given horn constraints are UNSATISFIABLE." << endl << endl;
+				outfile << '\n' << "The given horn constraints are UNSATISFIABLE." << '\n' << '\n';
 			}
-			outfile << "The final horn constraints are:" << endl << endl;
+			outfile << "The final horn constraints are:" << '\n' << '\n';
 			for(unsigned i = 0; i < _copy_of_horn_constraints.size(); i++){
 				std::stringstream ss_horn_constriant;
 				ss_horn_constriant << "(";
@@ -292,19 +292,19 @@ namespace horn_verification
 				}
 				ss_horn_constriant << _copy_of_horn_constraints.at(i)._conclusion->_identifier;
 				ss_horn_constriant << ")";
-				outfile<< ss_horn_constriant.str() << endl;
+				outfile<< ss_horn_constriant.str() << '\n';
 			}
-			outfile << endl << "The final positive classification of data points is:" << endl << endl;
+			outfile << '\n' << "The final positive classification of data points is:" << '\n' << '\n';
 			for(auto positive_itrator = positive.begin(); positive_itrator != positive.end(); positive_itrator++) {
 				datapoint_classification = (*positive_itrator)->_classification?"true)":"true)";
-				outfile << "(" << (*positive_itrator)->_identifier << "," << datapoint_classification << endl;
+				outfile << "(" << (*positive_itrator)->_identifier << "," << datapoint_classification << '\n';
 			}
-			outfile << endl << "The final negative classification of data points is:" << endl << endl;
+			outfile << '\n' << "The final negative classification of data points is:" << '\n' << '\n';
 			for(auto negative_itrator = negative.begin(); negative_itrator != negative.end(); negative_itrator++) {
 				datapoint_classification = (*negative_itrator)->_classification?"true)":"false)";
-				outfile << "(" << (*negative_itrator)->_identifier << "," << datapoint_classification << endl;
+				outfile << "(" << (*negative_itrator)->_identifier << "," << datapoint_classification << '\n';
 			}
-			outfile << endl << "Time taken in microseconds:  " << end_time.tv_usec - start_time.tv_usec << endl;
+			outfile << '\n' << "Time taken in microseconds:  " << end_time.tv_usec - start_time.tv_usec << '\n';
 			outfile.close();
 	}
 

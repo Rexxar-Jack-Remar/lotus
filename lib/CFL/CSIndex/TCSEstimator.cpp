@@ -36,7 +36,7 @@ TCSEstimator::TCSEstimator(Graph& g, int k){
 			g[i].tcs = 0;
 		else
 			g[i].tcs = (cnt/avg[i])-1;
-		// cout << "tcs[" << i<<"] = " << g[i].tcs << " avg " << avg[i] << endl;
+		// cout << "tcs[" << i<<"] = " << g[i].tcs << " avg " << avg[i] << '\n';
 		g[i].mingap = cnt;
 	}		
 }

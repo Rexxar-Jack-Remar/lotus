@@ -21,14 +21,14 @@
  * Thread safety: Uses thread-local visited sets to avoid contention.
  */
 
-#include <csignal>
-#include <unistd.h>
-#include <thread>
-#include <atomic>
-#include <mutex>
-#include <vector>
-#include <future>
 #include <algorithm>
+#include <atomic>
+#include <csignal>
+#include <future>
+#include <mutex>
+#include <thread>
+#include <unistd.h>
+#include <vector>
 
 #include "CFL/CSIndex/ParallelTabulation.h"
 #include "CFL/CSIndex/CSProgressBar.h"

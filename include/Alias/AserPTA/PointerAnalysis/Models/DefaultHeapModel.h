@@ -5,8 +5,8 @@
 #ifndef ASER_PTA_DEFAULTHEAPMODEL_H
 #define ASER_PTA_DEFAULTHEAPMODEL_H
 
-#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/Instructions.h>
 
 #include <set>
 

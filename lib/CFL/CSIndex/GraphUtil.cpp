@@ -120,12 +120,12 @@ void GraphUtil::findTreeCover(Graph& g, Graph& tree, vector<set<int> >& pred, ve
 			tree.addEdge(max_pred, *rvit);
 		}
 		/*
-		if (pred[*rvit].size() > g.num_vertices()) { cout << "error" <<  endl; exit(0); }
+		if (pred[*rvit].size() > g.num_vertices()) { cout << "error" << ''\n'; exit(0); }
 		sum += pred[*rvit].size();
 		cout << sum << "\t";
 		*/
 	}	
-//	cout << endl;
+//	cout << '\n';
 }
 
 // finding optimum tree-over by Rakesh Agrawal's paper
@@ -245,14 +245,14 @@ void GraphUtil::mergeSCC(Graph& g, int* on, vector<int>& reverse_topo_sort) {
 	int scc = 0;
 	int vid;
 	int origsize = g.num_vertices();
-//	cout << " inside MergeSCC "<< endl;	
+//	cout << " inside MergeSCC "<< '\n';	
 	for (int i = 0; i < origsize; i++) {
 		vid = i;
 		if (g[vid].visited)
 			continue;
 		tarjan(g, vid, ind, order, sn, sccmap, scc);
 	}
-//	cout << " inside MergeSCC after tarjan "<< endl;	
+//	cout << " inside MergeSCC after tarjan "<< '\n';	
 	// no component need to merge
 	if (scc == origsize) {
 		for (int i = 0; i < origsize; i++)
@@ -430,12 +430,12 @@ void GraphUtil::pre_post_labeling(Graph& tree) {
 
 	// for test
 /*
-	cout << "Labeling spanning tree" << endl;
+	cout << "Labeling spanning tree" << '\n';
 	VertexList vl = tree.vertices();
 	VertexList::iterator vit;
 	int i = 0;
 	for (vit = vl.begin(),i=0; vit != vl.end(); vit++,i++)
-		cout << i << ":\t" << tree[i].pre_order << "," << tree[i].post_order << endl;
+		cout << i << ":\t" << tree[i].pre_order << "," << tree[i].post_order << '\n';
 */
 }
 
@@ -493,7 +493,7 @@ void GraphUtil::treePathDecomposition(Graph tree, Graph& g, vector<vector<int> >
 
 	// for test
 /*	
-	cout << "tree path decomposition " << endl;
+	cout << "tree path decomposition " << '\n';
 	vector<vector<int> >::iterator mlit;
 	vector<int> path1;
 	vector<int>::iterator lit;
@@ -503,7 +503,7 @@ void GraphUtil::treePathDecomposition(Graph tree, Graph& g, vector<vector<int> >
 		cout << "path [" << i << "]: ";
 		for (lit = path1.begin(); lit != path1.end(); lit++)
 			cout << *lit << " ";
-		cout << endl;
+		cout << '\n';
 	}
 */
 }
@@ -548,7 +548,7 @@ void GraphUtil::pathDecomposition(Graph& g, vector<vector<int> >& pathMap, vecto
 	}
 	// for test
 /*
-	cout << "path  decomposition " << endl;
+	cout << "path  decomposition " << '\n';
 	unordered_map<int, list<int> >::iterator mlit;
 	list<int> path;
 	list<int>::iterator lit;
@@ -557,7 +557,7 @@ void GraphUtil::pathDecomposition(Graph& g, vector<vector<int> >& pathMap, vecto
 		cout << "path [" << mlit->first << "]: ";
 		for (lit = path.begin(); lit != path.end(); lit++)
 			cout << *lit << " ";
-		cout << endl;
+		cout << '\n';
 	}
 */
 }
@@ -596,7 +596,7 @@ void GraphUtil::genRandomGraph(int n, double c, char* filename) {
 // pure DFS as benchmark to verify other queries
 bool GraphUtil::DFSCheck(Graph& graph, int vid, bit_vector* visited, int trg) {
 #ifdef DFSDEBUG
-	cout << graph[vid].o_vid << "[" << vid << "]" << endl;
+	cout << graph[vid].o_vid << "[" << vid << "]" << '\n';
 #endif
 	if (vid==trg) return true;
 	visited->set_one(vid);
@@ -614,14 +614,14 @@ bool GraphUtil::DFSCheck(Graph& graph, int vid, bit_vector* visited, int trg) {
 
 bool GraphUtil::DFSReach(Graph& graph, int src, int trg) {
 #ifdef DFSDEBUG
-	cout << "DFS path: " << "(" << src << ", " << trg << "[" << graph[trg].o_vid << "])" << endl;
+	cout << "DFS path: " << "(" << src << ", " << trg << "[" << graph[trg].o_vid << "])" << '\n';
 #endif
 	int gsize = graph.num_vertices();
 	bit_vector* visited = new bit_vector(gsize);
 	bool result = DFSCheck(graph, src, visited, trg);
 	delete visited;
 #ifdef DFSDEBUG
-	cout << endl;
+	cout << '\n';
 #endif
 	return result;
 }
@@ -713,7 +713,7 @@ int GraphUtil::buildGateGraphByNodeFastWrite(Graph& g, bit_vector* isgates, int 
 	for (int i = 0; i < neighbors.size(); i++) {
 		out << neighbors[i] << " ";
 	}
-	out << "#" << endl;
+	out << "#" << '\n';
 	out.flush();
 	return neighbors.size();
 }
@@ -733,8 +733,8 @@ int GraphUtil::buildGateGraphWrite(Graph& graph, bit_vector* isgate, int radius,
 	vector<int> dist = vector<int>(gsize,0);
 	int ref = 0;
 	int edgesize = 0;
-	out << "graph_for_greach" << endl;
-	out << index << endl;
+	out << "graph_for_greach" << '\n';
+	out << index << '\n';
 	for (mit = gateindex.begin(); mit != gateindex.end(); mit++) {
 		int esize = buildGateGraphByNodeFastWrite(graph, isgate, mit->first, radius, gateindex, out, que, dist, ref);
 		edgesize += esize;

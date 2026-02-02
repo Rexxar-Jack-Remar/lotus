@@ -333,31 +333,31 @@ z3::expr FunctionContext::formulaFor(const Fragment &frag) const {
   }
 
 #ifndef NDEBUG
-  vout << "FunctionContext::formulaFor code_formula {{{" << endl
-       << code_formula << endl
-       << "}}}" << endl;
+  vout << "FunctionContext::formulaFor code_formula {{{" << '\n'
+       << code_formula << '\n'
+       << "}}}" << '\n';
   if (is_unsat(code_formula))
-    vout << "code_formula is UNSATISFIABLE" << endl;
+    vout << "code_formula is UNSATISFIABLE" << '\n';
 
-  vout << "FunctionContext::formulaFor preservation_formula {{{" << endl
-       << preservation_formula << endl
-       << "}}}" << endl;
+  vout << "FunctionContext::formulaFor preservation_formula {{{" << '\n'
+       << preservation_formula << '\n'
+       << "}}}" << '\n';
   if (is_unsat(preservation_formula))
-    vout << "preservation_formula is UNSATISFIABLE" << endl;
+    vout << "preservation_formula is UNSATISFIABLE" << '\n';
 
-  vout << "FunctionContext::formulaFor mem_transfer {{{" << endl
-       << mem_transfer << endl
-       << "}}}" << endl;
+  vout << "FunctionContext::formulaFor mem_transfer {{{" << '\n'
+       << mem_transfer << '\n'
+       << "}}}" << '\n';
 
-  vout << "FunctionContext::formulaFor cfg_formula {{{" << endl
-       << cfg_formula << endl
-       << "}}}" << endl;
+  vout << "FunctionContext::formulaFor cfg_formula {{{" << '\n'
+       << cfg_formula << '\n'
+       << "}}}" << '\n';
   if (is_unsat(cfg_formula))
-    vout << "cfg_formula is UNSATISFIABLE" << endl;
+    vout << "cfg_formula is UNSATISFIABLE" << '\n';
 
-  vout << "FunctionContext::formulaFor undef_formula {{{" << endl
-       << undef_formula << endl
-       << "}}}" << endl;
+  vout << "FunctionContext::formulaFor undef_formula {{{" << '\n'
+       << undef_formula << '\n'
+       << "}}}" << '\n';
 #endif
 
   return code_formula && preservation_formula && mem_transfer && cfg_formula &&

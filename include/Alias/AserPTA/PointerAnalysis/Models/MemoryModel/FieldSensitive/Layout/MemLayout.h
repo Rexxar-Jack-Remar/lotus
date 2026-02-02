@@ -5,9 +5,9 @@
 #ifndef ASER_PTA_MEMLAYOUT_H
 #define ASER_PTA_MEMLAYOUT_H
 
-#include <map>
-#include <llvm/ADT/SparseBitVector.h>
 #include <llvm/ADT/BitVector.h>
+#include <llvm/ADT/SparseBitVector.h>
+#include <map>
 
 namespace aser {
 

@@ -68,7 +68,7 @@ private:
     const MemLayout *getArrayLayout(llvm::ArrayType *T, const llvm::DataLayout &DL, size_t &lOffset, size_t &pOffset) {
         assert(lOffset == 0 && pOffset == 0);
 
-        auto layout = new (memLayoutAllocator.Allocate()) MemLayout(true);
+        auto *layout = new (memLayoutAllocator.Allocate()) MemLayout(true);
         // creating a new array layout
         llvm::Type *elementType = T->getElementType();
         size_t numElement = T->getArrayNumElements();
@@ -104,7 +104,7 @@ private:
                                      size_t &pOffset) {
         assert(lOffset == 0 && pOffset == 0);
         // create a new MemLayout
-        auto layout = new (memLayoutAllocator.Allocate()) MemLayout;
+        auto *layout = new (memLayoutAllocator.Allocate()) MemLayout;
         auto structLayout = DL.getStructLayout(T);
 
         for (int i = 0; i < T->getNumElements(); i++) {

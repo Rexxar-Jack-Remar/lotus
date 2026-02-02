@@ -72,11 +72,11 @@ Query::Query(const char* filestem, Graph& ig, int _r, double _ps, bool mat) : g(
 //	// init graph
 //	ifstream in(grafile);
 //	if (!in) {
-//		cout << "Error: Cannot open " << grafile << endl;
+//		cout << "Error: Cannot open " << grafile << '\n';
 //		return;
 //	}
 //	else
-//		cout << "reading " << grafile << endl;
+//		cout << "reading " << grafile << '\n';
 //	g = Graph(in);
 //	in.close();
 //	gsize = g.num_vertices();
@@ -98,18 +98,18 @@ Query::Query(const char* filestem, Graph& ig, int _r, double _ps, bool mat) : g(
 //	// init graph
 //	ifstream in(grafile);
 //	if (!in) {
-//		cout << "Error: Cannot open " << grafile << endl;
+//		cout << "Error: Cannot open " << grafile << '\n';
 //		return;
 //	}
 //	else
-//		cout << "reading " << grafile << endl;
+//		cout << "reading " << grafile << '\n';
 //	g = Graph(in);
 //	in.close();
 //	gsize = g.num_vertices();
 //	initGates(gatefile);
 //	initGateGraph(ggfile);
 ////	initIndex(indexfile);
-//	cout << "Init auxiliary data structures..." << endl;
+//	cout << "Init auxiliary data structures..." << '\n';
 //	initQueue();
 //}
 
@@ -125,8 +125,8 @@ Query::~Query() {
 		}	
 	}
 	delete materialized;
-	cout << "reachtime=" << reachtime << endl;
-	cout << "average reachtime=" << (reachtime*1.0)/(1.0*100000) << endl;
+	cout << "reachtime=" << reachtime << '\n';
+	cout << "average reachtime=" << (reachtime*1.0)/(1.0*100000) << '\n';
 }
 
 int Query::getGateSize() const {
@@ -242,7 +242,7 @@ int  Query::getGateEdgeSize() {
 }
 
 vector<string> Query::makeggfilename(const char* filestem) {
-	cout << "preselectratio=" << preselectratio << endl;
+	cout << "preselectratio=" << preselectratio << '\n';
 	string filestr(filestem);
 	int ps = (int)(preselectratio*1000);
 	filestr += "." + to_string(epsilon) + to_string(ps);
@@ -259,27 +259,27 @@ vector<string> Query::makeggfilename(const char* filestem) {
 void Query::initGateGraph(const char* ggfilename) {
 	ifstream infile(ggfilename);
 	if (!infile) {
-		cout << "Error: Cannot open " << ggfilename << endl;
+		cout << "Error: Cannot open " << ggfilename << '\n';
 		exit(-1);
 	}
 	gategraph = Graph(infile);
 	infile.close();
 	gateedgesize = gategraph.num_edges();
-	cout << "#V(gate graph)=" << gategraph.num_vertices() << " #E(gate graph)=" << gategraph.num_edges() << endl;
+	cout << "#V(gate graph)=" << gategraph.num_vertices() << " #E(gate graph)=" << gategraph.num_edges() << '\n';
 }
 
 void Query::initGates(const char* gatefile) {
 	gates = new bit_vector(gsize);
 	ifstream in(gatefile);
 	if (!in) {
-		cout << "initGates Error: Cannot open " << gatefile << endl;
+		cout << "initGates Error: Cannot open " << gatefile << '\n';
 		exit(-1);
 	}
 	else 
-		cout << "reading " << gatefile << endl;
+		cout << "reading " << gatefile << '\n';
 	// fist line: the number of gates
 	in >> gatesize >> radius;
-//	cout << "radius=" << radius << endl;
+//	cout << "radius=" << radius << '\n';
 	num_bits = (int)ceil(log(radius+1)/log(2));
 	int inputval;
 	for (int i = 0; i < gatesize; i++) {
@@ -294,17 +294,17 @@ void Query::initGates(const char* gatefile) {
 void Query::initIndex(const char* indexfile) {
 	ifstream in(indexfile);
 	if (!in) {
-		cout << "Error: Cannot open " << indexfile << endl;
+		cout << "Error: Cannot open " << indexfile << '\n';
 		exit(-1);
 	}
 	else
-		cout << "reading " << indexfile << endl;
+		cout << "reading " << indexfile << '\n';
 	int numgates=-1, begin, end;
 	labeltype=-1, indextype=-1;
 	// first line: #gates #hasLabel #indextype
 	in >> numgates >> labeltype >> indextype;
-	cout << "numgates: " << numgates << endl;
-	cout << "gatesize: " << gatesize << endl;
+	cout << "numgates: " << numgates << '\n';
+	cout << "gatesize: " << gatesize << '\n';
 	assert(numgates==gatesize);
 	if (indextype==0) {
 		lin = vector<vector<int> >(gsize,vector<int>());
@@ -329,7 +329,7 @@ void Query::initIndex(const char* indexfile) {
 		for (int i = 0; i < gatesize; i++) {
 			getline(in,buf);
 			// parse inlabels
-//			cout << "lin" << endl;
+//			cout << "lin" << '\n';
 			begin = buf.find(":");
 			end = buf.find_first_of("#");
 			inbuf = buf.substr(begin+2,end-begin-2);
@@ -353,7 +353,7 @@ void Query::initIndex(const char* indexfile) {
 			*/
 //			if (indextype==0 || indextype==2)
 //				sort(lin[sid].begin(),lin[sid].end());
-//			cout << "lout" << endl;
+//			cout << "lout" << '\n';
 
 			// parse lout
 //			begin = end+2;
@@ -498,11 +498,11 @@ bool Query::test_reach(int src, int trg) {
 	bool r = reach(src, trg);
 	bool ans = GraphUtil::DFSReach(g, src, trg);
 	if (r!=ans) {
-		cout << "###Wrong: [" << src << "] to [" << trg << "] reach = " << r << endl;
-		cout << "----------------------------------------------------" << endl;
+		cout << "###Wrong: [" << src << "] to [" << trg << "] reach = " << r << '\n';
+		cout << "----------------------------------------------------" << '\n';
 		displayLabelsByNode(src,cout);
 		displayLabelsByNode(trg,cout);
-		cout << "----------------------------------------------------" << endl;
+		cout << "----------------------------------------------------" << '\n';
 //		exit(0);
 	}
 	return true;
@@ -512,11 +512,11 @@ bool Query::test_nomreach(int src, int trg) {
 	bool r = reachWithoutMat(src, trg);
 	bool ans = GraphUtil::DFSReach(g, src, trg);
 	if (r!=ans) {
-		cout << "###Wrong: [" << src << "] to [" << trg << "] reach = " << r << endl;
-		cout << "----------------------------------------------------" << endl;
+		cout << "###Wrong: [" << src << "] to [" << trg << "] reach = " << r << '\n';
+		cout << "----------------------------------------------------" << '\n';
 		displayLabelsByNode(src,cout);
 		displayLabelsByNode(trg,cout);
-		cout << "----------------------------------------------------" << endl;
+		cout << "----------------------------------------------------" << '\n';
 		exit(0);
 	}
 	return true;
@@ -541,25 +541,25 @@ void Query::initMaterialization() {
 	pnum = max(pnum,100);
 	if (gatesize>1500000) pnum=min(pnum,10);
 	pnum = min(gsize,pnum);
-	cout << "Materialize local gates pnum=" << pnum << endl;
+	cout << "Materialize local gates pnum=" << pnum << '\n';
 	materialization(pnum);
 	ismaterialized = true;
 }
 
 void Query::materialization(int num) {
-	cout << "Materialize top 0.1% highest indegree vertices" << endl;
+	cout << "Materialize top 0.1% highest indegree vertices" << '\n';
 	selectMaterialized(num);
-//	cout << "Precompute inneighbors" << endl;
+//	cout << "Precompute inneighbors" << '\n';
 	for (int i = 0; i < gsize; i++) {
 		if (materialized->get(i))
 			materializeInNeighbors(i); // collect paritial inneighbors and ingates
 	}
-	cout << "Precompute incoming local gates" << endl;
+	cout << "Precompute incoming local gates" << '\n';
 	for (int i = 0; i < gsize; i++) {
 		if (gates->get(i)) continue;
 		precomputeGates(i,false); // collect ingates
 	}
-	cout << "Precompute outgoing local gates" << endl;
+	cout << "Precompute outgoing local gates" << '\n';
 	for (int i = 0; i < gsize; i++) {
 		if (gates->get(i)) continue;
 		precomputeGates(i,true); // collect outgates
@@ -686,13 +686,13 @@ void Query::displayInfor(ostream& out) {
 void Query::displayInfor(int vid, ostream& out) {
 	if (materialized->get(vid)) {
 		if (inneigs[vid]==NULL) {
-			cout << "Error: " << vid << " is NULL" << endl;
+			cout << "Error: " << vid << " is NULL" << '\n';
 			return;
 		}
 		out << "Inneigs[" << vid << "]: ";
 		for (int i = 0; i < gsize; i++) 
 			if (inneigs[vid]->get(i)) cout << i << " ";
-		out << endl;
+		out << '\n';
 	}
 	out << "InOutGates[" << vid << "]: ";
 	vector<int>::iterator vit;
@@ -701,13 +701,13 @@ void Query::displayInfor(int vid, ostream& out) {
 	out << " | ";
 	for (vit = inoutgates[vid][1].begin(); vit != inoutgates[vid][1].end(); vit++)
 		out << *vit << " ";
-	out << "#" << endl;
+	out << "#" << '\n';
 }	
 
 
 void Query::displayIndex(ostream& out) {
 	if (indextype==3) return;
-	out << "Lin and Lout Index " << endl;
+	out << "Lin and Lout Index " << '\n';
 	for (int i = 0; i < gsize; i++) {
 		out << i << ": ";
 		if (indextype!=1) {
@@ -719,7 +719,7 @@ void Query::displayIndex(ostream& out) {
 			for (int j = 0; j < lout[i].size(); j++) 
 				out << lout[i][j] << " ";
 		}
-		out << "#" << endl;
+		out << "#" << '\n';
 	}
 }
 
@@ -731,12 +731,12 @@ void Query::displayLabelsByNode(int vid, ostream& out) {
 	out << vid << ": [";
 	for (int j = 0; j < labels[vid].size()-1; j++)
 		out << labels[vid][j] << " ";
-	out << labels[vid][labels[vid].size()-1] << "]" << endl;
+	out << labels[vid][labels[vid].size()-1] << "]" << '\n';
 }
 
 void Query::displayLabels(ostream& out) {
 	if (gates->num_bits_set()==0) return;
-	out << "Node Labels (only for gate vertices)" << endl;
+	out << "Node Labels (only for gate vertices)" << '\n';
 	for (int i = 0; i < gsize; i++) {
 		if (gates->get(i)) {
 			displayLabelsByNode(i,out);
@@ -749,21 +749,21 @@ void Query::displayGates(ostream& out) {
 	for (int i = 0; i < gsize; i++) {
 		if (gates->get(i)) {
 			out << i << " ";
-			if (i%20==0) out << endl;
+			if (i%20==0) out << '\n';
 		}
 	}
-	out << "#" << endl;
+	out << "#" << '\n';
 }
 
 void Query::displayGrailLabels(ostream& out) {
 	if (!useMultiLabels) return;
-	out << "GRAIL Labels" << endl;
+	out << "GRAIL Labels" << '\n';
 	for (int i = 0; i < gsize; i++) {
 		if (gates->get(i)) {
 			out << i << ": ";
 			for (int j = 0; j < graillabels[i].size(); j++)
 				out << "[" << graillabels[i][j].first << "," << graillabels[i][j].second << "] ";
-			out << endl;
+			out << '\n';
 		}
 	}
 }
@@ -771,8 +771,8 @@ void Query::displayGrailLabels(ostream& out) {
 void Query::displayLocalGatesByNode(int vid, ostream& out) {
 	if (!useLocalGates && !usePartialLocalGates) return;
 	cout << vid << " ";
-	if (gates->get(vid)) cout << "is gate node" << endl;
-	else cout << "is not gate node" << endl;
+	if (gates->get(vid)) cout << "is gate node" << '\n';
+	else cout << "is not gate node" << '\n';
 	out << "Local Gates[";
 	out << vid << "]: ";
 	for (int j = 0; j < inoutgates[vid][0].size(); j++)
@@ -780,12 +780,12 @@ void Query::displayLocalGatesByNode(int vid, ostream& out) {
 	out << "# ";
 	for (int j = 0; j < inoutgates[vid][1].size(); j++)
 		out << inoutgates[vid][1][j] << " ";
-	out << "#" << endl;
+	out << "#" << '\n';
 }
 
 void Query::displayLocalGates(ostream& out) {
 	if (!useLocalGates && !usePartialLocalGates) return;
-	out << "Local Gates" << endl;
+	out << "Local Gates" << '\n';
 	for (int i = 0; i < gsize; i++) {
 		displayLocalGatesByNode(i, out);
 	}

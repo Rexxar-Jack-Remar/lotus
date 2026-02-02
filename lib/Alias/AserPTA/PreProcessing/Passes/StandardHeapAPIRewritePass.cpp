@@ -14,10 +14,10 @@
 
 #include <llvm/ADT/SmallSet.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/Demangle/Demangle.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Demangle/Demangle.h>
 
 #include "Alias/AserPTA/Util/Log.h"
 #include "Alias/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
