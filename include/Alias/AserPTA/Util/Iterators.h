@@ -4,6 +4,10 @@
 #ifndef ASER_PTA_ITERATORS_H
 #define ASER_PTA_ITERATORS_H
 
+#include <iterator>
+#include <type_traits>
+#include <utility>
+
 #include <llvm/ADT/iterator.h>
 
 namespace aser {
@@ -114,11 +118,16 @@ struct ConcatIterator : public ConcatIterator<Wrapped, N - 1> {
 };
 
 template <typename Wrapped>
-struct ConcatIterator<Wrapped, 1>
-    : public std::iterator<std::forward_iterator_tag, typename std::iterator_traits<Wrapped>::value_type> {
+struct ConcatIterator<Wrapped, 1> {
     using self = ConcatIterator<Wrapped, 1>;
     using ValueT = typename std::iterator_traits<Wrapped>::value_type;
     using ReferenceT = typename std::iterator_traits<Wrapped>::reference;
+
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = ValueT;
+    using difference_type = typename std::iterator_traits<Wrapped>::difference_type;
+    using pointer = typename std::iterator_traits<Wrapped>::pointer;
+    using reference = ReferenceT;
 
     Wrapped cur;
     Wrapped end;
@@ -199,16 +208,17 @@ struct ConcatIteratorWithTag : public ConcatIteratorWithTag<Wrapped, N - 1, E> {
 };
 
 template <typename Wrapped, typename E>
-struct ConcatIteratorWithTag<Wrapped, 1, E>
-    : public std::iterator<std::forward_iterator_tag,
-                           const std::pair<E, typename std::iterator_traits<Wrapped>::value_type>,
-                           typename std::iterator_traits<Wrapped>::difference_type,
-                           const std::pair<E, typename std::iterator_traits<Wrapped>::value_type>,
-                           const std::pair<E, typename std::iterator_traits<Wrapped>::value_type>> {
+struct ConcatIteratorWithTag<Wrapped, 1, E> {
     using self = ConcatIteratorWithTag<Wrapped, 1, E>;
     using ValueT = const std::pair<E, typename std::iterator_traits<Wrapped>::value_type>;
     using ReferenceT = ValueT;
     using PointerT = ValueT;
+
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = ValueT;
+    using difference_type = typename std::iterator_traits<Wrapped>::difference_type;
+    using pointer = PointerT;
+    using reference = ReferenceT;
 
     Wrapped cur;
     Wrapped end;
