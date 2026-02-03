@@ -3,10 +3,15 @@
 k-induction verification that reuses Seahorn PathBMC.
 
 For each k = KMin, KMin+1, ... (until KMax or timeout):
-1. Peel all loops (k+1) times (incrementally: peel once per iteration).
-2. Run PathBMC on the peeled program.
-3. If SAT → return BUG (counterexample in ≤ k+1 steps).
-4. If UNSAT → return SAFE (no error in ≤ k+1 steps).
+1. Base case: unwind loops up to k iterations and run PathBMC.
+   - SAT   => BUG (counterexample within k iterations)
+   - UNSAT => no counterexample within k iterations
+2. Inductive step: prove k-inductiveness using a second, instrumented clone:
+   - havoc initial state (over-approx)
+   - assume property for steps <= k (induction hypothesis)
+   - check property at step k+1
+   - unwind loops up to k+1 iterations and run PathBMC
+   - UNSAT => SAFE (property is k-inductive)
 
 @author: rainoftime
 
@@ -52,10 +57,9 @@ struct KInductionOptions {
 /// Production-ready k-induction engine that reuses Seahorn PathBMC.
 ///
 /// For each k = KMin, KMin+1, ... (until KMax or timeout):
-/// 1. Peel all loops (k+1) times (incrementally: peel once per iteration).
-/// 2. Run PathBMC on the peeled program.
-/// 3. If SAT → return BUG (counterexample in ≤ k+1 steps).
-/// 4. If UNSAT → return SAFE (no error in ≤ k+1 steps).
+/// 1. Base case: unwind loops to k iterations and run PathBMC.
+/// 2. Inductive step: havoc initial state, assume property for <=k steps,
+///    and check it at step k+1 (after unwinding to k+1 iterations).
 ///
 /// Requires the module to be preprocessed (ShadowMem, etc.) and CLAM
 /// for full PathBMC; otherwise falls back to UNKNOWN.

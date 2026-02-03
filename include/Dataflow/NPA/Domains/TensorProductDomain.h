@@ -17,7 +17,7 @@ namespace npa {
  *   zero  = (0, 0)
  *   one   = (1, 1)
  *   combine((a,b), (c,d)) = (combine(a,c), combine(b,d))
- *   extend((a,b), (c,d))  = (extend(a,c), extend(b,d))
+ *   extend((a,b), (c,d))  = (extend(a,c), extend(d,b))   // right component uses opposite product
  *
  * Idempotent and subtract follow from D.
  */
@@ -41,7 +41,10 @@ struct TensorProductDomain {
     return {D::combine(a.first, b.first), D::combine(a.second, b.second)};
   }
   static value_type extend(const value_type& a, const value_type& b) {
-    return {D::extend(a.first, b.first), D::extend(a.second, b.second)};
+    // a after b:
+    // left  composes normally,
+    // right composes in the opposite semiring (inner-right after outer-right).
+    return {D::extend(a.first, b.first), D::extend(b.second, a.second)};
   }
   static value_type extend_lin(const value_type& a, const value_type& b) {
     return extend(a, b);

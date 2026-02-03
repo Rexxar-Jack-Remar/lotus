@@ -42,7 +42,7 @@ if (ENABLE_SVF)
 endif()
 
 # Do not build Seahorn by default
-option(ENABLE_SEAHORN "Enable SeaHorn" OFF)
+option(ENABLE_SEAHORN "Enable SeaHorn" ON)
 if (ENABLE_SEAHORN)
     include(cmake/ConfigureSeaHorn.cmake)
 endif()

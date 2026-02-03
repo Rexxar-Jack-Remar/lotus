@@ -28,8 +28,8 @@
 #include "Verification/seahorn/HornifyModule.hh"
 #include "Verification/seahorn/Houdini.hh"
 #include "Verification/seahorn/InitializePasses.hh"
-#include "Verification/seahorn/Passes.hh"
 #include "Verification/seahorn/KInduction.hh"
+#include "Verification/seahorn/Passes.hh"
 #include "Verification/seahorn/PredicateAbstraction.hh"
 #include "Verification/seahorn/Support/SeaLog.hh"
 #include "Verification/seahorn/Transforms/Scalar/LowerCstExpr.hh"
@@ -164,7 +164,7 @@ static llvm::cl::opt<BmcEngineKind>
 
 static llvm::cl::opt<bool>
     KInduction("horn-kinduction",
-               llvm::cl::desc("Run k-induction (PathBMC-based, incremental peel)"),
+               llvm::cl::desc("Run k-induction (PathBMC-based: base + inductive step)"),
                llvm::cl::init(false));
 
 static llvm::cl::opt<bool>
