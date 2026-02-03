@@ -11,6 +11,22 @@
 
 namespace pulse {
 
+//===----------------------------------------------------------------------===//
+// Summary application (biabduction materialization)
+//
+// Applying a callee summary to a caller state is where biabduction becomes
+// operational:
+// - The summary's precondition represents heap/attribute facts that must hold
+//   for the callee witness path to execute.
+// - When the caller lacks these facts, we *materialize* them (create missing
+//   heap edges/attributes) and record them in the caller's `pre_*` state. This
+//   preserves sound incorrectness: we are not claiming the fact always holds,
+//   but rather that the witness requires it.
+//
+// This file contains the "improved" path that attempts to materialize and
+// propagate invalidation/nullness facts precisely enough for actionable reports.
+//===----------------------------------------------------------------------===//
+
 namespace {
 static bool isNullPointerConstantValue(const llvm::Value* v) {
   if (!v)
@@ -34,6 +50,12 @@ static bool isNullPointerConstantValue(const llvm::Value* v) {
 /**
  * Materialize pre-condition: recursively explore the pre-condition subgraph
  * starting from a formal parameter, materializing it in the caller's state.
+ *
+ * Soundness note:
+ * - We only create edges that the callee summary requires, and we record them
+ *   in the caller precondition via `abduceToPre`/`abduceAttrToPre`.
+ * - If we cannot safely materialize (e.g., base is already invalid), we fail
+ *   the entry rather than guessing a projection.
  */
 static bool materializePreFromAddress(
     PulseOperations& ops,

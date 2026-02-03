@@ -25,7 +25,12 @@ namespace lotus {
 namespace sifa {
 
 /// Builds ProcedureGraph from an LLVM function, optionally restricted to
-/// backward-reachable nodes from exit and locations of interest.
+/// backward-reachable nodes from exit and locations of interest (LOIs).
+///
+/// The "restricted" variant computes a backward slice of the CFG:
+/// 1) Start from EXIT (nullptr) and all LOI blocks.
+/// 2) Walk predecessors backwards until a fixpoint.
+/// 3) Emit the induced subgraph on the reached set (including return-to-EXIT edges).
 class ProcedureGraphBuilder {
 public:
   using Node = ProcedureGraph::Node;
@@ -35,6 +40,10 @@ public:
   /// Build a procedure graph containing entry, exit, LOIs, and all nodes/edges
   /// on backward paths from exit and LOIs. If \p locationsOfInterest is empty
   /// and \p restrictToReachable is false, the graph is the full CFG.
+  ///
+  /// This is a performance optimization: if you only care about reaching a small
+  /// set of LOIs, it can be much cheaper to build regex/DAG resources on the
+  /// restricted graph than on the full CFG.
   ProcedureGraph graphOfProcedure(
       const std::vector<llvm::BasicBlock *> &locationsOfInterest,
       bool restrictToReachable = true);

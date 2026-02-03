@@ -2,6 +2,18 @@
 
 namespace pulse {
 
+//===----------------------------------------------------------------------===//
+// NonDisjunctiveDomain
+//
+// Tracks "must" information aggregated across disjuncts for efficiency. This
+// is intentionally an *intersection*-like abstraction: it keeps only facts that
+// are common to all observed states. This is useful for diagnostics such as
+// unnecessary copies / const-ref suggestions.
+//
+// Note: This component is not where bug witnessability is decided; it is used
+// for non-bug reports and summarization.
+//===----------------------------------------------------------------------===//
+
 void NonDisjunctiveDomain::addState(const AbductiveDomain& state) {
     if (!summary_) {
         // First state: use it as the summary

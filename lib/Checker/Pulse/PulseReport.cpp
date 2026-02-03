@@ -5,6 +5,15 @@
 
 namespace pulse {
 
+//===----------------------------------------------------------------------===//
+// Reporting
+//
+// Converts internal Pulse diagnostics (operation failures + traces + state) into
+// user-facing bug reports. For sound incorrectness, reports should correspond to
+// feasible witnesses; reporting code should not "upgrade" uncertain conditions
+// into definite ones.
+//===----------------------------------------------------------------------===//
+
 void DiagnosticManager::registerBugType(const std::string& type, int id) {
     std::lock_guard<std::mutex> lock(mutex_);
     bugTypeIds_[type] = id;

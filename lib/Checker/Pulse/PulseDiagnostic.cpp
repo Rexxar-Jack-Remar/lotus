@@ -98,4 +98,34 @@ bool UnnecessaryCopy::equals(const Diagnostic& other) const {
            variable_name_ == o->variable_name_;
 }
 
+// --- StackVariableAddressEscape ---
+
+size_t StackVariableAddressEscape::getHash() const {
+    size_t h = std::hash<const llvm::Instruction*>{}(location_);
+    h = h ^ (std::hash<unsigned>{}(address_.getId()) << 1);
+    return h;
+}
+
+bool StackVariableAddressEscape::equals(const Diagnostic& other) const {
+    const auto* o = dynamic_cast<const StackVariableAddressEscape*>(&other);
+    if (!o) return false;
+    return location_ == o->location_ &&
+           address_.getId() == o->address_.getId();
+}
+
+// --- InvalidFree ---
+
+size_t InvalidFree::getHash() const {
+    size_t h = std::hash<const llvm::Instruction*>{}(location_);
+    h = h ^ (std::hash<unsigned>{}(address_.getId()) << 1);
+    return h;
+}
+
+bool InvalidFree::equals(const Diagnostic& other) const {
+    const auto* o = dynamic_cast<const InvalidFree*>(&other);
+    if (!o) return false;
+    return location_ == o->location_ &&
+           address_.getId() == o->address_.getId();
+}
+
 } // namespace pulse

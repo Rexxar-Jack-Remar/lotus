@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <set>
 #include <unordered_map>
 #include <z3++.h>
 
@@ -23,6 +24,24 @@ namespace {
         z3::expr var = ctx.int_const(name.c_str());
         var_map.insert({v, var});
         return var;
+    }
+
+    static int64_t clampToI64(__int128 v) {
+        if (v > static_cast<__int128>(std::numeric_limits<int64_t>::max())) {
+            return std::numeric_limits<int64_t>::max();
+        }
+        if (v < static_cast<__int128>(std::numeric_limits<int64_t>::min())) {
+            return std::numeric_limits<int64_t>::min();
+        }
+        return static_cast<int64_t>(v);
+    }
+
+    static int64_t satAddI64(int64_t a, int64_t b) {
+        return clampToI64(static_cast<__int128>(a) + static_cast<__int128>(b));
+    }
+
+    static int64_t satMulI64(int64_t a, int64_t b) {
+        return clampToI64(static_cast<__int128>(a) * static_cast<__int128>(b));
     }
 } // namespace
 
@@ -66,6 +85,9 @@ std::pair<AbstractValue, AbstractValue> PulseFormula::normalizePair(AbstractValu
 }
 
 bool PulseFormula::addEquality(AbstractValue v1, AbstractValue v2) {
+    if (is_contradiction_) {
+        return false;
+    }
     if (v1 == v2) {
         return true;  // Trivial equality
     }
@@ -127,6 +149,9 @@ bool PulseFormula::addEquality(AbstractValue v1, AbstractValue v2) {
 }
 
 bool PulseFormula::addDisequality(AbstractValue v1, AbstractValue v2) {
+    if (is_contradiction_) {
+        return false;
+    }
     AbstractValue rep1 = findRep(v1);
     AbstractValue rep2 = findRep(v2);
     if (rep1 == rep2) {
@@ -137,12 +162,18 @@ bool PulseFormula::addDisequality(AbstractValue v1, AbstractValue v2) {
 }
 
 void PulseFormula::addNonNull(AbstractValue v) {
+    if (is_contradiction_) {
+        return;
+    }
     AbstractValue rep = findRep(v);
     null_values_.erase(rep);  // Remove if was null
     non_null_values_.insert(rep);
 }
 
 bool PulseFormula::addNull(AbstractValue v) {
+    if (is_contradiction_) {
+        return false;
+    }
     AbstractValue rep = findRep(v);
     if (non_null_values_.count(rep) > 0) {
         return false;  // Contradiction: already non-null
@@ -184,6 +215,9 @@ bool PulseFormula::areDisequal(AbstractValue v1, AbstractValue v2) const {
 }
 
 bool PulseFormula::isConsistent() const {
+    if (is_contradiction_) {
+        return false;
+    }
     // Check for contradictions between null and non-null
     for (AbstractValue null_val : null_values_) {
         if (non_null_values_.count(null_val) > 0) {
@@ -212,18 +246,24 @@ bool PulseFormula::isEmptyOrTrivial() const {
 }
 
 PulseFormula PulseFormula::merge(const PulseFormula& f1, const PulseFormula& f2) {
+    if (f1.is_contradiction_) {
+        return PulseFormula::contradiction();
+    }
+    if (f2.is_contradiction_) {
+        return PulseFormula::contradiction();
+    }
     PulseFormula result = f1.clone();
     
     // Add equalities from f2
     for (const auto& eq : f2.equalities_) {
         if (!result.addEquality(eq.first, eq.second)) {
-            return PulseFormula();  // Contradiction
+            return PulseFormula::contradiction();
         }
     }
     
     for (const auto& neq : f2.disequalities_) {
         if (!result.addDisequality(neq.first, neq.second)) {
-            return PulseFormula();  // Contradiction
+            return PulseFormula::contradiction();
         }
     }
 
@@ -236,14 +276,14 @@ PulseFormula PulseFormula::merge(const PulseFormula& f1, const PulseFormula& f2)
     for (AbstractValue v : f2.null_values_) {
         if (!result.addNull(v)) {
             // Contradiction detected
-            return PulseFormula();  // Return empty/inconsistent formula
+            return PulseFormula::contradiction();
         }
     }
     
     // Merge linear constraints
     for (const auto& constraint : f2.linear_constraints_) {
         if (!result.addLinearConstraint(constraint)) {
-            return PulseFormula();  // Contradiction
+            return PulseFormula::contradiction();
         }
     }
     
@@ -271,7 +311,7 @@ PulseFormula PulseFormula::merge(const PulseFormula& f1, const PulseFormula& f2)
         auto upper_it = result.upper_bounds_.find(kv.first);
         if (upper_it != result.upper_bounds_.end()) {
             if (kv.second > upper_it->second) {
-                return PulseFormula();  // Contradiction: lower > upper
+                return PulseFormula::contradiction();
             }
         }
     }
@@ -284,8 +324,128 @@ PulseFormula PulseFormula::merge(const PulseFormula& f1, const PulseFormula& f2)
     return result;
 }
 
+PulseFormula PulseFormula::join(const PulseFormula& f1, const PulseFormula& f2) {
+    // f1 ∨ f2: if one side is UNSAT, return the other side.
+    if (f1.is_contradiction_) {
+        return f2.clone();
+    }
+    if (f2.is_contradiction_) {
+        return f1.clone();
+    }
+
+    PulseFormula out;
+
+    // Keep only constraints that are stable across both sides.
+    // This is a best-effort disjunction approximation: it intentionally
+    // forgets most relational information rather than (incorrectly) conjoining.
+
+    // Null/non-null: intersection.
+    for (AbstractValue v : f1.null_values_) {
+        if (f2.null_values_.count(v) > 0) {
+            (void)out.addNull(v);
+        }
+    }
+    for (AbstractValue v : f1.non_null_values_) {
+        if (f2.non_null_values_.count(v) > 0) {
+            out.addNonNull(v);
+        }
+    }
+
+    // Disequalities: intersection (already normalized pairs).
+    for (const auto& p : f1.disequalities_) {
+        if (f2.disequalities_.count(p) > 0) {
+            (void)out.addDisequality(p.first, p.second);
+        }
+    }
+
+    // Bounds: if both sides have a bound for the same canonical key, keep the
+    // weakest one implied by the disjunction.
+    for (const auto& kv : f1.lower_bounds_) {
+        auto it2 = f2.lower_bounds_.find(kv.first);
+        if (it2 != f2.lower_bounds_.end()) {
+            out.lower_bounds_[kv.first] = std::min(kv.second, it2->second);
+        }
+    }
+    for (const auto& kv : f1.upper_bounds_) {
+        auto it2 = f2.upper_bounds_.find(kv.first);
+        if (it2 != f2.upper_bounds_.end()) {
+            out.upper_bounds_[kv.first] = std::max(kv.second, it2->second);
+        }
+    }
+    for (const auto& kv : out.lower_bounds_) {
+        auto it_u = out.upper_bounds_.find(kv.first);
+        if (it_u != out.upper_bounds_.end() && kv.second > it_u->second) {
+            // Shouldn't happen from min/max above, but be defensive.
+            return PulseFormula::contradiction();
+        }
+    }
+
+    // Integer markers: intersection.
+    for (AbstractValue v : f1.integer_values_) {
+        if (f2.integer_values_.count(v) > 0) {
+            out.addIntegerConstraint(v);
+        }
+    }
+
+    // Linear constraints: keep syntactic intersection (normalized).
+    auto normalize_constraint = [](const PulseFormula& f,
+                                   const LinearConstraint& c) -> LinearConstraint {
+        LinearConstraint out_c;
+        out_c.constant = c.constant;
+        out_c.kind = c.kind;
+        out_c.terms = c.terms;
+        for (auto& t : out_c.terms) {
+            t.var = f.findRepReadOnly(t.var);
+        }
+        std::sort(out_c.terms.begin(), out_c.terms.end());
+        return out_c;
+    };
+
+    std::multiset<std::string> sigs1;
+    auto signature = [](const LinearConstraint& c) -> std::string {
+        std::string s;
+        s.reserve(64);
+        s += std::to_string(static_cast<int>(c.kind));
+        s += ":";
+        s += std::to_string(c.constant);
+        for (const auto& t : c.terms) {
+            s += "|";
+            s += std::to_string(t.var.getId());
+            s += ",";
+            s += std::to_string(t.coefficient);
+        }
+        return s;
+    };
+
+    for (const auto& c : f1.linear_constraints_) {
+        LinearConstraint nc = normalize_constraint(f1, c);
+        sigs1.insert(signature(nc));
+    }
+    for (const auto& c : f2.linear_constraints_) {
+        LinearConstraint nc = normalize_constraint(f2, c);
+        std::string sig = signature(nc);
+        auto it = sigs1.find(sig);
+        if (it != sigs1.end()) {
+            sigs1.erase(it);
+            // Add the normalized constraint to out.
+            // This should not introduce contradictions because it holds on both sides,
+            // but still run through addLinearConstraint for internal bookkeeping.
+            if (!out.addLinearConstraint(nc)) {
+                return PulseFormula::contradiction();
+            }
+        }
+    }
+
+    // Equalities and arithmetic ops are intentionally forgotten for now: the
+    // disjunction of equalities requires disjunctive formulas, and keeping them
+    // unsafely would reintroduce the original join bug.
+
+    return out;
+}
+
 PulseFormula PulseFormula::clone() const {
     PulseFormula f;
+    f.is_contradiction_ = is_contradiction_;
     f.equalities_ = equalities_;
     f.disequalities_ = disequalities_;
     f.non_null_values_ = non_null_values_;
@@ -300,18 +460,21 @@ PulseFormula PulseFormula::clone() const {
 
 PulseFormula PulseFormula::applySubstitution(const Substitution& substitution) const {
     PulseFormula out;
+    if (is_contradiction_) {
+        return PulseFormula::contradiction();
+    }
     for (const auto& eq : equalities_) {
         AbstractValue lhs = substitution.substituteOrIdentity(eq.first);
         AbstractValue rhs = substitution.substituteOrIdentity(eq.second);
         if (!out.addEquality(lhs, rhs)) {
-            return PulseFormula();
+            return PulseFormula::contradiction();
         }
     }
     for (const auto& neq : disequalities_) {
         AbstractValue lhs = substitution.substituteOrIdentity(neq.first);
         AbstractValue rhs = substitution.substituteOrIdentity(neq.second);
         if (!out.addDisequality(lhs, rhs)) {
-            return PulseFormula();
+            return PulseFormula::contradiction();
         }
     }
     for (AbstractValue v : non_null_values_) {
@@ -319,7 +482,7 @@ PulseFormula PulseFormula::applySubstitution(const Substitution& substitution) c
     }
     for (AbstractValue v : null_values_) {
         if (!out.addNull(substitution.substituteOrIdentity(v))) {
-            return PulseFormula();
+            return PulseFormula::contradiction();
         }
     }
     
@@ -333,7 +496,7 @@ PulseFormula PulseFormula::applySubstitution(const Substitution& substitution) c
             new_constraint.terms.emplace_back(new_var, term.coefficient);
         }
         if (!out.addLinearConstraint(new_constraint)) {
-            return PulseFormula();
+            return PulseFormula::contradiction();
         }
     }
     
@@ -356,11 +519,17 @@ PulseFormula PulseFormula::applySubstitution(const Substitution& substitution) c
 }
 
 void PulseFormula::addIntegerConstraint(AbstractValue v) {
+    if (is_contradiction_) {
+        return;
+    }
     AbstractValue rep = findRep(v);
     integer_values_.insert(rep);
 }
 
 bool PulseFormula::addLinearConstraint(const LinearConstraint& constraint) {
+    if (is_contradiction_) {
+        return false;
+    }
     // Simplified implementation: basic consistency checking
     // Full implementation would use simplex algorithm or SMT solver
     
@@ -376,12 +545,13 @@ bool PulseFormula::addLinearConstraint(const LinearConstraint& constraint) {
         int64_t term_min = (lower_it != lower_bounds_.end()) ? lower_it->second : std::numeric_limits<int64_t>::min();
         int64_t term_max = (upper_it != upper_bounds_.end()) ? upper_it->second : std::numeric_limits<int64_t>::max();
         
+        // Interval arithmetic with saturation to avoid UB/overflow.
         if (term.coefficient > 0) {
-            min_value += term.coefficient * term_min;
-            max_value += term.coefficient * term_max;
+            min_value = satAddI64(min_value, satMulI64(term.coefficient, term_min));
+            max_value = satAddI64(max_value, satMulI64(term.coefficient, term_max));
         } else {
-            min_value += term.coefficient * term_max;
-            max_value += term.coefficient * term_min;
+            min_value = satAddI64(min_value, satMulI64(term.coefficient, term_max));
+            max_value = satAddI64(max_value, satMulI64(term.coefficient, term_min));
         }
         has_bounds = true;
     }
@@ -414,6 +584,9 @@ bool PulseFormula::addLinearConstraint(const LinearConstraint& constraint) {
 }
 
 bool PulseFormula::addBounds(AbstractValue v, int64_t lower, int64_t upper) {
+    if (is_contradiction_) {
+        return false;
+    }
     if (lower > upper) {
         return false;  // Invalid bounds
     }
@@ -470,11 +643,17 @@ llvm::Optional<int64_t> PulseFormula::getUpperBound(AbstractValue v) const {
 }
 
 bool PulseFormula::isUnsat() const {
+    if (is_contradiction_) {
+        return true;
+    }
     // Check satisfiability using Z3
     return !checkSatisfiability();
 }
 
 bool PulseFormula::checkSatisfiability() const {
+    if (is_contradiction_) {
+        return false;
+    }
     // Early exit if formula is empty
     if (linear_constraints_.empty() && lower_bounds_.empty() && upper_bounds_.empty() &&
         equalities_.empty() && disequalities_.empty() && null_values_.empty() && 
@@ -619,20 +798,18 @@ bool PulseFormula::checkSatisfiability() const {
                 solver.add(op2_var != 0);
                 solver.add(result_var == z3::mod(op1_var, op2_var));
             } else if (arith_op.op == "&") {
-                // Bitwise AND
-                solver.add(result_var == (op1_var & op2_var));
+                // Bitwise operators are not defined on Z3 Int sort. We currently
+                // model variables as Ints, so skip these constraints rather than
+                // crashing and falling back to a much weaker satisfiability check.
+                continue;
             } else if (arith_op.op == "|") {
-                // Bitwise OR
-                solver.add(result_var == (op1_var | op2_var));
+                continue;
             } else if (arith_op.op == "^") {
-                // Bitwise XOR
-                solver.add(result_var == (op1_var ^ op2_var));
+                continue;
             } else if (arith_op.op == "<<") {
-                // Left shift
-                solver.add(result_var == z3::shl(op1_var, op2_var));
+                continue;
             } else if (arith_op.op == ">>") {
-                // Right shift (arithmetic)
-                solver.add(result_var == z3::ashr(op1_var, op2_var));
+                continue;
             }
         }
         
@@ -719,6 +896,9 @@ bool PulseFormula::addArithmeticOperation(AbstractValue result, AbstractValue op
 }
 
 bool PulseFormula::addMultiply(AbstractValue result, AbstractValue op1, AbstractValue op2) {
+    if (is_contradiction_) {
+        return false;
+    }
     ArithmeticOp op;
     op.result = result;
     op.op1 = op1;
@@ -729,6 +909,9 @@ bool PulseFormula::addMultiply(AbstractValue result, AbstractValue op1, Abstract
 }
 
 bool PulseFormula::addDivide(AbstractValue result, AbstractValue op1, AbstractValue op2) {
+    if (is_contradiction_) {
+        return false;
+    }
     // Check division by zero
     auto lower_opt = getLowerBound(op2);
     auto upper_opt = getUpperBound(op2);
@@ -746,6 +929,9 @@ bool PulseFormula::addDivide(AbstractValue result, AbstractValue op1, AbstractVa
 }
 
 bool PulseFormula::addModulo(AbstractValue result, AbstractValue op1, AbstractValue op2) {
+    if (is_contradiction_) {
+        return false;
+    }
     // Check modulo by zero
     auto lower_opt = getLowerBound(op2);
     auto upper_opt = getUpperBound(op2);
@@ -763,53 +949,56 @@ bool PulseFormula::addModulo(AbstractValue result, AbstractValue op1, AbstractVa
 }
 
 bool PulseFormula::addBitwiseAnd(AbstractValue result, AbstractValue op1, AbstractValue op2) {
-    ArithmeticOp op;
-    op.result = result;
-    op.op1 = op1;
-    op.op2 = op2;
-    op.op = "&";
-    arithmetic_ops_.push_back(op);
-    return checkSatisfiability();
+    if (is_contradiction_) {
+        return false;
+    }
+    // Bitwise operators are currently not modeled in the satisfiability check
+    // (we use Z3 Int sort). Keep analysis stable by recording only that the
+    // values are integers and not introducing a potentially explosive op log.
+    addIntegerConstraint(result);
+    addIntegerConstraint(op1);
+    addIntegerConstraint(op2);
+    return true;
 }
 
 bool PulseFormula::addBitwiseOr(AbstractValue result, AbstractValue op1, AbstractValue op2) {
-    ArithmeticOp op;
-    op.result = result;
-    op.op1 = op1;
-    op.op2 = op2;
-    op.op = "|";
-    arithmetic_ops_.push_back(op);
-    return checkSatisfiability();
+    if (is_contradiction_) {
+        return false;
+    }
+    addIntegerConstraint(result);
+    addIntegerConstraint(op1);
+    addIntegerConstraint(op2);
+    return true;
 }
 
 bool PulseFormula::addBitwiseXor(AbstractValue result, AbstractValue op1, AbstractValue op2) {
-    ArithmeticOp op;
-    op.result = result;
-    op.op1 = op1;
-    op.op2 = op2;
-    op.op = "^";
-    arithmetic_ops_.push_back(op);
-    return checkSatisfiability();
+    if (is_contradiction_) {
+        return false;
+    }
+    addIntegerConstraint(result);
+    addIntegerConstraint(op1);
+    addIntegerConstraint(op2);
+    return true;
 }
 
 bool PulseFormula::addLeftShift(AbstractValue result, AbstractValue op1, AbstractValue op2) {
-    ArithmeticOp op;
-    op.result = result;
-    op.op1 = op1;
-    op.op2 = op2;
-    op.op = "<<";
-    arithmetic_ops_.push_back(op);
-    return checkSatisfiability();
+    if (is_contradiction_) {
+        return false;
+    }
+    addIntegerConstraint(result);
+    addIntegerConstraint(op1);
+    addIntegerConstraint(op2);
+    return true;
 }
 
 bool PulseFormula::addRightShift(AbstractValue result, AbstractValue op1, AbstractValue op2) {
-    ArithmeticOp op;
-    op.result = result;
-    op.op1 = op1;
-    op.op2 = op2;
-    op.op = ">>";
-    arithmetic_ops_.push_back(op);
-    return checkSatisfiability();
+    if (is_contradiction_) {
+        return false;
+    }
+    addIntegerConstraint(result);
+    addIntegerConstraint(op1);
+    addIntegerConstraint(op2);
+    return true;
 }
 
 } // namespace pulse

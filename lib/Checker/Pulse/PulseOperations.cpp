@@ -7,10 +7,26 @@
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DataLayout.h>
+#include <llvm/IR/GetElementPtrTypeIterator.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/Operator.h>
 
 namespace pulse {
+
+std::atomic<unsigned> AbstractValueFactory::global_next_id_{1u};
+
+//===----------------------------------------------------------------------===//
+// PulseOperations
+//
+// Defines the operational semantics over `AbductiveDomain`:
+// - `eval` maps an LLVM value/expression to an abstract address (plus history).
+// - Heap reads may *abduce* missing edges/attrs into the precondition to keep
+//   witness paths sound (biabduction).
+// - For access paths (GEP), we model projections precisely enough to avoid
+//   conflation (critical for sound incorrectness).
+//===----------------------------------------------------------------------===//
 
 namespace {
 static bool isNullPointerConstantValue(const llvm::Value *v) {
@@ -60,7 +76,12 @@ AbstractValue AbstractValueFactory::getOrCreate(const llvm::Value *v) {
       }
     }
   }
-  AbstractValue av(v, next_id_++);
+  unsigned id = global_next_id_.fetch_add(1u, std::memory_order_relaxed);
+  // 0 is reserved for the default-constructed AbstractValue.
+  if (id == 0u) {
+    id = global_next_id_.fetch_add(1u, std::memory_order_relaxed);
+  }
+  AbstractValue av(v, id);
   value_map_[v] = av;
   return av;
 }
@@ -78,7 +99,11 @@ bool AbstractValueFactory::has(const llvm::Value *v) const {
 AbstractValue AbstractValueFactory::createFresh(const llvm::Value *hint) {
   // Create a fresh abstract value (for unknown/allocated memory)
   // In a full implementation, we'd track this properly
-  AbstractValue av(hint, next_id_++);
+  unsigned id = global_next_id_.fetch_add(1u, std::memory_order_relaxed);
+  if (id == 0u) {
+    id = global_next_id_.fetch_add(1u, std::memory_order_relaxed);
+  }
+  AbstractValue av(hint, id);
   if (hint) {
     value_map_[hint] = av;
   }
@@ -163,6 +188,15 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
                                               const llvm::Value *exp,
                                               const llvm::Instruction *loc,
                                               const llvm::BasicBlock *pred) {
+  // Global storage (GlobalVariable/Function/GlobalAlias): treat as stable
+  // memory root. Mark with Attribute::Global so we can prove stack escapes like
+  // `store %stack_ptr, @global` without guessing.
+  if (exp && exp->getType()->isPointerTy() && llvm::isa<llvm::GlobalValue>(exp)) {
+    AbstractValue gv_av = factory_->getOrCreate(exp);
+    astate.getPostAttrs().add(gv_av, Attribute::Global);
+    return llvm::Optional<Address>(Address(gv_av));
+  }
+
   // Pointer-typed null constants.
   if (isNullPointerConstantValue(exp)) {
     AbstractValue null_addr = factory_->createFresh(exp);
@@ -223,13 +257,26 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
     }
   }
 
-  if (auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(exp)) {
+  // GEP (GetElementPtr) materializes an access path into an aggregate/array.
+  //
+  // Sound incorrectness principle: never silently conflate distinct projections.
+  // - Struct indices must be constant (LLVM requirement). If they are not,
+  //   something is off; we conservatively bail out instead of inventing a
+  //   projection that could hide bugs.
+  // - For array/pointer indices, record the index as an integer in the path
+  //   formula (and keep exact bounds for constants). This supports "proved"
+  //   checks later without committing to may-alias reasoning.
+  if (auto *GEP = llvm::dyn_cast<llvm::GEPOperator>(exp)) {
     auto base_opt = eval(astate, GEP->getPointerOperand(), loc, pred);
     if (!base_opt)
       return llvm::None;
 
     // Check if base pointer is null or invalid before indexing
     AbstractValue base_canon = astate.getCanonical(base_opt->addr);
+    const bool base_is_stack =
+        astate.getPostAttrs().has(base_canon, Attribute::Stack);
+    const bool base_is_global =
+        astate.getPostAttrs().has(base_canon, Attribute::Global);
     // For NPD checker, only check Null attribute (set only by null constants)
     if (astate.getPostAttrs().has(base_canon, Attribute::Null) &&
         !astate.getPathFormula().isNonNull(base_canon)) {
@@ -248,15 +295,45 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
     bool base_is_uninitialized =
         astate.getPostAttrs().has(base_canon, Attribute::Uninitialized);
 
-    for (unsigned i = 1, n = GEP->getNumOperands(); i < n; ++i) {
-      llvm::Value *idx = GEP->getOperand(i);
+    // Best-effort: DataLayout lets us compute element stride for array indexing.
+    // Stride is stored into the access key to avoid collapsing different element
+    // types onto the same access path.
+    const llvm::DataLayout *DL =
+        (loc && loc->getModule()) ? &loc->getModule()->getDataLayout() : nullptr;
+
+    unsigned op_index = 1;
+    for (auto GTI = llvm::gep_type_begin(GEP), E = llvm::gep_type_end(GEP);
+         GTI != E; ++GTI, ++op_index) {
+      llvm::Value *idx = const_cast<llvm::Value *>(GEP->getOperand(op_index));
       Access acc;
-      if (auto *C = llvm::dyn_cast<llvm::ConstantInt>(idx)) {
-        acc = Access(static_cast<unsigned>(C->getZExtValue()));
+
+      if (llvm::StructType *ST = GTI.getStructTypeOrNull()) {
+        auto *C = llvm::dyn_cast<llvm::ConstantInt>(idx);
+        if (!C) {
+          // Struct indexing must be constant; bail out rather than conflate.
+          return llvm::None;
+        }
+        uint64_t field = C->getZExtValue();
+        if (field >= ST->getNumElements()) {
+          // Invalid field access. Be conservative: treat as unknown.
+          return llvm::None;
+        }
+        acc = Access(static_cast<unsigned>(field));
       } else {
         AbstractValue idxAv = factory_->getOrCreate(idx);
-        acc = Access::arrayIndex(idxAv);
+        astate.getPathFormula().addIntegerConstraint(idxAv);
+        if (auto c = getI64Constant(idx)) {
+          (void)astate.getPathFormula().addBounds(idxAv, *c, *c);
+        }
+
+        uint64_t stride_bytes = 0;
+        llvm::Type *indexed = GTI.getIndexedType();
+        if (DL && indexed && indexed->isSized()) {
+          stride_bytes = DL->getTypeAllocSize(indexed);
+        }
+        acc = Access::arrayIndex(idxAv, stride_bytes);
       }
+
       if (auto *target = astate.getPostHeap().findEdge(cur, acc)) {
         cur = target->addr;
         // If base was uninitialized, propagate to existing field
@@ -275,6 +352,12 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
       astate.getPostHeap().addEdge(cur, acc, targetAddr);
       astate.abduceToPre(cur, acc, targetAddr);
       astate.abduceAttrToPre(cur, Attribute::Allocated);
+      if (base_is_stack) {
+        astate.getPostAttrs().add(fresh, Attribute::Stack);
+      }
+      if (base_is_global) {
+        astate.getPostAttrs().add(fresh, Attribute::Global);
+      }
 
       // Field-level initialization tracking: if base struct is uninitialized,
       // mark the field as uninitialized too
@@ -286,6 +369,12 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
       cur = fresh;
     }
     AbstractValue gepAv = factory_->getOrCreate(GEP);
+    if (base_is_stack) {
+      astate.getPostAttrs().add(gepAv, Attribute::Stack);
+    }
+    if (base_is_global) {
+      astate.getPostAttrs().add(gepAv, Attribute::Global);
+    }
     Address gepAddr(gepAv);
     gepAddr.history = base.history;
     if (loc)
@@ -709,12 +798,8 @@ PulseOperations::checkAddressEscape(AbductiveDomain &astate, Address addr,
 
   AbstractValue canon_addr = astate.getCanonical(addr.addr);
 
-  // Check if this is a stack address
-  // In a full implementation, we'd track which addresses are stack vs heap
-  // For now, we check if it's not marked as allocated
-  if (!astate.getPostAttrs().has(canon_addr, Attribute::Allocated)) {
-    // This might be a stack address that's escaping
-    // Return error to indicate potential escape
+  // Sound incorrectness: only treat as escaping stack address when provable.
+  if (astate.getPostAttrs().has(canon_addr, Attribute::Stack)) {
     return OperationResult::InvalidAccess;
   }
 

@@ -1,6 +1,7 @@
 #include "Checker/Pulse/PulseModels.h"
 #include "Checker/Pulse/PulseChecker.h"
 #include "Checker/Pulse/PulseDiagnostic.h"
+#include "Checker/Pulse/PulseFormula.h"
 #include "Checker/Pulse/PulseReport.h"
 
 #include <llvm/IR/Constants.h>
@@ -77,6 +78,19 @@ void PulseModels::registerStandardModels() {
     models_["realloc"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
         return modelRealloc(call, state, pred);
     };
+
+    // Thread creation: the context argument escapes to another thread.
+    models_["pthread_create"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+        return modelPthreadCreate(call, state, pred);
+    };
+    models_["thrd_create"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+        return modelThrdCreate(call, state, pred);
+    };
+
+    // libdispatch: context escapes to asynchronous work item.
+    models_["dispatch_async_f"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+        return modelDispatchAsyncF(call, state, pred);
+    };
     
     // File operations
     models_["fopen"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
@@ -151,6 +165,69 @@ void PulseModels::registerStandardModels() {
     models_["pthread_mutex_unlock"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
         return modelUnlock(call, state, pred);
     };
+}
+
+namespace {
+static void reportStackEscapeOnCall(AbductiveDomain& astate,
+                                   const llvm::CallInst* call,
+                                   const Address& escaped_addr,
+                                   const char* reason) {
+    AbstractValue canon = astate.getCanonical(escaped_addr.addr);
+    if (!astate.getPostAttrs().has(canon, Attribute::Stack)) {
+        return;
+    }
+
+    Trace trace = Trace::fromValueHistory(escaped_addr.history);
+    trace.addEvent(call, reason);
+    auto diag = std::make_unique<StackVariableAddressEscape>(
+        call, canon, "Stack address escapes via call",
+        "Do not pass addresses of local variables to APIs that store them for later use.",
+        std::move(trace));
+    DiagnosticManager::getInstance().report(std::move(diag));
+}
+} // namespace
+
+ModelResult PulseModels::modelPthreadCreate(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+    // int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+    //                   void *(*start_routine)(void*), void *arg);
+    if (call->arg_size() < 4) return ModelResult::success({state});
+    auto* astate = state.getAstate();
+    if (!astate) return ModelResult::success({state});
+
+    auto arg_opt = ops_.eval(*astate, call->getArgOperand(3), call, pred);
+    if (arg_opt) {
+        reportStackEscapeOnCall(*astate, call, *arg_opt,
+                                "Passing stack-derived context to pthread_create (escapes to new thread)");
+    }
+    return ModelResult::success({state});
+}
+
+ModelResult PulseModels::modelThrdCreate(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+    // int thrd_create(thrd_t *thr, thrd_start_t func, void *arg);
+    if (call->arg_size() < 3) return ModelResult::success({state});
+    auto* astate = state.getAstate();
+    if (!astate) return ModelResult::success({state});
+
+    auto arg_opt = ops_.eval(*astate, call->getArgOperand(2), call, pred);
+    if (arg_opt) {
+        reportStackEscapeOnCall(*astate, call, *arg_opt,
+                                "Passing stack-derived context to thrd_create (escapes to new thread)");
+    }
+    return ModelResult::success({state});
+}
+
+ModelResult PulseModels::modelDispatchAsyncF(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+    // void dispatch_async_f(dispatch_queue_t queue, void *context, dispatch_function_t work);
+    if (call->arg_size() < 3) return ModelResult::success({state});
+    auto* astate = state.getAstate();
+    if (!astate) return ModelResult::success({state});
+
+    auto ctx_opt = ops_.eval(*astate, call->getArgOperand(1), call, pred);
+    if (ctx_opt) {
+        reportStackEscapeOnCall(*astate, call, *ctx_opt,
+                                "Passing stack-derived context to dispatch_async_f (escapes asynchronously)");
+    }
+    return ModelResult::success({state});
 }
 
 void PulseModels::registerTaintModels() {
@@ -289,7 +366,35 @@ ModelResult PulseModels::modelFree(const llvm::CallInst* call, ExecutionDomain& 
     }
     
     AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
-    
+
+    // free(NULL) is a no-op (C/C++). Treating it as an invalidation would later
+    // produce false UseAfterFree reports due to Invalid taking precedence over
+    // NullDereference. For sound incorrectness, skip invalidation only when
+    // NULL is proven by the path condition.
+    if (astate->getPathFormula().isNull(canon_ptr)) {
+        return ModelResult::success({state});
+    }
+
+    // Freeing non-heap memory is undefined behavior. Report only when we can
+    // prove non-heap provenance (Stack/Global), then stop exploring the path to
+    // avoid downstream UB-driven false positives.
+    if (astate->getPostAttrs().has(canon_ptr, Attribute::Stack) ||
+        astate->getPostAttrs().has(canon_ptr, Attribute::Global)) {
+        Trace trace = Trace::fromValueHistory(ptr_opt->history);
+        trace.addEvent(call, "Invalid free: non-heap pointer");
+        std::string msg = "Invalid free of ";
+        msg += astate->getPostAttrs().has(canon_ptr, Attribute::Stack) ? "stack" : "global";
+        msg += " memory";
+        auto diag = std::make_unique<InvalidFree>(
+            call, canon_ptr, msg,
+            "Only free heap allocations (malloc/new). Do not free stack/global addresses.",
+            std::move(trace));
+        DiagnosticManager::getInstance().report(std::move(diag));
+        astate->setPathFormula(
+            std::make_unique<PulseFormula>(PulseFormula::contradiction()));
+        return ModelResult::success({state});
+    }
+
     // Check for double free: if pointer is already invalid, report double free
     if (astate->getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
         // Double free detected!
@@ -324,11 +429,16 @@ ModelResult PulseModels::modelRealloc(const llvm::CallInst* call, ExecutionDomai
     if (call->arg_size() < 2) return ModelResult::success({state});
     
     auto* astate = state.getAstate();
+    if (!astate) return ModelResult::success({state});
     auto ptr_opt = ops_.eval(*astate, call->getArgOperand(0), call, pred);
     
-    // If ptr is not null, it behaves like free
+    // realloc(NULL, size) behaves like malloc(size). Skip invalidation only
+    // when NULL is proven by the current path condition.
     if (ptr_opt) {
-        ops_.invalidate(*astate, *ptr_opt, call, InvalidationKind::Realloc);
+        AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
+        if (!astate->getPathFormula().isNull(canon_ptr)) {
+            ops_.invalidate(*astate, *ptr_opt, call, InvalidationKind::Realloc);
+        }
     }
     
     // And then behaves like malloc

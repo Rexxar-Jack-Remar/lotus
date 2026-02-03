@@ -3,6 +3,18 @@
 
 namespace pulse {
 
+//===----------------------------------------------------------------------===//
+// Summaries
+//
+// A summary captures (possibly multiple) witness behaviors of a function.
+//
+// Sound incorrectness note:
+// - Disjunctive entries should preserve *existential* behaviors (there exists a
+//   path satisfying the entry). When compressing/merging, be careful not to
+//   conjoin path conditions, which can drop feasible witnesses.
+// - Latent issues are carried in summaries so callers can make them manifest.
+//===----------------------------------------------------------------------===//
+
 // SummaryEntry implementation
 SummaryEntry::SummaryEntry(std::unique_ptr<AbductiveDomain> pre,
                            PulseFormula pre_formula,

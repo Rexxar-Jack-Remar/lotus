@@ -104,6 +104,7 @@ private:
     joinAttributes(JoinState& state,
                    const AbductiveDomain& lhs_astate,
                    const AbductiveDomain& rhs_astate,
+                   bool use_pre_attrs,
                    AbstractValue joined_addr,
                    llvm::Optional<AbstractValue> lhs_addr_opt,
                    llvm::Optional<AbstractValue> rhs_addr_opt);

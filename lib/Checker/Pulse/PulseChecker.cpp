@@ -32,6 +32,21 @@
 
 namespace pulse {
 
+//===----------------------------------------------------------------------===//
+// PulseChecker (Infer Pulse-inspired "incorrectness logic")
+//
+// This driver performs a bounded disjunctive symbolic execution over LLVM IR.
+// Key properties:
+// - The analysis aims at *witnessable* bugs: reports should correspond to at
+//   least one feasible execution (sound incorrectness), rather than "may" bugs.
+// - The abstract state is biabductive (see `AbductiveDomain`): reads may
+//   populate preconditions that later become requirements on callers.
+// - At control-flow merges, path conditions must be joined as a disjunction
+//   approximation (keep stable facts), not conjoined.
+// - Path explosion is controlled via `kMaxDisjuncts`, widening, and summary
+//   construction; these knobs trade recall for scalability.
+//===----------------------------------------------------------------------===//
+
 namespace {
 static bool isNullPointerConstantValue(const llvm::Value *v) {
   if (!v)
@@ -277,6 +292,17 @@ void PulseChecker::registerBugTypes() {
       mgr.register_bug_type(IssueType::TaintError, BugDescription::BI_HIGH,
                             BugDescription::BC_SECURITY, "CWE-20");
   diagMgr.registerBugType(IssueType::TaintError, taintErrorTypeId_);
+
+  stackAddressEscapeTypeId_ = mgr.register_bug_type(
+      IssueType::StackVariableAddressEscape, BugDescription::BI_HIGH,
+      BugDescription::BC_SECURITY, "CWE-562");
+  diagMgr.registerBugType(IssueType::StackVariableAddressEscape,
+                          stackAddressEscapeTypeId_);
+
+  invalidFreeTypeId_ =
+      mgr.register_bug_type(IssueType::InvalidFree, BugDescription::BI_HIGH,
+                            BugDescription::BC_SECURITY, "CWE-590");
+  diagMgr.registerBugType(IssueType::InvalidFree, invalidFreeTypeId_);
 }
 
 void PulseChecker::analyze() {
@@ -503,6 +529,9 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
     if (current_state.isStopped())
       continue;
 
+    // Record entry predecessor for sound PHI/select handling.
+    current_state.setEntryPred(pred_bb);
+
     block_visits[BB]++;
     if (block_visits[BB] > kMaxDisjuncts * 4)
       continue;
@@ -516,11 +545,19 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
           auto invariant_opt = loop_abs_ref.inferInvariant(
               BB, loop_abs_ref.getEntryState(BB), current_state);
           if (invariant_opt) {
-            current_state = std::move(*invariant_opt);
+            // Only adopt an inferred invariant if it preserves the current
+            // incoming edge context. Otherwise, PHI nodes could be evaluated
+            // with a predecessor different from the witness that reached BB.
+            if (invariant_opt->getEntryPred() == pred_bb) {
+              current_state = std::move(*invariant_opt);
+            }
           }
         } else {
           // Apply widening
-          current_state = loop_abs_ref.widen(BB, current_state);
+          ExecutionDomain widened = loop_abs_ref.widen(BB, current_state);
+          if (widened.getEntryPred() == pred_bb) {
+            current_state = std::move(widened);
+          }
         }
         if (current_state.isStopped()) {
           continue;
@@ -537,6 +574,7 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
       ExecutionDomain joined = disj_domain.joinAtBlock(BB);
       if (!joined.isStopped()) {
         current_state = std::move(joined);
+        pred_bb = current_state.getEntryPred();
       } else {
         continue;
       }
@@ -600,13 +638,16 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
         const llvm::BasicBlock *succ = BI->getSuccessor(i);
         if (succ->empty())
           continue;
+        fork_opt->setEntryPred(BB);
         worklist.push(std::make_tuple(succ, std::move(*fork_opt), BB));
       }
     } else {
       for (const llvm::BasicBlock *succ : llvm::successors(BB)) {
         if (succ->empty())
           continue;
-        worklist.push(std::make_tuple(succ, current_state.clone(), BB));
+        ExecutionDomain succ_state = current_state.clone();
+        succ_state.setEntryPred(BB);
+        worklist.push(std::make_tuple(succ, std::move(succ_state), BB));
       }
     }
   }
@@ -644,19 +685,122 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
   if (!astate)
     return {exec_state};
 
+  auto pruneInfeasible = [](ExecutionDomain &st) -> bool {
+    if (st.isStopped())
+      return true;
+    AbductiveDomain *a = st.getAstate();
+    if (!a)
+      return true;
+    const PulseFormula &f = a->getPathFormula();
+    return f.isConsistent() && !f.isUnsat();
+  };
+
+  auto pruneStates = [&](std::vector<ExecutionDomain> states)
+      -> std::vector<ExecutionDomain> {
+    std::vector<ExecutionDomain> out;
+    out.reserve(states.size());
+    for (auto &st : states) {
+      if (pruneInfeasible(st)) {
+        out.push_back(std::move(st));
+      }
+    }
+    return out;
+  };
+
+  //===--------------------------------------------------------------------===//
+  // Select
+  //
+  // `select cond, t, f` is a value-level merge. For sound incorrectness, we do
+  // not want to conflate the two alternatives. However, this engine explores a
+  // single witness state per instruction step, so we pick a *single* feasible
+  // branch:
+  // - If the condition is provably true/false (using our limited formula),
+  //   choose the corresponding operand.
+  // - Otherwise, pick a deterministic representative (true operand).
+  //
+  // This may miss bugs (false negatives) but will not fabricate a witness.
+  if (auto *Sel = llvm::dyn_cast<llvm::SelectInst>(I)) {
+    if (Sel->getType()->isPointerTy()) {
+      llvm::Optional<bool> truth = llvm::None;
+      if (auto *ICmp = llvm::dyn_cast<llvm::ICmpInst>(Sel->getCondition())) {
+        llvm::Value *op0 = ICmp->getOperand(0);
+        llvm::Value *op1 = ICmp->getOperand(1);
+        const bool op0_is_null = isNullPointerConstantValue(op0);
+        const bool op1_is_null = isNullPointerConstantValue(op1);
+        llvm::ICmpInst::Predicate icmp_pred = ICmp->getPredicate();
+
+        // Decide select condition only when we can prove it.
+        if (op0_is_null || op1_is_null) {
+          llvm::Value *ptr = op0_is_null ? op1 : op0;
+          auto ptr_opt = ops_.eval(*astate, ptr, I, pred);
+          if (ptr_opt) {
+            AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
+            const bool proven_null = astate->getPathFormula().isNull(canon_ptr);
+            const bool proven_non_null =
+                astate->getPathFormula().isNonNull(canon_ptr);
+            if (icmp_pred == llvm::ICmpInst::ICMP_EQ) {
+              if (proven_null)
+                truth = true;
+              else if (proven_non_null)
+                truth = false;
+            } else if (icmp_pred == llvm::ICmpInst::ICMP_NE) {
+              if (proven_non_null)
+                truth = true;
+              else if (proven_null)
+                truth = false;
+            }
+          }
+        } else if (op0->getType()->isPointerTy() && op1->getType()->isPointerTy()) {
+          auto v0_opt = ops_.eval(*astate, op0, I, pred);
+          auto v1_opt = ops_.eval(*astate, op1, I, pred);
+          if (v0_opt && v1_opt) {
+            AbstractValue c0 = astate->getCanonical(v0_opt->addr);
+            AbstractValue c1 = astate->getCanonical(v1_opt->addr);
+            const bool proven_eq = astate->getPathFormula().areEqual(c0, c1);
+            const bool proven_neq =
+                astate->getPathFormula().areDisequal(c0, c1);
+            if (icmp_pred == llvm::ICmpInst::ICMP_EQ) {
+              if (proven_eq)
+                truth = true;
+              else if (proven_neq)
+                truth = false;
+            } else if (icmp_pred == llvm::ICmpInst::ICMP_NE) {
+              if (proven_neq)
+                truth = true;
+              else if (proven_eq)
+                truth = false;
+            }
+          }
+        }
+      }
+
+      const llvm::Value *chosen =
+          (truth && *truth) ? Sel->getTrueValue() : Sel->getFalseValue();
+      if (!truth) {
+        // Unknown condition: pick deterministic witness.
+        chosen = Sel->getTrueValue();
+      }
+
+      auto chosen_opt = ops_.eval(*astate, chosen, I, pred);
+      if (chosen_opt) {
+        AbstractValue canon = astate->getCanonical(chosen_opt->addr);
+        Address result(canon);
+        result.history = chosen_opt->history;
+        result.history.addEvent(ValueHistory::EventKind::Unknown, I,
+                                I->getFunction());
+        astate->getPostStack().add(Sel, result);
+      }
+    }
+    return pruneStates({exec_state});
+  }
+
   if (auto *Phi = llvm::dyn_cast<llvm::PHINode>(I)) {
     // PHI nodes need special handling: they merge values from multiple
     // predecessors Since we've already joined states at block entry, we can use
     // any predecessor In a more precise implementation, we'd track which
     // predecessor led to which state
     if (!pred) {
-      // No predecessor info - try to get from any predecessor
-      const llvm::BasicBlock *BB = I->getParent();
-      if (pred_begin(BB) != pred_end(BB)) {
-        pred = *pred_begin(BB);
-      } else {
-        return {exec_state};
-      }
+      pred = exec_state.getEntryPred();
     }
 
     // Check if pred is actually a predecessor of the PHI node
@@ -668,12 +812,14 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
       }
     }
     if (!is_predecessor) {
-      // pred is not a predecessor, use the first incoming block
-      if (Phi->getNumIncomingValues() > 0) {
-        pred = Phi->getIncomingBlock(0);
-      } else {
-        return {exec_state};
-      }
+      // Without a matching predecessor, do not guess an incoming edge: it can
+      // fabricate a witness. Fall back to an unknown fresh value.
+      AbstractValue fresh = factory_.createFresh(Phi);
+      Address addr(fresh);
+      addr.history.addEvent(ValueHistory::EventKind::Unknown, I,
+                            I->getFunction());
+      astate->getPostStack().add(Phi, addr);
+      return pruneStates({exec_state});
     }
 
     const llvm::Value *incoming = Phi->getIncomingValueForBlock(pred);
@@ -687,19 +833,19 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
                                     I->getFunction());
       astate->getPostStack().add(Phi, canon_result);
     }
-    return {exec_state};
+    return pruneStates({exec_state});
   }
 
   if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(I))
-    return {handleLoad(LI, exec_state, pred)};
+    return pruneStates({handleLoad(LI, exec_state, pred)});
   if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(I))
-    return {handleStore(SI, exec_state, pred)};
+    return pruneStates({handleStore(SI, exec_state, pred)});
   if (auto *CI = llvm::dyn_cast<llvm::CallInst>(I))
-    return handleCall(CI, exec_state, pred, call_depth);
+    return pruneStates(handleCall(CI, exec_state, pred, call_depth));
   if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(I))
-    return {handleAlloca(AI, exec_state)};
+    return pruneStates({handleAlloca(AI, exec_state)});
   if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(I))
-    return {handleReturn(RI, exec_state)};
+    return pruneStates({handleReturn(RI, exec_state)});
 
   // Integer arithmetic: record constraints linking SSA values.
   if (auto *BO = llvm::dyn_cast<llvm::BinaryOperator>(I)) {
@@ -758,12 +904,12 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
         }
       }
     }
-    return {exec_state};
+    return pruneStates({exec_state});
   }
 
   // Handle comparisons for path conditions. Skip when used as branch condition:
   // we fork and apply per-branch in applyBranchCondition.
-  if (llvm::isa<llvm::ICmpInst>(I) || llvm::isa<llvm::FCmpInst>(I)) {
+    if (llvm::isa<llvm::ICmpInst>(I) || llvm::isa<llvm::FCmpInst>(I)) {
     const llvm::Instruction *next = I->getNextNode();
     if (auto *BI = next ? llvm::dyn_cast<llvm::BranchInst>(
                               const_cast<llvm::Instruction *>(next))
@@ -773,10 +919,10 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
               static_cast<llvm::Value *>(const_cast<llvm::Instruction *>(I)))
         return {exec_state};
     }
-    return {handleComparison(I, exec_state, pred)};
+    return pruneStates({handleComparison(I, exec_state, pred)});
   }
 
-  return {exec_state};
+  return pruneStates({exec_state});
 }
 
 std::vector<ExecutionDomain>
@@ -1023,6 +1169,33 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
 
   const llvm::Value *ptr_operand = SI->getPointerOperand();
 
+  // Sound incorrectness: report stack address escape only when provable.
+  // If a stack-derived pointer is stored into heap/global memory, it escapes.
+  auto maybeReportStackEscape = [&](const Address& stored_value,
+                                    const Address& dest_ptr) {
+    if (!SI->getValueOperand()->getType()->isPointerTy())
+      return;
+    AbstractValue canon_value = astate->getCanonical(stored_value.addr);
+    if (!astate->getPostAttrs().has(canon_value, Attribute::Stack))
+      return;
+    AbstractValue canon_dest = astate->getCanonical(dest_ptr.addr);
+    const bool dest_is_global =
+        astate->getPostAttrs().has(canon_dest, Attribute::Global);
+    const bool dest_is_heap =
+        astate->getPostAttrs().has(canon_dest, Attribute::Allocated) &&
+        !astate->getPostAttrs().has(canon_dest, Attribute::Stack);
+    if (!dest_is_global && !dest_is_heap)
+      return; // Cannot prove escape.
+
+    Trace trace = Trace::fromValueHistory(stored_value.history);
+    trace.addEvent(SI, "Storing stack-derived address into non-stack memory");
+    auto diag = std::make_unique<StackVariableAddressEscape>(
+        SI, canon_value, "Stack address escapes via store",
+        "Do not store addresses of local variables into heap/global memory.",
+        std::move(trace));
+    DiagnosticManager::getInstance().report(std::move(diag));
+  };
+
   // Check if this is a direct store to a stack variable (alloca)
   // Stack variables are in the stack map, and we can store to them directly
   // without checking for uninitialized (storing initializes them)
@@ -1087,6 +1260,9 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
   auto ptr_opt = ops_.eval(*astate, ptr_operand, SI, pred);
   if (!ptr_opt)
     return exec_state;
+
+  maybeReportStackEscape(*value_opt, *ptr_opt);
+
   auto res = ops_.writeDeref(*astate, *ptr_opt, *value_opt, SI);
   if (res != OperationResult::Success) {
     Trace trace = Trace::fromValueHistory(ptr_opt->history);
@@ -1119,6 +1295,36 @@ std::vector<ExecutionDomain>
 PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
                          const llvm::BasicBlock *pred, unsigned call_depth) {
   auto *astate = exec_state.getAstate();
+  if (!astate) {
+    return {exec_state};
+  }
+
+  // Handle LLVM lifetime intrinsics: model end as definite invalidation.
+  if (auto *II =
+          llvm::dyn_cast<llvm::IntrinsicInst>(const_cast<llvm::CallInst *>(CI))) {
+    const auto iid = II->getIntrinsicID();
+    if (iid == llvm::Intrinsic::lifetime_start ||
+        iid == llvm::Intrinsic::lifetime_end) {
+      if (CI->arg_size() >= 2) {
+        auto ptr_opt = ops_.eval(*astate, CI->getArgOperand(1), CI, pred);
+        if (ptr_opt) {
+          AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
+          if (iid == llvm::Intrinsic::lifetime_start) {
+            // Treat as beginning of lifetime: clear invalidation and mark
+            // uninitialized.
+            astate->getPostAttrs().remove(canon_ptr, Attribute::Invalid);
+            astate->getPostAttrs().add(canon_ptr, Attribute::Uninitialized);
+          } else {
+            // End of lifetime: uses after this are invalid (gone out of scope).
+            ops_.invalidate(*astate, *ptr_opt, CI,
+                            InvalidationKind::GoneOutOfScope);
+          }
+        }
+      }
+      return {exec_state};
+    }
+  }
+
   llvm::Function *F = CI->getCalledFunction();
   if (!F)
     return {exec_state};
@@ -1263,6 +1469,8 @@ ExecutionDomain PulseChecker::handleAlloca(const llvm::AllocaInst *AI,
   auto *astate = exec_state.getAstate();
   AbstractValue av = factory_.getOrCreate(AI);
   ops_.allocate(*astate, av, AI);
+  // Stack allocation: mark as stack-derived so we can prove invalid escapes.
+  astate->getPostAttrs().add(av, Attribute::Stack);
   astate->getPostAttrs().add(av, Attribute::Uninitialized);
   astate->getPostStack().add(AI, Address(av));
   return exec_state;
@@ -1270,7 +1478,25 @@ ExecutionDomain PulseChecker::handleAlloca(const llvm::AllocaInst *AI,
 
 ExecutionDomain PulseChecker::handleReturn(const llvm::ReturnInst *RI,
                                            ExecutionDomain exec_state) {
-  (void)RI;
+  auto *astate = exec_state.getAstate();
+  if (RI && astate && RI->getNumOperands() > 0) {
+    const llvm::Value *ret_v = RI->getReturnValue();
+    if (ret_v && ret_v->getType()->isPointerTy()) {
+      auto ret_opt = ops_.eval(*astate, ret_v, RI, nullptr);
+      if (ret_opt) {
+        AbstractValue canon_ret = astate->getCanonical(ret_opt->addr);
+        if (astate->getPostAttrs().has(canon_ret, Attribute::Stack)) {
+          Trace trace = Trace::fromValueHistory(ret_opt->history);
+          trace.addEvent(RI, "Returning address derived from stack allocation");
+          auto diag = std::make_unique<StackVariableAddressEscape>(
+              RI, canon_ret, "Stack address escapes via return",
+              "Do not return addresses of local variables; allocate on heap or return by value.",
+              std::move(trace));
+          DiagnosticManager::getInstance().report(std::move(diag));
+        }
+      }
+    }
+  }
   // Convert to ExitProgram variant
   if (exec_state.isContinueProgram() && exec_state.getAstate()) {
     return ExecutionDomain::exitProgram(
@@ -1336,30 +1562,17 @@ PulseChecker::runCallee(const llvm::Function *callee,
     if (entry_states.empty())
       continue;
 
-    // Join states at block entry
+    // Join states at block entry.
+    //
+    // Sound incorrectness: avoid over-approximating joins when multiple
+    // disjunctive entry states arrive at the same block. A union-style merge can
+    // fabricate heap facts and admit non-witnessable bug paths. Prefer keeping a
+    // representative witness state.
     ExecutionDomain block_state;
     if (entry_states.size() == 1) {
       block_state = std::move(entry_states[0]);
     } else {
-      const AbductiveDomain *first_astate = entry_states[0].getAstate();
-      if (!first_astate) {
-        continue;
-      }
-
-      AbductiveDomain merged = first_astate->clone();
-      for (size_t i = 1; i < entry_states.size(); ++i) {
-        const AbductiveDomain *astate = entry_states[i].getAstate();
-        if (!astate)
-          continue;
-        auto merge_result = AbductiveDomain::merge(merged, *astate);
-        if (!merge_result) {
-          merged = first_astate->clone();
-          break;
-        }
-        merged = merge_result->clone();
-      }
-      block_state =
-          ExecutionDomain(std::make_unique<AbductiveDomain>(std::move(merged)));
+      block_state = std::move(entry_states[0]);
     }
 
     if (block_state.isStopped())
@@ -1631,9 +1844,6 @@ void PulseChecker::createSummary(
   }
 
   bool has_any_entry = latent_added > 0;
-  llvm::Optional<AbductiveDomain> merged_rest;
-  PulseFormula merged_rest_formula;
-  llvm::Optional<AbstractValue> merged_rest_ret_val;
   const unsigned max_normal_entries =
       kMaxDisjuncts > latent_added ? (kMaxDisjuncts - latent_added) : 0u;
 
@@ -1650,7 +1860,7 @@ void PulseChecker::createSummary(
 
     const unsigned normal_entries =
         static_cast<unsigned>(summary.getPrePostList().size()) - latent_added;
-    if (normal_entries + (merged_rest ? 1u : 0u) < max_normal_entries) {
+    if (normal_entries < max_normal_entries) {
       auto pre = std::make_unique<AbductiveDomain>(astate->clone());
       auto post = std::make_unique<AbductiveDomain>(astate->clone());
       summary.addPrePost(SummaryEntry(std::move(pre), formula.clone(),
@@ -1658,36 +1868,15 @@ void PulseChecker::createSummary(
                                       ret_val));
       continue;
     }
-
-    if (!merged_rest) {
-      merged_rest = astate->clone();
-      merged_rest_formula = formula.clone();
-      merged_rest_ret_val = ret_val;
-      continue;
-    }
-
-    auto merge_result = AbductiveDomain::merge(*merged_rest, *astate);
-    if (merge_result) {
-      merged_rest = merge_result->clone();
-      merged_rest_formula =
-          PulseFormula::merge(merged_rest_formula, astate->getPathFormula());
-      if (!merged_rest_formula.isConsistent()) {
-        merged_rest = merged_rest->clone();
-        merged_rest_formula = merged_rest->getPathFormula().clone();
-      }
-    }
+    // Budget exhausted: for sound incorrectness, do not merge multiple exit
+    // states into a single summary entry. Union-style merging can fabricate
+    // heap facts and admit non-witnessable caller paths. Prefer dropping extra
+    // disjuncts (reduces recall, preserves witnessability).
+    break;
   }
 
   if (!has_any_entry)
     return;
-
-  if (merged_rest) {
-    auto pre = std::make_unique<AbductiveDomain>(merged_rest->clone());
-    auto post = std::make_unique<AbductiveDomain>(merged_rest->clone());
-    summary.addPrePost(SummaryEntry(
-        std::move(pre), merged_rest_formula.clone(), std::move(post),
-        merged_rest_formula.clone(), merged_rest_ret_val));
-  }
 
   // Store formal parameter mappings
   for (const auto &Arg : F->args()) {

@@ -14,6 +14,12 @@ ProcedureGraphBuilder::ProcedureGraphBuilder(SifaStats &stats, const llvm::Funct
 ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
     const std::vector<llvm::BasicBlock *> &locationsOfInterest,
     bool restrictToReachable) {
+  stats_.start(SifaStats::Key::PROCEDURE_GRAPH_BUILDER_TIME);
+  struct StopTimer {
+    SifaStats &stats;
+    ~StopTimer() { stats.stop(SifaStats::Key::PROCEDURE_GRAPH_BUILDER_TIME); }
+  } stopTimer{stats_};
+
   auto *entry = const_cast<llvm::BasicBlock *>(&F_.getEntryBlock());
   const Node exitNode = nullptr; // single exit sentinel
 
@@ -70,27 +76,9 @@ ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
         pg.addEdge(src, dst);
       }
     }
-    if (llvm::succ_empty(&BB) && reachable.count(nullptr)) {
-      pg.addEdge(src, nullptr);
-    }
-  }
-  // ProcedureGraph::addEdge(src, nullptr) - we need to support edge to exit.
-  // Currently addEdge does if (!src || !dst) return; so dst=nullptr is skipped.
-  // So we must allow nullptr in reachable and add edges to exit. So we need
-  // ProcedureGraph to support adding an edge (src, nullptr). Let me check
-  // addEdge again - we have addEdge(Node src, Node dst). If dst is nullptr,
-  // we skip. So we need to either allow dst=nullptr in addEdge or add a
-  // separate addEdgeToExit. In ProcedureGraph full constructor we do
-  // graph_.addEdge(src, label, nullptr). So the graph can have nullptr as
-  // target. So we need addEdge to allow dst=nullptr. Let me update addEdge.
-  if (reachable.count(nullptr)) {
-    for (const llvm::BasicBlock &BB : F_) {
-      if (llvm::succ_empty(&BB)) {
-        Node src = const_cast<llvm::BasicBlock *>(&BB);
-        if (reachable.count(src)) {
-          pg.addEdge(src, nullptr);
-        }
-      }
+    if (llvm::succ_empty(&BB) && reachable.count(exitNode)) {
+      // Preserve exit edges for return blocks if EXIT is in the restricted slice.
+      pg.addEdge(src, exitNode);
     }
   }
 

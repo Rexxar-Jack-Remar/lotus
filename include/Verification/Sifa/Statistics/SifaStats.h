@@ -81,9 +81,22 @@ public:
   void increment(Key k, std::uint64_t by = 1);
   void add(Key k, std::uint64_t summand);
 
+  /// Start (or nest) a stopwatch for \p k.
+  ///
+  /// Stopwatches are *nestable*: multiple start() calls must be paired with
+  /// stop() calls; only the outermost interval contributes to the duration.
+  /// Calls to start()/stop() for non-stopwatch keys are allowed but have no
+  /// special meaning beyond accumulating in the internal maps.
   void start(Key k);
+  /// Stop (or un-nest) a stopwatch for \p k. If \p k was not running, no-op.
   void stop(Key k);
+  /// Start a MAX_TIMER interval for \p k (Ultimate-aligned).
+  ///
+  /// Semantics are the same as start(), but stopMax() additionally updates the
+  /// maximum single-interval duration observed so far for \p k.
   void startMax(Key k);
+  /// Stop a MAX_TIMER interval for \p k (Ultimate-aligned). If \p k was not
+  /// running, no-op.
   void stopMax(Key k);
 
   std::uint64_t counter(Key k) const;
@@ -111,7 +124,7 @@ private:
   std::unordered_map<Key, Clock::time_point, KeyHash> starts_;
   std::unordered_map<Key, std::chrono::nanoseconds, KeyHash> durations_;
   std::unordered_map<Key, int, KeyHash> stopwatchNesting_;
-  // Max-timer: track current interval start and max single interval so far
+  // Max-timer: track current interval start and max single interval so far.
   std::unordered_map<Key, Clock::time_point, KeyHash> maxStarts_;
   std::unordered_map<Key, std::chrono::nanoseconds, KeyHash> maxDurations_;
 };

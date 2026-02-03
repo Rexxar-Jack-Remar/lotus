@@ -139,6 +139,12 @@ private:
     
     // POSIX Models
     ModelResult modelSocket(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
+
+    // Explicit escape sinks (sound incorrectness): functions that store a
+    // pointer argument for later use beyond the current stack frame.
+    ModelResult modelPthreadCreate(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
+    ModelResult modelThrdCreate(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
+    ModelResult modelDispatchAsyncF(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
     
     // Taint models
     ModelResult modelTaintSource(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred, const std::string& kind);

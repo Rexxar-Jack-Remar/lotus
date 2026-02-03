@@ -20,12 +20,19 @@ using namespace lotus::sifa;
 
 bool lotus::sifa::isReachable(const llvm::Function &F, const llvm::BasicBlock &target,
                               SifaOptions options) {
+  // Current reachability pipeline is self-contained and does not yet consult:
+  // - options.blockTransferPolicy (value-domain only),
+  // - options.aliasAnalysis (value-domain only),
+  // - options.logLevel (logger integration is optional).
   (void)options;
 
   SifaStats stats;
   ReachabilityDomain<Transition> domain;
   NeverFluid<bool> fluid;
 
+  // Interpreter stack (Ultimate-aligned):
+  // - build ProcedureResources: path expressions -> regex -> regex DAG + overlays
+  // - interpret the DAG with optional loop summarization
   DagInterpreter<Transition, bool> ipr(stats, domain, fluid);
   FixpointLoopSummarizer<Transition, bool> loopSum(stats, domain, fluid, ipr);
   ipr.setLoopSummarizer(loopSum);
@@ -39,6 +46,8 @@ bool lotus::sifa::isReachableInterprocedural(const llvm::Module &M, const llvm::
                                              const llvm::Function &targetFunc,
                                              const llvm::BasicBlock &targetBlock,
                                              SifaOptions options) {
+  // Interprocedural reachability uses IcfgInterpreter and a storage mapping
+  // basic blocks to reachability booleans. Options are currently unused here.
   (void)options;
 
   SifaStats stats;

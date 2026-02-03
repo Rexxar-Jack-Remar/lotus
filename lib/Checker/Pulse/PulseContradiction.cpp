@@ -5,6 +5,15 @@
 
 namespace pulse {
 
+//===----------------------------------------------------------------------===//
+// Contradictions
+//
+// A contradiction is a reason a particular summary/precondition cannot apply at
+// a call site. In a Pulse/incorrectness setting, contradictions must be
+// *provable*: rejecting an entry based on heuristics can silently drop feasible
+// witnesses (false negatives).
+//===----------------------------------------------------------------------===//
+
 llvm::Optional<Contradiction> checkAliasingContradiction(
     const std::map<AbstractValue, AbstractValue>& formal_to_actual_map,
     const PulseFormula& callee_pre_formula) {
@@ -41,13 +50,9 @@ llvm::Optional<Contradiction> checkAliasingContradiction(
                     return Contradiction::makeAliasing(kv.first, formal1, formal2);
                 }
                 
-                // If pre doesn't explicitly say they're equal, and they're distinct abstract values,
-                // we assume they're distinct (conservative: may be false positive but safe)
-                if (!(formal1 == formal2)) {
-                    // This is a potential aliasing contradiction
-                    // In a more precise implementation, we'd check heap paths
-                    return Contradiction::makeAliasing(kv.first, formal1, formal2);
-                }
+                // If the precondition does not constrain the aliasing relation,
+                // do not reject the entry. Sound incorrectness requires that
+                // contradictions are established, not guessed.
             }
         }
     }

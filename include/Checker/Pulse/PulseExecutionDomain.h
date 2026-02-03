@@ -4,6 +4,7 @@
 #include "Checker/Pulse/PulseAbductiveDomain.h"
 #include "Checker/Pulse/PulseValueHistory.h"
 #include <llvm/ADT/Optional.h>
+#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <string>
@@ -139,6 +140,7 @@ private:
     Variant variant_;
     std::unique_ptr<AbductiveDomain> astate_;
     StoppedExecution stopped_execution_;
+    const llvm::BasicBlock* entry_pred_{nullptr};
 
 public:
     ExecutionDomain() : variant_(Variant::ContinueProgram),
@@ -152,7 +154,8 @@ public:
     ExecutionDomain(const ExecutionDomain& other)
         : variant_(other.variant_),
           astate_(other.astate_ ? std::make_unique<AbductiveDomain>(other.astate_->clone())
-                                : nullptr) {
+                                : nullptr),
+          entry_pred_(other.entry_pred_) {
         // Deep copy stopped_execution_ if needed
         if (other.variant_ == Variant::Stopped) {
             stopped_execution_.kind = other.stopped_execution_.kind;
@@ -180,6 +183,7 @@ public:
             variant_ = other.variant_;
             astate_ = other.astate_ ? std::make_unique<AbductiveDomain>(other.astate_->clone())
                                    : nullptr;
+            entry_pred_ = other.entry_pred_;
             if (other.variant_ == Variant::Stopped) {
                 stopped_execution_.kind = other.stopped_execution_.kind;
                 if (other.stopped_execution_.astate) {
@@ -304,6 +308,10 @@ public:
     // Legacy compatibility
     bool isContinue() const { return isContinueProgram(); }
 
+    // CFG predecessor used to enter the current basic block (for sound PHI).
+    const llvm::BasicBlock* getEntryPred() const { return entry_pred_; }
+    void setEntryPred(const llvm::BasicBlock* pred) { entry_pred_ = pred; }
+
     AbductiveDomain* getAstate() {
         return isStopped() ? stopped_execution_.astate.get() : astate_.get();
     }
@@ -338,6 +346,7 @@ public:
         ExecutionDomain c;
         c.variant_ = variant_;
         c.astate_ = astate_ ? std::make_unique<AbductiveDomain>(astate_->clone()) : nullptr;
+        c.entry_pred_ = entry_pred_;
         if (stopped_execution_.astate) {
             c.stopped_execution_.astate = 
                 std::make_unique<AbductiveDomain>(stopped_execution_.astate->clone());

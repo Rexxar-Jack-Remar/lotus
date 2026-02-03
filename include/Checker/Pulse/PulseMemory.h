@@ -4,6 +4,7 @@
 #include "Checker/Pulse/PulseAbstractValue.h"
 #include "Checker/Pulse/PulseValueHistory.h"
 #include <llvm/IR/Value.h>
+#include <cstdint>
 #include <map>
 #include <set>
 
@@ -25,6 +26,8 @@ struct Address {
  */
 enum class Attribute {
     Allocated,      // Memory was allocated
+    Stack,          // Address is derived from stack allocation (alloca)
+    Global,         // Address is a global variable / global storage
     Invalid,        // Memory is invalid (freed, out of scope)
     Uninitialized,  // Memory is uninitialized
     Null,           // Pointer is null
@@ -45,28 +48,50 @@ enum class AccessKind {
     ArrayIndex
 };
 
+/**
+ * Access: one step in an access path keying heap edges.
+ *
+ * Design notes (sound incorrectness / Pulse-style):
+ * - We must not conflate different memory projections. In particular, GEP over
+ *   struct fields is not the same as pointer/array indexing, even if the
+ *   index operand is a constant 0/1/2.
+ * - Array indexing may use a symbolic index; to keep distinct projections from
+ *   accidentally collapsing, we include a best-effort byte stride when known
+ *   (via LLVM DataLayout). If stride is unknown, it is left as 0.
+ *
+ * This structure is used as a `std::map` key inside `Heap`, so ordering must be
+ * stable and deterministic.
+ */
 struct Access {
     AccessKind kind;
-    union {
-        unsigned field_idx;      // For Field
-        AbstractValue index;     // For ArrayIndex
-    };
+    // For Field
+    unsigned field_idx{0};
+    // For ArrayIndex
+    AbstractValue index{};
+    // Size in bytes of the indexed element (0 if unknown / not applicable).
+    uint64_t stride_bytes{0};
 
-    Access() : kind(AccessKind::Dereference), field_idx(0) {}
-    explicit Access(AccessKind k) : kind(k), field_idx(0) {}
+    Access() : kind(AccessKind::Dereference) {}
+    explicit Access(AccessKind k) : kind(k) {}
     Access(unsigned idx) : kind(AccessKind::Field), field_idx(idx) {}
 
-    static Access arrayIndex(AbstractValue idx) {
+    static Access arrayIndex(AbstractValue idx, uint64_t stride_bytes = 0) {
         Access a;
         a.kind = AccessKind::ArrayIndex;
         a.index = idx;
+        a.stride_bytes = stride_bytes;
         return a;
     }
 
     bool operator<(const Access& other) const {
         if (kind != other.kind) return kind < other.kind;
         if (kind == AccessKind::Field) return field_idx < other.field_idx;
-        if (kind == AccessKind::ArrayIndex) return index < other.index;
+        if (kind == AccessKind::ArrayIndex) {
+            // Stride is part of the projection identity: same index value but
+            // different element types should not necessarily alias.
+            if (stride_bytes != other.stride_bytes) return stride_bytes < other.stride_bytes;
+            return index < other.index;
+        }
         return false;
     }
 };

@@ -6,6 +6,12 @@
 // CallReturnSummary (cfgpreprocessing). We provide those as named structs and
 // a unified Transition (tagged union) for the path-expression alphabet.
 //
+// In lotus, Transition::id is typically assigned by the producer:
+// - ProcedureGraph assigns dense ids to CFG edges (and ReturnSummary edges).
+// - ProcedureResources assigns ids to marker transitions used to denote LOIs/EXIT.
+// The id is used for hashing/comparison and as an index into side-tables such as
+// ProcedureGraph::transitions().
+//
 //===----------------------------------------------------------------------===//
 
 #ifndef LOTUS_VERIFICATION_SIFA_CFG_TRANSITION_H
@@ -61,6 +67,11 @@ struct CallReturnSummary {
 /// - Edge: regular CFG edge (source → target).
 /// - Marker: LocationMarkerTransition; target = marked location, source = null.
 /// - ReturnSummary: CallReturnSummary; synthetic call+return edge.
+///
+/// The meaning of a ReturnSummary transition is domain/interpreter-defined.
+/// In reachability-style interpretation it can be treated as "jump to successor",
+/// while richer interprocedural interpreters may use the embedded callee to
+/// consult summaries or recursively interpret the callee.
 struct Transition {
   TransitionKind kind = TransitionKind::Edge;
   std::uint32_t id = 0;

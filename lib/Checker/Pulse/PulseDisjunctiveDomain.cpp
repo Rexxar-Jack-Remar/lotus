@@ -5,6 +5,20 @@
 
 namespace pulse {
 
+//===----------------------------------------------------------------------===//
+// DisjunctiveDomain
+//
+// Tracks a bounded set of disjunctive states per basic block entry.
+//
+// Sound incorrectness guidance:
+// - Prefer keeping distinct disjuncts (witness paths) rather than aggressively
+//   merging them, because merges can forget the very information needed to make
+//   a bug witnessable.
+// - Widening/limits are scalability mechanisms; they may reduce recall. When
+//   forced to merge, this implementation avoids *conjoining* path conditions
+//   (which would drop feasible witnesses).
+//===----------------------------------------------------------------------===//
+
 static void reduceDisjuncts(std::vector<DisjunctiveDomain::Disjunct> &disjuncts,
                             size_t max) {
   if (disjuncts.size() <= max) {
@@ -60,6 +74,8 @@ size_t DisjunctiveDomain::size() const {
 void DisjunctiveDomain::add(const llvm::BasicBlock *at_block,
                             ExecutionDomain state,
                             const llvm::BasicBlock *path_context) {
+  // Preserve predecessor context for sound PHI evaluation.
+  state.setEntryPred(path_context);
   disjuncts_by_block_[at_block].emplace_back(std::move(state), path_context);
   limitDisjuncts(at_block);
 }
@@ -83,99 +99,19 @@ ExecutionDomain DisjunctiveDomain::joinAtBlock(const llvm::BasicBlock *BB) {
     return disjuncts[0].state.clone();
   }
 
-  std::vector<const AbductiveDomain *> astates;
-  astates.reserve(disjuncts.size());
+  // Sound incorrectness: avoid over-approximating joins under widening.
+  // A union-style merge can fabricate heap facts and admit non-witnessable bug
+  // paths (false positives). When forced to reduce disjuncts, keep a single
+  // representative witness state instead.
   for (const auto &disj : disjuncts) {
-    if (disj.state.isStopped()) {
-      continue;
-    }
-    if (const AbductiveDomain *a = disj.state.getAstate()) {
-      astates.push_back(a);
+    if (!disj.state.isStopped()) {
+      return disj.state.clone();
     }
   }
 
-  if (astates.empty()) {
-    ExecutionDomain stopped;
-    stopped.setState(ExecutionState::Stopped);
-    return stopped;
-  }
-
-  // Over-approximate join for widening: try a precise merge; if contradictory,
-  // fall back to a conservative join that drops path constraints.
-  auto conservative_join = [](const AbductiveDomain &d1,
-                              const AbductiveDomain &d2) -> AbductiveDomain {
-    AbductiveDomain out = d1.clone();
-
-    // Drop constraints to avoid under-approximation on contradictions.
-    out.setPathFormula(std::make_unique<PulseFormula>());
-    out.setUnknownValues(out.hasUnknownValues() || d2.hasUnknownValues());
-
-    // Union post stack: keep existing bindings; add missing ones.
-    for (const auto &kv : d2.getPostStack().getMap()) {
-      if (!out.getPostStack().find(kv.first)) {
-        out.getPostStack().add(kv.first, kv.second);
-      }
-    }
-
-    // Union post heap edges.
-    for (const auto &kv : d2.getPostHeap().getEdges()) {
-      for (const auto &edge_kv : kv.second) {
-        out.getPostHeap().addEdge(kv.first, edge_kv.first, edge_kv.second);
-      }
-    }
-
-    // Union post attrs.
-    for (const auto &kv : d2.getPostAttrs().getAttrs()) {
-      for (Attribute attr : kv.second) {
-        out.getPostAttrs().add(kv.first, attr);
-      }
-    }
-
-    // Precondition: union similarly (best-effort).
-    for (const auto &kv : d2.getPreStack().getMap()) {
-      if (!out.getPreStack().find(kv.first)) {
-        out.getPreStack().add(kv.first, kv.second);
-      }
-    }
-    for (const auto &kv : d2.getPreHeap().getEdges()) {
-      for (const auto &edge_kv : kv.second) {
-        out.getPreHeap().addEdge(kv.first, edge_kv.first, edge_kv.second);
-      }
-    }
-    for (const auto &kv : d2.getPreAttrs().getAttrs()) {
-      for (Attribute attr : kv.second) {
-        out.getPreAttrs().add(kv.first, attr);
-      }
-    }
-
-    // Skipped calls: union
-    for (const auto &name : d2.getSkippedCalls()) {
-      out.addSkippedCall(name);
-    }
-
-    // Transitive info: conservative merge.
-    out.setTransitiveInfo(
-        TransitiveInfo::merge(out.getTransitiveInfo(), d2.getTransitiveInfo()));
-    out.addRecursiveCalls(d2.getRecursiveCalls());
-    for (AbstractValue av : d2.getNeedDynamicTypeSpecialization()) {
-      out.addNeedDynamicTypeSpecialization(av);
-    }
-
-    out.canonicalize();
-    return out;
-  };
-
-  AbductiveDomain merged = astates[0]->clone();
-  for (size_t i = 1; i < astates.size(); ++i) {
-    auto precise = AbductiveDomain::merge(merged, *astates[i]);
-    if (precise) {
-      merged = precise->clone();
-    } else {
-      merged = conservative_join(merged, *astates[i]);
-    }
-  }
-
-  return ExecutionDomain(std::make_unique<AbductiveDomain>(std::move(merged)));
+  ExecutionDomain stopped;
+  stopped.setState(ExecutionState::Stopped);
+  return stopped;
 }
 
 bool DisjunctiveDomain::shouldWiden(const llvm::BasicBlock *BB) const {

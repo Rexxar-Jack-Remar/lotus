@@ -43,8 +43,20 @@ class PulseModels;
 
 /**
  * PulseChecker: main bug finder using biabductive analysis.
- * Supports CFG-based traversal, GEP/PHI, UnderApproxAA, and interprocedural
- * calls.
+ *
+ * High-level model (Infer Pulse-inspired, "incorrectness logic"):
+ * - The analysis is geared toward producing *witnessable* bug reports: an issue
+ *   is interesting only if there exists a feasible execution reaching it.
+ * - The abstract state is biabductive (`AbductiveDomain`): a post-state plus an
+ *   inferred precondition that records missing heap facts required for a
+ *   witness (materialized at call sites).
+ * - Control-flow merging must not conjoin path conditions; joining two paths is
+ *   a disjunction (best-effort) to avoid dropping feasible witnesses.
+ *
+ * Implementation notes:
+ * - Uses CFG traversal with bounded disjunction (`kMaxDisjuncts`) and bounded
+ *   interprocedural call depth (`kMaxCallDepth`).
+ * - Handles GEP/PHI and common library functions via `PulseModels`.
  */
 class PulseChecker {
 private:
@@ -62,6 +74,8 @@ private:
   int unnecessaryCopyTypeId_;
   int constRefableParamTypeId_;
   int taintErrorTypeId_;
+  int stackAddressEscapeTypeId_;
+  int invalidFreeTypeId_;
 
   std::map<const llvm::Function *, std::vector<ExecutionDomain>>
       function_states_;

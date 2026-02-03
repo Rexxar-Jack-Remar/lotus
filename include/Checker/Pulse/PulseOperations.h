@@ -8,6 +8,7 @@
 #include <llvm/ADT/Optional.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
+#include <atomic>
 #include <functional>
 
 // Forward declaration
@@ -173,11 +174,13 @@ private:
 class AbstractValueFactory {
 private:
     std::map<const llvm::Value*, AbstractValue> value_map_;
-    unsigned next_id_;
     std::function<bool(const llvm::Value*, const llvm::Value*)> mustAliasFn_;
+    // Global ID generator to ensure uniqueness even if multiple factories exist
+    // (e.g., join operations that create temporary factories).
+    static std::atomic<unsigned> global_next_id_;
 
 public:
-    AbstractValueFactory() : next_id_(1) {}
+    AbstractValueFactory() = default;
 
     void setMustAliasFn(std::function<bool(const llvm::Value*, const llvm::Value*)> fn) {
         mustAliasFn_ = std::move(fn);

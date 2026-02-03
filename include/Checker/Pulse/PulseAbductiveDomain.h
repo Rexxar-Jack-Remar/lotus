@@ -28,7 +28,18 @@ namespace pulse {
  * - Pre state: inferred pre-condition (biabduction)
  * - Path condition: constraints via PulseFormula
  *
- * Aligned with Infer's PulseAbductiveDomain structure
+ * Infer Pulse-inspired semantics (sound incorrectness):
+ * - The post-state represents what is known to hold along the current witness
+ *   path.
+ * - The pre-state records *missing* heap edges/attributes that were required by
+ *   operations (reads/dereferences) but not present in the current state. This
+ *   precondition is later materialized at call sites when applying summaries.
+ * - Joining two states at a program point should approximate a disjunction of
+ *   path conditions (keep only facts stable across both branches). Conjoining
+ *   conditions would drop feasible witnesses (false negatives).
+ *
+ * This implementation is intentionally conservative in what it proves: when it
+ * cannot establish a property, it prefers to keep it unknown rather than guess.
  */
 class AbductiveDomain {
 private:

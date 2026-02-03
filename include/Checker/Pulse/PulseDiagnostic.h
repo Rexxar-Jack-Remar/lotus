@@ -1,8 +1,9 @@
 #ifndef CHECKER_PULSE_PULSEDIAGNOSTIC_H
 #define CHECKER_PULSE_PULSEDIAGNOSTIC_H
 
-#include "Checker/Pulse/PulseValueHistory.h"
+#include "Checker/Pulse/PulseAbstractValue.h"
 #include "Checker/Pulse/PulseInvalidation.h"
+#include "Checker/Pulse/PulseValueHistory.h"
 #include <llvm/IR/Instruction.h>
 #include <optional>
 #include <string>
@@ -15,6 +16,7 @@ namespace IssueType {
     constexpr const char* ResourceLeak = "Resource Leak";
     constexpr const char* NullDereference = "Null Pointer Dereference";
     constexpr const char* UseAfterFree = "Use After Free";
+    constexpr const char* InvalidFree = "Invalid Free";
     constexpr const char* UninitializedRead = "Uninitialized Read";
     constexpr const char* TaintError = "Taint Error";
     constexpr const char* UnnecessaryCopy = "Unnecessary Copy";
@@ -136,6 +138,85 @@ public:
     std::string getIssueType() const override { return IssueType::UnnecessaryCopy; }
     const llvm::Instruction* getLocation() const override { return location_; }
     
+    size_t getHash() const override;
+    bool equals(const Diagnostic& other) const override;
+};
+
+/**
+ * StackVariableAddressEscape: a stack-derived address is returned or stored into
+ * non-stack memory (global/heap), making it invalid to use outside its scope.
+ *
+ * This is intended for sound incorrectness reporting: only emit when the
+ * stack-derived provenance is proven (via `Attribute::Stack`).
+ */
+class StackVariableAddressEscape : public Diagnostic {
+    const llvm::Instruction* location_;
+    AbstractValue address_;
+    std::string message_;
+    std::string suggestion_;
+    Trace trace_;
+
+public:
+    StackVariableAddressEscape(const llvm::Instruction* loc,
+                              AbstractValue addr,
+                              const std::string& msg,
+                              const std::string& sugg,
+                              Trace trace)
+        : location_(loc),
+          address_(addr),
+          message_(msg),
+          suggestion_(sugg),
+          trace_(std::move(trace)) {}
+
+    std::string getMessage() const override { return message_; }
+    std::string getDescription() const override { return "Invalid use of stack address: it escapes its scope."; }
+    std::string getSuggestion() const override { return suggestion_; }
+    std::string getIssueType() const override { return IssueType::StackVariableAddressEscape; }
+    const llvm::Instruction* getLocation() const override { return location_; }
+    const Trace* getTrace() const override { return &trace_; }
+
+    size_t getHash() const override;
+    bool equals(const Diagnostic& other) const override;
+};
+
+/**
+ * InvalidFree: freeing a pointer that is not a heap allocation (e.g., stack or
+ * global storage).
+ *
+ * Sound incorrectness: only emit when non-heap provenance is proven via
+ * `Attribute::{Stack,Global}`.
+ *
+ * Note: we intentionally stop exploring the current path after reporting,
+ * because undefined behavior makes subsequent reports unreliable.
+ */
+class InvalidFree : public Diagnostic {
+    const llvm::Instruction* location_;
+    AbstractValue address_;
+    std::string message_;
+    std::string suggestion_;
+    Trace trace_;
+
+public:
+    InvalidFree(const llvm::Instruction* loc,
+                AbstractValue addr,
+                const std::string& msg,
+                const std::string& sugg,
+                Trace trace)
+        : location_(loc),
+          address_(addr),
+          message_(msg),
+          suggestion_(sugg),
+          trace_(std::move(trace)) {}
+
+    std::string getMessage() const override { return message_; }
+    std::string getDescription() const override {
+        return "Freeing memory that is not on the heap causes undefined behavior.";
+    }
+    std::string getSuggestion() const override { return suggestion_; }
+    std::string getIssueType() const override { return IssueType::InvalidFree; }
+    const llvm::Instruction* getLocation() const override { return location_; }
+    const Trace* getTrace() const override { return &trace_; }
+
     size_t getHash() const override;
     bool equals(const Diagnostic& other) const override;
 };

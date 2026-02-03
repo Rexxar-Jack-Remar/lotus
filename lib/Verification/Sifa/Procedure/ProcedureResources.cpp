@@ -28,6 +28,8 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
   std::vector<RegexDagNode<Transition> *> loiMarkers;
   loiMarkers.reserve(lois.size());
 
+  // Marker ids must be stable and unique within the DAG's transition alphabet.
+  // We start at 1 to avoid the common "0 means uninitialized" convention.
   std::uint32_t nextMarkerId = 1;
   for (llvm::BasicBlock *loi : lois) {
     auto expr = exprBetween(stats, pe, entry, loi);
@@ -35,8 +37,10 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
     loiMarkers.push_back(addToDag(stats, regexToDag, marked));
   }
 
-  // Also add one marked regex to the explicit EXIT node (nullptr), if it exists
-  // in the procedure graph (it always does; see ProcedureGraph).
+  // Also add one marked regex to the explicit EXIT node (nullptr).
+  // ProcedureGraph ensures EXIT is always reachable from every return block via
+  // an outgoing edge to nullptr, so the path-expression computer can compute an
+  // (entry -> EXIT) expression uniformly.
   llvm::BasicBlock *const exitNode = nullptr;
   auto exprToExit = exprBetween(stats, pe, entry, exitNode);
   auto markedExit = markRegex(exprToExit, /*finalLocationAsMark=*/nullptr, nextMarkerId++);

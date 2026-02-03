@@ -4,6 +4,19 @@
 
 namespace pulse {
 
+//===----------------------------------------------------------------------===//
+// LoopAbstraction
+//
+// Provides widening/invariant inference scaffolding for the Pulse execution.
+//
+// Sound incorrectness guidance:
+// - Loop handling is primarily a scalability concern. When we "widen", we
+//   intentionally forget information to obtain termination, which can reduce
+//   recall.
+// - Path conditions are accumulated via disjunction-join (stable facts), never
+//   conjunction, to avoid dropping feasible witness paths.
+//===----------------------------------------------------------------------===//
+
 void LoopAbstraction::initialize(const llvm::LoopInfo& LI) {
     loop_headers_.clear();
     
@@ -77,7 +90,9 @@ bool LoopAbstraction::visitHeader(const llvm::BasicBlock* BB, const ExecutionDom
         pushLoopInfo(BB, timestamp, path_condition);
         
         // Update local path condition
-        it->second.local_path_condition = PulseFormula::merge(
+        // Accumulate information across iterations: this is a join (disjunction)
+        // over different paths, not a conjunction.
+        it->second.local_path_condition = PulseFormula::join(
             it->second.local_path_condition, path_condition);
     }
     
@@ -98,28 +113,11 @@ ExecutionDomain LoopAbstraction::widen(const llvm::BasicBlock* BB,
         return header_state.clone();
     }
 
-    const AbductiveDomain* h = header_state.getAstate();
-    const AbductiveDomain* c = current_state.getAstate();
-    if (!h || !c) {
-        return current_state;
-    }
-
-    auto merged_opt = AbductiveDomain::merge(*h, *c);
-    if (!merged_opt) {
-        return current_state;
-    }
-
-    AbductiveDomain merged = merged_opt->clone();
-    PulseFormula merged_formula = PulseFormula::merge(h->getPathFormula(), c->getPathFormula());
-    if (!merged_formula.isConsistent()) {
-        merged_formula = h->getPathFormula().clone();
-    }
-
-    auto merged_ptr = std::make_unique<AbductiveDomain>(std::move(merged));
-    merged_ptr->setPathFormula(std::make_unique<PulseFormula>(std::move(merged_formula)));
-    ExecutionDomain widened(std::move(merged_ptr));
-    it->second.header_state = widened.clone();
-    return widened;
+    // Sound incorrectness: widening must not over-approximate by union-merging
+    // heap facts across iterations (which can admit non-witnessable paths).
+    // Under pressure, keep a representative witness state.
+    (void)current_state;
+    return header_state.clone();
 }
 
 bool LoopAbstraction::isInLoop(const llvm::BasicBlock* BB) const {
@@ -159,25 +157,10 @@ llvm::Optional<ExecutionDomain> LoopAbstraction::inferInvariant(
     
     // Check convergence: if path stamps are the same, we've converged
     if (hasPreviousIterationSamePathStamp(BB)) {
-        // Path condition has stabilized - use intersection of states
-        const AbductiveDomain* entry_astate = entry_state.getAstate();
-        const AbductiveDomain* current_astate = current_state.getAstate();
-        
-        if (entry_astate && current_astate) {
-            auto merged_opt = AbductiveDomain::merge(*entry_astate, *current_astate);
-            if (merged_opt) {
-                AbductiveDomain merged = merged_opt->clone();
-                // Use intersection of path conditions
-                PulseFormula merged_formula = PulseFormula::merge(
-                    entry_astate->getPathFormula(), 
-                    current_astate->getPathFormula());
-                if (merged_formula.isConsistent()) {
-                    merged.setPathFormula(std::make_unique<PulseFormula>(std::move(merged_formula)));
-                    return ExecutionDomain::continueProgram(
-                        std::make_unique<AbductiveDomain>(std::move(merged)));
-                }
-            }
-        }
+        // Path condition has stabilized. For sound incorrectness, avoid
+        // constructing a potentially non-witnessable "merged" invariant; keep a
+        // representative witness state.
+        return llvm::Optional<ExecutionDomain>(current_state.clone());
     }
     
     // If we've exceeded max iterations, use entry state as invariant

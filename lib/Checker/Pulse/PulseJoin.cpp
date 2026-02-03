@@ -8,6 +8,19 @@
 namespace pulse {
 
 //===----------------------------------------------------------------------===//
+// PulseJoin
+//
+// Joins two `AbductiveDomain`s at the same program point.
+//
+// Sound incorrectness note:
+// - Joining must not conjoin path conditions (that would discard feasible
+//   witness paths). The formula join used here is a disjunction approximation.
+// - Heap/stack joins introduce fresh join values when the two sides disagree.
+//   This intentionally forgets some relational structure, trading recall for
+//   scalability while preserving witnessability.
+//===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
 // JoinState Helper Methods
 //===----------------------------------------------------------------------===//
 
@@ -317,6 +330,11 @@ llvm::Optional<Attribute> PulseJoin::joinOneSidedAttribute(Attribute attr) {
         case Attribute::Allocated:
             // Keep: if allocated in one branch, it might be allocated
             return attr;
+
+        case Attribute::Stack:
+        case Attribute::Global:
+            // Base-kind facts must be stable; drop on one-sided to avoid guessing.
+            return llvm::None;
             
         case Attribute::Invalid:
         case Attribute::Null:
@@ -356,6 +374,18 @@ llvm::Optional<Attribute> PulseJoin::joinTwoSidedAttribute(JoinState& state,
                 return Attribute::Allocated;  // Both allocated
             }
             // Allocated vs Invalid/Null - incompatible
+            return llvm::None;
+
+        case Attribute::Stack:
+            if (attr2 == Attribute::Stack) {
+                return Attribute::Stack;
+            }
+            return llvm::None;
+
+        case Attribute::Global:
+            if (attr2 == Attribute::Global) {
+                return Attribute::Global;
+            }
             return llvm::None;
             
         case Attribute::Invalid:
@@ -405,6 +435,7 @@ llvm::Optional<Attribute> PulseJoin::joinTwoSidedAttribute(JoinState& state,
 AttributeSet PulseJoin::joinAttributes(JoinState& state,
                                       const AbductiveDomain& lhs_astate,
                                       const AbductiveDomain& rhs_astate,
+                                      bool use_pre_attrs,
                                       AbstractValue joined_addr,
                                       llvm::Optional<AbstractValue> lhs_addr_opt,
                                       llvm::Optional<AbstractValue> rhs_addr_opt) {
@@ -414,10 +445,12 @@ AttributeSet PulseJoin::joinAttributes(JoinState& state,
     AttributeSet rhs_attrs;
     
     if (lhs_addr_opt) {
-        lhs_attrs = lhs_astate.getPostAttrs().get(*lhs_addr_opt);
+        lhs_attrs = use_pre_attrs ? lhs_astate.getPreAttrs().get(*lhs_addr_opt)
+                                  : lhs_astate.getPostAttrs().get(*lhs_addr_opt);
     }
     if (rhs_addr_opt) {
-        rhs_attrs = rhs_astate.getPostAttrs().get(*rhs_addr_opt);
+        rhs_attrs = use_pre_attrs ? rhs_astate.getPreAttrs().get(*rhs_addr_opt)
+                                  : rhs_astate.getPostAttrs().get(*rhs_addr_opt);
     }
     
     // Collect all attributes
@@ -463,11 +496,9 @@ PulseFormula PulseJoin::joinFormulas(const AbductiveDomain& lhs, const Abductive
     const PulseFormula& lhs_formula = lhs.getPathFormula();
     const PulseFormula& rhs_formula = rhs.getPathFormula();
     
-    // Join formulas (conjunction of both path conditions)
-    // This is different from merge - join creates a formula that represents
-    // "either lhs path condition OR rhs path condition"
-    // For now, we use merge as a conservative approximation
-    PulseFormula joined = PulseFormula::merge(lhs_formula, rhs_formula);
+    // Join formulas (disjunction): represent "lhs path condition OR rhs path condition".
+    // This must NOT conjoin constraints, otherwise feasible paths get dropped.
+    PulseFormula joined = PulseFormula::join(lhs_formula, rhs_formula);
     
     // TODO: Add equalities from rev_subst to formula
     // For each v_join in rev_subst mapping to (v_lhs, v_rhs),
@@ -564,13 +595,17 @@ PulseJoin::joinAbductive(const AbductiveDomain& lhs, const AbductiveDomain& rhs)
         llvm::Optional<AbstractValue> rhs_addr_opt = pair_opt.second;
         
         // Join post attributes
-        AttributeSet joined_post_attrs = joinAttributes(join_state, lhs, rhs, v_join, lhs_addr_opt, rhs_addr_opt);
+        AttributeSet joined_post_attrs =
+            joinAttributes(join_state, lhs, rhs, /*use_pre_attrs=*/false, v_join,
+                           lhs_addr_opt, rhs_addr_opt);
         for (Attribute attr : joined_post_attrs) {
             attrs_post_join.add(v_join, attr);
         }
         
         // Join pre attributes
-        AttributeSet joined_pre_attrs = joinAttributes(join_state, lhs, rhs, v_join, lhs_addr_opt, rhs_addr_opt);
+        AttributeSet joined_pre_attrs =
+            joinAttributes(join_state, lhs, rhs, /*use_pre_attrs=*/true, v_join,
+                           lhs_addr_opt, rhs_addr_opt);
         for (Attribute attr : joined_pre_attrs) {
             attrs_pre_join.add(v_join, attr);
         }

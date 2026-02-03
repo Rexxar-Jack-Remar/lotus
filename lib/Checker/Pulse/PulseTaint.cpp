@@ -8,6 +8,18 @@
 namespace pulse {
 
 //===----------------------------------------------------------------------===//
+// Taint
+//
+// Taint is an auxiliary analysis used by Pulse to detect source->sink flows.
+//
+// Sound incorrectness note:
+// - A taint report is ideally backed by a concrete feasible witness path.
+// - When modeling is incomplete (e.g., unknown/indirect calls), propagation may
+//   become conservative and can introduce false positives. Tighten behavior via
+//   `PulseTaintConfig` and models.
+//===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
 // TaintDomain Implementation
 //===----------------------------------------------------------------------===//
 

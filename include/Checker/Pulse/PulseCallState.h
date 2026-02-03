@@ -110,6 +110,9 @@ public:
                             "f" + std::to_string(acc.field_idx)));
                         break;
                     case AccessKind::ArrayIndex:
+                        // Preserve the symbolic index value. The physical stride
+                        // (if any) is part of `Access` identity for heap modeling,
+                        // but does not need to be rendered in the heap-path UI.
                         path_elements.push_back(HeapPath::Element(
                             HeapPath::PathElement::ArrayIndex, acc.index));
                         break;

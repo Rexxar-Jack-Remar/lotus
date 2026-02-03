@@ -53,6 +53,10 @@ struct LinearConstraint {
  */
 class PulseFormula {
 private:
+    // Bottom flag: represents an unsatisfiable/contradictory path condition.
+    // This is distinct from an empty formula (which represents "true").
+    bool is_contradiction_{false};
+
     // Track equalities: v1 = v2
     // Use union-find structure: each value maps to its canonical representative
     std::map<AbstractValue, AbstractValue> equalities_;
@@ -88,6 +92,15 @@ private:
     
 public:
     PulseFormula() = default;
+
+    /**
+     * Construct a contradiction (UNSAT) formula.
+     */
+    static PulseFormula contradiction() {
+        PulseFormula f;
+        f.is_contradiction_ = true;
+        return f;
+    }
     
     /**
      * Add equality constraint: v1 = v2
@@ -143,6 +156,11 @@ public:
     bool isConsistent() const;
 
     /**
+     * True if this is the contradiction element (UNSAT).
+     */
+    bool isContradiction() const { return is_contradiction_; }
+
+    /**
      * True if any null constraint (ptr == null) is assumed on this path.
      * Used for isManifest: latent when we've assumed null.
      */
@@ -158,6 +176,16 @@ public:
      * Merge two formulas (for join operations)
      */
     static PulseFormula merge(const PulseFormula& f1, const PulseFormula& f2);
+
+    /**
+     * Join (disjunction) of two formulas: over-approximate f1 ∨ f2.
+     * Keeps only facts that are stable across both branches (best-effort).
+     *
+     * This is the operation needed at CFG merge points in a Pulse-style engine:
+     * joining control flow must not conjoin path conditions, otherwise feasible
+     * bug witnesses are dropped (false negatives).
+     */
+    static PulseFormula join(const PulseFormula& f1, const PulseFormula& f2);
     
     /**
      * Clone formula

@@ -214,7 +214,10 @@ void SifaStats::stop(Key k) {
 }
 
 void SifaStats::startMax(Key k) {
-  start(k);
+  const int level = ++stopwatchNesting_[k];
+  if (level == 1) {
+    maxStarts_[k] = Clock::now();
+  }
 }
 
 void SifaStats::stopMax(Key k) {
@@ -224,8 +227,8 @@ void SifaStats::stopMax(Key k) {
   }
   const int level = --it->second;
   if (level == 0) {
-    auto startIt = starts_.find(k);
-    if (startIt != starts_.end()) {
+    auto startIt = maxStarts_.find(k);
+    if (startIt != maxStarts_.end()) {
       auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
           Clock::now() - startIt->second);
       durations_[k] += elapsed;
