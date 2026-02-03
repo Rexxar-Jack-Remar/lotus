@@ -1,11 +1,31 @@
 #ifndef NPA_LINEAR_SOLVERS_H
 #define NPA_LINEAR_SOLVERS_H
 
+/**
+ * \file
+ * \brief Solvers for the linearized equation system Df|ν(X) + δ = X.
+ *
+ * Each Newton round requires solving an LCFL equation system (when extend
+ * is non-commutative). Three strategies:
+ * - Worklist: chaotic iteration with dependency-driven worklist (conventional
+ *   fixpoint on the linear system).
+ * - SCC: Tarjan SCCs, solve in topological order, fixpoint per SCC (faster
+ *   when the dependency graph has nontrivial SCCs).
+ * - Tensor (see TensorLinearSolve.h): lift to paired semiring, solve as
+ *   left-linear (regular) system, project back (Reps et al. TOPLAS 2016).
+ *
+ * References: Esparza et al. (linearized system); Reps et al. (LCFL,
+ * regularization via tensor product, Alg. 3.4).
+ */
+
 #include "Dataflow/NPA/Core/Diff.h"
+#include "Dataflow/NPA/Core/Eval.h"
 #include "Dataflow/NPA/Core/LCFLDetector.h"
 
 namespace npa {
 
+/// Solve linear system (RHS = vector of Exp1) by worklist: repeatedly
+/// evaluate RHS under current env and push dependents until stable.
 template <class D>
 std::vector<DomVal<D>> solve_linear_worklist_impl(
     bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
@@ -51,6 +71,8 @@ std::vector<DomVal<D>> solve_linear_worklist_impl(
   return init;
 }
 
+/// Solve linear system by SCC: Tarjan to find SCCs, topological order on
+/// SCCs, then fixpoint iteration within each SCC (faster for cyclic deps).
 template <class D>
 std::vector<DomVal<D>>
 solve_linear_scc_impl(bool verbose,
@@ -141,12 +163,17 @@ solve_linear_scc_impl(bool verbose,
   return init;
 }
 
+/// Solve linear system via tensor product (Reps et al. Alg. 3.4): convert
+/// LCFL system to left-linear system over paired semiring, solve there,
+/// project back. Implemented in TensorLinearSolve.h.
 template <class D>
 std::vector<DomVal<D>>
 solve_linear_tensor_impl(bool verbose,
                          const std::vector<std::pair<Symbol, E1<D>>> &rhs,
                          std::vector<DomVal<D>> init);
 
+/// True if any equation has LCFL structure (Concat or InfClos). Tensor
+/// strategy is only applied when this holds (otherwise worklist is used).
 template <class D>
 inline bool system_has_lcfl_structure(
     const std::vector<std::pair<Symbol, E1<D>>> &rhs) {

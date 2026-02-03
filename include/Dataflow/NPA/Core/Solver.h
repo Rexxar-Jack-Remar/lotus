@@ -1,6 +1,22 @@
 #ifndef NPA_SOLVER_H
 #define NPA_SOLVER_H
 
+/**
+ * \file
+ * \brief Outer iteration: Kleene vs Newton; dispatches linear strategy.
+ *
+ * Solver<D, ITER> runs ITER until the vector of equation values stabilizes.
+ * - KleeneIter: κ^(i+1) = f(κ^(i)) (classical Kleene sequence, Eqn. (1) in
+ *   Esparza et al.).
+ * - NewtonIter: ν^(0) = ⊥ (or f(⊥)); ν^(i+1) = ν^(i) ⊔ LinearCorrectionTerm.
+ *   The correction is Δ^(i) = least solution of Df|ν^(i)(X) + δ^(i) = X
+ *   (Eqn. (2), (13)); then ν^(i+1) = ν^(i) ⊕ Δ^(i) (idempotent) or
+ *   ν^(i+1) = ν^(i) + Δ^(i) (non-idempotent). The linear system is solved
+ *   by Naive, Worklist, SCC, or TensorProduct (LinearStrategy).
+ *
+ * References: Esparza et al. (JACM); Reps et al. (TOPLAS 2016).
+ */
+
 #include "Dataflow/NPA/Core/TensorLinearSolve.h"
 
 namespace npa {
@@ -40,6 +56,8 @@ struct Solver {
   }
 };
 
+/// Kleene iteration: one round = evaluate all equations under current ν.
+/// κ^(i+1) = f(κ^(i)); no linear correction (Esparza et al. Eqn. (1)).
 template <class D>
 struct KleeneIter {
   using V = DomVal<D>;
@@ -56,6 +74,8 @@ struct KleeneIter {
   }
 };
 
+/// Newton iteration: one round = f(ν) plus least solution of Df|ν(X)+δ = X.
+/// δ = f(ν)−ν (or f(ν) when idempotent); Δ = solve linear system; ν' = ν⊕Δ.
 template <class D>
 struct NewtonIter {
   using V = DomVal<D>;

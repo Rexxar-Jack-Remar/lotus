@@ -1,18 +1,33 @@
 /**********************************************************************
- * Newtonian Program Analysis – generic C++14 header
+ * Newtonian Program Analysis (NPA) – generic C++14 header
+ *
+ * Implements Newton-style program analysis over ω-continuous semirings:
+ * - Kleene iteration: κ^(i+1) = f(κ^(i)).
+ * - Newton iteration: ν^(i+1) = ν^(i) ⊔ Δ^(i), where Δ^(i) is the least
+ *   solution of the \e linearized system Df|ν^(i)(X) + δ^(i) = X.
+ *
+ * The linearized system is an LCFL equation system when extend (⊗) is
+ * non-commutative; it can be solved by worklist, SCC, or tensor-product
+ * regularization (paired semiring → left-linear → project back).
+ *
+ * References:
+ * - Esparza et al., "Newtonian Program Analysis" (JACM): differential Df|ν,
+ *   Newton sequence, convergence to least fixed point.
+ * - Reps et al., "Newtonian Program Analysis via Tensor Product" (TOPLAS
+ *   2016): LCFL sub-problems, regularization via tensor product (Alg. 3.4).
  *
  * Based on OCaml NPA-PMA by Di Wang.
  *
- * This file is an umbrella header; implementation is split into:
- *   - Core/NPACommon.h         : domain concept + shared types
- *   - Core/Expressions.h       : Exp0/Exp1 AST
- *   - Core/Fixpoint.h          : generic fixpoint helpers
- *   - Core/Eval.h              : evaluators I0/I1
- *   - Core/Diff.h              : differential construction
- *   - Core/LinearSolvers.h     : worklist + SCC linear solvers
- *   - Core/TensorLinearSolve.h : tensor-product linear solver wrapper
- *   - Core/Solver.h            : Kleene/Newton outer iterators
- *
+ * Implementation split:
+ *   - Core/NPACommon.h         : domain concept (semiring) + LinearStrategy
+ *   - Core/Expressions.h       : Exp0 (polynomial) / Exp1 (linearized) AST
+ *   - Core/Fixpoint.h         : fix / fix_vec (Kleene-like iteration)
+ *   - Core/Eval.h             : I0 (Exp0) / I1 (Exp1) evaluators
+ *   - Core/Diff.h              : differential Df|ν construction
+ *   - Core/LCFLDetector.h     : detect LCFL structure (Concat/InfClos)
+ *   - Core/LinearSolvers.h    : worklist, SCC, tensor linear solvers
+ *   - Core/TensorLinearSolve.h: tensor-product solver (Alg. 3.4)
+ *   - Core/Solver.h           : KleeneIter / NewtonIter, Solver<D,ITER>
  *********************************************************************/
 #ifndef NPA_HPP
 #define NPA_HPP

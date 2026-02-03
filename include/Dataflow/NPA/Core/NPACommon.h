@@ -1,6 +1,23 @@
 #ifndef NPA_COMMON_H
 #define NPA_COMMON_H
 
+/**
+ * \file
+ * \brief NPA common types and domain concept (semiring).
+ *
+ * Newtonian Program Analysis (NPA) solves systems of equations over
+ * ω-continuous semirings. The framework expects a \e domain (semiring) D with:
+ * - combine (⊕), extend (⊗), zero (⊥), one (1)
+ * - optional: extend_lin (for linearized equations), subtract (non-idempotent)
+ *
+ * References:
+ * - Esparza et al., "Newtonian Program Analysis" (JACM): Newton sequence
+ *   ν^(i+1) = ν^(i) + Δ^(i) where Δ^(i) is the least solution of the linearized
+ *   system Df|ν^(i)(X) + δ^(i) = X.
+ * - Reps et al., "Newtonian Program Analysis via Tensor Product" (TOPLAS 2016):
+ *   Solving the LCFL linear sub-problems via tensor-product regularization.
+ */
+
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -19,11 +36,19 @@ namespace npa {
 
 using Symbol = std::string;
 
+/// Strategy for solving the \e linearized equation system on each Newton round.
+/// The linear system has the form Df|ν(X) + δ = X (LCFL equation system).
 enum class LinearStrategy {
-  Naive,         ///< Vector fixpoint (all vars updated each round)
-  Worklist,      ///< Dependency-driven worklist
-  SCC,           ///< SCC-based: solve in topological order, fixpoint per SCC
-  TensorProduct  ///< Lift to tensor space, solve, project back (TOPLAS 2016)
+  /// Vector fixpoint: update all variables each round (chaotic iteration).
+  Naive,
+  /// Dependency-driven worklist (chaotic iteration with dependency graph).
+  Worklist,
+  /// SCC-based: Tarjan SCCs, solve in topological order, fixpoint per SCC.
+  SCC,
+  /// Tensor-product (TOPLAS 2016): lift LCFL system to paired semiring,
+  /// solve as left-linear (regular) system, then project back. Only used when
+  /// the linear system has LCFL structure (Concat/InfClos).
+  TensorProduct
 };
 
 template <class T>
@@ -37,7 +62,11 @@ struct Stat {
 };
 
 /**********************************************************************
- * Domain concept (semiring)
+ * Domain concept (ω-continuous semiring)
+ *
+ * Required: zero, one, combine (⊕), extend (⊗), extend_lin, ndetCombine,
+ * condCombine, subtract, equal. See Esparza et al. for the semiring axioms
+ * and ω-continuity; NPA uses the least fixed point μf of f.
  *********************************************************************/
 template <class D>
 struct DomainHas {

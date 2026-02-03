@@ -1,10 +1,22 @@
 #ifndef NPA_FIXPOINT_H
 #define NPA_FIXPOINT_H
 
+/**
+ * \file
+ * \brief Generic fixpoint iteration (Kleene-like).
+ *
+ * Used for: 
+ * (1) Kleene sequence κ^(i+1) = f(κ^(i)) (single variable);
+ * (2) solving linear sub-systems (e.g. InfClos, or vector fixpoint for
+ * the linearized system). NPA's Newton iteration uses these to compute
+ * Δ^(i) as the least solution of Df|ν^(i)(X) + δ^(i) = X (Esparza et al.).
+ */
+
 #include "Dataflow/NPA/Core/NPACommon.h"
 
 namespace npa {
 
+/// Single-variable fixpoint: iterates until stable (κ^(i+1) = f(κ^(i))).
 template <class D, class F>
 auto fix(bool verbose, DomVal<D> init, F f) {
   NPA_REQUIRE_DOMAIN(D);
@@ -21,6 +33,8 @@ auto fix(bool verbose, DomVal<D> init, F f) {
   }
 }
 
+/// Vector fixpoint: iterates until all components stable (e.g. for linear
+/// system in Naive strategy: update all variables each round).
 template <class D, class Vec, class F>
 Vec fix_vec(bool verbose, Vec init, F f) {
   int cnt = 0;

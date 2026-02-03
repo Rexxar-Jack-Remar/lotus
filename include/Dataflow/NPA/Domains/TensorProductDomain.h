@@ -6,19 +6,20 @@
 namespace npa {
 
 /**
- * TensorProductDomain<D> – Tensor product of semiring D with itself
- * (TOPLAS 2016: Newtonian Program Analysis via Tensor Product)
+ * TensorProductDomain<D> – Paired semiring for LCFL regularization
+ * (Reps et al., "Newtonian Program Analysis via Tensor Product", TOPLAS 2016).
  *
- * Value type: pair (v_L, v_R) representing "left" and "right" context.
- * Used to convert LCFL (two-sided) linear systems into regular (one-sided)
- * systems in the tensor space.
+ * Value type: pair (v_L, v_R) representing left and right context. Used to
+ * convert an LCFL equation system Y_j = c_j ⊕ ⊕_{i,k} (a_{i,j,k} ⊗ Y_i ⊗
+ * b_{i,j,k}) into a \e left-linear system over pairs (Alg. 3.4). Pairing
+ * accumulates left/right coefficients separately so that the readout
+ * R((w1,w2)) = w1 ⊗ w2 recovers the desired mirrored correlation.
  *
- * Semiring structure (standard tensor product):
- *   zero  = (0, 0)
- *   one   = (1, 1)
- *   combine((a,b), (c,d)) = (combine(a,c), combine(b,d))
- *   extend((a,b), (c,d))  = (extend(a,c), extend(d,b))   // right component uses opposite product
+ * Paper notation: (a1,b1) ⊗_p (a2,b2) = (a2⊗a1, b1⊗b2); ⊕_p componentwise;
+ * R((a,b)) = a⊗b. extend((a,b), (c,d)) implements ⊗_p so that
+ * R(extend(p1,p2)) = R(p2)⊗R(p1) for the intended matching.
  *
+ * Semiring: zero = (0,0), one = (1,1), combine = ⊕_p, extend = ⊗_p.
  * Idempotent and subtract follow from D.
  */
 template <class D>
@@ -41,10 +42,9 @@ struct TensorProductDomain {
     return {D::combine(a.first, b.first), D::combine(a.second, b.second)};
   }
   static value_type extend(const value_type& a, const value_type& b) {
-    // a after b:
-    // left  composes normally,
-    // right composes in the opposite semiring (inner-right after outer-right).
-    return {D::extend(a.first, b.first), D::extend(b.second, a.second)};
+    // Paper: (a1,b1) ⊗_p (a2,b2) = (a2⊗a1, b1⊗b2). So extend(a,b) with a=(a1,b1),
+    // b=(a2,b2) must yield (a2⊗a1, b1⊗b2) so that R(extend(p1,p2))=R(p2)⊗R(p1).
+    return {D::extend(b.first, a.first), D::extend(a.second, b.second)};
   }
   static value_type extend_lin(const value_type& a, const value_type& b) {
     return extend(a, b);
@@ -60,11 +60,13 @@ struct TensorProductDomain {
     return {D::subtract(a.first, b.first), D::subtract(a.second, b.second)};
   }
 
-  /** Project tensor value back to base domain (e.g. left component). */
+  /** Project tensor value back to base domain (readout R((w1,w2)) = w1⊗w2). */
   static V project_left(const value_type& p) { return p.first; }
   static V project_right(const value_type& p) { return p.second; }
-  /** For idempotent semirings, left and right coincide at fixpoint; use left. */
-  static V project(const value_type& p) { return p.first; }
+  /** Readout R((a,b)) = a⊗b (Reps et al. Alg. 3.4). */
+  static V project(const value_type& p) {
+    return D::extend(p.first, p.second);
+  }
 };
 
 } // namespace npa

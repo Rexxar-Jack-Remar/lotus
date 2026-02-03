@@ -1,11 +1,26 @@
 #ifndef NPA_EVAL_H
 #define NPA_EVAL_H
 
+/**
+ * \file
+ * \brief Evaluators for polynomial (I0) and linearized (I1) expressions.
+ *
+ * - I0: evaluates Exp0 (full system f(X)) under a valuation ν for variables.
+ *   Used for Kleene step κ^(i+1) = f(κ^(i)) and for Newton step f(ν^(i)).
+ * - I1: evaluates Exp1 (linearized RHS) under a valuation for variables.
+ *   Used to compute the least solution of Df|ν(X) + δ = X by iterative
+ *   substitution (worklist, SCC, or after tensor conversion).
+ *
+ * Concat is evaluated as extend(t1_val, extend(mid, t2_val)) (LCFL form
+ * t1·X·t2). InfClos is the least fixpoint in the bound variable (Kleene star).
+ */
+
 #include "Dataflow/NPA/Core/Expressions.h"
 #include "Dataflow/NPA/Core/Fixpoint.h"
 
 namespace npa {
 
+/// Evaluator for polynomial expressions (Exp0).
 template <class D>
 struct I0 {
   using V = DomVal<D>;
@@ -72,7 +87,7 @@ private:
       v = env.at(e->sym);
       break;
     case Exp0<D>::Concat: {
-      // Linear context-free form: t1 · X · t2
+      // LCFL form t1·X·t2: value = t1_val ⊗ mid ⊗ t2_val (Reps et al. §3.1).
       auto it = env.find(e->sym);
       const V &mid = (it != env.end()) ? it->second : nu.at(e->sym);
       v = D::extend(rec(nu, env, e->t1), D::extend(mid, rec(nu, env, e->t2)));
@@ -93,6 +108,8 @@ private:
   }
 };
 
+/// Evaluator for linearized expressions (Exp1). Used when solving the
+/// linear system Df|ν(X) + δ = X (worklist, SCC, or tensor space).
 template <class D>
 struct I1 {
   using V = DomVal<D>;
@@ -122,6 +139,9 @@ private:
     case K::Seq:
       v = D::extend(e->c, rec(vars, env, e->t));
       break;
+    case K::SeqR:
+      v = D::extend(rec(vars, env, e->t), e->c);
+      break;
     case K::Call: {
       auto it = env.find(e->sym);
       const V &f = (it != env.end()) ? it->second : vars.at(e->sym);
@@ -146,6 +166,7 @@ private:
       v = env.at(e->sym);
       break;
     case K::Concat: {
+      // LCFL: a·Y·b -> a_val ⊗ Y ⊗ b_val (coefficients on both sides).
       auto it = env.find(e->sym);
       const V &mid = (it != env.end()) ? it->second : vars.at(e->sym);
       v = D::extend(rec(vars, env, e->t1), D::extend(mid, rec(vars, env, e->t2)));

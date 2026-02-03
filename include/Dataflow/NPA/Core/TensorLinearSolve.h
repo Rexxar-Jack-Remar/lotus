@@ -1,11 +1,28 @@
 #ifndef NPA_TENSOR_LINEAR_SOLVE_H
 #define NPA_TENSOR_LINEAR_SOLVE_H
 
+/**
+ * \file
+ * \brief Tensor-product linear solver (Reps et al. TOPLAS 2016, Alg. 3.4).
+ *
+ * Converts the LCFL linear system into a \e left-linear system over the
+ * paired semiring (TensorProductDomain): pair (a,b) represents left/right
+ * context so that a·Y·b becomes Z ⊗_p (a,b). The left-linear system is
+ * solved by worklist (or could use Tarjan path expressions); then we
+ * \e project back to the base domain (readout R((w1,w2)) = w1⊗w2).
+ *
+ * Note: R does not distribute over ⊕_p in general, so the result can be an
+ * over-approximation of the least solution; see paper §3.3 and §4.6 for
+ * conditions under which the least solution is obtained.
+ */
+
 #include "Dataflow/NPA/Core/LinearSolvers.h"
 #include "Dataflow/NPA/Domains/TensorProductDomain.h"
 
 namespace npa {
 
+/// Converts linearized expression over D to expression over TensorProductDomain<D>:
+/// each value v becomes (v,v); structure (Concat, InfClos, etc.) preserved.
 template <class D>
 struct Exp1ToTensor {
   using TD = TensorProductDomain<D>;
@@ -20,6 +37,8 @@ struct Exp1ToTensor {
       return Exp1<TD>::term(VT(e->c, e->c));
     case K::Seq:
       return Exp1<TD>::seq(VT(e->c, e->c), convert(e->t));
+    case K::SeqR:
+      return Exp1<TD>::seqR(convert(e->t), VT(e->c, e->c));
     case K::Call:
       return Exp1<TD>::call(e->sym, VT(e->c, e->c));
     case K::Cond:
@@ -42,6 +61,8 @@ struct Exp1ToTensor {
   }
 };
 
+/// Solve LCFL linear system by lifting to tensor space: convert RHS to
+/// TensorProductDomain, solve (left-linear over pairs), project back via R.
 template <class D>
 std::vector<DomVal<D>> solve_linear_tensor_impl(
     bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,

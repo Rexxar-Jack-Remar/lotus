@@ -1,7 +1,22 @@
 #ifndef NPA_DIFF_H
 #define NPA_DIFF_H
 
-#include "Dataflow/NPA/Core/Eval.h"
+/**
+ * \file
+ * \brief Differential construction: builds linearized expression Df|ν from f.
+ *
+ * Given the current approximation ν and a polynomial expression e (one
+ * equation of f), build the \e differential expression that corresponds to
+ * Df|ν. The result is an Exp1 (linear in the variables) such that the
+ * Newton round solves Df|ν(Δ) + δ = Δ, i.e. Δ^(i) is the least solution of
+ * the linearized system (Esparza et al. JACM, Defn. 3.1, 3.5).
+ *
+ * Rules: Term -> 0; Seq -> c·d(t); Call -> ν(f)·d(arg) + f(ν(arg)); Cond -> by
+ * branch; Ndet -> D(t1) ⊕ D(t2) (Defn 3.1 sum); Hole -> X; Bound -> 0;
+ * Concat -> D(t1)·ν_X·t2 + t1·X·t2 + t1·ν_X·D(t2); InfClos -> d(body).
+ */
+
+#include "Dataflow/NPA/Core/Expressions.h"
 
 namespace npa {
 
@@ -11,6 +26,7 @@ struct Diff {
   using M0 = E0<D>;
   using M1 = E1<D>;
   using Map = std::unordered_map<Symbol, V>;
+  /// Build the differential of e at ν; requires e to be evaluated (val set).
   static M1 build(const Map &nu, const M0 &e) { return aux(nu, e, clone(e)); }
 
 private:
@@ -40,25 +56,28 @@ private:
     case K0::Cond:
       return Exp1<D>::cond(o->phi, aux(nu, o->t1, cur->t1),
                            aux(nu, o->t2, cur->t2));
-    case K0::Ndet: {
-      auto a1 = aux(nu, o->t1, cur->t1), a2 = aux(nu, o->t2, cur->t2);
-      assert(o->t1->val.has_value() && o->t2->val.has_value() &&
-             o->val.has_value());
-      auto aug1 = Exp1<D>::add(Exp1<D>::term(*o->t1->val), a1);
-      auto aug2 = Exp1<D>::add(Exp1<D>::term(*o->t2->val), a2);
-      auto augmented = Exp1<D>::ndet(aug1, aug2);
-      return D::idempotent ? augmented
-                           : Exp1<D>::sub(augmented, Exp1<D>::term(*o->val));
-    }
+    case K0::Ndet:
+      // Paper Defn 3.1: D(∑ f_i)|ν(b) = ∑ Df_i|ν(b). So D(ndet(t1,t2)) = D(t1) ⊕ D(t2).
+      return Exp1<D>::add(aux(nu, o->t1, cur->t1), aux(nu, o->t2, cur->t2));
     case K0::Hole:
       return Exp1<D>::hole(o->sym);
     case K0::Bound:
       // Bound variables are local to Concat/InfClos; treat them as constants
       // w.r.t. the system variables.
       return Exp1<D>::term(D::zero());
-    case K0::Concat:
-      return Exp1<D>::concat(aux(nu, o->t1, cur->t1), o->sym,
-                             aux(nu, o->t2, cur->t2));
+    case K0::Concat: {
+      // Product rule: D(t1·X·t2)|ν(b) = D(t1)·ν_X·t2 + t1·b·t2 + t1·ν_X·D(t2)
+      // (Esparza et al. Defn. 3.1: D(g·h) = D(g)·h(v) + g(v)·D(h)).
+      assert(o->t1->val.has_value() && o->t2->val.has_value());
+      V t1_val = *o->t1->val, t2_val = *o->t2->val;
+      V nu_x = nu.at(o->sym);
+      M1 d1 = aux(nu, o->t1, cur->t1), d2 = aux(nu, o->t2, cur->t2);
+      M1 term1 = Exp1<D>::seqR(d1, D::extend(nu_x, t2_val));
+      M1 term2 = Exp1<D>::concat(Exp1<D>::term(t1_val), o->sym,
+                                 Exp1<D>::term(t2_val));
+      M1 term3 = Exp1<D>::seq(t1_val, Exp1<D>::seq(nu_x, d2));
+      return Exp1<D>::add(Exp1<D>::add(term1, term2), term3);
+    }
     case K0::InfClos:
       return Exp1<D>::inf(aux(nu, o->t, cur->t), o->sym);
     }

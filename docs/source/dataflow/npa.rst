@@ -19,14 +19,21 @@ Conceptual Background
 NPA is based on a sequence of works that recast program analysis as a
 form of **Newton iteration** over suitable abstract domains:
 
-* *Newtonian Program Analysis*, JACM 2010 [EsparzaKieferLuttenberger2010]_.
-* *Newtonian Program Analysis via Tensor Product*, POPL 2016.
+* *Newtonian Program Analysis* (JACM 2010) [EsparzaKieferLuttenberger2010]_:
+  algebraic differential :math:`Df|_\nu`, Newton sequence, convergence to least fixed point.
+* *Newtonian Program Analysis via Tensor Product* (TOPLAS 2016) [RepsEtAlTOPLAS2016]_:
+  solving the **LCFL** (linear context-free language) sub-problems produced each
+  Newton round by "regularizing" them via a **tensor product** (paired semiring).
 * *Compositional Recurrence Analysis Revisited*, PLDI 2017.
 
-The foundational paper [EsparzaKieferLuttenberger2010]_ presents a novel generic
-technique for solving interprocedural dataflow equations by generalizing
-Newton's method (the 300-year-old technique for computing zeros of differentiable
-functions) to **ω-continuous semirings**.
+The foundational paper [EsparzaKieferLuttenberger2010]_ (JACM) presents a novel
+generic technique for solving interprocedural dataflow equations by generalizing
+Newton's method to **ω-continuous semirings**. When the semiring multiplication
+is **non-commutative** (e.g. function composition in dataflow), the linearized
+system at each Newton round is an **LCFL equation system** (coefficients on both
+sides of variables). [RepsEtAlTOPLAS2016]_ shows
+how to convert such systems into left-linear (regular) form over a paired semiring,
+then solve and project back (Algorithm 3.4).
 
 Key Insight: Algebraic Generalization
 --------------------------------------
@@ -120,6 +127,26 @@ For probabilistic programs with recursive procedures, Newton's method converges
 substantially faster than Kleene iteration, achieving linear rather than logarithmic
 convergence.
 
+LCFL Sub-Problems and Tensor-Product Regularization
+--------------------------------------------------
+
+When the semiring extend (multiplication) is **non-commutative**, the linearized
+system at each Newton round has the form of an **LCFL equation system**
+:math:`Y_j = c_j \oplus \bigoplus_{i,k} (a_{i,j,k} \otimes Y_i \otimes b_{i,j,k})`
+(Reps et al. TOPLAS 2016, Definition 3.1): coefficients appear on **both sides**
+of variables, corresponding to path problems described by linear context-free
+languages. Conventional intraprocedural (regular) solvers cannot be applied
+directly.
+
+The **tensor-product** approach (Algorithm 3.4 in [RepsEtAlTOPLAS2016]_):
+(1) Convert the LCFL system into a **left-linear** system over a **paired**
+semiring :math:`(a,b) \otimes_p (a',b') = (a' \otimes a, b \otimes b')`,
+:math:`R((w_1,w_2)) = w_1 \otimes w_2`; (2) solve the left-linear system
+(e.g. by worklist or path expressions); (3) **project** back via :math:`R`.
+The paired structure maintains the mirrored correlation of left/right
+coefficients. The implementation uses ``TensorProductDomain`` and
+``solve_linear_tensor_impl`` when the system has LCFL structure (Concat/InfClos).
+
 Other Applications
 ------------------
 
@@ -141,6 +168,25 @@ NPA supports both **distributive** and **non-distributive** program analyses:
   fixed point is an **overapproximation** of the JOP solution, but still provides a
   sound analysis result. Examples include constant propagation analysis.
 
+Core Implementation (include/Dataflow/NPA/Core)
+===============================================
+
+The core headers implement the algorithms from Esparza et al. (JACM) and Reps et al. (TOPLAS 2016):
+
+* **NPACommon.h**: Domain concept (ω-continuous semiring), ``LinearStrategy``
+  (Naive, Worklist, SCC, TensorProduct).
+* **Expressions.h**: ``Exp0`` (polynomial equation AST), ``Exp1`` (linearized AST);
+  ``Concat`` encodes the LCFL form :math:`a \cdot X \cdot b`.
+* **Diff.h**: Builds the differential :math:`Df|_\nu` from a polynomial expression
+  (Esparza et al. JACM, Defn. 3.1, 3.5).
+* **Eval.h**: ``I0`` evaluates Exp0 (full system); ``I1`` evaluates Exp1 (linear RHS).
+* **Fixpoint.h**: ``fix`` / ``fix_vec`` for Kleene-like iteration.
+* **LCFLDetector.h**: Detects Concat/InfClos (LCFL structure).
+* **LinearSolvers.h**: ``solve_linear_worklist_impl``, ``solve_linear_scc_impl``,
+  ``solve_linear_tensor_impl`` for the linearized system.
+* **TensorLinearSolve.h**: Tensor-product solver (Reps et al. Alg. 3.4).
+* **Solver.h**: ``KleeneIter`` (κ^(i+1) = f(κ^(i))), ``NewtonIter`` (ν^(i+1) = ν^(i) ⊔ Δ^(i)).
+
 Usage Notes
 ===========
 
@@ -156,6 +202,10 @@ within Lotus.
 
 References
 ==========
+
+.. [RepsEtAlTOPLAS2016] Thomas Reps, Emma Turetsky, and Prathmesh Prabhu.
+   Newtonian Program Analysis via Tensor Product. ACM Transactions on Programming
+   Languages and Systems (TOPLAS), 2016. (Portions in POPL 2016.)
 
 .. [EsparzaKieferLuttenberger2010] Javier Esparza, Stefan Kiefer, and Michael Luttenberger.
    Newtonian Program Analysis. Journal of the ACM, 57(6):1-47, 2010.

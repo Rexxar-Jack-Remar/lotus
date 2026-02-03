@@ -1,6 +1,27 @@
 #ifndef NPA_EXPRESSIONS_H
 #define NPA_EXPRESSIONS_H
 
+/**
+ * \file
+ * \brief Expression AST for polynomial (Exp0) and linearized (Exp1) equation systems.
+ *
+ * Interprocedural dataflow is formulated as X = f(X) over a semiring. NPA
+ * linearizes f at the current approximation ν to obtain a system of \e linear
+ * equations; when multiplication is non-commutative, that system has the form
+ * of an \e LCFL equation system (linear context-free language).
+ *
+ * - \e Exp0: polynomial expressions (terms, seq, call, cond, ndet, hole/bound,
+ *   concat, inf-closure). Used for the full system f(X).
+ * - \e Exp1: linearized expressions; adds Add/Sub for the differential form.
+ *   Used for the right-hand side of Df|ν(X) + δ = X. Concat (t1·X·t2) and
+ *   InfClos correspond to LCFL structure (coefficients on both sides of X).
+ *
+ * References:
+ * - Esparza et al. (JACM): differential Df|ν; linearized system.
+ * - Reps et al. (TOPLAS 2016): LCFL equation system Y_j = c_j ⊕ ⊕_{i,k}
+ *   (a_{i,j,k} ⊗ Y_i ⊗ b_{i,j,k}); Concat encodes a·Y·b.
+ */
+
 #include "Dataflow/NPA/Core/NPACommon.h"
 
 namespace npa {
@@ -10,6 +31,9 @@ struct Exp0;
 template <class D>
 using E0 = std::shared_ptr<Exp0<D>>;
 
+/// Polynomial expression (full equation system f(X)).
+/// Kinds: Term (constant), Seq (c·t), Call (procedure call), Cond, Ndet,
+/// Hole/Bound (variable), Concat (t1·X·t2, LCFL form), InfClos (Kleene star).
 template <class D>
 struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
   using V = DomVal<D>;
@@ -70,6 +94,9 @@ struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
     e->sym = std::move(x);
     return e;
   }
+  /// LCFL form: a·X·b (left coeff a, variable X, right coeff b). In the
+  /// linearized system this yields terms a⊗Y⊗b that cannot be rearranged
+  /// when extend is non-commutative (Reps et al. TOPLAS 2016, Defn. 3.1).
   static E0<D> concat(E0<D> a, Symbol x, E0<D> b) {
     auto e = std::make_shared<Exp0>();
     e->k = Concat;
@@ -92,11 +119,14 @@ struct Exp1;
 template <class D>
 using E1 = std::shared_ptr<Exp1<D>>;
 
+/// Linearized expression (right-hand side of Df|ν(X) + δ = X). Adds Add/Sub
+/// for combine and differential; Concat/InfClos preserved from Exp0 (LCFL).
 template <class D>
 struct Exp1 : Dirty {
   using V = DomVal<D>;
   using T = DomTest<D>;
-  enum K { Term, Seq, Call, Cond, Ndet, Hole, Bound, Concat, InfClos, Add, Sub };
+  enum K { Term, Seq, SeqR, Call, Cond, Ndet, Hole, Bound, Concat, InfClos,
+           Add, Sub };
   K k;
   V c;
   Symbol sym;
@@ -128,6 +158,14 @@ struct Exp1 : Dirty {
     e->k = Seq;
     e->c = c;
     e->t = t;
+    return e;
+  }
+  /// Right sequence: expr · constant (for differential D(expr)·constant).
+  static E1<D> seqR(E1<D> t, V c) {
+    auto e = std::make_shared<Exp1>();
+    e->k = SeqR;
+    e->t = t;
+    e->c = c;
     return e;
   }
   static E1<D> call(Symbol f, V c) {
@@ -182,6 +220,8 @@ struct Exp1 : Dirty {
   }
 };
 
+/// Collects variable symbols on which a linearized expression depends
+/// (Hole, Call, Concat, InfClos). Used for worklist and dependency graph.
 template <class D>
 struct DepFinder {
   using Set = std::unordered_set<Symbol>;
@@ -204,6 +244,9 @@ struct DepFinder {
       break;
     case K::InfClos:
       deps.insert(e->sym);
+      find(e->t, deps);
+      break;
+    case K::SeqR:
       find(e->t, deps);
       break;
     default:
