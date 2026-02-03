@@ -15,9 +15,9 @@ namespace mono {
 
 // Compute forward reachability using backward dataflow analysis.
 // This analysis determines which instructions can be executed from each program point.
-[[nodiscard]] std::unique_ptr<DataFlowResult> runReachableAnalysis(llvm::Function *f);
+std::unique_ptr<DataFlowResult> runReachableAnalysis(llvm::Function *f);
 
-[[nodiscard]] std::unique_ptr<DataFlowResult> runReachableAnalysis(
+std::unique_ptr<DataFlowResult> runReachableAnalysis(
     llvm::Function *f,
     const std::function<bool(llvm::Instruction *i)> &filter);
 

@@ -1,11 +1,16 @@
 #ifndef ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
 #define ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
 
-#include "Dataflow/Mono/MonoFramework.h"
+#include "Dataflow/Mono/InterMonoProblem.h"
+#include "Dataflow/Mono/ControlFlow/InterCFG.h"
 #include "Dataflow/Mono/Solver/CallStringInterProceduralDataFlow.h"
 
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Support/raw_ostream.h"
 
+#include <algorithm>
+#include <map>
 #include <memory>
 #include <set>
 #include <vector>
@@ -18,17 +23,21 @@ public:
   using mono_container_t = typename AnalysisDomainTy::mono_container_t;
   using ResultTy = dataflow::ContextSensitiveDataFlowResult<K, mono_container_t>;
   using Context = typename ResultTy::Context;
+  using ContextKey = typename ResultTy::ContextKey;
+  using ICFG = mono::InterCFG;
 
   explicit InterMonoSolver(ProblemTy &Problem) : Problem(Problem) {}
 
   void solve() {
     auto &Entries = Problem.getEntryPoints();
-    if (Entries.empty()) {
+    const auto Seeds = Problem.initialSeeds();
+    if (Entries.empty() && Seeds.empty()) {
       return;
     }
 
     dataflow::CallStringInterProceduralDataFlowEngine<K, mono_container_t>
         Engine;
+
     auto ComputeGEN = [this](llvm::Instruction *Inst, ResultTy *DF) {
       computeGEN(Inst, DF);
     };
@@ -51,14 +60,87 @@ public:
                              mono_container_t &OUT, ResultTy *DF) {
       computeOUT(Inst, Ctx, OUT, DF);
     };
+    auto Equal = [this](const mono_container_t &Lhs, const mono_container_t &Rhs) {
+      return Problem.equal_to(Lhs, Rhs);
+    };
+    auto GetCallees = [this](llvm::Instruction *Inst) {
+      return getCalleesOfCallAt(Inst);
+    };
 
-    auto *Raw = Engine.applyForward(
-        Entries.front(), ComputeGEN, ComputeKILL, InitializeIN, InitializeOUT,
-        ComputeIN, ComputeOUT);
+    std::vector<ContextKey> RootKeys;
+    std::map<ContextKey, mono_container_t> SeedIns;
+
+    Context EmptyCtx;
+    for (const auto &Seed : Seeds) {
+      RootKeys.push_back(ContextKey{Seed.first, EmptyCtx});
+      SeedIns[ContextKey{Seed.first, EmptyCtx}] = Seed.second;
+    }
+
+    if (RootKeys.empty()) {
+      // Default seed: start at each entry's first instruction with TOP.
+      for (auto *Entry : Entries) {
+        if (Entry == nullptr || Entry->isDeclaration() || Entry->empty()) {
+          continue;
+        }
+        RootKeys.push_back(ContextKey{&*Entry->getEntryBlock().begin(), EmptyCtx});
+      }
+    }
+
+    llvm::Module *M = nullptr;
+    if (!RootKeys.empty() && RootKeys.front().Inst != nullptr) {
+      M = RootKeys.front().Inst->getModule();
+    }
+
+    // Select ICFG (provided by the problem or LLVM fallback).
+    OwnedICF.reset();
+    ICF = nullptr;
+    if (auto *Provided = Problem.getICFG()) {
+      ICF = Provided;
+    } else {
+      auto GetCallees = [this](llvm::Instruction *Inst) {
+        return Problem.getCalleesOfCallAt(Inst);
+      };
+      OwnedICF = std::make_unique<LLVMInterCFG>(M, GetCallees);
+      ICF = OwnedICF.get();
+    }
+
+    auto *Raw = Engine.applyForwardFromSeeds(
+        M, RootKeys, ICF, SeedIns, ComputeGEN, ComputeKILL, InitializeIN,
+        InitializeOUT, ComputeIN, ComputeOUT, Equal, GetCallees);
     Result.reset(Raw);
   }
 
-  [[nodiscard]] const ResultTy *getResults() const { return Result.get(); }
+  const ResultTy *getResults() const { return Result.get(); }
+
+  void dumpResults(llvm::raw_ostream &OS = llvm::outs()) const {
+    OS << "\n================ InterMonoSolver results ================\n";
+    if (!Result) {
+      OS << "No results computed!\n";
+      return;
+    }
+    for (const auto &Cell : Result->getINMap()) {
+      const auto &Key = Cell.first;
+      const auto &Facts = Cell.second;
+      OS << "Instruction: ";
+      if (Key.Inst != nullptr) {
+        OS << *Key.Inst;
+      } else {
+        OS << "<null>";
+      }
+      OS << "\n";
+      Key.Ctx.print(OS) << "\n";
+      OS << "Facts: ";
+      if (Facts.empty()) {
+        OS << "EMPTY\n";
+      } else {
+        Problem.printContainer(OS, Facts);
+        OS << "\n";
+      }
+    }
+  }
+
+  void emitTextReport(llvm::raw_ostream & /*OS*/ = llvm::outs()) const {}
+  void emitGraphicalReport(llvm::raw_ostream & /*OS*/ = llvm::outs()) const {}
 
 private:
   static bool isFunctionEntry(llvm::Instruction *Inst) {
@@ -99,6 +181,10 @@ private:
     return false;
   }
 
+  std::vector<llvm::Function *> getCalleesOfCallAt(llvm::Instruction *Inst) const {
+    return Problem.getCalleesOfCallAt(Inst);
+  }
+
   void initializeIN(llvm::Instruction *, mono_container_t &IN) {
     IN = Problem.allTop();
   }
@@ -122,22 +208,46 @@ private:
     mono_container_t Incoming;
     auto &PredIn = DF->IN(PredInst, PredCtx);
 
-    if (isFunctionEntry(Inst) && llvm::isa<llvm::CallBase>(PredInst) &&
-        getDirectCallee(PredInst) == Inst->getFunction()) {
-      Incoming = Problem.callFlow(PredInst, Inst->getFunction(), PredIn);
+    if (isFunctionEntry(Inst) && llvm::isa<llvm::CallBase>(PredInst)) {
+      const auto Callees = getCalleesOfCallAt(PredInst);
+      bool Matches = false;
+      for (auto *Callee : Callees) {
+        if (Callee == Inst->getFunction()) {
+          Matches = true;
+          break;
+        }
+      }
+      if (Matches) {
+        Incoming = Problem.callFlow(PredInst, Inst->getFunction(), PredIn);
+      } else {
+        Incoming = Problem.allTop();
+      }
     } else if (llvm::isa<llvm::ReturnInst>(PredInst)) {
       Context CallerCtx = PredCtx;
       auto *CallSite = CallerCtx.pop_back();
       if (CallSite != nullptr) {
         Incoming = Problem.returnFlow(CallSite, PredInst->getFunction(),
                                       PredInst, Inst, PredIn);
+      } else {
+        // Phasar-like: allow return-flow for empty contexts by fanning out to
+        // all callers of the current callee.
+        mono_container_t Merged;
+        if (ICF != nullptr) {
+          for (auto *Caller : ICF->getCallersOf(PredInst->getFunction())) {
+          auto RetFacts = Problem.returnFlow(
+              Caller, PredInst->getFunction(), PredInst, Inst, PredIn);
+          if (Merged.empty()) {
+            Merged = RetFacts;
+          } else {
+            Merged = Problem.merge(Merged, RetFacts);
+          }
+        }
+        }
+        Incoming = Merged.empty() ? Problem.allTop() : Merged;
       }
     } else if (llvm::isa<llvm::CallBase>(PredInst) &&
                isContinuationOfCall(Inst, PredInst)) {
-      std::vector<llvm::Function *> Callees;
-      if (auto *Callee = getDirectCallee(PredInst)) {
-        Callees.push_back(Callee);
-      }
+      const auto Callees = getCalleesOfCallAt(PredInst);
       Incoming = Problem.callToRetFlow(PredInst, Inst, Callees, PredIn);
     } else {
       Incoming = Problem.normalFlow(PredInst, PredIn);
@@ -157,7 +267,13 @@ private:
 
   ProblemTy &Problem;
   std::unique_ptr<ResultTy> Result;
+  std::unique_ptr<LLVMInterCFG> OwnedICF;
+  const ICFG *ICF = nullptr;
 };
+
+template <typename Problem, unsigned K>
+using InterMonoSolver_P =
+    InterMonoSolver<typename Problem::ProblemAnalysisDomain, K>;
 
 } // namespace mono
 

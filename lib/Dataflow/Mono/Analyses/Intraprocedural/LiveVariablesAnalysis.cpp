@@ -3,7 +3,9 @@
  * Author: rainoftime
 */
 #include "Dataflow/Mono/Analyses/Intraprocedural/LiveVariablesAnalysis.h"
-#include "Dataflow/Mono/MonoFramework.h"
+#include "Dataflow/Mono/IntraMonoProblem.h"
+#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
+#include "Dataflow/Mono/Solver/IntraMonoSolver.h"
 
 using namespace llvm;
 

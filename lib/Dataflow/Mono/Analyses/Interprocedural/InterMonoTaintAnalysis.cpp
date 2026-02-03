@@ -1,4 +1,5 @@
 #include "Dataflow/Mono/Analyses/Interprocedural/InterMonoTaintAnalysis.h"
+#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
 #include "Dataflow/Mono/Solver/InterMonoSolver.h"
 
 #include "llvm/IR/Instructions.h"
@@ -115,7 +116,7 @@ public:
     return Seeds;
   }
 
-  [[nodiscard]] const InterMonoTaintReport &getReport() const {
+  const InterMonoTaintReport &getReport() const {
     return Report;
   }
 

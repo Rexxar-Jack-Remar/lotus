@@ -1,5 +1,7 @@
 #include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoUninitVariables.h"
-#include "Dataflow/Mono/MonoFramework.h"
+#include "Dataflow/Mono/IntraMonoProblem.h"
+#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
+#include "Dataflow/Mono/Solver/IntraMonoSolver.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"

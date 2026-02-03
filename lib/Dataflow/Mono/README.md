@@ -8,4 +8,4 @@ Monotone dataflow analysis frameworks for intraprocedural and interprocedural an
 - **Analyses/Intraprocedural/** — Constant propagation, uninit variables, liveness, reachability
 - **Analyses/Interprocedural/** — Interprocedural taint analysis
 
-**Headers (include/Dataflow/Mono/):** `DataFlow.h` (umbrella), `DataFlowResult.h`, `MonoFramework.h`; `Solver/` and `Analyses/Intraprocedural|Interprocedural/` mirror the source layout.
+**Headers (include/Dataflow/Mono/):** `DataFlow.h` (umbrella), `DataFlowResult.h`; core interfaces in `IntraMonoProblem.h`, `InterMonoProblem.h`, `LLVMMonoAnalysisDomain.h`, and `Solver/`.

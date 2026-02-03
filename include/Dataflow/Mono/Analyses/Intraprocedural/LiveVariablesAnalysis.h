@@ -30,7 +30,7 @@ namespace mono {
  * @param f The function to analyze
  * @return DataFlowResult containing live SSA value sets for each instruction
  */
-[[nodiscard]] std::unique_ptr<DataFlowResult> runLiveVariablesAnalysis(llvm::Function *f);
+std::unique_ptr<DataFlowResult> runLiveVariablesAnalysis(llvm::Function *f);
 
 } // namespace mono
 

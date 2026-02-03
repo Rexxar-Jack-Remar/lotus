@@ -37,7 +37,7 @@ struct InterMonoTaintAnalysisResult {
 };
 
 // Interprocedural taint analysis (call-string length is fixed at 2).
-[[nodiscard]] InterMonoTaintAnalysisResult
+InterMonoTaintAnalysisResult
 runInterMonoTaintAnalysis(llvm::Function *Entry,
                           const InterMonoTaintConfig &Config);
 
