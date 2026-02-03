@@ -18,6 +18,7 @@ namespace kint {
 #include <llvm/ADT/SetVector.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
+#include <llvm/Support/Casting.h>
 #include <z3++.h>
 
 #include <chrono>
@@ -68,6 +69,9 @@ private:
     z3::expr getIntExpr(const Value* v, BasicBlock* cur, BasicBlock* pred);
     z3::expr getPtrExpr(const Value* v, BasicBlock* cur, BasicBlock* pred);
     z3::expr gepOffsetBytes(const GetElementPtrInst* gep, BasicBlock* cur, BasicBlock* pred);
+    bool maybeCheckOOB(const Instruction* at, const Value* ptrOperand, uint64_t accessBytes,
+                       BasicBlock* cur, BasicBlock* pred);
+    bool addWellDefinedConstraints(BinaryOperator* op, BasicBlock* cur, BasicBlock* pred);
     void ensureObject(const Value* obj, const std::string& hintName, const z3::expr& sizeBytes,
                       bool sizeKnown);
     bool isLittleEndian() const;

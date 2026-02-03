@@ -10,3 +10,8 @@ SMT-based model checking components used throughout Lotus.
    cudd
    smt
    wpds
+   smtsampler
+   symabs
+   slot
+   staub
+   egraphs_simp

@@ -38,16 +38,15 @@ See :doc:`../ir/index` for builder APIs and code snippets.
 * **DyckVFG** – Value Flow Graph variant designed for Dyck-based alias
   analyses (``lib/Alias/DyckAA/DyckVFG.cpp``).
 
-Constraint Solving
-------------------
+Machine Learning Features
+------------------------
 
-See :doc:`../solvers/index` for solver APIs.
+See :doc:`../ml/index` for ML feature extraction APIs.
 
-* **SMT Solving** – Z3-backed reasoning under ``lib/Solvers/SMT``.
-* **Binary Decision Diagram (BDD)** – CUDD-based symbolic set operations
-  (``lib/Solvers/CUDD``).
-* **Weighted Pushdown Systems (WPDS)** – Interprocedural reachability library
-  (``lib/Solvers/WPDS``).
+* **CanaryML** – Memory-related feature extraction using Sea-DSA for ML applications
+  (``lib/ML/``). Provides ``MemoryMLFeaturesPass`` for extracting memory access
+  patterns and structural features from call sites, useful for training memory
+  safety predictors.
 
 Abstract Interpretation
 -----------------------

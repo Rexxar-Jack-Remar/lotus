@@ -2,8 +2,9 @@
  * @file GlobalValueFlowAnalysis.cpp
  * @brief Global Value Flow Analysis using Dyck VFG
  *
- * Tracks data flow from vulnerability sources to sinks with optimized (fast)
- * and detailed (precise) analysis modes, plus context-sensitive CFL reachability.
+ * Tracks data flow from vulnerability sources to sinks using a fast index for
+ * pruning and lazy refinement for source attribution / witness traces, plus
+ * context-sensitive CFL reachability.
  */
 
 #include <llvm/IR/Argument.h>
@@ -15,9 +16,8 @@
 
 
 #include "Analysis/GVFA/GlobalValueFlowAnalysis.h"
-#include "Analysis/GVFA/FastGVFAEngine.h"
 #include "Analysis/GVFA/GVFAUtils.h"
-#include "Analysis/GVFA/PreciseGVFAEngine.h"
+#include "Analysis/GVFA/HybridGVFAEngine.h"
 #include "Checker/GVFA/GVFAVulnerabilityChecker.h"
 #include "Utils/LLVM/RecursiveTimer.h"
 
@@ -30,10 +30,6 @@ using namespace gvfa;
 static cl::opt<bool> EnableOnlineQuery("enable-online-query",
                                        cl::desc("enable online query"),
                                        cl::init(false));
-
-static cl::opt<bool> EnableFastVFA("enable-fast-vfa",
-                                 cl::desc("enable fast (bit-vector) value flow analysis"),
-                                 cl::init(true), cl::ReallyHidden);
 
 // Mutex for thread-safe online query timing
 static std::mutex ClearMutex;
@@ -108,11 +104,8 @@ void DyckGlobalValueFlowAnalysis::run() {
     outs() << "#Sources: " << SourcesVec.size() << "\n";
     outs() << "#Sinks: " << Sinks.size() << "\n";
     
-    if (EnableFastVFA.getValue()) {
-        Engine = std::make_unique<FastGVFAEngine>(M, VFG, DyckAA, DyckMRA, SourcesVec, Sinks);
-    } else {
-        Engine = std::make_unique<PreciseGVFAEngine>(M, VFG, DyckAA, DyckMRA, SourcesVec, Sinks);
-    }
+    Engine = std::make_unique<HybridGVFAEngine>(M, VFG, DyckAA, DyckMRA,
+                                                std::move(SourcesVec), Sinks);
     
     Engine->run();
 }

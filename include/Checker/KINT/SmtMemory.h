@@ -2,6 +2,7 @@
 
 #include <z3++.h>
 
+#include <string>
 #include <vector>
 
 namespace kint {
@@ -23,6 +24,9 @@ public:
     void pop();
     void reset();
 
+    // Conservatively forget all current memory contents (represents unknown side effects).
+    void havoc(const std::string& hint = "havoc");
+
     // Loads/stores raw byte vectors of width (numBytes * 8).
     z3::expr loadBytes(const z3::expr& addr, unsigned numBytes, bool littleEndian = true) const;
     void storeBytes(const z3::expr& addr, const z3::expr& value, unsigned numBytes, bool littleEndian = true);
@@ -32,7 +36,13 @@ public:
     void storeInt(const z3::expr& addr, const z3::expr& value, unsigned bitWidth, unsigned storeSizeBytes,
                   bool littleEndian = true);
 
+    // Helpers for modeling common memory intrinsics when the length is constant.
+    // For large lengths, callers should prefer `havoc()` to avoid large constraint sets.
+    void memsetBytes(const z3::expr& dst, const z3::expr& byteVal, uint64_t numBytes);
+    void memcpyBytes(const z3::expr& dst, const z3::expr& src, uint64_t numBytes);
+
 private:
+    z3::expr freshMemory(const std::string& hint) const;
     z3::expr addrAdd(const z3::expr& addr, uint64_t byteOffset) const;
 
     z3::context& m_ctx;

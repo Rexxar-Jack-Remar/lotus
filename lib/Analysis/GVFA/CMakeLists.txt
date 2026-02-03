@@ -2,6 +2,7 @@ set(GVFA_SOURCES
   GlobalValueFlowAnalysis.cpp
   GVFAEngine.cpp
   FastGVFAEngine.cpp
+  HybridGVFAEngine.cpp
   PreciseGVFAEngine.cpp
   GVFAUtils.cpp
 )

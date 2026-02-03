@@ -9,10 +9,10 @@ using namespace gvfa;
 
 GVFAEngine::GVFAEngine(Module *M, DyckVFG *VFG, DyckAliasAnalysis *DyckAA, 
                        DyckModRefAnalysis *DyckMRA,
-                       std::vector<std::pair<const Value *, int>> &SourcesVec,
+                       std::vector<std::pair<const Value *, int>> SourcesVec,
                        const VulnerabilitySinksType &Sinks)
     : M(M), VFG(VFG), DyckAA(DyckAA), DyckMRA(DyckMRA), 
-      SourcesVec(SourcesVec), Sinks(Sinks) {}
+      SourcesVec(std::move(SourcesVec)), Sinks(Sinks) {}
 
 // Base implementation uses ReachabilityMap (BitVector)
 int GVFAEngine::reachable(const Value *V, int Mask) {
@@ -199,4 +199,3 @@ void GVFAEngine::processReturnSite(const ReturnInst *RI, const Value *V, int Mas
         }
     }
 }
-

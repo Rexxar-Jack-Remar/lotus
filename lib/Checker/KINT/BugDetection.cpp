@@ -75,7 +75,7 @@ typename std::enable_if<!std::is_pointer<I>::value>::type BugDetection::mark_err
 }
 
 bool BugDetection::add_range_cons(const crange& rng, const z3::expr& bv, z3::solver& solver) {
-    if (rng.isFullSet() || bv.is_const())
+    if (rng.isFullSet() || bv.is_numeral())
         return true;
 
     if (rng.isEmptySet()) {
@@ -83,10 +83,18 @@ bool BugDetection::add_range_cons(const crange& rng, const z3::expr& bv, z3::sol
         return false;
     }
 
-    solver.add(
-        z3::ule(bv, solver.ctx().bv_val(rng.getUnsignedMax().getZExtValue(), rng.getBitWidth())));
-    solver.add(
-        z3::uge(bv, solver.ctx().bv_val(rng.getUnsignedMin().getZExtValue(), rng.getBitWidth())));
+    // Ensure bit-width match between the range and the symbolic value.
+    z3::expr v = bv;
+    const unsigned vbw = v.get_sort().bv_size();
+    const unsigned rbw = rng.getBitWidth();
+    if (vbw < rbw) {
+        v = z3::zext(v, rbw - vbw);
+    } else if (vbw > rbw) {
+        v = v.extract(rbw - 1, 0);
+    }
+
+    solver.add(z3::ule(v, solver.ctx().bv_val(rng.getUnsignedMax().getZExtValue(), rbw)));
+    solver.add(z3::uge(v, solver.ctx().bv_val(rng.getUnsignedMin().getZExtValue(), rbw)));
     return true;
 }
 
@@ -110,6 +118,14 @@ void BugDetection::binary_check(BinaryOperator* op,
         return std::make_pair(false, false);
     }();
     const auto is_nsw = is_nsw_is_nuw.first;
+    const auto is_nuw = is_nsw_is_nuw.second;
+
+    // Heuristic for signedness:
+    // - If only NSW is present, prefer signed overflow checks.
+    // - If only NUW is present, prefer unsigned overflow checks.
+    // - Otherwise (none or both), run both.
+    const bool preferSigned = is_nsw && !is_nuw;
+    const bool preferUnsigned = is_nuw && !is_nsw;
 
     const auto check = [&](interr et, bool is_signed) {
         if (solver.check() == z3::sat) { // counter example
@@ -149,13 +165,17 @@ void BugDetection::binary_check(BinaryOperator* op,
         if (!CheckIntOverflow)
             break;
             
-        if (!is_nsw) { // unsigned
+        if (!preferSigned) {
+            solver.push();
             solver.add(!z3::bvadd_no_overflow(lhs_bv, rhs_bv, false));
             check(interr::INT_OVERFLOW, false);
-        } else {
-            solver.add(!z3::bvadd_no_overflow(lhs_bv, rhs_bv, true));
-            solver.add(!z3::bvadd_no_underflow(lhs_bv, rhs_bv));
+            solver.pop();
+        }
+        if (!preferUnsigned) {
+            solver.push();
+            solver.add(!z3::bvadd_no_overflow(lhs_bv, rhs_bv, true) || !z3::bvadd_no_underflow(lhs_bv, rhs_bv));
             check(interr::INT_OVERFLOW, true);
+            solver.pop();
         }
         break;
         
@@ -163,13 +183,17 @@ void BugDetection::binary_check(BinaryOperator* op,
         if (!CheckIntOverflow)
             break;
             
-        if (!is_nsw) {
+        if (!preferSigned) {
+            solver.push();
             solver.add(!z3::bvsub_no_underflow(lhs_bv, rhs_bv, false));
             check(interr::INT_OVERFLOW, false);
-        } else {
-            solver.add(!z3::bvsub_no_underflow(lhs_bv, rhs_bv, true));
-            solver.add(!z3::bvsub_no_overflow(lhs_bv, rhs_bv));
+            solver.pop();
+        }
+        if (!preferUnsigned) {
+            solver.push();
+            solver.add(!z3::bvsub_no_underflow(lhs_bv, rhs_bv, true) || !z3::bvsub_no_overflow(lhs_bv, rhs_bv));
             check(interr::INT_OVERFLOW, true);
+            solver.pop();
         }
         break;
         
@@ -177,13 +201,17 @@ void BugDetection::binary_check(BinaryOperator* op,
         if (!CheckIntOverflow)
             break;
             
-        if (!is_nsw) {
+        if (!preferSigned) {
+            solver.push();
             solver.add(!z3::bvmul_no_overflow(lhs_bv, rhs_bv, false));
             check(interr::INT_OVERFLOW, false);
-        } else {
-            solver.add(!z3::bvmul_no_overflow(lhs_bv, rhs_bv, true));
-            solver.add(!z3::bvmul_no_underflow(lhs_bv, rhs_bv)); // INTMAX * -1
+            solver.pop();
+        }
+        if (!preferUnsigned) {
+            solver.push();
+            solver.add(!z3::bvmul_no_overflow(lhs_bv, rhs_bv, true) || !z3::bvmul_no_underflow(lhs_bv, rhs_bv));
             check(interr::INT_OVERFLOW, true);
+            solver.pop();
         }
         break;
         
@@ -206,7 +234,7 @@ void BugDetection::binary_check(BinaryOperator* op,
         }
         
         if (CheckIntOverflow) {
-            solver.add(z3::bvsdiv_no_overflow(lhs_bv, rhs_bv));
+            solver.add(!z3::bvsdiv_no_overflow(lhs_bv, rhs_bv));
             check(interr::INT_OVERFLOW, true);
         }
         break;
@@ -291,6 +319,10 @@ void BugDetection::recordBugWithPath(const Instruction* inst, interr type) {
     
     // Store it in the map
     m_bug_paths[inst] = bugPath;
+}
+
+void BugDetection::recordBug(const Instruction* inst, interr type) {
+    recordBugWithPath(inst, type);
 }
 
 z3::expr BugDetection::cast_op_propagate(CastInst* op, const DenseMap<const Value*, llvm::Optional<z3::expr>>& v2sym, z3::solver& solver) {

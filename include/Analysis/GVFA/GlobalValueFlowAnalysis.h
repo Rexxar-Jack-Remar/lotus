@@ -4,15 +4,17 @@
  *
  * This file provides a global value flow analysis that tracks data flow
  * from vulnerability sources to sinks using a Dyck-annotated value-flow graph.
- * It supports both forward and backward reachability queries, CFL-reachability,
- * and context-sensitive analysis.
+ *
+ * GVFA builds a fast reachability index first (for pruning), and lazily refines
+ * to a precise engine when a query needs source attribution or an accurate
+ * witness trace.
  *
  * Key Features:
  * - Forward and backward reachability queries
  * - CFL (Context-Free Language) reachability
  * - Context-sensitive analysis
  * - Path extraction for bug reporting
- * - Online and offline analysis modes
+ * - Online queries (optional)
  *
  * @author Lotus Analysis Framework
  * @date 2025
@@ -47,7 +49,7 @@ class GVFAVulnerabilityChecker;
 
 namespace gvfa {
 class GVFAEngine;
-}
+} // namespace gvfa
 
 /**
  * @typedef ValueSitePairType

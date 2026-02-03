@@ -4,6 +4,7 @@
 
 #include <llvm/Analysis/AliasAnalysis.h>
 #include <llvm/Analysis/MemorySSA.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
@@ -11,16 +12,73 @@
 #include <llvm/IR/GetElementPtrTypeIterator.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 #include <z3++.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 
 using namespace llvm;
 
 namespace kint {
+
+static llvm::Optional<uint64_t> getConstantU64(const llvm::Value* v) {
+    if (!v) return llvm::None;
+    if (const auto* ci = llvm::dyn_cast<llvm::ConstantInt>(v)) {
+        return ci->getZExtValue();
+    }
+    return llvm::None;
+}
+
+static z3::expr boolToBv1(const z3::expr& b) {
+    return z3::ite(b, b.ctx().bv_val(1, 1), b.ctx().bv_val(0, 1));
+}
+
+static bool computeWithOverflow(const llvm::WithOverflowInst* woi, z3::solver& solver,
+                                const std::function<z3::expr(const llvm::Value*)>& getInt,
+                                z3::expr& outResult, z3::expr& outOverflowBool) {
+    if (!woi) return false;
+    auto lhs = getInt(woi->getArgOperand(0));
+    auto rhs = getInt(woi->getArgOperand(1));
+
+    switch (woi->getIntrinsicID()) {
+    case llvm::Intrinsic::uadd_with_overflow:
+        outResult = lhs + rhs;
+        outOverflowBool = !z3::bvadd_no_overflow(lhs, rhs, /*is_signed=*/false);
+        return true;
+    case llvm::Intrinsic::usub_with_overflow:
+        outResult = lhs - rhs;
+        outOverflowBool = !z3::bvsub_no_underflow(lhs, rhs, /*is_signed=*/false);
+        return true;
+    case llvm::Intrinsic::umul_with_overflow:
+        outResult = lhs * rhs;
+        outOverflowBool = !z3::bvmul_no_overflow(lhs, rhs, /*is_signed=*/false);
+        return true;
+    case llvm::Intrinsic::sadd_with_overflow:
+        outResult = lhs + rhs;
+        outOverflowBool = (!z3::bvadd_no_overflow(lhs, rhs, /*is_signed=*/true)
+                           || !z3::bvadd_no_underflow(lhs, rhs));
+        return true;
+    case llvm::Intrinsic::ssub_with_overflow:
+        outResult = lhs - rhs;
+        outOverflowBool = (!z3::bvsub_no_underflow(lhs, rhs, /*is_signed=*/true)
+                           || !z3::bvsub_no_overflow(lhs, rhs));
+        return true;
+    case llvm::Intrinsic::smul_with_overflow:
+        outResult = lhs * rhs;
+        outOverflowBool = (!z3::bvmul_no_overflow(lhs, rhs, /*is_signed=*/true)
+                           || !z3::bvmul_no_underflow(lhs, rhs));
+        return true;
+    default:
+        break;
+    }
+    outResult = solver.ctx().bv_val(0, 1);
+    outOverflowBool = solver.ctx().bool_val(false);
+    return false;
+}
 
 MKintPass::MKintPass() : m_solver(llvm::None), m_function_timeout(FunctionTimeout) {
     m_range_analysis = std::make_unique<RangeAnalysis>();
@@ -440,6 +498,93 @@ void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
     for (auto& inst : cur->getInstList()) {
         if (isa<PHINode>(&inst)) continue;
 
+        if (auto *assumeI = dyn_cast<AssumeInst>(&inst)) {
+            // llvm.assume(cond) adds a constraint to the current path.
+            const auto *cond = assumeI->getArgOperand(0);
+            if (cond && cond->getType()->isIntegerTy(1)) {
+                const auto c = getIntExpr(cond, cur, pred);
+                m_solver.getValue().add(c == m_solver.getValue().ctx().bv_val(1, 1));
+                if (m_solver.getValue().check() == z3::unsat) return;
+            }
+            continue;
+        }
+
+        if (auto *woi = dyn_cast<WithOverflowInst>(&inst)) {
+            // Encode arithmetic/overflow semantics for llvm.*with.overflow intrinsics.
+            // Bug checking: if overflow is satisfiable under current path constraints, report an overflow.
+            if (CheckIntOverflow) {
+                z3::expr res = m_solver.getValue().ctx().bv_val(
+                    0, woi->getArgOperand(0)->getType()->getIntegerBitWidth());
+                z3::expr ov = m_solver.getValue().ctx().bool_val(false);
+                if (computeWithOverflow(
+                        woi, m_solver.getValue(),
+                        [&](const llvm::Value* x) { return getIntExpr(x, cur, pred); }, res, ov)) {
+                    m_solver.getValue().push();
+                    m_solver.getValue().add(ov);
+                    if (m_solver.getValue().check() == z3::sat) {
+                        m_overflow_insts.insert(woi);
+                        if (m_bug_detection) m_bug_detection->recordBug(woi, interr::INT_OVERFLOW);
+                    }
+                    m_solver.getValue().pop();
+                }
+            }
+            continue;
+        }
+
+        // Model memory intrinsics.
+        // These often appear as `llvm.memset/memcpy/memmove.*` and bypass normal CallInst handling.
+        if (auto *memsetI = dyn_cast<MemSetInst>(&inst)) {
+            constexpr uint64_t kMaxBytes = 256;
+            const auto dst = getPtrExpr(memsetI->getRawDest(), cur, pred);
+            const auto val = getIntExpr(memsetI->getValue(), cur, pred);
+            if (const auto len = getConstantU64(memsetI->getLength())) {
+                if (*len <= kMaxBytes) {
+                    m_smt_mem->memsetBytes(dst, val, *len);
+                } else {
+                    m_smt_mem->havoc("memset_large");
+                }
+                if (!maybeCheckOOB(memsetI, memsetI->getRawDest(), *len, cur, pred)) return;
+            } else {
+                m_smt_mem->havoc("memset_sym");
+            }
+            continue;
+        }
+
+        if (auto *memcpyI = dyn_cast<MemCpyInst>(&inst)) {
+            constexpr uint64_t kMaxBytes = 256;
+            const auto dst = getPtrExpr(memcpyI->getRawDest(), cur, pred);
+            const auto src = getPtrExpr(memcpyI->getRawSource(), cur, pred);
+            if (const auto len = getConstantU64(memcpyI->getLength())) {
+                if (*len <= kMaxBytes) {
+                    m_smt_mem->memcpyBytes(dst, src, *len);
+                } else {
+                    m_smt_mem->havoc("memcpy_large");
+                }
+                if (!maybeCheckOOB(memcpyI, memcpyI->getRawDest(), *len, cur, pred)) return;
+            } else {
+                m_smt_mem->havoc("memcpy_sym");
+            }
+            continue;
+        }
+
+        if (auto *memmoveI = dyn_cast<MemMoveInst>(&inst)) {
+            constexpr uint64_t kMaxBytes = 256;
+            const auto dst = getPtrExpr(memmoveI->getRawDest(), cur, pred);
+            const auto src = getPtrExpr(memmoveI->getRawSource(), cur, pred);
+            if (const auto len = getConstantU64(memmoveI->getLength())) {
+                if (*len <= kMaxBytes) {
+                    // Our memory is a functional array; a forward copy is sufficient for modeling memmove.
+                    m_smt_mem->memcpyBytes(dst, src, *len);
+                } else {
+                    m_smt_mem->havoc("memmove_large");
+                }
+                if (!maybeCheckOOB(memmoveI, memmoveI->getRawDest(), *len, cur, pred)) return;
+            } else {
+                m_smt_mem->havoc("memmove_sym");
+            }
+            continue;
+        }
+
         if (auto *ai = dyn_cast<AllocaInst>(&inst)) {
             // Bind the alloca instruction to its base address.
             if (m_obj_base.count(ai)) {
@@ -468,10 +613,11 @@ void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
         }
 
         if (auto *load = dyn_cast<LoadInst>(&inst)) {
+            const unsigned bytes = static_cast<unsigned>(m_dl->getTypeStoreSize(load->getType()));
+            if (!maybeCheckOOB(load, load->getPointerOperand(), bytes, cur, pred)) return;
             if (load->getType()->isIntegerTy()) {
                 const auto addr = getPtrExpr(load->getPointerOperand(), cur, pred);
                 const unsigned bw = load->getType()->getIntegerBitWidth();
-                const unsigned bytes = static_cast<unsigned>(m_dl->getTypeStoreSize(load->getType()));
                 const auto v = m_smt_mem->loadInt(addr, bw, bytes, isLittleEndian());
                 setSym(load, v);
                 if (!m_bug_detection->add_range_cons(m_range_analysis->get_range_by_bb(load, cur, m_func2range_info), v,
@@ -483,10 +629,11 @@ void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
 
         if (auto *store = dyn_cast<StoreInst>(&inst)) {
             auto *val = store->getValueOperand();
+            const unsigned bytes = static_cast<unsigned>(m_dl->getTypeStoreSize(val->getType()));
+            if (!maybeCheckOOB(store, store->getPointerOperand(), bytes, cur, pred)) return;
             if (val && val->getType()->isIntegerTy()) {
                 const auto addr = getPtrExpr(store->getPointerOperand(), cur, pred);
                 const unsigned bw = val->getType()->getIntegerBitWidth();
-                const unsigned bytes = static_cast<unsigned>(m_dl->getTypeStoreSize(val->getType()));
                 const auto v = getIntExpr(val, cur, pred);
                 m_smt_mem->storeInt(addr, v, bw, bytes, isLittleEndian());
             }
@@ -494,6 +641,63 @@ void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
         }
 
         if (auto *call = dyn_cast<CallInst>(&inst)) {
+            // Model common libc memory routines (when they survive as regular calls).
+            if (Function* callee = call->getCalledFunction()) {
+                constexpr uint64_t kMaxBytes = 256;
+                const auto name = callee->getName();
+
+                if ((name == "memset" || name == "__memset") && call->arg_size() >= 3) {
+                    const auto dst = getPtrExpr(call->getArgOperand(0), cur, pred);
+                    const auto val = getIntExpr(call->getArgOperand(1), cur, pred);
+                    if (const auto len = getConstantU64(call->getArgOperand(2))) {
+                        if (*len <= kMaxBytes) m_smt_mem->memsetBytes(dst, val, *len);
+                        else m_smt_mem->havoc("memset_large");
+                        if (!maybeCheckOOB(call, call->getArgOperand(0), *len, cur, pred)) return;
+                    } else {
+                        m_smt_mem->havoc("memset_sym");
+                    }
+                    // memset returns dst.
+                    if (call->getType()->isPointerTy()) setSym(call, dst);
+                    continue;
+                }
+
+                if ((name == "memcpy" || name == "__memcpy") && call->arg_size() >= 3) {
+                    const auto dst = getPtrExpr(call->getArgOperand(0), cur, pred);
+                    const auto src = getPtrExpr(call->getArgOperand(1), cur, pred);
+                    if (const auto len = getConstantU64(call->getArgOperand(2))) {
+                        if (*len <= kMaxBytes) m_smt_mem->memcpyBytes(dst, src, *len);
+                        else m_smt_mem->havoc("memcpy_large");
+                        if (!maybeCheckOOB(call, call->getArgOperand(0), *len, cur, pred)) return;
+                    } else {
+                        m_smt_mem->havoc("memcpy_sym");
+                    }
+                    if (call->getType()->isPointerTy()) setSym(call, dst);
+                    continue;
+                }
+
+                if ((name == "memmove" || name == "__memmove") && call->arg_size() >= 3) {
+                    const auto dst = getPtrExpr(call->getArgOperand(0), cur, pred);
+                    const auto src = getPtrExpr(call->getArgOperand(1), cur, pred);
+                    if (const auto len = getConstantU64(call->getArgOperand(2))) {
+                        if (*len <= kMaxBytes) m_smt_mem->memcpyBytes(dst, src, *len);
+                        else m_smt_mem->havoc("memmove_large");
+                        if (!maybeCheckOOB(call, call->getArgOperand(0), *len, cur, pred)) return;
+                    } else {
+                        m_smt_mem->havoc("memmove_sym");
+                    }
+                    if (call->getType()->isPointerTy()) setSym(call, dst);
+                    continue;
+                }
+
+                // Unknown call with memory side effects: conservatively havoc memory so subsequent loads don't assume
+                // stale/zero contents.
+                const bool is_allocator = (name == "malloc" || name == "calloc" || name == "realloc" || name == "free"
+                                           || name == "kmalloc" || name == "kzalloc" || name == "vmalloc");
+                if (!is_allocator && !call->doesNotAccessMemory() && !call->onlyReadsMemory()) {
+                    m_smt_mem->havoc("call_sidefx");
+                }
+            }
+
             // Model common allocators as fresh, disjoint heap objects.
             if (call->getType()->isPointerTy()) {
                 Function* callee = call->getCalledFunction();
@@ -508,7 +712,7 @@ void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
                             if (abw < m_ptr_bits) sizeBytes = z3::zext(sizeBytes, m_ptr_bits - abw);
                             if (abw > m_ptr_bits) sizeBytes = sizeBytes.extract(m_ptr_bits - 1, 0);
                         }
-                        sizeKnown = false;
+                        sizeKnown = sizeBytes.is_numeral();
                     } else if (name == "calloc") {
                         if (call->arg_size() >= 2 && call->getArgOperand(0)->getType()->isIntegerTy()
                             && call->getArgOperand(1)->getType()->isIntegerTy()) {
@@ -522,11 +726,19 @@ void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
                             sizeBytes = (n * m);
                             if (target > m_ptr_bits) sizeBytes = sizeBytes.extract(m_ptr_bits - 1, 0);
                         }
-                        sizeKnown = false;
+                        sizeKnown = sizeBytes.is_numeral();
+                    } else if (name == "realloc") {
+                        if (call->arg_size() >= 2 && call->getArgOperand(1)->getType()->isIntegerTy()) {
+                            sizeBytes = getIntExpr(call->getArgOperand(1), cur, pred);
+                            const unsigned abw = sizeBytes.get_sort().bv_size();
+                            if (abw < m_ptr_bits) sizeBytes = z3::zext(sizeBytes, m_ptr_bits - abw);
+                            if (abw > m_ptr_bits) sizeBytes = sizeBytes.extract(m_ptr_bits - 1, 0);
+                        }
+                        sizeKnown = sizeBytes.is_numeral();
                     }
 
                     if (name == "malloc" || name == "kmalloc" || name == "kzalloc" || name == "vmalloc"
-                        || name == "calloc") {
+                        || name == "calloc" || name == "realloc") {
                         ensureObject(call, ("heap." + cur->getParent()->getName().str() + "." + std::to_string((uintptr_t)call)),
                                      sizeBytes, sizeKnown);
                         setSym(call, m_obj_base[call].getValue());
@@ -547,6 +759,7 @@ void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
                 (void)getIntExpr(op->getOperand(1), cur, pred);
                 m_bug_detection->binary_check(op, m_solver.getValue(), m_v2sym, m_overflow_insts, m_bad_shift_insts,
                                               m_div_zero_insts);
+                if (!addWellDefinedConstraints(op, cur, pred)) return;
                 const auto r = m_bug_detection->binary_op_propagate(op, m_v2sym, m_solver.getValue());
                 setSym(op, r);
                 if (!m_bug_detection->add_range_cons(m_range_analysis->get_range_by_bb(op, cur, m_func2range_info), r,
@@ -667,6 +880,125 @@ void MKintPass::ensureObject(const Value* obj, const std::string& hintName, cons
             m_solver.getValue().add(base != otherBase);
         }
     }
+
+    // Avoid modular wraparound when computing [base, base+size) for known-size objects.
+    if (sizeKnown) {
+        m_solver.getValue().add(z3::bvadd_no_overflow(base, sizeBytes, /*is_signed=*/false));
+    }
+}
+
+bool MKintPass::maybeCheckOOB(const Instruction* at, const Value* ptrOperand, uint64_t accessBytes,
+                              BasicBlock* cur, BasicBlock* pred) {
+    if (!CheckArrayOOB) return true;
+    if (!at || !ptrOperand || !m_solver || !m_smt_mem) return true;
+    if (accessBytes == 0) return true;
+
+    const Value* stripped = ptrOperand->stripPointerCasts();
+    const auto* gep = dyn_cast<GetElementPtrInst>(stripped);
+    if (!gep) return true; // keep reporting consistent with existing ARRAY_OOB pipeline
+
+    const Value* obj = llvm::getUnderlyingObject(stripped);
+    if (!obj) return true;
+    if (!m_obj_base.count(obj) || !m_obj_size.count(obj)) return true;
+
+    const auto baseOpt = m_obj_base[obj];
+    const auto sizeOpt = m_obj_size[obj];
+    if (!baseOpt.hasValue() || !sizeOpt.hasValue()) return true;
+
+    auto& solver = m_solver.getValue();
+    auto& ctx = solver.ctx();
+    const auto base = baseOpt.getValue();
+    const auto size = sizeOpt.getValue();
+    const auto addr = getPtrExpr(ptrOperand, cur, pred);
+    const auto len = ctx.bv_val(accessBytes, m_ptr_bits);
+
+    // In-bounds check for a byte range: addr >= base && addr + len <= base + size, without wrapping.
+    const z3::expr noWrap = z3::bvadd_no_overflow(addr, len, /*is_signed=*/false);
+    const z3::expr inBounds = (z3::uge(addr, base) && z3::ule(addr + len, base + size) && noWrap);
+
+    solver.push();
+    solver.add(!inBounds);
+    if (solver.check() == z3::sat) {
+        m_gep_oob.insert(const_cast<GetElementPtrInst*>(gep));
+        if (m_bug_detection) {
+            m_bug_detection->recordBug(gep, interr::ARRAY_OOB);
+        }
+    }
+    solver.pop();
+
+    // Constrain the remaining exploration to defined, in-bounds behaviors (LLVM semantics for out-of-bounds are UB).
+    solver.add(inBounds);
+    return solver.check() != z3::unsat;
+}
+
+bool MKintPass::addWellDefinedConstraints(BinaryOperator* op, BasicBlock* cur, BasicBlock* pred) {
+    if (!op || !m_solver) return true;
+    auto& solver = m_solver.getValue();
+    auto& ctx = solver.ctx();
+
+    const auto lhs = getIntExpr(op->getOperand(0), cur, pred);
+    const auto rhs = getIntExpr(op->getOperand(1), cur, pred);
+    const unsigned bw = lhs.get_sort().bv_size();
+
+    bool added = false;
+    const auto addAndMark = [&](const z3::expr& e) {
+        solver.add(e);
+        added = true;
+    };
+
+    switch (op->getOpcode()) {
+    case Instruction::UDiv:
+    case Instruction::URem:
+    case Instruction::SDiv:
+    case Instruction::SRem:
+        // Div/rem by zero is poison; keep exploring only defined paths.
+        addAndMark(rhs != ctx.bv_val(0, bw));
+        if (op->getOpcode() == Instruction::SDiv) {
+            // Signed division overflow (INT_MIN / -1) is poison in LLVM.
+            addAndMark(z3::bvsdiv_no_overflow(lhs, rhs));
+        }
+        break;
+    case Instruction::Shl:
+    case Instruction::LShr:
+    case Instruction::AShr:
+        // Shift amount must be < bitwidth; otherwise poison.
+        addAndMark(z3::ult(rhs, ctx.bv_val(bw, bw)));
+        break;
+    case Instruction::Add:
+    case Instruction::Sub:
+    case Instruction::Mul:
+        if (auto *ofop = dyn_cast<OverflowingBinaryOperator>(op)) {
+            const bool nsw = ofop->hasNoSignedWrap();
+            const bool nuw = ofop->hasNoUnsignedWrap();
+            if (nuw) {
+                if (op->getOpcode() == Instruction::Add) {
+                    addAndMark(z3::bvadd_no_overflow(lhs, rhs, /*is_signed=*/false));
+                } else if (op->getOpcode() == Instruction::Sub) {
+                    addAndMark(z3::bvsub_no_underflow(lhs, rhs, /*is_signed=*/false));
+                } else if (op->getOpcode() == Instruction::Mul) {
+                    addAndMark(z3::bvmul_no_overflow(lhs, rhs, /*is_signed=*/false));
+                }
+            }
+            if (nsw) {
+                if (op->getOpcode() == Instruction::Add) {
+                    addAndMark(z3::bvadd_no_overflow(lhs, rhs, /*is_signed=*/true));
+                    addAndMark(z3::bvadd_no_underflow(lhs, rhs));
+                } else if (op->getOpcode() == Instruction::Sub) {
+                    addAndMark(z3::bvsub_no_underflow(lhs, rhs, /*is_signed=*/true));
+                    addAndMark(z3::bvsub_no_overflow(lhs, rhs));
+                } else if (op->getOpcode() == Instruction::Mul) {
+                    addAndMark(z3::bvmul_no_overflow(lhs, rhs, /*is_signed=*/true));
+                    addAndMark(z3::bvmul_no_underflow(lhs, rhs));
+                }
+            }
+        }
+        break;
+    default:
+        break;
+    }
+
+    if (!added) return true;
+    return solver.check() != z3::unsat;
 }
 
 z3::expr MKintPass::getValueExpr(const Value* v, BasicBlock* cur, BasicBlock* pred) {
@@ -686,6 +1018,34 @@ z3::expr MKintPass::getIntExpr(const Value* v, BasicBlock* cur, BasicBlock* pred
 
     if (const auto* ci = dyn_cast<ConstantInt>(v)) {
         return ctx.bv_val(ci->getZExtValue(), ci->getType()->getIntegerBitWidth());
+    }
+
+    if (const auto* fr = dyn_cast<FreezeInst>(v)) {
+        auto r = getIntExpr(fr->getOperand(0), cur, pred);
+        setSym(v, r);
+        return r;
+    }
+
+    if (const auto* ev = dyn_cast<ExtractValueInst>(v)) {
+        if (ev->getNumIndices() == 1) {
+            const unsigned idx = *ev->idx_begin();
+            if (const auto* woi = dyn_cast<WithOverflowInst>(ev->getAggregateOperand())) {
+                z3::expr res = ctx.bv_val(0, woi->getArgOperand(0)->getType()->getIntegerBitWidth());
+                z3::expr ov = ctx.bool_val(false);
+                if (computeWithOverflow(woi, m_solver.getValue(),
+                                        [&](const llvm::Value* x) { return getIntExpr(x, cur, pred); }, res, ov)) {
+                    if (idx == 0) {
+                        setSym(v, res);
+                        return res;
+                    }
+                    if (idx == 1) {
+                        auto b = boolToBv1(ov);
+                        setSym(v, b);
+                        return b;
+                    }
+                }
+            }
+        }
     }
 
     if (const auto* pti = dyn_cast<PtrToIntInst>(v)) {

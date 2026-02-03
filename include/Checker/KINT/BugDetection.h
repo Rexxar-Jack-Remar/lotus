@@ -85,6 +85,9 @@ public:
     // Get bug paths
     const std::map<const Instruction*, BugPath>& getBugPaths() const { return m_bug_paths; }
 
+    // Record a bug using the currently-tracked path.
+    void recordBug(const Instruction* inst, interr type);
+
     // Error reporting
     void mark_errors(const std::map<ICmpInst*, bool>& impossible_branches,
                     const std::set<GetElementPtrInst*>& gep_oob,

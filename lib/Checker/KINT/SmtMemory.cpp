@@ -1,16 +1,26 @@
 #include "Checker/KINT/SmtMemory.h"
 
+#include <atomic>
+
 namespace kint {
 
 static z3::expr mk_bv(z3::context& ctx, uint64_t v, unsigned bits) {
     return ctx.bv_val(static_cast<uint64_t>(v), bits);
 }
 
+static std::atomic<uint64_t> g_mem_id{0};
+
 SmtMemory::SmtMemory(z3::context& ctx, unsigned addrBits)
     : m_ctx(ctx)
     , m_addrBits(addrBits)
-    , m_mem(z3::const_array(ctx.bv_sort(addrBits), ctx.bv_val(0, 8)))
+    , m_mem(freshMemory("init"))
 {
+}
+
+z3::expr SmtMemory::freshMemory(const std::string& hint) const {
+    const auto id = g_mem_id.fetch_add(1, std::memory_order_relaxed);
+    const std::string name = "%mem." + hint + "." + std::to_string(id);
+    return m_ctx.constant(name.c_str(), m_ctx.array_sort(m_ctx.bv_sort(m_addrBits), m_ctx.bv_sort(8)));
 }
 
 void SmtMemory::push() {
@@ -26,7 +36,11 @@ void SmtMemory::pop() {
 
 void SmtMemory::reset() {
     m_stack.clear();
-    m_mem = z3::const_array(m_ctx.bv_sort(m_addrBits), m_ctx.bv_val(0, 8));
+    m_mem = freshMemory("reset");
+}
+
+void SmtMemory::havoc(const std::string& hint) {
+    m_mem = freshMemory(hint);
 }
 
 z3::expr SmtMemory::addrAdd(const z3::expr& addr, uint64_t byteOffset) const {
@@ -71,6 +85,26 @@ void SmtMemory::storeBytes(const z3::expr& addr, const z3::expr& value, unsigned
         const unsigned hi = lo + 7;
         z3::expr byteVal = v.extract(hi, lo);
         m_mem = z3::store(m_mem, addrAdd(addr, i), byteVal);
+    }
+}
+
+void SmtMemory::memsetBytes(const z3::expr& dst, const z3::expr& byteVal, uint64_t numBytes) {
+    if (numBytes == 0) return;
+    z3::expr b = byteVal;
+    const unsigned bw = b.get_sort().bv_size();
+    if (bw < 8) b = z3::zext(b, 8 - bw);
+    else if (bw > 8) b = b.extract(7, 0);
+
+    for (uint64_t i = 0; i < numBytes; ++i) {
+        m_mem = z3::store(m_mem, addrAdd(dst, i), b);
+    }
+}
+
+void SmtMemory::memcpyBytes(const z3::expr& dst, const z3::expr& src, uint64_t numBytes) {
+    if (numBytes == 0) return;
+    for (uint64_t i = 0; i < numBytes; ++i) {
+        z3::expr b = z3::select(m_mem, addrAdd(src, i));
+        m_mem = z3::store(m_mem, addrAdd(dst, i), b);
     }
 }
 

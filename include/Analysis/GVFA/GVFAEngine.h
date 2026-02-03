@@ -18,7 +18,7 @@ protected:
     DyckAliasAnalysis *DyckAA;
     DyckModRefAnalysis *DyckMRA;
     
-    std::vector<std::pair<const Value *, int>> &SourcesVec;
+    std::vector<std::pair<const Value *, int>> SourcesVec;
     const VulnerabilitySinksType &Sinks;
 
     // Reachability Maps
@@ -33,7 +33,7 @@ protected:
 public:
     GVFAEngine(Module *M, DyckVFG *VFG, DyckAliasAnalysis *DyckAA, 
                DyckModRefAnalysis *DyckMRA,
-               std::vector<std::pair<const Value *, int>> &SourcesVec,
+               std::vector<std::pair<const Value *, int>> SourcesVec,
                const VulnerabilitySinksType &Sinks);
 
     virtual ~GVFAEngine() = default;
@@ -71,4 +71,3 @@ protected:
 } // namespace gvfa
 
 #endif
-
