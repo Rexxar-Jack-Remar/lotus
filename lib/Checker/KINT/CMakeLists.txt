@@ -4,6 +4,7 @@ add_library(CanaryKint STATIC
     RangeAnalysis.cpp
     KINTTaintAnalysis.cpp
     BugDetection.cpp
+    SmtMemory.cpp
     Utils.cpp
     Options.cpp
     Log.cpp

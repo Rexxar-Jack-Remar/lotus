@@ -5,6 +5,8 @@
 
 #include "Utils/General/range.h"
 
+#include <llvm/Analysis/MemorySSA.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GetElementPtrTypeIterator.h>
@@ -101,7 +103,10 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
                                         std::map<ICmpInst*, bool>& /*impossible_branches*/,
                                         const MapVector<Function*, std::vector<CallInst*>>& func2tsrc,
                                         const SetVector<StringRef>& /*callback_tsrc_fn*/,
-                                        std::map<const Function*, crange>& func2ret_range) {
+                                        std::map<const Function*, crange>& func2ret_range,
+                                        const DataLayout& DL,
+                                        llvm::AAResults* /*AA*/,
+                                        llvm::MemorySSA* MSSA) {
     auto& F = *bb->getParent();
     auto& sum_rng = func2range_info[&F][bb];
     
@@ -184,10 +189,58 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
                         }
                     }
                 }
+
+                // Stack arrays: alloca [N x T] with GEP 0, idx
+                const Value* underlying = llvm::getUnderlyingObject(gep_addr);
+                if (CheckArrayOOB) {
+                    if (const auto* ai = dyn_cast_or_null<AllocaInst>(underlying)) {
+                        if (const auto* at = dyn_cast<ArrayType>(ai->getAllocatedType())) {
+                            if (gep->getNumIndices() == 2) {
+                                const uint64_t arr_size = at->getNumElements();
+                                auto *idx = gep->getOperand(2);
+                                const crange idx_rng = get_rng(idx);
+                                const uint64_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
+                                if (idx_max >= arr_size) {
+                                    gep_oob.insert(gep);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Heap arrays: malloc-like objects indexed via GEP (best-effort, range-based).
+                if (CheckArrayOOB) {
+                    if (const auto* ci = dyn_cast_or_null<CallInst>(underlying)) {
+                        if (auto *f = ci->getCalledFunction()) {
+                            const auto name = f->getName();
+                            if ((name == "malloc" || name == "kmalloc" || name == "kzalloc" || name == "vmalloc")
+                                && ci->arg_size() >= 1) {
+                                const crange size_rng = get_range_by_bb(ci->getArgOperand(0), ci->getParent(), func2range_info);
+                                const uint64_t size_min = size_rng.getUnsignedMin().getLimitedValue();
+                                if (gep->getNumIndices() >= 1) {
+                                    auto *idx = gep->getOperand(gep->getNumOperands() - 1);
+                                    const crange idx_rng = get_rng(idx);
+                                    const uint64_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
+                                    const uint64_t elem_bytes = DL.getTypeAllocSize(gep->getResultElementType());
+                                    if (elem_bytes != 0 && idx_max * elem_bytes >= size_min) {
+                                        gep_oob.insert(gep);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
-            // is local var
-            cur_rng[ptr] = valrng; // better precision.
+            // Track local memory coarsely when possible:
+            // - Prefer the underlying object when it is a stack/global allocation.
+            // - Fall back to the pointer SSA value otherwise (may be aliased).
+            const Value* underlying = llvm::getUnderlyingObject(ptr);
+            if (isa<AllocaInst>(underlying) || isa<GlobalVariable>(underlying)) {
+                cur_rng[underlying] = valrng;
+            } else {
+                cur_rng[ptr] = valrng;
+            }
             continue;
         } else if (auto *const ret = dyn_cast<ReturnInst>(&inst)) {
             // low precision: just apply!
@@ -264,42 +317,125 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
             }
         } else if (auto *op = dyn_cast<LoadInst>(&inst)) {
             auto *addr = op->getPointerOperand();
-            if (isa<GlobalVariable>(addr))
-                new_range = get_rng(addr);
-            else if (auto *gep = dyn_cast<GetElementPtrInst>(addr)) {
-                bool succ = false;
-                // we only analyze shallow arrays. i.e., one dim.
-                auto *gep_addr = gep->getPointerOperand();
-                if (auto *garr = dyn_cast<GlobalVariable>(gep_addr)) {
-                    if (garr2ranges.count(garr) && gep->getNumIndices() == 2) { // all one dim array<int>s!
-                        auto *idx = gep->getOperand(2);
-                        const size_t arr_size = garr2ranges[garr].size();
-                        const crange idx_rng = get_rng(idx);
-                        const size_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
-                        if (CheckArrayOOB && idx_max >= arr_size) {
-                            gep_oob.insert(gep);
-                        }
+            bool resolved = false;
 
-                        for (size_t i = idx_rng.getUnsignedMin().getLimitedValue(); i < std::min(arr_size, idx_max);
-                             ++i) {
-                            if (new_range.getBitWidth() == garr2ranges[garr][i].getBitWidth()) {
-                                new_range = new_range.unionWith(garr2ranges[garr][i]);
-                            } else if (new_range.isEmptySet()) {
-                                new_range = garr2ranges[garr][i];
+            // If MemorySSA is available, prefer the clobbering store's value (when it is a simple store of an int).
+            if (MSSA) {
+                if (auto *acc = MSSA->getMemoryAccess(op)) {
+                    if (auto *use = dyn_cast<llvm::MemoryUse>(acc)) {
+                        if (auto *def = dyn_cast_or_null<llvm::MemoryDef>(use->getDefiningAccess())) {
+                            if (auto *defInst = def->getMemoryInst()) {
+                                if (auto *clobberStore = dyn_cast<StoreInst>(defInst)) {
+                                    auto *storedVal = clobberStore->getValueOperand();
+                                    if (storedVal && storedVal->getType()->isIntegerTy()) {
+                                        new_range = get_rng(storedVal);
+                                        resolved = true;
+                                    }
+                                }
                             }
                         }
-
-                        succ = true;
                     }
                 }
+            }
 
-                if (!succ) {
-                    MKINT_WARN() << "Unknown address to load (unknow gep src addr): " << inst;
-                    new_range = crange(op->getType()->getIntegerBitWidth(), true); // unknown addr -> full range.
+            if (!resolved) {
+                // If we have a locally tracked value for the address (e.g., alloca or underlying object), use it.
+                if (cur_rng.count(addr)) {
+                    new_range = get_rng(addr);
+                    resolved = true;
+                } else {
+                    const Value* underlying = llvm::getUnderlyingObject(addr);
+                    if (underlying && cur_rng.count(underlying)) {
+                        new_range = get_rng(underlying);
+                        resolved = true;
+                    } else if (isa<GlobalVariable>(addr)) {
+                        new_range = get_rng(addr);
+                        resolved = true;
+                    }
                 }
-            } else {
-                MKINT_WARN() << "Unknown address to load: " << inst;
-                new_range = crange(op->getType()->getIntegerBitWidth()); // unknown addr -> full range.
+            }
+
+            if (!resolved) {
+                if (auto *gep = dyn_cast<GetElementPtrInst>(addr)) {
+                    bool succ = false;
+                    // we only analyze shallow arrays. i.e., one dim.
+                    auto *gep_addr = gep->getPointerOperand();
+                    if (auto *garr = dyn_cast<GlobalVariable>(gep_addr)) {
+                        if (garr2ranges.count(garr) && gep->getNumIndices() == 2) { // all one dim array<int>s!
+                            auto *idx = gep->getOperand(2);
+                            const size_t arr_size = garr2ranges[garr].size();
+                            const crange idx_rng = get_rng(idx);
+                            const size_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
+                            if (CheckArrayOOB && idx_max >= arr_size) {
+                                gep_oob.insert(gep);
+                            }
+
+                            for (size_t i = idx_rng.getUnsignedMin().getLimitedValue(); i < std::min(arr_size, idx_max);
+                                 ++i) {
+                                if (new_range.getBitWidth() == garr2ranges[garr][i].getBitWidth()) {
+                                    new_range = new_range.unionWith(garr2ranges[garr][i]);
+                                } else if (new_range.isEmptySet()) {
+                                    new_range = garr2ranges[garr][i];
+                                }
+                            }
+
+                            succ = true;
+                        }
+                    }
+
+                    // Stack arrays: alloca [N x T] with GEP 0, idx (best-effort).
+                    if (!succ) {
+                        const Value* underlying = llvm::getUnderlyingObject(gep_addr);
+                        if (const auto* ai = dyn_cast_or_null<AllocaInst>(underlying)) {
+                            if (const auto* at = dyn_cast<ArrayType>(ai->getAllocatedType())) {
+                                if (gep->getNumIndices() == 2) {
+                                    const uint64_t arr_size = at->getNumElements();
+                                    auto *idx = gep->getOperand(2);
+                                    const crange idx_rng = get_rng(idx);
+                                    const uint64_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
+                                    if (CheckArrayOOB && idx_max >= arr_size) {
+                                        gep_oob.insert(gep);
+                                    }
+                                    new_range = crange(op->getType()->getIntegerBitWidth(), true);
+                                    succ = true;
+                                }
+                            }
+                        }
+                    }
+
+                    // Heap arrays: malloc-like objects indexed via GEP (best-effort, range-based).
+                    if (!succ) {
+                        const Value* underlying = llvm::getUnderlyingObject(gep_addr);
+                        if (const auto* ci = dyn_cast_or_null<CallInst>(underlying)) {
+                            if (auto *f = ci->getCalledFunction()) {
+                                const auto name = f->getName();
+                                if ((name == "malloc" || name == "kmalloc" || name == "kzalloc" || name == "vmalloc")
+                                    && ci->arg_size() >= 1) {
+                                    const crange size_rng
+                                        = get_range_by_bb(ci->getArgOperand(0), ci->getParent(), func2range_info);
+                                    const uint64_t size_min = size_rng.getUnsignedMin().getLimitedValue();
+                                    auto *idx = gep->getOperand(gep->getNumOperands() - 1);
+                                    const crange idx_rng = get_rng(idx);
+                                    const uint64_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
+                                    const uint64_t elem_bytes = DL.getTypeAllocSize(gep->getResultElementType());
+                                    if (CheckArrayOOB && elem_bytes != 0 && idx_max * elem_bytes >= size_min) {
+                                        gep_oob.insert(gep);
+                                    }
+                                    new_range = crange(op->getType()->getIntegerBitWidth(), true);
+                                    succ = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if (!succ) {
+                        MKINT_WARN() << "Unknown address to load (unknow gep src addr): " << inst;
+                        new_range = crange(op->getType()->getIntegerBitWidth(), true); // unknown addr -> full range.
+                    }
+                } else {
+                    MKINT_WARN() << "Unknown address to load: " << inst;
+                    new_range = crange(op->getType()->getIntegerBitWidth()); // unknown addr -> full range.
+                }
             }
         } else if (auto *const op = dyn_cast<CmpInst>(&inst)) {
             // can be more precise by comparing the range...
@@ -342,7 +478,10 @@ void RangeAnalysis::range_analysis(Function& F,
                                   std::map<ICmpInst*, bool>& impossible_branches,
                                   std::set<GetElementPtrInst*>& gep_oob,
                                   const MapVector<Function*, std::vector<CallInst*>>& func2tsrc,
-                                  const SetVector<StringRef>& callback_tsrc_fn) {
+                                  const SetVector<StringRef>& callback_tsrc_fn,
+                                  const DataLayout& DL,
+                                  llvm::AAResults* AA,
+                                  llvm::MemorySSA* MSSA) {
     MKINT_LOG() << "Range Analysis -> " << F.getName();
 
     auto& bb_range = func2range_info[&F];
@@ -443,13 +582,13 @@ void RangeAnalysis::range_analysis(Function& F,
             }
 
             analyze_one_bb_range(bb, branch_rng, func2range_info, backedges, global2range, garr2ranges, 
-                               gep_oob, impossible_branches, func2tsrc, callback_tsrc_fn, func2ret_range);
+                               gep_oob, impossible_branches, func2tsrc, callback_tsrc_fn, func2ret_range, DL, AA, MSSA);
         }
 
         if (bb->isEntryBlock()) {
             MKINT_LOG() << "No predecessors: " << bb;
             analyze_one_bb_range(bb, sum_rng, func2range_info, backedges, global2range, garr2ranges, 
-                               gep_oob, impossible_branches, func2tsrc, callback_tsrc_fn, func2ret_range);
+                               gep_oob, impossible_branches, func2tsrc, callback_tsrc_fn, func2ret_range, DL, AA, MSSA);
         }
     }
 }

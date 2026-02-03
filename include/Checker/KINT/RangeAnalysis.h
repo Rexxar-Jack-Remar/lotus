@@ -5,12 +5,19 @@
 #include <llvm/ADT/SetVector.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/ConstantRange.h>
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Instructions.h>
 
 #include <map>
 #include <set>
 
 using namespace llvm;
+
+// Optional precision boosters (wired from MKintPass when available)
+namespace llvm {
+class AAResults;
+class MemorySSA;
+} // namespace llvm
 
 namespace kint {
 
@@ -45,7 +52,10 @@ public:
                        std::map<ICmpInst*, bool>& impossible_branches,
                        std::set<GetElementPtrInst*>& gep_oob,
                        const MapVector<Function*, std::vector<CallInst*>>& func2tsrc,
-                       const SetVector<StringRef>& callback_tsrc_fn);
+                       const SetVector<StringRef>& callback_tsrc_fn,
+                       const DataLayout& DL,
+                       llvm::AAResults* AA = nullptr,
+                       llvm::MemorySSA* MSSA = nullptr);
 
     void analyze_one_bb_range(BasicBlock* bb, 
                              DenseMap<const Value*, crange>& cur_rng,
@@ -57,7 +67,10 @@ public:
                              std::map<ICmpInst*, bool>& impossible_branches,
                              const MapVector<Function*, std::vector<CallInst*>>& func2tsrc,
                              const SetVector<StringRef>& callback_tsrc_fn,
-                             std::map<const Function*, crange>& func2ret_range);
+                             std::map<const Function*, crange>& func2ret_range,
+                             const DataLayout& DL,
+                             llvm::AAResults* AA = nullptr,
+                             llvm::MemorySSA* MSSA = nullptr);
 
     void init_ranges(Module& M,
                     std::map<const Function*, bbrange_t>& func2range_info,

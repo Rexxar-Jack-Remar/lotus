@@ -3,6 +3,7 @@
 #include "Checker/KINT/RangeAnalysis.h"
 #include "Checker/KINT/BugDetection.h"
 #include "Checker/KINT/KINTTaintAnalysis.h"
+#include "Checker/KINT/SmtMemory.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
 
@@ -22,6 +23,7 @@ namespace kint {
 #include <chrono>
 #include <map>
 #include <set>
+#include <vector>
 
 using namespace llvm;
 
@@ -58,6 +60,18 @@ private:
     void path_solving(BasicBlock* cur, BasicBlock* pred);
     static std::string get_bb_label(const BasicBlock* bb);
 
+    // SMT helpers (memory + symbol management)
+    void pushSymFrame();
+    void popSymFrame();
+    void setSym(const Value* v, const z3::expr& e);
+    z3::expr getValueExpr(const Value* v, BasicBlock* cur, BasicBlock* pred);
+    z3::expr getIntExpr(const Value* v, BasicBlock* cur, BasicBlock* pred);
+    z3::expr getPtrExpr(const Value* v, BasicBlock* cur, BasicBlock* pred);
+    z3::expr gepOffsetBytes(const GetElementPtrInst* gep, BasicBlock* cur, BasicBlock* pred);
+    void ensureObject(const Value* obj, const std::string& hintName, const z3::expr& sizeBytes,
+                      bool sizeKnown);
+    bool isLittleEndian() const;
+
     // Data members
     MapVector<Function*, std::vector<CallInst*>> m_func2tsrc;
     SetVector<Function*> m_taint_funcs;
@@ -80,10 +94,25 @@ private:
 
     // SMT solving
     llvm::Optional<z3::solver> m_solver;
+    std::unique_ptr<SmtMemory> m_smt_mem;
     DenseMap<const Value*, llvm::Optional<z3::expr>> m_v2sym;
     std::map<const BasicBlock*, SmallVector<BasicBlock*, 2>> m_bbpaths;
     std::chrono::time_point<std::chrono::steady_clock> m_function_start_time;
     unsigned m_function_timeout;
+
+    // Memory/object abstraction for pointer reasoning (SMT only)
+    const DataLayout* m_dl = nullptr;
+    unsigned m_ptr_bits = 0;
+    DenseMap<const Value*, llvm::Optional<z3::expr>> m_obj_base;  // base address for allocation-like objects
+    DenseMap<const Value*, llvm::Optional<z3::expr>> m_obj_size;  // size in bytes (bit-vector, ptr width)
+    std::vector<const Value*> m_obj_list;                         // stable iteration order for constraints
+    struct SymChange {
+        const Value* key = nullptr;
+        bool hadOld = false;
+        llvm::Optional<z3::expr> oldValue;
+    };
+    std::vector<SymChange> m_sym_change_log;
+    std::vector<size_t> m_sym_change_frames;
 
     // Analysis components
     std::unique_ptr<RangeAnalysis> m_range_analysis;

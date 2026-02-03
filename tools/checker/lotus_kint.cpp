@@ -131,12 +131,20 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Create and run the pass
+    // Create and run the pass (new pass manager with cross-registered proxies)
+    llvm::LoopAnalysisManager LAM;
+    llvm::FunctionAnalysisManager FAM;
+    llvm::CGSCCAnalysisManager CGAM;
     llvm::ModuleAnalysisManager MAM;
-    llvm::ModulePassManager MPM;
     llvm::PassBuilder PB;
 
     PB.registerModuleAnalyses(MAM);
+    PB.registerCGSCCAnalyses(CGAM);
+    PB.registerFunctionAnalyses(FAM);
+    PB.registerLoopAnalyses(LAM);
+    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+    llvm::ModulePassManager MPM;
     MPM.addPass(kint::MKintPass());
     
     // Run analysis pipeline (bugs are automatically reported to BugReportMgr)
