@@ -27,25 +27,25 @@ public:
 
   using Ref = std::shared_ptr<const Expr>;
 
-  [[nodiscard]] Ref zero() const {
+  Ref zero() const {
     if (!Zero) {
       Zero = std::make_shared<Expr>(Kind::Zero);
     }
     return Zero;
   }
 
-  [[nodiscard]] Ref one() const {
+  Ref one() const {
     if (!One) {
       One = std::make_shared<Expr>(Kind::One);
     }
     return One;
   }
 
-  [[nodiscard]] Ref atom(TransferT T) const {
+  Ref atom(TransferT T) const {
     return std::make_shared<Expr>(Kind::Atom, std::move(T));
   }
 
-  [[nodiscard]] Ref unite(const Ref &A, const Ref &B) const {
+  Ref unite(const Ref &A, const Ref &B) const {
     if (isZero(A)) {
       return B;
     }
@@ -58,7 +58,7 @@ public:
     return std::make_shared<Expr>(Kind::Union, A, B);
   }
 
-  [[nodiscard]] Ref concat(const Ref &A, const Ref &B) const {
+  Ref concat(const Ref &A, const Ref &B) const {
     if (isZero(A) || isZero(B)) {
       return zero();
     }
@@ -71,7 +71,7 @@ public:
     return std::make_shared<Expr>(Kind::Concat, A, B);
   }
 
-  [[nodiscard]] Ref star(const Ref &A) const {
+  Ref star(const Ref &A) const {
     if (isZero(A) || isOne(A)) {
       return one();
     }
@@ -81,11 +81,11 @@ public:
     return std::make_shared<Expr>(Kind::Star, A);
   }
 
-  [[nodiscard]] static bool isZero(const Ref &E) {
+  static bool isZero(const Ref &E) {
     return E && E->K == Kind::Zero;
   }
 
-  [[nodiscard]] static bool isOne(const Ref &E) {
+  static bool isOne(const Ref &E) {
     return E && E->K == Kind::One;
   }
 

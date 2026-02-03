@@ -45,13 +45,12 @@ TEST(NPA, TensorProductRightComponentUsesOppositeProduct) {
 
   // extend(a, b) means "a after b"
   //
-  // In the tensor product S ⊗ S^op, the right component composes in the
-  // opposite semiring: (l1,r1) after (l2,r2) = (l1∘l2, r2∘r1)
+  // In the tensor product used by NPA, extend is defined as:
+  // (l1,r1) ⊗_p (l2,r2) = (l2∘l1, r1∘r2)
   TD::value_type a{"L1", "R1"};
   TD::value_type b{"L2", "R2"};
 
   auto c = TD::extend(a, b);
-  EXPECT_EQ(c.first, "(L1∘L2)");
-  EXPECT_EQ(c.second, "(R2∘R1)");
+  EXPECT_EQ(c.first, "(L2∘L1)");
+  EXPECT_EQ(c.second, "(R1∘R2)");
 }
-

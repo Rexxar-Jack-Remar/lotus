@@ -5,7 +5,9 @@
 
 set(ELIMINATION_SOURCES
   Elimination.cpp
+  Analyses/Intraprocedural/EliminationReachable.cpp
+  Analyses/Intraprocedural/EliminationConstantPropagation.cpp
+  Analyses/Intraprocedural/EliminationUninitVariables.cpp
 )
 
 add_library(EliminationDataFlow STATIC ${ELIMINATION_SOURCES})
-

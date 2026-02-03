@@ -1,6 +1,7 @@
 # Newtonian Program Analysis (NPA)
 
 NPA implements Newton-style program analysis over ω-continuous semirings, following the algorithms in Esparza et al. (JACM) and Reps et al. (TOPLAS 2016).
+The primary target is **idempotent** semirings; non-idempotent domains are supported when a suitable `subtract` is provided.
 
 ## Algorithm overview
 
@@ -16,15 +17,15 @@ NPA implements Newton-style program analysis over ω-continuous semirings, follo
 
 4. **Solving the linear system** (each Newton round):
    - **Worklist / SCC**: Chaotic iteration (or SCC-ordered fixpoint) on the linear RHS.
-   - **Tensor product** (Reps et al., Alg. 3.4): Convert LCFL system to a *left-linear* system over a *paired* semiring \( (a,b) \otimes_p (a',b') = (a' \otimes a, b \otimes b') \), solve there (regular path problem), then *project* back via \( R((w_1,w_2)) = w_1 \otimes w_2 \). Used only when the system has LCFL structure (Concat/InfClos).
+   - **Tensor product** (Reps et al., Alg. 3.4): Convert LCFL system to a *left-linear* system over a *paired* semiring \( (a,b) \otimes_p (a',b') = (a' \otimes a, b \otimes b') \), solve there (regular path problem), then *project* back via \( R((w_1,w_2)) = w_1 \otimes w_2 \). Used only when the system has LCFL structure; falls back to worklist if regularization preconditions are not met (e.g., non-constant coefficients or `InfClos`).
 
 ## Implementation alignment with the papers
 
 - **Kleene**: \( \kappa^{(i+1)} = f(\kappa^{(i)}) \) — implemented as `KleeneIter` (evaluate all equations under current \( \nu \)).
 - **Newton**: \( \nu^{(i+1)} = \nu^{(i)} \sqcup \Delta^{(i)} \), \( \Delta^{(i)} \) = least solution of \( Df|_{\nu^{(i)}}(X) + \delta^{(i)} = X \) — implemented as `NewtonIter`: build RHS = \( \delta + Df|_\nu(X) \) (with \( \delta = f(\nu)-\nu \) or \( f(\nu) \) when idempotent), solve linear system, then \( \nu' = \Delta \) (idempotent) or \( \nu' = \nu \oplus \Delta \).
-- **Initial value**: The code uses \( \nu^{(0)} = \bot \). Esparza et al. use \( \nu^{(0)} = f(\bot) \); both yield a valid Newton sequence; convergence may differ.
+- **Initial value**: The code uses \( \nu^{(0)} = f(\bot) \) (as in Esparza et al.).
 - **Differential** (Esparza et al. Defn. 3.1, 3.5): Term→0, Seq→c·d(t), Call→\( \nu(f)\cdot d(arg) + f(\nu(arg)) \), Cond/Ndet by linearity, Hole→X, Bound→0, **Concat**→\( D(t_1)\cdot \nu_X\cdot t_2 + t_1\cdot X\cdot t_2 + t_1\cdot \nu_X\cdot D(t_2) \), InfClos→d(body). Implemented in `Diff.h` (with `SeqR` for “expr·constant”).
-- **Tensor product** (Reps et al. Alg. 3.4): Paired semiring \( (a_1,b_1)\otimes_p (a_2,b_2) = (a_2\otimes a_1,\, b_1\otimes b_2) \), readout \( R((w_1,w_2)) = w_1\otimes w_2 \). Implemented in `TensorProductDomain.h` (`extend` order and `project` = \( R \)).
+- **Tensor product** (Reps et al. Alg. 3.4): Paired semiring \( (a_1,b_1)\otimes_p (a_2,b_2) = (a_2\otimes a_1,\, b_1\otimes b_2) \), readout \( R((w_1,w_2)) = w_1\otimes w_2 \). Implemented in `TensorProductDomain.h` (`extend` order and `project` = \( R \)), with LCFL terms rewritten to left-linear form \( Y \otimes_p (a,b) \) when coefficients are constant.
 
 ## References
 

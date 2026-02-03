@@ -10,10 +10,15 @@ This corresponds to a **meet-over-all-paths (MOP)** computation. For classic dis
 
 ## Solver methods
 
-Two elimination-style solvers are exposed via `elimination::EliminationOptions`:
+Three elimination-style solvers are exposed via `elimination::EliminationOptions`:
 
 - `StateElimination` (default): generic **O(n³)** state-elimination over all nodes (Floyd–Warshall-style).
-- `ADTDelayed`: a **paper-style ADT-based** path-expression construction for **reducible** flowgraphs. To use it, implement `elimination::IntraReducibleEliminationProblem` (dominators + topological order + edge list). If the problem does not provide this interface (or assumptions fail), the solver automatically falls back to `StateElimination`.
+- `ADTSimple`: **paper-style ADT "simple" algorithm** for **reducible** flowgraphs (O(n²) updates).
+- `ADTDelayed`: **paper-style ADT "delayed" algorithm** for **reducible** flowgraphs.
+
+For ADT-based methods, you can optionally implement `elimination::IntraReducibleEliminationProblem`
+(dominators + topological order + edge list). If not provided, the solver computes reducible
+flowgraph metadata internally and falls back to `StateElimination` when reducibility assumptions fail.
 
 ## Main headers
 
@@ -21,3 +26,17 @@ Two elimination-style solvers are exposed via `elimination::EliminationOptions`:
 - `include/Dataflow/Elimination/PathExpression.h` — path-expression AST
 - `include/Dataflow/Elimination/Solver/IntraEliminationSolver.h` — solver
 - `include/Dataflow/Elimination/DataFlowResult.h` — result container
+- `include/Dataflow/Elimination/LLVM/LLVMEliminationProblem.h` — LLVM IR adapter
+- `include/Dataflow/Elimination/Analyses/Intraprocedural/EliminationReachable.h`
+- `include/Dataflow/Elimination/Analyses/Intraprocedural/EliminationConstantPropagation.h`
+- `include/Dataflow/Elimination/Analyses/Intraprocedural/EliminationUninitVariables.h`
+
+## Intraprocedural LLVM analyses
+
+We provide a few concrete LLVM IR analyses implemented on top of the
+elimination framework. These are intended as practical clients (as in the
+paper), and serve as examples for adding additional analyses:
+
+- Reachability (`runIntraElimReachable`)
+- Constant propagation (`runIntraElimConstantPropagation`)
+- Uninitialized variables (`runIntraElimUninitVariables`)

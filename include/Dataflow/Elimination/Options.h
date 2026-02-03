@@ -6,6 +6,8 @@ namespace elimination {
 enum class EliminationMethod {
   // Generic O(n^3) state-elimination (Floyd–Warshall-style) over all nodes.
   StateElimination,
+  // Paper-style ADT "simple" algorithm (O(n^2) path-expression updates).
+  ADTSimple,
   // Paper-style ADT + path-expression construction (requires reducible info).
   ADTDelayed,
 };
@@ -17,4 +19,3 @@ struct EliminationOptions final {
 } // namespace elimination
 
 #endif // DATAFLOW_ELIMINATION_OPTIONS_H_
-

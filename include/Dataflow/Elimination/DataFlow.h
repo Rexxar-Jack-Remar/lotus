@@ -3,6 +3,7 @@
 
 #include "Dataflow/Elimination/DataFlowResult.h"
 #include "Dataflow/Elimination/EliminationFramework.h"
+#include "Dataflow/Elimination/LLVM/LLVMEliminationProblem.h"
 #include "Dataflow/Elimination/Options.h"
 #include "Dataflow/Elimination/PathExpression.h"
 #include "Dataflow/Elimination/Solver/IntraEliminationSolver.h"

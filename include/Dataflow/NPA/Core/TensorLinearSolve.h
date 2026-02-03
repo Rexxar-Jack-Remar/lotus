@@ -7,9 +7,11 @@
  *
  * Converts the LCFL linear system into a \e left-linear system over the
  * paired semiring (TensorProductDomain): pair (a,b) represents left/right
- * context so that a·Y·b becomes Z ⊗_p (a,b). The left-linear system is
+ * context so that a·Y·b becomes Y ⊗_p (a,b). The left-linear system is
  * solved by worklist (or could use Tarjan path expressions); then we
  * \e project back to the base domain (readout R((w1,w2)) = w1⊗w2).
+ * Regularization requires Concat coefficients to be constant and excludes
+ * InfClos; otherwise we fall back to worklist.
  *
  * Note: R does not distribute over ⊕_p in general, so the result can be an
  * over-approximation of the least solution; see paper §3.3 and §4.6 for
@@ -21,26 +23,112 @@
 
 namespace npa {
 
-/// Converts linearized expression over D to expression over TensorProductDomain<D>:
-/// each value v becomes (v,v); structure (Concat, InfClos, etc.) preserved.
+/// Constant evaluator for Exp1: succeeds only if expression is variable-free.
+template <class D>
+struct Exp1ConstEval {
+  using V = DomVal<D>;
+  using E = E1<D>;
+  static Optional<V> eval(const E &e) {
+    if (!e) return {};
+    using K = typename Exp1<D>::K;
+    switch (e->k) {
+    case K::Term:
+      {
+        Optional<V> out;
+        out = e->c;
+        return out;
+      }
+    case K::Seq: {
+      auto t = eval(e->t);
+      if (!t.has_value()) return {};
+      Optional<V> out;
+      out = D::extend(e->c, *t);
+      return out;
+    }
+    case K::SeqR: {
+      auto t = eval(e->t);
+      if (!t.has_value()) return {};
+      Optional<V> out;
+      out = D::extend(*t, e->c);
+      return out;
+    }
+    case K::Add: {
+      auto a = eval(e->t1), b = eval(e->t2);
+      if (!a.has_value() || !b.has_value()) return {};
+      Optional<V> out;
+      out = D::combine(*a, *b);
+      return out;
+    }
+    case K::Sub: {
+      if (!DomainHasSubtract<D>::value) return {};
+      auto a = eval(e->t1), b = eval(e->t2);
+      if (!a.has_value() || !b.has_value()) return {};
+      Optional<V> out;
+      out = D::subtract(*a, *b);
+      return out;
+    }
+    case K::Ndet: {
+      auto a = eval(e->t1), b = eval(e->t2);
+      if (!a.has_value() || !b.has_value()) return {};
+      Optional<V> out;
+      out = D::ndetCombine(*a, *b);
+      return out;
+    }
+    case K::Cond: {
+      auto t = eval(e->t1), f = eval(e->t2);
+      if (!t.has_value() || !f.has_value()) return {};
+      Optional<V> out;
+      out = D::condCombine(e->phi, *t, *f);
+      return out;
+    }
+    default:
+      return {};
+    }
+  }
+};
+
+/// Converts linearized expression over D to a left-linear expression over
+/// TensorProductDomain<D> by rewriting Concat (a·X·b) into X ⊗_p (a,b).
 template <class D>
 struct Exp1ToTensor {
   using TD = TensorProductDomain<D>;
   using E1D = E1<D>;
   using E1T = E1<TD>;
+  using VT = typename TD::value_type;
+  static bool is_regularizable(const E1D &e) {
+    if (!e) return true;
+    using K = typename Exp1<D>::K;
+    switch (e->k) {
+    case K::InfClos:
+      return false;
+    case K::Concat: {
+      auto a = Exp1ConstEval<D>::eval(e->t1);
+      auto b = Exp1ConstEval<D>::eval(e->t2);
+      return a.has_value() && b.has_value();
+    }
+    default:
+      break;
+    }
+    if (e->t && !is_regularizable(e->t)) return false;
+    if (e->t1 && !is_regularizable(e->t1)) return false;
+    if (e->t2 && !is_regularizable(e->t2)) return false;
+    return true;
+  }
   static E1T convert(const E1D &e) {
     if (!e) return nullptr;
     using K = typename Exp1<D>::K;
-    using VT = typename TD::value_type;
     switch (e->k) {
     case K::Term:
-      return Exp1<TD>::term(VT(e->c, e->c));
+      return Exp1<TD>::term(VT(e->c, D::one()));
     case K::Seq:
-      return Exp1<TD>::seq(VT(e->c, e->c), convert(e->t));
+      // Base: c ⊗ t. Use seqR so projection yields c ⊗ R(t).
+      return Exp1<TD>::seqR(convert(e->t), VT(e->c, D::one()));
     case K::SeqR:
-      return Exp1<TD>::seqR(convert(e->t), VT(e->c, e->c));
+      // Base: t ⊗ c. Use seq so projection yields R(t) ⊗ c.
+      return Exp1<TD>::seq(VT(e->c, D::one()), convert(e->t));
     case K::Call:
-      return Exp1<TD>::call(e->sym, VT(e->c, e->c));
+      // Base: f ⊗ c. Encode as seq so projection yields R(f) ⊗ c.
+      return Exp1<TD>::seq(VT(e->c, D::one()), Exp1<TD>::hole(e->sym));
     case K::Cond:
       return Exp1<TD>::cond(e->phi, convert(e->t1), convert(e->t2));
     case K::Add:
@@ -52,7 +140,12 @@ struct Exp1ToTensor {
     case K::Hole:
       return Exp1<TD>::hole(e->sym);
     case K::Concat:
-      return Exp1<TD>::concat(convert(e->t1), e->sym, convert(e->t2));
+      // Regularization: a·X·b -> X ⊗_p (a,b) (TOPLAS 2016, Alg. 3.4).
+      {
+        auto a = Exp1ConstEval<D>::eval(e->t1);
+        auto b = Exp1ConstEval<D>::eval(e->t2);
+        return Exp1<TD>::seqR(Exp1<TD>::hole(e->sym), VT(*a, *b));
+      }
     case K::InfClos:
       return Exp1<TD>::inf(convert(e->t), e->sym);
     default:
@@ -67,6 +160,13 @@ template <class D>
 std::vector<DomVal<D>> solve_linear_tensor_impl(
     bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
     std::vector<DomVal<D>> init) {
+  for (const auto &p : rhs) {
+    if (!Exp1ToTensor<D>::is_regularizable(p.second)) {
+      if (verbose)
+        std::cerr << "[tensor] not regularizable; falling back to worklist\n";
+      return solve_linear_worklist_impl<D>(verbose, rhs, init);
+    }
+  }
   using TD = TensorProductDomain<D>;
   using VT = typename TD::value_type;
   std::vector<std::pair<Symbol, E1<TD>>> rhs_tensor;

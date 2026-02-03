@@ -16,7 +16,7 @@ public:
   FactT &IN(const NodeT &N) { return In[N]; }
   expr_ref_t &ExprTo(const NodeT &N) { return Expr[N]; }
 
-  [[nodiscard]] const FactT &IN(const NodeT &N) const {
+  const FactT &IN(const NodeT &N) const {
     auto It = In.find(N);
     if (It != In.end()) {
       return It->second;
@@ -24,7 +24,7 @@ public:
     return DefaultFact;
   }
 
-  [[nodiscard]] expr_ref_t ExprTo(const NodeT &N) const {
+  expr_ref_t ExprTo(const NodeT &N) const {
     auto It = Expr.find(N);
     if (It != Expr.end()) {
       return It->second;

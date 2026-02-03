@@ -8,7 +8,7 @@
  * Solver<D, ITER> runs ITER until the vector of equation values stabilizes.
  * - KleeneIter: κ^(i+1) = f(κ^(i)) (classical Kleene sequence, Eqn. (1) in
  *   Esparza et al.).
- * - NewtonIter: ν^(0) = ⊥ (or f(⊥)); ν^(i+1) = ν^(i) ⊔ LinearCorrectionTerm.
+ * - NewtonIter: ν^(0) = f(⊥); ν^(i+1) = ν^(i) ⊔ LinearCorrectionTerm.
  *   The correction is Δ^(i) = least solution of Df|ν^(i)(X) + δ^(i) = X
  *   (Eqn. (2), (13)); then ν^(i+1) = ν^(i) ⊕ Δ^(i) (idempotent) or
  *   ν^(i+1) = ν^(i) + Δ^(i) (non-idempotent). The linear system is solved
@@ -29,8 +29,7 @@ struct Solver {
   solve(const std::vector<Eqn> &eqns, bool verbose = false, int max = -1,
         LinearStrategy linStrat = LinearStrategy::Worklist) {
     NPA_REQUIRE_DOMAIN(D);
-    std::vector<std::pair<Symbol, V>> cur;
-    for (auto &e : eqns) cur.emplace_back(e.first, D::zero());
+    std::vector<std::pair<Symbol, V>> cur = ITER::init(eqns);
     auto tic = std::chrono::high_resolution_clock::now();
     int it = 0;
     while (max < 0 || it < max) {
@@ -63,6 +62,13 @@ struct KleeneIter {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
   static std::vector<std::pair<Symbol, V>>
+  init(const std::vector<Eqn> &eqns) {
+    std::vector<std::pair<Symbol, V>> cur;
+    cur.reserve(eqns.size());
+    for (auto &e : eqns) cur.emplace_back(e.first, D::zero());
+    return cur;
+  }
+  static std::vector<std::pair<Symbol, V>>
   run(bool verbose, const std::vector<Eqn> &eqns,
       const std::vector<std::pair<Symbol, V>> &binds,
       LinearStrategy = LinearStrategy::Worklist) {
@@ -80,6 +86,16 @@ template <class D>
 struct NewtonIter {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
+  static std::vector<std::pair<Symbol, V>>
+  init(const std::vector<Eqn> &eqns) {
+    std::unordered_map<Symbol, V> nu0;
+    for (auto &e : eqns) nu0[e.first] = D::zero();
+    std::vector<std::pair<Symbol, V>> cur;
+    cur.reserve(eqns.size());
+    for (auto &e : eqns)
+      cur.emplace_back(e.first, I0<D>::eval(false, nu0, e.second));
+    return cur;
+  }
   static std::vector<std::pair<Symbol, V>>
   run(bool verbose, const std::vector<Eqn> &eqns,
       const std::vector<std::pair<Symbol, V>> &binds,

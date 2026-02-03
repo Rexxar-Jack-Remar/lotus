@@ -7,8 +7,8 @@
  *
  * Newtonian Program Analysis (NPA) solves systems of equations over
  * ω-continuous semirings. The framework expects a \e domain (semiring) D with:
- * - combine (⊕), extend (⊗), zero (⊥), one (1)
- * - optional: extend_lin (for linearized equations), subtract (non-idempotent)
+ * - combine (⊕), extend (⊗), extend_lin (linearized equations), zero (⊥), one (1)
+ * - subtract is required only for non-idempotent domains
  *
  * References:
  * - Esparza et al., "Newtonian Program Analysis" (JACM): Newton sequence
@@ -65,11 +65,12 @@ struct Stat {
  * Domain concept (ω-continuous semiring)
  *
  * Required: zero, one, combine (⊕), extend (⊗), extend_lin, ndetCombine,
- * condCombine, subtract, equal. See Esparza et al. for the semiring axioms
- * and ω-continuity; NPA uses the least fixed point μf of f.
+ * condCombine, equal. See Esparza et al. for the semiring axioms and
+ * ω-continuity; NPA uses the least fixed point μf of f. subtract() is
+ * required only for non-idempotent domains.
  *********************************************************************/
 template <class D>
-struct DomainHas {
+struct DomainHasBase {
   template <class T>
   static auto test(int)
       -> decltype(T::zero(), T::one(), T::combine(T::zero(), T::zero()),
@@ -77,8 +78,20 @@ struct DomainHas {
                   T::extend_lin(T::zero(), T::zero()),
                   T::ndetCombine(T::zero(), T::zero()),
                   T::condCombine(typename T::test_type{}, T::zero(), T::zero()),
-                  T::subtract(T::zero(), T::zero()),
                   T::equal(T::zero(), T::zero()), std::true_type{});
+  template <class>
+  static std::false_type test(...);
+
+public:
+  static constexpr bool value =
+      std::is_same<decltype(test<D>(0)), std::true_type>::value;
+};
+
+template <class D>
+struct DomainHasSubtract {
+  template <class T>
+  static auto test(int)
+      -> decltype(T::subtract(T::zero(), T::zero()), std::true_type{});
   template <class>
   static std::false_type test(...);
 
@@ -93,8 +106,10 @@ template <class D>
 using DomTest = typename D::test_type;
 
 #define NPA_REQUIRE_DOMAIN(D)                                                 \
-  static_assert(DomainHas<D>::value,                                          \
-                "Invalid DOMAIN: missing required methods")
+  static_assert(DomainHasBase<D>::value,                                      \
+                "Invalid DOMAIN: missing required methods");                 \
+  static_assert(D::idempotent || DomainHasSubtract<D>::value,                 \
+                "Non-idempotent DOMAIN must implement subtract()")
 
 struct Dirty {
   mutable bool dirty_ = true;
