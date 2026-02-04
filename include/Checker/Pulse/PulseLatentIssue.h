@@ -25,6 +25,7 @@ class LatentIssue {
 public:
     enum class IssueKind {
         InvalidAccess,      // Access to invalid address
+        OutOfBounds,        // Out-of-bounds access
         NullDereference,    // Null pointer dereference
         UseAfterFree,       // Use after free
         UninitializedRead   // Read from uninitialized memory

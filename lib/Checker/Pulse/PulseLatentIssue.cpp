@@ -14,6 +14,9 @@ bool LatentIssue::shouldReport(const PulseSummary& /*summary*/, const LatentIssu
 LatentIssue::IssueKind LatentIssue::issueKindFromResult(OperationResult result) {
     switch (result) {
     case OperationResult::InvalidAccess:
+        return IssueKind::InvalidAccess;
+    case OperationResult::OutOfBounds:
+        return IssueKind::OutOfBounds;
     case OperationResult::UseAfterFree:
         return IssueKind::UseAfterFree;
     case OperationResult::NullDereference:
@@ -46,6 +49,10 @@ bool LatentIssue::isManifest(OperationResult diagnostic,
     // Use-after-free is manifest once we have observed the invalidation along
     // the current path.
     if (diagnostic == OperationResult::UseAfterFree) {
+        return true;
+    }
+
+    if (diagnostic == OperationResult::OutOfBounds) {
         return true;
     }
 

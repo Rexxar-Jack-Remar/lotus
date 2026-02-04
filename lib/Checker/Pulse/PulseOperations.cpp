@@ -4,6 +4,8 @@
 #include "Checker/Pulse/PulseTaint.h"
 
 #include <cassert>
+#include <limits>
+#include <set>
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constants.h>
@@ -301,6 +303,12 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
     const llvm::DataLayout *DL =
         (loc && loc->getModule()) ? &loc->getModule()->getDataLayout() : nullptr;
 
+    // Bounds tracking: use allocation size (when known) to prove OOB.
+    llvm::Optional<uint64_t> alloc_size_opt = astate.getAllocationSize(base_canon);
+    bool offset_known = true;
+    int64_t total_offset = 0;
+    bool oob_proven = false;
+
     unsigned op_index = 1;
     for (auto GTI = llvm::gep_type_begin(GEP), E = llvm::gep_type_end(GEP);
          GTI != E; ++GTI, ++op_index) {
@@ -319,6 +327,18 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
           return llvm::None;
         }
         acc = Access(static_cast<unsigned>(field));
+
+        if (offset_known && DL) {
+          auto *layout = DL->getStructLayout(ST);
+          uint64_t field_off = layout->getElementOffset(field);
+          if (field_off > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+            offset_known = false;
+          } else {
+            total_offset += static_cast<int64_t>(field_off);
+          }
+        } else {
+          offset_known = false;
+        }
       } else {
         AbstractValue idxAv = factory_->getOrCreate(idx);
         astate.getPathFormula().addIntegerConstraint(idxAv);
@@ -332,6 +352,34 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
           stride_bytes = DL->getTypeAllocSize(indexed);
         }
         acc = Access::arrayIndex(idxAv, stride_bytes);
+
+        if (offset_known && stride_bytes > 0) {
+          if (auto c = getI64Constant(idx)) {
+            __int128 off = static_cast<__int128>(*c) *
+                           static_cast<__int128>(stride_bytes);
+            if (off > std::numeric_limits<int64_t>::max() ||
+                off < std::numeric_limits<int64_t>::min()) {
+              offset_known = false;
+            } else {
+              total_offset += static_cast<int64_t>(off);
+            }
+          } else {
+            // If we have allocation size and a symbolic index, add bounds.
+            if (alloc_size_opt && offset_known) {
+              uint64_t alloc_size = *alloc_size_opt;
+              if (total_offset >= 0 && static_cast<uint64_t>(total_offset) < alloc_size) {
+                uint64_t remaining = alloc_size - static_cast<uint64_t>(total_offset);
+                if (remaining > 0) {
+                  uint64_t max_index = (remaining - 1) / stride_bytes;
+                  (void)astate.getPathFormula().addBounds(
+                      idxAv, 0, static_cast<int64_t>(max_index));
+                }
+              }
+            }
+          }
+        } else {
+          offset_known = false;
+        }
       }
 
       if (auto *target = astate.getPostHeap().findEdge(cur, acc)) {
@@ -368,7 +416,28 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
 
       cur = fresh;
     }
+    // If we can prove an out-of-bounds offset, mark it for later reporting.
+    if (alloc_size_opt && offset_known) {
+      const uint64_t alloc_size = *alloc_size_opt;
+      if (total_offset < 0 ||
+          static_cast<uint64_t>(total_offset) >= alloc_size) {
+        oob_proven = true;
+      }
+    }
+
     AbstractValue gepAv = factory_->getOrCreate(GEP);
+    if (oob_proven) {
+      astate.getPostAttrs().add(gepAv, Attribute::OutOfBounds);
+    }
+    if (alloc_size_opt && offset_known && total_offset >= 0) {
+      uint64_t alloc_size = *alloc_size_opt;
+      if (static_cast<uint64_t>(total_offset) < alloc_size) {
+        uint64_t remaining = alloc_size - static_cast<uint64_t>(total_offset);
+        if (remaining > 0) {
+          astate.setAllocationSize(gepAv, remaining);
+        }
+      }
+    }
     if (base_is_stack) {
       astate.getPostAttrs().add(gepAv, Attribute::Stack);
     }
@@ -499,6 +568,10 @@ OperationResult PulseOperations::checkAddrAccess(AbductiveDomain &astate,
     return OperationResult::UseAfterFree;
   }
 
+  if (astate.getPostAttrs().has(canon_addr, Attribute::OutOfBounds)) {
+    return OperationResult::OutOfBounds;
+  }
+
   // Check null (using formula first, then attributes)
   // Path formula is more precise (path-sensitive)
   // Only check null if Invalid is NOT present (already checked above)
@@ -544,6 +617,10 @@ void PulseOperations::invalidate(AbductiveDomain &astate, Address addr,
   // Invalidate the canonical address
   astate.getPostAttrs().add(canon, Attribute::Invalid);
   astate.getPostAttrs().remove(canon, Attribute::Allocated);
+  // Clear allocation size for freed memory.
+  // (Do not retain bounds for invalidated objects.)
+  // We keep it out of post state to avoid misleading OOB checks later.
+  astate.setAllocationSize(canon, 0);
   astate.setInvalidationInfo(canon, kind, loc);
   // Heap edges are keyed by canonical abstract values.
   astate.getPostHeap().removeEdges(canon);
@@ -554,46 +631,34 @@ void PulseOperations::invalidate(AbductiveDomain &astate, Address addr,
   // with the same canonical value are invalidated The canonical value itself is
   // already invalidated above
 
-  // Check stack for aliased pointers
-  for (auto &stack_kv : astate.getPostStack().getMap()) {
+  // Propagate invalidation to aliases across stack and heap keys/values.
+  std::set<AbstractValue> alias_keys;
+
+  for (const auto &stack_kv : astate.getPostStack().getMap()) {
     AbstractValue stack_canon = astate.getCanonical(stack_kv.second.addr);
     if (stack_canon == canon) {
-      // This stack value aliases the invalidated pointer
-      // The canonical value is already invalidated, so this is handled
-      // But we should also mark the stack value itself
-      astate.getPostAttrs().add(stack_canon, Attribute::Invalid);
-      astate.getPostAttrs().remove(stack_canon, Attribute::Allocated);
+      alias_keys.insert(stack_canon);
     }
   }
 
-  // Check heap edges - if any edge points to this address, the source might be
-  // invalidated Actually, we should check if any edge FROM this address exists,
-  // and invalidate targets But more importantly, we should check if any pointer
-  // points TO this address
-  for (auto &edge_kv : astate.getPostHeap().getEdges()) {
+  for (const auto &edge_kv : astate.getPostHeap().getEdges()) {
     AbstractValue source_canon = astate.getCanonical(edge_kv.first);
     if (source_canon == canon) {
-      // This is an edge FROM the invalidated address
-      // Remove all edges from this address (already done above)
-      // But also mark any targets as potentially invalid if they're pointers
-      for (auto &access_kv : edge_kv.second) {
-        (void)access_kv;
-        // If target is a pointer type, it might also need invalidation
-        // For now, we just remove the edges (done above)
-      }
+      alias_keys.insert(source_canon);
     }
-
-    // Check if any edge points TO the invalidated address
-    for (auto &access_kv : edge_kv.second) {
+    for (const auto &access_kv : edge_kv.second) {
       AbstractValue target_canon = astate.getCanonical(access_kv.second.addr);
       if (target_canon == canon) {
-        // This edge points TO the invalidated address
-        // The source pointer now points to invalid memory
-        // We should mark the source as potentially problematic
-        // But actually, the target is already invalidated, so dereferencing
-        // the source will be caught by checkAddrAccess
+        alias_keys.insert(target_canon);
       }
     }
+  }
+
+  for (AbstractValue alias : alias_keys) {
+    astate.getPostAttrs().add(alias, Attribute::Invalid);
+    astate.getPostAttrs().remove(alias, Attribute::Allocated);
+    astate.setAllocationSize(alias, 0);
+    astate.getPostHeap().removeEdges(alias);
   }
 }
 

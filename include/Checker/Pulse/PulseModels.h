@@ -117,6 +117,7 @@ private:
     ModelResult modelStrchr(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
     ModelResult modelStrstr(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
     ModelResult modelMemcpy(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
+    ModelResult modelMemmove(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
     ModelResult modelMemset(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
     ModelResult modelRead(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);
     ModelResult modelWrite(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred);

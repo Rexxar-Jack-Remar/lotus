@@ -113,6 +113,9 @@ void PulseLogger::logBug(OperationResult kind, const llvm::Instruction* loc, con
         case OperationResult::UseAfterFree:
             oss << "UseAfterFree";
             break;
+        case OperationResult::OutOfBounds:
+            oss << "OutOfBounds";
+            break;
         case OperationResult::NullDereference:
             oss << "NullDereference";
             break;
@@ -134,6 +137,7 @@ void PulseLogger::logBug(OperationResult kind, const llvm::Instruction* loc, con
     
     error(oss.str());
     incrementCounter("bugs." + std::string(kind == OperationResult::UseAfterFree ? "use_after_free" :
+                                          kind == OperationResult::OutOfBounds ? "out_of_bounds" :
                                           kind == OperationResult::NullDereference ? "null_deref" :
                                           kind == OperationResult::UninitializedRead ? "uninit_read" :
                                           kind == OperationResult::TaintError ? "taint_error" : "unknown"));

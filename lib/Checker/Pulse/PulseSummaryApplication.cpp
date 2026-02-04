@@ -294,6 +294,17 @@ static void applyPostCondition(
             }
         }
     }
+
+    // Apply allocation sizes (with substitution).
+    for (const auto& kv : callee_post->getAllocationSizes()) {
+        AbstractValue formal_av = callee_post->getCanonical(kv.first);
+        auto caller_av_opt = substitution.substitute(formal_av);
+        if (!caller_av_opt) {
+            continue;
+        }
+        AbstractValue caller_av = caller_astate.getCanonical(*caller_av_opt);
+        caller_astate.setAllocationSize(caller_av, kv.second);
+    }
 }
 
 /**
@@ -316,12 +327,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
         return {caller_state};
     }
 
-    unsigned formal_pointer_count = 0;
-    for (const auto& Arg : callee->args()) {
-        if (Arg.getType()->isPointerTy()) {
-            formal_pointer_count++;
-        }
-    }
+    const unsigned formal_arg_count = callee->arg_size();
 
     std::vector<ExecutionDomain> results;
     results.reserve(std::min<unsigned>(kMaxDisjuncts, summary.getPrePostList().size()));
@@ -349,16 +355,10 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
         std::map<const llvm::Value*, AbstractValue> captured_vars;
 
         unsigned arg_idx = 0;
-        unsigned pointer_arg_count = 0;
         bool entry_failed = false;
         
         // Check formal/actual length mismatch first
-        unsigned actual_pointer_count = 0;
-        for (unsigned i = 0; i < CI->arg_size(); ++i) {
-            if (CI->getArgOperand(i)->getType()->isPointerTy()) {
-                actual_pointer_count++;
-            }
-        }
+        const unsigned actual_arg_count = CI->arg_size();
         
         // Handle captured variables: check if this is a closure call
         // In LLVM IR, closures often have a first argument that's the closure structure
@@ -396,11 +396,11 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
         
         // Check formal/actual length mismatch (including captured variables)
         // Infer uses FormalActualLength and CapturedFormalActualLength contradictions
-        if (actual_pointer_count != formal_pointer_count && !is_closure_call) {
+        if (!callee->isVarArg() && actual_arg_count != formal_arg_count && !is_closure_call) {
             // Formal/actual length mismatch - this is a contradiction
             // Report as FormalActualLength contradiction
             auto contradiction = Contradiction::makeFormalActualLength(
-                formal_pointer_count, actual_pointer_count);
+                formal_arg_count, actual_arg_count);
             // Skip this entry, try next
             continue;
         }
@@ -423,19 +423,14 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
             // }
         }
         
-        // Build formal-to-actual mapping for ALL pointer arguments first
+        // Build formal-to-actual mapping for ALL arguments first
         // This ensures substitution is complete before applying post conditions
-        // Match formal parameters to actual arguments by position (not by pointer index)
+        // Match formal parameters to actual arguments by position
         arg_idx = 0;
         for (const auto& Arg : callee->args()) {
             if (arg_idx >= CI->arg_size()) {
                 break;
             }
-            if (!Arg.getType()->isPointerTy()) {
-                arg_idx++;
-                continue;
-            }
-            pointer_arg_count++;
 
             auto actual_opt = ops_.eval(*new_astate, CI->getArgOperand(arg_idx), CI, pred);
             if (!actual_opt) {
@@ -467,7 +462,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
         if (entry_failed) {
             continue;
         }
-        if (pointer_arg_count != formal_pointer_count) {
+        if (!callee->isVarArg() && actual_arg_count != formal_arg_count) {
             return handleCall(CI, caller_state, pred, 0);
         }
 

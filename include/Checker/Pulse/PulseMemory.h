@@ -31,6 +31,7 @@ enum class Attribute {
     Invalid,        // Memory is invalid (freed, out of scope)
     Uninitialized,  // Memory is uninitialized
     Null,           // Pointer is null
+    OutOfBounds,    // Pointer proven to be out of bounds for its allocation
     Tainted,        // Value is tainted
     FileHandle,     // File handle resource
     Lock,           // Lock resource

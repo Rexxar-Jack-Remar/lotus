@@ -74,7 +74,8 @@ typename std::enable_if<!std::is_pointer<I>::value>::type BugDetection::mark_err
     mark_err<err_t>(&inst);
 }
 
-bool BugDetection::add_range_cons(const crange& rng, const z3::expr& bv, z3::solver& solver) {
+bool BugDetection::add_range_cons(const crange& rng, const z3::expr& bv, z3::solver& solver,
+                                  const std::function<void(const z3::expr&)>& addConstraint) {
     if (rng.isFullSet() || bv.is_numeral())
         return true;
 
@@ -93,8 +94,15 @@ bool BugDetection::add_range_cons(const crange& rng, const z3::expr& bv, z3::sol
         v = v.extract(rbw - 1, 0);
     }
 
-    solver.add(z3::ule(v, solver.ctx().bv_val(rng.getUnsignedMax().getZExtValue(), rbw)));
-    solver.add(z3::uge(v, solver.ctx().bv_val(rng.getUnsignedMin().getZExtValue(), rbw)));
+    const auto upper = z3::ule(v, solver.ctx().bv_val(rng.getUnsignedMax().getZExtValue(), rbw));
+    const auto lower = z3::uge(v, solver.ctx().bv_val(rng.getUnsignedMin().getZExtValue(), rbw));
+    if (addConstraint) {
+        addConstraint(upper);
+        addConstraint(lower);
+    } else {
+        solver.add(upper);
+        solver.add(lower);
+    }
     return true;
 }
 
@@ -103,7 +111,12 @@ void BugDetection::binary_check(BinaryOperator* op,
                                const DenseMap<const Value*, llvm::Optional<z3::expr>>& v2sym,
                                std::set<Instruction*>& overflow_insts,
                                std::set<Instruction*>& bad_shift_insts,
-                               std::set<Instruction*>& div_zero_insts) {
+                               std::set<Instruction*>& div_zero_insts,
+                               bool robust_mode,
+                               const std::vector<z3::expr>* path_constraints,
+                               const std::vector<z3::expr>* universal_vars,
+                               const std::function<void(interr, const z3::expr&)>& dump,
+                               const std::function<bool(interr)>& robustFilter) {
     // Skip checks if all checkers are disabled
     if (!CheckIntOverflow && !CheckDivByZero && !CheckBadShift)
         return;
@@ -127,18 +140,56 @@ void BugDetection::binary_check(BinaryOperator* op,
     const bool preferSigned = is_nsw && !is_nuw;
     const bool preferUnsigned = is_nuw && !is_nsw;
 
-    const auto check = [&](interr et, bool is_signed) {
-        if (solver.check() == z3::sat) { // counter example
-            z3::model m = solver.get_model();
+    const auto check = [&](interr et, bool is_signed, const z3::expr& bugCond) {
+        if (robust_mode && robustFilter && !robustFilter(et)) {
+            return;
+        }
+        bool sat = false;
+        if (!robust_mode) {
+            solver.push();
+            solver.add(bugCond);
+            sat = (solver.check() == z3::sat);
+            solver.pop();
+        } else {
+            auto& ctx = solver.ctx();
+            z3::solver qsolver(ctx);
+            z3::expr pc = ctx.bool_val(true);
+            if (path_constraints && !path_constraints->empty()) {
+                z3::expr_vector pcs(ctx);
+                for (const auto& c : *path_constraints) pcs.push_back(c);
+                pc = z3::mk_and(pcs);
+            }
+            z3::expr body = pc && bugCond;
+            z3::expr q = body;
+            if (universal_vars && !universal_vars->empty()) {
+                z3::expr_vector uvars(ctx);
+                for (const auto& v : *universal_vars) uvars.push_back(v);
+                q = z3::forall(uvars, body);
+                qsolver.add(q);
+            } else {
+                qsolver.add(body);
+            }
+            sat = (qsolver.check() == z3::sat);
+            if (dump) {
+                dump(et, q);
+            }
+        }
+
+        if (sat) {
             MKINT_WARN() << rang::fg::yellow << rang::style::bold << mkstr(et) << rang::style::reset << " at "
                          << rang::bg::black << rang::fg::red << op->getParent()->getParent()->getName()
                          << "::" << *op << rang::style::reset;
-            auto lhs_bin = m.eval(lhs_bv, true);
-            auto rhs_bin = m.eval(rhs_bv, true);
-            MKINT_WARN() << "Counter example: " << rang::bg::black << rang::fg::red << op->getOpcodeName()
-                         << '(' << lhs_bin << ", " << rhs_bin << ") -> " << op->getOpcodeName() << '('
-                         << (is_signed ? lhs_bin.as_int64() : lhs_bin.as_uint64()) << ", "
-                         << (is_signed ? rhs_bin.as_int64() : rhs_bin.as_uint64()) << ')' << rang::style::reset;
+
+            if (!robust_mode) {
+                z3::model m = solver.get_model();
+                auto lhs_bin = m.eval(lhs_bv, true);
+                auto rhs_bin = m.eval(rhs_bv, true);
+                MKINT_WARN() << "Counter example: " << rang::bg::black << rang::fg::red << op->getOpcodeName()
+                             << '(' << lhs_bin << ", " << rhs_bin << ") -> " << op->getOpcodeName() << '('
+                             << (is_signed ? lhs_bin.as_int64() : lhs_bin.as_uint64()) << ", "
+                             << (is_signed ? rhs_bin.as_int64() : rhs_bin.as_uint64()) << ')'
+                             << rang::style::reset;
+            }
 
             // Record bug with its path
             this->recordBugWithPath(op, et);
@@ -158,24 +209,17 @@ void BugDetection::binary_check(BinaryOperator* op,
             }
         }
     };
-
-    solver.push();
     switch (op->getOpcode()) {
     case Instruction::Add:
         if (!CheckIntOverflow)
             break;
             
         if (!preferSigned) {
-            solver.push();
-            solver.add(!z3::bvadd_no_overflow(lhs_bv, rhs_bv, false));
-            check(interr::INT_OVERFLOW, false);
-            solver.pop();
+            check(interr::INT_OVERFLOW, false, !z3::bvadd_no_overflow(lhs_bv, rhs_bv, false));
         }
         if (!preferUnsigned) {
-            solver.push();
-            solver.add(!z3::bvadd_no_overflow(lhs_bv, rhs_bv, true) || !z3::bvadd_no_underflow(lhs_bv, rhs_bv));
-            check(interr::INT_OVERFLOW, true);
-            solver.pop();
+            check(interr::INT_OVERFLOW, true,
+                  (!z3::bvadd_no_overflow(lhs_bv, rhs_bv, true) || !z3::bvadd_no_underflow(lhs_bv, rhs_bv)));
         }
         break;
         
@@ -184,16 +228,11 @@ void BugDetection::binary_check(BinaryOperator* op,
             break;
             
         if (!preferSigned) {
-            solver.push();
-            solver.add(!z3::bvsub_no_underflow(lhs_bv, rhs_bv, false));
-            check(interr::INT_OVERFLOW, false);
-            solver.pop();
+            check(interr::INT_OVERFLOW, false, !z3::bvsub_no_underflow(lhs_bv, rhs_bv, false));
         }
         if (!preferUnsigned) {
-            solver.push();
-            solver.add(!z3::bvsub_no_underflow(lhs_bv, rhs_bv, true) || !z3::bvsub_no_overflow(lhs_bv, rhs_bv));
-            check(interr::INT_OVERFLOW, true);
-            solver.pop();
+            check(interr::INT_OVERFLOW, true,
+                  (!z3::bvsub_no_underflow(lhs_bv, rhs_bv, true) || !z3::bvsub_no_overflow(lhs_bv, rhs_bv)));
         }
         break;
         
@@ -202,16 +241,11 @@ void BugDetection::binary_check(BinaryOperator* op,
             break;
             
         if (!preferSigned) {
-            solver.push();
-            solver.add(!z3::bvmul_no_overflow(lhs_bv, rhs_bv, false));
-            check(interr::INT_OVERFLOW, false);
-            solver.pop();
+            check(interr::INT_OVERFLOW, false, !z3::bvmul_no_overflow(lhs_bv, rhs_bv, false));
         }
         if (!preferUnsigned) {
-            solver.push();
-            solver.add(!z3::bvmul_no_overflow(lhs_bv, rhs_bv, true) || !z3::bvmul_no_underflow(lhs_bv, rhs_bv));
-            check(interr::INT_OVERFLOW, true);
-            solver.pop();
+            check(interr::INT_OVERFLOW, true,
+                  (!z3::bvmul_no_overflow(lhs_bv, rhs_bv, true) || !z3::bvmul_no_underflow(lhs_bv, rhs_bv)));
         }
         break;
         
@@ -220,22 +254,17 @@ void BugDetection::binary_check(BinaryOperator* op,
         if (!CheckDivByZero)
             break;
             
-        solver.add(rhs_bv == solver.ctx().bv_val(0, rhs_bits));
-        check(interr::DIV_BY_ZERO, false);
+        check(interr::DIV_BY_ZERO, false, rhs_bv == solver.ctx().bv_val(0, rhs_bits));
         break;
         
     case Instruction::SRem:
     case Instruction::SDiv: // can be overflow or divisor == 0
         if (CheckDivByZero) {
-            solver.push();
-            solver.add(rhs_bv == solver.ctx().bv_val(0, rhs_bits)); // may 0?
-            check(interr::DIV_BY_ZERO, true);
-            solver.pop();
+            check(interr::DIV_BY_ZERO, true, rhs_bv == solver.ctx().bv_val(0, rhs_bits));
         }
         
         if (CheckIntOverflow) {
-            solver.add(!z3::bvsdiv_no_overflow(lhs_bv, rhs_bv));
-            check(interr::INT_OVERFLOW, true);
+            check(interr::INT_OVERFLOW, true, !z3::bvsdiv_no_overflow(lhs_bv, rhs_bv));
         }
         break;
         
@@ -245,8 +274,7 @@ void BugDetection::binary_check(BinaryOperator* op,
         if (!CheckBadShift)
             break;
             
-        solver.add(rhs_bv >= solver.ctx().bv_val(rhs_bits, rhs_bits)); // sat means bug
-        check(interr::BAD_SHIFT, false);
+        check(interr::BAD_SHIFT, false, rhs_bv >= solver.ctx().bv_val(rhs_bits, rhs_bits));
         break;
         
     case Instruction::And:
@@ -257,7 +285,6 @@ void BugDetection::binary_check(BinaryOperator* op,
     default:
         break;
     }
-    solver.pop();
 }
 
 z3::expr BugDetection::binary_op_propagate(BinaryOperator* op, const DenseMap<const Value*, llvm::Optional<z3::expr>>& v2sym, z3::solver& solver) {

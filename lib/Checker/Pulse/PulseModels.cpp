@@ -7,8 +7,58 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
+#include <limits>
 
 namespace pulse {
+
+namespace {
+static llvm::Optional<uint64_t> getConstUInt64(const llvm::Value* v) {
+    if (!v) return llvm::None;
+    if (auto* CI = llvm::dyn_cast<llvm::ConstantInt>(v)) {
+        if (CI->getBitWidth() <= 64) {
+            if (CI->isNegative()) return llvm::None;
+            return CI->getZExtValue();
+        }
+    }
+    return llvm::None;
+}
+
+static llvm::Optional<uint64_t> mulConstU64(uint64_t a, uint64_t b) {
+    __int128 prod = static_cast<__int128>(a) * static_cast<__int128>(b);
+    if (prod < 0 || prod > std::numeric_limits<uint64_t>::max()) {
+        return llvm::None;
+    }
+    return static_cast<uint64_t>(prod);
+}
+
+static void reportOutOfBoundsAccess(const llvm::Instruction* loc,
+                                    const Address& addr,
+                                    const char* detail) {
+    Trace trace = Trace::fromValueHistory(addr.history);
+    trace.addEvent(loc, detail);
+    auto diag = std::make_unique<AccessToInvalidAddress>(
+        loc, "Out of bounds access", detail,
+        "Ensure indices and lengths stay within the allocated object",
+        IssueType::OutOfBounds, std::move(trace));
+    DiagnosticManager::getInstance().report(std::move(diag));
+}
+
+static void checkLengthAgainstAllocation(AbductiveDomain& astate,
+                                         const Address& addr,
+                                         const llvm::Value* len_value,
+                                         const llvm::Instruction* loc,
+                                         const char* detail) {
+    auto len_opt = getConstUInt64(len_value);
+    if (!len_opt) return;
+    AbstractValue canon = astate.getCanonical(addr.addr);
+    auto size_opt = astate.getAllocationSize(canon);
+    if (!size_opt) return;
+    if (*len_opt > *size_opt) {
+        reportOutOfBoundsAccess(loc, addr, detail);
+        astate.getPostAttrs().add(canon, Attribute::OutOfBounds);
+    }
+}
+} // namespace
 
 PulseModels::PulseModels(PulseChecker& checker)
     : checker_(checker), ops_(checker.getOperations()), factory_(checker.getFactory()) {
@@ -134,7 +184,13 @@ void PulseModels::registerStandardModels() {
     models_["memcpy"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
         return modelMemcpy(call, state, pred);
     };
+    models_["memmove"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+        return modelMemmove(call, state, pred);
+    };
     models_["memset"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+        return modelMemset(call, state, pred);
+    };
+    models_["bzero"] = [this](PulseChecker&, const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
         return modelMemset(call, state, pred);
     };
     
@@ -323,7 +379,9 @@ ModelResult PulseModels::modelMalloc(const llvm::CallInst* call, ExecutionDomain
     
     // Track size if available
     if (call->arg_size() > 0) {
-        // TODO: Track size in formula for buffer overflow checks
+        if (auto size_opt = getConstUInt64(call->getArgOperand(0))) {
+            astate->setAllocationSize(ret_val, *size_opt);
+        }
     }
     
     // Return the address
@@ -445,6 +503,9 @@ ModelResult PulseModels::modelRealloc(const llvm::CallInst* call, ExecutionDomai
     AbstractValue ret_val = factory_.createFresh(call);
     Address ret_addr(ret_val);
     ops_.allocate(*astate, ret_val, call);
+    if (auto size_opt = getConstUInt64(call->getArgOperand(1))) {
+        astate->setAllocationSize(ret_val, *size_opt);
+    }
     ret_addr.history.addAllocationEvent(call, &ret_val);
     astate->getPostStack().add(call, ret_addr);
     
@@ -678,6 +739,15 @@ ModelResult PulseModels::modelCalloc(const llvm::CallInst* call, ExecutionDomain
     // Mark as allocated and initialized
     ops_.allocate(*astate, ret_val, call);
     ops_.initialize(*astate, ret_val);
+    if (call->arg_size() >= 2) {
+        auto n_opt = getConstUInt64(call->getArgOperand(0));
+        auto sz_opt = getConstUInt64(call->getArgOperand(1));
+        if (n_opt && sz_opt) {
+            if (auto total_opt = mulConstU64(*n_opt, *sz_opt)) {
+                astate->setAllocationSize(ret_val, *total_opt);
+            }
+        }
+    }
     
     ret_addr.history.addAllocationEvent(call, &ret_val);
     astate->getPostStack().add(call, ret_addr);
@@ -765,6 +835,10 @@ ModelResult PulseModels::modelMemcpy(const llvm::CallInst* call, ExecutionDomain
     auto src_opt = ops_.eval(*astate, call->getArgOperand(1), call, pred);
     
     if (dest_opt && src_opt) {
+        checkLengthAgainstAllocation(*astate, *dest_opt, call->getArgOperand(2), call,
+                                     "memcpy writes beyond destination buffer");
+        checkLengthAgainstAllocation(*astate, *src_opt, call->getArgOperand(2), call,
+                                     "memcpy reads beyond source buffer");
         // Check validity
         auto src_read = ops_.readDeref(*astate, *src_opt, call);
         if (src_read.first == OperationResult::Success) {
@@ -778,6 +852,11 @@ ModelResult PulseModels::modelMemcpy(const llvm::CallInst* call, ExecutionDomain
     return ModelResult::success({state});
 }
 
+ModelResult PulseModels::modelMemmove(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
+    // For safety, treat memmove like memcpy for now (overlap not modeled).
+    return modelMemcpy(call, state, pred);
+}
+
 ModelResult PulseModels::modelMemset(const llvm::CallInst* call, ExecutionDomain& state, const llvm::BasicBlock* pred) {
     if (call->arg_size() < 3) return ModelResult::success({state});
     
@@ -786,6 +865,8 @@ ModelResult PulseModels::modelMemset(const llvm::CallInst* call, ExecutionDomain
     auto value_opt = ops_.eval(*astate, call->getArgOperand(1), call, pred);
     
     if (dest_opt && value_opt) {
+        checkLengthAgainstAllocation(*astate, *dest_opt, call->getArgOperand(2), call,
+                                     "memset writes beyond destination buffer");
         // Write value to dest (simplified - real implementation would write to all bytes)
         ops_.writeDeref(*astate, *dest_opt, *value_opt, call);
         astate->getPostStack().add(call, *dest_opt);
@@ -801,6 +882,8 @@ ModelResult PulseModels::modelRead(const llvm::CallInst* call, ExecutionDomain& 
     auto buf_opt = ops_.eval(*astate, call->getArgOperand(1), call, pred);
     
     if (buf_opt) {
+        checkLengthAgainstAllocation(*astate, *buf_opt, call->getArgOperand(2), call,
+                                     "read writes beyond destination buffer");
         // Read into buffer (simplified)
         AbstractValue dummy = factory_.createFresh(call);
         ops_.writeDeref(*astate, *buf_opt, Address(dummy), call);
@@ -821,6 +904,8 @@ ModelResult PulseModels::modelWrite(const llvm::CallInst* call, ExecutionDomain&
     auto buf_opt = ops_.eval(*astate, call->getArgOperand(1), call, pred);
     
     if (buf_opt) {
+        checkLengthAgainstAllocation(*astate, *buf_opt, call->getArgOperand(2), call,
+                                     "write reads beyond source buffer");
         // Check buffer validity
         auto read_res = ops_.readDeref(*astate, *buf_opt, call);
         if (read_res.first == OperationResult::Success) {
@@ -842,6 +927,19 @@ ModelResult PulseModels::modelFread(const llvm::CallInst* call, ExecutionDomain&
     auto ptr_opt = ops_.eval(*astate, call->getArgOperand(0), call, pred);
     
     if (stream_opt && ptr_opt) {
+        auto size_opt = getConstUInt64(call->getArgOperand(1));
+        auto count_opt = getConstUInt64(call->getArgOperand(2));
+        if (size_opt && count_opt) {
+            if (auto total_opt = mulConstU64(*size_opt, *count_opt)) {
+                AbstractValue canon = astate->getCanonical(ptr_opt->addr);
+                auto alloc_size_opt = astate->getAllocationSize(canon);
+                if (alloc_size_opt && *total_opt > *alloc_size_opt) {
+                    reportOutOfBoundsAccess(call, *ptr_opt,
+                                            "fread writes beyond destination buffer");
+                    astate->getPostAttrs().add(canon, Attribute::OutOfBounds);
+                }
+            }
+        }
         // Check stream validity
         auto stream_read = ops_.readDeref(*astate, *stream_opt, call);
         if (stream_read.first == OperationResult::Success) {
@@ -867,6 +965,19 @@ ModelResult PulseModels::modelFwrite(const llvm::CallInst* call, ExecutionDomain
     auto ptr_opt = ops_.eval(*astate, call->getArgOperand(0), call, pred);
     
     if (stream_opt && ptr_opt) {
+        auto size_opt = getConstUInt64(call->getArgOperand(1));
+        auto count_opt = getConstUInt64(call->getArgOperand(2));
+        if (size_opt && count_opt) {
+            if (auto total_opt = mulConstU64(*size_opt, *count_opt)) {
+                AbstractValue canon = astate->getCanonical(ptr_opt->addr);
+                auto alloc_size_opt = astate->getAllocationSize(canon);
+                if (alloc_size_opt && *total_opt > *alloc_size_opt) {
+                    reportOutOfBoundsAccess(call, *ptr_opt,
+                                            "fwrite reads beyond source buffer");
+                    astate->getPostAttrs().add(canon, Attribute::OutOfBounds);
+                }
+            }
+        }
         // Check stream and ptr validity
         auto stream_read = ops_.readDeref(*astate, *stream_opt, call);
         auto ptr_read = ops_.readDeref(*astate, *ptr_opt, call);
@@ -889,6 +1000,8 @@ ModelResult PulseModels::modelFgets(const llvm::CallInst* call, ExecutionDomain&
     auto stream_opt = ops_.eval(*astate, call->getArgOperand(2), call, pred);
     
     if (str_opt && stream_opt) {
+        checkLengthAgainstAllocation(*astate, *str_opt, call->getArgOperand(1), call,
+                                     "fgets writes beyond destination buffer");
         // Check stream validity
         auto stream_read = ops_.readDeref(*astate, *stream_opt, call);
         if (stream_read.first == OperationResult::Success) {

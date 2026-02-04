@@ -4,6 +4,12 @@
 #include "Dataflow/Elimination/DataFlow.h"
 #include "Dataflow/Elimination/LLVM/LLVMEliminationProblem.h"
 
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Analysis/ValueLattice.h"
+#include "llvm/IR/Constant.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Value.h"
@@ -13,20 +19,7 @@
 
 namespace elimination {
 
-enum class ConstantPropagationTag {
-  Top,
-  Const,
-  Bottom,
-};
-
-struct ConstantPropagationValue {
-  ConstantPropagationTag Tag = ConstantPropagationTag::Top;
-  int64_t ConstValue = 0;
-
-  bool operator==(const ConstantPropagationValue &Other) const {
-    return Tag == Other.Tag && ConstValue == Other.ConstValue;
-  }
-};
+using ConstantPropagationValue = llvm::ValueLatticeElement;
 
 using ConstantPropagationMap =
     std::unordered_map<const llvm::Value *, ConstantPropagationValue>;
@@ -37,6 +30,17 @@ using ConstantPropagationResult =
 
 ConstantPropagationResult
 runIntraElimConstantPropagation(llvm::Function *F,
+                                EliminationOptions Opts = {});
+
+ConstantPropagationResult
+runIntraElimConstantPropagation(llvm::Function *F, llvm::AAResults *AA,
+                                EliminationOptions Opts = {});
+
+ConstantPropagationResult
+runIntraElimConstantPropagation(llvm::Function *F, llvm::AAResults *AA,
+                                llvm::AssumptionCache *AC,
+                                llvm::DominatorTree *DT,
+                                llvm::TargetLibraryInfo *TLI,
                                 EliminationOptions Opts = {});
 
 } // namespace elimination

@@ -24,6 +24,7 @@ namespace kint {
 #include <chrono>
 #include <map>
 #include <set>
+#include <unordered_set>
 #include <vector>
 
 using namespace llvm;
@@ -65,6 +66,21 @@ private:
     void pushSymFrame();
     void popSymFrame();
     void setSym(const Value* v, const z3::expr& e);
+    void pushConstraintFrame();
+    void popConstraintFrame();
+    void addConstraint(const z3::expr& e);
+    z3::expr buildPathConstraintConjunction() const;
+    bool checkBugCondition(const Instruction* inst, interr type, const z3::expr& bugCond);
+    void registerUniversal(const z3::expr& e);
+    void dumpEfConstraint(const Instruction* inst, interr type, const z3::expr& q) const;
+    bool isRobustBugEnabled(interr type) const;
+    void parseRobustBugFilter(const std::string& csv);
+    const Value* getObjectForPtr(const Value* ptr) const;
+    z3::expr loadBytesFromMem(const z3::expr& mem, const z3::expr& offset, unsigned numBytes, bool littleEndian) const;
+    z3::expr storeBytesToMem(const z3::expr& mem, const z3::expr& offset, const z3::expr& value, unsigned numBytes,
+                             bool littleEndian) const;
+    void havocObject(const Value* obj, const std::string& hint);
+    bool callMayModObject(llvm::CallBase* call, const Value* obj) const;
     z3::expr getValueExpr(const Value* v, BasicBlock* cur, BasicBlock* pred);
     z3::expr getIntExpr(const Value* v, BasicBlock* cur, BasicBlock* pred);
     z3::expr getPtrExpr(const Value* v, BasicBlock* cur, BasicBlock* pred);
@@ -103,6 +119,22 @@ private:
     std::map<const BasicBlock*, SmallVector<BasicBlock*, 2>> m_bbpaths;
     std::chrono::time_point<std::chrono::steady_clock> m_function_start_time;
     unsigned m_function_timeout;
+    unsigned m_path_limit;
+    uint64_t m_paths_explored = 0;
+    bool m_path_limit_hit = false;
+    bool m_robust_reachability = false;
+    std::string m_dump_ef_path;
+    bool m_robust_universal_unknown_loads = false;
+    bool m_robust_universal_external_globals = false;
+    bool m_robust_universal_inline_asm = false;
+    std::set<interr> m_robust_bug_filter;
+    std::vector<z3::expr> m_path_constraints;
+    std::vector<size_t> m_constraint_frames;
+    std::vector<z3::expr> m_universal_vars;
+    std::unordered_set<Z3_ast> m_universal_var_ids;
+    llvm::AAResults* m_aa = nullptr;
+    llvm::MemorySSA* m_mssa = nullptr;
+    llvm::FunctionAnalysisManager* m_fam = nullptr;
 
     // Memory/object abstraction for pointer reasoning (SMT only)
     const DataLayout* m_dl = nullptr;
@@ -110,6 +142,7 @@ private:
     DenseMap<const Value*, llvm::Optional<z3::expr>> m_obj_base;  // base address for allocation-like objects
     DenseMap<const Value*, llvm::Optional<z3::expr>> m_obj_size;  // size in bytes (bit-vector, ptr width)
     std::vector<const Value*> m_obj_list;                         // stable iteration order for constraints
+    DenseMap<const Value*, llvm::Optional<z3::expr>> m_obj_mem;   // per-object byte arrays
     struct SymChange {
         const Value* key = nullptr;
         bool hadOld = false;

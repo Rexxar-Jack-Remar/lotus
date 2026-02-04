@@ -16,6 +16,7 @@ namespace IssueType {
     constexpr const char* ResourceLeak = "Resource Leak";
     constexpr const char* NullDereference = "Null Pointer Dereference";
     constexpr const char* UseAfterFree = "Use After Free";
+    constexpr const char* OutOfBounds = "Out Of Bounds Access";
     constexpr const char* InvalidFree = "Invalid Free";
     constexpr const char* UninitializedRead = "Uninitialized Read";
     constexpr const char* TaintError = "Taint Error";

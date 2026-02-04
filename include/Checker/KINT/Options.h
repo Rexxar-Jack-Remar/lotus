@@ -9,6 +9,8 @@ extern llvm::cl::OptionCategory PerformanceCategory;
 
 // Add a timeout option
 extern llvm::cl::opt<unsigned> FunctionTimeout;
+// Limit on path exploration per function (0 = no limit)
+extern llvm::cl::opt<unsigned> MaxPathsPerFunction;
 
 // Define a category for checker options
 extern llvm::cl::OptionCategory CheckerCategory;
@@ -20,6 +22,12 @@ extern llvm::cl::opt<bool> CheckDivByZero;
 extern llvm::cl::opt<bool> CheckBadShift;
 extern llvm::cl::opt<bool> CheckArrayOOB;
 extern llvm::cl::opt<bool> CheckDeadBranch;
+extern llvm::cl::opt<bool> RobustReachability;
+extern llvm::cl::opt<std::string> DumpEFConstraints;
+extern llvm::cl::opt<bool> RobustUniversalUnknownLoads;
+extern llvm::cl::opt<bool> RobustUniversalExternalGlobals;
+extern llvm::cl::opt<bool> RobustUniversalInlineAsm;
+extern llvm::cl::opt<std::string> RobustOnlyBugs;
 
 // Define a category for logging options
 extern llvm::cl::OptionCategory LoggingCategory;

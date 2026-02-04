@@ -7,6 +7,9 @@ llvm::cl::OptionCategory PerformanceCategory("Performance Options", "Options for
 llvm::cl::opt<unsigned> FunctionTimeout("function-timeout",
                                         llvm::cl::desc("Maximum time in seconds to spend analyzing a single function (0 = no limit)"),
                                         llvm::cl::init(10), llvm::cl::cat(PerformanceCategory));
+llvm::cl::opt<unsigned> MaxPathsPerFunction("max-paths-per-function",
+                                            llvm::cl::desc("Maximum number of path expansions per function (0 = no limit)"),
+                                            llvm::cl::init(20000), llvm::cl::cat(PerformanceCategory));
 
 // Checker options
 llvm::cl::OptionCategory CheckerCategory("Bug Checker Options", "Options for enabling/disabling specific bug checkers");
@@ -22,6 +25,27 @@ llvm::cl::opt<bool> CheckArrayOOB("check-array-oob", llvm::cl::desc("Enable arra
                                   llvm::cl::init(false), llvm::cl::cat(CheckerCategory));
 llvm::cl::opt<bool> CheckDeadBranch("check-dead-branch", llvm::cl::desc("Enable dead branch checker"),
                                     llvm::cl::init(false), llvm::cl::cat(CheckerCategory));
+llvm::cl::opt<bool> RobustReachability("robust-reachability",
+                                       llvm::cl::desc("Enable robust reachability checks (quantified SMT over unknown calls)"),
+                                       llvm::cl::init(false), llvm::cl::cat(CheckerCategory));
+llvm::cl::opt<std::string> DumpEFConstraints("dump-ef-constraints",
+                                             llvm::cl::desc("Append robust reachability (forall) constraints to file"),
+                                             llvm::cl::value_desc("filename"),
+                                             llvm::cl::init(""), llvm::cl::cat(CheckerCategory));
+llvm::cl::opt<bool> RobustUniversalUnknownLoads("robust-universal-unknown-loads",
+                                                llvm::cl::desc("Treat unknown loads as universally quantified variables"),
+                                                llvm::cl::init(false), llvm::cl::cat(CheckerCategory));
+llvm::cl::opt<bool> RobustUniversalExternalGlobals("robust-universal-external-globals",
+                                                   llvm::cl::desc("Treat loads from external globals as universal variables"),
+                                                   llvm::cl::init(false), llvm::cl::cat(CheckerCategory));
+llvm::cl::opt<bool> RobustUniversalInlineAsm("robust-universal-inline-asm",
+                                             llvm::cl::desc("Treat inline asm returns as universal variables"),
+                                             llvm::cl::init(false), llvm::cl::cat(CheckerCategory));
+llvm::cl::opt<std::string> RobustOnlyBugs("robust-only-bugs",
+                                         llvm::cl::desc("Comma-separated bug classes for robust reachability "
+                                                        "(overflow,div0,shift,oob,dead). Empty means all."),
+                                         llvm::cl::value_desc("list"),
+                                         llvm::cl::init(""), llvm::cl::cat(CheckerCategory));
 
 // Define a category for logging options
 llvm::cl::OptionCategory LoggingCategory("Logging Options",

@@ -7,6 +7,7 @@
 #include "Checker/Pulse/PulseTaint.h"
 #include "Checker/Pulse/PulseTransitiveInfo.h"
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>
@@ -61,6 +62,9 @@ private:
   std::map<AbstractValue,
            std::pair<InvalidationKind, const llvm::Instruction *>>
       invalidation_info_;
+
+  // Allocation sizes (in bytes) for base addresses when known.
+  std::map<AbstractValue, uint64_t> allocation_sizes_;
 
   // Skipped calls (for unknown functions)
   std::set<std::string> skipped_calls_;
@@ -140,6 +144,28 @@ public:
                            const llvm::Instruction *loc);
   llvm::Optional<std::pair<InvalidationKind, const llvm::Instruction *>>
   getInvalidationInfo(AbstractValue addr) const;
+
+  // Allocation size tracking
+  void setAllocationSize(AbstractValue addr, uint64_t size_bytes) {
+    if (size_bytes == 0) {
+      allocation_sizes_.erase(addr);
+    } else {
+      allocation_sizes_[addr] = size_bytes;
+    }
+  }
+  llvm::Optional<uint64_t> getAllocationSize(AbstractValue addr) const {
+    auto it = allocation_sizes_.find(addr);
+    if (it != allocation_sizes_.end()) {
+      return it->second;
+    }
+    return llvm::None;
+  }
+  const std::map<AbstractValue, uint64_t> &getAllocationSizes() const {
+    return allocation_sizes_;
+  }
+  std::map<AbstractValue, uint64_t> &getAllocationSizes() {
+    return allocation_sizes_;
+  }
 
   // Skipped calls
   void addSkippedCall(const std::string &name) { skipped_calls_.insert(name); }

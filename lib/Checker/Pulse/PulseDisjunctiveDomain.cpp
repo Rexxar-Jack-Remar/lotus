@@ -25,28 +25,50 @@ static void reduceDisjuncts(std::vector<DisjunctiveDomain::Disjunct> &disjuncts,
     return;
   }
 
+  auto is_preferred = [](const DisjunctiveDomain::Disjunct &d) {
+    auto *a = d.state.getAstate();
+    return a && !a->hasUnknownValues();
+  };
+
+  std::vector<DisjunctiveDomain::Disjunct> preferred;
+  std::vector<DisjunctiveDomain::Disjunct> rest;
+  preferred.reserve(disjuncts.size());
+  rest.reserve(disjuncts.size());
+
+  for (auto &d : disjuncts) {
+    if (is_preferred(d)) {
+      preferred.push_back(std::move(d));
+    } else {
+      rest.push_back(std::move(d));
+    }
+  }
+
   std::vector<DisjunctiveDomain::Disjunct> selected;
   selected.reserve(max);
   std::set<const llvm::BasicBlock *> seen_ctx;
 
-  for (auto &d : disjuncts) {
-    if (selected.size() >= max) {
-      break;
+  auto pick = [&](std::vector<DisjunctiveDomain::Disjunct> &pool) {
+    for (auto &d : pool) {
+      if (selected.size() >= max) {
+        break;
+      }
+      if (!d.path_context) {
+        continue;
+      }
+      if (seen_ctx.insert(d.path_context).second) {
+        selected.push_back(std::move(d));
+      }
     }
-    if (!d.path_context) {
-      continue;
-    }
-    if (seen_ctx.insert(d.path_context).second) {
+    for (auto &d : pool) {
+      if (selected.size() >= max) {
+        break;
+      }
       selected.push_back(std::move(d));
     }
-  }
+  };
 
-  for (auto &d : disjuncts) {
-    if (selected.size() >= max) {
-      break;
-    }
-    selected.push_back(std::move(d));
-  }
+  pick(preferred);
+  pick(rest);
 
   disjuncts.swap(selected);
 }
@@ -103,10 +125,25 @@ ExecutionDomain DisjunctiveDomain::joinAtBlock(const llvm::BasicBlock *BB) {
   // A union-style merge can fabricate heap facts and admit non-witnessable bug
   // paths (false positives). When forced to reduce disjuncts, keep a single
   // representative witness state instead.
+  const DisjunctiveDomain::Disjunct *best = nullptr;
   for (const auto &disj : disjuncts) {
-    if (!disj.state.isStopped()) {
-      return disj.state.clone();
+    if (disj.state.isStopped()) {
+      continue;
     }
+    if (!best) {
+      best = &disj;
+      continue;
+    }
+    auto *a_best = best->state.getAstate();
+    auto *a_cur = disj.state.getAstate();
+    const bool best_unknown = a_best ? a_best->hasUnknownValues() : true;
+    const bool cur_unknown = a_cur ? a_cur->hasUnknownValues() : true;
+    if (best_unknown && !cur_unknown) {
+      best = &disj;
+    }
+  }
+  if (best) {
+    return best->state.clone();
   }
 
   ExecutionDomain stopped;

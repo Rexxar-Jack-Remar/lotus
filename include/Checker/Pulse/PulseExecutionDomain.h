@@ -21,6 +21,7 @@ class LatentIssue;
 enum class OperationResult {
     Success,
     InvalidAccess,       // Access to invalid memory
+    OutOfBounds,         // Proven out-of-bounds memory access
     NullDereference,     // Null pointer dereference
     UseAfterFree,        // Use after free
     UninitializedRead,   // Read from uninitialized memory

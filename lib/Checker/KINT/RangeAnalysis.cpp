@@ -82,7 +82,8 @@ crange RangeAnalysis::get_range(const Value* var, const DenseMap<const Value*, c
 }
 
 crange RangeAnalysis::get_range_by_bb(const Value* var, const BasicBlock* bb,
-                                     const std::map<const Function*, bbrange_t>& func2range_info) {
+                                     const std::map<const Function*, bbrange_t>& func2range_info,
+                                     const std::map<const GlobalVariable*, crange>& global2range) {
     auto func_it = func2range_info.find(bb->getParent());
     if (func_it == func2range_info.end()) {
         return crange(var->getType()->getIntegerBitWidth(), true);
@@ -91,7 +92,7 @@ crange RangeAnalysis::get_range_by_bb(const Value* var, const BasicBlock* bb,
     if (bb_it == func_it->second.end()) {
         return crange(var->getType()->getIntegerBitWidth(), true);
     }
-    return get_range(var, bb_it->second, {});
+    return get_range(var, bb_it->second, global2range);
 }
 
 void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, crange>& cur_rng,
@@ -176,7 +177,7 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
                         const size_t arr_size = garr2ranges[garr].size();
                         const crange idx_rng = get_rng(idx);
                         const size_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
-                        if (CheckArrayOOB && idx_max >= arr_size)
+                        if (CheckArrayOOB && !RobustReachability && idx_max >= arr_size)
                             gep_oob.insert(gep);
 
                         for (size_t i = idx_rng.getUnsignedMin().getLimitedValue(); i < std::min(arr_size, idx_max);
@@ -200,7 +201,7 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
                                 auto *idx = gep->getOperand(2);
                                 const crange idx_rng = get_rng(idx);
                                 const uint64_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
-                                if (idx_max >= arr_size) {
+                                if (!RobustReachability && idx_max >= arr_size) {
                                     gep_oob.insert(gep);
                                 }
                             }
@@ -215,14 +216,15 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
                             const auto name = f->getName();
                             if ((name == "malloc" || name == "kmalloc" || name == "kzalloc" || name == "vmalloc")
                                 && ci->arg_size() >= 1) {
-                                const crange size_rng = get_range_by_bb(ci->getArgOperand(0), ci->getParent(), func2range_info);
+                                const crange size_rng = get_range_by_bb(ci->getArgOperand(0), ci->getParent(), func2range_info,
+                                                                        global2range);
                                 const uint64_t size_min = size_rng.getUnsignedMin().getLimitedValue();
                                 if (gep->getNumIndices() >= 1) {
                                     auto *idx = gep->getOperand(gep->getNumOperands() - 1);
                                     const crange idx_rng = get_rng(idx);
                                     const uint64_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
                                     const uint64_t elem_bytes = DL.getTypeAllocSize(gep->getResultElementType());
-                                    if (elem_bytes != 0 && idx_max * elem_bytes >= size_min) {
+                                    if (!RobustReachability && elem_bytes != 0 && idx_max * elem_bytes >= size_min) {
                                         gep_oob.insert(gep);
                                     }
                                 }
@@ -308,7 +310,7 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
                 if (bb_it != backedges.end() && bb_it->second.contains(pred)) {
                     continue; // skip backedge
                 }
-                auto incoming_rng = get_range_by_bb(op->getIncomingValue(i), pred, func2range_info);
+                auto incoming_rng = get_range_by_bb(op->getIncomingValue(i), pred, func2range_info, global2range);
                 if (new_range.getBitWidth() == incoming_rng.getBitWidth()) {
                     new_range = new_range.unionWith(incoming_rng);
                 } else if (new_range.isEmptySet()) {
@@ -366,7 +368,7 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
                             const size_t arr_size = garr2ranges[garr].size();
                             const crange idx_rng = get_rng(idx);
                             const size_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
-                            if (CheckArrayOOB && idx_max >= arr_size) {
+                            if (CheckArrayOOB && !RobustReachability && idx_max >= arr_size) {
                                 gep_oob.insert(gep);
                             }
 
@@ -393,7 +395,7 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
                                     auto *idx = gep->getOperand(2);
                                     const crange idx_rng = get_rng(idx);
                                     const uint64_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
-                                    if (CheckArrayOOB && idx_max >= arr_size) {
+                                    if (CheckArrayOOB && !RobustReachability && idx_max >= arr_size) {
                                         gep_oob.insert(gep);
                                     }
                                     new_range = crange(op->getType()->getIntegerBitWidth(), true);
@@ -412,13 +414,14 @@ void RangeAnalysis::analyze_one_bb_range(BasicBlock* bb, DenseMap<const Value*, 
                                 if ((name == "malloc" || name == "kmalloc" || name == "kzalloc" || name == "vmalloc")
                                     && ci->arg_size() >= 1) {
                                     const crange size_rng
-                                        = get_range_by_bb(ci->getArgOperand(0), ci->getParent(), func2range_info);
+                                    = get_range_by_bb(ci->getArgOperand(0), ci->getParent(), func2range_info,
+                                                      global2range);
                                     const uint64_t size_min = size_rng.getUnsignedMin().getLimitedValue();
                                     auto *idx = gep->getOperand(gep->getNumOperands() - 1);
                                     const crange idx_rng = get_rng(idx);
                                     const uint64_t idx_max = idx_rng.getUnsignedMax().getLimitedValue();
                                     const uint64_t elem_bytes = DL.getTypeAllocSize(gep->getResultElementType());
-                                    if (CheckArrayOOB && elem_bytes != 0 && idx_max * elem_bytes >= size_min) {
+                                    if (CheckArrayOOB && !RobustReachability && elem_bytes != 0 && idx_max * elem_bytes >= size_min) {
                                         gep_oob.insert(gep);
                                     }
                                     new_range = crange(op->getType()->getIntegerBitWidth(), true);
@@ -513,8 +516,8 @@ void RangeAnalysis::range_analysis(Function& F,
                             // This should be covered by `ICmpInst`.
                             MKINT_WARN() << "The br operands are not both integers: " << *cmp;
                         } else {
-                            auto lrng = get_range_by_bb(lhs, pred, func2range_info), 
-                                 rrng = get_range_by_bb(rhs, pred, func2range_info);
+                            auto lrng = get_range_by_bb(lhs, pred, func2range_info, global2range), 
+                                 rrng = get_range_by_bb(rhs, pred, func2range_info, global2range);
 
                             bool is_true_br = br->getSuccessor(0) == bb;
                             if (is_true_br) { // T branch
@@ -532,7 +535,7 @@ void RangeAnalysis::range_analysis(Function& F,
                                 branch_rng[rhs] = dyn_cast<ConstantInt>(rhs) ? rrng : rrng.intersectWith(rprng);
                             }
 
-                            if (branch_rng[lhs].isEmptySet() || branch_rng[rhs].isEmptySet())
+                            if (!RobustReachability && (branch_rng[lhs].isEmptySet() || branch_rng[rhs].isEmptySet()))
                                 impossible_branches[cmp] = is_true_br; // TODO: higher precision.
                             else
                                 branch_rng[cmp] = crange(APInt(1, is_true_br));
@@ -542,7 +545,7 @@ void RangeAnalysis::range_analysis(Function& F,
             } else if (auto *swt = dyn_cast<SwitchInst>(terminator)) {
                 auto *cond = swt->getCondition();
                 if (cond->getType()->isIntegerTy()) {
-                    auto cond_rng = get_range_by_bb(cond, pred, func2range_info);
+                    auto cond_rng = get_range_by_bb(cond, pred, func2range_info, global2range);
                     auto emp_rng = crange::getEmpty(cond->getType()->getIntegerBitWidth());
 
                     if (swt->getDefaultDest() == bb) { // default

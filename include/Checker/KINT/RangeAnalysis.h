@@ -94,7 +94,8 @@ private:
     
 public:
     crange get_range_by_bb(const Value* var, const BasicBlock* bb,
-                          const std::map<const Function*, bbrange_t>& func2range_info);
+                          const std::map<const Function*, bbrange_t>& func2range_info,
+                          const std::map<const GlobalVariable*, crange>& global2range);
     
     crange compute_binary_rng(const BinaryOperator* op, const crange& lhs, const crange& rhs);
 };

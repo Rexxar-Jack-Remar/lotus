@@ -3,6 +3,7 @@
 #include "Checker/Pulse/PulseFormula.h"
 #include "Checker/Pulse/PulseTransitiveInfo.h"
 
+#include <algorithm>
 #include <cassert>
 
 namespace pulse {
@@ -176,6 +177,7 @@ AbductiveDomain AbductiveDomain::clone() const {
   }
 
   cloned.invalidation_info_ = invalidation_info_;
+  cloned.allocation_sizes_ = allocation_sizes_;
   cloned.taint_domain_.join(taint_domain_);
 
   // Clone new fields
@@ -307,6 +309,21 @@ void AbductiveDomain::canonicalize() {
     invalidation_info_ = std::move(new_info);
   }
 
+  // Allocation sizes
+  {
+    std::map<AbstractValue, uint64_t> new_sizes;
+    for (const auto &kv : allocation_sizes_) {
+      AbstractValue addr = getCanonical(kv.first);
+      auto it = new_sizes.find(addr);
+      if (it == new_sizes.end()) {
+        new_sizes.emplace(addr, kv.second);
+      } else {
+        it->second = std::min(it->second, kv.second);
+      }
+    }
+    allocation_sizes_ = std::move(new_sizes);
+  }
+
   // Dynamic type specialization set
   {
     std::set<AbstractValue> canon_set;
@@ -417,6 +434,17 @@ AbductiveDomain::merge(const AbductiveDomain &d1, const AbductiveDomain &d2) {
     if (merged.invalidation_info_.find(kv.first) ==
         merged.invalidation_info_.end())
       merged.invalidation_info_.insert(kv);
+  }
+
+  // Merge allocation sizes: keep the tighter (smaller) bound when both exist.
+  merged.allocation_sizes_ = d1.allocation_sizes_;
+  for (const auto &kv : d2.allocation_sizes_) {
+    auto it = merged.allocation_sizes_.find(kv.first);
+    if (it == merged.allocation_sizes_.end()) {
+      merged.allocation_sizes_.emplace(kv.first, kv.second);
+    } else {
+      it->second = std::min(it->second, kv.second);
+    }
   }
 
   // Merge skipped calls (union)

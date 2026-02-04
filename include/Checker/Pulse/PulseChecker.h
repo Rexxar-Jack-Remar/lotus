@@ -76,6 +76,7 @@ private:
   int taintErrorTypeId_;
   int stackAddressEscapeTypeId_;
   int invalidFreeTypeId_;
+  int outOfBoundsTypeId_;
 
   std::map<const llvm::Function *, std::vector<ExecutionDomain>>
       function_states_;

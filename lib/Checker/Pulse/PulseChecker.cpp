@@ -25,6 +25,7 @@
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
@@ -223,6 +224,149 @@ static bool applyIntegerIcmpConstraint(PulseFormula &formula,
   }
   return formula.addLinearConstraint(c);
 }
+
+static std::set<AbstractValue>
+computeReachable(const AbductiveDomain &astate, const Heap &heap,
+                 const std::set<AbstractValue> &roots) {
+  std::set<AbstractValue> reachable = roots;
+  std::vector<AbstractValue> worklist(roots.begin(), roots.end());
+
+  while (!worklist.empty()) {
+    AbstractValue cur = worklist.back();
+    worklist.pop_back();
+    auto it = heap.getEdges().find(cur);
+    if (it == heap.getEdges().end())
+      continue;
+    for (const auto &edge_kv : it->second) {
+      AbstractValue target = astate.getCanonical(edge_kv.second.addr);
+      if (reachable.insert(target).second) {
+        worklist.push_back(target);
+      }
+    }
+  }
+
+  return reachable;
+}
+
+static AbductiveDomain pruneForSummary(const llvm::Function *F,
+                                       const AbductiveDomain &astate,
+                                       llvm::Optional<AbstractValue> ret_val) {
+  AbductiveDomain pruned = astate.clone();
+
+  // Roots: formals, return value (if any), and globals.
+  std::set<AbstractValue> roots;
+  for (const auto &Arg : F->args()) {
+    if (auto *addr = pruned.getPostStack().find(&Arg)) {
+      roots.insert(pruned.getCanonical(addr->addr));
+    }
+    if (auto *addr = pruned.getPreStack().find(&Arg)) {
+      roots.insert(pruned.getCanonical(addr->addr));
+    }
+  }
+  if (ret_val) {
+    roots.insert(pruned.getCanonical(*ret_val));
+  }
+  for (const auto &kv : pruned.getPostAttrs().getAttrs()) {
+    if (kv.second.count(Attribute::Global) > 0) {
+      roots.insert(pruned.getCanonical(kv.first));
+    }
+  }
+
+  const std::set<AbstractValue> reachable_post =
+      computeReachable(pruned, pruned.getPostHeap(), roots);
+  const std::set<AbstractValue> reachable_pre =
+      computeReachable(pruned, pruned.getPreHeap(), roots);
+
+  // Prune stacks: keep only formals (and any retained values explicitly).
+  {
+    Stack new_post;
+    Stack new_pre;
+    for (const auto &Arg : F->args()) {
+      if (auto *addr = pruned.getPostStack().find(&Arg)) {
+        if (reachable_post.count(pruned.getCanonical(addr->addr)) > 0) {
+          new_post.add(&Arg, *addr);
+        }
+      }
+      if (auto *addr = pruned.getPreStack().find(&Arg)) {
+        if (reachable_pre.count(pruned.getCanonical(addr->addr)) > 0) {
+          new_pre.add(&Arg, *addr);
+        }
+      }
+    }
+    pruned.getPostStack() = std::move(new_post);
+    pruned.getPreStack() = std::move(new_pre);
+  }
+
+  // Prune heaps.
+  {
+    Heap new_post;
+    for (const auto &kv : pruned.getPostHeap().getEdges()) {
+      if (reachable_post.count(pruned.getCanonical(kv.first)) == 0)
+        continue;
+      AbstractValue from = pruned.getCanonical(kv.first);
+      for (const auto &edge_kv : kv.second) {
+        AbstractValue to = pruned.getCanonical(edge_kv.second.addr);
+        if (reachable_post.count(to) == 0)
+          continue;
+        new_post.addEdge(from, edge_kv.first, edge_kv.second);
+      }
+    }
+    pruned.getPostHeap() = std::move(new_post);
+  }
+  {
+    Heap new_pre;
+    for (const auto &kv : pruned.getPreHeap().getEdges()) {
+      if (reachable_pre.count(pruned.getCanonical(kv.first)) == 0)
+        continue;
+      AbstractValue from = pruned.getCanonical(kv.first);
+      for (const auto &edge_kv : kv.second) {
+        AbstractValue to = pruned.getCanonical(edge_kv.second.addr);
+        if (reachable_pre.count(to) == 0)
+          continue;
+        new_pre.addEdge(from, edge_kv.first, edge_kv.second);
+      }
+    }
+    pruned.getPreHeap() = std::move(new_pre);
+  }
+
+  // Prune attrs.
+  {
+    AddressAttributes new_post_attrs;
+    for (const auto &kv : pruned.getPostAttrs().getAttrs()) {
+      if (reachable_post.count(pruned.getCanonical(kv.first)) == 0)
+        continue;
+      for (Attribute a : kv.second) {
+        new_post_attrs.add(pruned.getCanonical(kv.first), a);
+      }
+    }
+    pruned.getPostAttrs() = std::move(new_post_attrs);
+
+    AddressAttributes new_pre_attrs;
+    for (const auto &kv : pruned.getPreAttrs().getAttrs()) {
+      if (reachable_pre.count(pruned.getCanonical(kv.first)) == 0)
+        continue;
+      for (Attribute a : kv.second) {
+        new_pre_attrs.add(pruned.getCanonical(kv.first), a);
+      }
+    }
+    pruned.getPreAttrs() = std::move(new_pre_attrs);
+  }
+
+  // Prune allocation sizes.
+  {
+    std::map<AbstractValue, uint64_t> sizes;
+    for (const auto &kv : pruned.getAllocationSizes()) {
+      AbstractValue canon = pruned.getCanonical(kv.first);
+      if (reachable_post.count(canon) > 0) {
+        sizes.emplace(canon, kv.second);
+      }
+    }
+    pruned.getAllocationSizes() = std::move(sizes);
+  }
+
+  pruned.canonicalize();
+  return pruned;
+}
 } // namespace
 
 constexpr unsigned PulseChecker::kMaxDisjuncts;
@@ -303,6 +447,11 @@ void PulseChecker::registerBugTypes() {
       mgr.register_bug_type(IssueType::InvalidFree, BugDescription::BI_HIGH,
                             BugDescription::BC_SECURITY, "CWE-590");
   diagMgr.registerBugType(IssueType::InvalidFree, invalidFreeTypeId_);
+
+  outOfBoundsTypeId_ =
+      mgr.register_bug_type(IssueType::OutOfBounds, BugDescription::BI_HIGH,
+                            BugDescription::BC_ERROR, "CWE-119");
+  diagMgr.registerBugType(IssueType::OutOfBounds, outOfBoundsTypeId_);
 }
 
 void PulseChecker::analyze() {
@@ -514,10 +663,12 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
   PulseLogger::incrementCounter("paths.explored");
 
   while (!worklist.empty() && iter_limit++ < max_iter) {
-    if (worklist.size() > kMaxDisjuncts) {
-      PulseLogger::warning("Reached max disjuncts limit for function " +
+    if (worklist.size() > kMaxDisjuncts * 4) {
+      PulseLogger::warning("Pruning oversized worklist for function " +
                            F->getName().str());
-      break;
+      while (worklist.size() > kMaxDisjuncts * 2) {
+        worklist.pop();
+      }
     }
 
     WorkItem item = std::move(worklist.front());
@@ -583,43 +734,85 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
       disj_domain.add(BB, current_state.clone(), pred_bb);
     }
 
-    for (const llvm::Instruction &I : *BB) {
-      if (current_state.isStopped())
-        break;
-      if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(&I)) {
-        (void)RI;
-        if (current_state.isExitProgram() ||
-            current_state.isContinueProgram()) {
-          exit_states.push_back(current_state.clone());
+    std::vector<ExecutionDomain> states;
+    states.push_back(std::move(current_state));
+
+    auto limitStates = [&](std::vector<ExecutionDomain> &vec) {
+      if (vec.size() <= kMaxDisjuncts) {
+        return;
+      }
+      std::vector<ExecutionDomain> preferred;
+      std::vector<ExecutionDomain> rest;
+      preferred.reserve(vec.size());
+      rest.reserve(vec.size());
+      for (auto &st : vec) {
+        auto *a = st.getAstate();
+        if (a && !a->hasUnknownValues()) {
+          preferred.push_back(std::move(st));
+        } else {
+          rest.push_back(std::move(st));
         }
+      }
+      vec.clear();
+      for (auto &st : preferred) {
+        if (vec.size() >= kMaxDisjuncts)
+          break;
+        vec.push_back(std::move(st));
+      }
+      for (auto &st : rest) {
+        if (vec.size() >= kMaxDisjuncts)
+          break;
+        vec.push_back(std::move(st));
+      }
+    };
+
+    for (const llvm::Instruction &I : *BB) {
+      if (states.empty())
         break;
+
+      std::vector<ExecutionDomain> next_states;
+      next_states.reserve(states.size());
+
+      for (auto &st : states) {
+        if (st.isStopped()) {
+          next_states.push_back(std::move(st));
+          continue;
+        }
+
+        const llvm::BasicBlock *phi_pred = pred_bb;
+        if (llvm::isa<llvm::PHINode>(&I) && !phi_pred) {
+          auto it = pred_begin(BB);
+          if (it != pred_end(BB))
+            phi_pred = *it;
+        }
+
+        auto new_states = executeInstruction(&I, std::move(st), phi_pred, 0u);
+        if (!new_states.empty()) {
+          for (auto &ns : new_states) {
+            next_states.push_back(std::move(ns));
+          }
+        }
       }
 
-      const llvm::BasicBlock *phi_pred = pred_bb;
-      if (llvm::isa<llvm::PHINode>(&I) && !phi_pred) {
-        auto it = pred_begin(BB);
-        if (it != pred_end(BB))
-          phi_pred = *it;
-      }
-
-      auto new_states = executeInstruction(&I, current_state, phi_pred, 0u);
-      if (new_states.empty() || new_states[0].isStopped()) {
-        current_state = new_states.empty() ? std::move(current_state)
-                                           : std::move(new_states[0]);
-        break;
-      }
-      current_state = std::move(new_states[0]);
+      states = std::move(next_states);
+      limitStates(states);
     }
 
-    if (current_state.isStopped()) {
-      // Handle stopped states: if it's ExitProgram, add to exit_states
-      if (current_state.isExitProgram()) {
-        exit_states.push_back(current_state.clone());
-      } else if (current_state.isLatentAbortProgram() ||
-                 current_state.isLatentInvalidAccess()) {
-        latent_exit_states.push_back(current_state.clone());
+    bool any_continuing = false;
+    for (auto &st : states) {
+      if (st.isStopped()) {
+        if (st.isExitProgram()) {
+          exit_states.push_back(st.clone());
+        } else if (st.isLatentAbortProgram() ||
+                   st.isLatentInvalidAccess()) {
+          latent_exit_states.push_back(st.clone());
+        }
+        continue;
       }
-      // For AbortProgram, we've already reported
+      any_continuing = true;
+    }
+
+    if (!any_continuing) {
       continue;
     }
 
@@ -630,24 +823,32 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
     auto *BI =
         llvm::dyn_cast<llvm::BranchInst>(const_cast<llvm::Instruction *>(term));
     if (BI && BI->isConditional() && BI->getNumSuccessors() == 2) {
-      for (unsigned i = 0; i < 2; i++) {
-        llvm::Optional<ExecutionDomain> fork_opt =
-            applyBranchCondition(current_state.clone(), BI, i, pred_bb);
-        if (!fork_opt)
+      for (auto &st : states) {
+        if (st.isStopped())
           continue;
-        const llvm::BasicBlock *succ = BI->getSuccessor(i);
-        if (succ->empty())
-          continue;
-        fork_opt->setEntryPred(BB);
-        worklist.push(std::make_tuple(succ, std::move(*fork_opt), BB));
+        for (unsigned i = 0; i < 2; i++) {
+          llvm::Optional<ExecutionDomain> fork_opt =
+              applyBranchCondition(st.clone(), BI, i, pred_bb);
+          if (!fork_opt)
+            continue;
+          const llvm::BasicBlock *succ = BI->getSuccessor(i);
+          if (succ->empty())
+            continue;
+          fork_opt->setEntryPred(BB);
+          worklist.push(std::make_tuple(succ, std::move(*fork_opt), BB));
+        }
       }
     } else {
-      for (const llvm::BasicBlock *succ : llvm::successors(BB)) {
-        if (succ->empty())
+      for (auto &st : states) {
+        if (st.isStopped())
           continue;
-        ExecutionDomain succ_state = current_state.clone();
-        succ_state.setEntryPred(BB);
-        worklist.push(std::make_tuple(succ, std::move(succ_state), BB));
+        for (const llvm::BasicBlock *succ : llvm::successors(BB)) {
+          if (succ->empty())
+            continue;
+          ExecutionDomain succ_state = st.clone();
+          succ_state.setEntryPred(BB);
+          worklist.push(std::make_tuple(succ, std::move(succ_state), BB));
+        }
       }
     }
   }
@@ -774,21 +975,32 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
         }
       }
 
-      const llvm::Value *chosen =
-          (truth && *truth) ? Sel->getTrueValue() : Sel->getFalseValue();
-      if (!truth) {
-        // Unknown condition: pick deterministic witness.
-        chosen = Sel->getTrueValue();
-      }
+      auto apply_choice = [&](ExecutionDomain &st, const llvm::Value *chosen) {
+        auto *a = st.getAstate();
+        if (!a)
+          return;
+        auto chosen_opt = ops_.eval(*a, chosen, I, pred);
+        if (chosen_opt) {
+          AbstractValue canon = a->getCanonical(chosen_opt->addr);
+          Address result(canon);
+          result.history = chosen_opt->history;
+          result.history.addEvent(ValueHistory::EventKind::Unknown, I,
+                                  I->getFunction());
+          a->getPostStack().add(Sel, result);
+        }
+      };
 
-      auto chosen_opt = ops_.eval(*astate, chosen, I, pred);
-      if (chosen_opt) {
-        AbstractValue canon = astate->getCanonical(chosen_opt->addr);
-        Address result(canon);
-        result.history = chosen_opt->history;
-        result.history.addEvent(ValueHistory::EventKind::Unknown, I,
-                                I->getFunction());
-        astate->getPostStack().add(Sel, result);
+      if (!truth) {
+        // Unknown condition: fork for both branches (bounded by disjunct cap).
+        ExecutionDomain t_state = exec_state.clone();
+        ExecutionDomain f_state = exec_state.clone();
+        apply_choice(t_state, Sel->getTrueValue());
+        apply_choice(f_state, Sel->getFalseValue());
+        return pruneStates({std::move(t_state), std::move(f_state)});
+      } else {
+        const llvm::Value *chosen =
+            (*truth) ? Sel->getTrueValue() : Sel->getFalseValue();
+        apply_choice(exec_state, chosen);
       }
     }
     return pruneStates({exec_state});
@@ -1323,6 +1535,57 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
       }
       return {exec_state};
     }
+
+    if (iid == llvm::Intrinsic::memcpy || iid == llvm::Intrinsic::memmove ||
+        iid == llvm::Intrinsic::memset) {
+      auto *a = exec_state.getAstate();
+      if (!a)
+        return {exec_state};
+      auto check_len = [&](const Address &addr, const llvm::Value *len_val,
+                           const char *detail) {
+        auto *CI_len = llvm::dyn_cast<llvm::ConstantInt>(len_val);
+        if (!CI_len || CI_len->isNegative() || CI_len->getBitWidth() > 64)
+          return;
+        uint64_t len = CI_len->getZExtValue();
+        AbstractValue canon = a->getCanonical(addr.addr);
+        auto size_opt = a->getAllocationSize(canon);
+        if (size_opt && len > *size_opt) {
+          Trace trace = Trace::fromValueHistory(addr.history);
+          trace.addEvent(CI, detail);
+          reportBug(OperationResult::OutOfBounds, CI, canon, trace, a);
+          a->getPostAttrs().add(canon, Attribute::OutOfBounds);
+        }
+      };
+
+      auto dest_opt = ops_.eval(*a, CI->getArgOperand(0), CI, pred);
+      if (!dest_opt)
+        return {exec_state};
+      if (iid == llvm::Intrinsic::memset) {
+        check_len(*dest_opt, CI->getArgOperand(2),
+                  "memset writes beyond destination buffer");
+        auto val_opt = ops_.eval(*a, CI->getArgOperand(1), CI, pred);
+        if (val_opt) {
+          ops_.writeDeref(*a, *dest_opt, *val_opt, CI);
+        }
+        a->getPostStack().add(CI, *dest_opt);
+        return {exec_state};
+      }
+
+      auto src_opt = ops_.eval(*a, CI->getArgOperand(1), CI, pred);
+      if (src_opt) {
+        check_len(*dest_opt, CI->getArgOperand(2),
+                  "memcpy/memmove writes beyond destination buffer");
+        check_len(*src_opt, CI->getArgOperand(2),
+                  "memcpy/memmove reads beyond source buffer");
+        auto src_read = ops_.readDeref(*a, *src_opt, CI);
+        if (src_read.first == OperationResult::Success) {
+          AbstractValue dummy = factory_.createFresh(CI);
+          ops_.writeDeref(*a, *dest_opt, Address(dummy), CI);
+          a->getPostStack().add(CI, *dest_opt);
+        }
+      }
+      return {exec_state};
+    }
   }
 
   llvm::Function *F = CI->getCalledFunction();
@@ -1382,6 +1645,31 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
       F->getName() == "realloc") {
     AbstractValue av = factory_.createFresh(CI);
     ops_.allocate(*astate, av, CI);
+    if (F->getName() == "malloc" && CI->arg_size() >= 1) {
+      if (auto *CI0 = llvm::dyn_cast<llvm::ConstantInt>(CI->getArgOperand(0))) {
+        if (!CI0->isNegative() && CI0->getBitWidth() <= 64) {
+          astate->setAllocationSize(av, CI0->getZExtValue());
+        }
+      }
+    } else if (F->getName() == "calloc" && CI->arg_size() >= 2) {
+      auto *n = llvm::dyn_cast<llvm::ConstantInt>(CI->getArgOperand(0));
+      auto *s = llvm::dyn_cast<llvm::ConstantInt>(CI->getArgOperand(1));
+      if (n && s && !n->isNegative() && !s->isNegative() &&
+          n->getBitWidth() <= 64 && s->getBitWidth() <= 64) {
+        __int128 prod =
+            static_cast<__int128>(n->getZExtValue()) *
+            static_cast<__int128>(s->getZExtValue());
+        if (prod >= 0 && prod <= std::numeric_limits<uint64_t>::max()) {
+          astate->setAllocationSize(av, static_cast<uint64_t>(prod));
+        }
+      }
+    } else if (F->getName() == "realloc" && CI->arg_size() >= 2) {
+      if (auto *CI1 = llvm::dyn_cast<llvm::ConstantInt>(CI->getArgOperand(1))) {
+        if (!CI1->isNegative() && CI1->getBitWidth() <= 64) {
+          astate->setAllocationSize(av, CI1->getZExtValue());
+        }
+      }
+    }
     astate->getPostStack().add(CI, Address(av));
     return {exec_state};
   }
@@ -1469,6 +1757,22 @@ ExecutionDomain PulseChecker::handleAlloca(const llvm::AllocaInst *AI,
   auto *astate = exec_state.getAstate();
   AbstractValue av = factory_.getOrCreate(AI);
   ops_.allocate(*astate, av, AI);
+  if (AI->getModule()) {
+    const llvm::DataLayout &DL = AI->getModule()->getDataLayout();
+    uint64_t elem_size = DL.getTypeAllocSize(AI->getAllocatedType());
+    uint64_t total_size = elem_size;
+    if (AI->isArrayAllocation()) {
+      if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(AI->getArraySize())) {
+        uint64_t count = CI->getZExtValue();
+        total_size = elem_size * count;
+      } else {
+        total_size = 0;
+      }
+    }
+    if (total_size > 0) {
+      astate->setAllocationSize(av, total_size);
+    }
+  }
   // Stack allocation: mark as stack-derived so we can prove invalid escapes.
   astate->getPostAttrs().add(av, Attribute::Stack);
   astate->getPostAttrs().add(av, Attribute::Uninitialized);
@@ -1579,53 +1883,111 @@ PulseChecker::runCallee(const llvm::Function *callee,
       continue;
 
     // Process instructions in block
-    ExecutionDomain current_state = std::move(block_state);
+    std::vector<ExecutionDomain> states;
+    states.push_back(std::move(block_state));
+
+    auto limitStates = [&](std::vector<ExecutionDomain> &vec) {
+      if (vec.size() <= kMaxDisjuncts)
+        return;
+      std::vector<ExecutionDomain> preferred;
+      std::vector<ExecutionDomain> rest;
+      preferred.reserve(vec.size());
+      rest.reserve(vec.size());
+      for (auto &st : vec) {
+        auto *a = st.getAstate();
+        if (a && !a->hasUnknownValues()) {
+          preferred.push_back(std::move(st));
+        } else {
+          rest.push_back(std::move(st));
+        }
+      }
+      vec.clear();
+      for (auto &st : preferred) {
+        if (vec.size() >= kMaxDisjuncts)
+          break;
+        vec.push_back(std::move(st));
+      }
+      for (auto &st : rest) {
+        if (vec.size() >= kMaxDisjuncts)
+          break;
+        vec.push_back(std::move(st));
+      }
+    };
 
     for (const llvm::Instruction &I : *BB) {
-      if (current_state.isStopped())
+      if (states.empty())
         break;
 
-      if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(&I)) {
-        llvm::Optional<AbstractValue> ret_av;
-        if (RI->getNumOperands() > 0 &&
-            RI->getReturnValue()->getType()->isPointerTy()) {
-          auto *a = current_state.getAstate();
-          if (a) {
-            auto opt = ops_.eval(*a, RI->getReturnValue(), RI, nullptr);
-            if (opt)
-              ret_av = opt->addr;
+      std::vector<ExecutionDomain> next_states;
+      next_states.reserve(states.size());
+
+      for (auto &st : states) {
+        if (st.isStopped()) {
+          next_states.push_back(std::move(st));
+          continue;
+        }
+
+        const llvm::BasicBlock *pred_bb = nullptr;
+        if (llvm::isa<llvm::PHINode>(&I)) {
+          if (pred_begin(BB) != pred_end(BB)) {
+            pred_bb = *pred_begin(BB);
           }
         }
-        result.push_back({current_state.clone(), ret_av});
-        continue;
-      }
 
-      const llvm::BasicBlock *pred_bb = nullptr;
-      if (llvm::isa<llvm::PHINode>(&I)) {
-        if (pred_begin(BB) != pred_end(BB)) {
-          pred_bb = *pred_begin(BB);
+        auto new_states =
+            executeInstruction(&I, std::move(st), pred_bb, call_depth + 1);
+        if (!new_states.empty()) {
+          for (auto &ns : new_states) {
+            next_states.push_back(std::move(ns));
+          }
         }
       }
 
-      auto new_states =
-          executeInstruction(&I, current_state, pred_bb, call_depth + 1);
-      if (new_states.empty() || new_states[0].isStopped()) {
-        current_state =
-            new_states.empty() ? current_state : std::move(new_states[0]);
-        break;
-      }
-      current_state = std::move(new_states[0]);
+      states = std::move(next_states);
+      limitStates(states);
     }
 
-    // Propagate to successors
-    if (!current_state.isStopped() && BB->getTerminator()) {
-      for (const llvm::BasicBlock *succ : llvm::successors(BB)) {
-        if (succ->empty())
+    // Collect returns / propagate to successors
+    bool any_continuing = false;
+    for (auto &st : states) {
+      if (st.isStopped()) {
+        if (st.isExitProgram()) {
+          llvm::Optional<AbstractValue> ret_av;
+          const AbductiveDomain *a = st.getAstate();
+          if (a && !callee->getReturnType()->isVoidTy()) {
+            // Best effort: find the return value in the stack.
+            for (const auto &BB2 : *callee) {
+              if (auto *RI =
+                      llvm::dyn_cast<llvm::ReturnInst>(BB2.getTerminator())) {
+                if (RI->getNumOperands() > 0 &&
+                    RI->getReturnValue()->getType()->isPointerTy()) {
+                  if (auto *addr = a->getPostStack().find(RI->getReturnValue())) {
+                    ret_av = addr->addr;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          result.push_back({st.clone(), ret_av});
+        }
+        continue;
+      }
+      any_continuing = true;
+    }
+
+    if (any_continuing && BB->getTerminator()) {
+      for (auto &st : states) {
+        if (st.isStopped())
           continue;
-        block_entry_states[succ].push_back(current_state.clone());
-        if (processed.find(succ) == processed.end() ||
-            !block_entry_states[succ].empty()) {
-          worklist.push(succ);
+        for (const llvm::BasicBlock *succ : llvm::successors(BB)) {
+          if (succ->empty())
+            continue;
+          block_entry_states[succ].push_back(st.clone());
+          if (processed.find(succ) == processed.end() ||
+              !block_entry_states[succ].empty()) {
+            worklist.push(succ);
+          }
         }
       }
     }
@@ -1695,6 +2057,12 @@ void PulseChecker::reportBug(OperationResult kind, const llvm::Instruction *loc,
         loc, "Uninitialized read", "Reading uninitialized memory",
         "Initialize variable before use", IssueType::UninitializedRead,
         trace.clone());
+    break;
+  case OperationResult::OutOfBounds:
+    diagnostic = std::make_unique<AccessToInvalidAddress>(
+        loc, "Out of bounds access", "Access beyond allocated bounds",
+        "Ensure indices and lengths stay within the allocated object",
+        IssueType::OutOfBounds, trace.clone());
     break;
   case OperationResult::TaintError:
     diagnostic = std::make_unique<TaintFlow>(loc, "Unknown Source",
@@ -1834,8 +2202,9 @@ void PulseChecker::createSummary(
     latent.calling_context = issue->getCallingContext();
 
     const PulseFormula formula = astate->getPathFormula().clone();
-    auto pre = std::make_unique<AbductiveDomain>(astate->clone());
-    auto post = std::make_unique<AbductiveDomain>(astate->clone());
+    AbductiveDomain pruned = pruneForSummary(F, *astate, llvm::None);
+    auto pre = std::make_unique<AbductiveDomain>(pruned.clone());
+    auto post = std::make_unique<AbductiveDomain>(std::move(pruned));
     summary.addPrePost(SummaryEntry(
         std::move(pre), formula.clone(), std::move(post), formula.clone(),
         llvm::None,
@@ -1861,8 +2230,9 @@ void PulseChecker::createSummary(
     const unsigned normal_entries =
         static_cast<unsigned>(summary.getPrePostList().size()) - latent_added;
     if (normal_entries < max_normal_entries) {
-      auto pre = std::make_unique<AbductiveDomain>(astate->clone());
-      auto post = std::make_unique<AbductiveDomain>(astate->clone());
+      AbductiveDomain pruned = pruneForSummary(F, *astate, ret_val);
+      auto pre = std::make_unique<AbductiveDomain>(pruned.clone());
+      auto post = std::make_unique<AbductiveDomain>(std::move(pruned));
       summary.addPrePost(SummaryEntry(std::move(pre), formula.clone(),
                                       std::move(post), formula.clone(),
                                       ret_val));
@@ -1880,10 +2250,8 @@ void PulseChecker::createSummary(
 
   // Store formal parameter mappings
   for (const auto &Arg : F->args()) {
-    if (Arg.getType()->isPointerTy()) {
-      AbstractValue formal_av = factory_.getOrCreate(&Arg);
-      summary.setFormalAV(&Arg, formal_av);
-    }
+    AbstractValue formal_av = factory_.getOrCreate(&Arg);
+    summary.setFormalAV(&Arg, formal_av);
   }
 
   summary_manager_.storeSummary(F, std::move(summary));
@@ -1921,10 +2289,6 @@ std::vector<ExecutionDomain> PulseChecker::applySummary(
   for (const auto &Arg : callee->args()) {
     if (arg_idx >= CI->arg_size())
       break;
-    if (!Arg.getType()->isPointerTy()) {
-      arg_idx++;
-      continue;
-    }
 
     // Get actual argument value (use new_astate which is non-const)
     auto actual_opt =
@@ -2050,6 +2414,13 @@ std::vector<ExecutionDomain> PulseChecker::applySummary(
     for (Attribute attr : kv.second) {
       new_astate->getPostAttrs().add(actual_av, attr);
     }
+  }
+
+  // Copy allocation sizes (with substitution)
+  for (const auto &kv : post->getAllocationSizes()) {
+    AbstractValue formal_av = post->getCanonical(kv.first);
+    AbstractValue actual_av = substitution.substituteOrIdentity(formal_av);
+    new_astate->setAllocationSize(actual_av, kv.second);
   }
 
   // Merge post-formula (with substitution applied conceptually)

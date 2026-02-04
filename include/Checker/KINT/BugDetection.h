@@ -4,6 +4,7 @@
 #include <llvm/IR/Instructions.h>
 #include <z3++.h>
 
+#include <functional>
 #include <map>
 #include <set>
 #include <vector>
@@ -66,7 +67,12 @@ public:
                      const DenseMap<const Value*, llvm::Optional<z3::expr>>& v2sym,
                      std::set<Instruction*>& overflow_insts,
                      std::set<Instruction*>& bad_shift_insts,
-                     std::set<Instruction*>& div_zero_insts);
+                     std::set<Instruction*>& div_zero_insts,
+                     bool robust_mode = false,
+                     const std::vector<z3::expr>* path_constraints = nullptr,
+                     const std::vector<z3::expr>* universal_vars = nullptr,
+                     const std::function<void(interr, const z3::expr&)>& dump = {},
+                     const std::function<bool(interr)>& robustFilter = {});
 
     // SMT expression generation
     z3::expr binary_op_propagate(BinaryOperator* op, const DenseMap<const Value*, llvm::Optional<z3::expr>>& v2sym, z3::solver& solver);
@@ -74,7 +80,8 @@ public:
     z3::expr v2sym(const Value* v, const DenseMap<const Value*, llvm::Optional<z3::expr>>& v2sym_map, z3::solver& solver);
 
     // Range constraint generation
-    bool add_range_cons(const crange& rng, const z3::expr& bv, z3::solver& solver);
+    bool add_range_cons(const crange& rng, const z3::expr& bv, z3::solver& solver,
+                        const std::function<void(const z3::expr&)>& addConstraint = {});
 
     // Path tracking
     void setCurrentPath(const std::vector<PathPoint>& path) { m_current_path = path; }
