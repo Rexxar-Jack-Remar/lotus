@@ -13,6 +13,7 @@
 #include "Alias/AserPTA/PointerAnalysis/Solver/PointsTo/BDDPts.h"
 #include "Alias/AserPTA/PointerAnalysis/Solver/PointsTo/PointedByPts.h"
 #include <llvm/Support/CommandLine.h>
+#include <string>
 
 using namespace llvm;
 
@@ -25,6 +26,20 @@ llvm::cl::opt<bool> ConfigUseBDDPts(
     "pta-use-bdd-pts",
     llvm::cl::desc("Use BDD-backed points-to sets instead of SparseBitVector"),
     llvm::cl::init(false));
+
+llvm::cl::opt<bool> ConfigBDDPtsReorder(
+    "pta-bdd-reorder",
+    llvm::cl::desc("Enable dynamic variable reordering for BDD points-to sets"),
+    llvm::cl::init(false));
+
+llvm::cl::opt<std::string> ConfigBDDPtsReorderMethod(
+    "pta-bdd-reorder-method",
+    llvm::cl::desc(
+        "BDD reordering heuristic (sift|sift-conv|symm-sift|symm-sift-conv|"
+        "group-sift|group-sift-conv|window2|window3|window4|window2-conv|"
+        "window3-conv|window4-conv|random|random-pivot|annealing|genetic|linear|"
+        "linear-conv|lazy-sift|exact); used when --pta-bdd-reorder is set"),
+    llvm::cl::init("sift"));
 
 std::vector<BitVectorPTS::PtsTy> BitVectorPTS::ptsVec;
 std::vector<ConfigurablePTS::PtsTy> ConfigurablePTS::ptsVec;

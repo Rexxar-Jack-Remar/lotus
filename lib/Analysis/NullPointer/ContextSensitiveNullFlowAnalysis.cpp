@@ -33,7 +33,7 @@ char ContextSensitiveNullFlowAnalysis::ID = 0;
 static RegisterPass<ContextSensitiveNullFlowAnalysis> X("csnfa", "context-sensitive null value flow");
 
 ContextSensitiveNullFlowAnalysis::ContextSensitiveNullFlowAnalysis() 
-    : ModulePass(ID), AAA(nullptr), VFG(nullptr), MaxContextDepth(CSMaxContextDepth), 
+    : ModulePass(ID), AAA(nullptr), DAA(nullptr), VFG(nullptr), MaxContextDepth(CSMaxContextDepth),
       OwnsAliasAnalysisAdapter(false) {
 }
 
@@ -58,6 +58,7 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
     
     // Get DyckAliasAnalysis and create the adapter
     auto *DyckAA = &getAnalysis<DyckAliasAnalysis>();
+    DAA = DyckAA;
     AAA = AliasAnalysisAdapter::createAdapter(&M, DyckAA);
     OwnsAliasAnalysisAdapter = true;
 
@@ -76,7 +77,11 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
     // Initialize the analysis for each function
     std::set<DyckVFGNode *> MayNullNodes;
     for (auto &F: M) {
-        if (!F.empty()) NewNonNullEdges[{&F, EmptyContext}];
+        if (!F.empty()) {
+            NewNonNullEdges[{&F, EmptyContext}];
+            NonNullEdges[{&F, EmptyContext}];
+            NonNullNodes[{&F, EmptyContext}];
+        }
         for (auto &I: instructions(&F)) {
             if (I.getType()->isPointerTy() && !MustNotNull(&I, &I)) {
                 if (auto *INode = VFG->getVFGNode(&I)) {
@@ -121,6 +126,8 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
                     auto FuncCtxPair = std::make_pair(Callee, NewCtx);
                     if (NewNonNullEdges.find(FuncCtxPair) == NewNonNullEdges.end()) {
                         NewNonNullEdges[FuncCtxPair] = {};
+                        NonNullEdges[FuncCtxPair] = {};
+                        NonNullNodes[FuncCtxPair] = {};
                         WorkList.insert(FuncCtxPair);
                     }
                 }
@@ -132,13 +139,70 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
 }
 
 bool ContextSensitiveNullFlowAnalysis::recompute(std::set<std::pair<Function*, Context>> &NewNonNullFunctionContexts) {
-    // This method should implement the recomputation logic when new non-null edges are discovered
-    // For simplicity, we'll just return false indicating no changes
-    
-    // In a real implementation, this would analyze the impact of new non-null edges
-    // and update the analysis results accordingly
-    
-    return false;
+    std::unordered_map<FunctionContextPair, std::set<DyckVFGNode *>> PossibleNonNullNodes;
+    unsigned K = 0,
+             Limits = CSIncrementalLimits < 0 ? UINT32_MAX : CSIncrementalLimits;
+    for (auto &NIt : NewNonNullEdges) {
+        auto &EdgeSet = NIt.second;
+        auto &NNNodes = NonNullNodes[NIt.first];
+        auto &NNEdges = NonNullEdges[NIt.first];
+        auto EIt = EdgeSet.begin();
+        while (EIt != EdgeSet.end()) {
+            if (++K > Limits)
+                break;
+            auto *Src = EIt->first;
+            auto *Tgt = EIt->second;
+            assert(Src && Tgt);
+            if (!NNNodes.count(Tgt))
+                PossibleNonNullNodes[NIt.first].insert(Tgt);
+            NNEdges.emplace(Src, Tgt);
+            EIt = EdgeSet.erase(EIt);
+        }
+    }
+    if (PossibleNonNullNodes.empty())
+        return false;
+
+    bool Changed = false;
+    for (auto &Entry : PossibleNonNullNodes) {
+        const FunctionContextPair &FuncCtx = Entry.first;
+        auto &NNNodes = NonNullNodes[FuncCtx];
+        auto &NNEdges = NonNullEdges[FuncCtx];
+
+        std::vector<DyckVFGNode *> WorkList;
+        WorkList.reserve(Entry.second.size());
+        for (auto *N : Entry.second)
+            WorkList.push_back(N);
+
+        while (!WorkList.empty()) {
+            auto *N = WorkList.back();
+            WorkList.pop_back();
+            if (!NNNodes.count(N)) {
+                bool AllInNonNull = true;
+                for (auto IIt = N->in_begin(), IE = N->in_end(); IIt != IE; ++IIt) {
+                    auto *In = IIt->first;
+                    if (!NNEdges.count(std::make_pair(In, N))) {
+                        AllInNonNull = false;
+                        break;
+                    }
+                }
+                if (!AllInNonNull)
+                    continue;
+                NNNodes.insert(N);
+                Changed = true;
+                if (auto *NF = N->getFunction()) {
+                    if (NF == FuncCtx.first) {
+                        NewNonNullFunctionContexts.insert(FuncCtx);
+                    } else {
+                        NewNonNullFunctionContexts.insert({NF, FuncCtx.second});
+                    }
+                }
+            }
+            for (auto &T : *N)
+                WorkList.push_back(T.first);
+        }
+    }
+
+    return Changed;
 }
 
 bool ContextSensitiveNullFlowAnalysis::notNull(Value *Ptr, Context Ctx) const {
@@ -162,6 +226,8 @@ bool ContextSensitiveNullFlowAnalysis::notNull(Value *Ptr, Context Ctx) const {
         // If it's not an instruction, we need a more conservative approach
         return false;
     }
+
+    DyckVFGNode *Node = VFG ? VFG->getVFGNode(Ptr) : nullptr;
     
     // Get all contexts that have the same k-suffix as our input context
     std::set<Context> MatchingContexts;
@@ -176,7 +242,7 @@ bool ContextSensitiveNullFlowAnalysis::notNull(Value *Ptr, Context Ctx) const {
     }
     
     // Add all contexts that have the same k-suffix
-    for (const auto &Entry : NewNonNullEdges) {
+    for (const auto &Entry : NonNullNodes) {
         if (Entry.first.first != F) continue;
         
         const Context &OtherCtx = Entry.first.second;
@@ -196,21 +262,25 @@ bool ContextSensitiveNullFlowAnalysis::notNull(Value *Ptr, Context Ctx) const {
     // This is the sound approach for k-limiting
     for (const Context &MatchingCtx : MatchingContexts) {
         auto FuncCtxPair = std::make_pair(F, MatchingCtx);
-        auto it = NewNonNullEdges.find(FuncCtxPair);
-        
-        if (it == NewNonNullEdges.end()) {
+        auto it = NonNullNodes.find(FuncCtxPair);
+
+        if (it == NonNullNodes.end()) {
             // If we don't have analysis for this context, we can't guarantee NOT_NULL
             return false;
         }
-        
+
         // Check if this pointer is NOT NULL in this context
         bool IsNotNullInContext = false;
-        
-        // For a proper implementation, this would check specific null checks in the context
-        if (InstPoint && !AAA->mayNull(Ptr, InstPoint)) {
+
+        if (Node && it->second.count(Node)) {
             IsNotNullInContext = true;
         }
-        
+
+        // Fall back to alias analysis if flow facts are unavailable
+        if (!IsNotNullInContext && InstPoint && AAA && !AAA->mayNull(Ptr, InstPoint)) {
+            IsNotNullInContext = true;
+        }
+
         if (!IsNotNullInContext) {
             // If it's not definitely NOT NULL in any matching context, we can't guarantee NOT_NULL
             return false;
@@ -224,42 +294,79 @@ bool ContextSensitiveNullFlowAnalysis::notNull(Value *Ptr, Context Ctx) const {
 void ContextSensitiveNullFlowAnalysis::add(Function *F, Context Ctx, Value *V1, Value *V2) {
     if (!V1 || !V1->getType()->isPointerTy())
         return;
-        
-    auto FuncCtxPair = std::make_pair(F, Ctx);
-    auto it = NewNonNullEdges.find(FuncCtxPair);
-    if (it == NewNonNullEdges.end()) {
-        NewNonNullEdges[FuncCtxPair] = {};
+
+    if (!V2) {
+        void (ContextSensitiveNullFlowAnalysis::*AddSingle)(Function *, Context, Value *) =
+            &ContextSensitiveNullFlowAnalysis::add;
+        (this->*AddSingle)(F, Ctx, V1);
+        return;
     }
-    
-    // This implementation depends on how you track non-null values
-    // For now, we'll just add a dummy entry to indicate that we've analyzed this context
+
+    auto *V1N = VFG ? VFG->getVFGNode(V1) : nullptr;
+    if (!V1N)
+        return;
+    auto *V2N = VFG->getVFGNode(V2);
+    if (!V2N)
+        return;
+
+    auto FuncCtxPair = std::make_pair(F, Ctx);
+    NonNullEdges[FuncCtxPair];
+    NonNullNodes[FuncCtxPair];
+    NewNonNullEdges[FuncCtxPair].emplace(V1N, V2N);
 }
 
 void ContextSensitiveNullFlowAnalysis::add(Function *F, Context Ctx, CallInst *CI, unsigned int K) {
     if (!CI) return;
-    
-    auto FuncCtxPair = std::make_pair(F, Ctx);
-    auto it = NewNonNullEdges.find(FuncCtxPair);
-    if (it == NewNonNullEdges.end()) {
-        NewNonNullEdges[FuncCtxPair] = {};
+
+    if (!DAA)
+        return;
+
+    auto *DCG = DAA->getDyckCallGraph();
+    if (!DCG)
+        return;
+    auto *DCGNode = DCG->getFunction(F);
+    if (!DCGNode)
+        return;
+    auto *C = DCGNode->getCall(CI);
+    if (!C)
+        return;
+    auto *Actual = CI->getArgOperand(K);
+
+    auto AddToCallee = [this, &Ctx, CI, Actual, K](Function *Callee) {
+        if (!Callee)
+            return;
+        if (K >= Callee->arg_size()) {
+            assert(Callee->isVarArg());
+            return;
+        }
+        if (Ctx.size() >= MaxContextDepth)
+            return;
+        Context NewCtx = extendContext(Ctx, CI);
+        add(Callee, NewCtx, Actual, Callee->getArg(K));
+    };
+
+    if (auto *CC = dyn_cast<CommonCall>(C)) {
+        AddToCallee(CC->getCalledFunction());
+    } else if (auto *PC = dyn_cast<PointerCall>(C)) {
+        for (auto *Callee : *PC)
+            AddToCallee(Callee);
     }
-    
-    // Add this call site argument as non-null
-    it->second.insert(std::make_pair(CI, K));
 }
 
 void ContextSensitiveNullFlowAnalysis::add(Function *F, Context Ctx, Value *Ret) {
     if (!Ret || !Ret->getType()->isPointerTy())
         return;
-        
+
+    auto *RetN = VFG ? VFG->getVFGNode(Ret) : nullptr;
+    if (!RetN)
+        return;
+
     auto FuncCtxPair = std::make_pair(F, Ctx);
-    auto it = NewNonNullEdges.find(FuncCtxPair);
-    if (it == NewNonNullEdges.end()) {
-        NewNonNullEdges[FuncCtxPair] = {};
-    }
-    
-    // This implementation depends on how you track non-null values
-    // For now, we'll just add a dummy entry to indicate that we've analyzed this context
+    NonNullEdges[FuncCtxPair];
+    NonNullNodes[FuncCtxPair];
+    auto &Set = NewNonNullEdges[FuncCtxPair];
+    for (auto &TargetIt : *RetN)
+        Set.emplace(RetN, TargetIt.first);
 }
 
 std::string ContextSensitiveNullFlowAnalysis::getContextString(const Context& Ctx) const {

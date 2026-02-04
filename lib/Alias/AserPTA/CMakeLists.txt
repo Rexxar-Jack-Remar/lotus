@@ -36,6 +36,6 @@ llvm_map_components_to_libnames(aserpta_llvm_libs
 # Link against LLVM libraries
 target_link_libraries(AserPTA PUBLIC
     ${aserpta_llvm_libs}
-    CanaryAliasBDD
+    CanaryAliasPtsSet
 )
 

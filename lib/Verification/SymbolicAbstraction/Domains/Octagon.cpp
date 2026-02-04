@@ -109,15 +109,28 @@ bool Octagon::meetWith(const AbstractValue &av_other) {
 }
 
 bool Octagon::updateWith(const ConcreteState &cstate) {
-  int64_t x = (int64_t)cstate[X_];
-  int64_t y = (int64_t)cstate[Y_];
+  unsigned bw = Fctx_.sortForType(X_->getType()).bv_size();
+  assert(bw > 0 && bw <= 64);
+  uint64_t mask = (bw == 64) ? ~0ULL : ((1ULL << bw) - 1ULL);
 
-  // Compute values for the four directions
+  auto sign_extend = [&](uint64_t v) -> int64_t {
+    v &= mask;
+    if (bw < 64) {
+      uint64_t sign = 1ULL << (bw - 1);
+      if (v & sign)
+        v |= ~mask;
+    }
+    return (int64_t)v;
+  };
+
+  uint64_t x_u = ((uint64_t)cstate[X_]) & mask;
+  uint64_t y_u = ((uint64_t)cstate[Y_]) & mask;
+
   int64_t vals[4];
-  vals[0] = x - y;  // +x - y
-  vals[1] = -x + y; // -x + y
-  vals[2] = x + y;  // +x + y
-  vals[3] = -x - y; // -x - y
+  vals[0] = sign_extend((x_u - y_u) & mask);
+  vals[1] = sign_extend((y_u - x_u) & mask);
+  vals[2] = sign_extend((x_u + y_u) & mask);
+  vals[3] = sign_extend((0ULL - x_u - y_u) & mask);
 
   if (isBottom()) {
     Bottom_ = false;
@@ -136,7 +149,6 @@ bool Octagon::updateWith(const ConcreteState &cstate) {
     return true;
   }
 
-  // Widen bounds if needed
   bool changed = false;
   for (int i = 0; i < 4; ++i) {
     if (vals[i] > C_[i]) {
@@ -159,7 +171,6 @@ z3::expr Octagon::toFormula(const ValueMapping &vmap, z3::context &ctx) const {
   z3::expr y = vmap[Y_];
   z3::expr result = ctx.bool_val(true);
 
-  // Add constraints for each finite bound
   if (C_[0] != INF) {
     z3::expr c0 = ctx.bv_val((uint64_t)C_[0], bw);
     result = result && z3::sle(x - y, c0);

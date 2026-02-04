@@ -3,7 +3,7 @@
  *
  * This header intentionally hides all CUDD types behind a pimpl to avoid
  * leaking the heavy dependency into most translation units. The actual
- * implementation lives in lib/Alias/BDD/BDDPtsSet.cpp.
+ * implementation lives in lib/Alias/PtsSet/BDDPtsSet.cpp.
  */
 
 #ifndef ANDERSEN_BDDPTSSET_H
@@ -11,10 +11,34 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 class BDDAndersPtsSet {
 public:
+  enum class ReorderingMethod : std::uint8_t {
+    Sift,
+    SiftConverge,
+    SymmSift,
+    SymmSiftConverge,
+    GroupSift,
+    GroupSiftConverge,
+    Window2,
+    Window3,
+    Window4,
+    Window2Converge,
+    Window3Converge,
+    Window4Converge,
+    Random,
+    RandomPivot,
+    Annealing,
+    Genetic,
+    Linear,
+    LinearConverge,
+    LazySift,
+    Exact,
+  };
+
   using Index = std::uint64_t;
   using iterator = std::vector<Index>::const_iterator;
 
@@ -31,6 +55,8 @@ public:
   bool contains(const BDDAndersPtsSet &other) const;
   bool intersectWith(const BDDAndersPtsSet &other) const;
   bool unionWith(const BDDAndersPtsSet &other);
+  bool differenceWith(const BDDAndersPtsSet &other);
+  bool complement();
 
   void clear();
   unsigned getSize() const;
@@ -39,6 +65,11 @@ public:
 
   iterator begin() const;
   iterator end() const;
+
+  static void configureReordering(bool enable,
+                                  ReorderingMethod method = ReorderingMethod::Sift);
+  static bool parseReorderingMethod(const std::string &name,
+                                    ReorderingMethod &out);
 
 private:
   struct Impl;

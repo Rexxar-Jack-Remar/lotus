@@ -4,23 +4,27 @@
 #include <cassert>
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <vector>
 
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 
-#include "Alias/BDD/BDDPtsSet.h"
+#include "Alias/PtsSet/BDDPtsSet.h"
 #include "Alias/AserPTA/PointerAnalysis/Solver/PointsTo/PTSTrait.h"
 #include "Alias/SparrowAA/PtsSet.h"
 
 namespace aser {
 
 extern llvm::cl::opt<bool> ConfigUseBDDPts;
+extern llvm::cl::opt<bool> ConfigBDDPtsReorder;
+extern llvm::cl::opt<std::string> ConfigBDDPtsReorderMethod;
 
 // A runtime-selectable points-to set for AserPTA. Backends:
 // - SparseBitVector (default)
 // - BDDAndersPtsSet (when --pta-use-bdd-pts is specified)
+// Note: pointed-by sets are not supported by this backend.
 class ConfigurablePTS {
 private:
     using TargetID = NodeID;
@@ -251,7 +255,8 @@ public:
     }
 
     static inline const PtsTy &getPointedBy(NodeID) {
-        llvm_unreachable("pointed-by is not supported by ConfigurablePTS");
+        llvm_unreachable(
+            "pointed-by is not supported by ConfigurablePTS; use PointedByPts");
     }
 
     static inline constexpr bool supportPointedBy() { return false; }
@@ -268,6 +273,22 @@ private:
     static inline void ensureBackendConfigured() {
         if (!backendLocked) {
             useBDDBackend = ConfigUseBDDPts;
+            if (useBDDBackend) {
+                if (ConfigBDDPtsReorder) {
+                    auto methodName = ConfigBDDPtsReorderMethod.getValue();
+                    BDDAndersPtsSet::ReorderingMethod method =
+                        BDDAndersPtsSet::ReorderingMethod::Sift;
+                    if (!BDDAndersPtsSet::parseReorderingMethod(methodName,
+                                                                method)) {
+                        llvm::report_fatal_error(
+                            llvm::Twine("Unknown BDD reordering method: ") +
+                            methodName);
+                    }
+                    BDDAndersPtsSet::configureReordering(true, method);
+                } else {
+                    BDDAndersPtsSet::configureReordering(false);
+                }
+            }
             backendLocked = true;
         }
     }

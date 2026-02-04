@@ -2,7 +2,7 @@
 #define ANDERSEN_TEMPLATE_PTSSET_H
 
 #include "Alias/SparrowAA/PtsSet.h"
-#include "Alias/BDD/BDDPtsSet.h"
+#include "Alias/PtsSet/BDDPtsSet.h"
 
 #include <memory>
 

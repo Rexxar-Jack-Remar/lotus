@@ -61,29 +61,30 @@ bool ContextSensitiveNullCheckAnalysis::runOnModule(Module &M) {
     unsigned Count = 1;
     do {
         errs() << "CSNCA Iteration " << Count << "\n";
-        
+
         // Process functions with contexts
         for (auto &FuncCtx : FuncsWithContexts) {
             Function *F = FuncCtx.first;
             const Context &Ctx = FuncCtx.second;
-            
+
             // Create and run analysis for this function and context
-            if (!AnalysisMap[{F, Ctx}]) {
-                auto *LNCA = new ContextSensitiveLocalNullCheckAnalysis(NFA, F, Ctx);
-                LNCA->run();
-                AnalysisMap[{F, Ctx}] = LNCA;
-                
+            auto *&LNCA = AnalysisMap[{F, Ctx}];
+            if (!LNCA) {
+                LNCA = new ContextSensitiveLocalNullCheckAnalysis(NFA, F, Ctx);
                 if (CSVerbose) {
-                    errs() << "  Generated analysis for function " << F->getName() 
-                          << " with context " << NFA->getContextString(Ctx) << "\n";
+                    errs() << "  Generated analysis for function " << F->getName()
+                           << " with context " << NFA->getContextString(Ctx) << "\n";
                 }
             }
+            LNCA->run();
         }
-        
-        // This is where we'd normally call NFA->recompute, but since we've simplified
-        // that part, we'll just ensure we've analyzed all functions
-        FuncsWithContexts.clear();
-            
+
+        // Recompute and get any new function-contexts that need analysis
+        std::set<std::pair<Function*, Context>> NewFuncContexts;
+        if (!NFA->recompute(NewFuncContexts)) {
+            break;
+        }
+        FuncsWithContexts.swap(NewFuncContexts);
     } while (Count++ < CSRound);
     
     // Ensure all functions have an analysis

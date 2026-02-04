@@ -17,11 +17,14 @@
 //#include <map>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "Alias/DyckAA/DyckVFG.h"
 #include "Analysis/NullPointer/AliasAnalysisAdapter.h"
 
 using namespace llvm;
+
+class DyckAliasAnalysis;
 
 // Context sensitive context
 typedef std::vector<CallInst *> Context;
@@ -55,13 +58,21 @@ namespace std {
     };
 } // namespace std
 
-// mapping from context to a set of nonnull args
-typedef std::unordered_map<FunctionContextPair, std::set<std::pair<CallInst *, unsigned>>> NewNonNullEdgesMap;
+// VFG edge used in non-null propagation
+typedef std::pair<DyckVFGNode *, DyckVFGNode *> VFGEdge;
+
+// mapping from context to sets of non-null edges/nodes
+typedef std::unordered_map<FunctionContextPair, std::set<VFGEdge>> NonNullEdgesMap;
+typedef std::unordered_map<FunctionContextPair, std::set<DyckVFGNode *>> NonNullNodesMap;
+typedef NonNullEdgesMap NewNonNullEdgesMap;
 
 class ContextSensitiveNullFlowAnalysis : public ModulePass {
 private:
     // Alias analysis adapter - uses DyckAA
     AliasAnalysisAdapter *AAA;
+    
+    // Dyck alias analysis (for call graph)
+    DyckAliasAnalysis *DAA;
     
     // VFG from DyckValueFlowAnalysis
     DyckVFG *VFG;
@@ -71,6 +82,10 @@ private:
     
     // NonNull edges collected during the analysis for each function & context
     NewNonNullEdgesMap NewNonNullEdges;
+    
+    // Known non-null edges/nodes per function & context
+    NonNullEdgesMap NonNullEdges;
+    NonNullNodesMap NonNullNodes;
     
     // Internally created alias analysis adapter - needs to be deleted
     bool OwnsAliasAnalysisAdapter;
