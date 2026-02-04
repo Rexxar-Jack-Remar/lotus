@@ -8,6 +8,7 @@
 #include "Solvers/WPDS/key_source.h"
 #include "Solvers/WPDS/keys.h"
 #include "Solvers/WPDS/semiring.h"
+#include "Solvers/WPDS/ref_ptr.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -107,6 +108,8 @@ private:
 // InterProceduralDataFlowEngine implements inter-procedural dataflow analysis using WPDS
 class InterProceduralDataFlowEngine {
 public:
+    using AutomatonBuilder = std::function<void(wpds::CA<GenKillTransformer>&)>;
+
     InterProceduralDataFlowEngine();
     ~InterProceduralDataFlowEngine() = default;
 
@@ -116,17 +119,54 @@ public:
         const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
         const std::set<Value*>& initialFacts = {});
 
+    // Run forward analysis with a caller-provided initial configuration automaton.
+    std::unique_ptr<mono::DataFlowResult> runForwardAnalysisWithAutomaton(
+        Module& m,
+        const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
+        const AutomatonBuilder& buildInitialCA);
+
     // Main method to run backward inter-procedural dataflow analysis
     std::unique_ptr<mono::DataFlowResult> runBackwardAnalysis(
         Module& m,
         const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
         const std::set<Value*>& initialFacts = {});
 
+    // Run backward analysis with a caller-provided initial configuration automaton.
+    std::unique_ptr<mono::DataFlowResult> runBackwardAnalysisWithAutomaton(
+        Module& m,
+        const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
+        const AutomatonBuilder& buildInitialCA);
+
     // Helper methods to query results
     const std::set<Value*>& getInSet(Instruction* inst) const;
     const std::set<Value*>& getOutSet(Instruction* inst) const;
 
+    // Access the last saturated configuration automaton (if any).
+    const wpds::CA<GenKillTransformer>* getLastResultAutomaton() const;
+
+    // Query a regular language of stack configurations against the last automaton.
+    ::ref_ptr<GenKillTransformer> queryRegularLanguage(
+        const wpds::CA<GenKillTransformer>& lang) const;
+
+#ifdef WITNESS_TRACE
+    // Return a DOT graph for the witness DAG of a specific transition.
+    std::string getWitnessDagDotForTransition(
+        wpds::wpds_key_t from,
+        wpds::wpds_key_t stack,
+        wpds::wpds_key_t to) const;
+
+    // Convenience: return DOT graph for the witness DAG of an instruction query
+    // in the default automaton (controlState -> instKey -> accept).
+    std::string getWitnessDagDotForInstruction(Instruction* inst) const;
+#endif
+
 private:
+    std::unique_ptr<mono::DataFlowResult> runAnalysisWithAutomaton(
+        Module& m,
+        const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
+        const AutomatonBuilder& buildInitialCA,
+        bool isForward);
+
     // Convert LLVM Module to WPDS
     void buildWPDS(
         Module& m, 
@@ -163,6 +203,10 @@ private:
 
     // Maintain the dataflow result for the most recent analysis
     mutable std::unique_ptr<mono::DataFlowResult> currentResult;
+    std::unique_ptr<wpds::CA<GenKillTransformer>> lastResultCA;
+    Query lastQuery = Query::user();
+    wpds::wpds_key_t lastAcceptState = WPDS_EPSILON;
+    bool hasLastAcceptState = false;
 
     // Single WPDS control state shared by rules and the initial automaton
     wpds::wpds_key_t controlState;

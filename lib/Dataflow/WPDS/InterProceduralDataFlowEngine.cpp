@@ -5,25 +5,17 @@
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
 #include "Solvers/WPDS/CA.h"
 #include "Solvers/WPDS/SaturationProcess.h"
+#ifdef WITNESS_TRACE
+#include "Solvers/WPDS/Witness.h"
+#endif
 #include <llvm/IR/CFG.h>
+#include <sstream>
+#include <unordered_map>
 
 namespace wpds {
 
 using namespace wpds;
 using namespace llvm;
-
-// Helper functor for copying CA transitions
-template<typename T>
-struct CopyTransitionsFunctor : public wpds::util::TransActionFunctor<T> {
-    wpds::CA<T>* targetCA;
-    
-    CopyTransitionsFunctor(wpds::CA<T>* target) : targetCA(target) {}
-    
-    void operator()(const typename wpds::CA<T>::catrans_t& t) override {
-        targetCA->add(t->from_state(), t->stack(), t->to_state(), 
-                     t->semiring_element().get_ptr());
-    }
-};
 
 InterProceduralDataFlowEngine::InterProceduralDataFlowEngine()
     : controlState(str2key("q")) {}
@@ -32,64 +24,74 @@ std::unique_ptr<mono::DataFlowResult> InterProceduralDataFlowEngine::runForwardA
     Module& m,
     const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
     const std::set<Value*>& initialFacts) {
-    
-    // Create semiring and WPDS
-    Semiring<GenKillTransformer> semiring(GenKillTransformer::one());
-    WPDS<GenKillTransformer> wpds(semiring, Query::poststar());
-    
-    // Build WPDS from LLVM module
-    buildWPDS(m, wpds, createTransformer);
-    
-    // Create initial configuration automaton
-    CA<GenKillTransformer> initialCA(semiring);
-    buildInitialAutomaton(m, initialCA, initialFacts, true);
-    
-    // Run post* algorithm
-    CA<GenKillTransformer> resultCA(semiring);
-    
-    // Copy initial CA transitions to result CA using functor
-    CopyTransitionsFunctor<GenKillTransformer> copier(&resultCA);
-    initialCA.for_each(copier);
-    
-    wpds::SaturationProcess<GenKillTransformer> satProcess(wpds, resultCA, semiring, Query::poststar());
-    satProcess.poststar();
-    
-    // Extract results
-    currentResult = std::make_unique<mono::DataFlowResult>();
-    extractResults(m, resultCA, currentResult, true);
-
-    return std::move(currentResult);
+    return runForwardAnalysisWithAutomaton(
+        m,
+        createTransformer,
+        [&](CA<GenKillTransformer>& ca) {
+            buildInitialAutomaton(m, ca, initialFacts, true);
+        });
 }
 
 std::unique_ptr<mono::DataFlowResult> InterProceduralDataFlowEngine::runBackwardAnalysis(
     Module& m,
     const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
     const std::set<Value*>& initialFacts) {
-    
+    return runBackwardAnalysisWithAutomaton(
+        m,
+        createTransformer,
+        [&](CA<GenKillTransformer>& ca) {
+            buildInitialAutomaton(m, ca, initialFacts, false);
+        });
+}
+
+std::unique_ptr<mono::DataFlowResult> InterProceduralDataFlowEngine::runForwardAnalysisWithAutomaton(
+    Module& m,
+    const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
+    const AutomatonBuilder& buildInitialCA) {
+    return runAnalysisWithAutomaton(m, createTransformer, buildInitialCA, true);
+}
+
+std::unique_ptr<mono::DataFlowResult> InterProceduralDataFlowEngine::runBackwardAnalysisWithAutomaton(
+    Module& m,
+    const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
+    const AutomatonBuilder& buildInitialCA) {
+    return runAnalysisWithAutomaton(m, createTransformer, buildInitialCA, false);
+}
+
+std::unique_ptr<mono::DataFlowResult> InterProceduralDataFlowEngine::runAnalysisWithAutomaton(
+    Module& m,
+    const std::function<GenKillTransformer*(Instruction*)>& createTransformer,
+    const AutomatonBuilder& buildInitialCA,
+    bool isForward) {
     // Create semiring and WPDS
-    Semiring<GenKillTransformer> semiring(GenKillTransformer::one(), false); // backward direction
-    WPDS<GenKillTransformer> wpds(semiring, Query::prestar());
-    
+    Semiring<GenKillTransformer> semiring(GenKillTransformer::one(), isForward);
+    WPDS<GenKillTransformer> wpds(semiring, isForward ? Query::poststar() : Query::prestar());
+
     // Build WPDS from LLVM module
     buildWPDS(m, wpds, createTransformer);
-    
-    // Create initial configuration automaton
-    CA<GenKillTransformer> initialCA(semiring);
-    buildInitialAutomaton(m, initialCA, initialFacts, false);
-    
-    // Run pre* algorithm
+
+    // Build initial configuration automaton (in-place)
     CA<GenKillTransformer> resultCA(semiring);
-    
-    // Copy initial CA transitions to result CA using functor
-    CopyTransitionsFunctor<GenKillTransformer> copier(&resultCA);
-    initialCA.for_each(copier);
-    
-    wpds::SaturationProcess<GenKillTransformer> satProcess(wpds, resultCA, semiring, Query::prestar());
-    satProcess.prestar();
-    
+    hasLastAcceptState = false;
+    lastAcceptState = WPDS_EPSILON;
+    buildInitialCA(resultCA);
+
+    // Run saturation algorithm
+    wpds::SaturationProcess<GenKillTransformer> satProcess(
+        wpds, resultCA, semiring, isForward ? Query::poststar() : Query::prestar());
+    if (isForward) {
+        satProcess.poststar();
+    } else {
+        satProcess.prestar();
+    }
+
     // Extract results
     currentResult = std::make_unique<mono::DataFlowResult>();
-    extractResults(m, resultCA, currentResult, false);
+    extractResults(m, resultCA, currentResult, isForward);
+
+    // Cache for queries/witnesses
+    lastResultCA = std::make_unique<CA<GenKillTransformer>>(resultCA);
+    lastQuery = isForward ? Query::poststar() : Query::prestar();
 
     return std::move(currentResult);
 }
@@ -162,6 +164,9 @@ void InterProceduralDataFlowEngine::buildWPDS(
         wpds.add_rule(controlState, funcEntry, controlState, entryBBKey, 
                      GenKillTransformer::one());
         
+        // Track return-site transformers so we can compose them at the return site.
+        std::unordered_map<wpds_key_t, ::ref_ptr<GenKillTransformer>> returnSiteTransformers;
+
         // Process each basic block
         for (auto& BB : F) {
             wpds_key_t bbKey = bbToKey[&BB];
@@ -182,6 +187,12 @@ void InterProceduralDataFlowEngine::buildWPDS(
                 
                 // Create transformer for this instruction
                 GenKillTransformer* transformer = createTransformer(&I);
+
+                // If we're returning from a callsite, compose return-flow before this instruction.
+                auto retIt = returnSiteTransformers.find(prevKey);
+                if (retIt != returnSiteTransformers.end()) {
+                    transformer = retIt->second.get_ptr()->extend(transformer);
+                }
                 
                 // Add rule from previous location to this instruction
                 wpds.add_rule(controlState, prevKey, controlState, instKey, transformer);
@@ -223,8 +234,7 @@ void InterProceduralDataFlowEngine::buildWPDS(
                                     controlState, calledEntry, returnKey,
                                     callTrans);
                         
-                        // Return rule: pop from callee exit
-                        // Map Return Value (represented by calledFunc) -> CallInst
+                        // Return-flow mapping: callee return value -> callsite value
                         std::map<Value*, DataFlowFacts> retFlow;
                         if (!callInst->getType()->isVoidTy()) {
                             if (!retFlow.count(calledFunc)) retFlow[calledFunc] = DataFlowFacts::EmptySet();
@@ -237,14 +247,14 @@ void InterProceduralDataFlowEngine::buildWPDS(
                             retFlow
                         );
 
-                        // Return rule: pop returnKey from stack and push returnKey to continue at return site
-                        // The call rule pushed: calledEntry, returnKey (returnKey is on top)
-                        // At return from calledExit, we pop returnKey and push returnKey (identity)
-                        // to continue execution at the return site
-                        // Rule format: <p, y> -> <q, g1> where y is popped and g1 is pushed
-                        wpds.add_rule(controlState, calledExit, returnKey,
-                                    controlState, returnKey,
-                                    retTrans);
+                        // At function exit, pop the exit symbol to reveal the return site below.
+                        // This encodes the exit-to-return-site edge.
+                        wpds.add_rule(controlState, calledExit,
+                                      controlState,
+                                      GenKillTransformer::one());
+
+                        // Apply return-flow at the return site before the next instruction.
+                        returnSiteTransformers[returnKey] = ::ref_ptr<GenKillTransformer>(retTrans);
                         
                         prevKey = returnKey;
                         prevInst = &I;
@@ -292,6 +302,8 @@ void InterProceduralDataFlowEngine::buildInitialAutomaton(
     bool isForward) {
     
     wpds_key_t acceptState = str2key("accept");
+    lastAcceptState = acceptState;
+    hasLastAcceptState = true;
     
     ca.add_initial_state(controlState);
     ca.add_final_state(acceptState);
@@ -373,22 +385,26 @@ void InterProceduralDataFlowEngine::extractResults(
     std::unique_ptr<mono::DataFlowResult>& result,
     bool isForward) {
     
-    wpds_key_t acceptState = str2key("accept");
-    
     // First, compute OUT sets directly from WPDS weights; then derive IN.
+    wpds_key_t queryInit = resultCA.initial_state();
+    if (queryInit == WPDS_EPSILON) {
+        queryInit = controlState;
+    }
     for (auto& kv : instToKey) {
         Instruction* inst = kv.first;
         wpds_key_t instKey = kv.second;
 
-        // Query the transition summarizing paths to this program point
-        wpds::CA<GenKillTransformer>::catrans_t trans;
-        bool found = resultCA.find(controlState, instKey, acceptState, trans);
-        if (!found || !trans.get_ptr()) {
+        // Query the language consisting of the single stack symbol instKey.
+        CA<GenKillTransformer> lang(resultCA.semiring());
+        wpds_key_t qf = new_str2key(("query_final_" + std::to_string((uintptr_t)inst)).c_str());
+        lang.add_initial_state(queryInit);
+        lang.add_final_state(qf);
+        lang.add(queryInit, instKey, qf, GenKillTransformer::one());
+
+        auto pathSummary = resultCA.reglang_query(lang);
+        if (!pathSummary.get_ptr()) {
             continue;
         }
-
-        GenKillTransformer* pathSummary = trans->semiring_element().get_ptr();
-        if (!pathSummary) continue;
 
         // Store GEN/KILL summary at this point for debugging/inspection
         result->GEN(inst) = pathSummary->getGen().getFacts();
@@ -440,5 +456,55 @@ void InterProceduralDataFlowEngine::extractResults(
         }
     }
 }
+
+const wpds::CA<GenKillTransformer>* InterProceduralDataFlowEngine::getLastResultAutomaton() const {
+    return lastResultCA.get();
+}
+
+::ref_ptr<GenKillTransformer> InterProceduralDataFlowEngine::queryRegularLanguage(
+    const wpds::CA<GenKillTransformer>& lang) const {
+    if (!lastResultCA) {
+        return ::ref_ptr<GenKillTransformer>(GenKillTransformer::zero());
+    }
+    return lastResultCA->reglang_query(lang);
+}
+
+#ifdef WITNESS_TRACE
+std::string InterProceduralDataFlowEngine::getWitnessDagDotForTransition(
+    wpds::wpds_key_t from,
+    wpds::wpds_key_t stack,
+    wpds::wpds_key_t to) const {
+    if (!lastResultCA) {
+        return "";
+    }
+    wpds::CA<GenKillTransformer>::catrans_t trans;
+    if (!lastResultCA->find(from, stack, to, trans) || !trans.get_ptr()) {
+        return "";
+    }
+    auto wit = trans->witness();
+    if (!wit.get_ptr()) {
+        return "";
+    }
+
+    using witness_path_t = wpds::ref_ptr<wpds::CAPathOfWitness<GenKillTransformer>>;
+    witness_path_t path(new wpds::CAPathOfWitness<GenKillTransformer>(wit, witness_path_t(0)));
+    auto dag = wpds::DAGWitnessForPath<GenKillTransformer>::createFromCAPathOfWitness(
+        path, lastQuery);
+    std::ostringstream oss;
+    dag->print(oss);
+    return oss.str();
+}
+
+std::string InterProceduralDataFlowEngine::getWitnessDagDotForInstruction(Instruction* inst) const {
+    if (!hasLastAcceptState) {
+        return "";
+    }
+    auto it = instToKey.find(inst);
+    if (it == instToKey.end()) {
+        return "";
+    }
+    return getWitnessDagDotForTransition(controlState, it->second, lastAcceptState);
+}
+#endif
 
 } // namespace wpds
