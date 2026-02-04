@@ -5,9 +5,10 @@
  * Uses UnderApproxAA for must-alias canonicalization.
  */
 
-#include "Checker/Pulse/PulseChecker.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Checker/Pulse/PulseChecker.h"
 #include "Checker/Pulse/PulseLogger.h"
+#include "Checker/Pulse/PulseOptions.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
@@ -37,6 +38,9 @@ static cl::opt<std::string> LogLevelOpt("log-level",
 static cl::opt<bool> ShowPulseStats("pulse-stats", cl::desc("Show Pulse analysis statistics"), cl::init(true));
 static cl::opt<std::string> JsonOutput("json-output", cl::desc("Output JSON report to file"), cl::init(""));
 static cl::opt<int> MinScore("min-score", cl::desc("Minimum confidence score for reporting (0-100)"), cl::init(0));
+static cl::opt<bool> NoSMT("no-smt",
+                           cl::desc("Disable SMT solving (fast mode); do not query Z3 for path satisfiability"),
+                           cl::init(false));
 
 int main(int argc, char** argv) {
     sys::PrintStackTraceOnErrorSignal(argv[0]);
@@ -59,6 +63,11 @@ int main(int argc, char** argv) {
     PulseLogger::setLevel(level);
     PulseLogger::setOutputStream(&errs());
     PulseLogger::resetStats();
+
+    pulse::options::setDisableSMT(NoSMT);
+    if (NoSMT) {
+        PulseLogger::info("Fast mode: SMT solving disabled");
+    }
 
     SMDiagnostic Err;
     LLVMContext Context;

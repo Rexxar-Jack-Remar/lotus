@@ -264,6 +264,15 @@ public:
     }
 
     /**
+     * Mark a value as tainted using procedure name only (avoids dereferencing
+     * the instruction; use when source may be invalid or to avoid EXC_BAD_ACCESS).
+     */
+    static void taint(AbductiveDomain& astate,
+                      AbstractValue v,
+                      TaintKind kind,
+                      const std::string& procedure_name);
+
+    /**
      * Check if a value is tainted and report if it flows to a sink
      * Returns true if a bug was reported
      */

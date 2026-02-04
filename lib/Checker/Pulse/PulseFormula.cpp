@@ -1,5 +1,5 @@
 #include "Checker/Pulse/PulseFormula.h"
-
+#include "Checker/Pulse/PulseOptions.h"
 #include "Checker/Pulse/PulseSubstitution.h"
 
 #include <algorithm>
@@ -667,6 +667,11 @@ bool PulseFormula::checkSatisfiability() const {
         if (non_null_values_.count(rep) > 0) {
             return false;  // Contradiction: null and non-null
         }
+    }
+
+    // Fast mode: skip Z3 entirely; assume satisfiable so paths are not pruned by SMT
+    if (pulse::options::disableSMT()) {
+        return true;
     }
 
     try {

@@ -2,6 +2,9 @@ set(PulseChecker_SOURCES
   PulseDomain.cpp
   PulseOperations.cpp
   PulseChecker.cpp
+  PulseCheckerUtils.cpp
+  PulseCheckerInstructions.cpp
+  PulseCheckerSummary.cpp
   PulseFormula.cpp
   PulseSummary.cpp
   PulseSubstitution.cpp

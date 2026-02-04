@@ -6,6 +6,7 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -220,9 +221,21 @@ public:
         return t;
     }
 
+    /** Maximum events to copy when cloning (avoids std::length_error and OOM on huge traces). */
+    static constexpr size_t kMaxTraceEventsForClone = 4096;
+
     Trace clone() const {
         Trace cloned;
-        cloned.events_ = events_;
+        const size_t n = events_.size();
+        if (n <= kMaxTraceEventsForClone) {
+            cloned.events_ = events_;
+        } else {
+            // Keep the most recent events for error reporting
+            const size_t skip = n - kMaxTraceEventsForClone;
+            cloned.events_.reserve(kMaxTraceEventsForClone);
+            for (size_t i = skip; i < n; ++i)
+                cloned.events_.push_back(events_[i]);
+        }
         return cloned;
     }
 };

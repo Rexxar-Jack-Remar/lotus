@@ -58,16 +58,32 @@ void TaintOperations::taint(AbductiveDomain& astate,
                             AbstractValue v,
                             const std::vector<TaintKind>& kinds,
                             const llvm::Instruction* source) {
-    const llvm::Function* func = source ? source->getFunction() : nullptr;
+    const llvm::Function* func = nullptr;
+    if (source) {
+        if (const llvm::BasicBlock* bb = source->getParent())
+            func = bb->getParent();
+    }
     unsigned timestamp = getNextTimestamp();
     
     // Create value tuple
-    TaintValue value(TaintValue::Type::TaintProcedure, 
+    TaintValue value(TaintValue::Type::TaintProcedure,
                      func ? func->getName().str() : "");
     TaintValueTuple value_tuple(value, TaintOrigin::ReturnValue);
     
     TaintItem item(kinds, value_tuple, source, func, timestamp);
     item.history.addEvent(ValueHistory::EventKind::Unknown, source, func); // Start of taint
+    astate.getTaintDomain().add(v, item);
+    astate.getPostAttrs().add(v, Attribute::Tainted);
+}
+
+void TaintOperations::taint(AbductiveDomain& astate,
+                            AbstractValue v,
+                            TaintKind kind,
+                            const std::string& procedure_name) {
+    unsigned timestamp = getNextTimestamp();
+    TaintValue value(TaintValue::Type::TaintProcedure, procedure_name);
+    TaintValueTuple value_tuple(value, TaintOrigin::ReturnValue);
+    TaintItem item({kind}, value_tuple, nullptr, nullptr, timestamp);
     astate.getTaintDomain().add(v, item);
     astate.getPostAttrs().add(v, Attribute::Tainted);
 }
