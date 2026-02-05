@@ -8,7 +8,7 @@
 // 4. Context Sensitivity: Creating new contexts for callees (via KLimitContext).
 // 5. External Calls: Handling calls to external/library functions using annotations.
 
-#include "Alias/TPA/Context/KLimitContext.h"
+#include "Alias/TPA/Context/ContextPolicy.h"
 #include "Alias/TPA/PointerAnalysis/Engine/GlobalState.h"
 #include "Alias/TPA/PointerAnalysis/Engine/StorePruner.h"
 #include "Alias/TPA/PointerAnalysis/Engine/TransferFunction.h"
@@ -219,9 +219,10 @@ void TransferFunction::evalCallNode(const ProgramPoint &pp,
 
   for (const auto *f : callees) {
     // Update call graph first.
-    // We create a new context for the callee using KLimitContext.
+    // Create context for callee (policy: k-CFA everywhere or selective 0-CFA
+    // for direct calls, k-CFA for indirect).
     const auto *callsite = callNode.getCallSite();
-    const auto *newCtx = context::KLimitContext::pushContext(ctx, callsite);
+    const auto *newCtx = context::pushContextForCall(ctx, callsite);
     auto callTgt = FunctionContext(newCtx, f);
     bool callGraphUpdated = globalState.getCallGraph().insertEdge(
         ProgramPoint(ctx, &callNode), callTgt);

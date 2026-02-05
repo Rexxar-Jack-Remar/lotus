@@ -8,8 +8,10 @@ Cmd options:
 -print-pts: Print points-to sets for pointers that were materialized by the analysis
 -print-indirect-calls: Print resolved targets for each indirect call in the module
 -k-limit <n>: Set k-limit for context-sensitive analysis (0 = context-insensitive, default: 0)
+-context-strategy <klimit|selective>: klimit = k-CFA at all calls; selective = 0-CFA at direct calls, k-CFA at indirect (default: klimit)
 */
 
+#include "Alias/TPA/Context/ContextPolicy.h"
 #include "Alias/TPA/Context/KLimitContext.h"
 #include "Alias/AliasAnalysisWrapper/CLIUtils.h"
 #include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
@@ -73,6 +75,12 @@ static cl::opt<unsigned> KLimit(
     "k-limit",
     cl::desc("Set k-limit for context-sensitive analysis (0 = context-insensitive, default: 0)"),
     cl::init(0));
+
+static cl::opt<std::string> ContextStrategyOpt(
+    "context-strategy",
+    cl::desc("Context strategy: klimit (k-CFA at all calls) or selective "
+             "(0-CFA at direct calls, k-CFA at indirect calls)"),
+    cl::init("klimit"));
 
 static std::string findDefaultPointerSpec() {
   // 1) LOTUS_CONFIG_DIR/ptr.spec
@@ -156,12 +164,23 @@ int main(int argc, char **argv) {
     util::io::writeModuleToFile(*M, PrepassOutFile.c_str(), isText);
   }
 
-  // Set k-limit for context-sensitive analysis
-  context::KLimitContext::setLimit(KLimit);
-  if (KLimit > 0) {
-    LOG_INFO("Context-sensitive analysis enabled with k-limit: {}", KLimit);
+  // Set context strategy and k-limit
+  if (ContextStrategyOpt == "selective") {
+    context::setContextStrategy(context::ContextStrategy::Selective);
+    context::KLimitContext::setLimit(KLimit);
+    if (KLimit > 0) {
+      LOG_INFO("Selective context: 0-CFA at direct calls, {}-CFA at indirect calls", KLimit);
+    } else {
+      LOG_INFO("Selective context: 0-CFA at direct calls, context-insensitive at indirect");
+    }
   } else {
-    LOG_INFO("Context-insensitive analysis mode");
+    context::setContextStrategy(context::ContextStrategy::KLimit);
+    context::KLimitContext::setLimit(KLimit);
+    if (KLimit > 0) {
+      LOG_INFO("Context-sensitive analysis enabled with k-limit: {}", KLimit);
+    } else {
+      LOG_INFO("Context-insensitive analysis mode");
+    }
   }
 
   // Build semi-sparse program and run analysis

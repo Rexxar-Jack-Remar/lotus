@@ -172,6 +172,11 @@ struct AAConfig {
   static AAConfig TPA_KCFA(unsigned k) {
     return {Implementation::TPA, ContextSensitivity::KCallSite, k, true, Solver::Default};
   }
+
+  /// Selective: 0-CFA at direct calls, k-CFA at indirect calls.
+  static AAConfig TPA_Selective(unsigned k = 1) {
+    return {Implementation::TPA, ContextSensitivity::Adaptive, k, true, Solver::Default};
+  }
   
   // Other analyses (no context sensitivity)
   static AAConfig DyckAA() {

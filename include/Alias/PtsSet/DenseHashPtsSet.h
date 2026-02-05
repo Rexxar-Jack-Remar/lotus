@@ -4,8 +4,8 @@
 #ifndef ANDERSEN_DENSE_HASH_PTSSET_H
 #define ANDERSEN_DENSE_HASH_PTSSET_H
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 #include <llvm/ADT/DenseSet.h>
 

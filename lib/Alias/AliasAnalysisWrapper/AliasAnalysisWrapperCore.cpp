@@ -13,6 +13,7 @@
 #include "Alias/AllocAA/AllocAA.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/SparrowAA/AndersenAA.h"
+#include "Alias/TPA/Context/ContextPolicy.h"
 #include "Alias/TPA/Context/KLimitContext.h"
 #include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
 #include "Alias/TPA/PointerAnalysis/FrontEnd/SemiSparseProgramBuilder.h"
@@ -154,10 +155,15 @@ void AliasAnalysisWrapper::initialize() {
   
   case AAConfig::Implementation::TPA: {
     _initialized = initAA([this]{
-      // Set k-limit for TPA context sensitivity
-      if (_config.ctxSens == AAConfig::ContextSensitivity::KCallSite) {
+      // Set context strategy and k-limit for TPA
+      if (_config.ctxSens == AAConfig::ContextSensitivity::Adaptive) {
+        context::setContextStrategy(context::ContextStrategy::Selective);
+        context::KLimitContext::setLimit(_config.kLimit);
+      } else if (_config.ctxSens == AAConfig::ContextSensitivity::KCallSite) {
+        context::setContextStrategy(context::ContextStrategy::KLimit);
         context::KLimitContext::setLimit(_config.kLimit);
       } else {
+        context::setContextStrategy(context::ContextStrategy::KLimit);
         context::KLimitContext::setLimit(0); // Context-insensitive
       }
       

@@ -4,6 +4,7 @@ set (PointerAnalysisSourceCodes
 	Analysis/SemiSparsePointerAnalysis.cpp
 	Context/AdaptiveContext.cpp
 	Context/Context.cpp
+	Context/ContextPolicy.cpp
 	Context/KLimitContext.cpp
 	Engine/ExternalCallAnalysis.cpp
 	Engine/Initializer.cpp
