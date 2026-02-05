@@ -55,3 +55,13 @@ target_link_libraries(lotus-pulse PRIVATE
   CanaryReport
   ${LLVM_LINK_COMPONENTS}
 )
+
+# FiTx Bug Finder Tool (runs all FiTx checkers: df, dl, dul, leak, ref_count, uaf, etc.)
+add_executable(lotus-fitx lotus_fitx.cpp)
+target_link_libraries(lotus-fitx PRIVATE
+  FiTxChecker
+  ${LLVM_LINK_COMPONENTS}
+)
+# LoopInfoWrapperPass and legacy pass manager for running FiTx pipeline
+llvm_map_components_to_libnames(_fitx_components Analysis Passes)
+target_link_libraries(lotus-fitx PRIVATE ${_fitx_components})

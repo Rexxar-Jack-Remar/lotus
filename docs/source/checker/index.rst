@@ -15,6 +15,7 @@ Overview
 The Checker Framework consists of four main checker categories, all unified through a centralized bug reporting system:
 
 * **GVFA Checkers** – Memory safety vulnerabilities using Global Value Flow Analysis
+* **FiTx Checkers** – Daily development-friendly bug detection using typestate analysis (path-insensitive, return-code aware; see Suzuki et al., USENIX ATC 2024)
 * **KINT Checkers** – Numerical bugs (overflow, division by zero, array bounds) using range analysis and SMT solving
 * **Concurrency Checkers** – Thread safety issues (data races, deadlocks, atomicity violations) using MHP and lock set analysis
 * **Pulse Checker** – Memory safety and other bugs using biabductive analysis with path-sensitive interprocedural reasoning
@@ -30,6 +31,13 @@ Components
 * ``DataRaceChecker.cpp`` – Data race detection using MHP (May Happen in Parallel) analysis
 * ``DeadlockChecker.cpp`` – Deadlock detection using lock set analysis
 * ``AtomicityChecker.cpp`` – Atomicity violation detection
+
+**FiTx Bug Checkers** (``lib/Checker/FiTx/``):
+
+* ``frontend/Framework.cpp`` – Main FiTx pass; typestate-based daily development-friendly checkers (Suzuki et al., USENIX ATC 2024)
+* ``frontend/Analyzer.cpp`` – CFG-based typestate analysis with return-code aware state propagation
+* ``framework_ir/Analyzer.cpp`` – IR builder; collects return values for function summaries
+* ``detector/df_detector/``, ``uaf_detector/``, ``leak_detector/``, etc. – Typestate definitions per bug pattern
 
 **GVFA Vulnerability Checkers** (``lib/Checker/GVFA/``):
 
@@ -80,8 +88,10 @@ Build Targets
 -------------
 
 * ``GVFAChecker`` – GVFA vulnerability checker library
+* ``FiTxChecker`` – FiTx typestate-based bug checker library
 * ``PulseChecker`` – Pulse biabductive analysis checker library
 * ``lotus-gvfa`` – Global value flow analysis tool (``tools/checker/lotus_gvfa.cpp``)
+* ``lotus-fitx`` – FiTx daily development-friendly bug checker (``tools/checker/lotus_fitx.cpp``)
 * ``lotus-kint`` – KINT numerical bug detection tool (``tools/checker/lotus_kint.cpp``)
 * ``lotus-concur`` – Concurrency checker tool (``tools/checker/lotus_concur.cpp``)
 * ``lotus-pulse`` – Pulse biabductive analysis tool (``tools/checker/lotus_pulse.cpp``)
@@ -174,6 +184,7 @@ See Also
    :maxdepth: 1
 
    concurrency
+   fitx
    gvfa
    kint
    pulse

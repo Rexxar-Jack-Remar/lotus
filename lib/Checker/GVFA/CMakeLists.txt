@@ -1,4 +1,5 @@
-set(CHECKER_GVFA_SOURCES
+# GVFA Vulnerability Checkers (library name GVFAChecker for tools/tests)
+set(GVFAChecker_SOURCES
   GVFAVulnerabilityChecker.cpp
   CheckerUtils.cpp
   NullPointerChecker.cpp
@@ -8,4 +9,9 @@ set(CHECKER_GVFA_SOURCES
   FreeOfNonHeapMemoryChecker.cpp
 )
 
-add_library(CheckerGVFA STATIC ${CHECKER_GVFA_SOURCES})
+add_library(GVFAChecker STATIC ${GVFAChecker_SOURCES})
+target_link_libraries(GVFAChecker
+  GVFA
+  CanaryNullPointer
+  CanaryReport
+)
