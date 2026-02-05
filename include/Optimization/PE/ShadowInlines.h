@@ -266,10 +266,10 @@ inline bool operator==(ShadowValue V1, ShadowValue V2) {
   case SHADOWVAL_CI32:
   case SHADOWVAL_CI64:
     return V1.u.CI == V2.u.CI;
-  /* default: */
-  /*   release_assert(0 && "Bad SV type"); */
-  /*   return false; */
+  default:
+    return false;
   }
+  llvm_unreachable("invalid ShadowValType");
 }
 
 inline bool operator!=(ShadowValue V1, ShadowValue V2) {
@@ -302,10 +302,10 @@ inline bool operator<(ShadowValue V1, ShadowValue V2) {
   case SHADOWVAL_CI32:
   case SHADOWVAL_CI64:
     return V1.u.CI < V2.u.CI;
-  /* default: */
-  /*   release_assert(0 && "Bad SV type"); */
-  /*   return false; */
+  default:
+    return false;
   }
+  llvm_unreachable("invalid ShadowValType");
 }
 
 inline bool operator<=(ShadowValue V1, ShadowValue V2) {

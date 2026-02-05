@@ -55,7 +55,8 @@ cnf::cnf(char *fname) : m_vc(0), m_cc(0), m_clauses(NULL), m_lc(0) {
       continue;
     else
       ungetc(c, ifp);
-    fgets(line, len, ifp);
+    if (!fgets(line, len, ifp))
+      break;
     if (c == 'p') {
       if (sscanf(line, "p cnf %d %d", &m_vc, &m_cc) == 2) {
         m_clauses = (int **)calloc(m_cc, sizeof(int *));
@@ -74,7 +75,7 @@ cnf::cnf(char *fname) : m_vc(0), m_cc(0), m_clauses(NULL), m_lc(0) {
     else
       ungetc(c, ifp);
     if ((c == '-') || isdigit(c)) {
-      for (j = 0; fscanf(ifp, "%d", &(literals[j])), literals[j] != 0;) {
+      for (j = 0; fscanf(ifp, "%d", &(literals[j])) == 1 && literals[j] != 0;) {
         if (++j == max_clause_len) {
           max_clause_len *= 2;
           literals = (int *)realloc(literals, max_clause_len * sizeof(int));
@@ -108,7 +109,8 @@ cnf::cnf(char *fname) : m_vc(0), m_cc(0), m_clauses(NULL), m_lc(0) {
       else
         m_lc += (m_cl[clause_index++] = j);
     }
-    fgets(line, len, ifp);
+    if (!fgets(line, len, ifp))
+      break;
   }
 
   free(literals);

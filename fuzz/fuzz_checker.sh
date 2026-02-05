@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fuzz the checkers in tools/checker (lotus-gvfa, lotus-kint, lotus-taint, lotus-concur, lotus-pulse).
+# Fuzz the checkers in tools/checker (lotus-gvfa, lotus-kint, lotus-taint, lotus-concur, lotus-pulse, lotus-fitx).
 # Uses CSmith to generate random C, compiles to LLVM IR, then runs each checker.
 # export CLANG="/path/to/your/clang"
 CLANG="${CLANG:-clang}"
@@ -113,6 +113,15 @@ while true; do
         fi
         echo "✓ lotus-pulse (--no-smt=$no_smt) completed successfully"
     done
+
+    # lotus-fitx
+    echo "=== Running lotus-fitx ==="
+    if ! "$BUILD_DIR/bin/lotus-fitx" "$BC_FILE" 2>&1; then
+        echo "CRASH: lotus-fitx crashed on $C_FILE"
+        echo "Test files preserved: $C_FILE, $BC_FILE"
+        exit 1
+    fi
+    echo "✓ lotus-fitx completed successfully"
 
     # Cleanup if no crash
     rm -f "$C_FILE" "$BC_FILE"

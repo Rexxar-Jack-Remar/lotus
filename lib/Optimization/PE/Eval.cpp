@@ -7,7 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "LLPEEval"
+// Include PostDominators before LLPE.h so GenericDomTreeConstruction.h
+// can define DEBUG_TYPE first, avoiding redefinition warnings.
+#include "llvm/Analysis/PostDominators.h"
 
 #include "Optimization/PE/LLPE.h"
 
@@ -19,7 +21,6 @@
 #include "llvm/IR/IntrinsicInst.h"
 // isIdentifiedObject provided by PE (Misc.cpp) for LLVM 14
 #include "llvm/Analysis/ConstantFolding.h"
-#include "llvm/Analysis/PostDominators.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"

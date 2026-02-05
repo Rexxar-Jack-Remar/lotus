@@ -13,8 +13,6 @@
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/AllocAA/AllocAA.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include <llvm/Analysis/CFLAndersAliasAnalysis.h>
-#include <llvm/Analysis/CFLSteensAliasAnalysis.h>
 #include "Alias/SparrowAA/AndersenAA.h"
 #include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
 #include "Alias/TPA/PointerAnalysis/Support/PtsSet.h"
@@ -22,6 +20,8 @@
 #include "Alias/seadsa/SeaDsaAliasAnalysis.hh"
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/AliasAnalysis.h>
+#include <llvm/Analysis/CFLAndersAliasAnalysis.h>
+#include <llvm/Analysis/CFLSteensAliasAnalysis.h>
 #include <llvm/Analysis/MemoryLocation.h>
 
 using namespace llvm;
