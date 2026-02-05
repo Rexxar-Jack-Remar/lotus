@@ -65,16 +65,24 @@ public:
   /// Print debug information about the computed clocks and pairs.
   void printResults(llvm::raw_ostream &os) const;
 
+  static constexpr unsigned kCallContextLimit = 2; // k-limiting for call strings
+
 private:
   struct Context {
-    std::vector<size_t> fork_sites; // sequence of SyncNode IDs (fork sites)
+    std::vector<size_t> call_sites; // call-string from thread entry (k-limited)
+    std::vector<size_t> fork_sites;  // sequence of SyncNode IDs (fork sites)
 
-    bool operator==(const Context &other) const { return fork_sites == other.fork_sites; }
+    bool operator==(const Context &other) const {
+      return call_sites == other.call_sites && fork_sites == other.fork_sites;
+    }
   };
 
   struct ContextHash {
     size_t operator()(const Context &c) const {
       size_t h = 1469598103934665603ULL;
+      for (size_t v : c.call_sites) {
+        h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+      }
       for (size_t v : c.fork_sites) {
         h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
       }
@@ -82,8 +90,9 @@ private:
     }
   };
 
+  // Paper: LC = ⊤ | S | ⊥ | n@c (logic clocks)
   struct LogicClockElem {
-    enum class Kind { Node, Start, Terminated };
+    enum class Kind { Top, Start, Terminated, Node };
     Kind kind;
     size_t node_id; // valid when kind == Node
 
@@ -101,12 +110,39 @@ private:
   using LogicClockSet = std::unordered_set<LogicClockElem, LogicClockElemHash>;
 
   struct StaticVectorClock {
-    // static thread id -> logic clock set
     std::unordered_map<StaticThreadID, LogicClockSet> entries;
 
     bool mergeFrom(const StaticVectorClock &other);
     bool leq(const StaticVectorClock &other) const;
   };
+
+  // Paper partial order: ⊥ ≤ S ≤ n@c ≤ T. leq(LC_a, LC_b) and Max(LC, LC') for sets.
+  bool logicClockLeq(const LogicClockElem &a, const LogicClockElem &b,
+                     StaticThreadID stid) const;
+  void logicClockMax(const LogicClockSet &la, const LogicClockSet &lb,
+                     StaticThreadID stid, LogicClockSet &out) const;
+  bool nodeReachesInStaticThread(const SyncNode *from, const SyncNode *to,
+                                 StaticThreadID stid) const;
+  void computeReachabilityPerStaticThread();
+
+  // Context-sensitive reachability: (node, call_string) -> set of nodes reachable
+  using CallString = std::vector<size_t>;
+  struct CallStringHash {
+    size_t operator()(const CallString &c) const {
+      size_t h = 0;
+      for (size_t v : c)
+        h ^= v + 0x9e3779b9 + (h << 6) + (h >> 2);
+      return h;
+    }
+  };
+  mutable std::unordered_map<StaticThreadID,
+      std::unordered_map<const SyncNode *,
+          std::unordered_map<CallString, std::unordered_set<const SyncNode *>, CallStringHash>>>
+      m_reachable_from_cs;
+  std::unordered_map<size_t, const SyncNode *> m_node_id_to_node;
+
+  // Return-site -> call-site mapping for context-sensitive Ret edge handling
+  std::unordered_map<const SyncNode *, const SyncNode *> m_ret_to_call;
 
   struct StaticThread {
     StaticThreadID id;
@@ -150,7 +186,9 @@ private:
   void handleCondWait(const llvm::Instruction *wait_inst, SyncNode *node);
   void handleCondSignal(const llvm::Instruction *signal_inst, SyncNode *node);
   void handleBarrier(const llvm::Instruction *barrier_inst, SyncNode *node);
+  void wireSynchronizationEdges();
   void buildStaticThreads();
+  void initializeNodeClocks();
   StaticThreadID getOrCreateStaticThread(const Context &ctx, ThreadID base_tid,
                                          const SyncNode *entry);
 
@@ -158,9 +196,15 @@ private:
   void computeStaticVectorClocks();
   StaticVectorClock initialClockFor(const StaticThread &st) const;
   bool transfer(const SyncNode *node);
+  StaticVectorClock mergePredecessorClocksWithRules(const SyncNode *node) const;
+  bool shouldAddEventAtNode(const SyncNode *node) const;
   StaticVectorClock mergePredecessorClocks(const SyncNode *node) const;
   void addEventToClock(const SyncNode *node, StaticVectorClock &sv) const;
+  std::unordered_set<ThreadID> getDescendantThreadIDs(ThreadID tid) const;
   bool happensBefore(const StaticVectorClock &lhs, const StaticVectorClock &rhs) const;
+  bool svcLeq(const StaticVectorClock &lhs, const StaticVectorClock &rhs) const;
+  void computeSVMax(const StaticVectorClock &sv1, const StaticVectorClock &sv2,
+                    StaticVectorClock &out) const;
 
   // Queries
   void computeMHPPairs();

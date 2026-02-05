@@ -57,12 +57,12 @@ llvm::cl::opt<LogLevel> CurrentLogLevel(
     llvm::cl::desc("Set the logging level"),
     llvm::cl::values(
         clEnumValN(LogLevel::DEBUG, "debug", "Display all messages including debug information"),
-        clEnumValN(LogLevel::INFO, "info", "Display informational messages and above (default)"),
-        clEnumValN(LogLevel::WARNING, "warning", "Display warnings and errors only"),
+        clEnumValN(LogLevel::INFO, "info", "Display per-value ranges and informational messages"),
+        clEnumValN(LogLevel::WARNING, "warning", "Display warnings and errors only (default)"),
         clEnumValN(LogLevel::ERROR, "error", "Display errors only"),
         clEnumValN(LogLevel::NONE, "none", "Suppress all log output")
     ),
-    llvm::cl::init(LogLevel::INFO),
+    llvm::cl::init(LogLevel::WARNING),
     llvm::cl::cat(LoggingCategory)
 );
 

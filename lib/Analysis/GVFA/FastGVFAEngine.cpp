@@ -81,8 +81,31 @@ void FastGVFAEngine::forwardRun() {
 }
 
 void FastGVFAEngine::backwardRun() {
+    // Multi-sink backward traversal: mark values that can reach any sink.
+    std::queue<const Value *> WorkQueue;
+    std::unordered_set<const Value *> Visited;
+
     for (const auto &Sink : Sinks) {
-        backwardReachability(Sink.first);
+        WorkQueue.push(Sink.first);
+    }
+
+    while (!WorkQueue.empty()) {
+        const Value *CurrentValue = WorkQueue.front();
+        WorkQueue.pop();
+
+        if (!Visited.insert(CurrentValue).second) continue;
+
+        // Mark as reaching at least one sink.
+        BackwardReachabilityMap[CurrentValue] = 1;
+
+        if (auto *Node = VFG->getVFGNode(const_cast<Value *>(CurrentValue))) {
+            for (auto It = Node->in_begin(); It != Node->in_end(); ++It) {
+                auto *Pred = It->first->getValue();
+                if (Visited.find(Pred) == Visited.end()) {
+                    WorkQueue.push(Pred);
+                }
+            }
+        }
     }
 }
 

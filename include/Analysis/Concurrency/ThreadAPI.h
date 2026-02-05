@@ -13,8 +13,8 @@
  * - Barrier synchronization support
  * - Configurable API mapping for different threading libraries
  *
- * @author Lotus Analysis Framework
- * @date 2025
+ * @author rainoftime
+ * @date 2025-2026
  * @ingroup Concurrency
  */
 

@@ -129,12 +129,54 @@ void ThreadFlowGraph::addIntraThreadEdge(SyncNode *from, SyncNode *to) {
   if (from && to) {
     from->addSuccessor(to);
     to->addPredecessor(from);
+    m_edge_kinds[{const_cast<const SyncNode *>(from), const_cast<const SyncNode *>(to)}] = EdgeKind::Control;
   }
 }
 
 void ThreadFlowGraph::addInterThreadEdge(SyncNode *from, SyncNode *to) {
-  // Inter-thread edges are also represented as regular edges
-  addIntraThreadEdge(from, to);
+  addInterThreadEdge(from, to, EdgeKind::Create);
+}
+
+void ThreadFlowGraph::addInterThreadEdge(SyncNode *from, SyncNode *to,
+                                         EdgeKind kind) {
+  if (from && to) {
+    from->addSuccessor(to);
+    to->addPredecessor(from);
+    m_edge_kinds[{const_cast<const SyncNode *>(from), const_cast<const SyncNode *>(to)}] = kind;
+  }
+}
+
+void ThreadFlowGraph::addCallEdge(SyncNode *call_site, SyncNode *callee_entry) {
+  if (call_site && callee_entry) {
+    call_site->addSuccessor(callee_entry);
+    callee_entry->addPredecessor(call_site);
+    m_edge_kinds[{const_cast<const SyncNode *>(call_site), const_cast<const SyncNode *>(callee_entry)}] = EdgeKind::Call;
+  }
+}
+
+void ThreadFlowGraph::addRetEdge(SyncNode *callee_exit, SyncNode *return_site) {
+  if (callee_exit && return_site) {
+    callee_exit->addSuccessor(return_site);
+    return_site->addPredecessor(callee_exit);
+    m_edge_kinds[{const_cast<const SyncNode *>(callee_exit), const_cast<const SyncNode *>(return_site)}] = EdgeKind::Ret;
+  }
+}
+
+EdgeKind ThreadFlowGraph::getEdgeKind(const SyncNode *from, const SyncNode *to) const {
+  auto it = m_edge_kinds.find({from, to});
+  return it != m_edge_kinds.end() ? it->second : EdgeKind::Control;
+}
+
+void ThreadFlowGraph::setFunctionExitNode(ThreadID tid,
+                                          const llvm::Function *func,
+                                          SyncNode *exit_node) {
+  m_func_exit_nodes[{tid, func}] = exit_node;
+}
+
+SyncNode *ThreadFlowGraph::getFunctionExitNode(
+    ThreadID tid, const llvm::Function *func) const {
+  auto it = m_func_exit_nodes.find({tid, func});
+  return it != m_func_exit_nodes.end() ? it->second : nullptr;
 }
 
 std::vector<SyncNode *>

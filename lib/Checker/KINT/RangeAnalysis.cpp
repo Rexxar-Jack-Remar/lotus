@@ -932,28 +932,30 @@ void RangeAnalysis::print_all_ranges(
     }
   }
 
-  if (!impossible_branches.empty())
-    MKINT_LOG() << "============" << rang::fg::yellow << rang::style::bold
-                << " Impossible Branches " << rang::style::reset
-                << "============";
-  for (auto &cmp_istbr_pair : impossible_branches) {
-    auto *cmp = cmp_istbr_pair.first;
-    auto is_tbr = cmp_istbr_pair.second;
-    MKINT_WARN() << rang::bg::black << rang::fg::red
-                 << cmp->getFunction()->getName() << "::" << *cmp
-                 << rang::style::reset << "'s " << rang::fg::red
-                 << rang::style::italic << (is_tbr ? "true" : "false")
-                 << rang::style::reset << " branch";
+  if (!impossible_branches.empty()) {
+    MKINT_WARN() << "============" << rang::fg::yellow << rang::style::bold
+                 << " Impossible Branches " << rang::style::reset
+                 << "============";
+    for (auto &cmp_istbr_pair : impossible_branches) {
+      auto *cmp = cmp_istbr_pair.first;
+      auto is_tbr = cmp_istbr_pair.second;
+      MKINT_WARN() << rang::bg::black << rang::fg::red
+                   << cmp->getFunction()->getName() << "::" << *cmp
+                   << rang::style::reset << "'s " << rang::fg::red
+                   << rang::style::italic << (is_tbr ? "true" : "false")
+                   << rang::style::reset << " branch";
+    }
   }
 
-  if (!gep_oob.empty())
-    MKINT_LOG() << "============" << rang::fg::yellow << rang::style::bold
-                << " Array Index Out of Bound " << rang::style::reset
-                << "============";
-  for (auto *gep : gep_oob) {
-    MKINT_WARN() << rang::bg::black << rang::fg::red
-                 << gep->getFunction()->getName() << "::" << *gep
-                 << rang::style::reset;
+  if (!gep_oob.empty()) {
+    MKINT_WARN() << "============" << rang::fg::yellow << rang::style::bold
+                 << " Array Index Out of Bound " << rang::style::reset
+                 << "============";
+    for (auto *gep : gep_oob) {
+      MKINT_WARN() << rang::bg::black << rang::fg::red
+                   << gep->getFunction()->getName() << "::" << *gep
+                   << rang::style::reset;
+    }
   }
 }
 

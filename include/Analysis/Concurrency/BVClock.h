@@ -7,7 +7,7 @@
  * representation for tracking causal relationships in concurrent
  * programs.
  *
- * @author Lotus Analysis Framework
+ * @author rainoftime
  */
 
 #ifndef __BVCLOCK_H__

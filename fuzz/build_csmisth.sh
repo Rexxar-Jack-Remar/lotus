@@ -37,7 +37,7 @@ make install
 echo "csmith built successfully!"
 
 # Create JSON config file
-CONFIG_FILE="$PROJECT_ROOT/config.json"
+CONFIG_FILE="$PROJECT_ROOT/fuzz/csmisth_config.json"
 CLANG_PATH=$(which clang 2>/dev/null || echo "clang")
 GCC_PATH=$(which gcc 2>/dev/null || echo "gcc")
 

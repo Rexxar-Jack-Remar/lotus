@@ -87,6 +87,7 @@ int GVFAEngine::backwardCount(const Value *V) {
 void GVFAEngine::extendSources(std::vector<std::pair<const Value *, int>> &Sources) {
     std::unordered_map<const Value *, int> NewSrcMap;
     std::queue<std::pair<const Value *, int>> WorkQueue;
+    std::unordered_map<const Value *, std::vector<const Value *>> PredCache;
     
     // Initialize work queue with current sources
     for (const auto &Source : Sources) {
@@ -109,6 +110,47 @@ void GVFAEngine::extendSources(std::vector<std::pair<const Value *, int>> &Sourc
         return this->count(V, Uncovered);
     };
     
+    auto getPredecessors = [&PredCache, this](const Value *V) -> const std::vector<const Value *> & {
+        auto It = PredCache.find(V);
+        if (It != PredCache.end()) {
+            return It->second;
+        }
+
+        std::vector<const Value *> Preds;
+        if (auto *Arg = dyn_cast<Argument>(V)) {
+            const Function *F = Arg->getParent();
+            unsigned ArgIdx = Arg->getArgNo();
+            for (auto *User : F->users()) {
+                if (auto *CI = dyn_cast<CallInst>(User)) {
+                    if (CI->getCalledFunction() == F && ArgIdx < CI->arg_size()) {
+                        Preds.push_back(CI->getArgOperand(ArgIdx));
+                    }
+                }
+            }
+        } else if (auto *CI = dyn_cast<CallInst>(V)) {
+            if (auto *F = CI->getCalledFunction()) {
+                for (auto &BB : *F) {
+                    for (auto &I : BB) {
+                        if (auto *RI = dyn_cast<ReturnInst>(&I)) {
+                            if (RI->getReturnValue()) {
+                                Preds.push_back(RI->getReturnValue());
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            if (auto *Node = VFG->getVFGNode(const_cast<Value *>(V))) {
+                for (auto ItPred = Node->in_begin(); ItPred != Node->in_end(); ++ItPred) {
+                    Preds.push_back(ItPred->first->getValue());
+                }
+            }
+        }
+
+        auto Inserted = PredCache.emplace(V, std::move(Preds));
+        return Inserted.first->second;
+    };
+
     // Process work queue iteratively
     while (!WorkQueue.empty()) {
         auto front = WorkQueue.front();
@@ -122,45 +164,10 @@ void GVFAEngine::extendSources(std::vector<std::pair<const Value *, int>> &Sourc
         
         NewSrcMap[CurrentValue] |= CurrentMask;
         
-        // Process function arguments and returns
-        if (auto *Arg = dyn_cast<Argument>(CurrentValue)) {
-            const Function *F = Arg->getParent();
-            
-            for (auto *User : F->users()) {
-                if (auto *CI = dyn_cast<CallInst>(User)) {
-                    if (CI->getCalledFunction() == F) {
-                        unsigned ArgIdx = Arg->getArgNo();
-                        if (ArgIdx < CI->arg_size()) {
-                            auto *ActualArg = CI->getArgOperand(ArgIdx);
-                            if (int UncoveredMask = count_lambda(ActualArg, CurrentMask)) {
-                                WorkQueue.emplace(ActualArg, UncoveredMask);
-                            }
-                        }
-                    }
-                }
-            }
-        } else if (auto *CI = dyn_cast<CallInst>(CurrentValue)) {
-            if (auto *F = CI->getCalledFunction()) {
-                for (auto &BB : *F) {
-                    for (auto &I : BB) {
-                        if (auto *RI = dyn_cast<ReturnInst>(&I)) {
-                            if (RI->getReturnValue()) {
-                                if (int UncoveredMask = count_lambda(RI->getReturnValue(), CurrentMask)) {
-                                    WorkQueue.emplace(RI->getReturnValue(), UncoveredMask);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            if (auto *Node = VFG->getVFGNode(const_cast<Value *>(CurrentValue))) {
-                for (auto It = Node->in_begin(); It != Node->in_end(); ++It) {
-                    auto *Pred = It->first->getValue();
-                    if (int UncoveredMask = count_lambda(Pred, CurrentMask)) {
-                        WorkQueue.emplace(Pred, UncoveredMask);
-                    }
-                }
+        const auto &Preds = getPredecessors(CurrentValue);
+        for (const auto *Pred : Preds) {
+            if (int UncoveredMask = count_lambda(Pred, CurrentMask)) {
+                WorkQueue.emplace(Pred, UncoveredMask);
             }
         }
     }

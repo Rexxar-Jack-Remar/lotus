@@ -5,8 +5,8 @@
  * This file defines the core classes for representing thread control flow
  * and synchronization in multithreaded programs.
  *
- * @author Lotus Analysis Framework
- * @date 2025
+ * @author rainoftime
+ * @date 2025-2026
  */
 
 #ifndef THREAD_FLOW_GRAPH_H
@@ -19,6 +19,7 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -52,6 +53,19 @@ enum class SyncNodeType {
   REGULAR_INST,       ///< Regular instruction
   FUNCTION_CALL,      ///< Function call (non-thread API)
   FUNCTION_RETURN     ///< Function return
+};
+
+/**
+ * @brief Edge kind in the thread-flow graph (call, ret, create, join, signal)
+ */
+enum class EdgeKind {
+  Control,  ///< Intra-thread control flow
+  Call,     ///< Call site -> callee entry
+  Ret,      ///< Callee exit -> return site
+  Create,   ///< Fork -> thread entry
+  Join,     ///< Thread exit -> join site
+  Signal,   ///< signal(c) -> wait(c)
+  Barrier   ///< Barrier synchronization between threads
 };
 
 /**
@@ -150,6 +164,14 @@ public:
   // Graph construction helpers
   void addIntraThreadEdge(SyncNode *from, SyncNode *to);
   void addInterThreadEdge(SyncNode *from, SyncNode *to);
+  void addCallEdge(SyncNode *call_site, SyncNode *callee_entry);
+  void addRetEdge(SyncNode *callee_exit, SyncNode *return_site);
+  void addInterThreadEdge(SyncNode *from, SyncNode *to, EdgeKind kind);
+  EdgeKind getEdgeKind(const SyncNode *from, const SyncNode *to) const;
+
+  // Per-function exit node (for ret edges); key is (ThreadID, Function*)
+  void setFunctionExitNode(ThreadID tid, const llvm::Function *func, SyncNode *exit_node);
+  SyncNode *getFunctionExitNode(ThreadID tid, const llvm::Function *func) const;
 
   // Query interface
   std::vector<SyncNode *> getNodesOfType(SyncNodeType type) const;
@@ -166,6 +188,8 @@ private:
   std::unordered_map<ThreadID, const llvm::Function *> m_thread_entries;
   std::unordered_map<ThreadID, SyncNode *> m_thread_entry_nodes;
   std::unordered_map<ThreadID, SyncNode *> m_thread_exit_nodes;
+  std::map<std::pair<const SyncNode *, const SyncNode *>, EdgeKind> m_edge_kinds;
+  std::map<std::pair<ThreadID, const llvm::Function *>, SyncNode *> m_func_exit_nodes;
 };
 
 // ============================================================================

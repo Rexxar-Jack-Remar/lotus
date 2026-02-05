@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
             logConfig.quiet = true; // Also set quiet mode for backward compatibility
             break;
         default:
-            logConfig.logLevel = mkint::LogLevel::INFO;
+            logConfig.logLevel = mkint::LogLevel::WARNING;
             break;
     }
     
