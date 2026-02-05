@@ -261,14 +261,21 @@ void MemoryRegion::prettyPrint(PrettyPrinter &out) const {
     return;
   }
 
-  for (auto &x : getValues()) {
-    if (x->isTop() && !dynamic_cast<ValidRegion *>(x.get()))
-      continue;
+	  for (auto &x : getValues()) {
+	    if (x->isTop() && !dynamic_cast<ValidRegion *>(x.get()))
+	      continue;
 
-    PrettyPrinter::Entry block(&out, typeid(*x).name());
-    x->prettyPrint(out);
-  }
-}
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpotentially-evaluated-expression"
+#endif
+	    PrettyPrinter::Entry block(&out, typeid(*x).name());
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+	    x->prettyPrint(out);
+	  }
+	}
 
 unique_ptr<AbstractValue> MemoryRegion::Create(const FunctionContext &fctx,
                                                llvm::BasicBlock *bb,

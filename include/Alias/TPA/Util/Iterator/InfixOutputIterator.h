@@ -9,13 +9,20 @@ namespace io
 {
 
 template <typename T, typename OStreamType> 
-class InfixOstreamIterator: public std::iterator<std::output_iterator_tag,void,void,void,void>
+class InfixOstreamIterator
 {
 private:
 	OStreamType& os;
 	const char* delimiter;
 	bool isFirstElem;
 public:
+	// Provide standard iterator typedefs without inheriting from std::iterator (deprecated since C++17).
+	using iterator_category = std::output_iterator_tag;
+	using value_type = void;
+	using difference_type = void;
+	using pointer = void;
+	using reference = void;
+
 	InfixOstreamIterator(OStreamType& s): os(s), delimiter(0), isFirstElem(true) {}
 	InfixOstreamIterator(OStreamType& s, const char* d): os(s), delimiter(d), isFirstElem(true) {}
 	

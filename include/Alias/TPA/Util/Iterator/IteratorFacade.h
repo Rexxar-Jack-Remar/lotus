@@ -1,18 +1,25 @@
 #pragma once
 
 #include <iterator>
+#include <type_traits>
 
 namespace util
 {
 
 // CRTP class that implements a simple iterator facade utility
 template <typename Subclass, typename CategoryT, typename ValueT, typename DifferenceT = std::ptrdiff_t, typename PointerT = ValueT*, typename ReferenceT = ValueT&>
-class IteratorFacade: public std::iterator<CategoryT, ValueT, DifferenceT, PointerT, ReferenceT>
+class IteratorFacade
 {
 protected:
 	static constexpr bool IsRandomAccess = std::is_base_of<std::random_access_iterator_tag, CategoryT>::value;
 	static constexpr bool IsBidirectional = std::is_base_of<std::bidirectional_iterator_tag, CategoryT>::value;
 public:
+	// Provide standard iterator typedefs without inheriting from std::iterator (deprecated since C++17).
+	using iterator_category = CategoryT;
+	using value_type = ValueT;
+	using difference_type = DifferenceT;
+	using pointer = PointerT;
+	using reference = ReferenceT;
 
 	Subclass operator+(DifferenceT n) const
 	{
