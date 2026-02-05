@@ -7,8 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "CFGEval"
-
 #include "Optimization/PE/LLPE.h"
 
 #include "llvm/ADT/DenseMap.h"

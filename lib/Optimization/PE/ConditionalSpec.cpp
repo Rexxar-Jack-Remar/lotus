@@ -9,6 +9,8 @@
 
 #include "Optimization/PE/LLPE.h"
 
+#include <memory>
+
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Dominators.h"
@@ -815,7 +817,7 @@ void IntegrationAttempt::emitPathConditionChecks2(ShadowBB* BB, PathConditions& 
     CommittedBlock& emitCB = *(emitBlockIt++);
     BasicBlock* emitBlock = emitCB.specBlock;
 
-    Value* verifyArgs[it->args.size()];
+    SmallVector<Value*, 8> verifyArgs(it->args.size());
     
     // Call the verify function at runtime with arguments corresponding to those which were
     // passed to the path function during specialisation.
@@ -844,7 +846,7 @@ void IntegrationAttempt::emitPathConditionChecks2(ShadowBB* BB, PathConditions& 
       
     }
 
-    Value* VCall = CallInst::Create(it->VerifyF, ArrayRef<Value*>(verifyArgs, it->args.size()), VerboseNames ? "verifycall" : "", emitBlock);
+    Value* VCall = CallInst::Create(it->VerifyF, ArrayRef<Value*>(verifyArgs), VerboseNames ? "verifycall" : "", emitBlock);
 
     // The verify function returns zero if we're okay to continue into specialised code.
     Value* VCond = new ICmpInst(*emitBlock, CmpInst::ICMP_EQ, VCall, Constant::getNullValue(VCall->getType()), VerboseNames ? "verifycheck" : "");
@@ -2158,9 +2160,9 @@ void IntegrationAttempt::getLocalSplitInsts(ShadowBB* BB, bool* splitInsts) {
 
 bool IntegrationAttempt::hasSplitInsts(ShadowBB* BB) {
 
-  bool splits[BB->insts.size()];
-  memset(splits, 0, sizeof(bool) * BB->insts.size());
-  getLocalSplitInsts(BB, splits);
+  std::unique_ptr<bool[]> splits(new bool[BB->insts.size()]);
+  memset(splits.get(), 0, sizeof(bool) * BB->insts.size());
+  getLocalSplitInsts(BB, splits.get());
 
   for(uint32_t i = 0, ilim = BB->insts.size(); i != ilim; ++i)
     if(splits[i])
@@ -2256,9 +2258,9 @@ void InlineAttempt::createFailedBlock(uint32_t idx) {
   failedBlocks[idx].push_back(std::make_pair(NewBB, createFailedBlockFrom));
   (*failedBlockMap)[BBI->BB] = NewBB;
 
-  bool splitInsts[BBI->insts.size()];
-  memset(splitInsts, 0, sizeof(bool) * BBI->insts.size());
-  getSplitInsts(BBI, splitInsts);
+  std::unique_ptr<bool[]> splitInsts(new bool[BBI->insts.size()]);
+  memset(splitInsts.get(), 0, sizeof(bool) * BBI->insts.size());
+  getSplitInsts(BBI, splitInsts.get());
 
   release_assert((!splitInsts[BBI->insts.size() - 1]) && "Can't split after terminator");
 
@@ -3036,22 +3038,19 @@ void llvm::emitRuntimePrint(BasicBlock* emitBB, std::string& message, Value* par
 
   }
     
-  uint32_t nParams = param ? 2 : 1;
-  Value* args[nParams];
-
   Constant* messageArray = ConstantDataArray::getString(emitBB->getContext(), message, true);
   GlobalVariable* messageGlobal = new GlobalVariable(*M, messageArray->getType(), true,
 						     GlobalValue::InternalLinkage, messageArray);
   Constant* castMessage = ConstantExpr::getBitCast(messageGlobal, CharPtr);
 
-  
-  args[0] = castMessage;
+  SmallVector<Value*, 2> args;
+  args.push_back(castMessage);
   if(param)
-    args[1] = param;
+    args.push_back(param);
 
   if(insertBefore)
-    CallInst::Create(cast<Function>(Printf)->getFunctionType(), Printf, ArrayRef<Value*>(args, nParams), "", insertBefore);
+    CallInst::Create(cast<Function>(Printf)->getFunctionType(), Printf, ArrayRef<Value*>(args), "", insertBefore);
   else
-    CallInst::Create(cast<Function>(Printf)->getFunctionType(), Printf, ArrayRef<Value*>(args, nParams), "", emitBB);
+    CallInst::Create(cast<Function>(Printf)->getFunctionType(), Printf, ArrayRef<Value*>(args), "", emitBB);
   
 }
