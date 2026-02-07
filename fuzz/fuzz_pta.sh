@@ -1,4 +1,5 @@
 #!/bin/bash
+# for testing whether crashes occur in the PTA analysis.
 # export CLANG="/path/to/your/clang"
 CLANG="${CLANG:-clang}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

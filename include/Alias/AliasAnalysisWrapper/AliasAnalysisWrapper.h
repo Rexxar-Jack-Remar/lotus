@@ -258,6 +258,11 @@ public:
   bool mayNull(const llvm::Value *v);
   
   bool getPointsToSet(const llvm::Value *ptr, std::vector<const llvm::Value *> &ptsSet);
+  /// Get points-to set size only (for metrics). Supported by SparrowAA and TPA.
+  bool getPointsToSetSize(const llvm::Value *ptr, size_t &outSize);
+  /// Get possible callees for a call (direct or indirect). Supported by SparrowAA and TPA.
+  void getIndirectCallTargets(llvm::CallBase *call,
+                             std::vector<const llvm::Function *> &targets);
   bool getAliasSet(const llvm::Value *v, std::vector<const llvm::Value *> &aliasSet);
   
   /**

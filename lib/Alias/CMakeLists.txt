@@ -12,6 +12,7 @@ add_subdirectory(LotusAA)
 add_subdirectory(AserPTA)
 # add_subdirectory(TypeQualifier) # not used for now
 add_subdirectory(AliasAnalysisWrapper)
+add_subdirectory(Metrics)
 if(LOTUS_CCLYZERPP_AVAILABLE)
   add_subdirectory(CclyzerAA)
 endif()

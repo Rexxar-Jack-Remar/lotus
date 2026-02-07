@@ -48,3 +48,24 @@ This directory contains various alias analysis implementations and toolkits used
 | **Context-sensitive** | SparrowAA, AserPTA, LotusAA, seadsa, TPA |
 | **Field-sensitive** | AserPTA (optional) |
 | **Specialized** | FPA (function pointers), UnderApproxAA (must-alias), Dynamic (runtime), SRAA (range-based) |
+
+## Comparing precision and soundness: metrics
+
+To compare pointer analyses (e.g. SparrowAA vs TPA vs AserPTA), use the built-in **metrics** layer under `lib/Alias/Metrics/`:
+
+- **Design**: See [METRICS.md](METRICS.md) for the rationale and mapping from Java points-to metrics (e.g. hybrid context-sensitivity, PLDI’13) to C/C++.
+- **API**: `PointerAnalysisMetrics` and `collectMetricsFromWrapper(AliasAnalysisWrapper&, Module&, PointerAnalysisMetrics&)` in `include/Alias/Metrics/PointerAnalysisMetrics.h`.
+- **Metrics**: Points-to set size (avg/median/max), call-graph edges, indirect-call sites and “poly” indirect calls (sites with >1 target).
+
+**Which analyses support which metrics (via the wrapper):**
+
+| Analysis | Points-to size | Indirect-call resolution |
+|----------|----------------|---------------------------|
+| SparrowAA, AserPTA | ✅ Full | ✅ |
+| TPA | ✅ Size only | ✅ |
+| DyckAA, UnderApprox, CFL* | ❌ | ❌ |
+| Combined | ✅ (via Andersen) | ✅ (via Andersen) |
+
+LotusAA and FPA are separate tools and are not backends in `AliasAnalysisWrapper`; SeaDsa/AllocAA/etc. are not yet integrated in the wrapper. See [METRICS.md](METRICS.md) for the full support table.
+
+- **High-level clients** (taint, use-after-free, ref-count) need more than alias/points-to (mod/ref, DFA, etc.) and live outside this metrics layer.

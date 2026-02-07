@@ -88,3 +88,5 @@ For wllvm, change to `CC=wllvm` or `CXX=wllvm++`
 
 `llvm-dis default.elf.bc` if readable ll is needed.
 
+
+Other resources: https://github.com/mbarbar/crux-bitcode

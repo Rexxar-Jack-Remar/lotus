@@ -1,6 +1,6 @@
 #include "Checker/FiTx/frontend/Framework.hpp"
-#include "Checker/FiTx/frontend/State.hpp"
 #include "Checker/FiTx/detector/RefDetector.hpp"
+#include "Checker/FiTx/frontend/State.hpp"
 
 namespace {
 class RefCountDetector : public framework::FrameworkPass {

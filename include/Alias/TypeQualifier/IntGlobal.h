@@ -20,11 +20,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "Alias/TypeQualifier/TaintSignature.h"
-#include "Alias/TypeQualifier/Common.h"
 #include "Alias/TypeQualifier/CRange.h"
-#include "Alias/TypeQualifier/StructAnalyzer.h"
+#include "Alias/TypeQualifier/Common.h"
 #include "Alias/TypeQualifier/FunctionSummary.h"
+#include "Alias/TypeQualifier/StructAnalyzer.h"
+#include "Alias/TypeQualifier/TaintSignature.h"
 
 using CallInstSet = llvm::SmallPtrSet<llvm::CallInst*, 8>;
 using CallerMap = llvm::DenseMap<llvm::Function*, CallInstSet>;

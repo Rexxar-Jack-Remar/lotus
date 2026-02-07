@@ -1,6 +1,6 @@
 #include "Checker/FiTx/frontend/Framework.hpp"
-#include "Checker/FiTx/frontend/State.hpp"
 #include "Checker/FiTx/detector/DF_Detector.hpp"
+#include "Checker/FiTx/frontend/State.hpp"
 
 namespace {
 class DoubleFreeDetector : public framework::FrameworkPass {

@@ -14,6 +14,7 @@
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/SparrowAA/AndersenAA.h"
+#include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/AliasAnalysis.h>
 #include <llvm/Analysis/MemoryLocation.h>
@@ -195,6 +196,56 @@ bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr, std::vector<const Va
   if (!ptr || !ptr->getType()->isPointerTy()) return false;
   ptsSet.clear();
   return _andersen_aa && _initialized && _andersen_aa->getPointsToSet(ptr, ptsSet);
+}
+
+bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr, size_t &outSize) {
+  if (!ptr || !ptr->getType()->isPointerTy()) return false;
+  outSize = 0;
+  if (!_initialized) return false;
+  if (_andersen_aa) {
+    std::vector<const Value *> ptsSet;
+    if (_andersen_aa->getPointsToSet(ptr, ptsSet)) {
+      outSize = ptsSet.size();
+      return true;
+    }
+    return false;
+  }
+  if (_tpa_aa) {
+    const Value *stripped = ptr->stripPointerCasts();
+    if (!stripped) return false;
+    tpa::PtsSet pts = _tpa_aa->getPtsSet(stripped);
+    outSize = pts.size();
+    return true;
+  }
+  return false;
+}
+
+void AliasAnalysisWrapper::getIndirectCallTargets(CallBase *call,
+                                                  std::vector<const llvm::Function *> &targets) {
+  targets.clear();
+  if (!_initialized || !call)
+    return;
+  if (call->getCalledFunction()) {
+    targets.push_back(call->getCalledFunction());
+    return;
+  }
+  const Value *calledVal = call->getCalledOperand();
+  if (!calledVal || !calledVal->getType()->isPointerTy())
+    return;
+  if (_andersen_aa) {
+    std::vector<const Value *> ptsSet;
+    if (_andersen_aa->getPointsToSet(calledVal, ptsSet)) {
+      for (const Value *v : ptsSet) {
+        if (const auto *F = dyn_cast<llvm::Function>(v))
+          targets.push_back(F);
+      }
+    }
+    return;
+  }
+  if (_tpa_aa) {
+    std::vector<const llvm::Function *> tpaCallees = _tpa_aa->getCallees(call, nullptr);
+    targets.assign(tpaCallees.begin(), tpaCallees.end());
+  }
 }
 
 /**

@@ -23,4 +23,4 @@ namespace UnreferenceCounter {
     }
   }
 
-}
+} // namespace UnreferenceCounter

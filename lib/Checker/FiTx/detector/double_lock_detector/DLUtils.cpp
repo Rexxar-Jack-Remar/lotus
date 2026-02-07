@@ -1,6 +1,6 @@
 #include "Checker/FiTx/detector/DL_Detector.hpp"
-#include "Checker/FiTx/frontend/State.hpp"
 #include "Checker/FiTx/detector/lock.hpp"
+#include "Checker/FiTx/frontend/State.hpp"
 
 class TryLockConstraint : public framework::StatefulConstraint {
  public:
