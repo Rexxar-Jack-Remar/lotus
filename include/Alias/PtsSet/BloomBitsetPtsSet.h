@@ -79,25 +79,40 @@ public:
 
       while (word_pos_ < words_->size()) {
         const std::uint64_t word = (*words_)[word_pos_];
-        if (word == 0) {
+        const std::uint64_t word_masked =
+            (word & (~std::uint64_t{0} << bit_pos_));
+        if (word_masked == 0) {
           ++word_pos_;
           bit_pos_ = 0;
           continue;
         }
-
-        for (; bit_pos_ < kWordBits; ++bit_pos_) {
-          const std::uint64_t mask = std::uint64_t{1} << bit_pos_;
-          if (word & mask) {
-            current_ = static_cast<Index>(word_pos_ * kWordBits + bit_pos_);
-            return;
-          }
+        const int tz = countTrailingZeros(word_masked);
+        const std::size_t next_bit = bit_pos_ + static_cast<std::size_t>(tz);
+        current_ = static_cast<Index>(word_pos_ * kWordBits + next_bit);
+        bit_pos_ = next_bit + 1;
+        if (bit_pos_ >= kWordBits) {
+          bit_pos_ = 0;
+          ++word_pos_;
         }
-
-        ++word_pos_;
-        bit_pos_ = 0;
+        return;
       }
 
       end_ = true;
+    }
+
+    static int countTrailingZeros(std::uint64_t value) {
+#if defined(__clang__) || defined(__GNUC__)
+      return value ? __builtin_ctzll(value) : 64;
+#else
+      if (value == 0)
+        return 64;
+      int n = 0;
+      while ((value & 1) == 0) {
+        value >>= 1;
+        ++n;
+      }
+      return n;
+#endif
     }
 
     const std::vector<std::uint64_t> *words_ = nullptr;
@@ -141,7 +156,9 @@ public:
           return false;
       }
     }
-    for (std::size_t i = 0; i < other.words_.size(); ++i) {
+    const std::size_t limit =
+        words_.size() < other.words_.size() ? words_.size() : other.words_.size();
+    for (std::size_t i = 0; i < limit; ++i) {
       if ((words_[i] & other.words_[i]) != other.words_[i])
         return false;
     }
@@ -182,11 +199,11 @@ public:
     bloom_.fill(0);
   }
 
-  unsigned getSize() const {
-    std::uint64_t total = 0;
+  std::size_t getSize() const {
+    std::size_t total = 0;
     for (std::uint64_t word : words_)
-      total += popcount(word);
-    return static_cast<unsigned>(total);
+      total += static_cast<std::size_t>(popcount(word));
+    return total;
   }
 
   bool isEmpty() const {

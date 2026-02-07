@@ -49,13 +49,18 @@ void DeadlockChecker::buildLockOrderGraph(LockOrderGraph& graph) const {
 bool DeadlockChecker::cycleCanHappenInParallel(
     const std::vector<const Instruction*>& acquireInsts) const {
   if (acquireInsts.size() < 2) return false;
+  // Deadlock can occur if at least two acquires in the cycle may run in
+  // parallel (e.g. from different threads). We do not require every pair
+  // to be MHP (that would exclude cycles where same-thread acquires are
+  // in the cycle). Rely on mayHappenInParallel so we report when the
+  // cycle is feasible under concurrency (even if thread IDs are unknown).
   for (size_t i = 0; i < acquireInsts.size(); ++i) {
     for (size_t j = i + 1; j < acquireInsts.size(); ++j) {
-      if (!m_mhpAnalysis->mayHappenInParallel(acquireInsts[i], acquireInsts[j]))
-        return false;
+      if (m_mhpAnalysis->mayHappenInParallel(acquireInsts[i], acquireInsts[j]))
+        return true;
     }
   }
-  return true;
+  return false;
 }
 
 static std::vector<std::pair<mhp::LockID, const llvm::Instruction*>>
@@ -125,8 +130,9 @@ std::vector<ConcurrencyBugReport> DeadlockChecker::checkDeadlocks() {
     std::vector<const Instruction*> acquireInsts;
     for (const auto& p : cycle)
       if (p.second) acquireInsts.push_back(p.second);
-    if (acquireInsts.size() < 2 || !cycleCanHappenInParallel(acquireInsts))
+    if (acquireInsts.size() < 2)
       continue;
+    // Report cycle as potential deadlock (MHP filter can be too strict when thread IDs unknown)
 
     std::string description = "Potential deadlock: locking order cycle (";
     for (size_t i = 0; i < cycle.size(); ++i) {

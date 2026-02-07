@@ -53,7 +53,7 @@ public:
 
   void clear() { set_.clear(); }
 
-  unsigned getSize() const { return static_cast<unsigned>(set_.size()); }
+  std::size_t getSize() const { return set_.size(); }
 
   bool isEmpty() const { return set_.empty(); }
 

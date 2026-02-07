@@ -226,7 +226,17 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
     return TD_DUMMY;
 
   // 1. Exact match (including loaded config)
-  TDAPIMap::const_iterator it = tdAPIMap.find(F->getName().str());
+  std::string nameStr = F->getName().str();
+  TDAPIMap::const_iterator it = tdAPIMap.find(nameStr);
+  if (it != tdAPIMap.end())
+    return it->second;
+
+  // Try with LLVM name prefix stripped (e.g. \01) and leading underscore (macOS)
+  if (nameStr.size() > 0 && nameStr[0] == '\01')
+    nameStr = nameStr.substr(1);
+  if (!nameStr.empty() && nameStr[0] == '_')
+    nameStr = nameStr.substr(1);
+  it = tdAPIMap.find(nameStr);
   if (it != tdAPIMap.end())
     return it->second;
 

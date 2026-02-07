@@ -17,6 +17,7 @@
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/Optional.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/AliasAnalysis.h>
@@ -25,6 +26,7 @@
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/DebugInfoMetadata.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
@@ -110,15 +112,12 @@ void AtomicityChecker::collectCriticalSections() {
         if (!(DT.dominates(Acq, Rel) && PDT.dominates(Rel, Acq)))
           continue;
 
-        // Build the critical section body.
+        // Build the critical section body: all instructions strictly between Acq and Rel (by dominance).
         CriticalSection CS{Acq, Rel, {}};
-        bool InBody = false;
         for (Instruction &J : instructions(F)) {
-          if (&J == Acq)
-            InBody = true;
-          else if (&J == Rel)
-            InBody = false;
-          else if (InBody)
+          if (&J == Acq || &J == Rel)
+            continue;
+          if (DT.dominates(Acq, &J) && PDT.dominates(Rel, &J))
             CS.Body.push_back(&J);
         }
         m_csPerFunc[&F].push_back(std::move(CS));
@@ -190,9 +189,21 @@ std::vector<ConcurrencyBugReport> AtomicityChecker::checkAtomicityViolations() {
       if (!Lock2)
         continue;
 
-      // Cheap filter: if acquires are on different locks, skip.
-      if (Lock1 != Lock2)
+      // Normalize lock values for comparison (e.g. strip casts).
+      const Value *V1 = Lock1 ? Lock1->stripPointerCasts() : nullptr;
+      const Value *V2 = Lock2 ? Lock2->stripPointerCasts() : nullptr;
+      if (!V1 || !V2)
         continue;
+      // Same lock: two CS cannot hold it concurrently; skip to avoid false positives.
+      if (V1 == V2)
+        continue;
+
+      // Same function with ordered acquires (one dominates the other): not concurrent (e.g. nested locks).
+      if (CS1.Acquire->getFunction() == CS2.Acquire->getFunction()) {
+        DominatorTree DT(const_cast<Function &>(*CS1.Acquire->getFunction()));
+        if (DT.dominates(CS1.Acquire, CS2.Acquire) || DT.dominates(CS2.Acquire, CS1.Acquire))
+          continue;
+      }
 
       // May these CS execute concurrently?
       if (!m_mhpAnalysis->mayHappenInParallel(CS1.Acquire, CS2.Acquire))
@@ -232,6 +243,82 @@ std::vector<ConcurrencyBugReport> AtomicityChecker::checkAtomicityViolations() {
       }
     }
   }
+
+  // Second pass: unprotected multi-step accesses (no critical section).
+  // E.g. check-then-act in one thread without lock while another thread may access same location.
+  DenseSet<const Instruction *> inCS;
+  for (auto &FuncPair : m_csPerFunc)
+    for (const auto &CS : FuncPair.second)
+      for (const Instruction *I : CS.Body)
+        inCS.insert(I);
+
+  SmallVector<std::pair<const Instruction *, const Value *>, 64> unprotectedAccesses;
+  for (Function &F : m_module) {
+    if (F.isDeclaration())
+      continue;
+    // Only consider functions with no critical section at all (avoid FP when CS present but lock set empty).
+    if (!m_csPerFunc[&F].empty())
+      continue;
+    for (Instruction &I : instructions(F)) {
+      if (!isMemoryAccess(&I))
+        continue;
+      if (inCS.count(&I))
+        continue;
+      const Value *Loc = getMemoryLocation(&I);
+      if (!Loc)
+        continue;
+      unprotectedAccesses.push_back({&I, Loc});
+    }
+  }
+
+  for (size_t i = 0; i < unprotectedAccesses.size(); ++i) {
+    const Instruction *I1 = unprotectedAccesses[i].first;
+    const Value *Loc1 = unprotectedAccesses[i].second;
+    const Function *F1 = I1->getFunction();
+
+    for (size_t j = i + 1; j < unprotectedAccesses.size(); ++j) {
+      const Instruction *I2 = unprotectedAccesses[j].first;
+      const Value *Loc2 = unprotectedAccesses[j].second;
+      if (I1->getFunction() != I2->getFunction())
+        continue;
+      if (!mayAlias(Loc1, Loc2))
+        continue;
+      if (!(isWrite(*I1) || isWrite(*I2)))
+        continue;
+
+      // Only report when both accesses have no lock held (definitely unprotected); avoids FP when CS not recognized.
+      if (m_locksetAnalysis &&
+          (!m_locksetAnalysis->getMayLockSetAt(I1).empty() ||
+           !m_locksetAnalysis->getMayLockSetAt(I2).empty()))
+        continue;
+
+      // Unprotected pair (I1, I2) in same function to same location. Check if another thread may interleave.
+      bool otherMayInterleave = false;
+      for (size_t k = 0; k < unprotectedAccesses.size(); ++k) {
+        const Instruction *K = unprotectedAccesses[k].first;
+        if (K->getFunction() == F1)
+          continue;
+        if (!mayAlias(Loc1, unprotectedAccesses[k].second))
+          continue;
+        if (m_mhpAnalysis->mayHappenInParallel(I1, K) || m_mhpAnalysis->mayHappenInParallel(I2, K)) {
+          otherMayInterleave = true;
+          break;
+        }
+      }
+      if (!otherMayInterleave)
+        continue;
+
+      std::string Desc = "Unprotected multi-step access at " + formatLoc(*I1) + " and " + formatLoc(*I2) +
+                         " may be interleaved with another thread";
+      ConcurrencyBugReport report(ConcurrencyBugType::ATOMICITY_VIOLATION, Desc,
+                                  BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
+      report.addStep(I1, "Access 1 (unprotected)");
+      report.addStep(I2, "Access 2 (unprotected)");
+      Reports.push_back(report);
+      break; // one report per (I1, I2) pair
+    }
+  }
+
   return Reports; // NRVO — no extra copy
 }
 

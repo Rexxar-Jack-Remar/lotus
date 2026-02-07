@@ -25,6 +25,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <queue>
 #include <stack>
 
@@ -77,29 +78,95 @@ void LockSetAnalysis::analyze() {
 
 LockSet LockSetAnalysis::getMayLockSetAt(const Instruction *inst) const {
   auto it = m_may_locksets_entry.find(inst);
-  if (it != m_may_locksets_entry.end())
+  if (it != m_may_locksets_entry.end() && !it->second.empty())
     return it->second;
-  return LockSet();
+  // Fallback: on a linear path, entry at inst = exit of prev (fixes worklist order)
+  if (const Instruction *prev = inst->getPrevNode()) {
+    auto it_exit = m_may_locksets_exit.find(prev);
+    if (it_exit != m_may_locksets_exit.end())
+      return it_exit->second;
+  }
+  // Fallback for block head: union of predecessors' terminator exit (fixes merge/empty entry)
+  const BasicBlock *bb = inst->getParent();
+  if (bb && inst == &bb->front()) {
+    LockSet merged;
+    for (const BasicBlock *pred : predecessors(bb)) {
+      const Instruction *term = pred->getTerminator();
+      if (!term) continue;
+      auto it_exit = m_may_locksets_exit.find(term);
+      if (it_exit != m_may_locksets_exit.end())
+        merged.insert(it_exit->second.begin(), it_exit->second.end());
+    }
+    if (!merged.empty())
+      return merged;
+  }
+  return it != m_may_locksets_entry.end() ? it->second : LockSet();
 }
 
 LockSet LockSetAnalysis::getMayReadLockSetAt(const Instruction *inst) const {
   auto it = m_may_read_locks_entry.find(inst);
   if (it != m_may_read_locks_entry.end())
     return it->second;
+  if (const Instruction *prev = inst->getPrevNode()) {
+    auto it_exit = m_may_read_locks_exit.find(prev);
+    if (it_exit != m_may_read_locks_exit.end())
+      return it_exit->second;
+  }
+  // Fallback for block head: union of predecessors' terminator exit
+  const BasicBlock *bb = inst->getParent();
+  if (bb && inst == &bb->front()) {
+    LockSet merged;
+    for (const BasicBlock *pred : predecessors(bb)) {
+      const Instruction *term = pred->getTerminator();
+      if (!term) continue;
+      auto it_exit = m_may_read_locks_exit.find(term);
+      if (it_exit != m_may_read_locks_exit.end())
+        merged.insert(it_exit->second.begin(), it_exit->second.end());
+    }
+    if (!merged.empty())
+      return merged;
+  }
   return LockSet();
 }
 
 LockSet LockSetAnalysis::getMayWriteLockSetAt(const Instruction *inst) const {
   auto it = m_may_write_locks_entry.find(inst);
-  if (it != m_may_write_locks_entry.end())
+  if (it != m_may_write_locks_entry.end() && !it->second.empty())
     return it->second;
-  return LockSet();
+  // Fallback: entry at inst = exit of prev on linear path (fixes worklist order)
+  if (const Instruction *prev = inst->getPrevNode()) {
+    auto it_exit = m_may_write_locks_exit.find(prev);
+    if (it_exit != m_may_write_locks_exit.end())
+      return it_exit->second;
+  }
+  // Fallback for block head: union of predecessors' terminator exit (fixes
+  // DCL/singleton pattern where critical section starts at block entry)
+  const BasicBlock *bb = inst->getParent();
+  if (bb && inst == &bb->front()) {
+    LockSet merged;
+    for (const BasicBlock *pred : predecessors(bb)) {
+      const Instruction *term = pred->getTerminator();
+      if (!term) continue;
+      auto it_exit = m_may_write_locks_exit.find(term);
+      if (it_exit != m_may_write_locks_exit.end())
+        merged.insert(it_exit->second.begin(), it_exit->second.end());
+    }
+    if (!merged.empty())
+      return merged;
+  }
+  return it != m_may_write_locks_entry.end() ? it->second : LockSet();
 }
 
 LockSet LockSetAnalysis::getMustLockSetAt(const Instruction *inst) const {
   auto it = m_must_locksets_entry.find(inst);
   if (it != m_must_locksets_entry.end())
     return it->second;
+  // Fallback: entry at inst = exit of prev on linear path (so double-lock sees held lock)
+  if (const Instruction *prev = inst->getPrevNode()) {
+    auto it_exit = m_must_locksets_exit.find(prev);
+    if (it_exit != m_must_locksets_exit.end())
+      return it_exit->second;
+  }
   return LockSet();
 }
 
@@ -129,7 +196,11 @@ bool LockSetAnalysis::mayHoldLock(const Instruction *inst, LockID lock) const {
 
 bool LockSetAnalysis::mustHoldLock(const Instruction *inst, LockID lock) const {
   auto lockset = getMustLockSetAt(inst);
-  return lockset.find(lock) != lockset.end();
+  for (const auto *held_lock : lockset) {
+    if (held_lock == lock || mayAlias(lock, held_lock))
+      return true;
+  }
+  return false;
 }
 
 std::unordered_set<const Instruction *>
@@ -156,7 +227,11 @@ bool LockSetAnalysis::mayHoldCommonLock(const Instruction *i1,
   };
   LockSet r1 = getMayReadLockSetAt(i1), r2 = getMayReadLockSetAt(i2);
   LockSet w1 = getMayWriteLockSetAt(i1), w2 = getMayWriteLockSetAt(i2);
-  return common(w1, w2) || common(r1, r2);
+  if (common(w1, w2) || common(r1, r2))
+    return true;
+  // Also check combined may-lock set (has block-head fallbacks for DCL pattern)
+  LockSet m1 = getMayLockSetAt(i1), m2 = getMayLockSetAt(i2);
+  return common(m1, m2);
 }
 
 LockSet LockSetAnalysis::getAllLocksInFunction(const Function *func) const {
@@ -443,16 +518,9 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
   std::set<const Instruction *> in_worklist;
 
   const Instruction *entry = &func->getEntryBlock().front();
-  m_may_locksets_entry[entry] = LockSet();
-  m_must_locksets_entry[entry] = LockSet();
-  m_may_read_locks_entry[entry] = LockSet();
-  m_may_read_locks_exit[entry] = LockSet();
-  m_may_write_locks_entry[entry] = LockSet();
-  m_may_write_locks_exit[entry] = LockSet();
-  m_must_read_locks_entry[entry] = LockSet();
-  m_must_read_locks_exit[entry] = LockSet();
-  m_must_write_locks_entry[entry] = LockSet();
-  m_must_write_locks_exit[entry] = LockSet();
+  // Do not pre-initialize entry's maps: then the first time we process it we have
+  // had_entry=false and we add successors (otherwise we never propagate when
+  // the computed value is empty).
   worklist.push(entry);
   in_worklist.insert(entry);
 
@@ -484,28 +552,35 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
             auto it_mw = m_may_write_locks_exit.find(pred_term);
             auto it_ur = m_must_read_locks_exit.find(pred_term);
             auto it_uw = m_must_write_locks_exit.find(pred_term);
-            if (it_may != m_may_locksets_exit.end()) may_inputs.push_back(it_may->second);
-            if (it_must != m_must_locksets_exit.end()) must_inputs.push_back(it_must->second);
-            if (it_mr != m_may_read_locks_exit.end()) may_read_inputs.push_back(it_mr->second);
-            if (it_mw != m_may_write_locks_exit.end()) may_write_inputs.push_back(it_mw->second);
-            if (it_ur != m_must_read_locks_exit.end()) must_read_inputs.push_back(it_ur->second);
-            if (it_uw != m_must_write_locks_exit.end()) must_write_inputs.push_back(it_uw->second);
+            // Use exit sets when available; otherwise treat as empty and ensure
+            // predecessor is processed first so we re-visit this block with full data.
+            if (it_may == m_may_locksets_exit.end() &&
+                in_worklist.find(pred_term) == in_worklist.end()) {
+              worklist.push(pred_term);
+              in_worklist.insert(pred_term);
+            }
+            may_inputs.push_back(it_may != m_may_locksets_exit.end() ? it_may->second : LockSet());
+            must_inputs.push_back(it_must != m_must_locksets_exit.end() ? it_must->second : LockSet());
+            may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
+            may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
+            must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end() ? it_ur->second : LockSet());
+            must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end() ? it_uw->second : LockSet());
           }
         }
       } else {
         const Instruction *prev = inst->getPrevNode();
-        auto it_may = m_may_locksets_exit.find(prev);
-        auto it_must = m_must_locksets_exit.find(prev);
-        auto it_mr = m_may_read_locks_exit.find(prev);
-        auto it_mw = m_may_write_locks_exit.find(prev);
-        auto it_ur = m_must_read_locks_exit.find(prev);
-        auto it_uw = m_must_write_locks_exit.find(prev);
-        if (it_may != m_may_locksets_exit.end()) may_inputs.push_back(it_may->second);
-        if (it_must != m_must_locksets_exit.end()) must_inputs.push_back(it_must->second);
-        if (it_mr != m_may_read_locks_exit.end()) may_read_inputs.push_back(it_mr->second);
-        if (it_mw != m_may_write_locks_exit.end()) may_write_inputs.push_back(it_mw->second);
-        if (it_ur != m_must_read_locks_exit.end()) must_read_inputs.push_back(it_ur->second);
-        if (it_uw != m_must_write_locks_exit.end()) must_write_inputs.push_back(it_uw->second);
+        auto it_may = prev ? m_may_locksets_exit.find(prev) : m_may_locksets_exit.end();
+        auto it_must = prev ? m_must_locksets_exit.find(prev) : m_must_locksets_exit.end();
+        auto it_mr = prev ? m_may_read_locks_exit.find(prev) : m_may_read_locks_exit.end();
+        auto it_mw = prev ? m_may_write_locks_exit.find(prev) : m_may_write_locks_exit.end();
+        auto it_ur = prev ? m_must_read_locks_exit.find(prev) : m_must_read_locks_exit.end();
+        auto it_uw = prev ? m_must_write_locks_exit.find(prev) : m_must_write_locks_exit.end();
+        may_inputs.push_back(it_may != m_may_locksets_exit.end() ? it_may->second : LockSet());
+        must_inputs.push_back(it_must != m_must_locksets_exit.end() ? it_must->second : LockSet());
+        may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
+        may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
+        must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end() ? it_ur->second : LockSet());
+        must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end() ? it_uw->second : LockSet());
       }
     }
 
@@ -525,7 +600,10 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
     LockSet may_out = transfer(inst, may_in, false);
     LockSet must_out = transfer(inst, must_in, true);
 
-    bool changed = false;
+    // First time we see this instruction we must propagate (otherwise we never add
+    // successors when the computed value equals the default empty set).
+    bool had_entry = m_may_locksets_entry.count(inst);
+    bool changed = !had_entry;
     if (m_may_read_locks_entry[inst] != may_read_in) { m_may_read_locks_entry[inst] = may_read_in; changed = true; }
     if (m_may_read_locks_exit[inst] != may_read_out) { m_may_read_locks_exit[inst] = may_read_out; changed = true; }
     if (m_may_write_locks_entry[inst] != may_write_in) { m_may_write_locks_entry[inst] = may_write_in; changed = true; }
@@ -561,6 +639,7 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
       }
     }
   }
+
 }
 
 void LockSetAnalysis::computeInterproceduralLockSets() {
@@ -620,9 +699,12 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         }
       }
     }
+  } else if (m_thread_api->isTDCondWait(inst)) {
+    // pthread_cond_wait atomically releases the mutex and re-acquires on return; lock set unchanged.
   } else if (const CallInst *call = dyn_cast<CallInst>(inst)) {
     // Try-lock is handled above (not added to set). Handle other calls.
-    if (!m_thread_api->isTDAcquire(call) && !m_thread_api->isTDRelease(call)) {
+    if (!m_thread_api->isTDAcquire(call) && !m_thread_api->isTDRelease(call) &&
+        !m_thread_api->isTDCondWait(call)) {
       // Handle regular function calls with interprocedural summaries
       if (m_call_graph) {
         auto callees = getCallees(call);
@@ -674,6 +756,8 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       LockID lock = getLockValue(inst);
       if (lock) out_write.insert(lock);
     }
+  } else if (m_thread_api->isTDCondWait(inst)) {
+    // pthread_cond_wait releases then re-acquires the mutex; read/write sets unchanged.
   } else if (m_thread_api->isTDRelease(inst)) {
     LockID lock = getLockValue(inst);
     if (lock) {
