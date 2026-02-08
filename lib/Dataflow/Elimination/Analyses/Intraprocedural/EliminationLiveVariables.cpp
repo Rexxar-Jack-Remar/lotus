@@ -1,6 +1,7 @@
 #include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationLiveVariables.h"
 
 #include "Dataflow/Elimination/EliminationFramework.h"
+#include "Dataflow/Elimination/LLVM/LLVMReverseEliminationProblem.h"
 #include "Dataflow/Elimination/Solver/IntraEliminationSolver.h"
 #include "Dataflow/Mono/ControlFlow/IntraCFG.h"
 
@@ -13,30 +14,14 @@
 namespace elimination {
 namespace {
 
-struct LiveVariablesDomain {
-  using n_t = llvm::Instruction *;
-  using fact_t = LiveVariablesFact;
-  using transfer_t = llvm::Instruction *;
-};
+using LiveVariablesDomain = LLVMEliminationDomain<LiveVariablesFact>;
 
 class ReverseLiveVariablesProblem
-    : public IntraEliminationProblem<LiveVariablesDomain> {
+    : public LLVMReverseIntraEliminationProblem<LiveVariablesFact> {
 public:
-  explicit ReverseLiveVariablesProblem(llvm::Function *F, llvm::Instruction *Entry)
-      : F(F), Entry(Entry) {}
-
-  std::vector<n_t> nodes() const override {
-    ensurePrepared();
-    return Nodes;
-  }
-
-  n_t entry() const override { return Entry; }
-
-  std::vector<n_t> succs(n_t Node) const override {
-    return CFG.getSuccsOf(Node, mono::FlowDirection::Backward);
-  }
-
-  transfer_t edgeTransfer(n_t /*Src*/, n_t Dst) const override { return Dst; }
+  explicit ReverseLiveVariablesProblem(llvm::Function *F,
+                                       llvm::Instruction *Exit)
+      : LLVMReverseIntraEliminationProblem<LiveVariablesFact>(F, Exit) {}
 
   fact_t applyTransfer(const transfer_t &T, const fact_t &In) const override {
     auto *Inst = T;
@@ -76,44 +61,6 @@ public:
   fact_t meetIdentity() const override { return fact_t{}; }
 
   fact_t initialFact() const override { return fact_t{}; }
-
-private:
-  void ensurePrepared() const {
-    if (Prepared) {
-      return;
-    }
-    Prepared = true;
-    Nodes.clear();
-    if (F == nullptr || F->isDeclaration() || Entry == nullptr) {
-      return;
-    }
-
-    std::unordered_set<n_t> Reach;
-    std::vector<n_t> Stack;
-    Stack.push_back(Entry);
-    Reach.insert(Entry);
-    while (!Stack.empty()) {
-      auto *Cur = Stack.back();
-      Stack.pop_back();
-      for (auto *Succ : CFG.getSuccsOf(Cur, mono::FlowDirection::Backward)) {
-        if (Reach.insert(Succ).second) {
-          Stack.push_back(Succ);
-        }
-      }
-    }
-
-    for (auto *N : CFG.getAllInstructionsOf(F)) {
-      if (Reach.count(N)) {
-        Nodes.push_back(N);
-      }
-    }
-  }
-
-  llvm::Function *F = nullptr;
-  llvm::Instruction *Entry = nullptr;
-  mono::LLVMIntraCFG CFG;
-  mutable bool Prepared = false;
-  mutable std::vector<n_t> Nodes;
 };
 
 std::vector<llvm::Instruction *> getExitInstructions(llvm::Function *F) {

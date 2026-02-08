@@ -90,6 +90,32 @@ private:
     }
   }
 
+  // Elimination order: prefer reverse topological when available (sinks first)
+  // to reduce path expression growth. Otherwise use index order.
+  std::vector<std::size_t> getEliminationOrder() const {
+    const auto N = Nodes.size();
+    std::vector<std::size_t> Order(N);
+    const auto *R = dynamic_cast<const ReducibleProblemTy *>(&Problem);
+    if (R != nullptr) {
+      const auto Topo = R->topologicalOrder();
+      if (Topo.size() == N) {
+        for (std::size_t i = 0; i < N; ++i) {
+          const auto It = Index.find(Topo[N - 1 - i]);
+          if (It == Index.end()) {
+            goto DefaultOrder;
+          }
+          Order[i] = It->second;
+        }
+        return Order;
+      }
+    }
+  DefaultOrder:
+    for (std::size_t i = 0; i < N; ++i) {
+      Order[i] = i;
+    }
+    return Order;
+  }
+
   void eliminateAllIntermediates() {
     const auto N = Nodes.size();
     std::vector<expr_ref_t> ColK;
@@ -97,7 +123,9 @@ private:
     ColK.resize(N);
     RowK.resize(N);
 
-    for (std::size_t k = 0; k < N; ++k) {
+    const auto Order = getEliminationOrder();
+    for (std::size_t ki = 0; ki < N; ++ki) {
+      const std::size_t k = Order[ki];
       for (std::size_t i = 0; i < N; ++i) {
         ColK[i] = Matrix[i][k];
       }
@@ -110,16 +138,16 @@ private:
         if (expr_factory_t::isZero(ColK[i])) {
           continue;
         }
-        for (std::size_t j = 0; j < N; ++j) {
-          if (expr_factory_t::isZero(RowK[j])) {
-            continue;
-          }
-          auto Via = Exprs.concat(ColK[i], KStar);
-          Via = Exprs.concat(Via, RowK[j]);
-          Matrix[i][j] = Exprs.unite(Matrix[i][j], Via);
+      for (std::size_t j = 0; j < N; ++j) {
+        if (expr_factory_t::isZero(RowK[j])) {
+          continue;
         }
+        auto Via = Exprs.concat(ColK[i], KStar);
+        Via = Exprs.concat(Via, RowK[j]);
+        Matrix[i][j] = Exprs.unite(Matrix[i][j], Via);
       }
     }
+  }
   }
 
   void materializeResultsFromMatrix() {

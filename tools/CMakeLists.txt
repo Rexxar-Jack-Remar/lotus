@@ -1,6 +1,7 @@
 
 add_subdirectory(alias)
 add_subdirectory(checker)
+add_subdirectory(dataflow)
 add_subdirectory(optimization)
 add_subdirectory(verifier)
 
