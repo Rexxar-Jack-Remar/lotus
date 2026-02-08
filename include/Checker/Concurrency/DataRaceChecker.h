@@ -2,9 +2,9 @@
 #define DATA_RACE_CHECKER_H
 
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
-#include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include <llvm/IR/InstIterator.h>

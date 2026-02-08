@@ -2,8 +2,8 @@
 #define CONCURRENCY_CHECKER_H
 
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
-#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
+#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include "Checker/Concurrency/AtomicityChecker.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"

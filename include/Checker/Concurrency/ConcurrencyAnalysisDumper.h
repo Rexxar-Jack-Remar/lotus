@@ -11,8 +11,8 @@
 #define CONCURRENCY_ANALYSIS_DUMPER_H
 
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
-#include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
+#include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include <llvm/IR/Module.h>

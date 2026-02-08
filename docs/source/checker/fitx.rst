@@ -59,25 +59,25 @@ Analysis Approach (from the paper)
 Components
 ----------
 
-**Frontend** (``lib/Checker/FiTx/frontend/``):
+**Frontend** (``lib/Checker/FiTx/Frontend/``):
 
-* ``Framework.cpp`` / ``Framework.hpp`` – Main FiTx pass; defines typestate checkers and runs them (paper Section 4, 5).
+* ``Framework.cpp`` / ``Framework.h`` – Main FiTx pass; defines typestate checkers and runs them (paper Section 4, 5).
 * ``Analyzer.cpp`` – CFG-based typestate analysis: block-by-block state merge, transition application, return-code aware propagation from callee summaries (paper Section 4.2, 4.3).
-* ``State.hpp``, ``StateTransition.hpp`` – Typestate FSM: states, transitions, notification timing (IMMEDIATE, FUNCTION_END, END_OF_LIFE, MODULE_END).
+* ``State.h``, ``StateTransition.h`` – Typestate FSM: states, transitions, notification timing (IMMEDIATE, FUNCTION_END, END_OF_LIFE, MODULE_END).
 
-**Framework IR** (``lib/Checker/FiTx/framework_ir/``):
+**Framework IR** (``lib/Checker/FiTx/Framework_IR/``):
 
 * ``Analyzer.cpp`` – Builds the framework IR from LLVM: calls, stores, loads, returns; collects possible return values per basic block for **function summaries** and return-code aware propagation (paper Section 4.3).
 
-**Core** (``lib/Checker/FiTx/core/``):
+**Core** (``lib/Checker/FiTx/Core/``):
 
-* ``BasicBlock.hpp``, ``Function.hpp``, ``Value.hpp`` – CFG and value representation with field-sensitive structure (static field offsets).
+* ``BasicBlock.h``, ``Function.h``, ``Value.h`` – CFG and value representation with field-sensitive structure (static field offsets).
 * ``Instructions/BranchInstruction.cpp`` – Branch/switch conditions; used to resolve **return-code** at call sites (e.g. ``if (err)`` vs ``if (!err)``) for propagating the correct callee summary (paper Section 4.3).
 * ``ValueTypeAlias.cpp`` – Intra-procedural alias for store/load (paper: intra-procedural alias only).
 
-**Detectors** (``lib/Checker/FiTx/detector/``):
+**Detectors** (``lib/Checker/FiTx/Detector/``):
 
-* Each detector (e.g. ``df_detector/``, ``uaf_detector/``, ``leak_detector/``, ``ref_count_detector/``) defines a typestate FSM for one bug pattern (paper Section 4.1, Table 5; Section 5: DF, DL/DUL, ML, UAF, Ref).
+* Each detector (e.g. ``DF_detector/``, ``UAF_detector/``, ``Leak_detector/``, ``Ref_count_detector/``) defines a typestate FSM for one bug pattern (paper Section 4.1, Table 5; Section 5: DF, DL/DUL, ML, UAF, Ref).
 
 Bug Types
 --------
@@ -107,13 +107,13 @@ Understanding the code
 
 **Key data structures**
 
-* **FunctionInformation** (``frontend/Function.hpp``): Per-function summary: ``basic_block_info_`` (per-block value states), ``return_info_`` (return code → set of blocks), ``value_collection_`` (related/parent values for propagation).
+* **FunctionInformation** (``frontend/Function.h``): Per-function summary: ``basic_block_info_`` (per-block value states), ``return_info_`` (return code → set of blocks), ``value_collection_`` (related/parent values for propagation).
 
-* **BasicBlockInformation** (``frontend/BasicBlock.hpp``): Per-block state: ``value_states_`` (value → TransitionLogs), ``arg_value_states_`` (for summary: arg index → (value, transitions)), ``pending_values_`` (per successor block: pending arg states and return value for return-code aware propagation).
+* **BasicBlockInformation** (``frontend/BasicBlock.h``): Per-block state: ``value_states_`` (value → TransitionLogs), ``arg_value_states_`` (for summary: arg index → (value, transitions)), ``pending_values_`` (per successor block: pending arg states and return value for return-code aware propagation).
 
-* **TransitionLogs** (``frontend/State.hpp``): History of (transition, instruction) for one value; ``LeastSignificantSource`` is used to filter reports (only report if the value reached the bug state from a “real” init).
+* **TransitionLogs** (``frontend/State.h``): History of (transition, instruction) for one value; ``LeastSignificantSource`` is used to filter reports (only report if the value reached the bug state from a “real” init).
 
-* **StateTransitionManager** (``frontend/State.hpp``): Lookup transitions by trigger: Fun Arg (function name + arg index), Store (NULL/NON/ANY/CALL_FUNC), Use, Alias. Each detector registers its typestate transitions here.
+* **StateTransitionManager** (``frontend/State.h``): Lookup transitions by trigger: Fun Arg (function name + arg index), Store (NULL/NON/ANY/CALL_FUNC), Use, Alias. Each detector registers its typestate transitions here.
 
 **Adding a new detector**
 

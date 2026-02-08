@@ -17,11 +17,11 @@
  * Usage: lotus-fitx [options] <input bitcode>
  */
 
-#include "Checker/FiTx/core/Logs.hpp"
-#include "Checker/FiTx/framework_ir/IRGenerator.hpp"
-#include "Checker/FiTx/frontend/Analyzer.hpp"
-#include "Checker/FiTx/frontend/Framework.hpp"
-#include "Checker/FiTx/frontend/State.hpp"
+#include "Checker/FiTx/Core/Logs.h"
+#include "Checker/FiTx/Framework_IR/IRGenerator.h"
+#include "Checker/FiTx/Frontend/Analyzer.h"
+#include "Checker/FiTx/Frontend/Framework.h"
+#include "Checker/FiTx/Frontend/State.h"
 
 #include <chrono>
 #include <iostream>

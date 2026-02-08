@@ -4,10 +4,10 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Value.h>
 #include <map>
+#include <regex>
 #include <set>
 #include <string>
 #include <vector>
-#include <regex>
 
 namespace pulse {
 
