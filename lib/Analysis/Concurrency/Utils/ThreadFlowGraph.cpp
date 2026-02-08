@@ -9,7 +9,7 @@
  * 2. Inter-thread synchronization (fork, join, signal, etc.)
  */
 
-#include "Analysis/Concurrency/ThreadFlowGraph.h"
+#include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>

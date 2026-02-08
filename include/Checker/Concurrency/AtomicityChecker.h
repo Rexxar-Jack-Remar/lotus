@@ -2,9 +2,9 @@
 #define ATOMICITY_CHECKER_H
 
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
-#include "Analysis/Concurrency/LockSetAnalysis.h"
-#include "Analysis/Concurrency/MHPAnalysis.h"
-#include "Analysis/Concurrency/ThreadAPI.h"
+#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
+#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>

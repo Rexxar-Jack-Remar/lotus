@@ -1,10 +1,10 @@
 #ifndef CONCURRENCY_CHECKER_H
 #define CONCURRENCY_CHECKER_H
 
-#include "Analysis/Concurrency/EscapeAnalysis.h"
-#include "Analysis/Concurrency/HappensBeforeAnalysis.h"
-#include "Analysis/Concurrency/LockSetAnalysis.h"
-#include "Analysis/Concurrency/MHPAnalysis.h"
+#include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
+#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
+#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include "Checker/Concurrency/AtomicityChecker.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 #include "Checker/Concurrency/ConditionVariableChecker.h"

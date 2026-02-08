@@ -2,7 +2,7 @@
  *
  * Author: rainoftime
 */
-#include "Analysis/Concurrency/HappensBeforeAnalysis.h"
+#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>

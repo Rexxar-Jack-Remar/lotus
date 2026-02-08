@@ -18,7 +18,7 @@
  * Author: rainoftime
  */
 
-#include "Analysis/Concurrency/MHPAnalysis.h"
+#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/CFG.h>

@@ -12,8 +12,8 @@
 #ifndef STATIC_VECTOR_CLOCK_MHP_H
 #define STATIC_VECTOR_CLOCK_MHP_H
 
-#include "Analysis/Concurrency/ThreadAPI.h"
-#include "Analysis/Concurrency/ThreadFlowGraph.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/Instruction.h>

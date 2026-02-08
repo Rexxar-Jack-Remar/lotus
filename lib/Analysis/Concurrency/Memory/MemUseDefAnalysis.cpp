@@ -1,7 +1,7 @@
 //===- MemUseDefAnalysis.cpp - Mem Use-Def Analysis based on MemorySSA---===//
 //===----------------------------------------------------------------------===//
 
-#include "Analysis/Concurrency/MemUseDefAnalysis.h"
+#include "Analysis/Concurrency/Memory/MemUseDefAnalysis.h"
 
 using namespace llvm;
 

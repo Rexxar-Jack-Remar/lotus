@@ -21,11 +21,11 @@
 #ifndef MHP_ANALYSIS_H
 #define MHP_ANALYSIS_H
 
-#include "Analysis/Concurrency/LockSetAnalysis.h"
+#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Analysis/Concurrency/Cpp11Atomics.h"
-#include "Analysis/Concurrency/ThreadAPI.h"
-#include "Analysis/Concurrency/ThreadFlowGraph.h"
+#include "Analysis/Concurrency/MHP/Cpp11Atomics.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>

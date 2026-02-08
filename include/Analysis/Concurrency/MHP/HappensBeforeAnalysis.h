@@ -1,8 +1,8 @@
 #ifndef HAPPENS_BEFORE_ANALYSIS_H
 #define HAPPENS_BEFORE_ANALYSIS_H
 
-#include "Analysis/Concurrency/Cpp11Atomics.h"
-#include "Analysis/Concurrency/MHPAnalysis.h"
+#include "Analysis/Concurrency/MHP/Cpp11Atomics.h"
+#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
 #include <unordered_map>

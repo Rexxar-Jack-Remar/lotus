@@ -3,7 +3,7 @@
  * @brief Join-target set implementation
  */
 
-#include "Analysis/Concurrency/JoinTargetAnalysis.h"
+#include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/IR/InstIterator.h>

@@ -3,7 +3,7 @@
  * @brief Unit tests for Lock Set Analysis
  */
 
-#include "Analysis/Concurrency/LockSetAnalysis.h"
+#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>

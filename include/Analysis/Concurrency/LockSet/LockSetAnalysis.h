@@ -26,7 +26,7 @@
 #ifndef LOCKSET_ANALYSIS_H
 #define LOCKSET_ANALYSIS_H
 
-#include "Analysis/Concurrency/ThreadAPI.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallVector.h>

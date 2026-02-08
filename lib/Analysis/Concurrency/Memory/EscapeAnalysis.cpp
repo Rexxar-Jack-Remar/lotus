@@ -2,8 +2,8 @@
  *
  * Author: rainoftime
 */
-#include "Analysis/Concurrency/EscapeAnalysis.h"
-#include "Analysis/Concurrency/ThreadAPI.h"
+#include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>

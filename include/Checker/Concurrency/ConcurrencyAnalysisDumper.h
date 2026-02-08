@@ -10,10 +10,10 @@
 #ifndef CONCURRENCY_ANALYSIS_DUMPER_H
 #define CONCURRENCY_ANALYSIS_DUMPER_H
 
-#include "Analysis/Concurrency/MHPAnalysis.h"
-#include "Analysis/Concurrency/EscapeAnalysis.h"
-#include "Analysis/Concurrency/LockSetAnalysis.h"
-#include "Analysis/Concurrency/ThreadAPI.h"
+#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
+#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>

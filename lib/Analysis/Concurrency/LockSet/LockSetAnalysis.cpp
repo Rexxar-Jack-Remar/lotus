@@ -13,7 +13,7 @@
  *    - Release: Removes all aliasing locks to ensure soundness.
  */
 
-#include "Analysis/Concurrency/LockSetAnalysis.h"
+#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/Analysis/CallGraph.h>

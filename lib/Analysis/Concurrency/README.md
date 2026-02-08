@@ -1,5 +1,19 @@
 # Analysis of Concurrent Programs
 
+## Directory layout
+
+Headers live under `include/Analysis/Concurrency/`, sources under `lib/Analysis/Concurrency/`, grouped by subdirectory:
+
+| Subdirectory | Contents |
+|--------------|----------|
+| **Utils/** | ThreadAPI, ThreadFlowGraph, ThreadInfo, BVClock, FBVClock, LanguageModel/ (Cpp11, OpenMP) |
+| **MHP/** | MHPAnalysis, StaticVectorClockMHP, HappensBeforeAnalysis, Cpp11Atomics |
+| **LockSet/** | LockSetAnalysis |
+| **Memory/** | EscapeAnalysis, StaticThreadSharingAnalysis, MemUseDefAnalysis |
+| **JoinTarget/** | JoinTargetAnalysis |
+
+Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, `Analysis/Concurrency/MHP/MHPAnalysis.h`.
+
 ## Utilities
 
 - **ThreadAPI**: Provides an API for identifying and categorizing thread-related operations (fork, join, lock, unlock, etc.) in LLVM IR.

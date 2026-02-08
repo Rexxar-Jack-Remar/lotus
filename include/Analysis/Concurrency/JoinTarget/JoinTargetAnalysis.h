@@ -13,7 +13,7 @@
 #ifndef JOIN_TARGET_ANALYSIS_H
 #define JOIN_TARGET_ANALYSIS_H
 
-#include "Analysis/Concurrency/ThreadAPI.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>

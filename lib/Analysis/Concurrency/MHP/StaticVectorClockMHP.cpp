@@ -3,7 +3,7 @@
  * @brief Implementation of the static vector clock based MHP analysis (CGO 1).
  */
 
-#include "Analysis/Concurrency/StaticVectorClockMHP.h"
+#include "Analysis/Concurrency/MHP/StaticVectorClockMHP.h"
 
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/InstIterator.h>

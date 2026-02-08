@@ -1,5 +1,5 @@
-#include "Analysis/Concurrency/MHPAnalysis.h"
-#include "Analysis/Concurrency/Cpp11Atomics.h"
+#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/MHP/Cpp11Atomics.h"
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>

@@ -3,7 +3,7 @@
  * @brief Simplified unit tests for MHP Analysis
  */
 
-#include "Analysis/Concurrency/MHPAnalysis.h"
+#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>

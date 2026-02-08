@@ -1,16 +1,18 @@
 set(Concurrency_SOURCES
-  Cpp11Atomics.cpp
-  EscapeAnalysis.cpp
-  HappensBeforeAnalysis.cpp
-  JoinTargetAnalysis.cpp
-  LockSetAnalysis.cpp
-  MemUseDefAnalysis.cpp
-  MHPAnalysis.cpp
-  StaticThreadSharingAnalysis.cpp
-  StaticVectorClockMHP.cpp
-  ThreadAPI.cpp
-  ThreadFlowGraph.cpp
+  Utils/ThreadAPI.cpp
+  Utils/ThreadFlowGraph.cpp
+  Utils/BVClock.cpp
+  Utils/FBVClock.cpp
+  MHP/Cpp11Atomics.cpp
+  MHP/MHPAnalysis.cpp
+  MHP/StaticVectorClockMHP.cpp
+  MHP/HappensBeforeAnalysis.cpp
+  LockSet/LockSetAnalysis.cpp
+  Memory/EscapeAnalysis.cpp
+  Memory/StaticThreadSharingAnalysis.cpp
+  Memory/MemUseDefAnalysis.cpp
+  JoinTarget/JoinTargetAnalysis.cpp
 )
 add_library(Concurrency STATIC ${Concurrency_SOURCES})
+target_include_directories(Concurrency PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(Concurrency CanaryLLVMUtils CanaryAliasAnalysisWrapper)
-

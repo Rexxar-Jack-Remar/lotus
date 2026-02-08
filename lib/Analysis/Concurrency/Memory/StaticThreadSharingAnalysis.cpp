@@ -10,11 +10,11 @@ Soundness/Approximations:
   which is a reasonable approximation when SeaDSA collapses globals.
 - Immutable Data: Distinguishes between reads and writes to ignore immutable shared data.
 */
-#include "Analysis/Concurrency/StaticThreadSharingAnalysis.h"
+#include "Analysis/Concurrency/Memory/StaticThreadSharingAnalysis.h"
 #include "Alias/seadsa/DsaAnalysis.hh"
 #include "Alias/seadsa/Global.hh"
 #include "Alias/seadsa/Graph.hh"
-#include "Analysis/Concurrency/ThreadAPI.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/Support/Debug.h"
