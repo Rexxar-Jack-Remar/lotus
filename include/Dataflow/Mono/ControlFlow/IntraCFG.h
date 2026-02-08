@@ -4,8 +4,9 @@
 
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,25 @@ public:
   virtual std::vector<n_t> getAllInstructionsOf(f_t Function) const = 0;
   virtual std::vector<std::pair<n_t, n_t>>
   getAllControlFlowEdges(f_t Function, FlowDirection Dir) const = 0;
+
+  /// Function containing \p Inst. Null if \p Inst is null.
+  virtual f_t getFunctionOf(n_t Inst) const = 0;
+
+  /// Start nodes for the given direction. Forward: entry block first
+  /// instruction(s). Backward: exit instructions.
+  virtual std::vector<n_t> getStartPointsOf(f_t Function,
+                                            FlowDirection Dir) const = 0;
+
+  /// Exit nodes for the given direction. Forward: return/exit instructions.
+  /// Backward: entry block first instruction(s).
+  virtual std::vector<n_t> getExitPointsOf(f_t Function,
+                                          FlowDirection Dir) const = 0;
+
+  /// True iff \p Inst is a start node for the given direction.
+  virtual bool isStartPoint(n_t Inst, FlowDirection Dir) const = 0;
+
+  /// True iff \p Inst is an exit node for the given direction.
+  virtual bool isExitInst(n_t Inst, FlowDirection Dir) const = 0;
 };
 
 /// Default LLVM-backed intraprocedural instruction CFG.
@@ -43,9 +63,19 @@ public:
   std::vector<std::pair<n_t, n_t>>
   getAllControlFlowEdges(f_t Function, FlowDirection Dir) const override;
 
+  f_t getFunctionOf(n_t Inst) const override;
+  std::vector<n_t> getStartPointsOf(f_t Function,
+                                    FlowDirection Dir) const override;
+  std::vector<n_t> getExitPointsOf(f_t Function,
+                                  FlowDirection Dir) const override;
+  bool isStartPoint(n_t Inst, FlowDirection Dir) const override;
+  bool isExitInst(n_t Inst, FlowDirection Dir) const override;
+
 private:
   static std::vector<n_t> getForwardSuccs(n_t Inst);
   static std::vector<n_t> getBackwardSuccs(n_t Inst);
+  static std::vector<n_t> getForwardStartPoints(f_t Function);
+  static std::vector<n_t> getForwardExitPoints(f_t Function);
 };
 
 } // namespace mono
@@ -129,6 +159,70 @@ LLVMIntraCFG::getAllControlFlowEdges(f_t Function, FlowDirection Dir) const {
     }
   }
   return Edges;
+}
+
+inline LLVMIntraCFG::f_t LLVMIntraCFG::getFunctionOf(n_t Inst) const {
+  return Inst && Inst->getParent() ? Inst->getParent()->getParent() : nullptr;
+}
+
+inline std::vector<LLVMIntraCFG::n_t>
+LLVMIntraCFG::getForwardStartPoints(f_t Function) {
+  std::vector<n_t> Start;
+  if (Function == nullptr || Function->isDeclaration() || Function->empty()) {
+    return Start;
+  }
+  Start.push_back(&*Function->getEntryBlock().begin());
+  return Start;
+}
+
+inline std::vector<LLVMIntraCFG::n_t>
+LLVMIntraCFG::getForwardExitPoints(f_t Function) {
+  std::vector<n_t> Exit;
+  if (Function == nullptr || Function->isDeclaration()) {
+    return Exit;
+  }
+  for (auto &BB : *Function) {
+    if (auto *Term = BB.getTerminator()) {
+      if (llvm::isa<llvm::ReturnInst>(Term)) {
+        Exit.push_back(Term);
+      }
+    }
+  }
+  return Exit;
+}
+
+inline std::vector<LLVMIntraCFG::n_t>
+LLVMIntraCFG::getStartPointsOf(f_t Function, FlowDirection Dir) const {
+  if (Dir == FlowDirection::Forward) {
+    return getForwardStartPoints(Function);
+  }
+  return getForwardExitPoints(Function);
+}
+
+inline std::vector<LLVMIntraCFG::n_t>
+LLVMIntraCFG::getExitPointsOf(f_t Function, FlowDirection Dir) const {
+  if (Dir == FlowDirection::Forward) {
+    return getForwardExitPoints(Function);
+  }
+  return getForwardStartPoints(Function);
+}
+
+inline bool LLVMIntraCFG::isStartPoint(n_t Inst, FlowDirection Dir) const {
+  auto *F = getFunctionOf(Inst);
+  if (F == nullptr) {
+    return false;
+  }
+  auto Start = getStartPointsOf(F, Dir);
+  return std::find(Start.begin(), Start.end(), Inst) != Start.end();
+}
+
+inline bool LLVMIntraCFG::isExitInst(n_t Inst, FlowDirection Dir) const {
+  auto *F = getFunctionOf(Inst);
+  if (F == nullptr) {
+    return false;
+  }
+  auto Exit = getExitPointsOf(F, Dir);
+  return std::find(Exit.begin(), Exit.end(), Inst) != Exit.end();
 }
 
 } // namespace mono

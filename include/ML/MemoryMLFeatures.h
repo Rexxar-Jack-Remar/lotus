@@ -19,7 +19,7 @@ class raw_ostream;
 
 namespace previrt {
 class MemoryMLFeaturesPassImpl;
-}
+} // namespace previrt
 
 namespace previrt {
 

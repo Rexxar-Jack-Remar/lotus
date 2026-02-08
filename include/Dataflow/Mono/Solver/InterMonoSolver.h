@@ -112,6 +112,41 @@ public:
 
   const ResultTy *getResults() const { return Result.get(); }
 
+  /// Returns the IN facts at \p Stmt merged across all call-string contexts.
+  /// Uses the problem's merge to combine per-context facts. Returns an empty
+  /// container if no results or \p Stmt has no entries.
+  mono_container_t getResultsAt(llvm::Instruction *Stmt) const {
+    if (!Result) {
+      return mono_container_t{};
+    }
+    mono_container_t merged;
+    bool first = true;
+    for (const auto &Cell : Result->getINMap()) {
+      if (Cell.first.Inst != Stmt) {
+        continue;
+      }
+      if (first) {
+        merged = Cell.second;
+        first = false;
+      } else {
+        merged = Problem.merge(merged, Cell.second);
+      }
+    }
+    return merged;
+  }
+
+  /// Raw IN map: (Instruction, Context) -> facts. Null if solve() not run or
+  /// produced no results.
+  const std::map<ContextKey, mono_container_t> *getAnalysisINMap() const {
+    return Result ? &Result->getINMap() : nullptr;
+  }
+
+  /// Raw OUT map: (Instruction, Context) -> facts. Null if solve() not run or
+  /// produced no results.
+  const std::map<ContextKey, mono_container_t> *getAnalysisOUTMap() const {
+    return Result ? &Result->getOUTMap() : nullptr;
+  }
+
   void dumpResults(llvm::raw_ostream &OS = llvm::outs()) const {
     OS << "\n================ InterMonoSolver results ================\n";
     if (!Result) {
@@ -229,21 +264,25 @@ private:
         Incoming = Problem.returnFlow(CallSite, PredInst->getFunction(),
                                       PredInst, Inst, PredIn);
       } else {
-        // Phasar-like: allow return-flow for empty contexts by fanning out to
-        // all callers of the current callee.
-        mono_container_t Merged;
+        // Empty context: fan out to all callers of the current callee and
+        // merge their return-flow facts. Explicitly start with allTop() so
+        // behavior is correct when ICF is null or there are no callers.
+        Incoming = Problem.allTop();
         if (ICF != nullptr) {
+          mono_container_t Merged;
           for (auto *Caller : ICF->getCallersOf(PredInst->getFunction())) {
-          auto RetFacts = Problem.returnFlow(
-              Caller, PredInst->getFunction(), PredInst, Inst, PredIn);
-          if (Merged.empty()) {
-            Merged = RetFacts;
-          } else {
-            Merged = Problem.merge(Merged, RetFacts);
+            auto RetFacts = Problem.returnFlow(
+                Caller, PredInst->getFunction(), PredInst, Inst, PredIn);
+            if (Merged.empty()) {
+              Merged = RetFacts;
+            } else {
+              Merged = Problem.merge(Merged, RetFacts);
+            }
+          }
+          if (!Merged.empty()) {
+            Incoming = Merged;
           }
         }
-        }
-        Incoming = Merged.empty() ? Problem.allTop() : Merged;
       }
     } else if (llvm::isa<llvm::CallBase>(PredInst) &&
                isContinuationOfCall(Inst, PredInst)) {

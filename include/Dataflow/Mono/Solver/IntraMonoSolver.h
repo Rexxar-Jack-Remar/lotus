@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <deque>
+#include <unordered_set>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -137,20 +138,35 @@ private:
       }
     }
 
+    std::unordered_set<llvm::Function *> SeenFunctions;
     for (auto *Function : EntryFunctions) {
       if (Function == nullptr || Function->isDeclaration()) {
         continue;
       }
-
+      SeenFunctions.insert(Function);
       auto Edges = CFG->getAllControlFlowEdges(Function, Problem.direction());
       Worklist.insert(Worklist.begin(), Edges.begin(), Edges.end());
-
       for (auto *Inst : CFG->getAllInstructionsOf(Function)) {
         AnalysisIn.insert({Inst, Problem.allTop()});
       }
     }
 
-    for (const auto &Entry : Problem.initialSeeds()) {
+    // Ensure any function that contains a seed node has its CFG in the
+    // worklist so propagation from that seed can occur (correctness when
+    // initialSeeds() targets instructions outside EntryPoints).
+    auto Seeds = Problem.initialSeeds();
+    for (const auto &Entry : Seeds) {
+      auto *BB = Entry.first ? Entry.first->getParent() : nullptr;
+      auto *F = BB ? BB->getParent() : nullptr;
+      if (F && !F->isDeclaration() && SeenFunctions.insert(F).second) {
+        auto Edges = CFG->getAllControlFlowEdges(F, Problem.direction());
+        Worklist.insert(Worklist.begin(), Edges.begin(), Edges.end());
+        for (auto *Inst : CFG->getAllInstructionsOf(F)) {
+          AnalysisIn.insert({Inst, Problem.allTop()});
+        }
+      }
+    }
+    for (const auto &Entry : Seeds) {
       AnalysisIn[Entry.first] = Entry.second;
     }
   }

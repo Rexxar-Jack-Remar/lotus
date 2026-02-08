@@ -48,6 +48,14 @@ public:
   std::vector<std::pair<n_t, n_t>>
   getAllControlFlowEdges(f_t Function, FlowDirection Dir) const override;
 
+  f_t getFunctionOf(n_t Inst) const override;
+  std::vector<n_t> getStartPointsOf(f_t Function,
+                                    FlowDirection Dir) const override;
+  std::vector<n_t> getExitPointsOf(f_t Function,
+                                  FlowDirection Dir) const override;
+  bool isStartPoint(n_t Inst, FlowDirection Dir) const override;
+  bool isExitInst(n_t Inst, FlowDirection Dir) const override;
+
   std::vector<n_t> getStartPointsOf(f_t Callee) const override;
   std::vector<n_t> getExitPointsOf(f_t Callee) const override;
 
@@ -115,6 +123,28 @@ LLVMInterCFG::getAllInstructionsOf(f_t Function) const {
 inline std::vector<std::pair<LLVMInterCFG::n_t, LLVMInterCFG::n_t>>
 LLVMInterCFG::getAllControlFlowEdges(f_t Function, FlowDirection Dir) const {
   return Intra.getAllControlFlowEdges(Function, Dir);
+}
+
+inline LLVMInterCFG::f_t LLVMInterCFG::getFunctionOf(n_t Inst) const {
+  return Intra.getFunctionOf(Inst);
+}
+
+inline std::vector<LLVMInterCFG::n_t>
+LLVMInterCFG::getStartPointsOf(f_t Function, FlowDirection Dir) const {
+  return Intra.getStartPointsOf(Function, Dir);
+}
+
+inline std::vector<LLVMInterCFG::n_t>
+LLVMInterCFG::getExitPointsOf(f_t Function, FlowDirection Dir) const {
+  return Intra.getExitPointsOf(Function, Dir);
+}
+
+inline bool LLVMInterCFG::isStartPoint(n_t Inst, FlowDirection Dir) const {
+  return Intra.isStartPoint(Inst, Dir);
+}
+
+inline bool LLVMInterCFG::isExitInst(n_t Inst, FlowDirection Dir) const {
+  return Intra.isExitInst(Inst, Dir);
 }
 
 inline std::vector<LLVMInterCFG::n_t>

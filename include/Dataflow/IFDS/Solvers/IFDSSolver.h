@@ -7,8 +7,18 @@
 #pragma once
 
 #include "Dataflow/IFDS/IFDSFramework.h"
+#include "Dataflow/IFDS/IFDSIDESolverConfig.h"
+
+#include <utility>
 
 namespace ifds {
+
+template<typename T, typename U>
+struct PairHash {
+    size_t operator()(const std::pair<T, U>& p) const {
+        return std::hash<T>{}(p.first) ^ (std::hash<U>{}(p.second) << 1);
+    }
+};
 
 // ============================================================================
 // IFDS Solver (Sequential)
@@ -29,6 +39,11 @@ public:
     // Enable/disable progress bar display during analysis
     void set_show_progress(bool show) { m_show_progress = show; }
 
+    // Solver configuration (return sites, unbalanced returns, etc.)
+    void set_solver_config(IFDSIDESolverConfig config) { m_config = std::move(config); }
+    IFDSIDESolverConfig& get_solver_config() { return m_config; }
+    const IFDSIDESolverConfig& get_solver_config() const { return m_config; }
+
     // Bounded solver: optional step limit (0 = unbounded). When the bound is reached,
     // the solver stops and returns a partial result; no exception is thrown.
     void set_max_steps(size_t max_steps) { m_max_steps = max_steps; }
@@ -39,6 +54,12 @@ public:
     // Query interface for analysis results
     FactSet get_facts_at_entry(const llvm::Instruction* inst) const;
     FactSet get_facts_at_exit(const llvm::Instruction* inst) const;
+
+    /// Returns facts at the given instruction in LLVM SSA style: for non-void
+    /// instructions (e.g. load), returns facts at the successor instruction(s)
+    /// where the defined value is valid; for void (e.g. terminator), returns
+    /// facts at exit of this instruction.
+    FactSet get_facts_at_in_llvm_ssa(const llvm::Instruction* inst) const;
 
     // Get all path edges (for debugging/analysis)
     void get_path_edges(std::vector<PathEdge<Fact>>& out_edges) const;
@@ -59,6 +80,7 @@ private:
 
     Problem& m_problem;
     bool m_show_progress = false;
+    IFDSIDESolverConfig m_config;
 
     // Bounded solver state (0 = unbounded)
     size_t m_max_steps = 0;
@@ -84,6 +106,12 @@ private:
 
     std::unordered_map<const llvm::Instruction*, std::set<PathEdgeType>> m_path_edges_at;
 
+    // Flow function result caches (key -> FactSet) to avoid recomputation
+    using NormalFlowKey = std::pair<const llvm::Instruction*, Fact>;
+    using CallToReturnFlowKey = std::pair<const llvm::CallInst*, Fact>;
+    std::unordered_map<NormalFlowKey, FactSet, PairHash<const llvm::Instruction*, Fact>> m_normal_flow_cache;
+    std::unordered_map<CallToReturnFlowKey, FactSet, PairHash<const llvm::CallInst*, Fact>> m_call_to_return_flow_cache;
+
     // Call graph information (read-only after initialization)
     std::unordered_map<const llvm::CallInst*, const llvm::Function*> m_call_to_callee;
     std::unordered_map<const llvm::Function*, std::vector<const llvm::CallInst*>> m_callee_to_calls;
@@ -100,8 +128,8 @@ private:
     void process_return_edge(const PathEdgeType& current_edge, const llvm::ReturnInst* ret);
     void process_call_to_return_edge(const PathEdgeType& current_edge, const llvm::CallInst* call);
 
-    // Helper methods
-    const llvm::Instruction* get_return_site(const llvm::CallInst* call) const;
+    // Helper methods: return sites = all CFG successors of the call (e.g. normal + unwind for invoke)
+    std::vector<const llvm::Instruction*> get_return_sites(const llvm::CallInst* call) const;
     std::vector<const llvm::Instruction*> get_successors(const llvm::Instruction* inst) const;
 
     // Initialization methods

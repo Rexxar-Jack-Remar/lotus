@@ -21,13 +21,34 @@
 #include <llvm/IR/Value.h>
 
 #include "Dataflow/IFDS/IFDSFramework.h"
+#include "Dataflow/IFDS/IFDSIDESolverConfig.h"
 
 #include <memory>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace ifds {
+
+namespace detail {
+template<typename A, typename B, typename C>
+struct TripleHash {
+    size_t operator()(const std::tuple<A, B, C>& t) const {
+        return std::hash<A>{}(std::get<0>(t)) ^
+               (std::hash<B>{}(std::get<1>(t)) << 1) ^
+               (std::hash<C>{}(std::get<2>(t)) << 2);
+    }
+};
+template<typename A, typename B, typename C>
+struct TripleEq {
+    bool operator()(const std::tuple<A, B, C>& a, const std::tuple<A, B, C>& b) const {
+        return std::get<0>(a) == std::get<0>(b) &&
+               std::get<1>(a) == std::get<1>(b) &&
+               std::get<2>(a) == std::get<2>(b);
+    }
+};
+} // namespace detail
 
 // ============================================================================
 // IDE Solver
@@ -48,6 +69,11 @@ public:
 
     void solve(const llvm::Module& module);
 
+    // Solver configuration (unbalanced returns, etc.)
+    void set_solver_config(IFDSIDESolverConfig config) { m_config = std::move(config); }
+    IFDSIDESolverConfig& get_solver_config() { return m_config; }
+    const IFDSIDESolverConfig& get_solver_config() const { return m_config; }
+
     // Bounded solver: optional step limit (0 = unbounded). When the bound is reached,
     // the solver stops and returns a partial result.
     void set_max_steps(size_t max_steps) { m_max_steps = max_steps; }
@@ -57,6 +83,9 @@ public:
 
     // Query interface
     Value get_value_at(const llvm::Instruction* inst, const Fact& fact) const;
+    /// Returns value at the given instruction in LLVM SSA style: for non-void
+    /// instructions, returns value at the successor where the def is valid.
+    Value get_value_at_in_llvm_ssa(const llvm::Instruction* inst, const Fact& fact) const;
     const std::unordered_map<const llvm::Instruction*,
                             std::unordered_map<Fact, Value>>& get_all_values() const;
 
@@ -118,6 +147,7 @@ private:
     EdgeFunctionPtr make_edge_function(const EdgeFunction& ef);
 
     Problem& m_problem;
+    IFDSIDESolverConfig m_config;
 
     // Bounded solver state (0 = unbounded)
     size_t m_max_steps = 0;
@@ -141,6 +171,16 @@ private:
 
     // Composition memoization table
     std::unordered_map<ComposePair, EdgeFunctionPtr, ComposePairHash> m_compose_cache;
+
+    // Edge function caches (avoid recomputing same edge function)
+    using NormalEdgeKey = std::tuple<const llvm::Instruction*, Fact, Fact>;
+    using CallToReturnEdgeKey = std::tuple<const llvm::CallInst*, Fact, Fact>;
+    std::unordered_map<NormalEdgeKey, EdgeFunctionPtr,
+                      detail::TripleHash<const llvm::Instruction*, Fact, Fact>,
+                      detail::TripleEq<const llvm::Instruction*, Fact, Fact>> m_normal_edge_cache;
+    std::unordered_map<CallToReturnEdgeKey, EdgeFunctionPtr,
+                      detail::TripleHash<const llvm::CallInst*, Fact, Fact>,
+                      detail::TripleEq<const llvm::CallInst*, Fact, Fact>> m_call_to_return_edge_cache;
 
     // Worklist of path edges with edge functions
     std::vector<std::pair<PathEdgeType, EdgeFunctionPtr>> m_worklist;
