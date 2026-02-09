@@ -1,16 +1,18 @@
 #ifndef ANALYSIS_MONO_SOLVER_INTRAMONOSOLVER_H_
 #define ANALYSIS_MONO_SOLVER_INTRAMONOSOLVER_H_
 
-#include "Dataflow/Mono/IntraMonoProblem.h"
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
-
 #include "llvm/IR/CFG.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
+#include "Dataflow/Mono/Debug/MonoDebug.h"
+#include "Dataflow/Mono/IntraMonoProblem.h"
+
 #include <algorithm>
+#include <chrono>
 #include <deque>
-#include <unordered_set>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -26,26 +28,67 @@ public:
   explicit IntraMonoSolver(ProblemTy &Problem)
       : Problem(Problem), CFG(selectCFG()) {}
 
+  void setDebugConfig(const DebugConfig &Config) { DebugCfg = Config; }
+
+  const DebugConfig &getDebugConfig() const { return DebugCfg; }
+
+  const SolverStatistics &getStatistics() const { return Stats; }
+
   void solve() {
+    auto start_time = std::chrono::steady_clock::now();
+
+    MONO_TRACE_WORKLIST(llvm::outs(), DebugCfg,
+                        "Starting IntraMonoSolver::solve()");
+
     initialize();
+
+    auto init_end_time = std::chrono::steady_clock::now();
+    Stats.initialization_time =
+        std::chrono::duration_cast<std::chrono::microseconds>(init_end_time -
+                                                              start_time);
+
+    auto solve_start_time = std::chrono::steady_clock::now();
+
     while (!Worklist.empty()) {
+      Stats.record_worklist_size(Worklist.size());
+      Stats.iterations++;
+
+      if (DebugCfg.is_enabled(DebugLevel::Debug) &&
+          Stats.iterations <= DebugCfg.max_iterations_log) {
+        llvm::outs() << "[WORKLIST] Iteration " << Stats.iterations
+                     << ", size=" << Worklist.size() << "\n";
+      }
+
       auto Edge = Worklist.front();
       Worklist.pop_front();
+      Stats.worklist_total_pops++;
+
       auto Src = Edge.first;
       auto Dst = Edge.second;
 
+      MONO_TRACE_WORKLIST(llvm::outs(), DebugCfg,
+                          "Processing edge: " << Src << " -> " << Dst);
+
+      Stats.flow_function_calls++;
       auto Out = Problem.normalFlow(Src, AnalysisIn[Src]);
+
       if (CFG->isBranchTarget(Src, Dst, Problem.direction())) {
+        MONO_TRACE_MERGE(llvm::outs(), DebugCfg,
+                         "Branch target detected at " << Dst);
         for (auto Pred : CFG->getPredsOf(Dst, Problem.direction())) {
           if (Pred == Src) {
             continue;
           }
+          Stats.flow_function_calls++;
+          Stats.merge_operations++;
           auto OtherOut = Problem.normalFlow(Pred, AnalysisIn[Pred]);
           Out = Problem.merge(Out, OtherOut);
         }
       }
 
+      Stats.stabilization_checks++;
       if (!Problem.equal_to(Out, AnalysisIn[Dst])) {
+        MONO_TRACE_FACTS(llvm::outs(), DebugCfg, "Facts changed at " << Dst);
         AnalysisIn[Dst] = Out;
         for (auto Succ : CFG->getSuccsOf(Dst, Problem.direction())) {
           Worklist.push_back({Dst, Succ});
@@ -56,9 +99,25 @@ public:
     for (auto &Entry : AnalysisIn) {
       AnalysisOut[Entry.first] = Problem.normalFlow(Entry.first, Entry.second);
     }
+
+    auto solve_end_time = std::chrono::steady_clock::now();
+    Stats.solving_time = std::chrono::duration_cast<std::chrono::microseconds>(
+        solve_end_time - solve_start_time);
+    Stats.total_time = std::chrono::duration_cast<std::chrono::microseconds>(
+        solve_end_time - start_time);
+
+    MONO_TRACE_WORKLIST(llvm::outs(), DebugCfg,
+                        "IntraMonoSolver finished after " << Stats.iterations
+                                                          << " iterations");
+
+    if (DebugCfg.collect_statistics) {
+      Stats.dump(llvm::outs());
+    }
   }
 
-  const mono_container_t &getResultsAt(n_t Stmt) const { return getInResultsAt(Stmt); }
+  const mono_container_t &getResultsAt(n_t Stmt) const {
+    return getInResultsAt(Stmt);
+  }
 
   const mono_container_t &getInResultsAt(n_t Stmt) const {
     auto It = AnalysisIn.find(Stmt);
@@ -93,8 +152,9 @@ public:
     std::vector<std::pair<n_t, mono_container_t>> Cells;
     Cells.reserve(AnalysisIn.size());
     Cells.insert(Cells.end(), AnalysisIn.begin(), AnalysisIn.end());
-    std::sort(Cells.begin(), Cells.end(),
-              [](const auto &Lhs, const auto &Rhs) { return Lhs.first < Rhs.first; });
+    std::sort(Cells.begin(), Cells.end(), [](const auto &Lhs, const auto &Rhs) {
+      return Lhs.first < Rhs.first;
+    });
     for (const auto &Cell : Cells) {
       n_t Node = Cell.first;
       const auto &Facts = Cell.second;
@@ -177,6 +237,8 @@ private:
   std::unordered_map<n_t, mono_container_t> AnalysisIn;
   std::unordered_map<n_t, mono_container_t> AnalysisOut;
   mono_container_t DefaultValue{};
+  DebugConfig DebugCfg;
+  SolverStatistics Stats;
 };
 
 template <typename Problem>

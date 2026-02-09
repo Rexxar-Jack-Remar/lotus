@@ -10,6 +10,7 @@
 #include "Dataflow/IFDS/IFDSIDESolverConfig.h"
 
 #include <utility>
+#include <vector>
 
 namespace ifds {
 
@@ -146,7 +147,7 @@ private:
              (std::hash<Fact>{}(k.second) << 1);
     }
   };
-  std::unordered_map<CallEdgeKey, CallEdgeInfo, CallEdgeKeyHash>
+  std::unordered_map<CallEdgeKey, std::vector<CallEdgeInfo>, CallEdgeKeyHash>
       m_call_edge_info;
 
   std::unordered_map<const llvm::Instruction *, std::set<PathEdgeType>>

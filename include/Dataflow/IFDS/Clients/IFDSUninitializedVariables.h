@@ -1,0 +1,121 @@
+/*
+ * IFDS Uninitialized Variables Analysis
+ *
+ * This analysis detects uses of uninitialized variables.
+ * It tracks which memory locations have been initialized through stores
+ * and reports uses of values that may be uninitialized.
+ */
+
+#pragma once
+
+#include "Dataflow/IFDS/IFDSFramework.h"
+
+#include <map>
+#include <set>
+
+#include <llvm/IR/Instructions.h>
+
+namespace ifds {
+
+// ============================================================================
+// Uninitialized Variables Fact
+// ============================================================================
+
+struct UninitVarFact {
+  enum Type {
+    ZERO,          // Lambda fact
+    UNINITIALIZED, // Memory location is uninitialized
+    INITIALIZED    // Memory location has been initialized
+  };
+
+  Type type;
+  const llvm::Value *value; // The memory location or value
+
+  UninitVarFact() : type(ZERO), value(nullptr) {}
+  UninitVarFact(Type t, const llvm::Value *v) : type(t), value(v) {}
+
+  static UninitVarFact zero() { return UninitVarFact(ZERO, nullptr); }
+  static UninitVarFact uninitialized(const llvm::Value *v) {
+    return UninitVarFact(UNINITIALIZED, v);
+  }
+  static UninitVarFact initialized(const llvm::Value *v) {
+    return UninitVarFact(INITIALIZED, v);
+  }
+
+  bool operator==(const UninitVarFact &other) const {
+    return type == other.type && value == other.value;
+  }
+
+  bool operator<(const UninitVarFact &other) const {
+    if (type != other.type)
+      return type < other.type;
+    return value < other.value;
+  }
+
+  bool is_zero() const { return type == ZERO; }
+  bool is_uninitialized() const { return type == UNINITIALIZED; }
+  bool is_initialized() const { return type == INITIALIZED; }
+};
+
+} // namespace ifds
+
+namespace std {
+template <> struct hash<ifds::UninitVarFact> {
+  size_t operator()(const ifds::UninitVarFact &fact) const {
+    return std::hash<int>{}(static_cast<int>(fact.type)) ^
+           (std::hash<const llvm::Value *>{}(fact.value) << 1);
+  }
+};
+} // namespace std
+
+namespace ifds {
+
+// ============================================================================
+// Uninitialized Variables Analysis
+// ============================================================================
+
+class UninitializedVariablesAnalysis : public IFDSProblem<UninitVarFact> {
+public:
+  struct UninitResult {
+    const llvm::Instruction *use_site;
+    const llvm::Value *uninitialized_value;
+    std::set<const llvm::Instruction *> trace;
+
+    UninitResult(const llvm::Instruction *use, const llvm::Value *val)
+        : use_site(use), uninitialized_value(val) {}
+  };
+
+private:
+  std::map<const llvm::Instruction *, std::set<const llvm::Value *>> undef_uses;
+  std::set<const llvm::Value *> initialized_locations;
+
+public:
+  UninitializedVariablesAnalysis();
+
+  // IFDS interface implementation
+  UninitVarFact zero_fact() const override;
+  FactSet normal_flow(const llvm::Instruction *stmt,
+                      const UninitVarFact &fact) override;
+  FactSet call_flow(const llvm::CallInst *call, const llvm::Function *callee,
+                    const UninitVarFact &fact) override;
+  FactSet return_flow(const llvm::CallInst *call, const llvm::Function *callee,
+                      const UninitVarFact &exit_fact,
+                      const UninitVarFact &call_fact) override;
+  FactSet call_to_return_flow(const llvm::CallInst *call,
+                              const UninitVarFact &fact) override;
+  FactSet initial_facts(const llvm::Function *main) override;
+
+  // Source detection - uninitialized variable uses are "sources" of bugs
+  bool is_source(const llvm::Instruction *inst) const override;
+
+  // Results
+  std::vector<UninitResult> get_results() const;
+  void emit_report(llvm::raw_ostream &OS = llvm::outs()) const;
+
+private:
+  bool is_initialized(const llvm::Value *val) const;
+  void mark_initialized(const llvm::Value *val);
+  bool may_be_uninitialized(const llvm::Value *val, const FactSet &facts) const;
+};
+
+} // namespace ifds

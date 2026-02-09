@@ -131,11 +131,12 @@ bool IFDSSolver<Problem>::propagate_path_edge(const PathEdgeType& edge) {
         return false;
     }
 
-    // Add to worklist for processing
-    m_worklist.push_back(edge);
-
-    // Track facts at instruction entry.
-    m_entry_facts[edge.target_node].insert(edge.target_fact);
+    // Join semantics: only add to worklist if the fact is new at the target node,
+    // to avoid redundant processing when the same (node, fact) is reached via another path.
+    bool fact_new_at_target = (m_entry_facts[edge.target_node].insert(edge.target_fact).second);
+    if (fact_new_at_target) {
+        m_worklist.push_back(edge);
+    }
 
     return true;
 }
@@ -194,7 +195,7 @@ void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
 
         // Track call edge info for restoring caller context on return
         CallEdgeInfo edge_info{call, entry_fact, current_edge.start_node, current_edge.start_fact};
-        m_call_edge_info[{callee, entry_fact}] = edge_info;
+        m_call_edge_info[{callee, entry_fact}].push_back(edge_info);
 
         // Propagate into callee
         propagate_path_edge(PathEdgeType(callee_entry, entry_fact, callee_entry, entry_fact));
@@ -208,9 +209,11 @@ void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
                 if (m_problem.auto_add_zero() && m_problem.is_zero_fact(return_fact)) {
                     return_facts.insert(m_problem.zero_fact());
                 }
-                for (const auto& rf : return_facts) {
-                    propagate_path_edge(PathEdgeType(current_edge.start_node, current_edge.start_fact,
-                                                     get_return_sites(call).front(), rf));
+                for (const llvm::Instruction* return_site : get_return_sites(call)) {
+                    for (const auto& rf : return_facts) {
+                        propagate_path_edge(PathEdgeType(current_edge.start_node, current_edge.start_fact,
+                                                         return_site, rf));
+                    }
                 }
             }
         }
@@ -234,35 +237,36 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
     auto& return_facts_set = m_summaries[summary_key];
     return_facts_set.insert(exit_fact);
 
-    // Look up the call edge info to restore caller context
+    // Look up the call edge info to restore caller context (may have multiple call sites)
     auto call_edge_it = m_call_edge_info.find({func, start_fact});
     if (call_edge_it != m_call_edge_info.end()) {
-        const CallEdgeInfo& edge_info = call_edge_it->second;
         had_incoming = true;
+        for (const CallEdgeInfo& edge_info : call_edge_it->second) {
+            // Compute return facts using the return flow function
+            FactSet return_facts = m_problem.return_flow(edge_info.call_node, func, exit_fact, start_fact);
+            if (m_problem.auto_add_zero() && m_problem.is_zero_fact(exit_fact)) {
+                return_facts.insert(m_problem.zero_fact());
+            }
 
-        // Compute return facts using the return flow function
-        FactSet return_facts = m_problem.return_flow(edge_info.call_node, func, exit_fact, start_fact);
-        if (m_problem.auto_add_zero() && m_problem.is_zero_fact(exit_fact)) {
-            return_facts.insert(m_problem.zero_fact());
-        }
+            // Create summary edge (cast instruction to CallInst)
+            auto* call_inst = llvm::cast<llvm::CallInst>(edge_info.call_node);
+            SummaryEdgeType new_summary(call_inst, start_fact, exit_fact);
+            m_summary_edges.insert(new_summary);
 
-        // Create summary edge (cast instruction to CallInst)
-        auto* call_inst = llvm::cast<llvm::CallInst>(edge_info.call_node);
-        SummaryEdgeType new_summary(call_inst, start_fact, exit_fact);
-        m_summary_edges.insert(new_summary);
-
-        for (const llvm::Instruction* return_site : get_return_sites(call_inst)) {
-            for (const Fact& return_fact : return_facts) {
-                propagate_path_edge(PathEdgeType(edge_info.source_node, edge_info.source_fact,
-                                                return_site, return_fact));
+            for (const llvm::Instruction* return_site : get_return_sites(call_inst)) {
+                for (const Fact& return_fact : return_facts) {
+                    propagate_path_edge(PathEdgeType(edge_info.source_node, edge_info.source_fact,
+                                                    return_site, return_fact));
+                }
             }
         }
     }
 
-    // Unbalanced returns: propagate to all return sites of all callers with zero fact
-    if (m_config.follow_returns_past_seeds() && !had_incoming && !m_callee_to_calls.empty()) {
+    // Unbalanced returns: propagate to all return sites of all callers of this function with zero fact
+    auto callee_calls_it = m_callee_to_calls.find(func);
+    if (m_config.follow_returns_past_seeds() && !had_incoming && callee_calls_it != m_callee_to_calls.end()) {
         Fact zero = m_problem.zero_fact();
-        for (const llvm::CallInst* call : m_callee_to_calls.begin()->second) {
+        for (const llvm::CallInst* call : callee_calls_it->second) {
             FactSet return_facts = m_problem.return_flow(call, func, exit_fact, zero);
             if (m_problem.auto_add_zero()) {
                 return_facts.insert(zero);
