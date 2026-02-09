@@ -15,6 +15,13 @@ class IntraCFG;
 class InterCFG;
 class LLVMIntraCFG;
 class LLVMInterCFG;
+} // namespace mono
+
+namespace lotus {
+class AliasAnalysisWrapper;
+}
+
+namespace mono {
 
 template <typename ContainerT> struct LLVMMonoAnalysisDomain {
   using n_t = llvm::Instruction *;
@@ -29,7 +36,7 @@ template <typename ContainerT> struct LLVMMonoAnalysisDomain {
   using i_t = mono::InterCFG;
 
   // Placeholder points-to type for LLVM-only Mono analyses.
-  using pt_t = std::nullptr_t;
+  using pt_t = lotus::AliasAnalysisWrapper *;
 
   using mono_container_t = ContainerT;
 };

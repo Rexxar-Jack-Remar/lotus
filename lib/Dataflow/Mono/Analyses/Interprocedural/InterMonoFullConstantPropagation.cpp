@@ -2,9 +2,12 @@
 
 #include "Dataflow/Mono/InterMonoProblem.h"
 #include "Dataflow/Mono/Solver/InterMonoSolver.h"
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
+
+#include <memory>
 
 using namespace llvm;
 
@@ -117,8 +120,10 @@ struct FullDomain : LLVMMonoAnalysisDomain<FullConstantPropagationState> {};
 class InterMonoFullConstantPropagation
     : public InterMonoProblem<FullDomain> {
 public:
-  explicit InterMonoFullConstantPropagation(Function *Entry)
-      : InterMonoProblem<FullDomain>(std::vector<Function *>{Entry}) {}
+  explicit InterMonoFullConstantPropagation(Function *Entry,
+                                             lotus::AliasAnalysisWrapper *AA)
+      : InterMonoProblem<FullDomain>(std::vector<Function *>{Entry}, AA),
+        AA(AA) {}
 
   mono_container_t allTop() override {
     return mono_container_t{};
@@ -145,6 +150,7 @@ public:
       }
       auto *Ptr = Store->getPointerOperand();
       Out.Values[Ptr] = resolveValue(In, Store->getValueOperand());
+      writeAliases(Ptr, Out.Values[Ptr], Out);
       return Out;
     }
 
@@ -153,7 +159,7 @@ public:
       if (It != In.Values.end()) {
         Out.Values[Load] = It->second;
       } else {
-        Out.Values[Load] = FullConstantValue::top();
+        Out.Values[Load] = resolveAliasValue(Load->getPointerOperand(), In);
       }
       return Out;
     }
@@ -284,6 +290,51 @@ public:
     Seeds[&F->getEntryBlock().front()] = Init;
     return Seeds;
   }
+
+private:
+  lotus::AliasAnalysisWrapper *AA;
+
+  FullConstantValue resolveAliasValue(const Value *Ptr,
+                                      const mono_container_t &In) const {
+    if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
+        !Ptr->getType()->isPointerTy()) {
+      return FullConstantValue::top();
+    }
+    std::vector<const Value *> Aliases;
+    if (!AA->getAliasSet(Ptr, Aliases)) {
+      return FullConstantValue::top();
+    }
+    bool Found = false;
+    FullConstantValue Val = FullConstantValue::top();
+    for (const auto *Alias : Aliases) {
+      auto It = In.Values.find(Alias);
+      if (It == In.Values.end()) {
+        continue;
+      }
+      if (!Found) {
+        Val = It->second;
+        Found = true;
+      } else if (!(Val == It->second)) {
+        return FullConstantValue::top();
+      }
+    }
+    return Found ? Val : FullConstantValue::top();
+  }
+
+  void writeAliases(const Value *Ptr, const FullConstantValue &Val,
+                    mono_container_t &Out) const {
+    if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
+        !Ptr->getType()->isPointerTy()) {
+      return;
+    }
+    std::vector<const Value *> Aliases;
+    if (!AA->getAliasSet(Ptr, Aliases)) {
+      return;
+    }
+    for (const auto *Alias : Aliases) {
+      Out.Values[Alias] = Val;
+    }
+  }
 };
 
 } // namespace
@@ -295,7 +346,12 @@ runInterMonoFullConstantPropagation(Function *Entry) {
     return Result;
   }
 
-  InterMonoFullConstantPropagation Problem(Entry);
+  auto AA = std::make_unique<lotus::AliasAnalysisWrapper>(
+      *Entry->getParent(),
+      lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
+                      lotus::AAConfig::ContextSensitivity::None, 0, true,
+                      lotus::AAConfig::Solver::Default));
+  InterMonoFullConstantPropagation Problem(Entry, AA.get());
   InterMonoSolver<FullDomain, kDefaultFullConstantPropagationCallStringLength> Solver(Problem);
   Solver.solve();
 
@@ -307,4 +363,3 @@ runInterMonoFullConstantPropagation(Function *Entry) {
 }
 
 } // namespace mono
-

@@ -2,6 +2,7 @@
 #include "Dataflow/Mono/IntraMonoProblem.h"
 #include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
 #include "Dataflow/Mono/Solver/IntraMonoSolver.h"
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
@@ -9,6 +10,7 @@
 #include "llvm/IR/Instructions.h"
 
 #include <algorithm>
+#include <memory>
 #include <set>
 
 using namespace llvm;
@@ -20,9 +22,10 @@ struct UninitVariablesDomain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
 
 class UninitVariablesProblem : public IntraMonoProblem<UninitVariablesDomain> {
 public:
-  explicit UninitVariablesProblem(Function *F)
-      : IntraMonoProblem<UninitVariablesDomain>({F}),
-        DL(&F->getParent()->getDataLayout()) {}
+  explicit UninitVariablesProblem(Function *F, lotus::AliasAnalysisWrapper *AA)
+      : IntraMonoProblem<UninitVariablesDomain>({F}, AA),
+        DL(&F->getParent()->getDataLayout()),
+        AA(AA) {}
 
   std::set<Value *> allTop() override { return {}; }
 
@@ -43,8 +46,7 @@ public:
         return Out;
       }
 
-      auto *StoredInst = dyn_cast<Instruction>(Val);
-      if (StoredInst != nullptr && In.count(StoredInst)) {
+      if (isUninitValue(Val, In)) {
         markAliasUninit(Out, Ptr);
       } else {
         clearAliasUninit(Out, Ptr);
@@ -53,21 +55,21 @@ public:
     }
 
     if (auto *Load = dyn_cast<LoadInst>(Inst)) {
-      if (In.count(Load->getPointerOperand())) {
+      if (isUninitValue(Load->getPointerOperand(), In)) {
         Out.insert(Load);
       }
       return Out;
     }
 
     if (auto *Bitcast = dyn_cast<BitCastInst>(Inst)) {
-      if (In.count(Bitcast->getOperand(0))) {
+      if (isUninitValue(Bitcast->getOperand(0), In)) {
         Out.insert(Bitcast);
       }
       return Out;
     }
 
     if (auto *GEP = dyn_cast<GetElementPtrInst>(Inst)) {
-      if (In.count(GEP->getPointerOperand())) {
+      if (isUninitValue(GEP->getPointerOperand(), In)) {
         Out.insert(GEP);
       }
       return Out;
@@ -85,8 +87,8 @@ public:
     }
 
     if (auto *Select = dyn_cast<SelectInst>(Inst)) {
-      if (In.count(Select->getTrueValue()) ||
-          In.count(Select->getFalseValue())) {
+      if (isUninitValue(Select->getTrueValue(), In) ||
+          isUninitValue(Select->getFalseValue(), In)) {
         Out.insert(Select);
       }
       return Out;
@@ -125,12 +127,49 @@ public:
 
 private:
   const DataLayout *DL;
+  lotus::AliasAnalysisWrapper *AA;
 
   const Value *getBaseObject(const Value *V) const {
     return llvm::getUnderlyingObject(V);
   }
 
+  bool isUninitValue(const Value *V, const std::set<Value *> &In) const {
+    if (V == nullptr) {
+      return false;
+    }
+    if (In.count(const_cast<Value *>(V))) {
+      return true;
+    }
+    if (AA == nullptr || !AA->isInitialized()) {
+      return false;
+    }
+    if (!V->getType()->isPointerTy()) {
+      return false;
+    }
+    std::vector<const Value *> Aliases;
+    if (!AA->getAliasSet(V, Aliases)) {
+      return false;
+    }
+    for (const auto *Alias : Aliases) {
+      if (In.count(const_cast<Value *>(Alias))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void clearAliasUninit(std::set<Value *> &Out, const Value *Ptr) const {
+    if (AA != nullptr && AA->isInitialized() && Ptr != nullptr &&
+        Ptr->getType()->isPointerTy()) {
+      std::vector<const Value *> Aliases;
+      if (AA->getAliasSet(Ptr, Aliases)) {
+        for (const auto *Alias : Aliases) {
+          Out.erase(const_cast<Value *>(Alias));
+        }
+      }
+      Out.erase(const_cast<Value *>(Ptr));
+      return;
+    }
     auto *Base = getBaseObject(Ptr);
     for (auto It = Out.begin(); It != Out.end();) {
       auto *Candidate = *It;
@@ -174,7 +213,7 @@ private:
       if (Call->arg_size() >= 2) {
         auto *Dest = Call->getArgOperand(0);
         auto *Src = Call->getArgOperand(1);
-        if (Out.count(Src)) {
+        if (isUninitValue(Src, Out)) {
           markAliasUninit(Out, Dest);
         } else {
           clearAliasUninit(Out, Dest);
@@ -192,7 +231,12 @@ std::unique_ptr<DataFlowResult> runIntraMonoUninitVariables(Function *F) {
     return nullptr;
   }
 
-  UninitVariablesProblem Problem(F);
+  auto AA = std::make_unique<lotus::AliasAnalysisWrapper>(
+      *F->getParent(),
+      lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
+                      lotus::AAConfig::ContextSensitivity::None, 0, true,
+                      lotus::AAConfig::Solver::Default));
+  UninitVariablesProblem Problem(F, AA.get());
   IntraMonoSolver<UninitVariablesDomain> Solver(Problem);
   Solver.solve();
 

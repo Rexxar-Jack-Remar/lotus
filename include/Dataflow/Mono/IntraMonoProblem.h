@@ -15,6 +15,10 @@
 #include <utility>
 #include <vector>
 
+namespace lotus {
+class AliasAnalysisWrapper;
+}
+
 namespace mono {
 
 struct HasNoConfigurationType {};
@@ -35,8 +39,9 @@ public:
 
   using ConfigurationTy = HasNoConfigurationType;
 
-  explicit IntraMonoProblem(std::vector<llvm::Function *> EntryPoints = {})
-      : EntryPoints(std::move(EntryPoints)) {}
+  explicit IntraMonoProblem(std::vector<llvm::Function *> EntryPoints = {},
+                            pt_t PT = nullptr)
+      : PT(PT), EntryPoints(std::move(EntryPoints)) {}
 
   IntraMonoProblem(const db_t *IRDB, const c_t *CF, pt_t PT,
                    std::vector<std::string> EntryPointNames = {})
@@ -71,6 +76,7 @@ public:
   const c_t *getCFG() const { return CF; }
 
   pt_t getPointstoInfo() const { return PT; }
+  pt_t getAliasAnalysis() const { return PT; }
 
   virtual bool setSoundness(Soundness /*S*/) { return false; }
 

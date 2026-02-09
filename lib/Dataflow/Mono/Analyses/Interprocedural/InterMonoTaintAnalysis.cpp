@@ -1,8 +1,11 @@
 #include "Dataflow/Mono/Analyses/Interprocedural/InterMonoTaintAnalysis.h"
 #include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
 #include "Dataflow/Mono/Solver/InterMonoSolver.h"
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/IR/Instructions.h"
+
+#include <memory>
 
 using namespace llvm;
 
@@ -15,8 +18,9 @@ class InterMonoTaintProblem : public InterMonoProblem<TaintDomain> {
 public:
   using mono_container_t = typename TaintDomain::mono_container_t;
 
-  InterMonoTaintProblem(Function *Entry, const InterMonoTaintConfig &Config)
-      : InterMonoProblem<TaintDomain>({Entry}), Config(Config) {}
+  InterMonoTaintProblem(Function *Entry, const InterMonoTaintConfig &Config,
+                        lotus::AliasAnalysisWrapper *AA)
+      : InterMonoProblem<TaintDomain>({Entry}, AA), Config(Config), AA(AA) {}
 
   mono_container_t normalFlow(Instruction *Inst,
                               const mono_container_t &In) override {
@@ -121,6 +125,51 @@ public:
   }
 
 private:
+  bool isTaintedValue(const Value *V, const mono_container_t &In) const {
+    if (V == nullptr) {
+      return false;
+    }
+    if (In.count(const_cast<Value *>(V))) {
+      return true;
+    }
+    if (AA == nullptr || !AA->isInitialized()) {
+      return false;
+    }
+    if (!V->getType()->isPointerTy()) {
+      return false;
+    }
+    std::vector<const Value *> Aliases;
+    if (!AA->getAliasSet(V, Aliases)) {
+      return false;
+    }
+    for (const auto *Alias : Aliases) {
+      if (In.count(const_cast<Value *>(Alias))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void taintAliases(Value *Ptr, mono_container_t &Out) const {
+    if (Ptr == nullptr) {
+      return;
+    }
+    Out.insert(Ptr);
+    if (AA == nullptr || !AA->isInitialized()) {
+      return;
+    }
+    if (!Ptr->getType()->isPointerTy()) {
+      return;
+    }
+    std::vector<const Value *> Aliases;
+    if (!AA->getAliasSet(Ptr, Aliases)) {
+      return;
+    }
+    for (const auto *Alias : Aliases) {
+      Out.insert(const_cast<Value *>(Alias));
+    }
+  }
+
   bool isSourceFunction(const Function *F) const {
     if (F == nullptr) {
       return false;
@@ -152,15 +201,22 @@ private:
     mono_container_t Out = In;
 
     if (auto *Store = dyn_cast<StoreInst>(Inst)) {
-      if (In.count(Store->getValueOperand())) {
-        Out.insert(Store->getPointerOperand());
+      if (isTaintedValue(Store->getValueOperand(), In)) {
+        taintAliases(Store->getPointerOperand(), Out);
+      }
+      return Out;
+    }
+
+    if (auto *Load = dyn_cast<LoadInst>(Inst)) {
+      if (isTaintedValue(Load->getPointerOperand(), In)) {
+        Out.insert(Load);
       }
       return Out;
     }
 
     if (!Inst->getType()->isVoidTy()) {
       for (auto &Op : Inst->operands()) {
-        if (In.count(Op.get())) {
+        if (isTaintedValue(Op.get(), In)) {
           Out.insert(Inst);
           break;
         }
@@ -183,7 +239,7 @@ private:
       if (Config.TaintPointerArgsFromSources) {
         for (auto &Arg : Call->args()) {
           if (Arg->getType()->isPointerTy()) {
-            Out.insert(Arg.get());
+            taintAliases(Arg.get(), Out);
           }
         }
       }
@@ -194,6 +250,7 @@ private:
 
   const InterMonoTaintConfig &Config;
   InterMonoTaintReport Report;
+  lotus::AliasAnalysisWrapper *AA;
 };
 
 } // namespace
@@ -205,7 +262,12 @@ runInterMonoTaintAnalysis(Function *Entry, const InterMonoTaintConfig &Config) {
     return Result;
   }
 
-  InterMonoTaintProblem Problem(Entry, Config);
+  auto AA = std::make_unique<lotus::AliasAnalysisWrapper>(
+      *Entry->getParent(),
+      lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
+                      lotus::AAConfig::ContextSensitivity::None, 0, true,
+                      lotus::AAConfig::Solver::Default));
+  InterMonoTaintProblem Problem(Entry, Config, AA.get());
   InterMonoSolver<TaintDomain, kDefaultTaintCallStringLength> Solver(Problem);
   Solver.solve();
 

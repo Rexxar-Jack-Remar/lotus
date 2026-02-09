@@ -22,12 +22,13 @@ public:
   using i_t = typename AnalysisDomainTy::i_t;
   using pt_t = typename AnalysisDomainTy::pt_t;
 
-  explicit InterMonoProblem(std::vector<llvm::Function *> EntryPoints = {})
-      : IntraMonoProblem<AnalysisDomainTy>(std::move(EntryPoints)) {}
+  explicit InterMonoProblem(std::vector<llvm::Function *> EntryPoints = {},
+                            pt_t PT = nullptr)
+      : IntraMonoProblem<AnalysisDomainTy>(std::move(EntryPoints), PT) {}
 
   InterMonoProblem(const db_t *IRDB, const i_t *ICF, pt_t PT,
                    std::vector<std::string> EntryPointNames = {})
-      : IntraMonoProblem<AnalysisDomainTy>(IRDB, nullptr, std::move(PT),
+      : IntraMonoProblem<AnalysisDomainTy>(IRDB, ICF, std::move(PT),
                                            std::move(EntryPointNames)),
         ICF(ICF) {}
 

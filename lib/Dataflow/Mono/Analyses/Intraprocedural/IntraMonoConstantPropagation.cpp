@@ -3,9 +3,12 @@
  * Author: rainoftime
  */
 #include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoConstantPropagation.h"
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
+
+#include <memory>
 
 namespace mono {
 namespace {
@@ -103,8 +106,9 @@ ConstantPropagationValue evalBinaryOp(unsigned Opcode,
 class IntraMonoConstantPropagation
     : public IntraMonoProblem<ConstantPropagationDomain> {
 public:
-  explicit IntraMonoConstantPropagation(llvm::Function *F)
-      : IntraMonoProblem<ConstantPropagationDomain>({F}) {}
+  explicit IntraMonoConstantPropagation(llvm::Function *F,
+                                        lotus::AliasAnalysisWrapper *AA)
+      : IntraMonoProblem<ConstantPropagationDomain>({F}, AA), AA(AA) {}
 
   ConstantPropagationMap normalFlow(llvm::Instruction *Inst,
                                     const ConstantPropagationMap &In) override {
@@ -126,6 +130,7 @@ public:
       auto Val = resolveValue(In, Store->getValueOperand());
       if (!isBottom(Val)) {
         Out[Ptr] = Val;
+        writeAliases(Ptr, Val, Out);
       }
       return Out;
     }
@@ -134,6 +139,8 @@ public:
       auto It = In.find(Load->getPointerOperand());
       if (It != In.end()) {
         Out[Load] = It->second;
+      } else {
+        Out[Load] = resolveAliasValue(Load->getPointerOperand(), In);
       }
       return Out;
     }
@@ -201,6 +208,51 @@ public:
       OS << "\n";
     }
   }
+
+private:
+  lotus::AliasAnalysisWrapper *AA;
+
+  ConstantPropagationValue resolveAliasValue(const llvm::Value *Ptr,
+                                             const ConstantPropagationMap &In) const {
+    if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
+        !Ptr->getType()->isPointerTy()) {
+      return makeTop();
+    }
+    std::vector<const llvm::Value *> Aliases;
+    if (!AA->getAliasSet(Ptr, Aliases)) {
+      return makeTop();
+    }
+    bool Found = false;
+    ConstantPropagationValue Val = makeTop();
+    for (const auto *Alias : Aliases) {
+      auto It = In.find(Alias);
+      if (It == In.end()) {
+        continue;
+      }
+      if (!Found) {
+        Val = It->second;
+        Found = true;
+      } else if (!equalValue(Val, It->second)) {
+        return makeBottom();
+      }
+    }
+    return Found ? Val : makeTop();
+  }
+
+  void writeAliases(const llvm::Value *Ptr, const ConstantPropagationValue &Val,
+                    ConstantPropagationMap &Out) const {
+    if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
+        !Ptr->getType()->isPointerTy()) {
+      return;
+    }
+    std::vector<const llvm::Value *> Aliases;
+    if (!AA->getAliasSet(Ptr, Aliases)) {
+      return;
+    }
+    for (const auto *Alias : Aliases) {
+      Out[Alias] = Val;
+    }
+  }
 };
 
 } // namespace
@@ -211,7 +263,12 @@ runIntraMonoConstantPropagation(llvm::Function *F) {
     return {};
   }
 
-  IntraMonoConstantPropagation Problem(F);
+  auto AA = std::make_unique<lotus::AliasAnalysisWrapper>(
+      *F->getParent(),
+      lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
+                      lotus::AAConfig::ContextSensitivity::None, 0, true,
+                      lotus::AAConfig::Solver::Default));
+  IntraMonoConstantPropagation Problem(F, AA.get());
   ConstantPropagationSolver Solver(Problem);
   Solver.solve();
   return Solver.getInResults();
