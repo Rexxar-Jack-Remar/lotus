@@ -20,7 +20,9 @@ public:
   explicit LiveVariablesProblem(Function *F)
       : IntraMonoProblem<LiveVariablesDomain>({F}) {}
 
-  FlowDirection direction() const override { return FlowDirection::Backward; }
+  ::dataflow::controlflow::FlowDirection direction() const override {
+    return ::dataflow::controlflow::FlowDirection::Backward;
+  }
 
   std::set<Value *> normalFlow(Instruction *Inst,
                                const std::set<Value *> &In) override {

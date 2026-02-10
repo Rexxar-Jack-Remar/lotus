@@ -3,12 +3,12 @@
  * Author: rainoftime
 */
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
+#include "Dataflow/ControlFlow/InterCFG.h"
 #include "Solvers/WPDS/CA.h"
 #include "Solvers/WPDS/SaturationProcess.h"
 #ifdef WITNESS_TRACE
 #include "Solvers/WPDS/Witness.h"
 #endif
-#include <llvm/IR/CFG.h>
 #include <sstream>
 #include <unordered_map>
 
@@ -116,6 +116,8 @@ void InterProceduralDataFlowEngine::buildWPDS(
     Module& m, 
     WPDS<GenKillTransformer>& wpds,
     const std::function<GenKillTransformer*(Instruction*)>& createTransformer) {
+    ::dataflow::controlflow::LLVMIntraCFG intraCfg;
+    ::dataflow::controlflow::LLVMInterCFG interCfg(&m);
     
     // Clear previous mappings
     functionToKey.clear();
@@ -198,9 +200,13 @@ void InterProceduralDataFlowEngine::buildWPDS(
                 wpds.add_rule(controlState, prevKey, controlState, instKey, transformer);
                 
                 // Handle different instruction types
-                if (auto* callInst = dyn_cast<CallInst>(&I)) {
-                    Function* calledFunc = callInst->getCalledFunction();
-                    if (calledFunc && !calledFunc->isDeclaration() && 
+                if (auto* callInst = dyn_cast<CallBase>(&I)) {
+                    const auto callees = interCfg.getCalleesOfCallAt(callInst);
+                    Function* calledFunc = nullptr;
+                    if (!callees.empty()) {
+                        calledFunc = callees.front();
+                    }
+                    if (calledFunc && !calledFunc->isDeclaration() &&
                         functionToKey.find(calledFunc) != functionToKey.end()) {
                         
                         // Interprocedural call: <q, instKey> -> <q, calledEntry, returnKey>
@@ -255,6 +261,23 @@ void InterProceduralDataFlowEngine::buildWPDS(
 
                         // Apply return-flow at the return site before the next instruction.
                         returnSiteTransformers[returnKey] = ::ref_ptr<GenKillTransformer>(retTrans);
+
+                        // For terminator calls (e.g., invoke/callbr), connect return-site
+                        // continuations through CFG to successor basic blocks.
+                        if (I.isTerminator()) {
+                            for (auto* retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
+                                if (retSite == nullptr) {
+                                    continue;
+                                }
+                                auto* retBB = retSite->getParent();
+                                auto bbIt = bbToKey.find(retBB);
+                                if (bbIt == bbToKey.end()) {
+                                    continue;
+                                }
+                                wpds.add_rule(controlState, returnKey, controlState,
+                                              bbIt->second, GenKillTransformer::one());
+                            }
+                        }
                         
                         prevKey = returnKey;
                         prevInst = &I;
@@ -282,8 +305,14 @@ void InterProceduralDataFlowEngine::buildWPDS(
                 wpds_key_t termKey = instToKey[terminator];
                 
                 // If terminator is not a return or call, connect to successors
-                if (!isa<ReturnInst>(terminator) && !isa<CallInst>(terminator)) {
-                    for (BasicBlock* succBB : successors(&BB)) {
+                if (!isa<ReturnInst>(terminator) && !isa<CallBase>(terminator)) {
+                    for (auto* succInst : intraCfg.getSuccsOf(
+                             terminator,
+                             ::dataflow::controlflow::FlowDirection::Forward)) {
+                        if (succInst == nullptr) {
+                            continue;
+                        }
+                        auto* succBB = succInst->getParent();
                         wpds_key_t succBBKey = bbToKey[succBB];
                         wpds.add_rule(controlState, termKey,
                                     controlState, succBBKey,
@@ -363,7 +392,7 @@ wpds_key_t InterProceduralDataFlowEngine::getKeyForBasicBlock(BasicBlock* bb) {
     return WPDS_EPSILON;
 }
 
-wpds_key_t InterProceduralDataFlowEngine::getKeyForCallSite(CallInst* callInst) {
+wpds_key_t InterProceduralDataFlowEngine::getKeyForCallSite(CallBase* callInst) {
     std::string instName = callInst->getName().str();
     if (instName.empty()) {
         instName = "inst_" + std::to_string((uintptr_t)callInst);
@@ -371,7 +400,7 @@ wpds_key_t InterProceduralDataFlowEngine::getKeyForCallSite(CallInst* callInst) 
     return str2key(("callsite_" + instName).c_str());
 }
 
-wpds_key_t InterProceduralDataFlowEngine::getKeyForReturnSite(CallInst* callInst) {
+wpds_key_t InterProceduralDataFlowEngine::getKeyForReturnSite(CallBase* callInst) {
     std::string instName = callInst->getName().str();
     if (instName.empty()) {
         instName = "inst_" + std::to_string((uintptr_t)callInst);
@@ -384,6 +413,7 @@ void InterProceduralDataFlowEngine::extractResults(
     CA<GenKillTransformer>& resultCA,
     std::unique_ptr<mono::DataFlowResult>& result,
     bool isForward) {
+    ::dataflow::controlflow::LLVMIntraCFG intraCfg;
     
     // First, compute OUT sets directly from WPDS weights; then derive IN.
     wpds_key_t queryInit = resultCA.initial_state();
@@ -429,10 +459,12 @@ void InterProceduralDataFlowEngine::extractResults(
                     // function entry; rely on path summary already seeded
                     // with initial facts; IN equals previous OUT of predecessors (none).
                 } else {
-                    for (auto* predBB : predecessors(inst->getParent())) {
-                        if (predBB->empty()) continue;
-                        Instruction* predTerm = predBB->getTerminator();
-                        auto& predOut = result->OUT(predTerm);
+                    for (auto* predInst : intraCfg.getPredsOf(
+                             inst, ::dataflow::controlflow::FlowDirection::Forward)) {
+                        if (predInst == nullptr) {
+                            continue;
+                        }
+                        auto& predOut = result->OUT(predInst);
                         inSet.insert(predOut.begin(), predOut.end());
                     }
                 }

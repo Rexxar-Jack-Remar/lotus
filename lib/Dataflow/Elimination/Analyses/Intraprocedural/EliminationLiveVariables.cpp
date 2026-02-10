@@ -1,11 +1,10 @@
 #include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationLiveVariables.h"
 
+#include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/Elimination/EliminationFramework.h"
 #include "Dataflow/Elimination/LLVM/LLVMReverseEliminationProblem.h"
 #include "Dataflow/Elimination/Solver/IntraEliminationSolver.h"
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
 
-#include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 
@@ -68,10 +67,10 @@ std::vector<llvm::Instruction *> getExitInstructions(llvm::Function *F) {
   if (F == nullptr || F->isDeclaration()) {
     return Exits;
   }
-  mono::LLVMIntraCFG CFG;
+  dataflow::controlflow::LLVMIntraCFG CFG;
   for (auto &BB : *F) {
     for (auto &I : BB) {
-      if (CFG.getSuccsOf(&I, mono::FlowDirection::Forward).empty()) {
+      if (CFG.getSuccsOf(&I, dataflow::controlflow::FlowDirection::Forward).empty()) {
         Exits.push_back(&I);
       }
     }

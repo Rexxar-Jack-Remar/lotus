@@ -44,7 +44,7 @@ static GenKillTransformer* createConstantPropagationTransformer(Instruction* I) 
         genSet.insert(AI); 
         // Note: AI represents the memory location *AI.
     }
-    else if (auto* CI = dyn_cast<CallInst>(I)) {
+    else if (auto* CI = dyn_cast<CallBase>(I)) {
         // Call result is varying (unless we know the function is const/pure)
         if (!CI->getType()->isVoidTy()) {
             genSet.insert(CI);

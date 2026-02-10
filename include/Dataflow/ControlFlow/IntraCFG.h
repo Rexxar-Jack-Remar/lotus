@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Dataflow/Mono/FlowDirection.h"
+#include "Dataflow/ControlFlow/FlowDirection.h"
 
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
@@ -10,7 +10,8 @@
 #include <utility>
 #include <vector>
 
-namespace mono {
+namespace dataflow {
+namespace controlflow {
 
 /// Instruction-level intraprocedural CFG interface (Phasar-like).
 class IntraCFG {
@@ -78,11 +79,13 @@ private:
   static std::vector<n_t> getForwardExitPoints(f_t Function);
 };
 
-} // namespace mono
+} // namespace controlflow
+} // namespace dataflow
 
 // ---- Header-only implementation ----
 
-namespace mono {
+namespace dataflow {
+namespace controlflow {
 
 inline std::vector<LLVMIntraCFG::n_t>
 LLVMIntraCFG::getForwardSuccs(n_t Inst) {
@@ -225,4 +228,5 @@ inline bool LLVMIntraCFG::isExitInst(n_t Inst, FlowDirection Dir) const {
   return std::find(Exit.begin(), Exit.end(), Inst) != Exit.end();
 }
 
-} // namespace mono
+} // namespace controlflow
+} // namespace dataflow

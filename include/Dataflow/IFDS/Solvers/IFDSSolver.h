@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/IFDS/IFDSFramework.h"
 #include "Dataflow/IFDS/IFDSIDESolverConfig.h"
 
@@ -180,6 +181,7 @@ private:
   std::unordered_map<const llvm::Instruction *,
                      std::vector<const llvm::Instruction *>>
       m_predecessors;
+  std::unique_ptr<::dataflow::controlflow::LLVMInterCFG> m_icfg;
 
   // Core IFDS Tabulation Algorithm Methods
   bool propagate_path_edge(const PathEdgeType &edge);

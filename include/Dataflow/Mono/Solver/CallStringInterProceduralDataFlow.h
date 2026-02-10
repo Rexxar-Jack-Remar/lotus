@@ -17,9 +17,9 @@
 #ifndef ANALYSIS_MONO_SOLVER_CALLSTRING_INTERPROCEDURAL_DATAFLOW_H_
 #define ANALYSIS_MONO_SOLVER_CALLSTRING_INTERPROCEDURAL_DATAFLOW_H_
 
-#include "Dataflow/Mono/ControlFlow/InterCFG.h"
+#include "Dataflow/ControlFlow/InterCFG.h"
+#include "Dataflow/ControlFlow/FlowDirection.h"
 #include "Dataflow/Mono/Contexts/CallStringCTX.h"
-#include "Dataflow/Mono/FlowDirection.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -133,7 +133,7 @@ public:
   using ResultTy = ContextSensitiveDataFlowResult<K, ContainerT>;
   using Context = typename ResultTy::Context;
   using ContextKey = typename ResultTy::ContextKey;
-  using ICFG = mono::InterCFG;
+  using ICFG = dataflow::controlflow::InterCFG;
 
   CallStringInterProceduralDataFlowEngine() = default;
 
@@ -351,7 +351,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::successors(
     return Result;
   }
 
-  for (auto *SuccInst : ICF->getSuccsOf(Inst, mono::FlowDirection::Forward)) {
+  for (auto *SuccInst : ICF->getSuccsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
     Result.push_back({SuccInst, Ctx});
   }
   return Result;
@@ -396,7 +396,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
     }
   }
 
-  for (auto *PredInst : ICF->getPredsOf(Inst, mono::FlowDirection::Forward)) {
+  for (auto *PredInst : ICF->getPredsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
     Result.push_back({PredInst, Ctx});
   }
   return Result;

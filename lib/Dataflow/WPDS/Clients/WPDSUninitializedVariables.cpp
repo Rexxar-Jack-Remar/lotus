@@ -7,7 +7,6 @@
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
 #include "Dataflow/Mono/DataFlowResult.h"
 #include "Dataflow/WPDS/Clients/WPDSUninitializedVariables.h"
-#include <llvm/IR/CFG.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
@@ -57,7 +56,7 @@ static GenKillTransformer *createUninitTransformer(Instruction *I) {
         // This requires killing all aliases.
         // Limitation: We only kill the pointer operand.
         
-    } else if (auto *CI = dyn_cast<CallInst>(I)) {
+    } else if (auto *CI = dyn_cast<CallBase>(I)) {
         // Assume function call initializes passed pointers (safe approximation)
         for (auto &Arg : CI->args()) {
             if (Arg->getType()->isPointerTy()) {

@@ -10,7 +10,6 @@
 
 #include "Utils/General/ProgressBar.h"
 
-#include <llvm/IR/CFG.h>
 #include <llvm/Support/raw_ostream.h>
 
 namespace ifds {
@@ -324,11 +323,17 @@ void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& curren
 template<typename Problem>
 std::vector<const llvm::Instruction*>
 IFDSSolver<Problem>::get_return_sites(const llvm::CallBase* call) const {
-    auto it = m_successors.find(call);
-    if (it != m_successors.end()) {
-        return it->second;
+    if (m_icfg == nullptr || call == nullptr) {
+        return {};
     }
-    return {};
+    std::vector<const llvm::Instruction*> result;
+    for (auto* site : m_icfg->getReturnSitesOfCallAt(
+             const_cast<llvm::CallBase*>(call))) {
+        if (site != nullptr) {
+            result.push_back(site);
+        }
+    }
+    return result;
 }
 
 template<typename Problem>
@@ -350,6 +355,8 @@ void IFDSSolver<Problem>::initialize_call_graph(const llvm::Module& module) {
     m_call_to_callee.clear();
     m_callee_to_calls.clear();
     m_function_returns.clear();
+    m_icfg = std::make_unique<::dataflow::controlflow::LLVMInterCFG>(
+        const_cast<llvm::Module*>(&module));
 
     for (const llvm::Function& func : module) {
         if (func.isDeclaration()) continue;
@@ -360,7 +367,10 @@ void IFDSSolver<Problem>::initialize_call_graph(const llvm::Module& module) {
                 if (auto* ret = llvm::dyn_cast<llvm::ReturnInst>(&inst)) {
                     returns.push_back(ret);
                 } else if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
-                    if (const llvm::Function* callee = call->getCalledFunction()) {
+                    const auto callee_vec =
+                        m_icfg->getCalleesOfCallAt(const_cast<llvm::CallBase*>(call));
+                    if (!callee_vec.empty() && callee_vec.front() != nullptr) {
+                        const llvm::Function* callee = callee_vec.front();
                         m_call_to_callee[call] = callee;
                         m_callee_to_calls[callee].push_back(call);
                     }
@@ -383,34 +393,12 @@ void IFDSSolver<Problem>::build_cfg_successors(const llvm::Module& module) {
             for (const llvm::Instruction& inst : bb) {
                 std::vector<const llvm::Instruction*> succs;
 
-                if (auto* br = llvm::dyn_cast<llvm::BranchInst>(&inst)) {
-                    for (unsigned i = 0; i < br->getNumSuccessors(); ++i) {
-                        llvm::BasicBlock* succ = br->getSuccessor(i);
-                        if (succ && !succ->empty()) {
-                            succs.push_back(&succ->front());
-                        }
+                for (auto* succ : m_icfg->getSuccsOf(
+                         const_cast<llvm::Instruction*>(&inst),
+                         ::dataflow::controlflow::FlowDirection::Forward)) {
+                    if (succ != nullptr) {
+                        succs.push_back(succ);
                     }
-                } else if (auto* sw = llvm::dyn_cast<llvm::SwitchInst>(&inst)) {
-                    for (unsigned i = 0; i < sw->getNumSuccessors(); ++i) {
-                        llvm::BasicBlock* succ = sw->getSuccessor(i);
-                        if (succ && !succ->empty()) {
-                            succs.push_back(&succ->front());
-                        }
-                    }
-                } else if (auto* invoke = llvm::dyn_cast<llvm::InvokeInst>(&inst)) {
-                    llvm::BasicBlock* normalDest = invoke->getNormalDest();
-                    if (normalDest && !normalDest->empty()) {
-                        succs.push_back(&normalDest->front());
-                    }
-                    llvm::BasicBlock* unwindDest = invoke->getUnwindDest();
-                    if (unwindDest && !unwindDest->empty()) {
-                        succs.push_back(&unwindDest->front());
-                    }
-                } else if (llvm::isa<llvm::ReturnInst>(&inst) ||
-                          llvm::isa<llvm::UnreachableInst>(&inst)) {
-                    // No intraprocedural successors
-                } else if (const llvm::Instruction* next = inst.getNextNode()) {
-                    succs.push_back(next);
                 }
 
                 m_successors[&inst] = succs;

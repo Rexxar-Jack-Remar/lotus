@@ -1,11 +1,12 @@
 #ifndef NPA_INTERPROCEDURAL_ENGINE_H
 #define NPA_INTERPROCEDURAL_ENGINE_H
 
+#include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/NPA/NPA.h"
-#include <llvm/IR/CFG.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <algorithm>
 #include <deque>
 #include <map>
 #include <set>
@@ -64,14 +65,14 @@ public:
 private:
     template <typename A>
     static auto getCallEntryTransfer(A &analysis,
-                                     const llvm::CallInst &call,
+                                     const llvm::CallBase &call,
                                      const llvm::Function &callee,
                                      int) -> decltype(analysis.getCallEntryTransfer(call, callee)) {
         return analysis.getCallEntryTransfer(call, callee);
     }
 
     static typename D::value_type getCallEntryTransfer(Analysis &,
-                                                       const llvm::CallInst &,
+                                                       const llvm::CallBase &,
                                                        const llvm::Function &,
                                                        long) {
         return D::one();
@@ -79,14 +80,14 @@ private:
 
     template <typename A>
     static auto getCallReturnTransfer(A &analysis,
-                                      const llvm::CallInst &call,
+                                      const llvm::CallBase &call,
                                       const llvm::Function &callee,
                                       int) -> decltype(analysis.getCallReturnTransfer(call, callee)) {
         return analysis.getCallReturnTransfer(call, callee);
     }
 
     static typename D::value_type getCallReturnTransfer(Analysis &,
-                                                        const llvm::CallInst &,
+                                                        const llvm::CallBase &,
                                                         const llvm::Function &,
                                                         long) {
         return D::one();
@@ -94,19 +95,20 @@ private:
 
     template <typename A>
     static auto getCallToReturnTransfer(A &analysis,
-                                        const llvm::CallInst &call,
+                                        const llvm::CallBase &call,
                                         int) -> decltype(analysis.getCallToReturnTransfer(call)) {
         return analysis.getCallToReturnTransfer(call);
     }
 
     static typename D::value_type getCallToReturnTransfer(Analysis &,
-                                                          const llvm::CallInst &,
+                                                          const llvm::CallBase &,
                                                           long) {
         return D::one();
     }
 
 public:
     static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false) {
+        ::dataflow::controlflow::LLVMIntraCFG CFG;
         std::vector<std::pair<Symbol, E>> eqns;
         std::deque<std::pair<llvm::Function*, CallString>> worklist;
         std::set<std::pair<llvm::Function*, CallString>> visited;
@@ -141,7 +143,11 @@ public:
                     inExpr = Exp::term(D::one());
                 } else {
                     bool hasPreds = false;
-                    for (auto *Pred : predecessors(&BB)) {
+                    auto *First = BB.empty() ? nullptr : &BB.front();
+                    for (auto *PredInst : CFG.getPredsOf(
+                             First, ::dataflow::controlflow::FlowDirection::Forward)) {
+                        auto *Pred = PredInst ? PredInst->getParent() : nullptr;
+                        if (Pred == nullptr) continue;
                         hasPreds = true;
                         std::string predSym = getBlockSymbol(Pred, cs);
                         auto pHole = Exp::hole(predSym);
@@ -153,7 +159,7 @@ public:
 
                 E currentPath = inExpr;
                 for (auto &I : BB) {
-                    if (auto *CI = llvm::dyn_cast<llvm::CallInst>(&I)) {
+                    if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
                         if (auto *Callee = CI->getCalledFunction()) {
                             if (!Callee->isDeclaration()) {
                                 CallString calleeCS = pushContext(cs, CI);
@@ -176,7 +182,9 @@ public:
 
                 eqns.emplace_back(bSym, currentPath);
 
-                if (llvm::succ_begin(&BB) == llvm::succ_end(&BB)) {
+                auto *Term = BB.getTerminator();
+                if (Term == nullptr || CFG.getSuccsOf(
+                        Term, ::dataflow::controlflow::FlowDirection::Forward).empty()) {
                     if (!exitExpr) exitExpr = Exp::hole(bSym);
                     else exitExpr = Exp::ndet(exitExpr, Exp::hole(bSym));
                 }
@@ -232,7 +240,11 @@ public:
                     entryToBlockStart = D::one();
                 } else {
                     bool first = true;
-                    for (auto *Pred : predecessors(&BB)) {
+                    auto *First = BB.empty() ? nullptr : &BB.front();
+                    for (auto *PredInst : CFG.getPredsOf(
+                             First, ::dataflow::controlflow::FlowDirection::Forward)) {
+                        auto *Pred = PredInst ? PredInst->getParent() : nullptr;
+                        if (Pred == nullptr) continue;
                         std::string pSym = getBlockSymbol(Pred, cs);
                         if (solvedMap.count(pSym)) {
                             if (first) { entryToBlockStart = solvedMap[pSym]; first=false; }
@@ -247,7 +259,7 @@ public:
                 E currentPath = Exp::term(D::one());
                 
                 for (auto &I : BB) {
-                    if (auto *CI = llvm::dyn_cast<llvm::CallInst>(&I)) {
+                    if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
                         if (auto *Callee = CI->getCalledFunction()) {
                             if (!Callee->isDeclaration()) {
                                 CallString calleeCS = pushContext(cs, CI);
@@ -281,7 +293,7 @@ public:
                         }
                     }
                     
-                    if (auto *CI = llvm::dyn_cast<llvm::CallInst>(&I)) {
+                    if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
                          if (auto *Callee = CI->getCalledFunction()) {
                              if (!Callee->isDeclaration()) {
                                  CallString calleeCS = pushContext(cs, CI);

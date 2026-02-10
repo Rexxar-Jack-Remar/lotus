@@ -1,6 +1,9 @@
 #ifndef ANALYSIS_MONO_LLVMMONOANALYSISDOMAIN_H_
 #define ANALYSIS_MONO_LLVMMONOANALYSISDOMAIN_H_
 
+#include "Dataflow/ControlFlow/InterCFG.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
+
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Module.h"
@@ -8,14 +11,6 @@
 #include "llvm/IR/Value.h"
 
 #include <cstddef>
-
-namespace mono {
-
-class IntraCFG;
-class InterCFG;
-class LLVMIntraCFG;
-class LLVMInterCFG;
-} // namespace mono
 
 namespace lotus {
 class AliasAnalysisWrapper;
@@ -32,8 +27,8 @@ template <typename ContainerT> struct LLVMMonoAnalysisDomain {
   using db_t = llvm::Module;
 
   // Phasar-like CFG/ICFG associated types for LLVM mode.
-  using c_t = mono::IntraCFG;
-  using i_t = mono::InterCFG;
+  using c_t = ::dataflow::controlflow::IntraCFG;
+  using i_t = ::dataflow::controlflow::InterCFG;
 
   // Placeholder points-to type for LLVM-only Mono analyses.
   using pt_t = lotus::AliasAnalysisWrapper *;

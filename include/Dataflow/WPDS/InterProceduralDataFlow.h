@@ -184,8 +184,8 @@ private:
     wpds::wpds_key_t getKeyForFunction(Function* f);
     wpds::wpds_key_t getKeyForInstruction(Instruction* inst);
     wpds::wpds_key_t getKeyForBasicBlock(BasicBlock* bb);
-    wpds::wpds_key_t getKeyForCallSite(CallInst* callInst);
-    wpds::wpds_key_t getKeyForReturnSite(CallInst* callInst);
+    wpds::wpds_key_t getKeyForCallSite(CallBase* callInst);
+    wpds::wpds_key_t getKeyForReturnSite(CallBase* callInst);
 
     // Extract dataflow results from the resulting automaton
     void extractResults(

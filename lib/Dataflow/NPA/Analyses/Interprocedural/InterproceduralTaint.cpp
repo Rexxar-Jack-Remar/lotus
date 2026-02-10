@@ -147,7 +147,7 @@ private:
             addMemBit(load->getPointerOperand());
           } else if (auto *store = llvm::dyn_cast<llvm::StoreInst>(&I)) {
             addMemBit(store->getPointerOperand());
-          } else if (auto *call = llvm::dyn_cast<llvm::CallInst>(&I)) {
+          } else if (auto *call = llvm::dyn_cast<llvm::CallBase>(&I)) {
             for (auto &arg : call->args()) {
               if (arg->getType()->isPointerTy()) addMemBit(arg.get());
             }
@@ -181,7 +181,7 @@ public:
   using E = E0<D>;
 
   E getTransfer(llvm::Instruction &I, E currentPath) {
-    if (llvm::isa<llvm::CallInst>(&I)) return currentPath;
+    if (llvm::isa<llvm::CallBase>(&I)) return currentPath;
 
     D::value_type transfer = D::one();
     bool updated = false;
@@ -263,7 +263,7 @@ public:
     return Exp::seq(transfer, currentPath);
   }
 
-  D::value_type getCallEntryTransfer(const llvm::CallInst &call,
+  D::value_type getCallEntryTransfer(const llvm::CallBase &call,
                                      const llvm::Function &callee) {
     D::value_type transfer = D::one();
     unsigned numArgs = static_cast<unsigned>(
@@ -289,7 +289,7 @@ public:
     return transfer;
   }
 
-  D::value_type getCallReturnTransfer(const llvm::CallInst &call,
+  D::value_type getCallReturnTransfer(const llvm::CallBase &call,
                                       const llvm::Function &callee) {
     D::value_type transfer = D::one();
     if (!call.getType()->isVoidTy()) {
@@ -312,7 +312,7 @@ public:
     return transfer;
   }
 
-  D::value_type getCallToReturnTransfer(const llvm::CallInst &call) {
+  D::value_type getCallToReturnTransfer(const llvm::CallBase &call) {
     D::value_type transfer = D::one();
     addSourceSpecs(call, transfer);
     addPipeSpecs(call, transfer);
@@ -346,7 +346,7 @@ private:
     }
   }
 
-  void addSourceSpecs(const llvm::CallInst &call, D::value_type &transfer) {
+  void addSourceSpecs(const llvm::CallBase &call, D::value_type &transfer) {
     const llvm::Function *callee = call.getCalledFunction();
     if (!callee) return;
     std::string funcName = taint_config::normalize_name(callee->getName().str());
@@ -380,7 +380,7 @@ private:
     }
   }
 
-  void addPipeSpecs(const llvm::CallInst &call, D::value_type &transfer) {
+  void addPipeSpecs(const llvm::CallBase &call, D::value_type &transfer) {
     const llvm::Function *callee = call.getCalledFunction();
     if (!callee) return;
     std::string funcName = taint_config::normalize_name(callee->getName().str());
@@ -435,7 +435,7 @@ private:
     }
   }
 
-  void applySanitizers(const llvm::CallInst &call, D::value_type &transfer) {
+  void applySanitizers(const llvm::CallBase &call, D::value_type &transfer) {
     const llvm::Function *callee = call.getCalledFunction();
     if (!callee) return;
     static const std::unordered_set<std::string> sanitizers = {

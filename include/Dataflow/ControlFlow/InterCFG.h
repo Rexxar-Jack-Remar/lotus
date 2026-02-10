@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
 
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -8,12 +8,16 @@
 #include <functional>
 #include <vector>
 
-namespace mono {
+namespace dataflow {
+namespace controlflow {
 
 /// Instruction-level interprocedural CFG interface (Phasar-like).
 class InterCFG : public IntraCFG {
 public:
   using m_t = llvm::Module *;
+  using IntraCFG::getExitPointsOf;
+  using IntraCFG::getStartPointsOf;
+  using IntraCFG::isExitInst;
 
   virtual ~InterCFG() = default;
 
@@ -74,11 +78,13 @@ private:
   LLVMIntraCFG Intra;
 };
 
-} // namespace mono
+} // namespace controlflow
+} // namespace dataflow
 
 // ---- Header-only implementation ----
 
-namespace mono {
+namespace dataflow {
+namespace controlflow {
 
 inline LLVMInterCFG::LLVMInterCFG(m_t M, GetCalleesFn GetCallees)
     : Mod(M), GetCallees(std::move(GetCallees)) {
@@ -231,4 +237,5 @@ LLVMInterCFG::getCallersOf(f_t Callee) const {
   return Callers;
 }
 
-} // namespace mono
+} // namespace controlflow
+} // namespace dataflow

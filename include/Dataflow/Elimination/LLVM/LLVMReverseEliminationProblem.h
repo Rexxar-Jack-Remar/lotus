@@ -6,11 +6,10 @@
 // the forward CFG. Provides reducible view for efficient ADT algorithms.
 
 #include "Dataflow/Elimination/EliminationFramework.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/Elimination/LLVM/LLVMEliminationProblem.h"
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
 
 #include "llvm/Analysis/PostDominators.h"
-#include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 
@@ -47,7 +46,7 @@ public:
   n_t entry() const override { return Entry; }
 
   std::vector<n_t> succs(n_t Node) const override {
-    return CFG.getSuccsOf(Node, mono::FlowDirection::Backward);
+    return CFG.getSuccsOf(Node, dataflow::controlflow::FlowDirection::Backward);
   }
 
   // Transfer associated with destination (backward: we enter Dst from Src).
@@ -112,7 +111,7 @@ public:
 protected:
   llvm::Function *F = nullptr;
   n_t Entry = nullptr;
-  mono::LLVMIntraCFG CFG;
+  dataflow::controlflow::LLVMIntraCFG CFG;
   mutable llvm::PostDominatorTree PDT;
   mutable bool Prepared = false;
 
@@ -146,7 +145,7 @@ protected:
     while (!Stack.empty()) {
       auto *Cur = Stack.back();
       Stack.pop_back();
-      for (auto *Succ : CFG.getSuccsOf(Cur, mono::FlowDirection::Backward)) {
+      for (auto *Succ : CFG.getSuccsOf(Cur, dataflow::controlflow::FlowDirection::Backward)) {
         if (Reach.insert(Succ).second) {
           Stack.push_back(Succ);
         }
@@ -163,7 +162,7 @@ protected:
     }
 
     const auto RawEdges =
-        CFG.getAllControlFlowEdges(F, mono::FlowDirection::Backward);
+        CFG.getAllControlFlowEdges(F, dataflow::controlflow::FlowDirection::Backward);
     for (const auto &E : RawEdges) {
       if (!Reach.count(E.first) || !Reach.count(E.second)) {
         continue;

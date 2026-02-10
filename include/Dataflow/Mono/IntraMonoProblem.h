@@ -1,8 +1,8 @@
 #ifndef ANALYSIS_MONO_INTRAMONOPROBLEM_H_
 #define ANALYSIS_MONO_INTRAMONOPROBLEM_H_
 
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
-#include "Dataflow/Mono/FlowDirection.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
+#include "Dataflow/ControlFlow/FlowDirection.h"
 #include "Dataflow/Mono/Soundness.h"
 
 #include "llvm/IR/Function.h"
@@ -58,7 +58,9 @@ public:
 
   virtual mono_container_t allTop() { return mono_container_t{}; }
   virtual std::unordered_map<n_t, mono_container_t> initialSeeds() = 0;
-  virtual FlowDirection direction() const { return FlowDirection::Forward; }
+  virtual ::dataflow::controlflow::FlowDirection direction() const {
+    return ::dataflow::controlflow::FlowDirection::Forward;
+  }
 
   virtual void printContainer(llvm::raw_ostream &, const mono_container_t &) const {
   }

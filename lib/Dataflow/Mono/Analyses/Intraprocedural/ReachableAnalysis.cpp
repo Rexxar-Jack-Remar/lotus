@@ -42,7 +42,9 @@ std::unique_ptr<DataFlowResult> runReachableAnalysis(
     ReachableProblem(Function *F, std::function<bool(Instruction *)> Filter)
         : IntraMonoProblem<ReachableDomain>({F}), Filter(std::move(Filter)) {}
 
-    FlowDirection direction() const override { return FlowDirection::Backward; }
+    ::dataflow::controlflow::FlowDirection direction() const override {
+      return ::dataflow::controlflow::FlowDirection::Backward;
+    }
 
     std::set<Value *> normalFlow(Instruction *Inst,
                                  const std::set<Value *> &In) override {

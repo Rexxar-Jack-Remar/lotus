@@ -1,8 +1,8 @@
 #include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationVeryBusyExpressions.h"
 
+#include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/Elimination/EliminationFramework.h"
 #include "Dataflow/Elimination/Solver/IntraEliminationSolver.h"
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
 
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/MemorySSA.h"
@@ -77,7 +77,7 @@ public:
   n_t entry() const override { return Entry; }
 
   std::vector<n_t> succs(n_t Node) const override {
-    return CFG.getSuccsOf(Node, mono::FlowDirection::Backward);
+    return CFG.getSuccsOf(Node, dataflow::controlflow::FlowDirection::Backward);
   }
 
   transfer_t edgeTransfer(n_t /*Src*/, n_t Dst) const override { return Dst; }
@@ -130,7 +130,7 @@ private:
   llvm::DominatorTree *DT = nullptr;
   llvm::TargetLibraryInfo *TLI = nullptr;
   llvm::MemorySSA *MSSA = nullptr;
-  mono::LLVMIntraCFG CFG;
+  dataflow::controlflow::LLVMIntraCFG CFG;
   mutable bool Prepared = false;
   mutable std::vector<n_t> Nodes;
   fact_t AllExprs;
@@ -173,7 +173,7 @@ private:
     while (!Stack.empty()) {
       auto *Cur = Stack.back();
       Stack.pop_back();
-      for (auto *Succ : CFG.getSuccsOf(Cur, mono::FlowDirection::Backward)) {
+      for (auto *Succ : CFG.getSuccsOf(Cur, dataflow::controlflow::FlowDirection::Backward)) {
         if (Reach.insert(Succ).second) {
           Stack.push_back(Succ);
         }
@@ -307,10 +307,10 @@ std::vector<llvm::Instruction *> getExitInstructions(llvm::Function *F) {
   if (F == nullptr || F->isDeclaration()) {
     return Exits;
   }
-  mono::LLVMIntraCFG CFG;
+  dataflow::controlflow::LLVMIntraCFG CFG;
   for (auto &BB : *F) {
     for (auto &I : BB) {
-      if (CFG.getSuccsOf(&I, mono::FlowDirection::Forward).empty()) {
+      if (CFG.getSuccsOf(&I, dataflow::controlflow::FlowDirection::Forward).empty()) {
         Exits.push_back(&I);
       }
     }

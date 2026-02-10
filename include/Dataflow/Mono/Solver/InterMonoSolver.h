@@ -2,7 +2,7 @@
 #define ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
 
 #include "Dataflow/Mono/InterMonoProblem.h"
-#include "Dataflow/Mono/ControlFlow/InterCFG.h"
+#include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/Mono/Solver/CallStringInterProceduralDataFlow.h"
 
 #include "llvm/IR/Instructions.h"
@@ -24,7 +24,7 @@ public:
   using ResultTy = dataflow::ContextSensitiveDataFlowResult<K, mono_container_t>;
   using Context = typename ResultTy::Context;
   using ContextKey = typename ResultTy::ContextKey;
-  using ICFG = mono::InterCFG;
+  using ICFG = dataflow::controlflow::InterCFG;
 
   explicit InterMonoSolver(ProblemTy &Problem) : Problem(Problem) {}
 
@@ -100,7 +100,8 @@ public:
       auto GetCallees = [this](llvm::Instruction *Inst) {
         return Problem.getCalleesOfCallAt(Inst);
       };
-      OwnedICF = std::make_unique<LLVMInterCFG>(M, GetCallees);
+      OwnedICF = std::make_unique<::dataflow::controlflow::LLVMInterCFG>(
+          M, GetCallees);
       ICF = OwnedICF.get();
     }
 
@@ -312,7 +313,7 @@ private:
 
   ProblemTy &Problem;
   std::unique_ptr<ResultTy> Result;
-  std::unique_ptr<LLVMInterCFG> OwnedICF;
+  std::unique_ptr<::dataflow::controlflow::LLVMInterCFG> OwnedICF;
   const ICFG *ICF = nullptr;
 };
 

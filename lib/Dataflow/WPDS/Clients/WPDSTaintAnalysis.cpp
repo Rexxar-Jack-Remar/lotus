@@ -23,7 +23,7 @@ using wpds::InterProceduralDataFlowEngine;
 // FLOW: propagation of taint (e.g., y = x + 1 => x flows to y)
 
 static bool isTaintSource(Instruction* I) {
-    if (auto* CI = dyn_cast<CallInst>(I)) {
+    if (auto* CI = dyn_cast<CallBase>(I)) {
         if (Function* F = CI->getCalledFunction()) {
             StringRef name = F->getName();
             // Expanded list of taint sources
@@ -41,7 +41,7 @@ static bool isTaintSource(Instruction* I) {
 }
 
 static bool isSanitizer(Instruction* I) {
-    if (auto* CI = dyn_cast<CallInst>(I)) {
+    if (auto* CI = dyn_cast<CallBase>(I)) {
         if (Function* F = CI->getCalledFunction()) {
             StringRef name = F->getName();
             // Common sanitizers
@@ -131,14 +131,14 @@ static GenKillTransformer* createTaintTransformer(Instruction* I) {
         addFlow(SI->getTrueValue(), I);
         addFlow(SI->getFalseValue(), I);
     }
-    else if (auto* CI = dyn_cast<CallInst>(I)) {
+    else if (auto* CI = dyn_cast<CallBase>(I)) {
         // Handle intrinsic calls like memcpy?
-        if (auto* MI = dyn_cast<MemCpyInst>(CI)) {
+        if (auto* MI = dyn_cast<MemCpyInst>(I)) {
             // memcpy(dest, src, len)
             // src -> dest
             addFlow(MI->getSource(), MI->getDest());
         }
-        else if (auto* MMI = dyn_cast<MemMoveInst>(CI)) {
+        else if (auto* MMI = dyn_cast<MemMoveInst>(I)) {
              addFlow(MMI->getSource(), MMI->getDest());
         }
     }
@@ -176,7 +176,7 @@ void demoTaintAnalysis(Module& module) {
                 const std::set<Value*>& in = result->IN(&I);
                 
                 // Check for sinks
-                if (auto* CI = dyn_cast<CallInst>(&I)) {
+                if (auto* CI = dyn_cast<CallBase>(&I)) {
                     if (Function* F = CI->getCalledFunction()) {
                         StringRef name = F->getName();
                         // Check for dangerous sinks

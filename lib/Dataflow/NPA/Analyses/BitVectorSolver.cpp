@@ -3,6 +3,8 @@
  * Author: rainoftime
 */
 #include "Dataflow/NPA/Analyses/BitVectorSolver.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -35,6 +37,7 @@ BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F,
     using D   = BitSetDomain;
     using Exp = Exp0<D>;
     using E   = E0<D>; // shared_ptr<Exp0<D>>
+    ::dataflow::controlflow::LLVMIntraCFG CFG;
     
     std::vector<std::pair<Symbol, E>> eqns;
     
@@ -60,7 +63,19 @@ BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F,
                  inExpr = Exp::term(boundary);
             } else {
                 bool hasPreds = false;
-                for (auto *Pred : predecessors(&BB)) {
+                auto *First = BB.empty() ? nullptr : &BB.front();
+                std::vector<llvm::BasicBlock *> PredBlocks;
+                for (auto *PredInst : CFG.getPredsOf(
+                         First, ::dataflow::controlflow::FlowDirection::Forward)) {
+                    auto *Pred = PredInst ? PredInst->getParent() : nullptr;
+                    if (Pred == nullptr ||
+                        std::find(PredBlocks.begin(), PredBlocks.end(), Pred) !=
+                            PredBlocks.end()) {
+                        continue;
+                    }
+                    PredBlocks.push_back(Pred);
+                }
+                for (auto *Pred : PredBlocks) {
                     hasPreds = true;
                     std::string predOut = getBlockSymbol(Pred, "OUT");
                     auto pHole = Exp::hole(predOut);
@@ -88,7 +103,19 @@ BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F,
              E outExpr = nullptr;
              
              bool hasSuccs = false;
-             for (auto *Succ : successors(&BB)) {
+             auto *Term = BB.getTerminator();
+             std::vector<llvm::BasicBlock *> SuccBlocks;
+             for (auto *SuccInst : CFG.getSuccsOf(
+                      Term, ::dataflow::controlflow::FlowDirection::Forward)) {
+                 auto *Succ = SuccInst ? SuccInst->getParent() : nullptr;
+                 if (Succ == nullptr ||
+                     std::find(SuccBlocks.begin(), SuccBlocks.end(), Succ) !=
+                         SuccBlocks.end()) {
+                     continue;
+                 }
+                 SuccBlocks.push_back(Succ);
+             }
+             for (auto *Succ : SuccBlocks) {
                  hasSuccs = true;
                  std::string succIn = getBlockSymbol(Succ, "IN");
                  auto sHole = Exp::hole(succIn);
@@ -145,4 +172,3 @@ BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F,
 }
 
 } // namespace npa
-

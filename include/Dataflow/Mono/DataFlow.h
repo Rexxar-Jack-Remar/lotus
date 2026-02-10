@@ -3,6 +3,9 @@
 
 #include "Utils/LLVM/SystemHeaders.h"
 
+#include "Dataflow/ControlFlow/FlowDirection.h"
+#include "Dataflow/ControlFlow/InterCFG.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/Mono/Analyses/Interprocedural/InterMonoConstantPropagation.h"
 #include "Dataflow/Mono/Analyses/Interprocedural/InterMonoFullConstantPropagation.h"
 #include "Dataflow/Mono/Analyses/Interprocedural/InterMonoSolverTest.h"
@@ -14,10 +17,7 @@
 #include "Dataflow/Mono/Analyses/Intraprocedural/LiveVariablesAnalysis.h"
 #include "Dataflow/Mono/Analyses/Intraprocedural/ReachableAnalysis.h"
 #include "Dataflow/Mono/Contexts/CallStringCTX.h"
-#include "Dataflow/Mono/ControlFlow/InterCFG.h"
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
 #include "Dataflow/Mono/DataFlowResult.h"
-#include "Dataflow/Mono/FlowDirection.h"
 #include "Dataflow/Mono/InterMonoProblem.h"
 #include "Dataflow/Mono/IntraMonoProblem.h"
 #include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"

@@ -1,12 +1,11 @@
 #include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationNonNull.h"
 
+#include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/Elimination/EliminationFramework.h"
 #include "Dataflow/Elimination/Solver/IntraEliminationSolver.h"
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
 
 #include "llvm/Analysis/AssumeBundleQueries.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/IR/CFG.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -44,7 +43,7 @@ public:
   }
 
   std::vector<n_t> succs(n_t Node) const override {
-    return CFG.getSuccsOf(Node, mono::FlowDirection::Forward);
+    return CFG.getSuccsOf(Node, dataflow::controlflow::FlowDirection::Forward);
   }
 
   transfer_t edgeTransfer(n_t Src, n_t Dst) const override {
@@ -98,7 +97,7 @@ private:
   llvm::AssumptionCache *AC = nullptr;
   llvm::DominatorTree *DT = nullptr;
   const llvm::DataLayout *DL = nullptr;
-  mono::LLVMIntraCFG CFG;
+  dataflow::controlflow::LLVMIntraCFG CFG;
   mutable bool Prepared = false;
   mutable std::vector<n_t> Nodes;
   fact_t Universe;
@@ -144,7 +143,7 @@ private:
     while (!Stack.empty()) {
       auto *Cur = Stack.back();
       Stack.pop_back();
-      for (auto *Succ : CFG.getSuccsOf(Cur, mono::FlowDirection::Forward)) {
+      for (auto *Succ : CFG.getSuccsOf(Cur, dataflow::controlflow::FlowDirection::Forward)) {
         if (Reach.insert(Succ).second) {
           Stack.push_back(Succ);
         }

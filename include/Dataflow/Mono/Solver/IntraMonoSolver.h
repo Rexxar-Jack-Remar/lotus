@@ -4,7 +4,7 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/Mono/Debug/MonoDebug.h"
 #include "Dataflow/Mono/IntraMonoProblem.h"
 
@@ -178,11 +178,11 @@ public:
   void emitGraphicalReport(llvm::raw_ostream & /*OS*/ = llvm::outs()) const {}
 
 private:
-  const IntraCFG *selectCFG() {
+  const ::dataflow::controlflow::IntraCFG *selectCFG() {
     if (auto *Provided = Problem.getCFG()) {
       return Provided;
     }
-    static LLVMIntraCFG DefaultCFG;
+    static ::dataflow::controlflow::LLVMIntraCFG DefaultCFG;
     return &DefaultCFG;
   }
 
@@ -232,7 +232,7 @@ private:
   }
 
   ProblemTy &Problem;
-  const IntraCFG *CFG;
+  const ::dataflow::controlflow::IntraCFG *CFG;
   std::deque<std::pair<n_t, n_t>> Worklist;
   std::unordered_map<n_t, mono_container_t> AnalysisIn;
   std::unordered_map<n_t, mono_container_t> AnalysisOut;

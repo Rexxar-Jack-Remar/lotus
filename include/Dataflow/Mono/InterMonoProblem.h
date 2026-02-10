@@ -1,7 +1,7 @@
 #ifndef ANALYSIS_MONO_INTERMONOPROBLEM_H_
 #define ANALYSIS_MONO_INTERMONOPROBLEM_H_
 
-#include "Dataflow/Mono/ControlFlow/InterCFG.h"
+#include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/Mono/IntraMonoProblem.h"
 
 #include "llvm/ADT/ArrayRef.h"

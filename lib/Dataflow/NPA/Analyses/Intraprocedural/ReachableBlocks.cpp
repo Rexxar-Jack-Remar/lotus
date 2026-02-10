@@ -4,7 +4,6 @@
 */
 #include "Dataflow/NPA/Analyses/Intraprocedural/ReachableBlocks.h"
 #include "Dataflow/NPA/Domains/BitVectorInfo.h"
-#include <llvm/IR/CFG.h>
 
 namespace npa {
 

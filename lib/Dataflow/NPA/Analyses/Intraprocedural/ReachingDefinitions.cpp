@@ -4,7 +4,6 @@
 */
 #include "Dataflow/NPA/Analyses/Intraprocedural/ReachingDefinitions.h"
 #include "Dataflow/NPA/Domains/BitVectorInfo.h"
-#include <llvm/IR/CFG.h>
 #include <llvm/IR/Instructions.h>
 #include <unordered_map>
 

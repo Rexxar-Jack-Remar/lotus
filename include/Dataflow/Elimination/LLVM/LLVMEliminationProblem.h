@@ -2,9 +2,8 @@
 #define DATAFLOW_ELIMINATION_LLVM_LLVMELIMINATIONPROBLEM_H_
 
 #include "Dataflow/Elimination/EliminationFramework.h"
-#include "Dataflow/Mono/ControlFlow/IntraCFG.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
 
-#include "llvm/IR/CFG.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
@@ -55,7 +54,7 @@ public:
   }
 
   std::vector<n_t> succs(n_t Node) const override {
-    return CFG.getSuccsOf(Node, mono::FlowDirection::Forward);
+    return CFG.getSuccsOf(Node, dataflow::controlflow::FlowDirection::Forward);
   }
 
   // By default, we associate the transfer with the source instruction so that
@@ -144,7 +143,7 @@ private:
     while (!Stack.empty()) {
       auto *Cur = Stack.back();
       Stack.pop_back();
-      for (auto *Succ : CFG.getSuccsOf(Cur, mono::FlowDirection::Forward)) {
+      for (auto *Succ : CFG.getSuccsOf(Cur, dataflow::controlflow::FlowDirection::Forward)) {
         if (Reach.insert(Succ).second) {
           Stack.push_back(Succ);
         }
@@ -161,7 +160,7 @@ private:
     }
 
     const auto RawEdges =
-        CFG.getAllControlFlowEdges(F, mono::FlowDirection::Forward);
+        CFG.getAllControlFlowEdges(F, dataflow::controlflow::FlowDirection::Forward);
     for (const auto &E : RawEdges) {
       if (!Reach.count(E.first) || !Reach.count(E.second)) {
         continue;
@@ -232,7 +231,7 @@ private:
   }
 
   llvm::Function *F = nullptr;
-  mono::LLVMIntraCFG CFG;
+  dataflow::controlflow::LLVMIntraCFG CFG;
   mutable llvm::DominatorTree DT;
   mutable bool Prepared = false;
 
