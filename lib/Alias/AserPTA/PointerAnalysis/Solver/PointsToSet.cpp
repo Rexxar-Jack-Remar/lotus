@@ -42,9 +42,7 @@ llvm::cl::opt<std::string> ConfigBDDPtsReorderMethod(
     llvm::cl::init("sift"));
 
 std::vector<BitVectorPTS::PtsTy> BitVectorPTS::ptsVec;
-std::vector<ConfigurablePTS::PtsTy> ConfigurablePTS::ptsVec;
-bool ConfigurablePTS::useBDDBackend = false;
-bool ConfigurablePTS::backendLocked = false;
+std::vector<BDDPts::PtsTy> BDDPts::ptsVec;
 std::vector<PointedByPts::PtsTy> PointedByPts::pointsTo;
 std::vector<PointedByPts::PtsTy> PointedByPts::pointedBy;
 
