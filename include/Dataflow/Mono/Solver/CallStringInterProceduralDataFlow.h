@@ -516,12 +516,23 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
 
     auto &InSet = DF->IN(Current);
     ContainerT OldIn = InSet;
+    ContainerT NewIn;
+    initializeIN(Current.Inst, NewIn);
+    {
+      auto SeedIt = SeedIns.find(Current);
+      if (SeedIt != SeedIns.end()) {
+        // Preserve explicit boundary facts while still recomputing predecessor
+        // contributions from scratch.
+        NewIn = SeedIt->second;
+      }
+    }
 
     for (const auto &PredKey :
          predecessors(Current, CallToReturns, ContinuationToCalls, ICF)) {
       ensureInitialized(PredKey, initializeIN, initializeOUT, DF);
-      computeIN(Current.Inst, PredKey.Inst, PredKey.Ctx, InSet, DF);
+      computeIN(Current.Inst, PredKey.Inst, PredKey.Ctx, NewIn, DF);
     }
+    InSet = std::move(NewIn);
 
     auto &OutSet = DF->OUT(Current);
     ContainerT OldOut = OutSet;

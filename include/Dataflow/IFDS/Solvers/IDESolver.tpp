@@ -54,6 +54,15 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     using Fact = typename Problem::FactType;
     using Value = typename Problem::ValueType;
 
+    std::unique_ptr<lotus::AliasAnalysisWrapper> owned_alias_analysis;
+    if (m_config.auto_inject_alias_analysis() &&
+        !m_problem.has_alias_analysis_configured()) {
+        owned_alias_analysis = std::make_unique<lotus::AliasAnalysisWrapper>(
+            const_cast<llvm::Module&>(module),
+            m_config.alias_analysis_config());
+        m_problem.set_alias_analysis(owned_alias_analysis.get());
+    }
+
     m_steps_performed = 0;
     m_bound_reached = false;
 
@@ -68,14 +77,14 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     m_worklist.clear();
 
     // Build call graph
-    std::unordered_map<const llvm::CallInst*, const llvm::Function*> call_to_callee;
-    std::unordered_map<const llvm::Function*, std::vector<const llvm::CallInst*>> callee_to_calls;
+    std::unordered_map<const llvm::CallBase*, const llvm::Function*> call_to_callee;
+    std::unordered_map<const llvm::Function*, std::vector<const llvm::CallBase*>> callee_to_calls;
 
     for (const llvm::Function& func : module) {
         if (func.isDeclaration()) continue;
         for (const llvm::BasicBlock& bb : func) {
             for (const llvm::Instruction& inst : bb) {
-                if (auto* call = llvm::dyn_cast<llvm::CallInst>(&inst)) {
+                if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
                     if (const llvm::Function* callee = call->getCalledFunction()) {
                         call_to_callee[call] = callee;
                         callee_to_calls[callee].push_back(call);
@@ -126,7 +135,7 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         }
     }
 
-    auto get_return_sites = [&successors](const llvm::CallInst* call) -> std::vector<const llvm::Instruction*> {
+    auto get_return_sites = [&successors](const llvm::CallBase* call) -> std::vector<const llvm::Instruction*> {
         auto it = successors.find(call);
         if (it != successors.end()) return it->second;
         return {};
@@ -245,7 +254,7 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         const Fact& start_fact = edge.start_fact;
         const Fact& fact = edge.target_fact;
 
-        if (auto* call = llvm::dyn_cast<llvm::CallInst>(curr)) {
+        if (auto* call = llvm::dyn_cast<llvm::CallBase>(curr)) {
             auto it_callee = call_to_callee.find(call);
             const llvm::Function* callee = (it_callee != call_to_callee.end()) ? it_callee->second : nullptr;
 
@@ -336,14 +345,14 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                     auto callee_calls_it = callee_to_calls.find(func);
                     if (callee_calls_it != callee_to_calls.end()) {
                         Fact zero_fact = m_problem.zero_fact();
-                        for (const llvm::CallInst* call : callee_calls_it->second) {
+                        for (const llvm::CallBase* call : callee_calls_it->second) {
                             FactSet return_facts = m_problem.return_flow(call, func, fact, zero_fact);
                             preserve_zero(return_facts, fact);
                             for (const llvm::Instruction* ret_site : get_return_sites(call)) {
                                 for (const Fact& rf : return_facts) {
                                     auto ret_ef = m_problem.return_edge_function(call, fact, rf);
                                     EdgeFunctionPtr ret_phi = make_edge_function(ret_ef);
-                                    EdgeFunctionPtr composed = compose_cached(phi, ret_phi);
+                                    EdgeFunctionPtr composed = compose_cached(ret_phi, phi);
                                     add_jump_function(PathEdgeType(ret_site, zero_fact, ret_site, rf),
                                                       composed);
                                 }

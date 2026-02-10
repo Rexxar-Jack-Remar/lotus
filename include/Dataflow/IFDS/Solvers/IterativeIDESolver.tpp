@@ -213,7 +213,7 @@ void IterativeIDESolver<Problem>::solve_incremental(const llvm::Module& module) 
         for (const auto& func : module) {
             for (const auto& bb : func) {
                 for (const auto& inst : bb) {
-                    if (const auto* call = llvm::dyn_cast<llvm::CallInst>(&inst)) {
+                    if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
                         if (call->getCalledFunction() && 
                             call->getCalledFunction()->getName() == func_name) {
                             to_reanalyze.insert(func.getName().str());

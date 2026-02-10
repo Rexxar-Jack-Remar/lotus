@@ -100,23 +100,23 @@ struct LCAResult {
 // Linear Constant Analysis (IDE)
 // ============================================================================
 
-class IDELinearConstantAnalysis : public IDEProblem<LCAFact, LCALattice> {
+class IDELinearConstantAnalysis : public DefaultNoAliasIDEProblem<LCAFact, LCALattice> {
 public:
   using Fact = LCAFact;
   using Value = LCALattice;
-  using FactSet = typename IDEProblem<Fact, Value>::FactSet;
-  using EdgeFunction = typename IDEProblem<Fact, Value>::EdgeFunction;
+  using FactSet = typename DefaultNoAliasIDEProblem<Fact, Value>::FactSet;
+  using EdgeFunction = typename DefaultNoAliasIDEProblem<Fact, Value>::EdgeFunction;
 
   IDELinearConstantAnalysis();
 
   // IFDS interface - flow functions
   Fact zero_fact() const override;
   FactSet normal_flow(const llvm::Instruction *stmt, const Fact &fact) override;
-  FactSet call_flow(const llvm::CallInst *call, const llvm::Function *callee,
+  FactSet call_flow(const llvm::CallBase*call, const llvm::Function *callee,
                     const Fact &fact) override;
-  FactSet return_flow(const llvm::CallInst *call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase*call, const llvm::Function *callee,
                       const Fact &exit_fact, const Fact &call_fact) override;
-  FactSet call_to_return_flow(const llvm::CallInst *call,
+  FactSet call_to_return_flow(const llvm::CallBase*call,
                               const Fact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 
@@ -129,13 +129,13 @@ public:
   EdgeFunction normal_edge_function(const llvm::Instruction *stmt,
                                     const Fact &src_fact,
                                     const Fact &tgt_fact) override;
-  EdgeFunction call_edge_function(const llvm::CallInst *call,
+  EdgeFunction call_edge_function(const llvm::CallBase*call,
                                   const Fact &src_fact,
                                   const Fact &tgt_fact) override;
-  EdgeFunction return_edge_function(const llvm::CallInst *call,
+  EdgeFunction return_edge_function(const llvm::CallBase*call,
                                     const Fact &exit_fact,
                                     const Fact &ret_fact) override;
-  EdgeFunction call_to_return_edge_function(const llvm::CallInst *call,
+  EdgeFunction call_to_return_edge_function(const llvm::CallBase*call,
                                             const Fact &src_fact,
                                             const Fact &tgt_fact) override;
 

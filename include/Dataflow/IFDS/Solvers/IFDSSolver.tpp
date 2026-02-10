@@ -26,6 +26,15 @@ IFDSSolver<Problem>::IFDSSolver(Problem& problem)
 
 template<typename Problem>
 void IFDSSolver<Problem>::solve(const llvm::Module& module) {
+    std::unique_ptr<lotus::AliasAnalysisWrapper> owned_alias_analysis;
+    if (m_config.auto_inject_alias_analysis() &&
+        !m_problem.has_alias_analysis_configured()) {
+        owned_alias_analysis = std::make_unique<lotus::AliasAnalysisWrapper>(
+            const_cast<llvm::Module&>(module),
+            m_config.alias_analysis_config());
+        m_problem.set_alias_analysis(owned_alias_analysis.get());
+    }
+
     m_steps_performed = 0;
     m_bound_reached = false;
 
@@ -171,7 +180,7 @@ void IFDSSolver<Problem>::process_normal_edge(const PathEdgeType& current_edge,
 
 template<typename Problem>
 void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
-                                            const llvm::CallInst* call,
+                                            const llvm::CallBase* call,
                                             const llvm::Function* callee) {
     // ALWAYS generate call-to-return edges (textbook IFDS requirement)
     process_call_to_return_edge(current_edge, call);
@@ -248,12 +257,10 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
                 return_facts.insert(m_problem.zero_fact());
             }
 
-            // Create summary edge (cast instruction to CallInst)
-            auto* call_inst = llvm::cast<llvm::CallInst>(edge_info.call_node);
-            SummaryEdgeType new_summary(call_inst, start_fact, exit_fact);
+            SummaryEdgeType new_summary(edge_info.call_node, start_fact, exit_fact);
             m_summary_edges.insert(new_summary);
 
-            for (const llvm::Instruction* return_site : get_return_sites(call_inst)) {
+            for (const llvm::Instruction* return_site : get_return_sites(edge_info.call_node)) {
                 for (const Fact& return_fact : return_facts) {
                     propagate_path_edge(PathEdgeType(edge_info.source_node, edge_info.source_fact,
                                                     return_site, return_fact));
@@ -266,7 +273,7 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
     auto callee_calls_it = m_callee_to_calls.find(func);
     if (m_config.follow_returns_past_seeds() && !had_incoming && callee_calls_it != m_callee_to_calls.end()) {
         Fact zero = m_problem.zero_fact();
-        for (const llvm::CallInst* call : callee_calls_it->second) {
+        for (const llvm::CallBase* call : callee_calls_it->second) {
             FactSet return_facts = m_problem.return_flow(call, func, exit_fact, zero);
             if (m_problem.auto_add_zero()) {
                 return_facts.insert(zero);
@@ -282,7 +289,7 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
 
 template<typename Problem>
 void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& current_edge,
-                                                      const llvm::CallInst* call) {
+                                                      const llvm::CallBase* call) {
     CallToReturnFlowKey ckey{call, current_edge.target_fact};
     auto cit = m_call_to_return_flow_cache.find(ckey);
     FactSet ctr_facts;
@@ -316,7 +323,7 @@ void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& curren
 
 template<typename Problem>
 std::vector<const llvm::Instruction*>
-IFDSSolver<Problem>::get_return_sites(const llvm::CallInst* call) const {
+IFDSSolver<Problem>::get_return_sites(const llvm::CallBase* call) const {
     auto it = m_successors.find(call);
     if (it != m_successors.end()) {
         return it->second;
@@ -352,7 +359,7 @@ void IFDSSolver<Problem>::initialize_call_graph(const llvm::Module& module) {
             for (const llvm::Instruction& inst : bb) {
                 if (auto* ret = llvm::dyn_cast<llvm::ReturnInst>(&inst)) {
                     returns.push_back(ret);
-                } else if (auto* call = llvm::dyn_cast<llvm::CallInst>(&inst)) {
+                } else if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
                     if (const llvm::Function* callee = call->getCalledFunction()) {
                         m_call_to_callee[call] = callee;
                         m_callee_to_calls[callee].push_back(call);
@@ -492,21 +499,12 @@ void IFDSSolver<Problem>::run_tabulation() {
         const llvm::Instruction* curr = current_edge.target_node;
 
         // Process different instruction types
-        if (auto* call = llvm::dyn_cast<llvm::CallInst>(curr)) {
-            if (!llvm::isa<llvm::InvokeInst>(curr)) {
-                auto it = m_call_to_callee.find(call);
-                if (it != m_call_to_callee.end()) {
-                    process_call_edge(current_edge, call, it->second);
-                } else {
-                    process_call_to_return_edge(current_edge, call);
-                }
+        if (auto* call = llvm::dyn_cast<llvm::CallBase>(curr)) {
+            auto it = m_call_to_callee.find(call);
+            if (it != m_call_to_callee.end()) {
+                process_call_edge(current_edge, call, it->second);
             } else {
-                auto* invoke = llvm::cast<llvm::InvokeInst>(curr);
-                if (const llvm::Function* callee = invoke->getCalledFunction()) {
-                    process_call_edge(current_edge, call, callee);
-                } else {
-                    process_call_to_return_edge(current_edge, call);
-                }
+                process_call_to_return_edge(current_edge, call);
             }
         } else if (auto* ret = llvm::dyn_cast<llvm::ReturnInst>(curr)) {
             process_return_edge(current_edge, ret);

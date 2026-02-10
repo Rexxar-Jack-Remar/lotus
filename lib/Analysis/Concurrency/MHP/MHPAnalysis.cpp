@@ -1018,16 +1018,10 @@ bool MHPAnalysis::isInSameThread(const Instruction *i1,
 
 bool MHPAnalysis::isOrderedByLocks(const Instruction *i1,
                                     const Instruction *i2) const {
-  if (!m_lockset)
-    return false;
-
-  // If both instructions may hold a common lock in different threads,
-  // they cannot execute in parallel due to mutual exclusion. Use
-  // mayHoldCommonLock so we suppress races when accesses are protected
-  // on some path (avoids false positives when must-lock is empty at merge points).
-  if (!isInSameThread(i1, i2))
-    return m_lockset->mayHoldCommonLock(i1, i2);
-
+  (void)i1;
+  (void)i2;
+  // Keep MHP conservative: lockset information is collected for downstream
+  // consumers, but does not currently prune may-parallel pairs.
   return false;
 }
 

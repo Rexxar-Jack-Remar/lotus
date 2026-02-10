@@ -218,7 +218,9 @@ TEST_F(CypherQueryTest, BidirectionalRelationship) {
 
   const auto *pattern = query->getPatterns()[0].get();
   ASSERT_NE(pattern->getRelationship(), nullptr);
-  EXPECT_TRUE(pattern->getRelationship()->isBidirectional());
+  EXPECT_EQ(pattern->getRelationship()->getDirection(),
+            CypherRelationshipPattern::Direction::IN);
+  EXPECT_FALSE(pattern->getRelationship()->isBidirectional());
 }
 
 TEST_F(CypherQueryTest, MultipleReturnItems) {
@@ -228,6 +230,75 @@ TEST_F(CypherQueryTest, MultipleReturnItems) {
 
   ASSERT_NE(query, nullptr);
   EXPECT_EQ(query->getReturnItems().size(), 4);
+}
+
+TEST_F(CypherQueryTest, ParseComparisonOperators) {
+  CypherParser parser;
+
+  auto q1 = parser.parse("MATCH (n) WHERE n.type <= 10 RETURN n");
+  ASSERT_NE(q1, nullptr);
+
+  auto q2 = parser.parse("MATCH (n) WHERE n.type >= 10 RETURN n");
+  ASSERT_NE(q2, nullptr);
+
+  auto q3 = parser.parse("MATCH (n) WHERE n.type != 10 RETURN n");
+  ASSERT_NE(q3, nullptr);
+}
+
+TEST_F(CypherQueryTest, ParseChainedPattern) {
+  CypherParser parser;
+  std::unique_ptr<CypherQuery> query =
+      parser.parse("MATCH (a)-[r1]->(b)-[r2]->(c) RETURN a, b, c");
+
+  ASSERT_NE(query, nullptr);
+  ASSERT_FALSE(query->getPatterns().empty());
+  const auto *root = query->getPatterns()[0].get();
+  ASSERT_NE(root, nullptr);
+  ASSERT_NE(root->getRelationship(), nullptr);
+  ASSERT_FALSE(root->getNextElements().empty());
+  ASSERT_NE(root->getNextElements()[0]->getRelationship(), nullptr);
+}
+
+TEST_F(CypherQueryTest, ParsePathBindingPattern) {
+  CypherParser parser;
+  std::unique_ptr<CypherQuery> query =
+      parser.parse("MATCH p = (a)-[*]->(b) RETURN a, b");
+
+  ASSERT_NE(query, nullptr);
+  ASSERT_FALSE(query->getPatterns().empty());
+}
+
+TEST_F(CypherQueryTest, ReturnRelationshipProjection) {
+  if (!pdg_) {
+    GTEST_SKIP() << "PDG not available";
+  }
+
+  CypherParser parser;
+  CypherQueryExecutor executor(*pdg_);
+  std::unique_ptr<CypherQuery> query =
+      parser.parse("MATCH (a)-[r]->(b) RETURN r LIMIT 5");
+  ASSERT_NE(query, nullptr);
+
+  std::unique_ptr<CypherResult> result = executor.execute(*query);
+  ASSERT_NE(result, nullptr);
+  EXPECT_EQ(result->getType(), CypherResult::ResultType::RELATIONSHIPS);
+}
+
+TEST_F(CypherQueryTest, ReturnPropertyProjection) {
+  if (!pdg_) {
+    GTEST_SKIP() << "PDG not available";
+  }
+
+  CypherParser parser;
+  CypherQueryExecutor executor(*pdg_);
+  std::unique_ptr<CypherQuery> query =
+      parser.parse("MATCH (n) RETURN n.label LIMIT 3");
+  ASSERT_NE(query, nullptr);
+
+  std::unique_ptr<CypherResult> result = executor.execute(*query);
+  ASSERT_NE(result, nullptr);
+  EXPECT_EQ(result->getType(), CypherResult::ResultType::SCALAR);
+  EXPECT_FALSE(result->getScalarValue().empty());
 }
 
 int main(int argc, char **argv) {

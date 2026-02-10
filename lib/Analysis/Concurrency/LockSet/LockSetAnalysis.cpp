@@ -197,7 +197,9 @@ bool LockSetAnalysis::mayHoldLock(const Instruction *inst, LockID lock) const {
 bool LockSetAnalysis::mustHoldLock(const Instruction *inst, LockID lock) const {
   auto lockset = getMustLockSetAt(inst);
   for (const auto *held_lock : lockset) {
-    if (held_lock == lock || mayAlias(lock, held_lock))
+    // Must queries require certainty. A may-alias relation is insufficient to
+    // conclude the queried lock is definitely held.
+    if (held_lock == lock)
       return true;
   }
   return false;

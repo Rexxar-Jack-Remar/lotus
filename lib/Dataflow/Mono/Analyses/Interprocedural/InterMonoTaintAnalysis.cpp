@@ -1,7 +1,7 @@
 #include "Dataflow/Mono/Analyses/Interprocedural/InterMonoTaintAnalysis.h"
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
 #include "Dataflow/Mono/Solver/InterMonoSolver.h"
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/IR/Instructions.h"
 
@@ -77,7 +77,6 @@ public:
   mono_container_t returnFlow(Instruction *CallSite, Function *Callee,
                               Instruction *ExitStmt, Instruction *RetSite,
                               const mono_container_t &In) override {
-    (void)Callee;
     (void)RetSite;
 
     mono_container_t Out;
@@ -93,6 +92,20 @@ public:
         if (In.count(RetVal) && !CallSite->getType()->isVoidTy()) {
           Out.insert(CallSite);
         }
+      }
+    }
+
+    auto *Call = dyn_cast_or_null<CallBase>(CallSite);
+    if (Call != nullptr && Callee != nullptr) {
+      unsigned Index = 0;
+      for (auto &Arg : Callee->args()) {
+        if (Index >= Call->arg_size()) {
+          break;
+        }
+        if (Arg.getType()->isPointerTy() && In.count(&Arg)) {
+          taintAliases(Call->getArgOperand(Index), Out);
+        }
+        ++Index;
       }
     }
 
@@ -125,6 +138,53 @@ public:
   }
 
 private:
+  struct AliasPartition {
+    std::vector<Value *> MustAliases;
+    std::vector<Value *> MayAliases;
+  };
+
+  AliasPartition classifyAliases(const Value *Ptr,
+                                 const mono_container_t &Facts) const {
+    AliasPartition AP;
+    if (Ptr == nullptr) {
+      return AP;
+    }
+    const bool HaveAA = AA != nullptr && AA->isInitialized();
+    const Value *PtrBase = Ptr->stripPointerCasts();
+
+    auto Add = [&](Value *Candidate) {
+      if (Candidate == nullptr || !Candidate->getType()->isPointerTy()) {
+        return;
+      }
+      const Value *CandidateBase = Candidate->stripPointerCasts();
+      if (PtrBase != nullptr && CandidateBase != nullptr &&
+          PtrBase == CandidateBase) {
+        AP.MustAliases.push_back(Candidate);
+        return;
+      }
+      if (Candidate == Ptr) {
+        AP.MustAliases.push_back(Candidate);
+        return;
+      }
+      if (!HaveAA || !Ptr->getType()->isPointerTy()) {
+        AP.MayAliases.push_back(Candidate);
+        return;
+      }
+      auto Res = AA->query(Ptr, Candidate);
+      if (Res == AliasResult::MustAlias) {
+        AP.MustAliases.push_back(Candidate);
+      } else if (Res != AliasResult::NoAlias) {
+        AP.MayAliases.push_back(Candidate);
+      }
+    };
+
+    Add(const_cast<Value *>(Ptr));
+    for (auto *V : Facts) {
+      Add(V);
+    }
+    return AP;
+  }
+
   bool isTaintedValue(const Value *V, const mono_container_t &In) const {
     if (V == nullptr) {
       return false;
@@ -132,18 +192,25 @@ private:
     if (In.count(const_cast<Value *>(V))) {
       return true;
     }
-    if (AA == nullptr || !AA->isInitialized()) {
-      return false;
-    }
     if (!V->getType()->isPointerTy()) {
       return false;
     }
-    std::vector<const Value *> Aliases;
-    if (!AA->getAliasSet(V, Aliases)) {
-      return false;
-    }
-    for (const auto *Alias : Aliases) {
-      if (In.count(const_cast<Value *>(Alias))) {
+    const bool HaveAA = AA != nullptr && AA->isInitialized();
+    const Value *VBase = V->stripPointerCasts();
+
+    for (auto *Candidate : In) {
+      if (Candidate == nullptr || !Candidate->getType()->isPointerTy()) {
+        continue;
+      }
+      const Value *CandidateBase = Candidate->stripPointerCasts();
+      if (VBase != nullptr && CandidateBase != nullptr &&
+          VBase == CandidateBase) {
+        return true;
+      }
+      if (!HaveAA) {
+        return true;
+      }
+      if (AA->query(V, Candidate) != AliasResult::NoAlias) {
         return true;
       }
     }
@@ -154,19 +221,22 @@ private:
     if (Ptr == nullptr) {
       return;
     }
-    Out.insert(Ptr);
-    if (AA == nullptr || !AA->isInitialized()) {
+    auto AP = classifyAliases(Ptr, Out);
+    for (auto *Alias : AP.MustAliases) {
+      Out.insert(Alias);
+    }
+    for (auto *Alias : AP.MayAliases) {
+      Out.insert(Alias);
+    }
+  }
+
+  void untaintMustAliases(Value *Ptr, mono_container_t &Out) const {
+    if (Ptr == nullptr) {
       return;
     }
-    if (!Ptr->getType()->isPointerTy()) {
-      return;
-    }
-    std::vector<const Value *> Aliases;
-    if (!AA->getAliasSet(Ptr, Aliases)) {
-      return;
-    }
-    for (const auto *Alias : Aliases) {
-      Out.insert(const_cast<Value *>(Alias));
+    auto AP = classifyAliases(Ptr, Out);
+    for (auto *Alias : AP.MustAliases) {
+      Out.erase(Alias);
     }
   }
 
@@ -203,6 +273,9 @@ private:
     if (auto *Store = dyn_cast<StoreInst>(Inst)) {
       if (isTaintedValue(Store->getValueOperand(), In)) {
         taintAliases(Store->getPointerOperand(), Out);
+      } else if (isTaintedValue(Store->getPointerOperand(), In)) {
+        // Strong update: clear only must-aliases. May-aliases are weak updates.
+        untaintMustAliases(Store->getPointerOperand(), Out);
       }
       return Out;
     }
@@ -264,7 +337,7 @@ runInterMonoTaintAnalysis(Function *Entry, const InterMonoTaintConfig &Config) {
 
   auto AA = std::make_unique<lotus::AliasAnalysisWrapper>(
       *Entry->getParent(),
-      lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
+      lotus::AAConfig(lotus::AAConfig::Implementation::DyckAA,
                       lotus::AAConfig::ContextSensitivity::None, 0, true,
                       lotus::AAConfig::Solver::Default));
   InterMonoTaintProblem Problem(Entry, Config, AA.get());

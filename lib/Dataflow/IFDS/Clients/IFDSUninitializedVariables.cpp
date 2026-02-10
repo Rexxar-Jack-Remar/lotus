@@ -79,7 +79,7 @@ UninitializedVariablesAnalysis::normal_flow(const llvm::Instruction *stmt,
 }
 
 UninitializedVariablesAnalysis::FactSet
-UninitializedVariablesAnalysis::call_flow(const llvm::CallInst *call,
+UninitializedVariablesAnalysis::call_flow(const llvm::CallBase*call,
                                           const llvm::Function *callee,
                                           const UninitVarFact &fact) {
   FactSet result;
@@ -111,7 +111,7 @@ UninitializedVariablesAnalysis::call_flow(const llvm::CallInst *call,
 
 UninitializedVariablesAnalysis::FactSet
 UninitializedVariablesAnalysis::return_flow(
-    const llvm::CallInst *call, const llvm::Function *callee,
+    const llvm::CallBase*call, const llvm::Function *callee,
     const UninitVarFact &exit_fact, const UninitVarFact & /*call_fact*/) {
   FactSet result;
 
@@ -149,7 +149,7 @@ UninitializedVariablesAnalysis::return_flow(
 }
 
 UninitializedVariablesAnalysis::FactSet
-UninitializedVariablesAnalysis::call_to_return_flow(const llvm::CallInst *call,
+UninitializedVariablesAnalysis::call_to_return_flow(const llvm::CallBase*call,
                                                     const UninitVarFact &fact) {
   FactSet result;
 

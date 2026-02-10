@@ -17,7 +17,7 @@
 
 namespace lotus {
 class AliasAnalysisWrapper;
-}
+} // namespace lotus
 
 namespace mono {
 

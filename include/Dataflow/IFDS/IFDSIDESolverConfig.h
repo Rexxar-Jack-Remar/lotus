@@ -9,6 +9,8 @@
 
 #include <cstdint>
 
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+
 namespace ifds {
 
 enum class SolverConfigOptions : uint32_t {
@@ -51,8 +53,31 @@ struct IFDSIDESolverConfig {
 
   void set_config(SolverConfigOptions opt) { m_options = static_cast<uint32_t>(opt); }
 
+  /// Automatically construct and inject alias analysis when none was provided
+  /// by the client analysis.
+  /// Default: false (Phasar-style explicit alias wiring).
+  bool auto_inject_alias_analysis() const { return m_auto_inject_alias_analysis; }
+  void set_auto_inject_alias_analysis(bool enable = true) {
+    m_auto_inject_alias_analysis = enable;
+  }
+
+  /// Alias backend used when auto injection is enabled.
+  const lotus::AAConfig &alias_analysis_config() const { return m_alias_analysis_config; }
+  void set_alias_analysis_config(const lotus::AAConfig &cfg) {
+    m_alias_analysis_config = cfg;
+  }
+
+  static lotus::AAConfig default_alias_analysis_config() {
+    return lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
+                           lotus::AAConfig::ContextSensitivity::None, 0, true,
+                           lotus::AAConfig::Solver::Default);
+  }
+
 private:
   uint32_t m_options = 0;
+  // Phasar-style default: alias-aware analyses explicitly receive alias info.
+  bool m_auto_inject_alias_analysis = false;
+  lotus::AAConfig m_alias_analysis_config = default_alias_analysis_config();
 };
 
 } // namespace ifds

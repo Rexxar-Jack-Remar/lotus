@@ -108,10 +108,10 @@ private:
 
   // Track entry facts used when entering each callee: (call, entry_fact) ->
   // true This allows proper retroactive summary application
-  using EntryFactKey = std::pair<const llvm::CallInst *, Fact>;
+  using EntryFactKey = std::pair<const llvm::CallBase *, Fact>;
   struct EntryFactKeyHash {
     size_t operator()(const EntryFactKey &k) const {
-      return std::hash<const llvm::CallInst *>{}(k.first) ^
+      return std::hash<const llvm::CallBase *>{}(k.first) ^
              (std::hash<Fact>{}(k.second) << 1);
     }
   };
@@ -120,7 +120,7 @@ private:
   // Track the call edge used to enter: (callee, entry_fact) -> original call
   // edge This allows restoring caller context when processing returns
   struct CallEdgeInfo {
-    const llvm::CallInst *call_node;
+    const llvm::CallBase *call_node;
     Fact call_fact;
     const llvm::Instruction *source_node;
     Fact source_fact;
@@ -133,7 +133,7 @@ private:
   };
   struct CallEdgeInfoHash {
     size_t operator()(const CallEdgeInfo &k) const {
-      size_t h1 = std::hash<const llvm::CallInst *>{}(k.call_node);
+      size_t h1 = std::hash<const llvm::CallBase *>{}(k.call_node);
       size_t h2 = std::hash<Fact>{}(k.call_fact);
       size_t h3 = std::hash<const llvm::Instruction *>{}(k.source_node);
       size_t h4 = std::hash<Fact>{}(k.source_fact);
@@ -155,19 +155,19 @@ private:
 
   // Flow function result caches (key -> FactSet) to avoid recomputation
   using NormalFlowKey = std::pair<const llvm::Instruction *, Fact>;
-  using CallToReturnFlowKey = std::pair<const llvm::CallInst *, Fact>;
+  using CallToReturnFlowKey = std::pair<const llvm::CallBase *, Fact>;
   std::unordered_map<NormalFlowKey, FactSet,
                      PairHash<const llvm::Instruction *, Fact>>
       m_normal_flow_cache;
   std::unordered_map<CallToReturnFlowKey, FactSet,
-                     PairHash<const llvm::CallInst *, Fact>>
+                     PairHash<const llvm::CallBase *, Fact>>
       m_call_to_return_flow_cache;
 
   // Call graph information (read-only after initialization)
-  std::unordered_map<const llvm::CallInst *, const llvm::Function *>
+  std::unordered_map<const llvm::CallBase *, const llvm::Function *>
       m_call_to_callee;
   std::unordered_map<const llvm::Function *,
-                     std::vector<const llvm::CallInst *>>
+                     std::vector<const llvm::CallBase *>>
       m_callee_to_calls;
   std::unordered_map<const llvm::Function *,
                      std::vector<const llvm::ReturnInst *>>
@@ -186,17 +186,17 @@ private:
   void process_normal_edge(const PathEdgeType &current_edge,
                            const llvm::Instruction *next);
   void process_call_edge(const PathEdgeType &current_edge,
-                         const llvm::CallInst *call,
+                         const llvm::CallBase *call,
                          const llvm::Function *callee);
   void process_return_edge(const PathEdgeType &current_edge,
                            const llvm::ReturnInst *ret);
   void process_call_to_return_edge(const PathEdgeType &current_edge,
-                                   const llvm::CallInst *call);
+                                   const llvm::CallBase *call);
 
   // Helper methods: return sites = all CFG successors of the call (e.g. normal
   // + unwind for invoke)
   std::vector<const llvm::Instruction *>
-  get_return_sites(const llvm::CallInst *call) const;
+  get_return_sites(const llvm::CallBase *call) const;
   std::vector<const llvm::Instruction *>
   get_successors(const llvm::Instruction *inst) const;
 

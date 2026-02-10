@@ -66,7 +66,7 @@ template <> struct hash<ifds::ConstFact> {
 
 namespace ifds {
 
-class ConstAnalysis : public IFDSProblem<ConstFact> {
+class ConstAnalysis : public DefaultAliasAwareIFDSProblem<ConstFact> {
 public:
   ConstAnalysis();
   explicit ConstAnalysis(lotus::AliasAnalysisWrapper *aa);
@@ -74,12 +74,12 @@ public:
   ConstFact zero_fact() const override;
   FactSet normal_flow(const llvm::Instruction *stmt,
                       const ConstFact &fact) override;
-  FactSet call_flow(const llvm::CallInst *call, const llvm::Function *callee,
+  FactSet call_flow(const llvm::CallBase*call, const llvm::Function *callee,
                     const ConstFact &fact) override;
-  FactSet return_flow(const llvm::CallInst *call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase*call, const llvm::Function *callee,
                       const ConstFact &exit_fact,
                       const ConstFact &call_fact) override;
-  FactSet call_to_return_flow(const llvm::CallInst *call,
+  FactSet call_to_return_flow(const llvm::CallBase*call,
                               const ConstFact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 
@@ -96,7 +96,7 @@ private:
   std::set<const llvm::Value *> all_memory_locations;
 
   bool is_vtable_store(const llvm::StoreInst *store) const;
-  bool is_memory_intrinsic(const llvm::CallInst *call) const;
+  bool is_memory_intrinsic(const llvm::CallBase*call) const;
   std::set<const llvm::Value *>
   get_context_relevant_aliases(const std::set<const llvm::Value *> &aliases,
                                const llvm::Function *context) const;

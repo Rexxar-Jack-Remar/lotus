@@ -46,7 +46,7 @@ public:
     return result;
   }
 
-  FactSet call_flow(const llvm::CallInst *call, const llvm::Function *callee,
+  FactSet call_flow(const llvm::CallBase*call, const llvm::Function *callee,
                     const SimpleIntFact &fact) override {
     (void)call;
     (void)callee;
@@ -55,7 +55,7 @@ public:
     return result;
   }
 
-  FactSet return_flow(const llvm::CallInst *call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase*call, const llvm::Function *callee,
                       const SimpleIntFact &exit_fact,
                       const SimpleIntFact &call_fact) override {
     (void)call;
@@ -66,7 +66,7 @@ public:
     return result;
   }
 
-  FactSet call_to_return_flow(const llvm::CallInst *call,
+  FactSet call_to_return_flow(const llvm::CallBase*call,
                               const SimpleIntFact &fact) override {
     (void)call;
     FactSet result;

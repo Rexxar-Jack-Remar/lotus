@@ -23,6 +23,7 @@
 #include <functional>
 #include <memory>
 #include <set>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -88,11 +89,11 @@ struct PathEdgeHash {
 
 template<typename Fact>
 struct SummaryEdge {
-    const llvm::CallInst* call_site;
+    const llvm::CallBase* call_site;
     Fact call_fact;
     Fact return_fact;
     
-    SummaryEdge(const llvm::CallInst* call, const Fact& c_fact, const Fact& r_fact)
+    SummaryEdge(const llvm::CallBase* call, const Fact& c_fact, const Fact& r_fact)
         : call_site(call), call_fact(c_fact), return_fact(r_fact) {}
     
     bool operator==(const SummaryEdge& other) const {
@@ -108,7 +109,7 @@ struct SummaryEdge {
 template<typename Fact>
 struct SummaryEdgeHash {
     size_t operator()(const SummaryEdge<Fact>& edge) const {
-        size_t h1 = std::hash<const llvm::CallInst*>{}(edge.call_site);
+        size_t h1 = std::hash<const llvm::CallBase*>{}(edge.call_site);
         size_t h2 = std::hash<Fact>{}(edge.call_fact);
         size_t h3 = std::hash<Fact>{}(edge.return_fact);
         return (h1 ^ (h2 << 1)) ^ (h3 << 2);
@@ -157,10 +158,10 @@ public:
     
     // Flow functions for different statement types
     virtual FactSet normal_flow(const llvm::Instruction* stmt, const Fact& fact) = 0;
-    virtual FactSet call_flow(const llvm::CallInst* call, const llvm::Function* callee, const Fact& fact) = 0;
-    virtual FactSet return_flow(const llvm::CallInst* call, const llvm::Function* callee, 
+    virtual FactSet call_flow(const llvm::CallBase* call, const llvm::Function* callee, const Fact& fact) = 0;
+    virtual FactSet return_flow(const llvm::CallBase* call, const llvm::Function* callee, 
                                const Fact& exit_fact, const Fact& call_fact) = 0;
-    virtual FactSet call_to_return_flow(const llvm::CallInst* call, const Fact& fact) = 0;
+    virtual FactSet call_to_return_flow(const llvm::CallBase* call, const Fact& fact) = 0;
     
     // Initial facts at program entry
     virtual FactSet initial_facts(const llvm::Function* main) = 0;
@@ -174,6 +175,7 @@ public:
     
     // Alias analysis integration
     virtual void set_alias_analysis(lotus::AliasAnalysisWrapper* aa);
+    bool has_alias_analysis_configured() const;
     
     // Helper methods for common operations
     virtual bool is_source(const llvm::Instruction* inst) const;
@@ -184,6 +186,109 @@ protected:
     
     // Alias analysis helper using AliasAnalysisWrapper
     bool may_alias(const llvm::Value* v1, const llvm::Value* v2) const;
+};
+
+// ============================================================================
+// No-Alias IFDS/IDE Problem Bases (Phasar-style split)
+// ============================================================================
+
+template<typename Fact>
+class DefaultNoAliasIFDSProblem : public IFDSProblem<Fact> {};
+
+// ============================================================================
+// Alias-Aware IFDS Problem Base
+// ============================================================================
+
+template<typename Fact>
+class DefaultAliasAwareIFDSProblem : public IFDSProblem<Fact> {
+public:
+    using typename IFDSProblem<Fact>::FactSet;
+
+protected:
+    bool has_alias_analysis() const {
+        return this->m_alias_analysis != nullptr &&
+               this->m_alias_analysis->isInitialized();
+    }
+
+    bool may_alias_or_equal(const llvm::Value* v1, const llvm::Value* v2) const {
+        if (v1 == v2) {
+            return true;
+        }
+        return this->may_alias(v1, v2);
+    }
+
+    std::vector<const llvm::Value*>
+    get_aliases_including_self(const llvm::Value* value) const {
+        std::vector<const llvm::Value*> aliases;
+        if (!value) {
+            return aliases;
+        }
+
+        aliases.push_back(value);
+        if (!has_alias_analysis()) {
+            return aliases;
+        }
+
+        std::vector<const llvm::Value*> queried;
+        if (!this->m_alias_analysis->getAliasSet(value, queried)) {
+            return aliases;
+        }
+
+        std::unordered_set<const llvm::Value*> seen;
+        seen.insert(value);
+        for (const llvm::Value* alias : queried) {
+            if (!alias || !seen.insert(alias).second) {
+                continue;
+            }
+            aliases.push_back(alias);
+        }
+        return aliases;
+    }
+
+    std::vector<const llvm::Value*>
+    get_aliases_including_self_in_context(const llvm::Value* value,
+                                          const llvm::Instruction* context) const {
+        auto aliases = get_aliases_including_self(value);
+        if (!context) {
+            return aliases;
+        }
+
+        std::vector<const llvm::Value*> filtered;
+        filtered.reserve(aliases.size());
+        for (const llvm::Value* alias : aliases) {
+            if (const auto* inst = llvm::dyn_cast<llvm::Instruction>(alias)) {
+                if (inst->getParent() == context->getParent() &&
+                    context->comesBefore(inst)) {
+                    // Keep Phasar-like precision guard: don't add future defs
+                    // in the same block; they will be seen later anyway.
+                    continue;
+                }
+            }
+            filtered.push_back(alias);
+        }
+        return filtered;
+    }
+
+    template <typename ExtractValueFn, typename BuildAliasFactFn, typename ShouldExpandFn>
+    void expand_facts_with_aliases_in_context(
+        FactSet& facts, const llvm::Instruction* context,
+        ExtractValueFn&& extractValue, BuildAliasFactFn&& buildAliasFact,
+        ShouldExpandFn&& shouldExpand) const {
+        FactSet snapshot = facts;
+        for (const auto& fact : snapshot) {
+            if (!shouldExpand(fact)) {
+                continue;
+            }
+            const llvm::Value* value = extractValue(fact);
+            if (!value) {
+                continue;
+            }
+            for (const llvm::Value* alias :
+                 get_aliases_including_self_in_context(value, context)) {
+                facts.insert(buildAliasFact(alias, fact));
+            }
+        }
+    }
 };
 
 // ============================================================================
@@ -200,19 +305,19 @@ public:
     // Edge functions for IDE
     virtual EdgeFunction normal_edge_function(const llvm::Instruction* stmt, 
                                             const Fact& src_fact, const Fact& tgt_fact) = 0;
-    virtual EdgeFunction call_edge_function(const llvm::CallInst* call, 
+    virtual EdgeFunction call_edge_function(const llvm::CallBase* call, 
                                            const Fact& src_fact, const Fact& tgt_fact) = 0;
-    virtual EdgeFunction return_edge_function(const llvm::CallInst* call, 
+    virtual EdgeFunction return_edge_function(const llvm::CallBase* call, 
                                              const Fact& exit_fact, const Fact& ret_fact) = 0;
-    virtual EdgeFunction call_to_return_edge_function(const llvm::CallInst* call, 
+    virtual EdgeFunction call_to_return_edge_function(const llvm::CallBase* call, 
                                                      const Fact& src_fact, const Fact& tgt_fact) = 0;
     // Optional summary flow/edge functions (for special-cased callees)
-    virtual FactSet summary_flow(const llvm::CallInst* /*call*/,
+    virtual FactSet summary_flow(const llvm::CallBase* /*call*/,
                                  const llvm::Function* /*callee*/,
                                  const Fact& /*fact*/) {
         return {};
     }
-    virtual EdgeFunction summary_edge_function(const llvm::CallInst* /*call*/,
+    virtual EdgeFunction summary_edge_function(const llvm::CallBase* /*call*/,
                                                const Fact& /*src_fact*/,
                                                const Fact& /*tgt_fact*/) {
         return identity();
@@ -228,6 +333,75 @@ public:
     
     // Identity edge function
     EdgeFunction identity() const;
+};
+
+template<typename Fact, typename Value>
+class DefaultNoAliasIDEProblem : public IDEProblem<Fact, Value> {};
+
+template<typename Fact, typename Value>
+class DefaultAliasAwareIDEProblem : public IDEProblem<Fact, Value> {
+protected:
+    bool has_alias_analysis() const {
+        return this->m_alias_analysis != nullptr &&
+               this->m_alias_analysis->isInitialized();
+    }
+
+    bool may_alias_or_equal(const llvm::Value* v1, const llvm::Value* v2) const {
+        if (v1 == v2) {
+            return true;
+        }
+        return this->may_alias(v1, v2);
+    }
+
+    std::vector<const llvm::Value*>
+    get_aliases_including_self(const llvm::Value* value) const {
+        std::vector<const llvm::Value*> aliases;
+        if (!value) {
+            return aliases;
+        }
+
+        aliases.push_back(value);
+        if (!has_alias_analysis()) {
+            return aliases;
+        }
+
+        std::vector<const llvm::Value*> queried;
+        if (!this->m_alias_analysis->getAliasSet(value, queried)) {
+            return aliases;
+        }
+
+        std::unordered_set<const llvm::Value*> seen;
+        seen.insert(value);
+        for (const llvm::Value* alias : queried) {
+            if (!alias || !seen.insert(alias).second) {
+                continue;
+            }
+            aliases.push_back(alias);
+        }
+        return aliases;
+    }
+
+    std::vector<const llvm::Value*>
+    get_aliases_including_self_in_context(const llvm::Value* value,
+                                          const llvm::Instruction* context) const {
+        auto aliases = get_aliases_including_self(value);
+        if (!context) {
+            return aliases;
+        }
+
+        std::vector<const llvm::Value*> filtered;
+        filtered.reserve(aliases.size());
+        for (const llvm::Value* alias : aliases) {
+            if (const auto* inst = llvm::dyn_cast<llvm::Instruction>(alias)) {
+                if (inst->getParent() == context->getParent() &&
+                    context->comesBefore(inst)) {
+                    continue;
+                }
+            }
+            filtered.push_back(alias);
+        }
+        return filtered;
+    }
 };
 
 // ============================================================================
@@ -334,6 +508,11 @@ namespace ifds {
 template<typename Fact>
 inline void IFDSProblem<Fact>::set_alias_analysis(lotus::AliasAnalysisWrapper* aa) {
     m_alias_analysis = aa;
+}
+
+template<typename Fact>
+inline bool IFDSProblem<Fact>::has_alias_analysis_configured() const {
+    return m_alias_analysis != nullptr;
 }
 
 template<typename Fact>

@@ -250,6 +250,21 @@ std::vector<std::string> CypherParser::tokenize(const std::string &s) {
       } else if (c == '<' && i + 1 < s.size() && s[i + 1] == '-') {
         tokens.push_back("<-");
         i++;
+      } else if (c == '<' && i + 1 < s.size() && s[i + 1] == '=') {
+        tokens.push_back("<=");
+        i++;
+      } else if (c == '>' && i + 1 < s.size() && s[i + 1] == '=') {
+        tokens.push_back(">=");
+        i++;
+      } else if (c == '!' && i + 1 < s.size() && s[i + 1] == '=') {
+        tokens.push_back("!=");
+        i++;
+      } else if (c == '<' && i + 1 < s.size() && s[i + 1] == '>') {
+        tokens.push_back("<>");
+        i++;
+      } else if (c == '=' && i + 1 < s.size() && s[i + 1] == '=') {
+        tokens.push_back("==");
+        i++;
       } else {
         std::string single(1, c);
         tokens.push_back(single);
@@ -292,6 +307,11 @@ CypherParser::parseQuery(std::vector<std::string> &tokens, size_t &pos,
       while (hasMore(tokens, pos) && peekUpper() != "WHERE" &&
              peekUpper() != "RETURN" && peekUpper() != "WITH" &&
              peekUpper() != ";") {
+        // Optional path binding syntax: MATCH p = (a)-[*]->(b) ...
+        if (pos + 1 < tokens.size() && tokens[pos + 1] == "=") {
+          consume(tokens, pos); // path variable (currently ignored)
+          consume(tokens, pos); // '='
+        }
         auto pattern = parsePattern(tokens, pos);
         if (!pattern) {
           return nullptr;
@@ -414,19 +434,56 @@ CypherParser::parsePattern(std::vector<std::string> &tokens, size_t &pos) {
     return nullptr;
   }
 
-  if (hasMore(tokens, pos)) {
-    std::string token = peek(tokens, pos);
-    if (token == "[" || token == "-" || token == "<-") {
-      auto rel = parseRelationshipPattern(tokens, pos);
-      if (!rel) {
+  auto cloneNodePattern = [](const CypherNodePattern *nodePat)
+      -> std::unique_ptr<CypherNodePattern> {
+    if (!nodePat)
+      return nullptr;
+    auto copy = std::make_unique<CypherNodePattern>(nodePat->getVariable(),
+                                                    nodePat->getLabel());
+    for (const auto &kv : nodePat->getProperties()) {
+      copy->addProperty(kv.first, kv.second);
+    }
+    return copy;
+  };
+
+  CypherPatternElement *current = pattern.get();
+  while (hasMore(tokens, pos)) {
+    const std::string token = peek(tokens, pos);
+    if (token != "[" && token != "-" && token != "<-") {
+      break;
+    }
+
+    auto rel = parseRelationshipPattern(tokens, pos);
+    if (!rel) {
+      return nullptr;
+    }
+    current->setRelationship(std::move(rel));
+
+    if (!hasMore(tokens, pos) || peek(tokens, pos) != "(") {
+      setError(CypherErrorCode::SYNTAX_ERROR,
+               "Expected '(' for end node pattern", 0, 0);
+      return nullptr;
+    }
+    auto endNode = parseNodePattern(tokens, pos);
+    if (!endNode) {
+      return nullptr;
+    }
+    current->setEndNode(std::move(endNode));
+
+    if (!hasMore(tokens, pos)) {
+      break;
+    }
+    const std::string nextToken = peek(tokens, pos);
+    if (nextToken == "[" || nextToken == "-" || nextToken == "<-") {
+      auto nextStart = cloneNodePattern(current->getEndNode());
+      if (!nextStart) {
         return nullptr;
       }
-      pattern->setRelationship(std::move(rel));
+      current = current->addNextElement(
+          std::make_unique<CypherPatternElement>(std::move(nextStart)));
+    } else {
+      break;
     }
-  }
-
-  if (hasMore(tokens, pos) && peek(tokens, pos) == "(") {
-    pattern->setEndNode(parseNodePattern(tokens, pos));
   }
 
   return pattern;
@@ -1184,33 +1241,359 @@ CypherQueryExecutor::execute(const CypherQuery &query,
   boundVariables_.clear();
   boundRelationships_.clear();
 
-  std::vector<Node *> resultNodes;
-  std::vector<Edge *> resultEdges;
+  struct MatchRow {
+    std::unordered_map<std::string, Node *> nodes;
+    std::unordered_map<std::string, Edge *> rels;
+  };
+
+  auto splitVarProp = [](const std::string &expr) {
+    std::string var = expr;
+    std::string prop;
+    const auto dot = expr.find('.');
+    if (dot != std::string::npos) {
+      var = expr.substr(0, dot);
+      prop = expr.substr(dot + 1);
+    }
+    return std::pair<std::string, std::string>(std::move(var), std::move(prop));
+  };
+
+  auto applyNodePattern = [&](Node *n, const CypherNodePattern *pat) {
+    if (!pat || !n) {
+      return false;
+    }
+
+    if (!pat->getLabel().empty()) {
+      auto labelMatches = matchNodes(pat->getLabel(), "");
+      bool found = false;
+      if (labelMatches) {
+        for (auto *cand : labelMatches->getNodes()) {
+          if (cand == n) {
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) {
+        return false;
+      }
+    }
+
+    for (const auto &kv : pat->getProperties()) {
+      if (getNodeProperty(n, kv.first) != kv.second) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  auto edgeMatchesType = [](EdgeType t, const std::string &upperType) {
+    if (upperType.empty()) {
+      return true;
+    }
+
+    std::vector<std::string> alts;
+    size_t startPos = 0;
+    while (startPos <= upperType.size()) {
+      size_t bar = upperType.find('|', startPos);
+      if (bar == std::string::npos) {
+        alts.push_back(upperType.substr(startPos));
+        break;
+      }
+      alts.push_back(upperType.substr(startPos, bar - startPos));
+      startPos = bar + 1;
+    }
+
+    for (const auto &alt : alts) {
+      if (alt.empty())
+        return true;
+      if (alt == "CONTROL_DEP") {
+        if (t == EdgeType::CONTROLDEP_ENTRY || t == EdgeType::CONTROLDEP_BR ||
+            t == EdgeType::CONTROLDEP_IND_BR ||
+            t == EdgeType::CONTROLDEP_CALLINV ||
+            t == EdgeType::CONTROLDEP_CALLRET) {
+          return true;
+        }
+      } else if (alt == "CALL") {
+        if (t == EdgeType::CONTROLDEP_CALLINV ||
+            t == EdgeType::CONTROLDEP_CALLRET || t == EdgeType::IND_CALL) {
+          return true;
+        }
+      } else if (alt == "DATA_DEP") {
+        if (t == EdgeType::DATA_DEF_USE) {
+          return true;
+        }
+      } else {
+        static const std::unordered_map<std::string, EdgeType> typeMap = {
+            {"DATA_DEF_USE", EdgeType::DATA_DEF_USE},
+            {"DATA_RAW", EdgeType::DATA_RAW},
+            {"DATA_READ", EdgeType::DATA_READ},
+            {"DATA_ALIAS", EdgeType::DATA_ALIAS},
+            {"DATA_RET", EdgeType::DATA_RET},
+            {"CONTROLDEP_ENTRY", EdgeType::CONTROLDEP_ENTRY},
+            {"CONTROLDEP_BR", EdgeType::CONTROLDEP_BR},
+            {"CONTROLDEP_IND_BR", EdgeType::CONTROLDEP_IND_BR},
+            {"CONTROLDEP_CALLINV", EdgeType::CONTROLDEP_CALLINV},
+            {"CONTROLDEP_CALLRET", EdgeType::CONTROLDEP_CALLRET},
+            {"CALL_INV", EdgeType::CONTROLDEP_CALLINV},
+            {"CALL_RET", EdgeType::CONTROLDEP_CALLRET},
+            {"IND_CALL", EdgeType::IND_CALL},
+            {"PARAM_IN", EdgeType::PARAMETER_IN},
+            {"PARAM_OUT", EdgeType::PARAMETER_OUT},
+            {"PARAMETER_IN", EdgeType::PARAMETER_IN},
+            {"PARAMETER_OUT", EdgeType::PARAMETER_OUT},
+        };
+        auto it = typeMap.find(alt);
+        if (it != typeMap.end() && t == it->second) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  auto expandFromNode = [&](Node *start, const CypherRelationshipPattern *rel) {
+    std::vector<std::pair<Node *, Edge *>> out;
+    if (!start || !rel) {
+      return out;
+    }
+
+    int minHops = std::max(1, rel->getMinHops());
+    int maxHops = rel->hasVariableLength() ? rel->getMaxHops() : 1;
+    if (maxHops < 0) {
+      maxHops = unboundedMaxHops_;
+    }
+    maxHops = std::max(1, maxHops);
+
+    std::string upperType = rel->getType();
+    std::transform(upperType.begin(), upperType.end(), upperType.begin(),
+                   ::toupper);
+
+    std::vector<Node *> frontier{start};
+    for (int hop = 0; hop < maxHops && !frontier.empty(); ++hop) {
+      std::vector<Node *> next;
+      for (auto *node : frontier) {
+        if (rel->getDirection() == CypherRelationshipPattern::Direction::OUT ||
+            rel->getDirection() == CypherRelationshipPattern::Direction::BOTH) {
+          for (auto *e : node->getOutEdgeSet()) {
+            if (!edgeMatchesType(e->getEdgeType(), upperType))
+              continue;
+            Node *nbr = e->getDstNode();
+            if (hop + 1 >= minHops) {
+              out.push_back({nbr, e});
+            }
+            next.push_back(nbr);
+          }
+        }
+        if (rel->getDirection() == CypherRelationshipPattern::Direction::IN ||
+            rel->getDirection() == CypherRelationshipPattern::Direction::BOTH) {
+          for (auto *e : node->getInEdgeSet()) {
+            if (!edgeMatchesType(e->getEdgeType(), upperType))
+              continue;
+            Node *nbr = e->getSrcNode();
+            if (hop + 1 >= minHops) {
+              out.push_back({nbr, e});
+            }
+            next.push_back(nbr);
+          }
+        }
+      }
+      frontier = std::move(next);
+    }
+    return out;
+  };
+
+  auto collectChain = [](const CypherPatternElement *root) {
+    std::vector<const CypherPatternElement *> chain;
+    const CypherPatternElement *cur = root;
+    while (cur) {
+      chain.push_back(cur);
+      if (cur->getNextElements().empty()) {
+        break;
+      }
+      cur = cur->getNextElements()[0].get();
+    }
+    return chain;
+  };
+
+  std::vector<MatchRow> rows(1); // one empty row
 
   for (const auto &pattern : query.getPatterns()) {
-    auto patternResult = matchPattern(pattern.get());
-    if (patternResult) {
-      const auto &nodes = patternResult->getNodes();
-      resultNodes.insert(resultNodes.end(), nodes.begin(), nodes.end());
-      const auto &edges = patternResult->getRelationships();
-      resultEdges.insert(resultEdges.end(), edges.begin(), edges.end());
-      lastStats_.nodesVisited += nodes.size();
-      lastStats_.edgesVisited += edges.size();
+    const auto chain = collectChain(pattern.get());
+    if (chain.empty()) {
+      continue;
+    }
+
+    std::vector<MatchRow> nextRows;
+    for (const auto &baseRow : rows) {
+      std::vector<std::pair<MatchRow, Node *>> states;
+      const CypherNodePattern *startPat = chain[0]->getStartNode();
+      if (!startPat) {
+        continue;
+      }
+
+      std::vector<Node *> startCandidates;
+      if (!startPat->getVariable().empty()) {
+        auto it = baseRow.nodes.find(startPat->getVariable());
+        if (it != baseRow.nodes.end()) {
+          startCandidates.push_back(it->second);
+        }
+      }
+      if (startCandidates.empty()) {
+        auto matched = matchNodes(startPat->getLabel(), "");
+        if (!matched) {
+          continue;
+        }
+        startCandidates = matched->getNodes();
+      }
+
+      for (auto *cand : startCandidates) {
+        if (!applyNodePattern(cand, startPat)) {
+          continue;
+        }
+        MatchRow seeded = baseRow;
+        if (!startPat->getVariable().empty()) {
+          auto it = seeded.nodes.find(startPat->getVariable());
+          if (it != seeded.nodes.end() && it->second != cand) {
+            continue;
+          }
+          seeded.nodes[startPat->getVariable()] = cand;
+        }
+        states.push_back({std::move(seeded), cand});
+      }
+
+      for (const auto *elem : chain) {
+        std::vector<std::pair<MatchRow, Node *>> advanced;
+        const auto *startNodePat = elem->getStartNode();
+        const auto *rel = elem->getRelationship();
+        const auto *endNodePat = elem->getEndNode();
+
+        for (auto &st : states) {
+          MatchRow row = st.first;
+          Node *curNode = st.second;
+
+          if (startNodePat && !applyNodePattern(curNode, startNodePat)) {
+            continue;
+          }
+          if (startNodePat && !startNodePat->getVariable().empty()) {
+            auto it = row.nodes.find(startNodePat->getVariable());
+            if (it != row.nodes.end() && it->second != curNode) {
+              continue;
+            }
+            row.nodes[startNodePat->getVariable()] = curNode;
+          }
+
+          if (!rel) {
+            advanced.push_back({std::move(row), curNode});
+            continue;
+          }
+
+          auto expansions = expandFromNode(curNode, rel);
+          for (const auto &exp : expansions) {
+            Node *dst = exp.first;
+            Edge *edge = exp.second;
+            if (endNodePat && !applyNodePattern(dst, endNodePat)) {
+              continue;
+            }
+
+            MatchRow row2 = row;
+            if (!rel->getVariable().empty()) {
+              auto it = row2.rels.find(rel->getVariable());
+              if (it != row2.rels.end() && it->second != edge) {
+                continue;
+              }
+              row2.rels[rel->getVariable()] = edge;
+            }
+            if (endNodePat && !endNodePat->getVariable().empty()) {
+              auto it = row2.nodes.find(endNodePat->getVariable());
+              if (it != row2.nodes.end() && it->second != dst) {
+                continue;
+              }
+              row2.nodes[endNodePat->getVariable()] = dst;
+            }
+            advanced.push_back({std::move(row2), dst});
+          }
+        }
+
+        states = std::move(advanced);
+        if (states.empty()) {
+          break;
+        }
+      }
+
+      for (auto &st : states) {
+        nextRows.push_back(std::move(st.first));
+      }
+    }
+    rows = std::move(nextRows);
+    if (rows.empty()) {
+      break;
     }
   }
 
-  std::sort(resultNodes.begin(), resultNodes.end());
-  resultNodes.erase(std::unique(resultNodes.begin(), resultNodes.end()),
-                    resultNodes.end());
-  std::sort(resultEdges.begin(), resultEdges.end());
-  resultEdges.erase(std::unique(resultEdges.begin(), resultEdges.end()),
-                    resultEdges.end());
+  auto rowSatisfies = [&](const auto &self, const CypherWhereClause &cond,
+                          const MatchRow &row) -> bool {
+    if (cond.isBooleanOp()) {
+      if (cond.getBoolOp() == "NOT") {
+        const auto *child = cond.getChild();
+        return child && !self(self, *child, row);
+      }
+      const auto *left = cond.getLeft();
+      const auto *right = cond.getRight();
+      bool l = left ? self(self, *left, row) : true;
+      bool r = right ? self(self, *right, row) : true;
+      if (cond.getBoolOp() == "AND")
+        return l && r;
+      if (cond.getBoolOp() == "OR")
+        return l || r;
+      return false;
+    }
 
-  // WHERE filters apply to the overall result node set.
-  std::vector<Node *> filteredNodes = resultNodes;
-  if (query.getWhereClause() && !resultNodes.empty()) {
-    auto filtered = filterByWhere(resultNodes, *query.getWhereClause());
-    filteredNodes = filtered->getNodes();
+    const std::string &var = cond.getVariableName();
+    const std::string &prop = cond.getProperty();
+    const auto itNode = row.nodes.find(var);
+    const auto itRel = row.rels.find(var);
+
+    if (cond.isExists()) {
+      if (prop.empty()) {
+        return itNode != row.nodes.end() || itRel != row.rels.end();
+      }
+      if (itNode != row.nodes.end()) {
+        return !getNodeProperty(itNode->second, prop).empty();
+      }
+      if (itRel != row.rels.end()) {
+        return !getEdgeProperty(itRel->second, prop).empty();
+      }
+      return false;
+    }
+
+    std::string lhs;
+    if (itNode != row.nodes.end()) {
+      lhs = getNodeProperty(itNode->second, prop);
+    } else if (itRel != row.rels.end()) {
+      lhs = getEdgeProperty(itRel->second, prop);
+    } else {
+      return false;
+    }
+
+    if (cond.getComparisonOp() == CypherComparisonOp::IN) {
+      for (const auto &v : cond.getListValues()) {
+        if (lhs == v)
+          return true;
+      }
+      return false;
+    }
+    return applyComparison(lhs, cond.getComparisonOp(), cond.getValue());
+  };
+
+  if (query.getWhereClause()) {
+    std::vector<MatchRow> filteredRows;
+    filteredRows.reserve(rows.size());
+    for (const auto &row : rows) {
+      if (rowSatisfies(rowSatisfies, *query.getWhereClause(), row)) {
+        filteredRows.push_back(row);
+      }
+    }
+    rows = std::move(filteredRows);
   }
 
   // Aggregations (currently: COUNT) return a scalar result.
@@ -1241,77 +1624,59 @@ CypherQueryExecutor::execute(const CypherQuery &query,
     int64_t count = 0;
 
     if (argVar == "*") {
-      count = static_cast<int64_t>(filteredNodes.size());
-    } else {
-      auto it = boundVariables_.find(argVar);
-      if (it != boundVariables_.end()) {
-        std::unordered_set<Node *> allowed(filteredNodes.begin(),
-                                           filteredNodes.end());
-        const auto &bucket = it->second;
-        if (argProp.empty()) {
-          if (wantDistinct) {
-            std::unordered_set<Node *> uniq;
-            for (auto *n : bucket) {
-              if (allowed.count(n))
-                uniq.insert(n);
-            }
-            count = static_cast<int64_t>(uniq.size());
-          } else {
-            for (auto *n : bucket) {
-              if (allowed.count(n))
-                ++count;
-            }
-          }
-        } else {
-          if (wantDistinct) {
-            std::unordered_set<std::string> uniq;
-            for (auto *n : bucket) {
-              if (!allowed.count(n))
-                continue;
-              const std::string v = getNodeProperty(n, argProp);
-              if (!v.empty())
-                uniq.insert(v);
-            }
-            count = static_cast<int64_t>(uniq.size());
-          } else {
-            for (auto *n : bucket) {
-              if (!allowed.count(n))
-                continue;
-              if (!getNodeProperty(n, argProp).empty())
-                ++count;
-            }
+      count = static_cast<int64_t>(rows.size());
+    } else if (argProp.empty()) {
+      if (wantDistinct) {
+        std::unordered_set<uintptr_t> uniq;
+        for (const auto &row : rows) {
+          auto itN = row.nodes.find(argVar);
+          if (itN != row.nodes.end())
+            uniq.insert(reinterpret_cast<uintptr_t>(itN->second));
+          auto itR = row.rels.find(argVar);
+          if (itR != row.rels.end())
+            uniq.insert(reinterpret_cast<uintptr_t>(itR->second));
+        }
+        count = static_cast<int64_t>(uniq.size());
+      } else {
+        for (const auto &row : rows) {
+          if (row.nodes.find(argVar) != row.nodes.end() ||
+              row.rels.find(argVar) != row.rels.end()) {
+            ++count;
           }
         }
-      } else {
-        auto itRel = boundRelationships_.find(argVar);
-        if (itRel != boundRelationships_.end()) {
-          const auto &bucket = itRel->second;
-          if (argProp.empty()) {
-            if (wantDistinct) {
-              std::unordered_set<Edge *> uniq(bucket.begin(), bucket.end());
-              count = static_cast<int64_t>(uniq.size());
-            } else {
-              count = static_cast<int64_t>(bucket.size());
-            }
-          } else {
-            if (wantDistinct) {
-              std::unordered_set<std::string> uniq;
-              for (auto *e : bucket) {
-                const std::string v = getEdgeProperty(e, argProp);
-                if (!v.empty())
-                  uniq.insert(v);
-              }
-              count = static_cast<int64_t>(uniq.size());
-            } else {
-              for (auto *e : bucket) {
-                if (!getEdgeProperty(e, argProp).empty())
-                  ++count;
-              }
-            }
+      }
+    } else {
+      if (wantDistinct) {
+        std::unordered_set<std::string> uniq;
+        for (const auto &row : rows) {
+          auto itN = row.nodes.find(argVar);
+          if (itN != row.nodes.end()) {
+            const auto v = getNodeProperty(itN->second, argProp);
+            if (!v.empty())
+              uniq.insert(v);
+            continue;
           }
-        } else {
-          // Unknown variable: fall back to the filtered node set.
-          count = static_cast<int64_t>(filteredNodes.size());
+          auto itR = row.rels.find(argVar);
+          if (itR != row.rels.end()) {
+            const auto v = getEdgeProperty(itR->second, argProp);
+            if (!v.empty())
+              uniq.insert(v);
+          }
+        }
+        count = static_cast<int64_t>(uniq.size());
+      } else {
+        for (const auto &row : rows) {
+          auto itN = row.nodes.find(argVar);
+          if (itN != row.nodes.end()) {
+            if (!getNodeProperty(itN->second, argProp).empty())
+              ++count;
+            continue;
+          }
+          auto itR = row.rels.find(argVar);
+          if (itR != row.rels.end()) {
+            if (!getEdgeProperty(itR->second, argProp).empty())
+              ++count;
+          }
         }
       }
     }
@@ -1327,11 +1692,10 @@ CypherQueryExecutor::execute(const CypherQuery &query,
     return result;
   }
 
-  // ORDER BY applies to the output node list (best-effort).
-  if (query.getOrderBy() && !filteredNodes.empty()) {
+  // ORDER BY applies to rows.
+  if (query.getOrderBy() && !rows.empty()) {
     const auto &ob = *query.getOrderBy();
-    const std::string prop =
-        ob.getProperty().empty() ? "label" : ob.getProperty();
+    const std::string prop = ob.getProperty().empty() ? "label" : ob.getProperty();
 
     auto tryParseInt = [](const std::string &s, int64_t &out) -> bool {
       if (s.empty())
@@ -1344,9 +1708,21 @@ CypherQueryExecutor::execute(const CypherQuery &query,
       return true;
     };
 
-    auto cmp = [&](Node *a, Node *b) {
-      const std::string va = getNodeProperty(a, prop);
-      const std::string vb = getNodeProperty(b, prop);
+    auto rowKey = [&](const MatchRow &row) {
+      auto itN = row.nodes.find(ob.getVariable());
+      if (itN != row.nodes.end()) {
+        return getNodeProperty(itN->second, prop);
+      }
+      auto itR = row.rels.find(ob.getVariable());
+      if (itR != row.rels.end()) {
+        return getEdgeProperty(itR->second, prop);
+      }
+      return std::string();
+    };
+
+    auto cmp = [&](const MatchRow &a, const MatchRow &b) {
+      const std::string va = rowKey(a);
+      const std::string vb = rowKey(b);
       int64_t ia = 0, ib = 0;
       const bool na = tryParseInt(va, ia);
       const bool nb = tryParseInt(vb, ib);
@@ -1355,36 +1731,200 @@ CypherQueryExecutor::execute(const CypherQuery &query,
       return va < vb;
     };
 
-    std::sort(filteredNodes.begin(), filteredNodes.end(), cmp);
+    std::sort(rows.begin(), rows.end(), cmp);
     if (ob.getDirection() == CypherOrderBy::Direction::DESC) {
-      std::reverse(filteredNodes.begin(), filteredNodes.end());
+      std::reverse(rows.begin(), rows.end());
     }
   }
 
   if (query.hasLimit() && query.getLimit() > 0 &&
-      filteredNodes.size() > static_cast<size_t>(query.getLimit())) {
-    filteredNodes.resize(static_cast<size_t>(query.getLimit()));
+      rows.size() > static_cast<size_t>(query.getLimit())) {
+    rows.resize(static_cast<size_t>(query.getLimit()));
   }
 
-  // Keep bound variables consistent with the final node result set so
-  // printing `RETURN n.prop` reflects WHERE/ORDER/LIMIT.
-  if (!boundVariables_.empty()) {
-    std::unordered_set<Node *> allowed(filteredNodes.begin(),
-                                       filteredNodes.end());
-    for (auto &kv : boundVariables_) {
-      auto &bucket = kv.second;
-      bucket.erase(std::remove_if(bucket.begin(), bucket.end(),
-                                  [&](Node *n) { return !allowed.count(n); }),
-                   bucket.end());
+  // Rebuild bindings from final rows.
+  boundVariables_.clear();
+  boundRelationships_.clear();
+  for (const auto &row : rows) {
+    for (const auto &kv : row.nodes) {
+      boundVariables_[kv.first].push_back(kv.second);
+    }
+    for (const auto &kv : row.rels) {
+      boundRelationships_[kv.first].push_back(kv.second);
+    }
+  }
+  for (auto &kv : boundVariables_) {
+    auto &bucket = kv.second;
+    std::sort(bucket.begin(), bucket.end());
+    bucket.erase(std::unique(bucket.begin(), bucket.end()), bucket.end());
+  }
+  for (auto &kv : boundRelationships_) {
+    auto &bucket = kv.second;
+    std::sort(bucket.begin(), bucket.end());
+    bucket.erase(std::unique(bucket.begin(), bucket.end()), bucket.end());
+  }
+
+  std::vector<Node *> projectedNodes;
+  std::vector<Edge *> projectedEdges;
+  std::vector<std::string> projectedScalars;
+  bool wantsNodeProjection = false;
+  bool wantsEdgeProjection = false;
+  bool wantsScalarProjection = false;
+  std::unordered_set<std::string> declaredNodeVars;
+  std::unordered_set<std::string> declaredRelVars;
+
+  auto collectDeclaredVars = [&](const auto &self,
+                                 const CypherPatternElement *elem) -> void {
+    if (!elem)
+      return;
+    if (elem->getStartNode() &&
+        !elem->getStartNode()->getVariable().empty()) {
+      declaredNodeVars.insert(elem->getStartNode()->getVariable());
+    }
+    if (elem->getEndNode() && !elem->getEndNode()->getVariable().empty()) {
+      declaredNodeVars.insert(elem->getEndNode()->getVariable());
+    }
+    if (elem->getRelationship() &&
+        !elem->getRelationship()->getVariable().empty()) {
+      declaredRelVars.insert(elem->getRelationship()->getVariable());
+    }
+    for (const auto &next : elem->getNextElements()) {
+      self(self, next.get());
+    }
+  };
+  for (const auto &p : query.getPatterns()) {
+    collectDeclaredVars(collectDeclaredVars, p.get());
+  }
+
+  if (query.getReturnItems().empty()) {
+    for (const auto &row : rows) {
+      for (const auto &kv : row.nodes)
+        projectedNodes.push_back(kv.second);
+      for (const auto &kv : row.rels)
+        projectedEdges.push_back(kv.second);
+    }
+  } else {
+    std::vector<std::vector<std::string>> tabular;
+    tabular.reserve(rows.size());
+
+    for (const auto &itemPtr : query.getReturnItems()) {
+      const auto &item = *itemPtr;
+      if (item.getKind() != CypherReturnItem::Kind::VARIABLE_OR_PROPERTY) {
+        continue;
+      }
+      const auto varProp = splitVarProp(item.getVariable());
+      const std::string &var = varProp.first;
+      const std::string &prop = varProp.second;
+      if (!prop.empty()) {
+        wantsScalarProjection = true;
+      } else if (declaredRelVars.find(var) != declaredRelVars.end()) {
+        wantsEdgeProjection = true;
+      } else if (declaredNodeVars.find(var) != declaredNodeVars.end()) {
+        wantsNodeProjection = true;
+      }
+    }
+
+    for (const auto &row : rows) {
+      std::vector<std::string> columns;
+      columns.reserve(query.getReturnItems().size());
+      for (const auto &itemPtr : query.getReturnItems()) {
+      const auto &item = *itemPtr;
+      if (item.getKind() != CypherReturnItem::Kind::VARIABLE_OR_PROPERTY) {
+          continue;
+      }
+
+      const auto varProp = splitVarProp(item.getVariable());
+      const std::string &var = varProp.first;
+      const std::string &prop = varProp.second;
+
+        auto itN = row.nodes.find(var);
+        if (itN != row.nodes.end()) {
+          if (prop.empty()) {
+            wantsNodeProjection = true;
+            projectedNodes.push_back(itN->second);
+            columns.push_back(getNodeProperty(itN->second, "label"));
+          } else {
+            wantsScalarProjection = true;
+            const auto v = getNodeProperty(itN->second, prop);
+            projectedScalars.push_back(v);
+            columns.push_back(v);
+          }
+          continue;
+        }
+
+        auto itR = row.rels.find(var);
+        if (itR != row.rels.end()) {
+          if (prop.empty()) {
+            wantsEdgeProjection = true;
+            projectedEdges.push_back(itR->second);
+            columns.push_back(getEdgeProperty(itR->second, "label"));
+          } else {
+            wantsScalarProjection = true;
+            const auto v = getEdgeProperty(itR->second, prop);
+            projectedScalars.push_back(v);
+            columns.push_back(v);
+          }
+          continue;
+        }
+
+        columns.push_back("");
+      }
+      tabular.push_back(std::move(columns));
+    }
+
+    if (query.getReturnItems().size() > 1) {
+      wantsScalarProjection = true;
+      wantsNodeProjection = false;
+      wantsEdgeProjection = false;
+      projectedScalars.clear();
+      for (const auto &cols : tabular) {
+        std::ostringstream line;
+        for (size_t i = 0; i < cols.size(); ++i) {
+          if (i)
+            line << ", ";
+          line << cols[i];
+        }
+        projectedScalars.push_back(line.str());
+      }
     }
   }
 
-  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::NODES);
-  for (auto *node : filteredNodes) {
-    result->addNode(node);
-  }
-  for (auto *edge : resultEdges) {
-    result->addEdge(edge);
+  std::sort(projectedNodes.begin(), projectedNodes.end());
+  projectedNodes.erase(std::unique(projectedNodes.begin(), projectedNodes.end()),
+                       projectedNodes.end());
+  std::sort(projectedEdges.begin(), projectedEdges.end());
+  projectedEdges.erase(std::unique(projectedEdges.begin(), projectedEdges.end()),
+                       projectedEdges.end());
+  std::sort(projectedScalars.begin(), projectedScalars.end());
+  projectedScalars.erase(
+      std::unique(projectedScalars.begin(), projectedScalars.end()),
+      projectedScalars.end());
+
+  std::unique_ptr<CypherResult> result;
+  if (wantsScalarProjection && !wantsNodeProjection && !wantsEdgeProjection) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < projectedScalars.size(); ++i) {
+      if (i)
+        oss << "\n";
+      oss << projectedScalars[i];
+    }
+    result = std::make_unique<CypherResult>(CypherResult::ResultType::SCALAR);
+    result->setScalarValue(oss.str());
+  } else if (wantsEdgeProjection && !wantsNodeProjection &&
+             !wantsScalarProjection) {
+    result =
+        std::make_unique<CypherResult>(CypherResult::ResultType::RELATIONSHIPS);
+    for (auto *edge : projectedEdges) {
+      result->addEdge(edge);
+    }
+  } else {
+    result = std::make_unique<CypherResult>(CypherResult::ResultType::NODES);
+    for (auto *node : projectedNodes) {
+      result->addNode(node);
+    }
+    for (auto *edge : projectedEdges) {
+      result->addEdge(edge);
+    }
   }
 
   lastStats_.resultsReturned = result->getCount();
@@ -1405,101 +1945,142 @@ CypherQueryExecutor::matchPattern(const CypherPatternElement *pattern) {
 
   auto result = std::make_unique<CypherResult>(CypherResult::ResultType::NODES);
 
-  const auto *startNodePattern = pattern->getStartNode();
-  if (!startNodePattern)
-    return result;
+  auto dedupNodes = [](std::vector<Node *> &nodes) {
+    std::sort(nodes.begin(), nodes.end());
+    nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+  };
+  auto dedupEdges = [](std::vector<Edge *> &edges) {
+    std::sort(edges.begin(), edges.end());
+    edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+  };
 
-  auto startNodes = matchNodes(startNodePattern->getLabel(), "");
-  if (startNodes) {
-    std::vector<Node *> startMatches = startNodes->getNodes();
-    const auto &startProps = startNodePattern->getProperties();
-    if (!startProps.empty()) {
-      std::vector<Node *> filtered;
-      filtered.reserve(startMatches.size());
-      for (auto *n : startMatches) {
-        bool ok = true;
-        for (const auto &kv : startProps) {
-          if (getNodeProperty(n, kv.first) != kv.second) {
-            ok = false;
-            break;
-          }
+  auto bindNodes = [&](const std::string &var, const std::vector<Node *> &nodes) {
+    if (var.empty())
+      return;
+    auto &bucket = boundVariables_[var];
+    bucket.insert(bucket.end(), nodes.begin(), nodes.end());
+    dedupNodes(bucket);
+  };
+  auto bindEdges = [&](const std::string &var, const std::vector<Edge *> &edges) {
+    if (var.empty())
+      return;
+    auto &bucket = boundRelationships_[var];
+    bucket.insert(bucket.end(), edges.begin(), edges.end());
+    dedupEdges(bucket);
+  };
+
+  auto filterByNodePattern =
+      [&](const std::vector<Node *> &candidates,
+          const CypherNodePattern *nodePattern) -> std::vector<Node *> {
+    if (!nodePattern)
+      return candidates;
+
+    std::unordered_set<Node *> labelAllowed;
+    if (!nodePattern->getLabel().empty()) {
+      auto labelNodes = matchNodes(nodePattern->getLabel(), "");
+      if (labelNodes) {
+        for (auto *n : labelNodes->getNodes()) {
+          labelAllowed.insert(n);
         }
-        if (ok)
-          filtered.push_back(n);
       }
-      startMatches = std::move(filtered);
     }
 
-    if (!startNodePattern->getVariable().empty()) {
-      boundVariables_[startNodePattern->getVariable()] = startMatches;
+    std::vector<Node *> filtered;
+    filtered.reserve(candidates.size());
+    for (auto *n : candidates) {
+      if (!nodePattern->getLabel().empty() && !labelAllowed.count(n))
+        continue;
+      bool ok = true;
+      for (const auto &kv : nodePattern->getProperties()) {
+        if (getNodeProperty(n, kv.first) != kv.second) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) {
+        filtered.push_back(n);
+      }
+    }
+    dedupNodes(filtered);
+    return filtered;
+  };
+
+  std::function<std::vector<Node *>(const CypherPatternElement *,
+                                    const std::vector<Node *> &)>
+      evalElement;
+  evalElement = [&](const CypherPatternElement *elem,
+                    const std::vector<Node *> &inputStarts)
+      -> std::vector<Node *> {
+    if (!elem)
+      return inputStarts;
+
+    std::vector<Node *> starts = filterByNodePattern(inputStarts, elem->getStartNode());
+    bindNodes(elem->getStartNode() ? elem->getStartNode()->getVariable() : "",
+              starts);
+    for (auto *n : starts) {
+      result->addNode(n);
     }
 
-    for (auto *node : startMatches) {
-      result->addNode(node);
-
-      const auto *rel = pattern->getRelationship();
-      if (rel) {
+    std::vector<Node *> terminals = starts;
+    const auto *rel = elem->getRelationship();
+    if (rel) {
+      std::vector<Node *> endNodes;
+      std::vector<Edge *> relEdges;
+      for (auto *start : starts) {
         int maxHops = rel->hasVariableLength() ? rel->getMaxHops() : 1;
         if (maxHops < 0)
           maxHops = unboundedMaxHops_;
-        auto traversed = traverse(node, *rel, maxHops);
-        if (traversed) {
-          for (auto *e : traversed->getRelationships())
-            result->addEdge(e);
+        auto traversed = traverse(start, *rel, maxHops);
+        if (!traversed)
+          continue;
 
-          if (!rel->getVariable().empty()) {
-            auto &bucket = boundRelationships_[rel->getVariable()];
-            const auto &edges = traversed->getRelationships();
-            bucket.insert(bucket.end(), edges.begin(), edges.end());
-            std::sort(bucket.begin(), bucket.end());
-            bucket.erase(std::unique(bucket.begin(), bucket.end()),
-                         bucket.end());
-          }
-
-          const auto *endNodePattern = pattern->getEndNode();
-          std::string endLabel = endNodePattern ? endNodePattern->getLabel() : "";
-          std::unordered_map<std::string, std::string> endProps =
-              endNodePattern ? endNodePattern->getProperties()
-                             : std::unordered_map<std::string, std::string>{};
-
-          std::unordered_set<Node *> labelAllowed;
-          if (endNodePattern && !endLabel.empty()) {
-            auto labelNodes = matchNodes(endLabel, "");
-            for (auto *ln : labelNodes->getNodes())
-              labelAllowed.insert(ln);
-          }
-
-          std::vector<Node *> endMatches;
-          for (auto *tNode : traversed->getNodes()) {
-            if (endNodePattern) {
-              if (!endLabel.empty() && labelAllowed.find(tNode) == labelAllowed.end())
-                continue;
-              bool ok = true;
-              for (const auto &kv : endProps) {
-                if (getNodeProperty(tNode, kv.first) != kv.second) {
-                  ok = false;
-                  break;
-                }
-              }
-              if (!ok)
-                continue;
-              endMatches.push_back(tNode);
-              result->addNode(tNode);
-            } else {
-              result->addNode(tNode);
-            }
-          }
-          if (endNodePattern && !endNodePattern->getVariable().empty()) {
-            auto &bucket = boundVariables_[endNodePattern->getVariable()];
-            bucket.insert(bucket.end(), endMatches.begin(), endMatches.end());
-            std::sort(bucket.begin(), bucket.end());
-            bucket.erase(std::unique(bucket.begin(), bucket.end()), bucket.end());
-          }
+        const auto &edges = traversed->getRelationships();
+        relEdges.insert(relEdges.end(), edges.begin(), edges.end());
+        for (auto *e : edges) {
+          result->addEdge(e);
         }
-      }
-    }
-  }
 
+        std::vector<Node *> traversedNodes = traversed->getNodes();
+        if (elem->getEndNode()) {
+          traversedNodes =
+              filterByNodePattern(traversedNodes, elem->getEndNode());
+        }
+        endNodes.insert(endNodes.end(), traversedNodes.begin(),
+                        traversedNodes.end());
+      }
+      dedupNodes(endNodes);
+      dedupEdges(relEdges);
+      bindEdges(rel->getVariable(), relEdges);
+      if (elem->getEndNode()) {
+        bindNodes(elem->getEndNode()->getVariable(), endNodes);
+      }
+      for (auto *n : endNodes) {
+        result->addNode(n);
+      }
+      terminals = std::move(endNodes);
+    }
+
+    if (elem->getNextElements().empty()) {
+      return terminals;
+    }
+
+    std::vector<Node *> allNextTerminals;
+    for (const auto &next : elem->getNextElements()) {
+      auto nextTerms = evalElement(next.get(), terminals);
+      allNextTerminals.insert(allNextTerminals.end(), nextTerms.begin(),
+                              nextTerms.end());
+    }
+    dedupNodes(allNextTerminals);
+    return allNextTerminals;
+  };
+
+  const auto *startNodePattern = pattern->getStartNode();
+  if (!startNodePattern)
+    return result;
+  auto allStartNodes = matchNodes(startNodePattern->getLabel(), "");
+  if (!allStartNodes)
+    return result;
+  evalElement(pattern, allStartNodes->getNodes());
   return result;
 }
 
@@ -1810,9 +2391,28 @@ bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
   }
 
   if (condition.isExists()) {
+    if (!condition.getVariableName().empty()) {
+      auto it = boundVariables_.find(condition.getVariableName());
+      if (it == boundVariables_.end())
+        return false;
+      if (std::find(it->second.begin(), it->second.end(), node) ==
+          it->second.end()) {
+        return true;
+      }
+    }
     if (condition.getProperty().empty())
       return true; // Variable existence (row semantics) not modeled yet.
     return !getNodeProperty(node, condition.getProperty()).empty();
+  }
+
+  if (!condition.getVariableName().empty()) {
+    auto it = boundVariables_.find(condition.getVariableName());
+    if (it == boundVariables_.end())
+      return false;
+    if (std::find(it->second.begin(), it->second.end(), node) ==
+        it->second.end()) {
+      return true;
+    }
   }
 
   const auto &property = condition.getProperty();
@@ -1853,9 +2453,28 @@ bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
   }
 
   if (condition.isExists()) {
+    if (!condition.getVariableName().empty()) {
+      auto it = boundRelationships_.find(condition.getVariableName());
+      if (it == boundRelationships_.end())
+        return false;
+      if (std::find(it->second.begin(), it->second.end(), edge) ==
+          it->second.end()) {
+        return true;
+      }
+    }
     if (condition.getProperty().empty())
       return true;
     return !getEdgeProperty(edge, condition.getProperty()).empty();
+  }
+
+  if (!condition.getVariableName().empty()) {
+    auto it = boundRelationships_.find(condition.getVariableName());
+    if (it == boundRelationships_.end())
+      return false;
+    if (std::find(it->second.begin(), it->second.end(), edge) ==
+        it->second.end()) {
+      return true;
+    }
   }
 
   const auto &property = condition.getProperty();

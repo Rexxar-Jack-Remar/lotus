@@ -102,7 +102,7 @@ namespace ifds {
 // Interprocedural Taint Analysis using IFDS
 // ============================================================================
 
-class TaintAnalysis : public IFDSProblem<TaintFact> {
+class TaintAnalysis : public DefaultAliasAwareIFDSProblem<TaintFact> {
 public:
     // Configuration options for analysis precision
     struct Config {
@@ -134,11 +134,11 @@ public:
     // IFDS interface implementation
     TaintFact zero_fact() const override;
     FactSet normal_flow(const llvm::Instruction* stmt, const TaintFact& fact) override;
-    FactSet call_flow(const llvm::CallInst* call, const llvm::Function* callee, 
+    FactSet call_flow(const llvm::CallBase* call, const llvm::Function* callee, 
                      const TaintFact& fact) override;
-    FactSet return_flow(const llvm::CallInst* call, const llvm::Function* callee,
+    FactSet return_flow(const llvm::CallBase* call, const llvm::Function* callee,
                        const TaintFact& exit_fact, const TaintFact& call_fact) override;
-    FactSet call_to_return_flow(const llvm::CallInst* call, const TaintFact& fact) override;
+    FactSet call_to_return_flow(const llvm::CallBase* call, const TaintFact& fact) override;
     FactSet initial_facts(const llvm::Function* main) override;
     
     // Override source/sink detection
@@ -167,15 +167,15 @@ public:
     // Tracing method for reconstructing taint propagation paths
     TaintPath trace_taint_sources_summary_based(
         const IFDSSolver<TaintAnalysis>& solver,
-        const llvm::CallInst* sink_call,
+        const llvm::CallBase* sink_call,
         const TaintFact& tainted_fact) const;
 
     bool is_argument_tainted(const llvm::Value* arg, const TaintFact& fact) const;
-    std::string format_tainted_arg(unsigned arg_index, const TaintFact& fact, const llvm::CallInst* call) const;
-    void analyze_tainted_arguments(const llvm::CallInst* call, const FactSet& facts,
+    std::string format_tainted_arg(unsigned arg_index, const TaintFact& fact, const llvm::CallBase* call) const;
+    void analyze_tainted_arguments(const llvm::CallBase* call, const FactSet& facts,
                                   std::string& tainted_args) const;
     void output_vulnerability_report(llvm::raw_ostream& OS, size_t vuln_num,
-                                   const std::string& func_name, const llvm::CallInst* call,
+                                   const std::string& func_name, const llvm::CallBase* call,
                                    const std::string& tainted_args,
                                    const std::vector<const llvm::Instruction*>& all_sources,
                                    const std::vector<const llvm::Function*>& propagation_path,
@@ -185,12 +185,12 @@ public:
     bool comes_before(const llvm::Instruction* first, const llvm::Instruction* second) const;
 
 private:
-    bool kills_fact(const llvm::CallInst* call, const TaintFact& fact) const;
+    bool kills_fact(const llvm::CallBase* call, const TaintFact& fact) const;
     bool taint_may_alias(const llvm::Value* v1, const llvm::Value* v2) const;
 
     // Internal helpers that need access to alias analysis utilities
-    void handle_source_function_specs(const llvm::CallInst* call, FactSet& result) const;
-    void handle_pipe_specifications(const llvm::CallInst* call, const TaintFact& fact, FactSet& result) const;
+    void handle_source_function_specs(const llvm::CallBase* call, FactSet& result) const;
+    void handle_pipe_specifications(const llvm::CallBase* call, const TaintFact& fact, FactSet& result) const;
 
 };
 

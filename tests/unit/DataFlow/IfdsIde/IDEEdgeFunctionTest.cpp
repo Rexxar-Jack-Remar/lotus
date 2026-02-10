@@ -16,18 +16,18 @@ public:
                       const Fact& fact) override {
     return {fact};
   }
-  FactSet call_flow(const llvm::CallInst* /*call*/,
+  FactSet call_flow(const llvm::CallBase* /*call*/,
                     const llvm::Function* /*callee*/,
                     const Fact& fact) override {
     return {fact};
   }
-  FactSet return_flow(const llvm::CallInst* /*call*/,
+  FactSet return_flow(const llvm::CallBase* /*call*/,
                       const llvm::Function* /*callee*/,
                       const Fact& exit_fact,
                       const Fact& /*call_fact*/) override {
     return {exit_fact};
   }
-  FactSet call_to_return_flow(const llvm::CallInst* /*call*/,
+  FactSet call_to_return_flow(const llvm::CallBase* /*call*/,
                               const Fact& fact) override {
     return {fact};
   }
@@ -42,17 +42,17 @@ public:
                                     const Fact& /*tgt_fact*/) override {
     return identity();
   }
-  EdgeFunction call_edge_function(const llvm::CallInst* /*call*/,
+  EdgeFunction call_edge_function(const llvm::CallBase* /*call*/,
                                   const Fact& /*src_fact*/,
                                   const Fact& /*tgt_fact*/) override {
     return identity();
   }
-  EdgeFunction return_edge_function(const llvm::CallInst* /*call*/,
+  EdgeFunction return_edge_function(const llvm::CallBase* /*call*/,
                                     const Fact& /*exit_fact*/,
                                     const Fact& /*ret_fact*/) override {
     return identity();
   }
-  EdgeFunction call_to_return_edge_function(const llvm::CallInst* /*call*/,
+  EdgeFunction call_to_return_edge_function(const llvm::CallBase* /*call*/,
                                             const Fact& /*src_fact*/,
                                             const Fact& /*tgt_fact*/) override {
     return identity();

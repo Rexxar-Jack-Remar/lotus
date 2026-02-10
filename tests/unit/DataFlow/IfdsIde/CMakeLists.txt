@@ -14,3 +14,15 @@ add_lotus_test(ide_edge_function_test IDEEdgeFunctionTest.cpp)
 
 # IDE Constant Propagation solver test (ported from phasar-development)
 add_lotus_test(ide_constant_propagation_test IDEConstantPropagationTest.cpp)
+
+# LLVM flow helper policy tests
+add_lotus_test(llvm_flow_helpers_test LLVMFlowHelpersTest.cpp)
+
+# LLVM flow helper mapping tests (callee/caller mappings)
+add_lotus_test(llvm_flow_helpers_mapping_test LLVMFlowHelpersMappingTest.cpp)
+
+# IFDS client analyses flow behavior on helper-migrated paths
+add_lotus_test(ifds_client_alias_flow_test IFDSClientAliasFlowTest.cpp)
+
+# IFDS solver-level integration for alias-aware client behavior
+add_lotus_test(ifds_solver_alias_integration_test IFDSSolverAliasIntegrationTest.cpp)

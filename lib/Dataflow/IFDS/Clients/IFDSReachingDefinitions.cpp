@@ -5,6 +5,7 @@
  */
 
 #include "Dataflow/IFDS/Clients/IFDSReachingDefinitions.h"
+#include "Dataflow/IFDS/LLVMFlowHelpers.h"
 
 #include <llvm/Support/raw_ostream.h>
 #include <iostream>
@@ -126,7 +127,7 @@ ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::normal_flow(co
     return result;
 }
 
-ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::call_flow(const llvm::CallInst* call, const llvm::Function* callee,
+ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::call_flow(const llvm::CallBase* call, const llvm::Function* callee,
                      const DefinitionFact& fact) {
     FactSet result;
     
@@ -139,27 +140,30 @@ ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::call_flow(cons
         return result;
     }
     
-    // For reaching definitions, we need to map definitions of arguments
     if (fact.is_definition()) {
-        // Check if the defined variable is passed as an argument
-        for (unsigned i = 0; i < call->getNumOperands() - 1; ++i) {
-            if (call->getOperand(i) == fact.get_variable()) {
-                // Map to corresponding parameter in callee
-                const auto* arg_it = callee->arg_begin();
-                std::advance(arg_it, i);
-                
-                // Create a new definition fact for the parameter
-                // The definition site is the function entry
+        flow::map_facts_to_callee(
+            call, callee, fact, result,
+            [this](const llvm::Value* actual, const llvm::Argument* /*formal*/,
+                   const DefinitionFact& source) {
+                if (source.get_variable() == actual) {
+                    return true;
+                }
+                return source.get_variable() && actual &&
+                       source.get_variable()->getType()->isPointerTy() &&
+                       actual->getType()->isPointerTy() &&
+                       may_alias_or_equal(source.get_variable(), actual);
+            },
+            [callee](const llvm::Value* /*actual*/, const llvm::Argument* formal,
+                     const DefinitionFact& /*source*/) {
                 const llvm::Instruction* entry_inst = &callee->getEntryBlock().front();
-                result.insert(DefinitionFact::definition(&*arg_it, entry_inst));
-            }
-        }
+                return DefinitionFact::definition(formal, entry_inst);
+            });
     }
     
     return result;
 }
 
-ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::return_flow(const llvm::CallInst* call, const llvm::Function* callee,
+ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::return_flow(const llvm::CallBase* call, const llvm::Function* callee,
                        const DefinitionFact& exit_fact, const DefinitionFact& call_fact) {
     FactSet result;
     
@@ -168,19 +172,19 @@ ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::return_flow(co
         result.insert(exit_fact);
     }
     
-    // For reaching definitions, we need to handle return values
     if (exit_fact.is_definition()) {
-        // Check if the definition is of a return value
-        for (const llvm::BasicBlock& bb : *callee) {
-            for (const llvm::Instruction& inst : bb) {
-                if (auto* ret = llvm::dyn_cast<llvm::ReturnInst>(&inst)) {
-                    if (ret->getReturnValue() == exit_fact.get_variable()) {
-                        // Map return value definition to call result
-                        result.insert(DefinitionFact::definition(call, exit_fact.get_definition_site()));
-                    }
-                }
-            }
-        }
+        flow::map_facts_to_caller(
+            call, callee, exit_fact, result,
+            [](const llvm::Argument* /*formal*/, const llvm::Value* /*actual*/,
+               const DefinitionFact& /*source*/) { return false; },
+            [](const llvm::Argument* /*formal*/, const llvm::Value* /*actual*/,
+               const DefinitionFact& source) { return source; },
+            [](const llvm::Value* ret_val, const DefinitionFact& source) {
+                return ret_val == source.get_variable();
+            },
+            [call](const llvm::Value* /*ret_val*/, const DefinitionFact& source) {
+                return DefinitionFact::definition(call, source.get_definition_site());
+            });
     }
     
     // Propagate call site facts that represent local variables
@@ -191,14 +195,9 @@ ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::return_flow(co
     return result;
 }
 
-ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::call_to_return_flow(const llvm::CallInst* call, const DefinitionFact& fact) {
+ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::call_to_return_flow(const llvm::CallBase* call, const DefinitionFact& fact) {
     FactSet result;
-    
-    // Always propagate zero fact
-    if (fact.is_zero()) {
-        result.insert(fact);
-    }
-    
+
     const llvm::Function* callee = call->getCalledFunction();
     
     // For external functions, model their effects
@@ -213,16 +212,32 @@ ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::call_to_return
                 result.insert(DefinitionFact::definition(call, call));
             }
         }
-        
-        // Propagate facts that are not killed by external calls
-        if (fact.is_definition() && !is_killed_by_external_call(fact, call)) {
-            result.insert(fact);
-        }
+
+        flow::map_facts_alongside_callsite_with_policies(
+            call, fact, result,
+            [this, call](const llvm::Value* /*arg*/, const DefinitionFact& source) {
+                return source.is_definition() && is_killed_by_external_call(source, call);
+            },
+            [](const DefinitionFact& source) { return source.is_zero(); },
+            [](const DefinitionFact& source) {
+                return source.is_definition() &&
+                       llvm::isa<llvm::GlobalValue>(source.get_variable());
+            },
+            /*PropagateGlobals=*/false,
+            /*PropagateZero=*/true);
     } else {
-        // Internal function - propagate local facts
-        if (fact.is_definition() && is_local_to_caller(fact, callee)) {
-            result.insert(fact);
-        }
+        flow::map_facts_alongside_callsite_with_policies(
+            call, fact, result,
+            [this, callee](const llvm::Value* /*arg*/, const DefinitionFact& source) {
+                return source.is_definition() && !is_local_to_caller(source, callee);
+            },
+            [](const DefinitionFact& source) { return source.is_zero(); },
+            [](const DefinitionFact& source) {
+                return source.is_definition() &&
+                       llvm::isa<llvm::GlobalValue>(source.get_variable());
+            },
+            /*PropagateGlobals=*/false,
+            /*PropagateZero=*/true);
     }
     
     return result;
@@ -292,7 +307,7 @@ bool ReachingDefinitionsAnalysis::is_local_to_caller(const DefinitionFact& fact,
     return true; // Local to caller
 }
 
-bool ReachingDefinitionsAnalysis::is_killed_by_external_call(const DefinitionFact& fact, const llvm::CallInst* call) const {
+bool ReachingDefinitionsAnalysis::is_killed_by_external_call(const DefinitionFact& fact, const llvm::CallBase* call) const {
     if (!fact.is_definition()) return false;
     
     const llvm::Value* var = fact.get_variable();
@@ -306,7 +321,7 @@ bool ReachingDefinitionsAnalysis::is_killed_by_external_call(const DefinitionFac
     // Check if the variable is passed as a pointer argument
     for (unsigned i = 0; i < call->getNumOperands() - 1; ++i) {
         const llvm::Value* arg = call->getOperand(i);
-        if (arg->getType()->isPointerTy() && may_alias(arg, var)) {
+        if (arg->getType()->isPointerTy() && may_alias_or_equal(arg, var)) {
             return true; // Might be modified through pointer
         }
     }

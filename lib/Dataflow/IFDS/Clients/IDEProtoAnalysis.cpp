@@ -13,7 +13,7 @@ IDEProtoAnalysis::FactSet IDEProtoAnalysis::normal_flow(const llvm::Instruction*
     return out;
 }
 
-IDEProtoAnalysis::FactSet IDEProtoAnalysis::call_flow(const llvm::CallInst*,
+IDEProtoAnalysis::FactSet IDEProtoAnalysis::call_flow(const llvm::CallBase*,
                                                       const llvm::Function*,
                                                       const Fact& fact) {
     FactSet out;
@@ -21,7 +21,7 @@ IDEProtoAnalysis::FactSet IDEProtoAnalysis::call_flow(const llvm::CallInst*,
     return out;
 }
 
-IDEProtoAnalysis::FactSet IDEProtoAnalysis::return_flow(const llvm::CallInst*,
+IDEProtoAnalysis::FactSet IDEProtoAnalysis::return_flow(const llvm::CallBase*,
                                                         const llvm::Function*,
                                                         const Fact&,
                                                         const Fact& call_fact) {
@@ -30,7 +30,7 @@ IDEProtoAnalysis::FactSet IDEProtoAnalysis::return_flow(const llvm::CallInst*,
     return out;
 }
 
-IDEProtoAnalysis::FactSet IDEProtoAnalysis::call_to_return_flow(const llvm::CallInst*,
+IDEProtoAnalysis::FactSet IDEProtoAnalysis::call_to_return_flow(const llvm::CallBase*,
                                                                 const Fact& fact) {
     FactSet out;
     out.insert(fact);
@@ -49,20 +49,20 @@ IDEProtoAnalysis::EdgeFunction IDEProtoAnalysis::normal_edge_function(const llvm
     return [](const Value& v) { return v; };
 }
 
-IDEProtoAnalysis::EdgeFunction IDEProtoAnalysis::call_edge_function(const llvm::CallInst*,
+IDEProtoAnalysis::EdgeFunction IDEProtoAnalysis::call_edge_function(const llvm::CallBase*,
                                                                     const Fact&,
                                                                     const Fact&) {
     return [](const Value& v) { return v; };
 }
 
-IDEProtoAnalysis::EdgeFunction IDEProtoAnalysis::return_edge_function(const llvm::CallInst*,
+IDEProtoAnalysis::EdgeFunction IDEProtoAnalysis::return_edge_function(const llvm::CallBase*,
                                                                       const Fact&,
                                                                       const Fact&) {
     return [](const Value& v) { return v; };
 }
 
 IDEProtoAnalysis::EdgeFunction IDEProtoAnalysis::call_to_return_edge_function(
-    const llvm::CallInst*, const Fact&, const Fact&) {
+    const llvm::CallBase*, const Fact&, const Fact&) {
     return [](const Value& v) { return v; };
 }
 

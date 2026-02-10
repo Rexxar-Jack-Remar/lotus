@@ -6,6 +6,7 @@
 
 #include "Annotation/Taint/TaintConfigManager.h"
 #include "Dataflow/IFDS/Clients/IFDSTaintAnalysis.h"
+#include "Dataflow/IFDS/LLVMFlowHelpers.h"
 #include "Utils/LLVM/Demangle.h"
 
 #include <llvm/Analysis/ValueTracking.h>
@@ -66,7 +67,7 @@ TaintAnalysis::TaintAnalysis(const Config& config) : m_config(config) {
 }
 
 bool TaintAnalysis::taint_may_alias(const llvm::Value* v1, const llvm::Value* v2) const {
-    if (may_alias(v1, v2)) {
+    if (may_alias_or_equal(v1, v2)) {
         return true;
     }
     if (!v1 || !v2) {
@@ -110,12 +111,17 @@ TaintAnalysis::FactSet TaintAnalysis::normal_flow(const llvm::Instruction* stmt,
         const llvm::Value* ptr = store->getPointerOperand();
         
         if (matches_tainted_value(value)) {
-            result.insert(TaintFact::tainted_memory(ptr, fact.get_source()));
+            // Alias-aware store fanout: taint the destination and known aliases.
+            for (const llvm::Value* alias : get_aliases_including_self(ptr)) {
+                result.insert(TaintFact::tainted_memory(alias, fact.get_source()));
+            }
             
             // Track global variable stores
             if (m_config.track_globals) {
-                if (auto* gv = llvm::dyn_cast<llvm::GlobalVariable>(ptr)) {
-                    result.insert(TaintFact::tainted_global(gv, fact.get_source()));
+                for (const llvm::Value* alias : get_aliases_including_self(ptr)) {
+                    if (auto* gv = llvm::dyn_cast<llvm::GlobalVariable>(alias)) {
+                        result.insert(TaintFact::tainted_global(gv, fact.get_source()));
+                    }
                 }
             }
         }
@@ -326,7 +332,7 @@ TaintAnalysis::FactSet TaintAnalysis::normal_flow(const llvm::Instruction* stmt,
     return result;
 }
 
-TaintAnalysis::FactSet TaintAnalysis::call_flow(const llvm::CallInst* call, const llvm::Function* callee, 
+TaintAnalysis::FactSet TaintAnalysis::call_flow(const llvm::CallBase* call, const llvm::Function* callee, 
                      const TaintFact& fact) {
     FactSet result;
     
@@ -339,46 +345,36 @@ TaintAnalysis::FactSet TaintAnalysis::call_flow(const llvm::CallInst* call, cons
         return result;
     }
     
-    // Map caller facts to callee facts
-    // Ensure we don't go beyond the number of actual function parameters
-    unsigned num_args = std::min(call->arg_size(), (unsigned)std::distance(callee->arg_begin(), callee->arg_end()));
-    
-    for (unsigned i = 0; i < num_args; ++i) {
-        const llvm::Value* arg = call->getArgOperand(i);
-        if (!arg) continue;
-        
-        const auto *param_it = callee->arg_begin();
-        std::advance(param_it, i);
-        if (param_it == callee->arg_end()) break;
-        
-        if (fact.is_tainted_var()) {
-            const llvm::Value* fact_val = fact.get_value();
-            if (fact_val) {
-                // Direct pointer comparison first, then alias check
-                bool matches_arg = (arg == fact_val) ||
-                    (fact_val->getType() && fact_val->getType()->isPointerTy() && taint_may_alias(arg, fact_val));
-                if (matches_arg) {
-                    result.insert(TaintFact::tainted_var(&*param_it, fact.get_source()));
-                }
+    flow::map_facts_to_callee(
+        call, callee, fact, result,
+        [this](const llvm::Value* arg, const llvm::Argument* /*formal*/, const TaintFact& source) {
+            if (source.is_tainted_var()) {
+                const llvm::Value* fact_val = source.get_value();
+                if (!fact_val) return false;
+                return (arg == fact_val) ||
+                       (fact_val->getType() && fact_val->getType()->isPointerTy() &&
+                        taint_may_alias(arg, fact_val));
             }
-        }
-        
-        if (fact.is_tainted_memory() && arg->getType() && arg->getType()->isPointerTy()) {
-            const llvm::Value* fact_mem = fact.get_memory_location();
-            if (fact_mem && fact_mem->getType() && fact_mem->getType()->isPointerTy() &&
-                taint_may_alias(arg, fact_mem)) {
-                result.insert(TaintFact::tainted_memory(&*param_it, fact.get_source()));
+            if (source.is_tainted_memory() && arg->getType() && arg->getType()->isPointerTy()) {
+                const llvm::Value* fact_mem = source.get_memory_location();
+                return fact_mem && fact_mem->getType() && fact_mem->getType()->isPointerTy() &&
+                       taint_may_alias(arg, fact_mem);
             }
-        }
-        
-        // Pass field-sensitive taint through parameters
-        if (m_config.field_sensitive && fact.is_tainted_field()) {
-            if (arg->getType() && arg->getType()->isPointerTy() &&
-                taint_may_alias(arg, fact.get_value())) {
-                result.insert(TaintFact::tainted_field(&*param_it, fact.get_field_index(), fact.get_source()));
+            if (m_config.field_sensitive && source.is_tainted_field()) {
+                return arg->getType() && arg->getType()->isPointerTy() &&
+                       taint_may_alias(arg, source.get_value());
             }
-        }
-    }
+            return false;
+        },
+        [](const llvm::Value* /*arg*/, const llvm::Argument* formal, const TaintFact& source) {
+            if (source.is_tainted_var()) {
+                return TaintFact::tainted_var(formal, source.get_source());
+            }
+            if (source.is_tainted_memory()) {
+                return TaintFact::tainted_memory(formal, source.get_source());
+            }
+            return TaintFact::tainted_field(formal, source.get_field_index(), source.get_source());
+        });
     
     // Propagate global variable taint across call boundaries
     if (m_config.track_globals && fact.is_tainted_global()) {
@@ -388,7 +384,7 @@ TaintAnalysis::FactSet TaintAnalysis::call_flow(const llvm::CallInst* call, cons
     return result;
 }
 
-TaintAnalysis::FactSet TaintAnalysis::return_flow(const llvm::CallInst* call, const llvm::Function* callee,
+TaintAnalysis::FactSet TaintAnalysis::return_flow(const llvm::CallBase* call, const llvm::Function* callee,
                        const TaintFact& exit_fact, const TaintFact& call_fact) {
     FactSet result;
     
@@ -397,36 +393,35 @@ TaintAnalysis::FactSet TaintAnalysis::return_flow(const llvm::CallInst* call, co
         return result;
     }
     
-    // Map return values back to call site
-    if (exit_fact.is_tainted_var()) {
-        for (const llvm::BasicBlock& bb : *callee) {
-            for (const llvm::Instruction& inst : bb) {
-                if (auto* ret = llvm::dyn_cast<llvm::ReturnInst>(&inst)) {
-                    if (ret->getReturnValue() == exit_fact.get_value()) {
-                        result.insert(TaintFact::tainted_var(call, exit_fact.get_source()));
-                    }
-                }
+    flow::map_facts_to_caller(
+        call, callee, exit_fact, result,
+        [this](const llvm::Argument* formal, const llvm::Value* actual, const TaintFact& source) {
+            if (!(source.is_tainted_memory() && actual && actual->getType() &&
+                  actual->getType()->isPointerTy())) {
+                return false;
             }
-        }
-    }
+            return taint_may_alias(formal, source.get_memory_location());
+        },
+        [](const llvm::Argument* /*formal*/, const llvm::Value* actual, const TaintFact& source) {
+            return TaintFact::tainted_memory(actual, source.get_source());
+        },
+        [](const llvm::Value* ret_val, const TaintFact& source) {
+            return source.is_tainted_var() && ret_val == source.get_value();
+        },
+        [call](const llvm::Value* /*ret_val*/, const TaintFact& source) {
+            return TaintFact::tainted_var(call, source.get_source());
+        });
 
-    // Map tainted memory on callee formals back to caller actuals.
-    if (exit_fact.is_tainted_memory()) {
-        unsigned num_args = std::min(call->arg_size(),
-                                     (unsigned)std::distance(callee->arg_begin(), callee->arg_end()));
-        for (unsigned i = 0; i < num_args; ++i) {
-            const llvm::Value* actual = call->getArgOperand(i);
-            if (!actual || !actual->getType() || !actual->getType()->isPointerTy()) continue;
-
-            const auto *param_it = callee->arg_begin();
-            std::advance(param_it, i);
-            if (param_it == callee->arg_end()) break;
-
-            if (taint_may_alias(&*param_it, exit_fact.get_memory_location())) {
-                result.insert(TaintFact::tainted_memory(actual, exit_fact.get_source()));
-            }
-        }
-    }
+    // Alias-aware return post-processing for memory taint in call context.
+    expand_facts_with_aliases_in_context(
+        result, call,
+        [](const TaintFact& f) -> const llvm::Value* {
+            return f.is_tainted_memory() ? f.get_memory_location() : nullptr;
+        },
+        [](const llvm::Value* alias, const TaintFact& f) {
+            return TaintFact::tainted_memory(alias, f.get_source());
+        },
+        [](const TaintFact& f) { return f.is_tainted_memory(); });
     
     if (!call_fact.is_zero()) {
         result.insert(call_fact);
@@ -435,7 +430,7 @@ TaintAnalysis::FactSet TaintAnalysis::return_flow(const llvm::CallInst* call, co
     return result;
 }
 
-TaintAnalysis::FactSet TaintAnalysis::call_to_return_flow(const llvm::CallInst* call, const TaintFact& fact) {
+TaintAnalysis::FactSet TaintAnalysis::call_to_return_flow(const llvm::CallBase* call, const TaintFact& fact) {
     FactSet result;
 
     const llvm::Function* callee = call->getCalledFunction();
@@ -455,26 +450,34 @@ TaintAnalysis::FactSet TaintAnalysis::call_to_return_flow(const llvm::CallInst* 
         handle_source_function_specs(call, result);
     }
 
-    // Always propagate zero fact
-    if (fact.is_zero()) {
-        result.insert(fact);
-        return result;
-    }
-
     if (!callee) {
-        if (!kills_fact(call, fact)) {
-            result.insert(fact);
-        }
+        flow::map_facts_alongside_callsite_with_policies(
+            call, fact, result,
+            [this, call](const llvm::Value* /*arg*/, const TaintFact& source) {
+                return kills_fact(call, source);
+            },
+            [](const TaintFact& source) { return source.is_zero(); },
+            [](const TaintFact& source) { return source.is_tainted_global(); },
+            /*PropagateGlobals=*/true,
+            /*PropagateZero=*/true);
         return result;
     }
 
     // Handle PIPE specifications for taint propagation
-    handle_pipe_specifications(call, fact, result);
-
-    // Propagate facts that are not killed by the call
-    if (!kills_fact(call, fact)) {
-        result.insert(fact);
+    if (!fact.is_zero()) {
+        handle_pipe_specifications(call, fact, result);
     }
+
+    // Propagate facts that are not killed by the call (policy-based helper).
+    flow::map_facts_alongside_callsite_with_policies(
+        call, fact, result,
+        [this, call](const llvm::Value* /*arg*/, const TaintFact& source) {
+            return kills_fact(call, source);
+        },
+        [](const TaintFact& source) { return source.is_zero(); },
+        [](const TaintFact& source) { return source.is_tainted_global(); },
+        /*PropagateGlobals=*/true,
+        /*PropagateZero=*/true);
 
     return result;
 }
@@ -565,7 +568,7 @@ bool TaintAnalysis::is_sanitizer(const llvm::Instruction* inst) const {
     return m_sanitizer_functions.count(func_name) > 0;
 }
 
-bool TaintAnalysis::kills_fact(const llvm::CallInst* call, const TaintFact& fact) const {
+bool TaintAnalysis::kills_fact(const llvm::CallBase* call, const TaintFact& fact) const {
     const llvm::Function* callee = call->getCalledFunction();
     if (!callee) return false;
     
@@ -601,7 +604,7 @@ bool TaintAnalysis::kills_fact(const llvm::CallInst* call, const TaintFact& fact
 }
 
 // Helper function to handle source function specifications from config
-void TaintAnalysis::handle_source_function_specs(const llvm::CallInst* call, FactSet& result) const {
+void TaintAnalysis::handle_source_function_specs(const llvm::CallBase* call, FactSet& result) const {
     std::string func_name = taint_config::normalize_name(call->getCalledFunction()->getName().str());
     const FunctionTaintConfig* func_config = taint_config::get_function_config(func_name);
 
@@ -630,7 +633,7 @@ void TaintAnalysis::handle_source_function_specs(const llvm::CallInst* call, Fac
 }
 
 // Helper function to handle PIPE specifications for taint propagation
-void TaintAnalysis::handle_pipe_specifications(const llvm::CallInst* call, const TaintFact& fact, FactSet& result) const {
+void TaintAnalysis::handle_pipe_specifications(const llvm::CallBase* call, const TaintFact& fact, FactSet& result) const {
     std::string func_name = taint_config::normalize_name(call->getCalledFunction()->getName().str());
     const FunctionTaintConfig* func_config = taint_config::get_function_config(func_name);
 
@@ -695,7 +698,7 @@ bool TaintAnalysis::is_argument_tainted(const llvm::Value* arg, const TaintFact&
 }
 
 // Helper function to format tainted argument description
-std::string TaintAnalysis::format_tainted_arg(unsigned arg_index, const TaintFact& fact, const llvm::CallInst* call) const {
+std::string TaintAnalysis::format_tainted_arg(unsigned arg_index, const TaintFact& fact, const llvm::CallBase* call) const {
     if (fact.is_tainted_var()) {
         return "arg" + std::to_string(arg_index);
     } else if (fact.is_tainted_memory()) {
@@ -707,7 +710,7 @@ std::string TaintAnalysis::format_tainted_arg(unsigned arg_index, const TaintFac
 }
 
 // Helper function to analyze tainted arguments for a call
-void TaintAnalysis::analyze_tainted_arguments(const llvm::CallInst* call, const TaintAnalysis::FactSet& facts,
+void TaintAnalysis::analyze_tainted_arguments(const llvm::CallBase* call, const TaintAnalysis::FactSet& facts,
                               std::string& tainted_args) const {
     std::set<std::string> unique_tainted_args;
 

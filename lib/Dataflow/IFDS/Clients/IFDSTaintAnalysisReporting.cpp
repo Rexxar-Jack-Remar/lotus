@@ -25,7 +25,7 @@ template<typename SolverType>
 TaintAnalysis::TaintPath trace_taint_sources_impl(
     const TaintAnalysis& self,
     const SolverType& solver,
-    const llvm::CallInst* sink_call,
+    const llvm::CallBase* sink_call,
     const TaintFact& tainted_fact) {
     (void)tainted_fact; // Suppress unused parameter warning
 
@@ -36,8 +36,8 @@ TaintAnalysis::TaintPath trace_taint_sources_impl(
     solver.get_summary_edges(summary_edges);
 
     // Build maps for efficient lookup
-    std::unordered_map<const llvm::CallInst*, std::vector<SummaryEdge<TaintFact>>> call_to_summaries;
-    std::unordered_map<const llvm::Function*, std::vector<const llvm::CallInst*>> function_to_calls;
+    std::unordered_map<const llvm::CallBase*, std::vector<SummaryEdge<TaintFact>>> call_to_summaries;
+    std::unordered_map<const llvm::Function*, std::vector<const llvm::CallBase*>> function_to_calls;
 
     for (const auto& edge : summary_edges) {
         call_to_summaries[edge.call_site].push_back(edge);
@@ -49,13 +49,13 @@ TaintAnalysis::TaintPath trace_taint_sources_impl(
 
     // Use a more sophisticated approach: trace back through the summary edges
     // starting from the sink call and following the taint flow backwards
-    std::unordered_set<const llvm::CallInst*> visited_calls;
+    std::unordered_set<const llvm::CallBase*> visited_calls;
     std::unordered_set<const llvm::Function*> visited_functions;
-    std::vector<const llvm::CallInst*> worklist;
+    std::vector<const llvm::CallBase*> worklist;
     worklist.push_back(sink_call);
 
     while (!worklist.empty() && result.sources.size() < 10) {
-        const llvm::CallInst* current_call = worklist.back();
+        const llvm::CallBase* current_call = worklist.back();
         worklist.pop_back();
 
         if (visited_calls.count(current_call)) continue;
@@ -92,7 +92,7 @@ TaintAnalysis::TaintPath trace_taint_sources_impl(
                 // Look for calls in the same function that could flow taint to this call
                 auto calls_in_func = function_to_calls.find(current_func);
                 if (calls_in_func != function_to_calls.end()) {
-                    for (const llvm::CallInst* other_call : calls_in_func->second) {
+                    for (const llvm::CallBase* other_call : calls_in_func->second) {
                         if (other_call != current_call && self.comes_before(other_call, current_call)) {
                             // Check if this other call's summary edges could flow to our call
                             auto other_summaries = call_to_summaries.find(other_call);
@@ -132,7 +132,7 @@ TaintAnalysis::TaintPath trace_taint_sources_impl(
 // Public API methods that delegate to the template implementation
 TaintAnalysis::TaintPath TaintAnalysis::trace_taint_sources_summary_based(
     const IFDSSolver<TaintAnalysis>& solver,
-    const llvm::CallInst* sink_call,
+    const llvm::CallBase* sink_call,
     const TaintFact& tainted_fact) const {
     return trace_taint_sources_impl(*this, solver, sink_call, tainted_fact);
 }
@@ -163,7 +163,7 @@ bool TaintAnalysis::comes_before(const llvm::Instruction* first, const llvm::Ins
 
 // Helper function to output vulnerability report
 void TaintAnalysis::output_vulnerability_report(llvm::raw_ostream& OS, size_t vuln_num,
-                               const std::string& func_name, const llvm::CallInst* call,
+                               const std::string& func_name, const llvm::CallBase* call,
                                const std::string& tainted_args,
                                const std::vector<const llvm::Instruction*>& all_sources,
                                const std::vector<const llvm::Function*>& propagation_path,

@@ -204,8 +204,10 @@ public:
     endNode_ = std::move(end);
   }
 
-  void addNextElement(std::unique_ptr<CypherPatternElement> next) {
+  CypherPatternElement *
+  addNextElement(std::unique_ptr<CypherPatternElement> next) {
     nextElements_.push_back(std::move(next));
+    return nextElements_.back().get();
   }
 
   const CypherNodePattern *getStartNode() const { return startNode_.get(); }

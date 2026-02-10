@@ -27,7 +27,7 @@ struct LCPValue {
 };
 
 // IDE problem for linear constant propagation
-class IDEConstantPropagation : public IDEProblem<const llvm::Value*, LCPValue> {
+class IDEConstantPropagation : public DefaultNoAliasIDEProblem<const llvm::Value*, LCPValue> {
 public:
     using Fact = const llvm::Value*;
     using Value = LCPValue;
@@ -35,9 +35,9 @@ public:
     // IFDS interface
     Fact zero_fact() const override { return nullptr; }
     FactSet normal_flow(const llvm::Instruction* stmt, const Fact& fact) override;
-    FactSet call_flow(const llvm::CallInst* call, const llvm::Function* callee, const Fact& fact) override;
-    FactSet return_flow(const llvm::CallInst* call, const llvm::Function* callee, const Fact& exit_fact, const Fact& call_fact) override;
-    FactSet call_to_return_flow(const llvm::CallInst* call, const Fact& fact) override;
+    FactSet call_flow(const llvm::CallBase* call, const llvm::Function* callee, const Fact& fact) override;
+    FactSet return_flow(const llvm::CallBase* call, const llvm::Function* callee, const Fact& exit_fact, const Fact& call_fact) override;
+    FactSet call_to_return_flow(const llvm::CallBase* call, const Fact& fact) override;
     FactSet initial_facts(const llvm::Function* main) override;
 
     // Value domain
@@ -47,11 +47,11 @@ public:
 
     // Edge functions
     EdgeFunction normal_edge_function(const llvm::Instruction* stmt, const Fact& src_fact, const Fact& tgt_fact) override;
-    EdgeFunction call_edge_function(const llvm::CallInst* call, const Fact& src_fact, const Fact& tgt_fact) override;
-    EdgeFunction return_edge_function(const llvm::CallInst* call, const Fact& exit_fact, const Fact& ret_fact) override;
-    EdgeFunction call_to_return_edge_function(const llvm::CallInst* call, const Fact& src_fact, const Fact& tgt_fact) override;
-    FactSet summary_flow(const llvm::CallInst* call, const llvm::Function* callee, const Fact& fact) override;
-    EdgeFunction summary_edge_function(const llvm::CallInst* call, const Fact& src_fact, const Fact& tgt_fact) override;
+    EdgeFunction call_edge_function(const llvm::CallBase* call, const Fact& src_fact, const Fact& tgt_fact) override;
+    EdgeFunction return_edge_function(const llvm::CallBase* call, const Fact& exit_fact, const Fact& ret_fact) override;
+    EdgeFunction call_to_return_edge_function(const llvm::CallBase* call, const Fact& src_fact, const Fact& tgt_fact) override;
+    FactSet summary_flow(const llvm::CallBase* call, const llvm::Function* callee, const Fact& fact) override;
+    EdgeFunction summary_edge_function(const llvm::CallBase* call, const Fact& src_fact, const Fact& tgt_fact) override;
 
 private:
     static bool definesValue(const llvm::Instruction* I);

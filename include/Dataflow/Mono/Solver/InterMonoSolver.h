@@ -200,6 +200,12 @@ private:
       Continuations.push_back(&*NormalDest->begin());
       return Continuations;
     }
+    if (auto *CallBr = llvm::dyn_cast<llvm::CallBrInst>(CallInst)) {
+      for (unsigned I = 0, E = CallBr->getNumSuccessors(); I < E; ++I) {
+        Continuations.push_back(&*CallBr->getSuccessor(I)->begin());
+      }
+      return Continuations;
+    }
     if (auto *Next = CallInst->getNextNode()) {
       Continuations.push_back(Next);
     }

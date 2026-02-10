@@ -212,19 +212,73 @@ public:
 private:
   lotus::AliasAnalysisWrapper *AA;
 
+  static ConstantPropagationValue weakJoin(const ConstantPropagationValue &OldVal,
+                                           const ConstantPropagationValue &NewVal) {
+    if (equalValue(OldVal, NewVal)) {
+      return OldVal;
+    }
+    return makeBottom();
+  }
+
+  void collectAliasedPointers(
+      const llvm::Value *Ptr, const ConstantPropagationMap &State,
+      std::vector<const llvm::Value *> &MustAliases,
+      std::vector<const llvm::Value *> &MayAliases) const {
+    if (Ptr == nullptr || !Ptr->getType()->isPointerTy()) {
+      return;
+    }
+
+    const bool HaveAA = AA != nullptr && AA->isInitialized();
+    const llvm::Value *PtrBase = Ptr->stripPointerCasts();
+    auto Add = [&](const llvm::Value *Candidate) {
+      if (Candidate == nullptr || !Candidate->getType()->isPointerTy()) {
+        return;
+      }
+      const llvm::Value *CandidateBase = Candidate->stripPointerCasts();
+      if (PtrBase != nullptr && CandidateBase != nullptr &&
+          PtrBase == CandidateBase) {
+        MustAliases.push_back(Candidate);
+        return;
+      }
+      if (Candidate == Ptr) {
+        MustAliases.push_back(Candidate);
+        return;
+      }
+      if (!HaveAA) {
+        MayAliases.push_back(Candidate);
+        return;
+      }
+      auto Res = AA->query(Ptr, Candidate);
+      if (Res == llvm::AliasResult::MustAlias) {
+        MustAliases.push_back(Candidate);
+      } else if (Res != llvm::AliasResult::NoAlias) {
+        MayAliases.push_back(Candidate);
+      }
+    };
+
+    Add(Ptr);
+    for (const auto &Entry : State) {
+      Add(Entry.first);
+    }
+  }
+
   ConstantPropagationValue resolveAliasValue(const llvm::Value *Ptr,
                                              const ConstantPropagationMap &In) const {
     if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
         !Ptr->getType()->isPointerTy()) {
       return makeTop();
     }
-    std::vector<const llvm::Value *> Aliases;
-    if (!AA->getAliasSet(Ptr, Aliases)) {
-      return makeTop();
-    }
+
     bool Found = false;
     ConstantPropagationValue Val = makeTop();
-    for (const auto *Alias : Aliases) {
+    for (const auto &Entry : In) {
+      auto *Alias = Entry.first;
+      if (Alias == nullptr || !Alias->getType()->isPointerTy()) {
+        continue;
+      }
+      if (AA->query(Ptr, Alias) == llvm::AliasResult::NoAlias) {
+        continue;
+      }
       auto It = In.find(Alias);
       if (It == In.end()) {
         continue;
@@ -241,16 +295,23 @@ private:
 
   void writeAliases(const llvm::Value *Ptr, const ConstantPropagationValue &Val,
                     ConstantPropagationMap &Out) const {
-    if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
-        !Ptr->getType()->isPointerTy()) {
-      return;
+    std::vector<const llvm::Value *> MustAliases;
+    std::vector<const llvm::Value *> MayAliases;
+    collectAliasedPointers(Ptr, Out, MustAliases, MayAliases);
+
+    for (const auto *Alias : MustAliases) {
+      if (Alias != nullptr) {
+        Out[Alias] = Val;
+      }
     }
-    std::vector<const llvm::Value *> Aliases;
-    if (!AA->getAliasSet(Ptr, Aliases)) {
-      return;
-    }
-    for (const auto *Alias : Aliases) {
-      Out[Alias] = Val;
+
+    for (const auto *Alias : MayAliases) {
+      if (Alias == nullptr) {
+        continue;
+      }
+      auto It = Out.find(Alias);
+      auto OldVal = It != Out.end() ? It->second : makeTop();
+      Out[Alias] = weakJoin(OldVal, Val);
     }
   }
 };
@@ -265,7 +326,7 @@ runIntraMonoConstantPropagation(llvm::Function *F) {
 
   auto AA = std::make_unique<lotus::AliasAnalysisWrapper>(
       *F->getParent(),
-      lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
+      lotus::AAConfig(lotus::AAConfig::Implementation::DyckAA,
                       lotus::AAConfig::ContextSensitivity::None, 0, true,
                       lotus::AAConfig::Solver::Default));
   IntraMonoConstantPropagation Problem(F, AA.get());

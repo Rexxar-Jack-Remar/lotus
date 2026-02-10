@@ -64,16 +64,16 @@ namespace ifds {
 // Interprocedural Reaching Definitions Analysis
 // ============================================================================
 
-class ReachingDefinitionsAnalysis : public IFDSProblem<DefinitionFact> {
+class ReachingDefinitionsAnalysis : public DefaultAliasAwareIFDSProblem<DefinitionFact> {
 public:
     // IFDS interface implementation
     DefinitionFact zero_fact() const override;
     FactSet normal_flow(const llvm::Instruction* stmt, const DefinitionFact& fact) override;
-    FactSet call_flow(const llvm::CallInst* call, const llvm::Function* callee,
+    FactSet call_flow(const llvm::CallBase* call, const llvm::Function* callee,
                      const DefinitionFact& fact) override;
-    FactSet return_flow(const llvm::CallInst* call, const llvm::Function* callee,
+    FactSet return_flow(const llvm::CallBase* call, const llvm::Function* callee,
                        const DefinitionFact& exit_fact, const DefinitionFact& call_fact) override;
-    FactSet call_to_return_flow(const llvm::CallInst* call, const DefinitionFact& fact) override;
+    FactSet call_to_return_flow(const llvm::CallBase* call, const DefinitionFact& fact) override;
     FactSet initial_facts(const llvm::Function* main) override;
     
     // Query interface
@@ -84,7 +84,7 @@ private:
     bool defines_variable(const llvm::Instruction* inst) const;
     const llvm::Value* get_defined_variable(const llvm::Instruction* inst) const;
     bool is_local_to_caller(const DefinitionFact& fact, const llvm::Function* callee) const;
-    bool is_killed_by_external_call(const DefinitionFact& fact, const llvm::CallInst* call) const;
+    bool is_killed_by_external_call(const DefinitionFact& fact, const llvm::CallBase* call) const;
 };
 
 } // namespace ifds

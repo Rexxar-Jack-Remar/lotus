@@ -3,7 +3,9 @@
  */
 
 #include "Dataflow/IFDS/Clients/IFDSConstAnalysis.h"
+#include "Dataflow/IFDS/LLVMFlowHelpers.h"
 
+#include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/Support/raw_ostream.h>
@@ -55,7 +57,7 @@ ConstAnalysis::FactSet ConstAnalysis::normal_flow(const llvm::Instruction *stmt,
     // Check aliases if we have alias analysis
     if (!already_initialized && m_alias_analysis) {
       for (const auto *loc : initialized_locations) {
-        if (may_alias(loc, pointer_op)) {
+        if (may_alias_or_equal(loc, pointer_op)) {
           already_initialized = true;
           break;
         }
@@ -71,6 +73,18 @@ ConstAnalysis::FactSet ConstAnalysis::normal_flow(const llvm::Instruction *stmt,
         result.insert(ConstFact::initialized(pointer_op));
         mark_initialized(pointer_op);
       }
+
+      // Alias-aware post-processing in store context.
+      expand_facts_with_aliases_in_context(
+          result, store,
+          [](const ConstFact &f) -> const llvm::Value * { return f.value; },
+          [this](const llvm::Value *alias, const ConstFact &f) {
+            if (f.is_initialized()) {
+              mark_initialized(alias);
+            }
+            return ConstFact(f.type, alias);
+          },
+          [](const ConstFact &f) { return !f.is_zero() && f.value != nullptr; });
     } else {
       result.insert(fact);
     }
@@ -81,7 +95,7 @@ ConstAnalysis::FactSet ConstAnalysis::normal_flow(const llvm::Instruction *stmt,
   return result;
 }
 
-ConstAnalysis::FactSet ConstAnalysis::call_flow(const llvm::CallInst *call,
+ConstAnalysis::FactSet ConstAnalysis::call_flow(const llvm::CallBase*call,
                                                 const llvm::Function *callee,
                                                 const ConstFact &fact) {
   FactSet result;
@@ -91,25 +105,24 @@ ConstAnalysis::FactSet ConstAnalysis::call_flow(const llvm::CallInst *call,
     return result;
   }
 
-  // Map actual parameters to formal parameters for pointer args
-  if (callee && !callee->isDeclaration()) {
-    unsigned arg_idx = 0;
-    for (const auto &arg : callee->args()) {
-      if (arg_idx < call->arg_size()) {
-        const llvm::Value *actual = call->getArgOperand(arg_idx);
-        if (fact.value == actual && arg.getType()->isPointerTy()) {
-          result.insert(ConstFact(fact.type, &arg));
-        }
-      }
-      ++arg_idx;
-    }
-  }
+  flow::map_facts_to_callee(call, callee, fact, result,
+                            [](const llvm::Value *actual,
+                               const llvm::Argument *formal,
+                               const ConstFact &source) {
+                              return source.value == actual &&
+                                     formal->getType()->isPointerTy();
+                            },
+                            [](const llvm::Value * /*actual*/,
+                               const llvm::Argument *formal,
+                               const ConstFact &source) {
+                              return ConstFact(source.type, formal);
+                            });
 
   return result;
 }
 
 ConstAnalysis::FactSet ConstAnalysis::return_flow(
-    const llvm::CallInst *call, const llvm::Function *callee,
+    const llvm::CallBase*call, const llvm::Function *callee,
     const ConstFact &exit_fact, const ConstFact & /*call_fact*/) {
   FactSet result;
 
@@ -118,25 +131,26 @@ ConstAnalysis::FactSet ConstAnalysis::return_flow(
     return result;
   }
 
-  // Map pointer parameters back to actuals
-  if (callee && !callee->isDeclaration()) {
-    unsigned arg_idx = 0;
-    for (const auto &arg : callee->args()) {
-      if (arg_idx < call->arg_size()) {
-        const llvm::Value *actual = call->getArgOperand(arg_idx);
-        if (exit_fact.value == &arg && arg.getType()->isPointerTy()) {
-          result.insert(ConstFact(exit_fact.type, actual));
-        }
-      }
-      ++arg_idx;
-    }
-  }
+  flow::map_facts_to_caller(
+      call, callee, exit_fact, result,
+      [](const llvm::Argument *formal, const llvm::Value * /*actual*/,
+         const ConstFact &source) {
+        return source.value == formal && formal->getType()->isPointerTy();
+      },
+      [](const llvm::Argument * /*formal*/, const llvm::Value *actual,
+         const ConstFact &source) { return ConstFact(source.type, actual); },
+      [](const llvm::Value * /*ret_val*/, const ConstFact & /*source*/) {
+        return false;
+      },
+      [](const llvm::Value * /*ret_val*/, const ConstFact &source) {
+        return source;
+      });
 
   return result;
 }
 
 ConstAnalysis::FactSet
-ConstAnalysis::call_to_return_flow(const llvm::CallInst *call,
+ConstAnalysis::call_to_return_flow(const llvm::CallBase*call,
                                    const ConstFact &fact) {
   FactSet result;
 
@@ -161,20 +175,19 @@ ConstAnalysis::call_to_return_flow(const llvm::CallInst *call,
     return result;
   }
 
-  // For non-pointer facts, pass through
-  // For pointer facts passed to callees, kill them (callee may modify)
-  bool is_pointer_param = false;
-  for (unsigned i = 0; i < call->arg_size(); ++i) {
-    if (call->getArgOperand(i) == fact.value &&
-        call->getArgOperand(i)->getType()->isPointerTy()) {
-      is_pointer_param = true;
-      break;
-    }
-  }
-
-  if (!is_pointer_param) {
-    result.insert(fact);
-  }
+  // For non-pointer facts, pass through; for pointer facts passed to callees,
+  // kill them (callee may modify).
+  flow::map_facts_alongside_callsite_with_policies(
+      call, fact, result,
+      [](const llvm::Value *arg, const ConstFact &source) {
+        return arg == source.value && arg->getType()->isPointerTy();
+      },
+      [](const ConstFact &source) { return source.is_zero(); },
+      [](const ConstFact &source) {
+        return source.value && llvm::isa<llvm::GlobalValue>(source.value);
+      },
+      /*PropagateGlobals=*/true,
+      /*PropagateZero=*/true);
 
   return result;
 }
@@ -208,7 +221,7 @@ bool ConstAnalysis::is_vtable_store(const llvm::StoreInst *store) const {
   return false;
 }
 
-bool ConstAnalysis::is_memory_intrinsic(const llvm::CallInst *call) const {
+bool ConstAnalysis::is_memory_intrinsic(const llvm::CallBase*call) const {
   if (!call->getCalledFunction()) {
     return false;
   }

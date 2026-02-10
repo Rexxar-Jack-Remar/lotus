@@ -1,8 +1,8 @@
 #include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoUninitVariables.h"
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Dataflow/Mono/IntraMonoProblem.h"
 #include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
 #include "Dataflow/Mono/Solver/IntraMonoSolver.h"
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
@@ -129,6 +129,53 @@ private:
   const DataLayout *DL;
   lotus::AliasAnalysisWrapper *AA;
 
+  struct AliasPartition {
+    std::vector<Value *> MustAliases;
+    std::vector<Value *> MayAliases;
+  };
+
+  AliasPartition classifyAliases(const Value *Ptr,
+                                 const std::set<Value *> &Facts) const {
+    AliasPartition AP;
+    if (Ptr == nullptr) {
+      return AP;
+    }
+    const bool HaveAA = AA != nullptr && AA->isInitialized();
+    const Value *PtrBase = Ptr->stripPointerCasts();
+
+    auto Add = [&](Value *Candidate) {
+      if (Candidate == nullptr || !Candidate->getType()->isPointerTy()) {
+        return;
+      }
+      const Value *CandidateBase = Candidate->stripPointerCasts();
+      if (PtrBase != nullptr && CandidateBase != nullptr &&
+          PtrBase == CandidateBase) {
+        AP.MustAliases.push_back(Candidate);
+        return;
+      }
+      if (Candidate == Ptr) {
+        AP.MustAliases.push_back(Candidate);
+        return;
+      }
+      if (!HaveAA || !Ptr->getType()->isPointerTy()) {
+        AP.MayAliases.push_back(Candidate);
+        return;
+      }
+      auto Res = AA->query(Ptr, Candidate);
+      if (Res == AliasResult::MustAlias) {
+        AP.MustAliases.push_back(Candidate);
+      } else if (Res != AliasResult::NoAlias) {
+        AP.MayAliases.push_back(Candidate);
+      }
+    };
+
+    Add(const_cast<Value *>(Ptr));
+    for (auto *V : Facts) {
+      Add(V);
+    }
+    return AP;
+  }
+
   const Value *getBaseObject(const Value *V) const {
     return llvm::getUnderlyingObject(V);
   }
@@ -140,18 +187,25 @@ private:
     if (In.count(const_cast<Value *>(V))) {
       return true;
     }
-    if (AA == nullptr || !AA->isInitialized()) {
-      return false;
-    }
     if (!V->getType()->isPointerTy()) {
       return false;
     }
-    std::vector<const Value *> Aliases;
-    if (!AA->getAliasSet(V, Aliases)) {
-      return false;
-    }
-    for (const auto *Alias : Aliases) {
-      if (In.count(const_cast<Value *>(Alias))) {
+    const bool HaveAA = AA != nullptr && AA->isInitialized();
+    const Value *VBase = V->stripPointerCasts();
+
+    for (auto *Candidate : In) {
+      if (Candidate == nullptr || !Candidate->getType()->isPointerTy()) {
+        continue;
+      }
+      const Value *CandidateBase = Candidate->stripPointerCasts();
+      if (VBase != nullptr && CandidateBase != nullptr &&
+          VBase == CandidateBase) {
+        return true;
+      }
+      if (!HaveAA) {
+        return true;
+      }
+      if (AA->query(V, Candidate) != AliasResult::NoAlias) {
         return true;
       }
     }
@@ -161,13 +215,10 @@ private:
   void clearAliasUninit(std::set<Value *> &Out, const Value *Ptr) const {
     if (AA != nullptr && AA->isInitialized() && Ptr != nullptr &&
         Ptr->getType()->isPointerTy()) {
-      std::vector<const Value *> Aliases;
-      if (AA->getAliasSet(Ptr, Aliases)) {
-        for (const auto *Alias : Aliases) {
-          Out.erase(const_cast<Value *>(Alias));
-        }
+      auto AP = classifyAliases(Ptr, Out);
+      for (auto *Alias : AP.MustAliases) {
+        Out.erase(Alias);
       }
-      Out.erase(const_cast<Value *>(Ptr));
       return;
     }
     auto *Base = getBaseObject(Ptr);
@@ -186,8 +237,14 @@ private:
     }
   }
 
-  static void markAliasUninit(std::set<Value *> &Out, Value *Ptr) {
-    Out.insert(Ptr);
+  void markAliasUninit(std::set<Value *> &Out, Value *Ptr) const {
+    auto AP = classifyAliases(Ptr, Out);
+    for (auto *Alias : AP.MustAliases) {
+      Out.insert(Alias);
+    }
+    for (auto *Alias : AP.MayAliases) {
+      Out.insert(Alias);
+    }
   }
 
   static bool isMemIntrinsic(Function *Callee, Intrinsic::ID ID) {
@@ -233,7 +290,7 @@ std::unique_ptr<DataFlowResult> runIntraMonoUninitVariables(Function *F) {
 
   auto AA = std::make_unique<lotus::AliasAnalysisWrapper>(
       *F->getParent(),
-      lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
+      lotus::AAConfig(lotus::AAConfig::Implementation::DyckAA,
                       lotus::AAConfig::ContextSensitivity::None, 0, true,
                       lotus::AAConfig::Solver::Default));
   UninitVariablesProblem Problem(F, AA.get());

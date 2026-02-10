@@ -74,7 +74,7 @@ namespace ifds {
 // Uninitialized Variables Analysis
 // ============================================================================
 
-class UninitializedVariablesAnalysis : public IFDSProblem<UninitVarFact> {
+class UninitializedVariablesAnalysis : public DefaultAliasAwareIFDSProblem<UninitVarFact> {
 public:
   struct UninitResult {
     const llvm::Instruction *use_site;
@@ -96,12 +96,12 @@ public:
   UninitVarFact zero_fact() const override;
   FactSet normal_flow(const llvm::Instruction *stmt,
                       const UninitVarFact &fact) override;
-  FactSet call_flow(const llvm::CallInst *call, const llvm::Function *callee,
+  FactSet call_flow(const llvm::CallBase*call, const llvm::Function *callee,
                     const UninitVarFact &fact) override;
-  FactSet return_flow(const llvm::CallInst *call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase*call, const llvm::Function *callee,
                       const UninitVarFact &exit_fact,
                       const UninitVarFact &call_fact) override;
-  FactSet call_to_return_flow(const llvm::CallInst *call,
+  FactSet call_to_return_flow(const llvm::CallBase*call,
                               const UninitVarFact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 

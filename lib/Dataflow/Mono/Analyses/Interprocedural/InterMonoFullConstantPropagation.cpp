@@ -1,8 +1,8 @@
 #include "Dataflow/Mono/Analyses/Interprocedural/InterMonoFullConstantPropagation.h"
 
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Dataflow/Mono/InterMonoProblem.h"
 #include "Dataflow/Mono/Solver/InterMonoSolver.h"
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
@@ -294,19 +294,65 @@ public:
 private:
   lotus::AliasAnalysisWrapper *AA;
 
+  void collectAliasedPointers(
+      const Value *Ptr, const mono_container_t &State,
+      std::vector<const Value *> &MustAliases,
+      std::vector<const Value *> &MayAliases) const {
+    if (Ptr == nullptr || !Ptr->getType()->isPointerTy()) {
+      return;
+    }
+
+    const bool HaveAA = AA != nullptr && AA->isInitialized();
+    const Value *PtrBase = Ptr->stripPointerCasts();
+    auto Add = [&](const Value *Candidate) {
+      if (Candidate == nullptr || !Candidate->getType()->isPointerTy()) {
+        return;
+      }
+      const Value *CandidateBase = Candidate->stripPointerCasts();
+      if (PtrBase != nullptr && CandidateBase != nullptr &&
+          PtrBase == CandidateBase) {
+        MustAliases.push_back(Candidate);
+        return;
+      }
+      if (Candidate == Ptr) {
+        MustAliases.push_back(Candidate);
+        return;
+      }
+      if (!HaveAA) {
+        MayAliases.push_back(Candidate);
+        return;
+      }
+      auto Res = AA->query(Ptr, Candidate);
+      if (Res == AliasResult::MustAlias) {
+        MustAliases.push_back(Candidate);
+      } else if (Res != AliasResult::NoAlias) {
+        MayAliases.push_back(Candidate);
+      }
+    };
+
+    Add(Ptr);
+    for (const auto &Entry : State.Values) {
+      Add(Entry.first);
+    }
+  }
+
   FullConstantValue resolveAliasValue(const Value *Ptr,
                                       const mono_container_t &In) const {
     if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
         !Ptr->getType()->isPointerTy()) {
       return FullConstantValue::top();
     }
-    std::vector<const Value *> Aliases;
-    if (!AA->getAliasSet(Ptr, Aliases)) {
-      return FullConstantValue::top();
-    }
+
     bool Found = false;
     FullConstantValue Val = FullConstantValue::top();
-    for (const auto *Alias : Aliases) {
+    for (const auto &Entry : In.Values) {
+      auto *Alias = Entry.first;
+      if (Alias == nullptr || !Alias->getType()->isPointerTy()) {
+        continue;
+      }
+      if (AA->query(Ptr, Alias) == AliasResult::NoAlias) {
+        continue;
+      }
       auto It = In.Values.find(Alias);
       if (It == In.Values.end()) {
         continue;
@@ -323,16 +369,24 @@ private:
 
   void writeAliases(const Value *Ptr, const FullConstantValue &Val,
                     mono_container_t &Out) const {
-    if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
-        !Ptr->getType()->isPointerTy()) {
-      return;
+    std::vector<const Value *> MustAliases;
+    std::vector<const Value *> MayAliases;
+    collectAliasedPointers(Ptr, Out, MustAliases, MayAliases);
+
+    for (const auto *Alias : MustAliases) {
+      if (Alias != nullptr) {
+        Out.Values[Alias] = Val;
+      }
     }
-    std::vector<const Value *> Aliases;
-    if (!AA->getAliasSet(Ptr, Aliases)) {
-      return;
-    }
-    for (const auto *Alias : Aliases) {
-      Out.Values[Alias] = Val;
+
+    for (const auto *Alias : MayAliases) {
+      if (Alias == nullptr) {
+        continue;
+      }
+      auto It = Out.Values.find(Alias);
+      auto OldVal =
+          It != Out.Values.end() ? It->second : FullConstantValue::top();
+      Out.Values[Alias] = joinValues(OldVal, Val);
     }
   }
 };
@@ -348,7 +402,7 @@ runInterMonoFullConstantPropagation(Function *Entry) {
 
   auto AA = std::make_unique<lotus::AliasAnalysisWrapper>(
       *Entry->getParent(),
-      lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
+      lotus::AAConfig(lotus::AAConfig::Implementation::DyckAA,
                       lotus::AAConfig::ContextSensitivity::None, 0, true,
                       lotus::AAConfig::Solver::Default));
   InterMonoFullConstantPropagation Problem(Entry, AA.get());

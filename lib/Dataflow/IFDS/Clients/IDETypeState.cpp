@@ -126,7 +126,7 @@ IDETypeState::FactSet IDETypeState::normal_flow(const llvm::Instruction* stmt, c
         const llvm::Value* ptr = store->getPointerOperand();
         
         // If the fact aliases with the pointer being stored to, it may be killed
-        if (fact && may_alias(fact, ptr)) {
+        if (fact && may_alias_or_equal(fact, ptr)) {
             fact_killed = true;
         }
         
@@ -145,7 +145,7 @@ IDETypeState::FactSet IDETypeState::normal_flow(const llvm::Instruction* stmt, c
         const llvm::Value* ptr = load->getPointerOperand();
         
         // If fact aliases with loaded pointer, propagate to load result
-        if (fact && may_alias(fact, ptr) && should_track(load)) {
+        if (fact && may_alias_or_equal(fact, ptr) && should_track(load)) {
             out.insert(load);
         }
         
@@ -187,7 +187,7 @@ IDETypeState::FactSet IDETypeState::normal_flow(const llvm::Instruction* stmt, c
     return out;
 }
 
-IDETypeState::FactSet IDETypeState::call_flow(const llvm::CallInst* call, 
+IDETypeState::FactSet IDETypeState::call_flow(const llvm::CallBase* call, 
                                                const llvm::Function* callee, 
                                                const Fact& fact) {
     FactSet out;
@@ -211,7 +211,7 @@ IDETypeState::FactSet IDETypeState::call_flow(const llvm::CallInst* call,
         if (fact == arg &&  should_track(formal)) {
                 out.insert(formal);
         } else if (fact && arg->getType()->isPointerTy() && 
-                   fact->getType()->isPointerTy() && may_alias(arg, fact)) {
+                   fact->getType()->isPointerTy() && may_alias_or_equal(arg, fact)) {
             // Fact aliases with argument, propagate to formal
             if (should_track(formal)) {
                 out.insert(formal);
@@ -222,7 +222,7 @@ IDETypeState::FactSet IDETypeState::call_flow(const llvm::CallInst* call,
     return out;
 }
 
-IDETypeState::FactSet IDETypeState::return_flow(const llvm::CallInst* call, 
+IDETypeState::FactSet IDETypeState::return_flow(const llvm::CallBase* call, 
                                                  const llvm::Function* callee,
                                                  const Fact& exit_fact, 
                                                  const Fact& call_fact) {
@@ -244,7 +244,7 @@ IDETypeState::FactSet IDETypeState::return_flow(const llvm::CallInst* call,
     return out;
 }
 
-IDETypeState::FactSet IDETypeState::call_to_return_flow(const llvm::CallInst* call, 
+IDETypeState::FactSet IDETypeState::call_to_return_flow(const llvm::CallBase* call, 
                                                          const Fact& fact) {
     FactSet out;
     
@@ -280,7 +280,7 @@ IDETypeState::normal_edge_function(const llvm::Instruction* stmt,
 }
 
 IDETypeState::EdgeFunction 
-IDETypeState::call_edge_function(const llvm::CallInst* call, 
+IDETypeState::call_edge_function(const llvm::CallBase* call, 
                                  const Fact& src_fact, 
                                  const Fact& tgt_fact) {
     (void)src_fact;
@@ -298,7 +298,7 @@ IDETypeState::call_edge_function(const llvm::CallInst* call,
 }
 
 IDETypeState::EdgeFunction 
-IDETypeState::return_edge_function(const llvm::CallInst* call, 
+IDETypeState::return_edge_function(const llvm::CallBase* call, 
                                    const Fact& exit_fact, 
                                    const Fact& ret_fact) {
     (void)call;
@@ -310,7 +310,7 @@ IDETypeState::return_edge_function(const llvm::CallInst* call,
 }
 
 IDETypeState::EdgeFunction 
-IDETypeState::call_to_return_edge_function(const llvm::CallInst* call, 
+IDETypeState::call_to_return_edge_function(const llvm::CallBase* call, 
                                            const Fact& src_fact, 
                                            const Fact& tgt_fact) {
     (void)call;

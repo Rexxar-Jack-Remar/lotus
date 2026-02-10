@@ -108,7 +108,7 @@ private:
     };
 
     struct IncomingEdge {
-        const llvm::CallInst* call;
+        const llvm::CallBase* call;
         Fact call_fact;
         const llvm::Instruction* start_node;
         Fact start_fact;
@@ -174,13 +174,13 @@ private:
 
     // Edge function caches (avoid recomputing same edge function)
     using NormalEdgeKey = std::tuple<const llvm::Instruction*, Fact, Fact>;
-    using CallToReturnEdgeKey = std::tuple<const llvm::CallInst*, Fact, Fact>;
+    using CallToReturnEdgeKey = std::tuple<const llvm::CallBase*, Fact, Fact>;
     std::unordered_map<NormalEdgeKey, EdgeFunctionPtr,
                       detail::TripleHash<const llvm::Instruction*, Fact, Fact>,
                       detail::TripleEq<const llvm::Instruction*, Fact, Fact>> m_normal_edge_cache;
     std::unordered_map<CallToReturnEdgeKey, EdgeFunctionPtr,
-                      detail::TripleHash<const llvm::CallInst*, Fact, Fact>,
-                      detail::TripleEq<const llvm::CallInst*, Fact, Fact>> m_call_to_return_edge_cache;
+                      detail::TripleHash<const llvm::CallBase*, Fact, Fact>,
+                      detail::TripleEq<const llvm::CallBase*, Fact, Fact>> m_call_to_return_edge_cache;
 
     // Worklist of path edges with edge functions
     std::vector<std::pair<PathEdgeType, EdgeFunctionPtr>> m_worklist;
