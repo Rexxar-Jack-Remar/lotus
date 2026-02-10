@@ -219,6 +219,7 @@ int main(int argc, char **argv) {
         const auto &InSet = Res.IN(I);
         OS << "  " << ValueToId.at(I) << " IN: ";
         std::vector<std::string> exprs;
+        exprs.reserve(InSet.size());
         for (const auto &expr : InSet) {
           exprs.push_back(formatExpressionKey(expr));
         }

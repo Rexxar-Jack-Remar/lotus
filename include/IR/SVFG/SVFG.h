@@ -1,0 +1,334 @@
+//===- SVFG.h -- Sparse Value-Flow Graph --------------------------------------//
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
+//===----------------------------------------------------------------------===//
+//
+// SVFG: Production-ready Sparse Value-Flow Graph.
+//
+// This file provides the main SVFG class aligned with SVF's design, supporting:
+// - Sparse value-flow representation for whole-program analysis
+// - Memory SSA form for precise alias tracking
+// - Interprocedural value-flow through calls and returns
+// - Integration with pointer analysis (Andersen, etc.)
+//
+// Key features:
+// - Efficient node/edge lookups with multiple indices
+// - Full call graph integration
+// - Memory SSA versioning
+// - Points-to set management
+// - Graph algorithms (reachability, slicing)
+//
+//===----------------------------------------------------------------------===//
+
+#pragma once
+
+#include "IR/SVFG/SVFGBase.h"
+#include "IR/ICFG/ICFG.h"
+#include "IR/SVFG/SVFGEdge.h"
+#include "IR/SVFG/SVFGNode.h"
+#include <map>
+#include <set>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace lotus {
+namespace analysis {
+
+class SVFG;
+
+/// @brief SVFG node ID to node map
+using SVFGNodeMap = std::unordered_map<uint32_t, SVFGNode*>;
+
+/// @brief SVFG node set
+using SVFGNodeSet = std::set<SVFGNode*>;
+
+/// @brief LLVM instruction to SVFG node ID map for definition sites
+using InstToDefMap = std::unordered_map<const llvm::Instruction *, uint32_t>;
+
+/// @brief Value to SVFG node ID map (for top-level pointers)
+using ValueToNodeMap = std::unordered_map<const llvm::Value*, uint32_t>;
+
+/// @brief Memory region version to SVFG node ID map
+struct MemSSAKey {
+    uint32_t memReg = 0;
+    uint32_t version = 0;
+
+    bool operator==(const MemSSAKey& other) const {
+        return memReg == other.memReg && version == other.version;
+    }
+};
+
+struct MemSSAKeyHash {
+    size_t operator()(const MemSSAKey& key) const noexcept {
+        return std::hash<uint32_t>()(key.memReg) ^
+               (std::hash<uint32_t>()(key.version) << 1);
+    }
+};
+
+using MRVerToNodeMap = std::unordered_map<MemSSAKey, SVFGNode*, MemSSAKeyHash>;
+
+/// @brief Callsite instruction to actual-in/out SVFG node set map
+using CallSiteToActualMap =
+    std::unordered_map<const llvm::CallBase *, SVFGNodeSet>;
+
+/// @brief Function to formal-in/out SVFG node set map
+using FuncToFormalMap = std::unordered_map<const llvm::Function*, SVFGNodeSet>;
+
+/// @brief SVFG statistics
+struct SVFGStat {
+    uint32_t numNodes = 0;
+    uint32_t numEdges = 0;
+    uint32_t numAddrNodes = 0;
+    uint32_t numCopyNodes = 0;
+    uint32_t numLoadNodes = 0;
+    uint32_t numStoreNodes = 0;
+    uint32_t numGepNodes = 0;
+    uint32_t numPhiNodes = 0;
+    uint32_t numMemNodes = 0;
+    uint32_t numParamNodes = 0;
+    uint32_t numCallEdges = 0;
+    uint32_t numRetEdges = 0;
+    uint32_t numIntraEdges = 0;
+};
+
+/// @brief Main SVFG class
+class SVFG
+{
+public:
+    /// @brief Iterator types
+    using iterator = SVFGNodeMap::iterator;
+    using const_iterator = SVFGNodeMap::const_iterator;
+
+private:
+    /// @brief Primary node map: ID -> Node
+    SVFGNodeMap nodeMap;
+    
+    /// @brief Definition mapping: ICFGNode -> SVFGNode ID
+    InstToDefMap instToDefMap;
+    
+    /// @brief Value mapping: LLVM Value -> SVFGNode ID (top-level pointers)
+    ValueToNodeMap valueToNodeMap;
+    
+    /// @brief Memory SSA mapping: Memory region version -> SVFGNode ID
+    MRVerToNodeMap mssaVerToNodeMap;
+    
+    /// @brief Callsite mappings
+    CallSiteToActualMap callSiteToActualInMap;
+    CallSiteToActualMap callSiteToActualOutMap;
+    
+    /// @brief Function mappings
+    FuncToFormalMap funcToFormalInMap;
+    FuncToFormalMap funcToFormalOutMap;
+    
+    /// @brief Associated ICFG
+    const ICFG* icfg;
+    
+    /// @brief Next available node ID
+    uint32_t nextNodeId;
+    
+    /// @brief Statistics
+    SVFGStat stat;
+
+public:
+    /// @brief Constructor
+    SVFG() : icfg(nullptr), nextNodeId(0) {}
+    
+    /// @brief Destructor
+    virtual ~SVFG() {
+        for (auto& pair : nodeMap) {
+            delete pair.second;
+        }
+    }
+
+    //===------------------------------------------------------------------===
+    // Node access
+    //===------------------------------------------------------------------===
+    
+    inline SVFGNode* getNode(uint32_t id) const {
+        auto it = nodeMap.find(id);
+        return (it != nodeMap.end()) ? it->second : nullptr;
+    }
+    
+    inline bool hasNode(uint32_t id) const {
+        return nodeMap.find(id) != nodeMap.end();
+    }
+    
+    inline uint32_t getNumNodes() const { return nodeMap.size(); }
+    inline uint32_t getNextNodeId() { return nextNodeId++; }
+    
+    iterator begin() { return nodeMap.begin(); }
+    iterator end() { return nodeMap.end(); }
+    const_iterator begin() const { return nodeMap.begin(); }
+    const_iterator end() const { return nodeMap.end(); }
+
+    //===------------------------------------------------------------------===
+    // Definition site access
+    //===------------------------------------------------------------------===
+    
+    inline SVFGNode* getDef(const llvm::Instruction* inst) const {
+        auto it = instToDefMap.find(inst);
+        return (it != instToDefMap.end()) ? getNode(it->second) : nullptr;
+    }
+    
+    inline bool hasDef(const llvm::Instruction* inst) const {
+        return instToDefMap.find(inst) != instToDefMap.end();
+    }
+    
+    inline void setDef(const llvm::Instruction* inst, uint32_t nodeId) {
+        instToDefMap[inst] = nodeId;
+    }
+    
+    inline SVFGNode* getMSSADef(uint32_t memReg, uint32_t version = 0) const {
+        auto it = mssaVerToNodeMap.find(MemSSAKey{memReg, version});
+        return (it != mssaVerToNodeMap.end()) ? it->second : nullptr;
+    }
+    
+    inline void setMSSADef(uint32_t memReg, SVFGNode* node, uint32_t version = 0) {
+        mssaVerToNodeMap[MemSSAKey{memReg, version}] = node;
+    }
+
+    //===------------------------------------------------------------------===
+    // Value mapping
+    //===------------------------------------------------------------------===
+    
+    inline SVFGNode* getValueNode(const llvm::Value* val) const {
+        auto it = valueToNodeMap.find(val);
+        return (it != valueToNodeMap.end()) ? getNode(it->second) : nullptr;
+    }
+    
+    inline void setValueNode(const llvm::Value* val, uint32_t nodeId) {
+        valueToNodeMap[val] = nodeId;
+    }
+
+    //===------------------------------------------------------------------===
+    // Node/edge management
+    //===------------------------------------------------------------------===
+    
+    void addNode(SVFGNode* node);
+    SVFGEdge* addEdge(SVFGNode* src, SVFGNode* dst, SVFGEdgeK kind,
+                      const llvm::CallBase* callSite = nullptr,
+                      const SVFGNodeBS& pointsTo = SVFGNodeBS());
+    void removeEdge(SVFGEdge* edge);
+    
+    //===------------------------------------------------------------------===
+    // Call/return site access
+    //===------------------------------------------------------------------===
+    
+    inline const SVFGNodeSet& getActualIns(const llvm::CallBase* cs) const {
+        static SVFGNodeSet empty;
+        auto it = callSiteToActualInMap.find(cs);
+        return (it != callSiteToActualInMap.end()) ? it->second : empty;
+    }
+    
+    inline const SVFGNodeSet& getActualOuts(const llvm::CallBase* cs) const {
+        static SVFGNodeSet empty;
+        auto it = callSiteToActualOutMap.find(cs);
+        return (it != callSiteToActualOutMap.end()) ? it->second : empty;
+    }
+    
+    inline void addActualIn(const llvm::CallBase* cs, SVFGNode* node) {
+        callSiteToActualInMap[cs].insert(node);
+    }
+    
+    inline void addActualOut(const llvm::CallBase* cs, SVFGNode* node) {
+        callSiteToActualOutMap[cs].insert(node);
+    }
+    
+    inline const SVFGNodeSet& getFormalIns(const llvm::Function* f) const {
+        static SVFGNodeSet empty;
+        auto it = funcToFormalInMap.find(f);
+        return (it != funcToFormalInMap.end()) ? it->second : empty;
+    }
+    
+    inline const SVFGNodeSet& getFormalOuts(const llvm::Function* f) const {
+        static SVFGNodeSet empty;
+        auto it = funcToFormalOutMap.find(f);
+        return (it != funcToFormalOutMap.end()) ? it->second : empty;
+    }
+    
+    inline void addFormalIn(const llvm::Function* f, SVFGNode* node) {
+        funcToFormalInMap[f].insert(node);
+    }
+    
+    inline void addFormalOut(const llvm::Function* f, SVFGNode* node) {
+        funcToFormalOutMap[f].insert(node);
+    }
+
+    //===------------------------------------------------------------------===
+    // ICFG integration
+    //===------------------------------------------------------------------===
+    
+    inline const ICFG* getICFG() const { return icfg; }
+    inline void setICFG(const ICFG* i) { icfg = i; }
+
+    //===------------------------------------------------------------------===
+    // Statistics
+    //===------------------------------------------------------------------===
+    
+    inline const SVFGStat& getStat() const { return stat; }
+    inline SVFGStat& getStat() { return stat; }
+    void updateStat(SVFGNode* node);
+    void updateStat(SVFGEdge* edge);
+
+    //===------------------------------------------------------------------===
+    // Graph algorithms
+    //===------------------------------------------------------------------===
+    
+    /// @brief Get all predecessors (backward reachability)
+    SVFGNodeSet getPreds(SVFGNode* node) const;
+    
+    /// @brief Get all successors (forward reachability)
+    SVFGNodeSet getSuccs(SVFGNode* node) const;
+    
+    /// @brief Check if path exists between two nodes
+    bool hasPath(SVFGNode* src, SVFGNode* dst) const;
+    
+    /// @brief Dump to DOT format
+    void dump(const std::string& filename) const;
+
+    /// @brief Serialize graph to text
+    bool writeToFile(const std::string& filename) const;
+
+    /// @brief Deserialize graph from text
+    bool readFromFile(const std::string& filename);
+    
+    /// @brief Print statistics
+    void printStat() const;
+
+    /// @brief Swap graph contents with another SVFG instance.
+    void swapWith(SVFG& other);
+    
+    //===------------------------------------------------------------------===
+    // Incremental update support
+    //===------------------------------------------------------------------===
+    
+    /// @brief Mark nodes/edges that depend on points-to information for update
+    /// Called when pointer analysis results change
+    void markForUpdate(SVFGNode* node);
+    
+    /// @brief Get all nodes marked for update
+    SVFGNodeSet getNodesForUpdate() const;
+    
+    /// @brief Clear update markers
+    void clearUpdateMarkers();
+    
+private:
+    /// @brief Nodes that need updating when PTA changes
+    SVFGNodeSet nodesForUpdate;
+};
+
+} // namespace analysis
+} // namespace lotus

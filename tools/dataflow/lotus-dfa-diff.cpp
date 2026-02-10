@@ -241,6 +241,7 @@ void formatIFDSFactSet(
     raw_ostream &OS, const std::set<Fact> &facts,
     const std::unordered_map<const llvm::Value *, std::string> &ValueToId) {
   std::vector<std::string> formatted;
+  formatted.reserve(facts.size());
   for (const auto &fact : facts) {
     formatted.push_back(formatIFDSFactToString(fact, ValueToId));
   }
@@ -365,6 +366,7 @@ void runEliminationAnalysis(Module &M, const std::string &AnalysisName,
         const auto &InSet = Res.IN(I);
         OS << "  " << ValueToId.at(I) << " IN: ";
         std::vector<std::string> exprs;
+        exprs.reserve(InSet.size());
         for (const auto &expr : InSet) {
           exprs.push_back(formatExpressionKey(expr));
         }

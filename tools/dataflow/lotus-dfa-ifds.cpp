@@ -93,6 +93,7 @@ void formatIFDSFactSet(
     raw_ostream &OS, const std::set<Fact> &facts,
     const std::unordered_map<const llvm::Value *, std::string> &ValueToId) {
   std::vector<std::string> formatted;
+  formatted.reserve(facts.size());
   for (const auto &fact : facts) {
     formatted.push_back(formatIFDSFactToString(fact, ValueToId));
   }

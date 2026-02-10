@@ -74,6 +74,8 @@ int main(int argc, char** argv) {
         case AAType::BasicAA:
             aaManager.registerFunctionAnalysis<BasicAA>();
             break;
+        default:
+            llvm_unreachable("Unknown alias analysis type");
     }
 
     IDAssigner idMap(*module);
