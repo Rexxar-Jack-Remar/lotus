@@ -22,8 +22,8 @@
 #include <functional>
 #include <memory>
 #include <set>
-#include <unordered_set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // Forward declaration
@@ -52,6 +52,13 @@ template<typename Fact> class ExplodedSupergraph;
 // IFDS Core Data Structures
 // ============================================================================
 
+// Helper for fact comparison so clients can specialize (e.g. for types without
+// visible operator< at template instantiation).
+template <typename Fact>
+bool fact_less(const Fact &a, const Fact &b) {
+  return a < b;
+}
+
 template<typename Fact>
 struct PathEdge {
     const llvm::Instruction* start_node;
@@ -70,8 +77,8 @@ struct PathEdge {
     bool operator<(const PathEdge& other) const {
         if (start_node != other.start_node) return start_node < other.start_node;
         if (target_node != other.target_node) return target_node < other.target_node;
-        if (start_fact != other.start_fact) return start_fact < other.start_fact;
-        return target_fact < other.target_fact;
+        if (start_fact != other.start_fact) return fact_less(start_fact, other.start_fact);
+        return fact_less(target_fact, other.target_fact);
     }
 };
 
@@ -100,8 +107,8 @@ struct SummaryEdge {
     }
     bool operator<(const SummaryEdge& other) const {
         if (call_site != other.call_site) return call_site < other.call_site;
-        if (call_fact != other.call_fact) return call_fact < other.call_fact;
-        return return_fact < other.return_fact;
+        if (call_fact != other.call_fact) return fact_less(call_fact, other.call_fact);
+        return fact_less(return_fact, other.return_fact);
     }
 };
 

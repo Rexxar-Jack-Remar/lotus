@@ -10,6 +10,7 @@
 
 #include "Dataflow/IFDS/IFDSFramework.h"
 
+#include <functional>
 #include <map>
 #include <set>
 
@@ -45,17 +46,31 @@ struct UninitVarFact {
   bool operator==(const UninitVarFact &other) const {
     return type == other.type && value == other.value;
   }
+  bool operator!=(const UninitVarFact &other) const {
+    return !(*this == other);
+  }
 
   bool operator<(const UninitVarFact &other) const {
     if (type != other.type)
       return type < other.type;
-    return value < other.value;
+    return std::less<const llvm::Value *>{}(value, other.value);
   }
 
   bool is_zero() const { return type == ZERO; }
   bool is_uninitialized() const { return type == UNINITIALIZED; }
   bool is_initialized() const { return type == INITIALIZED; }
 };
+
+// Specialize fact_less so PathEdge<UninitVarFact> and SummaryEdge<UninitVarFact>
+// can be used in std::set without requiring operator< visible at template
+// instantiation. Uses std::less for pointer comparison.
+template <>
+inline bool fact_less<UninitVarFact>(const UninitVarFact &a,
+                                    const UninitVarFact &b) {
+  if (a.type != b.type)
+    return a.type < b.type;
+  return std::less<const llvm::Value *>{}(a.value, b.value);
+}
 
 } // namespace ifds
 
