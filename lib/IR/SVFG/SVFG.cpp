@@ -359,8 +359,12 @@ void SVFG::swapWith(SVFG &other) {
   swap(mssaVerToNodeMap, other.mssaVerToNodeMap);
   swap(callSiteToActualInMap, other.callSiteToActualInMap);
   swap(callSiteToActualOutMap, other.callSiteToActualOutMap);
+  swap(callSiteToActualParmMap, other.callSiteToActualParmMap);
+  swap(callSiteToActualRetMap, other.callSiteToActualRetMap);
   swap(funcToFormalInMap, other.funcToFormalInMap);
   swap(funcToFormalOutMap, other.funcToFormalOutMap);
+  swap(funcToFormalParmMap, other.funcToFormalParmMap);
+  swap(funcToFormalRetMap, other.funcToFormalRetMap);
   swap(icfg, other.icfg);
   swap(nextNodeId, other.nextNodeId);
   swap(stat, other.stat);

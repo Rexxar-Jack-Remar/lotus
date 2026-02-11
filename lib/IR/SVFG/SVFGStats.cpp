@@ -213,14 +213,27 @@ void SVFGStats::processGraph() {
     for (const SVFGEdge *edge : node->getOutEdges()) {
       totalOutEdge++;
 
-      if (edge->isCallEdge()) {
+      switch (edge->getEdgeKind()) {
+      case SVFGEdgeK::CallDir:
+      case SVFGEdgeK::ParamCall:
+      case SVFGEdgeK::CallAIn:
+      case SVFGEdgeK::CallFIn:
         totalDirCallEdge++;
-      } else if (edge->isRetEdge()) {
-        totalDirRetEdge++;
-      } else if (edge->getEdgeKind() == SVFGEdgeK::CallInd) {
+        break;
+      case SVFGEdgeK::CallInd:
         totalIndCallEdge++;
-      } else if (edge->getEdgeKind() == SVFGEdgeK::RetInd) {
+        break;
+      case SVFGEdgeK::RetDir:
+      case SVFGEdgeK::ParamRet:
+      case SVFGEdgeK::RetAOut:
+      case SVFGEdgeK::RetFOut:
+        totalDirRetEdge++;
+        break;
+      case SVFGEdgeK::RetInd:
         totalIndRetEdge++;
+        break;
+      default:
+        break;
       }
 
       if (!edge->getPointsTo().empty()) {
@@ -236,11 +249,11 @@ void SVFGStats::processGraph() {
     calculateNodeDegrees(node, nodesWithIndInEdge, nodesWithIndOutEdge);
   }
 
-  totalInEdge = totalOutEdge;
-
   if (numNodes > 0) {
     avgInDegree = totalInEdge / numNodes;
     avgOutDegree = totalOutEdge / numNodes;
+    avgIndInDegree = totalIndInEdge / numNodes;
+    avgIndOutDegree = totalIndOutEdge / numNodes;
   }
 }
 
@@ -259,17 +272,32 @@ void SVFGStats::calculateNodeDegrees(const SVFGNode *node,
   uint32_t indInDegree = 0;
   uint32_t indOutDegree = 0;
 
+  auto isIndirectEdge = [](const SVFGEdge *edge) {
+    if (!edge)
+      return false;
+    if (edge->getEdgeKind() == SVFGEdgeK::CallInd ||
+        edge->getEdgeKind() == SVFGEdgeK::RetInd) {
+      return true;
+    }
+    return !edge->getPointsTo().empty();
+  };
+
   for (const SVFGEdge *edge : node->getInEdges()) {
-    if (!edge->isIntraEdge()) {
+    if (isIndirectEdge(edge)) {
       indInDegree++;
+      nodesWithIndInEdge.insert(node);
     }
   }
 
   for (const SVFGEdge *edge : node->getOutEdges()) {
-    if (!edge->isIntraEdge()) {
+    if (isIndirectEdge(edge)) {
       indOutDegree++;
+      nodesWithIndOutEdge.insert(node);
     }
   }
+
+  totalIndInEdge += indInDegree;
+  totalIndOutEdge += indOutDegree;
 
   maxIndInDegree = std::max(maxIndInDegree, indInDegree);
   maxIndOutDegree = std::max(maxIndOutDegree, indOutDegree);

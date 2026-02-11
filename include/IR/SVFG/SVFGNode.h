@@ -36,6 +36,7 @@
 #include "IR/SVFG/SVFGBase.h"
 #include "IR/ICFG/ICFGNode.h"
 #include <llvm/IR/Instructions.h>
+#include <algorithm>
 #include <set>
 #include <vector>
 

@@ -41,6 +41,7 @@
 #include <map>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -84,8 +85,20 @@ using MRVerToNodeMap = std::unordered_map<MemSSAKey, SVFGNode*, MemSSAKeyHash>;
 using CallSiteToActualMap =
     std::unordered_map<const llvm::CallBase *, SVFGNodeSet>;
 
+/// @brief Callsite instruction to actual parameter/return SVFG node set map
+using CallSiteToActualParmMap =
+    std::unordered_map<const llvm::CallBase *, SVFGNodeSet>;
+using CallSiteToActualRetMap =
+    std::unordered_map<const llvm::CallBase *, SVFGNodeSet>;
+
 /// @brief Function to formal-in/out SVFG node set map
 using FuncToFormalMap = std::unordered_map<const llvm::Function*, SVFGNodeSet>;
+
+/// @brief Function to formal parameter/return SVFG node set map
+using FuncToFormalParmMap =
+    std::unordered_map<const llvm::Function *, SVFGNodeSet>;
+using FuncToFormalRetMap =
+    std::unordered_map<const llvm::Function *, SVFGNodeSet>;
 
 /// @brief SVFG statistics
 struct SVFGStat {
@@ -126,12 +139,16 @@ private:
     MRVerToNodeMap mssaVerToNodeMap;
     
     /// @brief Callsite mappings
-    CallSiteToActualMap callSiteToActualInMap;
-    CallSiteToActualMap callSiteToActualOutMap;
+    CallSiteToActualMap callSiteToActualInMap;   // ActualIn (memory)
+    CallSiteToActualMap callSiteToActualOutMap;  // ActualOut (memory)
+    CallSiteToActualParmMap callSiteToActualParmMap;
+    CallSiteToActualRetMap callSiteToActualRetMap;
     
     /// @brief Function mappings
-    FuncToFormalMap funcToFormalInMap;
-    FuncToFormalMap funcToFormalOutMap;
+    FuncToFormalMap funcToFormalInMap;   // FormalIn (memory)
+    FuncToFormalMap funcToFormalOutMap;  // FormalOut (memory)
+    FuncToFormalParmMap funcToFormalParmMap;
+    FuncToFormalRetMap funcToFormalRetMap;
     
     /// @brief Associated ICFG
     const ICFG* icfg;
@@ -148,6 +165,18 @@ public:
     
     /// @brief Destructor
     virtual ~SVFG() {
+        // Delete edges once (they are owned by the graph, but referenced by nodes).
+        std::unordered_set<SVFGEdge*> edges;
+        for (auto& pair : nodeMap) {
+            if (!pair.second) continue;
+            for (SVFGEdge* e : pair.second->getOutEdges()) {
+                edges.insert(e);
+            }
+        }
+        for (SVFGEdge* e : edges) {
+            delete e;
+        }
+
         for (auto& pair : nodeMap) {
             delete pair.second;
         }
@@ -246,6 +275,26 @@ public:
     inline void addActualOut(const llvm::CallBase* cs, SVFGNode* node) {
         callSiteToActualOutMap[cs].insert(node);
     }
+
+    inline const SVFGNodeSet& getActualParms(const llvm::CallBase* cs) const {
+        static SVFGNodeSet empty;
+        auto it = callSiteToActualParmMap.find(cs);
+        return (it != callSiteToActualParmMap.end()) ? it->second : empty;
+    }
+
+    inline const SVFGNodeSet& getActualRets(const llvm::CallBase* cs) const {
+        static SVFGNodeSet empty;
+        auto it = callSiteToActualRetMap.find(cs);
+        return (it != callSiteToActualRetMap.end()) ? it->second : empty;
+    }
+
+    inline void addActualParm(const llvm::CallBase* cs, SVFGNode* node) {
+        callSiteToActualParmMap[cs].insert(node);
+    }
+
+    inline void addActualRet(const llvm::CallBase* cs, SVFGNode* node) {
+        callSiteToActualRetMap[cs].insert(node);
+    }
     
     inline const SVFGNodeSet& getFormalIns(const llvm::Function* f) const {
         static SVFGNodeSet empty;
@@ -265,6 +314,26 @@ public:
     
     inline void addFormalOut(const llvm::Function* f, SVFGNode* node) {
         funcToFormalOutMap[f].insert(node);
+    }
+
+    inline const SVFGNodeSet& getFormalParms(const llvm::Function* f) const {
+        static SVFGNodeSet empty;
+        auto it = funcToFormalParmMap.find(f);
+        return (it != funcToFormalParmMap.end()) ? it->second : empty;
+    }
+
+    inline const SVFGNodeSet& getFormalRets(const llvm::Function* f) const {
+        static SVFGNodeSet empty;
+        auto it = funcToFormalRetMap.find(f);
+        return (it != funcToFormalRetMap.end()) ? it->second : empty;
+    }
+
+    inline void addFormalParm(const llvm::Function* f, SVFGNode* node) {
+        funcToFormalParmMap[f].insert(node);
+    }
+
+    inline void addFormalRet(const llvm::Function* f, SVFGNode* node) {
+        funcToFormalRetMap[f].insert(node);
     }
 
     //===------------------------------------------------------------------===

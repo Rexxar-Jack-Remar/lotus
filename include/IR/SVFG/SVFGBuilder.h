@@ -161,11 +161,17 @@ private:
   /// @brief Global variable to memory region mapping
   std::unordered_map<const llvm::GlobalVariable *, uint32_t> globalToMemReg;
 
-  /// @brief Load instruction to memory use mapping
-  std::unordered_map<const llvm::LoadInst *, uint32_t> loadToMu;
+  /// @brief Load instruction to top-level Load SVFG node mapping
+  std::unordered_map<const llvm::LoadInst *, uint32_t> loadToLoadNode;
 
-  /// @brief Store instruction to memory def mapping
-  std::unordered_map<const llvm::StoreInst *, uint32_t> storeToChi;
+  /// @brief Store instruction to top-level Store SVFG node mapping
+  std::unordered_map<const llvm::StoreInst *, uint32_t> storeToStoreNode;
+
+  /// @brief Load instruction to MemorySSA LoadMu SVFG node mapping
+  std::unordered_map<const llvm::LoadInst *, uint32_t> loadToMuNode;
+
+  /// @brief Store instruction to MemorySSA StoreChi SVFG node mapping
+  std::unordered_map<const llvm::StoreInst *, uint32_t> storeToChiNode;
 
   /// @brief Atomic instruction to memory use/def mapping
   std::unordered_map<const llvm::Instruction *, uint32_t> atomicToMu;
