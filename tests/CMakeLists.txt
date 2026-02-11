@@ -15,7 +15,7 @@ add_definitions(-DCMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 set(COMMON_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/utils ${CMAKE_CURRENT_SOURCE_DIR}/../include ${LLVM_INCLUDE_DIRS})
 # CanaryAliasAnalysisWrapper must come after SifaAnalysis so that getPointsToSet/mayAlias
 # (used by libSifaAnalysis) are pulled in from the wrapper when linking.
-set(COMMON_LIBS ${LLVM_LIBRARIES} GTest::gtest GTest::gtest_main IFDS Annotation CanaryDyckAA LLVMIRReader CanaryPDG Concurrency SymAbs CanaryICFG AserPTA MONODataFlow WPDSDataFlow wpds++ CanaryTypeHirarchy CanaryTransform FailureDirectedTrimming SifaAnalysis CanaryAliasAnalysisWrapper)
+set(COMMON_LIBS ${LLVM_LIBRARIES} GTest::gtest GTest::gtest_main IFDS Annotation CanaryDyckAA LLVMIRReader CanaryPDG Concurrency SymAbs CanaryICFG AserPTA MONODataFlow WPDSDataFlow wpds++ CanaryTypeHirarchy CanaryTransform VerificationTransform FailureDirectedTrimming SifaAnalysis CanaryAliasAnalysisWrapper)
 
 add_library(lotus_test_utils INTERFACE)
 target_include_directories(lotus_test_utils INTERFACE ${COMMON_INCLUDES})

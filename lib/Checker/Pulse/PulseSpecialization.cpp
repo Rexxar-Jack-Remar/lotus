@@ -1,7 +1,7 @@
 #include "Checker/Pulse/PulseSpecialization.h"
 #include "Checker/Pulse/PulseAbductiveDomain.h"
-#include "Checker/Pulse/PulseOperations.h"
 #include "Checker/Pulse/PulseFormula.h"
+#include "Checker/Pulse/PulseOperations.h"
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>

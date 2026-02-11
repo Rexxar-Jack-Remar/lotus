@@ -233,7 +233,6 @@ public:
     case 2:
       return {1};
     case 3:
-      return {};
     default:
       return {};
     }
@@ -248,11 +247,9 @@ public:
   int idom(int Node) const override {
     switch (Node) {
     case 0:
-      return 0;
     case 1:
       return 0;
     case 2:
-      return 1;
     case 3:
       return 1;
     default:

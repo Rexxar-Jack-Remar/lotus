@@ -28,26 +28,30 @@
 
 using namespace llvm;
 
-llvm::cl::opt<std::string> assert_fn("replace-asserts-fn",
-        llvm::cl::desc("Insert a function that marks the header of the loop"),
-        llvm::cl::init("__assert_fail"));
-
-
-
 bool CloneMetadata(const llvm::Instruction *i1, llvm::Instruction *i2);
 
 namespace {
 
-class ReplaceAsserts : public FunctionPass {
+llvm::cl::opt<bool> justRemove("replace-ubsan-just-remove",
+        llvm::cl::desc("Just remove the UBSan checks instead of replacing them with error call\n"),
+        llvm::cl::init(false));
+
+llvm::cl::opt<bool> keepShifts("replace-ubsan-keep-shifts",
+        llvm::cl::desc("Keep checks for shifts (i.e., replace them with error call, the rest of ubsan is removed"),
+        llvm::cl::init(false));
+
+
+
+class ReplaceUBSan : public FunctionPass {
   public:
     static char ID;
 
-    ReplaceAsserts() : FunctionPass(ID) {}
+    ReplaceUBSan() : FunctionPass(ID) {}
 
     virtual bool runOnFunction(Function &F);
 };
 
-bool ReplaceAsserts::runOnFunction(Function &F)
+bool ReplaceUBSan::runOnFunction(Function &F)
 {
   bool modified = false;
   Module *M = F.getParent();
@@ -69,42 +73,53 @@ bool ReplaceAsserts::runOnFunction(Function &F)
       if (!callee || callee->isIntrinsic())
         continue;
 
-      if (!callee->isDeclaration())
-        continue;
-
       assert(callee->hasName());
       StringRef name = callee->getName();
-      if (!name.equals(assert_fn))
+
+      if (!name.startswith("__ubsan_handle"))
         continue;
 
-      if (!ver_err) {
-        LLVMContext& Ctx = M->getContext();
-        auto C = M->getOrInsertFunction("__VERIFIER_error",
-                                        Type::getVoidTy(Ctx)
+      bool isshift = name.startswith("__ubsan_handle_shift");
+
+      if (callee->isDeclaration()) {
+        // just remove ?
+        if (justRemove && (!keepShifts || !isshift)) {
+          CI->eraseFromParent();
+          modified = true;
+          continue;
+        }
+
+        // replace
+        if (!ver_err) {
+          LLVMContext& Ctx = M->getContext();
+          auto C = M->getOrInsertFunction("__VERIFIER_error",
+                                          Type::getVoidTy(Ctx)
 #if LLVM_VERSION_MAJOR < 5
-                                         , nullptr
+                                          , nullptr
 #endif
                                          );
 #if LLVM_VERSION_MAJOR >= 9
-        ver_err = cast<Function>(C.getCallee()->stripPointerCasts());
+          ver_err = cast<Function>(C.getCallee()->stripPointerCasts());
 #else
-        ver_err = cast<Function>(C);
+          ver_err = cast<Function>(C);
 #endif
+        }
+
+        auto *CI2 = CallInst::Create(ver_err);
+        CloneMetadata(CI, CI2);
+
+        CI2->insertAfter(CI);
+        CI->eraseFromParent();
+
+        modified = true;
       }
-
-      auto *CI2 = CallInst::Create(ver_err);
-      CloneMetadata(CI, CI2);
-
-      CI2->insertAfter(CI);
-      CI->eraseFromParent();
-
-      modified = true;
     }
   }
   return modified;
 }
 
-static RegisterPass<ReplaceAsserts> RASS("replace-asserts",
-                                         "Replace assert calls with calls to __VERIFIER_error");
-char ReplaceAsserts::ID;
 } // namespace
+
+static RegisterPass<ReplaceUBSan> RUBS("replace-ubsan",
+                                       "Replace ubsan calls with calls to __VERIFIER_error");
+char ReplaceUBSan::ID;

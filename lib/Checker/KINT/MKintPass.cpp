@@ -3,8 +3,8 @@
 #include "Checker/KINT/Options.h"
 
 #include <llvm/Analysis/AliasAnalysis.h>
-#include <llvm/Analysis/MemorySSA.h>
 #include <llvm/Analysis/MemoryLocation.h>
+#include <llvm/Analysis/MemorySSA.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/CFG.h>
@@ -392,9 +392,9 @@ void MKintPass::smt_solving(Module& M) {
 
         // add function arg constraints (integers + pointers).
         for (auto& arg : F->args()) {
-            const auto arg_name = F->getName() + "." + std::to_string(arg.getArgNo());
+            const std::string arg_name = (F->getName() + "." + std::to_string(arg.getArgNo())).str();
             if (arg.getType()->isIntegerTy()) {
-                const auto argv = m_solver.getValue().ctx().bv_const(arg_name.str().c_str(),
+                const auto argv = m_solver.getValue().ctx().bv_const(arg_name.c_str(),
                                                                     arg.getType()->getIntegerBitWidth());
                 setSym(&arg, argv);
                 m_bug_detection->add_range_cons(
@@ -403,7 +403,7 @@ void MKintPass::smt_solving(Module& M) {
                     m_solver.getValue(),
                     [this](const z3::expr& e) { addConstraint(e); });
             } else if (arg.getType()->isPointerTy()) {
-                const auto argv = m_solver.getValue().ctx().bv_const((arg_name + ".ptr").str().c_str(), m_ptr_bits);
+                const auto argv = m_solver.getValue().ctx().bv_const((arg_name + ".ptr").c_str(), m_ptr_bits);
                 setSym(&arg, argv);
             }
         }
@@ -1327,7 +1327,7 @@ void MKintPass::parseRobustBugFilter(const std::string& csv) {
         size_t end = csv.find(',', start);
         if (end == std::string::npos) end = csv.size();
         auto token = csv.substr(start, end - start);
-        auto trim = [](std::string s) {
+        auto trim = [](const std::string& s) {
             size_t b = s.find_first_not_of(" \t");
             size_t e = s.find_last_not_of(" \t");
             if (b == std::string::npos) return std::string();
@@ -1412,8 +1412,8 @@ bool MKintPass::maybeCheckOOB(const Instruction* at, const Value* ptrOperand, ui
 
     auto& solver = m_solver.getValue();
     auto& ctx = solver.ctx();
-    const auto base = baseOpt.getValue();
-    const auto size = sizeOpt.getValue();
+    const auto& base = baseOpt.getValue();
+    const auto& size = sizeOpt.getValue();
     const auto addr = getPtrExpr(ptrOperand, cur, pred);
     const auto len = ctx.bv_val(accessBytes, m_ptr_bits);
 

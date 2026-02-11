@@ -44,7 +44,7 @@ public:
 
     void interProcedureAnalysis();
 
-    void swap(std::map<Function *, ModRef> &Result) { Result.swap(Func2MR); }
+    void swap(std::map<Function *, ModRef> &Result) noexcept { Result.swap(Func2MR); }
 
 private:
     void runOnFunction(DyckCallGraphNode *);

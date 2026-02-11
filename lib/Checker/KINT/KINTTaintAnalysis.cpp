@@ -271,7 +271,7 @@ void TaintAnalysis::mark_func_sinks(Function& F, SetVector<StringRef>& callback_
             return;
 
         for (auto& inst : instructions(F)) {
-            if (dyn_cast<ReturnInst>(&inst)) {
+            if (isa<ReturnInst>(&inst)) {
                 MKINT_LOG() << "Taint Analysis -> sink: return inst of " << F.getName();
                 mark_sink(inst, "return");
                 callback_tsrc_fn.insert(F.getName());

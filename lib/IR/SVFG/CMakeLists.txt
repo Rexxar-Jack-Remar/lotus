@@ -34,7 +34,7 @@ target_include_directories(SVFG PUBLIC
 # Link dependencies
 # AserPTA is the default pointer analysis (lib/Alias/AserPTA)
 target_link_libraries(SVFG PUBLIC
-    ICFG
+    CanaryICFG
     AserPTA
     LLVMCore
     LLVMSupport

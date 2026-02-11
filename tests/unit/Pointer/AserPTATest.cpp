@@ -16,11 +16,11 @@
 #include "Alias/AserPTA/PreProcessing/Passes/LoweringMemCpyPass.h"
 #include "Alias/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
 
-#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/SourceMgr.h>
+#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace aser;

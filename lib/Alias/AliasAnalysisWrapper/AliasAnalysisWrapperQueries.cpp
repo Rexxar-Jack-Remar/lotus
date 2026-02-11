@@ -12,6 +12,7 @@
  */
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/DDA/DemandDrivenAA.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/SparrowAA/AndersenAA.h"
 #include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
@@ -195,7 +196,11 @@ bool AliasAnalysisWrapper::mayNull(const Value *v) {
 bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr, std::vector<const Value *> &ptsSet) {
   if (!ptr || !ptr->getType()->isPointerTy()) return false;
   ptsSet.clear();
-  return _andersen_aa && _initialized && _andersen_aa->getPointsToSet(ptr, ptsSet);
+  if (_andersen_aa && _initialized && _andersen_aa->getPointsToSet(ptr, ptsSet))
+    return true;
+  if (_dda_aa && _initialized && _dda_aa->getPointsToSet(ptr, ptsSet))
+    return true;
+  return false;
 }
 
 bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr, size_t &outSize) {
@@ -216,6 +221,14 @@ bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr, size_t &outSize)
     tpa::PtsSet pts = _tpa_aa->getPtsSet(stripped);
     outSize = pts.size();
     return true;
+  }
+  if (_dda_aa) {
+    std::vector<const Value *> ptsSet;
+    if (_dda_aa->getPointsToSet(ptr, ptsSet)) {
+      outSize = ptsSet.size();
+      return true;
+    }
+    return false;
   }
   return false;
 }

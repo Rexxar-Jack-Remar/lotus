@@ -27,10 +27,10 @@ class CompareInst : public Instruction {
   }
 
   void setOperands(std::vector<std::shared_ptr<framework::Value>> operand);
-  void replaceOperand(std::shared_ptr<framework::Value> operand,
-                      std::shared_ptr<framework::Value> new_operand);
-  bool operandExists(std::shared_ptr<framework::Value> value);
-  bool operandExists(std::shared_ptr<framework::CallInst> call_inst);
+  void replaceOperand(const std::shared_ptr<framework::Value>& operand,
+                      const std::shared_ptr<framework::Value>& new_operand);
+  bool operandExists(const std::shared_ptr<framework::Value>& value);
+  bool operandExists(const std::shared_ptr<framework::CallInst>& call_inst);
   bool returnValueOperandExists();
 
   std::shared_ptr<framework::Value> find_if(
@@ -84,9 +84,9 @@ class BranchInst : public Instruction {
   }
 
   void setTransitionNode(int64_t code,
-                         std::shared_ptr<framework::BasicBlock> block);
+                         const std::shared_ptr<framework::BasicBlock>& block);
 
-  bool isInOperand(std::shared_ptr<framework::Value> value);
+  bool isInOperand(const std::shared_ptr<framework::Value>& value);
   bool returnValueOperandExists();
   TransitionNodes TruePathNodes() { return nodes_[kTrueTransition]; };
   TransitionNodes FalsePathNodes() { return nodes_[kFalseTransition]; };

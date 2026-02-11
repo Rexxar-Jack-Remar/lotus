@@ -4,6 +4,7 @@
 namespace UseAfterFree {
 class OneshotCallConstraint : public framework::StatefulConstraint {
  public:
+virtual ~OneshotCallConstraint() = default;
   bool shouldPropagateOnCallInst(
       std::shared_ptr<framework::CallInst> inst) override {
     std::shared_ptr<framework::Function> called_func = inst->CalledFunction();

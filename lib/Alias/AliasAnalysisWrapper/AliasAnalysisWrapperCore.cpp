@@ -11,6 +11,7 @@
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/AllocAA/AllocAA.h"
+#include "Alias/DDA/DemandDrivenAA.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/SparrowAA/AndersenAA.h"
 #include "Alias/TPA/Context/ContextPolicy.h"
@@ -195,6 +196,13 @@ void AliasAnalysisWrapper::initialize() {
     }, _config.getName().c_str());
     break;
   }
+
+  case AAConfig::Implementation::DDA:
+    _initialized = initAA([this]{
+      _dda_aa = std::make_unique<lotus::analysis::DemandDrivenAA>();
+      _dda_aa->run(*_module);
+    }, _config.getName().c_str());
+    break;
   
   case AAConfig::Implementation::DyckAA:
     _initialized = initAA([this]{ 
@@ -319,6 +327,10 @@ std::string AAConfig::getName() const {
     } else {
       oss << "(NoCtx)";
     }
+    break;
+
+  case Implementation::DDA:
+    oss << "DDA(NoCtx)";
     break;
     
   case Implementation::DyckAA:

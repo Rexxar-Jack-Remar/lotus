@@ -920,7 +920,7 @@ void RangeAnalysis::print_all_ranges(
       for (const auto &val_rng_pair : inst2rng) {
         const auto *val = val_rng_pair.first;
         auto rng = val_rng_pair.second;
-        if (dyn_cast<ConstantInt>(val))
+        if (isa<ConstantInt>(val))
           continue; // meaningless to pring const range.
 
         if (rng.isFullSet())

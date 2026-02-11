@@ -4,6 +4,7 @@
 
 class TryLockConstraint : public framework::StatefulConstraint {
  public:
+virtual ~TryLockConstraint() = default;
   bool shouldPropagateOnCallInst(
       std::shared_ptr<framework::CallInst> inst) override {
     std::shared_ptr<framework::Function> called_func = inst->CalledFunction();

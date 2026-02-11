@@ -1,10 +1,10 @@
+#include <gtest/gtest.h>
 #include <Dataflow/IFDS/Clients/IDEExtendedTaintAnalysis.h>
 #include <Dataflow/IFDS/Clients/IDEFeatureTaintAnalysis.h>
 #include <Dataflow/IFDS/Clients/IDEGeneralizedLCA.h>
 #include <Dataflow/IFDS/Clients/IDEInstInteractionAnalysis.h>
 #include <Dataflow/IFDS/Clients/IDESecureHeapPropagation.h>
 #include <Dataflow/IFDS/Solvers/IDESolver.h>
-#include <gtest/gtest.h>
 
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Function.h>
@@ -107,7 +107,7 @@ TEST_F(IDENewAnalysesTest, InstInteractionMarksLoadAsRead) {
   auto *Main =
       llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage, "main", M.get());
 
-  auto argIt = Main->arg_begin();
+  auto *argIt = Main->arg_begin();
   llvm::Value *PtrArg = &*argIt;
 
   auto *Entry = llvm::BasicBlock::Create(*Ctx, "entry", Main);

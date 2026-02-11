@@ -15,6 +15,7 @@ namespace llvm { class CFLAndersAAWrapperPass; class CFLSteensAAWrapperPass; }
 namespace seadsa { class SeaDsaAAResult; }
 namespace UnderApprox { class UnderApproxAA; }
 namespace tpa { class SemiSparsePointerAnalysis; class SemiSparseProgram; }
+namespace lotus { namespace analysis { class DemandDrivenAA; } }
 
 namespace lotus {
 
@@ -38,6 +39,9 @@ struct AAConfig {
     
     // TPA: Flow- and context-sensitive semi-sparse pointer analysis
     TPA,
+
+    // DDA: Demand-driven pointer analysis on SVFG
+    DDA,
     
     // DyckAA: Dyck-CFL reachability based alias analysis
     DyckAA,
@@ -177,6 +181,11 @@ struct AAConfig {
   static AAConfig TPA_Selective(unsigned k = 1) {
     return {Implementation::TPA, ContextSensitivity::Adaptive, k, true, Solver::Default};
   }
+
+  // DDA (demand-driven on SVFG)
+  static AAConfig DDA_NoCtx() {
+    return {Implementation::DDA, ContextSensitivity::None, 0, true, Solver::Default};
+  }
   
   // Other analyses (no context sensitivity)
   static AAConfig DyckAA() {
@@ -305,6 +314,7 @@ private:
   std::unique_ptr<llvm::CFLAndersAAWrapperPass> _cflanders_pass;
   std::unique_ptr<llvm::CFLSteensAAWrapperPass> _cflsteens_pass;
   std::unique_ptr<AllocAA> _alloc_aa;
+  std::unique_ptr<lotus::analysis::DemandDrivenAA> _dda_aa;
   std::unique_ptr<tpa::SemiSparsePointerAnalysis> _tpa_aa;
   std::unique_ptr<tpa::SemiSparseProgram> _tpa_program;
   

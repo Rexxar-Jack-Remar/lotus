@@ -162,6 +162,8 @@ private:
 
     /// @brief Debug labels for abstract objects used in points-to sets.
     std::unordered_map<uint32_t, std::string> objectDebug;
+    std::unordered_map<uint32_t, const llvm::Value *> objIdToValue;
+    std::unordered_map<const llvm::Value *, uint32_t> valueToObjId;
     std::unordered_map<uint32_t, std::string> nodeFunctionDebug;
     std::unordered_map<uint32_t, std::string> nodeCallSiteDebug;
 
@@ -373,6 +375,15 @@ public:
         return objectDebug;
     }
 
+    /// @brief Map object ID (from edge pointsTo) to allocation-site Value*.
+    /// Populated by the builder when PTA objects have getValue().
+    /// Used by DDA for indirect-edge filtering and result conversion.
+    void setObjectValue(uint32_t objId, const llvm::Value *v);
+    /// @brief Return allocation-site Value* for objId, or nullptr if unknown.
+    const llvm::Value *getObjectValue(uint32_t objId) const;
+    /// @brief Return object ID for allocation-site Value* v, or 0 if unknown.
+    uint32_t getObjectId(const llvm::Value *v) const;
+
     inline void setNodeFunctionDebug(uint32_t nodeId, std::string label) {
         nodeFunctionDebug[nodeId] = std::move(label);
     }
@@ -411,7 +422,17 @@ public:
     
     /// @brief Check if path exists between two nodes
     bool hasPath(SVFGNode* src, SVFGNode* dst) const;
-    
+
+    /// @brief Get intra-procedural VFG edge from src to dst with given kind.
+    /// Used by DDA to find the direct edge from load/store pointer def to load/store.
+    /// Returns nullptr if no such edge exists.
+    SVFGEdge* getIntraVFGEdge(const SVFGNode* src, const SVFGNode* dst, SVFGEdgeK kind) const;
+
+    /// @brief Get the "LHS" node for direct value flow: the node that defines
+    /// the value flowing out of \p node. For stmt/phi/param nodes this is the node itself.
+    /// Used by DDA for backtraceAlongDirectVF.
+    SVFGNode* getLHSTopLevPtr(SVFGNode* node) const;
+
     /// @brief Dump to DOT format
     void dump(const std::string& filename) const;
 

@@ -134,6 +134,11 @@ AAConfig lotus::parseAAConfigFromString(const std::string &str, const AAConfig &
     return AAConfig::AserPTA_Origin();
   }
   
+  // DDA (demand-driven on SVFG)
+  if (lower == "dda" || lower == "demand-driven" || lower == "demanddriven") {
+    return AAConfig::DDA_NoCtx();
+  }
+  
   // TPA variants
   if (lower == "tpa" || lower == "tpa-0cfa") {
     return AAConfig::TPA_NoCtx();

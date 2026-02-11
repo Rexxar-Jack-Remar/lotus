@@ -2931,9 +2931,11 @@ SVFGNodeBS SVFGBuilder::convertPTAObjectsToObjIDs(
     ptaObjectToObjId.emplace(v, objId);
     result.insert(objId);
 
-    // Register stable debug label (best-effort).
+    // Register stable debug label and objId <-> Value* for DDA.
     if (svfg) {
       svfg->setObjectDebug(objId, obj->toString(false));
+      if (const Value *val = obj->getValue())
+        svfg->setObjectValue(objId, val);
     }
   }
 

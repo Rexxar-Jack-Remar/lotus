@@ -1,5 +1,5 @@
-#include <Dataflow/IFDS/Solvers/IDESolver.h>
 #include <gtest/gtest.h>
+#include <Dataflow/IFDS/Solvers/IDESolver.h>
 
 namespace ifds {
 namespace {

@@ -1,5 +1,5 @@
-#include <Dataflow/IFDS/Solvers/IDESolver.h>
 #include <gtest/gtest.h>
+#include <Dataflow/IFDS/Solvers/IDESolver.h>
 
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
@@ -114,7 +114,7 @@ TEST(IDEJumpFunctionJoinTest, JoinsFunctionsFromDistinctPaths) {
   auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "main",
                                    M.get());
 
-  auto argIt = F->arg_begin();
+  auto *argIt = F->arg_begin();
   llvm::Value *Cond = &*argIt;
 
   auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", F);

@@ -204,6 +204,25 @@ void SVFG::removeEdge(SVFGEdge *edge) {
   delete edge;
 }
 
+void SVFG::setObjectValue(uint32_t objId, const llvm::Value *v) {
+  if (objId == 0 || !v)
+    return;
+  objIdToValue[objId] = v;
+  valueToObjId[v] = objId;
+}
+
+const llvm::Value *SVFG::getObjectValue(uint32_t objId) const {
+  auto it = objIdToValue.find(objId);
+  return (it != objIdToValue.end()) ? it->second : nullptr;
+}
+
+uint32_t SVFG::getObjectId(const llvm::Value *v) const {
+  if (!v)
+    return 0;
+  auto it = valueToObjId.find(v);
+  return (it != valueToObjId.end()) ? it->second : 0;
+}
+
 void SVFG::removeNode(SVFGNode *node) {
   if (!node)
     return;
@@ -466,6 +485,29 @@ bool SVFG::hasPath(SVFGNode *src, SVFGNode *dst) const {
   return false;
 }
 
+SVFGEdge *SVFG::getIntraVFGEdge(const SVFGNode *src, const SVFGNode *dst,
+                                SVFGEdgeK kind) const {
+  if (!src || !dst)
+    return nullptr;
+  for (SVFGEdge *edge : dst->getInEdges()) {
+    if (edge->getSrcNode() == src && edge->getEdgeKind() == kind)
+      return edge;
+  }
+  return nullptr;
+}
+
+SVFGNode *SVFG::getLHSTopLevPtr(SVFGNode *node) const {
+  if (!node)
+    return nullptr;
+  // For stmt/phi/param nodes the LHS (the value defined) is the node itself.
+  if (node->isStmtNode() || node->isPhiNode() || node->isParamNode())
+    return node;
+  // For memory SSA nodes the "LHS" is the node (it defines a memory version).
+  if (node->isMemNode())
+    return node;
+  return node;
+}
+
 void SVFG::dump(const std::string &filename) const {
   (void)SVFGSerializer::writeDot(*this, filename);
 }
@@ -513,6 +555,8 @@ void SVFG::swapWith(SVFG &other) {
   swap(nextNodeId, other.nextNodeId);
   swap(stat, other.stat);
   swap(objectDebug, other.objectDebug);
+  swap(objIdToValue, other.objIdToValue);
+  swap(valueToObjId, other.valueToObjId);
   swap(nodeFunctionDebug, other.nodeFunctionDebug);
   swap(nodeCallSiteDebug, other.nodeCallSiteDebug);
   swap(nodesForUpdate, other.nodesForUpdate);

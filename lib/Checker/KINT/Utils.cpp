@@ -13,7 +13,7 @@ int64_t get_id(llvm::Instruction* inst) {
         if (!std::isdigit(c)) continue;
         v = v * 10 + c - '0';
     }
-    return v;
+    return static_cast<int64_t>(v);
 }
 
 } // namespace kint

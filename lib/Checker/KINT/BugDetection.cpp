@@ -306,8 +306,6 @@ void BugDetection::binary_check(
   case Instruction::And:
   case Instruction::Or:
   case Instruction::Xor:
-    break;
-
   default:
     break;
   }

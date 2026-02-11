@@ -7,9 +7,9 @@ At first glance, the abstract domains have overlap. However, it
 lib/Solvers/SMT/SymAbs, we actually use linear integer formulas to "approximate" bit-vector formulas, which can be unintuitive.
 
 */
+#include "Solvers/SMT/SymAbs/SymbolicAbstraction.h"
 #include <gtest/gtest.h>
 #include <z3++.h>
-#include "Solvers/SMT/SymAbs/SymbolicAbstraction.h"
 
 using namespace z3;
 

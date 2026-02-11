@@ -106,13 +106,13 @@ bool applyIntegerIcmpConstraint(PulseFormula &formula,
   const llvm::Value *rhs_v = rhs.getValue();
   const llvm::Value *lhs_v = lhs.getValue();
 
-  bool rhs_is_const = rhs_v && llvm::isa<llvm::ConstantInt>(rhs_v);
-  bool lhs_is_const = lhs_v && llvm::isa<llvm::ConstantInt>(lhs_v);
+  bool rhs_is_const = llvm::isa_and_nonnull<llvm::ConstantInt>(rhs_v);
+  bool lhs_is_const = llvm::isa_and_nonnull<llvm::ConstantInt>(lhs_v);
   if (lhs_is_const && !rhs_is_const) {
     std::swap(lhs, rhs);
     std::swap(lhs_v, rhs_v);
     p = swapIcmpSides(p);
-    rhs_is_const = rhs_v && llvm::isa<llvm::ConstantInt>(rhs_v);
+    rhs_is_const = llvm::isa_and_nonnull<llvm::ConstantInt>(rhs_v);
   }
 
   if (p == P::ICMP_EQ)

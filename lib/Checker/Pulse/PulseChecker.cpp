@@ -621,12 +621,7 @@ PulseChecker::runCallee(const llvm::Function *callee,
     // disjunctive entry states arrive at the same block. A union-style merge can
     // fabricate heap facts and admit non-witnessable bug paths. Prefer keeping a
     // representative witness state.
-    ExecutionDomain block_state;
-    if (entry_states.size() == 1) {
-      block_state = std::move(entry_states[0]);
-    } else {
-      block_state = std::move(entry_states[0]);
-    }
+    ExecutionDomain block_state = std::move(entry_states[0]);
 
     if (block_state.isStopped())
       continue;
