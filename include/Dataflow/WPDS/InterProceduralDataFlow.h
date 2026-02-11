@@ -7,13 +7,15 @@
 #include "Solvers/WPDS/WPDS.h"
 #include "Solvers/WPDS/key_source.h"
 #include "Solvers/WPDS/keys.h"
-#include "Solvers/WPDS/semiring.h"
 #include "Solvers/WPDS/ref_ptr.h"
+#include "Solvers/WPDS/semiring.h"
+#include "llvm/ADT/Optional.h"
 #include <functional>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 
 namespace wpds {
 
@@ -198,6 +200,7 @@ private:
     std::map<Function*, wpds::wpds_key_t> functionToKey;          // function entry keys
     std::map<Function*, wpds::wpds_key_t> functionExitToKey;      // function exit keys
     std::map<Instruction*, wpds::wpds_key_t> instToKey;
+    std::map<Instruction*, wpds::wpds_key_t> instPrevKey;         // program point key before inst
     std::map<BasicBlock*, wpds::wpds_key_t> bbToKey;
     std::map<wpds::wpds_key_t, Instruction*> keyToInst;
 
@@ -205,8 +208,7 @@ private:
     mutable std::unique_ptr<mono::DataFlowResult> currentResult;
     std::unique_ptr<wpds::CA<GenKillTransformer>> lastResultCA;
     Query lastQuery = Query::user();
-    wpds::wpds_key_t lastAcceptState = WPDS_EPSILON;
-    bool hasLastAcceptState = false;
+    llvm::Optional<wpds::wpds_key_t> lastAcceptState;
 
     // Single WPDS control state shared by rules and the initial automaton
     wpds::wpds_key_t controlState;

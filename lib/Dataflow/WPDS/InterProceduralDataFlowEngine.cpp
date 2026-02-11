@@ -9,6 +9,7 @@
 #ifdef WITNESS_TRACE
 #include "Solvers/WPDS/Witness.h"
 #endif
+#include "llvm/ADT/Optional.h"
 #include <sstream>
 #include <unordered_map>
 
@@ -72,8 +73,7 @@ std::unique_ptr<mono::DataFlowResult> InterProceduralDataFlowEngine::runAnalysis
 
     // Build initial configuration automaton (in-place)
     CA<GenKillTransformer> resultCA(semiring);
-    hasLastAcceptState = false;
-    lastAcceptState = WPDS_EPSILON;
+    lastAcceptState = llvm::None;
     buildInitialCA(resultCA);
 
     // Run saturation algorithm
@@ -123,20 +123,51 @@ void InterProceduralDataFlowEngine::buildWPDS(
     functionToKey.clear();
     functionExitToKey.clear();
     instToKey.clear();
+    instPrevKey.clear();
     bbToKey.clear();
     keyToInst.clear();
+
+    auto functionTag = [&](Function& F) -> std::string {
+        std::string fname = F.getName().str();
+        if (fname.empty()) {
+            fname = "anon";
+        }
+        return fname + "_" + std::to_string((uintptr_t)&F);
+    };
+
+    auto bbTag = [&](Function& F, BasicBlock& BB) -> std::string {
+        std::string name = BB.getName().str();
+        if (name.empty()) {
+            name = "bb";
+        }
+        return functionTag(F) + "_bb_" + name + "_" + std::to_string((uintptr_t)&BB);
+    };
+
+    auto instTag = [&](Function& F, Instruction& I) -> std::string {
+        std::string name = I.getName().str();
+        if (name.empty()) {
+            name = "inst";
+        }
+        return functionTag(F) + "_i_" + name + "_" + std::to_string((uintptr_t)&I);
+    };
+
+    auto retTag = [&](Function& F, Instruction& callI) -> std::string {
+        return functionTag(F) + "_ret_" + std::to_string((uintptr_t)&callI);
+    };
+
+    auto ensureExitPopRule = [&](wpds_key_t exitKey) {
+        // Pop the callee-exit symbol to reveal the return-site symbol below.
+        // Safe to add redundantly; WPDS will combine/ignore duplicates.
+        wpds.add_rule(controlState, exitKey, controlState, GenKillTransformer::one());
+    };
 
     // First pass: Create function entry and exit keys for all functions
     for (auto& F : m) {
         if (F.isDeclaration()) continue;
-        
-        std::string fname = F.getName().str();
-        if (fname.empty()) {
-            fname = "func_" + std::to_string((uintptr_t)&F);
-        }
-        
-        wpds_key_t funcEntry = new_str2key(("entry_" + fname).c_str());
-        wpds_key_t funcExit = new_str2key(("exit_" + fname).c_str());
+
+        const std::string ftag = functionTag(F);
+        wpds_key_t funcEntry = new_str2key(("entry_" + ftag).c_str());
+        wpds_key_t funcExit = new_str2key(("exit_" + ftag).c_str());
         functionToKey[&F] = funcEntry;
         functionExitToKey[&F] = funcExit;
         
@@ -152,11 +183,8 @@ void InterProceduralDataFlowEngine::buildWPDS(
         
         // Map basic blocks to keys
         for (auto& BB : F) {
-            std::string bbName = BB.getName().str();
-            if (bbName.empty()) {
-                bbName = "bb_" + std::to_string((uintptr_t)&BB);
-            }
-            wpds_key_t bbKey = new_str2key(bbName.c_str());
+            const std::string btag = bbTag(F, BB);
+            wpds_key_t bbKey = new_str2key(btag.c_str());
             bbToKey[&BB] = bbKey;
         }
         
@@ -173,19 +201,16 @@ void InterProceduralDataFlowEngine::buildWPDS(
         for (auto& BB : F) {
             wpds_key_t bbKey = bbToKey[&BB];
             
-            Instruction* prevInst = nullptr;
             wpds_key_t prevKey = bbKey;
             
             // Process instructions in the basic block
             for (auto& I : BB) {
                 // Create instruction key
-                std::string instName = I.getName().str();
-                if (instName.empty()) {
-                    instName = "inst_" + std::to_string((uintptr_t)&I);
-                }
-                wpds_key_t instKey = new_str2key(instName.c_str());
+                const std::string itag = instTag(F, I);
+                wpds_key_t instKey = new_str2key(itag.c_str());
                 instToKey[&I] = instKey;
                 keyToInst[instKey] = &I;
+                instPrevKey[&I] = prevKey;
                 
                 // Create transformer for this instruction
                 GenKillTransformer* transformer = createTransformer(&I);
@@ -202,68 +227,105 @@ void InterProceduralDataFlowEngine::buildWPDS(
                 // Handle different instruction types
                 if (auto* callInst = dyn_cast<CallBase>(&I)) {
                     const auto callees = interCfg.getCalleesOfCallAt(callInst);
-                    Function* calledFunc = nullptr;
-                    if (!callees.empty()) {
-                        calledFunc = callees.front();
-                    }
-                    if (calledFunc && !calledFunc->isDeclaration() &&
-                        functionToKey.find(calledFunc) != functionToKey.end()) {
-                        
+
+                    bool hasModeledCallee = false;
+                    bool hasUnmodeledCallee = callees.empty();
+
+                    // Create a single, callsite-specific return symbol to represent the return site.
+                    // (All possible callees return to the same point.)
+                    llvm::Optional<wpds_key_t> returnKeyOpt;
+                    auto getReturnKey = [&]() -> wpds_key_t {
+                        if (returnKeyOpt.hasValue()) {
+                            return *returnKeyOpt;
+                        }
+                        wpds_key_t rk = new_str2key(retTag(F, I).c_str());
+                        returnKeyOpt = rk;
+                        return rk;
+                    };
+
+                    for (Function* calledFunc : callees) {
+                        if (!calledFunc || calledFunc->isDeclaration() ||
+                            functionToKey.find(calledFunc) == functionToKey.end()) {
+                            hasUnmodeledCallee = true;
+                            continue;
+                        }
+
+                        hasModeledCallee = true;
+
                         // Interprocedural call: <q, instKey> -> <q, calledEntry, returnKey>
                         wpds_key_t calledEntry = functionToKey[calledFunc];
                         wpds_key_t calledExit = functionExitToKey[calledFunc];
-                        
-                        std::string returnName = "ret_" + instName;
-                        wpds_key_t returnKey = new_str2key(returnName.c_str());
-                        
-                        // Call rule: push callee and return point
-                        // Map Arguments -> Parameters
+                        wpds_key_t returnKey = getReturnKey();
+
+                        // Call rule weight maps actuals to formals.
                         std::map<Value*, DataFlowFacts> paramFlow;
                         unsigned argIdx = 0;
-                        for (auto& arg : calledFunc->args()) {
+                        for (auto& formal : calledFunc->args()) {
                             if (argIdx < callInst->arg_size()) {
                                 Value* actual = callInst->getArgOperand(argIdx);
-                                if (!paramFlow.count(actual)) paramFlow[actual] = DataFlowFacts::EmptySet();
-                                paramFlow[actual].addFact(&arg);
+                                if (!paramFlow.count(actual)) {
+                                    paramFlow[actual] = DataFlowFacts::EmptySet();
+                                }
+                                paramFlow[actual].addFact(&formal);
                             }
                             argIdx++;
                         }
-                        
-                        // Create call transformer (Identity + Param Flow)
                         GenKillTransformer* callTrans = GenKillTransformer::makeGenKillTransformer(
-                            DataFlowFacts::EmptySet(), 
-                            DataFlowFacts::EmptySet(), 
-                            paramFlow
-                        );
+                            DataFlowFacts::EmptySet(),
+                            DataFlowFacts::EmptySet(),
+                            paramFlow);
 
-                        wpds.add_rule(controlState, instKey, 
-                                    controlState, calledEntry, returnKey,
-                                    callTrans);
-                        
-                        // Return-flow mapping: callee return value -> callsite value
+                        wpds.add_rule(controlState, instKey,
+                                      controlState, calledEntry, returnKey,
+                                      callTrans);
+
+                        // Return-flow mapping: any returned SSA value in the callee can flow to the call result.
                         std::map<Value*, DataFlowFacts> retFlow;
                         if (!callInst->getType()->isVoidTy()) {
-                            if (!retFlow.count(calledFunc)) retFlow[calledFunc] = DataFlowFacts::EmptySet();
-                            retFlow[calledFunc].addFact(callInst);
+                            for (auto& calleeBB : *calledFunc) {
+                                if (auto* RI = dyn_cast<ReturnInst>(calleeBB.getTerminator())) {
+                                    Value* rv = RI->getReturnValue();
+                                    if (rv == nullptr) {
+                                        continue;
+                                    }
+                                    if (!retFlow.count(rv)) {
+                                        retFlow[rv] = DataFlowFacts::EmptySet();
+                                    }
+                                    retFlow[rv].addFact(callInst);
+                                }
+                            }
                         }
-
                         GenKillTransformer* retTrans = GenKillTransformer::makeGenKillTransformer(
-                            DataFlowFacts::EmptySet(), 
-                            DataFlowFacts::EmptySet(), 
-                            retFlow
-                        );
+                            DataFlowFacts::EmptySet(),
+                            DataFlowFacts::EmptySet(),
+                            retFlow);
 
-                        // At function exit, pop the exit symbol to reveal the return site below.
-                        // This encodes the exit-to-return-site edge.
-                        wpds.add_rule(controlState, calledExit,
-                                      controlState,
-                                      GenKillTransformer::one());
+                        // Ensure the standard exit-pop rule exists for the callee.
+                        ensureExitPopRule(calledExit);
 
                         // Apply return-flow at the return site before the next instruction.
-                        returnSiteTransformers[returnKey] = ::ref_ptr<GenKillTransformer>(retTrans);
+                        auto existing = returnSiteTransformers.find(returnKey);
+                        if (existing == returnSiteTransformers.end()) {
+                            returnSiteTransformers[returnKey] = ::ref_ptr<GenKillTransformer>(retTrans);
+                        } else {
+                            returnSiteTransformers[returnKey] =
+                                ::ref_ptr<GenKillTransformer>(existing->second.get_ptr()->combine(retTrans));
+                        }
+                    }
 
-                        // For terminator calls (e.g., invoke/callbr), connect return-site
-                        // continuations through CFG to successor basic blocks.
+                    // If the call has any modeled callee, we need an explicit return-site symbol.
+                    // Also, for mixed/unknown callees, add a conservative direct edge to the return site.
+                    if (hasModeledCallee) {
+                        wpds_key_t returnKey = getReturnKey();
+                        if (hasUnmodeledCallee) {
+                            wpds.add_rule(controlState, instKey,
+                                          controlState, returnKey,
+                                          GenKillTransformer::one());
+                        }
+
+                        // For terminator calls (e.g., invoke/callbr), connect return-site continuations
+                        // through CFG to successor basic blocks. For unmodeled calls we fall back to
+                        // instKey as the continuation point.
                         if (I.isTerminator()) {
                             for (auto* retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
                                 if (retSite == nullptr) {
@@ -278,10 +340,25 @@ void InterProceduralDataFlowEngine::buildWPDS(
                                               bbIt->second, GenKillTransformer::one());
                             }
                         }
-                        
+
                         prevKey = returnKey;
-                        prevInst = &I;
                         continue;
+                    }
+
+                    // No modeled callee: still handle terminator-call CFG edges (invoke/callbr).
+                    if (I.isTerminator()) {
+                        for (auto* retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
+                            if (retSite == nullptr) {
+                                continue;
+                            }
+                            auto* retBB = retSite->getParent();
+                            auto bbIt = bbToKey.find(retBB);
+                            if (bbIt == bbToKey.end()) {
+                                continue;
+                            }
+                            wpds.add_rule(controlState, instKey, controlState,
+                                          bbIt->second, GenKillTransformer::one());
+                        }
                     }
                 }
                 
@@ -291,13 +368,11 @@ void InterProceduralDataFlowEngine::buildWPDS(
                                 controlState, funcExit,
                                 GenKillTransformer::one());
                     prevKey = instKey;
-                    prevInst = &I;
                     continue;
                 }
                 
                 // Regular instruction - continue to next
                 prevKey = instKey;
-                prevInst = &I;
             }
             
             // Connect terminator to successor basic blocks
@@ -332,26 +407,29 @@ void InterProceduralDataFlowEngine::buildInitialAutomaton(
     
     wpds_key_t acceptState = str2key("accept");
     lastAcceptState = acceptState;
-    hasLastAcceptState = true;
     
     ca.add_initial_state(controlState);
     ca.add_final_state(acceptState);
     
     if (isForward) {
-        // For forward analysis: start from main function entry
+        // For forward analysis: start from main if present, otherwise seed all entries.
         Function* mainFn = nullptr;
         for (auto& F : m) {
             if (F.isDeclaration()) continue;
-            if (F.getName() == "main") { mainFn = &F; break; }
-            if (!mainFn) mainFn = &F; // fallback to first defined function
+            if (F.getName() == "main") {
+                mainFn = &F;
+                break;
+            }
         }
+        GenKillTransformer* initTrans = GenKillTransformer::makeGenKillTransformer(
+            DataFlowFacts::EmptySet(),
+            DataFlowFacts(initialFacts));
         if (mainFn) {
-            wpds_key_t mainEntry = functionToKey[mainFn];
-            GenKillTransformer* initTrans = GenKillTransformer::makeGenKillTransformer(
-                DataFlowFacts::EmptySet(),
-                DataFlowFacts(initialFacts)
-            );
-            ca.add(controlState, mainEntry, acceptState, initTrans);
+            ca.add(controlState, functionToKey[mainFn], acceptState, initTrans);
+        } else {
+            for (auto& kv : functionToKey) {
+                ca.add(controlState, kv.second, acceptState, initTrans);
+            }
         }
     } else {
         // For backward analysis: start from all exit points
@@ -413,78 +491,75 @@ void InterProceduralDataFlowEngine::extractResults(
     CA<GenKillTransformer>& resultCA,
     std::unique_ptr<mono::DataFlowResult>& result,
     bool isForward) {
-    ::dataflow::controlflow::LLVMIntraCFG intraCfg;
+    (void)m;
+    (void)isForward;
     
-    // First, compute OUT sets directly from WPDS weights; then derive IN.
     wpds_key_t queryInit = resultCA.initial_state();
     if (queryInit == WPDS_EPSILON) {
         queryInit = controlState;
     }
+
+    // Cache value-at-symbol queries to avoid repeated reglang_query work.
+    struct KeyQueryResult {
+        std::set<Value*> facts;
+        llvm::Optional<std::set<Value*>> gen;
+        llvm::Optional<std::set<Value*>> kill;
+    };
+    std::unordered_map<wpds_key_t, KeyQueryResult> cache;
+
+    auto querySymbol = [&](wpds_key_t sym, bool wantGenKill) -> const KeyQueryResult& {
+        auto it = cache.find(sym);
+        if (it != cache.end() && (!wantGenKill || (it->second.gen.hasValue() && it->second.kill.hasValue()))) {
+            return it->second;
+        }
+
+        // Query the regular language consisting of the single stack symbol `sym`.
+        CA<GenKillTransformer> lang(resultCA.semiring());
+        wpds_key_t qf = new_str2key(("query_final_" + std::to_string((uintptr_t)sym)).c_str());
+        lang.add_initial_state(queryInit);
+        lang.add_final_state(qf);
+        lang.add(queryInit, sym, qf, GenKillTransformer::one());
+
+        auto pathSummary = resultCA.reglang_query(lang);
+        KeyQueryResult res;
+        if (pathSummary.get_ptr()) {
+            DataFlowFacts outFacts = pathSummary->apply(DataFlowFacts::EmptySet());
+            res.facts = outFacts.getFacts();
+            if (wantGenKill) {
+                res.gen = pathSummary->getGen().getFacts();
+                res.kill = pathSummary->getKill().getFacts();
+            }
+        }
+
+        if (it == cache.end()) {
+            cache.emplace(sym, std::move(res));
+            return cache.find(sym)->second;
+        }
+        it->second = std::move(res);
+        return it->second;
+    };
+
+    // Compute IN/OUT directly from the saturated automaton.
     for (auto& kv : instToKey) {
         Instruction* inst = kv.first;
         wpds_key_t instKey = kv.second;
 
-        // Query the language consisting of the single stack symbol instKey.
-        CA<GenKillTransformer> lang(resultCA.semiring());
-        wpds_key_t qf = new_str2key(("query_final_" + std::to_string((uintptr_t)inst)).c_str());
-        lang.add_initial_state(queryInit);
-        lang.add_final_state(qf);
-        lang.add(queryInit, instKey, qf, GenKillTransformer::one());
+        // OUT at instruction = value at the "after-inst" program-point symbol.
+        result->OUT(inst) = querySymbol(instKey, /*wantGenKill=*/true).facts;
 
-        auto pathSummary = resultCA.reglang_query(lang);
-        if (!pathSummary.get_ptr()) {
-            continue;
+        // IN at instruction = value at the program-point symbol that precedes the instruction.
+        auto pkIt = instPrevKey.find(inst);
+        if (pkIt != instPrevKey.end()) {
+            result->IN(inst) = querySymbol(pkIt->second, /*wantGenKill=*/false).facts;
         }
 
-        // Store GEN/KILL summary at this point for debugging/inspection
-        result->GEN(inst) = pathSummary->getGen().getFacts();
-        result->KILL(inst) = pathSummary->getKill().getFacts();
-
-        // OUT is the application of the path summary to the empty set,
-        // which carries the seeded initial facts from the initial transition.
-        DataFlowFacts outFacts = pathSummary->apply(DataFlowFacts::EmptySet());
-        result->OUT(inst) = outFacts.getFacts();
-    }
-
-    // Derive IN from OUT using local control-flow where needed
-    for (auto& kv : instToKey) {
-        Instruction* inst = kv.first;
-
-        if (isForward) {
-            // IN of first instruction in a BB is the join of predecessor OUTs;
-            // otherwise it is the OUT of the previous instruction.
-            if (inst == &inst->getParent()->front()) {
-                std::set<Value*> inSet;
-                if (&inst->getParent()->getParent()->getEntryBlock() == inst->getParent()) {
-                    // function entry; rely on path summary already seeded
-                    // with initial facts; IN equals previous OUT of predecessors (none).
-                } else {
-                    for (auto* predInst : intraCfg.getPredsOf(
-                             inst, ::dataflow::controlflow::FlowDirection::Forward)) {
-                        if (predInst == nullptr) {
-                            continue;
-                        }
-                        auto& predOut = result->OUT(predInst);
-                        inSet.insert(predOut.begin(), predOut.end());
-                    }
-                }
-                result->IN(inst) = inSet;
-            } else {
-                auto prevIt = inst->getIterator();
-                --prevIt;
-                result->IN(inst) = result->OUT(&*prevIt);
-            }
-        } else {
-            // Backward: OUT of inst is already computed from WPDS;
-            // IN is transfer of local instruction on OUT.
-            // Approximate IN as OUT of predecessors/successors relation.
-            // Ensure OUT set is initialized (creates empty set if not found in first loop)
-            std::set<Value*>& outSetRef = result->OUT(inst);
-            // Apply local transformer if available (via modeling, the rule weight
-            // to reach the successor includes local effect; thus IN can be
-            // approximated by removing local GEN then adding local KILL inversely).
-            // Keep simple: IN = OUT for summarized WPDS results.
-            result->IN(inst) = outSetRef;
+        // Also retain the path summary’s gen/kill as a debugging view.
+        const auto& dbg = querySymbol(instKey, /*wantGenKill=*/true);
+        if (dbg.gen.hasValue()) {
+            result->GEN(inst) = *dbg.gen;
+        }
+        if (dbg.kill.hasValue()) {
+            result->KILL(inst) = *dbg.kill;
         }
     }
 }
@@ -535,7 +610,7 @@ std::string InterProceduralDataFlowEngine::getWitnessDagDotForInstruction(Instru
     if (it == instToKey.end()) {
         return "";
     }
-    return getWitnessDagDotForTransition(controlState, it->second, lastAcceptState);
+    return getWitnessDagDotForTransition(controlState, it->second, *lastAcceptState);
 }
 #endif
 
