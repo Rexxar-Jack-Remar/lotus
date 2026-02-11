@@ -310,10 +310,10 @@ uint32_t DemandDrivenAA::getLoadCVar(const LocDPItem &dpm) const {
 
 bool DemandDrivenAA::isMustAlias(const LocDPItem &loadDpm,
                                   const LocDPItem &storeDpm) const {
-  const PtsSet &loadPts = getCachedPointsTo(loadDpm);
-  const PtsSet &storePts = getCachedPointsTo(storeDpm);
-  return loadPts.size() == 1 && storePts.size() == 1 &&
-         *loadPts.begin() == *storePts.begin();
+  (void)loadDpm;
+  (void)storeDpm;
+  // Match upstream SVF DDAVFSolver default: FlowDDA does not implement must-alias.
+  return false;
 }
 
 bool DemandDrivenAA::propagateViaObj(uint32_t storeObjId,
@@ -323,37 +323,13 @@ bool DemandDrivenAA::propagateViaObj(uint32_t storeObjId,
 
 bool DemandDrivenAA::isHeapCondMemObj(uint32_t objId,
                                        const StoreSVFGNode *store) const {
-  if (objId == 0)
+  (void)store;
+  if (objId == 0 || !svfg_)
     return false;
-  if (!svfg_)
-    return false;
-  // Match SVF: heap/unknown objects are conditional strong-update candidates.
+  // Match upstream SVF FlowDDA: exclude heap/dummy objects from strong update.
   if (svfg_->isUnknownObject(objId))
     return true;
-
-  if (!svfg_->isHeapObject(objId))
-    return false;
-
-  // Approximate SVF's "local heap" strong-update condition:
-  // allow strong update for non-captured heap objects allocated in the same
-  // non-recursive function as the store.
-  const Value *allocV = svfg_->getObjectValue(objId);
-  const Instruction *allocI = dyn_cast_or_null<Instruction>(allocV);
-  const StoreInst *storeI =
-      store ? dyn_cast_or_null<StoreInst>(store->getValue()) : nullptr;
-
-  const Function *allocF = allocI ? allocI->getFunction() : nullptr;
-  const Function *storeF = storeI ? storeI->getFunction() : nullptr;
-
-  if (allocV && allocF && storeF && allocF == storeF &&
-      recursiveFunctions_.count(storeF) == 0) {
-    if (!llvm::PointerMayBeCaptured(allocV, /*ReturnCaptures*/ true,
-                                   /*StoreCaptures*/ true)) {
-      return false;
-    }
-  }
-
-  return true;
+  return svfg_->isHeapObject(objId);
 }
 
 bool DemandDrivenAA::isLocalCVarInRecursion(uint32_t objId) const {
@@ -430,9 +406,9 @@ LocDPItem DemandDrivenAA::getDPImWithOldCond(const LocDPItem &oldDpm,
   // Note: This is non-const because it modifies member maps, but we need const for
   // the interface. We'll handle the const_cast internally.
   DemandDrivenAA *nonConstThis = const_cast<DemandDrivenAA *>(this);
-  if (isa<StoreSVFGNode>(loc))
+  if (isa<StoreSVFGNode>(loc) || isa<StoreChiSVFGNode>(loc))
     nonConstThis->addLoadDpmAndCVar(dpm, getLoadDpm(oldDpm), objId);
-  if (isa<LoadSVFGNode>(loc))
+  if (isa<LoadSVFGNode>(loc) || isa<LoadMuSVFGNode>(loc))
     nonConstThis->addLoadDpmAndCVar(dpm, oldDpm, objId);
   return dpm;
 }
@@ -446,10 +422,13 @@ void DemandDrivenAA::addDpmToLoc(const LocDPItem &dpm) {
 bool DemandDrivenAA::isDirectEdge(SVFGEdge *e) {
   if (!e)
     return false;
-  SVFGEdgeK k = e->getEdgeKind();
+  if (isIndirectEdge(e))
+    return false;
+  const SVFGEdgeK k = e->getEdgeKind();
   return k == SVFGEdgeK::IntraCopy || k == SVFGEdgeK::IntraDirect ||
          k == SVFGEdgeK::IntraPhi || k == SVFGEdgeK::IntraGep ||
-         k == SVFGEdgeK::CallDir || k == SVFGEdgeK::RetDir ||
+         k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
+         k == SVFGEdgeK::RetDir || k == SVFGEdgeK::RetInd ||
          k == SVFGEdgeK::ParamCall || k == SVFGEdgeK::ParamRet ||
          k == SVFGEdgeK::IntraCmp || k == SVFGEdgeK::IntraBranch;
 }
@@ -457,16 +436,28 @@ bool DemandDrivenAA::isDirectEdge(SVFGEdge *e) {
 bool DemandDrivenAA::isIndirectEdge(SVFGEdge *e) {
   if (!e)
     return false;
-  SVFGEdgeK k = e->getEdgeKind();
-  // Treat memory/call edges carrying points-to guards as indirect (SVF-style).
-  return k == SVFGEdgeK::IntraLoad || k == SVFGEdgeK::IntraStore ||
-         k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
-         k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::CallInd ||
-         k == SVFGEdgeK::RetInd || k == SVFGEdgeK::ThreadMHPIndirectVF ||
-         k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
-         k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
-         k == SVFGEdgeK::CallMu || k == SVFGEdgeK::CallChi ||
-         k == SVFGEdgeK::RetMu || k == SVFGEdgeK::EntryChi;
+  const SVFGEdgeK k = e->getEdgeKind();
+  // Note: SVF's "IndirectSVFGEdge" set is narrower than "all non-direct edges".
+  // In particular, call/ret edges for indirect calls (CallInd/RetInd) are not
+  // memory value-flow edges for DDA; DDA relies on ParamCall/ParamRet plus
+  // memory edges (CallAIn/RetAOut/etc.) instead.
+  if (k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::ThreadMHPIndirectVF ||
+      k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
+      k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
+      k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
+      k == SVFGEdgeK::CallMu || k == SVFGEdgeK::CallChi ||
+      k == SVFGEdgeK::RetMu || k == SVFGEdgeK::EntryChi) {
+    return true;
+  }
+  // Memory SSA builder uses IntraPhi/IntraCopy between memory nodes. Treat
+  // those as indirect to match SVF's IndirectSVFGEdge semantics.
+  if (k == SVFGEdgeK::IntraPhi || k == SVFGEdgeK::IntraCopy ||
+      k == SVFGEdgeK::IntraDirect) {
+    const SVFGNode *src = e->getSrcNode();
+    const SVFGNode *dst = e->getDstNode();
+    return (src && src->isMemNode()) || (dst && dst->isMemNode());
+  }
+  return false;
 }
 
 void DemandDrivenAA::handleAddr(PtsSet &pts, const LocDPItem &,
@@ -656,22 +647,14 @@ const DemandDrivenAA::PtsSet &DemandDrivenAA::findPT(const LocDPItem &dpm) {
   markbkVisited(dpm);
   addDpmToLoc(dpm);
 
-  // Check out-of-budget
-  if (testOutOfBudget(dpm)) {
-    addOutOfBudgetDpm(dpm);
-    handleOutOfBudgetDpm(dpm);
-    return getCachedPointsTo(dpm);
+  // Match SVF DDAVFSolver::findPT: stop exploring when out-of-budget.
+  if (testOutOfBudget(dpm) == false) {
+    if (ddaStat_)
+      ddaStat_->numOfDPM++;
+    PtsSet pts;
+    handleSingleStatement(dpm, pts);
+    updateCachedPointsTo(dpm, pts);
   }
-
-  if (ddaStat_)
-    ddaStat_->numOfDPM++;
-  
-  // Compute points-to for this dpm
-  PtsSet pts;
-  handleSingleStatement(dpm, pts);
-  
-  // Update cache and recompute if needed
-  updateCachedPointsTo(dpm, pts);
   return getCachedPointsTo(dpm);
 }
 
@@ -798,8 +781,10 @@ DemandDrivenAA::PtsSet DemandDrivenAA::getPointsTo(const Value *ptr) {
   resetQuery();
   LocDPItem::setMaxBudget(kDefaultMaxBudget);
   LocDPItem dpm(defNode->getId(), defNode);
-  const PtsSet &pts = findPT(dpm);
-  result = pts;
+  (void)findPT(dpm);
+  if (outOfBudget_)
+    handleOutOfBudgetDpm(dpm);
+  result = getCachedPointsTo(dpm);
   return result;
 }
 

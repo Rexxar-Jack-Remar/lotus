@@ -56,6 +56,56 @@ void SVFGBuilder::buildNodes() {
 void SVFGBuilder::buildTopLevelNodes() {
   // Use a single NullPtr node for the module (ConstantPointerNull is uniqued).
   uint32_t nullPtrNodeId = std::numeric_limits<uint32_t>::max();
+
+  auto ensureBaseObjIdForValue = [&](const Value *v,
+                                     SVFG::ObjectInfo info) -> uint32_t {
+    if (!svfg || !v)
+      return 0;
+    if (const uint32_t existing = svfg->getObjectId(v))
+      return existing;
+
+    const uint32_t objId = nextObjId++;
+    info.baseObjId = objId;
+    svfg->setObjectInfo(objId, info);
+    svfg->setObjectValue(objId, v);
+    if (const auto *F = dyn_cast<Function>(v))
+      svfg->setObjectDebug(objId, ("FUN:" + F->getName()).str());
+    else if (const auto *GV = dyn_cast<GlobalValue>(v))
+      svfg->setObjectDebug(objId, ("GV:" + GV->getName()).str());
+    else if (v->hasName())
+      svfg->setObjectDebug(objId, ("OBJ:" + v->getName()).str());
+    else
+      svfg->setObjectDebug(objId, "OBJ");
+    (void)getOrCreateMemRegForObject(objId);
+    return objId;
+  };
+
+  auto ensureAddrNodeForConstPtr = [&](const Value *v,
+                                       IntraBlockNode *at) -> uint32_t {
+    if (!v)
+      return std::numeric_limits<uint32_t>::max();
+    auto it = valueToNode.find(v);
+    if (it != valueToNode.end())
+      return it->second;
+    const bool isConstPtrTarget =
+        isa<Function>(v) || isa<GlobalVariable>(v) || isa<GlobalAlias>(v);
+    if (!isConstPtrTarget)
+      return std::numeric_limits<uint32_t>::max();
+
+    // Also register a base object ID for this constant so DDA can seed points-to
+    // sets even when PTA queries return empty (e.g., in minimal IR snippets).
+    SVFG::ObjectInfo info;
+    info.isFunction = isa<Function>(v);
+    info.isGlobal = isa<GlobalValue>(v) && !isa<Function>(v);
+    ensureBaseObjIdForValue(v, info);
+
+    const uint32_t nodeId = nextNode();
+    auto *addrNode = new AddrSVFGNode(nodeId, at, v);
+    svfg->addNode(addrNode);
+    valueToNode.emplace(v, nodeId);
+    svfg->setValueNode(v, nodeId);
+    return nodeId;
+  };
   
   for (auto &pair : *icfg) {
     ICFGNode *node = pair.second;
@@ -81,7 +131,19 @@ void SVFGBuilder::buildTopLevelNodes() {
       for (const Use &op : inst.operands()) {
         const Value *opVal = op.get();
         if (!isa<ConstantPointerNull>(opVal))
+        {
+          // Model constant function/global addresses (and their pointer casts)
+          // as address nodes so DDA can resolve function pointers and globals.
+          if (opVal && opVal->getType()->isPointerTy()) {
+            const Value *canon = opVal->stripPointerCasts();
+            const uint32_t canonId = ensureAddrNodeForConstPtr(canon, blockNode);
+            if (canonId != std::numeric_limits<uint32_t>::max()) {
+              valueToNode.emplace(opVal, canonId);
+              svfg->setValueNode(opVal, canonId);
+            }
+          }
           continue;
+        }
         if (nullPtrNodeId == std::numeric_limits<uint32_t>::max()) {
           nullPtrNodeId = nextNode();
           auto *nullNode = new NullPtrSVFGNode(nullPtrNodeId, blockNode);
@@ -99,6 +161,9 @@ void SVFGBuilder::buildTopLevelNodes() {
         valueToNode[&inst] = nodeId;
         svfg->setValueNode(&inst, nodeId);
         getOrCreateMemReg(cast<AllocaInst>(&inst));
+        SVFG::ObjectInfo info;
+        info.isStack = true;
+        ensureBaseObjIdForValue(&inst, info);
         if (config.usePointerAnalysis)
           (void)getObjectIdsForValue(&inst);
       } else if (isHeapAllocation(&inst)) {
@@ -109,6 +174,9 @@ void SVFGBuilder::buildTopLevelNodes() {
         valueToNode[&inst] = nodeId;
         svfg->setValueNode(&inst, nodeId);
         (void)getOrCreateMemReg(&inst);
+        SVFG::ObjectInfo info;
+        info.isHeap = true;
+        ensureBaseObjIdForValue(&inst, info);
         if (config.usePointerAnalysis)
           (void)getObjectIdsForValue(&inst);
       } else if (const LoadInst *load = dyn_cast<LoadInst>(&inst)) {
@@ -636,4 +704,3 @@ void SVFGBuilder::buildActualRetNodes() {
     }
   }
 }
-

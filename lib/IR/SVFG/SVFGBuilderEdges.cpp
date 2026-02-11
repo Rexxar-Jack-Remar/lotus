@@ -126,22 +126,6 @@ void SVFGBuilder::buildLoadEdges() {
     if (ptrIt != valueToNode.end()) {
       if (SVFGNode *ptrNode = svfg->getNode(ptrIt->second)) {
         svfg->addEdge(ptrNode, dstNode, SVFGEdgeK::IntraDirect);
-
-        SVFGNodeBS ptsSet;
-        if (config.usePointerAnalysis && ptaSolverWrapper &&
-            ptaSolverWrapper->solver) {
-          std::vector<const void *> ptsVoid = getPointsToSet(ptr);
-          ptsSet = convertPTAObjectsToObjIDs(ptsVoid);
-        }
-        if (ptsSet.empty()) {
-          // Preserve soundness: unknown/unsupported PTA results use a wildcard guard.
-          ptsSet.insert(getOrCreateUnknownObjId());
-        }
-
-        // Represent memory-induced flow as an indirect edge labeled with
-        // points-to object IDs (NodeBS semantics in upstream SVF).
-        svfg->addEdge(ptrNode, dstNode, SVFGEdgeK::IntraIndirect, nullptr,
-                      ptsSet);
       }
     }
   }
@@ -160,20 +144,6 @@ void SVFGBuilder::buildStoreEdges() {
     if (ptrIt != valueToNode.end()) {
       if (SVFGNode *ptrNode = svfg->getNode(ptrIt->second)) {
         svfg->addEdge(ptrNode, srcNode, SVFGEdgeK::IntraDirect);
-
-        SVFGNodeBS ptsSet;
-        if (config.usePointerAnalysis && ptaSolverWrapper &&
-            ptaSolverWrapper->solver) {
-          std::vector<const void *> ptsVoid = getPointsToSet(ptr);
-          ptsSet = convertPTAObjectsToObjIDs(ptsVoid);
-        }
-        if (ptsSet.empty()) {
-          // Preserve soundness: unknown/unsupported PTA results use a wildcard guard.
-          ptsSet.insert(getOrCreateUnknownObjId());
-        }
-        // Store induces an indirect flow on the memory reached by ptr.
-        svfg->addEdge(srcNode, ptrNode, SVFGEdgeK::IntraIndirect, nullptr,
-                      ptsSet);
       }
     }
     const Value *val = store->getValueOperand();
@@ -330,4 +300,3 @@ void SVFGBuilder::buildMemoryEdges() {
   buildLoadEdges();
   buildStoreEdges();
 }
-

@@ -96,6 +96,11 @@ struct SVFGBuilderConfig {
 /// @brief SVFGBuilder with AserPTA integration
 class SVFGBuilder {
 public:
+  /// Object IDs live in a disjoint namespace from SVFG node IDs.
+  /// This avoids accidental collisions in DDA where `DPItem::cur` can hold
+  /// either a pointer (SVFG node ID) or an abstract object ID.
+  static constexpr uint32_t kObjIdBase = 1u << 30;
+
   /// @brief Memory region version info
   struct MemRegVer {
     uint32_t region;
@@ -171,7 +176,7 @@ private:
   uint32_t unknownObjId = 0;
 
   /// @brief Next object ID for points-to sets.
-  uint32_t nextObjId = 1;
+  uint32_t nextObjId = kObjIdBase;
 
   /// @brief Object ID to memory region mapping (one memReg per abstract object).
   std::unordered_map<uint32_t, uint32_t> objIdToMemReg;

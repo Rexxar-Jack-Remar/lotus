@@ -28,12 +28,17 @@ using namespace llvm;
 
 namespace {
 
+static bool isIndirectEdge(SVFGEdge *e);
+
 static bool isDirectEdge(SVFGEdge *e) {
   if (!e) return false;
+  if (isIndirectEdge(e))
+    return false;
   SVFGEdgeK k = e->getEdgeKind();
   return k == SVFGEdgeK::IntraCopy || k == SVFGEdgeK::IntraDirect ||
          k == SVFGEdgeK::IntraPhi || k == SVFGEdgeK::IntraGep ||
-         k == SVFGEdgeK::CallDir || k == SVFGEdgeK::RetDir ||
+         k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
+         k == SVFGEdgeK::RetDir || k == SVFGEdgeK::RetInd ||
          k == SVFGEdgeK::ParamCall || k == SVFGEdgeK::ParamRet ||
          k == SVFGEdgeK::IntraCmp || k == SVFGEdgeK::IntraBranch;
 }
@@ -41,15 +46,21 @@ static bool isDirectEdge(SVFGEdge *e) {
 static bool isIndirectEdge(SVFGEdge *e) {
   if (!e) return false;
   SVFGEdgeK k = e->getEdgeKind();
-  // Treat memory/call edges carrying points-to guards as indirect (SVF-style).
-  return k == SVFGEdgeK::IntraLoad || k == SVFGEdgeK::IntraStore ||
-         k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
-         k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::CallInd ||
-         k == SVFGEdgeK::RetInd || k == SVFGEdgeK::ThreadMHPIndirectVF ||
-         k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
-         k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
-         k == SVFGEdgeK::CallMu || k == SVFGEdgeK::CallChi ||
-         k == SVFGEdgeK::RetMu || k == SVFGEdgeK::EntryChi;
+  if (k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::ThreadMHPIndirectVF ||
+      k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
+      k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
+      k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
+      k == SVFGEdgeK::CallMu || k == SVFGEdgeK::CallChi ||
+      k == SVFGEdgeK::RetMu || k == SVFGEdgeK::EntryChi) {
+    return true;
+  }
+  if (k == SVFGEdgeK::IntraPhi || k == SVFGEdgeK::IntraCopy ||
+      k == SVFGEdgeK::IntraDirect) {
+    const SVFGNode *src = e->getSrcNode();
+    const SVFGNode *dst = e->getDstNode();
+    return (src && src->isMemNode()) || (dst && dst->isMemNode());
+  }
+  return false;
 }
 
 static bool isCallEdge(SVFGEdge *e) {
@@ -403,14 +414,10 @@ uint32_t ContextDDA::getLoadCVar(const CxtLocDPItem &dpm) const {
 
 bool ContextDDA::isMustAlias(const CxtLocDPItem &loadDpm,
                             const CxtLocDPItem &storeDpm) const {
-  auto it1 = dpmToPtsMap_.find(loadDpm);
-  auto it2 = dpmToPtsMap_.find(storeDpm);
-  if (it1 == dpmToPtsMap_.end() || it2 == dpmToPtsMap_.end())
-    return false;
-  const CxtPtSet &loadPts = it1->second;
-  const CxtPtSet &storePts = it2->second;
-  return loadPts.size() == 1 && storePts.size() == 1 &&
-         *loadPts.begin() == *storePts.begin();
+  (void)loadDpm;
+  (void)storeDpm;
+  // Match upstream SVF DDAVFSolver default: ContextDDA does not implement must-alias.
+  return false;
 }
 
 bool ContextDDA::propagateViaObj(uint32_t storeObjId, uint32_t loadCVarObjId) const {
@@ -489,9 +496,9 @@ CxtLocDPItem ContextDDA::getDPImWithOldCond(const CxtLocDPItem &oldDpm,
   CxtLocDPItem dpm(var, loc);
   // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load nodes.
   ContextDDA *nonConstThis = const_cast<ContextDDA *>(this);
-  if (llvm::isa<StoreSVFGNode>(loc))
+  if (llvm::isa<StoreSVFGNode>(loc) || llvm::isa<StoreChiSVFGNode>(loc))
     nonConstThis->addLoadDpmAndCVar(dpm, getLoadDpm(oldDpm), objId);
-  if (llvm::isa<LoadSVFGNode>(loc))
+  if (llvm::isa<LoadSVFGNode>(loc) || llvm::isa<LoadMuSVFGNode>(loc))
     nonConstThis->addLoadDpmAndCVar(dpm, oldDpm, objId);
   return dpm;
 }
@@ -789,14 +796,11 @@ const CxtPtSet &ContextDDA::findPT(const CxtLocDPItem &dpm) {
   if (dpm.getLoc())
     locToDpmSetMap_[dpm.getLoc()->getId()].insert(dpm);
 
-  // Match SVF testOutOfBudget pattern: check global and per-dpm OOB status.
+  // Match SVF DDAVFSolver::findPT: stop exploring when out-of-budget.
+  if (outOfBudgetDpms_.count(dpm))
+    return getCachedPointsTo(dpm);
   if (outOfBudget_ || ++numSteps_ > kDefaultMaxBudget) {
     outOfBudget_ = true;
-    outOfBudgetDpms_.insert(dpm);
-    handleOutOfBudgetDpm(dpm);
-    return getCachedPointsTo(dpm);
-  }
-  if (outOfBudgetDpms_.count(dpm)) {
     return getCachedPointsTo(dpm);
   }
 
@@ -826,7 +830,12 @@ const CxtPtSet &ContextDDA::computeDDAPts(const CxtVar &cxtVar) {
     }
   }
   CxtLocDPItem dpm(cxtVar, defNode);
-  return findPT(dpm);
+  (void)findPT(dpm);
+  if (outOfBudget_) {
+    outOfBudgetDpms_.insert(dpm);
+    handleOutOfBudgetDpm(dpm);
+  }
+  return getCachedPointsTo(dpm);
 }
 
 CxtPtSet ContextDDA::computeDDAPts(const llvm::Value *ptr) {

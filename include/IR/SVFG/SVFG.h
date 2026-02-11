@@ -101,6 +101,14 @@ using FuncToFormalParmMap =
 using FuncToFormalRetMap =
     std::unordered_map<const llvm::Function *, SVFGNodeSet>;
 
+/// @brief LoadInst to LoadMu SVFG nodes (Memory SSA)
+using LoadInstToMuMap =
+    std::unordered_map<const llvm::LoadInst *, SVFGNodeSet>;
+
+/// @brief StoreInst to StoreChi SVFG nodes (Memory SSA)
+using StoreInstToChiMap =
+    std::unordered_map<const llvm::StoreInst *, SVFGNodeSet>;
+
 /// @brief SVFG statistics
 struct SVFGStat {
     uint32_t numNodes = 0;
@@ -162,6 +170,10 @@ private:
     FuncToFormalMap funcToFormalOutMap;  // FormalOut (memory)
     FuncToFormalParmMap funcToFormalParmMap;
     FuncToFormalRetMap funcToFormalRetMap;
+
+    /// @brief Memory SSA instruction indices
+    LoadInstToMuMap loadInstToMuMap;
+    StoreInstToChiMap storeInstToChiMap;
     
     /// @brief Associated ICFG
     const ICFG* icfg;
@@ -380,6 +392,22 @@ public:
 
     inline void addFormalRet(const llvm::Function* f, SVFGNode* node) {
         funcToFormalRetMap[f].insert(node);
+    }
+
+    //===------------------------------------------------------------------===
+    // Memory SSA instruction indices (LoadMu / StoreChi)
+    //===------------------------------------------------------------------===
+
+    inline const SVFGNodeSet &getLoadMus(const llvm::LoadInst *li) const {
+        static SVFGNodeSet empty;
+        auto it = loadInstToMuMap.find(li);
+        return (it != loadInstToMuMap.end()) ? it->second : empty;
+    }
+
+    inline const SVFGNodeSet &getStoreChis(const llvm::StoreInst *si) const {
+        static SVFGNodeSet empty;
+        auto it = storeInstToChiMap.find(si);
+        return (it != storeInstToChiMap.end()) ? it->second : empty;
     }
 
     //===------------------------------------------------------------------===

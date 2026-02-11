@@ -239,7 +239,7 @@ void SVFGBuilder::initialize(const ICFG *cfg) {
   callToChiNodes.clear();
   ptaObjectToObjId.clear();
   unknownObjId = 0;
-  nextObjId = 1;
+  nextObjId = kObjIdBase;
   objIdToMemReg.clear();
   memRegToObjId.clear();
   ptsKeyToMemReg.clear();
@@ -781,8 +781,11 @@ bool SVFGBuilder::isAddressTakenPointer(const Value *ptr) const {
       return true;
   }
 
+  // Without pointer analysis, be conservative for memory SSA: treat pointers
+  // appearing in memory operations as address-taken so DDA has a sound
+  // (wildcard-guarded) memory value-flow to traverse.
   if (!config.usePointerAnalysis || !ptaSolverWrapper || !ptaSolverWrapper->solver)
-    return false;
+    return true;
 
   // PTA can identify memory-backed pointers even when base is a cast/gep/load.
   return !const_cast<SVFGBuilder *>(this)->getPointsToSet(ptr).empty();

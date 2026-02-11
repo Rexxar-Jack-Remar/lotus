@@ -145,6 +145,16 @@ void SVFG::addNode(SVFGNode *node) {
   if (node->isMemNode() && node->getMemReg() != 0) {
     setMSSADef(node->getMemReg(), node, node->getSSAVersion());
   }
+
+  // Maintain instruction indices for MemorySSA nodes.
+  if (auto *mu = dyn_cast<LoadMuSVFGNode>(node)) {
+    if (const llvm::LoadInst *li = mu->getLoadInst())
+      loadInstToMuMap[li].insert(mu);
+  } else if (auto *chi = dyn_cast<StoreChiSVFGNode>(node)) {
+    if (const llvm::StoreInst *si = chi->getStoreInst())
+      storeInstToChiMap[si].insert(chi);
+  }
+
   updateStat(node);
 }
 

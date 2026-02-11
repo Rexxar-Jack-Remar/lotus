@@ -161,7 +161,8 @@ void SVFGBuilder::buildMemorySSA() {
             const uint32_t memRegId = getOrCreateMemReg(ptr);
             const uint32_t muNodeId = nextNode();
             auto *muNode =
-                new LoadMuSVFGNode(muNodeId, icfgNode, load, memRegId, SVFGNodeBS{});
+                new LoadMuSVFGNode(muNodeId, icfgNode, load, memRegId,
+                                   SVFGNodeBS{getOrCreateUnknownObjId()});
             svfg->addNode(muNode);
             muVec.push_back(muNodeId);
           } else {
@@ -203,11 +204,25 @@ void SVFGBuilder::buildMemorySSA() {
             const uint32_t chiVersion = nextVersion(&F, memRegId);
             const uint32_t chiNodeId = nextNode();
             auto *chiNode = new StoreChiSVFGNode(chiNodeId, icfgNode, store,
-                                                 memRegId, SVFGNodeBS{},
+                                                 memRegId,
+                                                 SVFGNodeBS{getOrCreateUnknownObjId()},
                                                  chiVersion);
             svfg->addNode(chiNode);
             chiVec.push_back(chiNodeId);
             svfg->setMSSADef(memRegId, chiNode, chiVersion);
+
+            // SVF MemorySSA invariant: Store statement defines its Chi version.
+            // Needed so DDA can backtrace from StoreChi to StoreStmt.
+            auto stIt = storeToStoreNode.find(store);
+            if (stIt != storeToStoreNode.end()) {
+              if (SVFGNode *storeStmt = svfg->getNode(stIt->second)) {
+                SVFGNodeBS edgePts = chiNode->getDefSVFVars();
+                if (edgePts.empty())
+                  edgePts.insert(getOrCreateUnknownObjId());
+                svfg->addEdge(storeStmt, chiNode, SVFGEdgeK::IntraChi, nullptr,
+                              edgePts);
+              }
+            }
           } else {
             for (uint32_t objId : objIds) {
               const uint32_t memRegId = getOrCreateMemRegForObject(objId);
@@ -219,6 +234,17 @@ void SVFGBuilder::buildMemorySSA() {
               svfg->addNode(chiNode);
               chiVec.push_back(chiNodeId);
               svfg->setMSSADef(memRegId, chiNode, chiVersion);
+
+              auto stIt = storeToStoreNode.find(store);
+              if (stIt != storeToStoreNode.end()) {
+                if (SVFGNode *storeStmt = svfg->getNode(stIt->second)) {
+                  SVFGNodeBS edgePts = chiNode->getDefSVFVars();
+                  if (edgePts.empty())
+                    edgePts.insert(getOrCreateUnknownObjId());
+                  svfg->addEdge(storeStmt, chiNode, SVFGEdgeK::IntraChi, nullptr,
+                                edgePts);
+                }
+              }
             }
           }
         }
@@ -237,14 +263,16 @@ void SVFGBuilder::buildMemorySSA() {
               const uint32_t memRegId = getOrCreateMemReg(ptr);
               const uint32_t muNodeId = nextNode();
               auto *muNode = new LoadMuSVFGNode(muNodeId, icfgNode, nullptr,
-                                                memRegId, SVFGNodeBS{});
+                                                memRegId,
+                                                SVFGNodeBS{getOrCreateUnknownObjId()});
               svfg->addNode(muNode);
               muVec.push_back(muNodeId);
 
               const uint32_t chiNodeId = nextNode();
               const uint32_t chiVersion = nextVersion(&F, memRegId);
               auto *chiNode = new StoreChiSVFGNode(
-                  chiNodeId, icfgNode, nullptr, memRegId, SVFGNodeBS{},
+                  chiNodeId, icfgNode, nullptr, memRegId,
+                  SVFGNodeBS{getOrCreateUnknownObjId()},
                   chiVersion);
               svfg->addNode(chiNode);
               chiVec.push_back(chiNodeId);
@@ -408,8 +436,23 @@ void SVFGBuilder::buildMemorySSA() {
 		                              continue;
 		                            for (uint32_t chiId : dstChiNodes) {
 		                              SVFGNode *chiNode = svfg->getNode(chiId);
-		                              if (chiNode)
-		                                svfg->addEdge(muNode, chiNode, SVFGEdgeK::IntraCopy);
+		                              if (!chiNode)
+		                                continue;
+		                              auto *muMem = dyn_cast<MSSASVFGNode>(muNode);
+		                              auto *chiMem = dyn_cast<MSSASVFGNode>(chiNode);
+		                              if (!muMem || !chiMem)
+		                                continue;
+		                              // Only connect matching memory regions (same object).
+		                              if (muMem->getMemReg() != chiMem->getMemReg())
+		                                continue;
+		                              SVFGNodeBS edgePts = intersectPointsToSets(
+		                                  muMem->getDefSVFVars(),
+		                                  chiMem->getDefSVFVars(),
+		                                  getOrCreateUnknownObjId());
+		                              if (edgePts.empty())
+		                                edgePts.insert(getOrCreateUnknownObjId());
+		                              svfg->addEdge(muNode, chiNode, SVFGEdgeK::IntraCopy,
+		                                            nullptr, edgePts);
 		                            }
 		                          }
 	                        }
@@ -793,7 +836,11 @@ void SVFGBuilder::buildMemoryPHINodes() {
               
               // Connect incoming def to PHI (use EntryChi as fallback if no def found)
               if (incomingDef) {
-                svfg->addEdge(incomingDef, phiNode, SVFGEdgeK::IntraPhi);
+                SVFGNodeBS edgePts = phiNode->getDefSVFVars();
+                if (edgePts.empty())
+                  edgePts.insert(getOrCreateUnknownObjId());
+                svfg->addEdge(incomingDef, phiNode, SVFGEdgeK::IntraPhi, nullptr,
+                              edgePts);
                 // Record the operand version for this predecessor.
                 if (auto *defMem = dyn_cast<MSSASVFGNode>(incomingDef)) {
                   phiNode->setOpVer(predIdx, defMem->getMemReg(),
@@ -805,7 +852,11 @@ void SVFGBuilder::buildMemoryPHINodes() {
                   SVFGNode *entryChiNode = svfg->getNode(entryChiId);
                   if (auto *entryChi = dyn_cast<EntryChiSVFGNode>(entryChiNode)) {
                     if (entryChi->getMemReg() == memReg) {
-                      svfg->addEdge(entryChiNode, phiNode, SVFGEdgeK::IntraPhi);
+                      SVFGNodeBS edgePts = phiNode->getDefSVFVars();
+                      if (edgePts.empty())
+                        edgePts.insert(getOrCreateUnknownObjId());
+                      svfg->addEdge(entryChiNode, phiNode, SVFGEdgeK::IntraPhi,
+                                    nullptr, edgePts);
                       phiNode->setOpVer(predIdx, entryChi->getMemReg(),
                                         entryChi->getSSAVersion());
                       break;
@@ -907,8 +958,15 @@ void SVFGBuilder::buildInterproceduralMemoryPHINodes() {
       svfg->addNode(formalPhi);
       
       // Connect FormalIn -> InterPhi -> FormalOut
-      svfg->addEdge(formalIn, formalPhi, SVFGEdgeK::IntraPhi);
-      svfg->addEdge(formalPhi, formalOut, SVFGEdgeK::IntraPhi);
+      {
+        SVFGNodeBS edgePts = formalPhi->getDefSVFVars();
+        if (edgePts.empty())
+          edgePts.insert(getOrCreateUnknownObjId());
+        svfg->addEdge(formalIn, formalPhi, SVFGEdgeK::IntraPhi, nullptr,
+                      edgePts);
+        svfg->addEdge(formalPhi, formalOut, SVFGEdgeK::IntraPhi, nullptr,
+                      edgePts);
+      }
     }
 
     // Now handle call sites: create InterMSSAPhiSVFGNode for actual return memory flow
@@ -980,8 +1038,15 @@ void SVFGBuilder::buildInterproceduralMemoryPHINodes() {
           svfg->addNode(actualPhi);
           
           // Connect ActualIn -> InterPhi -> ActualOut
-          svfg->addEdge(actualIn, actualPhi, SVFGEdgeK::IntraPhi);
-          svfg->addEdge(actualPhi, actualOut, SVFGEdgeK::IntraPhi);
+          {
+            SVFGNodeBS edgePts = actualPhi->getDefSVFVars();
+            if (edgePts.empty())
+              edgePts.insert(getOrCreateUnknownObjId());
+            svfg->addEdge(actualIn, actualPhi, SVFGEdgeK::IntraPhi, nullptr,
+                          edgePts);
+            svfg->addEdge(actualPhi, actualOut, SVFGEdgeK::IntraPhi, nullptr,
+                          edgePts);
+          }
         }
       }
     }
@@ -995,6 +1060,20 @@ void SVFGBuilder::connectMemorySSAEdges() {
   const Module *M = getModuleFromICFG(icfg);
   if (!M)
     return;
+
+  auto getLoadStmtNode = [&](const llvm::LoadInst *li) -> SVFGNode * {
+    if (!li)
+      return nullptr;
+    auto it = loadToLoadNode.find(li);
+    return (it != loadToLoadNode.end()) ? svfg->getNode(it->second) : nullptr;
+  };
+
+  auto getStoreStmtNode = [&](const llvm::StoreInst *si) -> SVFGNode * {
+    if (!si)
+      return nullptr;
+    auto it = storeToStoreNode.find(si);
+    return (it != storeToStoreNode.end()) ? svfg->getNode(it->second) : nullptr;
+  };
 
   // Map: memory region -> last def (StoreChi/EntryChi) in each basic block
   std::unordered_map<const BasicBlock*, std::unordered_map<uint32_t, SVFGNode*>> lastDefInBlock;
@@ -1097,9 +1176,13 @@ void SVFGBuilder::connectMemorySSAEdges() {
                   uint32_t phiId = createMemoryPHI(memReg, bb);
                   SVFGNode *phiNode = svfg->getNode(phiId);
                   if (phiNode) {
+                    SVFGNodeBS edgePts = phiNode->getDefSVFVars();
+                    if (edgePts.empty())
+                      edgePts.insert(getOrCreateUnknownObjId());
                     svfg->addEdge(existingDefIt->second, phiNode,
-                                  SVFGEdgeK::IntraPhi);
-                    svfg->addEdge(def, phiNode, SVFGEdgeK::IntraPhi);
+                                  SVFGEdgeK::IntraPhi, nullptr, edgePts);
+                    svfg->addEdge(def, phiNode, SVFGEdgeK::IntraPhi, nullptr,
+                                  edgePts);
                     lastDef[memReg] = phiNode;
                   }
                 }
@@ -1139,9 +1222,23 @@ void SVFGBuilder::connectMemorySSAEdges() {
               }
 
               if (reachingDef) {
-                svfg->addEdge(reachingDef, muNode, SVFGEdgeK::IntraMu);
+                SVFGNodeBS edgePts = muNode->getDefSVFVars();
+                if (edgePts.empty())
+                  edgePts.insert(getOrCreateUnknownObjId());
+                svfg->addEdge(reachingDef, muNode, SVFGEdgeK::IntraMu, nullptr,
+                              edgePts);
                 if (isa<EntryChiSVFGNode>(reachingDef)) {
-                  svfg->addEdge(reachingDef, muNode, SVFGEdgeK::EntryChi);
+                  svfg->addEdge(reachingDef, muNode, SVFGEdgeK::EntryChi,
+                                nullptr, edgePts);
+                }
+
+                // Design (A): expose SVF-style guarded memory value-flow on
+                // the statement Load node for DDA.
+                if (const LoadInst *li = mu->getLoadInst()) {
+                  if (SVFGNode *loadStmt = getLoadStmtNode(li)) {
+                    svfg->addEdge(reachingDef, loadStmt, SVFGEdgeK::IntraIndirect,
+                                  nullptr, edgePts);
+                  }
                 }
               }
             }
@@ -1173,9 +1270,21 @@ void SVFGBuilder::connectMemorySSAEdges() {
             }
 
             if (reachingDef) {
-              svfg->addEdge(reachingDef, muNode, SVFGEdgeK::IntraMu);
+              SVFGNodeBS edgePts = muNode->getDefSVFVars();
+              if (edgePts.empty())
+                edgePts.insert(getOrCreateUnknownObjId());
+              svfg->addEdge(reachingDef, muNode, SVFGEdgeK::IntraMu, nullptr,
+                            edgePts);
               if (isa<EntryChiSVFGNode>(reachingDef)) {
-                svfg->addEdge(reachingDef, muNode, SVFGEdgeK::EntryChi);
+                svfg->addEdge(reachingDef, muNode, SVFGEdgeK::EntryChi, nullptr,
+                              edgePts);
+              }
+
+              if (const LoadInst *li = mu->getLoadInst()) {
+                if (SVFGNode *loadStmt = getLoadStmtNode(li)) {
+                  svfg->addEdge(reachingDef, loadStmt, SVFGEdgeK::IntraIndirect,
+                                nullptr, edgePts);
+                }
               }
             }
           }
@@ -1193,7 +1302,17 @@ void SVFGBuilder::connectMemorySSAEdges() {
               auto prevIt = lastDef.find(memReg);
               if (prevIt != lastDef.end() && prevIt->second &&
                   prevIt->second != chiNode) {
-                svfg->addEdge(prevIt->second, chiNode, SVFGEdgeK::IntraChi);
+                SVFGNodeBS edgePts = chiNode->getDefSVFVars();
+                if (edgePts.empty())
+                  edgePts.insert(getOrCreateUnknownObjId());
+                svfg->addEdge(prevIt->second, chiNode, SVFGEdgeK::IntraChi,
+                              nullptr, edgePts);
+
+                // Design (A): guarded indirect flow into Store statement.
+                if (SVFGNode *storeStmt = getStoreStmtNode(store)) {
+                  svfg->addEdge(prevIt->second, storeStmt,
+                                SVFGEdgeK::IntraIndirect, nullptr, edgePts);
+                }
               }
               lastDef[memReg] = chiNode;
             }
@@ -1210,7 +1329,18 @@ void SVFGBuilder::connectMemorySSAEdges() {
             auto prevIt = lastDef.find(memReg);
             if (prevIt != lastDef.end() && prevIt->second &&
                 prevIt->second != chiNode) {
-              svfg->addEdge(prevIt->second, chiNode, SVFGEdgeK::IntraChi);
+              SVFGNodeBS edgePts = chiNode->getDefSVFVars();
+              if (edgePts.empty())
+                edgePts.insert(getOrCreateUnknownObjId());
+              svfg->addEdge(prevIt->second, chiNode, SVFGEdgeK::IntraChi,
+                            nullptr, edgePts);
+
+              if (const StoreInst *si = chi->getStoreInst()) {
+                if (SVFGNode *storeStmt = getStoreStmtNode(si)) {
+                  svfg->addEdge(prevIt->second, storeStmt,
+                                SVFGEdgeK::IntraIndirect, nullptr, edgePts);
+                }
+              }
             }
             lastDef[memReg] = chiNode;
           }
@@ -1250,9 +1380,19 @@ void SVFGBuilder::connectMemorySSAEdges() {
               // Connect reaching def -> callMu, and callMu -> callChi.
               auto defIt = lastDef.find(memReg);
               if (defIt != lastDef.end() && defIt->second) {
-                svfg->addEdge(defIt->second, callMuNode, SVFGEdgeK::CallMu);
+                SVFGNodeBS edgePts = callMuNode->getDefSVFVars();
+                if (edgePts.empty())
+                  edgePts.insert(getOrCreateUnknownObjId());
+                svfg->addEdge(defIt->second, callMuNode, SVFGEdgeK::CallMu,
+                              nullptr, edgePts);
               }
-              svfg->addEdge(callMuNode, callChiNode, SVFGEdgeK::CallChi);
+              {
+                SVFGNodeBS edgePts = callChiNode->getDefSVFVars();
+                if (edgePts.empty())
+                  edgePts.insert(getOrCreateUnknownObjId());
+                svfg->addEdge(callMuNode, callChiNode, SVFGEdgeK::CallChi,
+                              nullptr, edgePts);
+              }
               lastDef[memReg] = callChiNode;
             }
           }
@@ -1303,7 +1443,18 @@ void SVFGBuilder::connectMemorySSAEdges() {
               const uint32_t memReg = mu->getMemReg();
               auto chiIt = lastChiInBlock.find(memReg);
               if (chiIt != lastChiInBlock.end()) {
-                svfg->addEdge(chiIt->second, muNode, SVFGEdgeK::IntraMu);
+                SVFGNodeBS edgePts = muNode->getDefSVFVars();
+                if (edgePts.empty())
+                  edgePts.insert(getOrCreateUnknownObjId());
+                svfg->addEdge(chiIt->second, muNode, SVFGEdgeK::IntraMu, nullptr,
+                              edgePts);
+
+                if (const LoadInst *li = mu->getLoadInst()) {
+                  if (SVFGNode *loadStmt = getLoadStmtNode(li)) {
+                    svfg->addEdge(chiIt->second, loadStmt,
+                                  SVFGEdgeK::IntraIndirect, nullptr, edgePts);
+                  }
+                }
               }
             }
           }
@@ -1318,7 +1469,18 @@ void SVFGBuilder::connectMemorySSAEdges() {
             const uint32_t memReg = mu->getMemReg();
             auto chiIt = lastChiInBlock.find(memReg);
             if (chiIt != lastChiInBlock.end()) {
-              svfg->addEdge(chiIt->second, muNode, SVFGEdgeK::IntraMu);
+              SVFGNodeBS edgePts = muNode->getDefSVFVars();
+              if (edgePts.empty())
+                edgePts.insert(getOrCreateUnknownObjId());
+              svfg->addEdge(chiIt->second, muNode, SVFGEdgeK::IntraMu, nullptr,
+                            edgePts);
+
+              if (const LoadInst *li = mu->getLoadInst()) {
+                if (SVFGNode *loadStmt = getLoadStmtNode(li)) {
+                  svfg->addEdge(chiIt->second, loadStmt, SVFGEdgeK::IntraIndirect,
+                                nullptr, edgePts);
+                }
+              }
             }
           }
         }
@@ -1417,7 +1579,10 @@ void SVFGBuilder::connectMemorySSAEdges() {
         svfg->setMSSADef(memReg, retMu, retMuVersion);
 
         if (lastDef) {
-          svfg->addEdge(lastDef, retMu, SVFGEdgeK::RetMu);
+          SVFGNodeBS edgePts = retMu->getDefSVFVars();
+          if (edgePts.empty())
+            edgePts.insert(getOrCreateUnknownObjId());
+          svfg->addEdge(lastDef, retMu, SVFGEdgeK::RetMu, nullptr, edgePts);
         } else {
           // If no def found, connect EntryChi (if exists) to indicate
           // the memory region is passed through without modification.
@@ -1425,11 +1590,21 @@ void SVFGBuilder::connectMemorySSAEdges() {
           if (entryIt != funcEntryChiMap.end()) {
             auto memEntryIt = entryIt->second.find(memReg);
             if (memEntryIt != entryIt->second.end()) {
-              svfg->addEdge(memEntryIt->second, retMu, SVFGEdgeK::RetMu);
+              SVFGNodeBS edgePts = retMu->getDefSVFVars();
+              if (edgePts.empty())
+                edgePts.insert(getOrCreateUnknownObjId());
+              svfg->addEdge(memEntryIt->second, retMu, SVFGEdgeK::RetMu, nullptr,
+                            edgePts);
             }
           }
         }
-        svfg->addEdge(retMu, formalOutMem, SVFGEdgeK::RetFOut);
+        {
+          SVFGNodeBS edgePts = formalOutMem->getDefSVFVars();
+          if (edgePts.empty())
+            edgePts.insert(getOrCreateUnknownObjId());
+          svfg->addEdge(retMu, formalOutMem, SVFGEdgeK::RetFOut, nullptr,
+                        edgePts);
+        }
       }
     }
   }
