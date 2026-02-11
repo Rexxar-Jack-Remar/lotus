@@ -139,13 +139,10 @@ public:
       bool operator!=(const VariableSetIterator &RHS) const {
         return it != RHS.it;
       }
-      
-      VariableSetIterator() {
-      }
+
+      VariableSetIterator() = delete;
    
-      VariableSetIterator(SparseBitVector<>::iterator It, VariableSet* Owner){
-        it = It;
-        owner = Owner;
+      VariableSetIterator(SparseBitVector<>::iterator It, VariableSet* Owner): it(It), owner(Owner) {
       }
     };
     
