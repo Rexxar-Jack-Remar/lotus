@@ -322,7 +322,7 @@ void SVFG::removeNode(SVFGNode *node) {
           callSiteToActualRetMap.erase(mapIt);
       }
     }
-  } else if (dyn_cast<FormalInSVFGNode>(node)) {
+  } else if (isa<FormalInSVFGNode>(node)) {
     if (fun) {
       auto mapIt = funcToFormalInMap.find(fun);
       if (mapIt != funcToFormalInMap.end()) {
@@ -331,7 +331,7 @@ void SVFG::removeNode(SVFGNode *node) {
           funcToFormalInMap.erase(mapIt);
       }
     }
-  } else if (dyn_cast<FormalOutSVFGNode>(node)) {
+  } else if (isa<FormalOutSVFGNode>(node)) {
     if (fun) {
       auto mapIt = funcToFormalOutMap.find(fun);
       if (mapIt != funcToFormalOutMap.end()) {
@@ -340,7 +340,7 @@ void SVFG::removeNode(SVFGNode *node) {
           funcToFormalOutMap.erase(mapIt);
       }
     }
-  } else if (dyn_cast<FormalParmSVFGNode>(node)) {
+  } else if (isa<FormalParmSVFGNode>(node)) {
     if (fun) {
       auto mapIt = funcToFormalParmMap.find(fun);
       if (mapIt != funcToFormalParmMap.end()) {
@@ -349,7 +349,7 @@ void SVFG::removeNode(SVFGNode *node) {
           funcToFormalParmMap.erase(mapIt);
       }
     }
-  } else if (dyn_cast<FormalRetSVFGNode>(node)) {
+  } else if (isa<FormalRetSVFGNode>(node)) {
     if (fun) {
       auto mapIt = funcToFormalRetMap.find(fun);
       if (mapIt != funcToFormalRetMap.end()) {

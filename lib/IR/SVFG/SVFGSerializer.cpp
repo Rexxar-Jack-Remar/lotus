@@ -178,16 +178,16 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
     uint32_t aux1 = 0;
     switch (node->getNodeKind()) {
     case SVFGK::Load:
-      aux0 = static_cast<const LoadSVFGNode *>(node)->getLoadFromPtr();
+      aux0 = dynamic_cast<const LoadSVFGNode *>(node)->getLoadFromPtr();
       break;
     case SVFGK::Store:
-      aux0 = static_cast<const StoreSVFGNode *>(node)->getStoreToPtr();
+      aux0 = dynamic_cast<const StoreSVFGNode *>(node)->getStoreToPtr();
       break;
     case SVFGK::FormalParm:
-      aux0 = static_cast<const FormalParmSVFGNode *>(node)->getParamIndex();
+      aux0 = dynamic_cast<const FormalParmSVFGNode *>(node)->getParamIndex();
       break;
     case SVFGK::ActualParm:
-      aux0 = static_cast<const ActualParmSVFGNode *>(node)->getParamIndex();
+      aux0 = dynamic_cast<const ActualParmSVFGNode *>(node)->getParamIndex();
       break;
     default:
       break;

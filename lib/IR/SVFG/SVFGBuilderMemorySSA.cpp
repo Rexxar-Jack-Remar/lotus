@@ -26,6 +26,7 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Module.h>
+#include <queue>
 
 using namespace lotus::analysis;
 using namespace llvm;
