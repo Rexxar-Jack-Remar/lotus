@@ -139,12 +139,10 @@ bool IFDSSolver<Problem>::propagate_path_edge(const PathEdgeType& edge) {
         return false;
     }
 
-    // Join semantics: only add to worklist if the fact is new at the target node,
-    // to avoid redundant processing when the same (node, fact) is reached via another path.
-    bool fact_new_at_target = (m_entry_facts[edge.target_node].insert(edge.target_fact).second);
-    if (fact_new_at_target) {
-        m_worklist.push_back(edge);
-    }
+    // Preserve context precision: process each newly discovered path edge,
+    // even if another start fact already reached the same (target_node, target_fact).
+    m_entry_facts[edge.target_node].insert(edge.target_fact);
+    m_worklist.push_back(edge);
 
     return true;
 }
@@ -181,9 +179,6 @@ template<typename Problem>
 void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
                                             const llvm::CallBase* call,
                                             const llvm::Function* callee) {
-    // ALWAYS generate call-to-return edges (textbook IFDS requirement)
-    process_call_to_return_edge(current_edge, call);
-
     if (!callee || callee->isDeclaration() || callee->empty()) {
         return;
     }
@@ -369,10 +364,17 @@ void IFDSSolver<Problem>::initialize_call_graph(const llvm::Module& module) {
                 } else if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
                     const auto callee_vec =
                         m_icfg->getCalleesOfCallAt(const_cast<llvm::CallBase*>(call));
-                    if (!callee_vec.empty() && callee_vec.front() != nullptr) {
-                        const llvm::Function* callee = callee_vec.front();
-                        m_call_to_callee[call] = callee;
+                    std::vector<const llvm::Function*> callees;
+                    std::unordered_set<const llvm::Function*> seen;
+                    for (const llvm::Function* callee : callee_vec) {
+                        if (!callee || !seen.insert(callee).second) {
+                            continue;
+                        }
+                        callees.push_back(callee);
                         m_callee_to_calls[callee].push_back(call);
+                    }
+                    if (!callees.empty()) {
+                        m_call_to_callee[call] = std::move(callees);
                     }
                 }
             }
@@ -488,11 +490,13 @@ void IFDSSolver<Problem>::run_tabulation() {
 
         // Process different instruction types
         if (auto* call = llvm::dyn_cast<llvm::CallBase>(curr)) {
+            // Call-to-return flows are always processed once per call edge.
+            process_call_to_return_edge(current_edge, call);
             auto it = m_call_to_callee.find(call);
             if (it != m_call_to_callee.end()) {
-                process_call_edge(current_edge, call, it->second);
-            } else {
-                process_call_to_return_edge(current_edge, call);
+                for (const llvm::Function* callee : it->second) {
+                    process_call_edge(current_edge, call, callee);
+                }
             }
         } else if (auto* ret = llvm::dyn_cast<llvm::ReturnInst>(curr)) {
             process_return_edge(current_edge, ret);

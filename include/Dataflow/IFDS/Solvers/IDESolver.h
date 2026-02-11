@@ -141,6 +141,8 @@ private:
 
     // Helper: memoized composition
     EdgeFunctionPtr compose_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2);
+    // Helper: memoized join for jump-function updates
+    EdgeFunctionPtr join_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2);
 
     // Helper: create shared pointer to edge function
     EdgeFunctionPtr make_edge_function(const EdgeFunction& ef);
@@ -156,8 +158,8 @@ private:
     // Results: instruction -> fact -> value
     std::unordered_map<const llvm::Instruction*, std::unordered_map<Fact, Value>> m_values;
 
-    // Jump functions: path edge -> edge functions
-    std::unordered_map<PathEdgeType, std::vector<EdgeFunctionPtr>, PathEdgeHashType> m_jump_functions;
+    // Jump functions: path edge -> joined edge function
+    std::unordered_map<PathEdgeType, EdgeFunctionPtr, PathEdgeHashType> m_jump_functions;
 
     // Incoming call edges for each callee start fact
     std::unordered_map<StartKey, std::vector<IncomingEdge>, StartKeyHash> m_incoming;
@@ -170,6 +172,7 @@ private:
 
     // Composition memoization table
     std::unordered_map<ComposePair, EdgeFunctionPtr, ComposePairHash> m_compose_cache;
+    std::unordered_map<ComposePair, EdgeFunctionPtr, ComposePairHash> m_join_cache;
 
     // Edge function caches (avoid recomputing same edge function)
     using NormalEdgeKey = std::tuple<const llvm::Instruction*, Fact, Fact>;

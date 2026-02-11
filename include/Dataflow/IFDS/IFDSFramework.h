@@ -336,6 +336,12 @@ public:
     
     // Edge function composition
     virtual EdgeFunction compose(const EdgeFunction& f1, const EdgeFunction& f2) const;
+    // Edge function join (meet-over-all-paths merge on jump functions)
+    virtual EdgeFunction join_edge_functions(const EdgeFunction& f1,
+                                            const EdgeFunction& f2) const;
+    // Heuristic equality check used to suppress redundant jump-function updates.
+    virtual bool edge_function_equivalent(const EdgeFunction& f1,
+                                          const EdgeFunction& f2) const;
     
     // Identity edge function
     EdgeFunction identity() const;
@@ -559,6 +565,28 @@ template<typename Fact, typename Value>
 inline typename IDEProblem<Fact, Value>::EdgeFunction
 IDEProblem<Fact, Value>::compose(const EdgeFunction& f1, const EdgeFunction& f2) const {
     return [f1, f2](const Value& v) { return f1(f2(v)); };
+}
+
+template<typename Fact, typename Value>
+inline typename IDEProblem<Fact, Value>::EdgeFunction
+IDEProblem<Fact, Value>::join_edge_functions(const EdgeFunction& f1,
+                                             const EdgeFunction& f2) const {
+    return [this, f1, f2](const Value& v) { return join(f1(v), f2(v)); };
+}
+
+template<typename Fact, typename Value>
+inline bool IDEProblem<Fact, Value>::edge_function_equivalent(
+    const EdgeFunction& f1, const EdgeFunction& f2) const {
+    const Value top = top_value();
+    const Value bottom = bottom_value();
+    if (!(f1(top) == f2(top))) {
+        return false;
+    }
+    if (!(f1(bottom) == f2(bottom))) {
+        return false;
+    }
+    const Value joined_probe = join(top, bottom);
+    return f1(joined_probe) == f2(joined_probe);
 }
 
 template<typename Fact, typename Value>

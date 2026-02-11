@@ -165,7 +165,7 @@ private:
       m_call_to_return_flow_cache;
 
   // Call graph information (read-only after initialization)
-  std::unordered_map<const llvm::CallBase *, const llvm::Function *>
+  std::unordered_map<const llvm::CallBase *, std::vector<const llvm::Function *>>
       m_call_to_callee;
   std::unordered_map<const llvm::Function *,
                      std::vector<const llvm::CallBase *>>

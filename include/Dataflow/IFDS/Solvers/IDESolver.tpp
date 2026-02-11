@@ -11,6 +11,7 @@
 
 #include <llvm/IR/CFG.h>
 #include <llvm/Support/raw_ostream.h>
+#include "Dataflow/ControlFlow/InterCFG.h"
 #include <algorithm>
 
 namespace ifds {
@@ -50,6 +51,21 @@ IDESolver<Problem>::compose_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2) {
 }
 
 template<typename Problem>
+typename IDESolver<Problem>::EdgeFunctionPtr
+IDESolver<Problem>::join_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2) {
+    ComposePair key{f1, f2};
+    auto it = m_join_cache.find(key);
+    if (it != m_join_cache.end()) {
+        return it->second;
+    }
+
+    EdgeFunction joined = m_problem.join_edge_functions(*f1, *f2);
+    EdgeFunctionPtr result = make_edge_function(joined);
+    m_join_cache[key] = result;
+    return result;
+}
+
+template<typename Problem>
 void IDESolver<Problem>::solve(const llvm::Module& module) {
     using Fact = typename Problem::FactType;
     using Value = typename Problem::ValueType;
@@ -72,12 +88,17 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     m_incoming.clear();
     m_end_summaries.clear();
     m_compose_cache.clear();
+    m_join_cache.clear();
     m_normal_edge_cache.clear();
     m_call_to_return_edge_cache.clear();
     m_worklist.clear();
 
-    // Build call graph
-    std::unordered_map<const llvm::CallBase*, const llvm::Function*> call_to_callee;
+    auto icfg = std::make_unique<::dataflow::controlflow::LLVMInterCFG>(
+        const_cast<llvm::Module*>(&module));
+
+    // Build call graph (supports indirect calls through ICFG resolution)
+    std::unordered_map<const llvm::CallBase*, std::vector<const llvm::Function*>>
+        call_to_callees;
     std::unordered_map<const llvm::Function*, std::vector<const llvm::CallBase*>> callee_to_calls;
 
     for (const llvm::Function& func : module) {
@@ -85,60 +106,52 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         for (const llvm::BasicBlock& bb : func) {
             for (const llvm::Instruction& inst : bb) {
                 if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
-                    if (const llvm::Function* callee = call->getCalledFunction()) {
-                        call_to_callee[call] = callee;
+                    std::vector<const llvm::Function*> callees;
+                    std::unordered_set<const llvm::Function*> seen;
+                    for (const llvm::Function* callee :
+                         icfg->getCalleesOfCallAt(const_cast<llvm::CallBase*>(call))) {
+                        if (!callee || !seen.insert(callee).second) {
+                            continue;
+                        }
+                        callees.push_back(callee);
                         callee_to_calls[callee].push_back(call);
+                    }
+                    if (!callees.empty()) {
+                        call_to_callees[call] = std::move(callees);
                     }
                 }
             }
         }
     }
 
-    // Build CFG successors (including switch and invoke)
+    // Build CFG successors from ICFG (covers invoke/unwind and inter-IR nuances)
     std::unordered_map<const llvm::Instruction*, std::vector<const llvm::Instruction*>> successors;
     for (const llvm::Function& func : module) {
         if (func.isDeclaration()) continue;
         for (const llvm::BasicBlock& bb : func) {
             for (const llvm::Instruction& inst : bb) {
                 std::vector<const llvm::Instruction*> succs;
-                if (auto* br = llvm::dyn_cast<llvm::BranchInst>(&inst)) {
-                    for (unsigned i = 0; i < br->getNumSuccessors(); ++i) {
-                        llvm::BasicBlock* succ = br->getSuccessor(i);
-                        if (succ && !succ->empty()) {
-                            succs.push_back(&succ->front());
-                        }
+                for (auto* succ : icfg->getSuccsOf(
+                         const_cast<llvm::Instruction*>(&inst),
+                         ::dataflow::controlflow::FlowDirection::Forward)) {
+                    if (succ != nullptr) {
+                        succs.push_back(succ);
                     }
-                } else if (auto* sw = llvm::dyn_cast<llvm::SwitchInst>(&inst)) {
-                    for (unsigned i = 0; i < sw->getNumSuccessors(); ++i) {
-                        llvm::BasicBlock* succ = sw->getSuccessor(i);
-                        if (succ && !succ->empty()) {
-                            succs.push_back(&succ->front());
-                        }
-                    }
-                } else if (auto* invoke = llvm::dyn_cast<llvm::InvokeInst>(&inst)) {
-                    llvm::BasicBlock* normalDest = invoke->getNormalDest();
-                    if (normalDest && !normalDest->empty()) {
-                        succs.push_back(&normalDest->front());
-                    }
-                    llvm::BasicBlock* unwindDest = invoke->getUnwindDest();
-                    if (unwindDest && !unwindDest->empty()) {
-                        succs.push_back(&unwindDest->front());
-                    }
-                } else if (llvm::isa<llvm::ReturnInst>(inst) ||
-                          llvm::isa<llvm::UnreachableInst>(inst)) {
-                    // No intraprocedural successors
-                } else if (const llvm::Instruction* next = inst.getNextNode()) {
-                    succs.push_back(next);
                 }
                 successors[&inst] = std::move(succs);
             }
         }
     }
 
-    auto get_return_sites = [&successors](const llvm::CallBase* call) -> std::vector<const llvm::Instruction*> {
-        auto it = successors.find(call);
-        if (it != successors.end()) return it->second;
-        return {};
+    auto get_return_sites = [&](const llvm::CallBase* call)
+        -> std::vector<const llvm::Instruction*> {
+        std::vector<const llvm::Instruction*> result;
+        for (auto* site : icfg->getReturnSitesOfCallAt(const_cast<llvm::CallBase*>(call))) {
+            if (site != nullptr) {
+                result.push_back(site);
+            }
+        }
+        return result;
     };
 
     auto preserve_zero = [&](FactSet& facts, const Fact& source_fact) {
@@ -150,12 +163,18 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     EdgeFunctionPtr identity_func = make_edge_function(m_problem.identity());
 
     auto add_jump_function = [&](const PathEdgeType& edge, EdgeFunctionPtr phi) {
-        auto& funcs = m_jump_functions[edge];
-        if (std::find(funcs.begin(), funcs.end(), phi) != funcs.end()) {
+        auto it = m_jump_functions.find(edge);
+        if (it == m_jump_functions.end()) {
+            m_jump_functions.emplace(edge, phi);
+            m_worklist.emplace_back(edge, phi);
             return;
         }
-        funcs.push_back(phi);
-        m_worklist.emplace_back(edge, phi);
+
+        EdgeFunctionPtr joined = join_cached(it->second, phi);
+        if (it->second != joined) {
+            it->second = joined;
+            m_worklist.emplace_back(edge, joined);
+        }
     };
 
     auto add_incoming = [&](const StartKey& key, const IncomingEdge& incoming) {
@@ -255,20 +274,28 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         const Fact& fact = edge.target_fact;
 
         if (auto* call = llvm::dyn_cast<llvm::CallBase>(curr)) {
-            auto it_callee = call_to_callee.find(call);
-            const llvm::Function* callee = (it_callee != call_to_callee.end()) ? it_callee->second : nullptr;
+            auto it_callees = call_to_callees.find(call);
+            std::vector<const llvm::Function*> callees;
+            if (it_callees != call_to_callees.end()) {
+                callees = it_callees->second;
+            }
+            if (callees.empty()) {
+                callees.push_back(nullptr);
+            }
 
             // Apply optional summary flow/edge functions (special-cased callees)
-            for (const llvm::Instruction* ret_site : get_return_sites(call)) {
-                FactSet summary_facts = m_problem.summary_flow(call, callee, fact);
-                preserve_zero(summary_facts, fact);
-                for (const auto& tgt_fact : summary_facts) {
-                    auto ef = m_problem.summary_edge_function(call, fact, tgt_fact);
-                    EdgeFunctionPtr edge_fn = make_edge_function(ef);
-                    EdgeFunctionPtr new_phi = compose_cached(edge_fn, phi);
-                    add_jump_function(PathEdgeType(edge.start_node, start_fact,
-                                                   ret_site, tgt_fact),
-                                      new_phi);
+            for (const llvm::Function* callee : callees) {
+                for (const llvm::Instruction* ret_site : get_return_sites(call)) {
+                    FactSet summary_facts = m_problem.summary_flow(call, callee, fact);
+                    preserve_zero(summary_facts, fact);
+                    for (const auto& tgt_fact : summary_facts) {
+                        auto ef = m_problem.summary_edge_function(call, fact, tgt_fact);
+                        EdgeFunctionPtr edge_fn = make_edge_function(ef);
+                        EdgeFunctionPtr new_phi = compose_cached(edge_fn, phi);
+                        add_jump_function(PathEdgeType(edge.start_node, start_fact,
+                                                       ret_site, tgt_fact),
+                                          new_phi);
+                    }
                 }
             }
 
@@ -293,7 +320,10 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                 }
             }
 
-            if (callee && !callee->isDeclaration() && !callee->empty()) {
+            for (const llvm::Function* callee : callees) {
+                if (!callee || callee->isDeclaration() || callee->empty()) {
+                    continue;
+                }
                 const llvm::Instruction* callee_entry = &callee->getEntryBlock().front();
                 FactSet call_facts = m_problem.call_flow(call, callee, fact);
                 preserve_zero(call_facts, fact);
@@ -401,10 +431,9 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
 
     for (const auto& entry : m_jump_functions) {
         const PathEdgeType& edge = entry.first;
-        for (const auto& phi : entry.second) {
-            StartKey key{edge.start_node, edge.start_fact};
-            value_edges[key].push_back(ValueEdge{edge.target_node, edge.target_fact, phi});
-        }
+        const EdgeFunctionPtr& phi = entry.second;
+        StartKey key{edge.start_node, edge.start_fact};
+        value_edges[key].push_back(ValueEdge{edge.target_node, edge.target_fact, phi});
     }
 
     for (const auto& entry : m_incoming) {

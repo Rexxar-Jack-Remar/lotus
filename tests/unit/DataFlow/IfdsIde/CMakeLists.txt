@@ -15,6 +15,12 @@ add_lotus_test(ide_edge_function_test IDEEdgeFunctionTest.cpp)
 # IDE Constant Propagation solver test (ported from phasar-development)
 add_lotus_test(ide_constant_propagation_test IDEConstantPropagationTest.cpp)
 
+# IDE jump-function join semantics
+add_lotus_test(ide_jump_function_join_test IDEJumpFunctionJoinTest.cpp)
+
+# Dedicated tests for newly added IDE client analyses
+add_lotus_test(ide_new_analyses_test IDENewAnalysesTest.cpp)
+
 # LLVM flow helper policy tests
 add_lotus_test(llvm_flow_helpers_test LLVMFlowHelpersTest.cpp)
 
