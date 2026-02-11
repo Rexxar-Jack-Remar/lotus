@@ -9,4 +9,6 @@ endif()
 
 target_compile_options(seahorn.KInduction PRIVATE -Wno-deprecated-declarations)
 
+target_link_libraries(seahorn.KInduction PRIVATE SeaTransformsScalar)
+
 set_target_properties(seahorn.KInduction PROPERTIES OUTPUT_NAME "seahorn-kinduction")

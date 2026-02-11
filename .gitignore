@@ -48,6 +48,8 @@ tests/regression/*.ll
 .DS_Store
 cmake-build-*
 build
+build-*
+result_*
 *.a
 *.o
 *.log
