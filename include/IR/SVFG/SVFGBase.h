@@ -241,8 +241,16 @@ inline bool isMemVFGEdge(SVFGEdgeK k) {
 
 /// @brief Check if edge kind is an indirect value-flow edge (carries points-to)
 inline bool isIndirectVFGEdge(SVFGEdgeK k) {
+  // In Lotus, several memory/call edges also carry points-to guards (e.g.,
+  // ActualIn->FormalIn, FormalOut->ActualOut). Treat them as indirect to match
+  // SVF's IndirectSVFGEdge semantics.
   return k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::CallInd ||
-         k == SVFGEdgeK::RetInd || k == SVFGEdgeK::ThreadMHPIndirectVF;
+         k == SVFGEdgeK::RetInd || k == SVFGEdgeK::ThreadMHPIndirectVF ||
+         k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
+         k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
+         k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
+         k == SVFGEdgeK::CallMu || k == SVFGEdgeK::CallChi ||
+         k == SVFGEdgeK::RetMu || k == SVFGEdgeK::EntryChi;
 }
 
 /// @brief Check if edge kind is a thread MHP edge (may-happen-in-parallel)

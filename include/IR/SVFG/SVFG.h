@@ -126,6 +126,18 @@ public:
     using iterator = SVFGNodeMap::iterator;
     using const_iterator = SVFGNodeMap::const_iterator;
 
+    /// @brief Object metadata for DDA (heap/stack/field-insensitive/etc.).
+    struct ObjectInfo {
+        bool isHeap = false;
+        bool isStack = false;
+        bool isGlobal = false;
+        bool isFunction = false;
+        bool isFieldInsensitive = false;
+        bool isArray = false;
+        bool isUnknown = false;
+        uint32_t baseObjId = 0;
+    };
+
 private:
     /// @brief Primary node map: ID -> Node
     SVFGNodeMap nodeMap;
@@ -164,8 +176,32 @@ private:
     std::unordered_map<uint32_t, std::string> objectDebug;
     std::unordered_map<uint32_t, const llvm::Value *> objIdToValue;
     std::unordered_map<const llvm::Value *, uint32_t> valueToObjId;
+    std::unordered_map<uint32_t, ObjectInfo> objIdToInfo;
     std::unordered_map<uint32_t, std::string> nodeFunctionDebug;
     std::unordered_map<uint32_t, std::string> nodeCallSiteDebug;
+
+    /// @brief Indirect-callsite indices used by DDA for on-the-fly call graph refinement.
+    std::unordered_map<uint32_t, std::unordered_set<const llvm::CallBase *>>
+        funPtrToIndCallSites;
+    std::unordered_map<const llvm::CallBase *,
+                       std::unordered_set<const llvm::Function *>>
+        callSiteToConnectedCallees;
+    struct CallSiteCalleeKey {
+        const llvm::CallBase *callSite = nullptr;
+        const llvm::Function *callee = nullptr;
+        bool operator==(const CallSiteCalleeKey &o) const {
+            return callSite == o.callSite && callee == o.callee;
+        }
+    };
+    struct CallSiteCalleeKeyHash {
+        size_t operator()(const CallSiteCalleeKey &k) const noexcept {
+            return std::hash<const void *>()(k.callSite) ^
+                   (std::hash<const void *>()(k.callee) << 1);
+        }
+    };
+    std::unordered_map<CallSiteCalleeKey, uint32_t, CallSiteCalleeKeyHash>
+        callSiteCalleeToId;
+    uint32_t nextCallSiteId = 1;
 
 public:
     /// @brief Constructor
@@ -384,6 +420,116 @@ public:
     /// @brief Return object ID for allocation-site Value* v, or 0 if unknown.
     uint32_t getObjectId(const llvm::Value *v) const;
 
+    //===------------------------------------------------------------------===
+    // Indirect callsite index (DDA)
+    //===------------------------------------------------------------------===
+
+    inline void addIndCallSite(uint32_t funPtrNodeId, const llvm::CallBase *cs) {
+        if (!cs) return;
+        funPtrToIndCallSites[funPtrNodeId].insert(cs);
+    }
+
+    inline const std::unordered_set<const llvm::CallBase *> &
+    getIndCallSites(uint32_t funPtrNodeId) const {
+        static const std::unordered_set<const llvm::CallBase *> empty;
+        auto it = funPtrToIndCallSites.find(funPtrNodeId);
+        return (it != funPtrToIndCallSites.end()) ? it->second : empty;
+    }
+
+    inline const std::unordered_map<uint32_t,
+                                    std::unordered_set<const llvm::CallBase *>> &
+    getIndCallSiteMap() const {
+        return funPtrToIndCallSites;
+    }
+
+    /// @brief Return true if (cs, callee) was newly marked as connected.
+    inline bool markConnectedCallee(const llvm::CallBase *cs,
+                                    const llvm::Function *callee) {
+        if (!cs || !callee) return false;
+        auto &s = callSiteToConnectedCallees[cs];
+        if (!s.insert(callee).second)
+            return false;
+        CallSiteCalleeKey key{cs, callee};
+        if (callSiteCalleeToId.find(key) == callSiteCalleeToId.end())
+            callSiteCalleeToId.emplace(key, nextCallSiteId++);
+        return true;
+    }
+
+    inline bool hasConnectedCallee(const llvm::CallBase *cs,
+                                   const llvm::Function *callee) const {
+        auto it = callSiteToConnectedCallees.find(cs);
+        if (it == callSiteToConnectedCallees.end())
+            return false;
+        return it->second.count(callee) != 0;
+    }
+
+    inline const std::unordered_set<const llvm::Function *> &
+    getConnectedCallees(const llvm::CallBase *cs) const {
+        static const std::unordered_set<const llvm::Function *> empty;
+        auto it = callSiteToConnectedCallees.find(cs);
+        return (it != callSiteToConnectedCallees.end()) ? it->second : empty;
+    }
+
+    /// @brief Return callsite ID for (cs, callee); 0 if not connected.
+    uint32_t getCallSiteId(const llvm::CallBase *cs,
+                           const llvm::Function *callee) const;
+
+    /// @brief Set object metadata for an abstract object ID.
+    inline void setObjectInfo(uint32_t objId, const ObjectInfo &info) {
+        if (objId == 0) return;
+        objIdToInfo[objId] = info;
+    }
+
+    /// @brief Update (merge) object metadata for an abstract object ID.
+    inline void updateObjectInfo(uint32_t objId, const ObjectInfo &info) {
+        if (objId == 0) return;
+        auto &dst = objIdToInfo[objId];
+        dst.isHeap = dst.isHeap || info.isHeap;
+        dst.isStack = dst.isStack || info.isStack;
+        dst.isGlobal = dst.isGlobal || info.isGlobal;
+        dst.isFunction = dst.isFunction || info.isFunction;
+        dst.isFieldInsensitive = dst.isFieldInsensitive || info.isFieldInsensitive;
+        dst.isArray = dst.isArray || info.isArray;
+        dst.isUnknown = dst.isUnknown || info.isUnknown;
+        if (dst.baseObjId == 0)
+            dst.baseObjId = info.baseObjId;
+    }
+
+    /// @brief Get object metadata (nullptr if unknown).
+    inline const ObjectInfo *getObjectInfo(uint32_t objId) const {
+        auto it = objIdToInfo.find(objId);
+        return (it != objIdToInfo.end()) ? &it->second : nullptr;
+    }
+
+    inline bool isHeapObject(uint32_t objId) const {
+        if (const ObjectInfo *info = getObjectInfo(objId)) return info->isHeap;
+        return false;
+    }
+    inline bool isStackObject(uint32_t objId) const {
+        if (const ObjectInfo *info = getObjectInfo(objId)) return info->isStack;
+        return false;
+    }
+    inline bool isGlobalObject(uint32_t objId) const {
+        if (const ObjectInfo *info = getObjectInfo(objId)) return info->isGlobal;
+        return false;
+    }
+    inline bool isFunctionObject(uint32_t objId) const {
+        if (const ObjectInfo *info = getObjectInfo(objId)) return info->isFunction;
+        return false;
+    }
+    inline bool isFieldInsensitiveObject(uint32_t objId) const {
+        if (const ObjectInfo *info = getObjectInfo(objId)) return info->isFieldInsensitive;
+        return false;
+    }
+    inline bool isArrayObject(uint32_t objId) const {
+        if (const ObjectInfo *info = getObjectInfo(objId)) return info->isArray;
+        return false;
+    }
+    inline bool isUnknownObject(uint32_t objId) const {
+        if (const ObjectInfo *info = getObjectInfo(objId)) return info->isUnknown;
+        return false;
+    }
+
     inline void setNodeFunctionDebug(uint32_t nodeId, std::string label) {
         nodeFunctionDebug[nodeId] = std::move(label);
     }
@@ -432,6 +578,11 @@ public:
     /// the value flowing out of \p node. For stmt/phi/param nodes this is the node itself.
     /// Used by DDA for backtraceAlongDirectVF.
     SVFGNode* getLHSTopLevPtr(SVFGNode* node) const;
+
+    /// @brief Return callsite-ret SVFG node if \p n is one, else nullptr.
+    const ActualRetSVFGNode* isCallSiteRetSVFGNode(const SVFGNode* n) const;
+    /// @brief Return fun-entry SVFG node if \p n is one, else nullptr.
+    const FormalParmSVFGNode* isFunEntrySVFGNode(const SVFGNode* n) const;
 
     /// @brief Dump to DOT format
     void dump(const std::string& filename) const;

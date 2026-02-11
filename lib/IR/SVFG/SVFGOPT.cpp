@@ -502,7 +502,12 @@ bool SVFGOPT::bothInterEdges(const SVFGEdge *edge1,
   return e1Inter && e2Inter;
 }
 
-void SVFGOPT::addPHIOperand(PhiSVFGNode *, uint32_t, const llvm::Value *) {}
+void SVFGOPT::addPHIOperand(PhiSVFGNode *phi, uint32_t pos,
+                            const llvm::Value *val) {
+  if (phi && val) {
+    phi->setOpVer(pos, val);
+  }
+}
 
 InterPhiSVFGNode *
 SVFGOPT::addInterPHIForFormalParm(const FormalParmSVFGNode *formalParm) {

@@ -21,6 +21,8 @@
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGSerializer.h"
 
+#include <llvm/Support/Casting.h>
+
 #include <queue>
 
 using namespace lotus::analysis;
@@ -208,7 +210,9 @@ void SVFG::setObjectValue(uint32_t objId, const llvm::Value *v) {
   if (objId == 0 || !v)
     return;
   objIdToValue[objId] = v;
-  valueToObjId[v] = objId;
+  // Preserve the first mapping to avoid clobbering base objects with field objects.
+  if (valueToObjId.find(v) == valueToObjId.end())
+    valueToObjId[v] = objId;
 }
 
 const llvm::Value *SVFG::getObjectValue(uint32_t objId) const {
@@ -221,6 +225,17 @@ uint32_t SVFG::getObjectId(const llvm::Value *v) const {
     return 0;
   auto it = valueToObjId.find(v);
   return (it != valueToObjId.end()) ? it->second : 0;
+}
+
+uint32_t SVFG::getCallSiteId(const llvm::CallBase *cs,
+                             const llvm::Function *callee) const {
+  if (!cs || !callee)
+    return 0;
+  if (!hasConnectedCallee(cs, callee))
+    return 0;
+  CallSiteCalleeKey key{cs, callee};
+  auto it = callSiteCalleeToId.find(key);
+  return (it != callSiteCalleeToId.end()) ? it->second : 0;
 }
 
 void SVFG::removeNode(SVFGNode *node) {
@@ -508,6 +523,14 @@ SVFGNode *SVFG::getLHSTopLevPtr(SVFGNode *node) const {
   return node;
 }
 
+const ActualRetSVFGNode *SVFG::isCallSiteRetSVFGNode(const SVFGNode *n) const {
+  return llvm::dyn_cast_or_null<ActualRetSVFGNode>(n);
+}
+
+const FormalParmSVFGNode *SVFG::isFunEntrySVFGNode(const SVFGNode *n) const {
+  return llvm::dyn_cast_or_null<FormalParmSVFGNode>(n);
+}
+
 void SVFG::dump(const std::string &filename) const {
   (void)SVFGSerializer::writeDot(*this, filename);
 }
@@ -560,6 +583,10 @@ void SVFG::swapWith(SVFG &other) {
   swap(nodeFunctionDebug, other.nodeFunctionDebug);
   swap(nodeCallSiteDebug, other.nodeCallSiteDebug);
   swap(nodesForUpdate, other.nodesForUpdate);
+  swap(funPtrToIndCallSites, other.funPtrToIndCallSites);
+  swap(callSiteToConnectedCallees, other.callSiteToConnectedCallees);
+  swap(callSiteCalleeToId, other.callSiteCalleeToId);
+  swap(nextCallSiteId, other.nextCallSiteId);
 }
 
 void SVFG::markForUpdate(SVFGNode *node) {

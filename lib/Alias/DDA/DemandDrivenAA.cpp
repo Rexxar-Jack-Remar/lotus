@@ -18,6 +18,9 @@
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
+#include <llvm/Analysis/CaptureTracking.h>
+#include <llvm/Analysis/LoopInfo.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Casting.h>
@@ -53,7 +56,11 @@ bool DemandDrivenAA::handleBKCondition(LocDPItem &dpm, SVFGEdge *edge) {
 }
 
 void DemandDrivenAA::handleOutOfBudgetDpm(const LocDPItem &dpm) {
-  (void)dpm;
+  // Downgrade to conservative points-to (base PTA if available).
+  const PtsSet conservativePts = getConservativeCPts(dpm);
+  if (!conservativePts.empty())
+    updateCachedPointsTo(dpm, conservativePts);
+  addOutOfBudgetDpm(dpm);
 }
 
 bool DemandDrivenAA::run(Module &M) {
@@ -64,6 +71,9 @@ bool DemandDrivenAA::run(Module &M) {
     icfgBuilder_ = std::make_unique<::ICFGBuilder>(icfg_.get());
     icfgBuilder_->build(&M);
     SVFGBuilderConfig cfg;
+    // Match SVF FlowDDA/ContextDDA: indirect-call edges are inserted on-the-fly
+    // when function-pointer points-to is discovered.
+    cfg.resolveIndirectCalls = false;
     svfgBuilder_ = std::make_unique<SVFGBuilder>(cfg);
     SVFG *built = svfgBuilder_->build(icfg_.get());
     if (!built) {
@@ -75,6 +85,7 @@ bool DemandDrivenAA::run(Module &M) {
     svfg_.reset(built);
     module_ = &M;
     buildRecursionInfo();
+    buildLoopInfo();
   } catch (const std::exception &) {
     icfg_.reset();
     icfgBuilder_.reset();
@@ -89,13 +100,9 @@ bool DemandDrivenAA::run(Module &M) {
 void DemandDrivenAA::resetQuery() {
   if (outOfBudget_)
     OOBResetVisited();
-  backwardVisited_.clear();
-  dpmToTLPtsMap_.clear();
-  dpmToADPtsMap_.clear();
   locToDpmSetMap_.clear();
   dpmToLoadDpmMap_.clear();
   dpmToLoadCVarMap_.clear();
-  outOfBudgetDpms_.clear();
   numSteps_ = 0;
   outOfBudget_ = false;
   if (ddaStat_)
@@ -132,16 +139,16 @@ bool DemandDrivenAA::unionDDAPts(const LocDPItem &dpm, const PtsSet &pts) {
     return !pts.empty();
   }
   size_t oldSize = it->second.size();
-  for (const Value *v : pts)
-    it->second.insert(v);
+  for (uint32_t id : pts)
+    it->second.insert(id);
   return it->second.size() != oldSize;
 }
 
 void DemandDrivenAA::unionDDAPts(PtsSet &target, const PtsSet &source) {
   // Match SVF DDAVFSolver::unionDDAPts(CPtSet&, const CPtSet&)
   // Simple union: insert all elements from source into target
-  for (const Value *v : source)
-    target.insert(v);
+  for (uint32_t id : source)
+    target.insert(id);
 }
 
 void DemandDrivenAA::updateCachedPointsTo(const LocDPItem &dpm,
@@ -157,20 +164,29 @@ void DemandDrivenAA::reCompute(const LocDPItem &dpm) {
   if (!node || !svfg_)
     return;
   
-  // Match SVF DDAVFSolver::reCompute: handle indirect call edge updates
-  // Check if this is a function pointer node that may need indirect call resolution
-  // In SVF, this checks _pag->isFunPtr(dpm.getCurNodeID())
-  // We approximate by checking if the node's value is a function pointer type
-  const Value *nodeVal = node->getValue();
-  if (nodeVal && nodeVal->getType()->isPointerTy()) {
-    // Check if it's a function pointer (used at indirect call sites)
-    if (const Type *elemTy = nodeVal->getType()->getPointerElementType()) {
-      if (isa<FunctionType>(elemTy)) {
-        // This is a function pointer - may need to update indirect call edges
-        // Note: In SVF, updateCallGraphAndSVFG is called here, but we don't
-        // have direct call graph update capability. The SVFG builder handles
-        // this during construction, so we skip explicit updates here.
+  // Match SVF DDAVFSolver::reCompute: update call graph/SVFG for indirect calls
+  // on-the-fly when function-pointer points-to changes.
+  const auto &indCallSites = svfg_->getIndCallSites(dpm.getCurNodeID());
+  if (!indCallSites.empty() && svfgBuilder_) {
+    const PtsSet &funPts = getCachedPointsTo(dpm);
+    std::vector<SVFGEdge *> newEdges;
+    for (const CallBase *cs : indCallSites) {
+      if (!cs)
+        continue;
+      for (uint32_t objId : funPts) {
+        if (objId == 0)
+          continue;
+        const Value *v = svfg_->getObjectValue(objId);
+        const Function *callee = dyn_cast_or_null<Function>(v);
+        if (!callee || callee->isDeclaration())
+          continue;
+        (void)svfgBuilder_->connectCallSiteToCalleeOnTheFly(
+            svfg_.get(), cs, callee, newEdges);
       }
+    }
+    if (!newEdges.empty()) {
+      buildRecursionInfo();
+      reComputeForEdges(dpm, newEdges, true);
     }
   }
   
@@ -215,13 +231,12 @@ void DemandDrivenAA::resolveFunPtr(const LocDPItem &dpm) {
   const SVFGNode *node = dpm.getLoc();
   if (!node || !svfg_)
     return;
-  
-  // Match SVF DDAVFSolver::resolveFunPtr: handle call site return nodes
-  // Check if this is a return node at a call site (ActualRetSVFGNode)
+
+  // SVF DDAVFSolver::resolveFunPtr case 1: at a call-site return node,
+  // resolve the function pointer at this indirect call site.
   if (const ActualRetSVFGNode *retNode = dyn_cast<ActualRetSVFGNode>(node)) {
     const llvm::CallBase *cs = retNode->getCallSite();
     if (cs && !cs->getCalledFunction()) {
-      // Indirect call: resolve function pointer
       const Value *calledOp = cs->getCalledOperand();
       if (calledOp && calledOp->getType()->isPointerTy()) {
         SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
@@ -232,31 +247,33 @@ void DemandDrivenAA::resolveFunPtr(const LocDPItem &dpm) {
       }
     }
   }
-  
-  // Match SVF: handle function entry nodes (FormalRetSVFGNode at function entry)
-  // When analyzing from a function entry, we need to resolve all indirect calls
-  // that may call this function. This is less common in backward analysis but
-  // may be needed for some forward-looking queries.
-  if (const FormalRetSVFGNode *formalRet = dyn_cast<FormalRetSVFGNode>(node)) {
-    const llvm::Function *fun = formalRet->getFunction();
-    if (fun && !fun->isDeclaration() && module_) {
-      // Find all indirect call sites that may call this function
-      // We iterate through the module to find indirect calls
-      for (const llvm::Function &F : *module_) {
-        for (const llvm::BasicBlock &BB : F) {
-          for (const llvm::Instruction &I : BB) {
-            const llvm::CallBase *cb = dyn_cast<llvm::CallBase>(&I);
-            if (!cb || cb->getCalledFunction())
-              continue;
-            // Indirect call: resolve function pointer
-            const Value *calledOp = cb->getCalledOperand();
-            if (calledOp && calledOp->getType()->isPointerTy()) {
-              SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
-              if (funPtrNode) {
-                LocDPItem funPtrDpm(funPtrNode->getId(), funPtrNode);
-                findPT(funPtrDpm);
-              }
-            }
+
+  // SVF DDAVFSolver::resolveFunPtr case 2: at a function entry node
+  // (FormalParmSVFGNode), find indirect call sites that may invoke this
+  // function and resolve their function pointers.
+  // Uses the SVFG's funPtrToIndCallSites map instead of scanning the module.
+  if (const FormalParmSVFGNode *formalParm =
+          dyn_cast<FormalParmSVFGNode>(node)) {
+    const llvm::Function *fun = formalParm->getFunction();
+    if (fun && !fun->isDeclaration()) {
+      // Look up indirect call sites whose function pointer could resolve to
+      // this callee. We iterate all registered (funPtrNodeId -> callsite)
+      // entries and resolve any whose call targets may include `fun`.
+      for (auto &pair : *svfg_) {
+        SVFGNode *n = pair.second;
+        if (!n)
+          continue;
+        const auto &indCS = svfg_->getIndCallSites(n->getId());
+        for (const llvm::CallBase *cs : indCS) {
+          if (!cs || cs->getCalledFunction())
+            continue;
+          const Value *calledOp = cs->getCalledOperand();
+          if (!calledOp || !calledOp->getType()->isPointerTy())
+            continue;
+          SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
+          if (funPtrNode) {
+            LocDPItem funPtrDpm(funPtrNode->getId(), funPtrNode);
+            findPT(funPtrDpm);
           }
         }
       }
@@ -304,51 +321,39 @@ bool DemandDrivenAA::propagateViaObj(uint32_t storeObjId,
   return storeObjId == loadCVarObjId;
 }
 
-bool DemandDrivenAA::isHeapCondMemObj(const Value *v,
+bool DemandDrivenAA::isHeapCondMemObj(uint32_t objId,
                                        const StoreSVFGNode *store) const {
-  if (!v)
+  if (objId == 0)
     return false;
-  
-  // Match SVF FlowDDA::isHeapCondMemObj logic
-  // SVF checks if the base object is HeapObjVar or DummyObjVar
-  // We approximate by checking if v is a result of heap allocation calls
-  
-  // Check if v is a result of a heap allocation call
-  if (const llvm::CallBase *cb = dyn_cast<llvm::CallBase>(v)) {
-    const llvm::Function *callee = cb->getCalledFunction();
-    if (callee) {
-      llvm::StringRef name = callee->getName();
-      // Standard heap allocation functions
-      if (name == "malloc" || name == "calloc" || name == "realloc" ||
-          name == "_Znam" || name == "_Znwm" || name == "aligned_alloc" ||
-          name == "posix_memalign" || name == "memalign" || name == "valloc") {
-        return true;
-      }
+  if (!svfg_)
+    return false;
+  // Match SVF: heap/unknown objects are conditional strong-update candidates.
+  if (svfg_->isUnknownObject(objId))
+    return true;
+
+  if (!svfg_->isHeapObject(objId))
+    return false;
+
+  // Approximate SVF's "local heap" strong-update condition:
+  // allow strong update for non-captured heap objects allocated in the same
+  // non-recursive function as the store.
+  const Value *allocV = svfg_->getObjectValue(objId);
+  const Instruction *allocI = dyn_cast_or_null<Instruction>(allocV);
+  const StoreInst *storeI =
+      store ? dyn_cast_or_null<StoreInst>(store->getValue()) : nullptr;
+
+  const Function *allocF = allocI ? allocI->getFunction() : nullptr;
+  const Function *storeF = storeI ? storeI->getFunction() : nullptr;
+
+  if (allocV && allocF && storeF && allocF == storeF &&
+      recursiveFunctions_.count(storeF) == 0) {
+    if (!llvm::PointerMayBeCaptured(allocV, /*ReturnCaptures*/ true,
+                                   /*StoreCaptures*/ true)) {
+      return false;
     }
   }
-  
-  // Check if v is a result of operator new (C++)
-  if (const llvm::Instruction *inst = dyn_cast<llvm::Instruction>(v)) {
-    if (const llvm::CallBase *cb = dyn_cast<llvm::CallBase>(inst)) {
-      const llvm::Function *callee = cb->getCalledFunction();
-      if (callee) {
-        llvm::StringRef name = callee->getName();
-        // C++ new operators
-        if (name.startswith("_Znw") || name.startswith("_Zna")) {
-          return true;
-        }
-      }
-    }
-  }
-  
-  // In SVF, there are additional checks:
-  // - Local allocated heap that hasn't escaped
-  // - Not inside loop
-  // - Not involved in recursion
-  // These are more complex and require more context, so we use a conservative
-  // approach: if it's a heap allocation, we mark it as heap
-  
-  return false;
+
+  return true;
 }
 
 bool DemandDrivenAA::isLocalCVarInRecursion(uint32_t objId) const {
@@ -362,6 +367,18 @@ bool DemandDrivenAA::isLocalCVarInRecursion(uint32_t objId) const {
     return false;
   const llvm::Function *f = inst->getFunction();
   return f && recursiveFunctions_.count(f) != 0;
+}
+
+bool DemandDrivenAA::isArrayCondMemObj(uint32_t objId) const {
+  if (!svfg_ || objId == 0)
+    return false;
+  return svfg_->isArrayObject(objId);
+}
+
+bool DemandDrivenAA::isFieldInsenCondMemObj(uint32_t objId) const {
+  if (!svfg_ || objId == 0)
+    return false;
+  return svfg_->isFieldInsensitiveObject(objId);
 }
 
 bool DemandDrivenAA::testOutOfBudget(const LocDPItem &dpm) {
@@ -441,16 +458,27 @@ bool DemandDrivenAA::isIndirectEdge(SVFGEdge *e) {
   if (!e)
     return false;
   SVFGEdgeK k = e->getEdgeKind();
+  // Treat memory/call edges carrying points-to guards as indirect (SVF-style).
   return k == SVFGEdgeK::IntraLoad || k == SVFGEdgeK::IntraStore ||
          k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
          k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::CallInd ||
-         k == SVFGEdgeK::RetInd || k == SVFGEdgeK::ThreadMHPIndirectVF;
+         k == SVFGEdgeK::RetInd || k == SVFGEdgeK::ThreadMHPIndirectVF ||
+         k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
+         k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
+         k == SVFGEdgeK::CallMu || k == SVFGEdgeK::CallChi ||
+         k == SVFGEdgeK::RetMu || k == SVFGEdgeK::EntryChi;
 }
 
 void DemandDrivenAA::handleAddr(PtsSet &pts, const LocDPItem &,
                                 const AddrSVFGNode *addr) {
-  if (const Value *v = addr->getValue())
-    pts.insert(v);
+  if (!addr)
+    return;
+  const Value *v = addr->getValue();
+  if (!v)
+    return;
+  SVFGNodeBS objIds = getObjectIdsForValue(v);
+  for (uint32_t id : objIds)
+    pts.insert(id);
 }
 
 void DemandDrivenAA::backwardPropDpm(PtsSet &pts, uint32_t ptrNodeId,
@@ -506,7 +534,6 @@ void DemandDrivenAA::backtraceAlongIndirectVF(PtsSet &pts,
     return;
   const uint32_t obj = oldDpm.getCurNodeID();
   // Match SVF DDAVFSolver: skip constant objects (obj == 0 represents null/constant).
-  // In SVF, this checks _pag->isConstantObj(obj), which includes null and constants.
   if (obj == 0)
     return;
   for (SVFGEdge *edge : node->getInEdges()) {
@@ -515,17 +542,21 @@ void DemandDrivenAA::backtraceAlongIndirectVF(PtsSet &pts,
     // Match SVF DDAVFSolver::backtraceAlongIndirectVF: only follow indirect edge
     // when obj is in guard (pointsTo set). In SVF: guard.test(obj) checks membership.
     const std::set<uint32_t> &guard = edge->getPointsTo();
-    // If guard is empty, guard.test(obj) would return false, so don't follow.
-    // If guard is not empty, only follow if obj is in guard.
-    if (guard.empty() || guard.count(obj) == 0)
-      continue;
-    SVFGNode *src = edge->getSrcNode();
-    if (!src)
-      continue;
-    SVFGNode *lhs = svfg_->getLHSTopLevPtr(src);
-    if (!lhs)
-      continue;
-    backwardPropDpm(pts, lhs->getId(), oldDpm, edge);
+    // Lotus SVFG may leave guard empty when PTA is unavailable/unknown; be conservative.
+    if (!guard.empty() && guard.count(obj) == 0) {
+      bool hasWildcard = false;
+      for (uint32_t id : guard) {
+        if (svfg_->isUnknownObject(id)) {
+          hasWildcard = true;
+          break;
+        }
+      }
+      if (!hasWildcard)
+        continue;
+    }
+    // SVF passes oldDpm.getCurNodeID() (the object being tracked) as ptrNodeId.
+    // The object ID stays the same when backtracing along indirect (memory SSA) edges.
+    backwardPropDpm(pts, oldDpm.getCurNodeID(), oldDpm, edge);
   }
 }
 
@@ -577,42 +608,21 @@ DemandDrivenAA::PtsSet DemandDrivenAA::processGepPts(const GepSVFGNode *gep,
   PtsSet tmpDstPts;
   
   // Match SVF FlowDDA::processGepPts logic
-  for (const Value *ptd : srcPts) {
-    // Check if this is a block object or constant (pass through)
-    // In SVF, isBlkObjOrConstantObj checks for null/undef/constant objects
-    // We approximate by checking if it's a constant or null
-    if (isa<Constant>(ptd) || isa<ConstantPointerNull>(ptd)) {
-      tmpDstPts.insert(ptd);
+  const bool isVariantFieldGep = !gi->hasAllConstantIndices();
+  for (uint32_t objId : srcPts) {
+    if (objId == 0) {
+      tmpDstPts.insert(objId);
       continue;
     }
-    
-    // Handle field-sensitive GEP
-    // In SVF: if variant field GEP, mark field-insensitive; else getGepObjVar
-    // For variant field GEPs (non-constant indices), SVF marks objects as field-insensitive
-    bool isVariantFieldGep = false;
-    if (gi->hasIndices()) {
-      // Check if any index is not constant
-      for (unsigned i = 1; i < gi->getNumOperands(); ++i) {
-        if (!isa<ConstantInt>(gi->getOperand(i))) {
-          isVariantFieldGep = true;
-          break;
-        }
-      }
+    uint32_t gepObjId = 0;
+    if (svfgBuilder_) {
+      gepObjId = svfgBuilder_->getGepObjectId(objId, gi);
+      if (isVariantFieldGep && gepObjId == 0)
+        gepObjId = svfgBuilder_->getOrCreateFIObjId(objId);
     }
-    
-    if (isVariantFieldGep) {
-      // Variant field GEP: pass through the base object (field-insensitive)
-      // In SVF, this would call setObjFieldInsensitive and getFIObjVar
-      // For now, we pass through the base object
-      tmpDstPts.insert(ptd);
-    } else {
-      // Constant field GEP: create field object
-      // In SVF, this would call getGepObjVar with the field index
-      // For now, we pass through the base object
-      // TODO: Implement proper field-sensitive object creation when we have
-      // object ID mapping and field tracking
-      tmpDstPts.insert(ptd);
-    }
+    if (gepObjId == 0)
+      gepObjId = objId;
+    tmpDstPts.insert(gepObjId);
   }
   
   return tmpDstPts;
@@ -622,29 +632,16 @@ bool DemandDrivenAA::isStrongUpdate(const PtsSet &dstPts,
                                    const StoreSVFGNode *store) {
   if (dstPts.size() != 1)
     return false;
-  
-  const Value *v = *dstPts.begin();
-  
+  const uint32_t objId = *dstPts.begin();
   // Match SVF DDAVFSolver::isStrongUpdate: exclude heap, array, field-insensitive, recursion
-  if (isHeapCondMemObj(v, store))
+  if (isHeapCondMemObj(objId, store))
     return false;
-  
-  // Check for array objects (arrays cannot have strong updates)
-  if (const Type *elemTy = v->getType()->getPointerElementType()) {
-    if (elemTy->isArrayTy())
-      return false;
-  }
-  
-  // Check for field-insensitive objects
-  // In SVF, this checks isFieldInsenCondMemObj which checks baseObj->isFieldInsensitive()
-  // We approximate by checking if the value is a struct pointer with variant GEPs
-  // For now, we skip this check as we don't track field-insensitive flags
-  
-  // Check for local variables in recursion
-  uint32_t objId = svfg_->getObjectId(v);
-  if (objId != 0 && isLocalCVarInRecursion(objId))
+  if (isArrayCondMemObj(objId))
     return false;
-  
+  if (isFieldInsenCondMemObj(objId))
+    return false;
+  if (isLocalCVarInRecursion(objId))
+    return false;
   return true;
 }
 
@@ -663,19 +660,6 @@ const DemandDrivenAA::PtsSet &DemandDrivenAA::findPT(const LocDPItem &dpm) {
   if (testOutOfBudget(dpm)) {
     addOutOfBudgetDpm(dpm);
     handleOutOfBudgetDpm(dpm);
-    // Return conservative points-to if available, otherwise empty
-    PtsSet conservativePts = getConservativeCPts(dpm);
-    if (!conservativePts.empty()) {
-      if (isTopLevelPtrStmt(dpm.getLoc()))
-        dpmToTLPtsMap_[dpm] = conservativePts;
-      else
-        dpmToADPtsMap_[dpm] = conservativePts;
-    } else {
-      if (isTopLevelPtrStmt(dpm.getLoc()))
-        dpmToTLPtsMap_.emplace(dpm, PtsSet{});
-      else
-        dpmToADPtsMap_.emplace(dpm, PtsSet{});
-    }
     return getCachedPointsTo(dpm);
   }
 
@@ -727,8 +711,7 @@ void DemandDrivenAA::handleSingleStatement(const LocDPItem &dpm, PtsSet &pts) {
       break;
     PtsSet loadPts;
     startNewPTCompFromLoadSrc(loadPts, dpm);
-    for (const Value *v : loadPts) {
-      uint32_t objId = svfg_->getObjectId(v);
+    for (uint32_t objId : loadPts) {
       LocDPItem objDpm = getDPImWithOldCond(dpm, objId, load);
       // getDPImWithOldCond already adds loadDpm/loadCVar for Load nodes.
       backtraceAlongIndirectVF(pts, objDpm, PtsSet{});
@@ -737,8 +720,15 @@ void DemandDrivenAA::handleSingleStatement(const LocDPItem &dpm, PtsSet &pts) {
   }
   case SVFGK::Store: {
     const StoreSVFGNode *store = cast<StoreSVFGNode>(node);
-    if (!store->getValue() || !store->getValue()->getType()->isPointerTy())
+    // SVF checks store->getPAGSrcNode()->isPointer(), i.e. whether the value
+    // being stored is a pointer.  StoreInst::getType() is void, not the
+    // stored value's type, so we must check the value operand explicitly.
+    if (const StoreInst *si = dyn_cast_or_null<StoreInst>(store->getValue())) {
+      if (!si->getValueOperand()->getType()->isPointerTy())
+        break;
+    } else {
       break;
+    }
     
     // Match SVF DDAVFSolver Store handling: check must-alias first
     if (hasLoadDpm(dpm) && isMustAlias(getLoadDpm(dpm), dpm)) {
@@ -755,8 +745,7 @@ void DemandDrivenAA::handleSingleStatement(const LocDPItem &dpm, PtsSet &pts) {
     if (!storePts.empty()) {
       // Match SVF DDAVFSolver Store handling: for each store target, check propagateViaObj.
       bool hasStrongUpdate = false;
-      for (const Value *v : storePts) {
-        uint32_t objId = svfg_->getObjectId(v);
+      for (uint32_t objId : storePts) {
         if (propagateViaObj(objId, getLoadCVar(dpm))) {
           LocDPItem objDpm = getDPImWithOldCond(dpm, objId, store);
           // getDPImWithOldCond already adds loadDpm/loadCVar for Store nodes.
@@ -827,7 +816,12 @@ bool DemandDrivenAA::getPointsToSet(const Value *ptr,
                                     std::vector<const Value *> &out) {
   out.clear();
   PtsSet pts = getPointsTo(ptr);
-  out.insert(out.end(), pts.begin(), pts.end());
+  if (!svfg_)
+    return !pts.empty();
+  for (uint32_t objId : pts) {
+    if (const Value *v = svfg_->getObjectValue(objId))
+      out.push_back(v);
+  }
   return !out.empty();
 }
 
@@ -845,10 +839,24 @@ void DemandDrivenAA::buildRecursionInfo() {
         const llvm::CallBase *cb = dyn_cast<llvm::CallBase>(&I);
         if (!cb)
           continue;
-        const llvm::Function *callee = cb->getCalledFunction();
-        if (!callee || callee->isDeclaration())
-          continue;
-        callGraph[&F].push_back(callee);
+        std::vector<const llvm::Function *> callees;
+        if (const llvm::Function *direct = cb->getCalledFunction()) {
+          if (!direct->isDeclaration())
+            callees.push_back(direct);
+        } else if (svfg_) {
+          const auto &connected = svfg_->getConnectedCallees(cb);
+          for (const llvm::Function *callee : connected)
+            callees.push_back(callee);
+          if (callees.empty() && svfgBuilder_)
+            callees = svfgBuilder_->getIndirectCallTargets(cb);
+        } else if (svfgBuilder_) {
+          callees = svfgBuilder_->getIndirectCallTargets(cb);
+        }
+        for (const llvm::Function *callee : callees) {
+          if (!callee || callee->isDeclaration())
+            continue;
+          callGraph[&F].push_back(callee);
+        }
       }
   }
   std::unordered_map<const llvm::Function *, uint32_t> index, lowlink;
@@ -903,6 +911,20 @@ void DemandDrivenAA::buildRecursionInfo() {
   }
 }
 
+void DemandDrivenAA::buildLoopInfo() {
+  loopInfoMap_.clear();
+  if (!module_)
+    return;
+  for (const llvm::Function &F : *module_) {
+    if (F.isDeclaration())
+      continue;
+    llvm::DominatorTree DT(const_cast<llvm::Function &>(F));
+    auto LI = std::make_unique<llvm::LoopInfo>();
+    LI->analyze(DT);
+    loopInfoMap_[&F] = std::move(LI);
+  }
+}
+
 bool DemandDrivenAA::mayAlias(const Value *v1, const Value *v2) {
   if (!initialized_ || !v1 || !v2)
     return true;
@@ -914,8 +936,8 @@ bool DemandDrivenAA::mayAlias(const Value *v1, const Value *v2) {
     return true;
   PtsSet pts1 = getPointsToCached(p1);
   PtsSet pts2 = getPointsToCached(p2);
-  for (const Value *v : pts1) {
-    if (pts2.count(v))
+  for (uint32_t id : pts1) {
+    if (pts2.count(id))
       return true;
   }
   return false;
@@ -924,14 +946,68 @@ bool DemandDrivenAA::mayAlias(const Value *v1, const Value *v2) {
 bool DemandDrivenAA::mayNull(const Value *ptr) {
   if (!ptr || !ptr->getType()->isPointerTy())
     return false;
-  return true;
+  PtsSet pts = getPointsToCached(ptr->stripPointerCasts());
+  if (pts.count(0) != 0)
+    return true;
+  if (svfg_) {
+    for (uint32_t id : pts) {
+      if (svfg_->isUnknownObject(id))
+        return true;
+    }
+  }
+  return false;
 }
 
 DemandDrivenAA::PtsSet DemandDrivenAA::getConservativeCPts(const LocDPItem &dpm) const {
-  // Default implementation: return empty set
-  // Subclasses or clients can override to use base pointer analysis
-  (void)dpm;
-  return PtsSet{};
+  if (!svfg_)
+    return PtsSet{};
+  const Value *v = nullptr;
+  if (const Value *objVal = svfg_->getObjectValue(dpm.getCurNodeID()))
+    v = objVal;
+  else if (const SVFGNode *loc = dpm.getLoc())
+    v = loc->getValue();
+  if (!v || !v->getType()->isPointerTy())
+    return PtsSet{};
+  SVFGNodeBS ids = getObjectIdsForValue(v);
+  PtsSet out;
+  for (uint32_t id : ids)
+    out.insert(id);
+  return out;
+}
+
+SVFGNodeBS DemandDrivenAA::getObjectIdsForValue(const Value *v) const {
+  SVFGNodeBS ids;
+  if (!v || !v->getType()->isPointerTy())
+    return ids;
+  if (svfg_) {
+    const uint32_t id = svfg_->getObjectId(v);
+    if (id != 0)
+      ids.insert(id);
+  }
+  if (svfgBuilder_) {
+    SVFGNodeBS ptaIds = svfgBuilder_->getObjectIdsForValue(v);
+    ids.insert(ptaIds.begin(), ptaIds.end());
+  }
+  return ids;
+}
+
+bool DemandDrivenAA::isRecursiveFunction(const Function *f) const {
+  if (!f)
+    return false;
+  return recursiveFunctions_.count(f) != 0;
+}
+
+bool DemandDrivenAA::isInLoop(const llvm::Instruction *inst) const {
+  if (!inst)
+    return false;
+  const llvm::Function *f = inst->getFunction();
+  if (!f)
+    return false;
+  auto it = loopInfoMap_.find(f);
+  if (it == loopInfoMap_.end() || !it->second)
+    return false;
+  const llvm::BasicBlock *bb = inst->getParent();
+  return bb && it->second->getLoopFor(bb) != nullptr;
 }
 
 bool DemandDrivenAA::isTopLevelPtrStmt(const SVFGNode *stmt) const {

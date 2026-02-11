@@ -38,6 +38,7 @@
 #include "IR/SVFG/SVFGBase.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -231,8 +232,25 @@ public:
 /// @brief Binary operation node
 class BinaryOpSVFGNode : public StmtSVFGNode {
 public:
+  using OPVers = std::map<uint32_t, const llvm::Value *>;
+
+private:
+  OPVers opVers;
+
+public:
   BinaryOpSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Value *v)
       : StmtSVFGNode(id, SVFGK::BinaryOp, icfg, v) {}
+
+  inline void setOpVer(uint32_t pos, const llvm::Value *val) {
+    opVers[pos] = val;
+  }
+  inline const llvm::Value *getOpVer(uint32_t pos) const {
+    auto it = opVers.find(pos);
+    return (it != opVers.end()) ? it->second : nullptr;
+  }
+  inline uint32_t getOpVerNum() const { return opVers.size(); }
+  inline OPVers::const_iterator opVerBegin() const { return opVers.begin(); }
+  inline OPVers::const_iterator opVerEnd() const { return opVers.end(); }
 
   SVFG_NODE_KIND(BinaryOp)
 };
@@ -240,8 +258,25 @@ public:
 /// @brief Comparison instruction node
 class CmpSVFGNode : public StmtSVFGNode {
 public:
+  using OPVers = std::map<uint32_t, const llvm::Value *>;
+
+private:
+  OPVers opVers;
+
+public:
   CmpSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Value *v)
       : StmtSVFGNode(id, SVFGK::Cmp, icfg, v) {}
+
+  inline void setOpVer(uint32_t pos, const llvm::Value *val) {
+    opVers[pos] = val;
+  }
+  inline const llvm::Value *getOpVer(uint32_t pos) const {
+    auto it = opVers.find(pos);
+    return (it != opVers.end()) ? it->second : nullptr;
+  }
+  inline uint32_t getOpVerNum() const { return opVers.size(); }
+  inline OPVers::const_iterator opVerBegin() const { return opVers.begin(); }
+  inline OPVers::const_iterator opVerEnd() const { return opVers.end(); }
 
   SVFG_NODE_KIND(Cmp)
 };
@@ -256,9 +291,17 @@ public:
 };
 
 /// @brief Base PHI node (SSA form)
+///
+/// Maintains an operand map (position -> Value*) matching SVF's
+/// PHIVFGNode::OPVers. This is used by SVFGOPT when converting
+/// FormalParm/ActualRet into InterPhi nodes.
 class PhiSVFGNode : public SVFGNode {
+public:
+  using OPVers = std::map<uint32_t, const llvm::Value *>;
+
 protected:
   const llvm::PHINode *phiNode;
+  OPVers opVers;
 
 public:
   PhiSVFGNode(uint32_t id, SVFGK k, const ICFGNode *icfg,
@@ -268,6 +311,18 @@ public:
   const llvm::PHINode *getPHINode() const { return phiNode; }
   const llvm::Value *getValue() const override { return phiNode; }
   const llvm::Instruction *getInstruction() const override { return phiNode; }
+
+  /// Operand access (position -> Value*)
+  inline void setOpVer(uint32_t pos, const llvm::Value *val) {
+    opVers[pos] = val;
+  }
+  inline const llvm::Value *getOpVer(uint32_t pos) const {
+    auto it = opVers.find(pos);
+    return (it != opVers.end()) ? it->second : nullptr;
+  }
+  inline uint32_t getOpVerNum() const { return opVers.size(); }
+  inline OPVers::const_iterator opVerBegin() const { return opVers.begin(); }
+  inline OPVers::const_iterator opVerEnd() const { return opVers.end(); }
 
   static inline bool classof(const SVFGNode *n) {
     return n && isPhiSVFGNode(n->getNodeKind());
@@ -330,11 +385,34 @@ public:
 };
 
 /// @brief Memory PHI node
+/// Maintains an operand map keyed by position, where each operand is
+/// a (memRegId, version) pair, mirroring SVF's MSSAPHISVFGNode::OPVers.
 class MSSAPhiSVFGNode : public MSSASVFGNode {
+public:
+  struct MemSSAOperand {
+    uint32_t memReg;
+    uint32_t version;
+  };
+  using OPVers = std::map<uint32_t, MemSSAOperand>;
+
+private:
+  OPVers opVers;
+
 public:
   MSSAPhiSVFGNode(uint32_t id, SVFGK k, const ICFGNode *icfg, uint32_t reg,
                   const SVFGNodeBS &pts)
       : MSSASVFGNode(id, k, icfg, reg, pts) {}
+
+  inline void setOpVer(uint32_t pos, uint32_t memReg, uint32_t ver) {
+    opVers[pos] = {memReg, ver};
+  }
+  inline const MemSSAOperand *getOpVer(uint32_t pos) const {
+    auto it = opVers.find(pos);
+    return (it != opVers.end()) ? &it->second : nullptr;
+  }
+  inline uint32_t getOpVerNum() const { return opVers.size(); }
+  inline OPVers::const_iterator opVerBegin() const { return opVers.begin(); }
+  inline OPVers::const_iterator opVerEnd() const { return opVers.end(); }
 
   static inline bool classof(const SVFGNode *n) {
     return n && isMPhiSVFGNode(n->getNodeKind());

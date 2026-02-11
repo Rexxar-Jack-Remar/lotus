@@ -112,7 +112,19 @@ struct AAConfig {
   
   Solver solver;
   
-  // Default constructor: SparrowAA, context-insensitive
+  /**
+   * @brief Default constructor: Creates SparrowAA, context-insensitive configuration
+   * 
+   * @warning This default constructor exists for convenience but explicit factory
+   *          methods (e.g., SparrowAA_NoCtx()) are preferred. When using this default
+   *          constructor, be aware that it creates a SparrowAA context-insensitive
+   *          analysis configuration.
+   * 
+   * @note For explicit configuration, prefer factory methods:
+   *       - SparrowAA_NoCtx() - explicit context-insensitive SparrowAA
+   *       - TPA_1CFA() - explicit TPA with 1-CFA
+   *       - etc.
+   */
   AAConfig()
     : impl(Implementation::SparrowAA),
       ctxSens(ContextSensitivity::None),
@@ -256,7 +268,24 @@ struct AAConfig {
 
 class AliasAnalysisWrapper {
 public:
-  AliasAnalysisWrapper(llvm::Module &M, const AAConfig &config = AAConfig::SparrowAA_NoCtx());
+  /**
+   * @brief Construct an AliasAnalysisWrapper with an explicit configuration
+   * 
+   * @param M The LLVM module to analyze
+   * @param config The alias analysis configuration - MUST be explicitly specified.
+   *               Use AAConfig factory methods like SparrowAA_NoCtx(), TPA_1CFA(), etc.
+   * 
+   * @note Users MUST explicitly specify which analysis to use. There is no default.
+   *       This ensures users are aware of what analysis is running and its implications.
+   * 
+   * @example
+   * ```cpp
+   * // Explicit specification required
+   * AliasAnalysisWrapper wrapper(M, AAConfig::SparrowAA_NoCtx());
+   * AliasAnalysisWrapper wrapper2(M, AAConfig::TPA_1CFA());
+   * ```
+   */
+  AliasAnalysisWrapper(llvm::Module &M, const AAConfig &config);
   ~AliasAnalysisWrapper();
 
   llvm::AliasResult query(const llvm::Value *v1, const llvm::Value *v2);
@@ -359,9 +388,13 @@ public:
  * - "underapprox" -> UnderApprox
  * 
  * @param str String representation of the alias analysis
- * @param fallback Default config to return if string is unknown
+ * @param fallback Config to return if string is unknown - MUST be explicitly specified.
+ *                 This ensures users are aware of what fallback analysis will be used.
  * @return AAConfig corresponding to the string, or fallback if unknown
+ * 
+ * @note The fallback parameter is required - there is no default. This ensures
+ *       users explicitly choose what analysis to use when parsing fails.
  */
-AAConfig parseAAConfigFromString(const std::string &str, const AAConfig &fallback = AAConfig::SparrowAA_NoCtx());
+AAConfig parseAAConfigFromString(const std::string &str, const AAConfig &fallback);
 
 } // namespace lotus

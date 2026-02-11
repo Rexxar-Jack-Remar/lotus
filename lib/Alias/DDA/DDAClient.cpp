@@ -43,12 +43,7 @@ std::vector<const llvm::Value *> &DDAClient::collectCandidateQueries() {
     const llvm::Value *v = node->getValue();
     if (!v || !v->getType()->isPointerTy())
       continue;
-    if (node->getNodeKind() == SVFGK::Addr || node->getNodeKind() == SVFGK::Copy ||
-        node->getNodeKind() == SVFGK::Phi || node->getNodeKind() == SVFGK::IntraPhi ||
-        node->getNodeKind() == SVFGK::FormalParm ||
-        node->getNodeKind() == SVFGK::ActualParm ||
-        node->getNodeKind() == SVFGK::FormalRet ||
-        node->getNodeKind() == SVFGK::ActualRet)
+    if (node->isStmtNode() || node->isPhiNode() || node->isParamNode())
       addCandidate(v);
   }
   return candidateQueries_;
@@ -70,6 +65,19 @@ std::vector<const llvm::Value *> &FunptrDDAClient::collectCandidateQueries() {
     for (const llvm::Value *v : userQueries_)
       addCandidate(v);
     return candidateQueries_;
+  }
+  if (svfg_) {
+    for (const auto &pair : svfg_->getIndCallSiteMap()) {
+      for (const llvm::CallBase *cb : pair.second) {
+        if (!cb || cb->getCalledFunction())
+          continue;
+        const llvm::Value *called = cb->getCalledOperand();
+        if (called && called->getType()->isPointerTy())
+          addCandidate(called);
+      }
+    }
+    if (!candidateQueries_.empty())
+      return candidateQueries_;
   }
   if (!module_)
     return candidateQueries_;

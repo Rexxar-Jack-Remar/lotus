@@ -66,6 +66,12 @@ struct SVFGBuilderConfig {
   /// @brief Include global initializers
   bool includeGlobals = true;
 
+  /// @brief Resolve indirect calls during SVFG construction (PTA-based).
+  /// When false, SVFGBuilder will still create call/ret nodes but will not
+  /// connect callsites to potential callees. DDA can then add such edges
+  /// on-the-fly based on demand-driven points-to of function pointers.
+  bool resolveIndirectCalls = true;
+
   /// @brief Maximum SSA version for memory regions
   uint32_t maxSSAVersion = std::numeric_limits<uint32_t>::max();
 
@@ -155,6 +161,10 @@ private:
 
   /// @brief PTA object to SVFG node mapping (for points-to set conversion)
   std::unordered_map<const void *, uint32_t> ptaObjectToObjId;
+  /// @brief Reverse mapping for PTA object lookup by objId.
+  std::unordered_map<uint32_t, const void *> objIdToPTAObject;
+  /// @brief Field-insensitive object ID per base object.
+  std::unordered_map<uint32_t, uint32_t> baseObjToFIObjId;
 
   /// @brief Singleton node ID used when a PTA object cannot be mapped.
   /// This preserves soundness without creating unbounded numbers of dummy nodes.
@@ -256,6 +266,18 @@ public:
   /// @return Built SVFG
   SVFG *build(const ICFG *icfg);
 
+  /// @brief Get object IDs for a pointer/alloc value using PTA (best-effort).
+  SVFGNodeBS getObjectIdsForValue(const llvm::Value *ptr);
+
+  /// @brief Map base object + GEP to field object ID (field-sensitive if possible).
+  uint32_t getGepObjectId(uint32_t baseObjId, const llvm::GetElementPtrInst *gep);
+
+  /// @brief Get or create a field-insensitive object ID for base object.
+  uint32_t getOrCreateFIObjId(uint32_t baseObjId);
+
+  /// @brief Get indirect call targets using pointer analysis
+  std::vector<const llvm::Function *> getIndirectCallTargets(const llvm::CallBase *call);
+
   /// @brief Build SVFG with configuration
   SVFG *build(const ICFG *icfg, const SVFGBuilderConfig &cfg);
 
@@ -273,6 +295,18 @@ public:
 
   /// @brief Update memory SSA edges for nodes marked for update
   void updateMemorySSAEdges(SVFG *svfg);
+
+  /// @brief SVF-style on-the-fly connection of an indirect callsite to a callee.
+  ///
+  /// When SVFGBuilderConfig::resolveIndirectCalls is false, SVFGBuilder builds
+  /// Actual*/Formal* nodes but does not connect indirect callsites to callees.
+  /// Demand-driven analyses (DDA) can call this method once a function-pointer
+  /// target is discovered.
+  ///
+  /// @return true if any new edge was created.
+  bool connectCallSiteToCalleeOnTheFly(SVFG *svfg, const llvm::CallBase *cs,
+                                       const llvm::Function *callee,
+                                       std::vector<SVFGEdge *> &newEdges);
 
   //===------------------------------------------------------------------===
   // Builder phases
@@ -339,6 +373,10 @@ private:
   SVFGNodeBS convertPTAObjectsToObjIDs(const std::vector<const void *> &ptaObjects,
                                       bool keepFunctions = false);
 
+  /// @brief Get or create a wildcard "unknown" object ID.
+  uint32_t getOrCreateUnknownObjId();
+
+
   /// @brief Get or create a canonical memory-region ID for a points-to set.
   ///
   /// When pts is empty, callers should fall back to value-based region IDs
@@ -354,8 +392,6 @@ private:
   /// @brief Get or create memory region for any pointer value
   uint32_t getOrCreateMemReg(const llvm::Value *ptrVal);
 
-  /// @brief Get indirect call targets using pointer analysis
-  std::vector<const llvm::Function *> getIndirectCallTargets(const llvm::CallBase *call);
 
   /// @brief Check if instruction is a heap allocation (malloc/calloc/realloc)
   bool isHeapAllocation(const llvm::Instruction *inst) const;
@@ -385,3 +421,10 @@ private:
 
 } // namespace analysis
 } // namespace lotus
+
+namespace llvm {
+class CallBase;
+class Function;
+class GetElementPtrInst;
+class Value;
+} // namespace llvm

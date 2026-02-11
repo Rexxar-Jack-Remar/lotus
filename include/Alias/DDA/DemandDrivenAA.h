@@ -52,6 +52,9 @@ class DDAStat;
 
 namespace llvm {
 class Module;
+class Function;
+class Instruction;
+class LoopInfo;
 } // namespace llvm
 
 namespace lotus {
@@ -62,7 +65,7 @@ using LocDPItem = StmtDPItem<SVFGNode>;
 /// Demand-driven pointer analysis using the SVFG (SVF-style algorithm).
 class DemandDrivenAA {
 public:
-  using PtsSet = std::unordered_set<const llvm::Value *>;
+  using PtsSet = std::unordered_set<uint32_t>;
 
   DemandDrivenAA();
   ~DemandDrivenAA();
@@ -80,6 +83,7 @@ public:
 
   SVFG *getSVFG() const { return svfg_.get(); }
   const SVFG *getSVFGConst() const { return svfg_.get(); }
+  SVFGBuilder *getSVFGBuilder() const { return svfgBuilder_.get(); }
   const llvm::Module *getModule() const { return module_; }
   bool isInitialized() const { return initialized_; }
 
@@ -99,6 +103,11 @@ public:
   PtsSet computeDDAPts(const llvm::Value *ptr) { return getPointsTo(ptr); }
 
   DDAStat *getStat() const { return ddaStat_.get(); }
+  /// @brief Query object IDs for a pointer/allocation value (PTA-backed).
+  SVFGNodeBS getObjectIdsForValue(const llvm::Value *v) const;
+  /// @brief Query if a function is recursive in the current module.
+  bool isRecursiveFunction(const llvm::Function *f) const;
+  bool isInLoop(const llvm::Instruction *inst) const;
 
 private:
   /// Union pts into cache for dpm; return true if cache grew. Used by updateCachedPointsTo.
@@ -131,7 +140,9 @@ private:
   bool propagateViaObj(uint32_t storeObjId, uint32_t loadCVarObjId) const;
 
   /// Strong-update refinements: exclude heap, array, recursion (best-effort).
-  bool isHeapCondMemObj(const llvm::Value *v, const StoreSVFGNode *store) const;
+  bool isHeapCondMemObj(uint32_t objId, const StoreSVFGNode *store) const;
+  bool isArrayCondMemObj(uint32_t objId) const;
+  bool isFieldInsenCondMemObj(uint32_t objId) const;
   bool isLocalCVarInRecursion(uint32_t objId) const;
 
   bool testOutOfBudget(const LocDPItem &dpm);
@@ -184,6 +195,7 @@ private:
   PtsSet getPointsToCached(const llvm::Value *ptr);
   void resetQuery();
   void buildRecursionInfo();
+  void buildLoopInfo();
 
   std::unique_ptr<::ICFG> icfg_;
   std::unique_ptr<::ICFGBuilder> icfgBuilder_;
@@ -205,6 +217,8 @@ private:
   const llvm::Module *module_ = nullptr;
   std::unique_ptr<DDAStat> ddaStat_;
   std::unordered_set<const llvm::Function *> recursiveFunctions_;
+  std::unordered_map<const llvm::Function *, std::unique_ptr<llvm::LoopInfo>>
+      loopInfoMap_;
 };
 
 } // namespace analysis

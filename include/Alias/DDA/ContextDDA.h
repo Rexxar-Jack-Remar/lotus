@@ -75,6 +75,7 @@ public:
 private:
   const CxtPtSet &findPT(const CxtLocDPItem &dpm);
   void handleSingleStatement(const CxtLocDPItem &dpm, CxtPtSet &pts);
+  void resolveFunPtr(const CxtLocDPItem &dpm);
   void handleAddr(CxtPtSet &pts, const CxtLocDPItem &dpm, const AddrSVFGNode *addr);
   void backtraceAlongDirectVF(CxtPtSet &pts, const CxtLocDPItem &oldDpm);
   void backtraceAlongIndirectVF(CxtPtSet &pts, const CxtLocDPItem &oldDpm,
@@ -89,7 +90,6 @@ private:
   CxtLocDPItem getDPImWithOldCond(const CxtLocDPItem &oldDpm, uint32_t objId,
                                   const SVFGNode *loc) const;
   SVFGNode *getDefNodeForValue(const llvm::Value *v) const;
-  uint32_t getOrCreateCSID(const llvm::CallBase *cs);
   void resetQuery();
   void buildRecursionInfo();
   void reCompute(const CxtLocDPItem &dpm);
@@ -119,8 +119,6 @@ private:
 
   DemandDrivenAA *flowDDA_;
   DDAClient *client_;
-  std::map<const llvm::CallBase *, uint32_t> callSiteToId_;
-  uint32_t nextCallSiteId_ = 1;
   std::set<CxtLocDPItem> backwardVisited_;
   std::map<CxtLocDPItem, CxtPtSet> dpmToPtsMap_;
   std::map<uint32_t, std::set<CxtLocDPItem>> locToDpmSetMap_;
@@ -129,6 +127,7 @@ private:
   uint32_t numSteps_ = 0;
   bool outOfBudget_ = false;
   static constexpr uint32_t kDefaultMaxBudget = 100000u;
+  std::set<CxtLocDPItem> outOfBudgetDpms_;
   std::unordered_set<uint32_t> recursiveCallSiteIds_;
 };
 

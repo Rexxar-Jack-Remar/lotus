@@ -42,9 +42,19 @@ public:
   /**
    * @brief Construct an alias wrapper with specified analysis configuration
    * @param M The LLVM module to analyze
-   * @param config The alias analysis configuration to use
+   * @param config The alias analysis configuration to use - MUST be explicitly specified.
+   *               Use AAConfig factory methods like SparrowAA_NoCtx(), TPA_1CFA(), etc.
+   * 
+   * @note Users MUST explicitly specify which analysis to use. There is no default.
+   *       This ensures users are aware of what analysis is running.
+   * 
+   * @example
+   * ```cpp
+   * // Explicit specification required
+   * PDGAliasWrapper wrapper(M, pdg::AAConfig::SparrowAA_NoCtx());
+   * ```
    */
-  PDGAliasWrapper(llvm::Module &M, const AAConfig &config = AAConfig::SparrowAA_NoCtx())
+  PDGAliasWrapper(llvm::Module &M, const AAConfig &config)
     : _wrapper(std::make_unique<lotus::AliasAnalysisWrapper>(M, config)) {}
 
   /**
