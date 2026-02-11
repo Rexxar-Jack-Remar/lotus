@@ -47,6 +47,7 @@
 
 #include <limits>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -66,7 +67,7 @@ struct SVFGBuilderConfig {
   bool includeGlobals = true;
 
   /// @brief Maximum SSA version for memory regions
-  uint32_t maxSSAVersion = 16;
+  uint32_t maxSSAVersion = std::numeric_limits<uint32_t>::max();
 
   /// @brief Solver type for AserPTA
   enum class SolverType {
@@ -153,7 +154,26 @@ private:
   std::unordered_map<const llvm::Value *, uint32_t> valueToNode;
 
   /// @brief PTA object to SVFG node mapping (for points-to set conversion)
-  std::unordered_map<const void *, uint32_t> ptaObjectToSVFGNode;
+  std::unordered_map<const void *, uint32_t> ptaObjectToObjId;
+
+  /// @brief Singleton node ID used when a PTA object cannot be mapped.
+  /// This preserves soundness without creating unbounded numbers of dummy nodes.
+  uint32_t unknownObjId = 0;
+
+  /// @brief Next object ID for points-to sets.
+  uint32_t nextObjId = 1;
+
+  /// @brief Object ID to memory region mapping (one memReg per abstract object).
+  std::unordered_map<uint32_t, uint32_t> objIdToMemReg;
+  std::unordered_map<uint32_t, uint32_t> memRegToObjId;
+
+  /// @brief Canonical memory-region IDs keyed by points-to set.
+  ///
+  /// Upstream SVF's MemSSA uses "memory regions" (MRs) whose identity is
+  /// derived from (field-sensitive) points-to regions, not from pointer SSA
+  /// values. To approximate that invariant without SVFIR, we memoize a stable
+  /// memReg ID per points-to set key.
+  std::unordered_map<std::string, uint32_t> ptsKeyToMemReg;
 
   /// @brief Alloca instruction to memory region mapping
   std::unordered_map<const llvm::AllocaInst *, uint32_t> allocaToMemReg;
@@ -167,15 +187,15 @@ private:
   /// @brief Store instruction to top-level Store SVFG node mapping
   std::unordered_map<const llvm::StoreInst *, uint32_t> storeToStoreNode;
 
-  /// @brief Load instruction to MemorySSA LoadMu SVFG node mapping
-  std::unordered_map<const llvm::LoadInst *, uint32_t> loadToMuNode;
+  /// @brief Load instruction to MemorySSA LoadMu nodes (one per accessed memReg).
+  std::unordered_map<const llvm::LoadInst *, std::vector<uint32_t>> loadToMuNodes;
 
-  /// @brief Store instruction to MemorySSA StoreChi SVFG node mapping
-  std::unordered_map<const llvm::StoreInst *, uint32_t> storeToChiNode;
+  /// @brief Store instruction to MemorySSA StoreChi nodes (one per accessed memReg).
+  std::unordered_map<const llvm::StoreInst *, std::vector<uint32_t>> storeToChiNodes;
 
-  /// @brief Atomic instruction to memory use/def mapping
-  std::unordered_map<const llvm::Instruction *, uint32_t> atomicToMu;
-  std::unordered_map<const llvm::Instruction *, uint32_t> atomicToChi;
+  /// @brief Atomic instruction to memory use/def nodes (one per accessed memReg).
+  std::unordered_map<const llvm::Instruction *, std::vector<uint32_t>> atomicToMuNodes;
+  std::unordered_map<const llvm::Instruction *, std::vector<uint32_t>> atomicToChiNodes;
 
   /// @brief Memory region version mapping
   std::unordered_map<MemRegVer, uint32_t, MemRegVerHash> memRegVerToNode;
@@ -199,9 +219,9 @@ private:
   /// @brief Generic pointer value to memory region mapping fallback
   std::unordered_map<const llvm::Value *, uint32_t> ptrValToMemReg;
 
-  /// @brief Call instruction to CallMu/CallChi nodes
-  std::unordered_map<const llvm::CallBase *, uint32_t> callToMu;
-  std::unordered_map<const llvm::CallBase *, uint32_t> callToChi;
+  /// @brief Call instruction to CallMu/CallChi nodes (one per accessed memReg).
+  std::unordered_map<const llvm::CallBase *, std::vector<uint32_t>> callToMuNodes;
+  std::unordered_map<const llvm::CallBase *, std::vector<uint32_t>> callToChiNodes;
 
   /// @brief Memory region version counter (for SSA versioning)
   /// Key: (Function*, memory region) -> version number
@@ -211,8 +231,8 @@ private:
   /// @brief Basic block to memory PHI nodes map
   std::unordered_map<const llvm::BasicBlock *, std::unordered_map<uint32_t, uint32_t>> bbToMemPhi;
 
-  /// @brief Function argument to memory region mapping (for FormalIn/FormalOut)
-  std::unordered_map<const llvm::Argument *, uint32_t> argToMemReg;
+  /// @brief Function argument to memory regions (derived from points-to objects).
+  std::unordered_map<const llvm::Argument *, std::vector<uint32_t>> argToMemRegs;
 
 public:
   /// @brief Constructor
@@ -313,9 +333,20 @@ private:
   /// Returns a vector of FSObject pointers
   std::vector<const void *> getPointsToSet(const llvm::Value *ptr);
 
-  /// @brief Convert PTA objects to SVFG node IDs (for points-to sets)
-  /// Maps PTA objects to SVFG nodes representing those objects
-  SVFGNodeBS convertPTAObjectsToSVFGNodes(const std::vector<const void *> &ptaObjects);
+  /// @brief Convert PTA objects to object IDs for points-to sets.
+  ///
+  /// When keepFunctions is false, function objects are filtered out.
+  SVFGNodeBS convertPTAObjectsToObjIDs(const std::vector<const void *> &ptaObjects,
+                                      bool keepFunctions = false);
+
+  /// @brief Get or create a canonical memory-region ID for a points-to set.
+  ///
+  /// When pts is empty, callers should fall back to value-based region IDs
+  /// (e.g., getOrCreateMemReg(ptrVal)) to avoid collapsing unrelated unknowns.
+  uint32_t getOrCreateMemRegForPointsTo(const SVFGNodeBS &pts);
+
+  /// @brief Get or create a stable memory region for an abstract object ID.
+  uint32_t getOrCreateMemRegForObject(uint32_t objId);
 
   /// @brief Get or create memory region for a heap allocation
   uint32_t getOrCreateMemReg(const llvm::Instruction *heapAlloc);
@@ -346,6 +377,7 @@ private:
   bool mayModifyMemory(const llvm::Function *F);
   bool mayModifyMemory(const llvm::Function *F,
                        std::unordered_set<const llvm::Function *> &visited);
+  uint32_t nextVersion(const llvm::Function *F, uint32_t memReg);
 
   /// @brief Get next node ID
   uint32_t nextNode() { return nextNodeId++; }

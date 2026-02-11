@@ -88,3 +88,4 @@ Primary contributors to this project:
 - rhuab
 - Zahrinas
 - Rexxar-Jack-Remar
+- x6eull

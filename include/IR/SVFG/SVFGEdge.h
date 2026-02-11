@@ -36,10 +36,11 @@
 
 #include "IR/SVFG/SVFGBase.h"
 
-#include <llvm/IR/InstrTypes.h>
 #include <set>
 #include <string>
 #include <utility>
+
+#include <llvm/IR/InstrTypes.h>
 
 namespace lotus {
 namespace analysis {
@@ -62,16 +63,16 @@ private:
   SVFGEdgeK kind;
   EdgeWeight weight;
   const llvm::CallBase *callSite;
+  std::string callSiteDebug;
   std::set<uint32_t> pointsTo;
 
 public:
   /// @brief Construct edge
   SVFGEdge(SVFGNode *s, SVFGNode *d, SVFGEdgeK k,
-           EdgeWeight w = EdgeWeight::One,
-           const llvm::CallBase *cs = nullptr,
-           std::set<uint32_t> pts = {})
+           EdgeWeight w = EdgeWeight::One, const llvm::CallBase *cs = nullptr,
+           std::string csDebug = {}, std::set<uint32_t> pts = {})
       : src(s), dst(d), kind(k), weight(w), callSite(cs),
-        pointsTo(std::move(pts)) {}
+        callSiteDebug(std::move(csDebug)), pointsTo(std::move(pts)) {}
 
   /// @brief Destructor
   virtual ~SVFGEdge() = default;
@@ -87,6 +88,9 @@ public:
   inline void setWeight(EdgeWeight w) { weight = w; }
   inline const llvm::CallBase *getCallSite() const { return callSite; }
   inline bool hasCallSite() const { return callSite != nullptr; }
+  inline const std::string &getCallSiteDebug() const { return callSiteDebug; }
+  inline void setCallSiteDebug(std::string s) { callSiteDebug = std::move(s); }
+  inline bool hasCallSiteDebug() const { return !callSiteDebug.empty(); }
   inline const std::set<uint32_t> &getPointsTo() const { return pointsTo; }
   inline bool addPointsTo(const std::set<uint32_t> &pts) {
     const size_t oldSize = pointsTo.size();
@@ -106,6 +110,9 @@ public:
   inline bool isLoadEdge() const { return kind == SVFGEdgeK::IntraLoad; }
   inline bool isStoreEdge() const { return kind == SVFGEdgeK::IntraStore; }
   inline bool isPhiEdge() const { return kind == SVFGEdgeK::IntraPhi; }
+  inline bool isIndirectEdge() const { return isIndirectVFGEdge(kind); }
+  inline bool isThreadMHPEdge() const { return isThreadMHPVFGEdge(kind); }
+  inline bool isDirectEdge() const { return isDirectVFGEdge(kind); }
 
   //===------------------------------------------------------------------===
   // Utility
@@ -246,6 +253,26 @@ public:
   ParamRetVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::ParamRet) {}
   SVFG_EDGE_KIND(ParamRet)
+};
+
+/// @brief Intra-procedural indirect value-flow edge
+/// Represents indirect value flows through pointers (load, store, etc.)
+/// Carries points-to set for precision in alias analysis.
+class IntraIndirectVFGEdge : public SVFGEdge {
+public:
+  IntraIndirectVFGEdge(SVFGNode *s, SVFGNode *d)
+      : SVFGEdge(s, d, SVFGEdgeK::IntraIndirect) {}
+  SVFG_EDGE_KIND(IntraIndirect)
+};
+
+/// @brief Thread MHP (May-Happen-in-Parallel) indirect edge
+/// Represents indirect value-flows between memory accesses that may happen
+/// in parallel in multithreaded programs. Used for concurrent analysis.
+class ThreadMHPIndVFGEdge : public SVFGEdge {
+public:
+  ThreadMHPIndVFGEdge(SVFGNode *s, SVFGNode *d)
+      : SVFGEdge(s, d, SVFGEdgeK::ThreadMHPIndirectVF) {}
+  SVFG_EDGE_KIND(ThreadMHPIndirectVF)
 };
 
 } // namespace analysis

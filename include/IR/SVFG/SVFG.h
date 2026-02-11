@@ -40,6 +40,7 @@
 #include "IR/SVFG/SVFGNode.h"
 #include <map>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -159,6 +160,11 @@ private:
     /// @brief Statistics
     SVFGStat stat;
 
+    /// @brief Debug labels for abstract objects used in points-to sets.
+    std::unordered_map<uint32_t, std::string> objectDebug;
+    std::unordered_map<uint32_t, std::string> nodeFunctionDebug;
+    std::unordered_map<uint32_t, std::string> nodeCallSiteDebug;
+
 public:
     /// @brief Constructor
     SVFG() : icfg(nullptr), nextNodeId(0) {}
@@ -249,8 +255,10 @@ public:
     void addNode(SVFGNode* node);
     SVFGEdge* addEdge(SVFGNode* src, SVFGNode* dst, SVFGEdgeK kind,
                       const llvm::CallBase* callSite = nullptr,
-                      const SVFGNodeBS& pointsTo = SVFGNodeBS());
+                      const SVFGNodeBS& pointsTo = SVFGNodeBS(),
+                      std::string callSiteDebug = std::string());
     void removeEdge(SVFGEdge* edge);
+    void removeNode(SVFGNode* node);
     
     //===------------------------------------------------------------------===
     // Call/return site access
@@ -351,6 +359,45 @@ public:
     inline SVFGStat& getStat() { return stat; }
     void updateStat(SVFGNode* node);
     void updateStat(SVFGEdge* edge);
+
+    //===------------------------------------------------------------------===
+    // Object debug
+    //===------------------------------------------------------------------===
+
+    inline void setObjectDebug(uint32_t objId, std::string label) {
+        if (objId == 0) return;
+        objectDebug[objId] = std::move(label);
+    }
+
+    inline const std::unordered_map<uint32_t, std::string>& getObjectDebugMap() const {
+        return objectDebug;
+    }
+
+    inline void setNodeFunctionDebug(uint32_t nodeId, std::string label) {
+        nodeFunctionDebug[nodeId] = std::move(label);
+    }
+
+    inline void setNodeCallSiteDebug(uint32_t nodeId, std::string label) {
+        nodeCallSiteDebug[nodeId] = std::move(label);
+    }
+
+    inline std::string getNodeFunctionDebug(uint32_t nodeId) const {
+        auto it = nodeFunctionDebug.find(nodeId);
+        return (it != nodeFunctionDebug.end()) ? it->second : std::string();
+    }
+
+    inline std::string getNodeCallSiteDebug(uint32_t nodeId) const {
+        auto it = nodeCallSiteDebug.find(nodeId);
+        return (it != nodeCallSiteDebug.end()) ? it->second : std::string();
+    }
+
+    inline const std::unordered_map<uint32_t, std::string>& getNodeFunctionDebugMap() const {
+        return nodeFunctionDebug;
+    }
+
+    inline const std::unordered_map<uint32_t, std::string>& getNodeCallSiteDebugMap() const {
+        return nodeCallSiteDebug;
+    }
 
     //===------------------------------------------------------------------===
     // Graph algorithms

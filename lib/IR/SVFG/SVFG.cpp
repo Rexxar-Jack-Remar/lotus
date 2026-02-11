@@ -119,6 +119,12 @@ std::string SVFGEdge::toString() const {
   case SVFGEdgeK::ParamRet:
     result = "ParamRet";
     break;
+  case SVFGEdgeK::IntraIndirect:
+    result = "IntraIndirect";
+    break;
+  case SVFGEdgeK::ThreadMHPIndirectVF:
+    result = "ThreadMHPIndirectVF";
+    break;
   case SVFGEdgeK::Variant:
     result = "Variant";
     break;
@@ -134,26 +140,47 @@ void SVFG::addNode(SVFGNode *node) {
   if (node->getId() >= nextNodeId) {
     nextNodeId = node->getId() + 1;
   }
+  if (node->isMemNode() && node->getMemReg() != 0) {
+    setMSSADef(node->getMemReg(), node, node->getSSAVersion());
+  }
   updateStat(node);
 }
 
 SVFGEdge *SVFG::addEdge(SVFGNode *src, SVFGNode *dst, SVFGEdgeK kind,
                         const llvm::CallBase *callSite,
-                        const SVFGNodeBS &pointsTo) {
+                        const SVFGNodeBS &pointsTo,
+                        std::string callSiteDebug) {
   if (!src || !dst)
     return nullptr;
+
+  if (callSiteDebug.empty() && callSite) {
+    llvm::raw_string_ostream os(callSiteDebug);
+    os << callSite->getFunction()->getName();
+    if (const Function *callee = callSite->getCalledFunction()) {
+      os << "->" << callee->getName();
+    } else {
+      os << "->ind";
+    }
+    if (const DebugLoc &dl = callSite->getDebugLoc()) {
+      os << "@" << dl.getLine() << ":" << dl.getCol();
+    }
+  }
 
   // Check for duplicate edge
   for (auto *existing : src->getOutEdges()) {
     if (existing->getDstNode() == dst && existing->getEdgeKind() == kind &&
-        existing->getCallSite() == callSite) {
+        existing->getCallSite() == callSite &&
+        existing->getCallSiteDebug() == callSiteDebug) {
       existing->addPointsTo(pointsTo);
+      if (existing->getCallSiteDebug().empty() && !callSiteDebug.empty()) {
+        existing->setCallSiteDebug(callSiteDebug);
+      }
       return existing;
     }
   }
 
   SVFGEdge *edge = new SVFGEdge(src, dst, kind, SVFGEdge::EdgeWeight::One,
-                                callSite, pointsTo);
+                                callSite, std::move(callSiteDebug), pointsTo);
   src->addOutEdge(edge);
   dst->addInEdge(edge);
   updateStat(edge);
@@ -175,6 +202,123 @@ void SVFG::removeEdge(SVFGEdge *edge) {
   }
 
   delete edge;
+}
+
+void SVFG::removeNode(SVFGNode *node) {
+  if (!node)
+    return;
+
+  const uint32_t nodeId = node->getId();
+  const llvm::Value *value = node->getValue();
+  const llvm::Instruction *inst = node->getInstruction();
+  const llvm::Function *fun = node->getFunction();
+
+  for (auto it = mssaVerToNodeMap.begin(); it != mssaVerToNodeMap.end();) {
+    if (it->second == node) {
+      it = mssaVerToNodeMap.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  if (value) {
+    auto it = valueToNodeMap.find(value);
+    if (it != valueToNodeMap.end() && it->second == nodeId) {
+      valueToNodeMap.erase(it);
+    }
+  }
+
+  if (inst) {
+    auto it = instToDefMap.find(inst);
+    if (it != instToDefMap.end() && it->second == nodeId) {
+      instToDefMap.erase(it);
+    }
+  }
+
+  nodeFunctionDebug.erase(nodeId);
+  nodeCallSiteDebug.erase(nodeId);
+
+  if (auto *actualIn = dyn_cast<ActualInSVFGNode>(node)) {
+    const llvm::CallBase *cs = actualIn->getCallSite();
+    if (cs) {
+      auto mapIt = callSiteToActualInMap.find(cs);
+      if (mapIt != callSiteToActualInMap.end()) {
+        mapIt->second.erase(node);
+        if (mapIt->second.empty())
+          callSiteToActualInMap.erase(mapIt);
+      }
+    }
+  } else if (auto *actualOut = dyn_cast<ActualOutSVFGNode>(node)) {
+    const llvm::CallBase *cs = actualOut->getCallSite();
+    if (cs) {
+      auto mapIt = callSiteToActualOutMap.find(cs);
+      if (mapIt != callSiteToActualOutMap.end()) {
+        mapIt->second.erase(node);
+        if (mapIt->second.empty())
+          callSiteToActualOutMap.erase(mapIt);
+      }
+    }
+  } else if (auto *actualParm = dyn_cast<ActualParmSVFGNode>(node)) {
+    const llvm::CallBase *cs = actualParm->getCallSite();
+    if (cs) {
+      auto mapIt = callSiteToActualParmMap.find(cs);
+      if (mapIt != callSiteToActualParmMap.end()) {
+        mapIt->second.erase(node);
+        if (mapIt->second.empty())
+          callSiteToActualParmMap.erase(mapIt);
+      }
+    }
+  } else if (auto *actualRet = dyn_cast<ActualRetSVFGNode>(node)) {
+    const llvm::CallBase *cs = actualRet->getCallSite();
+    if (cs) {
+      auto mapIt = callSiteToActualRetMap.find(cs);
+      if (mapIt != callSiteToActualRetMap.end()) {
+        mapIt->second.erase(node);
+        if (mapIt->second.empty())
+          callSiteToActualRetMap.erase(mapIt);
+      }
+    }
+  } else if (dyn_cast<FormalInSVFGNode>(node)) {
+    if (fun) {
+      auto mapIt = funcToFormalInMap.find(fun);
+      if (mapIt != funcToFormalInMap.end()) {
+        mapIt->second.erase(node);
+        if (mapIt->second.empty())
+          funcToFormalInMap.erase(mapIt);
+      }
+    }
+  } else if (dyn_cast<FormalOutSVFGNode>(node)) {
+    if (fun) {
+      auto mapIt = funcToFormalOutMap.find(fun);
+      if (mapIt != funcToFormalOutMap.end()) {
+        mapIt->second.erase(node);
+        if (mapIt->second.empty())
+          funcToFormalOutMap.erase(mapIt);
+      }
+    }
+  } else if (dyn_cast<FormalParmSVFGNode>(node)) {
+    if (fun) {
+      auto mapIt = funcToFormalParmMap.find(fun);
+      if (mapIt != funcToFormalParmMap.end()) {
+        mapIt->second.erase(node);
+        if (mapIt->second.empty())
+          funcToFormalParmMap.erase(mapIt);
+      }
+    }
+  } else if (dyn_cast<FormalRetSVFGNode>(node)) {
+    if (fun) {
+      auto mapIt = funcToFormalRetMap.find(fun);
+      if (mapIt != funcToFormalRetMap.end()) {
+        mapIt->second.erase(node);
+        if (mapIt->second.empty())
+          funcToFormalRetMap.erase(mapIt);
+      }
+    }
+  }
+
+  nodeMap.erase(nodeId);
+  nodesForUpdate.erase(node);
+  delete node;
 }
 
 void SVFG::updateStat(SVFGNode *node) {
@@ -368,6 +512,9 @@ void SVFG::swapWith(SVFG &other) {
   swap(icfg, other.icfg);
   swap(nextNodeId, other.nextNodeId);
   swap(stat, other.stat);
+  swap(objectDebug, other.objectDebug);
+  swap(nodeFunctionDebug, other.nodeFunctionDebug);
+  swap(nodeCallSiteDebug, other.nodeCallSiteDebug);
   swap(nodesForUpdate, other.nodesForUpdate);
 }
 

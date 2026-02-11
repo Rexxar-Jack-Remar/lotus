@@ -21,11 +21,32 @@
 // - Node and edge kinds (SVFGK)
 // - Type-safe casting support (isa/cast/dyn_cast)
 // - Base graph infrastructure
+// - Edge invariants documentation
 //
 // Design principles aligned with SVF:
 // - Conservative memory modeling
 // - Support for both top-level and address-taken variables
 // - Memory SSA form for precise alias tracking
+//
+// Edge Invariants:
+// - IntraDirect: Direct value flow (copy, bitcast, arithmetic) - points-to
+// empty
+// - IntraCopy: Copy of pointer value - points-to empty
+// - IntraLoad: Load through pointer - points-to from loaded address
+// - IntraStore: Store through pointer - points-to from stored value
+// - IntraGep: GetElementPtr instruction - points-to from base pointer
+// - IntraPhi: PHI node value flow - points-to from incoming operands
+// - IntraMu: Memory use (load) - points-to from used address
+// - IntraChi: Memory def (store) - points-to from stored value
+// - CallDir: Direct call parameter passing - points-to empty
+// - CallInd: Indirect call parameter passing - points-to from function pointer
+// - CallAIn/CallFIn: Actual to formal parameter flow - points-to from actual
+// - RetDir/RetInd: Direct/indirect return value flow - points-to from return
+// value
+// - RetAOut/RetFOut: Formal to actual return flow - points-to from formal
+// - ParamCall/ParamRet: Parameter/return edge without callsite context
+// - ThreadMHPIndirectVF: May-happen-in-parallel indirect flow (multithreaded)
+// - DummyVProp: Dummy node for object/version pair propagation
 //
 //===----------------------------------------------------------------------===//
 
@@ -89,6 +110,9 @@ enum class SVFGK : uint32_t {
   NullPtr,
   Dummy,
 
+  // Dummy node for value propagation (object/version pair)
+  DummyVProp,
+
   // Variant kinds
   Variant,
 
@@ -131,6 +155,12 @@ enum class SVFGEdgeK : uint32_t {
   // Parameter passing edges
   ParamCall,
   ParamRet,
+
+  // Indirect value-flow edges (carry points-to information)
+  IntraIndirect,
+
+  // Thread MHP (May-Happen-in-Parallel) edges for multithreaded analysis
+  ThreadMHPIndirectVF,
 
   // Variant edges
   Variant,
@@ -207,6 +237,23 @@ inline bool isMemVFGEdge(SVFGEdgeK k) {
          k == SVFGEdgeK::RetMu || k == SVFGEdgeK::EntryChi ||
          k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
          k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut;
+}
+
+/// @brief Check if edge kind is an indirect value-flow edge (carries points-to)
+inline bool isIndirectVFGEdge(SVFGEdgeK k) {
+  return k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::CallInd ||
+         k == SVFGEdgeK::RetInd || k == SVFGEdgeK::ThreadMHPIndirectVF;
+}
+
+/// @brief Check if edge kind is a thread MHP edge (may-happen-in-parallel)
+inline bool isThreadMHPVFGEdge(SVFGEdgeK k) {
+  return k == SVFGEdgeK::ThreadMHPIndirectVF;
+}
+
+/// @brief Check if edge kind is a direct value-flow edge (no points-to)
+inline bool isDirectVFGEdge(SVFGEdgeK k) {
+  return k == SVFGEdgeK::IntraDirect || k == SVFGEdgeK::CallDir ||
+         k == SVFGEdgeK::RetDir;
 }
 
 } // namespace analysis

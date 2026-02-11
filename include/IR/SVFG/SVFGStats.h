@@ -6,6 +6,7 @@
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace lotus {
 namespace analysis {
@@ -45,7 +46,7 @@ public:
 
   void performSCCAnalysis(const SVFGEdgeSet &insensitiveCalRetEdges);
 
-private:
+ private:
   void clear();
   void processGraph();
   void calculateNodeDegrees(const SVFGNode *node,
@@ -111,6 +112,10 @@ private:
   SVFGNodeSet backwardSlice;
   SVFGNodeSet sources;
   SVFGNodeSet sinks;
+
+  // SCC/cycle results
+  std::unordered_map<uint32_t, uint32_t> sccRep;
+  std::unordered_set<uint32_t> cycleNodes;
 };
 
 } // namespace analysis
