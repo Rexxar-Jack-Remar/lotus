@@ -416,10 +416,17 @@ bool Expression::operator==(const ExpressionBase &other_eb) const {
   if (!other)
     return false;
 
-  if (typeid(*Instance_) != typeid(*other->Instance_))
+  const auto *thisInst = Instance_.get();
+  const auto *otherInst = other->Instance_.get();
+  if (!thisInst || !otherInst)
     return false;
 
-  return *Instance_ == *other->Instance_;
+  // Avoid using smart-pointer `operator*` inside `typeid` to keep clang from
+  // warning about potential side effects being evaluated.
+  if (typeid(*thisInst) != typeid(*otherInst))
+    return false;
+
+  return *thisInst == *otherInst;
 }
 
 RepresentedValue Expression::asRepresentedValue() const {

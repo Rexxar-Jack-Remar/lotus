@@ -342,7 +342,10 @@ private:
     }
   }
 
-  struct getHead : public std::unary_function<wto_component_t, vertex_t> {
+  struct getHead {
+    using argument_type = wto_component_t;
+    using result_type = vertex_t;
+
     getHead() {}
     vertex_t operator()(const wto_component_t &c) const { return c.head(); }
   };

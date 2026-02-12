@@ -881,4 +881,8 @@ public:
   virtual Range getRange(const Value *v);
 }; // end of class RangeAnalysis
 
+// Explicit instantiation declarations - definitions are in RangeAnalysis.cpp
+extern template char InterProceduralRA<Cousot>::ID;
+extern template char InterProceduralRA<CropDFS>::ID;
+
 #endif /* LLVM_TRANSFORMS_RANGEANALYSIS_RANGEANALYSIS_H_ */

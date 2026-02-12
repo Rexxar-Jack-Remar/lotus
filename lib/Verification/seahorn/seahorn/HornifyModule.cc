@@ -135,10 +135,13 @@ namespace seahorn {
 char HornifyModule::ID = 0;
 
 struct FunctionNameMatcher
-    : public std::unary_function<const Function &, bool> {
+{
+  using argument_type = const Function &;
+  using result_type = bool;
+
   llvm::Optional<llvm::Regex> m_re;
-  FunctionNameMatcher(std::string s) {
-    if (s != "") {
+  explicit FunctionNameMatcher(const std::string &s) {
+    if (!s.empty()) {
       m_re = llvm::Regex(s);
       std::string Error;
       if (!m_re->isValid(Error)) {
@@ -147,7 +150,7 @@ struct FunctionNameMatcher
       }
     }
   }
-  bool operator()(const Function &fn) {
+  bool operator()(const Function &fn) const {
     return m_re && m_re->match(fn.getName());
   }
 };

@@ -16,8 +16,11 @@ namespace seahorn
   {
     typedef std::pair<expr::Expr, expr::Expr> EEPair; // fdecl -> fdecl
 
-    struct MkOutEdgePair : public std::unary_function<expr::Expr, EEPair>
+    struct MkOutEdgePair
     {
+      using argument_type = expr::Expr;
+      using result_type = EEPair;
+
       expr::Expr src; 
       MkOutEdgePair () : src (NULL) {}
       MkOutEdgePair (expr::Expr u) : src (u) 
@@ -31,8 +34,11 @@ namespace seahorn
       }
     };
 
-    struct MkInEdgePair : public std::unary_function<expr::Expr,EEPair>
+    struct MkInEdgePair
     {
+      using argument_type = expr::Expr;
+      using result_type = EEPair;
+
       expr::Expr dst;
     
       MkInEdgePair () : dst(NULL) {}    

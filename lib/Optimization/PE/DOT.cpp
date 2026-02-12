@@ -288,18 +288,24 @@ void llvm::printPathCondition(PathCondition& PC, PathConditionTypes t, ShadowBB*
   case PathConditionTypeInt:
     Out << "Int";
     break;
+  case PathConditionTypeFptr:
+    Out << "Fptr";
+    break;
   case PathConditionTypeString:
     Out << "String";
     break;
   case PathConditionTypeIntmem:
     Out << "Intmem";
     break;
+  case PathConditionTypeFptrmem:
+    Out << "Fptrmem";
+    break;
   case PathConditionTypeStream:
     Out << "Stream";
     break;
-  case PathConditionTypeFptrmem:
-    release_assert(0 && "Bad path condition type");
-    llvm_unreachable("Bad path condition type");
+  case PathConditionTypeGlobalInit:
+    Out << "GlobalInit";
+    break;
   }
 
   Out << " PC: ";

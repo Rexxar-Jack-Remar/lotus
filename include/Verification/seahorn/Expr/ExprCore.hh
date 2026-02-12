@@ -546,7 +546,10 @@ inline size_t hash_value(Expr e) {
 /// implement boost::hash
 namespace boost {
 template <>
-struct hash<expr::Expr> : public std::unary_function<expr::Expr, std::size_t> {
+struct hash<expr::Expr> {
+  using argument_type = expr::Expr;
+  using result_type = std::size_t;
+
   std::size_t operator()(const expr::Expr &v) const {
     return expr::hash_value(v);
   }
@@ -556,7 +559,10 @@ struct hash<expr::Expr> : public std::unary_function<expr::Expr, std::size_t> {
 /// implement std::hash<expr::Expr>
 namespace std {
 template <>
-struct hash<expr::Expr> : public std::unary_function<expr::Expr, std::size_t> {
+struct hash<expr::Expr> {
+  using argument_type = expr::Expr;
+  using result_type = std::size_t;
+
   std::size_t operator()(const expr::Expr &v) const {
     return expr::hash_value(v);
   }
