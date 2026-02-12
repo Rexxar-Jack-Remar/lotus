@@ -3,6 +3,7 @@
  * Author: rainoftime
  */
 #include "Checker/Concurrency/LockMismatchChecker.h"
+#include "Analysis/Concurrency/Utils/RAIILockTracker.h"
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -114,6 +115,47 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
               }
             }
             if (!sameBlockAcquire) {
+              auto calleeAcquiresLock = [this, lock](const Function *callee) {
+                if (!callee || callee->isDeclaration())
+                  return false;
+                for (const Instruction &CI : instructions(callee)) {
+                  if (!m_threadAPI->isTDAcquire(&CI))
+                    continue;
+                  LockID L = m_threadAPI->getLockVal(&CI);
+                  if (!L)
+                    continue;
+                  if (L->stripPointerCasts() == lock)
+                    return true;
+                }
+                return false;
+              };
+              // Fallback when lockset propagation is imprecise: if a caller has
+              // an earlier helper call that acquires this lock before invoking
+              // the unlock helper, treat it as matched.
+              for (Function &caller : m_module) {
+                if (caller.isDeclaration() || sameBlockAcquire)
+                  continue;
+                for (inst_iterator K = inst_begin(caller), KE = inst_end(caller);
+                     K != KE; ++K) {
+                  auto *CB = dyn_cast<CallBase>(&*K);
+                  if (!CB || CB->getCalledFunction() != &func)
+                    continue;
+                  for (Instruction *Prev = K->getPrevNode(); Prev;
+                       Prev = Prev->getPrevNode()) {
+                    auto *PrevCB = dyn_cast<CallBase>(Prev);
+                    if (!PrevCB)
+                      continue;
+                    if (calleeAcquiresLock(PrevCB->getCalledFunction())) {
+                      sameBlockAcquire = true;
+                      break;
+                    }
+                  }
+                  if (sameBlockAcquire)
+                    break;
+                }
+              }
+            }
+            if (!sameBlockAcquire) {
               ConcurrencyBugReport report(
                   ConcurrencyBugType::LOCK_MISMATCH,
                   "Unlock called without holding the lock",
@@ -167,6 +209,18 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
               funcName.contains("acquire") || funcName.contains("Acquire")) {
             intentional = true;
           }
+          if (!intentional) {
+            unsigned acqCount = 0, relCount = 0;
+            for (inst_iterator J = inst_begin(func), E = inst_end(func); J != E;
+                 ++J) {
+              if (m_threadAPI->isTDAcquire(&*J))
+                ++acqCount;
+              else if (m_threadAPI->isTDRelease(&*J))
+                ++relCount;
+            }
+            if (acqCount > 0 && relCount == 0)
+              intentional = true; // lock-acquire helper function
+          }
 
           if (!intentional) {
             for (const auto *lock : heldLocks) {
@@ -182,9 +236,74 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
         }
       }
     }
+    
+    // Check for RAII lock misuse patterns
+    checkRAIILockMisuse(func, reports);
   }
 
   return reports;
+}
+
+void LockMismatchChecker::checkRAIILockMisuse(Function &func,
+                                                std::vector<ConcurrencyBugReport> &reports) {
+  RAIILock::RAIILockTracker tracker;
+  tracker.analyzeFunction(&func);
+  
+  const auto &lifetimes = tracker.getAllLockLifetimes();
+  
+  for (const auto &pair : lifetimes) {
+    const auto &lifetime = pair.second;
+    
+    // Check for missing destructor (lock not released)
+    if (lifetime.destructors.empty()) {
+      ConcurrencyBugReport report(
+          ConcurrencyBugType::LOCK_MISMATCH,
+          "RAII lock may not be released: no destructor found",
+          BugDescription::BI_HIGH, BugDescription::BC_WARNING);
+      report.addStep(lifetime.constructor, "RAII lock constructor");
+      reports.push_back(report);
+    }
+    
+    // Check for scoped_lock with single mutex (should use lock_guard)
+    if (lifetime.isScoped && lifetime.constructor->getNumOperands() == 2) {
+      // scoped_lock with only one mutex - could use lock_guard instead
+      ConcurrencyBugReport report(
+          ConcurrencyBugType::LOCK_MISMATCH,
+          "scoped_lock used with single mutex: consider using lock_guard",
+          BugDescription::BI_LOW, BugDescription::BC_STYLE);
+      report.addStep(lifetime.constructor, "scoped_lock constructor");
+      reports.push_back(report);
+    }
+    
+    // Check for unique_lock without any manual lock/unlock operations
+    if (lifetime.constructor && lifetime.constructor->getCalledFunction()) {
+      StringRef name = lifetime.constructor->getCalledFunction()->getName();
+      if (name.contains("unique_lock")) {
+        // Check if there are any manual lock/unlock calls in the function
+        bool hasManualOps = false;
+        for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
+          const CallBase *call = dyn_cast<CallBase>(&*I);
+          if (call && call->getCalledFunction()) {
+            StringRef callName = call->getCalledFunction()->getName();
+            if (callName.contains("unique_lock") && 
+                (callName.contains("lockEv") || callName.contains("unlockEv"))) {
+              hasManualOps = true;
+              break;
+            }
+          }
+        }
+        
+        if (!hasManualOps) {
+          ConcurrencyBugReport report(
+              ConcurrencyBugType::LOCK_MISMATCH,
+              "unique_lock used without manual lock/unlock: consider using lock_guard",
+              BugDescription::BI_LOW, BugDescription::BC_STYLE);
+          report.addStep(lifetime.constructor, "unique_lock constructor");
+          reports.push_back(report);
+        }
+      }
+    }
+  }
 }
 
 std::string

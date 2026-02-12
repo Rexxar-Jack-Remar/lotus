@@ -80,4 +80,83 @@ inline bool isTaskAlloc(const llvm::StringRef& funcName) { return funcName.equal
 
 inline bool isGetThreadNum(const llvm::StringRef& funcName) { return funcName.equals("omp_get_thread_num"); }
 
+// OpenMP 3.0+ Task Support
+inline bool isTask(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_task"); }
+inline bool isTask(const llvm::CallBase* callInst) {
+  if (!callInst) return false;
+  auto const func = callInst->getCalledFunction();
+  if (!func || !func->hasName()) return false;
+  return isTask(func->getName());
+}
+
+inline bool isTaskwait(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_taskwait"); }
+
+inline bool isTaskyield(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_taskyield"); }
+
+inline bool isTaskgroupStart(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_taskgroup"); }
+
+inline bool isTaskgroupEnd(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_end_taskgroup"); }
+
+// OpenMP 4.0+ Task Dependencies
+inline bool isTaskWithDeps(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_task_with_deps"); }
+
+inline bool isTaskwaitWithDeps(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_wait_deps"); }
+
+// OpenMP 4.5+ Taskloop Support
+inline bool isTaskloop(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_taskloop"); }
+
+inline bool isTaskloopNoWait(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_taskloop_nowait"); }
+
+// OpenMP 4.0+ Target Offloading
+inline bool isTargetInit(const llvm::StringRef& funcName) { return funcName.startswith("__tgt_target"); }
+
+inline bool isTargetDataBegin(const llvm::StringRef& funcName) { return funcName.equals("__tgt_target_data_begin"); }
+
+inline bool isTargetDataEnd(const llvm::StringRef& funcName) { return funcName.equals("__tgt_target_data_end"); }
+
+inline bool isTargetDataUpdate(const llvm::StringRef& funcName) { return funcName.equals("__tgt_target_data_update"); }
+
+// OpenMP 5.0+ Task Detach
+inline bool isTaskDetach(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_task_complete"); }
+
+// OpenMP Sections Support
+inline bool isSectionsInit(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_sections_init"); }
+
+inline bool isSectionsNext(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_next_section"); }
+
+inline bool isSectionsEnd(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_end_sections"); }
+
+// OpenMP Worksharing Constructs
+inline bool isWorkshareStart(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_workshare"); }
+
+inline bool isWorkshareEnd(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_end_workshare"); }
+
+// OpenMP Atomic Operations
+inline bool isAtomicStart(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_atomic_start"); }
+
+inline bool isAtomicEnd(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_atomic_end"); }
+
+// OpenMP Flush (memory fence)
+inline bool isFlush(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_flush"); }
+
+// OpenMP Cancellation
+inline bool isCancel(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_cancel"); }
+
+inline bool isCancellationPoint(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_cancellationpoint"); }
+
+// Check if function is a task-related operation (for aggregation)
+inline bool isTaskRelated(const llvm::StringRef& funcName) {
+  return isTask(funcName) || isTaskwait(funcName) || isTaskyield(funcName) ||
+         isTaskgroupStart(funcName) || isTaskgroupEnd(funcName) ||
+         isTaskWithDeps(funcName) || isTaskloop(funcName) || isTaskloopNoWait(funcName);
+}
+
+// Update isNoEffect to include new constructs that don't need modeling
+inline bool isNoEffectExtended(const llvm::StringRef& funcName) {
+  return isNoEffect(funcName) || 
+         funcName.equals("__kmpc_push_proc_bind") ||
+         funcName.equals("__kmpc_push_num_teams") ||
+         funcName.equals("__kmpc_set_thread_limit");
+}
+
 }  // namespace OpenMPModel

@@ -102,4 +102,111 @@ bool isLoad(const llvm::Instruction *inst) {
     return llvm::isa<llvm::LoadInst>(inst) || llvm::isa<llvm::AtomicRMWInst>(inst) || llvm::isa<llvm::AtomicCmpXchgInst>(inst);
 }
 
+bool isReadModifyWrite(const llvm::Instruction *inst) {
+    if (!isAtomic(inst)) return false;
+    return llvm::isa<llvm::AtomicRMWInst>(inst);
+}
+
+bool isCompareExchange(const llvm::Instruction *inst) {
+    if (!isAtomic(inst)) return false;
+    return llvm::isa<llvm::AtomicCmpXchgInst>(inst);
+}
+
+bool isFence(const llvm::Instruction *inst) {
+    return llvm::isa<llvm::FenceInst>(inst);
+}
+
+// Memory ordering property checks for synchronization analysis
+bool hasAcquireSemantics(const llvm::Instruction *inst) {
+    MemoryOrder order = getMemoryOrder(inst);
+    return order == MemoryOrder::Acquire || 
+           order == MemoryOrder::AcquireRelease || 
+           order == MemoryOrder::SequentiallyConsistent;
+}
+
+bool hasReleaseSemantics(const llvm::Instruction *inst) {
+    MemoryOrder order = getMemoryOrder(inst);
+    return order == MemoryOrder::Release || 
+           order == MemoryOrder::AcquireRelease || 
+           order == MemoryOrder::SequentiallyConsistent;
+}
+
+bool hasSequentialConsistency(const llvm::Instruction *inst) {
+    MemoryOrder order = getMemoryOrder(inst);
+    return order == MemoryOrder::SequentiallyConsistent;
+}
+
+bool isRelaxed(const llvm::Instruction *inst) {
+    MemoryOrder order = getMemoryOrder(inst);
+    return order == MemoryOrder::Relaxed;
+}
+
+// Synchronizes-with relationship helpers
+bool canSynchronizeWith(const llvm::Instruction *release, const llvm::Instruction *acquire) {
+    if (!release || !acquire) return false;
+    
+    // Release operation must have release semantics
+    if (!hasReleaseSemantics(release)) return false;
+    
+    // Acquire operation must have acquire semantics
+    if (!hasAcquireSemantics(acquire)) return false;
+    
+    // Both must operate on the same memory location
+    const llvm::Value *relPtr = getAtomicPointer(release);
+    const llvm::Value *acqPtr = getAtomicPointer(acquire);
+    
+    if (!relPtr || !acqPtr) return false;
+    
+    // Simple pointer equality check (alias analysis would be more precise)
+    return relPtr == acqPtr;
+}
+
+bool participatesInReleaseSequence(const llvm::Instruction *inst) {
+    if (!isAtomic(inst)) return false;
+    
+    // An operation participates in a release sequence if it's:
+    // 1. A release operation, or
+    // 2. An atomic RMW operation on the same location
+    return hasReleaseSemantics(inst) || isReadModifyWrite(inst);
+}
+
+// Fence analysis
+bool isFenceAcquire(const llvm::Instruction *inst) {
+    if (!isFence(inst)) return false;
+    MemoryOrder order = getMemoryOrder(inst);
+    return order == MemoryOrder::Acquire;
+}
+
+bool isFenceRelease(const llvm::Instruction *inst) {
+    if (!isFence(inst)) return false;
+    MemoryOrder order = getMemoryOrder(inst);
+    return order == MemoryOrder::Release;
+}
+
+bool isFenceAcqRel(const llvm::Instruction *inst) {
+    if (!isFence(inst)) return false;
+    MemoryOrder order = getMemoryOrder(inst);
+    return order == MemoryOrder::AcquireRelease;
+}
+
+bool isFenceSeqCst(const llvm::Instruction *inst) {
+    if (!isFence(inst)) return false;
+    MemoryOrder order = getMemoryOrder(inst);
+    return order == MemoryOrder::SequentiallyConsistent;
+}
+
+// Helper to get human-readable memory order string
+const char* memoryOrderToString(MemoryOrder order) {
+    switch (order) {
+        case MemoryOrder::NotAtomic: return "not_atomic";
+        case MemoryOrder::Relaxed: return "relaxed";
+        case MemoryOrder::Consume: return "consume";
+        case MemoryOrder::Acquire: return "acquire";
+        case MemoryOrder::Release: return "release";
+        case MemoryOrder::AcquireRelease: return "acq_rel";
+        case MemoryOrder::SequentiallyConsistent: return "seq_cst";
+        default: return "unknown";
+    }
+}
+
 } // namespace Cpp11Atomics

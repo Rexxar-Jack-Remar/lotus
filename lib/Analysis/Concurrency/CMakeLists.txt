@@ -3,6 +3,7 @@ set(Concurrency_SOURCES
   Utils/ThreadFlowGraph.cpp
   Utils/BVClock.cpp
   Utils/FBVClock.cpp
+  Utils/RAIILockTracker.cpp
   MHP/Cpp11Atomics.cpp
   MHP/MHPAnalysis.cpp
   MHP/StaticVectorClockMHP.cpp

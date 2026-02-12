@@ -81,11 +81,67 @@ public:
     TD_CONDVAR_DESTROY, ///< Destroy a condition variable
     TD_BAR_INIT,        ///< Initialize a barrier
     TD_BAR_WAIT,        ///< Wait on a barrier
-    HARE_PAR_FOR        ///< Hare parallel for loop construct
+    HARE_PAR_FOR,       ///< Hare parallel for loop construct
+    
+    // C++11/17/20 Modern Synchronization Primitives
+    TD_SHARED_RDLOCK,   ///< std::shared_mutex::lock_shared (read lock)
+    TD_SHARED_WRLOCK,   ///< std::shared_mutex::lock (exclusive/write lock)
+    TD_SHARED_UNLOCK,   ///< std::shared_mutex::unlock[_shared]
+    TD_CALL_ONCE,       ///< std::call_once - singleton initialization
+    TD_FUTURE_GET,      ///< std::future::get - synchronization point
+    TD_FUTURE_WAIT,     ///< std::future::wait - wait without getting value
+    TD_PROMISE_SET,     ///< std::promise::set_value/set_exception
+    TD_ASYNC,           ///< std::async - task creation
+    
+    // RAII Lock Wrappers (special handling needed)
+    TD_LOCK_GUARD_CTOR,   ///< std::lock_guard constructor (acquire)
+    TD_LOCK_GUARD_DTOR,   ///< std::lock_guard destructor (release)
+    TD_UNIQUE_LOCK_CTOR,  ///< std::unique_lock constructor (acquire)
+    TD_UNIQUE_LOCK_DTOR,  ///< std::unique_lock destructor (release)
+    TD_UNIQUE_LOCK_LOCK,  ///< std::unique_lock::lock (manual acquire)
+    TD_UNIQUE_LOCK_UNLOCK, ///< std::unique_lock::unlock (manual release)
+    TD_SCOPED_LOCK_CTOR,  ///< std::scoped_lock constructor (acquire multiple)
+    TD_SCOPED_LOCK_DTOR,  ///< std::scoped_lock destructor (release multiple)
+    TD_SHARED_LOCK_CTOR,  ///< std::shared_lock constructor (shared acquire)
+    TD_SHARED_LOCK_DTOR,  ///< std::shared_lock destructor (shared release)
+    
+    // C++20 Additional Primitives
+    TD_JTHREAD_FORK,      ///< std::jthread constructor (fork)
+    TD_JTHREAD_JOIN,      ///< std::jthread::join
+    TD_LATCH_COUNT_DOWN,  ///< std::latch::count_down
+    TD_LATCH_WAIT,        ///< std::latch::wait
+    TD_LATCH_ARRIVE_WAIT, ///< std::latch::arrive_and_wait
+    TD_BARRIER_ARRIVE_WAIT, ///< std::barrier::arrive_and_wait
+    TD_BARRIER_ARRIVE,    ///< std::barrier::arrive
+    TD_BARRIER_WAIT_CPP20, ///< std::barrier::wait (C++20 version)
+    TD_SEMAPHORE_ACQUIRE, ///< std::counting_semaphore::acquire
+    TD_SEMAPHORE_RELEASE, ///< std::counting_semaphore::release
+    TD_SEMAPHORE_TRY_ACQUIRE, ///< std::counting_semaphore::try_acquire
+    
+    // OpenMP Task Support (3.0+)
+    TD_OMP_TASK,          ///< __kmpc_omp_task - explicit task creation
+    TD_OMP_TASKWAIT,      ///< __kmpc_omp_taskwait - wait for child tasks
+    TD_OMP_TASKYIELD,     ///< __kmpc_omp_taskyield - yield to other tasks
+    TD_OMP_TASKGROUP_START, ///< __kmpc_taskgroup - start task group
+    TD_OMP_TASKGROUP_END, ///< __kmpc_end_taskgroup - end task group
+    TD_OMP_TASK_WITH_DEPS, ///< __kmpc_omp_task_with_deps - task with dependencies
+    TD_OMP_TASKLOOP,      ///< __kmpc_taskloop - taskloop construct
+    
+    // OpenMP Additional Constructs
+    TD_OMP_SECTIONS_INIT, ///< __kmpc_sections_init - sections construct
+    TD_OMP_SECTIONS_NEXT, ///< __kmpc_next_section - get next section
+    TD_OMP_SECTIONS_END,  ///< __kmpc_end_sections - end sections
+    TD_OMP_ATOMIC_START,  ///< __kmpc_atomic_start - atomic region start
+    TD_OMP_ATOMIC_END,    ///< __kmpc_atomic_end - atomic region end
+    TD_OMP_FLUSH,         ///< __kmpc_flush - memory fence
+    TD_OMP_CANCEL,        ///< __kmpc_cancel - cancellation
+    TD_OMP_TARGET,        ///< __tgt_target* - target offloading
+    TD_OMP_TARGET_DATA_BEGIN, ///< __tgt_target_data_begin
+    TD_OMP_TARGET_DATA_END    ///< __tgt_target_data_end
   };
 
   /// Map type for API name to TD_TYPE conversion
-  typedef llvm::StringMap<TD_TYPE> TDAPIMap;
+  using TDAPIMap = llvm::StringMap<TD_TYPE>;
 
   /// Argument indices for TD_FORK (Goblint-style; default pthread_create: 0,2,3)
   struct ForkArgIndices {
@@ -116,9 +172,6 @@ private:
   /// Static reference
   static ThreadAPI *tdAPI;
 
-  /// Get the function type if it is a threadAPI function
-  TD_TYPE getType(const Function *F) const;
-
   /// Load configuration from a file
   void loadConfig(const std::string &filename);
 
@@ -126,6 +179,8 @@ private:
   void addEntry(const std::string &name, TD_TYPE type);
 
 public:
+  /// Get the function type if it is a threadAPI function
+  TD_TYPE getType(const Function *F) const;
   /// Return a static reference
   static ThreadAPI *getThreadAPI() {
     if (tdAPI == NULL) {

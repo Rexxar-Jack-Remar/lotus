@@ -37,6 +37,30 @@ private:
 
   bool sameAtomicLocation(const llvm::Instruction *store_inst,
                           const llvm::Instruction *load_inst) const;
+  
+  /**
+   * @brief Check if promise and future operate on the same shared state
+   */
+  bool samePromiseFuturePair(const llvm::Instruction *promise,
+                             const llvm::Instruction *future) const;
+  
+  /**
+   * @brief Check if two call_once calls use the same once_flag
+   */
+  bool sameOnceFlag(const llvm::Instruction *call1,
+                    const llvm::Instruction *call2) const;
+  
+  /**
+   * @brief Check if two latch operations use the same latch object
+   */
+  bool sameLatch(const llvm::Instruction *inst1,
+                 const llvm::Instruction *inst2) const;
+  
+  /**
+   * @brief Check if two barrier operations use the same barrier object
+   */
+  bool sameBarrier(const llvm::Instruction *inst1,
+                   const llvm::Instruction *inst2) const;
 
   llvm::Module &m_module;
   mhp::MHPAnalysis &m_mhp;

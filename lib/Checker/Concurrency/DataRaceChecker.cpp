@@ -6,6 +6,7 @@
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Analysis/Concurrency/MHP/Cpp11Atomics.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -55,6 +56,7 @@ static bool isIgnorableTypeForRace(const Type *ty) {
   if (name.startswith("\01"))
     name = name.drop_front(1);
   static const char *ignorable[] = {
+      // pthread primitives
       "pthread_mutex_t",
       "pthread_cond_t",
       "pthread_barrier_t",
@@ -64,19 +66,43 @@ static bool isIgnorableTypeForRace(const Type *ty) {
       "__pthread_mutex_s",
       "__pthread_cond_s",
       "__pthread_rwlock_arch_t",
-      "FILE",
-      "__FILE",
-      "_IO_FILE",
-      "atomic_flag",
-      "atomic_t",
-      "spinlock_t",
       "pthread_condattr_t",
       "pthread_mutexattr_t",
       "pthread_barrierattr_t",
-      "__jmp_buf_tag",
       "_pthread_cleanup_buffer",
       "__cancel_jmp_buf_tag",
+      // C++ standard library synchronization primitives
+      "mutex",
+      "recursive_mutex",
+      "shared_mutex",
+      "shared_timed_mutex",
+      "timed_mutex",
+      "lock_guard",
+      "unique_lock",
+      "scoped_lock",
+      "shared_lock",
+      "condition_variable",
+      "condition_variable_any",
+      "once_flag",
+      "promise",
+      "future",
+      "shared_future",
+      "latch",
+      "barrier",
+      "counting_semaphore",
+      "binary_semaphore",
+      "jthread",
+      // Atomic and low-level primitives
+      "atomic_flag",
+      "atomic_t",
+      "atomic",
+      "spinlock_t",
       "lock_class_key",
+      // File I/O
+      "FILE",
+      "__FILE",
+      "_IO_FILE",
+      "__jmp_buf_tag",
   };
   for (const char *ig : ignorable)
     if (name.equals(ig))
@@ -169,6 +195,63 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
         }
       }
     }
+  }
+
+  // Fallback for helper-based locking patterns where lockset propagation is
+  // imprecise (e.g., acquire/release split across helper calls).
+  if (inst1->getFunction() == inst2->getFunction()) {
+    auto getAcquireReleaseLock = [this](const CallBase *CB, bool wantAcquire)
+                                     -> const Value * {
+      if (!CB)
+        return nullptr;
+      const Instruction *I = cast<Instruction>(CB);
+      if (wantAcquire && m_threadAPI->isTDAcquire(I))
+        return m_threadAPI->getLockVal(I);
+      if (!wantAcquire && m_threadAPI->isTDRelease(I))
+        return m_threadAPI->getLockVal(I);
+      Function *callee = CB->getCalledFunction();
+      if (!callee || callee->isDeclaration())
+        return nullptr;
+      for (const Instruction &CI : instructions(callee)) {
+        if (wantAcquire && m_threadAPI->isTDAcquire(&CI))
+          return m_threadAPI->getLockVal(&CI);
+        if (!wantAcquire && m_threadAPI->isTDRelease(&CI))
+          return m_threadAPI->getLockVal(&CI);
+      }
+      return nullptr;
+    };
+
+    auto isSyntacticallyProtected = [&](const Instruction *I) {
+      const BasicBlock *BB = I->getParent();
+      if (!BB)
+        return false;
+      const Value *preLock = nullptr;
+      for (const Instruction *P = I->getPrevNode(); P; P = P->getPrevNode()) {
+        const auto *CB = dyn_cast<CallBase>(P);
+        if (!CB)
+          continue;
+        if (const Value *L = getAcquireReleaseLock(CB, /*wantAcquire=*/true)) {
+          preLock = L->stripPointerCasts();
+          break;
+        }
+      }
+      if (!preLock)
+        return false;
+      for (const Instruction *N = I->getNextNode(); N; N = N->getNextNode()) {
+        const auto *CB = dyn_cast<CallBase>(N);
+        if (!CB)
+          continue;
+        if (const Value *L = getAcquireReleaseLock(CB, /*wantAcquire=*/false)) {
+          const Value *postLock = L ? L->stripPointerCasts() : nullptr;
+          if (postLock && mayAlias(preLock, postLock))
+            return true;
+        }
+      }
+      return false;
+    };
+
+    if (isSyntacticallyProtected(inst1) && isSyntacticallyProtected(inst2))
+      return false;
   }
   return true;
 }
@@ -391,12 +474,22 @@ bool DataRaceChecker::isWriteAccess(const Instruction *inst) const {
 }
 
 bool DataRaceChecker::isAtomicOperation(const Instruction *inst) const {
+  // Use enhanced Cpp11Atomics module for better atomic recognition
+  if (Cpp11Atomics::isAtomic(inst))
+    return true;
+  
+  // Legacy check for backward compatibility
   if (isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst))
     return true;
   if (const auto *L = dyn_cast<LoadInst>(inst))
     return L->isAtomic();
   if (const auto *S = dyn_cast<StoreInst>(inst))
     return S->isAtomic();
+  
+  // Check if it's a fence instruction
+  if (Cpp11Atomics::isFence(inst))
+    return true;
+    
   return false;
 }
 
@@ -436,6 +529,8 @@ void DataRaceChecker::buildSyncObjectSet() {
       if (!cb || !m_threadAPI->getCallee(inst))
         continue;
       const Value *v = nullptr;
+      
+      // Traditional pthread primitives
       if (m_threadAPI->isTDAcquire(inst) || m_threadAPI->isTDRelease(inst))
         v = m_threadAPI->getLockVal(inst);
       else if (m_threadAPI->isTDCondWait(inst) ||
@@ -444,6 +539,68 @@ void DataRaceChecker::buildSyncObjectSet() {
         v = m_threadAPI->getCondVal(inst);
       else if (m_threadAPI->isTDBarWait(inst))
         v = m_threadAPI->getBarrierVal(inst);
+      
+      // Modern C++ synchronization primitives
+      else if (cb->getCalledFunction()) {
+        const Function *func = cb->getCalledFunction();
+        ThreadAPI::TD_TYPE type = m_threadAPI->getType(func);
+        
+        switch (type) {
+          case ThreadAPI::TD_SHARED_RDLOCK:
+          case ThreadAPI::TD_SHARED_WRLOCK:
+          case ThreadAPI::TD_SHARED_UNLOCK:
+          case ThreadAPI::TD_LOCK_GUARD_CTOR:
+          case ThreadAPI::TD_LOCK_GUARD_DTOR:
+          case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+          case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+          case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+          case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+          case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+          case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+          case ThreadAPI::TD_SHARED_LOCK_CTOR:
+          case ThreadAPI::TD_SHARED_LOCK_DTOR:
+          case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
+          case ThreadAPI::TD_SEMAPHORE_RELEASE:
+            // These take mutex/semaphore as argument
+            if (cb->arg_size() >= 1)
+              v = cb->getArgOperand(0);
+            break;
+            
+          case ThreadAPI::TD_CALL_ONCE:
+            // Takes once_flag as first argument
+            if (cb->arg_size() >= 1)
+              v = cb->getArgOperand(0);
+            break;
+            
+          case ThreadAPI::TD_FUTURE_GET:
+          case ThreadAPI::TD_FUTURE_WAIT:
+          case ThreadAPI::TD_PROMISE_SET:
+            // Future/promise are synchronization objects themselves
+            if (cb->arg_size() >= 1)
+              v = cb->getArgOperand(0);
+            break;
+            
+          case ThreadAPI::TD_LATCH_COUNT_DOWN:
+          case ThreadAPI::TD_LATCH_WAIT:
+          case ThreadAPI::TD_LATCH_ARRIVE_WAIT:
+            // Latch object
+            if (cb->arg_size() >= 1)
+              v = cb->getArgOperand(0);
+            break;
+            
+          case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
+          case ThreadAPI::TD_BARRIER_ARRIVE:
+          case ThreadAPI::TD_BARRIER_WAIT_CPP20:
+            // Barrier object
+            if (cb->arg_size() >= 1)
+              v = cb->getArgOperand(0);
+            break;
+            
+          default:
+            break;
+        }
+      }
+      
       if (v)
         m_syncObjects.insert(v->stripPointerCasts());
     }

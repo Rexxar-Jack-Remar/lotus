@@ -21,6 +21,7 @@ namespace concurrency {
  * - Double unlock
  * - Unlock without lock
  * - Lock leaks (returning with lock held)
+ * - RAII lock misuse patterns (C++11/17/20)
  */
 class LockMismatchChecker {
 public:
@@ -41,6 +42,14 @@ private:
 
     // Helper methods
     std::string getInstructionLocation(const llvm::Instruction* inst) const;
+    
+    /**
+     * @brief Check for RAII lock misuse patterns
+     * @param func Function to analyze
+     * @param reports Vector to append reports to
+     */
+    void checkRAIILockMisuse(llvm::Function& func,
+                             std::vector<ConcurrencyBugReport>& reports);
 };
 
 } // namespace concurrency

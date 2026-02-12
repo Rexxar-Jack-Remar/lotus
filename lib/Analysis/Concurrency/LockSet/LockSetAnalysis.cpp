@@ -710,6 +710,126 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
   } else if (m_thread_api->isTDCondWait(inst)) {
     // pthread_cond_wait atomically releases the mutex and re-acquires on return; lock set unchanged.
   } else if (const CallInst *call = dyn_cast<CallInst>(inst)) {
+    const Function *func = call->getCalledFunction();
+    if (func) {
+      ThreadAPI::TD_TYPE type = m_thread_api->getType(func);
+      
+      // Handle modern C++ synchronization primitives
+      switch (type) {
+        case ThreadAPI::TD_SHARED_RDLOCK:
+        case ThreadAPI::TD_SHARED_WRLOCK:
+          // Handled in transferReadWrite, but also update combined set
+          if (LockID lock = getLockValue(inst))
+            out_set.insert(lock);
+          return out_set;
+          
+        case ThreadAPI::TD_SHARED_UNLOCK:
+          // Release both read and write locks
+          if (LockID lock = getLockValue(inst)) {
+            out_set.erase(lock);
+            if (is_must && m_alias_analysis) {
+              LockSet to_remove;
+              for (const auto *l : out_set)
+                if (mayAlias(l, lock)) to_remove.insert(l);
+              for (const auto *l : to_remove) out_set.erase(l);
+            }
+          }
+          return out_set;
+        
+        // RAII lock constructors (acquire)
+        case ThreadAPI::TD_LOCK_GUARD_CTOR:
+        case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+        case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+        case ThreadAPI::TD_SHARED_LOCK_CTOR:
+          if (call->arg_size() >= 2) {
+            // Second argument is typically the mutex
+            LockID lock = getCanonicalLock(call->getArgOperand(1));
+            if (lock) out_set.insert(lock);
+          }
+          return out_set;
+        
+        // RAII lock destructors (release)
+        case ThreadAPI::TD_LOCK_GUARD_DTOR:
+        case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+        case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+        case ThreadAPI::TD_SHARED_LOCK_DTOR:
+          // Destructor releases the lock - need to track the lock object
+          // to determine which mutex to release
+          // For now, conservatively invalidate all locks if is_must
+          if (is_must) {
+            out_set.clear(); // Conservative: all RAII locks may be released
+          }
+          return out_set;
+        
+        // unique_lock manual operations
+        case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+          // Manual lock() call on unique_lock
+          if (call->arg_size() >= 1) {
+            LockID lock_obj = getCanonicalLock(call->getArgOperand(0));
+            if (lock_obj) out_set.insert(lock_obj);
+          }
+          return out_set;
+          
+        case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+          // Manual unlock() call on unique_lock
+          if (call->arg_size() >= 1) {
+            LockID lock_obj = getCanonicalLock(call->getArgOperand(0));
+            if (lock_obj) {
+              out_set.erase(lock_obj);
+              if (is_must && m_alias_analysis) {
+                LockSet to_remove;
+                for (const auto *l : out_set)
+                  if (mayAlias(l, lock_obj)) to_remove.insert(l);
+                for (const auto *l : to_remove) out_set.erase(l);
+              }
+            }
+          }
+          return out_set;
+        
+        // C++20 semaphores
+        case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
+          if (call->arg_size() >= 1) {
+            LockID sem = getCanonicalLock(call->getArgOperand(0));
+            if (sem) out_set.insert(sem);
+          }
+          return out_set;
+          
+        case ThreadAPI::TD_SEMAPHORE_RELEASE:
+          if (call->arg_size() >= 1) {
+            LockID sem = getCanonicalLock(call->getArgOperand(0));
+            if (sem) {
+              out_set.erase(sem);
+              if (is_must && m_alias_analysis) {
+                LockSet to_remove;
+                for (const auto *l : out_set)
+                  if (mayAlias(l, sem)) to_remove.insert(l);
+                for (const auto *l : to_remove) out_set.erase(l);
+              }
+            }
+          }
+          return out_set;
+        
+        // Synchronization primitives (don't hold locks, but create sync edges)
+        case ThreadAPI::TD_CALL_ONCE:
+        case ThreadAPI::TD_FUTURE_GET:
+        case ThreadAPI::TD_FUTURE_WAIT:
+        case ThreadAPI::TD_PROMISE_SET:
+        case ThreadAPI::TD_LATCH_WAIT:
+        case ThreadAPI::TD_LATCH_ARRIVE_WAIT:
+        case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
+        case ThreadAPI::TD_BARRIER_WAIT_CPP20:
+        case ThreadAPI::TD_OMP_TASKWAIT:
+        case ThreadAPI::TD_OMP_TASKGROUP_END:
+        case ThreadAPI::TD_OMP_FLUSH:
+          // These are synchronization points but don't modify lock sets
+          return out_set;
+        
+        default:
+          break;
+      }
+    }
+    
+    // Handle regular function calls with interprocedural summaries (existing code continues)
     // Try-lock is handled above (not added to set). Handle other calls.
     if (!m_thread_api->isTDAcquire(call) && !m_thread_api->isTDRelease(call) &&
         !m_thread_api->isTDCondWait(call)) {
@@ -813,6 +933,76 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         }
         for (const auto *l : to_remove_r) out_read.erase(l);
         for (const auto *l : to_remove_w) out_write.erase(l);
+      }
+    }
+  } else if (const CallInst *call = dyn_cast<CallInst>(inst)) {
+    const Function *func = call->getCalledFunction();
+    if (func) {
+      ThreadAPI::TD_TYPE type = m_thread_api->getType(func);
+      
+      switch (type) {
+        case ThreadAPI::TD_SHARED_RDLOCK:
+          // std::shared_mutex::lock_shared - acquire read lock
+          if (call->arg_size() >= 1) {
+            LockID lock = getCanonicalLock(call->getArgOperand(0));
+            if (lock) out_read.insert(lock);
+          }
+          break;
+          
+        case ThreadAPI::TD_SHARED_WRLOCK:
+          // std::shared_mutex::lock - acquire write lock
+          if (call->arg_size() >= 1) {
+            LockID lock = getCanonicalLock(call->getArgOperand(0));
+            if (lock) {
+              out_write.insert(lock);
+              // Remove any read locks on the same mutex
+              for (const auto *l : in_read) {
+                if (mayAlias(l, lock)) out_read.erase(l);
+              }
+            }
+          }
+          break;
+          
+        case ThreadAPI::TD_SHARED_UNLOCK:
+          // std::shared_mutex::unlock[_shared] - release lock
+          if (call->arg_size() >= 1) {
+            LockID lock = getCanonicalLock(call->getArgOperand(0));
+            if (lock) {
+              out_read.erase(lock);
+              out_write.erase(lock);
+              if (is_must && m_alias_analysis) {
+                LockSet to_remove_r, to_remove_w;
+                for (const auto *l : out_read)
+                  if (mayAlias(l, lock)) to_remove_r.insert(l);
+                for (const auto *l : out_write)
+                  if (mayAlias(l, lock)) to_remove_w.insert(l);
+                for (const auto *l : to_remove_r) out_read.erase(l);
+                for (const auto *l : to_remove_w) out_write.erase(l);
+              }
+            }
+          }
+          break;
+          
+        case ThreadAPI::TD_SHARED_LOCK_CTOR:
+          // std::shared_lock constructor - acquire read lock
+          if (call->arg_size() >= 2) {
+            LockID lock = getCanonicalLock(call->getArgOperand(1));
+            if (lock) out_read.insert(lock);
+          }
+          break;
+          
+        case ThreadAPI::TD_LOCK_GUARD_CTOR:
+        case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+        case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+          // These acquire write/exclusive locks
+          if (call->arg_size() >= 2) {
+            LockID lock = getCanonicalLock(call->getArgOperand(1));
+            if (lock) out_write.insert(lock);
+          }
+          break;
+          
+        default:
+          break;
       }
     }
   }
