@@ -19,6 +19,7 @@ public:
   using value_type = llvm::APInt;
   using test_type  = bool;            // no symbolic guards for now
   static constexpr bool idempotent = true;
+  static constexpr bool commutative_extend = true;
 
   // The width is determined at runtime but stored in a static so that the
   // zero() factory can create well-sized vectors.

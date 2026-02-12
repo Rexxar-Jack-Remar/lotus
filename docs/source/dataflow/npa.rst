@@ -57,7 +57,9 @@ This yields:
 * **Faster convergence** than classical Kleene iteration (often exponentially faster).
 * **Robustness**: guaranteed convergence for any ω-continuous semiring.
 * **Termination guarantees**: for idempotent commutative semirings, Newton's method
-  terminates in at most *n* iterations for a system of *n* equations.
+  terminates in at most *n* iterations for a system of *n* equations. In code, this
+  bound is applied automatically only when the domain declares
+  ``static constexpr bool commutative_extend = true``.
 
 Mathematical Foundation
 ========================
@@ -147,6 +149,11 @@ The paired structure maintains the mirrored correlation of left/right
 coefficients. The implementation uses ``TensorProductDomain`` and
 ``solve_linear_tensor_impl`` when the system has LCFL structure (Concat/InfClos).
 
+Implementation note: to preserve left/right correlation during projection, the
+tensor solver uses an exact correlated representation for idempotent domains
+(modeling sums as finite sets of pairs) rather than componentwise addition over a
+single pair.
+
 Other Applications
 ------------------
 
@@ -196,6 +203,19 @@ Clients that use NPA are expected to be familiar with the above papers
 and to instantiate the provided abstractions for their specific numeric
 domains and recurrence schemes.
 
+Practical notes for numeric domains
+===================================
+
+For floating-point / numeric semirings, exact equality often prevents termination
+in iterative solvers. Domains may provide an optional method
+``approx_equal(a,b)``; when present, NPA uses it for convergence checks instead
+of ``equal(a,b)``.
+
+Domains may also opt into bounding iteration:
+
+* ``max_fixpoint_iters`` caps generic fixpoint loops (e.g. Kleene-star bodies).
+* ``max_linear_steps`` caps worklist/SCC steps for the linearized system.
+
 This engine is **not** currently wired into a dedicated command-line
 tool; instead, it serves as a building block for experimental analyses
 within Lotus.
@@ -209,4 +229,3 @@ References
 
 .. [EsparzaKieferLuttenberger2010] Javier Esparza, Stefan Kiefer, and Michael Luttenberger.
    Newtonian Program Analysis. Journal of the ACM, 57(6):1-47, 2010.
-

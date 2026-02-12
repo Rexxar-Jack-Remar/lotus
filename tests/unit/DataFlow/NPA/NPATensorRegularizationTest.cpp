@@ -15,6 +15,7 @@ struct BoundedLangSemiring {
   using value_type = std::set<std::string>;
   using test_type = bool;
   static constexpr bool idempotent = true;
+  static constexpr bool commutative_extend = false;
   static constexpr size_t MaxLen = 3;
 
   static value_type zero() { return {}; }
@@ -88,13 +89,48 @@ TEST(NPA, TensorRegularizationMatchesWorklistOnConstantConcat) {
 
   ASSERT_EQ(wl.size(), 1u);
   ASSERT_EQ(tp.size(), 1u);
-  // Tensor-product projection may over-approximate; ensure it is a superset.
-  for (const auto &s : wl[0]) {
-    EXPECT_TRUE(tp[0].count(s) != 0);
-  }
+  EXPECT_EQ(tp[0], wl[0]);
 
   // Bounded by MaxLen=3: least solution includes { "c", "acb" }.
   BoundedLangSemiring::value_type expect = {"c", "acb"};
+  EXPECT_EQ(wl[0], expect);
+}
+
+TEST(NPA, TensorRegularizationPreservesCorrelationAcrossAlternatives) {
+  using D = BoundedLangSemiring;
+  using E1 = npa::E1<D>;
+  using Exp = npa::Exp1<D>;
+
+  // X = (a · X · b) ⊕ (c · X · d) ⊕ x
+  //
+  // Under bounded concatenation (MaxLen=3), the least solution should include:
+  // - x
+  // - axb
+  // - cxd
+  //
+  // A tensor implementation that loses correlation at projection time may
+  // spuriously introduce cross terms (axd, cxb). The exact tensor mode must
+  // match the base worklist solver.
+  auto a = Exp::term(singleton("a"));
+  auto b = Exp::term(singleton("b"));
+  auto c = Exp::term(singleton("c"));
+  auto d = Exp::term(singleton("d"));
+  auto x = Exp::term(singleton("x"));
+
+  E1 rhs = Exp::add(Exp::add(Exp::concat(a, "X", b), Exp::concat(c, "X", d)), x);
+
+  std::vector<std::pair<npa::Symbol, E1>> eqns;
+  eqns.emplace_back("X", rhs);
+
+  std::vector<npa::DomVal<D>> init = {D::zero()};
+  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
+
+  ASSERT_EQ(wl.size(), 1u);
+  ASSERT_EQ(tp.size(), 1u);
+  EXPECT_EQ(tp[0], wl[0]);
+
+  BoundedLangSemiring::value_type expect = {"x", "axb", "cxd"};
   EXPECT_EQ(wl[0], expect);
 }
 

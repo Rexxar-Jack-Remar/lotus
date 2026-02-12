@@ -10,6 +10,7 @@ struct BoolSemiring {
   using value_type = bool;
   using test_type = bool;
   static constexpr bool idempotent = true;
+  static constexpr bool commutative_extend = true;
 
   static value_type zero() { return false; }
   static value_type one() { return true; }

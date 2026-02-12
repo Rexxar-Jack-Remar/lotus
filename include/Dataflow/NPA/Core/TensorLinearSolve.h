@@ -10,12 +10,12 @@
  * context so that a·Y·b becomes Y ⊗_p (a,b). The left-linear system is
  * solved by worklist (or could use Tarjan path expressions); then we
  * \e project back to the base domain (readout R((w1,w2)) = w1⊗w2).
- * Regularization requires Concat coefficients to be constant and excludes
- * InfClos; otherwise we fall back to worklist.
+ * Regularization requires Concat coefficients to be constant; otherwise we
+ * fall back to worklist.
  *
- * Note: R does not distribute over ⊕_p in general, so the result can be an
- * over-approximation of the least solution; see paper §3.3 and §4.6 for
- * conditions under which the least solution is obtained.
+ * The implementation uses an exact correlated representation in tensor space
+ * for idempotent domains. This avoids correlation loss at projection time, at
+ * the cost of potentially larger intermediate values.
  */
 
 #include "Dataflow/NPA/Core/LinearSolvers.h"
@@ -91,16 +91,19 @@ struct Exp1ConstEval {
 /// TensorProductDomain<D> by rewriting Concat (a·X·b) into X ⊗_p (a,b).
 template <class D>
 struct Exp1ToTensor {
-  using TD = TensorProductDomain<D>;
+  using TD = TensorProductExactDomain<D>;
   using E1D = E1<D>;
   using E1T = E1<TD>;
-  using VT = typename TD::value_type;
+  using VT = typename TD::pair_type;
   static bool is_regularizable(const E1D &e) {
     if (!e) return true;
     using K = typename Exp1<D>::K;
     switch (e->k) {
     case K::InfClos:
-      return false;
+      // Allow InfClos when its body is regularizable. This keeps tensor
+      // regularization applicable to linear systems that use Kleene-star-like
+      // closures in the bound variable.
+      return is_regularizable(e->t);
     case K::Concat: {
       auto a = Exp1ConstEval<D>::eval(e->t1);
       auto b = Exp1ConstEval<D>::eval(e->t2);
@@ -119,16 +122,16 @@ struct Exp1ToTensor {
     using K = typename Exp1<D>::K;
     switch (e->k) {
     case K::Term:
-      return Exp1<TD>::term(VT(e->c, D::one()));
+      return Exp1<TD>::term(TD::singleton(e->c, D::one()));
     case K::Seq:
       // Base: c ⊗ t. Use seqR so projection yields c ⊗ R(t).
-      return Exp1<TD>::seqR(convert(e->t), VT(e->c, D::one()));
+      return Exp1<TD>::seqR(convert(e->t), TD::singleton(e->c, D::one()));
     case K::SeqR:
       // Base: t ⊗ c. Use seq so projection yields R(t) ⊗ c.
-      return Exp1<TD>::seq(VT(e->c, D::one()), convert(e->t));
+      return Exp1<TD>::seq(TD::singleton(e->c, D::one()), convert(e->t));
     case K::Call:
       // Base: f ⊗ c. Encode as seq so projection yields R(f) ⊗ c.
-      return Exp1<TD>::seq(VT(e->c, D::one()), Exp1<TD>::hole(e->sym));
+      return Exp1<TD>::seq(TD::singleton(e->c, D::one()), Exp1<TD>::hole(e->sym));
     case K::Cond:
       return Exp1<TD>::cond(e->phi, convert(e->t1), convert(e->t2));
     case K::Add:
@@ -144,7 +147,7 @@ struct Exp1ToTensor {
       {
         auto a = Exp1ConstEval<D>::eval(e->t1);
         auto b = Exp1ConstEval<D>::eval(e->t2);
-        return Exp1<TD>::seqR(Exp1<TD>::hole(e->sym), VT(*a, *b));
+        return Exp1<TD>::seqR(Exp1<TD>::hole(e->sym), TD::singleton(*a, *b));
       }
     case K::InfClos:
       return Exp1<TD>::inf(convert(e->t), e->sym);
@@ -160,6 +163,11 @@ template <class D>
 std::vector<DomVal<D>> solve_linear_tensor_impl(
     bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
     std::vector<DomVal<D>> init) {
+  if (!D::idempotent) {
+    if (verbose)
+      std::cerr << "[tensor] exact tensor mode requires idempotent domain; falling back to worklist\n";
+    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+  }
   for (const auto &p : rhs) {
     if (!Exp1ToTensor<D>::is_regularizable(p.second)) {
       if (verbose)
@@ -167,7 +175,7 @@ std::vector<DomVal<D>> solve_linear_tensor_impl(
       return solve_linear_worklist_impl<D>(verbose, rhs, init);
     }
   }
-  using TD = TensorProductDomain<D>;
+  using TD = TensorProductExactDomain<D>;
   using VT = typename TD::value_type;
   std::vector<std::pair<Symbol, E1<TD>>> rhs_tensor;
   rhs_tensor.reserve(rhs.size());
@@ -175,7 +183,7 @@ std::vector<DomVal<D>> solve_linear_tensor_impl(
     rhs_tensor.emplace_back(p.first, Exp1ToTensor<D>::convert(p.second));
   std::vector<VT> init_tensor;
   init_tensor.reserve(init.size());
-  for (const auto &v : init) init_tensor.emplace_back(v, v);
+  for (const auto &v : init) init_tensor.emplace_back(TD::singleton(v, v));
   std::vector<VT> delta_tensor =
       solve_linear_worklist_impl<TD>(verbose, rhs_tensor, init_tensor);
   std::vector<DomVal<D>> delta;

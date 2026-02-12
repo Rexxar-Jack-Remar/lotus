@@ -51,13 +51,19 @@ std::vector<DomVal<D>> solve_linear_worklist_impl(
     in_queue[i] = true;
   }
   long steps = 0;
+  const long max_steps = domain_max_linear_steps<D>();
   while (!worklist.empty()) {
     int idx = worklist.front();
     worklist.pop_front();
     in_queue[idx] = false;
     steps++;
+    if (max_steps >= 0 && steps > max_steps) {
+      if (verbose)
+        std::cerr << "[linear-wl] hit max_linear_steps=" << max_steps << "\n";
+      break;
+    }
     V new_val = I1<D>::eval(false, env, rhs[idx].second);
-    if (!D::equal(env[rhs[idx].first], new_val)) {
+    if (!domain_equal<D>(env[rhs[idx].first], new_val)) {
       env[rhs[idx].first] = new_val;
       init[idx] = new_val;
       for (int u : users[idx])
@@ -141,18 +147,24 @@ solve_linear_scc_impl(bool verbose,
   std::unordered_map<Symbol, V> env;
   for (int i = 0; i < n; ++i) env[rhs[i].first] = init[i];
   long steps = 0;
+  const long max_steps = domain_max_linear_steps<D>();
   for (int sid : scc_order) {
     const auto &scc = sccs[sid];
     for (;;) {
       bool stable = true;
       for (int i : scc) {
         V new_val = I1<D>::eval(false, env, rhs[i].second);
-        if (!D::equal(env[rhs[i].first], new_val)) {
+        if (!domain_equal<D>(env[rhs[i].first], new_val)) {
           env[rhs[i].first] = new_val;
           init[i] = new_val;
           stable = false;
         }
         ++steps;
+        if (max_steps >= 0 && steps > max_steps) {
+          if (verbose)
+            std::cerr << "[linear-scc] hit max_linear_steps=" << max_steps << "\n";
+          return init;
+        }
       }
       if (stable) break;
     }

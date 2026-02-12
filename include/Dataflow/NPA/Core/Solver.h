@@ -21,6 +21,35 @@
 
 namespace npa {
 
+namespace detail {
+/// C++14-friendly dispatch for delta: avoid if constexpr (DomainHasChooseDelta,
+/// idempotent) → choose_delta(v, nu) or v; else subtract(v, nu) or v.
+template <class D>
+DomVal<D> compute_delta(const DomVal<D> &v, const DomVal<D> &nu_sym,
+                        std::true_type /* has_choose_delta */,
+                        std::true_type /* idempotent */) {
+  return v;
+}
+template <class D>
+DomVal<D> compute_delta(const DomVal<D> &v, const DomVal<D> &nu_sym,
+                        std::true_type /* has_choose_delta */,
+                        std::false_type /* idempotent */) {
+  return D::choose_delta(v, nu_sym);
+}
+template <class D>
+DomVal<D> compute_delta(const DomVal<D> &v, const DomVal<D> &nu_sym,
+                        std::false_type /* has_choose_delta */,
+                        std::true_type /* idempotent */) {
+  return v;
+}
+template <class D>
+DomVal<D> compute_delta(const DomVal<D> &v, const DomVal<D> &nu_sym,
+                        std::false_type /* has_choose_delta */,
+                        std::false_type /* idempotent */) {
+  return D::subtract(v, nu_sym);
+}
+} // namespace detail
+
 template <class D, class ITER>
 struct Solver {
   using V = DomVal<D>;
@@ -36,7 +65,7 @@ struct Solver {
       auto nxt = ITER::run(verbose, eqns, cur, linStrat);
       bool stable = true;
       for (size_t i = 0; i < cur.size(); ++i)
-        if (!D::equal(cur[i].second, nxt[i].second)) {
+        if (!domain_equal<D>(cur[i].second, nxt[i].second)) {
           stable = false;
           break;
         }
@@ -106,8 +135,11 @@ struct NewtonIter {
     for (auto &e : eqns) {
       V v = I0<D>::eval(verbose, nu, e.second);
       auto d = Diff<D>::build(nu, e.second);
-      auto base = D::idempotent ? v : D::subtract(v, nu[e.first]);
-      rhs.emplace_back(e.first, Exp1<D>::add(Exp1<D>::term(base), d));
+      V delta0 = detail::compute_delta<D>(
+          v, nu[e.first],
+          std::integral_constant<bool, DomainHasChooseDelta<D>::value>{},
+          std::integral_constant<bool, D::idempotent>{});
+      rhs.emplace_back(e.first, Exp1<D>::add(Exp1<D>::term(delta0), d));
     }
     std::vector<V> init(rhs.size(), D::zero()), delta;
     if (linStrat == LinearStrategy::Naive) {
@@ -141,7 +173,22 @@ struct NewtonIter {
 template <class D>
 using KleeneSolver = Solver<D, KleeneIter<D>>;
 template <class D>
-using NewtonSolver = Solver<D, NewtonIter<D>>;
+struct NewtonSolver {
+  using V = DomVal<D>;
+  using Eqn = std::pair<Symbol, E0<D>>;
+  static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
+  solve(const std::vector<Eqn> &eqns, bool verbose = false, int max = -1,
+        LinearStrategy linStrat = LinearStrategy::Worklist) {
+    // JACM (Esparza et al.) shows: for idempotent + commutative semirings,
+    // Newton terminates after at most n iterations for a system of n equations.
+    // We only apply this bound when the domain explicitly declares commutativity.
+    int effective_max = max;
+    if (effective_max < 0 && D::idempotent && domain_commutative_extend<D>()) {
+      effective_max = static_cast<int>(eqns.size());
+    }
+    return Solver<D, NewtonIter<D>>::solve(eqns, verbose, effective_max, linStrat);
+  }
+};
 
 } // namespace npa
 
