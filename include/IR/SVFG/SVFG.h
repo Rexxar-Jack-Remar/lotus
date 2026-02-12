@@ -198,6 +198,11 @@ private:
     std::unordered_map<const llvm::CallBase *,
                        std::unordered_set<const llvm::Function *>>
         callSiteToConnectedCallees;
+    /// @brief Reverse index: callee function -> indirect call sites that may invoke it.
+    /// Mirrors SVF's CallGraph::getIndCallSitesInvokingCallee().
+    std::unordered_map<const llvm::Function *,
+                       std::unordered_set<const llvm::CallBase *>>
+        calleeToIndCallSites;
     struct CallSiteCalleeKey {
         const llvm::CallBase *callSite = nullptr;
         const llvm::Function *callee = nullptr;
@@ -470,6 +475,22 @@ public:
         return funPtrToIndCallSites;
     }
 
+    /// @brief Register that \p callee may be invoked from indirect callsite \p cs.
+    inline void addCalleeToIndCallSite(const llvm::Function *callee,
+                                       const llvm::CallBase *cs) {
+        if (callee && cs) calleeToIndCallSites[callee].insert(cs);
+    }
+
+    /// @brief Return all indirect call sites that may invoke \p callee.
+    /// Mirrors SVF's CallGraph::getIndCallSitesInvokingCallee().
+    inline const std::unordered_set<const llvm::CallBase *> &
+    getIndCallSitesInvokingCallee(const llvm::Function *callee) const {
+        static const std::unordered_set<const llvm::CallBase *> empty;
+        if (!callee) return empty;
+        auto it = calleeToIndCallSites.find(callee);
+        return (it != calleeToIndCallSites.end()) ? it->second : empty;
+    }
+
     /// @brief Return true if (cs, callee) was newly marked as connected.
     inline bool markConnectedCallee(const llvm::CallBase *cs,
                                     const llvm::Function *callee) {
@@ -480,6 +501,9 @@ public:
         CallSiteCalleeKey key{cs, callee};
         if (callSiteCalleeToId.find(key) == callSiteCalleeToId.end())
             callSiteCalleeToId.emplace(key, nextCallSiteId++);
+        // Populate reverse index: callee -> indirect call sites.
+        if (!cs->getCalledFunction())
+            calleeToIndCallSites[callee].insert(cs);
         return true;
     }
 

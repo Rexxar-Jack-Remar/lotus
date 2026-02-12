@@ -2,7 +2,7 @@
 
  * Author: rainoftime
 */
-#include "Dataflow/WPDS/InterProceduralDataFlow.h"
+#include "Dataflow/WPDS/DataFlowFacts.h"
 #include <algorithm>
 
 namespace wpds {
@@ -148,16 +148,18 @@ std::ostream& DataFlowFacts::print(std::ostream& os) const {
             os << "null";
             continue;
         }
-        
+
         if (auto* inst = dyn_cast<Instruction>(val)) {
-            os << inst->getName().str();
             if (inst->getName().empty()) {
                 os << "<unnamed-inst>";
+            } else {
+                os << inst->getName().str();
             }
         } else if (auto* arg = dyn_cast<Argument>(val)) {
-            os << arg->getName().str();
             if (arg->getName().empty()) {
                 os << "<unnamed-arg>";
+            } else {
+                os << arg->getName().str();
             }
         } else if (auto* global = dyn_cast<GlobalValue>(val)) {
             os << global->getName().str();

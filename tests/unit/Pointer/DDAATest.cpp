@@ -3,7 +3,7 @@
  * @brief Unit tests for SVF-style demand-driven analysis (DDA) on SVFG
  */
 
-#include "Alias/DDA/DemandDrivenAA.h"
+#include "Alias/DDA/FlowDDA.h"
 
 #include <algorithm>
 

@@ -18,6 +18,40 @@ namespace wpds {
 using namespace wpds;
 using namespace llvm;
 
+static bool isValueInInstructionScope(Value* v, const Function* f) {
+    if (v == nullptr) {
+        return false;
+    }
+    if (isa<GlobalValue>(v) || isa<Constant>(v)) {
+        return true;
+    }
+    if (const auto* a = dyn_cast<Argument>(v)) {
+        return a->getParent() == f;
+    }
+    if (const auto* i = dyn_cast<Instruction>(v)) {
+        return i->getFunction() == f;
+    }
+    return true;
+}
+
+static void filterFactsToInstructionScope(Instruction* inst, std::set<Value*>& facts) {
+    if (inst == nullptr) {
+        facts.clear();
+        return;
+    }
+    Function* f = inst->getFunction();
+    if (f == nullptr) {
+        return;
+    }
+    for (auto it = facts.begin(); it != facts.end();) {
+        if (!isValueInInstructionScope(*it, f)) {
+            it = facts.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 InterProceduralDataFlowEngine::InterProceduralDataFlowEngine()
     : controlState(str2key("q")) {}
 
@@ -214,6 +248,9 @@ void InterProceduralDataFlowEngine::buildWPDS(
                 
                 // Create transformer for this instruction
                 GenKillTransformer* transformer = createTransformer(&I);
+                if (!transformer) {
+                    transformer = GenKillTransformer::one();
+                }
 
                 // If we're returning from a callsite, compose return-flow before this instruction.
                 auto retIt = returnSiteTransformers.find(prevKey);
@@ -327,6 +364,11 @@ void InterProceduralDataFlowEngine::buildWPDS(
                         // through CFG to successor basic blocks. For unmodeled calls we fall back to
                         // instKey as the continuation point.
                         if (I.isTerminator()) {
+                            auto retIt = returnSiteTransformers.find(returnKey);
+                            GenKillTransformer* retWeight =
+                                (retIt != returnSiteTransformers.end() && retIt->second.get_ptr())
+                                    ? retIt->second.get_ptr()
+                                    : GenKillTransformer::one();
                             for (auto* retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
                                 if (retSite == nullptr) {
                                     continue;
@@ -337,7 +379,7 @@ void InterProceduralDataFlowEngine::buildWPDS(
                                     continue;
                                 }
                                 wpds.add_rule(controlState, returnKey, controlState,
-                                              bbIt->second, GenKillTransformer::one());
+                                              bbIt->second, retWeight);
                             }
                         }
 
@@ -522,7 +564,9 @@ void InterProceduralDataFlowEngine::extractResults(
 
         auto pathSummary = resultCA.reglang_query(lang);
         KeyQueryResult res;
-        if (pathSummary.get_ptr()) {
+        // Treat zero (no path / empty intersection) explicitly so we don't rely on zero()->apply semantics.
+        if (pathSummary.get_ptr() &&
+            !pathSummary->equal(GenKillTransformer::zero())) {
             DataFlowFacts outFacts = pathSummary->apply(DataFlowFacts::EmptySet());
             res.facts = outFacts.getFacts();
             if (wantGenKill) {
@@ -546,20 +590,24 @@ void InterProceduralDataFlowEngine::extractResults(
 
         // OUT at instruction = value at the "after-inst" program-point symbol.
         result->OUT(inst) = querySymbol(instKey, /*wantGenKill=*/true).facts;
+        filterFactsToInstructionScope(inst, result->OUT(inst));
 
         // IN at instruction = value at the program-point symbol that precedes the instruction.
         auto pkIt = instPrevKey.find(inst);
         if (pkIt != instPrevKey.end()) {
             result->IN(inst) = querySymbol(pkIt->second, /*wantGenKill=*/false).facts;
+            filterFactsToInstructionScope(inst, result->IN(inst));
         }
 
         // Also retain the path summary’s gen/kill as a debugging view.
         const auto& dbg = querySymbol(instKey, /*wantGenKill=*/true);
         if (dbg.gen.hasValue()) {
             result->GEN(inst) = *dbg.gen;
+            filterFactsToInstructionScope(inst, result->GEN(inst));
         }
         if (dbg.kill.hasValue()) {
             result->KILL(inst) = *dbg.kill;
+            filterFactsToInstructionScope(inst, result->KILL(inst));
         }
     }
 }
@@ -603,7 +651,7 @@ std::string InterProceduralDataFlowEngine::getWitnessDagDotForTransition(
 }
 
 std::string InterProceduralDataFlowEngine::getWitnessDagDotForInstruction(Instruction* inst) const {
-    if (!hasLastAcceptState) {
+    if (!lastAcceptState.hasValue()) {
         return "";
     }
     auto it = instToKey.find(inst);

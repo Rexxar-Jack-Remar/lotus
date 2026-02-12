@@ -8,13 +8,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "Alias/DDA/DDAStat.h"
-#include "Alias/DDA/DemandDrivenAA.h"
+#include "Alias/DDA/FlowDDA.h"
 
 #include <llvm/Support/raw_ostream.h>
 
 using namespace lotus::analysis;
 
-DDAStat::DDAStat(DemandDrivenAA *pta) : pta_(pta) {}
+DDAStat::DDAStat(FlowDDA *pta) : pta_(pta) {}
 
 void DDAStat::performStat() {}
 

@@ -43,7 +43,7 @@ void DDAPass::runOnModule(Module &M) {
 }
 
 void DDAPass::runPointerAnalysis(Module &M, DDAKind k) {
-  flowDDA_ = std::make_unique<DemandDrivenAA>();
+  flowDDA_ = std::make_unique<FlowDDA>();
   if (!flowDDA_->run(M))
     return;
   flowDDA_->setClient(client_.get());
@@ -54,6 +54,7 @@ void DDAPass::runPointerAnalysis(Module &M, DDAKind k) {
   case DDAKind::Cxt_DDA:
     contextDDA_ = std::make_unique<ContextDDA>(flowDDA_.get(), client_.get());
     contextDDA_->run(M);
+    contextDDA_->initInsensitiveEdges();
     contextDDA_->answerQueries();
     break;
   }

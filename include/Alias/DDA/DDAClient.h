@@ -31,7 +31,7 @@ namespace analysis {
 
 class SVFG;
 class SVFGNode;
-class DemandDrivenAA;
+class FlowDDA;
 
 /// Base DDA client: collects candidate pointers for demand-driven queries.
 class DDAClient {
@@ -51,7 +51,7 @@ public:
   }
 
   /// Run DDA for each candidate (calls dda->getPointsTo for each).
-  virtual void answerQueries(DemandDrivenAA *dda);
+  virtual void answerQueries(FlowDDA *dda);
 
   /// Callback during backward traversal (optional).
   virtual void handleStatement(const SVFGNode *node, uint32_t curNodeId) {
@@ -60,7 +60,7 @@ public:
   }
 
   /// Statistics after answerQueries (optional).
-  virtual void performStat(DemandDrivenAA *dda) { (void)dda; }
+  virtual void performStat(FlowDDA *dda) { (void)dda; }
 
   void setSolveAll(bool v) { solveAll_ = v; }
   bool getSolveAll() const { return solveAll_; }
@@ -84,7 +84,7 @@ class FunptrDDAClient : public DDAClient {
 public:
   FunptrDDAClient() = default;
   std::vector<const llvm::Value *> &collectCandidateQueries() override;
-  void performStat(DemandDrivenAA *dda) override;
+  void performStat(FlowDDA *dda) override;
 };
 
 /// Client that collects load pointer operands, store pointer operands, GEP base pointers.
@@ -92,7 +92,7 @@ class AliasDDAClient : public DDAClient {
 public:
   AliasDDAClient() = default;
   std::vector<const llvm::Value *> &collectCandidateQueries() override;
-  void performStat(DemandDrivenAA *dda) override;
+  void performStat(FlowDDA *dda) override;
 };
 
 } // namespace analysis

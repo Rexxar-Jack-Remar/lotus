@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Alias/DDA/DDAClient.h"
-#include "Alias/DDA/DemandDrivenAA.h"
+#include "Alias/DDA/FlowDDA.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBase.h"
 #include "IR/SVFG/SVFGNode.h"
@@ -49,7 +49,7 @@ std::vector<const llvm::Value *> &DDAClient::collectCandidateQueries() {
   return candidateQueries_;
 }
 
-void DDAClient::answerQueries(DemandDrivenAA *dda) {
+void DDAClient::answerQueries(FlowDDA *dda) {
   if (!dda || !dda->getSVFG())
     return;
   setSVFG(dda->getSVFG());
@@ -96,7 +96,7 @@ std::vector<const llvm::Value *> &FunptrDDAClient::collectCandidateQueries() {
   return candidateQueries_;
 }
 
-void FunptrDDAClient::performStat(DemandDrivenAA *dda) {
+void FunptrDDAClient::performStat(FlowDDA *dda) {
   (void)dda;
   // Optional: compare with baseline PTA, count resolved targets, etc.
 }
@@ -135,7 +135,7 @@ std::vector<const llvm::Value *> &AliasDDAClient::collectCandidateQueries() {
   return candidateQueries_;
 }
 
-void AliasDDAClient::performStat(DemandDrivenAA *dda) {
+void AliasDDAClient::performStat(FlowDDA *dda) {
   (void)dda;
   // Optional: run alias queries between load src / store dst pairs, etc.
 }

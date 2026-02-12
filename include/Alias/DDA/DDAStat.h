@@ -16,12 +16,12 @@
 namespace lotus {
 namespace analysis {
 
-class DemandDrivenAA;
+class FlowDDA;
 
 /// Statistics for demand-driven analysis (steps, strong updates, etc.).
 class DDAStat {
 public:
-  explicit DDAStat(DemandDrivenAA *pta);
+  explicit DDAStat(FlowDDA *pta);
 
   uint32_t numOfDPM = 0;
   uint32_t numOfStrongUpdates = 0;
@@ -38,7 +38,7 @@ public:
   void printStat(const std::string &str = "");
 
 private:
-  DemandDrivenAA *pta_ = nullptr;
+  FlowDDA *pta_ = nullptr;
 };
 
 } // namespace analysis

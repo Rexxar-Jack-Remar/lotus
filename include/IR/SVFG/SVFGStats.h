@@ -46,6 +46,12 @@ public:
 
   void performSCCAnalysis(const SVFGEdgeSet &insensitiveCalRetEdges);
 
+  /// @brief SCC representative node ID (for DDA context-insensitive edges).
+  /// Only valid after performSCCAnalysis() has been called.
+  uint32_t getSCCRepNode(uint32_t nodeId) const;
+  /// @brief True if \p edge's src and dst are in the same SVFG SCC.
+  bool isEdgeInSVFGSCC(const SVFGEdge *edge) const;
+
  private:
   void clear();
   void processGraph();

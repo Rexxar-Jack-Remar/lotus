@@ -217,6 +217,21 @@ void SVFGStats::performSCCAnalysis(const SVFGEdgeSet &insensitiveCalRetEdges) {
   }
 }
 
+uint32_t SVFGStats::getSCCRepNode(uint32_t nodeId) const {
+  auto it = sccRep.find(nodeId);
+  return (it != sccRep.end()) ? it->second : nodeId;
+}
+
+bool SVFGStats::isEdgeInSVFGSCC(const SVFGEdge *edge) const {
+  if (!edge || !graph)
+    return false;
+  const SVFGNode *src = edge->getSrcNode();
+  const SVFGNode *dst = edge->getDstNode();
+  if (!src || !dst)
+    return false;
+  return getSCCRepNode(src->getId()) == getSCCRepNode(dst->getId());
+}
+
 void SVFGStats::clear() {
   numNodes = 0;
   numFormalIn = numFormalOut = numFormalParam = numFormalRet = 0;

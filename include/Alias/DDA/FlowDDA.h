@@ -1,4 +1,4 @@
-//===- DemandDrivenAA.h -- Demand-driven pointer analysis (SVF-style) ---//
+//===- FlowDDA.h -- Flow-sensitive demand-driven pointer analysis ---------//
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// DemandDrivenAA: Value-flow-based demand-driven pointer analysis following
+// FlowDDA: Value-flow-based demand-driven pointer analysis following
 // SVF's FlowDDA / DDAVFSolver design (FSE'16, TSE'18).
 //
 // Mode: flow-sensitive, context-insensitive (SVF's FlowDDA). Context-sensitive
@@ -26,6 +26,7 @@
 #pragma once
 
 #include "Alias/DDA/DPItem.h"
+#include "Alias/DDA/DDAVFSolver.h"
 #include "IR/ICFG/ICFG.h"
 
 namespace lotus {
@@ -62,16 +63,22 @@ namespace analysis {
 
 using LocDPItem = StmtDPItem<SVFGNode>;
 
-/// Demand-driven pointer analysis using the SVFG (SVF-style algorithm).
-class DemandDrivenAA {
+/// Flow-sensitive, context-insensitive demand-driven pointer analysis using
+/// the SVFG. Matches SVF's FlowDDA / DDAVFSolver algorithm.
+class FlowDDA
+    : public DDAVFSolver<uint32_t, std::unordered_set<uint32_t>, LocDPItem,
+                         FlowDDA> {
+  template <typename CVar, typename CPtSet, typename DPIm, typename D>
+  friend class DDAVFSolver;
+
 public:
   using PtsSet = std::unordered_set<uint32_t>;
 
-  DemandDrivenAA();
-  ~DemandDrivenAA();
+  FlowDDA();
+  virtual ~FlowDDA();
 
-  DemandDrivenAA(const DemandDrivenAA &) = delete;
-  DemandDrivenAA &operator=(const DemandDrivenAA &) = delete;
+  FlowDDA(const FlowDDA &) = delete;
+  FlowDDA &operator=(const FlowDDA &) = delete;
 
   bool run(llvm::Module &M);
 
@@ -109,91 +116,54 @@ public:
   bool isRecursiveFunction(const llvm::Function *f) const;
   bool isInLoop(const llvm::Instruction *inst) const;
 
-private:
-  /// Union pts into cache for dpm; return true if cache grew. Used by updateCachedPointsTo.
-  bool unionDDAPts(const LocDPItem &dpm, const PtsSet &pts);
-  /// Union pts into target set (used by backwardPropDpm). Matches SVF's unionDDAPts(CPtSet&, const CPtSet&).
+protected:
+  // DDAVFSolver interface (CRTP). getSVFG/getSVFGBuilder/handleBKCondition are public above.
+  SVFGNode *getDefNodeForValue(const llvm::Value *v) const;
+  static bool isDirectEdge(SVFGEdge *e);
+  static bool isIndirectEdge(SVFGEdge *e);
+  PtsSet getConservativeCPts(const LocDPItem &dpm) const;
+  void handleAddr(PtsSet &pts, const LocDPItem &dpm, const AddrSVFGNode *addr);
+  PtsSet processGepPts(const GepSVFGNode *gep, const PtsSet &srcPts);
+  bool isStrongUpdate(const PtsSet &dstPts, const StoreSVFGNode *store);
+  uint32_t getPtrNodeID(uint32_t var) const { return var; }
+  void addDDAPts(PtsSet &pts, uint32_t var) { pts.insert(var); }
   void unionDDAPts(PtsSet &target, const PtsSet &source);
-  /// Union new pts into cache; if grew, call reCompute(dpm).
-  void updateCachedPointsTo(const LocDPItem &dpm, const PtsSet &pts);
-  /// Re-run findPT on successors (out-edges) when cached pts grew.
-  void reCompute(const LocDPItem &dpm);
-  /// Re-compute for specific edge set (used by reCompute and for indirect calls).
-  void reComputeForEdges(const LocDPItem &dpm,
-                         const std::vector<SVFGEdge *> &edgeSet,
-                         bool indirectCall = false);
-  void clearbkVisited(const LocDPItem &dpm);
-  void markbkVisited(const LocDPItem &dpm);
-  bool isbkVisited(const LocDPItem &dpm) const;
-  const PtsSet &getCachedPointsTo(const LocDPItem &dpm) const;
-
-  /// Resolve function pointer at call/ret (ensure fun-ptr pts computed). No edge addition.
+  bool unionDDAPts(const LocDPItem &dpm, const PtsSet &pts);
+  LocDPItem getDPImWithOldCond(const LocDPItem &oldDpm, uint32_t objId,
+                               const SVFGNode *loc) const;
   void resolveFunPtr(const LocDPItem &dpm);
-
-  /// Load/store must-alias and propagateViaObj (SVF-style).
-  void addLoadDpmAndCVar(const LocDPItem &dpm, const LocDPItem &loadDpm,
-                         uint32_t loadCVarObjId);
+  bool isTopLevelPtrStmt(const SVFGNode *stmt) const;
   bool hasLoadDpm(const LocDPItem &dpm) const;
   LocDPItem getLoadDpm(const LocDPItem &dpm) const;
   uint32_t getLoadCVar(const LocDPItem &dpm) const;
-  virtual bool isMustAlias(const LocDPItem &loadDpm, const LocDPItem &storeDpm) const;
-  bool propagateViaObj(uint32_t storeObjId, uint32_t loadCVarObjId) const;
+  bool isMustAlias(const LocDPItem &loadDpm, const LocDPItem &storeDpm) const;
+  bool propagateViaObj(uint32_t storeObj, const LocDPItem &dpm,
+                      bool singleton) const;
+  void forEachObjId(const PtsSet &pts,
+                    std::function<void(uint32_t)> callback) const;
+  void forEachElementInCPtSet(
+      const PtsSet &pts,
+      std::function<void(uint32_t, uint32_t)> callback) const;
+  const PtsSet &getEmptyCPtSetRef() const;
+  void setDpmLocVar(LocDPItem &dpm, SVFGNode *src, uint32_t ptrNodeId);
+  void addLoadDpmAndCVar(const LocDPItem &dpm, const LocDPItem &loadDpm,
+                         uint32_t loadCVarObjId);
+  void connectIndirectCallees(const LocDPItem &dpm, const PtsSet &funPts,
+                              std::vector<SVFGEdge *> &newEdges);
+  void onIndirectEdgesAdded() { buildRecursionInfo(); }
+  void resetQueryLoadMaps();
+  void insertOutOfBudgetDpm(const LocDPItem &dpm);
+  bool isOutOfBudgetDpm(const LocDPItem &dpm) const;
+  uint32_t getMaxBudget() const { return LocDPItem::getMaxBudget(); }
 
+private:
   /// Strong-update refinements: exclude heap, array, recursion (best-effort).
   bool isHeapCondMemObj(uint32_t objId, const StoreSVFGNode *store) const;
   bool isArrayCondMemObj(uint32_t objId) const;
   bool isFieldInsenCondMemObj(uint32_t objId) const;
   bool isLocalCVarInRecursion(uint32_t objId) const;
 
-  bool testOutOfBudget(const LocDPItem &dpm);
-  void addOutOfBudgetDpm(const LocDPItem &dpm);
-  bool isOutOfBudgetDpm(const LocDPItem &dpm) const;
-  void OOBResetVisited();
-
-  /// Core: compute points-to for dpm; cache and return.
-  const PtsSet &findPT(const LocDPItem &dpm);
-
-  /// Handle one node kind (Addr, Copy, Load, Store, Gep, Phi, param, MRSVFG).
-  void handleSingleStatement(const LocDPItem &dpm, PtsSet &pts);
-
-  void handleAddr(PtsSet &pts, const LocDPItem &dpm, const AddrSVFGNode *addr);
-  void backtraceAlongDirectVF(PtsSet &pts, const LocDPItem &oldDpm);
-  void backtraceAlongIndirectVF(PtsSet &pts, const LocDPItem &oldDpm,
-                                const PtsSet &curObjValues);
-  void backwardPropDpm(PtsSet &pts, uint32_t ptrNodeId, const LocDPItem &oldDpm,
-                       SVFGEdge *edge);
-
-  void startNewPTCompFromLoadSrc(PtsSet &loadPts, const LocDPItem &oldDpm);
-  void startNewPTCompFromStoreDst(PtsSet &storePts, const LocDPItem &oldDpm);
-  void backtraceToStoreSrc(PtsSet &pts, const LocDPItem &oldDpm);
-
-  /// Gep: filter base pts by field (simplified: union all for now).
-  PtsSet processGepPts(const GepSVFGNode *gep, const PtsSet &srcPts);
-
-  /// Strong update when store dest is singleton and not heap/array.
-  bool isStrongUpdate(const PtsSet &dstPts, const StoreSVFGNode *store);
-  
-  /// Get conservative points-to from base pointer analysis (fallback when out-of-budget).
-  /// Default implementation returns empty set; can be overridden to use base PTA.
-  virtual PtsSet getConservativeCPts(const LocDPItem &dpm) const;
-
-  /// Create dpm with (objId, loc) for per-object backtrace (SVF getDPImWithOldCond).
-  LocDPItem getDPImWithOldCond(const LocDPItem &oldDpm, uint32_t objId,
-                               const SVFGNode *loc) const;
-
-  /// Return SVFG node that defines \p v (value node or def of instruction).
-  SVFGNode *getDefNodeForValue(const llvm::Value *v) const;
-
-  /// Whether this is a top-level pointer statement (not Store or MRSVFG).
-  bool isTopLevelPtrStmt(const SVFGNode *stmt) const;
-
-  static bool isDirectEdge(SVFGEdge *e);
-  static bool isIndirectEdge(SVFGEdge *e);
-
-  void addDpmToLoc(const LocDPItem &dpm);
-
   PtsSet getPointsToCached(const llvm::Value *ptr);
-  void resetQuery();
   void buildRecursionInfo();
   void buildLoopInfo();
 
@@ -203,15 +173,9 @@ private:
   std::unique_ptr<SVFG> svfg_;
 
   std::unordered_map<const llvm::Value *, PtsSet> ptsCache_;
-  std::set<LocDPItem> backwardVisited_;
-  std::map<LocDPItem, PtsSet> dpmToTLPtsMap_;
-  std::map<LocDPItem, PtsSet> dpmToADPtsMap_;
-  std::map<uint32_t, std::set<LocDPItem>> locToDpmSetMap_;
   std::map<LocDPItem, LocDPItem> dpmToLoadDpmMap_;
   std::map<LocDPItem, uint32_t> dpmToLoadCVarMap_;
   std::set<LocDPItem> outOfBudgetDpms_;
-  uint32_t numSteps_ = 0;
-  bool outOfBudget_ = false;
   bool initialized_ = false;
   DDAClient *client_ = nullptr;
   const llvm::Module *module_ = nullptr;
@@ -220,6 +184,9 @@ private:
   std::unordered_map<const llvm::Function *, std::unique_ptr<llvm::LoopInfo>>
       loopInfoMap_;
 };
+
+/// Backward-compatibility alias for code that still refers to DemandDrivenAA.
+using DemandDrivenAA = FlowDDA;
 
 } // namespace analysis
 } // namespace lotus

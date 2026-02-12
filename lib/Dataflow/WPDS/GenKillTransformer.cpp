@@ -1,7 +1,7 @@
 /*
  * Author: rainoftime
 */
-#include "Dataflow/WPDS/InterProceduralDataFlow.h"
+#include "Dataflow/WPDS/GenKillTransformer.h"
 
 namespace wpds {
 
@@ -180,38 +180,23 @@ GenKillTransformer* GenKillTransformer::combine(GenKillTransformer* y) {
         return this;
     }
     
-    // General case: join operation
-    DataFlowFacts temp_k = DataFlowFacts::Intersect(kill, y->kill);
-    DataFlowFacts temp_g = DataFlowFacts::Union(gen, y->gen);
-    
-    // Merge Flows
-    // M_new(x) = (M1(x) if x not in K1) U (M2(x) if x not in K2)
+    // General case: meet (⊕) for semiring combine — result ⊆ T1(S) ∩ T2(S).
+    // So kill_meet = K1 ∪ K2 (kill more), gen_meet = G1 ∩ G2 (gen less).
+    DataFlowFacts temp_k = DataFlowFacts::Union(kill, y->kill);
+    DataFlowFacts temp_g = DataFlowFacts::Intersect(gen, y->gen);
+
+    // Flow meet: for each x not in K_meet, flow_meet(x) ⊆ flow1(x) ∩ flow2(x).
     std::map<Value*, DataFlowFacts> temp_flow;
-    
     std::set<Value*> keys;
-    for(auto& kv : flow) keys.insert(kv.first);
-    for(auto& kv : y->flow) keys.insert(kv.first);
-    
-    for(Value* x : keys) {
-        DataFlowFacts res;
-        
-        // M1 part
-        if (!kill.containsFact(x)) {
-            if (flow.count(x)) {
-                res = DataFlowFacts::Union(res, flow.at(x));
-            }
-        }
-        
-        // M2 part
-        if (!y->kill.containsFact(x)) {
-            if (y->flow.count(x)) {
-                res = DataFlowFacts::Union(res, y->flow.at(x));
-            }
-        }
-        
-        if (!res.isEmpty()) {
-            temp_flow[x] = res;
-        }
+    for (auto& kv : flow) keys.insert(kv.first);
+    for (auto& kv : y->flow) keys.insert(kv.first);
+
+    for (Value* x : keys) {
+        if (temp_k.containsFact(x)) continue;
+        DataFlowFacts f1 = flow.count(x) ? flow.at(x) : DataFlowFacts::EmptySet();
+        DataFlowFacts f2 = y->flow.count(x) ? y->flow.at(x) : DataFlowFacts::EmptySet();
+        DataFlowFacts res = DataFlowFacts::Intersect(f1, f2);
+        if (!res.isEmpty()) temp_flow[x] = res;
     }
 
     return makeGenKillTransformer(temp_k, temp_g, temp_flow);

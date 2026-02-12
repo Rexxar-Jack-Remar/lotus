@@ -7,7 +7,7 @@ add_library(DDA STATIC
   DDAStat.cpp
   DDAClient.cpp
   DDAPass.cpp
-  DemandDrivenAA.cpp
+  FlowDDA.cpp
 )
 
 target_link_libraries(DDA PUBLIC

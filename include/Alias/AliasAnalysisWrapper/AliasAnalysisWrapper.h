@@ -15,7 +15,7 @@ namespace llvm { class CFLAndersAAWrapperPass; class CFLSteensAAWrapperPass; }
 namespace seadsa { class SeaDsaAAResult; }
 namespace UnderApprox { class UnderApproxAA; }
 namespace tpa { class SemiSparsePointerAnalysis; class SemiSparseProgram; }
-namespace lotus { namespace analysis { class DemandDrivenAA; } }
+namespace lotus { namespace analysis { class FlowDDA; using DemandDrivenAA = FlowDDA; } }
 
 namespace lotus {
 

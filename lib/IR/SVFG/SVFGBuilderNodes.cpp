@@ -97,10 +97,13 @@ void SVFGBuilder::buildTopLevelNodes() {
     SVFG::ObjectInfo info;
     info.isFunction = isa<Function>(v);
     info.isGlobal = isa<GlobalValue>(v) && !isa<Function>(v);
-    ensureBaseObjIdForValue(v, info);
+    uint32_t baseObjId = ensureBaseObjIdForValue(v, info);
 
     const uint32_t nodeId = nextNode();
     auto *addrNode = new AddrSVFGNode(nodeId, at, v);
+    // Set object ID on AddrSVFGNode (mirrors SVF's getPAGSrcNodeID).
+    if (baseObjId != 0)
+      addrNode->setObjectId(baseObjId);
     svfg->addNode(addrNode);
     valueToNode.emplace(v, nodeId);
     svfg->setValueNode(v, nodeId);
@@ -163,7 +166,11 @@ void SVFGBuilder::buildTopLevelNodes() {
         getOrCreateMemReg(cast<AllocaInst>(&inst));
         SVFG::ObjectInfo info;
         info.isStack = true;
-        ensureBaseObjIdForValue(&inst, info);
+        uint32_t baseObjId = ensureBaseObjIdForValue(&inst, info);
+        // Set object ID on AddrSVFGNode (mirrors SVF's getPAGSrcNodeID).
+        // Use the base object ID which is also used for edge guard population.
+        if (baseObjId != 0)
+          addrNode->setObjectId(baseObjId);
         if (config.usePointerAnalysis)
           (void)getObjectIdsForValue(&inst);
       } else if (isHeapAllocation(&inst)) {
@@ -176,7 +183,10 @@ void SVFGBuilder::buildTopLevelNodes() {
         (void)getOrCreateMemReg(&inst);
         SVFG::ObjectInfo info;
         info.isHeap = true;
-        ensureBaseObjIdForValue(&inst, info);
+        uint32_t baseObjId = ensureBaseObjIdForValue(&inst, info);
+        // Set object ID on AddrSVFGNode (mirrors SVF's getPAGSrcNodeID).
+        if (baseObjId != 0)
+          addrNode->setObjectId(baseObjId);
         if (config.usePointerAnalysis)
           (void)getObjectIdsForValue(&inst);
       } else if (const LoadInst *load = dyn_cast<LoadInst>(&inst)) {

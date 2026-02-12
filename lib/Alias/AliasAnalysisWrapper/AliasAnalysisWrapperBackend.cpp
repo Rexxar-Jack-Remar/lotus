@@ -12,7 +12,7 @@
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/AllocAA/AllocAA.h"
-#include "Alias/DDA/DemandDrivenAA.h"
+#include "Alias/DDA/FlowDDA.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/SparrowAA/AndersenAA.h"
 #include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"

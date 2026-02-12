@@ -8,26 +8,29 @@
 //===----------------------------------------------------------------------===//
 //
 // ContextDDA: flow-sensitive, context-sensitive demand-driven pointer analysis.
-// Uses CxtLocDPItem (call-string context) and CxtPtSet. On out-of-budget
-// downgrades to FlowDDA (DemandDrivenAA).
+// Uses CxtLocDPItem (call-string context) and CxtPtSet. Shares DDAVFSolver
+// template with FlowDDA. On out-of-budget downgrades to FlowDDA.
 //
 //===----------------------------------------------------------------------===//
 
 #pragma once
 
 #include "Alias/DDA/CxtDPItem.h"
+#include "Alias/DDA/DDAVFSolver.h"
 #include "Alias/DDA/DDAClient.h"
-#include "Alias/DDA/DemandDrivenAA.h"
+#include "Alias/DDA/FlowDDA.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
 #include <llvm/IR/Value.h>
 
+#include <functional>
 #include <map>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace llvm {
 class Module;
@@ -36,18 +39,25 @@ class Module;
 namespace lotus {
 namespace analysis {
 
-/// Flow-sensitive, context-sensitive DDA. Uses call-string context in handleBKCondition.
-class ContextDDA {
-public:
+/// Flow-sensitive, context-sensitive DDA. Uses DDAVFSolver and call-string
+/// context in handleBKCondition.
+class ContextDDA
+    : public DDAVFSolver<CxtVar, CxtPtSet, CxtLocDPItem, ContextDDA> {
+  template <typename CVar, typename CPtSet, typename DPIm, typename D>
+  friend class DDAVFSolver;
 
-  explicit ContextDDA(DemandDrivenAA *flowDDA, DDAClient *client);
+public:
+  explicit ContextDDA(FlowDDA *flowDDA, DDAClient *client);
   ~ContextDDA();
 
   bool run(llvm::Module &M);
   void setClient(DDAClient *client) { client_ = client; }
   DDAClient *getClient() const { return client_; }
-  DemandDrivenAA *getFlowDDA() const { return flowDDA_; }
+  FlowDDA *getFlowDDA() const { return flowDDA_; }
   SVFG *getSVFG() const { return flowDDA_ ? flowDDA_->getSVFG() : nullptr; }
+  SVFGBuilder *getSVFGBuilder() const {
+    return flowDDA_ ? flowDDA_->getSVFGBuilder() : nullptr;
+  }
 
   /// Compute context-sensitive points-to for pointer value (empty context).
   CxtPtSet computeDDAPts(const llvm::Value *ptr);
@@ -69,66 +79,69 @@ public:
   /// Pop recursive call sites from dpm's context until top is not in recursion.
   void popRecursiveCallSites(CxtLocDPItem &dpm);
 
+  /// Initialize context-insensitive edges (call/ret in recursion or SVFG SCC).
+  /// Call after run(M) so recursion info and SVFG are available.
+  void initInsensitiveEdges();
+
   static void setMaxCxtLen(uint32_t max) { ContextCond::setMaxCxtLen(max); }
   static void setMaxPathLen(uint32_t max) { ContextCond::setMaxPathLen(max); }
 
+  /// Context compatibility for context-sensitive propagation (SVF isCondCompatible).
+  bool isCondCompatible(const ContextCond &cxt1, const ContextCond &cxt2,
+                        bool singleton) const;
+
 private:
-  const CxtPtSet &findPT(const CxtLocDPItem &dpm);
-  void handleSingleStatement(const CxtLocDPItem &dpm, CxtPtSet &pts);
-  void resolveFunPtr(const CxtLocDPItem &dpm);
+  void buildRecursionInfo();
+
+  /// DDAVFSolver interface (CRTP).
+  SVFGNode *getDefNodeForValue(const llvm::Value *v) const;
+  SVFGNodeBS getObjectIdsForValue(const llvm::Value *v) const;
+  static bool isDirectEdge(SVFGEdge *e);
+  static bool isIndirectEdge(SVFGEdge *e);
+  CxtPtSet getConservativeCPts(const CxtLocDPItem &dpm) const;
   void handleAddr(CxtPtSet &pts, const CxtLocDPItem &dpm, const AddrSVFGNode *addr);
-  void backtraceAlongDirectVF(CxtPtSet &pts, const CxtLocDPItem &oldDpm);
-  void backtraceAlongIndirectVF(CxtPtSet &pts, const CxtLocDPItem &oldDpm,
-                                const CxtPtSet &curObjPts);
-  void backwardPropDpm(CxtPtSet &pts, uint32_t ptrNodeId,
-                       const CxtLocDPItem &oldDpm, SVFGEdge *edge);
-  void startNewPTCompFromLoadSrc(CxtPtSet &loadPts, const CxtLocDPItem &oldDpm);
-  void startNewPTCompFromStoreDst(CxtPtSet &storePts, const CxtLocDPItem &oldDpm);
-  void backtraceToStoreSrc(CxtPtSet &pts, const CxtLocDPItem &oldDpm);
   CxtPtSet processGepPts(const GepSVFGNode *gep, const CxtPtSet &srcPts);
   bool isStrongUpdate(const CxtPtSet &dstPts, const StoreSVFGNode *store);
+  uint32_t getPtrNodeID(uint32_t var) const { return var; }
+  void addDDAPts(CxtPtSet &pts, uint32_t var);
+  void unionDDAPts(CxtPtSet &target, const CxtPtSet &source);
+  bool unionDDAPts(const CxtLocDPItem &dpm, const CxtPtSet &pts);
   CxtLocDPItem getDPImWithOldCond(const CxtLocDPItem &oldDpm, uint32_t objId,
                                   const SVFGNode *loc) const;
-  SVFGNode *getDefNodeForValue(const llvm::Value *v) const;
-  void resetQuery();
-  void buildRecursionInfo();
-  void reCompute(const CxtLocDPItem &dpm);
-  void reComputeForEdges(const CxtLocDPItem &dpm,
-                         const std::vector<SVFGEdge *> &edgeSet,
-                         bool indirectCall = false);
-
+  void resolveFunPtr(const CxtLocDPItem &dpm);
+  bool isTopLevelPtrStmt(const SVFGNode *stmt) const;
+  void setDpmLocVar(CxtLocDPItem &dpm, SVFGNode *src, uint32_t ptrNodeId);
   void addLoadDpmAndCVar(const CxtLocDPItem &dpm, const CxtLocDPItem &loadDpm,
                          uint32_t loadCVarObjId);
   bool hasLoadDpm(const CxtLocDPItem &dpm) const;
   CxtLocDPItem getLoadDpm(const CxtLocDPItem &dpm) const;
   uint32_t getLoadCVar(const CxtLocDPItem &dpm) const;
   bool isMustAlias(const CxtLocDPItem &loadDpm, const CxtLocDPItem &storeDpm) const;
-  bool propagateViaObj(uint32_t storeObjId, uint32_t loadCVarObjId) const;
-  
-  /// Visited flags for backward traversal
-  void markbkVisited(const CxtLocDPItem &dpm);
-  bool isbkVisited(const CxtLocDPItem &dpm) const;
-  void clearbkVisited(const CxtLocDPItem &dpm);
-  
-  /// Points-to caching
-  const CxtPtSet &getCachedPointsTo(const CxtLocDPItem &dpm) const;
-  void updateCachedPointsTo(const CxtLocDPItem &dpm, const CxtPtSet &pts);
-  
-  /// Get conservative points-to from base pointer analysis (fallback when out-of-budget).
-  CxtPtSet getConservativeCPts(const CxtLocDPItem &dpm) const;
+  bool propagateViaObj(const CxtVar &storeObj, const CxtLocDPItem &dpm,
+                       bool singleton) const;
+  void forEachObjId(const CxtPtSet &pts,
+                    std::function<void(uint32_t)> callback) const;
+  void forEachElementInCPtSet(
+      const CxtPtSet &pts,
+      std::function<void(const CxtVar &, uint32_t)> callback) const;
+  const CxtPtSet &getEmptyCPtSetRef() const;
+  void connectIndirectCallees(const CxtLocDPItem &dpm, const CxtPtSet &funPts,
+                              std::vector<SVFGEdge *> &newEdges);
+  void onIndirectEdgesAdded() {}
+  void resetQueryLoadMaps();
+  void insertOutOfBudgetDpm(const CxtLocDPItem &dpm);
+  bool isOutOfBudgetDpm(const CxtLocDPItem &dpm) const;
+  uint32_t getMaxBudget() const { return kDefaultMaxBudget; }
 
-  DemandDrivenAA *flowDDA_;
+  FlowDDA *flowDDA_;
   DDAClient *client_;
-  std::set<CxtLocDPItem> backwardVisited_;
-  std::map<CxtLocDPItem, CxtPtSet> dpmToPtsMap_;
-  std::map<uint32_t, std::set<CxtLocDPItem>> locToDpmSetMap_;
   std::map<CxtLocDPItem, CxtLocDPItem> dpmToLoadDpmMap_;
   std::map<CxtLocDPItem, uint32_t> dpmToLoadCVarMap_;
-  uint32_t numSteps_ = 0;
-  bool outOfBudget_ = false;
   static constexpr uint32_t kDefaultMaxBudget = 100000u;
   std::set<CxtLocDPItem> outOfBudgetDpms_;
   std::unordered_set<uint32_t> recursiveCallSiteIds_;
+  /// Call/ret edges treated context-insensitively (recursion or value-flow cycle).
+  std::unordered_set<const SVFGEdge *> insensitveEdges_;
 };
 
 } // namespace analysis

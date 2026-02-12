@@ -11,6 +11,7 @@
 #include "Alias/DDA/DPItem.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
+#include "IR/SVFG/SVFGStats.h"
 
 #include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/IR/Instructions.h>
@@ -28,11 +29,11 @@ using namespace llvm;
 
 namespace {
 
-static bool isIndirectEdge(SVFGEdge *e);
+static bool isIndirectEdgeImpl(SVFGEdge *e);
 
-static bool isDirectEdge(SVFGEdge *e) {
+static bool isDirectEdgeImpl(SVFGEdge *e) {
   if (!e) return false;
-  if (isIndirectEdge(e))
+  if (isIndirectEdgeImpl(e))
     return false;
   SVFGEdgeK k = e->getEdgeKind();
   return k == SVFGEdgeK::IntraCopy || k == SVFGEdgeK::IntraDirect ||
@@ -43,7 +44,7 @@ static bool isDirectEdge(SVFGEdge *e) {
          k == SVFGEdgeK::IntraCmp || k == SVFGEdgeK::IntraBranch;
 }
 
-static bool isIndirectEdge(SVFGEdge *e) {
+static bool isIndirectEdgeImpl(SVFGEdge *e) {
   if (!e) return false;
   SVFGEdgeK k = e->getEdgeKind();
   if (k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::ThreadMHPIndirectVF ||
@@ -89,7 +90,10 @@ static const llvm::Value *getValueForCxtVar(const CxtLocDPItem &dpm, SVFG *svfg)
 
 } // namespace
 
-ContextDDA::ContextDDA(DemandDrivenAA *flowDDA, DDAClient *client)
+bool ContextDDA::isDirectEdge(SVFGEdge *e) { return isDirectEdgeImpl(e); }
+bool ContextDDA::isIndirectEdge(SVFGEdge *e) { return isIndirectEdgeImpl(e); }
+
+ContextDDA::ContextDDA(FlowDDA *flowDDA, DDAClient *client)
     : flowDDA_(flowDDA), client_(client) {}
 
 ContextDDA::~ContextDDA() = default;
@@ -140,6 +144,9 @@ void ContextDDA::popRecursiveCallSites(CxtLocDPItem &dpm) {
 bool ContextDDA::handleBKCondition(CxtLocDPItem &dpm, SVFGEdge *edge) {
   if (client_)
     client_->handleStatement(edge->getSrcNode(), dpm.getCurNodeID());
+  // Context-insensitive edge: skip context check (recursion or value-flow cycle).
+  if (insensitveEdges_.count(edge))
+    return true;
   SVFG *svfg = getSVFG();
   if (!svfg) return true;
 
@@ -180,23 +187,12 @@ void ContextDDA::handleOutOfBudgetDpm(const CxtLocDPItem &dpm) {
   // Match SVF ContextDDA::handleOutOfBudgetDpm: downgrade to FlowDDA
   if (!flowDDA_ || !getSVFG())
     return;
-  
-  const llvm::Value *v = getValueForCxtVar(dpm, getSVFG());
-  if (!v || !v->getType()->isPointerTy())
-    return;
 
-  DemandDrivenAA::PtsSet flowPts = flowDDA_->getPointsTo(v);
-  
-  // Convert to context-insensitive points-to set (empty call-string)
-  CxtPtSet cxtPts;
-  ContextCond cond;
-  for (uint32_t objId : flowPts) {
-    CxtVar var(cond, objId);
-    cxtPts.insert(var);
-  }
-  
-  // Update cache with conservative points-to
-  updateCachedPointsTo(dpm, cxtPts);
+  const CxtPtSet conservativePts = getConservativeCPts(dpm);
+  if (!conservativePts.empty())
+    DDAVFSolver<CxtVar, CxtPtSet, CxtLocDPItem, ContextDDA>::updateCachedPointsTo(
+        dpm, conservativePts);
+  DDAVFSolver<CxtVar, CxtPtSet, CxtLocDPItem, ContextDDA>::addOutOfBudgetDpm(dpm);
 }
 
 void ContextDDA::buildRecursionInfo() {
@@ -278,6 +274,26 @@ void ContextDDA::buildRecursionInfo() {
     for (const llvm::Function *f : sccs[i])
       funcToScc[f] = i;
 
+  // Collect recursive SCCs: multi-function SCCs + self-recursive functions
+  std::unordered_set<size_t> recursiveSccIds;
+  for (size_t i = 0; i < sccs.size(); ++i) {
+    if (sccs[i].size() > 1) {
+      recursiveSccIds.insert(i);
+    } else if (sccs[i].size() == 1) {
+      // Check for self-recursion (self-edge in call graph)
+      const llvm::Function *f = *sccs[i].begin();
+      auto it = callGraph.find(f);
+      if (it != callGraph.end()) {
+        for (const llvm::Function *callee : it->second) {
+          if (callee == f) {
+            recursiveSccIds.insert(i);
+            break;
+          }
+        }
+      }
+    }
+  }
+
   for (const llvm::Function &F : *module) {
     if (F.isDeclaration())
       continue;
@@ -302,8 +318,10 @@ void ContextDDA::buildRecursionInfo() {
           auto itCallee = funcToScc.find(callee);
           if (itCaller == funcToScc.end() || itCallee == funcToScc.end())
             continue;
-          size_t sccId = itCaller->second;
-          if (itCallee->second != sccId || sccs[sccId].size() <= 1)
+          // Both caller and callee must be in the same recursive SCC
+          if (itCaller->second != itCallee->second)
+            continue;
+          if (recursiveSccIds.count(itCaller->second) == 0)
             continue;
           uint32_t csId = svfg ? svfg->getCallSiteId(cb, callee) : 0;
           if (csId != 0)
@@ -313,57 +331,9 @@ void ContextDDA::buildRecursionInfo() {
   }
 }
 
-void ContextDDA::resetQuery() {
-  // Match SVF DDAVFSolver::resetQuery: clear OOB dpms if previous query was OOB.
-  if (outOfBudget_) {
-    for (const auto &p : locToDpmSetMap_) {
-      for (const CxtLocDPItem &d : p.second) {
-        if (outOfBudgetDpms_.count(d) == 0)
-          backwardVisited_.erase(d);
-      }
-    }
-  }
-  locToDpmSetMap_.clear();
+void ContextDDA::resetQueryLoadMaps() {
   dpmToLoadDpmMap_.clear();
   dpmToLoadCVarMap_.clear();
-  numSteps_ = 0;
-  outOfBudget_ = false;
-}
-
-void ContextDDA::markbkVisited(const CxtLocDPItem &dpm) {
-  backwardVisited_.insert(dpm);
-}
-
-bool ContextDDA::isbkVisited(const CxtLocDPItem &dpm) const {
-  return backwardVisited_.count(dpm) != 0;
-}
-
-void ContextDDA::clearbkVisited(const CxtLocDPItem &dpm) {
-  backwardVisited_.erase(dpm);
-}
-
-const CxtPtSet &ContextDDA::getCachedPointsTo(const CxtLocDPItem &dpm) const {
-  auto it = dpmToPtsMap_.find(dpm);
-  static const CxtPtSet empty;
-  return (it != dpmToPtsMap_.end()) ? it->second : empty;
-}
-
-void ContextDDA::updateCachedPointsTo(const CxtLocDPItem &dpm, const CxtPtSet &pts) {
-  // Match SVF DDAVFSolver::updateCachedPointsTo: recompute if pts grew.
-  auto it = dpmToPtsMap_.find(dpm);
-  if (it == dpmToPtsMap_.end()) {
-    dpmToPtsMap_[dpm] = pts;
-    // SVF calls reCompute whenever unionDDAPts returns true (non-empty new entry).
-    if (!pts.empty())
-      reCompute(dpm);
-    return;
-  }
-  size_t oldSize = it->second.size();
-  for (const CxtVar &v : pts)
-    it->second.insert(v);
-  if (it->second.size() != oldSize) {
-    reCompute(dpm);
-  }
 }
 
 CxtPtSet ContextDDA::getConservativeCPts(const CxtLocDPItem &dpm) const {
@@ -375,7 +345,7 @@ CxtPtSet ContextDDA::getConservativeCPts(const CxtLocDPItem &dpm) const {
   if (!v || !v->getType()->isPointerTy())
     return CxtPtSet{};
 
-  DemandDrivenAA::PtsSet flowPts = flowDDA_->getPointsTo(v);
+  FlowDDA::PtsSet flowPts = flowDDA_->getPointsTo(v);
   CxtPtSet cxtPts;
   ContextCond cond;
   for (uint32_t objId : flowPts) {
@@ -383,6 +353,98 @@ CxtPtSet ContextDDA::getConservativeCPts(const CxtLocDPItem &dpm) const {
     cxtPts.insert(var);
   }
   return cxtPts;
+}
+
+void ContextDDA::setDpmLocVar(CxtLocDPItem &dpm, SVFGNode *src,
+                               uint32_t ptrNodeId) {
+  dpm.setLocVar(src, ptrNodeId);
+}
+
+void ContextDDA::addDDAPts(CxtPtSet &pts, uint32_t var) {
+  pts.insert(CxtVar(ContextCond(), var));
+}
+
+void ContextDDA::unionDDAPts(CxtPtSet &target, const CxtPtSet &source) {
+  for (const CxtVar &v : source)
+    target.insert(v);
+}
+
+bool ContextDDA::unionDDAPts(const CxtLocDPItem &dpm, const CxtPtSet &pts) {
+  const SVFGNode *loc = dpm.getLoc();
+  if (!loc)
+    return false;
+  auto &cache = isTopLevelPtrStmt(loc) ? dpmToTLPtsMap_ : dpmToADPtsMap_;
+  auto it = cache.find(dpm);
+  const size_t oldSize = (it != cache.end()) ? it->second.size() : 0;
+  if (it == cache.end())
+    cache[dpm] = pts;
+  else
+    for (const CxtVar &v : pts)
+      it->second.insert(v);
+  it = cache.find(dpm);
+  return (it != cache.end() && it->second.size() > oldSize);
+}
+
+const CxtPtSet &ContextDDA::getEmptyCPtSetRef() const {
+  static const CxtPtSet empty;
+  return empty;
+}
+
+bool ContextDDA::isTopLevelPtrStmt(const SVFGNode *stmt) const {
+  if (!stmt)
+    return false;
+  return !llvm::isa<LoadSVFGNode>(stmt) && !llvm::isa<StoreSVFGNode>(stmt) &&
+         !llvm::isa<LoadMuSVFGNode>(stmt) && !llvm::isa<StoreChiSVFGNode>(stmt);
+}
+
+void ContextDDA::connectIndirectCallees(const CxtLocDPItem &dpm,
+                                       const CxtPtSet &funPts,
+                                       std::vector<SVFGEdge *> &newEdges) {
+  SVFG *svfg = getSVFG();
+  if (!flowDDA_ || !flowDDA_->getSVFGBuilder() || !svfg)
+    return;
+  const auto &indCallSites = svfg->getIndCallSites(dpm.getCurNodeID());
+  for (const llvm::CallBase *cs : indCallSites) {
+    if (!cs)
+      continue;
+    for (const CxtVar &cv : funPts) {
+      uint32_t objId = cv.get_id();
+      if (objId == 0)
+        continue;
+      const llvm::Value *v = svfg->getObjectValue(objId);
+      const llvm::Function *callee =
+          llvm::dyn_cast_or_null<llvm::Function>(v);
+      if (!callee || callee->isDeclaration())
+        continue;
+      (void)flowDDA_->getSVFGBuilder()->connectCallSiteToCalleeOnTheFly(
+          svfg, cs, callee, newEdges);
+    }
+  }
+}
+
+void ContextDDA::insertOutOfBudgetDpm(const CxtLocDPItem &dpm) {
+  outOfBudgetDpms_.insert(dpm);
+}
+
+bool ContextDDA::isOutOfBudgetDpm(const CxtLocDPItem &dpm) const {
+  return outOfBudgetDpms_.count(dpm) != 0;
+}
+
+void ContextDDA::forEachObjId(const CxtPtSet &pts,
+                              std::function<void(uint32_t)> callback) const {
+  for (const CxtVar &v : pts)
+    callback(v.get_id());
+}
+
+void ContextDDA::forEachElementInCPtSet(
+    const CxtPtSet &pts,
+    std::function<void(const CxtVar &, uint32_t)> callback) const {
+  for (const CxtVar &v : pts)
+    callback(v, v.get_id());
+}
+
+SVFGNodeBS ContextDDA::getObjectIdsForValue(const llvm::Value *v) const {
+  return flowDDA_ ? flowDDA_->getObjectIdsForValue(v) : SVFGNodeBS{};
 }
 
 void ContextDDA::addLoadDpmAndCVar(const CxtLocDPItem &dpm,
@@ -404,24 +466,84 @@ CxtLocDPItem ContextDDA::getLoadDpm(const CxtLocDPItem &dpm) const {
   auto it = dpmToLoadDpmMap_.find(dpm);
   if (it != dpmToLoadDpmMap_.end())
     return it->second;
+  // SVF asserts here ("not found??"). Log a warning for debugging.
+  llvm::errs() << "ContextDDA::getLoadDpm: loadDpm not found for dpm (cur="
+               << dpm.getCurNodeID() << "); returning self as fallback\n";
   return dpm;
 }
 
 uint32_t ContextDDA::getLoadCVar(const CxtLocDPItem &dpm) const {
   auto it = dpmToLoadCVarMap_.find(dpm);
-  return (it != dpmToLoadCVarMap_.end()) ? it->second : dpm.getCurNodeID();
+  if (it != dpmToLoadCVarMap_.end())
+    return it->second;
+  // SVF asserts here ("not found??"). Log a warning for debugging.
+  llvm::errs() << "ContextDDA::getLoadCVar: loadCVar not found for dpm (cur="
+               << dpm.getCurNodeID() << "); returning curNodeID as fallback\n";
+  return dpm.getCurNodeID();
 }
 
 bool ContextDDA::isMustAlias(const CxtLocDPItem &loadDpm,
                             const CxtLocDPItem &storeDpm) const {
   (void)loadDpm;
   (void)storeDpm;
-  // Match upstream SVF DDAVFSolver default: ContextDDA does not implement must-alias.
   return false;
 }
 
-bool ContextDDA::propagateViaObj(uint32_t storeObjId, uint32_t loadCVarObjId) const {
-  return storeObjId == loadCVarObjId;
+bool ContextDDA::isCondCompatible(const ContextCond &cxt1,
+                                   const ContextCond &cxt2,
+                                   bool singleton) const {
+  // SVF: context conditions of local/global vars are compatible; singleton => true.
+  if (singleton)
+    return true;
+  int i = static_cast<int>(cxt1.cxtSize()) - 1;
+  int j = static_cast<int>(cxt2.cxtSize()) - 1;
+  const CallStrCxt &ctx1 = cxt1.getContexts();
+  const CallStrCxt &ctx2 = cxt2.getContexts();
+  for (; i >= 0 && j >= 0; --i, --j) {
+    if (ctx1[static_cast<size_t>(i)] != ctx2[static_cast<size_t>(j)])
+      return false;
+  }
+  return true;
+}
+
+bool ContextDDA::propagateViaObj(const CxtVar &storeObj,
+                                   const CxtLocDPItem &dpm,
+                                   bool singleton) const {
+  if (storeObj.get_id() != getLoadCVar(dpm))
+    return false;
+  return isCondCompatible(storeObj.get_cond(), dpm.getCond(), singleton);
+}
+
+void ContextDDA::initInsensitiveEdges() {
+  insensitveEdges_.clear();
+  SVFG *svfg = getSVFG();
+  if (!svfg)
+    return;
+  SVFGStats stats(svfg);
+  stats.performSCCAnalysis(SVFGStats::SVFGEdgeSet{});
+  CxtLocDPItem dummy(CxtVar(ContextCond(), 0), nullptr);
+  for (const auto &pair : *svfg) {
+    SVFGNode *node = pair.second;
+    if (!node)
+      continue;
+    for (SVFGEdge *edge : node->getInEdges()) {
+      if (!edge)
+        continue;
+      if (!isCallEdge(edge) && !isRetEdge(edge))
+        continue;
+      uint32_t csId = 0;
+      if (isCallEdge(edge))
+        csId = getCSIDAtCall(dummy, edge);
+      else
+        csId = getCSIDAtRet(dummy, edge);
+      if (csId != 0 && isEdgeInRecursion(csId)) {
+        insensitveEdges_.insert(edge);
+        continue;
+      }
+      if (stats.isEdgeInSVFGSCC(edge))
+        insensitveEdges_.insert(edge);
+    }
+  }
 }
 
 SVFGNode *ContextDDA::getDefNodeForValue(const llvm::Value *v) const {
@@ -460,29 +582,25 @@ void ContextDDA::resolveFunPtr(const CxtLocDPItem &dpm) {
   }
 
   // SVF case 2: at a function entry node (FormalParmSVFGNode), find indirect
-  // call sites that may invoke this function using SVFG's indcall map.
+  // call sites that may invoke this function using SVFG's callee index
+  // (mirrors SVF's CallGraph::getIndCallSitesInvokingCallee).
   if (const FormalParmSVFGNode *formalParm =
           dyn_cast<FormalParmSVFGNode>(node)) {
     const llvm::Function *fun = formalParm->getFunction();
     if (fun && !fun->isDeclaration()) {
-      for (auto &pair : *svfg) {
-        SVFGNode *n = pair.second;
-        if (!n)
+      const auto &indCS = svfg->getIndCallSitesInvokingCallee(fun);
+      for (const llvm::CallBase *cs : indCS) {
+        if (!cs || cs->getCalledFunction())
           continue;
-        const auto &indCS = svfg->getIndCallSites(n->getId());
-        for (const llvm::CallBase *cs : indCS) {
-          if (!cs || cs->getCalledFunction())
-            continue;
-          const Value *calledOp = cs->getCalledOperand();
-          if (!calledOp || !calledOp->getType()->isPointerTy())
-            continue;
-          SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
-          if (funPtrNode) {
-            CxtVar funptrVar(dpm.getCondVar().get_cond(),
-                             funPtrNode->getId());
-            CxtLocDPItem funPtrDpm(funptrVar, funPtrNode);
-            findPT(funPtrDpm);
-          }
+        const Value *calledOp = cs->getCalledOperand();
+        if (!calledOp || !calledOp->getType()->isPointerTy())
+          continue;
+        SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
+        if (funPtrNode) {
+          CxtVar funptrVar(dpm.getCondVar().get_cond(),
+                           funPtrNode->getId());
+          CxtLocDPItem funPtrDpm(funptrVar, funPtrNode);
+          findPT(funPtrDpm);
         }
       }
     }
@@ -508,120 +626,25 @@ void ContextDDA::handleAddr(CxtPtSet &pts, const CxtLocDPItem &dpm,
   ContextCond cond = dpm.getCond();
   if (!addr)
     return;
+
+  // Query PTA for the value's object IDs (same strategy as FlowDDA).
   const Value *v = addr->getValue();
   if (!v || !flowDDA_)
     return;
+  SVFGBuilder *builder = flowDDA_->getSVFGBuilder();
+  SVFG *svfg = getSVFG();
   SVFGNodeBS objIds = flowDDA_->getObjectIdsForValue(v);
-  for (uint32_t objId : objIds)
-    pts.insert(CxtVar(cond, objId));
-}
-
-void ContextDDA::backwardPropDpm(CxtPtSet &pts, uint32_t ptrNodeId,
-                                 const CxtLocDPItem &oldDpm, SVFGEdge *edge) {
-  SVFG *svfg = getSVFG();
-  SVFGNode *src = edge->getSrcNode();
-  if (!src || !svfg) return;
-  CxtLocDPItem dpm(oldDpm);
-  dpm.setLocVar(src, ptrNodeId);
-  if (!handleBKCondition(dpm, edge))
-    return;
-  // Match SVF DDAVFSolver: record load dpm/cvar when crossing indirect edge.
-  // SVF always adds when crossing indirect edge (doesn't check hasLoadDpm)
-  if (isIndirectEdge(edge))
-    addLoadDpmAndCVar(dpm, getLoadDpm(oldDpm), getLoadCVar(oldDpm));
-  // Match SVF: use unionDDAPts pattern
-  const CxtPtSet &predPts = findPT(dpm);
-  for (const CxtVar &v : predPts)
-    pts.insert(v);
-}
-
-void ContextDDA::backtraceAlongDirectVF(CxtPtSet &pts,
-                                        const CxtLocDPItem &oldDpm) {
-  const SVFGNode *node = oldDpm.getLoc();
-  SVFG *svfg = getSVFG();
-  if (!node || !svfg) return;
-  for (SVFGEdge *edge : node->getInEdges()) {
-    if (!isDirectEdge(edge)) continue;
-    SVFGNode *src = edge->getSrcNode();
-    SVFGNode *lhs = svfg->getLHSTopLevPtr(src);
-    if (lhs)
-      backwardPropDpm(pts, lhs->getId(), oldDpm, edge);
-  }
-}
-
-void ContextDDA::backtraceAlongIndirectVF(CxtPtSet &pts,
-                                          const CxtLocDPItem &oldDpm,
-                                          const CxtPtSet &curObjPts) {
-  (void)curObjPts;
-  const SVFGNode *node = oldDpm.getLoc();
-  SVFG *svfg = getSVFG();
-  if (!node || !svfg) return;
-  uint32_t obj = oldDpm.getCurNodeID();
-  // Match SVF DDAVFSolver: skip constant objects (obj == 0 represents null/constant).
-  if (obj == 0)
-    return;
-  for (SVFGEdge *edge : node->getInEdges()) {
-    if (!isIndirectEdge(edge)) continue;
-    // Match SVF DDAVFSolver::backtraceAlongIndirectVF: only follow indirect edge
-    // when obj is in guard (pointsTo set). In SVF: guard.test(obj) checks membership.
-    const std::set<uint32_t> &guard = edge->getPointsTo();
-    // Lotus SVFG may leave guard empty when PTA is unavailable/unknown; be conservative.
-    if (!guard.empty() && guard.count(obj) == 0) {
-      bool hasWildcard = false;
-      for (uint32_t id : guard) {
-        if (svfg->isUnknownObject(id)) {
-          hasWildcard = true;
-          break;
-        }
-      }
-      if (!hasWildcard)
+  for (uint32_t id : objIds) {
+    // SVF field-insensitivity check
+    if (svfg && svfg->isFieldInsensitiveObject(id) && builder) {
+      uint32_t fiObj = builder->getOrCreateFIObjId(id);
+      if (fiObj != 0) {
+        pts.insert(CxtVar(cond, fiObj));
         continue;
+      }
     }
-    // SVF passes oldDpm.getCurNodeID() (the object being tracked) as ptrNodeId.
-    // The object ID stays the same when backtracing along indirect (memory SSA) edges.
-    backwardPropDpm(pts, oldDpm.getCurNodeID(), oldDpm, edge);
+    pts.insert(CxtVar(cond, id));
   }
-}
-
-void ContextDDA::startNewPTCompFromLoadSrc(CxtPtSet &loadPts,
-                                           const CxtLocDPItem &oldDpm) {
-  const LoadSVFGNode *load = llvm::cast<LoadSVFGNode>(oldDpm.getLoc());
-  SVFG *svfg = getSVFG();
-  if (!svfg) return;
-  uint32_t ptrNodeId = load->getLoadFromPtr();
-  SVFGNode *loadSrc = svfg->getNode(ptrNodeId);
-  if (!loadSrc) return;
-  SVFGEdge *edge = svfg->getIntraVFGEdge(loadSrc, load, SVFGEdgeK::IntraDirect);
-  if (edge)
-    backwardPropDpm(loadPts, ptrNodeId, oldDpm, edge);
-}
-
-void ContextDDA::startNewPTCompFromStoreDst(CxtPtSet &storePts,
-                                            const CxtLocDPItem &oldDpm) {
-  const StoreSVFGNode *store = llvm::cast<StoreSVFGNode>(oldDpm.getLoc());
-  SVFG *svfg = getSVFG();
-  if (!svfg) return;
-  uint32_t ptrNodeId = store->getStoreToPtr();
-  SVFGNode *storeDst = svfg->getNode(ptrNodeId);
-  if (!storeDst) return;
-  SVFGEdge *edge =
-      svfg->getIntraVFGEdge(storeDst, store, SVFGEdgeK::IntraDirect);
-  if (edge)
-    backwardPropDpm(storePts, ptrNodeId, oldDpm, edge);
-}
-
-void ContextDDA::backtraceToStoreSrc(CxtPtSet &pts, const CxtLocDPItem &oldDpm) {
-  const StoreSVFGNode *store = llvm::cast<StoreSVFGNode>(oldDpm.getLoc());
-  const Value *valueOperand =
-      llvm::cast<StoreInst>(store->getValue())->getValueOperand();
-  SVFGNode *storeSrc = getDefNodeForValue(valueOperand);
-  if (!storeSrc) return;
-  SVFG *svfg = getSVFG();
-  if (!svfg) return;
-  SVFGEdge *edge =
-      svfg->getIntraVFGEdge(storeSrc, store, SVFGEdgeK::IntraDirect);
-  if (edge)
-    backwardPropDpm(pts, storeSrc->getId(), oldDpm, edge);
 }
 
 CxtPtSet ContextDDA::processGepPts(const GepSVFGNode *gep,
@@ -701,117 +724,6 @@ bool ContextDDA::isStrongUpdate(const CxtPtSet &dstPts,
   return true;
 }
 
-void ContextDDA::handleSingleStatement(const CxtLocDPItem &dpm, CxtPtSet &pts) {
-  const SVFGNode *node = dpm.getLoc();
-  SVFG *svfg = getSVFG();
-  if (!node || !svfg) return;
-  resolveFunPtr(dpm);
-  switch (node->getNodeKind()) {
-  case SVFGK::Addr:
-    handleAddr(pts, dpm, llvm::cast<AddrSVFGNode>(node));
-    break;
-  case SVFGK::Copy:
-  case SVFGK::Phi:
-  case SVFGK::IntraPhi:
-  case SVFGK::InterPhi:
-  case SVFGK::FormalParm:
-  case SVFGK::ActualParm:
-  case SVFGK::FormalRet:
-  case SVFGK::ActualRet:
-  case SVFGK::NullPtr:
-    backtraceAlongDirectVF(pts, dpm);
-    break;
-  case SVFGK::Gep: {
-    CxtPtSet gepPts;
-    backtraceAlongDirectVF(gepPts, dpm);
-    CxtPtSet filtered = processGepPts(llvm::cast<GepSVFGNode>(node), gepPts);
-    for (const CxtVar &v : filtered)
-      pts.insert(v);
-    break;
-  }
-  case SVFGK::Load: {
-    const LoadSVFGNode *load = llvm::cast<LoadSVFGNode>(node);
-    if (!load->getValue() || !load->getValue()->getType()->isPointerTy())
-      break;
-    CxtPtSet loadPts;
-    startNewPTCompFromLoadSrc(loadPts, dpm);
-    for (const CxtVar &v : loadPts) {
-      CxtLocDPItem objDpm = getDPImWithOldCond(dpm, v.get_id(), load);
-      // getDPImWithOldCond already adds loadDpm/loadCVar for Load nodes.
-      backtraceAlongIndirectVF(pts, objDpm, CxtPtSet{});
-    }
-    break;
-  }
-  case SVFGK::Store: {
-    const StoreSVFGNode *store = llvm::cast<StoreSVFGNode>(node);
-    // SVF checks store->getPAGSrcNode()->isPointer(): whether the value being
-    // stored is a pointer.  StoreInst::getType() is void, so check the value
-    // operand explicitly.
-    if (const llvm::StoreInst *si =
-            llvm::dyn_cast_or_null<llvm::StoreInst>(store->getValue())) {
-      if (!si->getValueOperand()->getType()->isPointerTy())
-        break;
-    } else {
-      break;
-    }
-    if (hasLoadDpm(dpm) && isMustAlias(getLoadDpm(dpm), dpm)) {
-      backtraceToStoreSrc(pts, dpm);
-      break;
-    }
-    CxtPtSet storePts;
-    startNewPTCompFromStoreDst(storePts, dpm);
-    if (!storePts.empty()) {
-      // Match SVF DDAVFSolver Store handling: for each store target, check propagateViaObj.
-      for (const CxtVar &v : storePts) {
-        if (propagateViaObj(v.get_id(), getLoadCVar(dpm))) {
-          CxtLocDPItem objDpm = getDPImWithOldCond(dpm, v.get_id(), store);
-          // getDPImWithOldCond already adds loadDpm/loadCVar for Store nodes.
-          backtraceToStoreSrc(pts, objDpm);
-          // Check strong update: if not strong, also do indirect backtrace.
-          if (!isStrongUpdate(storePts, store))
-            backtraceAlongIndirectVF(pts, objDpm, CxtPtSet{});
-        } else {
-          // When propagateViaObj is false, use original dpm (not objDpm).
-          backtraceAlongIndirectVF(pts, dpm, CxtPtSet{});
-        }
-      }
-    }
-    break;
-  }
-  default:
-    if (node->isMemNode()) {
-      backtraceAlongIndirectVF(pts, dpm, CxtPtSet{});
-    }
-    break;
-  }
-}
-
-const CxtPtSet &ContextDDA::findPT(const CxtLocDPItem &dpm) {
-  // Match SVF DDAVFSolver::findPT: check cache first
-  if (isbkVisited(dpm)) {
-    return getCachedPointsTo(dpm);
-  }
-
-  markbkVisited(dpm);
-  if (dpm.getLoc())
-    locToDpmSetMap_[dpm.getLoc()->getId()].insert(dpm);
-
-  // Match SVF DDAVFSolver::findPT: stop exploring when out-of-budget.
-  if (outOfBudgetDpms_.count(dpm))
-    return getCachedPointsTo(dpm);
-  if (outOfBudget_ || ++numSteps_ > kDefaultMaxBudget) {
-    outOfBudget_ = true;
-    return getCachedPointsTo(dpm);
-  }
-
-  CxtPtSet pts;
-  handleSingleStatement(dpm, pts);
-
-  // Update cache and recompute if needed
-  updateCachedPointsTo(dpm, pts);
-  return getCachedPointsTo(dpm);
-}
-
 const CxtPtSet &ContextDDA::computeDDAPts(const CxtVar &cxtVar) {
   resetQuery();
   DPItem::setMaxBudget(kDefaultMaxBudget);
@@ -831,8 +743,8 @@ const CxtPtSet &ContextDDA::computeDDAPts(const CxtVar &cxtVar) {
   }
   CxtLocDPItem dpm(cxtVar, defNode);
   (void)findPT(dpm);
-  if (outOfBudget_) {
-    outOfBudgetDpms_.insert(dpm);
+  if (isOutOfBudget()) {
+    insertOutOfBudgetDpm(dpm);
     handleOutOfBudgetDpm(dpm);
   }
   return getCachedPointsTo(dpm);
@@ -853,73 +765,6 @@ CxtPtSet ContextDDA::computeDDAPts(const llvm::Value *ptr) {
   ContextCond cxt;
   CxtVar cxtVar(cxt, defNode->getId());
   return computeDDAPts(cxtVar);
-}
-
-void ContextDDA::reCompute(const CxtLocDPItem &dpm) {
-  const SVFGNode *node = dpm.getLoc();
-  SVFG *svfg = getSVFG();
-  if (!node || !svfg)
-    return;
-  
-  // Match SVF ContextDDA::reCompute: refine indirect call edges on-the-fly.
-  if (flowDDA_ && flowDDA_->getSVFGBuilder()) {
-    const auto &indCallSites = svfg->getIndCallSites(dpm.getCurNodeID());
-    if (!indCallSites.empty()) {
-      const CxtPtSet &funPts = getCachedPointsTo(dpm);
-      std::vector<SVFGEdge *> newEdges;
-      for (const llvm::CallBase *cs : indCallSites) {
-        if (!cs)
-          continue;
-        for (const CxtVar &cv : funPts) {
-          const uint32_t objId = cv.get_id();
-          if (objId == 0)
-            continue;
-          const llvm::Value *v = svfg->getObjectValue(objId);
-          const llvm::Function *callee = llvm::dyn_cast_or_null<llvm::Function>(v);
-          if (!callee || callee->isDeclaration())
-            continue;
-          (void)flowDDA_->getSVFGBuilder()->connectCallSiteToCalleeOnTheFly(
-              svfg, cs, callee, newEdges);
-        }
-      }
-      if (!newEdges.empty()) {
-        buildRecursionInfo();
-        reComputeForEdges(dpm, newEdges, true);
-      }
-    }
-  }
-  
-  // Re-compute for transitive closures (out-edges)
-  const std::vector<SVFGEdge *> &edgeSet = node->getOutEdges();
-  reComputeForEdges(dpm, edgeSet, false);
-}
-
-void ContextDDA::reComputeForEdges(const CxtLocDPItem &dpm,
-                                    const std::vector<SVFGEdge *> &edgeSet,
-                                    bool indirectCall) {
-  for (SVFGEdge *edge : edgeSet) {
-    SVFGNode *dst = edge->getDstNode();
-    if (!dst)
-      continue;
-    auto locIt = locToDpmSetMap_.find(dst->getId());
-    if (locIt == locToDpmSetMap_.end())
-      continue;
-    
-    // Match SVF DDAVFSolver::reComputeForEdges logic
-    for (const CxtLocDPItem &dstDpm : locIt->second) {
-      if (!indirectCall && isIndirectEdge(edge) && !isa<LoadSVFGNode>(dst)) {
-        // For indirect edges (except to Load nodes), only recompute if same obj
-        if (dstDpm.getCurNodeID() == dpm.getCurNodeID()) {
-          clearbkVisited(dstDpm);
-          findPT(dstDpm);
-        }
-      } else {
-        // For direct edges or indirect call edges, always recompute
-        clearbkVisited(dstDpm);
-        findPT(dstDpm);
-      }
-    }
-  }
 }
 
 void ContextDDA::answerQueries() {

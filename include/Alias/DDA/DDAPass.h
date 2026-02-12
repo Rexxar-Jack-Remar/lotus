@@ -15,7 +15,7 @@
 #pragma once
 
 #include "Alias/DDA/DDAClient.h"
-#include "Alias/DDA/DemandDrivenAA.h"
+#include "Alias/DDA/FlowDDA.h"
 
 #include <memory>
 #include <string>
@@ -54,7 +54,7 @@ public:
   void setDDAKind(DDAKind k) { kind_ = k; }
   DDAKind getDDAKind() const { return kind_; }
 
-  DemandDrivenAA *getFlowDDA() const { return flowDDA_.get(); }
+  FlowDDA *getFlowDDA() const { return flowDDA_.get(); }
   ContextDDA *getContextDDA() const { return contextDDA_.get(); }
 
 private:
@@ -62,7 +62,7 @@ private:
 
   DDAKind kind_ = DDAKind::FlowS_DDA;
   std::unique_ptr<DDAClient> client_;
-  std::unique_ptr<DemandDrivenAA> flowDDA_;
+  std::unique_ptr<FlowDDA> flowDDA_;
   std::unique_ptr<ContextDDA> contextDDA_;
 };
 

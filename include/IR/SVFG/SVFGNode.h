@@ -173,10 +173,24 @@ public:
 };
 
 /// @brief Address-taking instruction (alloca, malloc, address-of)
+///
+/// Carries an optional abstract object ID (from the SVFG builder / PTA) so
+/// that DDA can directly read which memory object this Addr creates, matching
+/// SVF's `addr->getPAGSrcNodeID()`.  When `objectId_` is 0 the caller should
+/// fall back to PTA-based object lookup.
 class AddrSVFGNode : public StmtSVFGNode {
+private:
+  uint32_t objectId_ = 0;
+
 public:
-  AddrSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Value *v)
-      : StmtSVFGNode(id, SVFGK::Addr, icfg, v) {}
+  AddrSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Value *v,
+               uint32_t objectId = 0)
+      : StmtSVFGNode(id, SVFGK::Addr, icfg, v), objectId_(objectId) {}
+
+  /// @brief Return the abstract object ID created by this Addr node.
+  /// 0 means "not set" (fall back to PTA lookup).
+  inline uint32_t getObjectId() const { return objectId_; }
+  inline void setObjectId(uint32_t id) { objectId_ = id; }
 
   SVFG_NODE_KIND(Addr)
 };
