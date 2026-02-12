@@ -137,8 +137,7 @@ protected:
   LocDPItem getLoadDpm(const LocDPItem &dpm) const;
   uint32_t getLoadCVar(const LocDPItem &dpm) const;
   bool isMustAlias(const LocDPItem &loadDpm, const LocDPItem &storeDpm) const;
-  bool propagateViaObj(uint32_t storeObj, const LocDPItem &dpm,
-                      bool singleton) const;
+  bool propagateViaObj(uint32_t storeObj, uint32_t loadObj) const;
   void forEachObjId(const PtsSet &pts,
                     std::function<void(uint32_t)> callback) const;
   void forEachElementInCPtSet(

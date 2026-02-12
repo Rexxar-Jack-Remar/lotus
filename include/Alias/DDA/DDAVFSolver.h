@@ -42,7 +42,7 @@ namespace analysis {
 /// - unionDDAPts(target, source), unionDDAPts(dpm, pts), getDPImWithOldCond()
 /// - resolveFunPtr(), isTopLevelPtrStmt()
 /// - hasLoadDpm(), getLoadDpm(), getLoadCVar(), isMustAlias(), propagateViaObj()
-/// - forEachObjId(), forEachElementInCPtSet(), getEmptyCPtSetRef()
+/// - forEachElementInCPtSet(), getEmptyCPtSetRef()
 /// - setDpmLocVar(), addLoadDpmAndCVar(), connectIndirectCallees(), onIndirectEdgesAdded()
 /// - insertOutOfBudgetDpm(), isOutOfBudgetDpm()
 template <typename CVar, typename CPtSet, typename DPIm, typename Derived>
@@ -128,10 +128,11 @@ protected:
         break;
       CPtSet loadPts;
       startNewPTCompFromLoadSrc(loadPts, dpm);
-      derived().forEachObjId(loadPts, [&](uint32_t objId) {
-        DPIm objDpm = derived().getDPImWithOldCond(dpm, objId, load);
-        backtraceAlongIndirectVF(pts, objDpm, CPtSet{});
-      });
+      derived().forEachElementInCPtSet(
+          loadPts, [&](const CVar &obj, uint32_t /*objId*/) {
+            DPIm objDpm = derived().getDPImWithOldCond(dpm, obj, load);
+            backtraceAlongIndirectVF(pts, objDpm, CPtSet{});
+          });
       break;
     }
     case SVFGK::Store: {
@@ -152,11 +153,10 @@ protected:
       }
       CPtSet storePts;
       startNewPTCompFromStoreDst(storePts, dpm);
-      const bool storePtsSingleton = (storePts.size() == 1);
       derived().forEachElementInCPtSet(
-          storePts, [&](const CVar &storeObj, uint32_t objId) {
-            if (derived().propagateViaObj(storeObj, dpm, storePtsSingleton)) {
-              DPIm objDpm = derived().getDPImWithOldCond(dpm, objId, store);
+          storePts, [&](const CVar &storeObj, uint32_t /*objId*/) {
+            if (derived().propagateViaObj(storeObj, derived().getLoadCVar(dpm))) {
+              DPIm objDpm = derived().getDPImWithOldCond(dpm, storeObj, store);
               backtraceToStoreSrc(pts, objDpm);
               if (derived().isStrongUpdate(storePts, store)) {
                 if (ddaStat_) {
@@ -285,16 +285,12 @@ protected:
     SVFG *svfg = derived().getSVFG();
     if (!svfg)
       return;
-    SVFGEdge *edge =
-        svfg->getIntraVFGEdge(storeSrc, store, SVFGEdgeK::IntraDirect);
-    if (!edge)
-      return;
-    uint32_t ptrNodeId = storeSrc->getId();
-    SVFGNodeBS objIds = derived().getObjectIdsForValue(valueOperand);
-    if (objIds.size() == 1)
-      ptrNodeId = *objIds.begin();
-    backwardPropDpm(pts, ptrNodeId, oldDpm, edge);
-  }
+	    SVFGEdge *edge =
+	        svfg->getIntraVFGEdge(storeSrc, store, SVFGEdgeK::IntraDirect);
+	    if (!edge)
+	      return;
+	    backwardPropDpm(pts, storeSrc->getId(), oldDpm, edge);
+	  }
 
   void reCompute(const DPIm &dpm) {
     const SVFGNode *node = dpm.getLoc();

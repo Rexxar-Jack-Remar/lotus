@@ -1,5 +1,4 @@
 #include "Checker/Pulse/PulseChecker.h"
-
 #include "Checker/Pulse/PulseCheckerUtils.h"
 #include "Checker/Pulse/PulseLogger.h"
 #include "Checker/Pulse/PulseSubstitution.h"
@@ -179,9 +178,15 @@ void PulseChecker::createSummary(
         if (!ret_v || !ret_v->getType()->isPointerTy())
           continue;
         const auto *ret_addr = astate.getPostStack().find(ret_v);
-        if (!ret_addr)
-          continue;
-        return astate.getCanonical(ret_addr->addr);
+        if (ret_addr) {
+          return astate.getCanonical(ret_addr->addr);
+        }
+        // Handle null constants: they are not in post_stack but have an AV in
+        // factory
+        if (factory_.has(ret_v)) {
+          AbstractValue av = factory_.get(ret_v);
+          return astate.getCanonical(av);
+        }
       }
     }
     return llvm::None;
@@ -209,8 +214,9 @@ void PulseChecker::createSummary(
     SummaryEntry::LatentIssueSummary latent;
     latent.diagnostic = issue->getDiagnostic();
     latent.address = astate->getCanonical(issue->getAddress());
-    // Avoid cloning trace/calling_context when large to prevent std::length_error
-    // and crashes from huge or corrupt vectors (e.g. in write_gauge_info_item).
+    // Avoid cloning trace/calling_context when large to prevent
+    // std::length_error and crashes from huge or corrupt vectors (e.g. in
+    // write_gauge_info_item).
     const Trace &issue_trace = issue->getTrace();
     const auto &cc = issue->getCallingContext();
     constexpr size_t kMaxTraceEventsForSummary = 1024;
@@ -239,9 +245,22 @@ void PulseChecker::createSummary(
   const unsigned max_normal_entries =
       kMaxDisjuncts > latent_added ? (kMaxDisjuncts - latent_added) : 0u;
 
+  llvm::errs() << "[Pulse DEBUG] Processing " << exit_states.size()
+               << " exit states for " << F->getName().str() << "\n";
   for (const auto &exit_state : exit_states) {
-    if (exit_state.isStopped())
+    llvm::errs() << "[Pulse DEBUG] Exit state: stopped="
+                 << exit_state.isStopped()
+                 << ", exit_program=" << exit_state.isExitProgram()
+                 << ", abort_program=" << exit_state.isAbortProgram()
+                 << ", latent_abort=" << exit_state.isLatentAbortProgram()
+                 << ", has_astate=" << (exit_state.getAstate() != nullptr)
+                 << "\n";
+    // Skip abort/latent states (bugs), but process normal ExitProgram
+    if (exit_state.isAbortProgram() || exit_state.isLatentAbortProgram() ||
+        exit_state.isLatentInvalidAccess() ||
+        exit_state.isLatentSpecializedTypeIssue()) {
       continue;
+    }
     const AbductiveDomain *astate = exit_state.getAstate();
     if (!astate)
       continue;
@@ -249,6 +268,14 @@ void PulseChecker::createSummary(
     has_any_entry = true;
     const PulseFormula formula = astate->getPathFormula().clone();
     const llvm::Optional<AbstractValue> ret_val = computeReturnValue(*astate);
+
+    // Debug: check if return value has Null attribute
+    if (ret_val) {
+      AbstractValue canon_ret = astate->getCanonical(*ret_val);
+      bool has_null = astate->getPostAttrs().has(canon_ret, Attribute::Null);
+      llvm::errs() << "[Pulse DEBUG] Return value has Null attribute: "
+                   << has_null << "\n";
+    }
 
     const unsigned normal_entries =
         static_cast<unsigned>(summary.getPrePostList().size()) - latent_added;
@@ -268,8 +295,11 @@ void PulseChecker::createSummary(
     break;
   }
 
-  if (!has_any_entry)
+  if (!has_any_entry) {
+    llvm::errs() << "[Pulse DEBUG] No entries for summary of "
+                 << F->getName().str() << "\n";
     return;
+  }
 
   // Store formal parameter mappings
   for (const auto &Arg : F->args()) {
@@ -277,6 +307,8 @@ void PulseChecker::createSummary(
     summary.setFormalAV(&Arg, formal_av);
   }
 
+  llvm::errs() << "[Pulse DEBUG] Storing summary for " << F->getName().str()
+               << " with " << summary.getPrePostList().size() << " entries\n";
   summary_manager_.storeSummary(F, std::move(summary));
 }
 
@@ -478,13 +510,13 @@ std::vector<ExecutionDomain> PulseChecker::applySummary(
       for (const auto &BB : *callee) {
         if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
           if (RI->getNumOperands() > 0) {
-                  const llvm::Value *ret_val = RI->getReturnValue();
-                  if (ret_val && ret_val->getType()->isPointerTy()) {
-                    if (detail::isNullPointerConstantValue(ret_val)) {
-                      null_constant_ret = ret_val;
-                      break;
-                    }
-                  }
+            const llvm::Value *ret_val = RI->getReturnValue();
+            if (ret_val && ret_val->getType()->isPointerTy()) {
+              if (detail::isNullPointerConstantValue(ret_val)) {
+                null_constant_ret = ret_val;
+                break;
+              }
+            }
           }
         }
       }

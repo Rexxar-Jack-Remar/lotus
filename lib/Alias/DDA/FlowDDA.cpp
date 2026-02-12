@@ -174,10 +174,8 @@ void FlowDDA::forEachElementInCPtSet(
     callback(id, id);
 }
 
-bool FlowDDA::propagateViaObj(uint32_t storeObj, const LocDPItem &dpm,
-                              bool singleton) const {
-  (void)singleton;
-  return storeObj == getLoadCVar(dpm);
+bool FlowDDA::propagateViaObj(uint32_t storeObj, uint32_t loadObj) const {
+  return storeObj == loadObj;
 }
 
 void FlowDDA::resolveFunPtr(const LocDPItem &dpm) {

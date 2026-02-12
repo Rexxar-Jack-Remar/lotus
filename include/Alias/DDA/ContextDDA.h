@@ -16,8 +16,8 @@
 #pragma once
 
 #include "Alias/DDA/CxtDPItem.h"
-#include "Alias/DDA/DDAVFSolver.h"
 #include "Alias/DDA/DDAClient.h"
+#include "Alias/DDA/DDAVFSolver.h"
 #include "Alias/DDA/FlowDDA.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGEdge.h"
@@ -106,19 +106,18 @@ private:
   void addDDAPts(CxtPtSet &pts, uint32_t var);
   void unionDDAPts(CxtPtSet &target, const CxtPtSet &source);
   bool unionDDAPts(const CxtLocDPItem &dpm, const CxtPtSet &pts);
-  CxtLocDPItem getDPImWithOldCond(const CxtLocDPItem &oldDpm, uint32_t objId,
+  CxtLocDPItem getDPImWithOldCond(const CxtLocDPItem &oldDpm, const CxtVar &var,
                                   const SVFGNode *loc) const;
   void resolveFunPtr(const CxtLocDPItem &dpm);
   bool isTopLevelPtrStmt(const SVFGNode *stmt) const;
   void setDpmLocVar(CxtLocDPItem &dpm, SVFGNode *src, uint32_t ptrNodeId);
   void addLoadDpmAndCVar(const CxtLocDPItem &dpm, const CxtLocDPItem &loadDpm,
-                         uint32_t loadCVarObjId);
+                         const CxtVar &loadCVar);
   bool hasLoadDpm(const CxtLocDPItem &dpm) const;
   CxtLocDPItem getLoadDpm(const CxtLocDPItem &dpm) const;
-  uint32_t getLoadCVar(const CxtLocDPItem &dpm) const;
+  CxtVar getLoadCVar(const CxtLocDPItem &dpm) const;
   bool isMustAlias(const CxtLocDPItem &loadDpm, const CxtLocDPItem &storeDpm) const;
-  bool propagateViaObj(const CxtVar &storeObj, const CxtLocDPItem &dpm,
-                       bool singleton) const;
+  bool propagateViaObj(const CxtVar &storeObj, const CxtVar &loadObj) const;
   void forEachObjId(const CxtPtSet &pts,
                     std::function<void(uint32_t)> callback) const;
   void forEachElementInCPtSet(
@@ -127,16 +126,19 @@ private:
   const CxtPtSet &getEmptyCPtSetRef() const;
   void connectIndirectCallees(const CxtLocDPItem &dpm, const CxtPtSet &funPts,
                               std::vector<SVFGEdge *> &newEdges);
-  void onIndirectEdgesAdded() {}
+  void onIndirectEdgesAdded() {
+    buildRecursionInfo();
+    initInsensitiveEdges();
+  }
   void resetQueryLoadMaps();
   void insertOutOfBudgetDpm(const CxtLocDPItem &dpm);
   bool isOutOfBudgetDpm(const CxtLocDPItem &dpm) const;
-  uint32_t getMaxBudget() const { return kDefaultMaxBudget; }
+  uint32_t getMaxBudget() const { return DPItem::getMaxBudget(); }
 
   FlowDDA *flowDDA_;
   DDAClient *client_;
   std::map<CxtLocDPItem, CxtLocDPItem> dpmToLoadDpmMap_;
-  std::map<CxtLocDPItem, uint32_t> dpmToLoadCVarMap_;
+  std::map<CxtLocDPItem, CxtVar> dpmToLoadCVarMap_;
   static constexpr uint32_t kDefaultMaxBudget = 100000u;
   std::set<CxtLocDPItem> outOfBudgetDpms_;
   std::unordered_set<uint32_t> recursiveCallSiteIds_;

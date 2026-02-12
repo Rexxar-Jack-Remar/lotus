@@ -1,5 +1,4 @@
 #include "Checker/Pulse/PulseChecker.h"
-
 #include "Checker/Pulse/PulseCheckerUtils.h"
 #include "Checker/Pulse/PulseDiagnostic.h"
 #include "Checker/Pulse/PulseFormula.h"
@@ -45,8 +44,8 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
     return f.isConsistent() && !f.isUnsat();
   };
 
-  auto pruneStates = [&](std::vector<ExecutionDomain> states)
-      -> std::vector<ExecutionDomain> {
+  auto pruneStates =
+      [&](std::vector<ExecutionDomain> states) -> std::vector<ExecutionDomain> {
     std::vector<ExecutionDomain> out;
     out.reserve(states.size());
     for (auto &st : states) {
@@ -100,7 +99,8 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
                 truth = false;
             }
           }
-        } else if (op0->getType()->isPointerTy() && op1->getType()->isPointerTy()) {
+        } else if (op0->getType()->isPointerTy() &&
+                   op1->getType()->isPointerTy()) {
           auto v0_opt = ops_.eval(*astate, op0, I, pred);
           auto v1_opt = ops_.eval(*astate, op1, I, pred);
           if (v0_opt && v1_opt) {
@@ -261,7 +261,7 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
         }
         if (!op.empty()) {
           (void)astate->getPathFormula().addArithmeticOperation(res_av, lhs_av,
-                                                               rhs_av, op);
+                                                                rhs_av, op);
         }
       }
     }
@@ -270,7 +270,7 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
 
   // Handle comparisons for path conditions. Skip when used as branch condition:
   // we fork and apply per-branch in applyBranchCondition.
-    if (llvm::isa<llvm::ICmpInst>(I) || llvm::isa<llvm::FCmpInst>(I)) {
+  if (llvm::isa<llvm::ICmpInst>(I) || llvm::isa<llvm::FCmpInst>(I)) {
     const llvm::Instruction *next = I->getNextNode();
     if (auto *BI = next ? llvm::dyn_cast<llvm::BranchInst>(
                               const_cast<llvm::Instruction *>(next))
@@ -313,15 +313,15 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
     AbstractValue canon_var = astate->getCanonical(stack_var);
 
     // Check if variable is uninitialized (only for reads, not writes)
-	    if (astate->getPostAttrs().has(canon_var, Attribute::Uninitialized)) {
-	      Trace trace;
-	      trace.addEvent(LI, "Load from uninitialized variable");
-	      if (LatentIssue::isManifest(OperationResult::UninitializedRead, *astate,
-	                                  canon_var)) {
-	        reportBug(OperationResult::UninitializedRead, LI, canon_var, trace,
-	                  astate);
-	        return ExecutionDomain::abortProgram(
-	            std::make_unique<AbductiveDomain>(astate->clone()),
+    if (astate->getPostAttrs().has(canon_var, Attribute::Uninitialized)) {
+      Trace trace;
+      trace.addEvent(LI, "Load from uninitialized variable");
+      if (LatentIssue::isManifest(OperationResult::UninitializedRead, *astate,
+                                  canon_var)) {
+        reportBug(OperationResult::UninitializedRead, LI, canon_var, trace,
+                  astate);
+        return ExecutionDomain::abortProgram(
+            std::make_unique<AbductiveDomain>(astate->clone()),
             OperationResult::UninitializedRead, std::move(trace));
       } else {
         latent_issues_.emplace_back(OperationResult::UninitializedRead,
@@ -336,6 +336,54 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
 
     // Variable is initialized - get value from stack
     if (auto *stack_addr = astate->getPostStack().find(AI)) {
+      AbstractValue loaded_canon = astate->getCanonical(stack_addr->addr);
+
+      // Check if loaded value is invalid (use-after-free)
+      if (astate->getPostAttrs().has(loaded_canon, Attribute::Invalid)) {
+        Trace trace = Trace::fromValueHistory(stack_addr->history);
+        trace.addEvent(LI, "Load of freed pointer");
+        if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
+                                    loaded_canon)) {
+          reportBug(OperationResult::UseAfterFree, LI, loaded_canon, trace,
+                    astate);
+          return ExecutionDomain::abortProgram(
+              std::make_unique<AbductiveDomain>(astate->clone()),
+              OperationResult::UseAfterFree, std::move(trace));
+        } else {
+          latent_issues_.emplace_back(
+              OperationResult::UseAfterFree,
+              LatentIssue::issueKindFromResult(OperationResult::UseAfterFree),
+              loaded_canon, LI, std::move(trace));
+          return ExecutionDomain::latentAbortProgram(
+              std::make_unique<AbductiveDomain>(astate->clone()),
+              &latent_issues_.back());
+        }
+      }
+
+      // Check if loaded value is null (for pointer types)
+      if (LI->getType()->isPointerTy()) {
+        if (astate->getPostAttrs().has(loaded_canon, Attribute::Null)) {
+          Trace trace = Trace::fromValueHistory(stack_addr->history);
+          trace.addEvent(LI, "Load of null pointer");
+          if (LatentIssue::isManifest(OperationResult::NullDereference, *astate,
+                                      loaded_canon)) {
+            reportBug(OperationResult::NullDereference, LI, loaded_canon, trace,
+                      astate);
+            return ExecutionDomain::abortProgram(
+                std::make_unique<AbductiveDomain>(astate->clone()),
+                OperationResult::NullDereference, std::move(trace));
+          } else {
+            latent_issues_.emplace_back(OperationResult::NullDereference,
+                                        LatentIssue::issueKindFromResult(
+                                            OperationResult::NullDereference),
+                                        loaded_canon, LI, std::move(trace));
+            return ExecutionDomain::latentAbortProgram(
+                std::make_unique<AbductiveDomain>(astate->clone()),
+                &latent_issues_.back());
+          }
+        }
+      }
+
       astate->getPostStack().add(LI, *stack_addr);
     } else {
       // Variable not in stack yet - create fresh value (shouldn't happen for
@@ -355,14 +403,14 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
 
     // PRIORITY ORDER: Invalid > Null > Uninitialized
     // Check Invalid FIRST (UseAfterFree is most severe)
-	    if (astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid)) {
-	      Trace trace = Trace::fromValueHistory(stack_addr->history);
-	      trace.addEvent(LI, "Load of invalid pointer");
-	      if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
-	                                  loaded_ptr)) {
-	        reportBug(OperationResult::UseAfterFree, LI, loaded_ptr, trace, astate);
-	        return ExecutionDomain::abortProgram(
-	            std::make_unique<AbductiveDomain>(astate->clone()),
+    if (astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid)) {
+      Trace trace = Trace::fromValueHistory(stack_addr->history);
+      trace.addEvent(LI, "Load of invalid pointer");
+      if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
+                                  loaded_ptr)) {
+        reportBug(OperationResult::UseAfterFree, LI, loaded_ptr, trace, astate);
+        return ExecutionDomain::abortProgram(
+            std::make_unique<AbductiveDomain>(astate->clone()),
             OperationResult::UseAfterFree, std::move(trace));
       } else {
         latent_issues_.emplace_back(
@@ -393,14 +441,14 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
           loaded_addr.history = stack_addr->history;
           is_null_source = PulseOperations::isNullConstantSource(loaded_addr);
         }
-	        if (is_null_source) {
-	          Trace trace = Trace::fromValueHistory(stack_addr->history);
-	          trace.addEvent(LI, "Load of null pointer");
-	          if (LatentIssue::isManifest(OperationResult::NullDereference, *astate,
-	                                      loaded_ptr)) {
-	            reportBug(OperationResult::NullDereference, LI, loaded_ptr, trace,
-	                      astate);
-	            return ExecutionDomain::abortProgram(
+        if (is_null_source) {
+          Trace trace = Trace::fromValueHistory(stack_addr->history);
+          trace.addEvent(LI, "Load of null pointer");
+          if (LatentIssue::isManifest(OperationResult::NullDereference, *astate,
+                                      loaded_ptr)) {
+            reportBug(OperationResult::NullDereference, LI, loaded_ptr, trace,
+                      astate);
+            return ExecutionDomain::abortProgram(
                 std::make_unique<AbductiveDomain>(astate->clone()),
                 OperationResult::NullDereference, std::move(trace));
           } else {
@@ -466,14 +514,14 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
   // PRIORITY: Check Invalid FIRST before dereferencing (UseAfterFree >
   // NullDereference)
   AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
-	  if (astate->getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
-	    Trace trace = Trace::fromValueHistory(ptr_opt->history);
-	    trace.addEvent(LI, "Dereference of invalid pointer");
-	    if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
-	                                canon_ptr)) {
-	      reportBug(OperationResult::UseAfterFree, LI, canon_ptr, trace, astate);
-	      return ExecutionDomain::abortProgram(
-	          std::make_unique<AbductiveDomain>(astate->clone()),
+  if (astate->getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
+    Trace trace = Trace::fromValueHistory(ptr_opt->history);
+    trace.addEvent(LI, "Dereference of invalid pointer");
+    if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
+                                canon_ptr)) {
+      reportBug(OperationResult::UseAfterFree, LI, canon_ptr, trace, astate);
+      return ExecutionDomain::abortProgram(
+          std::make_unique<AbductiveDomain>(astate->clone()),
           OperationResult::UseAfterFree, std::move(trace));
     } else {
       latent_issues_.emplace_back(
@@ -490,15 +538,15 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
   OperationResult result = read_result.first;
   llvm::Optional<Address> value_opt = read_result.second;
 
-	  if (result != OperationResult::Success) {
-	    Trace trace = Trace::fromValueHistory(ptr_opt->history);
-	    trace.addEvent(LI, "Load from invalid address");
+  if (result != OperationResult::Success) {
+    Trace trace = Trace::fromValueHistory(ptr_opt->history);
+    trace.addEvent(LI, "Load from invalid address");
 
-	    if (LatentIssue::isManifest(result, *astate,
-	                                astate->getCanonical(ptr_opt->addr))) {
-	      // Manifest error - report immediately
-	      reportBug(result, LI, ptr_opt->addr, trace, astate);
-	      return ExecutionDomain::abortProgram(
+    if (LatentIssue::isManifest(result, *astate,
+                                astate->getCanonical(ptr_opt->addr))) {
+      // Manifest error - report immediately
+      reportBug(result, LI, ptr_opt->addr, trace, astate);
+      return ExecutionDomain::abortProgram(
           std::make_unique<AbductiveDomain>(astate->clone()), result,
           std::move(trace));
     } else {
@@ -532,8 +580,8 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
 
   // Sound incorrectness: report stack address escape only when provable.
   // If a stack-derived pointer is stored into heap/global memory, it escapes.
-  auto maybeReportStackEscape = [&](const Address& stored_value,
-                                    const Address& dest_ptr) {
+  auto maybeReportStackEscape = [&](const Address &stored_value,
+                                    const Address &dest_ptr) {
     if (!SI->getValueOperand()->getType()->isPointerTy())
       return;
     AbstractValue canon_value = astate->getCanonical(stored_value.addr);
@@ -622,6 +670,33 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
   if (!ptr_opt)
     return exec_state;
 
+  // Fix for false positives: when storing to a GEP of a stack array,
+  // also clear Uninitialized from the GEP address and the base alloca.
+  // This prevents false positives when the array is initialized
+  // element-by-element.
+  if (auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(ptr_operand)) {
+    const llvm::Value *base = GEP->getPointerOperand();
+    // Walk through any bitcasts to find the underlying alloca
+    while (base) {
+      if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(base)) {
+        // Found the base alloca - clear Uninitialized attribute
+        AbstractValue base_av = factory_.getOrCreate(AI);
+        AbstractValue base_canon = astate->getCanonical(base_av);
+        astate->getPostAttrs().remove(base_canon, Attribute::Uninitialized);
+        break;
+      }
+      if (auto *BC = llvm::dyn_cast<llvm::BitCastInst>(base)) {
+        base = BC->getOperand(0);
+      } else {
+        break;
+      }
+    }
+    // Also clear Uninitialized from the GEP address itself
+    // (the GEP result may have inherited Uninitialized from the base)
+    AbstractValue gep_canon = astate->getCanonical(ptr_opt->addr);
+    astate->getPostAttrs().remove(gep_canon, Attribute::Uninitialized);
+  }
+
   maybeReportStackEscape(*value_opt, *ptr_opt);
 
   auto res = ops_.writeDeref(*astate, *ptr_opt, *value_opt, SI);
@@ -629,11 +704,11 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
     Trace trace = Trace::fromValueHistory(ptr_opt->history);
     trace.addEvent(SI, "Store to invalid address");
 
-	    if (LatentIssue::isManifest(res, *astate,
-	                                astate->getCanonical(ptr_opt->addr))) {
-	      // Manifest error - report immediately
-	      reportBug(res, SI, ptr_opt->addr, trace, astate);
-	      return ExecutionDomain::abortProgram(
+    if (LatentIssue::isManifest(res, *astate,
+                                astate->getCanonical(ptr_opt->addr))) {
+      // Manifest error - report immediately
+      reportBug(res, SI, ptr_opt->addr, trace, astate);
+      return ExecutionDomain::abortProgram(
           std::make_unique<AbductiveDomain>(astate->clone()), res,
           std::move(trace));
     } else {
@@ -661,8 +736,8 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
   }
 
   // Handle LLVM lifetime intrinsics: model end as definite invalidation.
-  if (auto *II =
-          llvm::dyn_cast<llvm::IntrinsicInst>(const_cast<llvm::CallInst *>(CI))) {
+  if (auto *II = llvm::dyn_cast<llvm::IntrinsicInst>(
+          const_cast<llvm::CallInst *>(CI))) {
     const auto iid = II->getIntrinsicID();
     if (iid == llvm::Intrinsic::lifetime_start ||
         iid == llvm::Intrinsic::lifetime_end) {
@@ -717,6 +792,24 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
           ops_.writeDeref(*a, *dest_opt, *val_opt, CI);
         }
         a->getPostStack().add(CI, *dest_opt);
+        // Fix for false positives: memset to a stack array initializes it.
+        auto dest_val = CI->getArgOperand(0);
+        while (dest_val) {
+          if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(dest_val)) {
+            AbstractValue base_av = factory_.getOrCreate(AI);
+            AbstractValue base_canon = a->getCanonical(base_av);
+            a->getPostAttrs().remove(base_canon, Attribute::Uninitialized);
+            break;
+          }
+          if (auto *BC = llvm::dyn_cast<llvm::BitCastInst>(dest_val)) {
+            dest_val = BC->getOperand(0);
+          } else if (auto *GEP =
+                         llvm::dyn_cast<llvm::GetElementPtrInst>(dest_val)) {
+            dest_val = GEP->getPointerOperand();
+          } else {
+            break;
+          }
+        }
         return {exec_state};
       }
 
@@ -731,6 +824,25 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
           AbstractValue dummy = factory_.createFresh(CI);
           ops_.writeDeref(*a, *dest_opt, Address(dummy), CI);
           a->getPostStack().add(CI, *dest_opt);
+        }
+      }
+      // Fix for false positives: memcpy to a stack array initializes it,
+      // so clear the Uninitialized attribute from the base alloca.
+      auto dest_val = CI->getArgOperand(0);
+      while (dest_val) {
+        if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(dest_val)) {
+          AbstractValue base_av = factory_.getOrCreate(AI);
+          AbstractValue base_canon = a->getCanonical(base_av);
+          a->getPostAttrs().remove(base_canon, Attribute::Uninitialized);
+          break;
+        }
+        if (auto *BC = llvm::dyn_cast<llvm::BitCastInst>(dest_val)) {
+          dest_val = BC->getOperand(0);
+        } else if (auto *GEP =
+                       llvm::dyn_cast<llvm::GetElementPtrInst>(dest_val)) {
+          dest_val = GEP->getPointerOperand();
+        } else {
+          break;
         }
       }
       return {exec_state};
@@ -806,9 +918,8 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
       auto *s = llvm::dyn_cast<llvm::ConstantInt>(CI->getArgOperand(1));
       if (n && s && !n->isNegative() && !s->isNegative() &&
           n->getBitWidth() <= 64 && s->getBitWidth() <= 64) {
-        __int128 prod =
-            static_cast<__int128>(n->getZExtValue()) *
-            static_cast<__int128>(s->getZExtValue());
+        __int128 prod = static_cast<__int128>(n->getZExtValue()) *
+                        static_cast<__int128>(s->getZExtValue());
         if (prod >= 0 && prod <= std::numeric_limits<uint64_t>::max()) {
           astate->setAllocationSize(av, static_cast<uint64_t>(prod));
         }
@@ -875,12 +986,18 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
 
   // Try to use summary if available
   if (summary_manager_.hasSummary(F)) {
+    llvm::errs() << "[Pulse DEBUG] Applying summary for " << F->getName().str()
+                 << "\n";
     PulseLogger::debug("Applying summary for " + F->getName().str());
     PulseLogger::incrementCounter("summaries.applied");
     auto summary_results = applySummaryImproved(F, exec_state, CI, pred);
     if (!summary_results.empty()) {
+      llvm::errs() << "[Pulse DEBUG] Summary applied successfully for "
+                   << F->getName().str() << "\n";
       return summary_results;
     }
+    llvm::errs() << "[Pulse DEBUG] Summary application returned empty for "
+                 << F->getName().str() << "\n";
     // Fall back to legacy summary application if the improved engine cannot
     // apply any entry.
     auto legacy_results = applySummary(F, exec_state, CI, pred);
@@ -944,7 +1061,8 @@ ExecutionDomain PulseChecker::handleReturn(const llvm::ReturnInst *RI,
           trace.addEvent(RI, "Returning address derived from stack allocation");
           auto diag = std::make_unique<StackVariableAddressEscape>(
               RI, canon_ret, "Stack address escapes via return",
-              "Do not return addresses of local variables; allocate on heap or return by value.",
+              "Do not return addresses of local variables; allocate on heap or "
+              "return by value.",
               std::move(trace));
           DiagnosticManager::getInstance().report(std::move(diag));
         }
@@ -1162,8 +1280,8 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
 
     llvm::ICmpInst::Predicate eff_pred =
         is_then ? cmp_pred : detail::invertIcmpPred(cmp_pred);
-    if (!detail::applyIntegerIcmpConstraint(astate->getPathFormula(), eff_pred, av0,
-                                    av1)) {
+    if (!detail::applyIntegerIcmpConstraint(astate->getPathFormula(), eff_pred,
+                                            av0, av1)) {
       return llvm::None;
     }
     return llvm::Optional<ExecutionDomain>(std::move(forked));

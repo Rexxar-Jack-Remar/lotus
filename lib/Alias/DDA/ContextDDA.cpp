@@ -449,13 +449,13 @@ SVFGNodeBS ContextDDA::getObjectIdsForValue(const llvm::Value *v) const {
 
 void ContextDDA::addLoadDpmAndCVar(const CxtLocDPItem &dpm,
                                    const CxtLocDPItem &loadDpm,
-                                   uint32_t loadCVarObjId) {
+                                   const CxtVar &loadCVar) {
   auto it = dpmToLoadDpmMap_.find(dpm);
   if (it != dpmToLoadDpmMap_.end())
     it->second = loadDpm;
   else
     dpmToLoadDpmMap_.emplace(dpm, loadDpm);
-  dpmToLoadCVarMap_[dpm] = loadCVarObjId;
+  dpmToLoadCVarMap_[dpm] = loadCVar;
 }
 
 bool ContextDDA::hasLoadDpm(const CxtLocDPItem &dpm) const {
@@ -472,14 +472,14 @@ CxtLocDPItem ContextDDA::getLoadDpm(const CxtLocDPItem &dpm) const {
   return dpm;
 }
 
-uint32_t ContextDDA::getLoadCVar(const CxtLocDPItem &dpm) const {
+CxtVar ContextDDA::getLoadCVar(const CxtLocDPItem &dpm) const {
   auto it = dpmToLoadCVarMap_.find(dpm);
   if (it != dpmToLoadCVarMap_.end())
     return it->second;
   // SVF asserts here ("not found??"). Log a warning for debugging.
   llvm::errs() << "ContextDDA::getLoadCVar: loadCVar not found for dpm (cur="
-               << dpm.getCurNodeID() << "); returning curNodeID as fallback\n";
-  return dpm.getCurNodeID();
+               << dpm.getCurNodeID() << "); returning condVar as fallback\n";
+  return dpm.getCondVar();
 }
 
 bool ContextDDA::isMustAlias(const CxtLocDPItem &loadDpm,
@@ -507,11 +507,28 @@ bool ContextDDA::isCondCompatible(const ContextCond &cxt1,
 }
 
 bool ContextDDA::propagateViaObj(const CxtVar &storeObj,
-                                   const CxtLocDPItem &dpm,
-                                   bool singleton) const {
-  if (storeObj.get_id() != getLoadCVar(dpm))
+                                 const CxtVar &loadObj) const {
+  if (storeObj.get_id() != loadObj.get_id())
     return false;
-  return isCondCompatible(storeObj.get_cond(), dpm.getCond(), singleton);
+  const uint32_t objId = storeObj.get_id();
+  SVFG *svfg = getSVFG();
+  // Conservative: if we lack object metadata, treat as singleton (compatible).
+  bool singleton = true;
+  if (svfg) {
+    // SVF: distinguish context-sensitive heap allocations and stack objects in
+    // recursive functions; otherwise treat as singleton objects.
+    if (svfg->isHeapObject(objId) || svfg->isUnknownObject(objId)) {
+      singleton = false;
+    } else if (svfg->isStackObject(objId)) {
+      const Value *v = svfg->getObjectValue(objId);
+      if (const Instruction *inst = dyn_cast_or_null<Instruction>(v)) {
+        const Function *f = inst->getFunction();
+        if (flowDDA_ && flowDDA_->isRecursiveFunction(f))
+          singleton = false;
+      }
+    }
+  }
+  return isCondCompatible(storeObj.get_cond(), loadObj.get_cond(), singleton);
 }
 
 void ContextDDA::initInsensitiveEdges() {
@@ -608,16 +625,16 @@ void ContextDDA::resolveFunPtr(const CxtLocDPItem &dpm) {
 }
 
 CxtLocDPItem ContextDDA::getDPImWithOldCond(const CxtLocDPItem &oldDpm,
-                                             uint32_t objId,
-                                             const SVFGNode *loc) const {
-  CxtVar var(oldDpm.getCond(), objId);
-  CxtLocDPItem dpm(var, loc);
+                                            const CxtVar &var,
+                                            const SVFGNode *loc) const {
+  CxtLocDPItem dpm(oldDpm);
+  dpm.setLocVar(loc, var.get_id());
   // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load nodes.
   ContextDDA *nonConstThis = const_cast<ContextDDA *>(this);
   if (llvm::isa<StoreSVFGNode>(loc) || llvm::isa<StoreChiSVFGNode>(loc))
-    nonConstThis->addLoadDpmAndCVar(dpm, getLoadDpm(oldDpm), objId);
+    nonConstThis->addLoadDpmAndCVar(dpm, getLoadDpm(oldDpm), var);
   if (llvm::isa<LoadSVFGNode>(loc) || llvm::isa<LoadMuSVFGNode>(loc))
-    nonConstThis->addLoadDpmAndCVar(dpm, oldDpm, objId);
+    nonConstThis->addLoadDpmAndCVar(dpm, oldDpm, var);
   return dpm;
 }
 
