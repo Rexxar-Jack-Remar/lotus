@@ -48,7 +48,7 @@ public:
         std::string description;            // Optional extra description
         
         Event(EventKind k, const llvm::Instruction* loc, const llvm::Function* func = nullptr, std::string desc = "")
-            : kind(k), location(loc), function(func), related_value(nullptr), description(desc) {}
+            : kind(k), location(loc), function(func), related_value(nullptr), description(std::move(desc)) {}
     };
 
 private:
@@ -71,7 +71,7 @@ public:
     ValueHistory& operator=(ValueHistory&&) = default;
     
     void addEvent(EventKind kind, const llvm::Instruction* loc, const llvm::Function* func = nullptr, std::string desc = "") {
-        Event e(kind, loc, func, desc);
+        Event e(kind, loc, func, std::move(desc));
         head_ = std::make_shared<Node>(std::move(e), head_);
     }
     
@@ -118,6 +118,7 @@ public:
         TraceEvent& operator=(const TraceEvent&) = default;
         TraceEvent(TraceEvent&&) = default;
         TraceEvent& operator=(TraceEvent&&) = default;
+        ~TraceEvent() = default;
     };
     
 private:
@@ -148,7 +149,10 @@ public:
                 continue;
             std::string desc = i->getOpcodeName();
             if (const llvm::Function* f = i->getFunction()) {
-                desc = f->getName().str() + ": " + desc;
+                std::string prefix = f->getName().str();
+                prefix += ": ";
+                prefix += desc;
+                desc = std::move(prefix);
             }
             t.addEvent(i, desc);
         }
@@ -172,7 +176,10 @@ public:
                 default: desc = "Event"; break;
             }
             if (event.function) {
-                desc = event.function->getName().str() + ": " + desc;
+                std::string prefix = event.function->getName().str();
+                prefix += ": ";
+                prefix += desc;
+                desc = std::move(prefix);
             }
             t.addEvent(event.location, desc);
         }
@@ -211,7 +218,10 @@ public:
                     if (is_null_ptr_const(stored_value)) {
                         std::string desc = "Null constant stored";
                         if (event.function) {
-                            desc = event.function->getName().str() + ": " + desc;
+                            std::string prefix = event.function->getName().str();
+                            prefix += ": ";
+                            prefix += desc;
+                            desc = std::move(prefix);
                         }
                         t.addEvent(event.location, desc);
                     }

@@ -88,45 +88,20 @@ std::vector<ConcurrencyBugReport> ConditionVariableChecker::checkConditionVariab
                         continue;
                     }
 
-                    // 2. Check if the mutex is actually held at the point of wait
+                    // 2. Check if the mutex is actually held at the point of wait.
+                    // Use mayHoldLock (alias-aware) instead of pointer equality - the mutex
+                    // Value* from cond_wait may differ from the Value* stored in LockSet.
+                    // Only report when we're confident the lock is NOT held (avoids false
+                    // positives on proper usage patterns like producer-consumer).
                     if (m_locksetAnalysis) {
-                        LockSet mustHeld = m_locksetAnalysis->getMustLockSetAt(&inst);
-                        bool isHeld = false;
-                        
-                        for (const auto *heldLock : mustHeld) {
-                            if (heldLock == mutex) {
-                                isHeld = true;
-                                break;
-                            }
-                        }
-
-                        if (!isHeld) {
-                            LockSet mayHeld = m_locksetAnalysis->getMayLockSetAt(&inst);
-                            bool mayBeHeld = false;
-                            for (const auto *heldLock : mayHeld) {
-                                if (heldLock == mutex) {
-                                    mayBeHeld = true;
-                                    break;
-                                }
-                            }
-
-                            if (!mayBeHeld) {
-                                ConcurrencyBugReport report(
-                                    ConcurrencyBugType::COND_VAR_MISUSE,
-                                    "Mutex not held when calling condition variable wait",
-                                    BugDescription::BI_HIGH, BugDescription::BC_ERROR
-                                );
-                                report.addStep(&inst, "Wait called without holding lock");
-                                reports.push_back(report);
-                            } else {
-                                ConcurrencyBugReport report(
-                                    ConcurrencyBugType::COND_VAR_MISUSE,
-                                    "Mutex might not be held when calling condition variable wait",
-                                    BugDescription::BI_MEDIUM, BugDescription::BC_WARNING
-                                );
-                                report.addStep(&inst, "Wait called here");
-                                reports.push_back(report);
-                            }
+                        if (!m_locksetAnalysis->mayHoldLock(&inst, mutex)) {
+                            ConcurrencyBugReport report(
+                                ConcurrencyBugType::COND_VAR_MISUSE,
+                                "Mutex not held when calling condition variable wait",
+                                BugDescription::BI_HIGH, BugDescription::BC_ERROR
+                            );
+                            report.addStep(&inst, "Wait called without holding lock");
+                            reports.push_back(report);
                         }
                     }
                 }

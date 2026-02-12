@@ -6,6 +6,7 @@
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyAnalysisDumper.h"
 
+#include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -19,7 +20,7 @@ using namespace lotus;
 namespace concurrency {
 
 ConcurrencyChecker::ConcurrencyChecker(Module& module)
-    : m_module(module), m_aliasAnalysis(nullptr), m_threadAPI(ThreadAPI::getThreadAPI()) {
+    : m_module(module), m_aliasAnalysis(nullptr), m_threadAPI(ThreadAPI::getThreadAPI()), m_stats{} {
 
     // Register bug types with BugReportMgr (Clearblue pattern)
     BugReportMgr& mgr = BugReportMgr::get_instance();
@@ -75,6 +76,8 @@ void ConcurrencyChecker::runAnalyses() {
         m_locksetAnalysis = std::make_unique<LockSetAnalysis>(m_module);
         if (m_aliasAnalysis)
             m_locksetAnalysis->setAliasAnalysis(m_aliasAnalysis);
+        llvm::CallGraph cg(m_module);
+        m_locksetAnalysis->setCallGraph(&cg);
         m_locksetAnalysis->analyze();
         m_locksetAnalysisView = m_locksetAnalysis.get();
         m_stats.locksAnalyzed = m_locksetAnalysisView->getStatistics().num_locks;

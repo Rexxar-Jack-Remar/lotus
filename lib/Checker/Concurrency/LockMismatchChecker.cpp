@@ -5,6 +5,7 @@
 #include "Checker/Concurrency/LockMismatchChecker.h"
 
 #include <llvm/IR/InstIterator.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
@@ -83,15 +84,34 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
               for (inst_iterator J = inst_begin(func), E = inst_end(func); J != E; ++J) {
                 Instruction *o = &*J;
                 if (m_threadAPI->isTDAcquire(o)) {
-                  LockID l = m_threadAPI->getLockVal(o);
-                  if (sameLockValue(l, lock)) ++acqInFunc;
+                  LockID lockVal = m_threadAPI->getLockVal(o);
+                  if (sameLockValue(lockVal, lock)) ++acqInFunc;
                 } else if (m_threadAPI->isTDRelease(o)) {
-                  LockID l = m_threadAPI->getLockVal(o);
-                  if (sameLockValue(l, lock)) ++relInFunc;
+                  LockID lockVal = m_threadAPI->getLockVal(o);
+                  if (sameLockValue(lockVal, lock)) ++relInFunc;
                 }
               }
               if (acqInFunc > 0 && acqInFunc == relInFunc)
                 sameBlockAcquire = true;
+            }
+            if (!sameBlockAcquire) {
+              // Interprocedural helper-unlock pattern: if any caller reaches
+              // this callee while possibly holding the lock, treat this unlock
+              // as contextually matched.
+              for (Function &caller : m_module) {
+                if (caller.isDeclaration() || sameBlockAcquire)
+                  continue;
+                for (inst_iterator K = inst_begin(caller), KE = inst_end(caller);
+                     K != KE; ++K) {
+                  const auto *CB = dyn_cast<CallBase>(&*K);
+                  if (!CB || CB->getCalledFunction() != &func)
+                    continue;
+                  if (m_locksetAnalysis->mayHoldLock(&*K, lock)) {
+                    sameBlockAcquire = true;
+                    break;
+                  }
+                }
+              }
             }
             if (!sameBlockAcquire) {
               ConcurrencyBugReport report(
@@ -136,7 +156,9 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
     for (auto &bb : func) {
       if (isa<ReturnInst>(bb.getTerminator())) {
         const Instruction *term = bb.getTerminator();
-        LockSet heldLocks = m_locksetAnalysis->getMayLockSetAt(term);
+        // Use must-locks to avoid reporting leaks on loops/joins where may-lock
+        // can remain non-empty despite balanced acquire/release.
+        LockSet heldLocks = m_locksetAnalysis->getMustLockSetAt(term);
 
         if (!heldLocks.empty()) {
           bool intentional = false;
@@ -148,6 +170,7 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
 
           if (!intentional) {
             for (const auto *lock : heldLocks) {
+              (void)lock;
               ConcurrencyBugReport report(
                   ConcurrencyBugType::LOCK_MISMATCH,
                   "Lock leak: function may return with lock held",

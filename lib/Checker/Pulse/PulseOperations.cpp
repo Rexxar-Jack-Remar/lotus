@@ -573,7 +573,6 @@ PulseOperations::evalDeref(AbductiveDomain &astate, Address ptr,
 OperationResult PulseOperations::checkAddrAccess(AbductiveDomain &astate,
                                                  Address addr,
                                                  const llvm::Instruction *loc) {
-  (void)loc;
   // Canonicalize address
   AbstractValue canon_addr = astate.getCanonical(addr.addr);
 
@@ -588,22 +587,37 @@ OperationResult PulseOperations::checkAddrAccess(AbductiveDomain &astate,
     return OperationResult::OutOfBounds;
   }
 
+  // Skip null dereference check for free() calls - free(NULL) is safe in C
+  bool is_free_call = false;
+  if (loc) {
+    if (auto *CI = llvm::dyn_cast<llvm::CallInst>(loc)) {
+      if (auto *F = CI->getCalledFunction()) {
+        if (F->getName() == "free") {
+          is_free_call = true;
+        }
+      }
+    }
+  }
+
   // Check null (using formula first, then attributes)
   // Path formula is more precise (path-sensitive)
   // Only check null if Invalid is NOT present (already checked above)
   // NPD checker: only report if source is a null constant
-  if (astate.getPathFormula().isNull(canon_addr)) {
-    if (isNullConstantSource(addr)) {
-      return OperationResult::NullDereference;
-    }
-  }
-
-  // Check attributes (may be set by comparisons)
-  if (astate.getPostAttrs().has(canon_addr, Attribute::Null)) {
-    // If formula says non-null, trust formula over attribute
-    if (!astate.getPathFormula().isNonNull(canon_addr)) {
+  // Skip null check for free() calls - free(NULL) is safe
+  if (!is_free_call) {
+    if (astate.getPathFormula().isNull(canon_addr)) {
       if (isNullConstantSource(addr)) {
         return OperationResult::NullDereference;
+      }
+    }
+
+    // Check attributes (may be set by comparisons)
+    if (astate.getPostAttrs().has(canon_addr, Attribute::Null)) {
+      // If formula says non-null, trust formula over attribute
+      if (!astate.getPathFormula().isNonNull(canon_addr)) {
+        if (isNullConstantSource(addr)) {
+          return OperationResult::NullDereference;
+        }
       }
     }
   }
@@ -707,6 +721,20 @@ OperationResult PulseOperations::writeDeref(AbductiveDomain &astate,
 
   // Initialize if needed
   initialize(astate, canon_ptr);
+
+  // Interprocedural initialization: when writing through a pointer parameter,
+  // clear Uninitialized from the pointed-to memory location
+  // This handles cases like: void init(int *p) { *p = 100; } ... int x; init(&x);
+  // The write initializes the memory that p points to
+  AbstractValue pointed_canon = astate.getCanonical(canon_value_addr.addr);
+  astate.getPostAttrs().remove(pointed_canon, Attribute::Uninitialized);
+  
+  // Also check if the pointer itself points to a stack variable
+  // (for cases where we write to *p and p points to a stack variable)
+  if (astate.getPostAttrs().has(canon_ptr, Attribute::Stack)) {
+    // Clear Uninitialized from the stack variable that this pointer points to
+    astate.getPostAttrs().remove(canon_ptr, Attribute::Uninitialized);
+  }
 
   return OperationResult::Success;
 }

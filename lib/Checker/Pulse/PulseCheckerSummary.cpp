@@ -245,16 +245,7 @@ void PulseChecker::createSummary(
   const unsigned max_normal_entries =
       kMaxDisjuncts > latent_added ? (kMaxDisjuncts - latent_added) : 0u;
 
-  llvm::errs() << "[Pulse DEBUG] Processing " << exit_states.size()
-               << " exit states for " << F->getName().str() << "\n";
   for (const auto &exit_state : exit_states) {
-    llvm::errs() << "[Pulse DEBUG] Exit state: stopped="
-                 << exit_state.isStopped()
-                 << ", exit_program=" << exit_state.isExitProgram()
-                 << ", abort_program=" << exit_state.isAbortProgram()
-                 << ", latent_abort=" << exit_state.isLatentAbortProgram()
-                 << ", has_astate=" << (exit_state.getAstate() != nullptr)
-                 << "\n";
     // Skip abort/latent states (bugs), but process normal ExitProgram
     if (exit_state.isAbortProgram() || exit_state.isLatentAbortProgram() ||
         exit_state.isLatentInvalidAccess() ||
@@ -268,14 +259,6 @@ void PulseChecker::createSummary(
     has_any_entry = true;
     const PulseFormula formula = astate->getPathFormula().clone();
     const llvm::Optional<AbstractValue> ret_val = computeReturnValue(*astate);
-
-    // Debug: check if return value has Null attribute
-    if (ret_val) {
-      AbstractValue canon_ret = astate->getCanonical(*ret_val);
-      bool has_null = astate->getPostAttrs().has(canon_ret, Attribute::Null);
-      llvm::errs() << "[Pulse DEBUG] Return value has Null attribute: "
-                   << has_null << "\n";
-    }
 
     const unsigned normal_entries =
         static_cast<unsigned>(summary.getPrePostList().size()) - latent_added;
@@ -296,8 +279,6 @@ void PulseChecker::createSummary(
   }
 
   if (!has_any_entry) {
-    llvm::errs() << "[Pulse DEBUG] No entries for summary of "
-                 << F->getName().str() << "\n";
     return;
   }
 
@@ -307,8 +288,6 @@ void PulseChecker::createSummary(
     summary.setFormalAV(&Arg, formal_av);
   }
 
-  llvm::errs() << "[Pulse DEBUG] Storing summary for " << F->getName().str()
-               << " with " << summary.getPrePostList().size() << " entries\n";
   summary_manager_.storeSummary(F, std::move(summary));
 }
 

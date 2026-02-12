@@ -90,6 +90,9 @@ struct TaintValueTuple {
     
     // Move assignment
     TaintValueTuple& operator=(TaintValueTuple&&) noexcept = default;
+    
+    // Destructor
+    ~TaintValueTuple() = default;
 };
 
 /**
@@ -112,7 +115,7 @@ struct TaintItem {
         unsigned sanitizer_timestamp;
         
         Sanitizer(TaintKind k, const llvm::Instruction* loc, unsigned ts)
-            : sanitizer_kind(k), sanitizer_location(loc), sanitizer_timestamp(ts) {}
+            : sanitizer_kind(std::move(k)), sanitizer_location(loc), sanitizer_timestamp(ts) {}
     };
     std::vector<Sanitizer> sanitizers;  // Sanitizers that have been applied
 
@@ -157,6 +160,9 @@ struct TaintItem {
     
     // Move assignment
     TaintItem& operator=(TaintItem&&) noexcept = default;
+    
+    // Destructor
+    ~TaintItem() = default;
 
     bool operator<(const TaintItem& other) const {
         if (kinds != other.kinds) return kinds < other.kinds;
@@ -260,7 +266,7 @@ public:
                       AbstractValue v,
                       TaintKind kind,
                       const llvm::Instruction* source) {
-        taint(astate, v, {kind}, source);
+        taint(astate, v, {std::move(kind)}, source);
     }
 
     /**

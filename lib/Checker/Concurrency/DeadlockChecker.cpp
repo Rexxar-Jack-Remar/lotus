@@ -322,8 +322,6 @@ std::vector<ConcurrencyBugReport> DeadlockChecker::detectBarrierDivergence() con
         }
 
         bool hasParallelPair = false;
-        const Instruction *partnerA = nullptr;
-        const Instruction *partnerB = nullptr;
 
         for (size_t i = 0; i < waits.size() && !hasParallelPair; ++i) {
             for (size_t j = i + 1; j < waits.size(); ++j) {
@@ -332,15 +330,11 @@ std::vector<ConcurrencyBugReport> DeadlockChecker::detectBarrierDivergence() con
                 if (m_mhpAnalysis) {
                     if (m_mhpAnalysis->mayHappenInParallel(w1, w2)) {
                         hasParallelPair = true;
-                        partnerA = w1;
-                        partnerB = w2;
                         break;
                     }
                 } else {
                     // Without MHP info, be conservative and assume they could pair.
                     hasParallelPair = true;
-                    partnerA = w1;
-                    partnerB = w2;
                     break;
                 }
             }

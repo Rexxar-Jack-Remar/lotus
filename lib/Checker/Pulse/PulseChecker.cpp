@@ -585,7 +585,20 @@ PulseChecker::runCallee(const llvm::Function *callee,
     if (opt) {
       init_astate->getPostStack().add(&*ai, *opt);
       AbstractValue formal_av = factory_.getOrCreate(&*ai);
+      AbstractValue formal_canon = init_astate->getCanonical(formal_av);
       init_astate->getPostAttrs().remove(formal_av, Attribute::Uninitialized);
+      
+      // Track null arguments: if the actual argument is a null constant or has Null attribute,
+      // mark the formal parameter as potentially null
+      AbstractValue actual_canon = init_astate->getCanonical(opt->addr);
+      if (init_astate->getPostAttrs().has(actual_canon, Attribute::Null) ||
+          init_astate->getPathFormula().isNull(actual_canon)) {
+        // Check if this is a null constant source
+        if (PulseOperations::isNullConstantSource(*opt)) {
+          init_astate->getPostAttrs().add(formal_canon, Attribute::Null);
+          init_astate->getPathFormula().addNull(formal_canon);
+        }
+      }
     }
   }
 

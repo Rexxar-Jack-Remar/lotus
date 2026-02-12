@@ -348,6 +348,9 @@ private:
   // Per-thread set of functions already processed to avoid reprocessing
   std::unordered_map<ThreadID, std::unordered_set<const llvm::Function *>>
       m_visited_functions_by_thread;
+  // Instructions in thread 0 before the first fork in main's execution phase.
+  // These cannot run in parallel with child-thread instructions.
+  std::unordered_set<const llvm::Instruction *> m_pre_fork_main_insts;
 
   // Indirect fork handling (conservative)
   bool m_has_unresolved_fork = false;
@@ -408,7 +411,8 @@ private:
   // Helper Methods
   // ========================================================================
 
-  void processFunction(const llvm::Function *func, ThreadID tid);
+  void processFunction(const llvm::Function *func, ThreadID tid,
+                       bool inPreForkMainPhase = false);
   void processInstruction(const llvm::Instruction *inst, ThreadID tid,
                           SyncNode *&current_node);
 

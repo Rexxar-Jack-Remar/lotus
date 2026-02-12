@@ -632,12 +632,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
       AbstractValue formal_ret = *entry.getReturnValue();
       AbstractValue caller_ret = substitution.substituteOrIdentity(formal_ret);
 
-      llvm::errs() << "[Pulse DEBUG] Summary return value: formal="
-                   << formal_ret.getId() << ", caller=" << caller_ret.getId()
-                   << "\n";
-
       if (caller_ret == formal_ret && !substitution.substitute(formal_ret)) {
-        llvm::errs() << "[Pulse DEBUG] Creating fresh return value\n";
         // Check if the function returns a null constant
         const llvm::Function *callee = summary.getFunction();
         const llvm::Value *null_constant_ret = nullptr;
@@ -666,12 +661,8 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
         }
 
         const auto &ret_attrs = post->getPostAttrs().get(formal_ret);
-        llvm::errs() << "[Pulse DEBUG] Copying " << ret_attrs.size()
-                     << " attributes to return value\n";
         for (Attribute attr : ret_attrs) {
           new_astate->getPostAttrs().add(caller_ret, attr);
-          llvm::errs() << "[Pulse DEBUG] Copied attribute: "
-                       << static_cast<int>(attr) << "\n";
 
           // Propagate Invalid to aliases
           if (attr == Attribute::Invalid) {
@@ -690,8 +681,6 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
         // If function returns null constant, also set Null attribute and path
         // formula
         if (null_constant_ret) {
-          llvm::errs() << "[Pulse DEBUG] Function returns null constant - "
-                          "adding Null attribute\n";
           new_astate->getPostAttrs().add(caller_ret, Attribute::Null);
           new_astate->getPathFormula().addNull(caller_ret);
         }

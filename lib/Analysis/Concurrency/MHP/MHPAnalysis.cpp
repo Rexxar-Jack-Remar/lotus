@@ -20,6 +20,7 @@
 
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 
+#include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Dominators.h>
@@ -369,13 +370,14 @@ void MHPAnalysis::buildThreadFlowGraph() {
 
   // Main thread (thread 0)
   m_tfg->addThread(0, main_func);
-  processFunction(main_func, 0);
+  processFunction(main_func, 0, true);
 
   errs() << "Thread Flow Graph built with " << m_tfg->getAllNodes().size()
          << " nodes\n";
 }
 
-void MHPAnalysis::processFunction(const Function *func, ThreadID tid) {
+void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
+                                  bool inPreForkMainPhase) {
   if (!func || func->isDeclaration())
     return;
 
@@ -386,14 +388,23 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid) {
   m_visited_functions_by_thread[tid].insert(func);
 
   // --- Pass 1: Create all nodes for this function ---
+  bool preForkMainPhasePass1 = inPreForkMainPhase && (tid == 0);
   for (const BasicBlock &bb : *func) {
     for (const Instruction &inst : bb) {
       mapInstructionToThread(&inst, tid);
+      if (preForkMainPhasePass1) {
+        m_pre_fork_main_insts.insert(&inst);
+      }
       SyncNodeType node_type = SyncNodeType::REGULAR_INST;
 
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
         if (m_thread_api->isTDFork(&inst)) {
           node_type = SyncNodeType::THREAD_FORK;
+          // After the first fork in thread 0, subsequent instructions are no
+          // longer in initialization phase.
+          if (tid == 0) {
+            preForkMainPhasePass1 = false;
+          }
         } else if (m_thread_api->isTDJoin(&inst)) {
           node_type = SyncNodeType::THREAD_JOIN;
         } else if (m_thread_api->isTDAcquire(&inst)) {
@@ -418,6 +429,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid) {
   
   SyncNode *exit_node = nullptr;
   
+  bool preForkMainPhasePass2 = inPreForkMainPhase && (tid == 0);
   for (const BasicBlock &bb : *func) {
     for (const Instruction &inst : bb) {
       SyncNode *node = m_tfg->getNode(&inst);
@@ -449,6 +461,9 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid) {
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
         if (m_thread_api->isTDFork(&inst)) {
           handleThreadFork(&inst, node, tid);
+          if (tid == 0) {
+            preForkMainPhasePass2 = false;
+          }
         } else if (m_thread_api->isTDJoin(&inst)) {
           handleThreadJoin(&inst, node, tid);
         } else if (m_thread_api->isTDAcquire(&inst)) {
@@ -458,7 +473,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid) {
         } else {
             const Function* callee = cb->getCalledFunction();
             if(callee && !callee->isDeclaration()){
-                processFunction(callee, tid);
+                processFunction(callee, tid, preForkMainPhasePass2);
             }
         }
       }
@@ -721,6 +736,8 @@ void MHPAnalysis::analyzeLockSets() {
   errs() << "Analyzing Lock Sets...\n";
   m_lockset = std::make_unique<LockSetAnalysis>(m_module);
   m_lockset->setAliasAnalysis(m_alias_analysis.get());
+  CallGraph CG(m_module);
+  m_lockset->setCallGraph(&CG);
   m_lockset->analyze();
 }
 
@@ -785,6 +802,15 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
   if (i1 == i2 || isInSameThread(i1, i2))
     return (a && b) ? (m_mhp_cache[{a, b}] = false) : false;
 
+  // Initialization phase in main is single-threaded: instructions observed
+  // before the first pthread_create in thread 0 cannot race with child threads.
+  ThreadID t1 = getThreadID(i1);
+  ThreadID t2 = getThreadID(i2);
+  const bool i1PreForkMain = m_pre_fork_main_insts.count(i1) != 0;
+  const bool i2PreForkMain = m_pre_fork_main_insts.count(i2) != 0;
+  if ((i1PreForkMain && t2 != 0) || (i2PreForkMain && t1 != 0))
+    return (a && b) ? (m_mhp_cache[{a, b}] = false) : false;
+
   // Fast path: check precomputed MHP pairs
   if (isPrecomputedMHP(i1, i2))
     return (a && b) ? (m_mhp_cache[{a, b}] = true) : true;
@@ -792,8 +818,6 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
   // Special case: if both instructions are from the same multi-instance thread,
   // they can run in parallel (different instances) unless explicitly ordered
   // by inter-thread synchronization
-  ThreadID t1 = getThreadID(i1);
-  ThreadID t2 = getThreadID(i2);
   if (t1 == t2 && t1 != 0 && m_multi_instance_threads.count(t1)) {
     // For multi-instance threads, intra-thread program order does not prevent
     // parallelism between different dynamic thread instances.
@@ -1080,7 +1104,7 @@ void MHPAnalysis::Statistics::print(raw_ostream &os) const {
 }
 
 MHPAnalysis::Statistics MHPAnalysis::getStatistics() const {
-  Statistics stats;
+  Statistics stats{};
 
   if (m_tfg) {
     stats.num_threads = m_tfg->getAllThreads().size();

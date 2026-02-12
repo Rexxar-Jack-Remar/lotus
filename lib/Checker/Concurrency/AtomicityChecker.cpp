@@ -25,6 +25,7 @@
 #include <llvm/Analysis/DominanceFrontier.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Analysis/PostDominators.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
@@ -267,6 +268,9 @@ std::vector<ConcurrencyBugReport> AtomicityChecker::checkAtomicityViolations() {
       const Value *Loc = getMemoryLocation(&I);
       if (!Loc)
         continue;
+      const Value *Base = getUnderlyingObject(Loc);
+      if (isa<AllocaInst>(Base))
+        continue; // thread-local stack slots are not shared across threads
       unprotectedAccesses.push_back({&I, Loc});
     }
   }

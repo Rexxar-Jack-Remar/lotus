@@ -678,7 +678,7 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
 
     // When storing a pointer value, preserve its attributes (Null, Invalid,
     // Allocated)
-    [[maybe_unused]] AbstractValue canon_value =
+    AbstractValue canon_value =
         astate->getCanonical(value_opt->addr);
     if (astate->getPostAttrs().has(canon_value, Attribute::Null)) {
       // Preserve null attribute on the stored value
@@ -691,6 +691,18 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
     if (astate->getPostAttrs().has(canon_value, Attribute::Allocated)) {
       // Preserve allocated attribute on the stored value
       astate->getPostAttrs().add(canon_value, Attribute::Allocated);
+    }
+
+    // Fix for realloc pattern false positives: when storing a new pointer value
+    // (especially from realloc), if the stored value is valid (Allocated and not Invalid),
+    // clear Invalid from the variable itself. This handles cases like:
+    //   int *new_p = realloc(p, size);
+    //   p = new_p;  // p now points to valid allocation, not the old invalidated one
+    if (astate->getPostAttrs().has(canon_value, Attribute::Allocated) &&
+        !astate->getPostAttrs().has(canon_value, Attribute::Invalid)) {
+      // The stored value is a valid allocation - clear Invalid from the variable
+      // This ensures that after p = new_p, p is not considered invalid
+      astate->getPostAttrs().remove(canon_var, Attribute::Invalid);
     }
 
     // Update stack with new value
@@ -853,7 +865,7 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
         }
         a->getPostStack().add(CI, *dest_opt);
         // Fix for false positives: memset to a stack array initializes it.
-        auto dest_val = CI->getArgOperand(0);
+        auto *dest_val = CI->getArgOperand(0);
         while (dest_val) {
           if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(dest_val)) {
             AbstractValue base_av = factory_.getOrCreate(AI);
@@ -888,7 +900,7 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
       }
       // Fix for false positives: memcpy to a stack array initializes it,
       // so clear the Uninitialized attribute from the base alloca.
-      auto dest_val = CI->getArgOperand(0);
+      auto *dest_val = CI->getArgOperand(0);
       while (dest_val) {
         if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(dest_val)) {
           AbstractValue base_av = factory_.getOrCreate(AI);
@@ -1046,18 +1058,11 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
 
   // Try to use summary if available
   if (summary_manager_.hasSummary(F)) {
-    llvm::errs() << "[Pulse DEBUG] Applying summary for " << F->getName().str()
-                 << "\n";
-    PulseLogger::debug("Applying summary for " + F->getName().str());
     PulseLogger::incrementCounter("summaries.applied");
     auto summary_results = applySummaryImproved(F, exec_state, CI, pred);
     if (!summary_results.empty()) {
-      llvm::errs() << "[Pulse DEBUG] Summary applied successfully for "
-                   << F->getName().str() << "\n";
       return summary_results;
     }
-    llvm::errs() << "[Pulse DEBUG] Summary application returned empty for "
-                 << F->getName().str() << "\n";
     // Fall back to legacy summary application if the improved engine cannot
     // apply any entry.
     auto legacy_results = applySummary(F, exec_state, CI, pred);

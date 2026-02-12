@@ -18,6 +18,7 @@
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/MemoryLocation.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -195,11 +196,16 @@ bool LockSetAnalysis::mayHoldLock(const Instruction *inst, LockID lock) const {
 }
 
 bool LockSetAnalysis::mustHoldLock(const Instruction *inst, LockID lock) const {
+  lock = getCanonicalLock(lock);
   auto lockset = getMustLockSetAt(inst);
   for (const auto *held_lock : lockset) {
-    // Must queries require certainty. A may-alias relation is insufficient to
-    // conclude the queried lock is definitely held.
-    if (held_lock == lock)
+    const LockID canonical_held = getCanonicalLock(held_lock);
+    // Must queries require certainty. Accept either exact canonical equality or
+    // a proven must-alias relation.
+    if (canonical_held == lock)
+      return true;
+    if (m_alias_analysis && canonical_held && lock &&
+        m_alias_analysis->mustAlias(canonical_held, lock))
       return true;
   }
   return false;
@@ -325,7 +331,7 @@ void LockSetAnalysis::Statistics::print(raw_ostream &os) const {
 }
 
 LockSetAnalysis::Statistics LockSetAnalysis::getStatistics() const {
-  Statistics stats;
+  Statistics stats{};
 
   stats.num_locks = m_all_locks.size();
 
@@ -707,24 +713,56 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
     // Try-lock is handled above (not added to set). Handle other calls.
     if (!m_thread_api->isTDAcquire(call) && !m_thread_api->isTDRelease(call) &&
         !m_thread_api->isTDCondWait(call)) {
-      // Handle regular function calls with interprocedural summaries
-      if (m_call_graph) {
-        auto callees = getCallees(call);
-        for (Function *callee : callees) {
-          if (callee && !callee->isDeclaration()) {
-            // Keep may- and must-lock flows independent to preserve soundness.
-            if (!is_must) {
-              LockSet may_only = out_set;
-              LockSet must_dummy = out_set;
-              applyFunctionSummary(call, callee, may_only, must_dummy);
-              out_set = std::move(may_only);
-            } else {
-              LockSet may_dummy = out_set;
-              LockSet must_only = out_set;
-              applyFunctionSummary(call, callee, may_dummy, must_only);
-              out_set = std::move(must_only);
+      auto applyCalleeBodyFallback = [&](const Function *callee) {
+        for (const Instruction &I : instructions(callee)) {
+          if (m_thread_api->isTDAcquire(&I)) {
+            if (LockID L = getLockValue(&I))
+              out_set.insert(L);
+          } else if (m_thread_api->isTDRelease(&I)) {
+            if (LockID L = getLockValue(&I)) {
+              out_set.erase(L);
+              if (is_must && m_alias_analysis) {
+                LockSet to_remove;
+                for (const auto *held : out_set) {
+                  if (mayAlias(held, L))
+                    to_remove.insert(held);
+                }
+                for (const auto *held : to_remove)
+                  out_set.erase(held);
+              }
             }
           }
+        }
+      };
+
+      auto applySummaryIfPresent = [&](const Function *callee) -> bool {
+        auto it = m_function_summaries.find(callee);
+        if (it == m_function_summaries.end() || !it->second.is_analyzed)
+          return false;
+        // Keep may- and must-lock flows independent to preserve soundness.
+        if (!is_must) {
+          LockSet may_only = out_set;
+          LockSet must_dummy = out_set;
+          applyFunctionSummary(call, callee, may_only, must_dummy);
+          out_set = std::move(may_only);
+        } else {
+          LockSet may_dummy = out_set;
+          LockSet must_only = out_set;
+          applyFunctionSummary(call, callee, may_dummy, must_only);
+          out_set = std::move(must_only);
+        }
+        return true;
+      };
+
+      // Handle regular function calls with interprocedural summaries.
+      auto callees = getCallees(call);
+      for (Function *callee : callees) {
+        if (!callee || callee->isDeclaration())
+          continue;
+        if (!applySummaryIfPresent(callee)) {
+          // Fallback for helper wrappers when summaries are unavailable or too
+          // imprecise at a given call site.
+          applyCalleeBodyFallback(callee);
         }
       }
     }
@@ -876,6 +914,8 @@ void LockSetAnalysis::trackLockOrdering() {
 }
 
 bool LockSetAnalysis::mayAlias(LockID lock1, LockID lock2) const {
+  lock1 = getCanonicalLock(lock1);
+  lock2 = getCanonicalLock(lock2);
   if (lock1 == lock2)
     return true;
 
@@ -889,8 +929,38 @@ bool LockSetAnalysis::mayAlias(LockID lock1, LockID lock2) const {
 }
 
 LockID LockSetAnalysis::getCanonicalLock(LockID lock) const {
-  // Strip pointer casts to get canonical form
-  return lock->stripPointerCasts();
+  if (!lock)
+    return nullptr;
+
+  // Strip pointer casts first.
+  lock = lock->stripPointerCasts();
+
+  // For loads like "w->mutex", canonicalize to the loaded-from address so
+  // repeated loads from the same field map to one lock identity.
+  if (const auto *LI = dyn_cast<LoadInst>(lock)) {
+    lock = LI->getPointerOperand()->stripPointerCasts();
+  }
+
+  // Collapse simple pointer arithmetic to its base object.
+  if (const auto *GEP = dyn_cast<GetElementPtrInst>(lock)) {
+    lock = GEP->getPointerOperand()->stripPointerCasts();
+  }
+  if (const Value *base = getUnderlyingObject(lock, 32)) {
+    lock = base->stripPointerCasts();
+  }
+
+  // If points-to resolves to a unique target, use the target object as the
+  // canonical lock identity. This helps match locks loaded through wrapper
+  // fields (e.g., w->mutex) across different SSA values.
+  if (m_alias_analysis) {
+    std::vector<const Value *> pts;
+    if (m_alias_analysis->getPointsToSet(lock, pts) && pts.size() == 1 &&
+        pts.front()) {
+      return pts.front()->stripPointerCasts();
+    }
+  }
+
+  return lock;
 }
 
 bool LockSetAnalysis::isLockOperation(const Instruction *inst) const {
