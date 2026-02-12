@@ -11,7 +11,7 @@
 #ifndef ANALYSIS_WPDS_UNINITIALIZED_VARIABLES_H_
 #define ANALYSIS_WPDS_UNINITIALIZED_VARIABLES_H_
 
-#include "Dataflow/Mono/DataFlowResult.h"
+#include "Dataflow/Mono/Support/Result.h"
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <memory>

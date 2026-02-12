@@ -3,12 +3,12 @@
  * @brief Unit tests for Mono (monotone dataflow framework)
  */
 
-#include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoConstantPropagation.h"
-#include "Dataflow/Mono/Analyses/Interprocedural/InterMonoTaintAnalysis.h"
-#include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoUninitVariables.h"
-#include "Dataflow/Mono/Analyses/Intraprocedural/LiveVariablesAnalysis.h"
-#include "Dataflow/Mono/DataFlowResult.h"
-#include "Dataflow/Mono/Solver/InterMonoSolver.h"
+#include "Dataflow/Mono/Analyses/Intra/ConstantPropagation.h"
+#include "Dataflow/Mono/Analyses/Intra/LiveVariables.h"
+#include "Dataflow/Mono/Analyses/Intra/UninitVariables.h"
+#include "Dataflow/Mono/Analyses/Inter/TaintAnalysis.h"
+#include "Dataflow/Mono/Support/Result.h"
+#include "Dataflow/Mono/Solver/InterSolver.h"
 
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>

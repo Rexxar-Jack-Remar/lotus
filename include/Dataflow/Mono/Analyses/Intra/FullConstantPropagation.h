@@ -1,8 +1,8 @@
 #ifndef ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_FULLCONSTANTPROPAGATION_H_
 #define ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_FULLCONSTANTPROPAGATION_H_
 
-#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
-#include "Dataflow/Mono/Solver/IntraMonoSolver.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Solver/IntraSolver.h"
 
 #include <cstdint>
 #include <memory>

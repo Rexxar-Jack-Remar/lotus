@@ -1,7 +1,7 @@
 #ifndef ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_UNINITVARIABLES_H_
 #define ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_UNINITVARIABLES_H_
 
-#include "Dataflow/Mono/DataFlowResult.h"
+#include "Dataflow/Mono/Support/Result.h"
 
 #include <memory>
 

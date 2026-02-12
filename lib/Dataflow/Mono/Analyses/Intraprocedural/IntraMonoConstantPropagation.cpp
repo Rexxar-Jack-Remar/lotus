@@ -2,7 +2,7 @@
  *
  * Author: rainoftime
  */
-#include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoConstantPropagation.h"
+#include "Dataflow/Mono/Analyses/Intra/ConstantPropagation.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/IR/Constants.h"

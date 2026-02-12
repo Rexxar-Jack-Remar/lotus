@@ -1,8 +1,9 @@
-#include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoUninitVariables.h"
+#include "Dataflow/Mono/Analyses/Intra/UninitVariables.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Dataflow/Mono/IntraMonoProblem.h"
-#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
-#include "Dataflow/Mono/Solver/IntraMonoSolver.h"
+#include "Dataflow/Mono/Container/Traits.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Core/Problem.h"
+#include "Dataflow/Mono/Solver/IntraSolver.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
@@ -11,14 +12,14 @@
 
 #include <algorithm>
 #include <memory>
-#include <set>
+#include <vector>
 
 using namespace llvm;
 
 namespace mono {
 namespace {
 
-struct UninitVariablesDomain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+using UninitVariablesDomain = LLVMMonoAnalysisDomain<SetContainer<Value *>>;
 
 class UninitVariablesProblem : public IntraMonoProblem<UninitVariablesDomain> {
 public:
@@ -27,11 +28,11 @@ public:
         DL(&F->getParent()->getDataLayout()),
         AA(AA) {}
 
-  std::set<Value *> allTop() override { return {}; }
+  mono_container_t allTop() override { return {}; }
 
-  std::set<Value *> normalFlow(Instruction *Inst,
-                               const std::set<Value *> &In) override {
-    std::set<Value *> Out = In;
+  mono_container_t normalFlow(Instruction *Inst,
+                               const mono_container_t &In) override {
+    mono_container_t Out = In;
 
     if (auto *Alloca = dyn_cast<AllocaInst>(Inst)) {
       Out.insert(Alloca);
@@ -102,21 +103,20 @@ public:
     return Out;
   }
 
-  std::set<Value *> merge(const std::set<Value *> &Lhs,
-                          const std::set<Value *> &Rhs) override {
-    std::set<Value *> Out;
-    std::set_intersection(Lhs.begin(), Lhs.end(), Rhs.begin(), Rhs.end(),
-                          std::inserter(Out, Out.begin()));
+  mono_container_t merge(const mono_container_t &Lhs,
+                          const mono_container_t &Rhs) override {
+    mono_container_t Out = Lhs;
+    Out.intersectWith(Rhs);
     return Out;
   }
 
-  bool equal_to(const std::set<Value *> &Lhs,
-                const std::set<Value *> &Rhs) override {
+  bool equal_to(const mono_container_t &Lhs,
+                const mono_container_t &Rhs) override {
     return Lhs == Rhs;
   }
 
-  std::unordered_map<Instruction *, std::set<Value *>> initialSeeds() override {
-    std::unordered_map<Instruction *, std::set<Value *>> Seeds;
+  std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t> Seeds;
     auto *F = getEntryPoints().empty() ? nullptr : getEntryPoints().front();
     if (F == nullptr || F->empty()) {
       return Seeds;
@@ -135,7 +135,7 @@ private:
   };
 
   AliasPartition classifyAliases(const Value *Ptr,
-                                 const std::set<Value *> &Facts) const {
+                                 const mono_container_t &Facts) const {
     AliasPartition AP;
     if (Ptr == nullptr) {
       return AP;
@@ -180,7 +180,7 @@ private:
     return llvm::getUnderlyingObject(V);
   }
 
-  bool isUninitValue(const Value *V, const std::set<Value *> &In) const {
+  bool isUninitValue(const Value *V, const mono_container_t &In) const {
     if (V == nullptr) {
       return false;
     }
@@ -212,7 +212,7 @@ private:
     return false;
   }
 
-  void clearAliasUninit(std::set<Value *> &Out, const Value *Ptr) const {
+  void clearAliasUninit(mono_container_t &Out, const Value *Ptr) const {
     if (AA != nullptr && AA->isInitialized() && Ptr != nullptr &&
         Ptr->getType()->isPointerTy()) {
       auto AP = classifyAliases(Ptr, Out);
@@ -222,22 +222,22 @@ private:
       return;
     }
     auto *Base = getBaseObject(Ptr);
-    for (auto It = Out.begin(); It != Out.end();) {
-      auto *Candidate = *It;
+    // Collect elements to erase first, then erase them (SetContainer erase returns bool)
+    std::vector<Value *> ToErase;
+    for (auto *Candidate : Out) {
       if (Candidate == Ptr) {
-        It = Out.erase(It);
-        continue;
+        ToErase.push_back(Candidate);
+      } else if (Candidate->getType()->isPointerTy() &&
+                 getBaseObject(Candidate) == Base) {
+        ToErase.push_back(Candidate);
       }
-      if (Candidate->getType()->isPointerTy() &&
-          getBaseObject(Candidate) == Base) {
-        It = Out.erase(It);
-        continue;
-      }
-      ++It;
+    }
+    for (auto *Elem : ToErase) {
+      Out.erase(Elem);
     }
   }
 
-  void markAliasUninit(std::set<Value *> &Out, Value *Ptr) const {
+  void markAliasUninit(mono_container_t &Out, Value *Ptr) const {
     auto AP = classifyAliases(Ptr, Out);
     for (auto *Alias : AP.MustAliases) {
       Out.insert(Alias);
@@ -251,7 +251,7 @@ private:
     return Callee != nullptr && Callee->getIntrinsicID() == ID;
   }
 
-  void handleMemIntrinsics(CallBase *Call, std::set<Value *> &Out) {
+  void handleMemIntrinsics(CallBase *Call, mono_container_t &Out) {
     auto *Callee = Call->getCalledFunction();
     if (isMemIntrinsic(Callee, Intrinsic::memset)) {
       if (Call->arg_size() >= 2) {
@@ -301,8 +301,8 @@ std::unique_ptr<DataFlowResult> runIntraMonoUninitVariables(Function *F) {
   for (auto &BB : *F) {
     for (auto &Inst : BB) {
       auto *I = &Inst;
-      Result->IN(I) = Solver.getInResultsAt(I);
-      Result->OUT(I) = Solver.getOutResultsAt(I);
+      Result->IN(I) = Solver.getInResultsAt(I).getSet();
+      Result->OUT(I) = Solver.getOutResultsAt(I).getSet();
 
       if (isa<AllocaInst>(I)) {
         Result->GEN(I).insert(I);

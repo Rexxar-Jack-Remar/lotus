@@ -8,7 +8,7 @@
 #ifndef ANALYSIS_WPDS_TAINT_ANALYSIS_H_
 #define ANALYSIS_WPDS_TAINT_ANALYSIS_H_
 
-#include "Dataflow/Mono/DataFlowResult.h"
+#include "Dataflow/Mono/Support/Result.h"
 #include <llvm/IR/Module.h>
 #include <memory>
 

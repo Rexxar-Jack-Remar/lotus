@@ -1,7 +1,9 @@
-#include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoSolverTest.h"
+#include "Dataflow/Mono/Analyses/Intra/SolverTest.h"
 
-#include "Dataflow/Mono/DataFlowResult.h"
-#include "Dataflow/Mono/IntraMonoProblem.h"
+#include "Dataflow/Mono/Container/Traits.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Core/Problem.h"
+#include "Dataflow/Mono/Support/Result.h"
 
 #include "llvm/IR/Instructions.h"
 
@@ -10,7 +12,7 @@ using namespace llvm;
 namespace mono {
 namespace {
 
-struct TestDomain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+using TestDomain = LLVMMonoAnalysisDomain<SetContainer<Value *>>;
 
 class IntraSolverTestProblem : public IntraMonoProblem<TestDomain> {
 public:
@@ -36,7 +38,7 @@ public:
   mono_container_t merge(const mono_container_t &Lhs,
                          const mono_container_t &Rhs) override {
     mono_container_t Out = Lhs;
-    Out.insert(Rhs.begin(), Rhs.end());
+    Out.unionWith(Rhs);
     return Out;
   }
 
@@ -69,8 +71,8 @@ std::unique_ptr<DataFlowResult> runIntraMonoSolverTest(Function *F) {
   auto Result = std::make_unique<DataFlowResult>();
   for (auto &BB : *F) {
     for (auto &I : BB) {
-      Result->IN(&I) = Solver.getInResultsAt(&I);
-      Result->OUT(&I) = Solver.getOutResultsAt(&I);
+      Result->IN(&I) = Solver.getInResultsAt(&I).getSet();
+      Result->OUT(&I) = Solver.getOutResultsAt(&I).getSet();
     }
   }
   return Result;

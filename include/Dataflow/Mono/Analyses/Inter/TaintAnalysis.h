@@ -1,7 +1,8 @@
 #ifndef ANALYSIS_MONO_ANALYSES_INTERPROCEDURAL_INTERMONO_TAINTANALYSIS_H_
 #define ANALYSIS_MONO_ANALYSES_INTERPROCEDURAL_INTERMONO_TAINTANALYSIS_H_
 
-#include "Dataflow/Mono/Solver/CallStringInterProceduralDataFlow.h"
+#include "Dataflow/Mono/Container/Traits.h"
+#include "Dataflow/Mono/Core/CallStringSolver.h"
 
 #include <map>
 #include <memory>
@@ -29,7 +30,7 @@ struct InterMonoTaintReport {
 
 constexpr unsigned kDefaultTaintCallStringLength = 2;
 using InterMonoTaintResult = dataflow::ContextSensitiveDataFlowResult<
-    kDefaultTaintCallStringLength, std::set<llvm::Value *>>;
+    kDefaultTaintCallStringLength, SetContainer<llvm::Value *>>;
 
 struct InterMonoTaintAnalysisResult {
   std::unique_ptr<InterMonoTaintResult> Results;

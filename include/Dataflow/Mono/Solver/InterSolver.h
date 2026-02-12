@@ -1,9 +1,9 @@
 #ifndef ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
 #define ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
 
-#include "Dataflow/Mono/InterMonoProblem.h"
 #include "Dataflow/ControlFlow/InterCFG.h"
-#include "Dataflow/Mono/Solver/CallStringInterProceduralDataFlow.h"
+#include "Dataflow/Mono/Core/CallStringSolver.h"
+#include "Dataflow/Mono/Core/Problem.h"
 
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"

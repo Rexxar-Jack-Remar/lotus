@@ -2,10 +2,11 @@
  *
  * Author: rainoftime
 */
-#include "Dataflow/Mono/Analyses/Intraprocedural/LiveVariablesAnalysis.h"
-#include "Dataflow/Mono/IntraMonoProblem.h"
-#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
-#include "Dataflow/Mono/Solver/IntraMonoSolver.h"
+#include "Dataflow/Mono/Analyses/Intra/LiveVariables.h"
+#include "Dataflow/Mono/Container/Traits.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Core/Problem.h"
+#include "Dataflow/Mono/Solver/IntraSolver.h"
 
 using namespace llvm;
 
@@ -13,7 +14,7 @@ namespace mono {
 
 namespace {
 
-struct LiveVariablesDomain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+using LiveVariablesDomain = LLVMMonoAnalysisDomain<SetContainer<Value *>>;
 
 class LiveVariablesProblem : public IntraMonoProblem<LiveVariablesDomain> {
 public:
@@ -24,9 +25,9 @@ public:
     return ::dataflow::controlflow::FlowDirection::Backward;
   }
 
-  std::set<Value *> normalFlow(Instruction *Inst,
-                               const std::set<Value *> &In) override {
-    std::set<Value *> Out = In;
+  mono_container_t normalFlow(Instruction *Inst,
+                               const mono_container_t &In) override {
+    mono_container_t Out = In;
 
     if (!Inst->getType()->isVoidTy()) {
       Out.erase(Inst);
@@ -41,20 +42,20 @@ public:
     return Out;
   }
 
-  std::set<Value *> merge(const std::set<Value *> &Lhs,
-                          const std::set<Value *> &Rhs) override {
-    std::set<Value *> Out = Lhs;
-    Out.insert(Rhs.begin(), Rhs.end());
+  mono_container_t merge(const mono_container_t &Lhs,
+                          const mono_container_t &Rhs) override {
+    mono_container_t Out = Lhs;
+    Out.unionWith(Rhs);
     return Out;
   }
 
-  bool equal_to(const std::set<Value *> &Lhs,
-                const std::set<Value *> &Rhs) override {
+  bool equal_to(const mono_container_t &Lhs,
+                const mono_container_t &Rhs) override {
     return Lhs == Rhs;
   }
 
-  std::unordered_map<Instruction *, std::set<Value *>> initialSeeds() override {
-    std::unordered_map<Instruction *, std::set<Value *>> Seeds;
+  std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t> Seeds;
     auto *F = getEntryPoints().empty() ? nullptr : getEntryPoints().front();
     if (F == nullptr) {
       return Seeds;
@@ -84,8 +85,8 @@ std::unique_ptr<DataFlowResult> runLiveVariablesAnalysis(Function *f) {
   for (auto &BB : *f) {
     for (auto &Inst : BB) {
       auto *I = &Inst;
-      Result->OUT(I) = Solver.getInResultsAt(I);
-      Result->IN(I) = Solver.getOutResultsAt(I);
+      Result->OUT(I) = Solver.getInResultsAt(I).getSet();
+      Result->IN(I) = Solver.getOutResultsAt(I).getSet();
       for (auto &Op : I->operands()) {
         if (isa<Instruction>(Op) || isa<Argument>(Op)) {
           Result->GEN(I).insert(Op);

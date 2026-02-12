@@ -1,9 +1,9 @@
 #ifndef ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_SOLVERTEST_H_
 #define ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_SOLVERTEST_H_
 
-#include "Dataflow/Mono/DataFlowResult.h"
-#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
-#include "Dataflow/Mono/Solver/IntraMonoSolver.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Support/Result.h"
+#include "Dataflow/Mono/Solver/IntraSolver.h"
 
 #include <memory>
 #include <set>

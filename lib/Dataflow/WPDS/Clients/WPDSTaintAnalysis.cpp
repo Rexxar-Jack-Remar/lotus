@@ -5,7 +5,7 @@
  */
 
 #include "Dataflow/WPDS/Clients/WPDSTaintAnalysis.h"
-#include "Dataflow/Mono/DataFlowResult.h"
+#include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>

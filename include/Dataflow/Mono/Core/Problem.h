@@ -1,0 +1,296 @@
+#ifndef ANALYSIS_MONO_CORE_PROBLEM_H_
+#define ANALYSIS_MONO_CORE_PROBLEM_H_
+
+#include "Dataflow/ControlFlow/FlowDirection.h"
+#include "Dataflow/ControlFlow/InterCFG.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
+#include "Dataflow/Mono/Support/Soundness.h"
+
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Support/raw_ostream.h"
+
+#include <cstddef>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace lotus {
+class AliasAnalysisWrapper;
+} // namespace lotus
+
+namespace mono {
+
+struct HasNoConfigurationType {};
+
+// ============================================================================
+// IntraMonoProblem - Base class for intraprocedural monotone dataflow problems
+// ============================================================================
+
+/**
+ * @brief Base class for intraprocedural monotone dataflow analyses
+ *
+ * This defines the interface that all intraprocedural analyses must implement.
+ * The framework operates on a lattice of facts (mono_container_t) and propagates
+ * them along the control flow graph using the normalFlow and merge functions.
+ *
+ * @tparam AnalysisDomainTy The analysis domain specifying types (nodes, facts, etc.)
+ */
+template <typename AnalysisDomainTy> class IntraMonoProblem {
+public:
+  using n_t = typename AnalysisDomainTy::n_t;
+  using d_t = typename AnalysisDomainTy::d_t;
+  using mono_container_t = typename AnalysisDomainTy::mono_container_t;
+  using f_t = typename AnalysisDomainTy::f_t;
+  using t_t = typename AnalysisDomainTy::t_t;
+  using v_t = typename AnalysisDomainTy::v_t;
+  using db_t = typename AnalysisDomainTy::db_t;
+  using c_t = typename AnalysisDomainTy::c_t;
+  using pt_t = typename AnalysisDomainTy::pt_t;
+
+  using ProblemAnalysisDomain = AnalysisDomainTy;
+  using ConfigurationTy = HasNoConfigurationType;
+
+  explicit IntraMonoProblem(std::vector<llvm::Function *> EntryPoints = {},
+                            pt_t PT = nullptr)
+      : PT(PT), EntryPoints(std::move(EntryPoints)) {}
+
+  IntraMonoProblem(const db_t *IRDB, const c_t *CF, pt_t PT,
+                   std::vector<std::string> EntryPointNames = {})
+      : IRDB(IRDB), CF(CF), PT(std::move(PT)),
+        EntryPointNames(std::move(EntryPointNames)) {}
+
+  virtual ~IntraMonoProblem() = default;
+
+  // ========================================
+  // Core dataflow interface (must override)
+  // ========================================
+
+  /**
+   * @brief Compute the flow function for a single instruction
+   *
+   * This defines how facts flow through a single instruction. For example,
+   * in reaching definitions: OUT[inst] = GEN[inst] ∪ (IN[inst] - KILL[inst])
+   *
+   * @param Inst The instruction
+   * @param In The facts flowing into this instruction
+   * @return The facts flowing out of this instruction
+   */
+  virtual mono_container_t normalFlow(n_t Inst, const mono_container_t &In) = 0;
+
+  /**
+   * @brief Merge facts from multiple predecessors
+   *
+   * This defines the meet operator (∩) or join operator (∪) depending on
+   * the lattice. For may-analyses: union. For must-analyses: intersection.
+   *
+   * @param Lhs First set of facts
+   * @param Rhs Second set of facts
+   * @return The merged result
+   */
+  virtual mono_container_t merge(const mono_container_t &Lhs,
+                                 const mono_container_t &Rhs) = 0;
+
+  /**
+   * @brief Check if two fact sets are equal
+   *
+   * Used by the solver to detect fixpoint convergence.
+   *
+   * @param Lhs First set of facts
+   * @param Rhs Second set of facts
+   * @return true if equal
+   */
+  virtual bool equal_to(const mono_container_t &Lhs,
+                        const mono_container_t &Rhs) = 0;
+
+  // ========================================
+  // Lattice configuration
+  // ========================================
+
+  /**
+   * @brief Return the initial top element
+   *
+   * For forward may-analyses: typically empty set
+   * For forward must-analyses: typically universe set
+   * For backward analyses: depends on the lattice
+   */
+  virtual mono_container_t allTop() { return mono_container_t{}; }
+
+  /**
+   * @brief Specify initial seed facts at specific program points
+   *
+   * This allows starting the analysis with known facts at specific locations.
+   * For example, reaching definitions seeds the entry with function parameters.
+   *
+   * @return Map from program points to initial facts
+   */
+  virtual std::unordered_map<n_t, mono_container_t> initialSeeds() = 0;
+
+  /**
+   * @brief Specify the dataflow direction (Forward or Backward)
+   */
+  virtual ::dataflow::controlflow::FlowDirection direction() const {
+    return ::dataflow::controlflow::FlowDirection::Forward;
+  }
+
+  // ========================================
+  // Optional utilities
+  // ========================================
+
+  /**
+   * @brief Pretty-print a fact container (for debugging)
+   */
+  virtual void printContainer(llvm::raw_ostream &, const mono_container_t &) const {
+  }
+
+  // ========================================
+  // Configuration accessors
+  // ========================================
+
+  const std::vector<llvm::Function *> &getEntryPoints() const {
+    return EntryPoints;
+  }
+
+  const std::vector<std::string> &getEntryPointNames() const {
+    return EntryPointNames;
+  }
+
+  const db_t *getProjectIRDB() const { return IRDB; }
+
+  const c_t *getCFG() const { return CF; }
+
+  pt_t getPointstoInfo() const { return PT; }
+  pt_t getAliasAnalysis() const { return PT; }
+
+  virtual bool setSoundness(Soundness /*S*/) { return false; }
+
+protected:
+  const db_t *IRDB = nullptr;
+  const c_t *CF = nullptr;
+  pt_t PT{};
+  std::vector<std::string> EntryPointNames;
+  Soundness S = Soundness::Soundy;
+  std::vector<llvm::Function *> EntryPoints;
+};
+
+// ============================================================================
+// InterMonoProblem - Base class for interprocedural monotone dataflow problems
+// ============================================================================
+
+/**
+ * @brief Base class for interprocedural monotone dataflow analyses
+ *
+ * Extends IntraMonoProblem with additional flow functions for handling
+ * call sites: callFlow, returnFlow, and callToRetFlow.
+ *
+ * @tparam AnalysisDomainTy The analysis domain specifying types
+ */
+template <typename AnalysisDomainTy>
+class InterMonoProblem : public IntraMonoProblem<AnalysisDomainTy> {
+public:
+  using n_t = typename AnalysisDomainTy::n_t;
+  using d_t = typename AnalysisDomainTy::d_t;
+  using f_t = typename AnalysisDomainTy::f_t;
+  using mono_container_t = typename AnalysisDomainTy::mono_container_t;
+  using db_t = typename AnalysisDomainTy::db_t;
+  using i_t = typename AnalysisDomainTy::i_t;
+  using pt_t = typename AnalysisDomainTy::pt_t;
+
+  explicit InterMonoProblem(std::vector<llvm::Function *> EntryPoints = {},
+                            pt_t PT = nullptr)
+      : IntraMonoProblem<AnalysisDomainTy>(std::move(EntryPoints), PT) {}
+
+  InterMonoProblem(const db_t *IRDB, const i_t *ICF, pt_t PT,
+                   std::vector<std::string> EntryPointNames = {})
+      : IntraMonoProblem<AnalysisDomainTy>(IRDB, ICF, std::move(PT),
+                                           std::move(EntryPointNames)),
+        ICF(ICF) {}
+
+  // ========================================
+  // Interprocedural flow functions (must override)
+  // ========================================
+
+  /**
+   * @brief Flow function from call site to callee entry
+   *
+   * Models parameter passing and caller context propagation.
+   *
+   * @param CallSite The call instruction
+   * @param Callee The called function
+   * @param In Facts at the call site
+   * @return Facts at the callee entry
+   */
+  virtual mono_container_t callFlow(n_t CallSite, f_t Callee,
+                                    const mono_container_t &In) = 0;
+
+  /**
+   * @brief Flow function from callee exit to return site
+   *
+   * Models return value propagation and context restoration.
+   *
+   * @param CallSite The call instruction
+   * @param Callee The called function
+   * @param ExitStmt The exit instruction in the callee
+   * @param RetSite The instruction after the call site
+   * @param In Facts at the callee exit
+   * @return Facts at the return site
+   */
+  virtual mono_container_t returnFlow(n_t CallSite, f_t Callee, n_t ExitStmt,
+                                      n_t RetSite,
+                                      const mono_container_t &In) = 0;
+
+  /**
+   * @brief Flow function bypassing the call (call-to-return edge)
+   *
+   * Models facts that flow directly from call to return without entering
+   * the callee. Used for facts unaffected by the call.
+   *
+   * @param CallSite The call instruction
+   * @param RetSite The instruction after the call site
+   * @param Callees All possible callees
+   * @param In Facts at the call site
+   * @return Facts at the return site (bypassing the call)
+   */
+  virtual mono_container_t callToRetFlow(n_t CallSite, n_t RetSite,
+                                        llvm::ArrayRef<f_t> Callees,
+                                        const mono_container_t &In) = 0;
+
+  // ========================================
+  // Call graph resolution
+  // ========================================
+
+  /**
+   * @brief Resolve callees at a call site
+   *
+   * Override to provide more precise call graph resolution (e.g., for
+   * indirect calls using points-to analysis).
+   *
+   * Default: returns direct callee only.
+   *
+   * @param CallSite The call instruction
+   * @return Vector of possible callees
+   */
+  virtual std::vector<f_t> getCalleesOfCallAt(n_t CallSite) const {
+    std::vector<f_t> Callees;
+    auto *Call = llvm::dyn_cast_or_null<llvm::CallBase>(CallSite);
+    if (Call == nullptr) {
+      return Callees;
+    }
+    if (auto *Callee = Call->getCalledFunction()) {
+      Callees.push_back(Callee);
+    }
+    return Callees;
+  }
+
+  const i_t *getICFG() const { return ICF; }
+
+protected:
+  const i_t *ICF = nullptr;
+};
+
+} // namespace mono
+
+#endif // ANALYSIS_MONO_CORE_PROBLEM_H_

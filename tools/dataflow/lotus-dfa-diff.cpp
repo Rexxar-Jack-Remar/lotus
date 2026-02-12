@@ -49,10 +49,10 @@
 #include "Dataflow/IFDS/Clients/IFDSReachingDefinitions.h"
 #include "Dataflow/IFDS/Clients/IFDSUninitializedVariables.h"
 #include "Dataflow/IFDS/Solvers/IFDSSolver.h"
-#include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoConstantPropagation.h"
-#include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoUninitVariables.h"
-#include "Dataflow/Mono/Analyses/Intraprocedural/LiveVariablesAnalysis.h"
-#include "Dataflow/Mono/Analyses/Intraprocedural/ReachableAnalysis.h"
+#include "Dataflow/Mono/Analyses/Intra/ConstantPropagation.h"
+#include "Dataflow/Mono/Analyses/Intra/LiveVariables.h"
+#include "Dataflow/Mono/Analyses/Intra/Reachable.h"
+#include "Dataflow/Mono/Analyses/Intra/UninitVariables.h"
 
 #include <algorithm>
 #include <memory>

@@ -1,7 +1,7 @@
-#include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoFullConstantPropagation.h"
+#include "Dataflow/Mono/Analyses/Intra/FullConstantPropagation.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Dataflow/Mono/IntraMonoProblem.h"
+#include "Dataflow/Mono/Core/Problem.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"

@@ -1,8 +1,8 @@
-#include "Dataflow/Mono/Analyses/Interprocedural/InterMonoConstantPropagation.h"
+#include "Dataflow/Mono/Analyses/Inter/ConstantPropagation.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Dataflow/Mono/InterMonoProblem.h"
-#include "Dataflow/Mono/Solver/InterMonoSolver.h"
+#include "Dataflow/Mono/Core/Problem.h"
+#include "Dataflow/Mono/Solver/InterSolver.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"

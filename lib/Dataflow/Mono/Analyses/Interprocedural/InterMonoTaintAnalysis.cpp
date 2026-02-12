@@ -1,7 +1,8 @@
-#include "Dataflow/Mono/Analyses/Interprocedural/InterMonoTaintAnalysis.h"
+#include "Dataflow/Mono/Analyses/Inter/TaintAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
-#include "Dataflow/Mono/Solver/InterMonoSolver.h"
+#include "Dataflow/Mono/Container/Traits.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Solver/InterSolver.h"
 
 #include "llvm/IR/Instructions.h"
 
@@ -12,7 +13,7 @@ using namespace llvm;
 namespace mono {
 namespace {
 
-struct TaintDomain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+using TaintDomain = LLVMMonoAnalysisDomain<SetContainer<Value *>>;
 
 class InterMonoTaintProblem : public InterMonoProblem<TaintDomain> {
 public:
@@ -33,7 +34,7 @@ public:
   mono_container_t merge(const mono_container_t &Lhs,
                          const mono_container_t &Rhs) override {
     mono_container_t Out = Lhs;
-    Out.insert(Rhs.begin(), Rhs.end());
+    Out.unionWith(Rhs);
     return Out;
   }
 

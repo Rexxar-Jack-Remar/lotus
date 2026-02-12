@@ -1,8 +1,8 @@
 #ifndef ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_CONSTANTPROPAGATION_H_
 #define ANALYSIS_MONO_ANALYSES_INTRAPROCEDURAL_INTRAMONO_CONSTANTPROPAGATION_H_
 
-#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
-#include "Dataflow/Mono/Solver/IntraMonoSolver.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Solver/IntraSolver.h"
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"

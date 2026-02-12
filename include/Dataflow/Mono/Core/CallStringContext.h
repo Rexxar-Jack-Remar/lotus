@@ -1,5 +1,5 @@
-#ifndef ANALYSIS_MONO_CONTEXTS_CALLSTRINGCTX_H_
-#define ANALYSIS_MONO_CONTEXTS_CALLSTRINGCTX_H_
+#ifndef ANALYSIS_MONO_CORE_CALLSTRING_CONTEXT_H_
+#define ANALYSIS_MONO_CORE_CALLSTRING_CONTEXT_H_
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/IR/Value.h"
@@ -120,4 +120,4 @@ template <typename N, unsigned K> struct hash<mono::CallStringCTX<N, K>> {
 
 } // namespace std
 
-#endif // ANALYSIS_MONO_CONTEXTS_CALLSTRINGCTX_H_
+#endif // ANALYSIS_MONO_CORE_CALLSTRING_CONTEXT_H_

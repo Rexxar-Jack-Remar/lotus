@@ -1,7 +1,8 @@
-#include "Dataflow/Mono/Analyses/Intraprocedural/ReachableAnalysis.h"
-#include "Dataflow/Mono/IntraMonoProblem.h"
-#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
-#include "Dataflow/Mono/Solver/IntraMonoSolver.h"
+#include "Dataflow/Mono/Analyses/Intra/Reachable.h"
+#include "Dataflow/Mono/Container/Traits.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Core/Problem.h"
+#include "Dataflow/Mono/Solver/IntraSolver.h"
 
 using namespace llvm;
 
@@ -36,7 +37,7 @@ std::unique_ptr<DataFlowResult> runReachableAnalysis(
     return nullptr;
   }
 
-  struct ReachableDomain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+  using ReachableDomain = LLVMMonoAnalysisDomain<SetContainer<Value *>>;
   class ReachableProblem : public IntraMonoProblem<ReachableDomain> {
   public:
     ReachableProblem(Function *F, std::function<bool(Instruction *)> Filter)
@@ -46,28 +47,28 @@ std::unique_ptr<DataFlowResult> runReachableAnalysis(
       return ::dataflow::controlflow::FlowDirection::Backward;
     }
 
-    std::set<Value *> normalFlow(Instruction *Inst,
-                                 const std::set<Value *> &In) override {
-      std::set<Value *> Out = In;
+    mono_container_t normalFlow(Instruction *Inst,
+                                 const mono_container_t &In) override {
+      mono_container_t Out = In;
       if (Filter(Inst)) {
         Out.insert(Inst);
       }
       return Out;
     }
 
-    std::set<Value *> merge(const std::set<Value *> &Lhs,
-                            const std::set<Value *> &Rhs) override {
-      std::set<Value *> Out = Lhs;
-      Out.insert(Rhs.begin(), Rhs.end());
+    mono_container_t merge(const mono_container_t &Lhs,
+                            const mono_container_t &Rhs) override {
+      mono_container_t Out = Lhs;
+      Out.unionWith(Rhs);
       return Out;
     }
 
-    bool equal_to(const std::set<Value *> &Lhs,
-                  const std::set<Value *> &Rhs) override {
+    bool equal_to(const mono_container_t &Lhs,
+                  const mono_container_t &Rhs) override {
       return Lhs == Rhs;
     }
 
-    std::unordered_map<Instruction *, std::set<Value *>> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
       return {};
     }
 
@@ -83,8 +84,8 @@ std::unique_ptr<DataFlowResult> runReachableAnalysis(
   for (auto &BB : *f) {
     for (auto &Inst : BB) {
       auto *I = &Inst;
-      Result->OUT(I) = Solver.getInResultsAt(I);
-      Result->IN(I) = Solver.getOutResultsAt(I);
+      Result->OUT(I) = Solver.getInResultsAt(I).getSet();
+      Result->IN(I) = Solver.getOutResultsAt(I).getSet();
       if (filter(I)) {
         Result->GEN(I).insert(I);
       }

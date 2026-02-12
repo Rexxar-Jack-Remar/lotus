@@ -6,7 +6,7 @@
  */
 
 #include "Dataflow/WPDS/Clients/WPDSConstantPropagation.h"
-#include "Dataflow/Mono/DataFlowResult.h"
+#include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>

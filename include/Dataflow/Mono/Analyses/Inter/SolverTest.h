@@ -1,11 +1,11 @@
 #ifndef ANALYSIS_MONO_ANALYSES_INTERPROCEDURAL_INTERMONO_SOLVERTEST_H_
 #define ANALYSIS_MONO_ANALYSES_INTERPROCEDURAL_INTERMONO_SOLVERTEST_H_
 
-#include "Dataflow/Mono/LLVMMonoAnalysisDomain.h"
-#include "Dataflow/Mono/Solver/CallStringInterProceduralDataFlow.h"
+#include "Dataflow/Mono/Container/Traits.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Core/CallStringSolver.h"
 
 #include <memory>
-#include <set>
 
 namespace llvm {
 class Function;
@@ -15,13 +15,13 @@ class Value;
 
 namespace mono {
 
-struct InterMonoSolverTestDomain : LLVMMonoAnalysisDomain<std::set<llvm::Value *>> {
+struct InterMonoSolverTestDomain : LLVMMonoAnalysisDomain<SetContainer<llvm::Value *>> {
 };
 
 constexpr unsigned kDefaultInterMonoSolverTestCallStringLength = 2;
 using InterMonoSolverTestResult =
     dataflow::ContextSensitiveDataFlowResult<
-        kDefaultInterMonoSolverTestCallStringLength, std::set<llvm::Value *>>;
+        kDefaultInterMonoSolverTestCallStringLength, SetContainer<llvm::Value *>>;
 
 struct InterMonoSolverTestAnalysisResult {
   std::unique_ptr<InterMonoSolverTestResult> Results;

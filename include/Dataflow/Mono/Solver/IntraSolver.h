@@ -5,8 +5,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "Dataflow/ControlFlow/IntraCFG.h"
-#include "Dataflow/Mono/Debug/MonoDebug.h"
-#include "Dataflow/Mono/IntraMonoProblem.h"
+#include "Dataflow/Mono/Core/Problem.h"
+#include "Dataflow/Mono/Support/MonoDebug.h"
 
 #include <algorithm>
 #include <chrono>

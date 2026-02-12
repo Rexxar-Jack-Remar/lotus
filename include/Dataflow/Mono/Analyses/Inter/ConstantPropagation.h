@@ -1,8 +1,8 @@
 #ifndef ANALYSIS_MONO_ANALYSES_INTERPROCEDURAL_INTERMONO_CONSTANTPROPAGATION_H_
 #define ANALYSIS_MONO_ANALYSES_INTERPROCEDURAL_INTERMONO_CONSTANTPROPAGATION_H_
 
-#include "Dataflow/Mono/Analyses/Intraprocedural/IntraMonoConstantPropagation.h"
-#include "Dataflow/Mono/Solver/CallStringInterProceduralDataFlow.h"
+#include "Dataflow/Mono/Analyses/Intra/ConstantPropagation.h"
+#include "Dataflow/Mono/Core/CallStringSolver.h"
 
 #include <memory>
 

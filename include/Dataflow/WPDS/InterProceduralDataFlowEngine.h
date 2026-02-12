@@ -1,7 +1,7 @@
 #ifndef ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_
 #define ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_
 
-#include "Dataflow/Mono/DataFlow.h"
+#include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/GenKillTransformer.h"
 #include "Solvers/WPDS/CA.h"
 #include "Solvers/WPDS/WPDS.h"
