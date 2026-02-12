@@ -558,9 +558,13 @@ public:
   /**
    * @brief Get the nesting depth of a node in the control-dependence hierarchy.
    *
-   * The nesting depth is the number of control-dependence edges on the longest
-   * backward path to a FUNC_ENTRY node. This measures how deeply nested a
-   * statement is within control structures (if-statements, loops, etc.).
+   * The nesting depth is the number of control-dependence edges on the
+   * *shortest* backward path to a FUNC_ENTRY node (i.e. the closest function
+   * entry reachable by walking control-dependence edges backwards).
+   *
+   * This corresponds to “how many controlling predicates” guard the node in
+   * the PDG. If the PDG contains multiple interprocedural control edges, this
+   * measures nesting relative to the nearest reachable entry node.
    *
    * **Use cases:**
    * - **Complexity metrics**: Higher nesting depth = more complex control flow

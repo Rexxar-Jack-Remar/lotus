@@ -511,7 +511,9 @@ ControlDependenceQuery::controlRegion(Node &predicate_node, size_t max_depth) {
 
 size_t ControlDependenceQuery::nestingDepth(Node &node) {
   auto ctrl_edges = getControlEdgeTypes();
-  size_t depth = 0;
+  if (node.getNodeType() == GraphNodeType::FUNC_ENTRY)
+    return 0;
+
   std::unordered_set<Node *> visited;
   std::queue<std::pair<Node *, size_t>> worklist;
 
@@ -524,11 +526,9 @@ size_t ControlDependenceQuery::nestingDepth(Node &node) {
     size_t d = current_pair.second;
     worklist.pop();
 
-    // Check if this is a function entry node (root of control dep hierarchy).
-    if (current->getNodeType() == GraphNodeType::FUNC_ENTRY) {
-      depth = std::max(depth, d);
-      continue;
-    }
+    // First reachable FUNC_ENTRY in BFS gives the shortest distance.
+    if (current->getNodeType() == GraphNodeType::FUNC_ENTRY)
+      return d;
 
     for (auto *edge : current->getInEdgeSet()) {
       if (edge == nullptr)
@@ -545,7 +545,8 @@ size_t ControlDependenceQuery::nestingDepth(Node &node) {
     }
   }
 
-  return depth;
+  // No reachable entry via control-dependence edges.
+  return 0;
 }
 
 } // namespace pdg

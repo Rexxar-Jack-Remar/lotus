@@ -124,6 +124,8 @@ PDGDiffResult PDGDiff::diff(const NodeSet &old_nodes, const NodeSet &new_nodes,
   // Determine which matcher to use.
   bool use_pointer_eq = !_matcher;
 
+  std::unordered_map<Node *, Node *> old_to_new;
+
   if (use_pointer_eq) {
     // Fast path: pointer equality.
     for (Node *n : old_nodes) {
@@ -137,7 +139,8 @@ PDGDiffResult PDGDiff::diff(const NodeSet &old_nodes, const NodeSet &new_nodes,
         result.node_diffs.push_back({n, DiffKind::ADDED});
     }
   } else {
-    // Custom matcher: build a matching between old and new nodes.
+    // Custom matcher: build a consistent old->new node matching and reuse it
+    // for both node and edge diff.
     std::unordered_set<Node *> matched_new;
     for (Node *o : old_nodes) {
       bool found = false;
@@ -146,6 +149,7 @@ PDGDiffResult PDGDiff::diff(const NodeSet &old_nodes, const NodeSet &new_nodes,
           continue;
         if (_matcher(o, n)) {
           result.node_diffs.push_back({o, DiffKind::PRESERVED});
+          old_to_new[o] = n;
           matched_new.insert(n);
           found = true;
           break;
@@ -165,47 +169,38 @@ PDGDiffResult PDGDiff::diff(const NodeSet &old_nodes, const NodeSet &new_nodes,
   auto new_edges = collectInducedEdges(new_nodes, edge_types);
 
   if (use_pointer_eq) {
-    // Build an identity set from old edges.
-    std::unordered_set<EdgeIdentity, EdgeIdentityHash> old_id_set;
+    // Compare edges by (src,dst,type) identity, preserving multiplicity.
+    std::unordered_map<EdgeIdentity, size_t, EdgeIdentityHash> old_counts;
+    std::unordered_map<EdgeIdentity, size_t, EdgeIdentityHash> new_counts;
     for (Edge *e : old_edges)
-      old_id_set.insert({e->getSrcNode(), e->getDstNode(), e->getEdgeType()});
-
-    std::unordered_set<EdgeIdentity, EdgeIdentityHash> new_id_set;
+      old_counts[{e->getSrcNode(), e->getDstNode(), e->getEdgeType()}]++;
     for (Edge *e : new_edges)
-      new_id_set.insert({e->getSrcNode(), e->getDstNode(), e->getEdgeType()});
+      new_counts[{e->getSrcNode(), e->getDstNode(), e->getEdgeType()}]++;
 
     for (Edge *e : old_edges) {
       EdgeIdentity eid{e->getSrcNode(), e->getDstNode(), e->getEdgeType()};
-      if (new_id_set.count(eid))
+      auto it = new_counts.find(eid);
+      if (it != new_counts.end() && it->second > 0) {
         result.edge_diffs.push_back({e, DiffKind::PRESERVED});
-      else
+        it->second--;
+      } else {
         result.edge_diffs.push_back({e, DiffKind::REMOVED});
+      }
     }
     for (Edge *e : new_edges) {
       EdgeIdentity eid{e->getSrcNode(), e->getDstNode(), e->getEdgeType()};
-      if (old_id_set.count(eid) == 0)
+      auto it = old_counts.find(eid);
+      if (it != old_counts.end() && it->second > 0) {
+        it->second--;
+        continue;
+      }
+      {
         result.edge_diffs.push_back({e, DiffKind::ADDED});
-    }
-  } else {
-    // With custom matcher, edge diff is more complex -- for now treat edges
-    // whose (src, dst) are both PRESERVED (matched) and same type as PRESERVED.
-    // Build mapping: old-node -> matched-new-node.
-    std::unordered_map<Node *, Node *> old_to_new;
-    {
-      std::unordered_set<Node *> used_new;
-      for (Node *o : old_nodes) {
-        for (Node *n : new_nodes) {
-          if (used_new.count(n))
-            continue;
-          if (_matcher(o, n)) {
-            old_to_new[o] = n;
-            used_new.insert(n);
-            break;
-          }
-        }
       }
     }
-
+  } else {
+    // With custom matcher, treat an old edge as PRESERVED if its endpoints are
+    // matched and there exists a corresponding new edge with the same type.
     std::set<Edge *> matched_new_edges;
     for (Edge *oe : old_edges) {
       auto src_it = old_to_new.find(oe->getSrcNode());

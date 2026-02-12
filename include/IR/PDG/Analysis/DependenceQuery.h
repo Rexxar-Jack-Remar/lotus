@@ -96,6 +96,7 @@ struct DependenceResult {
 class PairwiseDependence {
 public:
   using NodeSet = std::set<Node *>;
+  using DirectDepMap = std::unordered_map<Node *, std::set<EdgeType>>;
 
   /**
    * @brief Constructor
@@ -139,17 +140,18 @@ public:
    * @param forward True to get outgoing dependences (successors),
    *                false to get incoming dependences (predecessors)
    * @param edge_types Allowed edge types (empty = all types)
-   * @return Map from neighbor node to the edge type connecting them
+   * @return Map from neighbor node to the set of edge types connecting them
    *
    * Example:
    * @code
    *   auto deps = dep.directDependences(node, true);
-   *   for (auto [neighbor, edge_type] : deps) {
-   *     errs() << "Direct dependence via " << edge_type << "\n";
+   *   for (auto &[neighbor, edge_types] : deps) {
+   *     for (auto edge_type : edge_types)
+   *       errs() << "Direct dependence via " << edge_type << "\n";
    *   }
    * @endcode
    */
-  std::unordered_map<Node *, EdgeType>
+  DirectDepMap
   directDependences(Node &node, bool forward,
                     const std::set<EdgeType> &edge_types = {});
 

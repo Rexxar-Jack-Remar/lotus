@@ -119,10 +119,10 @@ PairwiseDependence::query(Node &source, Node &target,
   return result;
 }
 
-std::unordered_map<Node *, EdgeType>
+PairwiseDependence::DirectDepMap
 PairwiseDependence::directDependences(Node &node, bool forward,
                                       const std::set<EdgeType> &edge_types) {
-  std::unordered_map<Node *, EdgeType> result;
+  DirectDepMap result;
   auto &edges = forward ? node.getOutEdgeSet() : node.getInEdgeSet();
 
   for (auto *edge : edges) {
@@ -133,7 +133,7 @@ PairwiseDependence::directDependences(Node &node, bool forward,
 
     Node *neighbor = forward ? edge->getDstNode() : edge->getSrcNode();
     if (neighbor != nullptr)
-      result.emplace(neighbor, edge->getEdgeType());
+      result[neighbor].insert(edge->getEdgeType());
   }
 
   return result;
