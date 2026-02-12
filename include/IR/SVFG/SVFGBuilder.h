@@ -44,6 +44,7 @@
 
 #include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFG.h"
+#include "IR/SVFG/PointsToSetHash.h"
 
 #include <limits>
 #include <memory>
@@ -188,7 +189,9 @@ private:
   /// derived from (field-sensitive) points-to regions, not from pointer SSA
   /// values. To approximate that invariant without SVFIR, we memoize a stable
   /// memReg ID per points-to set key.
-  std::unordered_map<std::string, uint32_t> ptsKeyToMemReg;
+  ///
+  /// Uses hash-based lookup (O(1)) instead of string construction (O(n)).
+  std::unordered_map<SVFGNodeBS, uint32_t, PointsToSetHash, PointsToSetEqual> ptsToMemReg;
 
   /// @brief Alloca instruction to memory region mapping
   std::unordered_map<const llvm::AllocaInst *, uint32_t> allocaToMemReg;
@@ -272,9 +275,25 @@ public:
   SVFG *build(const ICFG *icfg);
 
   /// @brief Get object IDs for a pointer/alloc value using PTA (best-effort).
+  ///
+  /// AserPTA supports field-sensitive analysis via FSMemModel. When
+  /// field-sensitivity is enabled (default), this returns:
+  /// - For stack/heap allocations: one object ID per field accessed via GEP
+  /// - For function pointers: the function object
+  /// - For globals: field-sensitive objects if struct type
+  ///
+  /// Field-insensitive fallback (FIMemModel or large objects) returns a single
+  /// base object ID for all fields.
   SVFGNodeBS getObjectIdsForValue(const llvm::Value *ptr);
 
   /// @brief Map base object + GEP to field object ID (field-sensitive if possible).
+  ///
+  /// Returns the field-sensitive object for GEP-derived pointer when:
+  /// 1. FSMemModel is active (config.memModelType == FieldSensitive)
+  /// 2. Base object is not marked field-insensitive
+  /// 3. GEP has constant indices (PTA can compute field offset)
+  ///
+  /// Otherwise returns base object ID or 0 if lookup fails.
   uint32_t getGepObjectId(uint32_t baseObjId, const llvm::GetElementPtrInst *gep);
 
   /// @brief Get or create a field-insensitive object ID for base object.

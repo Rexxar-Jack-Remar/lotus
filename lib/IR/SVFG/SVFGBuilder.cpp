@@ -242,7 +242,7 @@ void SVFGBuilder::initialize(const ICFG *cfg) {
   nextObjId = kObjIdBase;
   objIdToMemReg.clear();
   memRegToObjId.clear();
-  ptsKeyToMemReg.clear();
+  ptsToMemReg.clear();
   memRegVersion.clear();
   bbToMemPhi.clear();
   argToMemRegs.clear();
@@ -375,23 +375,13 @@ uint32_t SVFGBuilder::getOrCreateMemRegForPointsTo(const SVFGNodeBS &pts) {
     return 0;
   }
 
-  std::string key;
-  key.reserve(pts.size() * 6);
-  bool first = true;
-  for (uint32_t id : pts) {
-    if (!first)
-      key.push_back(',');
-    first = false;
-    key.append(std::to_string(id));
-  }
-
-  auto it = ptsKeyToMemReg.find(key);
-  if (it != ptsKeyToMemReg.end()) {
+  auto it = ptsToMemReg.find(pts);
+  if (it != ptsToMemReg.end()) {
     return it->second;
   }
 
   const uint32_t memRegId = nextMemRegId++;
-  ptsKeyToMemReg.emplace(std::move(key), memRegId);
+  ptsToMemReg.emplace(pts, memRegId);
   return memRegId;
 }
 
@@ -505,16 +495,41 @@ uint32_t SVFGBuilder::getGepObjectId(uint32_t baseObjId,
                                      const GetElementPtrInst *gep) {
   if (!gep || baseObjId == 0)
     return 0;
+
+  // Early return if PTA is unavailable
   if (!config.usePointerAnalysis || !ptaSolverWrapper || !ptaSolverWrapper->solver)
-    return 0;
-  if (svfg && (svfg->isUnknownObject(baseObjId) || svfg->isFieldInsensitiveObject(baseObjId)))
     return baseObjId;
+
+  // Check field-insensitivity markers (heap objects with unknown size, large structs)
+  if (svfg && (svfg->isUnknownObject(baseObjId) || 
+               svfg->isFieldInsensitiveObject(baseObjId)))
+    return baseObjId;
+
+  // Field-insensitive memory model bypasses field analysis
+  if (config.memModelType == SVFGBuilderConfig::MemModelType::FieldInsensitive)
+    return baseObjId;
+
+  // GEP with non-constant indices falls back to base object (array element tracking)
+  bool hasConstantIndices = true;
+  for (auto &idx : gep->indices()) {
+    if (!isa<ConstantInt>(idx)) {
+      hasConstantIndices = false;
+      break;
+    }
+  }
+  if (!hasConstantIndices) {
+    // Arrays: treat as field-insensitive when indices are symbolic
+    return baseObjId;
+  }
+
   auto it = objIdToPTAObject.find(baseObjId);
   if (it == objIdToPTAObject.end())
-    return 0;
+    return baseObjId;
+
   const FSObjectTy *baseObj = static_cast<const FSObjectTy *>(it->second);
   if (!baseObj)
-    return 0;
+    return baseObjId;
+
   ObjNodeTy *objNode = baseObj->getObjNode();
   if (!objNode)
     return 0;

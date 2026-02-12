@@ -351,27 +351,62 @@ bool SVFGOPT::handleSelfCycleEdges(const MSSAPhiSVFGNode *node) {
   if (!node)
     return false;
 
+  // Detect self-cycle: edge from node to itself
   bool hasSelfCycle = false;
-  const auto inEdges = node->getInEdges();
-  for (SVFGEdge *edge : inEdges) {
-    if (!edge || edge->getSrcNode() != edge->getDstNode())
-      continue;
+  SVFGEdge *callEdge = nullptr;
+  SVFGEdge *retEdge = nullptr;
 
-    if (keepAllSelfCycle) {
+  // Check all edges for self-cycles
+  for (SVFGEdge *edge : node->getInEdges()) {
+    if (edge && edge->getSrcNode() == node && edge->getDstNode() == node) {
       hasSelfCycle = true;
-      break;
+      if (edge->getEdgeKind() == SVFGEdgeK::CallInd)
+        callEdge = edge;
     }
+  }
 
-    if (keepContextSelfCycle &&
-        (edge->getEdgeKind() == SVFGEdgeK::CallInd ||
-         edge->getEdgeKind() == SVFGEdgeK::RetInd)) {
+  for (SVFGEdge *edge : node->getOutEdges()) {
+    if (edge && edge->getSrcNode() == node && edge->getDstNode() == node) {
       hasSelfCycle = true;
-      continue;
+      if (edge->getEdgeKind() == SVFGEdgeK::RetInd)
+        retEdge = edge;
     }
+  }
 
+  if (!hasSelfCycle)
+    return false;
+
+  // Record call-return self-cycle for analysis
+  if (callEdge && retEdge) {
+    selfCycles.emplace_back(node, callEdge, retEdge);
+  }
+
+  // Policy: keep all self-cycles
+  if (keepAllSelfCycle)
+    return true;
+
+  // Policy: keep context-sensitive self-cycles (call-return pairs)
+  if (keepContextSelfCycle && callEdge && retEdge)
+    return true;
+
+  // Remove self-cycle edges
+  std::vector<SVFGEdge *> toRemove;
+  for (SVFGEdge *edge : node->getInEdges()) {
+    if (edge && edge->getSrcNode() == node && edge->getDstNode() == node) {
+      toRemove.push_back(edge);
+    }
+  }
+  for (SVFGEdge *edge : node->getOutEdges()) {
+    if (edge && edge->getSrcNode() == node && edge->getDstNode() == node) {
+      toRemove.push_back(edge);
+    }
+  }
+
+  for (SVFGEdge *edge : toRemove) {
     removeEdge(edge);
   }
-  return hasSelfCycle;
+
+  return false; // Allow further processing
 }
 
 void SVFGOPT::initialWorkList() {

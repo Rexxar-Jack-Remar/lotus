@@ -51,6 +51,12 @@ void SVFGStats::printStat(const std::string &title) {
             << ", Avg Ind Out: " << avgIndOutDegree << "\n";
   std::cout << "  Max Ind In: " << maxIndInDegree
             << ", Max Ind Out: " << maxIndOutDegree << "\n";
+
+  if (!sccRep.empty()) {
+    std::cout << "Strongly Connected Components:\n";
+    std::cout << "  Total SCCs: " << getNumSCCs() << "\n";
+    std::cout << "  Nodes in cycles: " << cycleNodes.size() << "\n";
+  }
 }
 
 void SVFGStats::startTopLevelNodeTimer() {
@@ -422,4 +428,34 @@ uint32_t SVFGStats::getSCCRep(uint32_t nodeId) {
 
 bool SVFGStats::nodeInCycle(uint32_t nodeId) {
   return cycleNodes.count(nodeId) != 0;
+}
+
+uint32_t SVFGStats::getSCCSize(uint32_t nodeId) const {
+  uint32_t rep = getSCCRepNode(nodeId);
+  uint32_t count = 0;
+  for (const auto &pair : sccRep) {
+    if (pair.second == rep) {
+      count++;
+    }
+  }
+  return count;
+}
+
+std::vector<uint32_t> SVFGStats::getNodesInSCC(uint32_t nodeId) const {
+  std::vector<uint32_t> result;
+  uint32_t rep = getSCCRepNode(nodeId);
+  for (const auto &pair : sccRep) {
+    if (pair.second == rep) {
+      result.push_back(pair.first);
+    }
+  }
+  return result;
+}
+
+uint32_t SVFGStats::getNumSCCs() const {
+  std::unordered_set<uint32_t> uniqueReps;
+  for (const auto &pair : sccRep) {
+    uniqueReps.insert(pair.second);
+  }
+  return uniqueReps.size();
 }

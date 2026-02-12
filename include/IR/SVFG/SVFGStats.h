@@ -52,6 +52,15 @@ public:
   /// @brief True if \p edge's src and dst are in the same SVFG SCC.
   bool isEdgeInSVFGSCC(const SVFGEdge *edge) const;
 
+  /// @brief Get number of nodes in a strongly connected component
+  uint32_t getSCCSize(uint32_t nodeId) const;
+
+  /// @brief Get all nodes in the same SCC as the given node
+  std::vector<uint32_t> getNodesInSCC(uint32_t nodeId) const;
+
+  /// @brief Get number of SCCs in the graph
+  uint32_t getNumSCCs() const;
+
  private:
   void clear();
   void processGraph();
