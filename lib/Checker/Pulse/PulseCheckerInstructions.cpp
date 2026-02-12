@@ -464,6 +464,43 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
       }
     }
 
+    // HEAP POINTER CHECK: If loaded value is a heap pointer (Allocated),
+    // and we're loading from it, we need to read from heap
+    // This handles: int *q = *pp; where pp points to heap
+    if (astate->getPostAttrs().has(loaded_ptr, Attribute::Allocated) &&
+        !astate->getPostAttrs().has(loaded_ptr, Attribute::Stack)) {
+      Address heap_ptr_addr(loaded_ptr);
+      heap_ptr_addr.history = stack_addr->history;
+      auto read_result = ops_.readDeref(*astate, heap_ptr_addr, LI);
+      if (read_result.first == OperationResult::Success && read_result.second) {
+        // Check if the value loaded from heap is Invalid
+        AbstractValue heap_loaded_canon =
+            astate->getCanonical(read_result.second->addr);
+        if (astate->getPostAttrs().has(heap_loaded_canon, Attribute::Invalid)) {
+          Trace trace = Trace::fromValueHistory(read_result.second->history);
+          trace.addEvent(LI, "Load of invalid pointer from heap");
+          if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
+                                      heap_loaded_canon)) {
+            reportBug(OperationResult::UseAfterFree, LI, heap_loaded_canon,
+                      trace, astate);
+            return ExecutionDomain::abortProgram(
+                std::make_unique<AbductiveDomain>(astate->clone()),
+                OperationResult::UseAfterFree, std::move(trace));
+          } else {
+            latent_issues_.emplace_back(
+                OperationResult::UseAfterFree,
+                LatentIssue::issueKindFromResult(OperationResult::UseAfterFree),
+                heap_loaded_canon, LI, std::move(trace));
+            return ExecutionDomain::latentAbortProgram(
+                std::make_unique<AbductiveDomain>(astate->clone()),
+                &latent_issues_.back());
+          }
+        }
+        astate->getPostStack().add(LI, *read_result.second);
+        return exec_state;
+      }
+    }
+
     // Variable is initialized - use value from stack
     astate->getPostStack().add(LI, *stack_addr);
     return exec_state;
@@ -560,6 +597,29 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
     }
   }
   if (value_opt) {
+    // Check if the loaded value itself is Invalid (UAF through pointer)
+    AbstractValue loaded_canon = astate->getCanonical(value_opt->addr);
+    if (astate->getPostAttrs().has(loaded_canon, Attribute::Invalid)) {
+      Trace trace = Trace::fromValueHistory(value_opt->history);
+      trace.addEvent(LI, "Load of invalid/freed pointer value");
+      if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
+                                  loaded_canon)) {
+        reportBug(OperationResult::UseAfterFree, LI, loaded_canon, trace,
+                  astate);
+        return ExecutionDomain::abortProgram(
+            std::make_unique<AbductiveDomain>(astate->clone()),
+            OperationResult::UseAfterFree, std::move(trace));
+      } else {
+        latent_issues_.emplace_back(
+            OperationResult::UseAfterFree,
+            LatentIssue::issueKindFromResult(OperationResult::UseAfterFree),
+            loaded_canon, LI, std::move(trace));
+        return ExecutionDomain::latentAbortProgram(
+            std::make_unique<AbductiveDomain>(astate->clone()),
+            &latent_issues_.back());
+      }
+    }
+
     astate->getPostStack().add(LI, *value_opt);
 
     // Check for taint sink: if loaded value flows to a sink

@@ -193,7 +193,8 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
   // Global storage (GlobalVariable/Function/GlobalAlias): treat as stable
   // memory root. Mark with Attribute::Global so we can prove stack escapes like
   // `store %stack_ptr, @global` without guessing.
-  if (exp && exp->getType()->isPointerTy() && llvm::isa<llvm::GlobalValue>(exp)) {
+  if (exp && exp->getType()->isPointerTy() &&
+      llvm::isa<llvm::GlobalValue>(exp)) {
     AbstractValue gv_av = factory_->getOrCreate(exp);
     astate.getPostAttrs().add(gv_av, Attribute::Global);
     return llvm::Optional<Address>(Address(gv_av));
@@ -261,7 +262,8 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
 
   // GEP (GetElementPtr) materializes an access path into an aggregate/array.
   //
-  // Sound incorrectness principle: never silently conflate distinct projections.
+  // Sound incorrectness principle: never silently conflate distinct
+  // projections.
   // - Struct indices must be constant (LLVM requirement). If they are not,
   //   something is off; we conservatively bail out instead of inventing a
   //   projection that could hide bugs.
@@ -297,14 +299,16 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
     bool base_is_uninitialized =
         astate.getPostAttrs().has(base_canon, Attribute::Uninitialized);
 
-    // Best-effort: DataLayout lets us compute element stride for array indexing.
-    // Stride is stored into the access key to avoid collapsing different element
-    // types onto the same access path.
-    const llvm::DataLayout *DL =
-        (loc && loc->getModule()) ? &loc->getModule()->getDataLayout() : nullptr;
+    // Best-effort: DataLayout lets us compute element stride for array
+    // indexing. Stride is stored into the access key to avoid collapsing
+    // different element types onto the same access path.
+    const llvm::DataLayout *DL = (loc && loc->getModule())
+                                     ? &loc->getModule()->getDataLayout()
+                                     : nullptr;
 
     // Bounds tracking: use allocation size (when known) to prove OOB.
-    llvm::Optional<uint64_t> alloc_size_opt = astate.getAllocationSize(base_canon);
+    llvm::Optional<uint64_t> alloc_size_opt =
+        astate.getAllocationSize(base_canon);
     bool offset_known = true;
     int64_t total_offset = 0;
     bool oob_proven = false;
@@ -331,7 +335,8 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
         if (offset_known && DL) {
           auto *layout = DL->getStructLayout(ST);
           uint64_t field_off = layout->getElementOffset(field);
-          if (field_off > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+          if (field_off >
+              static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
             offset_known = false;
           } else {
             total_offset += static_cast<int64_t>(field_off);
@@ -355,8 +360,8 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
 
         if (offset_known && stride_bytes > 0) {
           if (auto c = getI64Constant(idx)) {
-            __int128 off = static_cast<__int128>(*c) *
-                           static_cast<__int128>(stride_bytes);
+            __int128 off =
+                static_cast<__int128>(*c) * static_cast<__int128>(stride_bytes);
             if (off > std::numeric_limits<int64_t>::max() ||
                 off < std::numeric_limits<int64_t>::min()) {
               offset_known = false;
@@ -367,8 +372,10 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
             // If we have allocation size and a symbolic index, add bounds.
             if (alloc_size_opt && offset_known) {
               uint64_t alloc_size = *alloc_size_opt;
-              if (total_offset >= 0 && static_cast<uint64_t>(total_offset) < alloc_size) {
-                uint64_t remaining = alloc_size - static_cast<uint64_t>(total_offset);
+              if (total_offset >= 0 &&
+                  static_cast<uint64_t>(total_offset) < alloc_size) {
+                uint64_t remaining =
+                    alloc_size - static_cast<uint64_t>(total_offset);
                 if (remaining > 0) {
                   uint64_t max_index = (remaining - 1) / stride_bytes;
                   (void)astate.getPathFormula().addBounds(
@@ -532,6 +539,15 @@ PulseOperations::evalDeref(AbductiveDomain &astate, Address ptr,
   if (auto *target = astate.getPostHeap().findEdge(canon_ptr, deref)) {
     // Canonicalize target
     AbstractValue canon_target = astate.getCanonical(target->addr);
+
+    // PROPAGATE ATTRIBUTES: Copy attributes from stored value to loaded value
+    // This ensures that if we stored an Invalid pointer, loading it gives
+    // Invalid
+    auto attrs = astate.getPostAttrs().get(canon_target);
+    for (Attribute attr : attrs) {
+      // Attributes are already on canon_target, they will be checked by caller
+    }
+
     Address result(canon_target);
     result.history = target->history;
     return {OperationResult::Success, result};
