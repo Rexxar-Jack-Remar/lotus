@@ -13,6 +13,7 @@ target_link_libraries(lotus-gvfa PRIVATE
   CanaryReport
   Annotation
   CanaryDyckAA
+  CanaryNullPointer
   ${LLVM_LINK_COMPONENTS}
 )
 
@@ -54,6 +55,7 @@ target_link_libraries(lotus-pulse PRIVATE
   CanaryAliasAnalysisWrapper
   CanaryReport
   ${LLVM_LINK_COMPONENTS}
+  ${Z3_LIBRARIES}
 )
 
 # FiTx Bug Finder Tool (runs all FiTx checkers: df, dl, dul, leak, ref_count, uaf, etc.)

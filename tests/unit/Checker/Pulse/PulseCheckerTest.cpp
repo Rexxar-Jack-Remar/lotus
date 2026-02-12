@@ -8,7 +8,7 @@
  * - Uninitialized variable detection
  */
 
-#include "Checker/Pulse/PulseChecker.h"
+#include "Checker/Pulse/Checker/PulseChecker.h"
 #include "Checker/Report/BugReportMgr.h"
 
 #include <llvm/AsmParser/Parser.h>

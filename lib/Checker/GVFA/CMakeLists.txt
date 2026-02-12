@@ -12,6 +12,4 @@ set(GVFAChecker_SOURCES
 add_library(GVFAChecker STATIC ${GVFAChecker_SOURCES})
 target_link_libraries(GVFAChecker
   GVFA
-  CanaryNullPointer
-  CanaryReport
 )

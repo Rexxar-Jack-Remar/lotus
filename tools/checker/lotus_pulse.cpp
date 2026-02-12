@@ -6,9 +6,9 @@
  */
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Checker/Pulse/PulseChecker.h"
-#include "Checker/Pulse/PulseLogger.h"
-#include "Checker/Pulse/PulseOptions.h"
+#include "Checker/Pulse/Checker/PulseChecker.h"
+#include "Checker/Pulse/Report/PulseLogger.h"
+#include "Checker/Pulse/Report/PulseOptions.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"

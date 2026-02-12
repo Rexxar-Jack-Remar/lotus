@@ -1,4 +1,4 @@
-#include "Checker/Pulse/PulseFormula.h"
+#include "Checker/Pulse/Core/PulseFormula.h"
 #include <gtest/gtest.h>
 
 namespace pulse {
