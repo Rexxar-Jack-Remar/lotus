@@ -15,9 +15,9 @@
 #include <unistd.h>
 #include <vector>
 
-#include "IR/PDG/Slicing.h"
-#include "IR/PDG/ContextSensitiveSlicing.h"
-#include "IR/PDG/PDGCallGraph.h"
+#include "IR/PDG/Analysis/Slicing.h"
+#include "IR/PDG/Analysis/ContextSensitiveSlicing.h"
+#include "IR/PDG/Core/PDGCallGraph.h"
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"

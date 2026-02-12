@@ -24,10 +24,10 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "IR/PDG/ControlDependencyGraph.h"
-#include "IR/PDG/CypherQuery.h"
-#include "IR/PDG/DataDependencyGraph.h"
-#include "IR/PDG/ProgramDependencyGraph.h"
+#include "IR/PDG/Core/ControlDependencyGraph.h"
+#include "IR/PDG/Analysis/CypherQuery.h"
+#include "IR/PDG/Core/DataDependencyGraph.h"
+#include "IR/PDG/Core/ProgramDependencyGraph.h"
 
 #include <algorithm>
 #include <chrono>

@@ -1,11 +1,11 @@
-#include "IR/PDG/CypherQuery.h"
+#include "IR/PDG/Analysis/CypherQuery.h"
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/SourceMgr.h"
 
-#include "IR/PDG/ProgramDependencyGraph.h"
+#include "IR/PDG/Core/ProgramDependencyGraph.h"
 
 #include <iostream>
 #include <sstream>

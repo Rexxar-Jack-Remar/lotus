@@ -5,20 +5,23 @@
 # 
 
 add_library(CanaryPDG STATIC
-  CallWrapper.cpp
-  ContextSensitiveSlicing.cpp
-  ControlDependencyGraph.cpp
-  DataDependencyGraph.cpp
-  DebugInfoUtils.cpp
-  FunctionWrapper.cpp
-  Graph.cpp
-  GraphWriter.cpp
-  PDGCallGraph.cpp
-  PDGNode.cpp
-  PDGUtils.cpp
-  ProgramDependencyGraph.cpp
-  CypherQuery.cpp
-  Slicing.cpp
-  ThinSlicing.cpp
-  Tree.cpp
+  Core/CallWrapper.cpp
+  Core/ControlDependencyGraph.cpp
+  Core/DataDependencyGraph.cpp
+  Core/FunctionWrapper.cpp
+  Core/Graph.cpp
+  Core/PDGCallGraph.cpp
+  Core/PDGNode.cpp
+  Core/ProgramDependencyGraph.cpp
+  Core/Tree.cpp
+  Analysis/ContextSensitiveSlicing.cpp
+  Analysis/CypherQuery.cpp
+  Analysis/DataFlowQuery.cpp
+  Analysis/DependenceQuery.cpp
+  Analysis/PDGDiff.cpp
+  Analysis/Slicing.cpp
+  Analysis/ThinSlicing.cpp
+  Support/DebugInfoUtils.cpp
+  Support/GraphWriter.cpp
+  Support/PDGUtils.cpp
 ) 

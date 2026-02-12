@@ -6,9 +6,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "IR/PDG/ProgramDependencyGraph.h"
-#include "IR/PDG/PDGCallGraph.h"
-#include "IR/PDG/DataDependencyGraph.h"
-#include "IR/PDG/ControlDependencyGraph.h"
+#include "IR/PDG/Core/PDGCallGraph.h"
+#include "IR/PDG/Core/DataDependencyGraph.h"
+#include "IR/PDG/Core/ControlDependencyGraph.h"
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"

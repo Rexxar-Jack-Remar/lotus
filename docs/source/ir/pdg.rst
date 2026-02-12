@@ -30,7 +30,7 @@ PDG is exposed as an LLVM ``ModulePass``. A typical usage pattern:
 
 .. code-block:: cpp
 
-   #include "IR/PDG/ProgramDependencyGraph.h"
+   #include "IR/PDG/Core/ProgramDependencyGraph.h"
    using namespace llvm;
    using namespace pdg;
 

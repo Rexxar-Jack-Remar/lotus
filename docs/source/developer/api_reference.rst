@@ -189,8 +189,8 @@ Include headers:
 
 .. code-block:: cpp
 
-   #include "IR/PDG/ProgramDependencyGraph.h"
-   #include "IR/PDG/Graph.h"
+   #include "IR/PDG/Core/ProgramDependencyGraph.h"
+   #include "IR/PDG/Core/Graph.h"
 
 Build PDG:
 
@@ -260,8 +260,8 @@ Include headers:
 
 .. code-block:: cpp
 
-   #include "IR/PDG/CypherQuery.h"
-   #include "IR/PDG/ProgramDependencyGraph.h"
+   #include "IR/PDG/Analysis/CypherQuery.h"
+   #include "IR/PDG/Core/ProgramDependencyGraph.h"
 
 Parse and execute Cypher queries:
 
@@ -690,7 +690,7 @@ Include headers:
 
 .. code-block:: cpp
 
-   #include "IR/PDG/PDGCallGraph.h"
+   #include "IR/PDG/Core/PDGCallGraph.h"
 
 Build and query call graph:
 
@@ -775,7 +775,7 @@ Here's a complete example of building a custom analysis tool:
    #include "llvm/Support/SourceMgr.h"
    #include "llvm/IR/LegacyPassManager.h"
    #include "Alias/DyckAA/DyckAliasAnalysis.h"
-   #include "IR/PDG/ProgramDependencyGraph.h"
+   #include "IR/PDG/Core/ProgramDependencyGraph.h"
    #include "Dataflow/TaintAnalysis/TaintAnalysis.h"
    #include "Checker/KINT/MKintPass.h"
    

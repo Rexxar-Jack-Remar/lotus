@@ -25,7 +25,7 @@ The PDG is field-sensitive, context-insensitive, and flow-insensitive, designed 
 ## Usage
 
 ```cpp
-#include "IR/PDG/ProgramDependencyGraph.h"
+#include "IR/PDG/Core/ProgramDependencyGraph.h"
 
 // Run PDG passes
 legacy::PassManager PM;
