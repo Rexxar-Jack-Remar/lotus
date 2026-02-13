@@ -17,12 +17,12 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils.h"
 
-#include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationAvailableExpressions.h"
-#include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationConstantPropagation.h"
-#include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationLiveVariables.h"
-#include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationReachable.h"
-#include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationReachingDefinitions.h"
-#include "Dataflow/Elimination/Analyses/Intraprocedural/EliminationUninitVariables.h"
+#include "Dataflow/Elimination/Analyses/Intra/IntraAvailableExpressions.h"
+#include "Dataflow/Elimination/Analyses/Intra/IntraConstantPropagation.h"
+#include "Dataflow/Elimination/Analyses/Intra/IntraLiveVariables.h"
+#include "Dataflow/Elimination/Analyses/Intra/IntraReachable.h"
+#include "Dataflow/Elimination/Analyses/Intra/IntraReachingDefinitions.h"
+#include "Dataflow/Elimination/Analyses/Intra/IntraUninitVariables.h"
 
 #include <algorithm>
 #include <memory>

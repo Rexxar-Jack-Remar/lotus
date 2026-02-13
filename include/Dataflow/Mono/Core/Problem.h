@@ -1,5 +1,5 @@
-#ifndef ANALYSIS_MONO_CORE_PROBLEM_H_
-#define ANALYSIS_MONO_CORE_PROBLEM_H_
+#ifndef LOTUS_DATAFLOW_MONO_CORE_PROBLEM_H_
+#define LOTUS_DATAFLOW_MONO_CORE_PROBLEM_H_
 
 #include "Dataflow/ControlFlow/FlowDirection.h"
 #include "Dataflow/ControlFlow/InterCFG.h"
@@ -293,4 +293,4 @@ protected:
 
 } // namespace mono
 
-#endif // ANALYSIS_MONO_CORE_PROBLEM_H_
+#endif // LOTUS_DATAFLOW_MONO_CORE_PROBLEM_H_

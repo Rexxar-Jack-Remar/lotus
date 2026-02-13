@@ -5,7 +5,7 @@
 // Uses PostDominatorTree: dominators in the backward CFG = post-dominators in
 // the forward CFG. Provides reducible view for efficient ADT algorithms.
 
-#include "Dataflow/Elimination/EliminationFramework.h"
+#include "Dataflow/Elimination/Core/Framework.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/Elimination/LLVM/LLVMEliminationProblem.h"
 

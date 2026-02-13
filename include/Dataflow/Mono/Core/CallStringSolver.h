@@ -296,8 +296,8 @@
  * @see ContextSensitiveDataFlowResult for result container details
  */
 
-#ifndef ANALYSIS_MONO_CORE_CALLSTRING_SOLVER_H_
-#define ANALYSIS_MONO_CORE_CALLSTRING_SOLVER_H_
+#ifndef LOTUS_DATAFLOW_MONO_CORE_CALLSTRINGSOLVER_H_
+#define LOTUS_DATAFLOW_MONO_CORE_CALLSTRINGSOLVER_H_
 
 #include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/ControlFlow/FlowDirection.h"
@@ -968,4 +968,4 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
 
 } // namespace dataflow
 
-#endif // ANALYSIS_MONO_CORE_CALLSTRING_SOLVER_H_
+#endif // LOTUS_DATAFLOW_MONO_CORE_CALLSTRINGSOLVER_H_

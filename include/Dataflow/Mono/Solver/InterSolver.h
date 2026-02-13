@@ -1,5 +1,5 @@
-#ifndef ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
-#define ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
+#ifndef LOTUS_DATAFLOW_MONO_SOLVER_INTERSOLVER_H_
+#define LOTUS_DATAFLOW_MONO_SOLVER_INTERSOLVER_H_
 
 #include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/Mono/Core/CallStringSolver.h"
@@ -323,4 +323,4 @@ using InterMonoSolver_P =
 
 } // namespace mono
 
-#endif // ANALYSIS_MONO_SOLVER_INTERMONOSOLVER_H_
+#endif // LOTUS_DATAFLOW_MONO_SOLVER_INTERSOLVER_H_

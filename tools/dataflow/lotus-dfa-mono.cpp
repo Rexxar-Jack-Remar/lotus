@@ -17,10 +17,10 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils.h"
 
-#include "Dataflow/Mono/Analyses/Intra/ConstantPropagation.h"
-#include "Dataflow/Mono/Analyses/Intra/LiveVariables.h"
-#include "Dataflow/Mono/Analyses/Intra/Reachable.h"
-#include "Dataflow/Mono/Analyses/Intra/UninitVariables.h"
+#include "Dataflow/Mono/Analyses/Intra/IntraConstantPropagation.h"
+#include "Dataflow/Mono/Analyses/Intra/IntraLiveVariables.h"
+#include "Dataflow/Mono/Analyses/Intra/IntraReachable.h"
+#include "Dataflow/Mono/Analyses/Intra/IntraUninitVariables.h"
 
 #include <algorithm>
 #include <memory>

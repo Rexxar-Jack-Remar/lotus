@@ -20,16 +20,6 @@ For ADT-based methods, you can optionally implement `elimination::IntraReducible
 (dominators + topological order + edge list). If not provided, the solver computes reducible
 flowgraph metadata internally and falls back to `StateElimination` when reducibility assumptions fail.
 
-## Main headers
-
-- `include/Dataflow/Elimination/EliminationFramework.h` — problem interface
-- `include/Dataflow/Elimination/PathExpression.h` — path-expression AST
-- `include/Dataflow/Elimination/Solver/IntraEliminationSolver.h` — solver
-- `include/Dataflow/Elimination/DataFlowResult.h` — result container
-- `include/Dataflow/Elimination/LLVM/LLVMEliminationProblem.h` — LLVM IR adapter
-- `include/Dataflow/Elimination/Analyses/Intraprocedural/EliminationReachable.h`
-- `include/Dataflow/Elimination/Analyses/Intraprocedural/EliminationConstantPropagation.h`
-- `include/Dataflow/Elimination/Analyses/Intraprocedural/EliminationUninitVariables.h`
 
 ## Intraprocedural LLVM analyses
 

@@ -1,5 +1,5 @@
-#ifndef ANALYSIS_DATAFLOWRESULT_H_
-#define ANALYSIS_DATAFLOWRESULT_H_
+#ifndef LOTUS_DATAFLOW_MONO_SUPPORT_RESULT_H_
+#define LOTUS_DATAFLOW_MONO_SUPPORT_RESULT_H_
 
 #include "Utils/LLVM/SystemHeaders.h"
 
@@ -41,4 +41,4 @@ private:
 
 } // namespace mono
 
-#endif // ANALYSIS_DATAFLOWRESULT_H_
+#endif // LOTUS_DATAFLOW_MONO_SUPPORT_RESULT_H_

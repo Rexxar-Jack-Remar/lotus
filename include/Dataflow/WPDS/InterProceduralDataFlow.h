@@ -16,9 +16,9 @@
  *      to Interprocedural Dataflow Analysis"
  */
 
-#include "Dataflow/WPDS/DataFlowFacts.h"
-#include "Dataflow/WPDS/ExplodedWPDSBuilder.h"
-#include "Dataflow/WPDS/GenKillTransformer.h"
-#include "Dataflow/WPDS/InterProceduralDataFlowEngine.h"
+#include "Dataflow/WPDS/Core/DataFlowFacts.h"
+#include "Dataflow/WPDS/Core/ExplodedWPDSBuilder.h"
+#include "Dataflow/WPDS/Core/GenKillTransformer.h"
+#include "Dataflow/WPDS/Solver/InterProceduralDataFlowEngine.h"
 
 #endif // ANALYSIS_INTERPROCEDURALDATAFLOW_H_

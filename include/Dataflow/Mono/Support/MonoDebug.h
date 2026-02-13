@@ -1,5 +1,5 @@
-#ifndef ANALYSIS_MONO_MONO_DEBUG_H_
-#define ANALYSIS_MONO_MONO_DEBUG_H_
+#ifndef LOTUS_DATAFLOW_MONO_SUPPORT_MONODEBUG_H_
+#define LOTUS_DATAFLOW_MONO_SUPPORT_MONODEBUG_H_
 
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -283,4 +283,4 @@ private:
 
 } // namespace mono
 
-#endif // ANALYSIS_MONO_MONO_DEBUG_H_
+#endif // LOTUS_DATAFLOW_MONO_SUPPORT_MONODEBUG_H_

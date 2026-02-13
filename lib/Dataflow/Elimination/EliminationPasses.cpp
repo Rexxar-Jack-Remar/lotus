@@ -1,4 +1,4 @@
-#include "Dataflow/Elimination/EliminationPasses.h"
+#include "Dataflow/Elimination/Passes/EliminationPasses.h"
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"

@@ -6,14 +6,14 @@
 set(ELIMINATION_SOURCES
   Elimination.cpp
   EliminationPasses.cpp
-  Analyses/Intraprocedural/EliminationReachable.cpp
-  Analyses/Intraprocedural/EliminationConstantPropagation.cpp
-  Analyses/Intraprocedural/EliminationReachingDefinitions.cpp
-  Analyses/Intraprocedural/EliminationAvailableExpressions.cpp
-  Analyses/Intraprocedural/EliminationUninitVariables.cpp
-  Analyses/Intraprocedural/EliminationLiveVariables.cpp
-  Analyses/Intraprocedural/EliminationVeryBusyExpressions.cpp
-  Analyses/Intraprocedural/EliminationNonNull.cpp
+  Analyses/Intra/IntraReachable.cpp
+  Analyses/Intra/IntraConstantPropagation.cpp
+  Analyses/Intra/IntraReachingDefinitions.cpp
+  Analyses/Intra/IntraAvailableExpressions.cpp
+  Analyses/Intra/IntraUninitVariables.cpp
+  Analyses/Intra/IntraLiveVariables.cpp
+  Analyses/Intra/IntraVeryBusyExpressions.cpp
+  Analyses/Intra/IntraNonNull.cpp
 )
 
 add_library(EliminationDataFlow STATIC ${ELIMINATION_SOURCES})

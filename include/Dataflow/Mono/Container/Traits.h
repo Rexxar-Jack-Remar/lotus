@@ -1,5 +1,5 @@
-#ifndef ANALYSIS_MONO_CONTAINERTRAITS_H_
-#define ANALYSIS_MONO_CONTAINERTRAITS_H_
+#ifndef LOTUS_DATAFLOW_MONO_CONTAINER_TRAITS_H_
+#define LOTUS_DATAFLOW_MONO_CONTAINER_TRAITS_H_
 
 #include "Dataflow/Mono/Container/BitVectorSet.h"
 
@@ -399,4 +399,4 @@ template <typename T> struct StdSetAdapter {
 
 } // namespace mono
 
-#endif // ANALYSIS_MONO_CONTAINERTRAITS_H_
+#endif // LOTUS_DATAFLOW_MONO_CONTAINER_TRAITS_H_

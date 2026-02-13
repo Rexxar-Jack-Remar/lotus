@@ -1,5 +1,5 @@
-#ifndef ANALYSIS_MONO_CORE_DOMAIN_H_
-#define ANALYSIS_MONO_CORE_DOMAIN_H_
+#ifndef LOTUS_DATAFLOW_MONO_CORE_DOMAIN_H_
+#define LOTUS_DATAFLOW_MONO_CORE_DOMAIN_H_
 
 #include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
@@ -152,4 +152,4 @@ using InstructionSetDomain = LLVMMonoAnalysisDomain<std::set<llvm::Instruction *
 
 } // namespace mono
 
-#endif // ANALYSIS_MONO_CORE_DOMAIN_H_
+#endif // LOTUS_DATAFLOW_MONO_CORE_DOMAIN_H_

@@ -6,25 +6,27 @@ A layered framework for monotone dataflow analyses in LLVM IR.
 
 ```
 include/Dataflow/Mono/
-├── Core/                          # Core abstractions
+├── Core/                          # Core abstractions (header-only)
 │   ├── Problem.h                  # IntraMonoProblem & InterMonoProblem
 │   ├── Domain.h                   # LLVMMonoAnalysisDomain
 │   ├── CallStringContext.h        # CallStringCTX template
-│   └── CallStringSolver.h        # Call-string interprocedural solver
-├── Solver/                        # Fixpoint solvers
+│   └── CallStringSolver.h         # Call-string interprocedural solver
+├── Solver/                        # Fixpoint solvers (header-only)
 │   ├── IntraSolver.h              # Intraprocedural solver
-│   └── InterSolver.h               # Interprocedural solver
-├── Container/                     # Container utilities
+│   └── InterSolver.h              # Interprocedural solver
+├── Container/                     # Container utilities (header-only)
 │   ├── BitVectorSet.h             # Bit-vector optimized sets
 │   └── Traits.h                   # Container abstractions
-├── Support/                       # Support utilities
+├── Support/                       # Support utilities (header-only)
 │   ├── Result.h                   # DataFlowResult structures
 │   ├── MonoDebug.h                # Debugging utilities
 │   └── Soundness.h                # Soundness configuration
-└── Analyses/                      # Analysis implementations
-    ├── Intra/                     # LiveVariables, ReachingDefinitions, etc.
-    └── Inter/                      # TaintAnalysis, ConstantPropagation, etc.
+└── Analyses/                      # Analysis headers (implementations in lib/)
+    ├── Intra/                     # Intra*.h — LiveVariables, ReachingDefinitions, etc.
+    └── Inter/                     # Inter*.h — TaintAnalysis, ConstantPropagation, etc.
 ```
+
+**Compiled vs header-only:** Core, Solver, Container, and Support are header-only (template-heavy framework). Analyses have both headers here and `.cpp` implementations in `lib/Dataflow/Mono/Analyses/`, which are compiled into the MONODataFlow library.
 
 ## Quick Start
 
@@ -83,13 +85,16 @@ auto Results = Solver.getInResults();
 - **`InterSolver`**: Interprocedural solver with context sensitivity
 
 ### Containers (`Container/`)
-- **`BitVectorSet`**: O(N/64) set operations for large universes (>100 elements)
-- **`SetContainer`**: Standard `std::set` wrapper
-- **`BitVectorContainer`**: `BitVectorSet` wrapper
+- **`BitVectorSet.h`**: O(N/64) set operations for large universes (>100 elements)
+- **`Traits.h`**: Container type traits and wrappers — `SetContainer` (std::set), `BitVectorContainer` (BitVectorSet), and domain helpers
 
 ### Analyses (`Analyses/`)
-- **Intra**: LiveVariables, ReachingDefinitions, AvailableExpressions, ConstantPropagation, UninitVariables, Reachable
-- **Inter**: TaintAnalysis, ConstantPropagation
+- **Intra** (`Intra*.h`): IntraLiveVariables, IntraReachingDefinitions, IntraAvailableExpressions, IntraConstantPropagation, IntraFullConstantPropagation, IntraUninitVariables, IntraReachable, IntraSolverTest
+- **Inter** (`Inter*.h`): InterTaintAnalysis, InterConstantPropagation, InterFullConstantPropagation, InterSolverTest
+
+## Conventions
+
+- **Include guards**: Use `LOTUS_DATAFLOW_MONO_<SUBDIR>_<FILE>_H_` (e.g. `LOTUS_DATAFLOW_MONO_CORE_PROBLEM_H_`).
 
 ## Design Principles
 

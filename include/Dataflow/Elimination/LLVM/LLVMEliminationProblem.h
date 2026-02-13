@@ -1,7 +1,7 @@
 #ifndef DATAFLOW_ELIMINATION_LLVM_LLVMELIMINATIONPROBLEM_H_
 #define DATAFLOW_ELIMINATION_LLVM_LLVMELIMINATIONPROBLEM_H_
 
-#include "Dataflow/Elimination/EliminationFramework.h"
+#include "Dataflow/Elimination/Core/Framework.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
 
 #include "llvm/IR/Dominators.h"
