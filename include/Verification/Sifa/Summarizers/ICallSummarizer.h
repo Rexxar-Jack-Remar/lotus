@@ -2,8 +2,9 @@
 //
 // Call summarization interface (ported from Ultimate Library-Sifa).
 //
-// lotus v1 (intraprocedural) does not use this yet, but the interface is kept
-// to preserve the structure of the original library.
+// Paper (TACAS 2020 "Ultimate Taipan..."): the call summarization operator
+// computes a summary for a procedure call. IcfgInterpreter uses this when
+// interpreting ReturnSummary transitions.
 //
 //===----------------------------------------------------------------------===//
 

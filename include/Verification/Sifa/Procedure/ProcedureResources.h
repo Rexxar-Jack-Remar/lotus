@@ -2,6 +2,11 @@
 //
 // Procedure-level resources: RegexDag and overlays (ported from Ultimate Sifa).
 //
+// Paper (TACAS 2020 "Ultimate Taipan..."): builds path expressions from entry
+// to LOIs/EXIT as RegexDAGs. A RegexDAG has vertices labeled with regular
+// expressions over transitions (summary/enter for interprocedural paths);
+// each sink represents a location of interest.
+//
 // This is the LLVM intraprocedural analogue of Java's ProcedureResources.
 //
 //===----------------------------------------------------------------------===//

@@ -6,13 +6,14 @@ Headers live under `include/Analysis/Concurrency/`, sources under `lib/Analysis/
 
 | Subdirectory | Contents |
 |--------------|----------|
-| **Utils/** | ThreadAPI, ThreadFlowGraph, ThreadInfo, BVClock, FBVClock, LanguageModel/ (Cpp11, OpenMP) |
+| **Utils/** | ThreadAPI, ThreadFlowGraph, ThreadInfo, BVClock, FBVClock, LanguageModel/ (Cpp11, OpenMP, MPI) |
 | **MHP/** | MHPAnalysis, StaticVectorClockMHP, HappensBeforeAnalysis, Cpp11Atomics |
 | **LockSet/** | LockSetAnalysis |
 | **Memory/** | EscapeAnalysis, StaticThreadSharingAnalysis, MemUseDefAnalysis |
 | **JoinTarget/** | JoinTargetAnalysis |
+| **MPI/** | MPIAnalysis (process model, collective analysis, RMA analysis) |
 
-Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, `Analysis/Concurrency/MHP/MHPAnalysis.h`.
+Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, `Analysis/Concurrency/MHP/MHPAnalysis.h`, `Analysis/Concurrency/MPI/MPIAnalysis.h`.
 
 ## Utilities
 
@@ -102,6 +103,57 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 - **Cancellation** (4.0+): Cancellation points and cancel constructs
 - **OpenMP locks**: omp_set_lock, omp_unset_lock, nested locks
 
+## MPI Support (MPI-1, MPI-2, MPI-3)
+
+### Process Management
+- **MPI_Init** / **MPI_Init_thread**: Initialize MPI environment
+- **MPI_Finalize**: Finalize MPI environment
+- **MPI_Comm_rank** / **MPI_Comm_size**: Query process rank and communicator size
+
+### Point-to-Point Communication (Blocking)
+- **MPI_Send** / **MPI_Ssend** / **MPI_Bsend** / **MPI_Rsend**: Blocking send operations
+- **MPI_Recv**: Blocking receive
+- **MPI_Sendrecv** / **MPI_Sendrecv_replace**: Combined send/receive
+- **MPI_Probe**: Probe for incoming messages
+
+### Point-to-Point Communication (Non-blocking)
+- **MPI_Isend** / **MPI_Issend** / **MPI_Ibsend** / **MPI_Irsend**: Non-blocking send operations
+- **MPI_Irecv**: Non-blocking receive
+- **MPI_Iprobe**: Non-blocking probe
+- **MPI_Wait** / **MPI_Waitall** / **MPI_Waitany** / **MPI_Waitsome**: Wait for completion
+- **MPI_Test** / **MPI_Testall** / **MPI_Testany** / **MPI_Testsome**: Test for completion
+
+### Collective Communication
+- **MPI_Barrier** / **MPI_Ibarrier**: Synchronization barrier
+- **MPI_Bcast** / **MPI_Ibcast**: Broadcast
+- **MPI_Scatter** / **MPI_Scatterv** / **MPI_Iscatter**: Scatter data
+- **MPI_Gather** / **MPI_Gatherv** / **MPI_Igather**: Gather data
+- **MPI_Allgather** / **MPI_Allgatherv** / **MPI_Iallgather**: All-gather
+- **MPI_Alltoall** / **MPI_Alltoallv** / **MPI_Alltoallw**: All-to-all exchange
+- **MPI_Reduce** / **MPI_Ireduce**: Reduce operation
+- **MPI_Allreduce** / **MPI_Iallreduce**: All-reduce operation
+- **MPI_Reduce_scatter** / **MPI_Reduce_scatter_block**: Reduce-scatter
+- **MPI_Scan** / **MPI_Exscan** / **MPI_Iscan**: Scan operations
+
+### One-Sided Communication (RMA - MPI-2/3)
+- **MPI_Win_create** / **MPI_Win_allocate** / **MPI_Win_create_dynamic**: Window creation
+- **MPI_Win_free**: Window deallocation
+- **MPI_Put** / **MPI_Rput**: Remote write operations
+- **MPI_Get** / **MPI_Rget**: Remote read operations
+- **MPI_Accumulate** / **MPI_Get_accumulate** / **MPI_Fetch_and_op** / **MPI_Compare_and_swap**: Atomic RMA operations
+
+### RMA Synchronization
+- **Active Target (Fence)**: MPI_Win_fence
+- **Passive Target (Lock/Unlock)**: MPI_Win_lock, MPI_Win_unlock, MPI_Win_lock_all, MPI_Win_unlock_all
+- **Completion**: MPI_Win_flush, MPI_Win_flush_all, MPI_Win_flush_local, MPI_Win_sync
+- **General Purpose (PSCW)**: MPI_Win_post, MPI_Win_start, MPI_Win_complete, MPI_Win_wait, MPI_Win_test
+
+### Communicator Management
+- **MPI_Comm_dup** / **MPI_Comm_idup**: Duplicate communicator
+- **MPI_Comm_split** / **MPI_Comm_split_type**: Split communicator
+- **MPI_Comm_create** / **MPI_Comm_create_group**: Create communicator
+- **MPI_Comm_free**: Free communicator
+
 ## Analysis Capabilities
 
 ### Lock Set Analysis
@@ -132,6 +184,16 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 - **unique_lock manual operations**: Tracks manual lock()/unlock() calls
 - **Shared lock patterns**: Validates shared_lock and shared_mutex usage
 
+### MPI Analysis (NEW)
+- **Process-level concurrency**: Models SPMD execution pattern
+- **Point-to-point tracking**: Tracks blocking and non-blocking send/recv operations
+- **Deadlock detection**: Identifies circular send/recv dependencies
+- **Collective mismatch**: Detects incompatible collective operations
+- **Orphaned requests**: Finds non-blocking operations without matching wait
+- **RMA race detection**: Detects data races in one-sided communication
+- **RMA synchronization**: Validates fence/lock/PSCW synchronization epochs
+- **Window leak detection**: Identifies RMA windows not properly freed
+
 ## Limitations
 
 - **RAII destructor tracking**: Currently uses conservative approximation for destructor lock releases. Full lifetime analysis via RAIILockTracker available but not yet fully integrated.
@@ -139,3 +201,71 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 - **Weak atomics precision**: Relaxed atomics tracked but no value-flow analysis
 - **Task dependencies**: OpenMP task depend clauses recognized but dependency graph not yet built
 - **Target offloading**: OpenMP target constructs recognized but no device-specific analysis
+- **MPI rank analysis**: Current implementation uses simplified rank tracking; full symbolic rank analysis not yet implemented
+- **MPI derived datatypes**: Custom MPI datatypes not fully analyzed for size/alignment
+- **MPI intercommunicator operations**: Focus is on intracommunicators; intercommunicator collectives have limited support
+
+## Extension Guidelines
+
+The concurrency analysis framework is designed for easy extensibility to support additional concurrency libraries.
+
+### Adding a New Concurrency Library
+
+1. **Create Language Model** (`include/Analysis/Concurrency/Utils/LanguageModel/YourLib.h`):
+   - Define inline pattern-matching functions for library operations
+   - Group by operation type (fork, join, lock, barrier, etc.)
+   - Follow naming convention: `isOperationName(const llvm::StringRef& funcName)`
+
+2. **Extend ThreadAPI Enum** (`include/Analysis/Concurrency/Utils/ThreadAPI.h`):
+   - Add new `TD_TYPE` enum values for library-specific operations
+   - Group related operations together
+   - Document each enum value
+
+3. **Update ThreadAPI Recognition** (`lib/Analysis/Concurrency/Utils/ThreadAPI.cpp`):
+   - Include your language model header
+   - Add recognition logic in `ThreadAPI::getType()`
+   - Check operations in order of specificity
+
+4. **Create Library-Specific Analysis** (optional):
+   - For complex semantics (like MPI's SPMD model), create dedicated analysis
+   - Place in `include/Analysis/Concurrency/YourLib/` and `lib/Analysis/Concurrency/YourLib/`
+
+5. **Update Build System**:
+   - Add source files to `lib/Analysis/Concurrency/CMakeLists.txt`
+
+6. **Document Support**:
+   - Update `lib/Analysis/Concurrency/README.md` with supported operations
+   - Add analysis capabilities
+
+### Example: Adding CUDA Support
+
+```cpp
+// include/Analysis/Concurrency/Utils/LanguageModel/CUDA.h
+namespace CUDAModel {
+  inline bool isKernelLaunch(const llvm::StringRef& funcName) {
+    return funcName.contains("cudaLaunchKernel");
+  }
+  inline bool isDeviceSynchronize(const llvm::StringRef& funcName) {
+    return funcName.equals("cudaDeviceSynchronize");
+  }
+  inline bool isSyncthreads(const llvm::StringRef& funcName) {
+    return funcName.equals("llvm.nvvm.barrier0");
+  }
+}
+
+// Add to ThreadAPI.h enum:
+TD_CUDA_KERNEL_LAUNCH,
+TD_CUDA_DEVICE_SYNC,
+TD_CUDA_SYNCTHREADS,
+
+// Add to ThreadAPI.cpp:
+if (CUDAModel::isKernelLaunch(name)) return TD_CUDA_KERNEL_LAUNCH;
+```
+
+### Design Principles
+
+- **Separation of Concerns**: Each library gets its own `LanguageModel` namespace
+- **Extensibility**: Use dynamic dispatch via enum for easy extension
+- **Config-driven**: Support `config/thread.spec` for user-defined APIs
+- **Semantic Mapping**: Map library calls to semantic operations (fork/join/barrier)
+- **Hierarchical Recognition**: Exact match → config → language models

@@ -1,3 +1,7 @@
+// Sifa: Symbolic Interpretation with Fluid Abstractions.
+// Algorithm from TACAS 2020 "Ultimate Taipan with Symbolic Interpretation and
+// Fluid Abstractions" (Dietsch et al.) — ICFG/DAG interpreters, RegexDAG,
+// post operator, call/loop summarization, fluid abstraction policies.
 #include "Verification/Sifa/Sifa.h"
 
 #include "Verification/Sifa/Domain/EqDomain.h"
@@ -45,7 +49,7 @@ bool lotus::sifa::isReachable(const llvm::Function &F, const llvm::BasicBlock &t
 bool lotus::sifa::isReachableInterprocedural(const llvm::Module &M, const llvm::Function *entry,
                                              const llvm::Function &targetFunc,
                                              const llvm::BasicBlock &targetBlock,
-                                             SifaOptions options) {
+                                             const SifaOptions &options) {
   // Interprocedural reachability uses IcfgInterpreter and a storage mapping
   // basic blocks to reachability booleans. Options are currently unused here.
   (void)options;

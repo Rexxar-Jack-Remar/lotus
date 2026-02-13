@@ -1,6 +1,11 @@
 //===-- Verification/Sifa/Interpreter/IcfgInterpreter.h ------------------===//
 //
-// Interprocedural CFG interpreter (ported from Ultimate Library-Sifa).
+// ICFG interpreter (ported from Ultimate Library-Sifa).
+//
+// Paper (TACAS 2020 "Ultimate Taipan with Symbolic Interpretation and Fluid
+// Abstractions"): generates for a (partial) ICFG and LOIs (locations of interest)
+// a set of path expressions as RegexDAGs. Coordinates DagInterpreter per
+// procedure, enter-call registration, and call summarization.
 //
 // Interprets from entry procedures, fills storage for LOIs, and uses
 // IEnterCallRegistrar + ICallSummarizer for call/return handling.

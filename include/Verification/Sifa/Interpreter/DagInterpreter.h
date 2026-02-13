@@ -1,11 +1,15 @@
 //===-- Verification/Sifa/Interpreter/DagInterpreter.h --------------------===//
 //
-// RegexDag interpreter (ported from Ultimate Library-Sifa).
+// DAG interpreter (ported from Ultimate Library-Sifa).
+//
+// Paper (TACAS 2020 "Ultimate Taipan with Symbolic Interpretation and Fluid
+// Abstractions"): analyzes a RegexDAG in topological order, applying the post
+// operator (domain_.post) for literals, loop summarization for Star, and call
+// summarization for ReturnSummary transitions. Uses IFluid to decide when to
+// apply abstraction (domain_.alpha). Multiple incoming edges -> join (∨).
 //
 // The DAG encodes a regex; interpretation propagates an abstract state from
 // overlay sources to overlay sinks.
-//
-// For a marked regex, interpretation returns the state at the unique marker.
 //
 //===----------------------------------------------------------------------===//
 

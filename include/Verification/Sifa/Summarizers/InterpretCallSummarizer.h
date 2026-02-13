@@ -1,9 +1,12 @@
 //===-- Verification/Sifa/Summarizers/InterpretCallSummarizer.h -----------===//
 //
-// Call summarizer that interprets the callee (ported from Ultimate Library-Sifa).
+// Call summarization operator (ported from Ultimate Library-Sifa).
 //
-// Always computes a new call summary by interpreting the callee's path
-// expression from entry to return with the given input.
+// Paper (TACAS 2020 "Ultimate Taipan..."): the call summarization operator
+// computes a summary for a procedure call, either with or without considering
+// the context. This implementation interprets the callee (entry->return) to
+// compute the summary.
+//
 // Ultimate-aligned: SifaStats CALL_SUMMARIZER_NEW_COMPUTATION_TIME, CACHE_MISSES.
 //
 //===----------------------------------------------------------------------===//

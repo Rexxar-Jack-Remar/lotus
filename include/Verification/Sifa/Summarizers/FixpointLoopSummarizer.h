@@ -1,6 +1,12 @@
 //===-- Verification/Sifa/Summarizers/FixpointLoopSummarizer.h ------------===//
 //
-// Fixpoint loop summarizer with widening (ported from Ultimate Sifa).
+// Loop summarization operator (ported from Ultimate Sifa).
+//
+// Paper (TACAS 2020 "Ultimate Taipan..."): computes a summary for the Kleene-star
+// operator of regular expressions by fixpoint iteration; nested loops resolved
+// by recursively inserting summaries. "Our current implementation does this by
+// computing a fixpoint and resolving nested loops by recursively inserting
+// summaries."
 //
 // Summarizes (inner)* by iterating:
 //   pre := input

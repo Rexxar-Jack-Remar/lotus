@@ -1,7 +1,9 @@
 //===-- Verification/Sifa/Sifa.h ------------------------------------------===//
 //
-// Intraprocedural Sifa (Symbolic Interpretation with Fluid Abstractions)
-// skeleton for lotus.
+// Sifa: Symbolic Interpretation with Fluid Abstractions (ported from Ultimate
+// Library-Sifa). Implements the symbolic interpretation engine from TACAS 2020
+// "Ultimate Taipan with Symbolic Interpretation and Fluid Abstractions"
+// (Dietsch et al.), combining algebraic program analysis and logical interpretation.
 //
 // v1 milestone: build CFG -> path expressions -> interpret regex using a domain.
 //
@@ -102,7 +104,7 @@ bool isReachable(const llvm::Function &F, const llvm::BasicBlock &target,
 bool isReachableInterprocedural(const llvm::Module &M, const llvm::Function *entry,
                                const llvm::Function &targetFunc,
                                const llvm::BasicBlock &targetBlock,
-                               SifaOptions options = {});
+                               const SifaOptions &options = {});
 
 /// Convenience APIs: analyze paths from entry to \p target using the chosen domain.
 /// Returns the abstract state at \p target. Use the API that matches the domain

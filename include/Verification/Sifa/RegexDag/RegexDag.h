@@ -1,6 +1,11 @@
 //===-- Verification/Sifa/RegexDag/RegexDag.h -----------------------------===//
 //
-// Regex DAG container (ported from Ultimate Library-Sifa).
+// RegexDAG container (ported from Ultimate Library-Sifa).
+//
+// Paper (TACAS 2020 "Ultimate Taipan..."): a directed acyclic graph whose
+// vertices are labeled with regular expressions over the program's transitions
+// (without calls/returns but with summary and enter statements for interproc.).
+// Exactly one sink node per location of interest.
 //
 // Owns all nodes and keeps track of a single source and sink.
 //

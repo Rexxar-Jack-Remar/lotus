@@ -44,7 +44,9 @@ public:
 
   NonrelationalState join(const NonrelationalState &other) const {
     NonrelationalState r;
-    for (const auto &[var, val] : map_) {
+    for (const auto &p : map_) {
+      const auto *var = p.first;
+      const auto &val = p.second;
       auto o = other.map_.find(var);
       if (o == other.map_.end()) {
         if (!val.isTop()) r.map_[var] = val;
@@ -58,7 +60,9 @@ public:
 
   NonrelationalState widen(const NonrelationalState &other) const {
     NonrelationalState r;
-    for (const auto &[var, val] : map_) {
+    for (const auto &p : map_) {
+      const auto *var = p.first;
+      const auto &val = p.second;
       auto o = other.map_.find(var);
       if (o == other.map_.end()) {
         if (!val.isTop()) r.map_[var] = val;
@@ -71,9 +75,8 @@ public:
   }
 
   bool isBottom() const {
-    for (const auto &[var, val] : map_) {
-      (void)var;
-      if (val.isBottom()) return true;
+    for (const auto &p : map_) {
+      if (p.second.isBottom()) return true;
     }
     return false;
   }

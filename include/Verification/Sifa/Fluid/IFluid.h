@@ -2,7 +2,10 @@
 //
 // Fluid abstraction policy interface (ported from Ultimate Sifa).
 //
-// Fluids decide when to apply abstraction to avoid blow-up.
+// Paper (TACAS 2020 "Ultimate Taipan..."): fluids are heuristics that govern
+// the choice of abstraction function and when to apply it. They decide when
+// to abstract (domain_.alpha) to avoid blow-up; different fluids (NeverFluid,
+// SizeLimitFluid, LogSizeWrapperFluid) can be swapped.
 //
 //===----------------------------------------------------------------------===//
 

@@ -2,6 +2,10 @@
 //
 // Loop summarization interface (ported from Ultimate Library-Sifa).
 //
+// Paper (TACAS 2020 "Ultimate Taipan..."): the loop summarization operator
+// computes a summary for the Kleene-star (re)*. DagInterpreter delegates
+// Star nodes to the loop summarizer (FixpointLoopSummarizer).
+//
 //===----------------------------------------------------------------------===//
 
 #ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ILOOPSUMMARIZER_H

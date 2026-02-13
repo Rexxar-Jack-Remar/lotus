@@ -2,7 +2,9 @@
 //
 // Minimal abstract domain interface for Sifa's regex interpreter.
 //
-// Sifa interprets path-expression regexes over CFG transitions:
+// Paper (TACAS 2020 "Ultimate Taipan..."): the post operator computes strongest
+// post for star-free regular expressions and optionally applies an abstraction
+// (α) when the fluid policy decides. Sifa interprets path-expression regexes:
 //  - Literal: post
 //  - Union: join
 //  - Star: loop summarization (fixpoint + widen)

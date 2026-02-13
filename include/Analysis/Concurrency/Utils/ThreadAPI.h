@@ -137,7 +137,77 @@ public:
     TD_OMP_CANCEL,        ///< __kmpc_cancel - cancellation
     TD_OMP_TARGET,        ///< __tgt_target* - target offloading
     TD_OMP_TARGET_DATA_BEGIN, ///< __tgt_target_data_begin
-    TD_OMP_TARGET_DATA_END    ///< __tgt_target_data_end
+    TD_OMP_TARGET_DATA_END,   ///< __tgt_target_data_end
+    
+    // MPI Process Management
+    TD_MPI_INIT,           ///< MPI_Init, MPI_Init_thread
+    TD_MPI_FINALIZE,       ///< MPI_Finalize
+    
+    // MPI Point-to-Point (blocking = synchronization point)
+    TD_MPI_SEND,           ///< MPI_Send, MPI_Ssend, MPI_Bsend, MPI_Rsend
+    TD_MPI_RECV,           ///< MPI_Recv
+    TD_MPI_SENDRECV,       ///< MPI_Sendrecv, MPI_Sendrecv_replace
+    TD_MPI_PROBE,          ///< MPI_Probe
+    
+    // MPI Point-to-Point (non-blocking)
+    TD_MPI_ISEND,          ///< MPI_Isend, MPI_Issend, MPI_Ibsend, MPI_Irsend
+    TD_MPI_IRECV,          ///< MPI_Irecv
+    TD_MPI_IPROBE,         ///< MPI_Iprobe
+    
+    // MPI Synchronization
+    TD_MPI_WAIT,           ///< MPI_Wait (join-like for non-blocking ops)
+    TD_MPI_WAITALL,        ///< MPI_Waitall
+    TD_MPI_WAITANY,        ///< MPI_Waitany
+    TD_MPI_WAITSOME,       ///< MPI_Waitsome
+    TD_MPI_TEST,           ///< MPI_Test
+    TD_MPI_TESTALL,        ///< MPI_Testall
+    TD_MPI_TESTANY,        ///< MPI_Testany
+    TD_MPI_TESTSOME,       ///< MPI_Testsome
+    TD_MPI_BARRIER,        ///< MPI_Barrier, MPI_Ibarrier
+    
+    // MPI Collectives (all are synchronization points)
+    TD_MPI_BCAST,          ///< MPI_Bcast, MPI_Ibcast
+    TD_MPI_SCATTER,        ///< MPI_Scatter, MPI_Scatterv, MPI_I*
+    TD_MPI_GATHER,         ///< MPI_Gather, MPI_Gatherv, MPI_I*
+    TD_MPI_ALLGATHER,      ///< MPI_Allgather, MPI_Allgatherv, MPI_I*
+    TD_MPI_ALLTOALL,       ///< MPI_Alltoall, MPI_Alltoallv, MPI_Alltoallw, MPI_I*
+    TD_MPI_REDUCE,         ///< MPI_Reduce, MPI_Ireduce
+    TD_MPI_ALLREDUCE,      ///< MPI_Allreduce, MPI_Iallreduce
+    TD_MPI_REDUCE_SCATTER, ///< MPI_Reduce_scatter, MPI_Reduce_scatter_block, MPI_I*
+    TD_MPI_SCAN,           ///< MPI_Scan, MPI_Exscan, MPI_I*
+    
+    // MPI One-Sided (RMA - Remote Memory Access)
+    TD_MPI_WIN_CREATE,     ///< MPI_Win_create, MPI_Win_allocate, MPI_Win_create_dynamic
+    TD_MPI_WIN_FREE,       ///< MPI_Win_free
+    TD_MPI_PUT,            ///< MPI_Put, MPI_Rput (shared write)
+    TD_MPI_GET,            ///< MPI_Get, MPI_Rget (shared read)
+    TD_MPI_ACCUMULATE,     ///< MPI_Accumulate, MPI_Get_accumulate, MPI_Fetch_and_op, etc. (atomic RMW)
+    
+    // MPI RMA Synchronization - Active Target
+    TD_MPI_WIN_FENCE,      ///< MPI_Win_fence (barrier for RMA)
+    
+    // MPI RMA Synchronization - Passive Target
+    TD_MPI_WIN_LOCK,       ///< MPI_Win_lock, MPI_Win_lock_all (RMA lock)
+    TD_MPI_WIN_UNLOCK,     ///< MPI_Win_unlock, MPI_Win_unlock_all (RMA unlock)
+    TD_MPI_WIN_FLUSH,      ///< MPI_Win_flush, MPI_Win_flush_all, MPI_Win_flush_local* (RMA completion)
+    TD_MPI_WIN_SYNC,       ///< MPI_Win_sync (memory consistency)
+    
+    // MPI RMA Synchronization - General Purpose (PSCW)
+    TD_MPI_WIN_POST,       ///< MPI_Win_post (exposure epoch start)
+    TD_MPI_WIN_START,      ///< MPI_Win_start (access epoch start)
+    TD_MPI_WIN_COMPLETE,   ///< MPI_Win_complete (access epoch end)
+    TD_MPI_WIN_WAIT,       ///< MPI_Win_wait (exposure epoch end)
+    TD_MPI_WIN_TEST,       ///< MPI_Win_test (test exposure epoch)
+    
+    // MPI Communicator Management
+    TD_MPI_COMM_DUP,       ///< MPI_Comm_dup, MPI_Comm_idup
+    TD_MPI_COMM_SPLIT,     ///< MPI_Comm_split, MPI_Comm_split_type
+    TD_MPI_COMM_CREATE,    ///< MPI_Comm_create, MPI_Comm_create_group
+    TD_MPI_COMM_FREE,      ///< MPI_Comm_free
+    
+    // MPI Request Management
+    TD_MPI_REQUEST_FREE,   ///< MPI_Request_free
+    TD_MPI_CANCEL          ///< MPI_Cancel
   };
 
   /// Map type for API name to TD_TYPE conversion

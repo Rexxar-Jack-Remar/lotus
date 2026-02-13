@@ -17,6 +17,7 @@
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include "Analysis/Concurrency/Utils/LanguageModel/Cpp11.h"
+#include "Analysis/Concurrency/Utils/LanguageModel/MPI.h"
 #include "Analysis/Concurrency/Utils/LanguageModel/OpenMP.h"
 
 #include <fstream>
@@ -399,6 +400,121 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
   if (Cpp11Model::isSemaphoreTryAcquire(name))
     return TD_SEMAPHORE_TRY_ACQUIRE;
 
+  // 4. MPI Support
+  // Process management
+  if (MPIModel::isInit(name))
+    return TD_MPI_INIT;
+  if (MPIModel::isFinalize(name))
+    return TD_MPI_FINALIZE;
+    
+  // Point-to-point blocking
+  if (MPIModel::isSend(name))
+    return TD_MPI_SEND;
+  if (MPIModel::isRecv(name))
+    return TD_MPI_RECV;
+  if (MPIModel::isSendrecv(name))
+    return TD_MPI_SENDRECV;
+  if (MPIModel::isProbe(name))
+    return TD_MPI_PROBE;
+    
+  // Point-to-point non-blocking
+  if (MPIModel::isIsend(name))
+    return TD_MPI_ISEND;
+  if (MPIModel::isIrecv(name))
+    return TD_MPI_IRECV;
+  if (MPIModel::isIprobe(name))
+    return TD_MPI_IPROBE;
+    
+  // Synchronization
+  if (MPIModel::isWait(name))
+    return TD_MPI_WAIT;
+  if (MPIModel::isWaitall(name))
+    return TD_MPI_WAITALL;
+  if (MPIModel::isWaitany(name))
+    return TD_MPI_WAITANY;
+  if (MPIModel::isWaitsome(name))
+    return TD_MPI_WAITSOME;
+  if (MPIModel::isTest(name))
+    return TD_MPI_TEST;
+  if (MPIModel::isTestall(name))
+    return TD_MPI_TESTALL;
+  if (MPIModel::isTestany(name))
+    return TD_MPI_TESTANY;
+  if (MPIModel::isTestsome(name))
+    return TD_MPI_TESTSOME;
+  if (MPIModel::isBarrier(name))
+    return TD_MPI_BARRIER;
+    
+  // Collectives
+  if (MPIModel::isBcast(name))
+    return TD_MPI_BCAST;
+  if (MPIModel::isScatter(name))
+    return TD_MPI_SCATTER;
+  if (MPIModel::isGather(name))
+    return TD_MPI_GATHER;
+  if (MPIModel::isAllgather(name))
+    return TD_MPI_ALLGATHER;
+  if (MPIModel::isAlltoall(name))
+    return TD_MPI_ALLTOALL;
+  if (MPIModel::isReduce(name))
+    return TD_MPI_REDUCE;
+  if (MPIModel::isAllreduce(name))
+    return TD_MPI_ALLREDUCE;
+  if (MPIModel::isReduceScatter(name))
+    return TD_MPI_REDUCE_SCATTER;
+  if (MPIModel::isScan(name))
+    return TD_MPI_SCAN;
+    
+  // RMA (one-sided)
+  if (MPIModel::isWinCreate(name))
+    return TD_MPI_WIN_CREATE;
+  if (MPIModel::isWinFree(name))
+    return TD_MPI_WIN_FREE;
+  if (MPIModel::isPut(name))
+    return TD_MPI_PUT;
+  if (MPIModel::isGet(name))
+    return TD_MPI_GET;
+  if (MPIModel::isAccumulate(name))
+    return TD_MPI_ACCUMULATE;
+  
+  // RMA synchronization
+  if (MPIModel::isWinFence(name))
+    return TD_MPI_WIN_FENCE;
+  if (MPIModel::isWinLock(name))
+    return TD_MPI_WIN_LOCK;
+  if (MPIModel::isWinUnlock(name))
+    return TD_MPI_WIN_UNLOCK;
+  if (MPIModel::isWinFlush(name))
+    return TD_MPI_WIN_FLUSH;
+  if (MPIModel::isWinSync(name))
+    return TD_MPI_WIN_SYNC;
+  if (MPIModel::isWinPost(name))
+    return TD_MPI_WIN_POST;
+  if (MPIModel::isWinStart(name))
+    return TD_MPI_WIN_START;
+  if (MPIModel::isWinComplete(name))
+    return TD_MPI_WIN_COMPLETE;
+  if (MPIModel::isWinWait(name))
+    return TD_MPI_WIN_WAIT;
+  if (MPIModel::isWinTest(name))
+    return TD_MPI_WIN_TEST;
+  
+  // Communicator management
+  if (MPIModel::isCommDup(name))
+    return TD_MPI_COMM_DUP;
+  if (MPIModel::isCommSplit(name))
+    return TD_MPI_COMM_SPLIT;
+  if (MPIModel::isCommCreate(name))
+    return TD_MPI_COMM_CREATE;
+  if (MPIModel::isCommFree(name))
+    return TD_MPI_COMM_FREE;
+  
+  // Request management
+  if (MPIModel::isRequestFree(name))
+    return TD_MPI_REQUEST_FREE;
+  if (MPIModel::isCancel(name))
+    return TD_MPI_CANCEL;
+
   return TD_DUMMY;
 }
 
@@ -567,7 +683,10 @@ void ThreadAPI::performAPIStat(Module *module) {
         tdAPIStatMap["hare_parallel_for"]++;
         break;
       }
-      case TD_DUMMY: {
+      case TD_DUMMY:
+      default: {
+        // Handle TD_DUMMY and all other thread API types (C++11/17/20, OpenMP, MPI, etc.)
+        // These are not explicitly tracked in statistics
         break;
       }
       }

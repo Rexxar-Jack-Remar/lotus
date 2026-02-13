@@ -13,6 +13,7 @@ set(Concurrency_SOURCES
   Memory/StaticThreadSharingAnalysis.cpp
   Memory/MemUseDefAnalysis.cpp
   JoinTarget/JoinTargetAnalysis.cpp
+  MPI/MPIAnalysis.cpp
 )
 add_library(Concurrency STATIC ${Concurrency_SOURCES})
 target_include_directories(Concurrency PUBLIC ${CMAKE_SOURCE_DIR}/include)
