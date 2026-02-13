@@ -708,6 +708,14 @@ public:
   std::unique_ptr<CypherResult> filterByWhere(const std::vector<Edge *> &edges,
                                               const CypherWhereClause &where);
 
+  // Optimizer query functions
+  std::unique_ptr<CypherResult> canMoveEarlier(Node *moving, Node *anchor);
+  std::unique_ptr<CypherResult> canMoveLater(Node *moving, Node *anchor);
+  std::unique_ptr<CypherResult> independent(Node *a, Node *b);
+  std::unique_ptr<CypherResult> readySet(const std::vector<Node *> &region,
+                                         const std::vector<Node *> &scheduled);
+  std::unique_ptr<CypherResult> criticalPath(const std::vector<Node *> &region);
+
   // Utility
   ProgramGraph &getPDG() { return pdg_; }
   const ProgramGraph &getPDG() const { return pdg_; }

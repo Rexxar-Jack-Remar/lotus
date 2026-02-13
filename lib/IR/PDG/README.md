@@ -21,6 +21,8 @@ The PDG is field-sensitive, context-insensitive, and flow-insensitive, designed 
 - **`PDGNode.cpp`**: Node representation for program elements (instructions, values, parameters)
 - **`Slicing.cpp`**: Program slicing algorithms
 - **`ContextSensitiveSlicing.cpp`**: Context-sensitive slicing support
+- **`MotionLegality.cpp`**: Dependence-based code-motion legality checks (hoist/sink)
+- **`SchedulingQuery.cpp`**: Scheduling/parallelism queries (independence, ready sets, SCCs)
 
 ## Usage
 

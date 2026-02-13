@@ -1,4 +1,6 @@
 #include "IR/PDG/Analysis/CypherQuery.h"
+#include "IR/PDG/Analysis/MotionLegality.h"
+#include "IR/PDG/Analysis/SchedulingQuery.h"
 #include "IR/PDG/Support/DebugInfoUtils.h"
 
 #include <algorithm>
@@ -2708,6 +2710,82 @@ std::string CypherQueryExecutor::getEdgeProperty(Edge *edge,
   }
 
   return "";
+}
+
+// ============================================================================
+// Optimizer query functions
+// ============================================================================
+
+std::unique_ptr<CypherResult>
+CypherQueryExecutor::canMoveEarlier(Node *moving, Node *anchor) {
+  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::BOOLEAN);
+  if (!moving || !anchor) {
+    result->setBooleanValue(false);
+    return result;
+  }
+
+  MotionLegalityQuery mlq(pdg_);
+  MotionLegalityResult legality = mlq.canMoveEarlier(*moving, *anchor);
+  result->setBooleanValue(legality.legal);
+  return result;
+}
+
+std::unique_ptr<CypherResult>
+CypherQueryExecutor::canMoveLater(Node *moving, Node *anchor) {
+  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::BOOLEAN);
+  if (!moving || !anchor) {
+    result->setBooleanValue(false);
+    return result;
+  }
+
+  MotionLegalityQuery mlq(pdg_);
+  MotionLegalityResult legality = mlq.canMoveLater(*moving, *anchor);
+  result->setBooleanValue(legality.legal);
+  return result;
+}
+
+std::unique_ptr<CypherResult>
+CypherQueryExecutor::independent(Node *a, Node *b) {
+  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::BOOLEAN);
+  if (!a || !b) {
+    result->setBooleanValue(false);
+    return result;
+  }
+
+  SchedulingQuery sq(pdg_);
+  IndependenceResult indep = sq.independent(*a, *b);
+  result->setBooleanValue(indep.independent);
+  return result;
+}
+
+std::unique_ptr<CypherResult>
+CypherQueryExecutor::readySet(const std::vector<Node *> &region,
+                              const std::vector<Node *> &scheduled) {
+  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::NODES);
+  
+  std::set<Node *> region_set(region.begin(), region.end());
+  std::set<Node *> scheduled_set(scheduled.begin(), scheduled.end());
+  
+  SchedulingQuery sq(pdg_);
+  auto ready = sq.readySet(region_set, scheduled_set);
+  
+  for (Node *n : ready) {
+    result->addNode(n);
+  }
+  
+  return result;
+}
+
+std::unique_ptr<CypherResult>
+CypherQueryExecutor::criticalPath(const std::vector<Node *> &region) {
+  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::INTEGER);
+  
+  std::set<Node *> region_set(region.begin(), region.end());
+  SchedulingQuery sq(pdg_);
+  size_t length = sq.criticalPathLength(region_set);
+  
+  result->setIntegerValue(static_cast<int64_t>(length));
+  return result;
 }
 
 } // namespace pdg

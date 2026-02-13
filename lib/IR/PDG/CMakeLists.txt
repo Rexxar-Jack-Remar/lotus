@@ -18,7 +18,9 @@ add_library(CanaryPDG STATIC
   Analysis/CypherQuery.cpp
   Analysis/DataFlowQuery.cpp
   Analysis/DependenceQuery.cpp
+  Analysis/MotionLegality.cpp
   Analysis/PDGDiff.cpp
+  Analysis/SchedulingQuery.cpp
   Analysis/Slicing.cpp
   Analysis/ThinSlicing.cpp
   Support/DebugInfoUtils.cpp

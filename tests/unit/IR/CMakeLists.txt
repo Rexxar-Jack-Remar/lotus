@@ -1,2 +1,3 @@
 add_lotus_test(pdg_slicing_test pdg_slicing_test.cpp)
 add_lotus_test(CypherQueryTest CypherQueryTest.cpp)
+add_lotus_test(PDGOptimizerQueryTest PDGOptimizerQueryTest.cpp)
