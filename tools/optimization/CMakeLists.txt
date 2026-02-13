@@ -10,6 +10,8 @@ set(LOTUS_OPT_COMMON_LIBS
   CanaryMemorySSA
   CanaryLLVMUtils
   SeaDsaAnalysis
+  VerificationTransform
+  VerificationAnalysis
   ${LLVM_LINK_COMPONENTS}
 )
 

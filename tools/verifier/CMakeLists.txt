@@ -13,6 +13,12 @@
 # SymbolicAbstraction
 add_subdirectory(symbolic-abstraction)
 
+add_executable(lotus-verify lotus-verify.cpp)
+target_link_libraries(lotus-verify PRIVATE
+  VerificationBackend
+  LLVMSupport
+)
+
 # Sifa (Symbolic Interpretation with Fluid Abstractions)
 add_subdirectory(sifa)
 

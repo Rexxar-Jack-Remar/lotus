@@ -1,5 +1,24 @@
 add_library(VerificationTransform STATIC
+  BreakCritLoops.cpp
+  BreakInfiniteLoops.cpp
+  DeleteUndefined.cpp
   ExpandAssume.cpp
+  FlattenLoops.cpp
+  InitializeUninitialized.cpp
+  InstrumentAlloc.cpp
+  InstrumentNontermination.cpp
+  InternalizeGlobals.cpp
+  MakeNondet.cpp
+  MarkVolatile.cpp
+  PrepareOverflows.cpp
+  RemoveConstantExprs.cpp
+  RemoveErrorCalls.cpp
+  RemoveInfiniteLoops.cpp
+  RemoveReadOnlyAttr.cpp
+  RenameVerifierFuns.cpp
   ReplaceAsserts.cpp
+  ReplaceLifetimeMarkers.cpp
   ReplaceUBSan.cpp
+  FindExits.cpp
+  DummyMarker.cpp
 )
