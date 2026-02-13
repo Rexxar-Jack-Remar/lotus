@@ -21,4 +21,8 @@ add_library(VerificationTransform STATIC
   ReplaceUBSan.cpp
   FindExits.cpp
   DummyMarker.cpp
+  Unrolling.cpp
+  ExplicitConsdes.cpp
+  DeleteCalls.cpp
+  ReplaceVerifierAtomic.cpp
 )

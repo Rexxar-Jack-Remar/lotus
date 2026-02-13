@@ -26,6 +26,10 @@ llvm::Pass *createReplaceLifetimeMarkersPass();
 llvm::Pass *createMarkVolatilePass();
 llvm::Pass *createFindExitsPass();
 llvm::Pass *createDummyMarkerPass();
+llvm::Pass *createUnrollingPass();
+llvm::Pass *createExplicitConsdesPass();
+llvm::Pass *createDeleteCallsPass();
+llvm::Pass *createReplaceVerifierAtomicPass();
 
 } // namespace transform
 } // namespace verification

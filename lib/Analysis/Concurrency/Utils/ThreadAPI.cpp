@@ -16,7 +16,8 @@
  */
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
-#include "Analysis/Concurrency/Utils/LanguageModel/Cpp11.h"
+#include "Analysis/Concurrency/Utils/LanguageModel/CppThreading.h"
+#include "Analysis/Concurrency/Utils/LanguageModel/LinuxKernel.h"
 #include "Analysis/Concurrency/Utils/LanguageModel/MPI.h"
 #include "Analysis/Concurrency/Utils/LanguageModel/OpenMP.h"
 
@@ -243,277 +244,386 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
 
   StringRef name = F->getName();
 
-  // 2. OpenMP Support
-  if (OpenMPModel::isFork(name))
-    return TD_FORK;
-  if (OpenMPModel::isBarrier(name))
-    return TD_BAR_WAIT;
-  if (OpenMPModel::isSetLock(name) || OpenMPModel::isSetNestLock(name) ||
-      OpenMPModel::isCriticalStart(name))
-    return TD_ACQUIRE;
-  if (OpenMPModel::isUnsetLock(name) || OpenMPModel::isUnsetNestLock(name) ||
-      OpenMPModel::isCriticalEnd(name))
-    return TD_RELEASE;
-  
-  // OpenMP Task Support (3.0+)
-  if (OpenMPModel::isTask(name))
-    return TD_OMP_TASK;
-  if (OpenMPModel::isTaskwait(name))
-    return TD_OMP_TASKWAIT;
-  if (OpenMPModel::isTaskyield(name))
-    return TD_OMP_TASKYIELD;
-  if (OpenMPModel::isTaskgroupStart(name))
-    return TD_OMP_TASKGROUP_START;
-  if (OpenMPModel::isTaskgroupEnd(name))
-    return TD_OMP_TASKGROUP_END;
-  if (OpenMPModel::isTaskWithDeps(name))
-    return TD_OMP_TASK_WITH_DEPS;
-  if (OpenMPModel::isTaskloop(name) || OpenMPModel::isTaskloopNoWait(name))
-    return TD_OMP_TASKLOOP;
-  
-  // OpenMP Sections
-  if (OpenMPModel::isSectionsInit(name))
-    return TD_OMP_SECTIONS_INIT;
-  if (OpenMPModel::isSectionsNext(name))
-    return TD_OMP_SECTIONS_NEXT;
-  if (OpenMPModel::isSectionsEnd(name))
-    return TD_OMP_SECTIONS_END;
-  
-  // OpenMP Atomic
-  if (OpenMPModel::isAtomicStart(name))
-    return TD_OMP_ATOMIC_START;
-  if (OpenMPModel::isAtomicEnd(name))
-    return TD_OMP_ATOMIC_END;
-  
-  // OpenMP Flush
-  if (OpenMPModel::isFlush(name))
-    return TD_OMP_FLUSH;
-  
-  // OpenMP Cancellation
-  if (OpenMPModel::isCancel(name) || OpenMPModel::isCancellationPoint(name))
-    return TD_OMP_CANCEL;
-  
-  // OpenMP Target Offloading
-  if (OpenMPModel::isTargetInit(name))
-    return TD_OMP_TARGET;
-  if (OpenMPModel::isTargetDataBegin(name))
-    return TD_OMP_TARGET_DATA_BEGIN;
-  if (OpenMPModel::isTargetDataEnd(name))
-    return TD_OMP_TARGET_DATA_END;
+  // 2. OpenMP Support (if enabled)
+  if (m_config.enable_openmp()) {
+    if (OpenMPModel::isFork(name))
+      return TD_FORK;
+    if (OpenMPModel::isBarrier(name))
+      return TD_BAR_WAIT;
+    if (OpenMPModel::isSetLock(name) || OpenMPModel::isSetNestLock(name) ||
+        OpenMPModel::isCriticalStart(name))
+      return TD_ACQUIRE;
+    if (OpenMPModel::isUnsetLock(name) || OpenMPModel::isUnsetNestLock(name) ||
+        OpenMPModel::isCriticalEnd(name))
+      return TD_RELEASE;
+    
+    // OpenMP Task Support (3.0+)
+    if (OpenMPModel::isTask(name))
+      return TD_OMP_TASK;
+    if (OpenMPModel::isTaskwait(name))
+      return TD_OMP_TASKWAIT;
+    if (OpenMPModel::isTaskyield(name))
+      return TD_OMP_TASKYIELD;
+    if (OpenMPModel::isTaskgroupStart(name))
+      return TD_OMP_TASKGROUP_START;
+    if (OpenMPModel::isTaskgroupEnd(name))
+      return TD_OMP_TASKGROUP_END;
+    if (OpenMPModel::isTaskWithDeps(name))
+      return TD_OMP_TASK_WITH_DEPS;
+    if (OpenMPModel::isTaskloop(name) || OpenMPModel::isTaskloopNoWait(name))
+      return TD_OMP_TASKLOOP;
+    
+    // OpenMP Sections
+    if (OpenMPModel::isSectionsInit(name))
+      return TD_OMP_SECTIONS_INIT;
+    if (OpenMPModel::isSectionsNext(name))
+      return TD_OMP_SECTIONS_NEXT;
+    if (OpenMPModel::isSectionsEnd(name))
+      return TD_OMP_SECTIONS_END;
+    
+    // OpenMP Atomic
+    if (OpenMPModel::isAtomicStart(name))
+      return TD_OMP_ATOMIC_START;
+    if (OpenMPModel::isAtomicEnd(name))
+      return TD_OMP_ATOMIC_END;
+    
+    // OpenMP Flush
+    if (OpenMPModel::isFlush(name))
+      return TD_OMP_FLUSH;
+    
+    // OpenMP Cancellation
+    if (OpenMPModel::isCancel(name) || OpenMPModel::isCancellationPoint(name))
+      return TD_OMP_CANCEL;
+    
+    // OpenMP Target Offloading
+    if (OpenMPModel::isTargetInit(name))
+      return TD_OMP_TARGET;
+    if (OpenMPModel::isTargetDataBegin(name))
+      return TD_OMP_TARGET_DATA_BEGIN;
+    if (OpenMPModel::isTargetDataEnd(name))
+      return TD_OMP_TARGET_DATA_END;
+  }
 
-  // 3. C++11/17/20 Support
-  // Basic threading
-  if (Cpp11Model::isFork(name))
-    return TD_FORK;
-  if (Cpp11Model::isJoin(name))
-    return TD_JOIN;
-  if (Cpp11Model::isDetach(name))
-    return TD_DETACH;
-  
-  // Basic mutex operations
-  if (Cpp11Model::isAcquire(name))
-    return TD_ACQUIRE;
-  if (Cpp11Model::isTryAcquire(name))
-    return TD_TRY_ACQUIRE;
-  if (Cpp11Model::isRelease(name))
-    return TD_RELEASE;
-  
-  // Condition variables
-  if (Cpp11Model::isCondWait(name))
-    return TD_COND_WAIT;
-  if (Cpp11Model::isCondSignal(name))
-    return TD_COND_SIGNAL;
-  if (Cpp11Model::isCondBroadcast(name))
-    return TD_COND_BROADCAST;
-  
-  // C++17 shared_mutex
-  if (Cpp11Model::isSharedLockAcquire(name) || Cpp11Model::isSharedTimedLockAcquire(name))
-    return TD_SHARED_RDLOCK;
-  if (Cpp11Model::isSharedLockExclusiveAcquire(name) || Cpp11Model::isSharedTimedLockExclusiveAcquire(name))
-    return TD_SHARED_WRLOCK;
-  if (Cpp11Model::isSharedLockRelease(name) || Cpp11Model::isSharedLockExclusiveRelease(name))
-    return TD_SHARED_UNLOCK;
-  
-  // RAII lock wrappers
-  if (Cpp11Model::isLockGuardConstructor(name))
-    return TD_LOCK_GUARD_CTOR;
-  if (Cpp11Model::isLockGuardDestructor(name))
-    return TD_LOCK_GUARD_DTOR;
-  if (Cpp11Model::isUniqueLockConstructor(name))
-    return TD_UNIQUE_LOCK_CTOR;
-  if (Cpp11Model::isUniqueLockDestructor(name))
-    return TD_UNIQUE_LOCK_DTOR;
-  if (Cpp11Model::isUniqueLockLock(name))
-    return TD_UNIQUE_LOCK_LOCK;
-  if (Cpp11Model::isUniqueLockUnlock(name))
-    return TD_UNIQUE_LOCK_UNLOCK;
-  if (Cpp11Model::isScopedLockConstructor(name))
-    return TD_SCOPED_LOCK_CTOR;
-  if (Cpp11Model::isScopedLockDestructor(name))
-    return TD_SCOPED_LOCK_DTOR;
-  if (Cpp11Model::isSharedLockConstructor(name))
-    return TD_SHARED_LOCK_CTOR;
-  if (Cpp11Model::isSharedLockDestructor(name))
-    return TD_SHARED_LOCK_DTOR;
-  
-  // std::call_once
-  if (Cpp11Model::isCallOnce(name))
-    return TD_CALL_ONCE;
-  
-  // Future/Promise synchronization
-  if (Cpp11Model::isFutureGet(name))
-    return TD_FUTURE_GET;
-  if (Cpp11Model::isFutureWait(name))
-    return TD_FUTURE_WAIT;
-  if (Cpp11Model::isPromiseSetValue(name) || Cpp11Model::isPromiseSetException(name))
-    return TD_PROMISE_SET;
-  if (Cpp11Model::isAsync(name))
-    return TD_ASYNC;
-  
-  // C++20 jthread
-  if (Cpp11Model::isJthreadConstructor(name))
-    return TD_JTHREAD_FORK;
-  if (Cpp11Model::isJthreadJoin(name))
-    return TD_JTHREAD_JOIN;
-  
-  // C++20 latch
-  if (Cpp11Model::isLatchCountDown(name))
-    return TD_LATCH_COUNT_DOWN;
-  if (Cpp11Model::isLatchWait(name))
-    return TD_LATCH_WAIT;
-  if (Cpp11Model::isLatchArriveAndWait(name))
-    return TD_LATCH_ARRIVE_WAIT;
-  
-  // C++20 barrier
-  if (Cpp11Model::isBarrierArriveAndWait(name))
-    return TD_BARRIER_ARRIVE_WAIT;
-  if (Cpp11Model::isBarrierArrive(name))
-    return TD_BARRIER_ARRIVE;
-  if (Cpp11Model::isBarrierWait(name))
-    return TD_BARRIER_WAIT_CPP20;
-  
-  // C++20 semaphore
-  if (Cpp11Model::isSemaphoreAcquire(name))
-    return TD_SEMAPHORE_ACQUIRE;
-  if (Cpp11Model::isSemaphoreRelease(name))
-    return TD_SEMAPHORE_RELEASE;
-  if (Cpp11Model::isSemaphoreTryAcquire(name))
-    return TD_SEMAPHORE_TRY_ACQUIRE;
+  // 3. C++11/17/20 Support (if enabled)
+  if (m_config.enable_cpp11()) {
+    // Basic threading
+    if (CppThreadingModel::isFork(name))
+      return TD_FORK;
+    if (CppThreadingModel::isJoin(name))
+      return TD_JOIN;
+    if (CppThreadingModel::isDetach(name))
+      return TD_DETACH;
+    
+    // Basic mutex operations
+    if (CppThreadingModel::isAcquire(name))
+      return TD_ACQUIRE;
+    if (CppThreadingModel::isTryAcquire(name))
+      return TD_TRY_ACQUIRE;
+    if (CppThreadingModel::isRelease(name))
+      return TD_RELEASE;
+    
+    // Condition variables
+    if (CppThreadingModel::isCondWait(name))
+      return TD_COND_WAIT;
+    if (CppThreadingModel::isCondSignal(name))
+      return TD_COND_SIGNAL;
+    if (CppThreadingModel::isCondBroadcast(name))
+      return TD_COND_BROADCAST;
+    
+    // C++17 shared_mutex
+    if (CppThreadingModel::isSharedLockAcquire(name) || CppThreadingModel::isSharedTimedLockAcquire(name))
+      return TD_SHARED_RDLOCK;
+    if (CppThreadingModel::isSharedLockExclusiveAcquire(name) || CppThreadingModel::isSharedTimedLockExclusiveAcquire(name))
+      return TD_SHARED_WRLOCK;
+    if (CppThreadingModel::isSharedLockRelease(name) || CppThreadingModel::isSharedLockExclusiveRelease(name))
+      return TD_SHARED_UNLOCK;
+    
+    // RAII lock wrappers
+    if (CppThreadingModel::isLockGuardConstructor(name))
+      return TD_LOCK_GUARD_CTOR;
+    if (CppThreadingModel::isLockGuardDestructor(name))
+      return TD_LOCK_GUARD_DTOR;
+    if (CppThreadingModel::isUniqueLockConstructor(name))
+      return TD_UNIQUE_LOCK_CTOR;
+    if (CppThreadingModel::isUniqueLockDestructor(name))
+      return TD_UNIQUE_LOCK_DTOR;
+    if (CppThreadingModel::isUniqueLockLock(name))
+      return TD_UNIQUE_LOCK_LOCK;
+    if (CppThreadingModel::isUniqueLockUnlock(name))
+      return TD_UNIQUE_LOCK_UNLOCK;
+    if (CppThreadingModel::isScopedLockConstructor(name))
+      return TD_SCOPED_LOCK_CTOR;
+    if (CppThreadingModel::isScopedLockDestructor(name))
+      return TD_SCOPED_LOCK_DTOR;
+    if (CppThreadingModel::isSharedLockConstructor(name))
+      return TD_SHARED_LOCK_CTOR;
+    if (CppThreadingModel::isSharedLockDestructor(name))
+      return TD_SHARED_LOCK_DTOR;
+    
+    // std::call_once
+    if (CppThreadingModel::isCallOnce(name))
+      return TD_CALL_ONCE;
+    
+    // Future/Promise synchronization
+    if (CppThreadingModel::isFutureGet(name))
+      return TD_FUTURE_GET;
+    if (CppThreadingModel::isFutureWait(name))
+      return TD_FUTURE_WAIT;
+    if (CppThreadingModel::isPromiseSetValue(name) || CppThreadingModel::isPromiseSetException(name))
+      return TD_PROMISE_SET;
+    if (CppThreadingModel::isAsync(name))
+      return TD_ASYNC;
+    
+    // C++20 jthread
+    if (CppThreadingModel::isJthreadConstructor(name))
+      return TD_JTHREAD_FORK;
+    if (CppThreadingModel::isJthreadJoin(name))
+      return TD_JTHREAD_JOIN;
+    
+    // C++20 latch
+    if (CppThreadingModel::isLatchCountDown(name))
+      return TD_LATCH_COUNT_DOWN;
+    if (CppThreadingModel::isLatchWait(name))
+      return TD_LATCH_WAIT;
+    if (CppThreadingModel::isLatchArriveAndWait(name))
+      return TD_LATCH_ARRIVE_WAIT;
+    
+    // C++20 barrier
+    if (CppThreadingModel::isBarrierArriveAndWait(name))
+      return TD_BARRIER_ARRIVE_WAIT;
+    if (CppThreadingModel::isBarrierArrive(name))
+      return TD_BARRIER_ARRIVE;
+    if (CppThreadingModel::isBarrierWait(name))
+      return TD_BARRIER_WAIT_CPP20;
+    
+    // C++20 semaphore
+    if (CppThreadingModel::isSemaphoreAcquire(name))
+      return TD_SEMAPHORE_ACQUIRE;
+    if (CppThreadingModel::isSemaphoreRelease(name))
+      return TD_SEMAPHORE_RELEASE;
+    if (CppThreadingModel::isSemaphoreTryAcquire(name))
+      return TD_SEMAPHORE_TRY_ACQUIRE;
+  }
 
-  // 4. MPI Support
-  // Process management
-  if (MPIModel::isInit(name))
-    return TD_MPI_INIT;
-  if (MPIModel::isFinalize(name))
-    return TD_MPI_FINALIZE;
+  // 4. MPI Support (if enabled)
+  if (m_config.enable_mpi()) {
+    // Process management
+    if (MPIModel::isInit(name))
+      return TD_MPI_INIT;
+    if (MPIModel::isFinalize(name))
+      return TD_MPI_FINALIZE;
+      
+    // Point-to-point blocking
+    if (MPIModel::isSend(name))
+      return TD_MPI_SEND;
+    if (MPIModel::isRecv(name))
+      return TD_MPI_RECV;
+    if (MPIModel::isSendrecv(name))
+      return TD_MPI_SENDRECV;
+    if (MPIModel::isProbe(name))
+      return TD_MPI_PROBE;
+      
+    // Point-to-point non-blocking
+    if (MPIModel::isIsend(name))
+      return TD_MPI_ISEND;
+    if (MPIModel::isIrecv(name))
+      return TD_MPI_IRECV;
+    if (MPIModel::isIprobe(name))
+      return TD_MPI_IPROBE;
+      
+    // Synchronization
+    if (MPIModel::isWait(name))
+      return TD_MPI_WAIT;
+    if (MPIModel::isWaitall(name))
+      return TD_MPI_WAITALL;
+    if (MPIModel::isWaitany(name))
+      return TD_MPI_WAITANY;
+    if (MPIModel::isWaitsome(name))
+      return TD_MPI_WAITSOME;
+    if (MPIModel::isTest(name))
+      return TD_MPI_TEST;
+    if (MPIModel::isTestall(name))
+      return TD_MPI_TESTALL;
+    if (MPIModel::isTestany(name))
+      return TD_MPI_TESTANY;
+    if (MPIModel::isTestsome(name))
+      return TD_MPI_TESTSOME;
+    if (MPIModel::isBarrier(name))
+      return TD_MPI_BARRIER;
+      
+    // Collectives
+    if (MPIModel::isBcast(name))
+      return TD_MPI_BCAST;
+    if (MPIModel::isScatter(name))
+      return TD_MPI_SCATTER;
+    if (MPIModel::isGather(name))
+      return TD_MPI_GATHER;
+    if (MPIModel::isAllgather(name))
+      return TD_MPI_ALLGATHER;
+    if (MPIModel::isAlltoall(name))
+      return TD_MPI_ALLTOALL;
+    if (MPIModel::isReduce(name))
+      return TD_MPI_REDUCE;
+    if (MPIModel::isAllreduce(name))
+      return TD_MPI_ALLREDUCE;
+    if (MPIModel::isReduceScatter(name))
+      return TD_MPI_REDUCE_SCATTER;
+    if (MPIModel::isScan(name))
+      return TD_MPI_SCAN;
+      
+    // RMA (one-sided)
+    if (MPIModel::isWinCreate(name))
+      return TD_MPI_WIN_CREATE;
+    if (MPIModel::isWinFree(name))
+      return TD_MPI_WIN_FREE;
+    if (MPIModel::isPut(name))
+      return TD_MPI_PUT;
+    if (MPIModel::isGet(name))
+      return TD_MPI_GET;
+    if (MPIModel::isAccumulate(name))
+      return TD_MPI_ACCUMULATE;
     
-  // Point-to-point blocking
-  if (MPIModel::isSend(name))
-    return TD_MPI_SEND;
-  if (MPIModel::isRecv(name))
-    return TD_MPI_RECV;
-  if (MPIModel::isSendrecv(name))
-    return TD_MPI_SENDRECV;
-  if (MPIModel::isProbe(name))
-    return TD_MPI_PROBE;
+    // RMA synchronization
+    if (MPIModel::isWinFence(name))
+      return TD_MPI_WIN_FENCE;
+    if (MPIModel::isWinLock(name))
+      return TD_MPI_WIN_LOCK;
+    if (MPIModel::isWinUnlock(name))
+      return TD_MPI_WIN_UNLOCK;
+    if (MPIModel::isWinFlush(name))
+      return TD_MPI_WIN_FLUSH;
+    if (MPIModel::isWinSync(name))
+      return TD_MPI_WIN_SYNC;
+    if (MPIModel::isWinPost(name))
+      return TD_MPI_WIN_POST;
+    if (MPIModel::isWinStart(name))
+      return TD_MPI_WIN_START;
+    if (MPIModel::isWinComplete(name))
+      return TD_MPI_WIN_COMPLETE;
+    if (MPIModel::isWinWait(name))
+      return TD_MPI_WIN_WAIT;
+    if (MPIModel::isWinTest(name))
+      return TD_MPI_WIN_TEST;
     
-  // Point-to-point non-blocking
-  if (MPIModel::isIsend(name))
-    return TD_MPI_ISEND;
-  if (MPIModel::isIrecv(name))
-    return TD_MPI_IRECV;
-  if (MPIModel::isIprobe(name))
-    return TD_MPI_IPROBE;
+    // Communicator management
+    if (MPIModel::isCommDup(name))
+      return TD_MPI_COMM_DUP;
+    if (MPIModel::isCommSplit(name))
+      return TD_MPI_COMM_SPLIT;
+    if (MPIModel::isCommCreate(name))
+      return TD_MPI_COMM_CREATE;
+    if (MPIModel::isCommFree(name))
+      return TD_MPI_COMM_FREE;
     
-  // Synchronization
-  if (MPIModel::isWait(name))
-    return TD_MPI_WAIT;
-  if (MPIModel::isWaitall(name))
-    return TD_MPI_WAITALL;
-  if (MPIModel::isWaitany(name))
-    return TD_MPI_WAITANY;
-  if (MPIModel::isWaitsome(name))
-    return TD_MPI_WAITSOME;
-  if (MPIModel::isTest(name))
-    return TD_MPI_TEST;
-  if (MPIModel::isTestall(name))
-    return TD_MPI_TESTALL;
-  if (MPIModel::isTestany(name))
-    return TD_MPI_TESTANY;
-  if (MPIModel::isTestsome(name))
-    return TD_MPI_TESTSOME;
-  if (MPIModel::isBarrier(name))
-    return TD_MPI_BARRIER;
+    // Request management
+    if (MPIModel::isRequestFree(name))
+      return TD_MPI_REQUEST_FREE;
+    if (MPIModel::isCancel(name))
+      return TD_MPI_CANCEL;
+  }
+
+  // 5. Linux Kernel Support (if enabled)
+  if (m_config.enable_linux_kernel()) {
+    // Spinlocks
+    if (LinuxKernelModel::isSpinLockInit(name))
+      return TD_KERNEL_SPIN_LOCK_INIT;
+    if (LinuxKernelModel::isSpinLock(name))
+      return TD_KERNEL_SPIN_LOCK;
+    if (LinuxKernelModel::isSpinUnlock(name))
+      return TD_KERNEL_SPIN_UNLOCK;
+    if (LinuxKernelModel::isSpinTryLock(name))
+      return TD_KERNEL_SPIN_TRYLOCK;
     
-  // Collectives
-  if (MPIModel::isBcast(name))
-    return TD_MPI_BCAST;
-  if (MPIModel::isScatter(name))
-    return TD_MPI_SCATTER;
-  if (MPIModel::isGather(name))
-    return TD_MPI_GATHER;
-  if (MPIModel::isAllgather(name))
-    return TD_MPI_ALLGATHER;
-  if (MPIModel::isAlltoall(name))
-    return TD_MPI_ALLTOALL;
-  if (MPIModel::isReduce(name))
-    return TD_MPI_REDUCE;
-  if (MPIModel::isAllreduce(name))
-    return TD_MPI_ALLREDUCE;
-  if (MPIModel::isReduceScatter(name))
-    return TD_MPI_REDUCE_SCATTER;
-  if (MPIModel::isScan(name))
-    return TD_MPI_SCAN;
+    // Mutexes
+    if (LinuxKernelModel::isMutexInit(name))
+      return TD_KERNEL_MUTEX_INIT;
+    if (LinuxKernelModel::isMutexLock(name))
+      return TD_KERNEL_MUTEX_LOCK;
+    if (LinuxKernelModel::isMutexUnlock(name))
+      return TD_KERNEL_MUTEX_UNLOCK;
+    if (LinuxKernelModel::isMutexTryLock(name))
+      return TD_KERNEL_MUTEX_TRYLOCK;
     
-  // RMA (one-sided)
-  if (MPIModel::isWinCreate(name))
-    return TD_MPI_WIN_CREATE;
-  if (MPIModel::isWinFree(name))
-    return TD_MPI_WIN_FREE;
-  if (MPIModel::isPut(name))
-    return TD_MPI_PUT;
-  if (MPIModel::isGet(name))
-    return TD_MPI_GET;
-  if (MPIModel::isAccumulate(name))
-    return TD_MPI_ACCUMULATE;
-  
-  // RMA synchronization
-  if (MPIModel::isWinFence(name))
-    return TD_MPI_WIN_FENCE;
-  if (MPIModel::isWinLock(name))
-    return TD_MPI_WIN_LOCK;
-  if (MPIModel::isWinUnlock(name))
-    return TD_MPI_WIN_UNLOCK;
-  if (MPIModel::isWinFlush(name))
-    return TD_MPI_WIN_FLUSH;
-  if (MPIModel::isWinSync(name))
-    return TD_MPI_WIN_SYNC;
-  if (MPIModel::isWinPost(name))
-    return TD_MPI_WIN_POST;
-  if (MPIModel::isWinStart(name))
-    return TD_MPI_WIN_START;
-  if (MPIModel::isWinComplete(name))
-    return TD_MPI_WIN_COMPLETE;
-  if (MPIModel::isWinWait(name))
-    return TD_MPI_WIN_WAIT;
-  if (MPIModel::isWinTest(name))
-    return TD_MPI_WIN_TEST;
-  
-  // Communicator management
-  if (MPIModel::isCommDup(name))
-    return TD_MPI_COMM_DUP;
-  if (MPIModel::isCommSplit(name))
-    return TD_MPI_COMM_SPLIT;
-  if (MPIModel::isCommCreate(name))
-    return TD_MPI_COMM_CREATE;
-  if (MPIModel::isCommFree(name))
-    return TD_MPI_COMM_FREE;
-  
-  // Request management
-  if (MPIModel::isRequestFree(name))
-    return TD_MPI_REQUEST_FREE;
-  if (MPIModel::isCancel(name))
-    return TD_MPI_CANCEL;
+    // Semaphores
+    if (LinuxKernelModel::isSemaInit(name))
+      return TD_KERNEL_SEMA_INIT;
+    if (LinuxKernelModel::isDown(name))
+      return TD_KERNEL_DOWN;
+    if (LinuxKernelModel::isUp(name))
+      return TD_KERNEL_UP;
+    
+    // Read-Write Locks
+    if (LinuxKernelModel::isReadLock(name))
+      return TD_KERNEL_READ_LOCK;
+    if (LinuxKernelModel::isReadUnlock(name))
+      return TD_KERNEL_READ_UNLOCK;
+    if (LinuxKernelModel::isWriteLock(name))
+      return TD_KERNEL_WRITE_LOCK;
+    if (LinuxKernelModel::isWriteUnlock(name))
+      return TD_KERNEL_WRITE_UNLOCK;
+    
+    // Read-Write Semaphores
+    if (LinuxKernelModel::isDownRead(name))
+      return TD_KERNEL_DOWN_READ;
+    if (LinuxKernelModel::isUpRead(name))
+      return TD_KERNEL_UP_READ;
+    if (LinuxKernelModel::isDownWrite(name))
+      return TD_KERNEL_DOWN_WRITE;
+    if (LinuxKernelModel::isUpWrite(name))
+      return TD_KERNEL_UP_WRITE;
+    if (LinuxKernelModel::isInitRwsem(name))
+      return TD_KERNEL_INIT_RWSEM;
+    
+    // RCU
+    if (LinuxKernelModel::isRcuReadLock(name))
+      return TD_KERNEL_RCU_READ_LOCK;
+    if (LinuxKernelModel::isRcuReadUnlock(name))
+      return TD_KERNEL_RCU_READ_UNLOCK;
+    if (LinuxKernelModel::isSynchronizeRcu(name))
+      return TD_KERNEL_SYNCHRONIZE_RCU;
+    if (LinuxKernelModel::isCallRcu(name))
+      return TD_KERNEL_CALL_RCU;
+    if (LinuxKernelModel::isRcuDereference(name))
+      return TD_KERNEL_RCU_DEREFERENCE;
+    if (LinuxKernelModel::isRcuAssignPointer(name))
+      return TD_KERNEL_RCU_ASSIGN_POINTER;
+    
+    // Seq Locks
+    if (LinuxKernelModel::isSeqlockInit(name))
+      return TD_KERNEL_SEQLOCK_INIT;
+    if (LinuxKernelModel::isReadSeqbegin(name))
+      return TD_KERNEL_READ_SEQBEGIN;
+    if (LinuxKernelModel::isReadSeqretry(name))
+      return TD_KERNEL_READ_SEQRETRY;
+    if (LinuxKernelModel::isWriteSeqlock(name))
+      return TD_KERNEL_WRITE_SEQLOCK;
+    if (LinuxKernelModel::isWriteSequnlock(name))
+      return TD_KERNEL_WRITE_SEQUNLOCK;
+    
+    // Completion Variables
+    if (LinuxKernelModel::isInitCompletion(name))
+      return TD_KERNEL_INIT_COMPLETION;
+    if (LinuxKernelModel::isWaitForCompletion(name))
+      return TD_KERNEL_WAIT_FOR_COMPLETION;
+    if (LinuxKernelModel::isComplete(name))
+      return TD_KERNEL_COMPLETE;
+    
+    // Wait Queues
+    if (LinuxKernelModel::isInitWaitqueueHead(name))
+      return TD_KERNEL_INIT_WAITQUEUE_HEAD;
+    if (LinuxKernelModel::isWaitEvent(name))
+      return TD_KERNEL_WAIT_EVENT;
+    if (LinuxKernelModel::isWakeUp(name))
+      return TD_KERNEL_WAKE_UP;
+    if (LinuxKernelModel::isPrepareToWait(name))
+      return TD_KERNEL_PREPARE_TO_WAIT;
+    if (LinuxKernelModel::isFinishWait(name))
+      return TD_KERNEL_FINISH_WAIT;
+    
+    // Memory Barriers
+    if (LinuxKernelModel::isMemoryBarrier(name))
+      return TD_KERNEL_MEMORY_BARRIER;
+  }
 
   return TD_DUMMY;
 }

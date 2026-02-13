@@ -21,6 +21,7 @@
 #ifndef THREADAPI_H
 #define THREADAPI_H
 
+#include "Analysis/Concurrency/ConcurrencyConfig.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -207,7 +208,67 @@ public:
     
     // MPI Request Management
     TD_MPI_REQUEST_FREE,   ///< MPI_Request_free
-    TD_MPI_CANCEL          ///< MPI_Cancel
+    TD_MPI_CANCEL,         ///< MPI_Cancel
+    
+    // Linux Kernel Spinlocks
+    TD_KERNEL_SPIN_LOCK_INIT,  ///< spin_lock_init, raw_spin_lock_init
+    TD_KERNEL_SPIN_LOCK,       ///< spin_lock, spin_lock_irq, spin_lock_irqsave, spin_lock_bh
+    TD_KERNEL_SPIN_UNLOCK,      ///< spin_unlock, spin_unlock_irq, spin_unlock_irqrestore, spin_unlock_bh
+    TD_KERNEL_SPIN_TRYLOCK,     ///< spin_trylock, raw_spin_trylock
+    
+    // Linux Kernel Mutexes
+    TD_KERNEL_MUTEX_INIT,       ///< mutex_init, __mutex_init
+    TD_KERNEL_MUTEX_LOCK,       ///< mutex_lock, mutex_lock_interruptible, mutex_lock_killable
+    TD_KERNEL_MUTEX_UNLOCK,     ///< mutex_unlock
+    TD_KERNEL_MUTEX_TRYLOCK,    ///< mutex_trylock
+    
+    // Linux Kernel Semaphores
+    TD_KERNEL_SEMA_INIT,        ///< sema_init, init_MUTEX, init_MUTEX_LOCKED
+    TD_KERNEL_DOWN,              ///< down, down_interruptible, down_killable, down_trylock
+    TD_KERNEL_UP,                ///< up
+    
+    // Linux Kernel Read-Write Locks
+    TD_KERNEL_READ_LOCK,         ///< read_lock, read_lock_irq, read_lock_irqsave, read_lock_bh
+    TD_KERNEL_READ_UNLOCK,       ///< read_unlock, read_unlock_irq, read_unlock_irqrestore, read_unlock_bh
+    TD_KERNEL_WRITE_LOCK,        ///< write_lock, write_lock_irq, write_lock_irqsave, write_lock_bh
+    TD_KERNEL_WRITE_UNLOCK,      ///< write_unlock, write_unlock_irq, write_unlock_irqrestore, write_unlock_bh
+    
+    // Linux Kernel Read-Write Semaphores
+    TD_KERNEL_DOWN_READ,         ///< down_read, down_read_trylock
+    TD_KERNEL_UP_READ,           ///< up_read
+    TD_KERNEL_DOWN_WRITE,        ///< down_write, down_write_trylock
+    TD_KERNEL_UP_WRITE,          ///< up_write
+    TD_KERNEL_INIT_RWSEM,        ///< init_rwsem
+    
+    // Linux Kernel RCU (Read-Copy-Update)
+    TD_KERNEL_RCU_READ_LOCK,     ///< rcu_read_lock, __rcu_read_lock
+    TD_KERNEL_RCU_READ_UNLOCK,   ///< rcu_read_unlock, __rcu_read_unlock
+    TD_KERNEL_SYNCHRONIZE_RCU,   ///< synchronize_rcu, synchronize_rcu_expedited, synchronize_srcu
+    TD_KERNEL_CALL_RCU,          ///< call_rcu, call_srcu
+    TD_KERNEL_RCU_DEREFERENCE,   ///< rcu_dereference, rcu_dereference_check, rcu_dereference_protected
+    TD_KERNEL_RCU_ASSIGN_POINTER, ///< rcu_assign_pointer
+    
+    // Linux Kernel Seq Locks
+    TD_KERNEL_SEQLOCK_INIT,      ///< seqlock_init
+    TD_KERNEL_READ_SEQBEGIN,     ///< read_seqbegin, read_seqbegin_irqsave
+    TD_KERNEL_READ_SEQRETRY,     ///< read_seqretry, read_seqretry_irqrestore
+    TD_KERNEL_WRITE_SEQLOCK,     ///< write_seqlock, write_seqlock_irq, write_seqlock_irqsave, write_seqlock_bh
+    TD_KERNEL_WRITE_SEQUNLOCK,   ///< write_sequnlock, write_sequnlock_irq, write_sequnlock_irqrestore, write_sequnlock_bh
+    
+    // Linux Kernel Completion Variables
+    TD_KERNEL_INIT_COMPLETION,   ///< init_completion
+    TD_KERNEL_WAIT_FOR_COMPLETION, ///< wait_for_completion, wait_for_completion_interruptible, wait_for_completion_killable, wait_for_completion_timeout
+    TD_KERNEL_COMPLETE,           ///< complete, complete_all
+    
+    // Linux Kernel Wait Queues
+    TD_KERNEL_INIT_WAITQUEUE_HEAD, ///< init_waitqueue_head
+    TD_KERNEL_WAIT_EVENT,         ///< wait_event, wait_event_interruptible, wait_event_killable, wait_event_timeout
+    TD_KERNEL_WAKE_UP,            ///< wake_up, wake_up_interruptible, wake_up_nr, wake_up_all, wake_up_one
+    TD_KERNEL_PREPARE_TO_WAIT,    ///< prepare_to_wait, prepare_to_wait_exclusive
+    TD_KERNEL_FINISH_WAIT,        ///< finish_wait
+    
+    // Linux Kernel Memory Barriers
+    TD_KERNEL_MEMORY_BARRIER      ///< mb, rmb, wmb, smp_mb, smp_rmb, smp_wmb, barrier
   };
 
   /// Map type for API name to TD_TYPE conversion
@@ -232,6 +293,9 @@ private:
   TDAPIMap tdAPIMap;
   std::unordered_map<std::string, ForkArgIndices> m_fork_args;
   std::unordered_map<std::string, JoinArgIndices> m_join_args;
+  
+  /// Configuration for threading models
+  concurrency::ConcurrencyConfig m_config;
 
   /// Constructor
   ThreadAPI() { init(); }
@@ -251,6 +315,13 @@ private:
 public:
   /// Get the function type if it is a threadAPI function
   TD_TYPE getType(const Function *F) const;
+  
+  /// Get the concurrency configuration
+  const concurrency::ConcurrencyConfig& getConfig() const { return m_config; }
+  
+  /// Set the concurrency configuration
+  void setConfig(const concurrency::ConcurrencyConfig& config) { m_config = config; }
+  
   /// Return a static reference
   static ThreadAPI *getThreadAPI() {
     if (tdAPI == NULL) {
@@ -411,54 +482,96 @@ public:
   inline bool isTDAcquire(const Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_RDLOCK ||
-           t == TD_RWLOCK_WRLOCK;
+           t == TD_RWLOCK_WRLOCK ||
+           // Linux kernel locks
+           t == TD_KERNEL_SPIN_LOCK || t == TD_KERNEL_SPIN_TRYLOCK ||
+           t == TD_KERNEL_MUTEX_LOCK || t == TD_KERNEL_MUTEX_TRYLOCK ||
+           t == TD_KERNEL_DOWN || t == TD_KERNEL_READ_LOCK ||
+           t == TD_KERNEL_WRITE_LOCK || t == TD_KERNEL_DOWN_READ ||
+           t == TD_KERNEL_DOWN_WRITE;
   }
 
   inline bool isTDAcquire(const CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_RDLOCK ||
-           t == TD_RWLOCK_WRLOCK;
+           t == TD_RWLOCK_WRLOCK ||
+           // Linux kernel locks
+           t == TD_KERNEL_SPIN_LOCK || t == TD_KERNEL_SPIN_TRYLOCK ||
+           t == TD_KERNEL_MUTEX_LOCK || t == TD_KERNEL_MUTEX_TRYLOCK ||
+           t == TD_KERNEL_DOWN || t == TD_KERNEL_READ_LOCK ||
+           t == TD_KERNEL_WRITE_LOCK || t == TD_KERNEL_DOWN_READ ||
+           t == TD_KERNEL_DOWN_WRITE;
   }
   //@}
 
   /// Return true if this call release a lock
   //@{
   inline bool isTDRelease(const Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_RELEASE;
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_RELEASE ||
+           // Linux kernel locks
+           t == TD_KERNEL_SPIN_UNLOCK || t == TD_KERNEL_MUTEX_UNLOCK ||
+           t == TD_KERNEL_UP || t == TD_KERNEL_READ_UNLOCK ||
+           t == TD_KERNEL_WRITE_UNLOCK || t == TD_KERNEL_UP_READ ||
+           t == TD_KERNEL_UP_WRITE;
   }
 
   inline bool isTDRelease(const CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_RELEASE;
+    TD_TYPE t = getType(getCallee(cb));
+    return t == TD_RELEASE ||
+           // Linux kernel locks
+           t == TD_KERNEL_SPIN_UNLOCK || t == TD_KERNEL_MUTEX_UNLOCK ||
+           t == TD_KERNEL_UP || t == TD_KERNEL_READ_UNLOCK ||
+           t == TD_KERNEL_WRITE_UNLOCK || t == TD_KERNEL_UP_READ ||
+           t == TD_KERNEL_UP_WRITE;
   }
   //@}
 
   /// Return true if this call is a try-lock (e.g., pthread_mutex_trylock)
   //@{
   inline bool isTryLock(const Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_TRY_ACQUIRE;
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_TRY_ACQUIRE ||
+           // Linux kernel try-locks
+           t == TD_KERNEL_SPIN_TRYLOCK || t == TD_KERNEL_MUTEX_TRYLOCK;
   }
   inline bool isTryLock(const CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_TRY_ACQUIRE;
+    TD_TYPE t = getType(getCallee(cb));
+    return t == TD_TRY_ACQUIRE ||
+           // Linux kernel try-locks
+           t == TD_KERNEL_SPIN_TRYLOCK || t == TD_KERNEL_MUTEX_TRYLOCK;
   }
   //@}
 
   /// Return true if this call acquires a read lock (rwlock_rdlock)
   //@{
   inline bool isReadLockAcquire(const Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_RWLOCK_RDLOCK;
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_RWLOCK_RDLOCK ||
+           // Linux kernel read locks
+           t == TD_KERNEL_READ_LOCK || t == TD_KERNEL_DOWN_READ;
   }
   inline bool isReadLockAcquire(const CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_RWLOCK_RDLOCK;
+    TD_TYPE t = getType(getCallee(cb));
+    return t == TD_RWLOCK_RDLOCK ||
+           // Linux kernel read locks
+           t == TD_KERNEL_READ_LOCK || t == TD_KERNEL_DOWN_READ;
   }
   //@}
 
   /// Return true if this call acquires a write lock (rwlock_wrlock)
   //@{
   inline bool isWriteLockAcquire(const Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_RWLOCK_WRLOCK;
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_RWLOCK_WRLOCK ||
+           // Linux kernel write locks
+           t == TD_KERNEL_WRITE_LOCK || t == TD_KERNEL_DOWN_WRITE;
   }
   inline bool isWriteLockAcquire(const CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_RWLOCK_WRLOCK;
+    TD_TYPE t = getType(getCallee(cb));
+    return t == TD_RWLOCK_WRLOCK ||
+           // Linux kernel write locks
+           t == TD_KERNEL_WRITE_LOCK || t == TD_KERNEL_DOWN_WRITE;
   }
   //@}
 
@@ -479,11 +592,17 @@ public:
   /// Return true if this call waits for a barrier
   //@{
   inline bool isTDBarWait(const Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_BAR_WAIT;
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_BAR_WAIT ||
+           // Linux kernel barriers (RCU synchronize acts as barrier)
+           t == TD_KERNEL_SYNCHRONIZE_RCU;
   }
 
   inline bool isTDBarWait(const CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_BAR_WAIT;
+    TD_TYPE t = getType(getCallee(cb));
+    return t == TD_BAR_WAIT ||
+           // Linux kernel barriers (RCU synchronize acts as barrier)
+           t == TD_KERNEL_SYNCHRONIZE_RCU;
   }
   //@}
 
@@ -503,33 +622,51 @@ public:
   /// Return true if this call waits on a condition variable
   //@{
   inline bool isTDCondWait(const Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_COND_WAIT;
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_COND_WAIT ||
+           // Linux kernel completion variables and wait queues
+           t == TD_KERNEL_WAIT_FOR_COMPLETION || t == TD_KERNEL_WAIT_EVENT;
   }
 
   inline bool isTDCondWait(const CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_COND_WAIT;
+    TD_TYPE t = getType(getCallee(cb));
+    return t == TD_COND_WAIT ||
+           // Linux kernel completion variables and wait queues
+           t == TD_KERNEL_WAIT_FOR_COMPLETION || t == TD_KERNEL_WAIT_EVENT;
   }
   //@}
 
   /// Return true if this call signals a condition variable
   //@{
   inline bool isTDCondSignal(const Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_COND_SIGNAL;
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_COND_SIGNAL ||
+           // Linux kernel completion variables and wait queues
+           t == TD_KERNEL_COMPLETE || t == TD_KERNEL_WAKE_UP;
   }
 
   inline bool isTDCondSignal(const CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_COND_SIGNAL;
+    TD_TYPE t = getType(getCallee(cb));
+    return t == TD_COND_SIGNAL ||
+           // Linux kernel completion variables and wait queues
+           t == TD_KERNEL_COMPLETE || t == TD_KERNEL_WAKE_UP;
   }
   //@}
 
   /// Return true if this call broadcasts a condition variable
   //@{
   inline bool isTDCondBroadcast(const Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_COND_BROADCAST;
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_COND_BROADCAST ||
+           // Linux kernel completion variables (complete_all broadcasts)
+           t == TD_KERNEL_COMPLETE; // complete_all acts as broadcast
   }
 
   inline bool isTDCondBroadcast(const CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_COND_BROADCAST;
+    TD_TYPE t = getType(getCallee(cb));
+    return t == TD_COND_BROADCAST ||
+           // Linux kernel completion variables (complete_all broadcasts)
+           t == TD_KERNEL_COMPLETE; // complete_all acts as broadcast
   }
   //@}
 

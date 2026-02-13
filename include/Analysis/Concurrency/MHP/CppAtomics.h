@@ -1,21 +1,22 @@
 /**
- * @file Cpp11Atomics.h
- * @brief C++11 Atomics Recognition
+ * @file CppAtomics.h
+ * @brief C++ Atomics Recognition (C++11/14/17/20)
  *
- * This file provides helpers to identify C++11 atomic operations
- * and their memory ordering in LLVM IR.
+ * This file provides helpers to identify C++ atomic operations
+ * and their memory ordering in LLVM IR. The C++ memory model
+ * and atomic operations are consistent across C++11, C++14, C++17, and C++20.
  *
  * @author rainoftime
  * @date 2025-2026
  */
 
-#ifndef CPP11_ATOMICS_H
-#define CPP11_ATOMICS_H
+#ifndef CPP_ATOMICS_H
+#define CPP_ATOMICS_H
 
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
 
-namespace Cpp11Atomics {
+namespace CppAtomics {
 
 // Enum to represent C++11 memory orderings
 enum class MemoryOrder {
@@ -60,6 +61,6 @@ bool isFenceSeqCst(const llvm::Instruction *inst);
 // Helper to get human-readable memory order string
 const char* memoryOrderToString(MemoryOrder order);
 
-} // namespace Cpp11Atomics
+} // namespace CppAtomics
 
-#endif // CPP11_ATOMICS_H
+#endif // CPP_ATOMICS_H

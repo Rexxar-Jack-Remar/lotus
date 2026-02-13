@@ -1,9 +1,23 @@
+/**
+ * @file CppThreading.h
+ * @brief C++ Threading Primitives Language Model (C++11/17/20)
+ *
+ * This file provides pattern matching and recognition for C++ standard library
+ * threading primitives including std::thread, std::mutex, std::condition_variable,
+ * std::shared_mutex (C++17), std::jthread, std::latch, std::barrier, std::semaphore (C++20),
+ * and RAII lock wrappers.
+ *
+ * @author Lotus Analysis Framework
+ * @date 2026
+ * @ingroup Concurrency
+ */
+
 #pragma once
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Function.h>
 
-namespace Cpp11Model {
+namespace CppThreadingModel {
 
 // Check if the function is std::thread constructor (fork)
 inline bool isFork(const llvm::StringRef& funcName) {
@@ -208,5 +222,5 @@ inline bool isSemaphoreTryAcquire(const llvm::StringRef& funcName) {
   return funcName.contains("semaphore") && funcName.contains("try_acquire");
 }
 
-} // namespace Cpp11Model
+} // namespace CppThreadingModel
 

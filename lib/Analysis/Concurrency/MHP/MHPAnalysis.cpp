@@ -1314,7 +1314,7 @@ void MHPAnalysis::computeAtomicHappensBefore() {
   if (m_atomic_instructions.empty()) {
     for (Function &F : m_module) {
       for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
-        if (Cpp11Atomics::isAtomic(&*I)) {
+        if (CppAtomics::isAtomic(&*I)) {
           m_atomic_instructions.push_back(&*I);
         }
       }
@@ -1339,20 +1339,20 @@ void MHPAnalysis::computeAtomicHappensBefore() {
   };
 
   for (const Instruction *inst : m_atomic_instructions) {
-    const Value *ptr = canonPtr(Cpp11Atomics::getAtomicPointer(inst));
+    const Value *ptr = canonPtr(CppAtomics::getAtomicPointer(inst));
     if (!ptr) continue;
 
-    const auto mo = Cpp11Atomics::getMemoryOrder(inst);
-    const bool has_release = (mo == Cpp11Atomics::MemoryOrder::Release ||
-                              mo == Cpp11Atomics::MemoryOrder::AcquireRelease ||
-                              mo == Cpp11Atomics::MemoryOrder::SequentiallyConsistent);
-    const bool has_acquire = (mo == Cpp11Atomics::MemoryOrder::Acquire ||
-                              mo == Cpp11Atomics::MemoryOrder::AcquireRelease ||
-                              mo == Cpp11Atomics::MemoryOrder::SequentiallyConsistent);
+    const auto mo = CppAtomics::getMemoryOrder(inst);
+    const bool has_release = (mo == CppAtomics::MemoryOrder::Release ||
+                              mo == CppAtomics::MemoryOrder::AcquireRelease ||
+                              mo == CppAtomics::MemoryOrder::SequentiallyConsistent);
+    const bool has_acquire = (mo == CppAtomics::MemoryOrder::Acquire ||
+                              mo == CppAtomics::MemoryOrder::AcquireRelease ||
+                              mo == CppAtomics::MemoryOrder::SequentiallyConsistent);
 
-    if (Cpp11Atomics::isStore(inst) && has_release)
+    if (CppAtomics::isStore(inst) && has_release)
       releasesByPtr[ptr].push_back(inst);
-    if (Cpp11Atomics::isLoad(inst) && has_acquire)
+    if (CppAtomics::isLoad(inst) && has_acquire)
       acquiresByPtr[ptr].push_back(inst);
   }
 

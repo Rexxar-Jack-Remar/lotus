@@ -1,15 +1,15 @@
 /**
- * @file Cpp11Atomics.cpp
- * @brief C++11 Atomics Recognition Implementation
+ * @file CppAtomics.cpp
+ * @brief C++ Atomics Recognition Implementation (C++11/14/17/20)
  *
  * @author rainofetime
  * @date 2025-2026
  */
 
-#include "Analysis/Concurrency/MHP/Cpp11Atomics.h"
+#include "Analysis/Concurrency/MHP/CppAtomics.h"
 #include <llvm/IR/Instructions.h>
 
-namespace Cpp11Atomics {
+namespace CppAtomics {
 
 // Helper to convert LLVM's AtomicOrdering to our enum
 static MemoryOrder fromLLVMOrdering(llvm::AtomicOrdering ordering) {
@@ -209,4 +209,4 @@ const char* memoryOrderToString(MemoryOrder order) {
     }
 }
 
-} // namespace Cpp11Atomics
+} // namespace CppAtomics

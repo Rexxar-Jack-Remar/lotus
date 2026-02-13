@@ -5,7 +5,7 @@
 #include "Checker/Concurrency/DataRaceChecker.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Analysis/Concurrency/MHP/Cpp11Atomics.h"
+#include "Analysis/Concurrency/MHP/CppAtomics.h"
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 
 #include <unordered_map>
@@ -474,8 +474,8 @@ bool DataRaceChecker::isWriteAccess(const Instruction *inst) const {
 }
 
 bool DataRaceChecker::isAtomicOperation(const Instruction *inst) const {
-  // Use enhanced Cpp11Atomics module for better atomic recognition
-  if (Cpp11Atomics::isAtomic(inst))
+  // Use enhanced CppAtomics module for better atomic recognition
+  if (CppAtomics::isAtomic(inst))
     return true;
   
   // Legacy check for backward compatibility
@@ -487,7 +487,7 @@ bool DataRaceChecker::isAtomicOperation(const Instruction *inst) const {
     return S->isAtomic();
   
   // Check if it's a fence instruction
-  if (Cpp11Atomics::isFence(inst))
+  if (CppAtomics::isFence(inst))
     return true;
     
   return false;

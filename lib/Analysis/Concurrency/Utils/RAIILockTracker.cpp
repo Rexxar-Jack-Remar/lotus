@@ -7,7 +7,7 @@
  */
 
 #include "Analysis/Concurrency/Utils/RAIILockTracker.h"
-#include "Analysis/Concurrency/Utils/LanguageModel/Cpp11.h"
+#include "Analysis/Concurrency/Utils/LanguageModel/CppThreading.h"
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
@@ -22,10 +22,10 @@ bool RAIILockTracker::isRAIILockConstructor(const llvm::Instruction *inst) {
   if (!func || !func->hasName()) return false;
   
   llvm::StringRef name = func->getName();
-  return Cpp11Model::isLockGuardConstructor(name) ||
-         Cpp11Model::isUniqueLockConstructor(name) ||
-         Cpp11Model::isScopedLockConstructor(name) ||
-         Cpp11Model::isSharedLockConstructor(name);
+  return CppThreadingModel::isLockGuardConstructor(name) ||
+         CppThreadingModel::isUniqueLockConstructor(name) ||
+         CppThreadingModel::isScopedLockConstructor(name) ||
+         CppThreadingModel::isSharedLockConstructor(name);
 }
 
 bool RAIILockTracker::isRAIILockDestructor(const llvm::Instruction *inst) {
@@ -36,10 +36,10 @@ bool RAIILockTracker::isRAIILockDestructor(const llvm::Instruction *inst) {
   if (!func || !func->hasName()) return false;
   
   llvm::StringRef name = func->getName();
-  return Cpp11Model::isLockGuardDestructor(name) ||
-         Cpp11Model::isUniqueLockDestructor(name) ||
-         Cpp11Model::isScopedLockDestructor(name) ||
-         Cpp11Model::isSharedLockDestructor(name);
+  return CppThreadingModel::isLockGuardDestructor(name) ||
+         CppThreadingModel::isUniqueLockDestructor(name) ||
+         CppThreadingModel::isScopedLockDestructor(name) ||
+         CppThreadingModel::isSharedLockDestructor(name);
 }
 
 bool RAIILockTracker::isSharedLock(const llvm::Instruction *inst) {
@@ -49,7 +49,7 @@ bool RAIILockTracker::isSharedLock(const llvm::Instruction *inst) {
   const auto *func = call->getCalledFunction();
   if (!func || !func->hasName()) return false;
   
-  return Cpp11Model::isSharedLockConstructor(func->getName());
+  return CppThreadingModel::isSharedLockConstructor(func->getName());
 }
 
 const llvm::AllocaInst *RAIILockTracker::findLockObjectForConstructor(const llvm::CallBase *ctor) {
@@ -152,7 +152,7 @@ void RAIILockTracker::processConstructor(const llvm::CallBase *ctor, const llvm:
   lifetime.constructor = ctor;
   lifetime.underlyingLock = extractUnderlyingLock(ctor);
   lifetime.isShared = isSharedLock(ctor);
-  lifetime.isScoped = Cpp11Model::isScopedLockConstructor(
+  lifetime.isScoped = CppThreadingModel::isScopedLockConstructor(
       ctor->getCalledFunction()->getName());
   
   // Find all destructor calls for this lock object

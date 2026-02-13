@@ -1,5 +1,7 @@
 #include "Verification/Backend/Backend.h"
 
+#include <algorithm>
+
 #include <gtest/gtest.h>
 
 using namespace lotus::verification::backend;

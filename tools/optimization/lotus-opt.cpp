@@ -177,6 +177,26 @@ static cl::opt<bool> EnableDummyMarker(
     cl::desc("Put calls to dummy functions into bitcode to prevent code removal"),
     cl::init(false), cl::cat(OptCat));
 
+static cl::opt<bool> EnableUnrolling(
+    "lotus-loop-unroll",
+    cl::desc("Unroll loops a specified number of times"),
+    cl::init(false), cl::cat(OptCat));
+
+static cl::opt<bool> EnableExplicitConsdes(
+    "explicit-consdes",
+    cl::desc("Insert explicit calls of module constructors and destructors"),
+    cl::init(false), cl::cat(OptCat));
+
+static cl::opt<bool> EnableDeleteCalls(
+    "delete-calls",
+    cl::desc("Delete direct calls to specified functions"),
+    cl::init(false), cl::cat(OptCat));
+
+static cl::opt<bool> EnableReplaceVerifierAtomic(
+    "replace-verifier-atomic",
+    cl::desc("Replace verifier atomic function names"),
+    cl::init(false), cl::cat(OptCat));
+
 static cl::opt<bool> EnableClassifyInstructions(
     "classify-instructions",
     cl::desc("Print statistics about instruction types"),
@@ -265,6 +285,10 @@ int main(int argc, char **argv) {
     EnableRenameVerifierFuns = true;
     EnableReplaceLifetimeMarkers = true;
     EnableMarkVolatile = true;
+    EnableUnrolling = true;
+    EnableExplicitConsdes = true;
+    EnableDeleteCalls = true;
+    EnableReplaceVerifierAtomic = true;
   }
 
   if (!EnableAInline && !EnableIPDSE && !EnableIPRLE && !EnableIPSink &&
@@ -276,7 +300,8 @@ int main(int argc, char **argv) {
       !EnableInstrumentNontermination && !EnableRemoveReadOnlyAttr &&
       !EnableRenameVerifierFuns && !EnableReplaceLifetimeMarkers && !EnableMarkVolatile &&
       !EnableFindExits && !EnableDummyMarker && !EnableClassifyInstructions &&
-      !EnableClassifyLoops && !EnableCountInstr && !EnableGetTestTargets && !EnableCheckModule) {
+      !EnableClassifyLoops && !EnableCountInstr && !EnableGetTestTargets && !EnableCheckModule &&
+      !EnableUnrolling && !EnableExplicitConsdes && !EnableDeleteCalls && !EnableReplaceVerifierAtomic) {
     errs() << "error: no optimization selected; use -ip-all or specific flags\n";
     return 1;
   }
@@ -390,6 +415,14 @@ int main(int argc, char **argv) {
     PM.add(lotus::verification::analysis::createGetTestTargetsPass());
   if (EnableCheckModule)
     PM.add(lotus::verification::analysis::createCheckModulePass());
+  if (EnableUnrolling)
+    PM.add(lotus::verification::transform::createUnrollingPass());
+  if (EnableExplicitConsdes)
+    PM.add(lotus::verification::transform::createExplicitConsdesPass());
+  if (EnableDeleteCalls)
+    PM.add(lotus::verification::transform::createDeleteCallsPass());
+  if (EnableReplaceVerifierAtomic)
+    PM.add(lotus::verification::transform::createReplaceVerifierAtomicPass());
 
   if (!Ok)
     return 1;

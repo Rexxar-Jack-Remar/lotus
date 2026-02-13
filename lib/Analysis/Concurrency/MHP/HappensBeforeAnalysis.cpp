@@ -21,7 +21,7 @@ void HappensBeforeAnalysis::analyze() {
 
 void HappensBeforeAnalysis::buildSynchronizesWith() {
   m_sync_with.clear();
-  using namespace Cpp11Atomics;
+  using namespace CppAtomics;
 
   std::vector<const Instruction *> release_ops;
   std::vector<const Instruction *> acquire_ops;
@@ -150,8 +150,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
 bool HappensBeforeAnalysis::sameAtomicLocation(const llvm::Instruction *store_inst,
                                                 const llvm::Instruction *load_inst) const {
-  const Value *p1 = Cpp11Atomics::getAtomicPointer(store_inst);
-  const Value *p2 = Cpp11Atomics::getAtomicPointer(load_inst);
+  const Value *p1 = CppAtomics::getAtomicPointer(store_inst);
+  const Value *p2 = CppAtomics::getAtomicPointer(load_inst);
   if (!p1 || !p2) return false;
   if (p1->stripPointerCasts() == p2->stripPointerCasts()) return true;
   if (m_alias_analysis && m_alias_analysis->mayAlias(p1, p2)) return true;
