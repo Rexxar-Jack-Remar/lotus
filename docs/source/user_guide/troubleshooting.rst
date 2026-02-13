@@ -68,7 +68,7 @@ Z3 Not Found
 Boost Not Found
 ~~~~~~~~~~~~~~~
 
-**Problem**: Boost libraries required for Sea-DSA and CLAM not found.
+**Problem**: Boost libraries required for SeaHorn, CLAM, and/or CclyzerAA not found.
 
 .. code-block:: text
 

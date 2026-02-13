@@ -27,9 +27,21 @@ include(cmake/ConfigureLLVM.cmake)
 
 # Include dependency configuration modules
 include(cmake/FindZ3.cmake)
-include(cmake/ConfigureBoost.cmake)
 
+# Configure module options
 option(ENABLE_CLAM "Enable CLAM abstract interpretation framework" ON)
+option(ENABLE_SEAHORN "Enable SeaHorn" ON)
+option(LOTUS_USE_CCLYZER "Enable optional cclyzer++ alias analysis backend" OFF)
+
+# Configure Boost only if modules that require it are enabled
+# Sea-DSA no longer requires Boost, so Boost is only needed for:
+# - SeaHorn (ENABLE_SEAHORN)
+# - CLAM (ENABLE_CLAM)
+# - CclyzerAA (LOTUS_USE_CCLYZER)
+if(ENABLE_CLAM OR ENABLE_SEAHORN OR LOTUS_USE_CCLYZER)
+    include(cmake/ConfigureBoost.cmake)
+endif()
+
 option(DOWNLOAD_CRAB "Download and build CRAB if not found" ON)
 set(CUSTOM_CRAB_ROOT "" CACHE PATH "Path to custom CRAB installation (optional)")
 if (ENABLE_CLAM)
@@ -41,14 +53,12 @@ if (ENABLE_SVF)
     include(cmake/ConfigureSVF.cmake)
 endif()
 
-# Do not build Seahorn by default
-option(ENABLE_SEAHORN "Enable SeaHorn" ON)
 if (ENABLE_SEAHORN)
     include(cmake/ConfigureSeaHorn.cmake)
 endif()
 
 # Optional cclyzer++ Datalog-based alias analysis (standalone backend, not in AliasAnalysisWrapper)
-option(LOTUS_USE_CCLYZER "Enable optional cclyzer++ alias analysis backend" OFF)
+# Note: CclyzerAA requires Boost, so Boost will be configured if this is enabled
 if (LOTUS_USE_CCLYZER)
     include(cmake/ConfigureCclyzerpp.cmake)
 endif()

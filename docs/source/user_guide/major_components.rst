@@ -16,7 +16,7 @@ See :doc:`../alias/alias_analysis` for detailed instructions and command example
   (``lib/Alias/DyckAA``).
 * **CFL (via LLVM)** – Context-Free Language alias analysis from LLVM (used by the alias wrapper).
 * **Sea-DSA** – Context-sensitive and field-sensitive analysis with
-  Sea-DSA (``lib/Alias/seadsa``) requiring Boost.
+  Sea-DSA (``lib/Alias/seadsa``). Does not require Boost.
 * **SparrowAA** – Inclusion-based pointer analysis without on-the-fly
   call-graph construction (``lib/Alias/SparrowAA``).
 * **FPA** – Function Pointer Analysis toolbox (FLTA, MLTA, MLTADF, KELP) under
