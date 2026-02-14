@@ -2,14 +2,18 @@
  * @file ThreadFlowGraph.cpp
  * @brief Implementation of Thread Flow Graph classes
  *
- * The Thread Flow Graph (TFG) is a graph representation of the concurrent program.
- * Nodes represent synchronization events or instructions.
- * Edges represent:
+ * The Thread Flow Graph (TFG) is a graph representation of the concurrent
+ * program. Nodes represent synchronization events or instructions. Edges
+ * represent:
  * 1. Intra-thread control flow (program order)
  * 2. Inter-thread synchronization (fork, join, signal, etc.)
  */
 
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
+
+#include <functional>
+#include <queue>
+#include <unordered_set>
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -129,7 +133,8 @@ void ThreadFlowGraph::addIntraThreadEdge(SyncNode *from, SyncNode *to) {
   if (from && to) {
     from->addSuccessor(to);
     to->addPredecessor(from);
-    m_edge_kinds[{const_cast<const SyncNode *>(from), const_cast<const SyncNode *>(to)}] = EdgeKind::Control;
+    m_edge_kinds[{const_cast<const SyncNode *>(from),
+                  const_cast<const SyncNode *>(to)}] = EdgeKind::Control;
   }
 }
 
@@ -142,7 +147,8 @@ void ThreadFlowGraph::addInterThreadEdge(SyncNode *from, SyncNode *to,
   if (from && to) {
     from->addSuccessor(to);
     to->addPredecessor(from);
-    m_edge_kinds[{const_cast<const SyncNode *>(from), const_cast<const SyncNode *>(to)}] = kind;
+    m_edge_kinds[{const_cast<const SyncNode *>(from),
+                  const_cast<const SyncNode *>(to)}] = kind;
   }
 }
 
@@ -150,7 +156,8 @@ void ThreadFlowGraph::addCallEdge(SyncNode *call_site, SyncNode *callee_entry) {
   if (call_site && callee_entry) {
     call_site->addSuccessor(callee_entry);
     callee_entry->addPredecessor(call_site);
-    m_edge_kinds[{const_cast<const SyncNode *>(call_site), const_cast<const SyncNode *>(callee_entry)}] = EdgeKind::Call;
+    m_edge_kinds[{const_cast<const SyncNode *>(call_site),
+                  const_cast<const SyncNode *>(callee_entry)}] = EdgeKind::Call;
   }
 }
 
@@ -158,11 +165,13 @@ void ThreadFlowGraph::addRetEdge(SyncNode *callee_exit, SyncNode *return_site) {
   if (callee_exit && return_site) {
     callee_exit->addSuccessor(return_site);
     return_site->addPredecessor(callee_exit);
-    m_edge_kinds[{const_cast<const SyncNode *>(callee_exit), const_cast<const SyncNode *>(return_site)}] = EdgeKind::Ret;
+    m_edge_kinds[{const_cast<const SyncNode *>(callee_exit),
+                  const_cast<const SyncNode *>(return_site)}] = EdgeKind::Ret;
   }
 }
 
-EdgeKind ThreadFlowGraph::getEdgeKind(const SyncNode *from, const SyncNode *to) const {
+EdgeKind ThreadFlowGraph::getEdgeKind(const SyncNode *from,
+                                      const SyncNode *to) const {
   auto it = m_edge_kinds.find({from, to});
   return it != m_edge_kinds.end() ? it->second : EdgeKind::Control;
 }
@@ -173,8 +182,9 @@ void ThreadFlowGraph::setFunctionExitNode(ThreadID tid,
   m_func_exit_nodes[{tid, func}] = exit_node;
 }
 
-SyncNode *ThreadFlowGraph::getFunctionExitNode(
-    ThreadID tid, const llvm::Function *func) const {
+SyncNode *
+ThreadFlowGraph::getFunctionExitNode(ThreadID tid,
+                                     const llvm::Function *func) const {
   auto it = m_func_exit_nodes.find({tid, func});
   return it != m_func_exit_nodes.end() ? it->second : nullptr;
 }
@@ -190,8 +200,7 @@ ThreadFlowGraph::getNodesOfType(SyncNodeType type) const {
   return result;
 }
 
-std::vector<SyncNode *>
-ThreadFlowGraph::getNodesInThread(ThreadID tid) const {
+std::vector<SyncNode *> ThreadFlowGraph::getNodesInThread(ThreadID tid) const {
   std::vector<SyncNode *> result;
   for (auto *node : m_all_nodes) {
     if (node->getThreadID() == tid) {
@@ -270,6 +279,249 @@ void ThreadFlowGraph::dumpToFile(const std::string &filename) const {
 }
 
 // ============================================================================
+// Reachability Index Implementation
+// ============================================================================
+
+void ThreadFlowGraph::buildReachabilityIndex() {
+  if (m_index_built) {
+    return;
+  }
+
+  errs() << "Building TFG reachability index...\n";
+
+  buildReverseEdges();
+
+  for (const auto &entry : m_thread_entries) {
+    ThreadID tid = entry.first;
+    buildTopologicalOrder(tid);
+    buildSCCs(tid);
+  }
+
+  m_index_built = true;
+
+  size_t total_indexed = 0;
+  for (const auto &entry : m_topo_nodes) {
+    total_indexed += entry.second.size();
+  }
+  errs() << "Indexed " << total_indexed << " nodes across "
+         << m_topo_nodes.size() << " threads\n";
+}
+
+void ThreadFlowGraph::buildReverseEdges() {
+  m_reverse_edges.clear();
+  for (SyncNode *node : m_all_nodes) {
+    for (SyncNode *succ : node->getSuccessors()) {
+      m_reverse_edges[succ].push_back(node);
+    }
+  }
+}
+
+void ThreadFlowGraph::buildTopologicalOrder(ThreadID tid) {
+  std::vector<SyncNode *> &order = m_topo_nodes[tid];
+  order.clear();
+
+  std::vector<SyncNode *> thread_nodes;
+  for (SyncNode *node : m_all_nodes) {
+    if (node->getThreadID() == tid) {
+      thread_nodes.push_back(node);
+    }
+  }
+
+  if (thread_nodes.empty()) {
+    return;
+  }
+
+  std::unordered_map<SyncNode *, int> in_degree;
+  std::unordered_map<SyncNode *, std::vector<SyncNode *>> adj;
+
+  for (SyncNode *node : thread_nodes) {
+    in_degree[node] = 0;
+  }
+
+  for (SyncNode *node : thread_nodes) {
+    for (SyncNode *succ : node->getSuccessors()) {
+      if (succ->getThreadID() == tid) {
+        adj[node].push_back(succ);
+        in_degree[succ]++;
+      }
+    }
+  }
+
+  std::queue<SyncNode *> q;
+  for (SyncNode *node : thread_nodes) {
+    if (in_degree[node] == 0) {
+      q.push(node);
+    }
+  }
+
+  while (!q.empty()) {
+    SyncNode *node = q.front();
+    q.pop();
+
+    int order_num = static_cast<int>(order.size());
+    m_topo_order[node->getNodeID()] = order_num;
+    order.push_back(node);
+
+    for (SyncNode *succ : adj[node]) {
+      in_degree[succ]--;
+      if (in_degree[succ] == 0) {
+        q.push(succ);
+      }
+    }
+  }
+
+  if (order.size() != thread_nodes.size()) {
+    for (SyncNode *node : thread_nodes) {
+      if (m_topo_order.find(node->getNodeID()) == m_topo_order.end()) {
+        int order_num = static_cast<int>(order.size());
+        m_topo_order[node->getNodeID()] = order_num;
+        order.push_back(node);
+      }
+    }
+  }
+}
+
+void ThreadFlowGraph::buildSCCs(ThreadID tid) {
+  std::unordered_map<SyncNode *, int> index;
+  std::unordered_map<SyncNode *, int> lowlink;
+  std::unordered_map<SyncNode *, bool> on_stack;
+  std::vector<SyncNode *> stack;
+  int current_index = 0;
+
+  std::function<void(SyncNode *)> strongConnect = [&](SyncNode *v) {
+    index[v] = current_index;
+    lowlink[v] = current_index;
+    current_index++;
+    stack.push_back(v);
+    on_stack[v] = true;
+
+    for (SyncNode *w : v->getSuccessors()) {
+      if (w->getThreadID() != tid)
+        continue;
+
+      if (index.find(w) == index.end()) {
+        strongConnect(w);
+        lowlink[v] = std::min(lowlink[v], lowlink[w]);
+      } else if (on_stack[w]) {
+        lowlink[v] = std::min(lowlink[v], index[w]);
+      }
+    }
+
+    if (lowlink[v] == index[v]) {
+      SyncNode *representative = v;
+      SyncNode *w;
+      do {
+        w = stack.back();
+        stack.pop_back();
+        on_stack[w] = false;
+        m_scc_representative[w] = representative;
+      } while (w != v);
+    }
+  };
+
+  for (SyncNode *node : m_all_nodes) {
+    if (node->getThreadID() == tid && index.find(node) == index.end()) {
+      strongConnect(node);
+    }
+  }
+}
+
+bool ThreadFlowGraph::canReach(const SyncNode *from, const SyncNode *to) const {
+  if (!from || !to || from == to) {
+    return false;
+  }
+
+  std::deque<const SyncNode *> worklist;
+  std::unordered_set<const SyncNode *> visited;
+
+  worklist.push_back(from);
+  visited.insert(from);
+
+  while (!worklist.empty()) {
+    const SyncNode *current = worklist.front();
+    worklist.pop_front();
+
+    if (current == to) {
+      return true;
+    }
+
+    for (SyncNode *succ : current->getSuccessors()) {
+      if (visited.insert(succ).second) {
+        worklist.push_back(succ);
+      }
+    }
+  }
+
+  return false;
+}
+
+bool ThreadFlowGraph::canReachViaIndex(const SyncNode *from,
+                                       const SyncNode *to) const {
+  auto from_it = m_topo_order.find(from->getNodeID());
+  auto to_it = m_topo_order.find(to->getNodeID());
+
+  if (from_it == m_topo_order.end() || to_it == m_topo_order.end()) {
+    return canReach(from, to);
+  }
+
+  if (from_it->second > to_it->second) {
+    auto from_rep = m_scc_representative.find(from);
+    auto to_rep = m_scc_representative.find(to);
+
+    if (from_rep != m_scc_representative.end() &&
+        to_rep != m_scc_representative.end() &&
+        from_rep->second == to_rep->second) {
+      return canReach(from, to);
+    }
+
+    return false;
+  }
+
+  std::deque<const SyncNode *> worklist;
+  std::unordered_set<const SyncNode *> visited;
+
+  worklist.push_back(from);
+  visited.insert(from);
+
+  while (!worklist.empty()) {
+    const SyncNode *current = worklist.front();
+    worklist.pop_front();
+
+    if (current == to) {
+      return true;
+    }
+
+    auto current_it = m_topo_order.find(current->getNodeID());
+    if (current_it != m_topo_order.end() &&
+        current_it->second > to_it->second) {
+      continue;
+    }
+
+    for (SyncNode *succ : current->getSuccessors()) {
+      if (succ->getThreadID() == from->getThreadID()) {
+        if (visited.insert(succ).second) {
+          worklist.push_back(succ);
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+int ThreadFlowGraph::getTopologicalOrder(const SyncNode *node) const {
+  auto it = m_topo_order.find(node->getNodeID());
+  return it != m_topo_order.end() ? it->second : -1;
+}
+
+const std::vector<SyncNode *> &
+ThreadFlowGraph::getTopologicalOrderNodes(ThreadID tid) const {
+  static const std::vector<SyncNode *> empty;
+  auto it = m_topo_nodes.find(tid);
+  return it != m_topo_nodes.end() ? it->second : empty;
+}
+
+// ============================================================================
 // Utility Functions
 // ============================================================================
 
@@ -310,8 +562,7 @@ StringRef getSyncNodeTypeName(SyncNodeType type) {
 bool isSynchronizationNode(SyncNodeType type) {
   return type == SyncNodeType::LOCK_ACQUIRE ||
          type == SyncNodeType::LOCK_RELEASE ||
-         type == SyncNodeType::COND_WAIT ||
-         type == SyncNodeType::COND_SIGNAL ||
+         type == SyncNodeType::COND_WAIT || type == SyncNodeType::COND_SIGNAL ||
          type == SyncNodeType::COND_BROADCAST ||
          type == SyncNodeType::BARRIER_WAIT;
 }
@@ -319,8 +570,7 @@ bool isSynchronizationNode(SyncNodeType type) {
 bool isThreadBoundaryNode(SyncNodeType type) {
   return type == SyncNodeType::THREAD_START ||
          type == SyncNodeType::THREAD_FORK ||
-         type == SyncNodeType::THREAD_JOIN ||
-         type == SyncNodeType::THREAD_EXIT;
+         type == SyncNodeType::THREAD_JOIN || type == SyncNodeType::THREAD_EXIT;
 }
 
 } // namespace mhp

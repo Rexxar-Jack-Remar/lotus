@@ -3,6 +3,7 @@
 #include "Apps/Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/PassManager.h>
 
 using namespace llvm;

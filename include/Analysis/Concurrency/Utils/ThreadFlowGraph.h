@@ -12,17 +12,17 @@
 #ifndef THREAD_FLOW_GRAPH_H
 #define THREAD_FLOW_GRAPH_H
 
+#include <map>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <map>
-#include <memory>
-#include <unordered_map>
-#include <vector>
 
 namespace mhp {
 
@@ -40,32 +40,32 @@ using ThreadID = size_t;
  * @brief Types of synchronization nodes in the thread-flow graph
  */
 enum class SyncNodeType {
-  THREAD_START,       ///< Program entry point
-  THREAD_FORK,        ///< pthread_create or similar
-  THREAD_JOIN,        ///< pthread_join or similar
-  THREAD_EXIT,        ///< pthread_exit or return from thread function
-  LOCK_ACQUIRE,       ///< Lock acquisition (mutex lock)
-  LOCK_RELEASE,       ///< Lock release (mutex unlock)
-  COND_WAIT,          ///< Condition variable wait
-  COND_SIGNAL,        ///< Condition variable signal
-  COND_BROADCAST,     ///< Condition variable broadcast
-  BARRIER_WAIT,       ///< Barrier synchronization
-  REGULAR_INST,       ///< Regular instruction
-  FUNCTION_CALL,      ///< Function call (non-thread API)
-  FUNCTION_RETURN     ///< Function return
+  THREAD_START,   ///< Program entry point
+  THREAD_FORK,    ///< pthread_create or similar
+  THREAD_JOIN,    ///< pthread_join or similar
+  THREAD_EXIT,    ///< pthread_exit or return from thread function
+  LOCK_ACQUIRE,   ///< Lock acquisition (mutex lock)
+  LOCK_RELEASE,   ///< Lock release (mutex unlock)
+  COND_WAIT,      ///< Condition variable wait
+  COND_SIGNAL,    ///< Condition variable signal
+  COND_BROADCAST, ///< Condition variable broadcast
+  BARRIER_WAIT,   ///< Barrier synchronization
+  REGULAR_INST,   ///< Regular instruction
+  FUNCTION_CALL,  ///< Function call (non-thread API)
+  FUNCTION_RETURN ///< Function return
 };
 
 /**
  * @brief Edge kind in the thread-flow graph (call, ret, create, join, signal)
  */
 enum class EdgeKind {
-  Control,  ///< Intra-thread control flow
-  Call,     ///< Call site -> callee entry
-  Ret,      ///< Callee exit -> return site
-  Create,   ///< Fork -> thread entry
-  Join,     ///< Thread exit -> join site
-  Signal,   ///< signal(c) -> wait(c)
-  Barrier   ///< Barrier synchronization between threads
+  Control, ///< Intra-thread control flow
+  Call,    ///< Call site -> callee entry
+  Ret,     ///< Callee exit -> return site
+  Create,  ///< Fork -> thread entry
+  Join,    ///< Thread exit -> join site
+  Signal,  ///< signal(c) -> wait(c)
+  Barrier  ///< Barrier synchronization between threads
 };
 
 /**
@@ -74,7 +74,8 @@ enum class EdgeKind {
 class SyncNode {
 public:
   SyncNode(const llvm::Instruction *inst, SyncNodeType type, ThreadID tid)
-      : m_instruction(inst), m_type(type), m_thread_id(tid), m_node_id(next_id++) {}
+      : m_instruction(inst), m_type(type), m_thread_id(tid),
+        m_node_id(next_id++) {}
 
   const llvm::Instruction *getInstruction() const { return m_instruction; }
   SyncNodeType getType() const { return m_type; }
@@ -101,9 +102,7 @@ public:
   const std::vector<SyncNode *> &getPredecessors() const {
     return m_predecessors;
   }
-  const std::vector<SyncNode *> &getSuccessors() const {
-    return m_successors;
-  }
+  const std::vector<SyncNode *> &getSuccessors() const { return m_successors; }
 
   // For debugging
   void print(llvm::raw_ostream &os) const;
@@ -170,12 +169,23 @@ public:
   EdgeKind getEdgeKind(const SyncNode *from, const SyncNode *to) const;
 
   // Per-function exit node (for ret edges); key is (ThreadID, Function*)
-  void setFunctionExitNode(ThreadID tid, const llvm::Function *func, SyncNode *exit_node);
+  void setFunctionExitNode(ThreadID tid, const llvm::Function *func,
+                           SyncNode *exit_node);
   SyncNode *getFunctionExitNode(ThreadID tid, const llvm::Function *func) const;
 
   // Query interface
   std::vector<SyncNode *> getNodesOfType(SyncNodeType type) const;
   std::vector<SyncNode *> getNodesInThread(ThreadID tid) const;
+
+  // ========================================================================
+  // Reachability Index (for O(1) HB queries)
+  // ========================================================================
+
+  void buildReachabilityIndex();
+  bool hasReachabilityIndex() const { return m_index_built; }
+  bool canReach(const SyncNode *from, const SyncNode *to) const;
+  int getTopologicalOrder(const SyncNode *node) const;
+  const std::vector<SyncNode *> &getTopologicalOrderNodes(ThreadID tid) const;
 
   // Debugging and visualization
   void print(llvm::raw_ostream &os) const;
@@ -188,8 +198,22 @@ private:
   std::unordered_map<ThreadID, const llvm::Function *> m_thread_entries;
   std::unordered_map<ThreadID, SyncNode *> m_thread_entry_nodes;
   std::unordered_map<ThreadID, SyncNode *> m_thread_exit_nodes;
-  std::map<std::pair<const SyncNode *, const SyncNode *>, EdgeKind> m_edge_kinds;
-  std::map<std::pair<ThreadID, const llvm::Function *>, SyncNode *> m_func_exit_nodes;
+  std::map<std::pair<const SyncNode *, const SyncNode *>, EdgeKind>
+      m_edge_kinds;
+  std::map<std::pair<ThreadID, const llvm::Function *>, SyncNode *>
+      m_func_exit_nodes;
+
+  // Reachability index structures
+  bool m_index_built = false;
+  std::unordered_map<size_t, int> m_topo_order;
+  std::unordered_map<ThreadID, std::vector<SyncNode *>> m_topo_nodes;
+  std::unordered_map<const SyncNode *, std::vector<SyncNode *>> m_reverse_edges;
+  std::unordered_map<const SyncNode *, const SyncNode *> m_scc_representative;
+
+  void buildTopologicalOrder(ThreadID tid);
+  void buildReverseEdges();
+  void buildSCCs(ThreadID tid);
+  bool canReachViaIndex(const SyncNode *from, const SyncNode *to) const;
 };
 
 // ============================================================================

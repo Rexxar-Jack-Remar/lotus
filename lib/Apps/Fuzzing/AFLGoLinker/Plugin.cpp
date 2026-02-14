@@ -64,7 +64,7 @@ static void addPasses(ModulePassManager &MPM) {
   MPM.addPass(DuplicateTargetRemovalPass());
 
   if (ClDAFL) {
-    MPM.addPass(DAFLInstrumentationPass(ClDAFLOutputFile));
+    MPM.addPass(DAFLInstrumentationPass(ClDAFLOutputFile.getValue()));
   } else {
     if (ClTraceFunctionDistance) {
       MPM.addPass(FunctionDistancePass());
@@ -91,7 +91,7 @@ llvm::PassPluginLibraryInfo getAFLGoLinkerPluginInfo() {
             });
         PB.registerAnalysisRegistrationCallback([](ModuleAnalysisManager &MAM) {
           MAM.registerPass([] {
-            return DAFLAnalysis(ClDAFLInputFile, ClDAFLNoTargetsNoError,
+            return DAFLAnalysis(ClDAFLInputFile.getValue(), ClDAFLNoTargetsNoError,
                                 ClDAFLDebug, ClDAFLVerbose);
           });
           MAM.registerPass([] { return ExtendedCallGraphAnalysis(); });
@@ -102,8 +102,10 @@ llvm::PassPluginLibraryInfo getAFLGoLinkerPluginInfo() {
               [] { return AFLGoBasicBlockDistanceAnalysis(ClExtendCG); });
         });
 
+#if LLVM_VERSION_MAJOR >= 15
         PB.registerFullLinkTimeOptimizationLastEPCallback(
             [](ModulePassManager &MPM, OptimizationLevel) { addPasses(MPM); });
+#endif
 
         PB.registerPipelineParsingCallback(
             [](StringRef Name, ModulePassManager &MPM,

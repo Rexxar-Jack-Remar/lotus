@@ -1,10 +1,10 @@
 /**
  * @file MHPAnalysis.h
  * @brief Production-ready May-Happen-in-Parallel (MHP) Analysis
- * 
+ *
  * This file provides a comprehensive MHP analysis framework for determining
  * which program statements may execute concurrently in a multithreaded program.
- * 
+ *
  * Key Features:
  * - Thread-flow graph construction
  * - Fork-join analysis
@@ -13,7 +13,7 @@
  * - Barrier synchronization support
  * - Efficient query interface
  * - Comprehensive debugging support
- * 
+ *
  * @author rainoftime
  * @date 2025
  */
@@ -21,15 +21,23 @@
 #ifndef MHP_ANALYSIS_H
 #define MHP_ANALYSIS_H
 
-#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
 namespace ThreadLocal {
-  class ThreadLocalAnalysis;
+class ThreadLocalAnalysis;
 }
+
+#include <bitset>
+#include <limits>
+#include <memory>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
@@ -42,13 +50,6 @@ namespace ThreadLocal {
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <limits>
-#include <memory>
-#include <set>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
 
 namespace mhp {
 
@@ -69,13 +70,19 @@ using InstructionSet = std::unordered_set<const llvm::Instruction *>;
 using InstructionVector = std::vector<const llvm::Instruction *>;
 using LockID = const llvm::Value *;
 
+// Maximum regions supported by bitvector (adjust if needed)
+constexpr size_t kMaxRegions = 4096;
+
+// Bitvector for efficient region parallelism representation
+using RegionBitVector = std::bitset<kMaxRegions>;
+
 // ============================================================================
 // Thread Region Analysis
 // ============================================================================
 
 /**
  * @brief Divides program into thread regions based on synchronization
- * 
+ *
  * A thread region is a maximal sequence of instructions within a single thread
  * that are not separated by any synchronization operations. Regions are the
  * basic units for MHP analysis.
@@ -89,14 +96,18 @@ public:
     SyncNode *end_node;
     InstructionSet instructions;
 
-    // Synchronization constraints
-    std::set<size_t> must_precede;    // Regions that must execute before this
-    std::set<size_t> must_follow;     // Regions that must execute after this
-    std::set<size_t> may_be_parallel; // Regions that may run in parallel
+    // Synchronization constraints using bitvectors for efficiency
+    RegionBitVector must_precede_bits; // Regions that must execute before this
+    RegionBitVector must_follow_bits;  // Regions that must execute after this
+    RegionBitVector may_be_parallel_bits; // Regions that may run in parallel
+
+    // Keep set versions for compatibility and iteration
+    std::set<size_t> must_precede;
+    std::set<size_t> must_follow;
+    std::set<size_t> may_be_parallel;
   };
 
-  ThreadRegionAnalysis(const ThreadFlowGraph &tfg)
-      : m_tfg(tfg) {}
+  ThreadRegionAnalysis(const ThreadFlowGraph &tfg) : m_tfg(tfg) {}
 
   void analyze();
 
@@ -115,16 +126,17 @@ private:
   std::vector<std::unique_ptr<Region>> m_regions;
   std::unordered_map<const llvm::Instruction *, const Region *>
       m_inst_to_region;
-  
+
   void identifyRegions();
   void identifyRegionsForThread(ThreadID tid, const llvm::Function *entry);
   void computeOrderingConstraints();
   void computeParallelism();
-  
+
   // CFG-based helpers
   bool isSyncPoint(const llvm::Instruction *inst) const;
-  std::vector<const llvm::Instruction *> collectSyncPoints(const llvm::Function *func) const;
-  
+  std::vector<const llvm::Instruction *>
+  collectSyncPoints(const llvm::Function *func) const;
+
   // TFG reachability helper
   bool isReachableInTFG(const SyncNode *from, const SyncNode *to) const;
 };
@@ -135,14 +147,14 @@ private:
 
 /**
  * @brief Main May-Happen-in-Parallel analysis
- * 
+ *
  * Computes which pairs of program statements may execute concurrently in a
  * multithreaded program. Takes into account:
  * - Thread creation and termination (fork-join)
  * - Lock-based synchronization
  * - Condition variables
  * - Barriers
- * 
+ *
  * Usage:
  *   MHPAnalysis mhp(module);
  *   mhp.analyze();
@@ -159,7 +171,9 @@ public:
   void analyze();
 
   // Alias analysis used internally (also useful for other analyses/checkers).
-  lotus::AliasAnalysisWrapper *getAliasAnalysis() const { return m_alias_analysis.get(); }
+  lotus::AliasAnalysisWrapper *getAliasAnalysis() const {
+    return m_alias_analysis.get();
+  }
 
   // ========================================================================
   // Query Interface
@@ -187,7 +201,7 @@ public:
 
   /**
    * @brief Get all instructions that may run in parallel with the given one
-   * 
+   *
    * @param inst Target instruction
    * @return Set of instructions that may execute concurrently with inst
    */
@@ -195,7 +209,7 @@ public:
 
   /**
    * @brief Check if two instructions must execute sequentially
-   * 
+   *
    * @param i1 First instruction
    * @param i2 Second instruction
    * @return true if i1 and i2 cannot execute concurrently
@@ -205,7 +219,7 @@ public:
 
   /**
    * @brief Check if instruction i1 must execute before i2
-   * 
+   *
    * @param i1 First instruction
    * @param i2 Second instruction
    * @return true if i1 must execute before i2 in all executions
@@ -215,7 +229,7 @@ public:
 
   /**
    * @brief Get the thread ID that an instruction belongs to
-   * 
+   *
    * @param inst Target instruction
    * @return Thread ID, or kUnknownThread if the instruction is thread-ambiguous
    */
@@ -223,7 +237,7 @@ public:
 
   /**
    * @brief Get all instructions in a specific thread
-   * 
+   *
    * @param tid Thread ID
    * @return Set of instructions in the thread
    */
@@ -231,7 +245,7 @@ public:
 
   /**
    * @brief Get locks held at a specific instruction
-   * 
+   *
    * @param inst Target instruction
    * @return Set of locks that may be held at inst
    */
@@ -263,28 +277,31 @@ public:
   const ThreadRegionAnalysis &getThreadRegionAnalysis() const {
     return *m_region_analysis;
   }
-  
+
   // Optional: LockSetAnalysis for more precise race detection
   LockSetAnalysis *getLockSetAnalysis() const { return m_lockset.get(); }
   void enableLockSetAnalysis();
-  
+
   // Thread-local storage analysis
-  ThreadLocal::ThreadLocalAnalysis *getThreadLocalAnalysis() const { 
-    return m_tls_analysis.get(); 
+  ThreadLocal::ThreadLocalAnalysis *getThreadLocalAnalysis() const {
+    return m_tls_analysis.get();
   }
-  
+
   /**
    * @brief Check if two instructions may race (excludes TLS accesses)
-   * 
+   *
    * @param i1 First instruction
    * @param i2 Second instruction
-   * @return true if instructions may race (both are MHP and access shared memory)
+   * @return true if instructions may race (both are MHP and access shared
+   * memory)
    */
   bool mayRace(const llvm::Instruction *i1, const llvm::Instruction *i2) const;
 
   // Optional: precompute and store the full MHP pair relation.
   // Warning: can be O(N^2) in number of instructions.
-  void enableMHPPrecomputation(bool enable = true) { m_precompute_mhp_pairs = enable; }
+  void enableMHPPrecomputation(bool enable = true) {
+    m_precompute_mhp_pairs = enable;
+  }
 
   // Visualization
   void dumpThreadFlowGraph(const std::string &filename) const;
@@ -309,10 +326,10 @@ private:
 
   // Analysis components
   std::unique_ptr<ThreadFlowGraph> m_tfg;
-  std::unique_ptr<LockSetAnalysis> m_lockset;  // Optional
+  std::unique_ptr<LockSetAnalysis> m_lockset; // Optional
   std::unique_ptr<ThreadRegionAnalysis> m_region_analysis;
   std::unique_ptr<ThreadLocal::ThreadLocalAnalysis> m_tls_analysis;
-  
+
   // Configuration
   bool m_enable_lockset_analysis = false;
   bool m_precompute_mhp_pairs = false;
@@ -331,7 +348,7 @@ private:
 
   // Alias Analysis
   std::unique_ptr<lotus::AliasAnalysisWrapper> m_alias_analysis;
-  
+
   // Call Graph for interprocedural analysis
   std::unique_ptr<llvm::CallGraph> m_call_graph;
 
@@ -343,31 +360,35 @@ private:
 
   // Fork-join tracking
   std::unordered_map<ThreadID, const llvm::Instruction *>
-      m_thread_fork_sites;                                   // Thread -> fork instruction
-  std::unordered_map<ThreadID, ThreadID> m_thread_parents;   // Child -> Parent
-  std::unordered_map<ThreadID, std::vector<ThreadID>> m_thread_children; // Parent -> Children
+      m_thread_fork_sites; // Thread -> fork instruction
+  std::unordered_map<ThreadID, ThreadID> m_thread_parents; // Child -> Parent
+  std::unordered_map<ThreadID, std::vector<ThreadID>>
+      m_thread_children; // Parent -> Children
   std::unordered_map<const llvm::Instruction *, ThreadID>
-      m_fork_to_thread;                                      // Fork inst -> created thread
+      m_fork_to_thread; // Fork inst -> created thread
   std::unordered_map<const llvm::Instruction *, ThreadID>
-      m_join_to_thread;                                      // Join inst -> joined thread
-  
+      m_join_to_thread; // Join inst -> joined thread
+
   // Value tracking for pthread_t variables
   std::unordered_map<const llvm::Value *, ThreadID>
-      m_pthread_value_to_thread;                             // pthread_t value -> thread ID
+      m_pthread_value_to_thread; // pthread_t value -> thread ID
   std::unordered_map<ThreadID, const llvm::Value *>
-      m_thread_to_pthread_value;                             // thread ID -> pthread_t value
-  
+      m_thread_to_pthread_value; // thread ID -> pthread_t value
+
   // Condition variable tracking (for happens-before)
   // Map condition variable -> list of signal/broadcast instructions
-  std::unordered_map<const llvm::Value *, std::vector<const llvm::Instruction *>>
+  std::unordered_map<const llvm::Value *,
+                     std::vector<const llvm::Instruction *>>
       m_condvar_signals;
   // Map condition variable -> list of wait instructions
-  std::unordered_map<const llvm::Value *, std::vector<const llvm::Instruction *>>
+  std::unordered_map<const llvm::Value *,
+                     std::vector<const llvm::Instruction *>>
       m_condvar_waits;
-  
+
   // Barrier tracking (for happens-before)
   // Map barrier -> list of threads that have reached it
-  std::unordered_map<const llvm::Value *, std::vector<const llvm::Instruction *>>
+  std::unordered_map<const llvm::Value *,
+                     std::vector<const llvm::Instruction *>>
       m_barrier_waits;
 
   // Per-thread set of functions already processed to avoid reprocessing
@@ -382,19 +403,21 @@ private:
   std::unordered_set<const llvm::Function *> m_thread_entry_candidates;
 
   // Dominator tree cache for HB queries within a function
-  mutable std::unordered_map<const llvm::Function *, std::unique_ptr<DominatorTree>>
+  mutable std::unordered_map<const llvm::Function *,
+                             std::unique_ptr<DominatorTree>>
       m_dom_cache;
-  mutable std::unordered_map<const llvm::Function *, std::unique_ptr<llvm::PostDominatorTree>>
+  mutable std::unordered_map<const llvm::Function *,
+                             std::unique_ptr<llvm::PostDominatorTree>>
       m_post_dom_cache;
 
   // Query caches (keyed by instruction pointer identity).
   mutable std::unordered_map<InstPair, bool, InstPairHash> m_hb_cache;
   mutable std::unordered_map<InstPair, bool, InstPairHash> m_mhp_cache;
-  
+
   // Transitive closure optimization for HB queries
   mutable bool m_hb_closure_computed = false;
-  mutable std::unordered_map<const llvm::Instruction *, 
-                              std::unordered_set<const llvm::Instruction *>> 
+  mutable std::unordered_map<const llvm::Instruction *,
+                             std::unordered_set<const llvm::Instruction *>>
       m_hb_transitive_closure;
 
   // ========================================================================
@@ -403,7 +426,7 @@ private:
 
   /**
    * @brief Phase 1: Build thread-flow graph
-   * 
+   *
    * Constructs a graph representation of all threads, including
    * synchronization operations and inter-thread edges.
    */
@@ -411,7 +434,7 @@ private:
 
   /**
    * @brief Phase 2: Analyze lock sets (OPTIONAL)
-   * 
+   *
    * Computes the sets of locks held at each program point.
    * Only runs if enableLockSetAnalysis() was called.
    */
@@ -419,21 +442,21 @@ private:
 
   /**
    * @brief Phase 3: Identify thread regions
-   * 
+   *
    * Divides each thread into regions separated by synchronization.
    */
   void analyzeThreadRegions();
 
   /**
    * @brief Phase 4: Compute MHP pairs
-   * 
+   *
    * Determines which pairs of instructions may execute in parallel.
    */
   void computeMHPPairs();
-  
+
   /**
    * @brief Fallback: Instruction-level MHP computation (O(N^2))
-   * 
+   *
    * Used when region analysis is not available.
    */
   void computeMHPPairsInstructionLevel();
@@ -444,24 +467,25 @@ private:
    * Finds happens-before relationships created by C++11 atomics.
    */
   void computeAtomicHappensBefore();
-  
+
   /**
    * @brief Compute fence-based synchronization
-   * 
+   *
    * Implements fence synchronization per C++11 memory model.
    */
   void computeFenceBasedHappensBefore();
-  
+
   /**
    * @brief Compute seq-cst total order
-   * 
+   *
    * Establishes total order on sequentially consistent operations.
    */
   void computeSeqCstTotalOrder();
-  
+
   /**
-   * @brief Compute transitive closure of happens-before relation (optional optimization)
-   * 
+   * @brief Compute transitive closure of happens-before relation (optional
+   * optimization)
+   *
    * Precomputes transitive closure for faster HB queries. Call this after all
    * HB edges have been added to the TFG.
    */
@@ -497,7 +521,7 @@ private:
 
   // Ordering computation
   bool hasHappenBeforeRelation(const llvm::Instruction *i1,
-                                const llvm::Instruction *i2) const;
+                               const llvm::Instruction *i2) const;
   bool isInSameThread(const llvm::Instruction *i1,
                       const llvm::Instruction *i2) const;
   bool isOrderedByLocks(const llvm::Instruction *i1,
@@ -505,11 +529,8 @@ private:
   bool isInstructionThreadAmbiguous(const llvm::Instruction *inst) const;
   bool isMustIntraThreadEdge(const SyncNode *from, const SyncNode *to) const;
 
-
   // Alias analysis helper
 
-  
-  
   // Fork-join helper methods
   bool isAncestorThread(ThreadID ancestor, ThreadID descendant) const;
   bool isForkSite(const llvm::Instruction *inst) const;
@@ -519,12 +540,13 @@ private:
 
   // Dominator helpers (intra-function)
   const DominatorTree &getDomTree(const llvm::Function *func) const;
-  const llvm::PostDominatorTree &getPostDomTree(const llvm::Function *func) const;
+  const llvm::PostDominatorTree &
+  getPostDomTree(const llvm::Function *func) const;
   bool dominates(const llvm::Instruction *a, const llvm::Instruction *b) const;
-  
+
   // Program order helpers (precise happens-before for same thread)
   bool isReachableWithoutBackEdges(const llvm::Instruction *from,
-                                    const llvm::Instruction *to) const;
+                                   const llvm::Instruction *to) const;
   bool isBackEdge(const llvm::BasicBlock *from, const llvm::BasicBlock *to,
                   const DominatorTree &DT) const;
 
