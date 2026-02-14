@@ -1,0 +1,255 @@
+/**
+ * @file ThreadLocalAnalysis.cpp
+ * @brief Implementation of Thread-Local Storage Detection
+ */
+
+#include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/Support/raw_ostream.h>
+#include <deque>
+
+using namespace llvm;
+using namespace ThreadLocal;
+
+ThreadLocalAnalysis::ThreadLocalAnalysis(Module &module) : m_module(module) {}
+
+void ThreadLocalAnalysis::analyze() {
+  identifyThreadLocalGlobals();
+  identifyThreadLocalAllocas();
+  identifyPthreadSpecificData();
+  
+  errs() << "Thread-Local Analysis: Found " << m_tls_globals.size() 
+         << " TLS globals, " << m_tls_allocas.size() << " TLS allocas\n";
+}
+
+void ThreadLocalAnalysis::identifyThreadLocalGlobals() {
+  for (GlobalVariable &gv : m_module.globals()) {
+    if (hasThreadLocalStorageLinkage(&gv)) {
+      m_tls_globals.insert(&gv);
+      m_tls_values.insert(&gv);
+    }
+  }
+}
+
+void ThreadLocalAnalysis::identifyThreadLocalAllocas() {
+  for (Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+    
+    for (BasicBlock &bb : func) {
+      for (Instruction &inst : bb) {
+        if (AllocaInst *alloca = dyn_cast<AllocaInst>(&inst)) {
+          // Check if this alloca is thread-local (doesn't escape)
+          if (isAllocaThreadLocal(alloca)) {
+            m_tls_allocas.insert(alloca);
+            m_tls_values.insert(alloca);
+          }
+        }
+      }
+    }
+  }
+}
+
+void ThreadLocalAnalysis::identifyPthreadSpecificData() {
+  // pthread_key_create creates thread-specific data keys
+  // pthread_getspecific/pthread_setspecific access thread-specific data
+  
+  for (Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+    
+    for (BasicBlock &bb : func) {
+      for (Instruction &inst : bb) {
+        if (CallInst *call = dyn_cast<CallInst>(&inst)) {
+          Function *callee = call->getCalledFunction();
+          if (!callee) {
+            continue;
+          }
+          
+          StringRef name = callee->getName();
+          
+          // pthread_key_create(pthread_key_t *key, ...)
+          if (name.equals("pthread_key_create")) {
+            if (call->arg_size() > 0) {
+              m_pthread_keys.insert(call->getArgOperand(0));
+            }
+          }
+          
+          // pthread_getspecific returns thread-local data
+          // pthread_setspecific stores thread-local data
+          if (name.equals("pthread_getspecific") || name.equals("pthread_setspecific")) {
+            // Mark the return value or stored value as thread-local
+            m_tls_values.insert(&inst);
+          }
+        }
+      }
+    }
+  }
+}
+
+bool ThreadLocalAnalysis::hasThreadLocalStorageLinkage(const GlobalVariable *gv) {
+  // Check if the global has TLS storage
+  return gv->isThreadLocal();
+}
+
+bool ThreadLocalAnalysis::isAllocaThreadLocal(const AllocaInst *alloca) const {
+  // An alloca is thread-local if:
+  // 1. It's a stack allocation (by definition in one thread's stack)
+  // 2. Its address doesn't escape to other threads
+  //
+  // For now, we use a simple heuristic: if the alloca's address is never
+  // stored to memory or passed to functions that could share it, it's thread-local
+  
+  return !escapesThread(alloca);
+}
+
+bool ThreadLocalAnalysis::escapesThread(const Value *val) const {
+  // Check if a value escapes its thread
+  // A value escapes if:
+  // - Its address is stored to a global variable
+  // - It's passed to a function that could share it (pthread_create, etc.)
+  // - It's stored to heap memory that could be accessed by other threads
+  
+  std::deque<const Value *> worklist;
+  std::unordered_set<const Value *> visited;
+  
+  worklist.push_back(val);
+  visited.insert(val);
+  
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+    
+    for (const Use &use : current->uses()) {
+      const User *user = use.getUser();
+      
+      // Check for escape scenarios
+      if (const StoreInst *store = dyn_cast<StoreInst>(user)) {
+        const Value *ptr = store->getPointerOperand();
+        
+        // Storing to a global = escape
+        if (isa<GlobalVariable>(ptr)) {
+          return true;
+        }
+        
+        // Storing to heap memory = potential escape
+        // (We'd need more sophisticated analysis to determine if heap is shared)
+        // For now, conservatively assume heap storage escapes
+        if (!isa<AllocaInst>(ptr)) {
+          return true;
+        }
+      }
+      else if (const CallInst *call = dyn_cast<CallInst>(user)) {
+        const Function *callee = call->getCalledFunction();
+        if (callee) {
+          StringRef name = callee->getName();
+          
+          // Known thread-creation functions = escape
+          if (name.contains("pthread_create") || 
+              name.contains("std::thread") ||
+              name.contains("std::async")) {
+            return true;
+          }
+          
+          // Unknown external functions = potential escape (conservative)
+          if (callee->isDeclaration() && !callee->isIntrinsic()) {
+            // Allow some known safe functions
+            if (!name.startswith("llvm.") && 
+                !name.equals("malloc") && 
+                !name.equals("free")) {
+              return true;
+            }
+          }
+        }
+      }
+      else if (const ReturnInst *ret = dyn_cast<ReturnInst>(user)) {
+        // Returning the value = potential escape
+        (void)ret;
+        return true;
+      }
+      else if (const Instruction *inst = dyn_cast<Instruction>(user)) {
+        // Continue tracking through casts, GEPs, etc.
+        if (isa<BitCastInst>(inst) || isa<GetElementPtrInst>(inst)) {
+          if (visited.insert(inst).second) {
+            worklist.push_back(inst);
+          }
+        }
+      }
+    }
+  }
+  
+  return false; // Doesn't escape
+}
+
+bool ThreadLocalAnalysis::isThreadLocal(const Value *val) const {
+  // Direct check
+  if (m_tls_values.count(val)) {
+    return true;
+  }
+  
+  // Check if it's a global with TLS
+  if (const GlobalVariable *gv = dyn_cast<GlobalVariable>(val)) {
+    return m_tls_globals.count(gv) > 0;
+  }
+  
+  // Check if it's a thread-local alloca
+  if (const AllocaInst *alloca = dyn_cast<AllocaInst>(val)) {
+    return m_tls_allocas.count(alloca) > 0;
+  }
+  
+  // Trace through GEP, bitcast, etc.
+  if (const GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(val)) {
+    return isThreadLocal(gep->getPointerOperand());
+  }
+  
+  if (const BitCastInst *cast = dyn_cast<BitCastInst>(val)) {
+    return isThreadLocal(cast->getOperand(0));
+  }
+  
+  if (const LoadInst *load = dyn_cast<LoadInst>(val)) {
+    return isThreadLocal(load->getPointerOperand());
+  }
+  
+  return false;
+}
+
+bool ThreadLocalAnalysis::accessesThreadLocalStorage(const Instruction *inst) const {
+  // Check if a load/store accesses thread-local storage
+  if (const LoadInst *load = dyn_cast<LoadInst>(inst)) {
+    return isThreadLocal(load->getPointerOperand());
+  }
+  
+  if (const StoreInst *store = dyn_cast<StoreInst>(inst)) {
+    return isThreadLocal(store->getPointerOperand());
+  }
+  
+  if (const AtomicRMWInst *rmw = dyn_cast<AtomicRMWInst>(inst)) {
+    return isThreadLocal(rmw->getPointerOperand());
+  }
+  
+  if (const AtomicCmpXchgInst *cmpxchg = dyn_cast<AtomicCmpXchgInst>(inst)) {
+    return isThreadLocal(cmpxchg->getPointerOperand());
+  }
+  
+  return false;
+}
+
+bool ThreadLocal::isObviouslyThreadLocal(const Value *val) {
+  // Fast check without full analysis
+  
+  // Global with TLS
+  if (const GlobalVariable *gv = dyn_cast<GlobalVariable>(val)) {
+    return gv->isThreadLocal();
+  }
+  
+  // Stack allocations are thread-local by default
+  // (though they can escape, this is a fast heuristic)
+  if (isa<AllocaInst>(val)) {
+    return true;
+  }
+  
+  return false;
+}

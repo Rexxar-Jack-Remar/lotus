@@ -5,6 +5,8 @@ set(Concurrency_SOURCES
   Utils/FBVClock.cpp
   Utils/RAIILockTracker.cpp
   Utils/CppAtomics.cpp
+  Utils/ThreadLocalAnalysis.cpp
+  Utils/OpenMPTaskGraph.cpp
   MHP/MHPAnalysis.cpp
   MHP/StaticVectorClockMHP.cpp
   MHP/HappensBeforeAnalysis.cpp
@@ -14,6 +16,7 @@ set(Concurrency_SOURCES
   Memory/MemUseDefAnalysis.cpp
   JoinTarget/JoinTargetAnalysis.cpp
   MPI/MPIAnalysis.cpp
+  MPI/MPIRankAnalysis.cpp
 )
 add_library(Concurrency STATIC ${Concurrency_SOURCES})
 target_include_directories(Concurrency PUBLIC ${CMAKE_SOURCE_DIR}/include)

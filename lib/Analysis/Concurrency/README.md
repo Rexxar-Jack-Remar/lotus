@@ -196,14 +196,12 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 
 ## Limitations
 
-- **RAII destructor tracking**: Currently uses conservative approximation for destructor lock releases. Full lifetime analysis via RAIILockTracker available but not yet fully integrated.
 - **std::memory_order_consume**: Recognized but treated as acquire (per C++ standard recommendation)
 - **Weak atomics precision**: Relaxed atomics tracked but no value-flow analysis
-- **Task dependencies**: OpenMP task depend clauses recognized but dependency graph not yet built
-- **Target offloading**: OpenMP target constructs recognized but no device-specific analysis
-- **MPI rank analysis**: Current implementation uses simplified rank tracking; full symbolic rank analysis not yet implemented
 - **MPI derived datatypes**: Custom MPI datatypes not fully analyzed for size/alignment
 - **MPI intercommunicator operations**: Focus is on intracommunicators; intercommunicator collectives have limited support
+- **OpenMP task dependencies**: Basic dependency graph structure implemented; full symbolic dependency analysis ongoing
+- **MPI rank analysis**: Symbolic rank tracking implemented; path-sensitive refinement ongoing
 
 ## Extension Guidelines
 

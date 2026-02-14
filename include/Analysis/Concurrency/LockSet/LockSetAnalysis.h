@@ -27,6 +27,7 @@
 #define LOCKSET_ANALYSIS_H
 
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Analysis/Concurrency/Utils/RAIILockTracker.h"
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallVector.h>
@@ -36,6 +37,7 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <map>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -332,6 +334,10 @@ private:
 
   std::unordered_set<LockPair, LockPair::Hash> m_observed_lock_orders;
   std::unordered_set<LockID> m_reentrant_locks;
+  
+  // RAII lock tracking per function (type alias avoids C++11 >> parse issue)
+  typedef std::map<const llvm::AllocaInst *, RAIILock::LockLifetime> RAIILockMap;
+  std::unordered_map<const llvm::Function *, RAIILockMap> m_raii_locks;
 
   // Interprocedural analysis data structures
   struct FunctionSummary {

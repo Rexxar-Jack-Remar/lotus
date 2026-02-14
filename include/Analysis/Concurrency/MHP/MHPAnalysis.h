@@ -27,6 +27,10 @@
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
+namespace ThreadLocal {
+  class ThreadLocalAnalysis;
+}
+
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/SmallVector.h>
@@ -120,6 +124,9 @@ private:
   // CFG-based helpers
   bool isSyncPoint(const llvm::Instruction *inst) const;
   std::vector<const llvm::Instruction *> collectSyncPoints(const llvm::Function *func) const;
+  
+  // TFG reachability helper
+  bool isReachableInTFG(const SyncNode *from, const SyncNode *to) const;
 };
 
 // ============================================================================
@@ -146,7 +153,7 @@ private:
 class MHPAnalysis {
 public:
   explicit MHPAnalysis(llvm::Module &module);
-  ~MHPAnalysis() = default;
+  ~MHPAnalysis();
 
   // Main analysis entry point
   void analyze();
@@ -260,6 +267,20 @@ public:
   // Optional: LockSetAnalysis for more precise race detection
   LockSetAnalysis *getLockSetAnalysis() const { return m_lockset.get(); }
   void enableLockSetAnalysis();
+  
+  // Thread-local storage analysis
+  ThreadLocal::ThreadLocalAnalysis *getThreadLocalAnalysis() const { 
+    return m_tls_analysis.get(); 
+  }
+  
+  /**
+   * @brief Check if two instructions may race (excludes TLS accesses)
+   * 
+   * @param i1 First instruction
+   * @param i2 Second instruction
+   * @return true if instructions may race (both are MHP and access shared memory)
+   */
+  bool mayRace(const llvm::Instruction *i1, const llvm::Instruction *i2) const;
 
   // Optional: precompute and store the full MHP pair relation.
   // Warning: can be O(N^2) in number of instructions.
@@ -290,6 +311,7 @@ private:
   std::unique_ptr<ThreadFlowGraph> m_tfg;
   std::unique_ptr<LockSetAnalysis> m_lockset;  // Optional
   std::unique_ptr<ThreadRegionAnalysis> m_region_analysis;
+  std::unique_ptr<ThreadLocal::ThreadLocalAnalysis> m_tls_analysis;
   
   // Configuration
   bool m_enable_lockset_analysis = false;
@@ -309,6 +331,9 @@ private:
 
   // Alias Analysis
   std::unique_ptr<lotus::AliasAnalysisWrapper> m_alias_analysis;
+  
+  // Call Graph for interprocedural analysis
+  std::unique_ptr<llvm::CallGraph> m_call_graph;
 
   // Thread ID allocation
   ThreadID m_next_thread_id = 1; // 0 is reserved for main thread
@@ -365,6 +390,12 @@ private:
   // Query caches (keyed by instruction pointer identity).
   mutable std::unordered_map<InstPair, bool, InstPairHash> m_hb_cache;
   mutable std::unordered_map<InstPair, bool, InstPairHash> m_mhp_cache;
+  
+  // Transitive closure optimization for HB queries
+  mutable bool m_hb_closure_computed = false;
+  mutable std::unordered_map<const llvm::Instruction *, 
+                              std::unordered_set<const llvm::Instruction *>> 
+      m_hb_transitive_closure;
 
   // ========================================================================
   // Analysis Phases
@@ -399,6 +430,13 @@ private:
    * Determines which pairs of instructions may execute in parallel.
    */
   void computeMHPPairs();
+  
+  /**
+   * @brief Fallback: Instruction-level MHP computation (O(N^2))
+   * 
+   * Used when region analysis is not available.
+   */
+  void computeMHPPairsInstructionLevel();
 
   /**
    * @brief Phase 5: Compute atomic happens-before
@@ -406,6 +444,28 @@ private:
    * Finds happens-before relationships created by C++11 atomics.
    */
   void computeAtomicHappensBefore();
+  
+  /**
+   * @brief Compute fence-based synchronization
+   * 
+   * Implements fence synchronization per C++11 memory model.
+   */
+  void computeFenceBasedHappensBefore();
+  
+  /**
+   * @brief Compute seq-cst total order
+   * 
+   * Establishes total order on sequentially consistent operations.
+   */
+  void computeSeqCstTotalOrder();
+  
+  /**
+   * @brief Compute transitive closure of happens-before relation (optional optimization)
+   * 
+   * Precomputes transitive closure for faster HB queries. Call this after all
+   * HB edges have been added to the TFG.
+   */
+  void computeHappensBeforeTransitiveClosure() const;
 
   // ========================================================================
   // Helper Methods

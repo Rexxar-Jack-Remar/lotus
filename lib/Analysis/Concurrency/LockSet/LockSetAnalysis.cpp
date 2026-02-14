@@ -15,6 +15,7 @@
 
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Analysis/Concurrency/Utils/RAIILockTracker.h"
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/MemoryLocation.h>
@@ -509,6 +510,13 @@ void LockSetAnalysis::analyzeFunction(Function *func) {
   if (!func || func->isDeclaration())
     return;
 
+  // First, analyze RAII lock lifetimes in this function
+  RAIILock::RAIILockTracker raii_tracker;
+  raii_tracker.analyzeFunction(func);
+  
+  // Store RAII lock info for use during transfer function
+  m_raii_locks[func] = raii_tracker.getAllLockLifetimes();
+
   computeIntraproceduralLockSets(func);
 }
 
@@ -741,10 +749,28 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
         case ThreadAPI::TD_SCOPED_LOCK_CTOR:
         case ThreadAPI::TD_SHARED_LOCK_CTOR:
-          if (call->arg_size() >= 2) {
-            // Second argument is typically the mutex
-            LockID lock = getCanonicalLock(call->getArgOperand(1));
-            if (lock) out_set.insert(lock);
+          {
+            // Use RAII tracker to get the underlying mutex
+            const Function *parent_func = inst->getFunction();
+            auto raii_it = m_raii_locks.find(parent_func);
+            if (raii_it != m_raii_locks.end()) {
+              for (const auto &raii_entry : raii_it->second) {
+                const RAIILock::LockLifetime &lifetime = raii_entry.second;
+                if (lifetime.constructor == call && lifetime.underlyingLock) {
+                  LockID lock = getCanonicalLock(lifetime.underlyingLock);
+                  if (lock) {
+                    out_set.insert(lock);
+                    return out_set;
+                  }
+                }
+              }
+            }
+            // Fallback to argument-based detection
+            if (call->arg_size() >= 2) {
+              // Second argument is typically the mutex
+              LockID lock = getCanonicalLock(call->getArgOperand(1));
+              if (lock) out_set.insert(lock);
+            }
           }
           return out_set;
         
@@ -753,11 +779,42 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
         case ThreadAPI::TD_SCOPED_LOCK_DTOR:
         case ThreadAPI::TD_SHARED_LOCK_DTOR:
-          // Destructor releases the lock - need to track the lock object
-          // to determine which mutex to release
-          // For now, conservatively invalidate all locks if is_must
-          if (is_must) {
-            out_set.clear(); // Conservative: all RAII locks may be released
+          // Use RAII tracker to find which lock is being released
+          {
+            const Function *parent_func = inst->getFunction();
+            auto raii_it = m_raii_locks.find(parent_func);
+            if (raii_it != m_raii_locks.end()) {
+              // Find the RAII lock object for this destructor
+              for (const auto &raii_entry : raii_it->second) {
+                const RAIILock::LockLifetime &lifetime = raii_entry.second;
+                // Check if this destructor call corresponds to this lock lifetime
+                for (const Instruction *dtor : lifetime.destructors) {
+                  if (dtor == inst && lifetime.underlyingLock) {
+                    // Found the lock being released
+                    LockID lock = getCanonicalLock(lifetime.underlyingLock);
+                    if (lock) {
+                      out_set.erase(lock);
+                      if (is_must && m_alias_analysis) {
+                        LockSet to_remove;
+                        for (const auto *l : out_set) {
+                          if (mayAlias(l, lock)) {
+                            to_remove.insert(l);
+                          }
+                        }
+                        for (const auto *l : to_remove) {
+                          out_set.erase(l);
+                        }
+                      }
+                    }
+                    return out_set;
+                  }
+                }
+              }
+            }
+            // Fallback: if we couldn't track the specific lock, be conservative
+            if (is_must) {
+              out_set.clear(); // Conservative: all locks may be released
+            }
           }
           return out_set;
         
