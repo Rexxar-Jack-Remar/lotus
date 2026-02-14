@@ -4,7 +4,7 @@ A framework for interprocedural dataflow analyses using Weighted Pushdown System
 
 ## Overview
 
-WPDS is a solver for distributive data-flow problems, very similar to IDE (Interprocedural Distributive Environment). Instead of building an exploded super-graph using user-provided flow and edge functions, a weighted pushdown system is built whose rules are drawn from the user's analysis description. The analysis problem is solved using a stack automaton obtained by the post* or pre* algorithm using the WALi library (`lib/Solvers/WPDS`).
+WPDS is a solver for distributive data-flow problems, very similar to IDE (Interprocedural Distributive Environment). Instead of building an exploded super-graph using user-provided flow and edge functions, a weighted pushdown system is built whose rules are drawn from the user's analysis description. The analysis problem is solved using a stack automaton obtained by the post* or pre* algorithm using the WALi library (`third-party/Solvers/WPDS`).
 
 ## Directory Structure
 

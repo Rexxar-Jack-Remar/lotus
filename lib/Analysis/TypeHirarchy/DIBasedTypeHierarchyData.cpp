@@ -8,7 +8,7 @@
  *****************************************************************************/
 
 #include "Analysis/TypeHirarchy/DIBasedTypeHierarchyData.h"
-#include "Utils/Vendor/spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"

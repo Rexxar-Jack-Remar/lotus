@@ -8,7 +8,7 @@
  *****************************************************************************/
 
 #include "Analysis/TypeHirarchy/LLVMVFTableData.h"
-#include "Utils/Vendor/spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/raw_ostream.h"

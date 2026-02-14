@@ -63,6 +63,9 @@ if (LOTUS_USE_CCLYZER)
     include(cmake/ConfigureCclyzerpp.cmake)
 endif()
 
+# Third-party libraries (CUDD, WPDS, spdlog)
+add_subdirectory(third-party)
+
 # Add subdirectories
 add_subdirectory(lib)
 add_subdirectory(tools)
