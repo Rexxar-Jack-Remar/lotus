@@ -23,6 +23,7 @@
 #include <llvm/Pass.h>
 //#include <list>
 //#include <set>
+#include <mutex>
 #include <unordered_map>
 
 using namespace llvm;
@@ -32,6 +33,7 @@ class LocalNullCheckAnalysis;
 class NullCheckAnalysis : public ModulePass {
 private:
     std::unordered_map<Function *, LocalNullCheckAnalysis *> AnalysisMap;
+    mutable std::mutex AnalysisMapMutex;
 
 public:
     static char ID;

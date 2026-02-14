@@ -34,6 +34,7 @@ char NullCheckAnalysis::ID = 0;
 static RegisterPass<NullCheckAnalysis> X("nca", "soundly checking if a pointer may be nullptr.");
 
 NullCheckAnalysis::~NullCheckAnalysis() {
+    std::lock_guard<std::mutex> lock(AnalysisMapMutex);
     for (auto &It: AnalysisMap) delete It.second;
     decltype(AnalysisMap)().swap(AnalysisMap);
 }
@@ -60,8 +61,17 @@ bool NullCheckAnalysis::runOnModule(Module &M) {
         for (auto &F: M) {
             if (!Funcs.count(&F)) continue;
             ThreadPool::get()->enqueue([this, NFA, &F]() {
-                auto *&LNCA = AnalysisMap.at(&F);
-                if (!LNCA) LNCA = new LocalNullCheckAnalysis(NFA, &F);
+                LocalNullCheckAnalysis *LNCA = nullptr;
+                {
+                    std::lock_guard<std::mutex> lock(AnalysisMapMutex);
+                    auto it = AnalysisMap.find(&F);
+                    if (it != AnalysisMap.end())
+                        LNCA = it->second;
+                    if (!LNCA) {
+                        LNCA = new LocalNullCheckAnalysis(NFA, &F);
+                        AnalysisMap[&F] = LNCA;
+                    }
+                }
                 LNCA->run();
             });
         }

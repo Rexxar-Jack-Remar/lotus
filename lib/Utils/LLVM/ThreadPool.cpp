@@ -20,6 +20,7 @@
 #include "Utils/LLVM/ThreadPool.h"
 
 #include <llvm/Support/CommandLine.h>
+#include <mutex>
 #include <unistd.h>
 
 using namespace llvm;
@@ -31,7 +32,8 @@ static cl::opt<unsigned>
                         "Default is min(the number of hardware cores, 10)."),
                cl::value_desc("num of workers"), cl::init(0));
 
-// Global thread pool instance.
+// Global thread pool instance and thread-safe initialization.
+static std::once_flag ThreadPoolOnce;
 static ThreadPool *Threads = nullptr;
 
 /// Hook functions to run at the beginning and end of a thread
@@ -42,8 +44,7 @@ void (*after_thread_complete_hook)() = nullptr;
 
 // Returns the global thread pool instance, creating it if necessary.
 ThreadPool *ThreadPool::get() {
-  if (!Threads)
-    Threads = new ThreadPool;
+  std::call_once(ThreadPoolOnce, []() { Threads = new ThreadPool; });
   return Threads;
 }
 

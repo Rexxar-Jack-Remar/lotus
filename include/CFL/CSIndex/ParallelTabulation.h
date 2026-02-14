@@ -21,18 +21,21 @@ public:
     ThreadSafeVisitedSet(size_t num_threads) : local_visited_sets(num_threads) {}
 
     void clear(size_t thread_id) {
+        std::lock_guard<std::mutex> lock(mutex);
         if (thread_id < local_visited_sets.size()) {
             local_visited_sets[thread_id].clear();
         }
     }
 
     void insert(size_t thread_id, int value) {
+        std::lock_guard<std::mutex> lock(mutex);
         if (thread_id < local_visited_sets.size()) {
             local_visited_sets[thread_id].insert(value);
         }
     }
 
     bool count(size_t thread_id, int value) {
+        std::lock_guard<std::mutex> lock(mutex);
         if (thread_id < local_visited_sets.size()) {
             return local_visited_sets[thread_id].count(value) > 0;
         }
@@ -40,6 +43,7 @@ public:
     }
 
     std::set<int>& get_set(size_t thread_id) {
+        std::lock_guard<std::mutex> lock(mutex);
         if (thread_id < local_visited_sets.size()) {
             return local_visited_sets[thread_id];
         }

@@ -26,10 +26,12 @@
 #include "Utils/LLVM/ThreadPool.h"
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
+#include <mutex>
 
 DyckVFG::DyckVFG(DyckAliasAnalysis *DAA, DyckModRefAnalysis *DMRA, Module *M) {
     // create a VFG for each function
     std::map<Function *, CFGReachabilityRef> LocalCFGMap;
+    std::mutex LocalCFGMapMutex;
     for (auto &F: *M) {
         if (F.empty()) continue;
         LocalCFGMap[&F] = nullptr;
@@ -38,9 +40,12 @@ DyckVFG::DyckVFG(DyckAliasAnalysis *DAA, DyckModRefAnalysis *DMRA, Module *M) {
 
     for (auto &F: *M) {
         if (F.empty()) continue;
-        ThreadPool::get()->enqueue([this, DAA, &F, &LocalCFGMap](){
+        ThreadPool::get()->enqueue([this, DAA, &F, &LocalCFGMap, &LocalCFGMapMutex](){
             auto LocalCFG = std::make_shared<CFGReachability>(&F);
-            LocalCFGMap.at(&F) = LocalCFG;
+            {
+                std::lock_guard<std::mutex> lock(LocalCFGMapMutex);
+                LocalCFGMap.at(&F) = LocalCFG;
+            }
             buildLocalVFG(DAA, LocalCFG.get(), &F);
         });
     }

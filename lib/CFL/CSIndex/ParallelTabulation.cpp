@@ -33,10 +33,10 @@
 #include "CFL/CSIndex/ParallelTabulation.h"
 #include "CFL/CSIndex/CSProgressBar.h"
 
-static bool timeout = false;
+static std::atomic<bool> timeout{false};
 
-static void alarm_handler(int param) {
-    timeout = true;
+static void alarm_handler(int) {
+    timeout.store(true, std::memory_order_relaxed);
 }
 
 ParallelTabulation::ParallelTabulation(Graph &g) : vfg(g), num_threads(std::thread::hardware_concurrency()) {
@@ -135,7 +135,7 @@ void ParallelTabulation::process_vertex_range(int start, int end,
     size_t thread_id = std::hash<std::thread::id>{}(std::this_thread::get_id()) % num_threads;
 
     for (int i = start; i < end; ++i) {
-        if (timeout) {
+        if (timeout.load(std::memory_order_relaxed)) {
             break;
         }
 
@@ -160,7 +160,7 @@ void ParallelTabulation::traverse_parallel(int s, std::set<int>& tc, size_t thre
         return;
     }
 
-    if (timeout) {
+    if (timeout.load(std::memory_order_relaxed)) {
         return;
     }
 
@@ -183,7 +183,7 @@ void ParallelTabulation::traverse_func_parallel(int s, std::set<int>& tc, size_t
         return;
     }
 
-    if (timeout) {
+    if (timeout.load(std::memory_order_relaxed)) {
         return;
     }
 
@@ -202,7 +202,7 @@ void ParallelTabulation::traverse_func_parallel(int s, std::set<int>& tc, size_t
 
 double ParallelTabulation::tc() {
     signal(SIGALRM, alarm_handler);
-    timeout = false;
+    timeout.store(false, std::memory_order_relaxed);
     alarm(3600 * 6);
 
     CSProgressBar bar(vfg.num_vertices());
@@ -256,7 +256,7 @@ double ParallelTabulation::tc() {
 // Alternative implementation using async/future for better load balancing
 double ParallelTabulation::tc_async() {
     signal(SIGALRM, alarm_handler);
-    timeout = false;
+    timeout.store(false, std::memory_order_relaxed);
     alarm(3600 * 6);
 
     CSProgressBar bar(vfg.num_vertices());
@@ -267,7 +267,7 @@ double ParallelTabulation::tc_async() {
 
     // Launch asynchronous tasks for each vertex
     for (int i = 0; i < vfg.num_vertices(); ++i) {
-        if (timeout) break;
+        if (timeout.load(std::memory_order_relaxed)) break;
 
         futures.emplace_back(std::async(std::launch::async, [this, i]() -> std::set<int> {
             size_t thread_id = std::hash<std::thread::id>{}(std::this_thread::get_id()) % num_threads;
@@ -286,7 +286,7 @@ double ParallelTabulation::tc_async() {
     // Collect results
     std::vector<std::set<int>> results(vfg.num_vertices());
     for (size_t i = 0; i < futures.size(); ++i) {
-        if (timeout) break;
+        if (timeout.load(std::memory_order_relaxed)) break;
 
         results[i] = futures[i].get();
 
