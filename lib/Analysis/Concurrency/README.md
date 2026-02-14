@@ -6,8 +6,8 @@ Headers live under `include/Analysis/Concurrency/`, sources under `lib/Analysis/
 
 | Subdirectory | Contents |
 |--------------|----------|
-| **Utils/** | ThreadAPI, ThreadFlowGraph, ThreadInfo, BVClock, FBVClock, LanguageModel/ (CppThreading, OpenMP, MPI, LinuxKernel) |
-| **MHP/** | MHPAnalysis, StaticVectorClockMHP, HappensBeforeAnalysis, CppAtomics |
+| **Utils/** | ThreadAPI, ThreadFlowGraph, ThreadInfo, BVClock, FBVClock, CppAtomics, RAIILockTracker, LanguageModel/ (CppThreading, OpenMP, MPI, LinuxKernel) |
+| **MHP/** | MHPAnalysis, StaticVectorClockMHP, HappensBeforeAnalysis |
 | **LockSet/** | LockSetAnalysis |
 | **Memory/** | EscapeAnalysis, StaticThreadSharingAnalysis, MemUseDefAnalysis |
 | **JoinTarget/** | JoinTargetAnalysis |

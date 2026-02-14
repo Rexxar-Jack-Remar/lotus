@@ -40,7 +40,7 @@
 #include <vector>
 
 #include "Alias/DyckAA/DyckCallGraphNode.h"
-#include "Utils/General/ADT/MapIterators.h"
+#include "Utils/ADT/MapIterators.h"
 
 using namespace llvm;
 

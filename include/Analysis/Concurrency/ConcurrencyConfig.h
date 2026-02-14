@@ -30,7 +30,7 @@ namespace concurrency {
  */
 enum class ThreadingModelOptions : uint32_t {
   None = 0,
-  EnablePthread = 1 << 0,        ///< Enable POSIX threads (pthread) analysis
+  EnablePthread = 1 << 0,         ///< Enable POSIX threads (pthread) analysis
   EnableCpp11 = 1 << 1,           ///< Enable C++11/17/20 threading analysis
   EnableOpenMP = 1 << 2,          ///< Enable OpenMP analysis
   EnableMPI = 1 << 3,             ///< Enable MPI (Message Passing Interface) analysis

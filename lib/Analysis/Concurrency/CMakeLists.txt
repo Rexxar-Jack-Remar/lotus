@@ -4,7 +4,7 @@ set(Concurrency_SOURCES
   Utils/BVClock.cpp
   Utils/FBVClock.cpp
   Utils/RAIILockTracker.cpp
-  MHP/CppAtomics.cpp
+  Utils/CppAtomics.cpp
   MHP/MHPAnalysis.cpp
   MHP/StaticVectorClockMHP.cpp
   MHP/HappensBeforeAnalysis.cpp

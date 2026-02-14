@@ -1,5 +1,5 @@
 #include "Annotation/ModRef/ExternalModRefTable.h"
-#include "Utils/General/pcomb/pcomb.h"
+#include "Utils/Formats/pcomb/pcomb.h"
 #include "Utils/LLVM/IO/ReadFile.h"
 
 #include <llvm/ADT/StringRef.h>

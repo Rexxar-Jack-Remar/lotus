@@ -11,7 +11,7 @@
 #ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ILOOPSUMMARIZER_H
 #define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ILOOPSUMMARIZER_H
 
-#include "Utils/General/PathExpressions/Regex.h"
+#include "Utils/Algorithms/PathExpressions/Regex.h"
 
 namespace lotus {
 namespace sifa {

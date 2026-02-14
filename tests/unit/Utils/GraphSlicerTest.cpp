@@ -2,7 +2,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <Utils/General/GraphSlicer.h>
+#include "Utils/ADT/GraphSlicer.h"
 
 using namespace lotus;
 

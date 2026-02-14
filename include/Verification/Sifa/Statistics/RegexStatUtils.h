@@ -10,9 +10,9 @@
 #ifndef LOTUS_VERIFICATION_SIFA_STATISTICS_REGEXSTATUTILS_H
 #define LOTUS_VERIFICATION_SIFA_STATISTICS_REGEXSTATUTILS_H
 
-#include "Utils/General/PathExpressions/LabeledGraph.h"
-#include "Utils/General/PathExpressions/PathExpressionComputer.h"
-#include "Utils/General/PathExpressions/Regex.h"
+#include "Utils/Algorithms/PathExpressions/LabeledGraph.h"
+#include "Utils/Algorithms/PathExpressions/PathExpressionComputer.h"
+#include "Utils/Algorithms/PathExpressions/Regex.h"
 #include "Verification/Sifa/RegexDag/RegexDag.h"
 #include "Verification/Sifa/RegexDag/RegexDagCompressor.h"
 #include "Verification/Sifa/RegexDag/RegexToDag.h"

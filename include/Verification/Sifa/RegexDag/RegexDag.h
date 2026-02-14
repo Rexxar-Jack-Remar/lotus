@@ -15,7 +15,7 @@
 #define LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAG_H
 
 #include "Verification/Sifa/RegexDag/RegexDagNode.h"
-#include "Utils/General/PathExpressions/Regex.h"
+#include "Utils/Algorithms/PathExpressions/Regex.h"
 
 #include <memory>
 #include <unordered_set>

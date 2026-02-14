@@ -17,7 +17,7 @@
 #include <llvm/IR/Value.h>
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Utils/General/ADT/ThreadSafe.h"
+#include "Utils/ADT/ThreadSafe.h"
 
 #include <functional>
 #include <memory>

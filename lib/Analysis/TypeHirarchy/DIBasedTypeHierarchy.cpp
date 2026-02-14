@@ -11,7 +11,7 @@
 
 #include "Analysis/TypeHirarchy/DIBasedTypeHierarchyData.h"
 #include "Analysis/TypeHirarchy/LLVMVFTable.h"
-#include "Utils/General/spdlog/spdlog.h"
+#include "Utils/Vendor/spdlog/spdlog.h"
 #include "Utils/LLVM/Demangle.h"
 
 #include "llvm/ADT/STLExtras.h"

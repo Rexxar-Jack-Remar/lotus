@@ -1,7 +1,7 @@
 #ifndef HAPPENS_BEFORE_ANALYSIS_H
 #define HAPPENS_BEFORE_ANALYSIS_H
 
-#include "Analysis/Concurrency/MHP/CppAtomics.h"
+#include "Analysis/Concurrency/Utils/CppAtomics.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>

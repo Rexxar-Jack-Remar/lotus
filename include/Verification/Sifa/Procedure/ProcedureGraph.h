@@ -10,7 +10,7 @@
 #ifndef LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDUREGRAPH_H
 #define LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDUREGRAPH_H
 
-#include "Utils/General/PathExpressions/LabeledGraph.h"
+#include "Utils/Algorithms/PathExpressions/LabeledGraph.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 
 #include <unordered_map>

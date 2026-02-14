@@ -18,7 +18,7 @@
 #ifndef LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGNODE_H
 #define LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGNODE_H
 
-#include "Utils/General/PathExpressions/Regex.h"
+#include "Utils/Algorithms/PathExpressions/Regex.h"
 
 #include <algorithm>
 #include <vector>

@@ -1,6 +1,6 @@
 //===-- Verification/Sifa/Interpreter/RegexInterpreter.h ------------------===//
 //
-// Interpret path-expression regexes (Utils/General/PathExpressions/Regex.h)
+// Interpret path-expression regexes (Utils/Algorithms/PathExpressions/Regex.h)
 // using an abstract domain.
 //
 // Semantics:
@@ -16,7 +16,7 @@
 #ifndef LOTUS_VERIFICATION_SIFA_INTERPRETER_REGEXINTERPRETER_H
 #define LOTUS_VERIFICATION_SIFA_INTERPRETER_REGEXINTERPRETER_H
 
-#include "Utils/General/PathExpressions/Regex.h"
+#include "Utils/Algorithms/PathExpressions/Regex.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 
 #include <cstddef>

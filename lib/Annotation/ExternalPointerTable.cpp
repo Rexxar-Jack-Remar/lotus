@@ -1,6 +1,6 @@
 #include "Utils/LLVM/IO/ReadFile.h"
 #include "Annotation/Pointer/ExternalPointerTable.h"
-#include "Utils/General/pcomb/pcomb.h"
+#include "Utils/Formats/pcomb/pcomb.h"
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;

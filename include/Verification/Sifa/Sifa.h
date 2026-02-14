@@ -29,7 +29,7 @@
 #include "Verification/Sifa/Log/SifaLogger.h"
 #include "Verification/Sifa/Procedure/ProcedureGraph.h"
 
-#include "Utils/General/PathExpressions/PathExpressionComputer.h"
+#include "Utils/Algorithms/PathExpressions/PathExpressionComputer.h"
 
 #include "llvm/ADT/Optional.h"
 

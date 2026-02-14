@@ -3,7 +3,7 @@
 #include "Checker/KINT/KINTTaintAnalysis.h"
 #include "Checker/KINT/Log.h"
 #include "Checker/KINT/Options.h"
-#include "Utils/General/range.h"
+#include "Utils/Types/range.h"
 
 #include <deque>
 

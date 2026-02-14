@@ -2,7 +2,7 @@
 #define LLVMUTILS_SCHEDULER_PIPELINESCHEDULER_H
 
 #include "Utils/LLVM/Scheduler/Task.h"
-#include "Utils/General/ProgressBar.h"
+#include "Utils/Platform/ProgressBar.h"
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Function.h>

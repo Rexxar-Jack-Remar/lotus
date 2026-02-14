@@ -1,5 +1,5 @@
 #include "Analysis/TypeHirarchy/TypeHierarchyAnalysis.h"
-#include "Utils/General/spdlog/spdlog.h"
+#include "Utils/Vendor/spdlog/spdlog.h"
 #include "Utils/LLVM/Demangle.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"

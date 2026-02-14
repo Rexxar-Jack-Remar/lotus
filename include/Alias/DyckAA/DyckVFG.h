@@ -20,7 +20,7 @@
 #define ALIAS_DyckAA_DYCKVFG_H
 
 #include "Analysis/CFG/CFGReachability.h"
-#include "Utils/General/ADT/MapIterators.h"
+#include "Utils/ADT/MapIterators.h"
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 #include <map>

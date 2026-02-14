@@ -8,7 +8,7 @@
  * - Suitable for small to medium programs or debugging
  */
 
-#include "Utils/General/ProgressBar.h"
+#include "Utils/Platform/ProgressBar.h"
 
 #include <llvm/Support/raw_ostream.h>
 

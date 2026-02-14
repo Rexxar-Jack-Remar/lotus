@@ -1,6 +1,6 @@
 #include "Verification/Sifa/Procedure/ProcedureResources.h"
 
-#include "Utils/General/PathExpressions/Regex.h"
+#include "Utils/Algorithms/PathExpressions/Regex.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/RegexDag/RegexDagUtils.h"
 #include "Verification/Sifa/Statistics/RegexStatUtils.h"

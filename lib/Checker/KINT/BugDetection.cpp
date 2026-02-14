@@ -4,7 +4,7 @@
 #include "Checker/KINT/Options.h"
 #include "Checker/KINT/RangeAnalysis.h"
 #include "Checker/Report/SARIF.h"
-#include "Utils/General/range.h"
+#include "Utils/Types/range.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>

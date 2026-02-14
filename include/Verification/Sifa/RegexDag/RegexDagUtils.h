@@ -7,7 +7,7 @@
 #ifndef LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGUTILS_H
 #define LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGUTILS_H
 
-#include "Utils/General/PathExpressions/Regex.h"
+#include "Utils/Algorithms/PathExpressions/Regex.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/RegexDag/IDagOverlay.h"
 

@@ -14,7 +14,7 @@
 #include "Alias/TypeQualifier/Config.h"
 #include "Alias/TypeQualifier/Helper.h"
 #include "Alias/TypeQualifier/QualifierAnalysis.h"
-#include "Utils/General/json11.hpp"
+#include "Utils/Formats/json11.hpp"
 
 #include <cstring>
 #include <deque>

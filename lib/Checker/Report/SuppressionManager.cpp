@@ -1,5 +1,5 @@
 #include "Checker/Report/SuppressionManager.h"
-#include "Utils/General/cJSON.h"
+#include "Utils/Formats/cJSON.h"
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/Path.h>

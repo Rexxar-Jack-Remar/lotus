@@ -5,8 +5,8 @@
 #include "Checker/Concurrency/DataRaceChecker.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Analysis/Concurrency/MHP/CppAtomics.h"
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Analysis/Concurrency/Utils/CppAtomics.h"
 
 #include <unordered_map>
 #include <unordered_set>

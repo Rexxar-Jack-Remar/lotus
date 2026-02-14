@@ -1,7 +1,7 @@
 #ifndef SARIF_H
 #define SARIF_H
 
-#include "Utils/General/cJSON.h"
+#include "Utils/Formats/cJSON.h"
 #include <llvm/IR/DebugLoc.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/Support/raw_ostream.h>

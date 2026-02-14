@@ -3,9 +3,9 @@
 #include "Alias/TPA/PointerAnalysis/Program/CFG/CFGNode.h"
 #include "Alias/TPA/PointerAnalysis/Support/FunctionContext.h"
 #include "Alias/TPA/PointerAnalysis/Support/ProgramPoint.h"
-#include "Alias/TPA/Util/DataStructure/FIFOWorkList.h"
-#include "Alias/TPA/Util/DataStructure/PriorityWorkList.h"
-#include "Alias/TPA/Util/DataStructure/TwoLevelWorkList.h"
+#include "Utils/ADT/PriorityWorkList.h"
+#include "Utils/ADT/TwoLevelWorkList.h"
+#include "Utils/LLVM/FIFOWorkList.h"
 
 namespace tpa
 {

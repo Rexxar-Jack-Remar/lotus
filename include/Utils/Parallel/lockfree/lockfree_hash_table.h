@@ -3,7 +3,7 @@
 
 #define MAX_BUF 256
 
-//#include "Utils/General/lockfree/hash_table.h"
+//#include "Utils/Parallel/lockfree/hash_table.h"
 #include <array>
 #include <vector>
 

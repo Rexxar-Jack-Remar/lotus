@@ -6,7 +6,7 @@
 
 #include "IR/ICFG/GraphAnalysis.h"
 
-#include "Utils/General/System.h"
+#include "Utils/Platform/System.h"
 
 #include <list>
 #include <map>
