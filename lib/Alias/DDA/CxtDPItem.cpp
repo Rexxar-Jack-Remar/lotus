@@ -16,16 +16,26 @@ namespace analysis {
 
 uint32_t ContextCond::maximumCxtLen = 3u;
 uint32_t ContextCond::maximumPathLen = 0u;
+uint32_t ContextCond::maxCxtLenSeen = 0u;
 
+void ContextCond::updateMaxCxtLenSeen(size_t len) {
+  if (len > maxCxtLenSeen)
+    maxCxtLenSeen = static_cast<uint32_t>(len);
+}
+
+// Matches SVF DPItem.h pushContext: when at maximumCxtLen, set non-concrete,
+// drop front (FIFO), push back, return false. Empty check guards maxCxtLen==0.
 bool ContextCond::pushContext(uint32_t ctx) {
   if (context_.size() < maximumCxtLen) {
     context_.push_back(ctx);
+    updateMaxCxtLenSeen(context_.size());
     return true;
   }
   if (!context_.empty()) {
     setNonConcreteCxt();
     context_.erase(context_.begin());
     context_.push_back(ctx);
+    updateMaxCxtLenSeen(context_.size());
   }
   return false;
 }

@@ -18,6 +18,8 @@
 
 #include "Alias/DDA/DPItem.h"
 
+#include <llvm/Support/raw_ostream.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <set>
@@ -76,6 +78,11 @@ public:
 
   static uint32_t maximumCxtLen;
   static uint32_t maximumPathLen;
+
+  /// Maximum context length observed during analysis (for statistics).
+  static uint32_t maxCxtLenSeen;
+  static uint32_t getMaxCxtLenSeen() { return maxCxtLenSeen; }
+  static void updateMaxCxtLenSeen(size_t len);
 
 private:
   CallStrCxt context_;
@@ -153,6 +160,13 @@ public:
            context_ == rhs.context_;
   }
   bool operator!=(const CxtStmtDPItem &rhs) const { return !(*this == rhs); }
+
+  /// Debug dump (SVF-style): cur, location, and call-string context.
+  void dump(llvm::raw_ostream &os) const {
+    os << "cur=" << this->cur
+       << " loc=" << static_cast<const void *>(this->curloc)
+       << " " << context_.toString();
+  }
 
 private:
   ContextCond context_;

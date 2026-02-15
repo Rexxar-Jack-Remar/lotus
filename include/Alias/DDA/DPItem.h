@@ -17,6 +17,8 @@
 
 #include <cstdint>
 
+#include <llvm/Support/raw_ostream.h>
+
 namespace lotus {
 namespace analysis {
 
@@ -38,6 +40,9 @@ public:
   bool operator<(const DPItem &rhs) const { return cur < rhs.cur; }
   bool operator==(const DPItem &rhs) const { return cur == rhs.cur; }
   bool operator!=(const DPItem &rhs) const { return !(*this == rhs); }
+
+  /// Debug dump (SVF-style).
+  void dump(llvm::raw_ostream &os) const { os << "cur=" << cur; }
 };
 
 /// Flow-sensitive DP item: (current node ID, current SVFG location).
@@ -64,6 +69,11 @@ public:
     return cur == rhs.cur && curloc == rhs.curloc;
   }
   bool operator!=(const StmtDPItem &rhs) const { return !(*this == rhs); }
+
+  /// Debug dump (SVF-style): cur and location pointer.
+  void dump(llvm::raw_ostream &os) const {
+    os << "cur=" << cur << " loc=" << static_cast<const void *>(curloc);
+  }
 };
 
 } // namespace analysis

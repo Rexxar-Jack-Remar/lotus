@@ -34,6 +34,10 @@ public:
   double totalTimeOfBKCondition = 0.0;
   std::set<uint32_t> strongUpdateStores;
 
+  /// Maximum context length and path length observed (SVF-style tracking).
+  uint32_t maximumCxtSeen = 0;
+  uint32_t maximumPathSeen = 0;
+
   void performStat();
   void printStat(const std::string &str = "");
 

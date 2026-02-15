@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Alias/DDA/DDAStat.h"
+#include "Alias/DDA/CxtDPItem.h"
 #include "Alias/DDA/FlowDDA.h"
 
 #include <llvm/Support/raw_ostream.h>
@@ -16,7 +17,9 @@ using namespace lotus::analysis;
 
 DDAStat::DDAStat(FlowDDA *pta) : pta_(pta) {}
 
-void DDAStat::performStat() {}
+void DDAStat::performStat() {
+  maximumCxtSeen = ContextCond::getMaxCxtLenSeen();
+}
 
 void DDAStat::printStat(const std::string &str) {
   llvm::outs() << "=== DDA Stat " << str << " ===\n";
@@ -27,5 +30,7 @@ void DDAStat::printStat(const std::string &str) {
   llvm::outs() << "  NumOfInfeasiblePath: " << numOfInfeasiblePath << "\n";
   llvm::outs() << "  NumOfStepInCycle: " << numOfStepInCycle << "\n";
   llvm::outs() << "  TotalTimeOfQueries: " << totalTimeOfQueries << "\n";
+  llvm::outs() << "  MaximumCxtSeen: " << maximumCxtSeen << "\n";
+  llvm::outs() << "  MaximumPathSeen: " << maximumPathSeen << "\n";
   llvm::outs() << "========================\n";
 }

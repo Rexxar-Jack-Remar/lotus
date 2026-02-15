@@ -321,14 +321,15 @@ TEST_F(MHPAnalysisTest, MutexSerializesCriticalSections) {
   ASSERT_NE(m_in, nullptr);
   ASSERT_NE(w_in, nullptr);
 
-  // MHP remains conservative even with lockset enabled; verify lockset ran.
+  // With lockset enabled, instructions inside the same mutex critical section
+  // should be considered non-parallel.
   auto *lockset = mhp.getLockSetAnalysis();
   ASSERT_NE(lockset, nullptr);
   auto stats = lockset->getStatistics();
   EXPECT_EQ(stats.num_locks, 1u);
   EXPECT_GE(stats.num_acquires, 2u);
   EXPECT_GE(stats.num_releases, 2u);
-  EXPECT_TRUE(mhp.mayHappenInParallel(m_in, w_in));
+  EXPECT_FALSE(mhp.mayHappenInParallel(m_in, w_in));
 }
 
 // Main function for tests
