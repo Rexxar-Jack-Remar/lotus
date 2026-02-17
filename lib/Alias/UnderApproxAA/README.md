@@ -26,6 +26,31 @@ Process the worklist, unifying equivalence classes. When classes merge, revisit 
 - `UnderApproxAA.cpp` - AAResult interface, per-function caching
 - `EquivDB.cpp` - Equivalence database with union-find
 - `Canonical.cpp` - Pointer canonicalization helpers
+- `AliasGraph.cpp` / `AliasGraph.h` - CC'18 alias graph data structure (see below)
+
+## AliasGraph (CC'18)
+
+An **alias graph** data structure implements the representation from *An Efficient Data Structure for Must-Alias Analysis* (Kastrinis et al., CC'18). It encodes must-alias equivalence classes and field links compactly:
+
+- **Nodes** = abstract objects (alias classes); each node holds a set of variables.
+- **Edges** = field-labeled: `(node --f--> node)` means “field f of objects in the first node points to objects in the second”.
+
+Two variables must-alias iff they are in the same node. Access paths `var.fld1.fld2...` are represented implicitly as paths in the graph.
+
+**Operations:**
+
+| Operation | Description |
+|----------|-------------|
+| `addVariable(V)` | Create or get node for variable V |
+| `moveMerge(X, Y)` | Merge nodes of X and Y (Move: x = y) |
+| `storeEdge(Base, F, Target)` | Add edge Base --F--> Target (Store: base.f = target) |
+| `loadEdge(Base, F, Z)` | Z = base.F: new node for Z, edge Base --F--> Z |
+| `intersect(G1, G2)` | Merge-point intersection: alias holds iff in both graphs |
+| `gc()` | Remove nodes that encode no useful alias pairs |
+| `allAliases(Base, Path, maxLen, Out)` | Find all (var, path) that must-alias Base+Path |
+| `mustAliasAccessPath(Base1, Path1, Base2, Path2)` | Check if two access paths must-alias |
+
+This structure can be used alongside or instead of an explicit pair representation for flow-sensitive, access-path must-alias analyses (e.g. per-program-point graphs with intersection at control-flow merges).
 
 ## Rules
 
