@@ -10,18 +10,20 @@
 #ifndef UNDERAPPROX_EQUIVDB_H
 #define UNDERAPPROX_EQUIVDB_H
 
+#include <cstdint>
 #include <vector>
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Operator.h>
 
 // Forward declarations for optional analyses
 namespace llvm {
 class MemorySSA;
 class DominatorTree;
-class BranchInst;
-class CmpInst;
 } // namespace llvm
 
 namespace UnderApprox {
@@ -41,15 +43,14 @@ namespace UnderApprox {
  *   union/find operations with path compression and union-by-rank
  * - Value Mapping: Bidirectional mapping between LLVM Values and integer IDs
  * - Watch Lists: Per-class lists of instructions to revisit when classes merge
- * - Conditional Equivalences: Path-specific must-alias from branch conditions
+ * - Worklist deduplication: Avoids redundant pair processing
  *
  * Algorithm:
  * 1. Seed phase: Apply atomic (syntactic) rules to find initial must-alias
  * pairs
  * 2. Propagate phase: Use semantic (inductive) rules to discover new
  * equivalences as classes merge, until saturation
- * 3. Path refinement: Use branch conditions to refine equivalences in dominated
- * blocks
+ * 3. Optional seeding extensions (MemorySSA, DominatorTree, call summaries)
  *
  * Time Complexity:
  * - Construction: O(N·M·α(N)) where N = values, M = instructions
@@ -58,19 +59,22 @@ namespace UnderApprox {
  */
 class EquivDB {
 public:
+  friend bool ruleClosedGEP(const llvm::Instruction *, const EquivDB &,
+                            const llvm::Value *&);
+
   /**
    * @brief Construct equivalence database for a function
    *
    * Builds the complete equivalence database by:
    * 1. Seeding with atomic must-alias pairs from syntactic rules
    * 2. Propagating equivalences using semantic rules until saturation
-   * 3. Refining with path conditions (if DominatorTree available)
+   * 3. Optional DominatorTree-based seeding for single-store allocas
    *
    * After construction, queries are very fast (effectively constant time).
    *
    * @param F The LLVM function to analyze
    * @param MSSA Optional MemorySSA for store-load forwarding (sound)
-   * @param DT Optional DominatorTree for path condition refinement (sound)
+   * @param DT Optional DominatorTree for single-store alloca forwarding
    */
   explicit EquivDB(llvm::Function &F, llvm::MemorySSA *MSSA = nullptr,
                    llvm::DominatorTree *DT = nullptr);
@@ -152,8 +156,25 @@ private:
   /// Optional MemorySSA for store-load forwarding
   llvm::MemorySSA *MSSA;
 
-  /// Optional DominatorTree for path condition refinement
+  /// Optional DominatorTree for single-store alloca forwarding
   llvm::DominatorTree *DT;
+
+  /// Pair keys already queued/processed during this build
+  llvm::DenseSet<uint64_t> SeenPairKeys;
+
+  /// GEP candidates bucketed by index-signature hash
+  llvm::DenseMap<uint64_t, llvm::SmallVector<const llvm::GetElementPtrInst *, 4>>
+      GEPIndexBuckets;
+
+  /// Instructions for which a semantic rule has already fired
+  llvm::DenseSet<const llvm::Instruction *> FiredSemantic;
+
+  struct ReturnSummary {
+    enum class Kind : uint8_t { Unknown, Arg, Null, Global };
+    Kind K = Kind::Unknown;
+    int ArgNo = -1;
+    const llvm::Value *Fixed = nullptr;
+  };
 
   // ---------- Construction Methods ------------------------------------------
 
@@ -201,22 +222,27 @@ private:
   void seedStoreLoadForwarding(
       std::vector<std::pair<const llvm::Value *, const llvm::Value *>> &WL);
 
-  // ---------- Extension: Path Condition Refinement -------------------------
+  // ---------- Helpers -------------------------------------------------------
 
-  /// Refine equivalences using branch conditions
-  /// Sound: if (p == q) then p ≡ q in the true branch
-  /// @param WL Output worklist to populate with conditional equivalences
-  void refineWithConditions(
-      std::vector<std::pair<const llvm::Value *, const llvm::Value *>> &WL);
+  void buildGEPIndex();
+  bool findClosedGEPCandidate(const llvm::GetElementPtrInst *GEPI,
+                              const llvm::Value *&Rep) const;
+  bool equivalentGEPIndexOperand(const llvm::Value *A,
+                                 const llvm::Value *B) const;
+  uint64_t gepIndexSignature(const llvm::Value *GEP) const;
 
-  /// Add must-alias pairs for conditionally executed blocks
-  /// @param Cmp The comparison instruction
-  /// @param TrueBB The block executed when condition is true
-  /// @param FalseBB The block executed when condition is false
-  /// @param WL Output worklist
-  void addConditionalMustAlias(
-      llvm::CmpInst *Cmp, llvm::BasicBlock *TrueBB, llvm::BasicBlock *FalseBB,
-      std::vector<std::pair<const llvm::Value *, const llvm::Value *>> &WL);
+  bool dominatesInst(const llvm::Instruction *Def,
+                     const llvm::Instruction *Use) const;
+
+  uint64_t makePairKey(const llvm::Value *A, const llvm::Value *B);
+  bool enqueuePair(
+      std::vector<std::pair<const llvm::Value *, const llvm::Value *>> &WL,
+      const llvm::Value *A, const llvm::Value *B);
+
+  ReturnSummary summarizeReturnBehavior(const llvm::Function *Callee) const;
+  int resolveReturnedArgNo(const llvm::Value *V, const llvm::Function *Callee,
+                           unsigned Depth = 0) const;
+
 };
 
 } // end namespace UnderApprox

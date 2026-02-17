@@ -60,9 +60,16 @@ const Value *UnderApprox::stripNoopCasts(const Value *V) {
     // is a no-op (though this shouldn't happen in well-formed IR, it's
     // possible in intermediate optimization states)
     if (isNoopAddrSpaceCast(V)) {
-      V = cast<AddrSpaceCastInst>(V)->getOperand(0);
+      V = cast<Operator>(V)->getOperand(0);
       continue;
     }
+
+    // Strip all-zero GEP: pointer arithmetic with only zero indices is a no-op
+    if (auto *GEP = dyn_cast<GEPOperator>(V))
+      if (GEP->hasAllZeroIndices()) {
+        V = GEP->getPointerOperand();
+        continue;
+      }
 
     // Strip invariant group intrinsics: these are optimization hints for
     // devirtualization and don't affect the actual memory address
@@ -100,9 +107,13 @@ const Value *UnderApprox::stripNoopCasts(const Value *V) {
 /// the address space. However, intermediate optimization passes may create
 /// no-op casts that should be canonicalized away.
 bool UnderApprox::isNoopAddrSpaceCast(const Value *V) {
-  if (auto *ASC = dyn_cast<AddrSpaceCastInst>(V))
-    return ASC->getSrcTy()->getPointerAddressSpace() ==
-           ASC->getDestTy()->getPointerAddressSpace();
+  if (auto *ASC = dyn_cast<AddrSpaceCastOperator>(V)) {
+    auto *SrcTy = dyn_cast<PointerType>(ASC->getOperand(0)->getType());
+    auto *DstTy = dyn_cast<PointerType>(ASC->getType());
+    if (!SrcTy || !DstTy)
+      return false;
+    return SrcTy->getAddressSpace() == DstTy->getAddressSpace();
+  }
   return false;
 }
 

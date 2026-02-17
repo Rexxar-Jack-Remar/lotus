@@ -11,8 +11,8 @@
  * - Intra-procedural only: Cross-function queries return NoAlias (conservative)
  * - Sound under-approximation: Returns MustAlias only when guaranteed
  * - Optional MemorySSA: Store-load forwarding for more precision (sound)
- * - Optional DominatorTree: Path condition refinement for more precision
- * (sound)
+ * - Optional DominatorTree: Single-store alloca forwarding for more precision
+ *   (sound)
  */
 
 #include "Alias/UnderApproxAA/UnderApproxAA.h"

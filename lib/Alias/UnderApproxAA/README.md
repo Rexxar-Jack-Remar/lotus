@@ -54,16 +54,15 @@ Inductive patterns checked during propagation:
 |------|-------------|---------------|
 | **Closed PHI** | `phi [p₁, bb₁], ..., [pₙ, bbₙ]` where `p₁ ≡ ... ≡ pₙ` | All incoming values unify → PHI equals common class |
 | **Closed Select** | `select cond, pTrue, pFalse` where `pTrue ≡ pFalse` | Both branches unify → Select equals common class |
-| **Closed GEP** | `GEP(base₁, idx...)` and `GEP(base₂, idx...)` where `base₁ ≡ base₂` | When base classes merge and indices are same SSA values → GEPs must alias |
+| **Closed GEP** | `GEP(base₁, idx...)` and `GEP(base₂, idx...)` where `base₁ ≡ base₂` | Indexed lookup with equivalent index operands (SSA or no-op integer-normalized equal) |
 
 ### Extension Rules (Phase 3 - Optional)
 
 | Rule | Description | Requirement |
 |------|-------------|-------------|
-| **Return-Value Forwarding** | Direct call where callee `return arg_i` → call result ≡ arg at call site | Callee has single return of one argument |
-| **Store-Load Forwarding** | `store v, p; load p` → load equals v (pointer stores only) | MemorySSA proves no clobber |
-| **Single-Store Alloca** | One store to alloca dominating all loads → load equals stored value | DominatorTree; pointer stores only |
-| **Path Condition** | `if (p == q)` → p ≡ q in true branch | *Disabled*: would require path-sensitive equivalence (future work) |
+| **Return-Value Forwarding** | `call/invoke/callbr` result forwarded from pointer argument | `returned` attribute, wrapper-style return expression resolves to one arg, or callee summary |
+| **Store-Load Forwarding** | `store v, p; load p` → load equals v (pointer stores only) | MemorySSA walker finds unique clobber store (including compatible `MemoryPhi`) |
+| **Alloca Forwarding** | For each load, unique dominating pointer store to same alloca → load equals stored value | DominatorTree with instruction-level dominance |
 
 ## Query Interface
 
@@ -185,7 +184,7 @@ merge:
 - **Allocation tracking**: Tracks same allocation site for heap (malloc/new); other heap patterns limited
 - **Syntactic patterns**: Limited arithmetic reasoning
 - **Conservative**: Under-approximation means we may miss true aliases
-- **Context-insensitive**: No path-sensitive reasoning (except via DominatorTree extension)
+- **Context-insensitive**: No path-sensitive reasoning
 
 ## Implemented Extensions (Sound)
 
@@ -193,16 +192,18 @@ The following extensions have been implemented while preserving under-approximat
 
 - **Same Allocation Site**: Pointers from same `malloc`/`new`/`calloc` call are unified
 - **Enhanced Round-Trip**: `inttoptr(ptrtoint(p) + 0)` patterns detected
-- **Store-Load Forwarding**: Via MemorySSA (when provider is set)
-- **Path Condition Refinement**: Via DominatorTree (when provider is set)
+- **Return-Value Forwarding**: Supports `CallBase`, `returned` attributes, and multi-return same-arg callees
+- **Interprocedural Return Summaries**: Tracks `ret ≡ arg_i`, `ret ≡ null`, and fixed global-return forms for direct callees
+- **Store-Load Forwarding**: Via MemorySSA walker with unique-store extraction (including simple `MemoryPhi` cases)
+- **Alloca Forwarding**: Per-load unique dominating store forwarding via DominatorTree
+- **Closed-GEP Indexing**: Candidate bucketing plus index-operand normalization for better precision/scalability
+- **Worklist Dedup**: Pair deduplication prevents redundant propagation churn
 
 ## Future Improvement Ideas
 
 Additional sound extensions that could be added:
 
-- **Limited interprocedural**: At call sites, unify `retval` with returned argument for simple return forwarding
 - **Cache invalidation**: Add `invalidateCache(F)` for passes that modify IR
-- **More semantic rules**: Closed GEP (all indices in same class), other inductive patterns
 
 ## Performance
 
@@ -221,4 +222,3 @@ Additional sound extensions that could be added:
 - POPL 98: Single and loving it: Must-alias analysis for higher-order languages
 - POPL 95: An extended form of must alias analysis for dynamic allocation. 
 - PLDI 94: Context-sensitive interprocedural points-to analysis in the presence of function pointers. I
-

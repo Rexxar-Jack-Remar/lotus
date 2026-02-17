@@ -77,7 +77,7 @@
 //     • Store-Load forwarding: load p after store v to p = v (no clobber)
 //
 //   If DominatorTree is available:
-//     • Path condition: if (p == q) → p ≡ q in true branch
+//     • Single-store alloca forwarding when store dominates all loads
 //
 // ┌─────────────────────────────────────────────────────────────────────────┐
 // │ QUERY: mustAlias(A, B)                                                  │
@@ -96,7 +96,9 @@
 #include "Alias/UnderApproxAA/Canonical.h"
 
 #include <queue>
+#include <unordered_map>
 
+#include <llvm/ADT/Hashing.h>
 #include <llvm/Analysis/MemorySSA.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Constants.h>
@@ -547,39 +549,12 @@ static bool ruleClosedSelect(const Instruction *I, const EquivDB &DB,
 ///   %a = GEP %base1, 0, %i
 ///   %b = GEP %base2, 0, %i
 ///   → %a ≡ %b (rule fires when base classes merge)
-static bool ruleClosedGEP(const Instruction *I, const EquivDB &DB,
-                          const Value *&Rep) {
+bool UnderApprox::ruleClosedGEP(const Instruction *I, const EquivDB &DB,
+                                const Value *&Rep) {
   auto *GEPI = dyn_cast<GetElementPtrInst>(I);
   if (!GEPI)
     return false;
-
-  const Value *BaseI = GEPI->getPointerOperand();
-  const unsigned NumOps = GEPI->getNumOperands();
-  const Function *Func = I->getParent()->getParent();
-
-  for (const BasicBlock &BB : *Func) {
-    for (const Instruction &J : BB) {
-      auto *GEPJ = dyn_cast<GetElementPtrInst>(&J);
-      if (!GEPJ || GEPJ == GEPI)
-        continue;
-      if (GEPJ->getNumOperands() != NumOps)
-        continue;
-      if (!DB.mustAlias(BaseI, GEPJ->getPointerOperand()))
-        continue;
-      // Same indices (SSA value equality)
-      bool SameIndices = true;
-      for (unsigned k = 1; k < NumOps; ++k)
-        if (GEPI->getOperand(k) != GEPJ->getOperand(k)) {
-          SameIndices = false;
-          break;
-        }
-      if (SameIndices) {
-        Rep = GEPJ;
-        return true;
-      }
-    }
-  }
-  return false;
+  return DB.findClosedGEPCandidate(GEPI, Rep);
 }
 
 //-----------------------------------------------------------------------
@@ -606,7 +581,7 @@ static constexpr RuleTy SemanticRules[] = {
 ///
 /// @param Func The LLVM function to analyze
 /// @param MemSSA Optional MemorySSA for store-load forwarding (sound)
-/// @param DomTree Optional DominatorTree for path condition refinement (sound)
+/// @param DomTree Optional DominatorTree for single-store alloca forwarding
 ///
 /// Time complexity: O(N·M·α(N)) where N = number of values, M = number of
 /// instructions. In practice, the α(N) factor is effectively constant.
@@ -633,6 +608,7 @@ EquivDB::EquivDB(Function &Func, MemorySSA *MemSSA, DominatorTree *DomTree)
 
   // Worklist stores pairs of values that must alias (to be unified)
   std::vector<std::pair<const Value *, const Value *>> WorkList;
+  buildGEPIndex();
 
   // Phase 1: Seed the worklist with atomic (syntactic) must-alias pairs
   // These are patterns we can detect locally without knowing the full
@@ -653,12 +629,6 @@ EquivDB::EquivDB(Function &Func, MemorySSA *MemSSA, DominatorTree *DomTree)
   // Sound: one store to alloca dominating all loads ⇒ load equals stored value
   if (DT) {
     seedSingleStoreAlloca(WorkList);
-  }
-
-  // Phase 1d: Refine with path conditions from branch instructions (if DT
-  // available) This is sound: if (p == q) then p ≡ q in the true branch
-  if (DT) {
-    refineWithConditions(WorkList);
   }
 
   // Phase 2: Propagate equivalences using semantic (inductive) rules
@@ -691,7 +661,7 @@ void EquivDB::seedAtomicEqualities(
     if (!A->getType()->isPointerTy() || !B->getType()->isPointerTy())
       return;
     if (atomicMustAlias(DL, A, B))
-      WL.emplace_back(A, B);
+      enqueuePair(WL, A, B);
   };
 
   // Scan all instructions in all basic blocks
@@ -733,63 +703,86 @@ void EquivDB::seedAtomicEqualities(
     }
 }
 
-/// Phase 1a: Seed from direct calls that return a pointer argument
+/// Phase 1a: Seed from calls that return a pointer argument
 ///
-/// If the callee has a single return that returns one of its pointer arguments
-/// (possibly after no-op casts), the call result must-alias that argument
-/// at the call site. Sound: no other definition of the return value.
+/// If the callee always returns one pointer argument (possibly after no-op
+/// casts), the call result must-alias that argument at the call site.
+///
+/// This implementation is intentionally conservative and sound:
+/// - Handles all CallBase instructions (call/invoke/callbr)
+/// - Uses `returned` parameter attributes when present
+/// - For direct callees with bodies, accepts multiple returns only when all
+///   return the same pointer argument
 void EquivDB::seedReturnValueForwarding(
     std::vector<std::pair<const Value *, const Value *>> &WL) {
+  static std::unordered_map<const Function *, ReturnSummary> SummaryCache;
+
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
-      auto *CI = dyn_cast<CallInst>(&I);
-      if (!CI || !CI->getType()->isPointerTy())
+      auto *CB = dyn_cast<CallBase>(&I);
+      if (!CB || !CB->getType()->isPointerTy())
         continue;
 
-      Function *Callee = CI->getCalledFunction();
-      if (!Callee || Callee->isDeclaration() || Callee->empty())
-        continue;
+      auto pushReturnedArg = [&](unsigned ArgNo) {
+        if (ArgNo >= CB->arg_size())
+          return;
+        const Value *CallArg = CB->getArgOperand(ArgNo);
+        if (!CallArg->getType()->isPointerTy())
+          return;
+        enqueuePair(WL, CB, CallArg);
+      };
 
-      // Find the single return that returns a pointer argument
-      ReturnInst *RI = nullptr;
-      for (BasicBlock &CalleeBB : *Callee) {
-        if (auto *R = dyn_cast<ReturnInst>(CalleeBB.getTerminator())) {
-          if (RI) {
-            RI = nullptr; // more than one return, give up
-            break;
-          }
-          RI = R;
+      SmallVector<unsigned, 4> ReturnedAttrArgs;
+      // Attribute-based forwarding works even for declarations.
+      for (unsigned ArgNo = 0, E = CB->arg_size(); ArgNo < E; ++ArgNo)
+        if (CB->paramHasAttr(ArgNo, Attribute::Returned)) {
+          ReturnedAttrArgs.push_back(ArgNo);
+          pushReturnedArg(ArgNo);
         }
+      // If multiple args are marked returned, they must alias each other.
+      for (unsigned i = 0; i < ReturnedAttrArgs.size(); ++i)
+        for (unsigned j = i + 1; j < ReturnedAttrArgs.size(); ++j) {
+          const Value *A = CB->getArgOperand(ReturnedAttrArgs[i]);
+          const Value *B = CB->getArgOperand(ReturnedAttrArgs[j]);
+          if (A->getType()->isPointerTy() && B->getType()->isPointerTy())
+            enqueuePair(WL, A, B);
+        }
+
+      Function *Callee = CB->getCalledFunction();
+      if (!Callee)
+        continue;
+
+      ReturnSummary Summary;
+      auto It = SummaryCache.find(Callee);
+      if (It == SummaryCache.end()) {
+        Summary = summarizeReturnBehavior(Callee);
+        SummaryCache.emplace(Callee, Summary);
+      } else {
+        Summary = It->second;
       }
-      if (!RI || !RI->getReturnValue())
-        continue;
 
-      const Value *RetVal = stripNoopCasts(RI->getReturnValue());
-      if (!RetVal || !RetVal->getType()->isPointerTy())
-        continue;
-
-      auto *Arg = dyn_cast<Argument>(RetVal);
-      if (!Arg)
-        continue;
-
-      unsigned ArgNo = Arg->getArgNo();
-      if (ArgNo >= CI->arg_size())
-        continue;
-
-      const Value *CallArg = CI->getArgOperand(ArgNo);
-      if (!CallArg->getType()->isPointerTy())
-        continue;
-
-      WL.emplace_back(CI, CallArg);
+      switch (Summary.K) {
+      case ReturnSummary::Kind::Arg:
+        pushReturnedArg(static_cast<unsigned>(Summary.ArgNo));
+        break;
+      case ReturnSummary::Kind::Null:
+      case ReturnSummary::Kind::Global:
+        if (Summary.Fixed && Summary.Fixed->getType() == CB->getType())
+          enqueuePair(WL, CB, Summary.Fixed);
+        break;
+      case ReturnSummary::Kind::Unknown:
+        break;
+      }
     }
   }
 }
 
 /// Phase 1c: Seed from single-store allocas when DominatorTree available
 ///
-/// For each alloca, if there is exactly one store (pointer-typed value) to
-/// that alloca (or GEP of it) and it dominates every load from that alloca,
-/// then each load result must-alias the stored value. Sound: single def.
+/// For each load from an alloca, if there is exactly one dominating store
+/// (pointer-typed value) to that alloca, then the load must-alias the stored
+/// value. This handles both the classic single-store case and per-load unique
+/// reaching store patterns.
 void EquivDB::seedSingleStoreAlloca(
     std::vector<std::pair<const Value *, const Value *>> &WL) {
   if (!DT)
@@ -817,27 +810,34 @@ void EquivDB::seedSingleStoreAlloca(
           }
         }
 
-      if (Stores.size() != 1 || Loads.empty())
+      if (Stores.empty() || Loads.empty())
         continue;
 
-      StoreInst *SingleStore = Stores[0];
-      const Value *StoredVal = SingleStore->getValueOperand();
-      if (!StoredVal->getType()->isPointerTy())
-        continue;
-
-      BasicBlock *StoreBB = SingleStore->getParent();
-      bool DominatesAll = true;
       for (LoadInst *LI : Loads) {
-        if (!DT->dominates(StoreBB, LI->getParent())) {
-          DominatesAll = false;
-          break;
-        }
-      }
-      if (!DominatesAll)
-        continue;
+        StoreInst *UniqueStore = nullptr;
+        bool Ambiguous = false;
 
-      for (LoadInst *LI : Loads)
-        WL.emplace_back(LI, StoredVal);
+        for (StoreInst *SI : Stores) {
+          if (!dominatesInst(SI, LI))
+            continue;
+
+          if (!UniqueStore) {
+            UniqueStore = SI;
+          } else if (UniqueStore != SI) {
+            Ambiguous = true;
+            break;
+          }
+        }
+
+        if (!UniqueStore || Ambiguous)
+          continue;
+
+        const Value *StoredVal = UniqueStore->getValueOperand();
+        if (!StoredVal->getType()->isPointerTy())
+          continue;
+
+        enqueuePair(WL, LI, StoredVal);
+      }
     }
   }
 }
@@ -972,6 +972,8 @@ void EquivDB::propagate(
         // these)
         if (!I->getType()->isPointerTy())
           continue;
+        if (FiredSemantic.count(I))
+          continue;
 
         // Try each semantic rule in sequence
         // The first rule that fires is applied (rules are mutually exclusive
@@ -980,7 +982,8 @@ void EquivDB::propagate(
         for (RuleTy R : SemanticRules)
           if (R(I, *this, Rep)) { // Rule fires: I ≡ Rep
             // Add new must-alias pair to worklist for further propagation
-            WL.emplace_back(I, Rep);
+            FiredSemantic.insert(I);
+            enqueuePair(WL, I, Rep);
             break; // One rule firing per instruction is enough
           }
       }
@@ -1064,6 +1067,48 @@ void EquivDB::seedStoreLoadForwarding(
   if (!MSSA)
     return;
 
+  auto extractStoreFromAccess =
+      [&](const MemoryAccess *Access, const LoadInst *LI) -> StoreInst * {
+    auto *MUD = dyn_cast_or_null<MemoryUseOrDef>(
+        const_cast<MemoryAccess *>(Access));
+    if (!MUD)
+      return nullptr;
+    auto *SI = dyn_cast_or_null<StoreInst>(MUD->getMemoryInst());
+    if (!SI)
+      return nullptr;
+    if (!atomicMustAlias(DL, SI->getPointerOperand(), LI->getPointerOperand()))
+      return nullptr;
+    return SI;
+  };
+
+  auto resolveUniqueStore = [&](MemoryAccess *Access,
+                                const LoadInst *LI) -> StoreInst * {
+    if (!Access)
+      return nullptr;
+
+    if (auto *SI = extractStoreFromAccess(Access, LI))
+      return SI;
+
+    auto *MP = dyn_cast<MemoryPhi>(Access);
+    if (!MP)
+      return nullptr;
+
+    StoreInst *Unique = nullptr;
+    for (const Use &IncU : MP->incoming_values()) {
+      auto *Inc = cast<MemoryAccess>(IncU.get());
+      StoreInst *S = extractStoreFromAccess(Inc, LI);
+      if (!S)
+        return nullptr;
+      if (!Unique)
+        Unique = S;
+      else if (Unique != S)
+        return nullptr;
+    }
+    return Unique;
+  };
+
+  MemorySSAWalker *Walker = MSSA->getWalker();
+
   // Walk all instructions in the function
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
@@ -1077,30 +1122,14 @@ void EquivDB::seedStoreLoadForwarding(
       if (!MA)
         continue;
 
-      // Get the defining access (the store that defines this location)
-      MemoryAccess *DefMA = MA->getDefiningAccess();
-      if (!DefMA)
-        continue;
+      MemoryAccess *Clob = nullptr;
+      if (Walker)
+        Clob = Walker->getClobberingMemoryAccess(MA);
+      if (!Clob)
+        Clob = MA->getDefiningAccess();
 
-      // Check if the defining access is a MemoryDef (a store)
-      auto *MDef = dyn_cast<MemoryDef>(DefMA);
-      if (!MDef)
-        continue;
-
-      // Get the defining instruction (MemoryDef inherits from MemoryUseOrDef)
-      Instruction *DefI = cast<MemoryUseOrDef>(DefMA)->getMemoryInst();
-      if (!DefI)
-        continue;
-
-      // Must be a store instruction
-      auto *SI = dyn_cast<StoreInst>(DefI);
+      StoreInst *SI = resolveUniqueStore(Clob, LI);
       if (!SI)
-        continue;
-
-      // Check if the store pointer must-alias the load pointer
-      // This is required for the forwarding to be valid
-      if (!atomicMustAlias(DL, SI->getPointerOperand(),
-                           LI->getPointerOperand()))
         continue;
 
       // Only unify pointer-typed values: must-alias is defined for pointers
@@ -1110,77 +1139,223 @@ void EquivDB::seedStoreLoadForwarding(
 
       // SOUND: MemorySSA guarantees the store is the only clobber
       // Therefore, load must equal the stored value
-      WL.emplace_back(LI, StoredVal);
+      enqueuePair(WL, LI, StoredVal);
     }
   }
 }
 
-//===----------------------------------------------------------------------===//
-//                    Extension: Path Condition Refinement
-//===----------------------------------------------------------------------===//
-
-/// Refine equivalences using branch conditions
-///
-/// This is SOUND: if we have a branch "if (p == q)" then in the true branch
-/// we KNOW that p equals q, and in the false branch we know p != q.
-///
-/// We only use the true branch information for must-alias
-/// (under-approximation).
-void EquivDB::refineWithConditions(
-    std::vector<std::pair<const Value *, const Value *>> &WL) {
-  if (!DT)
-    return;
-
-  // Scan all branch instructions
-  for (BasicBlock &BB : F) {
-    auto *BI = dyn_cast<BranchInst>(BB.getTerminator());
-    if (!BI || !BI->isConditional())
-      continue;
-
-    // Get the condition
-    Value *Cond = BI->getCondition();
-    auto *Cmp = dyn_cast<CmpInst>(Cond);
-    if (!Cmp)
-      continue;
-
-    // Check for pointer equality comparison
-    if (Cmp->getPredicate() != CmpInst::ICMP_EQ)
-      continue;
-
-    Value *Op0 = Cmp->getOperand(0);
-    Value *Op1 = Cmp->getOperand(1);
-
-    // Both operands must be pointers
-    if (!Op0->getType()->isPointerTy() || !Op1->getType()->isPointerTy())
-      continue;
-
-    // Get successor blocks
-    BasicBlock *TrueBB = BI->getSuccessor(0);
-    BasicBlock *FalseBB = BI->getSuccessor(1);
-
-    // Add conditional must-alias for the true branch
-    // SOUND: if (p == q) is true, then p must alias q
-    addConditionalMustAlias(Cmp, TrueBB, FalseBB, WL);
-  }
+void EquivDB::buildGEPIndex() {
+  GEPIndexBuckets.clear();
+  for (const BasicBlock &BB : F)
+    for (const Instruction &I : BB)
+      if (const auto *GEP = dyn_cast<GetElementPtrInst>(&I))
+        GEPIndexBuckets[gepIndexSignature(GEP)].push_back(GEP);
 }
 
-/// Add must-alias pairs for conditionally executed blocks
-///
-/// For the true branch of "if (p == q)", we know p ≡ q. The current
-/// implementation does NOT add (p, q) to the worklist because equivalence
-/// is global: unifying p and q would make mustAlias(p, q) true everywhere,
-/// including in the false branch where p != q (unsound).
-///
-/// Path-sensitive refinement (only report mustAlias(p, q) when the query
-/// is in a block dominated by the true branch) is future work.
-void EquivDB::addConditionalMustAlias(
-    CmpInst *Cmp, BasicBlock *TrueBB, BasicBlock *FalseBB,
-    std::vector<std::pair<const Value *, const Value *>> &WL) {
-  (void)Cmp;
-  (void)TrueBB;
-  (void)FalseBB;
-  (void)WL;
-  // Do not add (Op0, Op1) globally: that would report mustAlias(p, q) in
-  // the false branch, which is a false positive. Path-sensitive equivalence
-  // (per-branch classes or query-time dominance check) is required.
+bool EquivDB::equivalentGEPIndexOperand(const Value *A, const Value *B) const {
+  if (A == B)
+    return true;
+
+  if (A->getType()->isIntegerTy() && B->getType()->isIntegerTy()) {
+    A = stripNoopArithmetic(A);
+    B = stripNoopArithmetic(B);
+    if (A == B)
+      return true;
+    auto *CA = dyn_cast<ConstantInt>(A);
+    auto *CB = dyn_cast<ConstantInt>(B);
+    if (CA && CB)
+      return CA->getValue() == CB->getValue();
+  }
+
+  return false;
+}
+
+uint64_t EquivDB::gepIndexSignature(const Value *GEPV) const {
+  auto *GEP = dyn_cast<GEPOperator>(GEPV);
+  if (!GEP)
+    return 0;
+
+  auto H = hash_value(GEP->getNumOperands());
+  for (unsigned i = 1, e = GEP->getNumOperands(); i < e; ++i) {
+    const Value *Idx = GEP->getOperand(i);
+    if (Idx->getType()->isIntegerTy())
+      Idx = stripNoopArithmetic(Idx);
+    H = hash_combine(H, Idx);
+  }
+  return static_cast<uint64_t>(H);
+}
+
+bool EquivDB::findClosedGEPCandidate(const GetElementPtrInst *GEPI,
+                                     const Value *&Rep) const {
+  auto It = GEPIndexBuckets.find(gepIndexSignature(GEPI));
+  if (It == GEPIndexBuckets.end())
+    return false;
+
+  const Value *BaseI = GEPI->getPointerOperand();
+  const unsigned NumOps = GEPI->getNumOperands();
+
+  for (const GetElementPtrInst *GEPJ : It->second) {
+    if (GEPJ == GEPI)
+      continue;
+    if (GEPJ->getNumOperands() != NumOps)
+      continue;
+    if (!mustAlias(BaseI, GEPJ->getPointerOperand()))
+      continue;
+
+    bool SameIndices = true;
+    for (unsigned k = 1; k < NumOps; ++k)
+      if (!equivalentGEPIndexOperand(GEPI->getOperand(k), GEPJ->getOperand(k))) {
+        SameIndices = false;
+        break;
+      }
+
+    if (SameIndices) {
+      Rep = GEPJ;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool EquivDB::dominatesInst(const Instruction *Def, const Instruction *Use) const {
+  if (Def->getParent() != Use->getParent())
+    return DT && DT->dominates(Def->getParent(), Use->getParent());
+
+  if (Def == Use)
+    return true;
+
+  for (const Instruction &I : *Def->getParent()) {
+    if (&I == Def)
+      return true;
+    if (&I == Use)
+      return false;
+  }
+  return false;
+}
+
+uint64_t EquivDB::makePairKey(const Value *A, const Value *B) {
+  IdTy IA = id(A);
+  IdTy IB = id(B);
+  if (IA > IB)
+    std::swap(IA, IB);
+  return (static_cast<uint64_t>(IA) << 32) | static_cast<uint64_t>(IB);
+}
+
+bool EquivDB::enqueuePair(
+    std::vector<std::pair<const Value *, const Value *>> &WL, const Value *A,
+    const Value *B) {
+  if (!A || !B)
+    return false;
+  if (!A->getType()->isPointerTy() || !B->getType()->isPointerTy())
+    return false;
+  uint64_t Key = makePairKey(A, B);
+  if (!SeenPairKeys.insert(Key).second)
+    return false;
+  WL.emplace_back(A, B);
+  return true;
+}
+
+int EquivDB::resolveReturnedArgNo(const Value *V, const Function *Callee,
+                                  unsigned Depth) const {
+  if (!V || !Callee || Depth > 8)
+    return -1;
+
+  V = stripNoopCasts(V);
+  if (const auto *Arg = dyn_cast<Argument>(V))
+    return Arg->getParent() == Callee && Arg->getType()->isPointerTy()
+               ? static_cast<int>(Arg->getArgNo())
+               : -1;
+
+  if (const auto *GEP = dyn_cast<GEPOperator>(V))
+    if (GEP->hasAllZeroIndices())
+      return resolveReturnedArgNo(GEP->getPointerOperand(), Callee, Depth + 1);
+
+  if (const auto *SI = dyn_cast<SelectInst>(V)) {
+    int T = resolveReturnedArgNo(SI->getTrueValue(), Callee, Depth + 1);
+    int FNo = resolveReturnedArgNo(SI->getFalseValue(), Callee, Depth + 1);
+    return (T >= 0 && T == FNo) ? T : -1;
+  }
+
+  if (const auto *PN = dyn_cast<PHINode>(V)) {
+    int Common = -1;
+    for (const Value *In : PN->incoming_values()) {
+      int Cur = resolveReturnedArgNo(In, Callee, Depth + 1);
+      if (Cur < 0)
+        return -1;
+      if (Common < 0)
+        Common = Cur;
+      else if (Common != Cur)
+        return -1;
+    }
+    return Common;
+  }
+
+  if (const auto *Op = dyn_cast<Operator>(V)) {
+    if (Op->getOpcode() == Instruction::IntToPtr) {
+      const Value *IntOp = stripNoopArithmetic(Op->getOperand(0));
+      if (const auto *IntCast = dyn_cast<Operator>(IntOp))
+        if (IntCast->getOpcode() == Instruction::PtrToInt)
+          return resolveReturnedArgNo(IntCast->getOperand(0), Callee, Depth + 1);
+    }
+  }
+
+  return -1;
+}
+
+EquivDB::ReturnSummary
+EquivDB::summarizeReturnBehavior(const Function *Callee) const {
+  ReturnSummary Summary;
+  if (!Callee || Callee->isDeclaration() || Callee->empty())
+    return Summary;
+
+  bool SawReturn = false;
+  for (const BasicBlock &BB : *Callee) {
+    const auto *RI = dyn_cast<ReturnInst>(BB.getTerminator());
+    if (!RI)
+      continue;
+
+    SawReturn = true;
+    const Value *RV = RI->getReturnValue();
+    if (!RV || !RV->getType()->isPointerTy())
+      return ReturnSummary{};
+
+    RV = stripNoopCasts(RV);
+    ReturnSummary Cur;
+
+    int ArgNo = resolveReturnedArgNo(RV, Callee);
+    if (ArgNo >= 0) {
+      Cur.K = ReturnSummary::Kind::Arg;
+      Cur.ArgNo = ArgNo;
+    } else if (isa<ConstantPointerNull>(RV)) {
+      Cur.K = ReturnSummary::Kind::Null;
+      Cur.Fixed = RV;
+    } else {
+      const Value *Obj = getUnderlyingObject(RV);
+      if (isa<GlobalValue>(Obj)) {
+        Cur.K = ReturnSummary::Kind::Global;
+        Cur.Fixed = RV;
+      } else {
+        return ReturnSummary{};
+      }
+    }
+
+    if (Summary.K == ReturnSummary::Kind::Unknown) {
+      Summary = Cur;
+      continue;
+    }
+
+    if (Summary.K != Cur.K)
+      return ReturnSummary{};
+
+    if (Summary.K == ReturnSummary::Kind::Arg && Summary.ArgNo != Cur.ArgNo)
+      return ReturnSummary{};
+    if ((Summary.K == ReturnSummary::Kind::Null ||
+         Summary.K == ReturnSummary::Kind::Global) &&
+        Summary.Fixed != Cur.Fixed)
+      return ReturnSummary{};
+  }
+
+  if (!SawReturn)
+    return ReturnSummary{};
+  return Summary;
 }

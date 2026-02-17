@@ -15,7 +15,7 @@
  * - Intra-procedural: Analyzes within a single function at a time
  * - Per-function caching: Equivalence databases are built once per function
  * - Optional MemorySSA: Store-load forwarding when available (sound)
- * - Optional DominatorTree: Path condition refinement when available (sound)
+ * - Optional DominatorTree: Single-store alloca forwarding when available
  *
  * Algorithm Overview:
  * The analysis uses a three-phase approach:
@@ -69,7 +69,7 @@ namespace UnderApprox {
  * - Store-load forwarding: load after store to same location = stored value
  *
  * With optional DominatorTree:
- * - Path condition refinement: if (p == q) → p ≡ q in true branch
+ * - Single-store alloca forwarding: load-after-dominating-store precision
  *
  * The analysis is an under-approximation: it only reports MustAlias when
  * certain, otherwise returns NoAlias. It never reports MayAlias, making it
@@ -175,8 +175,8 @@ public:
   /**
    * @brief Set DominatorTree provider for enhanced analysis
    *
-   * When set, path condition refinement will be enabled.
-   * This provides more precise must-alias detection from branch conditions.
+   * When set, DominatorTree-based single-store alloca forwarding is enabled.
+   * This provides additional precise must-alias facts for load/store patterns.
    *
    * @param Provider A function that returns DominatorTree for a given function
    */
@@ -198,7 +198,7 @@ private:
   /// Optional MemorySSA provider for store-load forwarding
   MemorySSAProvider MSSAProvider = nullptr;
 
-  /// Optional DominatorTree provider for path condition refinement
+  /// Optional DominatorTree provider for single-store alloca forwarding
   DominatorTreeProvider DTProvider = nullptr;
 
   /**
