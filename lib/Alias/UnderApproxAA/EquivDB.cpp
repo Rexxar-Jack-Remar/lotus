@@ -95,10 +95,12 @@
 
 #include "Alias/UnderApproxAA/Canonical.h"
 
+#include <functional>
 #include <queue>
 #include <unordered_map>
 
 #include <llvm/ADT/Hashing.h>
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Analysis/MemorySSA.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Constants.h>
@@ -229,15 +231,29 @@ static bool checkTrivialPHI(const Value *S1, const Value *S2) {
 /// is equivalent to that common value.
 /// Example: select %cond, %p, %p and %p
 static bool checkTrivialSelect(const Value *S1, const Value *S2) {
-  if (auto *SI = dyn_cast<SelectInst>(S1))
+  if (auto *SI = dyn_cast<SelectInst>(S1)) {
     if (stripNoopCasts(SI->getTrueValue()) == S2 &&
         stripNoopCasts(SI->getFalseValue()) == S2)
       return true;
+    if (const auto *Cond = dyn_cast<ConstantInt>(SI->getCondition())) {
+      if (Cond->isOne() && stripNoopCasts(SI->getTrueValue()) == S2)
+        return true;
+      if (Cond->isZero() && stripNoopCasts(SI->getFalseValue()) == S2)
+        return true;
+    }
+  }
 
-  if (auto *SI = dyn_cast<SelectInst>(S2))
+  if (auto *SI = dyn_cast<SelectInst>(S2)) {
     if (stripNoopCasts(SI->getTrueValue()) == S1 &&
         stripNoopCasts(SI->getFalseValue()) == S1)
       return true;
+    if (const auto *Cond = dyn_cast<ConstantInt>(SI->getCondition())) {
+      if (Cond->isOne() && stripNoopCasts(SI->getTrueValue()) == S1)
+        return true;
+      if (Cond->isZero() && stripNoopCasts(SI->getFalseValue()) == S1)
+        return true;
+    }
+  }
 
   return false;
 }
@@ -256,6 +272,93 @@ static bool checkSameAllocation(const Value *S1, const Value *S2) {
 /// Example: inttoptr(ptrtoint(%p) + 0) and %p
 static bool checkEnhancedRoundTrip(const Value *S1, const Value *S2) {
   return isEnhancedRoundTrip(S1, S2);
+}
+
+static bool sameIntegerOpPoisonFlags(const Operator *A, const Operator *B) {
+  if (!A || !B || A->getOpcode() != B->getOpcode())
+    return false;
+
+  const auto *OA = dyn_cast<OverflowingBinaryOperator>(A);
+  const auto *OB = dyn_cast<OverflowingBinaryOperator>(B);
+  if (static_cast<bool>(OA) != static_cast<bool>(OB))
+    return false;
+  if (OA && OB) {
+    if (OA->hasNoSignedWrap() != OB->hasNoSignedWrap())
+      return false;
+    if (OA->hasNoUnsignedWrap() != OB->hasNoUnsignedWrap())
+      return false;
+  }
+
+  const auto *EA = dyn_cast<PossiblyExactOperator>(A);
+  const auto *EB = dyn_cast<PossiblyExactOperator>(B);
+  if (static_cast<bool>(EA) != static_cast<bool>(EB))
+    return false;
+  if (EA && EB && EA->isExact() != EB->isExact())
+    return false;
+
+  return true;
+}
+
+static bool equivalentIntegerExpr(const Value *A, const Value *B,
+                                  unsigned Depth = 0) {
+  if (A == B)
+    return true;
+  if (!A || !B || Depth > 10)
+    return false;
+  if (!A->getType()->isIntegerTy() || !B->getType()->isIntegerTy())
+    return false;
+
+  if (const auto *CA = dyn_cast<ConstantInt>(A))
+    if (const auto *CB = dyn_cast<ConstantInt>(B))
+      return CA->getValue() == CB->getValue();
+
+  const auto *OpA = dyn_cast<Operator>(A);
+  const auto *OpB = dyn_cast<Operator>(B);
+  if (!OpA || !OpB)
+    return false;
+
+  const unsigned Opc = OpA->getOpcode();
+  if (Opc != OpB->getOpcode() || OpA->getNumOperands() != OpB->getNumOperands())
+    return false;
+  if (OpA->getType() != OpB->getType())
+    return false;
+
+  switch (Opc) {
+  case Instruction::ZExt:
+  case Instruction::SExt:
+  case Instruction::Trunc:
+  case Instruction::Freeze:
+    return equivalentIntegerExpr(OpA->getOperand(0), OpB->getOperand(0),
+                                 Depth + 1);
+  case Instruction::Add:
+  case Instruction::Sub:
+  case Instruction::Mul:
+  case Instruction::And:
+  case Instruction::Or:
+  case Instruction::Xor:
+  case Instruction::Shl:
+  case Instruction::AShr:
+  case Instruction::LShr: {
+    if (!sameIntegerOpPoisonFlags(OpA, OpB))
+      return false;
+
+    const bool Direct = equivalentIntegerExpr(OpA->getOperand(0),
+                                              OpB->getOperand(0), Depth + 1) &&
+                        equivalentIntegerExpr(OpA->getOperand(1),
+                                              OpB->getOperand(1), Depth + 1);
+    if (Direct)
+      return true;
+
+    if (!Instruction::isCommutative(Opc))
+      return false;
+    return equivalentIntegerExpr(OpA->getOperand(0), OpB->getOperand(1),
+                                 Depth + 1) &&
+           equivalentIntegerExpr(OpA->getOperand(1), OpB->getOperand(0),
+                                 Depth + 1);
+  }
+  default:
+    return false;
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -619,13 +722,7 @@ EquivDB::EquivDB(Function &Func, MemorySSA *MemSSA, DominatorTree *DomTree)
   // Sound: callee "return arg_i" ⇒ call result must-alias arg_i at call site
   seedReturnValueForwarding(WorkList);
 
-  // Phase 1b: Seed from MemorySSA store-load forwarding (if available)
-  // This is sound: MemorySSA provides precise clobber information
-  if (MSSA) {
-    seedStoreLoadForwarding(WorkList);
-  }
-
-  // Phase 1c: Seed from single-store allocas when DominatorTree available
+  // Phase 1b: Seed from single-store allocas when DominatorTree available
   // Sound: one store to alloca dominating all loads ⇒ load equals stored value
   if (DT) {
     seedSingleStoreAlloca(WorkList);
@@ -635,6 +732,19 @@ EquivDB::EquivDB(Function &Func, MemorySSA *MemSSA, DominatorTree *DomTree)
   // As we unify classes, new patterns may emerge (e.g., closed PHIs),
   // which add more pairs to the worklist until saturation.
   propagate(WorkList);
+
+  // Phase 3: Iterative MemorySSA forwarding (if available)
+  // Memory forwarding benefits from discovered equivalence classes.
+  // Re-seed from memory clobbers and re-propagate to a local fixpoint.
+  if (MSSA) {
+    while (true) {
+      const size_t Before = SeenPairKeys.size();
+      seedStoreLoadForwarding(WorkList);
+      if (SeenPairKeys.size() == Before)
+        break;
+      propagate(WorkList);
+    }
+  }
 }
 
 /// Phase 1: Seed the worklist with atomic (syntactic) must-alias pairs
@@ -788,6 +898,18 @@ void EquivDB::seedSingleStoreAlloca(
   if (!DT)
     return;
 
+  auto sameMemorySlot = [&](const Value *P, const Value *Q) -> bool {
+    if (!P || !Q || !P->getType()->isPointerTy() || !Q->getType()->isPointerTy())
+      return false;
+    if (stripNoopCasts(P) == stripNoopCasts(Q))
+      return true;
+    if (sameConstOffset(DL, P, Q))
+      return true;
+    if (sameGEPOperands(P, Q))
+      return true;
+    return false;
+  };
+
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
       auto *AI = dyn_cast<AllocaInst>(&I);
@@ -819,6 +941,8 @@ void EquivDB::seedSingleStoreAlloca(
 
         for (StoreInst *SI : Stores) {
           if (!dominatesInst(SI, LI))
+            continue;
+          if (!sameMemorySlot(SI->getPointerOperand(), LI->getPointerOperand()))
             continue;
 
           if (!UniqueStore) {
@@ -965,9 +1089,10 @@ void EquivDB::propagate(
     // satisfy semantic rules (e.g., all PHI operands are now in the same class)
     auto Revisit = [&](IdTy Cls) {
       auto &List = Watches[Cls].Users;
+      SmallVector<Instruction *, 8> Snapshot(List.begin(), List.end());
 
       // Check each instruction watching this class
-      for (Instruction *I : List) {
+      for (Instruction *I : Snapshot) {
         // Only process pointer-producing instructions (semantic rules apply to
         // these)
         if (!I->getType()->isPointerTy())
@@ -1067,44 +1192,56 @@ void EquivDB::seedStoreLoadForwarding(
   if (!MSSA)
     return;
 
-  auto extractStoreFromAccess =
-      [&](const MemoryAccess *Access, const LoadInst *LI) -> StoreInst * {
-    auto *MUD = dyn_cast_or_null<MemoryUseOrDef>(
-        const_cast<MemoryAccess *>(Access));
-    if (!MUD)
-      return nullptr;
-    auto *SI = dyn_cast_or_null<StoreInst>(MUD->getMemoryInst());
-    if (!SI)
-      return nullptr;
-    if (!atomicMustAlias(DL, SI->getPointerOperand(), LI->getPointerOperand()))
-      return nullptr;
-    return SI;
+  DenseMap<IdTy, const LoadInst *> RepRootToFirstLoad;
+
+  auto mustAliasNow = [&](const Value *A, const Value *B) -> bool {
+    if (!A || !B)
+      return false;
+    if (!A->getType()->isPointerTy() || !B->getType()->isPointerTy())
+      return false;
+    if (atomicMustAlias(DL, A, B))
+      return true;
+
+    // Query current equivalence classes as propagation advances.
+    id(A);
+    id(B);
+    return mustAlias(A, B);
   };
 
-  auto resolveUniqueStore = [&](MemoryAccess *Access,
-                                const LoadInst *LI) -> StoreInst * {
-    if (!Access)
-      return nullptr;
+  std::function<bool(MemoryAccess *, const LoadInst *,
+                     SmallVectorImpl<const Value *> &,
+                     SmallPtrSetImpl<const MemoryAccess *> &)>
+      collectStoredValues = [&](MemoryAccess *Access, const LoadInst *LI,
+                                SmallVectorImpl<const Value *> &StoredVals,
+                                SmallPtrSetImpl<const MemoryAccess *> &Visited)
+      -> bool {
+    if (!Access || !Visited.insert(Access).second)
+      return false;
 
-    if (auto *SI = extractStoreFromAccess(Access, LI))
-      return SI;
+    if (auto *MUD = dyn_cast<MemoryUseOrDef>(Access)) {
+      auto *SI = dyn_cast_or_null<StoreInst>(MUD->getMemoryInst());
+      if (!SI)
+        return false;
+      if (!mustAliasNow(SI->getPointerOperand(), LI->getPointerOperand()))
+        return false;
+
+      const Value *StoredVal = SI->getValueOperand();
+      if (!StoredVal->getType()->isPointerTy())
+        return false;
+      StoredVals.push_back(StoredVal);
+      return true;
+    }
 
     auto *MP = dyn_cast<MemoryPhi>(Access);
-    if (!MP)
-      return nullptr;
+    if (!MP || MP->getNumIncomingValues() == 0)
+      return false;
 
-    StoreInst *Unique = nullptr;
     for (const Use &IncU : MP->incoming_values()) {
       auto *Inc = cast<MemoryAccess>(IncU.get());
-      StoreInst *S = extractStoreFromAccess(Inc, LI);
-      if (!S)
-        return nullptr;
-      if (!Unique)
-        Unique = S;
-      else if (Unique != S)
-        return nullptr;
+      if (!collectStoredValues(Inc, LI, StoredVals, Visited))
+        return false;
     }
-    return Unique;
+    return true;
   };
 
   MemorySSAWalker *Walker = MSSA->getWalker();
@@ -1128,18 +1265,38 @@ void EquivDB::seedStoreLoadForwarding(
       if (!Clob)
         Clob = MA->getDefiningAccess();
 
-      StoreInst *SI = resolveUniqueStore(Clob, LI);
-      if (!SI)
+      SmallVector<const Value *, 4> StoredVals;
+      SmallPtrSet<const MemoryAccess *, 8> Visited;
+      if (!collectStoredValues(Clob, LI, StoredVals, Visited) ||
+          StoredVals.empty())
         continue;
 
-      // Only unify pointer-typed values: must-alias is defined for pointers
-      const Value *StoredVal = SI->getValueOperand();
-      if (!StoredVal->getType()->isPointerTy())
+      // MemoryPhi merge forwarding: if all reaching stores write one
+      // pointer-equivalence class, the load must equal that class.
+      const Value *Rep = StoredVals.front();
+      bool AllSameClass = true;
+      for (const Value *V : StoredVals) {
+        if (!mustAliasNow(Rep, V)) {
+          AllSameClass = false;
+          break;
+        }
+      }
+      if (!AllSameClass)
         continue;
 
       // SOUND: MemorySSA guarantees the store is the only clobber
       // Therefore, load must equal the stored value
-      enqueuePair(WL, LI, StoredVal);
+      enqueuePair(WL, LI, Rep);
+
+      // Additional closure: loads forwarding to the same representative class
+      // must alias each other.
+      const IdTy RepRoot = find(id(Rep));
+      auto It = RepRootToFirstLoad.find(RepRoot);
+      if (It == RepRootToFirstLoad.end()) {
+        RepRootToFirstLoad[RepRoot] = LI;
+      } else {
+        enqueuePair(WL, LI, It->second);
+      }
     }
   }
 }
@@ -1165,6 +1322,8 @@ bool EquivDB::equivalentGEPIndexOperand(const Value *A, const Value *B) const {
     auto *CB = dyn_cast<ConstantInt>(B);
     if (CA && CB)
       return CA->getValue() == CB->getValue();
+    if (equivalentIntegerExpr(A, B))
+      return true;
   }
 
   return false;
@@ -1178,9 +1337,18 @@ uint64_t EquivDB::gepIndexSignature(const Value *GEPV) const {
   auto H = hash_value(GEP->getNumOperands());
   for (unsigned i = 1, e = GEP->getNumOperands(); i < e; ++i) {
     const Value *Idx = GEP->getOperand(i);
-    if (Idx->getType()->isIntegerTy())
+    if (Idx->getType()->isIntegerTy()) {
       Idx = stripNoopArithmetic(Idx);
-    H = hash_combine(H, Idx);
+      if (const auto *CI = dyn_cast<ConstantInt>(Idx)) {
+        H = hash_combine(H, CI->getValue());
+      } else if (const auto *Op = dyn_cast<Operator>(Idx)) {
+        H = hash_combine(H, Op->getOpcode(), Op->getType());
+      } else {
+        H = hash_combine(H, Idx->getType());
+      }
+    } else {
+      H = hash_combine(H, Idx);
+    }
   }
   return static_cast<uint64_t>(H);
 }

@@ -27,8 +27,8 @@ virtual ~OneshotCallConstraint() = default;
 void defineStates(framework::StateManager& manager) {
   framework::State& init = manager.getInitState();
 
-  framework::State& free = manager.createState(
-      framework::StateArgs("free"));
+  framework::StateArgs free_args("free");
+  framework::State& free = manager.createState(free_args);
 
   // init -> free when pointer is passed to free_funcs (e.g. kfree).
   auto free_func_rule = framework::FunctionArgTransitionRule(free_funcs);
