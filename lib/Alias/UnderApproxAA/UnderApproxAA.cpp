@@ -10,13 +10,19 @@
  * - Per-function caching: Each function's EquivDB is built once and reused
  * - Intra-procedural only: Cross-function queries return NoAlias (conservative)
  * - Sound under-approximation: Returns MustAlias only when guaranteed
+ * - Optional MemorySSA: Store-load forwarding for more precision (sound)
+ * - Optional DominatorTree: Path condition refinement for more precision
+ * (sound)
  */
 
 #include "Alias/UnderApproxAA/UnderApproxAA.h"
+
 #include "Alias/UnderApproxAA/EquivDB.h"
+
+#include <unordered_map>
+
 #include <llvm/Analysis/MemoryLocation.h>
 #include <llvm/IR/Instructions.h>
-#include <unordered_map>
 
 using namespace llvm;
 using namespace UnderApprox;
@@ -26,11 +32,28 @@ using namespace UnderApprox;
 // ---------------------------------------------------------------------------
 
 namespace {
-/// Cache type: maps each function to its equivalence database
-/// The database is built on first query and reused for subsequent queries
-/// within the same analysis session.
+/// Cache key: combines function pointer with analysis providers
+/// This ensures different provider configurations get different caches
+struct CacheKey {
+  const Function *F;
+  UnderApproxAA::MemorySSAProvider MSSAProv;
+  UnderApproxAA::DominatorTreeProvider DTProv;
+
+  bool operator==(const CacheKey &Other) const {
+    return F == Other.F && MSSAProv == Other.MSSAProv && DTProv == Other.DTProv;
+  }
+};
+
+/// Hash function for CacheKey
+struct CacheKeyHash {
+  size_t operator()(const CacheKey &K) const {
+    return hash_combine(K.F, K.MSSAProv, K.DTProv);
+  }
+};
+
+/// Cache type: maps each cache key to its equivalence database
 using CacheTy =
-    std::unordered_map<const Function *, std::unique_ptr<EquivDB>>;
+    std::unordered_map<CacheKey, std::unique_ptr<EquivDB>, CacheKeyHash>;
 static CacheTy EquivCache;
 
 /// Extract the parent function of a value
@@ -84,7 +107,8 @@ AliasResult UnderApproxAA::alias(const MemoryLocation &L1,
 
 bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {
   // Early exit: ensure both values are valid pointers
-  if (!isValidPointerQuery(V1, V2)) return false;
+  if (!isValidPointerQuery(V1, V2))
+    return false;
 
   // Extract parent functions for both values
   const Function *F1 = getParentFunction(V1);
@@ -93,11 +117,6 @@ bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {
   // Cross-function queries: conservative under-approximation
   // We cannot prove must-alias across function boundaries without
   // inter-procedural analysis. Return false (NoAlias) conservatively.
-  //
-  // Note: This could be extended to handle:
-  // - Calls where arguments are passed directly (no pointer arithmetic)
-  // - Return values that are parameters
-  // - Global variables accessed in multiple functions
   if (F1 != F2)
     return false;
 
@@ -107,20 +126,32 @@ bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {
 
   // Safety check: ensure function has a parent module before building EquivDB
   if (!F1->getParent()) {
-    // Function without parent module - cannot build EquivDB
-    // Return false (no must-alias)
     return false;
   }
 
+  // Get optional analyses from providers
+  MemorySSA *MSSA = nullptr;
+  DominatorTree *DT = nullptr;
+
+  if (MSSAProvider) {
+    MSSA = MSSAProvider(*const_cast<Function *>(F1));
+  }
+  if (DTProvider) {
+    DT = DTProvider(*const_cast<Function *>(F1));
+  }
+
+  // Create cache key
+  CacheKey Key{F1, MSSAProvider, DTProvider};
+
   // Lazy initialization: build EquivDB for F1 on first query
-  // The cache ensures we only build it once per function
-  auto &Ptr = EquivCache[F1];
+  // The cache ensures we only build it once per function+configuration
+  auto &Ptr = EquivCache[Key];
   if (!Ptr) {
     // Note: const_cast is necessary because EquivDB constructor takes
     // a non-const Function&, but we only have const Function* from
     // getParentFunction. This is safe because EquivDB only reads the IR.
     try {
-      Ptr = std::make_unique<EquivDB>(*const_cast<Function *>(F1));
+      Ptr = std::make_unique<EquivDB>(*const_cast<Function *>(F1), MSSA, DT);
     } catch (...) {
       // If EquivDB construction fails, return false (no must-alias)
       return false;

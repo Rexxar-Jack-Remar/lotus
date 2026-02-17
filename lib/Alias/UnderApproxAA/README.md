@@ -38,11 +38,14 @@ Local, syntactic patterns applied during seeding:
 | 2 | Cast Equivalence | Bitcast or no-op addrspace cast | `%p` and `bitcast %p to i8*` |
 | 3 | Constant Offset GEP | Same base + identical offsets | `GEP(%base, 0, i)` and `GEP(%base, 0, i)` |
 | 4 | Zero GEP | All-zero indices same as base | `GEP(%p, 0, 0)` and `%p` |
+| 4b | Same GEP operands | Same base and identical index operands (SSA) | `GEP(%base, i)` and `GEP(%base, i)` |
 | 5 | Round-Trip Cast | ptr→int→ptr with no arithmetic | `inttoptr(ptrtoint(%p))` and `%p` |
 | 6 | Same Underlying Object | Same alloca/global via casts/GEPs | `bitcast(%alloca)` and `GEP(%alloca, 0)` |
 | 7 | Constant Null | Null pointers in same address space | `null` and `null` |
 | 8 | Trivial PHI | All incoming values are identical | `phi [%p, %bb1], [%p, %bb2]` and `%p` |
 | 9 | Trivial Select | Both branches produce same value | `select %c, %p, %p` and `%p` |
+| 10 | Same Allocation Site | Same malloc/new call | `%p = malloc(); %q = bitcast %p` → `%p ≡ %q` |
+| 11 | Enhanced Round-Trip | ptr→int→ptr with no-op arithmetic | `inttoptr(ptrtoint(%p) + 0)` and `%p` |
 
 ### Semantic Rules (Phase 2)
 Inductive patterns checked during propagation:
@@ -51,16 +54,37 @@ Inductive patterns checked during propagation:
 |------|-------------|---------------|
 | **Closed PHI** | `phi [p₁, bb₁], ..., [pₙ, bbₙ]` where `p₁ ≡ ... ≡ pₙ` | All incoming values unify → PHI equals common class |
 | **Closed Select** | `select cond, pTrue, pFalse` where `pTrue ≡ pFalse` | Both branches unify → Select equals common class |
+| **Closed GEP** | `GEP(base₁, idx...)` and `GEP(base₂, idx...)` where `base₁ ≡ base₂` | When base classes merge and indices are same SSA values → GEPs must alias |
+
+### Extension Rules (Phase 3 - Optional)
+
+| Rule | Description | Requirement |
+|------|-------------|-------------|
+| **Return-Value Forwarding** | Direct call where callee `return arg_i` → call result ≡ arg at call site | Callee has single return of one argument |
+| **Store-Load Forwarding** | `store v, p; load p` → load equals v (pointer stores only) | MemorySSA proves no clobber |
+| **Single-Store Alloca** | One store to alloca dominating all loads → load equals stored value | DominatorTree; pointer stores only |
+| **Path Condition** | `if (p == q)` → p ≡ q in true branch | *Disabled*: would require path-sensitive equivalence (future work) |
 
 ## Query Interface
 
 After construction, query must-alias relationships in **O(α(N))** time:
 
 ```cpp
+// Basic usage
 EquivDB db(function);
 bool result = db.mustAlias(pointerA, pointerB);
 // result = true  → A and B are guaranteed to alias
 // result = false → unknown (may or may not alias)
+
+// With optional analyses (UnderApproxAA interface)
+UnderApproxAA AA(module);
+AA.setMemorySSAProvider([](Function &F) -> MemorySSA* {
+  return &getAnalysis<MemorySSAAnalysis>(F).getMSSA();
+});
+AA.setDominatorTreeProvider([](Function &F) -> DominatorTree* {
+  return &getAnalysis<DominatorTreeAnalysis>(F).getDomTree();
+});
+bool result = AA.mustAlias(pointerA, pointerB);
 ```
 
 ## Adding New Rules
@@ -158,10 +182,27 @@ merge:
 ## Limitations
 
 - **Intra-procedural only**: No reasoning across function boundaries
-- **Stack/global allocations only**: Heap objects from `malloc`/`new` are not tracked
-- **Syntactic patterns**: No deep arithmetic reasoning (e.g., `GEP(p, i)` vs `GEP(p, i+1-1)`)
+- **Allocation tracking**: Tracks same allocation site for heap (malloc/new); other heap patterns limited
+- **Syntactic patterns**: Limited arithmetic reasoning
 - **Conservative**: Under-approximation means we may miss true aliases
-- **Context-insensitive**: No path-sensitive or flow-sensitive reasoning
+- **Context-insensitive**: No path-sensitive reasoning (except via DominatorTree extension)
+
+## Implemented Extensions (Sound)
+
+The following extensions have been implemented while preserving under-approximation:
+
+- **Same Allocation Site**: Pointers from same `malloc`/`new`/`calloc` call are unified
+- **Enhanced Round-Trip**: `inttoptr(ptrtoint(p) + 0)` patterns detected
+- **Store-Load Forwarding**: Via MemorySSA (when provider is set)
+- **Path Condition Refinement**: Via DominatorTree (when provider is set)
+
+## Future Improvement Ideas
+
+Additional sound extensions that could be added:
+
+- **Limited interprocedural**: At call sites, unify `retval` with returned argument for simple return forwarding
+- **Cache invalidation**: Add `invalidateCache(F)` for passes that modify IR
+- **More semantic rules**: Closed GEP (all indices in same class), other inductive patterns
 
 ## Performance
 
