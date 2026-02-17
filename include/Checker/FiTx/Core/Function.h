@@ -1,3 +1,10 @@
+/// \file Function.h
+/// \brief FiTx function representation: CFG (blocks, edges), ordered blocks
+/// for analysis, and return-value tracking for summaries (paper §4.3).
+///
+/// Built by Framework_IR::Analyzer from llvm::Function. Holds basic blocks,
+/// init/return blocks, possible return assignments per block (for return-code
+/// aware propagation), and refcount/lifetime metadata.
 #pragma once
 #include <memory>
 #include <queue>
@@ -10,13 +17,17 @@
 #include "llvm/IR/Function.h"
 
 namespace framework {
+/// Linux kernel error macros: used for return-code aware propagation (paper §4.3).
 const std::vector<std::string> err_functions{"IS_ERR", "PTR_ERR"};
 const std::vector<std::string> refcount_decrement_functions{
     "atomic_dec_and_test", "atomic_dec_and_lock", "refcount_dec_and_test",
     "atomic_dec_return", "atomic_dec_and_lock"};
 
+/// Framework view of an LLVM function: blocks, successors/predecessors,
+/// ordered block list for CFG traversal, and return/refcount metadata.
 class Function {
  public:
+  /// Block -> value that may be returned from that block (for summaries).
   using PossibleReturnAssignmentMap =
       std::map<std::shared_ptr<framework::BasicBlock>,
                std::shared_ptr<framework::Value>>;

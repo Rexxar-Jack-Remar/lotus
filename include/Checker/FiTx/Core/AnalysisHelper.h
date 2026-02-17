@@ -1,3 +1,6 @@
+/// \file AnalysisHelper.h
+/// \brief Helpers for decoding GEP/struct layout and predecessor checks.
+/// Used when creating framework Values (field paths) and during CFG traversal.
 #pragma once
 #include "Checker/FiTx/Core/BasicBlock.h"
 #include "Checker/FiTx/Core/Value.h"

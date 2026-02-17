@@ -1,5 +1,6 @@
-// FiTx framework IR builder: builds CFG and collects return values per block
-// for function summaries and return-code aware state propagation (paper §4.3).
+// FiTx framework IR builder: converts llvm::Function to framework::Function
+// (basic blocks, ordered block list, call/store/load/ret instructions, return
+// assignments). No typestate; that is done by Frontend::Analyzer (paper §4.2, 4.3).
 #include "Checker/FiTx/Framework_IR/Analyzer.h"
 
 #include "Checker/FiTx/Core/AnalysisHelper.h"
@@ -22,8 +23,9 @@
 namespace ir_generator {
 Analyzer::Analyzer() {}
 
-// Build framework IR for one function: basic blocks, call/store/load/ret,
-// ordered blocks for CFG traversal (paper §4.2).
+// Build framework::Function: create blocks, iterate instructions to build
+// CallInst/StoreInst/LoadInst and collect return assignments; set ordered
+// block list for Frontend CFG traversal (paper §4.2).
 void Analyzer::analyze(llvm::Function& function, llvm::LoopInfo& loop_info) {
   framework_function_ = framework::Function::createManagedFunction(
       &function, std::make_unique<llvm::LoopInfo>(std::move(loop_info)));

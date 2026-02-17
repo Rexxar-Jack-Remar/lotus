@@ -1,3 +1,11 @@
+/// \file BasicBlock.h
+/// \brief FiTx per-block analysis state: value typestates, arg summaries,
+/// pending (return-code aware) propagation, and may-alias (paper §4.2, 4.3).
+///
+/// BasicBlockInformation holds value_states_ (value -> TransitionLogs),
+/// arg_value_states_ (per-arg summaries for callee application), pending_values_
+/// per successor (for return-code aware merge), and alias_info_ (store-based
+/// may-alias; not merged across predecessors).
 #pragma once
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -45,7 +53,8 @@
 
 namespace framework {
 
-/// Per-state transition history for one value at one arg index (used in ArgValueStates).
+/// Per-state transition history for one value at one argument index; used to
+/// build and apply callee summaries (paper §4.3).
 /// Tracks which transitions were applied so we can propagate the right state to callers.
 class ArgTransitions {
 public:
@@ -67,8 +76,9 @@ private:
   std::map<framework::State, TransitionLogs> transition_per_state_;
 };
 
-/// Callee summary: for each argument index, map (value, transitions) that may
-/// flow from that arg. Used when applying callee summary to caller (paper §4.3).
+/// Per-argument typestate summary: for each arg index, value -> ArgTransitions
+/// (state -> TransitionLogs). Used to apply callee summary at call sites
+/// (paper §4.3) and for return-code aware propagation.
 class ArgValueStates {
 public:
   ArgValueStates();
@@ -113,8 +123,9 @@ private:
   const std::set<State> states_;
 };
 
-/// Per-block map: value -> TransitionLogs (current state + transition history).
-/// Used to merge from predecessors and apply transitions (paper §4.2).
+/// Per-block map: value -> TransitionLogs (current typestate + transition
+/// history). Merged from predecessors in createBasicBlockInfo; updated when
+/// applying transitions (paper §4.2).
 class BasicBlockValueStates {
 public:
   BasicBlockValueStates() = default;
@@ -157,10 +168,10 @@ private:
   std::map<std::shared_ptr<framework::Value>, TransitionLogs> value_states_;
 };
 
-/// Analysis state for one basic block: value states, arg value states (for
-/// summary), pending values (return-code aware: per successor block we store
-/// pending arg states and return value), and return_values_ (possible return
-/// values from this block for building function summary; paper §4.3).
+/// All analysis state for one basic block: value_states_ (typestate per value),
+/// arg_value_states_ (per-arg summary), pending_values_ (per successor for
+/// return-code aware propagation), return_values_, and alias_info_ (store-based
+/// may-alias; recorded and used during analysis, not merged across preds).
 class BasicBlockInformation {
 public:
   constexpr static int kMaxTimeToLive = 5;

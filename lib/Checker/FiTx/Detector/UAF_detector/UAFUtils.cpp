@@ -1,7 +1,10 @@
+// UAF typestate definition: init, free, BUG (use-after-free). Transitions:
+// init -> free on call to free_funcs; free -> BUG on use (load); free -> init on store ANY.
 #include "Checker/FiTx/Detector/UAF_Detector.h"
 #include "Checker/FiTx/Frontend/State.h"
 
 namespace UseAfterFree {
+/// Suppresses propagation on calls whose name contains "put" (refcount helpers).
 class OneshotCallConstraint : public framework::StatefulConstraint {
  public:
 virtual ~OneshotCallConstraint() = default;
@@ -22,15 +25,16 @@ virtual ~OneshotCallConstraint() = default;
 };
 
 void defineStates(framework::StateManager& manager) {
-  // Create States
   framework::State& init = manager.getInitState();
 
-  auto store_args = framework::StateArgs("free");
-  framework::State& free = manager.createState(store_args);
+  framework::State& free = manager.createState(
+      framework::StateArgs("free"));
 
+  // init -> free when pointer is passed to free_funcs (e.g. kfree).
   auto free_func_rule = framework::FunctionArgTransitionRule(free_funcs);
   manager.addTransition(init, free, free_func_rule);
 
+  // free -> BUG (use-after-free) on load (UseValueTransitionRule).
   auto ubi_args =
       framework::StateArgs("Used", framework::StateType::BUG,
                            framework::BugNotificationTiming::IMMEDIATE, false);

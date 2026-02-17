@@ -1,3 +1,11 @@
+/// \file Function.h
+/// \brief FiTx per-function analysis state: per-block info, return-code
+/// mapping, value collection, and alias (paper §4.2, 4.3).
+///
+/// FunctionInformation is created when a function is first analyzed; it holds
+/// basic_block_info_ (per-block typestate and alias), return_info_ (return
+/// code -> blocks for return-code aware propagation), and value_collection_
+/// (all values in the function for getRelatedValues).
 #pragma once
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -43,11 +51,9 @@
 
 namespace framework {
 
-/// Per-function analysis summary (paper §4.3).
-/// Holds: (1) basic_block_info_ = per-block value states and arg value states,
-/// (2) return_info_ = map return_code -> set of blocks that return that code
-/// (for return-code aware propagation at call sites), (3) value_collection_ for
-/// related-value / parent-value lookup, (4) success/error blocks for summary application.
+/// Per-function analysis summary: per-block state, return_info_ (return code ->
+/// blocks), value_collection_, and alias_info_. Built during analyzeFunction();
+/// used for merge and call-site summary application (paper §4.3).
 class FunctionInformation {
 public:
   using WeakBasicBlockSet =

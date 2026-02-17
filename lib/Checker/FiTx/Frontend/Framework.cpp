@@ -87,14 +87,14 @@ void FrameworkPass::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
   AU.addRequired<ir_generator::IRGenerator>();
 }
 
-// Main entry: define typestate checkers (defineStates) and run CFG-based
-// typestate analysis with return-code aware propagation (paper §4.2, 4.3).
+// Entry: each subclass overrides defineStates() to register StateManagers;
+// we create one Analyzer per manager and run analyze() (CFG, typestate, summaries).
 bool FrameworkPass::runOnModule(llvm::Module &M) {
   std::chrono::system_clock::time_point start, end;
   LoggingServer server;
 
   start = std::chrono::system_clock::now();
-  defineStates();
+  defineStates();  // Detectors (UAF, Leak, etc.) add StateManagers here.
 
   // Create analyzers and spawn threads
   std::vector<AnalyzerInfo> analyzers;

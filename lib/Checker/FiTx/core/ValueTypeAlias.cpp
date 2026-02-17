@@ -1,3 +1,5 @@
+// ValueTypeAlias: instruction -> operands and store–call alias mapping.
+// Main typestate alias is in AliasValues (store-based, per block).
 #include "Checker/FiTx/Core/ValueTypeAlias.h"
 
 #include <memory>

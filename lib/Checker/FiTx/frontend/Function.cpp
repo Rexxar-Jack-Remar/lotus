@@ -84,6 +84,7 @@ FunctionInformation::createBasicBlockInfo(
   if (basic_block->isCleanupBlock()) return current_block_info;
 
   bool return_value_assigned = !current_block_info->ReturnValues().empty();
+  // Merge typestate and arg summaries from all predecessors (paper §4.2).
   for (auto pred_reference : basic_block->Predecessors()) {
     if (auto preds = pred_reference.lock()) {
       if (!basicBlockInfoExists(preds)) {
@@ -183,6 +184,7 @@ FunctionInformation::createBasicBlockInfo(
         /* } */
         /* generateWarning("---"); */
 
+        // Alias info is not merged across predecessors (intra-block only).
         // TODO: Experimental: Enable when in use
         /* current_block_info->getAliasValues().addAlias( */
         /*     pred_block_info->getAliasValues()); */

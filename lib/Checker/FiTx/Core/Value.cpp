@@ -312,6 +312,8 @@ bool ValueCollection::exists(std::shared_ptr<Value> value) {
   return values_.find(value) != values_.end();
 }
 
+// Same base LLVM value and compatible field path (same or more specific);
+// used to apply store/branch transitions to all SSA/field variants (paper §3).
 std::set<std::shared_ptr<Value>> ValueCollection::getRelatedValues(
     std::shared_ptr<Value> value) const {
   std::set<std::shared_ptr<Value>> related_values;
@@ -352,8 +354,9 @@ std::set<std::shared_ptr<Value>> ValueCollection::getParentValues(
 
 AliasValues::AliasValues() : alias_size_(0) {}
 
+// Record may-alias: both directions so getAliasInfo works for either value.
 void AliasValues::addAlias(std::shared_ptr<framework::Value> src,
-                           std::shared_ptr<framework::Value> target) {
+                            std::shared_ptr<framework::Value> target) {
   if (alias_info_[src].add(target)) {
     updated_values_.push_back(src);
     alias_size_++;

@@ -1,3 +1,7 @@
+/// \file ValueTypeAlias.h
+/// \brief Instruction-level alias mapping: instruction -> operands and
+/// store–call alias (which store feeds a call). Used for type/operand tracking;
+/// main typestate alias propagation uses AliasValues (store-based, per block).
 #pragma once
 #include <vector>
 
@@ -17,6 +21,7 @@ struct FunctionSigniture {
   std::vector<llvm::Type*> argument_type;
 };
 
+/// Operand list for a framework instruction (used by ValueTypeAlias).
 class Operands {
  public:
   Operands() = default;
@@ -36,6 +41,9 @@ class Operands {
   std::vector<std::shared_ptr<std::shared_ptr<framework::Value>>> values_;
 };
 
+/// Maps instructions to operand values and store–call alias (which store
+/// result is consumed by a call). Separate from AliasValues (store-based
+/// may-alias used by the typestate analyzer).
 class ValueTypeAlias {
  public:
   ValueTypeAlias();

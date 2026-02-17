@@ -58,8 +58,10 @@ class TransitionRule {
   TransitionTrigger trigger_;
 };
 
+/// Transition on "call F with argument i" (e.g. kfree(ptr) -> free; paper Table 5).
 class FunctionArgTransitionRule : public TransitionRule {
  public:
+  /// (function name, argument index); consider_parent for field-related values.
   struct FunctionArg {
     FunctionArg(std::string name, unsigned int index = 0,
                 bool consider_parent = false)
@@ -92,15 +94,18 @@ class FunctionArgTransitionRule : public TransitionRule {
   /* std::vector<std::string> function_names_; */
 };
 
+/// Transition on store: what is stored (NULL, non-null, any, or result of
+/// specific call); paper Table 5 (Store NULL/NON/ANY/CALL_FUNC).
 class StoreValueTransitionRule : public TransitionRule {
  public:
   static constexpr int kNullBranchOffset = 4;
   enum StoreValueType {
-    NULL_VAL,
-    NON_NULL_VAL,
-    ANY,
-    CALL_FUNC,
-    // The latter Values are special instances of Branch Considered Store Insts
+    NULL_VAL,      /// Store null into pointer.
+    NON_NULL_VAL,  /// Store non-null value.
+    ANY,           /// Store unknown value.
+    CALL_FUNC,     /// Store result of named function (e.g. malloc).
+    // Branch-dependent store types: used when block is reached via branch on
+    // null (e.g. ptr == NULL on true path -> NULL_BRANCH_CONSIDERED_NULL).
     // Developers should not used these fields unless they really know what they
     // are doing.
     // TODO: Set this to a different place, or make a new rule out of this
@@ -127,11 +132,14 @@ class StoreValueTransitionRule : public TransitionRule {
   StoreValueType type_;
 };
 
+/// Transition on load (use of pointer); e.g. UAF: free -> BUG on use (paper Table 5).
 class UseValueTransitionRule : public TransitionRule {
  public:
   UseValueTransitionRule();
 };
 
+/// Transition on store-based may-alias (ptr = value_operand); applied to all
+/// values that may alias the pointer (paper Table 5: Alias).
 class AliasValueTransitionRule : public TransitionRule {
  public:
   AliasValueTransitionRule();

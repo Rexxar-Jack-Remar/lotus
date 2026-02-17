@@ -71,6 +71,9 @@ BasicBlockInformation::BasicBlockInformation(const BasicBlockInformation &info)
   /* value_states_ = info.value_states_; */
 }
 
+// Apply transitions to value (and optionally its alias set). Caller (Analyzer)
+// already expands to related + aliased values before calling; here we only
+// apply to the single value (per-block alias expansion is done in Analyzer).
 bool BasicBlockInformation::changeValueState(
     std::vector<Transition> &transitions,
     std::shared_ptr<framework::Value> value,
@@ -81,7 +84,7 @@ bool BasicBlockInformation::changeValueState(
 
   /* if (auto collection = getAliasInfoForValue(value)) */
   /*   aliased_value.insert(aliased_value.end(), collection->Values().begin(),
-   */
+ */
   /*                        collection->Values().end()); */
 
   for (auto alias : aliased_value) {

@@ -331,6 +331,8 @@ void StateTransitionManager::addTransitionRule(Transition& transition,
       break;
     }
     case TransitionTrigger::ALIASED_VALUE: {
+      // Alias transitions: applied when ptr = value_operand (store); propagates
+      // typestate to all may-aliased values (paper Table 5: Alias).
       auto alias_value_transition = std::make_shared<AliasValueTransitionRule>(
           *static_cast<AliasValueTransitionRule*>(&arg));
       registerAliasTransition(alias_value_transition, transition);

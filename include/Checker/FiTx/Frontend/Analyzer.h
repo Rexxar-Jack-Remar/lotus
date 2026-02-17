@@ -95,6 +95,7 @@ public:
   std::shared_ptr<FunctionInformation>
   getFunctionInformation(std::shared_ptr<framework::Function> function);
 
+  /// Record store-based may-alias and apply alias transitions (paper §3).
   void checkAlias(std::shared_ptr<framework::StoreInst> store_inst);
 
 private:
@@ -102,12 +103,15 @@ private:
   framework::StateManager &state_manager_;
   framework::LoggingClient &log_;
 
+  /// Call stack for current analysis (bottom-up summary; paper §4.3).
   std::stack<std::shared_ptr<framework::Function>> analyzing_function_;
 
+  /// Per-function analysis state (block info, return_info_, value_collection_).
   std::map<std::shared_ptr<framework::Function>,
            std::shared_ptr<FunctionInformation>>
       function_info_;
 
+  /// Current block being analyzed (set in analyzeFunction).
   std::shared_ptr<framework::BasicBlockInformation> bb_info_;
 };
 } // namespace framework

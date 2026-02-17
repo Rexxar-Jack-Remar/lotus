@@ -405,8 +405,9 @@ void Analyzer::analyzeStoreInst(std::shared_ptr<framework::Instruction> I) {
   checkAlias(store_inst);  // Record ptr = value_operand and apply alias transitions.
 }
 
-// Record alias (pointer_operand = value_operand) and apply alias transitions
-// to all values that may alias the pointer (paper: intra-procedural alias only).
+// Record may-alias (pointer_operand = value_operand) in current block's
+// AliasValues, then apply alias transitions to pointer + related + aliased
+// values. Alias is intra-procedural and built during analysis (paper §3).
 void Analyzer::checkAlias(std::shared_ptr<framework::StoreInst> store_inst) {
   auto value_operand = store_inst->ValueOperand();
 

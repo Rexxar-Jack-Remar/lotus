@@ -1,3 +1,5 @@
+// FiTx IR builder: one FunctionPass per LLVM function; builds framework IR
+// (CFG + instructions) and stores in framework_ir_[Module]. Required by FrameworkPass.
 #include "Checker/FiTx/Framework_IR/IRGenerator.h"
 
 #include "Checker/FiTx/Core/Utils.h"
@@ -15,7 +17,8 @@ void IRGenerator::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
   AU.addRequired<llvm::LoopInfoWrapperPass>();
 }
 
-/*** Main Modular ***/
+// Build framework::Function for F (blocks, ordered blocks, instructions) and
+// register in framework_ir_[F.getParent()] for the typestate Analyzer.
 bool IRGenerator::runOnFunction(llvm::Function &F) {
   auto &loop_info = getAnalysis<llvm::LoopInfoWrapperPass>().getLoopInfo();
 

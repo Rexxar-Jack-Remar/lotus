@@ -1,3 +1,10 @@
+/// \file IRGenerator.h
+/// \brief FiTx IR builder pass: builds framework IR (CFG + instructions) from
+/// LLVM per function; runs before FrameworkPass (paper §4: FiTx pipeline).
+///
+/// IRGenerator::runOnFunction calls Analyzer::analyze to build framework::Function
+/// (blocks, ordered block list, call/store/load/ret). framework_ir_ maps
+/// llvm::Module -> set of framework::Function for the Frontend Analyzer.
 #pragma once
 #include "Checker/FiTx/Framework_IR/Analyzer.h"
 #include "llvm/IR/Function.h"
@@ -8,6 +15,8 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
 namespace ir_generator {
+/// LLVM FunctionPass that builds framework IR (framework::Function with blocks
+/// and instructions) for each LLVM function. Required by FrameworkPass.
 class IRGenerator : public llvm::FunctionPass {
  public:
   IRGenerator();

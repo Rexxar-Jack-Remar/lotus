@@ -1,3 +1,10 @@
+/// \file Instruction.h
+/// \brief FiTx instruction representation: wraps LLVM instructions with
+/// framework metadata (debug loc, parent block) for typestate analysis.
+///
+/// Instruction extends Value so that call/store/load results can be tracked
+/// as typestate values. Used by the Frontend Analyzer to apply transitions
+/// (paper Table 5: Fun Arg, Store, Use, Alias).
 #pragma once
 #include "Checker/FiTx/Core/Casting.h"
 #include "Checker/FiTx/Core/Value.h"
@@ -9,6 +16,8 @@
 namespace framework {
 // TODO: Remove this if possible
 class BasicBlock;
+/// Wrapper around llvm::Instruction with line/column and parent block for
+/// reporting and CFG-aware typestate propagation.
 class Instruction : public Value {
  public:
   static std::shared_ptr<Instruction> Create(std::shared_ptr<Instruction> inst,

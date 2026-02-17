@@ -247,6 +247,8 @@ public:
 
   std::vector<framework::Transition> getUseValueTransitions();
 
+  /// Transitions triggered when ptr = value_operand (store); applied to all
+  /// may-aliased values (paper Table 5: Alias).
   std::vector<framework::Transition> getAliasTransitions();
 
 private:
