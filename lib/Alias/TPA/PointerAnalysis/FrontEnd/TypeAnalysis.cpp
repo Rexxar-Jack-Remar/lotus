@@ -58,17 +58,17 @@ void TypeMapBuilder::insertTypeMap(Type *type, size_t size,
 size_t TypeMapBuilder::getTypeSize(Type *type, const DataLayout &dataLayout) {
   if (isa<FunctionType>(type))
     return dataLayout.getPointerSize();
-  else {
-    // If it's an array of array of ..., get the innermost element type
-    // Wait, type->getTypeAllocSize works for arrays.
-    // Why manual drilling? Maybe to avoid issues with empty arrays?
-    // Actually this logic looks odd. `getTypeAllocSize` handles nested arrays.
-    // But maybe for `[0 x i8]` etc.?
-    // Let's stick to the logic: iterate array types until non-array.
-    while (auto *arrayType = dyn_cast<ArrayType>(type))
-      type = arrayType->getElementType();
-    return dataLayout.getTypeAllocSize(type);
-  }
+  // Bug fix: the previous implementation drilled down through nested ArrayTypes
+  // to the innermost element type and returned its size, ignoring all array
+  // dimensions. For example, [4 x [3 x i32]] would return sizeof(i32)=4 instead
+  // of the correct 48 bytes. This caused TypeLayout sizes to be wrong for nested
+  // arrays, making offsetMemory() incorrectly return Universal for valid
+  // in-bounds accesses.
+  //
+  // Zero-element arrays ([0 x T]) have an alloc size of 0 from DataLayout, which
+  // is correct for our purposes (they model flexible array members; the memory
+  // model treats them as byte arrays anyway via the opaque-type path above).
+  return dataLayout.getTypeAllocSize(type);
 }
 
 void TypeMapBuilder::buildTypeMap() {

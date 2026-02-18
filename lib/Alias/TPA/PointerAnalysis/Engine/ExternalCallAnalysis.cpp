@@ -52,26 +52,66 @@ static const Value *getArgument(const CallCFGNode &callNode,
 }
 
 // Heuristic to determine the type of memory allocated by a malloc-like call.
-// Looks at the uses of the call instruction (specifically BitCasts) to infer the intended type.
+// Looks at the uses of the call instruction (specifically BitCasts) to infer
+// the intended type.
+//
+// Bug fix (2i): the previous implementation only examined *direct* users of
+// the call instruction. A common pattern after optimization passes is:
+//
+//   %p = call i8* @malloc(...)
+//   store i8* %p, i8** %slot          ; direct store — no bitcast visible
+//   %q = load SomeType** %slot        ; cast happens at the load site
+//   %r = bitcast i8* %p to SomeType*  ; or: bitcast is in a different BB
+//
+// In such cases the direct-user scan found no BitCastInst and fell back to
+// byte-array layout, losing type precision.
+//
+// Improvement: after scanning direct users, if no unique BitCast type was
+// found, also scan users of any StoreInst that stores the malloc result, and
+// look at the corresponding load sites for BitCasts. This covers the most
+// common indirect pattern without a full def-use traversal.
 static Type *getMallocType(const Instruction *callInst) {
   assert(callInst != nullptr);
 
+  // Helper: given a pointer value, collect all BitCast destination types seen
+  // among its direct users.
+  auto collectBitCastTypes = [](const Value *val,
+                                size_t &numBitCasts,
+                                size_t &numOther,
+                                PointerType *&lastBCType) {
+    for (const auto *user : val->users()) {
+      if (const auto *bcInst = dyn_cast<BitCastInst>(user)) {
+        lastBCType = cast<PointerType>(bcInst->getDestTy());
+        numBitCasts++;
+      } else if (isa<GetElementPtrInst>(user)) {
+        numOther++;
+      }
+    }
+  };
+
   PointerType *mallocType = nullptr;
-  // Bug fix: count BitCast uses and GEP uses separately.
-  // Previously both incremented the same counter, so a single GEP user (with
-  // no BitCast user) would set numOfBitCastUses=1 while mallocType remained
-  // nullptr, causing the function to fall through to the numOfBitCastUses==0
-  // branch and call getNonOpaquePointerElementType() on the malloc return type
-  // (i8*), silently producing a byte-array layout instead of the intended type.
   size_t numOfBitCastUses = 0;
   size_t numOfOtherUses = 0;
 
-  for (const auto *user : callInst->users()) {
-    if (const auto *bcInst = dyn_cast<BitCastInst>(user)) {
-      mallocType = cast<PointerType>(bcInst->getDestTy());
-      numOfBitCastUses++;
-    } else if (isa<GetElementPtrInst>(user)) {
-      numOfOtherUses++;
+  // Phase 1: scan direct users of the call instruction.
+  collectBitCastTypes(callInst, numOfBitCastUses, numOfOtherUses, mallocType);
+
+  // Phase 2: if no unique BitCast found yet, look through store→load chains.
+  // This handles the pattern where the malloc result is stored to a local slot
+  // and then loaded (possibly with a different type) elsewhere.
+  if (numOfBitCastUses == 0) {
+    for (const auto *user : callInst->users()) {
+      if (const auto *stInst = dyn_cast<StoreInst>(user)) {
+        // The malloc result is stored into a memory slot. Look at all loads
+        // from that slot and check their users for BitCasts.
+        const auto *slot = stInst->getPointerOperand();
+        for (const auto *slotUser : slot->users()) {
+          if (const auto *ldInst = dyn_cast<LoadInst>(slotUser)) {
+            collectBitCastTypes(ldInst, numOfBitCastUses, numOfOtherUses,
+                                mallocType);
+          }
+        }
+      }
     }
   }
 
@@ -285,7 +325,12 @@ void TransferFunction::evalExternalCopyDest(const context::Context *ctx,
         ctx, getArgument(callNode, dest.getPosition()));
     switch (dest.getType()) {
     case CopyDest::DestType::Value: {
-      // Destination is a pointer variable (e.g., p = ...)
+      // Destination is a pointer variable (e.g., p = ...).
+      // Bug fix: always propagate mem-level successors regardless of whether
+      // the env changed. Previously, if envChanged was false (no new pts-to
+      // info for the destination), neither top-level nor mem-level successors
+      // were added for this branch, silently dropping the call node's
+      // successors. The store is unchanged here, so we pass *localState.
       envChanged = globalState.getEnv().weakUpdate(dstPtr, srcSet);
       addMemLevelSuccessors(ProgramPoint(ctx, &callNode), *localState,
                             evalResult);
@@ -294,8 +339,13 @@ void TransferFunction::evalExternalCopyDest(const context::Context *ctx,
     case CopyDest::DestType::DirectMemory: {
       // Destination is memory pointed to by argument (e.g., *p = ...)
       auto dstSet = globalState.getEnv().lookup(dstPtr);
-      if (dstSet.empty())
+      if (dstSet.empty()) {
+        // Destination not yet resolved; still propagate the unmodified store
+        // so mem-level successors are not silently dropped.
+        addMemLevelSuccessors(ProgramPoint(ctx, &callNode), *localState,
+                              evalResult);
         return;
+      }
 
       auto &store = evalResult.getNewStore(*localState);
       weakUpdateStore(dstSet, srcSet, store);
@@ -333,8 +383,14 @@ void TransferFunction::evalExternalCopy(const context::Context *ctx,
     auto storeChanged =
         evalMemcpy(ctx, callNode, store, dest.getPosition(), src.getPosition());
 
-    if (storeChanged)
-      addMemLevelSuccessors(ProgramPoint(ctx, &callNode), store, evalResult);
+    // Fix #4: Always propagate mem-level successors regardless of whether
+    // evalMemcpy reported a store change. If storeChanged is false (e.g.,
+    // because the source/dest sets are not yet resolved), we still need to
+    // propagate the current store so that the call node's successors are not
+    // silently dropped. When the src/dst sets are resolved later, the call
+    // node will be re-evaluated and the store will be updated then.
+    addMemLevelSuccessors(ProgramPoint(ctx, &callNode),
+                          storeChanged ? store : *localState, evalResult);
   } else {
     // General case: src is Value/DirectMemory/etc.
     auto srcSet = evalExternalCopySource(ctx, callNode, src);

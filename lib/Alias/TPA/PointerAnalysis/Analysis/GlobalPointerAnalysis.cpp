@@ -21,6 +21,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Operator.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
@@ -35,18 +36,33 @@ static bool isScalarNonPointerType(const Type *type) {
 }
 
 // Calculates the byte offset for a sequence of GEP indices.
-// Traverses struct layouts and array sizes to compute the static offset.
+//
+// Fix #1: Removed use of the deprecated getPointerElementType() API (removed
+// in LLVM 17 with opaque pointers). The pointer-arithmetic branch now requires
+// the caller to pass the pointee type explicitly via `baseType`.
+//
+// Fix #2: The caller (processConstantGEP) previously passed
+// `baseVal->getType()` (a pointer type, e.g. `i32*`) instead of the pointee
+// type (`i32`). The function now takes the *pointee* type directly, so the
+// first index correctly indexes into the pointed-to aggregate rather than
+// hitting the pointer-arithmetic fallback.
+//
+// Parameters:
+//   dataLayout  - module data layout
+//   pointeeType - the type that the base pointer points TO (not the pointer
+//                 type itself)
+//   indexes     - GEP index operands (excluding the base pointer operand)
 static unsigned calculateIndexedOffset(const DataLayout &dataLayout,
-                                       Type *baseType,
+                                       Type *pointeeType,
                                        ArrayRef<Value *> indexes) {
   unsigned offset = 0;
-  Type *currentType = baseType;
+  Type *currentType = pointeeType;
 
   for (const auto *idxIt = indexes.begin(); idxIt != indexes.end(); ++idxIt) {
     Value *idxVal = *idxIt;
 
     if (auto *ci = dyn_cast<ConstantInt>(idxVal)) {
-      unsigned fieldIdx = ci->getZExtValue();
+      uint64_t fieldIdx = ci->getZExtValue();
 
       if (auto *structTy = dyn_cast<StructType>(currentType)) {
         // Handle struct member access
@@ -56,24 +72,37 @@ static unsigned calculateIndexedOffset(const DataLayout &dataLayout,
       } else if (auto *arrayTy = dyn_cast<ArrayType>(currentType)) {
         // Handle array element access
         Type *elemType = arrayTy->getElementType();
-        unsigned elemSize = dataLayout.getTypeAllocSize(elemType);
+        uint64_t elemSize = dataLayout.getTypeAllocSize(elemType);
         offset += fieldIdx * elemSize;
         currentType = elemType;
       } else if (auto *vecTy = dyn_cast<VectorType>(currentType)) {
         // Handle vector element access
         Type *elemType = vecTy->getElementType();
-        unsigned elemSize = dataLayout.getTypeAllocSize(elemType);
+        uint64_t elemSize = dataLayout.getTypeAllocSize(elemType);
         offset += fieldIdx * elemSize;
         currentType = elemType;
       } else {
-        // Handle pointer arithmetic (treated as array access)
-        Type *elemType = currentType->getPointerElementType();
-        unsigned elemSize = dataLayout.getTypeAllocSize(elemType);
-        offset += fieldIdx * elemSize;
-        currentType = elemType;
+        // Pointer arithmetic: the current type is a pointer; the index steps
+        // over elements of the pointee type.
+        // Fix #1: We no longer call getPointerElementType() here. Instead we
+        // rely on the fact that for a well-formed constant GEP the first index
+        // always steps over the base pointee type, which is passed in as
+        // `pointeeType` and is already set as `currentType` on the first
+        // iteration. Subsequent iterations should never reach this branch for
+        // a valid GEP (they will always be struct/array/vector). If we do
+        // reach here for a later index it means the IR is unusual; treat the
+        // offset as unknown (0) and stop.
+        LOG_WARN("calculateIndexedOffset: unexpected pointer type at index {}; "
+                 "treating remaining offset as 0",
+                 static_cast<unsigned>(idxIt - indexes.begin()));
+        break;
       }
     } else {
-      llvm_unreachable("Non-constant index in constant GEP!");
+      // Non-constant index in a constant GEP — should not happen for a
+      // ConstantExpr GEP, but handle gracefully instead of crashing.
+      LOG_WARN("calculateIndexedOffset: non-constant index in constant GEP; "
+               "treating remaining offset as 0");
+      break;
     }
   }
 
@@ -164,13 +193,35 @@ GlobalPointerAnalysis::processConstantGEP(const llvm::ConstantExpr *cexpr,
   auto *baseVal = cexpr->getOperand(0);
   auto indexes = llvm::SmallVector<llvm::Value *, 4>(cexpr->op_begin() + 1,
                                                      cexpr->op_end());
-  unsigned offset =
-      calculateIndexedOffset(dataLayout, baseVal->getType(), indexes);
+
+  // Fix #2: Pass the *pointee* type (source element type of the GEP), not the
+  // pointer type of the base operand. Previously `baseVal->getType()` was
+  // passed, which is a pointer type (e.g. `i32*`). calculateIndexedOffset
+  // expects the type being indexed into (e.g. `i32` or a struct type).
+  //
+  // getSourceElementType() is defined on GEPOperator (llvm/IR/Operator.h),
+  // which ConstantExpr with a GEP opcode inherits from.  We must cast to
+  // GEPOperator to access it — ConstantExpr itself does not expose the method
+  // directly in LLVM 14.
+  const auto *gepOp = cast<GEPOperator>(cexpr);
+  Type *sourceElemType = gepOp->getSourceElementType();
+  unsigned offset = calculateIndexedOffset(dataLayout, sourceElemType, indexes);
 
   // The loop is written for bitcast handling and nested constant expressions
   while (true) {
     if (auto *gVar = dyn_cast<GlobalVariable>(baseVal)) {
       return std::make_pair(gVar, offset);
+    } else if (auto *ga = dyn_cast<GlobalAlias>(baseVal)) {
+      // GlobalAlias is a valid LLVM construct (e.g., @foo = alias i32*,
+      // i32* @bar). Resolve the alias to its aliasee and continue the loop.
+      // If the aliasee is not a GlobalVariable (e.g., it is itself an alias
+      // chain or a function), we conservatively return nullptr (unknown base)
+      // to avoid infinite loops.
+      auto *aliasee = const_cast<Constant *>(ga->getAliasee());
+      if (aliasee == nullptr)
+        return std::make_pair(nullptr, 0);
+      baseVal = aliasee;
+      // Continue loop to resolve the aliasee.
     } else if (auto *ce = dyn_cast<ConstantExpr>(baseVal)) {
       switch (ce->getOpcode()) {
       case Instruction::GetElementPtr: {
@@ -197,12 +248,14 @@ GlobalPointerAnalysis::processConstantGEP(const llvm::ConstantExpr *cexpr,
       }
       }
     } else {
+      // Unknown base (e.g., a function, BlockAddress, or other constant).
+      // Conservatively treat as unknown rather than crashing.
       std::string baseValStr;
       raw_string_ostream baseValOS(baseValStr);
       baseValOS << *baseVal;
       baseValOS.flush();
-      LOG_ERROR("Unknown constant gep base: {}", baseValStr);
-      llvm_unreachable("Unknown constant gep base!");
+      LOG_WARN("Unknown constant GEP base (treating as universal): {}", baseValStr);
+      return std::make_pair(nullptr, 0);
     }
   }
 }
@@ -245,7 +298,6 @@ void GlobalPointerAnalysis::processGlobalScalarInitializer(
       // By default, clang won't generate global pointer arithmetic as
       // ptrtoint+inttoptr, so we will do the simplest thing here: treat as universal
       envStore.second.insert(gObj, MemoryManager::getUniversalObject());
-
       break;
     }
     case Instruction::BitCast: {
@@ -370,7 +422,7 @@ std::pair<Env, Store> GlobalPointerAnalysis::runOnModule(const Module &module) {
   // may refer to another global value defined "below" it.
   unsigned numGlobals = module.getGlobalList().size();
   unsigned numFunctions = module.getFunctionList().size();
-  LOG_INFO("  Creating {} global variables and {} function pointers...", 
+  LOG_INFO("  Creating {} global variables and {} function pointers...",
            numGlobals, numFunctions);
   createGlobalVariables(module, envStore.first);
   createFunctions(module, envStore.first);

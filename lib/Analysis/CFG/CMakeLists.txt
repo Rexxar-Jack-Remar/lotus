@@ -1,5 +1,6 @@
 set(CanaryCFG_SOURCES
   CFGReachability.cpp
+  CodeMetrics.cpp
   Dominator.cpp
   DominatorForest.cpp
   DominatorNode.cpp

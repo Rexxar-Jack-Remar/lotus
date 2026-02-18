@@ -37,15 +37,27 @@ MemoryManager::MemoryManager(size_t pSize)
 
 // Internal factory for MemoryObjects.
 // Interns the object in `objSet` to ensure pointer uniqueness.
+// Fix #8: Also maintains the blockToObjects index so that
+// getReachableMemoryObjects() can look up objects by block in O(k) time
+// instead of scanning all objects in O(n).
 const MemoryObject *MemoryManager::getMemoryObject(const MemoryBlock *memBlock,
                                                    size_t offset,
                                                    bool summary) const {
   assert(memBlock != nullptr);
 
   auto obj = MemoryObject(memBlock, offset, summary);
-  auto itr = objSet.insert(obj).first;
+  // C++14-compatible: use std::pair instead of structured binding.
+  auto insertResult = objSet.insert(obj);
+  auto itr = insertResult.first;
+  bool inserted = insertResult.second;
   assert(itr->isSummaryObject() == summary);
-  return &*itr;
+  const MemoryObject *result = &*itr;
+
+  // Populate the block→objects index for newly interned objects.
+  if (inserted)
+    blockToObjects[memBlock].push_back(result);
+
+  return result;
 }
 
 // Internal factory for MemoryBlocks.
@@ -193,28 +205,21 @@ MemoryManager::getReachablePointerObjects(const MemoryObject *obj,
 
 // Returns all abstract memory objects that belong to the same MemoryBlock
 // as 'obj' and are currently instantiated in the manager.
+//
+// Fix #8: Use the blockToObjects index (populated in getMemoryObject) to
+// look up objects by block in O(k) time instead of scanning all objects in
+// O(n). This is a significant performance improvement for large programs
+// where the total number of memory objects can be in the millions.
 std::vector<const MemoryObject *>
 MemoryManager::getReachableMemoryObjects(const MemoryObject *obj) const {
-  auto ret = std::vector<const MemoryObject *>();
+  if (obj->isSpecialObject())
+    return {obj};
 
-  if (obj->isSpecialObject()) {
-    ret.push_back(obj);
-  } else {
-    const auto *block = obj->getMemoryBlock();
-    // Bug fix: the previous implementation relied on the implicit assumption
-    // that all MemoryObjects belonging to the same MemoryBlock are contiguous
-    // in objSet (i.e., that MemoryObject's comparison operator groups by block
-    // first). This is fragile and may silently return incomplete results if the
-    // ordering changes. Instead, do an explicit linear scan over all objects in
-    // objSet and collect those that belong to the same block. This is correct
-    // regardless of the ordering of MemoryObject.
-    for (const auto &candidate : objSet) {
-      if (candidate.getMemoryBlock() == block)
-        ret.push_back(&candidate);
-    }
-  }
-
-  return ret;
+  const auto *block = obj->getMemoryBlock();
+  auto itr = blockToObjects.find(block);
+  if (itr == blockToObjects.end())
+    return {};
+  return itr->second;
 }
 
 } // namespace tpa

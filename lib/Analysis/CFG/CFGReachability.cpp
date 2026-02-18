@@ -3,9 +3,8 @@
 
 using namespace llvm;
 
-// Fix #2: Constructor now initialises ReachableMatrix (std::vector<BitVector>)
-// instead of allocating a raw array with new[].  No destructor needed.
-CFGReachability::CFGReachability(Function *F) : AnalyzedVec(F->size(), false) {
+CFGReachability::CFGReachability(Function *F)
+    : AnalyzedFunction(F), AnalyzedVec(F->size(), false) {
   unsigned Idx = 0;
   for (auto &B : *F) {
     ID2BB.push_back(&B);
@@ -22,11 +21,22 @@ bool CFGReachability::reachable(BasicBlock *From, BasicBlock *To) {
   if (From == To)
     return true;
 
-  assert(BB2ID.count(To) && BB2ID.count(From));
+  // Bug 1 fix: validate that both blocks still belong to this function.
+  // If the IR has been modified since construction, the caller must rebuild.
+  assert(isValid(From) &&
+         "CFGReachability: 'From' block not found — object may be stale");
+  assert(isValid(To) &&
+         "CFGReachability: 'To' block not found — object may be stale");
+
   const unsigned DstBlockID = BB2ID.at(To);
+
+  // Bug 3 fix: lock the cache before reading or writing AnalyzedVec /
+  // ReachableMatrix so that concurrent reachable() calls are safe.
+  std::unique_lock<std::mutex> lock(CacheMutex);
+
   // Demand-driven: run the backward BFS only the first time To is queried.
   if (!AnalyzedVec[DstBlockID]) {
-    analyze(To);
+    analyze(To);          // analyze() must be called with the lock held
     AnalyzedVec[DstBlockID] = true;
   }
 

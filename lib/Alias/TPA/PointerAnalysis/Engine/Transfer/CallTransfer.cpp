@@ -226,8 +226,27 @@ void TransferFunction::evalCallNode(const ProgramPoint &pp,
   auto const &callNode = static_cast<const CallCFGNode &>(*pp.getCFGNode());
 
   const auto callees = resolveCallTarget(ctx, callNode);
-  if (callees.empty())
+  if (callees.empty()) {
+    // Fix #9: if the callee set is empty the function pointer's points-to set
+    // has not been resolved yet (it will be populated later in the fixpoint
+    // iteration). Call nodes are mem-level nodes and are only re-enqueued when
+    // the store changes. But the function pointer's points-to set lives in the
+    // Env (top-level), so a store-only re-enqueue may never happen.
+    //
+    // To avoid a premature fixpoint we need two things:
+    // 1. Propagate the current store to mem-level successors so that when the
+    //    function pointer is resolved (triggering a top-level re-evaluation of
+    //    this node via the def-use chain), the store state at the successors is
+    //    already up-to-date.
+    // 2. Also enqueue the top-level successors (def-use users of the call's
+    //    return value). Without this, if the call has a pointer-typed return
+    //    value, its users will never be evaluated because they are only
+    //    triggered by top-level changes, and no top-level change is recorded
+    //    here (the return value's points-to set is empty/unknown).
+    addMemLevelSuccessors(pp, *localState, evalResult);
+    addTopLevelSuccessors(pp, evalResult);
     return;
+  }
 
   for (const auto *f : callees) {
     // Update call graph first.

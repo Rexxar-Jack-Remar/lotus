@@ -233,68 +233,28 @@ public:
 
 namespace {
 
-// Template version of collapseNodes function to support different PtsSet types
-template<typename PtsSetType>
-void collapseNodes(NodeIndex dst, NodeIndex src, AndersNodeFactory &nodeFactory,
-                   std::map<NodeIndex, PtsSetType> &ptsGraph,
-                   ConstraintGraph &constraintGraph) {
+// B4 Fix: Consolidate collapseNodes into a single static template function.
+// The previous code had multiple overloads with external linkage (ODR
+// violation) and dead __attribute__((unused)) wrappers.  All call sites use
+// DefaultPtsSet, so we keep only the template + one explicit instantiation,
+// both with internal linkage (static).
+template <typename PtsSetType>
+static void collapseNodes(NodeIndex dst, NodeIndex src,
+                          AndersNodeFactory &nodeFactory,
+                          std::map<NodeIndex, PtsSetType> &ptsGraph,
+                          ConstraintGraph &constraintGraph) {
   if (dst == src)
     return;
 
-  // Track node collapsing
   ++NumNodesCollapsed;
 
-  // Node merge
   nodeFactory.mergeNode(dst, src);
   if (ptsGraph.count(src))
     ptsGraph[dst].unionWith(ptsGraph[src]);
   constraintGraph.mergeNodes(dst, src);
 
-  // We don't need the node cycleIdx any more
   ptsGraph.erase(src);
   constraintGraph.deleteNode(src);
-}
-
-// Backward compatibility for the original version
-__attribute__((unused))
-static void collapseNodes(NodeIndex dst, NodeIndex src, AndersNodeFactory &nodeFactory,
-                   std::map<NodeIndex, AndersPtsSet> &ptsGraph,
-                   ConstraintGraph &constraintGraph) {
-  collapseNodes<AndersPtsSet>(dst, src, nodeFactory, ptsGraph, constraintGraph);
-}
-
-// Add overload for DefaultPtsSet
-void collapseNodes(NodeIndex dst, NodeIndex src, AndersNodeFactory &nodeFactory,
-                   std::map<NodeIndex, DefaultPtsSet> &ptsGraph,
-                   ConstraintGraph &constraintGraph) {
-  collapseNodes<DefaultPtsSet>(dst, src, nodeFactory, ptsGraph, constraintGraph);
-}
-
-// Template versions with CCG parameter
-template<typename PtsSetType>
-void collapseNodes(NodeIndex dst, NodeIndex src, AndersNodeFactory &nodeFactory,
-                   std::map<NodeIndex, PtsSetType> &ptsGraph,
-                   ConstraintGraph &constraintGraph, CCG &copyGraph) {
-  (void)copyGraph; // Unused in this version
-  collapseNodes<PtsSetType>(dst, src, nodeFactory, ptsGraph, constraintGraph);
-}
-
-// Backward compatibility for the original version with CCG parameter
-__attribute__((unused))
-static void collapseNodes(NodeIndex dst, NodeIndex src, AndersNodeFactory &nodeFactory,
-                   std::map<NodeIndex, AndersPtsSet> &ptsGraph,
-                   ConstraintGraph &constraintGraph, CCG &copyGraph) {
-  (void)copyGraph; // Unused in this version
-  collapseNodes<AndersPtsSet>(dst, src, nodeFactory, ptsGraph, constraintGraph);
-}
-
-// Add overload for DefaultPtsSet with CCG parameter
-__attribute__((unused))
-static void collapseNodes(NodeIndex dst, NodeIndex src, AndersNodeFactory &nodeFactory,
-                   std::map<NodeIndex, DefaultPtsSet> &ptsGraph,
-                   ConstraintGraph &constraintGraph, CCG &copyGraph) {
-  (void)copyGraph; // Unused in this version
-  collapseNodes<DefaultPtsSet>(dst, src, nodeFactory, ptsGraph, constraintGraph);
 }
 
 // The worklist for our analysis
@@ -395,12 +355,28 @@ private:
 
     scc.set(node->getNodeIndex());
 
-    // The representative is the first non-ref node
-    NodeIndex repNode = scc.find_first();
-    assert(repNode < nodeFactory.getNumNodes() &&
-           "The SCC didn't have a non-Ref node!");
-    for (auto itr = ++scc.begin(), ite = scc.end(); itr != ite; ++itr) {
+    // B2 Fix: find the first VAR node (index < getNumNodes()) as the
+    // representative.  scc.find_first() returns the numerically smallest
+    // index, which may be a REF node (index >= getNumNodes()).  Iterating
+    // to find the first VAR node is correct and safe.
+    NodeIndex repNode = AndersNodeFactory::InvalidIndex;
+    for (auto idx : scc) {
+      if (idx < nodeFactory.getNumNodes()) {
+        repNode = idx;
+        break;
+      }
+    }
+    // If the SCC contains only REF nodes there is no VAR node to serve as
+    // the representative; skip it (no merge/collapse is possible).
+    if (repNode == AndersNodeFactory::InvalidIndex) {
+      scc.clear();
+      return;
+    }
+
+    for (auto itr = scc.begin(), ite = scc.end(); itr != ite; ++itr) {
       NodeIndex cycleNode = *itr;
+      if (cycleNode == repNode)
+        continue;
       // REF nodes start at exactly getNumNodes(), so use >= (not >) to
       // correctly classify the first REF node (index == getNumNodes()).
       if (cycleNode >= nodeFactory.getNumNodes())
@@ -480,20 +456,12 @@ void buildConstraintGraph(ConstraintGraph &cGraph,
   }
 }
 
-// Backward compatibility for the original version
-__attribute__((unused))
+// Explicit instantiation for the DefaultPtsSet used by solveConstraints.
+// (B4 Fix: keep internal linkage; no duplicate non-static overloads.)
 static void buildConstraintGraph(ConstraintGraph &cGraph,
-                          const std::vector<AndersConstraint> &constraints,
-                          AndersNodeFactory &nodeFactory,
-                          std::map<NodeIndex, AndersPtsSet> &ptsGraph) {
-  buildConstraintGraph<AndersPtsSet>(cGraph, constraints, nodeFactory, ptsGraph);
-}
-
-// Add overload for DefaultPtsSet
-void buildConstraintGraph(ConstraintGraph &cGraph,
-                          const std::vector<AndersConstraint> &constraints,
-                          AndersNodeFactory &nodeFactory,
-                          std::map<NodeIndex, DefaultPtsSet> &ptsGraph) {
+                                 const std::vector<AndersConstraint> &constraints,
+                                 AndersNodeFactory &nodeFactory,
+                                 std::map<NodeIndex, DefaultPtsSet> &ptsGraph) {
   buildConstraintGraph<DefaultPtsSet>(cGraph, constraints, nodeFactory, ptsGraph);
 }
 
@@ -623,11 +591,17 @@ void Andersen::solveConstraints() {
       DefaultOnlineCycleDetector cycleDetector(nodeFactory, constraintGraph, ptsGraph,
                                       cycleCandidates);
       cycleDetector.run();
-      
-      // Empty the queue
-      while (!cycleCandidates.empty()) {
+
+      // Empty the candidate queue.
+      while (!cycleCandidates.empty())
         cycleCandidates.pop();
-      }
+
+      // B9 Fix: After collapsing cycles, node indices in checkedEdges may
+      // refer to nodes that have been merged into their representatives.
+      // Stale entries would prevent re-checking edges that now involve the
+      // merged representative, causing missed cycle detections.  Clear the
+      // entire set so that all edges are eligible for re-checking.
+      checkedEdges.clear();
     }
 
     if (iterCount == 1) LOG_INFO("  - Processing worklist...");

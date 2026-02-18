@@ -270,7 +270,19 @@ InstructionTranslator::visitInsertValueInst(InsertValueInst &inst) {
   return nullptr;
 }
 tpa::CFGNode *InstructionTranslator::visitVAArgInst(VAArgInst &inst) {
-  return handleUnsupportedInst(inst);
+  // Bug fix: previously this called handleUnsupportedInst() which calls
+  // llvm_unreachable, crashing the analysis on any program that uses variadic
+  // functions (va_arg). The va_arg instruction reads the next argument from a
+  // va_list. For pointer analysis purposes:
+  //   - If the result is not a pointer type, it is irrelevant — return nullptr.
+  //   - If the result is a pointer type, we conservatively model it as an
+  //     unknown pointer (UndefValue), since we cannot statically determine
+  //     which variadic argument is being read.
+  if (!inst.getType()->isPointerTy())
+    return nullptr;
+
+  std::vector<const llvm::Value *> srcs = {UndefValue::get(inst.getType())};
+  return cfg.create<tpa::CopyCFGNode>(&inst, std::move(srcs));
 }
 tpa::CFGNode *
 InstructionTranslator::visitExtractElementInst(ExtractElementInst &inst) {

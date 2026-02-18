@@ -34,6 +34,17 @@
    DominatorForest(llvm::PostDominatorTree &PDT);
  
    DominatorForest(DominatorForest &DTS, std::set<BasicBlock *> &bbSubset);
+
+   // Bug 10 fix: declare explicit deep-copy constructor and copy-assignment
+   // operator. The compiler-generated versions perform a shallow copy of the
+   // raw DominatorNode* pointers in `nodes`, causing double-free on
+   // destruction. Deep copies clone every node and rebuild the bbNodeMap.
+   DominatorForest(const DominatorForest &other);
+   DominatorForest &operator=(const DominatorForest &other);
+
+   // Move operations are safe and efficient.
+   DominatorForest(DominatorForest &&other) noexcept;
+   DominatorForest &operator=(DominatorForest &&other) noexcept;
  
    void transferToClones(
        std::unordered_map<BasicBlock *, BasicBlock *> &bbCloneMap);
@@ -41,6 +52,10 @@
    DominatorNode *getNode(BasicBlock *B) const;
  
    bool dominates(Instruction *I, Instruction *J) const;
+
+   /// Bug 6 fix: returns false (instead of asserting) when either block is
+   /// absent from the forest. This is the correct behaviour for subset forests
+   /// where blocks outside the subset are simply not present.
    bool dominates(BasicBlock *B1, BasicBlock *B2) const;
    bool dominates(DominatorNode *node1, DominatorNode *node2) const;
  
@@ -51,6 +66,9 @@
  
    std::set<DominatorNode *> dominates(DominatorNode *node) const;
  
+   /// Bug 7 fix: returns nullptr (instead of asserting) when no common
+   /// dominator exists in the forest (e.g., for subset forests where the true
+   /// common dominator was pruned out). Callers must check the return value.
    BasicBlock *findNearestCommonDominator(BasicBlock *B1, BasicBlock *B2) const;
    DominatorNode *findNearestCommonDominator(DominatorNode *node1,
                                              DominatorNode *node2) const;
@@ -81,6 +99,11 @@
    void cloneLLVMNodes(std::set<DTAliases::Node *> &nodesToClone);
  
    void addDescendants(DominatorNode *n, std::set<BasicBlock *> &ds) const;
+
+   /// Helper used by the copy constructor and copy-assignment operator.
+   void copyFrom(const DominatorForest &other);
+   /// Release all owned DominatorNode objects and clear maps.
+   void destroyNodes();
  };
  
  } // namespace noelle

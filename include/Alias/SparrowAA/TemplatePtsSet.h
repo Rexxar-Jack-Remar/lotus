@@ -223,14 +223,29 @@ inline std::unique_ptr<RuntimePtsSet::Concept> RuntimePtsSet::makeImpl() {
 inline RuntimePtsSet::RuntimePtsSet() : impl(makeImpl()) {}
 
 inline RuntimePtsSet::RuntimePtsSet(const RuntimePtsSet &other)
-    : impl(other.impl->clone()), cache(other.cache) {}
+    : impl(other.impl->clone()) {
+  // B10 Fix: do NOT share the cache shared_ptr with the source object.
+  // The original code did `cache(other.cache)`, which means both objects
+  // pointed to the same std::vector.  If either object was subsequently
+  // mutated (insert/unionWith/clear), it would call cache.reset() on its
+  // own shared_ptr, leaving the other object's shared_ptr pointing to the
+  // now-stale (but still live) vector.  The other object would then iterate
+  // over stale cached values without realising the cache was invalid.
+  //
+  // Fix: leave cache as nullptr (default-constructed).  The cache will be
+  // lazily rebuilt on the first call to begin()/end() after the copy.
+  // This is slightly less efficient than sharing an immutable cache, but
+  // it is correct.  A proper copy-on-write scheme would require additional
+  // synchronisation and is not worth the complexity here.
+}
 
 inline RuntimePtsSet &
 RuntimePtsSet::operator=(const RuntimePtsSet &other) {
   if (this == &other)
     return *this;
   impl = other.impl->clone();
-  cache = other.cache;
+  // B10 Fix: same reasoning as the copy constructor — do not share the cache.
+  cache.reset();
   return *this;
 }
 

@@ -62,10 +62,83 @@
  }
  
  DominatorForest::~DominatorForest() {
+   destroyNodes();
+ }
+
+ // Bug 10 fix: destroyNodes() centralises the cleanup logic used by both the
+ // destructor and the copy-assignment operator.
+ void DominatorForest::destroyNodes() {
    for (auto *node : nodes)
      delete node;
    nodes.clear();
    bbNodeMap.clear();
+ }
+
+ // Bug 10 fix: deep-copy helper.  Clones every DominatorNode, rebuilds the
+ // bbNodeMap, and re-wires parent/child pointers so the copy is fully
+ // independent of the source.
+ void DominatorForest::copyFrom(const DominatorForest &other) {
+   post = other.post;
+
+   // First pass: clone every node (parent/children not yet wired).
+   std::unordered_map<const DominatorNode *, DominatorNode *> nodeMap;
+   for (auto *src : other.nodes) {
+     auto *copy = new DominatorNode(*src); // copies B and level; parent/children reset
+     nodeMap[src] = copy;
+     nodes.insert(copy);
+     if (copy->B)
+       bbNodeMap[copy->B] = copy;
+   }
+
+   // Second pass: wire parent and children using the clone map.
+   for (auto *src : other.nodes) {
+     auto *copy = nodeMap[src];
+     if (src->parent) {
+       auto it = nodeMap.find(src->parent);
+       copy->parent = (it != nodeMap.end()) ? it->second : nullptr;
+     }
+     copy->children.clear();
+     for (auto *child : src->children) {
+       auto it = nodeMap.find(child);
+       if (it != nodeMap.end())
+         copy->children.push_back(it->second);
+     }
+   }
+ }
+
+ // Bug 10 fix: copy constructor — performs a deep copy via copyFrom().
+ DominatorForest::DominatorForest(const DominatorForest &other)
+     : nodes{}, bbNodeMap{}, post{false} {
+   copyFrom(other);
+ }
+
+ // Bug 10 fix: copy-assignment operator — destroy existing nodes, then deep copy.
+ DominatorForest &DominatorForest::operator=(const DominatorForest &other) {
+   if (this != &other) {
+     destroyNodes();
+     copyFrom(other);
+   }
+   return *this;
+ }
+
+ // Move constructor: steal the source's data, leave it in a valid empty state.
+ DominatorForest::DominatorForest(DominatorForest &&other) noexcept
+     : nodes{std::move(other.nodes)},
+       bbNodeMap{std::move(other.bbNodeMap)},
+       post{other.post} {
+   other.post = false;
+ }
+
+ // Move-assignment operator.
+ DominatorForest &DominatorForest::operator=(DominatorForest &&other) noexcept {
+   if (this != &other) {
+     destroyNodes();
+     nodes    = std::move(other.nodes);
+     bbNodeMap = std::move(other.bbNodeMap);
+     post     = other.post;
+     other.post = false;
+   }
+   return *this;
  }
  
 void DominatorForest::transferToClones(
@@ -223,10 +296,13 @@ bool DominatorForest::dominates(Instruction *I, Instruction *J) const {
 bool DominatorForest::dominates(BasicBlock *B1, BasicBlock *B2) const {
   auto *nodeB1 = this->getNode(B1);
   auto *nodeB2 = this->getNode(B2);
-   assert(
-       nodeB1 && nodeB2
-       && "The basic blocks provided to DominatorForest are not present in the tree");
-   return this->dominates(nodeB1, nodeB2);
+  // Bug 6 fix: when either block is absent from the forest (e.g., because this
+  // is a subset forest and the block was pruned out), return false instead of
+  // asserting. A missing block cannot dominate or be dominated within this
+  // forest, so false is the correct conservative answer.
+  if (!nodeB1 || !nodeB2)
+    return false;
+  return this->dominates(nodeB1, nodeB2);
  }
  
  bool DominatorForest::strictlyDominates(Instruction *I, Instruction *J) const {
@@ -368,22 +444,20 @@ bool DominatorForest::dominates(BasicBlock *B1, BasicBlock *B2) const {
                                                          BasicBlock *B2) const {
    assert(B1 != nullptr);
    assert(B2 != nullptr);
- 
-  /*
-   * Fetch the nodes in the dominator tree.
-   */
-  auto *n1 = this->getNode(B1);
-  auto *n2 = this->getNode(B2);
-   assert(n1 != nullptr);
-   assert(n2 != nullptr);
- 
-  /*
-   * Find the nearest common dominator.
-   */
-  auto *c = findNearestCommonDominator(n1, n2);
-   assert(c != nullptr);
- 
-   return c->B;
+
+   // Bug 7 fix: getNode() returns nullptr for blocks absent from the forest
+   // (e.g., subset forests where the true common dominator was pruned out).
+   // Return nullptr instead of asserting / dereferencing a null pointer so
+   // callers can handle the "no common dominator in this forest" case.
+   auto *n1 = this->getNode(B1);
+   auto *n2 = this->getNode(B2);
+   if (!n1 || !n2)
+     return nullptr;
+
+   auto *c = findNearestCommonDominator(n1, n2);
+   // c may be nullptr when the two nodes share no common ancestor within the
+   // (possibly pruned) forest — return nullptr and let the caller decide.
+   return c ? c->B : nullptr;
  }
  
  DominatorNode *DominatorForest::findNearestCommonDominator(

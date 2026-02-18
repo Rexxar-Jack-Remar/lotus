@@ -114,9 +114,11 @@ void Andersen::collectConstraintsForFunction(const Function *f,
   // Per-context function-scoped nodes
   if (f->getFunctionType()->getReturnType()->isPointerTy()) {
     nodeFactory.createReturnNode(f, ctx);
+    ++NumReturnNodes;
   }
   if (f->getFunctionType()->isVarArg()) {
     nodeFactory.createVarargNode(f, ctx);
+    ++NumVarargNodes;
   }
   for (Function::const_arg_iterator itr = f->arg_begin(), ite = f->arg_end();
        itr != ite; ++itr) {
@@ -165,36 +167,29 @@ void Andersen::collectConstraintsForGlobals(const Module &M,
     ++NumGlobalObjects;
   }
 
-  // Functions and function pointers are also considered global
+  // Functions and function pointers are also considered global.
+  // B7 Fix: collectConstraintsForGlobals previously pre-created return nodes,
+  // vararg nodes, and argument nodes for all non-declaration functions using
+  // initialCtx.  collectConstraintsForFunction() does the same for each
+  // function in its own context.  For context-insensitive analysis (k=0) the
+  // contexts are identical so createReturnNode/createValueNode are idempotent
+  // and the duplication is harmless.  For k>0, however, the pre-created nodes
+  // in initialCtx are never used for functions called in a different context,
+  // wasting memory and polluting valueNodeBuckets.
+  //
+  // Fix: only create the address-taken function pointer/object nodes here
+  // (which are genuinely global and context-independent).  The per-function
+  // return/vararg/argument nodes are created on demand by
+  // collectConstraintsForFunction() in the correct context.
   for (auto const &f : M) {
-    // If f is an addr-taken function, create a pointer and an object for it
+    // If f is an addr-taken function, create a pointer and an object for it.
+    // These are global (context-independent) because the function's address
+    // is a compile-time constant.
     if (f.hasAddressTaken()) {
       NodeIndex fVal = nodeFactory.createValueNode(&f, ctx);
       NodeIndex fObj = nodeFactory.createObjectNode(&f, ctx);
       constraints.emplace_back(AndersConstraint::ADDR_OF, fVal, fObj);
       ++NumAddrTakenFunctions;
-    }
-
-    if (f.isDeclaration() || f.isIntrinsic())
-      continue;
-
-    // Create return node
-    if (f.getFunctionType()->getReturnType()->isPointerTy()) {
-      nodeFactory.createReturnNode(&f, ctx);
-      ++NumReturnNodes;
-    }
-
-    // Create vararg node
-    if (f.getFunctionType()->isVarArg()) {
-      nodeFactory.createVarargNode(&f, ctx);
-      ++NumVarargNodes;
-    }
-
-    // Add nodes for all formal arguments.
-    for (Function::const_arg_iterator itr = f.arg_begin(), ite = f.arg_end();
-         itr != ite; ++itr) {
-      if (isa<PointerType>(itr->getType()))
-        nodeFactory.createValueNode(&*itr, ctx);
     }
   }
 
@@ -219,8 +214,6 @@ void Andersen::collectConstraintsForGlobals(const Module &M,
 void Andersen::addGlobalInitializerConstraints(NodeIndex objNode,
                                                const Constant *c,
                                                AndersNodeFactory::CtxKey ctx) {
-  // errs() << "Called with node# = " << objNode << ", initializer = " << *c <<
-  // "\n";
   if (c->getType()->isSingleValueType()) {
     if (isa<PointerType>(c->getType())) {
       NodeIndex rhsNode = nodeFactory.getObjectNodeForConstant(c, ctx);
@@ -228,10 +221,24 @@ void Andersen::addGlobalInitializerConstraints(NodeIndex objNode,
              "rhs node not found");
       constraints.emplace_back(AndersConstraint::ADDR_OF, objNode, rhsNode);
     }
+  } else if (isa<UndefValue>(c)) {
+    // Undefined values carry no pointer information; skip.
+  } else if (isa<ConstantAggregateZero>(c)) {
+    // B8 Fix: ConstantAggregateZero represents a zero-initialized aggregate
+    // (struct, array, or vector).  The previous code fell through to the
+    // isNullValue() branch only for scalar null pointers; for aggregates,
+    // isNullValue() is also true but the correct treatment is to recurse
+    // into each element so that pointer-typed fields are connected to the
+    // null object node individually.  For non-pointer element types the
+    // recursive call is a no-op (isSingleValueType() && !isPointerTy()).
+    for (unsigned i = 0, e = c->getNumOperands(); i != e; ++i)
+      addGlobalInitializerConstraints(objNode,
+                                      cast<Constant>(c->getOperand(i)), ctx);
   } else if (c->isNullValue()) {
+    // Scalar null pointer.
     constraints.emplace_back(AndersConstraint::COPY, objNode,
                              nodeFactory.getNullObjectNode());
-  } else if (!isa<UndefValue>(c)) {
+  } else {
     // Since we are doing field-insensitive analysis, all objects in the
     // array/struct/vector are pointed-to by the 1st-field pointer.
     // ConstantVector (SIMD vector of constants) is also handled here.
@@ -540,8 +547,29 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst,
       }
     }
 
-    // The result of cmpxchg is a struct {T, i1}; we do not currently model the
-    // loaded value here.
+    // B2 Fix: model the load-side of cmpxchg.
+    // The result is a struct {T, i1}.  When T is a pointer type, the first
+    // element (the old value read from memory) carries pointer information
+    // that must be tracked.  We model this with a LOAD constraint from the
+    // pointer operand into a synthetic value node for the instruction result.
+    // Subsequent ExtractValue instructions that pull out the old pointer will
+    // then copy from this synthetic node via the InsertValue/ExtractValue
+    // handling above.
+    //
+    // Note: the instruction result type is always a struct (never a raw
+    // pointer), so we check the *compared* value's type to determine whether
+    // the loaded element is a pointer.
+    const Value *cmpVal = cx->getCompareOperand();
+    if (cmpVal->getType()->isPointerTy()) {
+      NodeIndex ptrIndex =
+          nodeFactory.getValueNodeFor(cx->getPointerOperand(), ctx);
+      if (ptrIndex != AndersNodeFactory::InvalidIndex) {
+        // Create a value node for the aggregate result so that a later
+        // ExtractValue can copy the old pointer out of it.
+        NodeIndex resIndex = nodeFactory.createValueNode(inst, ctx);
+        constraints.emplace_back(AndersConstraint::LOAD, resIndex, ptrIndex);
+      }
+    }
     break;
   }
   default: {
@@ -626,6 +654,42 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
     // than checking whether a value node exists for f in the current context,
     // which was previously wrong and could miss or spuriously include callees.
     const Module *M = cs->getFunction()->getParent();
+    // B6 Fix: helper to check whether a candidate function's type is
+    // compatible with the call-site's function-pointer type.  We require
+    // that the return types and all argument types are pointer-compatible
+    // (both pointer or both non-pointer) to avoid spurious constraints from
+    // completely unrelated functions that happen to have the same arity.
+    // This is a conservative approximation: it may still admit some
+    // incompatible functions, but it eliminates the most egregious mismatches
+    // (e.g., a void*(int*) call site matching a void(int,int) callee).
+    auto isTypeCompatible = [&](const Function &f) -> bool {
+      // Derive the function type from the call-site's called operand.
+      // In LLVM 14 opaque-pointer mode, CallBase::getFunctionType() gives the
+      // statically-known callee type directly without needing getPointerElementType().
+      FunctionType *callSiteFTy = cs->getFunctionType();
+      if (!callSiteFTy)
+        return true; // Cannot determine type; be conservative.
+
+      FunctionType *calleeFTy = f.getFunctionType();
+
+      // Return type compatibility: both pointer or both non-pointer.
+      bool csRetIsPtr = callSiteFTy->getReturnType()->isPointerTy();
+      bool fRetIsPtr  = calleeFTy->getReturnType()->isPointerTy();
+      if (csRetIsPtr != fRetIsPtr)
+        return false;
+
+      // Argument type compatibility (for fixed args).
+      unsigned numFixed = std::min(callSiteFTy->getNumParams(),
+                                   calleeFTy->getNumParams());
+      for (unsigned i = 0; i < numFixed; ++i) {
+        bool csArgIsPtr = callSiteFTy->getParamType(i)->isPointerTy();
+        bool fArgIsPtr  = calleeFTy->getParamType(i)->isPointerTy();
+        if (csArgIsPtr != fArgIsPtr)
+          return false;
+      }
+      return true;
+    };
+
     bool foundAnyCallee = false;
     for (auto const &f : *M) {
       // Only consider address-taken functions as indirect-call targets.
@@ -634,6 +698,10 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
 
       if (!f.getFunctionType()->isVarArg() && f.arg_size() != cs->arg_size())
         // #arg mismatch
+        continue;
+
+      // B6 Fix: skip functions whose type is incompatible with the call site.
+      if (!isTypeCompatible(f))
         continue;
 
       foundAnyCallee = true;
