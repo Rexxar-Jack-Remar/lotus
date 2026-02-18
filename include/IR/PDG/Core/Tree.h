@@ -61,10 +61,10 @@ namespace pdg
       bool hasWriteAccess() { return _acc_tag_set.find(AccessTag::DATA_WRITE) != _acc_tag_set.end(); }
 
     private:
-      Tree *_tree;
-      TreeNode *_parent_node;
-      int _depth;
-      llvm::DILocalVariable *_di_local_var;
+      Tree *_tree = nullptr;
+      TreeNode *_parent_node = nullptr;
+      int _depth = 0;
+      llvm::DILocalVariable *_di_local_var = nullptr;
       std::vector<TreeNode *> _children;
       std::unordered_set<llvm::Value *> _addr_vars;
       std::set<AccessTag> _acc_tag_set;
@@ -103,8 +103,8 @@ namespace pdg
     void setBaseVal(llvm::Value &v) { _base_val = &v; }
 
   private:
-    llvm::Value* _base_val;
-    TreeNode *_root_node;
-    int _size;
+    llvm::Value* _base_val = nullptr;
+    TreeNode *_root_node = nullptr;
+    int _size = 0;
   };
 } // namespace pdg

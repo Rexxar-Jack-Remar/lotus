@@ -85,7 +85,9 @@ public:
   /// @brief Connects caller and callee through a call site
   /// @param cw Call wrapper for the call site
   /// @param fw Function wrapper for the callee
-  void connectCallerAndCallee(CallWrapper &cw, FunctionWrapper &fw);
+  void connectCallerAndCallee(
+      CallWrapper &cw, FunctionWrapper &fw,
+      EdgeType call_edge_type = EdgeType::CONTROLDEP_CALLINV);
 
   /// @brief Builds intraprocedural dependencies for a function
   /// @param F The function to analyze

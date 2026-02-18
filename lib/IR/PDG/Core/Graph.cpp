@@ -244,6 +244,7 @@ void pdg::ProgramGraph::build(Module &M) {
       FunctionWrapper *callee_fw = getFuncWrapper(*called_func);
       cw->buildActualTreeForArgs(*callee_fw);
       cw->buildActualTreesForRetVal(*callee_fw);
+      cw->setHasParamTrees();
       _call_wrapper_map.insert(std::make_pair(ci, cw));
     }
   }

@@ -22,7 +22,7 @@ namespace pdg
     // Struct and GEP handling
     llvm::StructType *getStructTypeFromGEP(llvm::GetElementPtrInst &gep);
     int getGEPAccessFieldOffset(llvm::GetElementPtrInst &gep);
-    uint64_t getGEPOffsetInBits(llvm::Module &M, llvm::StructType &struct_type, llvm::GetElementPtrInst &gep);
+    int64_t getGEPOffsetInBits(llvm::Module &M, llvm::StructType &struct_type, llvm::GetElementPtrInst &gep);
     bool isNodeBitOffsetMatchGEPBitOffset(Node &n, llvm::GetElementPtrInst &gep);
     bool isGEPOffsetMatchDIOffset(llvm::DIType &dt, llvm::GetElementPtrInst &gep);
     

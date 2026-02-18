@@ -197,14 +197,14 @@ void pdg::ProgramDependencyGraph::connectOutTrees(Tree *src_tree,
  * @param cw The CallWrapper for the call site.
  * @param fw The FunctionWrapper for the callee.
  */
-void pdg::ProgramDependencyGraph::connectCallerAndCallee(CallWrapper &cw,
-                                                         FunctionWrapper &fw) {
+void pdg::ProgramDependencyGraph::connectCallerAndCallee(
+    CallWrapper &cw, FunctionWrapper &fw, EdgeType call_edge_type) {
   // step 1: connect call site node with the entry node of function
   auto *call_site_node = _PDG->getNode(*cw.getCallInst());
   auto *func_entry_node = fw.getEntryNode();
   if (call_site_node == nullptr || func_entry_node == nullptr)
     return;
-  call_site_node->addNeighbor(*func_entry_node, EdgeType::CONTROLDEP_CALLINV);
+  call_site_node->addNeighbor(*func_entry_node, call_edge_type);
 
   // step 2: connect actual in -> formal in, formal out -> actual out
   auto actual_arg_list = cw.getArgList();
@@ -248,8 +248,8 @@ void pdg::ProgramDependencyGraph::connectCallerAndCallee(CallWrapper &cw,
       connectInTrees(ret_actual_in_tree, ret_formal_in_tree,
                      EdgeType::PARAMETER_IN);
     if (ret_formal_out_tree && ret_actual_out_tree)
-      connectInTrees(ret_actual_out_tree, ret_formal_out_tree,
-                     EdgeType::PARAMETER_OUT);
+      connectOutTrees(ret_formal_out_tree, ret_actual_out_tree,
+                      EdgeType::PARAMETER_OUT);
   }
 
   // step4: connect both control/data return edges of callee to the call site
@@ -342,23 +342,12 @@ void pdg::ProgramDependencyGraph::connectInterprocDependencies(Function &F) {
 
       auto connectToCallee = [&](FunctionWrapper &callee_fw,
                                  EdgeType callEdgeType) {
-        if (auto *entry = callee_fw.getEntryNode()) {
-          call_site_node->addNeighbor(*entry, callEdgeType);
+        if (!call_w->hasParamTrees()) {
+          call_w->buildActualTreeForArgs(callee_fw);
+          call_w->buildActualTreesForRetVal(callee_fw);
+          call_w->setHasParamTrees();
         }
-
-        auto *dst = _PDG->getNode(*call_inst);
-        if (!dst)
-          return;
-
-        // Always connect return->call edges when possible; parameter-tree
-        // connections are optional and may be absent without debug info.
-        for (auto *ret_inst : callee_fw.getReturnInsts()) {
-          Node *src = _PDG->getNode(*ret_inst);
-          if (!src)
-            continue;
-          src->addNeighbor(*dst, EdgeType::CONTROLDEP_CALLRET);
-          src->addNeighbor(*dst, EdgeType::DATA_RET);
-        }
+        connectCallerAndCallee(*call_w, callee_fw, callEdgeType);
       };
 
       if (auto *direct = call_w->getCalledFunc()) {

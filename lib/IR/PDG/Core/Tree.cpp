@@ -157,7 +157,7 @@ void pdg::TreeNode::computeDerivedAddrVarsFromParent() {
 
 //  ====== Tree =======
 pdg::Tree::Tree(const Tree &src_tree)
-    : _base_val(src_tree._base_val), _root_node(nullptr), _size(0) {
+    : _base_val(src_tree._base_val), _root_node(nullptr), _size(src_tree._size) {
   TreeNode *src_tree_root_node = src_tree.getRootNode();
   if (src_tree_root_node == nullptr) {
     return;
@@ -166,7 +166,7 @@ pdg::Tree::Tree(const Tree &src_tree)
   new_root_node->setParentTreeNode(nullptr);
   new_root_node->setTree(this);
   _root_node = new_root_node;
-  
+
   // Recursively copy all children
   std::queue<std::pair<TreeNode*, TreeNode*>> node_queue;
   node_queue.push(std::make_pair(src_tree_root_node, new_root_node));
@@ -203,6 +203,8 @@ bool pdg::Tree::isShapeCompatible(const Tree &other) const {
 }
 
 void pdg::Tree::print() {
+  if (_root_node == nullptr)
+    return;
   std::queue<TreeNode *> node_queue;
   node_queue.push(_root_node);
   while (!node_queue.empty()) {
@@ -212,9 +214,12 @@ void pdg::Tree::print() {
       node_queue.pop();
       queue_size--;
       if (current_node == _root_node)
-        errs() << dbgutils::getSourceLevelVariableName(
-                      *current_node->getDILocalVar())
-               << ", ";
+        if (current_node->getDILocalVar() != nullptr)
+          errs() << dbgutils::getSourceLevelVariableName(
+                        *current_node->getDILocalVar())
+                 << ", ";
+        else
+          errs() << "<root>, ";
       else {
         if (current_node->getDIType() != nullptr)
           errs() << dbgutils::getSourceLevelVariableName(
@@ -239,6 +244,11 @@ void pdg::Tree::print() {
  * @param max_tree_depth The maximum depth to expand the tree.
  */
 void pdg::Tree::build(int max_tree_depth) {
+  if (_root_node == nullptr)
+    return;
+  // Trees built via copy constructor already contain a full shape.
+  if (_size > 0)
+    return;
   int current_tree_depth = 0;
   std::queue<TreeNode *> node_queue;
   node_queue.push(_root_node);

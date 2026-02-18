@@ -69,8 +69,11 @@ public:
   /// @param e Edge to compare with
   /// @return True if this edge is considered less than the other edge
   bool operator<(const Edge &e) const {
-    return (_source == e.getSrcNode() && _dst == e.getDstNode() &&
-            _edge_type == e.getEdgeType());
+    if (_source != e.getSrcNode())
+      return _source < e.getSrcNode();
+    if (_dst != e.getDstNode())
+      return _dst < e.getDstNode();
+    return static_cast<int>(_edge_type) < static_cast<int>(e.getEdgeType());
   }
 };
 

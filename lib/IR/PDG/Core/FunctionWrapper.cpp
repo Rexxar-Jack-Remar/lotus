@@ -114,7 +114,6 @@ void pdg::FunctionWrapper::buildFormalTreeForArgs() {
       formal_out_root_node->addAddrVar(*addr_var);
     }
     formal_out_tree->setTreeNodeType(GraphNodeType::PARAM_FORMALOUT);
-    formal_out_tree->build();
     _arg_formal_out_tree_map.insert(std::make_pair(arg, formal_out_tree));
   }
 }
@@ -146,7 +145,6 @@ void pdg::FunctionWrapper::buildFormalTreesForRetVal() {
     ret_formal_out_tree_root_node->addAddrVar(*addr_var);
   }
   ret_formal_out_tree->setTreeNodeType(GraphNodeType::PARAM_FORMALOUT);
-  ret_formal_out_tree->build();
   _ret_val_formal_out_tree = ret_formal_out_tree;
 }
 

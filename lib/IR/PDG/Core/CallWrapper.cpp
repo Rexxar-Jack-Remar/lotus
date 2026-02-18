@@ -52,14 +52,17 @@ void pdg::CallWrapper::buildActualTreeForArgs(FunctionWrapper &callee_fw) {
     Tree *arg_formal_in_tree = callee_fw.getArgFormalInTree(**formal_arg_iter);
     if (!arg_formal_in_tree) // in some case, not each parameter has tree, for
                              // example, a function with structure parameter
-      break;
+    {
+      actual_arg_iter++;
+      formal_arg_iter++;
+      continue;
+    }
     // build actual in tree, copying the formal_in tree structure at the moment
     Tree *arg_actual_in_tree = new Tree(*arg_formal_in_tree);
     arg_actual_in_tree->setBaseVal(**actual_arg_iter);
     arg_actual_in_tree->setTreeNodeType(GraphNodeType::PARAM_ACTUALIN);
     TreeNode *actual_in_root_node = arg_actual_in_tree->getRootNode();
     actual_in_root_node->addAddrVar(**actual_arg_iter);
-    arg_actual_in_tree->build();
     _arg_actual_in_tree_map.insert(
         std::make_pair(*actual_arg_iter, arg_actual_in_tree));
     // build actual out tree
@@ -68,7 +71,6 @@ void pdg::CallWrapper::buildActualTreeForArgs(FunctionWrapper &callee_fw) {
     arg_actual_out_tree->setTreeNodeType(GraphNodeType::PARAM_ACTUALOUT);
     TreeNode *actual_out_root_node = arg_actual_out_tree->getRootNode();
     actual_out_root_node->addAddrVar(**actual_arg_iter);
-    arg_actual_out_tree->build();
     _arg_actual_out_tree_map.insert(
         std::make_pair(*actual_arg_iter, arg_actual_out_tree));
     actual_arg_iter++;
@@ -85,7 +87,6 @@ void pdg::CallWrapper::buildActualTreesForRetVal(FunctionWrapper &callee_fw) {
   ret_actual_in_tree->setTreeNodeType(GraphNodeType::PARAM_ACTUALIN);
   TreeNode *ret_actual_in_root_node = ret_actual_in_tree->getRootNode();
   ret_actual_in_root_node->addAddrVar(*_call_inst);
-  ret_actual_in_tree->build();
   _ret_val_actual_in_tree = ret_actual_in_tree;
 
   // build actual out tree
@@ -93,7 +94,6 @@ void pdg::CallWrapper::buildActualTreesForRetVal(FunctionWrapper &callee_fw) {
   ret_actual_out_tree->setTreeNodeType(GraphNodeType::PARAM_ACTUALOUT);
   TreeNode *ret_actual_out_root_node = ret_actual_out_tree->getRootNode();
   ret_actual_out_root_node->addAddrVar(*_call_inst);
-  ret_actual_out_tree->build();
   _ret_val_actual_out_tree = ret_actual_out_tree;
 }
 

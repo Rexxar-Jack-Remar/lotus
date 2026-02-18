@@ -103,6 +103,25 @@ public:
   /// @brief Resets the graph to empty state
   void reset() {
     _is_build = false;
+    std::set<Edge *> edges_to_delete;
+    for (auto *edge : _edge_set) {
+      if (edge)
+        edges_to_delete.insert(edge);
+    }
+    for (auto *node : _node_set) {
+      if (!node)
+        continue;
+      for (auto *edge : node->getOutEdgeSet()) {
+        if (edge)
+          edges_to_delete.insert(edge);
+      }
+    }
+    for (auto *edge : edges_to_delete) {
+      delete edge;
+    }
+    for (auto *node : _node_set) {
+      delete node;
+    }
     _val_node_map.clear();
     _edge_set.clear();
     _node_set.clear();
@@ -264,6 +283,12 @@ public:
 
   /// @brief Resets the graph and all its mappings
   void reset() {
+    for (auto &entry : _call_wrapper_map) {
+      delete entry.second;
+    }
+    for (auto &entry : _func_wrapper_map) {
+      delete entry.second;
+    }
     GenericGraph::reset();
     _func_wrapper_map.clear();
     _call_wrapper_map.clear();

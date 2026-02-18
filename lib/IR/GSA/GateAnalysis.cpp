@@ -93,17 +93,20 @@ public:
   }
 
   bool isEta(PHINode *PN) const override {
+    // An Eta node is a loop-exit PHI: the PHI lives outside (or at the exit
+    // of) a loop, while at least one incoming value arrives from inside that
+    // loop.  The previous check also tested IncL->contains(IncBB) and a
+    // redundant (!L || !L->contains(IncBB)) clause, which could misclassify
+    // PHIs in nested loops when the outer loop L still contains IncBB.
+    // The simplified form below is both necessary and sufficient: if the
+    // incoming block's loop does not contain the PHI's own block, the PHI is
+    // at a loop exit and is therefore an Eta.
     BasicBlock *BB = PN->getParent();
-    Loop *L = m_LI.getLoopFor(BB);
     for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
       BasicBlock *IncBB = PN->getIncomingBlock(i);
       Loop *IncL = m_LI.getLoopFor(IncBB);
-      if (IncL && IncL != L && IncL->contains(IncBB) &&
-          (!L || !L->contains(IncBB))) {
-        // Incoming from a loop that does not contain the PHI's block
-        // This is an exit PHI (Eta)
+      if (IncL && !IncL->contains(BB))
         return true;
-      }
     }
     return false;
   }
@@ -125,9 +128,15 @@ void GateAnalysisImpl::calculate() {
 
   // Gammas need to be placed just after the last PHI nodes. This is because
   // LLVM utilities expect PHIs to appear at the very beginning of basic blocks.
+  // Only visit blocks reachable from the entry: unreachable blocks are absent
+  // from the DominatorTree, so processPhi's assertion on m_DT.getNode() would
+  // fire if we attempted to build gammas for PHIs inside them.
   for (auto &BB : m_function) {
+    if (!m_DT.getNode(&BB))
+      continue; // Skip blocks unreachable from the function entry.
+
     Instruction *insertionPoint = BB.getFirstNonPHI();
-    assert(insertionPoint && "Basic block without terminator?");
+    assert(insertionPoint && "Basic block has no non-PHI instruction");
     insertionPts.insert({&BB, insertionPoint});
 
     for (auto &PN : BB.phis())
@@ -220,7 +229,19 @@ GateAnalysisImpl::processIncomingValues(PHINode *PN, Instruction *insertionPt) {
           {"seahorn.gsa.gamma.crit.", incomingBlock->getName()});
       incomingBlockToValue[incomingBlock] = Guarded;
       m_changed = true;
+      continue;
     }
+
+    // InvokeInst: the normal return edge is unconditional (no guarding
+    // predicate); the unwind edge carries exception state that cannot be
+    // expressed as a scalar boolean, so no guarding is emitted for either
+    // destination.  The plain incomingValue recorded above is sufficient.
+    //
+    // IndirectBrInst: the target is a runtime value — no static predicate is
+    // available.  The unguarded incomingValue is the correct conservative
+    // choice here too.
+    //
+    // All other terminators (UnreachableInst, etc.) are handled the same way.
   }
 
   return incomingBlockToValue;
@@ -290,7 +311,14 @@ void GateAnalysisImpl::processPhi(PHINode *PN, Instruction *insertionPt) {
           SuccToVal[S] = it->second;
           break;
         }
-        auto *treeNode = m_PDT.getNode(postDomBlock)->getIDom();
+        // m_PDT.getNode() returns null for blocks that do not appear in the
+        // post-dominator tree (e.g., a block inside an infinite loop that
+        // never reaches the function exit).  Guard against that here to
+        // avoid a null-pointer dereference.
+        auto *pdtNode = m_PDT.getNode(postDomBlock);
+        if (!pdtNode)
+          break;
+        auto *treeNode = pdtNode->getIDom();
         if (treeNode == nullptr)
           break;
         postDomBlock = treeNode->getBlock();
@@ -380,8 +408,27 @@ void GateAnalysisImpl::processPhi(PHINode *PN, Instruction *insertionPt) {
       continue;
     }
 
-    // Unsupported terminator shapes fall back to Bottom to keep the
-    // transformation conservative and avoid invalid IR.
+    if (auto *II = dyn_cast<InvokeInst>(TI)) {
+      // An InvokeInst has two successors: the normal-return destination and the
+      // unwind (landing-pad) destination.  For gamma construction we model only
+      // the normal path, because:
+      //   (a) there is no static boolean predicate that distinguishes the two
+      //       edges — the choice is made at runtime by the exception mechanism,
+      //   (b) the unwind destination receives exception-state values that are
+      //       not representable as ordinary scalar selects.
+      // We therefore propagate the value flowing through the normal dest and
+      // leave the unwind dest as Bottom.
+      BasicBlock *NormalDest = II->getNormalDest();
+      Value *NormalVal = SuccToVal.lookup(NormalDest);
+      flowingValues[BB] = NormalVal ? NormalVal : Bottom;
+      continue;
+    }
+
+    // IndirectBrInst: the branch target is a runtime value; no static boolean
+    // predicate is available.  Fall through to Bottom conservatively.
+    //
+    // All other terminators (UnreachableInst, CallBrInst, etc.) are equally
+    // opaque and handled conservatively.
     flowingValues[BB] = Bottom;
   }
 
@@ -419,7 +466,16 @@ void GateAnalysisPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<DominatorTreeWrapperPass>();
   AU.addRequired<PostDominatorTreeWrapperPass>();
   AU.addRequired<LoopInfoWrapperPass>();
-  AU.setPreservesAll();
+  // When PHI nodes are erased (-gsa-replace-phis) the IR is modified, so
+  // setPreservesAll() must not be called — it falsely promises a read-only
+  // analysis, which allows downstream passes to reuse stale cached results
+  // (e.g., DominatorTree, MemorySSA) that are now invalid because
+  // instructions were deleted.  We still preserve CFG structure since no
+  // control-flow edges are added or removed.
+  if (GsaReplacePhis)
+    AU.setPreservesCFG();
+  else
+    AU.setPreservesAll();
 }
 
 bool GateAnalysisPass::runOnModule(Module &M) {
@@ -431,16 +487,6 @@ bool GateAnalysisPass::runOnModule(Module &M) {
       continue;
     auto &LI = getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
     changed |= runOnFunction(F, CDP.getControlDependenceAnalysis(F), LI);
-  }
-
-  if (GsaReplacePhis) {
-    for (auto &F : M) {
-      if (F.isDeclaration())
-        continue;
-      for (auto &BB : F)
-        for (auto &I : BB)
-          (void)&I;
-    }
   }
 
   return changed;

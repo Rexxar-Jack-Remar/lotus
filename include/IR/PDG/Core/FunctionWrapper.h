@@ -35,12 +35,25 @@ namespace pdg
     FunctionWrapper(llvm::Function *func)
     {
       _func = func;
+      _ret_val_formal_in_tree = nullptr;
+      _ret_val_formal_out_tree = nullptr;
       for (auto *arg_iter = _func->arg_begin(); arg_iter != _func->arg_end(); arg_iter++)
       {
         _arg_list.push_back(&*arg_iter);
       }
       _entry_node = new Node(GraphNodeType::FUNC_ENTRY);
       _entry_node->setFunc(*func);
+    }
+
+    ~FunctionWrapper() {
+      for (auto &entry : _arg_formal_in_tree_map) {
+        delete entry.second;
+      }
+      for (auto &entry : _arg_formal_out_tree_map) {
+        delete entry.second;
+      }
+      delete _ret_val_formal_in_tree;
+      delete _ret_val_formal_out_tree;
     }
 
     /**

@@ -56,8 +56,8 @@ StructType *pdg::pdgutils::getStructTypeFromGEP(GetElementPtrInst &gep) {
  * @param gep The GetElementPtr instruction accessing the struct field
  * @return The bit offset of the accessed field, or INT_MIN on error
  */
-uint64_t pdg::pdgutils::getGEPOffsetInBits(Module &M, StructType &struct_type,
-                                           GetElementPtrInst &gep) {
+int64_t pdg::pdgutils::getGEPOffsetInBits(Module &M, StructType &struct_type,
+                                          GetElementPtrInst &gep) {
   // Get the accessed struct member offset from the gep instruction
   int gep_offset = getGEPAccessFieldOffset(gep);
   if (gep_offset == INT_MIN)
@@ -74,7 +74,8 @@ uint64_t pdg::pdgutils::getGEPOffsetInBits(Module &M, StructType &struct_type,
     return INT_MIN;
   }
 
-  uint64_t field_bit_offset = struct_layout->getElementOffsetInBits(gep_offset);
+  int64_t field_bit_offset =
+      static_cast<int64_t>(struct_layout->getElementOffsetInBits(gep_offset));
   // check if the gep may be used for accessing bit fields
   // if (isGEPforBitField(gep))
   // {
@@ -130,7 +131,7 @@ bool pdg::pdgutils::isGEPOffsetMatchDIOffset(DIType &dt,
   if (!struct_ty)
     return false;
   Module &module = *(gep.getFunction()->getParent());
-  uint64_t gep_bit_offset = getGEPOffsetInBits(module, *struct_ty, gep);
+  int64_t gep_bit_offset = getGEPOffsetInBits(module, *struct_ty, gep);
   if (gep_bit_offset < 0)
     return false;
 
@@ -149,7 +150,7 @@ bool pdg::pdgutils::isGEPOffsetMatchDIOffset(DIType &dt,
   //   }
   // }
 
-  uint64_t di_type_bit_offset = dt.getOffsetInBits();
+  int64_t di_type_bit_offset = static_cast<int64_t>(dt.getOffsetInBits());
   if (gep_bit_offset == di_type_bit_offset)
     return true;
   return false;
@@ -172,12 +173,12 @@ bool pdg::pdgutils::isNodeBitOffsetMatchGEPBitOffset(Node &n,
   if (struct_ty == nullptr)
     return false;
   Module &module = *(gep.getFunction()->getParent());
-  uint64_t gep_bit_offset =
+  int64_t gep_bit_offset =
       pdgutils::getGEPOffsetInBits(module, *struct_ty, gep);
   DIType *node_di_type = n.getDIType();
   if (node_di_type == nullptr || gep_bit_offset == INT_MIN)
     return false;
-  uint64_t node_bit_offset = node_di_type->getOffsetInBits();
+  int64_t node_bit_offset = static_cast<int64_t>(node_di_type->getOffsetInBits());
   if (gep_bit_offset == node_bit_offset)
     return true;
   return false;
@@ -329,16 +330,63 @@ std::set<Instruction *> pdg::pdgutils::getInstructionAfterInst(Instruction &i) {
 /**
  * @brief Computes variables whose addresses are taken by an AllocaInst.
  *
- * Identifies users of the AllocaInst that are LoadInsts (loading the address).
+ * Tracks pointer-producing/forwarding uses (load/gep/cast/phi/select) and
+ * records escape sites (store-as-value, call arguments, returns).
  *
  * @param ai The AllocaInst.
- * @return Set of values (users) that take the address.
+ * @return Set of values involved in address flow/escape.
  */
 std::set<Value *> pdg::pdgutils::computeAddrTakenVarsFromAlloc(AllocaInst &ai) {
   std::set<Value *> addr_taken_vars;
-  for (auto *user : ai.users()) {
-    if (isa<LoadInst>(user))
-      addr_taken_vars.insert(user);
+  std::vector<Value *> worklist;
+  std::set<Value *> visited;
+  worklist.push_back(&ai);
+  visited.insert(&ai);
+
+  while (!worklist.empty()) {
+    Value *tracked = worklist.back();
+    worklist.pop_back();
+    for (auto *user : tracked->users()) {
+      if (auto *si = dyn_cast<StoreInst>(user)) {
+        // Address escapes if it is stored as a value.
+        if (si->getValueOperand() == tracked) {
+          addr_taken_vars.insert(si->getPointerOperand());
+        }
+        continue;
+      }
+
+      if (auto *cb = dyn_cast<CallBase>(user)) {
+        for (unsigned idx = 0; idx < cb->arg_size(); ++idx) {
+          if (cb->getArgOperand(idx) == tracked) {
+            addr_taken_vars.insert(cb);
+            break;
+          }
+        }
+        continue;
+      }
+
+      if (auto *ret = dyn_cast<ReturnInst>(user)) {
+        if (ret->getReturnValue() == tracked)
+          addr_taken_vars.insert(ret);
+        continue;
+      }
+
+      if (auto *li = dyn_cast<LoadInst>(user)) {
+        if (li->getPointerOperand() == tracked && li->getType()->isPointerTy()) {
+          addr_taken_vars.insert(li);
+          if (visited.insert(li).second)
+            worklist.push_back(li);
+        }
+        continue;
+      }
+
+      if (isa<GetElementPtrInst>(user) || isa<BitCastInst>(user) ||
+          isa<PHINode>(user) || isa<SelectInst>(user)) {
+        addr_taken_vars.insert(user);
+        if (visited.insert(user).second)
+          worklist.push_back(user);
+      }
+    }
   }
   return addr_taken_vars;
 }
