@@ -174,16 +174,23 @@ NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val,
       return getValueNodeForConstant(c, ctx);
 
   auto ctxIt = valueNodeMap.find(ctxKeyOrNull(ctx));
-  decltype(ctxIt->second.find(val)) itr;
-  if (ctxIt == valueNodeMap.end())
-    goto fallback;
-  itr = ctxIt->second.find(val);
-  if (itr == ctxIt->second.end())
-    goto fallback;
-  else
-    return itr->second;
+  if (ctxIt != valueNodeMap.end()) {
+    auto itr = ctxIt->second.find(val);
+    if (itr != ctxIt->second.end())
+      return itr->second;
+  }
 
-fallback:
+  // For context-insensitive analysis (ctx == nullptr / single context) there
+  // is only one bucket, so the fallback below is safe.  For context-sensitive
+  // analysis, crossing context boundaries is unsound; we return InvalidIndex
+  // to signal "not found in this context" rather than silently returning a
+  // node from an unrelated context.
+  if (ctx != nullptr) {
+    // Context-sensitive: do NOT fall back across contexts.
+    return InvalidIndex;
+  }
+
+  // Context-insensitive fallback: return the first (and only) node.
   auto bucket = valueNodeBuckets.find(val);
   if (bucket != valueNodeBuckets.end() && !bucket->second.empty())
     return bucket->second.front();
@@ -227,16 +234,18 @@ NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val,
       return getObjectNodeForConstant(c, ctx);
 
   auto ctxIt = objNodeMap.find(ctxKeyOrNull(ctx));
-  decltype(ctxIt->second.find(val)) itr;
-  if (ctxIt == objNodeMap.end())
-    goto fallback;
-  itr = ctxIt->second.find(val);
-  if (itr == ctxIt->second.end())
-    goto fallback;
-  else
-    return itr->second;
+  if (ctxIt != objNodeMap.end()) {
+    auto itr = ctxIt->second.find(val);
+    if (itr != ctxIt->second.end())
+      return itr->second;
+  }
 
-fallback:
+  // For context-sensitive analysis, do NOT fall back across contexts to avoid
+  // returning an object node from an unrelated calling context (Bug 1.4).
+  if (ctx != nullptr)
+    return InvalidIndex;
+
+  // Context-insensitive fallback: scan all (single) context.
   for (auto const &entry : objNodeMap) {
     auto found = entry.second.find(val);
     if (found != entry.second.end())
@@ -278,16 +287,17 @@ AndersNodeFactory::getObjectNodeForConstant(const llvm::Constant *c,
 NodeIndex AndersNodeFactory::getReturnNodeFor(const llvm::Function *f,
                                               CtxKey ctx) const {
   auto ctxIt = returnMap.find(ctxKeyOrNull(ctx));
-  decltype(ctxIt->second.find(f)) itr;
-  if (ctxIt == returnMap.end())
-    goto fallback;
-  itr = ctxIt->second.find(f);
-  if (itr == ctxIt->second.end())
-    goto fallback;
-  else
-    return itr->second;
+  if (ctxIt != returnMap.end()) {
+    auto itr = ctxIt->second.find(f);
+    if (itr != ctxIt->second.end())
+      return itr->second;
+  }
 
-fallback:
+  // For context-sensitive analysis, do NOT fall back across contexts (Bug 1.4).
+  if (ctx != nullptr)
+    return InvalidIndex;
+
+  // Context-insensitive fallback.
   for (auto const &entry : returnMap) {
     auto found = entry.second.find(f);
     if (found != entry.second.end())
@@ -299,16 +309,17 @@ fallback:
 NodeIndex AndersNodeFactory::getVarargNodeFor(const llvm::Function *f,
                                               CtxKey ctx) const {
   auto ctxIt = varargMap.find(ctxKeyOrNull(ctx));
-  decltype(ctxIt->second.find(f)) itr;
-  if (ctxIt == varargMap.end())
-    goto fallback;
-  itr = ctxIt->second.find(f);
-  if (itr == ctxIt->second.end())
-    goto fallback;
-  else
-    return itr->second;
+  if (ctxIt != varargMap.end()) {
+    auto itr = ctxIt->second.find(f);
+    if (itr != ctxIt->second.end())
+      return itr->second;
+  }
 
-fallback:
+  // For context-sensitive analysis, do NOT fall back across contexts (Bug 1.4).
+  if (ctx != nullptr)
+    return InvalidIndex;
+
+  // Context-insensitive fallback.
   for (auto const &entry : varargMap) {
     auto found = entry.second.find(f);
     if (found != entry.second.end())

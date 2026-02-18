@@ -237,10 +237,21 @@ ContextPolicy makeContextPolicy(unsigned kCallSite) {
     return buildKCallStringPolicy<1>("1-CFA");
   case 2:
     return buildKCallStringPolicy<2>("2-CFA");
+  case 0:
+    return buildCtxPolicy<aser::NoCtx>(0, "NoCtx");
   default:
+    // k > 2 is not supported; warn and fall back to context-insensitive.
+    llvm::errs() << "WARNING: Andersen: k-callsite depth " << kCallSite
+                 << " is not supported (max is 2); falling back to "
+                    "context-insensitive analysis (k=0).\n";
     return buildCtxPolicy<aser::NoCtx>(0, "NoCtx");
   }
 }
+
+// Definition of the static ID member declared in Andersen.h.
+// Without this definition any ODR-use of Andersen::ID (e.g. passing it to
+// getAnalysis<>()) would cause a linker error.
+char Andersen::ID = 0;
 
 ContextPolicy getSelectedAndersenContextPolicy() {
   return makeContextPolicy(AndersenKContext);
@@ -309,7 +320,15 @@ bool Andersen::getPointsToSet(const llvm::Value *v,
 
   if (!sawKnown)
     return false;
-  return !sawUnknown || !ptsSet.isEmpty();
+
+  // If any node resolved to the universal pointer, the returned set is
+  // incomplete (the pointer may point to anything).  Insert the universal
+  // object node as a sentinel so that callers can detect this condition by
+  // checking whether the set contains getUniversalObjNode().
+  if (sawUnknown)
+    ptsSet.insert(static_cast<unsigned>(nodeFactory.getUniversalObjNode()));
+
+  return true;
 }
 
 bool Andersen::getPointsToSetInContext(const llvm::Value *v,

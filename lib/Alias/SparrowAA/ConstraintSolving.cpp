@@ -164,17 +164,24 @@ public:
   }
 
   void mergeNodes(NodeIndex dst, NodeIndex src) {
-    auto itr = graph.find(src);
-    if (itr == graph.end())
+    auto srcItr = graph.find(src);
+    if (srcItr == graph.end())
       return;
 
-    const ConstraintGraphNode &srcNode = itr->second;
-    itr = graph.find(dst);
-    if (itr == graph.end()) {
+    // Take a copy of the source edges before potentially invalidating the
+    // iterator by inserting a new dst node below.
+    ConstraintGraphNode srcNodeCopy = srcItr->second;
+
+    auto dstItr = graph.find(dst);
+    if (dstItr == graph.end()) {
+      // Create a fresh node for dst (not a copy of src — src has the wrong
+      // index).  Then merge src's edges into it.
       ConstraintGraphNode dstNode(dst);
-      graph.insert(std::make_pair(dst, srcNode));
-    } else
-      (itr->second).mergeEdges(srcNode);
+      dstNode.mergeEdges(srcNodeCopy);
+      graph.insert(std::make_pair(dst, std::move(dstNode)));
+    } else {
+      (dstItr->second).mergeEdges(srcNodeCopy);
+    }
   }
 
   void deleteNode(NodeIndex idx) { graph.erase(idx); }
@@ -394,7 +401,9 @@ private:
            "The SCC didn't have a non-Ref node!");
     for (auto itr = ++scc.begin(), ite = scc.end(); itr != ite; ++itr) {
       NodeIndex cycleNode = *itr;
-      if (cycleNode > nodeFactory.getNumNodes())
+      // REF nodes start at exactly getNumNodes(), so use >= (not >) to
+      // correctly classify the first REF node (index == getNumNodes()).
+      if (cycleNode >= nodeFactory.getNumNodes())
         // For REF nodes, insert it to the collapse map
         collapseMap[cycleNode - nodeFactory.getNumNodes()] = repNode;
       else

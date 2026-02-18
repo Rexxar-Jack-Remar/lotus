@@ -131,6 +131,13 @@ tpa::CFGNode *InstructionTranslator::visitPHINode(PHINode &phiInst) {
     srcs.insert(value);
   }
 
+  // Bug fix: if all incoming values are UndefValue (or the PHI has no
+  // incoming values), srcs will be empty and createCopyNode would assert.
+  // Model an all-undef PHI as a copy from UndefValue (unknown pointer).
+  if (srcs.empty()) {
+    srcs.insert(UndefValue::get(phiInst.getType()));
+  }
+
   return createCopyNode(&phiInst, srcs);
 }
 
@@ -248,9 +255,19 @@ InstructionTranslator::visitExtractValueInst(ExtractValueInst &inst) {
 }
 tpa::CFGNode *
 InstructionTranslator::visitInsertValueInst(InsertValueInst &inst) {
-  if (!inst.getType()->isPointerTy())
-    return nullptr;
-  return handleUnsupportedInst(inst);
+  // InsertValueInst produces an aggregate type, not a pointer type directly.
+  // The pointer analysis only models pointer-typed SSA values, so we can
+  // safely ignore insertvalue instructions here. Any pointer-typed fields
+  // inside the aggregate are recovered at their use sites via
+  // visitExtractValueInst().
+  //
+  // Bug fix: previously this called handleUnsupportedInst() (which calls
+  // llvm_unreachable) whenever the aggregate type happened to be a pointer
+  // type (which is unusual but valid, e.g. a pointer-to-struct aggregate).
+  // This caused an analysis crash on valid IR. Since we handle the extraction
+  // side conservatively, we can safely return nullptr here.
+  (void)inst;
+  return nullptr;
 }
 tpa::CFGNode *InstructionTranslator::visitVAArgInst(VAArgInst &inst) {
   return handleUnsupportedInst(inst);

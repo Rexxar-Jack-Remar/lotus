@@ -57,29 +57,36 @@ static Type *getMallocType(const Instruction *callInst) {
   assert(callInst != nullptr);
 
   PointerType *mallocType = nullptr;
+  // Bug fix: count BitCast uses and GEP uses separately.
+  // Previously both incremented the same counter, so a single GEP user (with
+  // no BitCast user) would set numOfBitCastUses=1 while mallocType remained
+  // nullptr, causing the function to fall through to the numOfBitCastUses==0
+  // branch and call getNonOpaquePointerElementType() on the malloc return type
+  // (i8*), silently producing a byte-array layout instead of the intended type.
   size_t numOfBitCastUses = 0;
+  size_t numOfOtherUses = 0;
 
-  // Determine if CallInst has a bitcast use.
   for (const auto *user : callInst->users()) {
     if (const auto *bcInst = dyn_cast<BitCastInst>(user)) {
       mallocType = cast<PointerType>(bcInst->getDestTy());
       numOfBitCastUses++;
+    } else if (isa<GetElementPtrInst>(user)) {
+      numOfOtherUses++;
     }
-    if (isa<GetElementPtrInst>(user))
-      numOfBitCastUses++;
   }
 
-  // Malloc call has exactly 1 bitcast use, so type is likely the bitcast's destination type.
-  // Note: a single GEP user also increments numOfBitCastUses, but does not
-  // provide a destination element type we can safely recover.
+  // Exactly one BitCast use and no other ambiguous uses: use the cast's
+  // destination element type as the allocation type.
   if (numOfBitCastUses == 1 && mallocType != nullptr)
     return mallocType->getNonOpaquePointerElementType();
 
-  // Malloc call was not bitcast, so type is the malloc function's return type.
-  if (numOfBitCastUses == 0)
+  // No BitCast and no GEP uses: the malloc result is used directly as its
+  // declared return type (e.g., already the right pointer type).
+  if (numOfBitCastUses == 0 && numOfOtherUses == 0)
     return callInst->getType()->getNonOpaquePointerElementType();
 
-  // Type could not be determined. Return i8* as a conservative answer (byte array).
+  // Multiple or ambiguous uses: type cannot be determined reliably.
+  // Return nullptr to fall back to byte-array layout.
   return nullptr;
 }
 
@@ -92,9 +99,15 @@ static bool isSingleAlloc(const TypeLayout *typeLayout,
 
   if (const auto *cInt = dyn_cast<ConstantInt>(sizeVal)) {
     auto size = cInt->getZExtValue();
-    // Verify alignment/size validity
-    assert(size % typeLayout->getSize() == 0);
-    return size == typeLayout->getSize();
+    auto typeSize = typeLayout->getSize();
+    // Bug fix: replaced assert with a graceful check. If the allocation size is
+    // not a multiple of the type size (e.g., due to alignment padding or
+    // programmer computing sizeof(T)+extra), the assert would crash the
+    // analysis. Instead, treat such cases as array/unknown allocations by
+    // returning false, which causes the caller to fall back to byte-array layout.
+    if (typeSize == 0 || size % typeSize != 0)
+      return false;
+    return size == typeSize;
   }
 
   return false;
@@ -380,10 +393,53 @@ void TransferFunction::evalExternalCall(const context::Context *ctx,
   const auto *summary =
       globalState.getExternalPointerTable().lookup(fc.getFunction()->getName());
   if (summary == nullptr) {
-    // Skip functions without annotations: conservatively propagate memory-level successors.
-    // NOTE: This assumes unannotated external functions do not modify analyzed memory 
-    // in a way that affects correctness (unsafe assumption but common in static analysis).
-    addMemLevelSuccessors(ProgramPoint(ctx, &callNode), *localState,
+    // Bug fix: unannotated external functions must be treated conservatively.
+    // Previously they were treated as no-ops, which is unsound: real library
+    // functions (e.g. qsort, pthread_create, custom allocators) can modify
+    // memory and cause pointer arguments to escape.
+    //
+    // Conservative model: for each pointer argument, assume the function may
+    // store Universal into any memory reachable from that argument, and if the
+    // call has a pointer-typed return value, assume it may return Universal.
+    auto &ptrManager = globalState.getPointerManager();
+    auto &env = globalState.getEnv();
+    const auto *uObj = MemoryManager::getUniversalObject();
+    const auto uSet = PtsSet::getSingletonSet(uObj);
+
+    // Escape all pointer arguments: write Universal into their reachable memory.
+    // Only create a new store copy if we actually need to modify it.
+    Store *modifiedStore = nullptr;
+    for (const auto *argVal : callNode) {
+      const auto *argPtr = ptrManager.getPointer(ctx, argVal);
+      if (argPtr == nullptr)
+        continue;
+      auto argPtsSet = env.lookup(argPtr);
+      for (const auto *obj : argPtsSet) {
+        if (obj->isSpecialObject())
+          continue;
+        // Lazily create the store copy on first modification.
+        if (modifiedStore == nullptr)
+          modifiedStore = &evalResult.getNewStore(*localState);
+        // Weak-update all reachable pointer fields with Universal.
+        auto reachable =
+            globalState.getMemoryManager().getReachablePointerObjects(obj);
+        for (const auto *rObj : reachable)
+          modifiedStore->weakUpdate(rObj, uSet);
+        modifiedStore->weakUpdate(obj, uSet);
+      }
+    }
+
+    // If the call has a pointer-typed return destination, it may return Universal.
+    bool envChanged = false;
+    if (const auto *dstVal = callNode.getDest()) {
+      const auto *dstPtr = ptrManager.getOrCreatePointer(ctx, dstVal);
+      envChanged = env.weakUpdate(dstPtr, uSet);
+    }
+
+    if (envChanged)
+      addTopLevelSuccessors(ProgramPoint(ctx, &callNode), evalResult);
+    addMemLevelSuccessors(ProgramPoint(ctx, &callNode),
+                          modifiedStore != nullptr ? *modifiedStore : *localState,
                           evalResult);
     return;
   }

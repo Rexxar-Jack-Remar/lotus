@@ -23,7 +23,7 @@ private:
 	std::vector<CFGNode*> findRedundantNodes(CFG&);
 	void flattenEquivalentMap();
 	void adjustCFG(CFG&, const util::VectorSet<CFGNode*>&);
-	void adjustDefUseChain(const util::VectorSet<CFGNode*>&);
+	void adjustDefUseChain(CFG&, const util::VectorSet<CFGNode*>&);
 	void removeNodes(CFG&, const util::VectorSet<CFGNode*>&);
 public:
 	CFGSimplifier() {}

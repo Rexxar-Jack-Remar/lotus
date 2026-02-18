@@ -233,9 +233,10 @@ void Andersen::addGlobalInitializerConstraints(NodeIndex objNode,
                              nodeFactory.getNullObjectNode());
   } else if (!isa<UndefValue>(c)) {
     // Since we are doing field-insensitive analysis, all objects in the
-    // array/struct are pointed-to by the 1st-field pointer
+    // array/struct/vector are pointed-to by the 1st-field pointer.
+    // ConstantVector (SIMD vector of constants) is also handled here.
     assert(isa<ConstantArray>(c) || isa<ConstantDataSequential>(c) ||
-           isa<ConstantStruct>(c));
+           isa<ConstantStruct>(c) || isa<ConstantVector>(c));
 
     for (unsigned i = 0, e = c->getNumOperands(); i != e; ++i)
       addGlobalInitializerConstraints(objNode, cast<Constant>(c->getOperand(i)),
@@ -457,30 +458,31 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst,
     break;
   }
   case Instruction::InsertValue: {
-    // InsertValue inserts a value into an aggregate (struct/array)
-    if (inst->getType()->isPointerTy()) {
-      // The result type is a pointer-containing aggregate
-      NodeIndex dstIndex = nodeFactory.getValueNodeFor(inst, ctx);
-      assert(dstIndex != AndersNodeFactory::InvalidIndex &&
-             "Failed to find insertvalue dst node");
+    // InsertValue inserts a value into an aggregate (struct/array).
+    // The result type is always an aggregate, never a raw pointer, so the
+    // old guard `inst->getType()->isPointerTy()` was always false and the
+    // entire case was dead code.  We now check whether the inserted value
+    // is a pointer and, if so, track it through a synthetic value node for
+    // the aggregate result so that subsequent ExtractValue instructions can
+    // recover the points-to information.
+    Value *insertedVal = inst->getOperand(1);
+    if (insertedVal->getType()->isPointerTy()) {
+      // Create / retrieve a value node for the aggregate result so that a
+      // later ExtractValue can copy from it.
+      NodeIndex dstIndex = nodeFactory.createValueNode(inst, ctx);
 
-      // Conservative: the result aggregate may contain any pointers from:
-      // 1. The original aggregate
+      // 1. Propagate points-to info from the original aggregate (if tracked).
       Value *aggOperand = inst->getOperand(0);
       NodeIndex srcIndex = nodeFactory.getValueNodeFor(aggOperand, ctx);
       if (srcIndex != AndersNodeFactory::InvalidIndex) {
         constraints.emplace_back(AndersConstraint::COPY, dstIndex, srcIndex);
       }
 
-      // 2. The inserted value (if it's a pointer)
-      Value *insertedVal = inst->getOperand(1);
-      if (insertedVal->getType()->isPointerTy()) {
-        NodeIndex insertedIndex = nodeFactory.getValueNodeFor(insertedVal, ctx);
-        assert(insertedIndex != AndersNodeFactory::InvalidIndex &&
-               "Failed to find insertvalue inserted value node");
-        constraints.emplace_back(AndersConstraint::COPY, dstIndex,
-                                 insertedIndex);
-      }
+      // 2. Propagate points-to info from the inserted pointer value.
+      NodeIndex insertedIndex = nodeFactory.getValueNodeFor(insertedVal, ctx);
+      assert(insertedIndex != AndersNodeFactory::InvalidIndex &&
+             "Failed to find insertvalue inserted value node");
+      constraints.emplace_back(AndersConstraint::COPY, dstIndex, insertedIndex);
     }
     break;
   }
@@ -617,32 +619,24 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
   } else // Indirect call
   {
     ++NumIndirectCalls;
-    // We do the simplest thing here: just assume the returned value can be
-    // anything :)
-    if (cs->getType()->isPointerTy()) {
-      NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, callerCtx);
-      assert(retIndex != AndersNodeFactory::InvalidIndex &&
-             "Failed to find ret node!");
-      constraints.emplace_back(AndersConstraint::COPY, retIndex,
-                               nodeFactory.getUniversalPtrNode());
-    }
-
     // For argument constraints, first search through all addr-taken functions:
     // any function that takes can take as many variables is a potential
-    // candidate
-    // FIXME: so, it seems that the analysis does not use on-the-fly callgraph
-    // construction, but uses a lightweight address-taken analysis to get the
-    // callee list
+    // candidate.
+    // NOTE: We use f.hasAddressTaken() (the correct LLVM predicate) rather
+    // than checking whether a value node exists for f in the current context,
+    // which was previously wrong and could miss or spuriously include callees.
     const Module *M = cs->getFunction()->getParent();
+    bool foundAnyCallee = false;
     for (auto const &f : *M) {
-      NodeIndex funPtrIndex = nodeFactory.getValueNodeFor(&f, callerCtx);
-      if (funPtrIndex == AndersNodeFactory::InvalidIndex)
-        // Not an addr-taken function
+      // Only consider address-taken functions as indirect-call targets.
+      if (!f.hasAddressTaken())
         continue;
 
       if (!f.getFunctionType()->isVarArg() && f.arg_size() != cs->arg_size())
         // #arg mismatch
         continue;
+
+      foundAnyCallee = true;
 
       if (f.isDeclaration() || f.isIntrinsic()) // External library call
       {
@@ -661,11 +655,56 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
                                        nodeFactory.getUniversalPtrNode());
             }
           }
+          // An unresolved external callee means the return is also unknown.
+          if (cs->getType()->isPointerTy()) {
+            NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, callerCtx);
+            assert(retIndex != AndersNodeFactory::InvalidIndex &&
+                   "Failed to find ret node!");
+            constraints.emplace_back(AndersConstraint::COPY, retIndex,
+                                     nodeFactory.getUniversalPtrNode());
+          }
         }
       } else {
         AndersNodeFactory::CtxKey calleeCtx = ctxPolicy.evolve(callerCtx, cs);
         collectConstraintsForFunction(&f, calleeCtx);
+
+        // Connect the callee's return node to the call-site value node.
+        if (cs->getType()->isPointerTy()) {
+          NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, callerCtx);
+          assert(retIndex != AndersNodeFactory::InvalidIndex &&
+                 "Failed to find ret node!");
+          NodeIndex fRetIndex = nodeFactory.getReturnNodeFor(&f, calleeCtx);
+          if (fRetIndex != AndersNodeFactory::InvalidIndex)
+            constraints.emplace_back(AndersConstraint::COPY, retIndex,
+                                     fRetIndex);
+        }
+
         addArgumentConstraintForCall(cs, &f, callerCtx, calleeCtx);
+      }
+    }
+
+    // If no callee was found at all (the function pointer has no address-taken
+    // candidates with a matching arity), fall back conservatively: the return
+    // value and pointer arguments may be anything.  Previously this universal
+    // constraint was added unconditionally, which made every indirect call
+    // return MayAlias with everything even when precise callee return nodes
+    // had already been connected above.
+    if (!foundAnyCallee) {
+      if (cs->getType()->isPointerTy()) {
+        NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, callerCtx);
+        assert(retIndex != AndersNodeFactory::InvalidIndex &&
+               "Failed to find ret node!");
+        constraints.emplace_back(AndersConstraint::COPY, retIndex,
+                                 nodeFactory.getUniversalPtrNode());
+      }
+      for (unsigned i = 0; i < cs->arg_size(); ++i) {
+        Value *argVal = cs->getArgOperand(i);
+        if (argVal->getType()->isPointerTy()) {
+          NodeIndex argIndex = nodeFactory.getValueNodeFor(argVal, callerCtx);
+          if (argIndex != AndersNodeFactory::InvalidIndex)
+            constraints.emplace_back(AndersConstraint::COPY, argIndex,
+                                     nodeFactory.getUniversalPtrNode());
+        }
       }
     }
   }

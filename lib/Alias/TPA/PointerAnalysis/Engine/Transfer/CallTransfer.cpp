@@ -87,6 +87,10 @@ TransferFunction::resolveCallTarget(const context::Context *ctx,
 }
 
 // Collects the points-to sets of all actual arguments at the call site.
+// Returns a vector of PtsSet, one per pointer parameter. If an argument's
+// points-to set is not yet available (empty), we use the empty set as a
+// placeholder rather than aborting early. This prevents premature fixpoints
+// where a callee is never analyzed because one argument is not yet resolved.
 std::vector<PtsSet>
 TransferFunction::collectArgumentPtsSets(const context::Context *ctx,
                                          const CallCFGNode &callNode,
@@ -102,13 +106,21 @@ TransferFunction::collectArgumentPtsSets(const context::Context *ctx,
     if (argItr == argEnd)
       break;
     const auto *argPtr = ptrManager.getPointer(ctx, *argItr);
-    if (argPtr == nullptr)
-      break;
+    if (argPtr == nullptr) {
+      // Argument not yet registered in the pointer manager; use empty set as
+      // placeholder so we still attempt to analyze the callee.
+      result.emplace_back(PtsSet::getEmptySet());
+      ++argItr;
+      continue;
+    }
 
     auto const &pSet = env.lookup(argPtr);
-    if (pSet.empty())
-      break;
-
+    // Bug fix: previously an empty points-to set caused early termination of
+    // the loop, which made evalCallArguments return (false, false) and skip
+    // the entire call. This could cause premature fixpoints if the argument's
+    // set is computed later. Now we include the empty set as a placeholder;
+    // updateParameterPtsSets will simply perform a no-op weak update for it,
+    // and the call will be re-evaluated when the argument's set changes.
     result.emplace_back(pSet);
     ++argItr;
   }

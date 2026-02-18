@@ -200,16 +200,17 @@ MemoryManager::getReachableMemoryObjects(const MemoryObject *obj) const {
   if (obj->isSpecialObject()) {
     ret.push_back(obj);
   } else {
-    auto itr = objSet.find(*obj);
-    assert(itr != objSet.end());
-
     const auto *block = obj->getMemoryBlock();
-    // Since objSet is ordered, objects from the same block might be adjacent?
-    // Note: The logic below assumes ordering in objSet groups blocks, 
-    // or requires a scan. This looks like it relies on a specific sort order of MemoryObject.
-    while (itr != objSet.end() && itr->getMemoryBlock() == block) {
-      ret.push_back(&*itr);
-      ++itr;
+    // Bug fix: the previous implementation relied on the implicit assumption
+    // that all MemoryObjects belonging to the same MemoryBlock are contiguous
+    // in objSet (i.e., that MemoryObject's comparison operator groups by block
+    // first). This is fragile and may silently return incomplete results if the
+    // ordering changes. Instead, do an explicit linear scan over all objects in
+    // objSet and collect those that belong to the same block. This is correct
+    // regardless of the ordering of MemoryObject.
+    for (const auto &candidate : objSet) {
+      if (candidate.getMemoryBlock() == block)
+        ret.push_back(&candidate);
     }
   }
 

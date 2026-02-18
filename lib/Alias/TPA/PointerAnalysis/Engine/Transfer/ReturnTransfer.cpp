@@ -19,16 +19,12 @@ TransferFunction::evalReturnValue(const context::Context *ctx,
 
   const auto *retVal = retNode.getReturnValue();
   if (retVal == nullptr) {
-    // calling a void function
-    if (const auto *dstVal = callNode.getDest()) {
-      const auto *ptr = globalState.getPointerManager().getOrCreatePointer(
-          retSite.getContext(), dstVal);
-      return std::make_pair(
-          true,
-          globalState.getEnv().weakUpdate(
-              ptr, PtsSet::getSingletonSet(MemoryManager::getNullObject())));
-    } else
-      return std::make_pair(true, false);
+    // Void function: no pointer value is returned. Do NOT write NullObject into
+    // the call-site destination — a void return carries no pointer information.
+    // Previously this incorrectly wrote {null} into dstVal, which polluted the
+    // points-to graph for any call site that (erroneously) has a destination
+    // for a void call (e.g., certain invoke lowerings).
+    return std::make_pair(true, false);
   }
 
   const auto *dstVal = callNode.getDest();
