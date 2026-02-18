@@ -235,9 +235,17 @@ LocDPItem FlowDDA::getLoadDpm(const LocDPItem &dpm) const {
   auto it = dpmToLoadDpmMap_.find(dpm);
   if (it != dpmToLoadDpmMap_.end())
     return it->second;
-  // SVF asserts here ("not found??"). Log a warning for debugging.
-  llvm::errs() << "FlowDDA::getLoadDpm: loadDpm not found for dpm (cur="
-               << dpm.getCurNodeID() << "); returning self as fallback\n";
+  // Callers must guard with hasLoadDpm() before calling this. Reaching here
+  // means the load/store DPM linkage was never established, which indicates a
+  // logic error in getDPImWithOldCond or the Store handler. Assert in debug
+  // builds; in release, return the dpm itself so the solver can continue
+  // (conservative: treats the store as a self-alias, which is sound but
+  // imprecise) and emit a diagnostic so the bug is visible.
+  assert(false && "FlowDDA::getLoadDpm: loadDpm not found; "
+                  "caller should have checked hasLoadDpm() first");
+  llvm::errs() << "[DDA bug] FlowDDA::getLoadDpm: loadDpm not found for dpm "
+                  "(cur=" << dpm.getCurNodeID() << "). "
+                  "Returning self — points-to result may be unsound.\n";
   return dpm;
 }
 
@@ -245,9 +253,12 @@ uint32_t FlowDDA::getLoadCVar(const LocDPItem &dpm) const {
   auto it = dpmToLoadCVarMap_.find(dpm);
   if (it != dpmToLoadCVarMap_.end())
     return it->second;
-  // SVF asserts here ("not found??"). Log a warning for debugging.
-  llvm::errs() << "FlowDDA::getLoadCVar: loadCVar not found for dpm (cur="
-               << dpm.getCurNodeID() << "); returning curNodeID as fallback\n";
+  // Same contract as getLoadDpm: callers must check hasLoadDpm() first.
+  assert(false && "FlowDDA::getLoadCVar: loadCVar not found; "
+                  "caller should have checked hasLoadDpm() first");
+  llvm::errs() << "[DDA bug] FlowDDA::getLoadCVar: loadCVar not found for dpm "
+                  "(cur=" << dpm.getCurNodeID() << "). "
+                  "Returning curNodeID — points-to result may be unsound.\n";
   return dpm.getCurNodeID();
 }
 
@@ -311,9 +322,15 @@ LocDPItem FlowDDA::getDPImWithOldCond(const LocDPItem &oldDpm,
   LocDPItem dpm(oldDpm);
   dpm.setLocVar(loc, objId);
   // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load nodes.
+  // Bug 5 fix (FlowDDA side): guard with hasLoadDpm(oldDpm) before calling
+  // getLoadDpm(oldDpm) for Store nodes. The old code called getLoadDpm
+  // unconditionally, triggering assert(false) + unsound fallback when oldDpm
+  // had no associated load DPM (e.g. path from EntryChi/FormalIn to a Store).
   FlowDDA *nonConstThis = const_cast<FlowDDA *>(this);
-  if (isa<StoreSVFGNode>(loc) || isa<StoreChiSVFGNode>(loc))
-    nonConstThis->addLoadDpmAndCVar(dpm, getLoadDpm(oldDpm), objId);
+  if (isa<StoreSVFGNode>(loc) || isa<StoreChiSVFGNode>(loc)) {
+    if (hasLoadDpm(oldDpm))
+      nonConstThis->addLoadDpmAndCVar(dpm, getLoadDpm(oldDpm), objId);
+  }
   if (isa<LoadSVFGNode>(loc) || isa<LoadMuSVFGNode>(loc))
     nonConstThis->addLoadDpmAndCVar(dpm, oldDpm, objId);
   return dpm;
@@ -446,6 +463,15 @@ FlowDDA::PtsSet FlowDDA::getPointsTo(const Value *ptr) {
       return result;
   }
 
+  // Bug 4 fix: resetQuery() clears the per-query DPM caches (dpmToTLPtsMap_,
+  // dpmToADPtsMap_), but ptsCache_ is a cross-query cache keyed by Value*.
+  // If we only erase the queried pointer (old code: ptsCache_.erase(v)), all
+  // other entries remain stale after the DPM caches are cleared. A subsequent
+  // getPointsToCached(alias) call returns the old cached result even though
+  // the underlying DPM caches were rebuilt, causing mayAlias to return
+  // incorrect results. The fix is to clear the entire ptsCache_ before every
+  // fresh solver run so it is always consistent with the DPM caches.
+  ptsCache_.clear();
   resetQuery();
   LocDPItem::setMaxBudget(kDefaultMaxBudget);
   LocDPItem dpm(defNode->getId(), defNode);
@@ -512,6 +538,10 @@ void FlowDDA::buildRecursionInfo() {
         }
       }
   }
+  // Bug 8 fix: the old implementation used a recursive std::function for
+  // Tarjan's SCC algorithm, which overflows the system stack on programs with
+  // deep call chains (e.g. SPEC2006 benchmarks). Replace with an explicit
+  // worklist-based iterative Tarjan's algorithm.
   std::unordered_map<const llvm::Function *, uint32_t> index, lowlink;
   std::stack<const llvm::Function *> stk;
   std::unordered_set<const llvm::Function *> onStack;
@@ -519,42 +549,79 @@ void FlowDDA::buildRecursionInfo() {
   std::vector<std::set<const llvm::Function *>> sccs;
   std::unordered_map<const llvm::Function *, size_t> funcToScc;
 
-  std::function<void(const llvm::Function *)> strongConnect;
-  strongConnect = [&](const llvm::Function *f) {
-    index[f] = lowlink[f] = nextIndex++;
-    stk.push(f);
-    onStack.insert(f);
-    auto it = callGraph.find(f);
-    if (it != callGraph.end()) {
-      for (const llvm::Function *callee : it->second) {
-        if (index.count(callee) == 0) {
-          strongConnect(callee);
-          lowlink[f] = std::min(lowlink[f], lowlink[callee]);
-        } else if (onStack.count(callee))
-          lowlink[f] = std::min(lowlink[f], index[callee]);
+  // Iterative Tarjan: each worklist entry is (function, iterator into its
+  // callee list). When the iterator is at begin() the node is being visited
+  // for the first time; when it is at end() we are returning from all callees.
+  struct Frame {
+    const llvm::Function *f;
+    std::vector<const llvm::Function *>::const_iterator it;
+    std::vector<const llvm::Function *>::const_iterator end;
+  };
+  std::stack<Frame> worklist;
+
+  auto visit = [&](const llvm::Function *root) {
+    if (index.count(root))
+      return;
+    worklist.push({root, {}, {}});
+    while (!worklist.empty()) {
+      Frame &frame = worklist.top();
+      const llvm::Function *f = frame.f;
+      // First visit: assign index/lowlink and push onto SCC stack.
+      if (!index.count(f)) {
+        index[f] = lowlink[f] = nextIndex++;
+        stk.push(f);
+        onStack.insert(f);
+        auto cgIt = callGraph.find(f);
+        if (cgIt != callGraph.end()) {
+          frame.it = cgIt->second.begin();
+          frame.end = cgIt->second.end();
+        } else {
+          frame.it = frame.end = {};
+        }
       }
-    }
-    if (lowlink[f] == index[f]) {
-      std::set<const llvm::Function *> scc;
-      const llvm::Function *w;
-      do {
-        w = stk.top();
-        stk.pop();
-        onStack.erase(w);
-        scc.insert(w);
-      } while (w != f);
-      size_t id = sccs.size();
-      sccs.push_back(std::move(scc));
-      for (const llvm::Function *g : sccs[id])
-        funcToScc[g] = id;
+      // Process next unvisited callee.
+      bool pushed = false;
+      while (frame.it != frame.end) {
+        const llvm::Function *callee = *frame.it;
+        ++frame.it;
+        if (!index.count(callee)) {
+          // Push callee frame; will update lowlink[f] on return.
+          worklist.push({callee, {}, {}});
+          pushed = true;
+          break;
+        } else if (onStack.count(callee)) {
+          lowlink[f] = std::min(lowlink[f], index[callee]);
+        }
+      }
+      if (pushed)
+        continue;
+      // All callees processed: update parent's lowlink and check SCC root.
+      worklist.pop();
+      if (!worklist.empty()) {
+        const llvm::Function *parent = worklist.top().f;
+        lowlink[parent] = std::min(lowlink[parent], lowlink[f]);
+      }
+      if (lowlink[f] == index[f]) {
+        std::set<const llvm::Function *> scc;
+        const llvm::Function *w;
+        do {
+          w = stk.top();
+          stk.pop();
+          onStack.erase(w);
+          scc.insert(w);
+        } while (w != f);
+        size_t id = sccs.size();
+        sccs.push_back(std::move(scc));
+        for (const llvm::Function *g : sccs[id])
+          funcToScc[g] = id;
+      }
     }
   };
 
   for (const llvm::Function &F : *module_) {
     if (F.isDeclaration())
       continue;
-    if (index.count(&F) == 0)
-      strongConnect(&F);
+    visit(&F);
   }
 
   for (const auto &scc : sccs) {

@@ -92,8 +92,8 @@ public:
     ICFGEdge* getICFGEdge(const ICFGNode* src, const ICFGNode* dst, ICFGEdge::ICFGEdgeK kind);
 
     /// @brief Gets the mapping from functions to their entry nodes.
-    /// @return Map of function to entry node.
-    inline functionToEntryIntraNodeMapTy getFunctionEntryMap()
+    /// @return Const reference to the map of function to entry node.
+    inline const functionToEntryIntraNodeMapTy& getFunctionEntryMap() const
     {
         return functionToEntryIntraNodeMap;
     }
@@ -108,10 +108,15 @@ public:
         delete edge;
     }
     
-    /// @brief Removes an ICFG node from the graph.
+    /// @brief Removes an ICFG node and all its incident edges from the graph.
     /// @param node Node to remove.
     inline void removeICFGNode(ICFGNode* node)
     {
+        // Collect edges first to avoid iterator invalidation during removal.
+        std::vector<ICFGEdge*> edgesToRemove;
+        for (auto *e : node->getOutEdges()) edgesToRemove.push_back(e);
+        for (auto *e : node->getInEdges())  edgesToRemove.push_back(e);
+        for (auto *e : edgesToRemove) removeICFGEdge(e);
         removeGNode(node);
     }
 
@@ -149,13 +154,23 @@ public:
     }
 
     /// @brief Adds an ICFG edge to the graph.
+    ///
+    /// Returns true if the edge was newly inserted into both endpoint sets.
+    /// Returns false (and deletes the edge) if it was already present.
+    /// Asserts if the edge was only partially inserted, which indicates an
+    /// inconsistency in the graph's in/out edge sets.
     /// @param edge Edge to add.
-    /// @return True if successfully added.
+    /// @return True if successfully added, false if already existed.
     inline bool addICFGEdge(ICFGEdge* edge)
     {
         bool added1 = edge->getDstNode()->addIncomingEdge(edge);
         bool added2 = edge->getSrcNode()->addOutgoingEdge(edge);
-        assert(added1 && added2 && "edge not added??");
+        if (!added1 && !added2) {
+            // Edge already exists in both sets — it's a true duplicate.
+            delete edge;
+            return false;
+        }
+        assert(added1 && added2 && "edge partially inserted: graph in/out edge sets are inconsistent!");
         return true;
     }
 

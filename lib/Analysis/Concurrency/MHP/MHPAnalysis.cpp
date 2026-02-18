@@ -507,6 +507,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
       SyncNodeType node_type = SyncNodeType::REGULAR_INST;
 
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
+        (void)cb;
         if (m_thread_api->isTDFork(&inst)) {
           node_type = SyncNodeType::THREAD_FORK;
           // After the first fork in thread 0, subsequent instructions are no
@@ -520,7 +521,17 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
           node_type = SyncNodeType::LOCK_ACQUIRE;
         } else if (m_thread_api->isTDRelease(&inst)) {
           node_type = SyncNodeType::LOCK_RELEASE;
-        } // ... etc for other sync types
+        } else if (m_thread_api->isTDExit(&inst)) {
+          node_type = SyncNodeType::THREAD_EXIT;
+        } else if (m_thread_api->isTDCondWait(&inst)) {
+          node_type = SyncNodeType::COND_WAIT;
+        } else if (m_thread_api->isTDCondBroadcast(&inst)) {
+          node_type = SyncNodeType::COND_BROADCAST;
+        } else if (m_thread_api->isTDCondSignal(&inst)) {
+          node_type = SyncNodeType::COND_SIGNAL;
+        } else if (m_thread_api->isTDBarWait(&inst)) {
+          node_type = SyncNodeType::BARRIER_WAIT;
+        }
       }
       m_tfg->createNode(&inst, node_type, tid);
     }
@@ -879,8 +890,11 @@ void MHPAnalysis::handleCondSignal(const Instruction *signal_inst,
   // Improvement: Only pair signals with waits that use compatible mutexes,
   // and track broadcast vs signal for different precision levels.
 
+  // B2 fix: use getCondVal (not getLockVal) for the condition variable.
+  // getLockVal asserts isTDAcquire||isTDRelease and would crash on a signal.
   const Value *cond = m_thread_api->getCondVal(signal_inst);
-  const Value *mutex = m_thread_api->getLockVal(signal_inst);
+  // The mutex is not directly available from a signal instruction; leave null.
+  const Value *mutex = nullptr;
 
   node->setCondValue(cond);
   if (mutex) {
@@ -980,8 +994,10 @@ void MHPAnalysis::analyzeLockSets() {
   errs() << "Analyzing Lock Sets...\n";
   m_lockset = std::make_unique<LockSetAnalysis>(m_module);
   m_lockset->setAliasAnalysis(m_alias_analysis.get());
-  CallGraph CG(m_module);
-  m_lockset->setCallGraph(&CG);
+  // B10 fix: use the module-owned CallGraph (m_call_graph) instead of a
+  // local CG that would be destroyed at the end of this function, leaving
+  // m_lockset with a dangling pointer.
+  m_lockset->setCallGraph(m_call_graph.get());
   m_lockset->analyze();
 }
 

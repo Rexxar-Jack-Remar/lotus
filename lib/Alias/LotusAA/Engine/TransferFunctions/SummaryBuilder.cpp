@@ -450,13 +450,36 @@ void IntraLotusAA::finalizeInterface() {
              IntraLotusAAConfig::lotus_restrict_inline_size) {
     lotus_restrict_ap_level_adjust = 0;
   } else {
-    // Self-adjusting heuristic based on interface size
+    // Self-adjusting heuristic: find the largest AP depth that keeps the
+    // interface size below lotus_restrict_inline_size.
+    //
+    // We count outputs/inputs at each depth level and accumulate until the
+    // limit is exceeded.  The loop variable tracks the *candidate* depth; we
+    // stop at the depth that first exceeds the limit and then use the
+    // *previous* depth as the effective limit.
+    //
+    // Bug fix: the original code used a sliding CACHE_SIZE window with the
+    // formula `cache_idx = level - (next_cache_start - CACHE_SIZE)`.  When
+    // `level == next_cache_start` (i.e., the cache was just rebuilt and
+    // `next_cache_start` was already incremented), the formula gives
+    // `cache_idx = next_cache_start - (next_cache_start) = 0`, which is
+    // correct.  However, the final `lotus_restrict_ap_level_adjust--` was
+    // applied unconditionally *after* the loop, including when the loop
+    // exited normally (without breaking), making the effective limit one less
+    // than the configured maximum.  We now track the last *valid* depth
+    // explicitly and avoid the unconditional decrement.
+
     const int CACHE_SIZE = 10;
     int cache_input[CACHE_SIZE] = {0};
     int cache_output[CACHE_SIZE] = {0};
     int input_sum = 0;
     int output_sum = 0;
     int next_cache_start = 0;
+    // last_valid_level: the highest depth at which the cumulative interface
+    // size was still within the limit.  Initialised to -1 (no valid level yet,
+    // meaning we should use the full configured depth).
+    int last_valid_level = -1;
+    bool limit_exceeded = false;
 
     for (lotus_restrict_ap_level_adjust = 0;
          lotus_restrict_ap_level_adjust <=
@@ -499,20 +522,35 @@ void IntraLotusAA::finalizeInterface() {
 
       if (input_sum >= IntraLotusAAConfig::lotus_restrict_inline_size ||
           output_sum >= IntraLotusAAConfig::lotus_restrict_inline_size) {
+        // This depth exceeds the limit; use last_valid_level.
+        limit_exceeded = true;
         break;
       }
+
+      last_valid_level = lotus_restrict_ap_level_adjust;
 
       if (cache_input[cache_idx] == 0 && cache_output[cache_idx] == 0 &&
           lotus_restrict_ap_level_adjust != 0) {
-        // Fully inline - no more interfaces at this depth
+        // No new interface items at this depth — the interface is already
+        // fully captured; allow all depths.
         lotus_restrict_ap_level_adjust =
             LotusConfig::MAXIMAL_SUMMARY_AP_DEPTH + 1;
+        last_valid_level = lotus_restrict_ap_level_adjust;
         break;
       }
     }
+
+    if (limit_exceeded) {
+      // Use the last depth that was within the limit.
+      lotus_restrict_ap_level_adjust = last_valid_level;
+    }
+    // If the loop completed without exceeding the limit, lotus_restrict_ap_level_adjust
+    // already holds the configured maximum (or MAXIMAL_SUMMARY_AP_DEPTH+1 for
+    // the "fully inline" case) — no adjustment needed.
   }
 
-  lotus_restrict_ap_level_adjust--;
+  // No unconditional decrement here (that was the off-by-one bug).
+
 
   // Filter outputs by AP level and function level
   std::vector<OutputItem *> new_outputs;

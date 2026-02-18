@@ -1,3 +1,45 @@
+/**
+ * @file CycleDetector.h
+ * @brief Generic SCC-based cycle detector for Andersen's constraint graph.
+ *
+ * ## Algorithm
+ *
+ * `CycleDetector` implements **Nuutila's improved Tarjan SCC algorithm**
+ * (Nuutila & Soisalon-Soininen, 1994).  The key difference from classic
+ * Tarjan is the use of an `inComponent` set instead of a "lowlink" array,
+ * which avoids redundant stack operations and is slightly faster in practice.
+ *
+ * The algorithm assigns a DFS timestamp to each node on first visit.  When
+ * the DFS unwinds, if a node's timestamp equals its minimum reachable
+ * timestamp (i.e., it is the root of an SCC), all nodes on the SCC stack
+ * with a higher timestamp belong to the same SCC and are collapsed.
+ *
+ * ## Usage
+ *
+ * Subclass `CycleDetector<MyGraph>` and implement the three pure-virtual
+ * hooks:
+ *
+ * ```cpp
+ * class MyCycleDetector : public CycleDetector<MyGraph> {
+ *   NodeType *getRep(NodeIndex n) override { ... }
+ *   void processNodeOnCycle(const NodeType *n, const NodeType *rep) override { ... }
+ *   void processCycleRepNode(const NodeType *rep) override { ... }
+ *   void run() override { runOnGraph(&myGraph); }
+ * };
+ * ```
+ *
+ * - `getRep` must return the current representative of a (possibly merged)
+ *   node.  During solving, nodes in the same SCC are merged; `getRep`
+ *   follows the union-find chain.
+ * - `processNodeOnCycle` is called for each non-representative node in an
+ *   SCC.  Typically merges the node into the representative.
+ * - `processCycleRepNode` is called once for the representative of each SCC
+ *   (including trivial SCCs of size 1).
+ *
+ * @tparam GraphType  The concrete graph type; must have an
+ *                    `AndersGraphTraits<GraphType>` specialisation.
+ */
+
 #ifndef ANDERSEN_CYCLEDETECTOR_H
 #define ANDERSEN_CYCLEDETECTOR_H
 
@@ -9,10 +51,16 @@
 #include <deque>
 #include <stack>
 
-// An abstract base class that offers the functionality of detecting SCC in a
-// graph Any concreate class that does cycle detection should inherit from this
-// class, specifiy the GraphType, and implement all the abstract virtual
-// functions
+/**
+ * @class CycleDetector
+ * @brief Abstract base class for SCC detection in Andersen's constraint graph.
+ *
+ * Subclasses must implement `getRep`, `processNodeOnCycle`,
+ * `processCycleRepNode`, and `run`.  The DFS traversal and SCC bookkeeping
+ * are handled entirely by this base class.
+ *
+ * @tparam GraphType  The concrete graph type.
+ */
 template <class GraphType> class CycleDetector {
 public:
   using GraphTraits = AndersGraphTraits<GraphType>;
@@ -21,14 +69,16 @@ public:
   using child_iterator = typename GraphTraits::ChildIterator;
 
 private:
-  // The SCC stack
+  /// Stack of nodes whose SCC membership has not yet been finalised.
+  /// Nodes are pushed when first visited and popped when their SCC root is found.
   std::stack<const NodeType *> sccStack;
-  // Map from NodeIndex to DFS number. Nodes that are not in the map are never
-  // visited
+  /// Maps each visited node to its DFS discovery timestamp.
+  /// Nodes absent from this map have not yet been visited.
   llvm::DenseMap<const NodeType *, unsigned> dfsNum;
-  // The "inComponent" array in Nutilla's improved SCC algorithm
+  /// Tracks nodes that have been assigned to a completed SCC.
+  /// Corresponds to the `inComponent` array in Nuutila's algorithm.
   llvm::DenseSet<const NodeType *> inComponent;
-  // DFS timestamp
+  /// Monotonically increasing DFS timestamp counter.
   unsigned timestamp;
 
   // visiting each node and perform some task

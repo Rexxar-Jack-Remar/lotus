@@ -1067,15 +1067,20 @@ void StaticVectorClockMHP::wireSynchronizationEdges() {
       }
     }
   }
+  // B12 fix: barrier semantics require that every arrival HB every other
+  // arrival, but adding edges in BOTH directions between the same pair
+  // creates a cycle in the HB graph (n_i HB n_j AND n_j HB n_i).
+  // Fix: only add the edge i→j for i < j (one direction per pair).
+  // The SVC transfer function treats Barrier edges with SVMax, so a single
+  // directed edge per pair is sufficient to enforce the all-before-all
+  // barrier semantics without introducing cycles.
   for (const auto &kv : m_barrier_waits) {
     const std::vector<const Instruction *> &waits = kv.second;
     for (size_t i = 0; i < waits.size(); ++i) {
       SyncNode *ni = m_tfg->getNode(waits[i]);
       if (!ni)
         continue;
-      for (size_t j = 0; j < waits.size(); ++j) {
-        if (i == j)
-          continue;
+      for (size_t j = i + 1; j < waits.size(); ++j) {
         SyncNode *nj = m_tfg->getNode(waits[j]);
         if (nj) {
           m_tfg->addInterThreadEdge(ni, nj, EdgeKind::Barrier);

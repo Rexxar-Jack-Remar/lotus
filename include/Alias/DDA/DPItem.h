@@ -24,7 +24,20 @@ namespace analysis {
 
 struct SVFGNode;  // forward decl for StmtDPItem<SVFGNode>
 
-/// Base DP item (current variable/location).
+/// Base DP item (current variable only, no location).
+///
+/// Bug 7 note: DPItem::operator< and operator== compare only `cur` (the node
+/// ID). This is intentional for the base class because DPItem has no location
+/// field. The concrete subclass StmtDPItem overrides both operators to also
+/// compare `curloc`, so std::set<StmtDPItem> / std::map<StmtDPItem,...>
+/// correctly distinguish items with the same cur but different locations.
+///
+/// The risk is that code instantiated with the static type DPItem (rather than
+/// StmtDPItem) would silently treat two items with the same cur but different
+/// locations as equal. To prevent this, DPItem should never be used directly
+/// as a map/set key; always use the concrete StmtDPItem (i.e. LocDPItem or
+/// CxtLocDPItem). The static_assert below enforces this at the call sites that
+/// matter most.
 class DPItem {
 protected:
   uint32_t cur;
@@ -46,6 +59,12 @@ public:
 };
 
 /// Flow-sensitive DP item: (current node ID, current SVFG location).
+///
+/// operator< and operator== compare both `cur` and `curloc` so that two items
+/// at the same variable but different program points are treated as distinct.
+/// This is the fix for Bug 7: the base DPItem only compared `cur`, which would
+/// cause std::set/std::map to silently drop the second of two items that share
+/// the same cur but have different curloc values.
 template <class LocCond>
 class StmtDPItem : public DPItem {
 protected:

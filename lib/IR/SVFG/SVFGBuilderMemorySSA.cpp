@@ -310,17 +310,22 @@ void SVFGBuilder::buildMemorySSA() {
             auto &muVec = atomicToMuNodes[&inst];
             auto &chiVec = atomicToChiNodes[&inst];
             if (objIds.empty()) {
+              // Bug #6 fix: use unknownObjId (not empty SVFGNodeBS{}) so the
+              // Mu/Chi nodes have a proper wildcard guard, consistent with the
+              // AtomicRMWInst path and the LoadInst path.
               const uint32_t memRegId = getOrCreateMemReg(ptr);
               const uint32_t muNodeId = nextNode();
               auto *muNode = new LoadMuSVFGNode(muNodeId, icfgNode, nullptr,
-                                                memRegId, SVFGNodeBS{});
+                                                memRegId,
+                                                SVFGNodeBS{getOrCreateUnknownObjId()});
               svfg->addNode(muNode);
               muVec.push_back(muNodeId);
 
               const uint32_t chiNodeId = nextNode();
               const uint32_t chiVersion = nextVersion(&F, memRegId);
               auto *chiNode = new StoreChiSVFGNode(
-                  chiNodeId, icfgNode, nullptr, memRegId, SVFGNodeBS{},
+                  chiNodeId, icfgNode, nullptr, memRegId,
+                  SVFGNodeBS{getOrCreateUnknownObjId()},
                   chiVersion);
               svfg->addNode(chiNode);
               chiVec.push_back(chiNodeId);
@@ -1035,6 +1040,16 @@ void SVFGBuilder::connectMemorySSAEdges() {
                     svfg->addEdge(def, phiNode, SVFGEdgeK::IntraPhi, nullptr,
                                   edgePts);
                     lastDef[memReg] = phiNode;
+                    // Bug #8 fix: the on-demand PHI changes the out-state of
+                    // this block, so successors must be re-queued. The old
+                    // code updated lastDef but never pushed successors back
+                    // onto the worklist, so the PHI's reaching-def was never
+                    // propagated forward.
+                    for (const BasicBlock *succ : successors(bb)) {
+                      if (inQueue.insert(succ).second) {
+                        worklist.push(succ);
+                      }
+                    }
                   }
                 }
                 // If same def, no change needed
@@ -1076,12 +1091,14 @@ void SVFGBuilder::connectMemorySSAEdges() {
                 SVFGNodeBS edgePts = muNode->getDefSVFVars();
                 if (edgePts.empty())
                   edgePts.insert(getOrCreateUnknownObjId());
+                // Bug #7 fix: only add IntraMu — do NOT add a second EntryChi
+                // edge. The old code added both IntraMu and EntryChi when the
+                // reaching def was an EntryChiSVFGNode, causing DDA to traverse
+                // the same path twice and produce duplicate points-to entries.
+                // IntraMu is the correct edge kind for all reaching-def → Mu
+                // connections regardless of whether the def is an EntryChi.
                 svfg->addEdge(reachingDef, muNode, SVFGEdgeK::IntraMu, nullptr,
                               edgePts);
-                if (isa<EntryChiSVFGNode>(reachingDef)) {
-                  svfg->addEdge(reachingDef, muNode, SVFGEdgeK::EntryChi,
-                                nullptr, edgePts);
-                }
 
                 // Design (A): expose SVF-style guarded memory value-flow on
                 // the statement Load node for DDA.
@@ -1124,12 +1141,9 @@ void SVFGBuilder::connectMemorySSAEdges() {
               SVFGNodeBS edgePts = muNode->getDefSVFVars();
               if (edgePts.empty())
                 edgePts.insert(getOrCreateUnknownObjId());
+              // Bug #7 fix: same as above — only IntraMu, no duplicate EntryChi.
               svfg->addEdge(reachingDef, muNode, SVFGEdgeK::IntraMu, nullptr,
                             edgePts);
-              if (isa<EntryChiSVFGNode>(reachingDef)) {
-                svfg->addEdge(reachingDef, muNode, SVFGEdgeK::EntryChi, nullptr,
-                              edgePts);
-              }
 
               if (const LoadInst *li = mu->getLoadInst()) {
                 if (SVFGNode *loadStmt = getLoadStmtNode(li)) {

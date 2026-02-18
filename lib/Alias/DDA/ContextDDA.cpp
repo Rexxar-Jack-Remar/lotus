@@ -228,45 +228,77 @@ void ContextDDA::buildRecursionInfo() {
         }
       }
   }
+  // Bug 8 fix: replace recursive std::function Tarjan with iterative version
+  // to avoid stack overflow on programs with deep call chains.
   std::unordered_map<const llvm::Function *, uint32_t> index, lowlink;
   std::stack<const llvm::Function *> stk;
   std::unordered_set<const llvm::Function *> onStack;
   uint32_t nextIndex = 0;
   std::vector<std::set<const llvm::Function *>> sccs;
 
-  std::function<void(const llvm::Function *)> strongConnect;
-  strongConnect = [&](const llvm::Function *f) {
-    index[f] = lowlink[f] = nextIndex++;
-    stk.push(f);
-    onStack.insert(f);
-    auto it = callGraph.find(f);
-    if (it != callGraph.end()) {
-      for (const llvm::Function *callee : it->second) {
-        if (index.count(callee) == 0) {
-          strongConnect(callee);
-          lowlink[f] = std::min(lowlink[f], lowlink[callee]);
-        } else if (onStack.count(callee))
-          lowlink[f] = std::min(lowlink[f], index[callee]);
+  struct Frame {
+    const llvm::Function *f;
+    std::vector<const llvm::Function *>::const_iterator it;
+    std::vector<const llvm::Function *>::const_iterator end;
+  };
+  std::stack<Frame> worklist;
+
+  auto visit = [&](const llvm::Function *root) {
+    if (index.count(root))
+      return;
+    worklist.push({root, {}, {}});
+    while (!worklist.empty()) {
+      Frame &frame = worklist.top();
+      const llvm::Function *f = frame.f;
+      if (!index.count(f)) {
+        index[f] = lowlink[f] = nextIndex++;
+        stk.push(f);
+        onStack.insert(f);
+        auto cgIt = callGraph.find(f);
+        if (cgIt != callGraph.end()) {
+          frame.it = cgIt->second.begin();
+          frame.end = cgIt->second.end();
+        } else {
+          frame.it = frame.end = {};
+        }
       }
-    }
-    if (lowlink[f] == index[f]) {
-      std::set<const llvm::Function *> scc;
-      const llvm::Function *w;
-      do {
-        w = stk.top();
-        stk.pop();
-        onStack.erase(w);
-        scc.insert(w);
-      } while (w != f);
-      sccs.push_back(std::move(scc));
+      bool pushed = false;
+      while (frame.it != frame.end) {
+        const llvm::Function *callee = *frame.it;
+        ++frame.it;
+        if (!index.count(callee)) {
+          worklist.push({callee, {}, {}});
+          pushed = true;
+          break;
+        } else if (onStack.count(callee)) {
+          lowlink[f] = std::min(lowlink[f], index[callee]);
+        }
+      }
+      if (pushed)
+        continue;
+      worklist.pop();
+      if (!worklist.empty()) {
+        const llvm::Function *parent = worklist.top().f;
+        lowlink[parent] = std::min(lowlink[parent], lowlink[f]);
+      }
+      if (lowlink[f] == index[f]) {
+        std::set<const llvm::Function *> scc;
+        const llvm::Function *w;
+        do {
+          w = stk.top();
+          stk.pop();
+          onStack.erase(w);
+          scc.insert(w);
+        } while (w != f);
+        sccs.push_back(std::move(scc));
+      }
     }
   };
 
   for (const llvm::Function &F : *module) {
     if (F.isDeclaration())
       continue;
-    if (index.count(&F) == 0)
-      strongConnect(&F);
+    visit(&F);
   }
 
   std::unordered_map<const llvm::Function *, size_t> funcToScc;
@@ -466,9 +498,17 @@ CxtLocDPItem ContextDDA::getLoadDpm(const CxtLocDPItem &dpm) const {
   auto it = dpmToLoadDpmMap_.find(dpm);
   if (it != dpmToLoadDpmMap_.end())
     return it->second;
-  // SVF asserts here ("not found??"). Log a warning for debugging.
-  llvm::errs() << "ContextDDA::getLoadDpm: loadDpm not found for dpm (cur="
-               << dpm.getCurNodeID() << "); returning self as fallback\n";
+  // Callers must guard with hasLoadDpm() before calling this. Reaching here
+  // means the load/store DPM linkage was never established, which indicates a
+  // logic error in getDPImWithOldCond or the Store handler. Assert in debug
+  // builds; in release, return the dpm itself so the solver can continue
+  // (conservative: treats the store as a self-alias, which is sound but
+  // imprecise) and emit a diagnostic so the bug is visible.
+  assert(false && "ContextDDA::getLoadDpm: loadDpm not found; "
+                  "caller should have checked hasLoadDpm() first");
+  llvm::errs() << "[DDA bug] ContextDDA::getLoadDpm: loadDpm not found for dpm "
+                  "(cur=" << dpm.getCurNodeID() << "). "
+                  "Returning self — points-to result may be unsound.\n";
   return dpm;
 }
 
@@ -476,9 +516,12 @@ CxtVar ContextDDA::getLoadCVar(const CxtLocDPItem &dpm) const {
   auto it = dpmToLoadCVarMap_.find(dpm);
   if (it != dpmToLoadCVarMap_.end())
     return it->second;
-  // SVF asserts here ("not found??"). Log a warning for debugging.
-  llvm::errs() << "ContextDDA::getLoadCVar: loadCVar not found for dpm (cur="
-               << dpm.getCurNodeID() << "); returning condVar as fallback\n";
+  // Same contract as getLoadDpm: callers must check hasLoadDpm() first.
+  assert(false && "ContextDDA::getLoadCVar: loadCVar not found; "
+                  "caller should have checked hasLoadDpm() first");
+  llvm::errs() << "[DDA bug] ContextDDA::getLoadCVar: loadCVar not found for dpm "
+                  "(cur=" << dpm.getCurNodeID() << "). "
+                  "Returning condVar — points-to result may be unsound.\n";
   return dpm.getCondVar();
 }
 
@@ -536,9 +579,22 @@ void ContextDDA::initInsensitiveEdges() {
   SVFG *svfg = getSVFG();
   if (!svfg)
     return;
-  SVFGStats stats(svfg);
-  stats.performSCCAnalysis(SVFGStats::SVFGEdgeSet{});
+
+  // Bug 6 fix: performSCCAnalysis takes the set of already-known insensitive
+  // call/ret edges so it can exclude them from the SCC condensation (treating
+  // them as cut edges). The old code passed an empty set, which caused the SCC
+  // analysis to include recursion-marked edges in the condensation graph,
+  // potentially producing an incorrect SCC decomposition that either missed
+  // cycle edges or incorrectly merged SCCs.
+  //
+  // Correct approach (matching SVF ContextDDA::initInsensitiveEdges):
+  //   1. First pass: collect all call/ret edges that are in recursion.
+  //   2. Pass that set to performSCCAnalysis as the seed insensitive edges.
+  //   3. Second pass: add any remaining call/ret edges that are in an SVFG SCC.
   CxtLocDPItem dummy(CxtVar(ContextCond(), 0), nullptr);
+
+  // Step 1: collect recursion-based insensitive edges.
+  SVFGStats::SVFGEdgeSet recursionInsensitive;
   for (const auto &pair : *svfg) {
     SVFGNode *node = pair.second;
     if (!node)
@@ -553,10 +609,30 @@ void ContextDDA::initInsensitiveEdges() {
         csId = getCSIDAtCall(dummy, edge);
       else
         csId = getCSIDAtRet(dummy, edge);
-      if (csId != 0 && isEdgeInRecursion(csId)) {
-        insensitveEdges_.insert(edge);
+      if (csId != 0 && isEdgeInRecursion(csId))
+        recursionInsensitive.insert(edge);
+    }
+  }
+  // Mark recursion edges as insensitive immediately.
+  for (const SVFGEdge *e : recursionInsensitive)
+    insensitveEdges_.insert(const_cast<SVFGEdge *>(e));
+
+  // Step 2: run SCC analysis with the recursion edges excluded.
+  SVFGStats stats(svfg);
+  stats.performSCCAnalysis(recursionInsensitive);
+
+  // Step 3: add any remaining call/ret edges that lie within an SVFG SCC.
+  for (const auto &pair : *svfg) {
+    SVFGNode *node = pair.second;
+    if (!node)
+      continue;
+    for (SVFGEdge *edge : node->getInEdges()) {
+      if (!edge)
         continue;
-      }
+      if (!isCallEdge(edge) && !isRetEdge(edge))
+        continue;
+      if (insensitveEdges_.count(edge))
+        continue; // already marked by recursion pass
       if (stats.isEdgeInSVFGSCC(edge))
         insensitveEdges_.insert(edge);
     }
@@ -630,9 +706,15 @@ CxtLocDPItem ContextDDA::getDPImWithOldCond(const CxtLocDPItem &oldDpm,
   CxtLocDPItem dpm(oldDpm);
   dpm.setLocVar(loc, var.get_id());
   // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load nodes.
+  // Bug 5 fix: guard with hasLoadDpm(oldDpm) before calling getLoadDpm(oldDpm).
+  // The old code called getLoadDpm unconditionally for Store nodes, triggering
+  // assert(false) + unsound fallback when oldDpm had no associated load DPM
+  // (e.g. when the solver reaches a Store via a path from EntryChi/FormalIn).
   ContextDDA *nonConstThis = const_cast<ContextDDA *>(this);
-  if (llvm::isa<StoreSVFGNode>(loc) || llvm::isa<StoreChiSVFGNode>(loc))
-    nonConstThis->addLoadDpmAndCVar(dpm, getLoadDpm(oldDpm), var);
+  if (llvm::isa<StoreSVFGNode>(loc) || llvm::isa<StoreChiSVFGNode>(loc)) {
+    if (hasLoadDpm(oldDpm))
+      nonConstThis->addLoadDpmAndCVar(dpm, getLoadDpm(oldDpm), var);
+  }
   if (llvm::isa<LoadSVFGNode>(loc) || llvm::isa<LoadMuSVFGNode>(loc))
     nonConstThis->addLoadDpmAndCVar(dpm, oldDpm, var);
   return dpm;

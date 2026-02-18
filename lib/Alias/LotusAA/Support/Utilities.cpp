@@ -256,9 +256,38 @@ bool IntraLotusAA::isSameInterface(IntraLotusAA *to_compare) {
   if (outputs.size() != to_compare->outputs.size())
     return false;
 
-  // TODO: Could do deeper comparison
-  return false;
+  // Compare input access paths
+  for (auto &input_pair : inputs) {
+    Value *arg = input_pair.first;
+    if (!to_compare->inputs.count(arg))
+      return false;
+    AccessPath &ap1 = input_pair.second;
+    AccessPath &ap2 = to_compare->inputs[arg];
+    if (ap1.getParentPtr() != ap2.getParentPtr() ||
+        ap1.getOffset() != ap2.getOffset())
+      return false;
+  }
+
+  // Compare output symbolic info (access paths)
+  for (size_t i = 0; i < outputs.size(); i++) {
+    OutputItem *o1 = outputs[i];
+    OutputItem *o2 = to_compare->outputs[i];
+    if (o1->getType() != o2->getType())
+      return false;
+    AccessPath &ap1 = o1->getSymbolicInfo();
+    AccessPath &ap2 = o2->getSymbolicInfo();
+    if (ap1.getParentPtr() != ap2.getParentPtr() ||
+        ap1.getOffset() != ap2.getOffset())
+      return false;
+  }
+
+  // Compare escaped object count
+  if (escape_objs.size() != to_compare->escape_objs.size())
+    return false;
+
+  return true;
 }
+
 
 bool IntraLotusAA::isPure() {
   // Pure if no side-effect outputs and no escaped objects

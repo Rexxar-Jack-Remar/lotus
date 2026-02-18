@@ -149,7 +149,13 @@ protected:
                          uint32_t loadCVarObjId);
   void connectIndirectCallees(const LocDPItem &dpm, const PtsSet &funPts,
                               std::vector<SVFGEdge *> &newEdges);
-  void onIndirectEdgesAdded() { buildRecursionInfo(); }
+  void onIndirectEdgesAdded() {
+    // The SVFG has been mutated (new call edges added). Invalidate ptsCache_
+    // so that subsequent mayAlias/mayNull calls recompute against the updated
+    // graph rather than returning stale pre-mutation results (bug #9).
+    ptsCache_.clear();
+    buildRecursionInfo();
+  }
   void resetQueryLoadMaps();
   void insertOutOfBudgetDpm(const LocDPItem &dpm);
   bool isOutOfBudgetDpm(const LocDPItem &dpm) const;

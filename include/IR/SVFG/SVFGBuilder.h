@@ -222,6 +222,13 @@ private:
   std::unordered_map<const llvm::Function *, std::vector<uint32_t>>
       funcEntryChi;
 
+  /// @brief Deduplication set for EntryChiSVFGNode creation (Bug #9 fix).
+  /// Tracks which (entryFunc, memReg) pairs already have an EntryChi node so
+  /// that re-visiting the same alloca/global via multiple uses does not create
+  /// duplicate nodes.
+  std::unordered_map<const llvm::Function *,
+                     std::unordered_set<uint32_t>> funcEntryChiMemRegs;
+
   /// @brief Function exit mu nodes
   std::unordered_map<const llvm::Function *, std::vector<uint32_t>> funcExitMu;
 

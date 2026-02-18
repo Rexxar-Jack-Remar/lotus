@@ -153,6 +153,15 @@ protected:
       }
       CPtSet storePts;
       startNewPTCompFromStoreDst(storePts, dpm);
+      // Bug 1/5 fix (Store handler): getLoadCVar(dpm) is only valid when dpm
+      // has an associated load DPM. If there is no load DPM (e.g. the solver
+      // was started directly at a Store node, not via a Load), we cannot
+      // determine which load object to match against. In that case, conservatively
+      // propagate along the indirect value-flow edge (same as the "else" branch).
+      if (!derived().hasLoadDpm(dpm)) {
+        backtraceAlongIndirectVF(pts, dpm, CPtSet{});
+        break;
+      }
       derived().forEachElementInCPtSet(
           storePts, [&](const CVar &storeObj, uint32_t /*objId*/) {
             if (derived().propagateViaObj(storeObj, derived().getLoadCVar(dpm))) {
@@ -235,7 +244,11 @@ protected:
         ddaStat_->numOfInfeasiblePath++;
       return;
     }
-    if (derived().isIndirectEdge(edge))
+    // Bug 1 fix: only forward load-DPM info when oldDpm actually has one.
+    // The old code called getLoadDpm/getLoadCVar unconditionally on every
+    // indirect edge, which triggered assert(false) + unsound fallback when
+    // oldDpm was a fresh DPItem (e.g. starting at EntryChi or FormalIn).
+    if (derived().isIndirectEdge(edge) && derived().hasLoadDpm(oldDpm))
       derived().addLoadDpmAndCVar(dpm, derived().getLoadDpm(oldDpm),
                                    derived().getLoadCVar(oldDpm));
     if (ddaStat_)
@@ -252,8 +265,15 @@ protected:
     SVFGNode *loadSrc = svfg->getNode(ptrNodeId);
     if (!loadSrc)
       return;
-    SVFGEdge *edge =
-        svfg->getIntraVFGEdge(loadSrc, load, SVFGEdgeK::IntraDirect);
+    // Bug 2 fix: the SVFG builder connects the load-pointer operand to the
+    // LoadSVFGNode with IntraCopy (not IntraDirect). Using IntraDirect caused
+    // getIntraVFGEdge to always return nullptr, silently dropping the load's
+    // pointer source and returning an empty points-to set for every load.
+    // Try IntraCopy first; fall back to IntraDirect for compatibility with
+    // alternative builders that may use IntraDirect.
+    SVFGEdge *edge = svfg->getIntraVFGEdge(loadSrc, load, SVFGEdgeK::IntraCopy);
+    if (!edge)
+      edge = svfg->getIntraVFGEdge(loadSrc, load, SVFGEdgeK::IntraDirect);
     if (edge)
       backwardPropDpm(loadPts, ptrNodeId, oldDpm, edge);
   }
@@ -268,8 +288,10 @@ protected:
     SVFGNode *storeDst = svfg->getNode(ptrNodeId);
     if (!storeDst)
       return;
-    SVFGEdge *edge =
-        svfg->getIntraVFGEdge(storeDst, store, SVFGEdgeK::IntraDirect);
+    // Bug 2 fix (store side): same as load — try IntraCopy first.
+    SVFGEdge *edge = svfg->getIntraVFGEdge(storeDst, store, SVFGEdgeK::IntraCopy);
+    if (!edge)
+      edge = svfg->getIntraVFGEdge(storeDst, store, SVFGEdgeK::IntraDirect);
     if (edge)
       backwardPropDpm(storePts, ptrNodeId, oldDpm, edge);
   }
@@ -322,9 +344,50 @@ protected:
       if (it == locToDpmSetMap_.end())
         continue;
       for (const DPIm &dstDpm : it->second) {
+        // Bug 3 fix: the old condition
+        //   !indirectCall && isIndirectEdge(edge) && !isa<LoadSVFGNode>(dst)
+        // only re-evaluated dstDpm when dstDpm.getCurNodeID() == dpm.getCurNodeID().
+        // For memory SSA nodes (StoreChiSVFGNode, IntraMSSAPhiSVFGNode,
+        // FormalInSVFGNode, etc.) the object IDs typically differ, so the
+        // condition was never true and new points-to facts were never propagated
+        // forward through those nodes.
+        //
+        // The correct rule (matching SVF DDAVFSolver::reComputeForEdges) is:
+        //   - For indirect edges to non-Load memory nodes: re-evaluate only
+        //     when the object IDs match (same object flowing through the edge).
+        //   - For all other cases (direct edges, indirect call edges, indirect
+        //     edges to Load nodes): always re-evaluate.
+        //
+        // We additionally check the edge guard: if the guard is non-empty and
+        // does not contain dpm.getCurNodeID() (and has no wildcard), the edge
+        // cannot carry the current object, so skip it.
         if (!indirectCall && derived().isIndirectEdge(edge) &&
             !llvm::isa<LoadSVFGNode>(dst)) {
-          if (dstDpm.getCurNodeID() == dpm.getCurNodeID()) {
+          // Check edge guard before deciding whether to re-evaluate.
+          const std::set<uint32_t> &guard = edge->getPointsTo();
+          bool guardAllows = guard.empty();
+          if (!guardAllows) {
+            if (guard.count(dpm.getCurNodeID()))
+              guardAllows = true;
+            if (!guardAllows) {
+              SVFG *svfg = derived().getSVFG();
+              for (uint32_t id : guard) {
+                if (svfg && svfg->isUnknownObject(id)) {
+                  guardAllows = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (!guardAllows)
+            continue;
+          // Re-evaluate if the object IDs match OR if the destination is a
+          // memory node that may merge multiple definitions (PHI, FormalIn).
+          const bool isMemMergeNode =
+              llvm::isa<IntraMSSAPhiSVFGNode>(dst) ||
+              llvm::isa<FormalInSVFGNode>(dst) ||
+              llvm::isa<EntryChiSVFGNode>(dst);
+          if (dstDpm.getCurNodeID() == dpm.getCurNodeID() || isMemMergeNode) {
             if (ddaStat_)
               ddaStat_->numOfStepInCycle++;
             clearbkVisited(dstDpm);

@@ -1,3 +1,50 @@
+/**
+ * @file TemplatePtsSet.h
+ * @brief Runtime-selectable points-to set for Andersen's analysis.
+ *
+ * ## Design
+ *
+ * `RuntimePtsSet` is a **type-erased wrapper** around the concrete points-to
+ * set implementations (`AndersPtsSet` backed by `llvm::SparseBitVector`, or
+ * `BDDAndersPtsSet` backed by a BDD library).  It uses the **type-erasure
+ * idiom** (Concept/Model pattern) to allow the implementation to be selected
+ * at runtime via `selectImplementation()` without changing any call sites.
+ *
+ * ## Implementation Selection
+ *
+ * The active implementation is stored in a process-global variable and
+ * applies to all `RuntimePtsSet` objects created after the call:
+ *
+ * ```cpp
+ * // Select BDD backend before constructing the Andersen object:
+ * selectGlobalPtsSetImpl(PtsSetImpl::BDD);
+ * Andersen aa(M);
+ * ```
+ *
+ * The default is `PtsSetImpl::SPARSE_BITVECTOR`.
+ *
+ * ## Type Erasure (Concept/Model)
+ *
+ * Internally, `RuntimePtsSet` holds a `std::unique_ptr<Concept>` where
+ * `Concept` is a pure-virtual interface.  `Model<Impl>` is a concrete
+ * template that wraps a specific `Impl` (e.g., `AndersPtsSet`).  This
+ * avoids virtual dispatch in the common case by using `dynamic_cast` to
+ * detect same-type operands and fall back to the virtual path only for
+ * cross-type operations (which should not occur in practice).
+ *
+ * ## Iteration Cache
+ *
+ * Because `llvm::SparseBitVector::iterator` is not a random-access iterator,
+ * `RuntimePtsSet` maintains a lazily-populated `std::vector<Index>` cache
+ * for `begin()`/`end()`.  The cache is invalidated on any mutating operation
+ * (`insert`, `unionWith`, `clear`).
+ *
+ * ## Aliases
+ *
+ * `DefaultPtsSet` is a type alias for `RuntimePtsSet` and is used throughout
+ * the Andersen implementation.
+ */
+
 #ifndef ANDERSEN_TEMPLATE_PTSSET_H
 #define ANDERSEN_TEMPLATE_PTSSET_H
 
@@ -6,11 +53,25 @@
 
 #include <memory>
 
-// An enumeration for the available points-to set implementations
-enum class PtsSetImpl { SPARSE_BITVECTOR, BDD };
+/**
+ * @enum PtsSetImpl
+ * @brief Selects the backing data structure for `RuntimePtsSet`.
+ */
+enum class PtsSetImpl {
+  SPARSE_BITVECTOR, ///< Use `llvm::SparseBitVector` (default; good for sparse sets).
+  BDD               ///< Use a BDD library (better for large, dense sets).
+};
 
-// Runtime-selectable points-to set that keeps the public interface of
-// the previous SparseBitVector-backed class while allowing a BDD backend.
+/**
+ * @class RuntimePtsSet
+ * @brief Type-erased, runtime-selectable points-to set.
+ *
+ * Presents the same public interface as `AndersPtsSet` but delegates all
+ * operations to the implementation selected by `selectImplementation()`.
+ *
+ * @note All mutating operations (`insert`, `unionWith`, `clear`) invalidate
+ *       the iteration cache.  Iterating over the set materialises the cache.
+ */
 class RuntimePtsSet {
 public:
   using Index = std::uint64_t;
@@ -120,24 +181,35 @@ private:
     }
   };
 
+  /// @brief Construct a new `Concept` instance for the currently active implementation.
   static std::unique_ptr<Concept> makeImpl();
+  /// @brief Populate `cache` from `impl` if the cache is stale.
   void refreshCache() const;
 
-  std::unique_ptr<Concept> impl;
+  std::unique_ptr<Concept> impl;  ///< Type-erased concrete implementation.
+  /// Lazily-populated sorted element cache for iteration.
+  /// Shared across copies (copy-on-write semantics via `shared_ptr`).
+  /// Reset to nullptr on any mutating operation.
   mutable std::shared_ptr<std::vector<Index>> cache;
 
+  /// @brief Process-global implementation selector (default: SPARSE_BITVECTOR).
   static PtsSetImpl &activeImpl();
 };
 
+/**
+ * @brief Set the global points-to set implementation for all future `RuntimePtsSet` objects.
+ * @param impl  The desired implementation (`SPARSE_BITVECTOR` or `BDD`).
+ */
 inline void selectGlobalPtsSetImpl(PtsSetImpl impl) {
   RuntimePtsSet::selectImplementation(impl);
 }
 
+/// @brief Return the currently active global points-to set implementation.
 inline PtsSetImpl getGlobalPtsSetImpl() {
   return RuntimePtsSet::selectedImplementation();
 }
 
-// Preserve the previous name used across Andersen implementation.
+/// @brief Alias for `RuntimePtsSet` — the name used throughout the Andersen implementation.
 using DefaultPtsSet = RuntimePtsSet;
 
 // === Inline implementation details ===================================== //

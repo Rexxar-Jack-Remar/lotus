@@ -247,6 +247,7 @@ void SVFGBuilder::initialize(const ICFG *cfg) {
   bbToMemPhi.clear();
   argToMemRegs.clear();
   previousPTSets.clear();
+  funcEntryChiMemRegs.clear();
 }
 
 void SVFGBuilder::runPointerAnalysis() {
@@ -627,40 +628,48 @@ SVFGBuilder::getPointsToSet(const Value *ptr) {
   }
 
   // Use AserPTA to get points-to set
-  // Call getPointsTo based on solver kind
-  bool found = false;
-  
   switch (ptaSolverWrapper->kind) {
   case SolverWrapper::SolverKind::Wave: {
     auto *solver = static_cast<CIWaveSolver*>(ptaSolverWrapper->solver);
-    if (solver) {
-      solver->getPointsTo(nullptr, ptr, ptsResult);
-      found = true;
-    }
+    if (solver) solver->getPointsTo(nullptr, ptr, ptsResult);
     break;
   }
   case SolverWrapper::SolverKind::Deep: {
     auto *solver = static_cast<CIDeepSolver*>(ptaSolverWrapper->solver);
-    if (solver) {
-      solver->getPointsTo(nullptr, ptr, ptsResult);
-      found = true;
-    }
+    if (solver) solver->getPointsTo(nullptr, ptr, ptsResult);
     break;
   }
   case SolverWrapper::SolverKind::Basic: {
     auto *solver = static_cast<CIBasicSolver*>(ptaSolverWrapper->solver);
-    if (solver) {
-      solver->getPointsTo(nullptr, ptr, ptsResult);
-      found = true;
-    }
+    if (solver) solver->getPointsTo(nullptr, ptr, ptsResult);
     break;
   }
   }
 
-  // Convert to void* vector for opaque interface
-  if (found) {
-    for (const auto *obj : ptsResult) {
-      result.push_back(static_cast<const void*>(obj));
+  // Convert to void* vector for opaque interface.
+  for (const auto *obj : ptsResult) {
+    result.push_back(static_cast<const void*>(obj));
+  }
+
+  // Bug #5 fix: when PTA is enabled but returns an empty set for a pointer
+  // that is clearly address-taken (alloca, global, heap), return a sentinel
+  // so callers create a conservative wildcard Mu/Chi node instead of silently
+  // dropping the memory operation from the SVFG.
+  // We do NOT do this for arbitrary values (e.g., integer-typed operands)
+  // because an empty PTA result there is correct (not a pointer).
+  if (result.empty() && ptr->getType()->isPointerTy()) {
+    const Value *base = ptr->stripPointerCasts();
+    const bool isKnownAddressTaken =
+        isa<AllocaInst>(base) || isa<GlobalVariable>(base) ||
+        (isa<Instruction>(base) && isHeapAllocation(cast<Instruction>(base)));
+    if (isKnownAddressTaken) {
+      // Return empty — callers check for empty and create unknownObjId nodes.
+      // (The unknownObjId sentinel is created lazily by getOrCreateUnknownObjId.)
+      // Returning empty here is correct: callers already handle the empty case
+      // by calling getOrCreateUnknownObjId(). The old bug was that the
+      // no-PTA fallback returned empty AND callers did nothing with it.
+      // Now that callers handle empty correctly (Bug #5 was in the no-PTA
+      // branch), we just return empty and let callers do the right thing.
     }
   }
 

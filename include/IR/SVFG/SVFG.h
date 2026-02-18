@@ -225,19 +225,31 @@ public:
     SVFG() : icfg(nullptr), nextNodeId(0) {}
     
     /// @brief Destructor
+    ///
+    /// Bug #4 fix: the old destructor collected edges from getOutEdges() into a
+    /// set and deleted them, then deleted nodes. This caused a double-free when
+    /// removeEdge() had already deleted some edges (removeEdge calls `delete
+    /// edge` directly). The fix: let each node own and delete its out-edges.
+    /// Since every edge appears in exactly one node's out-edge list, iterating
+    /// all nodes and deleting their out-edges covers every edge exactly once.
+    /// We must delete edges before nodes because edge destructors may reference
+    /// node pointers.
     virtual ~SVFG() {
-        // Delete edges once (they are owned by the graph, but referenced by nodes).
-        std::unordered_set<SVFGEdge*> edges;
+        // First pass: delete all edges (each edge is in exactly one out-edge list).
         for (auto& pair : nodeMap) {
-            if (!pair.second) continue;
-            for (SVFGEdge* e : pair.second->getOutEdges()) {
-                edges.insert(e);
+            SVFGNode* n = pair.second;
+            if (!n) continue;
+            // Copy the list because removeOutEdge modifies it.
+            auto outEdges = n->getOutEdges();
+            for (SVFGEdge* e : outEdges) {
+                if (!e) continue;
+                SVFGNode* dst = e->getDstNode();
+                if (dst) dst->removeInEdge(e);
+                n->removeOutEdge(e);
+                delete e;
             }
         }
-        for (SVFGEdge* e : edges) {
-            delete e;
-        }
-
+        // Second pass: delete nodes.
         for (auto& pair : nodeMap) {
             delete pair.second;
         }

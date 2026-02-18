@@ -69,18 +69,34 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
               getOrAddIntraBlockICFGNode(&calledFunc->getEntryBlock());
           icfg->addCallEdge(srcNode, calleeEntryNode, call);
 
-          for (inst_iterator I = inst_begin(calledFunc),
-                             E = inst_end(calledFunc);
-               I != E;) {
+          // The return edge should target the return-site block, i.e. the
+          // unique successor of the call-site block in the caller's CFG.
+          // A call instruction always terminates its own basic block in LLVM
+          // IR (the next BB is the normal-return successor at index 0).
+          ICFGNode *returnSiteNode = nullptr;
+          if (auto *invokeInst = dyn_cast<InvokeInst>(call)) {
+            // For invoke, the normal-return destination is the normal dest BB.
+            returnSiteNode =
+                getOrAddIntraBlockICFGNode(invokeInst->getNormalDest());
+          } else {
+            // For a regular call, the return site is the block that follows
+            // the call-site block (its unique successor).
+            const BasicBlock *callBB = call->getParent();
+            if (succ_begin(callBB) != succ_end(callBB))
+              returnSiteNode =
+                  getOrAddIntraBlockICFGNode(*succ_begin(callBB));
+          }
 
-            Instruction &ci = *I;
-            ++I;
-
-            if (isa<ReturnInst>(&ci)) {
-
-              ICFGNode *calleeExitNode =
-                  getOrAddIntraBlockICFGNode(ci.getParent());
-              icfg->addRetEdge(calleeExitNode, srcNode, call);
+          if (returnSiteNode) {
+            for (inst_iterator I = inst_begin(calledFunc),
+                               E = inst_end(calledFunc);
+                 I != E; ++I) {
+              Instruction &ci = *I;
+              if (isa<ReturnInst>(&ci)) {
+                ICFGNode *calleeExitNode =
+                    getOrAddIntraBlockICFGNode(ci.getParent());
+                icfg->addRetEdge(calleeExitNode, returnSiteNode, call);
+              }
             }
           }
         }
@@ -91,9 +107,9 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
 
 void ICFGBuilder::removeIntraBlockCycle() {
 
-  auto funcMap = icfg->getFunctionEntryMap();
+  const auto &funcMap = icfg->getFunctionEntryMap();
 
-  for (auto p : funcMap) {
+  for (const auto &p : funcMap) {
     const Function *func = p.first;
 
     std::set<ICFGEdge *> res;
@@ -117,9 +133,9 @@ void ICFGBuilder::removeIntraBlockCycle() {
 
 void ICFGBuilder::removeInterCallCycle() {
 
-  auto funcMap = icfg->getFunctionEntryMap();
+  const auto &funcMap = icfg->getFunctionEntryMap();
 
-  for (auto p : funcMap) {
+  for (const auto &p : funcMap) {
     const Function *func = p.first;
 
     std::set<ICFGEdge *> res;

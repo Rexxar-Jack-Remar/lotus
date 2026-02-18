@@ -870,8 +870,12 @@ bool MemoryLdStMapClass::insertReachingDef(const BasicBlock *BB,
 }
 
 bool MemoryLdStMapClass::isDoublePointer(ConstInstrPtr Instr) {
+  // B29 fix: assert(1) is always true and never fires — it was meant to be
+  // assert(0) or llvm_unreachable to catch non-LoadInst inputs.  Replace with
+  // a proper guard that returns false for non-load instructions instead of
+  // silently continuing with a null Ld pointer.
   if (!isa<LoadInst>(Instr))
-    assert(1);
+    return false;
   auto *Ld = dyn_cast<LoadInst>(Instr);
     const auto *LoadedVal = Ld->getPointerOperand();
     auto *PtrType = LoadedVal->getType();
@@ -913,18 +917,22 @@ void MemoryLdStMapClass::print(raw_ostream &O) {
 
 const SetOfInstructions &
 MemoryLdStMapClass::getFuncGeneratingDefs(const Function *F) const{
+  // B30 fix: the original code heap-allocated a SetOfInstructions and
+  // returned a reference to it, leaking memory on every call for an unknown
+  // function.  Use a static empty sentinel instead — it is never modified
+  // through the const overload so this is safe.
+  static const SetOfInstructions EmptySet;
   if (EXISTSinMap(FuncGeneratingDefs, F))
     return FuncGeneratingDefs.at(F);
-  SetOfInstructions *Temp = new SetOfInstructions;
-  return *Temp;
-  // TODO Memory Leak
+  return EmptySet;
 }
 
 SetOfInstructions &
 MemoryLdStMapClass::getFuncGeneratingDefs(const Function *F) {
+  // B30 fix: the original code heap-allocated a SetOfInstructions and stored
+  // a copy of it in the map, leaking the heap object.  Use value-init instead.
   if (!EXISTSinMap(FuncGeneratingDefs, F)) {
-    SetOfInstructions *Temp = new SetOfInstructions;
-    FuncGeneratingDefs[F] = *Temp ;
+    FuncGeneratingDefs[F] = SetOfInstructions{};
   }
   return FuncGeneratingDefs.at(F);
 }
@@ -2042,11 +2050,33 @@ GetElementPtrInst *MemAccessRangeAnalysis::getGEP(Instruction *Ptr){
   return nullptr;
 }
 
-int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &maxSCEV_string, ScalarEvolution &SE){
+// B32 fix: 'foundUnkown' was declared 'static', so it retained its value
+// across top-level calls to getSCEVMaxValue().  Once any call encountered an
+// unknown SCEV, every subsequent call would see foundUnkown==true and
+// immediately bail out, producing wrong results for all later instructions.
+//
+// The correct fix is to pass the flag by reference so that:
+//   1. Each top-level call starts with foundUnkown=false (caller resets it).
+//   2. Recursive calls can propagate the flag back to their caller.
+//
+// The public wrapper (called from handleInstruction) resets the flag before
+// each top-level invocation.
+static int getSCEVMaxValueImpl(std::vector<const SCEV *> &SimplifySCEVStack,
+                               std::string &maxSCEV_string,
+                               ScalarEvolution &SE,
+                               bool &foundUnkown);
+
+int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack,
+                   std::string &maxSCEV_string,
+                   ScalarEvolution &SE) {
+  bool foundUnkown = false; // reset on every top-level call
+  return getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
+}
+
+static int getSCEVMaxValueImpl(std::vector<const SCEV *> &SimplifySCEVStack, std::string &maxSCEV_string, ScalarEvolution &SE, bool &foundUnkown){
   if (SimplifySCEVStack.empty()) return 0;
   const SCEV * inst_scev = SimplifySCEVStack.back();
   SimplifySCEVStack.pop_back();
-  static bool foundUnkown = false;
   LLVM_DEBUG(dbgs()<<"\n simplify scev:"<<*inst_scev);
   //<<"\n scev vec size:"<<SimplifySCEVStack.size()
   //<<"\n "<<maxSCEV_string);
@@ -2064,7 +2094,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                        const SCEVTruncateExpr *Trunc = cast<SCEVTruncateExpr>(inst_scev);
                        const SCEV *Op = Trunc->getOperand();
                        SimplifySCEVStack.push_back(Op);
-                       getSCEVMaxValue(SimplifySCEVStack,maxSCEV_string, SE);
+                       getSCEVMaxValueImpl(SimplifySCEVStack,maxSCEV_string, SE, foundUnkown);
                        return -1;
                      }
     case scZeroExtend: {
@@ -2072,7 +2102,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                          const SCEVZeroExtendExpr *ZExt = cast<SCEVZeroExtendExpr>(inst_scev);
                          const SCEV *Op = ZExt->getOperand();
                          SimplifySCEVStack.push_back(Op);
-                         getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                         getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                          return -1;
                        }
     case scSignExtend: {
@@ -2080,7 +2110,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                          const SCEVSignExtendExpr *SExt = cast<SCEVSignExtendExpr>(inst_scev);
                          const SCEV *Op = SExt->getOperand();
                          SimplifySCEVStack.push_back(Op);
-                         getSCEVMaxValue(SimplifySCEVStack,  maxSCEV_string, SE);
+                         getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                          return -1;
                        }
     case scAddRecExpr: {
@@ -2097,7 +2127,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                            beCountScev = SE.getMinusSCEV(beCountScev, SE.getOne(beCountScev->getType()));
                            const SCEV *maxVal = AR->evaluateAtIteration(beCountScev, SE);
                            SimplifySCEVStack.push_back(maxVal);
-                           getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                           getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                          } else 
                            foundUnkown = true;
                          /*for add rec, simply get the maximum possible 
@@ -2110,7 +2140,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                       const SCEV *Op= Sadd->getOperand(0);
                       SimplifySCEVStack.push_back(Op);//simplify first op
                       maxSCEV_string += "(";
-                      getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                      getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                       if (foundUnkown) {
                         maxSCEV_string += ")";
                         return -1;
@@ -2120,7 +2150,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                       SimplifySCEVStack.pop_back();
                       Op= Sadd->getOperand(1);
                       SimplifySCEVStack.push_back(Op);//simplify second op
-                      getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                      getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                       maxSCEV_string += ")";
                       if (!foundUnkown) {
                         const SCEV *rhs = SimplifySCEVStack.back();
@@ -2128,7 +2158,6 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                         const auto *addSCEV  = SE.getAddExpr(lhs, rhs);
                         SimplifySCEVStack.push_back(addSCEV);
                       }
-                      //          getSCEVMaxValue(SimplifySCEVStack, SE, LI);
                       return -1;
                     }
     case scMulExpr: {
@@ -2137,7 +2166,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                       const SCEV *Op= Smul->getOperand(0);
                       SimplifySCEVStack.push_back(Op);//simplify first op
                       maxSCEV_string += "(";
-                      getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                      getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                       if (foundUnkown) {
                         maxSCEV_string += ")";
                         return -1;
@@ -2148,7 +2177,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                       Op= Smul->getOperand(1);
                       SimplifySCEVStack.push_back(Op);//simplify second op
                       maxSCEV_string += "*";
-                      getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                      getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                       LLVM_DEBUG(dbgs()<<"\n size:"<<SimplifySCEVStack.size()<<"\n");
                       maxSCEV_string += ")";
                       if (!foundUnkown) {
@@ -2157,20 +2186,16 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                         const auto *mulSCEV  = SE.getMulExpr(lhs, rhs);
                         SimplifySCEVStack.push_back(mulSCEV);
                       }
-                      //            getSCEVMaxValue(SimplifySCEVStack, SE, LI);
                       return -1;
                     }
     case scUMaxExpr:
     case scSMaxExpr: {
                        LLVM_DEBUG(dbgs()<<"\n max scev:");
                        const SCEVNAryExpr *SExt = cast<SCEVNAryExpr>(inst_scev);
-                       //const SCEVSMaxExpr *SExt = cast<SCEVSMaxExpr>(inst_scev);
-                       //ignore the first operator in maxexpr, example:(0 smax %p) 
-                       //TODO Generalize it
                        LLVM_DEBUG(dbgs()<<"\n Ignoring SMax first op:"<<*SExt);
                        const SCEV *Op = SExt->getOperand(1);
                        SimplifySCEVStack.push_back(Op);
-                       getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                       getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                        return -1;
                      }
     case scUMinExpr:
@@ -2178,13 +2203,10 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
     case scSequentialUMinExpr:{
                        LLVM_DEBUG(dbgs()<<"\n min scev:");
                        const SCEVNAryExpr *SExt = cast<SCEVNAryExpr>(inst_scev);
-                       //const SCEVSMaxExpr *SExt = cast<SCEVSMaxExpr>(inst_scev);
-                       //ignore the first operator in maxexpr, example:(0 smax %p) 
-                       //TODO Generalize it
                        LLVM_DEBUG(dbgs()<<"\n Ignoring SMin first op:"<<*SExt);
                        const SCEV *Op = SExt->getOperand(1);
                        SimplifySCEVStack.push_back(Op);
-                       getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                       getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                        return -1;
                     }
     case scUDivExpr: {
@@ -2193,7 +2215,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                        const SCEV *Op= UDiv->getLHS() ;
                        SimplifySCEVStack.push_back(Op);//simplify first op
                        maxSCEV_string += "(";
-                       getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                       getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                        if (foundUnkown) {
                          maxSCEV_string += ")";
                          return -1;
@@ -2203,7 +2225,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                        Op= UDiv->getRHS();
                        SimplifySCEVStack.push_back(Op);//simplify second op
                        maxSCEV_string += "/";
-                       getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                       getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                        maxSCEV_string += ")";
                        if (!foundUnkown) {
                          const SCEV *rhs = SimplifySCEVStack.back();
@@ -2211,7 +2233,6 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                          const auto *divSCEV  = SE.getUDivExpr(lhs, rhs);
                          SimplifySCEVStack.push_back(divSCEV);
                        }
-                       //              getSCEVMaxValue(SimplifySCEVStack, SE, LI);
                        return -1;
                      }
     case scPtrToInt: {
@@ -2219,7 +2240,7 @@ int getSCEVMaxValue(std::vector<const SCEV *> &SimplifySCEVStack, std::string &m
                       const SCEVPtrToIntExpr *PtrToInt = cast<SCEVPtrToIntExpr>(inst_scev);
                       const SCEV *Op = PtrToInt->getOperand();
                       SimplifySCEVStack.push_back(Op);
-                      getSCEVMaxValue(SimplifySCEVStack, maxSCEV_string, SE);
+                      getSCEVMaxValueImpl(SimplifySCEVStack, maxSCEV_string, SE, foundUnkown);
                       return -1;
                     }
     case scUnknown: {

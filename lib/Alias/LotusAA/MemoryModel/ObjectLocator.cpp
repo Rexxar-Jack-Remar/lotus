@@ -195,14 +195,27 @@ LocValue *ObjectLocator::storeValue(Value *val, Instruction *source,
       store_level = function_level;
   }
 
-  LocValue::UpdateType update_type = LocValue::STRONG;
-
+  // Determine update type: STRONG only when this object has a single,
+  // must-alias points-to target (i.e., the object's points-to set has exactly
+  // one locator and the pointer provably points only here).  In the general
+  // case we use WEAK to avoid killing values that may still be live on other
+  // paths.  The caller can promote to STRONG by passing is_strong=true when
+  // it has proven must-alias (currently unused; left as future work).
+  //
+  // Heuristic: use STRONG only when there are no existing values at this
+  // location in this basic block (first write in the BB), which is the common
+  // case for alloca-initialised locals and is always safe.
   BasicBlock *src_bb = source->getParent();
+  LocValue::UpdateType update_type =
+      loc_values.count(src_bb) && !loc_values[src_bb].empty()
+          ? LocValue::WEAK
+          : LocValue::STRONG;
 
-  // Check if value already exists
+  // Check if value already exists at this exact (source, val) pair.
+  // If so, just ensure it is marked STRONG (idempotent re-store).
   for (auto *loc_val : loc_values[src_bb]) {
     if (loc_val->getPos() == source && loc_val->getVal() == val) {
-      loc_val->resetUpdateType(LocValue::STRONG);
+      // Keep the existing update type; don't unconditionally promote to STRONG.
       return loc_val;
     }
   }
@@ -210,6 +223,7 @@ LocValue *ObjectLocator::storeValue(Value *val, Instruction *source,
   LocValue *loc_val = new LocValue(val, source, update_type);
   loc_values[src_bb].push_back(loc_val);
   placePhi(loc_val, src_bb);
+
 
   if (val != LocValue::FREE_VARIABLE) {
     Type *val_type = val->getType();
@@ -269,20 +283,33 @@ LocValue *ObjectLocator::getVersion(Instruction *pos_inst) {
     std::vector<LocValue *> *lv_list = getValueList(bb);
 
     if (lv_list) {
-      int end_pos = lv_list->size();
+      int end_pos = (int)lv_list->size();
 
       if (bb == startBB) {
-        // Find last value before pos_inst
-        auto it = bb->rbegin(), ie = bb->rend();
-        while (end_pos) {
+        // Find the last LocValue whose defining instruction comes strictly
+        // before pos_inst in program order.  We must reset the reverse
+        // iterator on every candidate check so that we always scan from the
+        // end of the BB rather than continuing from where a previous
+        // iteration left off (the original code shared `it` across the outer
+        // while loop, causing it to advance past the target).
+        while (end_pos > 0) {
           Instruction *last_loc = lv_list->at(end_pos - 1)->getPos();
-          for (; it != ie; ++it) {
+          // Walk the BB in reverse to determine relative order.
+          bool pos_comes_first = false;
+          for (auto it = bb->rbegin(), ie = bb->rend(); it != ie; ++it) {
             Instruction *inst = &(*it);
-            if (inst == pos_inst || inst == last_loc)
+            if (inst == pos_inst) {
+              pos_comes_first = true;
               break;
+            }
+            if (inst == last_loc) {
+              // last_loc comes before pos_inst in reverse order → it is
+              // after pos_inst in forward order → skip it.
+              break;
+            }
           }
-          if (&(*it) == pos_inst)
-            break;
+          if (pos_comes_first)
+            break; // last_loc is before pos_inst; keep end_pos
           --end_pos;
         }
       }
@@ -302,6 +329,7 @@ LocValue *ObjectLocator::getVersion(Instruction *pos_inst) {
 
   return nullptr;
 }
+
 
 // Forward declaration for helper
 static Value *get_constant_from_aggregate(Constant *val, int64_t offset,
@@ -454,7 +482,11 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
 // Constant Extraction Helper
 //===----------------------------------------------------------------------===//
 
-/// Extract constant from aggregate type (arrays, structs) at given offset
+/// Extract constant from aggregate type (arrays, structs) at given byte offset.
+///
+/// @param val    The constant aggregate to index into.
+/// @param offset Byte offset into the aggregate (NOT bits).
+/// @param DL     Data layout used to compute element sizes in bytes.
 static Value *get_constant_from_aggregate(Constant *val, int64_t offset,
                                           const DataLayout *DL) {
   if (!val)
@@ -464,56 +496,51 @@ static Value *get_constant_from_aggregate(Constant *val, int64_t offset,
 
   if (ConstantDataArray *array_global = dyn_cast<ConstantDataArray>(val)) {
     Type *elem_type = array_global->getElementType();
-    int64_t element_size = DL->getTypeSizeInBits(elem_type);
+    // Use byte size to match the byte-offset convention used throughout the
+    // analysis (ObjectLocator offsets are in bytes, not bits).
+    int64_t element_size = (int64_t)DL->getTypeStoreSize(elem_type);
     if (element_size != 0) {
-      int idx = offset / element_size;
-      int remainder = offset % element_size;
+      int64_t idx = offset / element_size;
+      int64_t remainder = offset % element_size;
       if (idx >= 0 && remainder >= 0 &&
-          (unsigned)idx < array_global->getNumElements()) {
-        Constant *element = array_global->getElementAsConstant(idx);
+          (uint64_t)idx < array_global->getNumElements()) {
+        Constant *element = array_global->getElementAsConstant((unsigned)idx);
         result = get_constant_from_aggregate(element, remainder, DL);
       }
     }
   } else if (ConstantArray *array_global = dyn_cast<ConstantArray>(val)) {
     Type *elem_type = array_global->getType()->getElementType();
-    int64_t element_size = DL->getTypeSizeInBits(elem_type);
+    int64_t element_size = (int64_t)DL->getTypeStoreSize(elem_type);
     if (element_size != 0) {
-      int idx = offset / element_size;
-      int remainder = offset % element_size;
+      int64_t idx = offset / element_size;
+      int64_t remainder = offset % element_size;
       if (idx >= 0 && remainder >= 0 &&
-          (unsigned)idx < array_global->getType()->getNumElements()) {
+          (uint64_t)idx < array_global->getType()->getNumElements()) {
         result = get_constant_from_aggregate(
             array_global->getAggregateElement((unsigned)idx), remainder, DL);
       }
     }
   } else if (ConstantStruct *struct_global = dyn_cast<ConstantStruct>(val)) {
     StructType *st = struct_global->getType();
+    const StructLayout *SL = DL->getStructLayout(st);
     unsigned n_elem = st->getNumContainedTypes();
-    int64_t cur_size = 0;
-    int64_t last_size = 0;
-    unsigned idx = 0;
 
-    for (idx = 0; idx < n_elem; idx++) {
-      if (cur_size >= offset)
-        break;
-
-      Type *t = st->getContainedType(idx);
-      last_size = cur_size;
-      cur_size += DL->getTypeSizeInBits(t);
-    }
-
-    if (cur_size == offset && idx < n_elem) {
+    // Find the struct element that contains the requested byte offset using
+    // the data-layout-aware struct layout (handles padding correctly).
+    // Previously this used getTypeSizeInBits() which produced bit offsets
+    // instead of byte offsets, causing wrong field selection.
+    unsigned idx = SL->getElementContainingOffset((uint64_t)offset);
+    if (idx < n_elem) {
+      int64_t field_offset = (int64_t)SL->getElementOffset(idx);
       Constant *elem_val = struct_global->getAggregateElement(idx);
-      result = get_constant_from_aggregate(elem_val, 0, DL);
-    } else if (cur_size > offset && last_size < offset && idx > 0) {
-      Constant *elem_val = struct_global->getAggregateElement(idx - 1);
-      result = get_constant_from_aggregate(elem_val, offset - last_size, DL);
+      result = get_constant_from_aggregate(elem_val, offset - field_offset, DL);
     }
   } else {
     // Scalar constant
     if (offset == 0)
       result = val;
   }
+
 
   // Strip casts from result
   if (result) {

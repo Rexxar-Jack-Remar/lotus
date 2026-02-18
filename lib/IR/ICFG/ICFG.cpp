@@ -140,34 +140,28 @@ ICFGEdge *ICFG::getICFGEdge(const ICFGNode *src, const ICFGNode *dst,
 /// @brief Adds an intraprocedural edge between two nodes.
 ICFGEdge *ICFG::addIntraEdge(ICFGNode *srcNode, ICFGNode *dstNode) {
   checkIntraEdgeParents(srcNode, dstNode);
-  if (ICFGEdge *edge = hasIntraICFGEdge(srcNode, dstNode, ICFGEdge::IntraCF)) {
-    assert(edge->isIntraCFGEdge() && "this should be an intra CFG edge!");
+  if (hasIntraICFGEdge(srcNode, dstNode, ICFGEdge::IntraCF))
     return nullptr;
-  }
   IntraCFGEdge *intraEdge = new IntraCFGEdge(srcNode, dstNode);
-  return (addICFGEdge(intraEdge) ? intraEdge : nullptr);
+  return addICFGEdge(intraEdge) ? intraEdge : nullptr;
 }
 
 /// @brief Adds an interprocedural call edge from caller to callee.
 ICFGEdge *ICFG::addCallEdge(ICFGNode *srcNode, ICFGNode *dstNode,
                             const llvm::Instruction *cs) {
-  if (ICFGEdge *edge = hasInterICFGEdge(srcNode, dstNode, ICFGEdge::CallCF)) {
-    assert(edge->isCallCFGEdge() && "this should be a call CFG edge!");
+  if (hasInterICFGEdge(srcNode, dstNode, ICFGEdge::CallCF))
     return nullptr;
-  }
   CallCFGEdge *callEdge = new CallCFGEdge(srcNode, dstNode, cs);
-  return (addICFGEdge(callEdge) ? callEdge : nullptr);
+  return addICFGEdge(callEdge) ? callEdge : nullptr;
 }
 
 /// @brief Adds an interprocedural return edge from callee to caller.
 ICFGEdge *ICFG::addRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
                            const llvm::Instruction *cs) {
-  if (ICFGEdge *edge = hasInterICFGEdge(srcNode, dstNode, ICFGEdge::RetCF)) {
-    assert(edge->isRetCFGEdge() && "this should be a return CFG edge!");
+  if (hasInterICFGEdge(srcNode, dstNode, ICFGEdge::RetCF))
     return nullptr;
-  }
   RetCFGEdge *retEdge = new RetCFGEdge(srcNode, dstNode, cs);
-  return (addICFGEdge(retEdge) ? retEdge : nullptr);
+  return addICFGEdge(retEdge) ? retEdge : nullptr;
 }
 
 bool ICFG::hasIntraBlockNode(const llvm::BasicBlock *bb) {

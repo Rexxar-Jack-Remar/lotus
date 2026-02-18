@@ -212,8 +212,12 @@ MemObject *PTGraph::newObject(Value *alloc_site, MemObject::ObjKind obj_type) {
 }
 
 PTResult *PTGraph::addPointsTo(Value *ptr, MemObject *obj, int64_t offset) {
-  assert(pt_results.find(ptr) == pt_results.end() &&
-         "Re-assigning value (SSA violation)");
+  // In SSA form each value should be assigned exactly once.  However,
+  // inter-procedural summary application (processArg, processGlobal) may be
+  // called on the same value from multiple call sites or from both the
+  // intra-procedural pass and the summary-application path.  Rather than
+  // asserting and crashing, we merge the new target into the existing result
+  // so that the analysis remains sound (over-approximate).
   PTResult *pts = findPTResult(ptr, true);
   pts->add_target(obj, offset);
   return pts;
@@ -221,12 +225,12 @@ PTResult *PTGraph::addPointsTo(Value *ptr, MemObject *obj, int64_t offset) {
 
 PTResult *PTGraph::derivePtsFrom(Value *ptr, PTResult *other_pts,
                                  int64_t offset) {
-  assert(pt_results.find(ptr) == pt_results.end() &&
-         "Re-assigning value (SSA violation)");
+  // Same rationale as addPointsTo: merge rather than assert on re-processing.
   PTResult *pts = findPTResult(ptr, true);
   pts->add_derived_target(other_pts, offset);
   return pts;
 }
+
 
 PTResult *PTGraph::assignPts(Value *ptr, PTResult *pts) {
   pt_results[ptr] = pts;

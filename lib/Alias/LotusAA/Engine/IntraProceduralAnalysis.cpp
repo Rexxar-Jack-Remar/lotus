@@ -43,11 +43,13 @@
 
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 
+#include <llvm/ADT/PostOrderIterator.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
+
 
 using namespace llvm;
 using namespace std;
@@ -88,17 +90,41 @@ IntraLotusAA::IntraLotusAA(Function *F, LotusAA *lotus_aa)
 
   getReturnInst();
 
-  // Topological sort of BBs (simple RPO)
-  for (BasicBlock &BB : *F) {
-    topBBs.push_back(&BB);
+  // Build a topological (reverse post-order) traversal of the CFG so that
+  // instructions are processed before their uses wherever possible.
+  // The previous code simply iterated over the function's basic block list,
+  // which is NOT guaranteed to be in topological order and causes
+  // processBasePointer() to fall back to processUnknown() for values that
+  // haven't been processed yet.
+  //
+  // ReversePostOrderTraversal gives a correct RPO ordering for reducible CFGs
+  // and a reasonable approximation for irreducible ones.
+  ReversePostOrderTraversal<Function *> RPOT(F);
+  for (BasicBlock *BB : RPOT) {
+    topBBs.push_back(BB);
   }
+
 }
 
 IntraLotusAA::~IntraLotusAA() {
   for (OutputItem *item : outputs) {
     delete item;
   }
+
+  // Delete pseudo-argument Argument objects created in createPseudoOutputNodes
+  // and createEscapedObjects.  These are synthetic LLVM Argument objects that
+  // are NOT owned by any LLVM Function, so they must be freed here.
+  // Previously they were only stored in func_pseudo_ret_cache (as keys in
+  // pt_results and as values in func_ret) but never deleted, causing a leak
+  // proportional to the number of call sites × callees.
+  for (auto &kv : func_pseudo_ret_cache) {
+    // kv.first is the synthetic Argument* we allocated with `new Argument(...)`.
+    // It is safe to delete because it has no parent Function.
+    kv.first->deleteValue();
+  }
+  func_pseudo_ret_cache.clear();
 }
+
 
 void IntraLotusAA::computePTA() {
   if (is_considered_as_library || is_PTA_computed)

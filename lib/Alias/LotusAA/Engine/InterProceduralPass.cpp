@@ -143,9 +143,12 @@ LotusAA::~LotusAA() {
 
 void LotusAA::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
-  AU.addRequired<DominatorTreeWrapperPass>();
-  // Iterated dominance frontier computed on-the-fly via IDFCalculator
+  // Dominator trees are computed and cached on-demand in getDomTree().
+  // We do NOT declare DominatorTreeWrapperPass as required because we manage
+  // our own DominatorTree objects (one per function) rather than using the
+  // pass-manager-provided ones, which would only cover the current function.
 }
+
 
 bool LotusAA::runOnModule(Module &M) {
   DL = &M.getDataLayout();
@@ -191,74 +194,111 @@ bool LotusAA::runOnModule(Module &M) {
 }
 
 void LotusAA::computeGlobalHeuristic(Module &M) {
-  for (Function &f : M) {
-    for (BasicBlock &bb : f) {
-      for (Instruction &inst : bb) {
-        if (StoreInst *store = dyn_cast<StoreInst>(&inst)) {
-          Value *ptr = store->getPointerOperand();
-          Value *val = store->getValueOperand();
-          if (isa<GlobalValue>(ptr) && isa<Constant>(val)) {
-            globalValuesCache_[ptr].insert(val);
-          }
-        }
-      }
+  // Pre-populate the function pointer results with direct calls to global
+  // function pointers that are initialized at the global scope.  This seeds
+  // the on-the-fly call graph so that the first iteration already has some
+  // indirect-call targets for common patterns like:
+  //   void (*fp)(void) = &foo;   // global initializer
+  //   fp();                      // indirect call resolved on first pass
+  for (GlobalVariable &GV : M.globals()) {
+    if (!GV.hasInitializer())
+      continue;
+    Constant *init = GV.getInitializer();
+    // Strip bitcasts to find the underlying function
+    if (Function *F = dyn_cast<Function>(init->stripPointerCasts())) {
+      globalValuesCache_[&GV].insert(F);
     }
   }
 }
 
+
 void LotusAA::initFuncProcessingSeq(Module &M,
                                     std::vector<Function *> &func_seq) {
-  // Simple bottom-up ordering (reverse call graph)
-  map<Function *, int> out_degrees;
+  // Build a bottom-up (callee-before-caller) ordering of functions.
+  //
+  // The previous implementation had two problems:
+  //
+  // 1. Back-edges were only detected *after* the sort (in detectBackEdges),
+  //    but the sort itself needed to know which edges are back-edges to avoid
+  //    counting them in in-degrees.  We now run a DFS-based back-edge
+  //    detection pass first, then build the DAG for Kahn's algorithm.
+  //
+  // 2. Kahn's algorithm silently drops functions that are part of SCCs
+  //    (mutual recursion) because their in-degree never reaches zero.  We
+  //    detect these and append them at the end so they are still analysed.
 
-  // Clear and initialize call graph
+  // --- Step 1: rebuild the raw call graph (all edges, no back-edge filter) ---
   callGraphState_.clear();
 
   std::vector<Function *> allFunctions;
   for (Function &F : M) {
-    allFunctions.push_back(&F);
-    out_degrees[&F] = 0;
+    if (!F.isDeclaration())
+      allFunctions.push_back(&F);
   }
   callGraphState_.initializeForFunctions(allFunctions);
 
-  // Build call graph from function pointer results
   const auto &fpResults = functionPointerResults_.getResultsMap();
   for (const auto &callerResults : fpResults) {
     Function *caller = callerResults.first;
     for (const auto &callsiteResults : callerResults.second) {
       for (Function *callee : callsiteResults.second) {
-        if (!callee)
-          continue;
-
-        if (!callGraphState_.isBackEdge(caller, callee)) {
+        if (callee && !callee->isDeclaration())
           callGraphState_.addEdge(caller, callee);
-          out_degrees[callee]++;
-        }
       }
     }
   }
 
-  // Topological sort
+  // --- Step 2: detect back-edges via DFS so the DAG is acyclic ---
+  {
+    std::set<Function *> dummy;
+    callGraphState_.detectBackEdges(dummy);
+  }
+
+  // --- Step 3: Kahn's topological sort on the DAG (back-edges excluded) ---
+  map<Function *, int> in_degree;
+  for (Function *F : allFunctions)
+    in_degree[F] = 0;
+
+  for (Function *F : allFunctions) {
+    for (Function *callee : callGraphState_.getCallees(F)) {
+      if (!callGraphState_.isBackEdge(F, callee))
+        in_degree[callee]++;
+    }
+  }
+
   std::vector<Function *> worklist;
-  for (auto &pair : out_degrees) {
+  for (auto &pair : in_degree) {
     if (pair.second == 0)
       worklist.push_back(pair.first);
   }
 
   func_seq.clear();
+  std::set<Function *> inSeq;
+
   while (!worklist.empty()) {
     Function *F = worklist.back();
     worklist.pop_back();
-
-    if (F)
-      func_seq.push_back(F);
+    func_seq.push_back(F);
+    inSeq.insert(F);
 
     for (Function *callee : callGraphState_.getCallees(F)) {
-      if (--out_degrees[callee] == 0)
+      if (callGraphState_.isBackEdge(F, callee))
+        continue;
+      if (--in_degree[callee] == 0)
         worklist.push_back(callee);
     }
   }
+
+  // --- Step 4: append any functions dropped by Kahn's (SCC members) ---
+  // These are functions whose in-degree never reached zero because they are
+  // part of a cycle.  Append them in an arbitrary order so they are still
+  // analysed (they will be re-analysed in subsequent fixpoint iterations).
+  for (Function *F : allFunctions) {
+    if (!inSeq.count(F))
+      func_seq.push_back(F);
+  }
 }
+
 
 void LotusAA::initCGBackedge() {
   // Initialize from existing call graph (direct calls)
@@ -341,8 +381,9 @@ void LotusAA::computePtsCgIteratively(Module &M,
       set<Function *> callersNeedingReanalysis = changed_func;
       changed_func.clear();
 
-      for (size_t i = func_seq.size() - 1; i >= 0; i--) {
+      for (int i = (int)func_seq.size() - 1; i >= 0; i--) {
         Function *func = func_seq[i];
+
         IntraLotusAA *func_result = getPtGraph(func);
 
         if (!func_result)

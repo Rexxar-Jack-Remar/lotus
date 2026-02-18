@@ -125,11 +125,6 @@ void IntraLotusAA::processCall(CallBase *call) {
       break;
 
     if (!callee || lotus_aa->isBackEdge(base_func, callee)) {
-      if (call->getType()->isPointerTy() &&
-          (size_t)callee_idx == callees->size() - 1) {
-        if (!pt_results.count(call))
-          addPointsTo(call, newObject(call, MemObject::CONCRETE), 0);
-      }
       callee_idx++;
       continue;
     }
@@ -137,11 +132,6 @@ void IntraLotusAA::processCall(CallBase *call) {
     IntraLotusAA *callee_result = lotus_aa->getPtGraph(callee);
 
     if (!callee_result || callee_result->is_considered_as_library) {
-      if (call->getType()->isPointerTy() &&
-          (size_t)callee_idx == callees->size() - 1) {
-        if (!pt_results.count(call))
-          addPointsTo(call, newObject(call, MemObject::CONCRETE), 0);
-      }
       processUnknownLibraryCall(call);
       callee_idx++;
       continue;
@@ -168,6 +158,14 @@ void IntraLotusAA::processCall(CallBase *call) {
 
     callee_idx++;
   }
+
+  // After processing all callees, if the call returns a pointer and no
+  // points-to result was produced (e.g., all callees were back-edges or
+  // library functions), create a conservative fallback object.
+  if (call->getType()->isPointerTy() && !pt_results.count(call)) {
+    addPointsTo(call, newObject(call, MemObject::CONCRETE), 0);
+  }
+
 }
 
 /// Binds actual arguments to callee's formal parameters and side-effect inputs.
@@ -227,7 +225,8 @@ void IntraLotusAA::processCalleeInput(
       parent_iter = parent_arg;
     }
 
-    for (size_t i = parents.size() - 1; i >= 0; i--) {
+    for (int i = (int)parents.size() - 1; i >= 0; i--) {
+
       Value *curr_arg_val = parents[i];
       processed.insert(curr_arg_val);
       assert(callee_input.count(curr_arg_val) && "Invalid Value found");

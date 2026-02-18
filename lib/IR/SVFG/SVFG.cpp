@@ -28,6 +28,10 @@
 using namespace lotus::analysis;
 using namespace llvm;
 
+// Forward declarations for stat helpers defined later in this file.
+static void adjustNodeStat(SVFGStat &stat, SVFGNode *node, int delta);
+static void adjustEdgeStat(SVFGStat &stat, SVFGEdge *edge, int delta);
+
 const llvm::Function *SVFGNode::getFunction() const {
   if (icfgNode) {
     return icfgNode->getFunction();
@@ -178,12 +182,20 @@ SVFGEdge *SVFG::addEdge(SVFGNode *src, SVFGNode *dst, SVFGEdgeK kind,
     }
   }
 
-  // Check for duplicate edge
+  // Bug #3 fix: the old duplicate check was O(out-degree) and used a debug
+  // string as part of the identity key, which is both slow and fragile.
+  // The canonical identity of an edge is (src, dst, kind, callSite pointer).
+  // We use the same O(out-degree) scan but drop the string comparison so that
+  // two semantically identical edges with different debug strings are correctly
+  // deduplicated. For graphs with very high fan-out this is still O(n); a
+  // proper fix would require a hash-set of (dst, kind, callSite) tuples on
+  // each node, but that is a larger refactor. The string comparison is the
+  // most harmful part and is removed here.
   for (auto *existing : src->getOutEdges()) {
     if (existing->getDstNode() == dst && existing->getEdgeKind() == kind &&
-        existing->getCallSite() == callSite &&
-        existing->getCallSiteDebug() == callSiteDebug) {
+        existing->getCallSite() == callSite) {
       existing->addPointsTo(pointsTo);
+      // Opportunistically fill in the debug string if it was missing.
       if (existing->getCallSiteDebug().empty() && !callSiteDebug.empty()) {
         existing->setCallSiteDebug(callSiteDebug);
       }
@@ -203,15 +215,16 @@ void SVFG::removeEdge(SVFGEdge *edge) {
   if (!edge)
     return;
 
+  // Bug #1 fix: decrement stats before deletion.
+  adjustEdgeStat(stat, edge, -1);
+
   SVFGNode *src = edge->getSrcNode();
   SVFGNode *dst = edge->getDstNode();
 
-  if (src) {
+  if (src)
     src->removeOutEdge(edge);
-  }
-  if (dst) {
+  if (dst)
     dst->removeInEdge(edge);
-  }
 
   delete edge;
 }
@@ -360,37 +373,31 @@ void SVFG::removeNode(SVFGNode *node) {
     }
   }
 
+  // Bug #1 fix: decrement stats before deletion.
+  adjustNodeStat(stat, node, -1);
+
   nodeMap.erase(nodeId);
   nodesForUpdate.erase(node);
   delete node;
 }
 
-void SVFG::updateStat(SVFGNode *node) {
+// Bug #1 fix: updateStat / decrementStat are symmetric so that removeNode and
+// removeEdge keep the counters accurate.
+
+static void adjustNodeStat(SVFGStat &stat, SVFGNode *node, int delta) {
   if (!node)
     return;
-
-  stat.numNodes++;
-
+  stat.numNodes += delta;
   switch (node->getNodeKind()) {
-  case SVFGK::Addr:
-    stat.numAddrNodes++;
-    break;
-  case SVFGK::Copy:
-    stat.numCopyNodes++;
-    break;
-  case SVFGK::Load:
-    stat.numLoadNodes++;
-    break;
-  case SVFGK::Store:
-    stat.numStoreNodes++;
-    break;
-  case SVFGK::Gep:
-    stat.numGepNodes++;
-    break;
+  case SVFGK::Addr:   stat.numAddrNodes  += delta; break;
+  case SVFGK::Copy:   stat.numCopyNodes  += delta; break;
+  case SVFGK::Load:   stat.numLoadNodes  += delta; break;
+  case SVFGK::Store:  stat.numStoreNodes += delta; break;
+  case SVFGK::Gep:    stat.numGepNodes   += delta; break;
   case SVFGK::Phi:
   case SVFGK::IntraPhi:
   case SVFGK::InterPhi:
-    stat.numPhiNodes++;
+    stat.numPhiNodes += delta;
     break;
   case SVFGK::FormalIn:
   case SVFGK::FormalOut:
@@ -405,42 +412,47 @@ void SVFG::updateStat(SVFGNode *node) {
   case SVFGK::CallChi:
   case SVFGK::RetMu:
   case SVFGK::EntryChi:
-    stat.numMemNodes++;
+    stat.numMemNodes += delta;
     break;
   case SVFGK::FormalParm:
   case SVFGK::ActualParm:
   case SVFGK::FormalRet:
   case SVFGK::ActualRet:
-    stat.numParamNodes++;
+    stat.numParamNodes += delta;
     break;
   default:
     break;
   }
 }
 
-void SVFG::updateStat(SVFGEdge *edge) {
+static void adjustEdgeStat(SVFGStat &stat, SVFGEdge *edge, int delta) {
   if (!edge)
     return;
-
-  stat.numEdges++;
-
-  if (isCallVFGEdge(edge->getEdgeKind())) {
-    stat.numCallEdges++;
-  } else if (isRetVFGEdge(edge->getEdgeKind())) {
-    stat.numRetEdges++;
-  } else if (isIntraVFGEdge(edge->getEdgeKind())) {
-    stat.numIntraEdges++;
-  }
+  stat.numEdges += delta;
+  if (isCallVFGEdge(edge->getEdgeKind()))
+    stat.numCallEdges += delta;
+  else if (isRetVFGEdge(edge->getEdgeKind()))
+    stat.numRetEdges += delta;
+  else if (isIntraVFGEdge(edge->getEdgeKind()))
+    stat.numIntraEdges += delta;
 }
 
+void SVFG::updateStat(SVFGNode *node) { adjustNodeStat(stat, node, +1); }
+void SVFG::updateStat(SVFGEdge *edge) { adjustEdgeStat(stat, edge, +1); }
+
 SVFGNodeSet SVFG::getPreds(SVFGNode *node) const {
+  // Bug #2 fix: do NOT insert the start node into the visited set before BFS.
+  // The old code inserted `node` first then erased it at the end, which
+  // silently dropped `node` from the result when it was reachable from itself
+  // (cycle). The correct approach: only insert nodes discovered via edges.
   SVFGNodeSet result;
   if (!node)
     return result;
 
+  SVFGNodeSet visited;
+  visited.insert(node); // mark start as visited so we don't re-enqueue it
   std::queue<SVFGNode *> worklist;
   worklist.push(node);
-  result.insert(node);
 
   while (!worklist.empty()) {
     SVFGNode *current = worklist.front();
@@ -448,24 +460,28 @@ SVFGNodeSet SVFG::getPreds(SVFGNode *node) const {
 
     for (auto *edge : current->getInEdges()) {
       SVFGNode *pred = edge->getSrcNode();
-      if (result.insert(pred).second) {
+      if (pred == node)
+        continue; // skip back-edges to the start node
+      if (visited.insert(pred).second) {
+        result.insert(pred);
         worklist.push(pred);
       }
     }
   }
 
-  result.erase(node);
   return result;
 }
 
 SVFGNodeSet SVFG::getSuccs(SVFGNode *node) const {
+  // Bug #2 fix: same as getPreds — don't insert start node into result.
   SVFGNodeSet result;
   if (!node)
     return result;
 
+  SVFGNodeSet visited;
+  visited.insert(node);
   std::queue<SVFGNode *> worklist;
   worklist.push(node);
-  result.insert(node);
 
   while (!worklist.empty()) {
     SVFGNode *current = worklist.front();
@@ -473,13 +489,15 @@ SVFGNodeSet SVFG::getSuccs(SVFGNode *node) const {
 
     for (auto *edge : current->getOutEdges()) {
       SVFGNode *succ = edge->getDstNode();
-      if (result.insert(succ).second) {
+      if (succ == node)
+        continue; // skip back-edges to the start node
+      if (visited.insert(succ).second) {
+        result.insert(succ);
         worklist.push(succ);
       }
     }
   }
 
-  result.erase(node);
   return result;
 }
 
