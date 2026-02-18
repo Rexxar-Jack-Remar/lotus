@@ -241,7 +241,11 @@ TEST_F(MonoTest, ConstantPropagationMayAliasWeakUpdate) {
 
   auto FactIt = It->second.find(load);
   ASSERT_NE(FactIt, It->second.end());
-  EXPECT_EQ(FactIt->second.Tag, ConstantPropagationTag::Bottom);
+  // A may-alias weak update leaves the value unknown (Top), not unreachable
+  // (Bottom).  Bottom means "unreachable code"; Top means "unknown value".
+  // After `store i32 2, i32* %r` where %r may alias %p, the analysis cannot
+  // determine whether %p was updated, so the result is Top (unknown).
+  EXPECT_EQ(FactIt->second.Tag, ConstantPropagationTag::Top);
 }
 
 TEST_F(MonoTest, UninitVariablesMustAliasClear) {

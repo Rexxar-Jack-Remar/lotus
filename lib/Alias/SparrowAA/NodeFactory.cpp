@@ -182,11 +182,23 @@ NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val,
 
   // For context-insensitive analysis (ctx == nullptr / single context) there
   // is only one bucket, so the fallback below is safe.  For context-sensitive
-  // analysis, crossing context boundaries is unsound; we return InvalidIndex
-  // to signal "not found in this context" rather than silently returning a
-  // node from an unrelated context.
+  // analysis, crossing context boundaries is unsound for local values; we
+  // return InvalidIndex to signal "not found in this context".
+  //
+  // Exception: global variables and functions are context-independent — they
+  // are created once under initialCtx in collectConstraintsForGlobals() and
+  // must be accessible from any calling context.  Fall back to the
+  // valueNodeBuckets (which aggregates nodes across all contexts) for global
+  // values so that a store/load to a global inside a callee context does not
+  // trigger a spurious assertion failure.
   if (ctx != nullptr) {
-    // Context-sensitive: do NOT fall back across contexts.
+    if (isa<GlobalValue>(val)) {
+      // Global: fall back to any context that has a node for this value.
+      auto bucket = valueNodeBuckets.find(val);
+      if (bucket != valueNodeBuckets.end() && !bucket->second.empty())
+        return bucket->second.front();
+    }
+    // Non-global local value not found in this context.
     return InvalidIndex;
   }
 
@@ -242,8 +254,21 @@ NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val,
 
   // For context-sensitive analysis, do NOT fall back across contexts to avoid
   // returning an object node from an unrelated calling context (Bug 1.4).
-  if (ctx != nullptr)
+  //
+  // Exception: global variables are context-independent — their object nodes
+  // are created once under initialCtx in collectConstraintsForGlobals() and
+  // must be accessible from any calling context.
+  if (ctx != nullptr) {
+    if (isa<GlobalValue>(val)) {
+      // Global: fall back to any context that has an object node for this value.
+      for (auto const &entry : objNodeMap) {
+        auto found = entry.second.find(val);
+        if (found != entry.second.end())
+          return found->second;
+      }
+    }
     return InvalidIndex;
+  }
 
   // Context-insensitive fallback: scan all (single) context.
   for (auto const &entry : objNodeMap) {

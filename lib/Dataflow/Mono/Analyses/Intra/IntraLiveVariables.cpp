@@ -81,23 +81,26 @@ std::unique_ptr<DataFlowResult> runLiveVariablesAnalysis(Function *f) {
   IntraMonoSolver<LiveVariablesDomain> Solver(Problem);
   Solver.solve();
 
-  // B6 fix: for a backward analysis the solver's AnalysisIn[n] holds the
-  // facts that flow *into* the backward traversal at node n.  In conventional
-  // (forward-view) liveness terminology:
+  // For a backward analysis the solver's direction is reversed:
+  //   - getPredsOf(n, Backward) returns CFG successors of n
+  //   - getSuccsOf(n, Backward) returns CFG predecessors of n
   //
-  //   Backward solver AnalysisIn[n]  = values live BEFORE n  = forward IN[n]
-  //   Backward solver AnalysisOut[n] = values live AFTER  n  = forward OUT[n]
+  // Therefore the solver computes:
+  //   AnalysisIn[n]  = merge(AnalysisOut[s] for CFG-successors s)
+  //                  = conventional OUT[n]  (live set AFTER n)
+  //   AnalysisOut[n] = normalFlow(n, AnalysisIn[n])
+  //                  = conventional IN[n]   (live set BEFORE n)
   //
-  // The previous code had these two assignments swapped, so callers querying
-  // Result->IN(I) received the post-instruction live set and vice-versa.
+  // The seed is placed at return instructions with an empty set, which
+  // correctly initialises AnalysisIn[ret] = {} (nothing live after return).
   auto Result = std::make_unique<DataFlowResult>();
   for (auto &BB : *f) {
     for (auto &Inst : BB) {
       auto *I = &Inst;
-      // IN[n]  = values live before n  (backward solver's AnalysisIn)
-      Result->IN(I)  = Solver.getInResultsAt(I).getSet();
-      // OUT[n] = values live after  n  (backward solver's AnalysisOut)
-      Result->OUT(I) = Solver.getOutResultsAt(I).getSet();
+      // OUT[n] = values live AFTER  n  (backward solver's AnalysisIn)
+      Result->OUT(I) = Solver.getInResultsAt(I).getSet();
+      // IN[n]  = values live BEFORE n  (backward solver's AnalysisOut)
+      Result->IN(I)  = Solver.getOutResultsAt(I).getSet();
       for (auto &Op : I->operands()) {
         if (isa<Instruction>(Op) || isa<Argument>(Op)) {
           Result->GEN(I).insert(Op);

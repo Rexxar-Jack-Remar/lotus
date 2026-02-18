@@ -80,11 +80,16 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
                 getOrAddIntraBlockICFGNode(invokeInst->getNormalDest());
           } else {
             // For a regular call, the return site is the block that follows
-            // the call-site block (its unique successor).
+            // the call-site block (its unique successor).  If the call-site
+            // block has no CFG successor (e.g., the call and the ret are in
+            // the same single-block function), the return site is the
+            // call-site block itself.
             const BasicBlock *callBB = call->getParent();
             if (succ_begin(callBB) != succ_end(callBB))
               returnSiteNode =
                   getOrAddIntraBlockICFGNode(*succ_begin(callBB));
+            else
+              returnSiteNode = getOrAddIntraBlockICFGNode(callBB);
           }
 
           if (returnSiteNode) {

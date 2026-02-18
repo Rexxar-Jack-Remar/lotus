@@ -271,9 +271,9 @@ private:
       }
     } else if (llvm::isa<llvm::ReturnInst>(PredInst)) {
       // Return edge: PredInst is a return instruction, Inst is the return site.
-      Context CallerCtx = PredCtx;
-      auto *CallSite = CallerCtx.pop_back();
-      if (CallSite != nullptr) {
+      if (!PredCtx.empty()) {
+        Context CallerCtx = PredCtx;
+        auto *CallSite = CallerCtx.pop_back();
         Incoming = Problem.returnFlow(CallSite, PredInst->getFunction(),
                                       PredInst, Inst, PredOut);
       } else {
