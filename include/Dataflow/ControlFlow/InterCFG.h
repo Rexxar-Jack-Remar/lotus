@@ -6,6 +6,7 @@
 #include "llvm/IR/Module.h"
 
 #include <functional>
+#include <map>
 #include <vector>
 
 namespace dataflow {
@@ -36,6 +37,10 @@ public:
 };
 
 /// Default LLVM-backed interprocedural CFG with pluggable callee resolution.
+///
+/// Fix 3.11: getCallersOf() now uses a pre-built caller index (O(1) per
+/// query) instead of scanning every instruction in the module on every call
+/// (O(N) per query → O(N²) overall for context-insensitive analyses).
 class LLVMInterCFG final : public InterCFG {
 public:
   using GetCalleesFn = std::function<std::vector<f_t>(n_t)>;
@@ -73,9 +78,15 @@ public:
 private:
   static std::vector<n_t> continuationInstructions(n_t CallInst);
 
+  /// Build the caller index: Callee → list of call-site instructions.
+  /// Called once in the constructor so getCallersOf() is O(1).
+  void buildCallerIndex();
+
   m_t Mod = nullptr;
   GetCalleesFn GetCallees;
   LLVMIntraCFG Intra;
+  /// Fix 3.11: pre-built caller index for O(1) getCallersOf() queries.
+  std::map<f_t, std::vector<n_t>> CallerIndex;
 };
 
 } // namespace controlflow
@@ -100,6 +111,32 @@ inline LLVMInterCFG::LLVMInterCFG(m_t M, GetCalleesFn GetCallees)
       }
       return Callees;
     };
+  }
+  // Fix 3.11: build the caller index once at construction time.
+  buildCallerIndex();
+}
+
+inline void LLVMInterCFG::buildCallerIndex() {
+  CallerIndex.clear();
+  if (Mod == nullptr) {
+    return;
+  }
+  for (auto &F : *Mod) {
+    if (F.isDeclaration()) {
+      continue;
+    }
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        if (!isCallSite(&I)) {
+          continue;
+        }
+        for (auto *Callee : getCalleesOfCallAt(&I)) {
+          if (Callee != nullptr) {
+            CallerIndex[Callee].push_back(&I);
+          }
+        }
+      }
+    }
   }
 }
 
@@ -212,29 +249,15 @@ LLVMInterCFG::getCalleesOfCallAt(n_t CallSite) const {
 
 inline std::vector<LLVMInterCFG::n_t>
 LLVMInterCFG::getCallersOf(f_t Callee) const {
-  std::vector<n_t> Callers;
-  if (Mod == nullptr || Callee == nullptr) {
-    return Callers;
+  // Fix 3.11: O(1) lookup via pre-built index instead of O(N) scan.
+  if (Callee == nullptr) {
+    return {};
   }
-  for (auto &F : *Mod) {
-    if (F.isDeclaration()) {
-      continue;
-    }
-    for (auto &BB : F) {
-      for (auto &I : BB) {
-        if (!isCallSite(&I)) {
-          continue;
-        }
-        for (auto *C : getCalleesOfCallAt(&I)) {
-          if (C == Callee) {
-            Callers.push_back(&I);
-            break;
-          }
-        }
-      }
-    }
+  auto It = CallerIndex.find(Callee);
+  if (It == CallerIndex.end()) {
+    return {};
   }
-  return Callers;
+  return It->second;
 }
 
 } // namespace controlflow

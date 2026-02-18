@@ -436,18 +436,34 @@ TaintAnalysis::FactSet TaintAnalysis::call_to_return_flow(const llvm::CallBase* 
     const llvm::Function* callee = call->getCalledFunction();
 
     // Handle sources independently of incoming facts.
-    if (is_source(call)) {
+    // BUG (fixed): the old code called both is_source() and
+    // handle_source_function_specs() unconditionally, which caused duplicate
+    // taint facts to be inserted for functions that are both in the source set
+    // AND have explicit source specs in the config.  We now use a single path:
+    // if the function has explicit config specs, use those (they are more
+    // precise); otherwise fall back to the generic is_source() treatment.
+    if (callee) {
+        // Try config-driven source specs first.
+        FactSet source_facts;
+        handle_source_function_specs(call, source_facts);
+        if (!source_facts.empty()) {
+            result.insert(source_facts.begin(), source_facts.end());
+        } else if (is_source(call)) {
+            // No explicit spec — use the generic treatment.
+            if (!call->getType()->isVoidTy()) {
+                result.insert(TaintFact::tainted_var(call, call));
+                if (call->getType()->isPointerTy()) {
+                    result.insert(TaintFact::tainted_memory(call, call));
+                }
+            }
+        }
+    } else if (is_source(call)) {
         if (!call->getType()->isVoidTy()) {
             result.insert(TaintFact::tainted_var(call, call));
             if (call->getType()->isPointerTy()) {
                 result.insert(TaintFact::tainted_memory(call, call));
             }
         }
-    }
-
-    // Handle source function specs from config (may add additional facts).
-    if (callee) {
-        handle_source_function_specs(call, result);
     }
 
     if (!callee) {

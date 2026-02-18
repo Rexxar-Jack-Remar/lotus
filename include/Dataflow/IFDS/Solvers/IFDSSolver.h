@@ -17,7 +17,14 @@ namespace ifds {
 
 template <typename T, typename U> struct PairHash {
   size_t operator()(const std::pair<T, U> &p) const {
-    return std::hash<T>{}(p.first) ^ (std::hash<U>{}(p.second) << 1);
+    // Use FNV-1a-style mixing to avoid the collision problems of XOR-shifting
+    // aligned pointer hashes by 1 bit.
+    size_t h = 14695981039346656037ULL;
+    h ^= std::hash<T>{}(p.first);
+    h *= 1099511628211ULL;
+    h ^= std::hash<U>{}(p.second);
+    h *= 1099511628211ULL;
+    return h;
   }
 };
 
@@ -98,23 +105,34 @@ private:
   std::unordered_map<const llvm::Instruction *, FactSet> m_entry_facts;
   std::unordered_map<const llvm::Instruction *, FactSet> m_exit_facts;
 
-  // Summary edges: keyed by (callee, entry_fact) -> set of return_fact
+  // Summary edges: keyed by (callee, entry_fact) -> set of return_fact.
+  // Use unordered_set<Fact> for O(1) average insertion/lookup instead of
+  // O(log n) with std::set.  Requires std::hash<Fact> to be defined.
   using SummaryKey = std::pair<const llvm::Function *, Fact>;
   struct SummaryKeyHash {
     size_t operator()(const SummaryKey &k) const {
-      return std::hash<const llvm::Function *>{}(k.first) ^
-             (std::hash<Fact>{}(k.second) << 1);
+      // FNV-style combiner to avoid XOR-shift collisions on aligned pointers.
+      size_t h = 14695981039346656037ULL;
+      h ^= std::hash<const llvm::Function *>{}(k.first);
+      h *= 1099511628211ULL;
+      h ^= std::hash<Fact>{}(k.second);
+      h *= 1099511628211ULL;
+      return h;
     }
   };
-  std::unordered_map<SummaryKey, std::set<Fact>, SummaryKeyHash> m_summaries;
+  std::unordered_map<SummaryKey, std::unordered_set<Fact>, SummaryKeyHash> m_summaries;
 
   // Track entry facts used when entering each callee: (call, entry_fact) ->
   // true This allows proper retroactive summary application
   using EntryFactKey = std::pair<const llvm::CallBase *, Fact>;
   struct EntryFactKeyHash {
     size_t operator()(const EntryFactKey &k) const {
-      return std::hash<const llvm::CallBase *>{}(k.first) ^
-             (std::hash<Fact>{}(k.second) << 1);
+      size_t h = 14695981039346656037ULL;
+      h ^= std::hash<const llvm::CallBase *>{}(k.first);
+      h *= 1099511628211ULL;
+      h ^= std::hash<Fact>{}(k.second);
+      h *= 1099511628211ULL;
+      return h;
     }
   };
   std::unordered_set<EntryFactKey, EntryFactKeyHash> m_entry_facts_at_call;
@@ -135,22 +153,39 @@ private:
   };
   struct CallEdgeInfoHash {
     size_t operator()(const CallEdgeInfo &k) const {
-      size_t h1 = std::hash<const llvm::CallBase *>{}(k.call_node);
-      size_t h2 = std::hash<Fact>{}(k.call_fact);
-      size_t h3 = std::hash<const llvm::Instruction *>{}(k.source_node);
-      size_t h4 = std::hash<Fact>{}(k.source_fact);
-      return ((h1 ^ (h2 << 1)) ^ (h3 << 2)) ^ (h4 << 3);
+      size_t h = 14695981039346656037ULL;
+      h ^= std::hash<const llvm::CallBase *>{}(k.call_node);
+      h *= 1099511628211ULL;
+      h ^= std::hash<Fact>{}(k.call_fact);
+      h *= 1099511628211ULL;
+      h ^= std::hash<const llvm::Instruction *>{}(k.source_node);
+      h *= 1099511628211ULL;
+      h ^= std::hash<Fact>{}(k.source_fact);
+      h *= 1099511628211ULL;
+      return h;
     }
   };
   using CallEdgeKey = std::pair<const llvm::Function *, Fact>;
   struct CallEdgeKeyHash {
     size_t operator()(const CallEdgeKey &k) const {
-      return std::hash<const llvm::Function *>{}(k.first) ^
-             (std::hash<Fact>{}(k.second) << 1);
+      size_t h = 14695981039346656037ULL;
+      h ^= std::hash<const llvm::Function *>{}(k.first);
+      h *= 1099511628211ULL;
+      h ^= std::hash<Fact>{}(k.second);
+      h *= 1099511628211ULL;
+      return h;
     }
   };
   std::unordered_map<CallEdgeKey, std::vector<CallEdgeInfo>, CallEdgeKeyHash>
       m_call_edge_info;
+  // Companion set for O(1) deduplication of m_call_edge_info entries.
+  // Keyed identically to m_call_edge_info; stores the set of already-recorded
+  // CallEdgeInfo values so that process_call_edge can avoid the O(n) linear
+  // scan that was previously used.
+  std::unordered_map<CallEdgeKey,
+                     std::unordered_set<CallEdgeInfo, CallEdgeInfoHash>,
+                     CallEdgeKeyHash>
+      m_call_edge_info_seen;
 
   // Flow function result caches (key -> FactSet) to avoid recomputation
   using NormalFlowKey = std::pair<const llvm::Instruction *, Fact>;

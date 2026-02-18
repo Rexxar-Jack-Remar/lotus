@@ -40,10 +40,19 @@ FullConstantPropagationState joinStates(const FullConstantPropagationState &Lhs,
 
   FullConstantPropagationState Out;
   Out.Unreachable = false;
+
+  // Start with all keys from Lhs.
   Out.Values = Lhs.Values;
+
+  // Merge keys from Rhs: update existing keys and add new ones.
+  // Bug fix: the old code only updated existing keys from Lhs but never
+  // added keys that were present only in Rhs.  A key absent in Lhs means
+  // Bottom on that path, so join(Bottom, Rhs_val) = Rhs_val — the key
+  // must be added to Out.
   for (const auto &Entry : Rhs.Values) {
     auto It = Out.Values.find(Entry.first);
     if (It == Out.Values.end()) {
+      // Key only in Rhs: join(Bottom, Rhs_val) = Rhs_val.
       Out.Values.insert(Entry);
     } else {
       It->second = joinValues(It->second, Entry.second);

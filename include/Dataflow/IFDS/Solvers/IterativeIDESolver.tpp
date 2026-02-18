@@ -108,7 +108,17 @@ uint64_t ModuleVersionTracker::compute_function_hash(const llvm::Function& func)
             stream << inst.getOpcodeName();
             for (const auto& op : inst.operands()) {
                 if (auto* val = llvm::dyn_cast<llvm::Value>(op)) {
-                    stream << val->getName();
+                    // BUG (fixed): the old code only serialised the Value's
+                    // name.  For constants (ConstantInt, ConstantFP, etc.) the
+                    // name is always empty, so two functions that differ only
+                    // in a literal constant (e.g. `x + 1` vs `x + 2`) would
+                    // produce the same hash and the change would go undetected.
+                    // We now print the full value representation for constants.
+                    if (llvm::isa<llvm::Constant>(val)) {
+                        val->print(stream);
+                    } else {
+                        stream << val->getName();
+                    }
                 }
             }
         }
@@ -271,31 +281,61 @@ void IterativeIDESolver<Problem>::run_solver_on_functions(
     const llvm::Module& module,
     const std::set<std::string>& functions) {
     
-    // For incremental solving, we still run the full solver but only
-    // on a modified module containing just the changed functions
-    // (simplified approach - more sophisticated would use partial analysis)
-    
-    // Mark which functions were reanalyzed
+    // Mark which functions were reanalyzed.
     for (const auto& func_name : functions) {
         m_reanalyzed_functions.insert(func_name);
     }
     
-    // For now, run full analysis but track which parts were reanalyzed
+    // BUG (fixed): the old code called run_solver_on_module() unconditionally,
+    // which always ran a full inter-procedural analysis over the entire module.
+    // This completely defeated the purpose of incremental mode: every
+    // "incremental" solve was as expensive as a full solve, and the
+    // m_reanalyzed_functions set was populated but never used to restrict the
+    // analysis scope.
+    //
+    // A truly partial re-analysis would require seeding the solver only at the
+    // entry points of the changed functions and propagating only within those
+    // functions (and their transitive callees).  That requires deeper solver
+    // integration that is not yet implemented.
+    //
+    // For now we still run the full solver, but we document the limitation
+    // clearly and leave the incremental_mode flag as a no-op performance hint
+    // rather than silently claiming partial analysis.  The merge step below
+    // will correctly prefer fresh results over stale cached ones.
+    //
+    // TODO: implement true partial re-analysis by seeding only changed
+    // functions and restricting propagation to their SCCs.
     run_solver_on_module(module);
 }
 
 template<typename Problem>
 void IterativeIDESolver<Problem>::merge_with_cached_results() {
-    // Merge cached results for functions that weren't reanalyzed
+    // Merge cached results for functions that weren't reanalyzed.
+    // BUG (fixed): the old code used operator[] to insert cached values, which
+    // overwrites any entry already present in m_current_values.  Because
+    // run_solver_on_module() runs a full analysis, m_current_values already
+    // contains fresh results for ALL functions — including the reanalyzed ones.
+    // Overwriting those fresh results with stale cached values for the same
+    // instructions would corrupt the analysis output.
+    //
+    // The correct behaviour is: only insert cached values for instructions
+    // that belong to functions that were NOT reanalyzed AND that are not
+    // already present in m_current_values (i.e. use insert, not operator[]).
     for (const auto& pair : m_cached_results.values) {
         const llvm::Instruction* inst = pair.first;
-        if (inst && inst->getParent() && inst->getParent()->getParent()) {
-            std::string func_name = inst->getParent()->getParent()->getName().str();
-            if (m_reanalyzed_functions.find(func_name) == m_reanalyzed_functions.end()) {
-                // This function wasn't reanalyzed, use cached values
-                m_current_values[inst] = pair.second;
-            }
+        if (!inst || !inst->getParent() || !inst->getParent()->getParent()) {
+            continue;
         }
+        std::string func_name = inst->getParent()->getParent()->getName().str();
+        if (m_reanalyzed_functions.find(func_name) != m_reanalyzed_functions.end()) {
+            // This function was reanalyzed — keep the fresh result, do NOT
+            // overwrite it with the stale cached value.
+            continue;
+        }
+        // Only fill in the cached value if the fresh analysis produced no
+        // result for this instruction (e.g. the function was unreachable in
+        // the new analysis context).
+        m_current_values.insert({inst, pair.second});
     }
 }
 

@@ -201,15 +201,22 @@ IDEConstantPropagation::FactSet IDEConstantPropagation::call_flow(const llvm::Ca
     return out;
 }
 
-IDEConstantPropagation::FactSet IDEConstantPropagation::return_flow(const llvm::CallBase* call, const llvm::Function* callee, const Fact& /*exit_fact*/, const Fact& call_fact) {
+IDEConstantPropagation::FactSet IDEConstantPropagation::return_flow(const llvm::CallBase* call, const llvm::Function* callee, const Fact& exit_fact, const Fact& call_fact) {
     FactSet out;
     if (!callee || callee->isDeclaration()) return out;
-    // propagate caller facts unchanged
+    // Propagate caller facts unchanged (local variables survive the call).
     if (call_fact) out.insert(call_fact);
-    // also link callee return back to call result if applicable
+    // Map the callee's return value back to the call-site result.
+    // The old code unconditionally inserted the call instruction regardless of
+    // exit_fact, which caused the call result to appear as a fact even when the
+    // callee returned nothing relevant.  We now only add the call result when
+    // exit_fact is a ReturnInst whose return value is non-null (i.e. the callee
+    // actually returns a value on this path).
     if (!call->getType()->isVoidTy()) {
-        if (const llvm::Value* callDef = static_cast<const llvm::Value*>(call)) {
-            out.insert(callDef);
+        if (const auto* ret = llvm::dyn_cast_or_null<llvm::ReturnInst>(exit_fact)) {
+            if (ret->getReturnValue()) {
+                out.insert(static_cast<const llvm::Value*>(call));
+            }
         }
     }
     return out;

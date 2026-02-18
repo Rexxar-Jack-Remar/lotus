@@ -249,8 +249,16 @@ private:
 
   struct ComposePairHash {
     size_t operator()(const ComposePair& cp) const {
-      return std::hash<EdgeFunctionPtr>{}(cp.f1) ^
-             (std::hash<EdgeFunctionPtr>{}(cp.f2) << 1);
+      // Use FNV-1a-style mixing instead of XOR-shift.  The XOR-shift pattern
+      // (h1 ^ (h2 << 1)) produces many collisions when h1 and h2 are aligned
+      // pointer hashes (low bits are zero), because shifting by 1 still leaves
+      // many low bits zero and the XOR cancels bits when h1 == h2.
+      size_t h = 14695981039346656037ULL;
+      h ^= std::hash<EdgeFunctionPtr>{}(cp.f1);
+      h *= 1099511628211ULL;
+      h ^= std::hash<EdgeFunctionPtr>{}(cp.f2);
+      h *= 1099511628211ULL;
+      return h;
     }
   };
 

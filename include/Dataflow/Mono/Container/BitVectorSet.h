@@ -142,27 +142,45 @@ public:
   /**
    * @brief Set union: this = this ∪ other
    *
+   * Fix 3.4: assert that both sets share the same universe size before
+   * performing bit-level operations.  Mismatched universes would cause
+   * llvm::BitVector to silently truncate to the shorter length, producing
+   * incorrect results.
+   *
    * @param Other The set to union with
    */
   void unionWith(const BitVectorSet &Other) {
+    assert(Bits.size() == Other.Bits.size() &&
+           "BitVectorSet::unionWith: universe size mismatch — both sets must "
+           "be initialized with the same universe");
     Bits |= Other.Bits;
   }
 
   /**
    * @brief Set intersection: this = this ∩ other
    *
+   * Fix 3.4: assert matching universe sizes.
+   *
    * @param Other The set to intersect with
    */
   void intersectWith(const BitVectorSet &Other) {
+    assert(Bits.size() == Other.Bits.size() &&
+           "BitVectorSet::intersectWith: universe size mismatch — both sets "
+           "must be initialized with the same universe");
     Bits &= Other.Bits;
   }
 
   /**
    * @brief Set difference: this = this - other
    *
+   * Fix 3.4: assert matching universe sizes.
+   *
    * @param Other The set to subtract
    */
   void differenceWith(const BitVectorSet &Other) {
+    assert(Bits.size() == Other.Bits.size() &&
+           "BitVectorSet::differenceWith: universe size mismatch — both sets "
+           "must be initialized with the same universe");
     Bits.reset(Other.Bits);
   }
 

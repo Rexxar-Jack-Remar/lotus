@@ -58,8 +58,13 @@ struct ConstFact {
 namespace std {
 template <> struct hash<ifds::ConstFact> {
   size_t operator()(const ifds::ConstFact &fact) const {
-    return std::hash<int>{}(static_cast<int>(fact.type)) ^
-           (std::hash<const llvm::Value *>{}(fact.value) << 1);
+    // FNV-1a-style mixing to avoid XOR-shift collisions on aligned hashes.
+    size_t h = 14695981039346656037ULL;
+    h ^= std::hash<int>{}(static_cast<int>(fact.type));
+    h *= 1099511628211ULL;
+    h ^= std::hash<const llvm::Value *>{}(fact.value);
+    h *= 1099511628211ULL;
+    return h;
   }
 };
 } // namespace std

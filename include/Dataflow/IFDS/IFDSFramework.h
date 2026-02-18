@@ -85,11 +85,21 @@ struct PathEdge {
 template<typename Fact>
 struct PathEdgeHash {
     size_t operator()(const PathEdge<Fact>& edge) const {
-        size_t h1 = std::hash<const llvm::Instruction*>{}(edge.start_node);
-        size_t h2 = std::hash<const llvm::Instruction*>{}(edge.target_node);
-        size_t h3 = std::hash<Fact>{}(edge.start_fact);
-        size_t h4 = std::hash<Fact>{}(edge.target_fact);
-        return ((h1 ^ (h2 << 1)) ^ (h3 << 2)) ^ (h4 << 3);
+        // Use a proper hash combiner (FNV-style) to avoid the collision
+        // problems of XOR-shifting pointer hashes by small amounts.
+        // 64-bit pointers are typically 8-byte aligned so their low 3 bits
+        // are always zero; shifting by 1/2/3 and XOR-ing produces many
+        // collisions.  Multiplying by a large prime disperses the bits.
+        size_t h = 14695981039346656037ULL;
+        auto mix = [&h](size_t v) {
+            h ^= v;
+            h *= 1099511628211ULL;
+        };
+        mix(std::hash<const llvm::Instruction*>{}(edge.start_node));
+        mix(std::hash<const llvm::Instruction*>{}(edge.target_node));
+        mix(std::hash<Fact>{}(edge.start_fact));
+        mix(std::hash<Fact>{}(edge.target_fact));
+        return h;
     }
 };
 
@@ -115,10 +125,17 @@ struct SummaryEdge {
 template<typename Fact>
 struct SummaryEdgeHash {
     size_t operator()(const SummaryEdge<Fact>& edge) const {
-        size_t h1 = std::hash<const llvm::CallBase*>{}(edge.call_site);
-        size_t h2 = std::hash<Fact>{}(edge.call_fact);
-        size_t h3 = std::hash<Fact>{}(edge.return_fact);
-        return (h1 ^ (h2 << 1)) ^ (h3 << 2);
+        // Use FNV-1a-style mixing to avoid the collision problems of
+        // XOR-shifting aligned pointer/fact hashes by small amounts.
+        size_t h = 14695981039346656037ULL;
+        auto mix = [&h](size_t v) {
+            h ^= v;
+            h *= 1099511628211ULL;
+        };
+        mix(std::hash<const llvm::CallBase*>{}(edge.call_site));
+        mix(std::hash<Fact>{}(edge.call_fact));
+        mix(std::hash<Fact>{}(edge.return_fact));
+        return h;
     }
 };
 
@@ -441,9 +458,14 @@ public:
     
     struct NodeHash {
         size_t operator()(const Node& node) const {
-            size_t h1 = std::hash<const llvm::Instruction*>{}(node.instruction);
-            size_t h2 = std::hash<Fact>{}(node.fact);
-            return h1 ^ (h2 << 1);
+            // Use FNV-1a-style mixing to avoid the collision problems of
+            // XOR-shifting aligned pointer hashes by 1 bit.
+            size_t h = 14695981039346656037ULL;
+            h ^= std::hash<const llvm::Instruction*>{}(node.instruction);
+            h *= 1099511628211ULL;
+            h ^= std::hash<Fact>{}(node.fact);
+            h *= 1099511628211ULL;
+            return h;
         }
     };
     

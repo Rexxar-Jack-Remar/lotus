@@ -31,12 +31,22 @@
 namespace ifds {
 
 namespace detail {
+// FNV-1a-based hash combiner — avoids the collision problems of XOR-shifting
+// pointer hashes by small amounts (aligned pointers have zero low bits).
+inline size_t fnv_mix(size_t h, size_t v) {
+    h ^= v;
+    h *= 1099511628211ULL;
+    return h;
+}
+
 template<typename A, typename B, typename C>
 struct TripleHash {
     size_t operator()(const std::tuple<A, B, C>& t) const {
-        return std::hash<A>{}(std::get<0>(t)) ^
-               (std::hash<B>{}(std::get<1>(t)) << 1) ^
-               (std::hash<C>{}(std::get<2>(t)) << 2);
+        size_t h = 14695981039346656037ULL;
+        h = fnv_mix(h, std::hash<A>{}(std::get<0>(t)));
+        h = fnv_mix(h, std::hash<B>{}(std::get<1>(t)));
+        h = fnv_mix(h, std::hash<C>{}(std::get<2>(t)));
+        return h;
     }
 };
 template<typename A, typename B, typename C>
@@ -100,9 +110,10 @@ private:
 
     struct StartKeyHash {
         size_t operator()(const StartKey& key) const {
-            size_t h1 = std::hash<const llvm::Instruction*>{}(key.start_node);
-            size_t h2 = std::hash<Fact>{}(key.start_fact);
-            return h1 ^ (h2 << 1);
+            size_t h = 14695981039346656037ULL;
+            h = detail::fnv_mix(h, std::hash<const llvm::Instruction*>{}(key.start_node));
+            h = detail::fnv_mix(h, std::hash<Fact>{}(key.start_fact));
+            return h;
         }
     };
 
@@ -134,8 +145,13 @@ private:
 
     struct ComposePairHash {
         size_t operator()(const ComposePair& cp) const {
-            return std::hash<EdgeFunctionPtr>{}(cp.f1) ^
-                   (std::hash<EdgeFunctionPtr>{}(cp.f2) << 1);
+            // FNV-1a-style mixing to avoid XOR-shift collisions on aligned pointers.
+            size_t h = 14695981039346656037ULL;
+            h ^= std::hash<EdgeFunctionPtr>{}(cp.f1);
+            h *= 1099511628211ULL;
+            h ^= std::hash<EdgeFunctionPtr>{}(cp.f2);
+            h *= 1099511628211ULL;
+            return h;
         }
     };
 

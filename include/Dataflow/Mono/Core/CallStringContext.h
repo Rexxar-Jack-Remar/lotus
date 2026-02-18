@@ -45,7 +45,18 @@ public:
     CallString.push_back(Stmt);
   }
 
+  /// Remove and return the last element of the call string.
+  ///
+  /// Bug fix: the old implementation silently returned a default-constructed
+  /// N{} (typically nullptr for pointer types) when the deque was empty.
+  /// Callers that forgot to check empty() would receive a null call-site and
+  /// silently produce wrong results (e.g., wrong context transitions in the
+  /// interprocedural solver).  We now assert non-empty so the bug surfaces
+  /// immediately in debug builds.  In release builds the assert is a no-op
+  /// and the old behaviour (return N{}) is preserved for ABI compatibility.
   N pop_back() { // NOLINT
+    assert(!CallString.empty() &&
+           "CallStringCTX::pop_back() called on empty call string");
     if (!CallString.empty()) {
       N Stmt = CallString.back();
       CallString.pop_back();

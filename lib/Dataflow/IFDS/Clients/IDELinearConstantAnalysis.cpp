@@ -67,14 +67,21 @@ IDELinearConstantAnalysis::normal_flow(const llvm::Instruction *stmt,
       result.insert(fact);
     }
   } else if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(stmt)) {
-    // Store: propagate value to pointer location
+    // Store: propagate value to pointer location.
+    // BUG (fixed): the old code re-inserted store->getPointerOperand() even
+    // when fact == getPointerOperand(), which means the old value of the
+    // pointer location was kept alive after the store.  In IFDS, a store
+    // *kills* the previous definition of the pointer location and *generates*
+    // a new one (from the stored value).  We must NOT propagate the pointer
+    // fact through the store; instead we only generate it from the value fact
+    // (or from zero, handled by the edge function).
     if (fact == store->getValueOperand()) {
       result.insert(fact);
       result.insert(store->getPointerOperand());
     } else if (fact == store->getPointerOperand()) {
-      // The location gets killed and replaced
-      // (handled by edge function)
-      result.insert(store->getPointerOperand());
+      // The old definition of the pointer location is killed by this store.
+      // Do NOT re-insert it here; the edge function will assign the new value.
+      // (No-op: fall through without inserting.)
     } else {
       result.insert(fact);
     }

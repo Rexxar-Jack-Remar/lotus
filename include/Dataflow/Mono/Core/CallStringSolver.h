@@ -399,11 +399,15 @@ public:
     return OUT(ContextKey{Inst, Ctx});
   }
 
+  // Fix 3.5: replace shared static empty containers with per-instance members.
+  // The old code used "static ContainerT EmptySet" which is shared across all
+  // instances and all calls.  For BitVectorSet this means the returned empty
+  // set has no universe, causing incorrect results when callers iterate or
+  // union with it.  Using per-instance members avoids the sharing problem.
   const ContainerT &IN(const ContextKey &Key) const {
     auto It = Ins.find(Key);
     if (It == Ins.end()) {
-      static ContainerT EmptySet;
-      return EmptySet;
+      return EmptyContainer;
     }
     return It->second;
   }
@@ -411,8 +415,7 @@ public:
   const ContainerT &OUT(const ContextKey &Key) const {
     auto It = Outs.find(Key);
     if (It == Outs.end()) {
-      static ContainerT EmptySet;
-      return EmptySet;
+      return EmptyContainer;
     }
     return It->second;
   }
@@ -448,6 +451,11 @@ private:
   std::map<llvm::Instruction *, ContainerT> Kills;
   std::map<ContextKey, ContainerT> Ins;
   std::map<ContextKey, ContainerT> Outs;
+  /// Fix 3.5: per-instance empty container returned for missing keys.
+  /// This avoids the shared-static problem where all callers would share
+  /// one empty container (especially problematic for BitVectorSet which
+  /// needs a universe to be useful).
+  ContainerT EmptyContainer{};
 };
 
 /**
@@ -484,40 +492,12 @@ public:
    * The analysis starts at the entry block's first instruction with an empty
    * call-string context.
    *
-   * **Algorithm:**
-   * 1. Compute GEN/KILL for all instructions (context-insensitive)
-   * 2. Initialize worklist with (entry_inst, [])
-   * 3. Iterate until fixpoint:
-   *    - Dequeue (inst, ctx)
-   *    - Compute IN from predecessors
-   *    - Compute OUT from IN
-   *    - If changed, enqueue successors
-   * 4. Return result container
+   * Fix 1.4: returns unique_ptr<ResultTy> instead of a raw owning pointer.
+   * Fix 1.5: asserts that ICF is non-null (was silently returning nullptr).
    *
-   * **Callback parameters:**
-   * - @param computeGEN Called once per instruction to compute GEN[inst]
-   * - @param computeKILL Called once per instruction to compute KILL[inst]
-   * - @param initializeIN Called when a new (inst, ctx) is first seen to initialize IN
-   * - @param initializeOUT Called when a new (inst, ctx) is first seen to initialize OUT
-   * - @param computeIN Called for each predecessor edge to merge OUT into IN
-   * - @param computeOUT Called to compute OUT from IN for each (inst, ctx)
-   * - @param equal Tests if two fact sets are equal (for fixpoint detection)
-   * - @param getCalleesOfCallAt Returns callees for call graph construction
-   *
-   * **Analysis parameters:**
-   * - @param Entry The entry function to analyze
-   * - @param ICF Interprocedural control flow graph
-   *
-   * @return Ownership of result container (caller must delete)
-   *
-   * **Example:**
-   * ```cpp
-   * auto *results = engine.applyForward(main, icfg, ...);
-   * // Use results...
-   * delete results;
-   * ```
+   * @return unique_ptr to result container (never null on success)
    */
-  ResultTy *applyForward(
+  std::unique_ptr<ResultTy> applyForward(
       llvm::Function *Entry,
       const ICFG *ICF,
       std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
@@ -606,8 +586,9 @@ public:
 
   /**
    * Convenience overload with empty KILL sets.
+   * Fix: returns unique_ptr<ResultTy> to match the primary overload.
    */
-  ResultTy *applyForward(
+  std::unique_ptr<ResultTy> applyForward(
       llvm::Function *Entry,
       const ICFG *ICF,
       std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
@@ -626,9 +607,10 @@ public:
       std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
           getCalleesOfCallAt) {
     auto EmptyKill = [](llvm::Instruction *, ResultTy *) {};
-    return applyForward(Entry, ICF, computeGEN, EmptyKill, initializeIN, initializeOUT,
-                        computeIN, computeOUT, std::move(equal),
-                        std::move(getCalleesOfCallAt));
+    return applyForward(Entry, ICF, computeGEN, std::move(EmptyKill),
+                        std::move(initializeIN), std::move(initializeOUT),
+                        std::move(computeIN), std::move(computeOUT),
+                        std::move(equal), std::move(getCalleesOfCallAt));
   }
 
 private:
@@ -805,8 +787,12 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
       Context RetCtx = Ctx;
       RetCtx.push_back(CallInst);
       for (auto *RetInst : CallToRetIt->second) {
+        // Fix 1.6: when Ctx is empty, RetCtx == Ctx (push+pop of the same
+        // call site on an empty deque yields the same empty deque), so the
+        // two pushes below would add the same entry twice.  Only add the
+        // empty-context entry when it is genuinely different from RetCtx.
         Result.push_back({RetInst, RetCtx});
-        if (Ctx.empty()) {
+        if (Ctx.empty() && !(RetCtx == Ctx)) {
           // Phasar-like: allow returns to flow back even for empty contexts.
           Result.push_back({RetInst, Ctx});
         }
@@ -821,7 +807,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
 }
 
 template <unsigned K, typename ContainerT>
-typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ResultTy *
+std::unique_ptr<typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ResultTy>
 CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
     llvm::Function *Entry,
     const ICFG *ICF,
@@ -835,9 +821,12 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
     std::function<void(llvm::Instruction *Inst, const Context &Ctx, ContainerT &OUT,
                        ResultTy *DF)>
         computeOUT,
-      std::function<bool(const ContainerT &, const ContainerT &)> equal,
-      std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
-          getCalleesOfCallAt) {
+    std::function<bool(const ContainerT &, const ContainerT &)> equal,
+    std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
+        getCalleesOfCallAt) {
+  // Fix 1.5: assert ICF is non-null rather than silently returning nullptr.
+  assert(ICF != nullptr && "CallStringInterProceduralDataFlowEngine::applyForward: "
+                           "ICF must not be null");
   if (Entry == nullptr || Entry->isDeclaration()) {
     return nullptr;
   }
@@ -847,11 +836,13 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
   ContextKey EntryKey{&*Entry->getEntryBlock().begin(), EmptyCtx};
   std::vector<ContextKey> Seeds{EntryKey};
   std::map<ContextKey, ContainerT> SeedIns;
-  return applyForwardFromSeeds(Module, Seeds, ICF, SeedIns, std::move(computeGEN),
-                               std::move(computeKILL), std::move(initializeIN),
-                               std::move(initializeOUT), std::move(computeIN),
-                               std::move(computeOUT), std::move(equal),
-                               std::move(getCalleesOfCallAt));
+  // Delegate to applyForwardFromSeeds which returns a raw ptr; wrap it.
+  return std::unique_ptr<ResultTy>(
+      applyForwardFromSeeds(Module, Seeds, ICF, SeedIns, std::move(computeGEN),
+                            std::move(computeKILL), std::move(initializeIN),
+                            std::move(initializeOUT), std::move(computeIN),
+                            std::move(computeOUT), std::move(equal),
+                            std::move(getCalleesOfCallAt)));
 }
 
 template <unsigned K, typename ContainerT>
@@ -872,7 +863,10 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     std::function<bool(const ContainerT &, const ContainerT &)> equal,
     std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
         getCalleesOfCallAt) {
-  if (M == nullptr || Seeds.empty() || ICF == nullptr) {
+  // Fix 1.5: assert ICF is non-null.
+  assert(ICF != nullptr && "CallStringInterProceduralDataFlowEngine::"
+                           "applyForwardFromSeeds: ICF must not be null");
+  if (M == nullptr || Seeds.empty()) {
     return nullptr;
   }
 

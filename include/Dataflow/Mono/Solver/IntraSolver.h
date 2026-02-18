@@ -34,6 +34,28 @@ public:
 
   const SolverStatistics &getStatistics() const { return Stats; }
 
+  /**
+   * @brief Set the widening threshold (L1 fix)
+   *
+   * When a node has been re-processed more than this many times, the solver
+   * calls Problem.widen(OldOut, NewOut) instead of using NewOut directly.
+   * This guarantees termination for analyses over infinite-height lattices
+   * (e.g., interval analysis) provided the widen() implementation is correct.
+   *
+   * Set to 0 to disable widening entirely (default behaviour for analyses
+   * over finite-height lattices that converge without widening).
+   *
+   * Typical values: 1–5.  Lower values converge faster but may be less
+   * precise; higher values are more precise but may take longer to converge.
+   *
+   * @param Threshold Number of re-processings before widening kicks in
+   */
+  void setWideningThreshold(unsigned Threshold) {
+    WideningThreshold = Threshold;
+  }
+
+  unsigned getWideningThreshold() const { return WideningThreshold; }
+
   void solve() {
     auto start_time = std::chrono::steady_clock::now();
 
@@ -160,6 +182,24 @@ public:
       Stats.flow_function_calls++;
       auto NewOut = Problem.normalFlow(Node, AnalysisIn[Node]);
 
+      // L1 fix: widening.  If this node has been re-processed more than
+      // WideningThreshold times, apply the problem's widen() operator instead
+      // of using NewOut directly.  This guarantees termination for analyses
+      // over infinite-height lattices (e.g., interval analysis) as long as
+      // the widen() implementation satisfies the ascending-chain condition.
+      // For analyses over finite-height lattices widen() defaults to returning
+      // NewOut unchanged, so there is no behavioural difference.
+      if (WideningThreshold > 0u) {
+        unsigned &Count = NodeIterCount[Node];
+        ++Count;
+        if (Count > WideningThreshold) {
+          auto OutWideIt = AnalysisOut.find(Node);
+          if (OutWideIt != AnalysisOut.end()) {
+            NewOut = Problem.widen(OutWideIt->second, NewOut);
+          }
+        }
+      }
+
       auto OutIt = AnalysisOut.find(Node);
       bool OutChanged = (OutIt == AnalysisOut.end()) ||
                         !Problem.equal_to(NewOut, OutIt->second);
@@ -260,21 +300,17 @@ private:
     if (auto *Provided = Problem.getCFG()) {
       return Provided;
     }
-    static ::dataflow::controlflow::LLVMIntraCFG DefaultCFG;
-    return &DefaultCFG;
+    // Fix 1.3: use a per-instance CFG instead of a static singleton.
+    // The static singleton was shared across all IntraMonoSolver instances,
+    // causing data races when multiple solvers ran concurrently and stale
+    // state when the same solver was reused across different functions.
+    return &PerInstanceCFG;
   }
 
   void initialize() {
+    // Fix 3.7: entry points are always Function* now; the string-based
+    // getEntryPointNames() API has been removed from Problem.h.
     std::vector<llvm::Function *> EntryFunctions = Problem.getEntryPoints();
-    if (EntryFunctions.empty()) {
-      if (auto *M = Problem.getProjectIRDB()) {
-        for (const auto &Name : Problem.getEntryPointNames()) {
-          if (auto *F = M->getFunction(Name)) {
-            EntryFunctions.push_back(F);
-          }
-        }
-      }
-    }
 
     std::unordered_set<llvm::Function *> SeenFunctions;
     for (auto *Function : EntryFunctions) {
@@ -353,6 +389,8 @@ private:
   }
 
   ProblemTy &Problem;
+  /// Fix 1.3: per-instance CFG (replaces the static singleton).
+  ::dataflow::controlflow::LLVMIntraCFG PerInstanceCFG;
   const ::dataflow::controlflow::IntraCFG *CFG;
   std::deque<std::pair<n_t, n_t>> Worklist;
   std::unordered_map<n_t, mono_container_t> AnalysisIn;
@@ -360,6 +398,14 @@ private:
   mono_container_t DefaultValue{};
   DebugConfig DebugCfg;
   SolverStatistics Stats;
+  /// L1 fix: per-node re-processing counter used by the widening logic.
+  /// Counts how many times each node has been dequeued and processed.
+  /// Reset to zero at the start of each solve() call (implicitly, since
+  /// NodeIterCount is default-constructed empty and populated on first use).
+  std::unordered_map<n_t, unsigned> NodeIterCount;
+  /// L1 fix: widening threshold.  0 = disabled (default).
+  /// When a node's NodeIterCount exceeds this value, widen() is called.
+  unsigned WideningThreshold = 0u;
 };
 
 template <typename Problem>

@@ -71,10 +71,15 @@ public:
 
   struct ESGEdgeHash {
     size_t operator()(const ESGEdge& edge) const {
-      size_t h1 = NodeHash{}(edge.source);
-      size_t h2 = NodeHash{}(edge.target);
-      size_t h3 = std::hash<int>{}(static_cast<int>(edge.kind));
-      return ((h1 ^ (h2 << 1)) ^ (h3 << 2));
+      // FNV-1a-style mixing to avoid XOR-shift collisions on aligned hashes.
+      size_t h = 14695981039346656037ULL;
+      h ^= NodeHash{}(edge.source);
+      h *= 1099511628211ULL;
+      h ^= NodeHash{}(edge.target);
+      h *= 1099511628211ULL;
+      h ^= std::hash<int>{}(static_cast<int>(edge.kind));
+      h *= 1099511628211ULL;
+      return h;
     }
   };
 
@@ -306,18 +311,47 @@ public:
   size_t get_esg_node_count() const { return m_esg.num_nodes(); }
   size_t get_esg_edge_count() const { return m_esg.num_edges(); }
 
-protected:
-  // Override to record edges during solving
-  void record_flow_edge(const llvm::Instruction* curr_inst, const Fact& curr_fact,
-                       const llvm::Instruction* succ_inst, const FactSet& succ_facts,
-                       ESGEdgeKind kind) {
-    if (m_record_edges) {
-      m_esg.save_edges(curr_inst, curr_fact, succ_inst, succ_facts, kind);
+  // Post-solve: reconstruct the ESG from the path edges recorded by the base
+  // solver.
+  //
+  // BUG (fixed): the old design declared record_flow_edge() as a protected
+  // method and added a friend declaration for IDESolver<Problem>, expecting
+  // the base class to call the hook.  IDESolver never calls any such hook —
+  // there is no virtual dispatch or CRTP mechanism wiring them together — so
+  // m_esg was always empty after solve().
+  //
+  // The correct approach is to reconstruct the ESG from the path edges that
+  // IDESolver already records in its m_path_edges set.  We do this in a
+  // post-processing step after Base::solve() returns.
+  void build_esg_from_path_edges() {
+    std::vector<PathEdge<Fact>> edges;
+    this->get_path_edges(edges);
+    for (const auto& pe : edges) {
+      Node src(pe.start_node, pe.start_fact);
+      Node tgt(pe.target_node, pe.target_fact);
+      // Classify the edge kind heuristically from the instruction types.
+      ESGEdgeKind kind = ESGEdgeKind::Normal;
+      if (pe.target_node && llvm::isa<llvm::ReturnInst>(pe.target_node)) {
+        kind = ESGEdgeKind::Return;
+      } else if (pe.target_node && llvm::isa<llvm::CallBase>(pe.target_node)) {
+        kind = ESGEdgeKind::Call;
+      }
+      m_esg.add_edge(src, tgt, kind);
+    }
+    // Also record summary edges.
+    // BUG (fixed): the old code used se.call_node and se.exit_fact, but
+    // SummaryEdge<Fact> (defined in IFDSFramework.h) has fields call_site,
+    // call_fact, and return_fact.  Using the wrong field names would fail to
+    // compile (or silently use the wrong data if the names happened to exist
+    // via ADL).  Use the correct field names here.
+    std::vector<SummaryEdge<Fact>> summaries;
+    this->get_summary_edges(summaries);
+    for (const auto& se : summaries) {
+      Node src(se.call_site, se.call_fact);
+      Node tgt(se.call_site, se.return_fact);
+      m_esg.add_edge(src, tgt, ESGEdgeKind::Summary);
     }
   }
-
-  // Hook into IDESolver's propagation
-  friend class IDESolver<Problem>;
 
   ExplicitExplodedSupergraph<Fact> m_esg;
   bool m_record_edges;

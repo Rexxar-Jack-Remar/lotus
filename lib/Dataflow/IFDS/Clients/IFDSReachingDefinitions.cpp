@@ -103,8 +103,7 @@ ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::normal_flow(co
         
         // Kill existing definitions of the same variable
         if (fact.is_definition() && fact.get_variable() == defined_var) {
-            // This fact is killed by the new definition
-            // Don't propagate it
+            // This fact is killed by the new definition — do NOT propagate it.
         } else {
             // Propagate existing facts that are not killed
             if (!fact.is_zero()) {
@@ -112,10 +111,17 @@ ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::normal_flow(co
             }
         }
         
-        // Generate new definition fact
-        if (fact.is_zero()) {
-            result.insert(DefinitionFact::definition(defined_var, stmt));
-        }
+        // Generate new definition fact.
+        // BUG (fixed): the old code only generated the new definition when
+        // fact.is_zero(), which means definitions were only created once (from
+        // the zero fact) and never re-generated when an existing definition
+        // fact flowed through the same instruction.  In standard reaching-
+        // definitions analysis, a new definition is generated for EVERY
+        // incoming fact (the zero fact acts as the "always-on" generator, but
+        // non-zero facts also need to see the new definition downstream).
+        // We generate the new definition unconditionally so that all paths
+        // through this instruction carry the new definition.
+        result.insert(DefinitionFact::definition(defined_var, stmt));
         
     } else {
         // No definition - just propagate existing facts
@@ -335,9 +341,13 @@ bool ReachingDefinitionsAnalysis::is_killed_by_external_call(const DefinitionFac
 namespace std {
 size_t hash<ifds::DefinitionFact>::operator()(const ifds::DefinitionFact& fact) const {
     if (fact.is_zero()) return 0;
-    
-    size_t h1 = std::hash<const llvm::Value*>{}(fact.get_variable());
-    size_t h2 = std::hash<const llvm::Instruction*>{}(fact.get_definition_site());
-    return h1 ^ (h2 << 1);
+    // Use FNV-1a-style mixing to avoid the collision problems of XOR-shifting
+    // aligned pointer hashes by 1 bit.
+    size_t h = 14695981039346656037ULL;
+    h ^= std::hash<const llvm::Value*>{}(fact.get_variable());
+    h *= 1099511628211ULL;
+    h ^= std::hash<const llvm::Instruction*>{}(fact.get_definition_site());
+    h *= 1099511628211ULL;
+    return h;
 }
 } // namespace std

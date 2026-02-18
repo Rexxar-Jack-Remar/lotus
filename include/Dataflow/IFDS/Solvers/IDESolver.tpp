@@ -171,23 +171,39 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         }
 
         EdgeFunctionPtr joined = join_cached(it->second, phi);
-        // Use semantic equivalence check rather than pointer identity.
-        // Pointer comparison (it->second != joined) would almost always be
-        // true for freshly-created shared_ptrs even when the functions are
-        // semantically identical, causing redundant worklist additions and
-        // potential non-termination on infinite ascending chains.
-        if (!m_problem.edge_function_equivalent(*it->second, *joined)) {
+        // Use pointer identity to detect change: join_cached returns the
+        // existing pointer unchanged when the join is idempotent (i.e. the
+        // new phi is already subsumed).  If the pointer changed, the jump
+        // function was updated and we must re-propagate.
+        // The old semantic-equivalence probe (checking only top/bottom/join)
+        // was unsound for multi-valued domains (e.g. integer constants, type
+        // states) where two distinct functions can agree on those three probe
+        // points yet differ on other inputs.
+        if (it->second != joined) {
             it->second = joined;
             m_worklist.emplace_back(edge, joined);
         }
     };
 
+    // add_incoming: record a call edge for a callee start key.
+    // We do NOT store caller_phi in the incoming record because the jump
+    // function for the caller path edge may be updated (joined) after the
+    // incoming edge is first recorded.  Instead we store only the path-edge
+    // identity (start_node, start_fact) and look up the current jump function
+    // from m_jump_functions at summary-application time.
     auto add_incoming = [&](const StartKey& key, const IncomingEdge& incoming) {
         auto& list = m_incoming[key];
-        auto it = std::find(list.begin(), list.end(), incoming);
-        if (it == list.end()) {
-            list.push_back(incoming);
+        // Deduplicate by structural identity (ignoring caller_phi which is
+        // looked up dynamically).
+        for (const auto& existing : list) {
+            if (existing.call == incoming.call &&
+                existing.call_fact == incoming.call_fact &&
+                existing.start_node == incoming.start_node &&
+                existing.start_fact == incoming.start_fact) {
+                return;
+            }
         }
+        list.push_back(incoming);
     };
 
     auto add_summary = [&](const StartKey& key, const Fact& exit_fact, EdgeFunctionPtr phi) {
@@ -210,13 +226,25 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         auto call_ef = m_problem.call_edge_function(incoming.call, incoming.call_fact, callee_fact);
         EdgeFunctionPtr call_phi = make_edge_function(call_ef);
 
+        // Look up the *current* (possibly updated) jump function for the
+        // caller path edge (start_node, start_fact) -> (call, call_fact).
+        // Using the stale incoming.caller_phi would produce wrong composed
+        // edge functions whenever the jump function was updated after the
+        // incoming edge was first recorded.
+        PathEdgeType caller_edge(incoming.start_node, incoming.start_fact,
+                                 incoming.call, incoming.call_fact);
+        auto jf_it = m_jump_functions.find(caller_edge);
+        EdgeFunctionPtr current_caller_phi = (jf_it != m_jump_functions.end())
+                                             ? jf_it->second
+                                             : identity_func;
+
         for (const llvm::Instruction* ret_site : get_return_sites(incoming.call)) {
             for (const auto& ret_fact : return_facts) {
                 auto ret_ef = m_problem.return_edge_function(incoming.call, exit_fact, ret_fact);
                 EdgeFunctionPtr ret_phi = make_edge_function(ret_ef);
                 EdgeFunctionPtr composed = compose_cached(ret_phi,
                                           compose_cached(summary_phi,
-                                          compose_cached(call_phi, incoming.caller_phi)));
+                                          compose_cached(call_phi, current_caller_phi)));
                 add_jump_function(PathEdgeType(incoming.start_node, incoming.start_fact,
                                                ret_site, ret_fact),
                                   composed);
@@ -373,7 +401,11 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                 }
             }
 
-            // Unbalanced returns: no incoming call edge for (entry, start_fact)
+            // Unbalanced returns: no incoming call edge for (entry, start_fact).
+            // This handles the case where a function is analyzed as a seed
+            // (i.e. its entry is a seed node) but is also called from elsewhere
+            // in the program.  We propagate the return value to those call sites
+            // using the zero fact as the caller context.
             if (m_config.follow_returns_past_seeds()) {
                 auto incoming_it = m_incoming.find(key);
                 if (incoming_it == m_incoming.end() || incoming_it->second.empty()) {
@@ -388,7 +420,16 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                                     auto ret_ef = m_problem.return_edge_function(call, fact, rf);
                                     EdgeFunctionPtr ret_phi = make_edge_function(ret_ef);
                                     EdgeFunctionPtr composed = compose_cached(ret_phi, phi);
-                                    add_jump_function(PathEdgeType(ret_site, zero_fact, ret_site, rf),
+                                    // BUG (fixed): the old code created a self-loop path edge
+                                    // PathEdge(ret_site, zero_fact, ret_site, rf).  This seeds
+                                    // a brand-new analysis context rooted at ret_site, which is
+                                    // wrong: the return should connect back to the *callee's*
+                                    // entry context (entry, start_fact), not start a new one at
+                                    // the return site.  The correct start node is the callee
+                                    // entry and the correct start fact is start_fact (the fact
+                                    // that was live at the callee entry under the seed context).
+                                    add_jump_function(PathEdgeType(entry, start_fact,
+                                                                   ret_site, rf),
                                                       composed);
                                 }
                             }
@@ -446,7 +487,19 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         for (const auto& incoming : entry.second) {
             auto call_ef = m_problem.call_edge_function(incoming.call, incoming.call_fact, callee_key.start_fact);
             EdgeFunctionPtr call_phi = make_edge_function(call_ef);
-            EdgeFunctionPtr composed = compose_cached(call_phi, incoming.caller_phi);
+            // BUG (fixed): the old code used incoming.caller_phi directly.
+            // caller_phi is the jump-function value at the time the incoming
+            // edge was first recorded.  If the jump function for the caller
+            // path edge was later updated (joined with a new path), the stored
+            // caller_phi is stale and composing with it produces wrong values.
+            // We must look up the *current* jump function from m_jump_functions.
+            PathEdgeType caller_edge(incoming.start_node, incoming.start_fact,
+                                     incoming.call, incoming.call_fact);
+            auto jf_it = m_jump_functions.find(caller_edge);
+            EdgeFunctionPtr current_caller_phi = (jf_it != m_jump_functions.end())
+                                                 ? jf_it->second
+                                                 : identity_func;
+            EdgeFunctionPtr composed = compose_cached(call_phi, current_caller_phi);
             StartKey caller_key{incoming.start_node, incoming.start_fact};
             value_edges[caller_key].push_back(ValueEdge{callee_key.start_node,
                                                         callee_key.start_fact,

@@ -186,15 +186,21 @@ std::ostream& operator<<(std::ostream& os, const TaintFact& fact) {
 // Hash function implementation
 namespace std {
 size_t hash<ifds::TaintFact>::operator()(const ifds::TaintFact& fact) const {
-    size_t h1 = std::hash<int>{}(static_cast<int>(fact.get_type()));
-    size_t h2 = 0;
+    // Use FNV-1a-style mixing to avoid the collision problems of XOR-shifting
+    // small integers and aligned pointers by 1/2 bits.
+    size_t h = 14695981039346656037ULL;
+    auto mix = [&h](size_t v) {
+        h ^= v;
+        h *= 1099511628211ULL;
+    };
+    mix(std::hash<int>{}(static_cast<int>(fact.get_type())));
     if (fact.get_value()) {
-        h2 = std::hash<const llvm::Value*>{}(fact.get_value());
+        mix(std::hash<const llvm::Value*>{}(fact.get_value()));
     } else if (fact.get_memory_location()) {
-        h2 = std::hash<const llvm::Value*>{}(fact.get_memory_location());
+        mix(std::hash<const llvm::Value*>{}(fact.get_memory_location()));
     }
     // Include field index in hash for field-sensitive facts
-    size_t h3 = std::hash<int>{}(fact.get_field_index());
-    return (h1 ^ (h2 << 1)) ^ (h3 << 2);
+    mix(std::hash<int>{}(fact.get_field_index()));
+    return h;
 }
 } // namespace std

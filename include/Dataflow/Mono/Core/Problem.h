@@ -54,14 +54,21 @@ public:
   using ProblemAnalysisDomain = AnalysisDomainTy;
   using ConfigurationTy = HasNoConfigurationType;
 
+  // Fix 3.7: Unified constructor — always takes a vector of Function* directly.
+  // The string-based constructor has been removed to eliminate the ambiguity
+  // where getEntryPoints() returned empty even though entry points were
+  // specified by name (they were only resolved lazily at solve-time).
+  // Callers that previously used entry-point names should resolve them from
+  // the Module before constructing the problem.
   explicit IntraMonoProblem(std::vector<llvm::Function *> EntryPoints = {},
                             pt_t PT = nullptr)
       : PT(PT), EntryPoints(std::move(EntryPoints)) {}
 
+  // Constructor for analyses that also need the CFG and IRDB.
   IntraMonoProblem(const db_t *IRDB, const c_t *CF, pt_t PT,
-                   std::vector<std::string> EntryPointNames = {})
+                   std::vector<llvm::Function *> EntryPoints = {})
       : IRDB(IRDB), CF(CF), PT(std::move(PT)),
-        EntryPointNames(std::move(EntryPointNames)) {}
+        EntryPoints(std::move(EntryPoints)) {}
 
   virtual ~IntraMonoProblem() = default;
 
@@ -113,9 +120,13 @@ public:
   /**
    * @brief Return the initial top element
    *
-   * For forward may-analyses: typically empty set
-   * For forward must-analyses: typically universe set
+   * For forward may-analyses: typically empty set (bottom of the lattice)
+   * For forward must-analyses: typically universe set (top of the lattice)
    * For backward analyses: depends on the lattice
+   *
+   * Note: the name "allTop" is inherited from Phasar convention and refers
+   * to the identity element for the merge operator, which is the top of the
+   * lattice for must-analyses and the bottom for may-analyses.
    */
   virtual mono_container_t allTop() { return mono_container_t{}; }
 
@@ -136,6 +147,41 @@ public:
     return ::dataflow::controlflow::FlowDirection::Forward;
   }
 
+  /**
+   * @brief Widening operator (L1 fix)
+   *
+   * Called by the solver instead of using the raw new value when a node has
+   * been re-processed more than WideningThreshold times (see IntraSolver.h).
+   * Widening must produce a value that is >= both OldVal and NewVal in the
+   * lattice order, and must guarantee convergence in a finite number of steps.
+   *
+   * Default implementation: returns NewVal unchanged (i.e., no widening).
+   * This preserves existing behaviour for analyses over finite-height lattices.
+   *
+   * Override this method for analyses over infinite-height lattices (e.g.,
+   * interval analysis, string-length analysis) to ensure termination.
+   *
+   * Example — interval widening:
+   * @code
+   *   Interval widen(const Interval &Old, const Interval &New) override {
+   *     int64_t lo = (New.lo < Old.lo) ? INT64_MIN : Old.lo;
+   *     int64_t hi = (New.hi > Old.hi) ? INT64_MAX : Old.hi;
+   *     return Interval{lo, hi};
+   *   }
+   * @endcode
+   *
+   * @param OldVal The value stored at the node before this iteration
+   * @param NewVal The newly computed value for the node
+   * @return A widened value that is >= both OldVal and NewVal
+   */
+  virtual mono_container_t widen(const mono_container_t &OldVal,
+                                 const mono_container_t &NewVal) {
+    // Default: no widening — just return the new value.
+    // Analyses over finite-height lattices converge without widening.
+    (void)OldVal;
+    return NewVal;
+  }
+
   // ========================================
   // Optional utilities
   // ========================================
@@ -154,10 +200,6 @@ public:
     return EntryPoints;
   }
 
-  const std::vector<std::string> &getEntryPointNames() const {
-    return EntryPointNames;
-  }
-
   const db_t *getProjectIRDB() const { return IRDB; }
 
   const c_t *getCFG() const { return CF; }
@@ -165,13 +207,20 @@ public:
   pt_t getPointstoInfo() const { return PT; }
   pt_t getAliasAnalysis() const { return PT; }
 
-  virtual bool setSoundness(Soundness /*S*/) { return false; }
+  // Fix 3.10: setSoundness now actually stores the value and returns true.
+  // Subclasses that want to adjust behavior based on soundness should check
+  // this->S in their transfer functions.
+  virtual bool setSoundness(Soundness NewS) {
+    S = NewS;
+    return true;
+  }
+
+  Soundness getSoundness() const { return S; }
 
 protected:
   const db_t *IRDB = nullptr;
   const c_t *CF = nullptr;
   pt_t PT{};
-  std::vector<std::string> EntryPointNames;
   Soundness S = Soundness::Soundy;
   std::vector<llvm::Function *> EntryPoints;
 };
@@ -204,9 +253,9 @@ public:
       : IntraMonoProblem<AnalysisDomainTy>(std::move(EntryPoints), PT) {}
 
   InterMonoProblem(const db_t *IRDB, const i_t *ICF, pt_t PT,
-                   std::vector<std::string> EntryPointNames = {})
+                   std::vector<llvm::Function *> EntryPoints = {})
       : IntraMonoProblem<AnalysisDomainTy>(IRDB, ICF, std::move(PT),
-                                           std::move(EntryPointNames)),
+                                           std::move(EntryPoints)),
         ICF(ICF) {}
 
   // ========================================
@@ -268,7 +317,10 @@ public:
    * Override to provide more precise call graph resolution (e.g., for
    * indirect calls using points-to analysis).
    *
-   * Default: returns direct callee only.
+   * Default: returns direct callee only.  For indirect calls (function
+   * pointers, virtual dispatch) the default returns an empty vector and
+   * emits a diagnostic warning (Fix 3.8).  Subclasses should override this
+   * method and use points-to information to resolve indirect calls soundly.
    *
    * @param CallSite The call instruction
    * @return Vector of possible callees
@@ -281,6 +333,16 @@ public:
     }
     if (auto *Callee = Call->getCalledFunction()) {
       Callees.push_back(Callee);
+    } else {
+      // Fix 3.8: indirect call — warn instead of silently dropping.
+      // The default implementation cannot resolve indirect calls; the analysis
+      // will be unsound at this call site.  Override getCalleesOfCallAt() and
+      // use points-to information to handle indirect calls correctly.
+      llvm::errs()
+          << "[InterMonoProblem] WARNING: indirect call site encountered "
+             "but getCalleesOfCallAt() not overridden — callee(s) will be "
+             "ignored and the analysis may be unsound.\n"
+          << "  Call site: " << *CallSite << "\n";
     }
     return Callees;
   }

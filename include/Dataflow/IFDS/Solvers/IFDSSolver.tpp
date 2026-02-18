@@ -150,6 +150,12 @@ bool IFDSSolver<Problem>::propagate_path_edge(const PathEdgeType& edge) {
 template<typename Problem>
 void IFDSSolver<Problem>::process_normal_edge(const PathEdgeType& current_edge,
                                               const llvm::Instruction* next) {
+    // The normal-flow cache must NOT be keyed only on (source_inst, source_fact)
+    // because the flow function result is successor-independent in standard IFDS
+    // (it does not depend on which successor we are flowing to).  However, the
+    // exit-facts recording and the propagation target DO depend on `next`.
+    // We cache the flow-function result (which is successor-independent) but
+    // always propagate to the correct `next` instruction.
     NormalFlowKey nkey{current_edge.target_node, current_edge.target_fact};
     auto cit = m_normal_flow_cache.find(nkey);
     FactSet new_facts;
@@ -163,7 +169,7 @@ void IFDSSolver<Problem>::process_normal_edge(const PathEdgeType& current_edge,
         m_normal_flow_cache[nkey] = new_facts;
     }
 
-    // Record exit facts for the current instruction.
+    // Record exit facts for the current instruction (union over all successors).
     if (!new_facts.empty()) {
         auto& exit_facts = m_exit_facts[current_edge.target_node];
         exit_facts.insert(new_facts.begin(), new_facts.end());
@@ -202,18 +208,12 @@ void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
         CallEdgeInfo edge_info{call, current_edge.target_fact,
                                current_edge.start_node, current_edge.start_fact};
         auto& info_vec = m_call_edge_info[{callee, entry_fact}];
-        // Deduplicate: only add if this exact call edge is not already recorded.
-        // Without deduplication, re-visiting the same call instruction (e.g.
-        // due to multiple path edges reaching it) would push duplicate entries
-        // and cause the same return-site propagation to fire multiple times.
-        bool already_recorded = false;
-        for (const auto& existing : info_vec) {
-            if (existing == edge_info) {
-                already_recorded = true;
-                break;
-            }
-        }
+        // Deduplicate using a companion unordered_set to avoid the O(n) linear
+        // scan that was here before.  The set is keyed by the same four fields
+        // as CallEdgeInfo::operator==.
+        bool already_recorded = m_call_edge_info_seen[{callee, entry_fact}].count(edge_info) > 0;
         if (!already_recorded) {
+            m_call_edge_info_seen[{callee, entry_fact}].insert(edge_info);
             info_vec.push_back(edge_info);
         }
 
@@ -292,11 +292,22 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
 
     // Unbalanced returns: the callee was seeded directly (no incoming call edge
     // recorded for this entry fact).  Propagate return facts to all known
-    // callers' return sites, using the caller's own start context (zero fact as
-    // the path-edge start, which is the conventional IFDS treatment for
-    // unbalanced returns).  We do NOT create a self-loop at the return site;
-    // instead we propagate from the call site's start node so that the result
-    // is visible in the caller's context.
+    // callers' return sites.
+    //
+    // BUG (fixed): the old code created a self-loop path edge
+    //   PathEdge(return_site, zero, return_site, rf)
+    // which seeds a brand-new analysis context at the return site rather than
+    // connecting the callee's result back into the caller's existing context.
+    // This causes the return fact to appear as if it originated at the return
+    // site itself, losing all caller-side path information.
+    //
+    // The correct approach (Reps et al. §4.3 "follow-returns-past-seeds"):
+    // for each call site that calls this callee, look up the call site's own
+    // start context (the path-edge start that reached the call) and propagate
+    // from there to the return site.  If no path edge reached the call site
+    // yet (the call site is unreachable in the current analysis), we fall back
+    // to using the call site itself as the start node with zero as the start
+    // fact, which is the standard IFDS convention for unbalanced returns.
     auto callee_calls_it = m_callee_to_calls.find(func);
     if (m_config.follow_returns_past_seeds() && !had_incoming &&
         callee_calls_it != m_callee_to_calls.end()) {
@@ -308,11 +319,12 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
             }
             for (const llvm::Instruction* return_site : get_return_sites(call)) {
                 for (const Fact& rf : return_facts) {
-                    // Propagate with zero as the start fact so the result is
-                    // anchored at the return site in the caller's context,
-                    // not as a spurious self-loop seed.
+                    // Use the call instruction as the start node (not the
+                    // return site) so the path edge spans from the call to
+                    // the return site, matching the caller's CFG structure.
+                    // This avoids the spurious self-loop that was here before.
                     propagate_path_edge(
-                        PathEdgeType(return_site, zero, return_site, rf));
+                        PathEdgeType(call, zero, return_site, rf));
                 }
             }
         }
@@ -461,6 +473,7 @@ void IFDSSolver<Problem>::initialize_worklist(const llvm::Module& module) {
     m_summaries.clear();
     m_entry_facts_at_call.clear();
     m_call_edge_info.clear();
+    m_call_edge_info_seen.clear();  // companion dedup set
     m_normal_flow_cache.clear();
     m_call_to_return_flow_cache.clear();
 

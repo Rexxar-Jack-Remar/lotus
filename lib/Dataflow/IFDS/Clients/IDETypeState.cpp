@@ -144,12 +144,14 @@ IDETypeState::FactSet IDETypeState::normal_flow(const llvm::Instruction* stmt, c
     else if (auto* load = llvm::dyn_cast<llvm::LoadInst>(stmt)) {
         const llvm::Value* ptr = load->getPointerOperand();
         
-        // If fact aliases with loaded pointer, propagate to load result
+        // If fact aliases with loaded pointer, propagate to load result.
+        // The old code had two separate blocks: one guarded by `fact &&
+        // may_alias_or_equal(...)` and one unconditional `should_track(load)`
+        // insert.  The unconditional insert caused the load result to be added
+        // as a new fact even when no existing fact flowed into it, which is
+        // unsound (it generates facts from thin air).  Only add the load result
+        // when the fact actually flows through the pointer.
         if (fact && may_alias_or_equal(fact, ptr) && should_track(load)) {
-            out.insert(load);
-        }
-        
-        if (should_track(load)) {
             out.insert(load);
         }
     }
@@ -342,11 +344,17 @@ bool IDETypeState::should_track(const llvm::Value* val) const {
         }
     }
     
-    // Check if the type matches tracked types
+    // Check if the type matches tracked types.
+    // NOTE: getPointerElementType() was deprecated in LLVM 14 and removed in
+    // LLVM 17 (opaque-pointer migration).  We use getNonOpaquePointerElementType()
+    // which is still available in LLVM 14.x (the project's target version) but
+    // guarded so the code compiles cleanly when the API is absent.
     if (!m_tracked_types.empty() && val->getType()) {
         llvm::Type* ty = val->getType();
         if (auto* ptr_ty = llvm::dyn_cast<llvm::PointerType>(ty)) {
-            llvm::Type* elem_ty = ptr_ty->getPointerElementType();
+#if LLVM_VERSION_MAJOR < 17
+            // LLVM 14–16: typed pointers still exist; use the non-opaque accessor.
+            llvm::Type* elem_ty = ptr_ty->getNonOpaquePointerElementType();
             if (auto* struct_ty = llvm::dyn_cast<llvm::StructType>(elem_ty)) {
                 if (struct_ty->hasName()) {
                     std::string type_name = struct_ty->getName().str();
@@ -355,6 +363,10 @@ bool IDETypeState::should_track(const llvm::Value* val) const {
                     }
                 }
             }
+#endif
+            // LLVM 17+: all pointers are opaque; type-based filtering is not
+            // possible without debug-info metadata.  Fall through to the
+            // default pointer-type check below.
         }
     }
     

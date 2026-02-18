@@ -45,10 +45,15 @@ struct SignFact {
 namespace std {
 template <> struct hash<ifds::SignFact> {
   size_t operator()(const ifds::SignFact &fact) const {
-    size_t h1 = std::hash<int>{}(static_cast<int>(fact.kind));
-    size_t h2 = std::hash<const llvm::Value *>{}(fact.value);
-    size_t h3 = std::hash<int>{}(static_cast<int>(fact.sign));
-    return (h1 ^ (h2 << 1)) ^ (h3 << 2);
+    // FNV-1a-style mixing to avoid XOR-shift collisions on aligned hashes.
+    size_t h = 14695981039346656037ULL;
+    h ^= std::hash<int>{}(static_cast<int>(fact.kind));
+    h *= 1099511628211ULL;
+    h ^= std::hash<const llvm::Value *>{}(fact.value);
+    h *= 1099511628211ULL;
+    h ^= std::hash<int>{}(static_cast<int>(fact.sign));
+    h *= 1099511628211ULL;
+    return h;
   }
 };
 } // namespace std
