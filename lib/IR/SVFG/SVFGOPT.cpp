@@ -206,41 +206,82 @@ void SVFGOPT::replaceARetWithPHI(PhiSVFGNode *phi, SVFGNode *svfgNode) {
 }
 
 void SVFGOPT::retargetEdgesOfAInFOut(SVFGNode *node) {
-  if (!node || node->getInEdges().size() != 1)
+  if (!node || node->getInEdges().empty())
     return;
 
-  auto *inEdge = node->getInEdges().front();
-  auto *def = inEdge ? inEdge->getSrcNode() : nullptr;
-  if (!inEdge || !def)
-    return;
+  // BUG FIX: the old "size() != 1 → return" was too strict for FormalOutSVFGNode,
+  // which can legitimately have one incoming edge per return statement (multiple
+  // returns in a function body).  We now handle the general case by performing
+  // the cross-product retargeting for all (inEdge, outEdge) pairs, which is
+  // the same algorithm used by retargetEdgesOfAOutFIn.
+  //
+  // For the single-incoming-edge shortcut (the common case for ActualInSVFGNode),
+  // we still take the fast path to record the def-node mapping.
 
-  const SVFGNodeBS inPts = inEdge->getPointsTo();
-  if (isa<ActualInSVFGNode>(node)) {
-    setActualInDef(node->getId(), def->getId());
-  } else if (isa<FormalOutSVFGNode>(node)) {
-    setFormalOutDef(node->getId(), def->getId());
-  }
+  if (node->getInEdges().size() == 1) {
+    // Fast path: single in-edge (typical for ActualIn nodes).
+    auto *inEdge = node->getInEdges().front();
+    auto *def = inEdge ? inEdge->getSrcNode() : nullptr;
+    if (!inEdge || !def)
+      return;
 
-  for (SVFGEdge *outEdge : node->getOutEdges()) {
-    if (!outEdge || !outEdge->getDstNode())
-      continue;
-    SVFGNodeBS pts = inPts;
-    if (!pts.empty() && !outEdge->getPointsTo().empty()) {
-      SVFGNodeBS inter;
-      std::set_intersection(pts.begin(), pts.end(), outEdge->getPointsTo().begin(),
-                            outEdge->getPointsTo().end(),
-                            std::inserter(inter, inter.begin()));
-      pts = std::move(inter);
-    } else {
-      pts.clear();
+    const SVFGNodeBS inPts = inEdge->getPointsTo();
+    if (isa<ActualInSVFGNode>(node)) {
+      setActualInDef(node->getId(), def->getId());
+    } else if (isa<FormalOutSVFGNode>(node)) {
+      setFormalOutDef(node->getId(), def->getId());
     }
-    if (inEdge->getPointsTo().empty() && outEdge->getPointsTo().empty()) {
-      pts.clear();
+
+    for (SVFGEdge *outEdge : node->getOutEdges()) {
+      if (!outEdge || !outEdge->getDstNode())
+        continue;
+      SVFGNodeBS pts = inPts;
+      if (!pts.empty() && !outEdge->getPointsTo().empty()) {
+        SVFGNodeBS inter;
+        std::set_intersection(pts.begin(), pts.end(),
+                              outEdge->getPointsTo().begin(),
+                              outEdge->getPointsTo().end(),
+                              std::inserter(inter, inter.begin()));
+        pts = std::move(inter);
+      } else if (inPts.empty() && outEdge->getPointsTo().empty()) {
+        // Both guards are empty: unconstrained flow, leave pts empty.
+        pts.clear();
+      } else if (!outEdge->getPointsTo().empty()) {
+        // Only out-edge has a guard; use it.
+        pts = outEdge->getPointsTo();
+      }
+      // If both guards are non-empty but the intersection is empty, skip.
+      if (!inPts.empty() && !outEdge->getPointsTo().empty() && pts.empty())
+        continue;
+      addEdge(def, outEdge->getDstNode(), outEdge->getEdgeKind(),
+              outEdge->getCallSite(), pts);
     }
-    if (!outEdge->getPointsTo().empty() && pts.empty())
-      continue;
-    addEdge(def, outEdge->getDstNode(), outEdge->getEdgeKind(),
-            outEdge->getCallSite(), pts);
+  } else {
+    // General path: multiple in-edges (typical for FormalOut nodes with
+    // multiple return statements).  Use cross-product retargeting.
+    const auto inEdgesCopy = node->getInEdges();
+    const auto outEdgesCopy = node->getOutEdges();
+
+    for (SVFGEdge *inEdge : inEdgesCopy) {
+      if (!inEdge || !inEdge->getSrcNode())
+        continue;
+      // Record the last def (caller may only care about one canonical def).
+      if (isa<FormalOutSVFGNode>(node))
+        setFormalOutDef(node->getId(), inEdge->getSrcNode()->getId());
+      else if (isa<ActualInSVFGNode>(node))
+        setActualInDef(node->getId(), inEdge->getSrcNode()->getId());
+
+      for (SVFGEdge *outEdge : outEdgesCopy) {
+        if (!outEdge || !outEdge->getDstNode())
+          continue;
+        SVFGNodeBS pts = intersectPts(inEdge, outEdge);
+        if (!inEdge->getPointsTo().empty() && !outEdge->getPointsTo().empty()
+            && pts.empty())
+          continue; // Points-to guards do not overlap.
+        addEdge(inEdge->getSrcNode(), outEdge->getDstNode(),
+                outEdge->getEdgeKind(), outEdge->getCallSite(), pts);
+      }
+    }
   }
 
   removeAllEdges(node);

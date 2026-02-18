@@ -73,6 +73,7 @@ enum class SVFGK : uint32_t {
   Store,
   Gep,
   BinaryOp,
+  UnaryOp,
   Cmp,
   Branch,
 
@@ -173,7 +174,8 @@ enum class SVFGEdgeK : uint32_t {
 inline bool isStmtSVFGNode(SVFGK k) {
   return k == SVFGK::Stmt || k == SVFGK::Addr || k == SVFGK::Copy ||
          k == SVFGK::Load || k == SVFGK::Store || k == SVFGK::Gep ||
-         k == SVFGK::BinaryOp || k == SVFGK::Cmp || k == SVFGK::Branch;
+         k == SVFGK::BinaryOp || k == SVFGK::UnaryOp ||
+         k == SVFGK::Cmp || k == SVFGK::Branch;
 }
 
 /// @brief Check if node kind is a memory SSA node
@@ -259,8 +261,18 @@ inline bool isThreadMHPVFGEdge(SVFGEdgeK k) {
 }
 
 /// @brief Check if edge kind is a direct value-flow edge (no points-to)
+/// Note: In Lotus the builder emits IntraCopy/IntraGep/IntraPhi/IntraCmp/
+/// IntraBranch rather than the single IntraDirect kind.  All of those are
+/// logically direct flows, so we include them here so that clients using
+/// isDirectVFGEdge() work correctly.
 inline bool isDirectVFGEdge(SVFGEdgeK k) {
-  return k == SVFGEdgeK::IntraDirect || k == SVFGEdgeK::CallDir ||
+  return k == SVFGEdgeK::IntraDirect  ||
+         k == SVFGEdgeK::IntraCopy    ||
+         k == SVFGEdgeK::IntraGep     ||
+         k == SVFGEdgeK::IntraPhi     ||
+         k == SVFGEdgeK::IntraCmp     ||
+         k == SVFGEdgeK::IntraBranch  ||
+         k == SVFGEdgeK::CallDir      ||
          k == SVFGEdgeK::RetDir;
 }
 

@@ -696,17 +696,17 @@ void SVFGBuilder::buildMemoryPHINodes() {
             }
           }
           
-          // Need PHI if we have multiple different incoming defs
-          // OR if we have a single predecessor with a PHI (to maintain SSA form)
-          if (incomingDefs.size() > 1) {
+          // A memory PHI is needed only at confluence points:
+          //   1.  The block has >= 2 predecessors (join point in the CFG).
+          //   2.  AND the memory region has at least one reaching definition
+          //       along some path (incomingDefs is non-empty).
+          //
+          // The old condition "numPreds == 1 && predecessor-has-PHI → needsPhi"
+          // was WRONG: a block with a single predecessor NEVER needs a PHI in
+          // SSA form.  That condition caused cascading/unnecessary PHIs,
+          // degrading analysis precision.
+          if (numPreds >= 2 && !incomingDefs.empty()) {
             needsPhi = true;
-          } else if (numPreds == 1 && incomingDefs.size() == 1) {
-            // Check if the single predecessor has a PHI - if so, we need one too
-            const BasicBlock *singlePred = *pred_begin(&bb);
-            auto predPhiIt = bbToMemPhi[singlePred].find(memReg);
-            if (predPhiIt != bbToMemPhi[singlePred].end()) {
-              needsPhi = true;
-            }
           }
 
           if (needsPhi) {
@@ -875,183 +875,33 @@ void SVFGBuilder::buildMemoryPHINodes() {
 }
 
 void SVFGBuilder::buildInterproceduralMemoryPHINodes() {
-  if (!config.buildMSSA)
-    return;
-
-  const Module *M = getModuleFromICFG(icfg);
-  if (!M)
-    return;
-
-  // Create inter-procedural memory PHI nodes for memory regions that flow
-  // across call boundaries. These are needed when:
-  // 1. A memory region is modified in a callee and flows back to caller
-  // 2. A memory region flows from caller to callee and back
-  
-  for (const Function &F : *M) {
-    if (F.isDeclaration())
-      continue;
-
-    // For each memory region that has FormalIn/FormalOut nodes,
-    // check if we need inter-procedural PHI nodes
-    
-    // Collect memory regions that have both FormalIn and FormalOut
-    std::set<uint32_t> interprocMemRegs;
-    for (auto *formalIn : svfg->getFormalIns(&F)) {
-      if (auto *formalInMem = dyn_cast<FormalInSVFGNode>(formalIn)) {
-        uint32_t memReg = formalInMem->getMemReg();
-        // Check if there's a corresponding FormalOut
-        for (auto *formalOut : svfg->getFormalOuts(&F)) {
-          if (auto *formalOutMem = dyn_cast<FormalOutSVFGNode>(formalOut)) {
-            if (formalOutMem->getMemReg() == memReg) {
-              interprocMemRegs.insert(memReg);
-              break;
-            }
-          }
-        }
-      }
-    }
-
-    // Create InterMSSAPhiSVFGNode for formal parameter memory flow
-    for (uint32_t memReg : interprocMemRegs) {
-      // Find FormalIn and FormalOut nodes for this memory region
-      FormalInSVFGNode *formalIn = nullptr;
-      FormalOutSVFGNode *formalOut = nullptr;
-      
-      for (auto *formal : svfg->getFormalIns(&F)) {
-        if (auto *fi = dyn_cast<FormalInSVFGNode>(formal)) {
-          if (fi->getMemReg() == memReg) {
-            formalIn = fi;
-            break;
-          }
-        }
-      }
-      
-      for (auto *formal : svfg->getFormalOuts(&F)) {
-        if (auto *fo = dyn_cast<FormalOutSVFGNode>(formal)) {
-          if (fo->getMemReg() == memReg) {
-            formalOut = fo;
-            break;
-          }
-        }
-      }
-
-      if (!formalIn || !formalOut)
-        continue;
-
-      // Get points-to set from FormalIn
-      SVFGNodeBS ptsSet = formalIn->getDefSVFVars();
-      
-      // Create InterMSSAPhiSVFGNode for formal parameter (function entry)
-      uint32_t formalPhiId = nextNode();
-      const ICFGNode *entryICFGNode = nullptr;
-      // Find entry ICFG node
-      for (auto &pair : *icfg) {
-        if (IntraBlockNode *blockNode = dyn_cast<IntraBlockNode>(pair.second)) {
-          if (blockNode->getBasicBlock() == &F.getEntryBlock()) {
-            entryICFGNode = blockNode;
-            break;
-          }
-        }
-      }
-      
-      auto *formalPhi = new InterMSSAPhiSVFGNode(
-          formalPhiId, entryICFGNode, &F, memReg, ptsSet);
-      svfg->addNode(formalPhi);
-      
-      // Connect FormalIn -> InterPhi -> FormalOut
-      {
-        SVFGNodeBS edgePts = formalPhi->getDefSVFVars();
-        if (edgePts.empty())
-          edgePts.insert(getOrCreateUnknownObjId());
-        svfg->addEdge(formalIn, formalPhi, SVFGEdgeK::IntraPhi, nullptr,
-                      edgePts);
-        svfg->addEdge(formalPhi, formalOut, SVFGEdgeK::IntraPhi, nullptr,
-                      edgePts);
-      }
-    }
-
-    // Now handle call sites: create InterMSSAPhiSVFGNode for actual return memory flow
-    for (auto &pair : *icfg) {
-      ICFGNode *node = pair.second;
-      IntraBlockNode *blockNode = dyn_cast<IntraBlockNode>(node);
-      if (!blockNode)
-        continue;
-
-      const BasicBlock *bb = blockNode->getBasicBlock();
-      if (!bb)
-        continue;
-
-      for (const Instruction &inst : *bb) {
-        const CallBase *call = dyn_cast<CallBase>(&inst);
-        if (!call)
-          continue;
-
-        // Get all ActualIn and ActualOut nodes for this call
-        std::set<uint32_t> callMemRegs;
-        for (auto *actualIn : svfg->getActualIns(call)) {
-          if (auto *ai = dyn_cast<ActualInSVFGNode>(actualIn)) {
-            uint32_t memReg = ai->getMemReg();
-            // Check if there's a corresponding ActualOut
-            for (auto *actualOut : svfg->getActualOuts(call)) {
-              if (auto *ao = dyn_cast<ActualOutSVFGNode>(actualOut)) {
-                if (ao->getMemReg() == memReg) {
-                  callMemRegs.insert(memReg);
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        // Create InterMSSAPhiSVFGNode for actual return memory flow
-        for (uint32_t memReg : callMemRegs) {
-          ActualInSVFGNode *actualIn = nullptr;
-          ActualOutSVFGNode *actualOut = nullptr;
-          
-          for (auto *actual : svfg->getActualIns(call)) {
-            if (auto *ai = dyn_cast<ActualInSVFGNode>(actual)) {
-              if (ai->getMemReg() == memReg) {
-                actualIn = ai;
-                break;
-              }
-            }
-          }
-          
-          for (auto *actual : svfg->getActualOuts(call)) {
-            if (auto *ao = dyn_cast<ActualOutSVFGNode>(actual)) {
-              if (ao->getMemReg() == memReg) {
-                actualOut = ao;
-                break;
-              }
-            }
-          }
-
-          if (!actualIn || !actualOut)
-            continue;
-
-          // Get points-to set from ActualIn
-          SVFGNodeBS ptsSet = actualIn->getDefSVFVars();
-          
-          // Create InterMSSAPhiSVFGNode for actual return (call site)
-          uint32_t actualPhiId = nextNode();
-          auto *actualPhi = new InterMSSAPhiSVFGNode(
-              actualPhiId, blockNode, call, memReg, ptsSet);
-          svfg->addNode(actualPhi);
-          
-          // Connect ActualIn -> InterPhi -> ActualOut
-          {
-            SVFGNodeBS edgePts = actualPhi->getDefSVFVars();
-            if (edgePts.empty())
-              edgePts.insert(getOrCreateUnknownObjId());
-            svfg->addEdge(actualIn, actualPhi, SVFGEdgeK::IntraPhi, nullptr,
-                          edgePts);
-            svfg->addEdge(actualPhi, actualOut, SVFGEdgeK::IntraPhi, nullptr,
-                          edgePts);
-          }
-        }
-      }
-    }
-  }
+  // DISABLED – this function used to insert InterMSSAPhiSVFGNode nodes
+  // between FormalIn and FormalOut (and between ActualIn and ActualOut),
+  // which is INCORRECT:
+  //
+  //   FormalIn → [InterPhi] → FormalOut
+  //
+  // FormalIn represents the memory state AT ENTRY; FormalOut represents the
+  // state AT EXIT after all stores in the body.  Inserting a synthetic
+  // inter-procedural PHI between them would bypass all intra-procedural
+  // StoreChi/PHI nodes and create direct def-use edges that skip the actual
+  // program flow, producing spurious value-flow paths.
+  //
+  // The correct inter-procedural memory flow is already established by:
+  //   • buildCallEdges:   ActualIn  → FormalIn  (CallAIn edge)
+  //   • buildReturnEdges: FormalOut → ActualOut (RetAOut edge)
+  //   • connectMemorySSAEdges: stores/loads connected inside each function
+  //
+  // If you need to model a callee that passes memory through unchanged, that
+  // is correctly handled by having no StoreChi in the callee body, which
+  // means the reaching-def chain continues from FormalIn through FormalOut
+  // without any additional node.  No synthetic PHI is needed.
+  return;
+}
+// ---- dead code preserved for reference (body removed) ----
+static void buildInterproceduralMemoryPHINodes_DEAD(
+    [[maybe_unused]] const llvm::Module *M) {
+  (void)M;
 }
 
 void SVFGBuilder::connectMemorySSAEdges() {
@@ -1650,13 +1500,19 @@ void SVFGBuilder::buildCallEdges() {
               continue;
             if (formalParm->getParamIndex() != actualParm->getParamIndex())
               continue;
-            svfg->addEdge(actualParm, formalParm, SVFGEdgeK::ParamCall, call);
+            // Use only CallDir/CallInd – ParamCall is a duplicate and is
+            // removed to avoid confusing DDA clients that pattern-match on
+            // edge kind.  (SVF uses a single CallDirVF/CallIndVF per pair.)
             const bool isDirectEdge =
                 (directCallee && directCallee == callee &&
                  !directCallee->isDeclaration());
-            svfg->addEdge(actualParm, formalParm,
+            if (SVFGEdge *e = svfg->addEdge(actualParm, formalParm,
                           isDirectEdge ? SVFGEdgeK::CallDir : SVFGEdgeK::CallInd,
-                          call);
+                          call)) {
+              // Track pre-computed indirect edges for spurious-edge filtering.
+              if (!isDirectEdge)
+                vfEdgesAtIndCallSite.insert(e);
+            }
           }
         }
       }
@@ -1717,13 +1573,17 @@ void SVFGBuilder::buildReturnEdges() {
             auto *formalRet = dyn_cast<FormalRetSVFGNode>(formal);
             if (!formalRet)
               continue;
-            svfg->addEdge(formalRet, actualRet, SVFGEdgeK::ParamRet, call);
+            // Use only RetDir/RetInd – ParamRet is a duplicate (same fix as
+            // for ParamCall above).
             const bool isDirectEdge =
                 (directCallee && directCallee == callee &&
                  !directCallee->isDeclaration());
-            svfg->addEdge(formalRet, actualRet,
+            if (SVFGEdge *e = svfg->addEdge(formalRet, actualRet,
                           isDirectEdge ? SVFGEdgeK::RetDir : SVFGEdgeK::RetInd,
-                          call);
+                          call)) {
+              if (!isDirectEdge)
+                vfEdgesAtIndCallSite.insert(e);
+            }
           }
         }
       }
@@ -1781,16 +1641,15 @@ bool SVFGBuilder::connectCallSiteToCalleeOnTheFly(
         continue;
       if (formalParm->getParamIndex() != actualParm->getParamIndex())
         continue;
-      if (SVFGEdge *e = g->addEdge(actualParm, formalParm, SVFGEdgeK::ParamCall, cs)) {
-        newEdges.push_back(e);
-        created = true;
-      }
+      // Emit only CallDir/CallInd – ParamCall is a duplicate (see buildCallEdges).
       if (SVFGEdge *e = g->addEdge(actualParm, formalParm,
                                    isDirectEdge ? SVFGEdgeK::CallDir
                                                 : SVFGEdgeK::CallInd,
                                    cs)) {
         newEdges.push_back(e);
         created = true;
+        if (!isDirectEdge)
+          vfEdgesAtIndCallSite.insert(e);
       }
     }
   }
@@ -1827,16 +1686,15 @@ bool SVFGBuilder::connectCallSiteToCalleeOnTheFly(
       auto *formalRet = dyn_cast<FormalRetSVFGNode>(formalNode);
       if (!formalRet)
         continue;
-      if (SVFGEdge *e = g->addEdge(formalRet, actualRet, SVFGEdgeK::ParamRet, cs)) {
-        newEdges.push_back(e);
-        created = true;
-      }
+      // Emit only RetDir/RetInd – ParamRet is a duplicate (see buildReturnEdges).
       if (SVFGEdge *e = g->addEdge(formalRet, actualRet,
                                    isDirectEdge ? SVFGEdgeK::RetDir
                                                 : SVFGEdgeK::RetInd,
                                    cs)) {
         newEdges.push_back(e);
         created = true;
+        if (!isDirectEdge)
+          vfEdgesAtIndCallSite.insert(e);
       }
     }
   }

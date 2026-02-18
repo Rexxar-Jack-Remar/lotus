@@ -269,6 +269,47 @@ public:
   SVFG_NODE_KIND(BinaryOp)
 };
 
+/// @brief Unary operation node (mirrors SVF's UnaryOpVFGNode).
+///
+/// Models unary instructions with a single operand and a result:
+///   - llvm::UnaryOperator (fneg)
+///   - llvm::CastInst subclasses (trunc, zext, sext, fpext, fptrunc,
+///     fptoui, fptosi, uitofp, sitofp, ptrtoint, inttoptr, bitcast,
+///     addrspacecast)
+///
+/// SVF stores these in UnaryOpVFGNode which carries an OPVers map; we do
+/// the same so SVFGOPT can query the single operand uniformly.
+class UnaryOpSVFGNode : public StmtSVFGNode {
+public:
+  using OPVers = std::map<uint32_t, const llvm::Value *>;
+
+private:
+  OPVers opVers;
+
+public:
+  UnaryOpSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Value *v)
+      : StmtSVFGNode(id, SVFGK::UnaryOp, icfg, v) {}
+
+  /// Set operand at position @p pos (only position 0 is used for unary ops).
+  inline void setOpVer(uint32_t pos, const llvm::Value *val) {
+    opVers[pos] = val;
+  }
+  inline const llvm::Value *getOpVer(uint32_t pos) const {
+    auto it = opVers.find(pos);
+    return (it != opVers.end()) ? it->second : nullptr;
+  }
+  /// Convenience: return the single source operand (position 0).
+  inline const llvm::Value *getOperand() const { return getOpVer(0); }
+
+  inline uint32_t getOpVerNum() const { return opVers.size(); }
+  inline OPVers::const_iterator opVerBegin() const { return opVers.begin(); }
+  inline OPVers::const_iterator opVerEnd() const { return opVers.end(); }
+
+  static inline bool classof(const SVFGNode *n) {
+    return n->getNodeKind() == SVFGK::UnaryOp;
+  }
+};
+
 /// @brief Comparison instruction node
 class CmpSVFGNode : public StmtSVFGNode {
 public:

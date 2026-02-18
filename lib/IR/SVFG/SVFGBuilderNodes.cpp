@@ -126,8 +126,12 @@ void SVFGBuilder::buildTopLevelNodes() {
       const bool isCmp = isa<CmpInst>(&inst);
       const bool isBranch = isa<BranchInst>(&inst);
       const bool isBinary = isa<BinaryOperator>(&inst);
+      // UnaryOperator covers fneg; CastInst covers bitcast/trunc/zext/inttoptr
+      // etc.  Both can carry pointer-type results, so they must be considered.
+      const bool isUnary = isa<UnaryOperator>(&inst) || isa<CastInst>(&inst);
       const bool hasPointerResult = inst.getType()->isPointerTy();
-      if (!hasPointerResult && !isStore && !isCmp && !isBranch && !isBinary)
+      if (!hasPointerResult && !isStore && !isCmp && !isBranch && !isBinary &&
+          !isUnary)
         continue;
 
       // Create the singleton null node on-demand and map the (uniqued) constant.
@@ -269,7 +273,19 @@ void SVFGBuilder::buildTopLevelNodes() {
         svfg->setDef(&inst, nodeId);
         valueToNode[&inst] = nodeId;
         svfg->setValueNode(&inst, nodeId);
+      } else if (isa<CastInst>(&inst) || isa<UnaryOperator>(&inst)) {
+        // Mirrors SVF's UnaryOpVFGNode (bitcast, trunc, zext, sext, fpext,
+        // inttoptr, ptrtoint, addrspacecast, fneg …).
+        uint32_t nodeId = nextNode();
+        auto *unaryNode = new UnaryOpSVFGNode(nodeId, blockNode, &inst);
+        // Record single source operand at position 0 (matching SVF's OPVers).
+        unaryNode->setOpVer(0, inst.getOperand(0));
+        svfg->addNode(unaryNode);
+        svfg->setDef(&inst, nodeId);
+        valueToNode[&inst] = nodeId;
+        svfg->setValueNode(&inst, nodeId);
       } else {
+        // Generic copy/move for remaining instructions with pointer results.
         uint32_t nodeId = nextNode();
         auto *copyNode = new CopySVFGNode(nodeId, blockNode, &inst);
         svfg->addNode(copyNode);
@@ -380,19 +396,51 @@ void SVFGBuilder::buildAddressTakenNodes() {
         std::vector<const void *> ptsVoid = getPointsToSet(&gv);
         SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
 
-        // Create global initialization node
-        // Find the entry function or create a dummy entry
-        const Function *entryFunc = nullptr;
-        for (const Function &F : *M) {
-          if (!F.isDeclaration() && F.hasName() && 
-              (F.getName() == "main" || entryFunc == nullptr)) {
-            entryFunc = &F;
-            if (F.getName() == "main")
-              break;
+        // Global variable anchoring strategy (mirrors SVF's GlobalBlock approach):
+        //
+        // 1. Prefer `main` as the anchor (SVF uses a GlobalBlock ICFG node that
+        //    feeds into main's entry).
+        // 2. If no `main`, collect all functions that DIRECTLY USE the global –
+        //    these are plausible entry contexts.  This avoids the unsound choice
+        //    of an arbitrary first function in library/multi-entry programs.
+        // 3. If the global has no direct instruction users (only ConstantExpr
+        //    users), fall back to all non-declaration functions.
+        //
+        // Note: proper GlobalBlock support requires ICFG changes; this is the
+        // best approximation with the current infrastructure.
+
+        // Gather direct-use functions for this global.
+        llvm::SmallVector<const Function *, 4> entryFuncs;
+        const Function *mainFunc = M->getFunction("main");
+        if (mainFunc && !mainFunc->isDeclaration()) {
+          entryFuncs.push_back(mainFunc);
+        } else {
+          // Collect functions that directly use this global.
+          for (const User *user : gv.users()) {
+            if (const Instruction *userInst = dyn_cast<Instruction>(user)) {
+              const Function *F = userInst->getFunction();
+              if (F && !F->isDeclaration()) {
+                // Deduplicate.
+                bool found = false;
+                for (const Function *ef : entryFuncs) {
+                  if (ef == F) { found = true; break; }
+                }
+                if (!found) entryFuncs.push_back(F);
+              }
+            }
+          }
+          // If no direct users found, fall back to first non-declaration function.
+          if (entryFuncs.empty()) {
+            for (const Function &F : *M) {
+              if (!F.isDeclaration()) {
+                entryFuncs.push_back(&F);
+                break;
+              }
+            }
           }
         }
 
-        if (entryFunc) {
+        for (const Function *entryFunc : entryFuncs) {
           const ICFGNode *entryICFGNode = nullptr;
           if (icfg) {
             entryICFGNode = const_cast<ICFG *>(icfg)->getIntraBlockNode(
@@ -400,6 +448,7 @@ void SVFGBuilder::buildAddressTakenNodes() {
           }
           if (objIds.empty()) {
             const uint32_t memReg = getOrCreateMemReg(&gv);
+            // Only create once per (memReg, entryFunc) pair.
             const uint32_t entryNodeId = nextNode();
             const uint32_t entryVersion = nextVersion(entryFunc, memReg);
             auto *entryChi = new EntryChiSVFGNode(
@@ -422,7 +471,6 @@ void SVFGBuilder::buildAddressTakenNodes() {
               funcEntryChi[entryFunc].push_back(entryNodeId);
             }
           }
-          
         }
       }
     }

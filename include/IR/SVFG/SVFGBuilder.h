@@ -252,6 +252,9 @@ private:
   /// @brief Function argument to memory regions (derived from points-to objects).
   std::unordered_map<const llvm::Argument *, std::vector<uint32_t>> argToMemRegs;
 
+  /// @brief Value-flow edges at indirect call sites (for spurious-edge filtering).
+  std::unordered_set<SVFGEdge *> vfEdgesAtIndCallSite;
+
 public:
   /// @brief Constructor
   SVFGBuilder(const SVFGBuilderConfig &cfg = SVFGBuilderConfig())
