@@ -27,6 +27,7 @@ bool pdg::ControlDependencyGraph::runOnFunction(Function &F) {
   _PDT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   addControlDepFromEntryNodeToInsts(F);
   addControlDepFromDominatedBlockToDominator(F);
+  addControlDepFromIndirectBranches(F);
   return false;
 }
 
@@ -56,13 +57,29 @@ void pdg::ControlDependencyGraph::addControlDepFromEntryNodeToInsts(
 
 void pdg::ControlDependencyGraph::addControlDepFromDominatedBlockToDominator(
     Function &F) {
+  // Implements the standard Ferrante/Ottenstein/Warren CDG algorithm:
+  // For each CFG edge (A -> B) where B does not post-dominate A, walk up the
+  // post-dominator tree from B to the parent of A in the post-dominator tree,
+  // adding CONTROLDEP_BR edges from A's terminator to every block on that path.
+  //
+  // Fix: the original code added a direct edge to succ_bb AND then walked the
+  // post-dominator tree from succ_bb upward, which double-counted succ_bb when
+  // nearestCommonDominator == &BB.  The corrected version only uses the tree
+  // walk (which already includes succ_bb as the starting point).
+  //
+  // IndirectBr is handled separately in addControlDepFromIndirectBranches().
   ProgramGraph &g = ProgramGraph::getInstance();
   for (auto &BB : F) {
     Instruction *terminator = BB.getTerminator();
     if (!terminator)
       continue;
+    // Skip blocks with 0 or 1 successors (no branching decision).
+    // Also skip IndirectBr — handled by addControlDepFromIndirectBranches().
     if (terminator->getNumSuccessors() <= 1)
       continue;
+    if (isa<IndirectBrInst>(terminator))
+      continue;
+
     Node *terminator_node = g.getNode(*terminator);
     if (terminator_node == nullptr)
       continue;
@@ -70,19 +87,56 @@ void pdg::ControlDependencyGraph::addControlDepFromDominatedBlockToDominator(
     for (auto succ_iter = succ_begin(&BB); succ_iter != succ_end(&BB);
          succ_iter++) {
       BasicBlock *succ_bb = *succ_iter;
-      if (&BB == &*succ_bb || !_PDT->dominates(&*succ_bb, &BB)) {
-        BasicBlock *nearestCommonDominator =
-            _PDT->findNearestCommonDominator(&BB, succ_bb);
-        if (nearestCommonDominator == &BB)
-          addControlDepFromNodeToBB(*terminator_node, *succ_bb,
-                                    EdgeType::CONTROLDEP_BR);
+      // Skip self-loops: a block cannot be control-dependent on itself.
+      if (succ_bb == &BB)
+        continue;
+      // Only process edges where succ_bb does NOT post-dominate BB.
+      if (_PDT->dominates(succ_bb, &BB))
+        continue;
 
-        auto *nearest_node = _PDT->getNode(nearestCommonDominator);
-        for (auto *cur = _PDT->getNode(&*succ_bb); cur && cur != nearest_node;
-             cur = cur->getIDom()) {
-          addControlDepFromNodeToBB(*terminator_node, *cur->getBlock(),
-                                    EdgeType::CONTROLDEP_BR);
-        }
+      // Walk up the post-dominator tree from succ_bb to (but not including)
+      // the nearest common post-dominator of BB and succ_bb.
+      BasicBlock *ncd = _PDT->findNearestCommonDominator(&BB, succ_bb);
+      auto *ncd_node = _PDT->getNode(ncd);
+      for (auto *cur = _PDT->getNode(succ_bb); cur && cur != ncd_node;
+           cur = cur->getIDom()) {
+        addControlDepFromNodeToBB(*terminator_node, *cur->getBlock(),
+                                  EdgeType::CONTROLDEP_BR);
+      }
+    }
+  }
+}
+
+void pdg::ControlDependencyGraph::addControlDepFromIndirectBranches(
+    Function &F) {
+  // Handle IndirectBrInst: emit CONTROLDEP_IND_BR edges using the same
+  // post-dominator-tree walk as for conditional branches.
+  ProgramGraph &g = ProgramGraph::getInstance();
+  for (auto &BB : F) {
+    auto *terminator = BB.getTerminator();
+    if (!terminator)
+      continue;
+    auto *ind_br = dyn_cast<IndirectBrInst>(terminator);
+    if (!ind_br)
+      continue;
+
+    Node *terminator_node = g.getNode(*terminator);
+    if (terminator_node == nullptr)
+      continue;
+
+    for (unsigned i = 0; i < ind_br->getNumSuccessors(); ++i) {
+      BasicBlock *succ_bb = ind_br->getSuccessor(i);
+      if (succ_bb == &BB)
+        continue;
+      if (_PDT->dominates(succ_bb, &BB))
+        continue;
+
+      BasicBlock *ncd = _PDT->findNearestCommonDominator(&BB, succ_bb);
+      auto *ncd_node = _PDT->getNode(ncd);
+      for (auto *cur = _PDT->getNode(succ_bb); cur && cur != ncd_node;
+           cur = cur->getIDom()) {
+        addControlDepFromNodeToBB(*terminator_node, *cur->getBlock(),
+                                  EdgeType::CONTROLDEP_IND_BR);
       }
     }
   }

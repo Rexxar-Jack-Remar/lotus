@@ -98,26 +98,53 @@ bool pdg::PDGCallGraph::isFuncSignatureMatch(CallInst &ci, llvm::Function &f) {
 }
 
 bool pdg::PDGCallGraph::isTypeEqual(Type &t1, Type &t2) {
+  // Fast path: same pointer (always true within one compilation unit).
   if (&t1 == &t2)
     return true;
-  // need to compare name for sturct, due to llvm-link duplicate struct types
-  if (!t1.isPointerTy() || !t2.isPointerTy())
+
+  // Both must be the same kind of type.
+  if (t1.getTypeID() != t2.getTypeID())
+    return false;
+
+  // For non-pointer types (int, float, void, …) the identity check above is
+  // sufficient within a single module.  After llvm-link, primitive types are
+  // still uniqued, so reaching here with non-pointer types means they differ.
+  if (!t1.isPointerTy())
     return false;
 
   auto *t1_pointed_ty = t1.getPointerElementType();
   auto *t2_pointed_ty = t2.getPointerElementType();
 
-  if (!t1_pointed_ty->isStructTy() || !t2_pointed_ty->isStructTy())
-    return false;
+  // Pointer-to-struct: compare struct names after stripping llvm-link version
+  // tags (e.g. "struct.Foo.1" vs "struct.Foo").
+  if (t1_pointed_ty->isStructTy() && t2_pointed_ty->isStructTy()) {
+    auto t1_name =
+        pdgutils::stripVersionTag(t1_pointed_ty->getStructName().str());
+    auto t2_name =
+        pdgutils::stripVersionTag(t2_pointed_ty->getStructName().str());
+    return (t1_name == t2_name);
+  }
 
-  // version tag is generated when the linker cannot merge type from different
-  // complilation units.
-  auto t1_name =
-      pdgutils::stripVersionTag(t1_pointed_ty->getStructName().str());
-  auto t2_name =
-      pdgutils::stripVersionTag(t2_pointed_ty->getStructName().str());
+  // Pointer-to-pointer: recurse.
+  if (t1_pointed_ty->isPointerTy() && t2_pointed_ty->isPointerTy())
+    return isTypeEqual(*t1_pointed_ty, *t2_pointed_ty);
 
-  return (t1_name == t2_name);
+  // Pointer-to-array: compare element type and size.
+  if (t1_pointed_ty->isArrayTy() && t2_pointed_ty->isArrayTy()) {
+    auto *at1 = cast<ArrayType>(t1_pointed_ty);
+    auto *at2 = cast<ArrayType>(t2_pointed_ty);
+    if (at1->getNumElements() != at2->getNumElements())
+      return false;
+    return isTypeEqual(*at1->getElementType(), *at2->getElementType());
+  }
+
+  // Pointer-to-function: compare via identity (function types are uniqued).
+  if (t1_pointed_ty->isFunctionTy() && t2_pointed_ty->isFunctionTy())
+    return (t1_pointed_ty == t2_pointed_ty);
+
+  // Pointer-to-primitive (int, float, void, …): compare the pointee types.
+  // After llvm-link, primitive types are still uniqued, so identity suffices.
+  return (t1_pointed_ty == t2_pointed_ty);
 }
 
 std::set<Function *> pdg::PDGCallGraph::getIndirectCallCandidates(CallInst &ci,

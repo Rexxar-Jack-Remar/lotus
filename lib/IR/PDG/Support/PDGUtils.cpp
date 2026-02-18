@@ -217,19 +217,33 @@ bool pdg::pdgutils::hasReadAccess(Value &v) {
 }
 
 /**
- * @brief Checks if a value is written to.
+ * @brief Checks if a value is written to (i.e., used as the pointer operand
+ * of a StoreInst).
  *
- * Examines users of the value to see if it is the pointer operand of a
- * StoreInst.
+ * Fix (B6): The original code contained the guard
+ *   `!isa<Argument>(si->getValueOperand())`
+ * which was intended to skip the alloca-initialization pattern
+ *   `store %arg, %alloca`
+ * (where the compiler copies an argument into a local alloca).  However, the
+ * guard is applied to the *value* operand, not to `v` itself.  This means any
+ * store whose *value* happens to be a function argument is excluded, even when
+ * `v` is a completely unrelated pointer being written to.  For example:
+ *   `store %arg0, %ptr_field`   — `%ptr_field` IS being written, but the
+ *   original code returned false because `%arg0` is an Argument.
+ *
+ * The correct check is simply: is `v` the pointer operand of any store?
+ * We do NOT need to special-case the alloca-initialization pattern here
+ * because the callers (connectFormalOutTreeWithAddrVars, connectOutTrees) only
+ * call hasWriteAccess on GEP/load/alloca nodes that represent field addresses,
+ * not on the argument alloca itself.
  *
  * @param v The value to check.
- * @return true if write access is detected.
+ * @return true if `v` is the pointer operand of at least one StoreInst.
  */
 bool pdg::pdgutils::hasWriteAccess(Value &v) {
   for (auto *user : v.users()) {
     if (auto *si = dyn_cast<StoreInst>(user)) {
-      if (!isa<Argument>(si->getValueOperand()) &&
-          si->getPointerOperand() == &v)
+      if (si->getPointerOperand() == &v)
         return true;
     }
   }

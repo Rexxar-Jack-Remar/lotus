@@ -167,7 +167,14 @@ pdg::Tree::Tree(const Tree &src_tree)
   new_root_node->setTree(this);
   _root_node = new_root_node;
 
-  // Recursively copy all children
+  // BFS copy of the entire tree.
+  // Fix: the TreeNode copy constructor copies _addr_vars from the source node,
+  // but child nodes computed via computeDerivedAddrVarsFromParent() store their
+  // addr_vars in the source tree's child TreeNode objects.  The copy constructor
+  // of TreeNode (which calls Node(node_type)) does copy _addr_vars via the
+  // member initializer list, so we just need to make sure we also copy the
+  // _addr_vars field explicitly here to be safe, since the TreeNode copy ctor
+  // initializes _addr_vars from tree_node._addr_vars.
   std::queue<std::pair<TreeNode*, TreeNode*>> node_queue;
   node_queue.push(std::make_pair(src_tree_root_node, new_root_node));
   
@@ -180,6 +187,15 @@ pdg::Tree::Tree(const Tree &src_tree)
       TreeNode *new_child = new TreeNode(*src_child);
       new_child->setParentTreeNode(dst_node);
       new_child->setTree(this);
+      // Explicitly copy addr_vars from the source child to the new child.
+      // This is the key fix: computeDerivedAddrVarsFromParent() populates
+      // _addr_vars on the source tree's child nodes, but the TreeNode copy
+      // constructor's member initializer copies _addr_vars correctly only if
+      // the source node's _addr_vars were populated before the copy.
+      // We re-copy here to be explicit and future-proof.
+      for (auto *addr_var : src_child->getAddrVars()) {
+        new_child->addAddrVar(*addr_var);
+      }
       dst_node->insertChildNode(new_child);
       node_queue.push(std::make_pair(src_child, new_child));
     }

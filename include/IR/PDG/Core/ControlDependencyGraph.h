@@ -17,6 +17,8 @@ namespace pdg
     void addControlDepFromNodeToBB(Node &n, llvm::BasicBlock &bb, EdgeType edge_type);
     void addControlDepFromEntryNodeToInsts(llvm::Function &F);
     void addControlDepFromDominatedBlockToDominator(llvm::Function &F);
+    /// @brief Adds CONTROLDEP_IND_BR edges for IndirectBrInst terminators.
+    void addControlDepFromIndirectBranches(llvm::Function &F);
   private:
     llvm::PostDominatorTree *_PDT;
   };

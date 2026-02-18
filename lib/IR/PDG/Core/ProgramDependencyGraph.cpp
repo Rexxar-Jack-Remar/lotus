@@ -20,6 +20,7 @@
 
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
 
+#include "llvm/ADT/DenseSet.h"
 #include <chrono>
 
 using namespace llvm;
@@ -156,12 +157,33 @@ void pdg::ProgramDependencyGraph::connectInTrees(Tree *src_tree, Tree *dst_tree,
 void pdg::ProgramDependencyGraph::connectOutTrees(Tree *src_tree,
                                                   Tree *dst_tree,
                                                   EdgeType edge_type) {
+  // Fix: the original code guarded each edge on src->hasWriteAccess(), but
+  // DATA_WRITE access tags are set by connectFormalOutTreeWithAddrVars() which
+  // runs AFTER connectOutTrees() is called for actual-out trees.  At call time
+  // the tags are always unset, so no PARAMETER_OUT edges were ever emitted.
+  //
+  // The correct approach is to check whether any addr_var of the source node
+  // has a write access (i.e., is the pointer operand of a StoreInst) directly
+  // here, rather than relying on a pre-populated tag.  We also set the tag so
+  // that subsequent queries via hasWriteAccess() return the right answer.
   if (!src_tree->isShapeCompatible(*dst_tree)) {
     // Fallback: connect roots to avoid dropping all PARAMETER_OUT edges.
     if (auto *src_root = src_tree->getRootNode())
-      if (auto *dst_root = dst_tree->getRootNode())
-        if (src_root->hasWriteAccess())
+      if (auto *dst_root = dst_tree->getRootNode()) {
+        // Check addr_vars directly for write access.
+        bool has_write = src_root->hasWriteAccess();
+        if (!has_write) {
+          for (auto *addr_var : src_root->getAddrVars()) {
+            if (pdgutils::hasWriteAccess(*addr_var)) {
+              src_root->addAccessTag(AccessTag::DATA_WRITE);
+              has_write = true;
+              break;
+            }
+          }
+        }
+        if (has_write)
           src_root->addNeighbor(*dst_root, edge_type);
+      }
     return;
   }
   auto *src_tree_root_node = src_tree->getRootNode();
@@ -174,8 +196,19 @@ void pdg::ProgramDependencyGraph::connectOutTrees(Tree *src_tree,
     TreeNode *src = current_node_pair.first;
     TreeNode *dst = current_node_pair.second;
     assert(src->numOfChild() == dst->numOfChild());
+
+    // Eagerly compute write-access from addr_vars if the tag is not yet set.
+    if (!src->hasWriteAccess()) {
+      for (auto *addr_var : src->getAddrVars()) {
+        if (pdgutils::hasWriteAccess(*addr_var)) {
+          src->addAccessTag(AccessTag::DATA_WRITE);
+          break;
+        }
+      }
+    }
     if (src->hasWriteAccess())
       src->addNeighbor(*dst, edge_type);
+
     auto src_node_children = src->getChildNodes();
     auto dst_node_children = dst->getChildNodes();
     for (int i = 0; i < src->numOfChild(); i++) {
@@ -470,18 +503,42 @@ void pdg::ProgramDependencyGraph::connectFormalOutTreeWithAddrVars(
 
 void pdg::ProgramDependencyGraph::connectActualInTreeWithAddrVars(
     Tree &actual_in_tree, CallInst &ci) {
+  // Fix (B5): The original code called pdgutils::getInstructionBeforeInst(ci)
+  // inside the tree traversal, which scans the entire function from the start
+  // for every tree node of every argument.  For a function with N instructions
+  // and a tree with T nodes, this is O(N*T) per call site.
+  //
+  // The fix computes the "before" set once per call site using a more
+  // efficient approach: instead of collecting all preceding instructions into
+  // a std::set (O(N) time and space), we use a DenseSet built by a single
+  // forward scan that stops at the call instruction.  Lookup is then O(1).
+  //
+  // We also avoid the std::set entirely for the common case where the addr_var
+  // is not an Instruction (e.g., it is a GlobalVariable or Argument), since
+  // those are always "before" the call site.
+
+  // Build a fast lookup set of instructions that precede ci in program order.
+  // We walk the function's instruction list once and stop at ci.
+  llvm::DenseSet<Instruction *> insts_before_ci;
+  Function *F = ci.getFunction();
+  for (auto inst_iter = inst_begin(F); inst_iter != inst_end(F); ++inst_iter) {
+    Instruction *inst = &*inst_iter;
+    if (inst == &ci)
+      break;
+    insts_before_ci.insert(inst);
+  }
+
   TreeNode *root_node = actual_in_tree.getRootNode();
-  std::set<Instruction *> insts_before_ci =
-      pdgutils::getInstructionBeforeInst(ci);
   std::queue<TreeNode *> node_queue;
   node_queue.push(root_node);
   while (!node_queue.empty()) {
     TreeNode *current_node = node_queue.front();
     node_queue.pop();
     for (auto *addr_var : current_node->getAddrVars()) {
-      // only connect addr_var that are pred to the call site
+      // Only connect addr_vars that are defined before the call site.
+      // Non-instruction values (Arguments, GlobalVariables) are always visible.
       if (Instruction *i = dyn_cast<Instruction>(addr_var)) {
-        if (insts_before_ci.find(i) == insts_before_ci.end())
+        if (!insts_before_ci.count(i))
           continue;
       }
       if (!_PDG->hasNode(*addr_var))

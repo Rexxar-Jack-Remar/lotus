@@ -18,7 +18,14 @@ namespace pdg
     bool runOnModule(llvm::Module &M) override;
     void addDefUseEdges(llvm::Instruction &inst);
     void addRAWEdges(llvm::Instruction &inst);
+    /// @brief No-op stub kept for API compatibility; use addAliasEdgesForFunction.
     void addAliasEdges(llvm::Instruction &inst);
+    /// @brief Builds DATA_ALIAS edges for all relevant instruction pairs in F.
+    ///
+    /// Called once per function instead of once per instruction to reduce
+    /// complexity from O(n³) to O(n²).  Skips construction entirely when the
+    /// over-approximate AA wrapper is unavailable to prevent graph blowup.
+    void addAliasEdgesForFunction(llvm::Function &F);
     llvm::AliasResult queryAliasUnderApproximate(llvm::Value &v1, llvm::Value &v2);
     llvm::AliasResult queryAliasOverApproximate(llvm::Value &v1, llvm::Value &v2);
 

@@ -57,6 +57,22 @@ namespace pdg
     }
 
     /**
+     * @brief Release (null out) all Tree pointers without deleting them.
+     *
+     * Called by ProgramGraph::reset() before GenericGraph::reset() so that
+     * the FunctionWrapper destructor does not double-free TreeNode objects
+     * that are already owned by the graph's _node_set.
+     */
+    void releaseTrees() {
+      for (auto &entry : _arg_formal_in_tree_map)
+        entry.second = nullptr;
+      for (auto &entry : _arg_formal_out_tree_map)
+        entry.second = nullptr;
+      _ret_val_formal_in_tree = nullptr;
+      _ret_val_formal_out_tree = nullptr;
+    }
+
+    /**
      * @brief Get the underlying LLVM Function
      * @return Pointer to the LLVM Function
      */

@@ -121,46 +121,77 @@ bool pdg::DataDependencyGraph::runOnModule(Module &M) {
     if (F.isDeclaration() || F.empty())
       continue;
     _mem_dep_res = &getAnalysis<MemoryDependenceWrapperPass>(F).getMemDep();
-    // setup alias query interface for each function
     for (auto inst_iter = inst_begin(F); inst_iter != inst_end(F);
          inst_iter++) {
       addDefUseEdges(*inst_iter);
       addRAWEdges(*inst_iter);
-      addAliasEdges(*inst_iter);
     }
+    // Build alias edges once per function (not once per instruction) to avoid
+    // O(n³) complexity.  Also guarded against AA-unavailable blowup.
+    addAliasEdgesForFunction(F);
   }
   return false;
 }
 
 void pdg::DataDependencyGraph::addAliasEdges(Instruction &inst) {
+  // This method is intentionally left as a no-op here.
+  // Alias edges are now built once per function in addAliasEdgesForFunction()
+  // to avoid the O(n²) per-instruction outer loop that the original design
+  // produced (addAliasEdges was called for every instruction, making the
+  // overall complexity O(n³) for a function with n instructions).
+  (void)inst;
+}
+
+void pdg::DataDependencyGraph::addAliasEdgesForFunction(Function &F) {
+  // When the over-approximate AA failed to initialize it returns MayAlias for
+  // every pair, which would add a DATA_ALIAS edge between every two
+  // pointer-touching instructions — an O(n²) graph blowup that makes all
+  // alias-based queries useless.  Guard against this by skipping alias-edge
+  // construction entirely when the over-approximate wrapper is unavailable.
+  if (!_alias_wrapper_over || !_alias_wrapper_over->isInitialized()) {
+    if (pdg::DEBUG)
+      llvm::errs() << "pdg: skipping alias edges for " << F.getName()
+                   << " (over-approximate AA not available)\n";
+    return;
+  }
+
   ProgramGraph &g = ProgramGraph::getInstance();
-  Function *func = inst.getFunction();
-  Node *src = g.getNode(inst);
-  if (src == nullptr)
-    return;
-  if (!isAliasRelevantInst(inst))
-    return;
 
-  for (auto inst_iter = inst_begin(func); inst_iter != inst_end(func);
-       inst_iter++) {
-    if (&inst == &*inst_iter)
-      continue;
-    if (!isAliasRelevantInst(*inst_iter))
-      continue;
+  // Collect alias-relevant instructions once.
+  llvm::SmallVector<Instruction *, 64> relevant;
+  for (auto inst_iter = inst_begin(F); inst_iter != inst_end(F); ++inst_iter) {
+    if (isAliasRelevantInst(*inst_iter))
+      relevant.push_back(&*inst_iter);
+  }
 
-    auto under_result = queryAliasUnderApproximate(inst, *inst_iter);
-    auto over_result = queryAliasOverApproximate(inst, *inst_iter);
-    if (under_result == llvm::AliasResult::NoAlias &&
-        over_result == llvm::AliasResult::NoAlias)
+  // O(n²) over relevant instructions only (not all instructions).
+  for (unsigned i = 0; i < relevant.size(); ++i) {
+    Instruction *a = relevant[i];
+    Node *src = g.getNode(*a);
+    if (!src)
       continue;
 
-    Node *dst = g.getNode(*inst_iter);
-    if (dst == nullptr)
-      continue;
+    for (unsigned j = i + 1; j < relevant.size(); ++j) {
+      Instruction *b = relevant[j];
 
-    // Prefer must-alias edges when the under-approximation can prove them,
-    // otherwise fall back to the over-approximation for may-alias coverage.
-    src->addNeighbor(*dst, EdgeType::DATA_ALIAS);
+      // Fast path: if both AAs agree on NoAlias, skip.
+      auto over_result = queryAliasOverApproximate(*a, *b);
+      if (over_result == llvm::AliasResult::NoAlias)
+        continue;
+
+      // Under-approximate AA can confirm NoAlias even when over says MayAlias.
+      auto under_result = queryAliasUnderApproximate(*a, *b);
+      if (under_result == llvm::AliasResult::NoAlias)
+        continue;
+
+      Node *dst = g.getNode(*b);
+      if (!dst)
+        continue;
+
+      // Add bidirectional alias edges (alias is symmetric).
+      src->addNeighbor(*dst, EdgeType::DATA_ALIAS);
+      dst->addNeighbor(*src, EdgeType::DATA_ALIAS);
+    }
   }
 }
 

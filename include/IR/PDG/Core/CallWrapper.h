@@ -65,6 +65,22 @@ namespace pdg
       }
 
       /**
+       * @brief Release (null out) all Tree pointers without deleting them.
+       *
+       * Called by ProgramGraph::reset() before GenericGraph::reset() so that
+       * the CallWrapper destructor does not double-free TreeNode objects that
+       * are already owned by the graph's _node_set.
+       */
+      void releaseTrees() {
+        for (auto &entry : _arg_actual_in_tree_map)
+          entry.second = nullptr;
+        for (auto &entry : _arg_actual_out_tree_map)
+          entry.second = nullptr;
+        _ret_val_actual_in_tree = nullptr;
+        _ret_val_actual_out_tree = nullptr;
+      }
+
+      /**
        * @brief Build trees for actual arguments matching the callee's formal trees
        * @param callee_fw The FunctionWrapper of the called function
        */

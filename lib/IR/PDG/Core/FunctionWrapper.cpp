@@ -123,16 +123,41 @@ void pdg::FunctionWrapper::buildFormalTreeForArgs() {
  *
  * Constructs "FormalIn" and "FormalOut" trees for the return value, enabling
  * field-sensitive analysis of returned data structures.
+ *
+ * Fix: the original code always allocated a tree even for void-returning
+ * functions, making hasNullRetVal() always return false.  It also called
+ * addAddrVar(*ret_val) without checking whether ret_val is nullptr (which it
+ * is for "ret void").  We now leave both tree pointers null for void functions
+ * so that hasNullRetVal() correctly returns true.
  */
 void pdg::FunctionWrapper::buildFormalTreesForRetVal() {
-  Tree *ret_formal_in_tree = new Tree();
+  // Void-returning functions have no return value to model.
+  if (_func->getReturnType()->isVoidTy()) {
+    _ret_val_formal_in_tree = nullptr;
+    _ret_val_formal_out_tree = nullptr;
+    return;
+  }
+
   DIType *func_ret_di_type = dbgutils::getFuncRetDIType(*_func);
+  // If we cannot determine the return type from debug info, leave trees null
+  // so that callers skip return-value parameter edges rather than crashing.
+  if (func_ret_di_type == nullptr) {
+    if (pdg::DEBUG)
+      errs() << "pdg: no return DIType for " << _func->getName()
+             << " — skipping return value trees\n";
+    _ret_val_formal_in_tree = nullptr;
+    _ret_val_formal_out_tree = nullptr;
+    return;
+  }
+
+  Tree *ret_formal_in_tree = new Tree();
   TreeNode *ret_formal_in_tree_root_node =
       new TreeNode(*_func, func_ret_di_type, 0, nullptr, ret_formal_in_tree,
                    GraphNodeType::PARAM_FORMALIN);
   for (auto *ret_inst : _return_insts) {
     auto *ret_val = ret_inst->getReturnValue();
-    ret_formal_in_tree_root_node->addAddrVar(*ret_val);
+    if (ret_val != nullptr)  // guard: "ret void" has a null return value
+      ret_formal_in_tree_root_node->addAddrVar(*ret_val);
   }
   ret_formal_in_tree->setRootNode(*ret_formal_in_tree_root_node);
   ret_formal_in_tree->build();

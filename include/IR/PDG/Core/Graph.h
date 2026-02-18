@@ -17,6 +17,7 @@
 #include "IR/PDG/Support/PDGCommandLineOptions.h"
 
 #include <unordered_map>
+#include <unordered_set>
 // #include <map>
 #include <set>
 
@@ -101,13 +102,16 @@ public:
   bool isBuild() { return _is_build; }
 
   /// @brief Resets the graph to empty state
+  ///
+  /// Edges are heap-allocated in Node::addNeighbor() and stored only in the
+  /// nodes' in/out edge sets; _edge_set is never populated and must not be
+  /// used for deletion.  We collect edges from every node's out-edge set
+  /// (each edge appears exactly once there) and delete them before deleting
+  /// the nodes themselves.
   void reset() {
     _is_build = false;
-    std::set<Edge *> edges_to_delete;
-    for (auto *edge : _edge_set) {
-      if (edge)
-        edges_to_delete.insert(edge);
-    }
+    // Collect every edge exactly once via out-edge sets.
+    std::unordered_set<Edge *> edges_to_delete;
     for (auto *node : _node_set) {
       if (!node)
         continue;
@@ -282,13 +286,33 @@ public:
   Node *getClassNodeByName(std::string cls_name);
 
   /// @brief Resets the graph and all its mappings
+  ///
+  /// Ownership of TreeNode objects is shared between the Tree objects inside
+  /// FunctionWrapper/CallWrapper and the _node_set in GenericGraph.
+  /// To avoid double-free we must release the Tree objects (which own their
+  /// TreeNodes via their destructors) BEFORE GenericGraph::reset() deletes
+  /// every node in _node_set.  We do this by calling releaseTrees() on every
+  /// wrapper first, which nulls out the tree pointers without deleting the
+  /// nodes (the nodes will be deleted by GenericGraph::reset()).
   void reset() {
+    // Step 1: release Tree objects from wrappers so their destructors do NOT
+    // delete TreeNodes that are still referenced by _node_set.
+    for (auto &entry : _func_wrapper_map) {
+      if (entry.second)
+        entry.second->releaseTrees();
+    }
+    for (auto &entry : _call_wrapper_map) {
+      if (entry.second)
+        entry.second->releaseTrees();
+    }
+    // Step 2: delete wrapper objects (trees already released, so no double-free).
     for (auto &entry : _call_wrapper_map) {
       delete entry.second;
     }
     for (auto &entry : _func_wrapper_map) {
       delete entry.second;
     }
+    // Step 3: delete all nodes and edges.
     GenericGraph::reset();
     _func_wrapper_map.clear();
     _call_wrapper_map.clear();
