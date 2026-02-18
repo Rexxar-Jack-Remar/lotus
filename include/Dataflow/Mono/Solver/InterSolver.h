@@ -235,22 +235,26 @@ private:
     OUT = Problem.allTop();
   }
 
-  void computeGEN(llvm::Instruction *Inst, ResultTy *DF) {
-    auto &Gen = DF->GEN(Inst);
-    Gen = Problem.allTop();
-  }
-
-  void computeKILL(llvm::Instruction *Inst, ResultTy *DF) {
-    auto &Kill = DF->KILL(Inst);
-    Kill = Problem.allTop();
-  }
+  // Bug B fix: computeGEN/computeKILL are not used by computeOUT (which calls
+  // normalFlow directly).  Setting them to allTop() was misleading and wasteful.
+  // They are left as no-ops; the engine still calls them but the results are
+  // never read by our computeOUT.
+  void computeGEN(llvm::Instruction * /*Inst*/, ResultTy * /*DF*/) {}
+  void computeKILL(llvm::Instruction * /*Inst*/, ResultTy * /*DF*/) {}
 
   void computeIN(llvm::Instruction *Inst, llvm::Instruction *PredInst,
                  const Context &PredCtx, mono_container_t &IN, ResultTy *DF) {
     mono_container_t Incoming;
-    auto &PredIn = DF->IN(PredInst, PredCtx);
+
+    // Bug A fix: use DF->OUT(PredInst, PredCtx) — the already-computed OUT of
+    // the predecessor — rather than re-applying normalFlow to PredIn.
+    // computeOUT applies normalFlow to produce OUT[Inst]; applying it again
+    // here to produce OUT[PredInst] would double-apply the transfer function.
+    const auto &PredOut = DF->OUT(PredInst, PredCtx);
 
     if (isFunctionEntry(Inst) && llvm::isa<llvm::CallBase>(PredInst)) {
+      // Call edge: PredInst is the call site, Inst is the callee entry.
+      // Use callFlow to map caller facts to callee entry facts.
       const auto Callees = getCalleesOfCallAt(PredInst);
       bool Matches = false;
       for (auto *Callee : Callees) {
@@ -260,54 +264,70 @@ private:
         }
       }
       if (Matches) {
-        Incoming = Problem.callFlow(PredInst, Inst->getFunction(), PredIn);
+        // Pass PredOut (= OUT[call site]) as the "In" to callFlow.
+        Incoming = Problem.callFlow(PredInst, Inst->getFunction(), PredOut);
       } else {
         Incoming = Problem.allTop();
       }
     } else if (llvm::isa<llvm::ReturnInst>(PredInst)) {
+      // Return edge: PredInst is a return instruction, Inst is the return site.
       Context CallerCtx = PredCtx;
       auto *CallSite = CallerCtx.pop_back();
       if (CallSite != nullptr) {
         Incoming = Problem.returnFlow(CallSite, PredInst->getFunction(),
-                                      PredInst, Inst, PredIn);
+                                      PredInst, Inst, PredOut);
       } else {
-        // Empty context: fan out to all callers of the current callee and
-        // merge their return-flow facts. Explicitly start with allTop() so
-        // behavior is correct when ICF is null or there are no callers.
+        // Empty context: fan out to all callers and merge return-flow facts.
         Incoming = Problem.allTop();
         if (ICF != nullptr) {
+          bool FirstCaller = true;
           mono_container_t Merged;
           for (auto *Caller : ICF->getCallersOf(PredInst->getFunction())) {
             auto RetFacts = Problem.returnFlow(
-                Caller, PredInst->getFunction(), PredInst, Inst, PredIn);
-            if (Merged.empty()) {
+                Caller, PredInst->getFunction(), PredInst, Inst, PredOut);
+            if (FirstCaller) {
               Merged = RetFacts;
+              FirstCaller = false;
             } else {
               Merged = Problem.merge(Merged, RetFacts);
             }
           }
-          if (!Merged.empty()) {
+          if (!FirstCaller) {
             Incoming = Merged;
           }
         }
       }
     } else if (llvm::isa<llvm::CallBase>(PredInst) &&
                isContinuationOfCall(Inst, PredInst)) {
+      // Call-to-return edge: facts that bypass the callee.
       const auto Callees = getCalleesOfCallAt(PredInst);
-      Incoming = Problem.callToRetFlow(PredInst, Inst, Callees, PredIn);
+      Incoming = Problem.callToRetFlow(PredInst, Inst, Callees, PredOut);
     } else {
-      Incoming = Problem.normalFlow(PredInst, PredIn);
+      // Normal intra-procedural edge: facts flow directly from OUT[Pred].
+      // Bug A fix: do NOT call normalFlow here — that is computeOUT's job.
+      Incoming = PredOut;
     }
 
-    if (IN.empty()) {
-      IN = Incoming;
-    } else {
-      IN = Problem.merge(IN, Incoming);
-    }
+    // Bug C fix: merge unconditionally rather than using empty() as a
+    // "first predecessor" sentinel.  An empty container is a valid lattice
+    // value (bottom for may-analyses) and must not be treated as uninitialised.
+    //
+    // The engine calls initializeIN before the predecessor loop, so IN already
+    // holds the correct identity element for the merge:
+    //   - May-analysis (union):         initializeIN → empty set (bottom)
+    //                                   merge(∅, Incoming) = Incoming  ✓
+    //   - Must-analysis (intersection): initializeIN → universal set (top)
+    //                                   merge(⊤, Incoming) = Incoming  ✓
+    // Subsequent predecessors are merged in correctly by the same equation.
+    IN = Problem.merge(IN, Incoming);
   }
 
   void computeOUT(llvm::Instruction *Inst, const Context &Ctx,
                   mono_container_t &OUT, ResultTy *DF) {
+    // Apply the transfer function to produce OUT[Inst, Ctx] from IN[Inst, Ctx].
+    // For call instructions the transfer function is still normalFlow (which
+    // typically passes through facts unchanged); the call/return flow functions
+    // are applied in computeIN at the callee entry / return site.
     OUT = Problem.normalFlow(Inst, DF->IN(Inst, Ctx));
   }
 

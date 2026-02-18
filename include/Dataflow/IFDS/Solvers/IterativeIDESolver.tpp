@@ -372,7 +372,10 @@ IterativeIDESolver<Problem>::get_value_at(const llvm::Instruction* inst,
             return jt->second;
         }
     }
-    return m_problem.top_value();
+    // A missing entry means the fact has not been reached at this instruction,
+    // so the correct default is bottom_value() (no information / unreachable),
+    // not top_value() (which would mean "all possible values" and is unsound).
+    return m_problem.bottom_value();
 }
 
 template<typename Problem>

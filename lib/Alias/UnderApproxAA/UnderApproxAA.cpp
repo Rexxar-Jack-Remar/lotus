@@ -54,6 +54,14 @@ struct CacheKeyHash {
 /// Cache type: maps each cache key to its equivalence database
 using CacheTy =
     std::unordered_map<CacheKey, std::unique_ptr<EquivDB>, CacheKeyHash>;
+
+/// Global per-function EquivDB cache.
+///
+/// WARNING: This cache is never automatically invalidated.  Any pass that
+/// modifies the IR of a function F after the first alias query on F will
+/// silently receive stale results.  Call UnderApproxAA::invalidateCache(F)
+/// (or UnderApproxAA::invalidateAllCaches()) before re-querying a modified
+/// function.
 static CacheTy EquivCache;
 
 /// Extract the parent function of a value
@@ -85,11 +93,22 @@ UnderApproxAA::UnderApproxAA(Module &M) : _module(M) {
 }
 
 UnderApproxAA::~UnderApproxAA() {
-  // The cache is static, so it persists across analysis instances
-  // This is intentional: once a function's EquivDB is built, it can be
-  // reused even if a new UnderApproxAA instance is created (assuming
-  // the IR hasn't changed).
+  // The cache is static, so it persists across analysis instances.
+  // Call invalidateCache(F) or invalidateAllCaches() if the IR changes.
 }
+
+void UnderApproxAA::invalidateCache(const llvm::Function *F) {
+  // Erase every cache entry whose function pointer matches F.
+  // There may be multiple entries (one per provider configuration).
+  for (auto It = EquivCache.begin(); It != EquivCache.end();) {
+    if (It->first.F == F)
+      It = EquivCache.erase(It);
+    else
+      ++It;
+  }
+}
+
+void UnderApproxAA::invalidateAllCaches() { EquivCache.clear(); }
 
 // ---------------------------------------------------------------------------
 // AAResult interface implementation
@@ -97,12 +116,34 @@ UnderApproxAA::~UnderApproxAA() {
 
 AliasResult UnderApproxAA::alias(const MemoryLocation &L1,
                                  const MemoryLocation &L2) {
-  // Extract pointer values from memory locations and delegate to mustAlias
-  // Note: This ignores size information - we only check pointer equality,
-  // not whether the memory regions overlap. This is acceptable for an
-  // under-approximation: if pointers must alias, the locations must alias.
-  return mustAlias(L1.Ptr, L2.Ptr) ? AliasResult::MustAlias
-                                   : AliasResult::NoAlias;
+  // Extract pointer values from memory locations and delegate to mustAlias.
+  if (!mustAlias(L1.Ptr, L2.Ptr))
+    // Unknown — we cannot prove they alias, but we also cannot prove they
+    // don't. Returning NoAlias here would violate the AAResult contract
+    // (NoAlias means *definitely* no alias). Return MayAlias instead.
+    return AliasResult::MayAlias;
+
+  // The pointers must alias at the pointer level.  Now check size
+  // compatibility: if both sizes are known and non-zero, the locations
+  // must overlap (same start address, both cover at least one byte).
+  // If either size is unknown (LocationSize::unknown()), we conservatively
+  // return MustAlias — the pointer-level guarantee is still valid.
+  //
+  // We do NOT return PartialAlias here because an under-approximation AA
+  // should only assert MustAlias when it is certain; for any uncertainty
+  // we fall back to MayAlias.
+  const LocationSize &S1 = L1.Size;
+  const LocationSize &S2 = L2.Size;
+
+  // If both sizes are precisely known and at least one is zero, the regions
+  // are zero-length and technically do not overlap — return MayAlias to be
+  // conservative (zero-size accesses are unusual; don't claim MustAlias).
+  if (S1.isPrecise() && S2.isPrecise()) {
+    if (S1.getValue() == 0 || S2.getValue() == 0)
+      return AliasResult::MayAlias;
+  }
+
+  return AliasResult::MustAlias;
 }
 
 bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {

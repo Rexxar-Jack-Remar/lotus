@@ -56,8 +56,14 @@ ConstantPropagationValue resolveValue(const ConstantPropagationMap &In,
 ConstantPropagationValue evalBinaryOp(unsigned Opcode,
                                       const ConstantPropagationValue &Lhs,
                                       const ConstantPropagationValue &Rhs) {
-  if (!isConst(Lhs) || !isConst(Rhs)) {
+  // Fix #5: Bottom (unreachable) propagates as Bottom; Top (unknown) yields
+  // Top, not Bottom.  The old code returned Bottom for any non-Const input,
+  // which incorrectly treated unknown values as unreachable.
+  if (isBottom(Lhs) || isBottom(Rhs)) {
     return makeBottom();
+  }
+  if (!isConst(Lhs) || !isConst(Rhs)) {
+    return makeTop();
   }
 
   auto LV = Lhs.ConstValue;
@@ -92,7 +98,8 @@ ConstantPropagationValue evalBinaryOp(unsigned Opcode,
     return makeConst(static_cast<uint64_t>(LV) %
                      static_cast<uint64_t>(RV));
   default:
-    return makeBottom();
+    // Unknown opcode: result is unknown (Top), not unreachable (Bottom).
+    return makeTop();
   }
 }
 
@@ -150,15 +157,45 @@ public:
     return Out;
   }
 
+  // merge() is the join operator at control-flow merge points.
+  //
+  // Absence from the map means Bottom (unreachable / not yet analyzed).
+  // join(Bottom/absent, x) = x  (unreachable path contributes nothing)
+  // join(x, Bottom/absent) = x
+  // join(x, x)             = x
+  // join(Const(a), Const(b)) = Top  (different constants → unknown)
+  // join(Const, Top)       = Top
+  // join(Top, Top)         = Top
   ConstantPropagationMap merge(const ConstantPropagationMap &Lhs,
                                const ConstantPropagationMap &Rhs) override {
     ConstantPropagationMap Out;
+
+    auto joinValues = [](const ConstantPropagationValue &A,
+                         const ConstantPropagationValue &B)
+        -> ConstantPropagationValue {
+      if (equalValue(A, B)) return A;
+      if (isBottom(A)) return B;
+      if (isBottom(B)) return A;
+      return makeTop();
+    };
+
     for (const auto &Entry : Lhs) {
       auto It = Rhs.find(Entry.first);
-      if (It != Rhs.end() && equalValue(Entry.second, It->second)) {
-        Out.insert(std::make_pair(Entry.first, Entry.second));
+      if (It == Rhs.end()) {
+        // Absent in Rhs → treat as Bottom → join = Lhs value.
+        Out[Entry.first] = Entry.second;
+      } else {
+        Out[Entry.first] = joinValues(Entry.second, It->second);
       }
     }
+
+    for (const auto &Entry : Rhs) {
+      if (Lhs.find(Entry.first) == Lhs.end()) {
+        // Absent in Lhs → treat as Bottom → join = Rhs value.
+        Out[Entry.first] = Entry.second;
+      }
+    }
+
     return Out;
   }
 
@@ -248,16 +285,16 @@ public:
       return Out;
     }
 
-    // Unknown/indirect call: we lose constant information about the return value.
+    // Unknown/indirect call: return value is unknown (Top), not unreachable.
     if (Callees.empty()) {
-      Out[CallSite] = makeBottom();
+      Out[CallSite] = makeTop();
       return Out;
     }
 
-    // Multiple potential callees: conservatively mark as unknown here. The
-    // precise constant, if any, will be re-established by returnFlow + merge.
+    // Multiple potential callees: conservatively mark return as unknown (Top).
+    // The precise constant, if any, will be re-established by returnFlow + merge.
     if (Callees.size() > 1) {
-      Out[CallSite] = makeBottom();
+      Out[CallSite] = makeTop();
     }
     return Out;
   }
@@ -277,12 +314,14 @@ public:
 private:
   lotus::AliasAnalysisWrapper *AA;
 
+  // weakJoin: for may-aliased pointers, conflicting values → Top (unknown),
+  // not Bottom (unreachable).
   static ConstantPropagationValue weakJoin(const ConstantPropagationValue &OldVal,
                                            const ConstantPropagationValue &NewVal) {
     if (equalValue(OldVal, NewVal)) {
       return OldVal;
     }
-    return makeBottom();
+    return makeTop();
   }
 
   void collectAliasedPointers(
@@ -352,7 +391,8 @@ private:
         Val = It->second;
         Found = true;
       } else if (!equalValue(Val, It->second)) {
-        return makeBottom();
+        // Multiple aliases disagree → unknown (Top), not unreachable (Bottom).
+        return makeTop();
       }
     }
     return Found ? Val : makeTop();

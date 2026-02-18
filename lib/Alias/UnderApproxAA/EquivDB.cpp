@@ -96,6 +96,7 @@
 #include "Alias/UnderApproxAA/Canonical.h"
 
 #include <functional>
+#include <mutex>
 #include <queue>
 #include <unordered_map>
 
@@ -187,16 +188,34 @@ static bool checkRoundTripCast(const Value *S1, const Value *S2) {
   return isRoundTripCast(S1, S2) || isRoundTripCast(S2, S1);
 }
 
-/// Rule 6: Same Underlying Object
-/// Two pointers derived from the same alloca or global (via casts/GEPs)
-/// that resolve to the same underlying object are aliases.
-/// Example: bitcast(%alloca) and GEP(%alloca, 0)
+/// Rule 6: Same Underlying Object at Zero Offset
+/// Two pointers that both have zero offset from the same alloca or global
+/// must alias.  We require zero offset to avoid false positives: e.g.
+/// GEP(%alloca, 4) and GEP(%alloca, 8) share the same underlying object
+/// but point to different locations.
+///
+/// "Zero offset" is checked by verifying that stripping all no-op casts
+/// and all-zero-index GEPs from each pointer yields the same base object.
+/// This is equivalent to requiring that both pointers ARE the base object
+/// (up to no-op casts / zero GEPs).
+///
+/// Example: bitcast(%alloca to i8*) and GEP(%alloca, 0) → true
+/// Counter-example: GEP(%alloca, 4) and GEP(%alloca, 8) → false (different
+/// offsets)
 static bool checkSameUnderlyingObject(const Value *S1, const Value *S2) {
   const Value *U1 = getUnderlyingObject(S1);
   const Value *U2 = getUnderlyingObject(S2);
 
-  // Only consider stack allocations and globals (not heap objects)
-  return U1 == U2 && (isa<AllocaInst>(U1) || isa<GlobalVariable>(U1));
+  // Only consider stack allocations and globals (not heap objects, which are
+  // handled by checkSameAllocation).
+  if (U1 != U2 || (!isa<AllocaInst>(U1) && !isa<GlobalVariable>(U1)))
+    return false;
+
+  // Require that both pointers reduce to the base object itself after
+  // stripping no-op casts and zero-index GEPs.  If either pointer has a
+  // non-zero offset (e.g. GEP with a non-zero index), stripNoopCasts will
+  // stop before the base and the comparison will fail.
+  return stripNoopCasts(S1) == U1 && stripNoopCasts(S2) == U2;
 }
 
 /// Rule 7: Constant Null Pointers
@@ -422,16 +441,20 @@ static bool atomicMustAlias(const DataLayout &DL, const Value *A,
 ///
 /// Time complexity: O(1) amortized (hash map lookup/insert + vector append)
 EquivDB::IdTy EquivDB::id(const Value *V) {
-  // Safety check: ensure V is not null
+  // Safety check: ensure V is not null.
+  // We use a dedicated sentinel slot (index 0) that is pre-allocated in the
+  // constructor so that id(nullptr) never collides with any real value's ID.
+  // Real value IDs start at 1.
   if (!V)
-    return 0; // Return invalid ID 0 for null values
+    return 0; // Sentinel slot — never unified with real values
 
   // Check if this value already has an ID
   auto It = Val2Id.find(V);
   if (It != Val2Id.end())
     return It->second;
 
-  // Allocate a new ID (the current size of Nodes/Id2Val)
+  // Allocate a new ID (the current size of Nodes/Id2Val).
+  // Because the sentinel occupies slot 0, the first real value gets ID 1.
   IdTy New = Nodes.size();
 
   // Initialize union-find node: parent is self (root), rank is 0
@@ -692,6 +715,15 @@ EquivDB::EquivDB(Function &Func, MemorySSA *MemSSA, DominatorTree *DomTree)
     : DL(Func.getParent()->getDataLayout()), F(Func), MSSA(MemSSA),
       DT(DomTree) {
 
+  // Pre-allocate sentinel slot 0 for id(nullptr).
+  // This ensures that the first real value gets ID 1, not 0, so that
+  // id(nullptr)==0 never collides with any real value's ID.
+  // The sentinel node is a self-rooted union-find node that is never
+  // unified with anything else.
+  Nodes.push_back({0u, 0u}); // parent=self, rank=0
+  Id2Val.push_back(nullptr);  // slot 0 → nullptr
+  Watches.emplace_back();     // empty watch list for sentinel
+
   // Safety check: ensure function has a parent module
   if (!Func.getParent()) {
     // Function without a parent module - cannot build equivalence database
@@ -825,7 +857,15 @@ void EquivDB::seedAtomicEqualities(
 ///   return the same pointer argument
 void EquivDB::seedReturnValueForwarding(
     std::vector<std::pair<const Value *, const Value *>> &WL) {
+  // SummaryCache is shared across all EquivDB instances (one per function
+  // being analyzed).  Under parallel compilation (e.g. ThinLTO or a
+  // multi-threaded pass manager) multiple threads may call this method
+  // concurrently for different functions, each of which may call different
+  // callees.  Protect the cache with a mutex so concurrent reads/writes are
+  // safe.  The lock is only held while looking up / inserting into the cache,
+  // not while running summarizeReturnBehavior(), so contention is minimal.
   static std::unordered_map<const Function *, ReturnSummary> SummaryCache;
+  static std::mutex SummaryCacheMutex;
 
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
@@ -862,14 +902,26 @@ void EquivDB::seedReturnValueForwarding(
       if (!Callee)
         continue;
 
-      ReturnSummary Summary;
-      auto It = SummaryCache.find(Callee);
-      if (It == SummaryCache.end()) {
-        Summary = summarizeReturnBehavior(Callee);
-        SummaryCache.emplace(Callee, Summary);
-      } else {
-        Summary = It->second;
-      }
+      // Look up the cache under the lock; compute the summary outside the
+      // lock if it is missing, then re-acquire to insert.
+      // Using a lambda avoids goto-across-initialization issues.
+      ReturnSummary Summary = [&]() -> ReturnSummary {
+        {
+          std::lock_guard<std::mutex> Guard(SummaryCacheMutex);
+          auto It = SummaryCache.find(Callee);
+          if (It != SummaryCache.end())
+            return It->second; // cache hit — no computation needed
+        }
+        // Compute outside the lock (read-only IR traversal, no shared state).
+        ReturnSummary Computed = summarizeReturnBehavior(Callee);
+        {
+          std::lock_guard<std::mutex> Guard(SummaryCacheMutex);
+          // Another thread may have inserted while we were computing; prefer
+          // the existing entry (both are equivalent for the same callee).
+          SummaryCache.emplace(Callee, Computed);
+        }
+        return Computed;
+      }();
 
       switch (Summary.K) {
       case ReturnSummary::Kind::Arg:
@@ -910,58 +962,65 @@ void EquivDB::seedSingleStoreAlloca(
     return false;
   };
 
+  // Build alloca → {stores, loads} maps in a single O(N) pass instead of
+  // re-scanning all instructions for every alloca (which was O(A×N)).
+  using AllocaStores = SmallVector<StoreInst *, 2>;
+  using AllocaLoads  = SmallVector<LoadInst *, 4>;
+  llvm::DenseMap<const Value *, AllocaStores> AllocaToStores;
+  llvm::DenseMap<const Value *, AllocaLoads>  AllocaToLoads;
+
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
-      auto *AI = dyn_cast<AllocaInst>(&I);
-      if (!AI)
-        continue;
-
-      const Value *AllocaV = AI;
-      SmallVector<StoreInst *, 2> Stores;
-      SmallVector<LoadInst *, 4> Loads;
-
-      for (BasicBlock &ScanBB : F)
-        for (Instruction &ScanI : ScanBB) {
-          if (auto *SI = dyn_cast<StoreInst>(&ScanI)) {
-            if (getUnderlyingObject(SI->getPointerOperand()) == AllocaV)
-              Stores.push_back(SI);
-          } else if (auto *LI = dyn_cast<LoadInst>(&ScanI)) {
-            if (getUnderlyingObject(LI->getPointerOperand()) == AllocaV &&
-                LI->getType()->isPointerTy())
-              Loads.push_back(LI);
-          }
-        }
-
-      if (Stores.empty() || Loads.empty())
-        continue;
-
-      for (LoadInst *LI : Loads) {
-        StoreInst *UniqueStore = nullptr;
-        bool Ambiguous = false;
-
-        for (StoreInst *SI : Stores) {
-          if (!dominatesInst(SI, LI))
-            continue;
-          if (!sameMemorySlot(SI->getPointerOperand(), LI->getPointerOperand()))
-            continue;
-
-          if (!UniqueStore) {
-            UniqueStore = SI;
-          } else if (UniqueStore != SI) {
-            Ambiguous = true;
-            break;
-          }
-        }
-
-        if (!UniqueStore || Ambiguous)
+      if (auto *SI = dyn_cast<StoreInst>(&I)) {
+        const Value *Base = getUnderlyingObject(SI->getPointerOperand());
+        if (isa<AllocaInst>(Base))
+          AllocaToStores[Base].push_back(SI);
+      } else if (auto *LI = dyn_cast<LoadInst>(&I)) {
+        if (!LI->getType()->isPointerTy())
           continue;
-
-        const Value *StoredVal = UniqueStore->getValueOperand();
-        if (!StoredVal->getType()->isPointerTy())
-          continue;
-
-        enqueuePair(WL, LI, StoredVal);
+        const Value *Base = getUnderlyingObject(LI->getPointerOperand());
+        if (isa<AllocaInst>(Base))
+          AllocaToLoads[Base].push_back(LI);
       }
+    }
+  }
+
+  // For each alloca that has both stores and loads, check per-load uniqueness.
+  for (auto &KV : AllocaToLoads) {
+    const Value *AllocaV = KV.first;
+    auto SIt = AllocaToStores.find(AllocaV);
+    if (SIt == AllocaToStores.end())
+      continue;
+
+    const AllocaStores &Stores = SIt->second;
+    const AllocaLoads  &Loads  = KV.second;
+
+    for (LoadInst *LI : Loads) {
+      StoreInst *UniqueStore = nullptr;
+      bool Ambiguous = false;
+
+      for (StoreInst *SI : Stores) {
+        if (!dominatesInst(SI, LI))
+          continue;
+        if (!sameMemorySlot(SI->getPointerOperand(), LI->getPointerOperand()))
+          continue;
+
+        if (!UniqueStore) {
+          UniqueStore = SI;
+        } else if (UniqueStore != SI) {
+          Ambiguous = true;
+          break;
+        }
+      }
+
+      if (!UniqueStore || Ambiguous)
+        continue;
+
+      const Value *StoredVal = UniqueStore->getValueOperand();
+      if (!StoredVal->getType()->isPointerTy())
+        continue;
+
+      enqueuePair(WL, LI, StoredVal);
     }
   }
 }
@@ -1097,20 +1156,24 @@ void EquivDB::propagate(
         // these)
         if (!I->getType()->isPointerTy())
           continue;
-        if (FiredSemantic.count(I))
-          continue;
-
-        // Try each semantic rule in sequence
-        // The first rule that fires is applied (rules are mutually exclusive
-        // per instruction)
+        // FiredSemantic guards PHI/Select (which can fire at most once: once
+        // all operands are in the same class the result is fixed).  GEPs are
+        // different: a GEP may gain new matching partners as more base-pointer
+        // classes merge, so we must NOT block ruleClosedGEP with FiredSemantic.
+        // We still block ruleClosedPHI / ruleClosedSelect after they fire to
+        // avoid redundant re-enqueueing.
         const Value *Rep = nullptr;
-        for (RuleTy R : SemanticRules)
-          if (R(I, *this, Rep)) { // Rule fires: I ≡ Rep
-            // Add new must-alias pair to worklist for further propagation
-            FiredSemantic.insert(I);
+        for (RuleTy R : SemanticRules) {
+          bool isGEPRule = (R == static_cast<RuleTy>(ruleClosedGEP));
+          if (!isGEPRule && FiredSemantic.count(I))
+            continue;
+          if (R(I, *this, Rep)) {
+            if (!isGEPRule)
+              FiredSemantic.insert(I);
             enqueuePair(WL, I, Rep);
-            break; // One rule firing per instruction is enough
+            break;
           }
+        }
       }
       // Note: We keep the List intact. Each instruction may be revisited
       // multiple times as its operand classes continue to merge, but semantic
@@ -1386,17 +1449,20 @@ bool EquivDB::findClosedGEPCandidate(const GetElementPtrInst *GEPI,
 }
 
 bool EquivDB::dominatesInst(const Instruction *Def, const Instruction *Use) const {
+  // A store cannot dominate itself as a load — they are never the same object,
+  // but guard against the degenerate case anyway.
+  if (Def == Use)
+    return false;
+
   if (Def->getParent() != Use->getParent())
     return DT && DT->dominates(Def->getParent(), Use->getParent());
 
-  if (Def == Use)
-    return true;
-
+  // Same basic block: Def dominates Use iff Def appears strictly before Use.
   for (const Instruction &I : *Def->getParent()) {
     if (&I == Def)
-      return true;
+      return true;  // Def comes first → it dominates Use
     if (&I == Use)
-      return false;
+      return false; // Use comes first → Def does not dominate Use
   }
   return false;
 }

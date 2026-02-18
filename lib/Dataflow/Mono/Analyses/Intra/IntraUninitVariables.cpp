@@ -103,10 +103,15 @@ public:
     return Out;
   }
 
+  // Uninitialized-variables is a FORWARD MAY-analysis: a variable is
+  // considered uninitialized if it MIGHT be uninitialized on ANY path
+  // reaching this point.  The join operator is therefore UNION, not
+  // intersection.  Using intersection (must-analysis) would only flag
+  // variables that are uninitialized on ALL paths, missing real bugs.
   mono_container_t merge(const mono_container_t &Lhs,
                           const mono_container_t &Rhs) override {
     mono_container_t Out = Lhs;
-    Out.intersectWith(Rhs);
+    Out.unionWith(Rhs);
     return Out;
   }
 

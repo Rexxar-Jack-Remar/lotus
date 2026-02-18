@@ -59,12 +59,21 @@ ConstantPropagationValue resolveValue(const ConstantPropagationMap &In,
 ConstantPropagationValue evalBinaryOp(unsigned Opcode,
                                       const ConstantPropagationValue &Lhs,
                                       const ConstantPropagationValue &Rhs) {
-  if (isTop(Lhs) || isTop(Rhs) || isBottom(Lhs) || isBottom(Rhs)) {
+  // Fix #5: distinguish Top (unknown) from Bottom (unreachable/error).
+  //   - Bottom propagates as Bottom (unreachable code stays unreachable).
+  //   - Top means the value is unknown; the result is also unknown (Top),
+  //     NOT Bottom.  Returning Bottom for Top inputs was unsound: it caused
+  //     reachable computations to be treated as unreachable, producing false
+  //     negatives in constant detection.
+  if (isBottom(Lhs) || isBottom(Rhs)) {
     return makeBottom();
+  }
+  if (isTop(Lhs) || isTop(Rhs)) {
+    return makeTop();
   }
 
   if (!isConst(Lhs) || !isConst(Rhs)) {
-    return makeBottom();
+    return makeTop();
   }
 
   auto LV = Lhs.ConstValue;
@@ -99,7 +108,8 @@ ConstantPropagationValue evalBinaryOp(unsigned Opcode,
     return makeConst(
         static_cast<uint64_t>(LV) % static_cast<uint64_t>(RV));
   default:
-    return makeBottom();
+    // Unknown opcode: result is unknown (Top), not unreachable (Bottom).
+    return makeTop();
   }
 }
 
@@ -155,15 +165,56 @@ public:
     return Out;
   }
 
+  // merge() is the join operator at control-flow merge points.
+  //
+  // The per-variable lattice is:  Bottom < Const(n) < Top
+  //
+  // Absence from the map means Bottom (unreachable / not yet analyzed).
+  // This is the standard convention for forward may-analyses: a variable
+  // that has not been assigned on a path contributes nothing (Bottom) to
+  // the join.
+  //
+  // Join rules:
+  //   join(x, x)            = x          (same value → keep it)
+  //   join(Const(a), Const(b)) = Top     (different constants → unknown)
+  //   join(Const, Top)      = Top         (one path unknown → unknown)
+  //   join(Top, Const)      = Top
+  //   join(Bottom/absent, x) = x         (unreachable path contributes nothing)
+  //   join(x, Bottom/absent) = x
+  //   join(Top, Top)        = Top
   ConstantPropagationMap merge(const ConstantPropagationMap &Lhs,
                                const ConstantPropagationMap &Rhs) override {
     ConstantPropagationMap Out;
+
+    // Helper: join two per-variable values.
+    auto joinValues = [](const ConstantPropagationValue &A,
+                         const ConstantPropagationValue &B)
+        -> ConstantPropagationValue {
+      if (equalValue(A, B)) return A;
+      if (isBottom(A)) return B;
+      if (isBottom(B)) return A;
+      // Both non-Bottom and different → Top.
+      return makeTop();
+    };
+
+    // Process all keys in Lhs.
     for (const auto &Entry : Lhs) {
       auto It = Rhs.find(Entry.first);
-      if (It != Rhs.end() && equalValue(Entry.second, It->second)) {
-        Out.insert({Entry.first, Entry.second});
+      if (It == Rhs.end()) {
+        // Key absent in Rhs → treat Rhs as Bottom → join = Lhs value.
+        Out[Entry.first] = Entry.second;
+      } else {
+        Out[Entry.first] = joinValues(Entry.second, It->second);
       }
     }
+
+    // Process keys only in Rhs (absent in Lhs → treat Lhs as Bottom).
+    for (const auto &Entry : Rhs) {
+      if (Lhs.find(Entry.first) == Lhs.end()) {
+        Out[Entry.first] = Entry.second;
+      }
+    }
+
     return Out;
   }
 
@@ -212,12 +263,16 @@ public:
 private:
   lotus::AliasAnalysisWrapper *AA;
 
+  // weakJoin is used for may-aliased pointers: if the old and new values
+  // agree, keep the value; otherwise the result is unknown (Top), not
+  // unreachable (Bottom).  Returning Bottom here was unsound: it caused
+  // a may-aliased store to mark the location as unreachable.
   static ConstantPropagationValue weakJoin(const ConstantPropagationValue &OldVal,
                                            const ConstantPropagationValue &NewVal) {
     if (equalValue(OldVal, NewVal)) {
       return OldVal;
     }
-    return makeBottom();
+    return makeTop(); // conflicting values → unknown
   }
 
   void collectAliasedPointers(
@@ -287,7 +342,9 @@ private:
         Val = It->second;
         Found = true;
       } else if (!equalValue(Val, It->second)) {
-        return makeBottom();
+        // Multiple aliases disagree on the value → unknown (Top), not
+        // unreachable (Bottom).  Returning Bottom was unsound.
+        return makeTop();
       }
     }
     return Found ? Val : makeTop();

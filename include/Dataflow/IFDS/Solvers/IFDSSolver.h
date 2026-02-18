@@ -91,7 +91,8 @@ private:
   bool m_bound_reached = false;
 
   // Simple sequential data structures (no thread-safety needed)
-  std::set<PathEdgeType> m_path_edges;
+  // Use unordered_set for O(1) average path-edge lookup (hot path).
+  std::unordered_set<PathEdgeType, PathEdgeHash<Fact>> m_path_edges;
   std::set<SummaryEdgeType> m_summary_edges;
   std::vector<PathEdgeType> m_worklist;
   std::unordered_map<const llvm::Instruction *, FactSet> m_entry_facts;
@@ -150,9 +151,6 @@ private:
   };
   std::unordered_map<CallEdgeKey, std::vector<CallEdgeInfo>, CallEdgeKeyHash>
       m_call_edge_info;
-
-  std::unordered_map<const llvm::Instruction *, std::set<PathEdgeType>>
-      m_path_edges_at;
 
   // Flow function result caches (key -> FactSet) to avoid recomputation
   using NormalFlowKey = std::pair<const llvm::Instruction *, Fact>;

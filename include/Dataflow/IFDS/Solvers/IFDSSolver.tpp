@@ -196,9 +196,26 @@ void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
         // Track the entry fact used for this call
         m_entry_facts_at_call.insert({call, entry_fact});
 
-        // Track call edge info for restoring caller context on return
-        CallEdgeInfo edge_info{call, entry_fact, current_edge.start_node, current_edge.start_fact};
-        m_call_edge_info[{callee, entry_fact}].push_back(edge_info);
+        // Track call edge info for restoring caller context on return.
+        // Use the caller's fact at the call site (current_edge.target_fact),
+        // not the callee's entry fact, as the call_fact field.
+        CallEdgeInfo edge_info{call, current_edge.target_fact,
+                               current_edge.start_node, current_edge.start_fact};
+        auto& info_vec = m_call_edge_info[{callee, entry_fact}];
+        // Deduplicate: only add if this exact call edge is not already recorded.
+        // Without deduplication, re-visiting the same call instruction (e.g.
+        // due to multiple path edges reaching it) would push duplicate entries
+        // and cause the same return-site propagation to fire multiple times.
+        bool already_recorded = false;
+        for (const auto& existing : info_vec) {
+            if (existing == edge_info) {
+                already_recorded = true;
+                break;
+            }
+        }
+        if (!already_recorded) {
+            info_vec.push_back(edge_info);
+        }
 
         // Propagate into callee
         propagate_path_edge(PathEdgeType(callee_entry, entry_fact, callee_entry, entry_fact));
@@ -245,13 +262,23 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
     if (call_edge_it != m_call_edge_info.end()) {
         had_incoming = true;
         for (const CallEdgeInfo& edge_info : call_edge_it->second) {
-            // Compute return facts using the return flow function
-            FactSet return_facts = m_problem.return_flow(edge_info.call_node, func, exit_fact, start_fact);
+            // Compute return facts using the return flow function.
+            // The fourth argument is the caller's fact at the call site
+            // (edge_info.call_fact), NOT the callee's entry fact (start_fact).
+            // Passing start_fact here was wrong: it gave the flow function the
+            // callee's entry fact instead of the caller's context fact, which
+            // breaks analyses that use call_fact to decide what to propagate
+            // back (e.g. taint analysis killing non-tainted return paths).
+            FactSet return_facts = m_problem.return_flow(edge_info.call_node, func, exit_fact, edge_info.call_fact);
             if (m_problem.auto_add_zero() && m_problem.is_zero_fact(exit_fact)) {
                 return_facts.insert(m_problem.zero_fact());
             }
 
-            SummaryEdgeType new_summary(edge_info.call_node, start_fact, exit_fact);
+            // SummaryEdge records (call_site, caller_fact_at_call, callee_exit_fact).
+            // Use edge_info.call_fact (the caller's fact at the call site) rather
+            // than start_fact (the callee's entry fact) so that the summary edge
+            // correctly reflects the caller's context.
+            SummaryEdgeType new_summary(edge_info.call_node, edge_info.call_fact, exit_fact);
             m_summary_edges.insert(new_summary);
 
             for (const llvm::Instruction* return_site : get_return_sites(edge_info.call_node)) {
@@ -263,9 +290,16 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
         }
     }
 
-    // Unbalanced returns: propagate to all return sites of all callers of this function with zero fact
+    // Unbalanced returns: the callee was seeded directly (no incoming call edge
+    // recorded for this entry fact).  Propagate return facts to all known
+    // callers' return sites, using the caller's own start context (zero fact as
+    // the path-edge start, which is the conventional IFDS treatment for
+    // unbalanced returns).  We do NOT create a self-loop at the return site;
+    // instead we propagate from the call site's start node so that the result
+    // is visible in the caller's context.
     auto callee_calls_it = m_callee_to_calls.find(func);
-    if (m_config.follow_returns_past_seeds() && !had_incoming && callee_calls_it != m_callee_to_calls.end()) {
+    if (m_config.follow_returns_past_seeds() && !had_incoming &&
+        callee_calls_it != m_callee_to_calls.end()) {
         Fact zero = m_problem.zero_fact();
         for (const llvm::CallBase* call : callee_calls_it->second) {
             FactSet return_facts = m_problem.return_flow(call, func, exit_fact, zero);
@@ -274,7 +308,11 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
             }
             for (const llvm::Instruction* return_site : get_return_sites(call)) {
                 for (const Fact& rf : return_facts) {
-                    propagate_path_edge(PathEdgeType(return_site, zero, return_site, rf));
+                    // Propagate with zero as the start fact so the result is
+                    // anchored at the return site in the caller's context,
+                    // not as a spurious self-loop seed.
+                    propagate_path_edge(
+                        PathEdgeType(return_site, zero, return_site, rf));
                 }
             }
         }
@@ -421,7 +459,6 @@ void IFDSSolver<Problem>::initialize_worklist(const llvm::Module& module) {
     m_entry_facts.clear();
     m_exit_facts.clear();
     m_summaries.clear();
-    m_path_edges_at.clear();
     m_entry_facts_at_call.clear();
     m_call_edge_info.clear();
     m_normal_flow_cache.clear();
@@ -467,13 +504,16 @@ void IFDSSolver<Problem>::initialize_worklist(const llvm::Module& module) {
 
 template<typename Problem>
 void IFDSSolver<Problem>::run_tabulation() {
-    ProgressBar* progress = nullptr;
+    // Use unique_ptr so the ProgressBar is always destroyed even if an
+    // exception propagates out of the loop (exception-safe resource management).
+    std::unique_ptr<ProgressBar> progress;
     size_t processed_edges = 0;
     size_t last_update = 0;
     const size_t update_interval = 100;
 
     if (m_show_progress) {
-        progress = new ProgressBar("Sequential IFDS Analysis", ProgressBar::PBS_CharacterStyle, 0.01);
+        progress = std::make_unique<ProgressBar>(
+            "Sequential IFDS Analysis", ProgressBar::PBS_CharacterStyle, 0.01);
         llvm::outs() << "\n";
     }
 
@@ -531,7 +571,7 @@ void IFDSSolver<Problem>::run_tabulation() {
             llvm::outs() << " (step bound " << m_max_steps << " reached)";
         }
         llvm::outs() << "\n";
-        delete progress;
+        // progress is destroyed automatically by unique_ptr
     }
 }
 

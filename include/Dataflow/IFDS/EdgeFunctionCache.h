@@ -105,35 +105,30 @@ public:
   EdgeFunctionCache(bool enable_stats = false)
       : m_enable_stats(enable_stats) {}
 
-  // Create or retrieve a singleton edge function
+  // Create a new edge function wrapper (no deduplication for capturing lambdas).
+  //
+  // The original design tried to deduplicate by hashing std::function objects,
+  // but std::function provides no reliable equality or hash for capturing
+  // lambdas: all lambdas of the same type share the same type_info address, so
+  // the hash is the same for every distinct closure.  Returning the first
+  // cached wrapper for all subsequent lambdas of the same type is a
+  // correctness bug (wrong function applied to values).
+  //
+  // The compose/join caches (keyed by shared_ptr identity) still provide
+  // memoization for composed functions, which is where the real savings are.
+  // We therefore always create a fresh wrapper here and skip the broken
+  // singleton deduplication.
   EdgeFunctionPtr get_or_create(const EdgeFunction& ef, bool is_identity = false) {
     if (is_identity) {
       return get_identity();
     }
 
-    // Try to find existing singleton
-    // Note: This is a simplified version. A production implementation would
-    // need a more sophisticated equality check for std::function
-    size_t hash = compute_hash(ef);
-    
-    std::lock_guard<std::mutex> lock(m_mutex);
-    
-    auto it = m_singleton_cache.find(hash);
-    if (it != m_singleton_cache.end()) {
-      if (m_enable_stats) {
-        m_stats.singleton_cache_hits++;
-      }
-      return it->second;
-    }
-
-    // Create new edge function
     auto wrapper = std::make_shared<EdgeFunctionWrapper<Value>>(ef, is_identity);
-    m_singleton_cache[hash] = wrapper;
 
     if (m_enable_stats) {
-      m_stats.singleton_cache_misses++;
+      std::lock_guard<std::mutex> lock(m_mutex);
       m_stats.total_edge_functions++;
-      m_stats.unique_edge_functions = m_singleton_cache.size() + 1; // +1 for identity
+      m_stats.unique_edge_functions++;
     }
 
     return wrapper;
@@ -230,16 +225,16 @@ public:
   // Cache management
   void clear() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_singleton_cache.clear();
     m_compose_cache.clear();
     m_join_cache.clear();
     m_identity_func.reset();
     m_stats.reset();
   }
 
+  // Returns the number of memoized composed/joined function pairs.
   size_t size() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_singleton_cache.size();
+    return m_compose_cache.size() + m_join_cache.size();
   }
 
 private:
@@ -259,20 +254,13 @@ private:
     }
   };
 
-  // Compute a hash for an edge function
-  // Note: This is a simplified version. In practice, you'd need a more
-  // sophisticated approach to hash std::function objects
-  size_t compute_hash(const EdgeFunction& ef) const {
-    // Use the function pointer address as a hash
-    // This assumes edge functions are created in consistent ways
-    return std::hash<const void*>{}(ef.template target<void>());
-  }
-
-  std::unordered_map<size_t, EdgeFunctionPtr> m_singleton_cache;
+  // m_singleton_cache removed: deduplication of capturing lambdas via
+  // type_info hash is unsound (all same-type lambdas collide).  The
+  // compose/join caches below still provide memoization where it matters.
   std::unordered_map<ComposePair, EdgeFunctionPtr, ComposePairHash> m_compose_cache;
   std::unordered_map<ComposePair, EdgeFunctionPtr, ComposePairHash> m_join_cache;
   EdgeFunctionPtr m_identity_func;
-  
+
   mutable std::mutex m_mutex;
   bool m_enable_stats;
   EdgeFunctionCacheStats m_stats;

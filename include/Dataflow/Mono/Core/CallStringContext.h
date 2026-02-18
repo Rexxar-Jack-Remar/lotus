@@ -30,7 +30,16 @@ public:
   }
 
   void push_back(N Stmt) { // NOLINT
-    if (CallString.size() > KLimit - 1) {
+    // Fix #3: when K == 0 the expression (KLimit - 1) underflows to SIZE_MAX
+    // (unsigned arithmetic), making the condition always false and allowing
+    // the deque to grow without bound.  Guard explicitly for K == 0 (which
+    // means context-insensitive: never store any call-site) and for the
+    // general case where the deque is already at capacity.
+    if (KLimit == 0) {
+      // K=0 → context-insensitive: discard the call site immediately.
+      return;
+    }
+    if (CallString.size() >= KLimit) {
       CallString.pop_front();
     }
     CallString.push_back(Stmt);

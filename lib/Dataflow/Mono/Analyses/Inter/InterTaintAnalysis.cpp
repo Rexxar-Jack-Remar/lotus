@@ -117,9 +117,22 @@ public:
                                  ArrayRef<Function *> Callees,
                                  const mono_container_t &In) override {
     (void)RetSite;
-    (void)Callees;
-    if (auto *Call = dyn_cast<CallBase>(CallSite)) {
-      return applyCallSite(Call, In);
+
+    // callToRetFlow models the call-to-return edge: facts that flow from the
+    // call site to the return site WITHOUT going through the callee body.
+    //
+    // For UNKNOWN/indirect callees (Callees.empty()), we conservatively apply
+    // the full call semantics here (source tainting, sink recording) since we
+    // have no callee body to analyse.
+    //
+    // For KNOWN callees, the callee body is analysed via callFlow/returnFlow.
+    // We must NOT re-apply applyCallSite here — that would double-count source
+    // tainting and sink recording.  Instead, just pass IN through unchanged;
+    // the return value and pointer-arg tainting are handled by returnFlow.
+    if (Callees.empty()) {
+      if (auto *Call = dyn_cast<CallBase>(CallSite)) {
+        return applyCallSite(Call, In);
+      }
     }
     return In;
   }

@@ -171,7 +171,12 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         }
 
         EdgeFunctionPtr joined = join_cached(it->second, phi);
-        if (it->second != joined) {
+        // Use semantic equivalence check rather than pointer identity.
+        // Pointer comparison (it->second != joined) would almost always be
+        // true for freshly-created shared_ptrs even when the functions are
+        // semantically identical, causing redundant worklist additions and
+        // potential non-termination on infinite ascending chains.
+        if (!m_problem.edge_function_equivalent(*it->second, *joined)) {
             it->second = joined;
             m_worklist.emplace_back(edge, joined);
         }

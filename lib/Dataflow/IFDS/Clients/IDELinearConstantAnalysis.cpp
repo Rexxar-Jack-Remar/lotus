@@ -175,13 +175,15 @@ IDELinearConstantAnalysis::FactSet IDELinearConstantAnalysis::return_flow(
     return result;
   }
 
-  // Map return value back to call site
-  if (exit_fact && exit_fact->getType()->isIntegerTy()) {
-    // Check if it's the return value
-    if (const auto *ret_inst = llvm::dyn_cast<llvm::ReturnInst>(exit_fact)) {
-      if (ret_inst->getReturnValue()) {
-        result.insert(call);
-      }
+  // Map return value back to call site.
+  // The old code guarded with exit_fact->getType()->isIntegerTy() before the
+  // dyn_cast<ReturnInst>.  A ReturnInst is an Instruction, not an
+  // integer-typed value, so that type check was always false and the return
+  // value was never mapped back to the call site.  The correct check is simply
+  // whether exit_fact is a ReturnInst with a non-void return value.
+  if (const auto *ret_inst = llvm::dyn_cast_or_null<llvm::ReturnInst>(exit_fact)) {
+    if (ret_inst->getReturnValue()) {
+      result.insert(call);
     }
   }
 
@@ -257,9 +259,13 @@ IDELinearConstantAnalysis::normal_edge_function(const llvm::Instruction *stmt,
     return create_identity();
   }
 
-  // Constant assignment
-  if (const auto *const_int = llvm::dyn_cast<llvm::ConstantInt>(stmt)) {
-    if (tgt_fact == stmt) {
+  // Constant assignment: when the zero fact generates a new fact that is a
+  // ConstantInt operand of some instruction, the edge function should return
+  // the constant value.  Note: llvm::ConstantInt is NOT a subclass of
+  // llvm::Instruction, so dyn_cast<ConstantInt>(stmt) always fails.  Instead,
+  // detect the pattern where tgt_fact is a ConstantInt value.
+  if (src_fact == nullptr /* zero fact */ && tgt_fact != nullptr) {
+    if (const auto *const_int = llvm::dyn_cast<llvm::ConstantInt>(tgt_fact)) {
       return create_constant(const_int->getSExtValue());
     }
   }
@@ -309,10 +315,13 @@ IDELinearConstantAnalysis::normal_edge_function(const llvm::Instruction *stmt,
           break;
         case llvm::Instruction::AShr:
         case llvm::Instruction::LShr:
-          if (c >= 0 && c < 64) {
-            return create_linear(1LL >> c, 0);
-          }
-          break;
+          // Right-shift by a constant c is equivalent to integer division by
+          // 2^c, which is not representable as an exact linear function
+          // (multiplier * x + offset) with integer coefficients.  The previous
+          // code used `1LL >> c` which evaluates to 0 for c >= 1, producing a
+          // constant-zero function instead of the correct transformation.
+          // Return bottom (non-constant) to be sound.
+          return create_bottom();
         default:
           break;
         }

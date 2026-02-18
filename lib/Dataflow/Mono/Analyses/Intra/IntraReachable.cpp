@@ -68,8 +68,27 @@ std::unique_ptr<DataFlowResult> runReachableAnalysis(
       return Lhs == Rhs;
     }
 
+    // For a backward analysis, seeds must be placed at exit points so that
+    // the solver has starting facts to propagate backward.  Without seeds,
+    // allTop() = empty set is used for all nodes and normalFlow never fires
+    // because no predecessor OUT is ever non-empty — the analysis produces
+    // no results.
+    //
+    // We seed every ReturnInst with the empty set.  normalFlow will add the
+    // return instruction itself (if it passes the filter) and propagate
+    // backward from there.
     std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
-      return {};
+      std::unordered_map<Instruction *, mono_container_t> Seeds;
+      auto *F = getEntryPoints().empty() ? nullptr : getEntryPoints().front();
+      if (F == nullptr) {
+        return Seeds;
+      }
+      for (auto &BB : *F) {
+        if (auto *Ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
+          Seeds[Ret] = mono_container_t{};
+        }
+      }
+      return Seeds;
     }
 
   private:

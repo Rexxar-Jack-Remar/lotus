@@ -1,7 +1,9 @@
 /*
- * Available Expressions Analysis (Backward)
+ * Available Expressions Analysis (Forward, must-analysis)
  *
- * Demonstrates backward dataflow analysis in the Lotus framework
+ * An expression e is "available" at program point p if every path from the
+ * function entry to p evaluates e and does not subsequently redefine any
+ * operand of e.  This is a forward, intersection-based (must) analysis.
  *
  * Author: rainoftime
  */
@@ -99,18 +101,19 @@ getKilledExpressions(Instruction *Inst,
 }
 
 // ============================================================================
-// Available Expressions Problem (Backward)
+// Available Expressions Problem (Forward, must-analysis)
 // ============================================================================
 
-// Note: Expression is a custom type, so we keep std::set<Expression>
-// For standard LLVM types (Value*, Instruction*), use LLVMMonoAnalysisDomain<ElementType>
+// Note: Expression is a custom type, so we keep std::set<Expression>.
+// For standard LLVM types (Value*, Instruction*), use
+// LLVMMonoAnalysisDomain<ElementType>.
 struct AvailableExprDomain : LLVMMonoAnalysisDomain<std::set<Expression>> {};
 
 class AvailableExprProblem : public IntraMonoProblem<AvailableExprDomain> {
 public:
   explicit AvailableExprProblem(Function *F)
       : IntraMonoProblem<AvailableExprDomain>({F}) {
-    // Collect all expressions in the function
+    // Collect all expressions in the function for use as allTop().
     for (auto &BB : *F) {
       for (auto &Inst : BB) {
         auto Exprs = getComputedExpressions(&Inst);
@@ -119,30 +122,35 @@ public:
     }
   }
 
+  // Available Expressions is a FORWARD analysis: facts flow from entry to exit.
   ::dataflow::controlflow::FlowDirection direction() const override {
-    return ::dataflow::controlflow::FlowDirection::Backward;
+    return ::dataflow::controlflow::FlowDirection::Forward;
   }
 
+  // Transfer function: OUT[n] = GEN[n] ∪ (IN[n] − KILL[n])
   std::set<Expression> normalFlow(Instruction *Inst,
                                   const std::set<Expression> &In) override {
     std::set<Expression> Out = In;
 
-    // KILL: Remove expressions that use values redefined by this instruction
+    // KILL: remove expressions that use the value defined by this instruction.
+    // In SSA form every value is defined exactly once, so KILL is non-empty
+    // only for instructions that produce a value used in some expression.
     auto Killed = getKilledExpressions(Inst, Out);
     for (const auto &Expr : Killed) {
       Out.erase(Expr);
     }
 
-    // GEN: Add expressions computed by this instruction
+    // GEN: add expressions computed by this instruction (after killing).
     auto Generated = getComputedExpressions(Inst);
     Out.insert(Generated.begin(), Generated.end());
 
     return Out;
   }
 
+  // Merge = intersection: an expression is available only if available on
+  // ALL paths reaching this point (must-analysis).
   std::set<Expression> merge(const std::set<Expression> &Lhs,
                              const std::set<Expression> &Rhs) override {
-    // Intersection: an expression is available only if available on ALL paths
     std::set<Expression> Out;
     std::set_intersection(Lhs.begin(), Lhs.end(), Rhs.begin(), Rhs.end(),
                           std::inserter(Out, Out.begin()));
@@ -154,9 +162,12 @@ public:
     return Lhs == Rhs;
   }
 
+  // allTop() = universal set (all expressions).
+  // For a must-analysis with intersection as merge, the top of the lattice
+  // is the set of ALL expressions (every expression is "assumed available"
+  // until proven otherwise).  This is the correct initial value for nodes
+  // that have not yet been reached.
   std::set<Expression> allTop() override {
-    // Top = universal set (all expressions available)
-    // Used as initial value for backward analysis
     return AllExpressions;
   }
 
@@ -164,24 +175,35 @@ public:
   initialSeeds() override {
     std::unordered_map<Instruction *, std::set<Expression>> Seeds;
     auto *F = getEntryPoints().empty() ? nullptr : getEntryPoints().front();
-    if (F == nullptr) {
+    if (F == nullptr || F->empty()) {
       return Seeds;
     }
 
-    // For backward analysis, seed all exit points (return instructions)
-    for (auto &BB : *F) {
-      if (auto *Ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
-        // Exit point: no expressions are available (empty set)
-        Seeds[Ret] = {};
-      }
-    }
-
+    // For a forward analysis, seed the function entry instruction with the
+    // empty set: no expressions are available before the first instruction.
+    Seeds[&F->getEntryBlock().front()] = {};
     return Seeds;
   }
 
 private:
   std::set<Expression> AllExpressions;
 };
+
+// Build a map from Expression → the Instruction* that computes it.
+// When multiple instructions compute the same expression (same opcode +
+// operands), we keep the first one encountered in program order.
+static std::map<Expression, Instruction *>
+buildExprToInstMap(Function *F) {
+  std::map<Expression, Instruction *> Map;
+  for (auto &BB : *F) {
+    for (auto &Inst : BB) {
+      for (const auto &Expr : getComputedExpressions(&Inst)) {
+        Map.emplace(Expr, &Inst); // emplace keeps the first insertion
+      }
+    }
+  }
+  return Map;
+}
 
 } // namespace
 
@@ -199,36 +221,58 @@ runAvailableExpressionsAnalysis(Function *F) {
   IntraMonoSolver<AvailableExprDomain> Solver(Problem);
   Solver.solve();
 
-  // Note: For expression analysis, we'd normally return a specialized result
-  // type. Here we use DataFlowResult with Value* for demonstration.
-  // A production implementation would use a custom result container.
+  // Fix #7: build a correct result by mapping each Expression back to the
+  // Instruction* that computes it.  DataFlowResult stores std::set<Value*>;
+  // we represent each available expression by the instruction that defines it.
+  //
+  // This is a FORWARD analysis, so the solver's IN/OUT maps directly to the
+  // analysis IN/OUT without any swap:
+  //   Solver IN[i]  = IN[i]  = expressions available BEFORE i executes
+  //   Solver OUT[i] = OUT[i] = expressions available AFTER  i executes
+  //                          = normalFlow(i, IN[i])
+  //                          = GEN[i] ∪ (IN[i] − KILL[i])
+
+  const auto ExprToInst = buildExprToInstMap(F);
 
   auto Result = std::make_unique<DataFlowResult>();
   for (auto &BB : *F) {
     for (auto &Inst : BB) {
       auto *I = &Inst;
 
-      // For backward analysis, IN is what flows backward from successors
-      // OUT is what flows backward to predecessors
-      // Note: The solver's "In" is the analysis IN, "Out" is analysis OUT
+      // Forward analysis: SolverIn = IN[I], SolverOut = OUT[I].
+      const auto &SolverIn  = Solver.getInResultsAt(I);   // std::set<Expression>
+      const auto &SolverOut = Solver.getOutResultsAt(I);  // std::set<Expression>
 
-      const auto &AnalysisIn = Solver.getInResultsAt(I);
-      const auto &AnalysisOut = Solver.getOutResultsAt(I);
-
-      // Store the count of available expressions (for demonstration)
-      // A real implementation would store the actual expressions
-      if (!AnalysisIn.empty()) {
-        // Mark that expressions are available at this point
-        // (Using instruction count as a proxy for expression count)
-        for (size_t Idx = 0; Idx < AnalysisIn.size(); ++Idx) {
-          Result->IN(I).insert(I); // Placeholder representation
+      // Populate Result->IN(I): expressions available before I.
+      for (const auto &Expr : SolverIn) {
+        auto It = ExprToInst.find(Expr);
+        if (It != ExprToInst.end()) {
+          Result->IN(I).insert(It->second);
         }
       }
 
-      auto Generated = getComputedExpressions(I);
-      for (const auto &Expr : Generated) {
-        // Represent generated expressions (simplified)
+      // Populate Result->OUT(I): expressions available after I.
+      for (const auto &Expr : SolverOut) {
+        auto It = ExprToInst.find(Expr);
+        if (It != ExprToInst.end()) {
+          Result->OUT(I).insert(It->second);
+        }
+      }
+
+      // GEN[I]: expressions computed by I.
+      for (const auto &Expr : getComputedExpressions(I)) {
+        (void)Expr;
         Result->GEN(I).insert(I);
+      }
+
+      // KILL[I]: expressions whose operands are redefined by I.
+      // In SSA form this is always empty (each value defined exactly once),
+      // but we compute it correctly for completeness / non-SSA IR.
+      for (const auto &Expr : getKilledExpressions(I, SolverIn)) {
+        auto It = ExprToInst.find(Expr);
+        if (It != ExprToInst.end()) {
+          Result->KILL(I).insert(It->second);
+        }
       }
     }
   }

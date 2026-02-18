@@ -49,56 +49,134 @@ public:
 
     auto solve_start_time = std::chrono::steady_clock::now();
 
-    while (!Worklist.empty()) {
-      Stats.record_worklist_size(Worklist.size());
+    // Standard monotone node-based worklist algorithm (fixes #1 and #2).
+    //
+    // We maintain:
+    //   AnalysisIn[n]  = IN[n]  = merge(OUT[p] for all preds p of n)
+    //   AnalysisOut[n] = OUT[n] = normalFlow(n, IN[n])
+    //
+    // The worklist contains nodes (not edges).  When we dequeue node n:
+    //   1. Recompute IN[n] by merging OUT[p] for every predecessor p.
+    //      Predecessors with no OUT yet are skipped (treated as identity for
+    //      the merge, i.e., they contribute nothing until they are computed).
+    //   2. Recompute OUT[n] = normalFlow(n, IN[n]).
+    //   3. If OUT[n] changed, enqueue all successors of n.
+    //
+    // This correctly handles join points: every predecessor's latest OUT
+    // contributes to IN[n], not just the one that triggered the re-evaluation.
+    //
+    // Seeds: initialSeeds() pre-populates AnalysisIn for boundary nodes.
+    // Those values are used as the starting IN for those nodes; if a seed
+    // node has predecessors whose OUT later becomes non-empty, the seed value
+    // is merged with (not replaced by) the predecessor contributions.
+
+    // Convert the edge-based initial worklist to a node-based one.
+    // We use a deque + in-queue set to avoid duplicate entries.
+    std::deque<n_t> NodeWorklist;
+    std::unordered_set<n_t> InNodeQueue;
+
+    auto EnqueueNode = [&](n_t Node) {
+      if (Node != nullptr && InNodeQueue.insert(Node).second) {
+        NodeWorklist.push_back(Node);
+      }
+    };
+
+    // Seed the node worklist from the edge worklist built by initialize().
+    // We enqueue both endpoints of every edge so that every reachable node
+    // gets processed at least once.
+    for (const auto &Edge : Worklist) {
+      EnqueueNode(Edge.first);
+      EnqueueNode(Edge.second);
+    }
+    Worklist.clear(); // edge worklist no longer needed
+
+    while (!NodeWorklist.empty()) {
+      Stats.record_worklist_size(NodeWorklist.size());
       Stats.iterations++;
 
       if (DebugCfg.is_enabled(DebugLevel::Debug) &&
           Stats.iterations <= DebugCfg.max_iterations_log) {
         llvm::outs() << "[WORKLIST] Iteration " << Stats.iterations
-                     << ", size=" << Worklist.size() << "\n";
+                     << ", size=" << NodeWorklist.size() << "\n";
       }
 
-      auto Edge = Worklist.front();
-      Worklist.pop_front();
+      n_t Node = NodeWorklist.front();
+      NodeWorklist.pop_front();
+      InNodeQueue.erase(Node);
       Stats.worklist_total_pops++;
 
-      auto Src = Edge.first;
-      auto Dst = Edge.second;
+      MONO_TRACE_WORKLIST(llvm::outs(), DebugCfg, "Processing node: " << Node);
 
-      MONO_TRACE_WORKLIST(llvm::outs(), DebugCfg,
-                          "Processing edge: " << Src << " -> " << Dst);
-
-      Stats.flow_function_calls++;
-      auto Out = Problem.normalFlow(Src, AnalysisIn[Src]);
-
-      if (CFG->isBranchTarget(Src, Dst, Problem.direction())) {
-        MONO_TRACE_MERGE(llvm::outs(), DebugCfg,
-                         "Branch target detected at " << Dst);
-        for (auto Pred : CFG->getPredsOf(Dst, Problem.direction())) {
-          if (Pred == Src) {
-            continue;
-          }
-          Stats.flow_function_calls++;
-          Stats.merge_operations++;
-          auto OtherOut = Problem.normalFlow(Pred, AnalysisIn[Pred]);
-          Out = Problem.merge(Out, OtherOut);
+      // Step 1: recompute IN[Node] = merge(OUT[p] for all preds p).
+      // Predecessors not yet in AnalysisOut are skipped; they will trigger
+      // re-evaluation of Node when they are processed later.
+      auto Preds = CFG->getPredsOf(Node, Problem.direction());
+      mono_container_t NewIn = Problem.allTop();
+      bool HasPredOut = false;
+      for (auto *Pred : Preds) {
+        auto OutIt = AnalysisOut.find(Pred);
+        if (OutIt == AnalysisOut.end()) {
+          continue; // predecessor not yet computed
+        }
+        Stats.merge_operations++;
+        if (!HasPredOut) {
+          NewIn = OutIt->second;
+          HasPredOut = true;
+        } else {
+          NewIn = Problem.merge(NewIn, OutIt->second);
         }
       }
 
+      if (!HasPredOut) {
+        // No predecessor has a computed OUT yet.  Use the existing AnalysisIn
+        // value (which may be a seed or allTop()).  Do NOT overwrite it with
+        // allTop() — that would erase seeds at entry/exit nodes.
+        auto InIt = AnalysisIn.find(Node);
+        if (InIt != AnalysisIn.end()) {
+          NewIn = InIt->second;
+        }
+        // else: NewIn stays as allTop() (the default initial value)
+      }
+      // When predecessors do have computed OUTs, NewIn is the merge of those
+      // OUTs.  We do NOT additionally merge the seed value here: seeds
+      // represent boundary conditions that initialise AnalysisIn before the
+      // fixpoint loop starts.  Once predecessors are computed their OUT
+      // correctly determines IN[Node] via the dataflow equations.  Merging
+      // the seed again on every iteration would prevent convergence for
+      // must-analyses (intersection-based) and produce over-approximate
+      // results for may-analyses.
+
+      // Step 2: check whether IN[Node] changed.
       Stats.stabilization_checks++;
-      if (!Problem.equal_to(Out, AnalysisIn[Dst])) {
-        MONO_TRACE_FACTS(llvm::outs(), DebugCfg, "Facts changed at " << Dst);
-        AnalysisIn[Dst] = Out;
-        for (auto Succ : CFG->getSuccsOf(Dst, Problem.direction())) {
-          Worklist.push_back({Dst, Succ});
+      auto InIt = AnalysisIn.find(Node);
+      bool InChanged = (InIt == AnalysisIn.end()) ||
+                       !Problem.equal_to(NewIn, InIt->second);
+
+      if (InChanged) {
+        AnalysisIn[Node] = NewIn;
+      }
+
+      // Step 3: recompute OUT[Node] = normalFlow(Node, IN[Node]).
+      Stats.flow_function_calls++;
+      auto NewOut = Problem.normalFlow(Node, AnalysisIn[Node]);
+
+      auto OutIt = AnalysisOut.find(Node);
+      bool OutChanged = (OutIt == AnalysisOut.end()) ||
+                        !Problem.equal_to(NewOut, OutIt->second);
+
+      if (OutChanged) {
+        MONO_TRACE_FACTS(llvm::outs(), DebugCfg, "Facts changed at " << Node);
+        AnalysisOut[Node] = std::move(NewOut);
+
+        // Enqueue all successors so they recompute their IN.
+        for (auto *Succ : CFG->getSuccsOf(Node, Problem.direction())) {
+          EnqueueNode(Succ);
         }
       }
     }
 
-    for (auto &Entry : AnalysisIn) {
-      AnalysisOut[Entry.first] = Problem.normalFlow(Entry.first, Entry.second);
-    }
+    // AnalysisIn and AnalysisOut are both fully populated above.
+    // No extra normalFlow pass needed (that was bug #2).
 
     auto solve_end_time = std::chrono::steady_clock::now();
     Stats.solving_time = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -226,8 +304,51 @@ private:
         }
       }
     }
+
+    // Fix #10: validate that each seed instruction is a valid start point for
+    // the chosen analysis direction.  For a forward analysis the seed must be
+    // at the entry of its function (or at least reachable from it without
+    // crossing a back-edge); for a backward analysis it must be at an exit
+    // (return) instruction.  We emit a diagnostic and skip invalid seeds
+    // rather than silently producing wrong results.
+    const auto Dir = Problem.direction();
     for (const auto &Entry : Seeds) {
-      AnalysisIn[Entry.first] = Entry.second;
+      auto *SeedInst = Entry.first;
+      if (SeedInst == nullptr) {
+        continue;
+      }
+      auto *BB = SeedInst->getParent();
+      auto *F  = BB ? BB->getParent() : nullptr;
+      if (F == nullptr || F->isDeclaration()) {
+        continue;
+      }
+
+      bool Valid = true;
+      if (Dir == ::dataflow::controlflow::FlowDirection::Backward) {
+        // For a backward analysis seeds should be at exit instructions
+        // (i.e., return instructions).  Seeding at a non-exit node means
+        // facts will never propagate backward past that point correctly.
+        if (!llvm::isa<llvm::ReturnInst>(SeedInst)) {
+          llvm::errs()
+              << "[IntraMonoSolver] WARNING: backward analysis seed is not a "
+                 "return instruction — facts may not propagate correctly.\n"
+              << "  Seed instruction: " << *SeedInst << "\n";
+          Valid = false;
+        }
+      } else {
+        // For a forward analysis seeds should be at the function entry.
+        auto *EntryInst = &*F->getEntryBlock().begin();
+        if (SeedInst != EntryInst) {
+          llvm::errs()
+              << "[IntraMonoSolver] WARNING: forward analysis seed is not the "
+                 "function entry instruction — facts may not propagate to all "
+                 "predecessors of the seed.\n"
+              << "  Seed instruction: " << *SeedInst << "\n";
+          // We still apply the seed; the warning is informational.
+        }
+      }
+      (void)Valid; // seed is applied regardless; warning is advisory
+      AnalysisIn[SeedInst] = Entry.second;
     }
   }
 

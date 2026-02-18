@@ -191,6 +191,25 @@ public:
    */
   llvm::Module &getModule() { return _module; }
 
+  /**
+   * @brief Invalidate the cached EquivDB for a specific function.
+   *
+   * Must be called whenever the IR of @p F is modified after the first alias
+   * query on that function.  Failure to do so will cause subsequent queries
+   * to return results based on the old (stale) IR.
+   *
+   * @param F The function whose cached analysis should be discarded.
+   */
+  static void invalidateCache(const llvm::Function *F);
+
+  /**
+   * @brief Invalidate all cached EquivDB entries.
+   *
+   * Clears the entire per-function cache.  Use this when multiple functions
+   * may have been modified, or when starting a fresh compilation pipeline.
+   */
+  static void invalidateAllCaches();
+
 private:
   /// The module being analyzed
   llvm::Module &_module;
