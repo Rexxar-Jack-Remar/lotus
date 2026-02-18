@@ -37,7 +37,8 @@
  
  DominatorForest::DominatorForest(std::set<DTAliases::Node *> nodeSubset)
    : nodes{},
-     bbNodeMap{} {
+     bbNodeMap{},
+     post{false} {
    this->cloneLLVMNodes(nodeSubset);
    return;
  }
@@ -45,12 +46,17 @@
  DominatorForest::DominatorForest(DominatorForest &DTS,
                                   std::set<BasicBlock *> &bbSubset)
    : DominatorForest{ filterNodes(DTS.nodes, bbSubset) } {
+   // Fix #6: propagate the post flag from the source forest so that
+   // dominates(Instruction*, Instruction*) uses the correct direction
+   // for subset forests built from a PostDominatorTree.
+   this->post = DTS.post;
    return;
  }
  
  DominatorForest::DominatorForest(std::set<DominatorNode *> nodeSubset)
    : nodes{},
-     bbNodeMap{} {
+     bbNodeMap{},
+     post{false} {
    this->cloneNodes<DominatorNode>(nodeSubset);
    return;
  }
@@ -179,64 +185,30 @@ std::set<DominatorNode *> DominatorForest::filterNodes(
 bool DominatorForest::dominates(Instruction *I, Instruction *J) const {
   auto *B1 = I->getParent();
   auto *B2 = J->getParent();
- 
-   /*
-    * Check if the instructions belong to the same basic block.
-    */
-   if (B1 == B2) {
- 
-    /*
-     * Define the first and second instruction.
-     */
-    auto *firstOne = I;
-    auto *secondOne = J;
- 
-     /*
-      * Check the dominance relation between I and J
-      */
-     while (firstOne != nullptr) {
-       if (firstOne == secondOne) {
- 
-         /*
-          * The secondOne instruction is found after the first one.
-          * Hence, I dominates J.
-          * Also, J postdominates I.
-          */
-         if (this->post) {
- 
-           /*
-            * I does not post-dominate J.
-            */
-           return false;
-         }
- 
-         /*
-          * I dominates J
-          */
-         return true;
-       }
- 
-       firstOne = firstOne->getNextNode();
-     }
- 
-     /*
-      * The secondOne instruction has not been found after the first one.
-      * Hence, J dominates I.
-      * Also, I post-dominates J.
-      */
-     if (this->post) {
- 
-       /*
-        * I post-dominates J.
-        */
-       return true;
-     }
- 
-     /*
-      * I does not dominates J.
-      */
-     return false;
-   }
+
+  /*
+   * Check if the instructions belong to the same basic block.
+   */
+  if (B1 == B2) {
+
+    // Fix #5: dominates(I, I) must return true (reflexivity).
+    // The old code advanced firstOne before checking, so it never matched
+    // when I == J, returning false — violating the standard dominance
+    // convention.  Start the scan at I itself (not I->getNextNode()).
+    for (auto *cur = I; cur != nullptr; cur = cur->getNextNode()) {
+      if (cur == J) {
+        // J is found at or after I in the block.
+        // For a dominator tree:      I dominates J → true.
+        // For a post-dominator tree: I does NOT post-dominate J → false.
+        return !this->post;
+      }
+    }
+
+    // J was not found at or after I, so J precedes I in the block.
+    // For a dominator tree:      I does NOT dominate J → false.
+    // For a post-dominator tree: I post-dominates J → true.
+    return this->post;
+  }
  
    /*
     * The instructions belong to different basic blocks.
