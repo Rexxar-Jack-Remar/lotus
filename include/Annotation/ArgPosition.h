@@ -57,6 +57,54 @@ private:
 		}
 	}
 public:
+	// Copy constructor: manually copy the active union member.
+	APosition(const APosition& rhs): type(rhs.type)
+	{
+		switch (type)
+		{
+			case APositionType::Arg:
+				new (&argPos) ArgPosition(rhs.argPos);
+				break;
+			case APositionType::Ret:
+				new (&retPos) RetPosition();
+				break;
+		}
+	}
+
+	// Copy-assignment operator: destroy the current active member, then
+	// copy-construct the new one.  Without this the compiler-generated
+	// assignment is deleted (because of the union), causing compile errors
+	// whenever APosition objects are assigned rather than copy-constructed.
+	APosition& operator=(const APosition& rhs)
+	{
+		if (this == &rhs)
+			return *this;
+
+		// Destroy current active member.
+		switch (type)
+		{
+			case APositionType::Arg:
+				argPos.~ArgPosition();
+				break;
+			case APositionType::Ret:
+				retPos.~RetPosition();
+				break;
+		}
+
+		// Copy-construct the new active member.
+		type = rhs.type;
+		switch (type)
+		{
+			case APositionType::Arg:
+				new (&argPos) ArgPosition(rhs.argPos);
+				break;
+			case APositionType::Ret:
+				new (&retPos) RetPosition();
+				break;
+		}
+		return *this;
+	}
+
 	~APosition()
 	{
 		switch (type)

@@ -358,7 +358,8 @@ private:
         unsigned bit = info.getValueBit(&call);
         if (bit != TaintInfo::invalidBit()) D::addGen(transfer, bit);
       } else if (spec.location == TaintSpec::ARG &&
-                 spec.access_mode == TaintSpec::DEREF) {
+                 (spec.access_mode == TaintSpec::DIRECT_DEREF ||
+                  spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
         if (spec.arg_index >= 0 && spec.arg_index < (int)(call.arg_size())) {
           const llvm::Value *arg = call.getArgOperand(spec.arg_index);
           for (unsigned memBit : info.getAliasMemBits(arg)) {
@@ -366,7 +367,8 @@ private:
           }
         }
       } else if (spec.location == TaintSpec::AFTER_ARG &&
-                 spec.access_mode == TaintSpec::DEREF) {
+                 (spec.access_mode == TaintSpec::DIRECT_DEREF ||
+                  spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
         int startIdx = spec.arg_index + 1;
         if (startIdx < 0) startIdx = 0;
         unsigned start = static_cast<unsigned>(startIdx);

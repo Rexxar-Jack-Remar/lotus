@@ -23,8 +23,9 @@ struct TaintSpec {
     };
     
     enum AccessMode {
-        VALUE,         // Direct value (V)
-        DEREF          // Dereferenced/memory (D or R)
+        VALUE,          // Direct value (V)
+        DIRECT_DEREF,   // Directly dereferenced memory (D)
+        REACHABLE_DEREF // Reachable (transitive) memory (R)
     };
     
     enum TaintType {

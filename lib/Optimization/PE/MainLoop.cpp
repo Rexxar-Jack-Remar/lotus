@@ -322,23 +322,23 @@ void PeelIteration::setExitingStore(void* S, ShadowBBInvar* BBI, const ShadowLoo
 
   if(kind == StoreKindTL) {
 
+    // Drop the old store reference for each live exiting edge, and add one
+    // reference to S per edge (including the final assignment below).
     for(uint32_t i = 0; i != exitingEdges; ++i) {
-      
       SAFE_DROP_REF(ExitingBB->tlStore);
-      ((TLLocalStore*)S)->refCount++;
     }
-    
+    // One reference for the assignment to ExitingBB->tlStore.
+    ((TLLocalStore*)S)->refCount++;
     ExitingBB->tlStore = (TLLocalStore*)S;
 
   }
   else if(kind == StoreKindDSE) {
 
     for(uint32_t i = 0; i != exitingEdges; ++i) {
-      
       SAFE_DROP_REF(ExitingBB->dseStore);
-      ((DSELocalStore*)S)->refCount++;
     }
-    
+    // One reference for the assignment to ExitingBB->dseStore.
+    ((DSELocalStore*)S)->refCount++;
     ExitingBB->dseStore = (DSELocalStore*)S;
 
   }
@@ -842,7 +842,7 @@ void IntegrationAttempt::releaseLatchStores(const ShadowLoopInvar* L) {
     // Release the latch store that the header will not use again:
     if(pass->latchStoresRetained.erase(std::make_pair(this, L))) {
       ShadowBB* LBB = getBB(L->latchIdx);
-      release_assert("Releasing store from dead latch?");
+      release_assert(LBB && "Releasing store from dead latch?");
       LBB->derefStores();
     }
   }

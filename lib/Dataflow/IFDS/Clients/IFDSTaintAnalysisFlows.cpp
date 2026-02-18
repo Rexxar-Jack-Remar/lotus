@@ -628,14 +628,18 @@ void TaintAnalysis::handle_source_function_specs(const llvm::CallBase* call, Fac
         for (const auto& spec : func_config->source_specs) {
             if (spec.location == TaintSpec::RET && spec.access_mode == TaintSpec::VALUE) {
                 result.insert(TaintFact::tainted_var(call));
-            } else if (spec.location == TaintSpec::ARG && spec.access_mode == TaintSpec::DEREF) {
+            } else if (spec.location == TaintSpec::ARG &&
+                       (spec.access_mode == TaintSpec::DIRECT_DEREF ||
+                        spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
                 if (spec.arg_index >= 0 && spec.arg_index < (int)(call->getNumOperands() - 1)) {
                     const llvm::Value* arg = call->getOperand(spec.arg_index);
                     if (arg->getType()->isPointerTy()) {
                         result.insert(TaintFact::tainted_memory(arg));
                     }
                 }
-            } else if (spec.location == TaintSpec::AFTER_ARG && spec.access_mode == TaintSpec::DEREF) {
+            } else if (spec.location == TaintSpec::AFTER_ARG &&
+                       (spec.access_mode == TaintSpec::DIRECT_DEREF ||
+                        spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
                 unsigned start_arg = spec.arg_index + 1;
                 for (unsigned i = start_arg; i < call->getNumOperands() - 1; ++i) {
                     const llvm::Value* arg = call->getOperand(i);

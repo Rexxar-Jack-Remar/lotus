@@ -20,6 +20,9 @@ private:
 	MapType table;
 
 	static ExternalPointerTable buildTable(const llvm::StringRef&);
+	/// Internal helper: builds the table and reports success via ok.
+	/// Declared as a static member so it can access the private `table` field.
+	static ExternalPointerTable buildTableImpl(const llvm::StringRef&, bool& ok);
 public:
 	using const_iterator = MapType::const_iterator;
 
@@ -32,7 +35,12 @@ public:
 	const_iterator end() const { return table.end(); }
 	size_t size() const { return table.size(); }
 
+	/// Load from file; calls std::exit(-1) on parse error (original behaviour).
 	static ExternalPointerTable loadFromFile(const char* fileName);
+
+	/// Load from file without calling std::exit().
+	/// Returns true on success; outTable is populated only on success.
+	static bool loadFromFile(const char* fileName, ExternalPointerTable& outTable);
 };
 
 } // namespace annotation

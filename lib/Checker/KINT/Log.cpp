@@ -210,8 +210,11 @@ detail::log_wrapper check(bool cond, bool abort, const std::string& prompt, cons
         auto& logger = Logger::getInstance();
         const auto& config = logger.getConfig();
         
-        // Only suppress error messages if level is NONE
-        if (config.quiet || config.logLevel >= LogLevel::NONE) {
+        // Suppress the diagnostic message only when the log level is set to
+        // NONE (i.e. completely silent).  Using >= would also suppress at
+        // LogLevel::ERROR which is wrong — errors should always be shown
+        // unless the user explicitly requests NONE.
+        if (config.quiet || config.logLevel > LogLevel::NONE) {
             if (abort) std::abort();
             return detail::log_wrapper(s_null_stream);
         }

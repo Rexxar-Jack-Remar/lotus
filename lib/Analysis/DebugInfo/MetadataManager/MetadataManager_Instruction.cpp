@@ -44,9 +44,9 @@
     * Get the metadata.
     */
    auto *metaNode = inst->getMetadata(metadataName);
-   if (metaNode) {
+   if (!metaNode) {
      errs() << "MetadataManager::getMetadata: ERROR = the metadata \""
-            << metadataName << "\" already exists in the instruction " << *inst
+            << metadataName << "\" does not exist in the instruction " << *inst
             << "\n";
      abort();
    }

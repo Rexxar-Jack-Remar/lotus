@@ -4,6 +4,8 @@
 #include <fstream>
 #include <sstream>
 
+#include <llvm/Support/raw_ostream.h>
+
 using namespace lotus;
 
 
@@ -30,16 +32,16 @@ static inline bool isCommentOrBlank(const std::string &line) {
 } // namespace
 
 // Converts a string token to a SpecOpKind enum value.
-static SpecOpKind toOpKind(const std::string &tok) {
-  if (tok == "IGNORE") return SpecOpKind::Ignore;
-  if (tok == "ALLOC") return SpecOpKind::Alloc;
-  if (tok == "DEALLOC") return SpecOpKind::Dealloc;
-  if (tok == "COPY") return SpecOpKind::Copy;
-  if (tok == "EXIT") return SpecOpKind::Exit;
-  if (tok == "MOD") return SpecOpKind::Mod;
-  if (tok == "REF") return SpecOpKind::Ref;
-  // Fallback: treat unknown as IGNORE to be conservative
-  return SpecOpKind::Ignore;
+// Returns false via the out-parameter if the token is unrecognised.
+static bool toOpKind(const std::string &tok, SpecOpKind &out) {
+  if (tok == "IGNORE") { out = SpecOpKind::Ignore;  return true; }
+  if (tok == "ALLOC")  { out = SpecOpKind::Alloc;   return true; }
+  if (tok == "DEALLOC"){ out = SpecOpKind::Dealloc; return true; }
+  if (tok == "COPY")   { out = SpecOpKind::Copy;    return true; }
+  if (tok == "EXIT")   { out = SpecOpKind::Exit;    return true; }
+  if (tok == "MOD")    { out = SpecOpKind::Mod;     return true; }
+  if (tok == "REF")    { out = SpecOpKind::Ref;     return true; }
+  return false;
 }
 
 // Converts a string to a QualifierKind enum value.
@@ -66,8 +68,14 @@ bool APISpec::parseLine(const std::string &line,
   std::string func, op;
   if (!(iss >> func)) return false;
   if (!(iss >> op)) return false;
+
+  if (!toOpKind(op, outOp)) {
+    llvm::errs() << "[APISpec] Warning: unrecognised op '" << op
+                 << "' for function '" << func << "' — line skipped\n";
+    return false;
+  }
+
   outFunc = func;
-  outOp = toOpKind(op);
 
   std::string tok;
   while (iss >> tok) outTokens.push_back(tok);
@@ -75,19 +83,49 @@ bool APISpec::parseLine(const std::string &line,
 }
 
 // Parses a value selector token (e.g., "Ret", "Arg0", "AfterArg2").
+// Returns an invalid selector (isValid=false) on any parse error.
 ValueSelector APISpec::parseSelector(const std::string &token) {
-  // Examples: Ret, Arg0, Arg1, AfterArg2, STATIC, NULL
-  if (token == "Ret") return ValueSelector{SelectorKind::Ret, -1, true};
-  if (token == "STATIC") return ValueSelector{SelectorKind::Static, -1, true};
-  if (token == "NULL") return ValueSelector{SelectorKind::Null, -1, true};
-  if (token.rfind("Arg", 0) == 0) {
-    int idx = std::stoi(token.substr(3));
-    return ValueSelector{SelectorKind::Arg, idx, true};
-  }
+  if (token == "Ret")    return ValueSelector{SelectorKind::Ret,      -1, true};
+  if (token == "STATIC") return ValueSelector{SelectorKind::Static,   -1, true};
+  if (token == "NULL")   return ValueSelector{SelectorKind::Null,     -1, true};
+
+  auto parseArgIndex = [](const std::string &suffix, int &idx) -> bool {
+    if (suffix.empty()) return false;
+    try {
+      size_t pos = 0;
+      long val = std::stol(suffix, &pos);
+      if (pos != suffix.size()) return false; // trailing garbage
+      if (val < 0 || val > 255) {
+        llvm::errs() << "[APISpec] Warning: argument index " << val
+                     << " out of range [0,255]\n";
+        return false;
+      }
+      idx = static_cast<int>(val);
+      return true;
+    } catch (...) {
+      return false;
+    }
+  };
+
   if (token.rfind("AfterArg", 0) == 0) {
-    int idx = std::stoi(token.substr(8));
+    int idx = -1;
+    if (!parseArgIndex(token.substr(8), idx)) {
+      llvm::errs() << "[APISpec] Warning: malformed selector '" << token << "'\n";
+      return ValueSelector{SelectorKind::Ret, -1, false};
+    }
     return ValueSelector{SelectorKind::AfterArg, idx, true};
   }
+
+  if (token.rfind("Arg", 0) == 0) {
+    int idx = -1;
+    if (!parseArgIndex(token.substr(3), idx)) {
+      llvm::errs() << "[APISpec] Warning: malformed selector '" << token << "'\n";
+      return ValueSelector{SelectorKind::Ret, -1, false};
+    }
+    return ValueSelector{SelectorKind::Arg, idx, true};
+  }
+
+  llvm::errs() << "[APISpec] Warning: unrecognised selector '" << token << "'\n";
   return ValueSelector{SelectorKind::Ret, -1, false};
 }
 
@@ -104,7 +142,13 @@ void APISpec::applyAlloc(FunctionSpec &spec, const std::vector<std::string> &tok
   // Some ALLOC lines provide an ArgN hint, e.g., "malloc ALLOC Arg0".
   if (!tokens.empty() && tokens[0].rfind("Arg", 0) == 0) {
     try {
-      eff.sizeArgIndex = std::stoi(tokens[0].substr(3));
+      const std::string suffix = tokens[0].substr(3);
+      size_t pos = 0;
+      long val = std::stol(suffix, &pos);
+      // pos must equal the full suffix length (no trailing garbage),
+      // and the index must fit in uint8_t.
+      if (pos == suffix.size() && val >= 0 && val <= 255)
+        eff.sizeArgIndex = static_cast<int>(val);
     } catch (...) {
       eff.sizeArgIndex = -1;
     }
@@ -113,15 +157,26 @@ void APISpec::applyAlloc(FunctionSpec &spec, const std::vector<std::string> &tok
 }
 
 // Applies COPY operation to a function specification.
-void APISpec::applyCopy(FunctionSpec &spec, const std::vector<std::string> &tokens) {
+// Returns false and emits a warning if the token count is insufficient.
+bool APISpec::applyCopy(FunctionSpec &spec, const std::vector<std::string> &tokens) {
   // Expect pattern: COPY <DstSel> <DstQual> <SrcSel> <SrcQual>
-  if (tokens.size() < 4) return;
+  if (tokens.size() < 4) {
+    llvm::errs() << "[APISpec] Warning: COPY for '" << spec.functionName
+                 << "' requires 4 tokens (DstSel DstQual SrcSel SrcQual), got "
+                 << tokens.size() << " — entry skipped\n";
+    return false;
+  }
   ValueSelector dstSel = parseSelector(tokens[0]);
   auto dstQ = parseQualifier(tokens[1]);
   ValueSelector srcSel = parseSelector(tokens[2]);
   auto srcQ = parseQualifier(tokens[3]);
-  if (!dstSel.isValid || !srcSel.isValid) return;
+  if (!dstSel.isValid || !srcSel.isValid) {
+    llvm::errs() << "[APISpec] Warning: COPY for '" << spec.functionName
+                 << "' has invalid selector — entry skipped\n";
+    return false;
+  }
   spec.copies.push_back(CopyEffect{dstSel, dstQ, srcSel, srcQ});
+  return true;
 }
 
 // Marks a function as ignored in the specification.
@@ -134,13 +189,35 @@ void APISpec::applyDealloc(FunctionSpec &spec) { spec.isDeallocator = true; }
 void APISpec::applyExit(FunctionSpec &spec) { spec.isExit = true; }
 
 // Applies MOD or REF operation to a function specification.
-void APISpec::applyModRef(FunctionSpec &spec, SpecOpKind op, const std::vector<std::string> &tokens) {
+// Returns false and emits a warning if the token count is insufficient.
+bool APISpec::applyModRef(FunctionSpec &spec, SpecOpKind op, const std::vector<std::string> &tokens) {
   // Expect: (MOD|REF) <Sel> <Qual>
-  if (tokens.size() < 2) return;
+  if (tokens.size() < 2) {
+    llvm::errs() << "[APISpec] Warning: MOD/REF for '" << spec.functionName
+                 << "' requires 2 tokens (Sel Qual), got " << tokens.size()
+                 << " — entry skipped\n";
+    return false;
+  }
   ValueSelector sel = parseSelector(tokens[0]);
   auto q = parseQualifier(tokens[1]);
-  if (!sel.isValid) return;
+  if (!sel.isValid) {
+    llvm::errs() << "[APISpec] Warning: MOD/REF for '" << spec.functionName
+                 << "' has invalid selector — entry skipped\n";
+    return false;
+  }
   spec.modref.push_back(ModRefEffect{op, sel, q});
+  return true;
+}
+
+// Checks for conflicting flags on a FunctionSpec and warns.
+static void warnConflicts(const FunctionSpec &spec) {
+  if (spec.isIgnored && (spec.isAllocator || spec.isDeallocator ||
+                         spec.isExit || !spec.copies.empty() ||
+                         !spec.modref.empty())) {
+    llvm::errs() << "[APISpec] Warning: function '" << spec.functionName
+                 << "' is marked IGNORE but also has other effects — "
+                    "IGNORE will take precedence for isIgnored queries\n";
+  }
 }
 
 // Loads API specification from a single file.
@@ -180,6 +257,7 @@ bool APISpec::loadFile(const std::string &path, std::string &errorMessage) {
         applyModRef(spec, op, toks);
         break;
     }
+    warnConflicts(spec);
   }
   return true;
 }
@@ -246,5 +324,3 @@ void APISpec::addOrReplaceSpec(const FunctionSpec &spec) {
     return;
   nameToSpec[spec.functionName] = spec;
 }
-
-

@@ -63,6 +63,14 @@ public:
   }
 
   // In backward CFG, dominators = post-dominators in forward CFG.
+  // For instruction-level backward CFG:
+  //   - The "entry" of a backward traversal within a block is the terminator.
+  //   - Within a block, the backward successor of instruction I is I->getPrevNode().
+  //   - So the idom of a non-terminator instruction I (in the backward CFG) is
+  //     I->getNextNode() (the instruction that immediately precedes I in the
+  //     backward traversal, i.e., the next instruction in forward order).
+  //   - For the terminator of a block, the idom is the terminator of the
+  //     post-dominator block (the block that post-dominates this block).
   n_t idom(n_t Node) const override {
     ensurePrepared();
     if (Node == nullptr || F == nullptr || F->isDeclaration()) {
@@ -72,6 +80,13 @@ public:
       return Entry;
     }
     const auto *BB = Node->getParent();
+    // Non-terminator: its backward-CFG idom is the next instruction in forward
+    // order (which is its backward predecessor within the block).
+    if (!Node->isTerminator()) {
+      auto *Next = Node->getNextNode();
+      return Next ? Next : Entry;
+    }
+    // Terminator: cross-block idom via post-dominator tree.
     const auto *PDTNode = PDT.getNode(const_cast<llvm::BasicBlock *>(BB));
     if (PDTNode == nullptr || PDTNode->getIDom() == nullptr) {
       return Entry;
@@ -79,11 +94,6 @@ public:
     const auto *IDomBB = PDTNode->getIDom()->getBlock();
     if (IDomBB == nullptr) {
       return Entry;
-    }
-    // IDomBB post-dominates BB. For instruction-level: if same block, prev
-    // instruction; else IDom block's terminator.
-    if (IDomBB == BB) {
-      return Node->getPrevNode();
     }
     return const_cast<n_t>(IDomBB->getTerminator());
   }

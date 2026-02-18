@@ -121,21 +121,47 @@ MKintPass::MKintPass()
 }
 
 void MKintPass::backedge_analysis(const Function& F) {
+    // Compute true loop backedges using a DFS-based algorithm.
+    // An edge pred->succ is a backedge iff succ dominates pred (i.e., succ is
+    // an ancestor of pred in the DFS spanning tree).
+    // We store, for each block B, the set of predecessors P such that P->B is
+    // a backedge.  The existing usage is: m_backedges[cur].contains(pred).
+
+    // Initialize all entries so every block has an (empty) set.
     for (const auto& bb_ref : F) {
         const auto *bb = &bb_ref;
-        if (m_backedges.count(bb) == 0) {
-            // compute backedges of bb
+        if (m_backedges.count(bb) == 0)
             m_backedges[bb] = {};
-            std::vector<const BasicBlock*> remote_succs { bb };
-            while (!remote_succs.empty()) {
-                const auto *cur_succ = remote_succs.back();
-                remote_succs.pop_back();
-                for (const auto *const succ : successors(cur_succ)) {
-                    if (succ != bb && !m_backedges[bb].contains(succ)) {
-                        m_backedges[bb].insert(succ);
-                        remote_succs.push_back(succ);
-                    }
-                }
+    }
+
+    // DFS colouring: 0 = white (unvisited), 1 = grey (on stack), 2 = black (done).
+    DenseMap<const BasicBlock*, int> color;
+    std::vector<std::pair<const BasicBlock*, bool>> stack; // (block, entered)
+    stack.push_back(std::make_pair(&F.getEntryBlock(), false));
+
+    while (!stack.empty()) {
+        // C++14: no structured bindings; use .first/.second explicitly.
+        const BasicBlock* bb = stack.back().first;
+        const bool leaving   = stack.back().second;
+        stack.pop_back();
+
+        if (leaving) {
+            color[bb] = 2; // black
+            continue;
+        }
+
+        if (color[bb] == 1) continue; // already on stack (cycle detected earlier)
+        if (color[bb] == 2) continue; // already fully processed
+
+        color[bb] = 1; // grey: on the DFS stack
+        stack.push_back(std::make_pair(bb, true)); // push "leaving" marker
+
+        for (const auto *succ : successors(bb)) {
+            if (color[succ] == 1) {
+                // succ is an ancestor in the DFS tree -> bb->succ is a backedge.
+                m_backedges[succ].insert(bb);
+            } else if (color[succ] == 0) {
+                stack.push_back(std::make_pair(succ, false));
             }
         }
     }
@@ -272,7 +298,7 @@ PreservedAnalyses MKintPass::run(Module& M, ModuleAnalysisManager& MAM) {
         }
     }
     
-    this->pring_all_ranges();
+    this->print_all_ranges();
 
     this->smt_solving(M);
 
@@ -294,7 +320,7 @@ void MKintPass::init_ranges(Module& M) {
                                  m_taint_funcs, m_callback_tsrc_fn);
 }
 
-void MKintPass::pring_all_ranges() const {
+void MKintPass::print_all_ranges() const {
     m_range_analysis->print_all_ranges(m_func2ret_range, m_global2range, m_garr2ranges,
                                       m_func2range_info, m_impossible_branches, m_gep_oob);
 }
@@ -424,6 +450,11 @@ void MKintPass::smt_solving(Module& M) {
 }
 
 void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
+    // Backedge check must come before the path counter so that loop back-edges
+    // do not consume path budget.
+    if (m_backedges[cur].contains(pred))
+        return;
+
     // Cap path exploration to avoid blowups on large CFGs.
     if (m_path_limit > 0) {
         if (m_paths_explored++ >= m_path_limit) {
@@ -447,9 +478,6 @@ void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
             return;
         }
     }
-    
-    if (m_backedges[cur].contains(pred))
-        return;
 
     // Track this basic block in the current execution path
     std::string bbDesc = "Basic block ";
@@ -1098,30 +1126,22 @@ void MKintPass::path_solving(BasicBlock* cur, BasicBlock* pred) {
         pushSymFrame();
         m_smt_mem->push();
         pushConstraintFrame();
+        // Record the path depth before recursing so we can restore it on return.
+        const size_t pathDepthBefore = m_bug_detection->getCurrentPath().size();
         path_solving(succ, cur);
+        // Restore the path to the depth it had before the recursive call.
+        // This is symmetric with the addPathPoint calls inside path_solving.
+        auto currentPath = m_bug_detection->getCurrentPath();
+        while (currentPath.size() > pathDepthBefore)
+            currentPath.pop_back();
+        m_bug_detection->setCurrentPath(currentPath);
         m_smt_mem->pop();
         popSymFrame();
         popConstraintFrame();
         m_solver.getValue().pop();
     }
-    
-    // Pop the current basic block from the path when backtracking
-    auto currentPath = m_bug_detection->getCurrentPath();
-    if (!currentPath.empty()) {
-        currentPath.pop_back();
-        m_bug_detection->setCurrentPath(currentPath);
-    }
 }
 
-
-std::string MKintPass::get_bb_label(const BasicBlock* bb) {
-    // Check if func and module are available, avoiding 'Segmentfault'
-    if (!bb || !bb->getParent() || bb->getParent()->getName().empty() || !bb->getParent()->getParent()) return "<badref>";
-    std::string str;
-    llvm::raw_string_ostream os(str);
-    bb->printAsOperand(os, false);
-    return str;
-}
 
 void MKintPass::generateSarifReport(const std::string& filename) {
     if (m_bug_detection) {

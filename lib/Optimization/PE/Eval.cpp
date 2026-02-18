@@ -2082,10 +2082,11 @@ bool IntegrationAttempt::tryEvaluateMultiInst(ShadowInstruction* SI, ImprovedVal
 	    if(canTruncate(newVal.value()))
 	      truncateRight(newVal, -ShiftedStart);
 	    else {
+	      // Operate on newVal (the NewIVM iterator), not the source 'it'.
 	      ImprovedValSetSingle OD(newVal.value().SetType, true);
-	      uint64_t oldStart = it.start(), oldStop = it.stop();
-	      it.erase();
-	      it.insert(oldStart, oldStop, OD);
+	      uint64_t oldStart = newVal.start(), oldStop = newVal.stop();
+	      newVal.erase();
+	      newVal.insert(oldStart, oldStop, OD);
 	    }
 	  }
 	  else if(ShiftedStop > resSize) {
@@ -2095,9 +2096,9 @@ bool IntegrationAttempt::tryEvaluateMultiInst(ShadowInstruction* SI, ImprovedVal
 	    }
 	    else {
 	      ImprovedValSetSingle OD(newVal.value().SetType, true);
-	      uint64_t oldStart = it.start(), oldStop = it.stop();
-	      it.erase();
-	      it.insert(oldStart, oldStop, OD);
+	      uint64_t oldStart = newVal.start(), oldStop = newVal.stop();
+	      newVal.erase();
+	      newVal.insert(oldStart, oldStop, OD);
 	    }
 	  }
 	 
@@ -2106,7 +2107,8 @@ bool IntegrationAttempt::tryEvaluateMultiInst(ShadowInstruction* SI, ImprovedVal
 	// Iterate again because the truncate options can break
 	// composites into many entries.  All values are now in
 	// appropriate range.
-	for(ImprovedValSetMulti::MapIt it = InIVM->Map.begin(), endit = InIVM->Map.end();
+	// Iterate over NewIVM (not InIVM) to avoid corrupting the source map.
+	for(ImprovedValSetMulti::MapIt it = NewIVM->Map.begin(), endit = NewIVM->Map.end();
 	    it != endit; ++it) {	
 	  it.setStartUnchecked(it.start() + ShiftInt);
 	  it.setStopUnchecked(it.stop() + ShiftInt);

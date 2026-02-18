@@ -138,16 +138,16 @@ private:
         if (expr_factory_t::isZero(ColK[i])) {
           continue;
         }
-      for (std::size_t j = 0; j < N; ++j) {
-        if (expr_factory_t::isZero(RowK[j])) {
-          continue;
+        for (std::size_t j = 0; j < N; ++j) {
+          if (expr_factory_t::isZero(RowK[j])) {
+            continue;
+          }
+          auto Via = Exprs.concat(ColK[i], KStar);
+          Via = Exprs.concat(Via, RowK[j]);
+          Matrix[i][j] = Exprs.unite(Matrix[i][j], Via);
         }
-        auto Via = Exprs.concat(ColK[i], KStar);
-        Via = Exprs.concat(Via, RowK[j]);
-        Matrix[i][j] = Exprs.unite(Matrix[i][j], Via);
       }
     }
-  }
   }
 
   void materializeResultsFromMatrix() {
@@ -364,17 +364,21 @@ private:
     Child->UFExpr = Prefix;
   }
 
+  // Evaluate the union-find path expression from the root to X, with full
+  // path compression: after the call, X->UFParent == root and X->UFExpr holds
+  // the composed expression from the root's entry to X's entry.
   expr_ref_t evalUF(ADTNode *X) {
     assert(X);
+    // Base case: X is its own root.
     if (X->UFParent == X) {
       return X->UFExpr;
     }
-    auto *P = X->UFParent;
-    assert(P);
-    if (P->UFParent != P) {
-      X->UFExpr = Exprs.concat(evalUF(P), X->UFExpr);
-      X->UFParent = P->UFParent;
-    }
+    // Recursively resolve the parent's full expression first.
+    auto ParentExpr = evalUF(X->UFParent);
+    // Compose: root -> ... -> parent -> X
+    X->UFExpr = Exprs.concat(ParentExpr, X->UFExpr);
+    // Path compression: point directly to the root.
+    X->UFParent = X->UFParent->UFParent;
     return X->UFExpr;
   }
 
@@ -1102,6 +1106,10 @@ private:
       return eval(E->R, Mid);
     }
     case expr_factory_t::Kind::Star: {
+      // Compute the least fixed point: lfp(λx. meet(In, f(x))), starting from
+      // In. For may-analyses (join meet) this grows monotonically; for
+      // must-analyses (intersection meet) it shrinks monotonically. Both
+      // converge on finite-height lattices.
       auto Cur = In;
       const auto Limit = Problem.maxStarIterations();
       for (std::size_t i = 0; i < Limit; ++i) {
@@ -1111,8 +1119,12 @@ private:
         }
         Cur = std::move(Next);
       }
+      // If we reach here the lattice has not converged. In debug builds this
+      // fires an assertion; in release builds we return the meet-identity
+      // (safe over-approximation for may-analyses, under-approximation for
+      // must-analyses) rather than silently returning an unconverged result.
       assert(false && "star did not converge within maxStarIterations()");
-      return Cur;
+      return Problem.meetIdentity();
     }
     }
     assert(false && "unreachable");

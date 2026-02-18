@@ -395,7 +395,9 @@ const ValueCollection* AliasValues::getAliasInfo(
   return nullptr;
 }
 
-ManagedValues ManagedValues::GetInstance() {
+// Bug fix: return by reference (was returning by value, so addValue() calls
+// on the returned copy were silently discarded).
+ManagedValues& ManagedValues::GetInstance() {
   static ManagedValues* managed_values = new ManagedValues();
   return *managed_values;
 }

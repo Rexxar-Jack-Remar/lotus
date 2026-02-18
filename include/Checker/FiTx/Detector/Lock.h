@@ -12,9 +12,9 @@ const std::vector<framework::FunctionArgTransitionRule::FunctionArg>
         framework::FunctionArgTransitionRule::FunctionArg("mutex_lock"),
         framework::FunctionArgTransitionRule::FunctionArg("mutex_lock_nested"),
         framework::FunctionArgTransitionRule::FunctionArg(
-            "mutex_lock_interruptable"),
+            "mutex_lock_interruptible"),
         framework::FunctionArgTransitionRule::FunctionArg(
-            "mutex_lock_interruptable_nested"),
+            "mutex_lock_interruptible_nested"),
         framework::FunctionArgTransitionRule::FunctionArg(
             "mutex_lock_killable"),
         framework::FunctionArgTransitionRule::FunctionArg(
@@ -41,9 +41,9 @@ const std::vector<framework::FunctionArgTransitionRule::FunctionArg>
         framework::FunctionArgTransitionRule::FunctionArg("mutex_lock_nested"),
         framework::FunctionArgTransitionRule::FunctionArg("mutex_trylock"),
         framework::FunctionArgTransitionRule::FunctionArg(
-            "mutex_lock_interruptable"),
+            "mutex_lock_interruptible"),
         framework::FunctionArgTransitionRule::FunctionArg(
-            "mutex_lock_interruptable_nested"),
+            "mutex_lock_interruptible_nested"),
         framework::FunctionArgTransitionRule::FunctionArg(
             "mutex_lock_killable"),
         framework::FunctionArgTransitionRule::FunctionArg(

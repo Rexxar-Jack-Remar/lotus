@@ -138,11 +138,13 @@ private:
   static QualifierKind parseQualifier(const std::string &token);
 
   void applyAlloc(FunctionSpec &spec, const std::vector<std::string> &tokens);
-  void applyCopy(FunctionSpec &spec, const std::vector<std::string> &tokens);
+  // Returns false (and emits a warning) if tokens are malformed.
+  bool applyCopy(FunctionSpec &spec, const std::vector<std::string> &tokens);
   void applyIgnore(FunctionSpec &spec);
   void applyDealloc(FunctionSpec &spec);
   void applyExit(FunctionSpec &spec);
-  void applyModRef(FunctionSpec &spec, SpecOpKind op, const std::vector<std::string> &tokens);
+  // Returns false (and emits a warning) if tokens are malformed.
+  bool applyModRef(FunctionSpec &spec, SpecOpKind op, const std::vector<std::string> &tokens);
 };
 
 // Utility helpers

@@ -302,16 +302,19 @@ private:
   }
 };
 
+// Return the set of "real" exit instructions for backward analysis.
+// We only include ReturnInst terminators; UnreachableInst and other
+// no-successor terminators are excluded because propagating facts backward
+// from unreachable code is unsound.
 std::vector<llvm::Instruction *> getExitInstructions(llvm::Function *F) {
   std::vector<llvm::Instruction *> Exits;
   if (F == nullptr || F->isDeclaration()) {
     return Exits;
   }
-  dataflow::controlflow::LLVMIntraCFG CFG;
   for (auto &BB : *F) {
-    for (auto &I : BB) {
-      if (CFG.getSuccsOf(&I, dataflow::controlflow::FlowDirection::Forward).empty()) {
-        Exits.push_back(&I);
+    if (auto *Term = BB.getTerminator()) {
+      if (llvm::isa<llvm::ReturnInst>(Term)) {
+        Exits.push_back(Term);
       }
     }
   }

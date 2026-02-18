@@ -66,10 +66,18 @@ BasicBlockInformation::BasicBlockInformation(
 }
 
 BasicBlockInformation::BasicBlockInformation(const BasicBlockInformation &info)
-    : basic_block_(info.basic_block_) {
-  /* arg_value_states_ = info.arg_value_states_; */
-  /* value_states_ = info.value_states_; */
-}
+    : basic_block_(info.basic_block_),
+      value_states_(info.value_states_),
+      arg_value_states_(info.arg_value_states_),
+      return_values_(info.return_values_),
+      alias_info_(info.alias_info_),
+      pending_values_(info.pending_values_),
+      states_(info.states_),
+      is_partial_states_(info.is_partial_states_),
+      predecessor_partial_(info.predecessor_partial_),
+      time_to_live_(info.time_to_live_),
+      status_(info.status_),
+      same_line_predecessors_(info.same_line_predecessors_) {}
 
 // Apply transitions to value (and optionally its alias set). Caller (Analyzer)
 // already expands to related + aliased values before calling; here we only
@@ -180,8 +188,14 @@ BasicBlockInformation::ValueStatesForSuccessor(
     auto operand = std::find_if(
         compare_inst->Operands().begin(), compare_inst->Operands().end(),
         [](auto operand) { return framework::shared_isa<CallInst>(operand); });
+    // Bug fix: guard against end() before dereferencing.
+    if (operand == compare_inst->Operands().end())
+      return states;
     call_inst = framework::shared_dyn_cast<CallInst>(*operand);
   }
+
+  if (!call_inst)
+    return states;
 
   auto operands = call_inst->Arguments();
   for (int i = 0; i < operands.size(); i++) {
@@ -219,7 +233,9 @@ BasicBlockInformation::ReturnCodeForSuccessor(
         compare_inst->Operands().begin(), compare_inst->Operands().end(),
         [](auto operand) { return framework::shared_isa<CallInst>(operand); });
 
-    return_values.erase(*operand);
+    // Bug fix: guard against end() before dereferencing.
+    if (operand != compare_inst->Operands().end())
+      return_values.erase(*operand);
   }
 
   /* for (auto return_value : return_values) { */
@@ -639,8 +655,9 @@ void BasicBlockInformation::removeReturnvalue(int value) {
           return value == const_ret->getConstValue();
         return false;
       });
-  if (*found_value)
-    return_values_.erase(*found_value);
+  // Bug fix: guard against end() before dereferencing.
+  if (found_value != return_values_.end())
+    return_values_.erase(found_value);
 }
 
 void BasicBlockInformation::setPartialStates(bool partial_states) {

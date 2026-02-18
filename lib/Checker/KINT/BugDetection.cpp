@@ -103,10 +103,19 @@ bool BugDetection::add_range_cons(
     v = v.extract(rbw - 1, 0);
   }
 
-  const auto upper =
-      z3::ule(v, solver.ctx().bv_val(rng.getUnsignedMax().getZExtValue(), rbw));
-  const auto lower =
-      z3::uge(v, solver.ctx().bv_val(rng.getUnsignedMin().getZExtValue(), rbw));
+  // Use signed comparisons when the range is a signed range (i.e. the signed
+  // min is negative), and unsigned comparisons otherwise.  Using unsigned
+  // bounds for a signed range causes the solver to accept values that are
+  // actually out of range (e.g. treating -1 as 2^32-1).
+  const bool isSigned = rng.getSignedMin().isNegative();
+  z3::expr upper(solver.ctx()), lower(solver.ctx());
+  if (isSigned) {
+    upper = z3::sle(v, solver.ctx().bv_val(rng.getSignedMax().getSExtValue(), rbw));
+    lower = z3::sge(v, solver.ctx().bv_val(rng.getSignedMin().getSExtValue(), rbw));
+  } else {
+    upper = z3::ule(v, solver.ctx().bv_val(rng.getUnsignedMax().getZExtValue(), rbw));
+    lower = z3::uge(v, solver.ctx().bv_val(rng.getUnsignedMin().getZExtValue(), rbw));
+  }
   if (addConstraint) {
     addConstraint(upper);
     addConstraint(lower);
@@ -399,25 +408,48 @@ z3::expr BugDetection::cast_op_propagate(
     CastInst *op,
     const DenseMap<const Value *, llvm::Optional<z3::expr>> &v2sym,
     z3::solver &solver) {
-  const auto src = this->v2sym(op->getOperand(0), v2sym, solver);
   const uint32_t bits = op->getType()->getIntegerBitWidth();
-  switch (op->getOpcode()) {
-  case CastInst::Trunc:
-    return src.extract(bits - 1, 0);
-  case CastInst::ZExt:
-    return z3::zext(src,
-                    bits - op->getOperand(0)->getType()->getIntegerBitWidth());
-  case CastInst::SExt:
-    return z3::sext(src,
-                    bits - op->getOperand(0)->getType()->getIntegerBitWidth());
-  default:
-    MKINT_WARN() << "Unhandled Cast Instruction " << op->getOpcodeName()
-                 << ". Using original range.";
+  const std::string fallback_sym = "%cast." + std::to_string(op->getValueID());
+
+  // Guard: source operand must be an integer type for Trunc/ZExt/SExt.
+  // Non-integer sources (e.g. FPToSI, PtrToInt, BitCast) are handled by
+  // returning a fresh unconstrained symbol rather than crashing.
+  auto *srcOp = op->getOperand(0);
+  if (!srcOp || !srcOp->getType()->isIntegerTy()) {
+    MKINT_WARN() << "cast_op_propagate: non-integer source for "
+                 << op->getOpcodeName() << "; using fresh symbol.";
+    return solver.ctx().bv_const(fallback_sym.c_str(), bits);
   }
 
-  const std::string new_sym_str = "\%cast" + std::to_string(op->getValueID());
-  return v2sym.begin()->second.getValue().ctx().bv_const(new_sym_str.c_str(),
-                                                         bits); // new expr
+  const auto src = this->v2sym(srcOp, v2sym, solver);
+  const uint32_t src_bits = srcOp->getType()->getIntegerBitWidth();
+
+  switch (op->getOpcode()) {
+  case CastInst::Trunc:
+    if (bits >= src_bits) {
+      // Defensive: should not happen in well-formed IR, but avoid UB in extract.
+      MKINT_WARN() << "Trunc to wider/equal type; using fresh symbol.";
+      return solver.ctx().bv_const(fallback_sym.c_str(), bits);
+    }
+    return src.extract(bits - 1, 0);
+  case CastInst::ZExt:
+    if (bits <= src_bits) {
+      MKINT_WARN() << "ZExt to narrower/equal type; using fresh symbol.";
+      return solver.ctx().bv_const(fallback_sym.c_str(), bits);
+    }
+    return z3::zext(src, bits - src_bits);
+  case CastInst::SExt:
+    if (bits <= src_bits) {
+      MKINT_WARN() << "SExt to narrower/equal type; using fresh symbol.";
+      return solver.ctx().bv_const(fallback_sym.c_str(), bits);
+    }
+    return z3::sext(src, bits - src_bits);
+  default:
+    MKINT_WARN() << "Unhandled Cast Instruction " << op->getOpcodeName()
+                 << ". Using fresh symbol.";
+  }
+
+  return solver.ctx().bv_const(fallback_sym.c_str(), bits);
 }
 
 void BugDetection::mark_errors(

@@ -602,8 +602,10 @@ void DSEMapPointer::mergeStores(DSEMapPointer* mergeFrom, DSEMapPointer* mergeTo
 	continue;
 
       DSEMapEntry newEntry = toEntry;
-      
-      for(DSEMapEntry::const_iterator it = fromEntry.begin(), itend = fromEntry.end(); it != itend && !willAdd; ++it) {
+
+      // Reset willAdd so the second loop actually iterates to add new entries.
+      willAdd = false;
+      for(DSEMapEntry::const_iterator it = fromEntry.begin(), itend = fromEntry.end(); it != itend; ++it) {
 
 	TrackedStore* fromStore = *it;
 	if(std::find(toEntry.begin(), toEntry.end(), fromStore) != toEntry.end())

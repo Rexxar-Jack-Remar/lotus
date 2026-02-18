@@ -74,7 +74,10 @@ StoreValueTransitionRule::StoreValueTransitionRule(
     : TransitionRule(TransitionTrigger::STORE_VALUE),
       type_(type),
       function_names_(funcs),
-      consider_null_branch_(true) {}
+      // Bug fix: default to false so detectors must explicitly opt-in to
+      // branch-variant transitions. Previously always true, causing every
+      // store rule to silently register NULL_BRANCH_CONSIDERED_* variants.
+      consider_null_branch_(false) {}
 
 UseValueTransitionRule::UseValueTransitionRule()
     : TransitionRule(TransitionTrigger::USE_VALUE) {}

@@ -1530,7 +1530,8 @@ void llvm::getConstSubVals(ShadowValue FromSV, uint64_t Offset, uint64_t TargetS
     // Out of bounds read on the right. Define as much as we can:
     getConstSubVals(FromSV, Offset, FromSize - Offset, OffsetAbove, Dest);
     // ...then overdef the rest.
-    Dest.push_back(IVSR(FromSize, (Offset + TargetSize) - FromSize, ImprovedValSetSingle(ValSetTypeUnknown, true)));
+    // The IVSR stop field is an absolute offset (start + size), not a size.
+    Dest.push_back(IVSR(OffsetAbove + FromSize, OffsetAbove + Offset + TargetSize, ImprovedValSetSingle(ValSetTypeUnknown, true)));
     return;
 
   }
@@ -2162,14 +2163,14 @@ void llvm::readValRangeMultiFrom(uint64_t Offset, uint64_t Size, ImprovedValSet*
 	release_assert(it.start() > Offset && "Overlapping-on-left should be caught already");
 	// Gap -- defer this bit to our parent map. If there is none, the value is undefined here.
 
-	if(!IVM->Underlying) {
+      if(!IVM->Underlying) {
 
-	  uint64_t UndefSize = it.start() - Offset;
-	  Type* UndefType = IntegerType::get(GInt8Ptr->getContext(), UndefSize * 8);
+	  // Size already holds the remaining byte count; use it directly.
+	  Type* UndefType = IntegerType::get(GInt8Ptr->getContext(), Size * 8);
 	  Value* UD = UndefValue::get(UndefType);
-	  Results.push_back(IVSR(Offset, Offset + UndefSize, ImprovedValSetSingle(ImprovedVal(UD), ValSetTypeScalar)));
-
-	}
+	  Results.push_back(IVSR(Offset, Offset + Size, ImprovedValSetSingle(ImprovedVal(UD), ValSetTypeScalar)));	
+	
+      }
 	else {
 
 	  LFV3(errs() << "Defer to underlying map " << IVM->Underlying << " for range " << Offset << "-" << it.start() << "\n");

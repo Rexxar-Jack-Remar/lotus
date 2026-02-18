@@ -21,6 +21,7 @@
  */
  #include "Analysis/DebugInfo/MetadataManager/LoopStructure.h"
  #include "Analysis/DebugInfo/MetadataManager/MetadataManager.h"
+ #include <stdexcept>
  
  namespace noelle {
  
@@ -208,14 +209,43 @@
  
  bool LoopStructure::isContainedInstructionLoopInvariant(
      Instruction *inst) const {
- 
-   /*
-    * Currently, we are as naive as LLVM, not including loop internal
-    * instructions which derive from loop invariants as being loop invariant. We
-    * simply cache loop instructions which LLVM's isLoopInvariant returns true
-    * for
-    */
-   return this->invariants.find(inst) != this->invariants.end();
+
+   // Fast path: LLVM already determined this instruction is loop-invariant.
+   if (this->invariants.find(inst) != this->invariants.end()) {
+     return true;
+   }
+
+   // Extended check: an instruction is loop-invariant if all of its operands
+   // are loop-invariant.  This catches one level of derived invariants that
+   // LLVM's naive isLoopInvariant misses (e.g., "add invariant_a, invariant_b").
+   //
+   // We only apply this to side-effect-free instructions to stay conservative.
+   if (inst->mayHaveSideEffects() || inst->mayReadFromMemory()) {
+     return false;
+   }
+
+   for (auto &operand : inst->operands()) {
+     Value *V = operand.get();
+     // Constants and arguments are always invariant.
+     if (isa<Constant>(V) || isa<Argument>(V)) {
+       continue;
+     }
+     // Instructions outside the loop are invariant.
+     if (auto *opInst = dyn_cast<Instruction>(V)) {
+       if (!this->isIncluded(opInst->getParent())) {
+         continue;
+       }
+       // Recursively check if the operand instruction is invariant.
+       if (!this->isContainedInstructionLoopInvariant(opInst)) {
+         return false;
+       }
+     } else {
+       // Unknown value kind — be conservative.
+       return false;
+     }
+   }
+
+   return true;
  }
  
  bool LoopStructure::isIncluded(BasicBlock *bb) const {
@@ -242,37 +272,48 @@ void LoopStructure::print(raw_ostream &stream) {
 }
 
 uint64_t LoopStructure::getID(void) {
-  Module *M = this->header->getModule();
-  MetadataManager metadataManager{ *M };
-  if (metadataManager.doesHaveMetadata(this, LoopStructure::metadataKeyID)) {
-    std::string idAsString =
-        metadataManager.getMetadata(this, LoopStructure::metadataKeyID);
-    uint64_t ID = std::stoi(idAsString);
-    return ID;
+  // Read the metadata directly from the header terminator (O(1)) instead of
+  // constructing a MetadataManager which scans the entire module (O(N)).
+  auto *headerTerm = this->header->getTerminator();
+  auto *metaNode = headerTerm->getMetadata(LoopStructure::metadataKeyID);
+  if (!metaNode) {
+    return 0;
   }
 
-  return 0;
+  auto *mdStr = dyn_cast<MDString>(metaNode->getOperand(0));
+  if (!mdStr) {
+    return 0;
+  }
+
+  // Use stoull with exception handling to avoid crashes on malformed metadata.
+  try {
+    return std::stoull(mdStr->getString().str());
+  } catch (const std::invalid_argument &) {
+    errs() << "LoopStructure::getID: WARNING = metadata \""
+           << LoopStructure::metadataKeyID
+           << "\" is not a valid integer: \"" << mdStr->getString() << "\"\n";
+    return 0;
+  } catch (const std::out_of_range &) {
+    errs() << "LoopStructure::getID: WARNING = metadata \""
+           << LoopStructure::metadataKeyID
+           << "\" value out of range: \"" << mdStr->getString() << "\"\n";
+    return 0;
+  }
 }
- 
+
  bool LoopStructure::doesHaveID(void) {
-   Module *M = this->header->getModule();
-   MetadataManager metadataManager{ *M };
-   return metadataManager.doesHaveMetadata(this, LoopStructure::metadataKeyID);
+   // Check the IR directly (O(1)) — no need for a full MetadataManager.
+   auto *headerTerm = this->header->getTerminator();
+   return headerTerm->getMetadata(LoopStructure::metadataKeyID) != nullptr;
  }
- 
+
  void LoopStructure::setID(uint64_t ID) {
-   Module *M = this->header->getModule();
-   MetadataManager metadataManager{ *M };
-   if (this->doesHaveID()) {
-     metadataManager.setMetadata(this,
-                                 LoopStructure::metadataKeyID,
-                                 std::to_string(ID));
-   } else {
-     metadataManager.addMetadata(this,
-                                 LoopStructure::metadataKeyID,
-                                 std::to_string(ID));
-   }
- 
+   auto *headerTerm = this->header->getTerminator();
+   auto &cxt = headerTerm->getContext();
+   auto *s = MDString::get(cxt, std::to_string(ID));
+   auto *n = MDNode::get(cxt, s);
+   // setMetadata replaces any existing node, so this handles both add and update.
+   headerTerm->setMetadata(LoopStructure::metadataKeyID, n);
    return;
  }
  

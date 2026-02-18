@@ -449,6 +449,10 @@ public:
     return Out;
   }
 
+  // meet is a symmetric join: for each key present in either map, merge the
+  // two lattice values. Keys absent from one side are treated as Unknown
+  // (bottom), so mergeIn(Unknown) leaves the other side unchanged — but we
+  // must also handle keys present only in Lhs symmetrically.
   ConstantPropagationMap meet(const ConstantPropagationMap &Lhs,
                               const ConstantPropagationMap &Rhs)
       const override {
@@ -456,13 +460,19 @@ public:
     for (const auto &Entry : Rhs) {
       auto It = Out.find(Entry.first);
       if (It == Out.end()) {
+        // Key only in Rhs: treat Lhs value as Unknown and merge.
+        // mergeIn(Unknown) on a fresh Unknown gives Entry.second.
         ConstantPropagationValue V;
         V.mergeIn(Entry.second);
         Out.insert({Entry.first, V});
-        continue;
+      } else {
+        It->second.mergeIn(Entry.second);
       }
-      It->second.mergeIn(Entry.second);
     }
+    // Keys only in Lhs: treat Rhs value as Unknown and merge.
+    // mergeIn(Unknown) is a no-op on any lattice element, so Lhs-only keys
+    // are already correctly represented in Out (copied from Lhs above).
+    // No additional action needed — the result is symmetric.
     return Out;
   }
 

@@ -2,14 +2,18 @@
 
 #include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/Elimination/Core/Framework.h"
+#include "Dataflow/Elimination/LLVM/LLVMEliminationProblem.h"
 #include "Dataflow/Elimination/Solver/IntraEliminationSolver.h"
 
 #include "llvm/Analysis/AssumeBundleQueries.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 
+#include <deque>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace elimination {
@@ -21,7 +25,7 @@ struct NonNullDomain {
   using transfer_t = NonNullEdgeTransfer;
 };
 
-class NonNullProblem : public IntraEliminationProblem<NonNullDomain> {
+class NonNullProblem : public IntraReducibleEliminationProblem<NonNullDomain> {
 public:
   explicit NonNullProblem(llvm::Function *F, llvm::AssumptionCache *AC,
                           llvm::DominatorTree *DT)
@@ -91,6 +95,120 @@ public:
     }
     return Out;
   }
+
+  // --- IntraReducibleEliminationProblem interface ---
+
+  std::vector<Edge> edges() const override {
+    ensurePrepared();
+    std::vector<Edge> Result;
+    for (auto *Src : Nodes) {
+      for (auto *Dst : CFG.getSuccsOf(Src, dataflow::controlflow::FlowDirection::Forward)) {
+        Result.push_back({Src, Dst});
+      }
+    }
+    return Result;
+  }
+
+  std::vector<n_t> topologicalOrder() const override {
+    ensurePrepared();
+    if (Nodes.empty()) {
+      return {};
+    }
+    // Build forward-edge adjacency and in-degree, skipping back edges.
+    std::unordered_map<n_t, std::vector<n_t>> Succ;
+    std::unordered_map<n_t, std::size_t> InDeg;
+    for (auto *N : Nodes) {
+      InDeg[N] = 0;
+    }
+    for (auto *Src : Nodes) {
+      for (auto *Dst : CFG.getSuccsOf(Src, dataflow::controlflow::FlowDirection::Forward)) {
+        if (!dominates(Dst, Src)) { // skip back edges
+          Succ[Src].push_back(Dst);
+          ++InDeg[Dst];
+        }
+      }
+    }
+    auto *EntryNode = entry();
+    std::deque<n_t> Ready;
+    Ready.push_back(EntryNode);
+    for (auto *N : Nodes) {
+      if (N != EntryNode && InDeg[N] == 0) {
+        Ready.push_back(N);
+      }
+    }
+    std::vector<n_t> Topo;
+    Topo.reserve(Nodes.size());
+    while (!Ready.empty()) {
+      auto *Cur = Ready.front();
+      Ready.pop_front();
+      Topo.push_back(Cur);
+      for (auto *S : Succ[Cur]) {
+        if (--InDeg[S] == 0) {
+          Ready.push_back(S);
+        }
+      }
+    }
+    if (Topo.size() != Nodes.size()) {
+      return {}; // cycle detected (irreducible)
+    }
+    return Topo;
+  }
+
+  n_t idom(n_t Node) const override {
+    if (Node == nullptr || F == nullptr || F->isDeclaration()) {
+      return Node;
+    }
+    if (Node == entry()) {
+      return entry();
+    }
+    const auto *BB = Node->getParent();
+    // Within a block: idom of a non-first instruction is its predecessor.
+    if (&BB->front() != Node) {
+      return Node->getPrevNode();
+    }
+    // First instruction of a block: idom is the last instruction of the
+    // immediate dominator block.
+    auto *EffDT = getDT();
+    const auto *DTNode = EffDT->getNode(const_cast<llvm::BasicBlock *>(BB));
+    if (DTNode == nullptr || DTNode->getIDom() == nullptr) {
+      return entry();
+    }
+    const auto *IDomBB = DTNode->getIDom()->getBlock();
+    if (IDomBB == nullptr) {
+      return entry();
+    }
+    return const_cast<n_t>(IDomBB->getTerminator());
+  }
+
+  bool dominates(n_t A, n_t B) const override {
+    if (A == nullptr || B == nullptr) {
+      return false;
+    }
+    if (A == B) {
+      return true;
+    }
+    const auto *BBA = A->getParent();
+    const auto *BBB = B->getParent();
+    if (BBA == BBB) {
+      return A->comesBefore(B);
+    }
+    return getDT()->dominates(BBA, BBB);
+  }
+
+private:
+  // Return the effective dominator tree: prefer the externally provided one,
+  // otherwise lazily compute and cache our own.
+  llvm::DominatorTree *getDT() const {
+    if (DT != nullptr) {
+      return DT;
+    }
+    if (!OwnedDT) {
+      OwnedDT = std::make_unique<llvm::DominatorTree>(*F);
+    }
+    return OwnedDT.get();
+  }
+
+  mutable std::unique_ptr<llvm::DominatorTree> OwnedDT;
 
 private:
   llvm::Function *F = nullptr;

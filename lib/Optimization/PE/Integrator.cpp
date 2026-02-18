@@ -44,7 +44,9 @@ namespace {
 bool LLPEPass::runOnModule(Module& M) {
   LLPEAnalysisPass* IHP = &getAnalysis<LLPEAnalysisPass>();
   IHP->commit();
-  return false;
+  // commit() rewrites the module (specialises functions, removes dead code, etc.)
+  // so the module has been modified.
+  return true;
 
 }
 

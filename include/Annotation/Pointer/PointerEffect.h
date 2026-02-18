@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Annotation/ArgPosition.h"
+#include <utility>  // std::move
 
 namespace annotation
 {
@@ -180,6 +181,100 @@ public:
 				new (&eexit) PointerExitEffect();
 				break;
 		}
+	}
+
+	// Copy-assignment operator: required because the union contains members
+	// with non-trivial copy assignment, which causes the compiler-generated
+	// operator= to be deleted.  Without this, storing PointerEffect in
+	// standard containers or assigning between instances fails to compile.
+	PointerEffect& operator=(const PointerEffect& rhs)
+	{
+		if (this == &rhs)
+			return *this;
+
+		// Destroy the currently active union member.
+		switch (type)
+		{
+			case PointerEffectType::Alloc:
+				alloc.~PointerAllocEffect();
+				break;
+			case PointerEffectType::Copy:
+				copy.~PointerCopyEffect();
+				break;
+			case PointerEffectType::Exit:
+				eexit.~PointerExitEffect();
+				break;
+		}
+
+		// Copy-construct the new active member.
+		type = rhs.type;
+		switch (type)
+		{
+			case PointerEffectType::Alloc:
+				new (&alloc) PointerAllocEffect(rhs.alloc);
+				break;
+			case PointerEffectType::Copy:
+				new (&copy) PointerCopyEffect(rhs.copy);
+				break;
+			case PointerEffectType::Exit:
+				new (&eexit) PointerExitEffect();
+				break;
+		}
+		return *this;
+	}
+
+	// Move constructor.
+	PointerEffect(PointerEffect&& rhs) noexcept : type(rhs.type)
+	{
+		switch (type)
+		{
+			case PointerEffectType::Alloc:
+				new (&alloc) PointerAllocEffect(std::move(rhs.alloc));
+				break;
+			case PointerEffectType::Copy:
+				new (&copy) PointerCopyEffect(std::move(rhs.copy));
+				break;
+			case PointerEffectType::Exit:
+				new (&eexit) PointerExitEffect();
+				break;
+		}
+	}
+
+	// Move-assignment operator.
+	PointerEffect& operator=(PointerEffect&& rhs) noexcept
+	{
+		if (this == &rhs)
+			return *this;
+
+		// Destroy the currently active union member.
+		switch (type)
+		{
+			case PointerEffectType::Alloc:
+				alloc.~PointerAllocEffect();
+				break;
+			case PointerEffectType::Copy:
+				copy.~PointerCopyEffect();
+				break;
+			case PointerEffectType::Exit:
+				eexit.~PointerExitEffect();
+				break;
+		}
+
+		// Move-construct the new active member.
+		type = rhs.type;
+		switch (type)
+		{
+			case PointerEffectType::Alloc:
+				new (&alloc) PointerAllocEffect(std::move(rhs.alloc));
+				break;
+			case PointerEffectType::Copy:
+				new (&copy) PointerCopyEffect(std::move(rhs.copy));
+				break;
+			case PointerEffectType::Exit:
+				new (&eexit) PointerExitEffect();
+				break;
+		}
+		return *this;
 	}
 
 	PointerEffectType getType() const { return type; }

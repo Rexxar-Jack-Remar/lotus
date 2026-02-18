@@ -219,11 +219,17 @@ bool Analyzer::collectPossibleReturnValues(
      */
     /* } */
   } else if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(V)) {
-    /* for (unsigned i = 0; i < PHI->getNumIncomingValues(); i++) { */
-    /* if (V != PHI->getIncomingValue(i)) */
-    /*   checkErrorCodeAndAddBlock(PHI, PHI->getIncomingBlock(i), */
-    /*                             PHI->getIncomingValue(i), visited_inst); */
-    /* } */
+    // Bug fix: PHI nodes were completely ignored, causing functions that return
+    // via a PHI (the common case after if/else with different return codes) to
+    // have no return codes recorded in their summary, breaking return-code-aware
+    // propagation. Recurse into each incoming value of the PHI.
+    for (unsigned i = 0; i < PHI->getNumIncomingValues(); i++) {
+      llvm::Value* incoming = PHI->getIncomingValue(i);
+      if (incoming != V)
+        add_return_value =
+            collectPossibleReturnValues(incoming, visited_inst) ||
+            add_return_value;
+    }
   } else if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(V)) {
     if (V != SI->getValueOperand()) {
       add_return_value =

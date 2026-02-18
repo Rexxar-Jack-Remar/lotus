@@ -27,9 +27,14 @@ namespace kint {
 #include <unordered_set>
 #include <vector>
 
-using namespace llvm;
-
 namespace kint {
+
+// NOTE: 'using namespace llvm' is scoped inside the kint namespace to limit
+// pollution.  It still affects all code inside this namespace block in every
+// TU that includes this header, but it does not leak into the global namespace.
+// The proper fix is to qualify every LLVM type with llvm:: throughout this
+// header, but that is a larger refactor deferred for now.
+using namespace llvm; // NOLINT(google-build-using-namespace)
 
 struct MKintPass : public PassInfoMixin<MKintPass> {
     MKintPass();
@@ -57,7 +62,7 @@ private:
     int m_deadBranchTypeId;
     void backedge_analysis(const Function& F);
     void init_ranges(Module& M);
-    void pring_all_ranges() const;
+    void print_all_ranges() const;
     void smt_solving(Module& M);
     void path_solving(BasicBlock* cur, BasicBlock* pred);
     static std::string get_bb_label(const BasicBlock* bb);

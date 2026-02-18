@@ -6,7 +6,6 @@
 #include <llvm/Support/raw_ostream.h>
 #include <fstream>
 #include <sstream>
-//#include <algorithm>
 
 void TaintConfig::dump(llvm::raw_ostream& OS) const {
     OS << "Sources: " << sources.size() << ", Sinks: " << sinks.size() 
@@ -63,42 +62,52 @@ void TaintConfigParser::parse_line(const std::string& line, TaintConfig& config)
         
         // Parse taint specifications: SOURCE func_name Arg0 D T
         // Format: <location> <access_mode> <taint_type>
-        for (size_t i = 2; i < tokens.size(); i += 3) {
-            if (i + 2 < tokens.size()) {
-                TaintSpec spec;
-                if (parse_taint_spec(tokens, i, spec)) {
-                    config.function_specs[func_name].source_specs.push_back(spec);
-                }
+        // Fix: the loop guard was "i + 2 < tokens.size()" which skips the last
+        // complete triplet when exactly 3 tokens remain (i+2 == size-1).
+        // Correct condition: i + 3 <= tokens.size()  (i.e. at least 3 tokens left).
+        for (size_t i = 2; i + 3 <= tokens.size(); i += 3) {
+            TaintSpec spec;
+            if (parse_taint_spec(tokens, i, spec)) {
+                config.function_specs[func_name].source_specs.push_back(spec);
             }
         }
     } else if (directive == "SINK") {
         config.sinks.insert(func_name);
         
         // Parse sink specifications similarly
-        for (size_t i = 2; i < tokens.size(); i += 3) {
-            if (i + 2 < tokens.size()) {
-                TaintSpec spec;
-                if (parse_taint_spec(tokens, i, spec)) {
-                    config.function_specs[func_name].sink_specs.push_back(spec);
-                }
+        for (size_t i = 2; i + 3 <= tokens.size(); i += 3) {
+            TaintSpec spec;
+            if (parse_taint_spec(tokens, i, spec)) {
+                config.function_specs[func_name].sink_specs.push_back(spec);
             }
         }
     } else if (directive == "IGNORE") {
         config.ignored.insert(func_name);
     } else if (directive == "PIPE") {
-        // Parse pipe specifications: PIPE func_name Ret V Arg0 D
-        // Format: <from_location> <from_access> <to_location> <to_access>
-        if (tokens.size() >= 6) {
-            PipeSpec pipe_spec;
-            // Parse 'from' spec (tokens 2-3, assuming taint type is implicit)
-            std::vector<std::string> from_tokens = {tokens[2], tokens[3], "T"};
-            if (parse_taint_spec(from_tokens, 0, pipe_spec.from)) {
-                std::vector<std::string> to_tokens = {tokens[4], tokens[5], "T"};
-                if (parse_taint_spec(to_tokens, 0, pipe_spec.to)) {
-                    config.function_specs[func_name].pipe_specs.push_back(pipe_spec);
-                }
-            }
+        // Parse pipe specifications: PIPE func_name <from_loc> <from_access> <to_loc> <to_access>
+        // Requires exactly 6 tokens (directive + func + 4 spec tokens).
+        if (tokens.size() < 6) {
+            llvm::errs() << "[TaintConfigParser] Warning: PIPE for '" << func_name
+                         << "' requires 6 tokens, got " << tokens.size()
+                         << " — entry skipped\n";
+            return;
         }
+        PipeSpec pipe_spec;
+        // Parse 'from' spec (tokens[2], tokens[3], implicit taint type "T")
+        std::vector<std::string> from_tokens = {tokens[2], tokens[3], "T"};
+        if (!parse_taint_spec(from_tokens, 0, pipe_spec.from)) {
+            llvm::errs() << "[TaintConfigParser] Warning: PIPE for '" << func_name
+                         << "' has invalid 'from' spec — entry skipped\n";
+            return;
+        }
+        // Parse 'to' spec (tokens[4], tokens[5], implicit taint type "T")
+        std::vector<std::string> to_tokens = {tokens[4], tokens[5], "T"};
+        if (!parse_taint_spec(to_tokens, 0, pipe_spec.to)) {
+            llvm::errs() << "[TaintConfigParser] Warning: PIPE for '" << func_name
+                         << "' has invalid 'to' spec — entry skipped\n";
+            return;
+        }
+        config.function_specs[func_name].pipe_specs.push_back(pipe_spec);
     }
 }
 
@@ -123,11 +132,12 @@ std::string TaintConfigParser::trim(const std::string& str) {
 }
 
 bool TaintConfigParser::parse_taint_spec(const std::vector<std::string>& tokens, size_t start_idx, TaintSpec& spec) {
-    if (start_idx + 2 >= tokens.size()) return false;
+    // Need exactly 3 tokens starting at start_idx.
+    if (start_idx + 3 > tokens.size()) return false;
     
     const std::string& location_token = tokens[start_idx];
-    const std::string& access_token = tokens[start_idx + 1];
-    const std::string& taint_token = tokens[start_idx + 2];
+    const std::string& access_token   = tokens[start_idx + 1];
+    const std::string& taint_token    = tokens[start_idx + 2];
     
     // Parse location (Arg0, AfterArg1, Ret, etc.)
     if (location_token == "Ret") {
@@ -151,11 +161,15 @@ bool TaintConfigParser::parse_taint_spec(const std::vector<std::string>& tokens,
         return false;
     }
     
-    // Parse access mode (V = value, D = deref, R = deref/read)
+    // Parse access mode.
+    // 'V' = direct value; 'D' = direct (dereferenced) memory; 'R' = reachable memory.
+    // Previously 'D' and 'R' were both mapped to DEREF, losing the distinction.
     if (access_token == "V") {
         spec.access_mode = TaintSpec::VALUE;
-    } else if (access_token == "D" || access_token == "R") {
-        spec.access_mode = TaintSpec::DEREF;
+    } else if (access_token == "D") {
+        spec.access_mode = TaintSpec::DIRECT_DEREF;
+    } else if (access_token == "R") {
+        spec.access_mode = TaintSpec::REACHABLE_DEREF;
     } else {
         return false;
     }

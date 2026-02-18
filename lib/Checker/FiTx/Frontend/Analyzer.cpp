@@ -1,5 +1,5 @@
 // FiTx CFG-based typestate analysis: path-insensitive, inter-procedural,
-// return-code aware state propagation (Suzuki et al., USENIX ATC 2024, §4.2, 4.3).
+// return-code aware state propagation (Suzuki et al., USENIX ATC 2024, ยง4.2, 4.3).
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Argument.h"
@@ -75,7 +75,7 @@ void Analyzer::analyze() {
 }
 
 void Analyzer::analyzeFunction(std::shared_ptr<framework::Function> function) {
-  // Bottom-up summary-based analysis (paper §4.3): each function analyzed
+  // Bottom-up summary-based analysis (paper ยง4.3): each function analyzed
   // once; states summarized per return code for caller propagation.
   if (!functionInformationExists(function))
     function_info_[function] =
@@ -89,7 +89,7 @@ void Analyzer::analyzeFunction(std::shared_ptr<framework::Function> function) {
 
   analyzing_function_.push(function);
   // Process blocks in order; createBasicBlockInfo merges states from all
-  // predecessors (paper §4.2: "collect the state from the predecessor").
+  // predecessors (paper ยง4.2: "collect the state from the predecessor").
   auto target_blocks = function->OrderedBasicBlocks();
   std::queue<std::shared_ptr<framework::BasicBlock>> block_queue(
       std::deque<std::shared_ptr<framework::BasicBlock>>(target_blocks.begin(),
@@ -153,7 +153,7 @@ void Analyzer::analyzeFunction(std::shared_ptr<framework::Function> function) {
 // whether the current block is on the "null" or "non-null" path and apply the
 // corresponding store transitions (e.g. "ptr is null" -> transition to init).
 // Also used for return-code aware propagation: branch on return value selects
-// which callee return codes we propagate (paper §4.3).
+// which callee return codes we propagate (paper ยง4.3).
 void Analyzer::analyzePrevBlockBranch(
     std::shared_ptr<framework::BasicBlock> block) {
   for (auto pred_reference : block->Predecessors()) {
@@ -231,7 +231,7 @@ void Analyzer::analyzePrevBlockBranch(
     transitions.insert(transitions.end(), possible_transitions.begin(),
                        possible_transitions.end());
 
-    // Apply to comp_value and all values that may alias it (intra-procedural alias; paper §3).
+    // Apply to comp_value and all values that may alias it (intra-procedural alias; paper ยง3).
     std::set<std::shared_ptr<framework::Value>> related_values =
         currentFunctionInformation()->GetValueCollection().getRelatedValues(
             comp_value);
@@ -407,7 +407,7 @@ void Analyzer::analyzeStoreInst(std::shared_ptr<framework::Instruction> I) {
 
 // Record may-alias (pointer_operand = value_operand) in current block's
 // AliasValues, then apply alias transitions to pointer + related + aliased
-// values. Alias is intra-procedural and built during analysis (paper §3).
+// values. Alias is intra-procedural and built during analysis (paper ยง3).
 void Analyzer::checkAlias(std::shared_ptr<framework::StoreInst> store_inst) {
   auto value_operand = store_inst->ValueOperand();
 
@@ -486,7 +486,7 @@ void Analyzer::changeValueState(std::vector<Transition> transitions,
 
 // Emit a bug report for every value that is in a bug state at this hook.
 // We only report if LeastSignificantSource is init: reduces false positives by
-// requiring the value to have reached the bug state from a "real" init (paper §4.2:
+// requiring the value to have reached the bug state from a "real" init (paper ยง4.2:
 // priority/distance to bug state used when merging predecessors).
 void Analyzer::generateError(
     BugNotificationTiming timing,
@@ -530,7 +530,7 @@ void Analyzer::generateError(
 // operands. If the return value is used in a branch, addPendingFunctionValues
 // already set pending states per (successor block, return code); we only reach
 // here when we don't have that (e.g. return value not checked). Then we merge
-// states from all "success" blocks of the callee and apply to caller (paper §4.3).
+// states from all "success" blocks of the callee and apply to caller (paper ยง4.3).
 void Analyzer::copyFunctionValues(
     std::shared_ptr<framework::Function> called_func,
     std::shared_ptr<framework::CallInst> call_inst) {
@@ -598,7 +598,7 @@ void Analyzer::copyFunctionValues(
   }
 }
 
-// Return-code aware state propagation (paper §4.3): if the return value is
+// Return-code aware state propagation (paper ยง4.3): if the return value is
 // used in a branch (e.g. if (err)), propagate only the states for the return
 // codes that satisfy that branch (e.g. error path gets error-return states).
 bool Analyzer::addPendingFunctionValues(
@@ -728,7 +728,7 @@ bool Analyzer::addPendingFunctionValues(
 }
 
 // Apply "Fun Arg" transition rules (paper Table 5: Fun Arg call arg arg num).
-// For each argument index, look up transitions (e.g. kfree(ptr) -> ptr: init→free)
+// For each argument index, look up transitions (e.g. kfree(ptr) -> ptr: initโ��free)
 // and apply to the argument value (and optionally parent/related values).
 bool Analyzer::analyzeFunctionCall(
     std::shared_ptr<framework::CallInst> call_inst) {
@@ -760,7 +760,7 @@ bool Analyzer::analyzeFunctionCall(
 }
 
 // Collect possible return codes per predecessor block for function summary
-// (paper §4.3). Constant return values (e.g. 0, -ENOMEM) are used to key
+// (paper ยง4.3). Constant return values (e.g. 0, -ENOMEM) are used to key
 // summarized states so callers can propagate the right state per branch.
 void Analyzer::analyzeReturnValue(
     std::shared_ptr<framework::Function> function) {
@@ -778,21 +778,21 @@ void Analyzer::analyzeReturnValue(
   std::set<std::weak_ptr<framework::BasicBlock>> pred_block(
       return_block->Predecessors());
 
-  /* if (pred_block.empty() || !return_block->Instructions().empty()) { */
-  /*   pred_block.insert(return_block); */
-  /* } */
-
-  if (!return_block->Instructions().empty()) {
+  // Bug fix: the original logic cleared pred_block when the return block had
+  // instructions, then unconditionally re-inserted return_block whenever
+  // pred_block was empty — making the two branches non-exclusive and silently
+  // discarding the predecessor set for functions whose return block has no
+  // predecessors. Correct intent: if the return block itself has instructions
+  // (i.e. it is not a pure merge block), analyze it directly; otherwise use
+  // its predecessors.
+  if (!return_block->Instructions().empty() || pred_block.empty()) {
     pred_block.clear();
-  }
-
-  if (pred_block.empty()) {
     pred_block.insert(return_block);
   }
 
   // Build function summary: for each predecessor of the return block, collect
   // which constant return values it may produce; record (return_code, pred) in
-  // func_info so callers can propagate by return code (paper §4.3).
+  // func_info so callers can propagate by return code (paper ยง4.3).
   for (auto pred_reference : pred_block) {
     if (auto pred = pred_reference.lock()) {
       if (!pred->Instructions().empty()) {
