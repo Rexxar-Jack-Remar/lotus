@@ -59,7 +59,14 @@ bool ball_walk_step(const std::vector<LinearConstraint> &constraints,
       if (std::isfinite(lo[j]) && std::isfinite(hi[j]) && hi[j] > lo[j]) {
         long double range = hi[j] - lo[j];
         // Use ~0.1% of the range as the step size, minimum 1.
-        int64_t s = static_cast<int64_t>(std::max(1.0L, range / 1000.0L));
+        // Fix PS-5: range / 1000 can exceed INT64_MAX for very large ranges
+        // (e.g., 64-bit variables).  Clamp to INT64_MAX before casting.
+        long double raw_step = std::max(1.0L, range / 1000.0L);
+        constexpr long double kInt64Max =
+            static_cast<long double>(std::numeric_limits<int64_t>::max());
+        if (raw_step > kInt64Max)
+          raw_step = kInt64Max;
+        int64_t s = static_cast<int64_t>(raw_step);
         step_size[j] = s;
       }
     }

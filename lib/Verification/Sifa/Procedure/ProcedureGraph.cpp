@@ -1,5 +1,6 @@
 #include "Verification/Sifa/Procedure/ProcedureGraph.h"
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -36,15 +37,50 @@ Transition ProcedureGraph::addTransition(Node src, Node dst) {
 }
 
 ProcedureGraph::ProcedureGraph(const llvm::Function &F) {
+  // Collect blocks that contain an InvokeInst with a resolved callee so we can
+  // skip adding a plain CFG edge for the invoke's normal-dest successor.
+  // The ReturnSummary edge added in the second pass already covers that path;
+  // adding both would create a duplicate path through the normal-dest block.
+  llvm::SmallPtrSet<const llvm::BasicBlock *, 8> invokeBlocks;
+  for (const llvm::BasicBlock &BB : F) {
+    for (const llvm::Instruction &I : BB) {
+      if (const auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(&I)) {
+        if (invoke->getCalledFunction()) {
+          invokeBlocks.insert(&BB);
+          break;
+        }
+      }
+    }
+  }
+
   // Regular intraprocedural CFG edges. For blocks with no successors we add a
   // synthetic outgoing edge to the EXIT sentinel (nullptr).
+  // For invoke blocks with a resolved callee, skip the normal-dest edge here;
+  // it will be represented by a ReturnSummary edge below.
   for (const llvm::BasicBlock &BB : F) {
     auto *src = const_cast<llvm::BasicBlock *>(&BB);
     graph_.addNode(src);
-    for (const llvm::BasicBlock *SuccC : llvm::successors(&BB)) {
-      auto *Succ = const_cast<llvm::BasicBlock *>(SuccC);
-      const auto label = addTransition(src, Succ);
-      graph_.addEdge(src, label, Succ);
+
+    if (invokeBlocks.count(&BB)) {
+      // Find the invoke and its normal/unwind dests.
+      for (const llvm::Instruction &I : BB) {
+        if (const auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(&I)) {
+          if (invoke->getCalledFunction()) {
+            // Only add the unwind edge as a plain CFG edge; the normal-dest
+            // is covered by the ReturnSummary edge added below.
+            auto *unwind = const_cast<llvm::BasicBlock *>(invoke->getUnwindDest());
+            const auto label = addTransition(src, unwind);
+            graph_.addEdge(src, label, unwind);
+            break;
+          }
+        }
+      }
+    } else {
+      for (const llvm::BasicBlock *SuccC : llvm::successors(&BB)) {
+        auto *Succ = const_cast<llvm::BasicBlock *>(SuccC);
+        const auto label = addTransition(src, Succ);
+        graph_.addEdge(src, label, Succ);
+      }
     }
 
     if (llvm::succ_empty(&BB)) {
@@ -66,6 +102,8 @@ ProcedureGraph::ProcedureGraph(const llvm::Function &F) {
   // - The edge goes from the block containing the call to the normal successor.
   // - Indirect calls are ignored here and must be handled conservatively by
   //   the interpreter/domain if interprocedural semantics are needed.
+  // - For InvokeInst, the normal-dest edge is represented solely by this
+  //   ReturnSummary (the plain CFG edge was skipped above).
   for (const llvm::BasicBlock &BB : F) {
     auto *src = const_cast<llvm::BasicBlock *>(&BB);
     for (const llvm::Instruction &I : BB) {

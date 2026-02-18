@@ -131,9 +131,19 @@ sample_points(const std::vector<LinearConstraint> &constraints,
       break;
 
     // Thinning: take multiple steps to reduce correlation between samples.
-    for (int step = 0; step < config.steps_per_sample; ++step) {
-      if (!walk_step(constraints, point, walk, rng))
-        break;
+    // Fix PS-1: count only *successful* steps so that a failed intermediate
+    // step does not silently shorten the thinning chain and increase
+    // correlation between consecutive samples.
+    {
+      int thinned = 0;
+      int thin_attempts = 0;
+      const int max_thin_attempts = config.steps_per_sample * 10;
+      while (thinned < config.steps_per_sample &&
+             thin_attempts < max_thin_attempts) {
+        ++thin_attempts;
+        if (walk_step(constraints, point, walk, rng))
+          ++thinned;
+      }
     }
 
     std::string key = point_key(point);

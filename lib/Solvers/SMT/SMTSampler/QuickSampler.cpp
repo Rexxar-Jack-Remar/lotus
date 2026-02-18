@@ -2,7 +2,7 @@
  * @file QuickSampler.cpp
  * @brief Implementation of quick_sampler - a mutation-based approach for sampling SMT formulas
  *
- * Fixes applied:
+ * Fixes applied (original B-series):
  *  B1  – Added a maximum epoch limit (max_epochs) to prevent the outer while(true)
  *        loop from running forever when the formula is always satisfiable.
  *  B2  – unsat_vars is now cleared at the start of each call to sample() so
@@ -23,6 +23,22 @@
  *  B9  – Replaced z3::optimize with z3::solver for pure SAT queries.  Soft
  *        "preference" constraints are now encoded as hard assumptions pushed
  *        onto the solver stack, which is both correct and much faster.
+ *
+ * Additional fixes (new):
+ *  QS-1 – Removed the dead push/pop block in sample() that hard-pinned the
+ *          seed model but was immediately popped before any solve call, making
+ *          it a no-op.  The seed model is now used directly to seed per-flip
+ *          pushes without the redundant outer push/pop.
+ *  QS-2 – literal() now caches z3::expr objects in an unordered_map keyed by
+ *          variable index, avoiding repeated string construction and Z3 symbol
+ *          interning on every call inside tight loops.
+ *  QS-3 – output() now checks the sample limit before recording a sample so
+ *          that recombination candidates cannot push the count past max_samples.
+ *  QS-4 – Recombination candidates are now verified against the formula via a
+ *          solver check before being written to the output file.
+ *  QS-5 – parse_cnf() deduplicates independent variables globally across all
+ *          "c ind" lines using the same indset, preventing duplicate entries in
+ *          ind[] that would cause model_string() size-mismatch errors.
  */
 
 #include "Solvers/SMT/SMTSampler/SMTSampler.h"
@@ -68,11 +84,11 @@ class quick_sampler {
   int max_samples;
   double max_time;
 
-  // Fix B1: cap the number of outer epochs so the loop always terminates.
+  // B1: cap the number of outer epochs so the loop always terminates.
   static constexpr int kMaxEpochs = 10000;
 
   z3::context c;
-  // Fix B9: use a plain solver instead of an optimizer for pure SAT queries.
+  // B9: use a plain solver instead of an optimizer for pure SAT queries.
   z3::solver sol;
   std::vector<int> ind; ///< Independent variables (support set for sampling)
   int epochs = 0;
@@ -87,6 +103,9 @@ class quick_sampler {
 
   std::ofstream results_file;
 
+  // QS-2: cache for literal() to avoid repeated string construction / Z3 interning.
+  std::unordered_map<int, z3::expr> literal_cache;
+
 public:
   quick_sampler(std::string input, int max_samples, double max_time)
       : input_file(input), max_samples(max_samples), max_time(max_time),
@@ -99,8 +118,8 @@ public:
   /**
    * @brief Main execution loop of the QuickSampler.
    *
-   * Fix B1: the outer loop is bounded by kMaxEpochs.
-   * Fix B9: uses z3::solver with push/pop instead of z3::optimize.
+   * B1: the outer loop is bounded by kMaxEpochs.
+   * B9: uses z3::solver with push/pop instead of z3::optimize.
    */
   void run() {
     clock_gettime(CLOCK_REALTIME, &start_time);
@@ -115,7 +134,7 @@ public:
     }
     results_file << "# format: <mutations>: <bitstring>\n";
 
-    // Fix B1: bounded epoch loop.
+    // B1: bounded epoch loop.
     for (int epoch = 0; epoch < kMaxEpochs && !stop_requested; ++epoch) {
       sol.push();
       // Randomly assign independent variables as hard assumptions to seed search.
@@ -157,8 +176,10 @@ public:
   /**
    * @brief Parses the input CNF file (DIMACS format).
    *
-   * Fix B4: empty clauses (lines with only "0") are skipped.
-   * Fix B5: the literal-reading loop breaks on the 0 terminator.
+   * B4: empty clauses (lines with only "0") are skipped.
+   * B5: the literal-reading loop breaks on the 0 terminator.
+   * QS-5: deduplication of independent variables is global across all
+   *        "c ind" lines — indset is declared once outside the loop.
    */
   bool parse_cnf() {
     z3::expr_vector exp(c);
@@ -167,6 +188,8 @@ public:
       log_error("Unable to open input file");
       return false;
     }
+    // QS-5: indset is declared once so duplicates across multiple "c ind"
+    // lines are caught correctly.
     std::unordered_set<int> indset;
     bool has_ind = false;
     int max_var = 0;
@@ -182,9 +205,9 @@ public:
         int v;
         while (iss >> v) {
           if (v == 0)
-            break; // Fix B5: stop at terminator
-          if (indset.find(v) == indset.end()) {
-            indset.insert(v);
+            break; // B5: stop at terminator
+          // QS-5: indset persists across lines, so duplicates are skipped.
+          if (indset.insert(v).second) {
             ind.push_back(v);
             has_ind = true;
           }
@@ -194,7 +217,7 @@ public:
         int v;
         while (iss >> v) {
           if (v == 0)
-            break; // Fix B5: stop at DIMACS clause terminator
+            break; // B5: stop at DIMACS clause terminator
           if (v > 0)
             clause.push_back(literal(v));
           else
@@ -205,7 +228,7 @@ public:
           if (av > max_var)
             max_var = av;
         }
-        // Fix B4: skip empty clauses (would make the formula trivially UNSAT).
+        // B4: skip empty clauses (would make the formula trivially UNSAT).
         if (clause.size() == 0)
           continue;
         exp.push_back(mk_or(clause));
@@ -229,15 +252,18 @@ public:
   /**
    * @brief Generates samples by mutating a known satisfying model.
    *
-   * Fix B2: unsat_vars is local to each call so variables are not permanently
-   *         blacklisted across epochs.
-   * Fix B3: the flip loop checks stop_requested after every solve() call.
-   * Fix B6: recombination uses majority vote instead of the broken XOR formula.
-   * Fix B7: model_string() handles unconstrained variables gracefully.
-   * Fix B8: print_stats(true) removed from the inner flip loop.
+   * B2: unsat_vars is local to each call so variables are not permanently
+   *     blacklisted across epochs.
+   * B3: the flip loop checks stop_requested after every solve() call.
+   * B6: recombination uses majority vote instead of the broken XOR formula.
+   * B7: model_string() handles unconstrained variables gracefully.
+   * B8: print_stats(true) removed from the inner flip loop.
+   * QS-1: removed the dead push/pop block that hard-pinned the seed model
+   *        but was immediately popped before any solve call.
+   * QS-4: recombination candidates are verified by the solver before output.
    */
   void sample(z3::model &m) {
-    // Fix B2: unsat_vars is local – cleared every epoch.
+    // B2: unsat_vars is local – cleared every epoch.
     std::unordered_set<int> unsat_vars;
 
     std::unordered_set<std::string> initial_mutations;
@@ -249,26 +275,13 @@ public:
     std::cout << m_string << " STARTING\n";
     output(m_string, 0);
 
-    // Fix B9: push hard constraints that prefer the current model's assignment.
-    // These are hard constraints (not soft weights), so the solver is still a
-    // plain SAT solver.  We push them so they can be popped after this epoch.
-    sol.push();
-    for (unsigned i = 0; i < ind.size(); ++i) {
-      int v = ind[i];
-      if (m_string[i] == '1')
-        sol.add(literal(v));
-      else
-        sol.add(!literal(v));
-    }
-    // NOTE: the above hard-pins all variables to the seed model, which means
-    // the solver will only return this exact model.  We pop immediately and
-    // instead use per-flip pushes below (the seed model is already recorded).
-    sol.pop();
+    // QS-1: the dead push/pop that pinned the seed model has been removed.
+    // Per-flip pushes below correctly constrain the solver for each mutation.
 
     std::unordered_map<std::string, int> mutations;
 
     for (unsigned i = 0; i < ind.size(); ++i) {
-      if (stop_requested)  // Fix B3
+      if (stop_requested)  // B3
         break;
       if (unsat_vars.find(i) != unsat_vars.end())
         continue;
@@ -291,10 +304,12 @@ public:
           output(new_string, 1);
           flips += 1;
 
-          // Fix B6: majority-vote recombination.
+          // B6: majority-vote recombination.
           // A bit in the candidate is 1 iff at least 2 of {m_string, prev, new}
           // have it as 1.  This is a well-defined, symmetric operator.
           for (auto &it : mutations) {
+            if (stop_requested)
+              break;
             if (it.second >= 6)
               continue;
             std::string candidate;
@@ -308,8 +323,11 @@ public:
             }
             if (mutations.find(candidate) == mutations.end() &&
                 new_mutations.find(candidate) == new_mutations.end()) {
-              new_mutations[candidate] = it.second + 1;
-              output(candidate, it.second + 1);
+              // QS-4: verify the recombination candidate satisfies the formula.
+              if (verify_candidate(candidate)) {
+                new_mutations[candidate] = it.second + 1;
+                output(candidate, it.second + 1);
+              }
             }
           }
           for (auto &it : new_mutations)
@@ -323,11 +341,46 @@ public:
       sol.pop();
     }
     epochs += 1;
-    // Fix B8: print_stats only once per epoch, not per flip.
+    // B8: print_stats only once per epoch, not per flip.
     print_stats(true);
   }
 
+  /**
+   * @brief Verifies that a candidate bit-string satisfies the formula.
+   *
+   * QS-4: recombination candidates are not guaranteed to be satisfying
+   * assignments, so we check them with the solver before recording them.
+   *
+   * @param candidate Bit-string over ind[] variables.
+   * @return true iff the assignment satisfies the formula.
+   */
+  bool verify_candidate(const std::string &candidate) {
+    if (candidate.size() != ind.size())
+      return false;
+    sol.push();
+    for (unsigned i = 0; i < ind.size(); ++i) {
+      if (candidate[i] == '1')
+        sol.add(literal(ind[i]));
+      else
+        sol.add(!literal(ind[i]));
+    }
+    bool sat = (sol.check() == z3::sat);
+    sol.pop();
+    return sat;
+  }
+
+  /**
+   * @brief Records a sample if the sample limit has not been reached.
+   *
+   * QS-3: the limit check is performed here so that recombination candidates
+   * cannot push the count past max_samples.
+   */
   void output(std::string &s, int nmut) {
+    if (samples >= max_samples) {
+      stop_requested = true;
+      stop_reason = "samples";
+      return;
+    }
     samples += 1;
     results_file << nmut << ": " << s << '\n';
   }
@@ -357,7 +410,7 @@ public:
       return false;
     }
 
-    // Fix B9: use sol.check() (plain solver) instead of opt.check().
+    // B9: use sol.check() (plain solver) instead of opt.check().
     z3::check_result result = sol.check();
     struct timespec end;
     clock_gettime(CLOCK_REALTIME, &end);
@@ -372,7 +425,7 @@ public:
   /**
    * @brief Projects the model onto the independent variables as a bit-string.
    *
-   * Fix B7: if eval() returns a non-Boolean expression (unconstrained variable),
+   * B7: if eval() returns a non-Boolean expression (unconstrained variable),
    * we log a warning and default to '0'.
    */
   std::string model_string(z3::model &model) {
@@ -398,7 +451,19 @@ public:
     return (b->tv_sec - a->tv_sec) + 1.0e-9 * (b->tv_nsec - a->tv_nsec);
   }
 
+  /**
+   * @brief Returns the Z3 Boolean constant for variable index v.
+   *
+   * QS-2: results are cached in literal_cache to avoid repeated string
+   * construction and Z3 symbol interning on every call inside tight loops.
+   */
   z3::expr literal(int v) {
-    return c.constant(c.str_symbol(std::to_string(v).c_str()), c.bool_sort());
+    auto it = literal_cache.find(v);
+    if (it != literal_cache.end())
+      return it->second;
+    z3::expr e = c.constant(c.str_symbol(std::to_string(v).c_str()),
+                            c.bool_sort());
+    literal_cache.emplace(v, e);
+    return e;
   }
 };

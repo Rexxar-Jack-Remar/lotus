@@ -12,6 +12,7 @@
 #include "Verification/Sifa/Interpreter/DagInterpreter.h"
 #include "Verification/Sifa/Interpreter/IcfgInterpreter.h"
 #include "Verification/Sifa/Procedure/ProcedureResources.h"
+#include "Verification/Sifa/Log/SifaLogger.h"
 #include "Verification/Sifa/Statistics/SifaStats.h"
 #include "Verification/Sifa/Storage/MapBasedStorage.h"
 #include "Verification/Sifa/Summarizers/FixpointLoopSummarizer.h"
@@ -24,11 +25,7 @@ using namespace lotus::sifa;
 
 bool lotus::sifa::isReachable(const llvm::Function &F, const llvm::BasicBlock &target,
                               SifaOptions options) {
-  // Current reachability pipeline is self-contained and does not yet consult:
-  // - options.blockTransferPolicy (value-domain only),
-  // - options.aliasAnalysis (value-domain only),
-  // - options.logLevel (logger integration is optional).
-  (void)options;
+  SifaLogger::setLevel(options.logLevel);
 
   SifaStats stats;
   ReachabilityDomain<Transition> domain;
@@ -50,9 +47,7 @@ bool lotus::sifa::isReachableInterprocedural(const llvm::Module &M, const llvm::
                                              const llvm::Function &targetFunc,
                                              const llvm::BasicBlock &targetBlock,
                                              const SifaOptions &options) {
-  // Interprocedural reachability uses IcfgInterpreter and a storage mapping
-  // basic blocks to reachability booleans. Options are currently unused here.
-  (void)options;
+  SifaLogger::setLevel(options.logLevel);
 
   SifaStats stats;
   ReachabilityDomain<Transition> domain;

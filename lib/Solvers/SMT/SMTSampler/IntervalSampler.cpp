@@ -2,7 +2,7 @@
  * @file IntervalSampler.cpp
  * @brief Implementation of interval_sampler - a bounds-based approach for sampling SMT formulas
  *
- * Fixes applied:
+ * Fixes applied (original B-series):
  *  B10 – get_bounds() now uses lower() for the minimization result and upper()
  *        for the maximization result (they were swapped).
  *  B11 – Bounds are stored as int64_t (not int) and extracted via
@@ -20,6 +20,13 @@
  *        that bound-computation time does not consume the sampling budget.
  *  B18 – m_sample_time now accumulates per-iteration durations (finish - iter_start)
  *        rather than cumulative elapsed time from the loop start.
+ *
+ * Additional fixes (new):
+ *  IS-2 – get_bounds() wraps get_numeral_int64() calls in try/catch so that
+ *          unbounded variables (whose bound expression is ±∞) do not crash the
+ *          process; the fallback default is used instead.
+ *  IS-3 – sample_once() computes the range via unsigned arithmetic to avoid
+ *          signed int64_t overflow when lo is negative and hi is INT64_MAX.
  */
 
 #include "Solvers/SMT/SMTSampler/SMTSampler.h"
@@ -92,12 +99,12 @@ struct interval_sampler {
   z3::expr smt_formula;
   z3::expr_vector m_vars;
 
-  // Fix B11: use int64_t for bounds to avoid truncation of wide bit-vectors.
+  // B11: use int64_t for bounds to avoid truncation of wide bit-vectors.
   std::vector<int64_t> lower_bounds;
   std::vector<int64_t> upper_bounds;
   std::vector<bool> should_fix;
 
-  // Fix B13: use a hash set for O(1) uniqueness checking.
+  // B13: use a hash set for O(1) uniqueness checking.
   std::unordered_set<std::string> unique_model_set;
 
   std::mt19937_64 rng;
@@ -112,7 +119,7 @@ struct interval_sampler {
     struct stat info = {};
     if (stat(path.c_str(), &info) == 0) {
       if (info.st_mode & S_IFDIR) {
-        // Fix B15: only collect .smt2 files; fix B16: always call closedir.
+        // B15: only collect .smt2 files; B16: always call closedir.
         DIR *dirp = opendir(input.c_str());
         if (dirp) {
           struct dirent *dp;
@@ -120,12 +127,12 @@ struct interval_sampler {
             std::string tmp(dp->d_name);
             if (tmp == "." || tmp == "..")
               continue;
-            // Fix B15: skip non-.smt2 files.
+            // B15: skip non-.smt2 files.
             if (!ends_with(tmp, ".smt2"))
               continue;
             input_files.push_back(join_path(path, tmp));
           }
-          closedir(dirp); // Fix B16: always reached now.
+          closedir(dirp); // B16: always reached now.
         } else {
           log_warn("Could not open directory: " + input);
         }
@@ -151,11 +158,13 @@ struct interval_sampler {
   /**
    * @brief Computes per-variable bounds using Z3 optimizer.
    *
-   * Fix B10: lower() gives the optimal (minimum) value after minimize();
-   *          upper() gives the optimal (maximum) value after maximize().
-   *          The original code had these swapped.
-   * Fix B11: bounds stored as int64_t; extracted via get_numeral_int64().
-   * Fix B12: fallback upper bound uses uint64_t shift to avoid UB.
+   * B10: lower() gives the optimal (minimum) value after minimize();
+   *      upper() gives the optimal (maximum) value after maximize().
+   *      The original code had these swapped.
+   * B11: bounds stored as int64_t; extracted via get_numeral_int64().
+   * B12: fallback upper bound uses uint64_t shift to avoid UB.
+   * IS-2: get_numeral_int64() calls are wrapped in try/catch so that
+   *        unbounded variables (±∞ expressions) do not crash the process.
    */
   void get_bounds() {
     params p(c);
@@ -180,9 +189,16 @@ struct interval_sampler {
 
     for (unsigned i = 0; i < m_vars.size(); i++) {
       if (min_res == sat) {
-        // Fix B10: use lower() (optimal value) not upper() (bound on optimum).
-        lower_bounds.push_back(
-            opt_sol_min.lower(handlers_min[i]).get_numeral_int64());
+        // B10: use lower() (optimal value) not upper() (bound on optimum).
+        // IS-2: catch exceptions from get_numeral_int64() on ±∞ expressions.
+        try {
+          lower_bounds.push_back(
+              opt_sol_min.lower(handlers_min[i]).get_numeral_int64());
+        } catch (const z3::exception &e) {
+          log_warn(std::string("lower bound extraction failed (unbounded?): ") +
+                   e.msg() + "; defaulting to 0");
+          lower_bounds.push_back(0);
+        }
       } else {
         lower_bounds.push_back(0);
       }
@@ -198,12 +214,26 @@ struct interval_sampler {
 
     for (unsigned i = 0; i < m_vars.size(); i++) {
       if (max_res == sat) {
-        // Fix B10: use upper() (optimal value) not lower() (bound on optimum).
-        upper_bounds.push_back(
-            opt_sol_max.upper(handlers_max[i]).get_numeral_int64());
+        // B10: use upper() (optimal value) not lower() (bound on optimum).
+        // IS-2: catch exceptions from get_numeral_int64() on ±∞ expressions.
+        try {
+          upper_bounds.push_back(
+              opt_sol_max.upper(handlers_max[i]).get_numeral_int64());
+        } catch (const z3::exception &e) {
+          log_warn(std::string("upper bound extraction failed (unbounded?): ") +
+                   e.msg() + "; using bit-width default");
+          unsigned sz = m_vars[i].get_sort().bv_size();
+          // B12: use uint64_t shift to avoid UB for sz >= 32.
+          int64_t max_val;
+          if (sz >= 64)
+            max_val = std::numeric_limits<int64_t>::max();
+          else
+            max_val = static_cast<int64_t>((1ULL << sz) - 1ULL);
+          upper_bounds.push_back(max_val);
+        }
       } else {
         unsigned sz = m_vars[i].get_sort().bv_size();
-        // Fix B12: use uint64_t shift to avoid UB for sz >= 32.
+        // B12: use uint64_t shift to avoid UB for sz >= 32.
         int64_t max_val;
         if (sz >= 64)
           max_val = std::numeric_limits<int64_t>::max();
@@ -217,7 +247,9 @@ struct interval_sampler {
   /**
    * @brief Generates a single sample by choosing values uniformly within bounds.
    *
-   * Fix B11: uses int64_t arithmetic throughout.
+   * B11: uses int64_t arithmetic throughout.
+   * IS-3: range is computed via unsigned arithmetic to avoid signed int64_t
+   *        overflow when lo is negative and hi is close to INT64_MAX.
    */
   std::vector<int64_t> sample_once() {
     m_samples++;
@@ -226,19 +258,23 @@ struct interval_sampler {
     for (unsigned i = 0; i < m_vars.size(); i++) {
       if (should_fix[i]) {
         sample.push_back(lower_bounds[i]);
-      } else {
-        int64_t lo = lower_bounds[i];
-        int64_t hi = upper_bounds[i];
-        if (lo >= hi) {
-          sample.push_back(lo);
-          continue;
-        }
-        // Use uint64_t range to avoid signed overflow.
-        uint64_t range = static_cast<uint64_t>(hi - lo) + 1ULL;
-        std::uniform_int_distribution<uint64_t> dist(0, range - 1);
-        int64_t output = lo + static_cast<int64_t>(dist(rng));
-        sample.push_back(output);
+        continue;
       }
+      int64_t lo = lower_bounds[i];
+      int64_t hi = upper_bounds[i];
+      if (lo >= hi) {
+        sample.push_back(lo);
+        continue;
+      }
+      // IS-3: cast to uint64_t before subtraction to avoid signed overflow
+      // when lo is negative and hi is large (e.g., lo = INT64_MIN, hi = INT64_MAX).
+      uint64_t range = static_cast<uint64_t>(hi) - static_cast<uint64_t>(lo) + 1ULL;
+      // If range wrapped to 0 (lo == INT64_MIN, hi == INT64_MAX), use max range.
+      if (range == 0)
+        range = std::numeric_limits<uint64_t>::max();
+      std::uniform_int_distribution<uint64_t> dist(0, range - 1);
+      int64_t output = lo + static_cast<int64_t>(dist(rng));
+      sample.push_back(output);
     }
     return sample;
   }
@@ -258,8 +294,8 @@ struct interval_sampler {
   /**
    * @brief Verifies if the generated sample satisfies the original SMT formula.
    *
-   * Fix B11: assignments are int64_t.
-   * Fix B13: uniqueness check is O(1) via unordered_set.
+   * B11: assignments are int64_t.
+   * B13: uniqueness check is O(1) via unordered_set.
    */
   bool check_random_model(std::vector<int64_t> &assignments) {
     model rand_model(c);
@@ -275,7 +311,7 @@ struct interval_sampler {
     if (!rand_model.eval(smt_formula, true).is_true())
       return false;
 
-    // Fix B13: O(1) uniqueness check.
+    // B13: O(1) uniqueness check.
     std::string key = sample_key(assignments);
     if (unique_model_set.insert(key).second) {
       m_unique++;
@@ -286,8 +322,8 @@ struct interval_sampler {
   /**
    * @brief Main execution function.
    *
-   * Fix B17: timeout clock reset just before the sampling loop.
-   * Fix B18: m_sample_time accumulates per-iteration durations.
+   * B17: timeout clock reset just before the sampling loop.
+   * B18: m_sample_time accumulates per-iteration durations.
    */
   void run() {
     for (auto &file : input_files) {
@@ -320,7 +356,7 @@ struct interval_sampler {
       }
       log_info("Bounds computed; sampling models");
 
-      // Fix B17: reset the sampling clock *after* bound computation so the
+      // B17: reset the sampling clock *after* bound computation so the
       // full max_time budget is available for actual sampling.
       auto init = std::chrono::high_resolution_clock::now();
 
@@ -343,7 +379,7 @@ struct interval_sampler {
         if (check_random_model(sample))
           m_success++;
 
-        // Fix B18: accumulate per-iteration time, not cumulative elapsed time.
+        // B18: accumulate per-iteration time, not cumulative elapsed time.
         auto iter_end = std::chrono::high_resolution_clock::now();
         m_sample_time +=
             std::chrono::duration<double, std::milli>(iter_end - iter_start).count();
@@ -364,7 +400,7 @@ struct interval_sampler {
     m_sample_time = 0;
     m_samples = 0;
     m_success = 0;
-    m_unique = 0; // Fix B14: reset m_unique alongside unique_model_set.
+    m_unique = 0; // B14: reset m_unique alongside unique_model_set.
     unique_model_set.clear();
   }
 
@@ -376,11 +412,14 @@ struct interval_sampler {
     std::cout << "unique models: " << m_unique << "\n";
     std::cout << "------------------------------------------\n";
 
+    // Append stats to res.log, prefixed with the current input file name so
+    // that results from different files in a directory run are distinguishable.
     std::ofstream of("res.log", std::ofstream::app);
     if (!of.is_open()) {
       log_warn("Failed to open res.log for append");
       return;
     }
+    of << "file: " << input_file << "\n";
     of << "solver time: " << solver_time << "\n";
     of << "sample total time: " << m_sample_time << "\n";
     of << "samples number: " << m_samples << "\n";

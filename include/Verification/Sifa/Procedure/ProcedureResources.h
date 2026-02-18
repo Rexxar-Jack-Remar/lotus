@@ -65,6 +65,8 @@ private:
   BackwardClosedOverlay<Transition> overlayToLois_;
   BackwardClosedOverlay<Transition> overlayToReturn_;
   BackwardClosedOverlay<Transition> overlayToLoisAndReturn_;
+  /// Separate overlay for LOIs + enter-call markers (no EXIT marker).
+  BackwardClosedOverlay<Transition> overlayToLoisAndEnterCalls_;
 };
 
 } // namespace sifa

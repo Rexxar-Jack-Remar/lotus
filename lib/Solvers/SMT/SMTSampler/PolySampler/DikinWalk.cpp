@@ -32,13 +32,18 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
   // Compute diagonal of the log-barrier Hessian: sum_i (a_ij^2 / slack_i^2).
   // Fix B27: use a small epsilon instead of returning false when slack == 0,
   // so that boundary points can still move.
+  // Fix PS-3: if slack is genuinely negative (the integer point is outside the
+  // polytope due to floating-point rounding in dot_ld), return false rather
+  // than silently clamping to kEps and producing an invalid sample.
   constexpr long double kEps = 1.0e-6L;
   std::vector<long double> diag(n, 0.0L);
   for (const auto &c : constraints) {
     long double slack = static_cast<long double>(c.bound) -
                         WalkUtils::dot_ld(c.coeffs, point);
+    if (slack < -kEps)
+      return false; // Fix PS-3: genuinely outside polytope — abort step.
     if (slack < kEps)
-      slack = kEps; // treat boundary / slightly-outside as kEps (was: return false)
+      slack = kEps; // B27: on boundary — use epsilon to avoid division by zero.
     long double inv = 1.0L / (slack * slack);
     for (size_t j = 0; j < n; ++j) {
       long double a = static_cast<long double>(c.coeffs[j]);

@@ -43,16 +43,25 @@ inline bool satisfies_constraints(const std::vector<LinearConstraint> &constrain
  * Returns false (and leaves @p out unchanged) if the value is not finite or
  * lies outside [INT64_MIN, INT64_MAX].  This fixes the undefined-behaviour
  * casts identified as B25/B26.
+ *
+ * Fix PS-4: INT64_MAX = 2^63 - 1 is not exactly representable as long double
+ * (80-bit extended has a 64-bit mantissa, so it rounds up to 2^63).  The old
+ * comparison `v > kMax` therefore passed for values in [2^63-1, 2^63), which
+ * could allow an out-of-range cast.  We now use a safe upper sentinel of
+ * 9.2233720368547758080e18L (= 2^63 exactly as long double) and require
+ * v < sentinel (strict), which correctly excludes all values >= INT64_MAX+1.
  */
 inline bool safe_cast_t(long double v, int64_t &out) {
   if (!std::isfinite(v))
     return false;
-  // Use the exact representable limits for the comparison.
+  // INT64_MIN = -2^63 is exactly representable as long double.
   constexpr long double kMin =
       static_cast<long double>(std::numeric_limits<int64_t>::min());
-  constexpr long double kMax =
-      static_cast<long double>(std::numeric_limits<int64_t>::max());
-  if (v < kMin || v > kMax)
+  // Fix PS-4: use 2^63 (the next representable value above INT64_MAX) as the
+  // exclusive upper sentinel.  Any v >= kMaxSentinel cannot be stored in
+  // int64_t without overflow.
+  constexpr long double kMaxSentinel = 9.2233720368547758080e18L; // 2^63
+  if (v < kMin || v >= kMaxSentinel)
     return false;
   out = static_cast<int64_t>(v);
   return true;

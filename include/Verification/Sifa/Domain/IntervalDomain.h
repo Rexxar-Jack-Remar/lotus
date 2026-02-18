@@ -88,22 +88,40 @@ struct Interval {
   Interval add(const Interval &rhs) const {
     if (isBottom() || rhs.isBottom()) return bottom();
     Interval r;
-    r.lo = (lo && rhs.lo) ? llvm::Optional<int64_t>(*lo + *rhs.lo) : llvm::None;
-    r.hi = (hi && rhs.hi) ? llvm::Optional<int64_t>(*hi + *rhs.hi) : llvm::None;
+    if (lo && rhs.lo) {
+      int64_t sum;
+      r.lo = __builtin_add_overflow(*lo, *rhs.lo, &sum) ? llvm::None : llvm::Optional<int64_t>(sum);
+    }
+    if (hi && rhs.hi) {
+      int64_t sum;
+      r.hi = __builtin_add_overflow(*hi, *rhs.hi, &sum) ? llvm::None : llvm::Optional<int64_t>(sum);
+    }
     return r;
   }
   Interval subtract(const Interval &rhs) const {
     if (isBottom() || rhs.isBottom()) return bottom();
     Interval r;
-    r.lo = (lo && rhs.hi) ? llvm::Optional<int64_t>(*lo - *rhs.hi) : llvm::None;
-    r.hi = (hi && rhs.lo) ? llvm::Optional<int64_t>(*hi - *rhs.lo) : llvm::None;
+    if (lo && rhs.hi) {
+      int64_t diff;
+      r.lo = __builtin_sub_overflow(*lo, *rhs.hi, &diff) ? llvm::None : llvm::Optional<int64_t>(diff);
+    }
+    if (hi && rhs.lo) {
+      int64_t diff;
+      r.hi = __builtin_sub_overflow(*hi, *rhs.lo, &diff) ? llvm::None : llvm::Optional<int64_t>(diff);
+    }
     return r;
   }
   /// Ultimate-aligned: [a,b]*[c,d] = [min(ac,ad,bc,bd), max(ac,ad,bc,bd)].
+  /// Uses overflow-safe multiplication; returns top on any overflow.
   Interval multiply(const Interval &rhs) const {
     if (isBottom() || rhs.isBottom()) return bottom();
     if (!lo || !hi || !rhs.lo || !rhs.hi) return top();
-    int64_t v00 = *lo * *rhs.lo, v01 = *lo * *rhs.hi, v10 = *hi * *rhs.lo, v11 = *hi * *rhs.hi;
+    int64_t v00, v01, v10, v11;
+    if (__builtin_mul_overflow(*lo, *rhs.lo, &v00) ||
+        __builtin_mul_overflow(*lo, *rhs.hi, &v01) ||
+        __builtin_mul_overflow(*hi, *rhs.lo, &v10) ||
+        __builtin_mul_overflow(*hi, *rhs.hi, &v11))
+      return top();
     return {std::min({v00, v01, v10, v11}), std::max({v00, v01, v10, v11}), false};
   }
   /// Ultimate: divide; containsZero(rhs) => top.

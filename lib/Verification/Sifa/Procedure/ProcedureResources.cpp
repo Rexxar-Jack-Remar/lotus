@@ -79,6 +79,16 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
   for (auto *m : enterCallMarkers) {
     overlayToLoisAndReturn_.addExclusive(m);
   }
+
+  // overlayToLoisAndEnterCalls_: LOI markers (inclusive) + enter-call markers
+  // (exclusive). Does NOT include the EXIT marker — the interpreter stops at
+  // call sites rather than propagating through to return.
+  for (auto *m : loiMarkers) {
+    overlayToLoisAndEnterCalls_.addInclusive(m);
+  }
+  for (auto *m : enterCallMarkers) {
+    overlayToLoisAndEnterCalls_.addExclusive(m);
+  }
 }
 
 const RegexDag<Transition> &ProcedureResources::getRegexDag() const { return regexDag_; }
@@ -92,5 +102,5 @@ const BackwardClosedOverlay<Transition> &ProcedureResources::getDagOverlayPathTo
   return overlayToLoisAndReturn_;
 }
 const BackwardClosedOverlay<Transition> &ProcedureResources::getDagOverlayPathToLoisAndEnterCalls() const {
-  return overlayToLoisAndReturn_;
+  return overlayToLoisAndEnterCalls_;
 }

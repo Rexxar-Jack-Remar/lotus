@@ -2,6 +2,8 @@
 
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instructions.h"
 
 #include <queue>
 #include <unordered_set>
@@ -79,6 +81,24 @@ ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
     if (llvm::succ_empty(&BB) && reachable.count(exitNode)) {
       // Preserve exit edges for return blocks if EXIT is in the restricted slice.
       pg.addEdge(src, exitNode);
+    }
+    // Also add ReturnSummary edges for direct calls in this block.
+    // Without these, interprocedural call semantics are silently dropped in
+    // the restricted slice, making the analysis unsound for programs with calls.
+    for (const llvm::Instruction &I : BB) {
+      auto *call = llvm::dyn_cast<llvm::CallBase>(&I);
+      if (!call) continue;
+      llvm::Function *callee = call->getCalledFunction();
+      if (!callee) continue;
+      llvm::BasicBlock *normalSucc = nullptr;
+      if (auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(call)) {
+        normalSucc = const_cast<llvm::BasicBlock *>(invoke->getNormalDest());
+      } else {
+        normalSucc = const_cast<llvm::BasicBlock *>(BB.getSingleSuccessor());
+      }
+      if (normalSucc && reachable.count(normalSucc)) {
+        pg.addReturnSummaryEdge(src, normalSucc, callee);
+      }
     }
   }
 

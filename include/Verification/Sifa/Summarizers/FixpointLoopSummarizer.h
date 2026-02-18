@@ -71,20 +71,25 @@ public:
   }
 
 private:
-  using CacheEntry = std::tuple<const void *, State, State>;
-  std::vector<CacheEntry> cache_;
+  // Per-inner-regex cache: map from inner regex pointer to list of (input, result) pairs.
+  // Using an unordered_map keyed by the inner regex pointer avoids scanning all entries
+  // for every lookup; the per-key list is still scanned linearly but is typically tiny
+  // (one entry per distinct input state for that loop body).
+  std::unordered_map<const void *, std::vector<std::pair<State, State>>> cache_;
 
   bool lookupCache(const void *innerKey, const State &input, State &out) const {
-    for (const auto &e : cache_) {
-      if (std::get<0>(e) == innerKey && domain_.equal(std::get<1>(e), input)) {
-        out = std::get<2>(e);
+    auto it = cache_.find(innerKey);
+    if (it == cache_.end()) return false;
+    for (const auto &e : it->second) {
+      if (domain_.equal(e.first, input)) {
+        out = e.second;
         return true;
       }
     }
     return false;
   }
   void putCache(const void *innerKey, const State &input, const State &result) {
-    cache_.emplace_back(innerKey, input, result);
+    cache_[innerKey].emplace_back(input, result);
   }
 
   State summarizeInternal(const RegexRef &inner, const State &input) {

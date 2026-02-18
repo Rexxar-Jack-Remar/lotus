@@ -84,6 +84,9 @@ template <typename StateT>
 StateT analyzeTo(const llvm::Function &F, const llvm::BasicBlock &target, const StateT &initial,
                  const AbstractDomain<Transition, StateT> &domain,
                  SifaOptions options = {}) {
+  // Apply log level from options so callers don't need to configure the logger separately.
+  SifaLogger::setLevel(options.logLevel);
+
   const ProcedureGraph pg(F);
   auto *entry = const_cast<llvm::BasicBlock *>(&F.getEntryBlock());
   auto *tgt = const_cast<llvm::BasicBlock *>(&target);

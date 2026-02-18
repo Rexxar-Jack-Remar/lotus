@@ -128,9 +128,17 @@ public:
   void print(llvm::raw_ostream &out) const;
 
   /// True if strong closure has a negative self-loop.
+  /// The strong closure is computed lazily and cached to avoid O(n³) recomputation
+  /// on every isBottom() call in the hot path of the DAG interpreter.
   bool hasNegativeSelfLoop() const {
-    return matrix_.strongClosure().hasNegativeSelfLoop();
+    if (!closureCache_) {
+      closureCache_ = matrix_.strongClosure();
+    }
+    return closureCache_->hasNegativeSelfLoop();
   }
+
+  /// Invalidate the cached strong closure (call after mutating matrix_).
+  void invalidateClosureCache() { closureCache_ = llvm::None; }
 
 private:
   static OctagonMatrix expandAndRearrange(const OctagonMatrix &m,
@@ -153,6 +161,8 @@ private:
   std::unordered_map<const llvm::Value *, std::size_t> varToIndex_;
   OctagonMatrix matrix_;
   std::unordered_map<const llvm::Value *, Interval> memory_;
+  /// Lazily computed strong closure cache. Mutable so hasNegativeSelfLoop() is const.
+  mutable llvm::Optional<OctagonMatrix> closureCache_;
 };
 
 /// Octagon domain implementing AbstractDomain<Transition, OctagonState>.
@@ -181,8 +191,38 @@ public:
   bool leq(const OctagonState &a, const OctagonState &b) const override {
     if (a.isBottom()) return true;
     if (b.isBottom()) return false;
-    OctagonState j = a.join(b);
-    return j.matrix().dim() == b.matrix().dim();
+    // a ⊑ b iff every constraint in a is implied by b, i.e. for all (i,j):
+    // b.matrix[i][j] >= a.matrix[i][j] (looser or equal bound).
+    // We compare after strong closure so both are in canonical form.
+    // Variables must be aligned: if a has a variable not in b, we cannot
+    // determine containment — conservatively return false.
+    for (const auto &kv : a.varToIndex()) {
+      if (!b.varToIndex().count(kv.first)) return false;
+    }
+    const OctagonMatrix aClosed = a.matrix().strongClosure();
+    const OctagonMatrix bClosed = b.matrix().strongClosure();
+    // For each pair of indices in a, check that b's bound is >= a's bound.
+    for (const auto &kvA : a.varToIndex()) {
+      auto itB = b.varToIndex().find(kvA.first);
+      if (itB == b.varToIndex().end()) return false;
+      std::size_t iA = kvA.second, iB = itB->second;
+      for (const auto &kvA2 : a.varToIndex()) {
+        auto itB2 = b.varToIndex().find(kvA2.first);
+        if (itB2 == b.varToIndex().end()) return false;
+        std::size_t jA = kvA2.second, jB = itB2->second;
+        for (int si = 0; si < 2; ++si) {
+          for (int sj = 0; sj < 2; ++sj) {
+            auto ca = aClosed.get(2 * iA + si, 2 * jA + sj);
+            auto cb = bClosed.get(2 * iB + si, 2 * jB + sj);
+            // a has a finite constraint that b does not have (b is +inf): a ⊄ b.
+            if (ca && !cb) return false;
+            // Both finite: a's bound must be <= b's bound (b is looser or equal).
+            if (ca && cb && *ca > *cb) return false;
+          }
+        }
+      }
+    }
+    return true;
   }
   OctagonState join(const OctagonState &a, const OctagonState &b) const override {
     return a.join(b);

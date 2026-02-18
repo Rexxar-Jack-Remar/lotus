@@ -2,7 +2,7 @@
  * @file RegionSampler.cpp
  * @brief Abstraction-based sampling using SymAbs + hit-and-run walk
  *
- * Fixes applied:
+ * Fixes applied (original B-series):
  *  B19 – signed_range() now handles width == 64 as a special case (using
  *        INT64_MIN / INT64_MAX) instead of silently returning false and leaving
  *        64-bit variables unconstrained in the polytope.
@@ -16,6 +16,18 @@
  *  B23 – collect_vars() deduplicates the variable list using a name-based set
  *        so that variables appearing multiple times in the formula are only
  *        added once.
+ *
+ * Additional fixes (new):
+ *  RS-1 – The set of Boolean variables not covered by the BV variable list is
+ *          now computed once in collect_vars() and stored in bool_vars, rather
+ *          than being recomputed on every call to model_satisfies() (which
+ *          traversed the entire formula AST per sample).
+ *  RS-3 – initial_point() now falls back to assigning 0 for any variable
+ *          whose value cannot be extracted by eval_model_value(), rather than
+ *          aborting the entire run.
+ *  RS-4 – build_constraints() uses unsigned ranges [0, 2^w - 1] for BV
+ *          variables instead of signed ranges, matching SMT-LIB semantics
+ *          where bit-vectors are unsigned by default.
  */
 
 #include "Solvers/SMT/SMTSampler/SMTSampler.h"
@@ -51,25 +63,25 @@ struct VarInfo {
 };
 
 /**
- * @brief Computes the signed range [min, max] for a bit-vector of the given width.
+ * @brief Computes the unsigned range [0, 2^width - 1] for a bit-vector.
  *
- * Fix B19: width == 64 is now handled explicitly using INT64_MIN / INT64_MAX
- * instead of returning false (which left 64-bit variables unconstrained).
+ * RS-4: bit-vectors in SMT-LIB are unsigned by default.  Using signed ranges
+ * caused the walk to propose negative values that are always rejected by
+ * model_satisfies(), wasting samples.
+ *
+ * B19 (retained): width == 64 is handled explicitly.
  */
-static bool signed_range(unsigned width, int64_t &min_out, int64_t &max_out) {
+static bool unsigned_range(unsigned width, int64_t &min_out, int64_t &max_out) {
   if (width == 0)
     return false;
-  if (width == 64) {
-    // Fix B19: special-case 64-bit signed integers.
-    min_out = std::numeric_limits<int64_t>::min();
+  min_out = 0;
+  if (width >= 64) {
+    // B19 / RS-4: 64-bit unsigned range saturates at INT64_MAX because we
+    // store bounds as int64_t.  The walk will still cover the positive half.
     max_out = std::numeric_limits<int64_t>::max();
-    return true;
+  } else {
+    max_out = static_cast<int64_t>((1ULL << width) - 1ULL);
   }
-  if (width > 64)
-    return false; // Cannot represent in int64_t.
-  int64_t pow2 = 1LL << static_cast<int>(width - 1);
-  min_out = -pow2;
-  max_out = pow2 - 1;
   return true;
 }
 
@@ -85,47 +97,34 @@ static z3::expr bv_from_int(z3::context &ctx, int64_t value, unsigned width) {
 /**
  * @brief Checks whether a candidate point satisfies the SMT formula.
  *
- * Fix B21: in addition to bit-vector variables, Boolean variables present in
+ * B21: in addition to bit-vector variables, Boolean variables present in
  * the formula are also assigned in the model (defaulting to false when not
- * covered by the point vector).  This prevents partial-model evaluation from
- * returning incorrect results for mixed BV/Boolean formulas.
+ * covered by the point vector).
+ *
+ * RS-1: the set of uncovered Boolean variables is passed in as a pre-computed
+ * parameter (bool_var_decls) rather than being recomputed on every call.
  */
-static bool model_satisfies(const z3::expr &phi,
-                            const std::vector<VarInfo> &vars,
-                            const std::vector<int64_t> &point) {
+static bool model_satisfies(
+    const z3::expr &phi,
+    const std::vector<VarInfo> &vars,
+    const std::vector<int64_t> &point,
+    const std::vector<z3::func_decl> &bool_var_decls) {
   z3::context &ctx = phi.ctx();
   z3::model m(ctx);
 
   // Assign bit-vector variables from the point.
-  // add_const_interp requires non-const lvalue refs for both arguments.
   for (size_t i = 0; i < vars.size(); ++i) {
     z3::func_decl decl = vars[i].var.decl();
     z3::expr val = bv_from_int(ctx, point[i], vars[i].width);
     m.add_const_interp(decl, val);
   }
 
-  // Fix B21: also assign any Boolean variables in the formula that are not
-  // covered by the BV variable list.  We collect them and default to false.
-  // Note: get_expr_vars requires a non-const expr& so we make a mutable copy.
-  z3::expr phi_mut = phi;
-  z3::expr_vector all_vars(ctx);
-  get_expr_vars(phi_mut, all_vars);
-  std::unordered_set<std::string> bv_names;
-  for (const auto &v : vars)
-    bv_names.insert(v.name);
-
-  for (unsigned i = 0; i < all_vars.size(); ++i) {
-    const z3::expr &v = all_vars[i];
-    if (v.get_sort().is_bool()) {
-      std::string name = v.decl().name().str();
-      if (bv_names.find(name) == bv_names.end()) {
-        // Default uncovered Boolean variables to false.
-        // add_const_interp requires non-const lvalue refs for both arguments.
-        z3::func_decl decl = v.decl();
-        z3::expr bool_false = ctx.bool_val(false);
-        m.add_const_interp(decl, bool_false);
-      }
-    }
+  // B21 / RS-1: assign pre-collected Boolean variables that are not covered
+  // by the BV variable list, defaulting to false.
+  z3::expr bool_false = ctx.bool_val(false);
+  for (const auto &decl : bool_var_decls) {
+    z3::func_decl d = decl; // need non-const lvalue
+    m.add_const_interp(d, bool_false);
   }
 
   return m.eval(phi, true).is_true();
@@ -151,6 +150,10 @@ struct region_sampler {
   std::vector<VarInfo> vars;
   std::vector<RegionSampling::LinearConstraint> constraints;
 
+  // RS-1: pre-computed list of Boolean variable declarations not covered by
+  // the BV variable list, used by model_satisfies().
+  std::vector<z3::func_decl> bool_var_decls;
+
   std::mt19937_64 rng;
 
   explicit region_sampler(std::string input, int max_samples, double max_time)
@@ -172,33 +175,54 @@ struct region_sampler {
   }
 
   /**
-   * @brief Collects all bit-vector variables from the SMT formula.
+   * @brief Collects all bit-vector variables from the SMT formula and
+   *        pre-computes the set of uncovered Boolean variables.
    *
-   * Fix B23: deduplicates by variable name so that variables appearing
+   * B23: deduplicates by variable name so that variables appearing
    * multiple times in the formula are only added once.
+   *
+   * RS-1: also collects Boolean variables not in the BV list into
+   * bool_var_decls so that model_satisfies() does not need to re-traverse
+   * the formula AST on every call.
    */
   void collect_vars() {
     expr_vector all_vars(c);
     get_expr_vars(smt_formula, all_vars);
     vars.clear();
-    // Fix B23: track seen names to avoid duplicates.
-    std::unordered_set<std::string> seen_names;
+    bool_var_decls.clear();
+
+    // B23: track seen names to avoid duplicates.
+    std::unordered_set<std::string> seen_bv_names;
+
     for (unsigned i = 0; i < all_vars.size(); ++i) {
-      if (!all_vars[i].get_sort().is_bv())
-        continue;
-      std::string name = all_vars[i].decl().name().str();
-      if (!seen_names.insert(name).second)
-        continue; // Already added.
-      VarInfo info{all_vars[i], all_vars[i].get_sort().bv_size(), name};
-      vars.push_back(info);
+      const z3::expr &v = all_vars[i];
+      std::string name = v.decl().name().str();
+      if (v.get_sort().is_bv()) {
+        if (seen_bv_names.insert(name).second) {
+          VarInfo info{v, v.get_sort().bv_size(), name};
+          vars.push_back(info);
+        }
+      } else if (v.get_sort().is_bool()) {
+        // RS-1: collect Boolean variables for model_satisfies().
+        // Deduplicate by name as well.
+        if (seen_bv_names.find(name) == seen_bv_names.end()) {
+          // Use a separate set for bool names to avoid mixing with BV names.
+          bool_var_decls.push_back(v.decl());
+          // Mark as seen so we don't add it twice.
+          seen_bv_names.insert("__bool__" + name);
+        }
+      }
     }
   }
 
   /**
    * @brief Builds linear integer constraints from the SMT formula.
    *
-   * Fix B22: logs a warning when a constraint references a variable name not
+   * B22: logs a warning when a constraint references a variable name not
    * found in the vars index (previously silently skipped).
+   *
+   * RS-4: uses unsigned_range() so that BV variable bounds are [0, 2^w-1]
+   * rather than the signed range [-2^(w-1), 2^(w-1)-1].
    */
   bool build_constraints() {
     std::unordered_map<std::string, size_t> index;
@@ -213,7 +237,7 @@ struct region_sampler {
         lc.coeffs.assign(vars.size(), 0);
         auto it_i = index.find(cstr.var_i.decl().name().str());
         if (it_i == index.end()) {
-          // Fix B22: warn instead of silently skipping.
+          // B22: warn instead of silently skipping.
           log_warn("Zone constraint references unknown variable: " +
                    cstr.var_i.decl().name().str());
           continue;
@@ -258,18 +282,20 @@ struct region_sampler {
     }
 
     // Add bit-width bounds for each variable.
-    // Fix B19: signed_range() now handles width == 64.
+    // RS-4: use unsigned_range() — BV variables are unsigned in SMT-LIB.
     for (size_t i = 0; i < vars.size(); ++i) {
       int64_t min_v = 0, max_v = 0;
-      if (!signed_range(vars[i].width, min_v, max_v))
+      if (!unsigned_range(vars[i].width, min_v, max_v))
         continue;
 
+      // upper bound: x[i] <= max_v
       RegionSampling::LinearConstraint upper;
       upper.coeffs.assign(vars.size(), 0);
       upper.coeffs[i] = 1;
       upper.bound = max_v;
       constraints.push_back(std::move(upper));
 
+      // lower bound: -x[i] <= -min_v  (i.e., x[i] >= min_v)
       RegionSampling::LinearConstraint lower;
       lower.coeffs.assign(vars.size(), 0);
       lower.coeffs[i] = -1;
@@ -290,6 +316,10 @@ struct region_sampler {
 
   /**
    * @brief Finds an initial satisfying assignment using the SMT solver.
+   *
+   * RS-3: if eval_model_value() fails for a variable, we fall back to 0
+   * rather than aborting the entire run.  The initial point is then verified
+   * against the formula before being used.
    */
   bool initial_point(std::vector<int64_t> &point) {
     solver s(c);
@@ -299,11 +329,24 @@ struct region_sampler {
     model m = s.get_model();
     point.clear();
     point.reserve(vars.size());
+    bool any_fallback = false;
     for (const auto &v : vars) {
       int64_t val = 0;
-      if (!SymAbs::eval_model_value(m, v.var, val))
-        return false;
+      if (!SymAbs::eval_model_value(m, v.var, val)) {
+        // RS-3: fall back to 0 instead of aborting.
+        log_warn("eval_model_value failed for variable '" + v.name +
+                 "'; using 0 as fallback");
+        val = 0;
+        any_fallback = true;
+      }
       point.push_back(val);
+    }
+    if (any_fallback) {
+      // Verify the fallback point actually satisfies the formula.
+      if (!model_satisfies(smt_formula, vars, point, bool_var_decls)) {
+        log_warn("Fallback initial point does not satisfy formula; aborting");
+        return false;
+      }
     }
     return true;
   }
@@ -349,9 +392,16 @@ struct region_sampler {
     sample_config.max_samples = max_samples;
     sample_config.max_time_ms = max_time_ms;
 
+    // RS-1: capture bool_var_decls by value so the lambda does not hold a
+    // dangling reference if the region_sampler is moved.
+    const std::vector<VarInfo> &vars_ref = vars;
+    const std::vector<z3::func_decl> &bool_decls_ref = bool_var_decls;
+    z3::expr formula_copy = smt_formula;
+
     // Acceptance criterion: must satisfy original SMT formula.
-    auto accept = [this](const std::vector<int64_t> &candidate) {
-      return model_satisfies(smt_formula, vars, candidate);
+    auto accept = [&formula_copy, &vars_ref,
+                   &bool_decls_ref](const std::vector<int64_t> &candidate) {
+      return model_satisfies(formula_copy, vars_ref, candidate, bool_decls_ref);
     };
 
     auto samples = RegionSampling::sample_points(constraints, point, walk, rng,

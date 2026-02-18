@@ -36,11 +36,16 @@ bool hit_and_run_step(const std::vector<LinearConstraint> &constraints,
   //    per coordinate, making all-zero directions very likely in high dimensions.
   //    A uniform draw from {-1,0,+1} gives P(0) = 1/3, which is much better,
   //    and the direction is still unbiased (symmetric around zero).
+  // Fix PS-2: non_zero must NOT be reset inside the loop body — doing so
+  // makes the outer condition (!non_zero) always true at loop entry, causing
+  // all 32 attempts to run even when the first attempt succeeded.
+  // The reset is now removed; non_zero is only set to true when a non-zero
+  // coordinate is found, and the loop exits as soon as that happens.
   std::uniform_int_distribution<int> dir_dist(-1, 1);
   std::vector<int64_t> direction(n, 0);
   bool non_zero = false;
   for (int attempt = 0; attempt < 32 && !non_zero; ++attempt) {
-    non_zero = false;
+    // Do NOT reset non_zero here — that was the bug (PS-2).
     for (size_t i = 0; i < n; ++i) {
       int64_t v = static_cast<int64_t>(dir_dist(rng));
       direction[i] = v;

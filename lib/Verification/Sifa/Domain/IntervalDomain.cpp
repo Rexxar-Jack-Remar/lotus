@@ -114,12 +114,13 @@ Interval transferInstruction(const llvm::Instruction &I,
     if (R.containsZero()) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
     if (L.isBottom() || R.isBottom()) return Interval::bottom();
     if (!L.lo || !L.hi || !R.lo || !R.hi) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
-    uint64_t u00 = static_cast<uint64_t>(*L.lo) / static_cast<uint64_t>(*R.lo);
-    uint64_t u01 = static_cast<uint64_t>(*L.lo) / static_cast<uint64_t>(*R.hi);
+    // UDiv treats both operands as unsigned. Negative signed values are invalid
+    // inputs for unsigned division; return top conservatively.
+    if (*L.lo < 0 || *R.lo < 0) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
+    uint64_t u00 = static_cast<uint64_t>(*L.lo) / static_cast<uint64_t>(*R.hi);
     uint64_t u10 = static_cast<uint64_t>(*L.hi) / static_cast<uint64_t>(*R.lo);
-    uint64_t u11 = static_cast<uint64_t>(*L.hi) / static_cast<uint64_t>(*R.hi);
-    int64_t lo = static_cast<int64_t>(std::min({u00, u01, u10, u11}));
-    int64_t hi = static_cast<int64_t>(std::max({u00, u01, u10, u11}));
+    int64_t lo = static_cast<int64_t>(u00);
+    int64_t hi = static_cast<int64_t>(u10);
     return restrictToUnsigned(Interval{lo, hi, false}, getBitWidth(&I));
   }
   case llvm::Instruction::SRem: {
@@ -143,29 +144,45 @@ Interval transferInstruction(const llvm::Instruction &I,
     auto R = getInterval(state, I.getOperand(1));
     if (L.isBottom() || R.isBottom()) return Interval::bottom();
     if (!L.lo || !L.hi || !R.lo || !R.hi) return restrictToSigned(Interval::top(), getBitWidth(&I));
-    if (*R.hi < 0 || *R.lo > 63) return restrictToSigned(Interval::top(), getBitWidth(&I));
-    int64_t shAmtLo = *R.lo, shAmtHi = std::min(*R.hi, int64_t{63});
-    int64_t v00 = *L.lo << shAmtLo, v01 = *L.lo << shAmtHi;
-    int64_t v10 = *L.hi << shAmtLo, v11 = *L.hi << shAmtHi;
+    // Shift amount must be in [0, 63]; negative or out-of-range => top.
+    if (*R.lo < 0 || *R.hi > 63) return restrictToSigned(Interval::top(), getBitWidth(&I));
+    // Use unsigned arithmetic to avoid signed-shift UB.
+    unsigned w = getBitWidth(&I);
+    int64_t shAmtLo = *R.lo, shAmtHi = *R.hi;
+    // Compute all four corner products using unsigned shift, then re-interpret.
+    auto ushl = [&](int64_t val, int64_t amt) -> int64_t {
+      return static_cast<int64_t>(static_cast<uint64_t>(val) << static_cast<unsigned>(amt));
+    };
+    int64_t v00 = ushl(*L.lo, shAmtLo), v01 = ushl(*L.lo, shAmtHi);
+    int64_t v10 = ushl(*L.hi, shAmtLo), v11 = ushl(*L.hi, shAmtHi);
     return restrictToSigned(
-        Interval{std::min({v00, v01, v10, v11}), std::max({v00, v01, v10, v11}), false},
-        getBitWidth(&I));
+        Interval{std::min({v00, v01, v10, v11}), std::max({v00, v01, v10, v11}), false}, w);
   }
   case llvm::Instruction::LShr: {
     auto L = getInterval(state, I.getOperand(0));
     auto R = getInterval(state, I.getOperand(1));
     if (L.isBottom() || R.isBottom()) return Interval::bottom();
     if (!L.lo || !L.hi || !R.lo || !R.hi) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
-    if (*R.hi < 0 || *R.lo > 63) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
+    // Shift amount must be in [0, 63].
+    if (*R.lo < 0 || *R.hi > 63) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
     unsigned w = getBitWidth(&I);
-    uint64_t mask = (w >= 64) ? UINT64_MAX : ((1ULL << w) - 1);
-    uint64_t uLo = static_cast<uint64_t>(*L.lo) & mask;
-    uint64_t uHi = static_cast<uint64_t>(*L.hi) & mask;
-    int64_t shAmt = std::min(*R.lo, int64_t{63});
-    uint64_t rLo = uLo >> shAmt, rHi = uHi >> shAmt;
+    // LShr treats the value as unsigned. If the interval straddles the sign
+    // boundary (lo < 0 <= hi), the unsigned representation is non-contiguous
+    // ([lo_unsigned, UINT_MAX] ∪ [0, hi_unsigned]), so we cannot represent the
+    // result precisely. Return top conservatively.
+    if (*L.lo < 0) return restrictToUnsigned(Interval::top(), w);
+    // Both bounds are non-negative: safe to treat as unsigned.
+    uint64_t uLo = static_cast<uint64_t>(*L.lo);
+    uint64_t uHi = static_cast<uint64_t>(*L.hi);
+    // Minimum shift gives maximum result; maximum shift gives minimum result.
+    uint64_t shAmtLo = static_cast<uint64_t>(*R.lo);
+    uint64_t shAmtHi = static_cast<uint64_t>(*R.hi);
+    uint64_t rLo = uHi >> shAmtHi; // smallest: largest value >> largest shift
+    uint64_t rHi = uLo >> shAmtLo; // largest: smallest value >> smallest shift
+    // Correct ordering: uLo <= uHi and shAmtLo <= shAmtHi, so rLo <= rHi.
+    if (rLo > rHi) std::swap(rLo, rHi);
     return restrictToUnsigned(
-        Interval{static_cast<int64_t>(std::min(rLo, rHi)), static_cast<int64_t>(std::max(rLo, rHi)), false},
-        w);
+        Interval{static_cast<int64_t>(rLo), static_cast<int64_t>(rHi), false}, w);
   }
   case llvm::Instruction::AShr: {
     auto L = getInterval(state, I.getOperand(0));
