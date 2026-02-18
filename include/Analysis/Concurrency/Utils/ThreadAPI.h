@@ -30,7 +30,8 @@
 #include <string>
 #include <unordered_map>
 
-using namespace llvm;
+// Do NOT use `using namespace llvm` in headers — it pollutes every TU that
+// includes this file.  All LLVM types are qualified explicitly below.
 
 typedef unsigned u32_t;
 
@@ -314,7 +315,7 @@ private:
 
 public:
   /// Get the function type if it is a threadAPI function
-  TD_TYPE getType(const Function *F) const;
+  TD_TYPE getType(const llvm::Function *F) const;
   
   /// Get the concurrency configuration
   const concurrency::ConcurrencyConfig& getConfig() const { return m_config; }
@@ -322,12 +323,18 @@ public:
   /// Set the concurrency configuration
   void setConfig(const concurrency::ConcurrencyConfig& config) { m_config = config; }
   
-  /// Return a static reference
+  /// Return a static reference to the singleton instance.
   static ThreadAPI *getThreadAPI() {
-    if (tdAPI == NULL) {
+    if (tdAPI == nullptr) {
       tdAPI = new ThreadAPI();
     }
     return tdAPI;
+  }
+
+  /// Reset the singleton (useful for testing or re-initialization).
+  static void resetThreadAPI() {
+    delete tdAPI;
+    tdAPI = nullptr;
   }
 
   /// Return the callee/callsite/func
@@ -341,94 +348,94 @@ public:
 
   /// Return true if this call create a new thread
   //@{
-  inline bool isTDFork(const Instruction *inst) const {
+  inline bool isTDFork(const llvm::Instruction *inst) const {
     return getType(getCallee(inst)) == TD_FORK;
   }
-  inline bool isTDFork(const CallBase *cb) const {
+  inline bool isTDFork(const llvm::CallBase *cb) const {
     return getType(getCallee(cb)) == TD_FORK;
   }
   //@}
 
   /// Return true if this call proceeds a hare_parallel_for
   //@{
-  inline bool isHareParFor(const Instruction *inst) const {
+  inline bool isHareParFor(const llvm::Instruction *inst) const {
     return getType(getCallee(inst)) == HARE_PAR_FOR;
   }
-  inline bool isHareParFor(const CallBase *cb) const {
-    return isHareParFor(dyn_cast<Instruction>(cb));
+  inline bool isHareParFor(const llvm::CallBase *cb) const {
+    return isHareParFor(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
   /// Return arguments/attributes of pthread_create / hare_parallel_for
   //@{
   /// Return the thread handle argument (configurable via thread.spec; default 0)
-  inline const Value *getForkedThread(const Instruction *inst) const {
+  inline const llvm::Value *getForkedThread(const llvm::Instruction *inst) const {
     assert(isTDFork(inst) && "not a thread fork function!");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     unsigned idx = getForkArgIndices(getCallee(inst)).thread_arg;
     return cb->getArgOperand(idx);
   }
-  inline const Value *getForkedThread(const CallBase *cb) const {
-    return getForkedThread(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getForkedThread(const llvm::CallBase *cb) const {
+    return getForkedThread(llvm::dyn_cast<llvm::Instruction>(cb));
   }
 
   /// Return the start-routine argument (configurable; default 2)
-  inline const Value *getForkedFun(const Instruction *inst) const {
+  inline const llvm::Value *getForkedFun(const llvm::Instruction *inst) const {
     assert(isTDFork(inst) && "not a thread fork function!");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     unsigned idx = getForkArgIndices(getCallee(inst)).start_routine_arg;
     return cb->getArgOperand(idx)->stripPointerCasts();
   }
-  inline const Value *getForkedFun(const CallBase *cb) const {
-    return getForkedFun(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getForkedFun(const llvm::CallBase *cb) const {
+    return getForkedFun(llvm::dyn_cast<llvm::Instruction>(cb));
   }
 
   /// Return the user-argument passed to the start routine (configurable; default 3)
-  inline const Value *getActualParmAtForkSite(const Instruction *inst) const {
+  inline const llvm::Value *getActualParmAtForkSite(const llvm::Instruction *inst) const {
     assert(isTDFork(inst) && "not a thread fork function!");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     unsigned idx = getForkArgIndices(getCallee(inst)).arg_arg;
     return cb->getArgOperand(idx);
   }
-  inline const Value *getActualParmAtForkSite(const CallBase *cb) const {
-    return getActualParmAtForkSite(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getActualParmAtForkSite(const llvm::CallBase *cb) const {
+    return getActualParmAtForkSite(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
   /// Get the task function (i.e., the 5th parameter) of the hare_parallel_for
   /// call
   //@{
-  inline const Value *
-  getTaskFuncAtHareParForSite(const Instruction *inst) const {
+  inline const llvm::Value *
+  getTaskFuncAtHareParForSite(const llvm::Instruction *inst) const {
     assert(isHareParFor(inst) && "not a hare_parallel_for function!");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     return cb->getArgOperand(4)->stripPointerCasts();
   }
 
-  inline const Value *getTaskFuncAtHareParForSite(const CallBase *cb) const {
-    return getTaskFuncAtHareParForSite(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getTaskFuncAtHareParForSite(const llvm::CallBase *cb) const {
+    return getTaskFuncAtHareParForSite(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
   /// Get the task data (i.e., the 6th parameter) of the hare_parallel_for call
   //@{
-  inline const Value *
-  getTaskDataAtHareParForSite(const Instruction *inst) const {
+  inline const llvm::Value *
+  getTaskDataAtHareParForSite(const llvm::Instruction *inst) const {
     assert(isHareParFor(inst) && "not a hare_parallel_for function!");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     return cb->getArgOperand(5);
   }
-  inline const Value *getTaskDataAtHareParForSite(const CallBase *cb) const {
-    return getTaskDataAtHareParForSite(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getTaskDataAtHareParForSite(const llvm::CallBase *cb) const {
+    return getTaskDataAtHareParForSite(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
   /// Return true if this call wait for a worker thread
   //@{
-  inline bool isTDJoin(const Instruction *inst) const {
+  inline bool isTDJoin(const llvm::Instruction *inst) const {
     return getType(getCallee(inst)) == TD_JOIN;
   }
-  inline bool isTDJoin(const CallBase *cb) const {
+  inline bool isTDJoin(const llvm::CallBase *cb) const {
     return getType(getCallee(cb)) == TD_JOIN;
   }
   //@}
@@ -436,50 +443,51 @@ public:
   /// Return arguments/attributes of pthread_join
   //@{
   /// Return the thread handle argument (configurable via thread.spec; default 0)
-  inline const Value *getJoinedThread(const Instruction *inst) const {
+  inline const llvm::Value *getJoinedThread(const llvm::Instruction *inst) const {
     assert(isTDJoin(inst) && "not a thread join function!");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     unsigned idx = getJoinArgIndices(getCallee(inst)).thread_arg;
-    Value *join = cb->getArgOperand(idx);
-    if (llvm::isa<LoadInst>(join))
-      return llvm::cast<LoadInst>(join)->getPointerOperand();
-    Value *stripped = join->stripPointerCasts();
-    if (llvm::isa<Argument>(stripped) || llvm::isa<AllocaInst>(stripped))
+    llvm::Value *join = cb->getArgOperand(idx);
+    if (llvm::isa<llvm::LoadInst>(join))
+      return llvm::cast<llvm::LoadInst>(join)->getPointerOperand();
+    llvm::Value *stripped = join->stripPointerCasts();
+    if (llvm::isa<llvm::Argument>(stripped) || llvm::isa<llvm::AllocaInst>(stripped))
       return stripped;
     if (stripped->getType()->isPointerTy())
       return stripped;
-    assert(false && "the value of the first argument at join is unexpected");
-    return NULL;
+    // Return nullptr gracefully for phi/select/other patterns rather than
+    // crashing — callers must handle nullptr (unknown join target).
+    return nullptr;
   }
-  inline const Value *getJoinedThread(const CallBase *cb) const {
-    return getJoinedThread(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getJoinedThread(const llvm::CallBase *cb) const {
+    return getJoinedThread(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   /// Return the return-value argument (configurable; default 1)
-  inline const Value *getRetParmAtJoinedSite(const Instruction *inst) const {
+  inline const llvm::Value *getRetParmAtJoinedSite(const llvm::Instruction *inst) const {
     assert(isTDJoin(inst) && "not a thread join function!");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     unsigned idx = getJoinArgIndices(getCallee(inst)).ret_arg;
     return cb->getArgOperand(idx);
   }
-  inline const Value *getRetParmAtJoinedSite(const CallBase *cb) const {
-    return getRetParmAtJoinedSite(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getRetParmAtJoinedSite(const llvm::CallBase *cb) const {
+    return getRetParmAtJoinedSite(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
   /// Return true if this call exits/terminate a thread
   //@{
-  inline bool isTDExit(const Instruction *inst) const {
+  inline bool isTDExit(const llvm::Instruction *inst) const {
     return getType(getCallee(inst)) == TD_EXIT;
   }
 
-  inline bool isTDExit(const CallBase *cb) const {
+  inline bool isTDExit(const llvm::CallBase *cb) const {
     return getType(getCallee(cb)) == TD_EXIT;
   }
   //@}
 
   /// Return true if this call acquire a lock (mutex or rwlock read/write)
   //@{
-  inline bool isTDAcquire(const Instruction *inst) const {
+  inline bool isTDAcquire(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_RDLOCK ||
            t == TD_RWLOCK_WRLOCK ||
@@ -491,7 +499,7 @@ public:
            t == TD_KERNEL_DOWN_WRITE;
   }
 
-  inline bool isTDAcquire(const CallBase *cb) const {
+  inline bool isTDAcquire(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_RDLOCK ||
            t == TD_RWLOCK_WRLOCK ||
@@ -506,7 +514,7 @@ public:
 
   /// Return true if this call release a lock
   //@{
-  inline bool isTDRelease(const Instruction *inst) const {
+  inline bool isTDRelease(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_RELEASE ||
            // Linux kernel locks
@@ -516,7 +524,7 @@ public:
            t == TD_KERNEL_UP_WRITE;
   }
 
-  inline bool isTDRelease(const CallBase *cb) const {
+  inline bool isTDRelease(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_RELEASE ||
            // Linux kernel locks
@@ -529,13 +537,13 @@ public:
 
   /// Return true if this call is a try-lock (e.g., pthread_mutex_trylock)
   //@{
-  inline bool isTryLock(const Instruction *inst) const {
+  inline bool isTryLock(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_TRY_ACQUIRE ||
            // Linux kernel try-locks
            t == TD_KERNEL_SPIN_TRYLOCK || t == TD_KERNEL_MUTEX_TRYLOCK;
   }
-  inline bool isTryLock(const CallBase *cb) const {
+  inline bool isTryLock(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_TRY_ACQUIRE ||
            // Linux kernel try-locks
@@ -545,13 +553,13 @@ public:
 
   /// Return true if this call acquires a read lock (rwlock_rdlock)
   //@{
-  inline bool isReadLockAcquire(const Instruction *inst) const {
+  inline bool isReadLockAcquire(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_RWLOCK_RDLOCK ||
            // Linux kernel read locks
            t == TD_KERNEL_READ_LOCK || t == TD_KERNEL_DOWN_READ;
   }
-  inline bool isReadLockAcquire(const CallBase *cb) const {
+  inline bool isReadLockAcquire(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_RWLOCK_RDLOCK ||
            // Linux kernel read locks
@@ -561,13 +569,13 @@ public:
 
   /// Return true if this call acquires a write lock (rwlock_wrlock)
   //@{
-  inline bool isWriteLockAcquire(const Instruction *inst) const {
+  inline bool isWriteLockAcquire(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_RWLOCK_WRLOCK ||
            // Linux kernel write locks
            t == TD_KERNEL_WRITE_LOCK || t == TD_KERNEL_DOWN_WRITE;
   }
-  inline bool isWriteLockAcquire(const CallBase *cb) const {
+  inline bool isWriteLockAcquire(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_RWLOCK_WRLOCK ||
            // Linux kernel write locks
@@ -578,27 +586,27 @@ public:
   /// Return lock value
   //@{
   /// First argument of pthread_mutex_lock/pthread_mutex_unlock/pthread_rwlock_*
-  inline const Value *getLockVal(const Instruction *inst) const {
+  inline const llvm::Value *getLockVal(const llvm::Instruction *inst) const {
     assert((isTDAcquire(inst) || isTDRelease(inst)) &&
            "not a lock acquire or release function");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     return cb->getArgOperand(0);
   }
-  inline const Value *getLockVal(const CallBase *cb) const {
-    return getLockVal(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getLockVal(const llvm::CallBase *cb) const {
+    return getLockVal(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
   /// Return true if this call waits for a barrier
   //@{
-  inline bool isTDBarWait(const Instruction *inst) const {
+  inline bool isTDBarWait(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_BAR_WAIT ||
            // Linux kernel barriers (RCU synchronize acts as barrier)
            t == TD_KERNEL_SYNCHRONIZE_RCU;
   }
 
-  inline bool isTDBarWait(const CallBase *cb) const {
+  inline bool isTDBarWait(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_BAR_WAIT ||
            // Linux kernel barriers (RCU synchronize acts as barrier)
@@ -609,26 +617,26 @@ public:
   /// Return barrier value
   //@{
   /// First argument of pthread_barrier_wait
-  inline const Value *getBarrierVal(const Instruction *inst) const {
+  inline const llvm::Value *getBarrierVal(const llvm::Instruction *inst) const {
     assert(isTDBarWait(inst) && "not a barrier wait function");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     return cb->getArgOperand(0);
   }
-  inline const Value *getBarrierVal(const CallBase *cb) const {
-    return getBarrierVal(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getBarrierVal(const llvm::CallBase *cb) const {
+    return getBarrierVal(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
   /// Return true if this call waits on a condition variable
   //@{
-  inline bool isTDCondWait(const Instruction *inst) const {
+  inline bool isTDCondWait(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_COND_WAIT ||
            // Linux kernel completion variables and wait queues
            t == TD_KERNEL_WAIT_FOR_COMPLETION || t == TD_KERNEL_WAIT_EVENT;
   }
 
-  inline bool isTDCondWait(const CallBase *cb) const {
+  inline bool isTDCondWait(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_COND_WAIT ||
            // Linux kernel completion variables and wait queues
@@ -638,14 +646,14 @@ public:
 
   /// Return true if this call signals a condition variable
   //@{
-  inline bool isTDCondSignal(const Instruction *inst) const {
+  inline bool isTDCondSignal(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_COND_SIGNAL ||
            // Linux kernel completion variables and wait queues
            t == TD_KERNEL_COMPLETE || t == TD_KERNEL_WAKE_UP;
   }
 
-  inline bool isTDCondSignal(const CallBase *cb) const {
+  inline bool isTDCondSignal(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_COND_SIGNAL ||
            // Linux kernel completion variables and wait queues
@@ -655,14 +663,14 @@ public:
 
   /// Return true if this call broadcasts a condition variable
   //@{
-  inline bool isTDCondBroadcast(const Instruction *inst) const {
+  inline bool isTDCondBroadcast(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_COND_BROADCAST ||
            // Linux kernel completion variables (complete_all broadcasts)
            t == TD_KERNEL_COMPLETE; // complete_all acts as broadcast
   }
 
-  inline bool isTDCondBroadcast(const CallBase *cb) const {
+  inline bool isTDCondBroadcast(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_COND_BROADCAST ||
            // Linux kernel completion variables (complete_all broadcasts)
@@ -673,33 +681,81 @@ public:
   /// Return condition variable value
   //@{
   /// First argument of pthread_cond_wait/signal/broadcast
-  inline const Value *getCondVal(const Instruction *inst) const {
+  inline const llvm::Value *getCondVal(const llvm::Instruction *inst) const {
     assert((isTDCondWait(inst) || isTDCondSignal(inst) ||
             isTDCondBroadcast(inst)) &&
            "not a condition variable function");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     return cb->getArgOperand(0);
   }
-  inline const Value *getCondVal(const CallBase *cb) const {
-    return getCondVal(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getCondVal(const llvm::CallBase *cb) const {
+    return getCondVal(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
   /// Return mutex value associated with condition wait
   //@{
   /// Second argument of pthread_cond_wait
-  inline const Value *getCondMutex(const Instruction *inst) const {
+  inline const llvm::Value *getCondMutex(const llvm::Instruction *inst) const {
     assert(isTDCondWait(inst) && "not a condition wait function");
-    const CallBase *cb = getLLVMCallSite(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     return cb->getArgOperand(1);
   }
-  inline const Value *getCondMutex(const CallBase *cb) const {
-    return getCondMutex(dyn_cast<Instruction>(cb));
+  inline const llvm::Value *getCondMutex(const llvm::CallBase *cb) const {
+    return getCondMutex(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
-  void performAPIStat(Module *m);
+  void performAPIStat(llvm::Module *m);
   void statInit(llvm::StringMap<u32_t> &tdAPIStatMap);
+
+  // ========================================================================
+  // Convenience group predicates (avoid enumerating all enum values at call sites)
+  // ========================================================================
+
+  /// True for any C++20 barrier/latch/semaphore synchronization operation.
+  inline bool isBarrierOp(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_BAR_WAIT || t == TD_BAR_INIT ||
+           t == TD_LATCH_COUNT_DOWN || t == TD_LATCH_WAIT ||
+           t == TD_LATCH_ARRIVE_WAIT || t == TD_BARRIER_ARRIVE_WAIT ||
+           t == TD_BARRIER_ARRIVE || t == TD_BARRIER_WAIT_CPP20;
+  }
+
+  /// True for any semaphore acquire/release operation.
+  inline bool isSemaphoreOp(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_SEMAPHORE_ACQUIRE || t == TD_SEMAPHORE_RELEASE ||
+           t == TD_SEMAPHORE_TRY_ACQUIRE;
+  }
+
+  /// True for any atomic synchronization operation (future/promise/call_once).
+  inline bool isAtomicSyncOp(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_CALL_ONCE || t == TD_FUTURE_GET || t == TD_FUTURE_WAIT ||
+           t == TD_PROMISE_SET || t == TD_ASYNC;
+  }
+
+  /// True for any MPI collective or barrier (synchronization point).
+  inline bool isMPICollective(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_MPI_BARRIER || t == TD_MPI_BCAST || t == TD_MPI_SCATTER ||
+           t == TD_MPI_GATHER || t == TD_MPI_ALLGATHER ||
+           t == TD_MPI_ALLTOALL || t == TD_MPI_REDUCE ||
+           t == TD_MPI_ALLREDUCE || t == TD_MPI_REDUCE_SCATTER ||
+           t == TD_MPI_SCAN;
+  }
+
+  /// True for any OpenMP task-related operation.
+  inline bool isOMPTaskOp(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_OMP_TASK || t == TD_OMP_TASKWAIT || t == TD_OMP_TASKYIELD ||
+           t == TD_OMP_TASKGROUP_START || t == TD_OMP_TASKGROUP_END ||
+           t == TD_OMP_TASK_WITH_DEPS || t == TD_OMP_TASKLOOP;
+  }
+
+  /// Convert a TD_TYPE to a human-readable string (for diagnostics).
+  static const char *tdTypeToString(TD_TYPE t);
 };
 
 #endif // THREADAPI_H

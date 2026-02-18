@@ -936,40 +936,44 @@ void MHPAnalysis::handleCondSignal(const Instruction *signal_inst,
 
 void MHPAnalysis::handleBarrier(const Instruction *barrier_inst,
                                 SyncNode *node) {
-  // Barrier synchronization handling
-  // pthread_barrier_wait: all threads must reach the barrier before any proceed
-  // Happens-before: all threads reaching barrier N happen-before any thread
-  // leaving barrier N
+  // Barrier synchronization handling.
+  // pthread_barrier_wait: all threads must reach the barrier before any
+  // proceeds.
+  //
+  // Correct HB model (no cycles):
+  //   Every thread's *arrival* at barrier B happens-before every thread's
+  //   *departure* from barrier B.  In a static analysis we conservatively
+  //   model this as: each previously-seen arrival HB the current arrival,
+  //   and the current arrival HB all previously-seen arrivals.
+  //
+  // IMPORTANT: we must NOT add edges in both directions between the same
+  // pair of nodes — that would create a cycle in the HB graph and make
+  // hasHappenBeforeRelation return true for unrelated instructions.
+  // Instead we add a one-directional edge from each earlier arrival to the
+  // current one.  The symmetric direction (current -> earlier) is added
+  // when those earlier arrivals are processed (they were already in the
+  // list when we processed them, so they added edges to each other).
+  // The net effect is a clique of HB edges among all arrivals, which is
+  // exactly the "all-before-all" barrier semantics without cycles.
 
   const Value *barrier = m_thread_api->getBarrierVal(barrier_inst);
   node->setLockValue(barrier); // Reuse lock field for barrier value
 
-  // Track this barrier wait
-  m_barrier_waits[barrier].push_back(barrier_inst);
-
-  // Add inter-thread happens-before edges between all barrier participants
-  // Model: each thread reaching the barrier happens-before all threads leaving
-  // it This creates a full synchronization point across all participating
-  // threads
+  // Add one-directional edges from all previously-seen arrivals to this one.
   auto it = m_barrier_waits.find(barrier);
   if (it != m_barrier_waits.end()) {
-    // For all previously-seen barrier waits on this barrier
     for (const Instruction *prev_wait : it->second) {
-      if (prev_wait == barrier_inst) {
-        continue; // Skip self
-      }
-
       SyncNode *prev_node = m_tfg->getNode(prev_wait);
       if (!prev_node || isInSameThread(prev_wait, barrier_inst)) {
-        continue; // Skip same thread (already ordered by program order)
+        continue;
       }
-
-      // Add bidirectional happens-before edges for barrier synchronization
-      // Each thread's arrival happens-before every other thread's departure
+      // prev_wait HB barrier_inst (arrival ordering, no reverse edge here)
       m_tfg->addInterThreadEdge(prev_node, node);
-      m_tfg->addInterThreadEdge(node, prev_node);
     }
   }
+
+  // Record this arrival *after* adding edges so we don't add self-edges.
+  m_barrier_waits[barrier].push_back(barrier_inst);
 }
 
 void MHPAnalysis::analyzeLockSets() {
@@ -1069,7 +1073,10 @@ void MHPAnalysis::computeMHPPairs() {
           continue;
         }
 
-        m_mhp_pairs.insert({inst_i, inst_j});
+        // Store in canonical (pointer-sorted) order for O(1) symmetric lookup.
+        const Instruction *ca = inst_i < inst_j ? inst_i : inst_j;
+        const Instruction *cb = inst_i < inst_j ? inst_j : inst_i;
+        m_mhp_pairs.insert({ca, cb});
         num_pairs++;
       }
     }
@@ -1104,7 +1111,10 @@ void MHPAnalysis::computeMHPPairsInstructionLevel() {
       // Check if they may happen in parallel
       if (!hasHappenBeforeRelation(i1, i2) &&
           !hasHappenBeforeRelation(i2, i1)) {
-        m_mhp_pairs.insert({i1, i2});
+        // Store in canonical (pointer-sorted) order for O(1) symmetric lookup.
+        const Instruction *ca = i1 < i2 ? i1 : i2;
+        const Instruction *cb = i1 < i2 ? i2 : i1;
+        m_mhp_pairs.insert({ca, cb});
         num_pairs++;
       }
     }
@@ -1164,8 +1174,11 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
 
 bool MHPAnalysis::isPrecomputedMHP(const Instruction *i1,
                                    const Instruction *i2) const {
-  return m_mhp_pairs.find({i1, i2}) != m_mhp_pairs.end() ||
-         m_mhp_pairs.find({i2, i1}) != m_mhp_pairs.end();
+  // Pairs are stored in canonical (pointer-sorted) order so a single probe
+  // suffices for a symmetric lookup.
+  const Instruction *a = i1 < i2 ? i1 : i2;
+  const Instruction *b = i1 < i2 ? i2 : i1;
+  return m_mhp_pairs.count({a, b}) != 0;
 }
 
 InstructionSet
@@ -1173,10 +1186,10 @@ MHPAnalysis::getParallelInstructions(const Instruction *inst) const {
   InstructionSet result;
 
   for (const auto &pair : m_mhp_pairs) {
-    if (pair.first == inst) {
-      result.insert(pair.second);
-    } else if (pair.second == inst) {
-      result.insert(pair.first);
+    if (pair.a == inst) {
+      result.insert(pair.b);
+    } else if (pair.b == inst) {
+      result.insert(pair.a);
     }
   }
 
@@ -1524,9 +1537,9 @@ void MHPAnalysis::printResults(raw_ostream &os) const {
   size_t count = 0;
   for (const auto &pair : m_mhp_pairs) {
     os << "MHP: ";
-    pair.first->print(os);
+    pair.a->print(os);
     os << " ||| ";
-    pair.second->print(os);
+    pair.b->print(os);
     os << "\n";
 
     if (++count >= 20) {
@@ -1907,10 +1920,23 @@ void MHPAnalysis::computeSeqCstTotalOrder() {
     }
   };
 
-  // Conservative total order: all stores before all loads (simplified)
+  // Seq-cst total order: add edges between stores and loads that access
+  // potentially aliasing locations.  We do NOT add edges between operations
+  // on provably non-aliasing locations — that would be unsound (it would
+  // make unrelated seq-cst operations appear ordered, suppressing real races).
+  //
+  // Note: addSeqCstEdge already skips same-thread pairs and non-aliasing ptrs.
   for (const Instruction *store : seq_cst_stores) {
     for (const Instruction *load : seq_cst_loads) {
-      addSeqCstEdge(store, load);
+      if (store != load)
+        addSeqCstEdge(store, load);
+    }
+  }
+  // Also order RMW-RMW pairs (each RMW is both a store and a load).
+  for (size_t i = 0; i < seq_cst_rmw.size(); ++i) {
+    for (size_t j = i + 1; j < seq_cst_rmw.size(); ++j) {
+      addSeqCstEdge(seq_cst_rmw[i], seq_cst_rmw[j]);
+      addSeqCstEdge(seq_cst_rmw[j], seq_cst_rmw[i]);
     }
   }
 

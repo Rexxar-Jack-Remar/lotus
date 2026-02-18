@@ -5,21 +5,23 @@
 
 namespace OpenMPModel {
 
-namespace {
-// return true of funcName equals any name in names
-bool matchesAny(const llvm::StringRef& funcName, const std::vector<llvm::StringRef>& names) {
+// Helper: return true if funcName equals any name in names.
+// Defined as an inline function (not in an anonymous namespace) to avoid
+// ODR violations when this header is included in multiple translation units.
+inline bool matchesAny(const llvm::StringRef& funcName,
+                       const std::vector<llvm::StringRef>& names) {
   for (auto const& name : names) {
     if (funcName.equals(name)) return true;
   }
   return false;
 }
-}  // namespace
 
 inline bool isFork(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_fork_call"); }
 inline bool isFork(const llvm::CallBase* callInst) {
   if (!callInst) return false;
   auto const func = callInst->getCalledFunction();
-  if (!func->hasName()) return false;
+  // Guard against null callee (indirect call) and unnamed functions.
+  if (!func || !func->hasName()) return false;
   return isFork(func->getName());
 }
 

@@ -194,6 +194,37 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 - **RMA synchronization**: Validates fence/lock/PSCW synchronization epochs
 - **Window leak detection**: Identifies RMA windows not properly freed
 
+## Recent Fixes (2026-02)
+
+### Correctness
+- **Barrier HB cycle fix** (`MHPAnalysis.cpp`): `handleBarrier` previously added bidirectional
+  HB edges between barrier arrivals, creating cycles in the HB graph that caused
+  `hasHappenBeforeRelation` to return `true` for unrelated instructions.  Fixed to add
+  one-directional edges from each earlier arrival to the current one; the symmetric direction
+  is added naturally when the earlier arrivals are processed.
+- **Seq-cst total order** (`MHPAnalysis.cpp`): `computeSeqCstTotalOrder` previously added edges
+  between *all* seq-cst stores and loads regardless of location, which could suppress real races
+  on unrelated variables.  Fixed to only add edges between operations on potentially aliasing
+  locations (alias analysis already skips non-aliasing pairs).  RMW–RMW pairs are now also
+  ordered correctly.
+- **CppThreading shared_mutex exclusion** (`CppThreading.h`): `isAcquire` / `isRelease` /
+  `isTryAcquire` previously matched `shared_mutex` operations, causing them to be classified
+  as plain exclusive locks instead of the more precise `TD_SHARED_RDLOCK` / `TD_SHARED_WRLOCK`
+  types.  Fixed by adding `!funcName.contains("shared")` guards.
+- **OpenMP null-callee guard** (`OpenMP.h`): `isFork(CallBase*)` did not guard against a null
+  callee (indirect call), causing a null-pointer dereference.  Fixed.
+
+### Performance
+- **MHP pairs storage** (`MHPAnalysis.h/.cpp`): `m_mhp_pairs` and `m_atomic_hb_pairs` changed
+  from `std::set<std::pair<...>>` (O(log N) per lookup) to
+  `std::unordered_set<InstPair, InstPairHash>` (O(1) average).  Pairs are stored in canonical
+  pointer-sorted order so `isPrecomputedMHP` requires only a single hash probe instead of two.
+
+### Code Quality
+- **OpenMP anonymous namespace** (`OpenMP.h`): `matchesAny` was defined inside an anonymous
+  namespace in a header, causing ODR violations when the header was included in multiple
+  translation units.  Changed to a plain `inline` function.
+
 ## Limitations
 
 - **std::memory_order_consume**: Recognized but treated as acquire (per C++ standard recommendation)

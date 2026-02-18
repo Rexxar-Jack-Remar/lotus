@@ -334,14 +334,14 @@ private:
   bool m_enable_lockset_analysis = false;
   bool m_precompute_mhp_pairs = false;
 
-  // MHP results
-  std::set<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
-      m_mhp_pairs;
+  // MHP results — use unordered_set for O(1) average lookup instead of O(log N).
+  // Pairs are stored in canonical order (a <= b by pointer) to allow symmetric
+  // lookup with a single probe.
+  std::unordered_set<InstPair, InstPairHash> m_mhp_pairs;
 
   // Atomics-based happens-before cache
   std::vector<const llvm::Instruction *> m_atomic_instructions;
-  std::set<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
-      m_atomic_hb_pairs;
+  std::unordered_set<InstPair, InstPairHash> m_atomic_hb_pairs;
 
   // Instruction to thread mapping
   std::unordered_map<const llvm::Instruction *, ThreadID> m_inst_to_thread;
@@ -404,7 +404,7 @@ private:
 
   // Dominator tree cache for HB queries within a function
   mutable std::unordered_map<const llvm::Function *,
-                             std::unique_ptr<DominatorTree>>
+                             std::unique_ptr<llvm::DominatorTree>>
       m_dom_cache;
   mutable std::unordered_map<const llvm::Function *,
                              std::unique_ptr<llvm::PostDominatorTree>>
@@ -539,7 +539,7 @@ private:
   ThreadID getJoinedThreadID(const llvm::Instruction *join_inst) const;
 
   // Dominator helpers (intra-function)
-  const DominatorTree &getDomTree(const llvm::Function *func) const;
+  const llvm::DominatorTree &getDomTree(const llvm::Function *func) const;
   const llvm::PostDominatorTree &
   getPostDomTree(const llvm::Function *func) const;
   bool dominates(const llvm::Instruction *a, const llvm::Instruction *b) const;
@@ -548,7 +548,7 @@ private:
   bool isReachableWithoutBackEdges(const llvm::Instruction *from,
                                    const llvm::Instruction *to) const;
   bool isBackEdge(const llvm::BasicBlock *from, const llvm::BasicBlock *to,
-                  const DominatorTree &DT) const;
+                  const llvm::DominatorTree &DT) const;
 
   void enableIndirectForkConservatism();
 

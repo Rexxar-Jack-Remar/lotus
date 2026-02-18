@@ -38,21 +38,26 @@ inline bool isDetach(const llvm::StringRef& funcName) {
   return funcName.contains("_ZNSt6thread6detachEv");
 }
 
-// Check if the function is std::mutex::lock or similar
+// Check if the function is std::mutex::lock or std::recursive_mutex::lock.
+// Deliberately excludes shared_mutex (handled separately by isSharedLock*).
 inline bool isAcquire(const llvm::StringRef& funcName) {
   // std::mutex::lock -> _ZNSt5mutex4lockEv
   // std::recursive_mutex::lock -> _ZNSt15recursive_mutex4lockEv
-  return funcName.contains("mutex") && funcName.contains("lockEv") && !funcName.contains("unlock");
+  // Exclude shared_mutex variants so they are not double-counted.
+  return funcName.contains("mutex") && funcName.contains("lockEv") &&
+         !funcName.contains("unlock") && !funcName.contains("shared");
 }
 
-// Check if the function is std::mutex::try_lock
+// Check if the function is std::mutex::try_lock (excludes shared_mutex).
 inline bool isTryAcquire(const llvm::StringRef& funcName) {
-    return funcName.contains("mutex") && funcName.contains("try_lockEv");
+  return funcName.contains("mutex") && funcName.contains("try_lockEv") &&
+         !funcName.contains("shared");
 }
 
-// Check if the function is std::mutex::unlock
+// Check if the function is std::mutex::unlock (excludes shared_mutex).
 inline bool isRelease(const llvm::StringRef& funcName) {
-  return funcName.contains("mutex") && funcName.contains("unlockEv");
+  return funcName.contains("mutex") && funcName.contains("unlockEv") &&
+         !funcName.contains("shared");
 }
 
 // Check if the function is std::condition_variable::wait
