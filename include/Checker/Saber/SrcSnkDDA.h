@@ -46,7 +46,6 @@ private:
   SVFGNodeSet sinks;
   std::unique_ptr<SaberCondAllocator> saberCondAllocator;
   SVFGNodeToDPItemsMap nodeToDPItemsMap;
-  SVFGNodeSet forwardNonConcreteVisited;
   SVFGNodeSet visitedSet;
   SrcToCSMap srcToCSMap;
   bool hasPrecomputedSrcSnk_ = false;
@@ -193,11 +192,6 @@ protected:
   void forwardTraverse(DPIm &it) override;
 
   bool forwardVisited(const SVFGNode *node, const DPIm &item) {
-    // Once a node is visited with non-concrete context, treat it as
-    // context-insensitive there and prune all further variants.
-    if (forwardNonConcreteVisited.find(node) != forwardNonConcreteVisited.end())
-      return true;
-
     auto it = nodeToDPItemsMap.find(node);
     if (it != nodeToDPItemsMap.end())
       return it->second.find(item) != it->second.end();
@@ -205,8 +199,6 @@ protected:
   }
 
   void addForwardVisited(const SVFGNode *node, const DPIm &item) {
-    if (!item.getCond().isConcreteCxt())
-      forwardNonConcreteVisited.insert(node);
     nodeToDPItemsMap[node].insert(item);
   }
 
@@ -218,7 +210,6 @@ protected:
 
   void clearVisitedMap() {
     nodeToDPItemsMap.clear();
-    forwardNonConcreteVisited.clear();
     visitedSet.clear();
   }
 

@@ -8,9 +8,7 @@
 #include "Checker/Saber/ProgSlice.h"
 
 #include "Checker/Saber/SaberCondAllocator.h"
-#include "Checker/Saber/SaberOptions.h"
 #include "IR/ICFG/ICFGNode.h"
-#include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBase.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
@@ -121,8 +119,7 @@ std::string ProgSlice::evalFinalCond() const {
       llvm::raw_string_ostream rso(locStr);
       DL.print(rso);
     } else if (inst->getParent()) {
-      locStr = inst->getParent()->getParent()->getName().str() + ":" +
-               std::to_string(inst->getDebugLoc() ? DL.getLine() : 0);
+      locStr = inst->getParent()->getParent()->getName().str() + ":0";
     }
     if (pathAllocator->isNegCond(id))
       locations.insert(locStr + "|False");

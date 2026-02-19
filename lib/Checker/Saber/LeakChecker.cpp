@@ -60,11 +60,12 @@ void LeakChecker::initSrcs() {
           if (llvm::Function *Callee = CI->getCalledFunction()) {
             sourceLike = isSourceLikeFun(Callee->getName().str());
           } else {
-            for (const llvm::Function *c : svfg->getConnectedCallees(CI))
+            for (const llvm::Function *c : memSSA.getIndirectCallTargets(CI)) {
               if (c && isSourceLikeFun(c->getName().str())) {
                 sourceLike = true;
                 break;
               }
+            }
           }
           if (sourceLike)
             worklist.push_back(CI);
@@ -121,11 +122,12 @@ void LeakChecker::initSnks() {
           if (llvm::Function *Callee = CI->getCalledFunction()) {
             sinkLike = isSinkLikeFun(Callee->getName().str());
           } else {
-            for (const llvm::Function *c : svfg->getConnectedCallees(CI))
+            for (const llvm::Function *c : memSSA.getIndirectCallTargets(CI)) {
               if (c && isSinkLikeFun(c->getName().str())) {
                 sinkLike = true;
                 break;
               }
+            }
           }
           if (!sinkLike)
             continue;

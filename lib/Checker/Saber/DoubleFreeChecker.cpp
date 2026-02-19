@@ -10,154 +10,19 @@
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/BugTypes.h"
-#include "Checker/Saber/SaberCheckerAPI.h"
 #include "Checker/Saber/SaberOptions.h"
-#include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGNode.h"
+
+#include <cassert>
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
-#include <cassert>
 
 using namespace llvm;
 using namespace lotus::analysis;
 
-void DoubleFreeChecker::initSrcs() {
-  if (!module_ || !svfg)
-    return;
-
-  CSWorkList worklist;
-  SVFGNodeBS visited;
-
-  // For double-free, sources are free() calls (first free)
-  for (auto &F : *module_) {
-    if (F.isDeclaration())
-      continue;
-    for (auto &BB : F) {
-      for (auto &I : BB) {
-        if (auto *CI = dyn_cast<CallBase>(&I)) {
-          bool sourceLike = false;
-          if (llvm::Function *Callee = CI->getCalledFunction()) {
-            sourceLike = isSourceLikeFun(Callee->getName().str());
-          } else {
-            for (const llvm::Function *c : svfg->getConnectedCallees(CI))
-              if (c && isSourceLikeFun(c->getName().str())) {
-                sourceLike = true;
-                break;
-              }
-          }
-          if (sourceLike)
-            worklist.push_back(CI);
-        }
-      }
-    }
-  }
-
-  while (!worklist.empty()) {
-    const llvm::CallBase *cs = worklist.front();
-    worklist.pop_front();
-
-    if (!cs->getCaller())
-      continue;
-    if (cs->getCaller()->isDeclaration())
-      continue;
-
-    SVFGNode *node = svfg->getDef(cs);
-    if (!node)
-      node = svfg->getValueNode(cs);
-    if (!node)
-      continue;
-    if (visited.count(node->getId()))
-      continue;
-    visited.insert(node->getId());
-
-    CallSiteSet csSet;
-    if (isInAWrapper(node, csSet)) {
-      for (const llvm::CallBase *c : csSet)
-        worklist.push_back(c);
-    } else {
-      const llvm::Function *caller = cs->getCaller();
-      if (!caller->isDeclaration() &&
-          !SaberCheckerAPI::getCheckerAPI()->isExtCall(caller)) {
-        addToSources(node);
-        addSrcToCSID(node, cs);
-      }
-    }
-  }
-}
-
-void DoubleFreeChecker::initSnks() {
-  if (!module_ || !svfg)
-    return;
-
-  // For double-free, sinks are also free() calls (second free)
-  for (auto &F : *module_) {
-    if (F.isDeclaration())
-      continue;
-
-    for (auto &BB : F) {
-      for (auto &I : BB) {
-        if (auto *CI = dyn_cast<CallBase>(&I)) {
-          bool sinkLike = false;
-          if (llvm::Function *Callee = CI->getCalledFunction()) {
-            sinkLike = isSinkLikeFun(Callee->getName().str());
-          } else {
-            for (const llvm::Function *c : svfg->getConnectedCallees(CI))
-              if (c && isSinkLikeFun(c->getName().str())) {
-                sinkLike = true;
-                break;
-              }
-          }
-          if (!sinkLike)
-            continue;
-
-          const auto &actualParms = svfg->getActualParms(CI);
-          unsigned argIndex = 0;
-          for (auto &arg : CI->args()) {
-            if (!arg->getType()->isPointerTy()) {
-              ++argIndex;
-              continue;
-            }
-
-            SVFGNode *actualParmNode = nullptr;
-            for (SVFGNode *n : actualParms) {
-              if (!n)
-                continue;
-              if (n->getNodeKind() != SVFGK::ActualParm)
-                continue;
-              auto *ap = llvm::dyn_cast<ActualParmSVFGNode>(n);
-              if (!ap)
-                continue;
-              if (ap->getParamIndex() == argIndex) {
-                actualParmNode = n;
-                break;
-              }
-            }
-
-            if (actualParmNode)
-              addToSinks(actualParmNode);
-
-            SVFGNode *snkNode = svfg->getValueNode(arg.get());
-            if (snkNode) {
-              if (!actualParmNode)
-                addToSinks(snkNode);
-              if (arg->getType()->getPointerElementType()->isPointerTy()) {
-                for (auto &edge : snkNode->getOutEdges()) {
-                  if (edge->getEdgeKind() == SVFGEdgeK::IntraLoad)
-                    addToSinks(edge->getDstNode());
-                }
-              }
-            }
-
-            ++argIndex;
-          }
-        }
-      }
-    }
-  }
-}
-
-static void appendPathConditionEvents(BugReport *report, const ProgSlice *slice) {
+static void appendPathConditionEvents(BugReport *report,
+                                      const ProgSlice *slice) {
   if (!report || !slice)
     return;
   ProgSlice::EventStack events;
@@ -165,8 +30,8 @@ static void appendPathConditionEvents(BugReport *report, const ProgSlice *slice)
   for (const auto &e : events) {
     if (!e.first)
       continue;
-    const std::vector<NodeTag> tags = {
-        e.second ? NodeTag::CONDITION_TRUE : NodeTag::CONDITION_FALSE};
+    const std::vector<NodeTag> tags = {e.second ? NodeTag::CONDITION_TRUE
+                                                : NodeTag::CONDITION_FALSE};
     report->append_step(const_cast<Instruction *>(e.first), "Path condition", 0,
                         tags);
   }
@@ -258,8 +123,7 @@ void DoubleFreeChecker::validateSuccessTests(ProgSlice *slice,
     outs() << "\t\t double free path:\n" << slice->evalFinalCond() << "\n";
     return;
   }
-  errs() << "\t FAILURE :" << srcFun << " (src id:" << source->getId()
-         << ")\n";
+  errs() << "\t FAILURE :" << srcFun << " (src id:" << source->getId() << ")\n";
   errs() << "\t\t double free path:\n" << slice->evalFinalCond() << "\n";
   assert(false && "SABER double-free validation failed");
 }
@@ -286,13 +150,13 @@ void DoubleFreeChecker::validateExpectedFailureTests(ProgSlice *slice,
                                  ? source->getFunction()->getName().str()
                                  : std::string("<unknown>");
   if (expectedFailure) {
-    outs() << "\t EXPECTED-FAILURE :" << srcFun << " (src id:" << source->getId()
-           << ")\n";
+    outs() << "\t EXPECTED-FAILURE :" << srcFun
+           << " (src id:" << source->getId() << ")\n";
     outs() << "\t\t double free path:\n" << slice->evalFinalCond() << "\n";
     return;
   }
-  errs() << "\t UNEXPECTED FAILURE :" << srcFun << " (src id:" << source->getId()
-         << ")\n";
+  errs() << "\t UNEXPECTED FAILURE :" << srcFun
+         << " (src id:" << source->getId() << ")\n";
   errs() << "\t\t double free path:\n" << slice->evalFinalCond() << "\n";
   assert(false && "SABER double-free unexpected validation result");
 }

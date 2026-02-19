@@ -47,9 +47,10 @@ void SrcSnkDDA::initialize() {
     return;
 
   RecursiveTimer timer("Saber initialization");
+  const bool needsBuild = !hasSVFGAndICFG();
 
   // Build ICFG and SVFG only if not already set (for shared usage)
-  if (!hasSVFGAndICFG()) {
+  if (needsBuild) {
     {
       RecursiveTimer timer("ICFG build");
       icfg_ = std::make_unique<::ICFG>();
@@ -73,6 +74,12 @@ void SrcSnkDDA::initialize() {
       svfg_.reset(built);
       this->svfg = svfg_.get();
       setGraph(this->svfg);
+      memSSA.setCurrentSVFG(this->svfg);
+      memSSA.collectGlobals();
+      memSSA.rmDerefDirSVFGEdges();
+      memSSA.rmIncomingEdgeForSUStore();
+      memSSA.AddExtActualParmSVFGNodes();
+      memSSA.recomputeGlobalSVFGNodes();
       if (SaberOptions::verbose()) {
         outs() << "SVFG nodes: " << this->svfg->getNumNodes() << "\n";
       }
@@ -81,6 +88,11 @@ void SrcSnkDDA::initialize() {
     // SVFG/ICFG already set, just ensure svfg pointer is set
     this->svfg = svfg_.get();
     setGraph(this->svfg);
+    memSSA.setModule(module_);
+    memSSA.setSaberCondAllocator(getSaberCondAllocator());
+    memSSA.setCurrentSVFG(this->svfg);
+    memSSA.collectGlobals();
+    memSSA.recomputeGlobalSVFGNodes();
     if (SaberOptions::verbose()) {
       outs() << "Using shared SVFG (nodes: " << this->svfg->getNumNodes()
              << ")\n";
@@ -134,6 +146,7 @@ void SrcSnkDDA::analyze() {
     if (SaberOptions::verbose()) {
       outs() << "No sources or sinks found, skipping analysis\n";
     }
+    finalize();
     return;
   }
 
@@ -245,6 +258,10 @@ bool SrcSnkDDA::isInAWrapper(const SVFGNode *src, CallSiteSet &csIdSet) {
         if (sk == SVFGK::Load || sk == SVFGK::MIntraPhi ||
             sk == SVFGK::MInterPhi)
           worklist.push_back(succ);
+      } else {
+        // Match SVF: unsupported interprocedural/variant edges mean this is
+        // not a pure wrapper propagation path.
+        return false;
       }
     }
   }

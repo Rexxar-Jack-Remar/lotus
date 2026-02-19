@@ -26,17 +26,6 @@ public:
     return false;
   }
 
-  void initSrcs() override;
-  void initSnks() override;
-
-  inline bool isSourceLikeFun(const std::string &funName) override {
-    return SaberCheckerAPI::getCheckerAPI()->isMemDealloc(funName);
-  }
-
-  inline bool isSinkLikeFun(const std::string &funName) override {
-    return SaberCheckerAPI::getCheckerAPI()->isMemDealloc(funName);
-  }
-
   void reportBug(ProgSlice *slice) override;
 
   void testsValidation(ProgSlice *slice);

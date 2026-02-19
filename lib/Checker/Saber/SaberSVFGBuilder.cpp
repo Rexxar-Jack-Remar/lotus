@@ -71,15 +71,10 @@ void SaberSVFGBuilder::rmDerefDirSVFGEdges() {
     if (!defNode)
       continue;
 
-    SVFGEdgeK kinds[] = {
-        SVFGEdgeK::IntraDirect, SVFGEdgeK::IntraCopy,
-        (k == SVFGK::Store ? SVFGEdgeK::IntraStore : SVFGEdgeK::IntraLoad)};
-    for (SVFGEdgeK ek : kinds) {
-      SVFGEdge *edge = g->getIntraVFGEdge(defNode, node, ek);
-      if (edge) {
-        g->removeEdge(edge);
-        break;
-      }
+    // Match SVF SABER semantics: remove only the direct def->deref edge.
+    if (SVFGEdge *edge =
+            g->getIntraVFGEdge(defNode, node, SVFGEdgeK::IntraDirect)) {
+      g->removeEdge(edge);
     }
     if (accessGlobal(ptr))
       globSVFGNodes.insert(node);
@@ -131,7 +126,7 @@ void SaberSVFGBuilder::AddExtActualParmSVFGNodes() {
           sinkLikeCallee = api->isMemDealloc(callee->getName().str()) ||
                            api->isFClose(callee->getName().str());
         } else {
-          for (const Function *c : g->getConnectedCallees(cs)) {
+          for (const Function *c : getIndirectCallTargets(cs)) {
             if (c && (api->isMemDealloc(c->getName().str()) ||
                       api->isFClose(c->getName().str()))) {
               sinkLikeCallee = true;
@@ -168,14 +163,52 @@ void SaberSVFGBuilder::AddExtActualParmSVFGNodes() {
           if (!actualParmNode)
             continue;
           if (g->getIntraVFGEdge(defNode, actualParmNode,
-                                 SVFGEdgeK::IntraDirect) ||
-              g->getIntraVFGEdge(defNode, actualParmNode, SVFGEdgeK::IntraCopy))
+                                 SVFGEdgeK::IntraDirect))
             continue;
-          g->addEdge(defNode, actualParmNode, SVFGEdgeK::IntraCopy);
+          g->addEdge(defNode, actualParmNode, SVFGEdgeK::IntraDirect);
         }
       }
     }
   }
+}
+
+static uint32_t getBaseObjId(const SVFG *g, uint32_t objId) {
+  if (!g || objId == 0)
+    return 0;
+  if (const auto *info = g->getObjectInfo(objId)) {
+    if (info->baseObjId != 0)
+      return info->baseObjId;
+  }
+  return objId;
+}
+
+static void collectBaseObjectFields(const SVFG *g, uint32_t baseId,
+                                    std::set<uint32_t> &out) {
+  if (!g || baseId == 0)
+    return;
+  out.insert(baseId);
+  for (const auto &entry : g->getObjectDebugMap()) {
+    uint32_t objId = entry.first;
+    const auto *info = g->getObjectInfo(objId);
+    if (!info)
+      continue;
+    if (info->baseObjId == baseId)
+      out.insert(objId);
+  }
+}
+
+static bool isExternalRetObject(const SVFG *g, uint32_t objId) {
+  if (!g || objId == 0)
+    return false;
+  const llvm::Value *v = g->getObjectValue(objId);
+  const auto *inst = llvm::dyn_cast<llvm::Instruction>(v);
+  if (!inst)
+    return false;
+  const auto *cs = llvm::dyn_cast<llvm::CallBase>(inst);
+  if (!cs)
+    return false;
+  const llvm::Function *callee = cs->getCalledFunction();
+  return callee && callee->isDeclaration();
 }
 
 SVFGNodeBS SaberSVFGBuilder::getPointsToOfObject(uint32_t objId) {
@@ -189,10 +222,9 @@ SVFGNodeBS SaberSVFGBuilder::getPointsToOfObject(uint32_t objId) {
   // external-return objects (SVF saber-collect-extret-globals: avoids pulling
   // in all malloc-return objects as globals).
   if (!SaberOptions::collectExtRetGlobals()) {
-    if (const llvm::Instruction *inst = llvm::dyn_cast<llvm::Instruction>(v))
-      if (const llvm::CallBase *cs = llvm::dyn_cast<llvm::CallBase>(inst))
-        if (cs->getCalledFunction() && cs->getCalledFunction()->isDeclaration())
-          return result;
+    if (currentSVFG_->isFieldInsensitiveObject(objId) &&
+        isExternalRetObject(currentSVFG_, objId))
+      return result;
   }
   result = getObjectIdsForValue(v);
   return result;
@@ -200,18 +232,34 @@ SVFGNodeBS SaberSVFGBuilder::getPointsToOfObject(uint32_t objId) {
 
 std::set<uint32_t> &
 SaberSVFGBuilder::CollectPtsChain(uint32_t id, NodeToPTSSMap &cachedPtsMap) {
-  auto it = cachedPtsMap.find(id);
+  uint32_t baseId = getBaseObjId(currentSVFG_, id);
+  auto it = cachedPtsMap.find(baseId);
   if (it != cachedPtsMap.end())
     return it->second;
 
-  std::set<uint32_t> &pts = cachedPtsMap[id];
-  pts.insert(id);
+  std::set<uint32_t> &pts = cachedPtsMap[baseId];
+  if (!SaberOptions::collectExtRetGlobals()) {
+    if (currentSVFG_ && currentSVFG_->isFieldInsensitiveObject(baseId) &&
+        isExternalRetObject(currentSVFG_, baseId))
+      return pts;
+  }
 
-  SVFGNodeBS directPts = getPointsToOfObject(id);
-  for (uint32_t o : directPts) {
-    pts.insert(o);
-    std::set<uint32_t> &sub = CollectPtsChain(o, cachedPtsMap);
-    pts.insert(sub.begin(), sub.end());
+  collectBaseObjectFields(currentSVFG_, baseId, pts);
+  WorkList worklist;
+  for (uint32_t objId : pts)
+    worklist.push_back(objId);
+
+  while (!worklist.empty()) {
+    uint32_t objId = worklist.front();
+    worklist.pop_front();
+    SVFGNodeBS directPts = getPointsToOfObject(objId);
+    for (uint32_t o : directPts) {
+      std::set<uint32_t> &sub = CollectPtsChain(o, cachedPtsMap);
+      for (uint32_t subId : sub) {
+        if (pts.insert(subId).second)
+          worklist.push_back(subId);
+      }
+    }
   }
   return pts;
 }
@@ -222,38 +270,19 @@ void SaberSVFGBuilder::collectGlobals() {
   if (!currentSVFG_)
     return;
 
-  // Seed: object IDs that are global (from graph nodes/edges).
   std::set<uint32_t> seedGlobals;
-  for (auto it = currentSVFG_->begin(), et = currentSVFG_->end(); it != et;
-       ++it) {
-    SVFGNode *node = it->second;
-    if (!node)
-      continue;
-    if (node->getNodeKind() == SVFGK::Addr) {
-      const auto *addr = static_cast<const AddrSVFGNode *>(node);
-      if (addr->getObjectId() != 0 &&
-          currentSVFG_->isGlobalObject(addr->getObjectId()))
-        seedGlobals.insert(addr->getObjectId());
-    }
-    if (const SVFGNodeBS *pts = node->getPointsTo()) {
-      for (uint32_t id : *pts)
-        if (currentSVFG_->isGlobalObject(id))
-          seedGlobals.insert(id);
-    }
-    for (SVFGEdge *e : node->getOutEdges()) {
-      for (uint32_t id : e->getPointsTo())
-        if (currentSVFG_->isGlobalObject(id))
-          seedGlobals.insert(id);
-    }
+  for (const auto &entry : currentSVFG_->getObjectDebugMap()) {
+    uint32_t objId = entry.first;
+    if (currentSVFG_->isGlobalObject(objId))
+      seedGlobals.insert(objId);
   }
 
   // Also seed from global LLVM values (in case they are not yet in the graph).
   if (module_) {
     for (const llvm::GlobalVariable &g : module_->globals()) {
-      SVFGNodeBS objIds = getObjectIdsForValue(&g);
-      for (uint32_t id : objIds)
-        if (currentSVFG_->isGlobalObject(id))
-          seedGlobals.insert(id);
+      uint32_t objId = currentSVFG_->getObjectId(&g);
+      if (objId != 0 && currentSVFG_->isGlobalObject(objId))
+        seedGlobals.insert(objId);
     }
   }
 
@@ -261,6 +290,25 @@ void SaberSVFGBuilder::collectGlobals() {
   for (uint32_t id : seedGlobals) {
     std::set<uint32_t> &chain = CollectPtsChain(id, cachedPtsMap);
     globs.insert(chain.begin(), chain.end());
+  }
+}
+
+void SaberSVFGBuilder::recomputeGlobalSVFGNodes() {
+  globSVFGNodes.clear();
+  if (!currentSVFG_)
+    return;
+
+  for (auto it = currentSVFG_->begin(), et = currentSVFG_->end(); it != et;
+       ++it) {
+    SVFGNode *node = it->second;
+    if (!node)
+      continue;
+    const SVFGK k = node->getNodeKind();
+    if (k != SVFGK::Store && k != SVFGK::Load)
+      continue;
+    const Value *ptr = getPointerOperandForStmt(node);
+    if (ptr && accessGlobal(ptr))
+      globSVFGNodes.insert(node);
   }
 }
 
@@ -277,6 +325,11 @@ bool SaberSVFGBuilder::accessGlobal(const SVFGNode *node) {
 bool SaberSVFGBuilder::accessGlobal(const llvm::Value *ptr) {
   if (!ptr || !currentSVFG_)
     return false;
+  if (const auto *gv = llvm::dyn_cast<llvm::GlobalValue>(ptr)) {
+    uint32_t objId = currentSVFG_->getObjectId(gv);
+    if (objId != 0 && globs.count(objId))
+      return true;
+  }
   SVFGNodeBS objIds = getObjectIdsForValue(ptr);
   for (uint32_t objId : objIds) {
     if (globs.count(objId))

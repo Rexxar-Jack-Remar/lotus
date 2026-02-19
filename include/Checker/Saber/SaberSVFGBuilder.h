@@ -48,6 +48,7 @@ public:
   void setCurrentSVFG(SVFG *g) { currentSVFG_ = g; }
 
   void collectGlobals();
+  void recomputeGlobalSVFGNodes();
 
   /// Called after building SVFG (e.g. from SrcSnkDDA::initialize).
   void rmDerefDirSVFGEdges();

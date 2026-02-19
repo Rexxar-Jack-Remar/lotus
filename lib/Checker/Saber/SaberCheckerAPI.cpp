@@ -55,11 +55,6 @@ static const ei_pair ei_pairs[] = {
     {"SSL_CTX_new", SaberCheckerAPI::CK_ALLOC},
     {"SSL_new", SaberCheckerAPI::CK_ALLOC},
     {"VOS_MemAlloc", SaberCheckerAPI::CK_ALLOC},
-    // C++ new (demangled names; LLVM mangles)
-    {"_Znwm", SaberCheckerAPI::CK_ALLOC},
-    {"_Znam", SaberCheckerAPI::CK_ALLOC},
-    {"_ZnwmRKSt9nothrow_t", SaberCheckerAPI::CK_ALLOC},
-    {"_ZnamRKSt9nothrow_t", SaberCheckerAPI::CK_ALLOC},
 
     {"VOS_MemFree", SaberCheckerAPI::CK_FREE},
     {"cfree", SaberCheckerAPI::CK_FREE},
@@ -81,9 +76,6 @@ static const ei_pair ei_pairs[] = {
     {"SSL_CTX_free", SaberCheckerAPI::CK_FREE},
     {"SSL_free", SaberCheckerAPI::CK_FREE},
     {"XFree", SaberCheckerAPI::CK_FREE},
-    // C++ delete (demangled names; LLVM mangles)
-    {"_ZdlPv", SaberCheckerAPI::CK_FREE},
-    {"_ZdaPv", SaberCheckerAPI::CK_FREE},
 
     {"fopen", SaberCheckerAPI::CK_FOPEN},
     {"\01_fopen", SaberCheckerAPI::CK_FOPEN},
@@ -117,7 +109,8 @@ static const ei_pair ei_pairs[] = {
     {"gcry_md_close", SaberCheckerAPI::CK_FCLOSE},
     {"gcry_cipher_close", SaberCheckerAPI::CK_FCLOSE},
 
-    // Sentinel: must be last (SVF uses {0, CK_DUMMY}); loop stops when p->n is null.
+    // Sentinel: must be last (SVF uses {0, CK_DUMMY}); loop stops when p->n is
+    // null.
     {nullptr, SaberCheckerAPI::CK_DUMMY}};
 
 void SaberCheckerAPI::init() {
