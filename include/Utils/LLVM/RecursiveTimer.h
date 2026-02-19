@@ -33,6 +33,8 @@ RecursiveTimer {
 private:
     std::chrono::steady_clock::time_point Begin;
     std::string Prefix;
+    bool Active = false;
+    static bool Enabled;
 
 public:
     /// the prefix should be in a style of "Doing sth" or "Sth"
@@ -41,6 +43,9 @@ public:
 
     explicit RecursiveTimer(const std::string &Prefix);
     /// @}
+
+    static void setEnabled(bool Enable) { Enabled = Enable; }
+    static bool isEnabled() { return Enabled; }
 
     /// end of the recorder
     ~RecursiveTimer();

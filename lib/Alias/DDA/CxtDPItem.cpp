@@ -14,6 +14,9 @@
 namespace lotus {
 namespace analysis {
 
+// Sentinel for k-limiting: merge all at-limit contexts (0 is invalid for getCallSiteId).
+static constexpr uint32_t kCxtTopSentinel = 0;
+
 uint32_t ContextCond::maximumCxtLen = 3u;
 uint32_t ContextCond::maximumPathLen = 0u;
 uint32_t ContextCond::maxCxtLenSeen = 0u;
@@ -23,26 +26,29 @@ void ContextCond::updateMaxCxtLenSeen(size_t len) {
     maxCxtLenSeen = static_cast<uint32_t>(len);
 }
 
-// Matches SVF DPItem.h pushContext: when at maximumCxtLen, set non-concrete,
-// drop front (FIFO), push back, return false. Empty check guards maxCxtLen==0.
+// K-limiting: when at maximumCxtLen, merge all at-limit contexts to a single
+// TOP sentinel (0 is reserved; getCallSiteId uses 0 for invalid). This prevents
+// context explosion (same node visited with thousands of call-strings).
+// Continue exploration with context [TOP] and return true.
 bool ContextCond::pushContext(uint32_t ctx) {
   if (context_.size() < maximumCxtLen) {
     context_.push_back(ctx);
     updateMaxCxtLenSeen(context_.size());
     return true;
   }
-  if (!context_.empty()) {
-    setNonConcreteCxt();
-    context_.erase(context_.begin());
-    context_.push_back(ctx);
-    updateMaxCxtLenSeen(context_.size());
-  }
-  return false;
+  setNonConcreteCxt();
+  context_.assign(1, kCxtTopSentinel);
+  updateMaxCxtLenSeen(context_.size());
+  return true;
 }
 
 bool ContextCond::matchContext(uint32_t ctx) {
   if (context_.empty())
     return true;
+  if (context_.back() == kCxtTopSentinel) {
+    context_.pop_back();
+    return true;
+  }
   if (context_.back() == ctx) {
     context_.pop_back();
     return true;

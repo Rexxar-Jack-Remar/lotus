@@ -207,6 +207,10 @@ SVFG *SVFGBuilder::build(const ICFG *icfg,
 
   buildInterproceduralEdges();
 
+  if (config.includeGlobals) {
+    connectFromGlobalToProgEntry();
+  }
+
   return svfg.release();
 }
 

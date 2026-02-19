@@ -67,3 +67,29 @@ target_link_libraries(lotus-fitx PRIVATE
 # LoopInfoWrapperPass and legacy pass manager for running FiTx pipeline
 llvm_map_components_to_libnames(_fitx_components Analysis Passes)
 target_link_libraries(lotus-fitx PRIVATE ${_fitx_components})
+
+# Saber: source-sink bug checker (leak, double-free, file descriptor)
+add_executable(lotus-saber lotus-saber.cpp)
+llvm_map_components_to_libnames(_saber_components IRReader Support)
+target_link_libraries(lotus-saber PRIVATE
+  ${_saber_components}
+  ${LLVM_LINK_COMPONENTS}
+)
+# Force linkage of all symbols from Saber library (needed for cl::opt variables)
+# This ensures that cl::opt global variables in SaberOptions.cpp are linked
+if(APPLE)
+  # On macOS, use -force_load to ensure all symbols are included
+  target_link_options(lotus-saber PRIVATE
+    -Wl,-force_load,$<TARGET_FILE:Saber>
+  )
+  target_link_libraries(lotus-saber PRIVATE Saber)
+else()
+  # On Linux, use --whole-archive
+  target_link_options(lotus-saber PRIVATE
+    -Wl,--whole-archive
+  )
+  target_link_libraries(lotus-saber PRIVATE Saber)
+  target_link_options(lotus-saber PRIVATE
+    -Wl,--no-whole-archive
+  )
+endif()

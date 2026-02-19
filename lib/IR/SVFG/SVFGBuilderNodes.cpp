@@ -20,9 +20,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFGBuilder.h"
 
-#include "IR/ICFG/ICFG.h"
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 
@@ -33,7 +33,7 @@ using namespace llvm;
 static const Module *getModuleFromICFG(const ICFG *icfg) {
   if (!icfg)
     return nullptr;
-  
+
   // Iterate through ICFG nodes to find a function
   for (auto &pair : *icfg) {
     ICFGNode *node = pair.second;
@@ -92,8 +92,9 @@ void SVFGBuilder::buildTopLevelNodes() {
     if (!isConstPtrTarget)
       return std::numeric_limits<uint32_t>::max();
 
-    // Also register a base object ID for this constant so DDA can seed points-to
-    // sets even when PTA queries return empty (e.g., in minimal IR snippets).
+    // Also register a base object ID for this constant so DDA can seed
+    // points-to sets even when PTA queries return empty (e.g., in minimal IR
+    // snippets).
     SVFG::ObjectInfo info;
     info.isFunction = isa<Function>(v);
     info.isGlobal = isa<GlobalValue>(v) && !isa<Function>(v);
@@ -109,7 +110,7 @@ void SVFGBuilder::buildTopLevelNodes() {
     svfg->setValueNode(v, nodeId);
     return nodeId;
   };
-  
+
   for (auto &pair : *icfg) {
     ICFGNode *node = pair.second;
     IntraBlockNode *blockNode = dyn_cast<IntraBlockNode>(node);
@@ -134,16 +135,17 @@ void SVFGBuilder::buildTopLevelNodes() {
           !isUnary)
         continue;
 
-      // Create the singleton null node on-demand and map the (uniqued) constant.
+      // Create the singleton null node on-demand and map the (uniqued)
+      // constant.
       for (const Use &op : inst.operands()) {
         const Value *opVal = op.get();
-        if (!isa<ConstantPointerNull>(opVal))
-        {
+        if (!isa<ConstantPointerNull>(opVal)) {
           // Model constant function/global addresses (and their pointer casts)
           // as address nodes so DDA can resolve function pointers and globals.
           if (opVal && opVal->getType()->isPointerTy()) {
             const Value *canon = opVal->stripPointerCasts();
-            const uint32_t canonId = ensureAddrNodeForConstPtr(canon, blockNode);
+            const uint32_t canonId =
+                ensureAddrNodeForConstPtr(canon, blockNode);
             if (canonId != std::numeric_limits<uint32_t>::max()) {
               valueToNode.emplace(opVal, canonId);
               svfg->setValueNode(opVal, canonId);
@@ -199,8 +201,7 @@ void SVFGBuilder::buildTopLevelNodes() {
                                  ? ptrIt->second
                                  : std::numeric_limits<uint32_t>::max();
         uint32_t nodeId = nextNode();
-        auto *loadNode =
-            new LoadSVFGNode(nodeId, blockNode, &inst, ptrNodeId);
+        auto *loadNode = new LoadSVFGNode(nodeId, blockNode, &inst, ptrNodeId);
         svfg->addNode(loadNode);
         svfg->setDef(&inst, nodeId);
         valueToNode[&inst] = nodeId;
@@ -217,6 +218,15 @@ void SVFGBuilder::buildTopLevelNodes() {
         svfg->addNode(storeNode);
         svfg->setDef(&inst, nodeId);
         storeToStoreNode[store] = nodeId;
+
+        // Track stores to globals for connectFromGlobalToProgEntry
+        const Value *ptrOp = store->getPointerOperand();
+        if (isa<GlobalVariable>(ptrOp) ||
+            (isa<GetElementPtrInst>(ptrOp) &&
+             isa<GlobalVariable>(
+                 cast<GetElementPtrInst>(ptrOp)->getPointerOperand()))) {
+          svfg->addGlobalStoreNode(storeNode);
+        }
       } else if (isa<GetElementPtrInst>(&inst)) {
         uint32_t nodeId = nextNode();
         auto *gepNode = new GepSVFGNode(nodeId, blockNode, &inst);
@@ -328,55 +338,53 @@ void SVFGBuilder::buildAddressTakenNodes() {
             }
           }
 
-	          if (addressTaken) {
-	            std::vector<const void *> ptsVoid = getPointsToSet(alloca);
-	            SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
+          if (addressTaken) {
+            std::vector<const void *> ptsVoid = getPointsToSet(alloca);
+            SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
 
-	            const Function *entryFunc = alloca->getParent()->getParent();
+            const Function *entryFunc = alloca->getParent()->getParent();
 
-	            const ICFGNode *entryICFGNode = nullptr;
-	            if (icfg) {
-	              entryICFGNode = const_cast<ICFG *>(icfg)->getIntraBlockNode(
-	                  &entryFunc->getEntryBlock());
-	            }
+            const ICFGNode *entryICFGNode = nullptr;
+            if (icfg) {
+              entryICFGNode = const_cast<ICFG *>(icfg)->getIntraBlockNode(
+                  &entryFunc->getEntryBlock());
+            }
 
-	            // Bug #9 fix: guard against duplicate EntryChiSVFGNode for the
-	            // same (memReg, entryFunc) pair. The old code had a comment
-	            // "Only create once" but no actual check, so re-visiting the
-	            // same alloca (e.g. via multiple uses) created multiple nodes
-	            // for the same memory region, causing duplicate reaching-def
-	            // edges and inflated points-to sets.
-	            if (objIds.empty()) {
-	              const uint32_t memReg = getOrCreateMemReg(alloca);
-	              if (funcEntryChiMemRegs[entryFunc].insert(memReg).second) {
-	                const uint32_t entryNodeId = nextNode();
-	                const uint32_t entryVersion = nextVersion(entryFunc, memReg);
-	                auto *entryChi = new EntryChiSVFGNode(
-	                    entryNodeId, entryICFGNode, entryFunc, memReg, SVFGNodeBS{},
-	                    entryVersion);
-	                svfg->addNode(entryChi);
-	                svfg->setMSSADef(memReg, entryChi, entryVersion);
-	                funcEntryChi[entryFunc].push_back(entryNodeId);
-	              }
-	            } else {
-	              for (uint32_t objId : objIds) {
-	                const uint32_t memReg = getOrCreateMemRegForObject(objId);
-	                if (!funcEntryChiMemRegs[entryFunc].insert(memReg).second)
-	                  continue; // already created for this (memReg, entryFunc)
-	                const uint32_t entryNodeId = nextNode();
-	                const uint32_t entryVersion =
-	                    nextVersion(entryFunc, memReg);
-	                SVFGNodeBS pts{objId};
-	                auto *entryChi = new EntryChiSVFGNode(
-	                    entryNodeId, entryICFGNode, entryFunc, memReg, pts,
-	                    entryVersion);
-	                svfg->addNode(entryChi);
-	                svfg->setMSSADef(memReg, entryChi, entryVersion);
-	                funcEntryChi[entryFunc].push_back(entryNodeId);
-	              }
-	            }
-	            
-	          }
+            // Bug #9 fix: guard against duplicate EntryChiSVFGNode for the
+            // same (memReg, entryFunc) pair. The old code had a comment
+            // "Only create once" but no actual check, so re-visiting the
+            // same alloca (e.g. via multiple uses) created multiple nodes
+            // for the same memory region, causing duplicate reaching-def
+            // edges and inflated points-to sets.
+            if (objIds.empty()) {
+              const uint32_t memReg = getOrCreateMemReg(alloca);
+              if (funcEntryChiMemRegs[entryFunc].insert(memReg).second) {
+                const uint32_t entryNodeId = nextNode();
+                const uint32_t entryVersion = nextVersion(entryFunc, memReg);
+                auto *entryChi =
+                    new EntryChiSVFGNode(entryNodeId, entryICFGNode, entryFunc,
+                                         memReg, SVFGNodeBS{}, entryVersion);
+                svfg->addNode(entryChi);
+                svfg->setMSSADef(memReg, entryChi, entryVersion);
+                funcEntryChi[entryFunc].push_back(entryNodeId);
+              }
+            } else {
+              for (uint32_t objId : objIds) {
+                const uint32_t memReg = getOrCreateMemRegForObject(objId);
+                if (!funcEntryChiMemRegs[entryFunc].insert(memReg).second)
+                  continue; // already created for this (memReg, entryFunc)
+                const uint32_t entryNodeId = nextNode();
+                const uint32_t entryVersion = nextVersion(entryFunc, memReg);
+                SVFGNodeBS pts{objId};
+                auto *entryChi =
+                    new EntryChiSVFGNode(entryNodeId, entryICFGNode, entryFunc,
+                                         memReg, pts, entryVersion);
+                svfg->addNode(entryChi);
+                svfg->setMSSADef(memReg, entryChi, entryVersion);
+                funcEntryChi[entryFunc].push_back(entryNodeId);
+              }
+            }
+          }
         }
       }
     }
@@ -406,13 +414,15 @@ void SVFGBuilder::buildAddressTakenNodes() {
         std::vector<const void *> ptsVoid = getPointsToSet(&gv);
         SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
 
-        // Global variable anchoring strategy (mirrors SVF's GlobalBlock approach):
+        // Global variable anchoring strategy (mirrors SVF's GlobalBlock
+        // approach):
         //
         // 1. Prefer `main` as the anchor (SVF uses a GlobalBlock ICFG node that
         //    feeds into main's entry).
         // 2. If no `main`, collect all functions that DIRECTLY USE the global –
-        //    these are plausible entry contexts.  This avoids the unsound choice
-        //    of an arbitrary first function in library/multi-entry programs.
+        //    these are plausible entry contexts.  This avoids the unsound
+        //    choice of an arbitrary first function in library/multi-entry
+        //    programs.
         // 3. If the global has no direct instruction users (only ConstantExpr
         //    users), fall back to all non-declaration functions.
         //
@@ -433,13 +443,18 @@ void SVFGBuilder::buildAddressTakenNodes() {
                 // Deduplicate.
                 bool found = false;
                 for (const Function *ef : entryFuncs) {
-                  if (ef == F) { found = true; break; }
+                  if (ef == F) {
+                    found = true;
+                    break;
+                  }
                 }
-                if (!found) entryFuncs.push_back(F);
+                if (!found)
+                  entryFuncs.push_back(F);
               }
             }
           }
-          // If no direct users found, fall back to first non-declaration function.
+          // If no direct users found, fall back to first non-declaration
+          // function.
           if (entryFuncs.empty()) {
             for (const Function &F : *M) {
               if (!F.isDeclaration()) {
@@ -462,9 +477,9 @@ void SVFGBuilder::buildAddressTakenNodes() {
             if (funcEntryChiMemRegs[entryFunc].insert(memReg).second) {
               const uint32_t entryNodeId = nextNode();
               const uint32_t entryVersion = nextVersion(entryFunc, memReg);
-              auto *entryChi = new EntryChiSVFGNode(
-                  entryNodeId, entryICFGNode, entryFunc, memReg, SVFGNodeBS{},
-                  entryVersion);
+              auto *entryChi =
+                  new EntryChiSVFGNode(entryNodeId, entryICFGNode, entryFunc,
+                                       memReg, SVFGNodeBS{}, entryVersion);
               svfg->addNode(entryChi);
               svfg->setMSSADef(memReg, entryChi, entryVersion);
               funcEntryChi[entryFunc].push_back(entryNodeId);
@@ -477,9 +492,9 @@ void SVFGBuilder::buildAddressTakenNodes() {
               const uint32_t entryNodeId = nextNode();
               const uint32_t entryVersion = nextVersion(entryFunc, memReg);
               SVFGNodeBS pts{objId};
-              auto *entryChi = new EntryChiSVFGNode(
-                  entryNodeId, entryICFGNode, entryFunc, memReg, pts,
-                  entryVersion);
+              auto *entryChi =
+                  new EntryChiSVFGNode(entryNodeId, entryICFGNode, entryFunc,
+                                       memReg, pts, entryVersion);
               svfg->addNode(entryChi);
               svfg->setMSSADef(memReg, entryChi, entryVersion);
               funcEntryChi[entryFunc].push_back(entryNodeId);
@@ -501,7 +516,8 @@ void SVFGBuilder::buildFormalParmNodes() {
       continue;
 
     unsigned idx = 0;
-    for (const auto *argIt = F.arg_begin(); argIt != F.arg_end(); ++argIt, ++idx) {
+    for (const auto *argIt = F.arg_begin(); argIt != F.arg_end();
+         ++argIt, ++idx) {
       const Argument *arg = &*argIt;
       if (!arg->getType()->isPointerTy())
         continue;
@@ -519,7 +535,8 @@ void SVFGBuilder::buildFormalParmNodes() {
 
         auto &memRegsForArg = argToMemRegs[arg];
         if (objIds.empty()) {
-          // Unknown points-to: conservative single region keyed by the argument value.
+          // Unknown points-to: conservative single region keyed by the argument
+          // value.
           const uint32_t memReg = getOrCreateMemReg(arg);
           memRegsForArg.push_back(memReg);
           SVFGNodeBS pts{getOrCreateUnknownObjId()};
@@ -543,7 +560,8 @@ void SVFGBuilder::buildFormalParmNodes() {
             memRegsForArg.push_back(memReg);
             SVFGNodeBS pts{objId};
 
-            // Avoid duplicating FormalIn/FormalOut for the same (Function, memReg).
+            // Avoid duplicating FormalIn/FormalOut for the same (Function,
+            // memReg).
             bool hasFormalIn = false;
             for (SVFGNode *n : svfg->getFormalIns(&F)) {
               if (auto *fi = dyn_cast<FormalInSVFGNode>(n)) {
@@ -555,8 +573,8 @@ void SVFGBuilder::buildFormalParmNodes() {
             }
             if (!hasFormalIn) {
               uint32_t formalInNodeId = nextNode();
-              auto *formalIn =
-                  new FormalInSVFGNode(formalInNodeId, nullptr, &F, memReg, pts);
+              auto *formalIn = new FormalInSVFGNode(formalInNodeId, nullptr, &F,
+                                                    memReg, pts);
               svfg->addNode(formalIn);
               svfg->addFormalIn(&F, formalIn);
             }
@@ -583,6 +601,17 @@ void SVFGBuilder::buildFormalParmNodes() {
         }
       }
     }
+
+    // Create VarArgSVFGNode for variadic functions
+    if (F.isVarArg()) {
+      uint32_t varArgNodeId = nextNode();
+      auto *varArgNode = new VarArgSVFGNode(varArgNodeId, nullptr, &F);
+      svfg->addNode(varArgNode);
+      svfg->addFormalParm(&F, varArgNode); // Treat as a formal parameter
+      // Note: valueToNode mapping is not needed here since vararg has no
+      // corresponding LLVM Argument. Call sites connect their extra args
+      // directly to this node via ActualParm → VarArg edges.
+    }
   }
 }
 
@@ -602,8 +631,9 @@ void SVFGBuilder::buildActualParmNodes() {
       if (!call)
         continue;
 
-      // Register (funPtrNodeId -> callsites) for SVF-style on-the-fly indirect-call refinement.
-      // Use the called operand's SVFG node id as the "funPtr" key.
+      // Register (funPtrNodeId -> callsites) for SVF-style on-the-fly
+      // indirect-call refinement. Use the called operand's SVFG node id as the
+      // "funPtr" key.
       if (!call->getCalledFunction()) {
         const Value *calledOp = call->getCalledOperand();
         if (calledOp)
@@ -630,8 +660,7 @@ void SVFGBuilder::buildActualParmNodes() {
           continue;
 
         uint32_t nodeId = nextNode();
-        auto *actualParm =
-            new ActualParmSVFGNode(nodeId, blockNode, call, idx);
+        auto *actualParm = new ActualParmSVFGNode(nodeId, blockNode, call, idx);
         svfg->addNode(actualParm);
         svfg->addActualParm(call, actualParm);
         auto argNodeIt = valueToNode.find(argVal);
@@ -645,7 +674,8 @@ void SVFGBuilder::buildActualParmNodes() {
       if (!config.buildMSSA)
         continue;
 
-      // Create ActualIn/ActualOut nodes for all memory regions reachable from pointer arguments.
+      // Create ActualIn/ActualOut nodes for all memory regions reachable from
+      // pointer arguments.
       std::unordered_set<uint32_t> createdMemRegs;
       for (unsigned i = 0; i < numArgs; ++i) {
         const Value *argVal = call->getArgOperand(i);

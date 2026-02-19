@@ -621,6 +621,36 @@ public:
     }
 
     //===------------------------------------------------------------------===
+    // Global store tracking (for global initializer handling)
+    //===------------------------------------------------------------------===
+    
+    /// @brief Set of global store SVFG nodes (stores to globals in initializers)
+    /// Mirrors SVF's globalVFGNodes for connectFromGlobalToProgEntry
+    using GlobalSVFGNodeSet = std::set<SVFGNode*>;
+    
+    /// @brief Add a store node to the global store set
+    inline void addGlobalStoreNode(SVFGNode* node) {
+        if (node && node->isStmtNode()) {
+            globalStoreNodes.insert(node);
+        }
+    }
+    
+    /// @brief Get all global store nodes
+    inline const GlobalSVFGNodeSet& getGlobalStoreNodes() const {
+        return globalStoreNodes;
+    }
+    
+    /// @brief Get all global store nodes (mutable)
+    inline GlobalSVFGNodeSet& getGlobalStoreNodes() {
+        return globalStoreNodes;
+    }
+    
+    /// @brief Check if a node is a global store node
+    inline bool isGlobalStoreNode(SVFGNode* node) const {
+        return globalStoreNodes.count(node) != 0;
+    }
+    
+    //===------------------------------------------------------------------===
     // Graph algorithms
     //===------------------------------------------------------------------===
     
@@ -680,6 +710,10 @@ public:
 private:
     /// @brief Nodes that need updating when PTA changes
     SVFGNodeSet nodesForUpdate;
+    
+    /// @brief Global store nodes (stores to globals in initializers)
+    /// Used for connectFromGlobalToProgEntry to flow values from initializers to entry points
+    GlobalSVFGNodeSet globalStoreNodes;
 };
 
 } // namespace analysis

@@ -93,6 +93,9 @@ enum class SVFGK : uint32_t {
   FormalRet,
   ActualRet,
 
+  // Variadic argument node (for vararg functions)
+  VarArg,
+
   // Memory SSA entry/exit
   FormalIn,
   FormalOut,
@@ -174,8 +177,8 @@ enum class SVFGEdgeK : uint32_t {
 inline bool isStmtSVFGNode(SVFGK k) {
   return k == SVFGK::Stmt || k == SVFGK::Addr || k == SVFGK::Copy ||
          k == SVFGK::Load || k == SVFGK::Store || k == SVFGK::Gep ||
-         k == SVFGK::BinaryOp || k == SVFGK::UnaryOp ||
-         k == SVFGK::Cmp || k == SVFGK::Branch;
+         k == SVFGK::BinaryOp || k == SVFGK::UnaryOp || k == SVFGK::Cmp ||
+         k == SVFGK::Branch;
 }
 
 /// @brief Check if node kind is a memory SSA node
@@ -203,10 +206,10 @@ inline bool isMPhiSVFGNode(SVFGK k) {
   return k == SVFGK::MPhi || k == SVFGK::MIntraPhi || k == SVFGK::MInterPhi;
 }
 
-/// @brief Check if node kind is a parameter node
+/// @brief Check if node kind is a parameter node (includes vararg)
 inline bool isParamSVFGNode(SVFGK k) {
   return k == SVFGK::FormalParm || k == SVFGK::ActualParm ||
-         k == SVFGK::FormalRet || k == SVFGK::ActualRet;
+         k == SVFGK::FormalRet || k == SVFGK::ActualRet || k == SVFGK::VarArg;
 }
 
 /// @brief Check if edge kind is intra-procedural
@@ -266,14 +269,10 @@ inline bool isThreadMHPVFGEdge(SVFGEdgeK k) {
 /// logically direct flows, so we include them here so that clients using
 /// isDirectVFGEdge() work correctly.
 inline bool isDirectVFGEdge(SVFGEdgeK k) {
-  return k == SVFGEdgeK::IntraDirect  ||
-         k == SVFGEdgeK::IntraCopy    ||
-         k == SVFGEdgeK::IntraGep     ||
-         k == SVFGEdgeK::IntraPhi     ||
-         k == SVFGEdgeK::IntraCmp     ||
-         k == SVFGEdgeK::IntraBranch  ||
-         k == SVFGEdgeK::CallDir      ||
-         k == SVFGEdgeK::RetDir;
+  return k == SVFGEdgeK::IntraDirect || k == SVFGEdgeK::IntraCopy ||
+         k == SVFGEdgeK::IntraGep || k == SVFGEdgeK::IntraPhi ||
+         k == SVFGEdgeK::IntraCmp || k == SVFGEdgeK::IntraBranch ||
+         k == SVFGEdgeK::CallDir || k == SVFGEdgeK::RetDir;
 }
 
 } // namespace analysis

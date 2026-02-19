@@ -378,16 +378,8 @@ void BugReportMgr::print_summary(llvm::raw_ostream& OS) const {
             continue;
         }
         
-        int valid_count = 0;
-        for (const BugReport* report : *bt_reports) {
-            if (report->is_valid()) {
-                valid_count++;
-            }
-        }
-        
         OS << bt.bug_name << " (" << bt.desc << ")\n";
-        OS << "  Total: " << bt_reports->size() 
-           << " | Valid: " << valid_count << "\n\n";
+        OS << "  Total: " << bt_reports->size() << "\n\n";
         
         total += bt_reports->size();
     }

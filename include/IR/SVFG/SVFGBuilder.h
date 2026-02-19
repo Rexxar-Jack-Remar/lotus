@@ -356,6 +356,12 @@ private:
   void buildInterproceduralMemoryPHINodes();
   void connectMemorySSAEdges();
   void buildInterproceduralEdges();
+  
+  /// @brief Connect global initializer stores to program entry points
+  /// Mirrors SVF's SVFG::connectFromGlobalToProgEntry
+  /// Connects stores to globals in initializer functions to EntryChi nodes
+  /// at the program entry (main or other entry functions)
+  void connectFromGlobalToProgEntry();
 
   //===------------------------------------------------------------------===
   // Node building

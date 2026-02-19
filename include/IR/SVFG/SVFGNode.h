@@ -735,6 +735,35 @@ public:
   SVFG_NODE_KIND(ActualRet)
 };
 
+/// @brief Variadic argument node (for vararg functions)
+///
+/// Represents the unique vararg parameter of a variadic function.
+/// In SVF, this corresponds to VarArgValPN which serves as a single
+/// formal parameter node that receives all extra arguments passed
+/// beyond the declared parameters.
+///
+/// For example, given:
+///   void foo(int x, ...) { ... }
+///   foo(1, 2, 3, 4);  // x=1, varargs=[2,3,4]
+///
+/// The VarArgSVFGNode for 'foo' receives value-flow from actual
+/// parameters at index 1, 2, and 3 of the callsite.
+class VarArgSVFGNode : public SVFGNode {
+private:
+  const llvm::Function *func;
+
+public:
+  VarArgSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Function *f)
+      : SVFGNode(id, SVFGK::VarArg, icfg), func(f) {}
+
+  const llvm::Function *getFunction() const override { return func; }
+
+  /// @brief Vararg nodes are always pointer-typed (they receive pointer args)
+  inline bool isPointer() const { return true; }
+
+  SVFG_NODE_KIND(VarArg)
+};
+
 /// @brief Null pointer node
 class NullPtrSVFGNode : public SVFGNode {
 public:
