@@ -1,14 +1,14 @@
 #include "Checker/Pulse/Checker/PulseChecker.h"
 #include "Checker/Pulse/Checker/PulseCheckerUtils.h"
-#include "Checker/Pulse/Report/PulseDiagnostic.h"
 #include "Checker/Pulse/Core/PulseFormula.h"
-#include "Checker/Pulse/Domain/PulseInvalidation.h"
-#include "Checker/Pulse/Report/PulseLogger.h"
-#include "Checker/Pulse/Interproc/PulseModels.h"
-#include "Checker/Pulse/Report/PulseReport.h"
-#include "Checker/Pulse/Interproc/PulseSpecialization.h"
 #include "Checker/Pulse/Core/PulseSubstitution.h"
+#include "Checker/Pulse/Domain/PulseInvalidation.h"
 #include "Checker/Pulse/Domain/PulseTaint.h"
+#include "Checker/Pulse/Interproc/PulseModels.h"
+#include "Checker/Pulse/Interproc/PulseSpecialization.h"
+#include "Checker/Pulse/Report/PulseDiagnostic.h"
+#include "Checker/Pulse/Report/PulseLogger.h"
+#include "Checker/Pulse/Report/PulseReport.h"
 
 #include <functional>
 #include <limits>
@@ -426,7 +426,33 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
     // Check for null pointer (only if not invalid)
     // DON'T report NullDereference if Invalid is present (UseAfterFree takes
     // priority) NPD checker: only report if source is a null constant
-    if (!astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid)) {
+    // Skip null check if load is used as argument to free() - free(NULL) is safe
+    // Check if the load result (LI as a Value) is used in a free() call
+    bool is_used_in_free = false;
+    const llvm::Value *load_value = LI; // LoadInst is also a Value
+    for (const auto *user : load_value->users()) {
+      if (const auto *CI = llvm::dyn_cast<llvm::CallInst>(user)) {
+        // Check if any argument is the load result
+        for (unsigned i = 0; i < CI->arg_size(); ++i) {
+          const llvm::Value *arg = CI->getArgOperand(i);
+          // Strip bitcasts
+          while (const auto *BC = llvm::dyn_cast<llvm::BitCastInst>(arg)) {
+            arg = BC->getOperand(0);
+          }
+          if (arg == load_value) {
+            if (const auto *F = CI->getCalledFunction()) {
+              if (F->getName() == "free") {
+                is_used_in_free = true;
+                break;
+              }
+            }
+          }
+        }
+        if (is_used_in_free) break;
+      }
+    }
+    
+    if (!astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid) && !is_used_in_free) {
       if (astate->getPathFormula().isNull(loaded_ptr) ||
           (astate->getPostAttrs().has(loaded_ptr, Attribute::Null) &&
            !astate->getPathFormula().isNonNull(loaded_ptr))) {
@@ -728,6 +754,19 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
       AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
       astate->getPostAttrs().remove(canon_ptr, Attribute::Uninitialized);
 
+      // Fix for realloc pattern: when storing a realloc result back to the original variable,
+      // invalidate the old value (since realloc succeeded and old memory is now invalid).
+      // This handles: int *new_p = realloc(p, size); p = new_p;
+      AbstractValue canon_value = astate->getCanonical(value_opt->addr);
+      if (astate->getPostAttrs().has(canon_value, Attribute::Allocated) &&
+          !astate->getPostAttrs().has(canon_value, Attribute::Invalid)) {
+        // This is a valid allocation (likely from realloc). Since we're storing it back
+        // to the original variable, the old value is now invalid (realloc succeeded).
+        // Invalidate the old value, then update the stack map with the new value.
+        ops_.invalidate(*astate, *ptr_opt, SI, InvalidationKind::Realloc);
+      }
+
+      // Update stack map with new value
       astate->getPostStack().add(ptr_operand, *value_opt);
     }
     // Only record copy if it's not a pointer type

@@ -93,3 +93,26 @@ else()
     -Wl,--no-whole-archive
   )
 endif()
+
+# AE: Abstract Execution bug checker (buffer overflow, null pointer dereference)
+add_executable(lotus-ae lotus-ae.cpp)
+llvm_map_components_to_libnames(_ae_components IRReader Support)
+target_link_libraries(lotus-ae PRIVATE
+  ${_ae_components}
+  ${LLVM_LINK_COMPONENTS}
+)
+# Force linkage of all symbols from AE library
+if(APPLE)
+  target_link_options(lotus-ae PRIVATE
+    -Wl,-force_load,$<TARGET_FILE:AE>
+  )
+  target_link_libraries(lotus-ae PRIVATE AE)
+else()
+  target_link_options(lotus-ae PRIVATE
+    -Wl,--whole-archive
+  )
+  target_link_libraries(lotus-ae PRIVATE AE)
+  target_link_options(lotus-ae PRIVATE
+    -Wl,--no-whole-archive
+  )
+endif()

@@ -492,12 +492,12 @@ ModelResult PulseModels::modelRealloc(const llvm::CallInst* call, ExecutionDomai
     
     // realloc(NULL, size) behaves like malloc(size). Skip invalidation only
     // when NULL is proven by the current path condition.
-    if (ptr_opt) {
-        AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
-        if (!astate->getPathFormula().isNull(canon_ptr)) {
-            ops_.invalidate(*astate, *ptr_opt, call, InvalidationKind::Realloc);
-        }
-    }
+    // IMPORTANT: Don't invalidate the old pointer here! realloc only invalidates
+    // the old pointer if it succeeds. If realloc fails (returns NULL), the old
+    // pointer remains valid. We'll handle invalidation when we see the assignment
+    // p = new_p (which indicates realloc succeeded). This prevents false positives.
+    // The invalidation happens in PulseCheckerInstructions.cpp::handleStore()
+    // when we see p = new_p.
     
     // And then behaves like malloc
     AbstractValue ret_val = factory_.createFresh(call);
