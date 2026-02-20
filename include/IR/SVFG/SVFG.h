@@ -30,6 +30,15 @@
 // - Points-to set management
 // - Graph algorithms (reachability, slicing)
 //
+// DDA-facing contract (important):
+// - Object IDs carried in SVFG edge guards are abstract memory objects, not
+//   SVFG node IDs.
+// - `getObjectValue(objId)` and `getObjectInfo(objId)` provide metadata used by
+//   demand-driven analyses for filtering (constant objects, unknown wildcard,
+//   function objects, etc.).
+// - Indirect callsite indices (`getIndCallSites*`) support on-the-fly call-edge
+//   materialization during demand solving.
+//
 //===----------------------------------------------------------------------===//
 
 #pragma once
@@ -135,11 +144,16 @@ public:
     using const_iterator = SVFGNodeMap::const_iterator;
 
     /// @brief Object metadata for DDA (heap/stack/field-insensitive/etc.).
+    ///
+    /// This metadata is monotonic and merged by OR in updateObjectInfo().
+    /// It is intentionally conservative: once an object is marked as unknown,
+    /// constant, field-insensitive, etc., the bit remains set.
     struct ObjectInfo {
         bool isHeap = false;
         bool isStack = false;
         bool isGlobal = false;
         bool isFunction = false;
+        bool isConstant = false;
         bool isFieldInsensitive = false;
         bool isArray = false;
         bool isUnknown = false;
@@ -185,6 +199,8 @@ private:
     SVFGStat stat;
 
     /// @brief Debug labels for abstract objects used in points-to sets.
+    ///
+    /// Keys are object IDs (abstract objects), not SVFG node IDs.
     std::unordered_map<uint32_t, std::string> objectDebug;
     std::unordered_map<uint32_t, const llvm::Value *> objIdToValue;
     std::unordered_map<const llvm::Value *, uint32_t> valueToObjId;
@@ -193,6 +209,9 @@ private:
     std::unordered_map<uint32_t, std::string> nodeCallSiteDebug;
 
     /// @brief Indirect-callsite indices used by DDA for on-the-fly call graph refinement.
+    ///
+    /// `funPtrToIndCallSites` indexes unresolved indirect callsites by the
+    /// defining function-pointer node ID.
     std::unordered_map<uint32_t, std::unordered_set<const llvm::CallBase *>>
         funPtrToIndCallSites;
     std::unordered_map<const llvm::CallBase *,
@@ -504,6 +523,10 @@ public:
     }
 
     /// @brief Return true if (cs, callee) was newly marked as connected.
+    ///
+    /// This API is used by on-the-fly indirect-call resolution:
+    /// once a function-pointer query discovers a concrete callee, builder/DDA
+    /// records connectivity here and can then insert call/ret edges.
     inline bool markConnectedCallee(const llvm::CallBase *cs,
                                     const llvm::Function *callee) {
         if (!cs || !callee) return false;
@@ -539,6 +562,9 @@ public:
                            const llvm::Function *callee) const;
 
     /// @brief Set object metadata for an abstract object ID.
+    ///
+    /// Intended for first-write initialization. For refinement/merge paths,
+    /// use updateObjectInfo().
     inline void setObjectInfo(uint32_t objId, const ObjectInfo &info) {
         if (objId == 0) return;
         objIdToInfo[objId] = info;
@@ -552,6 +578,7 @@ public:
         dst.isStack = dst.isStack || info.isStack;
         dst.isGlobal = dst.isGlobal || info.isGlobal;
         dst.isFunction = dst.isFunction || info.isFunction;
+        dst.isConstant = dst.isConstant || info.isConstant;
         dst.isFieldInsensitive = dst.isFieldInsensitive || info.isFieldInsensitive;
         dst.isArray = dst.isArray || info.isArray;
         dst.isUnknown = dst.isUnknown || info.isUnknown;
@@ -579,6 +606,10 @@ public:
     }
     inline bool isFunctionObject(uint32_t objId) const {
         if (const ObjectInfo *info = getObjectInfo(objId)) return info->isFunction;
+        return false;
+    }
+    inline bool isConstantObject(uint32_t objId) const {
+        if (const ObjectInfo *info = getObjectInfo(objId)) return info->isConstant;
         return false;
     }
     inline bool isFieldInsensitiveObject(uint32_t objId) const {

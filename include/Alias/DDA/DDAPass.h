@@ -22,6 +22,7 @@
 
 namespace llvm {
 class Module;
+class Value;
 } // namespace llvm
 
 namespace lotus {
@@ -50,12 +51,16 @@ public:
   void selectClient(DDAClientKind k);
   void setClient(std::unique_ptr<DDAClient> client);
   DDAClient *getClient() const { return client_.get(); }
+  /// Add one explicit query pointer (switches client to user-query mode).
+  void addQuery(const llvm::Value *v);
 
   void setDDAKind(DDAKind k) { kind_ = k; }
   DDAKind getDDAKind() const { return kind_; }
 
   FlowDDA *getFlowDDA() const { return flowDDA_.get(); }
   ContextDDA *getContextDDA() const { return contextDDA_.get(); }
+  /// Convenience alias query over the current FlowDDA results.
+  bool mayAlias(const llvm::Value *v1, const llvm::Value *v2) const;
 
 private:
   void runPointerAnalysis(llvm::Module &M, DDAKind k);

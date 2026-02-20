@@ -36,9 +36,26 @@ void DDAPass::setClient(std::unique_ptr<DDAClient> client) {
   client_ = std::move(client);
 }
 
+void DDAPass::addQuery(const llvm::Value *v) {
+  if (!client_)
+    selectClient(DDAClientKind::All);
+  if (client_)
+    client_->addQuery(v);
+}
+
+bool DDAPass::mayAlias(const llvm::Value *v1, const llvm::Value *v2) const {
+  if (!flowDDA_)
+    return true;
+  return flowDDA_->mayAlias(v1, v2);
+}
+
 void DDAPass::runOnModule(Module &M) {
   if (!client_)
+    selectClient(DDAClientKind::All);
+  if (!client_)
     return;
+  // Build FlowDDA first in all modes because ContextDDA reuses the same SVFG,
+  // recursion metadata, and helper queries through FlowDDA.
   runPointerAnalysis(M, kind_);
 }
 
@@ -49,12 +66,13 @@ void DDAPass::runPointerAnalysis(Module &M, DDAKind k) {
   flowDDA_->setClient(client_.get());
   switch (k) {
   case DDAKind::FlowS_DDA:
+    // Pure flow-sensitive demand solving.
     flowDDA_->answerQueries();
     break;
   case DDAKind::Cxt_DDA:
+    // Context-sensitive layer on top of the same flow-sensitive SVFG.
     contextDDA_ = std::make_unique<ContextDDA>(flowDDA_.get(), client_.get());
     contextDDA_->run(M);
-    contextDDA_->initInsensitiveEdges();
     contextDDA_->answerQueries();
     break;
   }

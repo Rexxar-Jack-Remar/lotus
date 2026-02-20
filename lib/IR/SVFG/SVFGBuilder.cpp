@@ -434,6 +434,12 @@ SVFGNodeBS SVFGBuilder::convertPTAObjectsToObjIDs(
     info.isGlobal = obj->isGlobalObj();
     info.isFieldInsensitive = obj->isFIObject();
     const Value *val = obj->getValue();
+    if (val) {
+      if (const auto *gv = dyn_cast<GlobalVariable>(val))
+        info.isConstant = gv->isConstant();
+      else
+        info.isConstant = isa<Constant>(val);
+    }
     if (val && val->getType()->isPointerTy()) {
       if (const Type *elemTy = val->getType()->getPointerElementType()) {
         info.isArray = elemTy->isArrayTy();
@@ -611,6 +617,10 @@ uint32_t SVFGBuilder::getOrCreateUnknownObjId() {
     svfg->setObjectInfo(unknownObjId, info);
   }
   return unknownObjId;
+}
+
+uint32_t SVFGBuilder::getUnknownObjId() {
+  return getOrCreateUnknownObjId();
 }
 
 std::vector<const void *>

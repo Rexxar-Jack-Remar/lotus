@@ -15,8 +15,11 @@
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/raw_ostream.h>
 
+#include <set>
 #include <unordered_set>
+#include <vector>
 
 using namespace lotus::analysis;
 using namespace llvm;
@@ -32,10 +35,12 @@ std::vector<const llvm::Value *> &DDAClient::collectCandidateQueries() {
   if (!svfg_)
     return candidateQueries_;
   if (!solveAll_) {
+    // User-specified query mode: trust explicit pointer list.
     for (const llvm::Value *v : userQueries_)
       addCandidate(v);
     return candidateQueries_;
   }
+  // Default mode: query all top-level pointer-like SVFG statements.
   for (auto it = svfg_->begin(), e = svfg_->end(); it != e; ++it) {
     SVFGNode *node = it->second;
     if (!node)
@@ -54,6 +59,7 @@ void DDAClient::answerQueries(FlowDDA *dda) {
     return;
   setSVFG(dda->getSVFG());
   collectCandidateQueries();
+  // Force demand solving per candidate; results are cached in FlowDDA.
   for (const llvm::Value *ptr : candidateQueries_)
     (void)dda->getPointsTo(ptr);
   performStat(dda);
@@ -67,6 +73,7 @@ std::vector<const llvm::Value *> &FunptrDDAClient::collectCandidateQueries() {
     return candidateQueries_;
   }
   if (svfg_) {
+    // Prefer SVFG's indirect-call map: it includes on-the-fly connected sites.
     for (const auto &pair : svfg_->getIndCallSiteMap()) {
       for (const llvm::CallBase *cb : pair.second) {
         if (!cb || cb->getCalledFunction())
@@ -81,6 +88,7 @@ std::vector<const llvm::Value *> &FunptrDDAClient::collectCandidateQueries() {
   }
   if (!module_)
     return candidateQueries_;
+  // Fallback when SVFG map is unavailable: scan IR for unresolved calls.
   for (const Function &F : *module_) {
     for (const BasicBlock &BB : F) {
       for (const Instruction &I : BB) {
@@ -97,8 +105,57 @@ std::vector<const llvm::Value *> &FunptrDDAClient::collectCandidateQueries() {
 }
 
 void FunptrDDAClient::performStat(FlowDDA *dda) {
-  (void)dda;
-  // Optional: compare with baseline PTA, count resolved targets, etc.
+  if (!dda || !module_)
+    return;
+
+  uint32_t totalCallsites = 0;
+  uint32_t zeroTargetCallsites = 0;
+  uint32_t oneTargetCallsites = 0;
+  uint32_t twoTargetCallsites = 0;
+  uint32_t moreThanTwoCallsites = 0;
+
+  for (const Function &F : *module_) {
+    if (F.isDeclaration())
+      continue;
+    for (const BasicBlock &BB : F) {
+      for (const Instruction &I : BB) {
+        const CallBase *cb = dyn_cast<CallBase>(&I);
+        if (!cb || cb->getCalledFunction())
+          continue;
+        const Value *called = cb->getCalledOperand();
+        if (!called || !called->getType()->isPointerTy())
+          continue;
+
+        ++totalCallsites;
+        std::unordered_set<const Function *> targetFuncs;
+        const auto pts = dda->getPointsTo(called);
+        for (uint32_t objId : pts) {
+          if (const Value *v = dda->getSVFGConst()
+                                   ? dda->getSVFGConst()->getObjectValue(objId)
+                                   : nullptr) {
+            if (const auto *callee = dyn_cast<Function>(v))
+              targetFuncs.insert(callee);
+          }
+        }
+
+        if (targetFuncs.empty())
+          ++zeroTargetCallsites;
+        else if (targetFuncs.size() == 1)
+          ++oneTargetCallsites;
+        else if (targetFuncs.size() == 2)
+          ++twoTargetCallsites;
+        else
+          ++moreThanTwoCallsites;
+      }
+    }
+  }
+
+  llvm::outs() << "=== FunptrDDAClient Stats ===\n";
+  llvm::outs() << "Indirect callsites: " << totalCallsites << "\n";
+  llvm::outs() << "  zero-target: " << zeroTargetCallsites << "\n";
+  llvm::outs() << "  one-target: " << oneTargetCallsites << "\n";
+  llvm::outs() << "  two-target: " << twoTargetCallsites << "\n";
+  llvm::outs() << "  >2-target: " << moreThanTwoCallsites << "\n";
 }
 
 std::vector<const llvm::Value *> &AliasDDAClient::collectCandidateQueries() {
@@ -111,6 +168,7 @@ std::vector<const llvm::Value *> &AliasDDAClient::collectCandidateQueries() {
   if (!svfg_)
     return candidateQueries_;
   std::unordered_set<const llvm::Value *> seen;
+  // Alias-focused query set: pointer operands used by load/store/GEP.
   for (auto it = svfg_->begin(), e = svfg_->end(); it != e; ++it) {
     SVFGNode *node = it->second;
     if (!node)
@@ -136,6 +194,44 @@ std::vector<const llvm::Value *> &AliasDDAClient::collectCandidateQueries() {
 }
 
 void AliasDDAClient::performStat(FlowDDA *dda) {
-  (void)dda;
-  // Optional: run alias queries between load src / store dst pairs, etc.
+  if (!dda || !module_)
+    return;
+
+  std::vector<const Value *> loadPtrs;
+  std::vector<const Value *> storePtrs;
+  std::set<std::pair<const Value *, const Value *>> seenPairs;
+
+  for (const Function &F : *module_) {
+    if (F.isDeclaration())
+      continue;
+    for (const BasicBlock &BB : F) {
+      for (const Instruction &I : BB) {
+        if (const auto *LI = dyn_cast<LoadInst>(&I)) {
+          const Value *ptr = LI->getPointerOperand();
+          if (ptr && ptr->getType()->isPointerTy())
+            loadPtrs.push_back(ptr);
+        } else if (const auto *SI = dyn_cast<StoreInst>(&I)) {
+          const Value *ptr = SI->getPointerOperand();
+          if (ptr && ptr->getType()->isPointerTy())
+            storePtrs.push_back(ptr);
+        }
+      }
+    }
+  }
+
+  uint32_t totalPairs = 0;
+  uint32_t mayAliasPairs = 0;
+  for (const Value *lp : loadPtrs) {
+    for (const Value *sp : storePtrs) {
+      if (!seenPairs.insert(std::make_pair(lp, sp)).second)
+        continue;
+      ++totalPairs;
+      if (dda->mayAlias(lp, sp))
+        ++mayAliasPairs;
+    }
+  }
+
+  llvm::outs() << "=== AliasDDAClient Stats ===\n";
+  llvm::outs() << "Load/Store alias pairs: " << totalPairs << "\n";
+  llvm::outs() << "  may-alias pairs: " << mayAliasPairs << "\n";
 }

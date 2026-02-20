@@ -18,6 +18,7 @@
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
+#include <algorithm>
 #include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Dominators.h>
@@ -34,7 +35,35 @@
 using namespace llvm;
 using namespace lotus::analysis;
 
+namespace {
+
+// Conservative fallback prefers pointer-typed SSA values associated with the
+// query state. We consider both the current location's value and the object-id
+// mapped value, then union AserPTA-backed object IDs for all candidates.
+static std::vector<const Value *> collectFallbackPointerValues(const SVFG *svfg,
+                                                               const LocDPItem &dpm) {
+  std::vector<const Value *> values;
+  if (const SVFGNode *loc = dpm.getLoc()) {
+    if (const Value *locVal = loc->getValue()) {
+      if (locVal->getType()->isPointerTy())
+        values.push_back(locVal);
+    }
+  }
+  if (svfg) {
+    if (const Value *objVal = svfg->getObjectValue(dpm.getCurNodeID())) {
+      if (objVal->getType()->isPointerTy() &&
+          std::find(values.begin(), values.end(), objVal) == values.end()) {
+        values.push_back(objVal);
+      }
+    }
+  }
+  return values;
+}
+
+} // namespace
+
 uint32_t DPItem::maximumBudget = 100000u;
+uint32_t FlowDDA::defaultMaxBudget_ = 100000u;
 
 FlowDDA::FlowDDA() {
   ddaStat_ = std::make_unique<DDAStat>(this);
@@ -59,6 +88,8 @@ bool FlowDDA::handleBKCondition(LocDPItem &dpm, SVFGEdge *edge) {
 }
 
 void FlowDDA::handleOutOfBudgetDpm(const LocDPItem &dpm) {
+  // SVF-style conservative downgrade: seed cache with fallback points-to and
+  // remember this DPM as out-of-budget so later traversals do not recurse.
   const PtsSet conservativePts = getConservativeCPts(dpm);
   if (!conservativePts.empty())
     DDAVFSolver<uint32_t, std::unordered_set<uint32_t>, LocDPItem,
@@ -342,11 +373,10 @@ bool FlowDDA::isDirectEdge(SVFGEdge *e) {
   if (isIndirectEdge(e))
     return false;
   const SVFGEdgeK k = e->getEdgeKind();
-  return k == SVFGEdgeK::IntraCopy || k == SVFGEdgeK::IntraDirect ||
-         k == SVFGEdgeK::IntraPhi || k == SVFGEdgeK::IntraGep ||
-         k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
-         k == SVFGEdgeK::RetDir || k == SVFGEdgeK::RetInd ||
-         k == SVFGEdgeK::ParamCall || k == SVFGEdgeK::ParamRet ||
+  if (isDirectVFGEdge(k))
+    return true;
+  // Lotus-specific direct-flow edges not present in SVF's minimal edge lattice.
+  return k == SVFGEdgeK::ParamCall || k == SVFGEdgeK::ParamRet ||
          k == SVFGEdgeK::IntraCmp || k == SVFGEdgeK::IntraBranch;
 }
 
@@ -354,12 +384,7 @@ bool FlowDDA::isIndirectEdge(SVFGEdge *e) {
   if (!e)
     return false;
   const SVFGEdgeK k = e->getEdgeKind();
-  if (k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::ThreadMHPIndirectVF ||
-      k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
-      k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
-      k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
-      k == SVFGEdgeK::CallMu || k == SVFGEdgeK::CallChi ||
-      k == SVFGEdgeK::RetMu || k == SVFGEdgeK::EntryChi) {
+  if (isIndirectVFGEdge(k)) {
     return true;
   }
   // Memory SSA builder uses IntraPhi/IntraCopy between memory nodes. Treat
@@ -451,6 +476,8 @@ bool FlowDDA::isStrongUpdate(const PtsSet &dstPts,
 
 FlowDDA::PtsSet FlowDDA::getPointsTo(const Value *ptr) {
   PtsSet result;
+  if (ddaStat_)
+    ddaStat_->numQueries++;
   if (!initialized_ || !svfg_ || !ptr || !ptr->getType()->isPointerTy())
     return result;
 
@@ -473,11 +500,14 @@ FlowDDA::PtsSet FlowDDA::getPointsTo(const Value *ptr) {
   // fresh solver run so it is always consistent with the DPM caches.
   ptsCache_.clear();
   resetQuery();
-  LocDPItem::setMaxBudget(kDefaultMaxBudget);
+  LocDPItem::setMaxBudget(defaultMaxBudget_);
   LocDPItem dpm(defNode->getId(), defNode);
   (void)findPT(dpm);
-  if (isOutOfBudget())
+  if (isOutOfBudget()) {
+    if (ddaStat_)
+      ddaStat_->numOutOfBudgetQueries++;
     handleOutOfBudgetDpm(dpm);
+  }
   result = getCachedPointsTo(dpm);
   return result;
 }
@@ -693,19 +723,37 @@ bool FlowDDA::mayNull(const Value *ptr) {
 }
 
 FlowDDA::PtsSet FlowDDA::getConservativeCPts(const LocDPItem &dpm) const {
-  if (!svfg_)
+  if (!svfg_) {
+    if (svfgBuilder_) {
+      auto *builder = const_cast<SVFGBuilder *>(svfgBuilder_.get());
+      const uint32_t unknown = builder->getUnknownObjId();
+      if (unknown != 0)
+        return PtsSet{unknown};
+    }
     return PtsSet{};
-  const Value *v = nullptr;
-  if (const Value *objVal = svfg_->getObjectValue(dpm.getCurNodeID()))
-    v = objVal;
-  else if (const SVFGNode *loc = dpm.getLoc())
-    v = loc->getValue();
-  if (!v || !v->getType()->isPointerTy())
+  }
+  const std::vector<const Value *> values = collectFallbackPointerValues(svfg_.get(), dpm);
+  if (values.empty()) {
+    if (svfgBuilder_) {
+      auto *builder = const_cast<SVFGBuilder *>(svfgBuilder_.get());
+      const uint32_t unknown = builder->getUnknownObjId();
+      if (unknown != 0)
+        return PtsSet{unknown};
+    }
     return PtsSet{};
-  SVFGNodeBS ids = getObjectIdsForValue(v);
+  }
   PtsSet out;
-  for (uint32_t id : ids)
-    out.insert(id);
+  for (const Value *v : values) {
+    SVFGNodeBS ids = getObjectIdsForValue(v);
+    for (uint32_t id : ids)
+      out.insert(id);
+  }
+  if (out.empty() && svfgBuilder_) {
+    auto *builder = const_cast<SVFGBuilder *>(svfgBuilder_.get());
+    const uint32_t unknown = builder->getUnknownObjId();
+    if (unknown != 0)
+      out.insert(unknown);
+  }
   return out;
 }
 

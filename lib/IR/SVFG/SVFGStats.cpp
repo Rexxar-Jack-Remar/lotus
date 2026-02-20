@@ -128,8 +128,6 @@ bool SVFGStats::isSink(const SVFGNode *node) const {
 }
 
 void SVFGStats::performSCCAnalysis(const SVFGEdgeSet &insensitiveCalRetEdges) {
-  (void)insensitiveCalRetEdges;
-
   sccRep.clear();
   cycleNodes.clear();
 
@@ -143,6 +141,8 @@ void SVFGStats::performSCCAnalysis(const SVFGEdgeSet &insensitiveCalRetEdges) {
     auto &out = adj[node->getId()];
     out.reserve(node->getOutEdges().size());
     for (const SVFGEdge *edge : node->getOutEdges()) {
+      if (insensitiveCalRetEdges.count(edge))
+        continue;
       if (edge && edge->getDstNode()) {
         out.push_back(edge->getDstNode()->getId());
       }

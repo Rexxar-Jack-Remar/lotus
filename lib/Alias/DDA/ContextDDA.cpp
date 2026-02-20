@@ -13,6 +13,7 @@
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGStats.h"
 
+#include <algorithm>
 #include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
@@ -36,23 +37,16 @@ static bool isDirectEdgeImpl(SVFGEdge *e) {
   if (isIndirectEdgeImpl(e))
     return false;
   SVFGEdgeK k = e->getEdgeKind();
-  return k == SVFGEdgeK::IntraCopy || k == SVFGEdgeK::IntraDirect ||
-         k == SVFGEdgeK::IntraPhi || k == SVFGEdgeK::IntraGep ||
-         k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
-         k == SVFGEdgeK::RetDir || k == SVFGEdgeK::RetInd ||
-         k == SVFGEdgeK::ParamCall || k == SVFGEdgeK::ParamRet ||
+  if (isDirectVFGEdge(k))
+    return true;
+  return k == SVFGEdgeK::ParamCall || k == SVFGEdgeK::ParamRet ||
          k == SVFGEdgeK::IntraCmp || k == SVFGEdgeK::IntraBranch;
 }
 
 static bool isIndirectEdgeImpl(SVFGEdge *e) {
   if (!e) return false;
   SVFGEdgeK k = e->getEdgeKind();
-  if (k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::ThreadMHPIndirectVF ||
-      k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
-      k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
-      k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
-      k == SVFGEdgeK::CallMu || k == SVFGEdgeK::CallChi ||
-      k == SVFGEdgeK::RetMu || k == SVFGEdgeK::EntryChi) {
+  if (isIndirectVFGEdge(k)) {
     return true;
   }
   if (k == SVFGEdgeK::IntraPhi || k == SVFGEdgeK::IntraCopy ||
@@ -68,6 +62,7 @@ static bool isCallEdge(SVFGEdge *e) {
   if (!e) return false;
   SVFGEdgeK k = e->getEdgeKind();
   return k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
+         k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
          k == SVFGEdgeK::ParamCall;
 }
 
@@ -75,17 +70,29 @@ static bool isRetEdge(SVFGEdge *e) {
   if (!e) return false;
   SVFGEdgeK k = e->getEdgeKind();
   return k == SVFGEdgeK::RetDir || k == SVFGEdgeK::RetInd ||
+         k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
          k == SVFGEdgeK::ParamRet;
 }
 
-static const llvm::Value *getValueForCxtVar(const CxtLocDPItem &dpm, SVFG *svfg) {
-  if (!svfg)
-    return nullptr;
-  if (const llvm::Value *objVal = svfg->getObjectValue(dpm.getCurNodeID()))
-    return objVal;
-  if (const SVFGNode *loc = dpm.getLoc())
-    return loc->getValue();
-  return nullptr;
+static std::vector<const llvm::Value *>
+collectFallbackPointerValues(const CxtLocDPItem &dpm, SVFG *svfg) {
+  // Same conservative value collection policy as FlowDDA fallback.
+  std::vector<const llvm::Value *> values;
+  if (const SVFGNode *loc = dpm.getLoc()) {
+    if (const llvm::Value *locVal = loc->getValue()) {
+      if (locVal->getType()->isPointerTy())
+        values.push_back(locVal);
+    }
+  }
+  if (svfg) {
+    if (const llvm::Value *objVal = svfg->getObjectValue(dpm.getCurNodeID())) {
+      if (objVal->getType()->isPointerTy() &&
+          std::find(values.begin(), values.end(), objVal) == values.end()) {
+        values.push_back(objVal);
+      }
+    }
+  }
+  return values;
 }
 
 } // namespace
@@ -102,6 +109,8 @@ bool ContextDDA::run(llvm::Module &M) {
   if (!flowDDA_ || !flowDDA_->run(M))
     return false;
   buildRecursionInfo();
+  // Ensure ContextDDA is fully initialized even when used directly (outside DDAPass).
+  initInsensitiveEdges();
   return true;
 }
 
@@ -372,17 +381,27 @@ CxtPtSet ContextDDA::getConservativeCPts(const CxtLocDPItem &dpm) const {
   // Match SVF ContextDDA::getConservativeCPts: downgrade to FlowDDA
   if (!flowDDA_ || !getSVFG())
     return CxtPtSet{};
-  
-  const llvm::Value *v = getValueForCxtVar(dpm, getSVFG());
-  if (!v || !v->getType()->isPointerTy())
+
+  std::vector<const llvm::Value *> values =
+      collectFallbackPointerValues(dpm, getSVFG());
+  if (values.empty())
     return CxtPtSet{};
 
-  FlowDDA::PtsSet flowPts = flowDDA_->getPointsTo(v);
   CxtPtSet cxtPts;
   ContextCond cond;
-  for (uint32_t objId : flowPts) {
-    CxtVar var(cond, objId);
-    cxtPts.insert(var);
+  for (const llvm::Value *v : values) {
+    // Use AserPTA-backed object IDs through FlowDDA helper.
+    SVFGNodeBS objIds = flowDDA_->getObjectIdsForValue(v);
+    for (uint32_t objId : objIds) {
+      CxtVar var(cond, objId);
+      cxtPts.insert(var);
+    }
+  }
+  if (cxtPts.empty() && flowDDA_->getSVFGBuilder()) {
+    uint32_t unknown =
+        flowDDA_->getSVFGBuilder()->getUnknownObjId();
+    if (unknown != 0)
+      cxtPts.insert(CxtVar(cond, unknown));
   }
   return cxtPts;
 }
@@ -425,8 +444,8 @@ const CxtPtSet &ContextDDA::getEmptyCPtSetRef() const {
 bool ContextDDA::isTopLevelPtrStmt(const SVFGNode *stmt) const {
   if (!stmt)
     return false;
-  return !llvm::isa<LoadSVFGNode>(stmt) && !llvm::isa<StoreSVFGNode>(stmt) &&
-         !llvm::isa<LoadMuSVFGNode>(stmt) && !llvm::isa<StoreChiSVFGNode>(stmt);
+  // Match SVF DDAVFSolver default: top-level unless Store or memory node.
+  return stmt->getNodeKind() != SVFGK::Store && !stmt->isMemNode();
 }
 
 void ContextDDA::connectIndirectCallees(const CxtLocDPItem &dpm,
@@ -824,8 +843,10 @@ bool ContextDDA::isStrongUpdate(const CxtPtSet &dstPts,
 }
 
 const CxtPtSet &ContextDDA::computeDDAPts(const CxtVar &cxtVar) {
+  if (getDDAStat())
+    getDDAStat()->numQueries++;
   resetQuery();
-  DPItem::setMaxBudget(kDefaultMaxBudget);
+  DPItem::setMaxBudget(FlowDDA::getDefaultMaxBudget());
   SVFG *svfg = getSVFG();
   if (!svfg) {
     static const CxtPtSet empty;
@@ -843,6 +864,8 @@ const CxtPtSet &ContextDDA::computeDDAPts(const CxtVar &cxtVar) {
   CxtLocDPItem dpm(cxtVar, defNode);
   (void)findPT(dpm);
   if (isOutOfBudget()) {
+    if (getDDAStat())
+      getDDAStat()->numOutOfBudgetQueries++;
     insertOutOfBudgetDpm(dpm);
     handleOutOfBudgetDpm(dpm);
   }

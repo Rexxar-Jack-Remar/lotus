@@ -94,8 +94,9 @@ public:
   const llvm::Module *getModule() const { return module_; }
   bool isInitialized() const { return initialized_; }
 
-  /// Max steps per query (out-of-budget then fallback to base PTA).
-  static constexpr uint32_t kDefaultMaxBudget = 100000u;
+  /// Max steps per query (out-of-budget then fallback to conservative PTA).
+  static void setDefaultMaxBudget(uint32_t budget) { defaultMaxBudget_ = budget; }
+  static uint32_t getDefaultMaxBudget() { return defaultMaxBudget_; }
 
   /// Client for candidate queries and callbacks (SVF-style).
   void setClient(DDAClient *client) { client_ = client; }
@@ -188,6 +189,7 @@ private:
   std::unordered_set<const llvm::Function *> recursiveFunctions_;
   std::unordered_map<const llvm::Function *, std::unique_ptr<llvm::LoopInfo>>
       loopInfoMap_;
+  static uint32_t defaultMaxBudget_;
 };
 
 /// Backward-compatibility alias for code that still refers to DemandDrivenAA.

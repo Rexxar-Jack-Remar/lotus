@@ -139,7 +139,6 @@ private:
   DDAClient *client_;
   std::map<CxtLocDPItem, CxtLocDPItem> dpmToLoadDpmMap_;
   std::map<CxtLocDPItem, CxtVar> dpmToLoadCVarMap_;
-  static constexpr uint32_t kDefaultMaxBudget = 100000u;
   std::set<CxtLocDPItem> outOfBudgetDpms_;
   std::unordered_set<uint32_t> recursiveCallSiteIds_;
   /// Call/ret edges treated context-insensitively (recursion or value-flow cycle).

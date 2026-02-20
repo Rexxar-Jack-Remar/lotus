@@ -38,6 +38,14 @@
 // - Different solver: WavePropagation, DeepPropagation, PartialUpdateSolver
 // - Field-insensitive: Use FIMemModel instead of FSMemModel
 //
+// DDA-facing builder contract:
+// - Produces guard-bearing memory value-flow edges where guards are sets of
+//   abstract object IDs.
+// - Maintains stable object metadata/value mappings (objId -> Value/info).
+// - Provides unknown wildcard object ID for conservative fallback.
+// - Optionally leaves indirect call edges unresolved so demand analyses can
+//   connect them on-the-fly.
+//
 //===----------------------------------------------------------------------===//
 
 #pragma once
@@ -172,8 +180,10 @@ private:
   /// @brief Field-insensitive object ID per base object.
   std::unordered_map<uint32_t, uint32_t> baseObjToFIObjId;
 
-  /// @brief Singleton node ID used when a PTA object cannot be mapped.
-  /// This preserves soundness without creating unbounded numbers of dummy nodes.
+  /// @brief Singleton object ID used when a PTA object cannot be mapped.
+  ///
+  /// Semantics: wildcard object that may alias any object. This preserves
+  /// soundness without creating unbounded numbers of dummy objects.
   uint32_t unknownObjId = 0;
 
   /// @brief Next object ID for points-to sets.
@@ -260,6 +270,9 @@ private:
   std::unordered_map<const llvm::Argument *, std::vector<uint32_t>> argToMemRegs;
 
   /// @brief Value-flow edges at indirect call sites (for spurious-edge filtering).
+  ///
+  /// Used by optimization/update passes to avoid retaining stale speculative
+  /// inter-procedural edges when points-to information changes.
   std::unordered_set<SVFGEdge *> vfEdgesAtIndCallSite;
 
 public:
@@ -281,7 +294,7 @@ public:
 
   /// @brief Build SVFG from ICFG with AserPTA
   /// @param icfg Input ICFG
-  /// @return Built SVFG
+  /// @return Built SVFG (owned by the builder until release via caller usage).
   SVFG *build(const ICFG *icfg);
 
   /// @brief Get object IDs for a pointer/alloc value using PTA (best-effort).
@@ -308,11 +321,18 @@ public:
 
   /// @brief Get or create a field-insensitive object ID for base object.
   uint32_t getOrCreateFIObjId(uint32_t baseObjId);
+  /// @brief Return the wildcard unknown object id, creating it if necessary.
+  ///
+  /// The unknown object is used as conservative fallback in both SVFG building
+  /// (guard generation) and DDA out-of-budget fallback.
+  uint32_t getUnknownObjId();
 
   /// @brief Get indirect call targets using pointer analysis
   std::vector<const llvm::Function *> getIndirectCallTargets(const llvm::CallBase *call);
 
   /// @brief Build SVFG with configuration
+  ///
+  /// Convenience overload that applies \p cfg then performs build().
   SVFG *build(const ICFG *icfg, const SVFGBuilderConfig &cfg);
 
   //===------------------------------------------------------------------===
@@ -328,6 +348,9 @@ public:
   bool updateSVFG(SVFG *svfg);
 
   /// @brief Update memory SSA edges for nodes marked for update
+  ///
+  /// This is best-effort incremental maintenance; full rebuild remains the
+  /// correctness fallback for complex structural updates.
   void updateMemorySSAEdges(SVFG *svfg);
 
   /// @brief SVF-style on-the-fly connection of an indirect callsite to a callee.
@@ -403,8 +426,8 @@ private:
   /// @brief Get or create memory region for a global
   uint32_t getOrCreateMemReg(const llvm::GlobalVariable *global);
 
-  /// @brief Get points-to set for a pointer value using AserPTA
-  /// Returns a vector of FSObject pointers
+  /// @brief Get points-to set for a pointer value using AserPTA.
+  /// @return A vector of PTA object handles (opaque to SVFG layer).
   std::vector<const void *> getPointsToSet(const llvm::Value *ptr);
 
   /// @brief Convert PTA objects to object IDs for points-to sets.
@@ -414,6 +437,8 @@ private:
                                       bool keepFunctions = false);
 
   /// @brief Get or create a wildcard "unknown" object ID.
+  ///
+  /// Internal creator. Public read API is getUnknownObjId().
   uint32_t getOrCreateUnknownObjId();
 
 
@@ -437,6 +462,8 @@ private:
   bool isHeapAllocation(const llvm::Instruction *inst) const;
 
   /// @brief Check whether pointer value should participate in Memory SSA.
+  ///
+  /// This is the gate for creating Mu/Chi/Phi memory nodes and guarded edges.
   bool isAddressTakenPointer(const llvm::Value *ptr) const;
 
   /// @brief Return true when two memory nodes may alias via points-to overlap.

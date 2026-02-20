@@ -25,6 +25,8 @@ void DDAStat::printStat(const std::string &str) {
   llvm::outs() << "=== DDA Stat " << str << " ===\n";
   llvm::outs() << "  NumOfStep: " << numOfStep << "\n";
   llvm::outs() << "  NumOfDPM: " << numOfDPM << "\n";
+  llvm::outs() << "  NumQueries: " << numQueries << "\n";
+  llvm::outs() << "  NumOutOfBudgetQueries: " << numOutOfBudgetQueries << "\n";
   llvm::outs() << "  NumOfStrongUpdates: " << numOfStrongUpdates << "\n";
   llvm::outs() << "  NumOfMustAliases: " << numOfMustAliases << "\n";
   llvm::outs() << "  NumOfInfeasiblePath: " << numOfInfeasiblePath << "\n";

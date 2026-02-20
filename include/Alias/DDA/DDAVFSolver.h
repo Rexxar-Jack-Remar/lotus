@@ -22,6 +22,8 @@
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/Casting.h>
 
@@ -60,7 +62,13 @@ public:
   void setDDAStat(DDAStat *s) { ddaStat_ = s; }
   DDAStat *getDDAStat() const { return ddaStat_; }
 
-  /// Core: compute points-to for dpm; cache and return.
+  /// Core query primitive (memoized DFS on SVFG backward edges).
+  ///
+  /// - Reuses previously-computed points-to when `dpm` is already visited.
+  /// - Otherwise evaluates the current SVFG statement, updates the cache, and
+  ///   triggers forward re-computation for dependents when new facts appear.
+  /// - The concrete statement semantics are implemented in
+  ///   `handleSingleStatement` below.
   const CPtSet &findPT(const DPIm &dpm) {
     if (isbkVisited(dpm))
       return getCachedPointsTo(dpm);
@@ -76,6 +84,11 @@ public:
     return getCachedPointsTo(dpm);
   }
 
+  /// Reset per-query working state.
+  ///
+  /// Cache maps (`dpmToTLPtsMap_` / `dpmToADPtsMap_`) are intentionally kept
+  /// across queries to mimic SVF's reuse strategy; only traversal-local state
+  /// and step budget counters are cleared.
   void resetQuery() {
     if (outOfBudget_)
       OOBResetVisited();
@@ -91,6 +104,13 @@ public:
   void setOutOfBudget(bool b) { outOfBudget_ = b; }
 
 protected:
+  /// Evaluate one SVFG statement under demand item `dpm`.
+  ///
+  /// This implements the same high-level transfer decomposition as SVF:
+  /// - Address/copy-like statements: direct backtrace
+  /// - GEP: backtrace then field/offset filtering
+  /// - Load/store: split into nested sub-queries on memory objects
+  /// - Memory nodes: indirect backtrace
   void handleSingleStatement(const DPIm &dpm, CPtSet &pts) {
     const SVFGNode *node = dpm.getLoc();
     SVFG *svfg = derived().getSVFG();
@@ -103,11 +123,13 @@ protected:
       derived().handleAddr(pts, dpm, llvm::cast<AddrSVFGNode>(node));
       break;
     case SVFGK::Copy:
+    case SVFGK::UnaryOp:
     case SVFGK::Phi:
     case SVFGK::IntraPhi:
     case SVFGK::InterPhi:
     case SVFGK::FormalParm:
     case SVFGK::ActualParm:
+    case SVFGK::VarArg:
     case SVFGK::FormalRet:
     case SVFGK::ActualRet:
     case SVFGK::NullPtr:
@@ -213,10 +235,27 @@ protected:
     uint32_t obj = oldDpm.getCurNodeID();
     if (obj == 0)
       return;
+    if (svfg->isConstantObject(obj))
+      return;
+    // Match SVF DDAVFSolver behavior: skip constant objects when traversing
+    // indirect value-flow edges.
+    if (const llvm::Value *objVal = svfg->getObjectValue(obj)) {
+      // Non-global constants are immutable objects (e.g., constant expressions).
+      if (llvm::isa<llvm::Constant>(objVal) &&
+          !llvm::isa<llvm::GlobalValue>(objVal))
+        return;
+      // Constant globals are also immutable; skip indirect memory propagation.
+      if (const auto *gv = llvm::dyn_cast<llvm::GlobalVariable>(objVal)) {
+        if (gv->isConstant())
+          return;
+      }
+    }
     for (SVFGEdge *edge : node->getInEdges()) {
       if (!derived().isIndirectEdge(edge))
         continue;
       const std::set<uint32_t> &guard = edge->getPointsTo();
+      // Edge guard is object-sensitive. If the current object is not listed,
+      // only keep the path when a wildcard/unknown object is present.
       if (!guard.empty() && guard.count(obj) == 0) {
         bool hasWildcard = false;
         for (uint32_t id : guard) {
@@ -307,13 +346,17 @@ protected:
     SVFG *svfg = derived().getSVFG();
     if (!svfg)
       return;
-	    SVFGEdge *edge =
-	        svfg->getIntraVFGEdge(storeSrc, store, SVFGEdgeK::IntraDirect);
-	    if (!edge)
-	      return;
-	    backwardPropDpm(pts, storeSrc->getId(), oldDpm, edge);
-	  }
+    SVFGEdge *edge =
+        svfg->getIntraVFGEdge(storeSrc, store, SVFGEdgeK::IntraDirect);
+    if (!edge)
+      return;
+    backwardPropDpm(pts, storeSrc->getId(), oldDpm, edge);
+  }
 
+  /// Re-evaluate dependents when `dpm` got new points-to facts.
+  ///
+  /// This is the demand-driven refinement loop: when a query discovers new
+  /// facts, already-seen dependent DPMs are invalidated and recomputed.
   void reCompute(const DPIm &dpm) {
     const SVFGNode *node = dpm.getLoc();
     SVFG *svfg = derived().getSVFG();
@@ -454,12 +497,18 @@ protected:
     }
   }
 
+  /// Per-query DFS visited set (for termination on value-flow cycles).
   std::set<DPIm> backwardVisited_;
+  /// Cache for top-level pointer statements (TLP cache in SVF terminology).
   std::map<DPIm, CPtSet> dpmToTLPtsMap_;
+  /// Cache for address-taken/memory statements.
   std::map<DPIm, CPtSet> dpmToADPtsMap_;
+  /// Reverse dependency index: SVFG node -> DPMs currently waiting on it.
   std::map<uint32_t, std::set<DPIm>> locToDpmSetMap_;
   DDAStat *ddaStat_;
+  /// Number of transfer steps consumed in the current query.
   uint32_t numSteps_;
+  /// Sticky flag once the current query exceeds budget.
   bool outOfBudget_;
 };
 
