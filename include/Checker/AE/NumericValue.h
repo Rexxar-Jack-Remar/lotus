@@ -27,10 +27,10 @@ public:
     return *this;
   }
 
-  BoundedDouble(BoundedDouble &&rhs) : _fVal(std::move(rhs._fVal)) {}
+  BoundedDouble(BoundedDouble &&rhs) : _fVal(rhs._fVal) {}
 
   BoundedDouble &operator=(BoundedDouble &&rhs) {
-    _fVal = std::move(rhs._fVal);
+    _fVal = rhs._fVal;
     return *this;
   }
 

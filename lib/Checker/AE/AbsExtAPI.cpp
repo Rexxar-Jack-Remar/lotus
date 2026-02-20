@@ -359,7 +359,7 @@ void AEExtAPI::initExtFunMap() {
       return;
     }
     double rhs =
-        static_cast<double>(as[argId].getInterval().lb().getIntNumeral());
+        static_cast<double>(as[argId].getInterval().lb().getIntNumeralOrZero());
     double res = sin(rhs);
     uint32_t lhsId = getValueId(callNode);
     as[lhsId] = AbstractValue(IntervalValue(res, res));
@@ -376,7 +376,7 @@ void AEExtAPI::initExtFunMap() {
       return;
     }
     double rhs =
-        static_cast<double>(as[argId].getInterval().lb().getIntNumeral());
+        static_cast<double>(as[argId].getInterval().lb().getIntNumeralOrZero());
     double res = cos(rhs);
     uint32_t lhsId = getValueId(callNode);
     as[lhsId] = AbstractValue(IntervalValue(res, res));
@@ -393,7 +393,7 @@ void AEExtAPI::initExtFunMap() {
       return;
     }
     double rhs =
-        static_cast<double>(as[argId].getInterval().lb().getIntNumeral());
+        static_cast<double>(as[argId].getInterval().lb().getIntNumeralOrZero());
     double res = tan(rhs);
     uint32_t lhsId = getValueId(callNode);
     as[lhsId] = AbstractValue(IntervalValue(res, res));
@@ -410,7 +410,7 @@ void AEExtAPI::initExtFunMap() {
       return;
     }
     double rhs =
-        static_cast<double>(as[argId].getInterval().lb().getIntNumeral());
+        static_cast<double>(as[argId].getInterval().lb().getIntNumeralOrZero());
     double res = log(rhs);
     uint32_t lhsId = getValueId(callNode);
     as[lhsId] = AbstractValue(IntervalValue(res, res));
@@ -427,7 +427,7 @@ void AEExtAPI::initExtFunMap() {
       return;
     }
     double rhs =
-        static_cast<double>(as[argId].getInterval().lb().getIntNumeral());
+        static_cast<double>(as[argId].getInterval().lb().getIntNumeralOrZero());
     double res = sinh(rhs);
     uint32_t lhsId = getValueId(callNode);
     as[lhsId] = AbstractValue(IntervalValue(res, res));
@@ -443,7 +443,7 @@ void AEExtAPI::initExtFunMap() {
       return;
     }
     double rhs =
-        static_cast<double>(as[argId].getInterval().lb().getIntNumeral());
+        static_cast<double>(as[argId].getInterval().lb().getIntNumeralOrZero());
     double res = cosh(rhs);
     uint32_t lhsId = getValueId(callNode);
     as[lhsId] = AbstractValue(IntervalValue(res, res));
@@ -459,7 +459,7 @@ void AEExtAPI::initExtFunMap() {
       return;
     }
     double rhs =
-        static_cast<double>(as[argId].getInterval().lb().getIntNumeral());
+        static_cast<double>(as[argId].getInterval().lb().getIntNumeralOrZero());
     double res = tanh(rhs);
     uint32_t lhsId = getValueId(callNode);
     as[lhsId] = AbstractValue(IntervalValue(res, res));
@@ -475,7 +475,7 @@ void AEExtAPI::initExtFunMap() {
       return;
     }
     double rhs =
-        static_cast<double>(as[argId].getInterval().lb().getIntNumeral());
+        static_cast<double>(as[argId].getInterval().lb().getIntNumeralOrZero());
     double res = sqrt(rhs);
     uint32_t lhsId = getValueId(callNode);
     as[lhsId] = AbstractValue(IntervalValue(res, res));
@@ -577,10 +577,10 @@ void AEExtAPI::initExtFunMap() {
         IntervalValue size = as[sizeId].getInterval();
         if (size.is_numeral()) {
           // Exact size known
-          as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeral()));
+          as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
         } else {
           // Size is an interval - use upper bound conservatively
-          int64_t ub = size.ub().getIntNumeral();
+          int64_t ub = size.ub().getIntNumeralOrZero();
           if (ub > 0 && ub <= static_cast<int64_t>(MaxFieldLimit)) {
             as.setObjSize(objId, static_cast<uint32_t>(ub));
           } else {
@@ -619,7 +619,7 @@ void AEExtAPI::initExtFunMap() {
 
       // Calculate total size: nmemb * size
       int64_t totalSize =
-          nmemb.ub().getIntNumeral() * size.ub().getIntNumeral();
+          nmemb.ub().getIntNumeralOrZero() * size.ub().getIntNumeralOrZero();
       if (totalSize > 0 && totalSize <= static_cast<int64_t>(MaxFieldLimit)) {
         as.setObjSize(objId, static_cast<uint32_t>(totalSize));
       } else {
@@ -842,8 +842,8 @@ void AEExtAPI::initExtFunMap() {
     IntervalValue len(0, MaxRecvLen);
     if (as.inVarToValTable(lenId)) {
       len = as[lenId].getInterval() - IntervalValue(1);
-      if (len.lb().getIntNumeral() < 0) {
-        len = IntervalValue(0, len.ub().getIntNumeral());
+      if (len.lb().getIntNumeralOrZero() < 0) {
+        len = IntervalValue(0, len.ub().getIntNumeralOrZero());
       }
     }
 
@@ -927,7 +927,7 @@ void AEExtAPI::initExtFunMap() {
     IntervalValue maxSize(0, MaxFieldLimit);
     if (as.inVarToValTable(sizeId)) {
       maxSize = as[sizeId].getInterval();
-      if (maxSize.ub().getIntNumeral() > static_cast<int64_t>(MaxFieldLimit)) {
+      if (maxSize.ub().getIntNumeralOrZero() > static_cast<int64_t>(MaxFieldLimit)) {
         maxSize = IntervalValue(0, MaxFieldLimit);
       }
     }
@@ -935,7 +935,7 @@ void AEExtAPI::initExtFunMap() {
     // Model snprintf as writing a string with length bounded by size
     if (as.inVarToAddrsTable(strId)) {
       // Store null terminator at the end (within size limit)
-      uint32_t maxLen = static_cast<uint32_t>(maxSize.ub().getIntNumeral());
+      uint32_t maxLen = static_cast<uint32_t>(maxSize.ub().getIntNumeralOrZero());
       if (maxLen > 0 && maxLen < MaxFieldLimit) {
         AddressValue nullAddr =
             as.getGepObjAddrs(strId, IntervalValue(maxLen - 1));
@@ -1017,7 +1017,7 @@ void AEExtAPI::initExtFunMap() {
     }
 
     // Total bytes = size * nmemb (conservative multiplication)
-    int64_t totalBytes = size.ub().getIntNumeral() * nmemb.ub().getIntNumeral();
+    int64_t totalBytes = size.ub().getIntNumeralOrZero() * nmemb.ub().getIntNumeralOrZero();
     if (totalBytes > static_cast<int64_t>(MaxFieldLimit)) {
       totalBytes = MaxFieldLimit;
     }
@@ -1037,7 +1037,7 @@ void AEExtAPI::initExtFunMap() {
 
     // Return value is the number of items read (could be less than nmemb)
     uint32_t lhsId = getValueId(callNode);
-    IntervalValue itemsRead(0, nmemb.ub().getIntNumeral());
+    IntervalValue itemsRead(0, nmemb.ub().getIntNumeralOrZero());
     as[lhsId] = AbstractValue(itemsRead);
   };
   func_map["fread"] = sse_fread;
@@ -1060,7 +1060,7 @@ void AEExtAPI::initExtFunMap() {
       if (as.inVarToValTable(sizeId)) {
         IntervalValue size = as[sizeId].getInterval();
         if (size.is_numeral()) {
-          as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeral()));
+          as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
         } else {
           as.setObjSize(objId, MaxFieldLimit);
         }
@@ -1097,7 +1097,7 @@ void AEExtAPI::initExtFunMap() {
       if (as.inVarToValTable(sizeId)) {
         IntervalValue size = as[sizeId].getInterval();
         if (size.is_numeral()) {
-          as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeral()));
+          as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
         } else {
           as.setObjSize(objId, MaxFieldLimit);
         }
@@ -1139,7 +1139,7 @@ void AEExtAPI::initExtFunMap() {
     if (as.inVarToValTable(sizeId)) {
       IntervalValue size = as[sizeId].getInterval();
       if (size.is_numeral()) {
-        as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeral()));
+        as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
       } else {
         as.setObjSize(objId, MaxFieldLimit);
       }
@@ -1170,7 +1170,7 @@ void AEExtAPI::initExtFunMap() {
     if (as.inVarToValTable(sizeId))
       size = as[sizeId].getInterval();
 
-    int64_t totalSize = nmemb.ub().getIntNumeral() * size.ub().getIntNumeral();
+    int64_t totalSize = nmemb.ub().getIntNumeralOrZero() * size.ub().getIntNumeralOrZero();
     if (totalSize > 0 && totalSize <= static_cast<int64_t>(MaxFieldLimit)) {
       as.setObjSize(objId, static_cast<uint32_t>(totalSize));
     } else {
@@ -1196,7 +1196,7 @@ void AEExtAPI::initExtFunMap() {
       uint32_t objId = AddressValue::getInternalID(newAddr);
       // Estimate size from strlen of source
       IntervalValue len = getStrlen(as, srcId);
-      as.setObjSize(objId, static_cast<uint32_t>(len.ub().getIntNumeral()));
+      as.setObjSize(objId, static_cast<uint32_t>(len.ub().getIntNumeralOrZero()));
     }
   };
   func_map["strdup"] = sse_strdup;
@@ -1411,9 +1411,9 @@ void AEExtAPI::handleExtAlloc(const llvm::CallBase *call) {
       // Bounds are unbounded; getIntNumeral() would assert. Use conservative limit.
       as.setObjSize(objId, MaxFieldLimit);
     } else if (size.is_numeral()) {
-      as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeral()));
+      as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
     } else {
-      int64_t ub = size.ub().getIntNumeral();
+      int64_t ub = size.ub().getIntNumeralOrZero();
       if (ub > 0 && ub <= static_cast<int64_t>(MaxFieldLimit)) {
         as.setObjSize(objId, static_cast<uint32_t>(ub));
       } else {
@@ -1442,9 +1442,9 @@ void AEExtAPI::handleExtRealloc(const llvm::CallBase *call) {
       // Bounds are unbounded; getIntNumeral() would assert. Use conservative limit.
       as.setObjSize(objId, MaxFieldLimit);
     } else if (size.is_numeral()) {
-      as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeral()));
+      as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
     } else {
-      int64_t ub = size.ub().getIntNumeral();
+      int64_t ub = size.ub().getIntNumeralOrZero();
       if (ub > 0 && ub <= static_cast<int64_t>(MaxFieldLimit)) {
         as.setObjSize(objId, static_cast<uint32_t>(ub));
       } else {
@@ -1524,13 +1524,13 @@ void AEExtAPI::handleExtSnprintf(const llvm::CallBase *call) {
   IntervalValue maxSize(0, MaxFieldLimit);
   if (as.inVarToValTable(sizeId)) {
     maxSize = as[sizeId].getInterval();
-    if (maxSize.ub().getIntNumeral() > static_cast<int64_t>(MaxFieldLimit)) {
+    if (maxSize.ub().getIntNumeralOrZero() > static_cast<int64_t>(MaxFieldLimit)) {
       maxSize = IntervalValue(0, MaxFieldLimit);
     }
   }
 
   if (as.inVarToAddrsTable(strId)) {
-    uint32_t maxLen = static_cast<uint32_t>(maxSize.ub().getIntNumeral());
+    uint32_t maxLen = static_cast<uint32_t>(maxSize.ub().getIntNumeralOrZero());
     if (maxLen > 0 && maxLen < MaxFieldLimit) {
       AddressValue nullAddr =
           as.getGepObjAddrs(strId, IntervalValue(maxLen - 1));
@@ -1554,8 +1554,8 @@ void AEExtAPI::handleExtRecv(const llvm::CallBase *call) {
   IntervalValue len(0, MaxRecvLen);
   if (as.inVarToValTable(lenId)) {
     len = as[lenId].getInterval() - IntervalValue(1);
-    if (len.lb().getIntNumeral() < 0) {
-      len = IntervalValue(0, len.ub().getIntNumeral());
+    if (len.lb().getIntNumeralOrZero() < 0) {
+      len = IntervalValue(0, len.ub().getIntNumeralOrZero());
     }
   }
 
@@ -1582,7 +1582,7 @@ void AEExtAPI::handleStrcpy(const llvm::CallBase *call) {
   for (auto dstAddr : as[dstId].getAddrs()) {
     (void)as.getIDFromAddr(dstAddr); // Keep for potential future debugging
     uint32_t nullTerminatorAddr =
-        dstAddr + static_cast<uint32_t>(strLen.ub().getIntNumeral());
+        dstAddr + static_cast<uint32_t>(strLen.ub().getIntNumeralOrZero());
     as.store(nullTerminatorAddr, AbstractValue(IntervalValue(0, 0)));
   }
 }
@@ -1604,7 +1604,7 @@ void AEExtAPI::handleStrcat(const llvm::CallBase *call) {
 
   // Copy src to end of dst
   handleMemcpy(as, dstId, srcId, srcLen,
-               static_cast<uint32_t>(dstLen.ub().getIntNumeral()));
+               static_cast<uint32_t>(dstLen.ub().getIntNumeralOrZero()));
 }
 
 IntervalValue AEExtAPI::getStrlen(AbstractState &as, uint32_t strId) {
@@ -1658,7 +1658,7 @@ IntervalValue AEExtAPI::getStrlen(AbstractState &as, uint32_t strId) {
     // Check if this is a null terminator
     if (val.isInterval()) {
       IntervalValue interval = val.getInterval();
-      if (interval.is_numeral() && interval.getIntNumeral() == 0) {
+      if (interval.is_numeral() && interval.getIntNumeralOrZero() == 0) {
         foundNull = true;
         break;
       } else if (!interval.contains(0)) {
@@ -1708,8 +1708,8 @@ void AEExtAPI::handleMemcpy(AbstractState &as, uint32_t dstId, uint32_t srcId,
   int64_t lenLb = 0;
   int64_t lenUb = MaxCopyLen;
   if (!len.is_infinite()) {
-    lenLb = len.lb().getIntNumeral();
-    lenUb = len.ub().getIntNumeral();
+    lenLb = len.lb().getIntNumeralOrZero();
+    lenUb = len.ub().getIntNumeralOrZero();
     if (lenLb < 0)
       lenLb = 0;
     if (lenUb > static_cast<int64_t>(MaxCopyLen))
@@ -1784,8 +1784,8 @@ void AEExtAPI::handleMemset(AbstractState &as, uint32_t dstId,
   int64_t lenLb = 0;
   int64_t lenUb = MaxSetLen;
   if (!len.is_infinite()) {
-    lenLb = len.lb().getIntNumeral();
-    lenUb = len.ub().getIntNumeral();
+    lenLb = len.lb().getIntNumeralOrZero();
+    lenUb = len.ub().getIntNumeralOrZero();
     if (lenLb < 0)
       lenLb = 0;
     if (lenUb > static_cast<int64_t>(MaxSetLen))
@@ -1895,7 +1895,7 @@ std::string AEExtAPI::strRead(AbstractState &as, uint32_t strId) {
     if (val.isInterval()) {
       IntervalValue interval = val.getInterval();
       if (interval.is_numeral()) {
-        int64_t charVal = interval.getIntNumeral();
+        int64_t charVal = interval.getIntNumeralOrZero();
         if (charVal == 0) {
           // Null terminator found
           break;
@@ -1954,7 +1954,7 @@ void AEExtAPI::handleExtAllocArg0(const llvm::CallBase *call) {
     if (as.inVarToValTable(sizeId)) {
       IntervalValue size = as[sizeId].getInterval();
       if (size.is_numeral()) {
-        as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeral()));
+        as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
       } else {
         as.setObjSize(objId, MaxFieldLimit);
       }

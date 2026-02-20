@@ -220,8 +220,8 @@ void AbstractInterpretation::handleGlobalNode() {
           AddressValue(AddressValue::getVirtualMemAddress(globalId)));
     } else if (global.getValueType()->isIntegerTy()) {
       if (global.hasInitializer()) {
-        if (llvm::ConstantInt *ci = llvm::dyn_cast<llvm::ConstantInt>(
-                global.getInitializer())) {
+        if (llvm::ConstantInt *ci =
+                llvm::dyn_cast<llvm::ConstantInt>(global.getInitializer())) {
           globalState[globalId] =
               AbstractValue(IntervalValue(ci->getSExtValue()));
         } else {
@@ -1498,9 +1498,83 @@ void AbstractInterpretation::updateStateOnRet(const llvm::ReturnInst *ret) {
   if (ret->getReturnValue()) {
     uint32_t retId = getValueId(ret->getReturnValue());
     AbstractState &as = abstractTrace[ret];
-    // Store return value for caller
     abstractTrace[ret][0] = as[retId];
   }
+}
+
+void AbstractInterpretation::updateStateOnCallPE(const llvm::CallBase *call,
+                                                 const llvm::Function *callee,
+                                                 AbstractState &callState) {
+  if (!callee || callee->isDeclaration())
+    return;
+
+  for (unsigned i = 0; i < call->arg_size() && i < callee->arg_size(); ++i) {
+    const llvm::Value *argOp = call->getArgOperand(i);
+    uint32_t argId = getValueId(argOp);
+    uint32_t paramId = getValueId(callee->getArg(i));
+
+    AbstractValue argVal;
+    bool hasArgVal = false;
+
+    auto argIt = callState._varToAbsVal.find(argId);
+    if (argIt != callState._varToAbsVal.end()) {
+      argVal = argIt->second;
+      hasArgVal = true;
+    }
+
+    if (!hasArgVal) {
+      if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(argOp)) {
+        uint32_t basePtrId = getValueId(load->getPointerOperand());
+        argVal = callState.loadValue(basePtrId);
+        if (!argVal.getAddrs().isBottom() || !argVal.getInterval().isBottom()) {
+          hasArgVal = true;
+        }
+      }
+    }
+
+    if (!hasArgVal && llvm::isa<llvm::ConstantPointerNull>(argOp)) {
+      argVal = AbstractValue(AddressValue(NullMemAddr));
+      hasArgVal = true;
+    }
+
+    if (hasArgVal) {
+      callState[paramId] = argVal;
+    }
+  }
+}
+
+void AbstractInterpretation::updateStateOnRetPE(const llvm::ReturnInst *ret,
+                                                const llvm::CallBase *call,
+                                                AbstractState &callerState) {
+  if (!ret->getReturnValue() || !call)
+    return;
+
+  uint32_t retId = getValueId(ret->getReturnValue());
+  uint32_t callId = getValueId(call);
+
+  AbstractState &calleeState = abstractTrace[ret];
+  if (calleeState.inVarToValTable(retId)) {
+    callerState[0] = calleeState[retId];
+    callerState[callId] = calleeState[retId];
+  }
+}
+
+void AbstractInterpretation::updateStateOnCopy(const llvm::Value *dst,
+                                               const llvm::Value *src) {
+  uint32_t dstId = getValueId(dst);
+  uint32_t srcId = getValueId(src);
+
+  AbstractState &as = abstractTrace[getCurrentInstruction()];
+
+  if (as.inVarToValTable(srcId)) {
+    as[dstId] = as[srcId];
+  } else if (as.inVarToAddrsTable(srcId)) {
+    as[dstId] = as[srcId];
+  }
+}
+
+const llvm::Instruction *AbstractInterpretation::getCurrentInstruction() const {
+  return nullptr;
 }
 
 void AbstractInterpretation::updateStateOnGep(
@@ -1510,7 +1584,10 @@ void AbstractInterpretation::updateStateOnGep(
 
   AbstractState &as = abstractTrace[gep];
 
-  IntervalValue offset = as.getByteOffset(gep);
+  // Use getElementIndex (like SVF) instead of getByteOffset: getElementIndex
+  // clamps with meet_with([0, MaxFieldLimit]) so never returns infinity,
+  // avoiding getIntNumeral() assertion when offset has infinite bounds.
+  IntervalValue offset = as.getElementIndex(gep);
 
   if (as.inVarToAddrsTable(ptrId)) {
     AddressValue gepAddrs = as.getGepObjAddrs(ptrId, offset, gep);
@@ -2156,21 +2233,23 @@ bool AbstractInterpretation::shouldApplyNarrowing(const llvm::Function *fun) {
 }
 
 void AbstractInterpretation::collectCheckPoint() {
-  std::set<std::string> ae_checkpoint_names = {"svf_assert"};
+  // Matching SVF's checkpoint names
+  std::set<std::string> ae_checkpoint_names = {"svf_assert", "svf_assert_eq"};
+
+  // Buffer overflow checkpoint names (enabled by enableBufOverflowCheck_)
   std::set<std::string> buf_checkpoint_names = {"UNSAFE_BUFACCESS",
                                                 "SAFE_BUFACCESS"};
+
+  // Null dereference checkpoint names (enabled by enableNullDerefCheck_)
   std::set<std::string> nullptr_checkpoint_names = {"UNSAFE_LOAD", "SAFE_LOAD"};
 
-  bool enableBufCheck = false;
-  bool enableNullCheck = false;
-  for (const auto &detector : detectors) {
-    if (!detector)
-      continue;
-    if (detector->getKind() == AEDetector::BUF_OVERFLOW)
-      enableBufCheck = true;
-    if (detector->getKind() == AEDetector::NULL_DEREF)
-      enableNullCheck = true;
-  }
+  // Division by zero checkpoint names (enabled by enableDivZeroCheck_)
+  std::set<std::string> divzero_checkpoint_names = {"UNSAFE_DIVZERO",
+                                                    "SAFE_DIVZERO"};
+
+  // Integer overflow checkpoint names (enabled by enableOverflowCheck_)
+  std::set<std::string> overflow_checkpoint_names = {"UNSAFE_OVERFLOW",
+                                                     "SAFE_OVERFLOW"};
 
   for (auto &func : *module_) {
     for (auto &bb : func) {
@@ -2178,34 +2257,79 @@ void AbstractInterpretation::collectCheckPoint() {
         if (auto *call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
           if (const llvm::Function *callee = call->getCalledFunction()) {
             std::string funName = callee->getName().str();
-            if (ae_checkpoint_names.count(funName) ||
-                (enableBufCheck && buf_checkpoint_names.count(funName)) ||
-                (enableNullCheck && nullptr_checkpoint_names.count(funName))) {
+
+            // Always collect svf_assert checkpoints
+            if (ae_checkpoint_names.count(funName)) {
               checkpoints.insert(call);
+              continue;
+            }
+
+            // Collect buffer overflow checkpoints if enabled
+            if (enableBufOverflowCheck_ &&
+                buf_checkpoint_names.count(funName)) {
+              checkpoints.insert(call);
+              continue;
+            }
+
+            // Collect null dereference checkpoints if enabled
+            if (enableNullDerefCheck_ &&
+                nullptr_checkpoint_names.count(funName)) {
+              checkpoints.insert(call);
+              continue;
+            }
+
+            // Collect division by zero checkpoints if enabled
+            if (enableDivZeroCheck_ &&
+                divzero_checkpoint_names.count(funName)) {
+              checkpoints.insert(call);
+              continue;
+            }
+
+            // Collect integer overflow checkpoints if enabled
+            if (enableOverflowCheck_ &&
+                overflow_checkpoint_names.count(funName)) {
+              checkpoints.insert(call);
+              continue;
             }
           }
         }
       }
     }
   }
+
+  // Initialize checked checkpoints set
+  checkedCheckpoints_.clear();
 }
 
 void AbstractInterpretation::checkPointAllSet() {
   if (checkpoints.empty())
     return;
 
-  std::string msg = "At least one checkpoint has not been checked:\n";
+  // Count unchecked checkpoints
+  std::vector<const llvm::CallBase *> unchecked;
   for (const auto *call : checkpoints) {
+    if (!checkedCheckpoints_.count(call)) {
+      unchecked.push_back(call);
+    }
+  }
+
+  if (unchecked.empty())
+    return;
+
+  std::string msg = "At least one checkpoint has not been checked (" +
+                    std::to_string(unchecked.size()) + " remaining):\n";
+  for (const auto *call : unchecked) {
     std::string callStr;
     llvm::raw_string_ostream os(callStr);
     os << *call;
     os.flush();
     msg += "  " + callStr + "\n";
   }
+
   if (strictCheckpoint_) {
     llvm::report_fatal_error(llvm::StringRef(msg));
   } else {
-    llvm::errs() << "Error: " << msg;
+    llvm::errs() << "Warning: " << msg;
   }
 }
 

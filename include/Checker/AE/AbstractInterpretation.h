@@ -133,7 +133,19 @@ public:
   void setWidenDelay(uint32_t delay) { widenDelay_ = delay; }
   void setStrictCheckpoint(bool strict) { strictCheckpoint_ = strict; }
 
+  // Checkpoint control options (matching SVF's Options)
+  void setEnableBufOverflowCheck(bool enable) {
+    enableBufOverflowCheck_ = enable;
+  }
+  void setEnableNullDerefCheck(bool enable) { enableNullDerefCheck_ = enable; }
+  void setEnableDivZeroCheck(bool enable) { enableDivZeroCheck_ = enable; }
+  void setEnableOverflowCheck(bool enable) { enableOverflowCheck_ = enable; }
+
   std::set<const llvm::CallBase *> checkpoints;
+
+  // Checkpoint statistics
+  uint32_t getCheckpointCount() const { return checkpoints.size(); }
+  uint32_t getCheckedCount() const { return checkedCheckpoints_.size(); }
 
   AbstractState &getAbsStateFromTrace(const llvm::Instruction *val) {
     auto it = abstractTrace.find(val);
@@ -187,6 +199,15 @@ private:
   uint32_t widenDelay_{0};
   bool strictCheckpoint_{true};
 
+  // Checkpoint enable flags (matching SVF's Options)
+  bool enableBufOverflowCheck_{false};
+  bool enableNullDerefCheck_{false};
+  bool enableDivZeroCheck_{false};
+  bool enableOverflowCheck_{false};
+
+  // Track which checkpoints have been checked
+  std::set<const llvm::CallBase *> checkedCheckpoints_;
+
   std::vector<std::unique_ptr<AEDetector>> detectors;
   std::map<const llvm::Instruction *, AbstractState> abstractTrace;
   AbstractState globalState; // State for global variables
@@ -227,12 +248,27 @@ private:
   void updateStateOnGep(const llvm::GetElementPtrInst *gep);
   void updateStateOnSelect(const llvm::SelectInst *select);
   void updateStateOnPhi(const llvm::PHINode *phi);
-  // Aggregate operation handlers (equivalent to SVF's CopyStmt)
-  void updateStateOnExtractValue(const llvm::ExtractValueInst *extract);
-  void updateStateOnInsertValue(const llvm::InsertValueInst *insert);
-  void updateStateOnExtractElement(const llvm::ExtractElementInst *extract);
-  void updateStateOnInsertElement(const llvm::InsertElementInst *insert);
-  void updateStateOnShuffleVector(const llvm::ShuffleVectorInst *shuffle);
+
+  // Call/Return parameter expansion (matching SVF's CallPE/RetPE handlers)
+  void updateStateOnCallPE(const llvm::CallBase *call,
+                           const llvm::Function *callee,
+                           AbstractState &callState);
+  void updateStateOnRetPE(const llvm::ReturnInst *ret,
+                          const llvm::CallBase *call,
+                          AbstractState &callerState);
+
+  // Copy statement handler (matching SVF's CopyStmt)
+  void updateStateOnCopy(const llvm::Value *dst, const llvm::Value *src);
+
+  // Aggregate operation handlers (matching SVF)
+  void updateStateOnExtractValue(const llvm::ExtractValueInst *ev);
+  void updateStateOnInsertValue(const llvm::InsertValueInst *iv);
+  void updateStateOnExtractElement(const llvm::ExtractElementInst *ee);
+  void updateStateOnInsertElement(const llvm::InsertElementInst *ie);
+  void updateStateOnShuffleVector(const llvm::ShuffleVectorInst *sv);
+
+  // Get current instruction for state tracking
+  const llvm::Instruction *getCurrentInstruction() const;
 
   bool isExtCall(const llvm::CallBase *callNode);
   void handleExtCall(const llvm::CallBase *callNode);

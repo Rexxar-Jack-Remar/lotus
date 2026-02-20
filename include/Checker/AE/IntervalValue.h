@@ -49,13 +49,20 @@ public:
   }
   bool is_zero() const { return kind == Kind::Normal && value == 0; }
 
+  /// Return numeral; for infinity return INT64_MIN/-MAX (aligns with SVF).
   int64_t getNumeral() const {
-    assert(kind == Kind::Normal && "Cannot get numeral from infinity");
+    if (kind == Kind::MinusInf)
+      return std::numeric_limits<int64_t>::min();
+    if (kind == Kind::PlusInf)
+      return std::numeric_limits<int64_t>::max();
     return value;
   }
 
-  int64_t getIntNumeral() const {
-    assert(kind == Kind::Normal && "Cannot get int numeral from infinity");
+  int64_t getIntNumeral() const { return getNumeral(); }
+
+  int64_t getIntNumeralOrZero() const {
+    if (kind != Kind::Normal)
+      return 0;
     return value;
   }
 
@@ -268,7 +275,7 @@ public:
   explicit IntervalValue(uint32_t n) : IntervalValue(static_cast<int64_t>(n)) {}
   explicit IntervalValue(BoundedInt n) : _lb(n), _ub(n) {}
   explicit IntervalValue(BoundedInt lb, BoundedInt ub)
-      : _lb(std::move(lb)), _ub(std::move(ub)) {
+      : _lb(lb), _ub(ub) {
     assert((isBottom() || _lb.leq(_ub)) &&
            "lower bound should be <= upper bound");
   }
@@ -301,6 +308,12 @@ public:
 
   int64_t getIntNumeral() const {
     assert(is_numeral() && "not a numeral");
+    return _lb.getIntNumeral();
+  }
+
+  int64_t getIntNumeralOrZero() const {
+    if (!is_numeral())
+      return 0;
     return _lb.getIntNumeral();
   }
 

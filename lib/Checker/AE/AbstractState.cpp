@@ -262,9 +262,14 @@ AddressValue AbstractState::getGepObjAddrs(uint32_t pointer,
   if (!inVarToAddrsTable(pointer))
     return result;
 
-  // Clamp offset bounds to MaxFieldLimit
-  int64_t lb = offset.lb().getIntNumeral();
-  int64_t ub = offset.ub().getIntNumeral();
+  // Clamp offset bounds to MaxFieldLimit (align with SVF: getIntNumeral returns
+  // INT64_MIN/MAX for infinity, which we clamp to 0/MaxFieldLimit)
+  int64_t lb = offset.lb().getIntNumeral() < static_cast<int64_t>(MaxFieldLimit)
+                   ? offset.lb().getIntNumeral()
+                   : static_cast<int64_t>(MaxFieldLimit);
+  int64_t ub = offset.ub().getIntNumeral() < static_cast<int64_t>(MaxFieldLimit)
+                   ? offset.ub().getIntNumeral()
+                   : static_cast<int64_t>(MaxFieldLimit);
   if (lb < 0)
     lb = 0;
   if (ub > static_cast<int64_t>(MaxFieldLimit))
@@ -584,6 +589,9 @@ AbstractState::getElementIndex(const llvm::GetElementPtrInst *gep) {
         IntervalValue idxItv = (*this)[idxId].getInterval();
         if (idxItv.isBottom()) {
           idxLb = idxUb = 0;
+        } else if (idxItv.is_infinite()) {
+          idxLb = 0;
+          idxUb = MaxFieldLimit;
         } else {
           idxLb = idxItv.lb().getIntNumeral();
           idxUb = idxItv.ub().getIntNumeral();
@@ -597,6 +605,14 @@ AbstractState::getElementIndex(const llvm::GetElementPtrInst *gep) {
     // Adjust bounds based on type
     if (idxType->isPointerTy()) {
       llvm::Type *pointeeType = idxType->getPointerElementType();
+      if (!pointeeType || !pointeeType->isSized()) {
+        // Opaque/unsized type: return conservative [0, MaxFieldLimit]
+        res.meet_with(IntervalValue(static_cast<int64_t>(0),
+                                    static_cast<int64_t>(MaxFieldLimit)));
+        if (res.isBottom())
+          res = IntervalValue(static_cast<int64_t>(0));
+        return res;
+      }
       uint32_t elemSize = dl.getTypeAllocSize(pointeeType);
       if (elemSize == 0)
         elemSize = 1;
