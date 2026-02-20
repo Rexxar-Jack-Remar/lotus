@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <string>
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Metadata.h>
@@ -20,6 +21,95 @@
 
 namespace lotus {
 namespace analysis {
+
+namespace {
+
+bool containsAny(const std::string &name,
+                 std::initializer_list<const char *> patterns) {
+  for (const char *pattern : patterns) {
+    if (name.find(pattern) != std::string::npos)
+      return true;
+  }
+  return false;
+}
+
+bool isLikelyStdContainerSymbol(const std::string &funcName) {
+  const bool hasContainerToken =
+      containsAny(funcName,
+                  {"vector", "basic_string", "deque", "list", "map",
+                   "unordered_map", "set", "unordered_set"});
+  if (!hasContainerToken)
+    return false;
+
+  // Handle both demangled and Itanium-mangled variants:
+  // - std::vector<T>::size()
+  // - _ZNSt6vector... / _ZNSt3__16vector...
+  // - basic_string with __cxx11 / libc++ namespaces
+  return containsAny(funcName, {"std::", "St", "__cxx11", "3__1", "3__2"});
+}
+
+enum class STLContainerOpKind { None, SizeLike, EmptyLike, PointerLike };
+
+STLContainerOpKind classifyStdContainerOp(const std::string &funcName) {
+  if (containsAny(funcName, {"::size(", "4sizeEv", "sizeEv", "::length(",
+                             "6lengthEv", "::capacity(", "8capacityEv"})) {
+    return STLContainerOpKind::SizeLike;
+  }
+
+  if (containsAny(funcName, {"::empty(", "5emptyEv", "emptyEv"})) {
+    return STLContainerOpKind::EmptyLike;
+  }
+
+  if (containsAny(funcName, {"::data(", "4dataEv", "::c_str(", "5c_strEv",
+                             "::begin(", "5beginEv", "::end(", "3endEv",
+                             "::front(", "5frontEv", "::back(", "4backEv",
+                             "::at(", "2atE", "::find(", "4find", "ixE",
+                             "::operator[]("})) {
+    return STLContainerOpKind::PointerLike;
+  }
+
+  return STLContainerOpKind::None;
+}
+
+bool modelStdContainerCall(AEExtAPI &extApi, const llvm::CallBase *call,
+                           const std::string &funcName) {
+  if (!isLikelyStdContainerSymbol(funcName))
+    return false;
+
+  STLContainerOpKind opKind = classifyStdContainerOp(funcName);
+  if (opKind == STLContainerOpKind::None)
+    return false;
+
+  if (call->getType()->isVoidTy())
+    return true;
+
+  AbstractState &as = extApi.getAbsStateFromTrace(call);
+  uint32_t lhsId = AEExtAPI::getValueId(call);
+
+  if (opKind == STLContainerOpKind::SizeLike) {
+    as[lhsId] = AbstractValue(IntervalValue(0, MaxFieldLimit));
+    return true;
+  }
+
+  if (opKind == STLContainerOpKind::EmptyLike) {
+    as[lhsId] = AbstractValue(IntervalValue(0, 1));
+    return true;
+  }
+
+  // Pointer/iterator/reference-like returns: conservatively alias `this`.
+  if (call->arg_size() >= 1) {
+    uint32_t thisId = AEExtAPI::getValueId(call->getArgOperand(0));
+    if (as.inVarToAddrsTable(thisId)) {
+      as[lhsId] = as[thisId];
+      return true;
+    }
+  }
+
+  as[lhsId] = AbstractValue(IntervalValue::top());
+  return true;
+}
+
+} // namespace
 
 AEExtAPI::AEExtAPI(std::map<const llvm::Instruction *, AbstractState> &traces)
     : module_(nullptr), abstractTrace(traces) {
@@ -484,6 +574,7 @@ void AEExtAPI::initExtFunMap() {
 
   // Assertion functions
   auto sse_svf_assert = [this](const llvm::CallBase *callNode) {
+    AbstractInterpretation::getAEInstance().markCheckpointChecked(callNode);
     AbstractInterpretation::getAEInstance().checkpoints.erase(callNode);
     if (callNode->arg_size() < 1)
       return;
@@ -797,6 +888,8 @@ void AEExtAPI::initExtFunMap() {
 
   // Assertion functions
   auto sse_svf_assert_eq = [this](const llvm::CallBase *callNode) {
+    AbstractInterpretation::getAEInstance().markCheckpointChecked(callNode);
+    AbstractInterpretation::getAEInstance().checkpoints.erase(callNode);
     if (callNode->arg_size() < 2)
       return;
     AbstractState &as = getAbsStateFromTrace(callNode);
@@ -1329,6 +1422,8 @@ void AEExtAPI::handleExtAPI(const llvm::CallBase *call) {
   default:
     if (func_map.find(funcName) != func_map.end()) {
       func_map[funcName](call);
+    } else if (modelStdContainerCall(*this, call, funcName)) {
+      return;
     } else {
       AbstractState &as = getAbsStateFromTrace(call);
       uint32_t lhsId = getValueId(call);

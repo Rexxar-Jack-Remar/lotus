@@ -21,8 +21,118 @@
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/Instructions.h>
 
+#include <algorithm>
+#include <functional>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 using namespace lotus::analysis;
 using namespace llvm;
+
+namespace {
+
+using FuncSet = std::unordered_set<const Function *>;
+using FuncGraph = std::unordered_map<const Function *, FuncSet>;
+
+static void addDefinedFunction(FuncGraph &graph, const Function *F) {
+  if (F && !F->isDeclaration())
+    graph.emplace(F, FuncSet{});
+}
+
+static void buildDirectCallGraph(const Module *M, FuncGraph &graph) {
+  if (!M)
+    return;
+
+  for (const Function &F : *M)
+    addDefinedFunction(graph, &F);
+
+  for (const Function &F : *M) {
+    if (F.isDeclaration())
+      continue;
+    auto it = graph.find(&F);
+    if (it == graph.end())
+      continue;
+
+    for (const BasicBlock &BB : F) {
+      for (const Instruction &I : BB) {
+        const auto *CB = dyn_cast<CallBase>(&I);
+        if (!CB)
+          continue;
+        const Function *callee = CB->getCalledFunction();
+        if (!callee || callee->isDeclaration())
+          continue;
+        it->second.insert(callee);
+      }
+    }
+  }
+}
+
+static std::unordered_set<const Function *>
+computeRecursiveFunctions(const FuncGraph &graph) {
+  std::unordered_map<const Function *, int> index;
+  std::unordered_map<const Function *, int> lowlink;
+  std::unordered_set<const Function *> onStack;
+  std::vector<const Function *> stack;
+  std::unordered_set<const Function *> recursive;
+  int nextIndex = 0;
+
+  std::function<void(const Function *)> strongConnect =
+      [&](const Function *v) {
+        index[v] = nextIndex;
+        lowlink[v] = nextIndex;
+        ++nextIndex;
+        stack.push_back(v);
+        onStack.insert(v);
+
+        auto git = graph.find(v);
+        if (git != graph.end()) {
+          for (const Function *w : git->second) {
+            if (!w)
+              continue;
+            if (index.find(w) == index.end()) {
+              strongConnect(w);
+              lowlink[v] = std::min(lowlink[v], lowlink[w]);
+            } else if (onStack.count(w)) {
+              lowlink[v] = std::min(lowlink[v], index[w]);
+            }
+          }
+        }
+
+        if (lowlink[v] != index[v])
+          return;
+
+        std::vector<const Function *> scc;
+        while (!stack.empty()) {
+          const Function *w = stack.back();
+          stack.pop_back();
+          onStack.erase(w);
+          scc.push_back(w);
+          if (w == v)
+            break;
+        }
+
+        if (scc.size() > 1) {
+          recursive.insert(scc.begin(), scc.end());
+          return;
+        }
+
+        const Function *f = scc.front();
+        auto it = graph.find(f);
+        if (it != graph.end() && it->second.count(f))
+          recursive.insert(f);
+      };
+
+  for (const auto &kv : graph) {
+    const Function *F = kv.first;
+    if (index.find(F) == index.end())
+      strongConnect(F);
+  }
+
+  return recursive;
+}
+
+} // namespace
 
 SVFG *SaberSVFGBuilder::buildSVFG(const ICFG *icfg) {
   SVFGBuilderConfig cfg;
@@ -359,6 +469,26 @@ bool SaberSVFGBuilder::isStrongUpdate(const SVFGNode *node,
       !currentSVFG_->isArrayObject(objId)) {
     if (const auto *info = currentSVFG_->getObjectInfo(objId)) {
       if (!info->isFieldInsensitive) {
+        // Match SVF SABER: avoid SU for local variables in recursive functions.
+        // SVF checks PTA::isLocalVarInRecursiveFun(singleton). In Lotus we
+        // approximate via object metadata + direct-call SCC recursion.
+        if (!recursiveFunctionsReady_) {
+          recursiveFunctionsReady_ = true;
+          recursiveFunctionsCache_.clear();
+          FuncGraph callGraph;
+          buildDirectCallGraph(module_, callGraph);
+          recursiveFunctionsCache_ = computeRecursiveFunctions(callGraph);
+        }
+        if (currentSVFG_->isStackObject(objId)) {
+          const Value *objVal = currentSVFG_->getObjectValue(objId);
+          const Function *owningFun = nullptr;
+          if (const auto *inst = dyn_cast_or_null<Instruction>(objVal))
+            owningFun = inst->getFunction();
+          else if (const auto *arg = dyn_cast_or_null<Argument>(objVal))
+            owningFun = arg->getParent();
+          if (owningFun && recursiveFunctionsCache_.count(owningFun))
+            return false;
+        }
         singleton = objId;
         return true;
       }

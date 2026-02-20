@@ -22,19 +22,19 @@ static cl::OptionCategory SaberCategory("Saber Options",
 cl::opt<bool> SaberFullSVFG(
     "saber-full-svfg",
     cl::desc("Use full SVFG (vs pointer-only)"),
-    cl::init(true),
+    cl::init(false),
     cl::cat(SaberCategory));
 
 cl::opt<unsigned> SaberCxtLimit(
     "saber-cxt-limit",
     cl::desc("Max call-string context length (k-limit; beyond this contexts merge to avoid explosion)"),
-    cl::init(5u),
+    cl::init(3u),
     cl::cat(SaberCategory));
 
 cl::opt<unsigned> SaberMaxStepInWrapper(
     "saber-max-step-wrapper",
     cl::desc("Max steps in wrapper detection"),
-    cl::init(100u),
+    cl::init(10u),
     cl::cat(SaberCategory));
 
 cl::opt<unsigned> SaberMaxForwardItems(

@@ -8,6 +8,9 @@
 
 #include "Checker/AE/AbsExtAPI.h"
 #include "Checker/AE/AbstractInterpretation.h"
+#include "Checker/Report/BugReport.h"
+#include "Checker/Report/BugReportMgr.h"
+#include "Checker/Report/BugTypes.h"
 
 #include <algorithm>
 
@@ -17,6 +20,60 @@
 
 namespace lotus {
 namespace analysis {
+
+namespace {
+int getOrRegisterAEBugType(AEDetector::DetectorKind kind) {
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  switch (kind) {
+  case AEDetector::BUF_OVERFLOW: {
+    int id = mgr.find_bug_type("AE Buffer Overflow");
+    if (id < 0) {
+      id = mgr.register_bug_type("AE Buffer Overflow", BugDescription::BI_HIGH,
+                                 BugDescription::BC_SECURITY, "CWE-120, CWE-122");
+    }
+    return id;
+  }
+  case AEDetector::NULL_DEREF: {
+    int id = mgr.find_bug_type("AE Null Dereference");
+    if (id < 0) {
+      id = mgr.register_bug_type("AE Null Dereference", BugDescription::BI_HIGH,
+                                 BugDescription::BC_SECURITY, "CWE-476");
+    }
+    return id;
+  }
+  case AEDetector::USE_AFTER_FREE: {
+    int id = mgr.find_bug_type("AE Use After Free");
+    if (id < 0) {
+      id = mgr.register_bug_type("AE Use After Free", BugDescription::BI_HIGH,
+                                 BugDescription::BC_SECURITY, "CWE-416");
+    }
+    return id;
+  }
+  case AEDetector::INVALID_FREE: {
+    int id = mgr.find_bug_type("AE Invalid Free");
+    if (id < 0) {
+      id = mgr.register_bug_type("AE Invalid Free", BugDescription::BI_HIGH,
+                                 BugDescription::BC_SECURITY, "CWE-590");
+    }
+    return id;
+  }
+  default:
+    break;
+  }
+  return -1;
+}
+
+void emitAEBugReport(AEDetector::DetectorKind kind, const llvm::Instruction *inst,
+                     const std::string &message) {
+  int tyId = getOrRegisterAEBugType(kind);
+  if (tyId < 0)
+    return;
+
+  BugReport *report = new BugReport(tyId);
+  report->append_step(const_cast<llvm::Instruction *>(inst), message);
+  BugReportMgr::get_instance().insert_report(tyId, report, true);
+}
+} // namespace
 
 void AEDetector::addEventToTrace(AEBugEventType type,
                                  const llvm::Instruction *inst,
@@ -68,11 +125,10 @@ void BufOverflowDetector::detect(AbstractState &as,
       // Update GEP offset tracking (for compatibility with existing code)
       updateGepObjOffsetFromBase(as, gepAddrs, objAddrs, accumulatedOffset);
 
-      // Check for buffer overflow
-      IntervalValue accessOffset = getAccessOffset(as, ptrId, gep);
-
       for (auto addr : as[ptrId].getAddrs()) {
         uint32_t objId = as.getIDFromAddr(addr);
+        // Compute access offset per object to preserve field/object sensitivity.
+        IntervalValue accessOffset = getAccessOffset(as, objId, gep);
         uint32_t objSize = as.getObjSize(objId);
 
         if (objSize > 0 && accessOffset.ub().getIntNumeral() >=
@@ -122,6 +178,7 @@ void BufOverflowDetector::handleStubFunctions(const llvm::CallBase *call) {
   std::string funcName = call->getCalledFunction()->getName().str();
 
   if (funcName == "SAFE_BUFACCESS") {
+    AbstractInterpretation::getAEInstance().markCheckpointChecked(call);
     AbstractInterpretation::getAEInstance().checkpoints.erase(call);
     if (call->arg_size() < 2)
       return;
@@ -150,6 +207,7 @@ void BufOverflowDetector::handleStubFunctions(const llvm::CallBase *call) {
       assert(false && "SAFE_BUFACCESS checkpoint failed");
     }
   } else if (funcName == "UNSAFE_BUFACCESS") {
+    AbstractInterpretation::getAEInstance().markCheckpointChecked(call);
     AbstractInterpretation::getAEInstance().checkpoints.erase(call);
     if (call->arg_size() < 2)
       return;
@@ -164,7 +222,12 @@ void BufOverflowDetector::handleStubFunctions(const llvm::CallBase *call) {
 
     IntervalValue size = as[sizeId].getInterval();
     if (size.isBottom()) {
-      assert(false && "UNSAFE_BUFACCESS size is bottom");
+      if (const auto *ci =
+              llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(1))) {
+        size = IntervalValue(ci->getSExtValue(), ci->getSExtValue());
+      } else {
+        size = IntervalValue::top();
+      }
     }
 
     bool isSafe = canSafelyAccessMemory(as, ptrId, size);
@@ -190,6 +253,14 @@ void BufOverflowDetector::reportBug() {
   }
 }
 
+void BufOverflowDetector::reset() {
+  clearEventTrace();
+  bugLoc.clear();
+  instToBugInfo.clear();
+  gepObjOffsetFromBase.clear();
+  gepObjOffsetFromBaseByObjId.clear();
+}
+
 void BufOverflowDetector::addBugToReporter(const AEException &e,
                                            const llvm::Instruction *inst) {
   std::string loc;
@@ -205,6 +276,7 @@ void BufOverflowDetector::addBugToReporter(const AEException &e,
 
   bugLoc.insert(loc);
   instToBugInfo[inst] = std::string(e.what()) + " @ " + loc;
+  emitAEBugReport(kind, inst, std::string(e.what()));
 }
 
 bool BufOverflowDetector::canSafelyAccessMemory(AbstractState &as,
@@ -676,6 +748,7 @@ void NullptrDerefDetector::handleStubFunctions(const llvm::CallBase *call) {
   std::string funcName = call->getCalledFunction()->getName().str();
 
   if (funcName == "SAFE_LOAD") {
+    AbstractInterpretation::getAEInstance().markCheckpointChecked(call);
     AbstractInterpretation::getAEInstance().checkpoints.erase(call);
     if (call->arg_size() < 1)
       return;
@@ -694,6 +767,7 @@ void NullptrDerefDetector::handleStubFunctions(const llvm::CallBase *call) {
       assert(false && "SAFE_LOAD checkpoint failed");
     }
   } else if (funcName == "UNSAFE_LOAD") {
+    AbstractInterpretation::getAEInstance().markCheckpointChecked(call);
     AbstractInterpretation::getAEInstance().checkpoints.erase(call);
     if (call->arg_size() < 1)
       return;
@@ -728,6 +802,12 @@ void NullptrDerefDetector::reportBug() {
   }
 }
 
+void NullptrDerefDetector::reset() {
+  clearEventTrace();
+  bugLoc.clear();
+  instToBugInfo.clear();
+}
+
 void NullptrDerefDetector::addBugToReporter(const AEException &e,
                                             const llvm::Instruction *inst) {
   std::string loc;
@@ -753,6 +833,7 @@ void NullptrDerefDetector::addBugToReporter(const AEException &e,
 
   bugLoc.insert(loc);
   instToBugInfo[inst] = std::string(e.what()) + " @ " + loc;
+  emitAEBugReport(kind, inst, std::string(e.what()));
 }
 
 bool NullptrDerefDetector::canSafelyDerefPtr(AbstractState &as,
@@ -792,9 +873,14 @@ bool NullptrDerefDetector::canSafelyDerefPtr(AbstractState &as,
 IntervalValue
 BufOverflowDetector::getAccessOffset(AbstractState &as, uint32_t objId,
                                      const llvm::GetElementPtrInst *gep) {
-  (void)objId; // Keep parameter for API compatibility
   // Get the offset from the GEP instruction
   IntervalValue offset = as.getByteOffset(gep);
+
+  // If we have tracked offset by object ID, prefer it.
+  auto objIt = gepObjOffsetFromBaseByObjId.find(objId);
+  if (objIt != gepObjOffsetFromBaseByObjId.end()) {
+    return objIt->second;
+  }
 
   // If we have tracked offset from base for this GEP, use it
   // (it already includes accumulated offsets from nested GEPs)
@@ -818,15 +904,28 @@ void BufOverflowDetector::updateGepObjOffsetFromBase(AbstractState &as,
                                                      AddressValue gepAddrs,
                                                      AddressValue objAddrs,
                                                      IntervalValue offset) {
-  // This function is called for compatibility but the actual offset tracking
-  // is now done in detect() where we have access to the GEP instruction.
-  // The offset passed here is already the accumulated offset from nested GEPs.
-  // This function can be used for additional bookkeeping if needed in the
-  // future.
-  (void)as;
-  (void)gepAddrs;
-  (void)objAddrs;
-  (void)offset;
+  // Preserve SVF-like object-based propagation:
+  // - Base object: gep offset = current offset
+  // - GEP object:  gep offset = base offset + current offset
+  for (const auto &objAddr : objAddrs) {
+    uint32_t baseObjId = as.getIDFromAddr(objAddr);
+    IntervalValue baseOffset(0, 0);
+    auto baseIt = gepObjOffsetFromBaseByObjId.find(baseObjId);
+    if (baseIt != gepObjOffsetFromBaseByObjId.end()) {
+      baseOffset = baseIt->second;
+    }
+
+    IntervalValue accumulated = baseOffset + offset;
+    for (const auto &gepAddr : gepAddrs) {
+      uint32_t gepObjId = as.getIDFromAddr(gepAddr);
+      auto it = gepObjOffsetFromBaseByObjId.find(gepObjId);
+      if (it == gepObjOffsetFromBaseByObjId.end()) {
+        gepObjOffsetFromBaseByObjId.emplace(gepObjId, accumulated);
+      } else {
+        it->second.join_with(accumulated);
+      }
+    }
+  }
 }
 
 void BufOverflowDetector::addToGepObjOffsetFromBase(
@@ -859,7 +958,7 @@ void UseAfterFreeDetector::detect(AbstractState &as,
     uint32_t ptrId =
         AbstractInterpretation::getValueIdStatic(load->getPointerOperand());
 
-    if (!canSafelyDerefPtr(as, ptrId)) {
+    if (mayAccessFreedMem(as, ptrId)) {
       addEventToTrace(AEBugEventType::LOAD, inst, "Load from freed memory");
       AEException bug("Use-after-free: load from freed memory");
       addBugToReporter(bug, inst);
@@ -871,7 +970,7 @@ void UseAfterFreeDetector::detect(AbstractState &as,
     uint32_t ptrId =
         AbstractInterpretation::getValueIdStatic(store->getPointerOperand());
 
-    if (!canSafelyDerefPtr(as, ptrId)) {
+    if (mayAccessFreedMem(as, ptrId)) {
       addEventToTrace(AEBugEventType::STORE, inst, "Store to freed memory");
       AEException bug("Use-after-free: store to freed memory");
       addBugToReporter(bug, inst);
@@ -883,7 +982,7 @@ void UseAfterFreeDetector::detect(AbstractState &as,
     uint32_t ptrId =
         AbstractInterpretation::getValueIdStatic(gep->getPointerOperand());
 
-    if (!canSafelyDerefPtr(as, ptrId)) {
+    if (mayAccessFreedMem(as, ptrId)) {
       addEventToTrace(AEBugEventType::DEREF, inst, "GEP on freed memory");
       AEException bug("Use-after-free: GEP on freed memory");
       addBugToReporter(bug, inst);
@@ -905,26 +1004,27 @@ void UseAfterFreeDetector::reportBug() {
   }
 }
 
-bool UseAfterFreeDetector::canSafelyDerefPtr(AbstractState &as,
+void UseAfterFreeDetector::reset() {
+  clearEventTrace();
+  bugLoc.clear();
+  instToBugInfo.clear();
+}
+
+bool UseAfterFreeDetector::mayAccessFreedMem(AbstractState &as,
                                              uint32_t ptrId) {
   if (!as.inVarToAddrsTable(ptrId))
-    return true;
+    return false;
 
   const AbstractValue &absVal = as[ptrId];
   if (!absVal.isAddr())
-    return true;
+    return false;
 
   for (const auto &addr : absVal.getAddrs()) {
-    if (AbstractState::isInvalidMem(addr))
-      return false;
-    if (AbstractState::isNullMem(addr))
-      return false;
-    // Check if memory was freed
     if (as.isFreedMem(addr))
-      return false;
+      return true;
   }
 
-  return true;
+  return false;
 }
 
 void UseAfterFreeDetector::addBugToReporter(const AEException &e,
@@ -942,6 +1042,7 @@ void UseAfterFreeDetector::addBugToReporter(const AEException &e,
 
   bugLoc.insert(loc);
   instToBugInfo[inst] = std::string(e.what()) + " @ " + loc;
+  emitAEBugReport(kind, inst, std::string(e.what()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -986,6 +1087,12 @@ void InvalidFreeDetector::reportBug() {
   }
 }
 
+void InvalidFreeDetector::reset() {
+  clearEventTrace();
+  bugLoc.clear();
+  instToBugInfo.clear();
+}
+
 bool InvalidFreeDetector::isValidFree(AbstractState &as, uint32_t ptrId) {
   // If we don't track this pointer, assume valid to avoid false positives
   // (e.g. malloc-returned ptr not in var-to-addrs table from external/stub)
@@ -1025,6 +1132,7 @@ void InvalidFreeDetector::addBugToReporter(const AEException &e,
 
   bugLoc.insert(loc);
   instToBugInfo[inst] = std::string(e.what()) + " @ " + loc;
+  emitAEBugReport(kind, inst, std::string(e.what()));
 }
 
 } // namespace analysis

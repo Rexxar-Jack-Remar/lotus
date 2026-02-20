@@ -63,6 +63,8 @@ AbstractInterpretation::AbstractInterpretation()
 AbstractInterpretation::~AbstractInterpretation() {
   delete stat;
   delete utils;
+  delete svfir_;
+  svfir_ = nullptr;
   // Clean up WTO objects
   for (auto &pair : funcToWTO_) {
     delete pair.second;
@@ -76,6 +78,9 @@ void AbstractInterpretation::reset() {
   globalState = AbstractState();
   checkpoints.clear();
   callSiteStack.clear();
+  checkedCheckpoints_.clear();
+  delete svfir_;
+  svfir_ = nullptr;
 
   // Clear value ID mappings
   valueToIdMap_.clear();
@@ -90,6 +95,8 @@ void AbstractInterpretation::reset() {
   recursiveFuns_.clear();
   callSiteRecursionDepth_.clear();
   nonRecursiveCallSites_.clear();
+  recursiveSccIdMap_.clear();
+  recursiveSccMembers_.clear();
   cycleHeadToCycle_.clear();
   analyzedFunctions_.clear();
 
@@ -113,7 +120,12 @@ void AbstractInterpretation::reset() {
     stat->nonExtCallSiteNum = 0;
   }
 
-  // Note: detectors are kept (they may accumulate results across modules)
+  // Keep detector configuration but clear previous run results.
+  for (auto &detector : detectors) {
+    if (detector) {
+      detector->reset();
+    }
+  }
   // Note: pta_ is kept (can be reused)
   ptaReady_ = false;
 }
@@ -195,16 +207,10 @@ void AbstractInterpretation::analyse() {
     }
   }
 
-  // Analyze all defined functions; prioritize main as a conventional entry.
+  // Match SVF semantics: analyze from main entry only.
   const llvm::Function *mainFunc = module_->getFunction("main");
   if (mainFunc && !mainFunc->isDeclaration()) {
     handleFunction(mainFunc);
-  }
-  for (const llvm::Function *func : functions) {
-    // Avoid standalone re-analysis for functions already reached from main.
-    if (func != mainFunc && analyzedFunctions_.count(func) == 0) {
-      handleFunction(func);
-    }
   }
 }
 
@@ -449,8 +455,12 @@ void AbstractInterpretation::initCallGraphSCC() {
   // Populate recursiveFuns_ set
   for (size_t i = 0; i < sccs.size(); ++i) {
     if (recursiveSccIds.count(i)) {
+      uint32_t rid = static_cast<uint32_t>(i);
+      auto &members = recursiveSccMembers_[rid];
       for (const llvm::Function *f : sccs[i]) {
         recursiveFuns_.insert(f);
+        recursiveSccIdMap_[f] = rid;
+        members.push_back(f);
       }
     }
   }
@@ -493,11 +503,11 @@ void AbstractInterpretation::initCallGraphSCC() {
           // For indirect calls, resolve via AserPTA and check if targets are in
           // SCC
           else {
-            const llvm::Function *indirectCallee =
-                resolveIndirectCallViaPTA(cb);
-            if (indirectCallee && !indirectCallee->isDeclaration() &&
-                scc.count(indirectCallee) > 0) {
-              nonRecursiveCallSites_.insert({cb, indirectCallee});
+            for (const llvm::Function *indirectCallee : getCallees(cb)) {
+              if (indirectCallee && !indirectCallee->isDeclaration() &&
+                  scc.count(indirectCallee) > 0) {
+                nonRecursiveCallSites_.insert({cb, indirectCallee});
+              }
             }
           }
         }
@@ -631,14 +641,6 @@ void AbstractInterpretation::handleSingletonWTO(const llvm::BasicBlock *bb) {
     }
   }
 
-  // Run detectors
-  const llvm::Instruction *lastInst = &bb->back();
-  if (abstractTrace.find(lastInst) != abstractTrace.end()) {
-    for (auto &detector : detectors) {
-      detector->detect(abstractTrace[lastInst], lastInst);
-    }
-  }
-
   stat->countStateSize();
 }
 
@@ -696,8 +698,15 @@ void AbstractInterpretation::handleCycleWTO(const ICFGCycleWTO *cycle) {
     // Find the call site that entered this function
     if (!callSiteStack.empty()) {
       const llvm::CallBase *callNode = callSiteStack.back();
-      if (callNode->getCalledFunction() == func) {
-        recursiveCallPass(callNode);
+      bool entersThisFunction = false;
+      for (const llvm::Function *resolved : getCallees(callNode)) {
+        if (resolved == func) {
+          entersThisFunction = true;
+          break;
+        }
+      }
+      if (entersThisFunction) {
+        recursiveCallPass(callNode, func);
         return;
       }
     }
@@ -733,28 +742,8 @@ void AbstractInterpretation::handleCycleWTO(const ICFGCycleWTO *cycle) {
       }
     }
 
-    // Process cycle body components
-    for (const ICFGWTOComp *comp : cycle->getComponents()) {
-      if (const ICFGSingletonWTO *singleton =
-              llvm::dyn_cast<ICFGSingletonWTO>(comp)) {
-        handleSingletonWTO(singleton->getBlock());
-      } else if (const ICFGCycleWTO *subCycle =
-                     llvm::dyn_cast<ICFGCycleWTO>(comp)) {
-        // Handle nested cycle recursively
-        handleCycleWTO(subCycle);
-      }
-    }
-
-    // Re-read head state after processing body (may have changed)
-    if (!cycleHead->empty()) {
-      const llvm::Instruction *firstInst = &cycleHead->front();
-      if (abstractTrace.find(firstInst) != abstractTrace.end()) {
-        curHeadState = abstractTrace[firstInst];
-      }
-    }
-
-    // Start widening or narrowing if curIter >= widen delay threshold
-    if (curIter >= widenDelay && hadPrevState) {
+    // Match SVF: apply widening/narrowing at cycle head before processing body.
+    if (curIter >= widenDelay) {
       if (increasing) {
         // Apply widening operator
         AbstractState widenedState = prevHeadState.widening(curHeadState);
@@ -770,7 +759,6 @@ void AbstractInterpretation::handleCycleWTO(const ICFGCycleWTO *cycle) {
         if (widenedState == prevHeadState) {
           // Widening fixpoint reached, switch to narrowing phase
           increasing = false;
-          continue;
         }
       } else {
         // Narrowing phase - check if narrowing should be applied
@@ -803,9 +791,16 @@ void AbstractInterpretation::handleCycleWTO(const ICFGCycleWTO *cycle) {
       }
     }
 
-    // Safety limit to prevent infinite loops
-    if (curIter > 100) {
-      break;
+    // Process cycle body components
+    for (const ICFGWTOComp *comp : cycle->getComponents()) {
+      if (const ICFGSingletonWTO *singleton =
+              llvm::dyn_cast<ICFGSingletonWTO>(comp)) {
+        handleSingletonWTO(singleton->getBlock());
+      } else if (const ICFGCycleWTO *subCycle =
+                     llvm::dyn_cast<ICFGCycleWTO>(comp)) {
+        // Handle nested cycle recursively
+        handleCycleWTO(subCycle);
+      }
     }
   }
 }
@@ -861,21 +856,31 @@ bool AbstractInterpretation::mergeStatesFromPredecessors(
 
         // Check if this is the default case
         if (bb == switchInst->getDefaultDest()) {
-          // Default case: check if any case is feasible, if not, default is
-          // feasible
-          bool anyCaseFeasible = false;
-          for (auto caseIt = switchInst->case_begin();
-               caseIt != switchInst->case_end(); ++caseIt) {
-            const llvm::ConstantInt *caseVal = caseIt->getCaseValue();
-            int64_t caseValue = caseVal->getSExtValue();
-            AbstractState testState = tmpEs;
-            if (isSwitchBranchFeasible(switchInst, caseValue, testState)) {
-              anyCaseFeasible = true;
-              break;
+          // Default edge is feasible unless we can prove the condition equals a
+          // specific case value (singleton interval exactly on a case).
+          uint32_t condId = getValueId(switchInst->getCondition());
+          if (!tmpEs.inVarToValTable(condId)) {
+            isFeasible = true;
+          } else {
+            const IntervalValue &condVal = tmpEs[condId].getInterval();
+            if (condVal.isBottom()) {
+              isFeasible = false;
+            } else if (!condVal.is_numeral()) {
+              isFeasible = true;
+            } else {
+              const int64_t exact = condVal.getIntNumeralOrZero();
+              bool matchesCase = false;
+              for (auto caseIt = switchInst->case_begin();
+                   caseIt != switchInst->case_end(); ++caseIt) {
+                const llvm::ConstantInt *caseVal = caseIt->getCaseValue();
+                if (caseVal->getSExtValue() == exact) {
+                  matchesCase = true;
+                  break;
+                }
+              }
+              isFeasible = !matchesCase;
             }
           }
-          // Default is feasible if no case matches
-          isFeasible = !anyCaseFeasible;
         } else {
           // Check if this block corresponds to a case value
           for (auto caseIt = switchInst->case_begin();
@@ -1691,20 +1696,31 @@ void AbstractInterpretation::updateStateOnPhi(const llvm::PHINode *phi) {
 
         // Check if phi->getParent() is the default destination
         if (phi->getParent() == switchInst->getDefaultDest()) {
-          // Default case: check if any case is feasible
-          bool anyCaseFeasible = false;
-          for (auto caseIt = switchInst->case_begin();
-               caseIt != switchInst->case_end(); ++caseIt) {
-            const llvm::ConstantInt *caseVal = caseIt->getCaseValue();
-            int64_t caseValue = caseVal->getSExtValue();
-            AbstractState testState = opAs;
-            if (isSwitchBranchFeasible(switchInst, caseValue, testState)) {
-              anyCaseFeasible = true;
-              break;
+          // Default edge is feasible unless we can prove the condition equals a
+          // specific case value (singleton interval exactly on a case).
+          uint32_t condId = getValueId(switchInst->getCondition());
+          if (!opAs.inVarToValTable(condId)) {
+            edgeFeasible = true;
+          } else {
+            const IntervalValue &condVal = opAs[condId].getInterval();
+            if (condVal.isBottom()) {
+              edgeFeasible = false;
+            } else if (!condVal.is_numeral()) {
+              edgeFeasible = true;
+            } else {
+              const int64_t exact = condVal.getIntNumeralOrZero();
+              bool matchesCase = false;
+              for (auto caseIt = switchInst->case_begin();
+                   caseIt != switchInst->case_end(); ++caseIt) {
+                const llvm::ConstantInt *caseVal = caseIt->getCaseValue();
+                if (caseVal->getSExtValue() == exact) {
+                  matchesCase = true;
+                  break;
+                }
+              }
+              edgeFeasible = !matchesCase;
             }
           }
-          // Default is feasible if no case matches
-          edgeFeasible = !anyCaseFeasible;
         } else {
           // Check if phi->getParent() corresponds to a case value
           for (auto caseIt = switchInst->case_begin();
@@ -1936,7 +1952,7 @@ void AbstractInterpretation::handleExtCall(const llvm::CallBase *callNode) {
   callSiteStack.pop_back();
 }
 
-bool AbstractInterpretation::isRecursiveFun(const llvm::Function *fun) {
+bool AbstractInterpretation::isRecursiveFun(const llvm::Function *fun) const {
   // Use the recursiveFuns_ set populated by initCallGraphSCC()
   return recursiveFuns_.count(fun) > 0;
 }
@@ -1957,220 +1973,264 @@ void AbstractInterpretation::handleCallSite(const llvm::CallBase *call) {
 }
 
 void AbstractInterpretation::handleFunCall(const llvm::CallBase *callNode) {
-  const llvm::Function *callee = getCallee(callNode);
-  if (!callee || callee->isDeclaration())
+  std::vector<const llvm::Function *> callees = getCallees(callNode);
+  if (callees.empty())
     return;
 
-  // Handle TOP mode for recursive functions
-  if (recursionMode_ == TOP && isRecursiveFun(callee)) {
-    // Check if this is a recursive call (not the entry call)
-    bool isRecursiveCallSite = false;
-    for (const auto *prevCall : callSiteStack) {
-      if (prevCall->getCalledFunction() == callee) {
-        isRecursiveCallSite = true;
-        break;
-      }
-    }
-
-    if (isRecursiveCallSite) {
-      // Skip recursive callsites in TOP mode
-      recursiveCallPass(callNode);
-      return;
-    }
-    // Entry call: continue to handle function, but will set TOP at end
-  }
-
-  // Skip recursive callsites (within SCC); entry calls are not skipped
-  if (skipRecursiveCall(callNode))
-    return;
-
-  // Map arguments to parameters
-  AbstractState callState;
   auto callIt = abstractTrace.find(callNode);
-  if (callIt != abstractTrace.end()) {
-    for (unsigned i = 0; i < callNode->arg_size() && i < callee->arg_size();
-         ++i) {
-      const llvm::Value *argOp = callNode->getArgOperand(i);
-      uint32_t argId = getValueId(argOp);
-      uint32_t paramId = getValueId(callee->getArg(i));
-
-      AbstractValue argVal;
-      bool hasArgVal = false;
-
-      // Prefer the value already tracked at callsite.
-      auto argIt = callIt->second._varToAbsVal.find(argId);
-      if (argIt != callIt->second._varToAbsVal.end()) {
-        argVal = argIt->second;
-        hasArgVal = true;
-      }
-
-      // If argument is a load and not materialized in var table, recover from
-      // the pointee at callsite.
-      if (!hasArgVal) {
-        if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(argOp)) {
-          uint32_t basePtrId = getValueId(load->getPointerOperand());
-          argVal = callIt->second.loadValue(basePtrId);
-          if (!argVal.getAddrs().isBottom() ||
-              !argVal.getInterval().isBottom()) {
-            hasArgVal = true;
-          }
-        }
-      }
-
-      // Handle explicit null argument.
-      if (!hasArgVal && llvm::isa<llvm::ConstantPointerNull>(argOp)) {
-        argVal = AbstractValue(AddressValue(NullMemAddr));
-        hasArgVal = true;
-      }
-
-      if (hasArgVal) {
-        callState[paramId] = argVal;
-      }
-    }
-  }
+  if (callIt == abstractTrace.end())
+    return;
 
   callSiteStack.push_back(callNode);
 
-  // Initialize state at function entry
-  const llvm::BasicBlock &entryBlock = callee->getEntryBlock();
-  if (!entryBlock.empty()) {
-    abstractTrace[&entryBlock.front()] = callState;
-  }
+  bool gotReturn = false;
+  AbstractValue joinedReturn;
 
-  // Handle the function using WTO
-  handleFunction(callee);
+  for (const llvm::Function *callee : callees) {
+    if (!callee || callee->isDeclaration())
+      continue;
 
-  // For TOP mode recursive functions, set stores and return to TOP
-  if (recursionMode_ == TOP && isRecursiveFun(callee)) {
-    setTopToObjInRecursion(callNode);
-    // Set return value to TOP
-    auto it = abstractTrace.find(callNode);
-    if (it != abstractTrace.end()) {
-      uint32_t lhsId = getValueId(callNode);
-      it->second[lhsId] = AbstractValue(IntervalValue::top());
+    // Build call state and map actuals to formals.
+    AbstractState callState = callIt->second;
+    updateStateOnCallPE(callNode, callee, callState);
+
+    const llvm::BasicBlock &entryBlock = callee->getEntryBlock();
+    if (!entryBlock.empty()) {
+      const llvm::Instruction *entryInst = &entryBlock.front();
+      auto entryIt = abstractTrace.find(entryInst);
+      if (entryIt == abstractTrace.end()) {
+        abstractTrace[entryInst] = callState;
+      } else {
+        AbstractState merged = entryIt->second;
+        merged.joinWith(callState);
+        abstractTrace[entryInst] = merged;
+      }
     }
-  } else {
-    // Propagate return value back to caller (normal mode)
-    if (!callSiteStack.empty() && callSiteStack.back() == callNode) {
-      auto it = abstractTrace.find(callNode);
-      if (it != abstractTrace.end()) {
-        uint32_t lhsId = getValueId(callNode);
-        if (!entryBlock.empty()) {
-          const llvm::Instruction &firstInst = entryBlock.front();
-          auto entryIt = abstractTrace.find(&firstInst);
-          if (entryIt != abstractTrace.end()) {
-            // Get return value from the state (stored at position 0)
-            it->second[lhsId] = entryIt->second[0];
-          }
+
+    // Recursive callsite inside SCC: do not recurse.
+    // Instead, feed argument state to the callee entry and consume the current
+    // callee summary (if any), matching SVF's interprocedural cycle feedback.
+    if (isRecursiveCallSite(callNode, callee)) {
+      if (recursionMode_ == TOP && isRecursiveFun(callee)) {
+        recursiveCallPass(callNode, callee);
+        continue;
+      }
+
+      AbstractValue calleeReturn;
+      bool calleeHasReturn = collectCalleeReturnValue(callee, calleeReturn);
+      if (calleeHasReturn) {
+        if (!gotReturn) {
+          joinedReturn = calleeReturn;
+          gotReturn = true;
+        } else {
+          joinedReturn.join_with(calleeReturn);
         }
       }
+      continue;
+    }
+
+    // Handle TOP mode for recursive functions reached from entry calls.
+    if (recursionMode_ == TOP && isRecursiveFun(callee)) {
+      recursiveCallPass(callNode, callee);
+      continue;
+    }
+
+    // Analyze callee.
+    if (isRecursiveFun(callee)) {
+      handleRecursiveSCC(callee);
+    } else {
+      handleFunction(callee);
+    }
+
+    AbstractValue calleeReturn;
+    bool calleeHasReturn = collectCalleeReturnValue(callee, calleeReturn);
+
+    if (recursionMode_ == TOP && isRecursiveFun(callee)) {
+      setTopToObjInRecursion(callNode, callee);
+      calleeReturn = AbstractValue(IntervalValue::top());
+      calleeHasReturn = true;
+    }
+
+    if (calleeHasReturn) {
+      if (!gotReturn) {
+        joinedReturn = calleeReturn;
+        gotReturn = true;
+      } else {
+        joinedReturn.join_with(calleeReturn);
+      }
+    }
+  }
+
+  if (!callSiteStack.empty() && callSiteStack.back() == callNode) {
+    auto it = abstractTrace.find(callNode);
+    if (it != abstractTrace.end() && callNode->getType()->isVoidTy() == false &&
+        gotReturn) {
+      uint32_t lhsId = getValueId(callNode);
+      it->second[lhsId] = joinedReturn;
     }
   }
 
   callSiteStack.pop_back();
 }
 
+bool AbstractInterpretation::collectCalleeReturnValue(
+    const llvm::Function *callee, AbstractValue &joinedReturn) const {
+  bool calleeHasReturn = false;
+  for (const llvm::BasicBlock &bb : *callee) {
+    const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator());
+    if (!ret || !ret->getReturnValue())
+      continue;
+    auto retIt = abstractTrace.find(ret);
+    if (retIt == abstractTrace.end())
+      continue;
+    auto rvIt = retIt->second._varToAbsVal.find(0);
+    if (rvIt == retIt->second._varToAbsVal.end())
+      continue;
+    if (!calleeHasReturn) {
+      joinedReturn = rvIt->second;
+      calleeHasReturn = true;
+    } else {
+      joinedReturn.join_with(rvIt->second);
+    }
+  }
+  return calleeHasReturn;
+}
+
+void AbstractInterpretation::handleRecursiveSCC(const llvm::Function *seed) {
+  auto idIt = recursiveSccIdMap_.find(seed);
+  if (idIt == recursiveSccIdMap_.end()) {
+    handleFunction(seed);
+    return;
+  }
+  auto membersIt = recursiveSccMembers_.find(idIt->second);
+  if (membersIt == recursiveSccMembers_.end() || membersIt->second.empty()) {
+    handleFunction(seed);
+    return;
+  }
+
+  // Iterate all functions in the recursive SCC to a global interprocedural
+  // fixpoint.
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (const llvm::Function *func : membersIt->second) {
+      if (!func || func->isDeclaration() || func->empty())
+        continue;
+
+      const llvm::Instruction *entryInst = &func->getEntryBlock().front();
+      AbstractState before;
+      bool hadBefore = false;
+      auto beforeIt = abstractTrace.find(entryInst);
+      if (beforeIt != abstractTrace.end()) {
+        before = beforeIt->second;
+        hadBefore = true;
+      }
+
+      handleFunction(func);
+
+      auto afterIt = abstractTrace.find(entryInst);
+      if (afterIt == abstractTrace.end())
+        continue;
+      if (!hadBefore || afterIt->second != before) {
+        changed = true;
+      }
+    }
+  }
+}
+
 /// Check if a call is a recursive callsite (within same SCC, not entry call
 /// from outside) This matches SVF's isRecursiveCallSite logic
 bool AbstractInterpretation::isRecursiveCallSite(
     const llvm::CallBase *callNode, const llvm::Function *callee) const {
+  // Only callsites to recursive functions can be recursive callsites.
+  if (!callee || !isRecursiveFun(callee))
+    return false;
   // If this call site is marked as non-recursive (entry call), it's not a
-  // recursive callsite
+  // recursive callsite.
   return nonRecursiveCallSites_.find({callNode, callee}) ==
          nonRecursiveCallSites_.end();
 }
 
 bool AbstractInterpretation::skipRecursiveCall(const llvm::CallBase *callNode) {
-  const llvm::Function *callee = getCallee(callNode);
-  if (!callee)
-    return false;
-
-  // Non-recursive function: never skip, always inline
-  if (!isRecursiveFun(callee))
-    return false;
-
-  // For recursive functions, skip only recursive callsites (within same SCC).
-  // Entry calls (from outside SCC) are not skipped - they are inlined so that
-  // handleLoopOrRecursion() can analyze the function body.
-  // This applies uniformly to all modes (TOP/WIDEN_ONLY/WIDEN_NARROW).
-  // This matches SVF's behavior exactly.
-  return isRecursiveCallSite(callNode, callee);
+  for (const llvm::Function *callee : getCallees(callNode)) {
+    if (!callee)
+      continue;
+    if (!isRecursiveFun(callee))
+      return false;
+    if (!isRecursiveCallSite(callNode, callee))
+      return false;
+  }
+  return true;
 }
 
-const llvm::Function *
-AbstractInterpretation::getCallee(const llvm::CallBase *callNode) {
-  // First check for direct call
+std::vector<const llvm::Function *>
+AbstractInterpretation::getCallees(const llvm::CallBase *callNode) const {
+  std::vector<const llvm::Function *> result;
+  if (!callNode)
+    return result;
+
+  // Direct call.
   if (const llvm::Function *direct = callNode->getCalledFunction()) {
-    return direct;
+    if (!direct->isDeclaration()) {
+      result.push_back(direct);
+    }
+    return result;
   }
 
-  // For indirect calls, use AserPTA to resolve targets
-  if (!ptaReady_)
-    return nullptr;
+  // Indirect call: collect all resolved targets from PTA call graph.
+  if (!ptaReady_ || !pta_ || !pta_->pass)
+    return result;
 
-  // Get the call graph and find the node for this call site
   const auto *cg = pta_->pass->getPTA()->getCallGraph();
-
   if (!cg)
-    return nullptr;
+    return result;
 
-  // Find the call graph node for this call instruction using AserPTA's direct
-  // iteration
+  std::set<const llvm::Function *> uniqueTargets;
   for (auto nodeIt = cg->begin(); nodeIt != cg->end(); ++nodeIt) {
     const auto *cgNode = *nodeIt;
-    if (!cgNode)
+    if (!cgNode || !cgNode->isIndirectCall())
+      continue;
+    auto *indCall = cgNode->getTargetFunPtr();
+    if (!indCall)
+      continue;
+    if (indCall->getCallSite() != callNode)
       continue;
 
-    // Check if this node corresponds to our call site
-    const llvm::Instruction *callInst = nullptr;
-    if (!cgNode->isIndirectCall()) {
-      // For direct calls, get the call site from the target function
-      // This is a bit indirect - we need to check edges
-      continue;
-    } else {
-      callInst = cgNode->getTargetFunPtr()->getCallSite();
-      if (callInst == callNode) {
-        // Found the indirect call node - get resolved targets
-        const auto *indCall = cgNode->getTargetFunPtr();
-
-        // First, check resolved nodes (these are the actual resolved targets)
-        const auto &resolvedNodes = indCall->getResolvedNode();
-        if (!resolvedNodes.empty()) {
-          // Return the first resolved non-indirect function
-          for (const auto *resolvedNode : resolvedNodes) {
-            if (resolvedNode && !resolvedNode->isIndirectCall()) {
-              if (const auto *targetFun = resolvedNode->getTargetFun()) {
-                const llvm::Function *calleeFunc = targetFun->getFunction();
-                if (calleeFunc && !calleeFunc->isDeclaration()) {
-                  return calleeFunc;
-                }
-              }
-            }
-          }
+    for (const auto *resolvedNode : indCall->getResolvedNode()) {
+      if (!resolvedNode || resolvedNode->isIndirectCall())
+        continue;
+      if (const auto *targetFun = resolvedNode->getTargetFun()) {
+        const llvm::Function *calleeFunc = targetFun->getFunction();
+        if (calleeFunc && !calleeFunc->isDeclaration()) {
+          uniqueTargets.insert(calleeFunc);
         }
+      }
+    }
 
-        // Also check direct successors (outgoing edges) as fallback
-        for (auto succIt = cgNode->succ_begin(); succIt != cgNode->succ_end();
-             ++succIt) {
-          const auto *calleeNode = *succIt;
-          if (calleeNode && !calleeNode->isIndirectCall()) {
-            if (const auto *targetFun = calleeNode->getTargetFun()) {
-              const llvm::Function *calleeFunc = targetFun->getFunction();
-              if (calleeFunc && !calleeFunc->isDeclaration()) {
-                return calleeFunc;
-              }
-            }
-          }
+    for (auto succIt = cgNode->succ_begin(); succIt != cgNode->succ_end();
+         ++succIt) {
+      const auto *calleeNode = *succIt;
+      if (!calleeNode || calleeNode->isIndirectCall())
+        continue;
+      if (const auto *targetFun = calleeNode->getTargetFun()) {
+        const llvm::Function *calleeFunc = targetFun->getFunction();
+        if (calleeFunc && !calleeFunc->isDeclaration()) {
+          uniqueTargets.insert(calleeFunc);
         }
-
-        // No resolved targets found - return nullptr (conservative)
-        return nullptr;
       }
     }
   }
 
-  // Not found in call graph - return nullptr (conservative)
-  return nullptr;
+  result.assign(uniqueTargets.begin(), uniqueTargets.end());
+  return result;
+}
+
+const llvm::Function *
+AbstractInterpretation::getCallee(const llvm::CallBase *callNode) {
+  std::vector<const llvm::Function *> callees = getCallees(callNode);
+  if (callees.empty())
+    return nullptr;
+  return callees.front();
 }
 
 /// Resolve indirect calls using AserPTA during initialization
@@ -2222,13 +2282,20 @@ const llvm::Function *AbstractInterpretation::resolveIndirectCallViaPTA(
 }
 
 bool AbstractInterpretation::shouldApplyNarrowing(const llvm::Function *fun) {
-  (void)fun;
-  if (recursionMode_ == TOP) {
-    return false;
-  } else if (recursionMode_ == WIDEN_ONLY) {
-    return false;
-  } else {
+  // Non-recursive functions (regular loops): always apply narrowing.
+  if (!fun || !isRecursiveFun(fun))
     return true;
+
+  // Recursive functions: mode-dependent.
+  switch (recursionMode_) {
+  case TOP:
+    return false;
+  case WIDEN_ONLY:
+    return false;
+  case WIDEN_NARROW:
+    return true;
+  default:
+    return false;
   }
 }
 
@@ -2333,8 +2400,8 @@ void AbstractInterpretation::checkPointAllSet() {
   }
 }
 
-void AbstractInterpretation::recursiveCallPass(const llvm::CallBase *callNode) {
-  const llvm::Function *callee = callNode->getCalledFunction();
+void AbstractInterpretation::recursiveCallPass(const llvm::CallBase *callNode,
+                                               const llvm::Function *callee) {
   if (!callee || !isRecursiveFun(callee))
     return;
 
@@ -2342,7 +2409,7 @@ void AbstractInterpretation::recursiveCallPass(const llvm::CallBase *callNode) {
   AbstractState &callState = abstractTrace[callNode];
 
   // Set all stores in the recursive function to TOP
-  setTopToObjInRecursion(callNode);
+  setTopToObjInRecursion(callNode, callee);
 
   // Set return value to TOP
   uint32_t lhsId = getValueId(callNode);
@@ -2358,8 +2425,7 @@ void AbstractInterpretation::recursiveCallPass(const llvm::CallBase *callNode) {
 }
 
 void AbstractInterpretation::setTopToObjInRecursion(
-    const llvm::CallBase *callNode) {
-  const llvm::Function *callee = callNode->getCalledFunction();
+    const llvm::CallBase *callNode, const llvm::Function *callee) {
   if (!callee || !isRecursiveFun(callee))
     return;
 
@@ -2530,8 +2596,9 @@ bool AbstractInterpretation::isBranchFeasible(const llvm::BranchInst *branch,
 
   // Check if condition can be true/false based on the edge
   if (isTrueEdge) {
-    // True edge: condition must be able to be non-zero
-    return !condVal.is_zero() && condVal.contains(1);
+    // True edge: condition must be able to be non-zero.
+    // Any value except exactly 0 is true in LLVM branch semantics.
+    return !condVal.is_zero();
   } else {
     // False edge: condition must be able to be zero
     return condVal.contains(0);
@@ -2682,21 +2749,29 @@ bool AbstractInterpretation::isCmpBranchFeasible(const llvm::CmpInst *cmpInst,
   }
 
   AbstractState newEs = as;
-  IntervalValue &lhs = newEs[op0Id].getInterval();
-  IntervalValue &rhs = newEs[op1Id].getInterval();
+  uint32_t lhsId = op0Id;
+  uint32_t rhsId = op1Id;
+  const llvm::LoadInst *lhsLoadOp = loadOp0;
+  const llvm::LoadInst *rhsLoadOp = loadOp1;
+  AddressValue lhsAddrs = addrOp0;
+  AddressValue rhsAddrs = addrOp1;
 
   bool b0 = val0.is_numeral();
   bool b1 = val1.is_numeral();
 
   if (b0 && !b1) {
-    std::swap(op0Id, op1Id);
-    std::swap(lhs, rhs);
+    std::swap(lhsId, rhsId);
+    std::swap(lhsLoadOp, rhsLoadOp);
+    std::swap(lhsAddrs, rhsAddrs);
     predicate = getSwitchLhsRhsPredicate()[predicate];
   } else if (!b0 && !b1) {
     return true;
   } else if (b0 && b1) {
     return true;
   }
+
+  IntervalValue &lhs = newEs[lhsId].getInterval();
+  IntervalValue &rhs = newEs[rhsId].getInterval();
 
   switch (predicate) {
   case llvm::CmpInst::ICMP_EQ:
@@ -2758,23 +2833,23 @@ bool AbstractInterpretation::isCmpBranchFeasible(const llvm::CmpInst *cmpInst,
 
   // Refine memory for loaded pointers (matching SVF's behavior)
   // If operand comes from a load, also refine the memory it points to
-  if (loadOp0 && !addrOp0.getVals().empty()) {
-    for (const auto &addr : addrOp0.getVals()) {
-      uint32_t objId = as.getIDFromAddr(addr);
-      if (as.inAddrToValTable(objId)) {
-        AbstractValue memVal = as.load(addr);
+  if (lhsLoadOp && !lhsAddrs.getVals().empty()) {
+    for (const auto &addr : lhsAddrs.getVals()) {
+      uint32_t objId = newEs.getIDFromAddr(addr);
+      if (newEs.inAddrToValTable(objId)) {
+        AbstractValue memVal = newEs.load(addr);
         memVal.getInterval().meet_with(lhs);
-        as.store(addr, memVal);
+        newEs.store(addr, memVal);
       }
     }
   }
-  if (loadOp1 && !addrOp1.getVals().empty()) {
-    for (const auto &addr : addrOp1.getVals()) {
-      uint32_t objId = as.getIDFromAddr(addr);
-      if (as.inAddrToValTable(objId)) {
-        AbstractValue memVal = as.load(addr);
+  if (rhsLoadOp && !rhsAddrs.getVals().empty()) {
+    for (const auto &addr : rhsAddrs.getVals()) {
+      uint32_t objId = newEs.getIDFromAddr(addr);
+      if (newEs.inAddrToValTable(objId)) {
+        AbstractValue memVal = newEs.load(addr);
         memVal.getInterval().meet_with(rhs);
-        as.store(addr, memVal);
+        newEs.store(addr, memVal);
       }
     }
   }

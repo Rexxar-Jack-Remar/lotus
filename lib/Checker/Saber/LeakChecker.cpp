@@ -16,9 +16,13 @@
 #include "IR/SVFG/SVFGNode.h"
 
 #include <cassert>
+#include <deque>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -41,9 +45,104 @@ static void appendPathConditionEvents(BugReport *report,
   }
 }
 
+using FuncSet = std::unordered_set<const Function *>;
+using FuncGraph = std::unordered_map<const Function *, FuncSet>;
+
+static bool isModuleCtorOrDtor(StringRef name) {
+  return name == "llvm.global_ctors" || name == "llvm.global_dtors";
+}
+
+static void addFunctionSeedsFromGlobalArray(const GlobalVariable *gv,
+                                            FuncSet &seeds) {
+  if (!gv || !gv->hasInitializer())
+    return;
+  const Constant *init = gv->getInitializer();
+  const auto *arr = dyn_cast<ConstantArray>(init);
+  if (!arr)
+    return;
+  for (unsigned i = 0; i < arr->getNumOperands(); ++i) {
+    const auto *elt = dyn_cast<ConstantStruct>(arr->getOperand(i));
+    if (!elt || elt->getNumOperands() < 2)
+      continue;
+    const Value *op = elt->getOperand(1)->stripPointerCasts();
+    if (const auto *fn = dyn_cast<Function>(op)) {
+      if (!fn->isDeclaration())
+        seeds.insert(fn);
+    }
+  }
+}
+
+static FuncSet computeReachableFunctions(const Module *M) {
+  FuncSet reachable;
+  FuncSet seeds;
+  FuncGraph graph;
+  if (!M)
+    return reachable;
+
+  for (const Function &F : *M) {
+    if (F.isDeclaration())
+      continue;
+    graph.emplace(&F, FuncSet{});
+
+    if (F.getName() == "main" || !F.hasLocalLinkage() || F.hasAddressTaken())
+      seeds.insert(&F);
+  }
+
+  for (const GlobalVariable &GV : M->globals()) {
+    if (!isModuleCtorOrDtor(GV.getName()))
+      continue;
+    addFunctionSeedsFromGlobalArray(&GV, seeds);
+  }
+
+  for (const Function &F : *M) {
+    if (F.isDeclaration())
+      continue;
+    auto it = graph.find(&F);
+    if (it == graph.end())
+      continue;
+
+    for (const BasicBlock &BB : F) {
+      for (const Instruction &I : BB) {
+        const auto *CB = dyn_cast<CallBase>(&I);
+        if (!CB)
+          continue;
+        const Function *callee = CB->getCalledFunction();
+        if (!callee || callee->isDeclaration())
+          continue;
+        it->second.insert(callee);
+      }
+    }
+  }
+
+  if (seeds.empty()) {
+    for (const auto &kv : graph)
+      seeds.insert(kv.first);
+  }
+
+  std::deque<const Function *> worklist(seeds.begin(), seeds.end());
+  while (!worklist.empty()) {
+    const Function *F = worklist.front();
+    worklist.pop_front();
+    if (!reachable.insert(F).second)
+      continue;
+    auto it = graph.find(F);
+    if (it == graph.end())
+      continue;
+    for (const Function *callee : it->second) {
+      if (callee && !callee->isDeclaration())
+        worklist.push_back(callee);
+    }
+  }
+
+  return reachable;
+}
+
 void LeakChecker::initSrcs() {
   if (!module_ || !svfg)
     return;
+
+  // SVF parity: skip sources in dead/uncalled functions.
+  const FuncSet reachableFunctions = computeReachableFunctions(module_);
 
   CSWorkList worklist;
   SVFGNodeBS visited;
@@ -99,6 +198,7 @@ void LeakChecker::initSrcs() {
     } else {
       const llvm::Function *caller = cs->getCaller();
       if (!caller->isDeclaration() &&
+          reachableFunctions.count(caller) &&
           !SaberCheckerAPI::getCheckerAPI()->isExtCall(caller)) {
         addToSources(node);
         addSrcToCSID(node, cs);
@@ -295,7 +395,7 @@ void LeakChecker::validateExpectedFailureTests(const SVFGNode *source,
   } else if (fun == "LEAKFN") {
     expectedFailure = (isAllPathReachable() && isSomePathReachable());
   } else if (fun == "SAFEMALLOC" || fun == "NFRMALLOC" || fun == "PLKMALLOC" ||
-             fun == "CLKLEAKFN") {
+             fun == "CLKMALLOC") {
     return;
   } else {
     errs() << "SABER validation skipped: unknown test function " << fun << "\n";

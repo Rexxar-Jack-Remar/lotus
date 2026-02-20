@@ -103,6 +103,8 @@ int main(int argc, char **argv) {
   ae.setRecursionMode(HandleRecurOpt);
   ae.setWidenDelay(WidenDelayOpt);
   ae.setStrictCheckpoint(StrictCheckpointOpt);
+  ae.setEnableBufOverflowCheck(runOverflow);
+  ae.setEnableNullDerefCheck(runNullDeref);
 
   // Add detectors based on options
   if (runOverflow) {

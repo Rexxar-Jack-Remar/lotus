@@ -146,6 +146,11 @@ public:
   // Checkpoint statistics
   uint32_t getCheckpointCount() const { return checkpoints.size(); }
   uint32_t getCheckedCount() const { return checkedCheckpoints_.size(); }
+  void markCheckpointChecked(const llvm::CallBase *call) {
+    if (call) {
+      checkedCheckpoints_.insert(call);
+    }
+  }
 
   AbstractState &getAbsStateFromTrace(const llvm::Instruction *val) {
     auto it = abstractTrace.find(val);
@@ -195,6 +200,9 @@ private:
   // recursive callsites
   std::set<std::pair<const llvm::CallBase *, const llvm::Function *>>
       nonRecursiveCallSites_;
+  std::unordered_map<const llvm::Function *, uint32_t> recursiveSccIdMap_;
+  std::unordered_map<uint32_t, std::vector<const llvm::Function *>>
+      recursiveSccMembers_;
   HandleRecur recursionMode_; // Recursion handling mode (default: WIDEN_NARROW)
   uint32_t widenDelay_{0};
   bool strictCheckpoint_{true};
@@ -272,12 +280,17 @@ private:
 
   bool isExtCall(const llvm::CallBase *callNode);
   void handleExtCall(const llvm::CallBase *callNode);
-  bool isRecursiveFun(const llvm::Function *fun);
+  bool isRecursiveFun(const llvm::Function *fun) const;
   bool isRecursiveCall(const llvm::CallBase *callNode);
   void handleFunCall(const llvm::CallBase *callNode);
   bool isRecursiveCallSite(const llvm::CallBase *callNode,
                            const llvm::Function *callee) const;
   bool skipRecursiveCall(const llvm::CallBase *callNode);
+  bool collectCalleeReturnValue(const llvm::Function *callee,
+                                AbstractValue &joinedReturn) const;
+  void handleRecursiveSCC(const llvm::Function *seed);
+  std::vector<const llvm::Function *>
+  getCallees(const llvm::CallBase *callNode) const;
   const llvm::Function *getCallee(const llvm::CallBase *callNode);
   const llvm::Function *
   resolveIndirectCallViaPTA(const llvm::CallBase *callNode) const;
@@ -285,8 +298,10 @@ private:
 
   void collectCheckPoint();
   void checkPointAllSet();
-  void recursiveCallPass(const llvm::CallBase *callNode);
-  void setTopToObjInRecursion(const llvm::CallBase *callNode);
+  void recursiveCallPass(const llvm::CallBase *callNode,
+                         const llvm::Function *callee);
+  void setTopToObjInRecursion(const llvm::CallBase *callNode,
+                              const llvm::Function *callee);
 
   bool isBranchFeasible(const llvm::BranchInst *branch, AbstractState &as,
                         bool isTrueEdge);

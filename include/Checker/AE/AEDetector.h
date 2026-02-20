@@ -86,6 +86,7 @@ public:
   virtual void handleStubFunctions(const llvm::CallBase *call) = 0;
   virtual void reportBug() = 0;
   virtual size_t getBugCount() const = 0;
+  virtual void reset() { clearEventTrace(); }
 
   DetectorKind getKind() const { return kind; }
 
@@ -129,6 +130,7 @@ public:
   void handleStubFunctions(const llvm::CallBase *call) override;
   void reportBug() override;
   size_t getBugCount() const override { return instToBugInfo.size(); }
+  void reset() override;
 
   void detectExtAPI(AbstractState &as, const llvm::CallBase *call);
   bool canSafelyAccessMemory(AbstractState &as, uint32_t ptrId,
@@ -154,6 +156,7 @@ private:
   std::set<std::string> bugLoc;
   std::map<const llvm::Instruction *, std::string> instToBugInfo;
   std::map<const llvm::GetElementPtrInst *, IntervalValue> gepObjOffsetFromBase;
+  std::map<uint32_t, IntervalValue> gepObjOffsetFromBaseByObjId;
 };
 
 /// Detector for identifying null pointer dereference issues
@@ -172,6 +175,7 @@ public:
   void handleStubFunctions(const llvm::CallBase *call) override;
   void reportBug() override;
   size_t getBugCount() const override { return instToBugInfo.size(); }
+  void reset() override;
 
   void detectExtAPI(AbstractState &as, const llvm::CallBase *call);
   bool canSafelyDerefPtr(AbstractState &as, uint32_t ptrId);
@@ -205,8 +209,9 @@ public:
   void handleStubFunctions(const llvm::CallBase *call) override;
   void reportBug() override;
   size_t getBugCount() const override { return instToBugInfo.size(); }
+  void reset() override;
 
-  bool canSafelyDerefPtr(AbstractState &as, uint32_t ptrId);
+  bool mayAccessFreedMem(AbstractState &as, uint32_t ptrId);
 
 private:
   void addBugToReporter(const AEException &e, const llvm::Instruction *inst);
@@ -231,6 +236,7 @@ public:
   void handleStubFunctions(const llvm::CallBase *call) override;
   void reportBug() override;
   size_t getBugCount() const override { return instToBugInfo.size(); }
+  void reset() override;
 
   bool isValidFree(AbstractState &as, uint32_t ptrId);
 

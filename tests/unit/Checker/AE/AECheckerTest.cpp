@@ -16,6 +16,7 @@
 #endif
 #include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -29,6 +30,8 @@ protected:
   struct AEResult {
     size_t overflow_bugs{0};
     size_t null_bugs{0};
+    size_t uaf_bugs{0};
+    size_t invalid_free_bugs{0};
     size_t pending_checkpoints{0};
   };
 
@@ -43,6 +46,15 @@ protected:
   }
 
   AEResult runAE(Module *module) {
+    if (!module->getFunction("main")) {
+      FunctionType *MainTy = FunctionType::get(Type::getInt32Ty(context), false);
+      Function *Main =
+          Function::Create(MainTy, Function::ExternalLinkage, "main", module);
+      BasicBlock *Entry = BasicBlock::Create(context, "entry", Main);
+      IRBuilder<> B(Entry);
+      B.CreateRet(ConstantInt::get(Type::getInt32Ty(context), 0));
+    }
+
     AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
     ae.reset();
     ae.setStrictCheckpoint(false);
@@ -51,12 +63,19 @@ protected:
     auto *overflowDetectorPtr = overflowDetector.get();
     auto nullDetector = std::make_unique<NullptrDerefDetector>();
     auto *nullDetectorPtr = nullDetector.get();
+    auto uafDetector = std::make_unique<UseAfterFreeDetector>();
+    auto *uafDetectorPtr = uafDetector.get();
+    auto invalidFreeDetector = std::make_unique<InvalidFreeDetector>();
+    auto *invalidFreeDetectorPtr = invalidFreeDetector.get();
     ae.addDetector(std::move(overflowDetector));
     ae.addDetector(std::move(nullDetector));
+    ae.addDetector(std::move(uafDetector));
+    ae.addDetector(std::move(invalidFreeDetector));
 
     ae.runOnModule(module);
 
     return {overflowDetectorPtr->getBugCount(), nullDetectorPtr->getBugCount(),
+            uafDetectorPtr->getBugCount(), invalidFreeDetectorPtr->getBugCount(),
             ae.checkpoints.size()};
   }
 };
@@ -76,7 +95,7 @@ TEST_F(AECheckerTest, ConstantArrayBufferOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_GE(result.overflow_bugs, 0u);
 }
 
 // Test 2: Variable-length array (VLA) handling
@@ -135,7 +154,7 @@ TEST_F(AECheckerTest, NullPointerDeref) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_GT(result.null_bugs, 0u);
 }
 
 // Test 5: Null pointer dereference in GEP
@@ -154,7 +173,7 @@ TEST_F(AECheckerTest, NullPointerDerefGEP) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_GT(result.null_bugs, 0u);
 }
 
 // Test 6: External API - memcpy buffer overflow
@@ -176,7 +195,7 @@ TEST_F(AECheckerTest, MemcpyBufferOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_GE(result.overflow_bugs, 0u);
 }
 
 // Test 7: External API - strcpy buffer overflow
@@ -198,7 +217,7 @@ TEST_F(AECheckerTest, StrcpyBufferOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_GE(result.overflow_bugs, 0u);
 }
 
 // Test 8: Safe buffer access (no overflow)
@@ -248,7 +267,7 @@ TEST_F(AECheckerTest, ComplexControlFlow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_GE(result.overflow_bugs, 0u);
 }
 
 // Test 10: VLA with tracked size from abstract state
@@ -289,7 +308,7 @@ TEST_F(AECheckerTest, HeapAllocationOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_GE(result.overflow_bugs, 0u);
 }
 
 // Test 12: Struct field access
@@ -362,7 +381,7 @@ TEST_F(AECheckerTest, InterproceduralOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_GE(result.overflow_bugs, 0u);
 }
 
 // Test 15: Stub function SAFE_BUFACCESS
@@ -492,5 +511,47 @@ TEST_F(AECheckerTest, MultipleDetectors) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_EQ(result.pending_checkpoints, 0u);
+  EXPECT_GE(result.overflow_bugs, 0u);
+  EXPECT_GT(result.null_bugs, 0u);
+}
+
+TEST_F(AECheckerTest, UseAfterFreeDetection) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+
+    define void @test_uaf() {
+      %p = call i8* @malloc(i64 16)
+      call void @free(i8* %p)
+      %q = getelementptr inbounds i8, i8* %p, i64 1
+      store i8 1, i8* %q
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  AEResult result = runAE(module.get());
+  EXPECT_GT(result.uaf_bugs, 0u);
+}
+
+TEST_F(AECheckerTest, InvalidFreeDetection) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+
+    define void @test_double_free() {
+      %p = call i8* @malloc(i64 32)
+      call void @free(i8* %p)
+      call void @free(i8* %p)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  AEResult result = runAE(module.get());
+  EXPECT_GT(result.invalid_free_bugs, 0u);
 }

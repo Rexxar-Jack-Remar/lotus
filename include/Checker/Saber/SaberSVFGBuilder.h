@@ -16,6 +16,7 @@
 #include <deque>
 #include <map>
 #include <set>
+#include <unordered_set>
 
 namespace lotus {
 namespace analysis {
@@ -43,7 +44,11 @@ public:
     saberCondAllocator = allocator;
   }
 
-  void setModule(llvm::Module *M) { module_ = M; }
+  void setModule(llvm::Module *M) {
+    module_ = M;
+    recursiveFunctionsReady_ = false;
+    recursiveFunctionsCache_.clear();
+  }
 
   void setCurrentSVFG(SVFG *g) { currentSVFG_ = g; }
 
@@ -68,6 +73,8 @@ protected:
   std::set<uint32_t> globs;
   SVFGNodeSet globSVFGNodes;
   SVFG *currentSVFG_ = nullptr;
+  std::unordered_set<const llvm::Function *> recursiveFunctionsCache_;
+  bool recursiveFunctionsReady_ = false;
 
   SaberCondAllocator *saberCondAllocator = nullptr;
   llvm::Module *module_ = nullptr;

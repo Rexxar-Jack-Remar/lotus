@@ -2,8 +2,107 @@
 
 #include <llvm/IR/CFG.h>
 
+#include <algorithm>
+#include <functional>
+#include <stack>
+#include <unordered_map>
+#include <unordered_set>
+
 namespace lotus {
 namespace analysis {
+
+namespace {
+
+using BB = llvm::BasicBlock;
+
+static bool hasSelfLoop(
+    const BB *bb,
+    const std::unordered_set<const BB *> *allowed = nullptr) {
+  for (const BB *succ : llvm::successors(bb)) {
+    if (succ != bb)
+      continue;
+    if (!allowed || allowed->count(succ) > 0)
+      return true;
+  }
+  return false;
+}
+
+static std::vector<const BB *> computeReachableRPO(const BB *entry) {
+  std::vector<const BB *> postOrder;
+  std::unordered_set<const BB *> visited;
+
+  std::function<void(const BB *)> dfs = [&](const BB *bb) {
+    if (!bb || !visited.insert(bb).second)
+      return;
+    for (const BB *succ : llvm::successors(bb)) {
+      dfs(succ);
+    }
+    postOrder.push_back(bb);
+  };
+
+  dfs(entry);
+  std::reverse(postOrder.begin(), postOrder.end());
+  return postOrder;
+}
+
+static std::vector<std::vector<const BB *>> computeSCCs(
+    const std::vector<const BB *> &nodes,
+    const std::unordered_map<const BB *, std::vector<const BB *>> &succAll) {
+  std::unordered_set<const BB *> allowed(nodes.begin(), nodes.end());
+  std::unordered_map<const BB *, int> index;
+  std::unordered_map<const BB *, int> lowlink;
+  std::unordered_set<const BB *> onStack;
+  std::vector<const BB *> stack;
+  std::vector<std::vector<const BB *>> sccs;
+  int nextIndex = 0;
+
+  std::function<void(const BB *)> strongConnect = [&](const BB *v) {
+    index[v] = nextIndex;
+    lowlink[v] = nextIndex;
+    ++nextIndex;
+    stack.push_back(v);
+    onStack.insert(v);
+
+    auto succIt = succAll.find(v);
+    if (succIt != succAll.end()) {
+      for (const BB *w : succIt->second) {
+        if (allowed.count(w) == 0)
+          continue;
+        if (index.count(w) == 0) {
+          strongConnect(w);
+          lowlink[v] = std::min(lowlink[v], lowlink[w]);
+        } else if (onStack.count(w) != 0) {
+          lowlink[v] = std::min(lowlink[v], index[w]);
+        }
+      }
+    }
+
+    if (lowlink[v] == index[v]) {
+      std::vector<const BB *> comp;
+      while (!stack.empty()) {
+        const BB *w = stack.back();
+        stack.pop_back();
+        onStack.erase(w);
+        comp.push_back(w);
+        if (w == v)
+          break;
+      }
+      sccs.push_back(std::move(comp));
+    }
+  };
+
+  for (const BB *bb : nodes) {
+    if (index.count(bb) == 0) {
+      strongConnect(bb);
+    }
+  }
+
+  // Tarjan naturally emits reverse topological SCC order.
+  std::reverse(sccs.begin(), sccs.end());
+  return sccs;
+}
+
+} // namespace
 
 std::vector<const llvm::BasicBlock *> ICFGSingletonWTO::getSuccessors() const {
   std::vector<const llvm::BasicBlock *> succs;
@@ -53,15 +152,102 @@ ICFGWTO::ICFGWTO(const llvm::Function *f) : func(f), entry(nullptr) {
 }
 
 void ICFGWTO::buildWTO() {
-  if (!entry)
+  if (!func || !entry)
     return;
 
-  std::set<const llvm::BasicBlock *> visited;
-  std::set<const llvm::BasicBlock *> inStack;
+  std::unordered_map<const BB *, std::vector<const BB *>> succAll;
+  for (const BB &bb : *func) {
+    auto &succs = succAll[&bb];
+    for (const BB *succ : llvm::successors(&bb)) {
+      succs.push_back(succ);
+    }
+  }
 
-  const ICFGWTOComp *comp = buildComponent(entry, visited, inStack);
-  if (comp) {
-    components.push_back(comp);
+  std::vector<const BB *> rpo = computeReachableRPO(entry);
+  std::unordered_map<const BB *, size_t> rpoIndex;
+  for (size_t i = 0; i < rpo.size(); ++i) {
+    rpoIndex[rpo[i]] = i;
+  }
+
+  std::unordered_set<const BB *> reachable(rpo.begin(), rpo.end());
+  std::set<const BB *> represented;
+
+  std::function<const ICFGWTOComp *(const std::vector<const BB *> &,
+                                    const BB *)>
+      buildFromNodes;
+  buildFromNodes = [&](const std::vector<const BB *> &nodes,
+                       const BB *preferredHead) -> const ICFGWTOComp * {
+    if (nodes.empty())
+      return nullptr;
+
+    std::unordered_set<const BB *> nodeSet(nodes.begin(), nodes.end());
+    bool cyclic = (nodes.size() > 1);
+    if (!cyclic) {
+      cyclic = hasSelfLoop(nodes.front(), &nodeSet);
+    }
+
+    if (!cyclic) {
+      represented.insert(nodes.front());
+      return new ICFGSingletonWTO(nodes.front());
+    }
+
+    const BB *head = nullptr;
+    if (preferredHead && nodeSet.count(preferredHead) > 0) {
+      head = preferredHead;
+    } else {
+      size_t best = std::numeric_limits<size_t>::max();
+      for (const BB *bb : nodes) {
+        auto it = rpoIndex.find(bb);
+        size_t idx = (it == rpoIndex.end()) ? best : it->second;
+        if (!head || idx < best) {
+          head = bb;
+          best = idx;
+        }
+      }
+      if (!head) {
+        head = nodes.front();
+      }
+    }
+
+    represented.insert(head);
+    auto *cycle = new ICFGCycleWTO(head);
+
+    std::vector<const BB *> remaining;
+    remaining.reserve(nodes.size());
+    for (const BB *bb : nodes) {
+      if (bb != head)
+        remaining.push_back(bb);
+    }
+    if (remaining.empty())
+      return cycle;
+
+    for (const auto &subScc : computeSCCs(remaining, succAll)) {
+      for (const BB *bb : subScc) {
+        represented.insert(bb);
+      }
+      if (const ICFGWTOComp *subComp = buildFromNodes(subScc, nullptr)) {
+        cycle->addComponent(subComp);
+      }
+    }
+
+    return cycle;
+  };
+
+  for (const auto &topScc : computeSCCs(rpo, succAll)) {
+    const BB *preferred = (std::find(topScc.begin(), topScc.end(), entry) !=
+                           topScc.end())
+                              ? entry
+                              : nullptr;
+    if (const ICFGWTOComp *comp = buildFromNodes(topScc, preferred)) {
+      components.push_back(comp);
+    }
+  }
+
+  // Preserve total coverage, including unreachable blocks.
+  for (const BB &bb : *func) {
+    if (reachable.count(&bb) == 0 || represented.count(&bb) == 0) {
+      components.push_back(new ICFGSingletonWTO(&bb));
+    }
   }
 }
 

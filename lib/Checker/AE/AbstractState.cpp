@@ -14,6 +14,7 @@
 
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
+#include <algorithm>
 
 namespace lotus {
 namespace analysis {
@@ -41,6 +42,18 @@ AbstractState AbstractState::widening(const AbstractState &other) {
         it->second.getInterval().widen_with(
             other._addrToAbsVal.at(key).getInterval());
       }
+    }
+  }
+  // Preserve may-freed facts monotonically.
+  result._freedAddrs.insert(other._freedAddrs.begin(), other._freedAddrs.end());
+  // Conservatively keep the smallest known object size per object so potential
+  // OOB is not hidden on merges.
+  for (const auto &entry : other._objToSize) {
+    auto it = result._objToSize.find(entry.first);
+    if (it == result._objToSize.end()) {
+      result._objToSize.emplace(entry.first, entry.second);
+    } else {
+      it->second = std::min(it->second, entry.second);
     }
   }
   return result;
@@ -71,6 +84,17 @@ AbstractState AbstractState::narrowing(const AbstractState &other) {
       }
     }
   }
+  // Narrowing keeps may-freed facts monotone.
+  result._freedAddrs.insert(other._freedAddrs.begin(), other._freedAddrs.end());
+  // Keep conservative (smallest) known object size.
+  for (const auto &entry : other._objToSize) {
+    auto it = result._objToSize.find(entry.first);
+    if (it == result._objToSize.end()) {
+      result._objToSize.emplace(entry.first, entry.second);
+    } else {
+      it->second = std::min(it->second, entry.second);
+    }
+  }
   return result;
 }
 
@@ -99,6 +123,15 @@ void AbstractState::joinWith(const AbstractState &other) {
   }
   // Union of freed addresses (matching SVF)
   _freedAddrs.insert(other._freedAddrs.begin(), other._freedAddrs.end());
+  // Merge object sizes conservatively (min size surfaces potential OOB).
+  for (const auto &entry : other._objToSize) {
+    auto it = _objToSize.find(entry.first);
+    if (it == _objToSize.end()) {
+      _objToSize.emplace(entry.first, entry.second);
+    } else {
+      it->second = std::min(it->second, entry.second);
+    }
+  }
 }
 
 /// Domain meet with other, important! other widen this.
@@ -123,6 +156,15 @@ void AbstractState::meetWith(const AbstractState &other) {
     }
   }
   _freedAddrs = std::move(intersection);
+  // Meet object sizes by requiring presence in both and taking max.
+  std::unordered_map<uint32_t, uint32_t> objIntersection;
+  for (const auto &entry : _objToSize) {
+    auto it = other._objToSize.find(entry.first);
+    if (it != other._objToSize.end()) {
+      objIntersection.emplace(entry.first, std::max(entry.second, it->second));
+    }
+  }
+  _objToSize = std::move(objIntersection);
 }
 
 void AbstractState::printAbstractState() const {
@@ -141,22 +183,36 @@ void AbstractState::printAbstractState() const {
 
 bool AbstractState::equals(const AbstractState &other) const {
   return eqVarToValMap(_varToAbsVal, other._varToAbsVal) &&
-         eqVarToValMap(_addrToAbsVal, other._addrToAbsVal);
+         eqVarToValMap(_addrToAbsVal, other._addrToAbsVal) &&
+         _freedAddrs == other._freedAddrs && _objToSize == other._objToSize;
 }
 
 uint32_t AbstractState::hash() const {
-  // Improved hash function matching SVF's approach
-  size_t h = getVarToVal().size() * 2;
+  // Szudzik's pairing function from SVF - elegant way to combine two hash
+  // values
+  auto szudzik = [](size_t a, size_t b) -> size_t {
+    return a > b ? b * b + a : a * a + a + b;
+  };
+
   std::hash<uint32_t> hf;
+  size_t h = szudzik(getVarToVal().size() * 2, 0);
   for (const auto &t : getVarToVal()) {
-    h ^= hf(t.first) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h = szudzik(h, hf(t.first));
   }
-  size_t h2 = getLocToVal().size() * 2;
+  size_t h2 = szudzik(getLocToVal().size() * 2, 0);
   for (const auto &t : getLocToVal()) {
-    h2 ^= hf(t.first) + 0x9e3779b9 + (h2 << 6) + (h2 >> 2);
+    h2 = szudzik(h2, hf(t.first));
   }
-  // Combine both hashes
-  return static_cast<uint32_t>(h ^ (h2 << 1));
+  // Combine both hashes using Szudzik
+  size_t h3 = szudzik(_freedAddrs.size() * 2, 0);
+  for (const auto &addr : _freedAddrs) {
+    h3 = szudzik(h3, hf(addr));
+  }
+  size_t h4 = szudzik(_objToSize.size() * 2, 0);
+  for (const auto &item : _objToSize) {
+    h4 = szudzik(h4, szudzik(hf(item.first), hf(item.second)));
+  }
+  return static_cast<uint32_t>(szudzik(szudzik(h, h2), szudzik(h3, h4)));
 }
 
 AbstractValue AbstractState::loadValue(uint32_t varId) {

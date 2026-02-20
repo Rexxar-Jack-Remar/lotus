@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 
@@ -49,6 +50,13 @@ public:
 
   // Get the PTA solver
   void *getPTASolver() const { return ptaSolver_; }
+
+  // Get object size in bytes using LLVM type information
+  // This uses the allocation site's type to determine size
+  uint32_t getByteSizeOfObj(const void *obj) const;
+
+  // Get the LLVM Value associated with an object
+  const llvm::Value *getObjValue(const void *obj) const;
 
 private:
   void *ptaSolver_;

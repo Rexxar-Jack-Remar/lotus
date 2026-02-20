@@ -42,8 +42,7 @@ void SVFIRWrapper::getPointsTo(const llvm::Value *V,
   if (!solver)
     return;
 
-  // Get points-to objects using the solver - it handles template internally
-  // We pass nullptr for context and get FSObject results
+  // Get points-to objects using the solver
   std::vector<const FSObject *> pts;
   solver->getPointsTo(nullptr, V, pts);
 
@@ -86,6 +85,53 @@ const llvm::Function *SVFIRWrapper::getFunction(const std::string &name) const {
   if (module_)
     return module_->getFunction(name);
   return nullptr;
+}
+
+uint32_t SVFIRWrapper::getByteSizeOfObj(const void *obj) const {
+  if (!obj || !module_)
+    return 0;
+
+  const auto *fsObj = static_cast<const FSObject *>(obj);
+  if (!fsObj)
+    return 0;
+
+  // Get the allocation site value and compute size from its type
+  const llvm::Value *allocSite = fsObj->getAllocSite().getValue();
+  if (!allocSite)
+    return 0;
+
+  const llvm::DataLayout &dl = module_->getDataLayout();
+
+  // For allocations (alloca, malloc, etc.), use the allocated type
+  if (const auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(allocSite)) {
+    return dl.getTypeAllocSize(alloca->getAllocatedType());
+  }
+
+  // For global variables, use the value type
+  if (const auto *gv = llvm::dyn_cast<llvm::GlobalVariable>(allocSite)) {
+    return dl.getTypeAllocSize(gv->getValueType());
+  }
+
+  // For pointer types, get the pointee type
+  if (allocSite->getType()->isPointerTy()) {
+    llvm::Type *pointeeType = allocSite->getType()->getPointerElementType();
+    if (pointeeType && pointeeType->isSized()) {
+      return dl.getTypeAllocSize(pointeeType);
+    }
+  }
+
+  return 0;
+}
+
+const llvm::Value *SVFIRWrapper::getObjValue(const void *obj) const {
+  if (!obj)
+    return nullptr;
+
+  const auto *fsObj = static_cast<const FSObject *>(obj);
+  if (!fsObj)
+    return nullptr;
+
+  return fsObj->getValue();
 }
 
 } // namespace analysis

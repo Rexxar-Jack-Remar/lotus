@@ -188,9 +188,34 @@ public:
     return true;
   }
 
+  static bool geqFreedAddrs(const std::unordered_set<uint32_t> &lhs,
+                            const std::unordered_set<uint32_t> &rhs) {
+    for (uint32_t addr : rhs) {
+      if (lhs.find(addr) == lhs.end())
+        return false;
+    }
+    return true;
+  }
+
+  static bool geqObjSizeMap(const std::unordered_map<uint32_t, uint32_t> &lhs,
+                            const std::unordered_map<uint32_t, uint32_t> &rhs) {
+    if (lhs.size() != rhs.size())
+      return false;
+    for (const auto &item : rhs) {
+      auto it = lhs.find(item.first);
+      if (it == lhs.end())
+        return false;
+      // Treat object size as exact metadata for lattice-order checks.
+      if (it->second != item.second)
+        return false;
+    }
+    return true;
+  }
+
   bool operator==(const AbstractState &rhs) const {
     return eqVarToValMap(_varToAbsVal, rhs.getVarToVal()) &&
-           eqVarToValMap(_addrToAbsVal, rhs.getLocToVal());
+           eqVarToValMap(_addrToAbsVal, rhs.getLocToVal()) &&
+           _freedAddrs == rhs._freedAddrs && _objToSize == rhs._objToSize;
   }
 
   bool operator!=(const AbstractState &rhs) const { return !(*this == rhs); }
@@ -199,7 +224,9 @@ public:
 
   bool operator>=(const AbstractState &rhs) const {
     return geqVarToValMap(_varToAbsVal, rhs.getVarToVal()) &&
-           geqVarToValMap(_addrToAbsVal, rhs.getLocToVal());
+           geqVarToValMap(_addrToAbsVal, rhs.getLocToVal()) &&
+           geqFreedAddrs(_freedAddrs, rhs._freedAddrs) &&
+           geqObjSizeMap(_objToSize, rhs._objToSize);
   }
 
   void clear() {
