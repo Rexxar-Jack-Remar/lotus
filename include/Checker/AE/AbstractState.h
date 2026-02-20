@@ -8,6 +8,7 @@
 
 #include "Checker/AE/AbstractValue.h"
 
+#include <map>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -18,6 +19,9 @@
 namespace lotus {
 namespace analysis {
 
+// Forward declaration (SVFIRWrapper only needs pointer)
+class SVFIRWrapper;
+
 // Maximum field limit for GEP offset calculations (default: 10000)
 [[maybe_unused]] static constexpr uint32_t MaxFieldLimit = 10000;
 
@@ -27,13 +31,15 @@ public:
   typedef std::unordered_map<uint32_t, AbstractValue> VarToAbsValMap;
   typedef VarToAbsValMap AddrToAbsValMap;
 
-  std::unordered_set<uint32_t> _freedAddrs;
+  static constexpr uint32_t NullPtr = 0;
+  static constexpr uint32_t BlkPtr = 1;
 
-public:
+  std::unordered_set<uint32_t> _freedAddrs;
   VarToAbsValMap _varToAbsVal;
   AddrToAbsValMap _addrToAbsVal;
 
-public:
+  SVFIRWrapper *svfir_ = nullptr;
+
   AbstractState() {}
 
   AbstractState(VarToAbsValMap &_varToValMap, AddrToAbsValMap &_locToValMap)
@@ -41,7 +47,8 @@ public:
 
   AbstractState(const AbstractState &rhs)
       : _freedAddrs(rhs._freedAddrs), _varToAbsVal(rhs._varToAbsVal),
-        _addrToAbsVal(rhs._addrToAbsVal) {}
+        _addrToAbsVal(rhs._addrToAbsVal), svfir_(rhs.svfir_),
+        _objToSize(rhs._objToSize) {}
 
   virtual ~AbstractState() = default;
 
@@ -50,19 +57,25 @@ public:
       _varToAbsVal = rhs._varToAbsVal;
       _addrToAbsVal = rhs._addrToAbsVal;
       _freedAddrs = rhs._freedAddrs;
+      _objToSize = rhs._objToSize;
+      svfir_ = rhs.svfir_;
     }
     return *this;
   }
 
   AbstractState(AbstractState &&rhs)
-      : _varToAbsVal(std::move(rhs._varToAbsVal)),
-        _addrToAbsVal(std::move(rhs._addrToAbsVal)) {}
+      : _freedAddrs(std::move(rhs._freedAddrs)),
+        _varToAbsVal(std::move(rhs._varToAbsVal)),
+        _addrToAbsVal(std::move(rhs._addrToAbsVal)), svfir_(rhs.svfir_),
+        _objToSize(std::move(rhs._objToSize)) {}
 
   AbstractState &operator=(AbstractState &&rhs) {
     if (&rhs != this) {
       _varToAbsVal = std::move(rhs._varToAbsVal);
       _addrToAbsVal = std::move(rhs._addrToAbsVal);
       _freedAddrs = std::move(rhs._freedAddrs);
+      _objToSize = std::move(rhs._objToSize);
+      svfir_ = rhs.svfir_;
     }
     return *this;
   }
@@ -125,9 +138,13 @@ public:
   }
 
   void store(uint32_t addr, const AbstractValue &val) {
-    assert(AddressValue::isVirtualMemAddress(addr) && "not virtual address?");
+    if (!AddressValue::isVirtualMemAddress(addr))
+      return;
     uint32_t objId = getIDFromAddr(addr);
     if (isNullMem(addr))
+      return;
+    // Check for freed memory before storing
+    if (isFreedMem(addr))
       return;
     _addrToAbsVal[objId] = val;
   }
@@ -235,28 +252,54 @@ public:
   IntervalValue getByteOffset(const llvm::GetElementPtrInst *gep);
   IntervalValue getElementIndex(const llvm::GetElementPtrInst *gep);
   uint32_t getAllocaInstByteSize(const llvm::AllocaInst *alloca);
-  // Improved version that uses abstract state for VLA size tracking
   uint32_t getAllocaInstByteSize(const llvm::AllocaInst *alloca,
                                  const AbstractState &as);
+
+  AddressValue getGepObjAddrs(uint32_t pointer, IntervalValue offset,
+                              const llvm::GetElementPtrInst *gep);
+  uint32_t getGepFieldSize(llvm::Type *srcType, int64_t offset,
+                           const llvm::DataLayout &dl);
 
   // Object initialization
   void initObjVar(const llvm::Value *objVar);
 
-  // Type queries
+  // Pointer to SVFIRWrapper for PTA-based queries
+  void setSVFIRWrapper(SVFIRWrapper *wrapper) { svfir_ = wrapper; }
+  SVFIRWrapper *getSVFIRWrapper() const { return svfir_; }
+
+  // Type queries using PTA
   const llvm::Type *getPointeeElement(uint32_t id);
 
-  // Object size tracking
-  std::unordered_map<uint32_t, uint32_t> _objToSize;
+  // Get object size using PTA
+  uint32_t getObjectSize(const llvm::Value *obj) const;
+
+  // Get points-to set for a pointer using PTA
+  // Returns vector of objects (as void* to avoid template in header)
+  void getPointsToSet(const llvm::Value *ptr,
+                      std::vector<void *> &result) const;
+
+  // Object size tracking (public for AE use)
   void setObjSize(uint32_t objId, uint32_t size) { _objToSize[objId] = size; }
   uint32_t getObjSize(uint32_t objId) const {
     auto it = _objToSize.find(objId);
     return it != _objToSize.end() ? it->second : 0;
   }
 
+private:
+  // Object size tracking (storage)
+  std::unordered_map<uint32_t, uint32_t> _objToSize;
+
   // GEP object offset tracking (similar to SVF's GepObjVar)
   // Maps GEP instruction pointer -> offset from base object
   std::unordered_map<const llvm::GetElementPtrInst *, IntervalValue>
       _gepObjOffsetFromBase;
+
+  // GEP field-sensitive object tracking: maps (baseObjId, offset) -> field
+  // object ID This maintains field sensitivity similar to SVF's getGepObjVar()
+  std::map<std::pair<uint32_t, int64_t>, uint32_t> _gepFieldObjMap;
+  uint32_t _nextGepFieldId =
+      0x80000000; // Start from high IDs to avoid collision
+
   void setGepObjOffsetFromBase(const llvm::GetElementPtrInst *gep,
                                const IntervalValue &offset) {
     _gepObjOffsetFromBase[gep] = offset;
@@ -273,6 +316,18 @@ public:
     return IntervalValue(0, 0);
   }
 
+  // Get or create a field-sensitive GEP object ID (matching SVF's getGepObjVar)
+  uint32_t getGepFieldObjId(uint32_t baseObjId, int64_t offset) {
+    auto key = std::make_pair(baseObjId, offset);
+    auto it = _gepFieldObjMap.find(key);
+    if (it != _gepFieldObjMap.end()) {
+      return it->second;
+    }
+    uint32_t newId = _nextGepFieldId++;
+    _gepFieldObjMap[key] = newId;
+    return newId;
+  }
+
   AbstractState sliceState(std::set<uint32_t> &sl) const {
     AbstractState inv;
     for (uint32_t id : sl) {
@@ -282,9 +337,6 @@ public:
     }
     return inv;
   }
-
-  static constexpr uint32_t NullPtr = 0;
-  static constexpr uint32_t BlkPtr = 1;
 };
 
 } // namespace analysis

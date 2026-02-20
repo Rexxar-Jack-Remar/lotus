@@ -9,6 +9,7 @@
 #include "Checker/AE/AEDetector.h"
 #include "Checker/AE/ICFGWTO.h"
 #include "Checker/AE/RelationSolver.h"
+#include "Checker/AE/SVFIRWrapper.h"
 
 #include <cstdint>
 #include <list>
@@ -29,6 +30,9 @@ namespace aser {
 template <typename ctx> class CallGraph;
 template <typename ctx> class CallGraphNode;
 } // namespace aser
+
+// Forward declaration for internal PTA wrapper
+class AbstractInterpretationPTAPtr;
 
 namespace lotus {
 namespace analysis {
@@ -166,6 +170,9 @@ private:
   std::unique_ptr<PTAPtr> pta_;
   bool ptaReady_{false};
 
+  // SVFIRWrapper for PTA-based queries (like SVF's SVFIR)
+  SVFIRWrapper *svfir_ = nullptr;
+
   // Call graph and recursion tracking
   llvm::CallGraph *callGraph_;
   std::set<const llvm::Function *> recursiveFuns_;
@@ -236,6 +243,8 @@ private:
                            const llvm::Function *callee) const;
   bool skipRecursiveCall(const llvm::CallBase *callNode);
   const llvm::Function *getCallee(const llvm::CallBase *callNode);
+  const llvm::Function *
+  resolveIndirectCallViaPTA(const llvm::CallBase *callNode) const;
   bool shouldApplyNarrowing(const llvm::Function *fun);
 
   void collectCheckPoint();
@@ -310,6 +319,15 @@ private:
 
 public:
   AEExtAPI *getUtils() { return utils; }
+
+  // Get pointer analysis for points-to information
+  // Returns nullptr if PTA not ready
+  void *getPTAPass() const;
+
+  bool isPTAReady() const { return ptaReady_; }
+
+  // Get the module being analyzed
+  llvm::Module *getModule() const { return module_; }
 };
 
 } // namespace analysis

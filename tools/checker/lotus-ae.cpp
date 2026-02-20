@@ -30,7 +30,18 @@ static cl::opt<bool>
                    cl::init(false));
 
 static cl::opt<bool>
-    AllChecks("all", cl::desc("Run all checkers (overflow, null-deref)"),
+    UseAfterFreeCheck("use-after-free",
+                      cl::desc("Check for use-after-free bugs"),
+                      cl::init(false));
+
+static cl::opt<bool> InvalidFreeCheck("invalid-free",
+                                      cl::desc("Check for invalid free bugs"),
+                                      cl::init(false));
+
+static cl::opt<bool>
+    AllChecks("all",
+              cl::desc("Run all checkers (overflow, null-deref, "
+                       "use-after-free, invalid-free)"),
               cl::init(false));
 
 static cl::opt<lotus::analysis::AbstractInterpretation::HandleRecur>
@@ -75,11 +86,15 @@ int main(int argc, char **argv) {
   // Determine which checkers to run
   bool runOverflow = BufferOverflowCheck || AllChecks;
   bool runNullDeref = NullDerefCheck || AllChecks;
+  bool runUseAfterFree = UseAfterFreeCheck || AllChecks;
+  bool runInvalidFree = InvalidFreeCheck || AllChecks;
 
-  // If no specific checkers are enabled, default to both
-  if (!runOverflow && !runNullDeref) {
+  // If no specific checkers are enabled, default to all
+  if (!runOverflow && !runNullDeref && !runUseAfterFree && !runInvalidFree) {
     runOverflow = true;
     runNullDeref = true;
+    runUseAfterFree = true;
+    runInvalidFree = true;
   }
 
   // Run AE analysis
@@ -98,6 +113,16 @@ int main(int argc, char **argv) {
   if (runNullDeref) {
     ae.addDetector(std::make_unique<lotus::analysis::NullptrDerefDetector>());
     outs() << "Running null pointer dereference checker...\n";
+  }
+
+  if (runUseAfterFree) {
+    ae.addDetector(std::make_unique<lotus::analysis::UseAfterFreeDetector>());
+    outs() << "Running use-after-free checker...\n";
+  }
+
+  if (runInvalidFree) {
+    ae.addDetector(std::make_unique<lotus::analysis::InvalidFreeDetector>());
+    outs() << "Running invalid free checker...\n";
   }
 
   // Run the analysis

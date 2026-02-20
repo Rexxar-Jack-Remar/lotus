@@ -6,20 +6,19 @@
 
 #include "Checker/AE/AbstractState.h"
 
+#include "Alias/AserPTA/PointerAnalysis/Context/NoCtx.h"
+#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSObject.h"
+#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/MemBlock.h"
 #include "Checker/AE/AbstractInterpretation.h"
+#include "Checker/AE/SVFIRWrapper.h"
 
-#include <algorithm>
-#include <functional>
-
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/DataLayout.h>
-#include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
 namespace lotus {
 namespace analysis {
 
+/// Widen interval to ensure termination of analysis
 AbstractState AbstractState::widening(const AbstractState &other) {
   // Match SVF semantics: iterate over existing keys in this, then widen with
   // other
@@ -47,6 +46,7 @@ AbstractState AbstractState::widening(const AbstractState &other) {
   return result;
 }
 
+/// Narrow interval to refine over-approximation from widening
 AbstractState AbstractState::narrowing(const AbstractState &other) {
   // Match SVF semantics: iterate over existing keys in this, then narrow with
   // other
@@ -74,18 +74,34 @@ AbstractState AbstractState::narrowing(const AbstractState &other) {
   return result;
 }
 
+/// Domain join with other, important! other widen this.
 void AbstractState::joinWith(const AbstractState &other) {
-  for (const auto &item : other._varToAbsVal) {
-    _varToAbsVal[item.first].join_with(item.second);
+  // Match SVF semantics: only join with existing keys, otherwise emplace
+  for (auto it = other._varToAbsVal.begin(); it != other._varToAbsVal.end();
+       ++it) {
+    auto key = it->first;
+    auto oit = _varToAbsVal.find(key);
+    if (oit != _varToAbsVal.end()) {
+      oit->second.join_with(it->second);
+    } else {
+      _varToAbsVal.emplace(key, it->second);
+    }
   }
-  for (const auto &item : other._addrToAbsVal) {
-    _addrToAbsVal[item.first].join_with(item.second);
+  for (auto it = other._addrToAbsVal.begin(); it != other._addrToAbsVal.end();
+       ++it) {
+    auto key = it->first;
+    auto oit = _addrToAbsVal.find(key);
+    if (oit != _addrToAbsVal.end()) {
+      oit->second.join_with(it->second);
+    } else {
+      _addrToAbsVal.emplace(key, it->second);
+    }
   }
-  for (const auto &addr : other._freedAddrs) {
-    _freedAddrs.insert(addr);
-  }
+  // Union of freed addresses (matching SVF)
+  _freedAddrs.insert(other._freedAddrs.begin(), other._freedAddrs.end());
 }
 
+/// Domain meet with other, important! other widen this.
 void AbstractState::meetWith(const AbstractState &other) {
   for (const auto &item : other._varToAbsVal) {
     auto it = _varToAbsVal.find(item.first);
@@ -145,21 +161,99 @@ uint32_t AbstractState::hash() const {
 
 AbstractValue AbstractState::loadValue(uint32_t varId) {
   AbstractValue result;
+
+  // Load from addresses in the abstract state
   if (inVarToAddrsTable(varId)) {
     for (auto addr : _varToAbsVal[varId].getAddrs()) {
+      if (!AddressValue::isVirtualMemAddress(addr))
+        continue;
+      if (isFreedMem(addr)) {
+        result = AbstractValue(IntervalValue::bottom());
+        continue;
+      }
       result.join_with(load(addr));
     }
   }
+
+  // Use PTA to get more precise points-to information (matching SVF's behavior)
+  if (svfir_ && svfir_->isPTAReady()) {
+    const llvm::Value *val =
+        AbstractInterpretation::getAEInstance().getValueFromIdStatic(varId);
+    if (val && val->getType()->isPointerTy()) {
+      std::vector<void *> pts;
+      svfir_->getPointsTo(val, pts);
+
+      using FSObject = aser::FSObject<aser::NoCtx>;
+      for (void *obj : pts) {
+        if (!obj)
+          continue;
+        auto *fsObj = static_cast<const FSObject *>(obj);
+        const llvm::Value *objVal = fsObj->getValue();
+        if (!objVal)
+          continue;
+        uint32_t objId = AbstractInterpretation::getValueIdStatic(objVal);
+        if (objId == 0) // ConstantPointerNull; getVirtualMemAddress(0) asserts
+          continue;
+        uint32_t objAddr = getVirtualMemAddress(objId);
+        if (!isNullMem(objAddr) && !isFreedMem(objAddr)) {
+          if (inAddrToValTable(objId)) {
+            result.join_with(load(objAddr));
+          }
+        }
+      }
+    }
+  }
+
   return result;
 }
 
 void AbstractState::storeValue(uint32_t varId, uint32_t valId) {
   AbstractValue val = _varToAbsVal[valId];
+
+  // Store to addresses in abstract state
   if (inVarToAddrsTable(varId)) {
     for (auto addr : _varToAbsVal[varId].getAddrs()) {
+      if (!AddressValue::isVirtualMemAddress(addr) || isFreedMem(addr))
+        continue;
       store(addr, val);
     }
   }
+
+  // Use PTA to get more precise points-to information (matching SVF's behavior)
+  if (svfir_ && svfir_->isPTAReady()) {
+    const llvm::Value *valPtr =
+        AbstractInterpretation::getAEInstance().getValueFromIdStatic(varId);
+    if (valPtr && valPtr->getType()->isPointerTy()) {
+      std::vector<void *> pts;
+      svfir_->getPointsTo(valPtr, pts);
+
+      using FSObject = aser::FSObject<aser::NoCtx>;
+      for (void *obj : pts) {
+        if (!obj)
+          continue;
+        auto *fsObj = static_cast<const FSObject *>(obj);
+        const llvm::Value *objVal = fsObj->getValue();
+        if (!objVal)
+          continue;
+        uint32_t objId = AbstractInterpretation::getValueIdStatic(objVal);
+        if (objId == 0) // ConstantPointerNull; getVirtualMemAddress(0) asserts
+          continue;
+        uint32_t objAddr = getVirtualMemAddress(objId);
+        if (!isNullMem(objAddr) && !isFreedMem(objAddr)) {
+          store(objAddr, val);
+        }
+      }
+    }
+  }
+}
+
+AddressValue AbstractState::getGepObjAddrs(uint32_t pointer,
+                                           IntervalValue offset,
+                                           const llvm::GetElementPtrInst *gep) {
+  if (gep) {
+    setGepObjOffsetFromBase(gep, offset);
+  }
+  return getGepObjAddrs(pointer, offset);
 }
 
 AddressValue AbstractState::getGepObjAddrs(uint32_t pointer,
@@ -179,21 +273,28 @@ AddressValue AbstractState::getGepObjAddrs(uint32_t pointer,
     lb = MaxFieldLimit;
 
   for (auto addr : _varToAbsVal[pointer].getAddrs()) {
-    uint32_t objId = getIDFromAddr(addr);
-    uint32_t baseAddr = AddressValue::getVirtualMemAddress(objId);
+    uint32_t baseObjId = getIDFromAddr(addr);
 
-    // Handle offset interval
+    // Handle offset interval - create field-sensitive GEP nodes similar to SVF
     if (offset.is_numeral()) {
       int64_t offsetVal = offset.getIntNumeral();
       if (offsetVal >= 0 && offsetVal <= static_cast<int64_t>(MaxFieldLimit)) {
-        uint32_t gepAddr = baseAddr + static_cast<uint32_t>(offsetVal);
+        // Create field-sensitive GEP object ID (matching SVF's getGepObjVar)
+        uint32_t gepObjId = getGepFieldObjId(baseObjId, offsetVal);
+        uint32_t gepAddr = getVirtualMemAddress(gepObjId);
+        // Initialize the GEP object with its address
+        _addrToAbsVal[gepObjId] = AddressValue(gepAddr);
         result.insert(gepAddr);
       }
     } else {
       // For interval offset, iterate over the range (limited to MaxFieldLimit)
       for (int64_t i = lb; i <= ub && i <= static_cast<int64_t>(MaxFieldLimit);
            ++i) {
-        uint32_t gepAddr = baseAddr + static_cast<uint32_t>(i);
+        // Create field-sensitive GEP object ID for each offset
+        uint32_t gepObjId = getGepFieldObjId(baseObjId, i);
+        uint32_t gepAddr = getVirtualMemAddress(gepObjId);
+        // Initialize the GEP object with its address
+        _addrToAbsVal[gepObjId] = AddressValue(gepAddr);
         result.insert(gepAddr);
       }
     }
@@ -202,7 +303,8 @@ AddressValue AbstractState::getGepObjAddrs(uint32_t pointer,
 }
 
 IntervalValue AbstractState::getByteOffset(const llvm::GetElementPtrInst *gep) {
-  llvm::Type *srcType = gep->getSourceElementType();
+  const llvm::DataLayout &dl = gep->getModule()->getDataLayout();
+  llvm::Type *curType = gep->getSourceElementType();
   IntervalValue offset(0);
 
   for (const auto *idxIt = gep->idx_begin(); idxIt != gep->idx_end(); ++idxIt) {
@@ -220,30 +322,56 @@ IntervalValue AbstractState::getByteOffset(const llvm::GetElementPtrInst *gep) {
       }
     }
 
-    if (srcType->isArrayTy()) {
-      llvm::Type *elemType = srcType->getArrayElementType();
-      uint32_t elemSize = elemType->getPrimitiveSizeInBits() / 8;
-      if (elemSize == 0)
-        elemSize = 8;
-      offset = offset + idxVal * IntervalValue(elemSize);
-      srcType = elemType;
-    } else if (srcType->isStructTy()) {
-      llvm::StructType *structType = llvm::cast<llvm::StructType>(srcType);
+    // Struct indexing: only constant field indices are valid in LLVM IR.
+    if (auto *structType = llvm::dyn_cast<llvm::StructType>(curType)) {
+      if (!structType->isSized()) {
+        return IntervalValue(0, MaxFieldLimit);
+      }
+      if (!idxVal.is_numeral()) {
+        return IntervalValue(0, MaxFieldLimit);
+      }
+
       if (idxVal.is_numeral()) {
         int64_t idxNum = idxVal.getIntNumeral();
         if (idxNum >= 0 &&
             idxNum < static_cast<int64_t>(structType->getNumElements())) {
-          const llvm::StructLayout *layout =
-              gep->getModule()->getDataLayout().getStructLayout(structType);
+          const llvm::StructLayout *layout = dl.getStructLayout(structType);
           uint32_t fieldOffset =
               layout->getElementOffset(static_cast<unsigned>(idxNum));
           offset = offset + IntervalValue(fieldOffset);
-          srcType = structType->getElementType(static_cast<unsigned>(idxNum));
+          curType = structType->getElementType(static_cast<unsigned>(idxNum));
+          continue;
         }
+        return IntervalValue(0, MaxFieldLimit);
       }
-    } else {
+    }
+
+    llvm::Type *elemType = nullptr;
+    if (auto *arrType = llvm::dyn_cast<llvm::ArrayType>(curType)) {
+      elemType = arrType->getElementType();
+    } else if (auto *vecType = llvm::dyn_cast<llvm::VectorType>(curType)) {
+      elemType = vecType->getElementType();
+    } else if (curType->isPointerTy()) {
+      elemType = curType->getPointerElementType();
+    }
+
+    if (!elemType) {
       break;
     }
+    if (!elemType->isSized()) {
+      return IntervalValue(0, MaxFieldLimit);
+    }
+
+    uint64_t elemSize = dl.getTypeAllocSize(elemType);
+    if (elemSize == 0) {
+      elemSize = 1;
+    }
+    if (elemSize > static_cast<uint64_t>(MaxFieldLimit)) {
+      elemSize = MaxFieldLimit;
+    }
+
+    offset = offset + idxVal * IntervalValue(static_cast<int64_t>(elemSize));
+    curType = elemType;
   }
 
   return offset;
@@ -253,6 +381,14 @@ uint32_t AbstractState::getAllocaInstByteSize(const llvm::AllocaInst *alloca) {
   llvm::Type *allocType = alloca->getAllocatedType();
   const llvm::DataLayout &dl = alloca->getModule()->getDataLayout();
   uint32_t typeSize = dl.getTypeAllocSize(allocType);
+
+  // Try to get more accurate size from PTA first
+  if (svfir_ && svfir_->isPTAReady()) {
+    uint32_t ptaSize = getObjectSize(alloca);
+    if (ptaSize > 0) {
+      return ptaSize;
+    }
+  }
 
   // Handle array allocation
   if (alloca->isArrayAllocation()) {
@@ -275,6 +411,14 @@ uint32_t AbstractState::getAllocaInstByteSize(const llvm::AllocaInst *alloca,
   llvm::Type *allocType = alloca->getAllocatedType();
   const llvm::DataLayout &dl = alloca->getModule()->getDataLayout();
   uint32_t typeSize = dl.getTypeAllocSize(allocType);
+
+  // Try to get more accurate size from PTA first
+  if (svfir_ && svfir_->isPTAReady()) {
+    uint32_t ptaSize = getObjectSize(alloca);
+    if (ptaSize > 0) {
+      return ptaSize;
+    }
+  }
 
   // Handle array allocation
   if (alloca->isArrayAllocation()) {
@@ -543,6 +687,36 @@ const llvm::Type *AbstractState::getPointeeElement(uint32_t id) {
     }
   }
   return nullptr;
+}
+
+uint32_t AbstractState::getObjectSize(const llvm::Value *obj) const {
+  if (!svfir_ || !svfir_->isPTAReady())
+    return 0;
+
+  // Use PTA to get object size (matching SVF's
+  // svfir->getBaseObject()->getByteSizeOfObj())
+  if (obj && obj->getType()->isPointerTy()) {
+    // Get the pointed-to type from PTA
+    const llvm::Type *pointeeType = svfir_->getObjectType(obj);
+    if (pointeeType) {
+      // Get DataLayout from the module
+      llvm::Module *mod = svfir_->getModule();
+      if (mod) {
+        const llvm::DataLayout &dl = mod->getDataLayout();
+        return dl.getTypeAllocSize(const_cast<llvm::Type *>(pointeeType));
+      }
+    }
+  }
+  return 0;
+}
+
+void AbstractState::getPointsToSet(const llvm::Value *ptr,
+                                   std::vector<void *> &result) const {
+  if (svfir_ && svfir_->isPTAReady()) {
+    svfir_->getPointsTo(ptr, result);
+  } else {
+    result.clear();
+  }
 }
 
 } // namespace analysis

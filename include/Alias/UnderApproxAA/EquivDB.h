@@ -245,5 +245,9 @@ private:
 
 };
 
+/// Forward declaration for ruleClosedGEP (friend, defined in EquivDB.cpp)
+bool ruleClosedGEP(const llvm::Instruction *, const EquivDB &,
+                   const llvm::Value *&);
+
 } // end namespace UnderApprox
 #endif

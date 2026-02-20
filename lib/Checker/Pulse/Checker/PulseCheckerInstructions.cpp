@@ -360,29 +360,9 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
         }
       }
 
-      // Check if loaded value is null (for pointer types)
-      if (LI->getType()->isPointerTy()) {
-        if (astate->getPostAttrs().has(loaded_canon, Attribute::Null)) {
-          Trace trace = Trace::fromValueHistory(stack_addr->history);
-          trace.addEvent(LI, "Load of null pointer");
-          if (LatentIssue::isManifest(OperationResult::NullDereference, *astate,
-                                      loaded_canon)) {
-            reportBug(OperationResult::NullDereference, LI, loaded_canon, trace,
-                      astate);
-            return ExecutionDomain::abortProgram(
-                std::make_unique<AbductiveDomain>(astate->clone()),
-                OperationResult::NullDereference, std::move(trace));
-          } else {
-            latent_issues_.emplace_back(OperationResult::NullDereference,
-                                        LatentIssue::issueKindFromResult(
-                                            OperationResult::NullDereference),
-                                        loaded_canon, LI, std::move(trace));
-            return ExecutionDomain::latentAbortProgram(
-                std::make_unique<AbductiveDomain>(astate->clone()),
-                &latent_issues_.back());
-          }
-        }
-      }
+      // Do NOT report NullDereference here: loading a pointer value is not a
+      // dereference. The actual dereference (store/load through the pointer) is
+      // checked in writeDeref/readDeref.
 
       astate->getPostStack().add(LI, *stack_addr);
     } else {
@@ -423,72 +403,9 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
       }
     }
 
-    // Check for null pointer (only if not invalid)
-    // DON'T report NullDereference if Invalid is present (UseAfterFree takes
-    // priority) NPD checker: only report if source is a null constant
-    // Skip null check if load is used as argument to free() - free(NULL) is safe
-    // Check if the load result (LI as a Value) is used in a free() call
-    bool is_used_in_free = false;
-    const llvm::Value *load_value = LI; // LoadInst is also a Value
-    for (const auto *user : load_value->users()) {
-      if (const auto *CI = llvm::dyn_cast<llvm::CallInst>(user)) {
-        // Check if any argument is the load result
-        for (unsigned i = 0; i < CI->arg_size(); ++i) {
-          const llvm::Value *arg = CI->getArgOperand(i);
-          // Strip bitcasts
-          while (const auto *BC = llvm::dyn_cast<llvm::BitCastInst>(arg)) {
-            arg = BC->getOperand(0);
-          }
-          if (arg == load_value) {
-            if (const auto *F = CI->getCalledFunction()) {
-              if (F->getName() == "free") {
-                is_used_in_free = true;
-                break;
-              }
-            }
-          }
-        }
-        if (is_used_in_free) break;
-      }
-    }
-    
-    if (!astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid) && !is_used_in_free) {
-      if (astate->getPathFormula().isNull(loaded_ptr) ||
-          (astate->getPostAttrs().has(loaded_ptr, Attribute::Null) &&
-           !astate->getPathFormula().isNonNull(loaded_ptr))) {
-        // Check if this pointer originated from a null constant
-        // Check both the stack address and the loaded pointer's AbstractValue
-        // source
-        bool is_null_source =
-            PulseOperations::isNullConstantSource(*stack_addr);
-        if (!is_null_source) {
-          // Also check if the AbstractValue itself has a null constant source
-          Address loaded_addr(loaded_ptr);
-          loaded_addr.history = stack_addr->history;
-          is_null_source = PulseOperations::isNullConstantSource(loaded_addr);
-        }
-        if (is_null_source) {
-          Trace trace = Trace::fromValueHistory(stack_addr->history);
-          trace.addEvent(LI, "Load of null pointer");
-          if (LatentIssue::isManifest(OperationResult::NullDereference, *astate,
-                                      loaded_ptr)) {
-            reportBug(OperationResult::NullDereference, LI, loaded_ptr, trace,
-                      astate);
-            return ExecutionDomain::abortProgram(
-                std::make_unique<AbductiveDomain>(astate->clone()),
-                OperationResult::NullDereference, std::move(trace));
-          } else {
-            latent_issues_.emplace_back(OperationResult::NullDereference,
-                                        LatentIssue::issueKindFromResult(
-                                            OperationResult::NullDereference),
-                                        loaded_ptr, LI, std::move(trace));
-            return ExecutionDomain::latentAbortProgram(
-                std::make_unique<AbductiveDomain>(astate->clone()),
-                &latent_issues_.back());
-          }
-        }
-      }
-    }
+    // Do NOT report NullDereference here: loading a pointer value is not a
+    // dereference. The actual dereference (store/load through the pointer) is
+    // checked in writeDeref/readDeref.
 
     // HEAP POINTER CHECK: If loaded value is a heap pointer (Allocated),
     // and we're loading from it, we need to read from heap
@@ -1330,10 +1247,27 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
         // then taking the [ptr == 0] branch makes the current path
         // contradictory. Do not silently drop it: record a latent issue so
         // callers like foo(0) can be reported.
+        // EXCEPTION: malloc/calloc/realloc can return null - taking the null
+        // branch is valid for these, so skip the latent issue.
+        auto isFromAllocThatCanFail = [](const Address &addr) {
+          for (const auto &event : addr.history.getEvents()) {
+            if (event.kind == ValueHistory::EventKind::Allocation &&
+                event.location) {
+              if (auto *CI = llvm::dyn_cast<llvm::CallInst>(event.location)) {
+                if (auto *F = CI->getCalledFunction()) {
+                  llvm::StringRef name = F->getName();
+                  if (name == "malloc" || name == "calloc" || name == "realloc")
+                    return true;
+                }
+              }
+            }
+          }
+          return false;
+        };
         bool is_allocated =
             astate->getPostAttrs().has(canon_ptr_av, Attribute::Allocated) ||
             astate->getPreAttrs().has(canon_ptr_av, Attribute::Allocated);
-        if (is_allocated) {
+        if (is_allocated && !isFromAllocThatCanFail(*ptr_opt)) {
           Trace trace = Trace::fromValueHistory(ptr_opt->history);
           trace.addEvent(ICmp, "Assumed null for allocated pointer");
           latent_issues_.emplace_back(OperationResult::NullDereference,

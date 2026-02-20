@@ -9,6 +9,7 @@ set(AE_SOURCES
   RelationSolver.cpp
   RelExeState.cpp
   ICFGWTO.cpp
+  SVFIRWrapper.cpp
 )
 
 add_library(AE STATIC ${AE_SOURCES})

@@ -491,6 +491,8 @@ inline IntervalValue operator%(const IntervalValue &lhs,
                                const IntervalValue &rhs) {
   if (lhs.isBottom() || rhs.isBottom())
     return IntervalValue::bottom();
+  if (lhs.is_infinite() || rhs.is_infinite())
+    return IntervalValue::top();
   if (rhs.contains(0))
     return lhs.is_zero() ? IntervalValue(0) : IntervalValue::top();
   BoundedInt n_ub =
@@ -513,6 +515,9 @@ inline IntervalValue operator&(const IntervalValue &lhs,
     return IntervalValue::bottom();
   if (lhs.is_numeral() && rhs.is_numeral())
     return IntervalValue(lhs._lb & rhs._lb);
+  // Cannot call getNumeral() on infinity - return top for unbounded intervals
+  if (lhs.is_infinite() || rhs.is_infinite())
+    return IntervalValue::top();
   if (lhs._lb.getNumeral() >= 0 && rhs._lb.getNumeral() >= 0)
     return IntervalValue(0, BoundedInt::min({lhs._ub, rhs._ub}).getNumeral());
   if (lhs._lb.getNumeral() >= 0)
@@ -544,6 +549,8 @@ inline IntervalValue operator<<(const IntervalValue &lhs,
                                 const IntervalValue &rhs) {
   if (lhs.isBottom() || rhs.isBottom())
     return IntervalValue::bottom();
+  if (lhs.is_infinite() || rhs.is_infinite())
+    return IntervalValue::top();
   if (lhs.isTop() && rhs.isTop())
     return IntervalValue::top();
   return lhs *

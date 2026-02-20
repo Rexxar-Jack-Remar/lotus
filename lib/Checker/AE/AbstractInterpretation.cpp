@@ -8,6 +8,7 @@
 
 #include "Checker/AE/AbsExtAPI.h"
 #include "Checker/AE/RelationSolver.h"
+#include "Checker/AE/SVFIRWrapper.h"
 #include "Solvers/SMT/LIBSMT/Z3Expr.h"
 
 // AserPTA includes
@@ -117,19 +118,28 @@ void AbstractInterpretation::reset() {
   ptaReady_ = false;
 }
 
+void *AbstractInterpretation::getPTAPass() const {
+  if (ptaReady_ && pta_) {
+    return pta_->pass.get();
+  }
+  return nullptr;
+}
+
 void AbstractInterpretation::runOnModule(llvm::Module *module) {
   // Reset state before analyzing new module
   reset();
 
   module_ = module;
 
-  const llvm::Function *mainFunc = module->getFunction("main");
-  if (mainFunc && !mainFunc->isDeclaration()) {
-    pta_->pass->analyze(module);
-    ptaReady_ = true;
-  } else {
-    ptaReady_ = false;
-  }
+  // Always run pointer analysis (required for AE)
+  pta_->pass->analyze(module);
+  ptaReady_ = true;
+
+  // Create SVFIRWrapper for PTA-based queries (like SVF's SVFIR)
+  svfir_ = new SVFIRWrapper(getPTAPass(), module_);
+
+  // Initialize global state with SVFIRWrapper
+  globalState.svfir_ = svfir_;
 
   // Delete old utils if exists
   if (utils) {
@@ -150,6 +160,7 @@ void AbstractInterpretation::runOnModule(llvm::Module *module) {
     detector->reportBug();
 }
 
+/// Program entry
 void AbstractInterpretation::analyse() {
   // Initialize call graph SCC detection
   initCallGraphSCC();
@@ -197,6 +208,7 @@ void AbstractInterpretation::analyse() {
   }
 }
 
+/// Handle global node
 void AbstractInterpretation::handleGlobalNode() {
   // Process global variables (matching SVF's global ICFG node processing)
   for (auto &global : module_->globals()) {
@@ -207,18 +219,26 @@ void AbstractInterpretation::handleGlobalNode() {
       globalState[globalId] = AbstractValue(
           AddressValue(AddressValue::getVirtualMemAddress(globalId)));
     } else if (global.getValueType()->isIntegerTy()) {
-      if (llvm::ConstantInt *ci =
-              llvm::dyn_cast<llvm::ConstantInt>(global.getInitializer())) {
-        globalState[globalId] =
-            AbstractValue(IntervalValue(ci->getSExtValue()));
+      if (global.hasInitializer()) {
+        if (llvm::ConstantInt *ci = llvm::dyn_cast<llvm::ConstantInt>(
+                global.getInitializer())) {
+          globalState[globalId] =
+              AbstractValue(IntervalValue(ci->getSExtValue()));
+        } else {
+          globalState[globalId] = AbstractValue(IntervalValue::top());
+        }
       } else {
         globalState[globalId] = AbstractValue(IntervalValue::top());
       }
     } else if (global.getValueType()->isFloatingPointTy()) {
-      if (llvm::ConstantFP *cfp =
-              llvm::dyn_cast<llvm::ConstantFP>(global.getInitializer())) {
-        double val = cfp->getValueAPF().convertToDouble();
-        globalState[globalId] = AbstractValue(IntervalValue(val, val));
+      if (global.hasInitializer()) {
+        if (llvm::ConstantFP *cfp =
+                llvm::dyn_cast<llvm::ConstantFP>(global.getInitializer())) {
+          double val = cfp->getValueAPF().convertToDouble();
+          globalState[globalId] = AbstractValue(IntervalValue(val, val));
+        } else {
+          globalState[globalId] = AbstractValue(IntervalValue::top());
+        }
       } else {
         globalState[globalId] = AbstractValue(IntervalValue::top());
       }
@@ -436,8 +456,8 @@ void AbstractInterpretation::initCallGraphSCC() {
   }
 
   // Track entry calls (calls from outside SCC to inside SCC) - these are NOT
-  // recursive callsites This matches SVF's nonRecursiveCallSites tracking We
-  // identify entry calls by finding call sites where:
+  // recursive callsites. This matches SVF's nonRecursiveCallSites tracking.
+  // We identify entry calls by finding call sites where:
   // 1. The caller is outside the SCC
   // 2. The callee is inside the SCC
   for (size_t i = 0; i < sccs.size(); ++i) {
@@ -470,9 +490,16 @@ void AbstractInterpretation::initCallGraphSCC() {
               nonRecursiveCallSites_.insert({cb, direct});
             }
           }
-          // For indirect calls, we'll handle them dynamically in
-          // skipRecursiveCall() using getCallee() when abstract state is
-          // available
+          // For indirect calls, resolve via AserPTA and check if targets are in
+          // SCC
+          else {
+            const llvm::Function *indirectCallee =
+                resolveIndirectCallViaPTA(cb);
+            if (indirectCallee && !indirectCallee->isDeclaration() &&
+                scc.count(indirectCallee) > 0) {
+              nonRecursiveCallSites_.insert({cb, indirectCallee});
+            }
+          }
         }
       }
     }
@@ -614,6 +641,50 @@ void AbstractInterpretation::handleSingletonWTO(const llvm::BasicBlock *bb) {
 
   stat->countStateSize();
 }
+
+/// Handle WTO cycle (loop or recursive function) using widening/narrowing
+/// iteration.
+///
+/// Widening is applied at the cycle head to ensure termination of the analysis.
+/// The cycle head's abstract state is iteratively updated until a fixpoint is
+/// reached.
+///
+/// == What is being widened ==
+/// The abstract state at the cycle head node, which includes:
+/// - Variable values (intervals) that may change across loop iterations
+/// - For example, a loop counter `i` starting at 0 and incrementing each
+/// iteration
+///
+/// == Regular loops (non-recursive functions) ==
+/// All modes (TOP/WIDEN_ONLY/WIDEN_NARROW) behave the same for regular loops:
+/// 1. Widening phase: Iterate until the cycle head state stabilizes
+///    Example: for(i=0; i<100; i++) -> i widens to [0, +inf]
+/// 2. Narrowing phase: Refine the over-approximation from widening
+///    Example: [0, +inf] narrows to [0, 100] using loop condition
+///
+/// == Recursive function cycles ==
+/// Behavior depends on recursionMode_:
+///
+/// - TOP mode:
+///     Does not iterate. Calls recursiveCallPass() to set all stores and
+///     return value to TOP immediately. This is the most conservative but
+///     fastest. Example:
+///       int factorial(int n) { return n <= 1 ? 1 : n * factorial(n-1); }
+///       factorial(5) -> returns [-inf, +inf]
+///
+/// - WIDEN_ONLY mode:
+///     Widening phase only, no narrowing for recursive functions.
+///     The recursive function body is analyzed with widening until fixpoint.
+///     Example:
+///       int factorial(int n) { return n <= 1 ? 1 : n * factorial(n-1); }
+///       factorial(5) -> returns [10000, +inf] (widened upper bound)
+///
+/// - WIDEN_NARROW mode:
+///     Both widening and narrowing phases for recursive functions.
+///     After widening reaches fixpoint, narrowing refines the result.
+///     Example:
+///       int factorial(int n) { return n <= 1 ? 1 : n * factorial(n-1); }
+///       factorial(5) -> returns [10000, 10000] (precise after narrowing)
 
 void AbstractInterpretation::handleCycleWTO(const ICFGCycleWTO *cycle) {
   const llvm::BasicBlock *cycleHead = cycle->getEntry();
@@ -837,7 +908,8 @@ bool AbstractInterpretation::mergeStatesFromPredecessors(
         const llvm::Instruction *firstInst = &bb->front();
         auto existing = abstractTrace.find(firstInst);
         if (existing != abstractTrace.end()) {
-          // Preserve callsite-seeded entry state (args/params) and merge globals.
+          // Preserve callsite-seeded entry state (args/params) and merge
+          // globals.
           AbstractState merged = globalState;
           merged.joinWith(existing->second);
           abstractTrace[firstInst] = merged;
@@ -872,16 +944,34 @@ bool AbstractInterpretation::handleInstruction(const llvm::Instruction *inst) {
   stat->stmtCount++;
 
   if (abstractTrace.find(inst) == abstractTrace.end()) {
-    auto predIt = llvm::pred_begin(inst->getParent());
-    if (predIt != llvm::pred_end(inst->getParent())) {
-      const llvm::Instruction *predTerm = (*predIt)->getTerminator();
-      if (abstractTrace.find(predTerm) != abstractTrace.end()) {
-        abstractTrace[inst] = abstractTrace[predTerm];
+    const llvm::BasicBlock *bb = inst->getParent();
+    // First try: inherit from previous instruction in same block (intra-block
+    // flow). This is critical for entry blocks and blocks with no CFG preds.
+    const llvm::Instruction *prevInst = nullptr;
+    for (const llvm::Instruction &I : *bb) {
+      if (&I == inst)
+        break;
+      prevInst = &I;
+    }
+    if (prevInst) {
+      auto prevIt = abstractTrace.find(prevInst);
+      if (prevIt != abstractTrace.end()) {
+        abstractTrace[inst] = prevIt->second;
+      }
+    }
+    // Fallback: inherit from CFG predecessors
+    if (abstractTrace.find(inst) == abstractTrace.end()) {
+      auto predIt = llvm::pred_begin(bb);
+      if (predIt != llvm::pred_end(bb)) {
+        const llvm::Instruction *predTerm = (*predIt)->getTerminator();
+        if (abstractTrace.find(predTerm) != abstractTrace.end()) {
+          abstractTrace[inst] = abstractTrace[predTerm];
+        } else {
+          abstractTrace[inst] = AbstractState();
+        }
       } else {
         abstractTrace[inst] = AbstractState();
       }
-    } else {
-      abstractTrace[inst] = AbstractState();
     }
   }
 
@@ -1131,6 +1221,13 @@ void AbstractInterpretation::updateStateOnCmp(const llvm::CmpInst *cmp) {
   IntervalValue val1 = as[op1Id].getInterval();
   IntervalValue resVal;
 
+  // getIntNumeral() asserts on infinity; use conservative [0,1] when bounds
+  // are unbounded
+  if (val0.is_infinite() || val1.is_infinite()) {
+    as[resId] = AbstractValue(IntervalValue(0, 1));
+    return;
+  }
+
   switch (cmp->getPredicate()) {
   case llvm::CmpInst::ICMP_EQ:
   case llvm::CmpInst::FCMP_OEQ:
@@ -1265,6 +1362,9 @@ void AbstractInterpretation::updateStateOnCast(const llvm::CastInst *cast) {
     if (!srcType->isIntegerTy())
       return IntervalValue::top();
 
+    if (val.is_infinite())
+      return IntervalValue::top();
+
     unsigned bits = srcType->getIntegerBitWidth();
     if (val.is_numeral()) {
       int64_t numVal = val.getIntNumeral();
@@ -1294,7 +1394,7 @@ void AbstractInterpretation::updateStateOnCast(const llvm::CastInst *cast) {
     if (val.isBottom())
       return val;
 
-    if (!dstType->isIntegerTy())
+    if (val.is_infinite() || !dstType->isIntegerTy())
       return IntervalValue::top();
 
     int64_t int_lb = val.lb().getIntNumeral();
@@ -1413,7 +1513,7 @@ void AbstractInterpretation::updateStateOnGep(
   IntervalValue offset = as.getByteOffset(gep);
 
   if (as.inVarToAddrsTable(ptrId)) {
-    AddressValue gepAddrs = as.getGepObjAddrs(ptrId, offset);
+    AddressValue gepAddrs = as.getGepObjAddrs(ptrId, offset, gep);
     as[lhsId] = AbstractValue(gepAddrs);
   } else {
     as[lhsId] = AbstractValue(AddressValue());
@@ -1833,7 +1933,8 @@ void AbstractInterpretation::handleFunCall(const llvm::CallBase *callNode) {
         if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(argOp)) {
           uint32_t basePtrId = getValueId(load->getPointerOperand());
           argVal = callIt->second.loadValue(basePtrId);
-          if (!argVal.getAddrs().isBottom() || !argVal.getInterval().isBottom()) {
+          if (!argVal.getAddrs().isBottom() ||
+              !argVal.getInterval().isBottom()) {
             hasArgVal = true;
           }
         }
@@ -1992,6 +2093,54 @@ AbstractInterpretation::getCallee(const llvm::CallBase *callNode) {
   }
 
   // Not found in call graph - return nullptr (conservative)
+  return nullptr;
+}
+
+/// Resolve indirect calls using AserPTA during initialization
+/// This is a simpler version of getCallee that can be called before analysis
+/// runs
+const llvm::Function *AbstractInterpretation::resolveIndirectCallViaPTA(
+    const llvm::CallBase *callNode) const {
+  // Only handle indirect calls
+  if (callNode->getCalledFunction())
+    return nullptr;
+
+  if (!ptaReady_ || !pta_ || !pta_->pass)
+    return nullptr;
+
+  const auto *cg = pta_->pass->getPTA()->getCallGraph();
+  if (!cg)
+    return nullptr;
+
+  // Find the call graph node for this call instruction
+  for (auto nodeIt = cg->begin(); nodeIt != cg->end(); ++nodeIt) {
+    const auto *cgNode = *nodeIt;
+    if (!cgNode || !cgNode->isIndirectCall())
+      continue;
+
+    auto *indCall = cgNode->getTargetFunPtr();
+    if (!indCall)
+      continue;
+
+    const llvm::Instruction *callInst = indCall->getCallSite();
+    if (callInst != callNode)
+      continue;
+
+    // Get resolved targets
+    const auto &resolvedNodes = indCall->getResolvedNode();
+    for (const auto *resolvedNode : resolvedNodes) {
+      if (!resolvedNode || resolvedNode->isIndirectCall())
+        continue;
+      auto *targetFun = resolvedNode->getTargetFun();
+      if (!targetFun)
+        continue;
+      const llvm::Function *calleeFunc = targetFun->getFunction();
+      if (calleeFunc && !calleeFunc->isDeclaration()) {
+        return calleeFunc;
+      }
+    }
+  }
+
   return nullptr;
 }
 
@@ -2282,7 +2431,8 @@ bool AbstractInterpretation::isCmpBranchFeasible(const llvm::CmpInst *cmpInst,
 
   // Refine pointer-vs-null comparisons to reduce false positives in guarded
   // dereferences (e.g., if (p) { *p = ... }).
-  if (predicate == llvm::CmpInst::ICMP_EQ || predicate == llvm::CmpInst::ICMP_NE) {
+  if (predicate == llvm::CmpInst::ICMP_EQ ||
+      predicate == llvm::CmpInst::ICMP_NE) {
     if (op0Id == AbstractState::NullPtr && op1Id == AbstractState::NullPtr) {
       return predicate == llvm::CmpInst::ICMP_EQ;
     }
@@ -2298,7 +2448,8 @@ bool AbstractInterpretation::isCmpBranchFeasible(const llvm::CmpInst *cmpInst,
     }
 
     if (hasNullOperand && as.inVarToAddrsTable(ptrId)) {
-      auto refineAddrSet = [&](AddressValue::AddrSet vals) -> AddressValue::AddrSet {
+      auto refineAddrSet =
+          [&](AddressValue::AddrSet vals) -> AddressValue::AddrSet {
         if (predicate == llvm::CmpInst::ICMP_NE) {
           vals.erase(NullMemAddr); // true edge of (p != null)
         } else {
@@ -2311,15 +2462,16 @@ bool AbstractInterpretation::isCmpBranchFeasible(const llvm::CmpInst *cmpInst,
         return vals;
       };
 
-      AddressValue::AddrSet refined = refineAddrSet(as[ptrId].getAddrs().getVals());
+      AddressValue::AddrSet refined =
+          refineAddrSet(as[ptrId].getAddrs().getVals());
       if (refined.empty()) {
         return false;
       }
       as[ptrId] = AbstractValue(AddressValue(refined));
 
       // If compared pointer value comes from a load, refine pointed memory too.
-      // This propagates branch facts from `%x = load ...; icmp %x, null` back to
-      // the backing variable, so subsequent loads in the guarded block are
+      // This propagates branch facts from `%x = load ...; icmp %x, null` back
+      // to the backing variable, so subsequent loads in the guarded block are
       // narrowed.
       const llvm::Value *ptrVal = (ptrId == op0Id) ? op0Val : op1Val;
       if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(ptrVal)) {
@@ -2346,6 +2498,47 @@ bool AbstractInterpretation::isCmpBranchFeasible(const llvm::CmpInst *cmpInst,
         }
       }
       return true;
+    }
+  }
+
+  // Check if operands come from load instructions and handle them
+  const llvm::LoadInst *loadOp0 = nullptr;
+  const llvm::LoadInst *loadOp1 = nullptr;
+
+  // Try to find if op0 comes from a load instruction
+  if (const llvm::LoadInst *load = llvm::dyn_cast<llvm::LoadInst>(op0Val)) {
+    loadOp0 = load;
+  } else if (const llvm::BitCastInst *bc =
+                 llvm::dyn_cast<llvm::BitCastInst>(op0Val)) {
+    if (const llvm::LoadInst *load =
+            llvm::dyn_cast<llvm::LoadInst>(bc->getOperand(0))) {
+      loadOp0 = load;
+    }
+  }
+
+  // Try to find if op1 comes from a load instruction
+  if (const llvm::LoadInst *load = llvm::dyn_cast<llvm::LoadInst>(op1Val)) {
+    loadOp1 = load;
+  } else if (const llvm::BitCastInst *bc =
+                 llvm::dyn_cast<llvm::BitCastInst>(op1Val)) {
+    if (const llvm::LoadInst *load =
+            llvm::dyn_cast<llvm::LoadInst>(bc->getOperand(0))) {
+      loadOp1 = load;
+    }
+  }
+
+  // Get addresses from loaded pointers for memory refinement
+  AddressValue addrOp0, addrOp1;
+  if (loadOp0) {
+    uint32_t ptrId = getValueId(loadOp0->getPointerOperand());
+    if (as.inVarToAddrsTable(ptrId)) {
+      addrOp0 = as[ptrId].getAddrs();
+    }
+  }
+  if (loadOp1) {
+    uint32_t ptrId = getValueId(loadOp1->getPointerOperand());
+    if (as.inVarToAddrsTable(ptrId)) {
+      addrOp1 = as[ptrId].getAddrs();
     }
   }
 
@@ -2437,6 +2630,29 @@ bool AbstractInterpretation::isCmpBranchFeasible(const llvm::CmpInst *cmpInst,
 
   if (lhs.isBottom()) {
     return false;
+  }
+
+  // Refine memory for loaded pointers (matching SVF's behavior)
+  // If operand comes from a load, also refine the memory it points to
+  if (loadOp0 && !addrOp0.getVals().empty()) {
+    for (const auto &addr : addrOp0.getVals()) {
+      uint32_t objId = as.getIDFromAddr(addr);
+      if (as.inAddrToValTable(objId)) {
+        AbstractValue memVal = as.load(addr);
+        memVal.getInterval().meet_with(lhs);
+        as.store(addr, memVal);
+      }
+    }
+  }
+  if (loadOp1 && !addrOp1.getVals().empty()) {
+    for (const auto &addr : addrOp1.getVals()) {
+      uint32_t objId = as.getIDFromAddr(addr);
+      if (as.inAddrToValTable(objId)) {
+        AbstractValue memVal = as.load(addr);
+        memVal.getInterval().meet_with(rhs);
+        as.store(addr, memVal);
+      }
+    }
   }
 
   as = newEs;

@@ -11,13 +11,30 @@
 
 #include <algorithm>
 
-#include <llvm/IR/DebugInfo.h>
 #include <llvm/Analysis/ValueTracking.h>
+#include <llvm/IR/DebugInfo.h>
 #include <llvm/Support/raw_ostream.h>
 
 namespace lotus {
 namespace analysis {
 
+void AEDetector::addEventToTrace(AEBugEventType type,
+                                 const llvm::Instruction *inst,
+                                 const std::string &desc) {
+  eventTrace.emplace_back(type, inst, desc);
+}
+
+void AEDetector::clearEventTrace() { eventTrace.clear(); }
+
+/// @brief Detects buffer overflow issues for a given instruction.
+///
+/// This function handles GEP (GetElementPtr) instructions to detect potential
+/// buffer overflows by comparing the access offset against the object size.
+///
+/// @param as Reference to the abstract state containing object sizes and
+/// addresses.
+/// @param inst Pointer to the instruction to analyze (must be a GEP
+/// instruction).
 void BufOverflowDetector::detect(AbstractState &as,
                                  const llvm::Instruction *inst) {
   // Check for buffer overflow in GEP instructions
@@ -498,6 +515,14 @@ bool BufOverflowDetector::detectStrcat(AbstractState &as,
   return true;
 }
 
+/// @brief Detects null pointer dereference issues.
+///
+/// Checks load instructions, store instructions, and GEP instructions for
+/// potential null pointer dereferences by analyzing whether pointers can
+/// point to null or invalid memory.
+///
+/// @param as Reference to the abstract state.
+/// @param inst Pointer to the instruction to analyze.
 void NullptrDerefDetector::detect(AbstractState &as,
                                   const llvm::Instruction *inst) {
   auto hasDefiniteNonNullBase = [](const llvm::Value *ptrVal) -> bool {
@@ -512,11 +537,11 @@ void NullptrDerefDetector::detect(AbstractState &as,
       return;
     uint32_t ptrId =
         AbstractInterpretation::getValueIdStatic(load->getPointerOperand());
-    
+
     // Check if pointer operand is a null constant
     const llvm::Value *ptrVal = load->getPointerOperand();
     bool isNullConstant = llvm::isa<llvm::ConstantPointerNull>(ptrVal);
-    
+
     bool isSafe = canSafelyDerefPtr(as, ptrId);
     if (!isSafe) {
       std::string bugMsg = "Null pointer dereference at load instruction";
@@ -698,7 +723,8 @@ void NullptrDerefDetector::reportBug() {
       llvm::errs() << it.second << "\n";
     }
   } else {
-    llvm::errs() << "###################### Nullptr Dereference (0 found) ######################\n";
+    llvm::errs() << "###################### Nullptr Dereference (0 found) "
+                    "######################\n";
   }
 }
 
@@ -717,9 +743,9 @@ void NullptrDerefDetector::addBugToReporter(const AEException &e,
     os.flush();
     const llvm::Function *func = inst->getFunction();
     const llvm::BasicBlock *bb = inst->getParent();
-    loc = (func ? func->getName().str() : "unknown_function") + "::" +
-          (bb && bb->hasName() ? bb->getName().str() : "unknown_bb") + "::" +
-          std::to_string(inst->getOpcode()) + "::" + instStr;
+    loc = (func ? func->getName().str() : "unknown_function") +
+          "::" + (bb && bb->hasName() ? bb->getName().str() : "unknown_bb") +
+          "::" + std::to_string(inst->getOpcode()) + "::" + instStr;
   }
 
   if (bugLoc.find(loc) != bugLoc.end())
@@ -734,12 +760,12 @@ bool NullptrDerefDetector::canSafelyDerefPtr(AbstractState &as,
   // Special case: if ptrId is 0 (NullPtr), check if it's a null constant
   // Check if the value exists in the abstract state
   bool hasValue = (as._varToAbsVal.find(ptrId) != as._varToAbsVal.end());
-  
+
   // If ptrId is 0 (null pointer constant) and not in state, it's null
   if (ptrId == 0 && !hasValue) {
     return false; // Null pointer cannot be safely dereferenced
   }
-  
+
   AbstractValue absVal = as[ptrId];
 
   // Uninitialized value cannot be dereferenced
@@ -820,6 +846,185 @@ IntervalValue BufOverflowDetector::getGepObjOffsetFromBase(
     return it->second;
   }
   return IntervalValue(0, 0);
+}
+
+//===----------------------------------------------------------------------===//
+// UseAfterFreeDetector Implementation
+//===----------------------------------------------------------------------===//
+
+void UseAfterFreeDetector::detect(AbstractState &as,
+                                  const llvm::Instruction *inst) {
+  // Check for loads from freed memory
+  if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(inst)) {
+    uint32_t ptrId =
+        AbstractInterpretation::getValueIdStatic(load->getPointerOperand());
+
+    if (!canSafelyDerefPtr(as, ptrId)) {
+      addEventToTrace(AEBugEventType::LOAD, inst, "Load from freed memory");
+      AEException bug("Use-after-free: load from freed memory");
+      addBugToReporter(bug, inst);
+    }
+  }
+
+  // Check for stores to freed memory
+  if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(inst)) {
+    uint32_t ptrId =
+        AbstractInterpretation::getValueIdStatic(store->getPointerOperand());
+
+    if (!canSafelyDerefPtr(as, ptrId)) {
+      addEventToTrace(AEBugEventType::STORE, inst, "Store to freed memory");
+      AEException bug("Use-after-free: store to freed memory");
+      addBugToReporter(bug, inst);
+    }
+  }
+
+  // Check for GEP on freed pointers
+  if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(inst)) {
+    uint32_t ptrId =
+        AbstractInterpretation::getValueIdStatic(gep->getPointerOperand());
+
+    if (!canSafelyDerefPtr(as, ptrId)) {
+      addEventToTrace(AEBugEventType::DEREF, inst, "GEP on freed memory");
+      AEException bug("Use-after-free: GEP on freed memory");
+      addBugToReporter(bug, inst);
+    }
+  }
+}
+
+void UseAfterFreeDetector::handleStubFunctions(const llvm::CallBase *call) {
+  // Track allocation/free events
+}
+
+void UseAfterFreeDetector::reportBug() {
+  if (!instToBugInfo.empty()) {
+    llvm::errs() << "###################### Use-After-Free ("
+                 << instToBugInfo.size() << " found) ######################\n";
+    for (const auto &it : instToBugInfo) {
+      llvm::errs() << it.second << "\n";
+    }
+  }
+}
+
+bool UseAfterFreeDetector::canSafelyDerefPtr(AbstractState &as,
+                                             uint32_t ptrId) {
+  if (!as.inVarToAddrsTable(ptrId))
+    return true;
+
+  const AbstractValue &absVal = as[ptrId];
+  if (!absVal.isAddr())
+    return true;
+
+  for (const auto &addr : absVal.getAddrs()) {
+    if (AbstractState::isInvalidMem(addr))
+      return false;
+    if (AbstractState::isNullMem(addr))
+      return false;
+    // Check if memory was freed
+    if (as.isFreedMem(addr))
+      return false;
+  }
+
+  return true;
+}
+
+void UseAfterFreeDetector::addBugToReporter(const AEException &e,
+                                            const llvm::Instruction *inst) {
+  std::string loc;
+  if (const llvm::DILocation *debugLoc = inst->getDebugLoc()) {
+    loc = debugLoc->getFilename().str() + ":" +
+          std::to_string(debugLoc->getLine());
+  } else {
+    loc = "unknown location";
+  }
+
+  if (bugLoc.find(loc) != bugLoc.end())
+    return;
+
+  bugLoc.insert(loc);
+  instToBugInfo[inst] = std::string(e.what()) + " @ " + loc;
+}
+
+//===----------------------------------------------------------------------===//
+// InvalidFreeDetector Implementation
+//===----------------------------------------------------------------------===//
+
+void InvalidFreeDetector::detect(AbstractState &as,
+                                 const llvm::Instruction *inst) {
+  // Check for free() calls
+  if (const auto *call = llvm::dyn_cast<llvm::CallBase>(inst)) {
+    if (const llvm::Function *callee = call->getCalledFunction()) {
+      std::string funcName = callee->getName().str();
+      if (funcName == "free" || funcName == "cfree" ||
+          funcName == "malloc_free") {
+        if (call->arg_size() >= 1) {
+          uint32_t ptrId =
+              AbstractInterpretation::getValueIdStatic(call->getArgOperand(0));
+
+          if (!isValidFree(as, ptrId)) {
+            addEventToTrace(AEBugEventType::FREE, inst,
+                            "Invalid free detected");
+            AEException bug("Invalid free: freeing invalid memory");
+            addBugToReporter(bug, inst);
+          }
+        }
+      }
+    }
+  }
+}
+
+void InvalidFreeDetector::handleStubFunctions(const llvm::CallBase *call) {
+  // Track allocation/free events
+}
+
+void InvalidFreeDetector::reportBug() {
+  if (!instToBugInfo.empty()) {
+    llvm::errs() << "###################### Invalid Free ("
+                 << instToBugInfo.size() << " found) ######################\n";
+    for (const auto &it : instToBugInfo) {
+      llvm::errs() << it.second << "\n";
+    }
+  }
+}
+
+bool InvalidFreeDetector::isValidFree(AbstractState &as, uint32_t ptrId) {
+  // If we don't track this pointer, assume valid to avoid false positives
+  // (e.g. malloc-returned ptr not in var-to-addrs table from external/stub)
+  if (!as.inVarToAddrsTable(ptrId))
+    return true;
+
+  const AbstractValue &absVal = as[ptrId];
+  if (!absVal.isAddr())
+    return false;
+
+  for (const auto &addr : absVal.getAddrs()) {
+    // Cannot free null or invalid memory
+    if (AbstractState::isNullMem(addr))
+      return false;
+    if (AbstractState::isInvalidMem(addr))
+      return false;
+    // Check for double-free (already freed)
+    if (as.isFreedMem(addr))
+      return false;
+  }
+
+  return true;
+}
+
+void InvalidFreeDetector::addBugToReporter(const AEException &e,
+                                           const llvm::Instruction *inst) {
+  std::string loc;
+  if (const llvm::DILocation *debugLoc = inst->getDebugLoc()) {
+    loc = debugLoc->getFilename().str() + ":" +
+          std::to_string(debugLoc->getLine());
+  } else {
+    loc = "unknown location";
+  }
+
+  if (bugLoc.find(loc) != bugLoc.end())
+    return;
+
+  bugLoc.insert(loc);
+  instToBugInfo[inst] = std::string(e.what()) + " @ " + loc;
 }
 
 } // namespace analysis

@@ -283,14 +283,12 @@ AEExtAPI::ExtAPIType AEExtAPI::getExtAPIType(const llvm::Function *fun) {
       return STRCPY;
     if (annotation.find("STRCAT") != std::string::npos)
       return STRCAT;
-    if (annotation.find("ALLOC") != std::string::npos) {
-      // Check if it's ALLOC_ARG0 (allocates in argument)
-      if (annotation.find("ARG0") != std::string::npos)
-        return ALLOC_ARG0;
-      return ALLOC;
-    }
+    if (annotation.find("ALLOC_ARG0") != std::string::npos)
+      return ALLOC_ARG0;
     if (annotation.find("REALLOC") != std::string::npos)
       return REALLOC;
+    if (annotation.find("ALLOC") != std::string::npos)
+      return ALLOC;
     if (annotation.find("FREE") != std::string::npos)
       return FREE;
     if (annotation.find("STRLEN") != std::string::npos)
@@ -1409,7 +1407,10 @@ void AEExtAPI::handleExtAlloc(const llvm::CallBase *call) {
 
   if (as.inVarToValTable(sizeId)) {
     IntervalValue size = as[sizeId].getInterval();
-    if (size.is_numeral()) {
+    if (size.is_infinite()) {
+      // Bounds are unbounded; getIntNumeral() would assert. Use conservative limit.
+      as.setObjSize(objId, MaxFieldLimit);
+    } else if (size.is_numeral()) {
       as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeral()));
     } else {
       int64_t ub = size.ub().getIntNumeral();
@@ -1437,7 +1438,10 @@ void AEExtAPI::handleExtRealloc(const llvm::CallBase *call) {
 
   if (as.inVarToValTable(sizeId)) {
     IntervalValue size = as[sizeId].getInterval();
-    if (size.is_numeral()) {
+    if (size.is_infinite()) {
+      // Bounds are unbounded; getIntNumeral() would assert. Use conservative limit.
+      as.setObjSize(objId, MaxFieldLimit);
+    } else if (size.is_numeral()) {
       as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeral()));
     } else {
       int64_t ub = size.ub().getIntNumeral();
@@ -1477,16 +1481,36 @@ void AEExtAPI::handleExtStrlen(const llvm::CallBase *call) {
 void AEExtAPI::handleExtScanf(const llvm::CallBase *call) {
   if (call->arg_size() < 2)
     return;
-  AbstractState &as = getAbsStateFromTrace(call);
-  uint32_t dstId = getValueId(call->getArgOperand(1));
 
-  if (!as.inVarToAddrsTable(dstId))
+  const llvm::Function *callee = call->getCalledFunction();
+  if (!callee)
     return;
 
-  AbstractValue range =
-      getRangeLimitFromType(call->getArgOperand(1)->getType());
-  for (auto addr : as[dstId].getAddrs()) {
-    as.store(addr, range);
+  AbstractState &as = getAbsStateFromTrace(call);
+
+  // scanf/vscanf:         format @ arg1, outputs start at arg1
+  // fscanf/sscanf family: format @ arg1, outputs start at arg2
+  uint32_t dstStart = 1;
+  const std::string calleeName = callee->getName().str();
+  if (calleeName.find("fscanf") != std::string::npos ||
+      calleeName.find("sscanf") != std::string::npos) {
+    dstStart = 2;
+  }
+
+  for (uint32_t i = dstStart; i < call->arg_size(); ++i) {
+    const llvm::Value *dstOp = call->getArgOperand(i);
+    if (!dstOp->getType()->isPointerTy())
+      continue;
+
+    uint32_t dstId = getValueId(dstOp);
+    if (!as.inVarToAddrsTable(dstId))
+      continue;
+
+    llvm::Type *pointeeTy = dstOp->getType()->getPointerElementType();
+    AbstractValue range = getRangeLimitFromType(pointeeTy);
+    for (auto addr : as[dstId].getAddrs()) {
+      as.store(addr, range);
+    }
   }
 }
 
@@ -1680,13 +1704,17 @@ void AEExtAPI::handleMemcpy(AbstractState &as, uint32_t dstId, uint32_t srcId,
 
   constexpr uint32_t MaxCopyLen = 10000; // Maximum length for copying
 
-  // Get the length bounds
-  int64_t lenLb = len.lb().getIntNumeral();
-  int64_t lenUb = len.ub().getIntNumeral();
-  if (lenLb < 0)
-    lenLb = 0;
-  if (lenUb > static_cast<int64_t>(MaxCopyLen))
-    lenUb = MaxCopyLen;
+  // Get the length bounds (handle infinite intervals conservatively)
+  int64_t lenLb = 0;
+  int64_t lenUb = MaxCopyLen;
+  if (!len.is_infinite()) {
+    lenLb = len.lb().getIntNumeral();
+    lenUb = len.ub().getIntNumeral();
+    if (lenLb < 0)
+      lenLb = 0;
+    if (lenUb > static_cast<int64_t>(MaxCopyLen))
+      lenUb = MaxCopyLen;
+  }
 
   // Calculate number of elements to copy
   uint32_t numElements = static_cast<uint32_t>(lenUb / elemSize);
@@ -1709,6 +1737,8 @@ void AEExtAPI::handleMemcpy(AbstractState &as, uint32_t dstId, uint32_t srcId,
     bool hasSrcVal = false;
 
     for (auto srcAddr : srcAddrs) {
+      if (!AddressValue::isVirtualMemAddress(srcAddr))
+        continue;
       uint32_t srcObjId = as.getIDFromAddr(srcAddr);
       if (as.inAddrToValTable(srcObjId)) {
         if (!hasSrcVal) {
@@ -1750,13 +1780,17 @@ void AEExtAPI::handleMemset(AbstractState &as, uint32_t dstId,
 
   constexpr uint32_t MaxSetLen = 10000; // Maximum length for setting
 
-  // Get the length bounds
-  int64_t lenLb = len.lb().getIntNumeral();
-  int64_t lenUb = len.ub().getIntNumeral();
-  if (lenLb < 0)
-    lenLb = 0;
-  if (lenUb > static_cast<int64_t>(MaxSetLen))
-    lenUb = MaxSetLen;
+  // Get the length bounds (handle infinite intervals conservatively)
+  int64_t lenLb = 0;
+  int64_t lenUb = MaxSetLen;
+  if (!len.is_infinite()) {
+    lenLb = len.lb().getIntNumeral();
+    lenUb = len.ub().getIntNumeral();
+    if (lenLb < 0)
+      lenLb = 0;
+    if (lenUb > static_cast<int64_t>(MaxSetLen))
+      lenUb = MaxSetLen;
+  }
 
   // Calculate number of elements to set
   uint32_t numElements = static_cast<uint32_t>(lenUb / elemSize);
@@ -1771,6 +1805,8 @@ void AEExtAPI::handleMemset(AbstractState &as, uint32_t dstId,
 
     // Set all destination addresses at this offset to the element value
     for (auto dstAddr : dstAddrs) {
+      if (!AddressValue::isVirtualMemAddress(dstAddr))
+        continue;
       // Load existing value and join with element (for precision)
       if (as.inAddrToValTable(as.getIDFromAddr(dstAddr))) {
         AbstractValue existing = as.load(dstAddr);

@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 
@@ -24,10 +25,55 @@ namespace analysis {
 class AbstractInterpretation;
 class AEExtAPI;
 
+/// Event types for bug diagnosis
+enum class AEBugEventType {
+  ALLOC,   ///< Memory allocation
+  FREE,    ///< Memory deallocation
+  LOAD,    ///< Memory load
+  STORE,   ///< Memory store
+  DEREF,   ///< Pointer dereference
+  COMPARE, ///< Pointer comparison
+  BRANCH,  ///< Branch instruction
+  CALL,    ///< Function call
+  RETURN   ///< Function return
+};
+
+/// A single event in the bug diagnosis trace
+struct AEBugEvent {
+  AEBugEventType type;
+  const llvm::Instruction *inst;
+  std::string description;
+  std::string srcFile;
+  unsigned srcLine;
+  unsigned srcCol;
+  std::string funcName;
+
+  AEBugEvent(AEBugEventType t, const llvm::Instruction *I,
+             const std::string &desc)
+      : type(t), inst(I), description(desc), srcLine(0), srcCol(0) {
+    if (inst) {
+      if (const llvm::DILocation *loc = inst->getDebugLoc()) {
+        srcFile = loc->getFilename().str();
+        srcLine = loc->getLine();
+        srcCol = loc->getColumn();
+      }
+      if (const llvm::Function *func = inst->getFunction()) {
+        funcName = func->getName().str();
+      }
+    }
+  }
+};
+
 /// Base class for all detectors
 class AEDetector {
 public:
-  enum DetectorKind { BUF_OVERFLOW, NULL_DEREF, UNKNOWN };
+  enum DetectorKind {
+    BUF_OVERFLOW,
+    NULL_DEREF,
+    USE_AFTER_FREE,
+    INVALID_FREE,
+    UNKNOWN
+  };
 
   AEDetector() : kind(UNKNOWN) {}
   virtual ~AEDetector() = default;
@@ -44,7 +90,13 @@ public:
   DetectorKind getKind() const { return kind; }
 
 protected:
+  void addEventToTrace(AEBugEventType type, const llvm::Instruction *inst,
+                       const std::string &desc);
+  void clearEventTrace();
+  std::vector<AEBugEvent> getEventTrace() const { return eventTrace; }
+
   DetectorKind kind;
+  std::vector<AEBugEvent> eventTrace;
 };
 
 /// Exception class for handling errors in Abstract Execution
@@ -129,6 +181,58 @@ public:
   }
 
   bool isNull(const AbstractValue &v) { return !v.isAddr() && !v.isInterval(); }
+
+private:
+  void addBugToReporter(const AEException &e, const llvm::Instruction *inst);
+
+  std::set<std::string> bugLoc;
+  std::map<const llvm::Instruction *, std::string> instToBugInfo;
+};
+
+/// Detector for identifying use-after-free issues
+class UseAfterFreeDetector : public AEDetector {
+  friend class AbstractInterpretation;
+
+public:
+  UseAfterFreeDetector() { kind = USE_AFTER_FREE; }
+  ~UseAfterFreeDetector() = default;
+
+  static bool classof(const AEDetector *detector) {
+    return detector->getKind() == AEDetector::USE_AFTER_FREE;
+  }
+
+  void detect(AbstractState &as, const llvm::Instruction *inst) override;
+  void handleStubFunctions(const llvm::CallBase *call) override;
+  void reportBug() override;
+  size_t getBugCount() const override { return instToBugInfo.size(); }
+
+  bool canSafelyDerefPtr(AbstractState &as, uint32_t ptrId);
+
+private:
+  void addBugToReporter(const AEException &e, const llvm::Instruction *inst);
+
+  std::set<std::string> bugLoc;
+  std::map<const llvm::Instruction *, std::string> instToBugInfo;
+};
+
+/// Detector for identifying invalid free issues (double-free, free non-heap)
+class InvalidFreeDetector : public AEDetector {
+  friend class AbstractInterpretation;
+
+public:
+  InvalidFreeDetector() { kind = INVALID_FREE; }
+  ~InvalidFreeDetector() = default;
+
+  static bool classof(const AEDetector *detector) {
+    return detector->getKind() == AEDetector::INVALID_FREE;
+  }
+
+  void detect(AbstractState &as, const llvm::Instruction *inst) override;
+  void handleStubFunctions(const llvm::CallBase *call) override;
+  void reportBug() override;
+  size_t getBugCount() const override { return instToBugInfo.size(); }
+
+  bool isValidFree(AbstractState &as, uint32_t ptrId);
 
 private:
   void addBugToReporter(const AEException &e, const llvm::Instruction *inst);

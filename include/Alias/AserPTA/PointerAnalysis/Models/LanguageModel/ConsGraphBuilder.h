@@ -237,7 +237,10 @@ protected:
     }
 
     void initIndirectCall(const InDirectCallSite<ctx> *indirect) {
-        PtrNode *funPtrNode = getPtrNode(indirect->getContext(), indirect->getValue());
+        PtrNode *funPtrNode =
+            getPtrNodeOrNull(indirect->getContext(), indirect->getValue());
+        if (!funPtrNode)
+            return;  // Unresolvable (e.g. inline asm) - skip conservatively
         // mark the ptr node as a indirect function pointer node
         funPtrNode->setIndirectCallNode(indirect->getCallNode());
     }
