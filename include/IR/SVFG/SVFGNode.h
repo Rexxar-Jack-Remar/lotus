@@ -245,7 +245,7 @@ public:
 
   const llvm::Value *getValue() const override { return value; }
   const llvm::Instruction *getInstruction() const override {
-    return llvm::dyn_cast<llvm::Instruction>(value);
+    return llvm::dyn_cast_or_null<llvm::Instruction>(value);
   }
 
   static inline bool classof(const SVFGNode *n) {
@@ -494,6 +494,7 @@ public:
   inline bool isFormalParmPHI() const { return func != nullptr; }
   inline bool isActualRetPHI() const { return callSite != nullptr; }
   const llvm::Function *getFunction() const override { return func; }
+  inline const llvm::CallBase *getCallSite() const { return callSite; }
 
   SVFG_NODE_KIND(InterPhi)
 };
@@ -594,6 +595,7 @@ public:
   bool isFormalParmPHI() const { return func != nullptr; }
   bool isActualRetPHI() const { return callSite != nullptr; }
   const llvm::Function *getFunction() const override { return func; }
+  inline const llvm::CallBase *getCallSite() const { return callSite; }
 
   SVFG_NODE_KIND(MInterPhi)
 };

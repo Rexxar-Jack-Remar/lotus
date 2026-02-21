@@ -74,7 +74,8 @@ Memory PHI Nodes
 ~~~~~~~~~~~~~~~~
 
 * **IntraMSSAPhiSVFGNode**: Intra-procedural memory PHI for merging memory states.
-* **InterMSSAPhiSVFGNode**: Inter-procedural memory PHI for parameter/return memory.
+* **InterMSSAPhiSVFGNode**: Inter-procedural memory PHI node kind (currently not
+  materialized by default builder construction).
 
 Parameter Nodes
 ---------------
@@ -156,7 +157,7 @@ The SVFG builder follows a phased construction approach:
    * Memory region identification from points-to sets.
    * SSA versioning for memory locations.
    * Memory PHI nodes at control-flow merges.
-   * Interprocedural memory PHI for call/return boundaries.
+   * Interprocedural memory flow through call/return edges (``CallAIn``/``RetAOut``).
 
 Usage
 =====

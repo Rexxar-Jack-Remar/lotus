@@ -2233,54 +2233,6 @@ AbstractInterpretation::getCallee(const llvm::CallBase *callNode) {
   return callees.front();
 }
 
-/// Resolve indirect calls using AserPTA during initialization
-/// This is a simpler version of getCallee that can be called before analysis
-/// runs
-const llvm::Function *AbstractInterpretation::resolveIndirectCallViaPTA(
-    const llvm::CallBase *callNode) const {
-  // Only handle indirect calls
-  if (callNode->getCalledFunction())
-    return nullptr;
-
-  if (!ptaReady_ || !pta_ || !pta_->pass)
-    return nullptr;
-
-  const auto *cg = pta_->pass->getPTA()->getCallGraph();
-  if (!cg)
-    return nullptr;
-
-  // Find the call graph node for this call instruction
-  for (auto nodeIt = cg->begin(); nodeIt != cg->end(); ++nodeIt) {
-    const auto *cgNode = *nodeIt;
-    if (!cgNode || !cgNode->isIndirectCall())
-      continue;
-
-    auto *indCall = cgNode->getTargetFunPtr();
-    if (!indCall)
-      continue;
-
-    const llvm::Instruction *callInst = indCall->getCallSite();
-    if (callInst != callNode)
-      continue;
-
-    // Get resolved targets
-    const auto &resolvedNodes = indCall->getResolvedNode();
-    for (const auto *resolvedNode : resolvedNodes) {
-      if (!resolvedNode || resolvedNode->isIndirectCall())
-        continue;
-      auto *targetFun = resolvedNode->getTargetFun();
-      if (!targetFun)
-        continue;
-      const llvm::Function *calleeFunc = targetFun->getFunction();
-      if (calleeFunc && !calleeFunc->isDeclaration()) {
-        return calleeFunc;
-      }
-    }
-  }
-
-  return nullptr;
-}
-
 bool AbstractInterpretation::shouldApplyNarrowing(const llvm::Function *fun) {
   // Non-recursive functions (regular loops): always apply narrowing.
   if (!fun || !isRecursiveFun(fun))

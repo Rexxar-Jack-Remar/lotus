@@ -294,6 +294,27 @@ void SVFG::removeNode(SVFGNode *node) {
 
   nodeFunctionDebug.erase(nodeId);
   nodeCallSiteDebug.erase(nodeId);
+  globalStoreNodes.erase(node);
+
+  if (auto *mu = dyn_cast<LoadMuSVFGNode>(node)) {
+    if (const llvm::LoadInst *li = mu->getLoadInst()) {
+      auto muIt = loadInstToMuMap.find(li);
+      if (muIt != loadInstToMuMap.end()) {
+        muIt->second.erase(node);
+        if (muIt->second.empty())
+          loadInstToMuMap.erase(muIt);
+      }
+    }
+  } else if (auto *chi = dyn_cast<StoreChiSVFGNode>(node)) {
+    if (const llvm::StoreInst *si = chi->getStoreInst()) {
+      auto chiIt = storeInstToChiMap.find(si);
+      if (chiIt != storeInstToChiMap.end()) {
+        chiIt->second.erase(node);
+        if (chiIt->second.empty())
+          storeInstToChiMap.erase(chiIt);
+      }
+    }
+  }
 
   if (auto *actualIn = dyn_cast<ActualInSVFGNode>(node)) {
     const llvm::CallBase *cs = actualIn->getCallSite();
@@ -371,6 +392,17 @@ void SVFG::removeNode(SVFGNode *node) {
           funcToFormalRetMap.erase(mapIt);
       }
     }
+  }
+
+  // Remove incident edges before deleting the node.
+  // Use a set to avoid double-removing self-loop edges.
+  std::unordered_set<SVFGEdge *> incident;
+  auto outEdges = node->getOutEdges();
+  incident.insert(outEdges.begin(), outEdges.end());
+  auto inEdges = node->getInEdges();
+  incident.insert(inEdges.begin(), inEdges.end());
+  for (SVFGEdge *edge : incident) {
+    removeEdge(edge);
   }
 
   // Bug #1 fix: decrement stats before deletion.
@@ -551,12 +583,69 @@ SVFGNode *SVFG::getLHSTopLevPtr(SVFGNode *node) const {
   return node;
 }
 
-const ActualRetSVFGNode *SVFG::isCallSiteRetSVFGNode(const SVFGNode *n) const {
-  return llvm::dyn_cast_or_null<ActualRetSVFGNode>(n);
+const llvm::CallBase *SVFG::isCallSiteRetSVFGNode(const SVFGNode *n) const {
+  if (const auto *ar = llvm::dyn_cast_or_null<ActualRetSVFGNode>(n))
+    return ar->getCallSite();
+  if (const auto *phi = llvm::dyn_cast_or_null<InterPhiSVFGNode>(n))
+    return phi->isActualRetPHI() ? phi->getCallSite() : nullptr;
+  if (const auto *ao = llvm::dyn_cast_or_null<ActualOutSVFGNode>(n))
+    return ao->getCallSite();
+  if (const auto *mphi = llvm::dyn_cast_or_null<InterMSSAPhiSVFGNode>(n))
+    return mphi->isActualRetPHI() ? mphi->getCallSite() : nullptr;
+  return nullptr;
 }
 
-const FormalParmSVFGNode *SVFG::isFunEntrySVFGNode(const SVFGNode *n) const {
-  return llvm::dyn_cast_or_null<FormalParmSVFGNode>(n);
+const llvm::Function *SVFG::isFunEntrySVFGNode(const SVFGNode *n) const {
+  if (const auto *fp = llvm::dyn_cast_or_null<FormalParmSVFGNode>(n))
+    return fp->getFunction();
+  if (const auto *phi = llvm::dyn_cast_or_null<InterPhiSVFGNode>(n))
+    return phi->isFormalParmPHI() ? phi->getFunction() : nullptr;
+  if (const auto *fi = llvm::dyn_cast_or_null<FormalInSVFGNode>(n))
+    return fi->getFunction();
+  if (const auto *mphi = llvm::dyn_cast_or_null<InterMSSAPhiSVFGNode>(n))
+    return mphi->isFormalParmPHI() ? mphi->getFunction() : nullptr;
+  return nullptr;
+}
+
+void SVFG::getInterVFEdgesForIndirectCallSite(
+    const llvm::CallBase *cs, const llvm::Function *callee,
+    std::vector<SVFGEdge *> &edges) const {
+  if (!cs || !callee)
+    return;
+
+  auto isInterKind = [](SVFGEdgeK k) {
+    return k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
+           k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
+           k == SVFGEdgeK::ParamCall || k == SVFGEdgeK::RetDir ||
+           k == SVFGEdgeK::RetInd || k == SVFGEdgeK::RetAOut ||
+           k == SVFGEdgeK::RetFOut || k == SVFGEdgeK::ParamRet;
+  };
+
+  auto isCallKind = [](SVFGEdgeK k) {
+    return k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
+           k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
+           k == SVFGEdgeK::ParamCall;
+  };
+
+  std::unordered_set<SVFGEdge *> seen;
+  for (const auto &pair : nodeMap) {
+    SVFGNode *src = pair.second;
+    if (!src)
+      continue;
+    for (SVFGEdge *edge : src->getOutEdges()) {
+      if (!edge || edge->getCallSite() != cs)
+        continue;
+      const SVFGEdgeK kind = edge->getEdgeKind();
+      if (!isInterKind(kind))
+        continue;
+      const SVFGNode *anchor = isCallKind(kind) ? edge->getDstNode()
+                                                : edge->getSrcNode();
+      if (!anchor || anchor->getFunction() != callee)
+        continue;
+      if (seen.insert(edge).second)
+        edges.push_back(edge);
+    }
+  }
 }
 
 void SVFG::dump(const std::string &filename) const {

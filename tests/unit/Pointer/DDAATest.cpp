@@ -209,6 +209,21 @@ TEST_F(DDAATest, SVFGSCCSkipsInsensitiveCallRetEdges) {
   EXPECT_FALSE(stats.isEdgeInSVFGSCC(callEdge));
 }
 
+TEST_F(DDAATest, RemoveNodeHandlesSelfLoopSafely) {
+  auto graph = std::make_unique<SVFG>();
+  auto *n1 = new CopySVFGNode(1, nullptr, nullptr);
+  graph->addNode(n1);
+  SVFGEdge *self = graph->addEdge(n1, n1, SVFGEdgeK::IntraCopy);
+  ASSERT_NE(self, nullptr);
+
+  graph->removeNode(n1);
+
+  EXPECT_EQ(graph->getNumNodes(), 0u);
+  const SVFGStat &stat = graph->getStat();
+  EXPECT_EQ(stat.numNodes, 0u);
+  EXPECT_EQ(stat.numEdges, 0u);
+}
+
 TEST_F(DDAATest, ContextSensitiveBKConditionOnCallAInRetAOut) {
   const char *source = R"(
     define void @setter(i32** %p, i32* %x) {

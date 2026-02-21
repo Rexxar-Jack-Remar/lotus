@@ -234,6 +234,8 @@ static SVFGNode *createNodeForKind(uint32_t id, SVFGK kind, uint32_t memReg,
                                    const SVFGNodeBS &pts) {
   const ICFGNode *icfg = nullptr;
   switch (kind) {
+  case SVFGK::Stmt:
+    return new StmtSVFGNode(id, SVFGK::Stmt, icfg, nullptr);
   case SVFGK::Addr:
     return new AddrSVFGNode(id, icfg, nullptr);
   case SVFGK::Copy:
@@ -246,15 +248,21 @@ static SVFGNode *createNodeForKind(uint32_t id, SVFGK kind, uint32_t memReg,
     return new GepSVFGNode(id, icfg, nullptr);
   case SVFGK::BinaryOp:
     return new BinaryOpSVFGNode(id, icfg, nullptr);
+  case SVFGK::UnaryOp:
+    return new UnaryOpSVFGNode(id, icfg, nullptr);
   case SVFGK::Cmp:
     return new CmpSVFGNode(id, icfg, nullptr);
   case SVFGK::Branch:
     return new BranchSVFGNode(id, icfg, nullptr);
+  case SVFGK::Phi:
+    return new PhiSVFGNode(id, SVFGK::Phi, icfg, nullptr);
   case SVFGK::IntraPhi:
     return new IntraPhiSVFGNode(id, icfg, nullptr);
   case SVFGK::InterPhi:
     return new InterPhiSVFGNode(id, icfg,
                                 static_cast<const llvm::Function *>(nullptr));
+  case SVFGK::MPhi:
+    return new MSSAPhiSVFGNode(id, SVFGK::MPhi, icfg, memReg, pts);
   case SVFGK::MIntraPhi:
     return new IntraMSSAPhiSVFGNode(id, icfg, memReg, version, pts);
   case SVFGK::MInterPhi:
@@ -288,6 +296,8 @@ static SVFGNode *createNodeForKind(uint32_t id, SVFGK kind, uint32_t memReg,
     return new FormalRetSVFGNode(id, icfg, nullptr);
   case SVFGK::ActualRet:
     return new ActualRetSVFGNode(id, icfg, nullptr);
+  case SVFGK::VarArg:
+    return new VarArgSVFGNode(id, icfg, nullptr);
   case SVFGK::NullPtr:
     return new NullPtrSVFGNode(id, icfg);
   case SVFGK::Dummy:

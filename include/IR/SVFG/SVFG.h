@@ -747,10 +747,20 @@ public:
     /// Used by DDA for backtraceAlongDirectVF.
     SVFGNode* getLHSTopLevPtr(SVFGNode* node) const;
 
-    /// @brief Return callsite-ret SVFG node if \p n is one, else nullptr.
-    const ActualRetSVFGNode* isCallSiteRetSVFGNode(const SVFGNode* n) const;
-    /// @brief Return fun-entry SVFG node if \p n is one, else nullptr.
-    const FormalParmSVFGNode* isFunEntrySVFGNode(const SVFGNode* n) const;
+    /// @brief Return callsite instruction if \p n is a callsite-ret SVFG node.
+    const llvm::CallBase* isCallSiteRetSVFGNode(const SVFGNode* n) const;
+    /// @brief Return function if \p n is a function-entry SVFG node.
+    const llvm::Function* isFunEntrySVFGNode(const SVFGNode* n) const;
+
+    /// @brief Collect existing inter-procedural value-flow edges for an
+    /// indirect callsite-callee pair.
+    ///
+    /// This mirrors SVF's query intent for demand-driven refinement clients:
+    /// return currently materialized call/return and memory inter edges that
+    /// belong to (\p cs, \p callee).
+    void getInterVFEdgesForIndirectCallSite(const llvm::CallBase* cs,
+                                            const llvm::Function* callee,
+                                            std::vector<SVFGEdge*>& edges) const;
 
     /// @brief Dump to DOT format
     void dump(const std::string& filename) const;

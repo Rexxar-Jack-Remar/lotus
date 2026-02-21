@@ -29,7 +29,8 @@ int getOrRegisterAEBugType(AEDetector::DetectorKind kind) {
     int id = mgr.find_bug_type("AE Buffer Overflow");
     if (id < 0) {
       id = mgr.register_bug_type("AE Buffer Overflow", BugDescription::BI_HIGH,
-                                 BugDescription::BC_SECURITY, "CWE-120, CWE-122");
+                                 BugDescription::BC_SECURITY,
+                                 "CWE-120, CWE-122");
     }
     return id;
   }
@@ -71,7 +72,8 @@ int getOrRegisterAEBugType(AEDetector::DetectorKind kind) {
   return -1;
 }
 
-void emitAEBugReport(AEDetector::DetectorKind kind, const llvm::Instruction *inst,
+void emitAEBugReport(AEDetector::DetectorKind kind,
+                     const llvm::Instruction *inst,
                      const std::string &message) {
   int tyId = getOrRegisterAEBugType(kind);
   if (tyId < 0)
@@ -135,7 +137,8 @@ void BufOverflowDetector::detect(AbstractState &as,
 
       for (auto addr : as[ptrId].getAddrs()) {
         uint32_t objId = as.getIDFromAddr(addr);
-        // Compute access offset per object to preserve field/object sensitivity.
+        // Compute access offset per object to preserve field/object
+        // sensitivity.
         IntervalValue accessOffset = getAccessOffset(as, objId, gep);
         uint32_t objSize = as.getObjSize(objId);
 
@@ -153,14 +156,20 @@ void BufOverflowDetector::detect(AbstractState &as,
   // Check for buffer overflow in external API calls
   // Use annotation-based classification from AEExtAPI
   if (const auto *call = llvm::dyn_cast<llvm::CallBase>(inst)) {
-    if (const llvm::Function *callee = call->getCalledFunction()) {
-      AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
+    // Get all possible callees (direct + indirect resolved via PTA)
+    AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
+    std::vector<const llvm::Function *> callees = ae.getCallees(call);
+
+    for (const llvm::Function *callee : callees) {
+      if (!callee)
+        continue;
       AEExtAPI *utils = ae.getUtils();
       if (utils) {
         AEExtAPI::ExtAPIType extType = utils->getExtAPIType(callee);
         if (extType == AEExtAPI::MEMCPY || extType == AEExtAPI::MEMSET ||
             extType == AEExtAPI::STRCPY || extType == AEExtAPI::STRCAT) {
           detectExtAPI(as, call);
+          break;
         }
       } else {
         // Fallback to string matching if utils not available
@@ -173,6 +182,7 @@ void BufOverflowDetector::detect(AbstractState &as,
             funName.find("strncpy") != std::string::npos ||
             funName.find("strncat") != std::string::npos) {
           detectExtAPI(as, call);
+          break;
         }
       }
     }
@@ -668,8 +678,12 @@ void NullptrDerefDetector::detect(AbstractState &as,
   }
 
   if (const auto *call = llvm::dyn_cast<llvm::CallBase>(inst)) {
-    if (const llvm::Function *callee = call->getCalledFunction()) {
-      AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
+    AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
+    std::vector<const llvm::Function *> callees = ae.getCallees(call);
+
+    for (const llvm::Function *callee : callees) {
+      if (!callee)
+        continue;
       AEExtAPI *utils = ae.getUtils();
       bool shouldCheck = false;
 
@@ -689,6 +703,7 @@ void NullptrDerefDetector::detect(AbstractState &as,
 
       if (shouldCheck) {
         detectExtAPI(as, call);
+        break;
       }
     }
   }
@@ -696,55 +711,59 @@ void NullptrDerefDetector::detect(AbstractState &as,
 
 void NullptrDerefDetector::detectExtAPI(AbstractState &as,
                                         const llvm::CallBase *call) {
-  const llvm::Function *callee = call->getCalledFunction();
-  if (!callee)
-    return;
-
   AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
-  AEExtAPI *utils = ae.getUtils();
+  std::vector<const llvm::Function *> callees = ae.getCallees(call);
 
-  std::vector<uint32_t> pointerArgs;
-  if (utils) {
-    for (const std::string &annotation : utils->getExtFuncAnnotations(callee)) {
-      if (annotation.find("MEMCPY") != std::string::npos) {
-        if (call->arg_size() < 4) {
+  for (const llvm::Function *callee : callees) {
+    if (!callee)
+      continue;
+    AEExtAPI *utils = ae.getUtils();
+
+    std::vector<uint32_t> pointerArgs;
+    if (utils) {
+      for (const std::string &annotation :
+           utils->getExtFuncAnnotations(callee)) {
+        if (annotation.find("MEMCPY") != std::string::npos) {
+          if (call->arg_size() < 4) {
+            pointerArgs.push_back(0);
+            pointerArgs.push_back(1);
+          } else {
+            pointerArgs.push_back(1);
+            pointerArgs.push_back(2);
+            pointerArgs.push_back(3);
+            pointerArgs.push_back(4);
+          }
+        } else if (annotation.find("MEMSET") != std::string::npos) {
+          pointerArgs.push_back(0);
+        } else if (annotation.find("STRCPY") != std::string::npos) {
           pointerArgs.push_back(0);
           pointerArgs.push_back(1);
-        } else {
+        } else if (annotation.find("STRCAT") != std::string::npos) {
+          pointerArgs.push_back(0);
           pointerArgs.push_back(1);
-          pointerArgs.push_back(2);
-          pointerArgs.push_back(3);
-          pointerArgs.push_back(4);
         }
-      } else if (annotation.find("MEMSET") != std::string::npos) {
-        pointerArgs.push_back(0);
-      } else if (annotation.find("STRCPY") != std::string::npos) {
-        pointerArgs.push_back(0);
-        pointerArgs.push_back(1);
-      } else if (annotation.find("STRCAT") != std::string::npos) {
-        pointerArgs.push_back(0);
-        pointerArgs.push_back(1);
       }
     }
-  }
 
-  if (pointerArgs.empty()) {
-    return;
-  }
+    if (pointerArgs.empty()) {
+      return;
+    }
 
-  std::sort(pointerArgs.begin(), pointerArgs.end());
-  pointerArgs.erase(std::unique(pointerArgs.begin(), pointerArgs.end()),
-                    pointerArgs.end());
+    std::sort(pointerArgs.begin(), pointerArgs.end());
+    pointerArgs.erase(std::unique(pointerArgs.begin(), pointerArgs.end()),
+                      pointerArgs.end());
 
-  for (uint32_t argIdx : pointerArgs) {
-    if (call->arg_size() <= argIdx)
-      continue;
-    uint32_t argId =
-        AbstractInterpretation::getValueIdStatic(call->getArgOperand(argIdx));
-    if (!canSafelyDerefPtr(as, argId)) {
-      AEException bug("Null pointer dereference in " + callee->getName().str() +
-                      " argument " + std::to_string(argIdx));
-      addBugToReporter(bug, call);
+    for (uint32_t argIdx : pointerArgs) {
+      if (call->arg_size() <= argIdx)
+        continue;
+      uint32_t argId =
+          AbstractInterpretation::getValueIdStatic(call->getArgOperand(argIdx));
+      if (!canSafelyDerefPtr(as, argId)) {
+        AEException bug("Null pointer dereference in " +
+                        callee->getName().str() + " argument " +
+                        std::to_string(argIdx));
+        addBugToReporter(bug, call);
+      }
     }
   }
 }
@@ -823,8 +842,9 @@ void NullptrDerefDetector::addBugToReporter(const AEException &e,
     loc = debugLoc->getFilename().str() + ":" +
           std::to_string(debugLoc->getLine());
   } else {
-    // Fallback location for stripped/no-debug IR: use a stable per-instruction
-    // textual key so multiple unknown-location bugs do not collapse into one.
+    // Fallback location for stripped/no-debug IR: use a stable
+    // per-instruction textual key so multiple unknown-location bugs do not
+    // collapse into one.
     std::string instStr;
     llvm::raw_string_ostream os(instStr);
     inst->print(os);
@@ -1150,45 +1170,51 @@ void InvalidFreeDetector::addBugToReporter(const AEException &e,
 void MemLeakDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
   // Track allocations (malloc, calloc, new, etc.)
   if (const auto *call = llvm::dyn_cast<llvm::CallBase>(inst)) {
-    const llvm::Function *callee = call->getCalledFunction();
-    if (!callee)
-      return;
+    AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
+    std::vector<const llvm::Function *> callees = ae.getCallees(call);
 
-    std::string funcName = callee->getName().str();
+    for (const llvm::Function *callee : callees) {
+      if (!callee)
+        continue;
 
-    // Check if this is an allocation function
-    if (funcName == "malloc" || funcName == "calloc" || funcName == "realloc" ||
-        funcName == "_Znwm" || funcName == "_Znam" || // operator new, new[]
-        funcName == "strdup" || funcName == "strndup") {
+      std::string funcName = callee->getName().str();
 
-      uint32_t retId = AbstractInterpretation::getValueIdStatic(call);
-      if (as.inVarToValTable(retId)) {
-        AddressValue addrs = as[retId].getAddrs();
-        for (uint64_t addr : addrs.getVals()) {
-          uint32_t objId = as.getIDFromAddr(addr);
-          if (objId != AbstractState::NullPtr && objId != AbstractState::BlkPtr) {
-            trackAllocation(objId, call);
+      // Check if this is an allocation function
+      if (funcName == "malloc" || funcName == "calloc" ||
+          funcName == "realloc" || funcName == "_Znwm" ||
+          funcName == "_Znam" || // operator new, new[]
+          funcName == "strdup" || funcName == "strndup") {
+
+        uint32_t retId = AbstractInterpretation::getValueIdStatic(call);
+        if (as.inVarToValTable(retId)) {
+          AddressValue addrs = as[retId].getAddrs();
+          for (uint64_t addr : addrs.getVals()) {
+            uint32_t objId = as.getIDFromAddr(addr);
+            if (objId != AbstractState::NullPtr &&
+                objId != AbstractState::BlkPtr) {
+              trackAllocation(objId, call);
+            }
           }
         }
       }
-    }
 
-    // Check if object escapes via external function call
-    for (unsigned i = 0; i < call->arg_size(); ++i) {
-      const llvm::Value *arg = call->getArgOperand(i);
-      if (arg->getType()->isPointerTy()) {
-        uint32_t argId = AbstractInterpretation::getValueIdStatic(arg);
-        if (as.inVarToValTable(argId)) {
-          AddressValue addrs = as[argId].getAddrs();
-          for (uint64_t addr : addrs.getVals()) {
-            uint32_t objId = as.getIDFromAddr(addr);
-            // Mark as escaped if passed to external function
-            if (!callee->isDeclaration() || funcName == "free" ||
-                funcName == "_ZdlPv" || funcName == "_ZdaPv") {
-              // Don't mark as escaped for free/delete
-              continue;
+      // Check if object escapes via external function call
+      for (unsigned i = 0; i < call->arg_size(); ++i) {
+        const llvm::Value *arg = call->getArgOperand(i);
+        if (arg->getType()->isPointerTy()) {
+          uint32_t argId = AbstractInterpretation::getValueIdStatic(arg);
+          if (as.inVarToValTable(argId)) {
+            AddressValue addrs = as[argId].getAddrs();
+            for (uint64_t addr : addrs.getVals()) {
+              uint32_t objId = as.getIDFromAddr(addr);
+              // Mark as escaped if passed to external function
+              if (!callee->isDeclaration() || funcName == "free" ||
+                  funcName == "_ZdlPv" || funcName == "_ZdaPv") {
+                // Don't mark as escaped for free/delete
+                continue;
+              }
+              escapedObjects.insert(objId);
             }
-            escapedObjects.insert(objId);
           }
         }
       }
@@ -1218,16 +1244,19 @@ void MemLeakDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
       if (!isReachableFromLivePointers(as, objId)) {
         // Found a leak
         const llvm::Instruction *allocSite = objToAllocSite[objId];
-        addEventToTrace(AEBugEventType::ALLOC, allocSite, "Memory allocated here");
+        addEventToTrace(AEBugEventType::ALLOC, allocSite,
+                        "Memory allocated here");
         addEventToTrace(AEBugEventType::RETURN, ret, "Memory leaked at return");
 
-        AEException bug("Memory leak: allocated memory not freed and not reachable");
+        AEException bug(
+            "Memory leak: allocated memory not freed and not reachable");
         addBugToReporter(bug, allocSite);
       }
     }
   }
 
-  // Also check for leaks when pointer goes out of scope (store overwrites last reference)
+  // Also check for leaks when pointer goes out of scope (store overwrites
+  // last reference)
   if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(inst)) {
     const llvm::Value *ptr = store->getPointerOperand();
 
@@ -1246,10 +1275,13 @@ void MemLeakDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
           // Check if this is the last reference
           if (!isReachableFromLivePointers(as, objId)) {
             const llvm::Instruction *allocSite = objToAllocSite[objId];
-            addEventToTrace(AEBugEventType::ALLOC, allocSite, "Memory allocated here");
-            addEventToTrace(AEBugEventType::STORE, store, "Last reference overwritten");
+            addEventToTrace(AEBugEventType::ALLOC, allocSite,
+                            "Memory allocated here");
+            addEventToTrace(AEBugEventType::STORE, store,
+                            "Last reference overwritten");
 
-            AEException bug("Memory leak: last reference to allocated memory overwritten");
+            AEException bug("Memory leak: last reference to allocated memory "
+                            "overwritten");
             addBugToReporter(bug, allocSite);
           }
         }
@@ -1300,7 +1332,7 @@ void MemLeakDetector::trackAllocation(uint32_t objId,
 }
 
 bool MemLeakDetector::isReachableFromLivePointers(AbstractState &as,
-                                                   uint32_t objId) {
+                                                  uint32_t objId) {
   // Check if objId is reachable from any variable in the abstract state
 
   // Check all variables

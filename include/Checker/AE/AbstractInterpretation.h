@@ -8,7 +8,8 @@
 //
 // Key features:
 // - Sparse analysis: Only tracks values that affect bug detection
-// - Cross-domain interaction: Uses Z3 solver to refine intervals via constraints
+// - Cross-domain interaction: Uses Z3 solver to refine intervals via
+// constraints
 // - WTO-based iteration: Handles loops and recursion with widening/narrowing
 // - Multiple bug detectors: Buffer overflow, null deref, use-after-free, etc.
 //
@@ -138,9 +139,9 @@ class AbstractInterpretation {
 public:
   /// Recursion handling strategy
   enum HandleRecur {
-    TOP,          ///< Set recursive results to ⊤ (top) immediately
-    WIDEN_ONLY,   ///< Apply widening only for recursive functions
-    WIDEN_NARROW  ///< Apply widening then narrowing (default, most precise)
+    TOP,         ///< Set recursive results to ⊤ (top) immediately
+    WIDEN_ONLY,  ///< Apply widening only for recursive functions
+    WIDEN_NARROW ///< Apply widening then narrowing (default, most precise)
   };
 
   AbstractInterpretation();
@@ -346,11 +347,7 @@ private:
   bool collectCalleeReturnValue(const llvm::Function *callee,
                                 AbstractValue &joinedReturn) const;
   void handleRecursiveSCC(const llvm::Function *seed);
-  std::vector<const llvm::Function *>
-  getCallees(const llvm::CallBase *callNode) const;
   const llvm::Function *getCallee(const llvm::CallBase *callNode);
-  const llvm::Function *
-  resolveIndirectCallViaPTA(const llvm::CallBase *callNode) const;
   bool shouldApplyNarrowing(const llvm::Function *fun);
 
   void collectCheckPoint();
@@ -436,6 +433,10 @@ public:
 
   // Get the module being analyzed
   llvm::Module *getModule() const { return module_; }
+
+  // Get all possible callees for a call (direct + indirect resolved via PTA)
+  std::vector<const llvm::Function *>
+  getCallees(const llvm::CallBase *callNode) const;
 };
 
 } // namespace analysis
