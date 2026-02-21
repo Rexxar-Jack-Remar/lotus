@@ -13,11 +13,11 @@
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGStats.h"
 
-#include <algorithm>
 #include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Casting.h>
+#include <algorithm>
 
 #include <functional>
 #include <stack>

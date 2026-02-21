@@ -18,13 +18,13 @@
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
-#include <algorithm>
 #include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Casting.h>
+#include <algorithm>
 
 #include <functional>
 #include <queue>

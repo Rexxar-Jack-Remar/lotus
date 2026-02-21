@@ -6,12 +6,12 @@
 #include "Checker/Pulse/Core/PulseFormula.h"
 #include "Checker/Pulse/Core/PulseSubstitution.h"
 #include "Checker/Pulse/Domain/PulseInvalidation.h"
+#include "Checker/Pulse/Domain/PulseTaint.h"
 #include "Checker/Pulse/Interproc/PulseModels.h"
 #include "Checker/Pulse/Interproc/PulseSpecialization.h"
 #include "Checker/Pulse/Report/PulseDiagnostic.h"
 #include "Checker/Pulse/Report/PulseLogger.h"
 #include "Checker/Pulse/Report/PulseReport.h"
-#include "Checker/Pulse/Domain/PulseTaint.h"
 #include "Checker/Report/BugReportMgr.h"
 
 #include <functional>
@@ -149,7 +149,8 @@ void PulseChecker::analyze() {
                                                           functions.end());
 
   // Build direct call graph: caller -> callee (only for defined functions).
-  std::unordered_map<const llvm::Function *, std::vector<const llvm::Function *>>
+  std::unordered_map<const llvm::Function *,
+                     std::vector<const llvm::Function *>>
       edges;
   edges.reserve(functions.size());
   for (const llvm::Function *F : functions) {
@@ -171,7 +172,8 @@ void PulseChecker::analyze() {
   }
 
   // Reverse edges for SCC computation (Kosaraju).
-  std::unordered_map<const llvm::Function *, std::vector<const llvm::Function *>>
+  std::unordered_map<const llvm::Function *,
+                     std::vector<const llvm::Function *>>
       rev_edges;
   rev_edges.reserve(functions.size());
   for (const llvm::Function *F : functions) {
@@ -213,7 +215,8 @@ void PulseChecker::analyze() {
   std::vector<std::vector<const llvm::Function *>> sccs;
   sccs.reserve(functions.size());
 
-  std::function<void(const llvm::Function *, std::vector<const llvm::Function *> &)>
+  std::function<void(const llvm::Function *,
+                     std::vector<const llvm::Function *> &)>
       dfs2 = [&](const llvm::Function *F,
                  std::vector<const llvm::Function *> &scc) {
         if (visited2.count(F))
@@ -291,8 +294,7 @@ void PulseChecker::analyze() {
   current_scc_.clear();
 
   PulseLogger::info("Completed analysis of " +
-                    std::to_string(functions.size()) +
-                    " functions");
+                    std::to_string(functions.size()) + " functions");
 
   // Flush periodically or at end
   DiagnosticManager::getInstance().flush();
@@ -404,8 +406,12 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
       // After widening, join all disjuncts at this block
       ExecutionDomain joined = disj_domain.joinAtBlock(BB);
       if (!joined.isStopped()) {
+        // Preserve the original predecessor context for PHI handling.
+        // The joined state may have a stale entry pred from a previous
+        // iteration. We must keep the current edge's pred_bb to ensure sound
+        // PHI evaluation.
+        joined.setEntryPred(pred_bb);
         current_state = std::move(joined);
-        pred_bb = current_state.getEntryPred();
       } else {
         continue;
       }
@@ -483,8 +489,7 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
       if (st.isStopped()) {
         if (st.isExitProgram()) {
           exit_states.push_back(st.clone());
-        } else if (st.isLatentAbortProgram() ||
-                   st.isLatentInvalidAccess()) {
+        } else if (st.isLatentAbortProgram() || st.isLatentInvalidAccess()) {
           latent_exit_states.push_back(st.clone());
         }
         continue;
@@ -557,7 +562,6 @@ ExecutionDomain PulseChecker::initializeFunction(const llvm::Function *F) {
   return exec_state;
 }
 
-
 std::vector<std::pair<ExecutionDomain, llvm::Optional<AbstractValue>>>
 PulseChecker::runCallee(const llvm::Function *callee,
                         const ExecutionDomain &caller_state,
@@ -566,6 +570,29 @@ PulseChecker::runCallee(const llvm::Function *callee,
   std::vector<std::pair<ExecutionDomain, llvm::Optional<AbstractValue>>> result;
   if (call_depth >= kMaxCallDepth)
     return result;
+
+  // Detect recursive calls: if callee is in the current SCC being analyzed,
+  // treat it as unknown to prevent infinite recursion.
+  if (current_scc_.count(callee) > 0) {
+    ExecutionDomain state = caller_state.clone();
+    auto *astate = state.getAstate();
+    if (astate) {
+      astate->addRecursiveCall(callee->getName().str());
+      astate->declareUnknownValues();
+    }
+    // Create a fresh return value for the unknown recursive call
+    if (CI->getType()->isPointerTy()) {
+      AbstractValue ret_val = factory_.createFresh(CI);
+      Address ret_addr(ret_val);
+      ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI,
+                                CI->getFunction());
+      if (auto *astate = state.getAstate()) {
+        astate->getPostStack().add(CI, ret_addr);
+      }
+    }
+    result.push_back({std::move(state), llvm::Optional<AbstractValue>()});
+    return result;
+  }
 
   ExecutionDomain init = initializeFunction(callee);
   auto *init_astate = init.getAstate();
@@ -587,9 +614,9 @@ PulseChecker::runCallee(const llvm::Function *callee,
       AbstractValue formal_av = factory_.getOrCreate(&*ai);
       AbstractValue formal_canon = init_astate->getCanonical(formal_av);
       init_astate->getPostAttrs().remove(formal_av, Attribute::Uninitialized);
-      
-      // Track null arguments: if the actual argument is a null constant or has Null attribute,
-      // mark the formal parameter as potentially null
+
+      // Track null arguments: if the actual argument is a null constant or has
+      // Null attribute, mark the formal parameter as potentially null
       AbstractValue actual_canon = init_astate->getCanonical(opt->addr);
       if (init_astate->getPostAttrs().has(actual_canon, Attribute::Null) ||
           init_astate->getPathFormula().isNull(actual_canon)) {
@@ -628,20 +655,53 @@ PulseChecker::runCallee(const llvm::Function *callee,
     if (entry_states.empty())
       continue;
 
-    // Join states at block entry.
-    //
-    // Sound incorrectness: avoid over-approximating joins when multiple
-    // disjunctive entry states arrive at the same block. A union-style merge can
-    // fabricate heap facts and admit non-witnessable bug paths. Prefer keeping a
-    // representative witness state.
-    ExecutionDomain block_state = std::move(entry_states[0]);
+    // Sound incorrectness: process multiple entry states to preserve witnesses.
+    // Instead of dropping all but the first, we limit to kMaxDisjuncts and
+    // process each as a separate execution path. This avoids losing bug
+    // witnesses that would be reachable through other entry paths.
+    auto selectRepresentative = [](std::vector<ExecutionDomain> &states) {
+      if (states.size() <= 1)
+        return;
+      std::vector<ExecutionDomain> preferred;
+      std::vector<ExecutionDomain> rest;
+      preferred.reserve(states.size());
+      rest.reserve(states.size());
+      for (auto &st : states) {
+        auto *a = st.getAstate();
+        if (a && !a->hasUnknownValues()) {
+          preferred.push_back(std::move(st));
+        } else {
+          rest.push_back(std::move(st));
+        }
+      }
+      states.clear();
+      for (auto &st : preferred) {
+        if (states.size() >= kMaxDisjuncts)
+          break;
+        states.push_back(std::move(st));
+      }
+      for (auto &st : rest) {
+        if (states.size() >= kMaxDisjuncts)
+          break;
+        states.push_back(std::move(st));
+      }
+    };
+    selectRepresentative(entry_states);
 
-    if (block_state.isStopped())
+    // Filter out stopped states early
+    std::vector<ExecutionDomain> work_states;
+    work_states.reserve(entry_states.size());
+    for (auto &st : entry_states) {
+      if (!st.isStopped()) {
+        work_states.push_back(std::move(st));
+      }
+    }
+
+    if (work_states.empty())
       continue;
 
-    // Process instructions in block
-    std::vector<ExecutionDomain> states;
-    states.push_back(std::move(block_state));
+    // Process instructions in block with multiple states
+    std::vector<ExecutionDomain> states = std::move(work_states);
 
     auto limitStates = [&](std::vector<ExecutionDomain> &vec) {
       if (vec.size() <= kMaxDisjuncts)
@@ -718,7 +778,8 @@ PulseChecker::runCallee(const llvm::Function *callee,
                       llvm::dyn_cast<llvm::ReturnInst>(BB2.getTerminator())) {
                 if (RI->getNumOperands() > 0 &&
                     RI->getReturnValue()->getType()->isPointerTy()) {
-                  if (auto *addr = a->getPostStack().find(RI->getReturnValue())) {
+                  if (auto *addr =
+                          a->getPostStack().find(RI->getReturnValue())) {
                     ret_av = addr->addr;
                     break;
                   }
