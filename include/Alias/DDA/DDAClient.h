@@ -7,10 +7,58 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// DDAClient: chooses which pointers to query and can hook into DDA.
-// - DDAClient: all top-level pointers or user-specified queries.
-// - FunptrDDAClient: function pointers at indirect call sites.
-// - AliasDDAClient: load src, store dst, GEP src (for alias-style queries).
+// DDAClient: Query Selection for Demand-Driven Analysis
+//
+// This file defines client classes that select which pointers to analyze
+// in demand-driven pointer analysis. Different clients focus on different
+// subsets of pointers based on analysis goals.
+//
+// == Client Types ==
+//
+// 1. DDAClient (base): All top-level pointers or user-specified queries
+//    - Use for: Comprehensive analysis, custom query sets
+//    - Collects: All pointer-typed values in the program
+//    - Example: Whole-program alias analysis
+//
+// 2. FunptrDDAClient: Function pointers at indirect call sites
+//    - Use for: Call graph construction, virtual call resolution
+//    - Collects: Function pointers used in indirect calls
+//    - Example: Resolving callbacks, virtual methods
+//
+// 3. AliasDDAClient: Pointers in memory operations
+//    - Use for: Alias-driven optimizations, memory analysis
+//    - Collects: Load sources, store destinations, GEP bases
+//    - Example: Redundant load elimination, store forwarding
+//
+// == Usage Example ==
+//
+// ```cpp
+// // Use function pointer client
+// FunptrDDAClient client;
+// FlowDDA dda;
+// dda.setClient(&client);
+// dda.run(module);
+// dda.answerQueries();  // Analyzes only function pointers
+// ```
+//
+// == Custom Queries ==
+//
+// ```cpp
+// DDAClient client;
+// client.addQuery(ptr1);  // Add specific pointer
+// client.addQuery(ptr2);
+// FlowDDA dda;
+// dda.setClient(&client);
+// dda.run(module);
+// dda.answerQueries();  // Analyzes only ptr1 and ptr2
+// ```
+//
+// == Client Callbacks ==
+//
+// Clients can override methods to hook into DDA:
+// - collectCandidateQueries(): Select which pointers to analyze
+// - handleStatement(): Called during backward traversal
+// - performStat(): Collect statistics after analysis
 //
 //===----------------------------------------------------------------------===//
 

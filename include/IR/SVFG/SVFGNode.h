@@ -15,20 +15,84 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// SVFGNode: Complete node type hierarchy for Sparse Value-Flow Graph.
+// SVFGNode: Node Type Hierarchy for Sparse Value-Flow Graph
 //
-// This file provides a comprehensive hierarchy of node types mirroring SVF's
-// design:
-// - Statement nodes: Addr, Copy, Load, Store, Gep, BinaryOp, Cmp, Branch
-// - PHI nodes: Phi, IntraPhi, InterPhi (for both values and memory)
-// - Memory SSA nodes: FormalIn/Out, ActualIn/Out, LoadMu, StoreChi, etc.
-// - Parameter nodes: FormalParm, ActualParm, FormalRet, ActualRet
+// This file defines the complete hierarchy of SVFG node types, representing
+// different kinds of value definitions and uses in the program.
 //
-// Key design features:
-// - Type-safe casting via LLVM-style RTTI
-// - Points-to set tracking for memory nodes
-// - Full ICFG and call site integration
-// - Memory SSA version support
+// == Node Type Hierarchy ==
+//
+// SVFGNode (base)
+// ├── StmtSVFGNode (statement nodes - direct value definitions)
+// │   ├── AddrSVFGNode        // x = &obj (address-of)
+// │   ├── CopySVFGNode        // x = y (copy/assignment)
+// │   ├── LoadSVFGNode        // x = *p (load from memory)
+// │   ├── StoreSVFGNode       // *p = x (store to memory)
+// │   ├── GepSVFGNode         // x = p + offset (pointer arithmetic)
+// │   ├── BinaryOpSVFGNode    // x = a + b (arithmetic/logical ops)
+// │   ├── CmpSVFGNode         // x = a < b (comparison)
+// │   └── BranchSVFGNode      // br i1 %cond (conditional branch)
+// │
+// ├── PHISVFGNode (phi nodes - merge points)
+// │   ├── IntraPHISVFGNode    // Intra-procedural phi (loop/branch merge)
+// │   ├── InterPHISVFGNode    // Inter-procedural phi (call/return merge)
+// │   ├── MemPHISVFGNode      // Memory phi (memory version merge)
+// │   └── MemInterPHISVFGNode // Inter-procedural memory phi
+// │
+// ├── MemSVFGNode (memory SSA nodes)
+// │   ├── FormalINSVFGNode    // Formal parameter input (callee side)
+// │   ├── FormalOUTSVFGNode   // Formal return output (callee side)
+// │   ├── ActualINSVFGNode    // Actual argument input (caller side)
+// │   ├── ActualOUTSVFGNode   // Actual return output (caller side)
+// │   ├── LoadMUSVFGNode      // Load MU (memory use before load)
+// │   ├── StoreCHISVFGNode    // Store CHI (memory def after store)
+// │   ├── CallMUSVFGNode      // Call MU (memory use at call site)
+// │   └── CallCHISVFGNode     // Call CHI (memory def at call site)
+// │
+// └── ParamSVFGNode (parameter/return nodes)
+//     ├── FormalParmSVFGNode  // Formal parameter (function entry)
+//     ├── ActualParmSVFGNode  // Actual argument (call site)
+//     ├── FormalRetSVFGNode   // Formal return (function exit)
+//     └── ActualRetSVFGNode   // Actual return (call site)
+//
+// == Memory SSA: MU and CHI Nodes ==
+//
+// Memory SSA extends SSA form to memory locations using MU (use) and CHI (def):
+//
+// - MU nodes: Represent memory reads (uses of memory versions)
+//   Example: x = *p
+//            LoadMU(mem_1) -> LoadNode -> x
+//
+// - CHI nodes: Represent memory writes (definitions of new memory versions)
+//   Example: *p = 5
+//            StoreChi(mem_1 -> mem_2) -> mem_2 defined
+//
+// Memory regions are versioned (mem_1, mem_2, ...) to track def-use chains
+// through memory operations, similar to SSA for registers.
+//
+// == Interprocedural Nodes ==
+//
+// FormalIN/OUT and ActualIN/OUT nodes connect caller and callee:
+//
+//   Caller:                    Callee:
+//   ActualIN(arg) ----call---> FormalIN(param)
+//   ActualOUT(ret) <--return-- FormalOUT(return)
+//
+// These nodes enable interprocedural value-flow tracking without inlining.
+//
+// == Type-Safe Casting ==
+//
+// Uses LLVM-style RTTI for safe downcasting:
+//   if (auto *load = llvm::dyn_cast<LoadSVFGNode>(node)) {
+//     // node is a LoadSVFGNode
+//   }
+//
+// == Key Design Features ==
+//
+// - Points-to set tracking: Memory nodes carry points-to sets (which objects)
+// - ICFG integration: Each node links to its ICFG node (control-flow context)
+// - Memory SSA versions: Track memory region versions for precise analysis
+// - Call site association: Parameter nodes link to their call sites
 //
 //===----------------------------------------------------------------------===//
 
@@ -50,10 +114,27 @@ namespace analysis {
 // Forward declarations
 class SVFGEdge;
 
-/// @brief NodeBS: Points-to set using lotus's AndersPtsSet style
+/// SVFGNodeBS: Points-to set representation using object IDs
+/// Each element is an abstract memory object ID from pointer analysis
 using SVFGNodeBS = std::set<uint32_t>;
 
-/// @brief Base class for all SVFG nodes
+/// SVFGNode is the base class for all SVFG node types.
+///
+/// Each node represents a value definition or use in the program's value-flow
+/// graph. Nodes are connected by SVFGEdge instances to form def-use chains.
+///
+/// Key responsibilities:
+/// - Maintain incoming and outgoing value-flow edges
+/// - Link to corresponding ICFG node (control-flow context)
+/// - Provide type inquiry methods for safe downcasting
+/// - Support points-to set queries for memory nodes
+///
+/// Example usage:
+///   SVFGNode *node = svfg->getNode(nodeId);
+///   if (auto *load = llvm::dyn_cast<LoadSVFGNode>(node)) {
+///     const llvm::LoadInst *inst = load->getLoadInst();
+///     const SVFGNodeBS *pts = load->getPointsTo();
+///   }
 class SVFGNode {
 private:
   uint32_t id;

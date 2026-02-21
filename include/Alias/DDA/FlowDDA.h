@@ -7,19 +7,64 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// FlowDDA: Value-flow-based demand-driven pointer analysis following
-// SVF's FlowDDA / DDAVFSolver design (FSE'16, TSE'18).
+// FlowDDA: Flow-Sensitive Demand-Driven Alias Analysis
 //
-// Mode: flow-sensitive, context-insensitive (SVF's FlowDDA). Context-sensitive
-// mode (ContextDDA) is in ContextDDA.h/cpp. DDAClient (FunptrDDAClient,
-// AliasDDAClient) supported via setClient/answerQueries.
+// This file implements demand-driven pointer analysis using value-flow graphs,
+// following SVF's FlowDDA design (FSE'16, TSE'18).
 //
-// - findPT(dpm): backward compute points-to for (cur, loc); cache and reuse.
-// - handleSingleStatement: Addr -> add allocation; Copy/Phi/param -> direct
-//   backtrace; Gep -> direct + processGepPts; Load -> pts of pointer then
-//   indirect backtrace; Store -> strong/weak update; MRSVFG -> indirect.
-// - backtraceAlongDirectVF / backtraceAlongIndirectVF: follow in-edges by kind.
-// - backwardPropDpm: dpm' = (ptr, pred); findPT(dpm') and union into pts.
+// == What is Demand-Driven Analysis? ==
+//
+// Unlike exhaustive pointer analysis that computes points-to sets for all
+// pointers upfront, demand-driven analysis (DDA) computes results on-demand:
+// - Only analyzes pointers when queried
+// - Backtracks through value-flow graph to find definitions
+// - Caches results to avoid recomputation
+// - Falls back to conservative analysis when budget exceeded
+//
+// == Analysis Characteristics ==
+//
+// - Flow-sensitive: Distinguishes different program points
+// - Context-insensitive: Merges all calling contexts (see ContextDDA for context-sensitive)
+// - Field-sensitive: Tracks individual struct fields
+// - On-demand: Computes points-to sets only when queried
+//
+// == Algorithm Overview ==
+//
+// 1. Query: getPointsTo(ptr) - compute points-to set for a pointer
+// 2. Backward traversal: Follow SVFG edges backward from ptr's definition
+// 3. Statement handling:
+//    - Addr: Add allocation object to points-to set
+//    - Copy/Phi: Continue backward through operands
+//    - Load: Get points-to of pointer, then indirect backward traversal
+//    - Store: Apply strong/weak update based on must-alias
+//    - GEP: Adjust field offsets in points-to set
+// 4. Caching: Store computed points-to sets to avoid recomputation
+// 5. Budget: Limit traversal steps; fallback to conservative PTA if exceeded
+//
+// == Example ==
+//
+// ```c
+// int x, y;
+// int *p = &x;        // p -> {x}
+// if (cond)
+//   p = &y;           // p -> {x, y} (flow-sensitive merge)
+// int z = *p;         // Query: what does p point to here?
+// ```
+//
+// DDA backward traversal:
+// 1. Start at use of p in `*p`
+// 2. Find phi node merging p from both branches
+// 3. Backward through both branches:
+//    - Branch 1: p = &x → add x to points-to set
+//    - Branch 2: p = &y → add y to points-to set
+// 4. Result: p -> {x, y}
+//
+// == References ==
+//
+// - "On-Demand Strong Update Analysis via Value-Flow Refinement"
+//   Yulei Sui, Jingling Xue. FSE 2016.
+// - "Detecting Memory Leaks Statically with Full-Sparse Value-Flow Analysis"
+//   Yulei Sui, Ding Ye, Jingling Xue. TSE 2014.
 //
 //===----------------------------------------------------------------------===//
 
@@ -63,8 +108,34 @@ namespace analysis {
 
 using LocDPItem = StmtDPItem<SVFGNode>;
 
-/// Flow-sensitive, context-insensitive demand-driven pointer analysis using
-/// the SVFG. Matches SVF's FlowDDA / DDAVFSolver algorithm.
+/// FlowDDA: Flow-sensitive, context-insensitive demand-driven pointer analysis.
+///
+/// This class implements on-demand pointer analysis using backward traversal
+/// through the Sparse Value-Flow Graph (SVFG). It computes points-to sets only
+/// when queried, making it efficient for query-driven tools.
+///
+/// Key methods:
+/// - getPointsTo(ptr): Compute points-to set for a pointer value
+/// - mayAlias(v1, v2): Check if two pointers may alias
+/// - run(module): Initialize analysis on an LLVM module
+///
+/// Usage example:
+/// ```cpp
+/// FlowDDA dda;
+/// dda.run(module);
+/// auto pts = dda.getPointsTo(ptr);
+/// for (uint32_t objId : pts) {
+///   // Process pointed-to object
+/// }
+/// ```
+///
+/// Budget control:
+/// - setDefaultMaxBudget(n): Limit traversal steps per query
+/// - When budget exceeded, falls back to conservative PTA results
+///
+/// Client support:
+/// - setClient(client): Set DDAClient for candidate query collection
+/// - answerQueries(): Run DDA for all client candidates
 class FlowDDA
     : public DDAVFSolver<uint32_t, std::unordered_set<uint32_t>, LocDPItem,
                          FlowDDA> {

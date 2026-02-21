@@ -15,29 +15,72 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// SVFG: Production-ready Sparse Value-Flow Graph.
+// SVFG: Sparse Value-Flow Graph for Interprocedural Program Analysis
 //
-// This file provides the main SVFG class aligned with SVF's design, supporting:
-// - Sparse value-flow representation for whole-program analysis
-// - Memory SSA form for precise alias tracking
-// - Interprocedural value-flow through calls and returns
-// - Integration with pointer analysis (Andersen, etc.)
+// The Sparse Value-Flow Graph (SVFG) is a program representation that captures
+// def-use chains for both register values and memory locations across function
+// boundaries. It extends traditional SSA form to handle memory operations and
+// interprocedural control flow.
 //
-// Key features:
-// - Efficient node/edge lookups with multiple indices
-// - Full call graph integration
-// - Memory SSA versioning
-// - Points-to set management
-// - Graph algorithms (reachability, slicing)
+// == What is SVFG? ==
 //
-// DDA-facing contract (important):
-// - Object IDs carried in SVFG edge guards are abstract memory objects, not
-//   SVFG node IDs.
-// - `getObjectValue(objId)` and `getObjectInfo(objId)` provide metadata used by
-//   demand-driven analyses for filtering (constant objects, unknown wildcard,
-//   function objects, etc.).
-// - Indirect callsite indices (`getIndCallSites*`) support on-the-fly call-edge
-//   materialization during demand solving.
+// SVFG represents value flow in a program as a directed graph where:
+// - Nodes represent definitions (assignments, loads, stores, parameters)
+// - Edges represent value-flow relationships (def-use chains)
+// - Memory SSA form tracks memory versions through MU/CHI nodes
+//
+// Example:
+//   int x = 5;           // AddrNode (defines x)
+//   int *p = &x;         // CopyNode (p = &x)
+//   int y = *p;          // LoadNode with LoadMu (reads memory)
+//   *p = 10;             // StoreNode with StoreChi (writes memory)
+//
+// == Key Features ==
+//
+// 1. Sparse Representation:
+//    - Only tracks values that flow through memory or across functions
+//    - Omits purely local computations (e.g., x = a + b stays in ICFG)
+//    - Reduces graph size while preserving essential def-use information
+//
+// 2. Memory SSA:
+//    - Extends SSA to memory locations using MU (use) and CHI (def) nodes
+//    - Each memory region has versioned definitions (e.g., mem_1, mem_2)
+//    - Enables precise tracking of memory dependencies
+//
+// 3. Interprocedural Value Flow:
+//    - FormalIn/FormalOut: Parameter/return value definitions in callee
+//    - ActualIn/ActualOut: Argument/return value uses at call site
+//    - Call/Return edges connect caller and callee contexts
+//
+// 4. Pointer Analysis Integration:
+//    - Uses AserPTA for points-to information
+//    - Guards memory edges with points-to sets (which objects may be accessed)
+//    - Supports field-sensitive and context-sensitive analysis
+//
+// == Use Cases ==
+//
+// - Demand-Driven Alias Analysis (DDA): Query alias relationships on-demand
+// - Program Slicing: Extract program fragments affecting specific values
+// - Taint Analysis: Track information flow from sources to sinks
+// - Bug Detection: Find use-after-free, null dereferences, buffer overflows
+// - Optimization: Identify dead stores, redundant loads
+//
+// == DDA-Facing Contract ==
+//
+// For demand-driven analyses (DDA), SVFG provides:
+// - Object IDs in edge guards are abstract memory objects (not node IDs)
+// - `getObjectValue(objId)` maps object IDs to LLVM values
+// - `getObjectInfo(objId)` provides metadata (constant, unknown, function, etc.)
+// - Indirect call site indices support on-the-fly call edge materialization
+// - Conservative unknown wildcard object for unresolved pointers
+//
+// == References ==
+//
+// Based on SVF (Static Value-Flow Analysis Framework):
+// - "Sparse Flow-Sensitive Pointer Analysis for Multithreaded Programs"
+//   Yulei Sui, Jingling Xue. CGO 2016.
+// - "SVF: Interprocedural Static Value-Flow Analysis in LLVM"
+//   Yulei Sui, Ding Ye, Jingling Xue. CC 2016.
 //
 //===----------------------------------------------------------------------===//
 

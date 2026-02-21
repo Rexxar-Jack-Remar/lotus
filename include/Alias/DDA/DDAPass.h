@@ -7,8 +7,60 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// DDAPass: selects DDA mode (FlowDDA / ContextDDA) and client
-// (DDAClient / FunptrDDAClient / AliasDDAClient), runs analysis, answerQueries.
+// DDAPass: Demand-Driven Analysis Driver
+//
+// This file provides the main driver for demand-driven pointer analysis,
+// allowing selection of analysis mode (flow-sensitive, context-sensitive)
+// and client type (all pointers, function pointers, alias queries).
+//
+// == Analysis Modes ==
+//
+// - FlowS_DDA (FlowDDA): Flow-sensitive, context-insensitive
+//   - Distinguishes different program points
+//   - Merges all calling contexts
+//   - Faster, less precise for recursive/callback-heavy code
+//
+// - Cxt_DDA (ContextDDA): Flow-sensitive, context-sensitive
+//   - Distinguishes different program points AND calling contexts
+//   - More precise but slower
+//   - Better for recursive functions and callbacks
+//
+// == Client Types ==
+//
+// - All: Analyze all top-level pointers in the program
+//   - Use for whole-program analysis
+//   - Comprehensive but may be slow for large programs
+//
+// - Funptr: Analyze only function pointers at indirect call sites
+//   - Use for call graph construction
+//   - Efficient for resolving virtual calls and callbacks
+//
+// - Alias: Analyze pointers in loads, stores, and GEPs
+//   - Use for alias-driven optimizations
+//   - Focuses on memory-related pointers
+//
+// == Usage Example ==
+//
+// ```cpp
+// DDAPass dda;
+// dda.setDDAKind(DDAKind::FlowS_DDA);
+// dda.selectClient(DDAClientKind::Funptr);
+// dda.runOnModule(module);
+//
+// // Query results
+// if (dda.mayAlias(ptr1, ptr2)) {
+//   // ptr1 and ptr2 may alias
+// }
+// ```
+//
+// == Custom Queries ==
+//
+// ```cpp
+// DDAPass dda;
+// dda.addQuery(ptr1);  // Add specific pointer to query
+// dda.addQuery(ptr2);
+// dda.runOnModule(module);
+// ```
 //
 //===----------------------------------------------------------------------===//
 

@@ -2,6 +2,20 @@
 //
 // Migrated from SVF's AE engine to Lotus.
 //
+// This file defines the AbstractState class, which represents the abstract
+// execution state during program analysis. The state maps program variables
+// and memory locations to abstract values (intervals or addresses).
+//
+// Key concepts:
+// - Abstract values: Either intervals (e.g., [0, 100]) or address sets
+// - Variable mapping: Maps SSA values to their abstract values
+// - Memory mapping: Maps heap/stack objects to their abstract values
+// - Field sensitivity: Tracks individual struct fields via GEP offsets
+//
+// Based on the paper:
+// "Precise Sparse Abstract Execution via Cross-Domain Interaction"
+// Xiao Cheng, Jiawei Wang, Yulei Sui. ICSE 2024.
+//
 //===----------------------------------------------------------------------===//
 
 #pragma once
@@ -22,29 +36,58 @@ namespace analysis {
 // Forward declaration (SVFIRWrapper only needs pointer)
 class SVFIRWrapper;
 
-// Maximum field limit for GEP offset calculations (default: 10000)
+/// Maximum field limit for GEP offset calculations to prevent explosion
+/// in field-sensitive analysis. Fields beyond this limit are merged.
 [[maybe_unused]] static constexpr uint32_t MaxFieldLimit = 10000;
 
-/// AbstractState - maps variables and memory locations to abstract values
+/// AbstractState represents the abstract execution state at a program point.
+///
+/// The state consists of two main mappings:
+/// 1. Variable-to-value map (_varToAbsVal): Maps SSA value IDs to abstract values
+/// 2. Address-to-value map (_addrToAbsVal): Maps memory object IDs to abstract values
+///
+/// Abstract values can be:
+/// - Intervals: Numeric ranges like [0, 100] or [-∞, +∞]
+/// - Addresses: Sets of memory object IDs that a pointer may point to
+///
+/// Example:
+///   int x = 5;           // _varToAbsVal[x_id] = IntervalValue(5, 5)
+///   int *p = &x;         // _varToAbsVal[p_id] = AddressValue({x_obj_id})
+///   int arr[10];         // _addrToAbsVal[arr_obj_id] = IntervalValue::top()
+///   free(p);             // _freedAddrs.insert(x_obj_id)
+///
 class AbstractState {
 public:
+  /// Map from variable ID to abstract value
   typedef std::unordered_map<uint32_t, AbstractValue> VarToAbsValMap;
+
+  /// Map from memory address/object ID to abstract value
   typedef VarToAbsValMap AddrToAbsValMap;
 
-  static constexpr uint32_t NullPtr = 0;
-  static constexpr uint32_t BlkPtr = 1;
+  /// Special sentinel IDs for null and black-hole pointers
+  static constexpr uint32_t NullPtr = 0;  ///< Null pointer constant (ID 0)
+  static constexpr uint32_t BlkPtr = 1;   ///< Black-hole pointer (absorbs all unknown pointers)
 
+  /// Set of freed memory object IDs (for use-after-free detection)
   std::unordered_set<uint32_t> _freedAddrs;
+
+  /// Maps SSA value IDs to their abstract values (intervals or addresses)
   VarToAbsValMap _varToAbsVal;
+
+  /// Maps memory object IDs to their abstract values (heap/stack contents)
   AddrToAbsValMap _addrToAbsVal;
 
+  /// Pointer to SVFIR wrapper for querying pointer analysis results
   SVFIRWrapper *svfir_ = nullptr;
 
+  /// Default constructor - creates an empty abstract state
   AbstractState() {}
 
+  /// Construct from existing variable and address maps
   AbstractState(VarToAbsValMap &_varToValMap, AddrToAbsValMap &_locToValMap)
       : _varToAbsVal(_varToValMap), _addrToAbsVal(_locToValMap) {}
 
+  /// Copy constructor - performs deep copy of all state components
   AbstractState(const AbstractState &rhs)
       : _freedAddrs(rhs._freedAddrs), _varToAbsVal(rhs._varToAbsVal),
         _addrToAbsVal(rhs._addrToAbsVal), svfir_(rhs.svfir_),
@@ -52,6 +95,7 @@ public:
 
   virtual ~AbstractState() = default;
 
+  /// Copy assignment operator
   AbstractState &operator=(const AbstractState &rhs) {
     if (rhs != *this) {
       _varToAbsVal = rhs._varToAbsVal;
@@ -63,12 +107,14 @@ public:
     return *this;
   }
 
+  /// Move constructor - transfers ownership of state components
   AbstractState(AbstractState &&rhs)
       : _freedAddrs(std::move(rhs._freedAddrs)),
         _varToAbsVal(std::move(rhs._varToAbsVal)),
         _addrToAbsVal(std::move(rhs._addrToAbsVal)), svfir_(rhs.svfir_),
         _objToSize(std::move(rhs._objToSize)) {}
 
+  /// Move assignment operator
   AbstractState &operator=(AbstractState &&rhs) {
     if (&rhs != this) {
       _varToAbsVal = std::move(rhs._varToAbsVal);
@@ -80,12 +126,17 @@ public:
     return *this;
   }
 
+  /// Access abstract value for a variable (mutable)
   AbstractValue &operator[](uint32_t varId) { return _varToAbsVal[varId]; }
 
+  /// Access abstract value for a variable (const)
   const AbstractValue &operator[](uint32_t varId) const {
     return _varToAbsVal.at(varId);
   }
 
+  /// Check if a variable ID maps to an address value (pointer)
+  /// @param id Variable ID to check
+  /// @return true if the variable holds an address set, false otherwise
   bool inVarToAddrsTable(uint32_t id) const {
     if (_varToAbsVal.find(id) != _varToAbsVal.end()) {
       if (_varToAbsVal.at(id).isAddr()) {
@@ -95,6 +146,9 @@ public:
     return false;
   }
 
+  /// Check if a variable ID maps to an interval value (numeric)
+  /// @param id Variable ID to check
+  /// @return true if the variable holds an interval, false otherwise
   bool inVarToValTable(uint32_t id) const {
     if (_varToAbsVal.find(id) != _varToAbsVal.end()) {
       if (_varToAbsVal.at(id).isInterval()) {
@@ -104,6 +158,9 @@ public:
     return false;
   }
 
+  /// Check if a memory address maps to an address value (pointer stored in memory)
+  /// @param id Memory object ID to check
+  /// @return true if the memory location holds an address set, false otherwise
   bool inAddrToAddrsTable(uint32_t id) const {
     if (_addrToAbsVal.find(id) != _addrToAbsVal.end()) {
       if (_addrToAbsVal.at(id).isAddr()) {
@@ -113,6 +170,9 @@ public:
     return false;
   }
 
+  /// Check if a memory address maps to an interval value (numeric stored in memory)
+  /// @param id Memory object ID to check
+  /// @return true if the memory location holds an interval, false otherwise
   bool inAddrToValTable(uint32_t id) const {
     if (_addrToAbsVal.find(id) != _addrToAbsVal.end()) {
       if (_addrToAbsVal.at(id).isInterval()) {
@@ -122,21 +182,45 @@ public:
     return false;
   }
 
+  /// Get the variable-to-value mapping (read-only)
   const VarToAbsValMap &getVarToVal() const { return _varToAbsVal; }
+
+  /// Get the address-to-value mapping (read-only)
   const AddrToAbsValMap &getLocToVal() const { return _addrToAbsVal; }
 
+  /// Widening operator: over-approximates the join to ensure termination
+  /// Used in fixpoint iteration to accelerate convergence by extrapolating trends.
+  /// Example: [0,10] ⊔ [0,20] with widening → [0,+∞]
   AbstractState widening(const AbstractState &other);
+
+  /// Narrowing operator: refines over-approximations from widening
+  /// Used after widening reaches fixpoint to improve precision.
+  /// Example: [0,+∞] ⊓ [0,100] with narrowing → [0,100]
   AbstractState narrowing(const AbstractState &other);
 
+  /// Join this state with another (in-place union/least upper bound)
+  /// Merges two abstract states by taking the join of all abstract values.
   void joinWith(const AbstractState &other);
+
+  /// Meet this state with another (in-place intersection/greatest lower bound)
+  /// Refines this state by taking the meet of all abstract values.
   void meetWith(const AbstractState &other);
 
+  /// Mark a memory address as freed (for use-after-free detection)
+  /// @param addr Memory object ID to mark as freed
   void addToFreedAddrs(uint32_t addr) { _freedAddrs.insert(addr); }
 
+  /// Check if a memory address has been freed
+  /// @param addr Memory object ID to check
+  /// @return true if the address was previously freed, false otherwise
   bool isFreedMem(uint32_t addr) const {
     return _freedAddrs.find(addr) != _freedAddrs.end();
   }
 
+  /// Store an abstract value to a memory address
+  /// @param addr Virtual memory address (encoded object ID)
+  /// @param val Abstract value to store
+  /// Skips stores to null memory or freed memory (for safety)
   void store(uint32_t addr, const AbstractValue &val) {
     if (!AddressValue::isVirtualMemAddress(addr))
       return;
@@ -149,15 +233,25 @@ public:
     _addrToAbsVal[objId] = val;
   }
 
+  /// Load an abstract value from a memory address
+  /// @param addr Virtual memory address (encoded object ID)
+  /// @return Reference to the abstract value at that address
   AbstractValue &load(uint32_t addr) {
     assert(AddressValue::isVirtualMemAddress(addr) && "not virtual address?");
     uint32_t objId = getIDFromAddr(addr);
     return _addrToAbsVal[objId];
   }
 
+  /// Print the abstract state to stderr (for debugging)
   void printAbstractState() const;
+
+  /// Convert state to string representation
   std::string toString() const { return ""; }
+
+  /// Check if this state equals another state
   bool equals(const AbstractState &other) const;
+
+  /// Compute hash of this state
   uint32_t hash() const;
 
   static bool eqVarToValMap(const VarToAbsValMap &lhs,

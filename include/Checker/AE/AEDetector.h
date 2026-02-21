@@ -72,6 +72,7 @@ public:
     NULL_DEREF,
     USE_AFTER_FREE,
     INVALID_FREE,
+    MEMORY_LEAK,
     UNKNOWN
   };
 
@@ -243,6 +244,47 @@ public:
 private:
   void addBugToReporter(const AEException &e, const llvm::Instruction *inst);
 
+  std::set<std::string> bugLoc;
+  std::map<const llvm::Instruction *, std::string> instToBugInfo;
+};
+
+/// Detector for identifying memory leaks (allocated but not freed)
+class MemLeakDetector : public AEDetector {
+  friend class AbstractInterpretation;
+
+public:
+  MemLeakDetector() { kind = MEMORY_LEAK; }
+  ~MemLeakDetector() = default;
+
+  static bool classof(const AEDetector *detector) {
+    return detector->getKind() == AEDetector::MEMORY_LEAK;
+  }
+
+  void detect(AbstractState &as, const llvm::Instruction *inst) override;
+  void handleStubFunctions(const llvm::CallBase *call) override;
+  void reportBug() override;
+  size_t getBugCount() const override { return instToBugInfo.size(); }
+  void reset() override;
+
+  /// Track allocations throughout the program
+  void trackAllocation(uint32_t objId, const llvm::Instruction *allocSite);
+
+  /// Check if an object is reachable from live pointers
+  bool isReachableFromLivePointers(AbstractState &as, uint32_t objId);
+
+  /// Check if an object escapes (stored to global, returned, passed to external function)
+  bool objectEscapes(uint32_t objId);
+
+private:
+  void addBugToReporter(const AEException &e, const llvm::Instruction *inst);
+
+  /// Map from object ID to allocation site
+  std::map<uint32_t, const llvm::Instruction *> objToAllocSite;
+
+  /// Set of objects that escape (may be freed elsewhere)
+  std::set<uint32_t> escapedObjects;
+
+  /// Reported bugs
   std::set<std::string> bugLoc;
   std::map<const llvm::Instruction *, std::string> instToBugInfo;
 };

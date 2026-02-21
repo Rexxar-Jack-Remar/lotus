@@ -57,6 +57,14 @@ int getOrRegisterAEBugType(AEDetector::DetectorKind kind) {
     }
     return id;
   }
+  case AEDetector::MEMORY_LEAK: {
+    int id = mgr.find_bug_type("AE Memory Leak");
+    if (id < 0) {
+      id = mgr.register_bug_type("AE Memory Leak", BugDescription::BI_MEDIUM,
+                                 BugDescription::BC_PERFORMANCE, "CWE-401");
+    }
+    return id;
+  }
   default:
     break;
   }
@@ -1119,6 +1127,217 @@ bool InvalidFreeDetector::isValidFree(AbstractState &as, uint32_t ptrId) {
 
 void InvalidFreeDetector::addBugToReporter(const AEException &e,
                                            const llvm::Instruction *inst) {
+  std::string loc;
+  if (const llvm::DILocation *debugLoc = inst->getDebugLoc()) {
+    loc = debugLoc->getFilename().str() + ":" +
+          std::to_string(debugLoc->getLine());
+  } else {
+    loc = "unknown location";
+  }
+
+  if (bugLoc.find(loc) != bugLoc.end())
+    return;
+
+  bugLoc.insert(loc);
+  instToBugInfo[inst] = std::string(e.what()) + " @ " + loc;
+  emitAEBugReport(kind, inst, std::string(e.what()));
+}
+
+//===----------------------------------------------------------------------===//
+// MemLeakDetector Implementation
+//===----------------------------------------------------------------------===//
+
+void MemLeakDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
+  // Track allocations (malloc, calloc, new, etc.)
+  if (const auto *call = llvm::dyn_cast<llvm::CallBase>(inst)) {
+    const llvm::Function *callee = call->getCalledFunction();
+    if (!callee)
+      return;
+
+    std::string funcName = callee->getName().str();
+
+    // Check if this is an allocation function
+    if (funcName == "malloc" || funcName == "calloc" || funcName == "realloc" ||
+        funcName == "_Znwm" || funcName == "_Znam" || // operator new, new[]
+        funcName == "strdup" || funcName == "strndup") {
+
+      uint32_t retId = AbstractInterpretation::getValueIdStatic(call);
+      if (as.inVarToValTable(retId)) {
+        AddressValue addrs = as[retId].getAddrs();
+        for (uint64_t addr : addrs.getVals()) {
+          uint32_t objId = as.getIDFromAddr(addr);
+          if (objId != AbstractState::NullPtr && objId != AbstractState::BlkPtr) {
+            trackAllocation(objId, call);
+          }
+        }
+      }
+    }
+
+    // Check if object escapes via external function call
+    for (unsigned i = 0; i < call->arg_size(); ++i) {
+      const llvm::Value *arg = call->getArgOperand(i);
+      if (arg->getType()->isPointerTy()) {
+        uint32_t argId = AbstractInterpretation::getValueIdStatic(arg);
+        if (as.inVarToValTable(argId)) {
+          AddressValue addrs = as[argId].getAddrs();
+          for (uint64_t addr : addrs.getVals()) {
+            uint32_t objId = as.getIDFromAddr(addr);
+            // Mark as escaped if passed to external function
+            if (!callee->isDeclaration() || funcName == "free" ||
+                funcName == "_ZdlPv" || funcName == "_ZdaPv") {
+              // Don't mark as escaped for free/delete
+              continue;
+            }
+            escapedObjects.insert(objId);
+          }
+        }
+      }
+    }
+  }
+
+  // Check for leaks at function return points
+  if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(inst)) {
+    // Get all allocated objects
+    std::set<uint32_t> allocatedObjs;
+    for (const auto &pair : objToAllocSite) {
+      allocatedObjs.insert(pair.first);
+    }
+
+    // Remove freed objects
+    for (uint32_t freedObj : as._freedAddrs) {
+      allocatedObjs.erase(freedObj);
+    }
+
+    // Remove escaped objects (may be freed elsewhere)
+    for (uint32_t escapedObj : escapedObjects) {
+      allocatedObjs.erase(escapedObj);
+    }
+
+    // Check if remaining objects are reachable from live pointers
+    for (uint32_t objId : allocatedObjs) {
+      if (!isReachableFromLivePointers(as, objId)) {
+        // Found a leak
+        const llvm::Instruction *allocSite = objToAllocSite[objId];
+        addEventToTrace(AEBugEventType::ALLOC, allocSite, "Memory allocated here");
+        addEventToTrace(AEBugEventType::RETURN, ret, "Memory leaked at return");
+
+        AEException bug("Memory leak: allocated memory not freed and not reachable");
+        addBugToReporter(bug, allocSite);
+      }
+    }
+  }
+
+  // Also check for leaks when pointer goes out of scope (store overwrites last reference)
+  if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(inst)) {
+    const llvm::Value *ptr = store->getPointerOperand();
+
+    // Check if we're overwriting the last reference to an allocated object
+    uint32_t ptrId = AbstractInterpretation::getValueIdStatic(ptr);
+    if (as.inAddrToValTable(ptrId)) {
+      AddressValue oldAddrs = as.load(ptrId).getAddrs();
+
+      for (uint64_t addr : oldAddrs.getVals()) {
+        uint32_t objId = as.getIDFromAddr(addr);
+
+        // Check if this object was allocated and not freed
+        if (objToAllocSite.count(objId) && !as._freedAddrs.count(objId) &&
+            !escapedObjects.count(objId)) {
+
+          // Check if this is the last reference
+          if (!isReachableFromLivePointers(as, objId)) {
+            const llvm::Instruction *allocSite = objToAllocSite[objId];
+            addEventToTrace(AEBugEventType::ALLOC, allocSite, "Memory allocated here");
+            addEventToTrace(AEBugEventType::STORE, store, "Last reference overwritten");
+
+            AEException bug("Memory leak: last reference to allocated memory overwritten");
+            addBugToReporter(bug, allocSite);
+          }
+        }
+      }
+    }
+  }
+}
+
+void MemLeakDetector::handleStubFunctions(const llvm::CallBase *call) {
+  // Handle stub functions that may allocate or free memory
+  const llvm::Function *callee = call->getCalledFunction();
+  if (!callee)
+    return;
+
+  std::string funcName = callee->getName().str();
+
+  // Mark objects as escaped if returned from function
+  if (funcName.find("SAFE_ALLOC") != std::string::npos) {
+    uint32_t retId = AbstractInterpretation::getValueIdStatic(call);
+    // Track this as an allocation that escapes
+    escapedObjects.insert(retId);
+  }
+}
+
+void MemLeakDetector::reportBug() {
+  if (instToBugInfo.empty())
+    return;
+
+  llvm::outs() << "\n=== Memory Leak Detection Results ===\n";
+  llvm::outs() << "Total leaks found: " << instToBugInfo.size() << "\n\n";
+
+  for (const auto &pair : instToBugInfo) {
+    llvm::outs() << pair.second << "\n";
+  }
+}
+
+void MemLeakDetector::reset() {
+  AEDetector::reset();
+  objToAllocSite.clear();
+  escapedObjects.clear();
+  bugLoc.clear();
+  instToBugInfo.clear();
+}
+
+void MemLeakDetector::trackAllocation(uint32_t objId,
+                                      const llvm::Instruction *allocSite) {
+  objToAllocSite[objId] = allocSite;
+}
+
+bool MemLeakDetector::isReachableFromLivePointers(AbstractState &as,
+                                                   uint32_t objId) {
+  // Check if objId is reachable from any variable in the abstract state
+
+  // Check all variables
+  for (const auto &pair : as.getVarToVal()) {
+    const AbstractValue &val = pair.second;
+    if (val.isAddr()) {
+      AddressValue addrs = val.getAddrs();
+      for (uint64_t addr : addrs.getVals()) {
+        if (as.getIDFromAddr(addr) == objId) {
+          return true; // Found a reference
+        }
+      }
+    }
+  }
+
+  // Check all memory locations
+  for (const auto &pair : as.getLocToVal()) {
+    const AbstractValue &val = pair.second;
+    if (val.isAddr()) {
+      AddressValue addrs = val.getAddrs();
+      for (uint64_t addr : addrs.getVals()) {
+        if (as.getIDFromAddr(addr) == objId) {
+          return true; // Found a reference in memory
+        }
+      }
+    }
+  }
+
+  return false; // No references found
+}
+
+bool MemLeakDetector::objectEscapes(uint32_t objId) {
+  return escapedObjects.count(objId) > 0;
+}
+
+void MemLeakDetector::addBugToReporter(const AEException &e,
+                                       const llvm::Instruction *inst) {
   std::string loc;
   if (const llvm::DILocation *debugLoc = inst->getDebugLoc()) {
     loc = debugLoc->getFilename().str() + ":" +

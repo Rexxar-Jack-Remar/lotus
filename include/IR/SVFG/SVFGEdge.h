@@ -1,5 +1,4 @@
-//===- SVFGEdge.h -- SVFG Edge Definitions
-//------------------------------------//
+//===- SVFGEdge.h -- SVFG Edge Definitions ------------------------------------//
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -16,19 +15,92 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// SVFGEdge: Complete edge type hierarchy for Sparse Value-Flow Graph.
+// SVFGEdge: Edge Type Hierarchy for Sparse Value-Flow Graph
 //
-// This file provides a comprehensive hierarchy of edge types mirroring SVF's
-// design:
-// - Intra-procedural edges: Copy, Load, Store, Gep, Phi, etc.
-// - Call edges: Direct/indirect parameter passing
-// - Return edges: Direct/indirect return value flow
-// - Memory edges: MU/CHI for memory SSA
+// This file defines the complete hierarchy of SVFG edge types, representing
+// different kinds of value-flow relationships between SVFG nodes.
 //
-// Key design features:
-// - Comprehensive edge classification
-// - Edge weight for cost-sensitive analysis
-// - Pointer to edge sets for efficient lookups
+// == Edge Type Hierarchy ==
+//
+// SVFGEdge (base)
+// ├── Intra-procedural edges (within a function)
+// │   ├── IntraCopyVFGEdge     // x = y (direct copy)
+// │   ├── IntraLoadVFGEdge     // x = *p (load from memory)
+// │   ├── IntraStoreVFGEdge    // *p = x (store to memory)
+// │   ├── IntraGepVFGEdge      // x = p + offset (pointer arithmetic)
+// │   ├── IntraPhiVFGEdge      // phi node operand (merge point)
+// │   └── IntraBinaryOpVFGEdge // x = a + b (arithmetic/logical)
+// │
+// ├── Call edges (caller → callee)
+// │   ├── CallDirVFGEdge       // Direct call parameter passing
+// │   └── CallIndVFGEdge       // Indirect call parameter passing
+// │
+// ├── Return edges (callee → caller)
+// │   ├── RetDirVFGEdge        // Direct return value flow
+// │   └── RetIndVFGEdge        // Indirect return value flow
+// │
+// └── Memory edges (Memory SSA)
+//     ├── MUEdge               // Memory use (read) edge
+//     ├── CHIEdge              // Memory def (write) edge
+//     └── MHPEdge              // May-happen-in-parallel (threading)
+//
+// == Edge Semantics ==
+//
+// 1. Intra-procedural edges:
+//    - Connect nodes within the same function
+//    - Represent direct value-flow (def-use chains)
+//    - Example: x = y creates IntraCopyVFGEdge from y's def to x's use
+//
+// 2. Call edges:
+//    - Connect actual arguments at call site to formal parameters in callee
+//    - Direct: Statically resolved function calls
+//    - Indirect: Function pointer calls (resolved via pointer analysis)
+//    - Example: foo(x) creates CallDirVFGEdge from x to foo's parameter
+//
+// 3. Return edges:
+//    - Connect return values in callee to return uses at call site
+//    - Direct: Statically resolved returns
+//    - Indirect: Returns through function pointers
+//    - Example: return x creates RetDirVFGEdge from x to call site
+//
+// 4. Memory edges (MU/CHI):
+//    - MU edges: Connect memory definitions to loads (memory uses)
+//      Example: *p = 5; x = *q; (if p and q may alias)
+//               StoreChi(mem_2) --MU--> LoadMu(mem_2)
+//    - CHI edges: Connect memory definitions to subsequent definitions
+//      Example: *p = 5; *q = 10; (if p and q may alias)
+//               StoreChi(mem_2) --CHI--> StoreChi(mem_3)
+//
+// == Edge Weights ==
+//
+// Edges carry weights for cost-sensitive analysis:
+// - Zero: No cost (epsilon transitions, e.g., phi edges)
+// - One: Standard weight (most edges)
+// - Many: Unbounded cost (loop back-edges, recursion)
+//
+// Weights are used in shortest-path algorithms for demand-driven analysis.
+//
+// == Points-To Guards ==
+//
+// Memory edges carry points-to sets as guards:
+// - Guard specifies which memory objects the edge applies to
+// - Example: Load edge guarded by {obj_1, obj_2} means the load may read
+//   from either object 1 or object 2
+// - Enables precise memory dependence tracking
+//
+// == Call Site Association ==
+//
+// Call and return edges link to their call sites:
+// - Enables context-sensitive analysis
+// - Supports call graph traversal
+// - Provides source location for debugging
+//
+// == Key Design Features ==
+//
+// - Type-safe casting: Use llvm::dyn_cast<EdgeType>(edge) for downcasting
+// - Edge classification: isIntraEdge(), isCallEdge(), isRetEdge(), etc.
+// - Weight management: getWeight(), setWeight() for cost-sensitive analysis
+// - Points-to tracking: getPointsTo(), addPointsTo() for memory edges
 //
 //===----------------------------------------------------------------------===//
 

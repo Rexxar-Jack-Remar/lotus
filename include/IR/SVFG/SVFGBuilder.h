@@ -102,7 +102,24 @@ struct SVFGBuilderConfig {
   SVFGBuilderConfig() = default;
 };
 
-/// @brief SVFGBuilder with AserPTA integration
+/// SVFGBuilder constructs SVFG from ICFG using AserPTA for pointer analysis.
+///
+/// The builder executes in these phases:
+/// 1. Pointer analysis bootstrap (AserPTA) and object-ID mapping
+/// 2. Node construction (statement, parameter, memory SSA nodes)
+/// 3. Edge construction (value-flow, call/return, memory edges)
+/// 4. Inter-procedural refinement (connect call/return edges)
+/// 5. Memory SSA linking and optional optimization
+///
+/// Key design decisions:
+/// - Object IDs are disjoint from SVFG node IDs (base = 1 << 30)
+/// - Memory regions are versioned for Memory SSA
+/// - Indirect calls can be resolved eagerly or deferred for DDA
+/// - Points-to sets guard memory edges for precision
+///
+/// Example:
+///   SVFGBuilder builder(config);
+///   SVFG *svfg = builder.build(icfg);
 class SVFGBuilder {
 public:
   /// Object IDs live in a disjoint namespace from SVFG node IDs.

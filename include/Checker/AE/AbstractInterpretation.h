@@ -2,6 +2,20 @@
 //
 // Migrated from SVF's AE engine to Lotus.
 //
+// This file defines the AbstractInterpretation class, which implements
+// sparse abstract execution for bug detection. The analysis performs
+// abstract interpretation over LLVM IR using interval and address domains.
+//
+// Key features:
+// - Sparse analysis: Only tracks values that affect bug detection
+// - Cross-domain interaction: Uses Z3 solver to refine intervals via constraints
+// - WTO-based iteration: Handles loops and recursion with widening/narrowing
+// - Multiple bug detectors: Buffer overflow, null deref, use-after-free, etc.
+//
+// Based on the paper:
+// "Precise Sparse Abstract Execution via Cross-Domain Interaction"
+// Xiao Cheng, Jiawei Wang, Yulei Sui. ICSE 2024.
+//
 //===----------------------------------------------------------------------===//
 
 #pragma once
@@ -43,7 +57,13 @@ class AbstractInterpretation;
 class ICFGWTO;
 class ICFGCycleWTO;
 
-/// Statistics for AE (matching SVF's AEStat)
+/// AEStat collects statistics during abstract execution analysis.
+///
+/// Tracks metrics such as:
+/// - Number of functions, blocks, and instructions analyzed
+/// - Number of external vs internal call sites
+/// - Abstract state sizes at program points
+/// - Analysis time and memory usage
 class AEStat {
 public:
   AbstractInterpretation *_ae;
@@ -93,29 +113,59 @@ public:
   void endClk();
 };
 
-/// Main Abstract Execution engine
+/// AbstractInterpretation is the main abstract execution engine.
+///
+/// This class performs sparse abstract interpretation over LLVM IR to detect
+/// bugs such as buffer overflows, null pointer dereferences, use-after-free,
+/// and invalid free operations.
+///
+/// Analysis workflow:
+/// 1. Run pointer analysis (AserPTA) to get points-to information
+/// 2. Build Weak Topological Order (WTO) for each function
+/// 3. Perform abstract interpretation with widening/narrowing
+/// 4. Run bug detectors on abstract states at each program point
+/// 5. Report detected bugs
+///
+/// Recursion handling modes:
+/// - TOP: Set all recursive function results to ⊤ (fastest, least precise)
+/// - WIDEN_ONLY: Apply widening only (moderate precision)
+/// - WIDEN_NARROW: Apply widening then narrowing (most precise, slowest)
 class AbstractInterpretation {
   friend class AEStat;
   friend class BufOverflowDetector;
   friend class NullptrDerefDetector;
 
 public:
-  enum HandleRecur { TOP, WIDEN_ONLY, WIDEN_NARROW };
+  /// Recursion handling strategy
+  enum HandleRecur {
+    TOP,          ///< Set recursive results to ⊤ (top) immediately
+    WIDEN_ONLY,   ///< Apply widening only for recursive functions
+    WIDEN_NARROW  ///< Apply widening then narrowing (default, most precise)
+  };
 
   AbstractInterpretation();
   virtual ~AbstractInterpretation();
 
+  /// Run abstract execution on an LLVM module
+  /// @param module The LLVM module to analyze
   void runOnModule(llvm::Module *module);
+
+  /// Main analysis entry point (called by runOnModule)
   void analyse();
 
-  // Reset state for analyzing a new module (prevents state leakage)
+  /// Reset all analysis state for analyzing a new module
+  /// Prevents state leakage between module analyses
   void reset();
 
+  /// Get the singleton instance of AbstractInterpretation
   static AbstractInterpretation &getAEInstance() {
     static AbstractInterpretation instance;
     return instance;
   }
 
+  /// Add a bug detector to the analysis
+  /// If a detector of the same kind exists, it will be replaced
+  /// @param detector Unique pointer to the detector to add
   void addDetector(std::unique_ptr<AEDetector> detector) {
     if (!detector)
       return;
@@ -129,8 +179,13 @@ public:
     detectors.push_back(std::move(detector));
   }
 
+  /// Set the recursion handling mode
   void setRecursionMode(HandleRecur mode) { recursionMode_ = mode; }
+
+  /// Set the widening delay (number of iterations before applying widening)
   void setWidenDelay(uint32_t delay) { widenDelay_ = delay; }
+
+  /// Set whether to use strict checkpoint checking
   void setStrictCheckpoint(bool strict) { strictCheckpoint_ = strict; }
 
   // Checkpoint control options (matching SVF's Options)
@@ -140,6 +195,7 @@ public:
   void setEnableNullDerefCheck(bool enable) { enableNullDerefCheck_ = enable; }
   void setEnableDivZeroCheck(bool enable) { enableDivZeroCheck_ = enable; }
   void setEnableOverflowCheck(bool enable) { enableOverflowCheck_ = enable; }
+  void setEnableMemLeakCheck(bool enable) { enableMemLeakCheck_ = enable; }
 
   std::set<const llvm::CallBase *> checkpoints;
 
@@ -212,6 +268,7 @@ private:
   bool enableNullDerefCheck_{false};
   bool enableDivZeroCheck_{false};
   bool enableOverflowCheck_{false};
+  bool enableMemLeakCheck_{false}; // Disabled by default
 
   // Track which checkpoints have been checked
   std::set<const llvm::CallBase *> checkedCheckpoints_;

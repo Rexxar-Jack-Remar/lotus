@@ -7,9 +7,54 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// DPItem / StmtDPItem: Demand-driven analysis item matching SVF's design.
-// StmtDPItem(cur, loc) = (current pointer/object node ID, current SVFG location).
-// Used by DDA to avoid recomputation and to handle cycles.
+// DPItem / StmtDPItem: Demand-Driven Program Item
+//
+// This file defines the core data structure for demand-driven analysis,
+// representing a (pointer, location) pair during backward traversal.
+//
+// == What is a DPItem? ==
+//
+// A DPItem (Demand-driven Program Item) represents a query state during
+// backward traversal through the value-flow graph:
+// - cur: Current pointer/object node ID being analyzed
+// - curloc: Current SVFG location (program point)
+//
+// == Why Two Classes? ==
+//
+// - DPItem: Base class with only `cur` (node ID)
+//   - Used for context-insensitive analysis
+//   - Compares only node ID (ignores location)
+//
+// - StmtDPItem: Derived class with `cur` and `curloc`
+//   - Used for flow-sensitive analysis
+//   - Compares both node ID and location
+//   - Distinguishes same pointer at different program points
+//
+// == Example ==
+//
+// ```c
+// int *p = &x;        // Location L1: p -> {x}
+// if (cond)
+//   p = &y;           // Location L2: p -> {y}
+// int z = *p;         // Location L3: query p
+// ```
+//
+// DPItems during backward traversal from L3:
+// - DPItem(p, L3): Start at use of p
+// - DPItem(p, L2): Backward to assignment p = &y
+// - DPItem(p, L1): Backward to assignment p = &x
+//
+// Without location (DPItem): Would treat all as same item
+// With location (StmtDPItem): Distinguishes different program points
+//
+// == Bug Fix Note ==
+//
+// StmtDPItem overrides operator< and operator== to compare both `cur` and
+// `curloc`. This fixes a bug where std::set/std::map would silently drop
+// items with the same `cur` but different `curloc` values.
+//
+// Always use StmtDPItem (or its aliases LocDPItem, CxtLocDPItem) as map/set
+// keys, never the base DPItem class.
 //
 //===----------------------------------------------------------------------===//
 
