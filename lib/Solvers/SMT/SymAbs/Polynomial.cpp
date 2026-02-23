@@ -35,6 +35,7 @@
  */
 
 #include "Solvers/SMT/SymAbs/SymbolicAbstraction.h"
+#include "Solvers/SMT/SymAbs/SymAbsUtils.h"
 #include "Verification/SymbolicAbstraction/Utils/Z3APIExtension.h"
 
 #include <cassert>
@@ -69,15 +70,15 @@ static int64_t eval_monomial(const expr& monomial, const model& m, context& ctx)
     // Full implementation would need to handle arbitrary monomials
     
     if (monomial.is_numeral()) {
-        std::string num_str = Z3_get_numeral_string(ctx, monomial);
-        return std::stoll(num_str);
+        auto as_int = SymAbs::to_int64(monomial);
+        return as_int.hasValue() ? as_int.getValue() : 0;
     }
     
     if (monomial.is_const()) {
         expr val = m.eval(monomial, true);
         if (val.is_numeral()) {
-            std::string num_str = Z3_get_numeral_string(ctx, val);
-            return std::stoll(num_str);
+            auto as_int = SymAbs::to_int64(val);
+            return as_int.hasValue() ? as_int.getValue() : 0;
         }
     }
     
@@ -232,12 +233,8 @@ std::vector<AffineEquality> alpha_poly_V(
             std::vector<int64_t> model_values;
             for (size_t j = 0; j < n; ++j) {
                 expr val = m.eval(variables[j], true);
-                if (val.is_numeral()) {
-                    std::string num_str = Z3_get_numeral_string(ctx, val);
-                    model_values.push_back(std::stoll(num_str));
-                } else {
-                    model_values.push_back(0);
-                }
+                auto as_int = SymAbs::to_int64(val);
+                model_values.push_back(as_int.hasValue() ? as_int.getValue() : 0);
             }
             
             // Evaluate monomials

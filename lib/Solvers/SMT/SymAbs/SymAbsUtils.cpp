@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include <numeric>
 #include <z3++.h>
 #include <z3.h>
@@ -60,13 +61,8 @@ namespace SymAbs {
  */
 expr bv_signed_to_int(const expr& bv) {
     context& ctx = bv.ctx();
-    const unsigned w = bv.get_sort().bv_size();
-    expr msb = z3_ext::extract(w - 1, w - 1, bv);  // Extract sign bit
-    expr unsigned_val = to_expr(ctx, Z3_mk_bv2int(ctx, bv, false));  // Convert to unsigned int
-    int64_t two_pow_w_val = 1LL << static_cast<int>(w);  // 2^w for two's complement adjustment
-    expr two_pow_w = ctx.int_val(two_pow_w_val);
-    // If MSB is 1 (negative), subtract 2^w; otherwise use unsigned value
-    return ite(msb == ctx.bv_val(1, 1), unsigned_val - two_pow_w, unsigned_val);
+    // Let Z3 perform signed two's-complement conversion directly.
+    return to_expr(ctx, Z3_mk_bv2int(ctx, bv, true));
 }
 
 // ============================================================================
@@ -128,16 +124,6 @@ llvm::Optional<int64_t> to_int64(const expr& val) {
  */
 bool eval_model_value(const model& m, const expr& v, int64_t& out) {
     expr val = m.eval(v, true);
-    if (val.is_numeral()) {
-        std::string num_str = Z3_get_numeral_string(val.ctx(), val);
-        try {
-            out = std::stoll(num_str);
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
     if (val.is_bv()) {
         unsigned bv_size = val.get_sort().bv_size();
         if (bv_size > 64) {
@@ -157,6 +143,16 @@ bool eval_model_value(const model& m, const expr& v, int64_t& out) {
         }
         out = signed_val;
         return true;
+    }
+
+    if (val.is_numeral()) {
+        std::string num_str = Z3_get_numeral_string(val.ctx(), val);
+        try {
+            out = std::stoll(num_str);
+            return true;
+        } catch (...) {
+            return false;
+        }
     }
 
     return false;
@@ -212,15 +208,27 @@ std::vector<int64_t> extract_point(const model& m, const std::vector<expr>& vars
  * @return GCD(|a|, |b|) (always non-negative)
  */
 int64_t gcd64(int64_t a, int64_t b) {
-    a = std::abs(a);
-    b = std::abs(b);
+    auto abs_u64 = [](int64_t x) -> uint64_t {
+        if (x >= 0) {
+            return static_cast<uint64_t>(x);
+        }
+        if (x == std::numeric_limits<int64_t>::min()) {
+            return (1ULL << 63);
+        }
+        return static_cast<uint64_t>(-x);
+    };
+    uint64_t ua = abs_u64(a);
+    uint64_t ub = abs_u64(b);
     // Euclidean algorithm
-    while (b != 0) {
-        int64_t temp = b;
-        b = a % b;
-        a = temp;
+    while (ub != 0) {
+        uint64_t temp = ub;
+        ub = ua % ub;
+        ua = temp;
     }
-    return a;
+    if (ua > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        return std::numeric_limits<int64_t>::max();
+    }
+    return static_cast<int64_t>(ua);
 }
 
 /**
@@ -266,12 +274,12 @@ int64_t lcm64(int64_t a, int64_t b) {
  */
 int64_t div_floor(int64_t num, int64_t denom) {
     assert(denom > 0 && "denominator must be positive");
-    if (num >= 0) {
-        // For non-negative, standard division is floor division
-        return num / denom;
+    int64_t q = num / denom;
+    int64_t r = num % denom;
+    if (r != 0 && num < 0) {
+        --q;
     }
-    // For negative: ⌊n/d⌋ = -⌈|n|/d⌉ = -((|n| + d - 1) / d)
-    return -static_cast<int64_t>((-num + denom - 1) / denom);
+    return q;
 }
 
 // ============================================================================
@@ -307,7 +315,7 @@ void Rational::normalize() {
         den_ = -den_;
     }
     // Reduce by GCD to get irreducible form
-    int64_t g = gcd64(std::abs(num_), den_);
+    int64_t g = gcd64(num_, den_);
     if (g > 1) {
         num_ /= g;
         den_ /= g;

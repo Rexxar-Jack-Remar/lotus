@@ -34,6 +34,7 @@
 
 //#include <cstdint>
 #include <iostream>
+#include <limits>
 //#include <map>
 #include <string>
 //#include <unordered_map>
@@ -42,6 +43,52 @@
 #include "Solvers/SMT/SymAbs/SMTOptimization.h"
 
 using namespace std;
+
+namespace {
+
+bool expr_to_uint64(const z3::expr &e, uint64_t &out) {
+  if (e.is_bv()) {
+    return Z3_get_numeral_uint64(e.ctx(), e, &out);
+  }
+  int64_t signed_out = 0;
+  if (Z3_get_numeral_int64(e.ctx(), e, &signed_out) && signed_out >= 0) {
+    out = static_cast<uint64_t>(signed_out);
+    return true;
+  }
+  try {
+    std::string s = Z3_get_numeral_string(e.ctx(), e);
+    out = std::stoull(s);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool expr_to_int_clamped(const z3::expr &e, int &out) {
+  uint64_t u = 0;
+  if (expr_to_uint64(e, u)) {
+    if (u > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+      out = std::numeric_limits<int>::max();
+    } else {
+      out = static_cast<int>(u);
+    }
+    return true;
+  }
+  int64_t s = 0;
+  if (Z3_get_numeral_int64(e.ctx(), e, &s)) {
+    if (s < std::numeric_limits<int>::min()) {
+      out = std::numeric_limits<int>::min();
+    } else if (s > std::numeric_limits<int>::max()) {
+      out = std::numeric_limits<int>::max();
+    } else {
+      out = static_cast<int>(s);
+    }
+    return true;
+  }
+  return false;
+}
+
+} // namespace
 
 void optutil::get_k_models(z3::expr &exp, int k) {
   z3::context &ctx = exp.ctx();
@@ -59,11 +106,13 @@ void optutil::get_k_models(z3::expr &exp, int k) {
       // get z3 variable
       z3::func_decl z3Variable = m[i];
       std::string varName = z3Variable.name().str();
-      z3::expr exp = m.get_const_interp(z3Variable);
-      unsigned bvSize = exp.get_sort().bv_size();
-      int value = m.eval(exp).get_numeral_int();
-      // std::string svalue = Z3_get_numeral_string(ctx, exp);
-      if (exp.get_sort().is_bv()) {
+      z3::expr model_expr = m.get_const_interp(z3Variable);
+      if (model_expr.get_sort().is_bv()) {
+        unsigned bvSize = model_expr.get_sort().bv_size();
+        uint64_t value = 0;
+        if (!expr_to_uint64(m.eval(model_expr), value)) {
+          continue;
+        }
         args.push_back(ctx.bv_const(varName.c_str(), bvSize) !=
                        ctx.bv_val(value, bvSize));
       }
@@ -89,16 +138,13 @@ bool optutil::is_var_fixed(expr &exp, expr &var) {
   solver.add(exp);
 
   if (solver.check() == z3::sat) {
-    // TODO:
     model m = solver.get_model();
-    std::string varName = var.decl().name().str();
     expr var_val = m.eval(var);
-    solver.add(ctx.bv_const(varName.c_str(), var.get_sort().bv_size()) !=
-               var_val);
+    solver.add(var != var_val);
     if (solver.check() == z3::unsat) {
       return true;
     } else {
-      return true;
+      return false;
     }
   } else {
     return false;
@@ -126,14 +172,16 @@ bool opt_solver::solve_with_linear_search(expr &pre_cond, expr &query,
     solver sol_min(ctx);
     sol_min.add(pre_cond);
     sol_min.set(p);
+    if (sol_min.check() != z3::sat) {
+      res.push_back(ctx.bool_val(false));
+      return false;
+    }
     // find lower bound
     try {
       expr lower = ctx.bv_val(0, query.get_sort().bv_size());
       while (sol_min.check() == z3::sat) {
-        sol_min.pop();
         model m = sol_min.get_model();
         lower = m.eval(query);
-        sol_min.push();
         // sol_min.add(query < lower);
         sol_min.add(ult(query, lower));
       }
@@ -150,45 +198,46 @@ bool opt_solver::solve_with_linear_search(expr &pre_cond, expr &query,
     solver sol_max(ctx);
     sol_max.add(pre_cond);
     expr cur_upper = ctx.bv_val(0, query.get_sort().bv_size());
+    if (sol_max.check() != z3::sat) {
+      res.push_back(ctx.bool_val(false));
+      return false;
+    }
 
     // 1. solve once (this step is not necessary)
-    if (m_prune_unsat) {
-      if (sol_max.check() == z3::sat) {
-        m_linear_search_solver_call++;
-        model m = sol_max.get_model();
-        cur_upper = m.eval(query);
-        sol_max.push();
-        // expr cond_test = query > cur_upper;
-        expr cond_test = ugt(query, cur_upper);
-        sol_max.add(cond_test);
-      TEST_SAT_UNDER_COND:
-        check_result cond_ret = sol_max.check();
-        m_linear_search_solver_call++;
-        if (cond_ret == z3::sat) {
-          m = sol_max.get_model();
-          cur_upper = m.eval(query);
-          sol_max.pop();
-          // expr cond_test = query > cur_upper;
-          expr cond_test = ugt(query, cur_upper);
-          sol_max.push();
-          sol_max.add(cond_test);
-          goto TEST_SAT_UNDER_COND;
-        } else if (cond_ret == z3::unsat) {
-          res.push_back(cur_upper);
-          m_linear_search_max = cur_upper.get_numeral_int();
-          if (m_verbose_lvl) {
-            std::cout << "  max: " << m_linear_search_max << "\n";
-            std::cout << "  solver calls: " << m_linear_search_solver_call
-                      << "\n";
-          }
-          return true;
-        } else {
-          res.push_back(cur_upper);
-          return false; // not exact bound
-        }
-      } else {
-        return false;
+    m_linear_search_solver_call++;
+    model m = sol_max.get_model();
+    cur_upper = m.eval(query);
+    sol_max.push();
+    // expr cond_test = query > cur_upper;
+    expr cond_test = ugt(query, cur_upper);
+    sol_max.add(cond_test);
+  TEST_SAT_UNDER_COND:
+    check_result cond_ret = sol_max.check();
+    m_linear_search_solver_call++;
+    if (cond_ret == z3::sat) {
+      m = sol_max.get_model();
+      cur_upper = m.eval(query);
+      sol_max.pop();
+      // expr cond_test = query > cur_upper;
+      expr cond_test = ugt(query, cur_upper);
+      sol_max.push();
+      sol_max.add(cond_test);
+      goto TEST_SAT_UNDER_COND;
+    } else if (cond_ret == z3::unsat) {
+      res.push_back(cur_upper);
+      int max_val = 0;
+      if (expr_to_int_clamped(cur_upper, max_val)) {
+        m_linear_search_max = static_cast<unsigned>(max_val);
       }
+      if (m_verbose_lvl) {
+        std::cout << "  max: " << m_linear_search_max << "\n";
+        std::cout << "  solver calls: " << m_linear_search_solver_call
+                  << "\n";
+      }
+      return true;
+    } else {
+      res.push_back(cur_upper);
+      return false; // not exact bound
     }
   }
   return true;
@@ -210,27 +259,43 @@ bool opt_solver::solve_with_binary_search(expr &pre_cond, expr &query,
   p.set("timeout", timeout);
 
   unsigned sz = query.get_sort().bv_size();
-  int max_bv = get_unsigned_max(sz);
+  if (sz > 64) {
+    // Current binary-search implementation tracks bounds in uint64_t.
+    // Avoid unsound truncation for very wide bit-vectors.
+    return solve_with_linear_search(pre_cond, query, res, mode);
+  }
+  uint64_t max_bv = get_unsigned_max(sz);
 
   if (mode == g_max || mode == g_min_max) {
     solver sol_max(ctx);
     sol_max.add(pre_cond);
     sol_max.set(p);
 
-    int cur_mid, cur_min = 0, cur_max = max_bv;
+    uint64_t cur_mid = 0;
+    uint64_t cur_min = 0;
+    uint64_t cur_max = max_bv;
     expr upper = ctx.bv_val(0, sz);
 
-    if (m_prune_unsat) {
-      if (sol_max.check() == z3::sat) {
-        m_binary_search_solver_call++;
-        model m = sol_max.get_model();
-        upper = m.eval(query);
-        cur_min = upper.get_numeral_int();
-      }
+    if (sol_max.check() != z3::sat) {
+      res.push_back(ctx.bool_val(false));
+      return false;
     }
+    m_binary_search_solver_call++;
+    model m = sol_max.get_model();
+    upper = m.eval(query);
+
+    if (m_prune_unsat) {
+      uint64_t cur_upper_u = 0;
+      if (!expr_to_uint64(upper, cur_upper_u)) {
+        res.push_back(upper);
+        return false;
+      }
+      cur_min = cur_upper_u;
+    }
+
     do {
       sol_max.push();
-      cur_mid = (cur_min + cur_max) / 2;
+      cur_mid = cur_min + ((cur_max - cur_min) / 2);
       // cur_mid = cur_min + ((cur_max - cur_min) >> 1)
       if (m_verbose_lvl) {
         // std::cout << "min, mid, max: " << cur_min << ", " << cur_mid << ", "
@@ -246,19 +311,36 @@ bool opt_solver::solve_with_binary_search(expr &pre_cond, expr &query,
       check_result cond_ret = sol_max.check();
       m_binary_search_solver_call++;
       if (cond_ret == z3::unsat) {
+        if (cur_mid == 0) {
+          sol_max.pop();
+          break;
+        }
         cur_max = cur_mid - 1;
         sol_max.pop();
       } else if (cond_ret == z3::sat) {
         model m = sol_max.get_model();
         upper = m.eval(query);
-        cur_min = upper.get_numeral_int() + 1;
+        uint64_t cur_upper_u = 0;
+        if (!expr_to_uint64(upper, cur_upper_u)) {
+          sol_max.pop();
+          res.push_back(upper);
+          return false;
+        }
+        if (cur_upper_u == std::numeric_limits<uint64_t>::max()) {
+          sol_max.pop();
+          break;
+        }
+        cur_min = cur_upper_u + 1;
         sol_max.pop();
       } else {
         res.push_back(upper);
         return false;
       }
     } while (cur_min <= cur_max);
-    m_binary_search_max = upper.get_numeral_int();
+    int max_int = 0;
+    if (expr_to_int_clamped(upper, max_int)) {
+      m_binary_search_max = static_cast<unsigned>(max_int);
+    }
     res.push_back(upper);
     if (m_verbose_lvl) {
       std::cout << "  max: " << m_binary_search_max << "\n";
@@ -283,9 +365,15 @@ bool opt_solver::solve_with_compact_search(expr &pre_cond, expr_vector &queries,
   }
   params p(ctx);
   p.set("timeout", timeout);
+  if (queries.empty()) {
+    return true;
+  }
   unsigned bvsz = queries[0].get_sort().bv_size();
   unsigned qsz = queries.size();
-  int max_bv = get_unsigned_max(bvsz);
+  int max_bv =
+      (bvsz >= 64 || get_unsigned_max(bvsz) > static_cast<uint64_t>(std::numeric_limits<int>::max()))
+          ? std::numeric_limits<int>::max()
+          : static_cast<int>(get_unsigned_max(bvsz));
 
   // TODO: we need to perform the min/max search together
 
@@ -330,7 +418,11 @@ bool opt_solver::solve_with_compact_search(expr &pre_cond, expr_vector &queries,
         m_compact_check_solver_call++;
         model m = sol_max.get_model();
         for (unsigned i = 0; i < queries.size(); i++) {
-          queries_bounds[i] = m.eval(queries[i]).get_numeral_int();
+          int q_bound = 0;
+          if (!expr_to_int_clamped(m.eval(queries[i]), q_bound)) {
+            return false;
+          }
+          queries_bounds[i] = q_bound;
           cur_mins[i] = queries_bounds[i];
           if (m_verbose_lvl) {
             std::cout << "Init min for " << queries[i] << " " << cur_mins[i]
@@ -496,6 +588,8 @@ bool opt_solver::solve_with_z3opt(expr &pre_cond, expr &query, expr_vector &res,
         if (m_verbose_lvl) {
           std::cout << "  min: " << lower << "\n";
         }
+      } else {
+        res.push_back(Ctx.bool_val(false));
       }
     } catch (z3::exception &Ex) {
       res.push_back(Ctx.bool_val(false));
@@ -514,6 +608,8 @@ bool opt_solver::solve_with_z3opt(expr &pre_cond, expr &query, expr_vector &res,
         if (m_verbose_lvl) {
           std::cout << "  max: " << upper << "\n";
         }
+      } else {
+        res.push_back(Ctx.bool_val(false));
       }
     } catch (z3::exception &Ex) {
       res.push_back(Ctx.bool_val(false));
@@ -545,6 +641,9 @@ bool opt_solver::solve_with_z3opt(expr &pre_cond, expr_vector &query,
   optimize Opt(Ctx);
   Opt.set(Param);
   Opt.add(pre_cond);
+  if (res.size() < query.size()) {
+    res.resize(query.size(), expr_vector(Ctx));
+  }
 
   std::vector<std::pair<optimize::handle, optimize::handle>> goals;
   for (unsigned i = 0; i < query.size(); i++) {
@@ -624,13 +723,17 @@ bool opt_solver::compact_check_misc(expr &G, expr_vector &FVec,
 
           // update the bounds info.
           expr val_query_i = M.eval(queries[I]);
-          if (val_query_i.get_numeral_int() >= bounds[I]) {
-            bounds[I] = val_query_i.get_numeral_int();
+          int q_val = 0;
+          if (!expr_to_int_clamped(val_query_i, q_val)) {
+            continue;
+          }
+          if (q_val >= bounds[I]) {
+            bounds[I] = q_val;
           }
         }
       }
     }
-    compact_check_misc(G, FVec, Labels, queries, bounds);
+    return compact_check_misc(G, FVec, Labels, queries, bounds);
   } else {
     // If any call to solver times out, the remaining labels are L_Undef. This
     // is not a good idea..
@@ -674,14 +777,20 @@ void opt_solver::sound_max_all(expr &pre_cond, expr_vector &queries,
       string lhs_name = bound[i].arg(0).decl().name().str();
       for (unsigned j = 0; j < queries.size(); j++) {
         if (lhs_name == queries[j].decl().name().str()) {
-          res[j] = bound[i].arg(1).get_numeral_int();
+          int val = 0;
+          if (expr_to_int_clamped(bound[i].arg(1), val)) {
+            res[j] = val;
+          }
         }
       }
     } else if (bound[i].decl().decl_kind() == Z3_OP_ULEQ) {
       string lhs_name = bound[i].arg(0).decl().name().str();
       for (unsigned j = 0; j < queries.size(); j++) {
         if (lhs_name == queries[j].decl().name().str()) {
-          res[j] = bound[i].arg(1).get_numeral_int();
+          int val = 0;
+          if (expr_to_int_clamped(bound[i].arg(1), val)) {
+            res[j] = val;
+          }
         }
       }
     }
@@ -706,14 +815,20 @@ void opt_solver::sound_min_all(expr &pre_cond, expr_vector &queries,
       string rhs_name = bound[i].arg(1).decl().name().str();
       for (unsigned j = 0; j < queries.size(); j++) {
         if (rhs_name == queries[j].decl().name().str()) {
-          res[j] = bound[i].arg(0).get_numeral_int();
+          int val = 0;
+          if (expr_to_int_clamped(bound[i].arg(0), val)) {
+            res[j] = val;
+          }
         }
       }
     } else if (bound[i].decl().decl_kind() == Z3_OP_ULEQ) {
       string rhs_name = bound[i].arg(1).decl().name().str();
       for (unsigned j = 0; j < queries.size(); j++) {
         if (rhs_name == queries[j].decl().name().str()) {
-          res[j] = bound[i].arg(0).get_numeral_int();
+          int val = 0;
+          if (expr_to_int_clamped(bound[i].arg(0), val)) {
+            res[j] = val;
+          }
         }
       }
     }

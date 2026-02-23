@@ -33,6 +33,8 @@
 
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <regex>
 #include <sstream>
 
 SMTLibOptimizer::SMTLibOptimizer(z3::context& context, const std::string& smt_formula,
@@ -59,11 +61,32 @@ bool SMTLibOptimizer::findVariable(const std::string& var_name, VariableInfo& va
         if (tokens.size() >= 4 && tokens[0] == "(declare-fun" && tokens[1] == var_name) {
             var_info.name = var_name;
             var_info.found = true;
+            var_info.sort_kind = VariableInfo::SORT_UNKNOWN;
+            var_info.bv_width = 0;
 
             if (tokens.size() > 3) {
                 std::string sort_str = tokens.back();
                 if (sort_str.back() == ')') sort_str.pop_back();
                 var_info.sort = sort_str;
+            }
+            if (line.find(" Int") != std::string::npos || line.find("Int)") != std::string::npos) {
+                var_info.sort_kind = VariableInfo::SORT_INT;
+                var_info.sort = "Int";
+            } else if (line.find("BitVec") != std::string::npos) {
+                std::regex bv_pattern(R"(\(_\s+BitVec\s+([0-9]+)\))");
+                std::smatch match;
+                if (std::regex_search(line, match, bv_pattern) && match.size() >= 2) {
+                    try {
+                        unsigned width = static_cast<unsigned>(std::stoul(match[1].str()));
+                        if (width > 0) {
+                            var_info.sort_kind = VariableInfo::SORT_BV;
+                            var_info.bv_width = width;
+                            var_info.sort = "(_ BitVec " + std::to_string(width) + ")";
+                        }
+                    } catch (...) {
+                        var_info.sort_kind = VariableInfo::SORT_UNKNOWN;
+                    }
+                }
             }
 
             var_info.min_value = LLONG_MIN;
@@ -79,8 +102,26 @@ z3::check_result SMTLibOptimizer::checkWithConstraint(const VariableInfo& var_in
 
     try {
         z3::expr_vector formulas = ctx.parse_string(smt_formula.c_str());
-        z3::expr var_expr = ctx.int_const(var_info.name.c_str());
-        z3::expr constraint = var_expr >= ctx.int_val(static_cast<int64_t>(value));
+        z3::expr var_expr(ctx);
+        z3::expr constraint(ctx);
+
+        if (var_info.sort_kind == VariableInfo::SORT_INT) {
+            var_expr = ctx.int_const(var_info.name.c_str());
+            constraint = var_expr >= ctx.int_val(static_cast<int64_t>(value));
+        } else if (var_info.sort_kind == VariableInfo::SORT_BV) {
+            var_expr = ctx.bv_const(var_info.name.c_str(), var_info.bv_width);
+            uint64_t threshold = 0;
+            if (value > 0) {
+                threshold = static_cast<uint64_t>(value);
+            }
+            if (var_info.bv_width < 64) {
+                const uint64_t max_u = (1ULL << var_info.bv_width) - 1ULL;
+                threshold = std::min(threshold, max_u);
+            }
+            constraint = uge(var_expr, ctx.bv_val(threshold, var_info.bv_width));
+        } else {
+            return z3::check_result::unknown;
+        }
 
         for (unsigned i = 0; i < formulas.size(); ++i) solver.add(formulas[i]);
         solver.add(constraint);
@@ -93,23 +134,31 @@ z3::check_result SMTLibOptimizer::checkWithConstraint(const VariableInfo& var_in
     }
 }
 
-long long SMTLibOptimizer::binarySearchMax(const VariableInfo& var_info, long long max_bound) {
+long long SMTLibOptimizer::binarySearchMax(const VariableInfo& var_info, long long max_bound,
+                                           bool* saw_unknown) {
     long long min_val = 0, max_val = max_bound > 0 ? max_bound : 1000000;
+    long long best = -1;
+    if (saw_unknown) *saw_unknown = false;
 
     while (min_val <= max_val) {
         long long mid = min_val + (max_val - min_val) / 2;
         z3::check_result result = checkWithConstraint(var_info, mid);
 
         if (result == z3::check_result::sat) {
+            best = mid;
             min_val = mid + 1;
             if (verbose) std::cout << "SAT: " << var_info.name << " >= " << mid << '\n';
-        } else {
+        } else if (result == z3::check_result::unsat) {
             max_val = mid - 1;
             if (verbose) std::cout << (result == z3::check_result::unsat ? "UNSAT" : "UNKNOWN")
                                    << ": " << var_info.name << " >= " << mid << '\n';
+        } else {
+            if (saw_unknown) *saw_unknown = true;
+            if (verbose) std::cout << "UNKNOWN: " << var_info.name << " >= " << mid << '\n';
+            break;
         }
     }
-    return max_val;
+    return best;
 }
 
 void SMTLibOptimizer::printSolution(const VariableInfo& var_info, long long solution, OptimizationResult result) {
@@ -124,15 +173,27 @@ SMTLibOptimizer::OptimizationResult SMTLibOptimizer::optimizeVariable(const std:
         std::cerr << "Error: Variable " << var_name << " not found" << '\n';
         return OPT_ERROR;
     }
+    if (var_info.sort_kind == VariableInfo::SORT_UNKNOWN) {
+        std::cerr << "Error: Variable " << var_name << " has unsupported/unknown sort" << '\n';
+        return OPT_ERROR;
+    }
 
     if (verbose) std::cout << "Optimizing: " << var_name << '\n';
 
-    long long max_value = binarySearchMax(var_info);
+    bool saw_unknown = false;
+    long long max_value = binarySearchMax(var_info, 0, &saw_unknown);
     result = max_value;
+    if (max_value < 0) {
+        return saw_unknown ? OPT_UNKNOWN : OPT_UNSAT;
+    }
 
     z3::check_result check_result = checkWithConstraint(var_info, max_value);
-    OptimizationResult opt_result = (check_result == z3::check_result::sat) ? OPT_SAT :
-                                   (check_result == z3::check_result::unknown) ? OPT_UNKNOWN : OPT_UNSAT;
+    OptimizationResult opt_result = OPT_UNSAT;
+    if (check_result == z3::check_result::sat) {
+        opt_result = saw_unknown ? OPT_UNKNOWN : OPT_SAT;
+    } else if (check_result == z3::check_result::unknown) {
+        opt_result = OPT_UNKNOWN;
+    }
 
     printSolution(var_info, max_value, opt_result);
     return opt_result;
@@ -160,10 +221,17 @@ bool SMTLibOptimizer::optimizeCuts(const std::string& cuts_file) {
 
         VariableInfo var_info = {};
         if (findVariable(cut_name, var_info)) {
+            if (var_info.sort_kind == VariableInfo::SORT_UNKNOWN) {
+                if (verbose) {
+                    std::cout << "Warning: Cut variable " << cut_name
+                              << " has unsupported/unknown sort" << '\n';
+                }
+                continue;
+            }
             processed++;
             if (verbose) std::cout << "Cut " << processed << "/" << total << ": " << cut_name << '\n';
 
-            long long solution = binarySearchMax(var_info, max_bound);
+            long long solution = binarySearchMax(var_info, max_bound, nullptr);
             if (verbose) std::cout << "Cost: " << solution << '\n';
         } else if (verbose) {
             std::cout << "Warning: Cut variable " << cut_name << " not found" << '\n';

@@ -16,8 +16,16 @@ public:
     };
 
     struct VariableInfo {
+        enum SortKind {
+            SORT_UNKNOWN,
+            SORT_INT,
+            SORT_BV
+        };
+
         std::string name;
         std::string sort;  // Store sort as string instead of z3::expr
+        SortKind sort_kind;
+        unsigned bv_width;
         long long min_value;
         long long max_value;
         bool found;
@@ -37,7 +45,8 @@ private:
     bool findVariable(const std::string& var_name, VariableInfo& var_info);
 
     // Binary search to find maximum value of a variable
-    long long binarySearchMax(const VariableInfo& var_info, long long max_bound = 0);
+    long long binarySearchMax(const VariableInfo& var_info, long long max_bound = 0,
+                              bool* saw_unknown = nullptr);
 
     // Check satisfiability with a constraint on variable value
     z3::check_result checkWithConstraint(const VariableInfo& var_info, long long value);
