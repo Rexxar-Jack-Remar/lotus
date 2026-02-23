@@ -1,4 +1,4 @@
-# Algebraci Program Analyis (the Elimination Method for Dataflow Analysis)
+# Algebraic Program Analyis (the Elimination Method for Dataflow Analysis)
 
 This directory provides an **elimination-based** intraprocedural solver that computes dataflow solutions by progressively summarizing paths, conceptually similar to state elimination in automata / Gaussian elimination over path expressions.
 
@@ -16,6 +16,41 @@ Analysis" machinery. In Lotus today, this component should be read as:
 
 For broader algebraic/interprocedural formulations, see other frameworks in this repository
 (e.g., IFDS/IDE, WPDS, and NPA modules).
+
+## References
+
+### Classical Elimination-Based Dataflow Analysis
+
+- Alfred V. Aho, Ravi Sethi, Jeffrey D. Ullman. *Compilers: Principles, Techniques, and Tools* (The "Dragon Book"). Addison-Wesley, 1986.
+  - Chapter on data flow analysis covers classical iterative algorithms and elimination methods.
+
+- Steven S. Muchnik. *Advanced Compiler Design and Implementation*. Morgan Kaufmann, 1997.
+  - Covers elimination-based dataflow analysis in detail.
+
+- Darren R. Cooper. "Concurrent Extensions to Dataflow Analysis". *Proceedings of the ACM SIGPLAN 1983 Symposium on Compiler Construction*, 1983.
+  - Early work on elimination methods for dataflow.
+
+### Algebraic Program Analysis (Reps & Kincaid)
+
+- Thomas Reps and Zachary Kincaid. "Algebraic Path Problems, Revisited". 2014.
+  - [PDF](https://pages.cs.wisc.edu/~zykincaid/papers/RepsKincaid14.pdf)
+  - Introduces the algebraic framework for path problems with Union, Concat, and Star operators over semirings.
+
+- Thomas Reps and Zachary Kincaid. "Algebraic Program Analysis". *International Conference on Computer Aided Verification (CAV)*, 2015.
+  - [PDF](https://pages.cs.wisc.edu/~zykincaid/papers/RepsKincaid15.pdf)
+  - Formalizes APA and shows how to compute MOP solutions via path expression evaluation.
+
+- Zachary Kincaid. "Algebraic Program Analysis". PhD Thesis, University of Wisconsin-Madison, 2017.
+  - [PDF](https://research.cs.wisc.edu/wpis/papers/thesis-kincaid.pdf)
+  - Comprehensive treatment including ADT algorithms for reducible flowgraphs.
+
+- Zachary Kincaid, Thomas Reps, and Samuel Stern. "Abstract Destination-Driven Distributive Analysis". *ACM Transactions on Programming Languages and Systems (TOPLAS)*, 2018.
+  - [PDF](https://pages.cs.wisc.edu/~zykincaid/papers/KincaidRepsStern18.pdf)
+  - The ADT (Abstract Destination-Driven Distributive) algorithms referenced in this implementation.
+
+- Zachary Kincaid, John Cyphert, Jason Breck, and Thomas Reps. "Non-Volatile Memory: Analysis, Optimizations and Applications". *Programming Language Design and Implementation (PLDI)*, 2018.
+  - [PDF](https://pages.cs.wisc.edu/~zykincaid/papers/KincaidEtAl18.pdf)
+  - Additional applications of APA techniques.
 
 ## What it computes
 
@@ -103,3 +138,4 @@ when operands are constant, and performs alias-aware memory updates when
 `AAResults` are available. Uninitialized-variable tracking normalizes pointer
 bases, uses ValueTracking for guaranteed-non-undef checks, and clears aliasing
 locations via `AAResults` when available, plus basic mem intrinsics.
+

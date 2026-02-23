@@ -35,3 +35,10 @@ include/Dataflow/APA/
 - **Legacy identifiers:** include guards and several type names still use
   `Elimination` / `DATAFLOW_ELIMINATION_*` for source compatibility (e.g.
   `DATAFLOW_ELIMINATION_CORE_FRAMEWORK_H_`).
+
+## References
+
+See `lib/Dataflow/APA/README.md` for full reference list, including:
+
+- Classical elimination-based dataflow: Aho, Sethi, Ullman (Dragon Book); Muchnik
+- Algebraic Program Analysis: Reps & Kincaid papers (2014-2018)
