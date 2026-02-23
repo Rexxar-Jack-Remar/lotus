@@ -10,20 +10,21 @@ namespace SLOT
 {
     static context c;
 
-    SMTFormula::SMTFormula(LLVMContext& t_lcx, Module* t_lmodule, IRBuilder<>& t_builder, std::string t_string, std::string t_func_name) : lcx(t_lcx), lmodule(t_lmodule), builder(t_builder), string(t_string), contents(c), func_name(t_func_name)
+    SMTFormula::SMTFormula(LLVMContext& t_lcx, Module* t_lmodule, IRBuilder<>& t_builder, std::string t_string, std::string t_func_name) : lcx(t_lcx), lmodule(t_lmodule), builder(t_builder), string(t_string), func_name(t_func_name), contents(c)
     {
         // Parse the SMT-LIB input eagerly so we can predeclare LLVM arguments with
         // the same shape as the SMT variables. We keep one static Z3 context to
         // avoid recreating sorts on every translation.
         // Regular expression matching to get variables
-        std::string s = string;
+        const std::string& s = string;
         std::smatch m;
-        std::regex e (R"(\((declare-fun\s(\|.*\||[\~\!\@\$\%\^\&\*_\-\+\=\<\>\.\?\/A-Za-z0-9]+)\s*\(\s*\)\s*(\(\s*_\s*FloatingPoint\s*(\d+)\s*(\d+)\s*\)|Float16|Float32|Float64|Float128|FPN|Bool|\(\s*_\s*BitVec\s*(\d+)\s*\))\s*|declare-const\s(\|.*\||[\~\!\@\$\%\^\&\*_\-\+\=\<\>\.\?\/A-Za-z0-9]+)\s*(\(\s*_\s*FloatingPoint\s*(\d+)\s*(\d+)\s*\)|Float16|Float32|Float64|Float128|FPN|Bool|\(\s*_\s*BitVec\s*(\d+)\s*\))\s*)\))");
+        static const std::regex e(R"(\((declare-fun\s(\|.*\||[\~\!\@\$\%\^\&\*_\-\+\=\<\>\.\?\/A-Za-z0-9]+)\s*\(\s*\)\s*(\(\s*_\s*FloatingPoint\s*(\d+)\s*(\d+)\s*\)|Float16|Float32|Float64|Float128|FPN|Bool|\(\s*_\s*BitVec\s*(\d+)\s*\))\s*|declare-const\s(\|.*\||[\~\!\@\$\%\^\&\*_\-\+\=\<\>\.\?\/A-Za-z0-9]+)\s*(\(\s*_\s*FloatingPoint\s*(\d+)\s*(\d+)\s*\)|Float16|Float32|Float64|Float128|FPN|Bool|\(\s*_\s*BitVec\s*(\d+)\s*\))\s*)\))");
+        std::string::const_iterator search_start = s.cbegin();
 
         std::vector<Type*> types;
         std::vector<std::string> names;
         std::string temp = "";
-        while (std::regex_search(s, m, e))
+        while (std::regex_search(search_start, s.cend(), m, e))
         {
             if (m[2]!="")
             {
@@ -79,7 +80,7 @@ namespace SLOT
             {
                 throw UnsupportedTypeException("unsupported SMT variable type", names.back());
             }
-            s = m.suffix().str();
+            search_start = m.suffix().first;
         }
 
 
@@ -96,10 +97,11 @@ namespace SLOT
         }
 
         contents = c.parse_string(t_string.c_str());
+        assertions.reserve(contents.size());
 
         for (expr e : contents)
         {
-            assertions.push_back(BooleanNode(lcx, lmodule, builder, variables, &value_cache, e));
+            assertions.emplace_back(lcx, lmodule, builder, variables, &value_cache, e);
         }
 
     }
@@ -117,17 +119,34 @@ namespace SLOT
         }
         else
         {
-            Value* temp = assertions[0].ToLLVM();
-            //Conjunction of all assertions
-            if (assertions.size() > 1)
+            std::vector<Value*> pending;
+            pending.reserve(assertions.size());
+            for (auto& assertion : assertions)
             {
-                for (int i = 1; i < assertions.size(); i++)
-                {
-                    temp = builder.CreateAnd(temp,assertions[i].ToLLVM());
-                }
+                pending.push_back(assertion.ToLLVM());
             }
 
-            builder.CreateRet(temp);
+            // Conjunction of all assertions with pairwise reduction to avoid
+            // creating a long left-deep chain.
+            while (pending.size() > 1)
+            {
+                std::vector<Value*> next;
+                next.reserve((pending.size() + 1) / 2);
+                for (size_t i = 0; i < pending.size(); i += 2)
+                {
+                    if (i + 1 < pending.size())
+                    {
+                        next.push_back(builder.CreateAnd(pending[i], pending[i + 1]));
+                    }
+                    else
+                    {
+                        next.push_back(pending[i]);
+                    }
+                }
+                pending.swap(next);
+            }
+
+            builder.CreateRet(pending[0]);
         }
     }
-}
+} // namespace SLOT

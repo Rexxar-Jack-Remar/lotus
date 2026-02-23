@@ -39,12 +39,11 @@ namespace SLOT
   class LLVMFunction
   {
     public:
-      static int varCounter;
-
       context &scx;
       SMTMAPPING variables;
       Function *contents;
       bool shiftToMultiply;
+      int varCounter;
       expr extraVariables; // Hold results of bitcast to bitvector
 
       expr AddBCVariable(std::unique_ptr<LLVMNode> contents);

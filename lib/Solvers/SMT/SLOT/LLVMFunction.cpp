@@ -9,7 +9,7 @@
 namespace SLOT
 {
 
-    LLVMFunction::LLVMFunction(bool t_shiftToMultiply, context& t_scx, Function* t_contents) : shiftToMultiply(t_shiftToMultiply), scx(t_scx), contents(t_contents), extraVariables(t_scx)
+    LLVMFunction::LLVMFunction(bool t_shiftToMultiply, context& t_scx, Function* t_contents) : shiftToMultiply(t_shiftToMultiply), scx(t_scx), contents(t_contents), varCounter(0), extraVariables(t_scx)
     {
         // Mirror the LLVM function signature in the SMT world. Each LLVM
         // argument becomes a Z3 constant with a matching sort; we keep the
@@ -59,12 +59,12 @@ namespace SLOT
     //For fp to bv bitcast, create a new variable and constraint it equal at the top level
     expr LLVMFunction::AddBCVariable(std::unique_ptr<LLVMNode> contents)
     {
-        std::string name = "_slot_smtbc_" + std::to_string(LLVMFunction::varCounter) + "_";
+        std::string name = "_slot_smtbc_" + std::to_string(varCounter) + "_";
         expr var = scx.bv_const(name.c_str(), contents->Width());
         variables.insert(make_pair(name, var));
         expr added = (var.mk_from_ieee_bv(contents->SMTSort()) == contents->ToSMT());
-        extraVariables = (LLVMFunction::varCounter == 0) ? added : (extraVariables && added);
-        LLVMFunction::varCounter++;
+        extraVariables = (varCounter == 0) ? added : (extraVariables && added);
+        varCounter++;
         return var;
     }
 
@@ -74,6 +74,6 @@ namespace SLOT
         // constraints introduced for helper variables (e.g., bitcasts) so the
         // solver sees the full set of equations.
         expr fromChildren = LLVMNode::MakeLLVMNode(shiftToMultiply, scx, *this, ((ReturnInst *)contents->getEntryBlock().getTerminator())->getOperand(0))->ToSMT();
-        return (LLVMFunction::varCounter == 0) ? fromChildren : (extraVariables && fromChildren);    
+        return (varCounter == 0) ? fromChildren : (extraVariables && fromChildren);    
     }
 } // namespace SLOT

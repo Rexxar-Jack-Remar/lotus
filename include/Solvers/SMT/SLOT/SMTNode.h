@@ -52,11 +52,42 @@ namespace SLOT
       SMTValueCache* value_cache;
       expr contents;
       bool noOverflow = true;
+      mutable bool m_has_stripped_name = false;
+      mutable std::string m_stripped_name;
+      mutable int m_symbol_kind = -1; // -1 unknown, 0 non-const, 1 variable, 2 constant
 
       //Z3 ''constants'' can be either variables or constants
-      inline std::string StrippedName() { return ((contents.to_string()[0] == '|') ? contents.to_string().substr(1, contents.to_string().length() - 2) : contents.to_string()); }
-      inline bool IsVariable() { return contents.is_const() && variables.count(StrippedName()); }
-      inline bool IsConstant() { return contents.is_const() && !variables.count(StrippedName()); }
+      inline const std::string& StrippedName() {
+        if (!m_has_stripped_name)
+        {
+          std::string repr = contents.to_string();
+          if (!repr.empty() && repr[0] == '|')
+          {
+            m_stripped_name = repr.substr(1, repr.length() - 2);
+          }
+          else
+          {
+            m_stripped_name = std::move(repr);
+          }
+          m_has_stripped_name = true;
+        }
+        return m_stripped_name;
+      }
+      inline int SymbolKind() {
+        if (m_symbol_kind != -1)
+        {
+          return m_symbol_kind;
+        }
+        if (!contents.is_const())
+        {
+          m_symbol_kind = 0;
+          return m_symbol_kind;
+        }
+        m_symbol_kind = (variables.find(StrippedName()) != variables.end()) ? 1 : 2;
+        return m_symbol_kind;
+      }
+      inline bool IsVariable() { return SymbolKind() == 1; }
+      inline bool IsConstant() { return SymbolKind() == 2; }
       inline Z3_decl_kind Op() { return contents.decl().decl_kind(); }
 
       inline Z3_decl_kind RoundingMode() { return ((contents.arg(0).get_sort().sort_kind() == Z3_ROUNDING_MODE_SORT) ? contents.arg(0).decl().decl_kind() : Z3_OP_FPA_RM_NEAREST_TIES_TO_EVEN); }

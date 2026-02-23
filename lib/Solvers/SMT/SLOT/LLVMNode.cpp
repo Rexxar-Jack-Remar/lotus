@@ -298,11 +298,18 @@ namespace SLOT
                 }
                 return concat(v);
             case Intrinsic::fshl:
-                //Funnel shift
-                return shl(concat(Child(0)->ToSMT(), Child(1)->ToSMT()), zext(Child(2)->ToSMT(), Width())).extract((Width() * 2) - 1, Width());
+                // Funnel shift amount is interpreted modulo element bit width.
+                // Keep shift operand width compatible with the concatenated value.
+                return shl(
+                    concat(Child(0)->ToSMT(), Child(1)->ToSMT()),
+                    zext(urem(Child(2)->ToSMT(), scx.bv_val(Width(), Width())), Width())
+                ).extract((Width() * 2) - 1, Width());
             case Intrinsic::fshr:
-                //Funnel shift
-                return lshr(concat(Child(0)->ToSMT(),Child(1)->ToSMT()),Child(2)->ToSMT()).extract(Width()-1,0);
+                // Funnel shift amount is interpreted modulo element bit width.
+                return lshr(
+                    concat(Child(0)->ToSMT(),Child(1)->ToSMT()),
+                    zext(urem(Child(2)->ToSMT(), scx.bv_val(Width(), Width())), Width())
+                ).extract(Width()-1,0);
             case Intrinsic::usub_sat:
                 //Subtraction without underflow (clamped to 0)
                 left = Child(0)->ToSMT();
@@ -312,7 +319,8 @@ namespace SLOT
                 //Addition without overflow (clamped to max, i.e. -1)
                 left = Child(0)->ToSMT();
                 right = Child(1)->ToSMT();
-                return ite(ule(left + right, left), scx.bv_val(-1, Width()), left + right);
+                temp = left + right;
+                return ite(ult(temp, left), scx.bv_val(-1, Width()), temp);
             case Intrinsic::umin:
                 left = Child(0)->ToSMT();
                 right = Child(1)->ToSMT();
@@ -646,9 +654,10 @@ namespace SLOT
                 // Check for shift left by a constant; this can be replaced with multiplication
                 if (shiftToMultiply && right.is_const() && ((rr = std::atoi(right.to_string().c_str())) > 0))
                 {
-                    int i = 1;
-                    while (rr > 0) { i*=2; rr--;}
-                    return left * scx.bv_val(i,Width());
+                    // Keep computation in bitvector domain to avoid host integer overflow.
+                    expr multiplier = scx.bv_val(1, Width());
+                    while (rr > 0) { multiplier = multiplier + multiplier; rr--; }
+                    return left * multiplier;
                 }
                 else
                 {
@@ -688,4 +697,4 @@ namespace SLOT
 
         }
     }
-}
+} // namespace SLOT

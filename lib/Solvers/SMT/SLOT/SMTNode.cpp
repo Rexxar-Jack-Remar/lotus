@@ -216,7 +216,7 @@ namespace SLOT
                     }
                     else
                     {
-                        UnsupportedSMTOpException(X_EQUAL_TYPE, contents);
+                        throw UnsupportedSMTOpException(X_EQUAL_TYPE, contents);
                     }
                 case Z3_OP_DISTINCT:
                     if (contents.num_args() < 2)
@@ -240,7 +240,7 @@ namespace SLOT
                         }
                         else
                         {
-                            UnsupportedSMTOpException(X_DISTINCT_TYPE, contents);
+                            throw UnsupportedSMTOpException(X_DISTINCT_TYPE, contents);
                         }
                     }
                     else
@@ -248,25 +248,59 @@ namespace SLOT
                         //Check pairwise inequality for all pairs
                         Value* temp = 0; //  = ConstantInt::getTrue(*TheContext);
                         Value* v = 0;
+                        std::vector<Value*> childValues;
+                        childValues.reserve(contents.num_args());
+                        if (contents.arg(0).is_bool())
+                        {
+                            for (unsigned int i = 0; i < contents.num_args(); i++)
+                            {
+                                childValues.push_back(BooleanChild(i).ToLLVM());
+                            }
+                        }
+                        else if (contents.arg(0).is_bv())
+                        {
+                            for (unsigned int i = 0; i < contents.num_args(); i++)
+                            {
+                                childValues.push_back(BitvectorChild(i).ToLLVM());
+                            }
+                        }
+                        else if (contents.arg(0).is_fpa())
+                        {
+                            for (unsigned int i = 0; i < contents.num_args(); i++)
+                            {
+                                childValues.push_back(FloatingChild(i).ToLLVM());
+                            }
+                        }
+                        else
+                        {
+                            throw UnsupportedSMTOpException(X_DISTINCT_TYPE, contents);
+                        }
                         for (unsigned int i = 0; i < contents.num_args(); i++)
                         {
                             for (unsigned int j = i+1; j < contents.num_args(); j++)
                             {
                                 if (contents.arg(0).is_bool())
                                 {
-                                    v = builder.CreateICmpNE(BooleanChild(i).ToLLVM(), BooleanChild(j).ToLLVM());
+                                    v = builder.CreateICmpNE(childValues[i], childValues[j]);
                                 }
                                 else if (contents.arg(0).is_bv())
                                 {
-                                    v = builder.CreateICmpNE(BitvectorChild(i).ToLLVM(),BitvectorChild(j).ToLLVM());
+                                    v = builder.CreateICmpNE(childValues[i], childValues[j]);
                                 }
                                 else if (contents.arg(0).is_fpa())
                                 {
-                                    v = FloatingChild(i).LLVMNE(FloatingChild(j));
+                                    IntegerType * iType = IntegerType::get(lcx, FloatingChild(i).Width());
+                                    Value* lb = builder.CreateBitCast(childValues[i], iType);
+                                    Value* rb = builder.CreateBitCast(childValues[j], iType);
+                                    Function * fpclassFun = Intrinsic::getDeclaration(lmodule, Function::lookupIntrinsicID("llvm.is.fpclass"), childValues[i]->getType());
+                                    Value* nanMask = ConstantInt::get(IntegerType::get(lcx, 32), FloatingNode::class_flags.at(Z3_OP_FPA_IS_NAN));
+                                    Value* lhsNan = builder.CreateCall(fpclassFun, {childValues[i], nanMask});
+                                    Value* rhsNan = builder.CreateCall(fpclassFun, {childValues[j], nanMask});
+                                    v = builder.CreateAnd(builder.CreateNot(builder.CreateAnd(lhsNan, rhsNan)), builder.CreateICmpNE(lb, rb));
                                 }
                                 else
                                 {
-                                    UnsupportedSMTOpException(X_DISTINCT_TYPE, contents);
+                                    throw UnsupportedSMTOpException(X_DISTINCT_TYPE, contents);
                                 }
                                 //Handle first time through loop correctly
                                 temp = temp ? builder.CreateAnd(temp, v) : v;
@@ -336,16 +370,16 @@ namespace SLOT
                     switch (RoundingMode())
                     {
                         case Z3_OP_FPA_RM_NEAREST_TIES_TO_EVEN:
-                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::roundeven, FloatingNode::ToFloatingType(lcx, contents.to_string(), Width()));
+                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::roundeven, FloatingNode::ToFloatingType(lcx, contents.to_string(), FloatingChild(1).Width()));
                             break;
                         case Z3_OP_FPA_RM_NEAREST_TIES_TO_AWAY:
-                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::lround, FloatingNode::ToFloatingType(lcx, contents.to_string(), Width()));
+                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::lround, FloatingNode::ToFloatingType(lcx, contents.to_string(), FloatingChild(1).Width()));
                             break;
                         case Z3_OP_FPA_RM_TOWARD_POSITIVE:         
-                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::ceil, FloatingNode::ToFloatingType(lcx, contents.to_string(), Width()));
+                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::ceil, FloatingNode::ToFloatingType(lcx, contents.to_string(), FloatingChild(1).Width()));
                             break;
                         case Z3_OP_FPA_RM_TOWARD_NEGATIVE:
-                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::floor, FloatingNode::ToFloatingType(lcx, contents.to_string(), Width()));
+                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::floor, FloatingNode::ToFloatingType(lcx, contents.to_string(), FloatingChild(1).Width()));
                             break;
                         case Z3_OP_FPA_RM_TOWARD_ZERO:
                             //Default behavior of llvm fptoui
@@ -362,16 +396,16 @@ namespace SLOT
                     switch (RoundingMode())
                     {
                         case Z3_OP_FPA_RM_NEAREST_TIES_TO_EVEN:
-                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::roundeven, FloatingNode::ToFloatingType(lcx, contents.to_string(), Width()));
+                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::roundeven, FloatingNode::ToFloatingType(lcx, contents.to_string(), FloatingChild(1).Width()));
                             break;
                         case Z3_OP_FPA_RM_NEAREST_TIES_TO_AWAY:
-                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::lround, FloatingNode::ToFloatingType(lcx, contents.to_string(), Width()));
+                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::lround, FloatingNode::ToFloatingType(lcx, contents.to_string(), FloatingChild(1).Width()));
                             break;
                         case Z3_OP_FPA_RM_TOWARD_POSITIVE:         
-                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::ceil, FloatingNode::ToFloatingType(lcx, contents.to_string(), Width()));
+                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::ceil, FloatingNode::ToFloatingType(lcx, contents.to_string(), FloatingChild(1).Width()));
                             break;
                         case Z3_OP_FPA_RM_TOWARD_NEGATIVE:
-                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::floor, FloatingNode::ToFloatingType(lcx, contents.to_string(), Width()));
+                            fun = Intrinsic::getDeclaration(lmodule, Intrinsic::floor, FloatingNode::ToFloatingType(lcx, contents.to_string(), FloatingChild(1).Width()));
                             break;
                         case Z3_OP_FPA_RM_TOWARD_ZERO:
                             //Default behavior of llvm fptosi
@@ -401,24 +435,48 @@ namespace SLOT
                     return builder.CreateSDiv(BitvectorChild(0).ToLLVM(), BitvectorChild(1).ToLLVM());
                 case Z3_OP_BUDIV:
                     assert(contents.num_args()==2);
-                    return builder.CreateSelect(BitvectorChild(1).IsZero(), mone, builder.CreateUDiv(BitvectorChild(0).ToLLVM(), BitvectorChild(1).ToLLVM()));
+                    {
+                        Value* leftVal = BitvectorChild(0).ToLLVM();
+                        Value* rightVal = BitvectorChild(1).ToLLVM();
+                        Value* rightIsZero = builder.CreateICmpEQ(rightVal, ConstantInt::get(rightVal->getType(), 0));
+                        return builder.CreateSelect(rightIsZero, mone, builder.CreateUDiv(leftVal, rightVal));
+                    }
                 case Z3_OP_BSREM:
                     assert(contents.num_args()==2);
-                    return builder.CreateSelect(BitvectorChild(1).IsZero(), BitvectorChild(0).ToLLVM(), builder.CreateSRem(BitvectorChild(0).ToLLVM(), BitvectorChild(1).ToLLVM()));
+                    {
+                        Value* leftVal = BitvectorChild(0).ToLLVM();
+                        Value* rightVal = BitvectorChild(1).ToLLVM();
+                        Value* rightIsZero = builder.CreateICmpEQ(rightVal, ConstantInt::get(rightVal->getType(), 0));
+                        return builder.CreateSelect(rightIsZero, leftVal, builder.CreateSRem(leftVal, rightVal));
+                    }
                 case Z3_OP_BSREM_I:
                     assert(contents.num_args()==2);
                     // [z3's docs] It has the same semantics as Z3_OP_BSREM, but created in a context where the second operand can be assumed to be non-zero.
                     return builder.CreateSRem(BitvectorChild(0).ToLLVM(), BitvectorChild(1).ToLLVM());
                 case Z3_OP_BUREM:
                     assert(contents.num_args()==2);
-                    return BitvectorNode::LlURem(builder, BitvectorChild(0).ToLLVM(), BitvectorChild(1).ToLLVM());
+                    {
+                        Value* leftVal = BitvectorChild(0).ToLLVM();
+                        Value* rightVal = BitvectorChild(1).ToLLVM();
+                        return BitvectorNode::LlURem(builder, leftVal, rightVal);
+                    }
                 case Z3_OP_BSMOD:
                     assert(contents.num_args()==2);
-                    u = BitvectorNode::LlURem(builder, builder.CreateSelect(BitvectorChild(0).IsNegative(), builder.CreateSub(Zero(), BitvectorChild(0).ToLLVM()), BitvectorChild(0).ToLLVM()), builder.CreateSelect(BitvectorChild(1).IsNegative(), builder.CreateSub(Zero(), BitvectorChild(1).ToLLVM()), BitvectorChild(1).ToLLVM()));
-                    sel0 = builder.CreateSelect(builder.CreateAnd(BitvectorChild(0).IsPositive(),BitvectorChild(1).IsNegative()), builder.CreateAdd(u, BitvectorChild(1).ToLLVM()), builder.CreateSub(Zero(), u));
-                    sel1 = builder.CreateSelect(builder.CreateAnd(BitvectorChild(0).IsNegative(),BitvectorChild(1).IsPositive()), builder.CreateAdd(builder.CreateSub(Zero(),u), BitvectorChild(1).ToLLVM()), sel0);
-                    sel2 = builder.CreateSelect(builder.CreateAnd(BitvectorChild(0).IsPositive(),BitvectorChild(1).IsPositive()), u, sel1);
-                    return builder.CreateSelect(builder.CreateICmpEQ(u, Zero()), u, sel2);
+                    {
+                        Value* leftVal = BitvectorChild(0).ToLLVM();
+                        Value* rightVal = BitvectorChild(1).ToLLVM();
+                        Value* leftIsNegative = builder.CreateICmpSLT(leftVal, Zero());
+                        Value* rightIsNegative = builder.CreateICmpSLT(rightVal, Zero());
+                        Value* leftIsPositive = builder.CreateICmpSGE(leftVal, Zero());
+                        Value* rightIsPositive = builder.CreateICmpSGE(rightVal, Zero());
+                        Value* absLeft = builder.CreateSelect(leftIsNegative, builder.CreateSub(Zero(), leftVal), leftVal);
+                        Value* absRight = builder.CreateSelect(rightIsNegative, builder.CreateSub(Zero(), rightVal), rightVal);
+                        u = BitvectorNode::LlURem(builder, absLeft, absRight);
+                        sel0 = builder.CreateSelect(builder.CreateAnd(leftIsPositive, rightIsNegative), builder.CreateAdd(u, rightVal), builder.CreateSub(Zero(), u));
+                        sel1 = builder.CreateSelect(builder.CreateAnd(leftIsNegative, rightIsPositive), builder.CreateAdd(builder.CreateSub(Zero(),u), rightVal), sel0);
+                        sel2 = builder.CreateSelect(builder.CreateAnd(leftIsPositive, rightIsPositive), u, sel1);
+                        return builder.CreateSelect(builder.CreateICmpEQ(u, Zero()), u, sel2);
+                    }
                 case Z3_OP_BAND:
                     temp = BitvectorChild(0).ToLLVM();
                     for (unsigned int i = 1; i < contents.num_args(); i++)
@@ -462,13 +520,24 @@ namespace SLOT
                     unsigned numArgs = contents.num_args();
                     assert(numArgs >= 2);  // Must have at least two arguments to concatenate
                 
+                    std::vector<Value*> childValues;
+                    std::vector<unsigned> childWidths;
+                    childValues.reserve(numArgs);
+                    childWidths.reserve(numArgs);
+                    for (unsigned i = 0; i < numArgs; ++i)
+                    {
+                        auto child = BitvectorChild(i);
+                        childValues.push_back(child.ToLLVM());
+                        childWidths.push_back(child.Width());
+                    }
+
                     // Start with the first bitvector
-                    Value* concatenatedResult = BitvectorChild(0).ToLLVM();
-                    unsigned totalWidth = BitvectorChild(0).Width();
+                    Value* concatenatedResult = childValues[0];
+                    unsigned totalWidth = childWidths[0];
                     // Concatenate the rest of the bitvectors one by one
                     for (unsigned i = 1; i < numArgs; ++i) {
-                        Value* nextBV = BitvectorChild(i).ToLLVM();
-                        unsigned nextWidth = BitvectorChild(i).Width();
+                        Value* nextBV = childValues[i];
+                        unsigned nextWidth = childWidths[i];
                 
                         concatenatedResult = ConcatTwoBV(
                             concatenatedResult,
@@ -495,22 +564,26 @@ namespace SLOT
                     return builder.CreateTrunc(builder.CreateLShr(BitvectorChild(0).ToLLVM(), ConstantInt::get(oldTp, contents.lo())), newTp);
                 case Z3_OP_REPEAT:
                     assert(contents.num_args()==1);
-                    oldWidth = BitvectorChild(0).Width();
+                    {
+                    auto child = BitvectorChild(0);
+                    oldWidth = child.Width();
                     times = Width()/oldWidth;
                     assert(oldWidth*times == Width() && times > 0);
-                    u = BitvectorChild(0).ToLLVM();
+                    u = child.ToLLVM();
                     if (times==1)
                     {
-                        return BitvectorChild(0).ToLLVM();
+                        return u;
                     }
                     else
                     {
-                        temp = builder.CreateZExt(BitvectorChild(0).ToLLVM(),IntegerType::get(lcx,Width()));
+                        Value* zextChild = builder.CreateZExt(u, IntegerType::get(lcx, Width()));
+                        temp = zextChild;
                         for (int i = 1; i < times; i++)
                         {
-                            temp = builder.CreateOr(temp,builder.CreateShl(builder.CreateZExt(BitvectorChild(0).ToLLVM(),IntegerType::get(lcx,Width())), ConstantInt::get(IntegerType::get(lcx,Width()),i*oldWidth)));
+                            temp = builder.CreateOr(temp, builder.CreateShl(zextChild, ConstantInt::get(IntegerType::get(lcx,Width()),i*oldWidth)));
                         }
                         return temp;
+                    }
                     }
                 case Z3_OP_BCOMP:
                     assert(contents.num_args()==2);
@@ -610,12 +683,18 @@ namespace SLOT
         assert(&lcx == &other.lcx);
         assert(&builder == &other.builder);
 
+        Value* lhs = ToLLVM();
+        Value* rhs = other.ToLLVM();
         IntegerType * iType = IntegerType::get(lcx,Width());
-        Value* lb = builder.CreateBitCast(ToLLVM(),iType);
-        Value* rb = builder.CreateBitCast(other.ToLLVM(),iType);
+        Value* lb = builder.CreateBitCast(lhs,iType);
+        Value* rb = builder.CreateBitCast(rhs,iType);
+        Function * fpclassFun = Intrinsic::getDeclaration(lmodule, Function::lookupIntrinsicID("llvm.is.fpclass"), lhs->getType());
+        Value* nanMask = ConstantInt::get(IntegerType::get(lcx, 32), class_flags.at(Z3_OP_FPA_IS_NAN));
+        Value* lhsNan = builder.CreateCall(fpclassFun, {lhs, nanMask});
+        Value* rhsNan = builder.CreateCall(fpclassFun, {rhs, nanMask});
 
         //Not both NAN or different bits
-        return builder.CreateAnd(builder.CreateNot(builder.CreateAnd(LLVMClassCheck(Z3_OP_FPA_IS_NAN), other.LLVMClassCheck(Z3_OP_FPA_IS_NAN))), builder.CreateICmpNE(lb, rb));
+        return builder.CreateAnd(builder.CreateNot(builder.CreateAnd(lhsNan, rhsNan)), builder.CreateICmpNE(lb, rb));
     }
 
     //Returns an LLVM equal comparison
@@ -626,12 +705,18 @@ namespace SLOT
         assert(&lcx == &other.lcx);
         assert(&builder == &other.builder);
 
+        Value* lhs = ToLLVM();
+        Value* rhs = other.ToLLVM();
         IntegerType * iType = IntegerType::get(lcx,Width());
-        Value* lb = builder.CreateBitCast(ToLLVM(),iType);
-        Value* rb = builder.CreateBitCast(other.ToLLVM(),iType);
+        Value* lb = builder.CreateBitCast(lhs,iType);
+        Value* rb = builder.CreateBitCast(rhs,iType);
+        Function * fpclassFun = Intrinsic::getDeclaration(lmodule, Function::lookupIntrinsicID("llvm.is.fpclass"), lhs->getType());
+        Value* nanMask = ConstantInt::get(IntegerType::get(lcx, 32), class_flags.at(Z3_OP_FPA_IS_NAN));
+        Value* lhsNan = builder.CreateCall(fpclassFun, {lhs, nanMask});
+        Value* rhsNan = builder.CreateCall(fpclassFun, {rhs, nanMask});
 
         //Both NAN or have the same bits
-        return builder.CreateOr(builder.CreateAnd(LLVMClassCheck(Z3_OP_FPA_IS_NAN), other.LLVMClassCheck(Z3_OP_FPA_IS_NAN)), builder.CreateICmpEQ(lb,rb));
+        return builder.CreateOr(builder.CreateAnd(lhsNan, rhsNan), builder.CreateICmpEQ(lb,rb));
     }
 
     FloatingNode::FloatingNode(LLVMContext& t_lcx, Module* t_lmodule, IRBuilder<>& t_builder, const LLMAPPING& t_variables, SMTValueCache* t_value_cache, expr t_contents) : SMTNode(t_lcx, t_lmodule, t_builder, t_variables, t_value_cache, t_contents)
@@ -678,7 +763,7 @@ namespace SLOT
                         args.push_back(LLVMException());
 
                         types.push_back(FloatingType());
-                        types.push_back(IntegerType::get(lcx, Width()));
+                        types.push_back(IntegerType::get(lcx, BitvectorChild(1).Width()));
 
                         fun = Intrinsic::getDeclaration(lmodule, Intrinsic::experimental_constrained_uitofp, types);
                         return builder.CreateCall(fun, args);
@@ -704,7 +789,7 @@ namespace SLOT
                             args.push_back(LLVMException());
 
                             types.push_back(FloatingType());
-                            types.push_back(IntegerType::get(lcx, Width()));
+                            types.push_back(IntegerType::get(lcx, BitvectorChild(1).Width()));
                             
                             fun = Intrinsic::getDeclaration(lmodule, Intrinsic::experimental_constrained_sitofp, types);
                             return builder.CreateCall(fun, args);

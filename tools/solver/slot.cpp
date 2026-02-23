@@ -240,10 +240,6 @@ unsigned short RunPasses(unsigned short flags, Function& fun)
 }
 
 
-int LLVMFunction::varCounter = 0;
-
-
-
 int main(int argc, char* argv[])
 {
   bool shiftToMultiply = false;
