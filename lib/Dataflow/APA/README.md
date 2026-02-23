@@ -1,4 +1,4 @@
-# Algebraic Program Analyis (the Elimination Method for Dataflow Analysis)
+# Algebraic Program Analysis (the Elimination Method for Dataflow Analysis)
 
 This directory provides an **elimination-based** intraprocedural solver that computes dataflow solutions by progressively summarizing paths, conceptually similar to state elimination in automata / Gaussian elimination over path expressions.
 
