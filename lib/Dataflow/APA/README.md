@@ -14,36 +14,25 @@ Analysis" machinery. In Lotus today, this component should be read as:
 - specialized to LLVM function CFGs,
 - aimed at MOP-style dataflow clients (reachable, const-prop, RD, liveness, etc.).
 
-For broader algebraic/interprocedural formulations, see other frameworks in this repository
+For broader interprocedural formulations, see other frameworks in this repository
 (e.g., IFDS/IDE, WPDS, and NPA modules).
 
 ## References
 
 ### Classical Elimination-Based Dataflow Analysis
 
-- Alfred V. Aho, Ravi Sethi, Jeffrey D. Ullman. *Compilers: Principles, Techniques, and Tools* (The "Dragon Book"). Addison-Wesley, 1986.
-  - Chapter on data flow analysis covers classical iterative algorithms and elimination methods.
-
-- Steven S. Muchnik. *Advanced Compiler Design and Implementation*. Morgan Kaufmann, 1997.
-  - Covers elimination-based dataflow analysis in detail.
+- Static Analysis by Elimination. Pavle Subotic, Andrew E. Santosa,  and
+Bernhard Scholz.
+- ETAPS ’07:  A new elimination-based data flow analysis framework using
+annotated decomposition trees. B. Scholz and J. Blieberger.
+- CSUR 86: Elimination Algorithms for Data Flow Analysis. Babara Ryder and Marvin Paull.
 
 ### Algebraic Program Analysis (Reps & Kincaid)
 
-- Zachary Kincaid, Thomas Reps, John Cyphert. Algebraic Program Analysis (Invited Tutorial). In *Computer Aided Verification (CAV)*, 2021.
-  - [PDF](https://www.cs.princeton.edu/~zkincaid/_static-pub/apa.pdf)
-
-- Zachary Kincaid, Jason Breck, Ashkan Boroujeni Forouhi, Thomas Reps. Compositional Recurrence Analysis Revisited. In *Programming Language Design and Implementation (PLDI)*, 2017.
-  - [PDF](https://www.cs.princeton.edu/~zkincaid/_static/pub/pldi17.pdf)
-
-- Azadeh Farzan, Zachary Kincaid. Compositional Recurrence Analysis. In *Formal Methods in Computer-Aided Design (FMCAD)*, 2015.
-  - [PDF](https://www.cs.princeton.edu/~zkincaid/_static/pub/fmcad15.pdf)
-
-- Azadeh Farzan, Zachary Kincaid. An Algebraic Framework for Compositional Program Analysis. *ArXiv*, 2013.
-  - [Link](https://arxiv.org/abs/1310.3481)
-
-- Zachary Kincaid, Thomas Reps. *Tutorial on Algebraic Program Analysis*. CAV 2021.
-  - [Link](https://ucl-pplv.github.io/CAV21/poster_P_k2/)
-
+- CAV 2021: Algebraic Program Analysis (Tutorial)
+- PLDI 2017: Compositional Recurrence Analysis Revisited
+- FMCAD 2015: Compositional Recurrence Analysis 
+- 
 
 ## What it computes
 
