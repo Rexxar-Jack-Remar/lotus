@@ -17,7 +17,7 @@ lotus/
 │   ├── Analysis/      # Analysis utilities (NullPointer, Concurrency, CFG, etc.)
 │   ├── CFL/           # CFL reachability
 │   ├── Checker/       # Bug checkers (Concurrency, FiTx, GVFA, KINT, Pulse)
-│   ├── Dataflow/      # Elimination, IFDS/IDE, Mono, NPA, WPDS
+│   ├── Dataflow/      # APA, IFDS/IDE, Mono, NPA, WPDS
 │   ├── IR/            # GSA, ICFG, MemorySSA, PDG, SSI, SVFG, vSSA
 │   ├── Solvers/       # SMT, BDD (CUDD)
 │   ├── Transform/     # LLVM bitcode transformations
