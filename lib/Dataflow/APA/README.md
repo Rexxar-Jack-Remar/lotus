@@ -27,30 +27,23 @@ For broader algebraic/interprocedural formulations, see other frameworks in this
 - Steven S. Muchnik. *Advanced Compiler Design and Implementation*. Morgan Kaufmann, 1997.
   - Covers elimination-based dataflow analysis in detail.
 
-- Darren R. Cooper. "Concurrent Extensions to Dataflow Analysis". *Proceedings of the ACM SIGPLAN 1983 Symposium on Compiler Construction*, 1983.
-  - Early work on elimination methods for dataflow.
-
 ### Algebraic Program Analysis (Reps & Kincaid)
 
-- Thomas Reps and Zachary Kincaid. "Algebraic Path Problems, Revisited". 2014.
-  - [PDF](https://pages.cs.wisc.edu/~zykincaid/papers/RepsKincaid14.pdf)
-  - Introduces the algebraic framework for path problems with Union, Concat, and Star operators over semirings.
+- Zachary Kincaid, Thomas Reps, John Cyphert. Algebraic Program Analysis (Invited Tutorial). In *Computer Aided Verification (CAV)*, 2021.
+  - [PDF](https://www.cs.princeton.edu/~zkincaid/_static-pub/apa.pdf)
 
-- Thomas Reps and Zachary Kincaid. "Algebraic Program Analysis". *International Conference on Computer Aided Verification (CAV)*, 2015.
-  - [PDF](https://pages.cs.wisc.edu/~zykincaid/papers/RepsKincaid15.pdf)
-  - Formalizes APA and shows how to compute MOP solutions via path expression evaluation.
+- Zachary Kincaid, Jason Breck, Ashkan Boroujeni Forouhi, Thomas Reps. Compositional Recurrence Analysis Revisited. In *Programming Language Design and Implementation (PLDI)*, 2017.
+  - [PDF](https://www.cs.princeton.edu/~zkincaid/_static/pub/pldi17.pdf)
 
-- Zachary Kincaid. "Algebraic Program Analysis". PhD Thesis, University of Wisconsin-Madison, 2017.
-  - [PDF](https://research.cs.wisc.edu/wpis/papers/thesis-kincaid.pdf)
-  - Comprehensive treatment including ADT algorithms for reducible flowgraphs.
+- Azadeh Farzan, Zachary Kincaid. Compositional Recurrence Analysis. In *Formal Methods in Computer-Aided Design (FMCAD)*, 2015.
+  - [PDF](https://www.cs.princeton.edu/~zkincaid/_static/pub/fmcad15.pdf)
 
-- Zachary Kincaid, Thomas Reps, and Samuel Stern. "Abstract Destination-Driven Distributive Analysis". *ACM Transactions on Programming Languages and Systems (TOPLAS)*, 2018.
-  - [PDF](https://pages.cs.wisc.edu/~zykincaid/papers/KincaidRepsStern18.pdf)
-  - The ADT (Abstract Destination-Driven Distributive) algorithms referenced in this implementation.
+- Azadeh Farzan, Zachary Kincaid. An Algebraic Framework for Compositional Program Analysis. *ArXiv*, 2013.
+  - [Link](https://arxiv.org/abs/1310.3481)
 
-- Zachary Kincaid, John Cyphert, Jason Breck, and Thomas Reps. "Non-Volatile Memory: Analysis, Optimizations and Applications". *Programming Language Design and Implementation (PLDI)*, 2018.
-  - [PDF](https://pages.cs.wisc.edu/~zykincaid/papers/KincaidEtAl18.pdf)
-  - Additional applications of APA techniques.
+- Zachary Kincaid, Thomas Reps. *Tutorial on Algebraic Program Analysis*. CAV 2021.
+  - [Link](https://ucl-pplv.github.io/CAV21/poster_P_k2/)
+
 
 ## What it computes
 
