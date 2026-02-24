@@ -1,3 +1,6 @@
+#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Core/IFDSFramework.h>
+#include <gtest/gtest.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -7,9 +10,6 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
-#include <gtest/gtest.h>
-#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/IFDSFramework.h>
 
 namespace ifds {
 
@@ -46,7 +46,7 @@ public:
     return result;
   }
 
-  FactSet call_flow(const llvm::CallBase*call, const llvm::Function *callee,
+  FactSet call_flow(const llvm::CallBase *call, const llvm::Function *callee,
                     const SimpleIntFact &fact) override {
     (void)call;
     (void)callee;
@@ -55,7 +55,7 @@ public:
     return result;
   }
 
-  FactSet return_flow(const llvm::CallBase*call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Function *callee,
                       const SimpleIntFact &exit_fact,
                       const SimpleIntFact &call_fact) override {
     (void)call;
@@ -66,7 +66,7 @@ public:
     return result;
   }
 
-  FactSet call_to_return_flow(const llvm::CallBase*call,
+  FactSet call_to_return_flow(const llvm::CallBase *call,
                               const SimpleIntFact &fact) override {
     (void)call;
     FactSet result;

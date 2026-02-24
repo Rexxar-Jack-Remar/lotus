@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Dataflow/IFDS/IFDSFramework.h"
+#include "Dataflow/IFDS/Core/IFDSFramework.h"
 
 #include <cstdint>
 #include <string>

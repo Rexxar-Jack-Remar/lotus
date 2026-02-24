@@ -31,7 +31,7 @@ void map_facts_to_callee(const llvm::CallBase*Call, const llvm::Function *Callee
     if (!Actual) {
       continue;
     }
-    auto ParamIt = Callee->arg_begin();
+    const auto *ParamIt = Callee->arg_begin();
     std::advance(ParamIt, I);
     if (ParamIt == Callee->arg_end()) {
       break;
@@ -66,7 +66,7 @@ void map_facts_to_caller(const llvm::CallBase*Call, const llvm::Function *Callee
       if (!Actual) {
         continue;
       }
-      auto ParamIt = Callee->arg_begin();
+      const auto *ParamIt = Callee->arg_begin();
       std::advance(ParamIt, I);
       if (ParamIt == Callee->arg_end()) {
         break;

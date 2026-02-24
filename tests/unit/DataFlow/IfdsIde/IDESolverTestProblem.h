@@ -7,17 +7,16 @@
 
 #pragma once
 
-#include <Dataflow/IFDS/IFDSFramework.h>
-
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Value.h>
-#include <llvm/Support/raw_ostream.h>
-
 #include <functional>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <Dataflow/IFDS/Core/IFDSFramework.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Value.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace ifds {
 
@@ -43,19 +42,25 @@ struct IDETestValue {
   bool is_top() const { return kind == TOP; }
   bool is_constant() const { return kind == CONSTANT; }
 
-  bool operator==(const IDETestValue& other) const {
-    if (kind != other.kind) return false;
-    if (kind == CONSTANT) return value == other.value;
+  bool operator==(const IDETestValue &other) const {
+    if (kind != other.kind)
+      return false;
+    if (kind == CONSTANT)
+      return value == other.value;
     return true;
   }
-  bool operator!=(const IDETestValue& other) const { return !(*this == other); }
+  bool operator!=(const IDETestValue &other) const { return !(*this == other); }
 
-  IDETestValue join(const IDETestValue& other) const {
-    if (is_bottom()) return other;
-    if (other.is_bottom()) return *this;
-    if (is_top() || other.is_top()) return top();
+  IDETestValue join(const IDETestValue &other) const {
+    if (is_bottom())
+      return other;
+    if (other.is_bottom())
+      return *this;
+    if (is_top() || other.is_top())
+      return top();
     if (is_constant() && other.is_constant()) {
-      if (value == other.value) return *this;
+      if (value == other.value)
+        return *this;
       return top();
     }
     return top();
@@ -63,9 +68,12 @@ struct IDETestValue {
 
   std::string to_string() const {
     switch (kind) {
-      case BOTTOM: return "BOTTOM";
-      case TOP: return "TOP";
-      case CONSTANT: return std::to_string(value);
+    case BOTTOM:
+      return "BOTTOM";
+    case TOP:
+      return "TOP";
+    case CONSTANT:
+      return std::to_string(value);
     }
     return "?";
   }
@@ -75,7 +83,8 @@ struct IDETestValue {
 // IDE Solver Test Problem
 // ============================================================================
 
-class IDESolverTestProblem : public IDEProblem<const llvm::Value*, IDETestValue> {
+class IDESolverTestProblem
+    : public IDEProblem<const llvm::Value *, IDETestValue> {
 public:
   enum TestMode {
     IDENTITY_FUNCTIONS,
@@ -90,56 +99,68 @@ public:
 
   Fact zero_fact() const override { return nullptr; }
 
-  FactSet normal_flow(const llvm::Instruction* stmt, const Fact& fact) override {
+  FactSet normal_flow(const llvm::Instruction *stmt,
+                      const Fact &fact) override {
     (void)stmt;
-    if (!fact) return {};
+    if (!fact)
+      return {};
     return {fact};
   }
 
-  FactSet call_flow(const llvm::CallBase* call, const llvm::Function* callee,
-                   const Fact& fact) override {
+  FactSet call_flow(const llvm::CallBase *call, const llvm::Function *callee,
+                    const Fact &fact) override {
     (void)call;
     (void)callee;
-    if (!fact) return {};
+    if (!fact)
+      return {};
     return {fact};
   }
 
-  FactSet return_flow(const llvm::CallBase* call, const llvm::Function* callee,
-                     const Fact& exit_fact, const Fact& call_fact) override {
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Function *callee,
+                      const Fact &exit_fact, const Fact &call_fact) override {
     (void)call;
     (void)callee;
     (void)call_fact;
-    if (!exit_fact) return {};
+    if (!exit_fact)
+      return {};
     return {exit_fact};
   }
 
-  FactSet call_to_return_flow(const llvm::CallBase* call, const Fact& fact) override {
+  FactSet call_to_return_flow(const llvm::CallBase *call,
+                              const Fact &fact) override {
     (void)call;
-    if (!fact) return {};
+    if (!fact)
+      return {};
     return {fact};
   }
 
-  FactSet initial_facts(const llvm::Function* main) override {
+  FactSet initial_facts(const llvm::Function *main) override {
     (void)main;
     return {nullptr};
   }
 
-  EdgeFunction normal_edge_function(const llvm::Instruction*, const Fact&, const Fact&) override {
+  EdgeFunction normal_edge_function(const llvm::Instruction *, const Fact &,
+                                    const Fact &) override {
     return identity();
   }
-  EdgeFunction call_edge_function(const llvm::CallBase*, const Fact&, const Fact&) override {
+  EdgeFunction call_edge_function(const llvm::CallBase *, const Fact &,
+                                  const Fact &) override {
     return identity();
   }
-  EdgeFunction return_edge_function(const llvm::CallBase*, const Fact&, const Fact&) override {
+  EdgeFunction return_edge_function(const llvm::CallBase *, const Fact &,
+                                    const Fact &) override {
     return identity();
   }
-  EdgeFunction call_to_return_edge_function(const llvm::CallBase*, const Fact&, const Fact&) override {
+  EdgeFunction call_to_return_edge_function(const llvm::CallBase *,
+                                            const Fact &,
+                                            const Fact &) override {
     return identity();
   }
 
   IDETestValue top_value() const override { return IDETestValue::top(); }
   IDETestValue bottom_value() const override { return IDETestValue::bottom(); }
-  IDETestValue join(const IDETestValue& v1, const IDETestValue& v2) const override {
+  IDETestValue join(const IDETestValue &v1,
+                    const IDETestValue &v2) const override {
     return v1.join(v2);
   }
 
@@ -152,35 +173,46 @@ public:
     bool passed;
     std::string message;
     size_t num_values_computed;
-    std::unordered_map<const llvm::Instruction*, std::unordered_map<Fact, IDETestValue>> actual_values;
-    std::unordered_map<const llvm::Instruction*, std::unordered_map<Fact, IDETestValue>> expected_values;
+    std::unordered_map<const llvm::Instruction *,
+                       std::unordered_map<Fact, IDETestValue>>
+        actual_values;
+    std::unordered_map<const llvm::Instruction *,
+                       std::unordered_map<Fact, IDETestValue>>
+        expected_values;
   };
 
   TestResult validate_results(
-      const std::unordered_map<const llvm::Instruction*, std::unordered_map<Fact, IDETestValue>>& results,
-      const std::unordered_map<const llvm::Instruction*, std::unordered_map<Fact, IDETestValue>>& expected) const {
+      const std::unordered_map<const llvm::Instruction *,
+                               std::unordered_map<Fact, IDETestValue>> &results,
+      const std::unordered_map<const llvm::Instruction *,
+                               std::unordered_map<Fact, IDETestValue>>
+          &expected) const {
     TestResult r;
     r.passed = true;
     r.message = "OK";
     r.num_values_computed = 0;
-    for (const auto& p : results)
-      for (const auto& q : p.second) (void)q, ++r.num_values_computed;
+    for (const auto &p : results)
+      for (const auto &q : p.second)
+        (void)q, ++r.num_values_computed;
     r.actual_values = results;
     r.expected_values = expected;
-    if (results != expected) r.passed = false, r.message = "Result does not match expected";
+    if (results != expected)
+      r.passed = false, r.message = "Result does not match expected";
     return r;
   }
 
   EdgeFunction create_linear_function(int64_t a, int64_t b) const {
-    return [a, b](const IDETestValue& v) {
-      if (v.is_bottom()) return IDETestValue::bottom();
-      if (v.is_top()) return IDETestValue::top();
+    return [a, b](const IDETestValue &v) {
+      if (v.is_bottom())
+        return IDETestValue::bottom();
+      if (v.is_top())
+        return IDETestValue::top();
       return IDETestValue::constant(a * v.value + b);
     };
   }
 
   EdgeFunction create_constant_function(int64_t c) const {
-    return [c](const IDETestValue&) { return IDETestValue::constant(c); };
+    return [c](const IDETestValue &) { return IDETestValue::constant(c); };
   }
 
 private:
@@ -199,28 +231,31 @@ public:
     std::string name;
     std::string description;
     IDESolverTestProblem::TestMode mode;
-    std::function<bool(const IDESolverTestProblem::TestResult&)> validator;
+    std::function<bool(const IDESolverTestProblem::TestResult &)> validator;
   };
 
   IDETestSuite() { register_standard_tests(); }
 
-  void add_test_case(const TestCase& test_case) { m_test_cases.push_back(test_case); }
+  void add_test_case(const TestCase &test_case) {
+    m_test_cases.push_back(test_case);
+  }
 
-  bool run_all_tests(llvm::raw_ostream& os) {
+  bool run_all_tests(llvm::raw_ostream &os) {
     bool ok = true;
-    for (const auto& tc : m_test_cases) {
-      if (!run_test(tc.name, os)) ok = false;
+    for (const auto &tc : m_test_cases) {
+      if (!run_test(tc.name, os))
+        ok = false;
     }
     return ok;
   }
 
-  bool run_test(const std::string& name, llvm::raw_ostream& os) {
+  bool run_test(const std::string &name, llvm::raw_ostream &os) {
     (void)name;
     (void)os;
     return true;
   }
 
-  const std::vector<TestCase>& get_test_cases() const { return m_test_cases; }
+  const std::vector<TestCase> &get_test_cases() const { return m_test_cases; }
 
 private:
   std::vector<TestCase> m_test_cases;

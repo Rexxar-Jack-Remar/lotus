@@ -300,7 +300,7 @@ private:
     if (auto *Provided = Problem.getCFG()) {
       return Provided;
     }
-    // Fix 1.3: use a per-instance CFG instead of a static singleton.
+    // Use a per-instance CFG instead of a static singleton.
     // The static singleton was shared across all IntraMonoSolver instances,
     // causing data races when multiple solvers ran concurrently and stale
     // state when the same solver was reused across different functions.
@@ -308,8 +308,6 @@ private:
   }
 
   void initialize() {
-    // Fix 3.7: entry points are always Function* now; the string-based
-    // getEntryPointNames() API has been removed from Problem.h.
     std::vector<llvm::Function *> EntryFunctions = Problem.getEntryPoints();
 
     std::unordered_set<llvm::Function *> SeenFunctions;
@@ -389,7 +387,7 @@ private:
   }
 
   ProblemTy &Problem;
-  /// Fix 1.3: per-instance CFG (replaces the static singleton).
+  /// Per-instance CFG (replaces the static singleton).
   ::dataflow::controlflow::LLVMIntraCFG PerInstanceCFG;
   const ::dataflow::controlflow::IntraCFG *CFG;
   std::deque<std::pair<n_t, n_t>> Worklist;

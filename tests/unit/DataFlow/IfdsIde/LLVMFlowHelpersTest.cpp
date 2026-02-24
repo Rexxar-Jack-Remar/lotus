@@ -1,6 +1,8 @@
-#include <gtest/gtest.h>
-#include <Dataflow/IFDS/LLVMFlowHelpers.h>
+#include <memory>
+#include <set>
 
+#include <Dataflow/IFDS/Utils/LLVMFlowHelpers.h>
+#include <gtest/gtest.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -12,15 +14,12 @@
 #include <llvm/IR/Type.h>
 #include <llvm/Support/Casting.h>
 
-#include <memory>
-#include <set>
-
 namespace {
 
 struct CallFixtureIR {
   std::unique_ptr<llvm::LLVMContext> Ctx;
   std::unique_ptr<llvm::Module> Mod;
-  const llvm::CallBase*Call = nullptr;
+  const llvm::CallBase *Call = nullptr;
   const llvm::Value *Arg = nullptr;
   const llvm::GlobalVariable *Global = nullptr;
 };
@@ -33,14 +32,14 @@ CallFixtureIR buildCallFixture() {
   auto *I32Ty = llvm::Type::getInt32Ty(*IR.Ctx);
   auto *PtrTy = llvm::Type::getInt32PtrTy(*IR.Ctx);
 
-  IR.Global = new llvm::GlobalVariable(
-      *IR.Mod, I32Ty, false, llvm::GlobalValue::ExternalLinkage,
-      llvm::ConstantInt::get(I32Ty, 0), "g");
+  IR.Global = new llvm::GlobalVariable(*IR.Mod, I32Ty, false,
+                                       llvm::GlobalValue::ExternalLinkage,
+                                       llvm::ConstantInt::get(I32Ty, 0), "g");
 
-  auto *CalleeTy = llvm::FunctionType::get(llvm::Type::getVoidTy(*IR.Ctx),
-                                           {PtrTy}, false);
-  auto *Callee = llvm::Function::Create(CalleeTy, llvm::Function::ExternalLinkage,
-                                        "callee", IR.Mod.get());
+  auto *CalleeTy =
+      llvm::FunctionType::get(llvm::Type::getVoidTy(*IR.Ctx), {PtrTy}, false);
+  auto *Callee = llvm::Function::Create(
+      CalleeTy, llvm::Function::ExternalLinkage, "callee", IR.Mod.get());
 
   auto *MainTy = llvm::FunctionType::get(I32Ty, {}, false);
   auto *Main = llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage,
@@ -152,4 +151,3 @@ TEST(LLVMFlowHelpersTest, PolicyPropagatesLocalWhenPredicateDoesNotMatch) {
   EXPECT_EQ(Out.size(), 1U);
   EXPECT_TRUE(Out.count(IR.Arg));
 }
-

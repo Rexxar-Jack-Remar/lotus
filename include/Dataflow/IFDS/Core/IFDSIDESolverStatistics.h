@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/raw_ostream.h>
 #include <chrono>
 #include <unordered_map>
@@ -87,32 +88,32 @@ struct IFDSIDESolverStatistics {
 
   double flow_function_cache_hit_rate() const {
     size_t total = flow_function_cache_hits + flow_function_cache_misses;
-    return total > 0 ? (double)flow_function_cache_hits / total : 0.0;
+    return total > 0 ? static_cast<double>(flow_function_cache_hits) / static_cast<double>(total) : 0.0;
   }
 
   double edge_function_cache_hit_rate() const {
     size_t total = edge_function_cache_hits + edge_function_cache_misses;
-    return total > 0 ? (double)edge_function_cache_hits / total : 0.0;
+    return total > 0 ? static_cast<double>(edge_function_cache_hits) / static_cast<double>(total) : 0.0;
   }
 
   double compose_cache_hit_rate() const {
     size_t total = compose_cache_hits + compose_cache_misses;
-    return total > 0 ? (double)compose_cache_hits / total : 0.0;
+    return total > 0 ? static_cast<double>(compose_cache_hits) / static_cast<double>(total) : 0.0;
   }
 
   double join_cache_hit_rate() const {
     size_t total = join_cache_hits + join_cache_misses;
-    return total > 0 ? (double)join_cache_hits / total : 0.0;
+    return total > 0 ? static_cast<double>(join_cache_hits) / static_cast<double>(total) : 0.0;
   }
 
   double summary_reuse_rate() const {
     size_t total = summary_edges_created + summary_edges_reused;
-    return total > 0 ? (double)summary_edges_reused / total : 0.0;
+    return total > 0 ? static_cast<double>(summary_edges_reused) / static_cast<double>(total) : 0.0;
   }
 
   double avg_facts_per_instruction() const {
     return instructions_analyzed > 0 
-        ? (double)facts_at_exit_total / instructions_analyzed 
+        ? static_cast<double>(facts_at_exit_total) / static_cast<double>(instructions_analyzed) 
         : 0.0;
   }
 
@@ -265,37 +266,31 @@ struct IFDSIDESolverStatistics {
 
 private:
   static std::string format_time(double seconds) {
-    char buf[64];
     if (seconds < 0.001) {
-      snprintf(buf, sizeof(buf), "%.3f μs", seconds * 1e6);
+      return llvm::formatv("{0:F3} μs", seconds * 1e6).str();
     } else if (seconds < 1.0) {
-      snprintf(buf, sizeof(buf), "%.3f ms", seconds * 1e3);
+      return llvm::formatv("{0:F3} ms", seconds * 1e3).str();
     } else if (seconds < 60.0) {
-      snprintf(buf, sizeof(buf), "%.3f s", seconds);
+      return llvm::formatv("{0:F3} s", seconds).str();
     } else {
       int minutes = (int)(seconds / 60);
       double secs = seconds - minutes * 60;
-      snprintf(buf, sizeof(buf), "%dm %.3fs", minutes, secs);
+      return llvm::formatv("{0}m {1:F3}s", minutes, secs).str();
     }
-    return std::string(buf);
   }
 
   static std::string format_number(size_t num) {
-    char buf[64];
     if (num < 1000) {
-      snprintf(buf, sizeof(buf), "%zu", num);
+      return llvm::formatv("{0}", num).str();
     } else if (num < 1000000) {
-      snprintf(buf, sizeof(buf), "%.2fK", num / 1000.0);
+      return llvm::formatv("{0:F2}K", static_cast<double>(num) / 1000.0).str();
     } else {
-      snprintf(buf, sizeof(buf), "%.2fM", num / 1000000.0);
+      return llvm::formatv("{0:F2}M", static_cast<double>(num) / 1000000.0).str();
     }
-    return std::string(buf);
   }
 
   static std::string format_percentage(double ratio) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%.1f%%", ratio * 100.0);
-    return std::string(buf);
+    return llvm::formatv("{0:F1}%", ratio * 100.0).str();
   }
 
   static std::string format_rate(double rate) {
@@ -303,9 +298,7 @@ private:
   }
 
   static std::string format_decimal(double val) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%.2f", val);
-    return std::string(buf);
+    return llvm::formatv("{0:F2}", val).str();
   }
 };
 

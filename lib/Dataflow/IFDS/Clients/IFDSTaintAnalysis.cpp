@@ -71,8 +71,9 @@ bool TaintFact::operator==(const TaintFact& other) const {
         case TAINTED_VAR: return m_value == other.m_value;
         case TAINTED_MEMORY: return m_memory_location == other.m_memory_location;
         case TAINTED_FIELD: return m_value == other.m_value && m_field_index == other.m_field_index;
-        case TAINTED_GLOBAL: return m_value == other.m_value;
-        case TAINTED_IMPLICIT: return m_value == other.m_value;
+        case TAINTED_GLOBAL:
+        case TAINTED_IMPLICIT:
+            return m_value == other.m_value;
     }
     return false;
 }
@@ -86,8 +87,9 @@ bool TaintFact::operator<(const TaintFact& other) const {
         case TAINTED_FIELD: 
             if (m_value != other.m_value) return m_value < other.m_value;
             return m_field_index < other.m_field_index;
-        case TAINTED_GLOBAL: return m_value < other.m_value;
-        case TAINTED_IMPLICIT: return m_value < other.m_value;
+        case TAINTED_GLOBAL:
+        case TAINTED_IMPLICIT:
+            return m_value < other.m_value;
     }
     return false;
 }

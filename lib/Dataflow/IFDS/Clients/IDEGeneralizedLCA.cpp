@@ -83,7 +83,7 @@ IDEGeneralizedLCA::FactSet IDEGeneralizedLCA::call_flow(
   }
   for (unsigned i = 0; i < call->arg_size() && i < callee->arg_size(); ++i) {
     if (fact == call->getArgOperand(i)) {
-      auto it = callee->arg_begin();
+      const auto *it = callee->arg_begin();
       std::advance(it, i);
       out.insert(&*it);
     }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Dataflow/IFDS/IFDSFramework.h"
+#include "Dataflow/IFDS/Core/IFDSFramework.h"
 
 #include <string>
 #include <unordered_set>
@@ -15,7 +15,9 @@ struct ExtendedTaintValue {
 
   static ExtendedTaintValue bottom() { return ExtendedTaintValue(Bottom); }
   static ExtendedTaintValue clean() { return ExtendedTaintValue(Clean); }
-  static ExtendedTaintValue sanitized() { return ExtendedTaintValue(Sanitized); }
+  static ExtendedTaintValue sanitized() {
+    return ExtendedTaintValue(Sanitized);
+  }
   static ExtendedTaintValue tainted() { return ExtendedTaintValue(Tainted); }
   static ExtendedTaintValue top() { return ExtendedTaintValue(Top); }
 

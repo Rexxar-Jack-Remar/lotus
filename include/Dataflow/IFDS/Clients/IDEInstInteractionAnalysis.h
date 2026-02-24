@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Dataflow/IFDS/IFDSFramework.h"
+#include "Dataflow/IFDS/Core/IFDSFramework.h"
 
 namespace ifds {
 
@@ -24,7 +24,8 @@ struct InstInteractionValue {
 };
 
 class IDEInstInteractionAnalysis
-    : public DefaultNoAliasIDEProblem<const llvm::Value *, InstInteractionValue> {
+    : public DefaultNoAliasIDEProblem<const llvm::Value *,
+                                      InstInteractionValue> {
 public:
   using Fact = const llvm::Value *;
   using Value = InstInteractionValue;

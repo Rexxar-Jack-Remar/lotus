@@ -9,9 +9,9 @@
  * - Edge function composition memoization: Avoids redundant function compositions
  */
 
+#include "Dataflow/ControlFlow/InterCFG.h"
 #include <llvm/IR/CFG.h>
 #include <llvm/Support/raw_ostream.h>
-#include "Dataflow/ControlFlow/InterCFG.h"
 #include <algorithm>
 
 namespace ifds {

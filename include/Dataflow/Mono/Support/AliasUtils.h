@@ -5,8 +5,7 @@
 //
 // Previously this logic was copy-pasted into IntraConstantPropagation,
 // IntraFullConstantPropagation, InterConstantPropagation,
-// InterFullConstantPropagation, and InterTaintAnalysis.  Any bug fix now
-// only needs to be applied here (Fix 3.9).
+// InterFullConstantPropagation, and InterTaintAnalysis.  
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
@@ -86,7 +85,7 @@ AliasPartition classifyAliases(const llvm::Value *Ptr,
 /// considered tainted/uninitialized.
 ///
 /// Without alias analysis every pointer in \p Facts is conservatively treated
-/// as a potential alias of \p V (Fix 2.4: this is still over-approximate but
+/// as a potential alias of \p V (this is still over-approximate but
 /// is the best we can do without AA; the caller should prefer providing AA).
 template <typename FactSet>
 bool isAliasedInSet(const llvm::Value *V, const FactSet &Facts,
@@ -116,7 +115,7 @@ bool isAliasedInSet(const llvm::Value *V, const FactSet &Facts,
       return true;
     }
     if (!HaveAA) {
-      // Fix 2.4: without AA we must be conservative, but only for pointer
+      // Without AA we must be conservative, but only for pointer
       // types (already checked above).  We still return true here because we
       // cannot rule out aliasing.
       return true;

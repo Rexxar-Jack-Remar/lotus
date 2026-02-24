@@ -54,7 +54,7 @@ public:
   using ProblemAnalysisDomain = AnalysisDomainTy;
   using ConfigurationTy = HasNoConfigurationType;
 
-  // Fix 3.7: Unified constructor — always takes a vector of Function* directly.
+  // Unified constructor — always takes a vector of Function* directly.
   // The string-based constructor has been removed to eliminate the ambiguity
   // where getEntryPoints() returned empty even though entry points were
   // specified by name (they were only resolved lazily at solve-time).
@@ -207,7 +207,7 @@ public:
   pt_t getPointstoInfo() const { return PT; }
   pt_t getAliasAnalysis() const { return PT; }
 
-  // Fix 3.10: setSoundness now actually stores the value and returns true.
+  // setSoundness now actually stores the value and returns true.
   // Subclasses that want to adjust behavior based on soundness should check
   // this->S in their transfer functions.
   virtual bool setSoundness(Soundness NewS) {
@@ -319,7 +319,7 @@ public:
    *
    * Default: returns direct callee only.  For indirect calls (function
    * pointers, virtual dispatch) the default returns an empty vector and
-   * emits a diagnostic warning (Fix 3.8).  Subclasses should override this
+   * emits a diagnostic warning.  Subclasses should override this
    * method and use points-to information to resolve indirect calls soundly.
    *
    * @param CallSite The call instruction
@@ -334,7 +334,7 @@ public:
     if (auto *Callee = Call->getCalledFunction()) {
       Callees.push_back(Callee);
     } else {
-      // Fix 3.8: indirect call — warn instead of silently dropping.
+      // Indirect call — warn instead of silently dropping.
       // The default implementation cannot resolve indirect calls; the analysis
       // will be unsound at this call site.  Override getCalleesOfCallAt() and
       // use points-to information to handle indirect calls correctly.

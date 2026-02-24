@@ -7,8 +7,8 @@
 
 #pragma once
 
-#include "Dataflow/IFDS/IFDSFramework.h"
-#include "Dataflow/IFDS/IFDSIDESolverConfig.h"
+#include "Dataflow/IFDS/Core/IFDSFramework.h"
+#include "Dataflow/IFDS/Core/IFDSIDESolverConfig.h"
 #include "Dataflow/IFDS/Solvers/IDESolver.h"
 
 #include <chrono>

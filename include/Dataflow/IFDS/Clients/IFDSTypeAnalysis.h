@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "Dataflow/IFDS/IFDSFramework.h"
+#include "Dataflow/IFDS/Core/IFDSFramework.h"
 
 #include <map>
 
@@ -26,8 +26,8 @@ public:
                               const Fact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 
-  std::map<const llvm::Value *, const llvm::Type *>
-  infer_types(const std::unordered_map<const llvm::Instruction *, FactSet> &facts)
+  std::map<const llvm::Value *, const llvm::Type *> infer_types(
+      const std::unordered_map<const llvm::Instruction *, FactSet> &facts)
       const;
 };
 

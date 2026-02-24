@@ -7,8 +7,8 @@
 #pragma once
 
 #include "Dataflow/ControlFlow/InterCFG.h"
-#include "Dataflow/IFDS/IFDSFramework.h"
-#include "Dataflow/IFDS/IFDSIDESolverConfig.h"
+#include "Dataflow/IFDS/Core/IFDSFramework.h"
+#include "Dataflow/IFDS/Core/IFDSIDESolverConfig.h"
 
 #include <utility>
 #include <vector>
@@ -120,7 +120,8 @@ private:
       return h;
     }
   };
-  std::unordered_map<SummaryKey, std::unordered_set<Fact>, SummaryKeyHash> m_summaries;
+  std::unordered_map<SummaryKey, std::unordered_set<Fact>, SummaryKeyHash>
+      m_summaries;
 
   // Track entry facts used when entering each callee: (call, entry_fact) ->
   // true This allows proper retroactive summary application
@@ -198,7 +199,8 @@ private:
       m_call_to_return_flow_cache;
 
   // Call graph information (read-only after initialization)
-  std::unordered_map<const llvm::CallBase *, std::vector<const llvm::Function *>>
+  std::unordered_map<const llvm::CallBase *,
+                     std::vector<const llvm::Function *>>
       m_call_to_callee;
   std::unordered_map<const llvm::Function *,
                      std::vector<const llvm::CallBase *>>

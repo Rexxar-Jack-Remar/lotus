@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "Dataflow/IFDS/IFDSFramework.h"
+#include "Dataflow/IFDS/Core/IFDSFramework.h"
 
 #include <functional>
 #include <map>
@@ -61,12 +61,13 @@ struct UninitVarFact {
   bool is_initialized() const { return type == INITIALIZED; }
 };
 
-// Specialize fact_less so PathEdge<UninitVarFact> and SummaryEdge<UninitVarFact>
-// can be used in std::set without requiring operator< visible at template
-// instantiation. Uses std::less for pointer comparison.
+// Specialize fact_less so PathEdge<UninitVarFact> and
+// SummaryEdge<UninitVarFact> can be used in std::set without requiring
+// operator< visible at template instantiation. Uses std::less for pointer
+// comparison.
 template <>
 inline bool fact_less<UninitVarFact>(const UninitVarFact &a,
-                                    const UninitVarFact &b) {
+                                     const UninitVarFact &b) {
   if (a.type != b.type)
     return a.type < b.type;
   return std::less<const llvm::Value *>{}(a.value, b.value);
@@ -94,7 +95,8 @@ namespace ifds {
 // Uninitialized Variables Analysis
 // ============================================================================
 
-class UninitializedVariablesAnalysis : public DefaultAliasAwareIFDSProblem<UninitVarFact> {
+class UninitializedVariablesAnalysis
+    : public DefaultAliasAwareIFDSProblem<UninitVarFact> {
 public:
   struct UninitResult {
     const llvm::Instruction *use_site;
@@ -116,12 +118,12 @@ public:
   UninitVarFact zero_fact() const override;
   FactSet normal_flow(const llvm::Instruction *stmt,
                       const UninitVarFact &fact) override;
-  FactSet call_flow(const llvm::CallBase*call, const llvm::Function *callee,
+  FactSet call_flow(const llvm::CallBase *call, const llvm::Function *callee,
                     const UninitVarFact &fact) override;
-  FactSet return_flow(const llvm::CallBase*call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Function *callee,
                       const UninitVarFact &exit_fact,
                       const UninitVarFact &call_fact) override;
-  FactSet call_to_return_flow(const llvm::CallBase*call,
+  FactSet call_to_return_flow(const llvm::CallBase *call,
                               const UninitVarFact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 

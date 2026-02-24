@@ -3,7 +3,8 @@
  */
 
 #include "Dataflow/IFDS/Clients/IFDSConstAnalysis.h"
-#include "Dataflow/IFDS/LLVMFlowHelpers.h"
+
+#include "Dataflow/IFDS/Utils/LLVMFlowHelpers.h"
 
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/Instructions.h>
@@ -84,7 +85,9 @@ ConstAnalysis::FactSet ConstAnalysis::normal_flow(const llvm::Instruction *stmt,
             }
             return ConstFact(f.type, alias);
           },
-          [](const ConstFact &f) { return !f.is_zero() && f.value != nullptr; });
+          [](const ConstFact &f) {
+            return !f.is_zero() && f.value != nullptr;
+          });
     } else {
       result.insert(fact);
     }
@@ -95,7 +98,7 @@ ConstAnalysis::FactSet ConstAnalysis::normal_flow(const llvm::Instruction *stmt,
   return result;
 }
 
-ConstAnalysis::FactSet ConstAnalysis::call_flow(const llvm::CallBase*call,
+ConstAnalysis::FactSet ConstAnalysis::call_flow(const llvm::CallBase *call,
                                                 const llvm::Function *callee,
                                                 const ConstFact &fact) {
   FactSet result;
@@ -105,24 +108,20 @@ ConstAnalysis::FactSet ConstAnalysis::call_flow(const llvm::CallBase*call,
     return result;
   }
 
-  flow::map_facts_to_callee(call, callee, fact, result,
-                            [](const llvm::Value *actual,
-                               const llvm::Argument *formal,
-                               const ConstFact &source) {
-                              return source.value == actual &&
-                                     formal->getType()->isPointerTy();
-                            },
-                            [](const llvm::Value * /*actual*/,
-                               const llvm::Argument *formal,
-                               const ConstFact &source) {
-                              return ConstFact(source.type, formal);
-                            });
+  flow::map_facts_to_callee(
+      call, callee, fact, result,
+      [](const llvm::Value *actual, const llvm::Argument *formal,
+         const ConstFact &source) {
+        return source.value == actual && formal->getType()->isPointerTy();
+      },
+      [](const llvm::Value * /*actual*/, const llvm::Argument *formal,
+         const ConstFact &source) { return ConstFact(source.type, formal); });
 
   return result;
 }
 
 ConstAnalysis::FactSet ConstAnalysis::return_flow(
-    const llvm::CallBase*call, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Function *callee,
     const ConstFact &exit_fact, const ConstFact & /*call_fact*/) {
   FactSet result;
 
@@ -150,7 +149,7 @@ ConstAnalysis::FactSet ConstAnalysis::return_flow(
 }
 
 ConstAnalysis::FactSet
-ConstAnalysis::call_to_return_flow(const llvm::CallBase*call,
+ConstAnalysis::call_to_return_flow(const llvm::CallBase *call,
                                    const ConstFact &fact) {
   FactSet result;
 
@@ -221,7 +220,7 @@ bool ConstAnalysis::is_vtable_store(const llvm::StoreInst *store) const {
   return false;
 }
 
-bool ConstAnalysis::is_memory_intrinsic(const llvm::CallBase*call) const {
+bool ConstAnalysis::is_memory_intrinsic(const llvm::CallBase *call) const {
   if (!call->getCalledFunction()) {
     return false;
   }

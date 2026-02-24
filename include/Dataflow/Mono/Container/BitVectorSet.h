@@ -142,7 +142,7 @@ public:
   /**
    * @brief Set union: this = this ∪ other
    *
-   * Fix 3.4: assert that both sets share the same universe size before
+   * Assert that both sets share the same universe size before
    * performing bit-level operations.  Mismatched universes would cause
    * llvm::BitVector to silently truncate to the shorter length, producing
    * incorrect results.
@@ -159,7 +159,7 @@ public:
   /**
    * @brief Set intersection: this = this ∩ other
    *
-   * Fix 3.4: assert matching universe sizes.
+   * assert matching universe sizes.
    *
    * @param Other The set to intersect with
    */
@@ -173,7 +173,6 @@ public:
   /**
    * @brief Set difference: this = this - other
    *
-   * Fix 3.4: assert matching universe sizes.
    *
    * @param Other The set to subtract
    */

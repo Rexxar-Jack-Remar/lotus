@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Dataflow/IFDS/IFDSFramework.h"
+#include "Dataflow/IFDS/Core/IFDSFramework.h"
 
 #include <string>
 #include <unordered_set>
@@ -20,7 +20,9 @@ struct SecureHeapValue {
   static SecureHeapValue freed() { return SecureHeapValue(Freed); }
   static SecureHeapValue error() { return SecureHeapValue(Error); }
 
-  bool operator==(const SecureHeapValue &other) const { return kind == other.kind; }
+  bool operator==(const SecureHeapValue &other) const {
+    return kind == other.kind;
+  }
 };
 
 class IDESecureHeapPropagation

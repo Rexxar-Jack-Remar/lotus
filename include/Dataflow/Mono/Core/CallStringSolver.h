@@ -399,7 +399,7 @@ public:
     return OUT(ContextKey{Inst, Ctx});
   }
 
-  // Fix 3.5: replace shared static empty containers with per-instance members.
+  // Replace shared static empty containers with per-instance members.
   // The old code used "static ContainerT EmptySet" which is shared across all
   // instances and all calls.  For BitVectorSet this means the returned empty
   // set has no universe, causing incorrect results when callers iterate or
@@ -451,7 +451,7 @@ private:
   std::map<llvm::Instruction *, ContainerT> Kills;
   std::map<ContextKey, ContainerT> Ins;
   std::map<ContextKey, ContainerT> Outs;
-  /// Fix 3.5: per-instance empty container returned for missing keys.
+  /// Per-instance empty container returned for missing keys.
   /// This avoids the shared-static problem where all callers would share
   /// one empty container (especially problematic for BitVectorSet which
   /// needs a universe to be useful).
@@ -492,8 +492,6 @@ public:
    * The analysis starts at the entry block's first instruction with an empty
    * call-string context.
    *
-   * Fix 1.4: returns unique_ptr<ResultTy> instead of a raw owning pointer.
-   * Fix 1.5: asserts that ICF is non-null (was silently returning nullptr).
    *
    * @return unique_ptr to result container (never null on success)
    */
@@ -787,7 +785,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
       Context RetCtx = Ctx;
       RetCtx.push_back(CallInst);
       for (auto *RetInst : CallToRetIt->second) {
-        // Fix 1.6: when Ctx is empty, RetCtx == Ctx (push+pop of the same
+        // When Ctx is empty, RetCtx == Ctx (push+pop of the same
         // call site on an empty deque yields the same empty deque), so the
         // two pushes below would add the same entry twice.  Only add the
         // empty-context entry when it is genuinely different from RetCtx.
@@ -824,7 +822,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
     std::function<bool(const ContainerT &, const ContainerT &)> equal,
     std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
         getCalleesOfCallAt) {
-  // Fix 1.5: assert ICF is non-null rather than silently returning nullptr.
+  // Assert ICF is non-null rather than silently returning nullptr.
   assert(ICF != nullptr && "CallStringInterProceduralDataFlowEngine::applyForward: "
                            "ICF must not be null");
   if (Entry == nullptr || Entry->isDeclaration()) {
@@ -863,7 +861,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     std::function<bool(const ContainerT &, const ContainerT &)> equal,
     std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
         getCalleesOfCallAt) {
-  // Fix 1.5: assert ICF is non-null.
+  // Assert ICF is non-null.
   assert(ICF != nullptr && "CallStringInterProceduralDataFlowEngine::"
                            "applyForwardFromSeeds: ICF must not be null");
   if (M == nullptr || Seeds.empty()) {

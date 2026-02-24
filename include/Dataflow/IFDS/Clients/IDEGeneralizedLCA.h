@@ -1,9 +1,10 @@
 #pragma once
 
-#include "Dataflow/IFDS/IFDSFramework.h"
+#include "Dataflow/IFDS/Core/IFDSFramework.h"
+
+#include <set>
 
 #include <llvm/ADT/Optional.h>
-#include <set>
 
 namespace ifds {
 
@@ -14,7 +15,8 @@ struct GLCAValue {
   GLCAValue() : kind(Bottom) {}
   explicit GLCAValue(Kind k) : kind(k) {}
   explicit GLCAValue(int64_t c) : kind(ConstantSet), constants{c} {}
-  explicit GLCAValue(std::set<int64_t> c) : kind(ConstantSet), constants(std::move(c)) {}
+  explicit GLCAValue(std::set<int64_t> c)
+      : kind(ConstantSet), constants(std::move(c)) {}
 
   static GLCAValue bottom() { return GLCAValue(Bottom); }
   static GLCAValue top() { return GLCAValue(Top); }
@@ -60,7 +62,8 @@ public:
 
 private:
   static llvm::Optional<int64_t> as_const(const llvm::Value *v);
-  static llvm::Optional<int64_t> apply_binop(unsigned opcode, int64_t a, int64_t b);
+  static llvm::Optional<int64_t> apply_binop(unsigned opcode, int64_t a,
+                                             int64_t b);
   static Value cap_constants(std::set<int64_t> values);
   static constexpr size_t kMaxSetSize = 8;
 };
