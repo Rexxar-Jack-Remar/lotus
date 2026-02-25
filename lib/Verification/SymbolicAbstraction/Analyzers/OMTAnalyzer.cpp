@@ -5,43 +5,94 @@
 #include "Verification/SymbolicAbstraction/Analyzers/Analyzer.h"
 #include "Verification/SymbolicAbstraction/Core/ConcreteState.h"
 #include "Verification/SymbolicAbstraction/Core/ValueMapping.h"
-#include "Verification/SymbolicAbstraction/Domains/Intervals.h"
 #include "Verification/SymbolicAbstraction/Utils/Config.h"
 #include "Verification/SymbolicAbstraction/Utils/Utils.h"
 
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace symbolic_abstraction {
 namespace {
-/**
- * @brief Collect optimization objectives from interval-style leaves in an abstract value.
- *
- * Traverses the flattened subcomponents of the abstract value and extracts
- * interval domain components. For each interval that has an associated variable,
- * adds the corresponding Z3 expression to the objectives vector (avoiding duplicates).
- *
- * @param value The abstract value to traverse for interval components
- * @param vmap Value mapping to convert LLVM values to Z3 expressions
- * @param[out] objectives Vector to collect Z3 expressions for optimization objectives
- * @param[in,out] seen Set to track already-seen variables to avoid duplicates
- */
-void collectIntervalObjectives(const AbstractValue *value,
-                               const ValueMapping &vmap,
-                               std::vector<z3::expr> *objectives,
-                               std::set<llvm::Value *> *seen) {
-  std::vector<const AbstractValue *> leaves;
-  value->gatherFlattenedSubcomponents(&leaves);
+void addObjectiveIfNew(const z3::expr &objective,
+                       std::vector<z3::expr> *objectives,
+                       std::set<std::string> *seen) {
+  std::string key = objective.to_string();
+  if (seen->insert(key).second)
+    objectives->push_back(objective);
+}
 
-  for (auto *leaf : leaves) {
-    if (auto *iv = dynamic_cast<const domains::Interval *>(leaf)) {
-      llvm::Value *var = iv->getVariable();
-      if (!var)
+/**
+ * @brief Collect OMT objectives from represented bitvector variables.
+ *
+ * We use a generic template bank so OMT can refine more than interval-only
+ * domains. For each represented bitvector value x, we add:
+ * - x (bitvector objective)
+ * - bv2int(x, unsigned)
+ * - bv2int(x, signed)
+ *
+ * Optionally, we also add signed pairwise differences (x - y) for values with
+ * equal bitwidth to support relational domains.
+ */
+void collectObjectives(const FunctionContext &fctx, const ValueMapping &vmap,
+                       std::vector<z3::expr> *objectives,
+                       unsigned max_objectives, bool enable_pair_objectives,
+                       unsigned max_bit_objectives_per_var) {
+  std::set<std::string> seen;
+  std::vector<z3::expr> vars;
+  vars.reserve(fctx.representedValues().size());
+
+  for (llvm::Value *value : fctx.representedValues()) {
+    z3::sort sort = fctx.sortForType(value->getType());
+    if (!sort.is_bv())
+      continue;
+
+    z3::expr x = vmap[value];
+    vars.push_back(x);
+
+    addObjectiveIfNew(x, objectives, &seen);
+    if (objectives->size() >= max_objectives)
+      return;
+
+    addObjectiveIfNew(z3::bv2int(x, false), objectives, &seen);
+    if (objectives->size() >= max_objectives)
+      return;
+
+    addObjectiveIfNew(z3::bv2int(x, true), objectives, &seen);
+    if (objectives->size() >= max_objectives)
+      return;
+
+    // Bit-level objectives help bitmask/congruence-like domains by forcing
+    // models that witness variability/fixity of individual bits.
+    unsigned bw = x.get_sort().bv_size();
+    unsigned bits_to_add = std::min(max_bit_objectives_per_var, bw);
+    for (unsigned bit = 0; bit < bits_to_add; ++bit) {
+      addObjectiveIfNew(z3::bv2int(x.extract(bit, bit), false), objectives,
+                        &seen);
+      if (objectives->size() >= max_objectives)
+        return;
+    }
+  }
+
+  if (!enable_pair_objectives)
+    return;
+
+  for (unsigned i = 0; i < vars.size(); ++i) {
+    for (unsigned j = i + 1; j < vars.size(); ++j) {
+      if (vars[i].get_sort().bv_size() != vars[j].get_sort().bv_size())
         continue;
-      if (seen->insert(var).second) {
-        objectives->push_back(vmap[var]);
-      }
+
+      z3::expr diff = z3::bv2int(vars[i], true) - z3::bv2int(vars[j], true);
+      addObjectiveIfNew(diff, objectives, &seen);
+      if (objectives->size() >= max_objectives)
+        return;
+
+      // Octagon/zone-style template.
+      z3::expr sum = z3::bv2int(vars[i], true) + z3::bv2int(vars[j], true);
+      addObjectiveIfNew(sum, objectives, &seen);
+      if (objectives->size() >= max_objectives)
+        return;
     }
   }
 }
@@ -81,6 +132,8 @@ OMTAnalyzer::runOptimize(const z3::expr &objective, const z3::expr &phi,
   else
     opt.minimize(objective);
 
+  // Keep SMT call accounting comparable with other analyzers.
+  countSmtSolverCall();
   auto res = opt.check();
   if (res == z3::sat) {
     ConcreteState cstate(vmap, opt.get_model());
@@ -94,53 +147,10 @@ OMTAnalyzer::runOptimize(const z3::expr &objective, const z3::expr &phi,
   return OptimizeStatus::Unknown;
 }
 
-/**
- * @brief Fallback enumeration-based strongest consequence computation.
- *
- * When OMT optimization fails or times out, this method falls back to a
- * model enumeration approach similar to UnilateralAnalyzer. Iteratively
- * finds counterexample models that violate the current abstract value,
- * joins them in, and applies widening periodically to ensure termination.
- *
- * @param[in,out] result The abstract value to refine (updated in place)
- * @param vmap Value mapping for converting models to concrete states
- * @param phi The constraint formula representing the concrete semantics
- * @return true if the abstract value was changed, false otherwise
- */
-bool OMTAnalyzer::fallbackEnumerate(AbstractValue *result,
-                                    const ValueMapping &vmap,
-                                    const z3::expr &phi) const {
-  z3::solver solver(phi.ctx());
-  solver.add(phi);
-
-  bool changed = false;
-  unsigned int loop_count = 0;
-  auto config = FunctionContext_.getConfig();
-  int widen_delay = config.get<int>("Analyzer", "WideningDelay", 20);
-  int widen_frequency = config.get<int>("Analyzer", "WideningFrequency", 10);
-
-  while (true) {
-    z3::expr constraint = !result->toFormula(vmap, solver.ctx());
-    solver.add(constraint);
-
-    auto z3_answer = checkWithStats(&solver);
-    if (z3_answer == z3::unknown)
-      break;
-    if (z3_answer == z3::unsat)
-      break;
-
-    auto cstate = ConcreteState(vmap, solver.get_model());
-    bool here_changed = result->updateWith(cstate);
-
-    int widen_n = (++loop_count) - widen_delay;
-    if (widen_n >= 0 && (widen_n % widen_frequency) == 0) {
-      result->widen();
-    }
-
-    changed = changed || here_changed;
-  }
-
-  return changed;
+bool OMTAnalyzer::overapproximateToTop(AbstractValue *result) const {
+  auto top = std::unique_ptr<AbstractValue>(result->clone());
+  top->havoc();
+  return result->joinWith(*top);
 }
 
 /**
@@ -149,11 +159,11 @@ bool OMTAnalyzer::fallbackEnumerate(AbstractValue *result,
  * This is the main entry point for computing strongest consequences in OMTAnalyzer.
  * The algorithm:
  * 1. Checks feasibility of phi
- * 2. If infeasible, sets result to bottom
- * 3. Collects interval objectives from the abstract value
- * 4. For each objective, optimizes both max and min to find tight bounds
+ * 2. If infeasible, leaves result unchanged
+ * 3. Collects generic objectives from represented bitvector variables
+ * 4. For each objective, optimizes both max and min to collect extremal models
  * 5. Joins all optimal solutions into the result
- * 6. Falls back to enumeration if optimization fails or times out
+ * 6. If OMT cannot conclude (unknown/incomplete), conservatively overapproximates to top
  *
  * @param[in,out] result The abstract value to refine (updated in place)
  * @param phi The constraint formula representing the concrete semantics
@@ -165,43 +175,60 @@ bool OMTAnalyzer::strongestConsequence(AbstractValue *result, z3::expr phi,
   z3::context &ctx = phi.ctx();
   auto cfg = FunctionContext_.getConfig();
   unsigned timeout_ms = cfg.get<int>("Analyzer", "OMTTimeoutMs", 10000);
-  bool fallback_on_unknown =
-      cfg.get<bool>("Analyzer", "OMTFallbackOnUnknown", true);
+  int max_objectives_cfg = cfg.get<int>("Analyzer", "OMTMaxObjectives", 512);
+  unsigned max_objectives =
+      max_objectives_cfg > 0 ? (unsigned)max_objectives_cfg : 512u;
+  bool pair_objectives =
+      cfg.get<bool>("Analyzer", "OMTPairObjectives", true);
+  int max_bits_cfg =
+      cfg.get<int>("Analyzer", "OMTMaxBitObjectivesPerVar", 8);
+  unsigned max_bit_objectives_per_var =
+      max_bits_cfg > 0 ? (unsigned)max_bits_cfg : 8u;
+  bool retry_unknown_without_timeout =
+      cfg.get<bool>("Analyzer", "OMTRetryUnknownWithoutTimeout", true);
 
   z3::solver feasibility(ctx);
   feasibility.add(phi);
   auto feas_res = checkWithStats(&feasibility);
 
   if (feas_res == z3::unsat) {
-    bool was_bottom = result->isBottom();
-    result->resetToBottom();
-    return !was_bottom;
+    // Match Unilateral/Bilateral behavior in Analyzer::bestTransformer:
+    // joining with alpha(false) should leave result unchanged.
+    return false;
   }
 
-  if (feas_res == z3::unknown && fallback_on_unknown)
-    return fallbackEnumerate(result, vmap, phi);
+  if (feas_res == z3::unknown)
+    return overapproximateToTop(result);
 
   std::vector<z3::expr> objectives;
-  std::set<llvm::Value *> seen;
-  collectIntervalObjectives(result, vmap, &objectives, &seen);
-
+  collectObjectives(FunctionContext_, vmap, &objectives, max_objectives,
+                    pair_objectives, max_bit_objectives_per_var);
   if (objectives.empty())
-    return fallbackEnumerate(result, vmap, phi);
+    return overapproximateToTop(result);
 
   auto candidate = std::unique_ptr<AbstractValue>(result->clone());
   candidate->resetToBottom();
 
   bool saw_unknown = false;
   for (auto &obj : objectives) {
-    auto max_res =
-        runOptimize(obj, phi, vmap, candidate.get(), true, timeout_ms);
-    auto min_res =
-        runOptimize(obj, phi, vmap, candidate.get(), false, timeout_ms);
+    auto run_with_retry = [&](bool maximize) {
+      OptimizeStatus res =
+          runOptimize(obj, phi, vmap, candidate.get(), maximize, timeout_ms);
+      if (res == OptimizeStatus::Unknown && retry_unknown_without_timeout &&
+          timeout_ms > 0) {
+        res = runOptimize(obj, phi, vmap, candidate.get(), maximize, 0);
+      }
+      return res;
+    };
+
+    auto max_res = run_with_retry(true);
+    auto min_res = run_with_retry(false);
 
     if (max_res == OptimizeStatus::Unsat || min_res == OptimizeStatus::Unsat) {
-      bool was_bottom = result->isBottom();
-      result->resetToBottom();
-      return !was_bottom;
+      // phi satisfiable was checked above; objective optimization being UNSAT
+      // indicates an inconsistent optimize query state. Use a conservative
+      // overapproximation to preserve soundness.
+      return overapproximateToTop(result);
     }
 
     if (max_res == OptimizeStatus::Unknown ||
@@ -210,8 +237,8 @@ bool OMTAnalyzer::strongestConsequence(AbstractValue *result, z3::expr phi,
     }
   }
 
-  if (saw_unknown && fallback_on_unknown)
-    return fallbackEnumerate(result, vmap, phi);
+  if (saw_unknown)
+    return overapproximateToTop(result);
 
   return result->joinWith(*candidate);
 }

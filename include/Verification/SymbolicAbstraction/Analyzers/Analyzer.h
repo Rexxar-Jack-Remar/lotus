@@ -237,9 +237,7 @@ private:
   OptimizeStatus runOptimize(const z3::expr &objective, const z3::expr &phi,
                              const ValueMapping &vmap, AbstractValue *target,
                              bool maximize, unsigned timeout_ms) const;
-
-  bool fallbackEnumerate(AbstractValue *result, const ValueMapping &vmap,
-                         const z3::expr &phi) const;
+  bool overapproximateToTop(AbstractValue *result) const;
 
 public:
   OMTAnalyzer(const FunctionContext &s, const FragmentDecomposition &fd,
