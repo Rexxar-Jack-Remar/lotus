@@ -208,13 +208,22 @@ public:
 
   /// Mark a memory address as freed (for use-after-free detection)
   /// @param addr Memory object ID to mark as freed
-  void addToFreedAddrs(uint32_t addr) { _freedAddrs.insert(addr); }
+  void addToFreedAddrs(uint32_t addr) {
+    if (AddressValue::isVirtualMemAddress(addr)) {
+      _freedAddrs.insert(AddressValue::getInternalID(addr));
+    } else {
+      _freedAddrs.insert(addr);
+    }
+  }
 
   /// Check if a memory address has been freed
   /// @param addr Memory object ID to check
   /// @return true if the address was previously freed, false otherwise
   bool isFreedMem(uint32_t addr) const {
-    return _freedAddrs.find(addr) != _freedAddrs.end();
+    uint32_t objId = AddressValue::isVirtualMemAddress(addr)
+                         ? AddressValue::getInternalID(addr)
+                         : addr;
+    return _freedAddrs.find(objId) != _freedAddrs.end();
   }
 
   /// Store an abstract value to a memory address
@@ -361,8 +370,9 @@ public:
   }
 
   inline uint32_t getIDFromAddr(uint32_t addr) const {
-    return _freedAddrs.count(addr) ? AddressValue::getInternalID(InvalidMemAddr)
-                                   : AddressValue::getInternalID(addr);
+    uint32_t objId = AddressValue::getInternalID(addr);
+    return _freedAddrs.count(objId) ? AddressValue::getInternalID(InvalidMemAddr)
+                                    : objId;
   }
 
   AddressValue getGepObjAddrs(uint32_t pointer, IntervalValue offset);

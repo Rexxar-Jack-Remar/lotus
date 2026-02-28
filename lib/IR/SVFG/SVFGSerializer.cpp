@@ -1,15 +1,27 @@
 #include "IR/SVFG/SVFGSerializer.h"
 
+#include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <sstream>
+#include <string>
 #include <tuple>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
+#include <llvm/ADT/StringRef.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace lotus::analysis;
@@ -18,6 +30,584 @@ using namespace llvm;
 static constexpr const char *kHeaderV2 = "SVFG-TEXT-V2";
 static constexpr const char *kHeaderV3 = "SVFG-TEXT-V3";
 static constexpr const char *kHeaderV4 = "SVFG-TEXT-V4";
+static constexpr const char *kHeaderV5 = "SVFG-TEXT-V5";
+
+namespace {
+
+enum class AnchorKind : uint32_t {
+  None = 0,
+  Function = 1,
+  GlobalValue = 2,
+  Argument = 3,
+  Instruction = 4,
+};
+
+struct Anchor {
+  AnchorKind kind = AnchorKind::None;
+  std::string symbolName;
+  std::string functionName;
+  uint32_t bbIndex = 0;
+  uint32_t instIndex = 0;
+  uint32_t argIndex = 0;
+};
+
+struct ParsedObjectInfo {
+  uint32_t objId = 0;
+  uint32_t flags = 0;
+  uint32_t baseObjId = 0;
+  Anchor valueAnchor;
+};
+
+struct ParsedNode {
+  uint32_t id = 0;
+  SVFGK kind = SVFGK::Dummy;
+  uint32_t memReg = 0;
+  uint32_t version = 0;
+  uint32_t aux0 = 0;
+  uint32_t aux1 = 0;
+  SVFGNodeBS pts;
+};
+
+struct ParsedEdge {
+  uint32_t src = 0;
+  uint32_t dst = 0;
+  uint32_t kind = 0;
+  uint32_t weight = static_cast<uint32_t>(SVFGEdge::EdgeWeight::One);
+  SVFGNodeBS pts;
+  Anchor callAnchor;
+  std::string callSiteDebug;
+};
+
+struct ParsedNodeMeta {
+  Anchor valueAnchor;
+  Anchor instAnchor;
+  Anchor functionAnchor;
+  Anchor callAnchor;
+  std::vector<std::pair<uint32_t, Anchor>> valueOperands;
+  std::vector<std::tuple<uint32_t, uint32_t, uint32_t>> mssaOperands;
+};
+
+static const Module *getModuleFromICFG(const ICFG *icfg) {
+  if (!icfg)
+    return nullptr;
+  for (const auto &pair : *icfg) {
+    const ICFGNode *node = pair.second;
+    if (!node)
+      continue;
+    if (const Function *F = node->getFunction())
+      return F->getParent();
+  }
+  return nullptr;
+}
+
+static void writeAnchor(std::ostream &out, const Anchor &anchor) {
+  out << static_cast<uint32_t>(anchor.kind) << " " << std::quoted(anchor.symbolName)
+      << " " << std::quoted(anchor.functionName) << " " << anchor.bbIndex << " "
+      << anchor.instIndex << " " << anchor.argIndex;
+}
+
+static bool readAnchor(std::istream &in, Anchor &anchor) {
+  uint32_t kind = 0;
+  if (!(in >> kind >> std::quoted(anchor.symbolName) >>
+        std::quoted(anchor.functionName) >> anchor.bbIndex >>
+        anchor.instIndex >> anchor.argIndex)) {
+    return false;
+  }
+  anchor.kind = static_cast<AnchorKind>(kind);
+  return true;
+}
+
+static const BasicBlock *getBasicBlockByIndex(const Function *F, uint32_t index) {
+  if (!F)
+    return nullptr;
+  uint32_t current = 0;
+  for (const BasicBlock &BB : *F) {
+    if (current == index)
+      return &BB;
+    ++current;
+  }
+  return nullptr;
+}
+
+static const Instruction *getInstructionByIndex(const BasicBlock *BB,
+                                                uint32_t index) {
+  if (!BB)
+    return nullptr;
+  uint32_t current = 0;
+  for (const Instruction &I : *BB) {
+    if (current == index)
+      return &I;
+    ++current;
+  }
+  return nullptr;
+}
+
+static Anchor getAnchorForValue(const Value *V) {
+  Anchor anchor;
+  if (!V)
+    return anchor;
+
+  if (const auto *F = dyn_cast<Function>(V)) {
+    anchor.kind = AnchorKind::Function;
+    anchor.symbolName = F->getName().str();
+    return anchor;
+  }
+
+  if (const auto *GV = dyn_cast<GlobalValue>(V)) {
+    anchor.kind = AnchorKind::GlobalValue;
+    anchor.symbolName = GV->getName().str();
+    return anchor;
+  }
+
+  if (const auto *Arg = dyn_cast<Argument>(V)) {
+    anchor.kind = AnchorKind::Argument;
+    if (const Function *F = Arg->getParent()) {
+      anchor.functionName = F->getName().str();
+      anchor.argIndex = Arg->getArgNo();
+    }
+    return anchor;
+  }
+
+  if (const auto *Inst = dyn_cast<Instruction>(V)) {
+    anchor.kind = AnchorKind::Instruction;
+    if (const Function *F = Inst->getFunction())
+      anchor.functionName = F->getName().str();
+    const BasicBlock *BB = Inst->getParent();
+    if (!BB)
+      return anchor;
+
+    uint32_t bbIndex = 0;
+    for (const BasicBlock &Candidate : *Inst->getFunction()) {
+      if (&Candidate == BB)
+        break;
+      ++bbIndex;
+    }
+    anchor.bbIndex = bbIndex;
+
+    uint32_t instIndex = 0;
+    for (const Instruction &Candidate : *BB) {
+      if (&Candidate == Inst)
+        break;
+      ++instIndex;
+    }
+    anchor.instIndex = instIndex;
+    return anchor;
+  }
+
+  return anchor;
+}
+
+static const Function *resolveFunctionAnchor(const Module *M,
+                                             const Anchor &anchor) {
+  if (!M)
+    return nullptr;
+  switch (anchor.kind) {
+  case AnchorKind::Function:
+    return M->getFunction(anchor.symbolName);
+  case AnchorKind::Argument:
+  case AnchorKind::Instruction:
+    return M->getFunction(anchor.functionName);
+  default:
+    return nullptr;
+  }
+}
+
+static const Value *resolveValueAnchor(const Module *M, const Anchor &anchor) {
+  if (!M)
+    return nullptr;
+  switch (anchor.kind) {
+  case AnchorKind::None:
+    return nullptr;
+  case AnchorKind::Function:
+    return M->getFunction(anchor.symbolName);
+  case AnchorKind::GlobalValue:
+    return M->getNamedValue(anchor.symbolName);
+  case AnchorKind::Argument: {
+    const Function *F = M->getFunction(anchor.functionName);
+    if (!F)
+      return nullptr;
+    if (anchor.argIndex >= F->arg_size())
+      return nullptr;
+    auto argIt = F->arg_begin();
+    std::advance(argIt, anchor.argIndex);
+    return &*argIt;
+  }
+  case AnchorKind::Instruction: {
+    const Function *F = M->getFunction(anchor.functionName);
+    const BasicBlock *BB = getBasicBlockByIndex(F, anchor.bbIndex);
+    return getInstructionByIndex(BB, anchor.instIndex);
+  }
+  }
+  return nullptr;
+}
+
+static const CallBase *resolveCallAnchor(const Module *M, const Anchor &anchor) {
+  return dyn_cast_or_null<CallBase>(resolveValueAnchor(M, anchor));
+}
+
+static const ICFGNode *resolveICFGNode(const SVFG &graph, const Anchor &anchor,
+                                       const Function *fallbackFunction) {
+  const ICFG *icfg = graph.getICFG();
+  if (!icfg)
+    return nullptr;
+
+  if (anchor.kind == AnchorKind::Instruction) {
+    const Value *V = resolveValueAnchor(getModuleFromICFG(icfg), anchor);
+    const auto *I = dyn_cast_or_null<Instruction>(V);
+    if (I)
+      return const_cast<ICFG *>(icfg)->getIntraBlockNode(I->getParent());
+  }
+
+  if (fallbackFunction && !fallbackFunction->isDeclaration())
+    return const_cast<ICFG *>(icfg)->getIntraBlockNode(&fallbackFunction->getEntryBlock());
+
+  return nullptr;
+}
+
+static uint32_t packObjectInfoFlags(const SVFG::ObjectInfo &info) {
+  uint32_t flags = 0;
+  flags |= info.isHeap ? (1u << 0) : 0;
+  flags |= info.isStack ? (1u << 1) : 0;
+  flags |= info.isGlobal ? (1u << 2) : 0;
+  flags |= info.isFunction ? (1u << 3) : 0;
+  flags |= info.isConstant ? (1u << 4) : 0;
+  flags |= info.isFieldInsensitive ? (1u << 5) : 0;
+  flags |= info.isArray ? (1u << 6) : 0;
+  flags |= info.isUnknown ? (1u << 7) : 0;
+  return flags;
+}
+
+static SVFG::ObjectInfo unpackObjectInfoFlags(uint32_t flags, uint32_t baseObjId) {
+  SVFG::ObjectInfo info;
+  info.isHeap = (flags & (1u << 0)) != 0;
+  info.isStack = (flags & (1u << 1)) != 0;
+  info.isGlobal = (flags & (1u << 2)) != 0;
+  info.isFunction = (flags & (1u << 3)) != 0;
+  info.isConstant = (flags & (1u << 4)) != 0;
+  info.isFieldInsensitive = (flags & (1u << 5)) != 0;
+  info.isArray = (flags & (1u << 6)) != 0;
+  info.isUnknown = (flags & (1u << 7)) != 0;
+  info.baseObjId = baseObjId;
+  return info;
+}
+
+static Anchor getNodeValueAnchor(const SVFGNode *node) {
+  if (!node)
+    return {};
+  if (const Value *V = node->getValue())
+    return getAnchorForValue(V);
+  if (const auto *formalParm = dyn_cast<FormalParmSVFGNode>(node)) {
+    if (const Function *F = formalParm->getFunction()) {
+      if (formalParm->getParamIndex() < F->arg_size()) {
+        auto argIt = F->arg_begin();
+        std::advance(argIt, formalParm->getParamIndex());
+        return getAnchorForValue(&*argIt);
+      }
+    }
+  }
+  return {};
+}
+
+static Anchor getNodeInstructionAnchor(const SVFGNode *node) {
+  if (!node)
+    return {};
+  if (const Instruction *I = node->getInstruction())
+    return getAnchorForValue(I);
+  if (const auto *loadMu = dyn_cast<LoadMuSVFGNode>(node))
+    return getAnchorForValue(loadMu->getLoadInst());
+  if (const auto *storeChi = dyn_cast<StoreChiSVFGNode>(node))
+    return getAnchorForValue(storeChi->getStoreInst());
+  return {};
+}
+
+static Anchor getNodeFunctionAnchor(const SVFGNode *node) {
+  if (!node)
+    return {};
+  if (const Function *F = node->getFunction())
+    return getAnchorForValue(F);
+  return {};
+}
+
+static Anchor getNodeCallAnchor(const SVFGNode *node) {
+  if (!node)
+    return {};
+  if (const auto *actualParm = dyn_cast<ActualParmSVFGNode>(node))
+    return getAnchorForValue(actualParm->getCallSite());
+  if (const auto *actualRet = dyn_cast<ActualRetSVFGNode>(node))
+    return getAnchorForValue(actualRet->getCallSite());
+  if (const auto *actualIn = dyn_cast<ActualInSVFGNode>(node))
+    return getAnchorForValue(actualIn->getCallSite());
+  if (const auto *actualOut = dyn_cast<ActualOutSVFGNode>(node))
+    return getAnchorForValue(actualOut->getCallSite());
+  if (const auto *callMu = dyn_cast<CallMuSVFGNode>(node))
+    return getAnchorForValue(callMu->getCallSite());
+  if (const auto *callChi = dyn_cast<CallChiSVFGNode>(node))
+    return getAnchorForValue(callChi->getCallSite());
+  if (const auto *interPhi = dyn_cast<InterPhiSVFGNode>(node))
+    return getAnchorForValue(interPhi->getCallSite());
+  if (const auto *interMPhi = dyn_cast<InterMSSAPhiSVFGNode>(node))
+    return getAnchorForValue(interMPhi->getCallSite());
+  return {};
+}
+
+static void writeNodeMetaAnchor(std::ostream &out, char tag, uint32_t nodeId,
+                                const Anchor &anchor) {
+  if (anchor.kind == AnchorKind::None)
+    return;
+  out << tag << " " << nodeId << " ";
+  writeAnchor(out, anchor);
+  out << "\n";
+}
+
+static void registerNodeBindings(SVFG &graph, SVFGNode *node) {
+  if (!node)
+    return;
+
+  if (const Value *V = node->getValue())
+    graph.setValueNode(V, node->getId());
+
+  if ((node->isStmtNode() || node->isPhiNode()) && node->getInstruction())
+    graph.setDef(node->getInstruction(), node->getId());
+
+  if (auto *formalParm = dyn_cast<FormalParmSVFGNode>(node)) {
+    if (const Function *F = formalParm->getFunction()) {
+      graph.addFormalParm(F, formalParm);
+      if (formalParm->getParamIndex() < F->arg_size()) {
+        auto argIt = F->arg_begin();
+        std::advance(argIt, formalParm->getParamIndex());
+        graph.setValueNode(&*argIt, node->getId());
+      }
+    }
+  } else if (auto *formalRet = dyn_cast<FormalRetSVFGNode>(node)) {
+    if (const Function *F = formalRet->getFunction())
+      graph.addFormalRet(F, formalRet);
+  } else if (auto *varArg = dyn_cast<VarArgSVFGNode>(node)) {
+    if (const Function *F = varArg->getFunction())
+      graph.addFormalParm(F, varArg);
+  } else if (auto *formalIn = dyn_cast<FormalInSVFGNode>(node)) {
+    if (const Function *F = formalIn->getFunction())
+      graph.addFormalIn(F, formalIn);
+  } else if (auto *formalOut = dyn_cast<FormalOutSVFGNode>(node)) {
+    if (const Function *F = formalOut->getFunction())
+      graph.addFormalOut(F, formalOut);
+  } else if (auto *actualParm = dyn_cast<ActualParmSVFGNode>(node)) {
+    if (const CallBase *cs = actualParm->getCallSite())
+      graph.addActualParm(cs, actualParm);
+  } else if (auto *actualRet = dyn_cast<ActualRetSVFGNode>(node)) {
+    if (const CallBase *cs = actualRet->getCallSite())
+      graph.addActualRet(cs, actualRet);
+  } else if (auto *actualIn = dyn_cast<ActualInSVFGNode>(node)) {
+    if (const CallBase *cs = actualIn->getCallSite())
+      graph.addActualIn(cs, actualIn);
+  } else if (auto *actualOut = dyn_cast<ActualOutSVFGNode>(node)) {
+    if (const CallBase *cs = actualOut->getCallSite())
+      graph.addActualOut(cs, actualOut);
+  }
+}
+
+static void rebuildCallsiteConnectivity(SVFG &graph) {
+  for (const auto &pair : graph) {
+    const SVFGNode *src = pair.second;
+    if (!src)
+      continue;
+    for (SVFGEdge *edge : src->getOutEdges()) {
+      if (!edge || !edge->getCallSite())
+        continue;
+      const Function *callee = nullptr;
+      if (isCallVFGEdge(edge->getEdgeKind()))
+        callee = edge->getDstNode() ? edge->getDstNode()->getFunction() : nullptr;
+      else if (isRetVFGEdge(edge->getEdgeKind()))
+        callee = edge->getSrcNode() ? edge->getSrcNode()->getFunction() : nullptr;
+      if (callee)
+        graph.markConnectedCallee(edge->getCallSite(), callee);
+    }
+  }
+}
+
+static void populateDerivedValueOperands(SVFGNode *node) {
+  if (!node)
+    return;
+  if (auto *binary = dyn_cast<BinaryOpSVFGNode>(node)) {
+    if (const auto *I = dyn_cast_or_null<Instruction>(binary->getValue())) {
+      for (unsigned i = 0, e = I->getNumOperands(); i < e; ++i)
+        binary->setOpVer(i, I->getOperand(i));
+    }
+  } else if (auto *unary = dyn_cast<UnaryOpSVFGNode>(node)) {
+    if (const auto *I = dyn_cast_or_null<Instruction>(unary->getValue())) {
+      if (I->getNumOperands() > 0)
+        unary->setOpVer(0, I->getOperand(0));
+    }
+  } else if (auto *cmp = dyn_cast<CmpSVFGNode>(node)) {
+    if (const auto *I = dyn_cast_or_null<Instruction>(cmp->getValue())) {
+      for (unsigned i = 0, e = I->getNumOperands(); i < e; ++i)
+        cmp->setOpVer(i, I->getOperand(i));
+    }
+  } else if (auto *phi = dyn_cast<PhiSVFGNode>(node)) {
+    if (const auto *phiInst = phi->getPHINode()) {
+      for (unsigned i = 0, e = phiInst->getNumIncomingValues(); i < e; ++i)
+        phi->setOpVer(i, phiInst->getIncomingValue(i));
+    }
+  }
+}
+
+static SVFGNode *createNodeForKind(const ParsedNode &parsed, const ParsedNodeMeta &meta,
+                                   const Module *module, const SVFG &graph) {
+  const Value *resolvedValue = resolveValueAnchor(module, meta.valueAnchor);
+  const Instruction *resolvedInst =
+      dyn_cast_or_null<Instruction>(resolveValueAnchor(module, meta.instAnchor));
+  const Function *resolvedFunction =
+      dyn_cast_or_null<Function>(resolveValueAnchor(module, meta.functionAnchor));
+  const CallBase *resolvedCall = resolveCallAnchor(module, meta.callAnchor);
+
+  const ICFGNode *icfgNode =
+      resolveICFGNode(graph, meta.instAnchor, resolvedFunction);
+  if (!icfgNode && resolvedCall)
+    icfgNode = resolveICFGNode(graph, getAnchorForValue(resolvedCall), resolvedFunction);
+  if (!icfgNode && resolvedValue && graph.getICFG()) {
+    if (const auto *I = dyn_cast<Instruction>(resolvedValue))
+      icfgNode = const_cast<ICFG *>(graph.getICFG())->getIntraBlockNode(I->getParent());
+  }
+
+  switch (parsed.kind) {
+  case SVFGK::Stmt:
+    return new StmtSVFGNode(parsed.id, SVFGK::Stmt, icfgNode, resolvedValue);
+  case SVFGK::Addr:
+    return new AddrSVFGNode(parsed.id, icfgNode, resolvedValue, parsed.aux0);
+  case SVFGK::Copy:
+    return new CopySVFGNode(parsed.id, icfgNode, resolvedValue);
+  case SVFGK::Load:
+    return new LoadSVFGNode(parsed.id, icfgNode, resolvedValue, parsed.aux0);
+  case SVFGK::Store:
+    return new StoreSVFGNode(parsed.id, icfgNode, resolvedValue, parsed.aux0);
+  case SVFGK::Gep:
+    return new GepSVFGNode(parsed.id, icfgNode, resolvedValue);
+  case SVFGK::BinaryOp:
+    return new BinaryOpSVFGNode(parsed.id, icfgNode, resolvedValue);
+  case SVFGK::UnaryOp:
+    return new UnaryOpSVFGNode(parsed.id, icfgNode, resolvedValue);
+  case SVFGK::Cmp:
+    return new CmpSVFGNode(parsed.id, icfgNode, resolvedValue);
+  case SVFGK::Branch:
+    return new BranchSVFGNode(parsed.id, icfgNode, resolvedValue);
+  case SVFGK::Phi:
+    return new PhiSVFGNode(parsed.id, SVFGK::Phi, icfgNode,
+                           dyn_cast_or_null<PHINode>(resolvedInst));
+  case SVFGK::IntraPhi:
+    return new IntraPhiSVFGNode(parsed.id, icfgNode,
+                                dyn_cast_or_null<PHINode>(resolvedInst));
+  case SVFGK::InterPhi:
+    if (resolvedCall)
+      return new InterPhiSVFGNode(parsed.id, icfgNode, resolvedCall);
+    return new InterPhiSVFGNode(parsed.id, icfgNode, resolvedFunction);
+  case SVFGK::MPhi:
+    return new MSSAPhiSVFGNode(parsed.id, SVFGK::MPhi, icfgNode, parsed.memReg,
+                               parsed.pts);
+  case SVFGK::MIntraPhi:
+    return new IntraMSSAPhiSVFGNode(parsed.id, icfgNode, parsed.memReg,
+                                    parsed.version, parsed.pts);
+  case SVFGK::MInterPhi:
+    if (resolvedCall)
+      return new InterMSSAPhiSVFGNode(parsed.id, icfgNode, resolvedCall,
+                                      parsed.memReg, parsed.pts);
+    return new InterMSSAPhiSVFGNode(parsed.id, icfgNode, resolvedFunction,
+                                    parsed.memReg, parsed.pts);
+  case SVFGK::FormalIn:
+    return new FormalInSVFGNode(parsed.id, icfgNode, resolvedFunction, parsed.memReg,
+                                parsed.pts);
+  case SVFGK::FormalOut:
+    return new FormalOutSVFGNode(parsed.id, icfgNode, resolvedFunction, parsed.memReg,
+                                 parsed.pts, parsed.version);
+  case SVFGK::ActualIn:
+    return new ActualInSVFGNode(parsed.id, icfgNode, resolvedCall, parsed.memReg,
+                                parsed.pts, parsed.version);
+  case SVFGK::ActualOut:
+    return new ActualOutSVFGNode(parsed.id, icfgNode, resolvedCall, parsed.memReg,
+                                 parsed.pts, parsed.version);
+  case SVFGK::LoadMu:
+    return new LoadMuSVFGNode(parsed.id, icfgNode,
+                              dyn_cast_or_null<LoadInst>(resolvedInst), parsed.memReg,
+                              parsed.pts, parsed.version);
+  case SVFGK::StoreChi:
+    return new StoreChiSVFGNode(parsed.id, icfgNode,
+                                dyn_cast_or_null<StoreInst>(resolvedInst), parsed.memReg,
+                                parsed.pts, parsed.version);
+  case SVFGK::CallMu:
+    return new CallMuSVFGNode(parsed.id, icfgNode, resolvedCall, parsed.memReg,
+                              parsed.pts, parsed.version);
+  case SVFGK::CallChi:
+    return new CallChiSVFGNode(parsed.id, icfgNode, resolvedCall, parsed.memReg,
+                               parsed.pts, parsed.version);
+  case SVFGK::RetMu:
+    return new RetMuSVFGNode(parsed.id, icfgNode, resolvedFunction, parsed.memReg,
+                             parsed.pts, parsed.version);
+  case SVFGK::EntryChi:
+    return new EntryChiSVFGNode(parsed.id, icfgNode, resolvedFunction, parsed.memReg,
+                                parsed.pts, parsed.version);
+  case SVFGK::FormalParm:
+    return new FormalParmSVFGNode(parsed.id, icfgNode, resolvedFunction, parsed.aux0);
+  case SVFGK::ActualParm:
+    return new ActualParmSVFGNode(parsed.id, icfgNode, resolvedCall, parsed.aux0);
+  case SVFGK::FormalRet:
+    return new FormalRetSVFGNode(parsed.id, icfgNode, resolvedFunction);
+  case SVFGK::ActualRet:
+    return new ActualRetSVFGNode(parsed.id, icfgNode, resolvedCall);
+  case SVFGK::VarArg:
+    return new VarArgSVFGNode(parsed.id, icfgNode, resolvedFunction);
+  case SVFGK::NullPtr:
+    return new NullPtrSVFGNode(parsed.id, icfgNode);
+  case SVFGK::Dummy:
+    return new DummySVFGNode(parsed.id, icfgNode);
+  case SVFGK::DummyVProp:
+    return new DummyVersionPropSVFGNode(parsed.id, icfgNode, parsed.memReg,
+                                        parsed.version);
+  case SVFGK::Variant:
+  case SVFGK::Total:
+    break;
+  }
+
+  return new DummySVFGNode(parsed.id, icfgNode);
+}
+
+static void applyValueOperands(SVFGNode *node, const ParsedNodeMeta &meta,
+                               const Module *module) {
+  if (!node)
+    return;
+
+  if (meta.valueOperands.empty()) {
+    populateDerivedValueOperands(node);
+    return;
+  }
+
+  if (auto *binary = dyn_cast<BinaryOpSVFGNode>(node)) {
+    for (const auto &entry : meta.valueOperands)
+      binary->setOpVer(entry.first, resolveValueAnchor(module, entry.second));
+    return;
+  }
+  if (auto *unary = dyn_cast<UnaryOpSVFGNode>(node)) {
+    for (const auto &entry : meta.valueOperands)
+      unary->setOpVer(entry.first, resolveValueAnchor(module, entry.second));
+    return;
+  }
+  if (auto *cmp = dyn_cast<CmpSVFGNode>(node)) {
+    for (const auto &entry : meta.valueOperands)
+      cmp->setOpVer(entry.first, resolveValueAnchor(module, entry.second));
+    return;
+  }
+  if (auto *phi = dyn_cast<PhiSVFGNode>(node)) {
+    for (const auto &entry : meta.valueOperands)
+      phi->setOpVer(entry.first, resolveValueAnchor(module, entry.second));
+  }
+}
+
+static void applyMSSAOperands(SVFGNode *node, const ParsedNodeMeta &meta) {
+  auto *phi = dyn_cast<MSSAPhiSVFGNode>(node);
+  if (!phi)
+    return;
+  for (const auto &entry : meta.mssaOperands)
+    phi->setOpVer(std::get<0>(entry), std::get<1>(entry), std::get<2>(entry));
+}
+
+} // namespace
 
 bool SVFGSerializer::writeDot(const SVFG &graph, const std::string &filename) {
   std::ofstream file(filename);
@@ -71,11 +661,21 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
   if (!file.is_open())
     return false;
 
-  file << kHeaderV4 << "\n";
+  file << kHeaderV5 << "\n";
 
   // Persist object debug labels to preserve points-to identity across reloads.
   for (const auto &pair : graph.getObjectDebugMap()) {
     file << "O " << pair.first << " " << pair.second << "\n";
+  }
+
+  for (const auto &pair : graph.getObjectDebugMap()) {
+    const uint32_t objId = pair.first;
+    const auto *info = graph.getObjectInfo(objId);
+    const uint32_t flags = info ? packObjectInfoFlags(*info) : 0;
+    const uint32_t baseObjId = info ? info->baseObjId : 0;
+    file << "T " << objId << " " << flags << " " << baseObjId << " ";
+    writeAnchor(file, getAnchorForValue(graph.getObjectValue(objId)));
+    file << "\n";
   }
 
   for (const auto &pair : graph) {
@@ -170,6 +770,45 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
       file << "M " << node->getId() << " " << std::quoted(fnDebug) << " "
            << std::quoted(csDebug) << "\n";
     }
+
+    writeNodeMetaAnchor(file, 'A', node->getId(), getNodeValueAnchor(node));
+    writeNodeMetaAnchor(file, 'B', node->getId(), getNodeInstructionAnchor(node));
+    writeNodeMetaAnchor(file, 'C', node->getId(), getNodeFunctionAnchor(node));
+    writeNodeMetaAnchor(file, 'D', node->getId(), getNodeCallAnchor(node));
+
+    if (const auto *binary = dyn_cast<BinaryOpSVFGNode>(node)) {
+      for (auto it = binary->opVerBegin(), eit = binary->opVerEnd(); it != eit; ++it) {
+        file << "P " << node->getId() << " " << it->first << " ";
+        writeAnchor(file, getAnchorForValue(it->second));
+        file << "\n";
+      }
+    } else if (const auto *unary = dyn_cast<UnaryOpSVFGNode>(node)) {
+      for (auto it = unary->opVerBegin(), eit = unary->opVerEnd(); it != eit; ++it) {
+        file << "P " << node->getId() << " " << it->first << " ";
+        writeAnchor(file, getAnchorForValue(it->second));
+        file << "\n";
+      }
+    } else if (const auto *cmp = dyn_cast<CmpSVFGNode>(node)) {
+      for (auto it = cmp->opVerBegin(), eit = cmp->opVerEnd(); it != eit; ++it) {
+        file << "P " << node->getId() << " " << it->first << " ";
+        writeAnchor(file, getAnchorForValue(it->second));
+        file << "\n";
+      }
+    } else if (const auto *phi = dyn_cast<PhiSVFGNode>(node)) {
+      for (auto it = phi->opVerBegin(), eit = phi->opVerEnd(); it != eit; ++it) {
+        file << "P " << node->getId() << " " << it->first << " ";
+        writeAnchor(file, getAnchorForValue(it->second));
+        file << "\n";
+      }
+    }
+
+    if (const auto *mssaPhi = dyn_cast<MSSAPhiSVFGNode>(node)) {
+      for (auto it = mssaPhi->opVerBegin(), eit = mssaPhi->opVerEnd(); it != eit;
+           ++it) {
+        file << "Q " << node->getId() << " " << it->first << " "
+             << it->second.memReg << " " << it->second.version << "\n";
+      }
+    }
   }
 
   for (const auto &pair : graph) {
@@ -177,6 +816,9 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
     uint32_t aux0 = 0;
     uint32_t aux1 = 0;
     switch (node->getNodeKind()) {
+    case SVFGK::Addr:
+      aux0 = dynamic_cast<const AddrSVFGNode *>(node)->getObjectId();
+      break;
     case SVFGK::Load:
       aux0 = dynamic_cast<const LoadSVFGNode *>(node)->getLoadFromPtr();
       break;
@@ -219,94 +861,13 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
       for (uint32_t pt : edge->getPointsTo()) {
         file << " " << pt;
       }
-      const std::string &cs = edge->getCallSiteDebug();
-      if (!cs.empty()) {
-        file << " " << std::quoted(cs);
-      }
+      file << " ";
+      writeAnchor(file, getAnchorForValue(edge->getCallSite()));
+      file << " " << std::quoted(edge->getCallSiteDebug());
       file << "\n";
     }
   }
   return true;
-}
-
-static SVFGNode *createNodeForKind(uint32_t id, SVFGK kind, uint32_t memReg,
-                                   uint32_t version, uint32_t aux0,
-                                   const SVFGNodeBS &pts) {
-  const ICFGNode *icfg = nullptr;
-  switch (kind) {
-  case SVFGK::Stmt:
-    return new StmtSVFGNode(id, SVFGK::Stmt, icfg, nullptr);
-  case SVFGK::Addr:
-    return new AddrSVFGNode(id, icfg, nullptr);
-  case SVFGK::Copy:
-    return new CopySVFGNode(id, icfg, nullptr);
-  case SVFGK::Load:
-    return new LoadSVFGNode(id, icfg, nullptr, aux0);
-  case SVFGK::Store:
-    return new StoreSVFGNode(id, icfg, nullptr, aux0);
-  case SVFGK::Gep:
-    return new GepSVFGNode(id, icfg, nullptr);
-  case SVFGK::BinaryOp:
-    return new BinaryOpSVFGNode(id, icfg, nullptr);
-  case SVFGK::UnaryOp:
-    return new UnaryOpSVFGNode(id, icfg, nullptr);
-  case SVFGK::Cmp:
-    return new CmpSVFGNode(id, icfg, nullptr);
-  case SVFGK::Branch:
-    return new BranchSVFGNode(id, icfg, nullptr);
-  case SVFGK::Phi:
-    return new PhiSVFGNode(id, SVFGK::Phi, icfg, nullptr);
-  case SVFGK::IntraPhi:
-    return new IntraPhiSVFGNode(id, icfg, nullptr);
-  case SVFGK::InterPhi:
-    return new InterPhiSVFGNode(id, icfg,
-                                static_cast<const llvm::Function *>(nullptr));
-  case SVFGK::MPhi:
-    return new MSSAPhiSVFGNode(id, SVFGK::MPhi, icfg, memReg, pts);
-  case SVFGK::MIntraPhi:
-    return new IntraMSSAPhiSVFGNode(id, icfg, memReg, version, pts);
-  case SVFGK::MInterPhi:
-    return new InterMSSAPhiSVFGNode(
-        id, icfg, static_cast<const llvm::Function *>(nullptr), memReg, pts);
-  case SVFGK::FormalIn:
-    return new FormalInSVFGNode(id, icfg, nullptr, memReg, pts);
-  case SVFGK::FormalOut:
-    return new FormalOutSVFGNode(id, icfg, nullptr, memReg, pts, version);
-  case SVFGK::ActualIn:
-    return new ActualInSVFGNode(id, icfg, nullptr, memReg, pts, version);
-  case SVFGK::ActualOut:
-    return new ActualOutSVFGNode(id, icfg, nullptr, memReg, pts, version);
-  case SVFGK::LoadMu:
-    return new LoadMuSVFGNode(id, icfg, nullptr, memReg, pts, version);
-  case SVFGK::StoreChi:
-    return new StoreChiSVFGNode(id, icfg, nullptr, memReg, pts, version);
-  case SVFGK::CallMu:
-    return new CallMuSVFGNode(id, icfg, nullptr, memReg, pts, version);
-  case SVFGK::CallChi:
-    return new CallChiSVFGNode(id, icfg, nullptr, memReg, pts, version);
-  case SVFGK::RetMu:
-    return new RetMuSVFGNode(id, icfg, nullptr, memReg, pts, version);
-  case SVFGK::EntryChi:
-    return new EntryChiSVFGNode(id, icfg, nullptr, memReg, pts, version);
-  case SVFGK::FormalParm:
-    return new FormalParmSVFGNode(id, icfg, nullptr, aux0);
-  case SVFGK::ActualParm:
-    return new ActualParmSVFGNode(id, icfg, nullptr, aux0);
-  case SVFGK::FormalRet:
-    return new FormalRetSVFGNode(id, icfg, nullptr);
-  case SVFGK::ActualRet:
-    return new ActualRetSVFGNode(id, icfg, nullptr);
-  case SVFGK::VarArg:
-    return new VarArgSVFGNode(id, icfg, nullptr);
-  case SVFGK::NullPtr:
-    return new NullPtrSVFGNode(id, icfg);
-  case SVFGK::Dummy:
-    return new DummySVFGNode(id, icfg);
-  case SVFGK::DummyVProp:
-    return new DummyVersionPropSVFGNode(id, icfg, memReg, version);
-  default:
-    return new DummySVFGNode(id, icfg);
-  }
 }
 
 bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
@@ -314,16 +875,12 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
   if (!file.is_open())
     return false;
 
-  struct SerializedEdge {
-    uint32_t src = 0;
-    uint32_t dst = 0;
-    uint32_t kind = 0;
-    uint32_t weight = static_cast<uint32_t>(SVFGEdge::EdgeWeight::One);
-    SVFGNodeBS pts;
-    std::string callSiteDebug;
-  };
-  std::vector<SerializedEdge> edges;
+  std::unordered_map<uint32_t, ParsedNode> nodes;
+  std::unordered_map<uint32_t, ParsedNodeMeta> nodeMeta;
+  std::vector<ParsedEdge> edges;
+  std::vector<ParsedObjectInfo> objects;
   std::string line;
+  bool sawV5 = false;
   while (std::getline(file, line)) {
     if (line.empty())
       continue;
@@ -334,6 +891,10 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
       continue;
     }
     if (line == kHeaderV4) {
+      continue;
+    }
+    if (line == kHeaderV5) {
+      sawV5 = true;
       continue;
     }
     std::istringstream iss(line);
@@ -350,6 +911,13 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
       graph.setObjectDebug(objId, std::move(label));
       continue;
     }
+    if (tag == 'T') {
+      ParsedObjectInfo parsed;
+      iss >> parsed.objId >> parsed.flags >> parsed.baseObjId;
+      if (readAnchor(iss, parsed.valueAnchor))
+        objects.push_back(std::move(parsed));
+      continue;
+    }
     if (tag == 'M') {
       uint32_t nodeId = 0;
       std::string fnDebug;
@@ -363,39 +931,75 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
       }
       continue;
     }
-    if (tag == 'N') {
-      uint32_t id = 0;
-      uint32_t kindVal = 0;
+    if (tag == 'A' || tag == 'B' || tag == 'C' || tag == 'D') {
+      uint32_t nodeId = 0;
+      iss >> nodeId;
+      Anchor anchor;
+      if (!readAnchor(iss, anchor))
+        continue;
+      ParsedNodeMeta &meta = nodeMeta[nodeId];
+      switch (tag) {
+      case 'A':
+        meta.valueAnchor = std::move(anchor);
+        break;
+      case 'B':
+        meta.instAnchor = std::move(anchor);
+        break;
+      case 'C':
+        meta.functionAnchor = std::move(anchor);
+        break;
+      case 'D':
+        meta.callAnchor = std::move(anchor);
+        break;
+      default:
+        break;
+      }
+      continue;
+    }
+    if (tag == 'P') {
+      uint32_t nodeId = 0;
+      uint32_t pos = 0;
+      iss >> nodeId >> pos;
+      Anchor anchor;
+      if (readAnchor(iss, anchor))
+        nodeMeta[nodeId].valueOperands.emplace_back(pos, std::move(anchor));
+      continue;
+    }
+    if (tag == 'Q') {
+      uint32_t nodeId = 0;
+      uint32_t pos = 0;
       uint32_t memReg = 0;
       uint32_t version = 0;
-      uint32_t aux0 = 0;
-      uint32_t aux1 = 0;
+      if (iss >> nodeId >> pos >> memReg >> version)
+        nodeMeta[nodeId].mssaOperands.emplace_back(pos, memReg, version);
+      continue;
+    }
+    if (tag == 'N') {
+      ParsedNode parsed;
+      uint32_t kindVal = 0;
       uint32_t ptsCount = 0;
-      iss >> id >> kindVal >> memReg >> version;
+      iss >> parsed.id >> kindVal >> parsed.memReg >> parsed.version;
+      parsed.kind = static_cast<SVFGK>(kindVal);
 
       // V2 adds aux0 aux1 ptsCount pts...
-      if (iss >> aux0 >> aux1 >> ptsCount) {
+      if (iss >> parsed.aux0 >> parsed.aux1 >> ptsCount) {
         // ok
       } else {
         // V1 format: "N id kind memReg version"
-        aux0 = 0;
-        aux1 = 0;
+        parsed.aux0 = 0;
+        parsed.aux1 = 0;
         ptsCount = 0;
         iss.clear();
       }
-      (void)aux1;
-      SVFGNodeBS pts;
       for (uint32_t i = 0; i < ptsCount; ++i) {
         uint32_t pt = 0;
         if (!(iss >> pt))
           break;
-        pts.insert(pt);
+        parsed.pts.insert(pt);
       }
-      SVFGNode *node = createNodeForKind(id, static_cast<SVFGK>(kindVal),
-                                         memReg, version, aux0, pts);
-      graph.addNode(node);
+      nodes.emplace(parsed.id, std::move(parsed));
     } else if (tag == 'E') {
-      SerializedEdge edge;
+      ParsedEdge edge;
       iss >> edge.src >> edge.dst >> edge.kind;
 
       // Optional fields for newer format.
@@ -408,15 +1012,14 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
               break;
             edge.pts.insert(pt);
           }
-          std::string callSiteDebug;
-          if (iss >> std::quoted(callSiteDebug)) {
-            edge.callSiteDebug = std::move(callSiteDebug);
+          if (sawV5) {
+            (void)readAnchor(iss, edge.callAnchor);
+            iss >> std::quoted(edge.callSiteDebug);
           } else {
             iss.clear();
             std::string fallback;
-            if (iss >> fallback) {
+            if (iss >> fallback)
               edge.callSiteDebug = std::move(fallback);
-            }
           }
         }
       }
@@ -425,17 +1028,43 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
     }
   }
 
+  const Module *module = getModuleFromICFG(graph.getICFG());
+
+  std::map<uint32_t, ParsedNode> orderedNodes(nodes.begin(), nodes.end());
+  for (const auto &entry : orderedNodes) {
+    const ParsedNode &parsed = entry.second;
+    ParsedNodeMeta meta;
+    auto metaIt = nodeMeta.find(parsed.id);
+    if (metaIt != nodeMeta.end())
+      meta = metaIt->second;
+
+    SVFGNode *node = createNodeForKind(parsed, meta, module, graph);
+    graph.addNode(node);
+    applyValueOperands(node, meta, module);
+    applyMSSAOperands(node, meta);
+    registerNodeBindings(graph, node);
+  }
+
+  for (const ParsedObjectInfo &object : objects) {
+    graph.setObjectInfo(object.objId,
+                        unpackObjectInfoFlags(object.flags, object.baseObjId));
+    if (const Value *V = resolveValueAnchor(module, object.valueAnchor))
+      graph.setObjectValue(object.objId, V);
+  }
+
   for (const auto &edgeInfo : edges) {
     SVFGNode *src = graph.getNode(edgeInfo.src);
     SVFGNode *dst = graph.getNode(edgeInfo.dst);
     if (src && dst) {
+      const CallBase *callSite = resolveCallAnchor(module, edgeInfo.callAnchor);
       SVFGEdge *edge =
-          graph.addEdge(src, dst, static_cast<SVFGEdgeK>(edgeInfo.kind),
-                        nullptr, edgeInfo.pts, edgeInfo.callSiteDebug);
-      if (edge) {
+          graph.addEdge(src, dst, static_cast<SVFGEdgeK>(edgeInfo.kind), callSite,
+                        edgeInfo.pts, edgeInfo.callSiteDebug);
+      if (edge)
         edge->setWeight(static_cast<SVFGEdge::EdgeWeight>(edgeInfo.weight));
-      }
     }
   }
+
+  rebuildCallsiteConnectivity(graph);
   return true;
 }

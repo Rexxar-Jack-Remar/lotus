@@ -494,9 +494,17 @@ private:
   uint32_t createMemoryPHI(uint32_t memReg, const llvm::BasicBlock *bb);
 
   /// @brief Check if function might modify memory (basic function summary)
+  bool mayReadMemory(const llvm::Function *F);
+  bool mayReadMemory(const llvm::Function *F,
+                     std::unordered_set<const llvm::Function *> &visited);
   bool mayModifyMemory(const llvm::Function *F);
   bool mayModifyMemory(const llvm::Function *F,
                        std::unordered_set<const llvm::Function *> &visited);
+  bool callMayReadMemory(const llvm::CallBase *call);
+  bool callMayModifyMemory(const llvm::CallBase *call);
+  bool callArgMayReadMemory(const llvm::CallBase *call, unsigned argNo) const;
+  bool callArgMayModifyMemory(const llvm::CallBase *call,
+                              unsigned argNo) const;
   uint32_t nextVersion(const llvm::Function *F, uint32_t memReg);
 
   /// @brief Get next node ID

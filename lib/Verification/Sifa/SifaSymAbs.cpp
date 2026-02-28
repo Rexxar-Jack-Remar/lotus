@@ -23,11 +23,27 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 using namespace lotus::sifa;
+
+namespace {
+bool profileEnabled() { return std::getenv("LOTUS_SIFA_PROFILE") != nullptr; }
+
+void logProfileTiming(const char *stage,
+                      std::chrono::steady_clock::duration elapsed) {
+  if (!profileEnabled()) {
+    return;
+  }
+  const auto ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+  llvm::errs() << "[sifa-profile] " << stage << ": " << ms << " ms\n";
+}
+} // namespace
 
 static bool isSupportedSymAbsValueType(llvm::Type *ty, const SifaSymAbsOptions &opt) {
   if (!ty) return false;
@@ -172,7 +188,12 @@ makeConfig(const SifaSymAbsOptions &opt) {
 static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
                                 llvm::BasicBlock *target,
                                 const SifaSymAbsOptions &options) {
+  const auto overallStart = std::chrono::steady_clock::now();
+
+  auto stageStart = std::chrono::steady_clock::now();
   validateLlvmSubsetOrThrow(M, F, options);
+  logProfileTiming("validateLlvmSubset",
+                   std::chrono::steady_clock::now() - stageStart);
 
   // Configure SifaLogger from options.
   SifaLogLevel level = options.logLevel;
@@ -194,13 +215,18 @@ static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
   auto *fun = const_cast<llvm::Function *>(&F);
 
   SifaLogger::progress("Building module context...");
+  stageStart = std::chrono::steady_clock::now();
   symbolic_abstraction::ModuleContext mctx(mod, cfg);
+  logProfileTiming("ModuleContext", std::chrono::steady_clock::now() - stageStart);
   SifaLogger::progress("Building function context and analyzer...");
+  stageStart = std::chrono::steady_clock::now();
   auto fctxPtr = mctx.createFunctionContext(fun);
   auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctxPtr);
   const auto fcfg = fctxPtr->getConfig();
   symbolic_abstraction::DomainConstructor dom(fcfg);
   auto analyzer = symbolic_abstraction::Analyzer::New(*fctxPtr, fragDecomp, dom);
+  logProfileTiming("FunctionContext+Analyzer",
+                   std::chrono::steady_clock::now() - stageStart);
 
   SifaStats stats;
   SifaSymAbsDomain domain(*fctxPtr, dom, *analyzer);
@@ -211,24 +237,42 @@ static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
   ipr.setLoopSummarizer(loopSum);
 
   SifaLogger::progress("Building procedure resources (regex DAG)...");
+  stageStart = std::chrono::steady_clock::now();
   ProcedureResources res(stats, *fun, {target});
+  logProfileTiming("ProcedureResources",
+                   std::chrono::steady_clock::now() - stageStart);
   auto initial = domain.makeTopAt(&fun->getEntryBlock(), /*after=*/false);
 
   SifaLogger::progress("Running fixpoint interpretation...");
+  stageStart = std::chrono::steady_clock::now();
   // Interpret for the unique marker in the LOI overlay.
   SymAbsState out =
       ipr.interpretForSingleMarker(res.getRegexDag(), res.getDagOverlayPathToLois(), initial);
+  logProfileTiming("Interpret", std::chrono::steady_clock::now() - stageStart);
   SifaLogger::progress(
       "bestTransformer calls: " +
       std::to_string(symbolic_abstraction::Analyzer::getBestTransformerCallCount()) +
       ", SMT solver calls: " +
       std::to_string(symbolic_abstraction::Analyzer::getSmtSolverCallCount()));
+  if (profileEnabled()) {
+    llvm::errs() << "[sifa-profile] bestTransformer calls: "
+                 << symbolic_abstraction::Analyzer::getBestTransformerCallCount()
+                 << ", SMT solver calls: "
+                 << symbolic_abstraction::Analyzer::getSmtSolverCallCount()
+                 << "\n";
+    logProfileTiming("Total", std::chrono::steady_clock::now() - overallStart);
+  }
   return out;
 }
 
 static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
                                 const SifaSymAbsOptions &options) {
+  const auto overallStart = std::chrono::steady_clock::now();
+
+  auto stageStart = std::chrono::steady_clock::now();
   validateLlvmSubsetOrThrow(M, F, options);
+  logProfileTiming("validateLlvmSubset",
+                   std::chrono::steady_clock::now() - stageStart);
 
   // Configure SifaLogger from options.
   SifaLogLevel level = options.logLevel;
@@ -248,13 +292,18 @@ static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
   auto *fun = const_cast<llvm::Function *>(&F);
 
   SifaLogger::progress("Building module context...");
+  stageStart = std::chrono::steady_clock::now();
   symbolic_abstraction::ModuleContext mctx(mod, cfg);
+  logProfileTiming("ModuleContext", std::chrono::steady_clock::now() - stageStart);
   SifaLogger::progress("Building function context and analyzer...");
+  stageStart = std::chrono::steady_clock::now();
   auto fctxPtr = mctx.createFunctionContext(fun);
   auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctxPtr);
   const auto fcfg = fctxPtr->getConfig();
   symbolic_abstraction::DomainConstructor dom(fcfg);
   auto analyzer = symbolic_abstraction::Analyzer::New(*fctxPtr, fragDecomp, dom);
+  logProfileTiming("FunctionContext+Analyzer",
+                   std::chrono::steady_clock::now() - stageStart);
 
   SifaStats stats;
   SifaSymAbsDomain domain(*fctxPtr, dom, *analyzer);
@@ -265,18 +314,31 @@ static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
   ipr.setLoopSummarizer(loopSum);
 
   SifaLogger::progress("Building procedure resources (regex DAG)...");
+  stageStart = std::chrono::steady_clock::now();
   // No LOIs needed; ProcedureResources always adds an EXIT marker.
   ProcedureResources res(stats, *fun, std::vector<llvm::BasicBlock *>{});
+  logProfileTiming("ProcedureResources",
+                   std::chrono::steady_clock::now() - stageStart);
   auto initial = domain.makeTopAt(&fun->getEntryBlock(), /*after=*/false);
 
   SifaLogger::progress("Running fixpoint interpretation...");
+  stageStart = std::chrono::steady_clock::now();
   SymAbsState out =
       ipr.interpretForSingleMarker(res.getRegexDag(), res.getDagOverlayPathToReturn(), initial);
+  logProfileTiming("Interpret", std::chrono::steady_clock::now() - stageStart);
   SifaLogger::progress(
       "bestTransformer calls: " +
       std::to_string(symbolic_abstraction::Analyzer::getBestTransformerCallCount()) +
       ", SMT solver calls: " +
       std::to_string(symbolic_abstraction::Analyzer::getSmtSolverCallCount()));
+  if (profileEnabled()) {
+    llvm::errs() << "[sifa-profile] bestTransformer calls: "
+                 << symbolic_abstraction::Analyzer::getBestTransformerCallCount()
+                 << ", SMT solver calls: "
+                 << symbolic_abstraction::Analyzer::getSmtSolverCallCount()
+                 << "\n";
+    logProfileTiming("Total", std::chrono::steady_clock::now() - overallStart);
+  }
   return out;
 }
 

@@ -616,7 +616,23 @@ bool BufOverflowDetector::detectStrcat(AbstractState &as,
 void NullptrDerefDetector::detect(AbstractState &as,
                                   const llvm::Instruction *inst) {
   auto hasDefiniteNonNullBase = [](const llvm::Value *ptrVal) -> bool {
-    const llvm::Value *base = llvm::getUnderlyingObject(ptrVal, 16);
+    const llvm::Value *base = ptrVal;
+    while (true) {
+      if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(base)) {
+        base = gep->getPointerOperand();
+        continue;
+      }
+      if (const auto *cast = llvm::dyn_cast<llvm::BitCastOperator>(base)) {
+        base = cast->getOperand(0);
+        continue;
+      }
+      if (const auto *asc =
+              llvm::dyn_cast<llvm::AddrSpaceCastOperator>(base)) {
+        base = asc->getOperand(0);
+        continue;
+      }
+      break;
+    }
     return llvm::isa<llvm::AllocaInst>(base) ||
            llvm::isa<llvm::GlobalValue>(base);
   };
@@ -1062,7 +1078,15 @@ void UseAfterFreeDetector::addBugToReporter(const AEException &e,
     loc = debugLoc->getFilename().str() + ":" +
           std::to_string(debugLoc->getLine());
   } else {
-    loc = "unknown location";
+    std::string instStr;
+    llvm::raw_string_ostream os(instStr);
+    inst->print(os);
+    os.flush();
+    const llvm::Function *func = inst->getFunction();
+    const llvm::BasicBlock *bb = inst->getParent();
+    loc = (func ? func->getName().str() : "unknown_function") +
+          "::" + (bb && bb->hasName() ? bb->getName().str() : "unknown_bb") +
+          "::" + std::to_string(inst->getOpcode()) + "::" + instStr;
   }
 
   if (bugLoc.find(loc) != bugLoc.end())
@@ -1152,7 +1176,15 @@ void InvalidFreeDetector::addBugToReporter(const AEException &e,
     loc = debugLoc->getFilename().str() + ":" +
           std::to_string(debugLoc->getLine());
   } else {
-    loc = "unknown location";
+    std::string instStr;
+    llvm::raw_string_ostream os(instStr);
+    inst->print(os);
+    os.flush();
+    const llvm::Function *func = inst->getFunction();
+    const llvm::BasicBlock *bb = inst->getParent();
+    loc = (func ? func->getName().str() : "unknown_function") +
+          "::" + (bb && bb->hasName() ? bb->getName().str() : "unknown_bb") +
+          "::" + std::to_string(inst->getOpcode()) + "::" + instStr;
   }
 
   if (bugLoc.find(loc) != bugLoc.end())

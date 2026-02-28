@@ -130,6 +130,358 @@ void SVFGBuilder::buildMemorySSA() {
   if (!M)
     return;
 
+  using MemRegPtsMap = std::unordered_map<uint32_t, SVFGNodeBS>;
+  struct FunctionMemorySummary {
+    std::unordered_set<unsigned> readArgs;
+    std::unordered_set<unsigned> writeArgs;
+    MemRegPtsMap readGlobals;
+    MemRegPtsMap writeGlobals;
+  };
+
+  auto addRegion = [](MemRegPtsMap &dst, uint32_t memReg,
+                      const SVFGNodeBS &pts) {
+    auto &bucket = dst[memReg];
+    bucket.insert(pts.begin(), pts.end());
+  };
+
+  auto mergeRegions = [&](MemRegPtsMap &dst, const MemRegPtsMap &src) {
+    for (const auto &entry : src)
+      addRegion(dst, entry.first, entry.second);
+  };
+
+  auto regionMapsEqual = [](const MemRegPtsMap &lhs, const MemRegPtsMap &rhs) {
+    if (lhs.size() != rhs.size())
+      return false;
+    for (const auto &entry : lhs) {
+      auto it = rhs.find(entry.first);
+      if (it == rhs.end() || it->second != entry.second)
+        return false;
+    }
+    return true;
+  };
+
+  auto summariesEqual = [&](const FunctionMemorySummary &lhs,
+                            const FunctionMemorySummary &rhs) {
+    return lhs.readArgs == rhs.readArgs && lhs.writeArgs == rhs.writeArgs &&
+           regionMapsEqual(lhs.readGlobals, rhs.readGlobals) &&
+           regionMapsEqual(lhs.writeGlobals, rhs.writeGlobals);
+  };
+
+  auto collectVisibleRegions = [&](const Value *ptr) -> MemRegPtsMap {
+    MemRegPtsMap regions;
+    if (!ptr || !ptr->getType()->isPointerTy())
+      return regions;
+
+    std::vector<const void *> ptsVoid = getPointsToSet(ptr);
+    SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
+    for (uint32_t objId : objIds) {
+      if (!svfg->isGlobalObject(objId))
+        continue;
+      addRegion(regions, getOrCreateMemRegForObject(objId), SVFGNodeBS{objId});
+    }
+
+    if (!regions.empty())
+      return regions;
+
+    const Value *base = ptr->stripPointerCasts();
+    if (isa<GlobalVariable>(base) || isa<GlobalAlias>(base)) {
+      addRegion(regions, getOrCreateMemReg(base),
+                SVFGNodeBS{getOrCreateUnknownObjId()});
+    }
+
+    return regions;
+  };
+
+  auto recordVisibleAccess = [&](const Function *context, const Value *ptr,
+                                 FunctionMemorySummary &summary, bool isRead,
+                                 bool isWrite) {
+    if (!ptr || !ptr->getType()->isPointerTy())
+      return;
+
+    if (const auto *arg = dyn_cast<Argument>(ptr->stripPointerCasts())) {
+      if (arg->getParent() == context) {
+        if (isRead)
+          summary.readArgs.insert(arg->getArgNo());
+        if (isWrite)
+          summary.writeArgs.insert(arg->getArgNo());
+        return;
+      }
+    }
+
+    MemRegPtsMap visibleRegs = collectVisibleRegions(ptr);
+    if (isRead)
+      mergeRegions(summary.readGlobals, visibleRegs);
+    if (isWrite)
+      mergeRegions(summary.writeGlobals, visibleRegs);
+  };
+
+  auto getCallTargets = [&](const CallBase *call) {
+    std::vector<const Function *> callees;
+    if (!call)
+      return callees;
+
+    if (const Function *directCallee = call->getCalledFunction()) {
+      if (!directCallee->isDeclaration())
+        callees.push_back(directCallee);
+      return callees;
+    }
+
+    if (config.usePointerAnalysis && ptaSolverWrapper &&
+        ptaSolverWrapper->solver && config.resolveIndirectCalls) {
+      callees = getIndirectCallTargets(call);
+      callees = filterCalleesByICFG(icfg, call, callees);
+    }
+    return callees;
+  };
+
+  auto collectDirectSummary = [&](const Function &F) {
+    FunctionMemorySummary summary;
+    for (const BasicBlock &bb : F) {
+      for (const Instruction &inst : bb) {
+        if (const auto *load = dyn_cast<LoadInst>(&inst)) {
+          if (isAddressTakenPointer(load->getPointerOperand()))
+            recordVisibleAccess(&F, load->getPointerOperand(), summary, true,
+                                false);
+          continue;
+        }
+        if (const auto *store = dyn_cast<StoreInst>(&inst)) {
+          if (isAddressTakenPointer(store->getPointerOperand()))
+            recordVisibleAccess(&F, store->getPointerOperand(), summary, false,
+                                true);
+          continue;
+        }
+        if (const auto *rmw = dyn_cast<AtomicRMWInst>(&inst)) {
+          if (isAddressTakenPointer(rmw->getPointerOperand()))
+            recordVisibleAccess(&F, rmw->getPointerOperand(), summary, true,
+                                true);
+          continue;
+        }
+        if (const auto *cmpxchg = dyn_cast<AtomicCmpXchgInst>(&inst)) {
+          if (isAddressTakenPointer(cmpxchg->getPointerOperand()))
+            recordVisibleAccess(&F, cmpxchg->getPointerOperand(), summary, true,
+                                true);
+          continue;
+        }
+        const auto *call = dyn_cast<CallBase>(&inst);
+        if (!call)
+          continue;
+        const auto *intrinsic = dyn_cast<IntrinsicInst>(call);
+        if (!intrinsic)
+          continue;
+        switch (intrinsic->getIntrinsicID()) {
+        case Intrinsic::memcpy:
+        case Intrinsic::memmove:
+          if (call->arg_size() >= 1 &&
+              call->getArgOperand(0)->getType()->isPointerTy()) {
+            recordVisibleAccess(&F, call->getArgOperand(0), summary, false,
+                                true);
+          }
+          if (call->arg_size() >= 2 &&
+              call->getArgOperand(1)->getType()->isPointerTy()) {
+            recordVisibleAccess(&F, call->getArgOperand(1), summary, true,
+                                false);
+          }
+          break;
+        case Intrinsic::memset:
+          if (call->arg_size() >= 1 &&
+              call->getArgOperand(0)->getType()->isPointerTy()) {
+            recordVisibleAccess(&F, call->getArgOperand(0), summary, false,
+                                true);
+          }
+          break;
+        default:
+          break;
+        }
+      }
+    }
+    return summary;
+  };
+
+  std::unordered_map<const Function *, FunctionMemorySummary> directSummaries;
+  std::unordered_map<const Function *, FunctionMemorySummary> summaries;
+  for (const Function &F : *M) {
+    if (F.isDeclaration())
+      continue;
+    directSummaries[&F] = collectDirectSummary(F);
+    summaries[&F] = directSummaries[&F];
+  }
+
+  bool summaryChanged = true;
+  while (summaryChanged) {
+    summaryChanged = false;
+    for (const Function &F : *M) {
+      if (F.isDeclaration())
+        continue;
+
+      FunctionMemorySummary next = directSummaries[&F];
+      for (const BasicBlock &bb : F) {
+        for (const Instruction &inst : bb) {
+          const auto *call = dyn_cast<CallBase>(&inst);
+          if (!call)
+            continue;
+          if (isa<IntrinsicInst>(call))
+            continue;
+
+          const bool mayRead = callMayReadMemory(call);
+          const bool mayWrite = callMayModifyMemory(call);
+          if (!mayRead && !mayWrite)
+            continue;
+
+          const std::vector<const Function *> callees = getCallTargets(call);
+          if (callees.empty()) {
+            for (unsigned i = 0; i < call->arg_size(); ++i) {
+              const Value *arg = call->getArgOperand(i);
+              if (!arg->getType()->isPointerTy())
+                continue;
+              recordVisibleAccess(&F, arg, next,
+                                  mayRead && callArgMayReadMemory(call, i),
+                                  mayWrite && callArgMayModifyMemory(call, i));
+            }
+            continue;
+          }
+
+          for (const Function *callee : callees) {
+            auto calleeIt = summaries.find(callee);
+            if (calleeIt == summaries.end())
+              continue;
+            const FunctionMemorySummary &calleeSummary = calleeIt->second;
+
+            if (mayRead) {
+              for (unsigned argIdx : calleeSummary.readArgs) {
+                if (argIdx >= call->arg_size() ||
+                    !callArgMayReadMemory(call, argIdx))
+                  continue;
+                recordVisibleAccess(&F, call->getArgOperand(argIdx), next, true,
+                                    false);
+              }
+              mergeRegions(next.readGlobals, calleeSummary.readGlobals);
+            }
+
+            if (mayWrite) {
+              for (unsigned argIdx : calleeSummary.writeArgs) {
+                if (argIdx >= call->arg_size() ||
+                    !callArgMayModifyMemory(call, argIdx))
+                  continue;
+                recordVisibleAccess(&F, call->getArgOperand(argIdx), next,
+                                    false, true);
+              }
+              mergeRegions(next.writeGlobals, calleeSummary.writeGlobals);
+            }
+          }
+        }
+      }
+
+      if (!summariesEqual(next, summaries[&F])) {
+        summaries[&F] = std::move(next);
+        summaryChanged = true;
+      }
+    }
+  }
+
+  std::unordered_map<const CallBase *, MemRegPtsMap> callReadRegions;
+  std::unordered_map<const CallBase *, MemRegPtsMap> callWriteRegions;
+  for (const Function &F : *M) {
+    if (F.isDeclaration())
+      continue;
+    for (const BasicBlock &bb : F) {
+      for (const Instruction &inst : bb) {
+        const auto *call = dyn_cast<CallBase>(&inst);
+        if (!call || isa<IntrinsicInst>(call))
+          continue;
+
+        const bool mayRead = callMayReadMemory(call);
+        const bool mayWrite = callMayModifyMemory(call);
+        if (!mayRead && !mayWrite)
+          continue;
+
+        MemRegPtsMap readRegs;
+        MemRegPtsMap writeRegs;
+        const std::vector<const Function *> callees = getCallTargets(call);
+        if (callees.empty()) {
+          for (unsigned i = 0; i < call->arg_size(); ++i) {
+            const Value *arg = call->getArgOperand(i);
+            if (!arg->getType()->isPointerTy())
+              continue;
+            MemRegPtsMap argRegs;
+            std::vector<const void *> ptsVoid = getPointsToSet(arg);
+            SVFGNodeBS argObjIds = convertPTAObjectsToObjIDs(ptsVoid);
+            if (argObjIds.empty()) {
+              addRegion(argRegs, getOrCreateMemReg(arg),
+                        SVFGNodeBS{getOrCreateUnknownObjId()});
+            } else {
+              for (uint32_t objId : argObjIds) {
+                addRegion(argRegs, getOrCreateMemRegForObject(objId),
+                          SVFGNodeBS{objId});
+              }
+            }
+            if (mayRead && callArgMayReadMemory(call, i))
+              mergeRegions(readRegs, argRegs);
+            if (mayWrite && callArgMayModifyMemory(call, i))
+              mergeRegions(writeRegs, argRegs);
+          }
+        } else {
+          for (const Function *callee : callees) {
+            auto calleeIt = summaries.find(callee);
+            if (calleeIt == summaries.end())
+              continue;
+            const FunctionMemorySummary &calleeSummary = calleeIt->second;
+
+            if (mayRead) {
+              for (unsigned argIdx : calleeSummary.readArgs) {
+                if (argIdx >= call->arg_size() ||
+                    !callArgMayReadMemory(call, argIdx))
+                  continue;
+                const Value *arg = call->getArgOperand(argIdx);
+                if (!arg->getType()->isPointerTy())
+                  continue;
+                std::vector<const void *> ptsVoid = getPointsToSet(arg);
+                SVFGNodeBS argObjIds = convertPTAObjectsToObjIDs(ptsVoid);
+                if (argObjIds.empty()) {
+                  addRegion(readRegs, getOrCreateMemReg(arg),
+                            SVFGNodeBS{getOrCreateUnknownObjId()});
+                } else {
+                  for (uint32_t objId : argObjIds) {
+                    addRegion(readRegs, getOrCreateMemRegForObject(objId),
+                              SVFGNodeBS{objId});
+                  }
+                }
+              }
+              mergeRegions(readRegs, calleeSummary.readGlobals);
+            }
+
+            if (mayWrite) {
+              for (unsigned argIdx : calleeSummary.writeArgs) {
+                if (argIdx >= call->arg_size() ||
+                    !callArgMayModifyMemory(call, argIdx))
+                  continue;
+                const Value *arg = call->getArgOperand(argIdx);
+                if (!arg->getType()->isPointerTy())
+                  continue;
+                std::vector<const void *> ptsVoid = getPointsToSet(arg);
+                SVFGNodeBS argObjIds = convertPTAObjectsToObjIDs(ptsVoid);
+                if (argObjIds.empty()) {
+                  addRegion(writeRegs, getOrCreateMemReg(arg),
+                            SVFGNodeBS{getOrCreateUnknownObjId()});
+                } else {
+                  for (uint32_t objId : argObjIds) {
+                    addRegion(writeRegs, getOrCreateMemRegForObject(objId),
+                              SVFGNodeBS{objId});
+                  }
+                }
+              }
+              mergeRegions(writeRegs, calleeSummary.writeGlobals);
+            }
+          }
+        }
+
+        if (!readRegs.empty())
+          callReadRegions.emplace(call, std::move(readRegs));
+        if (!writeRegs.empty())
+          callWriteRegions.emplace(call, std::move(writeRegs));
+      }
+    }
+  }
+
   for (const Function &F : *M) {
     if (F.isDeclaration())
       continue;
@@ -491,19 +843,13 @@ void SVFGBuilder::buildMemorySSA() {
             }
           }
 
-          // Create CallMu/CallChi nodes (one per accessed memReg).
-          SVFGNodeBS objIds;
-
-          // Get points-to set of all pointer arguments
-          for (unsigned i = 0; i < call->arg_size(); ++i) {
-            const Value *arg = call->getArgOperand(i);
-            if (!arg->getType()->isPointerTy())
-              continue;
-
-            std::vector<const void *> ptsVoid = getPointsToSet(arg);
-            SVFGNodeBS argObjIds = convertPTAObjectsToObjIDs(ptsVoid);
-            objIds.insert(argObjIds.begin(), argObjIds.end());
-          }
+          // Create CallMu/CallChi nodes from the callsite's computed ref/mod
+          // regions rather than from all pointer arguments.
+          auto readRegsIt = callReadRegions.find(call);
+          auto writeRegsIt = callWriteRegions.find(call);
+          if (readRegsIt == callReadRegions.end() &&
+              writeRegsIt == callWriteRegions.end())
+            continue;
 
           // Find ICFG node
           const ICFGNode *icfgNode = nullptr;
@@ -519,33 +865,21 @@ void SVFGBuilder::buildMemorySSA() {
 
           auto &muVec = callToMuNodes[call];
           auto &chiVec = callToChiNodes[call];
-          if (objIds.empty()) {
-            const uint32_t memRegId = getOrCreateMemReg(call);
-            const uint32_t callMuId = nextNode();
-            auto *callMu = new CallMuSVFGNode(callMuId, icfgNode, call,
-                                              memRegId, SVFGNodeBS{});
-            svfg->addNode(callMu);
-            muVec.push_back(callMuId);
-
-            const uint32_t callChiId = nextNode();
-            const uint32_t callChiVersion = nextVersion(&F, memRegId);
-            auto *callChi =
-                new CallChiSVFGNode(callChiId, icfgNode, call, memRegId,
-                                    SVFGNodeBS{}, callChiVersion);
-            svfg->addNode(callChi);
-            chiVec.push_back(callChiId);
-            svfg->setMSSADef(memRegId, callChi, callChiVersion);
-          } else {
-            for (uint32_t objId : objIds) {
-              const uint32_t memRegId = getOrCreateMemRegForObject(objId);
-              SVFGNodeBS pts{objId};
-
+          if (readRegsIt != callReadRegions.end()) {
+            for (const auto &entry : readRegsIt->second) {
+              const uint32_t memRegId = entry.first;
+              const SVFGNodeBS &pts = entry.second;
               const uint32_t callMuId = nextNode();
               auto *callMu =
                   new CallMuSVFGNode(callMuId, icfgNode, call, memRegId, pts);
               svfg->addNode(callMu);
               muVec.push_back(callMuId);
-
+            }
+          }
+          if (writeRegsIt != callWriteRegions.end()) {
+            for (const auto &entry : writeRegsIt->second) {
+              const uint32_t memRegId = entry.first;
+              const SVFGNodeBS &pts = entry.second;
               const uint32_t callChiId = nextNode();
               const uint32_t callChiVersion = nextVersion(&F, memRegId);
               auto *callChi = new CallChiSVFGNode(
@@ -555,8 +889,129 @@ void SVFGBuilder::buildMemorySSA() {
               svfg->setMSSADef(memRegId, callChi, callChiVersion);
             }
           }
+
+          if (readRegsIt == callReadRegions.end())
+            callToMuNodes.erase(call);
+          if (writeRegsIt == callWriteRegions.end())
+            callToChiNodes.erase(call);
         }
       }
+    }
+  }
+
+  for (const Function &F : *M) {
+    if (F.isDeclaration())
+      continue;
+
+    auto summaryIt = summaries.find(&F);
+    if (summaryIt == summaries.end())
+      continue;
+    const FunctionMemorySummary &summary = summaryIt->second;
+    const ICFGNode *entryICFGNode = findICFGNodeForBlock(icfg, &F.getEntryBlock());
+
+    std::unordered_map<uint32_t, SVFGNode *> entryChiByReg;
+    for (uint32_t entryChiId : funcEntryChi[&F]) {
+      if (auto *entryChi =
+              dyn_cast<EntryChiSVFGNode>(svfg->getNode(entryChiId))) {
+        entryChiByReg[entryChi->getMemReg()] = entryChi;
+      }
+    }
+
+    std::unordered_map<uint32_t, SVFGNodeBS> formalInRegs = summary.readGlobals;
+    std::unordered_map<uint32_t, SVFGNodeBS> formalOutRegs = summary.readGlobals;
+    mergeRegions(formalInRegs, summary.writeGlobals);
+    mergeRegions(formalOutRegs, summary.writeGlobals);
+
+    auto addFormalArgRegions = [&](unsigned argIdx, MemRegPtsMap &dst) {
+      if (argIdx >= F.arg_size())
+        return;
+      const Argument *arg = F.getArg(argIdx);
+      if (!arg || !arg->getType()->isPointerTy())
+        return;
+
+      std::vector<const void *> ptsVoid = getPointsToSet(arg);
+      SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
+      if (objIds.empty()) {
+        addRegion(dst, getOrCreateMemReg(arg),
+                  SVFGNodeBS{getOrCreateUnknownObjId()});
+        return;
+      }
+      for (uint32_t objId : objIds) {
+        addRegion(dst, getOrCreateMemRegForObject(objId), SVFGNodeBS{objId});
+      }
+    };
+
+    for (unsigned argIdx : summary.readArgs)
+      addFormalArgRegions(argIdx, formalInRegs);
+    for (unsigned argIdx : summary.readArgs)
+      addFormalArgRegions(argIdx, formalOutRegs);
+    for (unsigned argIdx : summary.writeArgs)
+      addFormalArgRegions(argIdx, formalInRegs);
+    for (unsigned argIdx : summary.writeArgs)
+      addFormalArgRegions(argIdx, formalOutRegs);
+
+    for (const auto &entry : formalInRegs) {
+      const uint32_t formalInId = nextNode();
+      auto *formalIn =
+          new FormalInSVFGNode(formalInId, entryICFGNode, &F, entry.first,
+                               entry.second);
+      svfg->addNode(formalIn);
+      svfg->addFormalIn(&F, formalIn);
+
+      auto entryChiIt = entryChiByReg.find(entry.first);
+      if (entryChiIt != entryChiByReg.end()) {
+        auto *entryChi = dyn_cast<MSSASVFGNode>(entryChiIt->second);
+        SVFGNodeBS edgePts =
+            entryChi ? intersectPointsToSets(formalIn->getDefSVFVars(),
+                                             entryChi->getDefSVFVars(),
+                                             getOrCreateUnknownObjId())
+                     : SVFGNodeBS{};
+        if (edgePts.empty())
+          edgePts = formalIn->getDefSVFVars();
+        if (edgePts.empty())
+          edgePts.insert(getOrCreateUnknownObjId());
+        svfg->addEdge(formalIn, entryChiIt->second, SVFGEdgeK::CallFIn,
+                      nullptr, edgePts);
+      }
+    }
+
+    for (const auto &entry : formalOutRegs) {
+      const uint32_t formalOutId = nextNode();
+      const uint32_t formalOutVersion = nextVersion(&F, entry.first);
+      auto *formalOut = new FormalOutSVFGNode(formalOutId, entryICFGNode, &F,
+                                              entry.first, entry.second,
+                                              formalOutVersion);
+      svfg->addNode(formalOut);
+      svfg->addFormalOut(&F, formalOut);
+      svfg->setMSSADef(entry.first, formalOut, formalOutVersion);
+    }
+  }
+
+  for (const auto &entry : callReadRegions) {
+    const CallBase *call = entry.first;
+    const ICFGNode *icfgNode = findICFGNodeForBlock(icfg, call->getParent());
+    for (const auto &region : entry.second) {
+      const uint32_t actualInId = nextNode();
+      auto *actualIn = new ActualInSVFGNode(actualInId, icfgNode, call,
+                                            region.first, region.second);
+      svfg->addNode(actualIn);
+      svfg->addActualIn(call, actualIn);
+    }
+  }
+
+  for (const auto &entry : callWriteRegions) {
+    const CallBase *call = entry.first;
+    const ICFGNode *icfgNode = findICFGNodeForBlock(icfg, call->getParent());
+    const Function *callerFunc = call->getFunction();
+    for (const auto &region : entry.second) {
+      const uint32_t actualOutId = nextNode();
+      const uint32_t actualOutVersion = nextVersion(callerFunc, region.first);
+      auto *actualOut = new ActualOutSVFGNode(actualOutId, icfgNode, call,
+                                              region.first, region.second,
+                                              actualOutVersion);
+      svfg->addNode(actualOut);
+      svfg->addActualOut(call, actualOut);
+      svfg->setMSSADef(region.first, actualOut, actualOutVersion);
     }
   }
 }
@@ -569,332 +1024,202 @@ void SVFGBuilder::buildMemoryPHINodes() {
   if (!M)
     return;
 
-  // For each function, use iterative algorithm to place PHI nodes correctly
-  // This handles all cases: multiple predecessors, single predecessor with PHI,
-  // etc.
   for (const Function &F : *M) {
     if (F.isDeclaration())
       continue;
 
-    // Track which memory regions have defs in each basic block
-    std::unordered_map<const BasicBlock *, std::set<uint32_t>> bbToMemRegs;
-
-    // First pass: collect memory regions with defs in each block
-    for (const BasicBlock &bb : F) {
-      for (const Instruction &inst : bb) {
-        if (const StoreInst *store = dyn_cast<StoreInst>(&inst)) {
-          auto chiIt = storeToChiNodes.find(store);
-          if (chiIt != storeToChiNodes.end()) {
-            for (uint32_t chiId : chiIt->second) {
-              SVFGNode *chiNode = svfg->getNode(chiId);
-              if (auto *chi = dyn_cast<StoreChiSVFGNode>(chiNode)) {
-                bbToMemRegs[&bb].insert(chi->getMemReg());
-              }
-            }
-          }
-        }
-        auto atomicChiIt = atomicToChiNodes.find(&inst);
-        if (atomicChiIt != atomicToChiNodes.end()) {
-          for (uint32_t chiId : atomicChiIt->second) {
-            SVFGNode *chiNode = svfg->getNode(chiId);
-            if (auto *chi = dyn_cast<StoreChiSVFGNode>(chiNode)) {
-              bbToMemRegs[&bb].insert(chi->getMemReg());
-            }
-          }
-        }
-      }
-
-      // Also include EntryChi memory regions for entry block
-      if (&bb == &F.getEntryBlock()) {
-        for (uint32_t entryChiId : funcEntryChi[&F]) {
-          SVFGNode *entryChiNode = svfg->getNode(entryChiId);
-          if (auto *entryChi = dyn_cast<EntryChiSVFGNode>(entryChiNode)) {
-            uint32_t memReg = entryChi->getMemReg();
-            bbToMemRegs[&bb].insert(memReg);
-          }
-        }
-      }
-    }
-
-    // Track all memory regions that need PHI nodes
+    std::unordered_map<uint32_t, SVFGNode *> entryChiByReg;
     std::set<uint32_t> memRegsWithDefs;
-    for (auto &pair : bbToMemRegs) {
-      memRegsWithDefs.insert(pair.second.begin(), pair.second.end());
-    }
+    std::unordered_map<const BasicBlock *, std::unordered_map<uint32_t, SVFGNode *>>
+        localDefs;
+
     for (uint32_t entryChiId : funcEntryChi[&F]) {
-      SVFGNode *entryChiNode = svfg->getNode(entryChiId);
-      if (auto *entryChi = dyn_cast<EntryChiSVFGNode>(entryChiNode)) {
+      if (auto *entryChi =
+              dyn_cast<EntryChiSVFGNode>(svfg->getNode(entryChiId))) {
+        entryChiByReg[entryChi->getMemReg()] = entryChi;
         memRegsWithDefs.insert(entryChi->getMemReg());
       }
     }
 
-    // Iterative algorithm: keep adding PHI nodes until fixpoint
-    // A PHI is needed if:
-    // 1. Block has multiple predecessors AND
-    // 2. At least two predecessors have different defs (or one has def, one has
-    // PHI)
+    for (const BasicBlock &bb : F) {
+      auto &blockDefs = localDefs[&bb];
+      for (const Instruction &inst : bb) {
+        if (const auto *store = dyn_cast<StoreInst>(&inst)) {
+          auto chiIt = storeToChiNodes.find(store);
+          if (chiIt != storeToChiNodes.end()) {
+            for (uint32_t chiId : chiIt->second) {
+              if (auto *chi =
+                      dyn_cast<StoreChiSVFGNode>(svfg->getNode(chiId))) {
+                blockDefs[chi->getMemReg()] = chi;
+                memRegsWithDefs.insert(chi->getMemReg());
+              }
+            }
+          }
+        }
+
+        auto atomicChiIt = atomicToChiNodes.find(&inst);
+        if (atomicChiIt != atomicToChiNodes.end()) {
+          for (uint32_t chiId : atomicChiIt->second) {
+            if (auto *chi = dyn_cast<StoreChiSVFGNode>(svfg->getNode(chiId))) {
+              blockDefs[chi->getMemReg()] = chi;
+              memRegsWithDefs.insert(chi->getMemReg());
+            }
+          }
+        }
+
+        if (const auto *call = dyn_cast<CallBase>(&inst)) {
+          auto chiIt = callToChiNodes.find(call);
+          if (chiIt != callToChiNodes.end()) {
+            for (uint32_t chiId : chiIt->second) {
+              if (auto *chi = dyn_cast<CallChiSVFGNode>(svfg->getNode(chiId))) {
+                blockDefs[chi->getMemReg()] = chi;
+                memRegsWithDefs.insert(chi->getMemReg());
+              }
+            }
+          }
+        }
+      }
+    }
+
+    auto computeExitDefs =
+        [&](std::unordered_map<const BasicBlock *,
+                               std::unordered_map<uint32_t, SVFGNode *>> &out) {
+          out.clear();
+          std::queue<const BasicBlock *> worklist;
+          std::set<const BasicBlock *> inQueue;
+          worklist.push(&F.getEntryBlock());
+          inQueue.insert(&F.getEntryBlock());
+
+          while (!worklist.empty()) {
+            const BasicBlock *bb = worklist.front();
+            worklist.pop();
+            inQueue.erase(bb);
+
+            std::unordered_map<uint32_t, SVFGNode *> current;
+            if (bb == &F.getEntryBlock()) {
+              current = entryChiByReg;
+            } else {
+              for (const BasicBlock *pred : predecessors(bb)) {
+                auto predIt = out.find(pred);
+                if (predIt == out.end())
+                  continue;
+                for (const auto &pair : predIt->second) {
+                  const uint32_t memReg = pair.first;
+                  SVFGNode *def = pair.second;
+                  auto phiIt = bbToMemPhi[bb].find(memReg);
+                  if (phiIt != bbToMemPhi[bb].end()) {
+                    current[memReg] = svfg->getNode(phiIt->second);
+                    continue;
+                  }
+                  if (current.find(memReg) == current.end())
+                    current[memReg] = def;
+                }
+              }
+            }
+
+            auto phiMapIt = bbToMemPhi.find(bb);
+            if (phiMapIt != bbToMemPhi.end()) {
+              for (const auto &phiPair : phiMapIt->second)
+                current[phiPair.first] = svfg->getNode(phiPair.second);
+            }
+
+            auto localIt = localDefs.find(bb);
+            if (localIt != localDefs.end()) {
+              for (const auto &pair : localIt->second)
+                current[pair.first] = pair.second;
+            }
+
+            const bool changed =
+                (out.find(bb) == out.end()) || out[bb] != current;
+            if (!changed)
+              continue;
+
+            out[bb] = std::move(current);
+            for (const BasicBlock *succ : successors(bb)) {
+              if (inQueue.insert(succ).second)
+                worklist.push(succ);
+            }
+          }
+        };
+
     bool changed = true;
     while (changed) {
       changed = false;
 
+      std::unordered_map<const BasicBlock *,
+                         std::unordered_map<uint32_t, SVFGNode *>>
+          exitDefs;
+      computeExitDefs(exitDefs);
+
       for (const BasicBlock &bb : F) {
-        // Skip entry block (no predecessors)
-        if (pred_empty(&bb))
+        const unsigned numPreds =
+            std::distance(pred_begin(&bb), pred_end(&bb));
+        if (numPreds < 2)
           continue;
 
-        // Check if this is a merge point (multiple predecessors)
-        unsigned numPreds = std::distance(pred_begin(&bb), pred_end(&bb));
-        if (numPreds < 1)
-          continue;
-
-        // For each memory region, check if PHI is needed
         for (uint32_t memReg : memRegsWithDefs) {
-          // Check if PHI already exists
-          auto phiIt = bbToMemPhi[&bb].find(memReg);
-          if (phiIt != bbToMemPhi[&bb].end())
+          if (bbToMemPhi[&bb].count(memReg))
             continue;
 
-          // Check if any predecessor has a def or PHI for this region
-          bool needsPhi = false;
-          std::set<SVFGNode *> incomingDefs;
-
+          std::vector<SVFGNode *> perPredDefs;
+          std::set<SVFGNode *> distinctDefs;
           for (const BasicBlock *pred : predecessors(&bb)) {
             SVFGNode *incomingDef = nullptr;
-
-            // First check if predecessor has a PHI node
-            auto predPhiIt = bbToMemPhi[pred].find(memReg);
-            if (predPhiIt != bbToMemPhi[pred].end()) {
-              incomingDef = svfg->getNode(predPhiIt->second);
-            } else {
-              // Look for StoreChi in predecessor (last def)
-              for (const Instruction &inst : *pred) {
-                if (const StoreInst *store = dyn_cast<StoreInst>(&inst)) {
-                  auto chiIt = storeToChiNodes.find(store);
-                  if (chiIt != storeToChiNodes.end()) {
-                    for (uint32_t chiId : chiIt->second) {
-                      SVFGNode *chiNode = svfg->getNode(chiId);
-                      if (auto *chi = dyn_cast<StoreChiSVFGNode>(chiNode)) {
-                        if (chi->getMemReg() == memReg) {
-                          incomingDef = chiNode;
-                          // Keep the last one (most recent def)
-                        }
-                      }
-                    }
-                  }
-                }
-                auto atomicChiIt = atomicToChiNodes.find(&inst);
-                if (atomicChiIt != atomicToChiNodes.end()) {
-                  for (uint32_t chiId : atomicChiIt->second) {
-                    SVFGNode *chiNode = svfg->getNode(chiId);
-                    if (auto *chi = dyn_cast<StoreChiSVFGNode>(chiNode)) {
-                      if (chi->getMemReg() == memReg) {
-                        incomingDef = chiNode;
-                      }
-                    }
-                  }
-                }
-              }
-
-              // If no def found in predecessor, check EntryChi (if pred is
-              // entry block)
-              if (!incomingDef && pred == &F.getEntryBlock()) {
-                for (uint32_t entryChiId : funcEntryChi[&F]) {
-                  SVFGNode *entryChiNode = svfg->getNode(entryChiId);
-                  if (auto *entryChi =
-                          dyn_cast<EntryChiSVFGNode>(entryChiNode)) {
-                    if (entryChi->getMemReg() == memReg) {
-                      incomingDef = entryChiNode;
-                      break;
-                    }
-                  }
-                }
-              }
+            auto predIt = exitDefs.find(pred);
+            if (predIt != exitDefs.end()) {
+              auto defIt = predIt->second.find(memReg);
+              if (defIt != predIt->second.end())
+                incomingDef = defIt->second;
             }
+            if (!incomingDef) {
+              auto entryIt = entryChiByReg.find(memReg);
+              if (entryIt != entryChiByReg.end())
+                incomingDef = entryIt->second;
+            }
+            perPredDefs.push_back(incomingDef);
+            if (incomingDef)
+              distinctDefs.insert(incomingDef);
+          }
 
-            if (incomingDef) {
-              incomingDefs.insert(incomingDef);
+          if (distinctDefs.size() < 2)
+            continue;
+
+          const uint32_t phiNodeId = createMemoryPHI(memReg, &bb);
+          auto *phiNode =
+              dyn_cast<IntraMSSAPhiSVFGNode>(svfg->getNode(phiNodeId));
+          if (!phiNode)
+            continue;
+
+          if (phiNode->getDefSVFVars().empty()) {
+            if (SVFGNode *seed = *distinctDefs.begin()) {
+              if (auto *seedMem = dyn_cast<MSSASVFGNode>(seed)) {
+                if (auto *phiPts =
+                        const_cast<SVFGNodeBS *>(phiNode->getPointsTo())) {
+                  *phiPts = seedMem->getDefSVFVars();
+                }
+              }
             }
           }
 
-          // A memory PHI is needed only at confluence points:
-          //   1.  The block has >= 2 predecessors (join point in the CFG).
-          //   2.  AND the memory region has at least one reaching definition
-          //       along some path (incomingDefs is non-empty).
-          //
-          // The old condition "numPreds == 1 && predecessor-has-PHI → needsPhi"
-          // was WRONG: a block with a single predecessor NEVER needs a PHI in
-          // SSA form.  That condition caused cascading/unnecessary PHIs,
-          // degrading analysis precision.
-          if (numPreds >= 2 && !incomingDefs.empty()) {
-            needsPhi = true;
+          uint32_t predIdx = 0;
+          for (SVFGNode *incomingDef : perPredDefs) {
+            if (!incomingDef) {
+              ++predIdx;
+              continue;
+            }
+            SVFGNodeBS edgePts = phiNode->getDefSVFVars();
+            if (edgePts.empty())
+              edgePts.insert(getOrCreateUnknownObjId());
+            svfg->addEdge(incomingDef, phiNode, SVFGEdgeK::IntraPhi, nullptr,
+                          edgePts);
+            if (auto *defMem = dyn_cast<MSSASVFGNode>(incomingDef)) {
+              phiNode->setOpVer(predIdx, defMem->getMemReg(),
+                                defMem->getSSAVersion());
+            }
+            ++predIdx;
           }
 
-          if (needsPhi) {
-            // Get points-to set for this memory region
-            SVFGNodeBS ptsSet;
-            // Try to get points-to from EntryChi or StoreChi nodes
-            for (uint32_t entryChiId : funcEntryChi[&F]) {
-              SVFGNode *entryChiNode = svfg->getNode(entryChiId);
-              if (auto *entryChi = dyn_cast<EntryChiSVFGNode>(entryChiNode)) {
-                if (entryChi->getMemReg() == memReg) {
-                  ptsSet = entryChi->getDefSVFVars();
-                  break;
-                }
-              }
-            }
-
-            // If no EntryChi found, try to get from any StoreChi
-            if (ptsSet.empty()) {
-              for (const BasicBlock &searchBB : F) {
-                for (const Instruction &inst : searchBB) {
-                  if (const StoreInst *store = dyn_cast<StoreInst>(&inst)) {
-                    auto chiIt = storeToChiNodes.find(store);
-                    if (chiIt != storeToChiNodes.end()) {
-                      for (uint32_t chiId : chiIt->second) {
-                        SVFGNode *chiNode = svfg->getNode(chiId);
-                        if (auto *chi = dyn_cast<StoreChiSVFGNode>(chiNode)) {
-                          if (chi->getMemReg() == memReg) {
-                            ptsSet = chi->getDefSVFVars();
-                            break;
-                          }
-                        }
-                      }
-                    }
-                  }
-                  auto atomicChiIt = atomicToChiNodes.find(&inst);
-                  if (atomicChiIt != atomicToChiNodes.end()) {
-                    for (uint32_t chiId : atomicChiIt->second) {
-                      SVFGNode *chiNode = svfg->getNode(chiId);
-                      if (auto *chi = dyn_cast<StoreChiSVFGNode>(chiNode)) {
-                        if (chi->getMemReg() == memReg) {
-                          ptsSet = chi->getDefSVFVars();
-                          break;
-                        }
-                      }
-                    }
-                  }
-                }
-                if (!ptsSet.empty())
-                  break;
-              }
-            }
-
-            // Create memory PHI node
-            uint32_t phiNodeId = nextNode();
-            // Use per-function versioning to avoid collisions across functions
-            uint32_t version = nextVersion(&F, memReg);
-
-            // Find ICFG node for this basic block
-            const ICFGNode *icfgNode = nullptr;
-            for (auto &pair : *icfg) {
-              if (IntraBlockNode *blockNode =
-                      dyn_cast<IntraBlockNode>(pair.second)) {
-                if (blockNode->getBasicBlock() == &bb) {
-                  icfgNode = blockNode;
-                  break;
-                }
-              }
-            }
-
-            auto *phiNode = new IntraMSSAPhiSVFGNode(phiNodeId, icfgNode,
-                                                     memReg, version, ptsSet);
-            svfg->addNode(phiNode);
-            bbToMemPhi[&bb][memReg] = phiNodeId;
-            changed = true;
-
-            // Connect PHI to incoming defs from predecessors
-            uint32_t predIdx = 0;
-            for (const BasicBlock *pred : predecessors(&bb)) {
-              SVFGNode *incomingDef = nullptr;
-
-              // Look for last def in predecessor block
-              // First check if there's a PHI node in the predecessor
-              auto predPhiIt = bbToMemPhi[pred].find(memReg);
-              if (predPhiIt != bbToMemPhi[pred].end()) {
-                incomingDef = svfg->getNode(predPhiIt->second);
-              } else {
-                // Look for StoreChi in predecessor (last def)
-                SVFGNode *lastChi = nullptr;
-                for (const Instruction &inst : *pred) {
-                  if (const StoreInst *store = dyn_cast<StoreInst>(&inst)) {
-                    auto chiIt = storeToChiNodes.find(store);
-                    if (chiIt != storeToChiNodes.end()) {
-                      for (uint32_t chiId : chiIt->second) {
-                        SVFGNode *chiNode = svfg->getNode(chiId);
-                        if (auto *chi = dyn_cast<StoreChiSVFGNode>(chiNode)) {
-                          if (chi->getMemReg() == memReg) {
-                            lastChi = chiNode;
-                          }
-                        }
-                      }
-                    }
-                  }
-                  auto atomicChiIt = atomicToChiNodes.find(&inst);
-                  if (atomicChiIt != atomicToChiNodes.end()) {
-                    for (uint32_t chiId : atomicChiIt->second) {
-                      SVFGNode *chiNode = svfg->getNode(chiId);
-                      if (auto *chi = dyn_cast<StoreChiSVFGNode>(chiNode)) {
-                        if (chi->getMemReg() == memReg) {
-                          lastChi = chiNode;
-                        }
-                      }
-                    }
-                  }
-                }
-                incomingDef = lastChi;
-
-                // If no def found in predecessor, check EntryChi (if pred is
-                // entry block)
-                if (!incomingDef && pred == &F.getEntryBlock()) {
-                  for (uint32_t entryChiId : funcEntryChi[&F]) {
-                    SVFGNode *entryChiNode = svfg->getNode(entryChiId);
-                    if (auto *entryChi =
-                            dyn_cast<EntryChiSVFGNode>(entryChiNode)) {
-                      if (entryChi->getMemReg() == memReg) {
-                        incomingDef = entryChiNode;
-                        break;
-                      }
-                    }
-                  }
-                }
-              }
-
-              // Connect incoming def to PHI (use EntryChi as fallback if no def
-              // found)
-              if (incomingDef) {
-                SVFGNodeBS edgePts = phiNode->getDefSVFVars();
-                if (edgePts.empty())
-                  edgePts.insert(getOrCreateUnknownObjId());
-                svfg->addEdge(incomingDef, phiNode, SVFGEdgeK::IntraPhi,
-                              nullptr, edgePts);
-                // Record the operand version for this predecessor.
-                if (auto *defMem = dyn_cast<MSSASVFGNode>(incomingDef)) {
-                  phiNode->setOpVer(predIdx, defMem->getMemReg(),
-                                    defMem->getSSAVersion());
-                }
-              } else {
-                // No def found - connect to EntryChi if available
-                // (conservative)
-                for (uint32_t entryChiId : funcEntryChi[&F]) {
-                  SVFGNode *entryChiNode = svfg->getNode(entryChiId);
-                  if (auto *entryChi =
-                          dyn_cast<EntryChiSVFGNode>(entryChiNode)) {
-                    if (entryChi->getMemReg() == memReg) {
-                      SVFGNodeBS edgePts = phiNode->getDefSVFVars();
-                      if (edgePts.empty())
-                        edgePts.insert(getOrCreateUnknownObjId());
-                      svfg->addEdge(entryChiNode, phiNode, SVFGEdgeK::IntraPhi,
-                                    nullptr, edgePts);
-                      phiNode->setOpVer(predIdx, entryChi->getMemReg(),
-                                        entryChi->getSSAVersion());
-                      break;
-                    }
-                  }
-                }
-              }
-              predIdx++;
-            }
-          }
+          changed = true;
         }
       }
     }
@@ -1242,51 +1567,73 @@ void SVFGBuilder::connectMemorySSAEdges() {
         if (const auto *call = dyn_cast<CallBase>(&inst)) {
           auto muIt = callToMuNodes.find(call);
           auto chiIt = callToChiNodes.find(call);
-          if (muIt != callToMuNodes.end() && chiIt != callToChiNodes.end()) {
+          if (muIt != callToMuNodes.end() || chiIt != callToChiNodes.end()) {
             std::unordered_map<uint32_t, SVFGNode *> callMuByReg;
             std::unordered_map<uint32_t, SVFGNode *> callChiByReg;
 
-            for (uint32_t muId : muIt->second) {
-              SVFGNode *muNode = svfg->getNode(muId);
-              if (auto *mu = dyn_cast<CallMuSVFGNode>(muNode)) {
-                callMuByReg[mu->getMemReg()] = muNode;
+            if (muIt != callToMuNodes.end()) {
+              for (uint32_t muId : muIt->second) {
+                SVFGNode *muNode = svfg->getNode(muId);
+                if (auto *mu = dyn_cast<CallMuSVFGNode>(muNode)) {
+                  callMuByReg[mu->getMemReg()] = muNode;
+                }
               }
             }
-            for (uint32_t chiId : chiIt->second) {
-              SVFGNode *chiNode = svfg->getNode(chiId);
-              if (auto *chi = dyn_cast<CallChiSVFGNode>(chiNode)) {
-                callChiByReg[chi->getMemReg()] = chiNode;
+            if (chiIt != callToChiNodes.end()) {
+              for (uint32_t chiId : chiIt->second) {
+                SVFGNode *chiNode = svfg->getNode(chiId);
+                if (auto *chi = dyn_cast<CallChiSVFGNode>(chiNode)) {
+                  callChiByReg[chi->getMemReg()] = chiNode;
+                }
               }
             }
 
-            for (const auto &pair : callMuByReg) {
-              const uint32_t memReg = pair.first;
-              SVFGNode *callMuNode = pair.second;
+            std::set<uint32_t> touchedRegs;
+            for (const auto &pair : callMuByReg)
+              touchedRegs.insert(pair.first);
+            for (const auto &pair : callChiByReg)
+              touchedRegs.insert(pair.first);
+
+            for (uint32_t memReg : touchedRegs) {
+              SVFGNode *callMuNode = nullptr;
               SVFGNode *callChiNode = nullptr;
+              auto muNodeIt = callMuByReg.find(memReg);
+              if (muNodeIt != callMuByReg.end())
+                callMuNode = muNodeIt->second;
               auto chiNodeIt = callChiByReg.find(memReg);
-              if (chiNodeIt != callChiByReg.end()) {
+              if (chiNodeIt != callChiByReg.end())
                 callChiNode = chiNodeIt->second;
-              }
-              if (!callMuNode || !callChiNode)
-                continue;
 
-              // Connect reaching def -> callMu, and callMu -> callChi.
               auto defIt = lastDef.find(memReg);
-              if (defIt != lastDef.end() && defIt->second) {
+              SVFGNode *reachingDef =
+                  (defIt != lastDef.end()) ? defIt->second : nullptr;
+
+              if (callMuNode && reachingDef) {
                 SVFGNodeBS edgePts = callMuNode->getDefSVFVars();
                 if (edgePts.empty())
                   edgePts.insert(getOrCreateUnknownObjId());
-                svfg->addEdge(defIt->second, callMuNode, SVFGEdgeK::CallMu,
+                svfg->addEdge(reachingDef, callMuNode, SVFGEdgeK::CallMu,
                               nullptr, edgePts);
               }
-              {
+
+              if (callMuNode && callChiNode) {
                 SVFGNodeBS edgePts = callChiNode->getDefSVFVars();
                 if (edgePts.empty())
                   edgePts.insert(getOrCreateUnknownObjId());
                 svfg->addEdge(callMuNode, callChiNode, SVFGEdgeK::CallChi,
                               nullptr, edgePts);
+                lastDef[memReg] = callChiNode;
+              } else if (callChiNode) {
+                SVFGNode *chiSrc = callMuNode ? callMuNode : reachingDef;
+                if (chiSrc) {
+                  SVFGNodeBS edgePts = callChiNode->getDefSVFVars();
+                  if (edgePts.empty())
+                    edgePts.insert(getOrCreateUnknownObjId());
+                  svfg->addEdge(chiSrc, callChiNode, SVFGEdgeK::CallChi,
+                                nullptr, edgePts);
+                }
+                lastDef[memReg] = callChiNode;
               }
-              lastDef[memReg] = callChiNode;
             }
           }
         }

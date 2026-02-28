@@ -962,6 +962,65 @@ bool SVFGBuilder::mayModifyMemory(const Function *F) {
   return mayModifyMemory(F, visited);
 }
 
+bool SVFGBuilder::mayReadMemory(const Function *F) {
+  std::unordered_set<const Function *> visited;
+  return mayReadMemory(F, visited);
+}
+
+bool SVFGBuilder::mayReadMemory(
+    const Function *F, std::unordered_set<const Function *> &visited) {
+  if (!F)
+    return true;
+  if (!visited.insert(F).second) {
+    // Break recursion cycles conservatively.
+    return true;
+  }
+
+  if (F->doesNotAccessMemory() || F->hasFnAttribute(Attribute::ReadNone))
+    return false;
+  if (F->hasFnAttribute(Attribute::WriteOnly))
+    return false;
+
+  if (F->isDeclaration()) {
+    return true;
+  }
+
+  for (const BasicBlock &bb : *F) {
+    for (const Instruction &inst : bb) {
+      if (isa<LoadInst>(&inst) || isa<AtomicRMWInst>(&inst) ||
+          isa<AtomicCmpXchgInst>(&inst)) {
+        return true;
+      }
+
+      if (const auto *call = dyn_cast<CallBase>(&inst)) {
+        if (const auto *intrinsic = dyn_cast<IntrinsicInst>(call)) {
+          switch (intrinsic->getIntrinsicID()) {
+          case Intrinsic::dbg_value:
+          case Intrinsic::dbg_declare:
+          case Intrinsic::dbg_label:
+          case Intrinsic::lifetime_start:
+          case Intrinsic::lifetime_end:
+          case Intrinsic::invariant_start:
+          case Intrinsic::invariant_end:
+          case Intrinsic::memset:
+            continue;
+          default:
+            return true;
+          }
+        }
+
+        const Function *callee = call->getCalledFunction();
+        if (!callee)
+          return true;
+        if (mayReadMemory(callee, visited))
+          return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 bool SVFGBuilder::mayModifyMemory(
     const Function *F, std::unordered_set<const Function *> &visited) {
   if (!F)
@@ -1043,6 +1102,72 @@ bool SVFGBuilder::mayModifyMemory(
   }
   
   return false;
+}
+
+bool SVFGBuilder::callMayReadMemory(const CallBase *call) {
+  if (!call)
+    return true;
+
+  if (call->doesNotAccessMemory() || call->hasFnAttr(Attribute::ReadNone))
+    return false;
+  if (call->hasFnAttr(Attribute::WriteOnly))
+    return false;
+
+  if (const Function *callee = call->getCalledFunction()) {
+    if (callee->doesNotAccessMemory() || callee->hasFnAttribute(Attribute::ReadNone))
+      return false;
+    if (callee->hasFnAttribute(Attribute::WriteOnly))
+      return false;
+    if (!callee->isDeclaration())
+      return mayReadMemory(callee);
+  }
+
+  return true;
+}
+
+bool SVFGBuilder::callMayModifyMemory(const CallBase *call) {
+  if (!call)
+    return true;
+
+  if (call->doesNotAccessMemory() || call->onlyReadsMemory() ||
+      call->hasFnAttr(Attribute::ReadNone) ||
+      call->hasFnAttr(Attribute::ReadOnly)) {
+    return false;
+  }
+
+  if (const Function *callee = call->getCalledFunction()) {
+    if (callee->doesNotAccessMemory() || callee->onlyReadsMemory() ||
+        callee->hasFnAttribute(Attribute::ReadNone) ||
+        callee->hasFnAttribute(Attribute::ReadOnly)) {
+      return false;
+    }
+    if (!callee->isDeclaration())
+      return mayModifyMemory(callee);
+  }
+
+  return true;
+}
+
+bool SVFGBuilder::callArgMayReadMemory(const CallBase *call,
+                                       unsigned argNo) const {
+  if (!call)
+    return true;
+  if (call->paramHasAttr(argNo, Attribute::ReadNone) ||
+      call->paramHasAttr(argNo, Attribute::WriteOnly)) {
+    return false;
+  }
+  return true;
+}
+
+bool SVFGBuilder::callArgMayModifyMemory(const CallBase *call,
+                                         unsigned argNo) const {
+  if (!call)
+    return true;
+  if (call->paramHasAttr(argNo, Attribute::ReadNone) ||
+      call->paramHasAttr(argNo, Attribute::ReadOnly)) {
+    return false;
+  }
+  return true;
 }
 
 uint32_t SVFGBuilder::nextVersion(const Function *F, uint32_t memReg) {

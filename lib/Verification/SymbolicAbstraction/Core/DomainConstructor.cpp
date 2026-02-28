@@ -14,7 +14,10 @@
 #include "Verification/SymbolicAbstraction/Core/AbstractValue.h"
 #include "Verification/SymbolicAbstraction/Core/ParamStrategy.h"
 // #include "Verification/SymbolicAbstraction/Core/ResultStore.h"
+#include "Verification/SymbolicAbstraction/Domains/Intervals.h"
+#include "Verification/SymbolicAbstraction/Domains/Octagon.h"
 #include "Verification/SymbolicAbstraction/Domains/Product.h"
+#include "Verification/SymbolicAbstraction/Domains/Zones.h"
 #include "Verification/SymbolicAbstraction/Utils/Config.h"
 
 #include <map>
@@ -26,6 +29,30 @@
 #include <llvm/Support/raw_ostream.h>
 
 namespace symbolic_abstraction {
+namespace {
+const std::vector<DomainConstructor> &fallbackBuiltInDomains() {
+  static const std::vector<DomainConstructor> domains = [] {
+    std::vector<DomainConstructor> builtins;
+    builtins.emplace_back("Interval", "interval domain for single values",
+                          params::ForNonPointers<domains::Interval>);
+    builtins.emplace_back(
+        "Octagon", "octagonal constraint domain (±x ± y ≤ c)",
+        [](const FunctionContext &fctx, llvm::BasicBlock *bb, bool after) {
+          return params::ForNonPointerPairs<domains::Octagon>(fctx, bb, after,
+                                                              false);
+        });
+    builtins.emplace_back(
+        "Zones", "difference-bound zone domain (DBM)",
+        [](const FunctionContext &fctx, llvm::BasicBlock *bb, bool after) {
+          return params::ForNonPointerPairs<domains::Zone>(fctx, bb, after,
+                                                           false);
+        });
+    return builtins;
+  }();
+  return domains;
+}
+} // namespace
+
 namespace configparser {
 
 /**
@@ -216,6 +243,12 @@ DomainConstructor Config::get(const char *module, const char *key,
 
 } // namespace configparser
 std::vector<DomainConstructor> *DomainConstructor::KnownDomains_;
+
+const std::vector<DomainConstructor> &DomainConstructor::all() {
+  if (KnownDomains_ && !KnownDomains_->empty())
+    return *KnownDomains_;
+  return fallbackBuiltInDomains();
+}
 
 /**
  * @brief Construct a DomainConstructor from a configuration object.

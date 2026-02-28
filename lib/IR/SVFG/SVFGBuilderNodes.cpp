@@ -529,76 +529,22 @@ void SVFGBuilder::buildFormalParmNodes() {
       valueToNode[arg] = nodeId;
       svfg->setValueNode(arg, nodeId);
 
-      if (config.buildMSSA) {
-        std::vector<const void *> ptsVoid = getPointsToSet(arg);
-        SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
+      if (!config.buildMSSA)
+        continue;
 
-        auto &memRegsForArg = argToMemRegs[arg];
-        if (objIds.empty()) {
-          // Unknown points-to: conservative single region keyed by the argument
-          // value.
-          const uint32_t memReg = getOrCreateMemReg(arg);
-          memRegsForArg.push_back(memReg);
-          SVFGNodeBS pts{getOrCreateUnknownObjId()};
+      std::vector<const void *> ptsVoid = getPointsToSet(arg);
+      SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
 
-          uint32_t formalInNodeId = nextNode();
-          auto *formalIn =
-              new FormalInSVFGNode(formalInNodeId, nullptr, &F, memReg, pts);
-          svfg->addNode(formalIn);
-          svfg->addFormalIn(&F, formalIn);
+      auto &memRegsForArg = argToMemRegs[arg];
+      if (objIds.empty()) {
+        // Keep the argument-to-region mapping even when MemorySSA nodes are
+        // synthesized later from actual ref/mod summaries.
+        memRegsForArg.push_back(getOrCreateMemReg(arg));
+        continue;
+      }
 
-          uint32_t formalOutNodeId = nextNode();
-          uint32_t formalOutVersion = nextVersion(&F, memReg);
-          auto *formalOut = new FormalOutSVFGNode(
-              formalOutNodeId, nullptr, &F, memReg, pts, formalOutVersion);
-          svfg->addNode(formalOut);
-          svfg->addFormalOut(&F, formalOut);
-          svfg->setMSSADef(memReg, formalOut, formalOutVersion);
-        } else {
-          for (uint32_t objId : objIds) {
-            const uint32_t memReg = getOrCreateMemRegForObject(objId);
-            memRegsForArg.push_back(memReg);
-            SVFGNodeBS pts{objId};
-
-            // Avoid duplicating FormalIn/FormalOut for the same (Function,
-            // memReg).
-            bool hasFormalIn = false;
-            for (SVFGNode *n : svfg->getFormalIns(&F)) {
-              if (auto *fi = dyn_cast<FormalInSVFGNode>(n)) {
-                if (fi->getMemReg() == memReg) {
-                  hasFormalIn = true;
-                  break;
-                }
-              }
-            }
-            if (!hasFormalIn) {
-              uint32_t formalInNodeId = nextNode();
-              auto *formalIn = new FormalInSVFGNode(formalInNodeId, nullptr, &F,
-                                                    memReg, pts);
-              svfg->addNode(formalIn);
-              svfg->addFormalIn(&F, formalIn);
-            }
-
-            bool hasFormalOut = false;
-            for (SVFGNode *n : svfg->getFormalOuts(&F)) {
-              if (auto *fo = dyn_cast<FormalOutSVFGNode>(n)) {
-                if (fo->getMemReg() == memReg) {
-                  hasFormalOut = true;
-                  break;
-                }
-              }
-            }
-            if (!hasFormalOut) {
-              uint32_t formalOutNodeId = nextNode();
-              uint32_t formalOutVersion = nextVersion(&F, memReg);
-              auto *formalOut = new FormalOutSVFGNode(
-                  formalOutNodeId, nullptr, &F, memReg, pts, formalOutVersion);
-              svfg->addNode(formalOut);
-              svfg->addFormalOut(&F, formalOut);
-              svfg->setMSSADef(memReg, formalOut, formalOutVersion);
-            }
-          }
-        }
+      for (uint32_t objId : objIds) {
+        memRegsForArg.push_back(getOrCreateMemRegForObject(objId));
       }
     }
 
@@ -673,63 +619,6 @@ void SVFGBuilder::buildActualParmNodes() {
 
       if (!config.buildMSSA)
         continue;
-
-      // Create ActualIn/ActualOut nodes for all memory regions reachable from
-      // pointer arguments.
-      std::unordered_set<uint32_t> createdMemRegs;
-      for (unsigned i = 0; i < numArgs; ++i) {
-        const Value *argVal = call->getArgOperand(i);
-        if (!argVal->getType()->isPointerTy())
-          continue;
-
-        std::vector<const void *> ptsVoid = getPointsToSet(argVal);
-        SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
-
-        if (objIds.empty()) {
-          const uint32_t memReg = getOrCreateMemReg(argVal);
-          if (!createdMemRegs.insert(memReg).second)
-            continue;
-
-          SVFGNodeBS pts{getOrCreateUnknownObjId()};
-          const uint32_t actualInMemId = nextNode();
-          auto *actualInMem =
-              new ActualInSVFGNode(actualInMemId, blockNode, call, memReg, pts);
-          svfg->addNode(actualInMem);
-          svfg->addActualIn(call, actualInMem);
-
-          const uint32_t actualOutMemId = nextNode();
-          const Function *callerFunc = bb->getParent();
-          const uint32_t actualOutVersion = nextVersion(callerFunc, memReg);
-          auto *actualOutMem = new ActualOutSVFGNode(
-              actualOutMemId, blockNode, call, memReg, pts, actualOutVersion);
-          svfg->addNode(actualOutMem);
-          svfg->addActualOut(call, actualOutMem);
-          svfg->setMSSADef(memReg, actualOutMem, actualOutVersion);
-          continue;
-        }
-
-        for (uint32_t objId : objIds) {
-          const uint32_t memReg = getOrCreateMemRegForObject(objId);
-          if (!createdMemRegs.insert(memReg).second)
-            continue;
-          SVFGNodeBS pts{objId};
-
-          const uint32_t actualInMemId = nextNode();
-          auto *actualInMem =
-              new ActualInSVFGNode(actualInMemId, blockNode, call, memReg, pts);
-          svfg->addNode(actualInMem);
-          svfg->addActualIn(call, actualInMem);
-
-          const uint32_t actualOutMemId = nextNode();
-          const Function *callerFunc = bb->getParent();
-          const uint32_t actualOutVersion = nextVersion(callerFunc, memReg);
-          auto *actualOutMem = new ActualOutSVFGNode(
-              actualOutMemId, blockNode, call, memReg, pts, actualOutVersion);
-          svfg->addNode(actualOutMem);
-          svfg->addActualOut(call, actualOutMem);
-          svfg->setMSSADef(memReg, actualOutMem, actualOutVersion);
-        }
-      }
     }
   }
 }

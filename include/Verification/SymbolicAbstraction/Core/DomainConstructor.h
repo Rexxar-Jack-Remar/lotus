@@ -160,12 +160,7 @@ public:
   /**
    * Returns all domains registered using `DomainConstructor::Register`.
    */
-  static const std::vector<DomainConstructor> &all() {
-    static std::vector<DomainConstructor> empty;
-    if (!KnownDomains_)
-      return empty;
-    return *KnownDomains_;
-  }
+  static const std::vector<DomainConstructor> &all();
 
   friend std::ostream &operator<<(std::ostream &out,
                                   const DomainConstructor &dom) {

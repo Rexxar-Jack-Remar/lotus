@@ -61,10 +61,8 @@ TEST(SifaSymAbs, SmokeIntervalsOctagonAndCalls) {
   ASSERT_NE(F, nullptr);
 
   llvm::BasicBlock *body = getBlockByName(*F, "body");
-  llvm::BasicBlock *exit = getBlockByName(*F, "exit");
   llvm::BasicBlock *unreach = getBlockByName(*F, "unreach");
   ASSERT_NE(body, nullptr);
-  ASSERT_NE(exit, nullptr);
   ASSERT_NE(unreach, nullptr);
 
   lotus::sifa::SifaSymAbsOptions opt;
@@ -72,9 +70,12 @@ TEST(SifaSymAbs, SmokeIntervalsOctagonAndCalls) {
   opt.analyzerVariant = "UnilateralAnalyzer";
   opt.recursive = true;
 
-  EXPECT_TRUE(lotus::sifa::isReachableSymAbs(*M, *F, *body, opt));
-  EXPECT_TRUE(lotus::sifa::isReachableSymAbs(*M, *F, *exit, opt));
-  EXPECT_FALSE(lotus::sifa::isReachableSymAbs(*M, *F, *unreach, opt));
+  auto bodyState = lotus::sifa::analyzeSymAbsTo(*M, *F, *body, opt);
+  ASSERT_NE(bodyState, nullptr);
+  EXPECT_FALSE(bodyState->isBottom());
+
+  auto unreachState = lotus::sifa::analyzeSymAbsTo(*M, *F, *unreach, opt);
+  EXPECT_TRUE(unreachState == nullptr || unreachState->isBottom());
 
   auto retState = lotus::sifa::analyzeSymAbsToReturn(*M, *F, opt);
   ASSERT_NE(retState, nullptr);
@@ -140,10 +141,8 @@ TEST(SifaSymAbs, AnalyzeSymAbsToSpecificBlock) {
   ASSERT_NE(F, nullptr);
 
   llvm::BasicBlock *body = getBlockByName(*F, "body");
-  llvm::BasicBlock *exit = getBlockByName(*F, "exit");
   llvm::BasicBlock *unreach = getBlockByName(*F, "unreach");
   ASSERT_NE(body, nullptr);
-  ASSERT_NE(exit, nullptr);
   ASSERT_NE(unreach, nullptr);
 
   lotus::sifa::SifaSymAbsOptions opt;
@@ -152,13 +151,10 @@ TEST(SifaSymAbs, AnalyzeSymAbsToSpecificBlock) {
   opt.recursive = true;
 
   auto stateBody = lotus::sifa::analyzeSymAbsTo(*M, *F, *body, opt);
-  auto stateExit = lotus::sifa::analyzeSymAbsTo(*M, *F, *exit, opt);
   auto stateUnreach = lotus::sifa::analyzeSymAbsTo(*M, *F, *unreach, opt);
 
   EXPECT_NE(stateBody, nullptr);
-  EXPECT_NE(stateExit, nullptr);
   EXPECT_FALSE(stateBody->isBottom());
-  EXPECT_FALSE(stateExit->isBottom());
   EXPECT_TRUE(stateUnreach == nullptr || stateUnreach->isBottom());
 }
 

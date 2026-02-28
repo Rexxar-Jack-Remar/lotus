@@ -207,10 +207,20 @@ void AbstractInterpretation::analyse() {
     }
   }
 
-  // Match SVF semantics: analyze from main entry only.
+  // Analyze from main first when present, then cover any remaining defined
+  // functions. This keeps the normal entrypoint behavior while still handling
+  // standalone test/helper functions that are not called from main.
   const llvm::Function *mainFunc = module_->getFunction("main");
   if (mainFunc && !mainFunc->isDeclaration()) {
     handleFunction(mainFunc);
+  }
+
+  for (const llvm::Function *func : functions) {
+    if (!func || func == mainFunc)
+      continue;
+    if (analyzedFunctions_.count(func))
+      continue;
+    handleFunction(func);
   }
 }
 
