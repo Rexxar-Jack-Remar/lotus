@@ -8,7 +8,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 
-#include "Dataflow/APA/Analyses/Intra/IntraExpressionKey.h"
+#include "Dataflow/APA/Support/ExpressionKey.h"
 #include "Dataflow/APA/DataFlow.h"
 
 #include <set>

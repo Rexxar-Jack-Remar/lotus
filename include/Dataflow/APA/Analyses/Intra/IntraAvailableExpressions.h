@@ -2,7 +2,7 @@
 #define DATAFLOW_ELIMINATION_ANALYSES_INTRA_AVAILABLEEXPRESSIONS_H_
 
 #include "Dataflow/APA/DataFlow.h"
-#include "Dataflow/APA/Analyses/Intra/IntraExpressionKey.h"
+#include "Dataflow/APA/Support/ExpressionKey.h"
 #include "Dataflow/APA/LLVM/LLVMEliminationProblem.h"
     
 #include "llvm/Analysis/AliasAnalysis.h"
