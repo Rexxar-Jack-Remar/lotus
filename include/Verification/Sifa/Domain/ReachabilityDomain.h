@@ -5,8 +5,8 @@
 // State is a boolean; bottom=false means "unreachable", top=true means "reachable".
 // join is OR; widen is OR; post is identity.
 //
-// This is intentionally simple and is meant as a scaffolding domain for the
-// initial intraprocedural milestone.
+// This is intentionally simple and is primarily used for Sifa reachability
+// queries and end-to-end regression coverage.
 //
 //===----------------------------------------------------------------------===//
 
@@ -38,6 +38,7 @@ public:
   }
 
   State meet(const State &a, const State &b) const override { return a && b; }
+  bool supportsMeet() const override { return true; }
 
   State post(const Label &t, const State &in) const override {
     (void)t;
@@ -55,4 +56,3 @@ public:
 } // namespace lotus
 
 #endif // LOTUS_VERIFICATION_SIFA_DOMAIN_REACHABILITYDOMAIN_H
-

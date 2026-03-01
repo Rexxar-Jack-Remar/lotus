@@ -1,11 +1,11 @@
 //===-- Verification/Sifa/SifaSymAbs.h ------------------------------------===//
 //
-// Public API for Sifa using SymbolicAbstraction-backed abstract domains.
+// Public API for the SymbolicAbstraction-backed Sifa helper.
 //
-// This provides support for domains such as Interval and Octagon by using
-// SymbolicAbstraction as the transfer engine for LLVM CFG edges. Call handling
-// comes from SymbolicAbstraction's own transformers and ModuleContext rather
-// than Sifa's interprocedural worklist/call-summary machinery.
+// This is intentionally narrower than the migrated Sifa engine: it uses
+// SymbolicAbstraction as a whole-block transfer engine on a single function's
+// CFG. Calls are interpreted by SymbolicAbstraction's own transformers and
+// ModuleContext, not by Sifa's interprocedural call-summary machinery.
 //
 //===----------------------------------------------------------------------===//
 
@@ -31,8 +31,8 @@ namespace sifa {
 
 using SymAbsState = std::shared_ptr<symbolic_abstraction::AbstractValue>;
 
-/// Run Sifa for a single function and compute the abstract state at `target`
-/// (after phi nodes in `target`).
+/// Run the intraprocedural SymbolicAbstraction-backed helper for one function
+/// and compute the abstract state at `target` (after phi nodes in `target`).
 ///
 /// Returns a null state for bottom/unreachable.
 SymAbsState analyzeSymAbsTo(const llvm::Module &M, const llvm::Function &F,

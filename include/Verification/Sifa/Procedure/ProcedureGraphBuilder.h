@@ -5,6 +5,8 @@
 // Optionally restricts the graph to nodes backward-reachable from exit and
 // locations of interest. For future ICFG integration, enter-calls-of-interest
 // can be supplied to add dead-end edges for "enter call without return".
+// Interprocedural call splitting currently applies to direct implemented calls
+// only; unresolved indirect calls stay inside the raw block transfer.
 //
 //===----------------------------------------------------------------------===//
 

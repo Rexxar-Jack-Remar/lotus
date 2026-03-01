@@ -24,6 +24,55 @@ using namespace lotus::sifa;
 
 namespace {
 
+OctagonState addVarUnconstrained(const OctagonState &s, const llvm::Value *v);
+llvm::Optional<std::size_t> getVarIndex(const OctagonState &s,
+                                        const llvm::Value *v);
+OctagonState assignCopy(const OctagonState &s, const llvm::Value *res,
+                        const llvm::Value *src);
+OctagonState assignConstant(const OctagonState &s, const llvm::Value *res,
+                            int64_t c);
+OctagonState havocVar(const OctagonState &s, const llvm::Value *v);
+llvm::Optional<int64_t> getConstant(const llvm::Value *V);
+
+llvm::BasicBlock::const_iterator segmentBegin(
+    const llvm::BasicBlock *bb, const llvm::Instruction *segmentStart) {
+  if (segmentStart) {
+    return segmentStart->getIterator();
+  }
+  auto it = bb->begin();
+  while (it != bb->end() && llvm::isa<llvm::PHINode>(&*it)) {
+    ++it;
+  }
+  return it;
+}
+
+const llvm::Value *incomingValueForPredecessor(const llvm::PHINode &phi,
+                                               const llvm::BasicBlock *pred) {
+  if (!pred) return nullptr;
+  const int index =
+      phi.getBasicBlockIndex(const_cast<llvm::BasicBlock *>(pred));
+  if (index < 0) return nullptr;
+  return phi.getIncomingValue(static_cast<unsigned>(index));
+}
+
+OctagonState applyIncomingPhis(const Transition &t, OctagonState out) {
+  if (!t.source || !t.target || !t.landsAtBlockEntry()) return out;
+  for (const llvm::Instruction &I : *t.target) {
+    const auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);
+    if (!phi) break;
+    const llvm::Value *incoming = incomingValueForPredecessor(*phi, t.source);
+    out = addVarUnconstrained(out, phi);
+    if (const auto c = getConstant(incoming)) {
+      out = assignConstant(out, phi, *c);
+    } else if (incoming && getVarIndex(out, incoming)) {
+      out = assignCopy(out, phi, incoming);
+    } else {
+      out = havocVar(out, phi);
+    }
+  }
+  return out;
+}
+
 /// Add variable \p v to state with no constraints (top for that variable).
 OctagonState addVarUnconstrained(const OctagonState &s, const llvm::Value *v) {
   auto varToIndex = s.varToIndex();
@@ -141,6 +190,13 @@ OctagonState assignInterval(const OctagonState &s, const llvm::Value *res,
 
 OctagonState OctagonDomain::applyBlockTransfer(llvm::BasicBlock *bb,
                                                const OctagonState &in) const {
+  return applyBlockTransfer(bb, in, nullptr, nullptr);
+}
+
+OctagonState OctagonDomain::applyBlockTransfer(
+    llvm::BasicBlock *bb, const OctagonState &in,
+    const llvm::Instruction *segmentStart,
+    const llvm::Instruction *stopBefore) const {
   if (in.isBottom()) return in;
   OctagonState out = in;
 
@@ -150,8 +206,11 @@ OctagonState OctagonDomain::applyBlockTransfer(llvm::BasicBlock *bb,
   if (AA)
     regions = getRegionsForFunction(*bb->getParent());
 
-  for (llvm::Instruction &I : *bb) {
-    if (I.isTerminator()) break;
+  for (llvm::BasicBlock::const_iterator it = segmentBegin(bb, segmentStart),
+                                        end = bb->end();
+       it != end; ++it) {
+    const llvm::Instruction &I = *it;
+    if (&I == stopBefore || I.isTerminator()) break;
     if (I.getType()->isVoidTy()) {
       if (AA && llvm::isa<llvm::StoreInst>(&I)) {
         auto *SI = llvm::cast<llvm::StoreInst>(&I);
@@ -274,11 +333,21 @@ OctagonState OctagonDomain::applyBlockTransfer(llvm::BasicBlock *bb,
 
 OctagonState OctagonDomain::applyBlockWiseHavoc(llvm::BasicBlock *bb,
                                                 const OctagonState &in) const {
+  return applyBlockWiseHavoc(bb, in, nullptr, nullptr);
+}
+
+OctagonState OctagonDomain::applyBlockWiseHavoc(
+    llvm::BasicBlock *bb, const OctagonState &in,
+    const llvm::Instruction *segmentStart,
+    const llvm::Instruction *stopBefore) const {
   if (in.isBottom()) return in;
   OctagonState out = in;
   // memory_ already copied from in
-  for (llvm::Instruction &I : *bb) {
-    if (I.isTerminator()) break;
+  for (llvm::BasicBlock::const_iterator it = segmentBegin(bb, segmentStart),
+                                        end = bb->end();
+       it != end; ++it) {
+    const llvm::Instruction &I = *it;
+    if (&I == stopBefore || I.isTerminator()) break;
     if (I.getType()->isVoidTy()) continue;
     if (I.getType()->isIntegerTy() || I.getType()->isPointerTy())
       out = addVarUnconstrained(out, &I);
@@ -293,9 +362,11 @@ OctagonState OctagonDomain::post(const Transition &t,
   if (t.kind == TransitionKind::EnterCall) return in;
   if (t.kind == TransitionKind::ReturnSummary) return in;
   if (t.kind != TransitionKind::Edge || !t.source) return in;
-  if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source))
-    return applyBlockWiseHavoc(t.source, in);
-  return applyBlockTransfer(t.source, in);
+  OctagonState out =
+      blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source)
+          ? applyBlockWiseHavoc(t.source, in, t.segmentStart, t.stopBefore)
+          : applyBlockTransfer(t.source, in, t.segmentStart, t.stopBefore);
+  return applyIncomingPhis(t, std::move(out));
 }
 
 void OctagonState::print(llvm::raw_ostream &out) const {

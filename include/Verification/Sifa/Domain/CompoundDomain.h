@@ -55,6 +55,9 @@ public:
   State meet(const State &a, const State &b) const override {
     return {d1_.meet(a.first, b.first), d2_.meet(a.second, b.second)};
   }
+  bool supportsMeet() const override {
+    return d1_.supportsMeet() && d2_.supportsMeet();
+  }
 
   State alpha(const State &s) const override {
     return {d1_.alpha(s.first), d2_.alpha(s.second)};

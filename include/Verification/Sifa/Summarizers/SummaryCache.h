@@ -27,15 +27,25 @@ public:
   using ComputeSummaryFn = std::function<StateT()>;
   using MeetFn = std::function<StateT(const StateT &, const StateT &)>;
 
-  /// Re-use cached summary when isSubsetEq(input, knownInput); return meet of
-  /// such summaries. Else compute via computeSummary, cache, and return.
-  StateT reUseOrCompute(const StateT &input, IsSubsetEqFn isSubsetEq,
-                        ComputeSummaryFn computeSummary, MeetFn meetFn) {
+  std::vector<StateT> reusableSummaries(const StateT &input,
+                                        IsSubsetEqFn isSubsetEq) const {
     std::vector<StateT> supersets;
     for (const auto &p : knownSummaries_) {
       if (isSubsetEq(input, p.first))
         supersets.push_back(p.second);
     }
+    return supersets;
+  }
+
+  void store(const StateT &input, const StateT &summary) {
+    knownSummaries_.emplace_back(input, summary);
+  }
+
+  /// Re-use cached summary when isSubsetEq(input, knownInput); return meet of
+  /// such summaries. Else compute via computeSummary, cache, and return.
+  StateT reUseOrCompute(const StateT &input, IsSubsetEqFn isSubsetEq,
+                        ComputeSummaryFn computeSummary, MeetFn meetFn) {
+    std::vector<StateT> supersets = reusableSummaries(input, std::move(isSubsetEq));
     if (!supersets.empty()) {
       StateT acc = supersets.front();
       for (std::size_t i = 1; i < supersets.size(); ++i)
@@ -43,7 +53,7 @@ public:
       return acc;
     }
     StateT summary = computeSummary();
-    knownSummaries_.emplace_back(input, summary);
+    store(input, summary);
     return summary;
   }
 

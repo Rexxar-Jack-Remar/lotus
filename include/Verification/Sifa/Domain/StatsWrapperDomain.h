@@ -55,6 +55,7 @@ public:
   State meet(const State &a, const State &b) const override {
     return inner_.meet(a, b);
   }
+  bool supportsMeet() const override { return inner_.supportsMeet(); }
 
   State alpha(const State &s) const override {
     stats_.start(SifaStats::Key::DOMAIN_ALPHA_TIME);

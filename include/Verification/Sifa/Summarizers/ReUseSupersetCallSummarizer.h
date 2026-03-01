@@ -39,13 +39,29 @@ public:
       stats_->increment(SifaStats::Key::CALL_SUMMARIZER_APPLICATIONS);
     }
     SummaryCache<StateT> &cache = perCalleeCache_[calleeName];
-    StateT result = cache.reUseOrCompute(
-        inputAfterCall,
-        [this](const StateT &a, const StateT &b) { return domain_.leq(a, b); },
-        [this, &calleeName, &inputAfterCall]() {
-          return inner_.summarize(calleeName, inputAfterCall);
-        },
-        [this](const StateT &a, const StateT &b) { return domain_.meet(a, b); });
+    const auto isReusable = [this](const StateT &a, const StateT &b) {
+      auto subsetEq = domain_.subsetEq(a, b);
+      return subsetEq.isTrueForAbstraction() && domain_.equal(subsetEq.getRhs(), b);
+    };
+    std::vector<StateT> supersets =
+        cache.reusableSummaries(inputAfterCall, isReusable);
+    StateT result;
+    if (supersets.empty()) {
+      result = inner_.summarize(calleeName, inputAfterCall);
+      cache.store(inputAfterCall, result);
+    } else if (supersets.size() == 1 || !domain_.supportsMeet()) {
+      if (supersets.size() == 1) {
+        result = supersets.front();
+      } else {
+        result = inner_.summarize(calleeName, inputAfterCall);
+        cache.store(inputAfterCall, result);
+      }
+    } else {
+      result = supersets.front();
+      for (std::size_t i = 1; i < supersets.size(); ++i) {
+        result = domain_.meet(result, supersets[i]);
+      }
+    }
     if (stats_)
       stats_->stop(SifaStats::Key::CALL_SUMMARIZER_OVERALL_TIME);
     return result;

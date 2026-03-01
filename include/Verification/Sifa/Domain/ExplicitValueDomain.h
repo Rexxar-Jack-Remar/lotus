@@ -152,16 +152,29 @@ public:
   }
   State post(const Transition &t, const State &in) const override {
     if (t.kind != TransitionKind::Edge || !t.source) return in;
-    if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source))
-      return applyBlockWiseHavoc(t.source, in);
+    auto begin = t.segmentStart ? t.segmentStart->getIterator() : t.source->begin();
+    while (begin != t.source->end() && llvm::isa<llvm::PHINode>(*begin))
+      ++begin;
+    if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source)) {
+      State out = in;
+      for (auto it = begin; it != t.source->end(); ++it) {
+        const llvm::Instruction &I = *it;
+        if (&I == t.stopBefore || I.isTerminator()) break;
+        if (I.getType()->isVoidTy()) continue;
+        if (I.getType()->isIntegerTy() || I.getType()->isPointerTy())
+          out.set(&I, ExplicitValue::top());
+      }
+      return applyIncomingPhis(t, std::move(out));
+    }
     State out = in;
     lotus::AliasAnalysisWrapper *AA = getAliasAnalysis();
     std::vector<const llvm::Value *> regions;
     std::vector<const llvm::Value *> resolved;
     if (AA)
       regions = getRegionsForFunction(*t.source->getParent());
-    for (llvm::Instruction &I : *t.source) {
-      if (I.isTerminator()) break;
+    for (auto it = begin; it != t.source->end(); ++it) {
+      const llvm::Instruction &I = *it;
+      if (&I == t.stopBefore || I.isTerminator()) break;
       if (I.getType()->isVoidTy()) {
         if (AA && llvm::isa<llvm::StoreInst>(&I)) {
           auto *SI = llvm::cast<llvm::StoreInst>(&I);
@@ -200,7 +213,7 @@ public:
         if (!res.isTop()) out.set(&I, res);
       }
     }
-    return out;
+    return applyIncomingPhis(t, std::move(out));
   }
   State postCall(const State &callerState) const override { return callerState; }
   State postReturn(const State &callerState, const State &calleeSummary) const override {
@@ -208,6 +221,25 @@ public:
   }
 
 private:
+  static const llvm::Value *incomingValueForPredecessor(const llvm::PHINode &phi,
+                                                        const llvm::BasicBlock *pred) {
+    if (!pred) return nullptr;
+    const int index =
+        phi.getBasicBlockIndex(const_cast<llvm::BasicBlock *>(pred));
+    if (index < 0) return nullptr;
+    return phi.getIncomingValue(static_cast<unsigned>(index));
+  }
+
+  static State applyIncomingPhis(const Transition &t, State out) {
+    if (!t.source || !t.target || !t.landsAtBlockEntry()) return out;
+    for (const llvm::Instruction &I : *t.target) {
+      const auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);
+      if (!phi) break;
+      out.set(phi, getConst(out, incomingValueForPredecessor(*phi, t.source)));
+    }
+    return out;
+  }
+
   static ExplicitValue getConst(const State &s, const llvm::Value *V) {
     if (!V) return ExplicitValue::top();
     if (const auto *C = llvm::dyn_cast<llvm::ConstantInt>(V)) {

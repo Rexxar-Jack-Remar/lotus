@@ -25,19 +25,69 @@ public:
 
   std::vector<Node *> topsort(const Dag &dag) {
     const auto it = cache_.find(&dag);
-    if (it != cache_.end()) {
+    if (it != cache_.end() && isStillValid(dag, it->second)) {
       return it->second;
     }
     auto order = compute(dag);
-    cache_.emplace(&dag, order);
+    cache_[&dag] = order;
     return order;
   }
 
 private:
   std::vector<Node *> compute(const Dag &dag);
+  bool isStillValid(const Dag &dag, const std::vector<Node *> &order) const;
 
   std::unordered_map<const Dag *, std::vector<Node *>> cache_;
 };
+
+template <typename L>
+bool TopsortCache<L>::isStillValid(const Dag &dag,
+                                   const std::vector<Node *> &order) const {
+  std::unordered_set<Node *> nodes;
+  std::queue<Node *> q;
+  if (dag.getSource()) {
+    q.push(dag.getSource());
+    nodes.insert(dag.getSource());
+  }
+  while (!q.empty()) {
+    Node *cur = q.front();
+    q.pop();
+    for (Node *n : cur->getOutgoingNodes()) {
+      if (nodes.insert(n).second) {
+        q.push(n);
+      }
+    }
+  }
+
+  if (order.size() != nodes.size()) {
+    return false;
+  }
+
+  std::unordered_map<Node *, std::size_t> pos;
+  pos.reserve(order.size());
+  for (std::size_t i = 0; i < order.size(); ++i) {
+    Node *n = order[i];
+    if (nodes.erase(n) == 0) {
+      return false;
+    }
+    pos.emplace(n, i);
+  }
+  if (!nodes.empty()) {
+    return false;
+  }
+
+  for (const auto &kv : pos) {
+    Node *src = kv.first;
+    const std::size_t srcPos = kv.second;
+    for (Node *dst : src->getOutgoingNodes()) {
+      auto dstIt = pos.find(dst);
+      if (dstIt != pos.end() && srcPos >= dstIt->second) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
 
 template <typename L>
 std::vector<typename TopsortCache<L>::Node *> TopsortCache<L>::compute(const Dag &dag) {

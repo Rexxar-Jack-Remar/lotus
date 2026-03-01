@@ -25,6 +25,11 @@
 #include <ostream>
 #include <string>
 
+namespace llvm {
+class CallBase;
+class Instruction;
+} // namespace llvm
+
 namespace lotus {
 namespace sifa {
 
@@ -54,6 +59,7 @@ struct CallReturnSummary {
   llvm::BasicBlock *source = nullptr;
   llvm::BasicBlock *target = nullptr;
   llvm::Function *callee = nullptr;
+  const llvm::CallBase *call = nullptr;
   std::uint32_t id = 0;
 
   llvm::BasicBlock *getSource() const { return source; }
@@ -80,17 +86,32 @@ struct Transition {
   std::uint32_t id = 0;
   llvm::BasicBlock *source = nullptr;
   llvm::BasicBlock *target = nullptr;
+  std::uint32_t sourceOrdinal = 0;
+  std::uint32_t targetOrdinal = 0;
   llvm::Function *callee = nullptr;
+  const llvm::Instruction *segmentStart = nullptr;
+  const llvm::Instruction *stopBefore = nullptr;
+  const llvm::CallBase *call = nullptr;
 
   static Transition makeEdge(std::uint32_t id, const llvm::BasicBlock *src,
-                             const llvm::BasicBlock *dst);
+                             const llvm::BasicBlock *dst,
+                             std::uint32_t sourceOrdinal = 0,
+                             std::uint32_t targetOrdinal = 0,
+                             const llvm::Instruction *segmentStart = nullptr,
+                             const llvm::Instruction *stopBefore = nullptr);
   static Transition makeMarker(std::uint32_t id, const llvm::BasicBlock *markedTarget);
   static Transition makeReturnSummary(std::uint32_t id, const llvm::BasicBlock *src,
                                       const llvm::BasicBlock *dst,
-                                      const llvm::Function *calleeFn);
+                                      std::uint32_t sourceOrdinal,
+                                      std::uint32_t targetOrdinal,
+                                      const llvm::Function *calleeFn,
+                                      const llvm::CallBase *callSite = nullptr);
   static Transition makeEnterCall(std::uint32_t id, const llvm::BasicBlock *src,
                                   const llvm::BasicBlock *calleeEntry,
-                                  const llvm::Function *calleeFn);
+                                  std::uint32_t sourceOrdinal,
+                                  std::uint32_t targetOrdinal,
+                                  const llvm::Function *calleeFn,
+                                  const llvm::CallBase *callSite = nullptr);
 
   /// Ultimate-aligned: build from LocationMarkerTransition.
   static Transition from(const LocationMarkerTransition &m);
@@ -101,6 +122,8 @@ struct Transition {
   llvm::Optional<LocationMarkerTransition> getLocationMarkerTransition() const;
   /// When kind == ReturnSummary, view as CallReturnSummary.
   llvm::Optional<CallReturnSummary> getCallReturnSummary() const;
+
+  bool landsAtBlockEntry() const { return target != nullptr && targetOrdinal == 0; }
 
   bool operator==(const Transition &o) const;
 };

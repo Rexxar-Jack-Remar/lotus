@@ -29,6 +29,8 @@
 #include "llvm/IR/Module.h"
 
 #include <functional>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 
 namespace lotus {
@@ -42,6 +44,13 @@ class IcfgInterpreter {
 public:
   using LOI = CallGraph::LOI;
   using Domain = AbstractDomain<Transition, StateT>;
+  using DagIpr = DagInterpreter<Transition, StateT>;
+  using LoopSummarizer = ILoopSummarizer<Transition, StateT>;
+  using CallSummarizer = ICallSummarizer<StateT>;
+  using LoopSummarizerFactory =
+      std::function<std::unique_ptr<LoopSummarizer>(DagIpr &)>;
+  using CallSummarizerFactory =
+      std::function<std::unique_ptr<CallSummarizer>(DagIpr &)>;
 
   /// Ultimate-aligned: allErrorLocations(icfg). Returns LOIs for all blocks that
   /// call error-like functions (e.g. __VERIFIER_error, abort). Use as LOI set
@@ -54,9 +63,23 @@ public:
                   const std::vector<LOI> &locationsOfInterest, SifaStats &stats,
                   const Domain &domain, const IFluid<StateT> &fluid,
                   const StateT &initialState)
-      : M_(M), entry_(entry), lois_(locationsOfInterest), stats_(stats),
+      : IcfgInterpreter(
+            M,
+            entry ? llvm::ArrayRef<const llvm::Function *>{entry}
+                  : llvm::ArrayRef<const llvm::Function *>{},
+            locationsOfInterest, stats, domain, fluid, initialState) {}
+
+  IcfgInterpreter(const llvm::Module &M,
+                  llvm::ArrayRef<const llvm::Function *> initialProcedures,
+                  const std::vector<LOI> &locationsOfInterest, SifaStats &stats,
+                  const Domain &domain, const IFluid<StateT> &fluid,
+                  const StateT &initialState)
+      : M_(M), lois_(locationsOfInterest), stats_(stats),
         domain_(domain), fluid_(fluid), initialState_(initialState),
-        cg_(M, entry, locationsOfInterest), procResCache_(stats_, cg_, M) {}
+        cg_(M, initialProcedures, locationsOfInterest),
+        procResCache_(stats_, cg_, M) {
+    resetSummarizerFactories();
+  }
 
   /// Ultimate-aligned: optional logging. No-op if not set.
   void setOnStartingInterpretation(std::function<void()> f) { onStartingInterpretation_ = std::move(f); }
@@ -65,6 +88,12 @@ public:
   }
   void setOnInterpretationFinished(std::function<void(const MapBasedStorage<const llvm::BasicBlock *, StateT> &)> f) {
     onInterpretationFinished_ = std::move(f);
+  }
+  void setLoopSummarizerFactory(LoopSummarizerFactory factory) {
+    loopSummarizerFactory_ = std::move(factory);
+  }
+  void setCallSummarizerFactory(CallSummarizerFactory factory) {
+    callSummarizerFactory_ = std::move(factory);
   }
 
   /// Ultimate-aligned: callGraph(), procedureResourceCache().
@@ -77,12 +106,21 @@ public:
     stats_.start(SifaStats::Key::OVERALL_TIME);
     if (onStartingInterpretation_) onStartingInterpretation_();
 
-    DagInterpreter<Transition, StateT> dagInterpreter(stats_, domain_, fluid_);
-    FixpointLoopSummarizer<Transition, StateT> loopSum(stats_, domain_, fluid_, dagInterpreter);
-    dagInterpreter.setLoopSummarizer(loopSum);
+    DagIpr dagInterpreter(stats_, domain_, fluid_);
+    std::unique_ptr<LoopSummarizer> loopSum =
+        loopSummarizerFactory_ ? loopSummarizerFactory_(dagInterpreter)
+                               : nullptr;
+    if (!loopSum) {
+      throw std::logic_error("IcfgInterpreter missing loop summarizer");
+    }
+    dagInterpreter.setLoopSummarizer(*loopSum);
 
-    InterpretCallSummarizer<StateT> callSum(stats_, M_, procResCache_, dagInterpreter, domain_);
-    dagInterpreter.setCallSummarizer(&callSum);
+    std::unique_ptr<CallSummarizer> callSum =
+        callSummarizerFactory_ ? callSummarizerFactory_(dagInterpreter)
+                               : nullptr;
+    if (callSum) {
+      dagInterpreter.setCallSummarizer(callSum.get());
+    }
 
     const auto &procs = cg_.relevantProceduresTopsorted();
     std::vector<const llvm::Function *> order(procs.begin(), procs.end());
@@ -108,11 +146,34 @@ public:
                                         input, storage, enterCallRegistrar);
     }
 
+    std::vector<const llvm::BasicBlock *> loiBlocks;
+    loiBlocks.reserve(lois_.size());
+    for (const LOI &loi : lois_) {
+      if (loi.second) {
+        loiBlocks.push_back(loi.second);
+      }
+    }
+    storage.addDefaultsAndGetMap(loiBlocks, domain_.bottom());
+
     stats_.stop(SifaStats::Key::OVERALL_TIME);
     if (onInterpretationFinished_) onInterpretationFinished_(storage);
   }
 
 private:
+  void resetSummarizerFactories() {
+    loopSummarizerFactory_ = [this](DagIpr &dagInterpreter) {
+      return std::unique_ptr<LoopSummarizer>(
+          new FixpointLoopSummarizer<Transition, StateT>(stats_, domain_,
+                                                         fluid_,
+                                                         dagInterpreter));
+    };
+    callSummarizerFactory_ = [this](DagIpr &dagInterpreter) {
+      return std::unique_ptr<CallSummarizer>(
+          new InterpretCallSummarizer<StateT>(stats_, M_, procResCache_,
+                                             dagInterpreter, domain_));
+    };
+  }
+
   std::function<void()> onStartingInterpretation_;
   std::function<void(const llvm::Function *, const StateT &)> onEnterProcedure_;
   std::function<void(const MapBasedStorage<const llvm::BasicBlock *, StateT> &)> onInterpretationFinished_;
@@ -136,12 +197,13 @@ private:
   };
 
   const llvm::Module &M_;
-  const llvm::Function *entry_ = nullptr;
   std::vector<LOI> lois_;
   SifaStats &stats_;
   const Domain &domain_;
   const IFluid<StateT> &fluid_;
   StateT initialState_;
+  LoopSummarizerFactory loopSummarizerFactory_;
+  CallSummarizerFactory callSummarizerFactory_;
   CallGraph cg_;
   ProcedureResourceCache procResCache_;
 };

@@ -18,11 +18,12 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
 ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F,
                                        const std::vector<llvm::BasicBlock *> &lois,
                                        const std::vector<const llvm::Function *> &enterCallsOfInterest) {
+  ProcedureGraphBuilder builder(stats, F);
   ProcedureGraph pg = enterCallsOfInterest.empty()
-                          ? ProcedureGraph(F)
-                          : ProcedureGraphBuilder(stats, F).graphOfProcedure(
-                                lois, enterCallsOfInterest, /*restrictToReachable=*/true);
-  auto *entry = const_cast<llvm::BasicBlock *>(&F.getEntryBlock());
+                          ? builder.graphOfProcedure(lois, /*restrictToReachable=*/true)
+                          : builder.graphOfProcedure(lois, enterCallsOfInterest,
+                                                     /*restrictToReachable=*/true);
+  auto *entry = pg.getEntryNode();
 
   auto pe = createPEComputer(stats, pg.graph());
   auto regexToDag = createRegexToDag<Transition>(stats);
@@ -34,17 +35,18 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
   // We start at 1 to avoid the common "0 means uninitialized" convention.
   std::uint32_t nextMarkerId = 1;
   for (llvm::BasicBlock *loi : lois) {
-    auto expr = exprBetween(stats, pe, entry, loi);
+    auto *loiNode = pg.getBlockEntryNode(*loi);
+    auto expr = exprBetween(stats, pe, entry, loiNode);
     auto marked = markRegex(expr, loi, nextMarkerId++);
     loiMarkers.push_back(addToDag(stats, regexToDag, marked));
   }
 
-  // Also add one marked regex to the explicit EXIT node (nullptr).
-  // ProcedureGraph ensures EXIT is always reachable from every return block via
-  // an outgoing edge to nullptr, so the path-expression computer can compute an
-  // (entry -> EXIT) expression uniformly.
-  llvm::BasicBlock *const exitNode = nullptr;
-  auto exprToExit = exprBetween(stats, pe, entry, exitNode);
+  // Also add one marked regex to the explicit EXIT node (nullptr). If the
+  // graph has no return edges at all, Ultimate uses the empty-set regex here.
+  auto *const exitNode = pg.getExitNode();
+  auto exprToExit = pg.graph().getNodes().count(exitNode)
+                        ? exprBetween(stats, pe, entry, exitNode)
+                        : lotus::pathexpressions::Regex<Transition>::emptySet();
   auto markedExit = markRegex(exprToExit, /*finalLocationAsMark=*/nullptr, nextMarkerId++);
   auto *exitMarker = addToDag(stats, regexToDag, markedExit);
 
@@ -55,7 +57,11 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
         continue;
       }
       auto *calleeEntry = const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
-      auto expr = exprBetween(stats, pe, entry, calleeEntry);
+      auto *calleeEntryNode = pg.getBlockEntryNode(*calleeEntry);
+      if (!calleeEntryNode) {
+        continue;
+      }
+      auto expr = exprBetween(stats, pe, entry, calleeEntryNode);
       auto marked = markRegex(expr, calleeEntry, nextMarkerId++);
       enterCallMarkers.push_back(addToDag(stats, regexToDag, marked));
     }

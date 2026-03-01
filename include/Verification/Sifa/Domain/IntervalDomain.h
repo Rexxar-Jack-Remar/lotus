@@ -262,8 +262,14 @@ public:
   /// Apply transfer for all non-terminator instructions in \p bb (sound over-approximation).
   /// Implemented in IntervalDomain.cpp.
   State applyBlockTransfer(llvm::BasicBlock *bb, const State &in) const;
+  State applyBlockTransfer(llvm::BasicBlock *bb, const State &in,
+                           const llvm::Instruction *segmentStart,
+                           const llvm::Instruction *stopBefore) const;
   /// Block-wise fast path: havoc all values defined in \p bb (sound, less precise).
   State applyBlockWiseHavoc(llvm::BasicBlock *bb, const State &in) const;
+  State applyBlockWiseHavoc(llvm::BasicBlock *bb, const State &in,
+                            const llvm::Instruction *segmentStart,
+                            const llvm::Instruction *stopBefore) const;
 
   State top() const override { return State(false); }
   State bottom() const override {

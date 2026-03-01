@@ -5,6 +5,7 @@
 
 #include "llvm/IR/Function.h"
 
+#include <stdexcept>
 #include <string>
 
 using namespace lotus::sifa;
@@ -31,9 +32,21 @@ SymAbsState SifaSymAbsDomain::post(const Label &t, const State &in) const {
   if (isBottom(in)) {
     return bottom();
   }
-  if (t.kind != TransitionKind::Edge) {
+  if (t.kind == TransitionKind::Marker) {
     // Markers are handled in DagInterpreter; treat as identity here.
     return in;
+  }
+  if (t.kind != TransitionKind::Edge) {
+    throw std::logic_error(
+        "SifaSymAbsDomain only supports intraprocedural CFG edges; "
+        "call-summary and enter-call transitions must be handled by Sifa.");
+  }
+  if (!t.source ||
+      t.stopBefore != nullptr ||
+      t.sourceOrdinal != 0 || (t.target && t.targetOrdinal != 0)) {
+    throw std::logic_error(
+        "SifaSymAbsDomain only supports whole-block edges between block-entry "
+        "program points (or the synthetic EXIT).");
   }
 
   llvm::BasicBlock *src = t.source;

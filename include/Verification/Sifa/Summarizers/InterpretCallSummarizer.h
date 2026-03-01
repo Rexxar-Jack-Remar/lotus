@@ -71,7 +71,7 @@ public:
     stats_.increment(SifaStats::Key::CALL_SUMMARIZER_CACHE_MISSES);
     stats_.start(SifaStats::Key::CALL_SUMMARIZER_NEW_COMPUTATION_TIME);
 
-    const ProcedureResources &res = cache_.resourcesOf(*callee, {});
+    const ProcedureResources &res = cache_.resourcesOf(*callee);
     StateT result = dagInterpreter_.interpretForSingleMarker(
         res.getRegexDag(), res.getDagOverlayPathToReturn(), inputAfterCall);
 

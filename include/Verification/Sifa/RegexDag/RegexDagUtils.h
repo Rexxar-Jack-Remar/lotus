@@ -126,7 +126,7 @@ inline const llvm::BasicBlock *
 singleSinkLocation(const RegexDag<Transition> &dag, const IDagOverlay<Transition> &overlay) {
   const auto locs =
       nextLocationsTransition(overlay.sinks(dag),
-                              [](const Transition &t) { return t.target ? t.target : t.source; },
+                              [](const Transition &t) { return t.target; },
                               [&](auto *n) { return overlay.predecessorsOf(n); });
   return getOnly(locs);
 }

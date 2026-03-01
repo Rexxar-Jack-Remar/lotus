@@ -129,7 +129,7 @@ bool hasCycle(const std::unordered_map<const llvm::Function *, std::unordered_se
   return false;
 }
 
-void topsortCalleesFirst(const std::unordered_set<const llvm::Function *> &closure,
+void topsortCallersFirst(const std::unordered_set<const llvm::Function *> &closure,
                          const std::unordered_map<const llvm::Function *, std::unordered_set<const llvm::Function *>> &mCalls,
                          std::vector<const llvm::Function *> &out) {
   std::unordered_set<const llvm::Function *> visited;
@@ -146,13 +146,23 @@ void topsortCalleesFirst(const std::unordered_set<const llvm::Function *> &closu
   for (const llvm::Function *F : closure) {
     dfs(F);
   }
+  std::reverse(out.begin(), out.end());
 }
 
 } // namespace
 
 CallGraph::CallGraph(const llvm::Module &M, const llvm::Function *entryProcedure,
                      const std::vector<LOI> &locationsOfInterest)
-    : M_(&M), entryProcedure_(entryProcedure) {
+    : CallGraph(M,
+                entryProcedure ? llvm::ArrayRef<const llvm::Function *>{entryProcedure}
+                               : llvm::ArrayRef<const llvm::Function *>{},
+                locationsOfInterest) {}
+
+CallGraph::CallGraph(const llvm::Module &M,
+                     llvm::ArrayRef<const llvm::Function *> initialProcedures,
+                     const std::vector<LOI> &locationsOfInterest)
+    : M_(&M),
+      initialProcedures_(initialProcedures.begin(), initialProcedures.end()) {
   for (const LOI &loi : locationsOfInterest) {
     if (loi.first && loi.second)
       loisInsideProcedure_[loi.first].push_back(loi.second);
@@ -181,14 +191,19 @@ CallGraph::CallGraph(const llvm::Module &M, const llvm::Function *entryProcedure
   if (hasCycle(mCalls_, closure)) {
     throw std::invalid_argument("Recursive programs are not supported.");
   }
-  topsortCalleesFirst(closure, mCalls_, topsorted_);
+  topsortCallersFirst(closure, mCalls_, topsorted_);
 }
 
 std::vector<const llvm::Function *> CallGraph::initialProceduresOfInterest() const {
   std::vector<const llvm::Function *> out;
-  if (!entryProcedure_ || entryProcedure_->isDeclaration()) return out;
-  if (hasLoiOrSuccessorWithLoi(entryProcedure_))
-    out.push_back(entryProcedure_);
+  out.reserve(initialProcedures_.size());
+  for (const llvm::Function *entryProcedure : initialProcedures_) {
+    if (!entryProcedure || entryProcedure->isDeclaration()) {
+      continue;
+    }
+    if (hasLoiOrSuccessorWithLoi(entryProcedure))
+      out.push_back(entryProcedure);
+  }
   return out;
 }
 

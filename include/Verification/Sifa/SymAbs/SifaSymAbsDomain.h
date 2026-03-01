@@ -1,9 +1,10 @@
 //===-- Verification/Sifa/SymAbs/SifaSymAbsDomain.h -----------------------===//
 //
-// Sifa abstract domain implemented using SymbolicAbstraction's AbstractValue.
+// Intraprocedural Sifa helper domain implemented using SymbolicAbstraction's
+// AbstractValue on whole-block CFG edges.
 //
-// This provides Interval/Octagon/etc by selecting a SymbolicAbstraction domain
-// via its DomainConstructor configuration.
+// This is intentionally not a full Sifa interprocedural domain adapter:
+// call-summary and enter-call transitions are rejected by post().
 //
 //===----------------------------------------------------------------------===//
 
@@ -88,4 +89,3 @@ private:
 } // namespace lotus
 
 #endif // LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSDOMAIN_H
-

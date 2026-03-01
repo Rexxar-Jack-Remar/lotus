@@ -28,6 +28,39 @@ using namespace lotus::sifa;
 
 namespace {
 
+Interval getInterval(const IntervalState &state, const llvm::Value *V);
+
+llvm::BasicBlock::const_iterator segmentBegin(
+    const llvm::BasicBlock *bb, const llvm::Instruction *segmentStart) {
+  if (segmentStart) {
+    return segmentStart->getIterator();
+  }
+  auto it = bb->begin();
+  while (it != bb->end() && llvm::isa<llvm::PHINode>(&*it)) {
+    ++it;
+  }
+  return it;
+}
+
+const llvm::Value *incomingValueForPredecessor(const llvm::PHINode &phi,
+                                               const llvm::BasicBlock *pred) {
+  if (!pred) return nullptr;
+  const int index =
+      phi.getBasicBlockIndex(const_cast<llvm::BasicBlock *>(pred));
+  if (index < 0) return nullptr;
+  return phi.getIncomingValue(static_cast<unsigned>(index));
+}
+
+IntervalState applyIncomingPhis(const Transition &t, IntervalState out) {
+  if (!t.source || !t.target || !t.landsAtBlockEntry()) return out;
+  for (const llvm::Instruction &I : *t.target) {
+    const auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);
+    if (!phi) break;
+    out.set(phi, getInterval(out, incomingValueForPredecessor(*phi, t.source)));
+  }
+  return out;
+}
+
 /// Return the interval for \p V from \p state, or Interval::top() if unknown.
 Interval getInterval(const IntervalState &state, const llvm::Value *V) {
   if (!V) return Interval::top();
@@ -305,6 +338,13 @@ Interval transferInstruction(const llvm::Instruction &I,
 
 IntervalState IntervalDomain::applyBlockTransfer(llvm::BasicBlock *bb,
                                                  const IntervalState &in) const {
+  return applyBlockTransfer(bb, in, nullptr, nullptr);
+}
+
+IntervalState IntervalDomain::applyBlockTransfer(
+    llvm::BasicBlock *bb, const IntervalState &in,
+    const llvm::Instruction *segmentStart,
+    const llvm::Instruction *stopBefore) const {
   if (in.isBottom()) return in;
   IntervalState out(false);
   for (const auto &kv : in.intervals())
@@ -319,8 +359,11 @@ IntervalState IntervalDomain::applyBlockTransfer(llvm::BasicBlock *bb,
   if (AA)
     regions = getRegionsForFunction(F);
 
-  for (llvm::Instruction &I : *bb) {
-    if (I.isTerminator()) break;
+  for (llvm::BasicBlock::const_iterator it = segmentBegin(bb, segmentStart),
+                                        end = bb->end();
+       it != end; ++it) {
+    const llvm::Instruction &I = *it;
+    if (&I == stopBefore || I.isTerminator()) break;
     if (I.getType()->isVoidTy()) {
       if (AA && llvm::isa<llvm::StoreInst>(&I)) {
         auto *SI = llvm::cast<llvm::StoreInst>(&I);
@@ -365,14 +408,24 @@ IntervalState IntervalDomain::applyBlockTransfer(llvm::BasicBlock *bb,
 
 IntervalState IntervalDomain::applyBlockWiseHavoc(llvm::BasicBlock *bb,
                                                  const IntervalState &in) const {
+  return applyBlockWiseHavoc(bb, in, nullptr, nullptr);
+}
+
+IntervalState IntervalDomain::applyBlockWiseHavoc(
+    llvm::BasicBlock *bb, const IntervalState &in,
+    const llvm::Instruction *segmentStart,
+    const llvm::Instruction *stopBefore) const {
   if (in.isBottom()) return in;
   IntervalState out(false);
   for (const auto &kv : in.intervals())
     out.set(kv.first, kv.second);
   for (const auto &kv : in.memory())
     out.setMemory(kv.first, kv.second);
-  for (llvm::Instruction &I : *bb) {
-    if (I.isTerminator()) break;
+  for (llvm::BasicBlock::const_iterator it = segmentBegin(bb, segmentStart),
+                                        end = bb->end();
+       it != end; ++it) {
+    const llvm::Instruction &I = *it;
+    if (&I == stopBefore || I.isTerminator()) break;
     if (I.getType()->isVoidTy()) continue;
     if (I.getType()->isIntegerTy() || I.getType()->isPointerTy())
       out.set(&I, Interval::top());
@@ -387,9 +440,11 @@ IntervalState IntervalDomain::post(const Transition &t,
   if (t.kind == TransitionKind::EnterCall) return in;
   if (t.kind == TransitionKind::ReturnSummary) return in;
   if (t.kind != TransitionKind::Edge || !t.source) return in;
-  if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source))
-    return applyBlockWiseHavoc(t.source, in);
-  return applyBlockTransfer(t.source, in);
+  IntervalState out =
+      blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source)
+          ? applyBlockWiseHavoc(t.source, in, t.segmentStart, t.stopBefore)
+          : applyBlockTransfer(t.source, in, t.segmentStart, t.stopBefore);
+  return applyIncomingPhis(t, std::move(out));
 }
 
 void IntervalState::print(llvm::raw_ostream &out) const {

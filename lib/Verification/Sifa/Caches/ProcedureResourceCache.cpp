@@ -9,9 +9,13 @@
 using namespace lotus::sifa;
 
 bool ProcedureResourceCache::Key::operator==(const Key &o) const {
-  if (F != o.F || LOIs.size() != o.LOIs.size()) return false;
+  if (F != o.F || LOIs.size() != o.LOIs.size() || enterCalls.size() != o.enterCalls.size()) {
+    return false;
+  }
   for (size_t i = 0; i < LOIs.size(); ++i)
     if (LOIs[i] != o.LOIs[i]) return false;
+  for (size_t i = 0; i < enterCalls.size(); ++i)
+    if (enterCalls[i] != o.enterCalls[i]) return false;
   return true;
 }
 
@@ -19,6 +23,8 @@ std::size_t ProcedureResourceCache::KeyHash::operator()(const Key &k) const {
   std::size_t h = std::hash<const llvm::Function *>()(k.F);
   for (auto *bb : k.LOIs)
     h ^= (std::hash<llvm::BasicBlock *>()(bb) + 0x9e3779b9 + (h << 6) + (h >> 2));
+  for (auto *callee : k.enterCalls)
+    h ^= (std::hash<const llvm::Function *>()(callee) + 0x9e3779b9 + (h << 6) + (h >> 2));
   return h;
 }
 
@@ -44,6 +50,7 @@ const ProcedureResources &ProcedureResourceCache::resourcesOf(const llvm::Functi
     Key k;
     k.F = &F;
     k.LOIs = lois;
+    k.enterCalls = enterCalls;
     auto it = cache_.find(k);
     if (it != cache_.end())
       return it->second;

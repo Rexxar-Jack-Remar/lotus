@@ -315,7 +315,9 @@ static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
 
   SifaLogger::progress("Building procedure resources (regex DAG)...");
   stageStart = std::chrono::steady_clock::now();
-  // No LOIs needed; ProcedureResources always adds an EXIT marker.
+  // No LOIs needed; ProcedureResources always adds an EXIT marker. This path
+  // remains intraprocedural: call semantics come from SymbolicAbstraction's
+  // own transformers rather than Sifa's call-summary engine.
   ProcedureResources res(stats, *fun, std::vector<llvm::BasicBlock *>{});
   logProfileTiming("ProcedureResources",
                    std::chrono::steady_clock::now() - stageStart);

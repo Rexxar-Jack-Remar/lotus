@@ -10,9 +10,9 @@
 #define LOTUS_VERIFICATION_SIFA_CACHES_STARDAGCACHE_H
 
 #include "Verification/Sifa/RegexDag/RegexDagCompressor.h"
+#include "Verification/Sifa/RegexDag/RegexDag.h"
 #include "Verification/Sifa/RegexDag/RegexDagUtils.h"
 #include "Verification/Sifa/RegexDag/RegexToDag.h"
-#include "Verification/Sifa/RegexDag/RegexDag.h"
 #include "Verification/Sifa/Statistics/SifaStats.h"
 
 #include <cstdint>

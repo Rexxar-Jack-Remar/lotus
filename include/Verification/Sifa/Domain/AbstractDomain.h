@@ -89,6 +89,8 @@ public:
   /// Meet (greatest lower bound); used e.g. by ReUseSupersetCallSummarizer.
   /// Default: return \p a (override for domains that support meet).
   virtual State meet(const State &a, const State &b) const { (void)b; return a; }
+  /// Whether meet() is a real greatest-lower-bound operation for this domain.
+  virtual bool supportsMeet() const { return false; }
 
   /// Transfer function for a literal transition label.
   virtual State post(const Label &t, const State &in) const = 0;
@@ -108,4 +110,3 @@ public:
 } // namespace lotus
 
 #endif // LOTUS_VERIFICATION_SIFA_DOMAIN_ABSTRACTDOMAIN_H
-

@@ -232,8 +232,14 @@ public:
   }
   /// Apply block transfer (copy/constant/affine; non-linear ops havoc). Implemented in OctagonDomain.cpp.
   OctagonState applyBlockTransfer(llvm::BasicBlock *bb, const OctagonState &in) const;
+  OctagonState applyBlockTransfer(llvm::BasicBlock *bb, const OctagonState &in,
+                                  const llvm::Instruction *segmentStart,
+                                  const llvm::Instruction *stopBefore) const;
   /// Block-wise fast path: add all values defined in \p bb as unconstrained (top).
   OctagonState applyBlockWiseHavoc(llvm::BasicBlock *bb, const OctagonState &in) const;
+  OctagonState applyBlockWiseHavoc(llvm::BasicBlock *bb, const OctagonState &in,
+                                   const llvm::Instruction *segmentStart,
+                                   const llvm::Instruction *stopBefore) const;
   OctagonState post(const Transition &t, const OctagonState &in) const override;
 
 private:

@@ -185,16 +185,28 @@ public:
   EqState post(const Transition &t, const EqState &in) const override {
     if (in.isBottom()) return in;
     if (t.kind != TransitionKind::Edge || !t.source) return in;
-    if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source))
-      return applyBlockWiseHavoc(t.source, in);
+    auto begin = t.segmentStart ? t.segmentStart->getIterator() : t.source->begin();
+    while (begin != t.source->end() && llvm::isa<llvm::PHINode>(*begin))
+      ++begin;
+    if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source)) {
+      EqState out = in;
+      for (auto it = begin; it != t.source->end(); ++it) {
+        const llvm::Instruction &I = *it;
+        if (&I == t.stopBefore || I.isTerminator()) break;
+        if (I.getType()->isVoidTy()) continue;
+        out.ensure(&I);
+      }
+      return applyIncomingPhis(t, std::move(out));
+    }
     EqState out = in;
     lotus::AliasAnalysisWrapper *AA = getAliasAnalysis();
     std::vector<const llvm::Value *> regions;
     std::vector<const llvm::Value *> resolved;
     if (AA)
       regions = getRegionsForFunction(*t.source->getParent());
-    for (llvm::Instruction &I : *t.source) {
-      if (I.isTerminator()) break;
+    for (auto it = begin; it != t.source->end(); ++it) {
+      const llvm::Instruction &I = *it;
+      if (&I == t.stopBefore || I.isTerminator()) break;
       if (I.getType()->isVoidTy()) {
         if (AA && llvm::isa<llvm::StoreInst>(&I)) {
           auto *SI = llvm::cast<llvm::StoreInst>(&I);
@@ -235,10 +247,33 @@ public:
         }
       }
     }
-    return out;
+    return applyIncomingPhis(t, std::move(out));
   }
 
 private:
+  static const llvm::Value *incomingValueForPredecessor(const llvm::PHINode &phi,
+                                                        const llvm::BasicBlock *pred) {
+    if (!pred) return nullptr;
+    const int index =
+        phi.getBasicBlockIndex(const_cast<llvm::BasicBlock *>(pred));
+    if (index < 0) return nullptr;
+    return phi.getIncomingValue(static_cast<unsigned>(index));
+  }
+
+  static EqState applyIncomingPhis(const Transition &t, EqState out) {
+    if (!t.source || !t.target || !t.landsAtBlockEntry()) return out;
+    for (const llvm::Instruction &I : *t.target) {
+      const auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);
+      if (!phi) break;
+      out.ensure(phi);
+      if (const llvm::Value *incoming =
+              incomingValueForPredecessor(*phi, t.source)) {
+        out.unite(phi, incoming);
+      }
+    }
+    return out;
+  }
+
   const BlockTransferPolicy *blockTransferPolicy_ = nullptr;
   lotus::AliasAnalysisWrapper *aliasAnalysis_ = nullptr;
 };

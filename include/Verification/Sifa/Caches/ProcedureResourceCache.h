@@ -57,6 +57,7 @@ private:
   struct Key {
     const llvm::Function *F = nullptr;
     std::vector<llvm::BasicBlock *> LOIs;
+    std::vector<const llvm::Function *> enterCalls;
 
     bool operator==(const Key &o) const;
   };

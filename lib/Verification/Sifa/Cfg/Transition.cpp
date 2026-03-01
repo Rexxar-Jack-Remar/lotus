@@ -21,13 +21,22 @@ std::string CallReturnSummary::calledProcedure() const {
 }
 
 Transition Transition::makeEdge(std::uint32_t id, const llvm::BasicBlock *src,
-                               const llvm::BasicBlock *dst) {
+                                const llvm::BasicBlock *dst,
+                                std::uint32_t sourceOrdinal,
+                                std::uint32_t targetOrdinal,
+                                const llvm::Instruction *segmentStart,
+                                const llvm::Instruction *stopBefore) {
   Transition t;
   t.kind = TransitionKind::Edge;
   t.id = id;
   t.source = const_cast<llvm::BasicBlock *>(src);
   t.target = const_cast<llvm::BasicBlock *>(dst);
+  t.sourceOrdinal = sourceOrdinal;
+  t.targetOrdinal = targetOrdinal;
   t.callee = nullptr;
+  t.segmentStart = segmentStart;
+  t.stopBefore = stopBefore;
+  t.call = nullptr;
   return t;
 }
 
@@ -37,31 +46,52 @@ Transition Transition::makeMarker(std::uint32_t id, const llvm::BasicBlock *mark
   t.id = id;
   t.source = nullptr;
   t.target = const_cast<llvm::BasicBlock *>(markedTarget);
+  t.sourceOrdinal = 0;
+  t.targetOrdinal = 0;
   t.callee = nullptr;
+  t.segmentStart = nullptr;
+  t.stopBefore = nullptr;
+  t.call = nullptr;
   return t;
 }
 
 Transition Transition::makeReturnSummary(std::uint32_t id, const llvm::BasicBlock *src,
                                          const llvm::BasicBlock *dst,
-                                         const llvm::Function *calleeFn) {
+                                         std::uint32_t sourceOrdinal,
+                                         std::uint32_t targetOrdinal,
+                                         const llvm::Function *calleeFn,
+                                         const llvm::CallBase *callSite) {
   Transition t;
   t.kind = TransitionKind::ReturnSummary;
   t.id = id;
   t.source = const_cast<llvm::BasicBlock *>(src);
   t.target = const_cast<llvm::BasicBlock *>(dst);
+  t.sourceOrdinal = sourceOrdinal;
+  t.targetOrdinal = targetOrdinal;
   t.callee = const_cast<llvm::Function *>(calleeFn);
+  t.segmentStart = nullptr;
+  t.stopBefore = nullptr;
+  t.call = callSite;
   return t;
 }
 
 Transition Transition::makeEnterCall(std::uint32_t id, const llvm::BasicBlock *src,
                                      const llvm::BasicBlock *calleeEntry,
-                                     const llvm::Function *calleeFn) {
+                                     std::uint32_t sourceOrdinal,
+                                     std::uint32_t targetOrdinal,
+                                     const llvm::Function *calleeFn,
+                                     const llvm::CallBase *callSite) {
   Transition t;
   t.kind = TransitionKind::EnterCall;
   t.id = id;
   t.source = const_cast<llvm::BasicBlock *>(src);
   t.target = const_cast<llvm::BasicBlock *>(calleeEntry);
+  t.sourceOrdinal = sourceOrdinal;
+  t.targetOrdinal = targetOrdinal;
   t.callee = const_cast<llvm::Function *>(calleeFn);
+  t.segmentStart = nullptr;
+  t.stopBefore = nullptr;
+  t.call = callSite;
   return t;
 }
 
@@ -70,7 +100,7 @@ Transition Transition::from(const LocationMarkerTransition &m) {
 }
 
 Transition Transition::from(const CallReturnSummary &c) {
-  return makeReturnSummary(c.id, c.source, c.target, c.callee);
+  return makeReturnSummary(c.id, c.source, c.target, 0, 0, c.callee);
 }
 
 llvm::Optional<LocationMarkerTransition> Transition::getLocationMarkerTransition() const {
@@ -89,6 +119,7 @@ llvm::Optional<CallReturnSummary> Transition::getCallReturnSummary() const {
   c.source = source;
   c.target = target;
   c.callee = callee;
+  c.call = call;
   c.id = id;
   return c;
 }

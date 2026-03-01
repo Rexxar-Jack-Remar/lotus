@@ -1,15 +1,30 @@
 #include "Verification/Sifa/Procedure/ProcedureGraph.h"
 
-#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 
 #include <cstddef>
-#include <functional>
 #include <utility>
 
 using namespace lotus::sifa;
+
+namespace {
+
+const llvm::Instruction *firstNonPhi(const llvm::BasicBlock &BB) {
+  for (const llvm::Instruction &I : BB) {
+    if (!llvm::isa<llvm::PHINode>(&I)) {
+      return &I;
+    }
+  }
+  return nullptr;
+}
+
+bool exitsViaReturn(const llvm::BasicBlock &BB) {
+  return llvm::isa<llvm::ReturnInst>(BB.getTerminator());
+}
+
+} // namespace
 
 std::size_t ProcedureGraph::NodePairHash::operator()(
     const std::pair<Node, Node> &p) const {
@@ -20,123 +35,96 @@ std::size_t ProcedureGraph::NodePairHash::operator()(
 
 ProcedureGraph::Node ProcedureGraph::getEntryNode() const { return entryNode_; }
 ProcedureGraph::Node ProcedureGraph::getExitNode() const { return exitNode_; }
-const ProcedureGraph::Graph &ProcedureGraph::graph() const { return graph_; }
-const std::vector<TransitionInfo> &ProcedureGraph::transitions() const { return transitions_; }
 
-Transition ProcedureGraph::addTransition(Node src, Node dst) {
-  const std::pair<Node, Node> k{src, dst};
-  const auto it = edgeToId_.find(k);
-  if (it != edgeToId_.end()) {
-    return Transition::makeEdge(it->second, src, dst);
-  }
-
-  const std::uint32_t id = static_cast<std::uint32_t>(transitions_.size());
-  transitions_.push_back(TransitionInfo{src, dst});
-  edgeToId_.emplace(std::move(k), id);
-  return Transition::makeEdge(id, src, dst);
-}
-
-ProcedureGraph::ProcedureGraph(const llvm::Function &F) {
-  // Collect blocks that contain an InvokeInst with a resolved callee so we can
-  // skip adding a plain CFG edge for the invoke's normal-dest successor.
-  // The ReturnSummary edge added in the second pass already covers that path;
-  // adding both would create a duplicate path through the normal-dest block.
-  llvm::SmallPtrSet<const llvm::BasicBlock *, 8> invokeBlocks;
-  for (const llvm::BasicBlock &BB : F) {
-    for (const llvm::Instruction &I : BB) {
-      if (const auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(&I)) {
-        if (invoke->getCalledFunction()) {
-          invokeBlocks.insert(&BB);
-          break;
-        }
-      }
-    }
-  }
-
-  // Regular intraprocedural CFG edges. For blocks with no successors we add a
-  // synthetic outgoing edge to the EXIT sentinel (nullptr).
-  // For invoke blocks with a resolved callee, skip the normal-dest edge here;
-  // it will be represented by a ReturnSummary edge below.
-  for (const llvm::BasicBlock &BB : F) {
-    auto *src = const_cast<llvm::BasicBlock *>(&BB);
-    graph_.addNode(src);
-
-    if (invokeBlocks.count(&BB)) {
-      // Find the invoke and its normal/unwind dests.
-      for (const llvm::Instruction &I : BB) {
-        if (const auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(&I)) {
-          if (invoke->getCalledFunction()) {
-            // Only add the unwind edge as a plain CFG edge; the normal-dest
-            // is covered by the ReturnSummary edge added below.
-            auto *unwind = const_cast<llvm::BasicBlock *>(invoke->getUnwindDest());
-            const auto label = addTransition(src, unwind);
-            graph_.addEdge(src, label, unwind);
-            break;
-          }
-        }
-      }
-    } else {
-      for (const llvm::BasicBlock *SuccC : llvm::successors(&BB)) {
-        auto *Succ = const_cast<llvm::BasicBlock *>(SuccC);
-        const auto label = addTransition(src, Succ);
-        graph_.addEdge(src, label, Succ);
-      }
-    }
-
-    if (llvm::succ_empty(&BB)) {
-      // Explicit edge to EXIT sentinel (nullptr). This makes the CFG "single-exit"
-      // in the sense that all returns flow into one sink, which simplifies
-      // construction of path expressions.
-      const auto label = addTransition(src, /*dst=*/nullptr);
-      graph_.addEdge(src, label, nullptr);
-    }
-  }
-
-  // Interprocedural aid: add ReturnSummary edges for each direct call site.
-  //
-  // A ReturnSummary is a synthetic "call + execute callee + return" transition
-  // (Ultimate's CallReturnSummary). This keeps the path-expression alphabet
-  // small while allowing ICFG-style interpretation to account for calls.
-  //
-  // - We add these edges only for direct calls where we can resolve the callee.
-  // - The edge goes from the block containing the call to the normal successor.
-  // - Indirect calls are ignored here and must be handled conservatively by
-  //   the interpreter/domain if interprocedural semantics are needed.
-  // - For InvokeInst, the normal-dest edge is represented solely by this
-  //   ReturnSummary (the plain CFG edge was skipped above).
-  for (const llvm::BasicBlock &BB : F) {
-    auto *src = const_cast<llvm::BasicBlock *>(&BB);
-    for (const llvm::Instruction &I : BB) {
-      auto *call = llvm::dyn_cast<llvm::CallBase>(&I);
-      if (!call) continue;
-      llvm::Function *callee = call->getCalledFunction();
-      if (!callee) continue;
-      if (auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(call)) {
-        addReturnSummaryEdge(src, const_cast<llvm::BasicBlock *>(invoke->getNormalDest()), callee);
-      } else {
-        bool added = false;
-        for (const llvm::BasicBlock *SuccC : llvm::successors(&BB)) {
-          addReturnSummaryEdge(src, const_cast<llvm::BasicBlock *>(SuccC), callee);
-          added = true;
-        }
-        if (!added) {
-          addReturnSummaryEdge(src, /*dst=*/nullptr, callee);
-        }
-      }
-    }
-  }
-
-  entryNode_ = const_cast<llvm::BasicBlock *>(&F.getEntryBlock());
-  exitNode_ = nullptr; // multiple exits represented by edges to nullptr
-}
-
-ProcedureGraph::ProcedureGraph(Node entryNode, Node exitNode)
-    : entryNode_(entryNode), exitNode_(exitNode) {
+void ProcedureGraph::setEntryNode(Node n) {
+  entryNode_ = n;
   if (entryNode_) {
     graph_.addNode(entryNode_);
   }
-  if (exitNode_ && exitNode_ != entryNode_) {
-    graph_.addNode(exitNode_);
+}
+
+ProcedureGraph::Node ProcedureGraph::getBlockEntryNode(const llvm::BasicBlock &bb) const {
+  auto it = blockEntryNodes_.find(&bb);
+  return it == blockEntryNodes_.end() ? nullptr : it->second;
+}
+
+ProcedureGraph::Node ProcedureGraph::createNode(llvm::BasicBlock *bb, std::uint32_t ordinal) {
+  ownedNodes_.emplace_back(new ProgramPoint{bb, ordinal});
+  return ownedNodes_.back().get();
+}
+
+ProcedureGraph::Node ProcedureGraph::getOrCreateBlockEntryNode(llvm::BasicBlock *bb) {
+  if (!bb) {
+    return nullptr;
+  }
+  auto it = blockEntryNodes_.find(bb);
+  if (it != blockEntryNodes_.end()) {
+    return it->second;
+  }
+  Node node = createNode(bb, 0);
+  blockEntryNodes_.emplace(bb, node);
+  nextOrdinal_[bb] = 1;
+  graph_.addNode(node);
+  return node;
+}
+
+ProcedureGraph::Node ProcedureGraph::createInternalNode(llvm::BasicBlock *bb) {
+  if (!bb) {
+    return nullptr;
+  }
+  std::uint32_t ordinal = nextOrdinal_[bb]++;
+  Node node = createNode(bb, ordinal);
+  graph_.addNode(node);
+  return node;
+}
+
+const ProcedureGraph::Graph &ProcedureGraph::graph() const { return graph_; }
+const std::vector<TransitionInfo> &ProcedureGraph::transitions() const { return transitions_; }
+
+Transition ProcedureGraph::addTransition(Node src, Node dst,
+                                         const llvm::Instruction *segmentStart,
+                                         const llvm::Instruction *stopBefore) {
+  const std::pair<Node, Node> k{src, dst};
+  const auto it = edgeToId_.find(k);
+  if (it != edgeToId_.end()) {
+    return Transition::makeEdge(it->second, src ? src->block : nullptr,
+                                dst ? dst->block : nullptr,
+                                src ? src->ordinal : 0,
+                                dst ? dst->ordinal : 0, segmentStart,
+                                stopBefore);
+  }
+
+  const std::uint32_t id = static_cast<std::uint32_t>(transitions_.size());
+  transitions_.push_back(TransitionInfo{
+      src ? src->block : nullptr, dst ? dst->block : nullptr,
+      src ? src->ordinal : 0, dst ? dst->ordinal : 0, nullptr,
+      segmentStart, stopBefore, nullptr});
+  edgeToId_.emplace(std::move(k), id);
+  return Transition::makeEdge(id, src ? src->block : nullptr,
+                              dst ? dst->block : nullptr,
+                              src ? src->ordinal : 0,
+                              dst ? dst->ordinal : 0, segmentStart,
+                              stopBefore);
+}
+
+ProcedureGraph::ProcedureGraph(const llvm::Function &F) {
+  exitNode_ = nullptr;
+  entryNode_ = getOrCreateBlockEntryNode(const_cast<llvm::BasicBlock *>(&F.getEntryBlock()));
+
+  for (const llvm::BasicBlock &BB : F) {
+    auto *srcBB = const_cast<llvm::BasicBlock *>(&BB);
+    Node src = getOrCreateBlockEntryNode(srcBB);
+    const llvm::Instruction *segmentStart = firstNonPhi(BB);
+
+    if (exitsViaReturn(BB)) {
+      addEdge(src, exitNode_, segmentStart, nullptr);
+      continue;
+    }
+
+    for (const llvm::BasicBlock *succBB : llvm::successors(&BB)) {
+      Node dst = getOrCreateBlockEntryNode(const_cast<llvm::BasicBlock *>(succBB));
+      addEdge(src, dst, segmentStart, nullptr);
+    }
   }
 }
 
@@ -146,33 +134,42 @@ void ProcedureGraph::addNode(Node n) {
   }
 }
 
-void ProcedureGraph::addEdge(Node src, Node dst) {
+void ProcedureGraph::addEdge(Node src, Node dst,
+                             const llvm::Instruction *segmentStart,
+                             const llvm::Instruction *stopBefore) {
   if (!src) {
     return;
   }
-  // Note: dst may be nullptr to represent an edge to the EXIT sentinel.
-  const auto label = addTransition(src, dst);
+  const auto label = addTransition(src, dst, segmentStart, stopBefore);
   graph_.addEdge(src, label, dst);
 }
 
-void ProcedureGraph::addReturnSummaryEdge(Node src, Node dst, const llvm::Function *callee) {
-  if (!src || !callee) return;
-  // ReturnSummary transitions are not de-duplicated by (src,dst) because the
-  // callee identity is part of the semantics. Each added edge gets a fresh id.
+void ProcedureGraph::addReturnSummaryEdge(Node src, Node dst,
+                                          const llvm::Function *callee,
+                                          const llvm::CallBase *callSite) {
+  if (!src || !dst || !callee) {
+    return;
+  }
   const std::uint32_t id = static_cast<std::uint32_t>(transitions_.size());
-  transitions_.push_back(
-      TransitionInfo{src, const_cast<llvm::BasicBlock *>(dst), const_cast<llvm::Function *>(callee)});
-  const auto label = Transition::makeReturnSummary(id, src, dst, callee);
+  transitions_.push_back(TransitionInfo{
+      src->block, dst->block, src->ordinal, dst->ordinal,
+      const_cast<llvm::Function *>(callee), nullptr, nullptr, callSite});
+  const auto label = Transition::makeReturnSummary(
+      id, src->block, dst->block, src->ordinal, dst->ordinal, callee, callSite);
   graph_.addEdge(src, label, dst);
 }
 
-void ProcedureGraph::addEnterCallEdge(Node src, const llvm::Function *callee) {
-  if (!src || !callee || callee->isDeclaration() || callee->empty()) return;
-  Node dst = const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
-  graph_.addNode(dst);
+void ProcedureGraph::addEnterCallEdge(Node src, Node dst,
+                                      const llvm::Function *callee,
+                                      const llvm::CallBase *callSite) {
+  if (!src || !dst || !callee) {
+    return;
+  }
   const std::uint32_t id = static_cast<std::uint32_t>(transitions_.size());
-  transitions_.push_back(
-      TransitionInfo{src, dst, const_cast<llvm::Function *>(callee)});
-  const auto label = Transition::makeEnterCall(id, src, dst, callee);
+  transitions_.push_back(TransitionInfo{
+      src->block, dst->block, src->ordinal, dst->ordinal,
+      const_cast<llvm::Function *>(callee), nullptr, nullptr, callSite});
+  const auto label = Transition::makeEnterCall(
+      id, src->block, dst->block, src->ordinal, dst->ordinal, callee, callSite);
   graph_.addEdge(src, label, dst);
 }
