@@ -40,6 +40,20 @@ The solver constructs **path expressions** (regular-expression-like ASTs) over e
 
 This corresponds to a **meet-over-all-paths (MOP)** computation. For classic distributive frameworks, MOP equals the standard maximal fixed point (MFP) solution.
 
+## Relation to `Utils/Algorithms/PathExpressions`
+
+Lotus also ships a generic path-expression utility under
+`include/Utils/Algorithms/PathExpressions/`. That component computes ordinary
+regular expressions over edge labels in arbitrary labeled graphs.
+
+The APA solver is different:
+
+- APA path expressions carry **transfer functions**, not plain labels.
+- APA expressions are **evaluated over a dataflow lattice** via
+  `applyTransfer`, `meet`, and `maxStarIterations`.
+- The utility path-expression library is for **regex/path summarization** and is
+  not a drop-in implementation of the APA solver.
+
 ## Current gaps / non-goals
 
 - **Not interprocedural**: this solver works within a single function CFG.
@@ -61,6 +75,22 @@ Three elimination-style solvers are exposed via `elimination::EliminationOptions
 - `StateElimination` (default): generic **O(n³)** state-elimination over all nodes (Floyd–Warshall-style).
 - `ADTSimple`: **paper-style ADT "simple" algorithm** for **reducible** flowgraphs (O(n²) updates).
 - `ADTDelayed`: **paper-style ADT "delayed" algorithm** for **reducible** flowgraphs.
+
+The public facade `IntraEliminationSolver.h` dispatches to one of three engine
+headers in `include/Dataflow/APA/Solver/`:
+
+- `EngineCommon.h` (shared internals: reducible-view construction, ADT
+  building, expression evaluation)
+- `StateEliminationEngine.h`
+- `ADTSimpleEngine.h`
+- `ADTDelayedEngine.h`
+
+Roughly, the split is:
+
+- `IntraEliminationSolver.h`: API surface and fallback policy
+- `StateEliminationEngine.h`: generic full-CFG elimination
+- `ADTSimpleEngine.h`: eager leaf-update ADT evaluation
+- `ADTDelayedEngine.h`: deferred prefix composition with union-find style links
 
 For ADT-based methods, you can optionally implement `elimination::IntraReducibleEliminationProblem`
 (dominators + topological order + edge list). If not provided, the solver computes reducible
@@ -120,4 +150,3 @@ when operands are constant, and performs alias-aware memory updates when
 `AAResults` are available. Uninitialized-variable tracking normalizes pointer
 bases, uses ValueTracking for guaranteed-non-undef checks, and clears aliasing
 locations via `AAResults` when available, plus basic mem intrinsics.
-

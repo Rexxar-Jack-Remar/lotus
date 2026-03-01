@@ -11,6 +11,18 @@ Path expressions over labeled graphs: compute a **regular expression** that desc
 - **RegexToTgf / RegexToCompactTgf** – Export regex syntax trees to Trivial Graph Format.
 - **PathExpressionComputer<N, L>** – Build from a graph; call `exprBetween(source, target)` to get the path expression from `source` to `target`.
 
+## Relation to APA
+
+This utility computes ordinary regex-style path expressions over graph labels.
+It is separate from `Dataflow/APA/Core/PathExpression.h`, which is the
+APA-specific transfer-expression AST used by the intraprocedural dataflow
+solver.
+
+In short:
+
+- `Utils/Algorithms/PathExpressions/`: generic labeled-graph regex engine
+- `Dataflow/APA/`: dataflow transfer-expression engine with lattice evaluation
+
 ## Requirements
 
 - **N** (node type): hashable and equality comparable (`std::hash<N>`, `operator==`) to be stored in sets/maps (like Java's `HashSet`).
