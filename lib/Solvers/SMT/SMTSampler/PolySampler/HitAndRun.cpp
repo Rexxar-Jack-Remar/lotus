@@ -14,6 +14,7 @@
  */
 
 #include "Solvers/SMT/SMTSampler/PolySampler/HitAndRun.h"
+
 #include "Solvers/SMT/SMTSampler/PolySampler/WalkUtils.h"
 
 #include <cmath>
@@ -22,8 +23,7 @@
 namespace RegionSampling {
 
 bool hit_and_run_step(const std::vector<LinearConstraint> &constraints,
-                      std::vector<int64_t> &point,
-                      std::mt19937_64 &rng) {
+                      std::vector<int64_t> &point, std::mt19937_64 &rng) {
   if (point.empty())
     return false;
 
@@ -33,9 +33,10 @@ bool hit_and_run_step(const std::vector<LinearConstraint> &constraints,
   //
   //    Fix B24: sample each coordinate uniformly from {-1, 0, +1} rather than
   //    rounding a N(0,1) variate.  Rounding a standard normal gives P(0) ≈ 39%
-  //    per coordinate, making all-zero directions very likely in high dimensions.
-  //    A uniform draw from {-1,0,+1} gives P(0) = 1/3, which is much better,
-  //    and the direction is still unbiased (symmetric around zero).
+  //    per coordinate, making all-zero directions very likely in high
+  //    dimensions. A uniform draw from {-1,0,+1} gives P(0) = 1/3, which is
+  //    much better, and the direction is still unbiased (symmetric around
+  //    zero).
   // Fix PS-2: non_zero must NOT be reset inside the loop body — doing so
   // makes the outer condition (!non_zero) always true at loop entry, causing
   // all 32 attempts to run even when the first attempt succeeded.
@@ -58,19 +59,20 @@ bool hit_and_run_step(const std::vector<LinearConstraint> &constraints,
 
   // 2. Find the chord [t_min, t_max] along the direction.
   long double t_min = -std::numeric_limits<long double>::infinity();
-  long double t_max =  std::numeric_limits<long double>::infinity();
+  long double t_max = std::numeric_limits<long double>::infinity();
 
   for (const auto &c : constraints) {
     long double a_dot_x = WalkUtils::dot_ld(c.coeffs, point);
     long double a_dot_d = WalkUtils::dot_ld(c.coeffs, direction);
-    long double slack   = static_cast<long double>(c.bound) - a_dot_x;
+    long double slack = static_cast<long double>(c.bound) - a_dot_x;
 
     if (a_dot_d > 0.0L) {
       t_max = std::min(t_max, slack / a_dot_d);
     } else if (a_dot_d < 0.0L) {
       t_min = std::max(t_min, slack / a_dot_d);
     } else if (slack < 0.0L) {
-      // Constraint violated regardless of t – current point is outside polytope.
+      // Constraint violated regardless of t – current point is outside
+      // polytope.
       return false;
     }
   }
@@ -80,7 +82,7 @@ bool hit_and_run_step(const std::vector<LinearConstraint> &constraints,
 
   // Fix B25: use safe_cast_t to avoid UB when t_low_ld / t_high_ld are outside
   // the representable range of int64_t.
-  long double t_low_ld  = std::ceil(t_min);
+  long double t_low_ld = std::ceil(t_min);
   long double t_high_ld = std::floor(t_max);
   if (t_low_ld > t_high_ld)
     return false;

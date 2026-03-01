@@ -1,9 +1,3 @@
-#include "IR/PDG/Analysis/PropertyBasedSlicing.h"
-#include "IR/PDG/Analysis/Slicing.h"
-#include "IR/PDG/Core/ControlDependencyGraph.h"
-#include "IR/PDG/Core/DataDependencyGraph.h"
-#include "IR/PDG/Core/ProgramDependencyGraph.h"
-
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
@@ -15,6 +9,12 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "IR/PDG/Analysis/PropertyBasedSlicing.h"
+#include "IR/PDG/Analysis/Slicing.h"
+#include "IR/PDG/Core/ControlDependencyGraph.h"
+#include "IR/PDG/Core/DataDependencyGraph.h"
+#include "IR/PDG/Core/ProgramDependencyGraph.h"
+
 using namespace llvm;
 using namespace pdg;
 
@@ -22,9 +22,10 @@ static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
                                           cl::Required);
 
-static cl::opt<std::string>
-    PropertyFile("property-file", cl::desc("Property file (.prp)"),
-                 cl::value_desc("filename"), cl::init(""));
+static cl::opt<std::string> PropertyFile("property-file",
+                                         cl::desc("Property file (.prp)"),
+                                         cl::value_desc("filename"),
+                                         cl::init(""));
 
 static cl::opt<std::string>
     Direction("direction", cl::desc("Slice direction: backward|forward"),
@@ -36,8 +37,7 @@ static cl::opt<bool> DumpSlice("dump-slice",
 
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
-  cl::ParseCommandLineOptions(argc, argv,
-                              "PDG property-based slicing tool\n");
+  cl::ParseCommandLineOptions(argc, argv, "PDG property-based slicing tool\n");
 
   LLVMContext Context;
   SMDiagnostic Err;

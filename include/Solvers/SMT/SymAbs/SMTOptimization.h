@@ -23,6 +23,7 @@
 
 #include "z3++.h"
 #include "z3.h"
+
 #include <cstdint>
 #include <limits>
 using namespace z3;

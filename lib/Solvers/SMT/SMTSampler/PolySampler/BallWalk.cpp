@@ -11,6 +11,7 @@
  */
 
 #include "Solvers/SMT/SMTSampler/PolySampler/BallWalk.h"
+
 #include "Solvers/SMT/SMTSampler/PolySampler/WalkUtils.h"
 
 #include <cmath>
@@ -19,8 +20,7 @@
 namespace RegionSampling {
 
 bool ball_walk_step(const std::vector<LinearConstraint> &constraints,
-                    std::vector<int64_t> &point,
-                    std::mt19937_64 &rng) {
+                    std::vector<int64_t> &point, std::mt19937_64 &rng) {
   if (point.empty() || constraints.empty())
     return false;
 
@@ -78,12 +78,12 @@ bool ball_walk_step(const std::vector<LinearConstraint> &constraints,
     bool overflow = false;
     for (size_t i = 0; i < n; ++i) {
       std::uniform_int_distribution<int64_t> step_dist(-step_size[i],
-                                                        step_size[i]);
+                                                       step_size[i]);
       int64_t delta = step_dist(rng);
       if (delta != 0)
         non_zero = true;
-      __int128 next = static_cast<__int128>(point[i]) +
-                      static_cast<__int128>(delta);
+      __int128 next =
+          static_cast<__int128>(point[i]) + static_cast<__int128>(delta);
       if (next < std::numeric_limits<int64_t>::min() ||
           next > std::numeric_limits<int64_t>::max()) {
         overflow = true;

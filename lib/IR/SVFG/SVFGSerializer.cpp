@@ -228,7 +228,7 @@ static const Value *resolveValueAnchor(const Module *M, const Anchor &anchor) {
       return nullptr;
     if (anchor.argIndex >= F->arg_size())
       return nullptr;
-    auto argIt = F->arg_begin();
+    const auto *argIt = F->arg_begin();
     std::advance(argIt, anchor.argIndex);
     return &*argIt;
   }
@@ -299,7 +299,7 @@ static Anchor getNodeValueAnchor(const SVFGNode *node) {
   if (const auto *formalParm = dyn_cast<FormalParmSVFGNode>(node)) {
     if (const Function *F = formalParm->getFunction()) {
       if (formalParm->getParamIndex() < F->arg_size()) {
-        auto argIt = F->arg_begin();
+        const auto *argIt = F->arg_begin();
         std::advance(argIt, formalParm->getParamIndex());
         return getAnchorForValue(&*argIt);
       }
@@ -373,7 +373,7 @@ static void registerNodeBindings(SVFG &graph, SVFGNode *node) {
     if (const Function *F = formalParm->getFunction()) {
       graph.addFormalParm(F, formalParm);
       if (formalParm->getParamIndex() < F->arg_size()) {
-        auto argIt = F->arg_begin();
+        const auto *argIt = F->arg_begin();
         std::advance(argIt, formalParm->getParamIndex());
         graph.setValueNode(&*argIt, node->getId());
       }

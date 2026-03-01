@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "Solvers/SMT/LIBSMT/Z3Plus.h"
+
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -38,10 +40,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-
 #include <z3++.h>
-
-#include "Solvers/SMT/LIBSMT/Z3Plus.h"
 
 // Fix L8: do NOT place "using namespace std" or "using namespace z3" here.
 // Each .cpp implementation file declares them locally as needed.

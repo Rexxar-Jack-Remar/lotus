@@ -24,8 +24,8 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "IR/PDG/Core/ControlDependencyGraph.h"
 #include "IR/PDG/Analysis/CypherQuery.h"
+#include "IR/PDG/Core/ControlDependencyGraph.h"
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
 
@@ -112,21 +112,20 @@ static cl::opt<int>
                 cl::desc("Maximum number of results to return (default: 100)"),
                 cl::init(100));
 
-static cl::opt<int>
-    UnboundedMaxHops("max-unbounded-hops",
-                     cl::desc("Default cap for unbounded traversals (e.g. *..), default: 5"),
-                     cl::init(5));
+static cl::opt<int> UnboundedMaxHops(
+    "max-unbounded-hops",
+    cl::desc("Default cap for unbounded traversals (e.g. *..), default: 5"),
+    cl::init(5));
 
 static cl::opt<std::string>
     OutputFormat("output-format",
                  cl::desc("Output format: text, json (default: text)"),
                  cl::init("text"));
 
-static cl::list<std::string>
-    QueryParams("param",
-                cl::desc("Query parameter key=value (repeatable); referenced as $key"),
-                cl::ZeroOrMore,
-                cl::value_desc("key=value"));
+static cl::list<std::string> QueryParams(
+    "param",
+    cl::desc("Query parameter key=value (repeatable); referenced as $key"),
+    cl::ZeroOrMore, cl::value_desc("key=value"));
 
 static cl::opt<bool> ShowVersion("show-version",
                                  cl::desc("Show version information"));
@@ -155,7 +154,6 @@ void printPDGInfo(ProgramGraph &pdg) {
   outs() << "  Total edges: " << pdg.numEdge() << "\n";
   outs() << "  Functions: " << pdg.getFuncWrapperMap().size() << "\n";
 }
-
 
 bool executeQuery(CypherQueryExecutor &executor, const std::string &queryStr) {
   if (Verbose) {
@@ -187,13 +185,16 @@ bool executeQuery(CypherQueryExecutor &executor, const std::string &queryStr) {
     }
   }
 
-  auto query = params.empty() ? parser.parse(queryStr) : parser.parse(queryStr, params);
+  auto query =
+      params.empty() ? parser.parse(queryStr) : parser.parse(queryStr, params);
 
   if (!query) {
     const auto &error = parser.getLastError();
     errs() << "Parse error: " << error.message;
-    if (error.line > 0) errs() << " (line " << error.line << ")";
-    if (!error.suggestion.empty()) errs() << " - " << error.suggestion;
+    if (error.line > 0)
+      errs() << " (line " << error.line << ")";
+    if (!error.suggestion.empty())
+      errs() << " - " << error.suggestion;
     errs() << "\n";
     return false;
   }
@@ -201,8 +202,10 @@ bool executeQuery(CypherQueryExecutor &executor, const std::string &queryStr) {
   if (Explain) {
     outs() << "Plan: " << query->getPatterns().size() << " patterns, "
            << query->getReturnItems().size() << " returns";
-    if (query->hasWhere()) outs() << ", WHERE";
-    if (query->hasLimit()) outs() << ", LIMIT " << query->getLimit();
+    if (query->hasWhere())
+      outs() << ", WHERE";
+    if (query->hasLimit())
+      outs() << ", LIMIT " << query->getLimit();
     outs() << "\n";
   }
 
@@ -360,13 +363,18 @@ void runInteractiveMode(CypherQueryExecutor &executor) {
 
     if (line == "help") {
       outs() << "Commands: help, quit, info, clear\n";
-      outs() << "Labels: :INST, :INST_FUNCALL, :INST_RET, :INST_BR, :FUNC_ENTRY, :PARAM, :VAR, :ANNO\n";
-      outs() << "Edges: :DATA_DEP, :DATA_RAW, :DATA_READ, :DATA_ALIAS, :CONTROL_DEP, :CALL_INV, :CALL_RET, :PARAM_IN, :PARAM_OUT\n";
-      outs() << "Notes: direction is respected (-[:T]-> vs <-[:T]-); list filters via IN [..]; COUNT(*)/COUNT(n)/COUNT(DISTINCT n.prop); params via --param k=v and $k\n";
+      outs() << "Labels: :INST, :INST_FUNCALL, :INST_RET, :INST_BR, "
+                ":FUNC_ENTRY, :PARAM, :VAR, :ANNO\n";
+      outs() << "Edges: :DATA_DEP, :DATA_RAW, :DATA_READ, :DATA_ALIAS, "
+                ":CONTROL_DEP, :CALL_INV, :CALL_RET, :PARAM_IN, :PARAM_OUT\n";
+      outs() << "Notes: direction is respected (-[:T]-> vs <-[:T]-); list "
+                "filters via IN [..]; COUNT(*)/COUNT(n)/COUNT(DISTINCT "
+                "n.prop); params via --param k=v and $k\n";
     } else if (line == "info") {
       printPDGInfo(executor.getPDG());
     } else if (line == "clear") {
-      for (int i = 0; i < 50; ++i) outs() << "\n";
+      for (int i = 0; i < 50; ++i)
+        outs() << "\n";
     } else {
       executeQuery(executor, line);
     }
@@ -386,15 +394,18 @@ void runBatchMode(CypherQueryExecutor &executor, const std::string &filename) {
   int queryCount = 0, successCount = 0;
 
   while (std::getline(file, line)) {
-    if (line.empty() || line[0] == '#') continue;
+    if (line.empty() || line[0] == '#')
+      continue;
 
     size_t start = line.find_first_not_of(" \t");
     size_t end = line.find_last_not_of(" \t\r\n");
-    if (start == std::string::npos) continue;
+    if (start == std::string::npos)
+      continue;
     line = line.substr(start, end - start + 1);
 
     outs() << "\n[" << (++queryCount) << "] " << line << "\n";
-    if (executeQuery(executor, line)) successCount++;
+    if (executeQuery(executor, line))
+      successCount++;
   }
 
   outs() << "\nComplete: " << successCount << "/" << queryCount << "\n";
@@ -434,8 +445,8 @@ int main(int argc, char **argv) {
     llvm::initializeTransformUtils(registry);
 
     llvm::legacy::PassManager PM;
-    // Add required passes in order: DataDependencyGraph and ControlDependencyGraph
-    // must run before ProgramDependencyGraph
+    // Add required passes in order: DataDependencyGraph and
+    // ControlDependencyGraph must run before ProgramDependencyGraph
     PM.add(new pdg::DataDependencyGraph());
     PM.add(new pdg::ControlDependencyGraph());
     PM.add(new pdg::ProgramDependencyGraph());

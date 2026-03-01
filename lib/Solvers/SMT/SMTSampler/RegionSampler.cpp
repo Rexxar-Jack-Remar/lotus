@@ -12,10 +12,10 @@
  *        Boolean variables found in the formula, so partial-model evaluation
  *        does not produce false positives for mixed BV/Boolean formulas.
  *  B22 – build_constraints() logs a warning when a constraint references an
- *        unknown variable name (previously silently skipped with no indication).
- *  B23 – collect_vars() deduplicates the variable list using a name-based set
- *        so that variables appearing multiple times in the formula are only
- *        added once.
+ *        unknown variable name (previously silently skipped with no
+ * indication). B23 – collect_vars() deduplicates the variable list using a
+ * name-based set so that variables appearing multiple times in the formula are
+ * only added once.
  *
  * Additional fixes (new):
  *  RS-1 – The set of Boolean variables not covered by the BV variable list is
@@ -30,17 +30,16 @@
  *          where bit-vectors are unsigned by default.
  */
 
+#include "Solvers/SMT/SMTSampler/PolySampler/PolySampler.h"
 #include "Solvers/SMT/SMTSampler/SMTSampler.h"
+#include "Solvers/SMT/SymAbs/SymAbsUtils.h"
+#include "Solvers/SMT/SymAbs/SymbolicAbstraction.h"
 
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <unordered_map>
 #include <unordered_set>
-
-#include "Solvers/SMT/SMTSampler/PolySampler/PolySampler.h"
-#include "Solvers/SMT/SymAbs/SymAbsUtils.h"
-#include "Solvers/SMT/SymAbs/SymbolicAbstraction.h"
 
 using namespace std;
 using namespace z3;
@@ -104,11 +103,10 @@ static z3::expr bv_from_int(z3::context &ctx, int64_t value, unsigned width) {
  * RS-1: the set of uncovered Boolean variables is passed in as a pre-computed
  * parameter (bool_var_decls) rather than being recomputed on every call.
  */
-static bool model_satisfies(
-    const z3::expr &phi,
-    const std::vector<VarInfo> &vars,
-    const std::vector<int64_t> &point,
-    const std::vector<z3::func_decl> &bool_var_decls) {
+static bool model_satisfies(const z3::expr &phi,
+                            const std::vector<VarInfo> &vars,
+                            const std::vector<int64_t> &point,
+                            const std::vector<z3::func_decl> &bool_var_decls) {
   z3::context &ctx = phi.ctx();
   z3::model m(ctx);
 
@@ -159,9 +157,8 @@ struct region_sampler {
   explicit region_sampler(std::string input, int max_samples, double max_time)
       : input_file(std::move(input)), max_samples(max_samples),
         max_time_ms(max_time), smt_formula(c) {
-    rng.seed(static_cast<uint64_t>(std::chrono::high_resolution_clock::now()
-                                       .time_since_epoch()
-                                       .count()));
+    rng.seed(static_cast<uint64_t>(
+        std::chrono::high_resolution_clock::now().time_since_epoch().count()));
   }
 
   void parse_smt() {
@@ -231,7 +228,8 @@ struct region_sampler {
 
     constraints.clear();
     if (domain == Domain::Zone) {
-      auto zone = SymAbs::alpha_zone_V(smt_formula, extract_exprs(), abs_config);
+      auto zone =
+          SymAbs::alpha_zone_V(smt_formula, extract_exprs(), abs_config);
       for (const auto &cstr : zone) {
         RegionSampling::LinearConstraint lc;
         lc.coeffs.assign(vars.size(), 0);

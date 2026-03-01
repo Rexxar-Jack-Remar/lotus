@@ -72,16 +72,16 @@ BVValue BVValue::from_signed(int64_t value, unsigned width) {
 
 uint64_t BVValue::to_uint64() const {
   if (width_ > 64) {
-    throw std::runtime_error("BVValue too wide for uint64_t (width=" +
-                             std::to_string(width_) + ")");
+    throw std::runtime_error(
+        "BVValue too wide for uint64_t (width=" + std::to_string(width_) + ")");
   }
   return value_small_;
 }
 
 int64_t BVValue::to_int64() const {
   if (width_ > 64) {
-    throw std::runtime_error("BVValue too wide for int64_t (width=" +
-                             std::to_string(width_) + ")");
+    throw std::runtime_error(
+        "BVValue too wide for int64_t (width=" + std::to_string(width_) + ")");
   }
 
   // Check if the value fits in int64_t when interpreted as signed
@@ -129,7 +129,8 @@ bool BVValue::fits_int64() const {
     return signed_val >= std::numeric_limits<int64_t>::min();
   } else {
     // Positive value: check if it's <= INT64_MAX
-    return value_small_ <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+    return value_small_ <=
+           static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
   }
 }
 
@@ -235,8 +236,7 @@ Optional<uint64_t> BVRange::size() const {
   return size;
 }
 
-template <typename RNG>
-BVValue BVRange::sample_uniform(RNG &rng) const {
+template <typename RNG> BVValue BVRange::sample_uniform(RNG &rng) const {
   if (!min_.fits_uint64() || !max_.fits_uint64()) {
     throw std::runtime_error("Cannot sample from wide BVRange (width > 64)");
   }
@@ -272,7 +272,8 @@ BVValue BVRange::sample_uniform(RNG &rng) const {
 }
 
 // Explicit template instantiation for common RNG types
-template BVValue BVRange::sample_uniform<std::mt19937_64>(std::mt19937_64 &) const;
+template BVValue
+BVRange::sample_uniform<std::mt19937_64>(std::mt19937_64 &) const;
 template BVValue BVRange::sample_uniform<std::mt19937>(std::mt19937 &) const;
 
 // ============================================================================
@@ -401,8 +402,7 @@ int64_t extract_lower_bound(z3::optimize &opt,
 
 int64_t extract_upper_bound(z3::optimize &opt,
                             const z3::optimize::handle &handle,
-                            const z3::expr &var,
-                            int64_t default_value) {
+                            const z3::expr &var, int64_t default_value) {
   try {
     z3::expr bound_expr = opt.upper(handle);
     auto result = SafeArithmetic::z3_to_int64(bound_expr);
@@ -420,7 +420,8 @@ int64_t extract_upper_bound(z3::optimize &opt,
     if (max_val.has_value()) {
       // Check if it fits in int64_t
       uint64_t max_uint = max_val.value();
-      if (max_uint <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+      if (max_uint <=
+          static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
         std::cerr << "; using bit-width default " << max_uint << "\n";
         return static_cast<int64_t>(max_uint);
       }
@@ -431,19 +432,18 @@ int64_t extract_upper_bound(z3::optimize &opt,
   return default_value;
 }
 
-BVRange extract_range(z3::optimize &opt_min,
-                      z3::optimize &opt_max,
+BVRange extract_range(z3::optimize &opt_min, z3::optimize &opt_max,
                       const z3::optimize::handle &handle_min,
                       const z3::optimize::handle &handle_max,
-                      const z3::expr &var,
-                      bool use_signed) {
+                      const z3::expr &var, bool use_signed) {
   unsigned width = var.get_sort().bv_size();
 
   // Try to extract bounds
   int64_t lower = extract_lower_bound(opt_min, handle_min, 0);
-  int64_t upper = extract_upper_bound(opt_max, handle_max, var,
-                                      use_signed ? std::numeric_limits<int64_t>::max()
-                                                 : static_cast<int64_t>((1ULL << std::min(width, 63u)) - 1));
+  int64_t upper = extract_upper_bound(
+      opt_max, handle_max, var,
+      use_signed ? std::numeric_limits<int64_t>::max()
+                 : static_cast<int64_t>((1ULL << std::min(width, 63u)) - 1));
 
   BVValue min_val = BVValue::from_signed(lower, width);
   BVValue max_val = BVValue::from_signed(upper, width);

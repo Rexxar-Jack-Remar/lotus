@@ -21,6 +21,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+
 #include <z3++.h>
 
 namespace SMTSampler {
@@ -29,8 +30,7 @@ namespace SMTSampler {
  * @brief Simple optional-like wrapper for C++14 compatibility.
  * Use std::optional when upgrading to C++17.
  */
-template <typename T>
-class Optional {
+template <typename T> class Optional {
 public:
   Optional() : has_value_(false), value_() {}
   Optional(const T &value) : has_value_(true), value_(value) {}
@@ -39,12 +39,14 @@ public:
   explicit operator bool() const { return has_value_; }
 
   const T &value() const {
-    if (!has_value_) throw std::runtime_error("Optional has no value");
+    if (!has_value_)
+      throw std::runtime_error("Optional has no value");
     return value_;
   }
 
   T &value() {
-    if (!has_value_) throw std::runtime_error("Optional has no value");
+    if (!has_value_)
+      throw std::runtime_error("Optional has no value");
     return value_;
   }
 
@@ -57,15 +59,11 @@ private:
   T value_;
 };
 
-template <typename T>
-Optional<T> make_optional(const T &value) {
+template <typename T> Optional<T> make_optional(const T &value) {
   return Optional<T>(value);
 }
 
-template <typename T>
-Optional<T> nullopt() {
-  return Optional<T>();
-}
+template <typename T> Optional<T> nullopt() { return Optional<T>(); }
 
 /**
  * @brief Represents a bit-vector value with arbitrary width.
@@ -107,7 +105,8 @@ public:
   uint64_t to_uint64() const;
 
   /**
-   * @brief Converts to int64_t using signed interpretation (only valid for width ≤ 64).
+   * @brief Converts to int64_t using signed interpretation (only valid for
+   * width ≤ 64).
    * @throws std::runtime_error if width > 64
    */
   int64_t to_int64() const;
@@ -139,7 +138,7 @@ public:
 
 private:
   unsigned width_;
-  uint64_t value_small_; // Used when width_ <= 64
+  uint64_t value_small_;              // Used when width_ <= 64
   Optional<std::string> value_large_; // Used when width_ > 64 (decimal string)
 };
 
@@ -205,8 +204,7 @@ public:
    * @param rng Random number generator
    * @return A random value in [min, max]
    */
-  template <typename RNG>
-  BVValue sample_uniform(RNG &rng) const;
+  template <typename RNG> BVValue sample_uniform(RNG &rng) const;
 
 private:
   BVValue min_;
@@ -286,8 +284,7 @@ int64_t extract_upper_bound(z3::optimize &opt,
  * @param ctx Z3 context
  * @return A BVRange representing the computed bounds
  */
-BVRange compute_bounds(const z3::expr &formula,
-                       const z3::expr &var,
+BVRange compute_bounds(const z3::expr &formula, const z3::expr &var,
                        z3::context &ctx);
 
 } // namespace BoundExtraction
@@ -322,8 +319,7 @@ z3::expr uint64_to_bv(z3::context &ctx, uint64_t value, unsigned width);
  * @param default_value Fallback if extraction fails
  * @return The extracted value or default_value
  */
-int64_t extract_from_model(const z3::model &model,
-                           const z3::expr &var,
+int64_t extract_from_model(const z3::model &model, const z3::expr &var,
                            int64_t default_value = 0);
 
 } // namespace Conversion

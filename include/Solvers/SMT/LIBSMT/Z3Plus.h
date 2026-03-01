@@ -34,6 +34,7 @@
 
 #include "z3++.h"
 #include "z3.h"
+
 #include <algorithm>
 #include <climits>
 #include <cmath>
@@ -150,8 +151,7 @@ inline void get_k_models(z3::expr &exp, int k) {
 }
 
 inline std::pair<int, int> get_abstract_interval(z3::expr &pre_cond,
-                                                  z3::expr &query,
-                                                  int timeout) {
+                                                 z3::expr &query, int timeout) {
   /*
    * Compute the interval abstraction of pre_cond for query.
    *
@@ -247,8 +247,8 @@ inline z3::expr do_constant_propagation(z3::expr &to_simp) {
 }
 
 inline bool check_model_misc(z3::expr &exp, z3::context &ctx,
-                              std::vector<z3::func_decl> &decls,
-                              std::vector<int> &candidate) {
+                             std::vector<z3::func_decl> &decls,
+                             std::vector<int> &candidate) {
   z3::model cur_model(ctx);
   for (unsigned i = 0; i < decls.size(); i++) {
     z3::expr var_i = ctx.bv_val(candidate[i], 32);

@@ -3,14 +3,14 @@
 
 # Sources
 set(SVFG_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/SVFG.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/SVFGBuilder.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/SVFGBuilderNodes.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/SVFGBuilderEdges.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/SVFGBuilderMemorySSA.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/SVFGSerializer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/SVFGOPT.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/SVFGStats.cpp
+    SVFG.cpp
+    SVFGBuilder.cpp
+    SVFGBuilderNodes.cpp
+    SVFGBuilderEdges.cpp
+    SVFGBuilderMemorySSA.cpp
+    SVFGSerializer.cpp
+    SVFGOPT.cpp
+    SVFGStats.cpp
 )
 
 # Create library

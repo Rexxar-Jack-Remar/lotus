@@ -20,40 +20,39 @@
 
 using namespace llvm;
 
-static cl::opt<std::string> InputFilename(
-    cl::Positional,
-    cl::desc("<input bitcode file>"),
-    cl::Required);
+static cl::opt<std::string> InputFilename(cl::Positional,
+                                          cl::desc("<input bitcode file>"),
+                                          cl::Required);
 
 static cl::opt<bool> MemoryLeakCheck(
     "leak",
     cl::desc("Check for memory leaks (alloc never freed or partial leak)"),
     cl::init(true));
 
-static cl::opt<bool> FileCheck(
-    "file",
-    cl::desc("Check for file descriptor leaks (fopen never fclose)"),
-    cl::init(false));
+static cl::opt<bool>
+    FileCheck("file",
+              cl::desc("Check for file descriptor leaks (fopen never fclose)"),
+              cl::init(false));
 
 static cl::opt<bool> DFreeCheck(
     "double-free",
     cl::desc("Check for double-free (same memory freed twice on same path)"),
     cl::init(false));
 
-static cl::opt<bool> AllChecks(
-    "all",
-    cl::desc("Run all checkers (leak, double-free, file)"),
-    cl::init(false));
+static cl::opt<bool>
+    AllChecks("all", cl::desc("Run all checkers (leak, double-free, file)"),
+              cl::init(false));
 
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y;
 
-  cl::ParseCommandLineOptions(argc, argv,
-                              "Source-Sink Bug Detector (Saber)\n"
-                              "  [options] <input-bitcode>\n"
-                              "  By default, runs leak checker. Use --all to run all checkers.\n");
+  cl::ParseCommandLineOptions(
+      argc, argv,
+      "Source-Sink Bug Detector (Saber)\n"
+      "  [options] <input-bitcode>\n"
+      "  By default, runs leak checker. Use --all to run all checkers.\n");
   RecursiveTimer::setEnabled(lotus::analysis::SaberOptions::verbose());
 
   // Force linkage of SaberOptions symbols from static library
@@ -86,21 +85,24 @@ int main(int argc, char **argv) {
 
   // Count how many checkers will run
   int checkerCount = 0;
-  if (runLeak) checkerCount++;
-  if (runDoubleFree) checkerCount++;
-  if (runFile) checkerCount++;
+  if (runLeak)
+    checkerCount++;
+  if (runDoubleFree)
+    checkerCount++;
+  if (runFile)
+    checkerCount++;
 
   // If running multiple checkers, build SVFG/ICFG once and share them
   std::unique_ptr<lotus::analysis::SVFG> shared_svfg;
   std::unique_ptr<::ICFG> shared_icfg;
-  
+
   if (checkerCount > 1) {
     // Build SVFG/ICFG once using a temporary checker
     outs() << "\n=== Building SVFG (shared across checkers) ===\n";
     lotus::analysis::LeakChecker builderChecker;
     builderChecker.setModule(M.get());
     builderChecker.initialize();
-    
+
     // Extract SVFG/ICFG to share (ownership moves to shared_svfg/shared_icfg)
     auto extracted = builderChecker.extractSVFGAndICFG();
     shared_svfg = std::move(extracted.first);
@@ -117,7 +119,8 @@ int main(int argc, char **argv) {
     lotus::analysis::LeakChecker leakChecker;
     if (checkerCount > 1 && shared_svfg && shared_icfg) {
       // Move shared graphs into this checker.
-      leakChecker.setSharedSVFGAndICFG(std::move(shared_svfg), std::move(shared_icfg));
+      leakChecker.setSharedSVFGAndICFG(std::move(shared_svfg),
+                                       std::move(shared_icfg));
     }
     leakChecker.setModule(M.get());
     leakChecker.runOnModule(*M);
@@ -137,7 +140,8 @@ int main(int argc, char **argv) {
     }
     lotus::analysis::DoubleFreeChecker dfChecker;
     if (checkerCount > 1 && shared_svfg && shared_icfg) {
-      dfChecker.setSharedSVFGAndICFG(std::move(shared_svfg), std::move(shared_icfg));
+      dfChecker.setSharedSVFGAndICFG(std::move(shared_svfg),
+                                     std::move(shared_icfg));
     }
     // Note: Double-free checker uses free() calls as both sources and sinks,
     // so it doesn't share source/sink state with leak checker.
@@ -158,7 +162,8 @@ int main(int argc, char **argv) {
     }
     lotus::analysis::FileChecker fileChecker;
     if (checkerCount > 1 && shared_svfg && shared_icfg) {
-      fileChecker.setSharedSVFGAndICFG(std::move(shared_svfg), std::move(shared_icfg));
+      fileChecker.setSharedSVFGAndICFG(std::move(shared_svfg),
+                                       std::move(shared_icfg));
     }
     fileChecker.setModule(M.get());
     fileChecker.runOnModule(*M);

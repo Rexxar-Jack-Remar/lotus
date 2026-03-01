@@ -13,15 +13,15 @@
 
 #include "Solvers/SMT/SMTSampler/PolySampler/PolySampler.h"
 
-#include <chrono>
-#include <sstream>
-#include <unordered_set>
-
 #include "Solvers/SMT/SMTSampler/PolySampler/BallWalk.h"
 #include "Solvers/SMT/SMTSampler/PolySampler/ConstraintWalk.h"
 #include "Solvers/SMT/SMTSampler/PolySampler/CoordinateWalk.h"
 #include "Solvers/SMT/SMTSampler/PolySampler/DikinWalk.h"
 #include "Solvers/SMT/SMTSampler/PolySampler/HitAndRun.h"
+
+#include <chrono>
+#include <sstream>
+#include <unordered_set>
 
 namespace RegionSampling {
 namespace {
@@ -49,8 +49,7 @@ static std::string point_key(const std::vector<int64_t> &point) {
  * @return true if the step was successful (point updated), false otherwise.
  */
 static bool walk_step(const std::vector<LinearConstraint> &constraints,
-                      std::vector<int64_t> &point,
-                      Walk walk,
+                      std::vector<int64_t> &point, Walk walk,
                       std::mt19937_64 &rng) {
   switch (walk) {
   case Walk::HitAndRun:
@@ -89,9 +88,7 @@ static bool walk_step(const std::vector<LinearConstraint> &constraints,
  */
 std::vector<std::vector<int64_t>>
 sample_points(const std::vector<LinearConstraint> &constraints,
-              std::vector<int64_t> point,
-              Walk walk,
-              std::mt19937_64 &rng,
+              std::vector<int64_t> point, Walk walk, std::mt19937_64 &rng,
               const SampleConfig &config,
               const std::function<bool(const std::vector<int64_t> &)> &accept) {
   std::vector<std::vector<int64_t>> samples;
@@ -117,8 +114,7 @@ sample_points(const std::vector<LinearConstraint> &constraints,
   // Fix B30: track rejected attempts separately from total iterations so that
   // successful samples do not consume the rejection budget.
   int rejected_attempts = 0;
-  const int max_rejected =
-      config.max_samples * config.max_attempts_factor;
+  const int max_rejected = config.max_samples * config.max_attempts_factor;
 
   while (static_cast<int>(samples.size()) < config.max_samples) {
     auto now = std::chrono::high_resolution_clock::now();

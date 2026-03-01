@@ -9,11 +9,11 @@
 
 #pragma once
 
+#include "Solvers/SMT/SMTSampler/PolySampler/RegionSamplingTypes.h"
+
 #include <cstdint>
 #include <limits>
 #include <vector>
-
-#include "Solvers/SMT/SMTSampler/PolySampler/RegionSamplingTypes.h"
 
 namespace RegionSampling {
 namespace WalkUtils {
@@ -28,8 +28,9 @@ inline long double dot_ld(const std::vector<int64_t> &a,
 }
 
 /// Returns true iff every constraint is satisfied by @p point.
-inline bool satisfies_constraints(const std::vector<LinearConstraint> &constraints,
-                                  const std::vector<int64_t> &point) {
+inline bool
+satisfies_constraints(const std::vector<LinearConstraint> &constraints,
+                      const std::vector<int64_t> &point) {
   for (const auto &c : constraints) {
     if (dot_ld(c.coeffs, point) > static_cast<long double>(c.bound))
       return false;

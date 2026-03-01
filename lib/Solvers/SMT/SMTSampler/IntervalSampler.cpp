@@ -1,6 +1,7 @@
 /**
  * @file IntervalSampler.cpp
- * @brief Implementation of interval_sampler - a bounds-based approach for sampling SMT formulas
+ * @brief Implementation of interval_sampler - a bounds-based approach for
+ * sampling SMT formulas
  *
  * Fixes applied (original B-series):
  *  B10 – get_bounds() now uses lower() for the minimization result and upper()
@@ -18,8 +19,8 @@
  *  B16 – closedir() is now called on all exit paths from the directory branch.
  *  B17 – The timeout clock (init) is reset just before the sampling loop so
  *        that bound-computation time does not consume the sampling budget.
- *  B18 – m_sample_time now accumulates per-iteration durations (finish - iter_start)
- *        rather than cumulative elapsed time from the loop start.
+ *  B18 – m_sample_time now accumulates per-iteration durations (finish -
+ * iter_start) rather than cumulative elapsed time from the loop start.
  *
  * Additional fixes (new):
  *  IS-2 – get_bounds() wraps get_numeral_int64() calls in try/catch so that
@@ -33,15 +34,16 @@
 
 #include <chrono>
 #include <ctime>
-#include <dirent.h>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <sstream>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <unordered_set>
 #include <vector>
+
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 using namespace std;
 using namespace z3;
@@ -245,7 +247,8 @@ struct interval_sampler {
   }
 
   /**
-   * @brief Generates a single sample by choosing values uniformly within bounds.
+   * @brief Generates a single sample by choosing values uniformly within
+   * bounds.
    *
    * B11: uses int64_t arithmetic throughout.
    * IS-3: range is computed via unsigned arithmetic to avoid signed int64_t
@@ -267,9 +270,12 @@ struct interval_sampler {
         continue;
       }
       // IS-3: cast to uint64_t before subtraction to avoid signed overflow
-      // when lo is negative and hi is large (e.g., lo = INT64_MIN, hi = INT64_MAX).
-      uint64_t range = static_cast<uint64_t>(hi) - static_cast<uint64_t>(lo) + 1ULL;
-      // If range wrapped to 0 (lo == INT64_MIN, hi == INT64_MAX), use max range.
+      // when lo is negative and hi is large (e.g., lo = INT64_MIN, hi =
+      // INT64_MAX).
+      uint64_t range =
+          static_cast<uint64_t>(hi) - static_cast<uint64_t>(lo) + 1ULL;
+      // If range wrapped to 0 (lo == INT64_MIN, hi == INT64_MAX), use max
+      // range.
       if (range == 0)
         range = std::numeric_limits<uint64_t>::max();
       std::uniform_int_distribution<uint64_t> dist(0, range - 1);
@@ -285,7 +291,8 @@ struct interval_sampler {
   static std::string sample_key(const std::vector<int64_t> &s) {
     std::ostringstream oss;
     for (size_t i = 0; i < s.size(); ++i) {
-      if (i) oss << ',';
+      if (i)
+        oss << ',';
       oss << s[i];
     }
     return oss.str();
@@ -349,7 +356,8 @@ struct interval_sampler {
       get_bounds();
       auto bound_end = std::chrono::high_resolution_clock::now();
       solver_time +=
-          std::chrono::duration<double, std::milli>(bound_end - bound_start).count();
+          std::chrono::duration<double, std::milli>(bound_end - bound_start)
+              .count();
 
       for (unsigned i = 0; i < m_vars.size(); i++) {
         should_fix.push_back(lower_bounds[i] == upper_bounds[i]);
@@ -368,7 +376,8 @@ struct interval_sampler {
 
         auto iter_start = std::chrono::high_resolution_clock::now();
         double elapsed =
-            std::chrono::duration<double, std::milli>(iter_start - init).count();
+            std::chrono::duration<double, std::milli>(iter_start - init)
+                .count();
         if (elapsed >= max_time) {
           log_warn("Stopping: timeout");
           request_stop("timeout");
@@ -382,7 +391,8 @@ struct interval_sampler {
         // B18: accumulate per-iteration time, not cumulative elapsed time.
         auto iter_end = std::chrono::high_resolution_clock::now();
         m_sample_time +=
-            std::chrono::duration<double, std::milli>(iter_end - iter_start).count();
+            std::chrono::duration<double, std::milli>(iter_end - iter_start)
+                .count();
       }
       if (stop_requested)
         log_info("Stopped due to " + stop_reason);

@@ -14,6 +14,7 @@
  */
 
 #include "Solvers/SMT/SMTSampler/PolySampler/DikinWalk.h"
+
 #include "Solvers/SMT/SMTSampler/PolySampler/WalkUtils.h"
 
 #include <cmath>
@@ -22,8 +23,7 @@
 namespace RegionSampling {
 
 bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
-                     std::vector<int64_t> &point,
-                     std::mt19937_64 &rng) {
+                     std::vector<int64_t> &point, std::mt19937_64 &rng) {
   if (point.empty())
     return false;
 
@@ -38,8 +38,8 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
   constexpr long double kEps = 1.0e-6L;
   std::vector<long double> diag(n, 0.0L);
   for (const auto &c : constraints) {
-    long double slack = static_cast<long double>(c.bound) -
-                        WalkUtils::dot_ld(c.coeffs, point);
+    long double slack =
+        static_cast<long double>(c.bound) - WalkUtils::dot_ld(c.coeffs, point);
     if (slack < -kEps)
       return false; // Fix PS-3: genuinely outside polytope — abort step.
     if (slack < kEps)
@@ -57,7 +57,8 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
 
   // Generate direction: N(0, 1/diag[j]) per coordinate, then round.
   // Fix B24: clamp the raw Gaussian to [-3, 3] before rounding to reduce the
-  // probability of rounding to zero (which was ~39% per coordinate with N(0,1)).
+  // probability of rounding to zero (which was ~39% per coordinate with
+  // N(0,1)).
   std::normal_distribution<double> normal(0.0, 1.0);
   std::vector<int64_t> direction(n, 0);
   bool non_zero = false;
@@ -67,8 +68,10 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
       long double scale = 1.0L / std::sqrt(diag[j]);
       double raw = normal(rng);
       // Clamp to [-3, 3] so that rounding to zero is less likely.
-      if (raw > 3.0) raw = 3.0;
-      if (raw < -3.0) raw = -3.0;
+      if (raw > 3.0)
+        raw = 3.0;
+      if (raw < -3.0)
+        raw = -3.0;
       // Ensure at least ±1 when the raw value is in (-1,1) \ {0} by biasing
       // toward the nearest non-zero integer.
       long double scaled = static_cast<long double>(raw) * scale;
@@ -89,12 +92,12 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
 
   // Find chord [t_min, t_max].
   long double t_min = -std::numeric_limits<long double>::infinity();
-  long double t_max =  std::numeric_limits<long double>::infinity();
+  long double t_max = std::numeric_limits<long double>::infinity();
 
   for (const auto &c : constraints) {
     long double a_dot_x = WalkUtils::dot_ld(c.coeffs, point);
     long double a_dot_d = WalkUtils::dot_ld(c.coeffs, direction);
-    long double slack   = static_cast<long double>(c.bound) - a_dot_x;
+    long double slack = static_cast<long double>(c.bound) - a_dot_x;
 
     if (a_dot_d > 0.0L) {
       t_max = std::min(t_max, slack / a_dot_d);
@@ -108,7 +111,7 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
   if (!std::isfinite(t_min) || !std::isfinite(t_max) || t_min > t_max)
     return false;
 
-  long double t_low_ld  = std::ceil(t_min);
+  long double t_low_ld = std::ceil(t_min);
   long double t_high_ld = std::floor(t_max);
   if (t_low_ld > t_high_ld)
     return false;

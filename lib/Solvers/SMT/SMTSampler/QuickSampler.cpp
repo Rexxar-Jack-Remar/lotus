@@ -1,10 +1,11 @@
 /**
  * @file QuickSampler.cpp
- * @brief Implementation of quick_sampler - a mutation-based approach for sampling SMT formulas
+ * @brief Implementation of quick_sampler - a mutation-based approach for
+ * sampling SMT formulas
  *
  * Fixes applied (original B-series):
- *  B1  – Added a maximum epoch limit (max_epochs) to prevent the outer while(true)
- *        loop from running forever when the formula is always satisfiable.
+ *  B1  – Added a maximum epoch limit (max_epochs) to prevent the outer
+ * while(true) loop from running forever when the formula is always satisfiable.
  *  B2  – unsat_vars is now cleared at the start of each call to sample() so
  *        that variables are not permanently blacklisted across epochs.
  *  B3  – solve() now propagates stop_requested back to sample(), which breaks
@@ -33,12 +34,12 @@
  *          variable index, avoiding repeated string construction and Z3 symbol
  *          interning on every call inside tight loops.
  *  QS-3 – output() now checks the sample limit before recording a sample so
- *          that recombination candidates cannot push the count past max_samples.
- *  QS-4 – Recombination candidates are now verified against the formula via a
- *          solver check before being written to the output file.
- *  QS-5 – parse_cnf() deduplicates independent variables globally across all
- *          "c ind" lines using the same indset, preventing duplicate entries in
- *          ind[] that would cause model_string() size-mismatch errors.
+ *          that recombination candidates cannot push the count past
+ * max_samples. QS-4 – Recombination candidates are now verified against the
+ * formula via a solver check before being written to the output file. QS-5 –
+ * parse_cnf() deduplicates independent variables globally across all "c ind"
+ * lines using the same indset, preventing duplicate entries in ind[] that would
+ * cause model_string() size-mismatch errors.
  */
 
 #include "Solvers/SMT/SMTSampler/SMTSampler.h"
@@ -103,7 +104,8 @@ class quick_sampler {
 
   std::ofstream results_file;
 
-  // QS-2: cache for literal() to avoid repeated string construction / Z3 interning.
+  // QS-2: cache for literal() to avoid repeated string construction / Z3
+  // interning.
   std::unordered_map<int, z3::expr> literal_cache;
 
 public:
@@ -137,7 +139,8 @@ public:
     // B1: bounded epoch loop.
     for (int epoch = 0; epoch < kMaxEpochs && !stop_requested; ++epoch) {
       sol.push();
-      // Randomly assign independent variables as hard assumptions to seed search.
+      // Randomly assign independent variables as hard assumptions to seed
+      // search.
       for (int v : ind) {
         if (bit_dist(rng))
           sol.add(literal(v));
@@ -169,8 +172,8 @@ public:
     if (simple)
       return;
     std::cout << "Solver time: " << solver_time << '\n';
-    std::cout << "Epochs " << epochs << ", Flips " << flips
-              << ", Calls " << solver_calls << '\n';
+    std::cout << "Epochs " << epochs << ", Flips " << flips << ", Calls "
+              << solver_calls << '\n';
   }
 
   /**
@@ -281,7 +284,7 @@ public:
     std::unordered_map<std::string, int> mutations;
 
     for (unsigned i = 0; i < ind.size(); ++i) {
-      if (stop_requested)  // B3
+      if (stop_requested) // B3
         break;
       if (unsat_vars.find(i) != unsat_vars.end())
         continue;
@@ -461,8 +464,8 @@ public:
     auto it = literal_cache.find(v);
     if (it != literal_cache.end())
       return it->second;
-    z3::expr e = c.constant(c.str_symbol(std::to_string(v).c_str()),
-                            c.bool_sort());
+    z3::expr e =
+        c.constant(c.str_symbol(std::to_string(v).c_str()), c.bool_sort());
     literal_cache.emplace(v, e);
     return e;
   }

@@ -2,15 +2,20 @@
  * @file SMTOptimization.cpp
  * @brief Implementation of optimization techniques for SMT constraints
  *
- * This module provides various optimization strategies for solving minimization and
- * maximization problems over SMT formulas. These techniques extend basic SMT solving
- * to support optimization queries, which are essential for symbolic abstraction algorithms.
+ * This module provides various optimization strategies for solving minimization
+ * and maximization problems over SMT formulas. These techniques extend basic
+ * SMT solving to support optimization queries, which are essential for symbolic
+ * abstraction algorithms.
  *
  * **Optimization Strategies:**
- * - **Linear Search**: Iteratively improves bounds by adding constraints (simple but potentially slow)
- * - **Binary Search**: Uses binary search over the value space (more efficient for bounded domains)
- * - **Compact Search**: Optimizes multiple queries simultaneously using compact checking
- * - **Z3 Optimize**: Direct use of Z3's optimization engine (most efficient when supported)
+ * - **Linear Search**: Iteratively improves bounds by adding constraints
+ * (simple but potentially slow)
+ * - **Binary Search**: Uses binary search over the value space (more efficient
+ * for bounded domains)
+ * - **Compact Search**: Optimizes multiple queries simultaneously using compact
+ * checking
+ * - **Z3 Optimize**: Direct use of Z3's optimization engine (most efficient
+ * when supported)
  * - **QSMT**: Quantified SMT approach for optimization
  *
  * **Key Features:**
@@ -21,26 +26,28 @@
  * - Compact checking for batch optimization queries
  *
  * **Use Cases:**
- * These optimization capabilities are used internally by symbolic abstraction algorithms
- * (e.g., Algorithm 7: α_lin-exp) to compute bounds and extremal values. They can also
- * be used directly for optimization queries over SMT formulas.
+ * These optimization capabilities are used internally by symbolic abstraction
+ * algorithms (e.g., Algorithm 7: α_lin-exp) to compute bounds and extremal
+ * values. They can also be used directly for optimization queries over SMT
+ * formulas.
  *
  * **Performance Considerations:**
  * - Linear search: O(k) where k is the gap between initial and optimal value
  * - Binary search: O(log(max_val)) solver calls
  * - Z3 Optimize: Leverages Z3's internal optimization (typically fastest)
- * - Compact search: Reduces solver calls for multiple queries via batch checking
+ * - Compact search: Reduces solver calls for multiple queries via batch
+ * checking
  */
 
-//#include <cstdint>
+// #include <cstdint>
 #include <iostream>
 #include <limits>
-//#include <map>
+// #include <map>
 #include <string>
-//#include <unordered_map>
-#include <vector>
-
+// #include <unordered_map>
 #include "Solvers/SMT/SymAbs/SMTOptimization.h"
+
+#include <vector>
 
 using namespace std;
 
@@ -231,8 +238,7 @@ bool opt_solver::solve_with_linear_search(expr &pre_cond, expr &query,
       }
       if (m_verbose_lvl) {
         std::cout << "  max: " << m_linear_search_max << "\n";
-        std::cout << "  solver calls: " << m_linear_search_solver_call
-                  << "\n";
+        std::cout << "  solver calls: " << m_linear_search_solver_call << "\n";
       }
       return true;
     } else {
@@ -371,7 +377,8 @@ bool opt_solver::solve_with_compact_search(expr &pre_cond, expr_vector &queries,
   unsigned bvsz = queries[0].get_sort().bv_size();
   unsigned qsz = queries.size();
   int max_bv =
-      (bvsz >= 64 || get_unsigned_max(bvsz) > static_cast<uint64_t>(std::numeric_limits<int>::max()))
+      (bvsz >= 64 || get_unsigned_max(bvsz) >
+                         static_cast<uint64_t>(std::numeric_limits<int>::max()))
           ? std::numeric_limits<int>::max()
           : static_cast<int>(get_unsigned_max(bvsz));
 
@@ -563,7 +570,7 @@ bool opt_solver::solve_with_z3opt(expr &pre_cond, expr &query, expr_vector &res,
     std::cout << "SymAbs: solving with z3 opt\n";
   }
 
-  //unsigned timeout = m_timeout;
+  // unsigned timeout = m_timeout;
   context &Ctx = pre_cond.ctx();
   if (m_var_lge_zero) {
     pre_cond = pre_cond && uge(query, 0);
@@ -626,7 +633,7 @@ bool opt_solver::solve_with_z3opt(expr &pre_cond, expr_vector &query,
     std::cout << "SymAbs: solving with z3 opt\n";
   }
 
-  //unsigned timeout = m_timeout;
+  // unsigned timeout = m_timeout;
   context &Ctx = pre_cond.ctx();
   if (m_var_lge_zero) {
     for (unsigned i = 0; i < query.size(); i++) {
@@ -637,7 +644,8 @@ bool opt_solver::solve_with_z3opt(expr &pre_cond, expr_vector &query,
   params Param(Ctx);
   Param.set("priority", Ctx.str_symbol("box"));
   // set_param("smt.timeout", (int)timeout);
-  // p.set("timeout", Timeout); TODO: it seems we cannot set timeout directly to opt?
+  // p.set("timeout", Timeout); TODO: it seems we cannot set timeout directly to
+  // opt?
   optimize Opt(Ctx);
   Opt.set(Param);
   Opt.add(pre_cond);
@@ -739,7 +747,7 @@ bool opt_solver::compact_check_misc(expr &G, expr_vector &FVec,
     // is not a good idea..
     return false;
   }
-  
+
   return true;
 }
 

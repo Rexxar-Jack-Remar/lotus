@@ -6,4 +6,4 @@ add_lotus_test(sifa_dag_interpreter_test SifaDagInterpreterTest.cpp)
 add_lotus_test(sifa_verification_test SifaVerificationTest.cpp)
 
 set_tests_properties(sifa_symabs_smoke_test PROPERTIES TIMEOUT 900)
-add_lotus_test(BackendTest BackendTest.cpp)
+add_lotus_test(backend_test BackendTest.cpp)

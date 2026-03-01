@@ -1,6 +1,6 @@
 # Utility Unit Tests
 
-add_lotus_test(GraphSlicerTest GraphSlicerTest.cpp)
+add_lotus_test(graph_slicer_test GraphSlicerTest.cpp)
 
 # Other Tests
 add_lotus_test(egraph_test EGraphTest.cpp)

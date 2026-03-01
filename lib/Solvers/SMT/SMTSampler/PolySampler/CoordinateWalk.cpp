@@ -10,6 +10,7 @@
  */
 
 #include "Solvers/SMT/SMTSampler/PolySampler/CoordinateWalk.h"
+
 #include "Solvers/SMT/SMTSampler/PolySampler/WalkUtils.h"
 
 #include <cmath>
@@ -18,8 +19,7 @@
 namespace RegionSampling {
 
 bool coordinate_walk_step(const std::vector<LinearConstraint> &constraints,
-                          std::vector<int64_t> &point,
-                          std::mt19937_64 &rng) {
+                          std::vector<int64_t> &point, std::mt19937_64 &rng) {
   if (point.empty())
     return false;
 
@@ -38,13 +38,12 @@ bool coordinate_walk_step(const std::vector<LinearConstraint> &constraints,
       int sign = (sign_attempt == 0) ? 1 : -1;
 
       long double t_min = -std::numeric_limits<long double>::infinity();
-      long double t_max =  std::numeric_limits<long double>::infinity();
+      long double t_max = std::numeric_limits<long double>::infinity();
       bool feasible = true;
 
       for (const auto &c : constraints) {
         long double a_dot_x = WalkUtils::dot_ld(c.coeffs, point);
-        long double a_dot_d =
-            static_cast<long double>(c.coeffs[axis]) * sign;
+        long double a_dot_d = static_cast<long double>(c.coeffs[axis]) * sign;
         long double slack = static_cast<long double>(c.bound) - a_dot_x;
 
         if (a_dot_d > 0.0L) {
@@ -61,7 +60,7 @@ bool coordinate_walk_step(const std::vector<LinearConstraint> &constraints,
           t_min > t_max)
         continue;
 
-      long double t_low_ld  = std::ceil(t_min);
+      long double t_low_ld = std::ceil(t_min);
       long double t_high_ld = std::floor(t_max);
       if (t_low_ld > t_high_ld)
         continue;
@@ -85,8 +84,8 @@ bool coordinate_walk_step(const std::vector<LinearConstraint> &constraints,
       if (t == 0)
         continue;
 
-      __int128 next = static_cast<__int128>(point[axis]) +
-                      static_cast<__int128>(t) * sign;
+      __int128 next =
+          static_cast<__int128>(point[axis]) + static_cast<__int128>(t) * sign;
       if (next < std::numeric_limits<int64_t>::min() ||
           next > std::numeric_limits<int64_t>::max())
         continue;

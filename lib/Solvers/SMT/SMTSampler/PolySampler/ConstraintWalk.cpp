@@ -8,6 +8,7 @@
  */
 
 #include "Solvers/SMT/SMTSampler/PolySampler/ConstraintWalk.h"
+
 #include "Solvers/SMT/SMTSampler/PolySampler/WalkUtils.h"
 
 #include <cmath>
@@ -16,8 +17,7 @@
 namespace RegionSampling {
 
 bool constraint_walk_step(const std::vector<LinearConstraint> &constraints,
-                          std::vector<int64_t> &point,
-                          std::mt19937_64 &rng) {
+                          std::vector<int64_t> &point, std::mt19937_64 &rng) {
   if (point.empty() || constraints.empty())
     return false;
 
@@ -42,13 +42,13 @@ bool constraint_walk_step(const std::vector<LinearConstraint> &constraints,
       continue;
 
     long double t_min = -std::numeric_limits<long double>::infinity();
-    long double t_max =  std::numeric_limits<long double>::infinity();
+    long double t_max = std::numeric_limits<long double>::infinity();
     bool feasible = true;
 
     for (const auto &c : constraints) {
       long double a_dot_x = WalkUtils::dot_ld(c.coeffs, point);
       long double a_dot_d = WalkUtils::dot_ld(c.coeffs, direction);
-      long double slack   = static_cast<long double>(c.bound) - a_dot_x;
+      long double slack = static_cast<long double>(c.bound) - a_dot_x;
 
       if (a_dot_d > 0.0L) {
         t_max = std::min(t_max, slack / a_dot_d);
@@ -64,7 +64,7 @@ bool constraint_walk_step(const std::vector<LinearConstraint> &constraints,
         t_min > t_max)
       continue;
 
-    long double t_low_ld  = std::ceil(t_min);
+    long double t_low_ld = std::ceil(t_min);
     long double t_high_ld = std::floor(t_max);
     if (t_low_ld > t_high_ld)
       continue;
