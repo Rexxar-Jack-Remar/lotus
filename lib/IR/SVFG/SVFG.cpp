@@ -146,7 +146,8 @@ void SVFG::addNode(SVFGNode *node) {
   if (node->getId() >= nextNodeId) {
     nextNodeId = node->getId() + 1;
   }
-  if (node->isMemNode() && node->getMemReg() != 0) {
+  if (node->isMemNode() && node->getMemReg() != 0 &&
+      isMemDefSVFGNode(node->getNodeKind())) {
     setMSSADef(node->getMemReg(), node, node->getSSAVersion());
   }
 

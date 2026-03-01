@@ -190,6 +190,14 @@ inline bool isMemSVFGNode(SVFGK k) {
          k == SVFGK::RetMu || k == SVFGK::EntryChi;
 }
 
+/// @brief Check if node kind defines a memory SSA version.
+inline bool isMemDefSVFGNode(SVFGK k) {
+  return k == SVFGK::FormalIn || k == SVFGK::ActualOut || k == SVFGK::MPhi ||
+         k == SVFGK::MIntraPhi || k == SVFGK::MInterPhi ||
+         k == SVFGK::StoreChi || k == SVFGK::CallChi ||
+         k == SVFGK::EntryChi;
+}
+
 /// @brief Check if node kind is a PHI node
 inline bool isPhiSVFGNode(SVFGK k) {
   return k == SVFGK::Phi || k == SVFGK::IntraPhi || k == SVFGK::InterPhi;

@@ -607,8 +607,8 @@ private:
 
 public:
   FormalInSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Function *f,
-                   uint32_t reg, const SVFGNodeBS &pts)
-      : MSSASVFGNode(id, SVFGK::FormalIn, icfg, reg, pts), func(f) {}
+                   uint32_t reg, const SVFGNodeBS &pts, uint32_t ver = 0)
+      : MSSASVFGNode(id, SVFGK::FormalIn, icfg, reg, pts, ver), func(f) {}
 
   const llvm::Function *getFunction() const override { return func; }
 

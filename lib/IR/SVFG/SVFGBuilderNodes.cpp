@@ -343,45 +343,13 @@ void SVFGBuilder::buildAddressTakenNodes() {
             SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
 
             const Function *entryFunc = alloca->getParent()->getParent();
-
-            const ICFGNode *entryICFGNode = nullptr;
-            if (icfg) {
-              entryICFGNode = const_cast<ICFG *>(icfg)->getIntraBlockNode(
-                  &entryFunc->getEntryBlock());
-            }
-
-            // Bug #9 fix: guard against duplicate EntryChiSVFGNode for the
-            // same (memReg, entryFunc) pair. The old code had a comment
-            // "Only create once" but no actual check, so re-visiting the
-            // same alloca (e.g. via multiple uses) created multiple nodes
-            // for the same memory region, causing duplicate reaching-def
-            // edges and inflated points-to sets.
             if (objIds.empty()) {
               const uint32_t memReg = getOrCreateMemReg(alloca);
-              if (funcEntryChiMemRegs[entryFunc].insert(memReg).second) {
-                const uint32_t entryNodeId = nextNode();
-                const uint32_t entryVersion = nextVersion(entryFunc, memReg);
-                auto *entryChi =
-                    new EntryChiSVFGNode(entryNodeId, entryICFGNode, entryFunc,
-                                         memReg, SVFGNodeBS{}, entryVersion);
-                svfg->addNode(entryChi);
-                svfg->setMSSADef(memReg, entryChi, entryVersion);
-                funcEntryChi[entryFunc].push_back(entryNodeId);
-              }
+              funcEntryChiMemRegs[entryFunc].insert(memReg);
             } else {
               for (uint32_t objId : objIds) {
                 const uint32_t memReg = getOrCreateMemRegForObject(objId);
-                if (!funcEntryChiMemRegs[entryFunc].insert(memReg).second)
-                  continue; // already created for this (memReg, entryFunc)
-                const uint32_t entryNodeId = nextNode();
-                const uint32_t entryVersion = nextVersion(entryFunc, memReg);
-                SVFGNodeBS pts{objId};
-                auto *entryChi =
-                    new EntryChiSVFGNode(entryNodeId, entryICFGNode, entryFunc,
-                                         memReg, pts, entryVersion);
-                svfg->addNode(entryChi);
-                svfg->setMSSADef(memReg, entryChi, entryVersion);
-                funcEntryChi[entryFunc].push_back(entryNodeId);
+                funcEntryChiMemRegs[entryFunc].insert(memReg);
               }
             }
           }
@@ -466,38 +434,13 @@ void SVFGBuilder::buildAddressTakenNodes() {
         }
 
         for (const Function *entryFunc : entryFuncs) {
-          const ICFGNode *entryICFGNode = nullptr;
-          if (icfg) {
-            entryICFGNode = const_cast<ICFG *>(icfg)->getIntraBlockNode(
-                &entryFunc->getEntryBlock());
-          }
-          // Bug #9 fix (global site): same deduplication guard as for allocas.
           if (objIds.empty()) {
             const uint32_t memReg = getOrCreateMemReg(&gv);
-            if (funcEntryChiMemRegs[entryFunc].insert(memReg).second) {
-              const uint32_t entryNodeId = nextNode();
-              const uint32_t entryVersion = nextVersion(entryFunc, memReg);
-              auto *entryChi =
-                  new EntryChiSVFGNode(entryNodeId, entryICFGNode, entryFunc,
-                                       memReg, SVFGNodeBS{}, entryVersion);
-              svfg->addNode(entryChi);
-              svfg->setMSSADef(memReg, entryChi, entryVersion);
-              funcEntryChi[entryFunc].push_back(entryNodeId);
-            }
+            funcEntryChiMemRegs[entryFunc].insert(memReg);
           } else {
             for (uint32_t objId : objIds) {
               const uint32_t memReg = getOrCreateMemRegForObject(objId);
-              if (!funcEntryChiMemRegs[entryFunc].insert(memReg).second)
-                continue; // already created for this (memReg, entryFunc)
-              const uint32_t entryNodeId = nextNode();
-              const uint32_t entryVersion = nextVersion(entryFunc, memReg);
-              SVFGNodeBS pts{objId};
-              auto *entryChi =
-                  new EntryChiSVFGNode(entryNodeId, entryICFGNode, entryFunc,
-                                       memReg, pts, entryVersion);
-              svfg->addNode(entryChi);
-              svfg->setMSSADef(memReg, entryChi, entryVersion);
-              funcEntryChi[entryFunc].push_back(entryNodeId);
+              funcEntryChiMemRegs[entryFunc].insert(memReg);
             }
           }
         }

@@ -26,6 +26,7 @@ using namespace lotus::analysis;
 using namespace llvm;
 
 void SVFGBuilder::buildEdges() {
+  buildDirectEdges();
   buildCopyEdges();
   buildGepEdges();
   buildPhiEdges();
@@ -52,6 +53,9 @@ void SVFGBuilder::buildDirectEdges() {
 
       SVFGNode *dstNode = svfg->getNode(dstIt->second);
       if (!dstNode)
+        continue;
+
+      if (!isa<BinaryOpSVFGNode>(dstNode) && !isa<UnaryOpSVFGNode>(dstNode))
         continue;
 
       for (const Use &op : inst.operands()) {

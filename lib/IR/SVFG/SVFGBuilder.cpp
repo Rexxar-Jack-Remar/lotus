@@ -904,13 +904,12 @@ uint32_t SVFGBuilder::createMemoryPHI(uint32_t memReg, const BasicBlock *bb) {
   uint32_t version = nextVersion(F, memReg);
   SVFGNodeBS pts;
 
-  // Get points-to set from EntryChi or StoreChi nodes
-  // Try to find a def for this memory region to get points-to info
-  for (uint32_t entryChiId : funcEntryChi[F]) {
-    SVFGNode *entryChiNode = svfg->getNode(entryChiId);
-    if (auto *entryChi = dyn_cast<EntryChiSVFGNode>(entryChiNode)) {
-      if (entryChi->getMemReg() == memReg) {
-        pts = entryChi->getDefSVFVars();
+  // Get points-to set from the function entry def for this memory region.
+  for (uint32_t formalInId : funcEntryChi[F]) {
+    SVFGNode *formalInNode = svfg->getNode(formalInId);
+    if (auto *formalIn = dyn_cast<FormalInSVFGNode>(formalInNode)) {
+      if (formalIn->getMemReg() == memReg) {
+        pts = formalIn->getDefSVFVars();
         break;
       }
     }

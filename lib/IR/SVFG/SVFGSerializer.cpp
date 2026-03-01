@@ -513,7 +513,7 @@ static SVFGNode *createNodeForKind(const ParsedNode &parsed, const ParsedNodeMet
                                     parsed.memReg, parsed.pts);
   case SVFGK::FormalIn:
     return new FormalInSVFGNode(parsed.id, icfgNode, resolvedFunction, parsed.memReg,
-                                parsed.pts);
+                                parsed.pts, parsed.version);
   case SVFGK::FormalOut:
     return new FormalOutSVFGNode(parsed.id, icfgNode, resolvedFunction, parsed.memReg,
                                  parsed.pts, parsed.version);
