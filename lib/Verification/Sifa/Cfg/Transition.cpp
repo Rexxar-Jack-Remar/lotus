@@ -53,6 +53,18 @@ Transition Transition::makeReturnSummary(std::uint32_t id, const llvm::BasicBloc
   return t;
 }
 
+Transition Transition::makeEnterCall(std::uint32_t id, const llvm::BasicBlock *src,
+                                     const llvm::BasicBlock *calleeEntry,
+                                     const llvm::Function *calleeFn) {
+  Transition t;
+  t.kind = TransitionKind::EnterCall;
+  t.id = id;
+  t.source = const_cast<llvm::BasicBlock *>(src);
+  t.target = const_cast<llvm::BasicBlock *>(calleeEntry);
+  t.callee = const_cast<llvm::Function *>(calleeFn);
+  return t;
+}
+
 Transition Transition::from(const LocationMarkerTransition &m) {
   return makeMarker(m.uniqueId, m.markedTarget);
 }
@@ -102,6 +114,12 @@ std::ostream &operator<<(std::ostream &os, const Transition &t) {
     break;
   case TransitionKind::ReturnSummary:
     os << "ret@" << t.id;
+    if (t.callee) {
+      os << "(" << t.callee->getName().str() << ")";
+    }
+    break;
+  case TransitionKind::EnterCall:
+    os << "enter@" << t.id;
     if (t.callee) {
       os << "(" << t.callee->getName().str() << ")";
     }

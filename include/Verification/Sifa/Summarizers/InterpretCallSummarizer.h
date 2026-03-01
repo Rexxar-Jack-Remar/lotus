@@ -41,7 +41,7 @@ public:
                           DagInterpreter<Transition, StateT> &dagInterpreter,
                           const Domain &domain)
       : stats_(stats), M_(M), cache_(cache), dagInterpreter_(dagInterpreter),
-        domain_(domain) {}
+        domain_(&domain) {}
 
   /// Legacy constructor without domain (uses default equal() via leq).
   InterpretCallSummarizer(SifaStats &stats, const llvm::Module &M,

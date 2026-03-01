@@ -2,9 +2,10 @@
 //
 // Public API for Sifa using SymbolicAbstraction-backed abstract domains.
 //
-// This provides support for domains such as Interval and Octagon, and
-// interprocedural call semantics via SymbolicAbstraction's InstructionSemantics
-// (which queries ModuleContext function summaries).
+// This provides support for domains such as Interval and Octagon by using
+// SymbolicAbstraction as the transfer engine for LLVM CFG edges. Call handling
+// comes from SymbolicAbstraction's own transformers and ModuleContext rather
+// than Sifa's interprocedural worklist/call-summary machinery.
 //
 //===----------------------------------------------------------------------===//
 
@@ -51,4 +52,3 @@ SymAbsState analyzeSymAbsToReturn(const llvm::Module &M, const llvm::Function &F
 } // namespace lotus
 
 #endif // LOTUS_VERIFICATION_SIFA_SIFASYMABS_H
-

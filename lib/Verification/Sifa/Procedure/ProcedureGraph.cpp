@@ -111,15 +111,17 @@ ProcedureGraph::ProcedureGraph(const llvm::Function &F) {
       if (!call) continue;
       llvm::Function *callee = call->getCalledFunction();
       if (!callee) continue;
-      llvm::BasicBlock *normalSucc = nullptr;
       if (auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(call)) {
-        normalSucc = const_cast<llvm::BasicBlock *>(invoke->getNormalDest());
+        addReturnSummaryEdge(src, const_cast<llvm::BasicBlock *>(invoke->getNormalDest()), callee);
       } else {
-        // Non-invoke calls should have exactly one successor (fallthrough).
-        normalSucc = const_cast<llvm::BasicBlock *>(BB.getSingleSuccessor());
-      }
-      if (normalSucc) {
-        addReturnSummaryEdge(src, normalSucc, callee);
+        bool added = false;
+        for (const llvm::BasicBlock *SuccC : llvm::successors(&BB)) {
+          addReturnSummaryEdge(src, const_cast<llvm::BasicBlock *>(SuccC), callee);
+          added = true;
+        }
+        if (!added) {
+          addReturnSummaryEdge(src, /*dst=*/nullptr, callee);
+        }
       }
     }
   }
@@ -154,12 +156,23 @@ void ProcedureGraph::addEdge(Node src, Node dst) {
 }
 
 void ProcedureGraph::addReturnSummaryEdge(Node src, Node dst, const llvm::Function *callee) {
-  if (!src || !dst || !callee) return;
+  if (!src || !callee) return;
   // ReturnSummary transitions are not de-duplicated by (src,dst) because the
   // callee identity is part of the semantics. Each added edge gets a fresh id.
   const std::uint32_t id = static_cast<std::uint32_t>(transitions_.size());
   transitions_.push_back(
       TransitionInfo{src, const_cast<llvm::BasicBlock *>(dst), const_cast<llvm::Function *>(callee)});
   const auto label = Transition::makeReturnSummary(id, src, dst, callee);
+  graph_.addEdge(src, label, dst);
+}
+
+void ProcedureGraph::addEnterCallEdge(Node src, const llvm::Function *callee) {
+  if (!src || !callee || callee->isDeclaration() || callee->empty()) return;
+  Node dst = const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
+  graph_.addNode(dst);
+  const std::uint32_t id = static_cast<std::uint32_t>(transitions_.size());
+  transitions_.push_back(
+      TransitionInfo{src, dst, const_cast<llvm::Function *>(callee)});
+  const auto label = Transition::makeEnterCall(id, src, dst, callee);
   graph_.addEdge(src, label, dst);
 }

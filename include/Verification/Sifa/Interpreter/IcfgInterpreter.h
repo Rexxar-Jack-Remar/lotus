@@ -81,7 +81,7 @@ public:
     FixpointLoopSummarizer<Transition, StateT> loopSum(stats_, domain_, fluid_, dagInterpreter);
     dagInterpreter.setLoopSummarizer(loopSum);
 
-    InterpretCallSummarizer<StateT> callSum(stats_, M_, procResCache_, dagInterpreter);
+    InterpretCallSummarizer<StateT> callSum(stats_, M_, procResCache_, dagInterpreter, domain_);
     dagInterpreter.setCallSummarizer(&callSum);
 
     const auto &procs = cg_.relevantProceduresTopsorted();

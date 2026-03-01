@@ -21,6 +21,7 @@ namespace {
 
 const llvm::StringRef kDefaultErrorNames[] = {
     "__VERIFIER_error", "__VERIFIER_abort", "abort", "__assert_fail",
+    "llvm.trap", "llvm.debugtrap", "__builtin_trap",
 };
 
 bool isErrorName(llvm::StringRef calleeName, llvm::ArrayRef<llvm::StringRef> names) {
@@ -34,20 +35,44 @@ bool isErrorName(llvm::StringRef calleeName, llvm::ArrayRef<llvm::StringRef> nam
   return false;
 }
 
+bool isNoReturnCall(const llvm::CallBase &call) {
+  if (call.hasFnAttr(llvm::Attribute::NoReturn)) {
+    return true;
+  }
+  const llvm::Function *callee = call.getCalledFunction();
+  return callee && callee->hasFnAttribute(llvm::Attribute::NoReturn);
+}
+
+bool isErrorLocation(const llvm::BasicBlock &BB,
+                     llvm::ArrayRef<llvm::StringRef> errorNames) {
+  bool endsInUnreachable = llvm::isa<llvm::UnreachableInst>(BB.getTerminator());
+  for (const llvm::Instruction &I : BB) {
+    const auto *call = llvm::dyn_cast<llvm::CallBase>(&I);
+    if (!call) {
+      continue;
+    }
+
+    if (const llvm::Function *callee = call->getCalledFunction()) {
+      if (isErrorName(callee->getName(), errorNames)) {
+        return true;
+      }
+    }
+
+    if (endsInUnreachable && isNoReturnCall(*call)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::vector<CallGraph::LOI> gatherErrorLocationsImpl(
     const llvm::Module &M, llvm::ArrayRef<llvm::StringRef> errorNames) {
   std::vector<CallGraph::LOI> lois;
   for (const llvm::Function &F : M) {
     if (F.isDeclaration()) continue;
     for (const llvm::BasicBlock &BB : F) {
-      for (const llvm::Instruction &I : BB) {
-        auto *call = llvm::dyn_cast<llvm::CallBase>(&I);
-        if (!call || !call->getCalledFunction()) continue;
-        llvm::StringRef calleeName = call->getCalledFunction()->getName();
-        if (isErrorName(calleeName, errorNames)) {
-          lois.push_back({&F, &BB});
-          break;
-        }
+      if (isErrorLocation(BB, errorNames)) {
+        lois.push_back({&F, &BB});
       }
     }
   }

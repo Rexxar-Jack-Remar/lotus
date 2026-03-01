@@ -32,6 +32,7 @@ enum class TransitionKind : std::uint8_t {
   Edge = 0,
   Marker = 1,
   ReturnSummary = 2,
+  EnterCall = 3,
 };
 
 //--- Ultimate cfgpreprocessing/LocationMarkerTransition (aligned) -------------
@@ -67,6 +68,8 @@ struct CallReturnSummary {
 /// - Edge: regular CFG edge (source → target).
 /// - Marker: LocationMarkerTransition; target = marked location, source = null.
 /// - ReturnSummary: CallReturnSummary; synthetic call+return edge.
+/// - EnterCall: synthetic caller -> callee-entry edge used for the "enter the
+///   callee without returning" paths in interprocedural Sifa.
 ///
 /// The meaning of a ReturnSummary transition is domain/interpreter-defined.
 /// In reachability-style interpretation it can be treated as "jump to successor",
@@ -85,6 +88,9 @@ struct Transition {
   static Transition makeReturnSummary(std::uint32_t id, const llvm::BasicBlock *src,
                                       const llvm::BasicBlock *dst,
                                       const llvm::Function *calleeFn);
+  static Transition makeEnterCall(std::uint32_t id, const llvm::BasicBlock *src,
+                                  const llvm::BasicBlock *calleeEntry,
+                                  const llvm::Function *calleeFn);
 
   /// Ultimate-aligned: build from LocationMarkerTransition.
   static Transition from(const LocationMarkerTransition &m);

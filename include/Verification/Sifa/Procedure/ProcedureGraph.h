@@ -30,11 +30,11 @@ namespace sifa {
 /// The ProcedureGraph assigns a dense id to every labeled edge it creates.
 /// That id is stored in Transition::id and indexes into this vector, allowing
 /// other components (e.g. debug/logging/analysis) to recover the underlying
-/// CFG endpoints and (for ReturnSummary edges) the callee.
+/// CFG endpoints and, for synthetic interprocedural edges, the callee.
 struct TransitionInfo {
   llvm::BasicBlock *source = nullptr;
   llvm::BasicBlock *target = nullptr;
-  llvm::Function *callee = nullptr; // non-null for ReturnSummary edges
+  llvm::Function *callee = nullptr; // non-null for ReturnSummary / EnterCall
 };
 
 /// Intraprocedural procedure graph used as input to the path-expression engine.
@@ -72,6 +72,8 @@ public:
   /// Adds a ReturnSummary edge from \p src to \p dst for call to \p callee.
   /// Used for interprocedural Sifa (path expression can include call/return).
   void addReturnSummaryEdge(Node src, Node dst, const llvm::Function *callee);
+  /// Adds an EnterCall edge from \p src to the entry block of \p callee.
+  void addEnterCallEdge(Node src, const llvm::Function *callee);
 
   const Graph &graph() const;
   const std::vector<TransitionInfo> &transitions() const;

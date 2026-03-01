@@ -2,13 +2,12 @@
 
 #include "Utils/Algorithms/PathExpressions/Regex.h"
 #include "Verification/Sifa/Cfg/Transition.h"
+#include "Verification/Sifa/Procedure/ProcedureGraphBuilder.h"
 #include "Verification/Sifa/RegexDag/RegexDagUtils.h"
 #include "Verification/Sifa/Statistics/RegexStatUtils.h"
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
-
-#include <unordered_set>
 
 using namespace lotus::sifa;
 
@@ -19,7 +18,10 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
 ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F,
                                        const std::vector<llvm::BasicBlock *> &lois,
                                        const std::vector<const llvm::Function *> &enterCallsOfInterest) {
-  const ProcedureGraph pg(F);
+  ProcedureGraph pg = enterCallsOfInterest.empty()
+                          ? ProcedureGraph(F)
+                          : ProcedureGraphBuilder(stats, F).graphOfProcedure(
+                                lois, enterCallsOfInterest, /*restrictToReachable=*/true);
   auto *entry = const_cast<llvm::BasicBlock *>(&F.getEntryBlock());
 
   auto pe = createPEComputer(stats, pg.graph());
@@ -48,18 +50,14 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
 
   std::vector<RegexDagNode<Transition> *> enterCallMarkers;
   if (!enterCallsOfInterest.empty()) {
-    std::unordered_set<const llvm::Function *> enterCallsSet(enterCallsOfInterest.begin(),
-                                                            enterCallsOfInterest.end());
-    for (const auto &edgePtr : pg.graph().getEdges()) {
-      const Transition &t = edgePtr->getLabel();
-      if (t.kind != TransitionKind::ReturnSummary || !t.callee ||
-          enterCallsSet.find(t.callee) == enterCallsSet.end()) {
+    for (const llvm::Function *callee : enterCallsOfInterest) {
+      if (!callee || callee->isDeclaration() || callee->empty()) {
         continue;
       }
-      auto pathExpr = exprBetween(stats, pe, entry, edgePtr->getSource());
-      auto lit = lotus::pathexpressions::Regex<Transition>::literal(t);
-      auto concat = lotus::pathexpressions::Regex<Transition>::concat(pathExpr, lit);
-      enterCallMarkers.push_back(addToDag(stats, regexToDag, concat));
+      auto *calleeEntry = const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
+      auto expr = exprBetween(stats, pe, entry, calleeEntry);
+      auto marked = markRegex(expr, calleeEntry, nextMarkerId++);
+      enterCallMarkers.push_back(addToDag(stats, regexToDag, marked));
     }
   }
 

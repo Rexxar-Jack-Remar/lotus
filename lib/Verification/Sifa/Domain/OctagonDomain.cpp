@@ -290,6 +290,7 @@ OctagonState OctagonDomain::post(const Transition &t,
                                  const OctagonState &in) const {
   if (in.isBottom()) return in;
   if (t.kind == TransitionKind::Marker) return in;
+  if (t.kind == TransitionKind::EnterCall) return in;
   if (t.kind == TransitionKind::ReturnSummary) return in;
   if (t.kind != TransitionKind::Edge || !t.source) return in;
   if (blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source))

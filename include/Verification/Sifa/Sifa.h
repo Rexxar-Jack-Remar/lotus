@@ -25,11 +25,13 @@
 #include "Verification/Sifa/Domain/IntervalDomain.h"
 #include "Verification/Sifa/Domain/OctagonDomain.h"
 #include "Verification/Sifa/Domain/ReachabilityDomain.h"
+#include "Verification/Sifa/Fluid/NeverFluid.h"
+#include "Verification/Sifa/Interpreter/DagInterpreter.h"
 #include "Verification/Sifa/Interpreter/RegexInterpreter.h"
 #include "Verification/Sifa/Log/SifaLogger.h"
-#include "Verification/Sifa/Procedure/ProcedureGraph.h"
-
-#include "Utils/Algorithms/PathExpressions/PathExpressionComputer.h"
+#include "Verification/Sifa/Procedure/ProcedureResources.h"
+#include "Verification/Sifa/Statistics/SifaStats.h"
+#include "Verification/Sifa/Summarizers/FixpointLoopSummarizer.h"
 
 #include "llvm/ADT/Optional.h"
 
@@ -84,19 +86,17 @@ template <typename StateT>
 StateT analyzeTo(const llvm::Function &F, const llvm::BasicBlock &target, const StateT &initial,
                  const AbstractDomain<Transition, StateT> &domain,
                  SifaOptions options = {}) {
-  // Apply log level from options so callers don't need to configure the logger separately.
   SifaLogger::setLevel(options.logLevel);
 
-  const ProcedureGraph pg(F);
-  auto *entry = const_cast<llvm::BasicBlock *>(&F.getEntryBlock());
-  auto *tgt = const_cast<llvm::BasicBlock *>(&target);
+  SifaStats stats;
+  NeverFluid<StateT> fluid;
+  DagInterpreter<Transition, StateT> ipr(stats, domain, fluid);
+  FixpointLoopSummarizer<Transition, StateT> loopSum(stats, domain, fluid, ipr);
+  ipr.setLoopSummarizer(loopSum);
 
-  lotus::pathexpressions::PathExpressionComputer<ProcedureGraph::Node, Transition> comp(
-      pg.graph());
-  auto expr = comp.exprBetween(entry, tgt);
-
-  RegexInterpreter<Transition, StateT> interp(domain, options.interpreter);
-  return interp.eval(expr, initial);
+  const ProcedureResources res(stats, F, {const_cast<llvm::BasicBlock *>(&target)});
+  return ipr.interpretForSingleMarker(res.getRegexDag(),
+                                      res.getDagOverlayPathToLois(), initial);
 }
 
 /// Convenience API: procedure-level reachability via Sifa's path-expression interpreter.

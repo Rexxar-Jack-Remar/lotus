@@ -106,7 +106,8 @@ public:
   }
 
   /// Full interpretation: fill \p storage for all overlay sinks and call
-  /// \p enterCallRegistrar when hitting ReturnSummary. Used by IcfgInterpreter.
+  /// \p enterCallRegistrar when hitting EnterCall transitions. Used by
+  /// IcfgInterpreter.
   void interpretWithCalls(const Dag &dag, const IDagOverlay<L> &overlay,
                           const State &initialInput,
                           MapBasedStorage<const llvm::BasicBlock *, State> &storage,
@@ -211,9 +212,13 @@ private:
       storage.store(t.target, input);
       return input;
     }
-    if (t.kind == TransitionKind::ReturnSummary && t.callee) {
+    if (t.kind == TransitionKind::EnterCall && t.callee) {
       const State stateAfterCall = domain_.postCall(input);
       enterCallRegistrar.registerEnterCall(t.callee->getName().str(), stateAfterCall);
+      return stateAfterCall;
+    }
+    if (t.kind == TransitionKind::ReturnSummary && t.callee) {
+      const State stateAfterCall = domain_.postCall(input);
       if (callSummarizer_) {
         const State summary = callSummarizer_->summarize(t.callee->getName().str(), stateAfterCall);
         return domain_.postReturn(input, summary);

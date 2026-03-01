@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <vector>
 using namespace z3;
 
 class optutil {
@@ -67,6 +68,7 @@ private:
 
   double m_qsmt_time = 0; // seems unsound
 
+public:
   // parameters for partitioned search
   typedef enum { disjoint, shared } partition_strategy;
 
@@ -78,7 +80,6 @@ private:
     g_min_max // get min and max
   } opt_mode;
 
-public:
   opt_solver() {}
 
   ~opt_solver() {}

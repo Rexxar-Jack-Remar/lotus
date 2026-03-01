@@ -48,6 +48,11 @@ public:
       const std::vector<llvm::BasicBlock *> &locationsOfInterest,
       bool restrictToReachable = true);
 
+  ProcedureGraph graphOfProcedure(
+      const std::vector<llvm::BasicBlock *> &locationsOfInterest,
+      const std::vector<const llvm::Function *> &enterCallsOfInterest,
+      bool restrictToReachable = true);
+
 private:
   SifaStats &stats_;
   const llvm::Function &F_;

@@ -25,22 +25,8 @@ using namespace lotus::sifa;
 
 bool lotus::sifa::isReachable(const llvm::Function &F, const llvm::BasicBlock &target,
                               SifaOptions options) {
-  SifaLogger::setLevel(options.logLevel);
-
-  SifaStats stats;
   ReachabilityDomain<Transition> domain;
-  NeverFluid<bool> fluid;
-
-  // Interpreter stack (Ultimate-aligned):
-  // - build ProcedureResources: path expressions -> regex -> regex DAG + overlays
-  // - interpret the DAG with optional loop summarization
-  DagInterpreter<Transition, bool> ipr(stats, domain, fluid);
-  FixpointLoopSummarizer<Transition, bool> loopSum(stats, domain, fluid, ipr);
-  ipr.setLoopSummarizer(loopSum);
-
-  const ProcedureResources res(stats, F, {const_cast<llvm::BasicBlock *>(&target)});
-  const bool out = ipr.interpretForSingleMarker(res.getRegexDag(), res.getDagOverlayPathToLois(), /*in=*/true);
-  return out;
+  return analyzeTo<bool>(F, target, /*initial=*/true, domain, options);
 }
 
 bool lotus::sifa::isReachableInterprocedural(const llvm::Module &M, const llvm::Function *entry,
