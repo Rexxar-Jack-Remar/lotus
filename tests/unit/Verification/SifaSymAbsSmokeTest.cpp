@@ -1,5 +1,14 @@
 #include "Verification/Sifa/SifaSymAbs.h"
+#include "Verification/Sifa/Fluid/NeverFluid.h"
+#include "Verification/Sifa/Interpreter/DagInterpreter.h"
+#include "Verification/Sifa/Procedure/ProcedureResources.h"
+#include "Verification/Sifa/Statistics/SifaStats.h"
+#include "Verification/Sifa/Summarizers/FixpointLoopSummarizer.h"
+#include "Verification/Sifa/SymAbs/SifaSymAbsDomain.h"
 #include "Verification/SymbolicAbstraction/Core/AbstractValue.h"
+#include "Verification/SymbolicAbstraction/Core/FragmentDecomposition.h"
+#include "Verification/SymbolicAbstraction/Core/ModuleContext.h"
+#include "Verification/SymbolicAbstraction/Utils/Config.h"
 
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/BasicBlock.h"
@@ -20,6 +29,15 @@ static llvm::BasicBlock *getBlockByName(llvm::Function &F, const char *name) {
     }
   }
   return nullptr;
+}
+
+static symbolic_abstraction::configparser::Config makeSymAbsConfig() {
+  symbolic_abstraction::configparser::Config cfg;
+  cfg.set("ModuleContext", "Recursive", true);
+  cfg.set("Analyzer", "Variant", llvm::StringRef("UnilateralAnalyzer"));
+  cfg.set("AbstractDomain", "Variant", llvm::StringRef("Interval"));
+  cfg.set("FunctionContext", "RepresentAllInstructions", true);
+  return cfg;
 }
 
 TEST(SifaSymAbs, SmokeIntervalsOctagonAndCalls) {
@@ -184,6 +202,129 @@ TEST(SifaSymAbs, IntervalOnlyDomain) {
   auto retState = lotus::sifa::analyzeSymAbsToReturn(*M, *F, opt);
   ASSERT_NE(retState, nullptr);
   EXPECT_FALSE(retState->isBottom());
+}
+
+TEST(SifaSymAbs, HybridFallbackHandlesSplitCallTransitions) {
+  const char *ir = R"IR(
+    define i32 @callee(i32 %x) {
+    entry:
+      %y = add i32 %x, 1
+      ret i32 %y
+    }
+
+    define i32 @caller(i32 %n) {
+    entry:
+      %a = add i32 %n, 2
+      %b = call i32 @callee(i32 %a)
+      %c = add i32 %b, 3
+      br label %exit
+
+    exit:
+      ret i32 %c
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  llvm::Function *caller = M->getFunction("caller");
+  ASSERT_NE(caller, nullptr);
+
+  llvm::BasicBlock *exit = getBlockByName(*caller, "exit");
+  ASSERT_NE(exit, nullptr);
+
+  symbolic_abstraction::ModuleContext mctx(M.get(), makeSymAbsConfig());
+  auto fctx = mctx.createFunctionContext(caller);
+  auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctx);
+  symbolic_abstraction::DomainConstructor dom(fctx->getConfig());
+  auto analyzer = symbolic_abstraction::Analyzer::New(*fctx, fragDecomp, dom);
+
+  lotus::sifa::SifaStats stats;
+  lotus::sifa::SifaSymAbsDomain domain(*fctx, dom, *analyzer);
+  lotus::sifa::NeverFluid<lotus::sifa::SymAbsState> fluid;
+
+  lotus::sifa::DagInterpreter<lotus::sifa::Transition, lotus::sifa::SymAbsState> ipr(
+      stats, domain, fluid);
+  lotus::sifa::FixpointLoopSummarizer<lotus::sifa::Transition, lotus::sifa::SymAbsState>
+      loopSum(stats, domain, fluid, ipr);
+  ipr.setLoopSummarizer(loopSum);
+
+  lotus::sifa::ProcedureResources res(
+      stats, *caller, {exit}, std::vector<const llvm::Function *>{});
+  auto initial = domain.makeTopAt(&caller->getEntryBlock(), /*after=*/false);
+
+  lotus::sifa::SymAbsState out;
+  EXPECT_NO_THROW(
+      out = ipr.interpretForSingleMarker(res.getRegexDag(), res.getDagOverlayPathToLois(),
+                                         initial));
+  ASSERT_NE(out, nullptr);
+  EXPECT_FALSE(out->isBottom());
+}
+
+TEST(SifaSymAbs, HybridFallbackHandlesInvokeReturnSummary) {
+  const char *ir = R"IR(
+    declare i32 @__gxx_personality_v0()
+
+    define i32 @callee(i32 %x) {
+    entry:
+      %y = add i32 %x, 5
+      ret i32 %y
+    }
+
+    define i32 @caller(i32 %n) personality i32 ()* @__gxx_personality_v0 {
+    entry:
+      %res = invoke i32 @callee(i32 %n)
+        to label %cont unwind label %lpad
+
+    cont:
+      %sum = add i32 %res, 1
+      ret i32 %sum
+
+    lpad:
+      %ex = landingpad i32 cleanup
+      ret i32 0
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  llvm::Function *caller = M->getFunction("caller");
+  ASSERT_NE(caller, nullptr);
+
+  llvm::BasicBlock *cont = getBlockByName(*caller, "cont");
+  ASSERT_NE(cont, nullptr);
+
+  symbolic_abstraction::ModuleContext mctx(M.get(), makeSymAbsConfig());
+  auto fctx = mctx.createFunctionContext(caller);
+  auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctx);
+  symbolic_abstraction::DomainConstructor dom(fctx->getConfig());
+  auto analyzer = symbolic_abstraction::Analyzer::New(*fctx, fragDecomp, dom);
+
+  lotus::sifa::SifaStats stats;
+  lotus::sifa::SifaSymAbsDomain domain(*fctx, dom, *analyzer);
+  lotus::sifa::NeverFluid<lotus::sifa::SymAbsState> fluid;
+
+  lotus::sifa::DagInterpreter<lotus::sifa::Transition, lotus::sifa::SymAbsState> ipr(
+      stats, domain, fluid);
+  lotus::sifa::FixpointLoopSummarizer<lotus::sifa::Transition, lotus::sifa::SymAbsState>
+      loopSum(stats, domain, fluid, ipr);
+  ipr.setLoopSummarizer(loopSum);
+
+  lotus::sifa::ProcedureResources res(
+      stats, *caller, {cont}, std::vector<const llvm::Function *>{});
+  auto initial = domain.makeTopAt(&caller->getEntryBlock(), /*after=*/false);
+
+  lotus::sifa::SymAbsState out;
+  EXPECT_NO_THROW(
+      out = ipr.interpretForSingleMarker(res.getRegexDag(), res.getDagOverlayPathToLois(),
+                                         initial));
+  ASSERT_NE(out, nullptr);
+  EXPECT_FALSE(out->isBottom());
 }
 
 } // namespace

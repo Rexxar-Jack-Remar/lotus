@@ -1,10 +1,12 @@
 //===-- Verification/Sifa/SymAbs/SifaSymAbsDomain.h -----------------------===//
 //
 // Intraprocedural Sifa helper domain implemented using SymbolicAbstraction's
-// AbstractValue on whole-block CFG edges.
+// AbstractValue on whole-block CFG edges, with an SMT-based fallback for
+// segmented intra-block transfers that do not fit bestTransformer's fragment
+// shape.
 //
-// This is intentionally not a full Sifa interprocedural domain adapter:
-// call-summary and enter-call transitions are rejected by post().
+// This is intentionally not a full Sifa interprocedural domain adapter.
+// Enter-call transitions still fall back to a coarse top-at-entry state.
 //
 //===----------------------------------------------------------------------===//
 
@@ -18,6 +20,7 @@
 #include "Verification/SymbolicAbstraction/Analyzers/Analyzer.h"
 #include "Verification/SymbolicAbstraction/Core/DomainConstructor.h"
 #include "Verification/SymbolicAbstraction/Core/Fragment.h"
+#include "Verification/SymbolicAbstraction/Core/ValueMapping.h"
 
 #include <cstdint>
 #include <memory>
@@ -71,6 +74,7 @@ public:
   }
 
   State post(const Label &t, const State &in) const override;
+  State postCall(const Label &t, const State &callerState) const override;
 
   /// Create a location-appropriate bottom value (SymbolicAbstraction makeBottom).
   State makeBottomAt(llvm::BasicBlock *bb, bool after) const;
@@ -79,6 +83,10 @@ public:
   State makeTopAt(llvm::BasicBlock *bb, bool after) const;
 
 private:
+  State fallbackPost(const Label &t, const State &in) const;
+  State fallbackReturnSummary(const Label &t, const State &in) const;
+  bool supportsBestTransformer(const Label &t) const;
+
   const symbolic_abstraction::FunctionContext &fctx_;
   const symbolic_abstraction::DomainConstructor &domainCtor_;
   const symbolic_abstraction::Analyzer &analyzer_;

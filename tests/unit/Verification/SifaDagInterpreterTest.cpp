@@ -58,6 +58,19 @@ static const llvm::PHINode *getPhiByName(const llvm::BasicBlock &BB,
   return nullptr;
 }
 
+static void expectOctagonPoint(const lotus::sifa::OctagonState &state,
+                               const llvm::Value *value, int64_t point) {
+  auto it = state.varToIndex().find(value);
+  ASSERT_NE(it, state.varToIndex().end());
+  const lotus::sifa::OctagonMatrix closed = state.matrix().strongClosure();
+  auto lowerConstraint = closed.get(2 * it->second, 2 * it->second + 1);
+  auto upperConstraint = closed.get(2 * it->second + 1, 2 * it->second);
+  ASSERT_TRUE(lowerConstraint.hasValue());
+  ASSERT_TRUE(upperConstraint.hasValue());
+  EXPECT_EQ(-(*lowerConstraint) / 2, point);
+  EXPECT_EQ((*upperConstraint) / 2, point);
+}
+
 class CountingEdgeDomain final
     : public lotus::sifa::AbstractDomain<lotus::sifa::Transition, int> {
 public:
@@ -441,6 +454,67 @@ TEST(SifaDagInterpreter, NativeDomainsApplyDestinationPhisAtBlockEntry) {
   EXPECT_EQ(octagonState.varToIndex().count(phi), 1u);
 }
 
+TEST(SifaDagInterpreter, NativeDomainsRefineTakenBranchGuards) {
+  const char *ir = R"IR(
+    define i32 @f() {
+    entry:
+      %cond = icmp eq i32 0, 0
+      br i1 %cond, label %then, label %else
+
+    then:
+      br label %merge
+
+    else:
+      br label %merge
+
+    merge:
+      %x = phi i32 [ 7, %then ], [ 42, %else ]
+      ret i32 %x
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  llvm::Function *F = M->getFunction("f");
+  ASSERT_NE(F, nullptr);
+
+  const llvm::BasicBlock *merge = getBlockByName(*F, "merge");
+  const llvm::BasicBlock *thenBB = getBlockByName(*F, "then");
+  ASSERT_NE(merge, nullptr);
+  ASSERT_NE(thenBB, nullptr);
+
+  const llvm::PHINode *phi = getPhiByName(*merge, "x");
+  ASSERT_NE(phi, nullptr);
+
+  lotus::sifa::IntervalState intervalState =
+      lotus::sifa::analyzeToWithIntervalDomain(*F, *merge,
+                                               lotus::sifa::IntervalState{});
+  auto interval = intervalState.get(phi);
+  ASSERT_TRUE(interval.hasValue());
+  EXPECT_EQ(*interval, lotus::sifa::Interval::point(7));
+
+  lotus::sifa::EqState eqState =
+      lotus::sifa::analyzeToWithEqDomain(*F, *merge, lotus::sifa::EqState{});
+  EXPECT_EQ(eqState.find(phi),
+            eqState.find(phi->getIncomingValueForBlock(thenBB)));
+
+  lotus::sifa::ExplicitValueState explicitState =
+      lotus::sifa::analyzeToWithExplicitValueDomain(
+          *F, *merge, lotus::sifa::ExplicitValueState{});
+  auto explicitValue = explicitState.get(phi);
+  ASSERT_TRUE(explicitValue.hasValue());
+  ASSERT_TRUE(explicitValue->value.hasValue());
+  EXPECT_EQ(*explicitValue->value, 7);
+
+  lotus::sifa::OctagonState octagonState =
+      lotus::sifa::analyzeToWithOctagonDomain(*F, *merge,
+                                              lotus::sifa::OctagonState{});
+  expectOctagonPoint(octagonState, phi, 7);
+}
+
 TEST(SifaDagInterpreter, EnterCallReceivesPrefixStateBeforeCallSite) {
   const char *ir = R"IR(
     define void @g() {
@@ -558,6 +632,50 @@ TEST(SifaDagInterpreter, ProcedureGraphBuilderEnterCallOverloadHonorsRestrictFla
   lotus::sifa::ProcedureGraph restricted =
       builder.graphOfProcedure({}, {calleeFn}, /*restrictToReachable=*/true);
   EXPECT_EQ(restricted.getBlockEntryNode(*dead), nullptr);
+}
+
+TEST(SifaDagInterpreter, TransitionEqualityIncludesCfgIdentity) {
+  const char *ir = R"IR(
+    define void @f() {
+    entry:
+      br label %exit
+
+    exit:
+      ret void
+    }
+
+    define void @g() {
+    entry:
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  llvm::Function *f = M->getFunction("f");
+  llvm::Function *g = M->getFunction("g");
+  ASSERT_NE(f, nullptr);
+  ASSERT_NE(g, nullptr);
+
+  auto *fEntry = &f->getEntryBlock();
+  auto *gEntry = &g->getEntryBlock();
+  auto *fExit = getBlockByName(*f, "exit");
+  auto *gExit = getBlockByName(*g, "exit");
+  ASSERT_NE(fExit, nullptr);
+  ASSERT_NE(gExit, nullptr);
+
+  const lotus::sifa::Transition a =
+      lotus::sifa::Transition::makeEdge(0, fEntry, fExit);
+  const lotus::sifa::Transition b =
+      lotus::sifa::Transition::makeEdge(0, gEntry, gExit);
+
+  EXPECT_FALSE(a == b);
 }
 
 TEST(SifaDagInterpreter, AnalyzeToCanUseCustomFluidPolicy) {

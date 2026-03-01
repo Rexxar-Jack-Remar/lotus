@@ -20,7 +20,8 @@ namespace lotus {
 namespace sifa {
 
 /// Facade delegating to AbstractDomain (Ultimate SymbolicTools-aligned).
-/// Provides top(), bottom(), post(t,input), postCall(input), postReturn(caller,summary),
+/// Provides top(), bottom(), post(t,input), postCall(t,input),
+/// postReturn(t,caller,summary),
 /// isBottomLiteral(state). Optionally records SifaStats for TOOLS_POST_* keys.
 template <typename LabelT, typename StateT>
 class SymbolicTools {
@@ -47,23 +48,24 @@ public:
   }
 
   /// State after entering call (Ultimate: postCall(input, callTransition)).
-  State postCall(const State &input) const {
+  State postCall(const Label &t, const State &input) const {
     if (stats_) {
       stats_->start(SifaStats::Key::TOOLS_POST_CALL_TIME);
       stats_->increment(SifaStats::Key::TOOLS_POST_CALL_APPLICATIONS);
     }
-    State r = domain_.postCall(input);
+    State r = domain_.postCall(t, input);
     if (stats_) stats_->stop(SifaStats::Key::TOOLS_POST_CALL_TIME);
     return r;
   }
 
   /// State after return (Ultimate: postReturn(beforeCall, beforeReturn, returnTrans)).
-  State postReturn(const State &callerState, const State &calleeSummary) const {
+  State postReturn(const Label &t, const State &callerState,
+                   const State &calleeSummary) const {
     if (stats_) {
       stats_->start(SifaStats::Key::TOOLS_POST_RETURN_TIME);
       stats_->increment(SifaStats::Key::TOOLS_POST_RETURN_APPLICATIONS);
     }
-    State r = domain_.postReturn(callerState, calleeSummary);
+    State r = domain_.postReturn(t, callerState, calleeSummary);
     if (stats_) stats_->stop(SifaStats::Key::TOOLS_POST_RETURN_TIME);
     return r;
   }

@@ -12,9 +12,20 @@
 #include <cstddef>
 #include <ostream>
 #include <string>
+#include <utility>
 
 namespace lotus {
 namespace sifa {
+
+namespace {
+
+template <typename T>
+void combineHash(std::size_t &seed, const T &value) {
+  const std::size_t h = std::hash<T>()(value);
+  seed ^= h + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+}
+
+} // namespace
 
 std::string CallReturnSummary::calledProcedure() const {
   return callee ? callee->getName().str() : std::string();
@@ -125,14 +136,26 @@ llvm::Optional<CallReturnSummary> Transition::getCallReturnSummary() const {
 }
 
 bool Transition::operator==(const Transition &o) const {
-  return kind == o.kind && id == o.id && callee == o.callee;
+  return kind == o.kind && id == o.id && source == o.source &&
+         target == o.target && sourceOrdinal == o.sourceOrdinal &&
+         targetOrdinal == o.targetOrdinal && callee == o.callee &&
+         segmentStart == o.segmentStart && stopBefore == o.stopBefore &&
+         call == o.call;
 }
 
 std::size_t hashValue(const Transition &t) {
-  const std::size_t a = static_cast<std::size_t>(t.id);
-  const std::size_t b = static_cast<std::size_t>(t.kind);
-  const std::size_t c = std::hash<llvm::Function *>()(t.callee);
-  return (a << 1) ^ b ^ (c << 2);
+  std::size_t seed = 0;
+  combineHash(seed, static_cast<std::size_t>(t.kind));
+  combineHash(seed, static_cast<std::size_t>(t.id));
+  combineHash(seed, t.source);
+  combineHash(seed, t.target);
+  combineHash(seed, static_cast<std::size_t>(t.sourceOrdinal));
+  combineHash(seed, static_cast<std::size_t>(t.targetOrdinal));
+  combineHash(seed, t.callee);
+  combineHash(seed, t.segmentStart);
+  combineHash(seed, t.stopBefore);
+  combineHash(seed, t.call);
+  return seed;
 }
 
 std::ostream &operator<<(std::ostream &os, const Transition &t) {

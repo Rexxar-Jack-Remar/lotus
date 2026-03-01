@@ -23,16 +23,26 @@ namespace sifa {
 template <typename StateT>
 class SummaryCache {
 public:
+  using Entry = std::pair<StateT, StateT>;
   using IsSubsetEqFn = std::function<bool(const StateT &, const StateT &)>;
   using ComputeSummaryFn = std::function<StateT()>;
   using MeetFn = std::function<StateT(const StateT &, const StateT &)>;
 
+  std::vector<Entry> reusableEntries(const StateT &input,
+                                     IsSubsetEqFn isSubsetEq) const {
+    std::vector<Entry> supersets;
+    for (const auto &p : knownSummaries_) {
+      if (isSubsetEq(input, p.first))
+        supersets.push_back(p);
+    }
+    return supersets;
+  }
+
   std::vector<StateT> reusableSummaries(const StateT &input,
                                         IsSubsetEqFn isSubsetEq) const {
     std::vector<StateT> supersets;
-    for (const auto &p : knownSummaries_) {
-      if (isSubsetEq(input, p.first))
-        supersets.push_back(p.second);
+    for (const auto &p : reusableEntries(input, std::move(isSubsetEq))) {
+      supersets.push_back(p.second);
     }
     return supersets;
   }
@@ -58,7 +68,7 @@ public:
   }
 
 private:
-  std::vector<std::pair<StateT, StateT>> knownSummaries_;
+  std::vector<Entry> knownSummaries_;
 };
 
 } // namespace sifa

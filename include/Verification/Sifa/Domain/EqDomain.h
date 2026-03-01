@@ -17,6 +17,7 @@
 #include "Verification/Sifa/RegionMemory.h"
 
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
@@ -196,6 +197,7 @@ public:
         if (I.getType()->isVoidTy()) continue;
         out.ensure(&I);
       }
+      out = refineForTakenEdge(t, std::move(out));
       return applyIncomingPhis(t, std::move(out));
     }
     EqState out = in;
@@ -247,10 +249,232 @@ public:
         }
       }
     }
+    out = refineForTakenEdge(t, std::move(out));
     return applyIncomingPhis(t, std::move(out));
+  }
+  EqState postCall(const Transition &t, const EqState &callerState) const override {
+    if (callerState.isBottom() || !t.call || !t.callee) return callerState;
+    EqState projected;
+    const llvm::Function *caller = t.source ? t.source->getParent() : nullptr;
+    for (const llvm::Value *value : callerState.keys()) {
+      if (!isFunctionLocalValue(caller, value))
+        copyEquality(projected, callerState, value);
+    }
+    for (const auto &kv : callerState.memory()) {
+      projected.ensure(kv.second);
+      projected.setMemory(kv.first, kv.second);
+    }
+    unsigned actualIndex = 0;
+    for (const llvm::Argument &formal : t.callee->args()) {
+      if (actualIndex >= t.call->arg_size()) break;
+      projected.ensure(&formal);
+      const llvm::Value *actual = t.call->getArgOperand(actualIndex);
+      projected.ensure(callerState.find(actual));
+      projected.unite(&formal, callerState.find(actual));
+      ++actualIndex;
+    }
+    return projected;
+  }
+  EqState postReturn(const Transition &t, const EqState &callerState,
+                     const EqState &calleeSummary) const override {
+    if (callerState.isBottom() || calleeSummary.isBottom()) return bottom();
+    EqState out = callerState;
+    const llvm::Function *callee = t.callee;
+    for (const llvm::Value *value : calleeSummary.keys()) {
+      if (!isFunctionLocalValue(callee, value))
+        copyEquality(out, calleeSummary, value);
+    }
+    for (const auto &kv : calleeSummary.memory()) {
+      out.ensure(kv.second);
+      out.setMemory(kv.first, kv.second);
+    }
+    if (t.call && !t.call->getType()->isVoidTy()) {
+      out.ensure(t.call);
+      if (const llvm::Value *rep = returnedRepresentative(*callee, calleeSummary))
+        out.unite(t.call, rep);
+    }
+    return out;
   }
 
 private:
+  static bool isFunctionLocalValue(const llvm::Function *F,
+                                   const llvm::Value *V) {
+    if (!F || !V) return false;
+    if (const auto *I = llvm::dyn_cast<llvm::Instruction>(V))
+      return I->getFunction() == F;
+    if (const auto *A = llvm::dyn_cast<llvm::Argument>(V))
+      return A->getParent() == F;
+    return false;
+  }
+
+  static void copyEquality(EqState &out, const EqState &in,
+                           const llvm::Value *value) {
+    if (!value) return;
+    const llvm::Value *rep = in.find(value);
+    out.ensure(value);
+    out.ensure(rep);
+    out.unite(value, rep);
+  }
+
+  static EqState bottomState() { return EqState(true); }
+
+  static const llvm::ConstantInt *knownConstant(const EqState &state,
+                                                const llvm::Value *value) {
+    if (!value) return nullptr;
+    if (const auto *constant = llvm::dyn_cast<llvm::ConstantInt>(value))
+      return constant;
+    return llvm::dyn_cast<llvm::ConstantInt>(state.find(value));
+  }
+
+  static bool evaluatePredicate(llvm::CmpInst::Predicate predicate, int64_t lhs,
+                                int64_t rhs) {
+    switch (predicate) {
+    case llvm::CmpInst::ICMP_EQ:
+      return lhs == rhs;
+    case llvm::CmpInst::ICMP_NE:
+      return lhs != rhs;
+    case llvm::CmpInst::ICMP_SLT:
+      return lhs < rhs;
+    case llvm::CmpInst::ICMP_SLE:
+      return lhs <= rhs;
+    case llvm::CmpInst::ICMP_SGT:
+      return lhs > rhs;
+    case llvm::CmpInst::ICMP_SGE:
+      return lhs >= rhs;
+    case llvm::CmpInst::ICMP_ULT:
+      return static_cast<uint64_t>(lhs) < static_cast<uint64_t>(rhs);
+    case llvm::CmpInst::ICMP_ULE:
+      return static_cast<uint64_t>(lhs) <= static_cast<uint64_t>(rhs);
+    case llvm::CmpInst::ICMP_UGT:
+      return static_cast<uint64_t>(lhs) > static_cast<uint64_t>(rhs);
+    case llvm::CmpInst::ICMP_UGE:
+      return static_cast<uint64_t>(lhs) >= static_cast<uint64_t>(rhs);
+    default:
+      return false;
+    }
+  }
+
+  static EqState refineForPredicate(EqState out, const llvm::ICmpInst &cmp,
+                                    bool truthy) {
+    const llvm::Value *lhsValue = cmp.getOperand(0);
+    const llvm::Value *rhsValue = cmp.getOperand(1);
+    const auto *lhsConst = knownConstant(out, lhsValue);
+    const auto *rhsConst = knownConstant(out, rhsValue);
+    llvm::CmpInst::Predicate predicate = cmp.getPredicate();
+    if (!truthy) predicate = cmp.getInversePredicate();
+
+    if (lhsConst && rhsConst) {
+      if (lhsConst->getBitWidth() > 64 || rhsConst->getBitWidth() > 64)
+        return out;
+      return evaluatePredicate(predicate, lhsConst->getSExtValue(),
+                               rhsConst->getSExtValue())
+                 ? out
+                 : bottomState();
+    }
+
+    switch (predicate) {
+    case llvm::CmpInst::ICMP_EQ:
+      out.ensure(lhsValue);
+      out.ensure(rhsValue);
+      out.unite(lhsValue, rhsValue);
+      return out;
+    case llvm::CmpInst::ICMP_NE:
+      if (out.find(lhsValue) == out.find(rhsValue))
+        return bottomState();
+      return out;
+    default:
+      return out;
+    }
+  }
+
+  static EqState refineForCondition(EqState out, const llvm::Value *condition,
+                                    bool truthy) {
+    if (out.isBottom() || !condition) return out;
+    if (const auto *constant = llvm::dyn_cast<llvm::ConstantInt>(condition))
+      return (!constant->isZero() == truthy) ? out : bottomState();
+    if (const auto *cmp = llvm::dyn_cast<llvm::ICmpInst>(condition))
+      return refineForPredicate(std::move(out), *cmp, truthy);
+
+    const llvm::ConstantInt *known = knownConstant(out, condition);
+    if (known)
+      return (!known->isZero() == truthy) ? out : bottomState();
+    out.ensure(condition);
+    out.unite(condition, truthy ? llvm::ConstantInt::getTrue(condition->getContext())
+                                : llvm::ConstantInt::getFalse(condition->getContext()));
+    return out;
+  }
+
+  static EqState refineForSwitch(const Transition &t, EqState out,
+                                 const llvm::SwitchInst &switchInst) {
+    const llvm::BasicBlock *target = t.target;
+    if (!target) return out;
+    const llvm::ConstantInt *known = knownConstant(out, switchInst.getCondition());
+
+    llvm::Optional<int64_t> matchedCase;
+    bool targetIsCase = false;
+    for (const auto &caseHandle : switchInst.cases()) {
+      if (caseHandle.getCaseSuccessor() != target) continue;
+      targetIsCase = true;
+      if (caseHandle.getCaseValue()->getBitWidth() > 64) return out;
+      matchedCase = caseHandle.getCaseValue()->getSExtValue();
+      break;
+    }
+
+    if (targetIsCase) {
+      if (!matchedCase.hasValue()) return out;
+      if (known && known->getSExtValue() != *matchedCase) return bottomState();
+      out.ensure(switchInst.getCondition());
+      out.unite(switchInst.getCondition(),
+                llvm::ConstantInt::get(switchInst.getCondition()->getType(),
+                                       *matchedCase, true));
+      return out;
+    }
+
+    if (switchInst.getDefaultDest() != target) return out;
+    if (known && known->getBitWidth() <= 64) {
+      for (const auto &caseHandle : switchInst.cases()) {
+        if (caseHandle.getCaseValue()->getBitWidth() > 64) continue;
+        if (known->getSExtValue() == caseHandle.getCaseValue()->getSExtValue())
+          return bottomState();
+      }
+    }
+    return out;
+  }
+
+  static EqState refineForTakenEdge(const Transition &t, EqState out) {
+    if (out.isBottom() || !t.source) return out;
+    const llvm::Instruction *terminator = t.source->getTerminator();
+    if (const auto *branch = llvm::dyn_cast<llvm::BranchInst>(terminator)) {
+      if (!branch->isConditional()) return out;
+      if (branch->getSuccessor(0) == t.target)
+        return refineForCondition(std::move(out), branch->getCondition(), true);
+      if (branch->getSuccessor(1) == t.target)
+        return refineForCondition(std::move(out), branch->getCondition(), false);
+      return bottomState();
+    }
+    if (const auto *switchInst = llvm::dyn_cast<llvm::SwitchInst>(terminator))
+      return refineForSwitch(t, std::move(out), *switchInst);
+    return out;
+  }
+
+  static const llvm::Value *returnedRepresentative(const llvm::Function &callee,
+                                                   const EqState &summary) {
+    const llvm::Value *result = nullptr;
+    bool sawReturn = false;
+    for (const llvm::BasicBlock &bb : callee) {
+      const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator());
+      if (!ret || ret->getNumOperands() == 0) continue;
+      const llvm::Value *rep = summary.find(ret->getReturnValue());
+      if (!sawReturn) {
+        result = rep;
+        sawReturn = true;
+        continue;
+      }
+      if (result != rep) return nullptr;
+    }
+    return sawReturn ? result : nullptr;
+  }
+
   static const llvm::Value *incomingValueForPredecessor(const llvm::PHINode &phi,
                                                         const llvm::BasicBlock *pred) {
     if (!pred) return nullptr;
@@ -261,6 +485,7 @@ private:
   }
 
   static EqState applyIncomingPhis(const Transition &t, EqState out) {
+    if (out.isBottom()) return out;
     if (!t.source || !t.target || !t.landsAtBlockEntry()) return out;
     for (const llvm::Instruction &I : *t.target) {
       const auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);

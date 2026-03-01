@@ -241,6 +241,9 @@ public:
                                    const llvm::Instruction *segmentStart,
                                    const llvm::Instruction *stopBefore) const;
   OctagonState post(const Transition &t, const OctagonState &in) const override;
+  OctagonState postCall(const Transition &t, const OctagonState &callerState) const override;
+  OctagonState postReturn(const Transition &t, const OctagonState &callerState,
+                          const OctagonState &calleeSummary) const override;
 
 private:
   const BlockTransferPolicy *blockTransferPolicy_ = nullptr;

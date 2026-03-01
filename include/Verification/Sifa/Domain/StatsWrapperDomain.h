@@ -75,8 +75,15 @@ public:
   State post(const Label &t, const State &in) const override {
     return inner_.post(t, in);
   }
+  State postCall(const Label &t, const State &callerState) const override {
+    return inner_.postCall(t, callerState);
+  }
   State postCall(const State &callerState) const override {
     return inner_.postCall(callerState);
+  }
+  State postReturn(const Label &t, const State &callerState,
+                   const State &calleeSummary) const override {
+    return inner_.postReturn(t, callerState, calleeSummary);
   }
   State postReturn(const State &callerState, const State &calleeSummary) const override {
     return inner_.postReturn(callerState, calleeSummary);

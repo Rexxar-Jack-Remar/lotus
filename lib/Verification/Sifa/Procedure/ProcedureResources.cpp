@@ -13,16 +13,52 @@ using namespace lotus::sifa;
 
 ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F,
                                        const std::vector<llvm::BasicBlock *> &lois)
-    : ProcedureResources(stats, F, lois, {}) {}
+{
+  ProcedureGraphBuilder builder(stats, F);
+  ProcedureGraph pg = builder.graphOfProcedure(lois, /*restrictToReachable=*/true);
+  auto *entry = pg.getEntryNode();
+
+  auto pe = createPEComputer(stats, pg.graph());
+  auto regexToDag = createRegexToDag<Transition>(stats);
+
+  std::vector<RegexDagNode<Transition> *> loiMarkers;
+  loiMarkers.reserve(lois.size());
+
+  std::uint32_t nextMarkerId = 1;
+  for (llvm::BasicBlock *loi : lois) {
+    auto *loiNode = pg.getBlockEntryNode(*loi);
+    auto expr = exprBetween(stats, pe, entry, loiNode);
+    auto marked = markRegex(expr, loi, nextMarkerId++);
+    loiMarkers.push_back(addToDag(stats, regexToDag, marked));
+  }
+
+  auto *const exitNode = pg.getExitNode();
+  auto exprToExit = pg.graph().getNodes().count(exitNode)
+                        ? exprBetween(stats, pe, entry, exitNode)
+                        : lotus::pathexpressions::Regex<Transition>::emptySet();
+  auto markedExit = markRegex(exprToExit, /*finalLocationAsMark=*/nullptr,
+                              nextMarkerId++);
+  auto *exitMarker = addToDag(stats, regexToDag, markedExit);
+
+  regexDag_ = getDagAndReset(stats, regexToDag);
+  compress(stats, regexDag_);
+
+  for (auto *m : loiMarkers) {
+    overlayToLois_.addInclusive(m);
+    overlayToLoisAndReturn_.addInclusive(m);
+    overlayToLoisAndEnterCalls_.addInclusive(m);
+  }
+
+  overlayToReturn_.addInclusive(exitMarker);
+  overlayToLoisAndReturn_.addInclusive(exitMarker);
+}
 
 ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F,
                                        const std::vector<llvm::BasicBlock *> &lois,
                                        const std::vector<const llvm::Function *> &enterCallsOfInterest) {
   ProcedureGraphBuilder builder(stats, F);
-  ProcedureGraph pg = enterCallsOfInterest.empty()
-                          ? builder.graphOfProcedure(lois, /*restrictToReachable=*/true)
-                          : builder.graphOfProcedure(lois, enterCallsOfInterest,
-                                                     /*restrictToReachable=*/true);
+  ProcedureGraph pg = builder.graphOfProcedure(lois, enterCallsOfInterest,
+                                               /*restrictToReachable=*/true);
   auto *entry = pg.getEntryNode();
 
   auto pe = createPEComputer(stats, pg.graph());

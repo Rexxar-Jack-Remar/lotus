@@ -15,6 +15,7 @@
 #include "Verification/Sifa/Summarizers/ICallSummarizer.h"
 #include "Verification/Sifa/Summarizers/SummaryCache.h"
 
+#include <algorithm>
 #include <unordered_map>
 
 namespace lotus {
@@ -43,23 +44,28 @@ public:
       auto subsetEq = domain_.subsetEq(a, b);
       return subsetEq.isTrueForAbstraction() && domain_.equal(subsetEq.getRhs(), b);
     };
-    std::vector<StateT> supersets =
-        cache.reusableSummaries(inputAfterCall, isReusable);
+    auto supersets = cache.reusableEntries(inputAfterCall, isReusable);
     StateT result;
     if (supersets.empty()) {
       result = inner_.summarize(calleeName, inputAfterCall);
       cache.store(inputAfterCall, result);
     } else if (supersets.size() == 1 || !domain_.supportsMeet()) {
-      if (supersets.size() == 1) {
-        result = supersets.front();
+      const auto exact = std::find_if(
+          supersets.begin(), supersets.end(), [this, &inputAfterCall](const auto &entry) {
+            return domain_.equal(entry.first, inputAfterCall);
+          });
+      if (exact != supersets.end()) {
+        result = exact->second;
+      } else if (supersets.size() == 1) {
+        result = supersets.front().second;
       } else {
         result = inner_.summarize(calleeName, inputAfterCall);
         cache.store(inputAfterCall, result);
       }
     } else {
-      result = supersets.front();
+      result = supersets.front().second;
       for (std::size_t i = 1; i < supersets.size(); ++i) {
-        result = domain_.meet(result, supersets[i]);
+        result = domain_.meet(result, supersets[i].second);
       }
     }
     if (stats_)

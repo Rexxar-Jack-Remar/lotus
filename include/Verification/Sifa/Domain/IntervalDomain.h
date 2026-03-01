@@ -383,6 +383,9 @@ public:
   }
 
   State post(const Transition &t, const State &in) const override;
+  State postCall(const Transition &t, const State &callerState) const override;
+  State postReturn(const Transition &t, const State &callerState,
+                   const State &calleeSummary) const override;
 
   State postCall(const State &callerState) const override { return callerState; }
   State postReturn(const State &callerState, const State &calleeSummary) const override {

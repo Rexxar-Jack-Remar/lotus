@@ -97,10 +97,19 @@ public:
 
   /// State after entering a call (caller state projected to callee context).
   /// Used for interprocedural interpretation at ReturnSummary edges.
+  virtual State postCall(const Label &t, const State &callerState) const {
+    (void)t;
+    return postCall(callerState);
+  }
   virtual State postCall(const State &callerState) const { return callerState; }
 
   /// State after return: combine caller state with callee summary.
   /// Default: join(callerState, summary); override for precise return handling.
+  virtual State postReturn(const Label &t, const State &callerState,
+                           const State &calleeSummary) const {
+    (void)t;
+    return postReturn(callerState, calleeSummary);
+  }
   virtual State postReturn(const State &callerState, const State &calleeSummary) const {
     return join(callerState, calleeSummary);
   }

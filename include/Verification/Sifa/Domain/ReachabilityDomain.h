@@ -45,8 +45,17 @@ public:
     return in;
   }
 
+  State postCall(const Label &t, const State &callerState) const override {
+    (void)t;
+    return callerState;
+  }
   State postCall(const State &callerState) const override { return callerState; }
 
+  State postReturn(const Label &t, const State &callerState,
+                   const State &calleeSummary) const override {
+    (void)t;
+    return callerState && calleeSummary;
+  }
   State postReturn(const State &callerState, const State &calleeSummary) const override {
     return callerState && calleeSummary;
   }

@@ -29,6 +29,29 @@ static llvm::BasicBlock *getBlockByName(llvm::Function &F, const char *name) {
   return nullptr;
 }
 
+static const llvm::PHINode *getPhiByName(const llvm::BasicBlock &BB,
+                                         const char *name) {
+  for (const llvm::Instruction &I : BB) {
+    const auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);
+    if (!phi) break;
+    if (phi->getName() == name) return phi;
+  }
+  return nullptr;
+}
+
+static void expectOctagonPoint(const lotus::sifa::OctagonState &state,
+                               const llvm::Value *value, int64_t point) {
+  auto it = state.varToIndex().find(value);
+  ASSERT_NE(it, state.varToIndex().end());
+  const lotus::sifa::OctagonMatrix closed = state.matrix().strongClosure();
+  auto lowerConstraint = closed.get(2 * it->second, 2 * it->second + 1);
+  auto upperConstraint = closed.get(2 * it->second + 1, 2 * it->second);
+  ASSERT_TRUE(lowerConstraint.hasValue());
+  ASSERT_TRUE(upperConstraint.hasValue());
+  EXPECT_EQ(-(*lowerConstraint) / 2, point);
+  EXPECT_EQ((*upperConstraint) / 2, point);
+}
+
 class CountingPassthroughCallSummarizer final
     : public lotus::sifa::ICallSummarizer<bool> {
 public:
@@ -322,6 +345,71 @@ TEST(SifaInterproceduralReachability,
           *M, mainFn, *gFn, *gEntry, lotus::sifa::IntervalState{}, domain);
 
   EXPECT_FALSE(result.isBottom());
+}
+
+TEST(SifaInterproceduralReachability,
+     NativeDomainsPropagateCallArgumentsAndReturnsInterprocedurally) {
+  const char *ir = R"IR(
+    define i32 @callee(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @main() {
+    entry:
+      %res = call i32 @callee(i32 41)
+      br label %target
+
+    target:
+      %phi = phi i32 [ %res, %entry ]
+      ret i32 %phi
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  llvm::Function *mainFn = M->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  llvm::BasicBlock *target = getBlockByName(*mainFn, "target");
+  ASSERT_NE(target, nullptr);
+  const llvm::PHINode *phi = getPhiByName(*target, "phi");
+  ASSERT_NE(phi, nullptr);
+
+  lotus::sifa::IntervalDomain intervalDomain(nullptr, nullptr);
+  lotus::sifa::IntervalState intervalResult =
+      lotus::sifa::analyzeInterproceduralTo<lotus::sifa::IntervalState>(
+          *M, mainFn, *mainFn, *target, lotus::sifa::IntervalState{},
+          intervalDomain);
+  auto interval = intervalResult.get(phi);
+  ASSERT_TRUE(interval.hasValue());
+  EXPECT_EQ(*interval, lotus::sifa::Interval::point(41));
+
+  lotus::sifa::ExplicitValueDomain explicitDomain(nullptr, nullptr);
+  lotus::sifa::ExplicitValueState explicitResult =
+      lotus::sifa::analyzeInterproceduralTo<lotus::sifa::ExplicitValueState>(
+          *M, mainFn, *mainFn, *target, lotus::sifa::ExplicitValueState{},
+          explicitDomain);
+  auto explicitValue = explicitResult.get(phi);
+  ASSERT_TRUE(explicitValue.hasValue());
+  ASSERT_TRUE(explicitValue->value.hasValue());
+  EXPECT_EQ(*explicitValue->value, 41);
+
+  lotus::sifa::EqDomain eqDomain(nullptr, nullptr);
+  lotus::sifa::EqState eqResult =
+      lotus::sifa::analyzeInterproceduralTo<lotus::sifa::EqState>(
+          *M, mainFn, *mainFn, *target, lotus::sifa::EqState{}, eqDomain);
+  EXPECT_EQ(eqResult.find(phi),
+            eqResult.find(llvm::ConstantInt::get(phi->getType(), 41, true)));
+
+  lotus::sifa::OctagonDomain octagonDomain(nullptr, nullptr);
+  lotus::sifa::OctagonState octagonResult =
+      lotus::sifa::analyzeInterproceduralTo<lotus::sifa::OctagonState>(
+          *M, mainFn, *mainFn, *target, lotus::sifa::OctagonState{},
+          octagonDomain);
+  expectOctagonPoint(octagonResult, phi, 41);
 }
 
 TEST(SifaInterproceduralReachability,

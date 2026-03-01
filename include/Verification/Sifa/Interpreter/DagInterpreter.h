@@ -213,15 +213,15 @@ private:
       return input;
     }
     if (t.kind == TransitionKind::EnterCall && t.callee) {
-      const State stateAfterCall = domain_.postCall(input);
+      const State stateAfterCall = domain_.postCall(t, input);
       enterCallRegistrar.registerEnterCall(t.callee->getName().str(), stateAfterCall);
       return stateAfterCall;
     }
     if (t.kind == TransitionKind::ReturnSummary && t.callee) {
-      const State stateAfterCall = domain_.postCall(input);
+      const State stateAfterCall = domain_.postCall(t, input);
       if (callSummarizer_) {
         const State summary = callSummarizer_->summarize(t.callee->getName().str(), stateAfterCall);
-        return domain_.postReturn(input, summary);
+        return domain_.postReturn(t, input, summary);
       }
       // No summarizer (intraprocedural): optimistically propagate past the call.
       return stateAfterCall;

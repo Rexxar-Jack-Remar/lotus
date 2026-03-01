@@ -69,8 +69,16 @@ public:
   State post(const Label &t, const State &in) const override {
     return {d1_.post(t, in.first), d2_.post(t, in.second)};
   }
+  State postCall(const Label &t, const State &callerState) const override {
+    return {d1_.postCall(t, callerState.first), d2_.postCall(t, callerState.second)};
+  }
   State postCall(const State &callerState) const override {
     return {d1_.postCall(callerState.first), d2_.postCall(callerState.second)};
+  }
+  State postReturn(const Label &t, const State &callerState,
+                   const State &calleeSummary) const override {
+    return {d1_.postReturn(t, callerState.first, calleeSummary.first),
+            d2_.postReturn(t, callerState.second, calleeSummary.second)};
   }
   State postReturn(const State &callerState, const State &calleeSummary) const override {
     return {d1_.postReturn(callerState.first, calleeSummary.first),
