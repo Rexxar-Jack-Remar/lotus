@@ -424,7 +424,7 @@ TEST_F(SVFGMemorySSATest, FormalOutKeepsDistinctReturnPathDefs) {
   EXPECT_TRUE(sawStoreChi);
 }
 
-TEST_F(SVFGMemorySSATest, ExternalModRefCallKeepsMemoryDefChainAlive) {
+TEST_F(SVFGMemorySSATest, ExternalModRefCallDoesNotBacklinkActualOut) {
   const char *source = R"(
     declare void @ext(i8*)
 
@@ -459,7 +459,7 @@ TEST_F(SVFGMemorySSATest, ExternalModRefCallKeepsMemoryDefChainAlive) {
 
   SVFGEdge *fallbackEdge =
       svfg->getIntraVFGEdge(actualIn, actualOut, SVFGEdgeK::IntraIndirect);
-  EXPECT_NE(fallbackEdge, nullptr);
+  EXPECT_EQ(fallbackEdge, nullptr);
 }
 
 TEST_F(SVFGMemorySSATest,

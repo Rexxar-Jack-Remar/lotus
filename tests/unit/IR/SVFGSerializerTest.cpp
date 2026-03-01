@@ -311,4 +311,97 @@ TEST_F(SVFGSerializerTest, PreservesExplicitNullInterPhiOperand) {
   EXPECT_EQ(reloadedPhi->getOpVer(0), nullptr);
 }
 
+TEST_F(SVFGSerializerTest, RoundTripsDeferredIndirectCallState) {
+  const char *source = R"(
+    define void @target(i8* %p) {
+    entry:
+      ret void
+    }
+
+    define void @apply(void (i8*)* %fp, i8* %arg) {
+    entry:
+      call void %fp(i8* %arg)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = false;
+  cfg.resolveIndirectCalls = false;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> original(builder.build(&icfg));
+  ASSERT_NE(original, nullptr);
+
+  SmallString<256> path;
+  int fd = -1;
+  ASSERT_FALSE(
+      sys::fs::createTemporaryFile("svfg-indcall-state", "txt", fd, path));
+  ::close(fd);
+
+  ASSERT_TRUE(original->writeToFile(path.str().str()));
+
+  SVFG reloaded;
+  reloaded.setICFG(&icfg);
+  ASSERT_TRUE(reloaded.readFromFile(path.str().str()));
+  sys::fs::remove(path);
+
+  Function *applyFn = module->getFunction("apply");
+  Function *targetFn = module->getFunction("target");
+  ASSERT_NE(applyFn, nullptr);
+  ASSERT_NE(targetFn, nullptr);
+
+  const CallBase *indCall = nullptr;
+  for (const BasicBlock &bb : *applyFn) {
+    for (const Instruction &inst : bb) {
+      const auto *cb = dyn_cast<CallBase>(&inst);
+      if (cb && !cb->getCalledFunction()) {
+        indCall = cb;
+        break;
+      }
+    }
+    if (indCall)
+      break;
+  }
+  ASSERT_NE(indCall, nullptr);
+
+  const Argument *fpArg = &*applyFn->arg_begin();
+  SVFGNode *fpNode = reloaded.getValueNode(fpArg);
+  ASSERT_NE(fpNode, nullptr);
+  EXPECT_EQ(reloaded.getIndCallSites(fpNode->getId()).count(indCall), 1u);
+
+  std::vector<SVFGEdge *> newEdges;
+  EXPECT_TRUE(
+      builder.connectCallSiteToCalleeOnTheFly(&reloaded, indCall, targetFn,
+                                              newEdges));
+  EXPECT_FALSE(newEdges.empty());
+  EXPECT_NE(reloaded.getCallSiteId(indCall, targetFn), 0u);
+
+  ICFGNode *callerNode = icfg.getIntraBlockNode(indCall->getParent());
+  ICFGNode *calleeEntryNode = icfg.getIntraBlockNode(&targetFn->getEntryBlock());
+  ASSERT_NE(callerNode, nullptr);
+  ASSERT_NE(calleeEntryNode, nullptr);
+
+  bool foundCallEdge = false;
+  for (const auto *edge : callerNode->getOutEdges()) {
+    const auto *callEdge = dyn_cast<CallCFGEdge>(edge);
+    if (!callEdge)
+      continue;
+    if (callEdge->getDstNode() == calleeEntryNode &&
+        callEdge->getCallSite() == indCall) {
+      foundCallEdge = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(foundCallEdge);
+}
+
 } // namespace

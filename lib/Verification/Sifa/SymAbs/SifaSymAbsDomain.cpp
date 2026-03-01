@@ -9,8 +9,8 @@
 #include "Verification/SymbolicAbstraction/Core/ValueMapping.h"
 
 #include "llvm/IR/CFG.h"
-#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 
 #include <stdexcept>
 #include <string>
@@ -52,10 +52,10 @@ z3::expr directCallSummaryFormula(
   z3::expr rawExpr = mctx.formulaFor(callee);
   z3::expr_vector src(z3), dst(z3);
 
-  auto formalIt = callee->arg_begin();
-  auto formalEnd = callee->arg_end();
-  auto actualIt = call.arg_begin();
-  auto actualEnd = call.arg_end();
+  auto *formalIt = callee->arg_begin();
+  auto *formalEnd = callee->arg_end();
+  const auto *actualIt = call.arg_begin();
+  const auto *actualEnd = call.arg_end();
   for (; formalIt != formalEnd && actualIt != actualEnd; ++formalIt, ++actualIt) {
     llvm::Value *actual = *actualIt;
     if (actual->getType()->isMetadataTy()) {

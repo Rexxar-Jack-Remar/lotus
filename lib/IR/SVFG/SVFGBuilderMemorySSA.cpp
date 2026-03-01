@@ -77,6 +77,44 @@ static bool icfgHasCallEdgeTo(const ICFG *icfg, const CallBase *call,
   return false;
 }
 
+static void ensureICFGInterEdges(const ICFG *icfg, const CallBase *call,
+                                 const Function *callee) {
+  if (!icfg || !call || !callee || callee->isDeclaration())
+    return;
+
+  ICFG *mutableICFG = const_cast<ICFG *>(icfg);
+  ICFGNode *callerNode = mutableICFG->getIntraBlockNode(call->getParent());
+  ICFGNode *calleeEntryNode =
+      mutableICFG->getIntraBlockNode(&callee->getEntryBlock());
+  if (!callerNode || !calleeEntryNode)
+    return;
+
+  (void)mutableICFG->addCallEdge(callerNode, calleeEntryNode, call);
+
+  ICFGNode *returnSiteNode = nullptr;
+  if (const auto *invokeInst = dyn_cast<InvokeInst>(call)) {
+    returnSiteNode = mutableICFG->getIntraBlockNode(invokeInst->getNormalDest());
+  } else {
+    const BasicBlock *callBB = call->getParent();
+    if (succ_begin(callBB) != succ_end(callBB))
+      returnSiteNode = mutableICFG->getIntraBlockNode(*succ_begin(callBB));
+    else
+      returnSiteNode = callerNode;
+  }
+  if (!returnSiteNode)
+    return;
+
+  for (const BasicBlock &bb : *callee) {
+    for (const Instruction &inst : bb) {
+      if (!isa<ReturnInst>(&inst))
+        continue;
+      ICFGNode *calleeExitNode = mutableICFG->getIntraBlockNode(&bb);
+      if (calleeExitNode)
+        (void)mutableICFG->addRetEdge(calleeExitNode, returnSiteNode, call);
+    }
+  }
+}
+
 static std::vector<const Function *>
 filterCalleesByICFG(const ICFG *icfg, const CallBase *call,
                     const std::vector<const Function *> &ptaCallees) {
@@ -1530,16 +1568,6 @@ void SVFGBuilder::connectMemorySSAEdges() {
           if (muIt != callToMuNodes.end() || chiIt != callToChiNodes.end()) {
             std::unordered_map<uint32_t, SVFGNode *> actualInByReg;
             std::unordered_map<uint32_t, SVFGNode *> actualOutByReg;
-            bool hasConcreteCallee = false;
-
-            if (const Function *directCallee = call->getCalledFunction()) {
-              hasConcreteCallee = !directCallee->isDeclaration();
-            } else if (config.usePointerAnalysis && ptaSolverWrapper &&
-                       ptaSolverWrapper->solver && config.resolveIndirectCalls) {
-              std::vector<const Function *> callees = getIndirectCallTargets(call);
-              callees = filterCalleesByICFG(icfg, call, callees);
-              hasConcreteCallee = !callees.empty();
-            }
 
             if (muIt != callToMuNodes.end()) {
               for (uint32_t muId : muIt->second) {
@@ -1585,17 +1613,6 @@ void SVFGBuilder::connectMemorySSAEdges() {
                 svfg->addEdge(reachingDef, actualInNode,
                               SVFGEdgeK::IntraIndirect,
                               nullptr, edgePts);
-              }
-
-              if (actualOutNode && !hasConcreteCallee) {
-                SVFGNode *fallbackDef = actualInNode ? actualInNode : reachingDef;
-                if (fallbackDef) {
-                  SVFGNodeBS edgePts = actualOutNode->getDefSVFVars();
-                  if (edgePts.empty())
-                    edgePts.insert(getOrCreateUnknownObjId());
-                  svfg->addEdge(fallbackDef, actualOutNode,
-                                SVFGEdgeK::IntraIndirect, nullptr, edgePts);
-                }
               }
 
               if (actualOutNode)
@@ -1828,6 +1845,9 @@ void SVFGBuilder::buildCallEdges() {
         callees = filterCalleesByICFG(icfg, call, callees);
       }
 
+      for (const Function *callee : callees)
+        ensureICFGInterEdges(icfg, call, callee);
+
       for (SVFGNode *actualNode : svfg->getActualParms(call)) {
         auto *actualParm = dyn_cast<ActualParmSVFGNode>(actualNode);
         if (!actualParm)
@@ -1932,6 +1952,9 @@ void SVFGBuilder::buildReturnEdges() {
         callees = filterCalleesByICFG(icfg, call, callees);
       }
 
+      for (const Function *callee : callees)
+        ensureICFGInterEdges(icfg, call, callee);
+
       for (SVFGNode *actualNode : svfg->getActualRets(call)) {
         auto *actualRet = dyn_cast<ActualRetSVFGNode>(actualNode);
         if (!actualRet)
@@ -1989,6 +2012,8 @@ bool SVFGBuilder::connectCallSiteToCalleeOnTheFly(
     return false;
   if (callee->isDeclaration())
     return false;
+
+  ensureICFGInterEdges(icfg, cs, callee);
 
   // De-duplicate refinements per (callsite, callee).
   if (!g->markConnectedCallee(cs, callee))

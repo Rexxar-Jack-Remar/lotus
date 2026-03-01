@@ -31,6 +31,7 @@ static constexpr const char *kHeaderV2 = "SVFG-TEXT-V2";
 static constexpr const char *kHeaderV3 = "SVFG-TEXT-V3";
 static constexpr const char *kHeaderV4 = "SVFG-TEXT-V4";
 static constexpr const char *kHeaderV5 = "SVFG-TEXT-V5";
+static constexpr const char *kHeaderV6 = "SVFG-TEXT-V6";
 
 namespace {
 
@@ -56,6 +57,11 @@ struct ParsedObjectInfo {
   uint32_t flags = 0;
   uint32_t baseObjId = 0;
   Anchor valueAnchor;
+};
+
+struct ParsedIndCallSite {
+  uint32_t funPtrNodeId = 0;
+  Anchor callAnchor;
 };
 
 struct ParsedNode {
@@ -661,7 +667,7 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
   if (!file.is_open())
     return false;
 
-  file << kHeaderV5 << "\n";
+  file << kHeaderV6 << "\n";
 
   // Persist object debug labels to preserve points-to identity across reloads.
   for (const auto &pair : graph.getObjectDebugMap()) {
@@ -676,6 +682,14 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
     file << "T " << objId << " " << flags << " " << baseObjId << " ";
     writeAnchor(file, getAnchorForValue(graph.getObjectValue(objId)));
     file << "\n";
+  }
+
+  for (const auto &pair : graph.getIndCallSiteMap()) {
+    for (const CallBase *callSite : pair.second) {
+      file << "I " << pair.first << " ";
+      writeAnchor(file, getAnchorForValue(callSite));
+      file << "\n";
+    }
   }
 
   for (const auto &pair : graph) {
@@ -879,8 +893,10 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
   std::unordered_map<uint32_t, ParsedNodeMeta> nodeMeta;
   std::vector<ParsedEdge> edges;
   std::vector<ParsedObjectInfo> objects;
+  std::vector<ParsedIndCallSite> indCallSites;
   std::string line;
   bool sawV5 = false;
+  bool sawV6 = false;
   while (std::getline(file, line)) {
     if (line.empty())
       continue;
@@ -895,6 +911,11 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
     }
     if (line == kHeaderV5) {
       sawV5 = true;
+      continue;
+    }
+    if (line == kHeaderV6) {
+      sawV5 = true;
+      sawV6 = true;
       continue;
     }
     std::istringstream iss(line);
@@ -916,6 +937,13 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
       iss >> parsed.objId >> parsed.flags >> parsed.baseObjId;
       if (readAnchor(iss, parsed.valueAnchor))
         objects.push_back(std::move(parsed));
+      continue;
+    }
+    if (tag == 'I') {
+      ParsedIndCallSite parsed;
+      iss >> parsed.funPtrNodeId;
+      if (readAnchor(iss, parsed.callAnchor))
+        indCallSites.push_back(std::move(parsed));
       continue;
     }
     if (tag == 'M') {
@@ -1050,6 +1078,13 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
                         unpackObjectInfoFlags(object.flags, object.baseObjId));
     if (const Value *V = resolveValueAnchor(module, object.valueAnchor))
       graph.setObjectValue(object.objId, V);
+  }
+
+  if (sawV6) {
+    for (const ParsedIndCallSite &entry : indCallSites) {
+      if (const CallBase *cs = resolveCallAnchor(module, entry.callAnchor))
+        graph.addIndCallSite(entry.funPtrNodeId, cs);
+    }
   }
 
   for (const auto &edgeInfo : edges) {
