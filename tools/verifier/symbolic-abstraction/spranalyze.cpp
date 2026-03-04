@@ -197,7 +197,9 @@ int main(int argc, char** argv) {
     }
 
     try {
-        configparser::Config config(ConfigFile.getValue());
+        configparser::Config config =
+            ConfigFile.empty() ? configparser::Config()
+                               : configparser::Config(ConfigFile.getValue());
 
         if (!FragmentStrategy.getValue().empty())
             config.set("FragmentDecomposition", "Strategy",
@@ -225,7 +227,8 @@ int main(int argc, char** argv) {
                 domainSource = "command line";
             }
         } else {
-            DomainConstructor configDomain(config);
+            DomainConstructor configDomain = config.get<DomainConstructor>(
+                "AbstractDomain", "Variant", DomainConstructor());
             if (!configDomain.isInvalid() || allDomains.empty()) {
                 domain = configDomain;
                 domainSource =

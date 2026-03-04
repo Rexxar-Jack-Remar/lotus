@@ -17,11 +17,5 @@ if(APPLE)
   target_link_options(symbolic_abstraction PRIVATE -Wl,-all_load)
 endif()
 
-target_include_directories(symbolic_abstraction PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_BINARY_DIR}/include
-    ${Z3_INCLUDE_DIRS}
-)
-
 install(TARGETS symbolic_abstraction DESTINATION bin)
 
