@@ -47,7 +47,8 @@ protected:
 
   AEResult runAE(Module *module) {
     if (!module->getFunction("main")) {
-      FunctionType *MainTy = FunctionType::get(Type::getInt32Ty(context), false);
+      FunctionType *MainTy =
+          FunctionType::get(Type::getInt32Ty(context), false);
       Function *Main =
           Function::Create(MainTy, Function::ExternalLinkage, "main", module);
       BasicBlock *Entry = BasicBlock::Create(context, "entry", Main);
@@ -75,8 +76,8 @@ protected:
     ae.runOnModule(module);
 
     return {overflowDetectorPtr->getBugCount(), nullDetectorPtr->getBugCount(),
-            uafDetectorPtr->getBugCount(), invalidFreeDetectorPtr->getBugCount(),
-            ae.checkpoints.size()};
+            uafDetectorPtr->getBugCount(),
+            invalidFreeDetectorPtr->getBugCount(), ae.checkpoints.size()};
   }
 };
 
@@ -95,7 +96,7 @@ TEST_F(AECheckerTest, ConstantArrayBufferOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.overflow_bugs, 0u);
+  EXPECT_EQ(result.overflow_bugs, 0u);
 }
 
 // Test 2: Variable-length array (VLA) handling
@@ -195,7 +196,7 @@ TEST_F(AECheckerTest, MemcpyBufferOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.overflow_bugs, 0u);
+  EXPECT_EQ(result.overflow_bugs, 0u);
 }
 
 // Test 7: External API - strcpy buffer overflow
@@ -217,7 +218,7 @@ TEST_F(AECheckerTest, StrcpyBufferOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.overflow_bugs, 0u);
+  EXPECT_EQ(result.overflow_bugs, 0u);
 }
 
 // Test 8: Safe buffer access (no overflow)
@@ -267,7 +268,7 @@ TEST_F(AECheckerTest, ComplexControlFlow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.overflow_bugs, 0u);
+  EXPECT_EQ(result.overflow_bugs, 0u);
 }
 
 // Test 10: VLA with tracked size from abstract state
@@ -308,7 +309,7 @@ TEST_F(AECheckerTest, HeapAllocationOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.overflow_bugs, 0u);
+  EXPECT_EQ(result.overflow_bugs, 0u);
 }
 
 // Test 12: Struct field access
@@ -381,7 +382,7 @@ TEST_F(AECheckerTest, InterproceduralOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.overflow_bugs, 0u);
+  EXPECT_EQ(result.overflow_bugs, 0u);
 }
 
 // Test 15: Stub function SAFE_BUFACCESS
@@ -401,7 +402,7 @@ TEST_F(AECheckerTest, StubSafeBufAccess) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_EQ(result.pending_checkpoints, 0u);
 }
 
 // Test 16: Stub function UNSAFE_BUFACCESS
@@ -421,7 +422,7 @@ TEST_F(AECheckerTest, StubUnsafeBufAccess) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.pending_checkpoints, 0u);
+  EXPECT_EQ(result.pending_checkpoints, 0u);
 }
 
 // Test 17: AbstractState VLA size computation
@@ -488,7 +489,7 @@ TEST_F(AECheckerTest, BoundaryOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.overflow_bugs, 0u);
+  EXPECT_EQ(result.overflow_bugs, 0u);
 }
 
 // Test 20: Multiple detectors interaction
@@ -511,7 +512,7 @@ TEST_F(AECheckerTest, MultipleDetectors) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_GE(result.overflow_bugs, 0u);
+  EXPECT_EQ(result.overflow_bugs, 0u);
   EXPECT_GT(result.null_bugs, 0u);
 }
 

@@ -284,6 +284,12 @@ private:
   std::unordered_map<const llvm::Value *, uint32_t> valueToIdMap_;
   std::unordered_map<uint32_t, const llvm::Value *> idToValueMap_;
   uint32_t nextValueId_;
+  // Dedicated slot for function return summaries (must not collide with
+  // NullPtr ID 0 or regular value IDs).
+  enum : uint32_t { ReturnValueId = 0xFFFFFFFEu };
+  // Current instruction being interpreted, used by transfer helpers that need
+  // instruction-local state access.
+  const llvm::Instruction *currentInstruction_{nullptr};
   // Functions reached during the current analysis traversal from entry.
   std::unordered_set<const llvm::Function *> analyzedFunctions_;
 

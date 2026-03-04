@@ -957,6 +957,7 @@ bool AbstractInterpretation::mergeStatesFromPredecessors(
 
 bool AbstractInterpretation::handleInstruction(const llvm::Instruction *inst) {
   stat->stmtCount++;
+  this->currentInstruction_ = inst;
 
   if (abstractTrace.find(inst) == abstractTrace.end()) {
     const llvm::BasicBlock *bb = inst->getParent();
@@ -1034,7 +1035,7 @@ bool AbstractInterpretation::handleInstruction(const llvm::Instruction *inst) {
     break;
   case llvm::Instruction::Call:
   case llvm::Instruction::Invoke:
-    handleCallSite(llvm::cast<llvm::CallBase>(inst));
+    updateStateOnCall(llvm::cast<llvm::CallBase>(inst));
     break;
   case llvm::Instruction::Select:
     updateStateOnSelect(llvm::cast<llvm::SelectInst>(inst));
@@ -1081,6 +1082,8 @@ bool AbstractInterpretation::handleInstruction(const llvm::Instruction *inst) {
 
   for (auto &detector : detectors)
     detector->detect(as, inst);
+
+  this->currentInstruction_ = nullptr;
 
   return true;
 }
@@ -1513,7 +1516,7 @@ void AbstractInterpretation::updateStateOnRet(const llvm::ReturnInst *ret) {
   if (ret->getReturnValue()) {
     uint32_t retId = getValueId(ret->getReturnValue());
     AbstractState &as = abstractTrace[ret];
-    abstractTrace[ret][0] = as[retId];
+    abstractTrace[ret][AbstractInterpretation::ReturnValueId] = as[retId];
   }
 }
 
@@ -1568,18 +1571,33 @@ void AbstractInterpretation::updateStateOnRetPE(const llvm::ReturnInst *ret,
   uint32_t callId = getValueId(call);
 
   AbstractState &calleeState = abstractTrace[ret];
-  if (calleeState.inVarToValTable(retId)) {
-    callerState[0] = calleeState[retId];
-    callerState[callId] = calleeState[retId];
+  auto retIt = calleeState._varToAbsVal.find(retId);
+  if (retIt != calleeState._varToAbsVal.end()) {
+    if (callerState._varToAbsVal.count(AbstractInterpretation::ReturnValueId) ==
+        0) {
+      callerState[AbstractInterpretation::ReturnValueId] = retIt->second;
+    } else {
+      callerState[AbstractInterpretation::ReturnValueId].join_with(
+          retIt->second);
+    }
+    if (callerState._varToAbsVal.count(callId) == 0) {
+      callerState[callId] = retIt->second;
+    } else {
+      callerState[callId].join_with(retIt->second);
+    }
   }
 }
 
 void AbstractInterpretation::updateStateOnCopy(const llvm::Value *dst,
                                                const llvm::Value *src) {
+  const llvm::Instruction *curInst = getCurrentInstruction();
+  if (!curInst)
+    return;
+
   uint32_t dstId = getValueId(dst);
   uint32_t srcId = getValueId(src);
 
-  AbstractState &as = abstractTrace[getCurrentInstruction()];
+  AbstractState &as = abstractTrace[curInst];
 
   if (as.inVarToValTable(srcId)) {
     as[dstId] = as[srcId];
@@ -1589,7 +1607,7 @@ void AbstractInterpretation::updateStateOnCopy(const llvm::Value *dst,
 }
 
 const llvm::Instruction *AbstractInterpretation::getCurrentInstruction() const {
-  return nullptr;
+  return this->currentInstruction_;
 }
 
 void AbstractInterpretation::updateStateOnGep(
@@ -1782,9 +1800,9 @@ void AbstractInterpretation::updateStateOnExtractValue(
   // For abstract interpretation, we conservatively propagate the value
   // In SVF, this would be a CopyStmt from aggregate field to result
   if (as.inVarToValTable(aggId)) {
-    as[lhsId] = as[aggId];
+    updateStateOnCopy(extract, extract->getAggregateOperand());
   } else if (as.inVarToAddrsTable(aggId)) {
-    as[lhsId] = as[aggId];
+    updateStateOnCopy(extract, extract->getAggregateOperand());
   } else {
     // Conservative: set to top
     as[lhsId] = AbstractValue(IntervalValue::top());
@@ -1806,7 +1824,8 @@ void AbstractInterpretation::updateStateOnInsertValue(
   bool hasValue = false;
 
   if (as.inVarToValTable(aggId) || as.inVarToAddrsTable(aggId)) {
-    result = as[aggId];
+    updateStateOnCopy(insert, insert->getAggregateOperand());
+    result = as[lhsId];
     hasValue = true;
   }
 
@@ -1837,9 +1856,9 @@ void AbstractInterpretation::updateStateOnExtractElement(
   // For abstract interpretation, we propagate the vector's abstract value
   // In SVF, this would be a CopyStmt from vector element to result
   if (as.inVarToValTable(vecId)) {
-    as[lhsId] = as[vecId];
+    updateStateOnCopy(extract, extract->getVectorOperand());
   } else if (as.inVarToAddrsTable(vecId)) {
-    as[lhsId] = as[vecId];
+    updateStateOnCopy(extract, extract->getVectorOperand());
   } else {
     as[lhsId] = AbstractValue(IntervalValue::top());
   }
@@ -1860,7 +1879,8 @@ void AbstractInterpretation::updateStateOnInsertElement(
   bool hasValue = false;
 
   if (as.inVarToValTable(vecId) || as.inVarToAddrsTable(vecId)) {
-    result = as[vecId];
+    updateStateOnCopy(insert, insert->getOperand(0));
+    result = as[lhsId];
     hasValue = true;
   }
 
@@ -1895,7 +1915,8 @@ void AbstractInterpretation::updateStateOnShuffleVector(
   bool hasValue = false;
 
   if (as.inVarToValTable(v1Id) || as.inVarToAddrsTable(v1Id)) {
-    result = as[v1Id];
+    updateStateOnCopy(shuffle, shuffle->getOperand(0));
+    result = as[lhsId];
     hasValue = true;
   }
 
@@ -2052,6 +2073,15 @@ void AbstractInterpretation::handleFunCall(const llvm::CallBase *callNode) {
       handleFunction(callee);
     }
 
+    // Propagate all concrete return edges to caller state (RetPE equivalent).
+    for (const llvm::BasicBlock &bb : *callee) {
+      const auto *retInst =
+          llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator());
+      if (!retInst || !retInst->getReturnValue())
+        continue;
+      updateStateOnRetPE(retInst, callNode, callIt->second);
+    }
+
     AbstractValue calleeReturn;
     bool calleeHasReturn = collectCalleeReturnValue(callee, calleeReturn);
 
@@ -2093,7 +2123,8 @@ bool AbstractInterpretation::collectCalleeReturnValue(
     auto retIt = abstractTrace.find(ret);
     if (retIt == abstractTrace.end())
       continue;
-    auto rvIt = retIt->second._varToAbsVal.find(0);
+    auto rvIt =
+        retIt->second._varToAbsVal.find(AbstractInterpretation::ReturnValueId);
     if (rvIt == retIt->second._varToAbsVal.end())
       continue;
     if (!calleeHasReturn) {
