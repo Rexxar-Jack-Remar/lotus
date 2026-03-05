@@ -65,7 +65,7 @@ Passes that implement light-weight optimizations or orchestrate multiple transfo
 - **`Unrolling.cpp`**: Loop unrolling transforms for selected loops
 
 **Typical use cases**:
-- Build an analysis-friendly optimization pipeline before running CLAM, SymbolicAbstraction, or alias analyses
+- Build an analysis-friendly optimization pipeline before running CLAM, SymAbsAI, or alias analyses
 - Experiment with different levels of inlining and loop/vector transformations
 - Replace floating-point operations in environments without hardware FP support
 
@@ -114,7 +114,7 @@ These transforms are used by:
 
 - **TPA**: IR normalization prepasses (GEP expansion, constant folding, etc.)
 - **CLAM**: Numerical abstract interpretation pipeline
-- **SymbolicAbstraction**: Symbolic abstraction analysis pipeline
+- **SymAbsAI**: Symbolic abstraction analysis pipeline
 - **Alias Analysis**: Preprocessing passes for pointer analysis
 - **ModuleOptimizer**: Driver pass that orchestrates multiple transforms
 

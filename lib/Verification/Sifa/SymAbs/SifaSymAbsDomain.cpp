@@ -1,12 +1,12 @@
 #include "Verification/Sifa/SymAbs/SifaSymAbsDomain.h"
 
 #include "Verification/Sifa/Log/SifaLogger.h"
-#include "Verification/SymbolicAbstraction/Core/FragmentDecomposition.h"
-#include "Verification/SymbolicAbstraction/Core/FunctionContext.h"
-#include "Verification/SymbolicAbstraction/Core/InstructionSemantics.h"
-#include "Verification/SymbolicAbstraction/Core/MemoryModel.h"
-#include "Verification/SymbolicAbstraction/Core/ModuleContext.h"
-#include "Verification/SymbolicAbstraction/Core/ValueMapping.h"
+#include "Verification/SymAbsAI/Core/FragmentDecomposition.h"
+#include "Verification/SymAbsAI/Core/FunctionContext.h"
+#include "Verification/SymAbsAI/Core/InstructionSemantics.h"
+#include "Verification/SymAbsAI/Core/MemoryModel.h"
+#include "Verification/SymAbsAI/Core/ModuleContext.h"
+#include "Verification/SymAbsAI/Core/ValueMapping.h"
 
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
@@ -30,7 +30,7 @@ const llvm::Instruction *firstNonPhi(const llvm::BasicBlock *bb) {
 }
 
 llvm::BasicBlock *transitionTarget(const Transition &t) {
-  return t.target ? t.target : symbolic_abstraction::Fragment::EXIT;
+  return t.target ? t.target : symabs_ai::Fragment::EXIT;
 }
 
 bool isBlockEntryPoint(const Transition &t) {
@@ -38,9 +38,9 @@ bool isBlockEntryPoint(const Transition &t) {
 }
 
 z3::expr directCallSummaryFormula(
-    const symbolic_abstraction::FunctionContext &fctx,
-    const symbolic_abstraction::ValueMapping &vmBefore,
-    const symbolic_abstraction::ValueMapping &vmAfter,
+    const symabs_ai::FunctionContext &fctx,
+    const symabs_ai::ValueMapping &vmBefore,
+    const symabs_ai::ValueMapping &vmAfter,
     const llvm::CallBase &call) {
   auto &z3 = fctx.getZ3();
   llvm::Function *callee = call.getCalledFunction();
@@ -82,10 +82,10 @@ z3::expr directCallSummaryFormula(
 }
 
 z3::expr preserveUnchangedRepresentedValues(
-    const symbolic_abstraction::FunctionContext &fctx,
-    const symbolic_abstraction::Fragment &frag,
-    const symbolic_abstraction::ValueMapping &vmBefore,
-    const symbolic_abstraction::ValueMapping &vmAfter) {
+    const symabs_ai::FunctionContext &fctx,
+    const symabs_ai::Fragment &frag,
+    const symabs_ai::ValueMapping &vmBefore,
+    const symabs_ai::ValueMapping &vmAfter) {
   z3::expr preserved = fctx.getZ3().bool_val(true);
   for (const auto &value : fctx.representedValues()) {
     llvm::Value *llvmValue = value;
@@ -134,11 +134,11 @@ SymAbsState SifaSymAbsDomain::fallbackReturnSummary(const Label &t,
   }
   if (const auto *callInst = llvm::dyn_cast<llvm::CallInst>(call)) {
     auto frag =
-        symbolic_abstraction::FragmentDecomposition::FragmentForBody(fctx_, t.source);
-    symbolic_abstraction::InstructionSemantics instSem(fctx_, frag);
-    auto vmIn = symbolic_abstraction::ValueMapping::before(
+        symabs_ai::FragmentDecomposition::FragmentForBody(fctx_, t.source);
+    symabs_ai::InstructionSemantics instSem(fctx_, frag);
+    auto vmIn = symabs_ai::ValueMapping::before(
         fctx_, frag, const_cast<llvm::CallInst *>(callInst));
-    auto vmOut = symbolic_abstraction::ValueMapping::after(
+    auto vmOut = symabs_ai::ValueMapping::after(
         fctx_, frag, const_cast<llvm::CallInst *>(callInst));
 
     z3::expr phi = in->toFormula(vmIn, fctx_.getZ3()) &&
@@ -150,15 +150,15 @@ SymAbsState SifaSymAbsDomain::fallbackReturnSummary(const Label &t,
   }
 
   if (const auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(call)) {
-    std::set<symbolic_abstraction::Fragment::edge> edges;
+    std::set<symabs_ai::Fragment::edge> edges;
     edges.insert({t.source, transitionTarget(t)});
-    symbolic_abstraction::Fragment frag(fctx_, t.source, transitionTarget(t), edges,
+    symabs_ai::Fragment frag(fctx_, t.source, transitionTarget(t), edges,
                                         /*includes_end_body=*/false);
-    symbolic_abstraction::InstructionSemantics instSem(fctx_, frag);
+    symabs_ai::InstructionSemantics instSem(fctx_, frag);
 
-    auto vmIn = symbolic_abstraction::ValueMapping::before(
+    auto vmIn = symabs_ai::ValueMapping::before(
         fctx_, frag, const_cast<llvm::InvokeInst *>(invoke));
-    auto vmOut = symbolic_abstraction::ValueMapping::atEnd(fctx_, frag);
+    auto vmOut = symabs_ai::ValueMapping::atEnd(fctx_, frag);
 
     z3::expr phi = in->toFormula(vmIn, fctx_.getZ3());
     phi = phi && directCallSummaryFormula(fctx_, vmIn, vmOut, *invoke);
@@ -189,14 +189,14 @@ SymAbsState SifaSymAbsDomain::fallbackPost(const Label &t,
   }
 
   const bool crossesEdge = transitionTarget(t) != t.source;
-  std::vector<symbolic_abstraction::Fragment::edge> edges;
+  std::vector<symabs_ai::Fragment::edge> edges;
   if (crossesEdge) {
     edges.push_back({t.source, transitionTarget(t)});
   }
 
-  symbolic_abstraction::Fragment frag(
+  symabs_ai::Fragment frag(
       fctx_, t.source, transitionTarget(t), edges, /*includes_end_body=*/false);
-  symbolic_abstraction::InstructionSemantics instSem(fctx_, frag);
+  symabs_ai::InstructionSemantics instSem(fctx_, frag);
 
   const llvm::Instruction *segmentStart = t.segmentStart ? t.segmentStart
                                                          : firstNonPhi(t.source);
@@ -207,7 +207,7 @@ SymAbsState SifaSymAbsDomain::fallbackPost(const Label &t,
     return in;
   }
 
-  auto vmIn = symbolic_abstraction::ValueMapping::before(
+  auto vmIn = symabs_ai::ValueMapping::before(
       fctx_, frag, const_cast<llvm::Instruction *>(segmentStart));
   z3::expr phi = in->toFormula(vmIn, fctx_.getZ3());
 
@@ -234,9 +234,9 @@ SymAbsState SifaSymAbsDomain::fallbackPost(const Label &t,
         phi = phi && chosen;
       }
 
-      auto vmBeforeTerm = symbolic_abstraction::ValueMapping::before(
+      auto vmBeforeTerm = symabs_ai::ValueMapping::before(
           fctx_, frag, const_cast<llvm::Instruction *>(terminator));
-      auto vmOut = symbolic_abstraction::ValueMapping::atEnd(fctx_, frag);
+      auto vmOut = symabs_ai::ValueMapping::atEnd(fctx_, frag);
       phi = phi && fctx_.getMemoryModel().copy(vmBeforeTerm.memory(),
                                                vmOut.memory());
 
@@ -254,9 +254,9 @@ SymAbsState SifaSymAbsDomain::fallbackPost(const Label &t,
 
   auto out = makeBottomAt(t.source, /*after=*/true);
   auto vmOut = t.stopBefore
-                   ? symbolic_abstraction::ValueMapping::before(
+                   ? symabs_ai::ValueMapping::before(
                          fctx_, frag, const_cast<llvm::Instruction *>(t.stopBefore))
-                   : symbolic_abstraction::ValueMapping::atEnd(fctx_, frag);
+                   : symabs_ai::ValueMapping::atEnd(fctx_, frag);
   analyzer_.strongestConsequence(out.get(), phi, vmOut);
   return out;
 }
@@ -279,9 +279,9 @@ SymAbsState SifaSymAbsDomain::post(const Label &t, const State &in) const {
   llvm::BasicBlock *src = t.source;
   llvm::BasicBlock *dst = t.target;
 
-  std::set<symbolic_abstraction::Fragment::edge> edges;
+  std::set<symabs_ai::Fragment::edge> edges;
   edges.insert({src, dst});
-  const symbolic_abstraction::Fragment frag(fctx_, src, dst, edges, /*includes_end_body=*/false);
+  const symabs_ai::Fragment frag(fctx_, src, dst, edges, /*includes_end_body=*/false);
 
   // Result is a bottom at the end location (state at dst after phi nodes).
   auto out = domainCtor_.makeBottom(fctx_, dst, /*after=*/false);

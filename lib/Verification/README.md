@@ -24,7 +24,7 @@ Verification backends:
 
 - **CLAM** – Abstract interpretation with numerical domains (intervals, octagons, polyhedra)
 - **Sifa** – Symbolic interpretation with fluid abstractions
-- **SymbolicAbstraction** – Program-level abstract interpretation framework
+- **SymAbsAI** – Program-level abstract interpretation framework
 - **Seahorn** – Horn clause-based verification
 
 ### CLAM
@@ -43,9 +43,9 @@ Verification backends:
 - Multiple domains: Reachability, Interval, Octagon, Eq, ExplicitValue
 - Region-based memory model via alias analysis
 
-### SymbolicAbstraction
+### SymAbsAI
 
-[SymbolicAbstraction](SymbolicAbstraction/) is a full abstract interpretation framework:
+[SymAbsAI](SymAbsAI/) is a full abstract interpretation framework:
 - Fixpoint engine with fragment decomposition
 - Abstract domains: Intervals, Octagons, MemRange, Congruence, etc.
 - Instruction semantics to SMT conversion

@@ -6,7 +6,7 @@ This section covers the core analysis components and frameworks in Lotus.
 Lotus provides several reusable analysis utilities and frameworks under
 ``lib/Analysis``. These components complement the alias analyses and
 high-level analyzers such as CLAM (numerical abstract interpretation) and
-SymbolicAbstraction (symbolic abstraction) built in ``lib/Verification``.
+SymAbsAI (symbolic abstraction + abstract interpretation) built in ``lib/Verification``.
 
 Overview
 --------
@@ -27,8 +27,8 @@ At a glance:
   detecting Spectre vulnerabilities. See :doc:`spectre`.
 
 
-Higher-level analyzers such as CLAM and SymbolicAbstraction build on these components;
-see :doc:`../verification/clam` and :doc:`../verification/symbolic-abstraction` for
+Higher-level analyzers such as CLAM and SymAbsAI build on these components;
+see :doc:`../verification/clam` and :doc:`../verification/symabs-ai` for
 details.
 
 .. toctree::

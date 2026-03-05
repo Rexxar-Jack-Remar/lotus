@@ -5,8 +5,8 @@
 #include "Verification/Sifa/Log/SifaLogger.h"
 #include "Verification/Sifa/Sifa.h"
 #include "Verification/Sifa/SifaSymAbs.h"
-#include "Verification/SymbolicAbstraction/Core/AbstractValue.h"
-#include "Verification/SymbolicAbstraction/Utils/PrettyPrinter.h"
+#include "Verification/SymAbsAI/Core/AbstractValue.h"
+#include "Verification/SymAbsAI/Utils/PrettyPrinter.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -152,7 +152,7 @@ int main(int argc, char **argv) {
         }
         outs() << label << ": state (top/non-bottom)\n";
         outs() << "Final invariant:\n";
-        symbolic_abstraction::PrettyPrinter pp(/*output_html=*/Verbose);
+        symabs_ai::PrettyPrinter pp(/*output_html=*/Verbose);
         state->prettyPrint(pp);
         outs() << pp.str() << "\n";
         return 0;

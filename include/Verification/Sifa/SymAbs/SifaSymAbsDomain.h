@@ -1,6 +1,6 @@
 //===-- Verification/Sifa/SymAbs/SifaSymAbsDomain.h -----------------------===//
 //
-// Intraprocedural Sifa helper domain implemented using SymbolicAbstraction's
+// Intraprocedural Sifa helper domain implemented using SymAbsAI's
 // AbstractValue on whole-block CFG edges, with an SMT-based fallback for
 // segmented intra-block transfers that do not fit bestTransformer's fragment
 // shape.
@@ -17,23 +17,23 @@
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 #include "Verification/Sifa/Log/SifaLogger.h"
 
-#include "Verification/SymbolicAbstraction/Analyzers/Analyzer.h"
-#include "Verification/SymbolicAbstraction/Core/DomainConstructor.h"
-#include "Verification/SymbolicAbstraction/Core/Fragment.h"
-#include "Verification/SymbolicAbstraction/Core/ValueMapping.h"
+#include "Verification/SymAbsAI/Analyzers/Analyzer.h"
+#include "Verification/SymAbsAI/Core/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Fragment.h"
+#include "Verification/SymAbsAI/Core/ValueMapping.h"
 
 #include <cstdint>
 #include <memory>
 #include <set>
 
-namespace symbolic_abstraction {
+namespace symabs_ai {
 class FunctionContext;
-} // namespace symbolic_abstraction
+} // namespace symabs_ai
 
 namespace lotus {
 namespace sifa {
 
-using SymAbsState = std::shared_ptr<symbolic_abstraction::AbstractValue>;
+using SymAbsState = std::shared_ptr<symabs_ai::AbstractValue>;
 
 class SifaSymAbsDomain final : public AbstractDomain<Transition, SymAbsState> {
 public:
@@ -41,9 +41,9 @@ public:
   using State = SymAbsState;
 
   /// post() logs progress via SifaLogger when log level is Debug or higher.
-  SifaSymAbsDomain(const symbolic_abstraction::FunctionContext &fctx,
-                   const symbolic_abstraction::DomainConstructor &domainCtor,
-                   const symbolic_abstraction::Analyzer &analyzer)
+  SifaSymAbsDomain(const symabs_ai::FunctionContext &fctx,
+                   const symabs_ai::DomainConstructor &domainCtor,
+                   const symabs_ai::Analyzer &analyzer)
       : fctx_(fctx), domainCtor_(domainCtor), analyzer_(analyzer) {}
 
   State top() const override;
@@ -59,7 +59,7 @@ public:
   State join(const State &a, const State &b) const override {
     if (isBottom(a)) return b;
     if (isBottom(b)) return a;
-    std::unique_ptr<symbolic_abstraction::AbstractValue> out(a->clone());
+    std::unique_ptr<symabs_ai::AbstractValue> out(a->clone());
     out->joinWith(*b);
     return State(out.release());
   }
@@ -67,7 +67,7 @@ public:
   State widen(const State &previous, const State &next) const override {
     if (isBottom(previous)) return next;
     if (isBottom(next)) return previous;
-    std::unique_ptr<symbolic_abstraction::AbstractValue> out(previous->clone());
+    std::unique_ptr<symabs_ai::AbstractValue> out(previous->clone());
     out->joinWith(*next);
     out->widen();
     return State(out.release());
@@ -76,7 +76,7 @@ public:
   State post(const Label &t, const State &in) const override;
   State postCall(const Label &t, const State &callerState) const override;
 
-  /// Create a location-appropriate bottom value (SymbolicAbstraction makeBottom).
+  /// Create a location-appropriate bottom value (SymAbsAI makeBottom).
   State makeBottomAt(llvm::BasicBlock *bb, bool after) const;
 
   /// Create a location-appropriate top value.
@@ -87,9 +87,9 @@ private:
   State fallbackReturnSummary(const Label &t, const State &in) const;
   bool supportsBestTransformer(const Label &t) const;
 
-  const symbolic_abstraction::FunctionContext &fctx_;
-  const symbolic_abstraction::DomainConstructor &domainCtor_;
-  const symbolic_abstraction::Analyzer &analyzer_;
+  const symabs_ai::FunctionContext &fctx_;
+  const symabs_ai::DomainConstructor &domainCtor_;
+  const symabs_ai::Analyzer &analyzer_;
   mutable std::uint64_t postCount_ = 0;
 };
 

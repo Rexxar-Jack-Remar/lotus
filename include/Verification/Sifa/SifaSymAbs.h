@@ -1,10 +1,10 @@
 //===-- Verification/Sifa/SifaSymAbs.h ------------------------------------===//
 //
-// Public API for the SymbolicAbstraction-backed Sifa helper.
+// Public API for the SymAbsAI-backed Sifa helper.
 //
 // This is intentionally narrower than the migrated Sifa engine: it uses
-// SymbolicAbstraction as a whole-block transfer engine on a single function's
-// CFG. Calls are interpreted by SymbolicAbstraction's own transformers and
+// SymAbsAI as a whole-block transfer engine on a single function's
+// CFG. Calls are interpreted by SymAbsAI's own transformers and
 // ModuleContext, not by Sifa's interprocedural call-summary machinery.
 //
 //===----------------------------------------------------------------------===//
@@ -22,16 +22,16 @@ class Function;
 class Module;
 } // namespace llvm
 
-namespace symbolic_abstraction {
+namespace symabs_ai {
 class AbstractValue;
-} // namespace symbolic_abstraction
+} // namespace symabs_ai
 
 namespace lotus {
 namespace sifa {
 
-using SymAbsState = std::shared_ptr<symbolic_abstraction::AbstractValue>;
+using SymAbsState = std::shared_ptr<symabs_ai::AbstractValue>;
 
-/// Run the intraprocedural SymbolicAbstraction-backed helper for one function
+/// Run the intraprocedural SymAbsAI-backed helper for one function
 /// and compute the abstract state at `target` (after phi nodes in `target`).
 ///
 /// Returns a null state for bottom/unreachable.

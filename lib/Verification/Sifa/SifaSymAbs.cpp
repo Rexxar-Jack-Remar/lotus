@@ -8,12 +8,12 @@
 #include "Verification/Sifa/Summarizers/FixpointLoopSummarizer.h"
 #include "Verification/Sifa/SymAbs/SifaSymAbsDomain.h"
 
-#include "Verification/SymbolicAbstraction/Analyzers/Analyzer.h"
-#include "Verification/SymbolicAbstraction/Core/DomainConstructor.h"
-#include "Verification/SymbolicAbstraction/Core/FragmentDecomposition.h"
-#include "Verification/SymbolicAbstraction/Core/FunctionContext.h"
-#include "Verification/SymbolicAbstraction/Core/ModuleContext.h"
-#include "Verification/SymbolicAbstraction/Utils/Config.h"
+#include "Verification/SymAbsAI/Analyzers/Analyzer.h"
+#include "Verification/SymAbsAI/Core/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/FragmentDecomposition.h"
+#include "Verification/SymAbsAI/Core/FunctionContext.h"
+#include "Verification/SymAbsAI/Core/ModuleContext.h"
+#include "Verification/SymAbsAI/Utils/Config.h"
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
@@ -112,7 +112,7 @@ static void validateLlvmSubsetOrThrow(const llvm::Module &M, const llvm::Functio
         continue;
       }
 
-      // Types must be representable by SymbolicAbstraction's Z3 encoding.
+      // Types must be representable by SymAbsAI's Z3 encoding.
       if (!isSupportedSymAbsValueType(I.getType(), opt)) {
         std::string s;
         llvm::raw_string_ostream os(s);
@@ -171,9 +171,9 @@ static void validateLlvmSubsetOrThrow(const llvm::Module &M, const llvm::Functio
   throw std::invalid_argument(os.str());
 }
 
-static symbolic_abstraction::configparser::Config
+static symabs_ai::configparser::Config
 makeConfig(const SifaSymAbsOptions &opt) {
-  symbolic_abstraction::configparser::Config cfg;
+  symabs_ai::configparser::Config cfg;
   cfg.set("ModuleContext", "Recursive", opt.recursive);
   cfg.set("Analyzer", "Variant", opt.analyzerVariant);
   cfg.set("AbstractDomain", "Variant", opt.abstractDomain);
@@ -205,26 +205,26 @@ static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
     SifaLogger::setLevel(level);
   }
 
-  symbolic_abstraction::Analyzer::resetBestTransformerCallCount();
-  symbolic_abstraction::Analyzer::resetSmtSolverCallCount();
+  symabs_ai::Analyzer::resetBestTransformerCallCount();
+  symabs_ai::Analyzer::resetSmtSolverCallCount();
   auto cfg = makeConfig(options);
 
-  // SymbolicAbstraction expects non-const pointers (it mutates analysis state
+  // SymAbsAI expects non-const pointers (it mutates analysis state
   // and queries IR properties through non-const APIs).
   auto *mod = const_cast<llvm::Module *>(&M);
   auto *fun = const_cast<llvm::Function *>(&F);
 
   SifaLogger::progress("Building module context...");
   stageStart = std::chrono::steady_clock::now();
-  symbolic_abstraction::ModuleContext mctx(mod, cfg);
+  symabs_ai::ModuleContext mctx(mod, cfg);
   logProfileTiming("ModuleContext", std::chrono::steady_clock::now() - stageStart);
   SifaLogger::progress("Building function context and analyzer...");
   stageStart = std::chrono::steady_clock::now();
   auto fctxPtr = mctx.createFunctionContext(fun);
-  auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctxPtr);
+  auto fragDecomp = symabs_ai::FragmentDecomposition::For(*fctxPtr);
   const auto fcfg = fctxPtr->getConfig();
-  symbolic_abstraction::DomainConstructor dom(fcfg);
-  auto analyzer = symbolic_abstraction::Analyzer::New(*fctxPtr, fragDecomp, dom);
+  symabs_ai::DomainConstructor dom(fcfg);
+  auto analyzer = symabs_ai::Analyzer::New(*fctxPtr, fragDecomp, dom);
   logProfileTiming("FunctionContext+Analyzer",
                    std::chrono::steady_clock::now() - stageStart);
 
@@ -251,14 +251,14 @@ static SymAbsState runForTarget(const llvm::Module &M, const llvm::Function &F,
   logProfileTiming("Interpret", std::chrono::steady_clock::now() - stageStart);
   SifaLogger::progress(
       "bestTransformer calls: " +
-      std::to_string(symbolic_abstraction::Analyzer::getBestTransformerCallCount()) +
+      std::to_string(symabs_ai::Analyzer::getBestTransformerCallCount()) +
       ", SMT solver calls: " +
-      std::to_string(symbolic_abstraction::Analyzer::getSmtSolverCallCount()));
+      std::to_string(symabs_ai::Analyzer::getSmtSolverCallCount()));
   if (profileEnabled()) {
     llvm::errs() << "[sifa-profile] bestTransformer calls: "
-                 << symbolic_abstraction::Analyzer::getBestTransformerCallCount()
+                 << symabs_ai::Analyzer::getBestTransformerCallCount()
                  << ", SMT solver calls: "
-                 << symbolic_abstraction::Analyzer::getSmtSolverCallCount()
+                 << symabs_ai::Analyzer::getSmtSolverCallCount()
                  << "\n";
     logProfileTiming("Total", std::chrono::steady_clock::now() - overallStart);
   }
@@ -284,8 +284,8 @@ static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
     SifaLogger::setLevel(level);
   }
 
-  symbolic_abstraction::Analyzer::resetBestTransformerCallCount();
-  symbolic_abstraction::Analyzer::resetSmtSolverCallCount();
+  symabs_ai::Analyzer::resetBestTransformerCallCount();
+  symabs_ai::Analyzer::resetSmtSolverCallCount();
   auto cfg = makeConfig(options);
 
   auto *mod = const_cast<llvm::Module *>(&M);
@@ -293,15 +293,15 @@ static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
 
   SifaLogger::progress("Building module context...");
   stageStart = std::chrono::steady_clock::now();
-  symbolic_abstraction::ModuleContext mctx(mod, cfg);
+  symabs_ai::ModuleContext mctx(mod, cfg);
   logProfileTiming("ModuleContext", std::chrono::steady_clock::now() - stageStart);
   SifaLogger::progress("Building function context and analyzer...");
   stageStart = std::chrono::steady_clock::now();
   auto fctxPtr = mctx.createFunctionContext(fun);
-  auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctxPtr);
+  auto fragDecomp = symabs_ai::FragmentDecomposition::For(*fctxPtr);
   const auto fcfg = fctxPtr->getConfig();
-  symbolic_abstraction::DomainConstructor dom(fcfg);
-  auto analyzer = symbolic_abstraction::Analyzer::New(*fctxPtr, fragDecomp, dom);
+  symabs_ai::DomainConstructor dom(fcfg);
+  auto analyzer = symabs_ai::Analyzer::New(*fctxPtr, fragDecomp, dom);
   logProfileTiming("FunctionContext+Analyzer",
                    std::chrono::steady_clock::now() - stageStart);
 
@@ -316,7 +316,7 @@ static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
   SifaLogger::progress("Building procedure resources (regex DAG)...");
   stageStart = std::chrono::steady_clock::now();
   // No LOIs needed; ProcedureResources always adds an EXIT marker. This path
-  // remains intraprocedural: call semantics come from SymbolicAbstraction's
+  // remains intraprocedural: call semantics come from SymAbsAI's
   // own transformers rather than Sifa's call-summary engine.
   ProcedureResources res(stats, *fun, std::vector<llvm::BasicBlock *>{});
   logProfileTiming("ProcedureResources",
@@ -330,14 +330,14 @@ static SymAbsState runForReturn(const llvm::Module &M, const llvm::Function &F,
   logProfileTiming("Interpret", std::chrono::steady_clock::now() - stageStart);
   SifaLogger::progress(
       "bestTransformer calls: " +
-      std::to_string(symbolic_abstraction::Analyzer::getBestTransformerCallCount()) +
+      std::to_string(symabs_ai::Analyzer::getBestTransformerCallCount()) +
       ", SMT solver calls: " +
-      std::to_string(symbolic_abstraction::Analyzer::getSmtSolverCallCount()));
+      std::to_string(symabs_ai::Analyzer::getSmtSolverCallCount()));
   if (profileEnabled()) {
     llvm::errs() << "[sifa-profile] bestTransformer calls: "
-                 << symbolic_abstraction::Analyzer::getBestTransformerCallCount()
+                 << symabs_ai::Analyzer::getBestTransformerCallCount()
                  << ", SMT solver calls: "
-                 << symbolic_abstraction::Analyzer::getSmtSolverCallCount()
+                 << symabs_ai::Analyzer::getSmtSolverCallCount()
                  << "\n";
     logProfileTiming("Total", std::chrono::steady_clock::now() - overallStart);
   }

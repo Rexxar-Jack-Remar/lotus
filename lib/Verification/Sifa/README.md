@@ -56,13 +56,13 @@ switch (options.domainKind) {
 
 ## Bitcode Support (C/C++ roadmap)
 
-The primary “real LLVM IR” entry point is `lotus::sifa::analyzeSymAbs*()` (see `include/Verification/Sifa/SifaSymAbs.h`), which runs Sifa with a SymbolicAbstraction-backed abstract domain.
+The primary “real LLVM IR” entry point is `lotus::sifa::analyzeSymAbs*()` (see `include/Verification/Sifa/SifaSymAbs.h`), which runs Sifa with a SymAbsAI-backed abstract domain.
 
 ### Supported subset (strict mode)
 
 By default, `SifaSymAbsOptions::validateLlvmSubset` is enabled. The current *well-defined* supported subset is:
 
-- LLVM IR compatible with lotus’ LLVM build (SymbolicAbstraction currently targets LLVM 14).
+- LLVM IR compatible with lotus’ LLVM build (SymAbsAI currently targets LLVM 14).
 - Scalar integers (`i1`…`i64`) and pointers.
 - Control-flow: `br`, `switch`, `phi`, `select`, `ret`.
 - Scalar ops: integer arith/bitwise (`add/sub/mul/div/rem/shifts/and/or/xor`), casts (`zext/sext/trunc`, `ptrtoint/inttoptr/bitcast`), `icmp`.

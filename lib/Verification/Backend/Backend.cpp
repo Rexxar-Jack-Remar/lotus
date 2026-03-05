@@ -133,9 +133,9 @@ public:
   }
 };
 
-class SymbolicAbstractionBackend final : public IBackend {
+class SymAbsAIBackend final : public IBackend {
 public:
-  const char *name() const override { return "symbolic_abstraction"; }
+  const char *name() const override { return "symabs_ai"; }
 
   bool supports(PropertyClass property) const override {
     return property == PropertyClass::Reachability ||
@@ -146,7 +146,7 @@ public:
 
   std::vector<std::string>
   buildCommand(const VerificationTask &task) const override {
-    std::vector<std::string> cmd = {"symbolic_abstraction", task.inputBitcode};
+    std::vector<std::string> cmd = {"symabs_ai", task.inputBitcode};
     cmd.insert(cmd.end(), task.extraArgs.begin(), task.extraArgs.end());
     return cmd;
   }
@@ -168,7 +168,7 @@ public:
       info.message = "Property violated";
     } else if (exitCode != 0) {
       info.result = VerificationResult::Error;
-      info.message = "SymbolicAbstraction error (exit code " + std::to_string(exitCode) + ")";
+      info.message = "SymAbsAI error (exit code " + std::to_string(exitCode) + ")";
     } else {
       info.result = VerificationResult::Unknown;
       info.message = "Could not determine result";
@@ -239,7 +239,7 @@ BackendRegistry &BackendRegistry::instance() {
 }
 
 std::vector<std::string> BackendRegistry::availableBackends() const {
-  return {"seahorn", "sifa", "symbolic_abstraction", "clam"};
+  return {"seahorn", "sifa", "symabs_ai", "clam"};
 }
 
 std::unique_ptr<IBackend> BackendRegistry::create(const std::string &name) const {
@@ -247,8 +247,8 @@ std::unique_ptr<IBackend> BackendRegistry::create(const std::string &name) const
     return std::unique_ptr<IBackend>(new SeahornBackend());
   if (eqLower(name, "sifa"))
     return std::unique_ptr<IBackend>(new SifaBackend());
-  if (eqLower(name, "symbolic_abstraction") || eqLower(name, "symabs"))
-    return std::unique_ptr<IBackend>(new SymbolicAbstractionBackend());
+  if (eqLower(name, "symabs_ai") || eqLower(name, "symbolic_abstraction") || eqLower(name, "symabs"))
+    return std::unique_ptr<IBackend>(new SymAbsAIBackend());
   if (eqLower(name, "clam"))
     return std::unique_ptr<IBackend>(new ClamBackend());
   return nullptr;

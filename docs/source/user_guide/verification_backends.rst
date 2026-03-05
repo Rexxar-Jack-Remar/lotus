@@ -18,7 +18,7 @@ Supported Backends
 
 * **seahorn**: SeaHorn CHC-based verification (supports all properties)
 * **sifa**: Sifa symbolic abstraction (reachability)
-* **symbolic_abstraction**: Symbolic abstraction framework (reachability, memsafety, overflow)
+* **symabs_ai**: SymAbsAI framework (reachability, memsafety, overflow)
 * **clam**: CLAM abstract interpretation (memsafety, overflow, reachability)
 
 Property Classes

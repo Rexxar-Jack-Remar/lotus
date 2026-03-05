@@ -6,7 +6,7 @@ if(ENABLE_SEAHORN)
 endif()
 
 add_subdirectory(FailureDirectedTrimming)
-add_subdirectory(SymbolicAbstraction)
+add_subdirectory(SymAbsAI)
 add_subdirectory(Sifa)
 add_subdirectory(Backend)
 add_subdirectory(Transform)

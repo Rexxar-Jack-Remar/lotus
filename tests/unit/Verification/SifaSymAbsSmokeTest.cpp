@@ -5,10 +5,10 @@
 #include "Verification/Sifa/Statistics/SifaStats.h"
 #include "Verification/Sifa/Summarizers/FixpointLoopSummarizer.h"
 #include "Verification/Sifa/SymAbs/SifaSymAbsDomain.h"
-#include "Verification/SymbolicAbstraction/Core/AbstractValue.h"
-#include "Verification/SymbolicAbstraction/Core/FragmentDecomposition.h"
-#include "Verification/SymbolicAbstraction/Core/ModuleContext.h"
-#include "Verification/SymbolicAbstraction/Utils/Config.h"
+#include "Verification/SymAbsAI/Core/AbstractValue.h"
+#include "Verification/SymAbsAI/Core/FragmentDecomposition.h"
+#include "Verification/SymAbsAI/Core/ModuleContext.h"
+#include "Verification/SymAbsAI/Utils/Config.h"
 
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/BasicBlock.h"
@@ -31,8 +31,8 @@ static llvm::BasicBlock *getBlockByName(llvm::Function &F, const char *name) {
   return nullptr;
 }
 
-static symbolic_abstraction::configparser::Config makeSymAbsConfig() {
-  symbolic_abstraction::configparser::Config cfg;
+static symabs_ai::configparser::Config makeSymAbsConfig() {
+  symabs_ai::configparser::Config cfg;
   cfg.set("ModuleContext", "Recursive", true);
   cfg.set("Analyzer", "Variant", llvm::StringRef("UnilateralAnalyzer"));
   cfg.set("AbstractDomain", "Variant", llvm::StringRef("Interval"));
@@ -235,11 +235,11 @@ TEST(SifaSymAbs, HybridFallbackHandlesSplitCallTransitions) {
   llvm::BasicBlock *exit = getBlockByName(*caller, "exit");
   ASSERT_NE(exit, nullptr);
 
-  symbolic_abstraction::ModuleContext mctx(M.get(), makeSymAbsConfig());
+  symabs_ai::ModuleContext mctx(M.get(), makeSymAbsConfig());
   auto fctx = mctx.createFunctionContext(caller);
-  auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctx);
-  symbolic_abstraction::DomainConstructor dom(fctx->getConfig());
-  auto analyzer = symbolic_abstraction::Analyzer::New(*fctx, fragDecomp, dom);
+  auto fragDecomp = symabs_ai::FragmentDecomposition::For(*fctx);
+  symabs_ai::DomainConstructor dom(fctx->getConfig());
+  auto analyzer = symabs_ai::Analyzer::New(*fctx, fragDecomp, dom);
 
   lotus::sifa::SifaStats stats;
   lotus::sifa::SifaSymAbsDomain domain(*fctx, dom, *analyzer);
@@ -299,11 +299,11 @@ TEST(SifaSymAbs, HybridFallbackHandlesInvokeReturnSummary) {
   llvm::BasicBlock *cont = getBlockByName(*caller, "cont");
   ASSERT_NE(cont, nullptr);
 
-  symbolic_abstraction::ModuleContext mctx(M.get(), makeSymAbsConfig());
+  symabs_ai::ModuleContext mctx(M.get(), makeSymAbsConfig());
   auto fctx = mctx.createFunctionContext(caller);
-  auto fragDecomp = symbolic_abstraction::FragmentDecomposition::For(*fctx);
-  symbolic_abstraction::DomainConstructor dom(fctx->getConfig());
-  auto analyzer = symbolic_abstraction::Analyzer::New(*fctx, fragDecomp, dom);
+  auto fragDecomp = symabs_ai::FragmentDecomposition::For(*fctx);
+  symabs_ai::DomainConstructor dom(fctx->getConfig());
+  auto analyzer = symabs_ai::Analyzer::New(*fctx, fragDecomp, dom);
 
   lotus::sifa::SifaStats stats;
   lotus::sifa::SifaSymAbsDomain domain(*fctx, dom, *analyzer);

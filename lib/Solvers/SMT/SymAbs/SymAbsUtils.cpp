@@ -18,7 +18,7 @@
 
 #include "Solvers/SMT/SymAbs/SymAbsUtils.h"
 
-#include "Verification/SymbolicAbstraction/Utils/Z3APIExtension.h"
+#include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 
 #include <algorithm>
 #include <cassert>

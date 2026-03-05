@@ -5,7 +5,7 @@
  * @brief Core algorithms for automatic abstraction of bit-vector formulae
  *
  * ⚠️ **IMPORTANT**: This is a FORMULA-LEVEL abstraction library for SMT
- * formulas. This is NOT the same as `Verification/SymbolicAbstraction`, which
+ * formulas. This is NOT the same as `Verification/SymAbsAI`, which
  * is a PROGRAM-LEVEL analysis framework for LLVM IR.
  *
  * This module implements algorithms from "Automatic Abstraction of Bit-Vector
@@ -25,7 +25,7 @@
  * constraints
  * - You're working at the formula/solver level, not the program level
  *
- * **When to use Verification/SymbolicAbstraction instead:**
+ * **When to use Verification/SymAbsAI instead:**
  * - You're analyzing LLVM IR programs
  * - You need a complete abstract interpretation framework with fixpoint engines
  * - You want to integrate analysis into LLVM optimization passes

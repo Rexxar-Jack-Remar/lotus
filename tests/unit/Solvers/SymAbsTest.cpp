@@ -1,6 +1,6 @@
 /*
 NOTE: we have two classes of "symbolic abstraction" algorithms:
-1. lib/Verification/SymbolicAbstraction
+1. lib/Verification/SymAbsAI
 2. lib/Solvers/SMT/SymAbs
 
 At first glance, the abstract domains have overlap. However, it 
