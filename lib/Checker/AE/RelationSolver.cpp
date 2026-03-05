@@ -33,7 +33,8 @@ AbstractState RelationSolver::bilateral(const AbstractState &domain,
     } else {
       consequence = abstract_consequence(lower, upper, domain);
     }
-    /// compute domain.model_and(phi, domain.logic_not(domain.gamma_hat(consequence)))
+    /// compute domain.model_and(phi,
+    /// domain.logic_not(domain.gamma_hat(consequence)))
     Z3Expr rhs = !(gamma_hat(consequence, domain));
     solver.push();
     solver.add(phi.getExpr() && rhs.getExpr());
@@ -47,7 +48,7 @@ AbstractState RelationSolver::bilateral(const AbstractState &domain,
         if (v.arity() != 0)
           continue;
         solution.emplace(std::stoi(v.name().str()),
-                        m.get_const_interp(v).get_numeral_int());
+                         m.get_const_interp(v).get_numeral_int());
       }
       for (const auto &item : domain.getVarToVal()) {
         if (solution.find(item.first) == solution.end()) {
@@ -128,9 +129,10 @@ AbstractState RelationSolver::RSY(const AbstractState &domain,
   return lower;
 }
 
-AbstractState RelationSolver::abstract_consequence(
-    const AbstractState &lower, const AbstractState &upper,
-    const AbstractState &domain) const {
+AbstractState
+RelationSolver::abstract_consequence(const AbstractState &lower,
+                                     const AbstractState &upper,
+                                     const AbstractState &domain) const {
   /*Returns the "abstract consequence" of lower and upper.
 
   The abstract consequence must be a superset of lower and *NOT* a
@@ -141,8 +143,8 @@ AbstractState RelationSolver::abstract_consequence(
   of the SMT solver in many cases. In certain cases, other choices for
   the abstract consequence will lead to better algorithm performance.*/
 
-  for (auto it = domain.getVarToVal().begin();
-       it != domain.getVarToVal().end(); ++it)
+  for (auto it = domain.getVarToVal().begin(); it != domain.getVarToVal().end();
+       ++it)
   /// for variable in self.variables:
   {
     AbstractState proposed = domain.top(); /// proposed = self.top.copy()
@@ -200,9 +202,9 @@ Z3Expr RelationSolver::gamma_hat(uint32_t id,
   return res;
 }
 
-AbstractState RelationSolver::beta(
-    const std::unordered_map<uint32_t, int32_t> &sigma,
-    const AbstractState &exeState) const {
+AbstractState
+RelationSolver::beta(const std::unordered_map<uint32_t, int32_t> &sigma,
+                     const AbstractState &exeState) const {
   AbstractState res;
   for (const auto &item : exeState.getVarToVal()) {
     int32_t val = sigma.at(item.first);
@@ -223,7 +225,7 @@ void RelationSolver::updateMap(std::unordered_map<uint32_t, int32_t> &map,
 }
 
 AbstractState RelationSolver::BS(const AbstractState &domain,
-                                const Z3Expr &phi) {
+                                 const Z3Expr &phi) {
   /// because key of _varToItvVal is u32_t, -key may out of range for int
   /// so we do key + bias for -key
   uint32_t bias = 0;
@@ -235,15 +237,18 @@ AbstractState RelationSolver::BS(const AbstractState &domain,
   /// init low, ret, high
   for (const auto &item : domain.getVarToVal()) {
     IntervalValue interval = item.second.getInterval();
-    updateMap(ret, item.first, static_cast<int32_t>(interval.ub().getIntNumeral()));
+    updateMap(ret, item.first,
+              static_cast<int32_t>(interval.ub().getIntNumeral()));
     if (interval.lb().is_minus_infinity())
       updateMap(low_values, item.first, -infinity);
     else
-      updateMap(low_values, item.first, static_cast<int32_t>(interval.lb().getIntNumeral()));
+      updateMap(low_values, item.first,
+                static_cast<int32_t>(interval.lb().getIntNumeral()));
     if (interval.ub().is_plus_infinity())
       updateMap(high_values, item.first, infinity);
     else
-      updateMap(high_values, item.first, static_cast<int32_t>(interval.ub().getIntNumeral()));
+      updateMap(high_values, item.first,
+                static_cast<int32_t>(interval.ub().getIntNumeral()));
     if (item.first > bias)
       bias = item.first + 1;
   }
@@ -251,18 +256,21 @@ AbstractState RelationSolver::BS(const AbstractState &domain,
     /// init objects -x
     IntervalValue interval = item.second.getInterval();
     uint32_t reverse_key = item.first + bias;
-    updateMap(ret, reverse_key, static_cast<int32_t>(-interval.lb().getIntNumeral()));
+    updateMap(ret, reverse_key,
+              static_cast<int32_t>(-interval.lb().getIntNumeral()));
     if (interval.ub().is_plus_infinity())
       updateMap(low_values, reverse_key, -infinity);
     else
-      updateMap(low_values, reverse_key, static_cast<int32_t>(-interval.ub().getIntNumeral()));
+      updateMap(low_values, reverse_key,
+                static_cast<int32_t>(-interval.ub().getIntNumeral()));
     if (interval.lb().is_minus_infinity())
       updateMap(high_values, reverse_key, infinity);
     else
-      updateMap(high_values, reverse_key, static_cast<int32_t>(-interval.lb().getIntNumeral()));
+      updateMap(high_values, reverse_key,
+                static_cast<int32_t>(-interval.lb().getIntNumeral()));
     /// add a relation that x == -(x+bias)
-    new_phi = (new_phi && (toIntZ3Expr(reverse_key) ==
-                          -1 * toIntZ3Expr(item.first)));
+    new_phi =
+        (new_phi && (toIntZ3Expr(reverse_key) == -1 * toIntZ3Expr(item.first)));
   }
   /// optimize each object
   BoxedOptSolver(new_phi.simplify(), ret, low_values, high_values);
@@ -274,22 +282,22 @@ AbstractState RelationSolver::BS(const AbstractState &domain,
         retInv[item.first - bias] = AbstractValue(IntervalValue::top());
 
       if (item.second == (infinity))
-        retInv[item.first - bias] = AbstractValue(IntervalValue(
-            BoundedInt::minus_infinity(),
-            retInv[item.first - bias].getInterval().ub()));
+        retInv[item.first - bias] = AbstractValue(
+            IntervalValue(BoundedInt::minus_infinity(),
+                          retInv[item.first - bias].getInterval().ub()));
       else
-        retInv[item.first - bias] = AbstractValue(IntervalValue(
-            BoundedInt(static_cast<int64_t>(-item.second)),
-            retInv[item.first - bias].getInterval().ub()));
+        retInv[item.first - bias] = AbstractValue(
+            IntervalValue(BoundedInt(static_cast<int64_t>(-item.second)),
+                          retInv[item.first - bias].getInterval().ub()));
     } else {
       if (item.second == (infinity))
-        retInv[item.first] = AbstractValue(IntervalValue(
-            retInv[item.first].getInterval().lb(),
-            BoundedInt::plus_infinity()));
+        retInv[item.first] =
+            AbstractValue(IntervalValue(retInv[item.first].getInterval().lb(),
+                                        BoundedInt::plus_infinity()));
       else
-        retInv[item.first] = AbstractValue(IntervalValue(
-            retInv[item.first].getInterval().lb(),
-            BoundedInt(static_cast<int64_t>(item.second))));
+        retInv[item.first] = AbstractValue(
+            IntervalValue(retInv[item.first].getInterval().lb(),
+                          BoundedInt(static_cast<int64_t>(item.second))));
     }
   }
   return retInv;
@@ -307,13 +315,12 @@ std::unordered_map<uint32_t, int32_t> RelationSolver::BoxedOptSolver(
     for (const auto &item : ret) {
       Z3Expr v = toIntZ3Expr(item.first);
       if (low_values.at(item.first) <= (high_values.at(item.first))) {
-        int32_t mid = (low_values.at(item.first) +
-                       (high_values.at(item.first) -
-                        low_values.at(item.first)) /
-                           2);
+        int32_t mid =
+            (low_values.at(item.first) +
+             (high_values.at(item.first) - low_values.at(item.first)) / 2);
         updateMap(mid_values, item.first, mid);
-        Z3Expr expr = (toIntVal(mid) <= v &&
-                      v <= toIntVal(high_values.at(item.first)));
+        Z3Expr expr =
+            (toIntVal(mid) <= v && v <= toIntVal(high_values.at(item.first)));
         L_phi[item.first] = expr;
       }
     }
@@ -347,8 +354,7 @@ void RelationSolver::decide_cpa_ext(
       solver.pop();
       for (const auto &item : L_phi) {
         uint32_t id = item.first;
-        int value =
-            m.eval(toIntZ3Expr(id).getExpr()).get_numeral_int();
+        int value = m.eval(toIntZ3Expr(id).getExpr()).get_numeral_int();
         /// id is the var id, value is the solution found for var_id
         /// add a relation to check if the solution meets phi_id
         Z3Expr expr = (item.second && toIntZ3Expr(id) == value);
@@ -363,7 +369,7 @@ void RelationSolver::decide_cpa_ext(
           updateMap(mid_values, id, mid);
           Z3Expr v = toIntZ3Expr(id);
           Z3Expr expr = (toIntVal(mid_values.at(id)) <= v &&
-                        v <= toIntVal(high_values.at(id)));
+                         v <= toIntVal(high_values.at(id)));
           L_phi[id] = expr;
         }
         solver.pop();

@@ -621,8 +621,7 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
 
     // When storing a pointer value, preserve its attributes (Null, Invalid,
     // Allocated)
-    AbstractValue canon_value =
-        astate->getCanonical(value_opt->addr);
+    AbstractValue canon_value = astate->getCanonical(value_opt->addr);
     if (astate->getPostAttrs().has(canon_value, Attribute::Null)) {
       // Preserve null attribute on the stored value
       astate->getPostAttrs().add(canon_value, Attribute::Null);
@@ -637,14 +636,16 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
     }
 
     // Fix for realloc pattern false positives: when storing a new pointer value
-    // (especially from realloc), if the stored value is valid (Allocated and not Invalid),
-    // clear Invalid from the variable itself. This handles cases like:
+    // (especially from realloc), if the stored value is valid (Allocated and
+    // not Invalid), clear Invalid from the variable itself. This handles cases
+    // like:
     //   int *new_p = realloc(p, size);
-    //   p = new_p;  // p now points to valid allocation, not the old invalidated one
+    //   p = new_p;  // p now points to valid allocation, not the old
+    //   invalidated one
     if (astate->getPostAttrs().has(canon_value, Attribute::Allocated) &&
         !astate->getPostAttrs().has(canon_value, Attribute::Invalid)) {
-      // The stored value is a valid allocation - clear Invalid from the variable
-      // This ensures that after p = new_p, p is not considered invalid
+      // The stored value is a valid allocation - clear Invalid from the
+      // variable This ensures that after p = new_p, p is not considered invalid
       astate->getPostAttrs().remove(canon_var, Attribute::Invalid);
     }
 
@@ -671,15 +672,17 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
       AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
       astate->getPostAttrs().remove(canon_ptr, Attribute::Uninitialized);
 
-      // Fix for realloc pattern: when storing a realloc result back to the original variable,
-      // invalidate the old value (since realloc succeeded and old memory is now invalid).
-      // This handles: int *new_p = realloc(p, size); p = new_p;
+      // Fix for realloc pattern: when storing a realloc result back to the
+      // original variable, invalidate the old value (since realloc succeeded
+      // and old memory is now invalid). This handles: int *new_p = realloc(p,
+      // size); p = new_p;
       AbstractValue canon_value = astate->getCanonical(value_opt->addr);
       if (astate->getPostAttrs().has(canon_value, Attribute::Allocated) &&
           !astate->getPostAttrs().has(canon_value, Attribute::Invalid)) {
-        // This is a valid allocation (likely from realloc). Since we're storing it back
-        // to the original variable, the old value is now invalid (realloc succeeded).
-        // Invalidate the old value, then update the stack map with the new value.
+        // This is a valid allocation (likely from realloc). Since we're storing
+        // it back to the original variable, the old value is now invalid
+        // (realloc succeeded). Invalidate the old value, then update the stack
+        // map with the new value.
         ops_.invalidate(*astate, *ptr_opt, SI, InvalidationKind::Realloc);
       }
 

@@ -2,33 +2,35 @@
 /// \brief FiTx IR builder pass: builds framework IR (CFG + instructions) from
 /// LLVM per function; runs before FrameworkPass (paper §4: FiTx pipeline).
 ///
-/// IRGenerator::runOnFunction calls Analyzer::analyze to build framework::Function
-/// (blocks, ordered block list, call/store/load/ret). framework_ir_ maps
-/// llvm::Module -> set of framework::Function for the Frontend Analyzer.
+/// IRGenerator::runOnFunction calls Analyzer::analyze to build
+/// framework::Function (blocks, ordered block list, call/store/load/ret).
+/// framework_ir_ maps llvm::Module -> set of framework::Function for the
+/// Frontend Analyzer.
 #pragma once
-#include "Checker/FiTx/Framework_IR/Analyzer.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
-#include "llvm/Pass.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+
+#include "Checker/FiTx/Framework_IR/Analyzer.h"
 
 namespace ir_generator {
 /// LLVM FunctionPass that builds framework IR (framework::Function with blocks
 /// and instructions) for each LLVM function. Required by FrameworkPass.
 class IRGenerator : public llvm::FunctionPass {
- public:
+public:
   IRGenerator();
 
   virtual void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
   bool runOnFunction(llvm::Function &F) override;
 
   static char ID;
-  static std::map<llvm::Module*, std::set<std::shared_ptr<framework::Function>>>
+  static std::map<llvm::Module *,
+                  std::set<std::shared_ptr<framework::Function>>>
       framework_ir_;
 
- private:
+private:
   Analyzer analyzer;
-};  // end of struct
-}  // namespace ir_generator
+}; // end of struct
+} // namespace ir_generator

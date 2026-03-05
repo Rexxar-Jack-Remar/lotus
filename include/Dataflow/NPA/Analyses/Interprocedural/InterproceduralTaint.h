@@ -2,9 +2,11 @@
 #define NPA_INTERPROC_TAINT_H
 
 #include "Dataflow/NPA/Domains/TaintTransferDomain.h"
-#include <llvm/IR/Module.h>
+
 #include <map>
 #include <string>
+
+#include <llvm/IR/Module.h>
 
 namespace lotus {
 class AliasAnalysisWrapper;
@@ -19,8 +21,7 @@ public:
     std::map<std::string, llvm::APInt> blockFacts;
   };
 
-  static Result run(llvm::Module &M,
-                    lotus::AliasAnalysisWrapper &aliasAnalysis,
+  static Result run(llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis,
                     bool verbose = false);
 };
 

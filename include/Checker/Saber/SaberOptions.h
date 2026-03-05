@@ -35,7 +35,8 @@ struct SaberOptions {
   /// Max steps in wrapper detection. Default 100.
   static unsigned maxStepInWrapper() { return SaberMaxStepInWrapper; }
 
-  /// Max (node, context) items per source in forward traversal (0 = no limit). Safety cap only.
+  /// Max (node, context) items per source in forward traversal (0 = no limit).
+  /// Safety cap only.
   static unsigned maxForwardItems() { return SaberMaxForwardItems; }
 
   /// Z3 solver timeout in milliseconds (0 = no timeout). Default 10000.
@@ -47,7 +48,8 @@ struct SaberOptions {
   /// Run validation tests (for regression). Default false.
   static bool validateTests() { return SaberValidateTests; }
 
-  /// Collect external-return globals (SVF saber-collect-extret-globals). Default true.
+  /// Collect external-return globals (SVF saber-collect-extret-globals).
+  /// Default true.
   static bool collectExtRetGlobals() { return SaberCollectExtRetGlobals; }
 
   /// Enable verbose output (timing, statistics). Default false.

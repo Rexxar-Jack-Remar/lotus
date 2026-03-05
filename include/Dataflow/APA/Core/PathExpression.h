@@ -17,8 +17,7 @@ public:
         : K(K), Transfer(std::make_shared<TransferT>(std::move(Transfer))) {}
     Expr(Kind K, std::shared_ptr<const Expr> L, std::shared_ptr<const Expr> R)
         : K(K), L(std::move(L)), R(std::move(R)) {}
-    Expr(Kind K, std::shared_ptr<const Expr> Sub)
-        : K(K), L(std::move(Sub)) {}
+    Expr(Kind K, std::shared_ptr<const Expr> Sub) : K(K), L(std::move(Sub)) {}
 
     Kind K;
     std::shared_ptr<const TransferT> Transfer;
@@ -90,13 +89,9 @@ public:
     return std::make_shared<Expr>(Kind::Star, A);
   }
 
-  static bool isZero(const Ref &E) {
-    return E && E->K == Kind::Zero;
-  }
+  static bool isZero(const Ref &E) { return E && E->K == Kind::Zero; }
 
-  static bool isOne(const Ref &E) {
-    return E && E->K == Kind::One;
-  }
+  static bool isOne(const Ref &E) { return E && E->K == Kind::One; }
 
 private:
   mutable std::mutex SingletonMutex;

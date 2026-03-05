@@ -3,10 +3,6 @@
 /// store–call alias (which store feeds a call). Used for type/operand tracking;
 /// main typestate alias propagation uses AliasValues (store-based, per block).
 #pragma once
-#include <vector>
-
-#include "Checker/FiTx/Core/Instruction.h"
-#include "Checker/FiTx/Core/Value.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstrTypes.h"
@@ -14,30 +10,35 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Value.h"
 
+#include "Checker/FiTx/Core/Instruction.h"
+#include "Checker/FiTx/Core/Value.h"
+
+#include <vector>
+
 namespace framework {
 
 struct FunctionSigniture {
-  llvm::Type* return_type;
-  std::vector<llvm::Type*> argument_type;
+  llvm::Type *return_type;
+  std::vector<llvm::Type *> argument_type;
 };
 
 /// Operand list for a framework instruction (used by ValueTypeAlias).
 class Operands {
- public:
+public:
   Operands() = default;
   Operands(std::vector<std::shared_ptr<framework::Value>> values);
   Operands(
       std::vector<std::shared_ptr<std::shared_ptr<framework::Value>>> values);
 
-  std::shared_ptr<std::shared_ptr<framework::Value>> operator[](
-      const int index);
+  std::shared_ptr<std::shared_ptr<framework::Value>>
+  operator[](const int index);
 
   void add(std::shared_ptr<std::shared_ptr<framework::Value>> value);
   void add(std::shared_ptr<framework::Value> value);
 
   size_t size() const;
 
- private:
+private:
   std::vector<std::shared_ptr<std::shared_ptr<framework::Value>>> values_;
 };
 
@@ -45,34 +46,34 @@ class Operands {
 /// result is consumed by a call). Separate from AliasValues (store-based
 /// may-alias used by the typestate analyzer).
 class ValueTypeAlias {
- public:
+public:
   ValueTypeAlias();
 
-  ValueTypeAlias(const ValueTypeAlias&);
-  ValueTypeAlias& operator=(const ValueTypeAlias&);
+  ValueTypeAlias(const ValueTypeAlias &);
+  ValueTypeAlias &operator=(const ValueTypeAlias &);
 
-  void setValues(llvm::Instruction* instruction, Operands operand_values);
-  Operands getValues(llvm::Instruction* value);
-  bool exists(llvm::Instruction* value);
+  void setValues(llvm::Instruction *instruction, Operands operand_values);
+  Operands getValues(llvm::Instruction *value);
+  bool exists(llvm::Instruction *value);
 
   void setValues(framework::Instruction instruction, Operands operand_values);
   Operands getValues(framework::Instruction value);
   bool exists(framework::Instruction value);
 
   Operands getAliasedValues(framework::Instruction value);
-  void setStoreAlias(llvm::StoreInst* store_inst, llvm::CallInst* call_inst);
+  void setStoreAlias(llvm::StoreInst *store_inst, llvm::CallInst *call_inst);
 
-  framework::Instruction getAliasedStore(llvm::CallInst* call_inst);
+  framework::Instruction getAliasedStore(llvm::CallInst *call_inst);
   framework::Instruction getAliasedStore(framework::Instruction instruction);
 
-  bool InstructionAliasExists(llvm::CallInst* call_inst);
+  bool InstructionAliasExists(llvm::CallInst *call_inst);
   bool InstructionAliasExists(framework::Instruction instruction);
   std::shared_ptr<std::map<framework::Instruction, Operands>> AliasedValue() {
     return aliased_value_;
   };
 
- private:
+private:
   std::shared_ptr<std::map<framework::Instruction, Operands>> aliased_value_;
   std::map<framework::Instruction, framework::Instruction> store_alias_;
 };
-}  // namespace framework
+} // namespace framework

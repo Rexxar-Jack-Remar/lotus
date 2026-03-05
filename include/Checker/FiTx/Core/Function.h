@@ -6,18 +6,20 @@
 /// init/return blocks, possible return assignments per block (for return-code
 /// aware propagation), and refcount/lifetime metadata.
 #pragma once
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/Function.h"
+
+#include "Checker/FiTx/Core/BasicBlock.h"
+#include "Checker/FiTx/Core/Value.h"
+
 #include <memory>
 #include <queue>
 #include <string>
 #include <vector>
 
-#include "Checker/FiTx/Core/BasicBlock.h"
-#include "Checker/FiTx/Core/Value.h"
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/IR/Function.h"
-
 namespace framework {
-/// Linux kernel error macros: used for return-code aware propagation (paper §4.3).
+/// Linux kernel error macros: used for return-code aware propagation (paper
+/// §4.3).
 const std::vector<std::string> err_functions{"IS_ERR", "PTR_ERR"};
 const std::vector<std::string> refcount_decrement_functions{
     "atomic_dec_and_test", "atomic_dec_and_lock", "refcount_dec_and_test",
@@ -26,39 +28,40 @@ const std::vector<std::string> refcount_decrement_functions{
 /// Framework view of an LLVM function: blocks, successors/predecessors,
 /// ordered block list for CFG traversal, and return/refcount metadata.
 class Function {
- public:
+public:
   /// Block -> value that may be returned from that block (for summaries).
   using PossibleReturnAssignmentMap =
       std::map<std::shared_ptr<framework::BasicBlock>,
                std::shared_ptr<framework::Value>>;
 
   // Factory method to create and manage functions
-  static std::shared_ptr<framework::Function> createManagedFunction(
-      llvm::Function* function, std::unique_ptr<llvm::LoopInfo> loop_info =
-                                    std::unique_ptr<llvm::LoopInfo>());
+  static std::shared_ptr<framework::Function>
+  createManagedFunction(llvm::Function *function,
+                        std::unique_ptr<llvm::LoopInfo> loop_info =
+                            std::unique_ptr<llvm::LoopInfo>());
 
-  static bool IsDebugValueFunction(
-      std::shared_ptr<framework::Function> function);
+  static bool
+  IsDebugValueFunction(std::shared_ptr<framework::Function> function);
 
-  static bool IsDebugDeclareFunction(
-      std::shared_ptr<framework::Function> function);
+  static bool
+  IsDebugDeclareFunction(std::shared_ptr<framework::Function> function);
 
-  static bool IsLifetimeEndFunction(
-      std::shared_ptr<framework::Function> function);
+  static bool
+  IsLifetimeEndFunction(std::shared_ptr<framework::Function> function);
 
-  static bool IsRefcountDecrementFunction(
-      std::shared_ptr<framework::Function> function);
+  static bool
+  IsRefcountDecrementFunction(std::shared_ptr<framework::Function> function);
 
   static bool IsMemSetFunction(std::shared_ptr<framework::Function> function);
 
   static bool IsExpectFunction(std::shared_ptr<framework::Function> function);
 
-  Function(llvm::Function* function, std::unique_ptr<llvm::LoopInfo> loop_info);
+  Function(llvm::Function *function, std::unique_ptr<llvm::LoopInfo> loop_info);
 
-  std::shared_ptr<framework::BasicBlock> getBasicBlock(
-      llvm::BasicBlock* basic_block);
+  std::shared_ptr<framework::BasicBlock>
+  getBasicBlock(llvm::BasicBlock *basic_block);
 
-  const std::set<std::shared_ptr<framework::BasicBlock>>& BasicBlocks() {
+  const std::set<std::shared_ptr<framework::BasicBlock>> &BasicBlocks() {
     return basic_blocks_;
   }
 
@@ -72,11 +75,11 @@ class Function {
 
   void addPossibleReturnValues(std::shared_ptr<framework::Value> value,
                                std::shared_ptr<framework::BasicBlock> block);
-  const PossibleReturnAssignmentMap& getReturnAssignments() {
+  const PossibleReturnAssignmentMap &getReturnAssignments() {
     return return_assignment_;
   };
 
-  const llvm::Type* ReturnType() { return return_type_; }
+  const llvm::Type *ReturnType() { return return_type_; }
   std::string Name() { return function_name_; };
   bool isDeclaration() { return is_definition_; };
   bool isDebugFunction() {
@@ -98,16 +101,16 @@ class Function {
   }
 
   std::shared_ptr<framework::BasicBlock> ReturnBlock() { return return_block_; }
-  static std::map<llvm::Function*, std::shared_ptr<framework::Function>>
+  static std::map<llvm::Function *, std::shared_ptr<framework::Function>>
   CreatedFunctions() {
     return created_functions_;
   }
 
   void addCallerFunction(std::shared_ptr<framework::Function> caller);
-  const std::set<std::shared_ptr<framework::Function>>& CallerFunctions();
+  const std::set<std::shared_ptr<framework::Function>> &CallerFunctions();
 
-  void addRefcountInstruction(
-      std::shared_ptr<framework::Instruction> instruction);
+  void
+  addRefcountInstruction(std::shared_ptr<framework::Instruction> instruction);
   std::shared_ptr<framework::Instruction> lastRefcountInstruction();
 
   std::shared_ptr<framework::Value> ProtectedRefcountValue() {
@@ -122,25 +125,25 @@ class Function {
   void setLoopBackBlock(bool loop_back);
   bool ContainsLoopBackBlock();
 
-  void addOrderedBlock(
-      std::vector<std::shared_ptr<framework::BasicBlock>>& block) {
+  void
+  addOrderedBlock(std::vector<std::shared_ptr<framework::BasicBlock>> &block) {
     ordered_basic_blocks_ = block;
   }
 
-  const std::vector<std::shared_ptr<framework::BasicBlock>>&
+  const std::vector<std::shared_ptr<framework::BasicBlock>> &
   OrderedBasicBlocks() {
     return ordered_basic_blocks_;
   }
 
- private:
-  static std::map<llvm::Function*, std::shared_ptr<framework::Function>>
+private:
+  static std::map<llvm::Function *, std::shared_ptr<framework::Function>>
       created_functions_;
 
   // Function metas these should be updated to copy llvm::Function, but for the
   // time being, we manually copy everything
-  llvm::Function* llvm_function_;
+  llvm::Function *llvm_function_;
 
-  const llvm::Type* return_type_;
+  const llvm::Type *return_type_;
 
   std::unique_ptr<llvm::LoopInfo> loop_info_;
   std::string function_name_;
@@ -166,4 +169,4 @@ class Function {
   std::shared_ptr<framework::Value> protected_refcount_value_;
   std::shared_ptr<framework::Instruction> last_refcount_call_;
 };
-}  // namespace framework
+} // namespace framework

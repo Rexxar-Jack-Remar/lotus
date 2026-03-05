@@ -1,11 +1,11 @@
 #include "Dataflow/Mono/Analyses/Intra/IntraSolverTest.h"
 
+#include "llvm/IR/Instructions.h"
+
 #include "Dataflow/Mono/Container/Traits.h"
 #include "Dataflow/Mono/Core/Domain.h"
 #include "Dataflow/Mono/Core/Problem.h"
 #include "Dataflow/Mono/Support/Result.h"
-
-#include "llvm/IR/Instructions.h"
 
 using namespace llvm;
 
@@ -19,7 +19,8 @@ public:
   explicit IntraSolverTestProblem(Function *F)
       : IntraMonoProblem<TestDomain>(std::vector<Function *>{F}) {}
 
-  mono_container_t normalFlow(Instruction *Inst, const mono_container_t &In) override {
+  mono_container_t normalFlow(Instruction *Inst,
+                              const mono_container_t &In) override {
     mono_container_t Out = In;
 
     // Add the instruction result if it produces a value.
@@ -42,13 +43,16 @@ public:
     return Out;
   }
 
-  bool equal_to(const mono_container_t &Lhs, const mono_container_t &Rhs) override {
+  bool equal_to(const mono_container_t &Lhs,
+                const mono_container_t &Rhs) override {
     return Lhs == Rhs;
   }
 
   std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
     std::unordered_map<Instruction *, mono_container_t> Seeds;
-    Function *F = this->getEntryPoints().empty() ? nullptr : this->getEntryPoints().front();
+    Function *F = this->getEntryPoints().empty()
+                      ? nullptr
+                      : this->getEntryPoints().front();
     if (F == nullptr || F->empty()) {
       return Seeds;
     }
@@ -79,4 +83,3 @@ std::unique_ptr<DataFlowResult> runIntraMonoSolverTest(Function *F) {
 }
 
 } // namespace mono
-

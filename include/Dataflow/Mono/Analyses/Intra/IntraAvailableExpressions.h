@@ -57,7 +57,8 @@ namespace mono {
  * we can track which expressions use a particular SSA value.
  *
  * @param F The function to analyze
- * @return DataFlowResult containing available expression sets for each instruction
+ * @return DataFlowResult containing available expression sets for each
+ * instruction
  */
 std::unique_ptr<DataFlowResult>
 runAvailableExpressionsAnalysis(llvm::Function *F);

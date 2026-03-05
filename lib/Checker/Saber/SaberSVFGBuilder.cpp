@@ -18,14 +18,14 @@
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
-#include <llvm/IR/GlobalValue.h>
-#include <llvm/IR/Instructions.h>
-
 #include <algorithm>
 #include <functional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/Instructions.h>
 
 using namespace lotus::analysis;
 using namespace llvm;
@@ -77,51 +77,50 @@ computeRecursiveFunctions(const FuncGraph &graph) {
   std::unordered_set<const Function *> recursive;
   int nextIndex = 0;
 
-  std::function<void(const Function *)> strongConnect =
-      [&](const Function *v) {
-        index[v] = nextIndex;
-        lowlink[v] = nextIndex;
-        ++nextIndex;
-        stack.push_back(v);
-        onStack.insert(v);
+  std::function<void(const Function *)> strongConnect = [&](const Function *v) {
+    index[v] = nextIndex;
+    lowlink[v] = nextIndex;
+    ++nextIndex;
+    stack.push_back(v);
+    onStack.insert(v);
 
-        auto git = graph.find(v);
-        if (git != graph.end()) {
-          for (const Function *w : git->second) {
-            if (!w)
-              continue;
-            if (index.find(w) == index.end()) {
-              strongConnect(w);
-              lowlink[v] = std::min(lowlink[v], lowlink[w]);
-            } else if (onStack.count(w)) {
-              lowlink[v] = std::min(lowlink[v], index[w]);
-            }
-          }
+    auto git = graph.find(v);
+    if (git != graph.end()) {
+      for (const Function *w : git->second) {
+        if (!w)
+          continue;
+        if (index.find(w) == index.end()) {
+          strongConnect(w);
+          lowlink[v] = std::min(lowlink[v], lowlink[w]);
+        } else if (onStack.count(w)) {
+          lowlink[v] = std::min(lowlink[v], index[w]);
         }
+      }
+    }
 
-        if (lowlink[v] != index[v])
-          return;
+    if (lowlink[v] != index[v])
+      return;
 
-        std::vector<const Function *> scc;
-        while (!stack.empty()) {
-          const Function *w = stack.back();
-          stack.pop_back();
-          onStack.erase(w);
-          scc.push_back(w);
-          if (w == v)
-            break;
-        }
+    std::vector<const Function *> scc;
+    while (!stack.empty()) {
+      const Function *w = stack.back();
+      stack.pop_back();
+      onStack.erase(w);
+      scc.push_back(w);
+      if (w == v)
+        break;
+    }
 
-        if (scc.size() > 1) {
-          recursive.insert(scc.begin(), scc.end());
-          return;
-        }
+    if (scc.size() > 1) {
+      recursive.insert(scc.begin(), scc.end());
+      return;
+    }
 
-        const Function *f = scc.front();
-        auto it = graph.find(f);
-        if (it != graph.end() && it->second.count(f))
-          recursive.insert(f);
-      };
+    const Function *f = scc.front();
+    auto it = graph.find(f);
+    if (it != graph.end() && it->second.count(f))
+      recursive.insert(f);
+  };
 
   for (const auto &kv : graph) {
     const Function *F = kv.first;

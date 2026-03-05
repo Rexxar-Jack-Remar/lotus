@@ -97,8 +97,8 @@ llvm::ICmpInst::Predicate invertIcmpPred(llvm::ICmpInst::Predicate p) {
 }
 
 bool applyIntegerIcmpConstraint(PulseFormula &formula,
-                                llvm::ICmpInst::Predicate p,
-                                AbstractValue lhs, AbstractValue rhs) {
+                                llvm::ICmpInst::Predicate p, AbstractValue lhs,
+                                AbstractValue rhs) {
   using P = llvm::ICmpInst::Predicate;
   formula.addIntegerConstraint(lhs);
   formula.addIntegerConstraint(rhs);

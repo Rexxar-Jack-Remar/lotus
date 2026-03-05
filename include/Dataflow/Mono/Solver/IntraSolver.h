@@ -171,8 +171,8 @@ public:
       // Step 2: check whether IN[Node] changed.
       Stats.stabilization_checks++;
       auto InIt = AnalysisIn.find(Node);
-      bool InChanged = (InIt == AnalysisIn.end()) ||
-                       !Problem.equal_to(NewIn, InIt->second);
+      bool InChanged =
+          (InIt == AnalysisIn.end()) || !Problem.equal_to(NewIn, InIt->second);
 
       if (InChanged) {
         AnalysisIn[Node] = NewIn;
@@ -352,7 +352,7 @@ private:
         continue;
       }
       auto *BB = SeedInst->getParent();
-      auto *F  = BB ? BB->getParent() : nullptr;
+      auto *F = BB ? BB->getParent() : nullptr;
       if (F == nullptr || F->isDeclaration()) {
         continue;
       }

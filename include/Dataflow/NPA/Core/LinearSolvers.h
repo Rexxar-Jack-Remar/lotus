@@ -27,9 +27,10 @@ namespace npa {
 /// Solve linear system (RHS = vector of Exp1) by worklist: repeatedly
 /// evaluate RHS under current env and push dependents until stable.
 template <class D>
-std::vector<DomVal<D>> solve_linear_worklist_impl(
-    bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
-    std::vector<DomVal<D>> init) {
+std::vector<DomVal<D>>
+solve_linear_worklist_impl(bool verbose,
+                           const std::vector<std::pair<Symbol, E1<D>>> &rhs,
+                           std::vector<DomVal<D>> init) {
   using V = DomVal<D>;
   std::unordered_map<Symbol, int> sym_to_idx;
   std::unordered_map<Symbol, V> env;
@@ -42,7 +43,8 @@ std::vector<DomVal<D>> solve_linear_worklist_impl(
     std::unordered_set<Symbol> deps;
     DepFinder<D>::find(rhs[i].second, deps);
     for (const auto &d : deps)
-      if (sym_to_idx.count(d)) users[sym_to_idx[d]].push_back(i);
+      if (sym_to_idx.count(d))
+        users[sym_to_idx[d]].push_back(i);
   }
   std::deque<int> worklist;
   std::vector<bool> in_queue(rhs.size(), false);
@@ -73,7 +75,8 @@ std::vector<DomVal<D>> solve_linear_worklist_impl(
         }
     }
   }
-  if (verbose) std::cerr << "[linear-wl] steps=" << steps << "\n";
+  if (verbose)
+    std::cerr << "[linear-wl] steps=" << steps << "\n";
   return init;
 }
 
@@ -87,14 +90,16 @@ solve_linear_scc_impl(bool verbose,
   using V = DomVal<D>;
   const int n = static_cast<int>(rhs.size());
   std::unordered_map<Symbol, int> sym_to_idx;
-  for (int i = 0; i < n; ++i) sym_to_idx[rhs[i].first] = i;
+  for (int i = 0; i < n; ++i)
+    sym_to_idx[rhs[i].first] = i;
   std::vector<std::vector<int>> out_edges(n);
   for (int i = 0; i < n; ++i) {
     std::unordered_set<Symbol> deps;
     DepFinder<D>::find(rhs[i].second, deps);
     for (const auto &d : deps) {
       auto it = sym_to_idx.find(d);
-      if (it != sym_to_idx.end()) out_edges[i].push_back(it->second);
+      if (it != sym_to_idx.end())
+        out_edges[i].push_back(it->second);
     }
   }
   std::vector<int> index(n, -1), low(n, -1), scc_id(n, -1);
@@ -116,25 +121,31 @@ solve_linear_scc_impl(bool verbose,
         int u = stack.back();
         stack.pop_back();
         scc_id[u] = scc_count;
-        if (u == v) break;
+        if (u == v)
+          break;
       }
       ++scc_count;
     }
   };
   for (int i = 0; i < n; ++i)
-    if (index[i] == -1) tarjan(i);
+    if (index[i] == -1)
+      tarjan(i);
   std::vector<std::vector<int>> sccs(scc_count);
-  for (int i = 0; i < n; ++i) sccs[scc_id[i]].push_back(i);
+  for (int i = 0; i < n; ++i)
+    sccs[scc_id[i]].push_back(i);
   std::vector<std::vector<int>> rev_cond(scc_count);
   for (int v = 0; v < n; ++v)
     for (int w : out_edges[v])
-      if (scc_id[v] != scc_id[w]) rev_cond[scc_id[w]].push_back(scc_id[v]);
+      if (scc_id[v] != scc_id[w])
+        rev_cond[scc_id[w]].push_back(scc_id[v]);
   std::vector<int> rev_in_degree(scc_count, 0);
   for (int a = 0; a < scc_count; ++a)
-    for (int b : rev_cond[a]) ++rev_in_degree[b];
+    for (int b : rev_cond[a])
+      ++rev_in_degree[b];
   std::deque<int> q;
   for (int i = 0; i < scc_count; ++i)
-    if (rev_in_degree[i] == 0) q.push_back(i);
+    if (rev_in_degree[i] == 0)
+      q.push_back(i);
   std::vector<int> scc_order;
   scc_order.reserve(scc_count);
   while (!q.empty()) {
@@ -142,10 +153,12 @@ solve_linear_scc_impl(bool verbose,
     q.pop_front();
     scc_order.push_back(a);
     for (int b : rev_cond[a])
-      if (--rev_in_degree[b] == 0) q.push_back(b);
+      if (--rev_in_degree[b] == 0)
+        q.push_back(b);
   }
   std::unordered_map<Symbol, V> env;
-  for (int i = 0; i < n; ++i) env[rhs[i].first] = init[i];
+  for (int i = 0; i < n; ++i)
+    env[rhs[i].first] = init[i];
   long steps = 0;
   const long max_steps = domain_max_linear_steps<D>();
   for (int sid : scc_order) {
@@ -162,11 +175,13 @@ solve_linear_scc_impl(bool verbose,
         ++steps;
         if (max_steps >= 0 && steps > max_steps) {
           if (verbose)
-            std::cerr << "[linear-scc] hit max_linear_steps=" << max_steps << "\n";
+            std::cerr << "[linear-scc] hit max_linear_steps=" << max_steps
+                      << "\n";
           return init;
         }
       }
-      if (stable) break;
+      if (stable)
+        break;
     }
   }
   if (verbose)
@@ -188,10 +203,11 @@ solve_linear_tensor_impl(bool verbose,
 /// strategy is only considered when this holds; the tensor solver may still
 /// fall back to worklist if regularization preconditions are not met.
 template <class D>
-inline bool system_has_lcfl_structure(
-    const std::vector<std::pair<Symbol, E1<D>>> &rhs) {
+inline bool
+system_has_lcfl_structure(const std::vector<std::pair<Symbol, E1<D>>> &rhs) {
   for (const auto &p : rhs)
-    if (LCFLDetector<D>::has_lcfl_structure(p.second)) return true;
+    if (LCFLDetector<D>::has_lcfl_structure(p.second))
+      return true;
   return false;
 }
 

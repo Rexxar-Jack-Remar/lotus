@@ -1,11 +1,11 @@
 #include "IR/PDG/Analysis/MotionLegality.h"
 
+#include "llvm/IR/Instruction.h"
+
 #include <algorithm>
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
-
-#include "llvm/IR/Instruction.h"
 
 using namespace llvm;
 
@@ -20,15 +20,21 @@ bool isEdgeAllowed(EdgeType et, const std::set<EdgeType> &allowed) {
 } // namespace
 
 std::set<EdgeType> MotionLegalityQuery::defaultMotionEdgeTypes() {
-  return {
-      EdgeType::DATA_DEF_USE,       EdgeType::DATA_RAW,
-      EdgeType::DATA_READ,          EdgeType::DATA_ALIAS,
-      EdgeType::DATA_RET,           EdgeType::PARAMETER_IN,
-      EdgeType::PARAMETER_OUT,      EdgeType::PARAMETER_FIELD,
-      EdgeType::VAL_DEP,            EdgeType::GLOBAL_DEP,
-      EdgeType::CONTROLDEP_CALLINV, EdgeType::CONTROLDEP_CALLRET,
-      EdgeType::CONTROLDEP_ENTRY,   EdgeType::CONTROLDEP_BR,
-      EdgeType::CONTROLDEP_IND_BR};
+  return {EdgeType::DATA_DEF_USE,
+          EdgeType::DATA_RAW,
+          EdgeType::DATA_READ,
+          EdgeType::DATA_ALIAS,
+          EdgeType::DATA_RET,
+          EdgeType::PARAMETER_IN,
+          EdgeType::PARAMETER_OUT,
+          EdgeType::PARAMETER_FIELD,
+          EdgeType::VAL_DEP,
+          EdgeType::GLOBAL_DEP,
+          EdgeType::CONTROLDEP_CALLINV,
+          EdgeType::CONTROLDEP_CALLRET,
+          EdgeType::CONTROLDEP_ENTRY,
+          EdgeType::CONTROLDEP_BR,
+          EdgeType::CONTROLDEP_IND_BR};
 }
 
 std::set<EdgeType> MotionLegalityQuery::controlEdgeTypes() {
@@ -64,7 +70,8 @@ MotionLegalityQuery::runCheck(Node &moving_node, Node &anchor_node,
     return result;
   }
 
-  if (policy.require_same_function && moving_node.getFunc() != anchor_node.getFunc()) {
+  if (policy.require_same_function &&
+      moving_node.getFunc() != anchor_node.getFunc()) {
     result.reason = "Node motion across functions is disallowed";
     return result;
   }

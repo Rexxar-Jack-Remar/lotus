@@ -178,7 +178,8 @@ bool pdg::pdgutils::isNodeBitOffsetMatchGEPBitOffset(Node &n,
   DIType *node_di_type = n.getDIType();
   if (node_di_type == nullptr || gep_bit_offset == INT_MIN)
     return false;
-  int64_t node_bit_offset = static_cast<int64_t>(node_di_type->getOffsetInBits());
+  int64_t node_bit_offset =
+      static_cast<int64_t>(node_di_type->getOffsetInBits());
   if (gep_bit_offset == node_bit_offset)
     return true;
   return false;
@@ -386,7 +387,8 @@ std::set<Value *> pdg::pdgutils::computeAddrTakenVarsFromAlloc(AllocaInst &ai) {
       }
 
       if (auto *li = dyn_cast<LoadInst>(user)) {
-        if (li->getPointerOperand() == tracked && li->getType()->isPointerTy()) {
+        if (li->getPointerOperand() == tracked &&
+            li->getType()->isPointerTy()) {
           addr_taken_vars.insert(li);
           if (visited.insert(li).second)
             worklist.push_back(li);

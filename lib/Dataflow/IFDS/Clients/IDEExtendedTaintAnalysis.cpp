@@ -42,8 +42,10 @@ IDEExtendedTaintAnalysis::normal_flow(const llvm::Instruction *stmt,
   return out;
 }
 
-IDEExtendedTaintAnalysis::FactSet IDEExtendedTaintAnalysis::call_flow(
-    const llvm::CallBase *call, const llvm::Function *callee, const Fact &fact) {
+IDEExtendedTaintAnalysis::FactSet
+IDEExtendedTaintAnalysis::call_flow(const llvm::CallBase *call,
+                                    const llvm::Function *callee,
+                                    const Fact &fact) {
   FactSet out;
   if (fact == zero_fact()) {
     out.insert(fact);
@@ -77,7 +79,8 @@ IDEExtendedTaintAnalysis::FactSet IDEExtendedTaintAnalysis::return_flow(
 
   if (!call->getType()->isVoidTy()) {
     for (const llvm::BasicBlock &bb : *callee) {
-      if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
+      if (const auto *ret =
+              llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
         if (ret->getReturnValue() == exit_fact) {
           out.insert(call);
           break;
@@ -133,9 +136,9 @@ IDEExtendedTaintAnalysis::join(const Value &v1, const Value &v2) const {
 }
 
 IDEExtendedTaintAnalysis::EdgeFunction
-IDEExtendedTaintAnalysis::normal_edge_function(const llvm::Instruction * /*stmt*/,
-                                               const Fact & /*src_fact*/,
-                                               const Fact & /*tgt_fact*/) {
+IDEExtendedTaintAnalysis::normal_edge_function(
+    const llvm::Instruction * /*stmt*/, const Fact & /*src_fact*/,
+    const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }
 
@@ -146,29 +149,34 @@ IDEExtendedTaintAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
   return [](const Value &v) { return v; };
 }
 
-IDEExtendedTaintAnalysis::EdgeFunction IDEExtendedTaintAnalysis::return_edge_function(
-    const llvm::CallBase * /*call*/, const Fact & /*exit_fact*/,
-    const Fact & /*ret_fact*/) {
+IDEExtendedTaintAnalysis::EdgeFunction
+IDEExtendedTaintAnalysis::return_edge_function(const llvm::CallBase * /*call*/,
+                                               const Fact & /*exit_fact*/,
+                                               const Fact & /*ret_fact*/) {
   return [](const Value &v) { return v; };
 }
 
 IDEExtendedTaintAnalysis::EdgeFunction
-IDEExtendedTaintAnalysis::call_to_return_edge_function(const llvm::CallBase * /*call*/,
-                                                       const Fact & /*src_fact*/,
-                                                       const Fact & /*tgt_fact*/) {
+IDEExtendedTaintAnalysis::call_to_return_edge_function(
+    const llvm::CallBase * /*call*/, const Fact & /*src_fact*/,
+    const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }
 
-IDEExtendedTaintAnalysis::FactSet IDEExtendedTaintAnalysis::summary_flow(
-    const llvm::CallBase *call, const llvm::Function *callee, const Fact &fact) {
+IDEExtendedTaintAnalysis::FactSet
+IDEExtendedTaintAnalysis::summary_flow(const llvm::CallBase *call,
+                                       const llvm::Function *callee,
+                                       const Fact &fact) {
   FactSet out;
   if (!call || !callee) {
     return out;
   }
-  if (is_source_function(callee) && fact == zero_fact() && !call->getType()->isVoidTy()) {
+  if (is_source_function(callee) && fact == zero_fact() &&
+      !call->getType()->isVoidTy()) {
     out.insert(call);
   }
-  if (is_sanitizer_function(callee) && fact != zero_fact() && !call->getType()->isVoidTy()) {
+  if (is_sanitizer_function(callee) && fact != zero_fact() &&
+      !call->getType()->isVoidTy()) {
     out.insert(call);
   }
   return out;

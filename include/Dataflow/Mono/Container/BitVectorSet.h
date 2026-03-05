@@ -14,11 +14,13 @@
 namespace mono {
 
 /**
- * @brief A set implementation backed by a bit-vector for efficient dataflow analysis
+ * @brief A set implementation backed by a bit-vector for efficient dataflow
+ * analysis
  *
- * This class provides a set-like interface optimized for monotone dataflow analyses
- * where the universe of elements is fixed and known in advance. Operations like
- * union, intersection, and equality checks are O(N/64) where N is the universe size.
+ * This class provides a set-like interface optimized for monotone dataflow
+ * analyses where the universe of elements is fixed and known in advance.
+ * Operations like union, intersection, and equality checks are O(N/64) where N
+ * is the universe size.
  *
  * **Performance characteristics:**
  * - Union/Intersection/Difference: O(N/64) bit operations
@@ -29,7 +31,8 @@ namespace mono {
  * **When to use:**
  * - Large universe (>100 elements) with frequent set operations
  * - Many temporary set allocations during analysis
- * - Performance-critical analyses (e.g., reaching definitions, available expressions)
+ * - Performance-critical analyses (e.g., reaching definitions, available
+ * expressions)
  *
  * **When NOT to use:**
  * - Small universe (<20 elements) - std::set is faster due to cache locality
@@ -59,8 +62,9 @@ public:
   /**
    * @brief Sets the universe for this bit-vector set
    *
-   * This must be called before any insert/contains operations. All BitVectorSets
-   * in a dataflow analysis should share the same universe for correctness.
+   * This must be called before any insert/contains operations. All
+   * BitVectorSets in a dataflow analysis should share the same universe for
+   * correctness.
    *
    * @param Universe The complete set of possible elements
    */
@@ -190,9 +194,7 @@ public:
     return Bits == Other.Bits;
   }
 
-  bool operator!=(const BitVectorSet &Other) const {
-    return !(*this == Other);
-  }
+  bool operator!=(const BitVectorSet &Other) const { return !(*this == Other); }
 
   /**
    * @brief Iterator support for range-based for loops
@@ -270,7 +272,8 @@ private:
 };
 
 /**
- * @brief Helper function to create a universe from all instructions in a function
+ * @brief Helper function to create a universe from all instructions in a
+ * function
  *
  * This is useful for instruction-based dataflow analyses (reaching definitions,
  * available expressions, etc.)
@@ -278,8 +281,7 @@ private:
  * @param F The function
  * @return A vector of all instructions in the function
  */
-inline std::vector<llvm::Instruction *>
-getAllInstructions(llvm::Function *F) {
+inline std::vector<llvm::Instruction *> getAllInstructions(llvm::Function *F) {
   std::vector<llvm::Instruction *> Result;
   if (F == nullptr) {
     return Result;

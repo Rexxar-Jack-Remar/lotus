@@ -1,7 +1,6 @@
 #ifndef CHECKER_PULSE_PULSECHECKER_H
 #define CHECKER_PULSE_PULSECHECKER_H
 
-#include "Checker/Pulse/Report/PulseDiagnostic.h"
 #include "Checker/Pulse/Core/PulseValueHistory.h"
 #include "Checker/Pulse/Domain/PulseDisjunctiveDomain.h"
 #include "Checker/Pulse/Domain/PulseDomain.h"
@@ -10,6 +9,7 @@
 #include "Checker/Pulse/Domain/PulseOperations.h"
 #include "Checker/Pulse/Interproc/PulseSummary.h"
 #include "Checker/Pulse/Interproc/PulseTransitiveInfo.h"
+#include "Checker/Pulse/Report/PulseDiagnostic.h"
 #include "Checker/Pulse/Report/PulseLatentIssue.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"

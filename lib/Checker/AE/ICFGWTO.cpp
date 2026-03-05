@@ -1,12 +1,12 @@
 #include "Checker/AE/ICFGWTO.h"
 
-#include <llvm/IR/CFG.h>
-
 #include <algorithm>
 #include <functional>
 #include <stack>
 #include <unordered_map>
 #include <unordered_set>
+
+#include <llvm/IR/CFG.h>
 
 namespace lotus {
 namespace analysis {
@@ -15,9 +15,9 @@ namespace {
 
 using BB = llvm::BasicBlock;
 
-static bool hasSelfLoop(
-    const BB *bb,
-    const std::unordered_set<const BB *> *allowed = nullptr) {
+static bool
+hasSelfLoop(const BB *bb,
+            const std::unordered_set<const BB *> *allowed = nullptr) {
   for (const BB *succ : llvm::successors(bb)) {
     if (succ != bb)
       continue;
@@ -234,10 +234,10 @@ void ICFGWTO::buildWTO() {
   };
 
   for (const auto &topScc : computeSCCs(rpo, succAll)) {
-    const BB *preferred = (std::find(topScc.begin(), topScc.end(), entry) !=
-                           topScc.end())
-                              ? entry
-                              : nullptr;
+    const BB *preferred =
+        (std::find(topScc.begin(), topScc.end(), entry) != topScc.end())
+            ? entry
+            : nullptr;
     if (const ICFGWTOComp *comp = buildFromNodes(topScc, preferred)) {
       components.push_back(comp);
     }

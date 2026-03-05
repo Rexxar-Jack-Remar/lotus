@@ -3,10 +3,11 @@
  * Author: rainoftime
  */
 #include "Dataflow/Mono/Analyses/Intra/IntraConstantPropagation.h"
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
+
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <memory>
 
@@ -94,8 +95,7 @@ ConstantPropagationValue evalBinaryOp(unsigned Opcode,
     if (RV == 0) {
       return makeBottom();
     }
-    return makeConst(
-        static_cast<uint64_t>(LV) / static_cast<uint64_t>(RV));
+    return makeConst(static_cast<uint64_t>(LV) / static_cast<uint64_t>(RV));
   case llvm::Instruction::SRem:
     if (RV == 0) {
       return makeBottom();
@@ -105,8 +105,7 @@ ConstantPropagationValue evalBinaryOp(unsigned Opcode,
     if (RV == 0) {
       return makeBottom();
     }
-    return makeConst(
-        static_cast<uint64_t>(LV) % static_cast<uint64_t>(RV));
+    return makeConst(static_cast<uint64_t>(LV) % static_cast<uint64_t>(RV));
   default:
     // Unknown opcode: result is unknown (Top), not unreachable (Bottom).
     return makeTop();
@@ -187,12 +186,15 @@ public:
     ConstantPropagationMap Out;
 
     // Helper: join two per-variable values.
-    auto joinValues = [](const ConstantPropagationValue &A,
-                         const ConstantPropagationValue &B)
-        -> ConstantPropagationValue {
-      if (equalValue(A, B)) return A;
-      if (isBottom(A)) return B;
-      if (isBottom(B)) return A;
+    auto joinValues =
+        [](const ConstantPropagationValue &A,
+           const ConstantPropagationValue &B) -> ConstantPropagationValue {
+      if (equalValue(A, B))
+        return A;
+      if (isBottom(A))
+        return B;
+      if (isBottom(B))
+        return A;
       // Both non-Bottom and different → Top.
       return makeTop();
     };
@@ -267,18 +269,20 @@ private:
   // agree, keep the value; otherwise the result is unknown (Top), not
   // unreachable (Bottom).  Returning Bottom here was unsound: it caused
   // a may-aliased store to mark the location as unreachable.
-  static ConstantPropagationValue weakJoin(const ConstantPropagationValue &OldVal,
-                                           const ConstantPropagationValue &NewVal) {
+  static ConstantPropagationValue
+  weakJoin(const ConstantPropagationValue &OldVal,
+           const ConstantPropagationValue &NewVal) {
     if (equalValue(OldVal, NewVal)) {
       return OldVal;
     }
     return makeTop(); // conflicting values → unknown
   }
 
-  void collectAliasedPointers(
-      const llvm::Value *Ptr, const ConstantPropagationMap &State,
-      std::vector<const llvm::Value *> &MustAliases,
-      std::vector<const llvm::Value *> &MayAliases) const {
+  void
+  collectAliasedPointers(const llvm::Value *Ptr,
+                         const ConstantPropagationMap &State,
+                         std::vector<const llvm::Value *> &MustAliases,
+                         std::vector<const llvm::Value *> &MayAliases) const {
     if (Ptr == nullptr || !Ptr->getType()->isPointerTy()) {
       return;
     }
@@ -317,8 +321,9 @@ private:
     }
   }
 
-  ConstantPropagationValue resolveAliasValue(const llvm::Value *Ptr,
-                                             const ConstantPropagationMap &In) const {
+  ConstantPropagationValue
+  resolveAliasValue(const llvm::Value *Ptr,
+                    const ConstantPropagationMap &In) const {
     if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
         !Ptr->getType()->isPointerTy()) {
       return makeTop();

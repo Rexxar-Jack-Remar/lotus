@@ -1,16 +1,16 @@
 #ifndef LOTUS_DATAFLOW_MONO_CORE_PROBLEM_H_
 #define LOTUS_DATAFLOW_MONO_CORE_PROBLEM_H_
 
-#include "Dataflow/ControlFlow/FlowDirection.h"
-#include "Dataflow/ControlFlow/InterCFG.h"
-#include "Dataflow/ControlFlow/IntraCFG.h"
-#include "Dataflow/Mono/Support/Soundness.h"
-
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "Dataflow/ControlFlow/FlowDirection.h"
+#include "Dataflow/ControlFlow/InterCFG.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
+#include "Dataflow/Mono/Support/Soundness.h"
 
 #include <cstddef>
 #include <string>
@@ -34,10 +34,12 @@ struct HasNoConfigurationType {};
  * @brief Base class for intraprocedural monotone dataflow analyses
  *
  * This defines the interface that all intraprocedural analyses must implement.
- * The framework operates on a lattice of facts (mono_container_t) and propagates
- * them along the control flow graph using the normalFlow and merge functions.
+ * The framework operates on a lattice of facts (mono_container_t) and
+ * propagates them along the control flow graph using the normalFlow and merge
+ * functions.
  *
- * @tparam AnalysisDomainTy The analysis domain specifying types (nodes, facts, etc.)
+ * @tparam AnalysisDomainTy The analysis domain specifying types (nodes, facts,
+ * etc.)
  */
 template <typename AnalysisDomainTy> class IntraMonoProblem {
 public:
@@ -189,8 +191,8 @@ public:
   /**
    * @brief Pretty-print a fact container (for debugging)
    */
-  virtual void printContainer(llvm::raw_ostream &, const mono_container_t &) const {
-  }
+  virtual void printContainer(llvm::raw_ostream &,
+                              const mono_container_t &) const {}
 
   // ========================================
   // Configuration accessors
@@ -304,8 +306,8 @@ public:
    * @return Facts at the return site (bypassing the call)
    */
   virtual mono_container_t callToRetFlow(n_t CallSite, n_t RetSite,
-                                        llvm::ArrayRef<f_t> Callees,
-                                        const mono_container_t &In) = 0;
+                                         llvm::ArrayRef<f_t> Callees,
+                                         const mono_container_t &In) = 0;
 
   // ========================================
   // Call graph resolution

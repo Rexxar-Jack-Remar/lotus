@@ -3,7 +3,8 @@
 
 /**
  * \file
- * \brief Expression AST for polynomial (Exp0) and linearized (Exp1) equation systems.
+ * \brief Expression AST for polynomial (Exp0) and linearized (Exp1) equation
+ * systems.
  *
  * Interprocedural dataflow is formulated as X = f(X) over a semiring. NPA
  * linearizes f at the current approximation ν to obtain a system of \e linear
@@ -26,16 +27,13 @@
 
 namespace npa {
 
-template <class D>
-struct Exp0;
-template <class D>
-using E0 = std::shared_ptr<Exp0<D>>;
+template <class D> struct Exp0;
+template <class D> using E0 = std::shared_ptr<Exp0<D>>;
 
 /// Polynomial expression (full equation system f(X)).
 /// Kinds: Term (constant), Seq (c·t), Call (procedure call), Cond, Ndet,
 /// Hole/Bound (variable), Concat (t1·X·t2, LCFL form), InfClos (Kleene star).
-template <class D>
-struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
+template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
   using V = DomVal<D>;
   using T = DomTest<D>;
   enum K { Term, Seq, Call, Cond, Ndet, Hole, Bound, Concat, InfClos };
@@ -114,19 +112,28 @@ struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
   }
 };
 
-template <class D>
-struct Exp1;
-template <class D>
-using E1 = std::shared_ptr<Exp1<D>>;
+template <class D> struct Exp1;
+template <class D> using E1 = std::shared_ptr<Exp1<D>>;
 
 /// Linearized expression (right-hand side of Df|ν(X) + δ = X). Adds Add/Sub
 /// for combine and differential; Concat/InfClos preserved from Exp0 (LCFL).
-template <class D>
-struct Exp1 : Dirty {
+template <class D> struct Exp1 : Dirty {
   using V = DomVal<D>;
   using T = DomTest<D>;
-  enum K { Term, Seq, SeqR, Call, Cond, Ndet, Hole, Bound, Concat, InfClos,
-           Add, Sub };
+  enum K {
+    Term,
+    Seq,
+    SeqR,
+    Call,
+    Cond,
+    Ndet,
+    Hole,
+    Bound,
+    Concat,
+    InfClos,
+    Add,
+    Sub
+  };
   K k;
   V c;
   Symbol sym;
@@ -222,11 +229,11 @@ struct Exp1 : Dirty {
 
 /// Collects variable symbols on which a linearized expression depends
 /// (Hole, Call, Concat, InfClos). Used for worklist and dependency graph.
-template <class D>
-struct DepFinder {
+template <class D> struct DepFinder {
   using Set = std::unordered_set<Symbol>;
   static void find(const E1<D> &e, Set &deps) {
-    if (!e) return;
+    if (!e)
+      return;
     using K = typename Exp1<D>::K;
     switch (e->k) {
     case K::Hole:
@@ -250,9 +257,12 @@ struct DepFinder {
       find(e->t, deps);
       break;
     default:
-      if (e->t) find(e->t, deps);
-      if (e->t1) find(e->t1, deps);
-      if (e->t2) find(e->t2, deps);
+      if (e->t)
+        find(e->t, deps);
+      if (e->t1)
+        find(e->t1, deps);
+      if (e->t2)
+        find(e->t2, deps);
       break;
     }
   }

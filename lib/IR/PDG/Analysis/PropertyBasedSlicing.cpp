@@ -28,8 +28,9 @@ static std::string trim(const std::string &s) {
 }
 
 static std::string toLower(std::string s) {
-  std::transform(s.begin(), s.end(), s.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
   return s;
 }
 
@@ -54,7 +55,8 @@ static bool containsInitMain(StringRef text) {
   compact.reserve(text.size());
   for (char c : text) {
     if (!std::isspace(static_cast<unsigned char>(c)))
-      compact.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+      compact.push_back(
+          static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
   }
   return hasToken(compact, "init(main())");
 }
@@ -128,7 +130,8 @@ static bool parseCallTarget(StringRef text, std::string &targetOut) {
       size_t start = i;
       while (i < s.size()) {
         char c = s[i];
-        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '$')
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' ||
+            c == '.' || c == '$')
           ++i;
         else
           break;
@@ -167,35 +170,40 @@ static bool isStructuredPropertyLine(StringRef line) {
 
 static PropertyKind parsePropertyName(StringRef name) {
   std::string lower = toLower(name.str());
-  if (lower == "valid-deref" || lower == "valid-free" || lower == "valid-memtrack" ||
-      lower == "valid-memsafety" || lower == "memsafety")
+  if (lower == "valid-deref" || lower == "valid-free" ||
+      lower == "valid-memtrack" || lower == "valid-memsafety" ||
+      lower == "memsafety")
     return PropertyKind::MemSafety;
-  if (lower == "overflow" || lower == "no-overflow" || lower == "signed-overflow")
+  if (lower == "overflow" || lower == "no-overflow" ||
+      lower == "signed-overflow")
     return PropertyKind::NoOverflow;
   if (lower == "termination" || lower == "end")
     return PropertyKind::Termination;
   if (lower == "null-deref")
     return PropertyKind::NullDeref;
-  if (lower == "def-behavior" || lower == "undefined-behavior" || 
+  if (lower == "def-behavior" || lower == "undefined-behavior" ||
       lower == "undef-behavior" || lower == "undefined")
     return PropertyKind::DefBehavior;
   if (lower == "valid-memcleanup" || lower == "memcleanup")
     return PropertyKind::MemCleanup;
   if (lower == "coverage-error-call" || lower == "cover-error")
     return PropertyKind::CoverageErrorCall;
-  if (lower == "coverage-branches" || lower == "@decisionedge" || lower == "cover-branches")
+  if (lower == "coverage-branches" || lower == "@decisionedge" ||
+      lower == "cover-branches")
     return PropertyKind::CoverageBranches;
-  if (lower == "coverage-statements" || lower == "@basicblockentry" || 
+  if (lower == "coverage-statements" || lower == "@basicblockentry" ||
       lower == "cover-statements" || lower == "coverage")
     return PropertyKind::CoverageStatements;
-  if (lower == "coverage-conditions" || lower == "@conditionedge" || lower == "cover-conditions")
+  if (lower == "coverage-conditions" || lower == "@conditionedge" ||
+      lower == "cover-conditions")
     return PropertyKind::CoverageConditions;
   // Note: "assert" and "assertions" map to PropertyKind::Assertions.
   // This is handled separately in parseFromString fallback parsing.
   return PropertyKind::Unknown;
 }
 
-static bool parseLTLLine(const std::string &line, PropertyRule &rule, std::string &error) {
+static bool parseLTLLine(const std::string &line, PropertyRule &rule,
+                         std::string &error) {
   const std::string lineTrim = trim(line);
   std::string lowerLine = toLower(lineTrim);
 
@@ -256,16 +264,26 @@ static bool parseLTLLine(const std::string &line, PropertyRule &rule, std::strin
     }
 
     for (const auto &pair : {
-             std::pair<std::string, PropertyKind>{"valid-deref", PropertyKind::MemSafety},
-             std::pair<std::string, PropertyKind>{"valid-free", PropertyKind::MemSafety},
-             std::pair<std::string, PropertyKind>{"valid-memtrack", PropertyKind::MemSafety},
-             std::pair<std::string, PropertyKind>{"valid-memsafety", PropertyKind::MemSafety},
-             std::pair<std::string, PropertyKind>{"overflow", PropertyKind::NoOverflow},
-             std::pair<std::string, PropertyKind>{"termination", PropertyKind::Termination},
-             std::pair<std::string, PropertyKind>{"end", PropertyKind::Termination},
-             std::pair<std::string, PropertyKind>{"null-deref", PropertyKind::NullDeref},
-             std::pair<std::string, PropertyKind>{"def-behavior", PropertyKind::DefBehavior},
-             std::pair<std::string, PropertyKind>{"valid-memcleanup", PropertyKind::MemCleanup},
+             std::pair<std::string, PropertyKind>{"valid-deref",
+                                                  PropertyKind::MemSafety},
+             std::pair<std::string, PropertyKind>{"valid-free",
+                                                  PropertyKind::MemSafety},
+             std::pair<std::string, PropertyKind>{"valid-memtrack",
+                                                  PropertyKind::MemSafety},
+             std::pair<std::string, PropertyKind>{"valid-memsafety",
+                                                  PropertyKind::MemSafety},
+             std::pair<std::string, PropertyKind>{"overflow",
+                                                  PropertyKind::NoOverflow},
+             std::pair<std::string, PropertyKind>{"termination",
+                                                  PropertyKind::Termination},
+             std::pair<std::string, PropertyKind>{"end",
+                                                  PropertyKind::Termination},
+             std::pair<std::string, PropertyKind>{"null-deref",
+                                                  PropertyKind::NullDeref},
+             std::pair<std::string, PropertyKind>{"def-behavior",
+                                                  PropertyKind::DefBehavior},
+             std::pair<std::string, PropertyKind>{"valid-memcleanup",
+                                                  PropertyKind::MemCleanup},
          }) {
       if (hasKeyword(lowerContent, pair.first)) {
         rule.kind = pair.second;
@@ -325,10 +343,13 @@ static bool isDefBehaviorInstruction(const Instruction &I) {
   const auto *BO = dyn_cast<BinaryOperator>(&I);
   if (BO) {
     // Division by zero, shift overflow, etc.
-    if (BO->getOpcode() == Instruction::UDiv || BO->getOpcode() == Instruction::SDiv ||
-        BO->getOpcode() == Instruction::URem || BO->getOpcode() == Instruction::SRem)
+    if (BO->getOpcode() == Instruction::UDiv ||
+        BO->getOpcode() == Instruction::SDiv ||
+        BO->getOpcode() == Instruction::URem ||
+        BO->getOpcode() == Instruction::SRem)
       return true;
-    if (BO->getOpcode() == Instruction::Shl || BO->getOpcode() == Instruction::LShr ||
+    if (BO->getOpcode() == Instruction::Shl ||
+        BO->getOpcode() == Instruction::LShr ||
         BO->getOpcode() == Instruction::AShr)
       return true;
   }
@@ -374,13 +395,13 @@ bool PropertySpec::parseFromFile(const std::string &path, PropertySpec &out,
   return parseFromString(buffer.str(), out, error);
 }
 
-bool PropertySpec::parseFromString(const std::string &content, PropertySpec &out,
-                                   std::string &error) {
+bool PropertySpec::parseFromString(const std::string &content,
+                                   PropertySpec &out, std::string &error) {
   PropertySpec parsed;
   std::istringstream stream(content);
   std::string line;
   size_t lineno = 0;
-  
+
   while (std::getline(stream, line)) {
     ++lineno;
     line = trim(line);
@@ -427,15 +448,17 @@ bool PropertySpec::parseFromString(const std::string &content, PropertySpec &out
         parsed._rules.push_back(rule);
         continue;
       }
-      
-      error = "line " + std::to_string(lineno) + ": unsupported property syntax";
+
+      error =
+          "line " + std::to_string(lineno) + ": unsupported property syntax";
       return false;
     }
-    
+
     parsed._rules.push_back(rule);
     if (parsed._type == PropertyType::CHECK && rule.type == PropertyType::COVER)
       parsed._type = PropertyType::COVER;
-    else if (parsed._type == PropertyType::COVER && rule.type == PropertyType::CHECK) {
+    else if (parsed._type == PropertyType::COVER &&
+             rule.type == PropertyType::CHECK) {
       error = "mixing CHECK and COVER properties not supported";
       return false;
     }
@@ -481,13 +504,14 @@ PropertyBasedSlicing::resolveCriteria(const Module &M,
 
         if (targetLower == "reach_error") {
           targets.push_back("__verifier_error");
-        } else if (targetLower == "__verifier_error" || targetLower == "__verifier_error()") {
+        } else if (targetLower == "__verifier_error" ||
+                   targetLower == "__verifier_error()") {
           targets.push_back("reach_error");
         } else if (targetLower == "__assert_fail") {
           targets.push_back("__verifier_error");
         }
       }
-      
+
       for (const Function &F : M) {
         if (F.isDeclaration())
           continue;
@@ -512,7 +536,8 @@ PropertyBasedSlicing::resolveCriteria(const Module &M,
       continue;
     }
 
-    auto isCallTo = [](const Instruction &I, const std::vector<std::string> &funcNames) -> bool {
+    auto isCallTo = [](const Instruction &I,
+                       const std::vector<std::string> &funcNames) -> bool {
       const auto *CB = dyn_cast<CallBase>(&I);
       if (!CB)
         return false;
@@ -528,11 +553,13 @@ PropertyBasedSlicing::resolveCriteria(const Module &M,
     };
 
     const bool hasMemMarkers =
-        (rule.kind == PropertyKind::MemSafety || rule.kind == PropertyKind::MemCleanup) &&
+        (rule.kind == PropertyKind::MemSafety ||
+         rule.kind == PropertyKind::MemCleanup) &&
         moduleHasAnyCall(M, {"__INSTR_mark_pointer", "__INSTR_mark_free",
                              "__INSTR_mark_allocation", "__INSTR_mark_exit"});
     const bool hasOverflowMarkers =
-        (rule.kind == PropertyKind::NoOverflow || rule.kind == PropertyKind::DefBehavior) &&
+        (rule.kind == PropertyKind::NoOverflow ||
+         rule.kind == PropertyKind::DefBehavior) &&
         moduleHasAnyCall(M, {"__VERIFIER_error", "__symbiotic_check_overflow"});
     const bool hasNullDerefMarkers =
         rule.kind == PropertyKind::NullDeref &&
@@ -547,8 +574,9 @@ PropertyBasedSlicing::resolveCriteria(const Module &M,
           case PropertyKind::MemSafety:
           case PropertyKind::MemCleanup: {
             if (hasMemMarkers) {
-              if (isCallTo(I, {"__INSTR_mark_pointer", "__INSTR_mark_free",
-                               "__INSTR_mark_allocation", "__INSTR_mark_exit"})) {
+              if (isCallTo(I,
+                           {"__INSTR_mark_pointer", "__INSTR_mark_free",
+                            "__INSTR_mark_allocation", "__INSTR_mark_exit"})) {
                 addInstructionNode(I);
               }
             } else if (isMemSafetyInstruction(I)) {
@@ -559,12 +587,15 @@ PropertyBasedSlicing::resolveCriteria(const Module &M,
           case PropertyKind::NoOverflow:
           case PropertyKind::DefBehavior: {
             if (hasOverflowMarkers) {
-              if (isCallTo(I, {"__VERIFIER_error", "__symbiotic_check_overflow"}))
+              if (isCallTo(I,
+                           {"__VERIFIER_error", "__symbiotic_check_overflow"}))
                 addInstructionNode(I);
             } else {
-              if (rule.kind == PropertyKind::NoOverflow && isSignedArithInstruction(I))
+              if (rule.kind == PropertyKind::NoOverflow &&
+                  isSignedArithInstruction(I))
                 addInstructionNode(I);
-              else if (rule.kind == PropertyKind::DefBehavior && isDefBehaviorInstruction(I))
+              else if (rule.kind == PropertyKind::DefBehavior &&
+                       isDefBehaviorInstruction(I))
                 addInstructionNode(I);
             }
             break;
@@ -591,7 +622,8 @@ PropertyBasedSlicing::resolveCriteria(const Module &M,
           case PropertyKind::CoverageBranches:
           case PropertyKind::CoverageStatements:
           case PropertyKind::CoverageConditions:
-            // Symbiotic does not define slicing criteria for branch/condition/statement coverage.
+            // Symbiotic does not define slicing criteria for
+            // branch/condition/statement coverage.
             break;
           default:
             break;

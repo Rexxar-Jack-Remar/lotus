@@ -50,8 +50,7 @@ DomVal<D> compute_delta(const DomVal<D> &v, const DomVal<D> &nu_sym,
 }
 } // namespace detail
 
-template <class D, class ITER>
-struct Solver {
+template <class D, class ITER> struct Solver {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
   static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
@@ -72,7 +71,8 @@ struct Solver {
       cur.swap(nxt);
       ++it;
       if (stable) {
-        if (verbose) std::cerr << "[conv] " << it << "\n";
+        if (verbose)
+          std::cerr << "[conv] " << it << "\n";
         break;
       }
     }
@@ -86,15 +86,14 @@ struct Solver {
 
 /// Kleene iteration: one round = evaluate all equations under current ν.
 /// κ^(i+1) = f(κ^(i)); no linear correction (Esparza et al. Eqn. (1)).
-template <class D>
-struct KleeneIter {
+template <class D> struct KleeneIter {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
-  static std::vector<std::pair<Symbol, V>>
-  init(const std::vector<Eqn> &eqns) {
+  static std::vector<std::pair<Symbol, V>> init(const std::vector<Eqn> &eqns) {
     std::vector<std::pair<Symbol, V>> cur;
     cur.reserve(eqns.size());
-    for (auto &e : eqns) cur.emplace_back(e.first, D::zero());
+    for (auto &e : eqns)
+      cur.emplace_back(e.first, D::zero());
     return cur;
   }
   static std::vector<std::pair<Symbol, V>>
@@ -102,23 +101,24 @@ struct KleeneIter {
       const std::vector<std::pair<Symbol, V>> &binds,
       LinearStrategy = LinearStrategy::Worklist) {
     std::unordered_map<Symbol, V> nu;
-    for (auto &b : binds) nu[b.first] = b.second;
+    for (auto &b : binds)
+      nu[b.first] = b.second;
     std::vector<std::pair<Symbol, V>> out;
-    for (auto &e : eqns) out.emplace_back(e.first, I0<D>::eval(verbose, nu, e.second));
+    for (auto &e : eqns)
+      out.emplace_back(e.first, I0<D>::eval(verbose, nu, e.second));
     return out;
   }
 };
 
 /// Newton iteration: one round = f(ν) plus least solution of Df|ν(X)+δ = X.
 /// δ = f(ν)−ν (or f(ν) when idempotent); Δ = solve linear system; ν' = ν⊕Δ.
-template <class D>
-struct NewtonIter {
+template <class D> struct NewtonIter {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
-  static std::vector<std::pair<Symbol, V>>
-  init(const std::vector<Eqn> &eqns) {
+  static std::vector<std::pair<Symbol, V>> init(const std::vector<Eqn> &eqns) {
     std::unordered_map<Symbol, V> nu0;
-    for (auto &e : eqns) nu0[e.first] = D::zero();
+    for (auto &e : eqns)
+      nu0[e.first] = D::zero();
     std::vector<std::pair<Symbol, V>> cur;
     cur.reserve(eqns.size());
     for (auto &e : eqns)
@@ -130,7 +130,8 @@ struct NewtonIter {
       const std::vector<std::pair<Symbol, V>> &binds,
       LinearStrategy linStrat = LinearStrategy::Worklist) {
     std::unordered_map<Symbol, V> nu;
-    for (auto &b : binds) nu[b.first] = b.second;
+    for (auto &b : binds)
+      nu[b.first] = b.second;
     std::vector<std::pair<Symbol, E1<D>>> rhs;
     for (auto &e : eqns) {
       V v = I0<D>::eval(verbose, nu, e.second);
@@ -145,9 +146,11 @@ struct NewtonIter {
     if (linStrat == LinearStrategy::Naive) {
       delta = fix_vec<D>(verbose, init, [&](const std::vector<V> &cur) {
         std::unordered_map<Symbol, V> env;
-        for (size_t i = 0; i < cur.size(); ++i) env[rhs[i].first] = cur[i];
+        for (size_t i = 0; i < cur.size(); ++i)
+          env[rhs[i].first] = cur[i];
         std::vector<V> nxt;
-        for (auto &p : rhs) nxt.push_back(I1<D>::eval(false, env, p.second));
+        for (auto &p : rhs)
+          nxt.push_back(I1<D>::eval(false, env, p.second));
         return nxt;
       });
     } else if (linStrat == LinearStrategy::SCC) {
@@ -170,10 +173,8 @@ struct NewtonIter {
   }
 };
 
-template <class D>
-using KleeneSolver = Solver<D, KleeneIter<D>>;
-template <class D>
-struct NewtonSolver {
+template <class D> using KleeneSolver = Solver<D, KleeneIter<D>>;
+template <class D> struct NewtonSolver {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
   static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
@@ -181,12 +182,14 @@ struct NewtonSolver {
         LinearStrategy linStrat = LinearStrategy::Worklist) {
     // JACM (Esparza et al.) shows: for idempotent + commutative semirings,
     // Newton terminates after at most n iterations for a system of n equations.
-    // We only apply this bound when the domain explicitly declares commutativity.
+    // We only apply this bound when the domain explicitly declares
+    // commutativity.
     int effective_max = max;
     if (effective_max < 0 && D::idempotent && domain_commutative_extend<D>()) {
       effective_max = static_cast<int>(eqns.size());
     }
-    return Solver<D, NewtonIter<D>>::solve(eqns, verbose, effective_max, linStrat);
+    return Solver<D, NewtonIter<D>>::solve(eqns, verbose, effective_max,
+                                           linStrat);
   }
 };
 

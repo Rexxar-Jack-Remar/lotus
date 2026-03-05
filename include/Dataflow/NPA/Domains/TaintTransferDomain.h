@@ -2,8 +2,10 @@
 #define NPA_TAINT_TRANSFER_DOMAIN_H
 
 #include "Utils/LLVM/SystemHeaders.h"
-#include <llvm/ADT/APInt.h>
+
 #include <vector>
+
+#include <llvm/ADT/APInt.h>
 
 namespace npa {
 
@@ -27,7 +29,8 @@ public:
   static bool equal(const value_type &a, const value_type &b);
   static value_type combine(const value_type &a, const value_type &b);
   static value_type ndetCombine(const value_type &a, const value_type &b);
-  static value_type condCombine(bool /*phi*/, const value_type &t, const value_type &e);
+  static value_type condCombine(bool /*phi*/, const value_type &t,
+                                const value_type &e);
   static value_type extend(const value_type &a, const value_type &b);
   static value_type extend_lin(const value_type &a, const value_type &b);
   static value_type subtract(const value_type &a, const value_type &b);
@@ -38,7 +41,8 @@ public:
   static void addGen(value_type &f, unsigned bit);
 
 private:
-  static llvm::APInt applyRel(const std::vector<llvm::APInt> &rel, const llvm::APInt &in);
+  static llvm::APInt applyRel(const std::vector<llvm::APInt> &rel,
+                              const llvm::APInt &in);
   static std::vector<llvm::APInt> identityRel();
   static unsigned BitWidth;
 };

@@ -1,11 +1,13 @@
 /**
  * @file ContextSensitiveSlicing.cpp
- * @brief Implementation of context-sensitive slicing (tabulation-style CFL-reachability)
+ * @brief Implementation of context-sensitive slicing (tabulation-style
+ * CFL-reachability)
  *
  * Implements context-sensitive slicing by tabulation over the PDG: valid paths
- * are those with properly matched call/return pairs (CFL-reachability). Optional
- * procedure summary caching avoids re-exploring the same callee for the same
- * caller context ("summary edges at callee"), matching IFDS-based slicer designs.
+ * are those with properly matched call/return pairs (CFL-reachability).
+ * Optional procedure summary caching avoids re-exploring the same callee for
+ * the same caller context ("summary edges at callee"), matching IFDS-based
+ * slicer designs.
  */
 
 #include "IR/PDG/Analysis/ContextSensitiveSlicing.h"
@@ -50,7 +52,8 @@ std::set<EdgeType> SliceOptions::getEdgeTypes() const {
   return types;
 }
 
-// ==================== ContextSensitiveSlicing Implementation ====================
+// ==================== ContextSensitiveSlicing Implementation
+// ====================
 
 ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::computeForwardSlice(
     Node &start_node, const std::set<EdgeType> &edge_types) {
@@ -96,28 +99,32 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::computeBackwardSlice(
   return traverseWithStack(end_nodes, edge_types, false, limits, diagnostics);
 }
 
-ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::computeForwardSlice(
-    const NodeSet &start_nodes, const SliceOptions &options,
-    CFLDiagnostics *diagnostics) {
+ContextSensitiveSlicing::NodeSet
+ContextSensitiveSlicing::computeForwardSlice(const NodeSet &start_nodes,
+                                             const SliceOptions &options,
+                                             CFLDiagnostics *diagnostics) {
   CFLTraversalLimits limits;
   limits.max_states = options.max_states;
   limits.max_stack_depth = options.max_stack_depth;
   std::set<EdgeType> edge_types = options.getEdgeTypes();
   SummaryCache cache;
   return traverseWithStack(start_nodes, edge_types, true, limits, diagnostics,
-                          options.use_summary_cache, options.use_summary_cache ? &cache : nullptr);
+                           options.use_summary_cache,
+                           options.use_summary_cache ? &cache : nullptr);
 }
 
-ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::computeBackwardSlice(
-    const NodeSet &end_nodes, const SliceOptions &options,
-    CFLDiagnostics *diagnostics) {
+ContextSensitiveSlicing::NodeSet
+ContextSensitiveSlicing::computeBackwardSlice(const NodeSet &end_nodes,
+                                              const SliceOptions &options,
+                                              CFLDiagnostics *diagnostics) {
   CFLTraversalLimits limits;
   limits.max_states = options.max_states;
   limits.max_stack_depth = options.max_stack_depth;
   std::set<EdgeType> edge_types = options.getEdgeTypes();
   SummaryCache cache;
   return traverseWithStack(end_nodes, edge_types, false, limits, diagnostics,
-                          options.use_summary_cache, options.use_summary_cache ? &cache : nullptr);
+                           options.use_summary_cache,
+                           options.use_summary_cache ? &cache : nullptr);
 }
 
 ContextSensitiveSlicing::NodeSet
@@ -158,9 +165,8 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
 
 ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
     const NodeSet &start_nodes, const std::set<EdgeType> &edge_types,
-    bool forward, const CFLTraversalLimits &limits,
-    CFLDiagnostics *diagnostics, bool use_summary_cache,
-    SummaryCache *summary_cache) {
+    bool forward, const CFLTraversalLimits &limits, CFLDiagnostics *diagnostics,
+    bool use_summary_cache, SummaryCache *summary_cache) {
   NodeSet slice;
   VisitedSet visited;
   std::queue<std::pair<Node *, std::vector<Node *>>> worklist;
@@ -202,7 +208,8 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
     }
     visited.insert(state);
 
-    // Summary cache: when we enter a callee (stack = [call_site]), reuse or compute summary.
+    // Summary cache: when we enter a callee (stack = [call_site]), reuse or
+    // compute summary.
     if (use_summary_cache && summary_cache != nullptr &&
         call_stack.size() == 1u) {
       Node *call_site = call_stack.back();
@@ -214,7 +221,8 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
         for (Node *n : it->second.reachable)
           slice.insert(n);
         if (it->second.returns_to_caller) {
-          auto new_state_return = std::make_pair(call_site, std::vector<Node *>());
+          auto new_state_return =
+              std::make_pair(call_site, std::vector<Node *>());
           if (visited.find(new_state_return) == visited.end()) {
             slice.insert(call_site);
             worklist.push({call_site, std::vector<Node *>()});
@@ -225,7 +233,8 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
       if (diagnostics != nullptr)
         diagnostics->summary_misses++;
       // Cache miss: compute summary for (current, call_site) for future hits.
-      (*summary_cache)[key] = computeProcedureSummary(current, call_site, edge_types, forward);
+      (*summary_cache)[key] =
+          computeProcedureSummary(current, call_site, edge_types, forward);
     }
 
     try {
@@ -293,9 +302,9 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
 }
 
 ContextSensitiveSlicing::ProcedureSummary
-ContextSensitiveSlicing::computeProcedureSummary(Node *entry_node, Node *call_site,
-                                                 const std::set<EdgeType> &edge_types,
-                                                 bool forward) {
+ContextSensitiveSlicing::computeProcedureSummary(
+    Node *entry_node, Node *call_site, const std::set<EdgeType> &edge_types,
+    bool forward) {
   ProcedureSummary sum;
   VisitedSet visited;
   std::queue<std::pair<Node *, std::vector<Node *>>> worklist;
@@ -550,7 +559,8 @@ bool ContextSensitiveSlicingUtils::isCFLValidPath(
     if (edge_type == EdgeType::CONTROLDEP_CALLINV) {
       call_stack.push_back(current);
     } else if (edge_type == EdgeType::CONTROLDEP_CALLRET) {
-      // Return edge: current (callee) -> next (call site); stack top must be the call site we return to.
+      // Return edge: current (callee) -> next (call site); stack top must be
+      // the call site we return to.
       if (call_stack.empty() || call_stack.back() != next) {
         return false;
       }

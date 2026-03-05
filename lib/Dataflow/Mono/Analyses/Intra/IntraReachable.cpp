@@ -1,4 +1,5 @@
 #include "Dataflow/Mono/Analyses/Intra/IntraReachable.h"
+
 #include "Dataflow/Mono/Container/Traits.h"
 #include "Dataflow/Mono/Core/Domain.h"
 #include "Dataflow/Mono/Core/Problem.h"
@@ -29,9 +30,9 @@ namespace mono {
  *
  * Author: rainoftime
  */
-std::unique_ptr<DataFlowResult> runReachableAnalysis(
-    Function *f,
-    const std::function<bool(Instruction *i)> &filter) {
+std::unique_ptr<DataFlowResult>
+runReachableAnalysis(Function *f,
+                     const std::function<bool(Instruction *i)> &filter) {
 
   if (f == nullptr || f->isDeclaration()) {
     return nullptr;
@@ -48,7 +49,7 @@ std::unique_ptr<DataFlowResult> runReachableAnalysis(
     }
 
     mono_container_t normalFlow(Instruction *Inst,
-                                 const mono_container_t &In) override {
+                                const mono_container_t &In) override {
       mono_container_t Out = In;
       if (Filter(Inst)) {
         Out.insert(Inst);
@@ -57,7 +58,7 @@ std::unique_ptr<DataFlowResult> runReachableAnalysis(
     }
 
     mono_container_t merge(const mono_container_t &Lhs,
-                            const mono_container_t &Rhs) override {
+                           const mono_container_t &Rhs) override {
       mono_container_t Out = Lhs;
       Out.unionWith(Rhs);
       return Out;
@@ -77,7 +78,8 @@ std::unique_ptr<DataFlowResult> runReachableAnalysis(
     // We seed every ReturnInst with the empty set.  normalFlow will add the
     // return instruction itself (if it passes the filter) and propagate
     // backward from there.
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
       auto *F = getEntryPoints().empty() ? nullptr : getEntryPoints().front();
       if (F == nullptr) {

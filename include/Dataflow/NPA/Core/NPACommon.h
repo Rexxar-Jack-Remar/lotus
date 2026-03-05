@@ -7,7 +7,8 @@
  *
  * Newtonian Program Analysis (NPA) solves systems of equations over
  * ω-continuous semirings. The framework expects a \e domain (semiring) D with:
- * - combine (⊕), extend (⊗), extend_lin (linearized equations), zero (⊥), one (1)
+ * - combine (⊕), extend (⊗), extend_lin (linearized equations), zero (⊥), one
+ * (1)
  * - subtract is required only for non-idempotent domains
  *
  * References:
@@ -51,8 +52,7 @@ enum class LinearStrategy {
   TensorProduct
 };
 
-template <class T>
-inline void hash_combine(std::size_t &h, const T &v) {
+template <class T> inline void hash_combine(std::size_t &h, const T &v) {
   h ^= std::hash<T>{}(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
 }
 
@@ -69,8 +69,7 @@ struct Stat {
  * ω-continuity; NPA uses the least fixed point μf of f. subtract() is
  * required only for non-idempotent domains.
  *********************************************************************/
-template <class D>
-struct DomainHasBase {
+template <class D> struct DomainHasBase {
   template <class T>
   static auto test(int)
       -> decltype(T::zero(), T::one(), T::combine(T::zero(), T::zero()),
@@ -79,108 +78,93 @@ struct DomainHasBase {
                   T::ndetCombine(T::zero(), T::zero()),
                   T::condCombine(typename T::test_type{}, T::zero(), T::zero()),
                   T::equal(T::zero(), T::zero()), std::true_type{});
-  template <class>
-  static std::false_type test(...);
+  template <class> static std::false_type test(...);
 
 public:
   static constexpr bool value =
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
-template <class D>
-struct DomainHasSubtract {
+template <class D> struct DomainHasSubtract {
   template <class T>
   static auto test(int)
       -> decltype(T::subtract(T::zero(), T::zero()), std::true_type{});
-  template <class>
-  static std::false_type test(...);
+  template <class> static std::false_type test(...);
 
 public:
   static constexpr bool value =
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
-template <class D>
-struct DomainHasChooseDelta {
+template <class D> struct DomainHasChooseDelta {
   template <class T>
   static auto test(int)
       -> decltype(T::choose_delta(T::zero(), T::zero()), std::true_type{});
-  template <class>
-  static std::false_type test(...);
+  template <class> static std::false_type test(...);
 
 public:
   static constexpr bool value =
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
-template <class D>
-struct DomainHasApproxEqual {
+template <class D> struct DomainHasApproxEqual {
   template <class T>
   static auto test(int)
       -> decltype(T::approx_equal(T::zero(), T::zero()), std::true_type{});
-  template <class>
-  static std::false_type test(...);
+  template <class> static std::false_type test(...);
 
 public:
   static constexpr bool value =
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
-template <class D>
-struct DomainHasCommutativeExtend {
+template <class D> struct DomainHasCommutativeExtend {
   template <class T>
   static auto test(int) -> decltype(T::commutative_extend, std::true_type{});
-  template <class>
-  static std::false_type test(...);
+  template <class> static std::false_type test(...);
 
 public:
   static constexpr bool value =
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
-template <class D>
-struct DomainHasMaxFixpointIters {
+template <class D> struct DomainHasMaxFixpointIters {
   template <class T>
   static auto test(int) -> decltype(T::max_fixpoint_iters, std::true_type{});
-  template <class>
-  static std::false_type test(...);
+  template <class> static std::false_type test(...);
 
 public:
   static constexpr bool value =
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
-template <class D>
-struct DomainHasMaxLinearSteps {
+template <class D> struct DomainHasMaxLinearSteps {
   template <class T>
   static auto test(int) -> decltype(T::max_linear_steps, std::true_type{});
-  template <class>
-  static std::false_type test(...);
+  template <class> static std::false_type test(...);
 
 public:
   static constexpr bool value =
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
-template <class D>
-using DomVal = typename D::value_type;
-template <class D>
-using DomTest = typename D::test_type;
+template <class D> using DomVal = typename D::value_type;
+template <class D> using DomTest = typename D::test_type;
 
-#define NPA_REQUIRE_DOMAIN(D)                                                 \
-  static_assert(DomainHasBase<D>::value,                                      \
-                "Invalid DOMAIN: missing required methods");                 \
-  static_assert(D::idempotent || DomainHasSubtract<D>::value ||               \
-                    DomainHasChooseDelta<D>::value,                           \
-                "Non-idempotent DOMAIN must implement subtract() or choose_delta()")
+#define NPA_REQUIRE_DOMAIN(D)                                                  \
+  static_assert(DomainHasBase<D>::value,                                       \
+                "Invalid DOMAIN: missing required methods");                   \
+  static_assert(                                                               \
+      D::idempotent || DomainHasSubtract<D>::value ||                          \
+          DomainHasChooseDelta<D>::value,                                      \
+      "Non-idempotent DOMAIN must implement subtract() or choose_delta()")
 
 struct Dirty {
   mutable bool dirty_ = true;
   void mark(bool d = true) const { dirty_ = d; }
 };
 
-template <class V>
-struct Optional {
+template <class V> struct Optional {
   bool has{false};
   V val{};
   Optional() = default;
@@ -200,12 +184,12 @@ struct Optional {
 namespace detail {
 template <class D>
 inline bool domain_equal_impl(const DomVal<D> &a, const DomVal<D> &b,
-                             std::true_type) {
+                              std::true_type) {
   return D::approx_equal(a, b);
 }
 template <class D>
 inline bool domain_equal_impl(const DomVal<D> &a, const DomVal<D> &b,
-                             std::false_type) {
+                              std::false_type) {
   return D::equal(a, b);
 }
 } // namespace detail
@@ -227,50 +211,41 @@ inline bool domain_leq_idempotent(const DomVal<D> &a, const DomVal<D> &b) {
 }
 
 namespace detail {
-template <class D>
-inline bool domain_commutative_extend_impl(std::true_type) {
+template <class D> inline bool domain_commutative_extend_impl(std::true_type) {
   return D::commutative_extend;
 }
-template <class D>
-inline bool domain_commutative_extend_impl(std::false_type) {
+template <class D> inline bool domain_commutative_extend_impl(std::false_type) {
   return false;
 }
 } // namespace detail
 
 /// Returns true if D declares commutative_extend, otherwise false.
-template <class D>
-inline bool domain_commutative_extend() {
+template <class D> inline bool domain_commutative_extend() {
   return detail::domain_commutative_extend_impl<D>(
       std::integral_constant<bool, DomainHasCommutativeExtend<D>::value>{});
 }
 
 namespace detail {
-template <class D>
-inline int domain_max_fixpoint_iters_impl(std::true_type) {
+template <class D> inline int domain_max_fixpoint_iters_impl(std::true_type) {
   return D::max_fixpoint_iters;
 }
-template <class D>
-inline int domain_max_fixpoint_iters_impl(std::false_type) {
+template <class D> inline int domain_max_fixpoint_iters_impl(std::false_type) {
   return -1;
 }
-template <class D>
-inline long domain_max_linear_steps_impl(std::true_type) {
+template <class D> inline long domain_max_linear_steps_impl(std::true_type) {
   return static_cast<long>(D::max_linear_steps);
 }
-template <class D>
-inline long domain_max_linear_steps_impl(std::false_type) {
+template <class D> inline long domain_max_linear_steps_impl(std::false_type) {
   return -1;
 }
 } // namespace detail
 
-template <class D>
-inline int domain_max_fixpoint_iters() {
+template <class D> inline int domain_max_fixpoint_iters() {
   return detail::domain_max_fixpoint_iters_impl<D>(
       std::integral_constant<bool, DomainHasMaxFixpointIters<D>::value>{});
 }
 
-template <class D>
-inline long domain_max_linear_steps() {
+template <class D> inline long domain_max_linear_steps() {
   return detail::domain_max_linear_steps_impl<D>(
       std::integral_constant<bool, DomainHasMaxLinearSteps<D>::value>{});
 }

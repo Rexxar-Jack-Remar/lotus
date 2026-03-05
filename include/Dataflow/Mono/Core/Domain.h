@@ -1,14 +1,14 @@
 #ifndef LOTUS_DATAFLOW_MONO_CORE_DOMAIN_H_
 #define LOTUS_DATAFLOW_MONO_CORE_DOMAIN_H_
 
-#include "Dataflow/ControlFlow/InterCFG.h"
-#include "Dataflow/ControlFlow/IntraCFG.h"
-
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
+
+#include "Dataflow/ControlFlow/InterCFG.h"
+#include "Dataflow/ControlFlow/IntraCFG.h"
 
 #include <set>
 
@@ -34,7 +34,8 @@ namespace mono {
  * using MyDomain = LLVMMonoAnalysisDomain<Value*>;
  *
  * class MyProblem : public IntraMonoProblem<MyDomain> {
- *   std::set<Value*> normalFlow(Instruction *Inst, const std::set<Value*> &In) override {
+ *   std::set<Value*> normalFlow(Instruction *Inst, const std::set<Value*> &In)
+ * override {
  *     // Analysis implementation using std::set
  *   }
  * };
@@ -148,7 +149,8 @@ using ValueSetDomain = LLVMMonoAnalysisDomain<std::set<llvm::Value *>>;
  * };
  * ```
  */
-using InstructionSetDomain = LLVMMonoAnalysisDomain<std::set<llvm::Instruction *>>;
+using InstructionSetDomain =
+    LLVMMonoAnalysisDomain<std::set<llvm::Instruction *>>;
 
 } // namespace mono
 

@@ -31,8 +31,10 @@ IDESecureHeapPropagation::normal_flow(const llvm::Instruction *stmt,
   return out;
 }
 
-IDESecureHeapPropagation::FactSet IDESecureHeapPropagation::call_flow(
-    const llvm::CallBase *call, const llvm::Function *callee, const Fact &fact) {
+IDESecureHeapPropagation::FactSet
+IDESecureHeapPropagation::call_flow(const llvm::CallBase *call,
+                                    const llvm::Function *callee,
+                                    const Fact &fact) {
   FactSet out;
   if (fact == zero_fact()) {
     out.insert(fact);
@@ -65,7 +67,8 @@ IDESecureHeapPropagation::FactSet IDESecureHeapPropagation::return_flow(
   }
   if (!call->getType()->isVoidTy()) {
     for (const llvm::BasicBlock &bb : *callee) {
-      if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
+      if (const auto *ret =
+              llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
         if (ret->getReturnValue() == exit_fact) {
           out.insert(call);
           break;
@@ -123,9 +126,9 @@ IDESecureHeapPropagation::join(const Value &v1, const Value &v2) const {
 }
 
 IDESecureHeapPropagation::EdgeFunction
-IDESecureHeapPropagation::normal_edge_function(const llvm::Instruction * /*stmt*/,
-                                               const Fact & /*src_fact*/,
-                                               const Fact & /*tgt_fact*/) {
+IDESecureHeapPropagation::normal_edge_function(
+    const llvm::Instruction * /*stmt*/, const Fact & /*src_fact*/,
+    const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }
 
@@ -144,24 +147,27 @@ IDESecureHeapPropagation::return_edge_function(const llvm::CallBase * /*call*/,
 }
 
 IDESecureHeapPropagation::EdgeFunction
-IDESecureHeapPropagation::call_to_return_edge_function(const llvm::CallBase * /*call*/,
-                                                       const Fact & /*src_fact*/,
-                                                       const Fact & /*tgt_fact*/) {
+IDESecureHeapPropagation::call_to_return_edge_function(
+    const llvm::CallBase * /*call*/, const Fact & /*src_fact*/,
+    const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }
 
-IDESecureHeapPropagation::FactSet IDESecureHeapPropagation::summary_flow(
-    const llvm::CallBase *call, const llvm::Function *callee, const Fact &fact) {
+IDESecureHeapPropagation::FactSet
+IDESecureHeapPropagation::summary_flow(const llvm::CallBase *call,
+                                       const llvm::Function *callee,
+                                       const Fact &fact) {
   FactSet out;
   if (!call || !callee) {
     return out;
   }
   const std::string name = callee->getName().str();
-  if (m_allocators.count(name) > 0 && fact == zero_fact() && !call->getType()->isVoidTy()) {
+  if (m_allocators.count(name) > 0 && fact == zero_fact() &&
+      !call->getType()->isVoidTy()) {
     out.insert(call);
   }
-  if ((m_releasers.count(name) > 0 || m_securers.count(name) > 0) && call->arg_size() > 0 &&
-      fact == call->getArgOperand(0)) {
+  if ((m_releasers.count(name) > 0 || m_securers.count(name) > 0) &&
+      call->arg_size() > 0 && fact == call->getArgOperand(0)) {
     out.insert(fact);
   }
   return out;

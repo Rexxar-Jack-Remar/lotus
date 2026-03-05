@@ -1,14 +1,15 @@
 #include "Dataflow/Mono/Analyses/Intra/IntraUninitVariables.h"
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Dataflow/Mono/Container/Traits.h"
-#include "Dataflow/Mono/Core/Domain.h"
-#include "Dataflow/Mono/Core/Problem.h"
-#include "Dataflow/Mono/Solver/IntraSolver.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
+
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Dataflow/Mono/Container/Traits.h"
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Core/Problem.h"
+#include "Dataflow/Mono/Solver/IntraSolver.h"
 
 #include <algorithm>
 #include <memory>
@@ -25,13 +26,12 @@ class UninitVariablesProblem : public IntraMonoProblem<UninitVariablesDomain> {
 public:
   explicit UninitVariablesProblem(Function *F, lotus::AliasAnalysisWrapper *AA)
       : IntraMonoProblem<UninitVariablesDomain>({F}, AA),
-        DL(&F->getParent()->getDataLayout()),
-        AA(AA) {}
+        DL(&F->getParent()->getDataLayout()), AA(AA) {}
 
   mono_container_t allTop() override { return {}; }
 
   mono_container_t normalFlow(Instruction *Inst,
-                               const mono_container_t &In) override {
+                              const mono_container_t &In) override {
     mono_container_t Out = In;
 
     if (auto *Alloca = dyn_cast<AllocaInst>(Inst)) {
@@ -109,7 +109,7 @@ public:
   // intersection.  Using intersection (must-analysis) would only flag
   // variables that are uninitialized on ALL paths, missing real bugs.
   mono_container_t merge(const mono_container_t &Lhs,
-                          const mono_container_t &Rhs) override {
+                         const mono_container_t &Rhs) override {
     mono_container_t Out = Lhs;
     Out.unionWith(Rhs);
     return Out;
@@ -227,7 +227,8 @@ private:
       return;
     }
     auto *Base = getBaseObject(Ptr);
-    // Collect elements to erase first, then erase them (SetContainer erase returns bool)
+    // Collect elements to erase first, then erase them (SetContainer erase
+    // returns bool)
     std::vector<Value *> ToErase;
     for (auto *Candidate : Out) {
       if (Candidate == Ptr) {

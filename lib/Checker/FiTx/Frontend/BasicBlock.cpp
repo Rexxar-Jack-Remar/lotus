@@ -1,36 +1,36 @@
-//#include "llvm/IR/BasicBlock.h"
+// #include "llvm/IR/BasicBlock.h"
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"
-//#include "llvm/IR/Argument.h"
-//#include "llvm/IR/CFG.h"
-//#include "llvm/IR/Constant.h"
-//#include "llvm/IR/DataLayout.h"
-//#include "llvm/IR/DebugInfoMetadata.h"
+// #include "llvm/IR/Argument.h"
+// #include "llvm/IR/CFG.h"
+// #include "llvm/IR/Constant.h"
+// #include "llvm/IR/DataLayout.h"
+// #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
-//#include "llvm/IR/DerivedTypes.h"
+// #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
-//#include "llvm/IR/InstrTypes.h"
-//#include "llvm/IR/Instruction.h"
-//#include "llvm/IR/Instructions.h"
-//#include "llvm/IR/LegacyPassManager.h"
-//#include "llvm/IR/PassManager.h"
+// #include "llvm/IR/InstrTypes.h"
+// #include "llvm/IR/Instruction.h"
+// #include "llvm/IR/Instructions.h"
+// #include "llvm/IR/LegacyPassManager.h"
+// #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Value.h"
-//#include "llvm/IR/ValueSymbolTable.h"
+// #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-//#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+// #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
 #include "Checker/FiTx/Core/BasicBlock.h"
 #include "Checker/FiTx/Core/Instructions/BranchInstruction.h"
 #include "Checker/FiTx/Core/Value.h"
-//#include "Checker/FiTx/Frontend/Utils.h"
+// #include "Checker/FiTx/Frontend/Utils.h"
 
 // include STL
 #include "Checker/FiTx/Core/Casting.h"
-//#include "Checker/FiTx/Core/Function.h"
+// #include "Checker/FiTx/Core/Function.h"
 #include "Checker/FiTx/Frontend/BasicBlock.h"
 
 #include <algorithm>
@@ -66,17 +66,13 @@ BasicBlockInformation::BasicBlockInformation(
 }
 
 BasicBlockInformation::BasicBlockInformation(const BasicBlockInformation &info)
-    : basic_block_(info.basic_block_),
-      value_states_(info.value_states_),
+    : basic_block_(info.basic_block_), value_states_(info.value_states_),
       arg_value_states_(info.arg_value_states_),
-      return_values_(info.return_values_),
-      alias_info_(info.alias_info_),
-      pending_values_(info.pending_values_),
-      states_(info.states_),
+      return_values_(info.return_values_), alias_info_(info.alias_info_),
+      pending_values_(info.pending_values_), states_(info.states_),
       is_partial_states_(info.is_partial_states_),
       predecessor_partial_(info.predecessor_partial_),
-      time_to_live_(info.time_to_live_),
-      status_(info.status_),
+      time_to_live_(info.time_to_live_), status_(info.status_),
       same_line_predecessors_(info.same_line_predecessors_) {}
 
 // Apply transitions to value (and optionally its alias set). Caller (Analyzer)
@@ -92,7 +88,7 @@ bool BasicBlockInformation::changeValueState(
 
   /* if (auto collection = getAliasInfoForValue(value)) */
   /*   aliased_value.insert(aliased_value.end(), collection->Values().begin(),
- */
+   */
   /*                        collection->Values().end()); */
 
   for (auto alias : aliased_value) {

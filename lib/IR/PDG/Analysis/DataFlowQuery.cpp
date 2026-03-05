@@ -29,16 +29,17 @@ namespace {
 
 /// Data-dependence edge types used across several analyses.
 std::set<EdgeType> dataEdgeTypes() {
-  return {EdgeType::DATA_DEF_USE, EdgeType::DATA_RAW,   EdgeType::DATA_READ,
-          EdgeType::DATA_ALIAS,   EdgeType::DATA_RET,   EdgeType::VAL_DEP,
-          EdgeType::PARAMETER_IN, EdgeType::PARAMETER_OUT,
+  return {EdgeType::DATA_DEF_USE,   EdgeType::DATA_RAW,
+          EdgeType::DATA_READ,      EdgeType::DATA_ALIAS,
+          EdgeType::DATA_RET,       EdgeType::VAL_DEP,
+          EdgeType::PARAMETER_IN,   EdgeType::PARAMETER_OUT,
           EdgeType::PARAMETER_FIELD};
 }
 
 /// Control-dependence edge types.
 std::set<EdgeType> controlEdgeTypes() {
   return {EdgeType::CONTROLDEP_CALLINV, EdgeType::CONTROLDEP_CALLRET,
-          EdgeType::CONTROLDEP_ENTRY,   EdgeType::CONTROLDEP_BR,
+          EdgeType::CONTROLDEP_ENTRY, EdgeType::CONTROLDEP_BR,
           EdgeType::CONTROLDEP_IND_BR};
 }
 
@@ -131,8 +132,7 @@ ReachingDefinitions::transitiveDefs(Node &use_node, size_t max_depth) {
   return all;
 }
 
-ReachingDefinitions::NodeSet
-ReachingDefinitions::directUses(Node &def_node) {
+ReachingDefinitions::NodeSet ReachingDefinitions::directUses(Node &def_node) {
   NodeSet result;
   auto data_edges = getDataEdgeTypes();
 
@@ -270,9 +270,7 @@ DefUseChains::allDefUseChains(const NodeSet &nodes, size_t max_depth) {
 // LiveVariables
 // ============================================================================
 
-std::set<EdgeType> LiveVariables::getDataEdgeTypes() {
-  return dataEdgeTypes();
-}
+std::set<EdgeType> LiveVariables::getDataEdgeTypes() { return dataEdgeTypes(); }
 
 bool LiveVariables::isLive(Node &node) {
   auto data_edges = getDataEdgeTypes();

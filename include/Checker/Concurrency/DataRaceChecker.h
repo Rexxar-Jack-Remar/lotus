@@ -1,19 +1,19 @@
 #ifndef DATA_RACE_CHECKER_H
 #define DATA_RACE_CHECKER_H
 
-#include "Checker/Concurrency/ConcurrencyBugReport.h"
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
-
-#include <llvm/IR/InstIterator.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Module.h>
+#include "Checker/Concurrency/ConcurrencyBugReport.h"
 
 #include <string>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/IR/InstIterator.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
 
 namespace lotus {
 class AliasAnalysisWrapper;
@@ -32,57 +32,60 @@ namespace concurrency {
  */
 class DataRaceChecker {
 public:
-    explicit DataRaceChecker(llvm::Module& module,
-                           mhp::MHPAnalysis* mhpAnalysis,
-                           mhp::LockSetAnalysis* locksetAnalysis = nullptr,
-                           lotus::EscapeAnalysis* escapeAnalysis = nullptr,
-                           lotus::AliasAnalysisWrapper* aliasAnalysis = nullptr,
-                           lotus::HappensBeforeAnalysis* happensBeforeAnalysis = nullptr);
+  explicit DataRaceChecker(
+      llvm::Module &module, mhp::MHPAnalysis *mhpAnalysis,
+      mhp::LockSetAnalysis *locksetAnalysis = nullptr,
+      lotus::EscapeAnalysis *escapeAnalysis = nullptr,
+      lotus::AliasAnalysisWrapper *aliasAnalysis = nullptr,
+      lotus::HappensBeforeAnalysis *happensBeforeAnalysis = nullptr);
 
-    /**
-     * @brief Check for data races in the module
-     * @return Vector of data race reports
-     */
-    std::vector<ConcurrencyBugReport> checkDataRaces();
+  /**
+   * @brief Check for data races in the module
+   * @return Vector of data race reports
+   */
+  std::vector<ConcurrencyBugReport> checkDataRaces();
 
-    /**
-     * @brief Check if two instructions are independent (do not access same location)
-     */
-    bool areIndependent(const llvm::Instruction* inst1,
-                       const llvm::Instruction* inst2) const;
+  /**
+   * @brief Check if two instructions are independent (do not access same
+   * location)
+   */
+  bool areIndependent(const llvm::Instruction *inst1,
+                      const llvm::Instruction *inst2) const;
 
-    /**
-     * @brief Single predicate: would we report a data race for this pair?
-     * Encapsulates MHP + happens-before + lock + alias so the definition lives in one place.
-     */
-    bool wouldReportDataRace(const llvm::Instruction* inst1,
-                             const llvm::Instruction* inst2) const;
+  /**
+   * @brief Single predicate: would we report a data race for this pair?
+   * Encapsulates MHP + happens-before + lock + alias so the definition lives in
+   * one place.
+   */
+  bool wouldReportDataRace(const llvm::Instruction *inst1,
+                           const llvm::Instruction *inst2) const;
 
 private:
-    llvm::Module& m_module;
-    mhp::MHPAnalysis* m_mhpAnalysis;
-    mhp::LockSetAnalysis* m_locksetAnalysis;
-    lotus::EscapeAnalysis* m_escapeAnalysis;
-    lotus::AliasAnalysisWrapper* m_aliasAnalysis;
-    lotus::HappensBeforeAnalysis* m_happensBeforeAnalysis;
+  llvm::Module &m_module;
+  mhp::MHPAnalysis *m_mhpAnalysis;
+  mhp::LockSetAnalysis *m_locksetAnalysis;
+  lotus::EscapeAnalysis *m_escapeAnalysis;
+  lotus::AliasAnalysisWrapper *m_aliasAnalysis;
+  lotus::HappensBeforeAnalysis *m_happensBeforeAnalysis;
 
-    bool mayAlias(const llvm::Value* v1, const llvm::Value* v2) const;
-    bool isMemoryAccess(const llvm::Instruction* inst) const;
-    bool isWriteAccess(const llvm::Instruction* inst) const;
-    bool isAtomicOperation(const llvm::Instruction* inst) const;
-    const llvm::Value* getMemoryLocation(const llvm::Instruction* inst) const;
-    std::string getInstructionLocation(const llvm::Instruction* inst) const;
+  bool mayAlias(const llvm::Value *v1, const llvm::Value *v2) const;
+  bool isMemoryAccess(const llvm::Instruction *inst) const;
+  bool isWriteAccess(const llvm::Instruction *inst) const;
+  bool isAtomicOperation(const llvm::Instruction *inst) const;
+  const llvm::Value *getMemoryLocation(const llvm::Instruction *inst) const;
+  std::string getInstructionLocation(const llvm::Instruction *inst) const;
 
-    void collectVariableAccesses(std::vector<const llvm::Instruction*>& accesses);
-    bool mayAccessSameLocation(const llvm::Instruction* inst1,
-                              const llvm::Instruction* inst2) const;
+  void
+  collectVariableAccesses(std::vector<const llvm::Instruction *> &accesses);
+  bool mayAccessSameLocation(const llvm::Instruction *inst1,
+                             const llvm::Instruction *inst2) const;
 
-    void buildSyncObjectSet();
-    bool isSyncObjectAccess(const llvm::Value* loc) const;
-    std::string getAccessPath(const llvm::Instruction* inst) const;
+  void buildSyncObjectSet();
+  bool isSyncObjectAccess(const llvm::Value *loc) const;
+  std::string getAccessPath(const llvm::Instruction *inst) const;
 
-    ThreadAPI* m_threadAPI;
-    std::unordered_set<const llvm::Value*> m_syncObjects;
+  ThreadAPI *m_threadAPI;
+  std::unordered_set<const llvm::Value *> m_syncObjects;
 };
 
 } // namespace concurrency

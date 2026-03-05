@@ -1,14 +1,16 @@
 #include "Checker/FiTx/Core/Function.h"
 
-#include "Checker/FiTx/Core/BasicBlock.h"
-#include "Checker/FiTx/Core/Instructions.h"
-#include "Checker/FiTx/Core/Utils.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 
+#include "Checker/FiTx/Core/BasicBlock.h"
+#include "Checker/FiTx/Core/Instructions.h"
+#include "Checker/FiTx/Core/Utils.h"
+
 namespace framework {
-std::shared_ptr<framework::Function> Function::createManagedFunction(
-    llvm::Function* function, std::unique_ptr<llvm::LoopInfo> loop_info) {
+std::shared_ptr<framework::Function>
+Function::createManagedFunction(llvm::Function *function,
+                                std::unique_ptr<llvm::LoopInfo> loop_info) {
   if (created_functions_.find(function) == created_functions_.end())
     created_functions_[function] =
         std::make_shared<framework::Function>(function, std::move(loop_info));
@@ -33,8 +35,7 @@ bool Function::IsLifetimeEndFunction(
   return findFunctionName(function->Name(), "llvm.lifetime.end");
 }
 
-bool Function::IsExpectFunction(
-    std::shared_ptr<framework::Function> function) {
+bool Function::IsExpectFunction(std::shared_ptr<framework::Function> function) {
   return findFunctionName(function->Name(), "llvm.expect");
 }
 
@@ -45,28 +46,25 @@ bool Function::IsRefcountDecrementFunction(
                    function->Name()) != refcount_decrement_functions.end();
 }
 
-bool Function::IsMemSetFunction(
-    std::shared_ptr<framework::Function> function) {
+bool Function::IsMemSetFunction(std::shared_ptr<framework::Function> function) {
   return findFunctionName(function->Name(), "memset");
 }
 
-Function::Function(llvm::Function* function,
+Function::Function(llvm::Function *function,
                    std::unique_ptr<llvm::LoopInfo> loop_info)
-    : llvm_function_(function),
-      function_name_(function->getName()),
+    : llvm_function_(function), function_name_(function->getName()),
       return_type_(function->getReturnType()),
       is_definition_(function->isDeclaration()),
-      arg_size_(function->arg_size()),
-      loop_info_(std::move(loop_info)),
-      contains_loop_back_blocks_(false),
-      return_value_(nullptr),
+      arg_size_(function->arg_size()), loop_info_(std::move(loop_info)),
+      contains_loop_back_blocks_(false), return_value_(nullptr),
       protected_refcount_value_(nullptr) {}
 
-std::shared_ptr<framework::BasicBlock> Function::getBasicBlock(
-    llvm::BasicBlock* basic_block) {
+std::shared_ptr<framework::BasicBlock>
+Function::getBasicBlock(llvm::BasicBlock *basic_block) {
   auto block =
       std::find(basic_blocks_.begin(), basic_blocks_.end(), basic_block);
-  if (block != basic_blocks_.end()) return *block;
+  if (block != basic_blocks_.end())
+    return *block;
 
   auto framework_block = std::make_shared<framework::BasicBlock>(basic_block);
   basic_blocks_.insert(framework_block);
@@ -76,7 +74,7 @@ std::shared_ptr<framework::BasicBlock> Function::getBasicBlock(
   if (basic_block == &llvm_function_->getEntryBlock())
     init_block_ = framework_block;
 
-  llvm::Loop* loop =
+  llvm::Loop *loop =
       loop_info_.get() ? loop_info_->getLoopFor(basic_block) : nullptr;
 
   if (auto *branch_inst =
@@ -137,7 +135,7 @@ void Function::addCallerFunction(std::shared_ptr<framework::Function> caller) {
   caller_functions_.insert(caller);
 }
 
-const std::set<std::shared_ptr<framework::Function>>&
+const std::set<std::shared_ptr<framework::Function>> &
 Function::CallerFunctions() {
   return caller_functions_;
 }
@@ -156,10 +154,8 @@ void Function::setLoopBackBlock(bool loop_back) {
   contains_loop_back_blocks_ = loop_back;
 }
 
-bool Function::ContainsLoopBackBlock() {
-  return contains_loop_back_blocks_;
-}
+bool Function::ContainsLoopBackBlock() { return contains_loop_back_blocks_; }
 
-std::map<llvm::Function*, std::shared_ptr<framework::Function>>
+std::map<llvm::Function *, std::shared_ptr<framework::Function>>
     framework::Function::created_functions_;
-}  // namespace framework
+} // namespace framework

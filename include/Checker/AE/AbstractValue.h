@@ -102,4 +102,3 @@ public:
 
 } // namespace analysis
 } // namespace lotus
-

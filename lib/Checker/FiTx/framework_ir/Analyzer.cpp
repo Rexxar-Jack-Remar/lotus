@@ -1,16 +1,9 @@
 // FiTx framework IR builder: converts llvm::Function to framework::Function
 // (basic blocks, ordered block list, call/store/load/ret instructions, return
-// assignments). No typestate; that is done by Frontend::Analyzer (paper §4.2, 4.3).
+// assignments). No typestate; that is done by Frontend::Analyzer (paper
+// §4.2, 4.3).
 #include "Checker/FiTx/Framework_IR/Analyzer.h"
 
-#include "Checker/FiTx/Core/AnalysisHelper.h"
-#include "Checker/FiTx/Core/BasicBlock.h"
-#include "Checker/FiTx/Core/Casting.h"
-#include "Checker/FiTx/Core/Function.h"
-#include "Checker/FiTx/Core/Instructions.h"
-#include "Checker/FiTx/Core/Utils.h"
-#include "Checker/FiTx/Core/Value.h"
-#include "Checker/FiTx/Framework_IR/Utils.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
@@ -20,39 +13,48 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "Checker/FiTx/Core/AnalysisHelper.h"
+#include "Checker/FiTx/Core/BasicBlock.h"
+#include "Checker/FiTx/Core/Casting.h"
+#include "Checker/FiTx/Core/Function.h"
+#include "Checker/FiTx/Core/Instructions.h"
+#include "Checker/FiTx/Core/Utils.h"
+#include "Checker/FiTx/Core/Value.h"
+#include "Checker/FiTx/Framework_IR/Utils.h"
+
 namespace ir_generator {
 Analyzer::Analyzer() {}
 
 // Build framework::Function: create blocks, iterate instructions to build
 // CallInst/StoreInst/LoadInst and collect return assignments; set ordered
 // block list for Frontend CFG traversal (paper §4.2).
-void Analyzer::analyze(llvm::Function& function, llvm::LoopInfo& loop_info) {
+void Analyzer::analyze(llvm::Function &function, llvm::LoopInfo &loop_info) {
   framework_function_ = framework::Function::createManagedFunction(
       &function, std::make_unique<llvm::LoopInfo>(std::move(loop_info)));
 
   std::vector<std::shared_ptr<framework::BasicBlock>> block;
-  for (auto& basic_block : function) {
+  for (auto &basic_block : function) {
     auto framework_block = framework_function_->getBasicBlock(&basic_block);
     if (framework_block->Id() == framework::BasicBlock::kNoId) {
       framework_block->setId(block.size());
       block.push_back(framework_block);
     }
-    for (auto& instruction : basic_block) {
+    for (auto &instruction : basic_block) {
       switch (instruction.getOpcode()) {
-        case llvm::Instruction::Call:
-          analyzeCallInst(&instruction);
-          break;
-        case llvm::Instruction::Store:
-          analyzeStoreInst(&instruction);
-          break;
-        case llvm::Instruction::Load:
-          analyzeLoadInst(&instruction);
-          break;
-        case llvm::Instruction::Ret:
-          analyzeReturnInst(&instruction);
-          break;
-        default:
-          break;
+      case llvm::Instruction::Call:
+        analyzeCallInst(&instruction);
+        break;
+      case llvm::Instruction::Store:
+        analyzeStoreInst(&instruction);
+        break;
+      case llvm::Instruction::Load:
+        analyzeLoadInst(&instruction);
+        break;
+      case llvm::Instruction::Ret:
+        analyzeReturnInst(&instruction);
+        break;
+      default:
+        break;
       }
     }
   }
@@ -61,7 +63,7 @@ void Analyzer::analyze(llvm::Function& function, llvm::LoopInfo& loop_info) {
 
 // Build framework representation of a call: create CallInst, attach to block.
 // Debug/lifetime/refcount helpers are handled (dead value, protected refcount).
-void Analyzer::analyzeCallInst(llvm::Instruction* instruction) {
+void Analyzer::analyzeCallInst(llvm::Instruction *instruction) {
   auto *call_inst = llvm::cast<llvm::CallInst>(instruction);
   auto framework_block =
       framework_function_->getBasicBlock(instruction->getParent());
@@ -71,7 +73,7 @@ void Analyzer::analyzeCallInst(llvm::Instruction* instruction) {
     if (framework::Function::IsDebugValueFunction(
             framework_call->CalledFunction())) {
       auto return_block = framework_function_->ReturnBlock();
-      const auto& args = framework_call->Arguments();
+      const auto &args = framework_call->Arguments();
       if (return_block && !args.empty() && args[0]) {
         return_block->addDeadValue(args[0]);
       }
@@ -98,9 +100,9 @@ void Analyzer::analyzeCallInst(llvm::Instruction* instruction) {
   framework_block->addInstruction(framework_call);
 }
 
-void Analyzer::analyzeDebugCallInst(llvm::CallInst* call_inst) {}
+void Analyzer::analyzeDebugCallInst(llvm::CallInst *call_inst) {}
 
-void Analyzer::analyzeStoreInst(llvm::Instruction* inst) {
+void Analyzer::analyzeStoreInst(llvm::Instruction *inst) {
   auto *store_inst = llvm::cast<llvm::StoreInst>(inst);
   auto framework_block = framework_function_->getBasicBlock(inst->getParent());
 
@@ -114,7 +116,8 @@ void Analyzer::analyzeStoreInst(llvm::Instruction* inst) {
   if (auto call_inst = framework::shared_dyn_cast<framework::CallInst>(
           created_store->ValueOperand())) {
     auto branch_inst = framework_block->getBranchInst();
-    if (!branch_inst || !branch_inst->Condition()) return;
+    if (!branch_inst || !branch_inst->Condition())
+      return;
 
     if (!call_inst->CalledFunction() ||
         !call_inst->CalledFunction()->ReturnType()->isIntegerTy())
@@ -128,21 +131,22 @@ void Analyzer::analyzeStoreInst(llvm::Instruction* inst) {
   }
 }
 
-void Analyzer::analyzeLoadInst(llvm::Instruction* inst) {
+void Analyzer::analyzeLoadInst(llvm::Instruction *inst) {
   auto *load_inst = llvm::cast<llvm::LoadInst>(inst);
 
   auto framework_block = framework_function_->getBasicBlock(inst->getParent());
   auto framework_load = framework::LoadInst::Create(load_inst);
 
   // TODO: this is a simple check of the load inst.
-  std::deque<llvm::User*> users(inst->user_begin(), inst->user_end());
+  std::deque<llvm::User *> users(inst->user_begin(), inst->user_end());
   while (!users.empty()) {
     auto *user = users.front();
     if (llvm::isa<llvm::CallInst>(user) || llvm::isa<llvm::CmpInst>(user) ||
         llvm::isa<llvm::ReturnInst>(user))
       return;
     if (auto *store = llvm::dyn_cast<llvm::StoreInst>(user)) {
-      if (store->getPointerOperand() == inst) return;
+      if (store->getPointerOperand() == inst)
+        return;
     }
 
     if (auto *unary = llvm::dyn_cast<llvm::UnaryInstruction>(user))
@@ -155,8 +159,9 @@ void Analyzer::analyzeLoadInst(llvm::Instruction* inst) {
 }
 
 // Record return block and return value; collect possible constant return values
-// (e.g. 0, -ENOMEM) by following use-def for building function summary (paper §4.3).
-void Analyzer::analyzeReturnInst(llvm::Instruction* instruction) {
+// (e.g. 0, -ENOMEM) by following use-def for building function summary (paper
+// §4.3).
+void Analyzer::analyzeReturnInst(llvm::Instruction *instruction) {
   auto *return_inst = llvm::cast<llvm::ReturnInst>(instruction);
   auto *return_value = return_inst->getReturnValue();
   framework_function_->setReturnBlock(
@@ -168,7 +173,7 @@ void Analyzer::analyzeReturnInst(llvm::Instruction* instruction) {
   auto framework_value = framework::Value::CreateFromDefinition(return_value);
   framework_function_->setReturnValue(framework_value);
 
-  std::vector<llvm::Instruction*> visited_inst{return_inst};
+  std::vector<llvm::Instruction *> visited_inst{return_inst};
   collectPossibleReturnValues(return_value, visited_inst);
 }
 
@@ -176,7 +181,7 @@ void Analyzer::analyzeReturnInst(llvm::Instruction* instruction) {
 // Constant return values (e.g. 0, -ENOMEM) key summarized states for
 // return-code aware propagation at call sites.
 bool Analyzer::collectPossibleReturnValues(
-    llvm::Value* V, std::vector<llvm::Instruction*>& visited_inst) {
+    llvm::Value *V, std::vector<llvm::Instruction *> &visited_inst) {
   auto framework_value = framework::Value::CreateFromDefinition(V);
   bool add_return_value = false;
 
@@ -221,10 +226,11 @@ bool Analyzer::collectPossibleReturnValues(
   } else if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(V)) {
     // Bug fix: PHI nodes were completely ignored, causing functions that return
     // via a PHI (the common case after if/else with different return codes) to
-    // have no return codes recorded in their summary, breaking return-code-aware
-    // propagation. Recurse into each incoming value of the PHI.
+    // have no return codes recorded in their summary, breaking
+    // return-code-aware propagation. Recurse into each incoming value of the
+    // PHI.
     for (unsigned i = 0; i < PHI->getNumIncomingValues(); i++) {
-      llvm::Value* incoming = PHI->getIncomingValue(i);
+      llvm::Value *incoming = PHI->getIncomingValue(i);
       if (incoming != V)
         add_return_value =
             collectPossibleReturnValues(incoming, visited_inst) ||
@@ -244,7 +250,7 @@ bool Analyzer::collectPossibleReturnValues(
     }
   } else if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(V)) {
     for (auto *usr : AI->users()) {
-      llvm::Value* val = usr;
+      llvm::Value *val = usr;
       add_return_value = collectPossibleReturnValues(usr, visited_inst);
     }
     /* auto current_block = framework_function_->getBasicBlock(AI->getParent());
@@ -262,4 +268,4 @@ bool Analyzer::collectPossibleReturnValues(
   return add_return_value;
 }
 
-}  // namespace ir_generator
+} // namespace ir_generator

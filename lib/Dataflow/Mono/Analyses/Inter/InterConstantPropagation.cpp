@@ -1,11 +1,11 @@
 #include "Dataflow/Mono/Analyses/Inter/InterConstantPropagation.h"
 
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Instructions.h"
+
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Dataflow/Mono/Core/Problem.h"
 #include "Dataflow/Mono/Solver/InterSolver.h"
-
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/Instructions.h"
 
 #include <memory>
 
@@ -84,8 +84,7 @@ ConstantPropagationValue evalBinaryOp(unsigned Opcode,
     if (RV == 0) {
       return makeBottom();
     }
-    return makeConst(static_cast<uint64_t>(LV) /
-                     static_cast<uint64_t>(RV));
+    return makeConst(static_cast<uint64_t>(LV) / static_cast<uint64_t>(RV));
   case Instruction::SRem:
     if (RV == 0) {
       return makeBottom();
@@ -95,8 +94,7 @@ ConstantPropagationValue evalBinaryOp(unsigned Opcode,
     if (RV == 0) {
       return makeBottom();
     }
-    return makeConst(static_cast<uint64_t>(LV) %
-                     static_cast<uint64_t>(RV));
+    return makeConst(static_cast<uint64_t>(LV) % static_cast<uint64_t>(RV));
   default:
     // Unknown opcode: result is unknown (Top), not unreachable (Bottom).
     return makeTop();
@@ -170,12 +168,15 @@ public:
                                const ConstantPropagationMap &Rhs) override {
     ConstantPropagationMap Out;
 
-    auto joinValues = [](const ConstantPropagationValue &A,
-                         const ConstantPropagationValue &B)
-        -> ConstantPropagationValue {
-      if (equalValue(A, B)) return A;
-      if (isBottom(A)) return B;
-      if (isBottom(B)) return A;
+    auto joinValues =
+        [](const ConstantPropagationValue &A,
+           const ConstantPropagationValue &B) -> ConstantPropagationValue {
+      if (equalValue(A, B))
+        return A;
+      if (isBottom(A))
+        return B;
+      if (isBottom(B))
+        return A;
       return makeTop();
     };
 
@@ -239,8 +240,7 @@ public:
   }
 
   ConstantPropagationMap returnFlow(Instruction *CallSite, Function *Callee,
-                                    Instruction *ExitStmt,
-                                    Instruction *RetSite,
+                                    Instruction *ExitStmt, Instruction *RetSite,
                                     const ConstantPropagationMap &In) override {
     (void)Callee;
     (void)RetSite;
@@ -270,10 +270,10 @@ public:
     return Out;
   }
 
-  ConstantPropagationMap callToRetFlow(Instruction *CallSite,
-                                       Instruction *RetSite,
-                                       ArrayRef<Function *> Callees,
-                                       const ConstantPropagationMap &In) override {
+  ConstantPropagationMap
+  callToRetFlow(Instruction *CallSite, Instruction *RetSite,
+                ArrayRef<Function *> Callees,
+                const ConstantPropagationMap &In) override {
     (void)RetSite;
     ConstantPropagationMap Out = In;
 
@@ -292,7 +292,8 @@ public:
     }
 
     // Multiple potential callees: conservatively mark return as unknown (Top).
-    // The precise constant, if any, will be re-established by returnFlow + merge.
+    // The precise constant, if any, will be re-established by returnFlow +
+    // merge.
     if (Callees.size() > 1) {
       Out[CallSite] = makeTop();
     }
@@ -302,8 +303,9 @@ public:
   std::unordered_map<Instruction *, ConstantPropagationMap>
   initialSeeds() override {
     std::unordered_map<Instruction *, ConstantPropagationMap> Seeds;
-    Function *F = this->getEntryPoints().empty() ? nullptr
-                                                 : this->getEntryPoints().front();
+    Function *F = this->getEntryPoints().empty()
+                      ? nullptr
+                      : this->getEntryPoints().front();
     if (F == nullptr || F->empty()) {
       return Seeds;
     }
@@ -316,18 +318,19 @@ private:
 
   // weakJoin: for may-aliased pointers, conflicting values → Top (unknown),
   // not Bottom (unreachable).
-  static ConstantPropagationValue weakJoin(const ConstantPropagationValue &OldVal,
-                                           const ConstantPropagationValue &NewVal) {
+  static ConstantPropagationValue
+  weakJoin(const ConstantPropagationValue &OldVal,
+           const ConstantPropagationValue &NewVal) {
     if (equalValue(OldVal, NewVal)) {
       return OldVal;
     }
     return makeTop();
   }
 
-  void collectAliasedPointers(
-      const Value *Ptr, const ConstantPropagationMap &State,
-      std::vector<const Value *> &MustAliases,
-      std::vector<const Value *> &MayAliases) const {
+  void collectAliasedPointers(const Value *Ptr,
+                              const ConstantPropagationMap &State,
+                              std::vector<const Value *> &MustAliases,
+                              std::vector<const Value *> &MayAliases) const {
     if (Ptr == nullptr || !Ptr->getType()->isPointerTy()) {
       return;
     }
@@ -366,8 +369,8 @@ private:
     }
   }
 
-  ConstantPropagationValue resolveAliasValue(const Value *Ptr,
-                                             const ConstantPropagationMap &In) const {
+  ConstantPropagationValue
+  resolveAliasValue(const Value *Ptr, const ConstantPropagationMap &In) const {
     if (AA == nullptr || !AA->isInitialized() || Ptr == nullptr ||
         !Ptr->getType()->isPointerTy()) {
       return makeTop();
@@ -436,7 +439,8 @@ runInterMonoConstantPropagation(Function *Entry) {
                       lotus::AAConfig::ContextSensitivity::None, 0, true,
                       lotus::AAConfig::Solver::Default));
   InterMonoConstantPropagation Problem(Entry, AA.get());
-  InterMonoSolver<ConstantPropagationDomain, kDefaultConstantPropagationCallStringLength>
+  InterMonoSolver<ConstantPropagationDomain,
+                  kDefaultConstantPropagationCallStringLength>
       Solver(Problem);
   Solver.solve();
 

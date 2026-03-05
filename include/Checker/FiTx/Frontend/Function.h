@@ -32,9 +32,9 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
 // include STL
-#include "Checker/FiTx/Frontend/BasicBlock.h"
 #include "Checker/FiTx/Core/BasicBlock.h"
 #include "Checker/FiTx/Core/Function.h"
+#include "Checker/FiTx/Frontend/BasicBlock.h"
 
 #include <algorithm>
 #include <ctime>

@@ -3,9 +3,9 @@
 /// pending (return-code aware) propagation, and may-alias (paper §4.2, 4.3).
 ///
 /// BasicBlockInformation holds value_states_ (value -> TransitionLogs),
-/// arg_value_states_ (per-arg summaries for callee application), pending_values_
-/// per successor (for return-code aware merge), and alias_info_ (store-based
-/// may-alias; not merged across predecessors).
+/// arg_value_states_ (per-arg summaries for callee application),
+/// pending_values_ per successor (for return-code aware merge), and alias_info_
+/// (store-based may-alias; not merged across predecessors).
 #pragma once
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -55,7 +55,8 @@ namespace framework {
 
 /// Per-state transition history for one value at one argument index; used to
 /// build and apply callee summaries (paper §4.3).
-/// Tracks which transitions were applied so we can propagate the right state to callers.
+/// Tracks which transitions were applied so we can propagate the right state to
+/// callers.
 class ArgTransitions {
 public:
   ArgTransitions();
@@ -264,7 +265,8 @@ public:
 private:
   std::shared_ptr<framework::BasicBlock> basic_block_;
   /// Return-code aware: for each successor block (branch target), store the
-  /// callee arg states and return value to propagate when we enter that successor.
+  /// callee arg states and return value to propagate when we enter that
+  /// successor.
   struct PendingValues {
     framework::ArgValueStates arg_states;
     std::set<std::shared_ptr<framework::ConstValue>> return_values;

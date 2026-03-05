@@ -1,8 +1,9 @@
 /*
  *
  * Author: rainoftime
-*/
+ */
 #include "Dataflow/Mono/Analyses/Intra/IntraLiveVariables.h"
+
 #include "Dataflow/Mono/Container/Traits.h"
 #include "Dataflow/Mono/Core/Domain.h"
 #include "Dataflow/Mono/Core/Problem.h"
@@ -26,7 +27,7 @@ public:
   }
 
   mono_container_t normalFlow(Instruction *Inst,
-                               const mono_container_t &In) override {
+                              const mono_container_t &In) override {
     mono_container_t Out = In;
 
     if (!Inst->getType()->isVoidTy()) {
@@ -43,7 +44,7 @@ public:
   }
 
   mono_container_t merge(const mono_container_t &Lhs,
-                          const mono_container_t &Rhs) override {
+                         const mono_container_t &Rhs) override {
     mono_container_t Out = Lhs;
     Out.unionWith(Rhs);
     return Out;
@@ -100,7 +101,7 @@ std::unique_ptr<DataFlowResult> runLiveVariablesAnalysis(Function *f) {
       // OUT[n] = values live AFTER  n  (backward solver's AnalysisIn)
       Result->OUT(I) = Solver.getInResultsAt(I).getSet();
       // IN[n]  = values live BEFORE n  (backward solver's AnalysisOut)
-      Result->IN(I)  = Solver.getOutResultsAt(I).getSet();
+      Result->IN(I) = Solver.getOutResultsAt(I).getSet();
       for (auto &Op : I->operands()) {
         if (isa<Instruction>(Op) || isa<Argument>(Op)) {
           Result->GEN(I).insert(Op);

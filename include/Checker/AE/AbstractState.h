@@ -43,8 +43,10 @@ class SVFIRWrapper;
 /// AbstractState represents the abstract execution state at a program point.
 ///
 /// The state consists of two main mappings:
-/// 1. Variable-to-value map (_varToAbsVal): Maps SSA value IDs to abstract values
-/// 2. Address-to-value map (_addrToAbsVal): Maps memory object IDs to abstract values
+/// 1. Variable-to-value map (_varToAbsVal): Maps SSA value IDs to abstract
+/// values
+/// 2. Address-to-value map (_addrToAbsVal): Maps memory object IDs to abstract
+/// values
 ///
 /// Abstract values can be:
 /// - Intervals: Numeric ranges like [0, 100] or [-∞, +∞]
@@ -65,8 +67,9 @@ public:
   typedef VarToAbsValMap AddrToAbsValMap;
 
   /// Special sentinel IDs for null and black-hole pointers
-  static constexpr uint32_t NullPtr = 0;  ///< Null pointer constant (ID 0)
-  static constexpr uint32_t BlkPtr = 1;   ///< Black-hole pointer (absorbs all unknown pointers)
+  static constexpr uint32_t NullPtr = 0; ///< Null pointer constant (ID 0)
+  static constexpr uint32_t BlkPtr =
+      1; ///< Black-hole pointer (absorbs all unknown pointers)
 
   /// Set of freed memory object IDs (for use-after-free detection)
   std::unordered_set<uint32_t> _freedAddrs;
@@ -158,7 +161,8 @@ public:
     return false;
   }
 
-  /// Check if a memory address maps to an address value (pointer stored in memory)
+  /// Check if a memory address maps to an address value (pointer stored in
+  /// memory)
   /// @param id Memory object ID to check
   /// @return true if the memory location holds an address set, false otherwise
   bool inAddrToAddrsTable(uint32_t id) const {
@@ -170,7 +174,8 @@ public:
     return false;
   }
 
-  /// Check if a memory address maps to an interval value (numeric stored in memory)
+  /// Check if a memory address maps to an interval value (numeric stored in
+  /// memory)
   /// @param id Memory object ID to check
   /// @return true if the memory location holds an interval, false otherwise
   bool inAddrToValTable(uint32_t id) const {
@@ -189,8 +194,8 @@ public:
   const AddrToAbsValMap &getLocToVal() const { return _addrToAbsVal; }
 
   /// Widening operator: over-approximates the join to ensure termination
-  /// Used in fixpoint iteration to accelerate convergence by extrapolating trends.
-  /// Example: [0,10] ⊔ [0,20] with widening → [0,+∞]
+  /// Used in fixpoint iteration to accelerate convergence by extrapolating
+  /// trends. Example: [0,10] ⊔ [0,20] with widening → [0,+∞]
   AbstractState widening(const AbstractState &other);
 
   /// Narrowing operator: refines over-approximations from widening
@@ -371,8 +376,9 @@ public:
 
   inline uint32_t getIDFromAddr(uint32_t addr) const {
     uint32_t objId = AddressValue::getInternalID(addr);
-    return _freedAddrs.count(objId) ? AddressValue::getInternalID(InvalidMemAddr)
-                                    : objId;
+    return _freedAddrs.count(objId)
+               ? AddressValue::getInternalID(InvalidMemAddr)
+               : objId;
   }
 
   AddressValue getGepObjAddrs(uint32_t pointer, IntervalValue offset);

@@ -1,10 +1,10 @@
 #include "Dataflow/IFDS/Clients/IDEGeneralizedLCA.h"
 
+#include <limits>
+
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/MathExtras.h>
-
-#include <limits>
 
 namespace ifds {
 
@@ -15,8 +15,8 @@ llvm::Optional<int64_t> IDEGeneralizedLCA::as_const(const llvm::Value *v) {
   return llvm::None;
 }
 
-llvm::Optional<int64_t> IDEGeneralizedLCA::apply_binop(unsigned opcode, int64_t a,
-                                                       int64_t b) {
+llvm::Optional<int64_t> IDEGeneralizedLCA::apply_binop(unsigned opcode,
+                                                       int64_t a, int64_t b) {
   int64_t out = 0;
   switch (opcode) {
   case llvm::Instruction::Add:
@@ -35,8 +35,7 @@ llvm::Optional<int64_t> IDEGeneralizedLCA::apply_binop(unsigned opcode, int64_t 
     }
     return out;
   case llvm::Instruction::SDiv:
-    if (b == 0 ||
-        (a == std::numeric_limits<int64_t>::min() && b == -1)) {
+    if (b == 0 || (a == std::numeric_limits<int64_t>::min() && b == -1)) {
       return llvm::None;
     }
     return a / b;
@@ -45,15 +44,17 @@ llvm::Optional<int64_t> IDEGeneralizedLCA::apply_binop(unsigned opcode, int64_t 
   }
 }
 
-IDEGeneralizedLCA::Value IDEGeneralizedLCA::cap_constants(std::set<int64_t> values) {
+IDEGeneralizedLCA::Value
+IDEGeneralizedLCA::cap_constants(std::set<int64_t> values) {
   if (values.size() > kMaxSetSize) {
     return Value::top();
   }
   return Value(std::move(values));
 }
 
-IDEGeneralizedLCA::FactSet IDEGeneralizedLCA::normal_flow(
-    const llvm::Instruction *stmt, const Fact &fact) {
+IDEGeneralizedLCA::FactSet
+IDEGeneralizedLCA::normal_flow(const llvm::Instruction *stmt,
+                               const Fact &fact) {
   FactSet out;
   out.insert(fact);
   if (!stmt || stmt->getType()->isVoidTy()) {
@@ -72,8 +73,9 @@ IDEGeneralizedLCA::FactSet IDEGeneralizedLCA::normal_flow(
   return out;
 }
 
-IDEGeneralizedLCA::FactSet IDEGeneralizedLCA::call_flow(
-    const llvm::CallBase *call, const llvm::Function *callee, const Fact &fact) {
+IDEGeneralizedLCA::FactSet
+IDEGeneralizedLCA::call_flow(const llvm::CallBase *call,
+                             const llvm::Function *callee, const Fact &fact) {
   FactSet out;
   if (fact == zero_fact()) {
     out.insert(fact);
@@ -91,9 +93,10 @@ IDEGeneralizedLCA::FactSet IDEGeneralizedLCA::call_flow(
   return out;
 }
 
-IDEGeneralizedLCA::FactSet IDEGeneralizedLCA::return_flow(
-    const llvm::CallBase *call, const llvm::Function *callee,
-    const Fact &exit_fact, const Fact &call_fact) {
+IDEGeneralizedLCA::FactSet
+IDEGeneralizedLCA::return_flow(const llvm::CallBase *call,
+                               const llvm::Function *callee,
+                               const Fact &exit_fact, const Fact &call_fact) {
   FactSet out;
   if (!call) {
     return out;
@@ -106,7 +109,8 @@ IDEGeneralizedLCA::FactSet IDEGeneralizedLCA::return_flow(
   }
   if (!call->getType()->isVoidTy()) {
     for (const llvm::BasicBlock &bb : *callee) {
-      if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
+      if (const auto *ret =
+              llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
         if (ret->getReturnValue() == exit_fact) {
           out.insert(call);
           break;

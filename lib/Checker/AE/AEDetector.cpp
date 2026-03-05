@@ -626,8 +626,7 @@ void NullptrDerefDetector::detect(AbstractState &as,
         base = cast->getOperand(0);
         continue;
       }
-      if (const auto *asc =
-              llvm::dyn_cast<llvm::AddrSpaceCastOperator>(base)) {
+      if (const auto *asc = llvm::dyn_cast<llvm::AddrSpaceCastOperator>(base)) {
         base = asc->getOperand(0);
         continue;
       }

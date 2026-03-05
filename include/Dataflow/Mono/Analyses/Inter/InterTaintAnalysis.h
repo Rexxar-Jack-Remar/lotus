@@ -29,8 +29,9 @@ struct InterMonoTaintReport {
 };
 
 constexpr unsigned kDefaultTaintCallStringLength = 2;
-using InterMonoTaintResult = dataflow::ContextSensitiveDataFlowResult<
-    kDefaultTaintCallStringLength, SetContainer<llvm::Value *>>;
+using InterMonoTaintResult =
+    dataflow::ContextSensitiveDataFlowResult<kDefaultTaintCallStringLength,
+                                             SetContainer<llvm::Value *>>;
 
 struct InterMonoTaintAnalysisResult {
   std::unique_ptr<InterMonoTaintResult> Results;

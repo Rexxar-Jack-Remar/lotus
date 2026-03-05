@@ -32,11 +32,11 @@ public:
   Z3Expr gamma_hat(uint32_t id, const AbstractState &exeState) const;
 
   AbstractState abstract_consequence(const AbstractState &lower,
-                                    const AbstractState &upper,
-                                    const AbstractState &domain) const;
+                                     const AbstractState &upper,
+                                     const AbstractState &domain) const;
 
   AbstractState beta(const std::unordered_map<uint32_t, int32_t> &sigma,
-                   const AbstractState &exeState) const;
+                     const AbstractState &exeState) const;
 
   /// Return Z3 expression lazily based on variable ID
   virtual inline Z3Expr toIntZ3Expr(uint32_t varId) const {
@@ -54,13 +54,12 @@ public:
   /* two optional solvers: RSY and bilateral */
 
   AbstractState bilateral(const AbstractState &domain, const Z3Expr &phi,
-                        uint32_t descend_check = 0);
+                          uint32_t descend_check = 0);
 
   AbstractState RSY(const AbstractState &domain, const Z3Expr &phi);
 
   std::unordered_map<uint32_t, int32_t>
-  BoxedOptSolver(const Z3Expr &phi,
-                 std::unordered_map<uint32_t, int32_t> &ret,
+  BoxedOptSolver(const Z3Expr &phi, std::unordered_map<uint32_t, int32_t> &ret,
                  std::unordered_map<uint32_t, int32_t> &low_values,
                  std::unordered_map<uint32_t, int32_t> &high_values);
 
@@ -69,8 +68,7 @@ public:
   void updateMap(std::unordered_map<uint32_t, int32_t> &map, uint32_t key,
                  const int32_t &value);
 
-  void decide_cpa_ext(const Z3Expr &phi,
-                      std::unordered_map<uint32_t, Z3Expr> &,
+  void decide_cpa_ext(const Z3Expr &phi, std::unordered_map<uint32_t, Z3Expr> &,
                       std::unordered_map<uint32_t, int32_t> &,
                       std::unordered_map<uint32_t, int32_t> &,
                       std::unordered_map<uint32_t, int32_t> &,

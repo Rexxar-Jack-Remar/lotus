@@ -1,10 +1,11 @@
 #include "Dataflow/Mono/Analyses/Inter/InterTaintAnalysis.h"
+
+#include "llvm/IR/Instructions.h"
+
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Dataflow/Mono/Container/Traits.h"
 #include "Dataflow/Mono/Core/Domain.h"
 #include "Dataflow/Mono/Solver/InterSolver.h"
-
-#include "llvm/IR/Instructions.h"
 
 #include <memory>
 
@@ -147,9 +148,7 @@ public:
     return Seeds;
   }
 
-  const InterMonoTaintReport &getReport() const {
-    return Report;
-  }
+  const InterMonoTaintReport &getReport() const { return Report; }
 
 private:
   struct AliasPartition {

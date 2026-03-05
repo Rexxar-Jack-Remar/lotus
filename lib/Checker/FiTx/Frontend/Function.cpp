@@ -1,10 +1,5 @@
 #include "llvm/IR/Function.h"
 
-#include "Checker/FiTx/Core/AnalysisHelper.h"
-#include "Checker/FiTx/Core/BasicBlock.h"
-#include "Checker/FiTx/Core/Casting.h"
-#include "Checker/FiTx/Core/Function.h"
-#include "Checker/FiTx/Core/Value.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Argument.h"
@@ -24,12 +19,21 @@
 #include "llvm/IR/Value.h"
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Pass.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
+#include "Checker/FiTx/Core/AnalysisHelper.h"
+#include "Checker/FiTx/Core/BasicBlock.h"
+#include "Checker/FiTx/Core/Casting.h"
+#include "Checker/FiTx/Core/Function.h"
+#include "Checker/FiTx/Core/Value.h"
+
 // include STL
+#include "Checker/FiTx/Frontend/Analyzer.h"
+#include "Checker/FiTx/Frontend/BasicBlock.h"
+#include "Checker/FiTx/Frontend/Function.h"
+
 #include <algorithm>
 #include <ctime>
 #include <iostream>
@@ -40,10 +44,6 @@
 #include <stack>
 #include <string>
 #include <vector>
-
-#include "Checker/FiTx/Frontend/Analyzer.h"
-#include "Checker/FiTx/Frontend/BasicBlock.h"
-#include "Checker/FiTx/Frontend/Function.h"
 
 namespace framework {
 FunctionInformation::FunctionInformation(
@@ -68,7 +68,7 @@ FunctionInformation::getCurrentBasicBlockInformation() {
 std::shared_ptr<BasicBlockInformation>
 FunctionInformation::createBasicBlockInfo(
     std::shared_ptr<framework::BasicBlock> basic_block,
-    const std::set<State>& states) {
+    const std::set<State> &states) {
   int time_to_live = BasicBlockInformation::kMaxTimeToLive;
 
   if (basicBlockInfoExists(basic_block)) {
@@ -81,7 +81,8 @@ FunctionInformation::createBasicBlockInfo(
 
   current_block_info->setTimeToLive(time_to_live);
 
-  if (basic_block->isCleanupBlock()) return current_block_info;
+  if (basic_block->isCleanupBlock())
+    return current_block_info;
 
   bool return_value_assigned = !current_block_info->ReturnValues().empty();
   // Merge typestate and arg summaries from all predecessors (paper §4.2).
@@ -100,7 +101,8 @@ FunctionInformation::createBasicBlockInfo(
                      [](const std::weak_ptr<framework::BasicBlock> block) {
                        return block.lock();
                      });
-      if (!passthrough_blocks.size()) passthrough_blocks.push_back(preds);
+      if (!passthrough_blocks.size())
+        passthrough_blocks.push_back(preds);
 
       for (auto block : passthrough_blocks) {
         if (!basicBlockInfoExists(block)) {
@@ -120,7 +122,7 @@ FunctionInformation::createBasicBlockInfo(
         // TODO: Fix this rough check of error code propagation
         BasicBlockInformation::BlockStatus status =
             pred_block_info->getBlockStatus();
-        const auto& branch_inst =
+        const auto &branch_inst =
             pred_block_info->BasicBlock()->getBranchInst();
         if (branch_inst && branch_inst->Condition() &&
             branch_inst->returnValueOperandExists()) {
@@ -131,16 +133,16 @@ FunctionInformation::createBasicBlockInfo(
             // Previously ICMP_EQ and ICMP_SGT fell through to set ERROR,
             // making the SUCCESS assignment unreachable.
             switch (condition->GetPredicate()) {
-              case llvm::CmpInst::Predicate::ICMP_EQ:
-              case llvm::CmpInst::Predicate::ICMP_SGT:
-                status = BasicBlockInformation::SUCCESS;
-                break;
-              case llvm::CmpInst::Predicate::ICMP_NE:
-              case llvm::CmpInst::Predicate::ICMP_SLT:
-                status = BasicBlockInformation::ERROR;
-                break;
-              default:
-                break;
+            case llvm::CmpInst::Predicate::ICMP_EQ:
+            case llvm::CmpInst::Predicate::ICMP_SGT:
+              status = BasicBlockInformation::SUCCESS;
+              break;
+            case llvm::CmpInst::Predicate::ICMP_NE:
+            case llvm::CmpInst::Predicate::ICMP_SLT:
+              status = BasicBlockInformation::ERROR;
+              break;
+            default:
+              break;
             }
           }
         }
@@ -149,7 +151,7 @@ FunctionInformation::createBasicBlockInfo(
         auto pred_value_states =
             pred_block_info->ValueStatesForSuccessor(basic_block);
         for (auto val_states : pred_value_states.first.ValueStates()) {
-          auto& value = val_states.first;
+          auto &value = val_states.first;
           if (!current_block_info->ValueStates().valueExists(value)) {
             current_block_info->ValueStates().setValueState(
                 value, pred_value_states.first.getTransitionLog(value));
@@ -207,14 +209,15 @@ void FunctionInformation::addValue(std::shared_ptr<Value> value) {
   value_collection_.add(value);
 }
 
-void FunctionInformation::addValues(const ValueCollection& collection) {
+void FunctionInformation::addValues(const ValueCollection &collection) {
   value_collection_.add(collection);
 }
 
 std::shared_ptr<BasicBlockInformation>
 FunctionInformation::getBasicBlockInformation(
     std::shared_ptr<framework::BasicBlock> basic_block) {
-  if (basicBlockInfoExists(basic_block)) return basic_block_info_[basic_block];
+  if (basicBlockInfoExists(basic_block))
+    return basic_block_info_[basic_block];
   return nullptr;
 }
 
@@ -237,12 +240,12 @@ bool FunctionInformation::basicBlockPrevInfoExists(
          prev_basic_block_info_.end();
 }
 
-const FunctionInformation::WeakBasicBlockSet&
+const FunctionInformation::WeakBasicBlockSet &
 FunctionInformation::getErrorBlocks(int64_t error_code) {
   return return_info_[error_code];
 }
 
-const FunctionInformation::WeakBasicBlockSet&
+const FunctionInformation::WeakBasicBlockSet &
 FunctionInformation::getSuccessBlock() {
   return return_info_[kSuccessCode];
 }
@@ -251,14 +254,18 @@ bool FunctionInformation::basicBlockInfoChanged(
     std::shared_ptr<framework::BasicBlock> block) {
   auto current_info = getBasicBlockInformation(block);
   auto prev_info = getBasicBlockPrevInformation(block);
-  if (!current_info || !prev_info) return true;
+  if (!current_info || !prev_info)
+    return true;
 
-  if (current_info->PartialStates()) return true;
+  if (current_info->PartialStates())
+    return true;
 
-  if (current_info->TimeToLive() <= 0) return false;
+  if (current_info->TimeToLive() <= 0)
+    return false;
 
   /* if (*current_info == *prev_info || !current_info->TimeToLive()) */
-  if (*current_info == *prev_info) return false;
+  if (*current_info == *prev_info)
+    return false;
   return true;
 }
 
@@ -291,4 +298,4 @@ void FunctionInformation::addRefcountFunction(
   called_refcount_functions_.push_back(function);
 }
 
-};  // namespace framework
+}; // namespace framework

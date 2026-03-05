@@ -16,14 +16,16 @@ bool isEdgeAllowed(EdgeType et, const std::set<EdgeType> &allowed) {
 } // namespace
 
 std::set<EdgeType> SchedulingQuery::defaultSchedulingEdgeTypes() {
-  return {EdgeType::DATA_DEF_USE,  EdgeType::DATA_RAW,     EdgeType::DATA_READ,
-          EdgeType::DATA_ALIAS,    EdgeType::DATA_RET,     EdgeType::PARAMETER_IN,
-          EdgeType::PARAMETER_OUT, EdgeType::PARAMETER_FIELD, EdgeType::VAL_DEP,
-          EdgeType::GLOBAL_DEP,    EdgeType::CONTROLDEP_BR, EdgeType::CONTROLDEP_IND_BR};
+  return {EdgeType::DATA_DEF_USE,  EdgeType::DATA_RAW,
+          EdgeType::DATA_READ,     EdgeType::DATA_ALIAS,
+          EdgeType::DATA_RET,      EdgeType::PARAMETER_IN,
+          EdgeType::PARAMETER_OUT, EdgeType::PARAMETER_FIELD,
+          EdgeType::VAL_DEP,       EdgeType::GLOBAL_DEP,
+          EdgeType::CONTROLDEP_BR, EdgeType::CONTROLDEP_IND_BR};
 }
 
-IndependenceResult SchedulingQuery::independent(Node &a, Node &b,
-                                                const SchedulingPolicy &policy) {
+IndependenceResult
+SchedulingQuery::independent(Node &a, Node &b, const SchedulingPolicy &policy) {
   IndependenceResult result;
   if (&a == &b) {
     result.independent = false;
@@ -31,8 +33,9 @@ IndependenceResult SchedulingQuery::independent(Node &a, Node &b,
     return result;
   }
 
-  const std::set<EdgeType> edge_types =
-      policy.edge_types.empty() ? defaultSchedulingEdgeTypes() : policy.edge_types;
+  const std::set<EdgeType> edge_types = policy.edge_types.empty()
+                                            ? defaultSchedulingEdgeTypes()
+                                            : policy.edge_types;
 
   bool a_to_b = findPath(a, b, edge_types, result.witness_path_ab,
                          result.witness_edge_types_ab);
@@ -46,8 +49,9 @@ SchedulingQuery::NodeSet
 SchedulingQuery::readySet(const NodeSet &region, const NodeSet &scheduled,
                           const SchedulingPolicy &policy) {
   NodeSet ready;
-  const std::set<EdgeType> edge_types =
-      policy.edge_types.empty() ? defaultSchedulingEdgeTypes() : policy.edge_types;
+  const std::set<EdgeType> edge_types = policy.edge_types.empty()
+                                            ? defaultSchedulingEdgeTypes()
+                                            : policy.edge_types;
 
   for (Node *node : region) {
     if (node == nullptr || scheduled.count(node))
@@ -96,8 +100,9 @@ SchedulingQuery::topologicalLevels(const NodeSet &region,
   if (region.empty())
     return levels;
 
-  const std::set<EdgeType> edge_types =
-      policy.edge_types.empty() ? defaultSchedulingEdgeTypes() : policy.edge_types;
+  const std::set<EdgeType> edge_types = policy.edge_types.empty()
+                                            ? defaultSchedulingEdgeTypes()
+                                            : policy.edge_types;
   auto adj = buildAdjacency(region, edge_types);
   std::unordered_map<Node *, size_t> indegree;
   for (Node *n : region)
@@ -157,8 +162,9 @@ SchedulingQuery::stronglyConnectedComponents(const NodeSet &region,
   if (region.empty())
     return sccs;
 
-  const std::set<EdgeType> edge_types =
-      policy.edge_types.empty() ? defaultSchedulingEdgeTypes() : policy.edge_types;
+  const std::set<EdgeType> edge_types = policy.edge_types.empty()
+                                            ? defaultSchedulingEdgeTypes()
+                                            : policy.edge_types;
   auto adj = buildAdjacency(region, edge_types);
 
   std::unordered_map<Node *, int> index;
@@ -210,8 +216,9 @@ size_t SchedulingQuery::criticalPathLength(const NodeSet &region,
   if (region.empty())
     return 0;
 
-  const std::set<EdgeType> edge_types =
-      policy.edge_types.empty() ? defaultSchedulingEdgeTypes() : policy.edge_types;
+  const std::set<EdgeType> edge_types = policy.edge_types.empty()
+                                            ? defaultSchedulingEdgeTypes()
+                                            : policy.edge_types;
   auto sccs = stronglyConnectedComponents(region, policy);
 
   std::unordered_map<Node *, size_t> node_to_comp;
@@ -266,9 +273,10 @@ size_t SchedulingQuery::criticalPathLength(const NodeSet &region,
   return best > 0 ? best - 1 : 0;
 }
 
-bool SchedulingQuery::findPath(
-    Node &source, Node &target, const std::set<EdgeType> &edge_types,
-    std::vector<Node *> &path, std::vector<EdgeType> &path_edge_types) const {
+bool SchedulingQuery::findPath(Node &source, Node &target,
+                               const std::set<EdgeType> &edge_types,
+                               std::vector<Node *> &path,
+                               std::vector<EdgeType> &path_edge_types) const {
   path.clear();
   path_edge_types.clear();
 

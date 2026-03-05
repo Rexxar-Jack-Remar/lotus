@@ -1,8 +1,8 @@
 #pragma once
+#include "Checker/FiTx/Frontend/StateTransition.h"
+
 #include <string>
 #include <vector>
-
-#include "Checker/FiTx/Frontend/StateTransition.h"
 
 const std::vector<framework::FunctionArgTransitionRule::FunctionArg>
     lock_funcs = {

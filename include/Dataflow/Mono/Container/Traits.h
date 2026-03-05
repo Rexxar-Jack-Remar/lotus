@@ -71,7 +71,7 @@ public:
 
   SetContainer() = default;
   SetContainer(std::initializer_list<T> Init) : Data(Init) {}
-  
+
   // Copy and move semantics (defaulted, but explicit for clarity)
   SetContainer(const SetContainer &) = default;
   SetContainer(SetContainer &&) = default;
@@ -87,9 +87,7 @@ public:
 
   bool erase(const T &Elem) { return Data.erase(Elem) > 0; }
 
-  iterator erase(iterator It) {
-    return Data.erase(It);
-  }
+  iterator erase(iterator It) { return Data.erase(It); }
 
   bool contains(const T &Elem) const { return Data.find(Elem) != Data.end(); }
 
@@ -123,9 +121,7 @@ public:
     return Data == Other.Data;
   }
 
-  bool operator!=(const SetContainer &Other) const {
-    return !(*this == Other);
-  }
+  bool operator!=(const SetContainer &Other) const { return !(*this == Other); }
 
   // Iterator support (already declared above)
 
@@ -176,7 +172,7 @@ public:
   using container_type = BitVectorSet<T>;
 
   BitVectorContainer() = default;
-  
+
   // Copy and move semantics (defaulted, but explicit for clarity)
   BitVectorContainer(const BitVectorContainer &) = default;
   BitVectorContainer(BitVectorContainer &&) = default;
@@ -203,8 +199,9 @@ public:
   bool erase(const T &Elem) { return Data.erase(Elem); }
 
   iterator erase(iterator It) {
-    // BitVectorSet doesn't support iterator erase, so we need to find the element
-    // and erase by value. This is less efficient but necessary for compatibility.
+    // BitVectorSet doesn't support iterator erase, so we need to find the
+    // element and erase by value. This is less efficient but necessary for
+    // compatibility.
     if (It != end()) {
       T Elem = *It;
       ++It; // Advance before erasing
@@ -224,7 +221,9 @@ public:
 
   void clear() { Data.clear(); }
 
-  void unionWith(const BitVectorContainer &Other) { Data.unionWith(Other.Data); }
+  void unionWith(const BitVectorContainer &Other) {
+    Data.unionWith(Other.Data);
+  }
 
   void intersectWith(const BitVectorContainer &Other) {
     Data.intersectWith(Other.Data);
@@ -271,9 +270,10 @@ private:
 template <typename ContainerT> struct HasSetUniverse {
 private:
   template <typename U>
-  static auto test(int) -> decltype(std::declval<U>().setUniverse(
-                                         std::declval<std::vector<typename U::value_type>>()),
-                                     std::true_type{});
+  static auto test(int)
+      -> decltype(std::declval<U>().setUniverse(
+                      std::declval<std::vector<typename U::value_type>>()),
+                  std::true_type{});
 
   template <typename> static std::false_type test(...);
 
@@ -289,15 +289,17 @@ public:
  */
 template <typename ContainerT>
 typename std::enable_if<HasSetUniverse<ContainerT>::value>::type
-initializeContainerUniverse(ContainerT &Container,
-                            const std::vector<typename ContainerT::value_type> &Universe) {
+initializeContainerUniverse(
+    ContainerT &Container,
+    const std::vector<typename ContainerT::value_type> &Universe) {
   Container.setUniverse(Universe);
 }
 
 template <typename ContainerT>
 typename std::enable_if<!HasSetUniverse<ContainerT>::value>::type
-initializeContainerUniverse(ContainerT &Container,
-                            const std::vector<typename ContainerT::value_type> &Universe) {
+initializeContainerUniverse(
+    ContainerT &Container,
+    const std::vector<typename ContainerT::value_type> &Universe) {
   // No-op for containers that don't need universe initialization
   (void)Container;
   (void)Universe;
@@ -348,7 +350,8 @@ template <typename T> using FastContainer = BitVectorContainer<T>;
  * @brief Adapter to use std::set directly (for backward compatibility)
  *
  * This allows existing code using std::set<T> to work without changes.
- * However, prefer SetContainer<T> for new code as it provides a cleaner interface.
+ * However, prefer SetContainer<T> for new code as it provides a cleaner
+ * interface.
  */
 template <typename T> struct StdSetAdapter {
   using value_type = T;
@@ -358,9 +361,7 @@ template <typename T> struct StdSetAdapter {
 
   bool insert(const T &Elem) { return Data.insert(Elem).second; }
   bool erase(const T &Elem) { return Data.erase(Elem) > 0; }
-  bool contains(const T &Elem) const {
-    return Data.find(Elem) != Data.end();
-  }
+  bool contains(const T &Elem) const { return Data.find(Elem) != Data.end(); }
   bool empty() const { return Data.empty(); }
   size_t size() const { return Data.size(); }
   void clear() { Data.clear(); }
@@ -372,7 +373,8 @@ template <typename T> struct StdSetAdapter {
   void intersectWith(const StdSetAdapter &Other) {
     std::set<T> Result;
     std::set_intersection(Data.begin(), Data.end(), Other.Data.begin(),
-                          Other.Data.end(), std::inserter(Result, Result.begin()));
+                          Other.Data.end(),
+                          std::inserter(Result, Result.begin()));
     Data = std::move(Result);
   }
 

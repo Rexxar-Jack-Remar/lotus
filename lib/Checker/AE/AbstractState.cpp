@@ -12,9 +12,10 @@
 #include "Checker/AE/AbstractInterpretation.h"
 #include "Checker/AE/SVFIRWrapper.h"
 
+#include <algorithm>
+
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
-#include <algorithm>
 
 namespace lotus {
 namespace analysis {

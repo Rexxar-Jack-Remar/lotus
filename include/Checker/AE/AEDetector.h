@@ -272,7 +272,8 @@ public:
   /// Check if an object is reachable from live pointers
   bool isReachableFromLivePointers(AbstractState &as, uint32_t objId);
 
-  /// Check if an object escapes (stored to global, returned, passed to external function)
+  /// Check if an object escapes (stored to global, returned, passed to external
+  /// function)
   bool objectEscapes(uint32_t objId);
 
 private:

@@ -20,8 +20,8 @@ llvm::ICmpInst::Predicate invertIcmpPred(llvm::ICmpInst::Predicate p);
 
 /** Add path condition for integer comparison; returns false if UNSAT. */
 bool applyIntegerIcmpConstraint(PulseFormula &formula,
-                                llvm::ICmpInst::Predicate p,
-                                AbstractValue lhs, AbstractValue rhs);
+                                llvm::ICmpInst::Predicate p, AbstractValue lhs,
+                                AbstractValue rhs);
 
 } // namespace detail
 } // namespace pulse

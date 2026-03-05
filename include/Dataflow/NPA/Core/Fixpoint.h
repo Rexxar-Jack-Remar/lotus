@@ -5,7 +5,7 @@
  * \file
  * \brief Generic fixpoint iteration (Kleene-like).
  *
- * Used for: 
+ * Used for:
  * (1) Kleene sequence κ^(i+1) = f(κ^(i)) (single variable);
  * (2) solving linear sub-systems (e.g. InfClos, or vector fixpoint for
  * the linearized system). NPA's Newton iteration uses these to compute
@@ -17,8 +17,7 @@
 namespace npa {
 
 /// Single-variable fixpoint: iterates until stable (κ^(i+1) = f(κ^(i))).
-template <class D, class F>
-auto fix(bool verbose, DomVal<D> init, F f) {
+template <class D, class F> auto fix(bool verbose, DomVal<D> init, F f) {
   NPA_REQUIRE_DOMAIN(D);
   int cnt = 0;
   auto last = init;
@@ -26,13 +25,15 @@ auto fix(bool verbose, DomVal<D> init, F f) {
   while (true) {
     auto nxt = f(last);
     if (domain_equal<D>(last, nxt)) {
-      if (verbose) std::cerr << "[fp] " << cnt + 1 << "\n";
+      if (verbose)
+        std::cerr << "[fp] " << cnt + 1 << "\n";
       return nxt;
     }
     last = std::move(nxt);
     ++cnt;
     if (max_iters >= 0 && cnt >= max_iters) {
-      if (verbose) std::cerr << "[fp] hit max_fixpoint_iters=" << max_iters << "\n";
+      if (verbose)
+        std::cerr << "[fp] hit max_fixpoint_iters=" << max_iters << "\n";
       return last;
     }
   }
@@ -54,13 +55,15 @@ Vec fix_vec(bool verbose, Vec init, F f) {
       }
     }
     if (stable) {
-      if (verbose) std::cerr << "[fp] " << cnt + 1 << "\n";
+      if (verbose)
+        std::cerr << "[fp] " << cnt + 1 << "\n";
       return nxt;
     }
     init.swap(nxt);
     ++cnt;
     if (max_iters >= 0 && cnt >= max_iters) {
-      if (verbose) std::cerr << "[fp] hit max_fixpoint_iters=" << max_iters << "\n";
+      if (verbose)
+        std::cerr << "[fp] hit max_fixpoint_iters=" << max_iters << "\n";
       return init;
     }
   }

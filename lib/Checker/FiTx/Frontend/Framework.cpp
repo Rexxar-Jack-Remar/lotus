@@ -88,13 +88,14 @@ void FrameworkPass::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
 }
 
 // Entry: each subclass overrides defineStates() to register StateManagers;
-// we create one Analyzer per manager and run analyze() (CFG, typestate, summaries).
+// we create one Analyzer per manager and run analyze() (CFG, typestate,
+// summaries).
 bool FrameworkPass::runOnModule(llvm::Module &M) {
   std::chrono::system_clock::time_point start, end;
   LoggingServer server;
 
   start = std::chrono::system_clock::now();
-  defineStates();  // Detectors (UAF, Leak, etc.) add StateManagers here.
+  defineStates(); // Detectors (UAF, Leak, etc.) add StateManagers here.
 
   // Create analyzers and spawn threads
   std::vector<AnalyzerInfo> analyzers;

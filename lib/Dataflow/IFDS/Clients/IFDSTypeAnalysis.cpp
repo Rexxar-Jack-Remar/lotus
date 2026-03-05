@@ -34,9 +34,9 @@ TypeAnalysis::FactSet TypeAnalysis::normal_flow(const llvm::Instruction *stmt,
   return result;
 }
 
-TypeAnalysis::FactSet
-TypeAnalysis::call_flow(const llvm::CallBase *call, const llvm::Function *callee,
-                        const Fact &fact) {
+TypeAnalysis::FactSet TypeAnalysis::call_flow(const llvm::CallBase *call,
+                                              const llvm::Function *callee,
+                                              const Fact &fact) {
   FactSet result;
   if (!call) {
     return result;
@@ -63,9 +63,10 @@ TypeAnalysis::call_flow(const llvm::CallBase *call, const llvm::Function *callee
   return result;
 }
 
-TypeAnalysis::FactSet
-TypeAnalysis::return_flow(const llvm::CallBase *call, const llvm::Function *callee,
-                          const Fact &exit_fact, const Fact &call_fact) {
+TypeAnalysis::FactSet TypeAnalysis::return_flow(const llvm::CallBase *call,
+                                                const llvm::Function *callee,
+                                                const Fact &exit_fact,
+                                                const Fact &call_fact) {
   FactSet result;
   if (!call) {
     return result;
@@ -99,7 +100,8 @@ TypeAnalysis::return_flow(const llvm::CallBase *call, const llvm::Function *call
   // Return-value mapping to call-site SSA result.
   if (!call->getType()->isVoidTy()) {
     for (const llvm::BasicBlock &bb : *callee) {
-      if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
+      if (const auto *ret =
+              llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
         if (ret->getReturnValue() == exit_fact) {
           result.insert(call);
           break;
@@ -131,9 +133,8 @@ TypeAnalysis::FactSet TypeAnalysis::initial_facts(const llvm::Function *main) {
   return result;
 }
 
-std::map<const llvm::Value *, const llvm::Type *>
-TypeAnalysis::infer_types(const std::unordered_map<const llvm::Instruction *, FactSet> &facts)
-    const {
+std::map<const llvm::Value *, const llvm::Type *> TypeAnalysis::infer_types(
+    const std::unordered_map<const llvm::Instruction *, FactSet> &facts) const {
   std::map<const llvm::Value *, const llvm::Type *> types;
   for (const auto &entry : facts) {
     for (const Fact &fact : entry.second) {

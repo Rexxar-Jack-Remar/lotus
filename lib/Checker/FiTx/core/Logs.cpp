@@ -5,7 +5,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-// Provide pipe2 only on macOS (not in older SDKs); Linux/glibc has it in unistd.h
+// Provide pipe2 only on macOS (not in older SDKs); Linux/glibc has it in
+// unistd.h
 #if defined(__APPLE__)
 static int pipe2(int fd[2], int flags) {
   if (pipe(fd) < 0)

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Dataflow/ControlFlow/IntraCFG.h"
-
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+
+#include "Dataflow/ControlFlow/IntraCFG.h"
 
 #include <functional>
 #include <map>
@@ -61,7 +61,7 @@ public:
   std::vector<n_t> getStartPointsOf(f_t Function,
                                     FlowDirection Dir) const override;
   std::vector<n_t> getExitPointsOf(f_t Function,
-                                  FlowDirection Dir) const override;
+                                   FlowDirection Dir) const override;
   bool isStartPoint(n_t Inst, FlowDirection Dir) const override;
   bool isExitInst(n_t Inst, FlowDirection Dir) const override;
 

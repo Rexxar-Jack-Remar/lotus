@@ -68,7 +68,8 @@ public:
   };
 
   // LCA table over the ADT. The F/B-set computation uses this to identify the
-  // lowest composition node whose left/right children are crossed by a CFG edge.
+  // lowest composition node whose left/right children are crossed by a CFG
+  // edge.
   struct LCATable final {
     std::vector<ADTNode *> Euler;
     std::vector<int> Depth;

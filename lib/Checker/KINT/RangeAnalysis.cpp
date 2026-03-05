@@ -219,7 +219,8 @@ void RangeAnalysis::analyze_one_bb_range(
             // Use <= idx_max (clamped to arr_size-1) so the last reachable
             // element is included in the range merge.
             const size_t idx_min = idx_rng.getUnsignedMin().getLimitedValue();
-            const size_t idx_end = std::min(arr_size, idx_max + 1); // inclusive upper bound
+            const size_t idx_end =
+                std::min(arr_size, idx_max + 1); // inclusive upper bound
             for (size_t i = idx_min; i < idx_end; ++i) {
               if (garr2ranges[garr][i].getBitWidth() == valrng.getBitWidth()) {
                 garr2ranges[garr][i] = garr2ranges[garr][i].unionWith(valrng);
@@ -442,7 +443,8 @@ void RangeAnalysis::analyze_one_bb_range(
 
               // Include idx_max itself (clamped to arr_size-1) so the last
               // reachable element contributes to the merged range.
-              const size_t load_idx_min = idx_rng.getUnsignedMin().getLimitedValue();
+              const size_t load_idx_min =
+                  idx_rng.getUnsignedMin().getLimitedValue();
               const size_t load_idx_end = std::min(arr_size, idx_max + 1);
               for (size_t i = load_idx_min; i < load_idx_end; ++i) {
                 if (new_range.getBitWidth() ==
@@ -696,9 +698,9 @@ void RangeAnalysis::range_analysis(
         // Invoke, IndirectBr, CallBr, etc. — proceed conservatively without
         // adding branch-specific range constraints.  Using MKINT_CHECK_RELAX
         // (not ABORT) so the analysis continues rather than crashing.
-        MKINT_CHECK_RELAX(false)
-            << "[Range Analysis] Unknown terminator (proceeding conservatively): "
-            << *pred->getTerminator();
+        MKINT_CHECK_RELAX(false) << "[Range Analysis] Unknown terminator "
+                                    "(proceeding conservatively): "
+                                 << *pred->getTerminator();
       }
 
       analyze_one_bb_range(bb, branch_rng, func2range_info, backedges,

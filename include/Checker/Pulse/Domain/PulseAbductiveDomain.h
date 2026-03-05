@@ -4,8 +4,8 @@
 #include "Checker/Pulse/Core/PulseFormula.h"
 #include "Checker/Pulse/Core/PulseMemory.h"
 #include "Checker/Pulse/Domain/PulseInvalidation.h"
-#include "Checker/Pulse/Interproc/PulseTransitiveInfo.h"
 #include "Checker/Pulse/Domain/PulseTaint.h"
+#include "Checker/Pulse/Interproc/PulseTransitiveInfo.h"
 
 #include <cstdint>
 #include <map>

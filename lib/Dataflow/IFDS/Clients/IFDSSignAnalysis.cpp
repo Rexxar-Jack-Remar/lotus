@@ -1,10 +1,10 @@
 #include "Dataflow/IFDS/Clients/IFDSSignAnalysis.h"
 
+#include <limits>
+
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/MathExtras.h>
-
-#include <limits>
 
 namespace ifds {
 
@@ -25,8 +25,8 @@ SignFact::Sign SignAnalysis::sign_of(int64_t v) {
   return SignFact::Sign::Zero;
 }
 
-llvm::Optional<SignFact::Sign>
-SignAnalysis::eval_binary(unsigned opcode, int64_t a, int64_t b) {
+llvm::Optional<SignFact::Sign> SignAnalysis::eval_binary(unsigned opcode,
+                                                         int64_t a, int64_t b) {
   int64_t out = 0;
   switch (opcode) {
   case llvm::Instruction::Add:
@@ -45,8 +45,7 @@ SignAnalysis::eval_binary(unsigned opcode, int64_t a, int64_t b) {
     }
     return sign_of(out);
   case llvm::Instruction::SDiv:
-    if (b == 0 ||
-        (a == std::numeric_limits<int64_t>::min() && b == -1)) {
+    if (b == 0 || (a == std::numeric_limits<int64_t>::min() && b == -1)) {
       return llvm::None;
     }
     return sign_of(a / b);
@@ -101,9 +100,9 @@ SignAnalysis::FactSet SignAnalysis::normal_flow(const llvm::Instruction *stmt,
   return result;
 }
 
-SignAnalysis::FactSet
-SignAnalysis::call_flow(const llvm::CallBase *call, const llvm::Function *callee,
-                        const SignFact &fact) {
+SignAnalysis::FactSet SignAnalysis::call_flow(const llvm::CallBase *call,
+                                              const llvm::Function *callee,
+                                              const SignFact &fact) {
   FactSet result;
   if (!call) {
     return result;
@@ -130,10 +129,10 @@ SignAnalysis::call_flow(const llvm::CallBase *call, const llvm::Function *callee
   return result;
 }
 
-SignAnalysis::FactSet
-SignAnalysis::return_flow(const llvm::CallBase *call, const llvm::Function *callee,
-                          const SignFact &exit_fact,
-                          const SignFact &call_fact) {
+SignAnalysis::FactSet SignAnalysis::return_flow(const llvm::CallBase *call,
+                                                const llvm::Function *callee,
+                                                const SignFact &exit_fact,
+                                                const SignFact &call_fact) {
   FactSet result;
   if (!call) {
     return result;
@@ -148,7 +147,8 @@ SignAnalysis::return_flow(const llvm::CallBase *call, const llvm::Function *call
 
   if (!call->getType()->isVoidTy()) {
     for (const llvm::BasicBlock &bb : *callee) {
-      if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
+      if (const auto *ret =
+              llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
         if (ret->getReturnValue() == exit_fact.value) {
           result.insert(SignFact::value_sign(call, exit_fact.sign));
           break;

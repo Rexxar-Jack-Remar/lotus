@@ -42,7 +42,8 @@ protected:
       DPIm item = popFromWorklist();
       FWProcessCurNode(item);
       SVFGNode *v = getNode(getNodeIDFromItem(item));
-      if (!v) continue;
+      if (!v)
+        continue;
       for (auto &edge : v->getOutEdges()) {
         FWProcessOutgoingEdge(item, edge);
       }
@@ -55,7 +56,8 @@ protected:
       DPIm item = popFromWorklist();
       BWProcessCurNode(item);
       SVFGNode *v = getNode(getNodeIDFromItem(item));
-      if (!v) continue;
+      if (!v)
+        continue;
       for (auto &edge : v->getInEdges()) {
         BWProcessIncomingEdge(item, edge);
       }

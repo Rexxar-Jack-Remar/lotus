@@ -1,35 +1,40 @@
 /**
  * @file CallStringInterProceduralDataFlow.h
- * @brief A lightweight call-string based inter-procedural monotone data-flow engine
+ * @brief A lightweight call-string based inter-procedural monotone data-flow
+ * engine
  *
- * This file provides a reusable, context-sensitive interprocedural dataflow analysis
- * engine based on the call-string approach. It's designed to be framework-agnostic
- * and can be used independently of the InterMonoSolver.
+ * This file provides a reusable, context-sensitive interprocedural dataflow
+ * analysis engine based on the call-string approach. It's designed to be
+ * framework-agnostic and can be used independently of the InterMonoSolver.
  *
  * ## Overview
  *
- * The implementation maintains separate IN/OUT lattices per (Instruction, CallString)
- * pair, where the call string is bounded to length K. When K is exceeded, the oldest
- * call site is dropped (FIFO truncation), falling back to less precise context.
+ * The implementation maintains separate IN/OUT lattices per (Instruction,
+ * CallString) pair, where the call string is bounded to length K. When K is
+ * exceeded, the oldest call site is dropped (FIFO truncation), falling back to
+ * less precise context.
  *
  * ### Key Design Principles
  *
- * 1. **Separation of Concerns**: The engine handles CFG traversal, context management,
- *    and fixpoint iteration. The client provides analysis-specific transfer functions.
+ * 1. **Separation of Concerns**: The engine handles CFG traversal, context
+ * management, and fixpoint iteration. The client provides analysis-specific
+ * transfer functions.
  *
- * 2. **Flexibility**: Supports arbitrary container types (std::set, BitVectorSet, etc.)
- *    and custom lattice operations via callbacks.
+ * 2. **Flexibility**: Supports arbitrary container types (std::set,
+ * BitVectorSet, etc.) and custom lattice operations via callbacks.
  *
  * 3. **Efficiency**: Uses worklist-based fixpoint iteration with lazy context
  *    initialization and precise successor/predecessor computation.
  *
- * 4. **Compatibility**: API mirrors intraprocedural solvers but extends transfer
- *    functions to receive predecessor context for precise call/return handling.
+ * 4. **Compatibility**: API mirrors intraprocedural solvers but extends
+ * transfer functions to receive predecessor context for precise call/return
+ * handling.
  *
  * ## Call-String Context Sensitivity
  *
  * **What is a call string?**
- * A call string is a sequence of call sites that led to the current program point:
+ * A call string is a sequence of call sites that led to the current program
+ * point:
  *   - Empty context: [] (context-insensitive)
  *   - 1-call-string: [call_1]
  *   - 2-call-string: [call_1, call_2]
@@ -78,13 +83,14 @@
  * For each (Instruction, Context) pair:
  *
  * ```
- * IN[n, ctx]  = merge { OUT[p, ctx_p] | (p, ctx_p) is a predecessor of (n, ctx) }
- * OUT[n, ctx] = transfer(IN[n, ctx], GEN[n], KILL[n])
+ * IN[n, ctx]  = merge { OUT[p, ctx_p] | (p, ctx_p) is a predecessor of (n, ctx)
+ * } OUT[n, ctx] = transfer(IN[n, ctx], GEN[n], KILL[n])
  * ```
  *
  * **Predecessor computation** handles three edge types:
  * 1. **Normal edges**: p → n within the same function, same context
- * 2. **Call edges**: call_site → callee_entry, context = caller_ctx + [call_site]
+ * 2. **Call edges**: call_site → callee_entry, context = caller_ctx +
+ * [call_site]
  * 3. **Return edges**: return → ret_site, context = callee_ctx - [last_call]
  *
  * ### Worklist Algorithm
@@ -171,9 +177,11 @@
  * ### initializeOUT(Instruction *I, Container &OUT)
  * Initializes OUT[I, ctx] when a new (I, ctx) pair is first seen.
  *
- * ### computeIN(Instruction *I, Instruction *Pred, Context &PredCtx, Container &IN, Result *DF)
- * Merges predecessor OUT into current IN. Called for each predecessor edge.
- * **Key insight:** Receives predecessor context to handle call/return precisely.
+ * ### computeIN(Instruction *I, Instruction *Pred, Context &PredCtx, Container
+ * &IN, Result *DF) Merges predecessor OUT into current IN. Called for each
+ * predecessor edge.
+ * **Key insight:** Receives predecessor context to handle call/return
+ * precisely.
  *
  * Example (union-based):
  * ```cpp
@@ -203,8 +211,8 @@
  *
  * ### Seed-Based Initialization
  *
- * Use `applyForwardFromSeeds()` to start from specific (Instruction, Context) pairs
- * with pre-initialized facts. This supports:
+ * Use `applyForwardFromSeeds()` to start from specific (Instruction, Context)
+ * pairs with pre-initialized facts. This supports:
  * - Multiple entry points
  * - Mid-function analysis seeds
  * - Incremental analysis (start from previous results)
@@ -237,7 +245,8 @@
  *
  * For large universes, use BitVectorSet as the container:
  * ```cpp
- * using Engine = CallStringInterProceduralDataFlowEngine<2, BitVectorSet<Value*>>;
+ * using Engine = CallStringInterProceduralDataFlowEngine<2,
+ * BitVectorSet<Value*>>;
  * ```
  * This reduces memory by ~30x and speeds up set operations by ~5-10x.
  *
@@ -287,8 +296,10 @@
  *
  * ## References
  *
- * - Sharir & Pnueli (1981): "Two Approaches to Interprocedural Data Flow Analysis"
- * - Reps, Horwitz, Sagiv (1995): "Precise Interprocedural Dataflow Analysis via Graph Reachability"
+ * - Sharir & Pnueli (1981): "Two Approaches to Interprocedural Data Flow
+ * Analysis"
+ * - Reps, Horwitz, Sagiv (1995): "Precise Interprocedural Dataflow Analysis via
+ * Graph Reachability"
  * - Phasar framework: https://github.com/secure-software-engineering/phasar
  *
  * @see InterMonoSolver for the problem-based wrapper around this engine
@@ -299,13 +310,14 @@
 #ifndef LOTUS_DATAFLOW_MONO_CORE_CALLSTRINGSOLVER_H_
 #define LOTUS_DATAFLOW_MONO_CORE_CALLSTRINGSOLVER_H_
 
-#include "Dataflow/ControlFlow/InterCFG.h"
-#include "Dataflow/ControlFlow/FlowDirection.h"
-#include "Dataflow/Mono/Core/CallStringContext.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+
+#include "Dataflow/ControlFlow/FlowDirection.h"
+#include "Dataflow/ControlFlow/InterCFG.h"
+#include "Dataflow/Mono/Core/CallStringContext.h"
 
 #include <deque>
 #include <functional>
@@ -358,9 +370,11 @@ namespace dataflow {
  * ```
  *
  * @tparam K Maximum call-string length
- * @tparam ContainerT Fact container type (e.g., std::set<Value*>, BitVectorSet<Value*>)
+ * @tparam ContainerT Fact container type (e.g., std::set<Value*>,
+ * BitVectorSet<Value*>)
  */
-template <unsigned K, typename ContainerT> class ContextSensitiveDataFlowResult {
+template <unsigned K, typename ContainerT>
+class ContextSensitiveDataFlowResult {
 public:
   using Context = mono::CallStringCTX<llvm::Instruction *, K>;
 
@@ -430,13 +444,9 @@ public:
     return Ins.find(Key) != Ins.end() || Outs.find(Key) != Outs.end();
   }
 
-  const std::map<ContextKey, ContainerT> &getINMap() const {
-    return Ins;
-  }
+  const std::map<ContextKey, ContainerT> &getINMap() const { return Ins; }
 
-  const std::map<ContextKey, ContainerT> &getOUTMap() const {
-    return Outs;
-  }
+  const std::map<ContextKey, ContainerT> &getOUTMap() const { return Outs; }
 
   const std::map<llvm::Instruction *, ContainerT> &getGENMap() const {
     return Gens;
@@ -496,34 +506,33 @@ public:
    * @return unique_ptr to result container (never null on success)
    */
   std::unique_ptr<ResultTy> applyForward(
-      llvm::Function *Entry,
-      const ICFG *ICF,
+      llvm::Function *Entry, const ICFG *ICF,
       std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
       std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
-      std::function<void(llvm::Instruction *Inst, ContainerT &IN)>
-          initializeIN,
+      std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
       std::function<void(llvm::Instruction *Inst, ContainerT &OUT)>
           initializeOUT,
       std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
-                         const Context &PredCtx, ContainerT &IN,
-                         ResultTy *DF)>
+                         const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
           computeIN,
-      std::function<void(llvm::Instruction *Inst, const Context &Ctx, ContainerT &OUT,
-                         ResultTy *DF)>
+      std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                         ContainerT &OUT, ResultTy *DF)>
           computeOUT,
       std::function<bool(const ContainerT &, const ContainerT &)> equal,
       std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
           getCalleesOfCallAt);
 
   /**
-   * @brief Run forward dataflow analysis from explicit seed points (Phasar-compatible)
+   * @brief Run forward dataflow analysis from explicit seed points
+   * (Phasar-compatible)
    *
    * This is a more flexible variant that supports:
    * - Multiple entry points
    * - Mid-function analysis seeds
    * - Pre-initialized fact sets at specific (instruction, context) pairs
    *
-   * This API is compatible with Phasar's InterMonoSolver initialization strategy.
+   * This API is compatible with Phasar's InterMonoSolver initialization
+   * strategy.
    *
    * **Use cases:**
    * - Analyzing multiple entry points simultaneously
@@ -532,10 +541,11 @@ public:
    * - Test generation (start from specific states)
    *
    * **Seed initialization:**
-   * The `SeedIns` map allows pre-populating IN facts for specific (inst, ctx) pairs.
-   * These facts are preserved during fixpoint iteration:
+   * The `SeedIns` map allows pre-populating IN facts for specific (inst, ctx)
+   * pairs. These facts are preserved during fixpoint iteration:
    * ```
-   * IN[seed_inst, seed_ctx] = SeedIns[{seed_inst, seed_ctx}] ∪ (merge from preds)
+   * IN[seed_inst, seed_ctx] = SeedIns[{seed_inst, seed_ctx}] ∪ (merge from
+   * preds)
    * ```
    *
    * **Parameters:**
@@ -560,12 +570,12 @@ public:
    * seeds.push_back({source, Context()});
    * seedFacts[{source, Context()}].insert(source);
    *
-   * auto *results = engine.applyForwardFromSeeds(module, seeds, icfg, seedFacts, ...);
+   * auto *results = engine.applyForwardFromSeeds(module, seeds, icfg,
+   * seedFacts, ...);
    * ```
    */
   ResultTy *applyForwardFromSeeds(
-      llvm::Module *M, const std::vector<ContextKey> &Seeds,
-      const ICFG *ICF,
+      llvm::Module *M, const std::vector<ContextKey> &Seeds, const ICFG *ICF,
       const std::map<ContextKey, ContainerT> &SeedIns,
       std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
       std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
@@ -575,8 +585,8 @@ public:
       std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
                          const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
           computeIN,
-      std::function<void(llvm::Instruction *Inst, const Context &Ctx, ContainerT &OUT,
-                         ResultTy *DF)>
+      std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                         ContainerT &OUT, ResultTy *DF)>
           computeOUT,
       std::function<bool(const ContainerT &, const ContainerT &)> equal,
       std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
@@ -587,19 +597,16 @@ public:
    * Fix: returns unique_ptr<ResultTy> to match the primary overload.
    */
   std::unique_ptr<ResultTy> applyForward(
-      llvm::Function *Entry,
-      const ICFG *ICF,
+      llvm::Function *Entry, const ICFG *ICF,
       std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
-      std::function<void(llvm::Instruction *Inst, ContainerT &IN)>
-          initializeIN,
+      std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
       std::function<void(llvm::Instruction *Inst, ContainerT &OUT)>
           initializeOUT,
       std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
-                         const Context &PredCtx, ContainerT &IN,
-                         ResultTy *DF)>
+                         const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
           computeIN,
-      std::function<void(llvm::Instruction *Inst, const Context &Ctx, ContainerT &OUT,
-                         ResultTy *DF)>
+      std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                         ContainerT &OUT, ResultTy *DF)>
           computeOUT,
       std::function<bool(const ContainerT &, const ContainerT &)> equal,
       std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
@@ -614,49 +621,46 @@ public:
 private:
   using WorkQueue = std::deque<ContextKey>;
 
-  static bool isCallToDefinedFunction(
-      llvm::Instruction *Inst, const ICFG *ICF);
+  static bool isCallToDefinedFunction(llvm::Instruction *Inst, const ICFG *ICF);
 
-  static llvm::Instruction *
-  getFirstInstruction(llvm::BasicBlock *BB) {
+  static llvm::Instruction *getFirstInstruction(llvm::BasicBlock *BB) {
     return &*BB->begin();
   }
 
   static bool isFunctionEntry(llvm::Instruction *Inst) {
     auto *BB = Inst->getParent();
-    return &BB->getParent()->getEntryBlock() == BB &&
-           Inst == &*BB->begin();
+    return &BB->getParent()->getEntryBlock() == BB && Inst == &*BB->begin();
   }
 
-  void computeGenKill(llvm::Module *M,
-                      std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
-                      std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
-                      ResultTy *DF);
+  void computeGenKill(
+      llvm::Module *M,
+      std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
+      std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
+      ResultTy *DF);
 
-  void ensureInitialized(const ContextKey &Key,
-                         std::function<void(llvm::Instruction *, ContainerT &)>
-                             initializeIN,
-                         std::function<void(llvm::Instruction *, ContainerT &)>
-                             initializeOUT,
-                         ResultTy *DF);
-
-  std::vector<ContextKey>
-  predecessors(
+  void ensureInitialized(
       const ContextKey &Key,
-      const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>> &CallToReturns,
-      const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>> &ContinuationToCalls,
+      std::function<void(llvm::Instruction *, ContainerT &)> initializeIN,
+      std::function<void(llvm::Instruction *, ContainerT &)> initializeOUT,
+      ResultTy *DF);
+
+  std::vector<ContextKey> predecessors(
+      const ContextKey &Key,
+      const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>>
+          &CallToReturns,
+      const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>>
+          &ContinuationToCalls,
       const ICFG *ICF);
 
-  std::vector<ContextKey>
-  successors(const ContextKey &Key,
-             const ICFG *ICF);
+  std::vector<ContextKey> successors(const ContextKey &Key, const ICFG *ICF);
 };
 
 // ---- Header-only template implementation ----
 
 template <unsigned K, typename ContainerT>
-bool CallStringInterProceduralDataFlowEngine<K, ContainerT>::isCallToDefinedFunction(
-    llvm::Instruction *Inst, const ICFG *ICF) {
+bool CallStringInterProceduralDataFlowEngine<
+    K, ContainerT>::isCallToDefinedFunction(llvm::Instruction *Inst,
+                                            const ICFG *ICF) {
   if (ICF == nullptr || Inst == nullptr || !ICF->isCallSite(Inst)) {
     return false;
   }
@@ -703,10 +707,10 @@ void CallStringInterProceduralDataFlowEngine<K, ContainerT>::ensureInitialized(
 }
 
 template <unsigned K, typename ContainerT>
-std::vector<typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ContextKey>
+std::vector<
+    typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ContextKey>
 CallStringInterProceduralDataFlowEngine<K, ContainerT>::successors(
-    const ContextKey &Key,
-    const ICFG *ICF) {
+    const ContextKey &Key, const ICFG *ICF) {
   std::vector<ContextKey> Result;
   auto *Inst = Key.Inst;
   auto Ctx = Key.Ctx;
@@ -749,18 +753,22 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::successors(
     return Result;
   }
 
-  for (auto *SuccInst : ICF->getSuccsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
+  for (auto *SuccInst :
+       ICF->getSuccsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
     Result.push_back({SuccInst, Ctx});
   }
   return Result;
 }
 
 template <unsigned K, typename ContainerT>
-std::vector<typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ContextKey>
+std::vector<
+    typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ContextKey>
 CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
     const ContextKey &Key,
-    const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>> &CallToReturns,
-    const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>> &ContinuationToCalls,
+    const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>>
+        &CallToReturns,
+    const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>>
+        &ContinuationToCalls,
     const ICFG *ICF) {
   std::vector<ContextKey> Result;
   auto *Inst = Key.Inst;
@@ -798,17 +806,18 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
     }
   }
 
-  for (auto *PredInst : ICF->getPredsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
+  for (auto *PredInst :
+       ICF->getPredsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
     Result.push_back({PredInst, Ctx});
   }
   return Result;
 }
 
 template <unsigned K, typename ContainerT>
-std::unique_ptr<typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ResultTy>
+std::unique_ptr<
+    typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ResultTy>
 CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
-    llvm::Function *Entry,
-    const ICFG *ICF,
+    llvm::Function *Entry, const ICFG *ICF,
     std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
     std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
     std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
@@ -816,15 +825,16 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
     std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
                        const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
         computeIN,
-    std::function<void(llvm::Instruction *Inst, const Context &Ctx, ContainerT &OUT,
-                       ResultTy *DF)>
+    std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                       ContainerT &OUT, ResultTy *DF)>
         computeOUT,
     std::function<bool(const ContainerT &, const ContainerT &)> equal,
     std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
         getCalleesOfCallAt) {
   // Assert ICF is non-null rather than silently returning nullptr.
-  assert(ICF != nullptr && "CallStringInterProceduralDataFlowEngine::applyForward: "
-                           "ICF must not be null");
+  assert(ICF != nullptr &&
+         "CallStringInterProceduralDataFlowEngine::applyForward: "
+         "ICF must not be null");
   if (Entry == nullptr || Entry->isDeclaration()) {
     return nullptr;
   }
@@ -835,12 +845,11 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
   std::vector<ContextKey> Seeds{EntryKey};
   std::map<ContextKey, ContainerT> SeedIns;
   // Delegate to applyForwardFromSeeds which returns a raw ptr; wrap it.
-  return std::unique_ptr<ResultTy>(
-      applyForwardFromSeeds(Module, Seeds, ICF, SeedIns, std::move(computeGEN),
-                            std::move(computeKILL), std::move(initializeIN),
-                            std::move(initializeOUT), std::move(computeIN),
-                            std::move(computeOUT), std::move(equal),
-                            std::move(getCalleesOfCallAt)));
+  return std::unique_ptr<ResultTy>(applyForwardFromSeeds(
+      Module, Seeds, ICF, SeedIns, std::move(computeGEN),
+      std::move(computeKILL), std::move(initializeIN), std::move(initializeOUT),
+      std::move(computeIN), std::move(computeOUT), std::move(equal),
+      std::move(getCalleesOfCallAt)));
 }
 
 template <unsigned K, typename ContainerT>
@@ -855,8 +864,8 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
                        const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
         computeIN,
-    std::function<void(llvm::Instruction *Inst, const Context &Ctx, ContainerT &OUT,
-                       ResultTy *DF)>
+    std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                       ContainerT &OUT, ResultTy *DF)>
         computeOUT,
     std::function<bool(const ContainerT &, const ContainerT &)> equal,
     std::function<std::vector<llvm::Function *>(llvm::Instruction *)>
@@ -872,7 +881,8 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
   computeGenKill(M, computeGEN, computeKILL, DF);
 
   std::map<llvm::Instruction *, std::vector<llvm::Instruction *>> CallToReturns;
-  std::map<llvm::Instruction *, std::vector<llvm::Instruction *>> ContinuationToCalls;
+  std::map<llvm::Instruction *, std::vector<llvm::Instruction *>>
+      ContinuationToCalls;
   for (auto &F : *M) {
     if (F.isDeclaration()) {
       continue;

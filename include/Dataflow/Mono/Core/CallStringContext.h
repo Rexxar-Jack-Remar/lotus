@@ -69,9 +69,7 @@ public:
     return CallString == Rhs.CallString;
   }
 
-  bool isDifferent(const CallStringCTX &Rhs) const {
-    return !isEqual(Rhs);
-  }
+  bool isDifferent(const CallStringCTX &Rhs) const { return !isEqual(Rhs); }
 
   friend bool operator==(const CallStringCTX &Lhs, const CallStringCTX &Rhs) {
     return Lhs.isEqual(Rhs);
@@ -106,7 +104,8 @@ private:
   template <typename T>
   static typename std::enable_if<
       std::is_pointer<T>::value &&
-          std::is_base_of<llvm::Value, typename std::remove_pointer<T>::type>::value,
+          std::is_base_of<llvm::Value,
+                          typename std::remove_pointer<T>::type>::value,
       void>::type
   printElement(llvm::raw_ostream &OS, T V) {
     if (V != nullptr) {
@@ -119,7 +118,8 @@ private:
   template <typename T>
   static typename std::enable_if<
       !(std::is_pointer<T>::value &&
-        std::is_base_of<llvm::Value, typename std::remove_pointer<T>::type>::value),
+        std::is_base_of<llvm::Value,
+                        typename std::remove_pointer<T>::type>::value),
       void>::type
   printElement(llvm::raw_ostream &OS, const T &) {
     OS << "<elem>";

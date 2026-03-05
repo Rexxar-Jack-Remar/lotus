@@ -5,11 +5,11 @@
 //
 // Previously this logic was copy-pasted into IntraConstantPropagation,
 // IntraFullConstantPropagation, InterConstantPropagation,
-// InterFullConstantPropagation, and InterTaintAnalysis.  
-
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+// InterFullConstantPropagation, and InterTaintAnalysis.
 
 #include "llvm/IR/Value.h"
+
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <vector>
 

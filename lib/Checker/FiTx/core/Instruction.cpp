@@ -1,19 +1,20 @@
 #include "Checker/FiTx/Core/Instruction.h"
 
-#include "Checker/FiTx/Core/BasicBlock.h"
-#include "Checker/FiTx/Core/Function.h"
-#include "Checker/FiTx/Core/SFG/Converter.h"
-#include "Checker/FiTx/Core/Value.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "Checker/FiTx/Core/BasicBlock.h"
+#include "Checker/FiTx/Core/Function.h"
+#include "Checker/FiTx/Core/SFG/Converter.h"
+#include "Checker/FiTx/Core/Value.h"
+
 namespace framework {
-std::shared_ptr<Instruction> Instruction::Create(
-    std::shared_ptr<Instruction> inst, std::vector<Fields> field,
-    long array_element_num) {
+std::shared_ptr<Instruction>
+Instruction::Create(std::shared_ptr<Instruction> inst,
+                    std::vector<Fields> field, long array_element_num) {
   auto created =
       Converter::GetInstance().createManagedInst<framework::Instruction>(
           inst, array_element_num, field);
@@ -21,45 +22,42 @@ std::shared_ptr<Instruction> Instruction::Create(
 }
 
 Instruction::Instruction()
-    : llvm_instruction_(nullptr),
-      module_(nullptr),
-      opcode_(0),
-      line_(0),
+    : llvm_instruction_(nullptr), module_(nullptr), opcode_(0), line_(0),
       Value() {}
 
-Instruction::Instruction(llvm::Instruction* instruction)
+Instruction::Instruction(llvm::Instruction *instruction)
     : llvm_instruction_(instruction), Value(instruction) {
   module_ = llvm_instruction_->getFunction()->getParent();
   opcode_ = llvm_instruction_->getOpcode();
-  if (const llvm::DebugLoc& Loc = llvm_instruction_->getDebugLoc()) {
+  if (const llvm::DebugLoc &Loc = llvm_instruction_->getDebugLoc()) {
     debug_loc_ = Loc;
     line_ = Loc.getLine();
     column_ = Loc.getCol();
   }
 }
 
-Instruction::Instruction(unsigned int opcode, llvm::Instruction* instruction)
+Instruction::Instruction(unsigned int opcode, llvm::Instruction *instruction)
     : opcode_(opcode), llvm_instruction_(instruction), Value(instruction) {
   module_ = llvm_instruction_->getFunction()->getParent();
-  if (const llvm::DebugLoc& Loc = llvm_instruction_->getDebugLoc()) {
+  if (const llvm::DebugLoc &Loc = llvm_instruction_->getDebugLoc()) {
     debug_loc_ = Loc;
     line_ = Loc.getLine();
     column_ = Loc.getCol();
   }
 }
 
-Instruction::Instruction(llvm::Instruction* instruction,
+Instruction::Instruction(llvm::Instruction *instruction,
                          std::vector<Fields> fields, long array_element_num)
     : Value(instruction, fields, array_element_num),
       llvm_instruction_(instruction) {
   module_ = llvm_instruction_->getFunction()->getParent();
   opcode_ = llvm_instruction_->getOpcode();
 
-  llvm::BasicBlock* block = llvm_instruction_->getParent();
+  llvm::BasicBlock *block = llvm_instruction_->getParent();
   parent_ = framework::Function::createManagedFunction(block->getParent())
                 ->getBasicBlock(block);
 
-  if (const llvm::DebugLoc& Loc = llvm_instruction_->getDebugLoc()) {
+  if (const llvm::DebugLoc &Loc = llvm_instruction_->getDebugLoc()) {
     debug_loc_ = Loc;
     line_ = Loc.getLine();
     column_ = Loc.getCol();
@@ -70,7 +68,7 @@ Instruction::Instruction(std::shared_ptr<Instruction> instruction,
                          std::vector<Fields> fields, long array_element_num)
     : Value(instruction, fields, array_element_num),
       llvm_instruction_(instruction->LLVMInstruction()) {
-  module_ = const_cast<llvm::Module*>(instruction->Module());
+  module_ = const_cast<llvm::Module *>(instruction->Module());
   opcode_ = instruction->Opcode();
   debug_loc_ = instruction->getDebugLoc();
 
@@ -79,52 +77,58 @@ Instruction::Instruction(std::shared_ptr<Instruction> instruction,
   parent_ = instruction->Parent();
 }
 
-bool Instruction::operator<=(const framework::Instruction& instruction) const {
-  if (llvm_instruction_ == instruction.llvm_instruction_) return true;
+bool Instruction::operator<=(const framework::Instruction &instruction) const {
+  if (llvm_instruction_ == instruction.llvm_instruction_)
+    return true;
 
   return module_ == instruction.module_ && line_ == instruction.line_ ||
          *this < instruction;
 }
 
-bool Instruction::operator<(llvm::Instruction* instruction) const {
-  if (const llvm::DebugLoc& Loc = llvm_instruction_->getDebugLoc()) {
+bool Instruction::operator<(llvm::Instruction *instruction) const {
+  if (const llvm::DebugLoc &Loc = llvm_instruction_->getDebugLoc()) {
     if (module_ != instruction->getFunction()->getParent())
       return module_ < instruction->getFunction()->getParent();
 
-    if (line_ != Loc.getLine()) return line_ < Loc.getLine();
+    if (line_ != Loc.getLine())
+      return line_ < Loc.getLine();
 
     return opcode_ < instruction->getOpcode();
   }
   return true;
 }
 
-bool Instruction::operator<(const framework::Instruction& instruction) const {
-  if (module_ != instruction.module_) return module_ < instruction.module_;
+bool Instruction::operator<(const framework::Instruction &instruction) const {
+  if (module_ != instruction.module_)
+    return module_ < instruction.module_;
 
-  if (line_ != instruction.line_) return line_ < instruction.line_;
+  if (line_ != instruction.line_)
+    return line_ < instruction.line_;
 
   return opcode_ < instruction.opcode_;
 }
 
-bool Instruction::operator==(llvm::Instruction* instruction) const {
-  if (llvm_instruction_ == instruction) return true;
+bool Instruction::operator==(llvm::Instruction *instruction) const {
+  if (llvm_instruction_ == instruction)
+    return true;
 
-  if (const llvm::DebugLoc& Loc = llvm_instruction_->getDebugLoc())
+  if (const llvm::DebugLoc &Loc = llvm_instruction_->getDebugLoc())
     return module_ == instruction->getFunction()->getParent() &&
            line_ == Loc.getLine() && opcode_ == instruction->getOpcode();
 
   return false;
 }
 
-bool Instruction::operator==(const framework::Instruction& instruction) const {
-  if (llvm_instruction_ == instruction.llvm_instruction_) return true;
+bool Instruction::operator==(const framework::Instruction &instruction) const {
+  if (llvm_instruction_ == instruction.llvm_instruction_)
+    return true;
 
   return module_ == instruction.module_ && opcode_ == instruction.opcode_ &&
          line_ == instruction.line_;
 }
 
-llvm::raw_ostream& operator<<(llvm::raw_ostream& ostream,
-                              const framework::Instruction& instruction) {
+llvm::raw_ostream &operator<<(llvm::raw_ostream &ostream,
+                              const framework::Instruction &instruction) {
   ostream << "[framework::Instruction] ";
   ostream << llvm::Instruction::getOpcodeName(instruction.opcode_);
   ostream << " (" << instruction.opcode_ << ") ";
@@ -140,4 +144,4 @@ bool Instruction::isInSameLine(framework::Instruction inst) {
   return line_ == inst.Line();
 }
 
-}  // namespace framework
+} // namespace framework

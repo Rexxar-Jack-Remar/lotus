@@ -1,4 +1,5 @@
-//===- RelExeState.cpp ----Relation Execution States for Interval Domains-------//
+//===- RelExeState.cpp ----Relation Execution States for Interval
+//Domains-------//
 //
 // Migrated from SVF's AE engine to Lotus.
 //
@@ -123,7 +124,7 @@ bool RelExeState::eqVarToValMap(const VarToValMap &lhs,
 }
 
 bool RelExeState::lessThanVarToValMap(const VarToValMap &lhs,
-                                     const VarToValMap &rhs) const {
+                                      const VarToValMap &rhs) const {
   if (lhs.size() != rhs.size())
     return lhs.size() < rhs.size();
   for (const auto &item : lhs) {
@@ -180,8 +181,8 @@ void RelExeState::printExprValues() {
     const Z3Expr &sim = item.second.simplify();
     if (sim.is_numeral() &&
         isVirtualMemAddress(static_cast<uint32_t>(z3Expr2NumValue(sim)))) {
-      std::cout << "\t Value: " << std::hex << "0x"
-                << z3Expr2NumValue(sim) << "\n";
+      std::cout << "\t Value: " << std::hex << "0x" << z3Expr2NumValue(sim)
+                << "\n";
     } else {
       std::cout << "\t Value: " << std::dec << sim << "\n";
     }

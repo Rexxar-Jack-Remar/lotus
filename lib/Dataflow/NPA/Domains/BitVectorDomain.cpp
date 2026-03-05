@@ -1,7 +1,7 @@
 /*
  *
  * Author: rainoftime
-*/
+ */
 #include "Dataflow/NPA/Domains/BitVectorDomain.h"
 
 namespace npa {
@@ -9,5 +9,3 @@ namespace npa {
 unsigned BitSetDomain::BitWidth = 1;
 
 } // namespace npa
-
-

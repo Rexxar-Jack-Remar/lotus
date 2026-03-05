@@ -20,8 +20,7 @@
 
 namespace npa {
 
-template <class D>
-struct Diff {
+template <class D> struct Diff {
   using V = DomVal<D>;
   using M0 = E0<D>;
   using M1 = E1<D>;
@@ -34,9 +33,12 @@ private:
     auto c = std::make_shared<Exp0<D>>(*e);
     c->val.reset();
     c->dirty_ = true;
-    if (e->t) c->t = clone(e->t);
-    if (e->t1) c->t1 = clone(e->t1);
-    if (e->t2) c->t2 = clone(e->t2);
+    if (e->t)
+      c->t = clone(e->t);
+    if (e->t1)
+      c->t1 = clone(e->t1);
+    if (e->t2)
+      c->t2 = clone(e->t2);
     return c;
   }
   static M1 aux(const Map &nu, const M0 &o, const M0 &cur) {
@@ -57,7 +59,8 @@ private:
       return Exp1<D>::cond(o->phi, aux(nu, o->t1, cur->t1),
                            aux(nu, o->t2, cur->t2));
     case K0::Ndet:
-      // Paper Defn 3.1: D(∑ f_i)|ν(b) = ∑ Df_i|ν(b). So D(ndet(t1,t2)) = D(t1) ⊕ D(t2).
+      // Paper Defn 3.1: D(∑ f_i)|ν(b) = ∑ Df_i|ν(b). So D(ndet(t1,t2)) = D(t1)
+      // ⊕ D(t2).
       return Exp1<D>::add(aux(nu, o->t1, cur->t1), aux(nu, o->t2, cur->t2));
     case K0::Hole:
       return Exp1<D>::hole(o->sym);
@@ -73,8 +76,8 @@ private:
       V nu_x = nu.at(o->sym);
       M1 d1 = aux(nu, o->t1, cur->t1), d2 = aux(nu, o->t2, cur->t2);
       M1 term1 = Exp1<D>::seqR(d1, D::extend(nu_x, t2_val));
-      M1 term2 = Exp1<D>::concat(Exp1<D>::term(t1_val), o->sym,
-                                 Exp1<D>::term(t2_val));
+      M1 term2 =
+          Exp1<D>::concat(Exp1<D>::term(t1_val), o->sym, Exp1<D>::term(t2_val));
       M1 term3 = Exp1<D>::seq(t1_val, Exp1<D>::seq(nu_x, d2));
       return Exp1<D>::add(Exp1<D>::add(term1, term2), term3);
     }

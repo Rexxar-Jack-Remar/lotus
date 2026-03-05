@@ -2,8 +2,8 @@
 #define LOTUS_DATAFLOW_MONO_ANALYSES_INTER_INTERSOLVERTEST_H_
 
 #include "Dataflow/Mono/Container/Traits.h"
-#include "Dataflow/Mono/Core/Domain.h"
 #include "Dataflow/Mono/Core/CallStringSolver.h"
+#include "Dataflow/Mono/Core/Domain.h"
 
 #include <memory>
 
@@ -15,13 +15,12 @@ class Value;
 
 namespace mono {
 
-struct InterMonoSolverTestDomain : LLVMMonoAnalysisDomain<SetContainer<llvm::Value *>> {
-};
+struct InterMonoSolverTestDomain
+    : LLVMMonoAnalysisDomain<SetContainer<llvm::Value *>> {};
 
 constexpr unsigned kDefaultInterMonoSolverTestCallStringLength = 2;
-using InterMonoSolverTestResult =
-    dataflow::ContextSensitiveDataFlowResult<
-        kDefaultInterMonoSolverTestCallStringLength, SetContainer<llvm::Value *>>;
+using InterMonoSolverTestResult = dataflow::ContextSensitiveDataFlowResult<
+    kDefaultInterMonoSolverTestCallStringLength, SetContainer<llvm::Value *>>;
 
 struct InterMonoSolverTestAnalysisResult {
   std::unique_ptr<InterMonoSolverTestResult> Results;

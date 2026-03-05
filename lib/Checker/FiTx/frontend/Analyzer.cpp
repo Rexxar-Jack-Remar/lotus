@@ -1,5 +1,6 @@
 // FiTx CFG-based typestate analysis: path-insensitive, inter-procedural,
-// return-code aware state propagation (Suzuki et al., USENIX ATC 2024, ยง4.2, 4.3).
+// return-code aware state propagation (Suzuki et al., USENIX ATC 2024,
+// ยง4.2, 4.3).
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Argument.h"
@@ -63,7 +64,8 @@ Analyzer::Analyzer(llvm::Module &llvm_module,
 
 // --- Top-level: analyze all functions in this module ---
 // framework_ir_ maps each LLVM Module to a list of framework::Function (our
-// CFG + IR). We analyze one compilation unit at a time (paper: single-TU scope).
+// CFG + IR). We analyze one compilation unit at a time (paper: single-TU
+// scope).
 void Analyzer::analyze() {
   auto &framework_ir = ir_generator::IRGenerator::framework_ir_;
   if (framework_ir.find(&llvm_module_) == framework_ir.end())
@@ -120,7 +122,8 @@ void Analyzer::analyzeFunction(std::shared_ptr<framework::Function> function) {
     }
     block_queue.pop();
 
-    // Worklist: if any value state changed (e.g. from callee summary), re-analyze.
+    // Worklist: if any value state changed (e.g. from callee summary),
+    // re-analyze.
     if (func_info->basicBlockInfoChanged(block)) {
       block_queue.push(block);
       continue;
@@ -136,7 +139,8 @@ void Analyzer::analyzeFunction(std::shared_ptr<framework::Function> function) {
 
   bb_info_ = func_info->getBasicBlockInformation(function->ReturnBlock());
   if (bb_info_) {
-    // FUNCTION_END = end of function; MODULE_END = no in-unit callers (paper Table 6).
+    // FUNCTION_END = end of function; MODULE_END = no in-unit callers (paper
+    // Table 6).
     generateError(BugNotificationTiming::FUNCTION_END);
 
     if (function->CallerFunctions().empty())
@@ -207,12 +211,14 @@ void Analyzer::analyzePrevBlockBranch(
 
     if (!null_exists)
       continue;
-    // Which successor set is "null": true branch for (ptr == NULL), false for (ptr != NULL).
+    // Which successor set is "null": true branch for (ptr == NULL), false for
+    // (ptr != NULL).
     BranchInst::TransitionNodes null_nodes =
         condition_inst->GetPredicate() == llvm::CmpInst::ICMP_EQ
             ? branch_inst->TruePathNodes()
             : branch_inst->FalsePathNodes();
-    // If current block is on the null path, use NULL_BRANCH_CONSIDERED_NULL transitions.
+    // If current block is on the null path, use NULL_BRANCH_CONSIDERED_NULL
+    // transitions.
     StoreValueTransitionRule::StoreValueType type =
         std::find_if(null_nodes.begin(), null_nodes.end(),
                      [&block](auto node) { return node.lock() == block; }) !=
@@ -220,7 +226,8 @@ void Analyzer::analyzePrevBlockBranch(
             ? StoreValueTransitionRule::NULL_BRANCH_CONSIDERED_NULL
             : StoreValueTransitionRule::NULL_BRANCH_CONSIDERED_NON_NULL;
 
-    // Apply branch-specific transitions plus ANY (for typestates that don't care).
+    // Apply branch-specific transitions plus ANY (for typestates that don't
+    // care).
     auto possible_transitions =
         state_manager_.TransitionManager()->getStoreArgTransitions(type);
 
@@ -231,7 +238,8 @@ void Analyzer::analyzePrevBlockBranch(
     transitions.insert(transitions.end(), possible_transitions.begin(),
                        possible_transitions.end());
 
-    // Apply to comp_value and all values that may alias it (intra-procedural alias; paper ยง3).
+    // Apply to comp_value and all values that may alias it (intra-procedural
+    // alias; paper ยง3).
     std::set<std::shared_ptr<framework::Value>> related_values =
         currentFunctionInformation()->GetValueCollection().getRelatedValues(
             comp_value);
@@ -249,7 +257,8 @@ void Analyzer::analyzePrevBlockBranch(
     }
     generateWarning(branch_inst.get(), "Branch Inst Transition Done");
 
-    // For return-code summary: don't treat this path as returning the other branch's code.
+    // For return-code summary: don't treat this path as returning the other
+    // branch's code.
     int remove_ret_val =
         type == framework::StoreValueTransitionRule::NULL_VAL ? 0 : -1;
     bb_info_->removeReturnvalue(remove_ret_val);
@@ -258,14 +267,16 @@ void Analyzer::analyzePrevBlockBranch(
 }
 
 // --- Call instruction: apply function-arg transitions, then callee summary ---
-// 1) Apply "Fun Arg" transitions (paper Table 5): e.g. kfree(ptr) -> ptr goes to free.
-// 2) If indirect call: stop tracking args (paper: no indirect calls).
-// 3) If callee is defined in this TU: analyze callee (bottom-up), then copyFunctionValues
+// 1) Apply "Fun Arg" transitions (paper Table 5): e.g. kfree(ptr) -> ptr goes
+// to free. 2) If indirect call: stop tracking args (paper: no indirect calls).
+// 3) If callee is defined in this TU: analyze callee (bottom-up), then
+// copyFunctionValues
 //    to apply its summary (arg/return states) to the caller.
 void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
   auto call_inst = std::static_pointer_cast<framework::CallInst>(I);
 
-  // Apply typestate transitions triggered by "call F with arg i" (e.g. kfree, malloc).
+  // Apply typestate transitions triggered by "call F with arg i" (e.g. kfree,
+  // malloc).
   if (analyzeFunctionCall(call_inst))
     return;
 
@@ -325,7 +336,8 @@ void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
     return;
   }
 
-  // External/declaration: we don't have a summary; stop tracking state for args (conservative).
+  // External/declaration: we don't have a summary; stop tracking state for args
+  // (conservative).
   if (function->isDeclaration()) {
     for (auto value : call_inst->Arguments()) {
       std::set<std::shared_ptr<framework::Value>> related_values =
@@ -337,7 +349,8 @@ void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
       }
     }
   } else {
-    // Callee defined in this TU: analyze it (bottom-up), then apply its summary.
+    // Callee defined in this TU: analyze it (bottom-up), then apply its
+    // summary.
     if (state_manager_.getStatefulConstraint() &&
         !state_manager_.getStatefulConstraint()->shouldPropagateOnCallInst(
             call_inst)) {
@@ -346,14 +359,15 @@ void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
     analyzeFunction(function);
     bb_info_ = function_info_[analyzing_function_.top()]
                    ->getCurrentBasicBlockInformation();
-    copyFunctionValues(function, call_inst);  // Apply callee summary to caller.
+    copyFunctionValues(function, call_inst); // Apply callee summary to caller.
   }
 }
 
 // --- Store: apply store transitions to the pointer operand (and aliases) ---
-// Transitions depend on what is stored: NULL (Store NULL), non-null (Store NON),
-// result of a specific call (Store Const / CALL_FUNC, e.g. malloc), or any (Store ANY).
-// Paper Table 5: Store NULL/NON/Const/ANY trigger typestate updates on the stored-to location.
+// Transitions depend on what is stored: NULL (Store NULL), non-null (Store
+// NON), result of a specific call (Store Const / CALL_FUNC, e.g. malloc), or
+// any (Store ANY). Paper Table 5: Store NULL/NON/Const/ANY trigger typestate
+// updates on the stored-to location.
 void Analyzer::analyzeStoreInst(std::shared_ptr<framework::Instruction> I) {
   auto store_inst = std::static_pointer_cast<framework::StoreInst>(I);
   std::vector<framework::Transition> transitions;
@@ -373,7 +387,8 @@ void Analyzer::analyzeStoreInst(std::shared_ptr<framework::Instruction> I) {
                        possible_transitions.end());
   }
 
-  // If storing result of a known function (e.g. kmalloc), add CALL_FUNC transitions.
+  // If storing result of a known function (e.g. kmalloc), add CALL_FUNC
+  // transitions.
   if (auto call_inst =
           framework::shared_dyn_cast<framework::CallInst>(value_operand)) {
     auto called_func = call_inst->CalledFunction();
@@ -402,7 +417,8 @@ void Analyzer::analyzeStoreInst(std::shared_ptr<framework::Instruction> I) {
     changeValueState(transitions, value, I);
   }
 
-  checkAlias(store_inst);  // Record ptr = value_operand and apply alias transitions.
+  checkAlias(
+      store_inst); // Record ptr = value_operand and apply alias transitions.
 }
 
 // Record may-alias (pointer_operand = value_operand) in current block's
@@ -468,7 +484,8 @@ bool Analyzer::functionInformationExists(
 
 // Apply a list of transitions to a value in the current block's state.
 // changeValueState in BasicBlockInformation tries each transition (source state
-// must match); if one applies, the value's state is updated and we record for worklist.
+// must match); if one applies, the value's state is updated and we record for
+// worklist.
 void Analyzer::changeValueState(std::vector<Transition> transitions,
                                 std::shared_ptr<Value> value,
                                 std::shared_ptr<framework::Instruction> inst) {
@@ -486,8 +503,8 @@ void Analyzer::changeValueState(std::vector<Transition> transitions,
 
 // Emit a bug report for every value that is in a bug state at this hook.
 // We only report if LeastSignificantSource is init: reduces false positives by
-// requiring the value to have reached the bug state from a "real" init (paper ยง4.2:
-// priority/distance to bug state used when merging predecessors).
+// requiring the value to have reached the bug state from a "real" init (paper
+// ยง4.2: priority/distance to bug state used when merging predecessors).
 void Analyzer::generateError(
     BugNotificationTiming timing,
     const std::set<std::shared_ptr<framework::Value>> values) {
@@ -530,7 +547,8 @@ void Analyzer::generateError(
 // operands. If the return value is used in a branch, addPendingFunctionValues
 // already set pending states per (successor block, return code); we only reach
 // here when we don't have that (e.g. return value not checked). Then we merge
-// states from all "success" blocks of the callee and apply to caller (paper ยง4.3).
+// states from all "success" blocks of the callee and apply to caller (paper
+// ยง4.3).
 void Analyzer::copyFunctionValues(
     std::shared_ptr<framework::Function> called_func,
     std::shared_ptr<framework::CallInst> call_inst) {
@@ -540,10 +558,11 @@ void Analyzer::copyFunctionValues(
 
   if (called_func->ProtectedRefcountValue() &&
       called_func->lastRefcountInstruction() != call_inst) {
-    return;  // Refcount special-case: skip if not the last refcount call.
+    return; // Refcount special-case: skip if not the last refcount call.
   }
 
-  // If caller branches on return value, we already set pending states per branch.
+  // If caller branches on return value, we already set pending states per
+  // branch.
   if (addPendingFunctionValues(called_func, call_inst))
     return;
 
@@ -584,7 +603,8 @@ void Analyzer::copyFunctionValues(
   }
 
   // Map callee arg i (value.first) + its transitions (value.second) to caller
-  // operand: new_value = operand (caller) extended with value.first (callee arg).
+  // operand: new_value = operand (caller) extended with value.first (callee
+  // arg).
   generateWarning(call_inst.get(), "Call Inst Here");
   for (int i = 0; i < operands.size(); i++) {
     auto operand = operands[i];
@@ -650,7 +670,8 @@ bool Analyzer::addPendingFunctionValues(
   generateWarning(call_inst.get(), "Found called func info");
 
   // For each (return_code, blocks) in callee summary, decide if this branch
-  // takes the "false" path for that code (e.g. if (err) and ret.first == 0 -> false path).
+  // takes the "false" path for that code (e.g. if (err) and ret.first == 0 ->
+  // false path).
   auto basic_block_info =
       currentFunctionInformation()->getCurrentBasicBlockInformation();
   for (auto ret : called_func_info->getReturnValueInfo()) {
@@ -728,8 +749,9 @@ bool Analyzer::addPendingFunctionValues(
 }
 
 // Apply "Fun Arg" transition rules (paper Table 5: Fun Arg call arg arg num).
-// For each argument index, look up transitions (e.g. kfree(ptr) -> ptr: initโ��free)
-// and apply to the argument value (and optionally parent/related values).
+// For each argument index, look up transitions (e.g. kfree(ptr) -> ptr:
+// initโ��free) and apply to the argument value (and optionally parent/related
+// values).
 bool Analyzer::analyzeFunctionCall(
     std::shared_ptr<framework::CallInst> call_inst) {
   auto function = call_inst->CalledFunction();

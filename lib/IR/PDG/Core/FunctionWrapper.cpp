@@ -21,6 +21,7 @@
  */
 
 #include "IR/PDG/Core/FunctionWrapper.h"
+
 #include "IR/PDG/Support/PDGCommandLineOptions.h"
 
 using namespace llvm;
@@ -156,7 +157,7 @@ void pdg::FunctionWrapper::buildFormalTreesForRetVal() {
                    GraphNodeType::PARAM_FORMALIN);
   for (auto *ret_inst : _return_insts) {
     auto *ret_val = ret_inst->getReturnValue();
-    if (ret_val != nullptr)  // guard: "ret void" has a null return value
+    if (ret_val != nullptr) // guard: "ret void" has a null return value
       ret_formal_in_tree_root_node->addAddrVar(*ret_val);
   }
   ret_formal_in_tree->setRootNode(*ret_formal_in_tree_root_node);

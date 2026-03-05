@@ -36,8 +36,10 @@ IDEFeatureTaintAnalysis::normal_flow(const llvm::Instruction *stmt,
   return out;
 }
 
-IDEFeatureTaintAnalysis::FactSet IDEFeatureTaintAnalysis::call_flow(
-    const llvm::CallBase *call, const llvm::Function *callee, const Fact &fact) {
+IDEFeatureTaintAnalysis::FactSet
+IDEFeatureTaintAnalysis::call_flow(const llvm::CallBase *call,
+                                   const llvm::Function *callee,
+                                   const Fact &fact) {
   FactSet out;
   if (fact == zero_fact()) {
     out.insert(fact);
@@ -70,7 +72,8 @@ IDEFeatureTaintAnalysis::FactSet IDEFeatureTaintAnalysis::return_flow(
   }
   if (!call->getType()->isVoidTy()) {
     for (const llvm::BasicBlock &bb : *callee) {
-      if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
+      if (const auto *ret =
+              llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
         if (ret->getReturnValue() == exit_fact) {
           out.insert(call);
           break;
@@ -120,9 +123,9 @@ IDEFeatureTaintAnalysis::join(const Value &v1, const Value &v2) const {
 }
 
 IDEFeatureTaintAnalysis::EdgeFunction
-IDEFeatureTaintAnalysis::normal_edge_function(const llvm::Instruction * /*stmt*/,
-                                              const Fact & /*src_fact*/,
-                                              const Fact & /*tgt_fact*/) {
+IDEFeatureTaintAnalysis::normal_edge_function(
+    const llvm::Instruction * /*stmt*/, const Fact & /*src_fact*/,
+    const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }
 
@@ -141,14 +144,16 @@ IDEFeatureTaintAnalysis::return_edge_function(const llvm::CallBase * /*call*/,
 }
 
 IDEFeatureTaintAnalysis::EdgeFunction
-IDEFeatureTaintAnalysis::call_to_return_edge_function(const llvm::CallBase * /*call*/,
-                                                      const Fact & /*src_fact*/,
-                                                      const Fact & /*tgt_fact*/) {
+IDEFeatureTaintAnalysis::call_to_return_edge_function(
+    const llvm::CallBase * /*call*/, const Fact & /*src_fact*/,
+    const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }
 
-IDEFeatureTaintAnalysis::FactSet IDEFeatureTaintAnalysis::summary_flow(
-    const llvm::CallBase *call, const llvm::Function *callee, const Fact &fact) {
+IDEFeatureTaintAnalysis::FactSet
+IDEFeatureTaintAnalysis::summary_flow(const llvm::CallBase *call,
+                                      const llvm::Function *callee,
+                                      const Fact &fact) {
   FactSet out;
   if (!call || !callee || call->getType()->isVoidTy()) {
     return out;

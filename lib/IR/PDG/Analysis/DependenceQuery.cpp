@@ -11,6 +11,7 @@
  */
 
 #include "IR/PDG/Analysis/DependenceQuery.h"
+
 #include "IR/PDG/Support/PDGUtils.h"
 
 #include <algorithm>
@@ -52,10 +53,10 @@ PairwiseDependence::query(Node &source, Node &target,
   }
 
   // BFS from source to target, recording predecessor map for witness path.
-  std::unordered_map<Node *, Node *> pred;          // child -> parent
-  std::unordered_map<Node *, EdgeType> pred_edge;   // child -> edge from parent
+  std::unordered_map<Node *, Node *> pred;        // child -> parent
+  std::unordered_map<Node *, EdgeType> pred_edge; // child -> edge from parent
   std::unordered_set<Node *> visited;
-  std::queue<std::pair<Node *, size_t>> worklist;    // <node, depth>
+  std::queue<std::pair<Node *, size_t>> worklist; // <node, depth>
 
   worklist.push({&source, 0});
   visited.insert(&source);
@@ -238,7 +239,7 @@ void TransitiveClosure::build(const NodeSet &subgraph_nodes,
 
   // Initialize maps.
   for (Node *n : subgraph_nodes) {
-    _forward[n];   // create empty entry
+    _forward[n]; // create empty entry
     _reverse[n];
   }
 
@@ -323,12 +324,9 @@ void TransitiveClosure::reset() {
 // ============================================================================
 
 template <typename GetEdgesFunc, typename GetNeighborFunc>
-DependenceDistance::DistanceMap
-DependenceDistance::computeDistances(Node &start,
-                                    const std::set<EdgeType> &edge_types,
-                                    size_t max_depth,
-                                    GetEdgesFunc get_edges,
-                                    GetNeighborFunc get_neighbor) {
+DependenceDistance::DistanceMap DependenceDistance::computeDistances(
+    Node &start, const std::set<EdgeType> &edge_types, size_t max_depth,
+    GetEdgesFunc get_edges, GetNeighborFunc get_neighbor) {
   DistanceMap distances;
   std::queue<std::pair<Node *, size_t>> worklist;
   distances[&start] = 0;
@@ -369,7 +367,7 @@ DependenceDistance::computeDistances(Node &start,
 }
 
 size_t DependenceDistance::distance(Node &source, Node &target,
-                                   const std::set<EdgeType> &edge_types) {
+                                    const std::set<EdgeType> &edge_types) {
   if (&source == &target)
     return 0;
 
@@ -380,20 +378,16 @@ size_t DependenceDistance::distance(Node &source, Node &target,
   return (it != dists.end()) ? it->second : SIZE_MAX;
 }
 
-DependenceDistance::DistanceMap
-DependenceDistance::forwardDistances(Node &source,
-                                    const std::set<EdgeType> &edge_types,
-                                    size_t max_depth) {
+DependenceDistance::DistanceMap DependenceDistance::forwardDistances(
+    Node &source, const std::set<EdgeType> &edge_types, size_t max_depth) {
   return computeDistances(
       source, edge_types, max_depth,
       [](Node *n) -> Node::EdgeSet & { return n->getOutEdgeSet(); },
       [](Edge *e) { return e->getDstNode(); });
 }
 
-DependenceDistance::DistanceMap
-DependenceDistance::backwardDistances(Node &target,
-                                     const std::set<EdgeType> &edge_types,
-                                     size_t max_depth) {
+DependenceDistance::DistanceMap DependenceDistance::backwardDistances(
+    Node &target, const std::set<EdgeType> &edge_types, size_t max_depth) {
   return computeDistances(
       target, edge_types, max_depth,
       [](Node *n) -> Node::EdgeSet & { return n->getInEdgeSet(); },

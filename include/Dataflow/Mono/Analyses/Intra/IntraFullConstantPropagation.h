@@ -28,7 +28,9 @@ struct FullConstantValue {
 
   static FullConstantValue bottom() { return {FullConstantTag::Bottom, 0}; }
   static FullConstantValue top() { return {FullConstantTag::Top, 0}; }
-  static FullConstantValue constant(int64_t V) { return {FullConstantTag::Const, V}; }
+  static FullConstantValue constant(int64_t V) {
+    return {FullConstantTag::Const, V};
+  }
 
   bool operator==(const FullConstantValue &Other) const {
     return Tag == Other.Tag && ConstValue == Other.ConstValue;

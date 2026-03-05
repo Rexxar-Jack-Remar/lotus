@@ -3,16 +3,19 @@
  * Author: rainoftime
  */
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralTaint.h"
+
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Annotation/Taint/TaintConfigManager.h"
 #include "Dataflow/NPA/Analyses/InterproceduralEngine.h"
+
+#include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
+
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Operator.h>
-#include <algorithm>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace npa {
 
@@ -54,25 +57,29 @@ public:
 
   unsigned getValueBit(const llvm::Value *v) const {
     auto it = valueBits.find(v);
-    if (it == valueBits.end()) return invalidBit();
+    if (it == valueBits.end())
+      return invalidBit();
     return it->second;
   }
 
   unsigned getMemBitForPtr(const llvm::Value *ptr) const {
     MemKey key = buildMemKey(ptr);
     auto it = memBits.find(key);
-    if (it == memBits.end()) return invalidBit();
+    if (it == memBits.end())
+      return invalidBit();
     return it->second;
   }
 
   std::vector<unsigned> getAliasMemBits(const llvm::Value *ptr) const {
     std::vector<unsigned> out;
-    if (!ptr || !ptr->getType()->isPointerTy()) return out;
+    if (!ptr || !ptr->getType()->isPointerTy())
+      return out;
 
     MemKey key = buildMemKey(ptr);
     for (const auto &entry : memBits) {
       const MemKey &cand = entry.first;
-      if (mayAlias(key, cand)) out.push_back(entry.second);
+      if (mayAlias(key, cand))
+        out.push_back(entry.second);
     }
     return out;
   }
@@ -90,22 +97,27 @@ private:
   std::unordered_map<MemKey, unsigned, MemKeyHash, MemKeyEq> memBits;
 
   void addValueBit(const llvm::Value *v) {
-    if (!v) return;
-    if (valueBits.count(v)) return;
+    if (!v)
+      return;
+    if (valueBits.count(v))
+      return;
     valueBits.emplace(v, nextBit++);
   }
 
   void addMemBit(const llvm::Value *ptr) {
-    if (!ptr || !ptr->getType()->isPointerTy()) return;
+    if (!ptr || !ptr->getType()->isPointerTy())
+      return;
     MemKey key = buildMemKey(ptr);
-    if (memBits.count(key)) return;
+    if (memBits.count(key))
+      return;
     memBits.emplace(key, nextBit++);
   }
 
   MemKey buildMemKey(const llvm::Value *ptr) const {
     MemKey key;
     key.ptr = ptr;
-    if (!ptr) return key;
+    if (!ptr)
+      return key;
     key.base = llvm::getUnderlyingObject(ptr);
     key.offset = 0;
     key.unknown = false;
@@ -123,11 +135,15 @@ private:
   }
 
   bool mayAlias(const MemKey &a, const MemKey &b) const {
-    if (!a.ptr || !b.ptr) return false;
+    if (!a.ptr || !b.ptr)
+      return false;
     bool baseAlias = (a.base == b.base);
-    if (!baseAlias) baseAlias = aliasAnalysis.mayAlias(a.ptr, b.ptr);
-    if (!baseAlias) return false;
-    if (a.unknown || b.unknown) return true;
+    if (!baseAlias)
+      baseAlias = aliasAnalysis.mayAlias(a.ptr, b.ptr);
+    if (!baseAlias)
+      return false;
+    if (a.unknown || b.unknown)
+      return true;
     return a.offset == b.offset;
   }
 
@@ -135,13 +151,15 @@ private:
     for (auto &F : module) {
       for (auto &Arg : F.args()) {
         addValueBit(&Arg);
-        if (Arg.getType()->isPointerTy()) addMemBit(&Arg);
+        if (Arg.getType()->isPointerTy())
+          addMemBit(&Arg);
       }
       for (auto &BB : F) {
         for (auto &I : BB) {
           if (!I.getType()->isVoidTy()) {
             addValueBit(&I);
-            if (I.getType()->isPointerTy()) addMemBit(&I);
+            if (I.getType()->isPointerTy())
+              addMemBit(&I);
           }
           if (auto *load = llvm::dyn_cast<llvm::LoadInst>(&I)) {
             addMemBit(load->getPointerOperand());
@@ -149,9 +167,11 @@ private:
             addMemBit(store->getPointerOperand());
           } else if (auto *call = llvm::dyn_cast<llvm::CallBase>(&I)) {
             for (auto &arg : call->args()) {
-              if (arg->getType()->isPointerTy()) addMemBit(arg.get());
+              if (arg->getType()->isPointerTy())
+                addMemBit(arg.get());
             }
-            if (call->getType()->isPointerTy()) addMemBit(call);
+            if (call->getType()->isPointerTy())
+              addMemBit(call);
           } else if (auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&I)) {
             addMemBit(gep);
           }
@@ -168,7 +188,8 @@ public:
   TaintAnalysis(llvm::Module &M, lotus::AliasAnalysisWrapper &aa)
       : module(M), info(M, aa), aliasAnalysis(aa) {
     bitWidth = info.getBitWidth();
-    if (bitWidth == 0) bitWidth = 1;
+    if (bitWidth == 0)
+      bitWidth = 1;
     TaintTransferDomain::setBitWidth(bitWidth);
     entryFacts = llvm::APInt(bitWidth, 0);
     initializeEntryFacts();
@@ -181,7 +202,8 @@ public:
   using E = E0<D>;
 
   E getTransfer(llvm::Instruction &I, E currentPath) {
-    if (llvm::isa<llvm::CallBase>(&I)) return currentPath;
+    if (llvm::isa<llvm::CallBase>(&I))
+      return currentPath;
 
     D::value_type transfer = D::one();
     bool updated = false;
@@ -209,7 +231,8 @@ public:
       unsigned ptrBit = info.getValueBit(ptr);
       unsigned loadBit = info.getValueBit(load);
 
-      if (ptrBit != TaintInfo::invalidBit() && loadBit != TaintInfo::invalidBit()) {
+      if (ptrBit != TaintInfo::invalidBit() &&
+          loadBit != TaintInfo::invalidBit()) {
         D::addEdge(transfer, ptrBit, loadBit);
         updated = true;
       }
@@ -235,14 +258,16 @@ public:
     } else if (auto *cast = llvm::dyn_cast<llvm::CastInst>(&I)) {
       unsigned inBit = info.getValueBit(cast->getOperand(0));
       unsigned outBit = info.getValueBit(cast);
-      if (inBit != TaintInfo::invalidBit() && outBit != TaintInfo::invalidBit()) {
+      if (inBit != TaintInfo::invalidBit() &&
+          outBit != TaintInfo::invalidBit()) {
         D::addEdge(transfer, inBit, outBit);
         updated = true;
       }
     } else if (auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&I)) {
       unsigned inBit = info.getValueBit(gep->getPointerOperand());
       unsigned outBit = info.getValueBit(gep);
-      if (inBit != TaintInfo::invalidBit() && outBit != TaintInfo::invalidBit()) {
+      if (inBit != TaintInfo::invalidBit() &&
+          outBit != TaintInfo::invalidBit()) {
         D::addEdge(transfer, inBit, outBit);
         updated = true;
       }
@@ -259,7 +284,8 @@ public:
       }
     }
 
-    if (!updated) return currentPath;
+    if (!updated)
+      return currentPath;
     return Exp::seq(transfer, currentPath);
   }
 
@@ -273,7 +299,8 @@ public:
       const llvm::Value *arg = call.getArgOperand(i);
       unsigned argBit = info.getValueBit(arg);
       unsigned paramBit = info.getValueBit(&*paramIt);
-      if (argBit != TaintInfo::invalidBit() && paramBit != TaintInfo::invalidBit()) {
+      if (argBit != TaintInfo::invalidBit() &&
+          paramBit != TaintInfo::invalidBit()) {
         D::addEdge(transfer, argBit, paramBit);
       }
 
@@ -296,7 +323,8 @@ public:
       unsigned callBit = info.getValueBit(&call);
       if (callBit != TaintInfo::invalidBit()) {
         for (const auto &BB : callee) {
-          if (auto *ret = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
+          if (auto *ret =
+                  llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
             if (const llvm::Value *retVal = ret->getReturnValue()) {
               unsigned retBit = info.getValueBit(retVal);
               if (retBit != TaintInfo::invalidBit()) {
@@ -340,7 +368,8 @@ private:
       for (auto &Arg : Main->args()) {
         if (Arg.getType()->isPointerTy()) {
           unsigned bit = info.getValueBit(&Arg);
-          if (bit != TaintInfo::invalidBit()) entryFacts.setBit(bit);
+          if (bit != TaintInfo::invalidBit())
+            entryFacts.setBit(bit);
         }
       }
     }
@@ -348,15 +377,21 @@ private:
 
   void addSourceSpecs(const llvm::CallBase &call, D::value_type &transfer) {
     const llvm::Function *callee = call.getCalledFunction();
-    if (!callee) return;
-    std::string funcName = taint_config::normalize_name(callee->getName().str());
-    const FunctionTaintConfig *cfg = taint_config::get_function_config(funcName);
-    if (!cfg || !cfg->has_source_specs()) return;
+    if (!callee)
+      return;
+    std::string funcName =
+        taint_config::normalize_name(callee->getName().str());
+    const FunctionTaintConfig *cfg =
+        taint_config::get_function_config(funcName);
+    if (!cfg || !cfg->has_source_specs())
+      return;
 
     for (const auto &spec : cfg->source_specs) {
-      if (spec.location == TaintSpec::RET && spec.access_mode == TaintSpec::VALUE) {
+      if (spec.location == TaintSpec::RET &&
+          spec.access_mode == TaintSpec::VALUE) {
         unsigned bit = info.getValueBit(&call);
-        if (bit != TaintInfo::invalidBit()) D::addGen(transfer, bit);
+        if (bit != TaintInfo::invalidBit())
+          D::addGen(transfer, bit);
       } else if (spec.location == TaintSpec::ARG &&
                  (spec.access_mode == TaintSpec::DIRECT_DEREF ||
                   spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
@@ -370,7 +405,8 @@ private:
                  (spec.access_mode == TaintSpec::DIRECT_DEREF ||
                   spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
         int startIdx = spec.arg_index + 1;
-        if (startIdx < 0) startIdx = 0;
+        if (startIdx < 0)
+          startIdx = 0;
         unsigned start = static_cast<unsigned>(startIdx);
         for (unsigned i = start; i < call.arg_size(); ++i) {
           const llvm::Value *arg = call.getArgOperand(i);
@@ -384,10 +420,14 @@ private:
 
   void addPipeSpecs(const llvm::CallBase &call, D::value_type &transfer) {
     const llvm::Function *callee = call.getCalledFunction();
-    if (!callee) return;
-    std::string funcName = taint_config::normalize_name(callee->getName().str());
-    const FunctionTaintConfig *cfg = taint_config::get_function_config(funcName);
-    if (!cfg || !cfg->has_pipe_specs()) return;
+    if (!callee)
+      return;
+    std::string funcName =
+        taint_config::normalize_name(callee->getName().str());
+    const FunctionTaintConfig *cfg =
+        taint_config::get_function_config(funcName);
+    if (!cfg || !cfg->has_pipe_specs())
+      return;
 
     for (const auto &pipe : cfg->pipe_specs) {
       std::vector<unsigned> fromBits;
@@ -397,7 +437,8 @@ private:
           const llvm::Value *arg = call.getArgOperand(idx);
           if (pipe.from.access_mode == TaintSpec::VALUE) {
             unsigned bit = info.getValueBit(arg);
-            if (bit != TaintInfo::invalidBit()) fromBits.push_back(bit);
+            if (bit != TaintInfo::invalidBit())
+              fromBits.push_back(bit);
           } else {
             auto memBits = info.getAliasMemBits(arg);
             fromBits.insert(fromBits.end(), memBits.begin(), memBits.end());
@@ -405,17 +446,20 @@ private:
         }
       }
 
-      if (fromBits.empty()) continue;
+      if (fromBits.empty())
+        continue;
 
       if (pipe.to.location == TaintSpec::RET) {
         if (pipe.to.access_mode == TaintSpec::VALUE) {
           unsigned bit = info.getValueBit(&call);
           if (bit != TaintInfo::invalidBit()) {
-            for (unsigned from : fromBits) D::addEdge(transfer, from, bit);
+            for (unsigned from : fromBits)
+              D::addEdge(transfer, from, bit);
           }
         } else {
           for (unsigned memBit : info.getAliasMemBits(&call)) {
-            for (unsigned from : fromBits) D::addEdge(transfer, from, memBit);
+            for (unsigned from : fromBits)
+              D::addEdge(transfer, from, memBit);
           }
         }
       } else if (pipe.to.location == TaintSpec::ARG) {
@@ -425,11 +469,13 @@ private:
           if (pipe.to.access_mode == TaintSpec::VALUE) {
             unsigned bit = info.getValueBit(arg);
             if (bit != TaintInfo::invalidBit()) {
-              for (unsigned from : fromBits) D::addEdge(transfer, from, bit);
+              for (unsigned from : fromBits)
+                D::addEdge(transfer, from, bit);
             }
           } else {
             for (unsigned memBit : info.getAliasMemBits(arg)) {
-              for (unsigned from : fromBits) D::addEdge(transfer, from, memBit);
+              for (unsigned from : fromBits)
+                D::addEdge(transfer, from, memBit);
             }
           }
         }
@@ -439,10 +485,12 @@ private:
 
   void applySanitizers(const llvm::CallBase &call, D::value_type &transfer) {
     const llvm::Function *callee = call.getCalledFunction();
-    if (!callee) return;
+    if (!callee)
+      return;
     static const std::unordered_set<std::string> sanitizers = {
         "strlen", "strcmp", "strncmp", "isdigit", "isalpha"};
-    if (!sanitizers.count(callee->getName().str())) return;
+    if (!sanitizers.count(callee->getName().str()))
+      return;
 
     for (unsigned i = 0; i < call.arg_size(); ++i) {
       const llvm::Value *arg = call.getArgOperand(i);
@@ -454,20 +502,22 @@ private:
   }
 };
 
-InterproceduralTaint::Result InterproceduralTaint::run(llvm::Module &M,
-                                                       lotus::AliasAnalysisWrapper &aliasAnalysis,
-                                                       bool verbose) {
+InterproceduralTaint::Result InterproceduralTaint::run(
+    llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis, bool verbose) {
   if (!taint_config::load_default_config()) {
     llvm::errs() << "Error: Could not load taint configuration\n";
   }
 
   TaintAnalysis analysis(M, aliasAnalysis);
   auto engineResult =
-      InterproceduralEngine<TaintTransferDomain, TaintAnalysis, 1>::run(M, analysis, verbose);
+      InterproceduralEngine<TaintTransferDomain, TaintAnalysis, 1>::run(
+          M, analysis, verbose);
 
   InterproceduralTaint::Result res;
-  res.summaries.insert(engineResult.summaries.begin(), engineResult.summaries.end());
-  for (auto &kv : engineResult.blockEntryFacts) res.blockFacts[kv.first] = kv.second;
+  res.summaries.insert(engineResult.summaries.begin(),
+                       engineResult.summaries.end());
+  for (auto &kv : engineResult.blockEntryFacts)
+    res.blockFacts[kv.first] = kv.second;
   return res;
 }
 

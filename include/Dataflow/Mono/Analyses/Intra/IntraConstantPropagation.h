@@ -1,12 +1,12 @@
 #ifndef LOTUS_DATAFLOW_MONO_ANALYSES_INTRA_INTRACONSTANTPROPAGATION_H_
 #define LOTUS_DATAFLOW_MONO_ANALYSES_INTRA_INTRACONSTANTPROPAGATION_H_
 
-#include "Dataflow/Mono/Core/Domain.h"
-#include "Dataflow/Mono/Solver/IntraSolver.h"
-
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Value.h"
+
+#include "Dataflow/Mono/Core/Domain.h"
+#include "Dataflow/Mono/Solver/IntraSolver.h"
 
 #include <cstdint>
 #include <unordered_map>

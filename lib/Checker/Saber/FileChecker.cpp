@@ -20,7 +20,8 @@
 using namespace llvm;
 using namespace lotus::analysis;
 
-static void appendPathConditionEvents(BugReport *report, const ProgSlice *slice) {
+static void appendPathConditionEvents(BugReport *report,
+                                      const ProgSlice *slice) {
   if (!report || !slice)
     return;
   ProgSlice::EventStack events;
@@ -28,8 +29,8 @@ static void appendPathConditionEvents(BugReport *report, const ProgSlice *slice)
   for (const auto &e : events) {
     if (!e.first)
       continue;
-    const std::vector<NodeTag> tags = {
-        e.second ? NodeTag::CONDITION_TRUE : NodeTag::CONDITION_FALSE};
+    const std::vector<NodeTag> tags = {e.second ? NodeTag::CONDITION_TRUE
+                                                : NodeTag::CONDITION_FALSE};
     report->append_step(const_cast<Instruction *>(e.first), "Path condition", 0,
                         tags);
   }
@@ -65,7 +66,8 @@ void FileChecker::reportBug(ProgSlice *slice) {
   for (auto it = slice->sinksBegin(), et = slice->sinksEnd(); it != et; ++it) {
     const SVFGNode *snk = *it;
     if (const Instruction *inst = snk->getInstruction()) {
-      report->append_step(const_cast<Instruction *>(inst), "File closed here", 1);
+      report->append_step(const_cast<Instruction *>(inst), "File closed here",
+                          1);
     }
   }
 

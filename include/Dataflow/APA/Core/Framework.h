@@ -38,8 +38,9 @@ public:
   virtual std::size_t maxStarIterations() const { return 100000; }
 };
 
-// Optional extension for "paper-style" ADT-based elimination on reducible flowgraphs.
-// The ADT solver will use this information; otherwise it falls back to StateElimination.
+// Optional extension for "paper-style" ADT-based elimination on reducible
+// flowgraphs. The ADT solver will use this information; otherwise it falls back
+// to StateElimination.
 template <typename AnalysisDomainTy>
 class IntraReducibleEliminationProblem
     : public IntraEliminationProblem<AnalysisDomainTy> {
@@ -55,8 +56,8 @@ public:
   // Enumerate edges of the flowgraph.
   virtual std::vector<Edge> edges() const = 0;
 
-  // Total order over nodes such that forward edges go from lower to higher index.
-  // (Back edges may violate the order.)
+  // Total order over nodes such that forward edges go from lower to higher
+  // index. (Back edges may violate the order.)
   virtual std::vector<n_t> topologicalOrder() const = 0;
 
   // Immediate dominator (idom(entry) may equal entry).
@@ -66,7 +67,9 @@ public:
   virtual bool dominates(n_t A, n_t B) const = 0;
 
   // Default back-edge predicate from the paper: destination dominates source.
-  virtual bool isBackEdge(n_t Src, n_t Dst) const { return dominates(Dst, Src); }
+  virtual bool isBackEdge(n_t Src, n_t Dst) const {
+    return dominates(Dst, Src);
+  }
 };
 
 } // namespace elimination

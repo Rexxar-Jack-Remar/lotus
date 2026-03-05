@@ -1,13 +1,13 @@
 #ifndef LOTUS_DATAFLOW_MONO_SOLVER_INTERSOLVER_H_
 #define LOTUS_DATAFLOW_MONO_SOLVER_INTERSOLVER_H_
 
-#include "Dataflow/ControlFlow/InterCFG.h"
-#include "Dataflow/Mono/Core/CallStringSolver.h"
-#include "Dataflow/Mono/Core/Problem.h"
-
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "Dataflow/ControlFlow/InterCFG.h"
+#include "Dataflow/Mono/Core/CallStringSolver.h"
+#include "Dataflow/Mono/Core/Problem.h"
 
 #include <algorithm>
 #include <map>
@@ -21,7 +21,8 @@ template <typename AnalysisDomainTy, unsigned K> class InterMonoSolver {
 public:
   using ProblemTy = InterMonoProblem<AnalysisDomainTy>;
   using mono_container_t = typename AnalysisDomainTy::mono_container_t;
-  using ResultTy = dataflow::ContextSensitiveDataFlowResult<K, mono_container_t>;
+  using ResultTy =
+      dataflow::ContextSensitiveDataFlowResult<K, mono_container_t>;
   using Context = typename ResultTy::Context;
   using ContextKey = typename ResultTy::ContextKey;
   using ICFG = dataflow::controlflow::InterCFG;
@@ -51,16 +52,16 @@ public:
                                 mono_container_t &OUT) {
       initializeOUT(Inst, OUT);
     };
-    auto ComputeIN = [this](llvm::Instruction *Inst, llvm::Instruction *PredInst,
-                            const Context &PredCtx,
+    auto ComputeIN = [this](llvm::Instruction *Inst,
+                            llvm::Instruction *PredInst, const Context &PredCtx,
                             mono_container_t &IN, ResultTy *DF) {
       computeIN(Inst, PredInst, PredCtx, IN, DF);
     };
     auto ComputeOUT = [this](llvm::Instruction *Inst, const Context &Ctx,
-                             mono_container_t &OUT, ResultTy *DF) {
-      computeOUT(Inst, Ctx, OUT, DF);
-    };
-    auto Equal = [this](const mono_container_t &Lhs, const mono_container_t &Rhs) {
+                             mono_container_t &OUT,
+                             ResultTy *DF) { computeOUT(Inst, Ctx, OUT, DF); };
+    auto Equal = [this](const mono_container_t &Lhs,
+                        const mono_container_t &Rhs) {
       return Problem.equal_to(Lhs, Rhs);
     };
     auto GetCallees = [this](llvm::Instruction *Inst) {
@@ -82,7 +83,8 @@ public:
         if (Entry == nullptr || Entry->isDeclaration() || Entry->empty()) {
           continue;
         }
-        RootKeys.push_back(ContextKey{&*Entry->getEntryBlock().begin(), EmptyCtx});
+        RootKeys.push_back(
+            ContextKey{&*Entry->getEntryBlock().begin(), EmptyCtx});
       }
     }
 
@@ -181,8 +183,7 @@ public:
 private:
   static bool isFunctionEntry(llvm::Instruction *Inst) {
     auto *BB = Inst->getParent();
-    return &BB->getParent()->getEntryBlock() == BB &&
-           Inst == &*BB->begin();
+    return &BB->getParent()->getEntryBlock() == BB && Inst == &*BB->begin();
   }
 
   static llvm::Function *getDirectCallee(llvm::Instruction *Inst) {
@@ -223,7 +224,8 @@ private:
     return false;
   }
 
-  std::vector<llvm::Function *> getCalleesOfCallAt(llvm::Instruction *Inst) const {
+  std::vector<llvm::Function *>
+  getCalleesOfCallAt(llvm::Instruction *Inst) const {
     return Problem.getCalleesOfCallAt(Inst);
   }
 
@@ -236,9 +238,9 @@ private:
   }
 
   // Bug B fix: computeGEN/computeKILL are not used by computeOUT (which calls
-  // normalFlow directly).  Setting them to allTop() was misleading and wasteful.
-  // They are left as no-ops; the engine still calls them but the results are
-  // never read by our computeOUT.
+  // normalFlow directly).  Setting them to allTop() was misleading and
+  // wasteful. They are left as no-ops; the engine still calls them but the
+  // results are never read by our computeOUT.
   void computeGEN(llvm::Instruction * /*Inst*/, ResultTy * /*DF*/) {}
   void computeKILL(llvm::Instruction * /*Inst*/, ResultTy * /*DF*/) {}
 
@@ -283,8 +285,8 @@ private:
           bool FirstCaller = true;
           mono_container_t Merged;
           for (auto *Caller : ICF->getCallersOf(PredInst->getFunction())) {
-            auto RetFacts = Problem.returnFlow(
-                Caller, PredInst->getFunction(), PredInst, Inst, PredOut);
+            auto RetFacts = Problem.returnFlow(Caller, PredInst->getFunction(),
+                                               PredInst, Inst, PredOut);
             if (FirstCaller) {
               Merged = RetFacts;
               FirstCaller = false;

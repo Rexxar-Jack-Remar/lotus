@@ -724,11 +724,11 @@ OperationResult PulseOperations::writeDeref(AbductiveDomain &astate,
 
   // Interprocedural initialization: when writing through a pointer parameter,
   // clear Uninitialized from the pointed-to memory location
-  // This handles cases like: void init(int *p) { *p = 100; } ... int x; init(&x);
-  // The write initializes the memory that p points to
+  // This handles cases like: void init(int *p) { *p = 100; } ... int x;
+  // init(&x); The write initializes the memory that p points to
   AbstractValue pointed_canon = astate.getCanonical(canon_value_addr.addr);
   astate.getPostAttrs().remove(pointed_canon, Attribute::Uninitialized);
-  
+
   // Also check if the pointer itself points to a stack variable
   // (for cases where we write to *p and p points to a stack variable)
   if (astate.getPostAttrs().has(canon_ptr, Attribute::Stack)) {

@@ -21,8 +21,7 @@
 namespace npa {
 
 /// Evaluator for polynomial expressions (Exp0).
-template <class D>
-struct I0 {
+template <class D> struct I0 {
   using V = DomVal<D>;
   using Map = std::unordered_map<Symbol, V>;
   static V eval(bool /*verbose*/, const Map &nu, const E0<D> &e) {
@@ -33,7 +32,8 @@ struct I0 {
 private:
   using Env = std::unordered_map<Symbol, V>;
   static void mark(const E0<D> &e) {
-    if (!e) return;
+    if (!e)
+      return;
     e->mark();
     switch (e->k) {
     case Exp0<D>::Seq:
@@ -62,7 +62,8 @@ private:
     }
   }
   static V rec(const Map &nu, const Env &env, const E0<D> &e) {
-    if (!e->dirty_) return *e->val;
+    if (!e->dirty_)
+      return *e->val;
     V v{};
     switch (e->k) {
     case Exp0<D>::Term:
@@ -110,8 +111,7 @@ private:
 
 /// Evaluator for linearized expressions (Exp1). Used when solving the
 /// linear system Df|ν(X) + δ = X (worklist, SCC, or tensor space).
-template <class D>
-struct I1 {
+template <class D> struct I1 {
   using V = DomVal<D>;
   using Map = std::unordered_map<Symbol, V>;
   static V eval(bool /*verbose*/, const Map &vars, const E1<D> &e) {
@@ -122,14 +122,19 @@ struct I1 {
 private:
   using Env = std::unordered_map<Symbol, V>;
   static void mark(const E1<D> &e) {
-    if (!e) return;
+    if (!e)
+      return;
     e->mark();
-    if (e->t) mark(e->t);
-    if (e->t1) mark(e->t1);
-    if (e->t2) mark(e->t2);
+    if (e->t)
+      mark(e->t);
+    if (e->t1)
+      mark(e->t1);
+    if (e->t2)
+      mark(e->t2);
   }
   static V rec(const Map &vars, const Env &env, const E1<D> &e) {
-    if (!e->dirty_) return *e->val;
+    if (!e->dirty_)
+      return *e->val;
     V v{};
     using K = typename Exp1<D>::K;
     switch (e->k) {
@@ -169,7 +174,8 @@ private:
       // LCFL: a·Y·b -> a_val ⊗ Y ⊗ b_val (coefficients on both sides).
       auto it = env.find(e->sym);
       const V &mid = (it != env.end()) ? it->second : vars.at(e->sym);
-      v = D::extend(rec(vars, env, e->t1), D::extend(mid, rec(vars, env, e->t2)));
+      v = D::extend(rec(vars, env, e->t1),
+                    D::extend(mid, rec(vars, env, e->t2)));
     } break;
     case K::InfClos: {
       V init = D::zero();

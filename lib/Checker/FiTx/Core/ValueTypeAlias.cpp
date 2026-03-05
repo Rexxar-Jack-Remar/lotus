@@ -2,9 +2,6 @@
 // Main typestate alias is in AliasValues (store-based, per block).
 #include "Checker/FiTx/Core/ValueTypeAlias.h"
 
-#include <memory>
-#include <vector>
-
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstrTypes.h"
@@ -13,13 +10,16 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <memory>
+#include <vector>
+
 namespace framework {
 Operands::Operands(std::vector<std::shared_ptr<framework::Value>> values) {
-  std::transform(
-      values.begin(), values.end(), std::back_inserter(values_),
-      [](std::shared_ptr<framework::Value> value) {
-        return std::make_shared<std::shared_ptr<framework::Value>>(value);
-      });
+  std::transform(values.begin(), values.end(), std::back_inserter(values_),
+                 [](std::shared_ptr<framework::Value> value) {
+                   return std::make_shared<std::shared_ptr<framework::Value>>(
+                       value);
+                 });
 }
 
 Operands::Operands(
@@ -34,8 +34,8 @@ void Operands::add(std::shared_ptr<framework::Value> value) {
   values_.push_back(std::make_shared<std::shared_ptr<framework::Value>>(value));
 }
 
-std::shared_ptr<std::shared_ptr<framework::Value>> Operands::operator[](
-    const int index) {
+std::shared_ptr<std::shared_ptr<framework::Value>>
+Operands::operator[](const int index) {
   return values_[index];
 }
 
@@ -45,29 +45,29 @@ ValueTypeAlias::ValueTypeAlias()
     : aliased_value_(
           std::make_shared<std::map<framework::Instruction, Operands>>()) {}
 
-ValueTypeAlias::ValueTypeAlias(const ValueTypeAlias& values) {
+ValueTypeAlias::ValueTypeAlias(const ValueTypeAlias &values) {
   aliased_value_ = values.aliased_value_;
   store_alias_ = values.store_alias_;
 }
 
-ValueTypeAlias& ValueTypeAlias::operator=(const ValueTypeAlias& values) {
+ValueTypeAlias &ValueTypeAlias::operator=(const ValueTypeAlias &values) {
   aliased_value_ = values.aliased_value_;
   store_alias_ = values.store_alias_;
   return *this;
 }
 
-void ValueTypeAlias::setValues(llvm::Instruction* instruction,
+void ValueTypeAlias::setValues(llvm::Instruction *instruction,
                                Operands framework_value) {
   auto framework_inst = framework::Instruction(instruction);
   setValues(framework_inst, framework_value);
 }
 
-Operands ValueTypeAlias::getValues(llvm::Instruction* instruction) {
+Operands ValueTypeAlias::getValues(llvm::Instruction *instruction) {
   auto framework_inst = framework::Instruction(instruction);
   return getValues(framework_inst);
 }
 
-bool ValueTypeAlias::exists(llvm::Instruction* instruction) {
+bool ValueTypeAlias::exists(llvm::Instruction *instruction) {
   auto framework_inst = framework::Instruction(instruction);
   return exists(framework_inst);
 }
@@ -88,33 +88,35 @@ bool ValueTypeAlias::exists(framework::Instruction instruction) {
 }
 
 Operands ValueTypeAlias::getAliasedValues(framework::Instruction instruction) {
-  if (!InstructionAliasExists(instruction)) return Operands();
+  if (!InstructionAliasExists(instruction))
+    return Operands();
   auto aliased_inst = getAliasedStore(instruction);
 
-  if (!exists(aliased_inst)) return Operands();
+  if (!exists(aliased_inst))
+    return Operands();
 
   return getValues(aliased_inst);
 }
 
-void ValueTypeAlias::setStoreAlias(llvm::StoreInst* store_inst,
-                                   llvm::CallInst* call_inst) {
+void ValueTypeAlias::setStoreAlias(llvm::StoreInst *store_inst,
+                                   llvm::CallInst *call_inst) {
   auto framework_store_inst = framework::Instruction(store_inst);
   auto framework_call_inst = framework::Instruction(call_inst);
   store_alias_[framework_call_inst] = framework_store_inst;
 }
 
-framework::Instruction ValueTypeAlias::getAliasedStore(
-    llvm::CallInst* call_inst) {
+framework::Instruction
+ValueTypeAlias::getAliasedStore(llvm::CallInst *call_inst) {
   auto framework_call_inst = framework::Instruction(call_inst);
   return store_alias_[framework_call_inst];
 }
 
-framework::Instruction ValueTypeAlias::getAliasedStore(
-    framework::Instruction instruction) {
+framework::Instruction
+ValueTypeAlias::getAliasedStore(framework::Instruction instruction) {
   return store_alias_[instruction];
 }
 
-bool ValueTypeAlias::InstructionAliasExists(llvm::CallInst* call_inst) {
+bool ValueTypeAlias::InstructionAliasExists(llvm::CallInst *call_inst) {
   return store_alias_.find(call_inst) != store_alias_.end();
 }
 
@@ -123,4 +125,4 @@ bool ValueTypeAlias::InstructionAliasExists(
   return store_alias_.find(instruction) != store_alias_.end();
 }
 
-}  // namespace framework
+} // namespace framework

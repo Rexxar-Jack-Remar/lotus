@@ -28,19 +28,28 @@ struct ExpressionKey {
   const void *MemoryAccess = nullptr;
 
   bool operator<(const ExpressionKey &Other) const {
-    if (Opcode != Other.Opcode) return Opcode < Other.Opcode;
-    if (Predicate != Other.Predicate) return Predicate < Other.Predicate;
-    if (Ty != Other.Ty) return Ty < Other.Ty;
-    if (FMF != Other.FMF) return FMF < Other.FMF;
-    if (OverflowFlags != Other.OverflowFlags) return OverflowFlags < Other.OverflowFlags;
-    if (Exact != Other.Exact) return Exact < Other.Exact;
-    if (IsVolatile != Other.IsVolatile) return IsVolatile < Other.IsVolatile;
-    if (IsAtomic != Other.IsAtomic) return IsAtomic < Other.IsAtomic;
+    if (Opcode != Other.Opcode)
+      return Opcode < Other.Opcode;
+    if (Predicate != Other.Predicate)
+      return Predicate < Other.Predicate;
+    if (Ty != Other.Ty)
+      return Ty < Other.Ty;
+    if (FMF != Other.FMF)
+      return FMF < Other.FMF;
+    if (OverflowFlags != Other.OverflowFlags)
+      return OverflowFlags < Other.OverflowFlags;
+    if (Exact != Other.Exact)
+      return Exact < Other.Exact;
+    if (IsVolatile != Other.IsVolatile)
+      return IsVolatile < Other.IsVolatile;
+    if (IsAtomic != Other.IsAtomic)
+      return IsAtomic < Other.IsAtomic;
     if (Ordering != Other.Ordering) {
       return static_cast<unsigned>(Ordering) <
              static_cast<unsigned>(Other.Ordering);
     }
-    if (SyncScopeID != Other.SyncScopeID) return SyncScopeID < Other.SyncScopeID;
+    if (SyncScopeID != Other.SyncScopeID)
+      return SyncScopeID < Other.SyncScopeID;
     if (AATags != Other.AATags) {
       return std::tie(AATags.TBAA, AATags.TBAAStruct, AATags.Scope,
                       AATags.NoAlias) <
@@ -94,13 +103,20 @@ inline ExpressionKey makeExpressionKey(const llvm::Instruction *Inst) {
 
   if (auto *FPMath = llvm::dyn_cast<llvm::FPMathOperator>(Inst)) {
     Key.FMF = FPMath->getFastMathFlags().any() ? 1u : 0u;
-    if (FPMath->hasAllowReassoc()) Key.FMF |= 1u << 1;
-    if (FPMath->hasNoNaNs()) Key.FMF |= 1u << 2;
-    if (FPMath->hasNoInfs()) Key.FMF |= 1u << 3;
-    if (FPMath->hasNoSignedZeros()) Key.FMF |= 1u << 4;
-    if (FPMath->hasAllowReciprocal()) Key.FMF |= 1u << 5;
-    if (FPMath->hasAllowContract()) Key.FMF |= 1u << 6;
-    if (FPMath->hasApproxFunc()) Key.FMF |= 1u << 7;
+    if (FPMath->hasAllowReassoc())
+      Key.FMF |= 1u << 1;
+    if (FPMath->hasNoNaNs())
+      Key.FMF |= 1u << 2;
+    if (FPMath->hasNoInfs())
+      Key.FMF |= 1u << 3;
+    if (FPMath->hasNoSignedZeros())
+      Key.FMF |= 1u << 4;
+    if (FPMath->hasAllowReciprocal())
+      Key.FMF |= 1u << 5;
+    if (FPMath->hasAllowContract())
+      Key.FMF |= 1u << 6;
+    if (FPMath->hasApproxFunc())
+      Key.FMF |= 1u << 7;
   }
 
   if (auto *OBO = llvm::dyn_cast<llvm::OverflowingBinaryOperator>(Inst)) {

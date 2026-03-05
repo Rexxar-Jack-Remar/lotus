@@ -10,6 +10,7 @@
  */
 
 #include "IR/PDG/Analysis/PDGDiff.h"
+
 #include "IR/PDG/Support/PDGUtils.h"
 
 #include <algorithm>
@@ -25,14 +26,16 @@ namespace pdg {
 
 static size_t countNodeDiffs(const std::vector<NodeDiffEntry> &diffs,
                              DiffKind kind) {
-  return std::count_if(diffs.begin(), diffs.end(),
-                       [kind](const NodeDiffEntry &e) { return e.kind == kind; });
+  return std::count_if(
+      diffs.begin(), diffs.end(),
+      [kind](const NodeDiffEntry &e) { return e.kind == kind; });
 }
 
 static size_t countEdgeDiffs(const std::vector<EdgeDiffEntry> &diffs,
                              DiffKind kind) {
-  return std::count_if(diffs.begin(), diffs.end(),
-                       [kind](const EdgeDiffEntry &e) { return e.kind == kind; });
+  return std::count_if(
+      diffs.begin(), diffs.end(),
+      [kind](const EdgeDiffEntry &e) { return e.kind == kind; });
 }
 
 size_t PDGDiffResult::numAddedNodes() const {
@@ -281,12 +284,12 @@ bool PDGDiff::instructionStringMatcher(Node *a, Node *b) {
 void PDGDiff::printDiffSummary(const PDGDiffResult &result,
                                const std::string &label) {
   errs() << "=============== " << label << " ===============\n";
-  errs() << "Nodes:  +" << result.numAddedNodes()
-         << "  -" << result.numRemovedNodes()
-         << "  =" << result.numPreservedNodes() << "\n";
-  errs() << "Edges:  +" << result.numAddedEdges()
-         << "  -" << result.numRemovedEdges()
-         << "  =" << result.numPreservedEdges() << "\n";
+  errs() << "Nodes:  +" << result.numAddedNodes() << "  -"
+         << result.numRemovedNodes() << "  =" << result.numPreservedNodes()
+         << "\n";
+  errs() << "Edges:  +" << result.numAddedEdges() << "  -"
+         << result.numRemovedEdges() << "  =" << result.numPreservedEdges()
+         << "\n";
   errs() << "Identical: " << (result.isIdentical() ? "yes" : "no") << "\n";
 
   // Print changed nodes.

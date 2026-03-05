@@ -1,10 +1,10 @@
 #include "Dataflow/Mono/Analyses/Intra/IntraFullConstantPropagation.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Dataflow/Mono/Core/Problem.h"
-
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
+
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Dataflow/Mono/Core/Problem.h"
 
 #include <memory>
 
@@ -28,8 +28,9 @@ FullConstantValue joinValues(const FullConstantValue &Lhs,
   return FullConstantValue::top();
 }
 
-FullConstantPropagationState joinStates(const FullConstantPropagationState &Lhs,
-                                        const FullConstantPropagationState &Rhs) {
+FullConstantPropagationState
+joinStates(const FullConstantPropagationState &Lhs,
+           const FullConstantPropagationState &Rhs) {
   if (Lhs.Unreachable) {
     return Rhs;
   }
@@ -80,7 +81,8 @@ FullConstantValue resolveValue(const FullConstantPropagationState &In,
 
 FullConstantValue evalBinaryOp(unsigned Opcode, const FullConstantValue &Lhs,
                                const FullConstantValue &Rhs) {
-  if (Lhs.Tag == FullConstantTag::Bottom || Rhs.Tag == FullConstantTag::Bottom) {
+  if (Lhs.Tag == FullConstantTag::Bottom ||
+      Rhs.Tag == FullConstantTag::Bottom) {
     return FullConstantValue::bottom();
   }
   if (Lhs.Tag != FullConstantTag::Const || Rhs.Tag != FullConstantTag::Const) {
@@ -127,7 +129,7 @@ class IntraMonoFullConstantPropagation
     : public IntraMonoProblem<IntraMonoFullConstantPropagationDomain> {
 public:
   explicit IntraMonoFullConstantPropagation(Function *F,
-                                             lotus::AliasAnalysisWrapper *AA)
+                                            lotus::AliasAnalysisWrapper *AA)
       : IntraMonoProblem<IntraMonoFullConstantPropagationDomain>(
             std::vector<Function *>{F}, AA),
         AA(AA) {}
@@ -197,7 +199,9 @@ public:
 
   std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
     std::unordered_map<Instruction *, mono_container_t> Seeds;
-    Function *F = this->getEntryPoints().empty() ? nullptr : this->getEntryPoints().front();
+    Function *F = this->getEntryPoints().empty()
+                      ? nullptr
+                      : this->getEntryPoints().front();
     if (F == nullptr || F->empty()) {
       return Seeds;
     }
@@ -210,10 +214,9 @@ public:
 private:
   lotus::AliasAnalysisWrapper *AA;
 
-  void collectAliasedPointers(
-      const Value *Ptr, const mono_container_t &State,
-      std::vector<const Value *> &MustAliases,
-      std::vector<const Value *> &MayAliases) const {
+  void collectAliasedPointers(const Value *Ptr, const mono_container_t &State,
+                              std::vector<const Value *> &MustAliases,
+                              std::vector<const Value *> &MayAliases) const {
     if (Ptr == nullptr || !Ptr->getType()->isPointerTy()) {
       return;
     }

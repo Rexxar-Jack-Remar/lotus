@@ -180,13 +180,15 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
         for (LockID lock : funcLocks) {
           for (const Instruction *Acq :
                m_locksetAnalysis->getLockAcquires(lock)) {
-            if (Acq->getFunction() != F1) continue;
+            if (Acq->getFunction() != F1)
+              continue;
             const BasicBlock *AcqBB = Acq->getParent();
             if (!DT.dominates(AcqBB, BB1) || !DT.dominates(AcqBB, BB2))
               continue;
             for (const Instruction *Rel :
                  m_locksetAnalysis->getLockReleases(lock)) {
-              if (Rel->getFunction() != F1) continue;
+              if (Rel->getFunction() != F1)
+                continue;
               const BasicBlock *RelBB = Rel->getParent();
               if (PDT.dominates(RelBB, BB1) && PDT.dominates(RelBB, BB2))
                 return false; // Both in same critical section
@@ -200,8 +202,8 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
   // Fallback for helper-based locking patterns where lockset propagation is
   // imprecise (e.g., acquire/release split across helper calls).
   if (inst1->getFunction() == inst2->getFunction()) {
-    auto getAcquireReleaseLock = [this](const CallBase *CB, bool wantAcquire)
-                                     -> const Value * {
+    auto getAcquireReleaseLock = [this](const CallBase *CB,
+                                        bool wantAcquire) -> const Value * {
       if (!CB)
         return nullptr;
       const Instruction *I = cast<Instruction>(CB);
@@ -424,7 +426,8 @@ bool DataRaceChecker::mayAccessSameLocation(const Instruction *inst1,
   const Value *ptr2 = getMemoryLocation(inst2);
   if (mayAlias(ptr1, ptr2))
     return true;
-  // Points-to: if one pointer may point to the other's object, they may access same location.
+  // Points-to: if one pointer may point to the other's object, they may access
+  // same location.
   std::vector<const Value *> pts1, pts2;
   if (m_aliasAnalysis && m_aliasAnalysis->getPointsToSet(ptr1, pts1)) {
     for (const Value *target : pts1) {
@@ -438,12 +441,14 @@ bool DataRaceChecker::mayAccessSameLocation(const Instruction *inst1,
         return true;
     }
   }
-  // Conservative fallback: two globals where one is pointer-typed (e.g. alias_ptr = &shared_var).
-  // Alias analysis may not connect *alias_ptr and shared_var; treat as may-access-same.
+  // Conservative fallback: two globals where one is pointer-typed (e.g.
+  // alias_ptr = &shared_var). Alias analysis may not connect *alias_ptr and
+  // shared_var; treat as may-access-same.
   if (ptr1 && ptr2 && ptr1 != ptr2) {
     const auto *g1 = dyn_cast<GlobalValue>(ptr1);
     const auto *g2 = dyn_cast<GlobalValue>(ptr2);
-    if (g1 && g2 && (ptr1->getType()->isPointerTy() || ptr2->getType()->isPointerTy()))
+    if (g1 && g2 &&
+        (ptr1->getType()->isPointerTy() || ptr2->getType()->isPointerTy()))
       return true;
   }
   return false;
@@ -477,7 +482,7 @@ bool DataRaceChecker::isAtomicOperation(const Instruction *inst) const {
   // Use enhanced CppAtomics module for better atomic recognition
   if (CppAtomics::isAtomic(inst))
     return true;
-  
+
   // Legacy check for backward compatibility
   if (isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst))
     return true;
@@ -485,11 +490,11 @@ bool DataRaceChecker::isAtomicOperation(const Instruction *inst) const {
     return L->isAtomic();
   if (const auto *S = dyn_cast<StoreInst>(inst))
     return S->isAtomic();
-  
+
   // Check if it's a fence instruction
   if (CppAtomics::isFence(inst))
     return true;
-    
+
   return false;
 }
 
@@ -529,7 +534,7 @@ void DataRaceChecker::buildSyncObjectSet() {
       if (!cb || !m_threadAPI->getCallee(inst))
         continue;
       const Value *v = nullptr;
-      
+
       // Traditional pthread primitives
       if (m_threadAPI->isTDAcquire(inst) || m_threadAPI->isTDRelease(inst))
         v = m_threadAPI->getLockVal(inst);
@@ -539,68 +544,68 @@ void DataRaceChecker::buildSyncObjectSet() {
         v = m_threadAPI->getCondVal(inst);
       else if (m_threadAPI->isTDBarWait(inst))
         v = m_threadAPI->getBarrierVal(inst);
-      
+
       // Modern C++ synchronization primitives
       else if (cb->getCalledFunction()) {
         const Function *func = cb->getCalledFunction();
         ThreadAPI::TD_TYPE type = m_threadAPI->getType(func);
-        
+
         switch (type) {
-          case ThreadAPI::TD_SHARED_RDLOCK:
-          case ThreadAPI::TD_SHARED_WRLOCK:
-          case ThreadAPI::TD_SHARED_UNLOCK:
-          case ThreadAPI::TD_LOCK_GUARD_CTOR:
-          case ThreadAPI::TD_LOCK_GUARD_DTOR:
-          case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
-          case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
-          case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
-          case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
-          case ThreadAPI::TD_SCOPED_LOCK_CTOR:
-          case ThreadAPI::TD_SCOPED_LOCK_DTOR:
-          case ThreadAPI::TD_SHARED_LOCK_CTOR:
-          case ThreadAPI::TD_SHARED_LOCK_DTOR:
-          case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
-          case ThreadAPI::TD_SEMAPHORE_RELEASE:
-            // These take mutex/semaphore as argument
-            if (cb->arg_size() >= 1)
-              v = cb->getArgOperand(0);
-            break;
-            
-          case ThreadAPI::TD_CALL_ONCE:
-            // Takes once_flag as first argument
-            if (cb->arg_size() >= 1)
-              v = cb->getArgOperand(0);
-            break;
-            
-          case ThreadAPI::TD_FUTURE_GET:
-          case ThreadAPI::TD_FUTURE_WAIT:
-          case ThreadAPI::TD_PROMISE_SET:
-            // Future/promise are synchronization objects themselves
-            if (cb->arg_size() >= 1)
-              v = cb->getArgOperand(0);
-            break;
-            
-          case ThreadAPI::TD_LATCH_COUNT_DOWN:
-          case ThreadAPI::TD_LATCH_WAIT:
-          case ThreadAPI::TD_LATCH_ARRIVE_WAIT:
-            // Latch object
-            if (cb->arg_size() >= 1)
-              v = cb->getArgOperand(0);
-            break;
-            
-          case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
-          case ThreadAPI::TD_BARRIER_ARRIVE:
-          case ThreadAPI::TD_BARRIER_WAIT_CPP20:
-            // Barrier object
-            if (cb->arg_size() >= 1)
-              v = cb->getArgOperand(0);
-            break;
-            
-          default:
-            break;
+        case ThreadAPI::TD_SHARED_RDLOCK:
+        case ThreadAPI::TD_SHARED_WRLOCK:
+        case ThreadAPI::TD_SHARED_UNLOCK:
+        case ThreadAPI::TD_LOCK_GUARD_CTOR:
+        case ThreadAPI::TD_LOCK_GUARD_DTOR:
+        case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+        case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+        case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+        case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+        case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+        case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+        case ThreadAPI::TD_SHARED_LOCK_CTOR:
+        case ThreadAPI::TD_SHARED_LOCK_DTOR:
+        case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
+        case ThreadAPI::TD_SEMAPHORE_RELEASE:
+          // These take mutex/semaphore as argument
+          if (cb->arg_size() >= 1)
+            v = cb->getArgOperand(0);
+          break;
+
+        case ThreadAPI::TD_CALL_ONCE:
+          // Takes once_flag as first argument
+          if (cb->arg_size() >= 1)
+            v = cb->getArgOperand(0);
+          break;
+
+        case ThreadAPI::TD_FUTURE_GET:
+        case ThreadAPI::TD_FUTURE_WAIT:
+        case ThreadAPI::TD_PROMISE_SET:
+          // Future/promise are synchronization objects themselves
+          if (cb->arg_size() >= 1)
+            v = cb->getArgOperand(0);
+          break;
+
+        case ThreadAPI::TD_LATCH_COUNT_DOWN:
+        case ThreadAPI::TD_LATCH_WAIT:
+        case ThreadAPI::TD_LATCH_ARRIVE_WAIT:
+          // Latch object
+          if (cb->arg_size() >= 1)
+            v = cb->getArgOperand(0);
+          break;
+
+        case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
+        case ThreadAPI::TD_BARRIER_ARRIVE:
+        case ThreadAPI::TD_BARRIER_WAIT_CPP20:
+          // Barrier object
+          if (cb->arg_size() >= 1)
+            v = cb->getArgOperand(0);
+          break;
+
+        default:
+          break;
         }
       }
-      
+
       if (v)
         m_syncObjects.insert(v->stripPointerCasts());
     }

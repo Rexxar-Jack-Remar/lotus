@@ -20,9 +20,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
-#include <llvm/IR/Constants.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -197,8 +197,7 @@ void LeakChecker::initSrcs() {
         worklist.push_back(c);
     } else {
       const llvm::Function *caller = cs->getCaller();
-      if (!caller->isDeclaration() &&
-          reachableFunctions.count(caller) &&
+      if (!caller->isDeclaration() && reachableFunctions.count(caller) &&
           !SaberCheckerAPI::getCheckerAPI()->isExtCall(caller)) {
         addToSources(node);
         addSrcToCSID(node, cs);

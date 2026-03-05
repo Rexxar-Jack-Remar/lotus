@@ -3,32 +3,35 @@
 // determines which callee return codes (success vs error) are propagated.
 #include "Checker/FiTx/Core/Instructions/BranchInstruction.h"
 
-#include <llvm/IR/Instruction.h>
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instructions.h"
 
 #include "Checker/FiTx/Core/BasicBlock.h"
 #include "Checker/FiTx/Core/Casting.h"
 #include "Checker/FiTx/Core/Function.h"
 #include "Checker/FiTx/Core/Instruction.h"
 #include "Checker/FiTx/Core/Value.h"
-#include "llvm/IR/InstrTypes.h"
-#include "llvm/IR/Instructions.h"
+
 #include <utility>
+
+#include <llvm/IR/Instruction.h>
 
 namespace framework {
 constexpr int64_t BranchInst::kTrueTransition;
 constexpr int64_t BranchInst::kFalseTransition;
 
 // Create framework CompareInst from LLVM ICmpInst; operands become framework
-// Values (used to detect return-value-in-branch for return-code aware propagation).
-std::shared_ptr<CompareInst> CompareInst::Create(
-    llvm::ICmpInst* icmp_inst, std::vector<Value::Fields> fields,
-    long array_element_num) {
+// Values (used to detect return-value-in-branch for return-code aware
+// propagation).
+std::shared_ptr<CompareInst>
+CompareInst::Create(llvm::ICmpInst *icmp_inst,
+                    std::vector<Value::Fields> fields, long array_element_num) {
   auto created =
       Converter::GetInstance().createManagedInst<framework::CompareInst>(
           icmp_inst, array_element_num, std::move(fields),
           [icmp_inst](std::shared_ptr<CompareInst> created) {
             std::vector<std::shared_ptr<framework::Value>> operands;
-            for (auto& operand : icmp_inst->operands()) {
+            for (auto &operand : icmp_inst->operands()) {
               auto created_operand =
                   framework::Value::CreateFromDefinition(operand);
               created_operand->addUser(created);
@@ -46,8 +49,8 @@ void CompareInst::setOperands(
 }
 
 void CompareInst::replaceOperand(
-    const std::shared_ptr<framework::Value>& operand,
-    const std::shared_ptr<framework::Value>& new_operand) {
+    const std::shared_ptr<framework::Value> &operand,
+    const std::shared_ptr<framework::Value> &new_operand) {
   std::replace(operands_.begin(), operands_.end(), operand, new_operand);
   replaced_.push_back(operand);
 }
@@ -56,59 +59,64 @@ void CompareInst::replaceOperand(
 // return-code aware propagation (paper §4.3).
 std::shared_ptr<framework::Value> CompareInst::find_if(
     std::function<bool(std::shared_ptr<framework::Value>)> lambda) {
-  auto found = std::find_if(operands_.begin(), operands_.end(), std::move(lambda));
-  if (found != operands_.end()) return *found;
+  auto found =
+      std::find_if(operands_.begin(), operands_.end(), std::move(lambda));
+  if (found != operands_.end())
+    return *found;
   return nullptr;
 }
 
 bool CompareInst::operandExists(
-    const std::shared_ptr<framework::Value>& value) {
+    const std::shared_ptr<framework::Value> &value) {
   return std::find(operands_.begin(), operands_.end(), value) !=
          operands_.end();
 }
 
 bool CompareInst::operandExists(
-    const std::shared_ptr<framework::CallInst>& call_inst) {
-  return std::find_if(operands_.begin(), operands_.end(),
-                      [&call_inst](const std::shared_ptr<framework::Value>& operand) {
-                        if (auto call_operand =
-                                shared_dyn_cast<framework::CallInst>(operand)) {
-                          return call_inst->LLVMInstruction() ==
-                                 call_operand->LLVMInstruction();
-                        }
-                        return call_inst == operand;
-                      }) != operands_.end();
+    const std::shared_ptr<framework::CallInst> &call_inst) {
+  return std::find_if(
+             operands_.begin(), operands_.end(),
+             [&call_inst](const std::shared_ptr<framework::Value> &operand) {
+               if (auto call_operand =
+                       shared_dyn_cast<framework::CallInst>(operand)) {
+                 return call_inst->LLVMInstruction() ==
+                        call_operand->LLVMInstruction();
+               }
+               return call_inst == operand;
+             }) != operands_.end();
 }
 
 bool CompareInst::returnValueOperandExists() {
   return std::find_if(operands_.begin(), operands_.end(),
-                      [](auto& operand) { return operand->isReturnValue(); }) !=
+                      [](auto &operand) { return operand->isReturnValue(); }) !=
              operands_.end() ||
-         std::find_if(replaced_.begin(), replaced_.end(), [](auto& operand) {
+         std::find_if(replaced_.begin(), replaced_.end(), [](auto &operand) {
            return operand->isReturnValue();
          }) != replaced_.end();
 }
 
-CompareInst::CompareInst(llvm::ICmpInst* icmp_inst, std::vector<Fields> fields,
+CompareInst::CompareInst(llvm::ICmpInst *icmp_inst, std::vector<Fields> fields,
                          long array_element_num)
     : Instruction(icmp_inst, std::move(fields), array_element_num),
       predicate_(icmp_inst->getPredicate()) {}
 
-std::shared_ptr<BranchInst> BranchInst::Create(
-    llvm::SwitchInst* switch_inst, std::vector<Value::Fields> fields,
-    long array_element_num) {
+std::shared_ptr<BranchInst>
+BranchInst::Create(llvm::SwitchInst *switch_inst,
+                   std::vector<Value::Fields> fields, long array_element_num) {
   auto created =
       Converter::GetInstance().createManagedInst<framework::BranchInst>(
-          switch_inst, array_element_num, std::move(fields), [switch_inst](auto created) {
+          switch_inst, array_element_num, std::move(fields),
+          [switch_inst](auto created) {
             auto *condition = switch_inst->getCondition();
             if (auto *icmp_inst = llvm::dyn_cast<llvm::ICmpInst>(condition))
               created->setCondition(framework::CompareInst::Create(icmp_inst));
-            else if (auto *call_inst = llvm::dyn_cast<llvm::CallInst>(condition))
+            else if (auto *call_inst =
+                         llvm::dyn_cast<llvm::CallInst>(condition))
               created->setCondition(framework::CallInst::Create(call_inst));
 
             auto function = framework::Function::createManagedFunction(
                 switch_inst->getFunction());
-            for (const auto& branch_case : switch_inst->cases()) {
+            for (const auto &branch_case : switch_inst->cases()) {
               created->setTransitionNode(
                   branch_case.getCaseValue()->getSExtValue(),
                   function->getBasicBlock(branch_case.getCaseSuccessor()));
@@ -126,13 +134,15 @@ std::shared_ptr<BranchInst> BranchInst::Create(
 // CallInst), and map kTrueTransition/kFalseTransition to successor blocks.
 // Used to resolve which path we're on for branch-dependent transitions and
 // return-code aware propagation (paper §4.3).
-std::shared_ptr<BranchInst> BranchInst::Create(
-    llvm::BranchInst* branch_inst, std::vector<Value::Fields> fields,
-    long array_element_num) {
+std::shared_ptr<BranchInst>
+BranchInst::Create(llvm::BranchInst *branch_inst,
+                   std::vector<Value::Fields> fields, long array_element_num) {
   auto created =
       Converter::GetInstance().createManagedInst<framework::BranchInst>(
-          branch_inst, array_element_num, std::move(fields), [branch_inst](auto created) {
-            if (branch_inst->isUnconditional()) return created;
+          branch_inst, array_element_num, std::move(fields),
+          [branch_inst](auto created) {
+            if (branch_inst->isUnconditional())
+              return created;
 
             auto *condition = branch_inst->getCondition();
             if (auto *icmp_inst = llvm::dyn_cast<llvm::ICmpInst>(condition)) {
@@ -149,8 +159,8 @@ std::shared_ptr<BranchInst> BranchInst::Create(
               /*                      call_inst->CalledFunction()); */
               /*         }); */
 
-              llvm::Value* val = nullptr;
-              for (const auto& operand : compare_inst->Operands()) {
+              llvm::Value *val = nullptr;
+              for (const auto &operand : compare_inst->Operands()) {
                 auto call_inst = shared_dyn_cast<framework::CallInst>(operand);
                 if (call_inst && call_inst->CalledFunction() &&
                     framework::Function::IsExpectFunction(
@@ -160,7 +170,8 @@ std::shared_ptr<BranchInst> BranchInst::Create(
                 }
               }
 
-              // Unwrap unary/binary ops (e.g. from __builtin_expect) to get the real ICmp.
+              // Unwrap unary/binary ops (e.g. from __builtin_expect) to get the
+              // real ICmp.
               while (val && !llvm::isa<llvm::ICmpInst>(val)) {
                 if (auto *new_val = llvm::dyn_cast<llvm::UnaryInstruction>(val))
                   val = new_val->getOperand(0);
@@ -195,12 +206,12 @@ std::shared_ptr<BranchInst> BranchInst::Create(
   return created;
 }
 
-BranchInst::BranchInst(llvm::BranchInst* branch_inst,
+BranchInst::BranchInst(llvm::BranchInst *branch_inst,
                        std::vector<Fields> fields, long array_element_num)
     : Instruction(branch_inst, std::move(fields), array_element_num),
       condition_instruction_(std::shared_ptr<framework::Instruction>()) {}
 
-BranchInst::BranchInst(llvm::SwitchInst* switch_inst,
+BranchInst::BranchInst(llvm::SwitchInst *switch_inst,
                        std::vector<Fields> fields, long array_element_num)
     : Instruction(switch_inst, std::move(fields), array_element_num),
       condition_instruction_(std::shared_ptr<framework::Instruction>()) {}
@@ -208,15 +219,17 @@ BranchInst::BranchInst(llvm::SwitchInst* switch_inst,
 // Map return-code-like value (e.g. kTrueTransition, kFalseTransition, or
 // switch case value) to successor blocks for return-code aware propagation.
 void BranchInst::setTransitionNode(
-    int64_t code, const std::shared_ptr<framework::BasicBlock>& block) {
-  if (nodes_.find(code) == nodes_.end()) nodes_[code] = TransitionNodes();
+    int64_t code, const std::shared_ptr<framework::BasicBlock> &block) {
+  if (nodes_.find(code) == nodes_.end())
+    nodes_[code] = TransitionNodes();
   nodes_[code].push_back(block);
 }
 
 // True if value appears in the branch condition (e.g. return value of callee).
 // Used to decide if we do return-code aware propagation at this call site.
-bool BranchInst::isInOperand(const std::shared_ptr<framework::Value>& value) {
-  if (!condition_instruction_) return false;
+bool BranchInst::isInOperand(const std::shared_ptr<framework::Value> &value) {
+  if (!condition_instruction_)
+    return false;
 
   if (auto inst = framework::shared_dyn_cast<framework::CompareInst>(
           condition_instruction_))
@@ -226,7 +239,8 @@ bool BranchInst::isInOperand(const std::shared_ptr<framework::Value>& value) {
 }
 
 bool BranchInst::returnValueOperandExists() {
-  if (!condition_instruction_) return false;
+  if (!condition_instruction_)
+    return false;
 
   if (auto inst = framework::shared_dyn_cast<framework::CompareInst>(
           condition_instruction_))
@@ -234,4 +248,4 @@ bool BranchInst::returnValueOperandExists() {
 
   return condition_instruction_->isReturnValue();
 }
-}  // namespace framework
+} // namespace framework

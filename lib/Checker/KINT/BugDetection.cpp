@@ -110,11 +110,15 @@ bool BugDetection::add_range_cons(
   const bool isSigned = rng.getSignedMin().isNegative();
   z3::expr upper(solver.ctx()), lower(solver.ctx());
   if (isSigned) {
-    upper = z3::sle(v, solver.ctx().bv_val(rng.getSignedMax().getSExtValue(), rbw));
-    lower = z3::sge(v, solver.ctx().bv_val(rng.getSignedMin().getSExtValue(), rbw));
+    upper =
+        z3::sle(v, solver.ctx().bv_val(rng.getSignedMax().getSExtValue(), rbw));
+    lower =
+        z3::sge(v, solver.ctx().bv_val(rng.getSignedMin().getSExtValue(), rbw));
   } else {
-    upper = z3::ule(v, solver.ctx().bv_val(rng.getUnsignedMax().getZExtValue(), rbw));
-    lower = z3::uge(v, solver.ctx().bv_val(rng.getUnsignedMin().getZExtValue(), rbw));
+    upper = z3::ule(
+        v, solver.ctx().bv_val(rng.getUnsignedMax().getZExtValue(), rbw));
+    lower = z3::uge(
+        v, solver.ctx().bv_val(rng.getUnsignedMin().getZExtValue(), rbw));
   }
   if (addConstraint) {
     addConstraint(upper);
@@ -427,7 +431,8 @@ z3::expr BugDetection::cast_op_propagate(
   switch (op->getOpcode()) {
   case CastInst::Trunc:
     if (bits >= src_bits) {
-      // Defensive: should not happen in well-formed IR, but avoid UB in extract.
+      // Defensive: should not happen in well-formed IR, but avoid UB in
+      // extract.
       MKINT_WARN() << "Trunc to wider/equal type; using fresh symbol.";
       return solver.ctx().bv_const(fallback_sym.c_str(), bits);
     }

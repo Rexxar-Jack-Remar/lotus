@@ -16,11 +16,11 @@
 
 namespace npa {
 
-template <class D>
-struct LCFLDetector {
+template <class D> struct LCFLDetector {
   /// True if e contains Concat or InfClos (two-sided or recursive structure).
   static bool has_lcfl_structure(const E1<D> &e) {
-    if (!e) return false;
+    if (!e)
+      return false;
     using K = typename Exp1<D>::K;
     switch (e->k) {
     case K::Concat:
@@ -29,9 +29,12 @@ struct LCFLDetector {
     default:
       break;
     }
-    if (e->t && has_lcfl_structure(e->t)) return true;
-    if (e->t1 && has_lcfl_structure(e->t1)) return true;
-    if (e->t2 && has_lcfl_structure(e->t2)) return true;
+    if (e->t && has_lcfl_structure(e->t))
+      return true;
+    if (e->t1 && has_lcfl_structure(e->t1))
+      return true;
+    if (e->t2 && has_lcfl_structure(e->t2))
+      return true;
     return false;
   }
 };

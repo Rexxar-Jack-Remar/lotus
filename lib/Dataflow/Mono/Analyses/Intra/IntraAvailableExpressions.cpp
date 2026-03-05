@@ -8,12 +8,13 @@
  * Author: rainoftime
  */
 #include "Dataflow/Mono/Analyses/Intra/IntraAvailableExpressions.h"
+
+#include "llvm/IR/Instructions.h"
+
 #include "Dataflow/Mono/Container/Traits.h"
 #include "Dataflow/Mono/Core/Domain.h"
 #include "Dataflow/Mono/Core/Problem.h"
 #include "Dataflow/Mono/Solver/IntraSolver.h"
-
-#include "llvm/IR/Instructions.h"
 
 #include <unordered_set>
 
@@ -84,8 +85,7 @@ static std::vector<Expression> getComputedExpressions(Instruction *Inst) {
  * the value being defined.
  */
 static std::set<Expression>
-getKilledExpressions(Instruction *Inst,
-                     const std::set<Expression> &AllExprs) {
+getKilledExpressions(Instruction *Inst, const std::set<Expression> &AllExprs) {
   std::set<Expression> Killed;
 
   // In SSA form, we kill expressions that use the value being redefined
@@ -167,9 +167,7 @@ public:
   // is the set of ALL expressions (every expression is "assumed available"
   // until proven otherwise).  This is the correct initial value for nodes
   // that have not yet been reached.
-  std::set<Expression> allTop() override {
-    return AllExpressions;
-  }
+  std::set<Expression> allTop() override { return AllExpressions; }
 
   std::unordered_map<Instruction *, std::set<Expression>>
   initialSeeds() override {
@@ -192,8 +190,7 @@ private:
 // Build a map from Expression → the Instruction* that computes it.
 // When multiple instructions compute the same expression (same opcode +
 // operands), we keep the first one encountered in program order.
-static std::map<Expression, Instruction *>
-buildExprToInstMap(Function *F) {
+static std::map<Expression, Instruction *> buildExprToInstMap(Function *F) {
   std::map<Expression, Instruction *> Map;
   for (auto &BB : *F) {
     for (auto &Inst : BB) {
@@ -211,8 +208,7 @@ buildExprToInstMap(Function *F) {
 // Public API
 // ============================================================================
 
-std::unique_ptr<DataFlowResult>
-runAvailableExpressionsAnalysis(Function *F) {
+std::unique_ptr<DataFlowResult> runAvailableExpressionsAnalysis(Function *F) {
   if (F == nullptr || F->isDeclaration()) {
     return nullptr;
   }
@@ -240,8 +236,8 @@ runAvailableExpressionsAnalysis(Function *F) {
       auto *I = &Inst;
 
       // Forward analysis: SolverIn = IN[I], SolverOut = OUT[I].
-      const auto &SolverIn  = Solver.getInResultsAt(I);   // std::set<Expression>
-      const auto &SolverOut = Solver.getOutResultsAt(I);  // std::set<Expression>
+      const auto &SolverIn = Solver.getInResultsAt(I);   // std::set<Expression>
+      const auto &SolverOut = Solver.getOutResultsAt(I); // std::set<Expression>
 
       // Populate Result->IN(I): expressions available before I.
       for (const auto &Expr : SolverIn) {

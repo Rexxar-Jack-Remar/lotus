@@ -1,7 +1,8 @@
 /// \file State.hpp
 /// Typestate FSM for FiTx: states, transitions, and bug-checking hooks.
 /// Paper: Suzuki et al., USENIX ATC 2024, Section 4.1 (Typestate Property),
-/// Table 6 (bug-checking hooks: IMMEDIATE, VAR_END, BLOCK_END, FUNC_END, MOD_END).
+/// Table 6 (bug-checking hooks: IMMEDIATE, VAR_END, BLOCK_END, FUNC_END,
+/// MOD_END).
 
 #pragma once
 #include "llvm/ADT/APFloat.h"
@@ -54,7 +55,8 @@ enum StateMergeMethod { STRICT, FLEX, CUSTOM };
 
 /// When to check for buggy states (paper Table 6).
 /// IMMEDIATE = right after transition; VAR_END = end of variable lifetime;
-/// FUNCTION_END = end of function; MODULE_END = end of analysis (e.g. no in-unit callers).
+/// FUNCTION_END = end of function; MODULE_END = end of analysis (e.g. no
+/// in-unit callers).
 enum BugNotificationTiming { IMMEDIATE, FUNCTION_END, END_OF_LIFE, MODULE_END };
 
 enum TriggerConstraint { NONE = 0, NON_RETURN = 1, NON_ARG = 2 };
@@ -167,9 +169,10 @@ private:
   std::vector<std::weak_ptr<TransitionRule>> transition_args_;
 };
 
-/// History of transitions applied to one value: list of (transition, instruction).
-/// Used for diagnostics (generateLog) and to filter reports: we only report if
-/// LeastSignificantSource is init (paper §4.2: reduces false positives).
+/// History of transitions applied to one value: list of (transition,
+/// instruction). Used for diagnostics (generateLog) and to filter reports: we
+/// only report if LeastSignificantSource is init (paper §4.2: reduces false
+/// positives).
 class TransitionLogs {
 public:
   TransitionLogs();
@@ -193,7 +196,8 @@ public:
   void generateLog(llvm::raw_ostream &stream) const;
   void logicalTerminate(std::shared_ptr<framework::Instruction> instruction);
 
-  /// Farthest-from-bug state in the history; used to require "real" init path for reports.
+  /// Farthest-from-bug state in the history; used to require "real" init path
+  /// for reports.
   const State &LeastSignificantSource() const {
     return *least_significant_source_;
   };
@@ -220,9 +224,9 @@ private:
   bool warned_;
 };
 
-/// Lookup transitions by trigger type (paper Table 5): Fun Arg (call F with arg i),
-/// Store (NULL/NON/ANY/CALL_FUNC), Use (load), Alias. Each detector registers
-/// its typestate transitions here.
+/// Lookup transitions by trigger type (paper Table 5): Fun Arg (call F with arg
+/// i), Store (NULL/NON/ANY/CALL_FUNC), Use (load), Alias. Each detector
+/// registers its typestate transitions here.
 class StateTransitionManager {
 public:
   StateTransitionManager() = default;
@@ -233,7 +237,8 @@ public:
 
   void addTransitionRule(Transition &transition, TransitionRule &rule);
 
-  /// Function Arg: transitions triggered by "call F with arg i" (e.g. kfree(ptr)).
+  /// Function Arg: transitions triggered by "call F with arg i" (e.g.
+  /// kfree(ptr)).
   bool existsInFunctionArgTransition(
       const FunctionArgTransitionRule::FunctionArg &arg);
   const std::pair<FunctionArgTransitionRule::FunctionArg,
@@ -252,7 +257,8 @@ public:
   std::vector<framework::Transition> getAliasTransitions();
 
 private:
-  /// Maps (function name, arg index) -> list of transitions (paper Table 5: Fun Arg).
+  /// Maps (function name, arg index) -> list of transitions (paper Table 5: Fun
+  /// Arg).
   void registerFunctionArgTransition(
       const FunctionArgTransitionRule::FunctionArg &arg,
       framework::Transition transition);
@@ -277,7 +283,8 @@ private:
   std::map<std::string, std::vector<framework::Transition>>
       call_store_transitions_;
 
-  /// Store transitions by type: NULL_VAL, NON_NULL_VAL, ANY, CALL_FUNC (paper Table 5).
+  /// Store transitions by type: NULL_VAL, NON_NULL_VAL, ANY, CALL_FUNC (paper
+  /// Table 5).
   std::map<framework::StoreValueTransitionRule::StoreValueType,
            std::vector<framework::Transition>>
       store_transitions_;

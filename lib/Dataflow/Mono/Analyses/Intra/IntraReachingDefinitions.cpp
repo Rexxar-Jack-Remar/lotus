@@ -6,6 +6,7 @@
  * Author: rainoftime
  */
 #include "Dataflow/Mono/Analyses/Intra/IntraReachingDefinitions.h"
+
 #include "Dataflow/Mono/Container/Traits.h"
 #include "Dataflow/Mono/Core/Domain.h"
 #include "Dataflow/Mono/Core/Problem.h"
@@ -18,7 +19,8 @@ namespace mono {
 namespace {
 
 // ============================================================================
-// Simple analysis implementation - uses SetContainer, can be switched to BitVectorContainer
+// Simple analysis implementation - uses SetContainer, can be switched to
+// BitVectorContainer
 // ============================================================================
 
 using ReachingDefsDomain = LLVMMonoAnalysisDomain<SetContainer<Instruction *>>;
@@ -33,7 +35,7 @@ public:
   }
 
   mono_container_t normalFlow(Instruction *Inst,
-                                     const mono_container_t &In) override {
+                              const mono_container_t &In) override {
     mono_container_t Out = In;
 
     // GEN: Add this instruction if it produces a value
@@ -46,7 +48,7 @@ public:
   }
 
   mono_container_t merge(const mono_container_t &Lhs,
-                                const mono_container_t &Rhs) override {
+                         const mono_container_t &Rhs) override {
     mono_container_t Out = Lhs;
     Out.unionWith(Rhs);
     return Out;
@@ -57,8 +59,7 @@ public:
     return Lhs == Rhs;
   }
 
-  std::unordered_map<Instruction *, mono_container_t>
-  initialSeeds() override {
+  std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
     std::unordered_map<Instruction *, mono_container_t> Seeds;
     auto *F = getEntryPoints().empty() ? nullptr : getEntryPoints().front();
     if (F == nullptr || F->empty()) {
@@ -83,7 +84,8 @@ std::unique_ptr<DataFlowResult> runReachingDefinitionsAnalysis(Function *F) {
     return nullptr;
   }
 
-  // Analysis writer just creates problem and solver - framework handles optimization
+  // Analysis writer just creates problem and solver - framework handles
+  // optimization
   ReachingDefsProblem Problem(F);
   IntraMonoSolver<ReachingDefsDomain> Solver(Problem);
   Solver.solve();
@@ -95,7 +97,8 @@ std::unique_ptr<DataFlowResult> runReachingDefinitionsAnalysis(Function *F) {
       const auto &InSet = Solver.getInResultsAt(I);
       const auto &OutSet = Solver.getOutResultsAt(I);
 
-      // Convert SetContainer<Instruction*> to std::set<Value*> (Instruction* -> Value*)
+      // Convert SetContainer<Instruction*> to std::set<Value*> (Instruction* ->
+      // Value*)
       auto &InVal = Result->IN(I);
       InVal.clear();
       for (auto *Def : InSet.getSet()) {

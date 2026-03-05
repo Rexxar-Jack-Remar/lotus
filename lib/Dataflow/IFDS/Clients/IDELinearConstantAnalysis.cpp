@@ -146,7 +146,7 @@ IDELinearConstantAnalysis::normal_flow(const llvm::Instruction *stmt,
 }
 
 IDELinearConstantAnalysis::FactSet
-IDELinearConstantAnalysis::call_flow(const llvm::CallBase*call,
+IDELinearConstantAnalysis::call_flow(const llvm::CallBase *call,
                                      const llvm::Function *callee,
                                      const Fact &fact) {
   FactSet result;
@@ -173,7 +173,7 @@ IDELinearConstantAnalysis::call_flow(const llvm::CallBase*call,
 }
 
 IDELinearConstantAnalysis::FactSet IDELinearConstantAnalysis::return_flow(
-    const llvm::CallBase*call, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Function *callee,
     const Fact &exit_fact, const Fact & /*call_fact*/) {
   FactSet result;
 
@@ -188,7 +188,8 @@ IDELinearConstantAnalysis::FactSet IDELinearConstantAnalysis::return_flow(
   // integer-typed value, so that type check was always false and the return
   // value was never mapped back to the call site.  The correct check is simply
   // whether exit_fact is a ReturnInst with a non-void return value.
-  if (const auto *ret_inst = llvm::dyn_cast_or_null<llvm::ReturnInst>(exit_fact)) {
+  if (const auto *ret_inst =
+          llvm::dyn_cast_or_null<llvm::ReturnInst>(exit_fact)) {
     if (ret_inst->getReturnValue()) {
       result.insert(call);
     }
@@ -211,7 +212,7 @@ IDELinearConstantAnalysis::FactSet IDELinearConstantAnalysis::return_flow(
 }
 
 IDELinearConstantAnalysis::FactSet
-IDELinearConstantAnalysis::call_to_return_flow(const llvm::CallBase*call,
+IDELinearConstantAnalysis::call_to_return_flow(const llvm::CallBase *call,
                                                const Fact &fact) {
   FactSet result;
 
@@ -363,14 +364,14 @@ IDELinearConstantAnalysis::normal_edge_function(const llvm::Instruction *stmt,
 }
 
 IDELinearConstantAnalysis::EdgeFunction
-IDELinearConstantAnalysis::call_edge_function(const llvm::CallBase* /*call*/,
+IDELinearConstantAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
                                               const Fact & /*src_fact*/,
                                               const Fact & /*tgt_fact*/) {
   return create_identity();
 }
 
 IDELinearConstantAnalysis::EdgeFunction
-IDELinearConstantAnalysis::return_edge_function(const llvm::CallBase* /*call*/,
+IDELinearConstantAnalysis::return_edge_function(const llvm::CallBase * /*call*/,
                                                 const Fact & /*exit_fact*/,
                                                 const Fact & /*ret_fact*/) {
   return create_identity();
@@ -378,7 +379,7 @@ IDELinearConstantAnalysis::return_edge_function(const llvm::CallBase* /*call*/,
 
 IDELinearConstantAnalysis::EdgeFunction
 IDELinearConstantAnalysis::call_to_return_edge_function(
-    const llvm::CallBase* /*call*/, const Fact & /*src_fact*/,
+    const llvm::CallBase * /*call*/, const Fact & /*src_fact*/,
     const Fact & /*tgt_fact*/) {
   return create_identity();
 }

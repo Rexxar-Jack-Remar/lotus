@@ -4,27 +4,27 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
-
-#include <algorithm>
 
 namespace ifds {
 namespace flow {
 
 template <typename FactSet, typename Fact, typename ShouldPropagate,
           typename MakeFact>
-void map_facts_to_callee(const llvm::CallBase*Call, const llvm::Function *Callee,
-                         const Fact &Source, FactSet &Out,
-                         ShouldPropagate &&ShouldPropagateArg,
+void map_facts_to_callee(const llvm::CallBase *Call,
+                         const llvm::Function *Callee, const Fact &Source,
+                         FactSet &Out, ShouldPropagate &&ShouldPropagateArg,
                          MakeFact &&MakeMappedFact) {
   if (!Call || !Callee || Callee->isDeclaration()) {
     return;
   }
 
-  const unsigned NumArgs = std::min(
-      Call->arg_size(),
-      static_cast<unsigned>(std::distance(Callee->arg_begin(), Callee->arg_end())));
+  const unsigned NumArgs =
+      std::min(Call->arg_size(), static_cast<unsigned>(std::distance(
+                                     Callee->arg_begin(), Callee->arg_end())));
 
   for (unsigned I = 0; I < NumArgs; ++I) {
     const llvm::Value *Actual = Call->getArgOperand(I);
@@ -47,8 +47,9 @@ void map_facts_to_callee(const llvm::CallBase*Call, const llvm::Function *Callee
 template <typename FactSet, typename Fact, typename ShouldPropagateParam,
           typename MakeMappedParamFact, typename ShouldPropagateRet,
           typename MakeMappedRetFact>
-void map_facts_to_caller(const llvm::CallBase*Call, const llvm::Function *Callee,
-                         const Fact &Source, FactSet &Out,
+void map_facts_to_caller(const llvm::CallBase *Call,
+                         const llvm::Function *Callee, const Fact &Source,
+                         FactSet &Out,
                          ShouldPropagateParam &&ShouldPropagateParameter,
                          MakeMappedParamFact &&MakeParamFact,
                          ShouldPropagateRet &&ShouldPropagateReturn,
@@ -58,9 +59,10 @@ void map_facts_to_caller(const llvm::CallBase*Call, const llvm::Function *Callee
   }
 
   if (!Callee->isDeclaration()) {
-    const unsigned NumArgs = std::min(
-        Call->arg_size(), static_cast<unsigned>(
-                             std::distance(Callee->arg_begin(), Callee->arg_end())));
+    const unsigned NumArgs =
+        std::min(Call->arg_size(),
+                 static_cast<unsigned>(
+                     std::distance(Callee->arg_begin(), Callee->arg_end())));
     for (unsigned I = 0; I < NumArgs; ++I) {
       const llvm::Value *Actual = Call->getArgOperand(I);
       if (!Actual) {
@@ -93,8 +95,9 @@ void map_facts_to_caller(const llvm::CallBase*Call, const llvm::Function *Callee
 }
 
 template <typename FactSet, typename Fact, typename ShouldKill>
-void map_facts_alongside_callsite(const llvm::CallBase*Call, const Fact &Source,
-                                  FactSet &Out, ShouldKill &&ShouldKillArg) {
+void map_facts_alongside_callsite(const llvm::CallBase *Call,
+                                  const Fact &Source, FactSet &Out,
+                                  ShouldKill &&ShouldKillArg) {
   if (!Call) {
     return;
   }
@@ -114,7 +117,7 @@ void map_facts_alongside_callsite(const llvm::CallBase*Call, const Fact &Source,
 template <typename FactSet, typename Fact, typename ShouldKill, typename IsZero,
           typename IsGlobal>
 void map_facts_alongside_callsite_with_policies(
-    const llvm::CallBase*Call, const Fact &Source, FactSet &Out,
+    const llvm::CallBase *Call, const Fact &Source, FactSet &Out,
     ShouldKill &&ShouldKillArg, IsZero &&IsZeroFact, IsGlobal &&IsGlobalFact,
     bool PropagateGlobals = true, bool PropagateZero = true) {
   if (!Call) {

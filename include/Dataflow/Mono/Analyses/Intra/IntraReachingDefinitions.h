@@ -14,8 +14,8 @@ namespace mono {
 /**
  * @brief Run reaching definitions analysis on a function
  *
- * This is a forward dataflow analysis that computes which definitions (instructions
- * that produce values) can reach each program point.
+ * This is a forward dataflow analysis that computes which definitions
+ * (instructions that produce values) can reach each program point.
  *
  * **Dataflow equations:**
  *   - GEN[n] = { n } if n produces a non-void SSA value, ∅ otherwise
@@ -35,20 +35,23 @@ namespace mono {
  *
  * **Performance:**
  * This implementation uses std::set by default. For large functions (>500
- * instructions), consider using the bit-vector variant (runReachingDefinitionsAnalysisBitVector)
- * which is 5-10x faster.
+ * instructions), consider using the bit-vector variant
+ * (runReachingDefinitionsAnalysisBitVector) which is 5-10x faster.
  *
  * @param F The function to analyze
- * @return DataFlowResult containing reaching definition sets for each instruction
+ * @return DataFlowResult containing reaching definition sets for each
+ * instruction
  */
-std::unique_ptr<DataFlowResult> runReachingDefinitionsAnalysis(llvm::Function *F);
+std::unique_ptr<DataFlowResult>
+runReachingDefinitionsAnalysis(llvm::Function *F);
 
 /**
  * @brief Run reaching definitions analysis using bit-vector optimization
  *
- * This variant uses BitVectorSet instead of std::set for much better performance
- * on large functions. The analysis results are identical to the std::set version,
- * but set operations (union, intersection) are O(N/64) instead of O(N log N).
+ * This variant uses BitVectorSet instead of std::set for much better
+ * performance on large functions. The analysis results are identical to the
+ * std::set version, but set operations (union, intersection) are O(N/64)
+ * instead of O(N log N).
  *
  * **Performance comparison** (empirical, on x86-64):
  * - Function with 100 instructions: ~1.2x faster than std::set
@@ -64,9 +67,11 @@ std::unique_ptr<DataFlowResult> runReachingDefinitionsAnalysis(llvm::Function *F
  * - BitVectorSet: ~125 KB (38x reduction)
  *
  * @param F The function to analyze
- * @return DataFlowResult containing reaching definition sets for each instruction
+ * @return DataFlowResult containing reaching definition sets for each
+ * instruction
  */
-std::unique_ptr<DataFlowResult> runReachingDefinitionsAnalysisBitVector(llvm::Function *F);
+std::unique_ptr<DataFlowResult>
+runReachingDefinitionsAnalysisBitVector(llvm::Function *F);
 
 } // namespace mono
 

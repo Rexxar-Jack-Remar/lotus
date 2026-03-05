@@ -35,9 +35,8 @@ bool containsAny(const std::string &name,
 
 bool isLikelyStdContainerSymbol(const std::string &funcName) {
   const bool hasContainerToken =
-      containsAny(funcName,
-                  {"vector", "basic_string", "deque", "list", "map",
-                   "unordered_map", "set", "unordered_set"});
+      containsAny(funcName, {"vector", "basic_string", "deque", "list", "map",
+                             "unordered_map", "set", "unordered_set"});
   if (!hasContainerToken)
     return false;
 
@@ -60,11 +59,11 @@ STLContainerOpKind classifyStdContainerOp(const std::string &funcName) {
     return STLContainerOpKind::EmptyLike;
   }
 
-  if (containsAny(funcName, {"::data(", "4dataEv", "::c_str(", "5c_strEv",
-                             "::begin(", "5beginEv", "::end(", "3endEv",
-                             "::front(", "5frontEv", "::back(", "4backEv",
-                             "::at(", "2atE", "::find(", "4find", "ixE",
-                             "::operator[]("})) {
+  if (containsAny(funcName,
+                  {"::data(", "4dataEv", "::c_str(", "5c_strEv", "::begin(",
+                   "5beginEv", "::end(", "3endEv", "::front(", "5frontEv",
+                   "::back(", "4backEv", "::at(", "2atE", "::find(", "4find",
+                   "ixE", "::operator[]("})) {
     return STLContainerOpKind::PointerLike;
   }
 
@@ -668,7 +667,8 @@ void AEExtAPI::initExtFunMap() {
         IntervalValue size = as[sizeId].getInterval();
         if (size.is_numeral()) {
           // Exact size known
-          as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
+          as.setObjSize(objId,
+                        static_cast<uint32_t>(size.getIntNumeralOrZero()));
         } else {
           // Size is an interval - use upper bound conservatively
           int64_t ub = size.ub().getIntNumeralOrZero();
@@ -1020,7 +1020,8 @@ void AEExtAPI::initExtFunMap() {
     IntervalValue maxSize(0, MaxFieldLimit);
     if (as.inVarToValTable(sizeId)) {
       maxSize = as[sizeId].getInterval();
-      if (maxSize.ub().getIntNumeralOrZero() > static_cast<int64_t>(MaxFieldLimit)) {
+      if (maxSize.ub().getIntNumeralOrZero() >
+          static_cast<int64_t>(MaxFieldLimit)) {
         maxSize = IntervalValue(0, MaxFieldLimit);
       }
     }
@@ -1028,7 +1029,8 @@ void AEExtAPI::initExtFunMap() {
     // Model snprintf as writing a string with length bounded by size
     if (as.inVarToAddrsTable(strId)) {
       // Store null terminator at the end (within size limit)
-      uint32_t maxLen = static_cast<uint32_t>(maxSize.ub().getIntNumeralOrZero());
+      uint32_t maxLen =
+          static_cast<uint32_t>(maxSize.ub().getIntNumeralOrZero());
       if (maxLen > 0 && maxLen < MaxFieldLimit) {
         AddressValue nullAddr =
             as.getGepObjAddrs(strId, IntervalValue(maxLen - 1));
@@ -1110,7 +1112,8 @@ void AEExtAPI::initExtFunMap() {
     }
 
     // Total bytes = size * nmemb (conservative multiplication)
-    int64_t totalBytes = size.ub().getIntNumeralOrZero() * nmemb.ub().getIntNumeralOrZero();
+    int64_t totalBytes =
+        size.ub().getIntNumeralOrZero() * nmemb.ub().getIntNumeralOrZero();
     if (totalBytes > static_cast<int64_t>(MaxFieldLimit)) {
       totalBytes = MaxFieldLimit;
     }
@@ -1153,7 +1156,8 @@ void AEExtAPI::initExtFunMap() {
       if (as.inVarToValTable(sizeId)) {
         IntervalValue size = as[sizeId].getInterval();
         if (size.is_numeral()) {
-          as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
+          as.setObjSize(objId,
+                        static_cast<uint32_t>(size.getIntNumeralOrZero()));
         } else {
           as.setObjSize(objId, MaxFieldLimit);
         }
@@ -1190,7 +1194,8 @@ void AEExtAPI::initExtFunMap() {
       if (as.inVarToValTable(sizeId)) {
         IntervalValue size = as[sizeId].getInterval();
         if (size.is_numeral()) {
-          as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
+          as.setObjSize(objId,
+                        static_cast<uint32_t>(size.getIntNumeralOrZero()));
         } else {
           as.setObjSize(objId, MaxFieldLimit);
         }
@@ -1263,7 +1268,8 @@ void AEExtAPI::initExtFunMap() {
     if (as.inVarToValTable(sizeId))
       size = as[sizeId].getInterval();
 
-    int64_t totalSize = nmemb.ub().getIntNumeralOrZero() * size.ub().getIntNumeralOrZero();
+    int64_t totalSize =
+        nmemb.ub().getIntNumeralOrZero() * size.ub().getIntNumeralOrZero();
     if (totalSize > 0 && totalSize <= static_cast<int64_t>(MaxFieldLimit)) {
       as.setObjSize(objId, static_cast<uint32_t>(totalSize));
     } else {
@@ -1289,7 +1295,8 @@ void AEExtAPI::initExtFunMap() {
       uint32_t objId = AddressValue::getInternalID(newAddr);
       // Estimate size from strlen of source
       IntervalValue len = getStrlen(as, srcId);
-      as.setObjSize(objId, static_cast<uint32_t>(len.ub().getIntNumeralOrZero()));
+      as.setObjSize(objId,
+                    static_cast<uint32_t>(len.ub().getIntNumeralOrZero()));
     }
   };
   func_map["strdup"] = sse_strdup;
@@ -1503,7 +1510,8 @@ void AEExtAPI::handleExtAlloc(const llvm::CallBase *call) {
   if (as.inVarToValTable(sizeId)) {
     IntervalValue size = as[sizeId].getInterval();
     if (size.is_infinite()) {
-      // Bounds are unbounded; getIntNumeral() would assert. Use conservative limit.
+      // Bounds are unbounded; getIntNumeral() would assert. Use conservative
+      // limit.
       as.setObjSize(objId, MaxFieldLimit);
     } else if (size.is_numeral()) {
       as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
@@ -1534,7 +1542,8 @@ void AEExtAPI::handleExtRealloc(const llvm::CallBase *call) {
   if (as.inVarToValTable(sizeId)) {
     IntervalValue size = as[sizeId].getInterval();
     if (size.is_infinite()) {
-      // Bounds are unbounded; getIntNumeral() would assert. Use conservative limit.
+      // Bounds are unbounded; getIntNumeral() would assert. Use conservative
+      // limit.
       as.setObjSize(objId, MaxFieldLimit);
     } else if (size.is_numeral()) {
       as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
@@ -1619,7 +1628,8 @@ void AEExtAPI::handleExtSnprintf(const llvm::CallBase *call) {
   IntervalValue maxSize(0, MaxFieldLimit);
   if (as.inVarToValTable(sizeId)) {
     maxSize = as[sizeId].getInterval();
-    if (maxSize.ub().getIntNumeralOrZero() > static_cast<int64_t>(MaxFieldLimit)) {
+    if (maxSize.ub().getIntNumeralOrZero() >
+        static_cast<int64_t>(MaxFieldLimit)) {
       maxSize = IntervalValue(0, MaxFieldLimit);
     }
   }

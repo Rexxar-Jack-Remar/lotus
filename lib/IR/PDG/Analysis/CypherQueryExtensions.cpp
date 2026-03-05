@@ -4,6 +4,7 @@
  */
 
 #include "IR/PDG/Analysis/CypherQueryExtensions.h"
+
 #include "IR/PDG/Analysis/Slicing.h"
 #include "IR/PDG/Support/PDGUtils.h"
 
@@ -21,7 +22,8 @@ namespace pdg {
 // CypherAggregation Implementation
 // ============================================================================
 
-std::string CypherAggregation::apply(const std::vector<std::string> &values) const {
+std::string
+CypherAggregation::apply(const std::vector<std::string> &values) const {
   if (values.empty()) {
     return "null";
   }
@@ -39,7 +41,8 @@ std::string CypherAggregation::apply(const std::vector<std::string> &values) con
     std::ostringstream oss;
     oss << "[";
     for (size_t i = 0; i < values.size(); ++i) {
-      if (i > 0) oss << ", ";
+      if (i > 0)
+        oss << ", ";
       oss << values[i];
     }
     oss << "]";
@@ -52,7 +55,8 @@ std::string CypherAggregation::apply(const std::vector<std::string> &values) con
     oss << "[";
     bool first = true;
     for (const auto &v : unique) {
-      if (!first) oss << ", ";
+      if (!first)
+        oss << ", ";
       oss << v;
       first = false;
     }
@@ -80,7 +84,8 @@ std::string CypherAggregation::apply(const std::vector<std::string> &values) con
   }
 }
 
-double CypherAggregation::applyNumeric(const std::vector<double> &values) const {
+double
+CypherAggregation::applyNumeric(const std::vector<double> &values) const {
   if (values.empty()) {
     return 0.0;
   }
@@ -99,11 +104,11 @@ double CypherAggregation::applyNumeric(const std::vector<double> &values) const 
     return *std::max_element(values.begin(), values.end());
 
   case AggregationFunction::STDEV: {
-    double mean = std::accumulate(values.begin(), values.end(), 0.0) / values.size();
-    double sq_sum = std::accumulate(values.begin(), values.end(), 0.0,
-                                   [mean](double acc, double v) {
-                                     return acc + (v - mean) * (v - mean);
-                                   });
+    double mean =
+        std::accumulate(values.begin(), values.end(), 0.0) / values.size();
+    double sq_sum = std::accumulate(
+        values.begin(), values.end(), 0.0,
+        [mean](double acc, double v) { return acc + (v - mean) * (v - mean); });
     return std::sqrt(sq_sum / values.size());
   }
 
@@ -124,8 +129,7 @@ double CypherAggregation::applyNumeric(const std::vector<double> &values) const 
 // ============================================================================
 
 bool RegularPathQuery::satisfiesConstraints(
-    const std::vector<Node *> &path,
-    const std::vector<Edge *> &edges) const {
+    const std::vector<Node *> &path, const std::vector<Edge *> &edges) const {
 
   for (auto constraint : constraints_) {
     switch (constraint) {
@@ -317,8 +321,7 @@ SubgraphPattern::findMatches(ProgramGraph &pdg) const {
 }
 
 bool SubgraphPattern::extendMapping(
-    std::unordered_map<std::string, Node *> &mapping,
-    size_t nextPatternIdx,
+    std::unordered_map<std::string, Node *> &mapping, size_t nextPatternIdx,
     ProgramGraph &pdg) const {
 
   if (nextPatternIdx >= nodes_.size()) {
@@ -448,7 +451,8 @@ WithClause::execute(std::unique_ptr<CypherResult> input) const {
     for (const auto &agg : aggregations_) {
       auto it = grouped.find(agg.getExpression());
       if (it != grouped.end()) {
-        std::string key = agg.getAlias().empty() ? agg.getExpression() : agg.getAlias();
+        std::string key =
+            agg.getAlias().empty() ? agg.getExpression() : agg.getAlias();
         aggRow[key] = agg.apply(it->second);
       }
     }
@@ -466,7 +470,7 @@ WithClause::execute(std::unique_ptr<CypherResult> input) const {
 
 std::unique_ptr<CypherResult>
 OptionalMatch::execute(std::unique_ptr<CypherResult> input,
-                      ProgramGraph &pdg) const {
+                       ProgramGraph &pdg) const {
   if (!input)
     return nullptr;
 
@@ -489,7 +493,7 @@ OptionalMatch::execute(std::unique_ptr<CypherResult> input,
 // ============================================================================
 
 bool PathPredicate::evaluate(const std::vector<Node *> &path,
-                            const std::vector<Edge *> &edges) const {
+                             const std::vector<Edge *> &edges) const {
   switch (type_) {
   case PathPredicateType::ALL:
     return evaluateAll(path, edges);
@@ -509,7 +513,7 @@ bool PathPredicate::evaluate(const std::vector<Node *> &path,
 }
 
 bool PathPredicate::evaluateAll(const std::vector<Node *> &path,
-                               const std::vector<Edge *> &edges) const {
+                                const std::vector<Edge *> &edges) const {
   if (targetType_ == PathPredicateTarget::NODES) {
     for (auto *node : path) {
       if (!condition_(node, nullptr))
@@ -525,7 +529,7 @@ bool PathPredicate::evaluateAll(const std::vector<Node *> &path,
 }
 
 bool PathPredicate::evaluateAny(const std::vector<Node *> &path,
-                               const std::vector<Edge *> &edges) const {
+                                const std::vector<Edge *> &edges) const {
   if (targetType_ == PathPredicateTarget::NODES) {
     for (auto *node : path) {
       if (condition_(node, nullptr))
@@ -541,7 +545,7 @@ bool PathPredicate::evaluateAny(const std::vector<Node *> &path,
 }
 
 bool PathPredicate::evaluateSingle(const std::vector<Node *> &path,
-                                  const std::vector<Edge *> &edges) const {
+                                   const std::vector<Edge *> &edges) const {
   int count = 0;
 
   if (targetType_ == PathPredicateTarget::NODES) {
@@ -653,8 +657,7 @@ TemporalPathQuery::findPaths(Node *start, Node *end, ProgramGraph &pdg) const {
 }
 
 bool TemporalPathQuery::satisfiesTemporalConstraints(
-    const std::vector<double> &timestamps,
-    double totalCost) const {
+    const std::vector<double> &timestamps, double totalCost) const {
 
   if (totalCost > maxCost_)
     return false;

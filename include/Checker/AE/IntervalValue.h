@@ -274,8 +274,7 @@ public:
   explicit IntervalValue(int32_t n) : IntervalValue(static_cast<int64_t>(n)) {}
   explicit IntervalValue(uint32_t n) : IntervalValue(static_cast<int64_t>(n)) {}
   explicit IntervalValue(BoundedInt n) : _lb(n), _ub(n) {}
-  explicit IntervalValue(BoundedInt lb, BoundedInt ub)
-      : _lb(lb), _ub(ub) {
+  explicit IntervalValue(BoundedInt lb, BoundedInt ub) : _lb(lb), _ub(ub) {
     assert((isBottom() || _lb.leq(_ub)) &&
            "lower bound should be <= upper bound");
   }

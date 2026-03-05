@@ -149,8 +149,10 @@ public:
   void setModule(llvm::Module *M) { module_ = M; }
 
   /// Set shared SVFG and ICFG (for optimization when running multiple checkers)
-  /// Ownership is transferred - the checker will take ownership of these pointers
-  void setSharedSVFGAndICFG(std::unique_ptr<SVFG> shared_svfg, std::unique_ptr<::ICFG> shared_icfg) {
+  /// Ownership is transferred - the checker will take ownership of these
+  /// pointers
+  void setSharedSVFGAndICFG(std::unique_ptr<SVFG> shared_svfg,
+                            std::unique_ptr<::ICFG> shared_icfg) {
     svfg_ = std::move(shared_svfg);
     icfg_ = std::move(shared_icfg);
     svfg = svfg_.get();
@@ -159,14 +161,13 @@ public:
 
   /// Extract SVFG and ICFG (for sharing with other checkers)
   /// Ownership is transferred to the caller
-  std::pair<std::unique_ptr<SVFG>, std::unique_ptr<::ICFG>> extractSVFGAndICFG() {
+  std::pair<std::unique_ptr<SVFG>, std::unique_ptr<::ICFG>>
+  extractSVFGAndICFG() {
     return std::make_pair(std::move(svfg_), std::move(icfg_));
   }
 
   /// Check if SVFG/ICFG are already initialized (to skip rebuilding)
-  bool hasSVFGAndICFG() const {
-    return svfg_ != nullptr && icfg_ != nullptr;
-  }
+  bool hasSVFGAndICFG() const { return svfg_ != nullptr && icfg_ != nullptr; }
 
 protected:
   void FWProcessCurNode(const DPIm &item) override {

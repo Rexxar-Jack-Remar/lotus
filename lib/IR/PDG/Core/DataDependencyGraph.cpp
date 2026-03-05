@@ -64,9 +64,10 @@ static opt<std::string> PdgAliasUnderOpt(
          "(underapprox|none)"),
     init("underapprox"));
 
-// Map a user-facing string to an AAConfig. Defaults to the provided fallback when
-// the string is unknown.
-static pdg::AAConfig parseAAConfig(const std::string &aa, const pdg::AAConfig &fallback) {
+// Map a user-facing string to an AAConfig. Defaults to the provided fallback
+// when the string is unknown.
+static pdg::AAConfig parseAAConfig(const std::string &aa,
+                                   const pdg::AAConfig &fallback) {
   return lotus::parseAAConfigFromString(aa, fallback);
 }
 
@@ -112,10 +113,12 @@ bool pdg::DataDependencyGraph::runOnModule(Module &M) {
   }
 
   // Initialize alias analysis wrappers based on command-line choices.
-  _alias_wrapper_over = buildAliasWrapper(M, PdgAliasOverOpt.getValue(),
-                                          pdg::AAConfig::SparrowAA_NoCtx(), "over-approximate");
-  _alias_wrapper_under = buildAliasWrapper(
-      M, PdgAliasUnderOpt.getValue(), pdg::AAConfig::UnderApprox(), "under-approximate");
+  _alias_wrapper_over =
+      buildAliasWrapper(M, PdgAliasOverOpt.getValue(),
+                        pdg::AAConfig::SparrowAA_NoCtx(), "over-approximate");
+  _alias_wrapper_under =
+      buildAliasWrapper(M, PdgAliasUnderOpt.getValue(),
+                        pdg::AAConfig::UnderApprox(), "under-approximate");
 
   for (auto &F : M) {
     if (F.isDeclaration() || F.empty())

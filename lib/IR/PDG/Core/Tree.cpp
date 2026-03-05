@@ -26,12 +26,10 @@ using namespace llvm;
 
 pdg::TreeNode::TreeNode(const TreeNode &tree_node)
     : Node(tree_node.getNodeType()),
-      _tree(nullptr), // Will be set by tree during tree copy
+      _tree(nullptr),        // Will be set by tree during tree copy
       _parent_node(nullptr), // Will be set by parent during tree copy
-      _depth(tree_node._depth),
-      _di_local_var(tree_node._di_local_var),
-      _addr_vars(tree_node._addr_vars),
-      _acc_tag_set(tree_node._acc_tag_set) {
+      _depth(tree_node._depth), _di_local_var(tree_node._di_local_var),
+      _addr_vars(tree_node._addr_vars), _acc_tag_set(tree_node._acc_tag_set) {
   _func = tree_node.getFunc();
   _node_di_type = tree_node.getDIType();
   _node_type = tree_node.getNodeType();
@@ -157,7 +155,8 @@ void pdg::TreeNode::computeDerivedAddrVarsFromParent() {
 
 //  ====== Tree =======
 pdg::Tree::Tree(const Tree &src_tree)
-    : _base_val(src_tree._base_val), _root_node(nullptr), _size(src_tree._size) {
+    : _base_val(src_tree._base_val), _root_node(nullptr),
+      _size(src_tree._size) {
   TreeNode *src_tree_root_node = src_tree.getRootNode();
   if (src_tree_root_node == nullptr) {
     return;
@@ -170,19 +169,19 @@ pdg::Tree::Tree(const Tree &src_tree)
   // BFS copy of the entire tree.
   // Fix: the TreeNode copy constructor copies _addr_vars from the source node,
   // but child nodes computed via computeDerivedAddrVarsFromParent() store their
-  // addr_vars in the source tree's child TreeNode objects.  The copy constructor
-  // of TreeNode (which calls Node(node_type)) does copy _addr_vars via the
-  // member initializer list, so we just need to make sure we also copy the
-  // _addr_vars field explicitly here to be safe, since the TreeNode copy ctor
-  // initializes _addr_vars from tree_node._addr_vars.
-  std::queue<std::pair<TreeNode*, TreeNode*>> node_queue;
+  // addr_vars in the source tree's child TreeNode objects.  The copy
+  // constructor of TreeNode (which calls Node(node_type)) does copy _addr_vars
+  // via the member initializer list, so we just need to make sure we also copy
+  // the _addr_vars field explicitly here to be safe, since the TreeNode copy
+  // ctor initializes _addr_vars from tree_node._addr_vars.
+  std::queue<std::pair<TreeNode *, TreeNode *>> node_queue;
   node_queue.push(std::make_pair(src_tree_root_node, new_root_node));
-  
+
   while (!node_queue.empty()) {
     TreeNode *src_node = node_queue.front().first;
     TreeNode *dst_node = node_queue.front().second;
     node_queue.pop();
-    
+
     for (TreeNode *src_child : src_node->getChildNodes()) {
       TreeNode *new_child = new TreeNode(*src_child);
       new_child->setParentTreeNode(dst_node);

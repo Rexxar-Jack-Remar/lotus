@@ -12,8 +12,7 @@ class Function;
 namespace mono {
 
 // Forward uninitialized variables analysis (intraprocedural).
-std::unique_ptr<DataFlowResult>
-runIntraMonoUninitVariables(llvm::Function *F);
+std::unique_ptr<DataFlowResult> runIntraMonoUninitVariables(llvm::Function *F);
 
 } // namespace mono
 

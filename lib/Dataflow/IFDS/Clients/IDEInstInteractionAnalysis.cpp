@@ -4,8 +4,9 @@
 
 namespace ifds {
 
-IDEInstInteractionAnalysis::FactSet IDEInstInteractionAnalysis::normal_flow(
-    const llvm::Instruction *stmt, const Fact &fact) {
+IDEInstInteractionAnalysis::FactSet
+IDEInstInteractionAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                        const Fact &fact) {
   FactSet out;
   out.insert(fact);
   if (!stmt) {
@@ -17,7 +18,8 @@ IDEInstInteractionAnalysis::FactSet IDEInstInteractionAnalysis::normal_flow(
       out.insert(load);
     }
   } else if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(stmt)) {
-    if (fact == store->getPointerOperand() || fact == store->getValueOperand()) {
+    if (fact == store->getPointerOperand() ||
+        fact == store->getValueOperand()) {
       out.insert(store->getPointerOperand());
     }
   } else if (!stmt->getType()->isVoidTy()) {
@@ -31,8 +33,10 @@ IDEInstInteractionAnalysis::FactSet IDEInstInteractionAnalysis::normal_flow(
   return out;
 }
 
-IDEInstInteractionAnalysis::FactSet IDEInstInteractionAnalysis::call_flow(
-    const llvm::CallBase *call, const llvm::Function *callee, const Fact &fact) {
+IDEInstInteractionAnalysis::FactSet
+IDEInstInteractionAnalysis::call_flow(const llvm::CallBase *call,
+                                      const llvm::Function *callee,
+                                      const Fact &fact) {
   FactSet out;
   if (!call || !callee || callee->isDeclaration()) {
     out.insert(fact);
@@ -62,7 +66,8 @@ IDEInstInteractionAnalysis::FactSet IDEInstInteractionAnalysis::return_flow(
   }
   if (!call->getType()->isVoidTy()) {
     for (const llvm::BasicBlock &bb : *callee) {
-      if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
+      if (const auto *ret =
+              llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
         if (ret->getReturnValue() == exit_fact) {
           out.insert(call);
           break;
@@ -140,7 +145,8 @@ IDEInstInteractionAnalysis::normal_edge_function(const llvm::Instruction *stmt,
     }
   }
   if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(stmt)) {
-    if (src_fact == store->getPointerOperand() && tgt_fact == store->getPointerOperand()) {
+    if (src_fact == store->getPointerOperand() &&
+        tgt_fact == store->getPointerOperand()) {
       return [](const Value &v) {
         if (v.kind == Value::Read || v.kind == Value::ReadWrite) {
           return Value::read_write();
@@ -160,16 +166,16 @@ IDEInstInteractionAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
 }
 
 IDEInstInteractionAnalysis::EdgeFunction
-IDEInstInteractionAnalysis::return_edge_function(const llvm::CallBase * /*call*/,
-                                                 const Fact & /*exit_fact*/,
-                                                 const Fact & /*ret_fact*/) {
+IDEInstInteractionAnalysis::return_edge_function(
+    const llvm::CallBase * /*call*/, const Fact & /*exit_fact*/,
+    const Fact & /*ret_fact*/) {
   return [](const Value &v) { return v; };
 }
 
 IDEInstInteractionAnalysis::EdgeFunction
-IDEInstInteractionAnalysis::call_to_return_edge_function(const llvm::CallBase * /*call*/,
-                                                         const Fact & /*src_fact*/,
-                                                         const Fact & /*tgt_fact*/) {
+IDEInstInteractionAnalysis::call_to_return_edge_function(
+    const llvm::CallBase * /*call*/, const Fact & /*src_fact*/,
+    const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }
 

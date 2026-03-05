@@ -42,7 +42,7 @@ private:
 public:
   Z3Expr()
 #ifdef USE_Z3
-      : expr_(context().bool_val(false)) {}
+      : expr_(context().bool_val(false)){}
 #else
       : expr_() {
     expr_ = DummyExpr(nextId_++);
@@ -50,7 +50,9 @@ public:
 #endif
 
 #ifdef USE_Z3
-  Z3Expr(const z3::expr &e) : expr_(e) {}
+        Z3Expr(const z3::expr &e)
+      : expr_(e) {
+  }
   Z3Expr(z3::expr &&e) : expr_(std::move(e)) {}
 #endif
 

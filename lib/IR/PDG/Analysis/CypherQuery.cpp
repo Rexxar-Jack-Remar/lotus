@@ -1,4 +1,8 @@
 #include "IR/PDG/Analysis/CypherQuery.h"
+
+#include "llvm/IR/Instructions.h"
+#include "llvm/Support/raw_ostream.h"
+
 #include "IR/PDG/Analysis/MotionLegality.h"
 #include "IR/PDG/Analysis/SchedulingQuery.h"
 #include "IR/PDG/Support/DebugInfoUtils.h"
@@ -9,21 +13,18 @@
 #include <cstdlib>
 #include <sstream>
 
-#include "llvm/IR/Instructions.h"
-#include "llvm/Support/raw_ostream.h"
-
 namespace pdg {
 
 static std::string toLower(std::string s) {
-  std::transform(s.begin(), s.end(), s.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
   return s;
 }
 
 static std::string unquoteStringToken(std::string token) {
-  if (token.size() >= 2 &&
-      ((token.front() == '"' && token.back() == '"') ||
-       (token.front() == '\'' && token.back() == '\''))) {
+  if (token.size() >= 2 && ((token.front() == '"' && token.back() == '"') ||
+                            (token.front() == '\'' && token.back() == '\''))) {
     token = token.substr(1, token.size() - 2);
   }
   return token;
@@ -145,7 +146,8 @@ std::unique_ptr<CypherQuery> CypherParser::parse(const std::string &query) {
 }
 
 std::unique_ptr<CypherQuery>
-CypherParser::parse(const std::string &query, const CypherQueryParameters &params) {
+CypherParser::parse(const std::string &query,
+                    const CypherQueryParameters &params) {
   clearError();
   trim(const_cast<std::string &>(query));
 
@@ -694,8 +696,8 @@ CypherParser::parseRelationshipPattern(std::vector<std::string> &tokens,
       consume(tokens, pos); // ']'
       consumeTrailingDirection();
 
-      auto rel = std::make_unique<CypherRelationshipPattern>(
-          "", "", inferDirection());
+      auto rel =
+          std::make_unique<CypherRelationshipPattern>("", "", inferDirection());
       rel->setMinHops(minHops);
       rel->setMaxHops(maxHops);
       return rel;
@@ -808,7 +810,8 @@ CypherParser::parseOrExpression(std::vector<std::string> &tokens, size_t &pos) {
 }
 
 std::unique_ptr<CypherWhereClause>
-CypherParser::parseAndExpression(std::vector<std::string> &tokens, size_t &pos) {
+CypherParser::parseAndExpression(std::vector<std::string> &tokens,
+                                 size_t &pos) {
   auto left = parseUnaryExpression(tokens, pos);
   if (!left)
     return nullptr;
@@ -907,8 +910,9 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
     while (hasMore(tokens, pos) && peek(tokens, pos) != "]") {
       std::string v = consume(tokens, pos);
       if (!v.empty() && v.front() == '$') {
-        v = substituteParameter(
-            v.substr(1), activeParams_ ? *activeParams_ : CypherQueryParameters{});
+        v = substituteParameter(v.substr(1), activeParams_
+                                                 ? *activeParams_
+                                                 : CypherQueryParameters{});
       }
       v = unquoteStringToken(std::move(v));
       values.push_back(std::move(v));
@@ -919,8 +923,8 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
     }
 
     if (!hasMore(tokens, pos) || peek(tokens, pos) != "]") {
-      setError(CypherErrorCode::SYNTAX_ERROR, "Expected ']' to close IN list", 0,
-               0);
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected ']' to close IN list",
+               0, 0);
       return nullptr;
     }
     consume(tokens, pos); // ']'
@@ -968,8 +972,8 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
   // Handle "STARTS WITH" / "ENDS WITH"
   if (upperOp == "STARTS" || upperOp == "ENDS") {
     if (!hasMore(tokens, pos)) {
-      setError(CypherErrorCode::SYNTAX_ERROR,
-               "Expected WITH after " + op, 0, 0);
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected WITH after " + op, 0,
+               0);
       return nullptr;
     }
     std::string maybeWith = consume(tokens, pos);
@@ -977,8 +981,8 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
     std::transform(upperWith.begin(), upperWith.end(), upperWith.begin(),
                    ::toupper);
     if (upperWith != "WITH") {
-      setError(CypherErrorCode::SYNTAX_ERROR,
-               "Expected WITH after " + op, 0, 0);
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected WITH after " + op, 0,
+               0);
       return nullptr;
     }
 
@@ -986,8 +990,9 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
     if (hasMore(tokens, pos)) {
       value = consume(tokens, pos);
       if (!value.empty() && value.front() == '$') {
-        value = substituteParameter(
-            value.substr(1), activeParams_ ? *activeParams_ : CypherQueryParameters{});
+        value = substituteParameter(value.substr(1),
+                                    activeParams_ ? *activeParams_
+                                                  : CypherQueryParameters{});
       }
       value = unquoteStringToken(std::move(value));
     }
@@ -1003,8 +1008,9 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
   if (hasMore(tokens, pos)) {
     value = consume(tokens, pos);
     if (!value.empty() && value.front() == '$') {
-      value = substituteParameter(
-          value.substr(1), activeParams_ ? *activeParams_ : CypherQueryParameters{});
+      value = substituteParameter(value.substr(1),
+                                  activeParams_ ? *activeParams_
+                                                : CypherQueryParameters{});
     }
     value = unquoteStringToken(std::move(value));
   }
@@ -1183,8 +1189,8 @@ CypherParser::substituteParameter(const std::string &name,
                                   const CypherQueryParameters &params) {
   auto it = params.find(name);
   if (it == params.end()) {
-    setError(CypherErrorCode::INVALID_PARAMETER,
-             "Unknown parameter: $" + name, 0, 0);
+    setError(CypherErrorCode::INVALID_PARAMETER, "Unknown parameter: $" + name,
+             0, 0);
     lastError_.suggestion =
         "Pass it via --param " + name + "=<value> (repeatable).";
     return "";
@@ -1697,7 +1703,8 @@ CypherQueryExecutor::execute(const CypherQuery &query,
   // ORDER BY applies to rows.
   if (query.getOrderBy() && !rows.empty()) {
     const auto &ob = *query.getOrderBy();
-    const std::string prop = ob.getProperty().empty() ? "label" : ob.getProperty();
+    const std::string prop =
+        ob.getProperty().empty() ? "label" : ob.getProperty();
 
     auto tryParseInt = [](const std::string &s, int64_t &out) -> bool {
       if (s.empty())
@@ -1779,8 +1786,7 @@ CypherQueryExecutor::execute(const CypherQuery &query,
                                  const CypherPatternElement *elem) -> void {
     if (!elem)
       return;
-    if (elem->getStartNode() &&
-        !elem->getStartNode()->getVariable().empty()) {
+    if (elem->getStartNode() && !elem->getStartNode()->getVariable().empty()) {
       declaredNodeVars.insert(elem->getStartNode()->getVariable());
     }
     if (elem->getEndNode() && !elem->getEndNode()->getVariable().empty()) {
@@ -1830,14 +1836,14 @@ CypherQueryExecutor::execute(const CypherQuery &query,
       std::vector<std::string> columns;
       columns.reserve(query.getReturnItems().size());
       for (const auto &itemPtr : query.getReturnItems()) {
-      const auto &item = *itemPtr;
-      if (item.getKind() != CypherReturnItem::Kind::VARIABLE_OR_PROPERTY) {
+        const auto &item = *itemPtr;
+        if (item.getKind() != CypherReturnItem::Kind::VARIABLE_OR_PROPERTY) {
           continue;
-      }
+        }
 
-      const auto varProp = splitVarProp(item.getVariable());
-      const std::string &var = varProp.first;
-      const std::string &prop = varProp.second;
+        const auto varProp = splitVarProp(item.getVariable());
+        const std::string &var = varProp.first;
+        const std::string &prop = varProp.second;
 
         auto itN = row.nodes.find(var);
         if (itN != row.nodes.end()) {
@@ -1892,11 +1898,13 @@ CypherQueryExecutor::execute(const CypherQuery &query,
   }
 
   std::sort(projectedNodes.begin(), projectedNodes.end());
-  projectedNodes.erase(std::unique(projectedNodes.begin(), projectedNodes.end()),
-                       projectedNodes.end());
+  projectedNodes.erase(
+      std::unique(projectedNodes.begin(), projectedNodes.end()),
+      projectedNodes.end());
   std::sort(projectedEdges.begin(), projectedEdges.end());
-  projectedEdges.erase(std::unique(projectedEdges.begin(), projectedEdges.end()),
-                       projectedEdges.end());
+  projectedEdges.erase(
+      std::unique(projectedEdges.begin(), projectedEdges.end()),
+      projectedEdges.end());
   std::sort(projectedScalars.begin(), projectedScalars.end());
   projectedScalars.erase(
       std::unique(projectedScalars.begin(), projectedScalars.end()),
@@ -1956,14 +1964,16 @@ CypherQueryExecutor::matchPattern(const CypherPatternElement *pattern) {
     edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
   };
 
-  auto bindNodes = [&](const std::string &var, const std::vector<Node *> &nodes) {
+  auto bindNodes = [&](const std::string &var,
+                       const std::vector<Node *> &nodes) {
     if (var.empty())
       return;
     auto &bucket = boundVariables_[var];
     bucket.insert(bucket.end(), nodes.begin(), nodes.end());
     dedupNodes(bucket);
   };
-  auto bindEdges = [&](const std::string &var, const std::vector<Edge *> &edges) {
+  auto bindEdges = [&](const std::string &var,
+                       const std::vector<Edge *> &edges) {
     if (var.empty())
       return;
     auto &bucket = boundRelationships_[var];
@@ -2010,13 +2020,14 @@ CypherQueryExecutor::matchPattern(const CypherPatternElement *pattern) {
   std::function<std::vector<Node *>(const CypherPatternElement *,
                                     const std::vector<Node *> &)>
       evalElement;
-  evalElement = [&](const CypherPatternElement *elem,
-                    const std::vector<Node *> &inputStarts)
-      -> std::vector<Node *> {
+  evalElement =
+      [&](const CypherPatternElement *elem,
+          const std::vector<Node *> &inputStarts) -> std::vector<Node *> {
     if (!elem)
       return inputStarts;
 
-    std::vector<Node *> starts = filterByNodePattern(inputStarts, elem->getStartNode());
+    std::vector<Node *> starts =
+        filterByNodePattern(inputStarts, elem->getStartNode());
     bindNodes(elem->getStartNode() ? elem->getStartNode()->getVariable() : "",
               starts);
     for (auto *n : starts) {
@@ -2125,8 +2136,9 @@ CypherQueryExecutor::matchNodes(const std::string &label,
 
     auto matchesGroup = [&](GraphNodeType t) -> bool {
       if (upperLabel == "INST") {
-        return t == GraphNodeType::INST_FUNCALL || t == GraphNodeType::INST_RET ||
-               t == GraphNodeType::INST_BR || t == GraphNodeType::INST_OTHER;
+        return t == GraphNodeType::INST_FUNCALL ||
+               t == GraphNodeType::INST_RET || t == GraphNodeType::INST_BR ||
+               t == GraphNodeType::INST_OTHER;
       }
       if (upperLabel == "VAR") {
         return t == GraphNodeType::VAR_OTHER ||
@@ -2141,7 +2153,8 @@ CypherQueryExecutor::matchNodes(const std::string &label,
                t == GraphNodeType::PARAM_ACTUALOUT;
       }
       if (upperLabel == "ANNO") {
-        return t == GraphNodeType::ANNO_VAR || t == GraphNodeType::ANNO_GLOBAL ||
+        return t == GraphNodeType::ANNO_VAR ||
+               t == GraphNodeType::ANNO_GLOBAL ||
                t == GraphNodeType::ANNO_OTHER;
       }
       return false;
@@ -2718,7 +2731,8 @@ std::string CypherQueryExecutor::getEdgeProperty(Edge *edge,
 
 std::unique_ptr<CypherResult>
 CypherQueryExecutor::canMoveEarlier(Node *moving, Node *anchor) {
-  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::BOOLEAN);
+  auto result =
+      std::make_unique<CypherResult>(CypherResult::ResultType::BOOLEAN);
   if (!moving || !anchor) {
     result->setBooleanValue(false);
     return result;
@@ -2730,9 +2744,10 @@ CypherQueryExecutor::canMoveEarlier(Node *moving, Node *anchor) {
   return result;
 }
 
-std::unique_ptr<CypherResult>
-CypherQueryExecutor::canMoveLater(Node *moving, Node *anchor) {
-  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::BOOLEAN);
+std::unique_ptr<CypherResult> CypherQueryExecutor::canMoveLater(Node *moving,
+                                                                Node *anchor) {
+  auto result =
+      std::make_unique<CypherResult>(CypherResult::ResultType::BOOLEAN);
   if (!moving || !anchor) {
     result->setBooleanValue(false);
     return result;
@@ -2744,9 +2759,10 @@ CypherQueryExecutor::canMoveLater(Node *moving, Node *anchor) {
   return result;
 }
 
-std::unique_ptr<CypherResult>
-CypherQueryExecutor::independent(Node *a, Node *b) {
-  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::BOOLEAN);
+std::unique_ptr<CypherResult> CypherQueryExecutor::independent(Node *a,
+                                                               Node *b) {
+  auto result =
+      std::make_unique<CypherResult>(CypherResult::ResultType::BOOLEAN);
   if (!a || !b) {
     result->setBooleanValue(false);
     return result;
@@ -2762,28 +2778,29 @@ std::unique_ptr<CypherResult>
 CypherQueryExecutor::readySet(const std::vector<Node *> &region,
                               const std::vector<Node *> &scheduled) {
   auto result = std::make_unique<CypherResult>(CypherResult::ResultType::NODES);
-  
+
   std::set<Node *> region_set(region.begin(), region.end());
   std::set<Node *> scheduled_set(scheduled.begin(), scheduled.end());
-  
+
   SchedulingQuery sq(pdg_);
   auto ready = sq.readySet(region_set, scheduled_set);
-  
+
   for (Node *n : ready) {
     result->addNode(n);
   }
-  
+
   return result;
 }
 
 std::unique_ptr<CypherResult>
 CypherQueryExecutor::criticalPath(const std::vector<Node *> &region) {
-  auto result = std::make_unique<CypherResult>(CypherResult::ResultType::INTEGER);
-  
+  auto result =
+      std::make_unique<CypherResult>(CypherResult::ResultType::INTEGER);
+
   std::set<Node *> region_set(region.begin(), region.end());
   SchedulingQuery sq(pdg_);
   size_t length = sq.criticalPathLength(region_set);
-  
+
   result->setIntegerValue(static_cast<int64_t>(length));
   return result;
 }

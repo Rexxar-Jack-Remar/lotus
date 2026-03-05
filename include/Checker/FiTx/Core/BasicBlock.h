@@ -63,8 +63,8 @@ public:
   /// Compare by pointer address only to avoid invoking Value::operator<
   /// during set operations (can crash with default comparator).
   struct ValuePtrCompare {
-    bool operator()(const std::shared_ptr<framework::Value>& a,
-                    const std::shared_ptr<framework::Value>& b) const {
+    bool operator()(const std::shared_ptr<framework::Value> &a,
+                    const std::shared_ptr<framework::Value> &b) const {
       return a.get() < b.get();
     }
   };

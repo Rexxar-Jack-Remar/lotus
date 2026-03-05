@@ -1,13 +1,14 @@
 #include "Checker/FiTx/Core/Instructions/CallInstruction.h"
 
+#include "llvm/IR/InstrTypes.h"
+
 #include "Checker/FiTx/Core/Function.h"
 #include "Checker/FiTx/Core/Instruction.h"
 #include "Checker/FiTx/Core/SFG/Converter.h"
 #include "Checker/FiTx/Core/Value.h"
-#include "llvm/IR/InstrTypes.h"
 
 namespace framework {
-std::shared_ptr<CallInst> CallInst::Create(llvm::CallInst* call_inst,
+std::shared_ptr<CallInst> CallInst::Create(llvm::CallInst *call_inst,
                                            std::vector<Fields> fields,
                                            long array_element_num) {
   auto created =
@@ -15,7 +16,7 @@ std::shared_ptr<CallInst> CallInst::Create(llvm::CallInst* call_inst,
           call_inst, array_element_num, fields,
           [call_inst](std::shared_ptr<CallInst> created) {
             std::vector<std::shared_ptr<framework::Value>> arguments;
-            for (auto& arg : call_inst->args())
+            for (auto &arg : call_inst->args())
               arguments.push_back(Value::CreateFromDefinition(arg));
             created->setArguments(arguments);
             if (created->CalledFunction())
@@ -40,7 +41,7 @@ std::shared_ptr<CallInst> CallInst::Create(std::shared_ptr<CallInst> call_inst,
   return created;
 }
 
-CallInst::CallInst(llvm::CallInst* call_inst)
+CallInst::CallInst(llvm::CallInst *call_inst)
     : Instruction(call_inst),
       called_function_(std::shared_ptr<framework::Function>()) {
   if (call_inst->getCalledFunction())
@@ -48,7 +49,7 @@ CallInst::CallInst(llvm::CallInst* call_inst)
         call_inst->getCalledFunction());
 }
 
-CallInst::CallInst(llvm::CallInst* call_inst, std::vector<Fields> fields,
+CallInst::CallInst(llvm::CallInst *call_inst, std::vector<Fields> fields,
                    long array_element_num)
     : Instruction(call_inst, fields, array_element_num),
       called_function_(std::shared_ptr<framework::Function>()) {
@@ -67,4 +68,4 @@ void CallInst::setArguments(
     std::vector<std::shared_ptr<framework::Value>> arguments) {
   arguments_ = arguments;
 }
-}  // namespace framework
+} // namespace framework

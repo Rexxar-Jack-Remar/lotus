@@ -208,7 +208,8 @@ void AbductiveDomain::canonicalize() {
     if (access.kind == AccessKind::ArrayIndex) {
       Access out = access;
       // Canonicalize only the symbolic index value. The `stride_bytes` is a
-      // structural part of the access path identity and should remain unchanged.
+      // structural part of the access path identity and should remain
+      // unchanged.
       out.index = getCanonical(access.index);
       return out;
     }
@@ -339,8 +340,8 @@ AbductiveDomain::merge(const AbductiveDomain &d1, const AbductiveDomain &d2) {
   // Merge path formulas first to check for contradictions
   PulseFormula merged_formula;
   if (d1.path_formula_ && d2.path_formula_) {
-    // Joining states at a program point requires disjunction of path conditions.
-    // Conjoining them (merge) would drop feasible paths.
+    // Joining states at a program point requires disjunction of path
+    // conditions. Conjoining them (merge) would drop feasible paths.
     merged_formula = PulseFormula::join(*d1.path_formula_, *d2.path_formula_);
   } else if (d1.path_formula_) {
     merged_formula = d1.path_formula_->clone();

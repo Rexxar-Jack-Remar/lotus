@@ -24,59 +24,65 @@
 namespace npa {
 
 /// Constant evaluator for Exp1: succeeds only if expression is variable-free.
-template <class D>
-struct Exp1ConstEval {
+template <class D> struct Exp1ConstEval {
   using V = DomVal<D>;
   using E = E1<D>;
   static Optional<V> eval(const E &e) {
-    if (!e) return {};
+    if (!e)
+      return {};
     using K = typename Exp1<D>::K;
     switch (e->k) {
-    case K::Term:
-      {
-        Optional<V> out;
-        out = e->c;
-        return out;
-      }
+    case K::Term: {
+      Optional<V> out;
+      out = e->c;
+      return out;
+    }
     case K::Seq: {
       auto t = eval(e->t);
-      if (!t.has_value()) return {};
+      if (!t.has_value())
+        return {};
       Optional<V> out;
       out = D::extend(e->c, *t);
       return out;
     }
     case K::SeqR: {
       auto t = eval(e->t);
-      if (!t.has_value()) return {};
+      if (!t.has_value())
+        return {};
       Optional<V> out;
       out = D::extend(*t, e->c);
       return out;
     }
     case K::Add: {
       auto a = eval(e->t1), b = eval(e->t2);
-      if (!a.has_value() || !b.has_value()) return {};
+      if (!a.has_value() || !b.has_value())
+        return {};
       Optional<V> out;
       out = D::combine(*a, *b);
       return out;
     }
     case K::Sub: {
-      if (!DomainHasSubtract<D>::value) return {};
+      if (!DomainHasSubtract<D>::value)
+        return {};
       auto a = eval(e->t1), b = eval(e->t2);
-      if (!a.has_value() || !b.has_value()) return {};
+      if (!a.has_value() || !b.has_value())
+        return {};
       Optional<V> out;
       out = D::subtract(*a, *b);
       return out;
     }
     case K::Ndet: {
       auto a = eval(e->t1), b = eval(e->t2);
-      if (!a.has_value() || !b.has_value()) return {};
+      if (!a.has_value() || !b.has_value())
+        return {};
       Optional<V> out;
       out = D::ndetCombine(*a, *b);
       return out;
     }
     case K::Cond: {
       auto t = eval(e->t1), f = eval(e->t2);
-      if (!t.has_value() || !f.has_value()) return {};
+      if (!t.has_value() || !f.has_value())
+        return {};
       Optional<V> out;
       out = D::condCombine(e->phi, *t, *f);
       return out;
@@ -89,14 +95,14 @@ struct Exp1ConstEval {
 
 /// Converts linearized expression over D to a left-linear expression over
 /// TensorProductDomain<D> by rewriting Concat (a·X·b) into X ⊗_p (a,b).
-template <class D>
-struct Exp1ToTensor {
+template <class D> struct Exp1ToTensor {
   using TD = TensorProductExactDomain<D>;
   using E1D = E1<D>;
   using E1T = E1<TD>;
   using VT = typename TD::pair_type;
   static bool is_regularizable(const E1D &e) {
-    if (!e) return true;
+    if (!e)
+      return true;
     using K = typename Exp1<D>::K;
     switch (e->k) {
     case K::InfClos:
@@ -112,13 +118,17 @@ struct Exp1ToTensor {
     default:
       break;
     }
-    if (e->t && !is_regularizable(e->t)) return false;
-    if (e->t1 && !is_regularizable(e->t1)) return false;
-    if (e->t2 && !is_regularizable(e->t2)) return false;
+    if (e->t && !is_regularizable(e->t))
+      return false;
+    if (e->t1 && !is_regularizable(e->t1))
+      return false;
+    if (e->t2 && !is_regularizable(e->t2))
+      return false;
     return true;
   }
   static E1T convert(const E1D &e) {
-    if (!e) return nullptr;
+    if (!e)
+      return nullptr;
     using K = typename Exp1<D>::K;
     switch (e->k) {
     case K::Term:
@@ -131,7 +141,8 @@ struct Exp1ToTensor {
       return Exp1<TD>::seq(TD::singleton(e->c, D::one()), convert(e->t));
     case K::Call:
       // Base: f ⊗ c. Encode as seq so projection yields R(f) ⊗ c.
-      return Exp1<TD>::seq(TD::singleton(e->c, D::one()), Exp1<TD>::hole(e->sym));
+      return Exp1<TD>::seq(TD::singleton(e->c, D::one()),
+                           Exp1<TD>::hole(e->sym));
     case K::Cond:
       return Exp1<TD>::cond(e->phi, convert(e->t1), convert(e->t2));
     case K::Add:
@@ -160,12 +171,14 @@ struct Exp1ToTensor {
 /// Solve LCFL linear system by lifting to tensor space: convert RHS to
 /// TensorProductDomain, solve (left-linear over pairs), project back via R.
 template <class D>
-std::vector<DomVal<D>> solve_linear_tensor_impl(
-    bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
-    std::vector<DomVal<D>> init) {
+std::vector<DomVal<D>>
+solve_linear_tensor_impl(bool verbose,
+                         const std::vector<std::pair<Symbol, E1<D>>> &rhs,
+                         std::vector<DomVal<D>> init) {
   if (!D::idempotent) {
     if (verbose)
-      std::cerr << "[tensor] exact tensor mode requires idempotent domain; falling back to worklist\n";
+      std::cerr << "[tensor] exact tensor mode requires idempotent domain; "
+                   "falling back to worklist\n";
     return solve_linear_worklist_impl<D>(verbose, rhs, init);
   }
   for (const auto &p : rhs) {
@@ -183,12 +196,14 @@ std::vector<DomVal<D>> solve_linear_tensor_impl(
     rhs_tensor.emplace_back(p.first, Exp1ToTensor<D>::convert(p.second));
   std::vector<VT> init_tensor;
   init_tensor.reserve(init.size());
-  for (const auto &v : init) init_tensor.emplace_back(TD::singleton(v, v));
+  for (const auto &v : init)
+    init_tensor.emplace_back(TD::singleton(v, v));
   std::vector<VT> delta_tensor =
       solve_linear_worklist_impl<TD>(verbose, rhs_tensor, init_tensor);
   std::vector<DomVal<D>> delta;
   delta.reserve(delta_tensor.size());
-  for (const auto &p : delta_tensor) delta.push_back(TD::project(p));
+  for (const auto &p : delta_tensor)
+    delta.push_back(TD::project(p));
   return delta;
 }
 
