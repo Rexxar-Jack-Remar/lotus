@@ -198,8 +198,8 @@ bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {
     // a non-const Function&, but we only have const Function* from
     // getParentFunction. This is safe because EquivDB only reads the IR.
     try {
-      Ptr = std::make_unique<EquivDB>(*const_cast<Function *>(QueryF), MSSA,
-                                      DT);
+      Ptr =
+          std::make_unique<EquivDB>(*const_cast<Function *>(QueryF), MSSA, DT);
     } catch (...) {
       // If EquivDB construction fails, return false (no must-alias)
       return false;

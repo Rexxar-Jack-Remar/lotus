@@ -67,12 +67,10 @@
 
 #include "Utils/LLVM/SystemHeaders.h"
 
-
 // Forward declarations (the structs reference each other).
 struct MemoryLayout;
 struct MemorySite;
 struct MemoryReference;
-
 
 /**
  * @enum AllocAAResult
@@ -92,7 +90,6 @@ enum class AllocAAResult {
   /// The two values **must** alias (they refer to the same object).
   Must
 };
-
 
 /**
  * @class MemorySiteInfo
@@ -180,7 +177,6 @@ private:
   std::set<MemorySite *> memorySites;
 };
 
-
 /**
  * @struct MemoryLayout
  * @brief Describes the parent/child relationships between memory sites.
@@ -214,7 +210,6 @@ struct MemoryLayout {
    */
   std::unordered_map<MemorySite *, std::set<MemoryReference *>> children;
 };
-
 
 /**
  * @struct MemorySite
@@ -285,7 +280,6 @@ struct MemorySite {
   std::set<Value *> escapingValues;
 };
 
-
 /**
  * @struct MemoryReference
  * @brief Describes a single reference into a `MemorySite` at a known offset.
@@ -335,6 +329,5 @@ struct MemoryReference {
    */
   int32_t offsetInBits;
 };
-
 
 #endif // ALLOC_AA_MEMORYSITE_H_

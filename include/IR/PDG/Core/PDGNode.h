@@ -8,9 +8,9 @@
 /// edge connections for dependency tracking.
 
 #pragma once
-#include "IR/PDG/Support/LLVMEssentials.h"
 #include "IR/PDG/Core/PDGEdge.h"
 #include "IR/PDG/Core/PDGEnums.h"
+#include "IR/PDG/Support/LLVMEssentials.h"
 
 #include <iterator>
 #include <set>

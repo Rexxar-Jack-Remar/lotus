@@ -30,8 +30,7 @@ bool SSIfy::runOnFunction(Function &F) {
   this->F = &F;
   this->DTw = &getAnalysis<DominatorTreeWrapperPass>();
   this->DTmap = &(this->DTw->getDomTree());
-  this->PDTmap =
-      &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
+  this->PDTmap = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
   this->DFmap =
       &getAnalysis<DominanceFrontierWrapperPass>().getDominanceFrontier();
   this->PDFmap = new PostDominanceFrontier(this->PDTmap);
@@ -52,8 +51,7 @@ bool SSIfy::runOnFunction(Function &F) {
   }
 
   // For every instruction in this function, call the SSIfy function.
-  for (Function::iterator Fit = F.begin(), Fend = F.end(); Fit != Fend;
-       ++Fit) {
+  for (Function::iterator Fit = F.begin(), Fend = F.end(); Fit != Fend; ++Fit) {
     BasicBlock &BB = *Fit;
     for (BasicBlock::iterator BBit = BB.begin(), BBend = BB.end();
          BBit != BBend; ++BBit) {

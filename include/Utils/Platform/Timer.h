@@ -2,6 +2,7 @@
 #define UTILS_TIMER_H
 
 #include <functional>
+
 #include <time.h>
 
 class Timer {

@@ -130,8 +130,8 @@ public:
   /**
    * @brief Query all direct (single-edge) dependences from @p node.
    *
-   * Returns all immediate neighbors connected by a single edge. This is O(degree)
-   * and much faster than transitive queries. Useful for:
+   * Returns all immediate neighbors connected by a single edge. This is
+   * O(degree) and much faster than transitive queries. Useful for:
    * - Inspecting immediate data/control dependencies
    * - Building adjacency lists for custom traversals
    * - Understanding local graph structure
@@ -151,9 +151,8 @@ public:
    *   }
    * @endcode
    */
-  DirectDepMap
-  directDependences(Node &node, bool forward,
-                    const std::set<EdgeType> &edge_types = {});
+  DirectDepMap directDependences(Node &node, bool forward,
+                                 const std::set<EdgeType> &edge_types = {});
 
   /**
    * @brief Enumerate *all* shortest witness paths between two nodes.
@@ -377,7 +376,8 @@ public:
                                 size_t max_depth = 0);
 
   /**
-   * @brief Eccentricity of a node: maximum shortest distance to any reachable node.
+   * @brief Eccentricity of a node: maximum shortest distance to any reachable
+   * node.
    *
    * The eccentricity is the length of the longest shortest path from @p node
    * to any other reachable node. This is a graph-theoretic metric useful for:
@@ -387,7 +387,8 @@ public:
    *
    * @param node Node to query
    * @param edge_types Allowed edge types (empty = all)
-   * @return Eccentricity (0 if no successors, SIZE_MAX if unreachable nodes exist)
+   * @return Eccentricity (0 if no successors, SIZE_MAX if unreachable nodes
+   * exist)
    *
    * @note This requires computing distances to all reachable nodes, so it's
    *       O(V+E) in the worst case.
@@ -403,7 +404,8 @@ private:
    * @tparam GetNeighborFunc  Returns the neighbor from an edge
    */
   template <typename GetEdgesFunc, typename GetNeighborFunc>
-  DistanceMap computeDistances(Node &start, const std::set<EdgeType> &edge_types,
+  DistanceMap computeDistances(Node &start,
+                               const std::set<EdgeType> &edge_types,
                                size_t max_depth, GetEdgesFunc get_edges,
                                GetNeighborFunc get_neighbor);
 };

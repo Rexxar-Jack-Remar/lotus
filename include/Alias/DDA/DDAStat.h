@@ -37,7 +37,8 @@ public:
   uint64_t numOfStepInCycle = 0;
   /// Number of top-level user/client queries issued.
   uint64_t numQueries = 0;
-  /// Number of queries that exceeded step budget and used conservative fallback.
+  /// Number of queries that exceeded step budget and used conservative
+  /// fallback.
   uint64_t numOutOfBudgetQueries = 0;
   double anaTimePerQuery = 0.0;
   double totalTimeOfQueries = 0.0;

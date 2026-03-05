@@ -9,8 +9,8 @@
 //
 // DDAVFSolver<Derived>: Shared value-flow backward solver for demand-driven
 // pointer analysis. FlowDDA and ContextDDA instantiate this template with
-// their CVar, CPtSet, and DPIm types (flow-sensitive only vs context-sensitive).
-// Matches SVF's DDAVFSolver design (FSE'16, TSE'18).
+// their CVar, CPtSet, and DPIm types (flow-sensitive only vs
+// context-sensitive). Matches SVF's DDAVFSolver design (FSE'16, TSE'18).
 //
 //===----------------------------------------------------------------------===//
 
@@ -22,16 +22,16 @@
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/GlobalValue.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/Support/Casting.h>
-
 #include <functional>
 #include <map>
 #include <set>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/Support/Casting.h>
 
 namespace lotus {
 namespace analysis {
@@ -39,25 +39,26 @@ namespace analysis {
 /// Value-flow backward solver template. Derived must define:
 /// - CVar, CPtSet, DPIm (types)
 /// - getSVFG(), getSVFGBuilder(), getDefNodeForValue(), getObjectIdsForValue()
-/// - isDirectEdge(), isIndirectEdge(), handleBKCondition(), getConservativeCPts()
-/// - handleAddr(), processGepPts(), isStrongUpdate(), getPtrNodeID(), addDDAPts()
+/// - isDirectEdge(), isIndirectEdge(), handleBKCondition(),
+/// getConservativeCPts()
+/// - handleAddr(), processGepPts(), isStrongUpdate(), getPtrNodeID(),
+/// addDDAPts()
 /// - unionDDAPts(target, source), unionDDAPts(dpm, pts), getDPImWithOldCond()
 /// - resolveFunPtr(), isTopLevelPtrStmt()
-/// - hasLoadDpm(), getLoadDpm(), getLoadCVar(), isMustAlias(), propagateViaObj()
+/// - hasLoadDpm(), getLoadDpm(), getLoadCVar(), isMustAlias(),
+/// propagateViaObj()
 /// - forEachElementInCPtSet(), getEmptyCPtSetRef()
-/// - setDpmLocVar(), addLoadDpmAndCVar(), connectIndirectCallees(), onIndirectEdgesAdded()
+/// - setDpmLocVar(), addLoadDpmAndCVar(), connectIndirectCallees(),
+/// onIndirectEdgesAdded()
 /// - insertOutOfBudgetDpm(), isOutOfBudgetDpm()
 template <typename CVar, typename CPtSet, typename DPIm, typename Derived>
 class DDAVFSolver {
 public:
-
   DDAVFSolver() : ddaStat_(nullptr), numSteps_(0), outOfBudget_(false) {}
   virtual ~DDAVFSolver() = default;
 
   Derived &derived() { return *static_cast<Derived *>(this); }
-  const Derived &derived() const {
-    return *static_cast<const Derived *>(this);
-  }
+  const Derived &derived() const { return *static_cast<const Derived *>(this); }
 
   void setDDAStat(DDAStat *s) { ddaStat_ = s; }
   DDAStat *getDDAStat() const { return ddaStat_; }
@@ -138,15 +139,14 @@ protected:
     case SVFGK::Gep: {
       CPtSet gepPts;
       backtraceAlongDirectVF(gepPts, dpm);
-      CPtSet filtered = derived().processGepPts(llvm::cast<GepSVFGNode>(node),
-                                                gepPts);
+      CPtSet filtered =
+          derived().processGepPts(llvm::cast<GepSVFGNode>(node), gepPts);
       derived().unionDDAPts(pts, filtered);
       break;
     }
     case SVFGK::Load: {
       const LoadSVFGNode *load = llvm::cast<LoadSVFGNode>(node);
-      if (!load->getValue() ||
-          !load->getValue()->getType()->isPointerTy())
+      if (!load->getValue() || !load->getValue()->getType()->isPointerTy())
         break;
       CPtSet loadPts;
       startNewPTCompFromLoadSrc(loadPts, dpm);
@@ -159,8 +159,8 @@ protected:
     }
     case SVFGK::Store: {
       const StoreSVFGNode *store = llvm::cast<StoreSVFGNode>(node);
-      if (const llvm::StoreInst *si = llvm::dyn_cast_or_null<llvm::StoreInst>(
-              store->getValue())) {
+      if (const llvm::StoreInst *si =
+              llvm::dyn_cast_or_null<llvm::StoreInst>(store->getValue())) {
         if (!si->getValueOperand()->getType()->isPointerTy())
           break;
       } else {
@@ -178,29 +178,30 @@ protected:
       // Bug 1/5 fix (Store handler): getLoadCVar(dpm) is only valid when dpm
       // has an associated load DPM. If there is no load DPM (e.g. the solver
       // was started directly at a Store node, not via a Load), we cannot
-      // determine which load object to match against. In that case, conservatively
-      // propagate along the indirect value-flow edge (same as the "else" branch).
+      // determine which load object to match against. In that case,
+      // conservatively propagate along the indirect value-flow edge (same as
+      // the "else" branch).
       if (!derived().hasLoadDpm(dpm)) {
         backtraceAlongIndirectVF(pts, dpm, CPtSet{});
         break;
       }
-      derived().forEachElementInCPtSet(
-          storePts, [&](const CVar &storeObj, uint32_t /*objId*/) {
-            if (derived().propagateViaObj(storeObj, derived().getLoadCVar(dpm))) {
-              DPIm objDpm = derived().getDPImWithOldCond(dpm, storeObj, store);
-              backtraceToStoreSrc(pts, objDpm);
-              if (derived().isStrongUpdate(storePts, store)) {
-                if (ddaStat_) {
-                  ddaStat_->numOfStrongUpdates++;
-                  ddaStat_->strongUpdateStores.insert(store->getId());
-                }
-              } else {
-                backtraceAlongIndirectVF(pts, objDpm, CPtSet{});
-              }
-            } else {
-              backtraceAlongIndirectVF(pts, dpm, CPtSet{});
+      derived().forEachElementInCPtSet(storePts, [&](const CVar &storeObj,
+                                                     uint32_t /*objId*/) {
+        if (derived().propagateViaObj(storeObj, derived().getLoadCVar(dpm))) {
+          DPIm objDpm = derived().getDPImWithOldCond(dpm, storeObj, store);
+          backtraceToStoreSrc(pts, objDpm);
+          if (derived().isStrongUpdate(storePts, store)) {
+            if (ddaStat_) {
+              ddaStat_->numOfStrongUpdates++;
+              ddaStat_->strongUpdateStores.insert(store->getId());
             }
-          });
+          } else {
+            backtraceAlongIndirectVF(pts, objDpm, CPtSet{});
+          }
+        } else {
+          backtraceAlongIndirectVF(pts, dpm, CPtSet{});
+        }
+      });
       break;
     }
     default:
@@ -240,7 +241,8 @@ protected:
     // Match SVF DDAVFSolver behavior: skip constant objects when traversing
     // indirect value-flow edges.
     if (const llvm::Value *objVal = svfg->getObjectValue(obj)) {
-      // Non-global constants are immutable objects (e.g., constant expressions).
+      // Non-global constants are immutable objects (e.g., constant
+      // expressions).
       if (llvm::isa<llvm::Constant>(objVal) &&
           !llvm::isa<llvm::GlobalValue>(objVal))
         return;
@@ -289,7 +291,7 @@ protected:
     // oldDpm was a fresh DPItem (e.g. starting at EntryChi or FormalIn).
     if (derived().isIndirectEdge(edge) && derived().hasLoadDpm(oldDpm))
       derived().addLoadDpmAndCVar(dpm, derived().getLoadDpm(oldDpm),
-                                   derived().getLoadCVar(oldDpm));
+                                  derived().getLoadCVar(oldDpm));
     if (ddaStat_)
       ddaStat_->numOfDPM++;
     derived().unionDDAPts(pts, findPT(dpm));
@@ -318,8 +320,7 @@ protected:
   }
 
   void startNewPTCompFromStoreDst(CPtSet &storePts, const DPIm &oldDpm) {
-    const StoreSVFGNode *store =
-        llvm::cast<StoreSVFGNode>(oldDpm.getLoc());
+    const StoreSVFGNode *store = llvm::cast<StoreSVFGNode>(oldDpm.getLoc());
     SVFG *svfg = derived().getSVFG();
     if (!svfg)
       return;
@@ -328,7 +329,8 @@ protected:
     if (!storeDst)
       return;
     // Bug 2 fix (store side): same as load — try IntraCopy first.
-    SVFGEdge *edge = svfg->getIntraVFGEdge(storeDst, store, SVFGEdgeK::IntraCopy);
+    SVFGEdge *edge =
+        svfg->getIntraVFGEdge(storeDst, store, SVFGEdgeK::IntraCopy);
     if (!edge)
       edge = svfg->getIntraVFGEdge(storeDst, store, SVFGEdgeK::IntraDirect);
     if (edge)
@@ -336,8 +338,7 @@ protected:
   }
 
   void backtraceToStoreSrc(CPtSet &pts, const DPIm &oldDpm) {
-    const StoreSVFGNode *store =
-        llvm::cast<StoreSVFGNode>(oldDpm.getLoc());
+    const StoreSVFGNode *store = llvm::cast<StoreSVFGNode>(oldDpm.getLoc());
     const llvm::Value *valueOperand =
         llvm::cast<llvm::StoreInst>(store->getValue())->getValueOperand();
     SVFGNode *storeSrc = derived().getDefNodeForValue(valueOperand);
@@ -389,11 +390,11 @@ protected:
       for (const DPIm &dstDpm : it->second) {
         // Bug 3 fix: the old condition
         //   !indirectCall && isIndirectEdge(edge) && !isa<LoadSVFGNode>(dst)
-        // only re-evaluated dstDpm when dstDpm.getCurNodeID() == dpm.getCurNodeID().
-        // For memory SSA nodes (StoreChiSVFGNode, IntraMSSAPhiSVFGNode,
-        // FormalInSVFGNode, etc.) the object IDs typically differ, so the
-        // condition was never true and new points-to facts were never propagated
-        // forward through those nodes.
+        // only re-evaluated dstDpm when dstDpm.getCurNodeID() ==
+        // dpm.getCurNodeID(). For memory SSA nodes (StoreChiSVFGNode,
+        // IntraMSSAPhiSVFGNode, FormalInSVFGNode, etc.) the object IDs
+        // typically differ, so the condition was never true and new points-to
+        // facts were never propagated forward through those nodes.
         //
         // The correct rule (matching SVF DDAVFSolver::reComputeForEdges) is:
         //   - For indirect edges to non-Load memory nodes: re-evaluate only
@@ -426,10 +427,9 @@ protected:
             continue;
           // Re-evaluate if the object IDs match OR if the destination is a
           // memory node that may merge multiple definitions (PHI, FormalIn).
-          const bool isMemMergeNode =
-              llvm::isa<IntraMSSAPhiSVFGNode>(dst) ||
-              llvm::isa<FormalInSVFGNode>(dst) ||
-              llvm::isa<EntryChiSVFGNode>(dst);
+          const bool isMemMergeNode = llvm::isa<IntraMSSAPhiSVFGNode>(dst) ||
+                                      llvm::isa<FormalInSVFGNode>(dst) ||
+                                      llvm::isa<EntryChiSVFGNode>(dst);
           if (dstDpm.getCurNodeID() == dpm.getCurNodeID() || isMemMergeNode) {
             if (ddaStat_)
               ddaStat_->numOfStepInCycle++;

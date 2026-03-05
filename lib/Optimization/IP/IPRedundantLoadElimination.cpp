@@ -104,8 +104,8 @@ public:
             bool IsShadowMem = false;
             if (const CallBase *CB2 = dyn_cast<CallBase>(I)) {
               if (CB2->getCalledFunction() &&
-                  CB2->getCalledFunction()->getName().startswith("shadow.mem")
-              ) {
+                  CB2->getCalledFunction()->getName().startswith(
+                      "shadow.mem")) {
                 IsShadowMem = true;
               }
             }

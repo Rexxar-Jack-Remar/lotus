@@ -21,10 +21,7 @@
 
 namespace pdg {
 
-enum class MotionDirection {
-  Earlier,
-  Later
-};
+enum class MotionDirection { Earlier, Later };
 
 struct MotionLegalityPolicy {
   /// Relevant edge kinds for dependence legality. Empty = defaults.
@@ -64,13 +61,11 @@ class MotionLegalityQuery {
 public:
   explicit MotionLegalityQuery(GenericGraph &pdg) : _pdg(pdg) {}
 
-  MotionLegalityResult
-  canMoveEarlier(Node &moving_node, Node &anchor_node,
-                 const MotionLegalityPolicy &policy = {});
+  MotionLegalityResult canMoveEarlier(Node &moving_node, Node &anchor_node,
+                                      const MotionLegalityPolicy &policy = {});
 
-  MotionLegalityResult
-  canMoveLater(Node &moving_node, Node &anchor_node,
-               const MotionLegalityPolicy &policy = {});
+  MotionLegalityResult canMoveLater(Node &moving_node, Node &anchor_node,
+                                    const MotionLegalityPolicy &policy = {});
 
 private:
   GenericGraph &_pdg;
@@ -85,8 +80,8 @@ private:
   bool isMovableInstruction(Node &node, const MotionLegalityPolicy &policy,
                             std::string &reason) const;
 
-  bool findPath(Node &source, Node &target, const std::set<EdgeType> &edge_types,
-                std::vector<Node *> &path,
+  bool findPath(Node &source, Node &target,
+                const std::set<EdgeType> &edge_types, std::vector<Node *> &path,
                 std::vector<EdgeType> &path_edge_types) const;
 
   std::set<Node *> collectControllers(Node &node) const;

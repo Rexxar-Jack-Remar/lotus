@@ -18,13 +18,13 @@
 
 #include "Alias/DDA/DPItem.h"
 
-#include <llvm/Support/raw_ostream.h>
-
 #include <algorithm>
 #include <cstdint>
 #include <set>
 #include <string>
 #include <vector>
+
+#include <llvm/Support/raw_ostream.h>
 
 namespace lotus {
 namespace analysis {
@@ -62,14 +62,17 @@ public:
   static uint32_t getMaxCxtLen() { return maximumCxtLen; }
   static uint32_t getMaxPathLen() { return maximumPathLen; }
 
-  /// Push call site id; return false if context limit exceeded (then may set non-concrete).
+  /// Push call site id; return false if context limit exceeded (then may set
+  /// non-concrete).
   bool pushContext(uint32_t ctx);
   /// Match and pop (for return edge); return true if back() == ctx and pop.
   bool matchContext(uint32_t ctx);
   /// Pop back of context (e.g. for recursion: pop recursive call sites).
   void popBack();
 
-  bool operator<(const ContextCond &rhs) const { return context_ < rhs.context_; }
+  bool operator<(const ContextCond &rhs) const {
+    return context_ < rhs.context_;
+  }
   bool operator==(const ContextCond &rhs) const {
     return context_ == rhs.context_;
   }
@@ -89,7 +92,8 @@ private:
   bool concreteCxt_;
 };
 
-/// Context-sensitive variable (context + node ID). Used as points-to element in ContextDDA.
+/// Context-sensitive variable (context + node ID). Used as points-to element in
+/// ContextDDA.
 class CxtVar {
 public:
   CxtVar() : cond_(), id_(0) {}
@@ -124,8 +128,7 @@ private:
 using CxtPtSet = std::set<CxtVar>;
 
 /// Context- and flow-sensitive DP item: (cur, loc) + ContextCond.
-template <class LocCond>
-class CxtStmtDPItem : public StmtDPItem<LocCond> {
+template <class LocCond> class CxtStmtDPItem : public StmtDPItem<LocCond> {
 public:
   using StmtDPItem<LocCond>::cur;
   using StmtDPItem<LocCond>::curloc;
@@ -164,8 +167,8 @@ public:
   /// Debug dump (SVF-style): cur, location, and call-string context.
   void dump(llvm::raw_ostream &os) const {
     os << "cur=" << this->cur
-       << " loc=" << static_cast<const void *>(this->curloc)
-       << " " << context_.toString();
+       << " loc=" << static_cast<const void *>(this->curloc) << " "
+       << context_.toString();
   }
 
 private:

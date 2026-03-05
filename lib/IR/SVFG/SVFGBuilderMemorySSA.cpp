@@ -93,7 +93,8 @@ static void ensureICFGInterEdges(const ICFG *icfg, const CallBase *call,
 
   ICFGNode *returnSiteNode = nullptr;
   if (const auto *invokeInst = dyn_cast<InvokeInst>(call)) {
-    returnSiteNode = mutableICFG->getIntraBlockNode(invokeInst->getNormalDest());
+    returnSiteNode =
+        mutableICFG->getIntraBlockNode(invokeInst->getNormalDest());
   } else {
     const BasicBlock *callBB = call->getParent();
     if (succ_begin(callBB) != succ_end(callBB))
@@ -918,8 +919,8 @@ void SVFGBuilder::buildMemorySSA() {
               const uint32_t memRegId = entry.first;
               const SVFGNodeBS &pts = entry.second;
               const uint32_t actualInId = nextNode();
-              auto *actualIn =
-                  new ActualInSVFGNode(actualInId, icfgNode, call, memRegId, pts);
+              auto *actualIn = new ActualInSVFGNode(actualInId, icfgNode, call,
+                                                    memRegId, pts);
               svfg->addNode(actualIn);
               svfg->addActualIn(call, actualIn);
               muVec.push_back(actualInId);
@@ -957,10 +958,12 @@ void SVFGBuilder::buildMemorySSA() {
     if (summaryIt == summaries.end())
       continue;
     const FunctionMemorySummary &summary = summaryIt->second;
-    const ICFGNode *entryICFGNode = findICFGNodeForBlock(icfg, &F.getEntryBlock());
+    const ICFGNode *entryICFGNode =
+        findICFGNodeForBlock(icfg, &F.getEntryBlock());
 
     std::unordered_map<uint32_t, SVFGNodeBS> formalInRegs = summary.readGlobals;
-    std::unordered_map<uint32_t, SVFGNodeBS> formalOutRegs = summary.readGlobals;
+    std::unordered_map<uint32_t, SVFGNodeBS> formalOutRegs =
+        summary.readGlobals;
     mergeRegions(formalInRegs, summary.writeGlobals);
     mergeRegions(formalOutRegs, summary.writeGlobals);
 
@@ -1036,7 +1039,8 @@ void SVFGBuilder::buildMemoryPHINodes() {
 
     std::unordered_map<uint32_t, SVFGNode *> formalInByReg;
     std::set<uint32_t> memRegsWithDefs;
-    std::unordered_map<const BasicBlock *, std::unordered_map<uint32_t, SVFGNode *>>
+    std::unordered_map<const BasicBlock *,
+                       std::unordered_map<uint32_t, SVFGNode *>>
         localDefs;
 
     for (uint32_t formalInId : funcEntryChi[&F]) {
@@ -1159,8 +1163,7 @@ void SVFGBuilder::buildMemoryPHINodes() {
       computeExitDefs(exitDefs);
 
       for (const BasicBlock &bb : F) {
-        const unsigned numPreds =
-            std::distance(pred_begin(&bb), pred_end(&bb));
+        const unsigned numPreds = std::distance(pred_begin(&bb), pred_end(&bb));
         if (numPreds < 2)
           continue;
 
@@ -1483,10 +1486,10 @@ void SVFGBuilder::connectMemorySSAEdges() {
                 reachingDef = defIt->second;
               } else {
                 auto entryIt = funcEntryChiMap[&F].find(memReg);
-                  if (entryIt != funcEntryChiMap[&F].end()) {
-                    reachingDef = entryIt->second;
-                  }
+                if (entryIt != funcEntryChiMap[&F].end()) {
+                  reachingDef = entryIt->second;
                 }
+              }
             }
 
             if (reachingDef) {
@@ -1611,8 +1614,7 @@ void SVFGBuilder::connectMemorySSAEdges() {
                 if (edgePts.empty())
                   edgePts.insert(getOrCreateUnknownObjId());
                 svfg->addEdge(reachingDef, actualInNode,
-                              SVFGEdgeK::IntraIndirect,
-                              nullptr, edgePts);
+                              SVFGEdgeK::IntraIndirect, nullptr, edgePts);
               }
 
               if (actualOutNode)
@@ -1764,7 +1766,8 @@ void SVFGBuilder::connectMemorySSAEdges() {
         std::set<SVFGNode *> exitDefs;
 
         if (!returnBlocks.empty()) {
-          // Collect all distinct defs that reach a return block for this region.
+          // Collect all distinct defs that reach a return block for this
+          // region.
           for (const BasicBlock *retBB : returnBlocks) {
             auto defsIt = lastDefAtBlock.find(retBB);
             if (defsIt != lastDefAtBlock.end()) {

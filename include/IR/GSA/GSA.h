@@ -123,4 +123,3 @@ private:
 llvm::ModulePass *createGateAnalysisPass();
 
 } // namespace gsa
-

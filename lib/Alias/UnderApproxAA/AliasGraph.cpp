@@ -163,8 +163,8 @@ NodeId AliasGraph::mergeNodes(NodeId I, NodeId J) {
     Ni.Vars.insert(V);
   Nj.Vars.clear();
 
-  // 2) Merge outgoing edges: for each field f in J, merge targets if I also has f.
-  // Snapshot first to avoid iterator invalidation under recursive merges.
+  // 2) Merge outgoing edges: for each field f in J, merge targets if I also has
+  // f. Snapshot first to avoid iterator invalidation under recursive merges.
   llvm::SmallVector<std::pair<FieldLabel, NodeId>, 4> JOut;
   JOut.reserve(Nj.OutEdges.size());
   for (const auto &KV : Nj.OutEdges)
@@ -183,7 +183,8 @@ NodeId AliasGraph::mergeNodes(NodeId I, NodeId J) {
         addEdge(I, F, TiNorm);
       if (TiNorm != TjNorm)
         mergeNodes(TiNorm, TjNorm);
-      // After merge, Ti holds the merged node; I.OutEdges[F] already points to Ti
+      // After merge, Ti holds the merged node; I.OutEdges[F] already points to
+      // Ti
     } else {
       Ni.OutEdges[F] = TjNorm;
       addInEdge(TjNorm, I, F);
@@ -301,8 +302,9 @@ AliasGraph AliasGraph::intersect(const AliasGraph &G1, const AliasGraph &G2) {
   llvm::DenseMap<uint64_t, NodeId> PairToNode;
   auto key = [n2](NodeId i, NodeId j) { return uint64_t(i) * n2 + j; };
 
-  // Step 1: Materialize non-empty intersections using variable-to-node indexing.
-  // For each node i in G1 and each var V in i, find j=node(V) in G2 and add V to (i,j).
+  // Step 1: Materialize non-empty intersections using variable-to-node
+  // indexing. For each node i in G1 and each var V in i, find j=node(V) in G2
+  // and add V to (i,j).
   for (NodeId i = 0; i < n1; ++i) {
     if (G1.nodeEmpty(i))
       continue;
@@ -427,8 +429,10 @@ void AliasGraph::gc() {
 //===----------------------------------------------------------------------===//
 
 void AliasGraph::allAliases(
-    VarId Base, const llvm::SmallVectorImpl<FieldLabel> &Path, unsigned maxLength,
-    llvm::SmallVector<std::pair<VarId, llvm::SmallVector<FieldLabel, 4>>, 8> &Out) const {
+    VarId Base, const llvm::SmallVectorImpl<FieldLabel> &Path,
+    unsigned maxLength,
+    llvm::SmallVector<std::pair<VarId, llvm::SmallVector<FieldLabel, 4>>, 8>
+        &Out) const {
   Out.clear();
   NodeId N = getNode(Base);
   if (N == kNoNode)

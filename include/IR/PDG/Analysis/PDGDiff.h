@@ -48,9 +48,9 @@ namespace pdg {
  * @brief Classification of a diff element.
  */
 enum class DiffKind {
-  ADDED,     ///< Present only in the "new" sub-graph.
-  REMOVED,   ///< Present only in the "old" sub-graph.
-  PRESERVED  ///< Present in both sub-graphs.
+  ADDED,    ///< Present only in the "new" sub-graph.
+  REMOVED,  ///< Present only in the "old" sub-graph.
+  PRESERVED ///< Present in both sub-graphs.
 };
 
 /**
@@ -121,8 +121,8 @@ struct PDGDiffDiagnostics {
  * dependence-graph level rather than just textual diff.
  *
  * **Key applications:**
- * 1. **Change-impact analysis**: After modifying code, diff the PDG before/after
- *    to see which dependences changed, not just which lines changed.
+ * 1. **Change-impact analysis**: After modifying code, diff the PDG
+ * before/after to see which dependences changed, not just which lines changed.
  * 2. **Regression test prioritization**: Tests covering nodes/edges in the
  *    diff are more likely to reveal bugs.
  * 3. **Program evolution**: Compare slices across versions to understand how
@@ -213,9 +213,11 @@ public:
    *
    * @param old_nodes   Nodes in the "old" sub-graph
    * @param new_nodes   Nodes in the "new" sub-graph
-   * @param edge_types  Edge types to include in the comparison (empty = all types)
+   * @param edge_types  Edge types to include in the comparison (empty = all
+   * types)
    * @param diagnostics Optional diagnostics output
-   * @return The diff result (edge_diffs will only contain edges of specified types)
+   * @return The diff result (edge_diffs will only contain edges of specified
+   * types)
    *
    * Example:
    * @code

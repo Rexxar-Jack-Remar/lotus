@@ -29,14 +29,14 @@ enum class PropertyKind {
 };
 
 enum class PropertyType {
-  CHECK,  // Safety property
-  COVER   // Coverage property
+  CHECK, // Safety property
+  COVER  // Coverage property
 };
 
 struct PropertyRule {
   PropertyType type = PropertyType::CHECK;
   PropertyKind kind = PropertyKind::Unknown;
-  std::string target;  // For call() targets
+  std::string target;   // For call() targets
   bool negated = false; // For ! operator in LTL
 };
 
@@ -54,7 +54,7 @@ public:
 private:
   std::vector<PropertyRule> _rules;
   PropertyType _type = PropertyType::CHECK;
-  
+
   friend class PropertyParser;
 };
 
@@ -64,7 +64,8 @@ public:
 
   explicit PropertyBasedSlicing(GenericGraph &pdg) : _pdg(pdg) {}
 
-  NodeSet resolveCriteria(const llvm::Module &M, const PropertySpec &spec) const;
+  NodeSet resolveCriteria(const llvm::Module &M,
+                          const PropertySpec &spec) const;
   NodeSet computeBackwardSlice(const llvm::Module &M,
                                const PropertySpec &spec) const;
   NodeSet computeForwardSlice(const llvm::Module &M,

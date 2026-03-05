@@ -146,9 +146,9 @@ private:
 class CypherRelationshipPattern {
 public:
   enum class Direction {
-    OUT,  // (a)-[:T]->(b)
-    IN,   // (a)<-[:T]-(b)
-    BOTH  // (a)-[:T]-(b) or (a)<-[:T]->(b)
+    OUT, // (a)-[:T]->(b)
+    IN,  // (a)<-[:T]-(b)
+    BOTH // (a)-[:T]-(b) or (a)<-[:T]->(b)
   };
 
   CypherRelationshipPattern(const std::string &variable = "",
@@ -606,17 +606,11 @@ public:
 
   CypherResult(ResultType type = ResultType::NODES) : type_(type) {}
 
-  void addNode(Node *node) {
-    nodes_.push_back(node);
-  }
+  void addNode(Node *node) { nodes_.push_back(node); }
 
-  void addEdge(Edge *edge) {
-    relationships_.push_back(edge);
-  }
+  void addEdge(Edge *edge) { relationships_.push_back(edge); }
 
-  void addRelationship(Edge *edge) {
-    relationships_.push_back(edge);
-  }
+  void addRelationship(Edge *edge) { relationships_.push_back(edge); }
 
   void setScalarValue(const std::string &value) {
     type_ = ResultType::SCALAR;
@@ -736,8 +730,7 @@ public:
     return &it->second;
   }
 
-  std::string getNodePropertyString(Node *node,
-                                    const std::string &property) {
+  std::string getNodePropertyString(Node *node, const std::string &property) {
     return getNodeProperty(node, property);
   }
 

@@ -35,8 +35,7 @@ struct IntPairHash {
 /// Computes path expressions for a labeled graph.
 /// For a fixed source node, returns a regex describing all paths to each node.
 /// Complexity: O(n^3 + m) for n nodes, m edges (Tarjan Chapter 2).
-template <typename N, typename L>
-class PathExpressionComputer {
+template <typename N, typename L> class PathExpressionComputer {
 public:
   using RegexRefT = RegexRef<L>;
   using Graph = ILabeledGraph<N, L>;
@@ -57,7 +56,8 @@ public:
     if (it == allPathsFromNode_.end()) {
       eliminate();
       auto allPathsFromSource = solve(source, extractPathSequence());
-      it = allPathsFromNode_.emplace(source, std::move(allPathsFromSource)).first;
+      it = allPathsFromNode_.emplace(source, std::move(allPathsFromSource))
+               .first;
     }
     return it->second.at(static_cast<std::size_t>(intOf(target)));
   }
@@ -87,7 +87,8 @@ private:
   int intOf(const N &node) const {
     auto it = nodeToInt_.find(node);
     if (it == nodeToInt_.end()) {
-      throw std::invalid_argument("Tried to access node which is not in the graph");
+      throw std::invalid_argument(
+          "Tried to access node which is not in the graph");
     }
     return it->second;
   }
@@ -167,24 +168,30 @@ private:
     return pathSequence;
   }
 
-  std::vector<RegexRefT> solve(const N &source,
-                               const std::vector<PathExpression> &pathSequence) const {
+  std::vector<RegexRefT>
+  solve(const N &source,
+        const std::vector<PathExpression> &pathSequence) const {
     const std::size_t n = graph_.getNodes().size();
     std::vector<RegexRefT> allPathsFromSource(n, Regex<L>::emptySet());
-    allPathsFromSource.at(static_cast<std::size_t>(intOf(source))) = Regex<L>::epsilon();
+    allPathsFromSource.at(static_cast<std::size_t>(intOf(source))) =
+        Regex<L>::epsilon();
 
     for (const auto &seqElement : pathSequence) {
       if (seqElement.source == seqElement.target) {
         const int vi = seqElement.source;
-        const auto regexVi = allPathsFromSource.at(static_cast<std::size_t>(vi));
+        const auto regexVi =
+            allPathsFromSource.at(static_cast<std::size_t>(vi));
         allPathsFromSource.at(static_cast<std::size_t>(vi)) =
             Regex<L>::simplifiedConcatenation(regexVi, seqElement.expr);
       } else {
         const int vi = seqElement.source;
         const int wi = seqElement.target;
-        const auto regexVi = allPathsFromSource.at(static_cast<std::size_t>(vi));
-        const auto inter = Regex<L>::simplifiedConcatenation(regexVi, seqElement.expr);
-        const auto regexWi = allPathsFromSource.at(static_cast<std::size_t>(wi));
+        const auto regexVi =
+            allPathsFromSource.at(static_cast<std::size_t>(vi));
+        const auto inter =
+            Regex<L>::simplifiedConcatenation(regexVi, seqElement.expr);
+        const auto regexWi =
+            allPathsFromSource.at(static_cast<std::size_t>(wi));
         allPathsFromSource.at(static_cast<std::size_t>(wi)) =
             Regex<L>::simplifiedUnion(regexWi, inter);
       }

@@ -1,6 +1,8 @@
 #include "Utils/Platform/ProgressBar.h"
+
 #include <cassert>
 #include <cstring>
+
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -9,7 +11,7 @@ ProgressBar::ProgressBar(const std::string &Title, ProgressBarStyle Style,
                          float UpdateFrequency)
     : Title(Title), Style(Style), UpdateFrequency(UpdateFrequency) {
 
-  struct winsize WinSize {};
+  struct winsize WinSize{};
   ioctl(STDIN_FILENO, TIOCGWINSZ, &WinSize);
   if (WinSize.ws_col > 80) {
     WindowWidth = 80;
@@ -89,7 +91,7 @@ void ProgressBar::resize() {
   printf("\r\033[K");
 
   unsigned CurrentWindowWidth;
-  struct winsize WinSize {};
+  struct winsize WinSize{};
   ioctl(STDIN_FILENO, TIOCGWINSZ, &WinSize);
   if (WinSize.ws_col > 80) {
     CurrentWindowWidth = 80;

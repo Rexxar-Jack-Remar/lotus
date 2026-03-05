@@ -12,11 +12,11 @@
  *   #2  - SSI node classification uses side-table sets, not name prefixes
  *   #3  - get_iterated_df / get_iterated_pdf guard against missing map entries
  *   #5  - rename_initial starts from the function entry, not V's defining block
- *   #6  - rename() saves/restores stack depth around dominator-tree child recursion
- *   #7  - set_use() scans the stack read-only instead of destructively popping
- *   #8  - visit() uses three-colour DFS to detect and skip cycles
- *   #9  - clean() verifies that V dominates use sites before replacing with V
- *   #18 - isNotNecessary() also checks existing SSI versions of V
+ *   #6  - rename() saves/restores stack depth around dominator-tree child
+ * recursion #7  - set_use() scans the stack read-only instead of destructively
+ * popping #8  - visit() uses three-colour DFS to detect and skip cycles #9  -
+ * clean() verifies that V dominates use sites before replacing with V #18 -
+ * isNotNecessary() also checks existing SSI versions of V
  */
 
 #include "IR/SSI/SSI.h"
@@ -297,8 +297,7 @@ void SSIfy::rename(BasicBlock *BB, RenamingStack &stack) {
 // set_use / set_def
 // ---------------------------------------------------------------------------
 
-void SSIfy::set_use(RenamingStack &stack, Instruction *inst,
-                    BasicBlock *from) {
+void SSIfy::set_use(RenamingStack &stack, Instruction *inst, BasicBlock *from) {
   Value *V = stack.getValue();
 
   // If the stack is empty, renaming hasn't reached the initial definition of

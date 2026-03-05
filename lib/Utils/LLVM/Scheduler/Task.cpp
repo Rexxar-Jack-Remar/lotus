@@ -19,4 +19,3 @@ std::string GCTask::toString() {
   Oss << "GCTask[" << FuncSet.size() << " functions]";
   return Oss.str();
 }
-

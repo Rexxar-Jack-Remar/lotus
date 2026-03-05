@@ -29,7 +29,7 @@
 
 namespace ThreadLocal {
 class ThreadLocalAnalysis;
-}
+} // namespace ThreadLocal
 
 #include <bitset>
 #include <limits>

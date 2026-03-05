@@ -78,17 +78,22 @@ private:
     return nextNodeId_++;
   }
 
-  void addEdge(const int sourceId, const int targetId, const std::string &label) {
-    edgeList_ += std::to_string(sourceId) + " " + std::to_string(targetId) + " " + label + "\n";
+  void addEdge(const int sourceId, const int targetId,
+               const std::string &label) {
+    edgeList_ += std::to_string(sourceId) + " " + std::to_string(targetId) +
+                 " " + label + "\n";
   }
 
-  void addLeftEdge(const int sourceId, const int targetId) { addEdge(sourceId, targetId, "0"); }
+  void addLeftEdge(const int sourceId, const int targetId) {
+    addEdge(sourceId, targetId, "0");
+  }
 
-  void addRightEdge(const int sourceId, const int targetId) { addEdge(sourceId, targetId, "1"); }
+  void addRightEdge(const int sourceId, const int targetId) {
+    addEdge(sourceId, targetId, "1");
+  }
 };
 
 } // namespace pathexpressions
 } // namespace lotus
 
 #endif // LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_REGEXTOTGF_H
-

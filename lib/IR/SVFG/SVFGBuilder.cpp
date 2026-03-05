@@ -18,10 +18,21 @@
 
 #include "IR/SVFG/SVFGBuilder.h"
 
+#include "Alias/AserPTA/PointerAnalysis/Context/NoCtx.h"
+#include "Alias/AserPTA/PointerAnalysis/Graph/ConstraintGraph/CGObjNode.h"
+#include "Alias/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
+#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
+#include "Alias/AserPTA/PointerAnalysis/Solver/DeepPropagation.h"
 #include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
+
+#include <algorithm>
+#include <limits>
+#include <map>
+#include <queue>
+#include <set>
 
 #include <llvm/ADT/Statistic.h>
 #include <llvm/Analysis/MemoryBuiltins.h>
@@ -31,19 +42,9 @@
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
-#include <algorithm>
-#include <limits>
-#include <map>
-#include <queue>
-#include <set>
 
-#include "Alias/AserPTA/PointerAnalysis/Context/NoCtx.h"
-#include "Alias/AserPTA/PointerAnalysis/Graph/ConstraintGraph/CGObjNode.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/DeepPropagation.h"
-
-// Define DEBUG_TYPE after including AserPTA headers to avoid redefinition warning
+// Define DEBUG_TYPE after including AserPTA headers to avoid redefinition
+// warning
 #ifdef DEBUG_TYPE
 #undef DEBUG_TYPE
 #endif
@@ -51,6 +52,7 @@
 #include "Alias/AserPTA/PointerAnalysis/Solver/PartialUpdateSolver.h"
 #include "Alias/AserPTA/PointerAnalysis/Solver/SolverBase.h"
 #include "Alias/AserPTA/PointerAnalysis/Solver/WavePropagation.h"
+
 #include <llvm/IR/IntrinsicInst.h>
 
 #undef DEBUG_TYPE
@@ -60,8 +62,7 @@ using namespace llvm;
 using namespace aser;
 
 // Type aliases for AserPTA solver configurations
-template <typename ctx>
-using FSModel = DefaultLangModel<ctx, FSMemModel<ctx>>;
+template <typename ctx> using FSModel = DefaultLangModel<ctx, FSMemModel<ctx>>;
 
 using CIWaveSolver = WavePropagation<FSModel<NoCtx>>;
 using CIDeepSolver = DeepPropagation<FSModel<NoCtx>>;
@@ -105,13 +106,13 @@ void SVFGBuilder::SolverWrapper::destroy() {
   if (solver) {
     switch (kind) {
     case SolverKind::Wave:
-      delete static_cast<CIWaveSolver*>(solver);
+      delete static_cast<CIWaveSolver *>(solver);
       break;
     case SolverKind::Deep:
-      delete static_cast<CIDeepSolver*>(solver);
+      delete static_cast<CIDeepSolver *>(solver);
       break;
     case SolverKind::Basic:
-      delete static_cast<CIBasicSolver*>(solver);
+      delete static_cast<CIBasicSolver *>(solver);
       break;
     }
     solver = nullptr;
@@ -124,7 +125,7 @@ SVFGBuilder::~SVFGBuilder() = default;
 static const Module *getModuleFromICFG(const ICFG *icfg) {
   if (!icfg)
     return nullptr;
-  
+
   // Iterate through ICFG nodes to find a function
   for (auto &pair : *icfg) {
     ICFGNode *node = pair.second;
@@ -158,7 +159,8 @@ static bool icfgHasCallEdgeTo(const ICFG *icfg, const CallBase *call,
     const auto *callEdge = llvm::dyn_cast<CallCFGEdge>(edge);
     if (!callEdge)
       continue;
-    if (callEdge->getDstNode() == calleeEntry && callEdge->getCallSite() == call)
+    if (callEdge->getDstNode() == calleeEntry &&
+        callEdge->getCallSite() == call)
       return true;
   }
   return false;
@@ -182,12 +184,9 @@ filterCalleesByICFG(const ICFG *icfg, const CallBase *call,
   return filtered.empty() ? ptaCallees : filtered;
 }
 
-SVFG *SVFGBuilder::build(const ICFG *icfg) {
-  return build(icfg, config);
-}
+SVFG *SVFGBuilder::build(const ICFG *icfg) { return build(icfg, config); }
 
-SVFG *SVFGBuilder::build(const ICFG *icfg,
-                         const SVFGBuilderConfig &cfg) {
+SVFG *SVFGBuilder::build(const ICFG *icfg, const SVFGBuilderConfig &cfg) {
   config = cfg;
   initialize(icfg);
 
@@ -407,7 +406,8 @@ SVFGNodeBS SVFGBuilder::convertPTAObjectsToObjIDs(
     const std::vector<const void *> &ptaObjects, bool keepFunctions) {
   SVFGNodeBS result;
 
-  if (config.memModelType == SVFGBuilderConfig::MemModelType::FieldInsensitive) {
+  if (config.memModelType ==
+      SVFGBuilderConfig::MemModelType::FieldInsensitive) {
     if (!ptaObjects.empty()) {
       if (unknownObjId == 0) {
         unknownObjId = nextObjId++;
@@ -493,7 +493,8 @@ SVFGNodeBS SVFGBuilder::getObjectIdsForValue(const Value *ptr) {
   SVFGNodeBS result;
   if (!ptr)
     return result;
-  if (!config.usePointerAnalysis || !ptaSolverWrapper || !ptaSolverWrapper->solver)
+  if (!config.usePointerAnalysis || !ptaSolverWrapper ||
+      !ptaSolverWrapper->solver)
     return result;
   if (!ptr->getType()->isPointerTy())
     return result;
@@ -508,11 +509,13 @@ uint32_t SVFGBuilder::getGepObjectId(uint32_t baseObjId,
     return 0;
 
   // Early return if PTA is unavailable
-  if (!config.usePointerAnalysis || !ptaSolverWrapper || !ptaSolverWrapper->solver)
+  if (!config.usePointerAnalysis || !ptaSolverWrapper ||
+      !ptaSolverWrapper->solver)
     return baseObjId;
 
-  // Check field-insensitivity markers (heap objects with unknown size, large structs)
-  if (svfg && (svfg->isUnknownObject(baseObjId) || 
+  // Check field-insensitivity markers (heap objects with unknown size, large
+  // structs)
+  if (svfg && (svfg->isUnknownObject(baseObjId) ||
                svfg->isFieldInsensitiveObject(baseObjId)))
     return baseObjId;
 
@@ -520,7 +523,8 @@ uint32_t SVFGBuilder::getGepObjectId(uint32_t baseObjId,
   if (config.memModelType == SVFGBuilderConfig::MemModelType::FieldInsensitive)
     return baseObjId;
 
-  // GEP with non-constant indices falls back to base object (array element tracking)
+  // GEP with non-constant indices falls back to base object (array element
+  // tracking)
   bool hasConstantIndices = true;
   for (auto &idx : gep->indices()) {
     if (!isa<ConstantInt>(idx)) {
@@ -550,19 +554,22 @@ uint32_t SVFGBuilder::getGepObjectId(uint32_t baseObjId,
   case SolverWrapper::SolverKind::Wave: {
     auto *solver = static_cast<CIWaveSolver *>(ptaSolverWrapper->solver);
     if (solver)
-      fieldNode = LMT::indexObjectForClients(solver->getLangModelForClients(), objNode, gep);
+      fieldNode = LMT::indexObjectForClients(solver->getLangModelForClients(),
+                                             objNode, gep);
     break;
   }
   case SolverWrapper::SolverKind::Deep: {
     auto *solver = static_cast<CIDeepSolver *>(ptaSolverWrapper->solver);
     if (solver)
-      fieldNode = LMT::indexObjectForClients(solver->getLangModelForClients(), objNode, gep);
+      fieldNode = LMT::indexObjectForClients(solver->getLangModelForClients(),
+                                             objNode, gep);
     break;
   }
   case SolverWrapper::SolverKind::Basic: {
     auto *solver = static_cast<CIBasicSolver *>(ptaSolverWrapper->solver);
     if (solver)
-      fieldNode = LMT::indexObjectForClients(solver->getLangModelForClients(), objNode, gep);
+      fieldNode = LMT::indexObjectForClients(solver->getLangModelForClients(),
+                                             objNode, gep);
     break;
   }
   }
@@ -619,16 +626,14 @@ uint32_t SVFGBuilder::getOrCreateUnknownObjId() {
   return unknownObjId;
 }
 
-uint32_t SVFGBuilder::getUnknownObjId() {
-  return getOrCreateUnknownObjId();
-}
+uint32_t SVFGBuilder::getUnknownObjId() { return getOrCreateUnknownObjId(); }
 
-std::vector<const void *>
-SVFGBuilder::getPointsToSet(const Value *ptr) {
+std::vector<const void *> SVFGBuilder::getPointsToSet(const Value *ptr) {
   std::vector<const FSObjectTy *> ptsResult;
   std::vector<const void *> result;
 
-  if (!config.usePointerAnalysis || !ptaSolverWrapper || !ptaSolverWrapper->solver) {
+  if (!config.usePointerAnalysis || !ptaSolverWrapper ||
+      !ptaSolverWrapper->solver) {
     // Conservative fallback: return all known memory regions
     // This is a sound but imprecise approximation
     for (auto &p : allocaToMemReg) {
@@ -644,25 +649,28 @@ SVFGBuilder::getPointsToSet(const Value *ptr) {
   // Use AserPTA to get points-to set
   switch (ptaSolverWrapper->kind) {
   case SolverWrapper::SolverKind::Wave: {
-    auto *solver = static_cast<CIWaveSolver*>(ptaSolverWrapper->solver);
-    if (solver) solver->getPointsTo(nullptr, ptr, ptsResult);
+    auto *solver = static_cast<CIWaveSolver *>(ptaSolverWrapper->solver);
+    if (solver)
+      solver->getPointsTo(nullptr, ptr, ptsResult);
     break;
   }
   case SolverWrapper::SolverKind::Deep: {
-    auto *solver = static_cast<CIDeepSolver*>(ptaSolverWrapper->solver);
-    if (solver) solver->getPointsTo(nullptr, ptr, ptsResult);
+    auto *solver = static_cast<CIDeepSolver *>(ptaSolverWrapper->solver);
+    if (solver)
+      solver->getPointsTo(nullptr, ptr, ptsResult);
     break;
   }
   case SolverWrapper::SolverKind::Basic: {
-    auto *solver = static_cast<CIBasicSolver*>(ptaSolverWrapper->solver);
-    if (solver) solver->getPointsTo(nullptr, ptr, ptsResult);
+    auto *solver = static_cast<CIBasicSolver *>(ptaSolverWrapper->solver);
+    if (solver)
+      solver->getPointsTo(nullptr, ptr, ptsResult);
     break;
   }
   }
 
   // Convert to void* vector for opaque interface.
   for (const auto *obj : ptsResult) {
-    result.push_back(static_cast<const void*>(obj));
+    result.push_back(static_cast<const void *>(obj));
   }
 
   // Bug #5 fix: when PTA is enabled but returns an empty set for a pointer
@@ -678,12 +686,13 @@ SVFGBuilder::getPointsToSet(const Value *ptr) {
         (isa<Instruction>(base) && isHeapAllocation(cast<Instruction>(base)));
     if (isKnownAddressTaken) {
       // Return empty — callers check for empty and create unknownObjId nodes.
-      // (The unknownObjId sentinel is created lazily by getOrCreateUnknownObjId.)
-      // Returning empty here is correct: callers already handle the empty case
-      // by calling getOrCreateUnknownObjId(). The old bug was that the
-      // no-PTA fallback returned empty AND callers did nothing with it.
-      // Now that callers handle empty correctly (Bug #5 was in the no-PTA
-      // branch), we just return empty and let callers do the right thing.
+      // (The unknownObjId sentinel is created lazily by
+      // getOrCreateUnknownObjId.) Returning empty here is correct: callers
+      // already handle the empty case by calling getOrCreateUnknownObjId(). The
+      // old bug was that the no-PTA fallback returned empty AND callers did
+      // nothing with it. Now that callers handle empty correctly (Bug #5 was in
+      // the no-PTA branch), we just return empty and let callers do the right
+      // thing.
     }
   }
 
@@ -693,8 +702,9 @@ SVFGBuilder::getPointsToSet(const Value *ptr) {
 std::vector<const Function *>
 SVFGBuilder::getIndirectCallTargets(const CallBase *call) {
   std::vector<const Function *> targets;
-  
-  if (!config.usePointerAnalysis || !ptaSolverWrapper || !ptaSolverWrapper->solver)
+
+  if (!config.usePointerAnalysis || !ptaSolverWrapper ||
+      !ptaSolverWrapper->solver)
     return targets;
 
   const Value *calledVal = call->getCalledOperand();
@@ -706,7 +716,7 @@ SVFGBuilder::getIndirectCallTargets(const CallBase *call) {
   std::vector<const FSObjectTy *> pts;
   pts.reserve(ptsVoid.size());
   for (const void *v : ptsVoid) {
-    pts.push_back(static_cast<const FSObjectTy*>(v));
+    pts.push_back(static_cast<const FSObjectTy *>(v));
   }
 
   // Filter for Function pointers
@@ -714,12 +724,12 @@ SVFGBuilder::getIndirectCallTargets(const CallBase *call) {
   for (const FSObjectTy *obj : pts) {
     if (!obj)
       continue;
-    
+
     // Get the allocation site value (for functions, this is the Function*)
     const Value *val = obj->getValue();
     if (!val)
       continue;
-    
+
     // Check if it's a function
     if (const Function *F = dyn_cast<Function>(val)) {
       // Avoid duplicates
@@ -727,12 +737,14 @@ SVFGBuilder::getIndirectCallTargets(const CallBase *call) {
         targets.push_back(F);
       }
     }
-    
+
     // Also check if the value type is a function pointer
     if (val->getType()->isPointerTy()) {
-      if (const FunctionType *FTy = dyn_cast<FunctionType>(val->getType()->getPointerElementType())) {
+      if (const FunctionType *FTy =
+              dyn_cast<FunctionType>(val->getType()->getPointerElementType())) {
         // This is a function pointer type, but we need the actual function
-        // Try to find it by checking if val itself is a function after stripping casts
+        // Try to find it by checking if val itself is a function after
+        // stripping casts
         if (const Function *F = dyn_cast<Function>(val->stripPointerCasts())) {
           if (std::find(targets.begin(), targets.end(), F) == targets.end()) {
             targets.push_back(F);
@@ -741,7 +753,7 @@ SVFGBuilder::getIndirectCallTargets(const CallBase *call) {
       }
     }
   }
-  
+
   // Enhanced handling: function pointers in structs/arrays
   // If calledVal is a load from a struct field or array element, we need to
   // handle field-sensitive points-to analysis
@@ -753,7 +765,7 @@ SVFGBuilder::getIndirectCallTargets(const CallBase *call) {
       const FSObjectTy *srcObj = static_cast<const FSObjectTy *>(v);
       if (!srcObj)
         continue;
-      
+
       // For field-sensitive analysis, the object might represent a struct field
       // containing a function pointer. Try to get the function from the object.
       const Value *srcVal = srcObj->getValue();
@@ -761,7 +773,8 @@ SVFGBuilder::getIndirectCallTargets(const CallBase *call) {
         // Check if this points to a function pointer stored in a struct
         // This is a conservative approximation - full field-sensitive handling
         // would require tracking struct field offsets
-        if (const Function *F = dyn_cast<Function>(srcVal->stripPointerCasts())) {
+        if (const Function *F =
+                dyn_cast<Function>(srcVal->stripPointerCasts())) {
           if (std::find(targets.begin(), targets.end(), F) == targets.end()) {
             targets.push_back(F);
           }
@@ -773,7 +786,8 @@ SVFGBuilder::getIndirectCallTargets(const CallBase *call) {
   // Fallback: check if called value directly points to a function
   // (handles direct function pointers that weren't captured in PTA)
   if (targets.empty()) {
-    if (const Function *F = dyn_cast<Function>(calledVal->stripPointerCasts())) {
+    if (const Function *F =
+            dyn_cast<Function>(calledVal->stripPointerCasts())) {
       targets.push_back(F);
     }
   }
@@ -822,7 +836,8 @@ bool SVFGBuilder::isAddressTakenPointer(const Value *ptr) const {
   // Without pointer analysis, be conservative for memory SSA: treat pointers
   // appearing in memory operations as address-taken so DDA has a sound
   // (wildcard-guarded) memory value-flow to traverse.
-  if (!config.usePointerAnalysis || !ptaSolverWrapper || !ptaSolverWrapper->solver)
+  if (!config.usePointerAnalysis || !ptaSolverWrapper ||
+      !ptaSolverWrapper->solver)
     return true;
 
   // PTA can identify memory-backed pointers even when base is a cast/gep/load.
@@ -890,14 +905,15 @@ uint32_t SVFGBuilder::createMemRegVerNode(uint32_t memReg, uint32_t version,
 
 uint32_t SVFGBuilder::createMemoryPHI(uint32_t memReg, const BasicBlock *bb) {
   // Create a memory PHI node at a control flow merge point
-  // This is called when multiple definitions of a memory region reach a basic block
-  
+  // This is called when multiple definitions of a memory region reach a basic
+  // block
+
   // Check if PHI already exists for this memory region at this block
   auto phiIt = bbToMemPhi[bb].find(memReg);
   if (phiIt != bbToMemPhi[bb].end()) {
     return phiIt->second;
   }
-  
+
   uint32_t nodeId = nextNode();
   const Function *F = bb->getParent();
   // Use per-function versioning to avoid collisions across functions
@@ -926,10 +942,11 @@ uint32_t SVFGBuilder::createMemoryPHI(uint32_t memReg, const BasicBlock *bb) {
     }
   }
 
-  auto *phiNode = new IntraMSSAPhiSVFGNode(nodeId, icfgNode, memReg, version, pts);
+  auto *phiNode =
+      new IntraMSSAPhiSVFGNode(nodeId, icfgNode, memReg, version, pts);
   svfg->addNode(phiNode);
   bbToMemPhi[bb][memReg] = nodeId;
-  
+
   return nodeId;
 }
 
@@ -966,8 +983,8 @@ bool SVFGBuilder::mayReadMemory(const Function *F) {
   return mayReadMemory(F, visited);
 }
 
-bool SVFGBuilder::mayReadMemory(
-    const Function *F, std::unordered_set<const Function *> &visited) {
+bool SVFGBuilder::mayReadMemory(const Function *F,
+                                std::unordered_set<const Function *> &visited) {
   if (!F)
     return true;
   if (!visited.insert(F).second) {
@@ -1023,26 +1040,26 @@ bool SVFGBuilder::mayReadMemory(
 bool SVFGBuilder::mayModifyMemory(
     const Function *F, std::unordered_set<const Function *> &visited) {
   if (!F)
-    return true;  // Conservative: assume unknown functions modify memory
+    return true; // Conservative: assume unknown functions modify memory
   if (!visited.insert(F).second) {
     // Break recursion cycles conservatively.
     return true;
   }
-  
+
   // External/declaration functions: check LLVM attributes
   if (F->isDeclaration()) {
     // Check LLVM function attributes for memory behavior
     if (F->onlyReadsMemory()) {
-      return false;  // Known to only read memory
+      return false; // Known to only read memory
     }
     if (F->doesNotAccessMemory()) {
-      return false;  // Known to not access memory
+      return false; // Known to not access memory
     }
     // Conservative: assume external functions may modify memory
     // unless explicitly marked otherwise
     return true;
   }
-  
+
   // For defined functions, check if they have any store instructions
   // or calls that might modify memory
   for (const BasicBlock &bb : *F) {
@@ -1051,47 +1068,47 @@ bool SVFGBuilder::mayModifyMemory(
       if (isa<StoreInst>(&inst)) {
         return true;
       }
-      
+
       // Check for atomic operations that modify memory
       if (isa<AtomicRMWInst>(&inst) || isa<AtomicCmpXchgInst>(&inst)) {
         return true;
       }
-      
+
       // Check for calls that might modify memory
       if (const CallBase *call = dyn_cast<CallBase>(&inst)) {
         // Skip LLVM intrinsics that don't modify memory
         if (const IntrinsicInst *intrinsic = dyn_cast<IntrinsicInst>(call)) {
           Intrinsic::ID id = intrinsic->getIntrinsicID();
           switch (id) {
-            case Intrinsic::dbg_value:
-            case Intrinsic::dbg_declare:
-            case Intrinsic::dbg_label:
-            case Intrinsic::lifetime_start:
-            case Intrinsic::lifetime_end:
-            case Intrinsic::invariant_start:
-            case Intrinsic::invariant_end:
-              continue;  // These don't modify memory
-            default:
-              // Other intrinsics might modify memory
-              return true;
+          case Intrinsic::dbg_value:
+          case Intrinsic::dbg_declare:
+          case Intrinsic::dbg_label:
+          case Intrinsic::lifetime_start:
+          case Intrinsic::lifetime_end:
+          case Intrinsic::invariant_start:
+          case Intrinsic::invariant_end:
+            continue; // These don't modify memory
+          default:
+            // Other intrinsics might modify memory
+            return true;
           }
         }
-        
+
         const Function *callee = call->getCalledFunction();
         if (!callee) {
           // Indirect call - conservative: assume it might modify
           return true;
         }
-        
+
         if (callee->isDeclaration()) {
           // External function - check attributes
           if (callee->onlyReadsMemory() || callee->doesNotAccessMemory()) {
-            continue;  // Known to not modify memory
+            continue; // Known to not modify memory
           }
           // Conservative: assume it might modify
           return true;
         }
-        
+
         // Recursive check: if callee modifies memory, so does caller
         if (mayModifyMemory(callee, visited)) {
           return true;
@@ -1099,7 +1116,7 @@ bool SVFGBuilder::mayModifyMemory(
       }
     }
   }
-  
+
   return false;
 }
 
@@ -1113,7 +1130,8 @@ bool SVFGBuilder::callMayReadMemory(const CallBase *call) {
     return false;
 
   if (const Function *callee = call->getCalledFunction()) {
-    if (callee->doesNotAccessMemory() || callee->hasFnAttribute(Attribute::ReadNone))
+    if (callee->doesNotAccessMemory() ||
+        callee->hasFnAttribute(Attribute::ReadNone))
       return false;
     if (callee->hasFnAttribute(Attribute::WriteOnly))
       return false;

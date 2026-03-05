@@ -12,7 +12,6 @@
 
 #include "Alias/AllocAA/MemorySite.h"
 
-
 AllocAAResult MemorySiteInfo::doesAlias(Value *V1, Value *V2) {
 
   // -------------------------------------------------------------------------
@@ -31,8 +30,8 @@ AllocAAResult MemorySiteInfo::doesAlias(Value *V1, Value *V2) {
   if (ref2 == referenceSites.end())
     return AllocAAResult::May;
 
-  auto* site1 = ref1->second;
-  auto* site2 = ref2->second;
+  auto *site1 = ref1->second;
+  auto *site2 = ref2->second;
 
   // -------------------------------------------------------------------------
   // Case 2: Same site → Must alias.
@@ -66,4 +65,3 @@ AllocAAResult MemorySiteInfo::doesAlias(Value *V1, Value *V2) {
   // -------------------------------------------------------------------------
   return AllocAAResult::No;
 }
-

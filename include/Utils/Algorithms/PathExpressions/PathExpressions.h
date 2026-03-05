@@ -1,4 +1,5 @@
-//===-- PathExpressions/PathExpressions.h - Path expressions facility ------===//
+//===-- PathExpressions/PathExpressions.h - Path expressions facility
+//------===//
 //
 // Path expressions over labeled graphs: given a directed graph with edge
 // labels, compute a regular expression describing all paths between two

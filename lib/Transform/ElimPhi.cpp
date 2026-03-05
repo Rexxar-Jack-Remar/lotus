@@ -13,7 +13,7 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
-//#include "llvm/Support/raw_ostream.h"
+// #include "llvm/Support/raw_ostream.h"
 
 #define DEBUG_TYPE "elim-phi"
 
@@ -43,9 +43,8 @@ class EliminatePHIPass : public PassInfoMixin<EliminatePHIPass> {
 
     /* Insert a load right after the last PHI in the PHI block. */
     Builder.SetInsertPoint(PN->getParent()->getFirstNonPHI());
-    LoadInst *Ld =
-        Builder.CreateLoad(PN->getType(), AI,
-                           PN->hasName() ? PN->getName() + ".val" : "phi.val");
+    LoadInst *Ld = Builder.CreateLoad(
+        PN->getType(), AI, PN->hasName() ? PN->getName() + ".val" : "phi.val");
     PN->replaceAllUsesWith(Ld);
 
     SlotForPhi[PN] = AI;
@@ -60,15 +59,14 @@ class EliminatePHIPass : public PassInfoMixin<EliminatePHIPass> {
 
     /* An edge is critical if the predecessor has >1 successor and the successor
        has >1 predecessor. */
-    bool Critical = (TI->getNumSuccessors() > 1) &&
-                    !SuccBB->getSinglePredecessor();
+    bool Critical =
+        (TI->getNumSuccessors() > 1) && !SuccBB->getSinglePredecessor();
 
     if (!Critical)
       return PredBB; // we can insert the store *before* the terminator
 
-    LLVM_DEBUG(dbgs() << "  splitting critical edge "
-                      << PredBB->getName() << " -> " << SuccBB->getName()
-                      << '\n');
+    LLVM_DEBUG(dbgs() << "  splitting critical edge " << PredBB->getName()
+                      << " -> " << SuccBB->getName() << '\n');
 
     Function *F = PredBB->getParent();
     BasicBlock *EdgeBB =
@@ -100,7 +98,9 @@ public:
 
         /* Choose the block in which we will emit the store(s). */
         BasicBlock *StoreBB = ensureEdgeForStore(PredBB, SuccBB, i);
-        IRBuilder<> Builder(StoreBB == PredBB ? (Instruction*)BI : &*StoreBB->getFirstInsertionPt());
+        IRBuilder<> Builder(StoreBB == PredBB
+                                ? (Instruction *)BI
+                                : &*StoreBB->getFirstInsertionPt());
 
         /* Rewrite every PHI in the successor. */
         SmallVector<PHINode *, 8> Phis;

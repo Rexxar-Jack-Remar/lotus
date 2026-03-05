@@ -122,22 +122,23 @@ public:
             if (!FirstUser)
               continue;
 
-            // Fix Bug 14: also check that the stored *value* (SI->getValueOperand())
-            // is not used between SI and FirstUser. If it is, sinking SI past
-            // those uses would not change correctness (the value is already
-            // computed), but we must ensure the value is available at the new
-            // position. Since we only sink within the same block and the value
-            // is defined before SI, this is always safe — skip this check.
-            // However, we must ensure that no instruction between SI and
-            // FirstUser *reads* the pointer that SI writes to, because sinking
-            // SI past such a read would expose a stale value.
+            // Fix Bug 14: also check that the stored *value*
+            // (SI->getValueOperand()) is not used between SI and FirstUser. If
+            // it is, sinking SI past those uses would not change correctness
+            // (the value is already computed), but we must ensure the value is
+            // available at the new position. Since we only sink within the same
+            // block and the value is defined before SI, this is always safe —
+            // skip this check. However, we must ensure that no instruction
+            // between SI and FirstUser *reads* the pointer that SI writes to,
+            // because sinking SI past such a read would expose a stale value.
             //
             // Fix Bug 15: check that no instruction between SI and FirstUser
             // writes to the same memory location as SI (which would make the
             // sink incorrect — the intermediate write would be hidden by SI).
             // We use mayWriteToMemory as a conservative approximation.
             bool Safe = true;
-            const Value *StorePtr = SI->getPointerOperand()->stripPointerCasts();
+            const Value *StorePtr =
+                SI->getPointerOperand()->stripPointerCasts();
             for (auto MoveIt = std::next(NextIt);
                  MoveIt != BB.end() && &*MoveIt != FirstUser; ++MoveIt) {
               Instruction *Between = &*MoveIt;
@@ -157,8 +158,8 @@ public:
                 bool IsShadowMem = false;
                 if (const CallBase *CB2 = dyn_cast<CallBase>(Between)) {
                   if (CB2->getCalledFunction() &&
-                      CB2->getCalledFunction()->getName().startswith("shadow.mem")
-                  ) {
+                      CB2->getCalledFunction()->getName().startswith(
+                          "shadow.mem")) {
                     IsShadowMem = true;
                   }
                 }

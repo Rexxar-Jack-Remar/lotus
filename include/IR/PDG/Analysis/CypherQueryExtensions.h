@@ -16,13 +16,16 @@
  *
  * References:
  * - Cypher Query Language Reference (Neo4j)
- * - Mendelzon & Wood, "Finding Regular Simple Paths in Graph Databases", SIAM 1995
- * - Angles et al., "G-CORE: A Core for Future Graph Query Languages", SIGMOD 2018
+ * - Mendelzon & Wood, "Finding Regular Simple Paths in Graph Databases", SIAM
+ * 1995
+ * - Angles et al., "G-CORE: A Core for Future Graph Query Languages", SIGMOD
+ * 2018
  */
 
 #pragma once
 
 #include "IR/PDG/Analysis/CypherQuery.h"
+
 #include <functional>
 #include <numeric>
 #include <optional>
@@ -38,16 +41,16 @@ namespace pdg {
  * @brief Supported aggregation function types
  */
 enum class AggregationFunction {
-  COUNT,      // Count number of items
-  COUNT_DISTINCT, // Count unique items
-  SUM,        // Sum numeric values
-  AVG,        // Average of numeric values
-  MIN,        // Minimum value
-  MAX,        // Maximum value
-  COLLECT,    // Collect all values into a list
+  COUNT,            // Count number of items
+  COUNT_DISTINCT,   // Count unique items
+  SUM,              // Sum numeric values
+  AVG,              // Average of numeric values
+  MIN,              // Minimum value
+  MAX,              // Maximum value
+  COLLECT,          // Collect all values into a list
   COLLECT_DISTINCT, // Collect unique values
-  STDEV,      // Standard deviation
-  PERCENTILE  // Percentile (requires parameter)
+  STDEV,            // Standard deviation
+  PERCENTILE        // Percentile (requires parameter)
 };
 
 /**
@@ -87,15 +90,15 @@ private:
  * @brief Path constraint types for regular path queries
  */
 enum class PathConstraintType {
-  SIMPLE,           // No repeated nodes (simple path)
-  TRAIL,            // No repeated edges (trail)
-  ACYCLIC,          // No cycles
-  SHORTEST,         // Shortest path only
-  ALL_SHORTEST,     // All shortest paths
-  K_SHORTEST,       // K shortest paths
-  REGEX,            // Edge labels match regex
-  LENGTH_BOUNDED,   // Path length within bounds
-  COST_BOUNDED      // Path cost within bounds
+  SIMPLE,         // No repeated nodes (simple path)
+  TRAIL,          // No repeated edges (trail)
+  ACYCLIC,        // No cycles
+  SHORTEST,       // Shortest path only
+  ALL_SHORTEST,   // All shortest paths
+  K_SHORTEST,     // K shortest paths
+  REGEX,          // Edge labels match regex
+  LENGTH_BOUNDED, // Path length within bounds
+  COST_BOUNDED    // Path cost within bounds
 };
 
 /**
@@ -111,16 +114,19 @@ public:
 
   void addConstraint(PathConstraintType type) { constraints_.push_back(type); }
   void setEdgeLabelRegex(const std::string &regex) { edgeLabelRegex_ = regex; }
-  void setLengthBounds(int min, int max) { minLength_ = min; maxLength_ = max; }
+  void setLengthBounds(int min, int max) {
+    minLength_ = min;
+    maxLength_ = max;
+  }
   void setK(int k) { k_ = k; }
 
   // Path validation
   bool satisfiesConstraints(const std::vector<Node *> &path,
-                           const std::vector<Edge *> &edges) const;
+                            const std::vector<Edge *> &edges) const;
 
   // Path enumeration with constraints
-  std::vector<std::vector<Node *>>
-  findPaths(Node *start, Node *end, ProgramGraph &pdg) const;
+  std::vector<std::vector<Node *>> findPaths(Node *start, Node *end,
+                                             ProgramGraph &pdg) const;
 
 private:
   std::vector<PathConstraintType> constraints_;
@@ -168,16 +174,17 @@ public:
 
   // Check if a candidate mapping is valid
   bool isValidMapping(const std::unordered_map<std::string, Node *> &mapping,
-                     ProgramGraph &pdg) const;
+                      ProgramGraph &pdg) const;
 
 private:
   std::vector<PatternNode> nodes_;
   std::vector<PatternEdge> edges_;
 
   // VF2 algorithm for subgraph isomorphism
-  void vf2Match(ProgramGraph &pdg,
-               std::unordered_map<std::string, Node *> &currentMapping,
-               std::vector<std::unordered_map<std::string, Node *>> &results) const;
+  void
+  vf2Match(ProgramGraph &pdg,
+           std::unordered_map<std::string, Node *> &currentMapping,
+           std::vector<std::unordered_map<std::string, Node *>> &results) const;
 };
 
 // ============================================================================
@@ -188,11 +195,13 @@ private:
  * @brief WITH clause for query pipelining
  *
  * Allows chaining multiple query stages with intermediate projections.
- * Example: MATCH (a)-[r]->(b) WITH a, COUNT(r) AS degree WHERE degree > 5 RETURN a
+ * Example: MATCH (a)-[r]->(b) WITH a, COUNT(r) AS degree WHERE degree > 5
+ * RETURN a
  */
 class CypherWithClause {
 public:
-  void addProjection(const std::string &variable, const std::string &alias = "") {
+  void addProjection(const std::string &variable,
+                     const std::string &alias = "") {
     projections_.push_back({variable, alias.empty() ? variable : alias});
   }
 
@@ -204,20 +213,20 @@ public:
     whereClause_ = std::move(where);
   }
 
-  const std::vector<std::pair<std::string, std::string>>& getProjections() const {
+  const std::vector<std::pair<std::string, std::string>> &
+  getProjections() const {
     return projections_;
   }
 
-  const std::vector<CypherAggregation>& getAggregations() const {
+  const std::vector<CypherAggregation> &getAggregations() const {
     return aggregations_;
   }
 
-  const CypherWhereClause* getWhereClause() const {
-    return whereClause_.get();
-  }
+  const CypherWhereClause *getWhereClause() const { return whereClause_.get(); }
 
 private:
-  std::vector<std::pair<std::string, std::string>> projections_; // (variable, alias)
+  std::vector<std::pair<std::string, std::string>>
+      projections_; // (variable, alias)
   std::vector<CypherAggregation> aggregations_;
   std::unique_ptr<CypherWhereClause> whereClause_;
 };
@@ -241,8 +250,8 @@ public:
     whereClause_ = std::move(where);
   }
 
-  const CypherPatternElement* getPattern() const { return pattern_.get(); }
-  const CypherWhereClause* getWhereClause() const { return whereClause_.get(); }
+  const CypherPatternElement *getPattern() const { return pattern_.get(); }
+  const CypherWhereClause *getWhereClause() const { return whereClause_.get(); }
 
 private:
   std::unique_ptr<CypherPatternElement> pattern_;
@@ -257,10 +266,10 @@ private:
  * @brief Path predicate types for filtering
  */
 enum class PathPredicateType {
-  ALL,    // All elements satisfy condition
-  ANY,    // At least one element satisfies condition
-  NONE,   // No elements satisfy condition
-  SINGLE  // Exactly one element satisfies condition
+  ALL,   // All elements satisfy condition
+  ANY,   // At least one element satisfies condition
+  NONE,  // No elements satisfy condition
+  SINGLE // Exactly one element satisfies condition
 };
 
 /**
@@ -271,8 +280,8 @@ enum class PathPredicateType {
 class PathPredicate {
 public:
   PathPredicate(PathPredicateType type, const std::string &variable,
-               const std::string &collection,
-               std::unique_ptr<CypherWhereClause> condition)
+                const std::string &collection,
+                std::unique_ptr<CypherWhereClause> condition)
       : type_(type), variable_(variable), collection_(collection),
         condition_(std::move(condition)) {}
 
@@ -299,7 +308,7 @@ private:
 class ListComprehension {
 public:
   ListComprehension(const std::string &variable, const std::string &collection,
-                   const std::string &expression)
+                    const std::string &expression)
       : variable_(variable), collection_(collection), expression_(expression) {}
 
   void setFilter(std::unique_ptr<CypherWhereClause> filter) {
@@ -334,7 +343,7 @@ public:
   };
 
   void addWhen(std::unique_ptr<CypherWhereClause> condition,
-              const std::string &result) {
+               const std::string &result) {
     whenClauses_.push_back({std::move(condition), result});
   }
 
@@ -384,11 +393,12 @@ public:
   // Execute query with aggregations
   std::unique_ptr<CypherResult>
   executeWithAggregation(const CypherQuery &query,
-                        const std::vector<CypherAggregation> &aggregations);
+                         const std::vector<CypherAggregation> &aggregations);
 
   // Execute regular path query
   std::vector<std::vector<Node *>>
-  executeRegularPathQuery(const RegularPathQuery &query, Node *start, Node *end);
+  executeRegularPathQuery(const RegularPathQuery &query, Node *start,
+                          Node *end);
 
   // Execute subgraph pattern matching
   std::vector<std::unordered_map<std::string, Node *>>
@@ -396,18 +406,19 @@ public:
 
   // Execute query with WITH clause
   std::unique_ptr<CypherResult>
-  executeWithClause(const CypherQuery &query, const CypherWithClause &withClause);
+  executeWithClause(const CypherQuery &query,
+                    const CypherWithClause &withClause);
 
   // Execute optional match
   std::unique_ptr<CypherResult>
   executeOptionalMatch(const CypherQuery &query,
-                      const CypherOptionalMatch &optionalMatch);
+                       const CypherOptionalMatch &optionalMatch);
 
 private:
   // Helper for aggregation computation
-  std::unordered_map<std::string, std::string>
-  computeAggregations(const std::vector<CypherAggregation> &aggregations,
-                     const std::vector<std::unordered_map<std::string, Node *>> &bindings);
+  std::unordered_map<std::string, std::string> computeAggregations(
+      const std::vector<CypherAggregation> &aggregations,
+      const std::vector<std::unordered_map<std::string, Node *>> &bindings);
 };
 
 // ============================================================================
@@ -428,21 +439,22 @@ private:
  */
 class CypherQueryBuilder {
 public:
-  CypherQueryBuilder& match(const std::string &pattern);
-  CypherQueryBuilder& optionalMatch(const std::string &pattern);
-  CypherQueryBuilder& where(const std::string &condition);
-  CypherQueryBuilder& with(const std::string &projection);
-  CypherQueryBuilder& unwind(const std::string &list, const std::string &alias);
-  CypherQueryBuilder& returnVar(const std::string &variable);
-  CypherQueryBuilder& returnAggregation(AggregationFunction func,
-                                       const std::string &expr,
-                                       const std::string &alias = "");
-  CypherQueryBuilder& orderBy(const std::string &variable, bool ascending = true);
-  CypherQueryBuilder& limit(int limit);
+  CypherQueryBuilder &match(const std::string &pattern);
+  CypherQueryBuilder &optionalMatch(const std::string &pattern);
+  CypherQueryBuilder &where(const std::string &condition);
+  CypherQueryBuilder &with(const std::string &projection);
+  CypherQueryBuilder &unwind(const std::string &list, const std::string &alias);
+  CypherQueryBuilder &returnVar(const std::string &variable);
+  CypherQueryBuilder &returnAggregation(AggregationFunction func,
+                                        const std::string &expr,
+                                        const std::string &alias = "");
+  CypherQueryBuilder &orderBy(const std::string &variable,
+                              bool ascending = true);
+  CypherQueryBuilder &limit(int limit);
 
-  CypherQueryBuilder& relationship(const std::string &var,
-                                  const std::string &type,
-                                  int minHops = 1, int maxHops = 1);
+  CypherQueryBuilder &relationship(const std::string &var,
+                                   const std::string &type, int minHops = 1,
+                                   int maxHops = 1);
 
   std::unique_ptr<CypherQuery> build();
 
@@ -470,21 +482,18 @@ public:
   // Find all paths from source to sink with specific edge types
   static std::unique_ptr<CypherQuery>
   findDataFlowPaths(const std::string &sourcePattern,
-                   const std::string &sinkPattern,
-                   const std::vector<EdgeType> &edgeTypes,
-                   int maxDepth = 10);
+                    const std::string &sinkPattern,
+                    const std::vector<EdgeType> &edgeTypes, int maxDepth = 10);
 
   // Find all nodes with high fan-in/fan-out
-  static std::unique_ptr<CypherQuery>
-  findHighDegreeNodes(int minDegree, bool incoming = true);
+  static std::unique_ptr<CypherQuery> findHighDegreeNodes(int minDegree,
+                                                          bool incoming = true);
 
   // Find strongly connected components
-  static std::unique_ptr<CypherQuery>
-  findStronglyConnectedComponents();
+  static std::unique_ptr<CypherQuery> findStronglyConnectedComponents();
 
   // Find all cycles in the PDG
-  static std::unique_ptr<CypherQuery>
-  findCycles(int maxLength = 10);
+  static std::unique_ptr<CypherQuery> findCycles(int maxLength = 10);
 
   // Find all definitions reaching a use
   static std::unique_ptr<CypherQuery>
@@ -497,7 +506,7 @@ public:
   // Find common ancestors/descendants
   static std::unique_ptr<CypherQuery>
   findCommonAncestors(const std::string &node1Pattern,
-                     const std::string &node2Pattern);
+                      const std::string &node2Pattern);
 };
 
 } // namespace pdg

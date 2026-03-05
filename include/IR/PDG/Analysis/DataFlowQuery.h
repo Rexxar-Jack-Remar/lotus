@@ -71,7 +71,8 @@ struct ReachingDef {
  * - **Data-flow analysis**: "What definitions can reach this use?"
  * - **Taint analysis**: "Where did this tainted value originate?"
  * - **Debugging**: "What assignments contributed to this value?"
- * - **Optimization**: Finding dead stores (definitions that don't reach any use)
+ * - **Optimization**: Finding dead stores (definitions that don't reach any
+ * use)
  *
  * **Relationship to PDG:**
  * The PDG already encodes def-use relationships via DATA_DEF_USE, DATA_RAW,
@@ -260,8 +261,8 @@ public:
    * @param max_depth Per-chain depth limit (0 = unlimited)
    * @return Map from definition node to its def-use chain
    */
-  std::unordered_map<Node *, Chain>
-  allDefUseChains(const NodeSet &nodes, size_t max_depth = 0);
+  std::unordered_map<Node *, Chain> allDefUseChains(const NodeSet &nodes,
+                                                    size_t max_depth = 0);
 
 private:
   GenericGraph &_pdg;
@@ -285,7 +286,8 @@ private:
  *
  * **Use cases:**
  * - **Dead code elimination**: Identify nodes with no outgoing data edges
- * - **Register allocation**: Understand which values need to be kept in registers
+ * - **Register allocation**: Understand which values need to be kept in
+ * registers
  * - **Program understanding**: See which computations produce unused results
  *
  * **Limitations:**
@@ -475,7 +477,8 @@ struct ControllingCondition {
  *   where B does not execute
  *
  * **Use cases:**
- * - **Program understanding**: "What conditions must be true for this code to execute?"
+ * - **Program understanding**: "What conditions must be true for this code to
+ * execute?"
  * - **Test generation**: Identify predicates that control a target statement
  * - **Debugging**: Understand the control-flow context of a bug
  * - **Refactoring**: Identify control-dependence regions for restructuring

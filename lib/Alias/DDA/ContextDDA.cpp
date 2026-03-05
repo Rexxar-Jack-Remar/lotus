@@ -8,22 +8,23 @@
 //===----------------------------------------------------------------------===//
 
 #include "Alias/DDA/ContextDDA.h"
+
 #include "Alias/DDA/DPItem.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGStats.h"
 
-#include <llvm/Analysis/CaptureTracking.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/Casting.h>
 #include <algorithm>
-
 #include <functional>
 #include <stack>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/Analysis/CaptureTracking.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Support/Casting.h>
 
 using namespace lotus::analysis;
 using namespace llvm;
@@ -33,7 +34,8 @@ namespace {
 static bool isIndirectEdgeImpl(SVFGEdge *e);
 
 static bool isDirectEdgeImpl(SVFGEdge *e) {
-  if (!e) return false;
+  if (!e)
+    return false;
   if (isIndirectEdgeImpl(e))
     return false;
   SVFGEdgeK k = e->getEdgeKind();
@@ -44,7 +46,8 @@ static bool isDirectEdgeImpl(SVFGEdge *e) {
 }
 
 static bool isIndirectEdgeImpl(SVFGEdge *e) {
-  if (!e) return false;
+  if (!e)
+    return false;
   SVFGEdgeK k = e->getEdgeKind();
   if (isIndirectVFGEdge(k)) {
     return true;
@@ -59,7 +62,8 @@ static bool isIndirectEdgeImpl(SVFGEdge *e) {
 }
 
 static bool isCallEdge(SVFGEdge *e) {
-  if (!e) return false;
+  if (!e)
+    return false;
   SVFGEdgeK k = e->getEdgeKind();
   return k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
          k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
@@ -67,7 +71,8 @@ static bool isCallEdge(SVFGEdge *e) {
 }
 
 static bool isRetEdge(SVFGEdge *e) {
-  if (!e) return false;
+  if (!e)
+    return false;
   SVFGEdgeK k = e->getEdgeKind();
   return k == SVFGEdgeK::RetDir || k == SVFGEdgeK::RetInd ||
          k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
@@ -109,7 +114,8 @@ bool ContextDDA::run(llvm::Module &M) {
   if (!flowDDA_ || !flowDDA_->run(M))
     return false;
   buildRecursionInfo();
-  // Ensure ContextDDA is fully initialized even when used directly (outside DDAPass).
+  // Ensure ContextDDA is fully initialized even when used directly (outside
+  // DDAPass).
   initInsensitiveEdges();
   return true;
 }
@@ -143,7 +149,8 @@ bool ContextDDA::isEdgeInRecursion(uint32_t csId) const {
 }
 
 void ContextDDA::popRecursiveCallSites(CxtLocDPItem &dpm) {
-  // SVF: mark context as non-concrete since we lose precision crossing recursion.
+  // SVF: mark context as non-concrete since we lose precision crossing
+  // recursion.
   dpm.getCond().setNonConcreteCxt();
   while (!dpm.getCond().getContexts().empty() &&
          isEdgeInRecursion(dpm.getCond().getContexts().back()))
@@ -153,17 +160,20 @@ void ContextDDA::popRecursiveCallSites(CxtLocDPItem &dpm) {
 bool ContextDDA::handleBKCondition(CxtLocDPItem &dpm, SVFGEdge *edge) {
   if (client_)
     client_->handleStatement(edge->getSrcNode(), dpm.getCurNodeID());
-  // Context-insensitive edge: skip context check (recursion or value-flow cycle).
+  // Context-insensitive edge: skip context check (recursion or value-flow
+  // cycle).
   if (insensitveEdges_.count(edge))
     return true;
   SVFG *svfg = getSVFG();
-  if (!svfg) return true;
+  if (!svfg)
+    return true;
 
   if (isCallEdge(edge)) {
     uint32_t csId = getCSIDAtCall(dpm, edge);
     if (csId != 0) {
       if (isEdgeInRecursion(csId)) {
-        // SVF: in recursion, just pop recursive call sites and skip matchContext.
+        // SVF: in recursion, just pop recursive call sites and skip
+        // matchContext.
         popRecursiveCallSites(dpm);
       } else {
         // Not in recursion: match call string. If mismatch, prune this path.
@@ -175,11 +185,12 @@ bool ContextDDA::handleBKCondition(CxtLocDPItem &dpm, SVFGEdge *edge) {
     uint32_t csId = getCSIDAtRet(dpm, edge);
     if (csId != 0) {
       if (isEdgeInRecursion(csId)) {
-        // SVF: in recursion, just pop recursive call sites and skip pushContext.
+        // SVF: in recursion, just pop recursive call sites and skip
+        // pushContext.
         popRecursiveCallSites(dpm);
       } else {
-        // SVF: if this call site ID is already in the call string, it may indicate
-        // an undetected recursion. Mark as out-of-budget.
+        // SVF: if this call site ID is already in the call string, it may
+        // indicate an undetected recursion. Mark as out-of-budget.
         if (dpm.getCond().containCallStr(csId)) {
           outOfBudget_ = true;
           return false;
@@ -199,9 +210,10 @@ void ContextDDA::handleOutOfBudgetDpm(const CxtLocDPItem &dpm) {
 
   const CxtPtSet conservativePts = getConservativeCPts(dpm);
   if (!conservativePts.empty())
-    DDAVFSolver<CxtVar, CxtPtSet, CxtLocDPItem, ContextDDA>::updateCachedPointsTo(
-        dpm, conservativePts);
-  DDAVFSolver<CxtVar, CxtPtSet, CxtLocDPItem, ContextDDA>::addOutOfBudgetDpm(dpm);
+    DDAVFSolver<CxtVar, CxtPtSet, CxtLocDPItem,
+                ContextDDA>::updateCachedPointsTo(dpm, conservativePts);
+  DDAVFSolver<CxtVar, CxtPtSet, CxtLocDPItem, ContextDDA>::addOutOfBudgetDpm(
+      dpm);
 }
 
 void ContextDDA::buildRecursionInfo() {
@@ -398,8 +410,7 @@ CxtPtSet ContextDDA::getConservativeCPts(const CxtLocDPItem &dpm) const {
     }
   }
   if (cxtPts.empty() && flowDDA_->getSVFGBuilder()) {
-    uint32_t unknown =
-        flowDDA_->getSVFGBuilder()->getUnknownObjId();
+    uint32_t unknown = flowDDA_->getSVFGBuilder()->getUnknownObjId();
     if (unknown != 0)
       cxtPts.insert(CxtVar(cond, unknown));
   }
@@ -407,7 +418,7 @@ CxtPtSet ContextDDA::getConservativeCPts(const CxtLocDPItem &dpm) const {
 }
 
 void ContextDDA::setDpmLocVar(CxtLocDPItem &dpm, SVFGNode *src,
-                               uint32_t ptrNodeId) {
+                              uint32_t ptrNodeId) {
   dpm.setLocVar(src, ptrNodeId);
 }
 
@@ -449,8 +460,8 @@ bool ContextDDA::isTopLevelPtrStmt(const SVFGNode *stmt) const {
 }
 
 void ContextDDA::connectIndirectCallees(const CxtLocDPItem &dpm,
-                                       const CxtPtSet &funPts,
-                                       std::vector<SVFGEdge *> &newEdges) {
+                                        const CxtPtSet &funPts,
+                                        std::vector<SVFGEdge *> &newEdges) {
   SVFG *svfg = getSVFG();
   if (!flowDDA_ || !flowDDA_->getSVFGBuilder() || !svfg)
     return;
@@ -463,8 +474,7 @@ void ContextDDA::connectIndirectCallees(const CxtLocDPItem &dpm,
       if (objId == 0)
         continue;
       const llvm::Value *v = svfg->getObjectValue(objId);
-      const llvm::Function *callee =
-          llvm::dyn_cast_or_null<llvm::Function>(v);
+      const llvm::Function *callee = llvm::dyn_cast_or_null<llvm::Function>(v);
       if (!callee || callee->isDeclaration())
         continue;
       (void)flowDDA_->getSVFGBuilder()->connectCallSiteToCalleeOnTheFly(
@@ -526,7 +536,9 @@ CxtLocDPItem ContextDDA::getLoadDpm(const CxtLocDPItem &dpm) const {
   assert(false && "ContextDDA::getLoadDpm: loadDpm not found; "
                   "caller should have checked hasLoadDpm() first");
   llvm::errs() << "[DDA bug] ContextDDA::getLoadDpm: loadDpm not found for dpm "
-                  "(cur=" << dpm.getCurNodeID() << "). "
+                  "(cur="
+               << dpm.getCurNodeID()
+               << "). "
                   "Returning self — points-to result may be unsound.\n";
   return dpm;
 }
@@ -538,23 +550,27 @@ CxtVar ContextDDA::getLoadCVar(const CxtLocDPItem &dpm) const {
   // Same contract as getLoadDpm: callers must check hasLoadDpm() first.
   assert(false && "ContextDDA::getLoadCVar: loadCVar not found; "
                   "caller should have checked hasLoadDpm() first");
-  llvm::errs() << "[DDA bug] ContextDDA::getLoadCVar: loadCVar not found for dpm "
-                  "(cur=" << dpm.getCurNodeID() << "). "
-                  "Returning condVar — points-to result may be unsound.\n";
+  llvm::errs()
+      << "[DDA bug] ContextDDA::getLoadCVar: loadCVar not found for dpm "
+         "(cur="
+      << dpm.getCurNodeID()
+      << "). "
+         "Returning condVar — points-to result may be unsound.\n";
   return dpm.getCondVar();
 }
 
 bool ContextDDA::isMustAlias(const CxtLocDPItem &loadDpm,
-                            const CxtLocDPItem &storeDpm) const {
+                             const CxtLocDPItem &storeDpm) const {
   (void)loadDpm;
   (void)storeDpm;
   return false;
 }
 
 bool ContextDDA::isCondCompatible(const ContextCond &cxt1,
-                                   const ContextCond &cxt2,
-                                   bool singleton) const {
-  // SVF: context conditions of local/global vars are compatible; singleton => true.
+                                  const ContextCond &cxt2,
+                                  bool singleton) const {
+  // SVF: context conditions of local/global vars are compatible; singleton =>
+  // true.
   if (singleton)
     return true;
   int i = static_cast<int>(cxt1.cxtSize()) - 1;
@@ -660,7 +676,8 @@ void ContextDDA::initInsensitiveEdges() {
 
 SVFGNode *ContextDDA::getDefNodeForValue(const llvm::Value *v) const {
   SVFG *svfg = getSVFG();
-  if (!svfg || !v) return nullptr;
+  if (!svfg || !v)
+    return nullptr;
   if (SVFGNode *n = svfg->getValueNode(v))
     return n;
   if (const Instruction *inst = llvm::dyn_cast<Instruction>(v))
@@ -709,8 +726,7 @@ void ContextDDA::resolveFunPtr(const CxtLocDPItem &dpm) {
           continue;
         SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
         if (funPtrNode) {
-          CxtVar funptrVar(dpm.getCondVar().get_cond(),
-                           funPtrNode->getId());
+          CxtVar funptrVar(dpm.getCondVar().get_cond(), funPtrNode->getId());
           CxtLocDPItem funPtrDpm(funptrVar, funPtrNode);
           findPT(funPtrDpm);
         }
@@ -724,11 +740,12 @@ CxtLocDPItem ContextDDA::getDPImWithOldCond(const CxtLocDPItem &oldDpm,
                                             const SVFGNode *loc) const {
   CxtLocDPItem dpm(oldDpm);
   dpm.setLocVar(loc, var.get_id());
-  // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load nodes.
-  // Bug 5 fix: guard with hasLoadDpm(oldDpm) before calling getLoadDpm(oldDpm).
-  // The old code called getLoadDpm unconditionally for Store nodes, triggering
-  // assert(false) + unsound fallback when oldDpm had no associated load DPM
-  // (e.g. when the solver reaches a Store via a path from EntryChi/FormalIn).
+  // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load
+  // nodes. Bug 5 fix: guard with hasLoadDpm(oldDpm) before calling
+  // getLoadDpm(oldDpm). The old code called getLoadDpm unconditionally for
+  // Store nodes, triggering assert(false) + unsound fallback when oldDpm had no
+  // associated load DPM (e.g. when the solver reaches a Store via a path from
+  // EntryChi/FormalIn).
   ContextDDA *nonConstThis = const_cast<ContextDDA *>(this);
   if (llvm::isa<StoreSVFGNode>(loc) || llvm::isa<StoreChiSVFGNode>(loc)) {
     if (hasLoadDpm(oldDpm))
@@ -766,13 +783,13 @@ void ContextDDA::handleAddr(CxtPtSet &pts, const CxtLocDPItem &dpm,
 }
 
 CxtPtSet ContextDDA::processGepPts(const GepSVFGNode *gep,
-                                    const CxtPtSet &srcPts) {
+                                   const CxtPtSet &srcPts) {
   if (!gep || !gep->getValue() || !isa<GetElementPtrInst>(gep->getValue()))
     return srcPts;
-  
+
   const auto *gi = cast<GetElementPtrInst>(gep->getValue());
   CxtPtSet tmpDstPts;
-  
+
   // Match SVF ContextDDA::processGepPts logic
   const bool isVariantFieldGep = !gi->hasAllConstantIndices();
   SVFGBuilder *builder = flowDDA_ ? flowDDA_->getSVFGBuilder() : nullptr;
@@ -791,7 +808,7 @@ CxtPtSet ContextDDA::processGepPts(const GepSVFGNode *gep,
       newObjId = ptd.get_id();
     tmpDstPts.insert(CxtVar(ptd.get_cond(), newObjId));
   }
-  
+
   return tmpDstPts;
 }
 
@@ -800,7 +817,7 @@ bool ContextDDA::isStrongUpdate(const CxtPtSet &dstPts,
   if (dstPts.size() != 1)
     return false;
   (void)store;
-  
+
   const CxtVar &var = *dstPts.begin();
   uint32_t objId = var.get_id();
   SVFG *svfg = getSVFG();
@@ -890,7 +907,8 @@ CxtPtSet ContextDDA::computeDDAPts(const llvm::Value *ptr) {
 }
 
 void ContextDDA::answerQueries() {
-  if (!client_ || !flowDDA_ || !getSVFG()) return;
+  if (!client_ || !flowDDA_ || !getSVFG())
+    return;
   client_->setSVFG(getSVFG());
   if (flowDDA_->getModule())
     client_->setModule(flowDDA_->getModule());

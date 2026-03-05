@@ -1,10 +1,10 @@
 #include "IR/SVFG/SVFGOPT.h"
 
+#include "llvm/Support/Casting.h"
+
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGSerializer.h"
-
-#include "llvm/Support/Casting.h"
 
 #include <algorithm>
 #include <deque>
@@ -146,11 +146,13 @@ void SVFGOPT::replaceFParamWithPHI(PhiSVFGNode *phi, SVFGNode *svfgNode) {
   }
 
   for (SVFGEdge *inEdge : svfgNode->getInEdges()) {
-    auto *ap = dyn_cast<ActualParmSVFGNode>(inEdge ? inEdge->getSrcNode() : nullptr);
+    auto *ap =
+        dyn_cast<ActualParmSVFGNode>(inEdge ? inEdge->getSrcNode() : nullptr);
     if (!ap)
       continue;
 
-    if (ap->getCallSite() && ap->getParamIndex() < ap->getCallSite()->arg_size()) {
+    if (ap->getCallSite() &&
+        ap->getParamIndex() < ap->getCallSite()->arg_size()) {
       addPHIOperand(phi, ap->getParamIndex(),
                     ap->getCallSite()->getArgOperand(ap->getParamIndex()));
     }
@@ -185,7 +187,8 @@ void SVFGOPT::replaceARetWithPHI(PhiSVFGNode *phi, SVFGNode *svfgNode) {
   }
 
   for (SVFGEdge *inEdge : svfgNode->getInEdges()) {
-    auto *fr = dyn_cast<FormalRetSVFGNode>(inEdge ? inEdge->getSrcNode() : nullptr);
+    auto *fr =
+        dyn_cast<FormalRetSVFGNode>(inEdge ? inEdge->getSrcNode() : nullptr);
     if (!fr)
       continue;
 
@@ -209,14 +212,15 @@ void SVFGOPT::retargetEdgesOfAInFOut(SVFGNode *node) {
   if (!node || node->getInEdges().empty())
     return;
 
-  // BUG FIX: the old "size() != 1 → return" was too strict for FormalOutSVFGNode,
-  // which can legitimately have one incoming edge per return statement (multiple
-  // returns in a function body).  We now handle the general case by performing
-  // the cross-product retargeting for all (inEdge, outEdge) pairs, which is
-  // the same algorithm used by retargetEdgesOfAOutFIn.
+  // BUG FIX: the old "size() != 1 → return" was too strict for
+  // FormalOutSVFGNode, which can legitimately have one incoming edge per return
+  // statement (multiple returns in a function body).  We now handle the general
+  // case by performing the cross-product retargeting for all (inEdge, outEdge)
+  // pairs, which is the same algorithm used by retargetEdgesOfAOutFIn.
   //
-  // For the single-incoming-edge shortcut (the common case for ActualInSVFGNode),
-  // we still take the fast path to record the def-node mapping.
+  // For the single-incoming-edge shortcut (the common case for
+  // ActualInSVFGNode), we still take the fast path to record the def-node
+  // mapping.
 
   if (node->getInEdges().size() == 1) {
     // Fast path: single in-edge (typical for ActualIn nodes).
@@ -238,10 +242,9 @@ void SVFGOPT::retargetEdgesOfAInFOut(SVFGNode *node) {
       SVFGNodeBS pts = inPts;
       if (!pts.empty() && !outEdge->getPointsTo().empty()) {
         SVFGNodeBS inter;
-        std::set_intersection(pts.begin(), pts.end(),
-                              outEdge->getPointsTo().begin(),
-                              outEdge->getPointsTo().end(),
-                              std::inserter(inter, inter.begin()));
+        std::set_intersection(
+            pts.begin(), pts.end(), outEdge->getPointsTo().begin(),
+            outEdge->getPointsTo().end(), std::inserter(inter, inter.begin()));
         pts = std::move(inter);
       } else if (inPts.empty() && outEdge->getPointsTo().empty()) {
         // Both guards are empty: unconstrained flow, leave pts empty.
@@ -275,8 +278,8 @@ void SVFGOPT::retargetEdgesOfAInFOut(SVFGNode *node) {
         if (!outEdge || !outEdge->getDstNode())
           continue;
         SVFGNodeBS pts = intersectPts(inEdge, outEdge);
-        if (!inEdge->getPointsTo().empty() && !outEdge->getPointsTo().empty()
-            && pts.empty())
+        if (!inEdge->getPointsTo().empty() && !outEdge->getPointsTo().empty() &&
+            pts.empty())
           continue; // Points-to guards do not overlap.
         addEdge(inEdge->getSrcNode(), outEdge->getDstNode(),
                 outEdge->getEdgeKind(), outEdge->getCallSite(), pts);
@@ -530,8 +533,8 @@ void SVFGOPT::removeOutgoingEdges(const SVFGNode *node) {
   }
 }
 
-bool SVFGOPT::addNewEdge(uint32_t srcId, uint32_t dstId, const SVFGEdge *predEdge,
-                         const SVFGEdge *succEdge) {
+bool SVFGOPT::addNewEdge(uint32_t srcId, uint32_t dstId,
+                         const SVFGEdge *predEdge, const SVFGEdge *succEdge) {
   if (!predEdge || !succEdge)
     return false;
   SVFGNode *src = getNode(srcId);
@@ -569,12 +572,10 @@ bool SVFGOPT::bothInterEdges(const SVFGEdge *edge1,
                              const SVFGEdge *edge2) const {
   if (!edge1 || !edge2)
     return false;
-  const bool e1Inter =
-      edge1->getEdgeKind() == SVFGEdgeK::CallInd ||
-      edge1->getEdgeKind() == SVFGEdgeK::RetInd;
-  const bool e2Inter =
-      edge2->getEdgeKind() == SVFGEdgeK::CallInd ||
-      edge2->getEdgeKind() == SVFGEdgeK::RetInd;
+  const bool e1Inter = edge1->getEdgeKind() == SVFGEdgeK::CallInd ||
+                       edge1->getEdgeKind() == SVFGEdgeK::RetInd;
+  const bool e2Inter = edge2->getEdgeKind() == SVFGEdgeK::CallInd ||
+                       edge2->getEdgeKind() == SVFGEdgeK::RetInd;
   return e1Inter && e2Inter;
 }
 
@@ -588,19 +589,21 @@ void SVFGOPT::addPHIOperand(PhiSVFGNode *phi, uint32_t pos,
 InterPhiSVFGNode *
 SVFGOPT::addInterPHIForFormalParm(const FormalParmSVFGNode *formalParm) {
   uint32_t id = getNextNodeId();
-  auto *phi = new InterPhiSVFGNode(id,
-                                   formalParm ? formalParm->getICFGNode() : nullptr,
-                                   formalParm ? formalParm->getFunction()
-                                             : static_cast<const llvm::Function *>(nullptr));
+  auto *phi = new InterPhiSVFGNode(
+      id, formalParm ? formalParm->getICFGNode() : nullptr,
+      formalParm ? formalParm->getFunction()
+                 : static_cast<const llvm::Function *>(nullptr));
   addNode(phi);
   return phi;
 }
 
-InterPhiSVFGNode *SVFGOPT::addInterPHIForActualRet(const ActualRetSVFGNode *actualRet) {
+InterPhiSVFGNode *
+SVFGOPT::addInterPHIForActualRet(const ActualRetSVFGNode *actualRet) {
   uint32_t id = getNextNodeId();
-  auto *phi = new InterPhiSVFGNode(id, actualRet ? actualRet->getICFGNode() : nullptr,
-                                   actualRet ? actualRet->getCallSite()
-                                             : static_cast<const llvm::CallBase *>(nullptr));
+  auto *phi = new InterPhiSVFGNode(
+      id, actualRet ? actualRet->getICFGNode() : nullptr,
+      actualRet ? actualRet->getCallSite()
+                : static_cast<const llvm::CallBase *>(nullptr));
   addNode(phi);
   return phi;
 }

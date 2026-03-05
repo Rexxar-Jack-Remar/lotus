@@ -52,8 +52,8 @@ public:
   /**
    * @brief Compute parallel scheduling wavefronts (Kahn levels).
    *
-   * Returns topological levels for the induced dependence subgraph on @p region.
-   * If cycles exist, cyclic SCC groups are emitted as final levels.
+   * Returns topological levels for the induced dependence subgraph on @p
+   * region. If cycles exist, cyclic SCC groups are emitted as final levels.
    */
   std::vector<NodeSet> topologicalLevels(const NodeSet &region,
                                          const SchedulingPolicy &policy = {});
@@ -61,8 +61,9 @@ public:
   /**
    * @brief Return SCCs of the induced dependence subgraph.
    */
-  std::vector<NodeSet> stronglyConnectedComponents(
-      const NodeSet &region, const SchedulingPolicy &policy = {});
+  std::vector<NodeSet>
+  stronglyConnectedComponents(const NodeSet &region,
+                              const SchedulingPolicy &policy = {});
 
   /**
    * @brief Estimate critical-path length in edge count.
@@ -78,12 +79,13 @@ private:
 
   static std::set<EdgeType> defaultSchedulingEdgeTypes();
 
-  bool findPath(Node &source, Node &target, const std::set<EdgeType> &edge_types,
-                std::vector<Node *> &path,
+  bool findPath(Node &source, Node &target,
+                const std::set<EdgeType> &edge_types, std::vector<Node *> &path,
                 std::vector<EdgeType> &path_edge_types) const;
 
   std::unordered_map<Node *, std::vector<Node *>>
-  buildAdjacency(const NodeSet &region, const std::set<EdgeType> &edge_types) const;
+  buildAdjacency(const NodeSet &region,
+                 const std::set<EdgeType> &edge_types) const;
 };
 
 } // namespace pdg

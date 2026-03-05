@@ -49,7 +49,8 @@ constexpr NodeId kNoNode = static_cast<NodeId>(-1);
  * Alias graph: nodes = alias classes (sets of variables), edges = field links.
  * Invariants:
  * - Two variables are in the same node iff they must-alias.
- * - Path from node N following edges f1,f2,... represents access path base.f1.f2...
+ * - Path from node N following edges f1,f2,... represents access path
+ * base.f1.f2...
  * - Two paths reaching the same node => those access paths must-alias.
  */
 class AliasGraph {
@@ -67,7 +68,8 @@ public:
   // --- Node and variable management -----------------------------------------
 
   /// Add a new node containing exactly the given variable; returns its NodeId.
-  /// If the variable is already in some node, that node is returned (no duplicate).
+  /// If the variable is already in some node, that node is returned (no
+  /// duplicate).
   NodeId addVariable(VarId V);
 
   /// Get the node that contains variable V, or kNoNode if not present.
@@ -88,9 +90,9 @@ public:
   /// existing F-edge target so Z aliases base.F. Used for Load(Z = base.F).
   void loadEdge(VarId Base, FieldLabel F, VarId Z);
 
-  /// Rename variable OldId to NewId (paper §3: "rename variables in alias classes").
-  /// OldId is removed from its node; NewId is placed in that node. If NewId
-  /// already exists in another node, the two nodes are merged first.
+  /// Rename variable OldId to NewId (paper §3: "rename variables in alias
+  /// classes"). OldId is removed from its node; NewId is placed in that node.
+  /// If NewId already exists in another node, the two nodes are merged first.
   void renameVariable(VarId OldId, VarId NewId);
 
   /// Number of nodes (including empty ones until gc).
@@ -105,19 +107,21 @@ public:
   /// Check if node N is empty (no variables).
   bool nodeEmpty(NodeId N) const;
 
-  /// Forward edge: from node N, following field F, which node? Returns kNoNode if none.
+  /// Forward edge: from node N, following field F, which node? Returns kNoNode
+  /// if none.
   NodeId getTarget(NodeId N, FieldLabel F) const;
 
   /// Predecessors of node N: pairs (source node, field label).
-  void getPredecessors(NodeId N,
-                       llvm::SmallVector<std::pair<NodeId, FieldLabel>, 4> &Out) const;
+  void getPredecessors(
+      NodeId N, llvm::SmallVector<std::pair<NodeId, FieldLabel>, 4> &Out) const;
 
   // --- High-level algorithms from the paper ---------------------------------
 
   /// Intersect two alias graphs (for control-flow merge).
   /// Alias holds in result iff it holds in both g1 and g2.
-  /// Result nodes are (i,j) with vars = vars(i) ∩ vars(j); edges when both graphs
-  /// have matching edges. Empty nodes with no in-edges are eagerly removed (paper §4.1).
+  /// Result nodes are (i,j) with vars = vars(i) ∩ vars(j); edges when both
+  /// graphs have matching edges. Empty nodes with no in-edges are eagerly
+  /// removed (paper §4.1).
   static AliasGraph intersect(const AliasGraph &G1, const AliasGraph &G2);
 
   /// Garbage-collect nodes that do not encode useful alias pairs (paper §4.1).
@@ -126,14 +130,19 @@ public:
   void gc();
 
   /// Find all access paths (up to maxLength fields) that must-alias the given
-  /// access path (base variable + sequence of fields). Appends (VarId, path) to Out.
-  void allAliases(VarId Base, const llvm::SmallVectorImpl<FieldLabel> &Path,
-                  unsigned maxLength,
-                  llvm::SmallVector<std::pair<VarId, llvm::SmallVector<FieldLabel, 4>>, 8> &Out) const;
+  /// access path (base variable + sequence of fields). Appends (VarId, path) to
+  /// Out.
+  void allAliases(
+      VarId Base, const llvm::SmallVectorImpl<FieldLabel> &Path,
+      unsigned maxLength,
+      llvm::SmallVector<std::pair<VarId, llvm::SmallVector<FieldLabel, 4>>, 8>
+          &Out) const;
 
-  /// Check whether two access paths must-alias: base1 + path1 and base2 + path2.
-  bool mustAliasAccessPath(VarId Base1, const llvm::SmallVectorImpl<FieldLabel> &Path1,
-                          VarId Base2, const llvm::SmallVectorImpl<FieldLabel> &Path2) const;
+  /// Check whether two access paths must-alias: base1 + path1 and base2 +
+  /// path2.
+  bool mustAliasAccessPath(
+      VarId Base1, const llvm::SmallVectorImpl<FieldLabel> &Path1, VarId Base2,
+      const llvm::SmallVectorImpl<FieldLabel> &Path2) const;
 
 private:
   struct Node {

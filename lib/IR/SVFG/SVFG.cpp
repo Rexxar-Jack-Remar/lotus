@@ -21,9 +21,9 @@
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGSerializer.h"
 
-#include <llvm/Support/Casting.h>
-
 #include <queue>
+
+#include <llvm/Support/Casting.h>
 
 using namespace lotus::analysis;
 using namespace llvm;
@@ -165,8 +165,7 @@ void SVFG::addNode(SVFGNode *node) {
 
 SVFGEdge *SVFG::addEdge(SVFGNode *src, SVFGNode *dst, SVFGEdgeK kind,
                         const llvm::CallBase *callSite,
-                        const SVFGNodeBS &pointsTo,
-                        std::string callSiteDebug) {
+                        const SVFGNodeBS &pointsTo, std::string callSiteDebug) {
   if (!src || !dst)
     return nullptr;
 
@@ -234,7 +233,8 @@ void SVFG::setObjectValue(uint32_t objId, const llvm::Value *v) {
   if (objId == 0 || !v)
     return;
   objIdToValue[objId] = v;
-  // Preserve the first mapping to avoid clobbering base objects with field objects.
+  // Preserve the first mapping to avoid clobbering base objects with field
+  // objects.
   if (valueToObjId.find(v) == valueToObjId.end())
     valueToObjId[v] = objId;
 }
@@ -422,11 +422,21 @@ static void adjustNodeStat(SVFGStat &stat, SVFGNode *node, int delta) {
     return;
   stat.numNodes += delta;
   switch (node->getNodeKind()) {
-  case SVFGK::Addr:   stat.numAddrNodes  += delta; break;
-  case SVFGK::Copy:   stat.numCopyNodes  += delta; break;
-  case SVFGK::Load:   stat.numLoadNodes  += delta; break;
-  case SVFGK::Store:  stat.numStoreNodes += delta; break;
-  case SVFGK::Gep:    stat.numGepNodes   += delta; break;
+  case SVFGK::Addr:
+    stat.numAddrNodes += delta;
+    break;
+  case SVFGK::Copy:
+    stat.numCopyNodes += delta;
+    break;
+  case SVFGK::Load:
+    stat.numLoadNodes += delta;
+    break;
+  case SVFGK::Store:
+    stat.numStoreNodes += delta;
+    break;
+  case SVFGK::Gep:
+    stat.numGepNodes += delta;
+    break;
   case SVFGK::Phi:
   case SVFGK::IntraPhi:
   case SVFGK::InterPhi:
@@ -639,8 +649,8 @@ void SVFG::getInterVFEdgesForIndirectCallSite(
       const SVFGEdgeK kind = edge->getEdgeKind();
       if (!isInterKind(kind))
         continue;
-      const SVFGNode *anchor = isCallKind(kind) ? edge->getDstNode()
-                                                : edge->getSrcNode();
+      const SVFGNode *anchor =
+          isCallKind(kind) ? edge->getDstNode() : edge->getSrcNode();
       if (!anchor || anchor->getFunction() != callee)
         continue;
       if (seen.insert(edge).second)
@@ -718,10 +728,6 @@ void SVFG::markForUpdate(SVFGNode *node) {
   }
 }
 
-SVFGNodeSet SVFG::getNodesForUpdate() const {
-  return nodesForUpdate;
-}
+SVFGNodeSet SVFG::getNodesForUpdate() const { return nodesForUpdate; }
 
-void SVFG::clearUpdateMarkers() {
-  nodesForUpdate.clear();
-}
+void SVFG::clearUpdateMarkers() { nodesForUpdate.clear(); }

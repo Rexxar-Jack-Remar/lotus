@@ -154,8 +154,7 @@ class IPDeadStoreElimination : public ModulePass {
       // Fix Bug 6: include length in equality so shorter paths can re-explore
       // the same (shadowMemInst, storeInstOrGvInit) pair.
       return (shadowMemInst == o.shadowMemInst &&
-              storeInstOrGvInit == o.storeInstOrGvInit &&
-              length == o.length);
+              storeInstOrGvInit == o.storeInstOrGvInit && length == o.length);
     }
 
     void write(raw_ostream &o) const {
@@ -188,9 +187,7 @@ class IPDeadStoreElimination : public ModulePass {
   enum class StoreState { Removable, Keep };
   DenseMap<Value *, StoreState> m_valueMap;
 
-  inline bool isRegistered(Value *V) const {
-    return m_valueMap.count(V) > 0;
-  }
+  inline bool isRegistered(Value *V) const { return m_valueMap.count(V) > 0; }
 
   inline bool isMarkedKeep(Value *V) const {
     auto It = m_valueMap.find(V);
@@ -457,8 +454,8 @@ public:
               DSE_LOG(errs() << "\tin: enqueue users\n");
               for (auto &InU : CB->uses()) {
                 if (Instruction *InUI = dyn_cast<Instruction>(InU.getUser())) {
-                  enqueue(queue, QueueElem(InUI, w.storeInstOrGvInit,
-                                           w.length + 1));
+                  enqueue(queue,
+                          QueueElem(InUI, w.storeInstOrGvInit, w.length + 1));
                 }
               }
             } else if (isMemSSAFunOut(CB, OnlySingleton)) {

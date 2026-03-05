@@ -81,9 +81,12 @@
  *
  * ```cpp
  * AllocAA aa(M,
- *   [&](Function &F) -> ScalarEvolution & { return getAnalysis<ScalarEvolutionWrapperPass>(F).getSE(); },
- *   [&](Function &F) -> LoopInfo &        { return getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo(); },
- *   [&]()            -> CallGraph &       { return getAnalysis<CallGraphWrapperPass>().getCallGraph(); });
+ *   [&](Function &F) -> ScalarEvolution & { return
+ * getAnalysis<ScalarEvolutionWrapperPass>(F).getSE(); },
+ *   [&](Function &F) -> LoopInfo &        { return
+ * getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo(); },
+ *   [&]()            -> CallGraph &       { return
+ * getAnalysis<CallGraphWrapperPass>().getCallGraph(); });
  *
  * // Query whether two pointers can alias:
  * if (!aa.canPointToTheSameObject(p1, p2)) { ... }
@@ -97,9 +100,8 @@
 #ifndef ALLOC_AA_ALLOCAA_H_
 #define ALLOC_AA_ALLOCAA_H_
 
-#include "Utils/LLVM/SystemHeaders.h"
 #include "Alias/Spec/AliasSpecManager.h"
-
+#include "Utils/LLVM/SystemHeaders.h"
 
 /**
  * @class AllocAA
@@ -608,6 +610,5 @@ private:
    */
   bool canPointToTheSameObject_Globals(Value *p1, Value *p2);
 };
-
 
 #endif // ALLOC_AA_ALLOCAA_H_

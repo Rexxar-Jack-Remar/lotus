@@ -1,13 +1,14 @@
 #include "Utils/LLVM/Scheduler/PipelineScheduler.h"
+
 #include "Utils/LLVM/ThreadPool.h"
+
+#include <chrono>
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Function.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <chrono>
 
 #define DEBUG_TYPE "PipelineScheduler"
 
@@ -23,10 +24,9 @@ static inline bool shouldAnalyzeFunction(const Function *Func) {
   return Func && !Func->isIntrinsic() && !Func->isDeclaration();
 }
 
-PipelineScheduler::PipelineScheduler(Module &M, CallGraph &CG,
-                                     AnalysisType AT)
-    : M(M), CG(CG), AType(AT), Prog("[Pipeline Scheduler]",
-                                     ProgressBar::PBS_CharacterStyle),
+PipelineScheduler::PipelineScheduler(Module &M, CallGraph &CG, AnalysisType AT)
+    : M(M), CG(CG), AType(AT),
+      Prog("[Pipeline Scheduler]", ProgressBar::PBS_CharacterStyle),
       ClientContext(nullptr), TaskTimeout(::TaskTimeout.getValue()),
       EnableGC(true), GCBatchSize(100) {
 
@@ -106,7 +106,8 @@ void PipelineScheduler::run() {
   for (const auto *F : Functions) {
     if (AType == AT_Local) {
       // Local analysis: schedule all functions immediately
-      auto FTask = std::make_shared<FunctionTask>(F, TaskCallback, ClientContext);
+      auto FTask =
+          std::make_shared<FunctionTask>(F, TaskCallback, ClientContext);
       this->executeTask(FTask);
     } else if (AType == AT_BottomUp) {
       // Bottom-up: schedule leaf functions (no callees)
@@ -217,7 +218,7 @@ int PipelineScheduler::postProcessFunctionTask(
 
           if (FunctionToRelease.size() >= GCBatchSize) {
             auto GTask = std::make_shared<GCTask>(FunctionToRelease, GCCallback,
-                                                   ClientContext);
+                                                  ClientContext);
             this->executeTask(GTask);
             FunctionToRelease.clear();
             NumGCTasksAdded++;
@@ -276,8 +277,8 @@ int PipelineScheduler::computeBottomUpDeps(size_t NumEdges) {
 
       int CalleeIndex = FunctionIndexMap[Callee];
 
-      LLVM_DEBUG(dbgs() << "[PipelineScheduler] Edge: " << CalleeIndex
-                        << " -> " << CallerIndex << "\n");
+      LLVM_DEBUG(dbgs() << "[PipelineScheduler] Edge: " << CalleeIndex << " -> "
+                        << CallerIndex << "\n");
 
       // Add edge: Callee -> Caller
       Callees[EdgeIndex] = CalleeIndex;
@@ -346,4 +347,3 @@ void PipelineScheduler::dumpStatus() {
   llvm::outs() << "  Functions to release: " << FunctionToRelease.size()
                << "\n";
 }
-

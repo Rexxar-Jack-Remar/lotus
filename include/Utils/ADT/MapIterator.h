@@ -1,8 +1,8 @@
 /*
-* @author: rainoftime
-* @brief: MapIterator is a iterator for map data structure.
-* 一个用于映射数据结构的迭代器实现。它提供了高效的遍历和访问映射中的键和值。
-*/
+ * @author: rainoftime
+ * @brief: MapIterator is a iterator for map data structure.
+ * 一个用于映射数据结构的迭代器实现。它提供了高效的遍历和访问映射中的键和值。
+ */
 
 #pragma once
 
@@ -10,7 +10,9 @@
 #include <type_traits>
 #include <utility>
 
-template <bool Condition, class T> struct add_const_if { typedef T type; };
+template <bool Condition, class T> struct add_const_if {
+  typedef T type;
+};
 
 template <class T> struct add_const_if<true, T> {
   typedef typename std::add_const<T>::type type;
@@ -103,4 +105,3 @@ template <class MapTy>
 auto values(MapTy &&Map) -> ValueRange<decltype(Map.begin())> {
   return ValueRange<decltype(Map.begin())>(Map.begin(), Map.end());
 }
-

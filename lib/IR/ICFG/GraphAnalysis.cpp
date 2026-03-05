@@ -29,7 +29,8 @@ using namespace std;
 /// Collects the loop exit blocks — i.e. the successors of in-loop blocks that
 /// lie outside the loop. These are the blocks where control flow continues
 /// after the loop, and are the correct targets to push onto the BFS worklist
-/// in isReachableFrom() so that reachability analysis can proceed past the loop.
+/// in isReachableFrom() so that reachability analysis can proceed past the
+/// loop.
 static void getLoopExitBlocks(const Loop *L,
                               SmallVectorImpl<BasicBlock *> &ExitBlocks) {
   SmallPtrSet<const BasicBlock *, 32> LoopBlocks;
@@ -394,7 +395,8 @@ calculateDistanceMapInterICFG(ICFG *icfg, ICFGNode *sourceBB) {
       if (adjCurDist > newDist) {
         // Remove the old entry from the priority set if it was finite.
         if (adjCurDist != INF)
-          distanceBlockSet.erase(distanceBlockSet.find(DisBBPair(adjCurDist, adjBB)));
+          distanceBlockSet.erase(
+              distanceBlockSet.find(DisBBPair(adjCurDist, adjBB)));
         distanceMap[adjBB] = newDist;
         distanceBlockSet.insert(DisBBPair(newDist, adjBB));
       }

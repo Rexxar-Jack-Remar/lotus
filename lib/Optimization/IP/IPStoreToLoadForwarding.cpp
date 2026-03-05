@@ -285,7 +285,7 @@ public:
           //
           // State: It -> LI (the load we just matched).
           // Advance It past LI before erasing.
-          ++It; // It now points to the instruction after LI.
+          ++It;                  // It now points to the instruction after LI.
           LI->eraseFromParent(); // LI is now invalid; It is still valid.
 
           if (CB->use_empty()) {

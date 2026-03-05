@@ -86,8 +86,7 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
             // call-site block itself.
             const BasicBlock *callBB = call->getParent();
             if (succ_begin(callBB) != succ_end(callBB))
-              returnSiteNode =
-                  getOrAddIntraBlockICFGNode(*succ_begin(callBB));
+              returnSiteNode = getOrAddIntraBlockICFGNode(*succ_begin(callBB));
             else
               returnSiteNode = getOrAddIntraBlockICFGNode(callBB);
           }

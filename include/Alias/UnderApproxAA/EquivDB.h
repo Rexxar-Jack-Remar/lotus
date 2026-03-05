@@ -163,7 +163,8 @@ private:
   llvm::DenseSet<uint64_t> SeenPairKeys;
 
   /// GEP candidates bucketed by index-signature hash
-  llvm::DenseMap<uint64_t, llvm::SmallVector<const llvm::GetElementPtrInst *, 4>>
+  llvm::DenseMap<uint64_t,
+                 llvm::SmallVector<const llvm::GetElementPtrInst *, 4>>
       GEPIndexBuckets;
 
   /// Instructions for which a semantic rule has already fired
@@ -242,7 +243,6 @@ private:
   ReturnSummary summarizeReturnBehavior(const llvm::Function *Callee) const;
   int resolveReturnedArgNo(const llvm::Value *V, const llvm::Function *Callee,
                            unsigned Depth = 0) const;
-
 };
 
 /// Forward declaration for ruleClosedGEP (friend, defined in EquivDB.cpp)

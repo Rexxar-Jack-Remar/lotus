@@ -8,18 +8,19 @@
 //===----------------------------------------------------------------------===//
 
 #include "Alias/DDA/DDAClient.h"
+
 #include "Alias/DDA/FlowDDA.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBase.h"
 #include "IR/SVFG/SVFGNode.h"
 
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/raw_ostream.h>
-
 #include <set>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace lotus::analysis;
 using namespace llvm;
@@ -185,7 +186,8 @@ std::vector<const llvm::Value *> &AliasDDAClient::collectCandidateQueries() {
     } else if (node->getNodeKind() == SVFGK::Gep) {
       const GepSVFGNode *gep = llvm::cast<GepSVFGNode>(node);
       if (llvm::isa_and_nonnull<GetElementPtrInst>(gep->getValue()))
-        ptr = llvm::cast<GetElementPtrInst>(gep->getValue())->getPointerOperand();
+        ptr =
+            llvm::cast<GetElementPtrInst>(gep->getValue())->getPointerOperand();
     }
     if (ptr && ptr->getType()->isPointerTy() && seen.insert(ptr).second)
       addCandidate(ptr);

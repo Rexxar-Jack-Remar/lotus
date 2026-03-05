@@ -1,12 +1,13 @@
 #ifndef LLVMUTILS_SCHEDULER_TASK_H
 #define LLVMUTILS_SCHEDULER_TASK_H
 
-#include <llvm/IR/Function.h>
-#include <llvm/Support/Casting.h>
 #include <functional>
 #include <memory>
 #include <set>
 #include <string>
+
+#include <llvm/IR/Function.h>
+#include <llvm/Support/Casting.h>
 
 using namespace llvm;
 
@@ -124,4 +125,3 @@ public:
 };
 
 #endif // LLVMUTILS_SCHEDULER_TASK_H
-

@@ -23,14 +23,14 @@
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
-#include <llvm/IR/Value.h>
-
 #include <functional>
 #include <map>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/IR/Value.h>
 
 namespace llvm {
 class Module;
@@ -74,7 +74,8 @@ public:
   uint32_t getCSIDAtCall(CxtLocDPItem &dpm, SVFGEdge *edge);
   uint32_t getCSIDAtRet(CxtLocDPItem &dpm, SVFGEdge *edge);
 
-  /// True if call site csId is in a recursive SCC (Tarjan on module call graph).
+  /// True if call site csId is in a recursive SCC (Tarjan on module call
+  /// graph).
   bool isEdgeInRecursion(uint32_t csId) const;
   /// Pop recursive call sites from dpm's context until top is not in recursion.
   void popRecursiveCallSites(CxtLocDPItem &dpm);
@@ -86,7 +87,8 @@ public:
   static void setMaxCxtLen(uint32_t max) { ContextCond::setMaxCxtLen(max); }
   static void setMaxPathLen(uint32_t max) { ContextCond::setMaxPathLen(max); }
 
-  /// Context compatibility for context-sensitive propagation (SVF isCondCompatible).
+  /// Context compatibility for context-sensitive propagation (SVF
+  /// isCondCompatible).
   bool isCondCompatible(const ContextCond &cxt1, const ContextCond &cxt2,
                         bool singleton) const;
 
@@ -99,7 +101,8 @@ private:
   static bool isDirectEdge(SVFGEdge *e);
   static bool isIndirectEdge(SVFGEdge *e);
   CxtPtSet getConservativeCPts(const CxtLocDPItem &dpm) const;
-  void handleAddr(CxtPtSet &pts, const CxtLocDPItem &dpm, const AddrSVFGNode *addr);
+  void handleAddr(CxtPtSet &pts, const CxtLocDPItem &dpm,
+                  const AddrSVFGNode *addr);
   CxtPtSet processGepPts(const GepSVFGNode *gep, const CxtPtSet &srcPts);
   bool isStrongUpdate(const CxtPtSet &dstPts, const StoreSVFGNode *store);
   uint32_t getPtrNodeID(uint32_t var) const { return var; }
@@ -116,7 +119,8 @@ private:
   bool hasLoadDpm(const CxtLocDPItem &dpm) const;
   CxtLocDPItem getLoadDpm(const CxtLocDPItem &dpm) const;
   CxtVar getLoadCVar(const CxtLocDPItem &dpm) const;
-  bool isMustAlias(const CxtLocDPItem &loadDpm, const CxtLocDPItem &storeDpm) const;
+  bool isMustAlias(const CxtLocDPItem &loadDpm,
+                   const CxtLocDPItem &storeDpm) const;
   bool propagateViaObj(const CxtVar &storeObj, const CxtVar &loadObj) const;
   void forEachObjId(const CxtPtSet &pts,
                     std::function<void(uint32_t)> callback) const;
@@ -141,7 +145,8 @@ private:
   std::map<CxtLocDPItem, CxtVar> dpmToLoadCVarMap_;
   std::set<CxtLocDPItem> outOfBudgetDpms_;
   std::unordered_set<uint32_t> recursiveCallSiteIds_;
-  /// Call/ret edges treated context-insensitively (recursion or value-flow cycle).
+  /// Call/ret edges treated context-insensitively (recursion or value-flow
+  /// cycle).
   std::unordered_set<const SVFGEdge *> insensitveEdges_;
 };
 

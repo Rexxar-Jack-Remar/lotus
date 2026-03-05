@@ -62,15 +62,16 @@
 #define LOTUS_ALIAS_SPEC_ALIAS_SPEC_MANAGER_H
 
 #include "Annotation/APISpec.h"
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Module.h>
 
-#include <llvm/ADT/Optional.h>
 #include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <llvm/ADT/Optional.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Module.h>
 
 namespace lotus {
 namespace alias {
@@ -84,19 +85,19 @@ namespace alias {
  * `getCategory` returns the single most specific one.
  */
 enum class FunctionCategory {
-  Unknown,         ///< Not recognised by any spec.
-  Allocator,       ///< Returns a freshly-allocated region (malloc, calloc, new).
-  Deallocator,     ///< Frees a previously-allocated region (free, delete).
-  Reallocator,     ///< Reallocates: frees old, allocates new, copies (realloc).
-  MemoryCopy,      ///< Copies bytes between two memory regions (memcpy, memmove).
-  MemorySet,       ///< Fills a memory region with a byte value (memset).
-  MemoryCompare,   ///< Compares two memory regions (memcmp).
+  Unknown,       ///< Not recognised by any spec.
+  Allocator,     ///< Returns a freshly-allocated region (malloc, calloc, new).
+  Deallocator,   ///< Frees a previously-allocated region (free, delete).
+  Reallocator,   ///< Reallocates: frees old, allocates new, copies (realloc).
+  MemoryCopy,    ///< Copies bytes between two memory regions (memcpy, memmove).
+  MemorySet,     ///< Fills a memory region with a byte value (memset).
+  MemoryCompare, ///< Compares two memory regions (memcmp).
   StringOperation, ///< String manipulation (strcpy, strcat, strlen, etc.).
   NoEffect,        ///< Pure function: no pointer-related side effects.
   ExitFunction,    ///< Terminates the program (exit, abort, _exit).
-  ReturnArgument,  ///< Return value aliases a specific argument (strcpy, fgets).
-  IoOperation,     ///< File / network I/O (fread, fwrite, send, recv, etc.).
-  MathFunction,    ///< Floating-point math (sqrt, sin, cos, etc.).
+  ReturnArgument, ///< Return value aliases a specific argument (strcpy, fgets).
+  IoOperation,    ///< File / network I/O (fread, fwrite, send, recv, etc.).
+  MathFunction,   ///< Floating-point math (sqrt, sin, cos, etc.).
 };
 
 /**
@@ -108,16 +109,18 @@ struct AllocatorInfo {
   /// Zero-based index of the size argument, or -1 if unknown/not applicable.
   int sizeArgIndex;
   /// `true` if the function returns the allocated pointer (malloc-style);
-  /// `false` if it writes the pointer through an out-parameter (posix_memalign-style).
+  /// `false` if it writes the pointer through an out-parameter
+  /// (posix_memalign-style).
   bool returnsPointer;
-  /// Index of the out-parameter that receives the pointer, or -1 if not applicable.
+  /// Index of the out-parameter that receives the pointer, or -1 if not
+  /// applicable.
   int ptrOutArgIndex;
   /// `true` if the allocated memory is zero-initialised (calloc-style).
   bool initializesToZero;
 
   AllocatorInfo()
-    : sizeArgIndex(-1), returnsPointer(true),
-      ptrOutArgIndex(-1), initializesToZero(false) {}
+      : sizeArgIndex(-1), returnsPointer(true), ptrOutArgIndex(-1),
+        initializesToZero(false) {}
 };
 
 /**
@@ -129,8 +132,8 @@ struct AllocatorInfo {
  * whether the return value aliases the destination.
  */
 struct CopyInfo {
-  int dstArgIndex;   ///< Zero-based index of the destination argument.
-  int srcArgIndex;   ///< Zero-based index of the source argument.
+  int dstArgIndex; ///< Zero-based index of the destination argument.
+  int srcArgIndex; ///< Zero-based index of the source argument.
   /// `true` if the copy writes to `*dst` (the region pointed to by dst);
   /// `false` if the copy writes to `dst` itself.
   bool dstIsRegion;
@@ -142,22 +145,23 @@ struct CopyInfo {
   int retArgIndex;
 
   CopyInfo()
-    : dstArgIndex(-1), srcArgIndex(-1),
-      dstIsRegion(false), srcIsRegion(false),
-      returnsAlias(false), retArgIndex(-1) {}
+      : dstArgIndex(-1), srcArgIndex(-1), dstIsRegion(false),
+        srcIsRegion(false), returnsAlias(false), retArgIndex(-1) {}
 };
 
 /**
  * @struct ReturnAliasInfo
  * @brief Describes how the return value of a function aliases its arguments.
  *
- * For example, `strcpy(dst, src)` returns `dst`, so `argIndex=0`, `isRegion=false`.
- * `fgets(buf, n, stream)` returns `buf` or NULL, so `argIndex=0`, `isNull=true`.
+ * For example, `strcpy(dst, src)` returns `dst`, so `argIndex=0`,
+ * `isRegion=false`. `fgets(buf, n, stream)` returns `buf` or NULL, so
+ * `argIndex=0`, `isNull=true`.
  */
 struct ReturnAliasInfo {
   /// Which argument the return value aliases (-1 for a static/global pointer).
   int argIndex;
-  /// `true` if the return value aliases `*arg` (the region); `false` for `arg` itself.
+  /// `true` if the return value aliases `*arg` (the region); `false` for `arg`
+  /// itself.
   bool isRegion;
   /// `true` if the function may return a pointer to static/global storage.
   bool isStatic;
@@ -165,8 +169,7 @@ struct ReturnAliasInfo {
   bool isNull;
 
   ReturnAliasInfo()
-    : argIndex(-1), isRegion(false),
-      isStatic(false), isNull(false) {}
+      : argIndex(-1), isRegion(false), isStatic(false), isNull(false) {}
 };
 
 /**
@@ -181,9 +184,11 @@ struct ModRefInfo {
   std::vector<int> modifiedArgs;
   /// Zero-based indices of arguments that the function reads through.
   std::vector<int> referencedArgs;
-  /// `true` if the function writes to the memory region pointed to by the return value.
+  /// `true` if the function writes to the memory region pointed to by the
+  /// return value.
   bool modifiesReturn;
-  /// `true` if the function reads from the memory region pointed to by the return value.
+  /// `true` if the function reads from the memory region pointed to by the
+  /// return value.
   bool referencesReturn;
 
   ModRefInfo() : modifiesReturn(false), referencesReturn(false) {}
@@ -232,10 +237,12 @@ public:
   /// @brief Return the primary `FunctionCategory` for the named function.
   FunctionCategory getCategory(const std::string &functionName) const;
 
-  /// @brief Return all applicable categories for @p F (a function may have multiple).
+  /// @brief Return all applicable categories for @p F (a function may have
+  /// multiple).
   std::set<FunctionCategory> getCategories(const llvm::Function *F) const;
   /// @brief Return all applicable categories for the named function.
-  std::set<FunctionCategory> getCategories(const std::string &functionName) const;
+  std::set<FunctionCategory>
+  getCategories(const std::string &functionName) const;
 
   // =========================================================================
   // Allocator Queries
@@ -248,8 +255,10 @@ public:
 
   /// @brief Return detailed allocator information for @p F, or `None`.
   llvm::Optional<AllocatorInfo> getAllocatorInfo(const llvm::Function *F) const;
-  /// @brief Return detailed allocator information for the named function, or `None`.
-  llvm::Optional<AllocatorInfo> getAllocatorInfo(const std::string &functionName) const;
+  /// @brief Return detailed allocator information for the named function, or
+  /// `None`.
+  llvm::Optional<AllocatorInfo>
+  getAllocatorInfo(const std::string &functionName) const;
 
   // =========================================================================
   // Deallocator Queries
@@ -272,7 +281,8 @@ public:
    * Typical examples: `abs`, `strlen` (read-only), math functions.
    */
   bool isNoEffect(const llvm::Function *F) const;
-  /// @brief Return `true` if the named function has no pointer-related side effects.
+  /// @brief Return `true` if the named function has no pointer-related side
+  /// effects.
   bool isNoEffect(const std::string &functionName) const;
 
   // =========================================================================
@@ -281,10 +291,12 @@ public:
 
   /// @brief Return `true` if @p F copies memory between two regions.
   bool isMemoryCopy(const llvm::Function *F) const;
-  /// @brief Return `true` if the named function copies memory between two regions.
+  /// @brief Return `true` if the named function copies memory between two
+  /// regions.
   bool isMemoryCopy(const std::string &functionName) const;
 
-  /// @brief Return all copy effects for @p F (a function may have multiple copy effects).
+  /// @brief Return all copy effects for @p F (a function may have multiple copy
+  /// effects).
   std::vector<CopyInfo> getCopyEffects(const llvm::Function *F) const;
   /// @brief Return all copy effects for the named function.
   std::vector<CopyInfo> getCopyEffects(const std::string &functionName) const;
@@ -293,15 +305,19 @@ public:
   // Return Alias Queries
   // =========================================================================
 
-  /// @brief Return `true` if the return value of @p F aliases one of its arguments.
+  /// @brief Return `true` if the return value of @p F aliases one of its
+  /// arguments.
   bool returnsArgumentAlias(const llvm::Function *F) const;
-  /// @brief Return `true` if the return value of the named function aliases an argument.
+  /// @brief Return `true` if the return value of the named function aliases an
+  /// argument.
   bool returnsArgumentAlias(const std::string &functionName) const;
 
   /// @brief Return all return-alias descriptions for @p F.
-  std::vector<ReturnAliasInfo> getReturnAliasInfo(const llvm::Function *F) const;
+  std::vector<ReturnAliasInfo>
+  getReturnAliasInfo(const llvm::Function *F) const;
   /// @brief Return all return-alias descriptions for the named function.
-  std::vector<ReturnAliasInfo> getReturnAliasInfo(const std::string &functionName) const;
+  std::vector<ReturnAliasInfo>
+  getReturnAliasInfo(const std::string &functionName) const;
 
   // =========================================================================
   // Exit Function Queries
@@ -333,10 +349,12 @@ public:
   /// @brief Return all known function names in the given category.
   std::vector<std::string> getFunctionsByCategory(FunctionCategory cat) const;
 
-  /// @brief Return all known allocator function names (e.g., "malloc", "calloc").
+  /// @brief Return all known allocator function names (e.g., "malloc",
+  /// "calloc").
   std::vector<std::string> getAllocatorNames() const;
 
-  /// @brief Return all known deallocator function names (e.g., "free", "delete").
+  /// @brief Return all known deallocator function names (e.g., "free",
+  /// "delete").
   std::vector<std::string> getDeallocatorNames() const;
 
   /// @brief Return all known no-effect function names.
@@ -356,9 +374,11 @@ public:
   void addCustomSpec(const std::string &functionName, const FunctionSpec &spec);
 
   /// @brief Return the underlying `APISpec` for advanced / low-level queries.
-  const APISpec& getAPISpec() const { return apiSpec_; }
+  const APISpec &getAPISpec() const { return apiSpec_; }
   /// @brief Return the list of spec files that have been loaded.
-  const std::vector<std::string>& getLoadedSpecFiles() const { return loadedSpecFiles_; }
+  const std::vector<std::string> &getLoadedSpecFiles() const {
+    return loadedSpecFiles_;
+  }
 
   // =========================================================================
   // Debugging / Statistics
@@ -380,38 +400,46 @@ public:
   Statistics getStatistics() const;
 
 private:
-  APISpec apiSpec_;                        ///< Underlying raw spec data.
-  const llvm::Module *module_;             ///< Optional module for name matching.
-  bool cacheEnabled_;                      ///< Whether query caching is active.
-  std::vector<std::string> loadedSpecFiles_; ///< Paths of all loaded spec files.
+  APISpec apiSpec_;            ///< Underlying raw spec data.
+  const llvm::Module *module_; ///< Optional module for name matching.
+  bool cacheEnabled_;          ///< Whether query caching is active.
+  std::vector<std::string>
+      loadedSpecFiles_; ///< Paths of all loaded spec files.
 
   // Per-query result caches (keyed by canonical function name string).
   mutable std::unordered_map<std::string, FunctionCategory> categoryCache_;
-  mutable std::unordered_map<std::string, std::set<FunctionCategory>> categoriesCache_;
-  mutable std::unordered_map<std::string, llvm::Optional<AllocatorInfo>> allocatorCache_;
+  mutable std::unordered_map<std::string, std::set<FunctionCategory>>
+      categoriesCache_;
+  mutable std::unordered_map<std::string, llvm::Optional<AllocatorInfo>>
+      allocatorCache_;
   mutable std::unordered_map<std::string, std::vector<CopyInfo>> copyCache_;
-  mutable std::unordered_map<std::string, std::vector<ReturnAliasInfo>> returnAliasCache_;
+  mutable std::unordered_map<std::string, std::vector<ReturnAliasInfo>>
+      returnAliasCache_;
   mutable std::unordered_map<std::string, ModRefInfo> modRefCache_;
 
   /// Pre-computed lists of function names per category (built lazily).
-  mutable std::unordered_map<FunctionCategory, std::vector<std::string>> categoryLists_;
+  mutable std::unordered_map<FunctionCategory, std::vector<std::string>>
+      categoryLists_;
   mutable bool categoryListsBuilt_;
 
   // Internal helpers
   std::string normalizeFunctionName(const llvm::Function *F) const;
   std::string demangle(const std::string &mangledName) const;
   std::string canonicalizeName(const std::string &name) const;
-  const FunctionSpec* lookupSpec(const std::string &functionName) const;
+  const FunctionSpec *lookupSpec(const std::string &functionName) const;
   FunctionCategory categorizeIntrinsic(const llvm::Function *F) const;
   bool isKnownDeallocator(const std::string &functionName) const;
 
   FunctionCategory categorizeFunctionSpec(const FunctionSpec &spec) const;
-  std::set<FunctionCategory> categorizeFunctionSpecMulti(const FunctionSpec &spec) const;
+  std::set<FunctionCategory>
+  categorizeFunctionSpecMulti(const FunctionSpec &spec) const;
 
-  AllocatorInfo buildAllocatorInfo(const std::string &name, const FunctionSpec &spec) const;
+  AllocatorInfo buildAllocatorInfo(const std::string &name,
+                                   const FunctionSpec &spec) const;
   std::vector<CopyInfo> buildCopyInfo(const FunctionSpec &spec) const;
   std::vector<CopyInfo> buildIntrinsicCopyInfo(const llvm::Function *F) const;
-  std::vector<ReturnAliasInfo> buildReturnAliasInfo(const FunctionSpec &spec) const;
+  std::vector<ReturnAliasInfo>
+  buildReturnAliasInfo(const FunctionSpec &spec) const;
   ModRefInfo buildModRefInfo(const FunctionSpec &spec) const;
   ModRefInfo buildIntrinsicModRefInfo(const llvm::Function *F) const;
 
@@ -430,7 +458,7 @@ std::vector<std::string> getDefaultSpecFiles();
 std::string getSpecFilePath(const std::string &specFileName);
 
 /// @brief Convert a `FunctionCategory` to a human-readable string.
-const char* categoryToString(FunctionCategory cat);
+const char *categoryToString(FunctionCategory cat);
 
 /// @brief Parse a `FunctionCategory` from a string, or return `None`.
 llvm::Optional<FunctionCategory> stringToCategory(const std::string &str);

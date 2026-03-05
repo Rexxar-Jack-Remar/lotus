@@ -305,7 +305,8 @@ public:
       if (entry.second)
         entry.second->releaseTrees();
     }
-    // Step 2: delete wrapper objects (trees already released, so no double-free).
+    // Step 2: delete wrapper objects (trees already released, so no
+    // double-free).
     for (auto &entry : _call_wrapper_map) {
       delete entry.second;
     }

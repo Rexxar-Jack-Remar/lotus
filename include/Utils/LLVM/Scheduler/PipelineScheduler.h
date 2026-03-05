@@ -4,16 +4,16 @@
 #include "Utils/LLVM/Scheduler/Task.h"
 #include "Utils/Platform/ProgressBar.h"
 
-#include <llvm/Analysis/CallGraph.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Module.h>
-
 #include <condition_variable>
 #include <functional>
 #include <map>
 #include <mutex>
 #include <set>
 #include <vector>
+
+#include <llvm/Analysis/CallGraph.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Module.h>
 
 using namespace llvm;
 
@@ -97,9 +97,9 @@ private:
 
   /// Configuration options
   /// @{
-  int TaskTimeout;        // Timeout for task completion (seconds)
-  bool EnableGC;          // Enable automatic garbage collection
-  unsigned GCBatchSize;   // Number of functions to batch for GC
+  int TaskTimeout;      // Timeout for task completion (seconds)
+  bool EnableGC;        // Enable automatic garbage collection
+  unsigned GCBatchSize; // Number of functions to batch for GC
   /// @}
 
 private:
@@ -128,8 +128,7 @@ private:
   bool shouldScheduleFunction(const Function *F);
 
 public:
-  PipelineScheduler(Module &M, CallGraph &CG,
-                    AnalysisType AT = AT_BottomUp);
+  PipelineScheduler(Module &M, CallGraph &CG, AnalysisType AT = AT_BottomUp);
   virtual ~PipelineScheduler();
 
   /// Set the task callback that will be invoked for each function
@@ -162,4 +161,3 @@ public:
 };
 
 #endif // LLVMUTILS_SCHEDULER_PIPELINESCHEDULER_H
-

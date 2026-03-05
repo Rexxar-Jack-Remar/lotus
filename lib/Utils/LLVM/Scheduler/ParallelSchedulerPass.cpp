@@ -1,4 +1,5 @@
 #include "Utils/LLVM/Scheduler/ParallelSchedulerPass.h"
+
 #include "Utils/LLVM/Scheduler/PipelineScheduler.h"
 
 #include <llvm/Analysis/CallGraph.h>
@@ -57,7 +58,7 @@ bool ParallelSchedulerPass::runOnModule(Module &M) {
   // Create and configure scheduler
   PipelineScheduler Scheduler(M, CG, AT);
   Scheduler.setTaskCallback(AnalysisCallback);
-  
+
   if (GCCallback && EnableGC) {
     Scheduler.setGCCallback(GCCallback);
   } else {
@@ -71,4 +72,3 @@ bool ParallelSchedulerPass::runOnModule(Module &M) {
 
   return false; // We don't modify the module
 }
-

@@ -19,8 +19,9 @@
 
 #include "Utils/LLVM/ThreadPool.h"
 
-#include <llvm/Support/CommandLine.h>
 #include <mutex>
+
+#include <llvm/Support/CommandLine.h>
 #include <unistd.h>
 
 using namespace llvm;

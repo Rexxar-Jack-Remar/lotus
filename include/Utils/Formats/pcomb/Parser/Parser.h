@@ -6,19 +6,16 @@
 
 #include <type_traits>
 
-namespace pcomb
-{
+namespace pcomb {
 
-template <typename O>
-class Parser
-{
+template <typename O> class Parser {
 public:
-	using OutputType = O;
-	using ResultType = ParseResult<OutputType>;
+  using OutputType = O;
+  using ResultType = ParseResult<OutputType>;
 
-	virtual ~Parser() {}
+  virtual ~Parser() {}
 
-	virtual ResultType parse(const InputStream& input) const = 0;
+  virtual ResultType parse(const InputStream &input) const = 0;
 };
 
 } // namespace pcomb

@@ -24,7 +24,8 @@
 // == Analysis Characteristics ==
 //
 // - Flow-sensitive: Distinguishes different program points
-// - Context-insensitive: Merges all calling contexts (see ContextDDA for context-sensitive)
+// - Context-insensitive: Merges all calling contexts (see ContextDDA for
+// context-sensitive)
 // - Field-sensitive: Tracks individual struct fields
 // - On-demand: Computes points-to sets only when queried
 //
@@ -70,8 +71,8 @@
 
 #pragma once
 
-#include "Alias/DDA/DPItem.h"
 #include "Alias/DDA/DDAVFSolver.h"
+#include "Alias/DDA/DPItem.h"
 #include "IR/ICFG/ICFG.h"
 
 namespace lotus {
@@ -87,14 +88,14 @@ class DDAStat;
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
-#include <llvm/IR/Value.h>
-
 #include <map>
 #include <memory>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/IR/Value.h>
 
 namespace llvm {
 class Module;
@@ -136,9 +137,8 @@ using LocDPItem = StmtDPItem<SVFGNode>;
 /// Client support:
 /// - setClient(client): Set DDAClient for candidate query collection
 /// - answerQueries(): Run DDA for all client candidates
-class FlowDDA
-    : public DDAVFSolver<uint32_t, std::unordered_set<uint32_t>, LocDPItem,
-                         FlowDDA> {
+class FlowDDA : public DDAVFSolver<uint32_t, std::unordered_set<uint32_t>,
+                                   LocDPItem, FlowDDA> {
   template <typename CVar, typename CPtSet, typename DPIm, typename D>
   friend class DDAVFSolver;
 
@@ -166,7 +166,9 @@ public:
   bool isInitialized() const { return initialized_; }
 
   /// Max steps per query (out-of-budget then fallback to conservative PTA).
-  static void setDefaultMaxBudget(uint32_t budget) { defaultMaxBudget_ = budget; }
+  static void setDefaultMaxBudget(uint32_t budget) {
+    defaultMaxBudget_ = budget;
+  }
   static uint32_t getDefaultMaxBudget() { return defaultMaxBudget_; }
 
   /// Client for candidate queries and callbacks (SVF-style).
@@ -178,7 +180,8 @@ public:
   virtual bool handleBKCondition(LocDPItem &dpm, SVFGEdge *edge);
   /// Called when a dpm hits step budget (optional downgrade / stats).
   virtual void handleOutOfBudgetDpm(const LocDPItem &dpm);
-  /// Entry used by client: compute points-to for pointer value (same as getPointsTo).
+  /// Entry used by client: compute points-to for pointer value (same as
+  /// getPointsTo).
   PtsSet computeDDAPts(const llvm::Value *ptr) { return getPointsTo(ptr); }
 
   DDAStat *getStat() const { return ddaStat_.get(); }
@@ -189,7 +192,8 @@ public:
   bool isInLoop(const llvm::Instruction *inst) const;
 
 protected:
-  // DDAVFSolver interface (CRTP). getSVFG/getSVFGBuilder/handleBKCondition are public above.
+  // DDAVFSolver interface (CRTP). getSVFG/getSVFGBuilder/handleBKCondition are
+  // public above.
   SVFGNode *getDefNodeForValue(const llvm::Value *v) const;
   static bool isDirectEdge(SVFGEdge *e);
   static bool isIndirectEdge(SVFGEdge *e);

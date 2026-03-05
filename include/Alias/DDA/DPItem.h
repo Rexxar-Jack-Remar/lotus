@@ -67,7 +67,7 @@
 namespace lotus {
 namespace analysis {
 
-struct SVFGNode;  // forward decl for StmtDPItem<SVFGNode>
+struct SVFGNode; // forward decl for StmtDPItem<SVFGNode>
 
 /// Base DP item (current variable only, no location).
 ///
@@ -110,8 +110,7 @@ public:
 /// This is the fix for Bug 7: the base DPItem only compared `cur`, which would
 /// cause std::set/std::map to silently drop the second of two items that share
 /// the same cur but have different curloc values.
-template <class LocCond>
-class StmtDPItem : public DPItem {
+template <class LocCond> class StmtDPItem : public DPItem {
 protected:
   const LocCond *curloc;
 

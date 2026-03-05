@@ -721,8 +721,8 @@ EquivDB::EquivDB(Function &Func, MemorySSA *MemSSA, DominatorTree *DomTree)
   // The sentinel node is a self-rooted union-find node that is never
   // unified with anything else.
   Nodes.push_back({0u, 0u}); // parent=self, rank=0
-  Id2Val.push_back(nullptr);  // slot 0 → nullptr
-  Watches.emplace_back();     // empty watch list for sentinel
+  Id2Val.push_back(nullptr); // slot 0 → nullptr
+  Watches.emplace_back();    // empty watch list for sentinel
 
   // Safety check: ensure function has a parent module
   if (!Func.getParent()) {
@@ -951,7 +951,8 @@ void EquivDB::seedSingleStoreAlloca(
     return;
 
   auto sameMemorySlot = [&](const Value *P, const Value *Q) -> bool {
-    if (!P || !Q || !P->getType()->isPointerTy() || !Q->getType()->isPointerTy())
+    if (!P || !Q || !P->getType()->isPointerTy() ||
+        !Q->getType()->isPointerTy())
       return false;
     if (stripNoopCasts(P) == stripNoopCasts(Q))
       return true;
@@ -965,9 +966,9 @@ void EquivDB::seedSingleStoreAlloca(
   // Build alloca → {stores, loads} maps in a single O(N) pass instead of
   // re-scanning all instructions for every alloca (which was O(A×N)).
   using AllocaStores = SmallVector<StoreInst *, 2>;
-  using AllocaLoads  = SmallVector<LoadInst *, 4>;
+  using AllocaLoads = SmallVector<LoadInst *, 4>;
   llvm::DenseMap<const Value *, AllocaStores> AllocaToStores;
-  llvm::DenseMap<const Value *, AllocaLoads>  AllocaToLoads;
+  llvm::DenseMap<const Value *, AllocaLoads> AllocaToLoads;
 
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
@@ -993,7 +994,7 @@ void EquivDB::seedSingleStoreAlloca(
       continue;
 
     const AllocaStores &Stores = SIt->second;
-    const AllocaLoads  &Loads  = KV.second;
+    const AllocaLoads &Loads = KV.second;
 
     for (LoadInst *LI : Loads) {
       StoreInst *UniqueStore = nullptr;
@@ -1274,10 +1275,10 @@ void EquivDB::seedStoreLoadForwarding(
   std::function<bool(MemoryAccess *, const LoadInst *,
                      SmallVectorImpl<const Value *> &,
                      SmallPtrSetImpl<const MemoryAccess *> &)>
-      collectStoredValues = [&](MemoryAccess *Access, const LoadInst *LI,
-                                SmallVectorImpl<const Value *> &StoredVals,
-                                SmallPtrSetImpl<const MemoryAccess *> &Visited)
-      -> bool {
+      collectStoredValues =
+          [&](MemoryAccess *Access, const LoadInst *LI,
+              SmallVectorImpl<const Value *> &StoredVals,
+              SmallPtrSetImpl<const MemoryAccess *> &Visited) -> bool {
     if (!Access || !Visited.insert(Access).second)
       return false;
 
@@ -1435,7 +1436,8 @@ bool EquivDB::findClosedGEPCandidate(const GetElementPtrInst *GEPI,
 
     bool SameIndices = true;
     for (unsigned k = 1; k < NumOps; ++k)
-      if (!equivalentGEPIndexOperand(GEPI->getOperand(k), GEPJ->getOperand(k))) {
+      if (!equivalentGEPIndexOperand(GEPI->getOperand(k),
+                                     GEPJ->getOperand(k))) {
         SameIndices = false;
         break;
       }
@@ -1448,7 +1450,8 @@ bool EquivDB::findClosedGEPCandidate(const GetElementPtrInst *GEPI,
   return false;
 }
 
-bool EquivDB::dominatesInst(const Instruction *Def, const Instruction *Use) const {
+bool EquivDB::dominatesInst(const Instruction *Def,
+                            const Instruction *Use) const {
   // A store cannot dominate itself as a load — they are never the same object,
   // but guard against the degenerate case anyway.
   if (Def == Use)
@@ -1460,7 +1463,7 @@ bool EquivDB::dominatesInst(const Instruction *Def, const Instruction *Use) cons
   // Same basic block: Def dominates Use iff Def appears strictly before Use.
   for (const Instruction &I : *Def->getParent()) {
     if (&I == Def)
-      return true;  // Def comes first → it dominates Use
+      return true; // Def comes first → it dominates Use
     if (&I == Use)
       return false; // Use comes first → Def does not dominate Use
   }
@@ -1529,7 +1532,8 @@ int EquivDB::resolveReturnedArgNo(const Value *V, const Function *Callee,
       const Value *IntOp = stripNoopArithmetic(Op->getOperand(0));
       if (const auto *IntCast = dyn_cast<Operator>(IntOp))
         if (IntCast->getOpcode() == Instruction::PtrToInt)
-          return resolveReturnedArgNo(IntCast->getOperand(0), Callee, Depth + 1);
+          return resolveReturnedArgNo(IntCast->getOperand(0), Callee,
+                                      Depth + 1);
     }
   }
 

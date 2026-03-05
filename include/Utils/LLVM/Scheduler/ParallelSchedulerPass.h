@@ -1,11 +1,11 @@
 #ifndef LLVMUTILS_SCHEDULER_PARALLELSCHEDULERPASS_H
 #define LLVMUTILS_SCHEDULER_PARALLELSCHEDULERPASS_H
 
-#include <llvm/IR/Module.h>
-#include <llvm/Pass.h>
-
 #include <functional>
 #include <string>
+
+#include <llvm/IR/Module.h>
+#include <llvm/Pass.h>
 
 using namespace llvm;
 
@@ -68,4 +68,3 @@ public:
 };
 
 #endif // LLVMUTILS_SCHEDULER_PARALLELSCHEDULERPASS_H
-

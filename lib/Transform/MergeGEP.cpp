@@ -6,14 +6,13 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-// 
+//
 // Merge chained GEPs; Specially useful for arrays inside structs
 //
 //===----------------------------------------------------------------------===//
 #define DEBUG_TYPE "merge-gep"
 
 #include "Transform/MergeGEP.h"
-
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
@@ -22,7 +21,6 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 #include "llvm/Transforms/Utils/Cloning.h"
-
 
 #include <vector>
 // Pass statistics
@@ -48,21 +46,21 @@ static void simplifyGEP(GetElementPtrInst *GEP);
 //  true  - The module was modified.
 //  false - The module was not modified.
 //
-bool MergeArrayGEP::runOnModule(Module& M) {
+bool MergeArrayGEP::runOnModule(Module &M) {
   bool changed;
   do {
     changed = false;
-    for (Module::iterator F = M.begin(); F != M.end(); ++F){
-      for (Function::iterator B = F->begin(), FE = F->end(); B != FE; ++B) {      
+    for (Module::iterator F = M.begin(); F != M.end(); ++F) {
+      for (Function::iterator B = F->begin(), FE = F->end(); B != FE; ++B) {
         for (BasicBlock::iterator I = B->begin(), BE = B->end(); I != BE;) {
           GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(I++);
-          if(GEP == NULL)
+          if (GEP == NULL)
             continue;
           simplifyGEP(GEP);
         }
       }
     }
-  } while(changed);
+  } while (changed);
   return true;
 }
 
@@ -84,11 +82,11 @@ static void simplifyGEP(GetElementPtrInst *GEP) {
     // avoids us creating a TON of code in some cases.
     //
     if (GetElementPtrInst *SrcGEP =
-        dyn_cast<GetElementPtrInst>(Src->getOperand(0)))
+            dyn_cast<GetElementPtrInst>(Src->getOperand(0)))
       if (SrcGEP->getNumOperands() == 2)
-        return;   // Wait until our source is folded to completion.
+        return; // Wait until our source is folded to completion.
 
-    SmallVector<Value*, 8> Indices;
+    SmallVector<Value *, 8> Indices;
 
     // Find out whether the last index in the source GEP is a sequential idx.
     bool EndsWithSequential = false;
@@ -102,7 +100,7 @@ static void simplifyGEP(GetElementPtrInst *GEP) {
       // With:    T = long A+B; gep %P, T, ...
       //
       Value *Sum;
-      Value *SO1 = Src->getOperand(Src->getNumOperands()-1);
+      Value *SO1 = Src->getOperand(Src->getNumOperands() - 1);
       Value *GO1 = GEP->getOperand(1);
       if (SO1 == Constant::getNullValue(SO1->getType())) {
         Sum = GO1;
@@ -115,9 +113,8 @@ static void simplifyGEP(GetElementPtrInst *GEP) {
         // normalized.
         if (SO1->getType() != GO1->getType())
           return;
-        Sum = llvm::BinaryOperator::Create(BinaryOperator::Add,
-                                           SO1, GO1, 
-                                           PtrOp->getName()+".sum",GEP);
+        Sum = llvm::BinaryOperator::Create(BinaryOperator::Add, SO1, GO1,
+                                           PtrOp->getName() + ".sum", GEP);
       }
 
       // Update the GEP in place if possible.
@@ -127,23 +124,26 @@ static void simplifyGEP(GetElementPtrInst *GEP) {
         numMerged++;
         return;
       }
-      Indices.append(Src->op_begin()+1, Src->op_end()-1);
+      Indices.append(Src->op_begin() + 1, Src->op_end() - 1);
       Indices.push_back(Sum);
-      Indices.append(GEP->op_begin()+2, GEP->op_end());
+      Indices.append(GEP->op_begin() + 2, GEP->op_end());
     } else if (isa<Constant>(GEP->idx_begin()) &&
                cast<Constant>(GEP->idx_begin())->isNullValue() &&
                Src->getNumOperands() != 1) {
       // Otherwise we can do the fold if the first index of the GEP is a zero
-      Indices.append(Src->op_begin()+1, Src->op_end());
-      Indices.append(GEP->idx_begin()+1, GEP->idx_end());
+      Indices.append(Src->op_begin() + 1, Src->op_end());
+      Indices.append(GEP->idx_begin() + 1, GEP->idx_end());
     }
 
-    if (!Indices.empty()){
-      GetElementPtrInst *GEPNew =  (GEP->isInBounds() && Src->isInBounds()) ?
-        GetElementPtrInst::CreateInBounds(Src->getSourceElementType(), Src->getOperand(0), Indices,
-                                          GEP->getName(), GEP) :
-        GetElementPtrInst::Create(Src->getSourceElementType(), Src->getOperand(0), Indices,
-                                  GEP->getName(), GEP);
+    if (!Indices.empty()) {
+      GetElementPtrInst *GEPNew =
+          (GEP->isInBounds() && Src->isInBounds())
+              ? GetElementPtrInst::CreateInBounds(Src->getSourceElementType(),
+                                                  Src->getOperand(0), Indices,
+                                                  GEP->getName(), GEP)
+              : GetElementPtrInst::Create(Src->getSourceElementType(),
+                                          Src->getOperand(0), Indices,
+                                          GEP->getName(), GEP);
       numMerged++;
       GEP->replaceAllUsesWith(GEPNew);
       GEP->eraseFromParent();
@@ -155,5 +155,5 @@ static void simplifyGEP(GetElementPtrInst *GEP) {
 char MergeArrayGEP::ID = 0;
 
 // Register the pass
-static RegisterPass<MergeArrayGEP>
-X("mergearrgep", "Merge GEPs for arrays indexing");
+static RegisterPass<MergeArrayGEP> X("mergearrgep",
+                                     "Merge GEPs for arrays indexing");

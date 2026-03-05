@@ -19,5 +19,4 @@ set(Concurrency_SOURCES
   MPI/MPIRankAnalysis.cpp
 )
 add_library(Concurrency STATIC ${Concurrency_SOURCES})
-target_include_directories(Concurrency PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(Concurrency CanaryLLVMUtils CanaryAliasAnalysisWrapper)

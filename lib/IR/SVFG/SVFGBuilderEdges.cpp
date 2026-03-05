@@ -32,7 +32,7 @@ void SVFGBuilder::buildEdges() {
   buildPhiEdges();
   buildCmpEdges();
   buildBranchEdges();
-  buildMemoryEdges();  // This calls buildLoadEdges() and buildStoreEdges()
+  buildMemoryEdges(); // This calls buildLoadEdges() and buildStoreEdges()
 }
 
 void SVFGBuilder::buildDirectEdges() {
@@ -157,7 +157,6 @@ void SVFGBuilder::buildStoreEdges() {
         svfg->addEdge(valNode, srcNode, SVFGEdgeK::IntraDirect);
       }
     }
-
   }
 }
 

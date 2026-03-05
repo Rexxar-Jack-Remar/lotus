@@ -74,8 +74,7 @@ bool ProgramPoint::not_definition_of(const Value *V, const SSIfy &pass) const {
       const Instruction *FirstNonPHI = BB->getFirstNonPHI();
       for (BasicBlock::const_iterator
                BBit = BB->begin(),
-               BBend =
-                   (FirstNonPHI ? FirstNonPHI->getIterator() : BB->end());
+               BBend = (FirstNonPHI ? FirstNonPHI->getIterator() : BB->end());
            BBit != BBend; ++BBit) {
         const PHINode *op = cast<PHINode>(&*BBit);
 
@@ -118,8 +117,8 @@ bool ProgramPoint::not_definition_of(const Value *V, const SSIfy &pass) const {
 
   case ProgramPoint::Self:
     // copy case: walk instructions after I looking for an SSI_copy of V.
-    for (BasicBlock::const_iterator bit = I->getIterator();
-         bit != BB->end(); ++bit) {
+    for (BasicBlock::const_iterator bit = I->getIterator(); bit != BB->end();
+         ++bit) {
       const Instruction *next = &*bit;
 
       // Fix for bug #2: use side-table instead of name prefix.

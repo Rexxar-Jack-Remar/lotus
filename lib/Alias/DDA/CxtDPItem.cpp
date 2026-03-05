@@ -25,7 +25,8 @@ void ContextCond::updateMaxCxtLenSeen(size_t len) {
 
 // Match SVF context limiting semantics:
 // - If call-string length is below max, append ctx and return true.
-// - If at limit, mark non-concrete, drop the oldest context element, append ctx,
+// - If at limit, mark non-concrete, drop the oldest context element, append
+// ctx,
 //   and return false.
 bool ContextCond::pushContext(uint32_t ctx) {
   if (context_.size() < maximumCxtLen) {

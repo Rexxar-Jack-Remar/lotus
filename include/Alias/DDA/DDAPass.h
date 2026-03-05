@@ -83,14 +83,14 @@ namespace analysis {
 class ContextDDA;
 
 enum class DDAKind {
-  FlowS_DDA,  /// Flow-sensitive, context-insensitive (FlowDDA)
-  Cxt_DDA     /// Flow-sensitive, context-sensitive (ContextDDA)
+  FlowS_DDA, /// Flow-sensitive, context-insensitive (FlowDDA)
+  Cxt_DDA    /// Flow-sensitive, context-sensitive (ContextDDA)
 };
 
 enum class DDAClientKind {
-  All,     /// All top-level pointers (DDAClient, solveAll)
-  Funptr,  /// Function pointers at indirect call sites
-  Alias    /// Load src, store dst, GEP src (AliasDDAClient)
+  All,    /// All top-level pointers (DDAClient, solveAll)
+  Funptr, /// Function pointers at indirect call sites
+  Alias   /// Load src, store dst, GEP src (AliasDDAClient)
 };
 
 /// Demand-driven analysis driver: mode + client, run + answerQueries.

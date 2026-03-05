@@ -20,8 +20,7 @@ namespace lotus {
 namespace pathexpressions {
 
 namespace detail {
-template <typename L>
-struct RegexToCompactTgfArg {
+template <typename L> struct RegexToCompactTgfArg {
   RegexToCompactTgfArg(const int parentId, const IRegex<L> &parent)
       : parentId_(parentId), parentType_(std::type_index(typeid(parent))) {}
   int parentId_;
@@ -32,7 +31,8 @@ struct RegexToCompactTgfArg {
 
 template <typename L>
 class RegexToCompactTgf
-    : public IRegexVisitor<L, RegexToCompactTgf<L> &, detail::RegexToCompactTgfArg<L> *> {
+    : public IRegexVisitor<L, RegexToCompactTgf<L> &,
+                           detail::RegexToCompactTgfArg<L> *> {
 public:
   using Arg = detail::RegexToCompactTgfArg<L>;
 
@@ -80,12 +80,13 @@ private:
   std::string edgeList_;
 
   void addEdge(const int sourceId, const int targetId, const int label) {
-    edgeList_ += std::to_string(sourceId) + " " + std::to_string(targetId) + " " +
-                std::to_string(label) + "\n";
+    edgeList_ += std::to_string(sourceId) + " " + std::to_string(targetId) +
+                 " " + std::to_string(label) + "\n";
   }
 
   void linkNextNodeToParent(Arg *arg) {
-    if (!arg) return;
+    if (!arg)
+      return;
     addEdge(arg->parentId_, nextNodeId_, arg->childOffset_);
     ++arg->childOffset_;
   }
@@ -97,8 +98,7 @@ private:
   }
 
   RegexToCompactTgf<L> &visitAndCompact(const std::string &nodeLabel,
-                                        const IRegex<L> &node,
-                                        Arg *arg,
+                                        const IRegex<L> &node, Arg *arg,
                                         const RegexRef<L> &leftChild,
                                         const RegexRef<L> &rightChild) {
     Arg childArg(0, node);

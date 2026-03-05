@@ -92,7 +92,8 @@ public:
   void setModule(const llvm::Module *M) { module_ = M; }
   const llvm::Module *getModule() const { return module_; }
 
-  /// Collect candidate pointers (Value*) to be queried. Uses getSVFG() (and getModule() for Funptr) if set.
+  /// Collect candidate pointers (Value*) to be queried. Uses getSVFG() (and
+  /// getModule() for Funptr) if set.
   virtual std::vector<const llvm::Value *> &collectCandidateQueries();
   const std::vector<const llvm::Value *> &getCandidateQueries() const {
     return candidateQueries_;
@@ -135,7 +136,8 @@ public:
   void performStat(FlowDDA *dda) override;
 };
 
-/// Client that collects load pointer operands, store pointer operands, GEP base pointers.
+/// Client that collects load pointer operands, store pointer operands, GEP base
+/// pointers.
 class AliasDDAClient : public DDAClient {
 public:
   AliasDDAClient() = default;

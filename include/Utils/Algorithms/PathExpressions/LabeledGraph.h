@@ -18,32 +18,33 @@ namespace lotus {
 namespace pathexpressions {
 
 /// Directed edge with label: source --(label)--> target.
-template <typename N, typename L>
-struct ILabeledEdge {
+template <typename N, typename L> struct ILabeledEdge {
   virtual ~ILabeledEdge() = default;
   virtual N getSource() const = 0;
   virtual N getTarget() const = 0;
   virtual L getLabel() const = 0;
 
-  /// Structural equality & hashing, used for set semantics (like Java's HashSet).
+  /// Structural equality & hashing, used for set semantics (like Java's
+  /// HashSet).
   virtual std::size_t hashCode() const = 0;
   virtual bool equals(const ILabeledEdge<N, L> &other) const = 0;
 };
 
 namespace detail {
-template <typename N, typename L>
-struct EdgePtrHash {
-  std::size_t operator()(const std::shared_ptr<const ILabeledEdge<N, L>> &p) const {
+template <typename N, typename L> struct EdgePtrHash {
+  std::size_t
+  operator()(const std::shared_ptr<const ILabeledEdge<N, L>> &p) const {
     return p ? p->hashCode() : 0;
   }
 };
 
-template <typename N, typename L>
-struct EdgePtrEq {
+template <typename N, typename L> struct EdgePtrEq {
   bool operator()(const std::shared_ptr<const ILabeledEdge<N, L>> &a,
                   const std::shared_ptr<const ILabeledEdge<N, L>> &b) const {
-    if (a == b) return true;
-    if (!a || !b) return false;
+    if (a == b)
+      return true;
+    if (!a || !b)
+      return false;
     return a->equals(*b);
   }
 };
@@ -51,8 +52,7 @@ struct EdgePtrEq {
 
 /// Directed labeled graph: nodes and edges with labels.
 /// Faithfully mirrors Ultimate's Java interface: both nodes and edges are sets.
-template <typename N, typename L>
-struct ILabeledGraph {
+template <typename N, typename L> struct ILabeledGraph {
   virtual ~ILabeledGraph() = default;
   virtual const std::unordered_set<N> &getNodes() const = 0;
   virtual const std::unordered_set<std::shared_ptr<const ILabeledEdge<N, L>>,
@@ -66,7 +66,8 @@ template <typename N, typename L>
 class GenericLabeledEdge final : public ILabeledEdge<N, L> {
 public:
   GenericLabeledEdge(N source, L label, N target)
-      : source_(std::move(source)), label_(std::move(label)), target_(std::move(target)) {}
+      : source_(std::move(source)), label_(std::move(label)),
+        target_(std::move(target)) {}
 
   N getSource() const override { return source_; }
   N getTarget() const override { return target_; }
@@ -81,7 +82,8 @@ public:
 
   bool equals(const ILabeledEdge<N, L> &other) const override {
     const auto *o = dynamic_cast<const GenericLabeledEdge<N, L> *>(&other);
-    return o != nullptr && source_ == o->source_ && label_ == o->label_ && target_ == o->target_;
+    return o != nullptr && source_ == o->source_ && label_ == o->label_ &&
+           target_ == o->target_;
   }
 
 private:
@@ -97,8 +99,7 @@ public:
   const std::unordered_set<N> &getNodes() const override { return nodes_; }
 
   const std::unordered_set<std::shared_ptr<const ILabeledEdge<N, L>>,
-                           detail::EdgePtrHash<N, L>,
-                           detail::EdgePtrEq<N, L>> &
+                           detail::EdgePtrHash<N, L>, detail::EdgePtrEq<N, L>> &
   getEdges() const override {
     return edges_;
   }
@@ -106,23 +107,22 @@ public:
   bool addNode(N node) { return nodes_.insert(std::move(node)).second; }
 
   bool addEdge(std::shared_ptr<const ILabeledEdge<N, L>> edge) {
-    if (!edge) return false;
+    if (!edge)
+      return false;
     addNode(edge->getSource());
     addNode(edge->getTarget());
     return edges_.insert(std::move(edge)).second;
   }
 
   bool addEdge(N source, L label, N target) {
-    return addEdge(std::make_shared<GenericLabeledEdge<N, L>>(std::move(source),
-                                                             std::move(label),
-                                                             std::move(target)));
+    return addEdge(std::make_shared<GenericLabeledEdge<N, L>>(
+        std::move(source), std::move(label), std::move(target)));
   }
 
 private:
   std::unordered_set<N> nodes_;
   std::unordered_set<std::shared_ptr<const ILabeledEdge<N, L>>,
-                     detail::EdgePtrHash<N, L>,
-                     detail::EdgePtrEq<N, L>>
+                     detail::EdgePtrHash<N, L>, detail::EdgePtrEq<N, L>>
       edges_;
 };
 

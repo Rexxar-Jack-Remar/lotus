@@ -13,10 +13,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "Alias/DDA/FlowDDA.h"
+
 #include "Alias/DDA/DDAClient.h"
 #include "Alias/DDA/DDAStat.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
+
+#include <algorithm>
+#include <functional>
+#include <queue>
+#include <stack>
+#include <unordered_set>
+#include <vector>
 
 #include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/Analysis/LoopInfo.h>
@@ -24,13 +32,6 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Casting.h>
-#include <algorithm>
-
-#include <functional>
-#include <queue>
-#include <stack>
-#include <unordered_set>
-#include <vector>
 
 using namespace llvm;
 using namespace lotus::analysis;
@@ -40,8 +41,8 @@ namespace {
 // Conservative fallback prefers pointer-typed SSA values associated with the
 // query state. We consider both the current location's value and the object-id
 // mapped value, then union AserPTA-backed object IDs for all candidates.
-static std::vector<const Value *> collectFallbackPointerValues(const SVFG *svfg,
-                                                               const LocDPItem &dpm) {
+static std::vector<const Value *>
+collectFallbackPointerValues(const SVFG *svfg, const LocDPItem &dpm) {
   std::vector<const Value *> values;
   if (const SVFGNode *loc = dpm.getLoc()) {
     if (const Value *locVal = loc->getValue()) {
@@ -93,9 +94,9 @@ void FlowDDA::handleOutOfBudgetDpm(const LocDPItem &dpm) {
   const PtsSet conservativePts = getConservativeCPts(dpm);
   if (!conservativePts.empty())
     DDAVFSolver<uint32_t, std::unordered_set<uint32_t>, LocDPItem,
-                 FlowDDA>::updateCachedPointsTo(dpm, conservativePts);
+                FlowDDA>::updateCachedPointsTo(dpm, conservativePts);
   DDAVFSolver<uint32_t, std::unordered_set<uint32_t>, LocDPItem,
-               FlowDDA>::addOutOfBudgetDpm(dpm);
+              FlowDDA>::addOutOfBudgetDpm(dpm);
 }
 
 bool FlowDDA::run(Module &M) {
@@ -186,21 +187,20 @@ void FlowDDA::connectIndirectCallees(const LocDPItem &dpm, const PtsSet &funPts,
       const Function *callee = dyn_cast_or_null<Function>(v);
       if (!callee || callee->isDeclaration())
         continue;
-      (void)svfgBuilder_->connectCallSiteToCalleeOnTheFly(
-          svfg_.get(), cs, callee, newEdges);
+      (void)svfgBuilder_->connectCallSiteToCalleeOnTheFly(svfg_.get(), cs,
+                                                          callee, newEdges);
     }
   }
 }
 
 void FlowDDA::forEachObjId(const PtsSet &pts,
-                            std::function<void(uint32_t)> callback) const {
+                           std::function<void(uint32_t)> callback) const {
   for (uint32_t id : pts)
     callback(id);
 }
 
 void FlowDDA::forEachElementInCPtSet(
-    const PtsSet &pts,
-    std::function<void(uint32_t, uint32_t)> callback) const {
+    const PtsSet &pts, std::function<void(uint32_t, uint32_t)> callback) const {
   for (uint32_t id : pts)
     callback(id, id);
 }
@@ -247,9 +247,8 @@ void FlowDDA::resolveFunPtr(const LocDPItem &dpm) {
   }
 }
 
-void FlowDDA::addLoadDpmAndCVar(const LocDPItem &dpm,
-                                  const LocDPItem &loadDpm,
-                                  uint32_t loadCVarObjId) {
+void FlowDDA::addLoadDpmAndCVar(const LocDPItem &dpm, const LocDPItem &loadDpm,
+                                uint32_t loadCVarObjId) {
   auto it = dpmToLoadDpmMap_.find(dpm);
   if (it != dpmToLoadDpmMap_.end())
     it->second = loadDpm;
@@ -275,7 +274,9 @@ LocDPItem FlowDDA::getLoadDpm(const LocDPItem &dpm) const {
   assert(false && "FlowDDA::getLoadDpm: loadDpm not found; "
                   "caller should have checked hasLoadDpm() first");
   llvm::errs() << "[DDA bug] FlowDDA::getLoadDpm: loadDpm not found for dpm "
-                  "(cur=" << dpm.getCurNodeID() << "). "
+                  "(cur="
+               << dpm.getCurNodeID()
+               << "). "
                   "Returning self — points-to result may be unsound.\n";
   return dpm;
 }
@@ -288,21 +289,24 @@ uint32_t FlowDDA::getLoadCVar(const LocDPItem &dpm) const {
   assert(false && "FlowDDA::getLoadCVar: loadCVar not found; "
                   "caller should have checked hasLoadDpm() first");
   llvm::errs() << "[DDA bug] FlowDDA::getLoadCVar: loadCVar not found for dpm "
-                  "(cur=" << dpm.getCurNodeID() << "). "
+                  "(cur="
+               << dpm.getCurNodeID()
+               << "). "
                   "Returning curNodeID — points-to result may be unsound.\n";
   return dpm.getCurNodeID();
 }
 
 bool FlowDDA::isMustAlias(const LocDPItem &loadDpm,
-                            const LocDPItem &storeDpm) const {
+                          const LocDPItem &storeDpm) const {
   (void)loadDpm;
   (void)storeDpm;
-  // Match upstream SVF DDAVFSolver default: FlowDDA does not implement must-alias.
+  // Match upstream SVF DDAVFSolver default: FlowDDA does not implement
+  // must-alias.
   return false;
 }
 
 bool FlowDDA::isHeapCondMemObj(uint32_t objId,
-                                 const StoreSVFGNode *store) const {
+                               const StoreSVFGNode *store) const {
   (void)store;
   if (objId == 0 || !svfg_)
     return false;
@@ -347,14 +351,13 @@ SVFGNode *FlowDDA::getDefNodeForValue(const Value *v) const {
   return nullptr;
 }
 
-LocDPItem FlowDDA::getDPImWithOldCond(const LocDPItem &oldDpm,
-                                       uint32_t objId,
-                                       const SVFGNode *loc) const {
+LocDPItem FlowDDA::getDPImWithOldCond(const LocDPItem &oldDpm, uint32_t objId,
+                                      const SVFGNode *loc) const {
   LocDPItem dpm(oldDpm);
   dpm.setLocVar(loc, objId);
-  // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load nodes.
-  // Bug 5 fix (FlowDDA side): guard with hasLoadDpm(oldDpm) before calling
-  // getLoadDpm(oldDpm) for Store nodes. The old code called getLoadDpm
+  // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load
+  // nodes. Bug 5 fix (FlowDDA side): guard with hasLoadDpm(oldDpm) before
+  // calling getLoadDpm(oldDpm) for Store nodes. The old code called getLoadDpm
   // unconditionally, triggering assert(false) + unsound fallback when oldDpm
   // had no associated load DPM (e.g. path from EntryChi/FormalIn to a Store).
   FlowDDA *nonConstThis = const_cast<FlowDDA *>(this);
@@ -399,7 +402,7 @@ bool FlowDDA::isIndirectEdge(SVFGEdge *e) {
 }
 
 void FlowDDA::handleAddr(PtsSet &pts, const LocDPItem &,
-                          const AddrSVFGNode *addr) {
+                         const AddrSVFGNode *addr) {
   if (!addr)
     return;
 
@@ -416,7 +419,8 @@ void FlowDDA::handleAddr(PtsSet &pts, const LocDPItem &,
     return;
   SVFGNodeBS objIds = getObjectIdsForValue(v);
   for (uint32_t id : objIds) {
-    // SVF field-insensitivity check: if isFieldInsensitive(srcID) srcID = getFIObjVar(srcID)
+    // SVF field-insensitivity check: if isFieldInsensitive(srcID) srcID =
+    // getFIObjVar(srcID)
     if (svfg_ && svfg_->isFieldInsensitiveObject(id) && svfgBuilder_) {
       uint32_t fiObj = svfgBuilder_->getOrCreateFIObjId(id);
       if (fiObj != 0) {
@@ -429,13 +433,13 @@ void FlowDDA::handleAddr(PtsSet &pts, const LocDPItem &,
 }
 
 FlowDDA::PtsSet FlowDDA::processGepPts(const GepSVFGNode *gep,
-                                         const PtsSet &srcPts) {
+                                       const PtsSet &srcPts) {
   if (!gep || !gep->getValue() || !isa<GetElementPtrInst>(gep->getValue()))
     return srcPts;
-  
+
   const auto *gi = cast<GetElementPtrInst>(gep->getValue());
   PtsSet tmpDstPts;
-  
+
   // Match SVF FlowDDA::processGepPts logic
   const bool isVariantFieldGep = !gi->hasAllConstantIndices();
   for (uint32_t objId : srcPts) {
@@ -453,16 +457,16 @@ FlowDDA::PtsSet FlowDDA::processGepPts(const GepSVFGNode *gep,
       gepObjId = objId;
     tmpDstPts.insert(gepObjId);
   }
-  
+
   return tmpDstPts;
 }
 
-bool FlowDDA::isStrongUpdate(const PtsSet &dstPts,
-                               const StoreSVFGNode *store) {
+bool FlowDDA::isStrongUpdate(const PtsSet &dstPts, const StoreSVFGNode *store) {
   if (dstPts.size() != 1)
     return false;
   const uint32_t objId = *dstPts.begin();
-  // Match SVF DDAVFSolver::isStrongUpdate: exclude heap, array, field-insensitive, recursion
+  // Match SVF DDAVFSolver::isStrongUpdate: exclude heap, array,
+  // field-insensitive, recursion
   if (isHeapCondMemObj(objId, store))
     return false;
   if (isArrayCondMemObj(objId))
@@ -522,7 +526,7 @@ FlowDDA::PtsSet FlowDDA::getPointsToCached(const Value *ptr) {
 }
 
 bool FlowDDA::getPointsToSet(const Value *ptr,
-                               std::vector<const Value *> &out) {
+                             std::vector<const Value *> &out) {
   out.clear();
   PtsSet pts = getPointsTo(ptr);
   if (!svfg_)
@@ -538,7 +542,8 @@ void FlowDDA::buildRecursionInfo() {
   recursiveFunctions_.clear();
   if (!module_)
     return;
-  std::unordered_map<const llvm::Function *, std::vector<const llvm::Function *>>
+  std::unordered_map<const llvm::Function *,
+                     std::vector<const llvm::Function *>>
       callGraph;
   for (const llvm::Function &F : *module_) {
     if (F.isDeclaration())
@@ -660,7 +665,8 @@ void FlowDDA::buildRecursionInfo() {
       for (const llvm::Function *f : scc)
         recursiveFunctions_.insert(f);
     } else if (scc.size() == 1) {
-      // Single-function SCC: check for self-recursion (self-edge in call graph).
+      // Single-function SCC: check for self-recursion (self-edge in call
+      // graph).
       const llvm::Function *f = *scc.begin();
       auto it = callGraph.find(f);
       if (it != callGraph.end()) {
@@ -732,7 +738,8 @@ FlowDDA::PtsSet FlowDDA::getConservativeCPts(const LocDPItem &dpm) const {
     }
     return PtsSet{};
   }
-  const std::vector<const Value *> values = collectFallbackPointerValues(svfg_.get(), dpm);
+  const std::vector<const Value *> values =
+      collectFallbackPointerValues(svfg_.get(), dpm);
   if (values.empty()) {
     if (svfgBuilder_) {
       auto *builder = const_cast<SVFGBuilder *>(svfgBuilder_.get());
@@ -793,7 +800,8 @@ bool FlowDDA::isInLoop(const llvm::Instruction *inst) const {
 }
 
 bool FlowDDA::isTopLevelPtrStmt(const SVFGNode *stmt) const {
-  // Match SVF DDAVFSolver::isTopLevelPtrStmt: Store and MRSVFG are not top-level
+  // Match SVF DDAVFSolver::isTopLevelPtrStmt: Store and MRSVFG are not
+  // top-level
   if (!stmt)
     return false;
   return stmt->getNodeKind() != SVFGK::Store && !stmt->isMemNode();

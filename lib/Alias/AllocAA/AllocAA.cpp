@@ -16,24 +16,18 @@
 #include "Alias/AllocAA/AllocAA.h"
 
 #include "Alias/Spec/AliasSpecManager.h"
-#include <utility>
 
+#include <utility>
 
 AllocAA::AllocAA(Module &M,
                  std::function<llvm::ScalarEvolution &(Function &F)> getSCEV,
                  std::function<llvm::LoopInfo &(Function &F)> getLoopInfo,
                  std::function<llvm::CallGraph &(void)> getCallGraph)
-  : M{ M },
-    getSCEV{ std::move(getSCEV) },
-    getLoopInfo{ std::move(getLoopInfo) },
-    getCallGraph{ std::move(getCallGraph) },
-    CGUnderMain{},
-    allocatorCalls{},
-    allocatorFunctionNames{},
-    readOnlyFunctionNames{},
-    memorylessFunctionNames{},
-    primitiveArrayGlobals{},
-    primitiveArrayLocals{} {
+    : M{M}, getSCEV{std::move(getSCEV)}, getLoopInfo{std::move(getLoopInfo)},
+      getCallGraph{std::move(getCallGraph)}, CGUnderMain{}, allocatorCalls{},
+      allocatorFunctionNames{}, readOnlyFunctionNames{},
+      memorylessFunctionNames{}, primitiveArrayGlobals{},
+      primitiveArrayLocals{} {
 
   // -------------------------------------------------------------------------
   // Step 1: Seed function-name sets from the shared AliasSpecManager.
@@ -55,11 +49,12 @@ AllocAA::AllocAA(Module &M,
   // mod/ref effects at all — i.e., it neither reads nor writes any memory
   // through its arguments or return value.  Typical examples: math helpers
   // like abs(), min(), max() that operate purely on integer values.
-  // "Memoryless" here means: no pointer-producing effects and no mod/ref effects.
+  // "Memoryless" here means: no pointer-producing effects and no mod/ref
+  // effects.
   for (const auto &name : specMgr.getNoEffectNames()) {
     auto mr = specMgr.getModRefInfo(name);
-    if (mr.modifiedArgs.empty() && mr.referencedArgs.empty() && !mr.modifiesReturn &&
-        !mr.referencesReturn) {
+    if (mr.modifiedArgs.empty() && mr.referencedArgs.empty() &&
+        !mr.modifiesReturn && !mr.referencesReturn) {
       memorylessFunctionNames.insert(name);
     }
   }
@@ -80,10 +75,10 @@ AllocAA::AllocAA(Module &M,
   return;
 }
 
-std::pair<Value *, GetElementPtrInst *> AllocAA::getPrimitiveArrayAccess(
-    Value *V) {
+std::pair<Value *, GetElementPtrInst *>
+AllocAA::getPrimitiveArrayAccess(Value *V) {
   // V must be a LoadInst or StoreInst; extract its pointer operand.
-  auto* memOp = getMemoryPointerOperand(V);
+  auto *memOp = getMemoryPointerOperand(V);
   if (!memOp)
     return std::make_pair(nullptr, nullptr);
 
@@ -92,7 +87,7 @@ std::pair<Value *, GetElementPtrInst *> AllocAA::getPrimitiveArrayAccess(
   //   Example IR:  store i32 42, i32* %arr
   //   where %arr is itself in primitiveArrayLocals or primitiveArrayGlobals.
   // -----------------------------------------------------------------------
-  auto* directAccessArray = getPrimitiveArray(memOp);
+  auto *directAccessArray = getPrimitiveArray(memOp);
   if (directAccessArray) {
     // directAccessArray->print(errs() << "Found direct access array: "); errs()
     // << "\n";
@@ -101,18 +96,18 @@ std::pair<Value *, GetElementPtrInst *> AllocAA::getPrimitiveArrayAccess(
     return std::make_pair(directAccessArray, nullptr);
 
   auto empty = std::make_pair(nullptr, nullptr);
-  if (auto* gep = dyn_cast<GetElementPtrInst>(memOp)) {
+  if (auto *gep = dyn_cast<GetElementPtrInst>(memOp)) {
     // The pointer operand is a GEP — check whether the GEP's base is a
     // known primitive array (local or global).
 
-    auto* gepMemOp = gep->getPointerOperand();
+    auto *gepMemOp = gep->getPointerOperand();
 
     // -----------------------------------------------------------------------
     // Pattern 2: GEP of a local (heap-allocated) primitive array.
     //   Example IR:  %ptr = getelementptr i32, i32* %mallocResult, i64 %i
     //                store i32 0, i32* %ptr
     // -----------------------------------------------------------------------
-    auto* localArray = getLocalPrimitiveArray(gepMemOp);
+    auto *localArray = getLocalPrimitiveArray(gepMemOp);
     if (localArray) {
       // localArray->print(errs() << "Found GEP access local array: "); errs()
       // << "\n";
@@ -128,8 +123,8 @@ std::pair<Value *, GetElementPtrInst *> AllocAA::getPrimitiveArrayAccess(
     //   Here gepMemOp is the LoadInst; we extract its pointer operand
     //   (@globalArrayPtr) and check whether it is a primitive-array global.
     // -----------------------------------------------------------------------
-    auto* loadMemOp = getMemoryPointerOperand(gepMemOp);
-    auto* globalArray =
+    auto *loadMemOp = getMemoryPointerOperand(gepMemOp);
+    auto *globalArray =
         loadMemOp ? getGlobalValuePrimitiveArray(loadMemOp) : nullptr;
     if (globalArray) {
       // globalArray->print(errs() << "Found GEP access global array: "); errs()
@@ -167,7 +162,7 @@ bool AllocAA::areGEPIndicesConstantOrIV(GetElementPtrInst *gep) {
     //   {start, +, stride}<enclosing-loop>
     // Any other SCEV type (e.g., scUnknown, scMulExpr) means the index is
     // not a simple IV, so we conservatively return false.
-    auto* scev = SE.getSCEV(indexV);
+    auto *scev = SE.getSCEV(indexV);
     if (scev->getSCEVType() != scAddRecExpr)
       return false;
   }
@@ -196,20 +191,20 @@ bool AllocAA::areIdenticalGEPAccessesInSameLoop(GetElementPtrInst *gep1,
   //   (a) Both GEPs directly use the same Value* as their pointer operand.
   //   (b) Both GEPs use loads from the same pointer (i.e., they both load
   //       from the same global/alloca and then index into the loaded array).
-  auto* gepOp1 = gep1->getPointerOperand();
-  auto* gepOp2 = gep2->getPointerOperand();
+  auto *gepOp1 = gep1->getPointerOperand();
+  auto *gepOp2 = gep2->getPointerOperand();
   if (gepOp1 != gepOp2) {
     // Try case (b): both pointer operands must be loads from the same address.
     Value *accessed = nullptr;
-    if (auto* load = dyn_cast<LoadInst>(gepOp1)) {
+    if (auto *load = dyn_cast<LoadInst>(gepOp1)) {
       accessed = load->getPointerOperand();
     } else
-      return false;  // gepOp1 is not a load — cannot match.
-    if (auto* load = dyn_cast<LoadInst>(gepOp2)) {
+      return false; // gepOp1 is not a load — cannot match.
+    if (auto *load = dyn_cast<LoadInst>(gepOp2)) {
       if (accessed != load->getPointerOperand())
-        return false;  // Loads from different addresses.
+        return false; // Loads from different addresses.
     } else
-      return false;  // gepOp2 is not a load — cannot match.
+      return false; // gepOp2 is not a load — cannot match.
   }
 
   // Finally, all index operands must be the same Value* (syntactic equality).
@@ -227,20 +222,20 @@ bool AllocAA::areIdenticalGEPAccessesInSameLoop(GetElementPtrInst *gep1,
 }
 
 bool AllocAA::isReadOnly(StringRef functionName) {
-  return readOnlyFunctionNames.find(functionName.str())
-         != readOnlyFunctionNames.end();
+  return readOnlyFunctionNames.find(functionName.str()) !=
+         readOnlyFunctionNames.end();
 }
 
 bool AllocAA::isMemoryless(StringRef functionName) {
-  return memorylessFunctionNames.find(functionName.str())
-         != memorylessFunctionNames.end();
+  return memorylessFunctionNames.find(functionName.str()) !=
+         memorylessFunctionNames.end();
 }
 
 void AllocAA::collectCGUnderFunctionMain(Module &M, CallGraph &callGraph) {
 
   // Require a "main" entry point — the analysis is scoped to the live
   // call graph rooted at main.
-  auto* main = M.getFunction("main");
+  auto *main = M.getFunction("main");
   assert(main != nullptr);
 
   // BFS over the call graph starting from main.
@@ -251,13 +246,13 @@ void AllocAA::collectCGUnderFunctionMain(Module &M, CallGraph &callGraph) {
   funcToTraverse.push(main);
   reached.insert(main);
   while (!funcToTraverse.empty()) {
-    auto* func = funcToTraverse.front();
+    auto *func = funcToTraverse.front();
     funcToTraverse.pop();
 
-    auto* funcCGNode = callGraph[func];
+    auto *funcCGNode = callGraph[func];
     for (auto &callRecord :
          make_range(funcCGNode->begin(), funcCGNode->end())) {
-      auto* F = callRecord.second->getFunction();
+      auto *F = callRecord.second->getFunction();
       // Skip external declarations (no body to analyse) and null entries
       // (which represent indirect calls whose target is unknown).
       if (!F || F->empty())
@@ -297,20 +292,20 @@ void AllocAA::collectFunctionCallsTo(CallGraph &callGraph,
                                      std::set<CallInst *> &calls) {
   // For each function reachable from main, inspect its outgoing call-graph
   // edges and record any CallInst that targets a function in `called`.
-  for (auto* caller : CGUnderMain) {
-    auto* funcCGNode = callGraph[caller];
+  for (auto *caller : CGUnderMain) {
+    auto *funcCGNode = callGraph[caller];
     for (auto &callRecord :
          make_range(funcCGNode->begin(), funcCGNode->end())) {
-      auto* F = callRecord.second->getFunction();
+      auto *F = callRecord.second->getFunction();
       if (called.find(F) == called.end())
         continue;
 
       // callRecord.first is a WeakTrackingVH (value handle) to the call site.
       // Dereference it to get the actual Value*, then cast to CallInst.
-      auto* vO = &*callRecord.first;
+      auto *vO = &*callRecord.first;
       if (vO) {
         auto v = *vO;
-        if (auto* call = dyn_cast<CallInst>(v)) {
+        if (auto *call = dyn_cast<CallInst>(v)) {
           calls.insert(call);
         }
       }
@@ -319,9 +314,8 @@ void AllocAA::collectFunctionCallsTo(CallGraph &callGraph,
 }
 
 bool AllocAA::collectUserInstructions(
-    Value *V,
-    std::set<Instruction *> &userInstructions) {
-  for (auto* user : V->users()) {
+    Value *V, std::set<Instruction *> &userInstructions) {
+  for (auto *user : V->users()) {
     Instruction *I = nullptr;
     if (isa<Instruction>(user)) {
       // Common case: the user is a regular instruction.
@@ -333,7 +327,7 @@ bool AllocAA::collectUserInstructions(
       // The hasOneUse() guard ensures we don't accidentally merge multiple
       // instruction users into one.
       if (user->hasOneUse()) {
-        auto* operUser = *user->user_begin();
+        auto *operUser = *user->user_begin();
         if (isa<Instruction>(operUser)) {
           I = (Instruction *)operUser;
         }
@@ -377,7 +371,7 @@ void AllocAA::collectPrimitiveArrayValues(Module &M) {
     // Only consider globals that are actually used by functions reachable
     // from main.  Globals used only by dead code are irrelevant.
     bool relevantToMain = false;
-    for (auto* I : scopedUsers) {
+    for (auto *I : scopedUsers) {
       relevantToMain |= CGUnderMain.find(I->getFunction()) != CGUnderMain.end();
       if (relevantToMain)
         break;
@@ -398,7 +392,7 @@ void AllocAA::collectPrimitiveArrayValues(Module &M) {
   // For each call site of a known allocator, check whether the returned
   // pointer is used only in ways that qualify it as a primitive array.
   // -----------------------------------------------------------------------
-  for (auto* call : allocatorCalls) {
+  for (auto *call : allocatorCalls) {
     std::set<Instruction *> allUsers;
     if (!collectUserInstructions(call, allUsers))
       continue;
@@ -408,8 +402,7 @@ void AllocAA::collectPrimitiveArrayValues(Module &M) {
 }
 
 bool AllocAA::isPrimitiveArrayPointer(
-    Value *V,
-    std::set<Instruction *> &userInstructions) {
+    Value *V, std::set<Instruction *> &userInstructions) {
   // A "primitive array pointer" is a value (typically a global variable of
   // pointer type, e.g., `int **g`) that is used exclusively to:
   //   (a) Receive a freshly-allocated array (store of a single-use allocator
@@ -420,14 +413,14 @@ bool AllocAA::isPrimitiveArrayPointer(
   // Any other use (e.g., passing the pointer to an unknown function, storing
   // a non-allocator value) disqualifies the value.
   bool isPrimitive = true;
-  for (auto* I : userInstructions) {
-    if (auto* store = dyn_cast<StoreInst>(I)) {
+  for (auto *I : userInstructions) {
+    if (auto *store = dyn_cast<StoreInst>(I)) {
       // The store must write a freshly-allocated array into this pointer.
       // "Freshly allocated" means the stored value is a CallInst to a known
       // allocator AND that call has exactly one use (this store), so the
       // allocation is not shared with any other pointer.
-      if (auto* storedCall = dyn_cast<CallInst>(store->getValueOperand())) {
-        auto* callF = storedCall->getCalledFunction();
+      if (auto *storedCall = dyn_cast<CallInst>(store->getValueOperand())) {
+        auto *callF = storedCall->getCalledFunction();
         // Conservatively return false for indirect calls — we cannot know
         // what an indirect call returns.
         if (!callF) {
@@ -443,13 +436,13 @@ bool AllocAA::isPrimitiveArrayPointer(
       // Any other store (non-allocator value, or shared allocation) fails.
     }
 
-    if (auto* load = dyn_cast<LoadInst>(I)) {
+    if (auto *load = dyn_cast<LoadInst>(I)) {
       // A load of the pointer is acceptable if the loaded value is itself
       // used only as a primitive array (i.e., all uses of the loaded pointer
       // are GEPs that don't escape, or read-only calls).
       std::set<Instruction *> allUsers;
-      if (collectUserInstructions(load, allUsers)
-          && isPrimitiveArray(load, allUsers)) {
+      if (collectUserInstructions(load, allUsers) &&
+          isPrimitiveArray(load, allUsers)) {
         continue;
       }
     }
@@ -478,28 +471,28 @@ bool AllocAA::isPrimitiveArray(Value *V,
   // Any other use (store of the pointer, call to an unknown/write function,
   // return of a pointer type, etc.) disqualifies the value.
   auto isPrimitive = true;
-  for (auto* I : userInstructions) {
+  for (auto *I : userInstructions) {
     // Case 1: Cast — recursively check the cast result.
-    if (auto* cast = dyn_cast<CastInst>(I)) {
+    if (auto *cast = dyn_cast<CastInst>(I)) {
       std::set<Instruction *> castUsers;
-      if (collectUserInstructions(cast, castUsers)
-          && isPrimitiveArray(cast, castUsers))
+      if (collectUserInstructions(cast, castUsers) &&
+          isPrimitiveArray(cast, castUsers))
         continue;
     }
     // Case 2: GEP — acceptable if the GEP result does not escape.
     // We seed the `checked` set with the GEP itself to avoid re-visiting it
     // in the recursive escape analysis.
-    if (auto* GEPUser = dyn_cast<GetElementPtrInst>(I)) {
-      if (doesValueNotEscape({ GEPUser }, GEPUser))
+    if (auto *GEPUser = dyn_cast<GetElementPtrInst>(I)) {
+      if (doesValueNotEscape({GEPUser}, GEPUser))
         continue;
     }
     // Case 3: Call to a known read-only function.
-    if (auto* callUser = dyn_cast<CallInst>(I)) {
-      auto* calleeFn = callUser->getCalledFunction();
+    if (auto *callUser = dyn_cast<CallInst>(I)) {
+      auto *calleeFn = callUser->getCalledFunction();
       if (calleeFn != nullptr) {
         auto fnName = calleeFn->getName();
-        if (readOnlyFunctionNames.find(fnName.str())
-            != readOnlyFunctionNames.end())
+        if (readOnlyFunctionNames.find(fnName.str()) !=
+            readOnlyFunctionNames.end())
           continue;
       }
     }
@@ -518,12 +511,12 @@ bool AllocAA::doesValueNotEscape(std::set<Instruction *> checked,
   // expression that appears in a global initialiser), the value has escaped
   // to a context we cannot analyse.
   User *unkUser = nullptr;
-  for (auto* user : I->users()) {
+  for (auto *user : I->users()) {
     if (!isa<Instruction>(user)) {
       unkUser = user;
       break;
     }
-    auto* userI = cast<Instruction>(user);
+    auto *userI = cast<Instruction>(user);
     // Cycle guard: if we have already visited this instruction on the current
     // path, skip it to avoid infinite recursion.
     if (checked.find(userI) != checked.end())
@@ -535,9 +528,9 @@ bool AllocAA::doesValueNotEscape(std::set<Instruction *> checked,
     // -----------------------------------------------------------------------
     // Branch and switch instructions use the value only as a condition or
     // selector — they do not propagate the pointer anywhere.
-    Instruction* userInst;
-    if (true && ((userInst = dyn_cast<Instruction>(user)) != nullptr)
-        && userInst->isTerminator()) {
+    Instruction *userInst;
+    if (true && ((userInst = dyn_cast<Instruction>(user)) != nullptr) &&
+        userInst->isTerminator()) {
       if (isa<BranchInst>(user) || isa<SwitchInst>(user))
         continue;
       if (isa<ReturnInst>(user)) {
@@ -550,7 +543,7 @@ bool AllocAA::doesValueNotEscape(std::set<Instruction *> checked,
         // a pointer, but since at no point along the uses of the original
         // value are pointer based instructions permitted, no intentional
         // pointer value can be returned here.
-        auto* returnV = cast<ReturnInst>(user)->getReturnValue();
+        auto *returnV = cast<ReturnInst>(user)->getReturnValue();
         if (isa<IntegerType>(returnV->getType()))
           continue;
       }
@@ -565,13 +558,13 @@ bool AllocAA::doesValueNotEscape(std::set<Instruction *> checked,
     // A store is acceptable only if BOTH the stored value AND the storage
     // location are themselves non-escaping.  This prevents the array pointer
     // from being written into a location that could be read by unknown code.
-    if (auto* store = dyn_cast<StoreInst>(user)) {
-      auto* stored = store->getValueOperand();
+    if (auto *store = dyn_cast<StoreInst>(user)) {
+      auto *stored = store->getValueOperand();
       auto storedDoesNotEscape = false;
       // Only integer-typed stored values are considered non-escaping.
       // A pointer-typed stored value would propagate the array address.
       if (isa<IntegerType>(stored->getType())) {
-        if (auto* storedI = dyn_cast<Instruction>(stored)) {
+        if (auto *storedI = dyn_cast<Instruction>(stored)) {
           if (doesValueNotEscape(checked, storedI))
             storedDoesNotEscape = true;
         }
@@ -582,10 +575,10 @@ bool AllocAA::doesValueNotEscape(std::set<Instruction *> checked,
       // The storage location must also be non-escaping.  The simplest case
       // is that the storage IS the instruction I itself (i.e., we are storing
       // into the array, not storing the array pointer somewhere else).
-      auto* storage = store->getPointerOperand();
+      auto *storage = store->getPointerOperand();
       auto storageDoesNotEscape = storage == (Value *)I;
       if (!storageDoesNotEscape) {
-        if (auto* storageI = dyn_cast<Instruction>(storage)) {
+        if (auto *storageI = dyn_cast<Instruction>(storage)) {
           if (doesValueNotEscape(checked, storageI))
             storageDoesNotEscape = true;
         }
@@ -630,11 +623,11 @@ void AllocAA::collectMemorylessFunctions(Module &M) {
   // sense that if a function passes, it truly has no memory effects.  It is
   // not complete: a function that calls another memoryless function will not
   // be recognised here (the TODO below tracks this limitation).
-  for (auto* F : this->CGUnderMain) {
+  for (auto *F : this->CGUnderMain) {
 
     auto isMemoryless = true;
-    for (auto& B : *F) {
-      for (auto& I : B) {
+    for (auto &B : *F) {
+      for (auto &I : B) {
         // Any load, store, or call immediately disqualifies the function.
         if (isa<LoadInst>(I) || isa<StoreInst>(I) || isa<CallInst>(I)) {
           isMemoryless = false;
@@ -670,15 +663,15 @@ void AllocAA::collectMemorylessFunctions(Module &M) {
 }
 
 Value *AllocAA::getPrimitiveArray(Value *V) {
-  auto*  localArray = getLocalPrimitiveArray(V);
+  auto *localArray = getLocalPrimitiveArray(V);
   return localArray ? localArray : getGlobalValuePrimitiveArray(V);
 }
 
 Value *AllocAA::getLocalPrimitiveArray(Value *V) {
-  auto* targetV = V;
-  if (auto* cast = dyn_cast<CastInst>(V))
+  auto *targetV = V;
+  if (auto *cast = dyn_cast<CastInst>(V))
     targetV = cast->getOperand(0);
-  if (auto* I = dyn_cast<Instruction>(targetV)) {
+  if (auto *I = dyn_cast<Instruction>(targetV)) {
     if (primitiveArrayLocals.find(I) != primitiveArrayLocals.end()) {
       return I;
     }
@@ -687,10 +680,10 @@ Value *AllocAA::getLocalPrimitiveArray(Value *V) {
 }
 
 Value *AllocAA::getGlobalValuePrimitiveArray(Value *V) {
-  auto* targetV = V;
-  if (auto* cast = dyn_cast<CastInst>(V))
+  auto *targetV = V;
+  if (auto *cast = dyn_cast<CastInst>(V))
     targetV = cast->getOperand(0);
-  if (auto* GV = dyn_cast<GlobalValue>(targetV)) {
+  if (auto *GV = dyn_cast<GlobalValue>(targetV)) {
     if (primitiveArrayGlobals.find(GV) != primitiveArrayGlobals.end()) {
       return GV;
     }
@@ -699,10 +692,10 @@ Value *AllocAA::getGlobalValuePrimitiveArray(Value *V) {
 }
 
 Value *AllocAA::getMemoryPointerOperand(Value *V) {
-  if (auto* load = dyn_cast<LoadInst>(V)) {
+  if (auto *load = dyn_cast<LoadInst>(V)) {
     return load->getPointerOperand();
   }
-  if (auto* store = dyn_cast<StoreInst>(V)) {
+  if (auto *store = dyn_cast<StoreInst>(V)) {
     return store->getPointerOperand();
   }
   return nullptr;
@@ -730,8 +723,9 @@ Value *AllocAA::getBasePointer(Value *p) {
   assert(p != nullptr);
   // Strip a single GEP layer to reach the base allocation.
   // We do not recurse through multiple GEPs; a single level is sufficient
-  // for the allocation-origin checks performed by canPointToTheSameObject_Globals.
-  if (auto* gep = dyn_cast<GetElementPtrInst>(p)) {
+  // for the allocation-origin checks performed by
+  // canPointToTheSameObject_Globals.
+  if (auto *gep = dyn_cast<GetElementPtrInst>(p)) {
     return gep->getPointerOperand();
   }
   return p;
@@ -739,8 +733,8 @@ Value *AllocAA::getBasePointer(Value *p) {
 
 bool AllocAA::canPointToTheSameObject_Globals(Value *p1, Value *p2) {
   // Strip GEPs to reach the base allocation of each pointer.
-  auto* b1 = this->getBasePointer(p1);
-  auto* b2 = this->getBasePointer(p2);
+  auto *b1 = this->getBasePointer(p1);
+  auto *b2 = this->getBasePointer(p2);
 
   // Rule 1: A global variable and a stack allocation live in different
   // storage classes and can never alias.
@@ -772,7 +766,7 @@ bool AllocAA::canPointToTheSameObject_ArgumentAttributes(Value *p1, Value *p2) {
   // neither), we cannot draw a conclusion and return true (may-alias).
 
   // Try to identify which of p1/p2 is the load and which is the store.
-  auto* loadInst = dyn_cast<LoadInst>(p1);
+  auto *loadInst = dyn_cast<LoadInst>(p1);
   if (!loadInst) {
     loadInst = dyn_cast<LoadInst>(p2);
   }
@@ -781,7 +775,7 @@ bool AllocAA::canPointToTheSameObject_ArgumentAttributes(Value *p1, Value *p2) {
     return true;
   }
 
-  auto* storeInst = dyn_cast<StoreInst>(p1);
+  auto *storeInst = dyn_cast<StoreInst>(p1);
   if (!storeInst) {
     storeInst = dyn_cast<StoreInst>(p2);
   }
@@ -792,8 +786,8 @@ bool AllocAA::canPointToTheSameObject_ArgumentAttributes(Value *p1, Value *p2) {
 
   // Determine the base pointer of the load: strip a GEP if present so we
   // can inspect the underlying argument.
-  auto* loadPtr = loadInst->getPointerOperand();
-  if (auto* gep = dyn_cast<GetElementPtrInst>(loadPtr)) {
+  auto *loadPtr = loadInst->getPointerOperand();
+  if (auto *gep = dyn_cast<GetElementPtrInst>(loadPtr)) {
     loadPtr = gep->getPointerOperand();
   }
   assert(loadPtr != nullptr);
@@ -802,14 +796,13 @@ bool AllocAA::canPointToTheSameObject_ArgumentAttributes(Value *p1, Value *p2) {
   // marked `readonly` (or `readnone`).  Such an argument guarantees the
   // callee does not write through it, so a load through it cannot alias any
   // store in the same function.
-  auto* obj1 = dyn_cast<Argument>(loadPtr);
+  auto *obj1 = dyn_cast<Argument>(loadPtr);
   if (obj1 == nullptr) {
-    return true;  // Base is not an argument — check does not apply.
+    return true; // Base is not an argument — check does not apply.
   }
   if (obj1->onlyReadsMemory()) {
-    return false;  // readonly argument → load cannot alias the store.
+    return false; // readonly argument → load cannot alias the store.
   }
 
   return true;
 }
-
