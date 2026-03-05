@@ -149,11 +149,7 @@ IterativeIDESolver<Problem>::IterativeIDESolver(Problem& problem)
 
 template<typename Problem>
 void IterativeIDESolver<Problem>::solve(const llvm::Module& module) {
-    if (m_config.incremental_mode && !m_last_version.function_hashes.empty()) {
-        solve_incremental(module);
-    } else {
-        solve_full(module);
-    }
+    solve_full(module);
 }
 
 template<typename Problem>
@@ -185,7 +181,9 @@ void IterativeIDESolver<Problem>::solve_full(const llvm::Module& module) {
 }
 
 template<typename Problem>
-void IterativeIDESolver<Problem>::solve_incremental(const llvm::Module& module) {
+void IterativeIDESolver<Problem>::solve_incremental(
+    const llvm::Module& module,
+    const std::set<std::string>& changed_functions) {
     if (!m_config.enable_caching || m_cached_results.empty()) {
         solve_full(module);
         return;
@@ -194,48 +192,72 @@ void IterativeIDESolver<Problem>::solve_incremental(const llvm::Module& module) 
     m_solve_start_time = std::chrono::steady_clock::now();
     m_stats.num_iterations++;
     
-    // Take version snapshot and detect changes
+    // Take version snapshot and detect additional structural changes
     auto current_version = m_version_tracker.snapshot(module);
-    m_changed_functions = m_version_tracker.detect_changes(m_last_version, current_version);
+    m_changed_functions.assign(changed_functions.begin(), changed_functions.end());
+    auto detected = m_version_tracker.detect_changes(m_last_version, current_version);
     auto added = m_version_tracker.detect_additions(m_last_version, current_version);
     auto removed = m_version_tracker.detect_removals(m_last_version, current_version);
-    
-    // Combine all changes
+
+    m_changed_functions.insert(m_changed_functions.end(), detected.begin(), detected.end());
     m_changed_functions.insert(m_changed_functions.end(), added.begin(), added.end());
-    
-    // Invalidate results for removed functions
+
+    std::set<std::string> changed_set(m_changed_functions.begin(),
+                                      m_changed_functions.end());
     for (const auto& func_name : removed) {
-        invalidate_function_results(func_name);
+        changed_set.insert(func_name);
     }
-    
-    // Invalidate results for changed functions
-    for (const auto& func_name : m_changed_functions) {
-        invalidate_function_results(func_name);
-    }
-    
-    // Determine which functions to re-analyze
-    std::set<std::string> to_reanalyze;
-    for (const auto& func_name : m_changed_functions) {
-        to_reanalyze.insert(func_name);
-        
-        // Also re-analyze callers of changed functions
-        // (simplified - in practice, need call graph info)
-        for (const auto& func : module) {
-            for (const auto& bb : func) {
-                for (const auto& inst : bb) {
-                    if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
-                        if (call->getCalledFunction() && 
-                            call->getCalledFunction()->getName() == func_name) {
-                            to_reanalyze.insert(func.getName().str());
-                        }
+
+    // Build direct call graph and expand changed frontier to callers+callees.
+    std::unordered_map<std::string, std::set<std::string>> callers_of;
+    std::unordered_map<std::string, std::set<std::string>> callees_of;
+    for (const auto& func : module) {
+        if (func.isDeclaration()) {
+            continue;
+        }
+        const std::string caller_name = func.getName().str();
+        for (const auto& bb : func) {
+            for (const auto& inst : bb) {
+                if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
+                    if (const llvm::Function* callee = call->getCalledFunction()) {
+                        const std::string callee_name = callee->getName().str();
+                        callees_of[caller_name].insert(callee_name);
+                        callers_of[callee_name].insert(caller_name);
                     }
                 }
             }
         }
     }
-    
+
+    std::set<std::string> to_reanalyze = changed_set;
+    std::vector<std::string> queue(to_reanalyze.begin(), to_reanalyze.end());
+    size_t qi = 0;
+    while (qi < queue.size()) {
+        const std::string curr = queue[qi++];
+        auto callers_it = callers_of.find(curr);
+        if (callers_it != callers_of.end()) {
+            for (const auto& caller : callers_it->second) {
+                if (to_reanalyze.insert(caller).second) {
+                    queue.push_back(caller);
+                }
+            }
+        }
+        auto callees_it = callees_of.find(curr);
+        if (callees_it != callees_of.end()) {
+            for (const auto& callee : callees_it->second) {
+                if (to_reanalyze.insert(callee).second) {
+                    queue.push_back(callee);
+                }
+            }
+        }
+    }
+
+    for (const auto& func_name : to_reanalyze) {
+        invalidate_function_results(func_name);
+    }
+
     m_stats.num_reanalyzed_functions = to_reanalyze.size();
-    
+
     if (to_reanalyze.empty()) {
         // No changes detected, use cached results
         m_current_values = m_cached_results.values;
@@ -286,26 +308,20 @@ void IterativeIDESolver<Problem>::run_solver_on_functions(
         m_reanalyzed_functions.insert(func_name);
     }
     
-    // BUG (fixed): the old code called run_solver_on_module() unconditionally,
-    // which always ran a full inter-procedural analysis over the entire module.
-    // This completely defeated the purpose of incremental mode: every
-    // "incremental" solve was as expensive as a full solve, and the
-    // m_reanalyzed_functions set was populated but never used to restrict the
-    // analysis scope.
-    //
-    // A truly partial re-analysis would require seeding the solver only at the
-    // entry points of the changed functions and propagating only within those
-    // functions (and their transitive callees).  That requires deeper solver
-    // integration that is not yet implemented.
-    //
-    // For now we still run the full solver, but we document the limitation
-    // clearly and leave the incremental_mode flag as a no-op performance hint
-    // rather than silently claiming partial analysis.  The merge step below
-    // will correctly prefer fresh results over stale cached ones.
-    //
-    // TODO: implement true partial re-analysis by seeding only changed
-    // functions and restricting propagation to their SCCs.
-    run_solver_on_module(module);
+    IDESolver<Problem> solver(m_problem);
+    solver.solve(module);
+    m_current_values.clear();
+    for (const auto& pair : solver.get_all_values()) {
+        const llvm::Instruction* inst = pair.first;
+        if (!inst || !inst->getParent() || !inst->getParent()->getParent()) {
+            continue;
+        }
+        const std::string func_name =
+            inst->getParent()->getParent()->getName().str();
+        if (functions.find(func_name) != functions.end()) {
+            m_current_values.insert(pair);
+        }
+    }
 }
 
 template<typename Problem>

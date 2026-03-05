@@ -9,6 +9,8 @@
 #include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/IFDS/Core/IFDSFramework.h"
 #include "Dataflow/IFDS/Core/IFDSIDESolverConfig.h"
+#include "Dataflow/IFDS/Core/SolverGraphContext.h"
+#include "Dataflow/IFDS/Core/SolverRunState.h"
 
 #include <utility>
 #include <vector>
@@ -98,10 +100,7 @@ private:
   bool m_bound_reached = false;
 
   // Simple sequential data structures (no thread-safety needed)
-  // Use unordered_set for O(1) average path-edge lookup (hot path).
-  std::unordered_set<PathEdgeType, PathEdgeHash<Fact>> m_path_edges;
-  std::set<SummaryEdgeType> m_summary_edges;
-  std::vector<PathEdgeType> m_worklist;
+  IFDSRunState<Fact> m_state;
   std::unordered_map<const llvm::Instruction *, FactSet> m_entry_facts;
   std::unordered_map<const llvm::Instruction *, FactSet> m_exit_facts;
 
@@ -198,25 +197,7 @@ private:
                      PairHash<const llvm::CallBase *, Fact>>
       m_call_to_return_flow_cache;
 
-  // Call graph information (read-only after initialization)
-  std::unordered_map<const llvm::CallBase *,
-                     std::vector<const llvm::Function *>>
-      m_call_to_callee;
-  std::unordered_map<const llvm::Function *,
-                     std::vector<const llvm::CallBase *>>
-      m_callee_to_calls;
-  std::unordered_map<const llvm::Function *,
-                     std::vector<const llvm::ReturnInst *>>
-      m_function_returns;
-
-  // CFG navigation helpers (read-only after initialization)
-  std::unordered_map<const llvm::Instruction *,
-                     std::vector<const llvm::Instruction *>>
-      m_successors;
-  std::unordered_map<const llvm::Instruction *,
-                     std::vector<const llvm::Instruction *>>
-      m_predecessors;
-  std::unique_ptr<::dataflow::controlflow::LLVMInterCFG> m_icfg;
+  SolverGraphContext<Fact, Problem> m_graph_context;
 
   // Core IFDS Tabulation Algorithm Methods
   bool propagate_path_edge(const PathEdgeType &edge);

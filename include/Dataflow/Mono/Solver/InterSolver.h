@@ -64,9 +64,6 @@ public:
                         const mono_container_t &Rhs) {
       return Problem.equal_to(Lhs, Rhs);
     };
-    auto GetCallees = [this](llvm::Instruction *Inst) {
-      return getCalleesOfCallAt(Inst);
-    };
 
     std::vector<ContextKey> RootKeys;
     std::map<ContextKey, mono_container_t> SeedIns;
@@ -107,10 +104,9 @@ public:
       ICF = OwnedICF.get();
     }
 
-    auto *Raw = Engine.applyForwardFromSeeds(
+    Result = Engine.applyForwardFromSeeds(
         M, RootKeys, ICF, SeedIns, ComputeGEN, ComputeKILL, InitializeIN,
-        InitializeOUT, ComputeIN, ComputeOUT, Equal, GetCallees);
-    Result.reset(Raw);
+        InitializeOUT, ComputeIN, ComputeOUT, Equal);
   }
 
   const ResultTy *getResults() const { return Result.get(); }
@@ -186,14 +182,6 @@ private:
     return &BB->getParent()->getEntryBlock() == BB && Inst == &*BB->begin();
   }
 
-  static llvm::Function *getDirectCallee(llvm::Instruction *Inst) {
-    auto *Call = llvm::dyn_cast<llvm::CallBase>(Inst);
-    if (Call == nullptr) {
-      return nullptr;
-    }
-    return Call->getCalledFunction();
-  }
-
   static std::vector<llvm::Instruction *>
   continuationInstructions(llvm::Instruction *CallInst) {
     std::vector<llvm::Instruction *> Continuations;
@@ -224,11 +212,6 @@ private:
     return false;
   }
 
-  std::vector<llvm::Function *>
-  getCalleesOfCallAt(llvm::Instruction *Inst) const {
-    return Problem.getCalleesOfCallAt(Inst);
-  }
-
   void initializeIN(llvm::Instruction *, mono_container_t &IN) {
     IN = Problem.allTop();
   }
@@ -257,7 +240,7 @@ private:
     if (isFunctionEntry(Inst) && llvm::isa<llvm::CallBase>(PredInst)) {
       // Call edge: PredInst is the call site, Inst is the callee entry.
       // Use callFlow to map caller facts to callee entry facts.
-      const auto Callees = getCalleesOfCallAt(PredInst);
+      const auto Callees = getCalleesForCall(PredInst);
       bool Matches = false;
       for (auto *Callee : Callees) {
         if (Callee == Inst->getFunction()) {
@@ -302,7 +285,7 @@ private:
     } else if (llvm::isa<llvm::CallBase>(PredInst) &&
                isContinuationOfCall(Inst, PredInst)) {
       // Call-to-return edge: facts that bypass the callee.
-      const auto Callees = getCalleesOfCallAt(PredInst);
+      const auto Callees = getCalleesForCall(PredInst);
       Incoming = Problem.callToRetFlow(PredInst, Inst, Callees, PredOut);
     } else {
       // Normal intra-procedural edge: facts flow directly from OUT[Pred].
@@ -331,6 +314,19 @@ private:
     // typically passes through facts unchanged); the call/return flow functions
     // are applied in computeIN at the callee entry / return site.
     OUT = Problem.normalFlow(Inst, DF->IN(Inst, Ctx));
+  }
+
+  std::vector<llvm::Function *> getCalleesForCall(llvm::Instruction *Inst) const {
+    if (ICF == nullptr) {
+      return Problem.getCalleesOfCallAt(Inst);
+    }
+    std::vector<llvm::Function *> Callees;
+    for (auto *Callee : ICF->getCalleesOfCallAt(Inst)) {
+      if (Callee != nullptr) {
+        Callees.push_back(Callee);
+      }
+    }
+    return Callees;
   }
 
   ProblemTy &Problem;

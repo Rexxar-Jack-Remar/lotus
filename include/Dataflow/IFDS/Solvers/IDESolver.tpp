@@ -13,6 +13,7 @@
 #include <llvm/IR/CFG.h>
 #include <llvm/Support/raw_ostream.h>
 #include <algorithm>
+#include <chrono>
 
 namespace ifds {
 
@@ -87,71 +88,21 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     m_jump_functions.clear();
     m_incoming.clear();
     m_end_summaries.clear();
+    m_path_edges.clear();
+    m_summary_edges.clear();
     m_compose_cache.clear();
     m_join_cache.clear();
     m_normal_edge_cache.clear();
     m_call_to_return_edge_cache.clear();
     m_worklist.clear();
-
-    auto icfg = std::make_unique<::dataflow::controlflow::LLVMInterCFG>(
-        const_cast<llvm::Module*>(&module));
-
-    // Build call graph (supports indirect calls through ICFG resolution)
-    std::unordered_map<const llvm::CallBase*, std::vector<const llvm::Function*>>
-        call_to_callees;
-    std::unordered_map<const llvm::Function*, std::vector<const llvm::CallBase*>> callee_to_calls;
-
-    for (const llvm::Function& func : module) {
-        if (func.isDeclaration()) continue;
-        for (const llvm::BasicBlock& bb : func) {
-            for (const llvm::Instruction& inst : bb) {
-                if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
-                    std::vector<const llvm::Function*> callees;
-                    std::unordered_set<const llvm::Function*> seen;
-                    for (const llvm::Function* callee :
-                         icfg->getCalleesOfCallAt(const_cast<llvm::CallBase*>(call))) {
-                        if (!callee || !seen.insert(callee).second) {
-                            continue;
-                        }
-                        callees.push_back(callee);
-                        callee_to_calls[callee].push_back(call);
-                    }
-                    if (!callees.empty()) {
-                        call_to_callees[call] = std::move(callees);
-                    }
-                }
-            }
-        }
-    }
-
-    // Build CFG successors from ICFG (covers invoke/unwind and inter-IR nuances)
-    std::unordered_map<const llvm::Instruction*, std::vector<const llvm::Instruction*>> successors;
-    for (const llvm::Function& func : module) {
-        if (func.isDeclaration()) continue;
-        for (const llvm::BasicBlock& bb : func) {
-            for (const llvm::Instruction& inst : bb) {
-                std::vector<const llvm::Instruction*> succs;
-                for (auto* succ : icfg->getSuccsOf(
-                         const_cast<llvm::Instruction*>(&inst),
-                         ::dataflow::controlflow::FlowDirection::Forward)) {
-                    if (succ != nullptr) {
-                        succs.push_back(succ);
-                    }
-                }
-                successors[&inst] = std::move(succs);
-            }
-        }
-    }
+    m_statistics.reset();
+    m_statistics.start_time = std::chrono::steady_clock::now();
+    m_statistics.functions_analyzed = module.size();
+    m_graph_context.initialize(module);
 
     auto get_return_sites = [&](const llvm::CallBase* call)
         -> std::vector<const llvm::Instruction*> {
-        std::vector<const llvm::Instruction*> result;
-        for (auto* site : icfg->getReturnSitesOfCallAt(const_cast<llvm::CallBase*>(call))) {
-            if (site != nullptr) {
-                result.push_back(site);
-            }
-        }
-        return result;
+        return m_graph_context.get_return_sites(call);
     };
 
     auto preserve_zero = [&](FactSet& facts, const Fact& source_fact) {
@@ -167,6 +118,9 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         if (it == m_jump_functions.end()) {
             m_jump_functions.emplace(edge, phi);
             m_worklist.emplace_back(edge, phi);
+            if (m_config.record_edges() && m_path_edges.insert(edge).second) {
+                on_path_edge_added(edge);
+            }
             return;
         }
 
@@ -206,7 +160,8 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         list.push_back(incoming);
     };
 
-    auto add_summary = [&](const StartKey& key, const Fact& exit_fact, EdgeFunctionPtr phi) {
+    auto add_summary = [&](const StartKey& key, const Fact& exit_fact,
+                           EdgeFunctionPtr phi) {
         auto& vec = m_end_summaries[key][exit_fact];
         if (std::find(vec.begin(), vec.end(), phi) == vec.end()) {
             vec.push_back(phi);
@@ -222,6 +177,10 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                                          EdgeFunctionPtr summary_phi) {
         FactSet return_facts = m_problem.return_flow(incoming.call, callee, exit_fact, incoming.call_fact);
         preserve_zero(return_facts, exit_fact);
+        SummaryEdge<Fact> summary_edge(incoming.call, incoming.call_fact, exit_fact);
+        if (m_config.record_edges() && m_summary_edges.insert(summary_edge).second) {
+            on_summary_edge_added(summary_edge);
+        }
 
         auto call_ef = m_problem.call_edge_function(incoming.call, incoming.call_fact, callee_fact);
         EdgeFunctionPtr call_phi = make_edge_function(call_ef);
@@ -253,22 +212,7 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     };
 
     // Initialize initial seeds
-    auto seeds = m_problem.initial_seeds(module);
-    if (seeds.empty()) {
-        const llvm::Function* main_func = module.getFunction("main");
-        if (!main_func) {
-            for (const llvm::Function& f : module) {
-                if (!f.isDeclaration() && !f.empty()) {
-                    main_func = &f;
-                    break;
-                }
-            }
-        }
-        if (main_func && !main_func->empty()) {
-            const llvm::Instruction* entry = &main_func->getEntryBlock().front();
-            seeds.add_seed(entry, m_problem.initial_facts(main_func));
-        }
-    }
+    auto seeds = m_graph_context.build_initial_seeds(m_problem, module);
 
     for (const auto& pair : seeds.get_seeds()) {
         const llvm::Instruction* entry = pair.first;
@@ -307,9 +251,9 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         const Fact& fact = edge.target_fact;
 
         if (auto* call = llvm::dyn_cast<llvm::CallBase>(curr)) {
-            auto it_callees = call_to_callees.find(call);
+            auto it_callees = m_graph_context.call_to_callees().find(call);
             std::vector<const llvm::Function*> callees;
-            if (it_callees != call_to_callees.end()) {
+            if (it_callees != m_graph_context.call_to_callees().end()) {
                 callees = it_callees->second;
             }
             if (callees.empty()) {
@@ -409,8 +353,8 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
             if (m_config.follow_returns_past_seeds()) {
                 auto incoming_it = m_incoming.find(key);
                 if (incoming_it == m_incoming.end() || incoming_it->second.empty()) {
-                    auto callee_calls_it = callee_to_calls.find(func);
-                    if (callee_calls_it != callee_to_calls.end()) {
+                    auto callee_calls_it = m_graph_context.callee_to_calls().find(func);
+                    if (callee_calls_it != m_graph_context.callee_to_calls().end()) {
                         Fact zero_fact = m_problem.zero_fact();
                         for (const llvm::CallBase* call : callee_calls_it->second) {
                             FactSet return_facts = m_problem.return_flow(call, func, fact, zero_fact);
@@ -439,9 +383,9 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
             }
 
         } else {
-            auto succ_it = successors.find(curr);
-            if (succ_it != successors.end()) {
-                for (const llvm::Instruction* succ : succ_it->second) {
+            auto succs = m_graph_context.get_successors(curr);
+            if (!succs.empty()) {
+                for (const llvm::Instruction* succ : succs) {
                     FactSet next_facts = m_problem.normal_flow(curr, fact);
                     preserve_zero(next_facts, fact);
                     for (const auto& tgt_fact : next_facts) {
@@ -566,6 +510,15 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
             }
         }
     }
+    m_statistics.path_edges_total = m_path_edges.size();
+    m_statistics.summary_edges_total = m_summary_edges.size();
+    m_statistics.jump_functions_stored = m_jump_functions.size();
+    m_statistics.values_computed = m_values.size();
+    m_statistics.end_time = std::chrono::steady_clock::now();
+    m_statistics.total_time_seconds =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            m_statistics.end_time - m_statistics.start_time)
+            .count();
 }
 
 template<typename Problem>
@@ -604,6 +557,25 @@ const std::unordered_map<const llvm::Instruction*,
                         std::unordered_map<typename Problem::FactType, typename Problem::ValueType>>&
 IDESolver<Problem>::get_all_values() const {
     return m_values;
+}
+
+template<typename Problem>
+void IDESolver<Problem>::get_path_edges(std::vector<PathEdgeType>& out_edges) const {
+    out_edges.clear();
+    out_edges.reserve(m_path_edges.size());
+    for (const auto& edge : m_path_edges) {
+        out_edges.push_back(edge);
+    }
+}
+
+template<typename Problem>
+void IDESolver<Problem>::get_summary_edges(
+    std::vector<SummaryEdge<Fact>>& out_edges) const {
+    out_edges.clear();
+    out_edges.reserve(m_summary_edges.size());
+    for (const auto& edge : m_summary_edges) {
+        out_edges.push_back(edge);
+    }
 }
 
 } // namespace ifds

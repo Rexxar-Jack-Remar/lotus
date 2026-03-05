@@ -137,8 +137,9 @@ public:
   // Main solve interface
   void solve(const llvm::Module &module);
 
-  // Incremental solve - re-analyze only changed parts
-  void solve_incremental(const llvm::Module &module);
+  // Incremental solve - re-analyze changed function frontier
+  void solve_incremental(const llvm::Module &module,
+                         const std::set<std::string> &changed_functions);
 
   // Force full re-analysis
   void solve_full(const llvm::Module &module);

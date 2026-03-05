@@ -32,3 +32,10 @@ add_lotus_test(ifds_client_alias_flow_test IFDSClientAliasFlowTest.cpp)
 
 # IFDS solver-level integration for alias-aware client behavior
 add_lotus_test(ifds_solver_alias_integration_test IFDSSolverAliasIntegrationTest.cpp)
+
+# IFDS/IDE solver invariants and path-aware behavior
+add_lotus_test(ifds_solver_invariants_test IFDSSolverInvariantsTest.cpp)
+add_lotus_test(pathaware_solver_test PathAwareSolverTest.cpp)
+
+# Iterative IDE solver incremental behavior
+add_lotus_test(iterative_ide_solver_test IterativeIDESolverTest.cpp)

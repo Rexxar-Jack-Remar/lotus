@@ -57,6 +57,7 @@ public:
   unsigned getWideningThreshold() const { return WideningThreshold; }
 
   void solve() {
+    resetStateForSolve();
     auto start_time = std::chrono::steady_clock::now();
 
     MONO_TRACE_WORKLIST(llvm::outs(), DebugCfg,
@@ -104,11 +105,14 @@ public:
     };
 
     // Seed the node worklist from the edge worklist built by initialize().
-    // We enqueue both endpoints of every edge so that every reachable node
-    // gets processed at least once.
+    // We enqueue both endpoints of every edge and every discovered node so
+    // each instruction gets an initial visit even for sparse/empty edge sets.
     for (const auto &Edge : Worklist) {
       EnqueueNode(Edge.first);
       EnqueueNode(Edge.second);
+    }
+    for (auto *Node : InitialNodes) {
+      EnqueueNode(Node);
     }
     Worklist.clear(); // edge worklist no longer needed
 
@@ -126,6 +130,7 @@ public:
       NodeWorklist.pop_front();
       InNodeQueue.erase(Node);
       Stats.worklist_total_pops++;
+      Stats.nodes_processed++;
 
       MONO_TRACE_WORKLIST(llvm::outs(), DebugCfg, "Processing node: " << Node);
 
@@ -307,6 +312,15 @@ private:
     return &PerInstanceCFG;
   }
 
+  void resetStateForSolve() {
+    Worklist.clear();
+    InitialNodes.clear();
+    AnalysisIn.clear();
+    AnalysisOut.clear();
+    NodeIterCount.clear();
+    Stats = SolverStatistics{};
+  }
+
   void initialize() {
     std::vector<llvm::Function *> EntryFunctions = Problem.getEntryPoints();
 
@@ -320,6 +334,7 @@ private:
       Worklist.insert(Worklist.begin(), Edges.begin(), Edges.end());
       for (auto *Inst : CFG->getAllInstructionsOf(Function)) {
         AnalysisIn.insert({Inst, Problem.allTop()});
+        InitialNodes.push_back(Inst);
       }
     }
 
@@ -335,6 +350,7 @@ private:
         Worklist.insert(Worklist.begin(), Edges.begin(), Edges.end());
         for (auto *Inst : CFG->getAllInstructionsOf(F)) {
           AnalysisIn.insert({Inst, Problem.allTop()});
+          InitialNodes.push_back(Inst);
         }
       }
     }
@@ -391,6 +407,7 @@ private:
   ::dataflow::controlflow::LLVMIntraCFG PerInstanceCFG;
   const ::dataflow::controlflow::IntraCFG *CFG;
   std::deque<std::pair<n_t, n_t>> Worklist;
+  std::vector<n_t> InitialNodes;
   std::unordered_map<n_t, mono_container_t> AnalysisIn;
   std::unordered_map<n_t, mono_container_t> AnalysisOut;
   mono_container_t DefaultValue{};

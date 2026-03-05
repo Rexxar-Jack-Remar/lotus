@@ -84,6 +84,16 @@ auto Results = Solver.getInResults();
 - **`IntraSolver`**: Worklist-based intraprocedural fixpoint solver
 - **`InterSolver`**: Interprocedural solver with context sensitivity
 
+## API Notes
+
+- `Core/IntraMonoSolver.h` is a compatibility shim that re-exports the
+  authoritative implementation in `Solver/IntraSolver.h`.
+- `CallStringInterProceduralDataFlowEngine::applyForwardFromSeeds()` returns
+  `std::unique_ptr<ResultTy>`.
+- Call-string engine callee/return resolution is driven by the provided ICFG
+  (`getCalleesOfCallAt`, `getReturnSitesOfCallAt`, etc.), not a separate
+  callee callback parameter.
+
 ### Containers (`Container/`)
 - **`BitVectorSet.h`**: O(N/64) set operations for large universes (>100 elements)
 - **`Traits.h`**: Container type traits and wrappers — `SetContainer` (std::set), `BitVectorContainer` (BitVectorSet), and domain helpers

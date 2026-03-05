@@ -11,8 +11,11 @@
 
 #include "Dataflow/IFDS/Core/IFDSFramework.h"
 #include "Dataflow/IFDS/Core/IFDSIDESolverConfig.h"
+#include "Dataflow/IFDS/Core/IFDSIDESolverStatistics.h"
+#include "Dataflow/IFDS/Core/SolverGraphContext.h"
 
 #include <memory>
+#include <set>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -98,6 +101,15 @@ public:
   const std::unordered_map<const llvm::Instruction *,
                            std::unordered_map<Fact, Value>> &
   get_all_values() const;
+  void get_path_edges(std::vector<PathEdgeType> &out_edges) const;
+  void get_summary_edges(std::vector<SummaryEdge<Fact>> &out_edges) const;
+  const IFDSIDESolverStatistics &get_statistics() const { return m_statistics; }
+
+protected:
+  virtual void on_path_edge_added(const PathEdgeType &edge) { (void)edge; }
+  virtual void on_summary_edge_added(const SummaryEdge<Fact> &edge) {
+    (void)edge;
+  }
 
 private:
   struct StartKey {
@@ -165,6 +177,8 @@ private:
 
   Problem &m_problem;
   IFDSIDESolverConfig m_config;
+  IFDSIDESolverStatistics m_statistics;
+  SolverGraphContext<Fact, Problem> m_graph_context;
 
   // Bounded solver state (0 = unbounded)
   size_t m_max_steps = 0;
@@ -209,6 +223,8 @@ private:
 
   // Worklist of path edges with edge functions
   std::vector<std::pair<PathEdgeType, EdgeFunctionPtr>> m_worklist;
+  std::unordered_set<PathEdgeType, PathEdgeHashType> m_path_edges;
+  std::set<SummaryEdge<Fact>> m_summary_edges;
 };
 
 } // namespace ifds

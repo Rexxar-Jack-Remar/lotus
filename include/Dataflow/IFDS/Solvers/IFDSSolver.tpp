@@ -38,8 +38,7 @@ void IFDSSolver<Problem>::solve(const llvm::Module& module) {
     m_bound_reached = false;
 
     // Initialize data structures
-    initialize_call_graph(module);
-    build_cfg_successors(module);
+    m_graph_context.initialize(module);
     initialize_worklist(module);
 
     // Run sequential tabulation algorithm
@@ -63,8 +62,8 @@ IFDSSolver<Problem>::get_facts_at_exit(const llvm::Instruction* inst) const {
 template<typename Problem>
 void IFDSSolver<Problem>::get_path_edges(std::vector<PathEdge<Fact>>& out_edges) const {
     out_edges.clear();
-    out_edges.reserve(m_path_edges.size());
-    for (const auto& edge : m_path_edges) {
+    out_edges.reserve(m_state.path_edges.size());
+    for (const auto& edge : m_state.path_edges) {
         out_edges.push_back(edge);
     }
 }
@@ -72,8 +71,8 @@ void IFDSSolver<Problem>::get_path_edges(std::vector<PathEdge<Fact>>& out_edges)
 template<typename Problem>
 void IFDSSolver<Problem>::get_summary_edges(std::vector<SummaryEdge<Fact>>& out_edges) const {
     out_edges.clear();
-    out_edges.reserve(m_summary_edges.size());
-    for (const auto& edge : m_summary_edges) {
+    out_edges.reserve(m_state.summary_edges.size());
+    for (const auto& edge : m_state.summary_edges) {
         out_edges.push_back(edge);
     }
 }
@@ -135,14 +134,13 @@ IFDSSolver<Problem>::get_facts_at_in_llvm_ssa(const llvm::Instruction* inst) con
 template<typename Problem>
 bool IFDSSolver<Problem>::propagate_path_edge(const PathEdgeType& edge) {
     // Try to insert the edge - if already exists, return false
-    if (!m_path_edges.insert(edge).second) {
+    if (!m_state.add_path_edge(edge)) {
         return false;
     }
 
     // Preserve context precision: process each newly discovered path edge,
     // even if another start fact already reached the same (target_node, target_fact).
     m_entry_facts[edge.target_node].insert(edge.target_fact);
-    m_worklist.push_back(edge);
 
     return true;
 }
@@ -279,7 +277,7 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
             // than start_fact (the callee's entry fact) so that the summary edge
             // correctly reflects the caller's context.
             SummaryEdgeType new_summary(edge_info.call_node, edge_info.call_fact, exit_fact);
-            m_summary_edges.insert(new_summary);
+            m_state.add_summary_edge(new_summary);
 
             for (const llvm::Instruction* return_site : get_return_sites(edge_info.call_node)) {
                 for (const Fact& return_fact : return_facts) {
@@ -308,9 +306,9 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
     // yet (the call site is unreachable in the current analysis), we fall back
     // to using the call site itself as the start node with zero as the start
     // fact, which is the standard IFDS convention for unbalanced returns.
-    auto callee_calls_it = m_callee_to_calls.find(func);
+    auto callee_calls_it = m_graph_context.callee_to_calls().find(func);
     if (m_config.follow_returns_past_seeds() && !had_incoming &&
-        callee_calls_it != m_callee_to_calls.end()) {
+        callee_calls_it != m_graph_context.callee_to_calls().end()) {
         Fact zero = m_problem.zero_fact();
         for (const llvm::CallBase* call : callee_calls_it->second) {
             FactSet return_facts = m_problem.return_flow(call, func, exit_fact, zero);
@@ -368,27 +366,13 @@ void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& curren
 template<typename Problem>
 std::vector<const llvm::Instruction*>
 IFDSSolver<Problem>::get_return_sites(const llvm::CallBase* call) const {
-    if (m_icfg == nullptr || call == nullptr) {
-        return {};
-    }
-    std::vector<const llvm::Instruction*> result;
-    for (auto* site : m_icfg->getReturnSitesOfCallAt(
-             const_cast<llvm::CallBase*>(call))) {
-        if (site != nullptr) {
-            result.push_back(site);
-        }
-    }
-    return result;
+    return m_graph_context.get_return_sites(call);
 }
 
 template<typename Problem>
 std::vector<const llvm::Instruction*>
 IFDSSolver<Problem>::get_successors(const llvm::Instruction* inst) const {
-    auto it = m_successors.find(inst);
-    if (it != m_successors.end()) {
-        return it->second;
-    }
-    return {};
+    return m_graph_context.get_successors(inst);
 }
 
 // ============================================================================
@@ -397,77 +381,17 @@ IFDSSolver<Problem>::get_successors(const llvm::Instruction* inst) const {
 
 template<typename Problem>
 void IFDSSolver<Problem>::initialize_call_graph(const llvm::Module& module) {
-    m_call_to_callee.clear();
-    m_callee_to_calls.clear();
-    m_function_returns.clear();
-    m_icfg = std::make_unique<::dataflow::controlflow::LLVMInterCFG>(
-        const_cast<llvm::Module*>(&module));
-
-    for (const llvm::Function& func : module) {
-        if (func.isDeclaration()) continue;
-
-        std::vector<const llvm::ReturnInst*> returns;
-        for (const llvm::BasicBlock& bb : func) {
-            for (const llvm::Instruction& inst : bb) {
-                if (auto* ret = llvm::dyn_cast<llvm::ReturnInst>(&inst)) {
-                    returns.push_back(ret);
-                } else if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
-                    const auto callee_vec =
-                        m_icfg->getCalleesOfCallAt(const_cast<llvm::CallBase*>(call));
-                    std::vector<const llvm::Function*> callees;
-                    std::unordered_set<const llvm::Function*> seen;
-                    for (const llvm::Function* callee : callee_vec) {
-                        if (!callee || !seen.insert(callee).second) {
-                            continue;
-                        }
-                        callees.push_back(callee);
-                        m_callee_to_calls[callee].push_back(call);
-                    }
-                    if (!callees.empty()) {
-                        m_call_to_callee[call] = std::move(callees);
-                    }
-                }
-            }
-        }
-        m_function_returns[&func] = returns;
-    }
+    m_graph_context.initialize(module);
 }
 
 template<typename Problem>
 void IFDSSolver<Problem>::build_cfg_successors(const llvm::Module& module) {
-    m_successors.clear();
-    m_predecessors.clear();
-
-    for (const llvm::Function& func : module) {
-        if (func.isDeclaration()) continue;
-
-        for (const llvm::BasicBlock& bb : func) {
-            for (const llvm::Instruction& inst : bb) {
-                std::vector<const llvm::Instruction*> succs;
-
-                for (auto* succ : m_icfg->getSuccsOf(
-                         const_cast<llvm::Instruction*>(&inst),
-                         ::dataflow::controlflow::FlowDirection::Forward)) {
-                    if (succ != nullptr) {
-                        succs.push_back(succ);
-                    }
-                }
-
-                m_successors[&inst] = succs;
-
-                for (const llvm::Instruction* succ : succs) {
-                    m_predecessors[succ].push_back(&inst);
-                }
-            }
-        }
-    }
+    (void)module;
 }
 
 template<typename Problem>
 void IFDSSolver<Problem>::initialize_worklist(const llvm::Module& module) {
-    m_path_edges.clear();
-    m_summary_edges.clear();
-    m_worklist.clear();
+    m_state.clear();
     m_entry_facts.clear();
     m_exit_facts.clear();
     m_summaries.clear();
@@ -477,22 +401,7 @@ void IFDSSolver<Problem>::initialize_worklist(const llvm::Module& module) {
     m_normal_flow_cache.clear();
     m_call_to_return_flow_cache.clear();
 
-    auto seeds = m_problem.initial_seeds(module);
-    if (seeds.empty()) {
-        const llvm::Function* main_func = get_main_function(module);
-        if (!main_func) {
-            for (const llvm::Function& func : module) {
-                if (!func.isDeclaration() && !func.empty()) {
-                    main_func = &func;
-                    break;
-                }
-            }
-        }
-        if (main_func && !main_func->empty()) {
-            const llvm::Instruction* entry = &main_func->getEntryBlock().front();
-            seeds.add_seed(entry, m_problem.initial_facts(main_func));
-        }
-    }
+    auto seeds = m_graph_context.build_initial_seeds(m_problem, module);
 
     for (const auto& pair : seeds.get_seeds()) {
         const llvm::Instruction* entry = pair.first;
@@ -530,14 +439,14 @@ void IFDSSolver<Problem>::run_tabulation() {
         llvm::outs() << "\n";
     }
 
-    while (!m_worklist.empty()) {
+    while (!m_state.worklist.empty()) {
         if (m_max_steps != 0 && m_steps_performed >= m_max_steps) {
             m_bound_reached = true;
             break;
         }
 
-        PathEdgeType current_edge = m_worklist.back();
-        m_worklist.pop_back();
+        PathEdgeType current_edge = m_state.worklist.back();
+        m_state.worklist.pop_back();
 
         const llvm::Instruction* curr = current_edge.target_node;
 
@@ -545,8 +454,8 @@ void IFDSSolver<Problem>::run_tabulation() {
         if (auto* call = llvm::dyn_cast<llvm::CallBase>(curr)) {
             // Call-to-return flows are always processed once per call edge.
             process_call_to_return_edge(current_edge, call);
-            auto it = m_call_to_callee.find(call);
-            if (it != m_call_to_callee.end()) {
+            auto it = m_graph_context.call_to_callees().find(call);
+            if (it != m_graph_context.call_to_callees().end()) {
                 for (const llvm::Function* callee : it->second) {
                     process_call_edge(current_edge, call, callee);
                 }
@@ -565,8 +474,8 @@ void IFDSSolver<Problem>::run_tabulation() {
 
         if (m_show_progress && processed_edges - last_update >= update_interval) {
             last_update = processed_edges;
-            size_t total_path_edges = m_path_edges.size();
-            size_t worklist_size = m_worklist.size();
+            size_t total_path_edges = m_state.path_edges.size();
+            size_t worklist_size = m_state.worklist.size();
 
             llvm::outs() << "\r\033[KProcessed: " << processed_edges
                         << " | Path edges: " << total_path_edges
@@ -579,7 +488,7 @@ void IFDSSolver<Problem>::run_tabulation() {
         llvm::outs() << "\r\033[K";
         progress->showProgress(1.0);
         llvm::outs() << "\nCompleted! Processed " << processed_edges
-                    << " edges, discovered " << m_path_edges.size() << " path edges";
+                    << " edges, discovered " << m_state.path_edges.size() << " path edges";
         if (m_bound_reached) {
             llvm::outs() << " (step bound " << m_max_steps << " reached)";
         }

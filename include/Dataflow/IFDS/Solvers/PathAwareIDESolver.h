@@ -273,7 +273,7 @@ public:
   using FactSet = typename Problem::FactSet;
   using ESGEdge = typename ExplicitExplodedSupergraph<Fact>::ESGEdge;
 
-  PathAwareIDESolver(Problem &problem) : Base(problem), m_record_edges(true) {}
+  PathAwareIDESolver(Problem &problem) : Base(problem) {}
 
   void solve(const llvm::Module &module) {
     // Clear ESG before solving
@@ -285,6 +285,10 @@ public:
 
     // Call base solver
     Base::solve(module);
+    // Fallback reconstruction if a caller disables edge recording hooks.
+    if (m_esg.num_edges() == 0) {
+      build_esg_from_path_edges();
+    }
   }
 
   // Access the explicit ESG
@@ -364,8 +368,26 @@ public:
     }
   }
 
+protected:
+  void on_path_edge_added(const PathEdge<Fact> &pe) override {
+    Node src(pe.start_node, pe.start_fact);
+    Node tgt(pe.target_node, pe.target_fact);
+    ESGEdgeKind kind = ESGEdgeKind::Normal;
+    if (pe.target_node && llvm::isa<llvm::ReturnInst>(pe.target_node)) {
+      kind = ESGEdgeKind::Return;
+    } else if (pe.target_node && llvm::isa<llvm::CallBase>(pe.target_node)) {
+      kind = ESGEdgeKind::Call;
+    }
+    m_esg.add_edge(src, tgt, kind);
+  }
+
+  void on_summary_edge_added(const SummaryEdge<Fact> &se) override {
+    Node src(se.call_site, se.call_fact);
+    Node tgt(se.call_site, se.return_fact);
+    m_esg.add_edge(src, tgt, ESGEdgeKind::Summary);
+  }
+
   ExplicitExplodedSupergraph<Fact> m_esg;
-  bool m_record_edges;
 };
 
 } // namespace ifds
