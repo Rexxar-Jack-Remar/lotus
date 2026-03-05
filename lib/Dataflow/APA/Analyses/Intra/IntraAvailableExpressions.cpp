@@ -278,8 +278,10 @@ AvailableExpressionsResult runIntraElimAvailableExpressions(
   ElimAvailableExpressionsProblem Problem(F, AA, DT, TLI, MSSA);
   IntraEliminationSolver<LLVMEliminationDomain<AvailableExpressionsFact>>
       Solver(Problem, Opts);
-  Solver.solve();
-  return Solver.getResults();
+  auto Status = Solver.solve();
+  auto Out = Solver.getResults();
+  Out.setSolveMetadata(Status, Solver.getDiagnostics());
+  return Out;
 }
 
 } // namespace elimination

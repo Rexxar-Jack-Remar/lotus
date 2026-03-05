@@ -2,7 +2,6 @@
 #define DATAFLOW_ELIMINATION_CORE_PATHEXPRESSION_H_
 
 #include <memory>
-#include <mutex>
 #include <utility>
 
 namespace elimination {
@@ -28,24 +27,12 @@ public:
   using Ref = std::shared_ptr<const Expr>;
 
   Ref zero() const {
-    // Double-checked locking for thread-safe lazy initialization.
-    if (!Zero) {
-      std::lock_guard<std::mutex> Lock(SingletonMutex);
-      if (!Zero) {
-        Zero = std::make_shared<Expr>(Kind::Zero);
-      }
-    }
+    static const Ref Zero = std::make_shared<Expr>(Kind::Zero);
     return Zero;
   }
 
   Ref one() const {
-    // Double-checked locking for thread-safe lazy initialization.
-    if (!One) {
-      std::lock_guard<std::mutex> Lock(SingletonMutex);
-      if (!One) {
-        One = std::make_shared<Expr>(Kind::One);
-      }
-    }
+    static const Ref One = std::make_shared<Expr>(Kind::One);
     return One;
   }
 
@@ -92,11 +79,6 @@ public:
   static bool isZero(const Ref &E) { return E && E->K == Kind::Zero; }
 
   static bool isOne(const Ref &E) { return E && E->K == Kind::One; }
-
-private:
-  mutable std::mutex SingletonMutex;
-  mutable Ref Zero;
-  mutable Ref One;
 };
 
 } // namespace elimination

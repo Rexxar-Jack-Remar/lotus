@@ -182,6 +182,59 @@ void printExprSet(raw_ostream &OS, const std::set<ExpressionKey> &Set) {
   OS << "}";
 }
 
+const char *toString(EliminationMethod M) {
+  switch (M) {
+  case EliminationMethod::StateElimination:
+    return "state";
+  case EliminationMethod::ADTSimple:
+    return "adt-simple";
+  case EliminationMethod::ADTDelayed:
+    return "adt-delayed";
+  }
+  return "unknown";
+}
+
+const char *toString(SolveStatus S) {
+  switch (S) {
+  case SolveStatus::Ok:
+    return "ok";
+  case SolveStatus::FallbackToState:
+    return "fallback-to-state";
+  case SolveStatus::NonConvergentStar:
+    return "non-convergent-star";
+  case SolveStatus::InvalidProblem:
+    return "invalid-problem";
+  }
+  return "unknown";
+}
+
+const char *toString(FallbackReason R) {
+  switch (R) {
+  case FallbackReason::None:
+    return "none";
+  case FallbackReason::ADTRejected:
+    return "adt-rejected";
+  case FallbackReason::InvalidProblem:
+    return "invalid-problem";
+  }
+  return "unknown";
+}
+
+template <typename ResultT> void printSolveMetadata(raw_ostream &OS,
+                                                    const ResultT &Result) {
+  if (!Result.hasSolveMetadata()) {
+    return;
+  }
+  const auto &Diag = Result.solveDiagnostics();
+  OS << "  [solver] status=" << toString(Result.solveStatus())
+     << ", requested=" << toString(Diag.requested_method)
+     << ", executed=" << toString(Diag.executed_method)
+     << ", used_adt=" << (Diag.used_adt ? "true" : "false")
+     << ", fallback=" << toString(Diag.fallback_reason)
+     << ", star_iters=" << Diag.star_iterations_total
+     << ", max_star_hit=" << (Diag.max_star_hit ? "true" : "false") << "\n";
+}
+
 } // namespace
 
 void ElimReachablePass::getAnalysisUsage(AnalysisUsage &AU) const {
@@ -192,11 +245,14 @@ bool ElimReachablePass::runOnFunction(Function &F) {
   Result = runIntraElimReachable(&F, getElimOptions());
   if (ElimReachPrint) {
     errs() << "== Elimination Reachability: " << F.getName() << " ==\n";
+    printSolveMetadata(errs(), Result);
     for (auto &BB : F) {
       for (auto &I : BB) {
         errs() << "  ";
         I.print(errs());
-        errs() << " :: " << (Result.IN(&I) ? "reachable" : "unreachable")
+        const auto *Fact = Result.tryIN(&I);
+        errs() << " :: "
+               << ((Fact != nullptr && *Fact) ? "reachable" : "unreachable")
                << "\n";
       }
     }
@@ -222,12 +278,18 @@ bool ElimConstantPropagationPass::runOnFunction(Function &F) {
                                            getElimOptions());
   if (ElimConstPrint) {
     errs() << "== Elimination Constant Propagation: " << F.getName() << " ==\n";
+    printSolveMetadata(errs(), Result);
     for (auto &BB : F) {
       for (auto &I : BB) {
         errs() << "  ";
         I.print(errs());
         errs() << " :: ";
-        printConstMap(errs(), Result.IN(&I));
+        if (const auto *Fact = Result.tryIN(&I)) {
+          printConstMap(errs(), *Fact);
+        } else {
+          const ConstantPropagationMap Empty{};
+          printConstMap(errs(), Empty);
+        }
         errs() << "\n";
       }
     }
@@ -251,12 +313,18 @@ bool ElimReachingDefinitionsPass::runOnFunction(Function &F) {
   Result = runIntraElimReachingDefinitions(&F, &AA, MSSA, getElimOptions());
   if (ElimRDPrint) {
     errs() << "== Elimination Reaching Definitions: " << F.getName() << " ==\n";
+    printSolveMetadata(errs(), Result);
     for (auto &BB : F) {
       for (auto &I : BB) {
         errs() << "  ";
         I.print(errs());
         errs() << " :: ";
-        printValueSet(errs(), Result.IN(&I));
+        if (const auto *Fact = Result.tryIN(&I)) {
+          printValueSet(errs(), *Fact);
+        } else {
+          const std::set<const Value *> Empty{};
+          printValueSet(errs(), Empty);
+        }
         errs() << "\n";
       }
     }
@@ -286,12 +354,18 @@ bool ElimAvailableExpressionsPass::runOnFunction(Function &F) {
   if (ElimAvailPrint) {
     errs() << "== Elimination Available Expressions: " << F.getName()
            << " ==\n";
+    printSolveMetadata(errs(), Result);
     for (auto &BB : F) {
       for (auto &I : BB) {
         errs() << "  ";
         I.print(errs());
         errs() << " :: ";
-        printExprSet(errs(), Result.IN(&I));
+        if (const auto *Fact = Result.tryIN(&I)) {
+          printExprSet(errs(), *Fact);
+        } else {
+          const std::set<ExpressionKey> Empty{};
+          printExprSet(errs(), Empty);
+        }
         errs() << "\n";
       }
     }
@@ -315,12 +389,18 @@ bool ElimUninitVariablesPass::runOnFunction(Function &F) {
   if (ElimUninitPrint) {
     errs() << "== Elimination Uninitialized Variables: " << F.getName()
            << " ==\n";
+    printSolveMetadata(errs(), Result);
     for (auto &BB : F) {
       for (auto &I : BB) {
         errs() << "  ";
         I.print(errs());
         errs() << " :: ";
-        printUninitSet(errs(), Result.IN(&I));
+        if (const auto *Fact = Result.tryIN(&I)) {
+          printUninitSet(errs(), *Fact);
+        } else {
+          const UninitVariablesFact Empty{};
+          printUninitSet(errs(), Empty);
+        }
         errs() << "\n";
       }
     }
@@ -337,12 +417,18 @@ bool ElimLiveVariablesPass::runOnFunction(Function &F) {
   Result = runIntraElimLiveVariables(&F, getElimOptions());
   if (ElimLivePrint) {
     errs() << "== Elimination Live Variables: " << F.getName() << " ==\n";
+    printSolveMetadata(errs(), Result);
     for (auto &BB : F) {
       for (auto &I : BB) {
         errs() << "  ";
         I.print(errs());
         errs() << " :: ";
-        printValueSet(errs(), Result.IN(&I));
+        if (const auto *Fact = Result.tryIN(&I)) {
+          printValueSet(errs(), *Fact);
+        } else {
+          const std::set<const Value *> Empty{};
+          printValueSet(errs(), Empty);
+        }
         errs() << "\n";
       }
     }
@@ -372,12 +458,18 @@ bool ElimVeryBusyExpressionsPass::runOnFunction(Function &F) {
   if (ElimBusyPrint) {
     errs() << "== Elimination Very Busy Expressions: " << F.getName()
            << " ==\n";
+    printSolveMetadata(errs(), Result);
     for (auto &BB : F) {
       for (auto &I : BB) {
         errs() << "  ";
         I.print(errs());
         errs() << " :: ";
-        printExprSet(errs(), Result.IN(&I));
+        if (const auto *Fact = Result.tryIN(&I)) {
+          printExprSet(errs(), *Fact);
+        } else {
+          const std::set<ExpressionKey> Empty{};
+          printExprSet(errs(), Empty);
+        }
         errs() << "\n";
       }
     }
@@ -398,12 +490,18 @@ bool ElimNonNullPass::runOnFunction(Function &F) {
   Result = runIntraElimNonNull(&F, &AC, &DT, getElimOptions());
   if (ElimNonNullPrint) {
     errs() << "== Elimination NonNull: " << F.getName() << " ==\n";
+    printSolveMetadata(errs(), Result);
     for (auto &BB : F) {
       for (auto &I : BB) {
         errs() << "  ";
         I.print(errs());
         errs() << " :: ";
-        printValueSet(errs(), Result.IN(&I));
+        if (const auto *Fact = Result.tryIN(&I)) {
+          printValueSet(errs(), *Fact);
+        } else {
+          const std::set<const Value *> Empty{};
+          printValueSet(errs(), Empty);
+        }
         errs() << "\n";
       }
     }

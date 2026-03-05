@@ -485,8 +485,10 @@ NonNullResult runIntraElimNonNull(llvm::Function *F, llvm::AssumptionCache *AC,
 
   NonNullProblem Problem(F, AC, DT);
   IntraEliminationSolver<NonNullDomain> Solver(Problem, Opts);
-  Solver.solve();
-  return Solver.getResults();
+  auto Status = Solver.solve();
+  auto Out = Solver.getResults();
+  Out.setSolveMetadata(Status, Solver.getDiagnostics());
+  return Out;
 }
 
 } // namespace elimination

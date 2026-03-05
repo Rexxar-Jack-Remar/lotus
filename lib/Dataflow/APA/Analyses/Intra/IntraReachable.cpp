@@ -39,8 +39,10 @@ ReachableResult runIntraElimReachable(llvm::Function *F,
   ElimReachableProblem Problem(F);
   IntraEliminationSolver<LLVMEliminationDomain<ReachableFact>> Solver(Problem,
                                                                       Opts);
-  Solver.solve();
-  return Solver.getResults();
+  auto Status = Solver.solve();
+  auto Out = Solver.getResults();
+  Out.setSolveMetadata(Status, Solver.getDiagnostics());
+  return Out;
 }
 
 } // namespace elimination

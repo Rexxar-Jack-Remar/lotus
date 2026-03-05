@@ -114,17 +114,18 @@ void eliminateStateIntermediates(
 }
 
 template <typename AnalysisDomainTy>
-void materializeStateResults(
+bool materializeStateResults(
     IntraEliminationSolverContext<AnalysisDomainTy> &Ctx) {
   using Context = IntraEliminationSolverContext<AnalysisDomainTy>;
   Ctx.Results = typename Context::result_t{};
   if (Ctx.Nodes.empty()) {
-    return;
+    return true;
   }
 
   const auto EntryIt = Ctx.Index.find(Ctx.Problem.entry());
-  assert(EntryIt != Ctx.Index.end() &&
-         "Problem.entry() must be included in Problem.nodes()");
+  if (EntryIt == Ctx.Index.end()) {
+    return false;
+  }
   const auto EntryIdx = EntryIt->second;
 
   const auto Init = Ctx.Problem.initialFact();
@@ -135,14 +136,15 @@ void materializeStateResults(
     Ctx.Results.ExprTo(N) = E;
     Ctx.Results.IN(N) = Ctx.eval(E, Init);
   }
+  return true;
 }
 
 template <typename AnalysisDomainTy>
-void solveStateElimination(
+bool solveStateElimination(
     IntraEliminationSolverContext<AnalysisDomainTy> &Ctx) {
   buildStateEliminationMatrix(Ctx);
   eliminateStateIntermediates(Ctx);
-  materializeStateResults(Ctx);
+  return materializeStateResults(Ctx);
 }
 
 } // namespace detail

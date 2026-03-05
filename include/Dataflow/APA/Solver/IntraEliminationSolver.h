@@ -28,34 +28,70 @@ public:
 
   explicit IntraEliminationSolver(const ProblemTy &Problem,
                                   EliminationOptions Opts = {})
-      : Ctx(Problem), Opts(Opts) {}
+      : Ctx(Problem, Opts), Opts(Opts) {}
 
   // Try the requested engine first. ADT-based methods may reject the problem if
   // reducibility assumptions do not hold; in that case we transparently fall
   // back to the generic state-elimination engine.
-  void solve() {
+  SolveStatus solve() {
     UsedADT = false;
+    LastStatus = SolveStatus::Ok;
+    Ctx.Diagnostics = {};
+    Ctx.Diagnostics.requested_method = Opts.Method;
+    Ctx.Diagnostics.executed_method = EliminationMethod::StateElimination;
+
     if (Opts.Method == EliminationMethod::ADTSimple) {
       if (detail::solveADTSimple(Ctx)) {
         UsedADT = true;
-        return;
+        Ctx.Diagnostics.used_adt = true;
+        Ctx.Diagnostics.executed_method = EliminationMethod::ADTSimple;
+        LastStatus = Ctx.StarNonConvergent ? SolveStatus::NonConvergentStar
+                                           : SolveStatus::Ok;
+        return LastStatus;
       }
+      Ctx.Diagnostics.fallback_reason = FallbackReason::ADTRejected;
     }
     if (Opts.Method == EliminationMethod::ADTDelayed) {
       if (detail::solveADTDelayed(Ctx)) {
         UsedADT = true;
-        return;
+        Ctx.Diagnostics.used_adt = true;
+        Ctx.Diagnostics.executed_method = EliminationMethod::ADTDelayed;
+        LastStatus = Ctx.StarNonConvergent ? SolveStatus::NonConvergentStar
+                                           : SolveStatus::Ok;
+        return LastStatus;
       }
+      Ctx.Diagnostics.fallback_reason = FallbackReason::ADTRejected;
     }
-    detail::solveStateElimination(Ctx);
+    Ctx.Diagnostics.executed_method = EliminationMethod::StateElimination;
+    if ((Opts.Method == EliminationMethod::ADTSimple ||
+         Opts.Method == EliminationMethod::ADTDelayed) &&
+        Ctx.Diagnostics.fallback_reason == FallbackReason::None) {
+      Ctx.Diagnostics.fallback_reason = FallbackReason::ADTRejected;
+    }
+    if (!detail::solveStateElimination(Ctx)) {
+      Ctx.Diagnostics.fallback_reason = FallbackReason::InvalidProblem;
+      LastStatus = SolveStatus::InvalidProblem;
+      return LastStatus;
+    }
+    if (Ctx.StarNonConvergent) {
+      LastStatus = SolveStatus::NonConvergentStar;
+      return LastStatus;
+    }
+    LastStatus = (Ctx.Diagnostics.fallback_reason == FallbackReason::ADTRejected)
+                     ? SolveStatus::FallbackToState
+                     : SolveStatus::Ok;
+    return LastStatus;
   }
 
   const result_t &getResults() const { return Ctx.Results; }
+  SolveStatus getLastStatus() const { return LastStatus; }
+  const SolveDiagnostics &getDiagnostics() const { return Ctx.Diagnostics; }
   bool usedADT() const { return UsedADT; }
 
 private:
   Context Ctx;
   EliminationOptions Opts;
+  SolveStatus LastStatus = SolveStatus::Ok;
   bool UsedADT = false;
 };
 

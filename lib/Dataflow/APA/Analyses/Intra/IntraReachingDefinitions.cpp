@@ -196,8 +196,10 @@ runIntraElimReachingDefinitions(llvm::Function *F, llvm::AAResults *AA,
   ElimReachingDefinitionsProblem Problem(F, AA, MSSA);
   IntraEliminationSolver<LLVMEliminationDomain<ReachingDefinitionsFact>> Solver(
       Problem, Opts);
-  Solver.solve();
-  return Solver.getResults();
+  auto Status = Solver.solve();
+  auto Out = Solver.getResults();
+  Out.setSolveMetadata(Status, Solver.getDiagnostics());
+  return Out;
 }
 
 } // namespace elimination

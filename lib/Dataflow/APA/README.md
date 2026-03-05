@@ -76,6 +76,11 @@ Three elimination-style solvers are exposed via `elimination::EliminationOptions
 - `ADTSimple`: **paper-style ADT "simple" algorithm** for **reducible** flowgraphs (O(n²) updates).
 - `ADTDelayed`: **paper-style ADT "delayed" algorithm** for **reducible** flowgraphs.
 
+`EliminationOptions` also controls non-convergent `Star` behavior:
+
+- `NonConvergentStarPolicy = Fail | ReturnLast | ReturnIdentity`
+- `MaxStarIterations` (0 means use `Problem.maxStarIterations()`).
+
 The public facade `IntraEliminationSolver.h` dispatches to one of three engine
 headers in `include/Dataflow/APA/Solver/`:
 
@@ -141,6 +146,20 @@ Printing is optional via:
 Memory modeling can be toggled with:
 
 - `-elim-use-memssa` (default: true) — use MemorySSA to refine memory analyses
+
+When print flags are enabled, pass output now includes solver diagnostics:
+status, requested/executed method, ADT fallback reason, and star-iteration
+counters.
+
+## Solver status and result lookup
+
+- `IntraEliminationSolver::solve()` returns `SolveStatus`:
+  `Ok`, `FallbackToState`, `NonConvergentStar`, `InvalidProblem`.
+- `IntraEliminationSolver::getDiagnostics()` reports method/fallback/counters.
+- `DataFlowResultT` uses explicit read lookup:
+  - `containsNode(node)`
+  - `tryIN(node)` (nullable pointer)
+  and no longer returns implicit default facts for missing nodes.
 
 ## Analysis coverage notes
 

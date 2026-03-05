@@ -553,8 +553,10 @@ ConstantPropagationResult runIntraElimConstantPropagation(
   ElimConstantPropagationProblem Problem(F, AA, AC, DT, TLI);
   IntraEliminationSolver<LLVMEliminationDomain<ConstantPropagationMap>> Solver(
       Problem, Opts);
-  Solver.solve();
-  return Solver.getResults();
+  auto Status = Solver.solve();
+  auto Out = Solver.getResults();
+  Out.setSolveMetadata(Status, Solver.getDiagnostics());
+  return Out;
 }
 
 } // namespace elimination

@@ -353,28 +353,53 @@ VeryBusyExpressionsResult runIntraElimVeryBusyExpressions(
     return Combined;
   }
 
+  auto OverallStatus = SolveStatus::Ok;
+  SolveDiagnostics OverallDiag;
+  OverallDiag.requested_method = Opts.Method;
+  OverallDiag.executed_method = Opts.Method;
   bool Initialized = false;
 
   for (auto *Exit : Exits) {
     ReverseVeryBusyProblem Problem(F, Exit, AA, DT, TLI, MSSA);
     IntraEliminationSolver<VeryBusyDomain> Solver(Problem, Opts);
-    Solver.solve();
+    auto Status = Solver.solve();
+    const auto &Diag = Solver.getDiagnostics();
+    OverallDiag.used_adt = OverallDiag.used_adt || Diag.used_adt;
+    OverallDiag.star_iterations_total += Diag.star_iterations_total;
+    OverallDiag.max_star_hit = OverallDiag.max_star_hit || Diag.max_star_hit;
+    if (Diag.fallback_reason != FallbackReason::None) {
+      OverallDiag.fallback_reason = Diag.fallback_reason;
+    }
+    if (Status == SolveStatus::NonConvergentStar) {
+      OverallStatus = SolveStatus::NonConvergentStar;
+    } else if (Status == SolveStatus::InvalidProblem &&
+               OverallStatus != SolveStatus::NonConvergentStar) {
+      OverallStatus = SolveStatus::InvalidProblem;
+    } else if (Status == SolveStatus::FallbackToState &&
+               OverallStatus == SolveStatus::Ok) {
+      OverallStatus = SolveStatus::FallbackToState;
+    }
     auto Res = Solver.getResults();
 
-    auto ExitFacts = Res.IN(Exit);
-    Res.IN(Exit) = Problem.applyTransfer(Exit, ExitFacts);
+    const auto *ExitFacts = Res.tryIN(Exit);
+    if (ExitFacts != nullptr) {
+      Res.IN(Exit) = Problem.applyTransfer(Exit, *ExitFacts);
+    }
 
     for (auto &BB : *F) {
       for (auto &I : BB) {
         auto *Inst = &I;
         auto &Out = Combined.IN(Inst);
-        const auto &InFacts = Res.IN(Inst);
+        const auto *InFacts = Res.tryIN(Inst);
+        if (InFacts == nullptr) {
+          continue;
+        }
         if (!Initialized) {
           Out = Problem.allExprs();
         }
         VeryBusyExpressionsFact Intersected;
-        std::set_intersection(Out.begin(), Out.end(), InFacts.begin(),
-                              InFacts.end(),
+        std::set_intersection(Out.begin(), Out.end(), InFacts->begin(),
+                              InFacts->end(),
                               std::inserter(Intersected, Intersected.begin()));
         Out.swap(Intersected);
       }
@@ -382,6 +407,7 @@ VeryBusyExpressionsResult runIntraElimVeryBusyExpressions(
     Initialized = true;
   }
 
+  Combined.setSolveMetadata(OverallStatus, OverallDiag);
   return Combined;
 }
 

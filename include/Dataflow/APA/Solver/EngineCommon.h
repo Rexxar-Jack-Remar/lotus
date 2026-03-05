@@ -2,6 +2,7 @@
 #define DATAFLOW_ELIMINATION_SOLVER_DETAIL_ENGINECOMMON_H_
 
 #include "Dataflow/APA/Core/Framework.h"
+#include "Dataflow/APA/Core/Options.h"
 #include "Dataflow/APA/Core/PathExpression.h"
 #include "Dataflow/APA/Support/Result.h"
 
@@ -211,16 +212,18 @@ public:
     std::vector<n_t> Topo;
     std::unordered_map<n_t, std::size_t> NodeIndex;
     std::vector<std::vector<std::size_t>> Preds;
-    std::vector<std::vector<uint64_t>> DomBits;
     std::vector<n_t> Idom;
+    std::vector<std::vector<std::size_t>> DomTreeChildren;
+    std::vector<std::size_t> DomTin;
+    std::vector<std::size_t> DomTout;
 
     const std::vector<Edge> &edges() const { return Edges; }
     const std::vector<n_t> &topologicalOrder() const { return Topo; }
     n_t idom(n_t N) const { return Idom.at(NodeIndex.at(N)); }
     bool dominates(n_t A, n_t B) const {
-      const auto &Bits = DomBits[NodeIndex.at(B)];
-      const auto Idx = NodeIndex.at(A);
-      return (Bits[Idx / 64] >> (Idx % 64)) & 1U;
+      const auto IA = NodeIndex.at(A);
+      const auto IB = NodeIndex.at(B);
+      return DomTin[IA] <= DomTin[IB] && DomTout[IB] <= DomTout[IA];
     }
     bool isBackEdge(n_t Src, n_t Dst) const { return dominates(Dst, Src); }
     transfer_t edgeTransfer(n_t Src, n_t Dst) const {
@@ -228,8 +231,9 @@ public:
     }
   };
 
-  explicit IntraEliminationSolverContext(const ProblemTy &Problem)
-      : Problem(Problem) {}
+  explicit IntraEliminationSolverContext(const ProblemTy &Problem,
+                                         const EliminationOptions &Opts)
+      : Problem(Problem), Opts(Opts) {}
 
   // Populate interval entries and leaf ranges after the ADT shape is built.
   void computeEntriesAndRanges(ADTNode *N,
@@ -345,79 +349,128 @@ public:
     }
 
     const std::size_t N = Out.Nodes.size();
-    // Classical iterative dominator computation over the reachable CFG.
-    const auto All = bitsetAllOnes(N);
-    Out.DomBits.assign(N, bitsetZero(N));
-    for (std::size_t i = 0; i < N; ++i) {
-      if (i == EntryIdx) {
-        Out.DomBits[i] = bitsetZero(N);
-        bitsetSet(Out.DomBits[i], i);
-      } else {
-        Out.DomBits[i] = All;
-      }
+    std::vector<std::vector<std::size_t>> Succ(N);
+    for (const auto &E : Out.Edges) {
+      const auto SrcIdx = Out.NodeIndex.at(E.Src);
+      const auto DstIdx = Out.NodeIndex.at(E.Dst);
+      Succ[SrcIdx].push_back(DstIdx);
     }
+
+    // Compute reverse postorder numbers from entry for iterative idom.
+    std::vector<std::size_t> PostOrder;
+    PostOrder.reserve(N);
+    std::vector<std::size_t> NextSucc(N, 0);
+    std::vector<std::size_t> DFSStack;
+    std::vector<bool> Seen(N, false);
+    DFSStack.push_back(EntryIdx);
+    Seen[EntryIdx] = true;
+    while (!DFSStack.empty()) {
+      const auto Cur = DFSStack.back();
+      auto &SI = NextSucc[Cur];
+      if (SI < Succ[Cur].size()) {
+        const auto Dst = Succ[Cur][SI++];
+        if (!Seen[Dst]) {
+          Seen[Dst] = true;
+          DFSStack.push_back(Dst);
+        }
+        continue;
+      }
+      PostOrder.push_back(Cur);
+      DFSStack.pop_back();
+    }
+    if (PostOrder.size() != N) {
+      return false;
+    }
+
+    std::vector<std::size_t> RPO;
+    RPO.reserve(N);
+    for (auto It = PostOrder.rbegin(); It != PostOrder.rend(); ++It) {
+      RPO.push_back(*It);
+    }
+    std::vector<std::size_t> Rank(N, 0);
+    for (std::size_t I = 0; I < RPO.size(); ++I) {
+      Rank[RPO[I]] = I;
+    }
+
+    std::vector<int> IdomIdx(N, -1);
+    IdomIdx[EntryIdx] = static_cast<int>(EntryIdx);
+
+    auto Intersect = [&](std::size_t A, std::size_t B) {
+      while (A != B) {
+        while (Rank[A] > Rank[B]) {
+          A = static_cast<std::size_t>(IdomIdx[A]);
+        }
+        while (Rank[B] > Rank[A]) {
+          B = static_cast<std::size_t>(IdomIdx[B]);
+        }
+      }
+      return A;
+    };
 
     bool Changed = true;
     while (Changed) {
       Changed = false;
-      for (std::size_t V = 0; V < N; ++V) {
+      for (const auto V : RPO) {
         if (V == EntryIdx) {
           continue;
         }
-        if (Out.Preds[V].empty()) {
+        std::size_t NewIdom = static_cast<std::size_t>(-1);
+        for (const auto P : Out.Preds[V]) {
+          if (IdomIdx[P] == -1) {
+            continue;
+          }
+          if (NewIdom == static_cast<std::size_t>(-1)) {
+            NewIdom = P;
+          } else {
+            NewIdom = Intersect(P, NewIdom);
+          }
+        }
+        if (NewIdom == static_cast<std::size_t>(-1)) {
           return false;
         }
-        auto NewBits = All;
-        for (const auto P : Out.Preds[V]) {
-          bitsetAndInplace(NewBits, Out.DomBits[P]);
-        }
-        bitsetSet(NewBits, V);
-        if (!bitsetEqual(NewBits, Out.DomBits[V])) {
-          Out.DomBits[V] = std::move(NewBits);
+        if (IdomIdx[V] != static_cast<int>(NewIdom)) {
+          IdomIdx[V] = static_cast<int>(NewIdom);
           Changed = true;
         }
       }
     }
 
+    Out.Idom.assign(N, Out.Nodes.front());
     for (std::size_t V = 0; V < N; ++V) {
-      if (!bitsetTest(Out.DomBits[V], EntryIdx)) {
+      if (IdomIdx[V] == -1) {
         return false;
       }
+      Out.Idom[V] = Out.Nodes[static_cast<std::size_t>(IdomIdx[V])];
     }
 
-    // Recover immediate dominators from the full dominator sets.
-    Out.Idom.assign(N, Out.Nodes.front());
-    Out.Idom[EntryIdx] = Out.Nodes[EntryIdx];
+    Out.DomTreeChildren.assign(N, {});
     for (std::size_t V = 0; V < N; ++V) {
       if (V == EntryIdx) {
         continue;
       }
-      n_t Candidate = Out.Nodes.front();
-      bool Found = false;
-      for (std::size_t D = 0; D < N; ++D) {
-        if (D == V || !bitsetTest(Out.DomBits[V], D)) {
-          continue;
-        }
-        bool IsImmediate = true;
-        for (std::size_t D2 = 0; D2 < N; ++D2) {
-          if (D2 == V || D2 == D || !bitsetTest(Out.DomBits[V], D2)) {
-            continue;
-          }
-          if (bitsetTest(Out.DomBits[D2], D)) {
-            IsImmediate = false;
-            break;
-          }
-        }
-        if (IsImmediate) {
-          Candidate = Out.Nodes[D];
-          Found = true;
-          break;
-        }
+      Out.DomTreeChildren[static_cast<std::size_t>(IdomIdx[V])].push_back(V);
+    }
+    Out.DomTin.assign(N, 0);
+    Out.DomTout.assign(N, 0);
+    std::size_t Time = 0;
+    struct DomFrame {
+      std::size_t Node = 0;
+      std::size_t ChildIdx = 0;
+    };
+    std::vector<DomFrame> DomStack;
+    DomStack.push_back({EntryIdx, 0});
+    while (!DomStack.empty()) {
+      auto &Top = DomStack.back();
+      if (Top.ChildIdx == 0) {
+        Out.DomTin[Top.Node] = Time++;
       }
-      if (!Found) {
-        return false;
+      if (Top.ChildIdx < Out.DomTreeChildren[Top.Node].size()) {
+        const auto Child = Out.DomTreeChildren[Top.Node][Top.ChildIdx++];
+        DomStack.push_back({Child, 0});
+        continue;
       }
-      Out.Idom[V] = Candidate;
+      Out.DomTout[Top.Node] = Time++;
+      DomStack.pop_back();
     }
 
     // Topologically sort only the non-back edges. If that fails, the graph does
@@ -544,7 +597,11 @@ public:
     }
 
     Lca.build(Root);
-    return computeFBSets(R, Root, LeafOf, TopoPos, Lca);
+    if (!computeFBSets(R, Root, LeafOf, TopoPos, Lca)) {
+      return false;
+    }
+    buildSelfLoopCache(R);
+    return true;
   }
 
   ADTNode *newLeaf(n_t N, std::unordered_map<n_t, ADTNode *> &LeafOf) {
@@ -636,16 +693,20 @@ public:
 
   template <typename ReducibleViewT>
   bool hasSelfLoop(const ReducibleViewT &R, n_t N) const {
-    for (const auto &E : R.edges()) {
-      if (E.Src == N && E.Dst == N) {
-        return true;
-      }
+    (void)R;
+    auto It = SelfLoops.find(N);
+    if (It == SelfLoops.end()) {
+      return false;
     }
-    return false;
+    return It->second;
   }
 
   fact_t eval(const expr_ref_t &E, const fact_t &In) const {
     assert(E && "expression must not be null");
+    if (StarNonConvergent &&
+        Opts.NonConvergentStarPolicy == OnNonConvergentStar::Fail) {
+      return Problem.meetIdentity();
+    }
     switch (E->K) {
     case expr_factory_t::Kind::Zero:
       return Problem.meetIdentity();
@@ -667,19 +728,33 @@ public:
       // stabilizes. This keeps the transfer-expression layer generic instead of
       // assuming a closed-form semiring implementation.
       auto Cur = In;
-      const auto Limit = Problem.maxStarIterations();
+      const auto Limit = Opts.MaxStarIterations != 0
+                             ? Opts.MaxStarIterations
+                             : Problem.maxStarIterations();
       for (std::size_t i = 0; i < Limit; ++i) {
+        ++Diagnostics.star_iterations_total;
         auto Next = Problem.meet(In, eval(E->L, Cur));
         if (Problem.equal_to(Next, Cur)) {
           return Cur;
         }
         Cur = std::move(Next);
       }
-      assert(false && "star did not converge within maxStarIterations()");
-      return Problem.meetIdentity();
+      Diagnostics.max_star_hit = true;
+      switch (Opts.NonConvergentStarPolicy) {
+      case OnNonConvergentStar::ReturnLast:
+        return Cur;
+      case OnNonConvergentStar::ReturnIdentity:
+        return Problem.meetIdentity();
+      case OnNonConvergentStar::Fail:
+      default:
+        StarNonConvergent = true;
+        return Problem.meetIdentity();
+      }
     }
     }
-    assert(false && "unreachable");
+    if (Opts.NonConvergentStarPolicy == OnNonConvergentStar::Fail) {
+      StarNonConvergent = true;
+    }
     return Problem.meetIdentity();
   }
 
@@ -690,12 +765,16 @@ public:
   }
 
   const ProblemTy &Problem;
+  EliminationOptions Opts;
+  mutable bool StarNonConvergent = false;
+  mutable SolveDiagnostics Diagnostics;
   expr_factory_t Exprs;
   std::vector<n_t> Nodes;
   std::unordered_map<n_t, std::size_t> Index;
   std::vector<std::vector<expr_ref_t>> Matrix;
   result_t Results;
   std::vector<ADTNode> ADTNodes;
+  std::unordered_map<n_t, bool> SelfLoops;
 
 private:
   static bool containsPos(const ADTNode *N, int Pos) {
@@ -715,45 +794,14 @@ private:
     return nullptr;
   }
 
-  static std::vector<uint64_t> bitsetAllOnes(std::size_t Bits) {
-    const std::size_t Words = (Bits + 63) / 64;
-    std::vector<uint64_t> Out(Words, ~uint64_t(0));
-    if (Bits % 64) {
-      Out.back() &= ((uint64_t(1) << (Bits % 64)) - 1);
-    }
-    return Out;
-  }
-
-  static std::vector<uint64_t> bitsetZero(std::size_t Bits) {
-    return std::vector<uint64_t>((Bits + 63) / 64, uint64_t(0));
-  }
-
-  static void bitsetSet(std::vector<uint64_t> &Bits, std::size_t Idx) {
-    Bits[Idx / 64] |= (uint64_t(1) << (Idx % 64));
-  }
-
-  static bool bitsetTest(const std::vector<uint64_t> &Bits, std::size_t Idx) {
-    return (Bits[Idx / 64] >> (Idx % 64)) & 1U;
-  }
-
-  static void bitsetAndInplace(std::vector<uint64_t> &Dst,
-                               const std::vector<uint64_t> &Src) {
-    for (std::size_t i = 0; i < Dst.size(); ++i) {
-      Dst[i] &= Src[i];
-    }
-  }
-
-  static bool bitsetEqual(const std::vector<uint64_t> &A,
-                          const std::vector<uint64_t> &B) {
-    if (A.size() != B.size()) {
-      return false;
-    }
-    for (std::size_t i = 0; i < A.size(); ++i) {
-      if (A[i] != B[i]) {
-        return false;
+  template <typename ReducibleViewT>
+  void buildSelfLoopCache(const ReducibleViewT &R) {
+    SelfLoops.clear();
+    for (const auto &E : R.edges()) {
+      if (E.Src == E.Dst) {
+        SelfLoops[E.Src] = true;
       }
     }
-    return true;
   }
 };
 

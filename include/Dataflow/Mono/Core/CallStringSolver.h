@@ -261,11 +261,6 @@
  *   - d: maximum call depth
  *   - |Facts|: average fact set size
  *
- * **Practical performance:**
- * - K=1, small module (<10K instructions): ~50-200ms
- * - K=2, medium module (10-50K instructions): ~500-2000ms
- * - K=3, large module (>50K instructions): several seconds
- *
  * ## References
  *
  * - Sharir & Pnueli (1981): "Two Approaches to Interprocedural Data Flow

@@ -63,6 +63,30 @@ include/Dataflow/APA/
 - `ADTSimpleEngine.h` and `ADTDelayedEngine.h` implement the two paper-style
   reducible-graph variants.
 
+## Runtime status and diagnostics
+
+- `IntraEliminationSolver::solve()` returns `SolveStatus`:
+  - `Ok`
+  - `FallbackToState`
+  - `NonConvergentStar`
+  - `InvalidProblem`
+- `IntraEliminationSolver::getDiagnostics()` returns `SolveDiagnostics`
+  (requested/executed method, ADT usage, fallback reason, star-iteration
+  counters).
+- Analysis results (`DataFlowResultT`) carry optional solve metadata via:
+  - `hasSolveMetadata()`
+  - `solveStatus()`
+  - `solveDiagnostics()`
+
+## Result lookup semantics
+
+- `DataFlowResultT` no longer returns an implicit default fact for missing
+  nodes.
+- Read access is explicit:
+  - `containsNode(node)`
+  - `tryIN(node) -> const FactT *`
+- Mutable builders still use `IN(node)`.
+
 ## References
 
 See `lib/Dataflow/APA/README.md` for full reference list, including:

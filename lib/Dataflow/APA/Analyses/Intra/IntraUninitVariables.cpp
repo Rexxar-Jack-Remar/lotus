@@ -282,8 +282,10 @@ UninitVariablesResult runIntraElimUninitVariables(llvm::Function *F,
   ElimUninitVariablesProblem Problem(F, AA, AC, DT);
   IntraEliminationSolver<LLVMEliminationDomain<UninitVariablesFact>> Solver(
       Problem, Opts);
-  Solver.solve();
-  return Solver.getResults();
+  auto Status = Solver.solve();
+  auto Out = Solver.getResults();
+  Out.setSolveMetadata(Status, Solver.getDiagnostics());
+  return Out;
 }
 
 } // namespace elimination

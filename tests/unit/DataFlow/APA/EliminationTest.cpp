@@ -14,6 +14,14 @@
 
 namespace {
 
+template <typename ResultT, typename NodeT>
+const typename ResultT::fact_t &factAt(const ResultT &Res, const NodeT &N) {
+  auto *Fact = Res.tryIN(N);
+  EXPECT_NE(Fact, nullptr);
+  static const typename ResultT::fact_t Empty{};
+  return Fact != nullptr ? *Fact : Empty;
+}
+
 struct TestDomain {
   using n_t = int;
   using fact_t = std::set<int>;
@@ -89,10 +97,10 @@ TEST(EliminationTest, LoopReachability) {
   Solver.solve();
   const auto &Res = Solver.getResults();
 
-  EXPECT_EQ(Res.IN(0), (std::set<int>{}));
-  EXPECT_EQ(Res.IN(1), (std::set<int>{1, 2}));
-  EXPECT_EQ(Res.IN(2), (std::set<int>{1, 2}));
-  EXPECT_EQ(Res.IN(3), (std::set<int>{1, 2, 3}));
+  EXPECT_EQ(factAt(Res, 0), (std::set<int>{}));
+  EXPECT_EQ(factAt(Res, 1), (std::set<int>{1, 2}));
+  EXPECT_EQ(factAt(Res, 2), (std::set<int>{1, 2}));
+  EXPECT_EQ(factAt(Res, 3), (std::set<int>{1, 2, 3}));
 }
 
 TEST(EliminationTest, BranchJoinUnion) {
@@ -106,7 +114,7 @@ TEST(EliminationTest, BranchJoinUnion) {
   Solver.solve();
   const auto &Res = Solver.getResults();
 
-  EXPECT_EQ(Res.IN(3), (std::set<int>{1, 2, 3}));
+  EXPECT_EQ(factAt(Res, 3), (std::set<int>{1, 2, 3}));
 }
 
 TEST(EliminationTest, EmptyGraph) {
@@ -117,8 +125,8 @@ TEST(EliminationTest, EmptyGraph) {
   Solver.solve();
   const auto &Res = Solver.getResults();
 
-  // No nodes => no entries in result; IN(any) returns default (meet identity).
-  EXPECT_TRUE(Res.IN(0).empty());
+  EXPECT_FALSE(Res.containsNode(0));
+  EXPECT_EQ(Res.tryIN(0), nullptr);
 }
 
 TEST(EliminationTest, SingleNodeNoEdges) {
@@ -129,7 +137,7 @@ TEST(EliminationTest, SingleNodeNoEdges) {
   Solver.solve();
   const auto &Res = Solver.getResults();
 
-  EXPECT_EQ(Res.IN(0), (std::set<int>{}));
+  EXPECT_EQ(factAt(Res, 0), (std::set<int>{}));
 }
 
 TEST(EliminationTest, SingleNodeSelfLoop) {
@@ -141,7 +149,7 @@ TEST(EliminationTest, SingleNodeSelfLoop) {
   const auto &Res = Solver.getResults();
 
   // Path from 0 to 0: empty path or one or more self-loops; each adds 0.
-  EXPECT_EQ(Res.IN(0), (std::set<int>{0}));
+  EXPECT_EQ(factAt(Res, 0), (std::set<int>{0}));
 }
 
 TEST(EliminationTest, UnreachableNodeGetsMeetIdentity) {
@@ -153,8 +161,8 @@ TEST(EliminationTest, UnreachableNodeGetsMeetIdentity) {
   Solver.solve();
   const auto &Res = Solver.getResults();
 
-  EXPECT_EQ(Res.IN(0), (std::set<int>{0}));
-  EXPECT_EQ(Res.IN(1), (std::set<int>{})); // unreachable => meet identity
+  EXPECT_EQ(factAt(Res, 0), (std::set<int>{0}));
+  EXPECT_EQ(factAt(Res, 1), (std::set<int>{})); // unreachable => meet identity
 }
 
 TEST(EliminationTest, DisconnectedTwoComponents) {
@@ -166,8 +174,8 @@ TEST(EliminationTest, DisconnectedTwoComponents) {
   Solver.solve();
   const auto &Res = Solver.getResults();
 
-  EXPECT_EQ(Res.IN(0), (std::set<int>{0}));
-  EXPECT_EQ(Res.IN(1), (std::set<int>{}));
+  EXPECT_EQ(factAt(Res, 0), (std::set<int>{0}));
+  EXPECT_EQ(factAt(Res, 1), (std::set<int>{}));
 }
 
 TEST(EliminationTest, DiamondWithUnreachableSink) {
@@ -180,8 +188,8 @@ TEST(EliminationTest, DiamondWithUnreachableSink) {
   Solver.solve();
   const auto &Res = Solver.getResults();
 
-  EXPECT_EQ(Res.IN(3), (std::set<int>{1, 2, 3}));
-  EXPECT_EQ(Res.IN(4), (std::set<int>{})); // unreachable
+  EXPECT_EQ(factAt(Res, 3), (std::set<int>{1, 2, 3}));
+  EXPECT_EQ(factAt(Res, 4), (std::set<int>{})); // unreachable
 }
 
 TEST(EliminationTest, ExprToStoredForEveryNode) {
@@ -210,10 +218,10 @@ TEST(EliminationTest, LinearChain) {
   Solver.solve();
   const auto &Res = Solver.getResults();
 
-  EXPECT_EQ(Res.IN(0), (std::set<int>{}));
-  EXPECT_EQ(Res.IN(1), (std::set<int>{1}));
-  EXPECT_EQ(Res.IN(2), (std::set<int>{1, 2}));
-  EXPECT_EQ(Res.IN(3), (std::set<int>{1, 2, 3}));
+  EXPECT_EQ(factAt(Res, 0), (std::set<int>{}));
+  EXPECT_EQ(factAt(Res, 1), (std::set<int>{1}));
+  EXPECT_EQ(factAt(Res, 2), (std::set<int>{1, 2}));
+  EXPECT_EQ(factAt(Res, 3), (std::set<int>{1, 2, 3}));
 }
 
 namespace {
@@ -307,10 +315,144 @@ TEST(EliminationTest, ADTDelayedReducible) {
   EXPECT_TRUE(Solver.usedADT());
 
   const auto &Res = Solver.getResults();
-  EXPECT_EQ(Res.IN(0), (std::set<int>{}));
-  EXPECT_EQ(Res.IN(1), (std::set<int>{1, 2}));
-  EXPECT_EQ(Res.IN(2), (std::set<int>{1, 2}));
-  EXPECT_EQ(Res.IN(3), (std::set<int>{1, 2, 3}));
+  EXPECT_EQ(factAt(Res, 0), (std::set<int>{}));
+  EXPECT_EQ(factAt(Res, 1), (std::set<int>{1, 2}));
+  EXPECT_EQ(factAt(Res, 2), (std::set<int>{1, 2}));
+  EXPECT_EQ(factAt(Res, 3), (std::set<int>{1, 2, 3}));
+}
+
+TEST(EliminationTest, ADTSimpleReducible) {
+  ReducibleReachabilityProblem Problem;
+  elimination::IntraEliminationSolver<TestDomain> Solver(
+      Problem, elimination::EliminationOptions{
+                   elimination::EliminationMethod::ADTSimple});
+  const auto Status = Solver.solve();
+  EXPECT_EQ(Status, elimination::SolveStatus::Ok);
+  EXPECT_TRUE(Solver.usedADT());
+
+  const auto &Res = Solver.getResults();
+  EXPECT_EQ(factAt(Res, 0), (std::set<int>{}));
+  EXPECT_EQ(factAt(Res, 1), (std::set<int>{1, 2}));
+  EXPECT_EQ(factAt(Res, 2), (std::set<int>{1, 2}));
+  EXPECT_EQ(factAt(Res, 3), (std::set<int>{1, 2, 3}));
+}
+
+TEST(EliminationTest, EngineParityOnReducibleGraph) {
+  ReducibleReachabilityProblem Problem;
+  elimination::IntraEliminationSolver<TestDomain> StateSolver(
+      Problem, elimination::EliminationOptions{
+                   elimination::EliminationMethod::StateElimination});
+  elimination::IntraEliminationSolver<TestDomain> SimpleSolver(
+      Problem, elimination::EliminationOptions{
+                   elimination::EliminationMethod::ADTSimple});
+  elimination::IntraEliminationSolver<TestDomain> DelayedSolver(
+      Problem, elimination::EliminationOptions{
+                   elimination::EliminationMethod::ADTDelayed});
+
+  EXPECT_EQ(StateSolver.solve(), elimination::SolveStatus::Ok);
+  EXPECT_EQ(SimpleSolver.solve(), elimination::SolveStatus::Ok);
+  EXPECT_EQ(DelayedSolver.solve(), elimination::SolveStatus::Ok);
+
+  const auto &StateRes = StateSolver.getResults();
+  const auto &SimpleRes = SimpleSolver.getResults();
+  const auto &DelayedRes = DelayedSolver.getResults();
+  for (const auto Node : Problem.nodes()) {
+    EXPECT_EQ(factAt(StateRes, Node), factAt(SimpleRes, Node));
+    EXPECT_EQ(factAt(StateRes, Node), factAt(DelayedRes, Node));
+  }
+}
+
+TEST(EliminationTest, ADTFallsBackOnIrreducibleGraph) {
+  std::unordered_map<int, std::vector<int>> Succs = {
+      {0, {1, 2}}, {1, {3}}, {2, {3}}, {3, {1, 2}}};
+  ReachabilityProblem Problem(0, Succs);
+
+  elimination::IntraEliminationSolver<TestDomain> StateSolver(
+      Problem, elimination::EliminationOptions{
+                   elimination::EliminationMethod::StateElimination});
+  elimination::IntraEliminationSolver<TestDomain> ADTSolver(
+      Problem, elimination::EliminationOptions{
+                   elimination::EliminationMethod::ADTDelayed});
+
+  EXPECT_EQ(StateSolver.solve(), elimination::SolveStatus::Ok);
+  EXPECT_EQ(ADTSolver.solve(), elimination::SolveStatus::FallbackToState);
+  EXPECT_FALSE(ADTSolver.usedADT());
+  EXPECT_EQ(ADTSolver.getDiagnostics().fallback_reason,
+            elimination::FallbackReason::ADTRejected);
+
+  const auto &StateRes = StateSolver.getResults();
+  const auto &ADTRes = ADTSolver.getResults();
+  for (const auto &Node : Problem.nodes()) {
+    EXPECT_EQ(factAt(StateRes, Node), factAt(ADTRes, Node));
+  }
+}
+
+namespace {
+
+struct NonConvergentDomain {
+  using n_t = int;
+  using fact_t = int;
+  using transfer_t = int;
+};
+
+class NonConvergentProblem final
+    : public elimination::IntraEliminationProblem<NonConvergentDomain> {
+public:
+  std::vector<int> nodes() const override { return {0}; }
+  int entry() const override { return 0; }
+  std::vector<int> succs(int) const override { return {0}; }
+  transfer_t edgeTransfer(int, int) const override { return 0; }
+  fact_t applyTransfer(const transfer_t &, const fact_t &In) const override {
+    return 1 - In;
+  }
+  fact_t meet(const fact_t &, const fact_t &Rhs) const override { return Rhs; }
+  bool equal_to(const fact_t &Lhs, const fact_t &Rhs) const override {
+    return Lhs == Rhs;
+  }
+  fact_t meetIdentity() const override { return -1; }
+  fact_t initialFact() const override { return 0; }
+  std::size_t maxStarIterations() const override { return 100; }
+};
+
+} // namespace
+
+TEST(EliminationTest, NonConvergentStarFailPolicy) {
+  NonConvergentProblem Problem;
+  elimination::EliminationOptions Opts;
+  Opts.MaxStarIterations = 3;
+  Opts.NonConvergentStarPolicy = elimination::OnNonConvergentStar::Fail;
+  elimination::IntraEliminationSolver<NonConvergentDomain> Solver(Problem,
+                                                                   Opts);
+  EXPECT_EQ(Solver.solve(), elimination::SolveStatus::NonConvergentStar);
+  EXPECT_TRUE(Solver.getDiagnostics().max_star_hit);
+}
+
+TEST(EliminationTest, NonConvergentStarReturnLastPolicy) {
+  NonConvergentProblem Problem;
+  elimination::EliminationOptions Opts;
+  Opts.MaxStarIterations = 3;
+  Opts.NonConvergentStarPolicy = elimination::OnNonConvergentStar::ReturnLast;
+  elimination::IntraEliminationSolver<NonConvergentDomain> Solver(Problem,
+                                                                   Opts);
+  EXPECT_EQ(Solver.solve(), elimination::SolveStatus::Ok);
+  const auto &Res = Solver.getResults();
+  ASSERT_NE(Res.tryIN(0), nullptr);
+  EXPECT_EQ(*Res.tryIN(0), 1);
+}
+
+TEST(EliminationTest, NonConvergentStarReturnIdentityPolicy) {
+  NonConvergentProblem Problem;
+  elimination::EliminationOptions Opts;
+  Opts.MaxStarIterations = 3;
+  Opts.NonConvergentStarPolicy =
+      elimination::OnNonConvergentStar::ReturnIdentity;
+  elimination::IntraEliminationSolver<NonConvergentDomain> Solver(Problem,
+                                                                   Opts);
+  EXPECT_EQ(Solver.solve(), elimination::SolveStatus::Ok);
+  EXPECT_TRUE(Solver.getDiagnostics().max_star_hit);
+  const auto &Res = Solver.getResults();
+  ASSERT_NE(Res.tryIN(0), nullptr);
+  EXPECT_NE(*Res.tryIN(0), 1);
 }
 
 int main(int argc, char **argv) {
