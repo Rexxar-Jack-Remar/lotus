@@ -102,27 +102,7 @@ public:
 
   InitialSeeds build_initial_seeds(Problem &problem,
                                    const llvm::Module &module) const {
-    InitialSeeds seeds = problem.initial_seeds(module);
-    if (!seeds.empty()) {
-      return seeds;
-    }
-
-    const llvm::Function *main_func = module.getFunction("main");
-    if (!main_func) {
-      for (const llvm::Function &func : module) {
-        if (!func.isDeclaration() && !func.empty()) {
-          main_func = &func;
-          break;
-        }
-      }
-    }
-    if (!main_func || main_func->empty()) {
-      return seeds;
-    }
-
-    const llvm::Instruction *entry = &main_func->getEntryBlock().front();
-    seeds.add_seed(entry, problem.initial_facts(main_func));
-    return seeds;
+    return problem.initial_seeds(module);
   }
 
   void clear() {

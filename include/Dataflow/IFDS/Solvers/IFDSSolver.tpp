@@ -24,14 +24,26 @@ IFDSSolver<Problem>::IFDSSolver(Problem& problem)
 }
 
 template<typename Problem>
+IFDSSolver<Problem>::~IFDSSolver() {
+    if (m_injected_alias_analysis) {
+        m_problem.set_alias_analysis(nullptr);
+    }
+}
+
+template<typename Problem>
 void IFDSSolver<Problem>::solve(const llvm::Module& module) {
-    std::unique_ptr<lotus::AliasAnalysisWrapper> owned_alias_analysis;
+    if (m_injected_alias_analysis) {
+        m_problem.set_alias_analysis(nullptr);
+        m_owned_alias_analysis.reset();
+        m_injected_alias_analysis = false;
+    }
     if (m_config.auto_inject_alias_analysis() &&
         !m_problem.has_alias_analysis_configured()) {
-        owned_alias_analysis = std::make_unique<lotus::AliasAnalysisWrapper>(
+        m_owned_alias_analysis = std::make_unique<lotus::AliasAnalysisWrapper>(
             const_cast<llvm::Module&>(module),
             m_config.alias_analysis_config());
-        m_problem.set_alias_analysis(owned_alias_analysis.get());
+        m_problem.set_alias_analysis(m_owned_alias_analysis.get());
+        m_injected_alias_analysis = true;
     }
 
     m_steps_performed = 0;
@@ -338,7 +350,8 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
             for (const llvm::Instruction* return_site : get_return_sites(call)) {
                 FactSet return_facts =
                     m_problem.return_flow(call, return_site, func, exit_fact, zero);
-                if (m_problem.auto_add_zero()) {
+                if (m_problem.auto_add_zero() &&
+                    m_problem.is_zero_fact(exit_fact)) {
                     return_facts.insert(zero);
                 }
                 for (const Fact& rf : return_facts) {

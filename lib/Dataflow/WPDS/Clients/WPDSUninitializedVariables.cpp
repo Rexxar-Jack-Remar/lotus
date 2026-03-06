@@ -43,13 +43,13 @@ static GenKillTransformer *createUninitTransformer(Instruction *I) {
     // The memory abstraction is field-insensitive and only tracks canonical
     // base objects, so distinct subobjects may still collapse together.
 
-  } else if (auto *CI = dyn_cast<CallBase>(I)) {
-    // Assume function call initializes passed pointers (safe approximation)
-    for (auto &Arg : CI->args()) {
-      if (Arg->getType()->isPointerTy()) {
-        MemoryObjectFact::addRepresentativeFact(killSet, Arg.get());
-      }
+  } else if (auto *LI = dyn_cast<LoadInst>(I)) {
+    // If the source memory object may be uninitialized, the loaded SSA value is
+    // uninitialized as well.
+    if (Value *rep = MemoryObjectFact::getRepresentative(LI->getPointerOperand())) {
+      addFlow(rep, LI);
     }
+
   } else if (auto *BC = dyn_cast<BitCastInst>(I)) {
     // p2 = bitcast p1
     // If p1 uninit, p2 uninit

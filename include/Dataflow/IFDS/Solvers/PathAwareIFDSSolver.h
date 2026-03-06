@@ -39,6 +39,25 @@ public:
     IDEWrapper(Problem &ifds_problem) : m_ifds_problem(ifds_problem) {}
 
     Fact zero_fact() const override { return m_ifds_problem.zero_fact(); }
+    bool auto_add_zero() const override {
+      return m_ifds_problem.auto_add_zero();
+    }
+    bool is_zero_fact(const Fact &fact) const override {
+      return m_ifds_problem.is_zero_fact(fact);
+    }
+    void set_alias_analysis(lotus::AliasAnalysisWrapper *aa) override {
+      IDEProblem<Fact, BinaryValue>::set_alias_analysis(aa);
+      m_ifds_problem.set_alias_analysis(aa);
+    }
+    bool has_alias_analysis_configured() const {
+      return m_ifds_problem.has_alias_analysis_configured();
+    }
+    bool is_source(const llvm::Instruction *inst) const override {
+      return m_ifds_problem.is_source(inst);
+    }
+    bool is_sink(const llvm::Instruction *inst) const override {
+      return m_ifds_problem.is_sink(inst);
+    }
 
     FactSet normal_flow(const llvm::Instruction *stmt,
                         const Fact &fact) override {
@@ -123,7 +142,7 @@ public:
     std::vector<PathEdge<Fact>> edges;
     m_solver.get_path_edges(edges);
     for (const auto &edge : edges) {
-      if (edge.target_node == inst && !m_wrapper.is_zero_fact(edge.target_fact)) {
+      if (edge.target_node == inst) {
         facts.insert(edge.target_fact);
       }
     }

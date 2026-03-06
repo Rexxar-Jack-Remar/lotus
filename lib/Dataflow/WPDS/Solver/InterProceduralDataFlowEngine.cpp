@@ -10,6 +10,7 @@
 #include "Solvers/WPDS/Witness.h"
 #endif
 #include "llvm/ADT/Optional.h"
+#include "llvm/IR/CFG.h"
 
 #include <sstream>
 #include <unordered_map>
@@ -133,13 +134,13 @@ InterProceduralDataFlowEngine::runAnalysisWithAutomaton(
     Module &m,
     const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
     const AutomatonBuilder &buildInitialCA, bool isForward) {
-  // Create semiring and WPDS
-  Semiring<GenKillTransformer> semiring(GenKillTransformer::one(), isForward);
-  WPDS<GenKillTransformer> wpds(semiring, isForward ? Query::poststar()
-                                                    : Query::prestar());
+  // Model both directions as forward reachability over direction-specific
+  // program graphs. This keeps interprocedural call/return wiring explicit.
+  Semiring<GenKillTransformer> semiring(GenKillTransformer::one(), true);
+  WPDS<GenKillTransformer> wpds(semiring, Query::poststar());
 
   // Build WPDS from LLVM module
-  buildWPDS(m, wpds, createTransformer);
+  buildWPDS(m, wpds, createTransformer, isForward);
 
   // Build initial configuration automaton (in-place)
   CA<GenKillTransformer> resultCA(semiring);
@@ -148,13 +149,8 @@ InterProceduralDataFlowEngine::runAnalysisWithAutomaton(
 
   // Run saturation algorithm
   wpds::SaturationProcess<GenKillTransformer> satProcess(
-      wpds, resultCA, semiring,
-      isForward ? Query::poststar() : Query::prestar());
-  if (isForward) {
-    satProcess.poststar();
-  } else {
-    satProcess.prestar();
-  }
+      wpds, resultCA, semiring, Query::poststar());
+  satProcess.poststar();
 
   // Extract results
   currentResult = std::make_unique<mono::DataFlowResult>();
@@ -162,7 +158,7 @@ InterProceduralDataFlowEngine::runAnalysisWithAutomaton(
 
   // Cache for queries/witnesses
   lastResultCA = std::make_unique<CA<GenKillTransformer>>(resultCA);
-  lastQuery = isForward ? Query::poststar() : Query::prestar();
+  lastQuery = Query::poststar();
 
   return std::make_unique<mono::DataFlowResult>(*currentResult);
 }
@@ -188,13 +184,19 @@ InterProceduralDataFlowEngine::getOutSet(Instruction *inst) const {
 std::set<Value *>
 InterProceduralDataFlowEngine::queryFactsBeforeInstruction(
     Instruction *inst) const {
-  return queryFactsAtSymbol(getProgramPointKeyBeforeInstruction(inst));
+  std::set<Value *> facts =
+      queryFactsAtSymbol(getProgramPointKeyBeforeInstruction(inst));
+  filterFactsToInstructionScope(inst, facts);
+  return facts;
 }
 
 std::set<Value *>
 InterProceduralDataFlowEngine::queryFactsAfterInstruction(
     Instruction *inst) const {
-  return queryFactsAtSymbol(getProgramPointKeyAfterInstruction(inst));
+  std::set<Value *> facts =
+      queryFactsAtSymbol(getProgramPointKeyAfterInstruction(inst));
+  filterFactsToInstructionScope(inst, facts);
+  return facts;
 }
 
 ::ref_ptr<GenKillTransformer>
@@ -219,6 +221,12 @@ InterProceduralDataFlowEngine::getProgramPointKeyBeforeInstruction(
 wpds::wpds_key_t
 InterProceduralDataFlowEngine::getProgramPointKeyAfterInstruction(
     Instruction *inst) const {
+  if (auto *callInst = dyn_cast_or_null<CallBase>(inst)) {
+    auto retIt = callReturnToKey.find(callInst);
+    if (retIt != callReturnToKey.end()) {
+      return retIt->second;
+    }
+  }
   auto it = instToKey.find(inst);
   return it != instToKey.end() ? it->second : WPDS_EPSILON;
 }
@@ -226,7 +234,8 @@ InterProceduralDataFlowEngine::getProgramPointKeyAfterInstruction(
 void InterProceduralDataFlowEngine::buildWPDS(
     Module &m, WPDS<GenKillTransformer> &wpds,
     const std::function<GenKillTransformer *(Instruction *)>
-        &createTransformer) {
+        &createTransformer,
+    bool isForward) {
   ::dataflow::controlflow::LLVMIntraCFG intraCfg;
   std::unique_ptr<::dataflow::controlflow::LLVMInterCFG> interCfgStorage;
   if (calleeResolver) {
@@ -281,11 +290,20 @@ void InterProceduralDataFlowEngine::buildWPDS(
     return functionTag(F) + "_ret_" + std::to_string((uintptr_t)&callI);
   };
 
-  auto ensureExitPopRule = [&](wpds_key_t exitKey) {
-    // Pop the callee-exit symbol to reveal the return-site symbol below.
-    // Safe to add redundantly; WPDS will combine/ignore duplicates.
-    wpds.add_rule(controlState, exitKey, controlState,
+  auto ensurePopRule = [&](wpds_key_t boundaryKey) {
+    wpds.add_rule(controlState, boundaryKey, controlState,
                   GenKillTransformer::one());
+  };
+
+  auto getAfterKey = [&](Instruction *inst) -> wpds_key_t {
+    if (auto *callInst = dyn_cast_or_null<CallBase>(inst)) {
+      auto retIt = callReturnToKey.find(callInst);
+      if (retIt != callReturnToKey.end()) {
+        return retIt->second;
+      }
+    }
+    auto instIt = instToKey.find(inst);
+    return instIt != instToKey.end() ? instIt->second : WPDS_EPSILON;
   };
 
   // First pass: Create function entry and exit keys for all functions
@@ -302,47 +320,67 @@ void InterProceduralDataFlowEngine::buildWPDS(
     wpds.add_element_to_P(controlState);
   }
 
-  // Second pass: Create rules for each function
+  // Second pass: assign basic-block and instruction keys.
   for (auto &F : m) {
     if (F.isDeclaration())
       continue;
 
-    wpds_key_t funcEntry = functionToKey[&F];
-    wpds_key_t funcExit = functionExitToKey[&F];
-
-    // Map basic blocks to keys
     for (auto &BB : F) {
       const std::string btag = bbTag(F, BB);
       wpds_key_t bbKey = new_str2key(btag.c_str());
       bbToKey[&BB] = bbKey;
-    }
-
-    // Rule from function entry to first basic block
-    BasicBlock &entryBB = F.getEntryBlock();
-    wpds_key_t entryBBKey = bbToKey[&entryBB];
-    wpds.add_rule(controlState, funcEntry, controlState, entryBBKey,
-                  GenKillTransformer::one());
-
-    // Track return-site transformers so we can compose them at the return site.
-    std::unordered_map<wpds_key_t, ::ref_ptr<GenKillTransformer>>
-        returnSiteTransformers;
-
-    // Process each basic block
-    for (auto &BB : F) {
-      wpds_key_t bbKey = bbToKey[&BB];
-
       wpds_key_t prevKey = bbKey;
-
-      // Process instructions in the basic block
       for (auto &I : BB) {
-        // Create instruction key
         const std::string itag = instTag(F, I);
         wpds_key_t instKey = new_str2key(itag.c_str());
         instToKey[&I] = instKey;
         keyToInst[instKey] = &I;
         instPrevKey[&I] = prevKey;
+        if (auto *callInst = dyn_cast<CallBase>(&I)) {
+          callReturnToKey[callInst] = new_str2key(retTag(F, I).c_str());
+        }
+        prevKey = getAfterKey(&I);
+      }
+    }
+  }
 
-        // Create transformer for this instruction
+  // Third pass: create direction-specific rules.
+  for (auto &F : m) {
+    if (F.isDeclaration()) {
+      continue;
+    }
+
+    wpds_key_t funcEntry = functionToKey[&F];
+    wpds_key_t funcExit = functionExitToKey[&F];
+    BasicBlock &entryBB = F.getEntryBlock();
+    wpds_key_t entryBBKey = bbToKey[&entryBB];
+
+    if (isForward) {
+      wpds.add_rule(controlState, funcEntry, controlState, entryBBKey,
+                    GenKillTransformer::one());
+    } else {
+      wpds.add_rule(controlState, entryBBKey, controlState, funcEntry,
+                    GenKillTransformer::one());
+    }
+
+    for (auto &BB : F) {
+      wpds_key_t bbKey = bbToKey[&BB];
+      if (!isForward && &BB != &entryBB) {
+        for (BasicBlock *pred : predecessors(&BB)) {
+          if (pred == nullptr || pred->getTerminator() == nullptr) {
+            continue;
+          }
+          wpds.add_rule(controlState, bbKey, controlState,
+                        getAfterKey(pred->getTerminator()),
+                        GenKillTransformer::one());
+        }
+      }
+
+      for (auto &I : BB) {
+        wpds_key_t beforeKey = instPrevKey[&I];
+        wpds_key_t instKey = instToKey[&I];
+        wpds_key_t afterKey = getAfterKey(&I);
+
         GenKillTransformer *transformer = createTransformer(&I);
         if (!transformer) {
           transformer = GenKillTransformer::one();
@@ -350,18 +388,14 @@ void InterProceduralDataFlowEngine::buildWPDS(
         localGenByInst[&I] = transformer->getGen().getFacts();
         localKillByInst[&I] = transformer->getKill().getFacts();
 
-        // If we're returning from a callsite, compose return-flow before this
-        // instruction.
-        auto retIt = returnSiteTransformers.find(prevKey);
-        if (retIt != returnSiteTransformers.end()) {
-          transformer = retIt->second.get_ptr()->extend(transformer);
+        if (isForward) {
+          wpds.add_rule(controlState, beforeKey, controlState, instKey,
+                        transformer);
+        } else {
+          wpds.add_rule(controlState, instKey, controlState, beforeKey,
+                        transformer);
         }
 
-        // Add rule from previous location to this instruction
-        wpds.add_rule(controlState, prevKey, controlState, instKey,
-                      transformer);
-
-        // Handle different instruction types
         if (auto *callInst = dyn_cast<CallBase>(&I)) {
           std::vector<Function *> callees;
           if (calleeResolver) {
@@ -373,17 +407,15 @@ void InterProceduralDataFlowEngine::buildWPDS(
           bool hasModeledCallee = false;
           bool hasUnmodeledCallee = callees.empty();
 
-          // Create a single, callsite-specific return symbol to represent the
-          // return site. (All possible callees return to the same point.)
-          llvm::Optional<wpds_key_t> returnKeyOpt;
-          auto getReturnKey = [&]() -> wpds_key_t {
-            if (returnKeyOpt.hasValue()) {
-              return *returnKeyOpt;
-            }
-            wpds_key_t rk = new_str2key(retTag(F, I).c_str());
-            returnKeyOpt = rk;
-            callReturnToKey[callInst] = rk;
-            return rk;
+          auto connectForwardReturnJoin = [&](wpds_key_t pathReturnKey,
+                                              GenKillTransformer *weight) {
+            wpds.add_rule(controlState, pathReturnKey, controlState, afterKey,
+                          weight ? weight : GenKillTransformer::one());
+          };
+          auto connectBackwardCallSite = [&](wpds_key_t pathCallKey,
+                                             GenKillTransformer *weight) {
+            wpds.add_rule(controlState, pathCallKey, controlState, instKey,
+                          weight ? weight : GenKillTransformer::one());
           };
 
           for (Function *calledFunc : callees) {
@@ -394,163 +426,129 @@ void InterProceduralDataFlowEngine::buildWPDS(
             }
 
             hasModeledCallee = true;
-
-            // Interprocedural call: <q, instKey> -> <q, calledEntry, returnKey>
             wpds_key_t calledEntry = functionToKey[calledFunc];
             wpds_key_t calledExit = functionExitToKey[calledFunc];
-            wpds_key_t returnKey = getReturnKey();
 
-            // Call rule weight maps actuals to formals.
-            std::map<Value *, DataFlowFacts> paramFlow;
+            std::map<Value *, DataFlowFacts> actualToFormalFlow;
+            std::map<Value *, DataFlowFacts> formalToActualFlow;
             unsigned argIdx = 0;
             for (auto &formal : calledFunc->args()) {
               if (argIdx < callInst->arg_size()) {
                 Value *actual = callInst->getArgOperand(argIdx);
-                if (!paramFlow.count(actual)) {
-                  paramFlow[actual] = DataFlowFacts::EmptySet();
-                }
-                paramFlow[actual].addFact(&formal);
+                actualToFormalFlow[actual].addFact(&formal);
+                formalToActualFlow[&formal].addFact(actual);
               }
               argIdx++;
             }
-            GenKillTransformer *callTrans =
-                GenKillTransformer::makeGenKillTransformer(
-                    DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
-                    paramFlow);
 
-            wpds.add_rule(controlState, instKey, controlState, calledEntry,
-                          returnKey, callTrans);
-
-            // Return-flow mapping: any returned SSA value in the callee can
-            // flow to the call result.
-            std::map<Value *, DataFlowFacts> retFlow;
+            std::map<Value *, DataFlowFacts> retToCallFlow;
+            std::map<Value *, DataFlowFacts> callToRetFlow;
             if (!callInst->getType()->isVoidTy()) {
               for (auto &calleeBB : *calledFunc) {
-                if (auto *RI = dyn_cast<ReturnInst>(calleeBB.getTerminator())) {
-                  Value *rv = RI->getReturnValue();
+                if (auto *retInst = dyn_cast<ReturnInst>(calleeBB.getTerminator())) {
+                  Value *rv = retInst->getReturnValue();
                   if (rv == nullptr) {
                     continue;
                   }
-                  if (!retFlow.count(rv)) {
-                    retFlow[rv] = DataFlowFacts::EmptySet();
-                  }
-                  retFlow[rv].addFact(callInst);
+                  retToCallFlow[rv].addFact(callInst);
+                  callToRetFlow[callInst].addFact(rv);
                 }
               }
             }
-            GenKillTransformer *retTrans =
-                GenKillTransformer::makeGenKillTransformer(
-                    DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
-                    retFlow);
 
-            // Ensure the standard exit-pop rule exists for the callee.
-            ensureExitPopRule(calledExit);
-
-            // Apply return-flow at the return site before the next instruction.
-            auto existing = returnSiteTransformers.find(returnKey);
-            if (existing == returnSiteTransformers.end()) {
-              returnSiteTransformers[returnKey] =
-                  ::ref_ptr<GenKillTransformer>(retTrans);
+            if (isForward) {
+              wpds_key_t pathReturnKey =
+                  new_str2key(
+                      (retTag(F, I) + "_callee_" + functionTag(*calledFunc))
+                          .c_str());
+              wpds.add_rule(
+                  controlState, instKey, controlState, calledEntry, pathReturnKey,
+                  GenKillTransformer::makeGenKillTransformer(
+                      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
+                      actualToFormalFlow));
+              ensurePopRule(calledExit);
+              connectForwardReturnJoin(
+                  pathReturnKey,
+                  GenKillTransformer::makeGenKillTransformer(
+                      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
+                      retToCallFlow));
             } else {
-              returnSiteTransformers[returnKey] = ::ref_ptr<GenKillTransformer>(
-                  existing->second.get_ptr()->combine(retTrans));
+              wpds_key_t pathCallKey =
+                  new_str2key((retTag(F, I) + "_callee_back_" +
+                               functionTag(*calledFunc))
+                                  .c_str());
+              wpds.add_rule(
+                  controlState, afterKey, controlState, calledExit, pathCallKey,
+                  GenKillTransformer::makeGenKillTransformer(
+                      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
+                      callToRetFlow));
+              ensurePopRule(calledEntry);
+              connectBackwardCallSite(
+                  pathCallKey,
+                  GenKillTransformer::makeGenKillTransformer(
+                      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
+                      formalToActualFlow));
             }
           }
 
-          // If the call has any modeled callee, we need an explicit return-site
-          // symbol. Also, for mixed/unknown callees, add a conservative direct
-          // edge to the return site.
-          if (hasModeledCallee) {
-            wpds_key_t returnKey = getReturnKey();
-            if (hasUnmodeledCallee) {
-              wpds.add_rule(controlState, instKey, controlState, returnKey,
-                            buildUnknownCallSummary(callInst, m));
-            }
-
-            // For terminator calls (e.g., invoke/callbr), connect return-site
-            // continuations through CFG to successor basic blocks. For
-            // unmodeled calls we fall back to instKey as the continuation
-            // point.
-            if (I.isTerminator()) {
-              auto retIt = returnSiteTransformers.find(returnKey);
-              GenKillTransformer *retWeight =
-                  (retIt != returnSiteTransformers.end() &&
-                   retIt->second.get_ptr())
-                      ? retIt->second.get_ptr()
-                      : GenKillTransformer::one();
-              for (auto *retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
-                if (retSite == nullptr) {
-                  continue;
-                }
-                auto *retBB = retSite->getParent();
-                auto bbIt = bbToKey.find(retBB);
-                if (bbIt == bbToKey.end()) {
-                  continue;
-                }
-                wpds.add_rule(controlState, returnKey, controlState,
-                              bbIt->second, retWeight);
-              }
-            }
-
-            prevKey = returnKey;
-            continue;
-          }
-
-          // No modeled callee: use a synthetic return-site symbol so the
-          // external-call summary is applied exactly once before continuing.
           if (hasUnmodeledCallee) {
-            wpds_key_t returnKey = getReturnKey();
-            wpds.add_rule(controlState, instKey, controlState, returnKey,
-                          buildUnknownCallSummary(callInst, m));
-
-            if (I.isTerminator()) {
-              for (auto *retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
-                if (retSite == nullptr) {
-                  continue;
-                }
-                auto *retBB = retSite->getParent();
-                auto bbIt = bbToKey.find(retBB);
-                if (bbIt == bbToKey.end()) {
-                  continue;
-                }
-                wpds.add_rule(controlState, returnKey, controlState,
-                              bbIt->second, GenKillTransformer::one());
-              }
+            wpds_key_t unknownKey = new_str2key(
+                (retTag(F, I) + (isForward ? "_unknown" : "_unknown_back"))
+                    .c_str());
+            if (isForward) {
+              wpds.add_rule(controlState, instKey, controlState, unknownKey,
+                            buildUnknownCallSummary(callInst, m, true));
+              connectForwardReturnJoin(unknownKey, GenKillTransformer::one());
+            } else {
+              wpds.add_rule(controlState, afterKey, controlState, unknownKey,
+                            buildUnknownCallSummary(callInst, m, false));
+              connectBackwardCallSite(unknownKey, GenKillTransformer::one());
             }
-
-            prevKey = returnKey;
-            continue;
           }
-        }
 
-        if (isa<ReturnInst>(&I)) {
-          // Return: <q, instKey> -> <q, funcExit>
-          wpds.add_rule(controlState, instKey, controlState, funcExit,
-                        GenKillTransformer::one());
-          prevKey = instKey;
+          if (isForward && (hasModeledCallee || hasUnmodeledCallee) &&
+              I.isTerminator()) {
+            for (auto *retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
+              if (retSite == nullptr) {
+                continue;
+              }
+              auto bbIt = bbToKey.find(retSite->getParent());
+              if (bbIt == bbToKey.end()) {
+                continue;
+              }
+              wpds.add_rule(controlState, afterKey, controlState, bbIt->second,
+                            GenKillTransformer::one());
+            }
+          }
           continue;
         }
 
-        // Regular instruction - continue to next
-        prevKey = instKey;
+        if (isa<ReturnInst>(&I)) {
+          if (isForward) {
+            wpds.add_rule(controlState, instKey, controlState, funcExit,
+                          GenKillTransformer::one());
+          } else {
+            wpds.add_rule(controlState, funcExit, controlState, instKey,
+                          GenKillTransformer::one());
+          }
+          continue;
+        }
       }
 
-      // Connect terminator to successor basic blocks
-      if (Instruction *terminator = BB.getTerminator()) {
-        wpds_key_t termKey = instToKey[terminator];
-
-        // If terminator is not a return or call, connect to successors
-        if (!isa<ReturnInst>(terminator) && !isa<CallBase>(terminator)) {
-          for (auto *succInst : intraCfg.getSuccsOf(
-                   terminator,
-                   ::dataflow::controlflow::FlowDirection::Forward)) {
-            if (succInst == nullptr) {
-              continue;
+      if (isForward) {
+        if (Instruction *terminator = BB.getTerminator()) {
+          wpds_key_t termKey = getAfterKey(terminator);
+          if (!isa<ReturnInst>(terminator) && !isa<CallBase>(terminator)) {
+            for (auto *succInst : intraCfg.getSuccsOf(
+                     terminator,
+                     ::dataflow::controlflow::FlowDirection::Forward)) {
+              if (succInst == nullptr) {
+                continue;
+              }
+              wpds.add_rule(controlState, termKey, controlState,
+                            bbToKey[succInst->getParent()],
+                            GenKillTransformer::one());
             }
-            auto *succBB = succInst->getParent();
-            wpds_key_t succBBKey = bbToKey[succBB];
-            wpds.add_rule(controlState, termKey, controlState, succBBKey,
-                          GenKillTransformer::one());
           }
         }
       }
@@ -727,10 +725,10 @@ void InterProceduralDataFlowEngine::extractResults(
   // Compute IN/OUT directly from the saturated automaton.
   for (auto &kv : instToKey) {
     Instruction *inst = kv.first;
-    wpds_key_t instKey = kv.second;
+    wpds_key_t afterKey = getProgramPointKeyAfterInstruction(inst);
 
     // OUT at instruction = value at the "after-inst" program-point symbol.
-    result->OUT(inst) = querySymbol(instKey, /*wantGenKill=*/true).facts;
+    result->OUT(inst) = querySymbol(afterKey, /*wantGenKill=*/true).facts;
     filterFactsToInstructionScope(inst, result->OUT(inst));
 
     // IN at instruction = value at the program-point symbol that precedes the
@@ -799,7 +797,7 @@ InterProceduralDataFlowEngine::queryRegularLanguage(
 }
 
 GenKillTransformer *InterProceduralDataFlowEngine::buildUnknownCallSummary(
-    CallBase *callInst, Module &m) const {
+    CallBase *callInst, Module &m, bool isForward) const {
   if (callInst == nullptr) {
     return GenKillTransformer::one();
   }
@@ -815,28 +813,56 @@ GenKillTransformer *InterProceduralDataFlowEngine::buildUnknownCallSummary(
     }
   }
 
-  if (!externalCallPolicy.preserveIdentity &&
-      !externalCallPolicy.flowPointerArgumentsToReturn &&
-      !externalCallPolicy.flowGlobalsToReturn) {
-    return GenKillTransformer::zero();
+  DataFlowFacts killFacts = DataFlowFacts::EmptySet();
+  std::set<Value *> genSet;
+  std::map<Value *, DataFlowFacts> flow;
+  if (!externalCallPolicy.preserveIdentity) {
+    for (Value *object : pointerObjects) {
+      MemoryObjectFact::addRepresentativeFact(killFacts, object);
+    }
+    for (GlobalValue *global : globals) {
+      MemoryObjectFact::addRepresentativeFact(killFacts, global);
+    }
   }
 
-  std::map<Value *, DataFlowFacts> flow;
   if (!callInst->getType()->isVoidTy()) {
-    if (externalCallPolicy.flowPointerArgumentsToReturn) {
-      for (Value *object : pointerObjects) {
-        MemoryObjectFact::addFlow(flow, object, callInst);
+    const bool mayFlowFromPointers =
+        externalCallPolicy.flowPointerArgumentsToReturn && !pointerObjects.empty();
+    const bool mayFlowFromGlobals =
+        externalCallPolicy.flowGlobalsToReturn && !globals.empty();
+    const bool mayGenerateReturn = mayFlowFromPointers || mayFlowFromGlobals;
+
+    if (isForward) {
+      if (mayFlowFromPointers && externalCallPolicy.preserveIdentity) {
+        for (Value *object : pointerObjects) {
+          MemoryObjectFact::addFlow(flow, object, callInst);
+        }
+      }
+      if (mayFlowFromGlobals && externalCallPolicy.preserveIdentity) {
+        for (GlobalValue *global : globals) {
+          MemoryObjectFact::addFlow(flow, global, callInst);
+        }
+      }
+      if (!externalCallPolicy.preserveIdentity && mayGenerateReturn) {
+        genSet.insert(callInst);
+      }
+    } else {
+      if (mayFlowFromPointers) {
+        for (Value *object : pointerObjects) {
+          MemoryObjectFact::addFlow(flow, callInst, object);
+        }
+      }
+      if (mayFlowFromGlobals) {
+        for (GlobalValue *global : globals) {
+          MemoryObjectFact::addFlow(flow, callInst, global);
+        }
       }
     }
-    if (externalCallPolicy.flowGlobalsToReturn) {
-      for (GlobalValue *global : globals) {
-        MemoryObjectFact::addFlow(flow, global, callInst);
-      }
-    }
+
   }
 
   return GenKillTransformer::makeGenKillTransformer(
-      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(), flow);
+      killFacts, DataFlowFacts(genSet), flow);
 }
 
 #ifdef WITNESS_TRACE

@@ -24,6 +24,13 @@ namespace ifds {
 template<typename Problem>
 IDESolver<Problem>::IDESolver(Problem& problem) : m_problem(problem) {}
 
+template<typename Problem>
+IDESolver<Problem>::~IDESolver() {
+    if (m_injected_alias_analysis) {
+        m_problem.set_alias_analysis(nullptr);
+    }
+}
+
 // ============================================================================
 // Helper Methods
 // ============================================================================
@@ -58,7 +65,14 @@ template<typename Problem>
 typename IDESolver<Problem>::EdgeFunctionPtr
 IDESolver<Problem>::join_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2) {
     if (!m_config.enable_edge_function_caching()) {
-        return make_edge_function(m_problem.join_edge_functions(*f1, *f2));
+        EdgeFunction joined = m_problem.join_edge_functions(*f1, *f2);
+        if (m_problem.edge_function_equivalent(joined, *f1)) {
+            return f1;
+        }
+        if (m_problem.edge_function_equivalent(joined, *f2)) {
+            return f2;
+        }
+        return make_edge_function(joined);
     }
     ComposePair key{f1, f2};
     auto it = m_join_cache.find(key);
@@ -67,7 +81,14 @@ IDESolver<Problem>::join_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2) {
     }
 
     EdgeFunction joined = m_problem.join_edge_functions(*f1, *f2);
-    EdgeFunctionPtr result = make_edge_function(joined);
+    EdgeFunctionPtr result;
+    if (m_problem.edge_function_equivalent(joined, *f1)) {
+        result = f1;
+    } else if (m_problem.edge_function_equivalent(joined, *f2)) {
+        result = f2;
+    } else {
+        result = make_edge_function(joined);
+    }
     m_join_cache[key] = result;
     return result;
 }
@@ -77,13 +98,18 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     using Fact = typename Problem::FactType;
     using Value = typename Problem::ValueType;
 
-    std::unique_ptr<lotus::AliasAnalysisWrapper> owned_alias_analysis;
+    if (m_injected_alias_analysis) {
+        m_problem.set_alias_analysis(nullptr);
+        m_owned_alias_analysis.reset();
+        m_injected_alias_analysis = false;
+    }
     if (m_config.auto_inject_alias_analysis() &&
         !m_problem.has_alias_analysis_configured()) {
-        owned_alias_analysis = std::make_unique<lotus::AliasAnalysisWrapper>(
+        m_owned_alias_analysis = std::make_unique<lotus::AliasAnalysisWrapper>(
             const_cast<llvm::Module&>(module),
             m_config.alias_analysis_config());
-        m_problem.set_alias_analysis(owned_alias_analysis.get());
+        m_problem.set_alias_analysis(m_owned_alias_analysis.get());
+        m_injected_alias_analysis = true;
     }
 
     m_steps_performed = 0;
@@ -172,7 +198,7 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         auto& vec = m_end_summaries[key];
         for (const auto& summary : vec) {
             if (summary.exit_inst == exit_inst && summary.exit_fact == exit_fact &&
-                summary.phi == phi) {
+                m_problem.edge_function_equivalent(*summary.phi, *phi)) {
                 return false;
             }
         }
@@ -334,7 +360,7 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                 preserve_zero(call_facts, fact);
                 for (const auto& callee_fact : call_facts) {
                     StartKey key{callee_entry, callee_fact};
-                    IncomingEdge incoming{call, fact, edge.start_node, start_fact, phi};
+                    IncomingEdge incoming{call, fact, edge.start_node, start_fact};
                     add_incoming(key, incoming);
                     on_call_transition(Node(call, fact),
                                        Node(callee_entry, callee_fact));

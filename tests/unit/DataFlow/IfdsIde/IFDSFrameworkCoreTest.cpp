@@ -1,5 +1,6 @@
 #include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/Core/IFDSFramework.h>
+#include <Dataflow/IFDS/Core/SolverGraphContext.h>
 #include <gtest/gtest.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
@@ -604,11 +605,36 @@ protected:
   std::unique_ptr<llvm::LLVMContext> context;
 };
 
+class EmptySeedIFDSProblem : public SimpleIFDSProblem {
+public:
+  InitialSeeds initial_seeds(const llvm::Module &) override { return {}; }
+};
+
 TEST_F(IFDSProblemInterfaceTest, InitialSeedsEmptyByDefault) {
   auto module = std::make_unique<llvm::Module>("test", *context);
   SimpleIFDSProblem problem;
 
   auto seeds = problem.initial_seeds(*module);
+  EXPECT_TRUE(seeds.empty());
+}
+
+TEST_F(IFDSProblemInterfaceTest, CustomEmptyInitialSeedsRemainEmpty) {
+  auto module = std::make_unique<llvm::Module>("test", *context);
+  auto *i32 = llvm::Type::getInt32Ty(*context);
+  auto *main_ty = llvm::FunctionType::get(i32, {}, false);
+  auto *main =
+      llvm::Function::Create(main_ty, llvm::Function::ExternalLinkage, "main",
+                             module.get());
+  auto *entry = llvm::BasicBlock::Create(*context, "entry", main);
+  llvm::IRBuilder<> builder(entry);
+  builder.CreateRet(llvm::ConstantInt::get(i32, 0));
+
+  EmptySeedIFDSProblem problem;
+  SolverGraphContext<SimpleIntFact, EmptySeedIFDSProblem> graph_context;
+
+  graph_context.initialize(*module);
+  auto seeds = graph_context.build_initial_seeds(problem, *module);
+
   EXPECT_TRUE(seeds.empty());
 }
 

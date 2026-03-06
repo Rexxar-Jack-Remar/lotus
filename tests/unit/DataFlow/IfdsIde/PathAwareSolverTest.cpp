@@ -14,6 +14,79 @@
 namespace ifds {
 namespace {
 
+struct IntFact {
+  int value = 0;
+
+  bool operator==(const IntFact &other) const { return value == other.value; }
+  bool operator!=(const IntFact &other) const { return !(*this == other); }
+  bool operator<(const IntFact &other) const { return value < other.value; }
+};
+
+class CustomZeroProblem : public IFDSProblem<IntFact> {
+public:
+  bool alias_configured = false;
+
+  IntFact zero_fact() const override { return IntFact{-1}; }
+  bool auto_add_zero() const override { return false; }
+  bool is_zero_fact(const IntFact &fact) const override {
+    return fact.value == zero_fact().value;
+  }
+  void set_alias_analysis(lotus::AliasAnalysisWrapper *aa) override {
+    IFDSProblem<IntFact>::set_alias_analysis(aa);
+    alias_configured = aa != nullptr;
+  }
+  FactSet normal_flow(const llvm::Instruction *, const IntFact &fact) override {
+    return {fact};
+  }
+  FactSet call_flow(const llvm::CallBase *, const llvm::Function *,
+                    const IntFact &fact) override {
+    return {fact};
+  }
+  FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
+                      const llvm::Function *, const IntFact &exit_fact,
+                      const IntFact &) override {
+    return {exit_fact};
+  }
+  FactSet call_to_return_flow(const llvm::CallBase *,
+                              const llvm::Instruction *,
+                              const IntFact &fact) override {
+    return {fact};
+  }
+  FactSet initial_facts(const llvm::Function *) override {
+    return {IntFact{7}};
+  }
+};
+
+class SummaryProjectionProblem : public IFDSProblem<IntFact> {
+public:
+  IntFact zero_fact() const override { return IntFact{0}; }
+  bool auto_add_zero() const override { return false; }
+  bool is_zero_fact(const IntFact &fact) const override {
+    return fact.value == 0;
+  }
+  FactSet normal_flow(const llvm::Instruction *, const IntFact &fact) override {
+    return {fact};
+  }
+  FactSet call_flow(const llvm::CallBase *, const llvm::Function *,
+                    const IntFact &fact) override {
+    return {fact};
+  }
+  FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
+                      const llvm::Function *, const IntFact &exit_fact,
+                      const IntFact &) override {
+    if (exit_fact.value == 1) {
+      return {IntFact{2}};
+    }
+    return {exit_fact};
+  }
+  FactSet call_to_return_flow(const llvm::CallBase *,
+                              const llvm::Instruction *,
+                              const IntFact &) override {
+    return {};
+  }
+  FactSet initial_facts(const llvm::Function *) override { return {IntFact{1}}; }
+};
+
 class PathAwareSolverTest : public ::testing::Test {
 protected:
   struct FlowNodes {
@@ -97,6 +170,47 @@ protected:
     return m;
   }
 
+  std::unique_ptr<llvm::Module> createSimplePropagationModule() {
+    auto m = std::make_unique<llvm::Module>("pathaware_simple", *ctx);
+    auto *i32 = llvm::Type::getInt32Ty(*ctx);
+    auto *mainTy = llvm::FunctionType::get(i32, {}, false);
+    auto *mainFn = llvm::Function::Create(
+        mainTy, llvm::Function::ExternalLinkage, "main", m.get());
+
+    auto *entry = llvm::BasicBlock::Create(*ctx, "entry", mainFn);
+    llvm::IRBuilder<> b(entry);
+    auto *tmp = b.CreateAdd(llvm::ConstantInt::get(i32, 1),
+                            llvm::ConstantInt::get(i32, 2), "tmp");
+    b.CreateRet(tmp);
+
+    return m;
+  }
+
+  std::unique_ptr<llvm::Module> createSummaryProjectionModule() {
+    auto m = std::make_unique<llvm::Module>("pathaware_summary_projection", *ctx);
+    auto *i32 = llvm::Type::getInt32Ty(*ctx);
+    auto *mainTy = llvm::FunctionType::get(i32, {}, false);
+    auto *calleeTy = llvm::FunctionType::get(i32, {i32}, false);
+
+    auto *mainFn = llvm::Function::Create(mainTy, llvm::Function::ExternalLinkage,
+                                          "main", m.get());
+    auto *calleeFn = llvm::Function::Create(calleeTy, llvm::Function::InternalLinkage,
+                                            "project", m.get());
+
+    auto *entry = llvm::BasicBlock::Create(*ctx, "entry", mainFn);
+    llvm::IRBuilder<> b(entry);
+    auto *call = b.CreateCall(calleeTy, calleeFn,
+                              {llvm::ConstantInt::get(i32, 1)}, "projected");
+    (void)call;
+    b.CreateRet(llvm::ConstantInt::get(i32, 0));
+
+    auto *calleeEntry = llvm::BasicBlock::Create(*ctx, "entry", calleeFn);
+    llvm::IRBuilder<> cb(calleeEntry);
+    cb.CreateRet(calleeFn->getArg(0));
+
+    return m;
+  }
+
   FlowNodes collectFlowNodes(const llvm::Module &m) {
     FlowNodes nodes;
     auto *mainFn = m.getFunction("main");
@@ -129,6 +243,20 @@ protected:
     return nodes;
   }
 };
+
+} // namespace
+} // namespace ifds
+
+namespace std {
+template <> struct hash<ifds::IntFact> {
+  size_t operator()(const ifds::IntFact &fact) const {
+    return std::hash<int>{}(fact.value);
+  }
+};
+} // namespace std
+
+namespace ifds {
+namespace {
 
 TEST_F(PathAwareSolverTest, RecordsImmediateInterproceduralEdges) {
   auto m = createIdentityFlowModule();
@@ -231,13 +359,7 @@ TEST_F(PathAwareSolverTest, IFDSAndPathAwareParityAtSinkCall) {
 
   auto baseline = ifds_solver.get_facts_at_entry(nodes.sink_call);
   auto pathaware = path_solver.get_facts_at_entry(nodes.sink_call);
-  std::set<TaintFact> baseline_nonzero;
-  for (const auto &fact : baseline) {
-    if (!taint1.is_zero_fact(fact)) {
-      baseline_nonzero.insert(fact);
-    }
-  }
-  EXPECT_EQ(baseline_nonzero, pathaware);
+  EXPECT_EQ(baseline, pathaware);
 }
 
 TEST_F(PathAwareSolverTest, MultiReturnSummaryReuseUsesRealExitNode) {
@@ -316,6 +438,107 @@ TEST_F(PathAwareSolverTest, SolvePreservesRecordEdgesConfig) {
   solver.solve(*m);
 
   EXPECT_FALSE(solver.get_solver_config().record_edges());
+}
+
+TEST_F(PathAwareSolverTest, PathAwareWrapperForwardsCustomZeroPolicy) {
+  auto m = createSimplePropagationModule();
+  auto *main_fn = m->getFunction("main");
+  ASSERT_NE(main_fn, nullptr);
+  const llvm::Instruction *entry = &main_fn->getEntryBlock().front();
+
+  CustomZeroProblem base_problem;
+  IFDSSolver<CustomZeroProblem> ifds_solver(base_problem);
+  ifds_solver.solve(*m);
+
+  CustomZeroProblem path_problem;
+  PathAwareIFDSSolver<CustomZeroProblem> path_solver(path_problem);
+  path_solver.solve(*m);
+
+  auto baseline = ifds_solver.get_facts_at_entry(entry);
+  auto pathaware = path_solver.get_facts_at_entry(entry);
+  EXPECT_EQ(baseline, pathaware);
+  EXPECT_EQ(pathaware.count(path_problem.zero_fact()), 0U);
+  EXPECT_EQ(pathaware.count(IntFact{7}), 1U);
+}
+
+TEST_F(PathAwareSolverTest, PathAwareWrapperForwardsAliasInjection) {
+  auto m = createSimplePropagationModule();
+  CustomZeroProblem problem;
+  PathAwareIFDSSolver<CustomZeroProblem> solver(problem);
+  auto config = solver.get_solver_config();
+  config.set_auto_inject_alias_analysis(true);
+  solver.set_solver_config(config);
+
+  solver.solve(*m);
+
+  EXPECT_TRUE(problem.alias_configured);
+}
+
+TEST_F(PathAwareSolverTest, AutoInjectedAliasIsClearedWhenIFDSSolverDies) {
+  auto m = createSimplePropagationModule();
+  CustomZeroProblem problem;
+  {
+    IFDSSolver<CustomZeroProblem> solver(problem);
+    auto config = solver.get_solver_config();
+    config.set_auto_inject_alias_analysis(true);
+    solver.set_solver_config(config);
+    solver.solve(*m);
+    EXPECT_TRUE(problem.has_alias_analysis_configured());
+  }
+
+  EXPECT_FALSE(problem.has_alias_analysis_configured());
+  EXPECT_FALSE(problem.alias_configured);
+}
+
+TEST_F(PathAwareSolverTest, AutoInjectedAliasIsClearedWhenPathAwareSolverDies) {
+  auto m = createSimplePropagationModule();
+  CustomZeroProblem problem;
+  {
+    PathAwareIFDSSolver<CustomZeroProblem> solver(problem);
+    auto config = solver.get_solver_config();
+    config.set_auto_inject_alias_analysis(true);
+    solver.set_solver_config(config);
+    solver.solve(*m);
+    EXPECT_TRUE(problem.has_alias_analysis_configured());
+  }
+
+  EXPECT_FALSE(problem.has_alias_analysis_configured());
+  EXPECT_FALSE(problem.alias_configured);
+}
+
+TEST_F(PathAwareSolverTest, SummaryEdgesTrackReturnFactsNotCalleeExitFacts) {
+  auto m = createSummaryProjectionModule();
+  SummaryProjectionProblem problem;
+  PathAwareIFDSSolver<SummaryProjectionProblem> solver(problem);
+  solver.solve(*m);
+
+  const llvm::CallBase *project_call = nullptr;
+  const llvm::Instruction *ret_site = nullptr;
+  for (const auto &inst : m->getFunction("main")->getEntryBlock()) {
+    if (auto *call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
+      project_call = call;
+    }
+    if (llvm::isa<llvm::ReturnInst>(&inst)) {
+      ret_site = &inst;
+    }
+  }
+  ASSERT_NE(project_call, nullptr);
+  ASSERT_NE(ret_site, nullptr);
+
+  bool saw_projected_fact = false;
+  bool saw_exit_fact = false;
+  for (const auto &edge : solver.get_esg().get_all_edges()) {
+    if (edge.kind != ESGEdgeKind::Summary ||
+        edge.source.instruction != project_call ||
+        edge.target.instruction != ret_site) {
+      continue;
+    }
+    saw_projected_fact |= edge.target.fact == IntFact{2};
+    saw_exit_fact |= edge.target.fact == IntFact{1};
+  }
+
+  EXPECT_TRUE(saw_projected_fact);
+  EXPECT_FALSE(saw_exit_fact);
 }
 
 } // namespace

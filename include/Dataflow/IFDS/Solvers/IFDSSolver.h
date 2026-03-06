@@ -12,6 +12,7 @@
 #include "Dataflow/IFDS/Core/SolverGraphContext.h"
 #include "Dataflow/IFDS/Core/SolverRunState.h"
 
+#include <memory>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -65,6 +66,7 @@ public:
   using NodeHash = typename ExplodedSupergraph<Fact>::NodeHash;
 
   IFDSSolver(Problem &problem);
+  ~IFDSSolver();
 
   void solve(const llvm::Module &module);
 
@@ -130,6 +132,8 @@ private:
 
   Problem &m_problem;
   IFDSIDESolverConfig m_config;
+  std::unique_ptr<lotus::AliasAnalysisWrapper> m_owned_alias_analysis;
+  bool m_injected_alias_analysis = false;
 
   // Bounded solver state (0 = unbounded)
   size_t m_max_steps = 0;

@@ -47,8 +47,22 @@ void DataFlowFacts::ClearUniverse() {
 
 DataFlowFacts DataFlowFacts::Union(const DataFlowFacts &x,
                                    const DataFlowFacts &y) {
-  if (x.is_universe || y.is_universe) {
-    return UniverseSet();
+  if (x.is_universe && y.is_universe) {
+    DataFlowFacts result = UniverseSet();
+    std::set_intersection(x.facts.begin(), x.facts.end(), y.facts.begin(),
+                          y.facts.end(),
+                          std::inserter(result.facts, result.facts.begin()));
+    return result;
+  }
+  if (x.is_universe) {
+    DataFlowFacts result = UniverseSet();
+    std::set_difference(x.facts.begin(), x.facts.end(), y.facts.begin(),
+                        y.facts.end(),
+                        std::inserter(result.facts, result.facts.begin()));
+    return result;
+  }
+  if (y.is_universe) {
+    return Union(y, x);
   }
   DataFlowFacts result = x;
   result.facts.insert(y.facts.begin(), y.facts.end());
@@ -57,11 +71,21 @@ DataFlowFacts DataFlowFacts::Union(const DataFlowFacts &x,
 
 DataFlowFacts DataFlowFacts::Intersect(const DataFlowFacts &x,
                                        const DataFlowFacts &y) {
+  if (x.is_universe && y.is_universe) {
+    DataFlowFacts result = UniverseSet();
+    result.facts = x.facts;
+    result.facts.insert(y.facts.begin(), y.facts.end());
+    return result;
+  }
   if (x.is_universe) {
-    return y;
+    DataFlowFacts result;
+    std::set_difference(y.facts.begin(), y.facts.end(), x.facts.begin(),
+                        x.facts.end(),
+                        std::inserter(result.facts, result.facts.begin()));
+    return result;
   }
   if (y.is_universe) {
-    return x;
+    return Intersect(y, x);
   }
   DataFlowFacts result;
   std::set_intersection(x.facts.begin(), x.facts.end(), y.facts.begin(),
@@ -72,11 +96,25 @@ DataFlowFacts DataFlowFacts::Intersect(const DataFlowFacts &x,
 
 DataFlowFacts DataFlowFacts::Diff(const DataFlowFacts &x,
                                   const DataFlowFacts &y) {
+  if (x.is_universe && y.is_universe) {
+    DataFlowFacts result;
+    std::set_difference(y.facts.begin(), y.facts.end(), x.facts.begin(),
+                        x.facts.end(),
+                        std::inserter(result.facts, result.facts.begin()));
+    return result;
+  }
   if (y.is_universe) {
-    return EmptySet();
+    DataFlowFacts result;
+    std::set_intersection(x.facts.begin(), x.facts.end(), y.facts.begin(),
+                          y.facts.end(),
+                          std::inserter(result.facts, result.facts.begin()));
+    return result;
   }
   if (x.is_universe) {
-    return UniverseSet();
+    DataFlowFacts result = UniverseSet();
+    result.facts = x.facts;
+    result.facts.insert(y.facts.begin(), y.facts.end());
+    return result;
   }
   DataFlowFacts result;
   std::set_difference(x.facts.begin(), x.facts.end(), y.facts.begin(),
@@ -93,6 +131,7 @@ const std::set<Value *> &DataFlowFacts::getFacts() const { return facts; }
 
 void DataFlowFacts::addFact(Value *val) {
   if (is_universe) {
+    facts.erase(val);
     return;
   }
   facts.insert(val);
@@ -100,6 +139,7 @@ void DataFlowFacts::addFact(Value *val) {
 
 void DataFlowFacts::removeFact(Value *val) {
   if (is_universe) {
+    facts.insert(val);
     return;
   }
   facts.erase(val);
@@ -107,7 +147,7 @@ void DataFlowFacts::removeFact(Value *val) {
 
 bool DataFlowFacts::containsFact(Value *val) const {
   if (is_universe) {
-    return true;
+    return facts.find(val) == facts.end();
   }
   return facts.find(val) != facts.end();
 }

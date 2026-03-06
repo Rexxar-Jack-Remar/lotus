@@ -280,11 +280,14 @@ public:
     m_esg = ExplicitExplodedSupergraph<Fact>();
 
     auto &config = this->get_solver_config();
-    bool had_record_edges = config.record_edges();
+    struct RecordEdgesGuard {
+      IFDSIDESolverConfig &config;
+      bool previous;
+      ~RecordEdgesGuard() { config.set_record_edges(previous); }
+    } guard{config, config.record_edges()};
     config.set_record_edges(true);
 
     Base::solve(module);
-    config.set_record_edges(had_record_edges);
   }
 
   // Access the explicit ESG
@@ -340,11 +343,7 @@ protected:
     m_esg.add_edge(source, target, ESGEdgeKind::CallToReturn);
   }
 
-  void on_summary_edge_added(const SummaryEdge<Fact> &se) override {
-    Node src(se.call_site, se.call_fact);
-    Node tgt(se.return_site, se.return_fact);
-    m_esg.add_edge(src, tgt, ESGEdgeKind::Summary);
-  }
+  void on_summary_edge_added(const SummaryEdge<Fact> &se) override { (void)se; }
 
   void on_summary_transition(const Node &source, const Node &target) override {
     m_esg.add_edge(source, target, ESGEdgeKind::Summary);

@@ -138,7 +138,8 @@ private:
   // Convert LLVM Module to WPDS
   void buildWPDS(Module &m, wpds::WPDS<GenKillTransformer> &wpds,
                  const std::function<GenKillTransformer *(Instruction *)>
-                     &createTransformer);
+                     &createTransformer,
+                 bool isForward);
 
   // Create a configuration automaton for the initial states
   void buildInitialAutomaton(Module &m, wpds::CA<GenKillTransformer> &ca,
@@ -149,7 +150,8 @@ private:
       const std::set<Value *> &initialFacts, bool useExitPoints);
   ::ref_ptr<GenKillTransformer> querySummaryAtSymbol(wpds::wpds_key_t symbol) const;
   std::set<Value *> queryFactsAtSymbol(wpds::wpds_key_t symbol) const;
-  GenKillTransformer *buildUnknownCallSummary(CallBase *callInst, Module &m) const;
+  GenKillTransformer *buildUnknownCallSummary(CallBase *callInst, Module &m,
+                                              bool isForward) const;
 
   // Map program elements to WPDS keys. These return the exact keys used in the
   // engine's internal WPDS encoding when such keys exist.

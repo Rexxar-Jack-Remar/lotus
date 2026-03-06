@@ -45,14 +45,14 @@ static GenKillTransformer *createLivenessTransformer(Instruction *I) {
     Value *ptr = SI->getPointerOperand();
     Value *val = SI->getValueOperand();
 
-    // Store defines (kills) the memory location
-    if (isa<Instruction>(ptr) || isa<Argument>(ptr)) {
-      killSet.insert(ptr);
-    }
-
     // Store uses the value being stored
     if (isa<Instruction>(val) || isa<Argument>(val)) {
       genSet.insert(val);
+    }
+
+    // The store address is read to determine where the write goes.
+    if (isa<Instruction>(ptr) || isa<Argument>(ptr)) {
+      genSet.insert(ptr);
     }
   }
 

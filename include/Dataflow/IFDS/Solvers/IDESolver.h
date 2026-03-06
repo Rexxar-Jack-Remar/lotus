@@ -95,6 +95,7 @@ public:
   using PathEdgeHashType = PathEdgeHash<Fact>;
 
   IDESolver(Problem &problem);
+  ~IDESolver();
 
   void solve(const llvm::Module &module);
 
@@ -183,12 +184,10 @@ private:
     Fact call_fact;
     const llvm::Instruction *start_node;
     Fact start_fact;
-    EdgeFunctionPtr caller_phi;
 
     bool operator==(const IncomingEdge &other) const {
       return call == other.call && call_fact == other.call_fact &&
-             start_node == other.start_node && start_fact == other.start_fact &&
-             caller_phi == other.caller_phi;
+             start_node == other.start_node && start_fact == other.start_fact;
     }
   };
 
@@ -226,6 +225,8 @@ private:
   IFDSIDESolverConfig m_config;
   IFDSIDESolverStatistics m_statistics;
   SolverGraphContext<Fact, Problem> m_graph_context;
+  std::unique_ptr<lotus::AliasAnalysisWrapper> m_owned_alias_analysis;
+  bool m_injected_alias_analysis = false;
 
   // Bounded solver state (0 = unbounded)
   size_t m_max_steps = 0;

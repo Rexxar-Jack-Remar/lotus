@@ -154,6 +154,28 @@ protected:
     return M;
   }
 
+  std::unique_ptr<Module> createReadOnlyCallModule() {
+    auto M = std::make_unique<Module>("readonly_call", *Ctx);
+    auto *I32 = Type::getInt32Ty(*Ctx);
+    auto *PtrTy = PointerType::getUnqual(I32);
+
+    auto *ReaderTy = FunctionType::get(I32, {PtrTy}, false);
+    auto *Reader = Function::Create(ReaderTy, Function::ExternalLinkage,
+                                    "reader", M.get());
+
+    auto *MainTy = FunctionType::get(I32, {}, false);
+    auto *Main =
+        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
+    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
+    IRBuilder<> B(Entry);
+    auto *P = B.CreateAlloca(I32, nullptr, "p");
+    auto *Call = B.CreateCall(ReaderTy, Reader, {P}, "reader_result");
+    (void)Call;
+    auto *Load = B.CreateLoad(I32, P, "load_p");
+    B.CreateRet(Load);
+    return M;
+  }
+
   std::unique_ptr<Module> createMultiCalleeResolverModule() {
     auto M = std::make_unique<Module>("multi_callee", *Ctx);
     auto *I32 = Type::getInt32Ty(*Ctx);
@@ -189,6 +211,38 @@ protected:
     return M;
   }
 
+  std::unique_ptr<Module> createMixedCalleeResolverModule() {
+    auto M = std::make_unique<Module>("mixed_callee", *Ctx);
+    auto *I32 = Type::getInt32Ty(*Ctx);
+    auto *PtrTy = PointerType::getUnqual(I32);
+    auto *KnownGlobal = new GlobalVariable(
+        *M, I32, false, GlobalValue::ExternalLinkage,
+        ConstantInt::get(I32, 1), "known_g");
+    new GlobalVariable(*M, I32, false, GlobalValue::ExternalLinkage,
+                       ConstantInt::get(I32, 2), "unknown_g");
+
+    auto *DispatchTy = FunctionType::get(PtrTy, {PtrTy}, false);
+    auto *Dispatch = Function::Create(DispatchTy, Function::ExternalLinkage,
+                                      "dispatch", M.get());
+
+    auto *Known = Function::Create(DispatchTy, Function::InternalLinkage,
+                                   "known", M.get());
+    Known->arg_begin()->setName("arg");
+    auto *KnownBB = BasicBlock::Create(*Ctx, "entry", Known);
+    IRBuilder<> KnownBuilder(KnownBB);
+    KnownBuilder.CreateRet(KnownGlobal);
+
+    auto *Main = Function::Create(DispatchTy, Function::ExternalLinkage, "main",
+                                  M.get());
+    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
+    IRBuilder<> B(Entry);
+    auto *P = B.CreateAlloca(I32, nullptr, "p");
+    auto *Call = B.CreateCall(DispatchTy, Dispatch, {P}, "dispatch_result");
+    auto *After = B.CreatePtrToInt(Call, I32, "after_call");
+    B.CreateRet(After);
+    return M;
+  }
+
   std::unique_ptr<Module> createTwoFunctionModule() {
     auto M = std::make_unique<Module>("two_functions", *Ctx);
     auto *I32 = Type::getInt32Ty(*Ctx);
@@ -218,6 +272,47 @@ protected:
     return M;
   }
 
+  std::unique_ptr<Module> createReturnThroughCalleeModule() {
+    auto M = std::make_unique<Module>("return_through_callee", *Ctx);
+    auto *I32 = Type::getInt32Ty(*Ctx);
+
+    auto *CalleeTy = FunctionType::get(I32, {I32}, false);
+    auto *Callee = Function::Create(CalleeTy, Function::InternalLinkage, "id",
+                                    M.get());
+    Callee->arg_begin()->setName("arg");
+    auto *CalleeBB = BasicBlock::Create(*Ctx, "entry", Callee);
+    IRBuilder<> CalleeBuilder(CalleeBB);
+    CalleeBuilder.CreateRet(&*Callee->arg_begin());
+
+    auto *MainTy = FunctionType::get(I32, {}, false);
+    auto *Main =
+        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
+    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
+    IRBuilder<> B(Entry);
+    auto *Seed = BinaryOperator::CreateAdd(ConstantInt::get(I32, 1),
+                                           ConstantInt::get(I32, 2), "seed",
+                                           Entry);
+    auto *Call = B.CreateCall(CalleeTy, Callee, {Seed}, "call_id");
+    B.CreateRet(Call);
+    (void)Call;
+    return M;
+  }
+
+  std::unique_ptr<Module> createUninitializedLoadValueModule() {
+    auto M = std::make_unique<Module>("uninit_load_value", *Ctx);
+    auto *I32 = Type::getInt32Ty(*Ctx);
+    auto *MainTy = FunctionType::get(I32, {}, false);
+    auto *Main =
+        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
+    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
+    IRBuilder<> B(Entry);
+    auto *P = B.CreateAlloca(I32, nullptr, "p");
+    auto *Loaded = B.CreateLoad(I32, P, "loaded");
+    auto *Use = B.CreateAdd(Loaded, ConstantInt::get(I32, 1), "use_loaded");
+    B.CreateRet(Use);
+    return M;
+  }
+
   std::unique_ptr<Module> createUnnamedLivenessModule() {
     auto M = std::make_unique<Module>("liveness", *Ctx);
     auto *I32 = Type::getInt32Ty(*Ctx);
@@ -231,6 +326,26 @@ protected:
     auto *Ret = B.CreateRet(Tmp);
     UnnamedDef = Tmp;
     RetInst = Ret;
+    return M;
+  }
+
+  std::unique_ptr<Module> createStorePointerUseModule() {
+    auto M = std::make_unique<Module>("store_pointer_use", *Ctx);
+    auto *I32 = Type::getInt32Ty(*Ctx);
+    auto *MainTy = FunctionType::get(I32, {}, false);
+    auto *Main =
+        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
+    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
+    IRBuilder<> B(Entry);
+    auto *P = B.CreateAlloca(I32, nullptr, "p");
+    auto *Store = B.CreateStore(ConstantInt::get(I32, 1), P);
+    auto *Cast = B.CreatePtrToInt(P, Type::getInt64Ty(*Ctx), "ptr_use");
+    auto *Trunc = B.CreateTrunc(Cast, I32, "ptr_use32");
+    (void)Trunc;
+    B.CreateRet(ConstantInt::get(I32, 0));
+    StoreInstForLiveness = cast<StoreInst>(Store);
+    PointerAllocaForLiveness = P;
+    PtrUseInst = cast<Instruction>(Cast);
     return M;
   }
 
@@ -253,6 +368,9 @@ protected:
   std::unique_ptr<LLVMContext> Ctx;
   Instruction *UnnamedDef = nullptr;
   ReturnInst *RetInst = nullptr;
+  StoreInst *StoreInstForLiveness = nullptr;
+  Value *PointerAllocaForLiveness = nullptr;
+  Instruction *PtrUseInst = nullptr;
 };
 
 TEST_F(WPDSTest, CombineIsCommutativeAndIdempotentForMayJoin) {
@@ -308,6 +426,24 @@ TEST_F(WPDSTest, ExtendIsAssociativeAndHasIdentityAndZeroLaws) {
   EXPECT_TRUE(GenKillTransformer::zero()->extend(T1)
                   ->equal(GenKillTransformer::zero()));
   EXPECT_TRUE(T1->combine(GenKillTransformer::zero())->equal(T1));
+}
+
+TEST_F(WPDSTest, UniverseSetSupportsSubtractionAndRemoval) {
+  auto *A = fact(1);
+  auto *B = fact(2);
+  auto *C = fact(3);
+
+  DataFlowFacts universe = DataFlowFacts::UniverseSet();
+  universe.removeFact(A);
+  EXPECT_FALSE(universe.containsFact(A));
+  EXPECT_TRUE(universe.containsFact(B));
+
+  DataFlowFacts finite;
+  finite.addFact(B);
+  DataFlowFacts diff = DataFlowFacts::Diff(universe, finite);
+  EXPECT_FALSE(diff.containsFact(A));
+  EXPECT_FALSE(diff.containsFact(B));
+  EXPECT_TRUE(diff.containsFact(C));
 }
 
 TEST_F(WPDSTest, ForwardAnalysisRetainsResultForAccessorQueries) {
@@ -395,6 +531,18 @@ TEST_F(WPDSTest, LivenessKillsUnnamedDefinitions) {
   EXPECT_TRUE(containsFact(Result->IN(RetInst), UnnamedDef));
 }
 
+TEST_F(WPDSTest, LivenessTreatsStorePointerAsUseNotDefinition) {
+  auto M = createStorePointerUseModule();
+  auto Result = runLivenessAnalysis(*M);
+  ASSERT_NE(Result, nullptr);
+  ASSERT_NE(StoreInstForLiveness, nullptr);
+  ASSERT_NE(PointerAllocaForLiveness, nullptr);
+  ASSERT_NE(PtrUseInst, nullptr);
+
+  EXPECT_TRUE(containsFact(Result->IN(StoreInstForLiveness),
+                           PointerAllocaForLiveness));
+}
+
 TEST_F(WPDSTest, UninitializedVariablesDocumentsAliasingLimitation) {
   auto M = createAliasLimitationModule();
   auto Result = runUninitializedVariablesAnalysis(*M);
@@ -421,6 +569,33 @@ TEST_F(WPDSTest, UninitializedVariablesTracksGlobalStoreLoadThroughObjectFact) {
   ASSERT_NE(Global, nullptr);
 
   EXPECT_FALSE(containsFact(Result->IN(Load), Global));
+}
+
+TEST_F(WPDSTest, UninitializedVariablesDoNotAssumeCallsInitializePointers) {
+  auto M = createReadOnlyCallModule();
+  auto Result = runUninitializedVariablesAnalysis(*M);
+  ASSERT_NE(Result, nullptr);
+
+  auto *Load = findInstructionByName(*M, "load_p");
+  auto *P = findInstructionByName(*M, "p");
+  ASSERT_NE(Load, nullptr);
+  ASSERT_NE(P, nullptr);
+
+  EXPECT_TRUE(containsFact(Result->IN(Load), P));
+}
+
+TEST_F(WPDSTest, UninitializedVariablesPropagateLoadResultToUses) {
+  auto M = createUninitializedLoadValueModule();
+  auto Result = runUninitializedVariablesAnalysis(*M);
+  ASSERT_NE(Result, nullptr);
+
+  auto *Loaded = findInstructionByName(*M, "loaded");
+  auto *Use = findInstructionByName(*M, "use_loaded");
+  ASSERT_NE(Loaded, nullptr);
+  ASSERT_NE(Use, nullptr);
+
+  EXPECT_TRUE(containsFact(Result->OUT(Loaded), Loaded));
+  EXPECT_TRUE(containsFact(Result->IN(Use), Loaded));
 }
 
 TEST_F(WPDSTest, QueryHelpersExposeProgramPointFactsAndSummaries) {
@@ -450,6 +625,52 @@ TEST_F(WPDSTest, QueryHelpersExposeProgramPointFactsAndSummaries) {
   auto Summary = Engine.querySummaryAfterInstruction(First);
   ASSERT_TRUE(Summary.get_ptr() != nullptr);
   EXPECT_FALSE(Summary->equal(GenKillTransformer::zero()));
+}
+
+TEST_F(WPDSTest, CallOutSetUsesAfterCallProgramPoint) {
+  auto M = createReturnThroughCalleeModule();
+  InterProceduralDataFlowEngine Engine;
+
+  auto Result = Engine.runForwardAnalysis(
+      *M,
+      [&](Instruction *I) -> GenKillTransformer * {
+        if (I->getName() == "seed") {
+          return makeTransformer({}, {I});
+        }
+        return GenKillTransformer::one();
+      });
+  ASSERT_NE(Result, nullptr);
+
+  auto *Call = findInstructionByName(*M, "call_id");
+  ASSERT_NE(Call, nullptr);
+
+  EXPECT_EQ(Result->OUT(Call), Engine.queryFactsAfterInstruction(Call));
+  EXPECT_TRUE(containsFact(Result->OUT(Call), Call));
+}
+
+TEST_F(WPDSTest, BackwardAnalysisMapsCalleeReturnBackToActual) {
+  auto M = createReturnThroughCalleeModule();
+  InterProceduralDataFlowEngine Engine;
+
+  auto Result = Engine.runBackwardAnalysis(
+      *M,
+      [&](Instruction *I) -> GenKillTransformer * {
+        if (auto *RI = dyn_cast<ReturnInst>(I)) {
+          if (Value *RV = RI->getReturnValue()) {
+            return makeTransformer({}, {RV});
+          }
+        }
+        return GenKillTransformer::one();
+      });
+  ASSERT_NE(Result, nullptr);
+
+  auto *Seed = findInstructionByName(*M, "seed");
+  auto *Call = findInstructionByName(*M, "call_id");
+  ASSERT_NE(Seed, nullptr);
+  ASSERT_NE(Call, nullptr);
+
+  EXPECT_TRUE(containsFact(Result->IN(Call), Seed));
+  EXPECT_TRUE(containsFact(Engine.queryFactsBeforeInstruction(Call), Seed));
 }
 
 TEST_F(WPDSTest, UnknownCallPolicyCanSummarizeReturnPointerAndGlobalEffects) {
@@ -496,6 +717,35 @@ TEST_F(WPDSTest, UnknownCallPolicyCanSummarizeReturnPointerAndGlobalEffects) {
   EXPECT_TRUE(containsFact(Result->IN(Ret), Global));
 }
 
+TEST_F(WPDSTest, UnknownCallPolicyCanDropIdentityWhileKeepingReturnSummary) {
+  auto M = createUnknownCallModule();
+  InterProceduralDataFlowEngine Engine;
+  InterProceduralDataFlowEngine::ExternalCallPolicy Policy;
+  Policy.preserveIdentity = false;
+  Policy.flowPointerArgumentsToReturn = true;
+  Policy.flowGlobalsToReturn = false;
+  Engine.setExternalCallPolicy(Policy);
+
+  auto *P = findInstructionByName(*M, "p");
+  ASSERT_NE(P, nullptr);
+
+  auto Result = Engine.runForwardAnalysis(
+      *M,
+      [](Instruction *) -> GenKillTransformer * {
+        return GenKillTransformer::one();
+      },
+      {P});
+  ASSERT_NE(Result, nullptr);
+
+  auto *Call = findInstructionByName(*M, "ext_result");
+  auto *Ret = M->getFunction("main")->back().getTerminator();
+  ASSERT_NE(Call, nullptr);
+  ASSERT_NE(Ret, nullptr);
+
+  EXPECT_TRUE(containsFact(Result->IN(Ret), Call));
+  EXPECT_FALSE(containsFact(Result->IN(Ret), P));
+}
+
 TEST_F(WPDSTest, CustomResolverSupportsMultiCalleeMayJoin) {
   auto M = createMultiCalleeResolverModule();
   InterProceduralDataFlowEngine Engine;
@@ -521,6 +771,44 @@ TEST_F(WPDSTest, CustomResolverSupportsMultiCalleeMayJoin) {
   ASSERT_NE(Call, nullptr);
   ASSERT_NE(After, nullptr);
   EXPECT_TRUE(containsFact(Result->OUT(After), Call));
+}
+
+TEST_F(WPDSTest, MixedKnownAndUnknownCalleesDoNotReuseKnownReturnSummary) {
+  auto M = createMixedCalleeResolverModule();
+  InterProceduralDataFlowEngine Engine;
+  InterProceduralDataFlowEngine::ExternalCallPolicy Policy;
+  Policy.flowPointerArgumentsToReturn = false;
+  Policy.flowGlobalsToReturn = true;
+  Engine.setExternalCallPolicy(Policy);
+  Engine.setCalleeResolver([&](CallBase *Call) -> std::vector<Function *> {
+    if (Call->getCalledFunction() &&
+        Call->getCalledFunction()->getName() == "dispatch") {
+      return {M->getFunction("known"), nullptr};
+    }
+    return {};
+  });
+
+  std::set<Value *> initialFacts = {M->getNamedGlobal("known_g")};
+  auto Result = Engine.runForwardAnalysis(
+      *M,
+      [](Instruction *) -> GenKillTransformer * {
+        return GenKillTransformer::one();
+      },
+      initialFacts);
+  ASSERT_NE(Result, nullptr);
+
+  auto *Ret = M->getFunction("main")->back().getTerminator();
+  auto *Call = findInstructionByName(*M, "dispatch_result");
+  auto *KnownGlobal = M->getNamedGlobal("known_g");
+  auto *UnknownGlobal = M->getNamedGlobal("unknown_g");
+  ASSERT_NE(Ret, nullptr);
+  ASSERT_NE(Call, nullptr);
+  ASSERT_NE(KnownGlobal, nullptr);
+  ASSERT_NE(UnknownGlobal, nullptr);
+
+  EXPECT_TRUE(containsFact(Result->IN(Ret), Call));
+  EXPECT_TRUE(containsFact(Result->IN(Ret), KnownGlobal));
+  EXPECT_FALSE(containsFact(Result->IN(Ret), UnknownGlobal));
 }
 
 TEST_F(WPDSTest, ExplicitEntryAndExitSeedingRestrictAnalysisScope) {
