@@ -2,13 +2,24 @@
  * @file ConstraintOptimize.cpp
  * @brief Constraint optimization phase using HVN and HU algorithms.
  *
- * This file implements constraint optimization algorithms (HVN: Hash-based Value
- * Numbering, and HU: HVN with deReference and Union) that reduce the number of
- * constraints by merging equivalent nodes and eliminating redundant constraints.
- * These optimizations significantly speed up the constraint solving phase.
+ * This file implements constraint optimization algorithms (HVN: Hash-based
+ * Value Numbering, and HU: HVN with deReference and Union) that reduce the
+ * number of constraints by merging equivalent nodes and eliminating redundant
+ * constraints. These optimizations significantly speed up the constraint
+ * solving phase.
  *
  * @author rainoftime
  */
+#include "Alias/SparrowAA/Andersen.h"
+#include "Alias/SparrowAA/CycleDetector.h"
+#include "Alias/SparrowAA/Log.h"
+#include "Alias/SparrowAA/SparseBitVectorGraph.h"
+
+#include <deque>
+#include <set>
+#include <unordered_map>
+#include <vector>
+
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/SparseBitVector.h>
@@ -17,16 +28,6 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <deque>
-#include <set>
-#include <unordered_map>
-#include <vector>
-
-#include "Alias/SparrowAA/Andersen.h"
-#include "Alias/SparrowAA/CycleDetector.h"
-#include "Alias/SparrowAA/Log.h"
-#include "Alias/SparrowAA/SparseBitVectorGraph.h"
 
 #define DEBUG_TYPE "andersen"
 
@@ -628,7 +629,7 @@ public:
 void Andersen::optimizeConstraints() {
   // Track constraints before optimization
   NumConstraintsBeforeOpt = constraints.size();
-  
+
   // errs() << "\n#constraints = " << constraints.size() << "\n";
   // dumpConstraints();
 
@@ -657,7 +658,7 @@ void Andersen::optimizeConstraints() {
   // dumpConstraints();
 
   // errs() << "#constraints = " << constraints.size() << "\n";
-  
+
   // Track constraints after optimization
   NumConstraintsAfterOpt = constraints.size();
   NumConstraintsEliminated = NumConstraintsBeforeOpt - NumConstraintsAfterOpt;

@@ -84,7 +84,8 @@ public:
   ///          empty checks.
   unsigned getSize() const { return bitvec.count(); }
 
-  /// @brief Return `true` if the set is empty.  Prefer this over `getSize()==0`.
+  /// @brief Return `true` if the set is empty.  Prefer this over
+  /// `getSize()==0`.
   bool isEmpty() const { return bitvec.empty(); }
 
   bool operator==(const AndersPtsSet &other) const {

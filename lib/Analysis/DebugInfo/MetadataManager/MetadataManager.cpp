@@ -78,8 +78,7 @@ MetadataManager::MetadataManager(Module &M) : program{M} {
     if (!annoteStr) {
       return "";
     }
-    auto *data =
-        dyn_cast<ConstantDataSequential>(annoteStr->getInitializer());
+    auto *data = dyn_cast<ConstantDataSequential>(annoteStr->getInitializer());
     if (!data || !data->isString()) {
       return "";
     }
@@ -414,7 +413,8 @@ void MetadataManager::addMetadata(LoopStructure *loop,
     delete it->second;
     it->second = new MetadataEntry(metadataName, metaString.str());
   } else {
-    loopEntries[metadataName] = new MetadataEntry(metadataName, metaString.str());
+    loopEntries[metadataName] =
+        new MetadataEntry(metadataName, metaString.str());
   }
 
   return;

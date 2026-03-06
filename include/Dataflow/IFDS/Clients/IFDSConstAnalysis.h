@@ -81,11 +81,11 @@ public:
                       const ConstFact &fact) override;
   FactSet call_flow(const llvm::CallBase *call, const llvm::Function *callee,
                     const ConstFact &fact) override;
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const ConstFact &exit_fact,
                       const ConstFact &call_fact) override;
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const ConstFact &fact) override;
+                              const llvm::Instruction *return_site, const ConstFact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 
   void set_alias_analysis(lotus::AliasAnalysisWrapper *aa) override;

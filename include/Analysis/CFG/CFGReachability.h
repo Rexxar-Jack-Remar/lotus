@@ -1,14 +1,14 @@
 #ifndef ANALYSIS_CFG_CFGREACHABILITY_H
 #define ANALYSIS_CFG_CFGREACHABILITY_H
 
-#include <llvm/ADT/BitVector.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Instruction.h>
-
 #include <map>
 #include <memory>
 #include <mutex>
 #include <vector>
+
+#include <llvm/ADT/BitVector.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Instruction.h>
 
 // Do NOT use `using namespace llvm` in headers — use explicit llvm:: qualifiers
 // throughout to avoid polluting includers' namespaces.
@@ -62,7 +62,8 @@ public:
 
   // Not movable: std::mutex is not movable, so the implicitly-deleted move
   // constructor/assignment cannot be defaulted.  Explicitly delete them to
-  // suppress the -Wdefaulted-function-deleted warning and make the intent clear.
+  // suppress the -Wdefaulted-function-deleted warning and make the intent
+  // clear.
   CFGReachability(CFGReachability &&) = delete;
   CFGReachability &operator=(CFGReachability &&) = delete;
 
@@ -70,9 +71,7 @@ public:
 
   /// Returns true if \p BB belongs to the function this object was built for.
   /// Use this to detect stale objects after IR modifications.
-  bool isValid(llvm::BasicBlock *BB) const {
-    return BB2ID.count(BB) != 0;
-  }
+  bool isValid(llvm::BasicBlock *BB) const { return BB2ID.count(BB) != 0; }
 
   /// Returns true if there is a path from \p From to \p To in the CFG.
   /// Both blocks must belong to the function passed at construction;

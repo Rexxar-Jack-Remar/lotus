@@ -27,7 +27,7 @@ static GenKillTransformer *createLivenessTransformer(Instruction *I) {
   std::set<Value *> killSet; // Variables defined
 
   // Definitions kill liveness
-  if (I->getType()->isVoidTy() == false && I->hasName()) {
+  if (!I->getType()->isVoidTy()) {
     // This instruction defines a value
     killSet.insert(I);
   }
@@ -66,9 +66,7 @@ static GenKillTransformer *createLivenessTransformer(Instruction *I) {
     }
 
     // Load defines its result
-    if (LI->hasName()) {
-      killSet.insert(LI);
-    }
+    killSet.insert(LI);
   }
 
   DataFlowFacts gen(genSet);

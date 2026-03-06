@@ -8,18 +8,18 @@
  *
  * @author rainoftime
  */
+#include "Alias/SparrowAA/NodeFactory.h"
+
+#include "Alias/SparrowAA/Log.h"
+
+#include <limits>
+#include <sstream>
+#include <unordered_set>
+
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <limits>
-#include <sstream>
-
-#include "Alias/SparrowAA/NodeFactory.h"
-#include "Alias/SparrowAA/Log.h"
-
-#include <unordered_set>
 
 using namespace llvm;
 
@@ -59,7 +59,8 @@ AndersNodeFactory::AndersNodeFactory() {
   assert(nodes.size() == 4);
 }
 
-static constexpr AndersNodeFactory::CtxKey ctxKeyOrNull(AndersNodeFactory::CtxKey ctx) {
+static constexpr AndersNodeFactory::CtxKey
+ctxKeyOrNull(AndersNodeFactory::CtxKey ctx) {
   return ctx;
 }
 
@@ -209,9 +210,8 @@ NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val,
   return InvalidIndex;
 }
 
-NodeIndex
-AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c,
-                                           CtxKey ctx) const {
+NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c,
+                                                     CtxKey ctx) const {
   assert(isa<PointerType>(c->getType()) && "Not a constant pointer!");
 
   if (isa<ConstantPointerNull>(c) || isa<UndefValue>(c))
@@ -260,7 +260,8 @@ NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val,
   // must be accessible from any calling context.
   if (ctx != nullptr) {
     if (isa<GlobalValue>(val)) {
-      // Global: fall back to any context that has an object node for this value.
+      // Global: fall back to any context that has an object node for this
+      // value.
       for (auto const &entry : objNodeMap) {
         auto found = entry.second.find(val);
         if (found != entry.second.end())
@@ -279,9 +280,8 @@ NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val,
   return InvalidIndex;
 }
 
-NodeIndex
-AndersNodeFactory::getObjectNodeForConstant(const llvm::Constant *c,
-                                            CtxKey ctx) const {
+NodeIndex AndersNodeFactory::getObjectNodeForConstant(const llvm::Constant *c,
+                                                      CtxKey ctx) const {
   assert(isa<PointerType>(c->getType()) && "Not a constant pointer!");
 
   if (isa<ConstantPointerNull>(c))
@@ -373,7 +373,9 @@ NodeIndex AndersNodeFactory::getMergeTarget(NodeIndex n) {
   // guard here to avoid out-of-bounds access and hard crashes.
   if (LLVM_UNLIKELY(n >= nodes.size())) {
     if (InvalidMergeTargetWarnings < 10) {
-      LOG_WARN("Andersen: getMergeTarget called with invalid node index {} (numNodes = {})", n, nodes.size());
+      LOG_WARN("Andersen: getMergeTarget called with invalid node index {} "
+               "(numNodes = {})",
+               n, nodes.size());
       if (InvalidMergeTargetWarnings == 9)
         LOG_WARN("Andersen: further invalid node index warnings suppressed");
       ++InvalidMergeTargetWarnings;
@@ -399,7 +401,9 @@ NodeIndex AndersNodeFactory::getMergeTarget(NodeIndex n) {
 NodeIndex AndersNodeFactory::getMergeTarget(NodeIndex n) const {
   if (LLVM_UNLIKELY(n >= nodes.size())) {
     if (InvalidMergeTargetWarnings < 10) {
-      LOG_WARN("Andersen: getMergeTarget (const) called with invalid node index {} (numNodes = {})", n, nodes.size());
+      LOG_WARN("Andersen: getMergeTarget (const) called with invalid node "
+               "index {} (numNodes = {})",
+               n, nodes.size());
       if (InvalidMergeTargetWarnings == 9)
         LOG_WARN("Andersen: further invalid node index warnings suppressed");
       ++InvalidMergeTargetWarnings;
@@ -466,12 +470,14 @@ void AndersNodeFactory::dumpNodeInfo() const {
   LOG_DEBUG("\nReturn Map:");
   for (auto const &ctxEntry : returnMap) {
     for (auto const &mapping : ctxEntry.second)
-      LOG_DEBUG("{}  -->>  [Node #{}]", mapping.first->getName().str(), mapping.second);
+      LOG_DEBUG("{}  -->>  [Node #{}]", mapping.first->getName().str(),
+                mapping.second);
   }
   LOG_DEBUG("\nVararg Map:");
   for (auto const &ctxEntry : varargMap) {
     for (auto const &mapping : ctxEntry.second)
-      LOG_DEBUG("{}  -->>  [Node #{}]", mapping.first->getName().str(), mapping.second);
+      LOG_DEBUG("{}  -->>  [Node #{}]", mapping.first->getName().str(),
+                mapping.second);
   }
   LOG_DEBUG("----- End of Print -----");
 }

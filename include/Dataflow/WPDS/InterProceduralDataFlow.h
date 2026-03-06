@@ -19,6 +19,7 @@
 #include "Dataflow/WPDS/Core/DataFlowFacts.h"
 #include "Dataflow/WPDS/Core/ExplodedWPDSBuilder.h"
 #include "Dataflow/WPDS/Core/GenKillTransformer.h"
+#include "Dataflow/WPDS/Core/MemoryObjectFact.h"
 #include "Dataflow/WPDS/Solver/InterProceduralDataFlowEngine.h"
 
 #endif // ANALYSIS_INTERPROCEDURALDATAFLOW_H_

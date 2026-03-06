@@ -67,11 +67,11 @@ public:
                       const SignFact &fact) override;
   FactSet call_flow(const llvm::CallBase *call, const llvm::Function *callee,
                     const SignFact &fact) override;
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const SignFact &exit_fact,
                       const SignFact &call_fact) override;
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const SignFact &fact) override;
+                              const llvm::Instruction *return_site, const SignFact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 
 private:

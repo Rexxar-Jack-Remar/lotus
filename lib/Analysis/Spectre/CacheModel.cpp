@@ -5,7 +5,6 @@
 //
 //===---------------------------------------------------------------------------===//
 
-#include "Analysis/Spectre/CacheSpecuAnalysis.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Analysis/CFG.h"
@@ -16,6 +15,9 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "Analysis/Spectre/CacheSpecuAnalysis.h"
+
 #include <deque>
 using namespace llvm;
 using namespace std;
@@ -134,7 +136,7 @@ unsigned CacheModel::Access(Value *var, unsigned offset) {
     unsigned addr = this->Vars[var]->AddrB + offset;
     if (addr > this->Vars[var]->AddrE) {
       //			errs() << "Fatal: try to access variable offset
-      //out of bound!\n";
+      // out of bound!\n";
       return 2;
     }
     CacheLoc = addr / CacheLineSize;
@@ -168,7 +170,6 @@ unsigned CacheModel::Access(Value *var, unsigned offset) {
   return age < CacheLineNum ? 1 : 0;
 }
 
-
 CacheModel *CacheModel::fork() {
   CacheModel *ret = new CacheModel(this->CacheLineSize, this->CacheLineNum,
                                    this->CacheSetNum, this->MustMod);
@@ -198,7 +199,7 @@ CacheModel *CacheModel::merge(CacheModel *mod) {
         this->AddVar(val, var.second->ty, var.second->alignment);
         for (int i = 0; i < mod->Vars[val]->AgeSize; i++) {
           //					unsigned modAge =
-          //mod->Ages[mod->Vars[val]->AgeIndex+i];
+          // mod->Ages[mod->Vars[val]->AgeIndex+i];
           this->Ages[this->Vars[val]->AgeIndex + i] = CacheLinesPerSet;
         }
         continue;

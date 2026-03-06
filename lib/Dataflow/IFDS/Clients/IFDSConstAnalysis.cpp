@@ -121,7 +121,7 @@ ConstAnalysis::FactSet ConstAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 ConstAnalysis::FactSet ConstAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
     const ConstFact &exit_fact, const ConstFact & /*call_fact*/) {
   FactSet result;
 
@@ -150,7 +150,7 @@ ConstAnalysis::FactSet ConstAnalysis::return_flow(
 
 ConstAnalysis::FactSet
 ConstAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                   const ConstFact &fact) {
+                                   const llvm::Instruction *return_site, const ConstFact &fact) {
   FactSet result;
 
   // Handle memory intrinsics

@@ -236,7 +236,7 @@ IDETypeState::FactSet IDETypeState::call_flow(const llvm::CallBase *call,
 }
 
 IDETypeState::FactSet IDETypeState::return_flow(const llvm::CallBase *call,
-                                                const llvm::Function *callee,
+                                                const llvm::Instruction *return_site, const llvm::Function *callee,
                                                 const Fact &exit_fact,
                                                 const Fact &call_fact) {
   (void)callee;
@@ -259,7 +259,7 @@ IDETypeState::FactSet IDETypeState::return_flow(const llvm::CallBase *call,
 
 IDETypeState::FactSet
 IDETypeState::call_to_return_flow(const llvm::CallBase *call,
-                                  const Fact &fact) {
+                                  const llvm::Instruction *return_site, const Fact &fact) {
   FactSet out;
 
   // Keep the fact (it's not killed by the call)
@@ -310,7 +310,7 @@ IDETypeState::call_edge_function(const llvm::CallBase *call,
 }
 
 IDETypeState::EdgeFunction IDETypeState::return_edge_function(
-    const llvm::CallBase *call, const Fact &exit_fact, const Fact &ret_fact) {
+    const llvm::CallBase *call, const llvm::Instruction *return_site, const Fact &exit_fact, const Fact &ret_fact) {
   (void)call;
   (void)exit_fact;
   (void)ret_fact;
@@ -320,7 +320,7 @@ IDETypeState::EdgeFunction IDETypeState::return_edge_function(
 }
 
 IDETypeState::EdgeFunction IDETypeState::call_to_return_edge_function(
-    const llvm::CallBase *call, const Fact &src_fact, const Fact &tgt_fact) {
+    const llvm::CallBase *call, const llvm::Instruction *return_site, const Fact &src_fact, const Fact &tgt_fact) {
   (void)call;
   (void)src_fact;
   (void)tgt_fact;

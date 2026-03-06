@@ -1,6 +1,7 @@
 # WPDS-based Interprocedural Dataflow Analysis Framework
 
-A framework for interprocedural dataflow analyses using Weighted Pushdown Systems (WPDS) in LLVM IR.
+A framework for interprocedural may analyses using Weighted Pushdown Systems
+(WPDS) over LLVM IR.
 
 ## Directory Structure
 
@@ -9,6 +10,7 @@ include/Dataflow/WPDS/
 ├── Core/                          # Core abstractions
 │   ├── DataFlowFacts.h            # Fact domain (set of facts / environment)
 │   ├── GenKillTransformer.h       # Semiring weight (gen/kill + relational flow)
+│   ├── MemoryObjectFact.h         # Canonical memory-object helper layer
 │   └── ExplodedWPDSBuilder.h      # Builder for exploded supergraph encoding
 ├── Solver/                        # Solver engine
 │   └── InterProceduralDataFlowEngine.h  # WPDS solver, runs GPR algorithm
@@ -38,12 +40,13 @@ lib/Dataflow/WPDS/
 ## Architecture
 
 ### Core (`Core/`)
-- **`DataFlowFacts`**: Fact domain representing a set of LLVM Values with set operations (union, intersect, diff)
-- **`GenKillTransformer`**: Semiring weight implementing gen/kill-style flow functions for WPDS
+- **`DataFlowFacts`**: Fact domain representing a finite set of LLVM Values
+- **`GenKillTransformer`**: May-analysis semiring weight implementing gen/kill-style flow functions for WPDS
+- **`MemoryObjectFact`**: Minimal field-insensitive memory-object abstraction for facts and flow edges
 - **`ExplodedWPDSBuilder`**: Template for building the paper's exploded supergraph encoding
 
 ### Solver (`Solver/`)
-- **`InterProceduralDataFlowEngine`**: Encodes program supergraph as WPDS, runs forward/backward saturation (GPR), extracts results
+- **`InterProceduralDataFlowEngine`**: Encodes program supergraph as WPDS, runs forward/backward saturation (GPR), extracts results, supports explicit seeds, custom callee resolution, and external-call summaries
 
 ### Clients (`Clients/`)
 Pre-built analyses using the WPDS framework:
@@ -51,6 +54,22 @@ Pre-built analyses using the WPDS framework:
 - **`WPDSConstantPropagation`**: Constant propagation (values NOT in set are constant)
 - **`WPDSLivenessAnalysis`**: Live variable analysis
 - **`WPDSUninitializedVariables`**: Uninitialized variable detection
+
+## Supported Semantics
+
+- The current framework targets distributive may analyses over a finite fact
+  domain.
+- `IN` and `OUT` are concrete fact sets at each instruction under the chosen
+  seed/query automaton.
+- `GEN` and `KILL` are the local transfer effects of the instruction, not
+  accumulated path summaries.
+- Memory objects are tracked via canonical base objects (allocas, globals,
+  pointer arguments, pointer-returning calls) and pointer casts/GEPs collapse
+  to that base.
+- Indirect and external calls are handled conservatively and can be customized
+  with `ExternalCallPolicy`.
+- Precise field-sensitive updates, alias-aware strong updates, heap-shape
+  recovery, and must analyses are out of scope for the current implementation.
 
 ## Quick Start
 
@@ -70,6 +89,20 @@ auto Result = Engine.runForwardAnalysis(
     [](Instruction* inst) { return /* transformer */; },
     {/* initial facts */}
 );
+
+// Optional: restrict seeds to specific entries or exits.
+auto EntryOnly = Engine.runForwardAnalysisFromEntries(
+    M, createTransformer, {M.getFunction("helper")}, {/* initial facts */}
+);
+
+// Optional: customize unresolved-call handling.
+wpds::InterProceduralDataFlowEngine::ExternalCallPolicy Policy;
+Policy.buildSummary = [](llvm::CallBase *Call,
+                         const std::vector<llvm::Value *> &PointerObjects,
+                         const std::vector<llvm::GlobalValue *> &Globals) {
+  return wpds::GenKillTransformer::one();
+};
+Engine.setExternalCallPolicy(Policy);
 ```
 
 ## References

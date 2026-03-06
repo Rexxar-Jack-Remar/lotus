@@ -279,16 +279,12 @@ public:
     // Clear ESG before solving
     m_esg = ExplicitExplodedSupergraph<Fact>();
 
-    // Configure to record edges
     auto &config = this->get_solver_config();
+    bool had_record_edges = config.record_edges();
     config.set_record_edges(true);
 
-    // Call base solver
     Base::solve(module);
-    // Fallback reconstruction if a caller disables edge recording hooks.
-    if (m_esg.num_edges() == 0) {
-      build_esg_from_path_edges();
-    }
+    config.set_record_edges(had_record_edges);
   }
 
   // Access the explicit ESG
@@ -326,65 +322,32 @@ public:
   size_t get_esg_node_count() const { return m_esg.num_nodes(); }
   size_t get_esg_edge_count() const { return m_esg.num_edges(); }
 
-  // Post-solve: reconstruct the ESG from the path edges recorded by the base
-  // solver.
-  //
-  // BUG (fixed): the old design declared record_flow_edge() as a protected
-  // method and added a friend declaration for IDESolver<Problem>, expecting
-  // the base class to call the hook.  IDESolver never calls any such hook —
-  // there is no virtual dispatch or CRTP mechanism wiring them together — so
-  // m_esg was always empty after solve().
-  //
-  // The correct approach is to reconstruct the ESG from the path edges that
-  // IDESolver already records in its m_path_edges set.  We do this in a
-  // post-processing step after Base::solve() returns.
-  void build_esg_from_path_edges() {
-    std::vector<PathEdge<Fact>> edges;
-    this->get_path_edges(edges);
-    for (const auto &pe : edges) {
-      Node src(pe.start_node, pe.start_fact);
-      Node tgt(pe.target_node, pe.target_fact);
-      // Classify the edge kind heuristically from the instruction types.
-      ESGEdgeKind kind = ESGEdgeKind::Normal;
-      if (pe.target_node && llvm::isa<llvm::ReturnInst>(pe.target_node)) {
-        kind = ESGEdgeKind::Return;
-      } else if (pe.target_node && llvm::isa<llvm::CallBase>(pe.target_node)) {
-        kind = ESGEdgeKind::Call;
-      }
-      m_esg.add_edge(src, tgt, kind);
-    }
-    // Also record summary edges.
-    // BUG (fixed): the old code used se.call_node and se.exit_fact, but
-    // SummaryEdge<Fact> (defined in IFDSFramework.h) has fields call_site,
-    // call_fact, and return_fact.  Using the wrong field names would fail to
-    // compile (or silently use the wrong data if the names happened to exist
-    // via ADL).  Use the correct field names here.
-    std::vector<SummaryEdge<Fact>> summaries;
-    this->get_summary_edges(summaries);
-    for (const auto &se : summaries) {
-      Node src(se.call_site, se.call_fact);
-      Node tgt(se.call_site, se.return_fact);
-      m_esg.add_edge(src, tgt, ESGEdgeKind::Summary);
-    }
+protected:
+  void on_normal_transition(const Node &source, const Node &target) override {
+    m_esg.add_edge(source, target, ESGEdgeKind::Normal);
   }
 
-protected:
-  void on_path_edge_added(const PathEdge<Fact> &pe) override {
-    Node src(pe.start_node, pe.start_fact);
-    Node tgt(pe.target_node, pe.target_fact);
-    ESGEdgeKind kind = ESGEdgeKind::Normal;
-    if (pe.target_node && llvm::isa<llvm::ReturnInst>(pe.target_node)) {
-      kind = ESGEdgeKind::Return;
-    } else if (pe.target_node && llvm::isa<llvm::CallBase>(pe.target_node)) {
-      kind = ESGEdgeKind::Call;
-    }
-    m_esg.add_edge(src, tgt, kind);
+  void on_call_transition(const Node &source, const Node &target) override {
+    m_esg.add_edge(source, target, ESGEdgeKind::Call);
+  }
+
+  void on_return_transition(const Node &source, const Node &target) override {
+    m_esg.add_edge(source, target, ESGEdgeKind::Return);
+  }
+
+  void on_call_to_return_transition(const Node &source,
+                                    const Node &target) override {
+    m_esg.add_edge(source, target, ESGEdgeKind::CallToReturn);
   }
 
   void on_summary_edge_added(const SummaryEdge<Fact> &se) override {
     Node src(se.call_site, se.call_fact);
-    Node tgt(se.call_site, se.return_fact);
+    Node tgt(se.return_site, se.return_fact);
     m_esg.add_edge(src, tgt, ESGEdgeKind::Summary);
+  }
+
+  void on_summary_transition(const Node &source, const Node &target) override {
+    m_esg.add_edge(source, target, ESGEdgeKind::Summary);
   }
 
   ExplicitExplodedSupergraph<Fact> m_esg;

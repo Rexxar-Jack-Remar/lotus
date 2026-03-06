@@ -106,20 +106,24 @@ template <typename Fact> struct PathEdgeHash {
 
 template <typename Fact> struct SummaryEdge {
   const llvm::CallBase *call_site;
+  const llvm::Instruction *return_site;
   Fact call_fact;
   Fact return_fact;
 
-  SummaryEdge(const llvm::CallBase *call, const Fact &c_fact,
-              const Fact &r_fact)
-      : call_site(call), call_fact(c_fact), return_fact(r_fact) {}
+  SummaryEdge(const llvm::CallBase *call, const llvm::Instruction *ret_site,
+              const Fact &c_fact, const Fact &r_fact)
+      : call_site(call), return_site(ret_site), call_fact(c_fact),
+        return_fact(r_fact) {}
 
   bool operator==(const SummaryEdge &other) const {
-    return call_site == other.call_site && call_fact == other.call_fact &&
-           return_fact == other.return_fact;
+    return call_site == other.call_site && return_site == other.return_site &&
+           call_fact == other.call_fact && return_fact == other.return_fact;
   }
   bool operator<(const SummaryEdge &other) const {
     if (call_site != other.call_site)
       return call_site < other.call_site;
+    if (return_site != other.return_site)
+      return return_site < other.return_site;
     if (call_fact != other.call_fact)
       return fact_less(call_fact, other.call_fact);
     return fact_less(return_fact, other.return_fact);
@@ -136,6 +140,7 @@ template <typename Fact> struct SummaryEdgeHash {
       h *= 1099511628211ULL;
     };
     mix(std::hash<const llvm::CallBase *>{}(edge.call_site));
+    mix(std::hash<const llvm::Instruction *>{}(edge.return_site));
     mix(std::hash<Fact>{}(edge.call_fact));
     mix(std::hash<Fact>{}(edge.return_fact));
     return h;
@@ -186,9 +191,12 @@ public:
   virtual FactSet call_flow(const llvm::CallBase *call,
                             const llvm::Function *callee, const Fact &fact) = 0;
   virtual FactSet return_flow(const llvm::CallBase *call,
+                              const llvm::Instruction *return_site,
                               const llvm::Function *callee,
-                              const Fact &exit_fact, const Fact &call_fact) = 0;
+                              const Fact &exit_fact,
+                              const Fact &call_fact) = 0;
   virtual FactSet call_to_return_flow(const llvm::CallBase *call,
+                                      const llvm::Instruction *return_site,
                                       const Fact &fact) = 0;
 
   // Initial facts at program entry
@@ -339,12 +347,12 @@ public:
   virtual EdgeFunction call_edge_function(const llvm::CallBase *call,
                                           const Fact &src_fact,
                                           const Fact &tgt_fact) = 0;
-  virtual EdgeFunction return_edge_function(const llvm::CallBase *call,
-                                            const Fact &exit_fact,
-                                            const Fact &ret_fact) = 0;
-  virtual EdgeFunction call_to_return_edge_function(const llvm::CallBase *call,
-                                                    const Fact &src_fact,
-                                                    const Fact &tgt_fact) = 0;
+  virtual EdgeFunction return_edge_function(
+      const llvm::CallBase *call, const llvm::Instruction *return_site,
+      const Fact &exit_fact, const Fact &ret_fact) = 0;
+  virtual EdgeFunction call_to_return_edge_function(
+      const llvm::CallBase *call, const llvm::Instruction *return_site,
+      const Fact &src_fact, const Fact &tgt_fact) = 0;
   // Optional summary flow/edge functions (for special-cased callees)
   virtual FactSet summary_flow(const llvm::CallBase * /*call*/,
                                const llvm::Function * /*callee*/,

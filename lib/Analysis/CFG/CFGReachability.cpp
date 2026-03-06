@@ -1,4 +1,5 @@
 #include "Analysis/CFG/CFGReachability.h"
+
 #include <llvm/IR/CFG.h>
 
 using namespace llvm;
@@ -36,7 +37,7 @@ bool CFGReachability::reachable(BasicBlock *From, BasicBlock *To) {
 
   // Demand-driven: run the backward BFS only the first time To is queried.
   if (!AnalyzedVec[DstBlockID]) {
-    analyze(To);          // analyze() must be called with the lock held
+    analyze(To); // analyze() must be called with the lock held
     AnalyzedVec[DstBlockID] = true;
   }
 
@@ -60,7 +61,7 @@ bool CFGReachability::reachable(Instruction *From, Instruction *To) {
     return true;
 
   BasicBlock *FromB = From->getParent();
-  BasicBlock *ToB   = To->getParent();
+  BasicBlock *ToB = To->getParent();
 
   if (FromB == ToB) {
     // Walk forward from From to see if To appears later in the same block.

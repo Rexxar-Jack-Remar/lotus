@@ -3,10 +3,12 @@ HybridGVFAEngine.cpp
 
 Hybrid engine:
 - Run FastGVFAEngine once to build a cheap reachability index (pruning).
-- Lazily build/run PreciseGVFAEngine when a query needs attribution or a good trace.
+- Lazily build/run PreciseGVFAEngine when a query needs attribution or a good
+trace.
 */
 
 #include "Analysis/GVFA/HybridGVFAEngine.h"
+
 #include "Analysis/GVFA/FastGVFAEngine.h"
 #include "Analysis/GVFA/PreciseGVFAEngine.h"
 
@@ -14,7 +16,8 @@ using namespace llvm;
 using namespace gvfa;
 
 HybridGVFAEngine::HybridGVFAEngine(
-    Module *M, DyckVFG *VFG, DyckAliasAnalysis *DyckAA, DyckModRefAnalysis *DyckMRA,
+    Module *M, DyckVFG *VFG, DyckAliasAnalysis *DyckAA,
+    DyckModRefAnalysis *DyckMRA,
     std::vector<std::pair<const Value *, int>> SourcesVec,
     const VulnerabilitySinksType &Sinks)
     : GVFAEngine(M, VFG, DyckAA, DyckMRA, {}, Sinks),
@@ -24,7 +27,7 @@ HybridGVFAEngine::~HybridGVFAEngine() = default;
 
 void HybridGVFAEngine::run() {
   Fast = std::make_unique<FastGVFAEngine>(M, VFG, DyckAA, DyckMRA,
-                                         OriginalSourcesVec, Sinks);
+                                          OriginalSourcesVec, Sinks);
   Fast->run();
 }
 
@@ -61,9 +64,10 @@ bool HybridGVFAEngine::backwardReachableAllSinks(const Value *V) {
   return Precise ? Precise->backwardReachableAllSinks(V) : false;
 }
 
-std::vector<const Value *> HybridGVFAEngine::getWitnessPath(const Value *From,
-                                                            const Value *To) const {
+std::vector<const Value *>
+HybridGVFAEngine::getWitnessPath(const Value *From, const Value *To) const {
   ensurePrecise();
   return Precise ? Precise->getWitnessPath(From, To)
-                 : (Fast ? Fast->getWitnessPath(From, To) : std::vector<const Value *>{});
+                 : (Fast ? Fast->getWitnessPath(From, To)
+                         : std::vector<const Value *>{});
 }

@@ -33,11 +33,11 @@
 #include "Alias/SparrowAA/GraphTraits.h"
 #include "Alias/SparrowAA/NodeFactory.h"
 
-#include <llvm/ADT/DenseMap.h>
-#include <llvm/ADT/SparseBitVector.h>
-
 #include <algorithm>
 #include <unordered_map>
+
+#include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/SparseBitVector.h>
 
 /**
  * @class SparseBitVectorGraphNode
@@ -51,8 +51,9 @@
  */
 class SparseBitVectorGraphNode {
 private:
-  NodeIndex idx;                  ///< This node's index in the constraint graph.
-  llvm::SparseBitVector<> succs;  ///< Set of successor node indices (outgoing edges).
+  NodeIndex idx; ///< This node's index in the constraint graph.
+  llvm::SparseBitVector<>
+      succs; ///< Set of successor node indices (outgoing edges).
 
   /// Insert a directed edge to @p n.  Called only by `SparseBitVectorGraph`.
   void insertEdge(NodeIndex n) { return succs.set(n); }

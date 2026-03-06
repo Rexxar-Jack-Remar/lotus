@@ -408,7 +408,7 @@ TaintAnalysis::FactSet TaintAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 TaintAnalysis::FactSet TaintAnalysis::return_flow(const llvm::CallBase *call,
-                                                  const llvm::Function *callee,
+                                                  const llvm::Instruction *return_site, const llvm::Function *callee,
                                                   const TaintFact &exit_fact,
                                                   const TaintFact &call_fact) {
   FactSet result;
@@ -459,7 +459,7 @@ TaintAnalysis::FactSet TaintAnalysis::return_flow(const llvm::CallBase *call,
 
 TaintAnalysis::FactSet
 TaintAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                   const TaintFact &fact) {
+                                   const llvm::Instruction *return_site, const TaintFact &fact) {
   FactSet result;
 
   const llvm::Function *callee = call->getCalledFunction();

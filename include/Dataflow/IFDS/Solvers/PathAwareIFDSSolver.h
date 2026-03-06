@@ -51,14 +51,17 @@ public:
     }
 
     FactSet return_flow(const llvm::CallBase *call,
+                        const llvm::Instruction *return_site,
                         const llvm::Function *callee, const Fact &exit_fact,
                         const Fact &call_fact) override {
-      return m_ifds_problem.return_flow(call, callee, exit_fact, call_fact);
+      return m_ifds_problem.return_flow(call, return_site, callee, exit_fact,
+                                        call_fact);
     }
 
     FactSet call_to_return_flow(const llvm::CallBase *call,
+                                const llvm::Instruction *return_site,
                                 const Fact &fact) override {
-      return m_ifds_problem.call_to_return_flow(call, fact);
+      return m_ifds_problem.call_to_return_flow(call, return_site, fact);
     }
 
     FactSet initial_facts(const llvm::Function *main) override {
@@ -84,13 +87,15 @@ public:
     }
 
     typename IDEProblem<Fact, BinaryValue>::EdgeFunction
-    return_edge_function(const llvm::CallBase *, const Fact &,
+    return_edge_function(const llvm::CallBase *,
+                         const llvm::Instruction *, const Fact &,
                          const Fact &) override {
       return this->identity();
     }
 
     typename IDEProblem<Fact, BinaryValue>::EdgeFunction
-    call_to_return_edge_function(const llvm::CallBase *, const Fact &,
+    call_to_return_edge_function(const llvm::CallBase *,
+                                 const llvm::Instruction *, const Fact &,
                                  const Fact &) override {
       return this->identity();
     }
@@ -115,13 +120,11 @@ public:
   // Query interface (IFDS style)
   FactSet get_facts_at_entry(const llvm::Instruction *inst) const {
     FactSet facts;
-    const auto &values = m_solver.get_all_values();
-    auto it = values.find(inst);
-    if (it != values.end()) {
-      for (const auto &pair : it->second) {
-        if (pair.second.present && !m_wrapper.is_zero_fact(pair.first)) {
-          facts.insert(pair.first);
-        }
+    std::vector<PathEdge<Fact>> edges;
+    m_solver.get_path_edges(edges);
+    for (const auto &edge : edges) {
+      if (edge.target_node == inst && !m_wrapper.is_zero_fact(edge.target_fact)) {
+        facts.insert(edge.target_fact);
       }
     }
     return facts;

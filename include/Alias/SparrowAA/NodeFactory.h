@@ -48,13 +48,13 @@
 #ifndef ANDERSEN_NODE_FACTORY_H
 #define ANDERSEN_NODE_FACTORY_H
 
+#include <vector>
+
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Value.h>
-
-#include <vector>
 
 /// Dense integer index type for constraint-graph nodes.
 using NodeIndex = unsigned;
@@ -81,10 +81,12 @@ public:
   };
 
 private:
-  AndersNodeType type;    ///< Whether this is a value node or an object node.
-  NodeIndex idx;          ///< This node's unique index in the factory's vector.
-  NodeIndex mergeTarget;  ///< Index of the representative after merging (== idx if not merged).
-  const llvm::Value *value; ///< The LLVM value this node corresponds to, or nullptr for artificial nodes.
+  AndersNodeType type;   ///< Whether this is a value node or an object node.
+  NodeIndex idx;         ///< This node's unique index in the factory's vector.
+  NodeIndex mergeTarget; ///< Index of the representative after merging (== idx
+                         ///< if not merged).
+  const llvm::Value *value; ///< The LLVM value this node corresponds to, or
+                            ///< nullptr for artificial nodes.
 
   AndersNode(AndersNodeType t, unsigned i, const llvm::Value *v = nullptr)
       : type(t), idx(i), mergeTarget(i), value(v) {}
@@ -123,10 +125,13 @@ private:
   std::vector<AndersNode> nodes;
 
   // Fixed indices for the four pre-allocated special nodes.
-  static const NodeIndex UniversalPtrIndex = 0; ///< Index of the universal pointer node.
-  static const NodeIndex UniversalObjIndex = 1; ///< Index of the universal object node.
-  static const NodeIndex NullPtrIndex = 2;      ///< Index of the null pointer node.
-  static const NodeIndex NullObjectIndex = 3;   ///< Index of the null object node.
+  static const NodeIndex UniversalPtrIndex =
+      0; ///< Index of the universal pointer node.
+  static const NodeIndex UniversalObjIndex =
+      1; ///< Index of the universal object node.
+  static const NodeIndex NullPtrIndex = 2; ///< Index of the null pointer node.
+  static const NodeIndex NullObjectIndex =
+      3; ///< Index of the null object node.
 
   /// Per-context map from LLVM value → value-node index.
   using ValueNodeMap = llvm::DenseMap<const llvm::Value *, NodeIndex>;
@@ -155,11 +160,9 @@ public:
 
   // Map lookup interfaces (return InvalidIndex if value not found)
   NodeIndex getValueNodeFor(const llvm::Value *val, CtxKey ctx) const;
-  NodeIndex getValueNodeForConstant(const llvm::Constant *c,
-                                    CtxKey ctx) const;
+  NodeIndex getValueNodeForConstant(const llvm::Constant *c, CtxKey ctx) const;
   NodeIndex getObjectNodeFor(const llvm::Value *val, CtxKey ctx) const;
-  NodeIndex getObjectNodeForConstant(const llvm::Constant *c,
-                                     CtxKey ctx) const;
+  NodeIndex getObjectNodeForConstant(const llvm::Constant *c, CtxKey ctx) const;
   NodeIndex getReturnNodeFor(const llvm::Function *f, CtxKey ctx) const;
   NodeIndex getVarargNodeFor(const llvm::Function *f, CtxKey ctx) const;
 
@@ -194,7 +197,9 @@ public:
   void getAllocSites(std::vector<const llvm::Value *> &) const;
 
   // Value remover
-  void removeNodeForValue(const llvm::Value *val) { valueNodeBuckets.erase(val); }
+  void removeNodeForValue(const llvm::Value *val) {
+    valueNodeBuckets.erase(val);
+  }
 
   // Size getters
   unsigned getNumNodes() const { return nodes.size(); }

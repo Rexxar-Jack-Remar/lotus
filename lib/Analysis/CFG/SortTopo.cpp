@@ -49,7 +49,6 @@ public:
 
 } // namespace llvm
 
-
 void RevTopoSort(const llvm::Function &F,
                  std::vector<const BasicBlock *> &out) {
   if (F.isDeclaration() || F.empty())

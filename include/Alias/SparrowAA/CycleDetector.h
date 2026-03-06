@@ -22,9 +22,9 @@
  * ```cpp
  * class MyCycleDetector : public CycleDetector<MyGraph> {
  *   NodeType *getRep(NodeIndex n) override { ... }
- *   void processNodeOnCycle(const NodeType *n, const NodeType *rep) override { ... }
- *   void processCycleRepNode(const NodeType *rep) override { ... }
- *   void run() override { runOnGraph(&myGraph); }
+ *   void processNodeOnCycle(const NodeType *n, const NodeType *rep) override {
+ * ... } void processCycleRepNode(const NodeType *rep) override { ... } void
+ * run() override { runOnGraph(&myGraph); }
  * };
  * ```
  *
@@ -56,11 +56,11 @@
 
 #include "Alias/SparrowAA/GraphTraits.h"
 
-#include <llvm/ADT/DenseMap.h>
-#include <llvm/ADT/DenseSet.h>
-
 #include <stack>
 #include <vector>
+
+#include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/DenseSet.h>
 
 /**
  * @class CycleDetector
@@ -119,9 +119,8 @@ private:
       unsigned ts = timestamp++;
       dfsNum[node] = ts;
       entryTime[node] = ts;
-      worklist.push_back({node,
-                          GraphTraits::child_begin(node),
-                          GraphTraits::child_end(node)});
+      worklist.push_back(
+          {node, GraphTraits::child_begin(node), GraphTraits::child_end(node)});
     };
 
     pushNode(startNode);
@@ -142,8 +141,7 @@ private:
           // the successor's children before coming back to this node.
         } else {
           // Back/cross edge: propagate the minimum timestamp upward.
-          if (!inComponent.count(succRep) &&
-              dfsNum[node] > dfsNum[succRep])
+          if (!inComponent.count(succRep) && dfsNum[node] > dfsNum[succRep])
             dfsNum[node] = dfsNum[succRep];
         }
       } else {

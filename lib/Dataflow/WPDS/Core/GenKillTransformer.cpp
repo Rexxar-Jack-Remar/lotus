@@ -5,6 +5,30 @@
 
 namespace wpds {
 
+static std::set<Value *> collectRelevantValues(
+    const GenKillTransformer &lhs, const GenKillTransformer &rhs) {
+  std::set<Value *> values;
+
+  auto collectFacts = [&values](const DataFlowFacts &facts) {
+    values.insert(facts.getFacts().begin(), facts.getFacts().end());
+  };
+  auto collectFlow = [&values, &collectFacts](
+                         const std::map<Value *, DataFlowFacts> &flow) {
+    for (const auto &entry : flow) {
+      values.insert(entry.first);
+      collectFacts(entry.second);
+    }
+  };
+
+  collectFacts(lhs.getKill());
+  collectFacts(lhs.getGen());
+  collectFacts(rhs.getKill());
+  collectFacts(rhs.getGen());
+  collectFlow(lhs.getFlow());
+  collectFlow(rhs.getFlow());
+  return values;
+}
+
 GenKillTransformer::GenKillTransformer()
     : count(0), kill(DataFlowFacts::EmptySet()),
       gen(DataFlowFacts::EmptySet()) {}
@@ -62,6 +86,8 @@ GenKillTransformer *GenKillTransformer::one() {
 }
 
 GenKillTransformer *GenKillTransformer::zero() {
+  // Join identity and extend annihilator for may transformers. Applying zero
+  // to any fact set yields the empty set.
   static GenKillTransformer *ZERO = new GenKillTransformer(
       DataFlowFacts::UniverseSet(), DataFlowFacts::EmptySet(), {}, 1);
   return ZERO;
@@ -74,7 +100,7 @@ GenKillTransformer *GenKillTransformer::bottom() {
 }
 
 GenKillTransformer *GenKillTransformer::extend(GenKillTransformer *y) {
-  // Special cases
+  // Composition in program order: this ; y, i.e. result(S) = y(this(S)).
   if (equal(GenKillTransformer::zero()) ||
       y->equal(GenKillTransformer::zero())) {
     return GenKillTransformer::zero();
@@ -88,91 +114,30 @@ GenKillTransformer *GenKillTransformer::extend(GenKillTransformer *y) {
     return this;
   }
 
-  // General case: (f∘g)(x) = f(g(x))
-  // Note: 'y' is the outer function (f), 'this' is the inner function (g)
-  // extend(y) usually means this->extend(y) = y(this).
-  // Let's verify standard WPDS terminology.
-  // If weights are transformers w1, w2. Path w1 w2.
-  // extend(w1, w2) = w1 * w2.
-  // Semiring multiplication is usually composition.
-  // If 'extend' is multiplication, and we have path e1 -> e2.
-  // d1 = f1(d0). d2 = f2(d1). d2 = f2(f1(d0)).
-  // So extend(f1, f2) should return f2 o f1.
-  // Implementation of extend(y) corresponds to `y * this` or `this * y`?
-  // In InterProceduralDataFlowEngine.cpp:
-  // wpds.add_rule(..., transformer).
-  // Default semiring uses extend(a, b).
-  // Usually a is the weight of the rule, b is the weight of the rest.
-  // Let's assume standard order: extend(a, b) = a * b.
-  // If a is first, b is second.
-  // So `this` is first, `y` is second.
-  // So Result = y(this(S)).
+  DataFlowFacts composedGen = y->apply(apply(DataFlowFacts::EmptySet()));
+  DataFlowFacts composedKill = DataFlowFacts::Union(kill, y->kill);
+  std::map<Value *, DataFlowFacts> composedFlow;
 
-  // K_new = K1 U K2
-  DataFlowFacts temp_k = DataFlowFacts::Union(kill, y->kill);
+  for (Value *value : collectRelevantValues(*this, *y)) {
+    DataFlowFacts input;
+    input.addFact(value);
+    DataFlowFacts output = y->apply(apply(input));
 
-  // G_new = (G1 \ K2) U M2(G1 \ K2) U G2
-  DataFlowFacts g1_minus_k2 = DataFlowFacts::Diff(gen, y->kill);
-  DataFlowFacts m2_applied; // M2(G1 \ K2)
+    DataFlowFacts withoutGen = DataFlowFacts::Diff(output, composedGen);
+    if (!composedKill.containsFact(value)) {
+      withoutGen.removeFact(value);
+    }
 
-  // Apply M2 to g1_minus_k2
-  for (Value *v : g1_minus_k2.getFacts()) {
-    auto it = y->flow.find(v);
-    if (it != y->flow.end()) {
-      m2_applied = DataFlowFacts::Union(m2_applied, it->second);
+    if (!withoutGen.isEmpty()) {
+      composedFlow[value] = withoutGen;
     }
   }
 
-  DataFlowFacts temp_g = DataFlowFacts::Union(
-      DataFlowFacts::Union(g1_minus_k2, m2_applied), y->gen);
-
-  // M_new
-  // M_new(x) = (M1(x) \ K2) U M2(x) U M2(M1(x) \ K2)
-  std::map<Value *, DataFlowFacts> temp_flow;
-
-  // Collect all keys from M1 and M2
-  std::set<Value *> keys;
-  for (auto &kv : flow)
-    keys.insert(kv.first);
-  for (auto &kv : y->flow)
-    keys.insert(kv.first);
-
-  for (Value *x : keys) {
-    DataFlowFacts m1_x;
-    if (flow.count(x))
-      m1_x = flow.at(x);
-
-    DataFlowFacts m2_x;
-    if (y->flow.count(x))
-      m2_x = y->flow.at(x);
-
-    // Term 1: M1(x) \ K2
-    DataFlowFacts term1 = DataFlowFacts::Diff(m1_x, y->kill);
-
-    // Term 2: M2(x)
-    DataFlowFacts term2 = m2_x;
-
-    // Term 3: M2(M1(x) \ K2)
-    DataFlowFacts term3;
-    for (Value *v : term1.getFacts()) {
-      if (y->flow.count(v)) {
-        term3 = DataFlowFacts::Union(term3, y->flow.at(v));
-      }
-    }
-
-    DataFlowFacts result_x =
-        DataFlowFacts::Union(term1, DataFlowFacts::Union(term2, term3));
-
-    if (!result_x.isEmpty()) {
-      temp_flow[x] = result_x;
-    }
-  }
-
-  return makeGenKillTransformer(temp_k, temp_g, temp_flow);
+  return makeGenKillTransformer(composedKill, composedGen, composedFlow);
 }
 
 GenKillTransformer *GenKillTransformer::combine(GenKillTransformer *y) {
-  // Special cases
+  // Conservative may-join over alternative paths.
   if (equal(GenKillTransformer::zero())) {
     return y;
   }
@@ -181,86 +146,37 @@ GenKillTransformer *GenKillTransformer::combine(GenKillTransformer *y) {
     return this;
   }
 
-  // General case: meet (⊕) for semiring combine — result ⊆ T1(S) ∩ T2(S).
-  // So kill_meet = K1 ∪ K2 (kill more), gen_meet = G1 ∩ G2 (gen less).
-  DataFlowFacts temp_k = DataFlowFacts::Union(kill, y->kill);
-  DataFlowFacts temp_g = DataFlowFacts::Intersect(gen, y->gen);
-
-  // Flow meet: for each x not in K_meet, flow_meet(x) ⊆ flow1(x) ∩ flow2(x).
+  DataFlowFacts temp_k = DataFlowFacts::Intersect(kill, y->kill);
+  DataFlowFacts temp_g = DataFlowFacts::Union(gen, y->gen);
   std::map<Value *, DataFlowFacts> temp_flow;
-  std::set<Value *> keys;
-  for (auto &kv : flow)
-    keys.insert(kv.first);
-  for (auto &kv : y->flow)
-    keys.insert(kv.first);
 
-  for (Value *x : keys) {
-    if (temp_k.containsFact(x))
-      continue;
-    DataFlowFacts f1 = flow.count(x) ? flow.at(x) : DataFlowFacts::EmptySet();
-    DataFlowFacts f2 =
-        y->flow.count(x) ? y->flow.at(x) : DataFlowFacts::EmptySet();
-    DataFlowFacts res = DataFlowFacts::Intersect(f1, f2);
-    if (!res.isEmpty())
-      temp_flow[x] = res;
+  for (Value *x : collectRelevantValues(*this, *y)) {
+    DataFlowFacts flowOut = DataFlowFacts::EmptySet();
+    if (flow.count(x)) {
+      flowOut = DataFlowFacts::Union(flowOut, flow.at(x));
+    }
+    if (y->flow.count(x)) {
+      flowOut = DataFlowFacts::Union(flowOut, y->flow.at(x));
+    }
+    flowOut = DataFlowFacts::Diff(flowOut, temp_g);
+    if (!temp_k.containsFact(x)) {
+      flowOut.removeFact(x);
+    }
+    if (!flowOut.isEmpty()) {
+      temp_flow[x] = flowOut;
+    }
   }
 
   return makeGenKillTransformer(temp_k, temp_g, temp_flow);
 }
 
 GenKillTransformer *GenKillTransformer::diff(GenKillTransformer *y) {
-  // Special cases
-  if (equal(GenKillTransformer::zero())) {
+  // The non-differential build does not rely on precise deltas. Keep diff
+  // coherent: zero iff unchanged, otherwise return the new weight itself.
+  if (equal(y)) {
     return GenKillTransformer::zero();
   }
-
-  if (y->equal(GenKillTransformer::zero())) {
-    return this;
-  }
-
-  // General case: Diff not strictly defined for arbitrary maps,
-  // but WPDS diff usually tries to check if y covers this.
-  // For flow analysis, diff is often simple check.
-
-  // Keep existing logic for K/G
-  DataFlowFacts temp_k = DataFlowFacts::Diff(
-      DataFlowFacts::UniverseSet(), DataFlowFacts::Diff(y->kill, kill));
-  DataFlowFacts temp_g = DataFlowFacts::Diff(gen, y->gen);
-
-  // Flow diff?
-  // If we can't easily diff maps, we might return 'this' (safe approximation
-  // for termination if used in fixpoint?) But WPDS `diff` is often used for
-  // `delta = new - old`. If we assume simple subtraction for maps:
-  std::map<Value *, DataFlowFacts> temp_flow;
-  for (auto &kv : flow) {
-    Value *k = kv.first;
-    DataFlowFacts v = kv.second;
-    if (y->flow.count(k)) {
-      DataFlowFacts v_other = y->flow.at(k);
-      DataFlowFacts d = DataFlowFacts::Diff(v, v_other);
-      if (!d.isEmpty())
-        temp_flow[k] = d;
-    } else {
-      temp_flow[k] = v;
-    }
-  }
-
-  // Test if *this <= *y (i.e., diff is empty)
-  // For K/G: (Universe \ (Ky \ Kx)) == Universe => Ky \ Kx is empty => Ky
-  // subset Kx (Kill is reverse lattice?) Usually: this <= y means y is "bigger"
-  // (more info? or higher in lattice?). In sets: y contains this. Here logic
-  // seems to be: diff returns what is in 'this' but not in 'y'.
-
-  bool k_is_empty = DataFlowFacts::Eq(
-      temp_k, DataFlowFacts::UniverseSet()); // Wait, based on logic above
-  bool g_is_empty = DataFlowFacts::Eq(temp_g, DataFlowFacts::EmptySet());
-  bool flow_is_empty = temp_flow.empty();
-
-  if (k_is_empty && g_is_empty && flow_is_empty) {
-    return GenKillTransformer::zero();
-  }
-
-  return makeGenKillTransformer(temp_k, temp_g, temp_flow);
+  return this;
 }
 
 GenKillTransformer *GenKillTransformer::quasiOne() const { return one(); }

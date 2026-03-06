@@ -175,7 +175,7 @@ ReachingDefinitionsAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
     const DefinitionFact &exit_fact, const DefinitionFact &call_fact) {
   FactSet result;
 
@@ -209,7 +209,7 @@ ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::return_flow(
 
 ReachingDefinitionsAnalysis::FactSet
 ReachingDefinitionsAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                                 const DefinitionFact &fact) {
+                                                 const llvm::Instruction *return_site, const DefinitionFact &fact) {
   FactSet result;
 
   const llvm::Function *callee = call->getCalledFunction();

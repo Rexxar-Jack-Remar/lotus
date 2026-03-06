@@ -16,7 +16,8 @@ class PreciseGVFAEngine;
  * HybridGVFAEngine
  *
  * Always builds a fast reachability index first (cheap pruning), and lazily
- * computes precise reachability/trace info on demand (confirmation + reporting).
+ * computes precise reachability/trace info on demand (confirmation +
+ * reporting).
  */
 class HybridGVFAEngine final : public GVFAEngine {
 public:

@@ -125,9 +125,9 @@ ComplexityLegacy::ComplexityLegacy() : FunctionPass(ID) {}
 
 bool ComplexityLegacy::runOnFunction(Function &F) {
   auto &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  auto CC  = calcCyclomaticComplexity(F);
-  auto LM  = collectLoopMetrics(F, LI);
-  auto NP  = nPath(F);
+  auto CC = calcCyclomaticComplexity(F);
+  auto LM = collectLoopMetrics(F, LI);
+  auto NP = nPath(F);
 
   errs() << "== " << F.getName() << " ==\n"
          << "  Cyclomatic    : " << CC << '\n'
@@ -136,8 +136,8 @@ bool ComplexityLegacy::runOnFunction(Function &F) {
     errs() << ">= UINT64_MAX (saturated)\n";
   else
     errs() << NP << '\n';
-  errs() << "  Loops         : " << LM.NumLoops
-         << "  (max depth " << LM.MaxDepth << ")\n";
+  errs() << "  Loops         : " << LM.NumLoops << "  (max depth "
+         << LM.MaxDepth << ")\n";
 
   return false; // analysis pass — does not modify IR
 }
@@ -153,6 +153,7 @@ void ComplexityLegacy::getAnalysisUsage(AnalysisUsage &AU) const {
 // including TU — an ODR violation and a duplicate-registration crash.
 char ComplexityLegacy::ID = 0;
 
-static RegisterPass<ComplexityLegacy>
-    X("complexity-legacy", "Complexity metrics (legacy PM)",
-      /*cfgOnly=*/false, /*is_analysis=*/true);
+static RegisterPass<ComplexityLegacy> X("complexity-legacy",
+                                        "Complexity metrics (legacy PM)",
+                                        /*cfgOnly=*/false,
+                                        /*is_analysis=*/true);

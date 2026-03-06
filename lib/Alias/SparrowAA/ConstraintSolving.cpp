@@ -2,21 +2,13 @@
  * @file ConstraintSolving.cpp
  * @brief Constraint solving phase using worklist-based propagation.
  *
- * This file implements the constraint solving algorithm that propagates points-to
- * information through the constraint graph. Uses a worklist algorithm with
- * cycle detection (HCD: Hybrid Cycle Detection, LCD: Lazy Cycle Detection)
+ * This file implements the constraint solving algorithm that propagates
+ * points-to information through the constraint graph. Uses a worklist algorithm
+ * with cycle detection (HCD: Hybrid Cycle Detection, LCD: Lazy Cycle Detection)
  * to handle strongly connected components efficiently.
  *
  * @author rainoftime
  */
-#include <llvm/ADT/DenseMap.h>
-#include <llvm/ADT/DenseSet.h>
-#include <llvm/ADT/SmallSet.h>
-#include <llvm/ADT/Statistic.h>
-#include <llvm/ADT/iterator_range.h>
-#include <llvm/Support/CommandLine.h>
-#include <llvm/Support/raw_ostream.h>
-
 #include "Alias/SparrowAA/Andersen.h"
 #include "Alias/SparrowAA/CycleDetector.h"
 #include "Alias/SparrowAA/Log.h"
@@ -24,6 +16,14 @@
 
 #include <map>
 #include <queue>
+
+#include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/SmallSet.h>
+#include <llvm/ADT/Statistic.h>
+#include <llvm/ADT/iterator_range.h>
+#include <llvm/Support/CommandLine.h>
+#include <llvm/Support/raw_ostream.h>
 
 #define DEBUG_TYPE "andersen"
 
@@ -43,10 +43,9 @@ STATISTIC(AvgPtsSetSize, "Average points-to set size");
 // Use extern to reference the category defined in Andersen.cpp
 extern cl::OptionCategory AndersenCategory;
 
-cl::opt<bool>
-    EnableHCD("enable-hcd",
-              cl::desc("Enable the hybrid cycle detection algorithm"),
-              cl::cat(AndersenCategory));
+cl::opt<bool> EnableHCD("enable-hcd",
+                        cl::desc("Enable the hybrid cycle detection algorithm"),
+                        cl::cat(AndersenCategory));
 cl::opt<bool> EnableLCD("enable-lcd",
                         cl::desc("Enable the lazy cycle detection algorithm"),
                         cl::cat(AndersenCategory));
@@ -125,7 +124,7 @@ private:
   NodeMapTy graph;
 
 public:
-  using iterator =   NodeMapTy::iterator;
+  using iterator = NodeMapTy::iterator;
   using const_iterator = NodeMapTy::const_iterator;
 
   ConstraintGraph() {}
@@ -423,8 +422,9 @@ public:
   }
 };
 
-// Template version of buildConstraintGraph function to support different PtsSet types
-template<typename PtsSetType>
+// Template version of buildConstraintGraph function to support different PtsSet
+// types
+template <typename PtsSetType>
 void buildConstraintGraph(ConstraintGraph &cGraph,
                           const std::vector<AndersConstraint> &constraints,
                           AndersNodeFactory &nodeFactory,
@@ -458,15 +458,17 @@ void buildConstraintGraph(ConstraintGraph &cGraph,
 
 // Explicit instantiation for the DefaultPtsSet used by solveConstraints.
 // (B4 Fix: keep internal linkage; no duplicate non-static overloads.)
-static void buildConstraintGraph(ConstraintGraph &cGraph,
-                                 const std::vector<AndersConstraint> &constraints,
-                                 AndersNodeFactory &nodeFactory,
-                                 std::map<NodeIndex, DefaultPtsSet> &ptsGraph) {
-  buildConstraintGraph<DefaultPtsSet>(cGraph, constraints, nodeFactory, ptsGraph);
+static void
+buildConstraintGraph(ConstraintGraph &cGraph,
+                     const std::vector<AndersConstraint> &constraints,
+                     AndersNodeFactory &nodeFactory,
+                     std::map<NodeIndex, DefaultPtsSet> &ptsGraph) {
+  buildConstraintGraph<DefaultPtsSet>(cGraph, constraints, nodeFactory,
+                                      ptsGraph);
 }
 
 // Template version of OnlineCycleDetector class
-template<typename PtsSetType>
+template <typename PtsSetType>
 class OnlineCycleDetectorT : public CycleDetector<ConstraintGraph> {
 private:
   AndersNodeFactory &nodeFactory;
@@ -477,7 +479,7 @@ private:
   NodeType *getRep(NodeIndex idx) override {
     return constraintGraph.getOrInsertNode(nodeFactory.getMergeTarget(idx));
   }
-  
+
   // Specify how to process the non-rep nodes if a cycle is found
   void processNodeOnCycle(const NodeType *node,
                           const NodeType *repNode) override {
@@ -488,7 +490,7 @@ private:
 
     collapseNodes(repIdx, cycleIdx, nodeFactory, ptsGraph, constraintGraph);
   }
-  
+
   // Specify how to process the rep nodes if a cycle is found
   void processCycleRepNode(const NodeType *node) override {
     (void)node; // Unused parameter
@@ -497,13 +499,14 @@ private:
 
 public:
   OnlineCycleDetectorT(AndersNodeFactory &n, ConstraintGraph &co,
-                      std::map<NodeIndex, PtsSetType> &p,
-                      std::queue<std::pair<NodeIndex, NodeIndex>> &cc)
+                       std::map<NodeIndex, PtsSetType> &p,
+                       std::queue<std::pair<NodeIndex, NodeIndex>> &cc)
       : nodeFactory(n), constraintGraph(co), ptsGraph(p), cycleCandidates(cc) {}
 
   void run() override {
     // Perform cycle detection on for nodes on the candidate list
-    std::queue<std::pair<NodeIndex, NodeIndex>> tempCandidates = cycleCandidates;
+    std::queue<std::pair<NodeIndex, NodeIndex>> tempCandidates =
+        cycleCandidates;
     while (!tempCandidates.empty()) {
       auto candidate = tempCandidates.front();
       tempCandidates.pop();
@@ -565,7 +568,8 @@ void Andersen::solveConstraints() {
 
   // Scan the node list, add it to work list if the node a representative and
   // can contribute to the calculation right now.
-  LOG_INFO("Initializing work list from {} points-to graph entries...", ptsGraph.size());
+  LOG_INFO("Initializing work list from {} points-to graph entries...",
+           ptsGraph.size());
   for (auto const &mapping : ptsGraph) {
     NodeIndex node = mapping.first;
     if (nodeFactory.getMergeTarget(node) == node &&
@@ -584,12 +588,13 @@ void Andersen::solveConstraints() {
 
     // First we've got to check if there is any cycle candidates in the last
     // iteration. If there is, detect and collapse cycle
-    if (iterCount == 1) LOG_INFO("  - Checking cycle candidates...");
+    if (iterCount == 1)
+      LOG_INFO("  - Checking cycle candidates...");
     if (EnableLCD && !cycleCandidates.empty()) {
       // Detect and collapse cycles online
       NumCyclesDetected += cycleCandidates.size();
-      DefaultOnlineCycleDetector cycleDetector(nodeFactory, constraintGraph, ptsGraph,
-                                      cycleCandidates);
+      DefaultOnlineCycleDetector cycleDetector(nodeFactory, constraintGraph,
+                                               ptsGraph, cycleCandidates);
       cycleDetector.run();
 
       // Empty the candidate queue.
@@ -604,7 +609,8 @@ void Andersen::solveConstraints() {
       checkedEdges.clear();
     }
 
-    if (iterCount == 1) LOG_INFO("  - Processing worklist...");
+    if (iterCount == 1)
+      LOG_INFO("  - Processing worklist...");
     unsigned nodeCount = 0;
     while (!currWorkList->isEmpty()) {
       NodeIndex node = currWorkList->dequeue();
@@ -745,14 +751,14 @@ void Andersen::solveConstraints() {
     // Swap the current and the next worklist
     std::swap(currWorkList, nextWorkList);
   }
-  
+
   LOG_INFO("Constraint solving loop completed, calculating statistics...");
-  
+
   // Calculate points-to set statistics
   unsigned long long totalPtsSetSize = 0;
   unsigned maxSize = 0;
   unsigned numNonEmptyPtsSets = 0;
-  
+
   for (const auto &mapping : ptsGraph) {
     unsigned size = mapping.second.getSize();
     if (size > 0) {
@@ -762,7 +768,7 @@ void Andersen::solveConstraints() {
         maxSize = size;
     }
   }
-  
+
   MaxPtsSetSize = maxSize;
   if (numNonEmptyPtsSets > 0)
     AvgPtsSetSize = totalPtsSetSize / numNonEmptyPtsSets;

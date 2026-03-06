@@ -54,7 +54,7 @@ IDEInstInteractionAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 IDEInstInteractionAnalysis::FactSet IDEInstInteractionAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
     const Fact &exit_fact, const Fact &call_fact) {
   FactSet out;
   if (!call) {
@@ -80,7 +80,7 @@ IDEInstInteractionAnalysis::FactSet IDEInstInteractionAnalysis::return_flow(
 
 IDEInstInteractionAnalysis::FactSet
 IDEInstInteractionAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                                const Fact &fact) {
+                                                const llvm::Instruction *return_site, const Fact &fact) {
   FactSet out;
   out.insert(fact);
   if (call && !call->getType()->isVoidTy()) {
@@ -167,14 +167,14 @@ IDEInstInteractionAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
 
 IDEInstInteractionAnalysis::EdgeFunction
 IDEInstInteractionAnalysis::return_edge_function(
-    const llvm::CallBase * /*call*/, const Fact & /*exit_fact*/,
+    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
     const Fact & /*ret_fact*/) {
   return [](const Value &v) { return v; };
 }
 
 IDEInstInteractionAnalysis::EdgeFunction
 IDEInstInteractionAnalysis::call_to_return_edge_function(
-    const llvm::CallBase * /*call*/, const Fact & /*src_fact*/,
+    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site, const Fact & /*src_fact*/,
     const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }

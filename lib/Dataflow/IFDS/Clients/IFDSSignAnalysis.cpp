@@ -130,7 +130,7 @@ SignAnalysis::FactSet SignAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 SignAnalysis::FactSet SignAnalysis::return_flow(const llvm::CallBase *call,
-                                                const llvm::Function *callee,
+                                                const llvm::Instruction *return_site, const llvm::Function *callee,
                                                 const SignFact &exit_fact,
                                                 const SignFact &call_fact) {
   FactSet result;
@@ -162,7 +162,7 @@ SignAnalysis::FactSet SignAnalysis::return_flow(const llvm::CallBase *call,
 
 SignAnalysis::FactSet
 SignAnalysis::call_to_return_flow(const llvm::CallBase * /*call*/,
-                                  const SignFact &fact) {
+                                  const llvm::Instruction *return_site, const SignFact &fact) {
   FactSet result;
   result.insert(fact);
   return result;

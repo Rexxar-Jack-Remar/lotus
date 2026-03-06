@@ -21,10 +21,11 @@ IDEProtoAnalysis::FactSet IDEProtoAnalysis::call_flow(const llvm::CallBase *,
   return out;
 }
 
-IDEProtoAnalysis::FactSet IDEProtoAnalysis::return_flow(const llvm::CallBase *,
-                                                        const llvm::Function *,
-                                                        const Fact &,
-                                                        const Fact &call_fact) {
+IDEProtoAnalysis::FactSet
+IDEProtoAnalysis::return_flow(const llvm::CallBase *,
+                              const llvm::Instruction *,
+                              const llvm::Function *, const Fact &,
+                              const Fact &call_fact) {
   FactSet out;
   out.insert(call_fact);
   return out;
@@ -32,6 +33,7 @@ IDEProtoAnalysis::FactSet IDEProtoAnalysis::return_flow(const llvm::CallBase *,
 
 IDEProtoAnalysis::FactSet
 IDEProtoAnalysis::call_to_return_flow(const llvm::CallBase *,
+                                      const llvm::Instruction *,
                                       const Fact &fact) {
   FactSet out;
   out.insert(fact);
@@ -58,13 +60,15 @@ IDEProtoAnalysis::call_edge_function(const llvm::CallBase *, const Fact &,
 }
 
 IDEProtoAnalysis::EdgeFunction
-IDEProtoAnalysis::return_edge_function(const llvm::CallBase *, const Fact &,
-                                       const Fact &) {
+IDEProtoAnalysis::return_edge_function(const llvm::CallBase *,
+                                       const llvm::Instruction *,
+                                       const Fact &, const Fact &) {
   return [](const Value &v) { return v; };
 }
 
 IDEProtoAnalysis::EdgeFunction
 IDEProtoAnalysis::call_to_return_edge_function(const llvm::CallBase *,
+                                               const llvm::Instruction *,
                                                const Fact &, const Fact &) {
   return [](const Value &v) { return v; };
 }

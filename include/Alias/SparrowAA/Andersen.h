@@ -58,9 +58,10 @@
 // This file defines an implementation of Andersen's interprocedural alias
 // analysis
 //
-// In pointer analysis terms, this is a subset-based, flow-insensitive algorithm.
-// Context sensitivity is configurable: the default is context-insensitive, but
-// k-call-site (k-CFA) contexts can be enabled at runtime.
+// In pointer analysis terms, this is a subset-based, flow-insensitive
+// algorithm. Context sensitivity is configurable: the default is
+// context-insensitive, but k-call-site (k-CFA) contexts can be enabled at
+// runtime.
 //
 
 #ifndef TCFS_ANDERSEN_H
@@ -71,16 +72,16 @@
 #include "Alias/SparrowAA/TemplatePtsSet.h"
 #include "Alias/Spec/AliasSpecManager.h"
 
-#include <llvm/ADT/DenseMap.h>
-#include <llvm/ADT/DenseSet.h>
-#include <llvm/ADT/Hashing.h>
-#include <llvm/IR/DataLayout.h>
-#include <llvm/IR/InstrTypes.h>  // For CallBase
-
 #include <functional>
 #include <map>
 #include <string>
 #include <vector>
+
+#include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/Hashing.h>
+#include <llvm/IR/DataLayout.h>
+#include <llvm/IR/InstrTypes.h> // For CallBase
 
 /**
  * @struct ContextPolicy
@@ -106,13 +107,13 @@ struct ContextPolicy {
   using ToStringFn = std::string (*)(Context, bool);
   using EvolveFn = Context (*)(Context, const llvm::Instruction *);
 
-  Context (*initialCtx)();   ///< Returns the initial (entry-point) context.
-  Context (*globalCtx)();    ///< Returns the context for global initialisers.
-  EvolveFn evolve;           ///< Computes callee context from caller context + call site.
-  ToStringFn toString;       ///< Converts a context to a string for debugging.
-  void (*release)();         ///< Releases any resources owned by the policy.
-  unsigned k;                ///< Call-string depth (0 = context-insensitive).
-  const char *name;          ///< Short name of the policy (e.g., "0-CFA").
+  Context (*initialCtx)(); ///< Returns the initial (entry-point) context.
+  Context (*globalCtx)();  ///< Returns the context for global initialisers.
+  EvolveFn evolve; ///< Computes callee context from caller context + call site.
+  ToStringFn toString; ///< Converts a context to a string for debugging.
+  void (*release)();   ///< Releases any resources owned by the policy.
+  unsigned k;          ///< Call-string depth (0 = context-insensitive).
+  const char *name;    ///< Short name of the policy (e.g., "0-CFA").
 };
 
 /**
@@ -151,12 +152,14 @@ private:
 
   /// The points-to graph: maps each node index to its points-to set.
   /// Populated by `solveConstraints()` and queried by `getPointsToSet()`.
-  std::map<NodeIndex, DefaultPtsSet, std::less<NodeIndex>, std::allocator<std::pair<const NodeIndex, DefaultPtsSet>>> ptsGraph;
+  std::map<NodeIndex, DefaultPtsSet, std::less<NodeIndex>,
+           std::allocator<std::pair<const NodeIndex, DefaultPtsSet>>>
+      ptsGraph;
 
   /// Library-function spec manager used during constraint collection.
   lotus::alias::AliasSpecManager specManager;
 
-  ContextPolicy ctxPolicy;       ///< The active context policy.
+  ContextPolicy ctxPolicy;              ///< The active context policy.
   AndersNodeFactory::CtxKey initialCtx; ///< Context for the entry point.
   AndersNodeFactory::CtxKey globalCtx;  ///< Context for global initialisers.
 
@@ -168,15 +171,18 @@ private:
   /// DenseSet info for `FunctionContextKey`.
   struct FunctionContextInfo {
     static FunctionContextKey getEmptyKey() {
-      return {reinterpret_cast<const llvm::Function *>(-1), reinterpret_cast<void *>(0x1)};
+      return {reinterpret_cast<const llvm::Function *>(-1),
+              reinterpret_cast<void *>(0x1)};
     }
     static FunctionContextKey getTombstoneKey() {
-      return {reinterpret_cast<const llvm::Function *>(-2), reinterpret_cast<void *>(0x2)};
+      return {reinterpret_cast<const llvm::Function *>(-2),
+              reinterpret_cast<void *>(0x2)};
     }
     static unsigned getHashValue(const FunctionContextKey &k) {
       return llvm::hash_combine(k.func, k.ctx);
     }
-    static bool isEqual(const FunctionContextKey &lhs, const FunctionContextKey &rhs) {
+    static bool isEqual(const FunctionContextKey &lhs,
+                        const FunctionContextKey &rhs) {
       return lhs.func == rhs.func && lhs.ctx == rhs.ctx;
     }
   };
@@ -184,20 +190,27 @@ private:
 
   // Three main phases
   void collectConstraints(const llvm::Module &);
-  void collectConstraintsForFunction(const llvm::Function *, AndersNodeFactory::CtxKey);
+  void collectConstraintsForFunction(const llvm::Function *,
+                                     AndersNodeFactory::CtxKey);
   void optimizeConstraints();
   void solveConstraints();
 
   // Helper functions for constraint collection
-  void collectConstraintsForGlobals(const llvm::Module &, AndersNodeFactory::CtxKey);
-  void collectConstraintsForInstruction(const llvm::Instruction *, AndersNodeFactory::CtxKey);
-  void addGlobalInitializerConstraints(NodeIndex, const llvm::Constant *, AndersNodeFactory::CtxKey);
-  void addConstraintForCall(const llvm::CallBase *cs, AndersNodeFactory::CtxKey callerCtx);
+  void collectConstraintsForGlobals(const llvm::Module &,
+                                    AndersNodeFactory::CtxKey);
+  void collectConstraintsForInstruction(const llvm::Instruction *,
+                                        AndersNodeFactory::CtxKey);
+  void addGlobalInitializerConstraints(NodeIndex, const llvm::Constant *,
+                                       AndersNodeFactory::CtxKey);
+  void addConstraintForCall(const llvm::CallBase *cs,
+                            AndersNodeFactory::CtxKey callerCtx);
   bool addConstraintForExternalLibrary(const llvm::CallBase *cs,
-                                     const llvm::Function *f, AndersNodeFactory::CtxKey callerCtx);
+                                       const llvm::Function *f,
+                                       AndersNodeFactory::CtxKey callerCtx);
   void addArgumentConstraintForCall(const llvm::CallBase *cs,
-                                  const llvm::Function *f, AndersNodeFactory::CtxKey callerCtx,
-                                  AndersNodeFactory::CtxKey calleeCtx);
+                                    const llvm::Function *f,
+                                    AndersNodeFactory::CtxKey callerCtx,
+                                    AndersNodeFactory::CtxKey calleeCtx);
 
   // Helper functions for constraint optimization
   NodeIndex getRefNodeIndex(NodeIndex n) const;
@@ -212,7 +225,8 @@ private:
 public:
   static char ID;
 
-  explicit Andersen(const llvm::Module &, ContextPolicy policy = makeContextPolicy(0));
+  explicit Andersen(const llvm::Module &,
+                    ContextPolicy policy = makeContextPolicy(0));
   ~Andersen();
   bool runOnModule(const llvm::Module &M);
 
@@ -223,8 +237,7 @@ public:
   // argument.
   bool getPointsToSet(const llvm::Value *v,
                       std::vector<const llvm::Value *> &ptsSet) const;
-  bool getPointsToSet(const llvm::Value *v,
-                      AndersPtsSet &ptsSet) const;
+  bool getPointsToSet(const llvm::Value *v, AndersPtsSet &ptsSet) const;
   // Context-sensitive queries (no cross-context union). Return false if the
   // value has no node in the given context; otherwise fill the supplied set.
   bool getPointsToSetInContext(const llvm::Value *v,

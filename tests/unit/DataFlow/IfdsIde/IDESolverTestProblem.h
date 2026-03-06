@@ -116,7 +116,7 @@ public:
     return {fact};
   }
 
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const Fact &exit_fact, const Fact &call_fact) override {
     (void)call;
     (void)callee;
@@ -127,7 +127,7 @@ public:
   }
 
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const Fact &fact) override {
+                              const llvm::Instruction *return_site, const Fact &fact) override {
     (void)call;
     if (!fact)
       return {};
@@ -147,11 +147,13 @@ public:
                                   const Fact &) override {
     return identity();
   }
-  EdgeFunction return_edge_function(const llvm::CallBase *, const Fact &,
+  EdgeFunction return_edge_function(const llvm::CallBase *,
+                                    const llvm::Instruction *, const Fact &,
                                     const Fact &) override {
     return identity();
   }
   EdgeFunction call_to_return_edge_function(const llvm::CallBase *,
+                                            const llvm::Instruction *,
                                             const Fact &,
                                             const Fact &) override {
     return identity();

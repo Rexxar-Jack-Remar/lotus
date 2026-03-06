@@ -6,6 +6,7 @@
 //===---------------------------------------------------------------------------===//
 
 #include "Analysis/Spectre/CacheSpecuAnalysis.h"
+
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Analysis/CFG.h"
@@ -16,6 +17,7 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
+
 #include <deque>
 using namespace llvm;
 using namespace std;
@@ -196,7 +198,7 @@ bool CacheSpecuAnalysis::SpecuSim(BasicBlock *from, BasicBlock *to,
               bb); // if pred is not a back edge, and is unvisited, do it later
           skipBB = true;
           //					dbgs()<<"\nHas unvisited pred
-          //bb, skip this bb.\n";
+          // bb, skip this bb.\n";
           break;
         }
         continue;
@@ -213,7 +215,7 @@ bool CacheSpecuAnalysis::SpecuSim(BasicBlock *from, BasicBlock *to,
           wideningMapCount[edge] = 1;
         } else if (wideningMap[edge] == nullptr) {
           //					dbgs()<<"fixed point already
-          //reached before!\n";
+          // reached before!\n";
           // already reached fix-point before, skip it anyway
           skipBB = true;
         } else if (wideningOp(wideningMap[edge], predModel)) {
@@ -223,14 +225,14 @@ bool CacheSpecuAnalysis::SpecuSim(BasicBlock *from, BasicBlock *to,
 
           if (++wideningMapCount[edge] < 10) {
             //						dbgs()<<"fixed point
-            //reached!\n";
+            // reached!\n";
             wideningMap[edge] = nullptr;
             wideningMapCount[edge] = 0;
             skipBB = true; // wideningOp reach fixed point, finish this loop
           }
         } else {
           //					dbgs()<<"fixed point
-          //reached!\n";
+          // reached!\n";
           wideningMap[edge] = nullptr;
           wideningMapCount[edge] = 0;
           skipBB = true; // wideningOp reach fixed point, finish this loop
@@ -284,14 +286,14 @@ bool CacheSpecuAnalysis::SpecuSim(BasicBlock *from, BasicBlock *to,
 
         if (isSpecu & 0x1) {
           //					dbgs()<<"\nBB is speculatively
-          //executed at if branch with depth: " << sp->IfDepth <<"\n";
+          // executed at if branch with depth: " << sp->IfDepth <<"\n";
           if (sp->AddModel(this->model, true, cacheChanged))
             sp->IfEndBB = bb;
         }
 
         if (isSpecu & 0x2) {
           //					dbgs()<<"\nBB is speculatively
-          //executed at else branch with depth: " << sp->ElseDepth <<"\n";
+          // executed at else branch with depth: " << sp->ElseDepth <<"\n";
           if (sp->AddModel(this->model, false, cacheChanged))
             sp->ElseEndBB = bb;
         }
@@ -346,7 +348,7 @@ bool CacheSpecuAnalysis::SpecuSim(BasicBlock *from, BasicBlock *to,
             BasicBlock *propMergeBB = SpecuPropagation(
                 sp->DTIf->getBlock(), sp->MergeBB, sp->ElseModel);
             //					dbgs() << "If propagate to:
-            //\n\t"; 					propMergeBB->print(dbgs());
+            //\n\t"; propMergeBB->print(dbgs());
             if (propMergeBB &&
                 std::find(WL.begin(), WL.end(), propMergeBB) == WL.end())
               WL.push_back(propMergeBB);
@@ -354,7 +356,7 @@ bool CacheSpecuAnalysis::SpecuSim(BasicBlock *from, BasicBlock *to,
             propMergeBB = SpecuPropagation(sp->DTElse->getBlock(), sp->MergeBB,
                                            sp->IfModel);
             //					dbgs() << "Else propagate to:
-            //\n\t"; 					propMergeBB->print(dbgs());
+            //\n\t"; propMergeBB->print(dbgs());
             if (propMergeBB &&
                 std::find(WL.begin(), WL.end(), propMergeBB) == WL.end())
               WL.push_back(propMergeBB);
@@ -375,7 +377,7 @@ bool CacheSpecuAnalysis::SpecuSim(BasicBlock *from, BasicBlock *to,
     //			this->cacheTrace[bb] = this->model;
     //		else
     //			this->cacheTrace[bb] =
-    //this->cacheTrace[bb]->merge(this->model);
+    // this->cacheTrace[bb]->merge(this->model);
 
     for (auto it = succ_begin(bb), et = succ_end(bb); it != et; ++it) {
       if (std::find(WL.begin(), WL.end(), *it) == WL.end())
@@ -791,7 +793,8 @@ void CacheSpecuAnalysis::visitGetElementPtrInst(GetElementPtrInst &I) {
       //    		if(!CacheModel::GEPInstPos(*GEP, from, to))
       //    		{
       //    			this->AliasMap[&I] = new
-      //    PointerLocation(dest,-1); 			delete(GEP); 			return;
+      //    PointerLocation(dest,-1); 			delete(GEP);
+      //    return;
       //    		}
       dest = GEP->getPointerOperand();
       delete (GEP);

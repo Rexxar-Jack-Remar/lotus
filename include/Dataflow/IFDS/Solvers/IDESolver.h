@@ -58,6 +58,25 @@ template <typename A, typename B, typename C> struct TripleEq {
            std::get<1>(a) == std::get<1>(b) && std::get<2>(a) == std::get<2>(b);
   }
 };
+template <typename A, typename B, typename C, typename D> struct QuadHash {
+  size_t operator()(const std::tuple<A, B, C, D> &t) const {
+    size_t h = 14695981039346656037ULL;
+    h = fnv_mix(h, std::hash<A>{}(std::get<0>(t)));
+    h = fnv_mix(h, std::hash<B>{}(std::get<1>(t)));
+    h = fnv_mix(h, std::hash<C>{}(std::get<2>(t)));
+    h = fnv_mix(h, std::hash<D>{}(std::get<3>(t)));
+    return h;
+  }
+};
+template <typename A, typename B, typename C, typename D> struct QuadEq {
+  bool operator()(const std::tuple<A, B, C, D> &a,
+                  const std::tuple<A, B, C, D> &b) const {
+    return std::get<0>(a) == std::get<0>(b) &&
+           std::get<1>(a) == std::get<1>(b) &&
+           std::get<2>(a) == std::get<2>(b) &&
+           std::get<3>(a) == std::get<3>(b);
+  }
+};
 } // namespace detail
 
 // ============================================================================
@@ -71,6 +90,7 @@ public:
   using Value = typename Problem::ValueType;
   using EdgeFunction = typename Problem::EdgeFunction;
   using EdgeFunctionPtr = std::shared_ptr<EdgeFunction>;
+  using Node = typename ExplodedSupergraph<Fact>::Node;
   using PathEdgeType = PathEdge<Fact>;
   using PathEdgeHashType = PathEdgeHash<Fact>;
 
@@ -110,8 +130,35 @@ protected:
   virtual void on_summary_edge_added(const SummaryEdge<Fact> &edge) {
     (void)edge;
   }
+  virtual void on_normal_transition(const Node &source, const Node &target) {
+    (void)source;
+    (void)target;
+  }
+  virtual void on_call_transition(const Node &source, const Node &target) {
+    (void)source;
+    (void)target;
+  }
+  virtual void on_return_transition(const Node &source, const Node &target) {
+    (void)source;
+    (void)target;
+  }
+  virtual void on_call_to_return_transition(const Node &source,
+                                            const Node &target) {
+    (void)source;
+    (void)target;
+  }
+  virtual void on_summary_transition(const Node &source, const Node &target) {
+    (void)source;
+    (void)target;
+  }
 
 private:
+  struct EndSummary {
+    const llvm::Instruction *exit_inst;
+    Fact exit_fact;
+    EdgeFunctionPtr phi;
+  };
+
   struct StartKey {
     const llvm::Instruction *start_node;
     Fact start_fact;
@@ -197,10 +244,8 @@ private:
   std::unordered_map<StartKey, std::vector<IncomingEdge>, StartKeyHash>
       m_incoming;
 
-  // End summaries per callee start fact: exit_fact -> edge functions
-  std::unordered_map<StartKey,
-                     std::unordered_map<Fact, std::vector<EdgeFunctionPtr>>,
-                     StartKeyHash>
+  // End summaries per callee start fact.
+  std::unordered_map<StartKey, std::vector<EndSummary>, StartKeyHash>
       m_end_summaries;
 
   // Composition memoization table
@@ -211,14 +256,17 @@ private:
 
   // Edge function caches (avoid recomputing same edge function)
   using NormalEdgeKey = std::tuple<const llvm::Instruction *, Fact, Fact>;
-  using CallToReturnEdgeKey = std::tuple<const llvm::CallBase *, Fact, Fact>;
+  using CallToReturnEdgeKey =
+      std::tuple<const llvm::CallBase *, const llvm::Instruction *, Fact, Fact>;
   std::unordered_map<NormalEdgeKey, EdgeFunctionPtr,
                      detail::TripleHash<const llvm::Instruction *, Fact, Fact>,
                      detail::TripleEq<const llvm::Instruction *, Fact, Fact>>
       m_normal_edge_cache;
   std::unordered_map<CallToReturnEdgeKey, EdgeFunctionPtr,
-                     detail::TripleHash<const llvm::CallBase *, Fact, Fact>,
-                     detail::TripleEq<const llvm::CallBase *, Fact, Fact>>
+                     detail::QuadHash<const llvm::CallBase *,
+                                      const llvm::Instruction *, Fact, Fact>,
+                     detail::QuadEq<const llvm::CallBase *,
+                                    const llvm::Instruction *, Fact, Fact>>
       m_call_to_return_edge_cache;
 
   // Worklist of path edges with edge functions

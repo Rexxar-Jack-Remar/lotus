@@ -106,7 +106,7 @@ public:
     return {fact};
   }
 
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const IFDSTestFact &exit_fact,
                       const IFDSTestFact &call_fact) override {
     (void)call;
@@ -118,7 +118,7 @@ public:
   }
 
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const IFDSTestFact &fact) override {
+                              const llvm::Instruction *return_site, const IFDSTestFact &fact) override {
     (void)call;
     if (fact.is_zero())
       return {fact};

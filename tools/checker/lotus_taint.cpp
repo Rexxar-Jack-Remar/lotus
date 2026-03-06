@@ -242,7 +242,9 @@ int main(int argc, char **argv) {
 
       // Enable progress bar when running in verbose mode
       if (Verbose) {
-        solver.set_show_progress(true);
+        auto config = solver.get_solver_config();
+        config.set_enable_progress_reporting(true);
+        solver.set_solver_config(config);
       }
 
       solver.solve(*M);

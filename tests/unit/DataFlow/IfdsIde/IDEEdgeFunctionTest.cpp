@@ -22,12 +22,14 @@ public:
     return {fact};
   }
   FactSet return_flow(const llvm::CallBase* /*call*/,
+                      const llvm::Instruction* /*return_site*/,
                       const llvm::Function* /*callee*/,
                       const Fact& exit_fact,
                       const Fact& /*call_fact*/) override {
     return {exit_fact};
   }
   FactSet call_to_return_flow(const llvm::CallBase* /*call*/,
+                              const llvm::Instruction* /*return_site*/,
                               const Fact& fact) override {
     return {fact};
   }
@@ -48,11 +50,13 @@ public:
     return identity();
   }
   EdgeFunction return_edge_function(const llvm::CallBase* /*call*/,
+                                    const llvm::Instruction* /*return_site*/,
                                     const Fact& /*exit_fact*/,
                                     const Fact& /*ret_fact*/) override {
     return identity();
   }
   EdgeFunction call_to_return_edge_function(const llvm::CallBase* /*call*/,
+                                            const llvm::Instruction* /*return_site*/,
                                             const Fact& /*src_fact*/,
                                             const Fact& /*tgt_fact*/) override {
     return identity();
@@ -98,4 +102,3 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
-

@@ -71,7 +71,14 @@ public:
 
   std::vector<const llvm::Instruction *>
   get_return_sites(const llvm::CallBase *call) const {
-    if (!call || !m_icfg) {
+    if (!call) {
+      return {};
+    }
+    auto it = m_successors.find(call);
+    if (it != m_successors.end()) {
+      return it->second;
+    }
+    if (!m_icfg) {
       return {};
     }
     std::vector<const llvm::Instruction *> out;
@@ -149,4 +156,3 @@ private:
 };
 
 } // namespace ifds
-

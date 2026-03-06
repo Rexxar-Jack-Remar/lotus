@@ -18,10 +18,11 @@ using namespace llvm;
 using wpds::DataFlowFacts;
 using wpds::GenKillTransformer;
 using wpds::InterProceduralDataFlowEngine;
+using wpds::MemoryObjectFact;
 
-// Taint analysis tracks which values are tainted (derived from untrusted
-// sources) GEN: values that become tainted KILL: values that are sanitized
-// FLOW: propagation of taint (e.g., y = x + 1 => x flows to y)
+// Taint analysis tracks which SSA values may be tainted. This is a coarse
+// demonstration over Value* facts: external calls are approximated
+// conservatively and memory/aliasing updates are not modeled precisely.
 
 static bool isTaintSource(Instruction *I) {
   if (auto *CI = dyn_cast<CallBase>(I)) {
@@ -79,6 +80,9 @@ static GenKillTransformer *createTaintTransformer(Instruction *I) {
       Value *V = U.get();
       if (isa<Instruction>(V) || isa<Argument>(V)) {
         killSet.insert(V);
+        if (V->getType()->isPointerTy()) {
+          MemoryObjectFact::addRepresentativeFact(killSet, V);
+        }
       }
     }
   }
@@ -95,15 +99,12 @@ static GenKillTransformer *createTaintTransformer(Instruction *I) {
 
   if (auto *SI = dyn_cast<StoreInst>(I)) {
     // store val, ptr
-    // val flows to ptr (taint memory location)
+    // val flows to the canonical memory object
     Value *val = SI->getValueOperand();
-    Value *ptr = SI->getPointerOperand();
-    addFlow(val, ptr);
+    MemoryObjectFact::addFlow(flowMap, val, SI->getPointerOperand());
   } else if (auto *LI = dyn_cast<LoadInst>(I)) {
-    // val = load ptr
-    // ptr flows to val (tainted memory yields tainted value)
-    Value *ptr = LI->getPointerOperand();
-    addFlow(ptr, I);
+    // val = load ptr; the canonical memory object flows to val.
+    MemoryObjectFact::addFlow(flowMap, LI->getPointerOperand(), I);
   } else if (auto *PHI = dyn_cast<PHINode>(I)) {
     // phi(v1, v2)
     // v1 -> phi, v2 -> phi
@@ -118,9 +119,8 @@ static GenKillTransformer *createTaintTransformer(Instruction *I) {
   } else if (auto *CI = dyn_cast<CastInst>(I)) {
     addFlow(CI->getOperand(0), I);
   } else if (auto *GEPI = dyn_cast<GetElementPtrInst>(I)) {
-    // gep(ptr, ...)
-    // ptr -> gep
     addFlow(GEPI->getPointerOperand(), I);
+    MemoryObjectFact::addFlow(flowMap, GEPI->getPointerOperand(), I);
   } else if (auto *SI = dyn_cast<SelectInst>(I)) {
     // select(c, v1, v2)
     // v1 -> res, v2 -> res. (ignoring cond taint for now)
@@ -130,10 +130,9 @@ static GenKillTransformer *createTaintTransformer(Instruction *I) {
     // Handle intrinsic calls like memcpy?
     if (auto *MI = dyn_cast<MemCpyInst>(I)) {
       // memcpy(dest, src, len)
-      // src -> dest
-      addFlow(MI->getSource(), MI->getDest());
+      MemoryObjectFact::addFlow(flowMap, MI->getSource(), MI->getDest());
     } else if (auto *MMI = dyn_cast<MemMoveInst>(I)) {
-      addFlow(MMI->getSource(), MMI->getDest());
+      MemoryObjectFact::addFlow(flowMap, MMI->getSource(), MMI->getDest());
     }
   }
 

@@ -42,7 +42,8 @@ public:
 
   // B6 Fix: the original comparisons were all `RHS.field < this->field`,
   // producing a descending order instead of the ascending order required by
-  // std::set and other sorted containers.  Corrected to `this->field < RHS.field`.
+  // std::set and other sorted containers.  Corrected to `this->field <
+  // RHS.field`.
   bool operator<(const AndersConstraint &RHS) const {
     if (type != RHS.type)
       return type < RHS.type;

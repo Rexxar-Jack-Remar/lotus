@@ -58,7 +58,7 @@ IDEFeatureTaintAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 IDEFeatureTaintAnalysis::FactSet IDEFeatureTaintAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
     const Fact &exit_fact, const Fact &call_fact) {
   FactSet out;
   if (!call) {
@@ -86,7 +86,7 @@ IDEFeatureTaintAnalysis::FactSet IDEFeatureTaintAnalysis::return_flow(
 
 IDEFeatureTaintAnalysis::FactSet
 IDEFeatureTaintAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                             const Fact &fact) {
+                                             const llvm::Instruction *return_site, const Fact &fact) {
   FactSet out;
   out.insert(fact);
   if (call && !call->getType()->isVoidTy()) {
@@ -138,14 +138,14 @@ IDEFeatureTaintAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
 
 IDEFeatureTaintAnalysis::EdgeFunction
 IDEFeatureTaintAnalysis::return_edge_function(const llvm::CallBase * /*call*/,
-                                              const Fact & /*exit_fact*/,
+                                              const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
                                               const Fact & /*ret_fact*/) {
   return [](const Value &v) { return v; };
 }
 
 IDEFeatureTaintAnalysis::EdgeFunction
 IDEFeatureTaintAnalysis::call_to_return_edge_function(
-    const llvm::CallBase * /*call*/, const Fact & /*src_fact*/,
+    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site, const Fact & /*src_fact*/,
     const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }

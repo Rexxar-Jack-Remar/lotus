@@ -4,7 +4,8 @@
  *
  * This file implements the constraint collection phase that scans the program
  * and generates pointer constraints. It processes global variables, functions,
- * and instructions to build the constraint set that will be solved in later phases.
+ * and instructions to build the constraint set that will be solved in later
+ * phases.
  *
  * FIXME: The analysis does not use on-the-fly callgraph construction, but uses
  * a lightweight address-taken analysis to get the callee list. See the
@@ -232,8 +233,8 @@ void Andersen::addGlobalInitializerConstraints(NodeIndex objNode,
     // null object node individually.  For non-pointer element types the
     // recursive call is a no-op (isSingleValueType() && !isPointerTy()).
     for (unsigned i = 0, e = c->getNumOperands(); i != e; ++i)
-      addGlobalInitializerConstraints(objNode,
-                                      cast<Constant>(c->getOperand(i)), ctx);
+      addGlobalInitializerConstraints(objNode, cast<Constant>(c->getOperand(i)),
+                                      ctx);
   } else if (c->isNullValue()) {
     // Scalar null pointer.
     constraints.emplace_back(AndersConstraint::COPY, objNode,
@@ -255,7 +256,8 @@ void Andersen::addGlobalInitializerConstraints(NodeIndex objNode,
  * @brief Collect constraints for a single instruction.
  *
  * Dispatches to instruction-specific constraint collectors based on opcode.
- * Handles Alloca, Load, Store, GEP, BitCast, PHI, Select, and Call instructions.
+ * Handles Alloca, Load, Store, GEP, BitCast, PHI, Select, and Call
+ * instructions.
  *
  * @param inst The instruction to process
  * @param ctx The context key for this instruction
@@ -665,7 +667,8 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
     auto isTypeCompatible = [&](const Function &f) -> bool {
       // Derive the function type from the call-site's called operand.
       // In LLVM 14 opaque-pointer mode, CallBase::getFunctionType() gives the
-      // statically-known callee type directly without needing getPointerElementType().
+      // statically-known callee type directly without needing
+      // getPointerElementType().
       FunctionType *callSiteFTy = cs->getFunctionType();
       if (!callSiteFTy)
         return true; // Cannot determine type; be conservative.
@@ -674,16 +677,16 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
 
       // Return type compatibility: both pointer or both non-pointer.
       bool csRetIsPtr = callSiteFTy->getReturnType()->isPointerTy();
-      bool fRetIsPtr  = calleeFTy->getReturnType()->isPointerTy();
+      bool fRetIsPtr = calleeFTy->getReturnType()->isPointerTy();
       if (csRetIsPtr != fRetIsPtr)
         return false;
 
       // Argument type compatibility (for fixed args).
-      unsigned numFixed = std::min(callSiteFTy->getNumParams(),
-                                   calleeFTy->getNumParams());
+      unsigned numFixed =
+          std::min(callSiteFTy->getNumParams(), calleeFTy->getNumParams());
       for (unsigned i = 0; i < numFixed; ++i) {
         bool csArgIsPtr = callSiteFTy->getParamType(i)->isPointerTy();
-        bool fArgIsPtr  = calleeFTy->getParamType(i)->isPointerTy();
+        bool fArgIsPtr = calleeFTy->getParamType(i)->isPointerTy();
         if (csArgIsPtr != fArgIsPtr)
           return false;
       }

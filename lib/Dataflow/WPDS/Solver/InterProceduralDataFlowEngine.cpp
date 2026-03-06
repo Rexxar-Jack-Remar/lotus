@@ -57,6 +57,15 @@ static void filterFactsToInstructionScope(Instruction *inst,
 InterProceduralDataFlowEngine::InterProceduralDataFlowEngine()
     : controlState(str2key("q")) {}
 
+void InterProceduralDataFlowEngine::setCalleeResolver(CalleeResolver resolver) {
+  calleeResolver = std::move(resolver);
+}
+
+void InterProceduralDataFlowEngine::setExternalCallPolicy(
+    ExternalCallPolicy policy) {
+  externalCallPolicy = std::move(policy);
+}
+
 std::unique_ptr<mono::DataFlowResult>
 InterProceduralDataFlowEngine::runForwardAnalysis(
     Module &m,
@@ -88,11 +97,35 @@ InterProceduralDataFlowEngine::runForwardAnalysisWithAutomaton(
 }
 
 std::unique_ptr<mono::DataFlowResult>
+InterProceduralDataFlowEngine::runForwardAnalysisFromEntries(
+    Module &m,
+    const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
+    const std::vector<Function *> &entryFunctions,
+    const std::set<Value *> &initialFacts) {
+  return runForwardAnalysisWithAutomaton(
+      m, createTransformer, [&](CA<GenKillTransformer> &ca) {
+        buildSeedAutomatonForFunctions(ca, entryFunctions, initialFacts, false);
+      });
+}
+
+std::unique_ptr<mono::DataFlowResult>
 InterProceduralDataFlowEngine::runBackwardAnalysisWithAutomaton(
     Module &m,
     const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
     const AutomatonBuilder &buildInitialCA) {
   return runAnalysisWithAutomaton(m, createTransformer, buildInitialCA, false);
+}
+
+std::unique_ptr<mono::DataFlowResult>
+InterProceduralDataFlowEngine::runBackwardAnalysisFromExits(
+    Module &m,
+    const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
+    const std::vector<Function *> &exitFunctions,
+    const std::set<Value *> &initialFacts) {
+  return runBackwardAnalysisWithAutomaton(
+      m, createTransformer, [&](CA<GenKillTransformer> &ca) {
+        buildSeedAutomatonForFunctions(ca, exitFunctions, initialFacts, true);
+      });
 }
 
 std::unique_ptr<mono::DataFlowResult>
@@ -131,7 +164,7 @@ InterProceduralDataFlowEngine::runAnalysisWithAutomaton(
   lastResultCA = std::make_unique<CA<GenKillTransformer>>(resultCA);
   lastQuery = isForward ? Query::poststar() : Query::prestar();
 
-  return std::move(currentResult);
+  return std::make_unique<mono::DataFlowResult>(*currentResult);
 }
 
 const std::set<Value *> &
@@ -152,12 +185,61 @@ InterProceduralDataFlowEngine::getOutSet(Instruction *inst) const {
   return currentResult->OUT(inst);
 }
 
+std::set<Value *>
+InterProceduralDataFlowEngine::queryFactsBeforeInstruction(
+    Instruction *inst) const {
+  return queryFactsAtSymbol(getProgramPointKeyBeforeInstruction(inst));
+}
+
+std::set<Value *>
+InterProceduralDataFlowEngine::queryFactsAfterInstruction(
+    Instruction *inst) const {
+  return queryFactsAtSymbol(getProgramPointKeyAfterInstruction(inst));
+}
+
+::ref_ptr<GenKillTransformer>
+InterProceduralDataFlowEngine::querySummaryBeforeInstruction(
+    Instruction *inst) const {
+  return querySummaryAtSymbol(getProgramPointKeyBeforeInstruction(inst));
+}
+
+::ref_ptr<GenKillTransformer>
+InterProceduralDataFlowEngine::querySummaryAfterInstruction(
+    Instruction *inst) const {
+  return querySummaryAtSymbol(getProgramPointKeyAfterInstruction(inst));
+}
+
+wpds::wpds_key_t
+InterProceduralDataFlowEngine::getProgramPointKeyBeforeInstruction(
+    Instruction *inst) const {
+  auto it = instPrevKey.find(inst);
+  return it != instPrevKey.end() ? it->second : WPDS_EPSILON;
+}
+
+wpds::wpds_key_t
+InterProceduralDataFlowEngine::getProgramPointKeyAfterInstruction(
+    Instruction *inst) const {
+  auto it = instToKey.find(inst);
+  return it != instToKey.end() ? it->second : WPDS_EPSILON;
+}
+
 void InterProceduralDataFlowEngine::buildWPDS(
     Module &m, WPDS<GenKillTransformer> &wpds,
     const std::function<GenKillTransformer *(Instruction *)>
         &createTransformer) {
   ::dataflow::controlflow::LLVMIntraCFG intraCfg;
-  ::dataflow::controlflow::LLVMInterCFG interCfg(&m);
+  std::unique_ptr<::dataflow::controlflow::LLVMInterCFG> interCfgStorage;
+  if (calleeResolver) {
+    interCfgStorage = std::make_unique<::dataflow::controlflow::LLVMInterCFG>(
+        &m, [this](Instruction *inst) -> std::vector<Function *> {
+          auto *call = dyn_cast<CallBase>(inst);
+          return call ? calleeResolver(call) : std::vector<Function *>{};
+        });
+  } else {
+    interCfgStorage =
+        std::make_unique<::dataflow::controlflow::LLVMInterCFG>(&m);
+  }
+  auto &interCfg = *interCfgStorage;
 
   // Clear previous mappings
   functionToKey.clear();
@@ -165,7 +247,10 @@ void InterProceduralDataFlowEngine::buildWPDS(
   instToKey.clear();
   instPrevKey.clear();
   bbToKey.clear();
+  callReturnToKey.clear();
   keyToInst.clear();
+  localGenByInst.clear();
+  localKillByInst.clear();
 
   auto functionTag = [&](Function &F) -> std::string {
     std::string fname = F.getName().str();
@@ -262,6 +347,8 @@ void InterProceduralDataFlowEngine::buildWPDS(
         if (!transformer) {
           transformer = GenKillTransformer::one();
         }
+        localGenByInst[&I] = transformer->getGen().getFacts();
+        localKillByInst[&I] = transformer->getKill().getFacts();
 
         // If we're returning from a callsite, compose return-flow before this
         // instruction.
@@ -276,7 +363,12 @@ void InterProceduralDataFlowEngine::buildWPDS(
 
         // Handle different instruction types
         if (auto *callInst = dyn_cast<CallBase>(&I)) {
-          const auto callees = interCfg.getCalleesOfCallAt(callInst);
+          std::vector<Function *> callees;
+          if (calleeResolver) {
+            callees = calleeResolver(callInst);
+          } else {
+            callees = interCfg.getCalleesOfCallAt(callInst);
+          }
 
           bool hasModeledCallee = false;
           bool hasUnmodeledCallee = callees.empty();
@@ -290,6 +382,7 @@ void InterProceduralDataFlowEngine::buildWPDS(
             }
             wpds_key_t rk = new_str2key(retTag(F, I).c_str());
             returnKeyOpt = rk;
+            callReturnToKey[callInst] = rk;
             return rk;
           };
 
@@ -371,7 +464,7 @@ void InterProceduralDataFlowEngine::buildWPDS(
             wpds_key_t returnKey = getReturnKey();
             if (hasUnmodeledCallee) {
               wpds.add_rule(controlState, instKey, controlState, returnKey,
-                            GenKillTransformer::one());
+                            buildUnknownCallSummary(callInst, m));
             }
 
             // For terminator calls (e.g., invoke/callbr), connect return-site
@@ -403,21 +496,30 @@ void InterProceduralDataFlowEngine::buildWPDS(
             continue;
           }
 
-          // No modeled callee: still handle terminator-call CFG edges
-          // (invoke/callbr).
-          if (I.isTerminator()) {
-            for (auto *retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
-              if (retSite == nullptr) {
-                continue;
+          // No modeled callee: use a synthetic return-site symbol so the
+          // external-call summary is applied exactly once before continuing.
+          if (hasUnmodeledCallee) {
+            wpds_key_t returnKey = getReturnKey();
+            wpds.add_rule(controlState, instKey, controlState, returnKey,
+                          buildUnknownCallSummary(callInst, m));
+
+            if (I.isTerminator()) {
+              for (auto *retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
+                if (retSite == nullptr) {
+                  continue;
+                }
+                auto *retBB = retSite->getParent();
+                auto bbIt = bbToKey.find(retBB);
+                if (bbIt == bbToKey.end()) {
+                  continue;
+                }
+                wpds.add_rule(controlState, returnKey, controlState,
+                              bbIt->second, GenKillTransformer::one());
               }
-              auto *retBB = retSite->getParent();
-              auto bbIt = bbToKey.find(retBB);
-              if (bbIt == bbToKey.end()) {
-                continue;
-              }
-              wpds.add_rule(controlState, instKey, controlState, bbIt->second,
-                            GenKillTransformer::one());
             }
+
+            prevKey = returnKey;
+            continue;
           }
         }
 
@@ -501,6 +603,31 @@ void InterProceduralDataFlowEngine::buildInitialAutomaton(
   }
 }
 
+void InterProceduralDataFlowEngine::buildSeedAutomatonForFunctions(
+    CA<GenKillTransformer> &ca, const std::vector<Function *> &functions,
+    const std::set<Value *> &initialFacts, bool useExitPoints) {
+  wpds_key_t acceptState = str2key("accept");
+  lastAcceptState = acceptState;
+
+  ca.add_initial_state(controlState);
+  ca.add_final_state(acceptState);
+
+  GenKillTransformer *initTrans = GenKillTransformer::makeGenKillTransformer(
+      DataFlowFacts::EmptySet(), DataFlowFacts(initialFacts));
+
+  for (Function *function : functions) {
+    if (function == nullptr) {
+      continue;
+    }
+    auto &keyMap = useExitPoints ? functionExitToKey : functionToKey;
+    auto it = keyMap.find(function);
+    if (it == keyMap.end()) {
+      continue;
+    }
+    ca.add(controlState, it->second, acceptState, initTrans);
+  }
+}
+
 wpds_key_t InterProceduralDataFlowEngine::getKeyForFunction(Function *f) {
   auto it = functionToKey.find(f);
   if (it != functionToKey.end()) {
@@ -528,20 +655,16 @@ wpds_key_t InterProceduralDataFlowEngine::getKeyForBasicBlock(BasicBlock *bb) {
 
 wpds_key_t
 InterProceduralDataFlowEngine::getKeyForCallSite(CallBase *callInst) {
-  std::string instName = callInst->getName().str();
-  if (instName.empty()) {
-    instName = "inst_" + std::to_string((uintptr_t)callInst);
-  }
-  return str2key(("callsite_" + instName).c_str());
+  return getKeyForInstruction(callInst);
 }
 
 wpds_key_t
 InterProceduralDataFlowEngine::getKeyForReturnSite(CallBase *callInst) {
-  std::string instName = callInst->getName().str();
-  if (instName.empty()) {
-    instName = "inst_" + std::to_string((uintptr_t)callInst);
+  auto it = callReturnToKey.find(callInst);
+  if (it != callReturnToKey.end()) {
+    return it->second;
   }
-  return str2key(("ret_" + instName).c_str());
+  return WPDS_EPSILON;
 }
 
 void InterProceduralDataFlowEngine::extractResults(
@@ -618,14 +741,14 @@ void InterProceduralDataFlowEngine::extractResults(
       filterFactsToInstructionScope(inst, result->IN(inst));
     }
 
-    // Also retain the path summary’s gen/kill as a debugging view.
-    const auto &dbg = querySymbol(instKey, /*wantGenKill=*/true);
-    if (dbg.gen.hasValue()) {
-      result->GEN(inst) = *dbg.gen;
+    auto genIt = localGenByInst.find(inst);
+    if (genIt != localGenByInst.end()) {
+      result->GEN(inst) = genIt->second;
       filterFactsToInstructionScope(inst, result->GEN(inst));
     }
-    if (dbg.kill.hasValue()) {
-      result->KILL(inst) = *dbg.kill;
+    auto killIt = localKillByInst.find(inst);
+    if (killIt != localKillByInst.end()) {
+      result->KILL(inst) = killIt->second;
       filterFactsToInstructionScope(inst, result->KILL(inst));
     }
   }
@@ -637,12 +760,83 @@ InterProceduralDataFlowEngine::getLastResultAutomaton() const {
 }
 
 ::ref_ptr<GenKillTransformer>
+InterProceduralDataFlowEngine::querySummaryAtSymbol(wpds::wpds_key_t symbol) const {
+  if (!lastResultCA || symbol == WPDS_EPSILON) {
+    return ::ref_ptr<GenKillTransformer>(GenKillTransformer::zero());
+  }
+
+  wpds_key_t queryInit = lastResultCA->initial_state();
+  if (queryInit == WPDS_EPSILON) {
+    queryInit = controlState;
+  }
+
+  CA<GenKillTransformer> lang(lastResultCA->semiring());
+  wpds_key_t qf =
+      new_str2key(("query_final_" + std::to_string((uintptr_t)symbol)).c_str());
+  lang.add_initial_state(queryInit);
+  lang.add_final_state(qf);
+  lang.add(queryInit, symbol, qf, GenKillTransformer::one());
+  return lastResultCA->reglang_query(lang);
+}
+
+std::set<Value *>
+InterProceduralDataFlowEngine::queryFactsAtSymbol(wpds::wpds_key_t symbol) const {
+  auto summary = querySummaryAtSymbol(symbol);
+  if (!summary.get_ptr() || summary->equal(GenKillTransformer::zero())) {
+    return {};
+  }
+  DataFlowFacts facts = summary->apply(DataFlowFacts::EmptySet());
+  return facts.getFacts();
+}
+
+::ref_ptr<GenKillTransformer>
 InterProceduralDataFlowEngine::queryRegularLanguage(
     const wpds::CA<GenKillTransformer> &lang) const {
   if (!lastResultCA) {
     return ::ref_ptr<GenKillTransformer>(GenKillTransformer::zero());
   }
   return lastResultCA->reglang_query(lang);
+}
+
+GenKillTransformer *InterProceduralDataFlowEngine::buildUnknownCallSummary(
+    CallBase *callInst, Module &m) const {
+  if (callInst == nullptr) {
+    return GenKillTransformer::one();
+  }
+
+  std::vector<Value *> pointerObjects =
+      MemoryObjectFact::pointerArgumentObjects(callInst);
+  std::vector<GlobalValue *> globals = MemoryObjectFact::trackedGlobals(m);
+
+  if (externalCallPolicy.buildSummary) {
+    if (GenKillTransformer *custom =
+            externalCallPolicy.buildSummary(callInst, pointerObjects, globals)) {
+      return custom;
+    }
+  }
+
+  if (!externalCallPolicy.preserveIdentity &&
+      !externalCallPolicy.flowPointerArgumentsToReturn &&
+      !externalCallPolicy.flowGlobalsToReturn) {
+    return GenKillTransformer::zero();
+  }
+
+  std::map<Value *, DataFlowFacts> flow;
+  if (!callInst->getType()->isVoidTy()) {
+    if (externalCallPolicy.flowPointerArgumentsToReturn) {
+      for (Value *object : pointerObjects) {
+        MemoryObjectFact::addFlow(flow, object, callInst);
+      }
+    }
+    if (externalCallPolicy.flowGlobalsToReturn) {
+      for (GlobalValue *global : globals) {
+        MemoryObjectFact::addFlow(flow, global, callInst);
+      }
+    }
+  }
+
+  return GenKillTransformer::makeGenKillTransformer(
+      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(), flow);
 }
 
 #ifdef WITNESS_TRACE

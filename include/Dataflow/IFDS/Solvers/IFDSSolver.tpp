@@ -155,16 +155,23 @@ void IFDSSolver<Problem>::process_normal_edge(const PathEdgeType& current_edge,
     // We cache the flow-function result (which is successor-independent) but
     // always propagate to the correct `next` instruction.
     NormalFlowKey nkey{current_edge.target_node, current_edge.target_fact};
-    auto cit = m_normal_flow_cache.find(nkey);
     FactSet new_facts;
-    if (cit != m_normal_flow_cache.end()) {
-        new_facts = cit->second;
+    if (m_config.enable_flow_function_caching()) {
+        auto cit = m_normal_flow_cache.find(nkey);
+        if (cit != m_normal_flow_cache.end()) {
+            new_facts = cit->second;
+        } else {
+            new_facts = m_problem.normal_flow(current_edge.target_node, current_edge.target_fact);
+            if (m_problem.auto_add_zero() && m_problem.is_zero_fact(current_edge.target_fact)) {
+                new_facts.insert(m_problem.zero_fact());
+            }
+            m_normal_flow_cache[nkey] = new_facts;
+        }
     } else {
         new_facts = m_problem.normal_flow(current_edge.target_node, current_edge.target_fact);
         if (m_problem.auto_add_zero() && m_problem.is_zero_fact(current_edge.target_fact)) {
             new_facts.insert(m_problem.zero_fact());
         }
-        m_normal_flow_cache[nkey] = new_facts;
     }
 
     // Record exit facts for the current instruction (union over all successors).
@@ -174,6 +181,8 @@ void IFDSSolver<Problem>::process_normal_edge(const PathEdgeType& current_edge,
     }
 
     for (const auto& new_fact : new_facts) {
+        on_normal_transition(Node(current_edge.target_node, current_edge.target_fact),
+                             Node(next, new_fact));
         propagate_path_edge(PathEdgeType(current_edge.start_node, current_edge.start_fact,
                                          next, new_fact));
     }
@@ -215,6 +224,8 @@ void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
             info_vec.push_back(edge_info);
         }
 
+        on_call_transition(Node(call, current_edge.target_fact),
+                           Node(callee_entry, entry_fact));
         // Propagate into callee
         propagate_path_edge(PathEdgeType(callee_entry, entry_fact, callee_entry, entry_fact));
 
@@ -222,13 +233,20 @@ void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
         // This handles the case where the callee was already analyzed
         auto summary_it = m_summaries.find({callee, entry_fact});
         if (summary_it != m_summaries.end()) {
-            for (const Fact& return_fact : summary_it->second) {
-                FactSet return_facts = m_problem.return_flow(call, callee, return_fact, entry_fact);
-                if (m_problem.auto_add_zero() && m_problem.is_zero_fact(return_fact)) {
-                    return_facts.insert(m_problem.zero_fact());
-                }
+            for (const ExitSummary& summary : summary_it->second) {
                 for (const llvm::Instruction* return_site : get_return_sites(call)) {
+                    FactSet return_facts = m_problem.return_flow(
+                        call, return_site, callee, summary.exit_fact,
+                        current_edge.target_fact);
+                    if (m_problem.auto_add_zero() &&
+                        m_problem.is_zero_fact(summary.exit_fact)) {
+                        return_facts.insert(m_problem.zero_fact());
+                    }
                     for (const auto& rf : return_facts) {
+                        on_summary_transition(Node(call, current_edge.target_fact),
+                                              Node(return_site, rf));
+                        on_return_transition(Node(summary.exit_inst, summary.exit_fact),
+                                             Node(return_site, rf));
                         propagate_path_edge(PathEdgeType(current_edge.start_node, current_edge.start_fact,
                                                          return_site, rf));
                     }
@@ -253,7 +271,7 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
     // Create the summary for this (callee, entry_fact) combination
     SummaryKey summary_key{func, start_fact};
     auto& return_facts_set = m_summaries[summary_key];
-    return_facts_set.insert(exit_fact);
+    return_facts_set.insert(ExitSummary{ret, exit_fact});
 
     // Look up the call edge info to restore caller context (may have multiple call sites)
     auto call_edge_it = m_call_edge_info.find({func, start_fact});
@@ -267,20 +285,26 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
             // callee's entry fact instead of the caller's context fact, which
             // breaks analyses that use call_fact to decide what to propagate
             // back (e.g. taint analysis killing non-tainted return paths).
-            FactSet return_facts = m_problem.return_flow(edge_info.call_node, func, exit_fact, edge_info.call_fact);
-            if (m_problem.auto_add_zero() && m_problem.is_zero_fact(exit_fact)) {
-                return_facts.insert(m_problem.zero_fact());
-            }
-
             // SummaryEdge records (call_site, caller_fact_at_call, callee_exit_fact).
             // Use edge_info.call_fact (the caller's fact at the call site) rather
             // than start_fact (the callee's entry fact) so that the summary edge
             // correctly reflects the caller's context.
-            SummaryEdgeType new_summary(edge_info.call_node, edge_info.call_fact, exit_fact);
-            m_state.add_summary_edge(new_summary);
-
             for (const llvm::Instruction* return_site : get_return_sites(edge_info.call_node)) {
+                SummaryEdgeType new_summary(edge_info.call_node, return_site,
+                                            edge_info.call_fact, exit_fact);
+                m_state.add_summary_edge(new_summary);
+                FactSet return_facts = m_problem.return_flow(
+                    edge_info.call_node, return_site, func, exit_fact,
+                    edge_info.call_fact);
+                if (m_problem.auto_add_zero() &&
+                    m_problem.is_zero_fact(exit_fact)) {
+                    return_facts.insert(m_problem.zero_fact());
+                }
                 for (const Fact& return_fact : return_facts) {
+                    on_summary_transition(Node(edge_info.call_node, edge_info.call_fact),
+                                          Node(return_site, return_fact));
+                    on_return_transition(Node(ret, exit_fact),
+                                         Node(return_site, return_fact));
                     propagate_path_edge(PathEdgeType(edge_info.source_node, edge_info.source_fact,
                                                     return_site, return_fact));
                 }
@@ -311,18 +335,19 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
         callee_calls_it != m_graph_context.callee_to_calls().end()) {
         Fact zero = m_problem.zero_fact();
         for (const llvm::CallBase* call : callee_calls_it->second) {
-            FactSet return_facts = m_problem.return_flow(call, func, exit_fact, zero);
-            if (m_problem.auto_add_zero()) {
-                return_facts.insert(zero);
-            }
             for (const llvm::Instruction* return_site : get_return_sites(call)) {
+                FactSet return_facts =
+                    m_problem.return_flow(call, return_site, func, exit_fact, zero);
+                if (m_problem.auto_add_zero()) {
+                    return_facts.insert(zero);
+                }
                 for (const Fact& rf : return_facts) {
                     // Use the call instruction as the start node (not the
                     // return site) so the path edge spans from the call to
                     // the return site, matching the caller's CFG structure.
                     // This avoids the spurious self-loop that was here before.
-                    propagate_path_edge(
-                        PathEdgeType(call, zero, return_site, rf));
+                    on_return_transition(Node(ret, exit_fact), Node(return_site, rf));
+                    propagate_path_edge(PathEdgeType(call, zero, return_site, rf));
                 }
             }
         }
@@ -332,27 +357,39 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
 template<typename Problem>
 void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& current_edge,
                                                       const llvm::CallBase* call) {
-    CallToReturnFlowKey ckey{call, current_edge.target_fact};
-    auto cit = m_call_to_return_flow_cache.find(ckey);
-    FactSet ctr_facts;
-    if (cit != m_call_to_return_flow_cache.end()) {
-        ctr_facts = cit->second;
-    } else {
-        ctr_facts = m_problem.call_to_return_flow(call, current_edge.target_fact);
-        if (m_problem.auto_add_zero() && m_problem.is_zero_fact(current_edge.target_fact)) {
-            ctr_facts.insert(m_problem.zero_fact());
-        }
-        m_call_to_return_flow_cache[ckey] = ctr_facts;
-    }
-
-    // Record exit facts for the call instruction (call-to-return flow).
-    if (!ctr_facts.empty()) {
-        auto& exit_facts = m_exit_facts[call];
-        exit_facts.insert(ctr_facts.begin(), ctr_facts.end());
-    }
-
     for (const llvm::Instruction* return_site : get_return_sites(call)) {
+        CallToReturnFlowKey ckey{call, return_site, current_edge.target_fact};
+        FactSet ctr_facts;
+        if (m_config.enable_flow_function_caching()) {
+            auto cit = m_call_to_return_flow_cache.find(ckey);
+            if (cit != m_call_to_return_flow_cache.end()) {
+                ctr_facts = cit->second;
+            } else {
+                ctr_facts = m_problem.call_to_return_flow(call, return_site,
+                                                          current_edge.target_fact);
+                if (m_problem.auto_add_zero() &&
+                    m_problem.is_zero_fact(current_edge.target_fact)) {
+                    ctr_facts.insert(m_problem.zero_fact());
+                }
+                m_call_to_return_flow_cache[ckey] = ctr_facts;
+            }
+        } else {
+            ctr_facts = m_problem.call_to_return_flow(call, return_site,
+                                                      current_edge.target_fact);
+            if (m_problem.auto_add_zero() &&
+                m_problem.is_zero_fact(current_edge.target_fact)) {
+                ctr_facts.insert(m_problem.zero_fact());
+            }
+        }
+
+        if (!ctr_facts.empty()) {
+            auto& exit_facts = m_exit_facts[call];
+            exit_facts.insert(ctr_facts.begin(), ctr_facts.end());
+        }
+
         for (const auto& ctr_fact : ctr_facts) {
+            on_call_to_return_transition(Node(call, current_edge.target_fact),
+                                         Node(return_site, ctr_fact));
             propagate_path_edge(PathEdgeType(current_edge.start_node, current_edge.start_fact,
                                              return_site, ctr_fact));
         }
@@ -433,7 +470,7 @@ void IFDSSolver<Problem>::run_tabulation() {
     size_t last_update = 0;
     const size_t update_interval = 100;
 
-    if (m_show_progress) {
+    if (m_config.enable_progress_reporting()) {
         progress = std::make_unique<ProgressBar>(
             "Sequential IFDS Analysis", ProgressBar::PBS_CharacterStyle, 0.01);
         llvm::outs() << "\n";
@@ -472,7 +509,8 @@ void IFDSSolver<Problem>::run_tabulation() {
         processed_edges++;
         m_steps_performed = processed_edges;
 
-        if (m_show_progress && processed_edges - last_update >= update_interval) {
+        if (m_config.enable_progress_reporting() &&
+            processed_edges - last_update >= update_interval) {
             last_update = processed_edges;
             size_t total_path_edges = m_state.path_edges.size();
             size_t worklist_size = m_state.worklist.size();
@@ -484,7 +522,7 @@ void IFDSSolver<Problem>::run_tabulation() {
         }
     }
 
-    if (m_show_progress) {
+    if (m_config.enable_progress_reporting()) {
         llvm::outs() << "\r\033[K";
         progress->showProgress(1.0);
         llvm::outs() << "\nCompleted! Processed " << processed_edges

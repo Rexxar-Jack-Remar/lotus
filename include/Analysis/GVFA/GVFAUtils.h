@@ -1,6 +1,8 @@
 #ifndef ANALYSIS_GVFA_GVFAUTILS_H
 #define ANALYSIS_GVFA_GVFAUTILS_H
 
+#include "Alias/DyckAA/DyckVFG.h"
+
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -8,19 +10,17 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
 
-#include "Alias/DyckAA/DyckVFG.h"
-
 using namespace llvm;
 
 // Hash function for pair<const CallInst *, const Function *>
 namespace std {
-    template<>
-    struct hash<std::pair<const CallInst *, const Function *>> {
-        size_t operator()(const std::pair<const CallInst *, const Function *> &p) const {
-            return std::hash<const CallInst *>()(p.first) ^ 
-                   (std::hash<const Function *>()(p.second) << 1);
-        }
-    };
+template <> struct hash<std::pair<const CallInst *, const Function *>> {
+  size_t
+  operator()(const std::pair<const CallInst *, const Function *> &p) const {
+    return std::hash<const CallInst *>()(p.first) ^
+           (std::hash<const Function *>()(p.second) << 1);
+  }
+};
 } // namespace std
 
 namespace GVFAUtils {
@@ -68,7 +68,7 @@ bool isValueFlowEdge(const Value *From, const Value *To, DyckVFG *VFG);
  * @param CallSiteIndexMap The map maintaining call site IDs
  * @return The unique ID for this call site
  */
-int getCallSiteID(const CallInst *CI, 
+int getCallSiteID(const CallInst *CI,
                   std::unordered_map<const CallInst *, int> &CallSiteIndexMap);
 
 /**
@@ -76,11 +76,14 @@ int getCallSiteID(const CallInst *CI,
  *
  * @param CI The call instruction
  * @param Callee The called function
- * @param CallSiteCalleePairIndexMap The map maintaining call site-callee pair IDs
+ * @param CallSiteCalleePairIndexMap The map maintaining call site-callee pair
+ * IDs
  * @return The unique ID for this call site-callee pair
  */
-int getCallSiteID(const CallInst *CI, const Function *Callee,
-                  std::unordered_map<std::pair<const CallInst *, const Function *>, int> &CallSiteCalleePairIndexMap);
+int getCallSiteID(
+    const CallInst *CI, const Function *Callee,
+    std::unordered_map<std::pair<const CallInst *, const Function *>, int>
+        &CallSiteCalleePairIndexMap);
 
 //===----------------------------------------------------------------------===//
 // Witness Path Extraction Utilities
@@ -88,34 +91,36 @@ int getCallSiteID(const CallInst *CI, const Function *Callee,
 
 /**
  * Extract a witness path from source to target showing key propagation steps.
- * 
- * Returns a vector of key intermediate values (stores, loads, calls, returns, PHIs)
- * that demonstrate how the value flows from source to target.
+ *
+ * Returns a vector of key intermediate values (stores, loads, calls, returns,
+ * PHIs) that demonstrate how the value flows from source to target.
  *
  * @param From The source value
  * @param To The target value
  * @param VFG The Value Flow Graph
  * @return A vector of values representing the witness path
  */
-std::vector<const Value *> getWitnessPath(const Value *From, const Value *To, DyckVFG *VFG);
+std::vector<const Value *> getWitnessPath(const Value *From, const Value *To,
+                                          DyckVFG *VFG);
 
 /**
  * Extract a witness path using detailed reachability information for guidance.
- * 
+ *
  * Uses AllReachabilityMap to only explore values that are known to be reachable
  * from the source, making the search more efficient and accurate.
  *
  * @param From The source value
  * @param To The target value
  * @param VFG The Value Flow Graph
- * @param AllReachabilityMap Map from values to the set of sources that reach them
+ * @param AllReachabilityMap Map from values to the set of sources that reach
+ * them
  * @return A vector of values representing the witness path
  */
 std::vector<const Value *> getWitnessPathGuided(
     const Value *From, const Value *To, DyckVFG *VFG,
-    const std::unordered_map<const Value *, std::unordered_set<const Value *>> &AllReachabilityMap);
+    const std::unordered_map<const Value *, std::unordered_set<const Value *>>
+        &AllReachabilityMap);
 
 } // namespace GVFAUtils
 
 #endif // ANALYSIS_GVFA_GVFAUTILS_H
-

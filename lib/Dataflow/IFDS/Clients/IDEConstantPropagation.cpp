@@ -234,7 +234,7 @@ IDEConstantPropagation::call_flow(const llvm::CallBase *call,
 }
 
 IDEConstantPropagation::FactSet IDEConstantPropagation::return_flow(
-    const llvm::CallBase *call, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
     const Fact &exit_fact, const Fact &call_fact) {
   FactSet out;
   if (!callee || callee->isDeclaration())
@@ -260,7 +260,7 @@ IDEConstantPropagation::FactSet IDEConstantPropagation::return_flow(
 
 IDEConstantPropagation::FactSet
 IDEConstantPropagation::call_to_return_flow(const llvm::CallBase *call,
-                                            const Fact &fact) {
+                                            const llvm::Instruction *return_site, const Fact &fact) {
   FactSet out;
   // conservative: propagate caller facts across unknown call
   if (fact)
@@ -398,7 +398,7 @@ IDEConstantPropagation::EdgeFunction IDEConstantPropagation::call_edge_function(
 
 IDEConstantPropagation::EdgeFunction
 IDEConstantPropagation::return_edge_function(const llvm::CallBase *call,
-                                             const Fact & /*exit_fact*/,
+                                             const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
                                              const Fact &ret_fact) {
   // callee return to caller result
   if (!call->getType()->isVoidTy()) {
@@ -413,7 +413,7 @@ IDEConstantPropagation::return_edge_function(const llvm::CallBase *call,
 
 IDEConstantPropagation::EdgeFunction
 IDEConstantPropagation::call_to_return_edge_function(const llvm::CallBase *call,
-                                                     const Fact &src_fact,
+                                                     const llvm::Instruction *return_site, const Fact &src_fact,
                                                      const Fact &tgt_fact) {
   // unknown function: kill definition of call result => top; keep others
   if (!call->getType()->isVoidTy()) {

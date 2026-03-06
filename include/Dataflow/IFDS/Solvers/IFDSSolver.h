@@ -12,6 +12,7 @@
 #include "Dataflow/IFDS/Core/SolverGraphContext.h"
 #include "Dataflow/IFDS/Core/SolverRunState.h"
 
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -30,6 +31,28 @@ template <typename T, typename U> struct PairHash {
   }
 };
 
+template <typename A, typename B, typename C> struct TripleHash {
+  size_t operator()(const std::tuple<A, B, C> &t) const {
+    size_t h = 14695981039346656037ULL;
+    h ^= std::hash<A>{}(std::get<0>(t));
+    h *= 1099511628211ULL;
+    h ^= std::hash<B>{}(std::get<1>(t));
+    h *= 1099511628211ULL;
+    h ^= std::hash<C>{}(std::get<2>(t));
+    h *= 1099511628211ULL;
+    return h;
+  }
+};
+
+template <typename A, typename B, typename C> struct TripleEq {
+  bool operator()(const std::tuple<A, B, C> &lhs,
+                  const std::tuple<A, B, C> &rhs) const {
+    return std::get<0>(lhs) == std::get<0>(rhs) &&
+           std::get<1>(lhs) == std::get<1>(rhs) &&
+           std::get<2>(lhs) == std::get<2>(rhs);
+  }
+};
+
 // ============================================================================
 // IFDS Solver (Sequential)
 // ============================================================================
@@ -44,9 +67,6 @@ public:
   IFDSSolver(Problem &problem);
 
   void solve(const llvm::Module &module);
-
-  // Enable/disable progress bar display during analysis
-  void set_show_progress(bool show) { m_show_progress = show; }
 
   // Solver configuration (return sites, unbalanced returns, etc.)
   void set_solver_config(IFDSIDESolverConfig config) {
@@ -89,9 +109,26 @@ public:
 private:
   using PathEdgeType = PathEdge<Fact>;
   using SummaryEdgeType = SummaryEdge<Fact>;
+  struct ExitSummary {
+    const llvm::Instruction *exit_inst;
+    Fact exit_fact;
+
+    bool operator==(const ExitSummary &other) const {
+      return exit_inst == other.exit_inst && exit_fact == other.exit_fact;
+    }
+  };
+  struct ExitSummaryHash {
+    size_t operator()(const ExitSummary &s) const {
+      size_t h = 14695981039346656037ULL;
+      h ^= std::hash<const llvm::Instruction *>{}(s.exit_inst);
+      h *= 1099511628211ULL;
+      h ^= std::hash<Fact>{}(s.exit_fact);
+      h *= 1099511628211ULL;
+      return h;
+    }
+  };
 
   Problem &m_problem;
-  bool m_show_progress = false;
   IFDSIDESolverConfig m_config;
 
   // Bounded solver state (0 = unbounded)
@@ -104,9 +141,7 @@ private:
   std::unordered_map<const llvm::Instruction *, FactSet> m_entry_facts;
   std::unordered_map<const llvm::Instruction *, FactSet> m_exit_facts;
 
-  // Summary edges: keyed by (callee, entry_fact) -> set of return_fact.
-  // Use unordered_set<Fact> for O(1) average insertion/lookup instead of
-  // O(log n) with std::set.  Requires std::hash<Fact> to be defined.
+  // Summary edges: keyed by (callee, entry_fact) -> set of (exit inst, exit fact).
   using SummaryKey = std::pair<const llvm::Function *, Fact>;
   struct SummaryKeyHash {
     size_t operator()(const SummaryKey &k) const {
@@ -119,7 +154,8 @@ private:
       return h;
     }
   };
-  std::unordered_map<SummaryKey, std::unordered_set<Fact>, SummaryKeyHash>
+  std::unordered_map<SummaryKey, std::unordered_set<ExitSummary, ExitSummaryHash>,
+                     SummaryKeyHash>
       m_summaries;
 
   // Track entry facts used when entering each callee: (call, entry_fact) ->
@@ -189,12 +225,15 @@ private:
 
   // Flow function result caches (key -> FactSet) to avoid recomputation
   using NormalFlowKey = std::pair<const llvm::Instruction *, Fact>;
-  using CallToReturnFlowKey = std::pair<const llvm::CallBase *, Fact>;
+  using CallToReturnFlowKey =
+      std::tuple<const llvm::CallBase *, const llvm::Instruction *, Fact>;
   std::unordered_map<NormalFlowKey, FactSet,
                      PairHash<const llvm::Instruction *, Fact>>
       m_normal_flow_cache;
-  std::unordered_map<CallToReturnFlowKey, FactSet,
-                     PairHash<const llvm::CallBase *, Fact>>
+  std::unordered_map<
+      CallToReturnFlowKey, FactSet,
+      TripleHash<const llvm::CallBase *, const llvm::Instruction *, Fact>,
+      TripleEq<const llvm::CallBase *, const llvm::Instruction *, Fact>>
       m_call_to_return_flow_cache;
 
   SolverGraphContext<Fact, Problem> m_graph_context;
@@ -225,6 +264,29 @@ private:
   void run_tabulation();
 
   const llvm::Function *get_main_function(const llvm::Module &module);
+
+protected:
+  virtual void on_normal_transition(const Node &source, const Node &target) {
+    (void)source;
+    (void)target;
+  }
+  virtual void on_call_transition(const Node &source, const Node &target) {
+    (void)source;
+    (void)target;
+  }
+  virtual void on_return_transition(const Node &source, const Node &target) {
+    (void)source;
+    (void)target;
+  }
+  virtual void on_call_to_return_transition(const Node &source,
+                                            const Node &target) {
+    (void)source;
+    (void)target;
+  }
+  virtual void on_summary_transition(const Node &source, const Node &target) {
+    (void)source;
+    (void)target;
+  }
 };
 
 } // namespace ifds

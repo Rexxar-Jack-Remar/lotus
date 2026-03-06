@@ -120,11 +120,11 @@ public:
                       const UninitVarFact &fact) override;
   FactSet call_flow(const llvm::CallBase *call, const llvm::Function *callee,
                     const UninitVarFact &fact) override;
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const UninitVarFact &exit_fact,
                       const UninitVarFact &call_fact) override;
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const UninitVarFact &fact) override;
+                              const llvm::Instruction *return_site, const UninitVarFact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 
   // Source detection - uninitialized variable uses are "sources" of bugs

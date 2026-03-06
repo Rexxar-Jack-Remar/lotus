@@ -1,6 +1,7 @@
 /**
  * @file AndersenAA.cpp
- * @brief LLVM AliasAnalysis interface implementation for Andersen's pointer analysis.
+ * @brief LLVM AliasAnalysis interface implementation for Andersen's pointer
+ * analysis.
  *
  * This file implements the AliasAnalysis interface that LLVM uses to query
  * alias information. It wraps the underlying Andersen pointer analysis engine
@@ -28,11 +29,13 @@ static inline bool isSetContainingOnly(const AndersPtsSet &set, NodeIndex i) {
 }
 
 /**
- * @brief Determine the alias relationship between two LLVM values using Andersen's analysis.
+ * @brief Determine the alias relationship between two LLVM values using
+ * Andersen's analysis.
  *
  * First checks if the values are merged to the same node (MustAlias).
  * Then retrieves points-to sets and checks for null pointers (NoAlias).
- * Finally compares points-to sets for intersection (MayAlias/MustAlias/NoAlias).
+ * Finally compares points-to sets for intersection
+ * (MayAlias/MustAlias/NoAlias).
  *
  * @param v1 First value to check
  * @param v2 Second value to check

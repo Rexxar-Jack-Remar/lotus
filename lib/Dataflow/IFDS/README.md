@@ -14,7 +14,6 @@
 - **Solvers/** – Header-only solver implementations:
   - **IFDSSolver.h** / **IFDSSolver.tpp** – Sequential IFDS tabulation solver.
   - **IDESolver.h** / **IDESolver.tpp** – IDE solver.
-  - **IterativeIDESolver.h** / **IterativeIDESolver.tpp** – Incremental IDE solver.
   - **PathAwareIFDSSolver.h** – Path-tracking IFDS solver.
   - **PathAwareIDESolver.h** – Path-tracking IDE solver.
 - **Utils/** – Utility headers:
@@ -29,12 +28,6 @@
 - **Caching**: Flow function results (normal, call-to-return) and edge function lookups (normal, call-to-return) are cached to avoid recomputation.
 - **Shared graph context**: IFDS and IDE solvers use a common graph/seed construction layer to avoid drift.
 - **Path-aware hooks**: Path-aware IDE/IFDS solvers consume explicit path/summary edge hooks from the base IDE solver.
-
-## Migration Notes
-
-- `IterativeIDESolver::solve()` now always performs full analysis.
-- Incremental mode is explicit via:
-  - `solve_incremental(const llvm::Module&, const std::set<std::string>& changed_functions)`
 
 ### lib/Dataflow/IFDS/
 

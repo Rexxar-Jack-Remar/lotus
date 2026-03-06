@@ -17,6 +17,7 @@ using namespace llvm;
 using wpds::DataFlowFacts;
 using wpds::GenKillTransformer;
 using wpds::InterProceduralDataFlowEngine;
+using wpds::MemoryObjectFact;
 
 static GenKillTransformer *createUninitTransformer(Instruction *I) {
 
@@ -34,42 +35,32 @@ static GenKillTransformer *createUninitTransformer(Instruction *I) {
 
   if (auto *AI = dyn_cast<AllocaInst>(I)) {
     // Newly allocated local is uninitialized until stored
-    genSet.insert(AI);
+    MemoryObjectFact::addRepresentativeFact(genSet, AI);
   } else if (auto *SI = dyn_cast<StoreInst>(I)) {
     // Store initializes the destination memory
-    Value *ptr = SI->getPointerOperand();
-    killSet.insert(ptr);
+    MemoryObjectFact::addRepresentativeFact(killSet, SI->getPointerOperand());
 
-    // Also kill aliases? Not easy without full alias analysis.
-    // But WPDS flow tracks aliases if we propagated them!
-    // If p -> q (q is alias of p).
-    // If p is killed, does q get killed?
-    // In our Flow model: f(S) = (S \ K) U Flow(S \ K).
-    // If p is in K, p is removed. Flow(p) is NOT added.
-    // So if flow[p] = {q}, and p is killed, q is NOT regenerated from p.
-    // BUT if q was already in S (from previous step), q remains unless q is in
-    // K. So to kill q, we must explicitly add q to K. Without reverse flow map,
-    // we can't find q from p. So this simple flow model handles "Propagation of
-    // Property", not "Update of State". Uninitialized is a property of the
-    // *variable holding the address*. If p and q point to same memory. "p is
-    // uninit" means "memory at p is uninit". If we store to p, memory becomes
-    // init. So both p and q should lose the "uninit" property. This requires
-    // killing all aliases. Limitation: We only kill the pointer operand.
+    // The memory abstraction is field-insensitive and only tracks canonical
+    // base objects, so distinct subobjects may still collapse together.
 
   } else if (auto *CI = dyn_cast<CallBase>(I)) {
     // Assume function call initializes passed pointers (safe approximation)
     for (auto &Arg : CI->args()) {
       if (Arg->getType()->isPointerTy()) {
-        killSet.insert(Arg.get());
+        MemoryObjectFact::addRepresentativeFact(killSet, Arg.get());
       }
     }
   } else if (auto *BC = dyn_cast<BitCastInst>(I)) {
     // p2 = bitcast p1
     // If p1 uninit, p2 uninit
-    addFlow(BC->getOperand(0), BC);
+    if (Value *rep = MemoryObjectFact::getRepresentative(BC->getOperand(0))) {
+      addFlow(rep, BC);
+    }
   } else if (auto *GEP = dyn_cast<GetElementPtrInst>(I)) {
     // p2 = gep p1
-    addFlow(GEP->getPointerOperand(), GEP);
+    if (Value *rep = MemoryObjectFact::getRepresentative(GEP->getPointerOperand())) {
+      addFlow(rep, GEP);
+    }
   } else if (auto *PHI = dyn_cast<PHINode>(I)) {
     for (Value *inc : PHI->incoming_values()) {
       addFlow(inc, PHI);
@@ -97,11 +88,11 @@ void demoUninitializedVariablesAnalysis(Module &module) {
     for (auto &BB : F) {
       for (auto &I : BB) {
         if (auto *LI = dyn_cast<LoadInst>(&I)) {
-          Value *ptr = LI->getPointerOperand();
+          Value *ptr = MemoryObjectFact::getRepresentative(LI->getPointerOperand());
           const std::set<Value *> &in = result->IN(&I);
 
           // Check if ptr or any source of ptr is in IN set
-          if (in.count(ptr)) {
+          if (ptr != nullptr && in.count(ptr)) {
             errs() << "[WPDS][Uninit] Potentially uninitialized read at: ";
             if (!I.getFunction()->getName().empty()) {
               errs() << I.getFunction()->getName();

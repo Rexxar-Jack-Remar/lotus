@@ -23,6 +23,8 @@ struct IFDSFlowFixtureIR {
   const llvm::Function *Callee = nullptr;
   const llvm::CallBase*Call = nullptr;
   const llvm::CallBase*ExtCall = nullptr;
+  const llvm::Instruction *CallReturnSite = nullptr;
+  const llvm::Instruction *ExtCallReturnSite = nullptr;
   llvm::Argument *Formal = nullptr;
   const llvm::Value *Actual = nullptr;
   const llvm::Instruction *CalleeEntryInst = nullptr;
@@ -64,7 +66,9 @@ IFDSFlowFixtureIR buildIFDSFlowFixture() {
   IR.Actual = Alloca;
   IR.Call = B.CreateCall(Callee, {Alloca});
   IR.ExtCall = B.CreateCall(Ext, {Alloca});
-  B.CreateRet(llvm::ConstantInt::get(I32Ty, 0));
+  auto *Ret = B.CreateRet(llvm::ConstantInt::get(I32Ty, 0));
+  IR.CallReturnSite = IR.ExtCall;
+  IR.ExtCallReturnSite = Ret;
 
   return IR;
 }
@@ -97,7 +101,7 @@ TEST(IFDSConstAnalysisFlowTest, ReturnFlowMapsFormalBackToActual) {
   auto IR = buildIFDSFlowFixture();
   ifds::ConstAnalysis Analysis;
 
-  auto Out = Analysis.return_flow(IR.Call, IR.Callee,
+  auto Out = Analysis.return_flow(IR.Call, IR.CallReturnSite, IR.Callee,
                                   ifds::ConstFact::mutable_mem(IR.Formal),
                                   ifds::ConstFact::zero());
 
@@ -109,7 +113,7 @@ TEST(IFDSConstAnalysisFlowTest, CallToReturnKillsPointerArgFact) {
   ifds::ConstAnalysis Analysis;
 
   auto Out = Analysis.call_to_return_flow(
-      IR.Call, ifds::ConstFact::initialized(IR.Actual));
+      IR.Call, IR.CallReturnSite, ifds::ConstFact::initialized(IR.Actual));
 
   EXPECT_TRUE(Out.empty());
 }
@@ -118,11 +122,13 @@ TEST(IFDSConstAnalysisFlowTest, CallToReturnPreservesZeroAndGlobalFacts) {
   auto IR = buildIFDSFlowFixture();
   ifds::ConstAnalysis Analysis;
 
-  auto ZeroOut = Analysis.call_to_return_flow(IR.Call, ifds::ConstFact::zero());
+  auto ZeroOut =
+      Analysis.call_to_return_flow(IR.Call, IR.CallReturnSite,
+                                   ifds::ConstFact::zero());
   EXPECT_EQ(ZeroOut.count(ifds::ConstFact::zero()), 1U);
 
   auto GlobalOut = Analysis.call_to_return_flow(
-      IR.Call, ifds::ConstFact::initialized(IR.Global));
+      IR.Call, IR.CallReturnSite, ifds::ConstFact::initialized(IR.Global));
   EXPECT_EQ(GlobalOut.count(ifds::ConstFact::initialized(IR.Global)), 1U);
 }
 
@@ -142,7 +148,7 @@ TEST(IFDSReachingDefinitionsFlowTest, ReturnFlowMapsReturnValueToCallResult) {
   ifds::ReachingDefinitionsAnalysis Analysis;
 
   auto Out = Analysis.return_flow(
-      IR.Call, IR.Callee,
+      IR.Call, IR.CallReturnSite, IR.Callee,
       ifds::DefinitionFact::definition(IR.Formal, IR.CalleeEntryInst),
       ifds::DefinitionFact::zero());
 
@@ -154,7 +160,7 @@ TEST(IFDSReachingDefinitionsFlowTest, CallToReturnKillsCalleeNonLocalFacts) {
   ifds::ReachingDefinitionsAnalysis Analysis;
 
   auto Out = Analysis.call_to_return_flow(
-      IR.Call,
+      IR.Call, IR.CallReturnSite,
       ifds::DefinitionFact::definition(IR.Formal, IR.CalleeEntryInst));
 
   EXPECT_TRUE(Out.empty());
@@ -165,7 +171,7 @@ TEST(IFDSReachingDefinitionsFlowTest, CallToReturnKeepsCallerLocalFacts) {
   ifds::ReachingDefinitionsAnalysis Analysis;
 
   auto InFact = ifds::DefinitionFact::definition(IR.Actual, IR.Call);
-  auto Out = Analysis.call_to_return_flow(IR.Call, InFact);
+  auto Out = Analysis.call_to_return_flow(IR.Call, IR.CallReturnSite, InFact);
 
   EXPECT_EQ(Out.count(InFact), 1U);
 }
@@ -175,9 +181,11 @@ TEST(IFDSReachingDefinitionsFlowTest, ExternalCallKillsGlobalsAndKeepsZero) {
   ifds::ReachingDefinitionsAnalysis Analysis;
 
   auto GlobalFact = ifds::DefinitionFact::definition(IR.Global, IR.Call);
-  auto GlobalOut = Analysis.call_to_return_flow(IR.ExtCall, GlobalFact);
+  auto GlobalOut =
+      Analysis.call_to_return_flow(IR.ExtCall, IR.ExtCallReturnSite, GlobalFact);
   EXPECT_TRUE(GlobalOut.empty());
 
-  auto ZeroOut = Analysis.call_to_return_flow(IR.ExtCall, ifds::DefinitionFact::zero());
+  auto ZeroOut = Analysis.call_to_return_flow(IR.ExtCall, IR.ExtCallReturnSite,
+                                              ifds::DefinitionFact::zero());
   EXPECT_EQ(ZeroOut.count(ifds::DefinitionFact::zero()), 1U);
 }

@@ -53,7 +53,7 @@ IDESecureHeapPropagation::call_flow(const llvm::CallBase *call,
 }
 
 IDESecureHeapPropagation::FactSet IDESecureHeapPropagation::return_flow(
-    const llvm::CallBase *call, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
     const Fact &exit_fact, const Fact &call_fact) {
   FactSet out;
   if (!call) {
@@ -81,7 +81,7 @@ IDESecureHeapPropagation::FactSet IDESecureHeapPropagation::return_flow(
 
 IDESecureHeapPropagation::FactSet
 IDESecureHeapPropagation::call_to_return_flow(const llvm::CallBase *call,
-                                              const Fact &fact) {
+                                              const llvm::Instruction *return_site, const Fact &fact) {
   FactSet out;
   out.insert(fact);
   if (call && !call->getType()->isVoidTy()) {
@@ -141,14 +141,14 @@ IDESecureHeapPropagation::call_edge_function(const llvm::CallBase * /*call*/,
 
 IDESecureHeapPropagation::EdgeFunction
 IDESecureHeapPropagation::return_edge_function(const llvm::CallBase * /*call*/,
-                                               const Fact & /*exit_fact*/,
+                                               const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
                                                const Fact & /*ret_fact*/) {
   return [](const Value &v) { return v; };
 }
 
 IDESecureHeapPropagation::EdgeFunction
 IDESecureHeapPropagation::call_to_return_edge_function(
-    const llvm::CallBase * /*call*/, const Fact & /*src_fact*/,
+    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site, const Fact & /*src_fact*/,
     const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }

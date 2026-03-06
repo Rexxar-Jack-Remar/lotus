@@ -64,7 +64,7 @@ TypeAnalysis::FactSet TypeAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 TypeAnalysis::FactSet TypeAnalysis::return_flow(const llvm::CallBase *call,
-                                                const llvm::Function *callee,
+                                                const llvm::Instruction *return_site, const llvm::Function *callee,
                                                 const Fact &exit_fact,
                                                 const Fact &call_fact) {
   FactSet result;
@@ -115,7 +115,7 @@ TypeAnalysis::FactSet TypeAnalysis::return_flow(const llvm::CallBase *call,
 
 TypeAnalysis::FactSet
 TypeAnalysis::call_to_return_flow(const llvm::CallBase * /*call*/,
-                                  const Fact &fact) {
+                                  const llvm::Instruction *return_site, const Fact &fact) {
   FactSet result;
   result.insert(fact);
   return result;

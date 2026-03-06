@@ -20,13 +20,11 @@ using namespace llvm;
 using wpds::DataFlowFacts;
 using wpds::GenKillTransformer;
 using wpds::InterProceduralDataFlowEngine;
+using wpds::MemoryObjectFact;
 
-// Logic:
-// The Set tracks "Varying" (Non-Constant) values.
-// Bottom (Empty Set) = All values are Constant.
-// Gen = Sources of variation (Inputs, I/O, Alloca(uninit)).
-// Flow = Propagation.
-// Kill = Assignment of Constant.
+// Coarse may-style demo:
+// The set tracks "varying" SSA values and pointer-typed memory proxies.
+// This is not a precise memory-aware constant propagation framework.
 
 static GenKillTransformer *
 createConstantPropagationTransformer(Instruction *I) {
@@ -44,8 +42,7 @@ createConstantPropagationTransformer(Instruction *I) {
   // 1. Sources of Variation
   if (auto *AI = dyn_cast<AllocaInst>(I)) {
     // Memory content is initially garbage (varying)
-    genSet.insert(AI);
-    // Note: AI represents the memory location *AI.
+    MemoryObjectFact::addRepresentativeFact(genSet, AI);
   } else if (auto *CI = dyn_cast<CallBase>(I)) {
     // Call result is varying (unless we know the function is const/pure)
     if (!CI->getType()->isVoidTy()) {
@@ -56,20 +53,25 @@ createConstantPropagationTransformer(Instruction *I) {
   // 2. Kill / Flow
   if (auto *SI = dyn_cast<StoreInst>(I)) {
     Value *val = SI->getValueOperand();
-    Value *ptr = SI->getPointerOperand();
+    Value *ptr = MemoryObjectFact::getRepresentative(SI->getPointerOperand());
 
     // Storing to ptr overwrites previous content.
     // So we KILL the "varying" status of ptr (memory).
-    killSet.insert(ptr);
+    if (ptr != nullptr) {
+      killSet.insert(ptr);
+    }
 
     // If 'val' is varying, it flows to 'ptr'.
     // If 'val' is constant (not in set), 'ptr' remains killed (constant).
-    addFlow(val, ptr);
+    if (ptr != nullptr) {
+      addFlow(val, ptr);
+    }
   } else if (auto *LI = dyn_cast<LoadInst>(I)) {
     // val = load ptr
     // If memory at ptr is varying, val is varying.
-    Value *ptr = LI->getPointerOperand();
-    addFlow(ptr, LI);
+    if (Value *ptr = MemoryObjectFact::getRepresentative(LI->getPointerOperand())) {
+      addFlow(ptr, LI);
+    }
   } else if (auto *BI = dyn_cast<BinaryOperator>(I)) {
     // z = x + y
     // If x varying OR y varying -> z varying.
@@ -86,6 +88,9 @@ createConstantPropagationTransformer(Instruction *I) {
     // For ConstProp, GEP calculation is constant if base and indices are
     // constant. flow base -> gep flow indices -> gep
     addFlow(GEPI->getPointerOperand(), I);
+    if (Value *ptr = MemoryObjectFact::getRepresentative(GEPI->getPointerOperand())) {
+      addFlow(ptr, I);
+    }
     for (auto &idx : GEPI->indices()) {
       addFlow(idx.get(), I);
     }
@@ -116,9 +121,12 @@ runConstantPropagationAnalysis(Module &module) {
   for (auto &F : module) {
     if (F.getName() == "main") {
       for (auto &Arg : F.args()) {
-        initial.insert(&Arg);
+      initial.insert(&Arg);
+      if (Arg.getType()->isPointerTy()) {
+        MemoryObjectFact::addRepresentativeFact(initial, &Arg);
       }
     }
+  }
   }
   // Also Global Variables? Mutable globals are varying initially?
   // Or assume 0-initialized (Constant).
@@ -126,6 +134,7 @@ runConstantPropagationAnalysis(Module &module) {
   for (auto &G : module.globals()) {
     if (!G.hasInitializer() && G.hasExternalLinkage()) {
       initial.insert(&G);
+      MemoryObjectFact::addRepresentativeFact(initial, &G);
     }
   }
 

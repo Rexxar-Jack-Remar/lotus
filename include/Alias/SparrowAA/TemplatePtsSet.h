@@ -48,8 +48,8 @@
 #ifndef ANDERSEN_TEMPLATE_PTSSET_H
 #define ANDERSEN_TEMPLATE_PTSSET_H
 
-#include "Alias/SparrowAA/PtsSet.h"
 #include "Alias/PtsSet/BDDPtsSet.h"
+#include "Alias/SparrowAA/PtsSet.h"
 
 #include <memory>
 
@@ -58,7 +58,8 @@
  * @brief Selects the backing data structure for `RuntimePtsSet`.
  */
 enum class PtsSetImpl {
-  SPARSE_BITVECTOR, ///< Use `llvm::SparseBitVector` (default; good for sparse sets).
+  SPARSE_BITVECTOR, ///< Use `llvm::SparseBitVector` (default; good for sparse
+                    ///< sets).
   BDD               ///< Use a BDD library (better for large, dense sets).
 };
 
@@ -121,8 +122,12 @@ private:
   template <typename Impl> struct Model : Concept {
     Impl set;
 
-    bool has(Index idx) const override { return set.has(static_cast<unsigned>(idx)); }
-    bool insert(Index idx) override { return set.insert(static_cast<unsigned>(idx)); }
+    bool has(Index idx) const override {
+      return set.has(static_cast<unsigned>(idx));
+    }
+    bool insert(Index idx) override {
+      return set.insert(static_cast<unsigned>(idx));
+    }
 
     bool contains(const Concept &other) const override {
       if (auto *same = dynamic_cast<const Model *>(&other))
@@ -181,12 +186,13 @@ private:
     }
   };
 
-  /// @brief Construct a new `Concept` instance for the currently active implementation.
+  /// @brief Construct a new `Concept` instance for the currently active
+  /// implementation.
   static std::unique_ptr<Concept> makeImpl();
   /// @brief Populate `cache` from `impl` if the cache is stale.
   void refreshCache() const;
 
-  std::unique_ptr<Concept> impl;  ///< Type-erased concrete implementation.
+  std::unique_ptr<Concept> impl; ///< Type-erased concrete implementation.
   /// Lazily-populated sorted element cache for iteration.
   /// Shared across copies (copy-on-write semantics via `shared_ptr`).
   /// Reset to nullptr on any mutating operation.
@@ -197,7 +203,8 @@ private:
 };
 
 /**
- * @brief Set the global points-to set implementation for all future `RuntimePtsSet` objects.
+ * @brief Set the global points-to set implementation for all future
+ * `RuntimePtsSet` objects.
  * @param impl  The desired implementation (`SPARSE_BITVECTOR` or `BDD`).
  */
 inline void selectGlobalPtsSetImpl(PtsSetImpl impl) {
@@ -209,7 +216,8 @@ inline PtsSetImpl getGlobalPtsSetImpl() {
   return RuntimePtsSet::selectedImplementation();
 }
 
-/// @brief Alias for `RuntimePtsSet` — the name used throughout the Andersen implementation.
+/// @brief Alias for `RuntimePtsSet` — the name used throughout the Andersen
+/// implementation.
 using DefaultPtsSet = RuntimePtsSet;
 
 // === Inline implementation details ===================================== //
@@ -239,8 +247,7 @@ inline RuntimePtsSet::RuntimePtsSet(const RuntimePtsSet &other)
   // synchronisation and is not worth the complexity here.
 }
 
-inline RuntimePtsSet &
-RuntimePtsSet::operator=(const RuntimePtsSet &other) {
+inline RuntimePtsSet &RuntimePtsSet::operator=(const RuntimePtsSet &other) {
   if (this == &other)
     return *this;
   impl = other.impl->clone();
@@ -317,4 +324,4 @@ inline PtsSetImpl &RuntimePtsSet::activeImpl() {
   return impl;
 }
 
-#endif // ANDERSEN_TEMPLATE_PTSSET_H 
+#endif // ANDERSEN_TEMPLATE_PTSSET_H
