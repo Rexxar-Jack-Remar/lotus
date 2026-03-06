@@ -107,136 +107,49 @@ void ThreadRegionAnalysis::identifyRegionsForThread(ThreadID tid,
   if (!func || func->isDeclaration())
     return;
 
-  // Collect all synchronization points in CFG order
-  std::vector<const Instruction *> sync_points = collectSyncPoints(func);
-
-  // If no synchronization points, the entire function is one region
-  if (sync_points.empty()) {
-    auto region = std::make_unique<Region>();
-    region->region_id = m_regions.size();
-    region->thread_id = tid;
-    // For a region without sync points, start/end nodes can be null or
-    // entry/exit
-    region->start_node = nullptr;
-    region->end_node = nullptr;
-
-    // Collect all instructions in the function
-    for (const BasicBlock &BB : *func) {
-      for (const Instruction &inst : BB) {
-        region->instructions.insert(&inst);
-        m_inst_to_region[&inst] = region.get();
-      }
+  auto flush_region = [&](std::unique_ptr<Region> &region) {
+    if (!region || region->instructions.empty()) {
+      return;
     }
-
+    for (const Instruction *inst : region->instructions) {
+      m_inst_to_region[inst] = region.get();
+    }
     m_regions.push_back(std::move(region));
-    return;
-  }
+  };
 
-  // Create regions based on CFG traversal between synchronization points
-  // Region strategy:
-  // - Region 0: entry -> first sync point (inclusive)
-  // - Region i: sync_i -> sync_{i+1} (both inclusive)
-  // - Region n: last sync -> exit
-
-  // Helper: CFG-based region construction between two instructions
-  auto build_region = [&](const Instruction *start_inst,
-                          const Instruction *end_inst, SyncNode *start_node,
-                          SyncNode *end_node) {
+  auto make_region = [&](SyncNode *start_node) {
     auto region = std::make_unique<Region>();
     region->region_id = m_regions.size();
     region->thread_id = tid;
     region->start_node = start_node;
-    region->end_node = end_node;
-
-    // Collect instructions between start and end using CFG traversal
-    std::unordered_set<const BasicBlock *> visited;
-    std::deque<const BasicBlock *> worklist;
-
-    const BasicBlock *start_bb =
-        start_inst ? start_inst->getParent() : &func->getEntryBlock();
-    worklist.push_back(start_bb);
-    visited.insert(start_bb);
-
-    // BFS through CFG
-    while (!worklist.empty()) {
-      const BasicBlock *BB = worklist.front();
-      worklist.pop_front();
-
-      bool reached_end = false;
-      bool started = (BB != start_bb) || (start_inst == nullptr);
-
-      // Process instructions in this block
-      for (const Instruction &inst : *BB) {
-        // Mark start point
-        if (start_inst && &inst == start_inst) {
-          started = true;
-        }
-
-        // Add instruction if we're in the region
-        if (started) {
-          region->instructions.insert(&inst);
-          m_inst_to_region[&inst] = region.get();
-        }
-
-        // Check if we reached the end
-        if (end_inst && &inst == end_inst) {
-          reached_end = true;
-          break;
-        }
-      }
-
-      // Continue to successors if we haven't reached the end
-      if (!reached_end) {
-        for (const BasicBlock *succ : successors(BB)) {
-          if (visited.find(succ) == visited.end()) {
-            visited.insert(succ);
-            worklist.push_back(succ);
-          }
-        }
-      }
-    }
-
-    m_regions.push_back(std::move(region));
+    region->end_node = nullptr;
+    return region;
   };
 
-  // Build regions
-  // Region 1: entry to first sync
-  build_region(nullptr, sync_points[0],
-               nullptr, // Entry node - no specific sync node for start
-               m_tfg.getNode(sync_points[0]));
-
-  // Regions between sync points
-  for (size_t i = 0; i + 1 < sync_points.size(); ++i) {
-    build_region(sync_points[i], sync_points[i + 1],
-                 m_tfg.getNode(sync_points[i]),
-                 m_tfg.getNode(sync_points[i + 1]));
-  }
-
-  // Final region: last sync to exit
-  // Use a simple approach: collect all remaining instructions
-  auto final_region = std::make_unique<Region>();
-  final_region->region_id = m_regions.size();
-  final_region->thread_id = tid;
-  final_region->start_node = m_tfg.getNode(sync_points.back());
-  final_region->end_node = nullptr; // Exit node - no specific sync node for end
-
-  bool after_last_sync = false;
   for (const BasicBlock &BB : *func) {
-    for (const Instruction &inst : BB) {
-      if (&inst == sync_points.back()) {
-        after_last_sync = true;
-        continue; // Don't include the last sync again
-      }
-      if (after_last_sync &&
-          m_inst_to_region.find(&inst) == m_inst_to_region.end()) {
-        final_region->instructions.insert(&inst);
-        m_inst_to_region[&inst] = final_region.get();
-      }
-    }
-  }
+    SyncNode *pending_start = nullptr;
+    std::unique_ptr<Region> region;
 
-  if (!final_region->instructions.empty()) {
-    m_regions.push_back(std::move(final_region));
+    for (const Instruction &inst : BB) {
+      if (!region) {
+        region = make_region(pending_start);
+        pending_start = nullptr;
+      }
+
+      region->instructions.insert(&inst);
+
+      if (!isSyncPoint(&inst)) {
+        continue;
+      }
+
+      region->end_node = m_tfg.getNode(&inst);
+      flush_region(region);
+      pending_start = m_tfg.getNode(&inst);
+    }
+
+    if (region) {
+      flush_region(region);
+    }
   }
 }
 
@@ -593,6 +506,13 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
           handleLockAcquire(&inst, node);
         } else if (m_thread_api->isTDRelease(&inst)) {
           handleLockRelease(&inst, node);
+        } else if (m_thread_api->isTDCondWait(&inst)) {
+          handleCondWait(&inst, node);
+        } else if (m_thread_api->isTDCondSignal(&inst) ||
+                   m_thread_api->isTDCondBroadcast(&inst)) {
+          handleCondSignal(&inst, node);
+        } else if (m_thread_api->isTDBarWait(&inst)) {
+          handleBarrier(&inst, node);
         } else {
           // Handle both direct and indirect calls
           const Function *callee = cb->getCalledFunction();
@@ -761,10 +681,34 @@ const Value *MHPAnalysis::tracePthreadT(const Value *val) const {
     // Recursive step: add operands to the worklist.
     if (const LoadInst *load = dyn_cast<LoadInst>(v)) {
       worklist.push_back(load->getPointerOperand());
+    } else if (const StoreInst *store = dyn_cast<StoreInst>(v)) {
+      worklist.push_back(store->getPointerOperand());
+      worklist.push_back(store->getValueOperand());
     } else if (const BitCastInst *cast = dyn_cast<BitCastInst>(v)) {
       worklist.push_back(cast->getOperand(0));
     } else if (const GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(v)) {
       worklist.push_back(gep->getPointerOperand());
+    } else if (const PHINode *phi = dyn_cast<PHINode>(v)) {
+      for (const Value *incoming : phi->incoming_values()) {
+        worklist.push_back(incoming);
+      }
+    } else if (const SelectInst *select = dyn_cast<SelectInst>(v)) {
+      worklist.push_back(select->getTrueValue());
+      worklist.push_back(select->getFalseValue());
+    } else if (const Argument *arg = dyn_cast<Argument>(v)) {
+      const Function *parent = arg->getParent();
+      if (!parent) {
+        continue;
+      }
+      if (parent->hasAddressTaken()) {
+        for (const Use &use : parent->uses()) {
+          const auto *cb = dyn_cast<CallBase>(use.getUser());
+          if (!cb || arg->getArgNo() >= cb->arg_size()) {
+            continue;
+          }
+          worklist.push_back(cb->getArgOperand(arg->getArgNo()));
+        }
+      }
     } else if (const Instruction *inst = dyn_cast<Instruction>(v)) {
       // General case for other instructions, trace all operands.
       for (const Use &use : inst->operands()) {
@@ -950,44 +894,41 @@ void MHPAnalysis::handleCondSignal(const Instruction *signal_inst,
 
 void MHPAnalysis::handleBarrier(const Instruction *barrier_inst,
                                 SyncNode *node) {
-  // Barrier synchronization handling.
-  // pthread_barrier_wait: all threads must reach the barrier before any
-  // proceeds.
-  //
-  // Correct HB model (no cycles):
-  //   Every thread's *arrival* at barrier B happens-before every thread's
-  //   *departure* from barrier B.  In a static analysis we conservatively
-  //   model this as: each previously-seen arrival HB the current arrival,
-  //   and the current arrival HB all previously-seen arrivals.
-  //
-  // IMPORTANT: we must NOT add edges in both directions between the same
-  // pair of nodes — that would create a cycle in the HB graph and make
-  // hasHappenBeforeRelation return true for unrelated instructions.
-  // Instead we add a one-directional edge from each earlier arrival to the
-  // current one.  The symmetric direction (current -> earlier) is added
-  // when those earlier arrivals are processed (they were already in the
-  // list when we processed them, so they added edges to each other).
-  // The net effect is a clique of HB edges among all arrivals, which is
-  // exactly the "all-before-all" barrier semantics without cycles.
-
   const Value *barrier = m_thread_api->getBarrierVal(barrier_inst);
+  if (!barrier) {
+    barrier = barrier_inst;
+  }
   node->setLockValue(barrier); // Reuse lock field for barrier value
 
-  // Add one-directional edges from all previously-seen arrivals to this one.
-  auto it = m_barrier_waits.find(barrier);
-  if (it != m_barrier_waits.end()) {
-    for (const Instruction *prev_wait : it->second) {
-      SyncNode *prev_node = m_tfg->getNode(prev_wait);
-      if (!prev_node || isInSameThread(prev_wait, barrier_inst)) {
-        continue;
+  BarrierParticipant current;
+  current.arrival = barrier_inst;
+  current.continuations = getBarrierContinuations(barrier_inst);
+
+  auto &participants = m_barrier_waits[barrier];
+  for (const BarrierParticipant &previous : participants) {
+    if (!previous.arrival || isInSameThread(previous.arrival, barrier_inst)) {
+      continue;
+    }
+
+    SyncNode *prev_node = m_tfg->getNode(previous.arrival);
+    if (!prev_node) {
+      continue;
+    }
+
+    for (SyncNode *cont : current.continuations) {
+      if (cont) {
+        m_tfg->addInterThreadEdge(prev_node, cont);
       }
-      // prev_wait HB barrier_inst (arrival ordering, no reverse edge here)
-      m_tfg->addInterThreadEdge(prev_node, node);
+    }
+
+    for (SyncNode *cont : previous.continuations) {
+      if (cont) {
+        m_tfg->addInterThreadEdge(node, cont);
+      }
     }
   }
 
-  // Record this arrival *after* adding edges so we don't add self-edges.
-  m_barrier_waits[barrier].push_back(barrier_inst);
+  participants.push_back(std::move(current));
 }
 
 void MHPAnalysis::analyzeLockSets() {
@@ -1725,6 +1666,7 @@ void MHPAnalysis::computeAtomicHappensBefore() {
 
   // Clear the old pairs and rebuild
   m_atomic_hb_pairs.clear();
+  m_atomic_sync_witnesses.clear();
   size_t pairs_found = 0;
 
   // Phase 2: Find release-acquire pairs for synchronizing variables.
@@ -1775,6 +1717,11 @@ void MHPAnalysis::computeAtomicHappensBefore() {
     if (isInSameThread(release_inst, acquire_inst))
       return;
     m_atomic_hb_pairs.insert({release_inst, acquire_inst});
+    m_atomic_sync_witnesses.push_back(
+        {release_inst, acquire_inst,
+         CppAtomics::getAtomicPointer(release_inst)
+             ? CppAtomics::getAtomicPointer(release_inst)->stripPointerCasts()
+             : nullptr});
     SyncNode *release_node = m_tfg->getNode(release_inst);
     SyncNode *acquire_node = m_tfg->getNode(acquire_inst);
     if (release_node && acquire_node)
@@ -1819,60 +1766,137 @@ void MHPAnalysis::computeAtomicHappensBefore() {
          << " atomic happens-before pairs (release-acquire).\n";
 }
 
-void MHPAnalysis::computeFenceBasedHappensBefore() {
-  // Fence synchronization model per C++11:
-  // - Fence-rel in thread A sync-with Fence-acq in thread B if:
-  //   1. There exists atomic X such that:
-  //   2. Thread A: atomic-store(X) is sequenced-before fence-rel
-  //   3. Thread B: fence-acq is sequenced-before atomic-load(X)
-  //   4. atomic-store(X) synchronizes-with atomic-load(X)
-  //
-  // Conservative approach: Add HB edges from all release fences to all acquire
-  // fences if they synchronize on any atomic variable.
+std::vector<const Instruction *>
+MHPAnalysis::collectFenceWitnesses(const Instruction *fence,
+                                   bool require_release_semantics) const {
+  std::vector<const Instruction *> witnesses;
+  if (!fence) {
+    return witnesses;
+  }
 
+  ThreadID fence_tid = getThreadID(fence);
+  for (const Instruction *inst : m_atomic_instructions) {
+    if (inst == fence || CppAtomics::isFence(inst)) {
+      continue;
+    }
+    if (getThreadID(inst) != fence_tid) {
+      continue;
+    }
+
+    if (require_release_semantics) {
+      if (!CppAtomics::hasReleaseSemantics(inst) || !CppAtomics::isStore(inst)) {
+        continue;
+      }
+      if (!hasHappenBeforeRelation(inst, fence)) {
+        continue;
+      }
+    } else {
+      if (!CppAtomics::hasAcquireSemantics(inst) || !CppAtomics::isLoad(inst)) {
+        continue;
+      }
+      if (!hasHappenBeforeRelation(fence, inst)) {
+        continue;
+      }
+    }
+
+    if (!CppAtomics::getAtomicPointer(inst)) {
+      continue;
+    }
+    witnesses.push_back(inst);
+  }
+
+  return witnesses;
+}
+
+std::vector<SyncNode *>
+MHPAnalysis::getBarrierContinuations(const Instruction *barrier_inst) const {
+  std::vector<SyncNode *> continuations;
+  if (!barrier_inst) {
+    return continuations;
+  }
+
+  if (const Instruction *next = barrier_inst->getNextNode()) {
+    if (SyncNode *next_node = m_tfg->getNode(next)) {
+      continuations.push_back(next_node);
+    }
+  }
+
+  if (barrier_inst->isTerminator()) {
+    for (const BasicBlock *succ : successors(barrier_inst->getParent())) {
+      if (succ->empty()) {
+        continue;
+      }
+      if (SyncNode *succ_node = m_tfg->getNode(&succ->front())) {
+        continuations.push_back(succ_node);
+      }
+    }
+  }
+
+  if (continuations.empty()) {
+    if (SyncNode *self = m_tfg->getNode(barrier_inst)) {
+      continuations.push_back(self);
+    }
+  }
+
+  return continuations;
+}
+
+void MHPAnalysis::computeFenceBasedHappensBefore() {
   std::vector<const Instruction *> release_fences;
   std::vector<const Instruction *> acquire_fences;
-  std::vector<const Instruction *> seq_cst_fences;
 
   for (const Instruction *inst : m_atomic_instructions) {
     if (CppAtomics::isFence(inst)) {
-      if (CppAtomics::isFenceSeqCst(inst)) {
-        seq_cst_fences.push_back(inst);
-      } else if (CppAtomics::isFenceRelease(inst) ||
-                 CppAtomics::isFenceAcqRel(inst)) {
+      if (CppAtomics::isFenceRelease(inst) || CppAtomics::isFenceAcqRel(inst) ||
+          CppAtomics::isFenceSeqCst(inst)) {
         release_fences.push_back(inst);
       }
 
-      if (CppAtomics::isFenceAcquire(inst) || CppAtomics::isFenceAcqRel(inst)) {
+      if (CppAtomics::isFenceAcquire(inst) || CppAtomics::isFenceAcqRel(inst) ||
+          CppAtomics::isFenceSeqCst(inst)) {
         acquire_fences.push_back(inst);
       }
     }
   }
 
-  // Seq-cst fences participate in both release and acquire
-  release_fences.insert(release_fences.end(), seq_cst_fences.begin(),
-                        seq_cst_fences.end());
-  acquire_fences.insert(acquire_fences.end(), seq_cst_fences.begin(),
-                        seq_cst_fences.end());
-
   size_t fence_pairs = 0;
 
-  // Conservative fence synchronization: release-fence -> acquire-fence across
-  // threads
   for (const Instruction *rel_fence : release_fences) {
+    const auto release_ops = collectFenceWitnesses(rel_fence, true);
+    if (release_ops.empty()) {
+      continue;
+    }
+
     for (const Instruction *acq_fence : acquire_fences) {
-      // Skip same-thread fences (already ordered by program order)
       if (isInSameThread(rel_fence, acq_fence)) {
         continue;
       }
 
-      // Add happens-before edge
-      m_atomic_hb_pairs.insert({rel_fence, acq_fence});
-      SyncNode *rel_node = m_tfg->getNode(rel_fence);
-      SyncNode *acq_node = m_tfg->getNode(acq_fence);
-      if (rel_node && acq_node) {
-        m_tfg->addInterThreadEdge(rel_node, acq_node);
-        ++fence_pairs;
+      const auto acquire_ops = collectFenceWitnesses(acq_fence, false);
+      if (acquire_ops.empty()) {
+        continue;
+      }
+
+      bool synchronized = false;
+      for (const Instruction *release_op : release_ops) {
+        if (synchronized) {
+          break;
+        }
+        for (const Instruction *acquire_op : acquire_ops) {
+          if (!m_atomic_hb_pairs.count({release_op, acquire_op})) {
+            continue;
+          }
+
+          SyncNode *rel_node = m_tfg->getNode(rel_fence);
+          SyncNode *acq_node = m_tfg->getNode(acq_fence);
+          if (rel_node && acq_node) {
+            m_atomic_hb_pairs.insert({rel_fence, acq_fence});
+            m_tfg->addInterThreadEdge(rel_node, acq_node);
+            ++fence_pairs;
+          }
+          synchronized = true;
+          break;
+        }
       }
     }
   }
@@ -1881,82 +1905,7 @@ void MHPAnalysis::computeFenceBasedHappensBefore() {
 }
 
 void MHPAnalysis::computeSeqCstTotalOrder() {
-  // Sequential consistency establishes a total order S on all seq-cst
-  // operations. For soundness in MHP analysis, we conservatively add
-  // happens-before edges from every seq-cst store to every subsequent seq-cst
-  // load on potentially aliasing locations in different threads.
-  //
-  // This is a conservative over-approximation of the true total order.
-
-  std::vector<const Instruction *> seq_cst_stores;
-  std::vector<const Instruction *> seq_cst_loads;
-  std::vector<const Instruction *> seq_cst_rmw;
-
-  for (const Instruction *inst : m_atomic_instructions) {
-    if (CppAtomics::getMemoryOrder(inst) ==
-        CppAtomics::MemoryOrder::SequentiallyConsistent) {
-      if (CppAtomics::isStore(inst)) {
-        seq_cst_stores.push_back(inst);
-      } else if (CppAtomics::isLoad(inst)) {
-        seq_cst_loads.push_back(inst);
-      } else if (CppAtomics::isReadModifyWrite(inst)) {
-        seq_cst_rmw.push_back(inst);
-        // RMW operations act as both load and store
-        seq_cst_stores.push_back(inst);
-        seq_cst_loads.push_back(inst);
-      }
-    }
-  }
-
-  size_t seqcst_pairs = 0;
-
-  // Add total order edges: seq-cst store/RMW -> seq-cst load/RMW
-  // Only for different threads and potentially aliasing locations
-  auto addSeqCstEdge = [&](const Instruction *earlier,
-                           const Instruction *later) {
-    if (isInSameThread(earlier, later)) {
-      return; // Already ordered by program order
-    }
-
-    // Check if they access potentially aliasing locations
-    const Value *ptr1 = CppAtomics::getAtomicPointer(earlier);
-    const Value *ptr2 = CppAtomics::getAtomicPointer(later);
-    if (ptr1 && ptr2) {
-      if (m_alias_analysis && !m_alias_analysis->mayAlias(ptr1, ptr2)) {
-        return; // No aliasing, no seq-cst ordering required
-      }
-    }
-
-    m_atomic_hb_pairs.insert({earlier, later});
-    SyncNode *earlier_node = m_tfg->getNode(earlier);
-    SyncNode *later_node = m_tfg->getNode(later);
-    if (earlier_node && later_node) {
-      m_tfg->addInterThreadEdge(earlier_node, later_node);
-      ++seqcst_pairs;
-    }
-  };
-
-  // Seq-cst total order: add edges between stores and loads that access
-  // potentially aliasing locations.  We do NOT add edges between operations
-  // on provably non-aliasing locations — that would be unsound (it would
-  // make unrelated seq-cst operations appear ordered, suppressing real races).
-  //
-  // Note: addSeqCstEdge already skips same-thread pairs and non-aliasing ptrs.
-  for (const Instruction *store : seq_cst_stores) {
-    for (const Instruction *load : seq_cst_loads) {
-      if (store != load)
-        addSeqCstEdge(store, load);
-    }
-  }
-  // Also order RMW-RMW pairs (each RMW is both a store and a load).
-  for (size_t i = 0; i < seq_cst_rmw.size(); ++i) {
-    for (size_t j = i + 1; j < seq_cst_rmw.size(); ++j) {
-      addSeqCstEdge(seq_cst_rmw[i], seq_cst_rmw[j]);
-      addSeqCstEdge(seq_cst_rmw[j], seq_cst_rmw[i]);
-    }
-  }
-
-  errs() << "Added " << seqcst_pairs << " seq-cst total order edges.\n";
+  errs() << "Skipped synthetic seq-cst total-order edges.\n";
 }
 
 bool MHPAnalysis::mayRace(const Instruction *i1, const Instruction *i2) const {

@@ -5,6 +5,7 @@
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -62,9 +63,13 @@ private:
   bool sameBarrier(const llvm::Instruction *inst1,
                    const llvm::Instruction *inst2) const;
 
+  const llvm::Value *traceSharedState(const llvm::Value *value) const;
+
   llvm::Module &m_module;
   mhp::MHPAnalysis &m_mhp;
   lotus::AliasAnalysisWrapper *m_alias_analysis = nullptr;
+  std::unordered_map<const llvm::Value *, const llvm::Value *>
+      m_future_shared_state;
 
   /// Pairs (release/seq_cst store, acquire/seq_cst load) on same location
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
@@ -87,4 +92,3 @@ private:
 } // namespace lotus
 
 #endif // HAPPENS_BEFORE_ANALYSIS_H
-

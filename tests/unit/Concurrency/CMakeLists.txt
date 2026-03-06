@@ -1,3 +1,4 @@
 add_lotus_test(mhp_analysis_test MHPAnalysisTest.cpp)
 add_lotus_test(lockset_analysis_test LockSetAnalysisTest.cpp)
 add_lotus_test(simple_atomic_test AtomicTest.cpp)
+add_lotus_test(happens_before_test HappensBeforeAnalysisTest.cpp)

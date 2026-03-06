@@ -455,9 +455,9 @@ public:
       return stripped;
     if (stripped->getType()->isPointerTy())
       return stripped;
-    // Return nullptr gracefully for phi/select/other patterns rather than
-    // crashing — callers must handle nullptr (unknown join target).
-    return nullptr;
+    // Preserve the SSA value for phi/select/scalar forwarding so callers can
+    // trace it further instead of giving up immediately.
+    return stripped;
   }
   inline const llvm::Value *getJoinedThread(const llvm::CallBase *cb) const {
     return getJoinedThread(llvm::dyn_cast<llvm::Instruction>(cb));

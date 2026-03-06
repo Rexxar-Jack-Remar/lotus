@@ -30,9 +30,10 @@ annotated decomposition trees. B. Scholz and J. Blieberger.
 ### Algebraic Program Analysis (Reps & Kincaid)
 
 - CAV 2021: Algebraic Program Analysis (Tutorial)
+- POPL 19: Refinement of Path Expressions for Static Analysis. John Cypher, Jason Breck, Zak Kincaid, Thomas Reps.
 - PLDI 2017: Compositional Recurrence Analysis Revisited
 - FMCAD 2015: Compositional Recurrence Analysis 
-- 
+
 
 ## What it computes
 

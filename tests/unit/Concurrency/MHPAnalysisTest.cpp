@@ -332,6 +332,159 @@ TEST_F(MHPAnalysisTest, MutexSerializesCriticalSections) {
   EXPECT_FALSE(mhp.mayHappenInParallel(m_in, w_in));
 }
 
+TEST_F(MHPAnalysisTest, BarrierOrdersPreAndPostRegions) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_barrier_wait(i8*)
+
+    @bar = global i8 0
+    @shared = global i32 0
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 42, i32* @shared, align 4
+      %bw = call i32 @pthread_barrier_wait(i8* @bar)
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %bw = call i32 @pthread_barrier_wait(i8* @bar)
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer_func = module->getFunction("writer");
+  const Function *reader_func = module->getFunction("reader");
+  ASSERT_NE(writer_func, nullptr);
+  ASSERT_NE(reader_func, nullptr);
+
+  const Instruction *store_shared = &writer_func->getEntryBlock().front();
+  const Instruction *load_shared = findInstructionByName(*reader_func, "val");
+  ASSERT_NE(load_shared, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  EXPECT_TRUE(mhp.mustPrecede(store_shared, load_shared));
+  EXPECT_FALSE(mhp.mayHappenInParallel(store_shared, load_shared));
+}
+
+TEST_F(MHPAnalysisTest, JoinTargetThroughPhiResolves) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 1, 2
+      ret i8* null
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      br i1 %cond, label %left, label %right
+
+    left:
+      br label %join
+
+    right:
+      br label %join
+
+    join:
+      %phi_tid = phi i8* [ %tid, %left ], [ %tid, %right ]
+      %joined = call i32 @pthread_join(i8* %phi_tid, i8* null)
+      %post = add i32 3, 4
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *main_func = module->getFunction("main");
+  const Function *worker_func = module->getFunction("worker");
+  ASSERT_NE(main_func, nullptr);
+  ASSERT_NE(worker_func, nullptr);
+
+  const Instruction *worker_inst = findInstructionByName(*worker_func, "w");
+  const Instruction *post = findInstructionByName(*main_func, "post");
+  ASSERT_NE(worker_inst, nullptr);
+  ASSERT_NE(post, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  EXPECT_TRUE(mhp.mustBeSequential(worker_inst, post));
+}
+
+TEST_F(MHPAnalysisTest, RegionPartitionDoesNotOverlapAcrossBranchMerge) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+
+    @lock = global i8 0
+
+    define i32 @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %then, label %else
+
+    then:
+      %lock_then = call i32 @pthread_mutex_lock(i8* @lock)
+      br label %merge
+
+    else:
+      %plain = add i32 1, 2
+      br label %merge
+
+    merge:
+      %merge_val = phi i32 [ 1, %then ], [ %plain, %else ]
+      ret i32 %merge_val
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  size_t inst_count = 0;
+  for (const BasicBlock &bb : *main_func) {
+    for (const Instruction &inst : bb) {
+      (void)inst;
+      ++inst_count;
+    }
+  }
+
+  size_t covered = 0;
+  for (const auto &region : mhp.getThreadRegionAnalysis().getAllRegions()) {
+    if (region->thread_id != 0) {
+      continue;
+    }
+    covered += region->instructions.size();
+  }
+
+  EXPECT_EQ(covered, inst_count);
+}
+
 // Main function for tests
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

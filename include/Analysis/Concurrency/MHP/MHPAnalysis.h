@@ -343,6 +343,13 @@ private:
   std::vector<const llvm::Instruction *> m_atomic_instructions;
   std::unordered_set<InstPair, InstPairHash> m_atomic_hb_pairs;
 
+  struct AtomicSyncWitness {
+    const llvm::Instruction *release = nullptr;
+    const llvm::Instruction *acquire = nullptr;
+    const llvm::Value *location = nullptr;
+  };
+  std::vector<AtomicSyncWitness> m_atomic_sync_witnesses;
+
   // Instruction to thread mapping
   std::unordered_map<const llvm::Instruction *, ThreadID> m_inst_to_thread;
 
@@ -386,9 +393,12 @@ private:
       m_condvar_waits;
 
   // Barrier tracking (for happens-before)
-  // Map barrier -> list of threads that have reached it
-  std::unordered_map<const llvm::Value *,
-                     std::vector<const llvm::Instruction *>>
+  struct BarrierParticipant {
+    const llvm::Instruction *arrival = nullptr;
+    std::vector<SyncNode *> continuations;
+  };
+  // Map barrier object -> barrier participants seen so far.
+  std::unordered_map<const llvm::Value *, std::vector<BarrierParticipant>>
       m_barrier_waits;
 
   // Per-thread set of functions already processed to avoid reprocessing
@@ -481,6 +491,12 @@ private:
    * Establishes total order on sequentially consistent operations.
    */
   void computeSeqCstTotalOrder();
+
+  std::vector<const llvm::Instruction *>
+  collectFenceWitnesses(const llvm::Instruction *fence,
+                        bool require_release_semantics) const;
+  std::vector<SyncNode *>
+  getBarrierContinuations(const llvm::Instruction *barrier_inst) const;
 
   /**
    * @brief Compute transitive closure of happens-before relation (optional

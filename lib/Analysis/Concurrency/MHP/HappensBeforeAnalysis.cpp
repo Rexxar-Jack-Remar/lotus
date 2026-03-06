@@ -21,6 +21,7 @@ void HappensBeforeAnalysis::analyze() {
 
 void HappensBeforeAnalysis::buildSynchronizesWith() {
   m_sync_with.clear();
+  m_future_shared_state.clear();
   using namespace CppAtomics;
 
   std::vector<const Instruction *> release_ops;
@@ -55,9 +56,17 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         acquire_ops.push_back(inst);
       
       // C++11 future/promise synchronization
-      const CallInst *call = dyn_cast<CallInst>(inst);
+      const CallBase *call = dyn_cast<CallBase>(inst);
       if (call && call->getCalledFunction()) {
-        ThreadAPI::TD_TYPE type = threadAPI->getType(call->getCalledFunction());
+        const Function *callee = call->getCalledFunction();
+        ThreadAPI::TD_TYPE type = threadAPI->getType(callee);
+
+        if (callee->getName().contains("get_future") && call->arg_size() >= 1) {
+          const Value *promise_obj = traceSharedState(call->getArgOperand(0));
+          if (promise_obj) {
+            m_future_shared_state[call] = promise_obj;
+          }
+        }
         
         switch (type) {
           case ThreadAPI::TD_PROMISE_SET:
@@ -120,9 +129,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   for (size_t i = 0; i < call_once_ops.size(); ++i) {
     for (size_t j = i + 1; j < call_once_ops.size(); ++j) {
       if (sameOnceFlag(call_once_ops[i], call_once_ops[j])) {
-        // Conservative: assume any ordering
         m_sync_with.emplace_back(call_once_ops[i], call_once_ops[j]);
-        m_sync_with.emplace_back(call_once_ops[j], call_once_ops[i]);
       }
     }
   }
@@ -160,26 +167,23 @@ bool HappensBeforeAnalysis::sameAtomicLocation(const llvm::Instruction *store_in
 
 bool HappensBeforeAnalysis::samePromiseFuturePair(const llvm::Instruction *promise,
                                                    const llvm::Instruction *future) const {
-  // Check if promise and future operate on the same shared state
-  // This is conservative: we assume they might be paired if we can't prove otherwise
-  const CallInst *p = dyn_cast<CallInst>(promise);
-  const CallInst *f = dyn_cast<CallInst>(future);
+  const CallBase *p = dyn_cast<CallBase>(promise);
+  const CallBase *f = dyn_cast<CallBase>(future);
   if (!p || !f) return false;
   
-  // Extract the promise/future objects (typically first argument is 'this')
   if (p->arg_size() == 0 || f->arg_size() == 0) return false;
   
-  const Value *p_obj = p->getArgOperand(0)->stripPointerCasts();
-  const Value *f_obj = f->getArgOperand(0)->stripPointerCasts();
-  
-  // Conservative: assume they might be paired
-  if (m_alias_analysis && m_alias_analysis->mayAlias(p_obj, f_obj))
+  const Value *promise_state = traceSharedState(p->getArgOperand(0));
+  const Value *future_state = traceSharedState(f->getArgOperand(0));
+  if (!promise_state || !future_state) {
+    return false;
+  }
+
+  if (promise_state == future_state) return true;
+  if (m_alias_analysis && m_alias_analysis->mustAlias(promise_state, future_state))
     return true;
   
-  // Check if they're derived from the same allocation
-  if (p_obj == f_obj) return true;
-  
-  return false; // Conservative: assume not paired if we can't tell
+  return false;
 }
 
 bool HappensBeforeAnalysis::sameOnceFlag(const llvm::Instruction *call1,
@@ -236,6 +240,102 @@ bool HappensBeforeAnalysis::sameBarrier(const llvm::Instruction *inst1,
   return false;
 }
 
+const Value *HappensBeforeAnalysis::traceSharedState(const Value *value) const {
+  if (!value) {
+    return nullptr;
+  }
+
+  std::vector<const Value *> worklist = {value};
+  std::unordered_set<const Value *> visited;
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.back();
+    worklist.pop_back();
+    if (!current || !visited.insert(current).second) {
+      continue;
+    }
+
+    auto mapped = m_future_shared_state.find(current);
+    if (mapped != m_future_shared_state.end()) {
+      return mapped->second;
+    }
+
+    const Value *stripped = current->stripPointerCasts();
+    if (stripped != current) {
+      worklist.push_back(stripped);
+    }
+
+    if (isa<AllocaInst>(current) || isa<GlobalValue>(current)) {
+      return current;
+    }
+
+    if (const auto *arg = dyn_cast<Argument>(current)) {
+      const Function *parent = arg->getParent();
+      bool expanded = false;
+      if (parent) {
+        for (const Use &use : parent->uses()) {
+          const auto *cb = dyn_cast<CallBase>(use.getUser());
+          if (cb && arg->getArgNo() < cb->arg_size()) {
+            worklist.push_back(cb->getArgOperand(arg->getArgNo()));
+            expanded = true;
+          }
+        }
+
+        for (const Function &func : m_module) {
+          for (const BasicBlock &bb : func) {
+            for (const Instruction &inst : bb) {
+              const auto *cb = dyn_cast<CallBase>(&inst);
+              if (!cb || arg->getArgNo() >= cb->arg_size()) {
+                continue;
+              }
+              const Value *called = cb->getCalledOperand();
+              if (called && called->stripPointerCasts() == parent) {
+                worklist.push_back(cb->getArgOperand(arg->getArgNo()));
+                expanded = true;
+              }
+            }
+          }
+        }
+      }
+      if (!expanded) {
+        return current;
+      }
+      continue;
+    }
+
+    if (const auto *load = dyn_cast<LoadInst>(current)) {
+      worklist.push_back(load->getPointerOperand());
+      for (const User *user : load->getPointerOperand()->users()) {
+        if (const auto *store = dyn_cast<StoreInst>(user)) {
+          if (store->getPointerOperand() == load->getPointerOperand()) {
+            worklist.push_back(store->getValueOperand());
+          }
+        }
+      }
+    } else if (const auto *store = dyn_cast<StoreInst>(current)) {
+      worklist.push_back(store->getPointerOperand());
+      worklist.push_back(store->getValueOperand());
+    } else if (const auto *phi = dyn_cast<PHINode>(current)) {
+      for (const Value *incoming : phi->incoming_values()) {
+        worklist.push_back(incoming);
+      }
+    } else if (const auto *select = dyn_cast<SelectInst>(current)) {
+      worklist.push_back(select->getTrueValue());
+      worklist.push_back(select->getFalseValue());
+    } else if (const auto *cb = dyn_cast<CallBase>(current)) {
+      if (cb->arg_size() >= 1) {
+        worklist.push_back(cb->getArgOperand(0));
+      }
+    } else if (const auto *inst = dyn_cast<Instruction>(current)) {
+      for (const Use &operand : inst->operands()) {
+        worklist.push_back(operand.get());
+      }
+    }
+  }
+
+  return nullptr;
+}
+
 bool HappensBeforeAnalysis::happensBefore(const Instruction *A, const Instruction *B) const {
   if (!A || !B) return false;
   if (A == B) return true;
@@ -262,4 +362,3 @@ bool HappensBeforeAnalysis::happensBefore(const Instruction *A, const Instructio
 }
 
 } // namespace lotus
-

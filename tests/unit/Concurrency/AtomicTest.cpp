@@ -665,6 +665,120 @@ TEST_F(AtomicHappensBeforeTest, SequentialConsistencyMultipleThreads) {
   EXPECT_FALSE(mhp.mayHappenInParallel(store_y, load_y));
 }
 
+TEST_F(AtomicHappensBeforeTest, UnrelatedFencesDoNotSynchronize) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag1 = global i32 0, align 4
+    @flag2 = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 7, i32* @data, align 4
+      store atomic i32 1, i32* @flag1 release, align 4
+      fence release
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      fence acquire
+      %flag = load atomic i32, i32* @flag2 acquire, align 4
+      %cond = icmp ne i32 %flag, 0
+      br i1 %cond, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer_func = module->getFunction("writer");
+  const Function *reader_func = module->getFunction("reader");
+  ASSERT_NE(writer_func, nullptr);
+  ASSERT_NE(reader_func, nullptr);
+
+  const Instruction *store_data = &writer_func->getEntryBlock().front();
+  const Instruction *load_data = findInstructionByName(*reader_func, "val");
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+}
+
+TEST_F(AtomicHappensBeforeTest, SeqCstDifferentLocationsStayParallel) {
+  const char *source = R"(
+    @x = global i32 0, align 4
+    @y = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @thread1(i8* %arg) {
+    entry:
+      store i32 1, i32* @x, align 4
+      store atomic i32 1, i32* @x seq_cst, align 4
+      ret i8* null
+    }
+
+    define i8* @thread2(i8* %arg) {
+    entry:
+      store i32 2, i32* @y, align 4
+      %flag = load atomic i32, i32* @y seq_cst, align 4
+      %cond = icmp ne i32 %flag, 0
+      br i1 %cond, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @x, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @thread1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @thread2, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *thread1_func = module->getFunction("thread1");
+  const Function *thread2_func = module->getFunction("thread2");
+  ASSERT_NE(thread1_func, nullptr);
+  ASSERT_NE(thread2_func, nullptr);
+
+  const Instruction *store_x = &thread1_func->getEntryBlock().front();
+  const Instruction *load_x = findInstructionByName(*thread2_func, "val");
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_x, load_x));
+}
+
 // Main function for tests
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
