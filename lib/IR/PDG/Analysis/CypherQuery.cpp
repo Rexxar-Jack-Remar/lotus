@@ -126,15 +126,16 @@ static const char *edgeTypeName(EdgeType t) {
 
 std::unique_ptr<CypherQuery> CypherParser::parse(const std::string &query) {
   clearError();
-  trim(const_cast<std::string &>(query));
+  std::string trimmedQuery = query;
+  trim(trimmedQuery);
 
-  if (query.empty()) {
+  if (trimmedQuery.empty()) {
     setError(CypherErrorCode::PARSE_ERROR, "Empty query", 1, 1);
     return nullptr;
   }
 
   size_t pos = 0;
-  std::vector<std::string> tokens = tokenize(query);
+  std::vector<std::string> tokens = tokenize(trimmedQuery);
 
   if (tokens.empty()) {
     setError(CypherErrorCode::PARSE_ERROR, "No valid tokens found", 1, 1);
@@ -149,15 +150,16 @@ std::unique_ptr<CypherQuery>
 CypherParser::parse(const std::string &query,
                     const CypherQueryParameters &params) {
   clearError();
-  trim(const_cast<std::string &>(query));
+  std::string trimmedQuery = query;
+  trim(trimmedQuery);
 
-  if (query.empty()) {
+  if (trimmedQuery.empty()) {
     setError(CypherErrorCode::PARSE_ERROR, "Empty query", 1, 1);
     return nullptr;
   }
 
   size_t pos = 0;
-  std::vector<std::string> tokens = tokenize(query);
+  std::vector<std::string> tokens = tokenize(trimmedQuery);
 
   if (tokens.empty()) {
     setError(CypherErrorCode::PARSE_ERROR, "No valid tokens found", 1, 1);
@@ -855,6 +857,41 @@ CypherParser::parseUnaryExpression(std::vector<std::string> &tokens,
     return CypherWhereClause::makeNot(std::move(expr));
   }
 
+  if (upperToken == "EXISTS") {
+    consume(tokens, pos);
+    if (!hasMore(tokens, pos) || peek(tokens, pos) != "(") {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected '(' after EXISTS", 0,
+               0);
+      return nullptr;
+    }
+    consume(tokens, pos); // '('
+    if (!hasMore(tokens, pos)) {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected operand in EXISTS", 0,
+               0);
+      return nullptr;
+    }
+
+    std::string variable = consume(tokens, pos);
+    std::string property;
+    if (hasMore(tokens, pos) && peek(tokens, pos) == ".") {
+      consume(tokens, pos);
+      if (!hasMore(tokens, pos)) {
+        setError(CypherErrorCode::SYNTAX_ERROR,
+                 "Expected property after '.' in EXISTS", 0, 0);
+        return nullptr;
+      }
+      property = consume(tokens, pos);
+    }
+
+    if (!hasMore(tokens, pos) || peek(tokens, pos) != ")") {
+      setError(CypherErrorCode::SYNTAX_ERROR, "Expected ')' after EXISTS", 0,
+               0);
+      return nullptr;
+    }
+    consume(tokens, pos); // ')'
+    return CypherWhereClause::makeExists(variable, property);
+  }
+
   if (token == "(") {
     consume(tokens, pos);
     auto expr = parseOrExpression(tokens, pos);
@@ -1249,11 +1286,6 @@ CypherQueryExecutor::execute(const CypherQuery &query,
   boundVariables_.clear();
   boundRelationships_.clear();
 
-  struct MatchRow {
-    std::unordered_map<std::string, Node *> nodes;
-    std::unordered_map<std::string, Edge *> rels;
-  };
-
   auto splitVarProp = [](const std::string &expr) {
     std::string var = expr;
     std::string prop;
@@ -1538,66 +1570,11 @@ CypherQueryExecutor::execute(const CypherQuery &query,
     }
   }
 
-  auto rowSatisfies = [&](const auto &self, const CypherWhereClause &cond,
-                          const MatchRow &row) -> bool {
-    if (cond.isBooleanOp()) {
-      if (cond.getBoolOp() == "NOT") {
-        const auto *child = cond.getChild();
-        return child && !self(self, *child, row);
-      }
-      const auto *left = cond.getLeft();
-      const auto *right = cond.getRight();
-      bool l = left ? self(self, *left, row) : true;
-      bool r = right ? self(self, *right, row) : true;
-      if (cond.getBoolOp() == "AND")
-        return l && r;
-      if (cond.getBoolOp() == "OR")
-        return l || r;
-      return false;
-    }
-
-    const std::string &var = cond.getVariableName();
-    const std::string &prop = cond.getProperty();
-    const auto itNode = row.nodes.find(var);
-    const auto itRel = row.rels.find(var);
-
-    if (cond.isExists()) {
-      if (prop.empty()) {
-        return itNode != row.nodes.end() || itRel != row.rels.end();
-      }
-      if (itNode != row.nodes.end()) {
-        return !getNodeProperty(itNode->second, prop).empty();
-      }
-      if (itRel != row.rels.end()) {
-        return !getEdgeProperty(itRel->second, prop).empty();
-      }
-      return false;
-    }
-
-    std::string lhs;
-    if (itNode != row.nodes.end()) {
-      lhs = getNodeProperty(itNode->second, prop);
-    } else if (itRel != row.rels.end()) {
-      lhs = getEdgeProperty(itRel->second, prop);
-    } else {
-      return false;
-    }
-
-    if (cond.getComparisonOp() == CypherComparisonOp::IN) {
-      for (const auto &v : cond.getListValues()) {
-        if (lhs == v)
-          return true;
-      }
-      return false;
-    }
-    return applyComparison(lhs, cond.getComparisonOp(), cond.getValue());
-  };
-
   if (query.getWhereClause()) {
     std::vector<MatchRow> filteredRows;
     filteredRows.reserve(rows.size());
     for (const auto &row : rows) {
-      if (rowSatisfies(rowSatisfies, *query.getWhereClause(), row)) {
+      if (evaluateCondition(*query.getWhereClause(), row)) {
         filteredRows.push_back(row);
       }
     }
@@ -1762,16 +1739,6 @@ CypherQueryExecutor::execute(const CypherQuery &query,
       boundRelationships_[kv.first].push_back(kv.second);
     }
   }
-  for (auto &kv : boundVariables_) {
-    auto &bucket = kv.second;
-    std::sort(bucket.begin(), bucket.end());
-    bucket.erase(std::unique(bucket.begin(), bucket.end()), bucket.end());
-  }
-  for (auto &kv : boundRelationships_) {
-    auto &bucket = kv.second;
-    std::sort(bucket.begin(), bucket.end());
-    bucket.erase(std::unique(bucket.begin(), bucket.end()), bucket.end());
-  }
 
   std::vector<Node *> projectedNodes;
   std::vector<Edge *> projectedEdges;
@@ -1896,19 +1863,6 @@ CypherQueryExecutor::execute(const CypherQuery &query,
       }
     }
   }
-
-  std::sort(projectedNodes.begin(), projectedNodes.end());
-  projectedNodes.erase(
-      std::unique(projectedNodes.begin(), projectedNodes.end()),
-      projectedNodes.end());
-  std::sort(projectedEdges.begin(), projectedEdges.end());
-  projectedEdges.erase(
-      std::unique(projectedEdges.begin(), projectedEdges.end()),
-      projectedEdges.end());
-  std::sort(projectedScalars.begin(), projectedScalars.end());
-  projectedScalars.erase(
-      std::unique(projectedScalars.begin(), projectedScalars.end()),
-      projectedScalars.end());
 
   std::unique_ptr<CypherResult> result;
   if (wantsScalarProjection && !wantsNodeProjection && !wantsEdgeProjection) {
@@ -2383,128 +2337,95 @@ CypherQueryExecutor::filterByWhere(const std::vector<Edge *> &edges,
   return result;
 }
 
-bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
-                                            Node *node) {
+bool CypherQueryExecutor::evaluateCondition(
+    const CypherWhereClause &condition,
+    const CypherQueryExecutor::MatchRow &row) {
   if (condition.isBooleanOp()) {
     if (condition.getBoolOp() == "NOT") {
       const auto *child = condition.getChild();
-      return child && !evaluateCondition(*child, node);
-    } else {
-      const auto *left = condition.getLeft();
-      const auto *right = condition.getRight();
-      const std::string &op = condition.getBoolOp();
-
-      bool leftResult = left ? evaluateCondition(*left, node) : true;
-      bool rightResult = right ? evaluateCondition(*right, node) : true;
-
-      if (op == "AND") {
-        return leftResult && rightResult;
-      } else if (op == "OR") {
-        return leftResult || rightResult;
-      }
+      return child && !evaluateCondition(*child, row);
     }
+
+    const auto *left = condition.getLeft();
+    const auto *right = condition.getRight();
+    bool left_result = left ? evaluateCondition(*left, row) : true;
+    bool right_result = right ? evaluateCondition(*right, row) : true;
+
+    if (condition.getBoolOp() == "AND")
+      return left_result && right_result;
+    if (condition.getBoolOp() == "OR")
+      return left_result || right_result;
+    return false;
+  }
+
+  const std::string &var = condition.getVariableName();
+  const std::string &prop = condition.getProperty();
+
+  Node *bound_node = nullptr;
+  Edge *bound_edge = nullptr;
+
+  if (var.empty()) {
+    if (row.nodes.size() == 1 && row.rels.empty())
+      bound_node = row.nodes.begin()->second;
+    else if (row.rels.size() == 1 && row.nodes.empty())
+      bound_edge = row.rels.begin()->second;
+  } else {
+    auto it_node = row.nodes.find(var);
+    if (it_node != row.nodes.end())
+      bound_node = it_node->second;
+    auto it_rel = row.rels.find(var);
+    if (it_rel != row.rels.end())
+      bound_edge = it_rel->second;
   }
 
   if (condition.isExists()) {
-    if (!condition.getVariableName().empty()) {
-      auto it = boundVariables_.find(condition.getVariableName());
-      if (it == boundVariables_.end())
-        return false;
-      if (std::find(it->second.begin(), it->second.end(), node) ==
-          it->second.end()) {
-        return true;
-      }
-    }
-    if (condition.getProperty().empty())
-      return true; // Variable existence (row semantics) not modeled yet.
-    return !getNodeProperty(node, condition.getProperty()).empty();
+    if (prop.empty())
+      return bound_node != nullptr || bound_edge != nullptr;
+    if (bound_node != nullptr)
+      return !getNodeProperty(bound_node, prop).empty();
+    if (bound_edge != nullptr)
+      return !getEdgeProperty(bound_edge, prop).empty();
+    return false;
   }
 
-  if (!condition.getVariableName().empty()) {
-    auto it = boundVariables_.find(condition.getVariableName());
-    if (it == boundVariables_.end())
-      return false;
-    if (std::find(it->second.begin(), it->second.end(), node) ==
-        it->second.end()) {
-      return true;
-    }
+  std::string lhs;
+  if (bound_node != nullptr) {
+    lhs = getNodeProperty(bound_node, prop);
+  } else if (bound_edge != nullptr) {
+    lhs = getEdgeProperty(bound_edge, prop);
+  } else {
+    return false;
   }
-
-  const auto &property = condition.getProperty();
-  const auto &value = condition.getValue();
-  std::string nodeValue = getNodeProperty(node, property);
 
   if (condition.getComparisonOp() == CypherComparisonOp::IN) {
     for (const auto &v : condition.getListValues()) {
-      if (nodeValue == v)
+      if (lhs == v)
         return true;
     }
     return false;
   }
 
-  return applyComparison(nodeValue, condition.getComparisonOp(), value);
+  return applyComparison(lhs, condition.getComparisonOp(), condition.getValue());
+}
+
+bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
+                                            Node *node) {
+  MatchRow row;
+  if (!condition.getVariableName().empty())
+    row.nodes[condition.getVariableName()] = node;
+  else
+    row.nodes[""] = node;
+  return evaluateCondition(condition, row);
 }
 
 bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
                                             Edge *edge) {
-  if (condition.isBooleanOp()) {
-    if (condition.getBoolOp() == "NOT") {
-      const auto *child = condition.getChild();
-      return child && !evaluateCondition(*child, edge);
-    } else {
-      const auto *left = condition.getLeft();
-      const auto *right = condition.getRight();
-      const std::string &op = condition.getBoolOp();
-
-      bool leftResult = left ? evaluateCondition(*left, edge) : true;
-      bool rightResult = right ? evaluateCondition(*right, edge) : true;
-
-      if (op == "AND") {
-        return leftResult && rightResult;
-      } else if (op == "OR") {
-        return leftResult || rightResult;
-      }
-    }
-  }
-
-  if (condition.isExists()) {
-    if (!condition.getVariableName().empty()) {
-      auto it = boundRelationships_.find(condition.getVariableName());
-      if (it == boundRelationships_.end())
-        return false;
-      if (std::find(it->second.begin(), it->second.end(), edge) ==
-          it->second.end()) {
-        return true;
-      }
-    }
-    if (condition.getProperty().empty())
-      return true;
-    return !getEdgeProperty(edge, condition.getProperty()).empty();
-  }
-
-  if (!condition.getVariableName().empty()) {
-    auto it = boundRelationships_.find(condition.getVariableName());
-    if (it == boundRelationships_.end())
-      return false;
-    if (std::find(it->second.begin(), it->second.end(), edge) ==
-        it->second.end()) {
-      return true;
-    }
-  }
-
-  const auto &property = condition.getProperty();
-  const auto &value = condition.getValue();
-  std::string edgeValue = getEdgeProperty(edge, property);
-
-  if (condition.getComparisonOp() == CypherComparisonOp::IN) {
-    for (const auto &v : condition.getListValues()) {
-      if (edgeValue == v)
-        return true;
-    }
-    return false;
-  }
-
-  return applyComparison(edgeValue, condition.getComparisonOp(), value);
+  MatchRow row;
+  if (!condition.getVariableName().empty())
+    row.rels[condition.getVariableName()] = edge;
+  else
+    row.rels[""] = edge;
+  return evaluateCondition(condition, row);
 }
 
 bool CypherQueryExecutor::applyComparison(const std::string &nodeValue,

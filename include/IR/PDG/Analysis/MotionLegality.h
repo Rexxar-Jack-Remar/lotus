@@ -2,10 +2,11 @@
  * @file MotionLegality.h
  * @brief Code-motion legality queries over the Program Dependency Graph (PDG).
  *
- * This file provides conservative legality checks for moving a node earlier
- * (hoisting) or later (sinking) relative to an anchor node. The analysis is
- * intended as a production-grade legality oracle for optimization passes such
- * as LICM, sinking, and local scheduling.
+ * This file provides conservative PDG-based legality checks for moving a node
+ * earlier (hoisting) or later (sinking) relative to an anchor node. The
+ * analysis is a heuristic filter for optimization passes such as LICM,
+ * sinking, and local scheduling; it does not model dominance, loop structure,
+ * or MemorySSA-based legality.
  */
 
 #pragma once

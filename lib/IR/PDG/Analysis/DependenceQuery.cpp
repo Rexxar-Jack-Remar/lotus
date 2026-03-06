@@ -341,25 +341,21 @@ DependenceDistance::DistanceMap DependenceDistance::computeDistances(
     if (max_depth > 0 && depth >= max_depth)
       continue;
 
-    try {
-      for (auto *edge : get_edges(current)) {
-        if (edge == nullptr)
-          continue;
-        if (!isEdgeAllowed(edge->getEdgeType(), edge_types))
-          continue;
+    for (auto *edge : get_edges(current)) {
+      if (edge == nullptr)
+        continue;
+      if (!isEdgeAllowed(edge->getEdgeType(), edge_types))
+        continue;
 
-        Node *neighbor = get_neighbor(edge);
-        if (neighbor == nullptr)
-          continue;
+      Node *neighbor = get_neighbor(edge);
+      if (neighbor == nullptr)
+        continue;
 
-        size_t nd = depth + 1;
-        if (distances.find(neighbor) == distances.end()) {
-          distances[neighbor] = nd;
-          worklist.push({neighbor, nd});
-        }
+      size_t nd = depth + 1;
+      if (distances.find(neighbor) == distances.end()) {
+        distances[neighbor] = nd;
+        worklist.push({neighbor, nd});
       }
-    } catch (...) {
-      continue;
     }
   }
 

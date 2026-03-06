@@ -11,6 +11,50 @@ using namespace llvm;
 
 namespace pdg {
 
+namespace {
+bool usesValueAsPointerOperand(const Value *value, const Instruction *user) {
+  if (value == nullptr || user == nullptr)
+    return false;
+
+  if (auto *load = dyn_cast<LoadInst>(user))
+    return load->getPointerOperand() == value;
+  if (auto *store = dyn_cast<StoreInst>(user))
+    return store->getPointerOperand() == value;
+  if (auto *gep = dyn_cast<GetElementPtrInst>(user))
+    return gep->getPointerOperand() == value;
+
+  return false;
+}
+
+bool applyThinCallStackTransition(bool forward, Node *current, Node *neighbor,
+                                  EdgeType edge_type,
+                                  std::vector<Node *> &call_stack) {
+  if (edge_type == EdgeType::CONTROLDEP_CALLINV) {
+    if (forward) {
+      call_stack.push_back(current);
+      return true;
+    }
+    if (call_stack.empty() || neighbor != call_stack.back())
+      return false;
+    call_stack.pop_back();
+    return true;
+  }
+
+  if (edge_type == EdgeType::CONTROLDEP_CALLRET) {
+    if (forward) {
+      if (call_stack.empty() || neighbor != call_stack.back())
+        return false;
+      call_stack.pop_back();
+      return true;
+    }
+    call_stack.push_back(current);
+    return true;
+  }
+
+  return true;
+}
+} // namespace
+
 // ==================== ThinSlicing Implementation ====================
 
 ThinSlicing::NodeSet
@@ -279,16 +323,10 @@ ThinSlicing::NodeSet ThinSlicing::traverseBackwardContextSensitive(
       // Handle control edges for CFL-reachability stack matching
       // These edges are used for context matching but are NOT added to thin
       // slice
-      if (et == EdgeType::CONTROLDEP_CALLRET &&
-          current->getNodeType() == GraphNodeType::INST_RET) {
-        // Backward: return edge pushes return site onto stack
-        new_stack.push_back(current);
-      } else if (et == EdgeType::CONTROLDEP_CALLINV) {
-        // Backward: call edge pops matching return site from stack
-        if (!new_stack.empty() && neighbor == new_stack.back()) {
-          new_stack.pop_back();
-        } else if (!new_stack.empty()) {
-          // Skip: call/return mismatch (CFL-reachability constraint)
+      if (et == EdgeType::CONTROLDEP_CALLRET ||
+          et == EdgeType::CONTROLDEP_CALLINV) {
+        if (!applyThinCallStackTransition(false, current, neighbor, et,
+                                          new_stack)) {
           continue;
         }
         // Control edges are NOT value flow edges - don't add to thin slice
@@ -394,16 +432,10 @@ ThinSlicing::NodeSet ThinSlicing::traverseForwardContextSensitive(
       // Handle control edges for CFL-reachability stack matching
       // These edges are used for context matching but are NOT added to thin
       // slice
-      if (et == EdgeType::CONTROLDEP_CALLINV &&
-          current->getNodeType() == GraphNodeType::INST_FUNCALL) {
-        // Forward: call edge pushes call site onto stack
-        new_stack.push_back(current);
-      } else if (et == EdgeType::CONTROLDEP_CALLRET) {
-        // Forward: return edge pops matching call site from stack
-        if (!new_stack.empty() && neighbor == new_stack.back()) {
-          new_stack.pop_back();
-        } else if (!new_stack.empty()) {
-          // Skip: call/return mismatch (CFL-reachability constraint)
+      if (et == EdgeType::CONTROLDEP_CALLINV ||
+          et == EdgeType::CONTROLDEP_CALLRET) {
+        if (!applyThinCallStackTransition(true, current, neighbor, et,
+                                          new_stack)) {
           continue;
         }
         // Control edges are NOT value flow edges - don't add to thin slice
@@ -474,61 +506,58 @@ bool ThinSlicing::isValueFlowEdge(Edge *edge, Node *src_node, Node *dst_node) {
     return false;
 
   EdgeType et = edge->getEdgeType();
-
-  // DEF_USE edges represent direct value flow
-  if (et == EdgeType::DATA_DEF_USE || et == EdgeType::DATA_RAW ||
-      et == EdgeType::DATA_RET || et == EdgeType::VAL_DEP)
+  switch (et) {
+  case EdgeType::DATA_RET:
+  case EdgeType::VAL_DEP:
+  case EdgeType::DATA_ALIAS:
+  case EdgeType::PARAMETER_IN:
+  case EdgeType::PARAMETER_OUT:
+  case EdgeType::PARAMETER_FIELD:
     return true;
+  case EdgeType::DATA_DEF_USE:
+  case EdgeType::DATA_RAW:
+  case EdgeType::DATA_READ:
+    break;
+  default:
+    return false;
+  }
 
-  // For load instructions, check if the edge is from the loaded value
-  // (not the pointer operand)
-  if (auto *load_inst = dyn_cast_or_null<LoadInst>(dst_node->getValue())) {
-    Value *ptr_operand = load_inst->getPointerOperand();
-    if (src_node->getValue() == ptr_operand) {
-      // This is a dependency on the pointer (base pointer flow), not value
+  Value *src_value = src_node->getValue();
+  Value *dst_value = dst_node->getValue();
+  auto *dst_inst = dyn_cast_or_null<Instruction>(dst_value);
+  auto *src_inst = dyn_cast_or_null<Instruction>(src_value);
+
+  if (usesValueAsPointerOperand(src_value, dst_inst))
+    return false;
+
+  if (auto *gep = dyn_cast_or_null<GetElementPtrInst>(src_value)) {
+    if (usesValueAsPointerOperand(gep, dst_inst))
       return false;
-    }
   }
 
-  // For store instructions, check if the edge is for the stored value
-  // (not the pointer operand)
-  if (auto *store_inst = dyn_cast_or_null<StoreInst>(src_node->getValue())) {
-    Value *ptr_operand = store_inst->getPointerOperand();
-    if (dst_node->getValue() == ptr_operand) {
+  if (auto *store = dyn_cast_or_null<StoreInst>(dst_value)) {
+    return store->getValueOperand() == src_value;
+  }
+
+  if (auto *load = dyn_cast_or_null<LoadInst>(dst_value)) {
+    return load->getPointerOperand() != src_value;
+  }
+
+  if (auto *gep = dyn_cast_or_null<GetElementPtrInst>(dst_value)) {
+    return gep->getPointerOperand() != src_value;
+  }
+
+  if (auto *store = dyn_cast_or_null<StoreInst>(src_value)) {
+    if (dst_value != nullptr && store->getPointerOperand() == dst_value)
       return false;
-    }
   }
 
-  // For GEP, the result is a pointer, so def-use is base pointer flow
-  if (auto *gep = dyn_cast_or_null<GetElementPtrInst>(src_node->getValue())) {
-    if (et == EdgeType::DATA_DEF_USE) {
-      // GEP's result being used - this is pointer flow
-      // Check if it's being used as a pointer operand
-      if (auto *user_inst =
-              dyn_cast_or_null<Instruction>(dst_node->getValue())) {
-        if (auto *li = dyn_cast<LoadInst>(user_inst)) {
-          if (li->getPointerOperand() == gep)
-            return false;
-        }
-        if (auto *si = dyn_cast<StoreInst>(user_inst)) {
-          if (si->getPointerOperand() == gep)
-            return false;
-        }
-      }
-    }
+  if (auto *gep = dyn_cast_or_null<GetElementPtrInst>(src_value)) {
+    if (dst_inst != nullptr && usesValueAsPointerOperand(gep, dst_inst))
+      return false;
   }
 
-  // ALIAS edges between memory operations can represent value flow
-  // if they access the same field
-  if (et == EdgeType::DATA_ALIAS)
-    return true;
-
-  // PARAMETER edges for interprocedural value flow
-  if (et == EdgeType::PARAMETER_IN || et == EdgeType::PARAMETER_OUT ||
-      et == EdgeType::PARAMETER_FIELD)
-    return true;
-
-  return true;
+  return src_inst != nullptr || dst_inst != nullptr;
 }
 
 bool ThinSlicing::isFieldAccess(Node *node) {

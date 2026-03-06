@@ -755,6 +755,11 @@ public:
   const CypherQueryStats &getLastStats() const { return lastStats_; }
 
 private:
+  struct MatchRow {
+    std::unordered_map<std::string, Node *> nodes;
+    std::unordered_map<std::string, Edge *> rels;
+  };
+
   ProgramGraph &pdg_;
   std::string lastError_;
   CypherQueryStats lastStats_;
@@ -769,6 +774,8 @@ private:
   int unboundedMaxHops_ = 5;
 
   // Helper methods
+  bool evaluateCondition(const CypherWhereClause &condition,
+                         const MatchRow &row);
   bool evaluateCondition(const CypherWhereClause &condition, Node *node);
   bool evaluateCondition(const CypherWhereClause &condition, Edge *edge);
   std::string getNodeProperty(Node *node, const std::string &property);

@@ -21,6 +21,38 @@ using namespace llvm;
 
 namespace pdg {
 
+namespace {
+bool applyCallStackTransition(bool forward, Node *current, Node *neighbor,
+                              EdgeType edge_type,
+                              std::vector<Node *> &call_stack) {
+  if (edge_type == EdgeType::CONTROLDEP_CALLINV) {
+    if (forward) {
+      call_stack.push_back(current);
+      return true;
+    }
+    if (call_stack.empty() || neighbor != call_stack.back())
+      return false;
+    call_stack.pop_back();
+    return true;
+  }
+
+  if (edge_type == EdgeType::CONTROLDEP_CALLRET) {
+    if (forward) {
+      if (call_stack.empty() || neighbor != call_stack.back())
+        return false;
+      call_stack.pop_back();
+      return true;
+    }
+    // Backward traversal follows the reversed return edge from the callsite
+    // into the callee, so the callsite itself is the stack token.
+    call_stack.push_back(current);
+    return true;
+  }
+
+  return true;
+}
+} // namespace
+
 // ==================== SliceOptions ====================
 
 std::set<EdgeType> SliceOptions::getEdgeTypes() const {
@@ -211,7 +243,8 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
     // Summary cache: when we enter a callee (stack = [call_site]), reuse or
     // compute summary.
     if (use_summary_cache && summary_cache != nullptr &&
-        call_stack.size() == 1u) {
+        call_stack.size() == 1u &&
+        current->getNodeType() == GraphNodeType::FUNC_ENTRY) {
       Node *call_site = call_stack.back();
       auto key = std::make_pair(current, call_site);
       auto it = summary_cache->find(key);
@@ -237,62 +270,37 @@ ContextSensitiveSlicing::NodeSet ContextSensitiveSlicing::traverseWithStack(
           computeProcedureSummary(current, call_site, edge_types, forward);
     }
 
-    try {
-      auto &edges =
-          forward ? current->getOutEdgeSet() : current->getInEdgeSet();
-      for (auto *edge : edges) {
-        if (edge == nullptr ||
-            (!edge_types.empty() &&
-             edge_types.find(edge->getEdgeType()) == edge_types.end())) {
-          continue;
-        }
-
-        Node *neighbor = forward ? edge->getDstNode() : edge->getSrcNode();
-        if (neighbor == nullptr) {
-          continue;
-        }
-
-        std::vector<Node *> new_stack = call_stack;
-
-        if (forward) {
-          if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLINV &&
-              current->getNodeType() == GraphNodeType::INST_FUNCALL) {
-            new_stack.push_back(current);
-          } else if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLRET) {
-            if (!new_stack.empty() && neighbor == new_stack.back()) {
-              new_stack.pop_back();
-            } else {
-              continue;
-            }
-          }
-        } else {
-          if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLRET &&
-              current->getNodeType() == GraphNodeType::INST_RET) {
-            new_stack.push_back(current);
-          } else if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLINV) {
-            if (!new_stack.empty() && neighbor == new_stack.back()) {
-              new_stack.pop_back();
-            } else {
-              continue;
-            }
-          }
-        }
-
-        if (limits.max_stack_depth > 0 &&
-            new_stack.size() > limits.max_stack_depth) {
-          if (diagnostics != nullptr)
-            diagnostics->stack_depth_limit_hit = true;
-          continue;
-        }
-
-        auto new_state = std::make_pair(neighbor, new_stack);
-        if (visited.find(new_state) == visited.end()) {
-          slice.insert(neighbor);
-          worklist.push({neighbor, new_stack});
-        }
+    auto &edges = forward ? current->getOutEdgeSet() : current->getInEdgeSet();
+    for (auto *edge : edges) {
+      if (edge == nullptr ||
+          (!edge_types.empty() &&
+           edge_types.find(edge->getEdgeType()) == edge_types.end())) {
+        continue;
       }
-    } catch (...) {
-      continue;
+
+      Node *neighbor = forward ? edge->getDstNode() : edge->getSrcNode();
+      if (neighbor == nullptr) {
+        continue;
+      }
+
+      std::vector<Node *> new_stack = call_stack;
+      if (!applyCallStackTransition(forward, current, neighbor,
+                                    edge->getEdgeType(), new_stack)) {
+        continue;
+      }
+
+      if (limits.max_stack_depth > 0 &&
+          new_stack.size() > limits.max_stack_depth) {
+        if (diagnostics != nullptr)
+          diagnostics->stack_depth_limit_hit = true;
+        continue;
+      }
+
+      auto new_state = std::make_pair(neighbor, new_stack);
+      if (visited.find(new_state) == visited.end()) {
+        slice.insert(neighbor);
+        worklist.push({neighbor, new_stack});
+      }
     }
   }
 
@@ -335,32 +343,14 @@ ContextSensitiveSlicing::computeProcedureSummary(
         continue;
 
       std::vector<Node *> new_stack = call_stack;
-      if (forward) {
-        if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLINV &&
-            current->getNodeType() == GraphNodeType::INST_FUNCALL) {
-          new_stack.push_back(current);
-        } else if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLRET) {
-          if (!new_stack.empty() && neighbor == new_stack.back()) {
-            new_stack.pop_back();
-            if (new_stack.empty())
-              sum.returns_to_caller = true;
-          } else {
-            continue;
-          }
-        }
-      } else {
-        if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLRET &&
-            current->getNodeType() == GraphNodeType::INST_RET) {
-          new_stack.push_back(current);
-        } else if (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLINV) {
-          if (!new_stack.empty() && neighbor == new_stack.back()) {
-            new_stack.pop_back();
-            if (new_stack.empty())
-              sum.returns_to_caller = true;
-          } else {
-            continue;
-          }
-        }
+      if (!applyCallStackTransition(forward, current, neighbor,
+                                    edge->getEdgeType(), new_stack)) {
+        continue;
+      }
+      if (call_stack.size() == 1u && new_stack.empty() &&
+          (edge->getEdgeType() == EdgeType::CONTROLDEP_CALLINV ||
+           edge->getEdgeType() == EdgeType::CONTROLDEP_CALLRET)) {
+        sum.returns_to_caller = true;
       }
       auto new_state = std::make_pair(neighbor, new_stack);
       if (visited.find(new_state) == visited.end()) {

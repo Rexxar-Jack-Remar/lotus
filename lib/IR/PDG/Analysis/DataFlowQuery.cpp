@@ -69,23 +69,19 @@ std::set<Node *> bfsCollect(Node &start, const std::set<EdgeType> &edge_types,
     if (max_depth > 0 && depth >= max_depth)
       continue;
 
-    try {
-      for (auto *edge : get_edges(current)) {
-        if (edge == nullptr)
-          continue;
-        if (!isEdgeAllowed(edge->getEdgeType(), edge_types))
-          continue;
+    for (auto *edge : get_edges(current)) {
+      if (edge == nullptr)
+        continue;
+      if (!isEdgeAllowed(edge->getEdgeType(), edge_types))
+        continue;
 
-        Node *neighbor = get_neighbor(edge);
-        if (neighbor == nullptr || visited.count(neighbor))
-          continue;
+      Node *neighbor = get_neighbor(edge);
+      if (neighbor == nullptr || visited.count(neighbor))
+        continue;
 
-        visited.insert(neighbor);
-        result.insert(neighbor);
-        worklist.push({neighbor, depth + 1});
-      }
-    } catch (...) {
-      continue;
+      visited.insert(neighbor);
+      result.insert(neighbor);
+      worklist.push({neighbor, depth + 1});
     }
   }
 
@@ -364,23 +360,19 @@ DataOnlySlicing::forwardSlice(const NodeSet &start_nodes, size_t max_depth) {
     if (max_depth > 0 && depth >= max_depth)
       continue;
 
-    try {
-      for (auto *edge : current->getOutEdgeSet()) {
-        if (edge == nullptr)
-          continue;
-        if (!data_edges.count(edge->getEdgeType()))
-          continue;
+    for (auto *edge : current->getOutEdgeSet()) {
+      if (edge == nullptr)
+        continue;
+      if (!data_edges.count(edge->getEdgeType()))
+        continue;
 
-        Node *neighbor = edge->getDstNode();
-        if (neighbor == nullptr || visited.count(neighbor))
-          continue;
+      Node *neighbor = edge->getDstNode();
+      if (neighbor == nullptr || visited.count(neighbor))
+        continue;
 
-        visited.insert(neighbor);
-        result.insert(neighbor);
-        worklist.push({neighbor, depth + 1});
-      }
-    } catch (...) {
-      continue;
+      visited.insert(neighbor);
+      result.insert(neighbor);
+      worklist.push({neighbor, depth + 1});
     }
   }
 
@@ -416,23 +408,19 @@ DataOnlySlicing::backwardSlice(const NodeSet &end_nodes, size_t max_depth) {
     if (max_depth > 0 && depth >= max_depth)
       continue;
 
-    try {
-      for (auto *edge : current->getInEdgeSet()) {
-        if (edge == nullptr)
-          continue;
-        if (!data_edges.count(edge->getEdgeType()))
-          continue;
+    for (auto *edge : current->getInEdgeSet()) {
+      if (edge == nullptr)
+        continue;
+      if (!data_edges.count(edge->getEdgeType()))
+        continue;
 
-        Node *neighbor = edge->getSrcNode();
-        if (neighbor == nullptr || visited.count(neighbor))
-          continue;
+      Node *neighbor = edge->getSrcNode();
+      if (neighbor == nullptr || visited.count(neighbor))
+        continue;
 
-        visited.insert(neighbor);
-        result.insert(neighbor);
-        worklist.push({neighbor, depth + 1});
-      }
-    } catch (...) {
-      continue;
+      visited.insert(neighbor);
+      result.insert(neighbor);
+      worklist.push({neighbor, depth + 1});
     }
   }
 

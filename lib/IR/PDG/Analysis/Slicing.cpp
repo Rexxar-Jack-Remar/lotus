@@ -79,27 +79,22 @@ traverseBFS(const ForwardSlicing::NodeSet &start_nodes,
 
     visited.insert(current);
 
-    try {
-      // Explore all edges from current node
-      for (auto *edge : get_edges(current)) {
-        // Skip null edges or edges not in allowed types
-        if (edge == nullptr ||
-            (!edge_types.empty() &&
-             edge_types.find(edge->getEdgeType()) == edge_types.end()))
-          continue;
+    // Explore all edges from current node
+    for (auto *edge : get_edges(current)) {
+      // Skip null edges or edges not in allowed types
+      if (edge == nullptr ||
+          (!edge_types.empty() &&
+           edge_types.find(edge->getEdgeType()) == edge_types.end()))
+        continue;
 
-        Node *neighbor = get_neighbor(edge);
-        // Skip null neighbors or already visited neighbors
-        if (neighbor == nullptr || visited.find(neighbor) != visited.end())
-          continue;
+      Node *neighbor = get_neighbor(edge);
+      // Skip null neighbors or already visited neighbors
+      if (neighbor == nullptr || visited.find(neighbor) != visited.end())
+        continue;
 
-        // Add neighbor to slice and queue for further exploration
-        slice.insert(neighbor);
-        worklist.push({neighbor, depth + 1});
-      }
-    } catch (...) {
-      // Skip this node if there's an error accessing its edges
-      continue;
+      // Add neighbor to slice and queue for further exploration
+      slice.insert(neighbor);
+      worklist.push({neighbor, depth + 1});
     }
   }
 

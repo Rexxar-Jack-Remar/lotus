@@ -21,7 +21,9 @@ std::set<EdgeType> SchedulingQuery::defaultSchedulingEdgeTypes() {
           EdgeType::DATA_RET,      EdgeType::PARAMETER_IN,
           EdgeType::PARAMETER_OUT, EdgeType::PARAMETER_FIELD,
           EdgeType::VAL_DEP,       EdgeType::GLOBAL_DEP,
-          EdgeType::CONTROLDEP_BR, EdgeType::CONTROLDEP_IND_BR};
+          EdgeType::CONTROLDEP_CALLINV, EdgeType::CONTROLDEP_CALLRET,
+          EdgeType::CONTROLDEP_ENTRY, EdgeType::CONTROLDEP_BR,
+          EdgeType::CONTROLDEP_IND_BR};
 }
 
 IndependenceResult
@@ -103,52 +105,65 @@ SchedulingQuery::topologicalLevels(const NodeSet &region,
   const std::set<EdgeType> edge_types = policy.edge_types.empty()
                                             ? defaultSchedulingEdgeTypes()
                                             : policy.edge_types;
-  auto adj = buildAdjacency(region, edge_types);
-  std::unordered_map<Node *, size_t> indegree;
-  for (Node *n : region)
-    indegree[n] = 0;
-  for (const auto &kv : adj) {
-    for (Node *dst : kv.second)
-      ++indegree[dst];
+  auto sccs = stronglyConnectedComponents(region, policy);
+  if (sccs.empty())
+    return levels;
+
+  std::unordered_map<Node *, size_t> node_to_scc;
+  for (size_t i = 0; i < sccs.size(); ++i) {
+    for (Node *node : sccs[i]) {
+      if (node != nullptr)
+        node_to_scc[node] = i;
+    }
   }
 
-  std::queue<Node *> q;
-  for (Node *n : region) {
-    if (indegree[n] == 0)
-      q.push(n);
+  std::vector<std::set<size_t>> scc_adj(sccs.size());
+  std::vector<size_t> indegree(sccs.size(), 0);
+  for (Node *node : region) {
+    if (node == nullptr)
+      continue;
+    const size_t src_scc = node_to_scc[node];
+    for (auto *edge : node->getOutEdgeSet()) {
+      if (edge == nullptr || !isEdgeAllowed(edge->getEdgeType(), edge_types))
+        continue;
+      Node *dst = edge->getDstNode();
+      if (dst == nullptr || !region.count(dst))
+        continue;
+      const size_t dst_scc = node_to_scc[dst];
+      if (src_scc != dst_scc && scc_adj[src_scc].insert(dst_scc).second)
+        ++indegree[dst_scc];
+    }
   }
 
-  std::unordered_set<Node *> emitted;
-  while (!q.empty()) {
-    size_t layer_size = q.size();
+  std::queue<size_t> ready;
+  for (size_t i = 0; i < sccs.size(); ++i) {
+    if (indegree[i] == 0)
+      ready.push(i);
+  }
+
+  size_t emitted_sccs = 0;
+  while (!ready.empty()) {
+    const size_t layer_size = ready.size();
     NodeSet level;
     for (size_t i = 0; i < layer_size; ++i) {
-      Node *n = q.front();
-      q.pop();
-      if (emitted.count(n))
-        continue;
-      emitted.insert(n);
-      level.insert(n);
-      for (Node *dst : adj[n]) {
-        if (--indegree[dst] == 0)
-          q.push(dst);
+      const size_t scc_idx = ready.front();
+      ready.pop();
+      ++emitted_sccs;
+      level.insert(sccs[scc_idx].begin(), sccs[scc_idx].end());
+      for (size_t succ : scc_adj[scc_idx]) {
+        if (--indegree[succ] == 0)
+          ready.push(succ);
       }
     }
     if (!level.empty())
       levels.push_back(std::move(level));
   }
 
-  // Remaining nodes are part of cycles; emit SCC groups as final levels.
-  if (emitted.size() < region.size()) {
-    NodeSet remaining;
-    for (Node *n : region) {
-      if (!emitted.count(n))
-        remaining.insert(n);
-    }
-    auto sccs = stronglyConnectedComponents(remaining, policy);
-    for (auto &scc : sccs) {
-      if (!scc.empty())
-        levels.push_back(std::move(scc));
+  if (emitted_sccs != sccs.size()) {
+    for (size_t i = 0; i < sccs.size(); ++i) {
+      if (indegree[i] == 0)
+        continue;
+      levels.push_back(sccs[i]);
     }
   }
 
