@@ -21,9 +21,10 @@ namespace transform {
  * @class RemoveErrorCallsPass
  * @brief Replaces __VERIFIER_error() and __assert_fail() calls with assumptions
  *
- * This pass replaces error calls with __VERIFIER_assume(0) or __VERIFIER_exit(0),
- * which silently abort the path without checking for leaks. Useful for certain
- * verification scenarios where error paths should be eliminated.
+ * This pass replaces error calls with __VERIFIER_assume(0) or
+ * __VERIFIER_exit(0), which silently abort the path without checking for leaks.
+ * Useful for certain verification scenarios where error paths should be
+ * eliminated.
  */
 class RemoveErrorCallsPass : public llvm::FunctionPass {
 public:

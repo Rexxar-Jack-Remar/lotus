@@ -15,8 +15,9 @@ namespace backend {
 namespace {
 static std::string toLower(const std::string &s) {
   std::string result = s;
-  std::transform(result.begin(), result.end(), result.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::transform(
+      result.begin(), result.end(), result.begin(),
+      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   return result;
 }
 
@@ -53,14 +54,14 @@ public:
     cmd.insert(cmd.end(), task.extraArgs.begin(), task.extraArgs.end());
     return cmd;
   }
-  
+
   VerificationResultInfo parseResult(const std::string &output,
                                      int exitCode) const override {
     VerificationResultInfo info;
     info.exitCode = exitCode;
-    
+
     std::string lower = toLower(output);
-    
+
     // SeaHorn typically outputs "sat" (error found) or "unsat" (safe)
     if (hasToken(lower, "unsat") || hasToken(lower, "safe") ||
         hasToken(lower, "true") || hasToken(lower, "verification successful")) {
@@ -68,7 +69,8 @@ public:
       info.message = "Property holds (no error found)";
     } else if (hasToken(lower, "sat") || hasToken(lower, "unsafe") ||
                hasToken(lower, "false") || hasToken(lower, "error found") ||
-               hasToken(lower, "__verifier_error") || hasToken(lower, "counterexample")) {
+               hasToken(lower, "__verifier_error") ||
+               hasToken(lower, "counterexample")) {
       info.result = VerificationResult::False;
       info.message = "Property violated (error found)";
       // Try to extract error trace
@@ -81,12 +83,13 @@ public:
       info.message = "Verification timed out";
     } else if (exitCode != 0) {
       info.result = VerificationResult::Error;
-      info.message = "Verification tool error (exit code " + std::to_string(exitCode) + ")";
+      info.message = "Verification tool error (exit code " +
+                     std::to_string(exitCode) + ")";
     } else {
       info.result = VerificationResult::Unknown;
       info.message = "Could not determine verification result";
     }
-    
+
     return info;
   }
 };
@@ -106,19 +109,19 @@ public:
     cmd.insert(cmd.end(), task.extraArgs.begin(), task.extraArgs.end());
     return cmd;
   }
-  
+
   VerificationResultInfo parseResult(const std::string &output,
                                      int exitCode) const override {
     VerificationResultInfo info;
     info.exitCode = exitCode;
-    
+
     std::string lower = toLower(output);
-    
+
     if (hasToken(lower, "reachable") || hasToken(lower, "true")) {
       info.result = VerificationResult::True;
       info.message = "Target is reachable";
-    } else if (hasToken(lower, "not reachable") || hasToken(lower, "unreachable") ||
-               hasToken(lower, "false")) {
+    } else if (hasToken(lower, "not reachable") ||
+               hasToken(lower, "unreachable") || hasToken(lower, "false")) {
       info.result = VerificationResult::False;
       info.message = "Target is not reachable";
     } else if (exitCode != 0) {
@@ -128,7 +131,7 @@ public:
       info.result = VerificationResult::Unknown;
       info.message = "Could not determine result";
     }
-    
+
     return info;
   }
 };
@@ -150,14 +153,14 @@ public:
     cmd.insert(cmd.end(), task.extraArgs.begin(), task.extraArgs.end());
     return cmd;
   }
-  
+
   VerificationResultInfo parseResult(const std::string &output,
                                      int exitCode) const override {
     VerificationResultInfo info;
     info.exitCode = exitCode;
-    
+
     std::string lower = toLower(output);
-    
+
     if (hasToken(lower, "safe") || hasToken(lower, "true") ||
         hasToken(lower, "property holds")) {
       info.result = VerificationResult::True;
@@ -168,12 +171,13 @@ public:
       info.message = "Property violated";
     } else if (exitCode != 0) {
       info.result = VerificationResult::Error;
-      info.message = "SymAbsAI error (exit code " + std::to_string(exitCode) + ")";
+      info.message =
+          "SymAbsAI error (exit code " + std::to_string(exitCode) + ")";
     } else {
       info.result = VerificationResult::Unknown;
       info.message = "Could not determine result";
     }
-    
+
     return info;
   }
 };
@@ -200,14 +204,14 @@ public:
     cmd.insert(cmd.end(), task.extraArgs.begin(), task.extraArgs.end());
     return cmd;
   }
-  
+
   VerificationResultInfo parseResult(const std::string &output,
                                      int exitCode) const override {
     VerificationResultInfo info;
     info.exitCode = exitCode;
-    
+
     std::string lower = toLower(output);
-    
+
     // CLAM typically outputs "safe" or "unsafe"
     if (hasToken(lower, "safe") || hasToken(lower, "true") ||
         hasToken(lower, "no error")) {
@@ -224,12 +228,14 @@ public:
       info.result = VerificationResult::Unknown;
       info.message = "Could not determine result";
     }
-    
+
     return info;
   }
 };
 
-static bool eqLower(StringRef a, StringRef b) { return a.equals_insensitive(b); }
+static bool eqLower(StringRef a, StringRef b) {
+  return a.equals_insensitive(b);
+}
 
 } // namespace
 
@@ -242,19 +248,22 @@ std::vector<std::string> BackendRegistry::availableBackends() const {
   return {"seahorn", "sifa", "symabs_ai", "clam"};
 }
 
-std::unique_ptr<IBackend> BackendRegistry::create(const std::string &name) const {
+std::unique_ptr<IBackend>
+BackendRegistry::create(const std::string &name) const {
   if (eqLower(name, "seahorn"))
     return std::unique_ptr<IBackend>(new SeahornBackend());
   if (eqLower(name, "sifa"))
     return std::unique_ptr<IBackend>(new SifaBackend());
-  if (eqLower(name, "symabs_ai") || eqLower(name, "symbolic_abstraction") || eqLower(name, "symabs"))
+  if (eqLower(name, "symabs_ai") || eqLower(name, "symbolic_abstraction") ||
+      eqLower(name, "symabs"))
     return std::unique_ptr<IBackend>(new SymAbsAIBackend());
   if (eqLower(name, "clam"))
     return std::unique_ptr<IBackend>(new ClamBackend());
   return nullptr;
 }
 
-std::vector<std::string> BackendRegistry::recommend(PropertyClass property) const {
+std::vector<std::string>
+BackendRegistry::recommend(PropertyClass property) const {
   std::vector<std::string> out;
   for (const std::string &name : availableBackends()) {
     std::unique_ptr<IBackend> b = create(name);
@@ -268,9 +277,11 @@ PropertyClass parsePropertyClass(const std::string &name) {
   StringRef N(name);
   if (N.empty())
     return PropertyClass::Unknown;
-  if (N.equals_insensitive("unreach-call") || N.equals_insensitive("reachability"))
+  if (N.equals_insensitive("unreach-call") ||
+      N.equals_insensitive("reachability"))
     return PropertyClass::Reachability;
-  if (N.equals_insensitive("memsafety") || N.equals_insensitive("valid-memsafety"))
+  if (N.equals_insensitive("memsafety") ||
+      N.equals_insensitive("valid-memsafety"))
     return PropertyClass::MemSafety;
   if (N.equals_insensitive("no-overflow") || N.equals_insensitive("overflow"))
     return PropertyClass::Overflow;
@@ -297,9 +308,11 @@ std::string toString(PropertyClass property) {
 
 VerificationResult parseResultFromString(const std::string &str) {
   std::string lower = toLower(str);
-  if (hasToken(lower, "true") || hasToken(lower, "safe") || hasToken(lower, "unsat"))
+  if (hasToken(lower, "true") || hasToken(lower, "safe") ||
+      hasToken(lower, "unsat"))
     return VerificationResult::True;
-  if (hasToken(lower, "false") || hasToken(lower, "unsafe") || hasToken(lower, "sat"))
+  if (hasToken(lower, "false") || hasToken(lower, "unsafe") ||
+      hasToken(lower, "sat"))
     return VerificationResult::False;
   if (hasToken(lower, "timeout"))
     return VerificationResult::Timeout;

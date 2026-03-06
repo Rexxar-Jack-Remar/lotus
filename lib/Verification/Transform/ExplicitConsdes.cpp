@@ -42,7 +42,9 @@ void fillFromInitializer(std::vector<FunctionEntry> &target, Constant *init) {
   auto *inner = ty->getArrayElementType();
   if (inner->getStructNumElements() != 3 ||
       !inner->getStructElementType(0)->isIntegerTy() ||
-      !inner->getStructElementType(1)->getPointerElementType()->isFunctionTy() ||
+      !inner->getStructElementType(1)
+           ->getPointerElementType()
+           ->isFunctionTy() ||
       !inner->getStructElementType(2)->isPointerTy()) {
     errs() << "explicit-consdes: unexpected type of element in global "
               "var initializer\n";
@@ -252,9 +254,7 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createExplicitConsdesPass() {
-  return new ExplicitConsdesPass();
-}
+llvm::Pass *createExplicitConsdesPass() { return new ExplicitConsdesPass(); }
 
 } // namespace transform
 } // namespace verification

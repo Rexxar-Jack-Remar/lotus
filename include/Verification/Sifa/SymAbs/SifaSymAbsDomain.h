@@ -16,7 +16,6 @@
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 #include "Verification/Sifa/Log/SifaLogger.h"
-
 #include "Verification/SymAbsAI/Analyzers/Analyzer.h"
 #include "Verification/SymAbsAI/Core/DomainConstructor.h"
 #include "Verification/SymAbsAI/Core/Fragment.h"
@@ -51,22 +50,28 @@ public:
   bool isBottom(const State &s) const override { return !s || s->isBottom(); }
 
   bool leq(const State &a, const State &b) const override {
-    if (isBottom(a)) return true;
-    if (isBottom(b)) return isBottom(a);
+    if (isBottom(a))
+      return true;
+    if (isBottom(b))
+      return isBottom(a);
     return (*a) <= (*b);
   }
 
   State join(const State &a, const State &b) const override {
-    if (isBottom(a)) return b;
-    if (isBottom(b)) return a;
+    if (isBottom(a))
+      return b;
+    if (isBottom(b))
+      return a;
     std::unique_ptr<symabs_ai::AbstractValue> out(a->clone());
     out->joinWith(*b);
     return State(out.release());
   }
 
   State widen(const State &previous, const State &next) const override {
-    if (isBottom(previous)) return next;
-    if (isBottom(next)) return previous;
+    if (isBottom(previous))
+      return next;
+    if (isBottom(next))
+      return previous;
     std::unique_ptr<symabs_ai::AbstractValue> out(previous->clone());
     out->joinWith(*next);
     out->widen();

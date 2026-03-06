@@ -55,16 +55,16 @@ static void replaceCall(Module &M, CallInst *CI, unsigned line,
   std::string name = parent_name + ":" + var + ":" + std::to_string(line);
   Function *called_func = CI->getCalledFunction();
   auto new_func = M.getOrInsertFunction(
-      called_func->getName().str() + "_named",
-      called_func->getAttributes(), called_func->getReturnType(),
-      Type::getInt8PtrTy(M.getContext()));
+      called_func->getName().str() + "_named", called_func->getAttributes(),
+      called_func->getReturnType(), Type::getInt8PtrTy(M.getContext()));
 
   std::vector<Value *> args;
   Constant *name_const = ConstantDataArray::getString(M.getContext(), name);
-  GlobalVariable *nameG = new GlobalVariable(
-      M, name_const->getType(), true /*constant*/, GlobalVariable::PrivateLinkage,
-      name_const);
-  args.push_back(ConstantExpr::getPointerCast(nameG, Type::getInt8PtrTy(M.getContext())));
+  GlobalVariable *nameG =
+      new GlobalVariable(M, name_const->getType(), true /*constant*/,
+                         GlobalVariable::PrivateLinkage, name_const);
+  args.push_back(
+      ConstantExpr::getPointerCast(nameG, Type::getInt8PtrTy(M.getContext())));
 
   CallInst *new_CI = CallInst::Create(new_func, args);
   SmallVector<std::pair<unsigned, MDNode *>, 8> metadata;
@@ -98,8 +98,8 @@ bool RenameVerifierFunsPass::runOnModule(Module &M) {
     if (!name.startswith("__VERIFIER_nondet_"))
       continue;
 
-    for (auto use_it = F.use_begin(), use_end = F.use_end();
-         use_it != use_end; ++use_it) {
+    for (auto use_it = F.use_begin(), use_end = F.use_end(); use_it != use_end;
+         ++use_it) {
       CallInst *CI = dyn_cast<CallInst>(use_it->getUser());
       if (CI) {
         const DebugLoc &Loc = CI->getDebugLoc();
@@ -150,7 +150,8 @@ bool RenameVerifierFunsPass::runOnModule(Module &M) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::RenameVerifierFunsPass>
+static llvm::RegisterPass<
+    lotus::verification::transform::RenameVerifierFunsPass>
     X("rename-verifier-funs",
       "Replace calls to verifier functions with calls to named versions");
 

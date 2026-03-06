@@ -98,9 +98,7 @@ namespace lotus {
 namespace verification {
 namespace analysis {
 
-llvm::Pass *createGetTestTargetsPass() {
-  return new GetTestTargetsPass();
-}
+llvm::Pass *createGetTestTargetsPass() { return new GetTestTargetsPass(); }
 
 } // namespace analysis
 } // namespace verification

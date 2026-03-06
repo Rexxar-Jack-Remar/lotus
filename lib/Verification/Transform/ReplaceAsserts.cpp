@@ -3,52 +3,52 @@
 // This file is distributed under the University of Illinois Open Source
 // License. See LICENSE.TXT for details.
 
-#include <cassert>
-#include <set>
-#include <vector>
-
-#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
-#if LLVM_VERSION_MAJOR >= 4 || (LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5)
-  #include "llvm/IR/InstIterator.h"
+
+#include <cassert>
+#include <set>
+#include <vector>
+#if LLVM_VERSION_MAJOR >= 4 ||                                                 \
+    (LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5)
+#include "llvm/IR/InstIterator.h"
 #else
-  #include "llvm/Support/InstIterator.h"
+#include "llvm/Support/InstIterator.h"
 #endif
-#include <llvm/IR/DebugInfoMetadata.h>
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
+#include <llvm/IR/DebugInfoMetadata.h>
+
 using namespace llvm;
 
-llvm::cl::opt<std::string> assert_fn("replace-asserts-fn",
-        llvm::cl::desc("Insert a function that marks the header of the loop"),
-        llvm::cl::init("__assert_fail"));
-
-
+llvm::cl::opt<std::string> assert_fn(
+    "replace-asserts-fn",
+    llvm::cl::desc("Insert a function that marks the header of the loop"),
+    llvm::cl::init("__assert_fail"));
 
 bool CloneMetadata(const llvm::Instruction *i1, llvm::Instruction *i2);
 
 namespace {
 
 class ReplaceAsserts : public FunctionPass {
-  public:
-    static char ID;
+public:
+  static char ID;
 
-    ReplaceAsserts() : FunctionPass(ID) {}
+  ReplaceAsserts() : FunctionPass(ID) {}
 
-    virtual bool runOnFunction(Function &F);
+  virtual bool runOnFunction(Function &F);
 };
 
-bool ReplaceAsserts::runOnFunction(Function &F)
-{
+bool ReplaceAsserts::runOnFunction(Function &F) {
   bool modified = false;
   Module *M = F.getParent();
   Function *ver_err = nullptr;
@@ -78,13 +78,13 @@ bool ReplaceAsserts::runOnFunction(Function &F)
         continue;
 
       if (!ver_err) {
-        LLVMContext& Ctx = M->getContext();
-        auto C = M->getOrInsertFunction("__VERIFIER_error",
-                                        Type::getVoidTy(Ctx)
+        LLVMContext &Ctx = M->getContext();
+        auto C = M->getOrInsertFunction("__VERIFIER_error", Type::getVoidTy(Ctx)
 #if LLVM_VERSION_MAJOR < 5
-                                         , nullptr
+                                                                ,
+                                        nullptr
 #endif
-                                         );
+        );
 #if LLVM_VERSION_MAJOR >= 9
         ver_err = cast<Function>(C.getCallee()->stripPointerCasts());
 #else
@@ -104,7 +104,8 @@ bool ReplaceAsserts::runOnFunction(Function &F)
   return modified;
 }
 
-static RegisterPass<ReplaceAsserts> RASS("replace-asserts",
-                                         "Replace assert calls with calls to __VERIFIER_error");
+static RegisterPass<ReplaceAsserts>
+    RASS("replace-asserts",
+         "Replace assert calls with calls to __VERIFIER_error");
 char ReplaceAsserts::ID;
 } // namespace

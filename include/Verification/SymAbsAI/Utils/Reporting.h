@@ -23,12 +23,10 @@ void printEffectiveConfiguration(
     const std::string &memoryOrigin);
 
 // Pretty-print analysis results at the function entry.
-void printEntryResult(symabs_ai::Analyzer *analyzer,
-                      llvm::Function *func);
+void printEntryResult(symabs_ai::Analyzer *analyzer, llvm::Function *func);
 
 // Pretty-print analysis results for all basic blocks.
-void printAllBlocksResults(symabs_ai::Analyzer *analyzer,
-                           llvm::Function *func);
+void printAllBlocksResults(symabs_ai::Analyzer *analyzer, llvm::Function *func);
 
 // Pretty-print analysis results for exit blocks (with return).
 void printExitBlocksResults(symabs_ai::Analyzer *analyzer,

@@ -114,14 +114,16 @@ public:
                                        const FragmentDecomposition &frag,
                                        mode_t mode = FULL);
 
-  /// Profile: bestTransformer vs SMT solver calls. Reset at start of each analysis.
+  /// Profile: bestTransformer vs SMT solver calls. Reset at start of each
+  /// analysis.
   static void resetBestTransformerCallCount();
   static std::uint64_t getBestTransformerCallCount();
   static void resetSmtSolverCallCount();
   static std::uint64_t getSmtSolverCallCount();
 
 protected:
-  /// Called by derived bestTransformer() implementations to count each bestTransformer call.
+  /// Called by derived bestTransformer() implementations to count each
+  /// bestTransformer call.
   static void countBestTransformerCall();
   /// Called from checkWithStats() to count each actual SMT solver invocation.
   static void countSmtSolverCall();
@@ -237,14 +239,11 @@ private:
   OptimizeStatus runOptimize(const z3::expr &objective, const z3::expr &phi,
                              const ValueMapping &vmap, AbstractValue *target,
                              bool maximize, unsigned timeout_ms) const;
-  static OptimizeStatus runOptimizeWithRetry(const OMTAnalyzer *analyzer,
-                                             const z3::expr &objective,
-                                             const z3::expr &phi,
-                                             const ValueMapping &vmap,
-                                             AbstractValue *target,
-                                             bool maximize,
-                                             unsigned timeout_ms,
-                                             bool retry_unknown);
+  static OptimizeStatus
+  runOptimizeWithRetry(const OMTAnalyzer *analyzer, const z3::expr &objective,
+                       const z3::expr &phi, const ValueMapping &vmap,
+                       AbstractValue *target, bool maximize,
+                       unsigned timeout_ms, bool retry_unknown);
   bool overapproximateToTop(AbstractValue *result) const;
 
 public:

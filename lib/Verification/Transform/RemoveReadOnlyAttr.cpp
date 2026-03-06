@@ -5,6 +5,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
+
 #include <set>
 
 using namespace llvm;
@@ -15,7 +16,8 @@ namespace transform {
 
 char RemoveReadOnlyAttrPass::ID = 0;
 
-static bool removeROAttrFromCallers(Function &F, std::set<Function *> &visitedFuns) {
+static bool removeROAttrFromCallers(Function &F,
+                                    std::set<Function *> &visitedFuns) {
   bool changed = false;
   for (auto use_it = F.use_begin(), use_end = F.use_end(); use_it != use_end;
        ++use_it) {
@@ -61,7 +63,8 @@ bool RemoveReadOnlyAttrPass::runOnModule(Module &M) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::RemoveReadOnlyAttrPass>
+static llvm::RegisterPass<
+    lotus::verification::transform::RemoveReadOnlyAttrPass>
     X("remove-readonly-attr",
       "Remove read-only attribute from selected functions");
 

@@ -19,8 +19,7 @@ namespace sifa {
 
 namespace {
 
-template <typename T>
-void combineHash(std::size_t &seed, const T &value) {
+template <typename T> void combineHash(std::size_t &seed, const T &value) {
   const std::size_t h = std::hash<T>()(value);
   seed ^= h + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
 }
@@ -51,7 +50,8 @@ Transition Transition::makeEdge(std::uint32_t id, const llvm::BasicBlock *src,
   return t;
 }
 
-Transition Transition::makeMarker(std::uint32_t id, const llvm::BasicBlock *markedTarget) {
+Transition Transition::makeMarker(std::uint32_t id,
+                                  const llvm::BasicBlock *markedTarget) {
   Transition t;
   t.kind = TransitionKind::Marker;
   t.id = id;
@@ -66,12 +66,10 @@ Transition Transition::makeMarker(std::uint32_t id, const llvm::BasicBlock *mark
   return t;
 }
 
-Transition Transition::makeReturnSummary(std::uint32_t id, const llvm::BasicBlock *src,
-                                         const llvm::BasicBlock *dst,
-                                         std::uint32_t sourceOrdinal,
-                                         std::uint32_t targetOrdinal,
-                                         const llvm::Function *calleeFn,
-                                         const llvm::CallBase *callSite) {
+Transition Transition::makeReturnSummary(
+    std::uint32_t id, const llvm::BasicBlock *src, const llvm::BasicBlock *dst,
+    std::uint32_t sourceOrdinal, std::uint32_t targetOrdinal,
+    const llvm::Function *calleeFn, const llvm::CallBase *callSite) {
   Transition t;
   t.kind = TransitionKind::ReturnSummary;
   t.id = id;
@@ -86,7 +84,8 @@ Transition Transition::makeReturnSummary(std::uint32_t id, const llvm::BasicBloc
   return t;
 }
 
-Transition Transition::makeEnterCall(std::uint32_t id, const llvm::BasicBlock *src,
+Transition Transition::makeEnterCall(std::uint32_t id,
+                                     const llvm::BasicBlock *src,
                                      const llvm::BasicBlock *calleeEntry,
                                      std::uint32_t sourceOrdinal,
                                      std::uint32_t targetOrdinal,
@@ -114,7 +113,8 @@ Transition Transition::from(const CallReturnSummary &c) {
   return makeReturnSummary(c.id, c.source, c.target, 0, 0, c.callee);
 }
 
-llvm::Optional<LocationMarkerTransition> Transition::getLocationMarkerTransition() const {
+llvm::Optional<LocationMarkerTransition>
+Transition::getLocationMarkerTransition() const {
   if (kind != TransitionKind::Marker)
     return llvm::None;
   LocationMarkerTransition m;

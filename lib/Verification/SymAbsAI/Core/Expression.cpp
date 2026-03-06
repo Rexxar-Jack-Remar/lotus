@@ -1,11 +1,13 @@
 /**
  * @file Expression.cpp
- * @brief Implementation of Expression hierarchy for representing program expressions.
+ * @brief Implementation of Expression hierarchy for representing program
+ * expressions.
  *
- * Expressions represent program values and operations that can be evaluated in both
- * abstract (as Z3 formulas) and concrete (as ConcreteState values) contexts. The
- * hierarchy includes RVExpression (for represented values), ConstantExpression (for
- * constants), and various arithmetic/logical operation expressions.
+ * Expressions represent program values and operations that can be evaluated in
+ * both abstract (as Z3 formulas) and concrete (as ConcreteState values)
+ * contexts. The hierarchy includes RVExpression (for represented values),
+ * ConstantExpression (for constants), and various arithmetic/logical operation
+ * expressions.
  *
  * @author rainoftime
  */

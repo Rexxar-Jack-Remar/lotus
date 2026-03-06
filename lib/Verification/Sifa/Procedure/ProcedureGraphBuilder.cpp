@@ -77,7 +77,8 @@ void addTailEdges(ProcedureGraph &pg, ProcedureGraph::Node srcNode, Block srcBB,
 
 } // namespace
 
-ProcedureGraphBuilder::ProcedureGraphBuilder(SifaStats &stats, const llvm::Function &F)
+ProcedureGraphBuilder::ProcedureGraphBuilder(SifaStats &stats,
+                                             const llvm::Function &F)
     : stats_(stats), F_(F) {}
 
 ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
@@ -126,7 +127,8 @@ ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
   }
 
   ProcedureGraph pg;
-  pg.setEntryNode(pg.getOrCreateBlockEntryNode(const_cast<llvm::BasicBlock *>(&F_.getEntryBlock())));
+  pg.setEntryNode(pg.getOrCreateBlockEntryNode(
+      const_cast<llvm::BasicBlock *>(&F_.getEntryBlock())));
   for (Block bb : reachable) {
     if (bb) {
       pg.getOrCreateBlockEntryNode(bb);
@@ -137,7 +139,8 @@ ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
     if (!reachable.count(srcBB)) {
       continue;
     }
-    addTailEdges(pg, pg.getBlockEntryNode(BB), srcBB, firstNonPhi(srcBB), reachable);
+    addTailEdges(pg, pg.getBlockEntryNode(BB), srcBB, firstNonPhi(srcBB),
+                 reachable);
   }
   return pg;
 }
@@ -154,8 +157,8 @@ ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
 
   Block entry = const_cast<llvm::BasicBlock *>(&F_.getEntryBlock());
 
-  std::unordered_set<const llvm::Function *> enterCallSet(enterCallsOfInterest.begin(),
-                                                          enterCallsOfInterest.end());
+  std::unordered_set<const llvm::Function *> enterCallSet(
+      enterCallsOfInterest.begin(), enterCallsOfInterest.end());
   std::unordered_map<const llvm::Function *, std::vector<Block>> enterCallPreds;
   std::unordered_map<Block, std::vector<Block>> summaryPreds;
   std::unordered_set<Block> requestedEnterTargets;
@@ -169,7 +172,8 @@ ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
       }
 
       if (const auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(&I)) {
-        summaryPreds[const_cast<llvm::BasicBlock *>(invoke->getNormalDest())].push_back(src);
+        summaryPreds[const_cast<llvm::BasicBlock *>(invoke->getNormalDest())]
+            .push_back(src);
       } else if (exitsViaReturn(src)) {
         summaryPreds[nullptr].push_back(src);
       } else {
@@ -179,7 +183,8 @@ ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
       }
 
       if (enterCallSet.count(callee) && !callee->empty()) {
-        Block calleeEntry = const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
+        Block calleeEntry =
+            const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
         enterCallPreds[callee].push_back(src);
         requestedEnterTargets.insert(calleeEntry);
       }
@@ -290,18 +295,23 @@ ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
       }
 
       if (const auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(call)) {
-        Block normalDest = const_cast<llvm::BasicBlock *>(invoke->getNormalDest());
+        Block normalDest =
+            const_cast<llvm::BasicBlock *>(invoke->getNormalDest());
         if (reachable.count(normalDest)) {
-          pg.addReturnSummaryEdge(cur, pg.getBlockEntryNode(*normalDest), callee, call);
+          pg.addReturnSummaryEdge(cur, pg.getBlockEntryNode(*normalDest),
+                                  callee, call);
         }
-        Block unwindDest = const_cast<llvm::BasicBlock *>(invoke->getUnwindDest());
+        Block unwindDest =
+            const_cast<llvm::BasicBlock *>(invoke->getUnwindDest());
         if (reachable.count(unwindDest)) {
           pg.addEdge(cur, pg.getBlockEntryNode(*unwindDest), &I, nullptr);
         }
         if (enterCallSet.count(callee) && !callee->empty()) {
-          Block calleeEntry = const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
+          Block calleeEntry =
+              const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
           if (reachable.count(calleeEntry)) {
-            pg.addEnterCallEdge(cur, pg.getBlockEntryNode(*calleeEntry), callee, call);
+            pg.addEnterCallEdge(cur, pg.getBlockEntryNode(*calleeEntry), callee,
+                                call);
           }
         }
         cur = nullptr;
@@ -312,9 +322,11 @@ ProcedureGraph ProcedureGraphBuilder::graphOfProcedure(
       ProcedureGraph::Node afterCall = pg.createInternalNode(srcBB);
       pg.addReturnSummaryEdge(cur, afterCall, callee, call);
       if (enterCallSet.count(callee) && !callee->empty()) {
-        Block calleeEntry = const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
+        Block calleeEntry =
+            const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
         if (reachable.count(calleeEntry)) {
-          pg.addEnterCallEdge(cur, pg.getBlockEntryNode(*calleeEntry), callee, call);
+          pg.addEnterCallEdge(cur, pg.getBlockEntryNode(*calleeEntry), callee,
+                              call);
         }
       }
 

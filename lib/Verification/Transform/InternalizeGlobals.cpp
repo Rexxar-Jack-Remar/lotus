@@ -36,9 +36,9 @@ static Function *get_verifier_make_nondet(Module *M) {
   LLVMContext &Ctx = M->getContext();
   auto C = M->getOrInsertFunction(
       "__VERIFIER_make_nondet", Type::getVoidTy(Ctx),
-      Type::getInt8PtrTy(Ctx), // addr
+      Type::getInt8PtrTy(Ctx),                                         // addr
       Type::getIntNTy(Ctx, M->getDataLayout().getPointerSizeInBits()), // nbytes
-      Type::getInt8PtrTy(Ctx)  // name
+      Type::getInt8PtrTy(Ctx)                                          // name
   );
   return cast<Function>(C.getCallee());
 }
@@ -71,7 +71,8 @@ bool InternalizeGlobalsPass::runOnModule(Module &M) {
     // Skip standard library globals
     if (GV.hasName()) {
       StringRef name = GV.getName();
-      if (name.equals("stdin") || name.equals("stderr") || name.equals("stdout"))
+      if (name.equals("stdin") || name.equals("stderr") ||
+          name.equals("stdout"))
         continue;
     }
 
@@ -97,9 +98,9 @@ bool InternalizeGlobalsPass::runOnModule(Module &M) {
       }
 
       Constant *init = Constant::getNullValue(Ty->getContainedType(0));
-      GlobalVariable *pointedG = new GlobalVariable(
-          M, Ty->getContainedType(0), false /*constant*/,
-          GlobalVariable::PrivateLinkage, init);
+      GlobalVariable *pointedG =
+          new GlobalVariable(M, Ty->getContainedType(0), false /*constant*/,
+                             GlobalVariable::PrivateLinkage, init);
       GV.setInitializer(pointedG);
 
       memory = pointedG;
@@ -128,9 +129,11 @@ bool InternalizeGlobalsPass::runOnModule(Module &M) {
     args.push_back(ConstantInt::get(size_t_Ty, DL->getTypeAllocSize(Ty)));
     std::string nameStr = GV.hasName() ? GV.getName().str() : "extern-global";
     Constant *name = ConstantDataArray::getString(Ctx, nameStr);
-    GlobalVariable *nameG = new GlobalVariable(M, name->getType(), true /*constant*/,
-                                               GlobalVariable::PrivateLinkage, name);
-    args.push_back(ConstantExpr::getPointerCast(nameG, Type::getInt8PtrTy(Ctx)));
+    GlobalVariable *nameG =
+        new GlobalVariable(M, name->getType(), true /*constant*/,
+                           GlobalVariable::PrivateLinkage, name);
+    args.push_back(
+        ConstantExpr::getPointerCast(nameG, Type::getInt8PtrTy(Ctx)));
     CallInst *CI = CallInst::Create(vms, args);
 
     BasicBlock &block = main->getEntryBlock();
@@ -154,7 +157,8 @@ bool InternalizeGlobalsPass::runOnModule(Module &M) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::InternalizeGlobalsPass>
+static llvm::RegisterPass<
+    lotus::verification::transform::InternalizeGlobalsPass>
     X("internalize-globals",
       "Internalize and make non-deterministic external globals");
 

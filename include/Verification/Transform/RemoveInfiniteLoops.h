@@ -21,9 +21,9 @@ namespace transform {
  * @class RemoveInfiniteLoopsPass
  * @brief Removes infinite loops by replacing them with __VERIFIER_assume(0)
  *
- * This pass detects infinite loops (blocks that unconditionally jump to themselves
- * without side effects) and replaces them with __VERIFIER_assume(0) followed by
- * unreachable, effectively removing the loop.
+ * This pass detects infinite loops (blocks that unconditionally jump to
+ * themselves without side effects) and replaces them with __VERIFIER_assume(0)
+ * followed by unreachable, effectively removing the loop.
  */
 class RemoveInfiniteLoopsPass : public llvm::FunctionPass {
 public:

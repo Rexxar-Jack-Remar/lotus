@@ -17,8 +17,7 @@
 namespace lotus {
 namespace sifa {
 
-template <typename L>
-class TopsortCache final {
+template <typename L> class TopsortCache final {
 public:
   using Dag = RegexDag<L>;
   using Node = RegexDagNode<L>;
@@ -90,7 +89,8 @@ bool TopsortCache<L>::isStillValid(const Dag &dag,
 }
 
 template <typename L>
-std::vector<typename TopsortCache<L>::Node *> TopsortCache<L>::compute(const Dag &dag) {
+std::vector<typename TopsortCache<L>::Node *>
+TopsortCache<L>::compute(const Dag &dag) {
   using Node = typename TopsortCache<L>::Node;
   // Work on reachable subgraph from source.
   std::unordered_set<Node *> nodes;

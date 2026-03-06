@@ -43,14 +43,15 @@ bool DummyMarkerPass::runOnFunction(Function &F) {
     if (!CI)
       continue;
 
-    auto *calledFun = dyn_cast<Function>(CI->getCalledOperand()->stripPointerCasts());
+    auto *calledFun =
+        dyn_cast<Function>(CI->getCalledOperand()->stripPointerCasts());
     if (!calledFun)
       continue;
     auto fun = calledFun->getName();
     if (fun.equals("malloc") || fun.equals("calloc")) {
-      auto dummyC = M->getOrInsertFunction("__symbiotic_keep_ptr",
-                                           Type::getVoidTy(Ctx),
-                                           Type::getInt8PtrTy(Ctx));
+      auto dummyC =
+          M->getOrInsertFunction("__symbiotic_keep_ptr", Type::getVoidTy(Ctx),
+                                 Type::getInt8PtrTy(Ctx));
       auto *dummy = cast<Function>(dummyC.getCallee());
       auto *new_CI = CallInst::Create(dummy, {CI});
       CloneMetadata(CI, new_CI);
@@ -74,9 +75,7 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createDummyMarkerPass() {
-  return new DummyMarkerPass();
-}
+llvm::Pass *createDummyMarkerPass() { return new DummyMarkerPass(); }
 
 } // namespace transform
 } // namespace verification

@@ -1,10 +1,12 @@
 /**
  * @file ConcreteState.cpp
- * @brief Implementation of ConcreteState, representing a concrete execution state from a Z3 model.
+ * @brief Implementation of ConcreteState, representing a concrete execution
+ * state from a Z3 model.
  *
- * ConcreteState extracts concrete values for all represented LLVM values from a Z3 model,
- * providing a bridge between SMT solver results and abstract interpretation. It evaluates
- * each represented value in the model and stores the results for use in updating abstract values.
+ * ConcreteState extracts concrete values for all represented LLVM values from a
+ * Z3 model, providing a bridge between SMT solver results and abstract
+ * interpretation. It evaluates each represented value in the model and stores
+ * the results for use in updating abstract values.
  *
  * @author rainoftime
  */

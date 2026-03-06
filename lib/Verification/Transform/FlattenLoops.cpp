@@ -10,6 +10,7 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
+
 #include <set>
 #include <vector>
 
@@ -41,15 +42,18 @@ bool FlattenLoopsPass::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
   auto &M = *fun->getParent();
   auto &Ctx = M.getContext();
 
-  BasicBlock *flaginit = BasicBlock::Create(Ctx, "flatten.init", fun, parentheader);
-  BasicBlock *newheaderbb = BasicBlock::Create(Ctx, "flatten.loop.header", fun, parentheader);
+  BasicBlock *flaginit =
+      BasicBlock::Create(Ctx, "flatten.init", fun, parentheader);
+  BasicBlock *newheaderbb =
+      BasicBlock::Create(Ctx, "flatten.loop.header", fun, parentheader);
 
   // Flag whether we are in the inner or outer loop
   // Initialize "inner" to 0
   auto &entrybb = fun->getEntryBlock();
   auto *allocaTy = Type::getInt8Ty(Ctx);
-  AllocaInst *flag = new AllocaInst(allocaTy, 0, nullptr,
-                                    M.getDataLayout().getPrefTypeAlign(allocaTy), "inner");
+  AllocaInst *flag =
+      new AllocaInst(allocaTy, 0, nullptr,
+                     M.getDataLayout().getPrefTypeAlign(allocaTy), "inner");
   flag->insertBefore(&*entrybb.getFirstInsertionPt());
   auto *SI = new StoreInst(ConstantInt::get(Type::getInt8Ty(Ctx), 0), flag,
                            /*isVolatile=*/false, flag->getAlign());
@@ -116,7 +120,8 @@ bool FlattenLoopsPass::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
 
   // Create the branch instruction
   auto *LI = new LoadInst(Type::getInt8Ty(Ctx), flag, "innerval", newheaderbb);
-  auto *Cmp = new ICmpInst(ICmpInst::ICMP_EQ, ConstantInt::get(Type::getInt8Ty(Ctx), 1), LI);
+  auto *Cmp = new ICmpInst(ICmpInst::ICMP_EQ,
+                           ConstantInt::get(Type::getInt8Ty(Ctx), 1), LI);
   Cmp->insertAfter(LI);
   BranchInst::Create(innerheader, parentheader, Cmp, newheaderbb);
 
@@ -141,9 +146,7 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createFlattenLoopsPass() {
-  return new FlattenLoopsPass();
-}
+llvm::Pass *createFlattenLoopsPass() { return new FlattenLoopsPass(); }
 
 } // namespace transform
 } // namespace verification

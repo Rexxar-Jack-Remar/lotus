@@ -23,8 +23,8 @@ namespace transform {
  * @brief Instruments loops with checks for state space cycles (non-termination)
  *
  * This pass instruments loops to detect cycles in the state space by comparing
- * variable values at loop entry and after each iteration. If all variables remain
- * unchanged, it indicates a potential infinite loop.
+ * variable values at loop entry and after each iteration. If all variables
+ * remain unchanged, it indicates a potential infinite loop.
  */
 class InstrumentNonterminationPass : public llvm::LoopPass {
 public:

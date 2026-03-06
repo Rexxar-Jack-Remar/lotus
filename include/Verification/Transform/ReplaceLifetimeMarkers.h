@@ -19,10 +19,12 @@ namespace transform {
 
 /**
  * @class ReplaceLifetimeMarkersPass
- * @brief Replaces lifetime.start and lifetime.end intrinsics with verifier calls
+ * @brief Replaces lifetime.start and lifetime.end intrinsics with verifier
+ * calls
  *
  * This pass replaces LLVM lifetime markers with calls to __VERIFIER_scope_enter
- * and __VERIFIER_scope_leave, making lifetime information visible to verification tools.
+ * and __VERIFIER_scope_leave, making lifetime information visible to
+ * verification tools.
  */
 class ReplaceLifetimeMarkersPass : public llvm::FunctionPass {
 public:

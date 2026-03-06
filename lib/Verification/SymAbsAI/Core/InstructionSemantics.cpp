@@ -3,9 +3,10 @@
  * @brief Implementation of SMT encoding for LLVM instruction semantics.
  *
  * InstructionSemantics translates LLVM IR instructions into Z3 SMT formulas
- * that encode their semantics. It handles arithmetic operations, memory operations,
- * control flow, floating-point operations, and various LLVM-specific constructs.
- * The visitor pattern is used to dispatch to instruction-specific encoders.
+ * that encode their semantics. It handles arithmetic operations, memory
+ * operations, control flow, floating-point operations, and various
+ * LLVM-specific constructs. The visitor pattern is used to dispatch to
+ * instruction-specific encoders.
  *
  * @author rainoftime
  */
@@ -29,7 +30,8 @@
 namespace // anonymous
 {
 /**
- * @brief Construct a condition that is true iff a right shift is exact (no bits shifted out).
+ * @brief Construct a condition that is true iff a right shift is exact (no bits
+ * shifted out).
  *
  * For a right shift `_shr(in0, in1)`, this checks that all bits that would be
  * shifted out are zero. This is used to encode the "exact" flag on LLVM shift
@@ -59,7 +61,8 @@ namespace symabs_ai {
 /**
  * @brief Construct an InstructionSemantics visitor for a fragment.
  *
- * @param fctx Function context providing Z3 context and memory/floating-point models
+ * @param fctx Function context providing Z3 context and memory/floating-point
+ * models
  * @param frag Fragment containing the instructions to encode
  */
 InstructionSemantics::InstructionSemantics(const FunctionContext &fctx,
@@ -113,7 +116,8 @@ bool InstructionSemantics::hasValidOperands(llvm::Instruction &instr) {
 }
 
 /**
- * @brief Get the Z3 expression representing the r-value (read value) of an LLVM value.
+ * @brief Get the Z3 expression representing the r-value (read value) of an LLVM
+ * value.
  *
  * Handles multiple cases:
  * - Represented variables: returns their SMT variable from ValueMapping
@@ -200,13 +204,16 @@ z3::expr InstructionSemantics::rValue(llvm::Value *value) {
 }
 
 /**
- * @brief Get the Z3 expression representing the l-value (write target) of the current instruction.
+ * @brief Get the Z3 expression representing the l-value (write target) of the
+ * current instruction.
  *
- * Returns the SMT variable that the current instruction writes to. For temporary
- * instructions (e.g., from ConstantExpr), uses the instruction's name directly.
- * Otherwise, uses ValueMapping to get the primed version of the instruction's result.
+ * Returns the SMT variable that the current instruction writes to. For
+ * temporary instructions (e.g., from ConstantExpr), uses the instruction's name
+ * directly. Otherwise, uses ValueMapping to get the primed version of the
+ * instruction's result.
  *
- * @return Z3 expression representing the l-value (must be called while visiting an instruction)
+ * @return Z3 expression representing the l-value (must be called while visiting
+ * an instruction)
  */
 z3::expr InstructionSemantics::lValue() {
   if (Instruction_->getParent() == nullptr) {

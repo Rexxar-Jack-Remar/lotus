@@ -2,8 +2,8 @@
 //
 // A minimal concrete domain for end-to-end Sifa wiring: reachability.
 //
-// State is a boolean; bottom=false means "unreachable", top=true means "reachable".
-// join is OR; widen is OR; post is identity.
+// State is a boolean; bottom=false means "unreachable", top=true means
+// "reachable". join is OR; widen is OR; post is identity.
 //
 // This is intentionally simple and is primarily used for Sifa reachability
 // queries and end-to-end regression coverage.
@@ -49,14 +49,17 @@ public:
     (void)t;
     return callerState;
   }
-  State postCall(const State &callerState) const override { return callerState; }
+  State postCall(const State &callerState) const override {
+    return callerState;
+  }
 
   State postReturn(const Label &t, const State &callerState,
                    const State &calleeSummary) const override {
     (void)t;
     return callerState && calleeSummary;
   }
-  State postReturn(const State &callerState, const State &calleeSummary) const override {
+  State postReturn(const State &callerState,
+                   const State &calleeSummary) const override {
     return callerState && calleeSummary;
   }
 };

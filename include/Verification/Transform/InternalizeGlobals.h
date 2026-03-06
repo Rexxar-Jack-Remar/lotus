@@ -1,6 +1,7 @@
 /**
  * @file InternalizeGlobals.h
- * @brief Pass for internalizing external globals with nondeterministic initialization
+ * @brief Pass for internalizing external globals with nondeterministic
+ * initialization
  * @author Migrated from Symbiotic
  */
 
@@ -19,7 +20,8 @@ namespace transform {
 
 /**
  * @class InternalizeGlobalsPass
- * @brief Internalizes external global variables and initializes them with nondet values
+ * @brief Internalizes external global variables and initializes them with
+ * nondet values
  *
  * This pass finds external global variables (without initializers) and:
  * - Creates initializers for them

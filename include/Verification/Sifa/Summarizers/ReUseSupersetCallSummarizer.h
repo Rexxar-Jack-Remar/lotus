@@ -1,9 +1,12 @@
-//===-- Verification/Sifa/Summarizers/ReUseSupersetCallSummarizer.h --------===//
+//===-- Verification/Sifa/Summarizers/ReUseSupersetCallSummarizer.h
+//--------===//
 //
-// Call summarizer that re-uses summaries when input ⊆ knownInput (Ultimate-aligned).
+// Call summarizer that re-uses summaries when input ⊆ knownInput
+// (Ultimate-aligned).
 //
-// Uses SummaryCache per callee; reUseOrCompute: if ∃ cached (knownInput, summary)
-// with leq(input, knownInput), return meet of such summaries; else compute and cache.
+// Uses SummaryCache per callee; reUseOrCompute: if ∃ cached (knownInput,
+// summary) with leq(input, knownInput), return meet of such summaries; else
+// compute and cache.
 //
 //===----------------------------------------------------------------------===//
 
@@ -26,15 +29,18 @@ class ReUseSupersetCallSummarizer final : public ICallSummarizer<StateT> {
 public:
   using Domain = AbstractDomain<LabelT, StateT>;
 
-  ReUseSupersetCallSummarizer(const Domain &domain, ICallSummarizer<StateT> &inner)
+  ReUseSupersetCallSummarizer(const Domain &domain,
+                              ICallSummarizer<StateT> &inner)
       : domain_(domain), inner_(inner) {}
 
-  /// Ultimate-aligned: optional stats for CALL_SUMMARIZER_OVERALL_TIME and APPLICATIONS.
+  /// Ultimate-aligned: optional stats for CALL_SUMMARIZER_OVERALL_TIME and
+  /// APPLICATIONS.
   ReUseSupersetCallSummarizer(SifaStats &stats, const Domain &domain,
                               ICallSummarizer<StateT> &inner)
       : stats_(&stats), domain_(domain), inner_(inner) {}
 
-  StateT summarize(const std::string &calleeName, const StateT &inputAfterCall) override {
+  StateT summarize(const std::string &calleeName,
+                   const StateT &inputAfterCall) override {
     if (stats_) {
       stats_->start(SifaStats::Key::CALL_SUMMARIZER_OVERALL_TIME);
       stats_->increment(SifaStats::Key::CALL_SUMMARIZER_APPLICATIONS);
@@ -42,7 +48,8 @@ public:
     SummaryCache<StateT> &cache = perCalleeCache_[calleeName];
     const auto isReusable = [this](const StateT &a, const StateT &b) {
       auto subsetEq = domain_.subsetEq(a, b);
-      return subsetEq.isTrueForAbstraction() && domain_.equal(subsetEq.getRhs(), b);
+      return subsetEq.isTrueForAbstraction() &&
+             domain_.equal(subsetEq.getRhs(), b);
     };
     auto supersets = cache.reusableEntries(inputAfterCall, isReusable);
     StateT result;
@@ -50,10 +57,11 @@ public:
       result = inner_.summarize(calleeName, inputAfterCall);
       cache.store(inputAfterCall, result);
     } else if (supersets.size() == 1 || !domain_.supportsMeet()) {
-      const auto exact = std::find_if(
-          supersets.begin(), supersets.end(), [this, &inputAfterCall](const auto &entry) {
-            return domain_.equal(entry.first, inputAfterCall);
-          });
+      const auto exact =
+          std::find_if(supersets.begin(), supersets.end(),
+                       [this, &inputAfterCall](const auto &entry) {
+                         return domain_.equal(entry.first, inputAfterCall);
+                       });
       if (exact != supersets.end()) {
         result = exact->second;
       } else if (supersets.size() == 1) {

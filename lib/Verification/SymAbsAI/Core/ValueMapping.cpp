@@ -1,12 +1,14 @@
 /**
  * @file ValueMapping.cpp
- * @brief Implementation of ValueMapping for mapping LLVM values to Z3 expressions.
+ * @brief Implementation of ValueMapping for mapping LLVM values to Z3
+ * expressions.
  *
  * ValueMapping provides a context-sensitive mapping from LLVM values to Z3 SMT
- * expressions at specific program points within a fragment. It handles the SSA-like
- * encoding where values may be "primed" (after definition) or "unprimed" (before
- * definition) depending on their position relative to the mapping point. Also
- * manages memory state variables that change at memory-modifying instructions.
+ * expressions at specific program points within a fragment. It handles the
+ * SSA-like encoding where values may be "primed" (after definition) or
+ * "unprimed" (before definition) depending on their position relative to the
+ * mapping point. Also manages memory state variables that change at
+ * memory-modifying instructions.
  *
  * @author rainoftime
  */
@@ -37,19 +39,22 @@ z3::expr ValueMapping::operator[](llvm::Value *value) const {
 }
 
 /**
- * @brief Get the full Z3 representation of a value, determining primed/unprimed status.
+ * @brief Get the full Z3 representation of a value, determining primed/unprimed
+ * status.
  *
- * Determines whether a value should be represented as primed (_1) or unprimed (_0)
- * based on:
+ * Determines whether a value should be represented as primed (_1) or unprimed
+ * (_0) based on:
  * - AtBeginning: always unprimed
  * - AtEnd: always primed
- * - At a point: primed if the value is defined in the fragment and reachable before the point
+ * - At a point: primed if the value is defined in the fragment and reachable
+ * before the point
  * - Otherwise: unprimed
  *
  * Arguments are never primed as they don't change within a function.
  *
  * @param value The LLVM value to represent
- * @return Z3 expression (constant) representing the value with appropriate naming
+ * @return Z3 expression (constant) representing the value with appropriate
+ * naming
  */
 z3::expr ValueMapping::getFullRepresentation(llvm::Value *value) const {
   bool primed;
@@ -141,7 +146,8 @@ z3::expr ValueMapping::memory() const {
  * @param fctx Function context for the mapping
  * @param frag Fragment containing the basic block
  * @param bb Basic block to create mapping for
- * @return ValueMapping positioned at the start of the block's non-PHI instructions
+ * @return ValueMapping positioned at the start of the block's non-PHI
+ * instructions
  */
 ValueMapping ValueMapping::atLocation(const FunctionContext &fctx,
                                       const Fragment &frag,
@@ -203,7 +209,8 @@ ValueMapping ValueMapping::atEnd(const FunctionContext &fctx,
  * @brief Create a ValueMapping immediately before an instruction.
  *
  * Creates a mapping point just before the given instruction. If the instruction
- * is the first non-PHI in the fragment start block, returns atBeginning instead.
+ * is the first non-PHI in the fragment start block, returns atBeginning
+ * instead.
  *
  * @param fctx Function context for the mapping
  * @param frag Fragment containing the instruction

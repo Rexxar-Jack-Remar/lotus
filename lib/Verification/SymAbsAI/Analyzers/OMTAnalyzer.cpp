@@ -86,8 +86,8 @@ void collectObjectives(const FunctionContext &fctx, const ValueMapping &vmap,
 }
 
 unsigned getPositiveConfigOrDefault(const configparser::Config &cfg,
-                                    const char *section,
-                                    const char *key, unsigned default_value) {
+                                    const char *section, const char *key,
+                                    unsigned default_value) {
   int value = cfg.get<int>(section, key, (int)default_value);
   return value > 0 ? (unsigned)value : default_value;
 }
@@ -95,9 +95,9 @@ unsigned getPositiveConfigOrDefault(const configparser::Config &cfg,
 } // namespace
 
 OMTAnalyzer::OptimizeStatus OMTAnalyzer::runOptimizeWithRetry(
-    const OMTAnalyzer *analyzer, const z3::expr &objective,
-    const z3::expr &phi, const ValueMapping &vmap, AbstractValue *target,
-    bool maximize, unsigned timeout_ms, bool retry_unknown) {
+    const OMTAnalyzer *analyzer, const z3::expr &objective, const z3::expr &phi,
+    const ValueMapping &vmap, AbstractValue *target, bool maximize,
+    unsigned timeout_ms, bool retry_unknown) {
   auto res =
       analyzer->runOptimize(objective, phi, vmap, target, maximize, timeout_ms);
   if (res == OMTAnalyzer::OptimizeStatus::Unknown && retry_unknown &&
@@ -154,8 +154,7 @@ bool OMTAnalyzer::strongestConsequence(AbstractValue *result, z3::expr phi,
       getPositiveConfigOrDefault(cfg, "Analyzer", "OMTTimeoutMs", 10000);
   unsigned max_objectives =
       getPositiveConfigOrDefault(cfg, "Analyzer", "OMTMaxObjectives", 512);
-  bool pair_objectives =
-      cfg.get<bool>("Analyzer", "OMTPairObjectives", true);
+  bool pair_objectives = cfg.get<bool>("Analyzer", "OMTPairObjectives", true);
   unsigned max_bit_objectives_per_var = getPositiveConfigOrDefault(
       cfg, "Analyzer", "OMTMaxBitObjectivesPerVar", 8);
   bool retry_unknown_without_timeout =
@@ -185,12 +184,12 @@ bool OMTAnalyzer::strongestConsequence(AbstractValue *result, z3::expr phi,
 
   bool saw_unknown = false;
   for (auto &obj : objectives) {
-    auto max_res = runOptimizeWithRetry(this, obj, phi, vmap, candidate.get(),
-                                        true, timeout_ms,
-                                        retry_unknown_without_timeout);
-    auto min_res = runOptimizeWithRetry(this, obj, phi, vmap, candidate.get(),
-                                        false, timeout_ms,
-                                        retry_unknown_without_timeout);
+    auto max_res =
+        runOptimizeWithRetry(this, obj, phi, vmap, candidate.get(), true,
+                             timeout_ms, retry_unknown_without_timeout);
+    auto min_res =
+        runOptimizeWithRetry(this, obj, phi, vmap, candidate.get(), false,
+                             timeout_ms, retry_unknown_without_timeout);
 
     if (max_res == OptimizeStatus::Unsat || min_res == OptimizeStatus::Unsat) {
       // phi satisfiable was checked above; objective optimization being UNSAT

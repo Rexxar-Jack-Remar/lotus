@@ -43,7 +43,8 @@ struct ProgramPoint {
 /// The ProcedureGraph assigns a dense id to every labeled edge it creates.
 /// That id is stored in Transition::id and indexes into this vector, allowing
 /// other components (e.g. debug/logging/analysis) to recover the underlying
-/// CFG endpoints and, for synthetic interprocedural edges, the callee/call site.
+/// CFG endpoints and, for synthetic interprocedural edges, the callee/call
+/// site.
 struct TransitionInfo {
   llvm::BasicBlock *source = nullptr;
   llvm::BasicBlock *target = nullptr;
@@ -118,7 +119,8 @@ private:
     std::size_t operator()(const std::pair<Node, Node> &p) const;
   };
 
-  std::unordered_map<std::pair<Node, Node>, std::uint32_t, NodePairHash> edgeToId_;
+  std::unordered_map<std::pair<Node, Node>, std::uint32_t, NodePairHash>
+      edgeToId_;
 
   Node createNode(llvm::BasicBlock *bb, std::uint32_t ordinal);
   Transition addTransition(Node src, Node dst,

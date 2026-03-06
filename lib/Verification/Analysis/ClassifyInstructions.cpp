@@ -80,7 +80,7 @@ bool ClassifyInstructionsPass::runOnFunction(Function &F) {
 
 bool ClassifyInstructionsPass::doFinalization(Module &M) {
   static ClassifyState state;
-  
+
   if (state.stack_array)
     errs() << "array on stack\n";
   if (state.stack_var_array)
@@ -100,10 +100,10 @@ bool ClassifyInstructionsPass::doFinalization(Module &M) {
     errs() << "bit-wise operations\n";
   if (state.bit_shift)
     errs() << "bit-shift operations\n";
-  
+
   // Reset state
   state = ClassifyState{};
-  
+
   return false;
 }
 
@@ -111,7 +111,8 @@ bool ClassifyInstructionsPass::doFinalization(Module &M) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::analysis::ClassifyInstructionsPass>
+static llvm::RegisterPass<
+    lotus::verification::analysis::ClassifyInstructionsPass>
     X("classify-instructions", "Print statistics from module");
 
 namespace lotus {

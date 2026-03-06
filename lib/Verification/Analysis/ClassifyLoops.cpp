@@ -76,9 +76,7 @@ namespace lotus {
 namespace verification {
 namespace analysis {
 
-llvm::Pass *createClassifyLoopsPass() {
-  return new ClassifyLoopsPass();
-}
+llvm::Pass *createClassifyLoopsPass() { return new ClassifyLoopsPass(); }
 
 } // namespace analysis
 } // namespace verification

@@ -11,15 +11,17 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
+
 #include <map>
 #include <set>
 #include <vector>
 
 using namespace llvm;
 
-static cl::opt<bool> insertHeader("instrument-nontermination-mark-header",
-                                   cl::desc("Insert a function that marks the header of the loop"),
-                                   cl::init(false));
+static cl::opt<bool> insertHeader(
+    "instrument-nontermination-mark-header",
+    cl::desc("Insert a function that marks the header of the loop"),
+    cl::init(false));
 
 namespace {
 
@@ -129,8 +131,9 @@ bool InstrumentNonterminationPass::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
       // For allocas, create a new alloca
       Function *F = header->getParent();
       AllocaInst *AI = cast<AllocaInst>(v);
-      newVal = new AllocaInst(AI->getAllocatedType(), AI->getAddressSpace(),
-                              nullptr, "", &*F->getEntryBlock().getFirstInsertionPt());
+      newVal =
+          new AllocaInst(AI->getAllocatedType(), AI->getAddressSpace(), nullptr,
+                         "", &*F->getEntryBlock().getFirstInsertionPt());
     }
     if (newVal)
       mapping[v] = newVal;
@@ -167,7 +170,7 @@ bool InstrumentNonterminationPass::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
 
     for (auto &it : mapping) {
       auto *newVal = new LoadInst(it.first->getType()->getContainedType(0),
-                                   it.first, "", term);
+                                  it.first, "", term);
       auto *oldVal = new LoadInst(it.second->getType()->getContainedType(0),
                                   it.second, "", term);
       auto *cmp = new ICmpInst(term, ICmpInst::ICMP_EQ, newVal, oldVal, "");
@@ -177,7 +180,8 @@ bool InstrumentNonterminationPass::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
       CloneMetadata(term, cmp);
 
       if (lastCond) {
-        auto *And = BinaryOperator::Create(Instruction::And, lastCond, cmp, "", term);
+        auto *And =
+            BinaryOperator::Create(Instruction::And, lastCond, cmp, "", term);
         lastCond = And;
       } else {
         lastCond = cmp;
@@ -198,7 +202,8 @@ bool InstrumentNonterminationPass::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::InstrumentNonterminationPass>
+static llvm::RegisterPass<
+    lotus::verification::transform::InstrumentNonterminationPass>
     X("instrument-nontermination",
       "Insert trivial checks for state space cycles");
 

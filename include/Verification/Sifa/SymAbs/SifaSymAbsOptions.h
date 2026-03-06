@@ -8,6 +8,7 @@
 #define LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSOPTIONS_H
 
 #include "Verification/Sifa/Log/SifaLogger.h"
+
 #include <string>
 
 namespace llvm {
@@ -27,7 +28,8 @@ struct SifaSymAbsOptions {
   std::string abstractDomain = "Interval, Octagon";
 
   /// SymAbsAI analyzer variant to use.
-  /// Supported values include "UnilateralAnalyzer", "BilateralAnalyzer", "OMTAnalyzer".
+  /// Supported values include "UnilateralAnalyzer", "BilateralAnalyzer",
+  /// "OMTAnalyzer".
   std::string analyzerVariant = "UnilateralAnalyzer";
 
   /// Whether to recursively analyze callees when encoding call semantics.

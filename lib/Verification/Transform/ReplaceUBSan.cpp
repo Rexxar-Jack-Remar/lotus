@@ -3,28 +3,30 @@
 // This file is distributed under the University of Illinois Open Source
 // License. See LICENSE.TXT for details.
 
-#include <cassert>
-#include <set>
-#include <vector>
-
-#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
-#if LLVM_VERSION_MAJOR >= 4 || (LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5)
-  #include "llvm/IR/InstIterator.h"
+
+#include <cassert>
+#include <set>
+#include <vector>
+#if LLVM_VERSION_MAJOR >= 4 ||                                                 \
+    (LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5)
+#include "llvm/IR/InstIterator.h"
 #else
-  #include "llvm/Support/InstIterator.h"
+#include "llvm/Support/InstIterator.h"
 #endif
-#include <llvm/IR/DebugInfoMetadata.h>
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+
+#include <llvm/IR/DebugInfoMetadata.h>
 
 using namespace llvm;
 
@@ -32,27 +34,28 @@ bool CloneMetadata(const llvm::Instruction *i1, llvm::Instruction *i2);
 
 namespace {
 
-llvm::cl::opt<bool> justRemove("replace-ubsan-just-remove",
-        llvm::cl::desc("Just remove the UBSan checks instead of replacing them with error call\n"),
-        llvm::cl::init(false));
+llvm::cl::opt<bool>
+    justRemove("replace-ubsan-just-remove",
+               llvm::cl::desc("Just remove the UBSan checks instead of "
+                              "replacing them with error call\n"),
+               llvm::cl::init(false));
 
-llvm::cl::opt<bool> keepShifts("replace-ubsan-keep-shifts",
-        llvm::cl::desc("Keep checks for shifts (i.e., replace them with error call, the rest of ubsan is removed"),
-        llvm::cl::init(false));
-
-
+llvm::cl::opt<bool>
+    keepShifts("replace-ubsan-keep-shifts",
+               llvm::cl::desc("Keep checks for shifts (i.e., replace them with "
+                              "error call, the rest of ubsan is removed"),
+               llvm::cl::init(false));
 
 class ReplaceUBSan : public FunctionPass {
-  public:
-    static char ID;
+public:
+  static char ID;
 
-    ReplaceUBSan() : FunctionPass(ID) {}
+  ReplaceUBSan() : FunctionPass(ID) {}
 
-    virtual bool runOnFunction(Function &F);
+  virtual bool runOnFunction(Function &F);
 };
 
-bool ReplaceUBSan::runOnFunction(Function &F)
-{
+bool ReplaceUBSan::runOnFunction(Function &F) {
   bool modified = false;
   Module *M = F.getParent();
   Function *ver_err = nullptr;
@@ -91,13 +94,14 @@ bool ReplaceUBSan::runOnFunction(Function &F)
 
         // replace
         if (!ver_err) {
-          LLVMContext& Ctx = M->getContext();
-          auto C = M->getOrInsertFunction("__VERIFIER_error",
-                                          Type::getVoidTy(Ctx)
+          LLVMContext &Ctx = M->getContext();
+          auto C =
+              M->getOrInsertFunction("__VERIFIER_error", Type::getVoidTy(Ctx)
 #if LLVM_VERSION_MAJOR < 5
-                                          , nullptr
+                                                             ,
+                                     nullptr
 #endif
-                                         );
+              );
 #if LLVM_VERSION_MAJOR >= 9
           ver_err = cast<Function>(C.getCallee()->stripPointerCasts());
 #else
@@ -120,6 +124,6 @@ bool ReplaceUBSan::runOnFunction(Function &F)
 
 } // namespace
 
-static RegisterPass<ReplaceUBSan> RUBS("replace-ubsan",
-                                       "Replace ubsan calls with calls to __VERIFIER_error");
+static RegisterPass<ReplaceUBSan>
+    RUBS("replace-ubsan", "Replace ubsan calls with calls to __VERIFIER_error");
 char ReplaceUBSan::ID;

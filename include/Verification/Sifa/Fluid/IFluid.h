@@ -15,8 +15,7 @@
 namespace lotus {
 namespace sifa {
 
-template <typename StateT>
-class IFluid {
+template <typename StateT> class IFluid {
 public:
   virtual ~IFluid() = default;
   virtual bool shallBeAbstracted(const StateT &state) const = 0;
@@ -26,4 +25,3 @@ public:
 } // namespace lotus
 
 #endif // LOTUS_VERIFICATION_SIFA_FLUID_IFLUID_H
-

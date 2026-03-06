@@ -75,9 +75,7 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createMarkVolatilePass() {
-  return new MarkVolatilePass();
-}
+llvm::Pass *createMarkVolatilePass() { return new MarkVolatilePass(); }
 
 } // namespace transform
 } // namespace verification

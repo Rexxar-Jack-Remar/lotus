@@ -51,9 +51,7 @@ namespace lotus {
 namespace verification {
 namespace analysis {
 
-llvm::Pass *createCountInstrPass() {
-  return new CountInstrPass();
-}
+llvm::Pass *createCountInstrPass() { return new CountInstrPass(); }
 
 } // namespace analysis
 } // namespace verification

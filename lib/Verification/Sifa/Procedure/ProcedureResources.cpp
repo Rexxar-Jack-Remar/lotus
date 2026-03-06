@@ -1,21 +1,22 @@
 #include "Verification/Sifa/Procedure/ProcedureResources.h"
 
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Function.h"
+
 #include "Utils/Algorithms/PathExpressions/Regex.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Procedure/ProcedureGraphBuilder.h"
 #include "Verification/Sifa/RegexDag/RegexDagUtils.h"
 #include "Verification/Sifa/Statistics/RegexStatUtils.h"
 
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Function.h"
-
 using namespace lotus::sifa;
 
-ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F,
-                                       const std::vector<llvm::BasicBlock *> &lois)
-{
+ProcedureResources::ProcedureResources(
+    SifaStats &stats, const llvm::Function &F,
+    const std::vector<llvm::BasicBlock *> &lois) {
   ProcedureGraphBuilder builder(stats, F);
-  ProcedureGraph pg = builder.graphOfProcedure(lois, /*restrictToReachable=*/true);
+  ProcedureGraph pg =
+      builder.graphOfProcedure(lois, /*restrictToReachable=*/true);
   auto *entry = pg.getEntryNode();
 
   auto pe = createPEComputer(stats, pg.graph());
@@ -36,8 +37,8 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
   auto exprToExit = pg.graph().getNodes().count(exitNode)
                         ? exprBetween(stats, pe, entry, exitNode)
                         : lotus::pathexpressions::Regex<Transition>::emptySet();
-  auto markedExit = markRegex(exprToExit, /*finalLocationAsMark=*/nullptr,
-                              nextMarkerId++);
+  auto markedExit =
+      markRegex(exprToExit, /*finalLocationAsMark=*/nullptr, nextMarkerId++);
   auto *exitMarker = addToDag(stats, regexToDag, markedExit);
 
   regexDag_ = getDagAndReset(stats, regexToDag);
@@ -53,9 +54,10 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
   overlayToLoisAndReturn_.addInclusive(exitMarker);
 }
 
-ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F,
-                                       const std::vector<llvm::BasicBlock *> &lois,
-                                       const std::vector<const llvm::Function *> &enterCallsOfInterest) {
+ProcedureResources::ProcedureResources(
+    SifaStats &stats, const llvm::Function &F,
+    const std::vector<llvm::BasicBlock *> &lois,
+    const std::vector<const llvm::Function *> &enterCallsOfInterest) {
   ProcedureGraphBuilder builder(stats, F);
   ProcedureGraph pg = builder.graphOfProcedure(lois, enterCallsOfInterest,
                                                /*restrictToReachable=*/true);
@@ -83,7 +85,8 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
   auto exprToExit = pg.graph().getNodes().count(exitNode)
                         ? exprBetween(stats, pe, entry, exitNode)
                         : lotus::pathexpressions::Regex<Transition>::emptySet();
-  auto markedExit = markRegex(exprToExit, /*finalLocationAsMark=*/nullptr, nextMarkerId++);
+  auto markedExit =
+      markRegex(exprToExit, /*finalLocationAsMark=*/nullptr, nextMarkerId++);
   auto *exitMarker = addToDag(stats, regexToDag, markedExit);
 
   std::vector<RegexDagNode<Transition> *> enterCallMarkers;
@@ -92,7 +95,8 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
       if (!callee || callee->isDeclaration() || callee->empty()) {
         continue;
       }
-      auto *calleeEntry = const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
+      auto *calleeEntry =
+          const_cast<llvm::BasicBlock *>(&callee->getEntryBlock());
       auto *calleeEntryNode = pg.getBlockEntryNode(*calleeEntry);
       if (!calleeEntryNode) {
         continue;
@@ -131,16 +135,22 @@ ProcedureResources::ProcedureResources(SifaStats &stats, const llvm::Function &F
   }
 }
 
-const RegexDag<Transition> &ProcedureResources::getRegexDag() const { return regexDag_; }
-const BackwardClosedOverlay<Transition> &ProcedureResources::getDagOverlayPathToLois() const {
+const RegexDag<Transition> &ProcedureResources::getRegexDag() const {
+  return regexDag_;
+}
+const BackwardClosedOverlay<Transition> &
+ProcedureResources::getDagOverlayPathToLois() const {
   return overlayToLois_;
 }
-const BackwardClosedOverlay<Transition> &ProcedureResources::getDagOverlayPathToReturn() const {
+const BackwardClosedOverlay<Transition> &
+ProcedureResources::getDagOverlayPathToReturn() const {
   return overlayToReturn_;
 }
-const BackwardClosedOverlay<Transition> &ProcedureResources::getDagOverlayPathToLoisAndReturn() const {
+const BackwardClosedOverlay<Transition> &
+ProcedureResources::getDagOverlayPathToLoisAndReturn() const {
   return overlayToLoisAndReturn_;
 }
-const BackwardClosedOverlay<Transition> &ProcedureResources::getDagOverlayPathToLoisAndEnterCalls() const {
+const BackwardClosedOverlay<Transition> &
+ProcedureResources::getDagOverlayPathToLoisAndEnterCalls() const {
   return overlayToLoisAndEnterCalls_;
 }

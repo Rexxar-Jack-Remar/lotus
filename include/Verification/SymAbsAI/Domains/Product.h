@@ -83,7 +83,8 @@ public:
   virtual bool joinWith(const AbstractValue &av_other) override {
     assert(Finalized_);
     auto &other = static_cast<const Product &>(av_other);
-    // Allow different sizes (e.g. parameterized domains with location-dependent param sets).
+    // Allow different sizes (e.g. parameterized domains with location-dependent
+    // param sets).
     const size_t n = std::min(Values_.size(), other.Values_.size());
     bool changed = false;
     for (size_t i = 0; i < n; i++) {

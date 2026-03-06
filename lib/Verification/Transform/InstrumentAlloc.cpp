@@ -23,7 +23,7 @@ static void replace_malloc(Module *M, CallInst *CI, bool never_fails) {
                                CI->getOperand(0)->getType());
   } else {
     F = M->getOrInsertFunction("__VERIFIER_malloc", CI->getType(),
-                                CI->getOperand(0)->getType());
+                               CI->getOperand(0)->getType());
   }
 
   Function *Malloc = cast<Function>(F.getCallee());
@@ -54,8 +54,8 @@ static void replace_calloc(Module *M, CallInst *CI, bool never_fails) {
                                CI->getOperand(1)->getType());
   } else {
     F = M->getOrInsertFunction("__VERIFIER_calloc", CI->getType(),
-                                CI->getOperand(0)->getType(),
-                                CI->getOperand(1)->getType());
+                               CI->getOperand(0)->getType(),
+                               CI->getOperand(1)->getType());
   }
 
   Function *Calloc = cast<Function>(F.getCallee());
@@ -142,9 +142,7 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createInstrumentAllocPass() {
-  return new InstrumentAllocPass();
-}
+llvm::Pass *createInstrumentAllocPass() { return new InstrumentAllocPass(); }
 
 llvm::Pass *createInstrumentAllocNeverFailsPass() {
   return new InstrumentAllocNeverFailsPass();

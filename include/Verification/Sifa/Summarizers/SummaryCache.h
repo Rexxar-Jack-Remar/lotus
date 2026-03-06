@@ -1,4 +1,5 @@
-//===-- Verification/Sifa/Summarizers/SummaryCache.h -----------------------===//
+//===-- Verification/Sifa/Summarizers/SummaryCache.h
+//-----------------------===//
 //
 // Standalone re-use summary cache (ported from Ultimate Library-Sifa).
 //
@@ -20,8 +21,7 @@ namespace sifa {
 
 /// Standalone cache for one procedure or loop: (input, summary). Re-use when
 /// input ⊆ knownInput; return meet(supersets) or compute and cache.
-template <typename StateT>
-class SummaryCache {
+template <typename StateT> class SummaryCache {
 public:
   using Entry = std::pair<StateT, StateT>;
   using IsSubsetEqFn = std::function<bool(const StateT &, const StateT &)>;
@@ -55,7 +55,8 @@ public:
   /// such summaries. Else compute via computeSummary, cache, and return.
   StateT reUseOrCompute(const StateT &input, IsSubsetEqFn isSubsetEq,
                         ComputeSummaryFn computeSummary, MeetFn meetFn) {
-    std::vector<StateT> supersets = reusableSummaries(input, std::move(isSubsetEq));
+    std::vector<StateT> supersets =
+        reusableSummaries(input, std::move(isSubsetEq));
     if (!supersets.empty()) {
       StateT acc = supersets.front();
       for (std::size_t i = 1; i < supersets.size(); ++i)

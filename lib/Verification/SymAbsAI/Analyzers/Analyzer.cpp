@@ -20,10 +20,10 @@
 #include "Verification/SymAbsAI/Utils/Utils.h"
 #include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 
+#include <atomic>
+
 #include <llvm/IR/CFG.h>
 #include <llvm/Support/Timer.h>
-
-#include <atomic>
 
 namespace symabs_ai {
 

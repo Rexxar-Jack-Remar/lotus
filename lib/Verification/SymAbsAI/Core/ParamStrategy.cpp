@@ -306,8 +306,8 @@ ParamStrategy ParamStrategy::NonPointers() {
  *  Checks for two llvm::Values whether they are used or defined in the same
  *  fragment.
  */
-bool params::isInPack(symabs_ai::FragmentDecomposition &decomp,
-                      llvm::Value *a, llvm::Value *b) {
+bool params::isInPack(symabs_ai::FragmentDecomposition &decomp, llvm::Value *a,
+                      llvm::Value *b) {
   bool foundA = false, foundB = false;
   for (auto &frag : decomp) {
     for (auto *loc : frag.locations()) {

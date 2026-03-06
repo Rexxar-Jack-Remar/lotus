@@ -120,8 +120,7 @@ bool containsDomain(const symabs_ai::AbstractValue *value) {
 
 char SymAbsAIPass::ID;
 
-SymAbsAIPass::SymAbsAIPass()
-    : llvm::FunctionPass(SymAbsAIPass::ID) {
+SymAbsAIPass::SymAbsAIPass() : llvm::FunctionPass(SymAbsAIPass::ID) {
   const char *M = "SymAbsAIPass";
 
   Config_.ConstantPropagation =
@@ -143,8 +142,8 @@ SymAbsAIPass::SymAbsAIPass()
  * with the missing domains so that analysis results expose the information
  * required for the transformations implemented below.
  */
-DomainConstructor SymAbsAIPass::getAugmentedDomain(
-    symabs_ai::FunctionContext &smtsem) {
+DomainConstructor
+SymAbsAIPass::getAugmentedDomain(symabs_ai::FunctionContext &smtsem) {
   using namespace symabs_ai;
   using namespace domains;
 
@@ -202,9 +201,8 @@ DomainConstructor SymAbsAIPass::getAugmentedDomain(
   return domain;
 }
 
-bool SymAbsAIPass::replaceUsesOfWithInBBAndPHISuccs(BasicBlock &bb,
-                                                               Value *from,
-                                                               Value *to) {
+bool SymAbsAIPass::replaceUsesOfWithInBBAndPHISuccs(BasicBlock &bb, Value *from,
+                                                    Value *to) {
   bool changed = false;
 
   // get a reasonable textual representation of a Value
@@ -294,8 +292,7 @@ bool SymAbsAIPass::performConstPropForBB(
   return replaceUsesOfWithInBBAndPHISuccs(bb, var, const_int);
 }
 
-void SymAbsAIPass::insertEquality(equals_t &eqs, Value *a,
-                                             Value *b) {
+void SymAbsAIPass::insertEquality(equals_t &eqs, Value *a, Value *b) {
   // If x is presenet in a set of eqs, inserts y into the same set and
   // returns `true`. Returns `false` otherwise.
   auto insertConditionally = [&eqs](Value *x, Value *y) {
@@ -316,8 +313,7 @@ void SymAbsAIPass::insertEquality(equals_t &eqs, Value *a,
   }
 }
 
-Value *SymAbsAIPass::getReplacementCanditdate(const equals_t &eqs,
-                                                         Value *val) {
+Value *SymAbsAIPass::getReplacementCanditdate(const equals_t &eqs, Value *val) {
   Instruction *candidate = dyn_cast_or_null<Instruction>(val);
   if (!candidate)
     return nullptr; // we only want to replace instructions
@@ -360,7 +356,7 @@ Value *SymAbsAIPass::getReplacementCanditdate(const equals_t &eqs,
  * computations without changing semantics.
  */
 bool SymAbsAIPass::performRedundancyReplForBB(const equals_t &eqs,
-                                                         BasicBlock &bb) {
+                                              BasicBlock &bb) {
   using namespace symabs_ai;
   using namespace domains;
   std::map<Value *, Value *> repl;
@@ -407,8 +403,8 @@ bool SymAbsAIPass::performRedundancyReplForBB(const equals_t &eqs,
  *    based on the abstract results for each basic block.
  */
 bool SymAbsAIPass::runOnFunction(llvm::Function &function) {
-  vout << "Perform SymAbsAIPass on function `"
-       << function.getName().str() << "'." << '\n'
+  vout << "Perform SymAbsAIPass on function `" << function.getName().str()
+       << "'." << '\n'
        << "¸.·´¯`·.´¯`·.¸¸.·´¯`·.¸><(((º>" << '\n'
        << '\n';
   bool changed = false;

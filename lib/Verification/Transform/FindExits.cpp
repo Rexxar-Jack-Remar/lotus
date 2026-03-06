@@ -10,15 +10,17 @@
 
 using namespace llvm;
 
-static cl::opt<bool> no_change_assumes("no-change-assumes",
-                                       cl::desc("Do not replace __VERIFIER_assume with "
-                                                "__INSTR_check_assume"),
-                                       cl::init(false));
+static cl::opt<bool>
+    no_change_assumes("no-change-assumes",
+                      cl::desc("Do not replace __VERIFIER_assume with "
+                               "__INSTR_check_assume"),
+                      cl::init(false));
 
-static cl::opt<bool> use_exit("find-exits-use-exit",
-                               cl::desc("Use calls to __VERIFIER_exit() instead of "
-                                        "__VERIFIER_silent_exit"),
-                               cl::init(false));
+static cl::opt<bool>
+    use_exit("find-exits-use-exit",
+             cl::desc("Use calls to __VERIFIER_exit() instead of "
+                      "__VERIFIER_silent_exit"),
+             cl::init(false));
 
 namespace {
 
@@ -50,10 +52,11 @@ bool FindExitsPass::runOnFunction(Function &F) {
   Type *argTy = Type::getInt32Ty(Ctx);
   FunctionCallee exitC;
   if (use_exit) {
-    exitC = M->getOrInsertFunction("__VERIFIER_exit", Type::getVoidTy(Ctx), argTy);
+    exitC =
+        M->getOrInsertFunction("__VERIFIER_exit", Type::getVoidTy(Ctx), argTy);
   } else {
-    exitC = M->getOrInsertFunction("__VERIFIER_silent_exit", Type::getVoidTy(Ctx),
-                                    argTy);
+    exitC = M->getOrInsertFunction("__VERIFIER_silent_exit",
+                                   Type::getVoidTy(Ctx), argTy);
   }
   Function *exitF = cast<Function>(exitC.getCallee());
   exitF->addFnAttr(Attribute::NoReturn);
@@ -83,7 +86,7 @@ bool FindExitsPass::runOnFunction(Function &F) {
           continue;
         if (calledFun->getName().equals("__VERIFIER_assume")) {
           auto ICAC = M->getOrInsertFunction("__INSTR_check_assume",
-                                              Type::getVoidTy(Ctx), argTy);
+                                             Type::getVoidTy(Ctx), argTy);
           auto *ICA = cast<Function>(ICAC.getCallee());
           CI->setCalledFunction(ICA);
           modified = true;
@@ -107,9 +110,7 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createFindExitsPass() {
-  return new FindExitsPass();
-}
+llvm::Pass *createFindExitsPass() { return new FindExitsPass(); }
 
 } // namespace transform
 } // namespace verification

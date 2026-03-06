@@ -9,8 +9,8 @@
 #ifndef LOTUS_VERIFICATION_SIFA_CACHES_STARDAGCACHE_H
 #define LOTUS_VERIFICATION_SIFA_CACHES_STARDAGCACHE_H
 
-#include "Verification/Sifa/RegexDag/RegexDagCompressor.h"
 #include "Verification/Sifa/RegexDag/RegexDag.h"
+#include "Verification/Sifa/RegexDag/RegexDagCompressor.h"
 #include "Verification/Sifa/RegexDag/RegexDagUtils.h"
 #include "Verification/Sifa/RegexDag/RegexToDag.h"
 #include "Verification/Sifa/Statistics/SifaStats.h"
@@ -21,8 +21,7 @@
 namespace lotus {
 namespace sifa {
 
-template <typename L>
-class StarDagCache final {
+template <typename L> class StarDagCache final {
 public:
   using RegexRef = lotus::pathexpressions::RegexRef<L>;
   using Dag = RegexDag<L>;
@@ -43,12 +42,16 @@ private:
   SifaStats &stats_;
   std::uint32_t nextMarkerId_ = 1;
   struct RegexRefKeyHash {
-    std::size_t operator()(const RegexRef &r) const { return r ? r->hashCode() : 0; }
+    std::size_t operator()(const RegexRef &r) const {
+      return r ? r->hashCode() : 0;
+    }
   };
   struct RegexRefKeyEq {
     bool operator()(const RegexRef &a, const RegexRef &b) const {
-      if (a == b) return true;
-      if (!a || !b) return false;
+      if (a == b)
+        return true;
+      if (!a || !b)
+        return false;
       return a->equals(*b);
     }
   };
@@ -56,9 +59,11 @@ private:
 };
 
 template <typename L>
-typename StarDagCache<L>::Dag StarDagCache<L>::computeDagOf(const RegexRef &regex) {
+typename StarDagCache<L>::Dag
+StarDagCache<L>::computeDagOf(const RegexRef &regex) {
   RegexToDag<L> r2d;
-  const auto marked = markRegex(regex, /*finalLocationAsMark=*/nullptr, nextMarkerId_++);
+  const auto marked =
+      markRegex(regex, /*finalLocationAsMark=*/nullptr, nextMarkerId_++);
   r2d.add(marked);
   Dag dag = r2d.getDagAndReset();
   RegexDagCompressor<L> comp;

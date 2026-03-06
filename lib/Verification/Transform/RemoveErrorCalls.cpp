@@ -64,9 +64,9 @@ bool RemoveErrorCallsPass::runOnFunction(Function &F) {
       if (name.equals("__VERIFIER_error") || name.equals("__assert_fail")) {
         if (!ext) {
           Type *argTy = Type::getInt32Ty(Ctx);
-          auto extF = M->getOrInsertFunction(
-              useExit ? "__VERIFIER_exit" : "__VERIFIER_assume",
-              Type::getVoidTy(Ctx), argTy);
+          auto extF = M->getOrInsertFunction(useExit ? "__VERIFIER_exit"
+                                                     : "__VERIFIER_assume",
+                                             Type::getVoidTy(Ctx), argTy);
 
           std::vector<Value *> args = {ConstantInt::get(argTy, 0)};
           ext = std::unique_ptr<CallInst>(CallInst::Create(extF, args));
@@ -96,9 +96,7 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createRemoveErrorCallsPass() {
-  return new RemoveErrorCallsPass();
-}
+llvm::Pass *createRemoveErrorCallsPass() { return new RemoveErrorCallsPass(); }
 
 } // namespace transform
 } // namespace verification

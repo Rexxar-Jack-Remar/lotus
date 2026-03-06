@@ -17,11 +17,11 @@ enum class PropertyClass {
 };
 
 enum class VerificationResult {
-  True,      // Property holds (no error found)
-  False,     // Property violated (error found)
-  Unknown,   // Could not determine
-  Error,     // Verification tool error
-  Timeout    // Verification timed out
+  True,    // Property holds (no error found)
+  False,   // Property violated (error found)
+  Unknown, // Could not determine
+  Error,   // Verification tool error
+  Timeout  // Verification timed out
 };
 
 struct VerificationTask {
@@ -34,9 +34,9 @@ struct VerificationTask {
 struct VerificationResultInfo {
   VerificationResult result = VerificationResult::Unknown;
   std::string message;
-  std::string errorTrace;  // If result is False, may contain error trace
+  std::string errorTrace; // If result is False, may contain error trace
   int exitCode = -1;
-  
+
   bool isSafe() const { return result == VerificationResult::True; }
   bool hasError() const { return result == VerificationResult::False; }
   bool isUnknown() const { return result == VerificationResult::Unknown; }
@@ -49,10 +49,10 @@ public:
   virtual bool supports(PropertyClass property) const = 0;
   virtual std::vector<std::string>
   buildCommand(const VerificationTask &task) const = 0;
-  
+
   // Parse backend output and normalize to standard result format
   virtual VerificationResultInfo parseResult(const std::string &output,
-                                            int exitCode) const = 0;
+                                             int exitCode) const = 0;
 };
 
 class BackendRegistry {

@@ -19,7 +19,8 @@ namespace transform {
 
 /**
  * @class BreakCritLoopsPass
- * @brief Breaks critical loops for better slicing and control dependence analysis
+ * @brief Breaks critical loops for better slicing and control dependence
+ * analysis
  *
  * This pass identifies basic blocks that jump back to themselves via critical
  * edges (from simplifycfg pass) and splits these blocks to improve control

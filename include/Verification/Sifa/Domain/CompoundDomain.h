@@ -33,12 +33,8 @@ public:
 
   CompoundDomain(const Domain1 &d1, const Domain2 &d2) : d1_(d1), d2_(d2) {}
 
-  State top() const override {
-    return {d1_.top(), d2_.top()};
-  }
-  State bottom() const override {
-    return {d1_.bottom(), d2_.bottom()};
-  }
+  State top() const override { return {d1_.top(), d2_.top()}; }
+  State bottom() const override { return {d1_.bottom(), d2_.bottom()}; }
   bool isBottom(const State &s) const override {
     return d1_.isBottom(s.first) || d2_.isBottom(s.second);
   }
@@ -50,7 +46,8 @@ public:
     return {d1_.join(a.first, b.first), d2_.join(a.second, b.second)};
   }
   State widen(const State &prev, const State &next) const override {
-    return {d1_.widen(prev.first, next.first), d2_.widen(prev.second, next.second)};
+    return {d1_.widen(prev.first, next.first),
+            d2_.widen(prev.second, next.second)};
   }
   State meet(const State &a, const State &b) const override {
     return {d1_.meet(a.first, b.first), d2_.meet(a.second, b.second)};
@@ -70,7 +67,8 @@ public:
     return {d1_.post(t, in.first), d2_.post(t, in.second)};
   }
   State postCall(const Label &t, const State &callerState) const override {
-    return {d1_.postCall(t, callerState.first), d2_.postCall(t, callerState.second)};
+    return {d1_.postCall(t, callerState.first),
+            d2_.postCall(t, callerState.second)};
   }
   State postCall(const State &callerState) const override {
     return {d1_.postCall(callerState.first), d2_.postCall(callerState.second)};
@@ -80,7 +78,8 @@ public:
     return {d1_.postReturn(t, callerState.first, calleeSummary.first),
             d2_.postReturn(t, callerState.second, calleeSummary.second)};
   }
-  State postReturn(const State &callerState, const State &calleeSummary) const override {
+  State postReturn(const State &callerState,
+                   const State &calleeSummary) const override {
     return {d1_.postReturn(callerState.first, calleeSummary.first),
             d2_.postReturn(callerState.second, calleeSummary.second)};
   }

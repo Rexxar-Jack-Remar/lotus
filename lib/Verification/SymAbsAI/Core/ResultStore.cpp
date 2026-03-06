@@ -1,11 +1,13 @@
 /**
  * @file ResultStore.cpp
- * @brief Implementation of ResultStore for persisting and retrieving abstract analysis results.
+ * @brief Implementation of ResultStore for persisting and retrieving abstract
+ * analysis results.
  *
- * ResultStore provides a database-backed storage mechanism for abstract interpretation
- * results. It allows storing and retrieving AbstractValue instances associated with
- * specific function/location keys, enabling reuse of analysis results across runs or
- * integration with dynamic analysis results. Uses Berkeley DB when ENABLE_DYNAMIC is defined.
+ * ResultStore provides a database-backed storage mechanism for abstract
+ * interpretation results. It allows storing and retrieving AbstractValue
+ * instances associated with specific function/location keys, enabling reuse of
+ * analysis results across runs or integration with dynamic analysis results.
+ * Uses Berkeley DB when ENABLE_DYNAMIC is defined.
  *
  * @author rainoftime
  */

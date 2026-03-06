@@ -20,7 +20,8 @@ namespace transform {
 
 /**
  * @class MakeNondetPass
- * @brief Replaces selected input functions with nondeterministic value generators
+ * @brief Replaces selected input functions with nondeterministic value
+ * generators
  *
  * This pass replaces calls to specified functions (e.g., rand(), getchar(),
  * scanf()) with calls to verifier.nondet.input.* functions. This is useful

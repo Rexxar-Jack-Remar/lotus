@@ -19,7 +19,8 @@ namespace transform {
 
 /**
  * @class RemoveReadOnlyAttrPass
- * @brief Removes readonly attribute from functions that call instrumented functions
+ * @brief Removes readonly attribute from functions that call instrumented
+ * functions
  *
  * When checking for memory safety, LLVM may drop calls to functions with no
  * side effects. This pass removes readonly attributes from functions that call

@@ -60,8 +60,8 @@ bool BreakInfiniteLoopsPass::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
 
   // Create a new block with always-true condition
   GlobalVariable *trueGV = new GlobalVariable(
-      *M, Type::getInt1Ty(Ctx), true /*constant*/, GlobalVariable::PrivateLinkage,
-      ConstantInt::getTrue(Ctx), "always_true");
+      *M, Type::getInt1Ty(Ctx), true /*constant*/,
+      GlobalVariable::PrivateLinkage, ConstantInt::getTrue(Ctx), "always_true");
 
   BasicBlock *nb = BasicBlock::Create(Ctx, "break.inf.loop");
   LoadInst *LI = new LoadInst(Type::getInt1Ty(Ctx), trueGV, "always_true", nb);
@@ -98,7 +98,8 @@ bool BreakInfiniteLoopsPass::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::BreakInfiniteLoopsPass>
+static llvm::RegisterPass<
+    lotus::verification::transform::BreakInfiniteLoopsPass>
     X("break-infinite-loops",
       "Transform loops that have no exit to loops that have an exit");
 

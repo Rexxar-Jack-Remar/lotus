@@ -24,7 +24,8 @@ namespace transform {
  *
  * This pass:
  * - Unrolls loops a configurable number of times
- * - Optionally adds termination paths with __VERIFIER_assume(0) for bounded verification
+ * - Optionally adds termination paths with __VERIFIER_assume(0) for bounded
+ * verification
  * - Useful for bounded model checking and verification scenarios
  */
 class UnrollingPass : public llvm::LoopPass {

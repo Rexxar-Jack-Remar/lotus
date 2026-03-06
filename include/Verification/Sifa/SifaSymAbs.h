@@ -45,7 +45,8 @@ bool isReachableSymAbs(const llvm::Module &M, const llvm::Function &F,
                        const SifaSymAbsOptions &options = {});
 
 /// Compute the abstract state at the procedure exit (the synthetic EXIT node).
-SymAbsState analyzeSymAbsToReturn(const llvm::Module &M, const llvm::Function &F,
+SymAbsState analyzeSymAbsToReturn(const llvm::Module &M,
+                                  const llvm::Function &F,
                                   const SifaSymAbsOptions &options = {});
 
 } // namespace sifa

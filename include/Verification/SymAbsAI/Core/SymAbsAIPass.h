@@ -38,8 +38,7 @@ private:
    *      - appropriate EqPredicates AbstractValues if Redundant Computation
    *          Eliminatation should be performed.
    */
-  DomainConstructor
-  getAugmentedDomain(symabs_ai::FunctionContext &smtsem);
+  DomainConstructor getAugmentedDomain(symabs_ai::FunctionContext &smtsem);
 
 public:
   static char ID;
@@ -58,9 +57,8 @@ public:
    * Performs all replacements of Value uses with constants in `bb` that are
    * allowed by `scp`.
    */
-  bool performConstPropForBB(
-      const FunctionContext &fctx, llvm::BasicBlock &bb,
-      const symabs_ai::domains::SimpleConstProp *scp);
+  bool performConstPropForBB(const FunctionContext &fctx, llvm::BasicBlock &bb,
+                             const symabs_ai::domains::SimpleConstProp *scp);
 
   /**
    * Representation of a partition of a set of llvm Values. Values in the

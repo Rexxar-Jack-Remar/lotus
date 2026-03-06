@@ -11,8 +11,8 @@
 using namespace llvm;
 
 static cl::opt<std::string> detect_calls("detect-calls",
-                                          cl::desc("Detect calls to functions"),
-                                          cl::value_desc("function name"));
+                                         cl::desc("Detect calls to functions"),
+                                         cl::value_desc("function name"));
 
 namespace lotus {
 namespace verification {
@@ -68,16 +68,14 @@ bool CheckModulePass::runOnModule(Module &M) {
 } // namespace lotus
 
 static llvm::RegisterPass<lotus::verification::analysis::CheckModulePass>
-    X("check-module",
-      "Check whether the module contains given features (e.g., calls to pthread funs)");
+    X("check-module", "Check whether the module contains given features (e.g., "
+                      "calls to pthread funs)");
 
 namespace lotus {
 namespace verification {
 namespace analysis {
 
-llvm::Pass *createCheckModulePass() {
-  return new CheckModulePass();
-}
+llvm::Pass *createCheckModulePass() { return new CheckModulePass(); }
 
 } // namespace analysis
 } // namespace verification

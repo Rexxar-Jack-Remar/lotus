@@ -11,9 +11,10 @@
 
 using namespace llvm;
 
-static cl::list<std::string> CallsToDelete("delete-call",
-                                            cl::desc("Specify which calls of functions to delete"),
-                                            cl::CommaSeparated);
+static cl::list<std::string>
+    CallsToDelete("delete-call",
+                  cl::desc("Specify which calls of functions to delete"),
+                  cl::CommaSeparated);
 
 namespace lotus {
 namespace verification {
@@ -65,9 +66,7 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createDeleteCallsPass() {
-  return new DeleteCallsPass();
-}
+llvm::Pass *createDeleteCallsPass() { return new DeleteCallsPass(); }
 
 } // namespace transform
 } // namespace verification

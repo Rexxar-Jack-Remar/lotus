@@ -32,7 +32,8 @@ struct InterpreterOptions {
 
 template <typename LabelT, typename StateT>
 class RegexInterpreter final
-    : public lotus::pathexpressions::IRegexVisitor<LabelT, StateT, const StateT *> {
+    : public lotus::pathexpressions::IRegexVisitor<LabelT, StateT,
+                                                   const StateT *> {
 public:
   using Label = LabelT;
   using State = StateT;
@@ -111,4 +112,3 @@ private:
 } // namespace lotus
 
 #endif // LOTUS_VERIFICATION_SIFA_INTERPRETER_REGEXINTERPRETER_H
-

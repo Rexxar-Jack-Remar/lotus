@@ -26,8 +26,8 @@ bool exitsViaReturn(const llvm::BasicBlock &BB) {
 
 } // namespace
 
-std::size_t ProcedureGraph::NodePairHash::operator()(
-    const std::pair<Node, Node> &p) const {
+std::size_t
+ProcedureGraph::NodePairHash::operator()(const std::pair<Node, Node> &p) const {
   const std::size_t a = std::hash<Node>()(p.first);
   const std::size_t b = std::hash<Node>()(p.second);
   return a ^ (b + 0x9e3779b97f4a7c15ULL + (a << 6) + (a >> 2));
@@ -43,17 +43,20 @@ void ProcedureGraph::setEntryNode(Node n) {
   }
 }
 
-ProcedureGraph::Node ProcedureGraph::getBlockEntryNode(const llvm::BasicBlock &bb) const {
+ProcedureGraph::Node
+ProcedureGraph::getBlockEntryNode(const llvm::BasicBlock &bb) const {
   auto it = blockEntryNodes_.find(&bb);
   return it == blockEntryNodes_.end() ? nullptr : it->second;
 }
 
-ProcedureGraph::Node ProcedureGraph::createNode(llvm::BasicBlock *bb, std::uint32_t ordinal) {
+ProcedureGraph::Node ProcedureGraph::createNode(llvm::BasicBlock *bb,
+                                                std::uint32_t ordinal) {
   ownedNodes_.emplace_back(new ProgramPoint{bb, ordinal});
   return ownedNodes_.back().get();
 }
 
-ProcedureGraph::Node ProcedureGraph::getOrCreateBlockEntryNode(llvm::BasicBlock *bb) {
+ProcedureGraph::Node
+ProcedureGraph::getOrCreateBlockEntryNode(llvm::BasicBlock *bb) {
   if (!bb) {
     return nullptr;
   }
@@ -79,7 +82,9 @@ ProcedureGraph::Node ProcedureGraph::createInternalNode(llvm::BasicBlock *bb) {
 }
 
 const ProcedureGraph::Graph &ProcedureGraph::graph() const { return graph_; }
-const std::vector<TransitionInfo> &ProcedureGraph::transitions() const { return transitions_; }
+const std::vector<TransitionInfo> &ProcedureGraph::transitions() const {
+  return transitions_;
+}
 
 Transition ProcedureGraph::addTransition(Node src, Node dst,
                                          const llvm::Instruction *segmentStart,
@@ -89,27 +94,25 @@ Transition ProcedureGraph::addTransition(Node src, Node dst,
   if (it != edgeToId_.end()) {
     return Transition::makeEdge(it->second, src ? src->block : nullptr,
                                 dst ? dst->block : nullptr,
-                                src ? src->ordinal : 0,
-                                dst ? dst->ordinal : 0, segmentStart,
-                                stopBefore);
+                                src ? src->ordinal : 0, dst ? dst->ordinal : 0,
+                                segmentStart, stopBefore);
   }
 
   const std::uint32_t id = static_cast<std::uint32_t>(transitions_.size());
-  transitions_.push_back(TransitionInfo{
-      src ? src->block : nullptr, dst ? dst->block : nullptr,
-      src ? src->ordinal : 0, dst ? dst->ordinal : 0, nullptr,
-      segmentStart, stopBefore, nullptr});
+  transitions_.push_back(
+      TransitionInfo{src ? src->block : nullptr, dst ? dst->block : nullptr,
+                     src ? src->ordinal : 0, dst ? dst->ordinal : 0, nullptr,
+                     segmentStart, stopBefore, nullptr});
   edgeToId_.emplace(std::move(k), id);
-  return Transition::makeEdge(id, src ? src->block : nullptr,
-                              dst ? dst->block : nullptr,
-                              src ? src->ordinal : 0,
-                              dst ? dst->ordinal : 0, segmentStart,
-                              stopBefore);
+  return Transition::makeEdge(
+      id, src ? src->block : nullptr, dst ? dst->block : nullptr,
+      src ? src->ordinal : 0, dst ? dst->ordinal : 0, segmentStart, stopBefore);
 }
 
 ProcedureGraph::ProcedureGraph(const llvm::Function &F) {
   exitNode_ = nullptr;
-  entryNode_ = getOrCreateBlockEntryNode(const_cast<llvm::BasicBlock *>(&F.getEntryBlock()));
+  entryNode_ = getOrCreateBlockEntryNode(
+      const_cast<llvm::BasicBlock *>(&F.getEntryBlock()));
 
   for (const llvm::BasicBlock &BB : F) {
     auto *srcBB = const_cast<llvm::BasicBlock *>(&BB);
@@ -122,7 +125,8 @@ ProcedureGraph::ProcedureGraph(const llvm::Function &F) {
     }
 
     for (const llvm::BasicBlock *succBB : llvm::successors(&BB)) {
-      Node dst = getOrCreateBlockEntryNode(const_cast<llvm::BasicBlock *>(succBB));
+      Node dst =
+          getOrCreateBlockEntryNode(const_cast<llvm::BasicBlock *>(succBB));
       addEdge(src, dst, segmentStart, nullptr);
     }
   }

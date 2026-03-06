@@ -1,6 +1,7 @@
 //===-- Verification/Sifa/Cfg/Transition.h --------------------------------===//
 //
-// Transition labels used for path expressions and Sifa's regex/DAG interpretation.
+// Transition labels used for path expressions and Sifa's regex/DAG
+// interpretation.
 //
 // Ultimate-aligned: Ultimate has separate classes LocationMarkerTransition and
 // CallReturnSummary (cfgpreprocessing). We provide those as named structs and
@@ -8,9 +9,9 @@
 //
 // In lotus, Transition::id is typically assigned by the producer:
 // - ProcedureGraph assigns dense ids to CFG edges (and ReturnSummary edges).
-// - ProcedureResources assigns ids to marker transitions used to denote LOIs/EXIT.
-// The id is used for hashing/comparison and as an index into side-tables such as
-// ProcedureGraph::transitions().
+// - ProcedureResources assigns ids to marker transitions used to denote
+// LOIs/EXIT. The id is used for hashing/comparison and as an index into
+// side-tables such as ProcedureGraph::transitions().
 //
 //===----------------------------------------------------------------------===//
 
@@ -41,8 +42,9 @@ enum class TransitionKind : std::uint8_t {
 };
 
 //--- Ultimate cfgpreprocessing/LocationMarkerTransition (aligned) -------------
-/// Transition to mark paths uniquely in RegexDag (Ultimate LocationMarkerTransition).
-/// getSource() returns nullptr for markers; getTarget() returns the marked location.
+/// Transition to mark paths uniquely in RegexDag (Ultimate
+/// LocationMarkerTransition). getSource() returns nullptr for markers;
+/// getTarget() returns the marked location.
 struct LocationMarkerTransition {
   llvm::BasicBlock *markedTarget = nullptr;
   std::uint32_t uniqueId = 0;
@@ -53,8 +55,9 @@ struct LocationMarkerTransition {
 };
 
 //--- Ultimate cfgpreprocessing/CallReturnSummary (aligned) -------------------
-/// One transition representing: enter callee, execute body, return (Ultimate CallReturnSummary).
-/// correspondingCall() / correspondingReturn() in Ultimate return ICFG edges; we expose callee.
+/// One transition representing: enter callee, execute body, return (Ultimate
+/// CallReturnSummary). correspondingCall() / correspondingReturn() in Ultimate
+/// return ICFG edges; we expose callee.
 struct CallReturnSummary {
   llvm::BasicBlock *source = nullptr;
   llvm::BasicBlock *target = nullptr;
@@ -78,9 +81,9 @@ struct CallReturnSummary {
 ///   callee without returning" paths in interprocedural Sifa.
 ///
 /// The meaning of a ReturnSummary transition is domain/interpreter-defined.
-/// In reachability-style interpretation it can be treated as "jump to successor",
-/// while richer interprocedural interpreters may use the embedded callee to
-/// consult summaries or recursively interpret the callee.
+/// In reachability-style interpretation it can be treated as "jump to
+/// successor", while richer interprocedural interpreters may use the embedded
+/// callee to consult summaries or recursively interpret the callee.
 struct Transition {
   TransitionKind kind = TransitionKind::Edge;
   std::uint32_t id = 0;
@@ -99,13 +102,13 @@ struct Transition {
                              std::uint32_t targetOrdinal = 0,
                              const llvm::Instruction *segmentStart = nullptr,
                              const llvm::Instruction *stopBefore = nullptr);
-  static Transition makeMarker(std::uint32_t id, const llvm::BasicBlock *markedTarget);
-  static Transition makeReturnSummary(std::uint32_t id, const llvm::BasicBlock *src,
-                                      const llvm::BasicBlock *dst,
-                                      std::uint32_t sourceOrdinal,
-                                      std::uint32_t targetOrdinal,
-                                      const llvm::Function *calleeFn,
-                                      const llvm::CallBase *callSite = nullptr);
+  static Transition makeMarker(std::uint32_t id,
+                               const llvm::BasicBlock *markedTarget);
+  static Transition
+  makeReturnSummary(std::uint32_t id, const llvm::BasicBlock *src,
+                    const llvm::BasicBlock *dst, std::uint32_t sourceOrdinal,
+                    std::uint32_t targetOrdinal, const llvm::Function *calleeFn,
+                    const llvm::CallBase *callSite = nullptr);
   static Transition makeEnterCall(std::uint32_t id, const llvm::BasicBlock *src,
                                   const llvm::BasicBlock *calleeEntry,
                                   std::uint32_t sourceOrdinal,
@@ -123,7 +126,9 @@ struct Transition {
   /// When kind == ReturnSummary, view as CallReturnSummary.
   llvm::Optional<CallReturnSummary> getCallReturnSummary() const;
 
-  bool landsAtBlockEntry() const { return target != nullptr && targetOrdinal == 0; }
+  bool landsAtBlockEntry() const {
+    return target != nullptr && targetOrdinal == 0;
+  }
 
   bool operator==(const Transition &o) const;
 };
@@ -140,8 +145,7 @@ std::ostream &operator<<(std::ostream &os, const Transition &t);
 } // namespace lotus
 
 namespace std {
-template <>
-struct hash<lotus::sifa::Transition> {
+template <> struct hash<lotus::sifa::Transition> {
   std::size_t operator()(const lotus::sifa::Transition &t) const {
     return lotus::sifa::hashValue(t);
   }

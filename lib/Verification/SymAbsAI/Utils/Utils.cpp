@@ -2,9 +2,9 @@
  * @file Utils.cpp
  * @brief Utility functions and global state for the SymAbsAI module.
  *
- * Provides utility functions for string escaping, module loading, SSA form checking,
- * and debug information extraction. Also implements the global verbose output stream
- * that can be enabled/disabled for debugging.
+ * Provides utility functions for string escaping, module loading, SSA form
+ * checking, and debug information extraction. Also implements the global
+ * verbose output stream that can be enabled/disabled for debugging.
  *
  * @author rainoftime
  */
@@ -34,9 +34,11 @@ namespace symabs_ai {
 namespace // unnamed
 {
 /**
- * @brief String buffer that conditionally outputs to stderr based on VerboseEnable.
+ * @brief String buffer that conditionally outputs to stderr based on
+ * VerboseEnable.
  *
- * Used to implement the global vout stream that only prints when verbose mode is enabled.
+ * Used to implement the global vout stream that only prints when verbose mode
+ * is enabled.
  */
 class VerboseOutBuf : public std::stringbuf {
 protected:
@@ -50,9 +52,11 @@ protected:
 } VerboseOutBufInstance;
 } // namespace
 
-/** @brief Global flag controlling verbose output. When true, vout prints to stderr. */
+/** @brief Global flag controlling verbose output. When true, vout prints to
+ * stderr. */
 bool VerboseEnable;
-/** @brief Global verbose output stream. Only outputs when VerboseEnable is true. */
+/** @brief Global verbose output stream. Only outputs when VerboseEnable is
+ * true. */
 std::ostream vout(&VerboseOutBufInstance);
 
 /**
@@ -90,8 +94,8 @@ std::string escapeJSON(const std::string &in) {
 /**
  * @brief Escape special characters in a string for HTML encoding.
  *
- * Escapes HTML special characters: < becomes &lt;, > becomes &gt;, & becomes &amp;.
- * Non-printable characters are removed from the output.
+ * Escapes HTML special characters: < becomes &lt;, > becomes &gt;, & becomes
+ * &amp;. Non-printable characters are removed from the output.
  *
  * @param in Input string to escape
  * @return HTML-escaped string
@@ -125,8 +129,8 @@ std::string escapeHTML(const std::string &in) {
 /**
  * @brief Extract the source file path for a function from debug information.
  *
- * Searches through the function's instructions to find debug location information
- * and constructs the full path by combining directory and filename.
+ * Searches through the function's instructions to find debug location
+ * information and constructs the full path by combining directory and filename.
  *
  * @param function The LLVM function to get source path for
  * @return Source file path if found, empty string otherwise

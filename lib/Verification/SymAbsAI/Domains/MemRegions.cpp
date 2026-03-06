@@ -261,21 +261,21 @@ void MemoryRegion::prettyPrint(PrettyPrinter &out) const {
     return;
   }
 
-	  for (auto &x : getValues()) {
-	    if (x->isTop() && !dynamic_cast<ValidRegion *>(x.get()))
-	      continue;
+  for (auto &x : getValues()) {
+    if (x->isTop() && !dynamic_cast<ValidRegion *>(x.get()))
+      continue;
 
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpotentially-evaluated-expression"
 #endif
-	    PrettyPrinter::Entry block(&out, typeid(*x).name());
+    PrettyPrinter::Entry block(&out, typeid(*x).name());
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
-	    x->prettyPrint(out);
-	  }
-	}
+    x->prettyPrint(out);
+  }
+}
 
 unique_ptr<AbstractValue> MemoryRegion::Create(const FunctionContext &fctx,
                                                llvm::BasicBlock *bb,
@@ -317,22 +317,22 @@ unique_ptr<AbstractValue> MemoryRegion::Create(const FunctionContext &fctx,
 } // namespace symabs_ai
 
 namespace {
-DomainConstructor::Register NoAlias(
-    "NoAlias",
-    "domain for expressing whether two pointers point to distinct"
-    " memory regions",
-    [](const FunctionContext &fctx, llvm::BasicBlock *loc, bool after) {
-      return params::ForPointerPairs<symabs_ai::domains::NoAlias>(
-          fctx, loc, after, true);
-    });
+DomainConstructor::Register
+    NoAlias("NoAlias",
+            "domain for expressing whether two pointers point to distinct"
+            " memory regions",
+            [](const FunctionContext &fctx, llvm::BasicBlock *loc, bool after) {
+              return params::ForPointerPairs<symabs_ai::domains::NoAlias>(
+                  fctx, loc, after, true);
+            });
 
 DomainConstructor::Register ValidRegion(
     "ValidRegion",
     " domain for expressing whether a pointer points to a valid"
     " memory region",
     [](const FunctionContext &fctx, llvm::BasicBlock *loc, bool after) {
-      return params::ForPointers<symabs_ai::domains::ValidRegion>(
-          fctx, loc, after);
+      return params::ForPointers<symabs_ai::domains::ValidRegion>(fctx, loc,
+                                                                  after);
     });
 
 DomainConstructor::Register ConstRegion(
@@ -340,8 +340,8 @@ DomainConstructor::Register ConstRegion(
     " domain for expressing a constant size of the memory region"
     " pointed to by a pointer if it points to a valid region",
     [](const FunctionContext &fctx, llvm::BasicBlock *loc, bool after) {
-      return params::ForPointers<symabs_ai::domains::ConstantRegion>(
-          fctx, loc, after);
+      return params::ForPointers<symabs_ai::domains::ConstantRegion>(fctx, loc,
+                                                                     after);
     });
 
 DomainConstructor::Register VarRegion(
@@ -350,8 +350,8 @@ DomainConstructor::Register VarRegion(
     " pointed to by a pointer in terms of an expression if it"
     " points to a valid region",
     [](const FunctionContext &fctx, llvm::BasicBlock *loc, bool after) {
-      return ForPointerSizePairs<symabs_ai::domains::VariableRegion>(
-          fctx, loc, after);
+      return ForPointerSizePairs<symabs_ai::domains::VariableRegion>(fctx, loc,
+                                                                     after);
     });
 
 DomainConstructor::Register MemRegion(

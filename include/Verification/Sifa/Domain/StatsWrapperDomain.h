@@ -1,4 +1,5 @@
-//===-- Verification/Sifa/Domain/StatsWrapperDomain.h ----------------------===//
+//===-- Verification/Sifa/Domain/StatsWrapperDomain.h
+//----------------------===//
 //
 // Domain wrapper that updates SifaStats (Ultimate StatsWrapperDomain-aligned).
 //
@@ -85,7 +86,8 @@ public:
                    const State &calleeSummary) const override {
     return inner_.postReturn(t, callerState, calleeSummary);
   }
-  State postReturn(const State &callerState, const State &calleeSummary) const override {
+  State postReturn(const State &callerState,
+                   const State &calleeSummary) const override {
     return inner_.postReturn(callerState, calleeSummary);
   }
 

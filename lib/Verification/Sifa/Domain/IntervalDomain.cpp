@@ -9,15 +9,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "Verification/Sifa/Domain/IntervalDomain.h"
-#include "Verification/Sifa/RegionMemory.h"
-
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Verification/Sifa/RegionMemory.h"
 
 #include <algorithm>
 #include <climits>
@@ -38,8 +38,9 @@ IntervalState mergeReturnState(const Transition &t,
                                const IntervalState &callerState,
                                const IntervalState &calleeSummary);
 
-llvm::BasicBlock::const_iterator segmentBegin(
-    const llvm::BasicBlock *bb, const llvm::Instruction *segmentStart) {
+llvm::BasicBlock::const_iterator
+segmentBegin(const llvm::BasicBlock *bb,
+             const llvm::Instruction *segmentStart) {
   if (segmentStart) {
     return segmentStart->getIterator();
   }
@@ -52,19 +53,24 @@ llvm::BasicBlock::const_iterator segmentBegin(
 
 const llvm::Value *incomingValueForPredecessor(const llvm::PHINode &phi,
                                                const llvm::BasicBlock *pred) {
-  if (!pred) return nullptr;
+  if (!pred)
+    return nullptr;
   const int index =
       phi.getBasicBlockIndex(const_cast<llvm::BasicBlock *>(pred));
-  if (index < 0) return nullptr;
+  if (index < 0)
+    return nullptr;
   return phi.getIncomingValue(static_cast<unsigned>(index));
 }
 
 IntervalState applyIncomingPhis(const Transition &t, IntervalState out) {
-  if (out.isBottom()) return out;
-  if (!t.source || !t.target || !t.landsAtBlockEntry()) return out;
+  if (out.isBottom())
+    return out;
+  if (!t.source || !t.target || !t.landsAtBlockEntry())
+    return out;
   for (const llvm::Instruction &I : *t.target) {
     const auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);
-    if (!phi) break;
+    if (!phi)
+      break;
     out.set(phi, getInterval(out, incomingValueForPredecessor(*phi, t.source)));
   }
   return out;
@@ -72,11 +78,14 @@ IntervalState applyIncomingPhis(const Transition &t, IntervalState out) {
 
 /// Return the interval for \p V from \p state, or Interval::top() if unknown.
 Interval getInterval(const IntervalState &state, const llvm::Value *V) {
-  if (!V) return Interval::top();
+  if (!V)
+    return Interval::top();
   auto opt = state.get(V);
-  if (opt.hasValue()) return opt.getValue();
+  if (opt.hasValue())
+    return opt.getValue();
   if (const auto *C = llvm::dyn_cast<llvm::ConstantInt>(V)) {
-    if (C->getBitWidth() > 64) return Interval::top();
+    if (C->getBitWidth() > 64)
+      return Interval::top();
     int64_t val = C->getSExtValue();
     return Interval::point(val);
   }
@@ -84,7 +93,8 @@ Interval getInterval(const IntervalState &state, const llvm::Value *V) {
 }
 
 bool isFunctionLocalValue(const llvm::Function *F, const llvm::Value *V) {
-  if (!F || !V) return false;
+  if (!F || !V)
+    return false;
   if (const auto *I = llvm::dyn_cast<llvm::Instruction>(V))
     return I->getFunction() == F;
   if (const auto *A = llvm::dyn_cast<llvm::Argument>(V))
@@ -94,7 +104,8 @@ bool isFunctionLocalValue(const llvm::Function *F, const llvm::Value *V) {
 
 llvm::Optional<int64_t> decrementBound(const llvm::Optional<int64_t> &bound,
                                        bool &overflowed) {
-  if (!bound.hasValue()) return llvm::None;
+  if (!bound.hasValue())
+    return llvm::None;
   if (*bound == std::numeric_limits<int64_t>::min()) {
     overflowed = true;
     return llvm::None;
@@ -104,7 +115,8 @@ llvm::Optional<int64_t> decrementBound(const llvm::Optional<int64_t> &bound,
 
 llvm::Optional<int64_t> incrementBound(const llvm::Optional<int64_t> &bound,
                                        bool &overflowed) {
-  if (!bound.hasValue()) return llvm::None;
+  if (!bound.hasValue())
+    return llvm::None;
   if (*bound == std::numeric_limits<int64_t>::max()) {
     overflowed = true;
     return llvm::None;
@@ -114,14 +126,16 @@ llvm::Optional<int64_t> incrementBound(const llvm::Optional<int64_t> &bound,
 
 Interval intersectWithUpper(const Interval &input,
                             const llvm::Optional<int64_t> &upper) {
-  if (input.isBottom()) return input;
+  if (input.isBottom())
+    return input;
   Interval bound{llvm::None, upper, false};
   return input.intersect(bound);
 }
 
 Interval intersectWithLower(const Interval &input,
                             const llvm::Optional<int64_t> &lower) {
-  if (input.isBottom()) return input;
+  if (input.isBottom())
+    return input;
   Interval bound{lower, llvm::None, false};
   return input.intersect(bound);
 }
@@ -175,25 +189,31 @@ IntervalState bottomState() {
   return s;
 }
 
-IntervalState setOperandInterval(IntervalState state, const llvm::Value *operand,
+IntervalState setOperandInterval(IntervalState state,
+                                 const llvm::Value *operand,
                                  const Interval &interval) {
-  if (!operand || llvm::isa<llvm::Constant>(operand)) return state;
-  if (interval.isBottom()) return bottomState();
+  if (!operand || llvm::isa<llvm::Constant>(operand))
+    return state;
+  if (interval.isBottom())
+    return bottomState();
   state.set(operand, interval);
   return state;
 }
 
 IntervalState refineForPredicate(IntervalState out, const llvm::ICmpInst &cmp,
                                  bool truthy) {
-  if (out.isBottom()) return out;
+  if (out.isBottom())
+    return out;
   const llvm::Value *lhsValue = cmp.getOperand(0);
   const llvm::Value *rhsValue = cmp.getOperand(1);
   const Interval lhs = getInterval(out, lhsValue);
   const Interval rhs = getInterval(out, rhsValue);
-  if (lhs.isBottom() || rhs.isBottom()) return bottomState();
+  if (lhs.isBottom() || rhs.isBottom())
+    return bottomState();
 
   llvm::CmpInst::Predicate predicate = cmp.getPredicate();
-  if (!truthy) predicate = cmp.getInversePredicate();
+  if (!truthy)
+    predicate = cmp.getInversePredicate();
 
   if (llvm::CmpInst::isUnsigned(predicate)) {
     if (!isDefinitelyNonNegative(lhs) || !isDefinitelyNonNegative(rhs))
@@ -233,7 +253,8 @@ IntervalState refineForPredicate(IntervalState out, const llvm::ICmpInst &cmp,
   switch (predicate) {
   case llvm::CmpInst::ICMP_EQ: {
     const Interval common = lhs.intersect(rhs);
-    if (common.isBottom()) return bottomState();
+    if (common.isBottom())
+      return bottomState();
     refinedL = common;
     refinedR = common;
     break;
@@ -247,7 +268,8 @@ IntervalState refineForPredicate(IntervalState out, const llvm::ICmpInst &cmp,
     bool rhsOverflow = false;
     const auto upper = decrementBound(rhs.hi, rhsOverflow);
     const auto lower = incrementBound(lhs.lo, lhsOverflow);
-    if (rhsOverflow || lhsOverflow) return bottomState();
+    if (rhsOverflow || lhsOverflow)
+      return bottomState();
     refinedL = intersectWithUpper(lhs, upper);
     refinedR = intersectWithLower(rhs, lower);
     break;
@@ -261,7 +283,8 @@ IntervalState refineForPredicate(IntervalState out, const llvm::ICmpInst &cmp,
     bool rhsOverflow = false;
     const auto lower = incrementBound(rhs.lo, lhsOverflow);
     const auto upper = decrementBound(lhs.hi, rhsOverflow);
-    if (lhsOverflow || rhsOverflow) return bottomState();
+    if (lhsOverflow || rhsOverflow)
+      return bottomState();
     refinedL = intersectWithLower(lhs, lower);
     refinedR = intersectWithUpper(rhs, upper);
     break;
@@ -274,16 +297,19 @@ IntervalState refineForPredicate(IntervalState out, const llvm::ICmpInst &cmp,
     return out;
   }
 
-  if (refinedL.isBottom() || refinedR.isBottom()) return bottomState();
+  if (refinedL.isBottom() || refinedR.isBottom())
+    return bottomState();
   out = setOperandInterval(std::move(out), lhsValue, refinedL);
-  if (out.isBottom()) return out;
+  if (out.isBottom())
+    return out;
   out = setOperandInterval(std::move(out), rhsValue, refinedR);
   return out;
 }
 
-IntervalState refineForCondition(IntervalState out, const llvm::Value *condition,
-                                 bool truthy) {
-  if (out.isBottom() || !condition) return out;
+IntervalState refineForCondition(IntervalState out,
+                                 const llvm::Value *condition, bool truthy) {
+  if (out.isBottom() || !condition)
+    return out;
   if (const auto *constant = llvm::dyn_cast<llvm::ConstantInt>(condition)) {
     const bool isTrue = !constant->isZero();
     return isTrue == truthy ? out : bottomState();
@@ -293,7 +319,8 @@ IntervalState refineForCondition(IntervalState out, const llvm::Value *condition
 
   const Interval refined =
       getInterval(out, condition).intersect(Interval::point(truthy ? 1 : 0));
-  if (refined.isBottom()) return bottomState();
+  if (refined.isBottom())
+    return bottomState();
   return setOperandInterval(std::move(out), condition, refined);
 }
 
@@ -301,29 +328,37 @@ IntervalState refineForSwitch(const Transition &t, IntervalState out,
                               const llvm::SwitchInst &switchInst) {
   const Interval condition = getInterval(out, switchInst.getCondition());
   const llvm::BasicBlock *target = t.target;
-  if (!target) return out;
+  if (!target)
+    return out;
 
   llvm::Optional<int64_t> matchedCase;
   bool targetIsCase = false;
   for (const auto &caseHandle : switchInst.cases()) {
-    if (caseHandle.getCaseSuccessor() != target) continue;
+    if (caseHandle.getCaseSuccessor() != target)
+      continue;
     targetIsCase = true;
-    if (caseHandle.getCaseValue()->getBitWidth() > 64) return out;
+    if (caseHandle.getCaseValue()->getBitWidth() > 64)
+      return out;
     matchedCase = caseHandle.getCaseValue()->getSExtValue();
     break;
   }
 
   if (targetIsCase) {
-    if (!matchedCase.hasValue()) return out;
+    if (!matchedCase.hasValue())
+      return out;
     const Interval refined = condition.intersect(Interval::point(*matchedCase));
-    if (refined.isBottom()) return bottomState();
-    return setOperandInterval(std::move(out), switchInst.getCondition(), refined);
+    if (refined.isBottom())
+      return bottomState();
+    return setOperandInterval(std::move(out), switchInst.getCondition(),
+                              refined);
   }
 
-  if (switchInst.getDefaultDest() != target) return out;
+  if (switchInst.getDefaultDest() != target)
+    return out;
   if (condition.isPoint() && condition.lo.hasValue()) {
     for (const auto &caseHandle : switchInst.cases()) {
-      if (caseHandle.getCaseValue()->getBitWidth() > 64) continue;
+      if (caseHandle.getCaseValue()->getBitWidth() > 64)
+        continue;
       if (*condition.lo == caseHandle.getCaseValue()->getSExtValue())
         return bottomState();
     }
@@ -332,7 +367,8 @@ IntervalState refineForSwitch(const Transition &t, IntervalState out,
 }
 
 IntervalState refineForTakenEdge(const Transition &t, IntervalState out) {
-  if (out.isBottom() || !t.source) return out;
+  if (out.isBottom() || !t.source)
+    return out;
   const llvm::Instruction *terminator = t.source->getTerminator();
   const auto *branch = llvm::dyn_cast<llvm::BranchInst>(terminator);
   if (branch && branch->isConditional()) {
@@ -352,8 +388,10 @@ IntervalState refineForTakenEdge(const Transition &t, IntervalState out) {
 
 IntervalState projectCallState(const Transition &t,
                                const IntervalState &callerState) {
-  if (callerState.isBottom()) return callerState;
-  if (!t.call || !t.callee) return callerState;
+  if (callerState.isBottom())
+    return callerState;
+  if (!t.call || !t.callee)
+    return callerState;
 
   IntervalState projected(false);
   const llvm::Function *caller = t.source ? t.source->getParent() : nullptr;
@@ -366,8 +404,10 @@ IntervalState projectCallState(const Transition &t,
 
   unsigned actualIndex = 0;
   for (const llvm::Argument &formal : t.callee->args()) {
-    if (actualIndex >= t.call->arg_size()) break;
-    projected.set(&formal, getInterval(callerState, t.call->getArgOperand(actualIndex)));
+    if (actualIndex >= t.call->arg_size())
+      break;
+    projected.set(&formal,
+                  getInterval(callerState, t.call->getArgOperand(actualIndex)));
     ++actualIndex;
   }
   return projected;
@@ -379,7 +419,8 @@ Interval returnedInterval(const llvm::Function &callee,
   bool sawReturn = false;
   for (const llvm::BasicBlock &bb : callee) {
     const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator());
-    if (!ret || ret->getNumOperands() == 0) continue;
+    if (!ret || ret->getNumOperands() == 0)
+      continue;
     const Interval value = getInterval(calleeSummary, ret->getReturnValue());
     result = sawReturn ? result.join(value) : value;
     sawReturn = true;
@@ -390,7 +431,8 @@ Interval returnedInterval(const llvm::Function &callee,
 IntervalState mergeReturnState(const Transition &t,
                                const IntervalState &callerState,
                                const IntervalState &calleeSummary) {
-  if (callerState.isBottom() || calleeSummary.isBottom()) return bottomState();
+  if (callerState.isBottom() || calleeSummary.isBottom())
+    return bottomState();
   IntervalState out = callerState;
   const llvm::Function *callee = t.callee;
   for (const auto &kv : calleeSummary.intervals()) {
@@ -406,8 +448,10 @@ IntervalState mergeReturnState(const Transition &t,
 
 /// Restrict interval to signed range of \p bits (e.g. i32 -> [-2^31, 2^31-1]).
 Interval restrictToSigned(const Interval &i, unsigned bits) {
-  if (i.isBottom()) return i;
-  if (bits >= 64) return i;
+  if (i.isBottom())
+    return i;
+  if (bits >= 64)
+    return i;
   int64_t minVal = -(1LL << (bits - 1));
   int64_t maxVal = (1LL << (bits - 1)) - 1;
   llvm::Optional<int64_t> lo = i.lo.hasValue()
@@ -416,37 +460,43 @@ Interval restrictToSigned(const Interval &i, unsigned bits) {
   llvm::Optional<int64_t> hi = i.hi.hasValue()
                                    ? std::min(*i.hi, maxVal)
                                    : llvm::Optional<int64_t>(maxVal);
-  if (lo && hi && *lo > *hi) return Interval::bottom();
+  if (lo && hi && *lo > *hi)
+    return Interval::bottom();
   return Interval{lo, hi, false};
 }
 
 /// Restrict interval to unsigned range [0, 2^bits - 1].
 Interval restrictToUnsigned(const Interval &i, unsigned bits) {
-  if (i.isBottom()) return i;
-  if (bits >= 64) return i;
+  if (i.isBottom())
+    return i;
+  if (bits >= 64)
+    return i;
   int64_t maxVal = (bits == 64) ? INT64_MAX : ((1LL << bits) - 1);
-  llvm::Optional<int64_t> lo = i.lo.hasValue()
-                                   ? std::max(*i.lo, int64_t{0})
-                                   : llvm::Optional<int64_t>(0);
+  llvm::Optional<int64_t> lo = i.lo.hasValue() ? std::max(*i.lo, int64_t{0})
+                                               : llvm::Optional<int64_t>(0);
   llvm::Optional<int64_t> hi = i.hi.hasValue()
                                    ? std::min(*i.hi, maxVal)
                                    : llvm::Optional<int64_t>(maxVal);
-  if (lo && hi && *lo > *hi) return Interval::bottom();
+  if (lo && hi && *lo > *hi)
+    return Interval::bottom();
   return Interval{lo, hi, false};
 }
 
 unsigned getBitWidth(const llvm::Value *V) {
-  if (!V) return 64;
+  if (!V)
+    return 64;
   auto *Ty = V->getType();
-  if (Ty->isIntegerTy()) return Ty->getIntegerBitWidth();
+  if (Ty->isIntegerTy())
+    return Ty->getIntegerBitWidth();
   return 64;
 }
 
 /// Transfer for a single instruction: compute result interval from operands.
 Interval transferInstruction(const llvm::Instruction &I,
-                              const IntervalState &state) {
+                             const IntervalState &state) {
   if (const auto *C = llvm::dyn_cast<llvm::ConstantInt>(&I)) {
-    if (C->getBitWidth() > 64) return Interval::top();
+    if (C->getBitWidth() > 64)
+      return Interval::top();
     return Interval::point(C->getSExtValue());
   }
 
@@ -474,12 +524,16 @@ Interval transferInstruction(const llvm::Instruction &I,
   case llvm::Instruction::UDiv: {
     auto L = getInterval(state, I.getOperand(0));
     auto R = getInterval(state, I.getOperand(1));
-    if (R.containsZero()) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
-    if (L.isBottom() || R.isBottom()) return Interval::bottom();
-    if (!L.lo || !L.hi || !R.lo || !R.hi) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
+    if (R.containsZero())
+      return restrictToUnsigned(Interval::top(), getBitWidth(&I));
+    if (L.isBottom() || R.isBottom())
+      return Interval::bottom();
+    if (!L.lo || !L.hi || !R.lo || !R.hi)
+      return restrictToUnsigned(Interval::top(), getBitWidth(&I));
     // UDiv treats both operands as unsigned. Negative signed values are invalid
     // inputs for unsigned division; return top conservatively.
-    if (*L.lo < 0 || *R.lo < 0) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
+    if (*L.lo < 0 || *R.lo < 0)
+      return restrictToUnsigned(Interval::top(), getBitWidth(&I));
     uint64_t u00 = static_cast<uint64_t>(*L.lo) / static_cast<uint64_t>(*R.hi);
     uint64_t u10 = static_cast<uint64_t>(*L.hi) / static_cast<uint64_t>(*R.lo);
     int64_t lo = static_cast<int64_t>(u00);
@@ -489,15 +543,18 @@ Interval transferInstruction(const llvm::Instruction &I,
   case llvm::Instruction::SRem: {
     auto L = getInterval(state, I.getOperand(0));
     auto R = getInterval(state, I.getOperand(1));
-    if (R.containsZero()) return restrictToSigned(Interval::top(), getBitWidth(&I));
-    if (!R.lo || !R.hi) return restrictToSigned(Interval::top(), getBitWidth(&I));
+    if (R.containsZero())
+      return restrictToSigned(Interval::top(), getBitWidth(&I));
+    if (!R.lo || !R.hi)
+      return restrictToSigned(Interval::top(), getBitWidth(&I));
     int64_t rLo = std::abs(*R.lo), rHi = std::abs(*R.hi);
     int64_t bound = std::max(rLo, rHi) - 1;
     return restrictToSigned(Interval{-bound, bound, false}, getBitWidth(&I));
   }
   case llvm::Instruction::URem: {
     auto R = getInterval(state, I.getOperand(1));
-    if (R.containsZero()) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
+    if (R.containsZero())
+      return restrictToUnsigned(Interval::top(), getBitWidth(&I));
     unsigned w = getBitWidth(&I);
     int64_t maxVal = (w >= 64) ? INT64_MAX : ((1LL << w) - 1);
     return restrictToUnsigned(Interval{0, maxVal, false}, w);
@@ -505,35 +562,44 @@ Interval transferInstruction(const llvm::Instruction &I,
   case llvm::Instruction::Shl: {
     auto L = getInterval(state, I.getOperand(0));
     auto R = getInterval(state, I.getOperand(1));
-    if (L.isBottom() || R.isBottom()) return Interval::bottom();
-    if (!L.lo || !L.hi || !R.lo || !R.hi) return restrictToSigned(Interval::top(), getBitWidth(&I));
+    if (L.isBottom() || R.isBottom())
+      return Interval::bottom();
+    if (!L.lo || !L.hi || !R.lo || !R.hi)
+      return restrictToSigned(Interval::top(), getBitWidth(&I));
     // Shift amount must be in [0, 63]; negative or out-of-range => top.
-    if (*R.lo < 0 || *R.hi > 63) return restrictToSigned(Interval::top(), getBitWidth(&I));
+    if (*R.lo < 0 || *R.hi > 63)
+      return restrictToSigned(Interval::top(), getBitWidth(&I));
     // Use unsigned arithmetic to avoid signed-shift UB.
     unsigned w = getBitWidth(&I);
     int64_t shAmtLo = *R.lo, shAmtHi = *R.hi;
     // Compute all four corner products using unsigned shift, then re-interpret.
     auto ushl = [&](int64_t val, int64_t amt) -> int64_t {
-      return static_cast<int64_t>(static_cast<uint64_t>(val) << static_cast<unsigned>(amt));
+      return static_cast<int64_t>(static_cast<uint64_t>(val)
+                                  << static_cast<unsigned>(amt));
     };
     int64_t v00 = ushl(*L.lo, shAmtLo), v01 = ushl(*L.lo, shAmtHi);
     int64_t v10 = ushl(*L.hi, shAmtLo), v11 = ushl(*L.hi, shAmtHi);
-    return restrictToSigned(
-        Interval{std::min({v00, v01, v10, v11}), std::max({v00, v01, v10, v11}), false}, w);
+    return restrictToSigned(Interval{std::min({v00, v01, v10, v11}),
+                                     std::max({v00, v01, v10, v11}), false},
+                            w);
   }
   case llvm::Instruction::LShr: {
     auto L = getInterval(state, I.getOperand(0));
     auto R = getInterval(state, I.getOperand(1));
-    if (L.isBottom() || R.isBottom()) return Interval::bottom();
-    if (!L.lo || !L.hi || !R.lo || !R.hi) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
+    if (L.isBottom() || R.isBottom())
+      return Interval::bottom();
+    if (!L.lo || !L.hi || !R.lo || !R.hi)
+      return restrictToUnsigned(Interval::top(), getBitWidth(&I));
     // Shift amount must be in [0, 63].
-    if (*R.lo < 0 || *R.hi > 63) return restrictToUnsigned(Interval::top(), getBitWidth(&I));
+    if (*R.lo < 0 || *R.hi > 63)
+      return restrictToUnsigned(Interval::top(), getBitWidth(&I));
     unsigned w = getBitWidth(&I);
     // LShr treats the value as unsigned. If the interval straddles the sign
     // boundary (lo < 0 <= hi), the unsigned representation is non-contiguous
     // ([lo_unsigned, UINT_MAX] ∪ [0, hi_unsigned]), so we cannot represent the
     // result precisely. Return top conservatively.
-    if (*L.lo < 0) return restrictToUnsigned(Interval::top(), w);
+    if (*L.lo < 0)
+      return restrictToUnsigned(Interval::top(), w);
     // Both bounds are non-negative: safe to treat as unsigned.
     uint64_t uLo = static_cast<uint64_t>(*L.lo);
     uint64_t uHi = static_cast<uint64_t>(*L.hi);
@@ -543,26 +609,35 @@ Interval transferInstruction(const llvm::Instruction &I,
     uint64_t rLo = uHi >> shAmtHi; // smallest: largest value >> largest shift
     uint64_t rHi = uLo >> shAmtLo; // largest: smallest value >> smallest shift
     // Correct ordering: uLo <= uHi and shAmtLo <= shAmtHi, so rLo <= rHi.
-    if (rLo > rHi) std::swap(rLo, rHi);
+    if (rLo > rHi)
+      std::swap(rLo, rHi);
     return restrictToUnsigned(
-        Interval{static_cast<int64_t>(rLo), static_cast<int64_t>(rHi), false}, w);
+        Interval{static_cast<int64_t>(rLo), static_cast<int64_t>(rHi), false},
+        w);
   }
   case llvm::Instruction::AShr: {
     auto L = getInterval(state, I.getOperand(0));
     auto R = getInterval(state, I.getOperand(1));
-    if (L.isBottom() || R.isBottom()) return Interval::bottom();
-    if (!L.lo || !L.hi || !R.lo || !R.hi) return restrictToSigned(Interval::top(), getBitWidth(&I));
-    if (*R.hi < 0 || *R.lo > 63) return restrictToSigned(Interval::top(), getBitWidth(&I));
+    if (L.isBottom() || R.isBottom())
+      return Interval::bottom();
+    if (!L.lo || !L.hi || !R.lo || !R.hi)
+      return restrictToSigned(Interval::top(), getBitWidth(&I));
+    if (*R.hi < 0 || *R.lo > 63)
+      return restrictToSigned(Interval::top(), getBitWidth(&I));
     int64_t shAmt = std::min(*R.lo, int64_t{63});
     int64_t vLo = *L.lo >> shAmt, vHi = *L.hi >> shAmt;
-    return restrictToSigned(Interval{std::min(vLo, vHi), std::max(vLo, vHi), false}, getBitWidth(&I));
+    return restrictToSigned(
+        Interval{std::min(vLo, vHi), std::max(vLo, vHi), false},
+        getBitWidth(&I));
   }
   case llvm::Instruction::And: {
     auto L = getInterval(state, I.getOperand(0));
     auto R = getInterval(state, I.getOperand(1));
-    if (L.isBottom() || R.isBottom()) return Interval::bottom();
+    if (L.isBottom() || R.isBottom())
+      return Interval::bottom();
     unsigned w = getBitWidth(&I);
-    if (w > 64) return Interval::top();
+    if (w > 64)
+      return Interval::top();
     int64_t maxVal = (w == 64) ? INT64_MAX : ((1LL << w) - 1);
     if (!L.lo || !L.hi || !R.lo || !R.hi)
       return restrictToUnsigned(Interval{0, maxVal, false}, w);
@@ -577,7 +652,8 @@ Interval transferInstruction(const llvm::Instruction &I,
   case llvm::Instruction::Xor: {
     auto L = getInterval(state, I.getOperand(0));
     auto R = getInterval(state, I.getOperand(1));
-    if (L.isBottom() || R.isBottom()) return Interval::bottom();
+    if (L.isBottom() || R.isBottom())
+      return Interval::bottom();
     unsigned w = getBitWidth(&I);
     return restrictToUnsigned(Interval::top(), w);
   }
@@ -590,8 +666,10 @@ Interval transferInstruction(const llvm::Instruction &I,
     auto Op = getInterval(state, I.getOperand(0));
     unsigned wIn = I.getOperand(0)->getType()->getIntegerBitWidth();
     unsigned wOut = getBitWidth(&I);
-    if (Op.isBottom()) return Interval::bottom();
-    if (!Op.lo || !Op.hi) return restrictToUnsigned(Interval::top(), wOut);
+    if (Op.isBottom())
+      return Interval::bottom();
+    if (!Op.lo || !Op.hi)
+      return restrictToUnsigned(Interval::top(), wOut);
     if (*Op.lo >= 0 && *Op.hi >= 0)
       return restrictToUnsigned(Interval{*Op.lo, *Op.hi, false}, wOut);
     int64_t maxIn = (wIn >= 64) ? INT64_MAX : ((1LL << wIn) - 1);
@@ -604,22 +682,28 @@ Interval transferInstruction(const llvm::Instruction &I,
   case llvm::Instruction::PtrToInt:
   case llvm::Instruction::IntToPtr:
   case llvm::Instruction::BitCast:
-    return restrictToSigned(getInterval(state, I.getOperand(0)), getBitWidth(&I));
+    return restrictToSigned(getInterval(state, I.getOperand(0)),
+                            getBitWidth(&I));
 
   case llvm::Instruction::ICmp: {
     auto L = getInterval(state, I.getOperand(0));
     auto R = getInterval(state, I.getOperand(1));
-    if (L.isBottom() || R.isBottom()) return Interval::bottom();
+    if (L.isBottom() || R.isBottom())
+      return Interval::bottom();
     auto *Cmp = llvm::cast<llvm::CmpInst>(&I);
     bool isSigned = Cmp->isSigned();
     switch (Cmp->getPredicate()) {
     case llvm::CmpInst::ICMP_EQ:
-      if (L.isPoint() && R.isPoint() && *L.lo == *R.lo) return Interval::point(1);
-      if (!L.intersect(R).isBottom()) return Interval{0, 1, false};
+      if (L.isPoint() && R.isPoint() && *L.lo == *R.lo)
+        return Interval::point(1);
+      if (!L.intersect(R).isBottom())
+        return Interval{0, 1, false};
       return Interval::point(0);
     case llvm::CmpInst::ICMP_NE:
-      if (L.isPoint() && R.isPoint() && *L.lo == *R.lo) return Interval::point(0);
-      if (!L.intersect(R).isBottom()) return Interval{0, 1, false};
+      if (L.isPoint() && R.isPoint() && *L.lo == *R.lo)
+        return Interval::point(0);
+      if (!L.intersect(R).isBottom())
+        return Interval{0, 1, false};
       return Interval::point(1);
     case llvm::CmpInst::ICMP_SLT:
     case llvm::CmpInst::ICMP_ULT:
@@ -638,7 +722,8 @@ Interval transferInstruction(const llvm::Instruction &I,
     auto Cond = getInterval(state, I.getOperand(0));
     auto TrueVal = getInterval(state, I.getOperand(1));
     auto FalseVal = getInterval(state, I.getOperand(2));
-    if (TrueVal.isBottom() && FalseVal.isBottom()) return Interval::bottom();
+    if (TrueVal.isBottom() && FalseVal.isBottom())
+      return Interval::bottom();
     if (Cond.containsZero() && Cond.isPoint() && Cond.lo && *Cond.lo != 0)
       return TrueVal;
     if (Cond.containsZero() && Cond.isPoint() && Cond.lo && *Cond.lo == 0)
@@ -666,16 +751,19 @@ Interval transferInstruction(const llvm::Instruction &I,
 
 } // namespace
 
-IntervalState IntervalDomain::applyBlockTransfer(llvm::BasicBlock *bb,
-                                                 const IntervalState &in) const {
+IntervalState
+IntervalDomain::applyBlockTransfer(llvm::BasicBlock *bb,
+                                   const IntervalState &in) const {
   return applyBlockTransfer(bb, in, nullptr, nullptr);
 }
 
-IntervalState IntervalDomain::applyBlockTransfer(
-    llvm::BasicBlock *bb, const IntervalState &in,
-    const llvm::Instruction *segmentStart,
-    const llvm::Instruction *stopBefore) const {
-  if (in.isBottom()) return in;
+IntervalState
+IntervalDomain::applyBlockTransfer(llvm::BasicBlock *bb,
+                                   const IntervalState &in,
+                                   const llvm::Instruction *segmentStart,
+                                   const llvm::Instruction *stopBefore) const {
+  if (in.isBottom())
+    return in;
   IntervalState out(false);
   for (const auto &kv : in.intervals())
     out.set(kv.first, kv.second);
@@ -693,7 +781,8 @@ IntervalState IntervalDomain::applyBlockTransfer(
                                         end = bb->end();
        it != end; ++it) {
     const llvm::Instruction &I = *it;
-    if (&I == stopBefore || I.isTerminator()) break;
+    if (&I == stopBefore || I.isTerminator())
+      break;
     if (I.getType()->isVoidTy()) {
       if (AA && llvm::isa<llvm::StoreInst>(&I)) {
         auto *SI = llvm::cast<llvm::StoreInst>(&I);
@@ -736,16 +825,19 @@ IntervalState IntervalDomain::applyBlockTransfer(
   return out;
 }
 
-IntervalState IntervalDomain::applyBlockWiseHavoc(llvm::BasicBlock *bb,
-                                                 const IntervalState &in) const {
+IntervalState
+IntervalDomain::applyBlockWiseHavoc(llvm::BasicBlock *bb,
+                                    const IntervalState &in) const {
   return applyBlockWiseHavoc(bb, in, nullptr, nullptr);
 }
 
-IntervalState IntervalDomain::applyBlockWiseHavoc(
-    llvm::BasicBlock *bb, const IntervalState &in,
-    const llvm::Instruction *segmentStart,
-    const llvm::Instruction *stopBefore) const {
-  if (in.isBottom()) return in;
+IntervalState
+IntervalDomain::applyBlockWiseHavoc(llvm::BasicBlock *bb,
+                                    const IntervalState &in,
+                                    const llvm::Instruction *segmentStart,
+                                    const llvm::Instruction *stopBefore) const {
+  if (in.isBottom())
+    return in;
   IntervalState out(false);
   for (const auto &kv : in.intervals())
     out.set(kv.first, kv.second);
@@ -755,8 +847,10 @@ IntervalState IntervalDomain::applyBlockWiseHavoc(
                                         end = bb->end();
        it != end; ++it) {
     const llvm::Instruction &I = *it;
-    if (&I == stopBefore || I.isTerminator()) break;
-    if (I.getType()->isVoidTy()) continue;
+    if (&I == stopBefore || I.isTerminator())
+      break;
+    if (I.getType()->isVoidTy())
+      continue;
     if (I.getType()->isIntegerTy() || I.getType()->isPointerTy())
       out.set(&I, Interval::top());
   }
@@ -764,12 +858,17 @@ IntervalState IntervalDomain::applyBlockWiseHavoc(
 }
 
 IntervalState IntervalDomain::post(const Transition &t,
-                                  const IntervalState &in) const {
-  if (in.isBottom()) return in;
-  if (t.kind == TransitionKind::Marker) return in;
-  if (t.kind == TransitionKind::EnterCall) return in;
-  if (t.kind == TransitionKind::ReturnSummary) return in;
-  if (t.kind != TransitionKind::Edge || !t.source) return in;
+                                   const IntervalState &in) const {
+  if (in.isBottom())
+    return in;
+  if (t.kind == TransitionKind::Marker)
+    return in;
+  if (t.kind == TransitionKind::EnterCall)
+    return in;
+  if (t.kind == TransitionKind::ReturnSummary)
+    return in;
+  if (t.kind != TransitionKind::Edge || !t.source)
+    return in;
   IntervalState out =
       blockTransferPolicy_ && blockTransferPolicy_->useBlockWise(t.source)
           ? applyBlockWiseHavoc(t.source, in, t.segmentStart, t.stopBefore)
@@ -783,9 +882,10 @@ IntervalState IntervalDomain::postCall(const Transition &t,
   return projectCallState(t, callerState);
 }
 
-IntervalState IntervalDomain::postReturn(const Transition &t,
-                                         const IntervalState &callerState,
-                                         const IntervalState &calleeSummary) const {
+IntervalState
+IntervalDomain::postReturn(const Transition &t,
+                           const IntervalState &callerState,
+                           const IntervalState &calleeSummary) const {
   return mergeReturnState(t, callerState, calleeSummary);
 }
 

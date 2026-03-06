@@ -75,7 +75,8 @@ bool RemoveConstantExprsPass::runOnModule(Module &M) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::RemoveConstantExprsPass>
+static llvm::RegisterPass<
+    lotus::verification::transform::RemoveConstantExprsPass>
     X("remove-constant-exprs",
       "Transform constant expressions to instructions");
 

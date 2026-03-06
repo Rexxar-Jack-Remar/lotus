@@ -3,9 +3,9 @@
  * @brief Assertion and memory-safety checking helpers for SymAbsAI.
  *
  * Provides functions to check for assertion violations and memory safety issues
- * using abstract interpretation results. These checks analyze the abstract states
- * at program points to determine if assertions can be violated or if memory safety
- * properties are violated.
+ * using abstract interpretation results. These checks analyze the abstract
+ * states at program points to determine if assertions can be violated or if
+ * memory safety properties are violated.
  *
  * @author rainoftime
  */
@@ -26,12 +26,15 @@ using namespace llvm;
 using namespace symabs_ai;
 
 /**
- * @brief Check for assertion violations in a function using abstract interpretation results.
+ * @brief Check for assertion violations in a function using abstract
+ * interpretation results.
  *
- * Scans all call instructions in the function for assertion calls (e.g., __assert_fail,
- * __assert_rtn, or functions with "assert" in the name that don't return). For each
- * assertion call, checks if the abstract state at that point is bottom (unreachable).
- * If not bottom, the assertion may be violated and a violation is reported.
+ * Scans all call instructions in the function for assertion calls (e.g.,
+ * __assert_fail,
+ * __assert_rtn, or functions with "assert" in the name that don't return). For
+ * each assertion call, checks if the abstract state at that point is bottom
+ * (unreachable). If not bottom, the assertion may be violated and a violation
+ * is reported.
  *
  * @param analyzer The analyzer containing abstract interpretation results
  * @param targetFunc The function to check for assertion violations
@@ -111,8 +114,8 @@ int runMemSafetyCheck(Analyzer *analyzer, Function *targetFunc) {
 
       bool isValid = false;
       for (const auto *v : vals) {
-        if (const auto *asVr = dynamic_cast<
-                const symabs_ai::domains::ValidRegion *>(v)) {
+        if (const auto *asVr =
+                dynamic_cast<const symabs_ai::domains::ValidRegion *>(v)) {
           if (asVr->getRepresentedPointer() == ptr && asVr->isValid()) {
             isValid = true;
             break;

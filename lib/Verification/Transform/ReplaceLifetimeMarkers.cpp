@@ -36,12 +36,10 @@ bool ReplaceLifetimeMarkersPass::runOnFunction(Function &F) {
   bool modified = false;
   Module *M = F.getParent();
   LLVMContext &Ctx = M->getContext();
-  auto ver_scope_enterC = M->getOrInsertFunction("__VERIFIER_scope_enter",
-                                                  Type::getVoidTy(Ctx),
-                                                  Type::getInt8PtrTy(Ctx));
-  auto ver_scope_leaveC = M->getOrInsertFunction("__VERIFIER_scope_leave",
-                                                  Type::getVoidTy(Ctx),
-                                                  Type::getInt8PtrTy(Ctx));
+  auto ver_scope_enterC = M->getOrInsertFunction(
+      "__VERIFIER_scope_enter", Type::getVoidTy(Ctx), Type::getInt8PtrTy(Ctx));
+  auto ver_scope_leaveC = M->getOrInsertFunction(
+      "__VERIFIER_scope_leave", Type::getVoidTy(Ctx), Type::getInt8PtrTy(Ctx));
   auto *ver_scope_enter = cast<Function>(ver_scope_enterC.getCallee());
   auto *ver_scope_leave = cast<Function>(ver_scope_leaveC.getCallee());
 
@@ -73,7 +71,8 @@ bool ReplaceLifetimeMarkersPass::runOnFunction(Function &F) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::ReplaceLifetimeMarkersPass>
+static llvm::RegisterPass<
+    lotus::verification::transform::ReplaceLifetimeMarkersPass>
     X("replace-lifetime-markers",
       "Replace lifetime markers with calls to __VERIFIER_scope_*");
 

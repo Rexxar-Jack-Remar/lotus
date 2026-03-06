@@ -7,12 +7,15 @@
 // the context. This implementation interprets the callee (entry->return) to
 // compute the summary.
 //
-// Ultimate-aligned: SifaStats CALL_SUMMARIZER_NEW_COMPUTATION_TIME, CACHE_MISSES.
+// Ultimate-aligned: SifaStats CALL_SUMMARIZER_NEW_COMPUTATION_TIME,
+// CACHE_MISSES.
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_INTERPRETCALLSUMMARIZER_H
 #define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_INTERPRETCALLSUMMARIZER_H
+
+#include "llvm/IR/Module.h"
 
 #include "Verification/Sifa/Caches/ProcedureResourceCache.h"
 #include "Verification/Sifa/Cfg/Transition.h"
@@ -21,8 +24,6 @@
 #include "Verification/Sifa/Procedure/ProcedureResources.h"
 #include "Verification/Sifa/Statistics/SifaStats.h"
 #include "Verification/Sifa/Summarizers/ICallSummarizer.h"
-
-#include "llvm/IR/Module.h"
 
 #include <string>
 #include <unordered_map>
@@ -50,7 +51,8 @@ public:
       : stats_(stats), M_(M), cache_(cache), dagInterpreter_(dagInterpreter),
         domain_(nullptr) {}
 
-  StateT summarize(const std::string &calleeName, const StateT &inputAfterCall) override {
+  StateT summarize(const std::string &calleeName,
+                   const StateT &inputAfterCall) override {
     const llvm::Function *callee = M_.getFunction(calleeName);
     if (!callee || callee->isDeclaration()) {
       // External function: assume identity (conservative).
@@ -84,7 +86,8 @@ public:
 
 private:
   bool statesEqual(const StateT &a, const StateT &b) const {
-    if (domain_) return domain_->equal(a, b);
+    if (domain_)
+      return domain_->equal(a, b);
     // Fallback: use operator== if available (works for bool, etc.).
     return a == b;
   }
@@ -99,7 +102,8 @@ private:
   // Linear scan is acceptable because the number of distinct inputs per callee
   // is typically small (bounded by the number of call sites).
   std::unordered_map<const llvm::Function *,
-                     std::vector<std::pair<StateT, StateT>>> resultCache_;
+                     std::vector<std::pair<StateT, StateT>>>
+      resultCache_;
 };
 
 } // namespace sifa

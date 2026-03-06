@@ -22,16 +22,17 @@ static cl::opt<unsigned> UnrollCount("lotus-loop-unroll-count",
                                      cl::desc("The number of loop unrollings"),
                                      cl::value_desc("N"), cl::init(1));
 
-static cl::opt<bool> TerminateLoop("lotus-loop-unroll-terminate",
-                                    cl::desc("Terminate the paths that exceed the "
-                                             "unrolling count."));
+static cl::opt<bool>
+    TerminateLoop("lotus-loop-unroll-terminate",
+                  cl::desc("Terminate the paths that exceed the "
+                           "unrolling count."));
 
 namespace {
 
 bool CloneMetadata(const Instruction *src, Instruction *dst) {
   if (!src || !dst)
     return false;
-  
+
   // Copy all metadata from src to dst
   SmallVector<std::pair<unsigned, MDNode *>, 8> metadata;
   src->getAllMetadata(metadata);
@@ -46,15 +47,14 @@ static BasicBlock *createTerminatingBlock(Function *F, Instruction *I) {
   LLVMContext &Ctx = M->getContext();
   BasicBlock *block = BasicBlock::Create(Ctx, "loop_term", F);
 
-  auto assume = M->getOrInsertFunction("__VERIFIER_assume",
-                                       FunctionType::get(Type::getVoidTy(Ctx),
-                                                         {Type::getInt32Ty(Ctx)},
-                                                         false));
+  auto assume = M->getOrInsertFunction(
+      "__VERIFIER_assume",
+      FunctionType::get(Type::getVoidTy(Ctx), {Type::getInt32Ty(Ctx)}, false));
   // The contents of the block is:
   //  __VERIFIER_assume(0)
   //  unreachable
-  auto *CI = CallInst::Create(assume, {ConstantInt::get(Type::getInt32Ty(Ctx), 0)},
-                                     "", block);
+  auto *CI = CallInst::Create(
+      assume, {ConstantInt::get(Type::getInt32Ty(Ctx), 0)}, "", block);
   new UnreachableInst(Ctx, block);
 
   // take the metadata from I, some passes would consider the module
@@ -67,8 +67,9 @@ static BasicBlock *createTerminatingBlock(Function *F, Instruction *I) {
 }
 
 // redirect node successors
-static void redirectEdges(const BasicBlock *origB, BasicBlock *newB,
-                          const std::map<BasicBlock *, BasicBlock *> &BlocksMap) {
+static void
+redirectEdges(const BasicBlock *origB, BasicBlock *newB,
+              const std::map<BasicBlock *, BasicBlock *> &BlocksMap) {
   auto *origTI = origB->getTerminator();
   auto *newTI = newB->getTerminator();
 
@@ -76,7 +77,8 @@ static void redirectEdges(const BasicBlock *origB, BasicBlock *newB,
   // some passes would consider the module
   // broken without the metadata
   if (!CloneMetadata(origTI, newTI)) {
-    llvm::errs() << "[Unrolling] Failed assigning metadata to: " << *newTI << "\n";
+    llvm::errs() << "[Unrolling] Failed assigning metadata to: " << *newTI
+                 << "\n";
   }
 
   for (unsigned i = 0; i < origTI->getNumSuccessors(); ++i) {
@@ -103,8 +105,9 @@ static void replaceSuccessor(const std::vector<BasicBlock *> &Blocks,
 }
 
 // redirect value uses and PHI nodes
-static void redirectValues(BasicBlock *newB, ValueToValueMapTy &VMap,
-                           const std::map<BasicBlock *, BasicBlock *> & /*BlocksMap*/) {
+static void
+redirectValues(BasicBlock *newB, ValueToValueMapTy &VMap,
+               const std::map<BasicBlock *, BasicBlock *> & /*BlocksMap*/) {
 
   for (auto &I : *newB) {
     if (isa<PHINode>(&I)) {
@@ -122,8 +125,8 @@ static void redirectValues(BasicBlock *newB, ValueToValueMapTy &VMap,
   }
 }
 
-static std::vector<BasicBlock *> cloneLoopBody(Function *F,
-                                                const std::vector<BasicBlock *> Blocks) {
+static std::vector<BasicBlock *>
+cloneLoopBody(Function *F, const std::vector<BasicBlock *> Blocks) {
 
   ValueToValueMapTy VMap;
   std::map<BasicBlock *, BasicBlock *> BlocksMap;
@@ -195,9 +198,7 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createUnrollingPass() {
-  return new UnrollingPass();
-}
+llvm::Pass *createUnrollingPass() { return new UnrollingPass(); }
 
 } // namespace transform
 } // namespace verification

@@ -16,15 +16,14 @@
 namespace lotus {
 namespace sifa {
 
-template <typename StateT>
-class ICallSummarizer {
+template <typename StateT> class ICallSummarizer {
 public:
   virtual ~ICallSummarizer() = default;
-  virtual StateT summarize(const std::string &calleeName, const StateT &inputAfterCall) = 0;
+  virtual StateT summarize(const std::string &calleeName,
+                           const StateT &inputAfterCall) = 0;
 };
 
 } // namespace sifa
 } // namespace lotus
 
 #endif // LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ICALLSUMMARIZER_H
-

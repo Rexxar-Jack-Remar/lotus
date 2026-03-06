@@ -28,41 +28,41 @@ namespace transform {
 char BreakCritLoopsPass::ID = 0;
 
 bool BreakCritLoopsPass::runOnFunction(Function &F) {
-    if (F.isDeclaration())
-      return false;
+  if (F.isDeclaration())
+    return false;
 
-    std::vector<BasicBlock *> toProcess;
+  std::vector<BasicBlock *> toProcess;
 
-    for (BasicBlock &BB : F) {
-      if (BB.size() <= 1)
+  for (BasicBlock &BB : F) {
+    if (BB.size() <= 1)
+      continue;
+
+    auto *Term = BB.getTerminator();
+    if (auto *BI = dyn_cast<BranchInst>(Term)) {
+      if (BI->isUnconditional())
         continue;
 
-      auto *Term = BB.getTerminator();
-      if (auto *BI = dyn_cast<BranchInst>(Term)) {
-        if (BI->isUnconditional())
-          continue;
-
-        for (BasicBlock *SuccBB : BI->successors()) {
-          BasicBlock *UniqueSucc = SuccBB->getUniqueSuccessor();
-          if (UniqueSucc && UniqueSucc == &BB) {
-            toProcess.push_back(&BB);
-            break;
-          }
+      for (BasicBlock *SuccBB : BI->successors()) {
+        BasicBlock *UniqueSucc = SuccBB->getUniqueSuccessor();
+        if (UniqueSucc && UniqueSucc == &BB) {
+          toProcess.push_back(&BB);
+          break;
         }
       }
     }
+  }
 
-    bool Changed = false;
-    for (BasicBlock *BB : toProcess) {
-      BasicBlock::iterator SplitPoint = --BB->end();
-      BasicBlock *NewBB = BB->splitBasicBlock(SplitPoint, "crit.blk.split");
-      if (!CloneMetadata(BB->getTerminator(), BB->getTerminator())) {
-        errs() << "[BreakCritLoops] Failed assigning metadata\n";
-      }
-      Changed = true;
+  bool Changed = false;
+  for (BasicBlock *BB : toProcess) {
+    BasicBlock::iterator SplitPoint = --BB->end();
+    BasicBlock *NewBB = BB->splitBasicBlock(SplitPoint, "crit.blk.split");
+    if (!CloneMetadata(BB->getTerminator(), BB->getTerminator())) {
+      errs() << "[BreakCritLoops] Failed assigning metadata\n";
     }
+    Changed = true;
+  }
 
-    return Changed;
+  return Changed;
 }
 
 } // namespace transform
@@ -70,8 +70,7 @@ bool BreakCritLoopsPass::runOnFunction(Function &F) {
 } // namespace lotus
 
 static llvm::RegisterPass<lotus::verification::transform::BreakCritLoopsPass>
-    X("break-crit-loops",
-      "Break critical loops for better slicing");
+    X("break-crit-loops", "Break critical loops for better slicing");
 
 namespace lotus {
 namespace verification {

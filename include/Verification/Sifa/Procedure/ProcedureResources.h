@@ -33,19 +33,24 @@ namespace sifa {
 class ProcedureResources {
 public:
   /// Build resources with LOIs only (no enter-call markers in overlay).
-  ProcedureResources(SifaStats &stats, const llvm::Function &F,
-                     const std::vector<llvm::BasicBlock *> &locationsOfInterest);
+  ProcedureResources(
+      SifaStats &stats, const llvm::Function &F,
+      const std::vector<llvm::BasicBlock *> &locationsOfInterest);
 
-  /// Ultimate-aligned: LOIs + \p enterCallsOfInterest (callees). Overlay includes
-  /// paths to LOIs (inclusive), to return (inclusive), and to enter-calls (exclusive).
-  ProcedureResources(SifaStats &stats, const llvm::Function &F,
-                     const std::vector<llvm::BasicBlock *> &locationsOfInterest,
-                     const std::vector<const llvm::Function *> &enterCallsOfInterest);
+  /// Ultimate-aligned: LOIs + \p enterCallsOfInterest (callees). Overlay
+  /// includes paths to LOIs (inclusive), to return (inclusive), and to
+  /// enter-calls (exclusive).
+  ProcedureResources(
+      SifaStats &stats, const llvm::Function &F,
+      const std::vector<llvm::BasicBlock *> &locationsOfInterest,
+      const std::vector<const llvm::Function *> &enterCallsOfInterest);
 
-  /// The regex DAG built from (entry -> LOI/EXIT[/enter-call]) path expressions.
+  /// The regex DAG built from (entry -> LOI/EXIT[/enter-call]) path
+  /// expressions.
   ///
   /// The DAG contains:
-  /// - a path expression for each LOI, with a LocationMarkerTransition appended,
+  /// - a path expression for each LOI, with a LocationMarkerTransition
+  /// appended,
   /// - a path expression to the EXIT sentinel (`nullptr`), also marked, so that
   ///   "analyze to return" can be phrased as "interpret for the exit marker",
   /// - optionally, unmarked call-site path expressions used to represent
@@ -55,10 +60,14 @@ public:
   const BackwardClosedOverlay<Transition> &getDagOverlayPathToLois() const;
   /// Backward-closed overlay including the EXIT marker (inclusive).
   const BackwardClosedOverlay<Transition> &getDagOverlayPathToReturn() const;
-  /// Overlay including both LOI markers and return (for interprocedural interpretWithCalls).
-  const BackwardClosedOverlay<Transition> &getDagOverlayPathToLoisAndReturn() const;
-  /// Ultimate-aligned name: overlay for LOIs and enter-calls (same as PathToLoisAndReturn).
-  const BackwardClosedOverlay<Transition> &getDagOverlayPathToLoisAndEnterCalls() const;
+  /// Overlay including both LOI markers and return (for interprocedural
+  /// interpretWithCalls).
+  const BackwardClosedOverlay<Transition> &
+  getDagOverlayPathToLoisAndReturn() const;
+  /// Ultimate-aligned name: overlay for LOIs and enter-calls (same as
+  /// PathToLoisAndReturn).
+  const BackwardClosedOverlay<Transition> &
+  getDagOverlayPathToLoisAndEnterCalls() const;
 
 private:
   RegexDag<Transition> regexDag_;

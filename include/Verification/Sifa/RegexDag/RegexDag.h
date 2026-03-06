@@ -14,8 +14,8 @@
 #ifndef LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAG_H
 #define LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAG_H
 
-#include "Verification/Sifa/RegexDag/RegexDagNode.h"
 #include "Utils/Algorithms/PathExpressions/Regex.h"
+#include "Verification/Sifa/RegexDag/RegexDagNode.h"
 
 #include <memory>
 #include <unordered_set>
@@ -24,8 +24,7 @@
 namespace lotus {
 namespace sifa {
 
-template <typename L>
-class RegexDag final {
+template <typename L> class RegexDag final {
 public:
   using Node = RegexDagNode<L>;
   using RegexRef = typename Node::RegexRef;
@@ -70,12 +69,14 @@ public:
     return singleNodeDag(lotus::pathexpressions::Regex<L>::epsilon());
   }
 
-  /// Ultimate-aligned: makeEmptySet(). DAG representing the never-matching regex ∅.
+  /// Ultimate-aligned: makeEmptySet(). DAG representing the never-matching
+  /// regex ∅.
   static RegexDag makeEmptySet() {
     return singleNodeDag(lotus::pathexpressions::Regex<L>::emptySet());
   }
 
-  /// Ultimate-aligned: collectNodes(). All nodes reachable from source (each once).
+  /// Ultimate-aligned: collectNodes(). All nodes reachable from source (each
+  /// once).
   std::vector<Node *> collectNodes() const {
     std::vector<Node *> out;
     std::unordered_set<Node *> visited;
@@ -88,7 +89,8 @@ public:
 private:
   static void collectNodesFrom(Node *cur, std::unordered_set<Node *> &visited,
                                std::vector<Node *> &out) {
-    if (!cur || !visited.insert(cur).second) return;
+    if (!cur || !visited.insert(cur).second)
+      return;
     out.push_back(cur);
     for (Node *succ : cur->getOutgoingNodes()) {
       collectNodesFrom(succ, visited, out);

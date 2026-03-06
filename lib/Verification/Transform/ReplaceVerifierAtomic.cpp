@@ -33,7 +33,8 @@ bool ReplaceVerifierAtomicPass::runOnModule(llvm::Module &M) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::ReplaceVerifierAtomicPass>
+static llvm::RegisterPass<
+    lotus::verification::transform::ReplaceVerifierAtomicPass>
     X("replace-verifier-atomic",
       "Replace calls to verifier atomic with calls to pthread API", false,
       false);

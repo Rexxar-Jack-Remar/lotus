@@ -8,6 +8,7 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
+
 #include <set>
 #include <vector>
 
@@ -77,8 +78,8 @@ bool RemoveInfiniteLoopsPass::runOnFunction(Function &F) {
 
   LLVMContext &Ctx = M->getContext();
   Type *argTy = Type::getInt32Ty(Ctx);
-  auto C = M->getOrInsertFunction("__VERIFIER_assume", Type::getVoidTy(Ctx),
-                                   argTy);
+  auto C =
+      M->getOrInsertFunction("__VERIFIER_assume", Type::getVoidTy(Ctx), argTy);
   auto *extF = cast<Function>(C.getCallee()->stripPointerCasts());
 
   std::vector<Value *> args = {ConstantInt::get(argTy, 0)};
@@ -103,7 +104,8 @@ bool RemoveInfiniteLoopsPass::runOnFunction(Function &F) {
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::RemoveInfiniteLoopsPass>
+static llvm::RegisterPass<
+    lotus::verification::transform::RemoveInfiniteLoopsPass>
     X("remove-infinite-loops",
       "Delete patterns like LABEL: goto LABEL and replace them with exit(0)");
 

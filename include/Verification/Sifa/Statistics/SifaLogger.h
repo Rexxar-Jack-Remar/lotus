@@ -42,15 +42,16 @@ public:
   template <typename... Args>
   void log(Level l, const char *fmt, Args &&...args) {
     std::lock_guard<std::mutex> lk(mu_);
-    if (l > level_) return;
+    if (l > level_)
+      return;
     char buf[512];
     std::snprintf(buf, sizeof(buf), fmt, std::forward<Args>(args)...);
     llvm::errs() << "[sifa] " << buf << "\n";
   }
 
   void error(const std::string &msg) { log(Level::Error, "%s", msg.c_str()); }
-  void warn(const std::string &msg)  { log(Level::Warn,  "%s", msg.c_str()); }
-  void info(const std::string &msg)  { log(Level::Info,  "%s", msg.c_str()); }
+  void warn(const std::string &msg) { log(Level::Warn, "%s", msg.c_str()); }
+  void info(const std::string &msg) { log(Level::Info, "%s", msg.c_str()); }
   void debug(const std::string &msg) { log(Level::Debug, "%s", msg.c_str()); }
   void trace(const std::string &msg) { log(Level::Trace, "%s", msg.c_str()); }
 
