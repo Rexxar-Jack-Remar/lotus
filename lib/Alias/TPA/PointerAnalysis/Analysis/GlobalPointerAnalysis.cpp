@@ -29,7 +29,8 @@ using namespace llvm;
 namespace tpa {
 
 // Helper to check if a type is a scalar non-pointer type (e.g., int, float).
-// These types are generally uninteresting for pointer analysis unless cast to pointers.
+// These types are generally uninteresting for pointer analysis unless cast to
+// pointers.
 static bool isScalarNonPointerType(const Type *type) {
   assert(type != nullptr);
   return type->isSingleValueType() && !type->isPointerTy();
@@ -134,7 +135,8 @@ void GlobalPointerAnalysis::createGlobalVariables(const Module &module,
 }
 
 // Creates Pointer and MemoryObject representations for all functions.
-// This is necessary because functions can be taken as addresses (function pointers).
+// This is necessary because functions can be taken as addresses (function
+// pointers).
 void GlobalPointerAnalysis::createFunctions(const llvm::Module &module,
                                             Env &env) {
   for (auto const &f : module) {
@@ -149,7 +151,8 @@ void GlobalPointerAnalysis::createFunctions(const llvm::Module &module,
   }
 }
 
-// Retrieves the memory object associated with a global value from the environment.
+// Retrieves the memory object associated with a global value from the
+// environment.
 const MemoryObject *
 GlobalPointerAnalysis::getGlobalObject(const GlobalValue *gv, const Env &env) {
   const auto *iPtr = ptrManager.getPointer(globalCtx, gv);
@@ -183,8 +186,8 @@ void GlobalPointerAnalysis::initializeGlobalValues(const llvm::Module &module,
   }
 }
 
-// Analyzes a ConstantExpr GEP to determine the base global variable and total offset.
-// Handles nested BitCasts and recursive GEPs.
+// Analyzes a ConstantExpr GEP to determine the base global variable and total
+// offset. Handles nested BitCasts and recursive GEPs.
 std::pair<const llvm::GlobalVariable *, size_t>
 GlobalPointerAnalysis::processConstantGEP(const llvm::ConstantExpr *cexpr,
                                           const DataLayout &dataLayout) {
@@ -243,7 +246,8 @@ GlobalPointerAnalysis::processConstantGEP(const llvm::ConstantExpr *cexpr,
         raw_string_ostream ceOS(ceStr);
         ceOS << *ce;
         ceOS.flush();
-        LOG_ERROR("Constant expr not yet handled in global initializer: {}", ceStr);
+        LOG_ERROR("Constant expr not yet handled in global initializer: {}",
+                  ceStr);
         llvm_unreachable("Unknown constantexpr!");
       }
       }
@@ -254,7 +258,8 @@ GlobalPointerAnalysis::processConstantGEP(const llvm::ConstantExpr *cexpr,
       raw_string_ostream baseValOS(baseValStr);
       baseValOS << *baseVal;
       baseValOS.flush();
-      LOG_WARN("Unknown constant GEP base (treating as universal): {}", baseValStr);
+      LOG_WARN("Unknown constant GEP base (treating as universal): {}",
+               baseValStr);
       return std::make_pair(nullptr, 0);
     }
   }
@@ -296,7 +301,8 @@ void GlobalPointerAnalysis::processGlobalScalarInitializer(
     }
     case Instruction::IntToPtr: {
       // By default, clang won't generate global pointer arithmetic as
-      // ptrtoint+inttoptr, so we will do the simplest thing here: treat as universal
+      // ptrtoint+inttoptr, so we will do the simplest thing here: treat as
+      // universal
       envStore.second.insert(gObj, MemoryManager::getUniversalObject());
       break;
     }
@@ -350,8 +356,9 @@ void GlobalPointerAnalysis::processGlobalStructInitializer(
 }
 
 // Handles array initializers.
-// Note: Arrays are often "collapsed" in pointer analysis (field-insensitive for array elements),
-// but this implementation iterates all elements. If offsetMemory collapses them, that logic is in MemoryManager.
+// Note: Arrays are often "collapsed" in pointer analysis (field-insensitive for
+// array elements), but this implementation iterates all elements. If
+// offsetMemory collapses them, that logic is in MemoryManager.
 void GlobalPointerAnalysis::processGlobalArrayInitializer(
     const MemoryObject *gObj, const llvm::Constant *initializer,
     EnvStore &envStore, const DataLayout &dataLayout) {

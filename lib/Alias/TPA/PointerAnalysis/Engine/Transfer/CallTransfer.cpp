@@ -1,12 +1,17 @@
 // Implementation of Call transfer functions.
 //
-// This file handles the evaluation of function calls, which is the most complex part
-// of the pointer analysis. It handles:
-// 1. Call Graph Construction: Dynamic discovery of callee functions (for indirect calls).
-// 2. Argument Passing: Mapping actual arguments (caller) to formal parameters (callee).
-// 3. Return Value Passing: Mapping return values (callee) to call sites (caller).
-// 4. Context Sensitivity: Creating new contexts for callees (via KLimitContext).
-// 5. External Calls: Handling calls to external/library functions using annotations.
+// This file handles the evaluation of function calls, which is the most complex
+// part of the pointer analysis. It handles:
+// 1. Call Graph Construction: Dynamic discovery of callee functions (for
+// indirect calls).
+// 2. Argument Passing: Mapping actual arguments (caller) to formal parameters
+// (callee).
+// 3. Return Value Passing: Mapping return values (callee) to call sites
+// (caller).
+// 4. Context Sensitivity: Creating new contexts for callees (via
+// KLimitContext).
+// 5. External Calls: Handling calls to external/library functions using
+// annotations.
 
 #include "Alias/TPA/Context/ContextPolicy.h"
 #include "Alias/TPA/PointerAnalysis/Engine/GlobalState.h"
@@ -34,9 +39,9 @@ static inline size_t countPointerArguments(const llvm::Function *f) {
   return ret;
 };
 
-// Resolves potential target functions from a points-to set of a function pointer.
-// Handles the case where the function pointer points to the "Universal Object"
-// by conservatively matching signatures of all address-taken functions.
+// Resolves potential target functions from a points-to set of a function
+// pointer. Handles the case where the function pointer points to the "Universal
+// Object" by conservatively matching signatures of all address-taken functions.
 std::vector<const llvm::Function *>
 TransferFunction::findFunctionInPtsSet(PtsSet pSet,
                                        const CallCFGNode &callNode) {
@@ -69,7 +74,8 @@ TransferFunction::findFunctionInPtsSet(PtsSet pSet,
 }
 
 // Top-level resolver for call targets.
-// Fetches the points-to set of the called value and delegates to findFunctionInPtsSet.
+// Fetches the points-to set of the called value and delegates to
+// findFunctionInPtsSet.
 std::vector<const llvm::Function *>
 TransferFunction::resolveCallTarget(const context::Context *ctx,
                                     const CallCFGNode &callNode) {
@@ -174,9 +180,11 @@ TransferFunction::evalCallArguments(const context::Context *ctx,
 
 // Handling for internal (defined in the module) function calls.
 // 1. Evaluates argument passing.
-// 2. Prunes the store (optimizes by removing irrelevant objects for the callee).
+// 2. Prunes the store (optimizes by removing irrelevant objects for the
+// callee).
 // 3. Propagates execution to the callee's Entry node.
-// 4. Also propagates to the "next" instruction in the caller (to handle return flow
+// 4. Also propagates to the "next" instruction in the caller (to handle return
+// flow
 //    or parallel execution assumption).
 void TransferFunction::evalInternalCall(const context::Context *ctx,
                                         const CallCFGNode &callNode,
@@ -192,7 +200,7 @@ void TransferFunction::evalInternalCall(const context::Context *ctx,
   std::tie(isValid, envChanged) = evalCallArguments(ctx, callNode, fc);
   if (!isValid)
     return;
-    
+
   // If the environment changed (new args) or it's a new edge, we must
   // re-evaluate the callee's entry point.
   if (envChanged || callGraphUpdated) {

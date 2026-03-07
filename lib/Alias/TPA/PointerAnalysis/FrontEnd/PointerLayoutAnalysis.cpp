@@ -4,14 +4,15 @@
 //
 // Key Feature: Layout Propagation via Casts.
 // Since pointers can be cast between different struct types (especially in C),
-// we must ensure that the pointer analysis "sees" pointers even if they are accessed
-// through a casted type.
+// we must ensure that the pointer analysis "sees" pointers even if they are
+// accessed through a casted type.
 //
 // Algorithm:
 // 1. Build initial layout: recursively scan types to find pointer fields.
-// 2. Propagate layouts: Using the CastMap (from StructCastAnalysis), merge layout information.
-//    If StructA is cast to StructB, then StructA effectively "has" pointers where StructB does.
-//    (Conservative approach to handle unsafe casts).
+// 2. Propagate layouts: Using the CastMap (from StructCastAnalysis), merge
+// layout information.
+//    If StructA is cast to StructB, then StructA effectively "has" pointers
+//    where StructB does. (Conservative approach to handle unsafe casts).
 
 #include "Alias/TPA/PointerAnalysis/FrontEnd/Type/PointerLayoutAnalysis.h"
 
@@ -178,12 +179,14 @@ void PtrLayoutMapPropagator::propagatePtrLayoutMap() {
 
       // Forward: merge srcType's layout into dstType.
       auto itrDst = updates.find(dstType);
-      const auto *curDst = (itrDst != updates.end()) ? itrDst->second : dstLayout;
+      const auto *curDst =
+          (itrDst != updates.end()) ? itrDst->second : dstLayout;
       updates[dstType] = PointerLayout::merge(curDst, srcLayout);
 
       // Backward: merge dstType's layout into srcType.
       auto itrSrc = updates.find(srcType);
-      const auto *curSrc = (itrSrc != updates.end()) ? itrSrc->second : srcLayout;
+      const auto *curSrc =
+          (itrSrc != updates.end()) ? itrSrc->second : srcLayout;
       updates[srcType] = PointerLayout::merge(curSrc, dstLayout);
     }
   }

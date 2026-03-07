@@ -27,20 +27,21 @@ typedef GenericGraph<ICFGNode, ICFGEdge> GenericICFGTy;
 class ICFG : public GenericICFGTy {
 
 public:
-  typedef std::unordered_map<NodeID, ICFGNode *> ICFGNodeIDToNodeMapTy;
-  typedef ICFGNodeIDToNodeMapTy::iterator iterator;
-  typedef ICFGNodeIDToNodeMapTy::const_iterator const_iterator;
+  using ICFGNodeIDToNodeMapTy =
+      std::unordered_map<NodeID, ICFGNode *>;
+  using iterator = ICFGNodeIDToNodeMapTy::iterator;
+  using const_iterator = ICFGNodeIDToNodeMapTy::const_iterator;
 
-  typedef std::unordered_map<const llvm::BasicBlock *, IntraBlockNode *>
-      blockToIntraNodeMapTy;
-  typedef std::unordered_map<const llvm::Function *, IntraBlockNode *>
-      functionToEntryIntraNodeMapTy;
-  typedef std::unordered_map<const llvm::Function *, FunEntryBlockNode *>
-      functionToEntryNodeMapTy;
-  typedef std::unordered_map<const llvm::Function *, FunExitBlockNode *>
-      functionToExitNodeMapTy;
-  typedef std::unordered_map<const llvm::Instruction *, CallRetBlockNode *>
-      callToRetNodeMapTy;
+  using blockToIntraNodeMapTy =
+      std::unordered_map<const llvm::BasicBlock *, IntraBlockNode *>;
+  using functionToEntryIntraNodeMapTy =
+      std::unordered_map<const llvm::Function *, IntraBlockNode *>;
+  using functionToEntryNodeMapTy =
+      std::unordered_map<const llvm::Function *, FunEntryBlockNode *>;
+  using functionToExitNodeMapTy =
+      std::unordered_map<const llvm::Function *, FunExitBlockNode *>;
+  using callToRetNodeMapTy =
+      std::unordered_map<const llvm::Instruction *, CallRetBlockNode *>;
 
   NodeID totalICFGNode;
 

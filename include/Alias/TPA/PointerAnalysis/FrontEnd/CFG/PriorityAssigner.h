@@ -1,7 +1,8 @@
 #pragma once
 
-#include <llvm/ADT/SmallPtrSet.h>
 #include <vector>
+
+#include <llvm/ADT/SmallPtrSet.h>
 
 namespace tpa {
 

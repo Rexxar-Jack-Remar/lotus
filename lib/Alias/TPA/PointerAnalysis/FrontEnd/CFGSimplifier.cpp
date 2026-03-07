@@ -1,12 +1,14 @@
 // Implementation of CFGSimplifier.
 //
-// This class performs graph transformations to reduce the size and complexity of the CFG.
+// This class performs graph transformations to reduce the size and complexity
+// of the CFG.
 //
 // Optimization: Redundant Node Elimination
 // 1. Identify nodes that are "identity" transforms:
 //    - Copy nodes with a single source (dst = src).
 //    - Offset nodes with 0 offset (dst = src + 0).
-// 2. These nodes can be removed, and all their uses replaced by their definitions.
+// 2. These nodes can be removed, and all their uses replaced by their
+// definitions.
 //    (effectively merging the pointer equivalence classes).
 // 3. Updates Def-Use chains to bypass the removed nodes.
 
@@ -48,7 +50,7 @@ public:
 
   void visitEntryNode(EntryCFGNode &) {}
   void visitAllocNode(AllocCFGNode &) {}
-  
+
   void visitCopyNode(CopyCFGNode &copyNode) {
     if (redundantSet.count(&copyNode))
       return;
@@ -193,7 +195,8 @@ void CFGSimplifier::adjustDefUseChain(
         entryNode->insertDefUseEdge(useNode);
     }
 
-    // Clean up node's edges (snapshot uses first since we're modifying the list)
+    // Clean up node's edges (snapshot uses first since we're modifying the
+    // list)
     auto uses = SmallVector<CFGNode *, 8>(node->use_begin(), node->use_end());
     for (auto *useNode : uses)
       node->removeDefUseEdge(useNode);

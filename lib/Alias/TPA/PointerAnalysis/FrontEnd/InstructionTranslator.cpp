@@ -5,8 +5,10 @@
 // Key Responsibilities:
 // 1. Identify relevant instructions (Alloca, Load, Store, Call, GEP, etc.).
 // 2. Filter irrelevant instructions (arithmetic, etc.).
-// 3. Handle complicated logic like PHI nodes and Selects (translating them to Copy).
-// 4. Handle "extraction" patterns (ExtractValue, ExtractElement) to recover pointers.
+// 3. Handle complicated logic like PHI nodes and Selects (translating them to
+// Copy).
+// 4. Handle "extraction" patterns (ExtractValue, ExtractElement) to recover
+// pointers.
 
 #include "Alias/TPA/PointerAnalysis/FrontEnd/CFG/InstructionTranslator.h"
 
@@ -33,12 +35,13 @@ tpa::CFGNode *InstructionTranslator::visitAllocaInst(AllocaInst &allocaInst) {
   // Only interested in allocas of pointer types (pointer to pointer),
   // OR allocas of anything if we track address-taken?
   // Actually, TPA tracks allocations of memory blocks.
-  // Wait, `allocaInst.getType()` is `T*`. `allocaInst.getAllocatedType()` is `T`.
-  // The check below says `isPointerTy()`. This implies we only track stack
-  // allocations if the *result* is treated as a pointer (always true) 
+  // Wait, `allocaInst.getType()` is `T*`. `allocaInst.getAllocatedType()` is
+  // `T`. The check below says `isPointerTy()`. This implies we only track stack
+  // allocations if the *result* is treated as a pointer (always true)
   // or maybe it means we only care if we allocate a pointer on the stack?
   //
-  // Re-reading code: `visitAllocaInst` assumes `getType()->isPointerTy()`, which is always true.
+  // Re-reading code: `visitAllocaInst` assumes `getType()->isPointerTy()`,
+  // which is always true.
   assert(allocaInst.getType()->isPointerTy());
 
   const auto *allocType = typeMap.lookup(allocaInst.getAllocatedType());
@@ -48,7 +51,8 @@ tpa::CFGNode *InstructionTranslator::visitAllocaInst(AllocaInst &allocaInst) {
 }
 
 tpa::CFGNode *InstructionTranslator::visitLoadInst(LoadInst &loadInst) {
-  // We only care about loading POINTERS. Data flow of non-pointers is irrelevant.
+  // We only care about loading POINTERS. Data flow of non-pointers is
+  // irrelevant.
   if (!loadInst.getType()->isPointerTy())
     return nullptr;
 

@@ -1,8 +1,7 @@
 #include "Alias/TPA/PointerAnalysis/Support/PtsMap.h"
 
-namespace tpa
-{
+namespace tpa {
 
-using Store = PtsMap<const MemoryObject*>;
+using Store = PtsMap<const MemoryObject *>;
 
 } // namespace tpa

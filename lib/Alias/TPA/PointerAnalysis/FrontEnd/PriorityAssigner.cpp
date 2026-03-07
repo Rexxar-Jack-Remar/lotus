@@ -4,10 +4,11 @@
 //
 // Purpose:
 // The worklist algorithm (in the Engine) uses priorities to determine the order
-// of node processing. Processing nodes in Reverse Post-Order (RPO) significantly
-// speeds up convergence for forward data-flow analysis: in RPO, a node is always
-// processed before its successors (in the acyclic case), so information flows
-// forward in a single pass rather than requiring many iterations.
+// of node processing. Processing nodes in Reverse Post-Order (RPO)
+// significantly speeds up convergence for forward data-flow analysis: in RPO, a
+// node is always processed before its successors (in the acyclic case), so
+// information flows forward in a single pass rather than requiring many
+// iterations.
 //
 // Fix #6: The previous implementation assigned post-order labels (leaf nodes
 // get low numbers, entry gets a high number). If the worklist is a min-heap

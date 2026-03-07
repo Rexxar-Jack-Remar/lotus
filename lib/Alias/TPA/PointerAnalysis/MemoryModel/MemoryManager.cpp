@@ -1,20 +1,28 @@
 // Implementation of the MemoryManager.
 //
-// The MemoryManager is the central authority for managing the abstract memory model.
-// It handles the creation of MemoryObjects and their organization into MemoryBlocks.
+// The MemoryManager is the central authority for managing the abstract memory
+// model. It handles the creation of MemoryObjects and their organization into
+// MemoryBlocks.
 //
 // Concepts:
-// - MemoryBlock: Represents a conceptual allocation unit (e.g., a malloc call site, 
+// - MemoryBlock: Represents a conceptual allocation unit (e.g., a malloc call
+// site,
 //   a stack variable declaration, or a global variable).
-// - MemoryObject: Represents a specific offset within a MemoryBlock (e.g., field 'x'
+// - MemoryObject: Represents a specific offset within a MemoryBlock (e.g.,
+// field 'x'
 //   at offset 0 inside struct 'Point').
-// - TypeLayout: Used to understand the structure (fields, arrays) of allocated memory.
+// - TypeLayout: Used to understand the structure (fields, arrays) of allocated
+// memory.
 //
 // Key Features:
-// - Region-based Allocation: Distinct handling for Stack, Heap, Global, and Function memory.
-// - Field Sensitivity: `offsetMemory` creates new MemoryObjects for field accesses.
-// - Array Abstraction: Detects array accesses via `TypeLayout` and collapses them 
-//   into summary objects (field-insensitive for array elements, but sensitive for the array itself).
+// - Region-based Allocation: Distinct handling for Stack, Heap, Global, and
+// Function memory.
+// - Field Sensitivity: `offsetMemory` creates new MemoryObjects for field
+// accesses.
+// - Array Abstraction: Detects array accesses via `TypeLayout` and collapses
+// them
+//   into summary objects (field-insensitive for array elements, but sensitive
+//   for the array itself).
 
 #include "Alias/TPA/PointerAnalysis/MemoryModel/MemoryManager.h"
 
@@ -24,7 +32,7 @@ using namespace context;
 
 namespace tpa {
 
-// Helper to check if the type layout implies that the object at offset 0 
+// Helper to check if the type layout implies that the object at offset 0
 // should be treated as a summary (e.g., an array at the start of a struct).
 static bool startWithSummary(const TypeLayout *type) {
   bool ret;
@@ -147,7 +155,8 @@ const MemoryObject *MemoryManager::offsetMemory(const MemoryObject *obj,
 }
 
 // Low-level offset calculation.
-// Determines the new offset and whether it falls into an array (requiring summary).
+// Determines the new offset and whether it falls into an array (requiring
+// summary).
 const MemoryObject *MemoryManager::offsetMemory(const MemoryBlock *block,
                                                 size_t offset) const {
   assert(block != nullptr);
@@ -163,7 +172,7 @@ const MemoryObject *MemoryManager::offsetMemory(const MemoryBlock *block,
   // Consult TypeLayout to see if 'offset' hits an array region.
   // adjustedOffset will be normalized (modulo element size) if inside an array.
   std::tie(adjustedOffset, summary) = type->offsetInto(offset);
-  
+
   // Heap objects are inherently summary objects.
   summary = summary || block->isHeapBlock();
 
@@ -186,13 +195,14 @@ MemoryManager::getReachablePointerObjects(const MemoryObject *obj,
   if (!obj->isSpecialObject()) {
     const auto *memBlock = obj->getMemoryBlock();
     const auto *ptrLayout = memBlock->getTypeLayout()->getPointerLayout();
-    
-    // Find all valid pointer offsets in the type layout starting from obj->getOffset()
+
+    // Find all valid pointer offsets in the type layout starting from
+    // obj->getOffset()
     auto itr = ptrLayout->lower_bound(obj->getOffset());
     // (Optimization: skip self if found, as it was handled by includeSelf)
     if (itr != ptrLayout->end() && *itr == obj->getOffset())
       ++itr;
-      
+
     // Transform offsets back into MemoryObjects
     std::transform(itr, ptrLayout->end(), std::back_inserter(ret),
                    [this, memBlock](size_t offset) {

@@ -1,7 +1,8 @@
 // Implementation of Load transfer functions.
 //
 // Handles the evaluation of load instructions (p = *q).
-// Reads from the memory Store to update the points-to set of the destination pointer 'p'.
+// Reads from the memory Store to update the points-to set of the destination
+// pointer 'p'.
 //
 // Logic:
 // 1. Look up the points-to set of 'q' in the Environment.
@@ -62,20 +63,20 @@ void TransferFunction::evalLoadNode(const ProgramPoint &pp,
 
   auto &ptrManager = globalState.getPointerManager();
   const auto *srcPtr = ptrManager.getPointer(ctx, loadNode.getSrc());
-  
+
   // If source pointer hasn't been seen yet, we can't load anything.
   if (srcPtr == nullptr)
     return;
 
   // assert(srcPtr != nullptr && "LoadNode is evaluated before its src operand
   // becomes available");
-  
+
   // Create or get the pointer representation for the destination register
   const auto *dstPtr = ptrManager.getOrCreatePointer(ctx, loadNode.getDest());
 
   // Perform the load
   const auto resSet = loadFromPointer(srcPtr, *localState);
-  
+
   // Update the Environment for the destination pointer.
   // Since 'dstPtr' is an SSA value (register), we can always do a Strong Update
   // because it has a single definition.
@@ -84,7 +85,7 @@ void TransferFunction::evalLoadNode(const ProgramPoint &pp,
   // If the environment changed, we need to propagate to top-level users
   if (envChanged)
     addTopLevelSuccessors(pp, evalResult);
-    
+
   // Always propagate the store to memory-level successors
   addMemLevelSuccessors(pp, *localState, evalResult);
 }

@@ -1,26 +1,29 @@
 // Implementation of External Call Analysis.
 //
-// This file handles calls to external functions (functions without definitions in the module).
-// Instead of analyzing the body of the function, it relies on an "External Pointer Table"
-// (annotations) to model the side effects of the call on pointers and memory.
+// This file handles calls to external functions (functions without definitions
+// in the module). Instead of analyzing the body of the function, it relies on
+// an "External Pointer Table" (annotations) to model the side effects of the
+// call on pointers and memory.
 //
 // Supported Effects:
 // - Alloc: The function allocates memory (like malloc).
-// - Copy: The function copies data between pointers (like memcpy, strcpy) or assigns values.
+// - Copy: The function copies data between pointers (like memcpy, strcpy) or
+// assigns values.
 // - Exit: The function terminates the program (like exit).
 //
-// If no annotation is found, the analysis conservatively assumes the function acts as a no-op
-// regarding the tracked state (unless it returns a value, which is effectively lost/universal).
-// NOTE: A robust analysis should probably assume "unknown behavior" escapes everything, 
-// but this implementation seems to rely on explicit annotations for correctness.
+// If no annotation is found, the analysis conservatively assumes the function
+// acts as a no-op regarding the tracked state (unless it returns a value, which
+// is effectively lost/universal). NOTE: A robust analysis should probably
+// assume "unknown behavior" escapes everything, but this implementation seems
+// to rely on explicit annotations for correctness.
 
-#include "Annotation/Pointer/ExternalPointerTable.h"
 #include "Alias/TPA/PointerAnalysis/Engine/GlobalState.h"
 #include "Alias/TPA/PointerAnalysis/Engine/TransferFunction.h"
 #include "Alias/TPA/PointerAnalysis/MemoryModel/MemoryManager.h"
 #include "Alias/TPA/PointerAnalysis/MemoryModel/PointerManager.h"
 #include "Alias/TPA/PointerAnalysis/MemoryModel/Type/TypeLayout.h"
 #include "Alias/TPA/PointerAnalysis/Program/SemiSparseProgram.h"
+#include "Annotation/Pointer/ExternalPointerTable.h"
 #include "Annotation/Pointer/PointerEffect.h"
 
 #include <llvm/IR/Constants.h>
@@ -33,7 +36,8 @@ using namespace llvm;
 
 namespace tpa {
 
-// Helper to extract the LLVM Value corresponding to a position argument (e.g., Arg(0), Ret).
+// Helper to extract the LLVM Value corresponding to a position argument (e.g.,
+// Arg(0), Ret).
 static const Value *getArgument(const CallCFGNode &callNode,
                                 const APosition &pos) {
   const auto *inst = callNode.getCallSite();
@@ -75,10 +79,8 @@ static Type *getMallocType(const Instruction *callInst) {
 
   // Helper: given a pointer value, collect all BitCast destination types seen
   // among its direct users.
-  auto collectBitCastTypes = [](const Value *val,
-                                size_t &numBitCasts,
-                                size_t &numOther,
-                                PointerType *&lastBCType) {
+  auto collectBitCastTypes = [](const Value *val, size_t &numBitCasts,
+                                size_t &numOther, PointerType *&lastBCType) {
     for (const auto *user : val->users()) {
       if (const auto *bcInst = dyn_cast<BitCastInst>(user)) {
         lastBCType = cast<PointerType>(bcInst->getDestTy());
@@ -130,8 +132,8 @@ static Type *getMallocType(const Instruction *callInst) {
   return nullptr;
 }
 
-// Checks if the allocation size matches the size of a single instance of the type.
-// If not, it's likely an array allocation.
+// Checks if the allocation size matches the size of a single instance of the
+// type. If not, it's likely an array allocation.
 static bool isSingleAlloc(const TypeLayout *typeLayout,
                           const llvm::Value *sizeVal) {
   if (sizeVal == nullptr)
@@ -144,7 +146,8 @@ static bool isSingleAlloc(const TypeLayout *typeLayout,
     // not a multiple of the type size (e.g., due to alignment padding or
     // programmer computing sizeof(T)+extra), the assert would crash the
     // analysis. Instead, treat such cases as array/unknown allocations by
-    // returning false, which causes the caller to fall back to byte-array layout.
+    // returning false, which causes the caller to fall back to byte-array
+    // layout.
     if (typeSize == 0 || size % typeSize != 0)
       return false;
     return size == typeSize;
@@ -186,9 +189,10 @@ bool TransferFunction::evalExternalAlloc(
     return false;
 
   auto *mallocType = getMallocType(callNode.getCallSite());
-  const auto *sizeVal = allocEffect.hasSizePosition()
-                     ? getArgument(callNode, allocEffect.getSizePosition())
-                     : nullptr;
+  const auto *sizeVal =
+      allocEffect.hasSizePosition()
+          ? getArgument(callNode, allocEffect.getSizePosition())
+          : nullptr;
 
   return evalMallocWithSize(ctx, dstVal, mallocType, sizeVal);
 }
@@ -210,7 +214,7 @@ void TransferFunction::evalMemcpyPtsSet(
     const auto *tgtObj = memManager.offsetMemory(dstObj, offset);
     if (tgtObj->isSpecialObject())
       break;
-    
+
     // Copy the points-to set (weak update because we are merging)
     store.weakUpdate(tgtObj, srcSet);
   }
@@ -231,7 +235,8 @@ bool TransferFunction::evalMemcpyPointer(const Pointer *dst, const Pointer *src,
   auto &memManager = globalState.getMemoryManager();
   for (const auto *srcObj : srcSet) {
     // Get all objects reachable from the source pointer's object (deep copy?)
-    // Actually, getReachablePointerObjects usually returns the object + sub-objects (fields/array elements).
+    // Actually, getReachablePointerObjects usually returns the object +
+    // sub-objects (fields/array elements).
     auto srcObjs = memManager.getReachablePointerObjects(srcObj);
     for (const auto *dstObj : dstSet)
       evalMemcpyPtsSet(dstObj, srcObjs, srcObj->getOffset(), store);
@@ -248,10 +253,12 @@ bool TransferFunction::evalMemcpy(const context::Context *ctx,
          "memcpy only operates on arguments");
 
   auto &ptrManager = globalState.getPointerManager();
-  const auto *dstPtr = ptrManager.getPointer(ctx, getArgument(callNode, dstPos));
+  const auto *dstPtr =
+      ptrManager.getPointer(ctx, getArgument(callNode, dstPos));
   if (dstPtr == nullptr)
     return false;
-  const auto *srcPtr = ptrManager.getPointer(ctx, getArgument(callNode, srcPos));
+  const auto *srcPtr =
+      ptrManager.getPointer(ctx, getArgument(callNode, srcPos));
   if (srcPtr == nullptr)
     return false;
 
@@ -295,7 +302,8 @@ PtsSet TransferFunction::evalExternalCopySource(const context::Context *ctx,
 }
 
 // Helper to fill a destination pointer's reachable memory with a source set.
-// This is used when a function copies a value into *all* reachable sub-fields of a struct/array.
+// This is used when a function copies a value into *all* reachable sub-fields
+// of a struct/array.
 void TransferFunction::fillPtsSetWith(const Pointer *ptr, PtsSet srcSet,
                                       Store &store) {
   auto pSet = globalState.getEnv().lookup(ptr);
@@ -462,8 +470,8 @@ void TransferFunction::evalExternalCall(const context::Context *ctx,
     const auto *uObj = MemoryManager::getUniversalObject();
     const auto uSet = PtsSet::getSingletonSet(uObj);
 
-    // Escape all pointer arguments: write Universal into their reachable memory.
-    // Only create a new store copy if we actually need to modify it.
+    // Escape all pointer arguments: write Universal into their reachable
+    // memory. Only create a new store copy if we actually need to modify it.
     Store *modifiedStore = nullptr;
     for (const auto *argVal : callNode) {
       const auto *argPtr = ptrManager.getPointer(ctx, argVal);
@@ -485,7 +493,8 @@ void TransferFunction::evalExternalCall(const context::Context *ctx,
       }
     }
 
-    // If the call has a pointer-typed return destination, it may return Universal.
+    // If the call has a pointer-typed return destination, it may return
+    // Universal.
     bool envChanged = false;
     if (const auto *dstVal = callNode.getDest()) {
       const auto *dstPtr = ptrManager.getOrCreatePointer(ctx, dstVal);
@@ -494,9 +503,9 @@ void TransferFunction::evalExternalCall(const context::Context *ctx,
 
     if (envChanged)
       addTopLevelSuccessors(ProgramPoint(ctx, &callNode), evalResult);
-    addMemLevelSuccessors(ProgramPoint(ctx, &callNode),
-                          modifiedStore != nullptr ? *modifiedStore : *localState,
-                          evalResult);
+    addMemLevelSuccessors(
+        ProgramPoint(ctx, &callNode),
+        modifiedStore != nullptr ? *modifiedStore : *localState, evalResult);
     return;
   }
 
