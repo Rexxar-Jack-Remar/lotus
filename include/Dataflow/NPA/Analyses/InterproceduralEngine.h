@@ -4,11 +4,12 @@
 #include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/NPA/NPA.h"
 
-#include <algorithm>
 #include <deque>
 #include <map>
 #include <set>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <llvm/IR/Function.h>
@@ -17,10 +18,21 @@
 
 namespace npa {
 
-using CallSiteID = const llvm::Instruction *;
-using CallString = std::vector<CallSiteID>;
+struct FunctionKey {
+  const llvm::Function *function = nullptr;
 
-template <class D, class Analysis, int K = 0> class InterproceduralEngine {
+  bool operator<(const FunctionKey &other) const {
+    return function < other.function;
+  }
+};
+
+struct BlockKey {
+  const llvm::BasicBlock *block = nullptr;
+
+  bool operator<(const BlockKey &other) const { return block < other.block; }
+};
+
+template <class D, class Analysis> class InterproceduralEngine {
 public:
   using Exp = Exp0<D>;
   using E = E0<D>;
@@ -28,46 +40,47 @@ public:
   using Fact = typename Analysis::FactType;
 
   struct Result {
-    std::unordered_map<std::string, Val> summaries;
-    std::unordered_map<std::string, Fact> blockEntryFacts;
+    std::map<FunctionKey, Val> summaries;
+    std::map<BlockKey, Fact> blockEntryFacts;
   };
 
-  static void appendCallString(std::string &s, const CallString &cs) {
-    for (auto *site : cs) {
-      s.append(reinterpret_cast<const char *>(&site), sizeof(site));
-    }
-  }
-
-  static std::string getBlockSymbol(const llvm::BasicBlock *BB,
-                                    const CallString &cs) {
+  static std::string getBlockSymbol(const llvm::BasicBlock *BB) {
     std::string s;
-    s.reserve(1 + sizeof(BB) + cs.size() * sizeof(CallSiteID));
+    s.reserve(1 + sizeof(BB));
     s.push_back('B');
     s.append(reinterpret_cast<const char *>(&BB), sizeof(BB));
-    appendCallString(s, cs);
     return s;
   }
 
-  static std::string getFuncSymbol(const llvm::Function *F,
-                                   const CallString &cs) {
+  static std::string getFuncSymbol(const llvm::Function *F) {
     std::string s;
-    s.reserve(1 + sizeof(F) + cs.size() * sizeof(CallSiteID));
+    s.reserve(1 + sizeof(F));
     s.push_back('F');
     s.append(reinterpret_cast<const char *>(&F), sizeof(F));
-    appendCallString(s, cs);
     return s;
-  }
-
-  static CallString pushContext(const CallString &cs,
-                                const llvm::Instruction *site) {
-    CallString next = cs;
-    next.push_back(site);
-    if (next.size() > K)
-      next.erase(next.begin());
-    return next;
   }
 
 private:
+  template <typename A>
+  static auto getMaxPropagationSteps(const A &analysis, int)
+      -> decltype(analysis.getMaxPropagationSteps()) {
+    return analysis.getMaxPropagationSteps();
+  }
+
+  static long getMaxPropagationSteps(const Analysis &, long) { return 100000; }
+
+  template <typename A>
+  static auto widenFacts(A &analysis, const Fact &oldFact, const Fact &newFact,
+                         size_t updates, int)
+      -> decltype(analysis.widenFacts(oldFact, newFact, updates)) {
+    return analysis.widenFacts(oldFact, newFact, updates);
+  }
+
+  static Fact widenFacts(Analysis &, const Fact &, const Fact &newFact, size_t,
+                         long) {
+    return newFact;
+  }
+
   template <typename A>
   static auto getCallEntryTransfer(A &analysis, const llvm::CallBase &call,
                                    const llvm::Function &callee, int)
@@ -109,36 +122,59 @@ private:
   }
 
 public:
-  static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false) {
-    ::dataflow::controlflow::LLVMIntraCFG CFG;
-    std::vector<std::pair<Symbol, E>> eqns;
-    std::deque<std::pair<llvm::Function *, CallString>> worklist;
-    std::set<std::pair<llvm::Function *, CallString>> visited;
+  static std::vector<llvm::Function *> getEntryFunctions(llvm::Module &M) {
+    if (llvm::Function *Main = M.getFunction("main"))
+      return {Main};
 
-    llvm::Function *Main = M.getFunction("main");
-    if (Main) {
-      worklist.push_back({Main, {}});
-      visited.insert({Main, {}});
-    } else {
-      for (auto &F : M) {
-        if (!F.isDeclaration()) {
-          worklist.push_back({&F, {}});
-          visited.insert({&F, {}});
+    std::unordered_set<const llvm::Function *> called;
+    std::vector<llvm::Function *> defined;
+    for (auto &F : M) {
+      if (F.isDeclaration())
+        continue;
+      defined.push_back(&F);
+      for (auto &BB : F) {
+        for (auto &I : BB) {
+          auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+          auto *Callee = CB ? CB->getCalledFunction() : nullptr;
+          if (Callee && !Callee->isDeclaration())
+            called.insert(Callee);
         }
       }
     }
 
-    while (!worklist.empty()) {
-      auto item = worklist.front();
-      worklist.pop_front();
-      llvm::Function *F = item.first;
-      CallString cs = item.second;
+    std::vector<llvm::Function *> roots;
+    for (llvm::Function *F : defined) {
+      if (!called.count(F))
+        roots.push_back(F);
+    }
+    return roots.empty() ? defined : roots;
+  }
 
-      std::string fSym = getFuncSymbol(F, cs);
+  static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false) {
+    ::dataflow::controlflow::LLVMIntraCFG CFG;
+    std::vector<std::pair<Symbol, E>> eqns;
+    std::deque<llvm::Function *> worklist;
+    std::set<llvm::Function *> visited;
+    std::unordered_map<std::string, FunctionKey> functionSymbols;
+    std::unordered_map<std::string, BlockKey> blockSymbols;
+
+    std::vector<llvm::Function *> entries = getEntryFunctions(M);
+    for (llvm::Function *Entry : entries) {
+      worklist.push_back(Entry);
+      visited.insert(Entry);
+    }
+
+    while (!worklist.empty()) {
+      llvm::Function *F = worklist.front();
+      worklist.pop_front();
+
+      std::string fSym = getFuncSymbol(F);
+      functionSymbols[fSym] = {F};
       E exitExpr = nullptr;
 
       for (auto &BB : *F) {
-        std::string bSym = getBlockSymbol(&BB, cs);
+        std::string bSym = getBlockSymbol(&BB);
+        blockSymbols[bSym] = {&BB};
 
         E inExpr = nullptr;
         if (&BB == &F->getEntryBlock()) {
@@ -149,11 +185,10 @@ public:
           for (auto *PredInst : CFG.getPredsOf(
                    First, ::dataflow::controlflow::FlowDirection::Forward)) {
             auto *Pred = PredInst ? PredInst->getParent() : nullptr;
-            if (Pred == nullptr)
+            if (!Pred)
               continue;
             hasPreds = true;
-            std::string predSym = getBlockSymbol(Pred, cs);
-            auto pHole = Exp::hole(predSym);
+            auto pHole = Exp::hole(getBlockSymbol(Pred));
             if (!inExpr)
               inExpr = pHole;
             else
@@ -168,16 +203,12 @@ public:
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
             if (auto *Callee = CI->getCalledFunction()) {
               if (!Callee->isDeclaration()) {
-                CallString calleeCS = pushContext(cs, CI);
-                if (visited.find({Callee, calleeCS}) == visited.end()) {
-                  visited.insert({Callee, calleeCS});
-                  worklist.push_back({Callee, calleeCS});
-                }
+                if (visited.insert(Callee).second)
+                  worklist.push_back(Callee);
                 currentPath =
                     Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
                              currentPath);
-                currentPath =
-                    Exp::call(getFuncSymbol(Callee, calleeCS), currentPath);
+                currentPath = Exp::call(getFuncSymbol(Callee), currentPath);
                 currentPath =
                     Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
                              currentPath);
@@ -218,40 +249,42 @@ public:
       solvedMap[p.first] = p.second;
 
     Result res;
-    res.summaries = solvedMap;
+    for (const auto &entry : functionSymbols) {
+      auto It = solvedMap.find(entry.first);
+      if (It != solvedMap.end())
+        res.summaries[entry.second] = It->second;
+    }
 
-    std::deque<std::pair<llvm::Function *, CallString>> worklist2;
-    std::set<std::pair<llvm::Function *, CallString>> inWorklist2;
+    std::deque<llvm::Function *> worklist2;
+    std::set<llvm::Function *> inWorklist2;
     std::unordered_map<std::string, Fact> funcInput;
+    std::unordered_map<std::string, size_t> funcUpdates;
+    const long maxPropagationSteps = getMaxPropagationSteps(analysis, 0);
+    long propagationSteps = 0;
 
-    if (Main) {
-      std::string sym = getFuncSymbol(Main, {});
+    for (llvm::Function *Entry : entries) {
+      std::string sym = getFuncSymbol(Entry);
       funcInput[sym] = analysis.getEntryValue();
-      worklist2.push_back({Main, {}});
-      inWorklist2.insert({Main, {}});
-    } else {
-      for (auto &F : M) {
-        if (!F.isDeclaration()) {
-          std::string sym = getFuncSymbol(&F, {});
-          funcInput[sym] = analysis.getEntryValue();
-          worklist2.push_back({&F, {}});
-          inWorklist2.insert({&F, {}});
-        }
-      }
+      worklist2.push_back(Entry);
+      inWorklist2.insert(Entry);
     }
 
     while (!worklist2.empty()) {
-      auto item = worklist2.front();
+      if (maxPropagationSteps >= 0 && propagationSteps++ >= maxPropagationSteps) {
+        if (verbose)
+          std::cerr << "[interproc-fwd] hit max propagation steps="
+                    << maxPropagationSteps << "\n";
+        break;
+      }
+      llvm::Function *F = worklist2.front();
       worklist2.pop_front();
-      llvm::Function *F = item.first;
-      CallString cs = item.second;
-      inWorklist2.erase(item);
+      inWorklist2.erase(F);
 
-      std::string fSym = getFuncSymbol(F, cs);
+      std::string fSym = getFuncSymbol(F);
       Fact inputVal = funcInput[fSym];
 
       for (auto &BB : *F) {
-        std::string bSym = getBlockSymbol(&BB, cs);
+        std::string bSym = getBlockSymbol(&BB);
         if (!solvedMap.count(bSym))
           continue;
 
@@ -264,9 +297,9 @@ public:
           for (auto *PredInst : CFG.getPredsOf(
                    First, ::dataflow::controlflow::FlowDirection::Forward)) {
             auto *Pred = PredInst ? PredInst->getParent() : nullptr;
-            if (Pred == nullptr)
+            if (!Pred)
               continue;
-            std::string pSym = getBlockSymbol(Pred, cs);
+            std::string pSym = getBlockSymbol(Pred);
             if (solvedMap.count(pSym)) {
               if (first) {
                 entryToBlockStart = solvedMap[pSym];
@@ -281,7 +314,7 @@ public:
 
         auto blockEntryFact =
             analysis.applySummary(entryToBlockStart, inputVal);
-        res.blockEntryFacts[bSym] = blockEntryFact;
+        res.blockEntryFacts[{&BB}] = blockEntryFact;
 
         E currentPath = Exp::term(D::one());
 
@@ -289,8 +322,7 @@ public:
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
             if (auto *Callee = CI->getCalledFunction()) {
               if (!Callee->isDeclaration()) {
-                CallString calleeCS = pushContext(cs, CI);
-                std::string calleeFSym = getFuncSymbol(Callee, calleeCS);
+                std::string calleeFSym = getFuncSymbol(Callee);
 
                 Val currentPathVal = I0<D>::eval(false, solvedMap, currentPath);
                 Val callEntry =
@@ -302,21 +334,20 @@ public:
 
                 if (!funcInput.count(calleeFSym)) {
                   funcInput[calleeFSym] = factAtCall;
-                  if (inWorklist2.find({Callee, calleeCS}) ==
-                      inWorklist2.end()) {
-                    worklist2.push_back({Callee, calleeCS});
-                    inWorklist2.insert({Callee, calleeCS});
-                  }
+                  if (inWorklist2.insert(Callee).second)
+                    worklist2.push_back(Callee);
                 } else {
                   auto oldVal = funcInput[calleeFSym];
                   auto newVal = analysis.joinFacts(oldVal, factAtCall);
                   if (!analysis.factsEqual(oldVal, newVal)) {
-                    funcInput[calleeFSym] = newVal;
-                    if (inWorklist2.find({Callee, calleeCS}) ==
-                        inWorklist2.end()) {
-                      worklist2.push_back({Callee, calleeCS});
-                      inWorklist2.insert({Callee, calleeCS});
-                    }
+                    size_t updateCount = ++funcUpdates[calleeFSym];
+                    Fact widened =
+                        widenFacts(analysis, oldVal, newVal, updateCount, 0);
+                    if (analysis.factsEqual(oldVal, widened))
+                      continue;
+                    funcInput[calleeFSym] = widened;
+                    if (inWorklist2.insert(Callee).second)
+                      worklist2.push_back(Callee);
                   }
                 }
               }
@@ -326,12 +357,10 @@ public:
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
             if (auto *Callee = CI->getCalledFunction()) {
               if (!Callee->isDeclaration()) {
-                CallString calleeCS = pushContext(cs, CI);
                 currentPath =
                     Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
                              currentPath);
-                currentPath =
-                    Exp::call(getFuncSymbol(Callee, calleeCS), currentPath);
+                currentPath = Exp::call(getFuncSymbol(Callee), currentPath);
                 currentPath =
                     Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
                              currentPath);

@@ -15,7 +15,10 @@ add_definitions(-DCMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 set(COMMON_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/utils ${CMAKE_CURRENT_SOURCE_DIR}/../include ${LLVM_INCLUDE_DIRS})
 # CanaryAliasAnalysisWrapper must come after SifaAnalysis so that getPointsToSet/mayAlias
 # (used by libSifaAnalysis) are pulled in from the wrapper when linking.
-set(COMMON_LIBS ${LLVM_LIBRARIES} GTest::gtest GTest::gtest_main IFDS Annotation CanaryDyckAA LLVMIRReader CanaryPDG Concurrency SymAbs CanaryICFG AserPTA MONODataFlow WPDSDataFlow wpds++ CanaryTypeHirarchy CanaryTransform VerificationTransform VerificationBackend FailureDirectedTrimming SifaAnalysis CanaryAliasAnalysisWrapper AE)
+set(COMMON_LIBS ${LLVM_LIBRARIES} GTest::gtest GTest::gtest_main IFDS Annotation CanaryDyckAA LLVMIRReader CanaryPDG Concurrency SymAbs CanaryICFG AserPTA MONODataFlow NPADataFlow WPDSDataFlow wpds++ CanaryTypeHirarchy CanaryTransform VerificationTransform VerificationBackend FailureDirectedTrimming SifaAnalysis CanaryAliasAnalysisWrapper AE)
+
+set(LOTUS_UNIT_TEST_TIMEOUT 60 CACHE STRING
+    "Default timeout in seconds for Lotus unit tests registered with CTest")
 
 add_library(lotus_test_utils INTERFACE)
 target_include_directories(lotus_test_utils INTERFACE ${COMMON_INCLUDES})
@@ -41,7 +44,10 @@ function(add_lotus_test test_name source_file)
     
     # Register with CTest
     add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
-    set_tests_properties(${test_name} PROPERTIES TIMEOUT 300 WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    set_tests_properties(${test_name} PROPERTIES
+        TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
 endfunction()
 
 function(add_lotus_pdg_test test_name source_file)
@@ -65,7 +71,10 @@ function(add_lotus_pdg_test test_name source_file)
     
     # Register with CTest
     add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
-    set_tests_properties(${test_name} PROPERTIES TIMEOUT 300 WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    set_tests_properties(${test_name} PROPERTIES
+        TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
 endfunction()
 
 # Add unit test subdirectory

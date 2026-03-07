@@ -54,18 +54,18 @@ Supported Property Types
 Usage
 -----
 
-Basic usage with ``pdg-slice``:
+Basic usage with ``pdg-query``:
 
 .. code-block:: bash
 
    # Backward slice (default)
-   pdg-slice input.bc --property-file property.prp
+   pdg-query input.bc --property-file property.prp
 
    # Forward slice
-   pdg-slice input.bc --property-file property.prp --direction forward
+   pdg-query input.bc --property-file property.prp --direction forward
 
    # Dump slice nodes
-   pdg-slice input.bc --property-file property.prp --dump-slice
+   pdg-query input.bc --property-file property.prp --dump-slice
 
 Example
 -------
@@ -95,7 +95,7 @@ Slice the program:
 .. code-block:: bash
 
    clang -emit-llvm -c test.c -o test.bc
-   pdg-slice test.bc --property-file unreach-call.prp
+   pdg-query test.bc --property-file unreach-call.prp
 
 The slicer will identify the ``reach_error()`` call and compute a backward slice containing all instructions that can affect whether that call is executed.
 
@@ -106,10 +106,8 @@ Property-based slicing is designed to work with Lotus's verification backends:
 
 .. code-block:: bash
 
-   # 1. Slice the program
-   pdg-slice input.bc --property-file property.prp -o sliced.bc
+   pdg-query input.bc --property-file property.prp --dump-slice
 
-   # 2. Verify the sliced program
-   lotus-verify sliced.bc --property unreach-call --backend seahorn
-
-This workflow reduces verification time by analyzing only the relevant parts of the program.
+This workflow identifies the PDG region relevant to the property so it can be
+fed into verification or reduction passes without requiring a separate
+frontend binary.

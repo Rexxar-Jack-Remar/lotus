@@ -58,19 +58,27 @@ include/Dataflow/NPA/
 │   └── TensorProductDomain.h  # Paired semiring (TOPLAS 2016)
 └── Analyses/
     ├── BitVectorSolver.h
+    ├── BackwardInterproceduralEngine.h
     ├── InterproceduralEngine.h
     ├── Intraprocedural/
+    │   ├── LiveVariables.h
     │   ├── ReachingDefinitions.h
     │   └── ReachableBlocks.h
     └── Interprocedural/
+        ├── InterproceduralAffineEqualities.h
+        ├── InterproceduralConstantPropagation.h
+        ├── InterproceduralIntervalAnalysis.h
+        ├── InterproceduralLiveVariables.h
+        ├── InterproceduralMaybeUninitialized.h
         ├── InterproceduralRD.h
         └── InterproceduralTaint.h
 ```
 
 ## Usage
 
-- **Intraprocedural**: `BitVectorSolver` + `BitVectorInfo` implementation.
-- **Interprocedural**: `InterproceduralEngine<Domain, Analysis>` + analysis policy.
+- **Intraprocedural**: local clients such as `BitVectorSolver` can use conventional worklist/Kleene-style solving.
+- **Interprocedural (forward)**: `InterproceduralEngine<Domain, Analysis>` builds recursive procedure-summary equations and reports merged valid-path facts at blocks.
+- **Interprocedural (backward)**: `BackwardInterproceduralEngine<Domain, Analysis>` provides the analogous backward summary-based engine for clients such as liveness.
 - **Linear strategy** (Newton only): `LinearStrategy::Worklist`, `SCC`, or `TensorProduct` (when LCFL).
 
 ## Domain hooks (optional)

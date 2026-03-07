@@ -510,8 +510,9 @@ InterproceduralTaint::Result InterproceduralTaint::run(
 
   TaintAnalysis analysis(M, aliasAnalysis);
   auto engineResult =
-      InterproceduralEngine<TaintTransferDomain, TaintAnalysis, 1>::run(
-          M, analysis, verbose);
+      InterproceduralEngine<TaintTransferDomain, TaintAnalysis>::run(M,
+                                                                     analysis,
+                                                                     verbose);
 
   InterproceduralTaint::Result res;
   res.summaries.insert(engineResult.summaries.begin(),

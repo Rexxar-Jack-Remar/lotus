@@ -25,6 +25,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "IR/PDG/Analysis/CypherQuery.h"
+#include "IR/PDG/Analysis/PropertyBasedSlicing.h"
+#include "IR/PDG/Analysis/Slicing.h"
 #include "IR/PDG/Core/ControlDependencyGraph.h"
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
@@ -86,6 +88,20 @@ static cl::opt<std::string>
     QueryFile("query-file", "f", cl::desc("Execute Cypher queries from file"),
               cl::value_desc("filename"));
 
+static cl::opt<std::string> PropertyFile(
+    "property-file",
+    cl::desc("Compute a property-based slice from a Symbiotic-style .prp file"),
+    cl::value_desc("filename"), cl::init(""));
+
+static cl::opt<std::string>
+    SliceDirection("direction",
+                   cl::desc("Property slice direction: backward|forward"),
+                   cl::init("backward"));
+
+static cl::opt<bool> DumpSlice("dump-slice",
+                               cl::desc("Dump selected property slice nodes"),
+                               cl::init(false));
+
 static cl::opt<bool> Interactive("interactive", "i",
                                  cl::desc("Run in interactive mode"));
 
@@ -141,6 +157,9 @@ void printUsage(const char *programName) {
   errs() << "\nOptions:\n";
   errs() << "  -q, --query <query>       Execute a single Cypher query\n";
   errs() << "  -f, --query-file <file>   Execute queries from file\n";
+  errs() << "      --property-file <f>   Compute a property-based slice\n";
+  errs() << "      --direction <dir>     Property slice direction\n";
+  errs() << "      --dump-slice          Dump property slice nodes\n";
   errs() << "  -i, --interactive         Run in interactive mode\n";
   errs() << "  -v, --verbose             Enable verbose output\n";
   errs() << "  -e, --explain             Show query execution plan\n";
@@ -411,6 +430,40 @@ void runBatchMode(CypherQueryExecutor &executor, const std::string &filename) {
   outs() << "\nComplete: " << successCount << "/" << queryCount << "\n";
 }
 
+bool executePropertySlice(ProgramGraph &pdg, const Module &M) {
+  PropertySpec spec;
+  std::string parseErr;
+  if (!PropertySpec::parseFromFile(PropertyFile, spec, parseErr)) {
+    errs() << "error: " << parseErr << "\n";
+    return false;
+  }
+
+  if (SliceDirection != "backward" && SliceDirection != "forward") {
+    errs() << "error: unsupported --direction '" << SliceDirection
+           << "' (expected backward or forward)\n";
+    return false;
+  }
+
+  PropertyBasedSlicing slicer(pdg);
+  const auto criteria = slicer.resolveCriteria(M, spec);
+  const auto slice =
+      SliceDirection == "forward" ? slicer.computeForwardSlice(M, spec)
+                                  : slicer.computeBackwardSlice(M, spec);
+
+  outs() << "property rules: " << spec.rules().size() << "\n";
+  outs() << "criteria nodes: " << criteria.size() << "\n";
+  outs() << SliceDirection << " slice nodes: " << slice.size() << "\n";
+
+  if (DumpSlice)
+    SlicingUtils::printSlice(slice, "Property Slice");
+
+  if (slice.empty()) {
+    errs() << "warning: empty slice; criteria might not map to PDG nodes.\n";
+  }
+
+  return true;
+}
+
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
 
@@ -466,14 +519,16 @@ int main(int argc, char **argv) {
   executor.setUnboundedMaxHops(UnboundedMaxHops);
 
   // Execute queries based on mode
-  if (Interactive) {
+  if (!PropertyFile.empty()) {
+    return executePropertySlice(pdg, *M) ? 0 : 1;
+  } else if (Interactive) {
     runInteractiveMode(executor);
   } else if (!QueryString.empty()) {
     executeQuery(executor, QueryString);
   } else if (!QueryFile.empty()) {
     runBatchMode(executor, QueryFile);
   } else {
-    errs() << "No query specified. Use -q, -i, or -f\n";
+    errs() << "No mode specified. Use -q, -i, -f, or --property-file\n";
     return 1;
   }
 

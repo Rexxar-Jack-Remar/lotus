@@ -5,8 +5,14 @@ set(NPA_SOURCES
   Domains/TaintTransferDomain.cpp
 
   Analyses/BitVectorSolver.cpp
+  Analyses/Intraprocedural/LiveVariables.cpp
+  Analyses/Interprocedural/InterproceduralAffineEqualities.cpp
+  Analyses/Interprocedural/InterproceduralConstantPropagation.cpp
+  Analyses/Interprocedural/InterproceduralIntervalAnalysis.cpp
+  Analyses/Interprocedural/InterproceduralLiveVariables.cpp
   Analyses/Intraprocedural/ReachingDefinitions.cpp
   Analyses/Intraprocedural/ReachableBlocks.cpp
+  Analyses/Interprocedural/InterproceduralMaybeUninitialized.cpp
   Analyses/Interprocedural/InterproceduralRD.cpp
   Analyses/Interprocedural/InterproceduralTaint.cpp
 )
