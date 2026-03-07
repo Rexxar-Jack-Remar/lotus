@@ -350,11 +350,10 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
             for (const llvm::Instruction* return_site : get_return_sites(call)) {
                 FactSet return_facts =
                     m_problem.return_flow(call, return_site, func, exit_fact, zero);
-                if (m_problem.auto_add_zero() &&
-                    m_problem.is_zero_fact(exit_fact)) {
-                    return_facts.insert(zero);
-                }
                 for (const Fact& rf : return_facts) {
+                    if (m_problem.is_zero_fact(rf)) {
+                        continue;
+                    }
                     // Use the call instruction as the start node (not the
                     // return site) so the path edge spans from the call to
                     // the return site, matching the caller's CFG structure.

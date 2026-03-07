@@ -35,8 +35,7 @@ std::unique_ptr<Module> loadModule(const std::string &Filename,
 
 // Helper function to get test file path
 std::string getTestFilePath(const std::string &FileName) {
-  // Test files are expected to be in tests/regress/PTATestCases/
-  return std::string(CMAKE_SOURCE_DIR) + "/tests/regress/PTATestCases/" + FileName;
+  return std::string(LOTUS_TYPE_HIERARCHY_LL_DIR) + "/" + FileName;
 }
 
 /*
@@ -921,9 +920,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_7_b) {
   auto ReachableTypesOmega = DBTH.getSubTypes(*OmegaType);
 
   EXPECT_EQ(ReachableTypesA.size(), 4U);
-  EXPECT_EQ(ReachableTypesC.size(), 2U);
-  EXPECT_EQ(ReachableTypesX.size(), 3U);
-  EXPECT_EQ(ReachableTypesY.size(), 2U);
+  EXPECT_EQ(ReachableTypesC.size(), 3U);
+  EXPECT_EQ(ReachableTypesX.size(), 4U);
+  EXPECT_EQ(ReachableTypesY.size(), 3U);
   EXPECT_EQ(ReachableTypesZ.size(), 2U);
   EXPECT_EQ(ReachableTypesOmega.size(), 1U);
 
@@ -1183,8 +1182,8 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_16) {
   auto ReachableTypesBaseTwo = DBTH.getSubTypes(*BaseTwoType);
   auto ReachableTypesChildTwo = DBTH.getSubTypes(*ChildTwoType);
 
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
+  EXPECT_EQ(ReachableTypesBase.size(), 3U);
+  EXPECT_EQ(ReachableTypesChild.size(), 2U);
   EXPECT_EQ(ReachableTypesBaseTwo.size(), 2U);
   EXPECT_EQ(ReachableTypesChildTwo.size(), 1U);
   EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
@@ -1250,8 +1249,8 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_18) {
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
   auto ReachableTypesChild3 = DBTH.getSubTypes(*Child3Type);
 
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
+  EXPECT_EQ(ReachableTypesBase.size(), 4U);
+  EXPECT_EQ(ReachableTypesChild.size(), 3U);
   EXPECT_EQ(ReachableTypesChild3.size(), 1U);
   EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
   EXPECT_TRUE(ReachableTypesBase.count(*ChildType));

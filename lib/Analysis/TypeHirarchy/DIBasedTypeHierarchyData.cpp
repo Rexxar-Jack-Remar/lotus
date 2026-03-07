@@ -9,6 +9,7 @@
 
 #include "Analysis/TypeHirarchy/DIBasedTypeHierarchyData.h"
 
+#include "llvm/Support/JSON.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/raw_ostream.h"
@@ -22,54 +23,69 @@ namespace lotus {
 
 static DIBasedTypeHierarchyData getDataFromJson(const std::string &JsonStr) {
   DIBasedTypeHierarchyData Data;
+  auto Parsed = llvm::json::parse(JsonStr);
+  if (!Parsed) {
+    SPDLOG_ERROR("Failed to parse type hierarchy JSON: {}",
+                 llvm::toString(Parsed.takeError()));
+    return Data;
+  }
 
-  // Simplified JSON parsing - for production use, consider a proper JSON
-  // library This is a basic implementation that handles the expected structure
-  std::istringstream iss(JsonStr);
-  std::string line;
-  std::string currentSection;
+  auto *Root = Parsed->getAsObject();
+  if (!Root) {
+    SPDLOG_ERROR("Type hierarchy JSON root is not an object");
+    return Data;
+  }
 
-  while (std::getline(iss, line)) {
-    // Parse VertexTypes
-    if (line.find("\"VertexTypes\"") != std::string::npos) {
-      currentSection = "VertexTypes";
-      continue;
-    }
-    // Parse TransitiveDerivedIndex
-    if (line.find("\"TransitiveDerivedIndex\"") != std::string::npos) {
-      currentSection = "TransitiveDerivedIndex";
-      continue;
-    }
-    // Parse Hierarchy
-    if (line.find("\"Hierarchy\"") != std::string::npos) {
-      currentSection = "Hierarchy";
-      continue;
-    }
-    // Parse VTables
-    if (line.find("\"VTables\"") != std::string::npos) {
-      currentSection = "VTables";
-      continue;
-    }
-
-    // Extract string values
-    size_t start = line.find('"');
-    if (start != std::string::npos) {
-      size_t end = line.find('"', start + 1);
-      if (end != std::string::npos) {
-        std::string value = line.substr(start + 1, end - start - 1);
-        if (currentSection == "VertexTypes") {
-          Data.VertexTypes.push_back(value);
-        } else if (currentSection == "Hierarchy") {
-          Data.Hierarchy.push_back(value);
-        }
+  if (auto *VertexTypes = Root->getArray("VertexTypes")) {
+    Data.VertexTypes.reserve(VertexTypes->size());
+    for (const auto &Entry : *VertexTypes) {
+      if (auto Value = Entry.getAsString()) {
+        Data.VertexTypes.push_back(std::string(*Value));
       }
     }
+  }
 
-    // Parse pairs for TransitiveDerivedIndex
-    if (currentSection == "TransitiveDerivedIndex" &&
-        line.find('[') != std::string::npos) {
-      // Extract pair values [uint32_t, uint32_t]
-      // Simplified - would need proper JSON parsing for production
+  if (auto *TransitiveDerivedIndex = Root->getArray("TransitiveDerivedIndex")) {
+    Data.TransitiveDerivedIndex.reserve(TransitiveDerivedIndex->size());
+    for (const auto &Entry : *TransitiveDerivedIndex) {
+      auto *Pair = Entry.getAsArray();
+      if (!Pair || Pair->size() != 2) {
+        continue;
+      }
+      auto First = (*Pair)[0].getAsInteger();
+      auto Second = (*Pair)[1].getAsInteger();
+      if (!First || !Second) {
+        continue;
+      }
+      Data.TransitiveDerivedIndex.emplace_back(
+          static_cast<uint32_t>(*First), static_cast<uint32_t>(*Second));
+    }
+  }
+
+  if (auto *Hierarchy = Root->getArray("Hierarchy")) {
+    Data.Hierarchy.reserve(Hierarchy->size());
+    for (const auto &Entry : *Hierarchy) {
+      if (auto Value = Entry.getAsString()) {
+        Data.Hierarchy.push_back(std::string(*Value));
+      }
+    }
+  }
+
+  if (auto *VTables = Root->getArray("VTables")) {
+    Data.VTables.reserve(VTables->size());
+    for (const auto &Entry : *VTables) {
+      auto *VTable = Entry.getAsArray();
+      if (!VTable) {
+        continue;
+      }
+      std::vector<std::string> Current;
+      Current.reserve(VTable->size());
+      for (const auto &Func : *VTable) {
+        if (auto Value = Func.getAsString()) {
+          Current.push_back(std::string(*Value));
+        }
+      }
+      Data.VTables.emplace_back(std::move(Current));
     }
   }
 

@@ -22,11 +22,24 @@ static std::string toLower(const std::string &s) {
 }
 
 static bool hasToken(StringRef haystack, StringRef needle) {
-  return haystack.find(needle) != StringRef::npos;
+  size_t pos = haystack.find(needle);
+  while (pos != StringRef::npos) {
+    const bool left_ok =
+        pos == 0 || !std::isalnum(static_cast<unsigned char>(haystack[pos - 1]));
+    const size_t end = pos + needle.size();
+    const bool right_ok =
+        end >= haystack.size() ||
+        !std::isalnum(static_cast<unsigned char>(haystack[end]));
+    if (left_ok && right_ok) {
+      return true;
+    }
+    pos = haystack.find(needle, pos + 1);
+  }
+  return false;
 }
 
 static bool hasToken(const std::string &haystack, StringRef needle) {
-  return StringRef(haystack).find(needle) != StringRef::npos;
+  return hasToken(StringRef(haystack), needle);
 }
 
 class SeahornBackend final : public IBackend {
@@ -63,14 +76,10 @@ public:
     std::string lower = toLower(output);
 
     // SeaHorn typically outputs "sat" (error found) or "unsat" (safe)
-    if (hasToken(lower, "unsat") || hasToken(lower, "safe") ||
-        hasToken(lower, "true") || hasToken(lower, "verification successful")) {
-      info.result = VerificationResult::True;
-      info.message = "Property holds (no error found)";
-    } else if (hasToken(lower, "sat") || hasToken(lower, "unsafe") ||
-               hasToken(lower, "false") || hasToken(lower, "error found") ||
-               hasToken(lower, "__verifier_error") ||
-               hasToken(lower, "counterexample")) {
+    if (hasToken(lower, "unsafe") || hasToken(lower, "false") ||
+        hasToken(lower, "error found") ||
+        hasToken(lower, "__verifier_error") ||
+        hasToken(lower, "counterexample") || hasToken(lower, "sat")) {
       info.result = VerificationResult::False;
       info.message = "Property violated (error found)";
       // Try to extract error trace
@@ -78,6 +87,11 @@ public:
       if (traceStart != std::string::npos) {
         info.errorTrace = output.substr(traceStart);
       }
+    } else if (hasToken(lower, "unsat") || hasToken(lower, "safe") ||
+               hasToken(lower, "true") ||
+               hasToken(lower, "verification successful")) {
+      info.result = VerificationResult::True;
+      info.message = "Property holds (no error found)";
     } else if (exitCode == 124 || hasToken(lower, "timeout")) {
       info.result = VerificationResult::Timeout;
       info.message = "Verification timed out";
@@ -161,14 +175,14 @@ public:
 
     std::string lower = toLower(output);
 
-    if (hasToken(lower, "safe") || hasToken(lower, "true") ||
-        hasToken(lower, "property holds")) {
-      info.result = VerificationResult::True;
-      info.message = "Property holds";
-    } else if (hasToken(lower, "unsafe") || hasToken(lower, "false") ||
-               hasToken(lower, "violation") || hasToken(lower, "error")) {
+    if (hasToken(lower, "unsafe") || hasToken(lower, "false") ||
+        hasToken(lower, "violation") || hasToken(lower, "error")) {
       info.result = VerificationResult::False;
       info.message = "Property violated";
+    } else if (hasToken(lower, "safe") || hasToken(lower, "true") ||
+               hasToken(lower, "property holds")) {
+      info.result = VerificationResult::True;
+      info.message = "Property holds";
     } else if (exitCode != 0) {
       info.result = VerificationResult::Error;
       info.message =
@@ -213,14 +227,14 @@ public:
     std::string lower = toLower(output);
 
     // CLAM typically outputs "safe" or "unsafe"
-    if (hasToken(lower, "safe") || hasToken(lower, "true") ||
-        hasToken(lower, "no error")) {
-      info.result = VerificationResult::True;
-      info.message = "Property holds (safe)";
-    } else if (hasToken(lower, "unsafe") || hasToken(lower, "false") ||
-               hasToken(lower, "error") || hasToken(lower, "violation")) {
+    if (hasToken(lower, "unsafe") || hasToken(lower, "false") ||
+        hasToken(lower, "violation")) {
       info.result = VerificationResult::False;
       info.message = "Property violated (unsafe)";
+    } else if (hasToken(lower, "safe") || hasToken(lower, "true") ||
+               hasToken(lower, "no error")) {
+      info.result = VerificationResult::True;
+      info.message = "Property holds (safe)";
     } else if (exitCode != 0) {
       info.result = VerificationResult::Error;
       info.message = "CLAM error (exit code " + std::to_string(exitCode) + ")";
@@ -308,12 +322,12 @@ std::string toString(PropertyClass property) {
 
 VerificationResult parseResultFromString(const std::string &str) {
   std::string lower = toLower(str);
-  if (hasToken(lower, "true") || hasToken(lower, "safe") ||
-      hasToken(lower, "unsat"))
-    return VerificationResult::True;
   if (hasToken(lower, "false") || hasToken(lower, "unsafe") ||
       hasToken(lower, "sat"))
     return VerificationResult::False;
+  if (hasToken(lower, "true") || hasToken(lower, "safe") ||
+      hasToken(lower, "unsat"))
+    return VerificationResult::True;
   if (hasToken(lower, "timeout"))
     return VerificationResult::Timeout;
   if (hasToken(lower, "error"))
