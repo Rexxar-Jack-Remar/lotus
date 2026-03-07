@@ -173,7 +173,7 @@ TEST_F(ICFGTest, FunctionCall) {
   ASSERT_NE(call, nullptr);
 
   IntraBlockNode *callerNode = icfg.getIntraBlockNode(call->getParent());
-  IntraBlockNode *calleeEntryNode = icfg.getIntraBlockNode(&callee->getEntryBlock());
+  FunEntryBlockNode *calleeEntryNode = icfg.getFunEntryICFGNode(callee);
 
   ASSERT_NE(callerNode, nullptr);
   ASSERT_NE(calleeEntryNode, nullptr);
@@ -211,20 +211,25 @@ TEST_F(ICFGTest, ReturnEdgeFromCallee) {
   ASSERT_NE(callee, nullptr);
 
   const BasicBlock *callerEntry = &caller->getEntryBlock();
-  const BasicBlock *calleeEntry = &callee->getEntryBlock();
+  const CallBase *call = findCall(caller, "callee");
+  ASSERT_NE(call, nullptr);
 
   IntraBlockNode *callerNode = icfg.getIntraBlockNode(callerEntry);
-  IntraBlockNode *calleeEntryNode = icfg.getIntraBlockNode(calleeEntry);
+  FunEntryBlockNode *calleeEntryNode = icfg.getFunEntryICFGNode(callee);
+  FunExitBlockNode *calleeExitNode = icfg.getFunExitICFGNode(callee);
+  CallRetBlockNode *retSiteNode = icfg.getRetICFGNode(call);
 
   ASSERT_NE(callerNode, nullptr);
   ASSERT_NE(calleeEntryNode, nullptr);
+  ASSERT_NE(calleeExitNode, nullptr);
+  ASSERT_NE(retSiteNode, nullptr);
 
   // Call edge
   ICFGEdge *callEdge = icfg.getICFGEdge(callerNode, calleeEntryNode, ICFGEdge::CallCF);
   EXPECT_NE(callEdge, nullptr);
 
   // Return edge
-  ICFGEdge *retEdge = icfg.getICFGEdge(calleeEntryNode, callerNode, ICFGEdge::RetCF);
+  ICFGEdge *retEdge = icfg.getICFGEdge(calleeExitNode, retSiteNode, ICFGEdge::RetCF);
   EXPECT_NE(retEdge, nullptr);
 }
 
@@ -261,7 +266,7 @@ TEST_F(ICFGTest, MultipleCallers) {
   ASSERT_NE(caller1, nullptr);
   ASSERT_NE(caller2, nullptr);
 
-  IntraBlockNode *sharedEntry = icfg.getIntraBlockNode(&shared->getEntryBlock());
+  FunEntryBlockNode *sharedEntry = icfg.getFunEntryICFGNode(shared);
   IntraBlockNode *caller1Node = icfg.getIntraBlockNode(&caller1->getEntryBlock());
   IntraBlockNode *caller2Node = icfg.getIntraBlockNode(&caller2->getEntryBlock());
 
@@ -308,16 +313,18 @@ TEST_F(ICFGTest, NestedFunctionCalls) {
   ASSERT_NE(inner, nullptr);
 
   IntraBlockNode *outerNode = icfg.getIntraBlockNode(&outer->getEntryBlock());
-  IntraBlockNode *middleNode = icfg.getIntraBlockNode(&middle->getEntryBlock());
-  IntraBlockNode *innerNode = icfg.getIntraBlockNode(&inner->getEntryBlock());
+  IntraBlockNode *middleCallerNode = icfg.getIntraBlockNode(&middle->getEntryBlock());
+  FunEntryBlockNode *middleEntryNode = icfg.getFunEntryICFGNode(middle);
+  FunEntryBlockNode *innerNode = icfg.getFunEntryICFGNode(inner);
 
   ASSERT_NE(outerNode, nullptr);
-  ASSERT_NE(middleNode, nullptr);
+  ASSERT_NE(middleCallerNode, nullptr);
+  ASSERT_NE(middleEntryNode, nullptr);
   ASSERT_NE(innerNode, nullptr);
 
   // Call chain: outer -> middle -> inner
-  EXPECT_NE(icfg.getICFGEdge(outerNode, middleNode, ICFGEdge::CallCF), nullptr);
-  EXPECT_NE(icfg.getICFGEdge(middleNode, innerNode, ICFGEdge::CallCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(outerNode, middleEntryNode, ICFGEdge::CallCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(middleCallerNode, innerNode, ICFGEdge::CallCF), nullptr);
 }
 
 // Test 7: Recursive function call
@@ -515,6 +522,89 @@ TEST_F(ICFGTest, IndirectCall) {
   // Indirect calls might not have direct ICFG edges in basic ICFG
   // Verify the module builds correctly
   EXPECT_TRUE(true);
+}
+
+TEST_F(ICFGTest, DedicatedReturnSiteDoesNotCollapseToCallerBlock) {
+  const char *source = R"(
+    declare void @ext()
+
+    define i32 @caller() {
+    entry:
+      call void @ext()
+      %x = add i32 1, 2
+      ret i32 %x
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *caller = module->getFunction("caller");
+  ASSERT_NE(caller, nullptr);
+  const CallBase *call = nullptr;
+  for (const Instruction &I : caller->getEntryBlock()) {
+    if (const auto *CB = dyn_cast<CallBase>(&I)) {
+      call = CB;
+      break;
+    }
+  }
+  ASSERT_NE(call, nullptr);
+
+  CallRetBlockNode *retSite = icfg.getRetICFGNode(call);
+  IntraBlockNode *callerBlock = icfg.getIntraBlockNode(&caller->getEntryBlock());
+  ASSERT_NE(retSite, nullptr);
+  ASSERT_NE(callerBlock, nullptr);
+
+  EXPECT_EQ(icfg.getICFGEdge(retSite, callerBlock, ICFGEdge::IntraCF), nullptr);
+}
+
+TEST_F(ICFGTest, RemoveDedicatedNodesClearsSideMaps) {
+  const char *source = R"(
+    define i32 @callee() {
+    entry:
+      ret i32 1
+    }
+
+    define i32 @caller() {
+    entry:
+      %result = call i32 @callee()
+      ret i32 %result
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *caller = module->getFunction("caller");
+  Function *callee = module->getFunction("callee");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  const CallBase *call = findCall(caller, "callee");
+  ASSERT_NE(call, nullptr);
+
+  FunEntryBlockNode *entryNode = icfg.getFunEntryICFGNode(callee);
+  FunExitBlockNode *exitNode = icfg.getFunExitICFGNode(callee);
+  CallRetBlockNode *retNode = icfg.getRetICFGNode(call);
+  ASSERT_NE(entryNode, nullptr);
+  ASSERT_NE(exitNode, nullptr);
+  ASSERT_NE(retNode, nullptr);
+
+  icfg.removeICFGNode(entryNode);
+  icfg.removeICFGNode(exitNode);
+  icfg.removeICFGNode(retNode);
+
+  EXPECT_NE(icfg.getFunEntryICFGNode(callee), entryNode);
+  EXPECT_NE(icfg.getFunExitICFGNode(callee), exitNode);
+  EXPECT_NE(icfg.getRetICFGNode(call), retNode);
 }
 
 // Test 12: Empty function handling

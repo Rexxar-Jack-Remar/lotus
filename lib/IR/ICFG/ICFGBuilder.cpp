@@ -33,6 +33,12 @@ void ICFGBuilder::build(llvm::Module *module) {
 }
 
 void ICFGBuilder::processFunction(const llvm::Function *func) {
+  ICFGNode *funEntryNode = icfg->getFunEntryICFGNode(func);
+  ICFGNode *entryBlockNode = getOrAddIntraBlockICFGNode(&func->getEntryBlock());
+  if (funEntryNode && entryBlockNode)
+    icfg->addIntraEdge(funEntryNode, entryBlockNode);
+
+  ICFGNode *funExitNode = icfg->getFunExitICFGNode(func);
 
   std::queue<const llvm::BasicBlock *> worklist;
   worklist.push(&func->getEntryBlock());
@@ -65,33 +71,24 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
           if (!calledFunc || calledFunc->isDeclaration())
             continue;
 
-          ICFGNode *calleeEntryNode =
-              getOrAddIntraBlockICFGNode(&calledFunc->getEntryBlock());
+          ICFGNode *calleeEntryNode = icfg->getFunEntryICFGNode(calledFunc);
           icfg->addCallEdge(srcNode, calleeEntryNode, call);
 
-          // The return edge should target the return-site block, i.e. the
-          // unique successor of the call-site block in the caller's CFG.
-          // A call instruction always terminates its own basic block in LLVM
-          // IR (the next BB is the normal-return successor at index 0).
-          ICFGNode *returnSiteNode = nullptr;
+          ICFGNode *returnSiteNode = icfg->getRetICFGNode(call);
+          ICFGNode *continuationNode = nullptr;
           if (auto *invokeInst = dyn_cast<InvokeInst>(call)) {
-            // For invoke, the normal-return destination is the normal dest BB.
-            returnSiteNode =
+            continuationNode =
                 getOrAddIntraBlockICFGNode(invokeInst->getNormalDest());
           } else {
-            // For a regular call, the return site is the block that follows
-            // the call-site block (its unique successor).  If the call-site
-            // block has no CFG successor (e.g., the call and the ret are in
-            // the same single-block function), the return site is the
-            // call-site block itself.
             const BasicBlock *callBB = call->getParent();
             if (succ_begin(callBB) != succ_end(callBB))
-              returnSiteNode = getOrAddIntraBlockICFGNode(*succ_begin(callBB));
-            else
-              returnSiteNode = getOrAddIntraBlockICFGNode(callBB);
+              continuationNode =
+                  getOrAddIntraBlockICFGNode(*succ_begin(callBB));
           }
+          if (returnSiteNode && continuationNode)
+            icfg->addIntraEdge(returnSiteNode, continuationNode);
 
-          if (returnSiteNode) {
+          if (returnSiteNode && funExitNode) {
             for (inst_iterator I = inst_begin(calledFunc),
                                E = inst_end(calledFunc);
                  I != E; ++I) {
@@ -99,7 +96,10 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
               if (isa<ReturnInst>(&ci)) {
                 ICFGNode *calleeExitNode =
                     getOrAddIntraBlockICFGNode(ci.getParent());
-                icfg->addRetEdge(calleeExitNode, returnSiteNode, call);
+                icfg->addIntraEdge(calleeExitNode,
+                                   icfg->getFunExitICFGNode(calledFunc));
+                icfg->addRetEdge(icfg->getFunExitICFGNode(calledFunc),
+                                 returnSiteNode, call);
               }
             }
           }
@@ -107,6 +107,8 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
       }
     }
   }
+
+  (void)funExitNode;
 }
 
 void ICFGBuilder::removeIntraBlockCycle() {

@@ -268,8 +268,7 @@ static const ICFGNode *resolveICFGNode(const SVFG &graph, const Anchor &anchor,
   }
 
   if (fallbackFunction && !fallbackFunction->isDeclaration())
-    return const_cast<ICFG *>(icfg)->getIntraBlockNode(
-        &fallbackFunction->getEntryBlock());
+    return const_cast<ICFG *>(icfg)->getFunEntryICFGNode(fallbackFunction);
 
   return nullptr;
 }
@@ -473,15 +472,47 @@ static SVFGNode *createNodeForKind(const ParsedNode &parsed,
       resolveValueAnchor(module, meta.functionAnchor));
   const CallBase *resolvedCall = resolveCallAnchor(module, meta.callAnchor);
 
-  const ICFGNode *icfgNode =
-      resolveICFGNode(graph, meta.instAnchor, resolvedFunction);
-  if (!icfgNode && resolvedCall)
-    icfgNode = resolveICFGNode(graph, getAnchorForValue(resolvedCall),
-                               resolvedFunction);
-  if (!icfgNode && resolvedValue && graph.getICFG()) {
+  const ICFG *icfg = graph.getICFG();
+  ICFG *mutableICFG = const_cast<ICFG *>(icfg);
+  const ICFGNode *icfgNode = resolveICFGNode(graph, meta.instAnchor, nullptr);
+  if (!icfgNode && resolvedValue && icfg) {
     if (const auto *I = dyn_cast<Instruction>(resolvedValue))
-      icfgNode = const_cast<ICFG *>(graph.getICFG())
-                     ->getIntraBlockNode(I->getParent());
+      icfgNode = mutableICFG->getIntraBlockNode(I->getParent());
+  }
+  if (icfg) {
+    switch (parsed.kind) {
+    case SVFGK::FormalParm:
+    case SVFGK::VarArg:
+    case SVFGK::FormalIn:
+    case SVFGK::EntryChi:
+      if (resolvedFunction && !resolvedFunction->isDeclaration())
+        icfgNode = mutableICFG->getFunEntryICFGNode(resolvedFunction);
+      break;
+    case SVFGK::FormalRet:
+    case SVFGK::FormalOut:
+    case SVFGK::RetMu:
+      if (resolvedFunction && !resolvedFunction->isDeclaration())
+        icfgNode = mutableICFG->getFunExitICFGNode(resolvedFunction);
+      break;
+    case SVFGK::ActualRet:
+    case SVFGK::ActualOut:
+      if (resolvedCall)
+        icfgNode = mutableICFG->getRetICFGNode(resolvedCall);
+      break;
+    case SVFGK::ActualParm:
+    case SVFGK::ActualIn:
+    case SVFGK::CallMu:
+    case SVFGK::CallChi:
+      if (resolvedCall)
+        icfgNode = mutableICFG->getIntraBlockNode(resolvedCall->getParent());
+      break;
+    default:
+      if (!icfgNode && resolvedCall)
+        icfgNode = mutableICFG->getIntraBlockNode(resolvedCall->getParent());
+      else if (!icfgNode && resolvedFunction && !resolvedFunction->isDeclaration())
+        icfgNode = mutableICFG->getFunEntryICFGNode(resolvedFunction);
+      break;
+    }
   }
 
   switch (parsed.kind) {

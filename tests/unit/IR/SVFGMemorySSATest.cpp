@@ -1,5 +1,6 @@
 #include "IR/ICFG/ICFG.h"
 #include "IR/ICFG/ICFGBuilder.h"
+#include "IR/ICFG/CallGraph.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBuilder.h"
 #include "IR/SVFG/SVFGNode.h"
@@ -53,6 +54,29 @@ protected:
       }
     }
     return nullptr;
+  }
+
+  static const CallBase *findSingleIndirectCall(const Function *F) {
+    for (const BasicBlock &BB : *F) {
+      for (const Instruction &I : BB) {
+        const auto *CB = dyn_cast<CallBase>(&I);
+        if (CB && !CB->getCalledFunction())
+          return CB;
+      }
+    }
+    return nullptr;
+  }
+
+  static bool callGraphHasEdge(const LTCallGraph &cg, const Function *caller,
+                               const Instruction *callInst,
+                               const Function *callee) {
+    const LTCallGraphNode *node = cg[caller];
+    for (const auto &record : *node) {
+      if (record.first == callInst && record.second &&
+          record.second->getFunction() == callee)
+        return true;
+    }
+    return false;
   }
 };
 
@@ -257,6 +281,329 @@ TEST_F(SVFGMemorySSATest, CallsiteMemoryNodesTrackOnlyTouchedArguments) {
     }
   }
   EXPECT_EQ(callMuCount, 0u);
+}
+
+TEST_F(SVFGMemorySSATest, InterproceduralValueNodesUseEntryExitAndReturnSite) {
+  const char *source = R"(
+    declare i8* @sink(...)
+
+    define i8* @id(i8* %p, ...) {
+    entry:
+      ret i8* %p
+    }
+
+    define i8* @caller(i8* %q) {
+    entry:
+      %r = call i8* (i8*, ...) @id(i8* %q, i8* %q)
+      br label %exit
+
+    exit:
+      ret i8* %r
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = true;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> svfg(builder.build(&icfg));
+  ASSERT_NE(svfg, nullptr);
+
+  const Function *idFn = module->getFunction("id");
+  const Function *callerFn = module->getFunction("caller");
+  ASSERT_NE(idFn, nullptr);
+  ASSERT_NE(callerFn, nullptr);
+
+  const CallBase *call = findDirectCall(callerFn, "id");
+  ASSERT_NE(call, nullptr);
+
+  const ICFGNode *entryNode = icfg.getFunEntryICFGNode(idFn);
+  const ICFGNode *exitNode = icfg.getFunExitICFGNode(idFn);
+  const ICFGNode *returnSiteNode = icfg.getRetICFGNode(call);
+
+  bool sawFormalParm = false;
+  bool sawVarArg = false;
+  for (SVFGNode *node : svfg->getFormalParms(idFn)) {
+    if (auto *formalParm = dyn_cast<FormalParmSVFGNode>(node)) {
+      sawFormalParm = true;
+      EXPECT_EQ(formalParm->getICFGNode(), entryNode);
+    } else if (auto *varArg = dyn_cast<VarArgSVFGNode>(node)) {
+      sawVarArg = true;
+      EXPECT_EQ(varArg->getICFGNode(), entryNode);
+    }
+  }
+  EXPECT_TRUE(sawFormalParm);
+  EXPECT_TRUE(sawVarArg);
+
+  const auto &formalRets = svfg->getFormalRets(idFn);
+  ASSERT_EQ(formalRets.size(), 1u);
+  auto *formalRet = dyn_cast<FormalRetSVFGNode>(*formalRets.begin());
+  ASSERT_NE(formalRet, nullptr);
+  EXPECT_EQ(formalRet->getICFGNode(), exitNode);
+
+  const auto &actualRets = svfg->getActualRets(call);
+  ASSERT_EQ(actualRets.size(), 1u);
+  auto *actualRet = dyn_cast<ActualRetSVFGNode>(*actualRets.begin());
+  ASSERT_NE(actualRet, nullptr);
+  EXPECT_EQ(actualRet->getICFGNode(), returnSiteNode);
+}
+
+TEST_F(SVFGMemorySSATest, InterproceduralMemoryNodesUseExitAndReturnSite) {
+  const char *source = R"(
+    define void @writer(i8* %p) {
+    entry:
+      store i8 1, i8* %p
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %x = alloca i8
+      call void @writer(i8* %x)
+      br label %exit
+
+    exit:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = true;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> svfg(builder.build(&icfg));
+  ASSERT_NE(svfg, nullptr);
+
+  const Function *mainFn = module->getFunction("main");
+  const Function *writerFn = module->getFunction("writer");
+  ASSERT_NE(mainFn, nullptr);
+  ASSERT_NE(writerFn, nullptr);
+  const CallBase *call = findDirectCall(mainFn, "writer");
+  ASSERT_NE(call, nullptr);
+
+  const ICFGNode *exitNode = icfg.getFunExitICFGNode(writerFn);
+  const ICFGNode *returnSiteNode = icfg.getRetICFGNode(call);
+
+  const auto &formalOuts = svfg->getFormalOuts(writerFn);
+  ASSERT_FALSE(formalOuts.empty());
+  for (SVFGNode *node : formalOuts) {
+    auto *formalOut = dyn_cast<FormalOutSVFGNode>(node);
+    ASSERT_NE(formalOut, nullptr);
+    EXPECT_EQ(formalOut->getICFGNode(), exitNode);
+  }
+
+  const auto &actualOuts = svfg->getActualOuts(call);
+  ASSERT_FALSE(actualOuts.empty());
+  for (SVFGNode *node : actualOuts) {
+    auto *actualOut = dyn_cast<ActualOutSVFGNode>(node);
+    ASSERT_NE(actualOut, nullptr);
+    EXPECT_EQ(actualOut->getICFGNode(), returnSiteNode);
+  }
+}
+
+TEST_F(SVFGMemorySSATest, GlobalEntryFallbackCoversAllDirectUsersWithoutMain) {
+  const char *source = R"(
+    @g = global i8 0
+
+    define void @foo() {
+    entry:
+      store i8 1, i8* @g
+      ret void
+    }
+
+    define void @bar() {
+    entry:
+      %v = load i8, i8* @g
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = true;
+  cfg.includeGlobals = true;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> svfg(builder.build(&icfg));
+  ASSERT_NE(svfg, nullptr);
+
+  const Function *fooFn = module->getFunction("foo");
+  const Function *barFn = module->getFunction("bar");
+  ASSERT_NE(fooFn, nullptr);
+  ASSERT_NE(barFn, nullptr);
+
+  ASSERT_FALSE(svfg->getFormalIns(fooFn).empty());
+  ASSERT_FALSE(svfg->getFormalIns(barFn).empty());
+  ASSERT_EQ(svfg->getGlobalStoreNodes().size(), 1u);
+  SVFGNode *storeNode = *svfg->getGlobalStoreNodes().begin();
+  ASSERT_NE(storeNode, nullptr);
+
+  auto hasIncomingFromStore = [&](const SVFGNodeSet &formalIns) {
+    for (SVFGNode *node : formalIns) {
+      for (SVFGEdge *edge : node->getInEdges()) {
+        if (edge && edge->getSrcNode() == storeNode &&
+            edge->getEdgeKind() == SVFGEdgeK::IntraIndirect) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  EXPECT_TRUE(hasIncomingFromStore(svfg->getFormalIns(fooFn)));
+  EXPECT_TRUE(hasIncomingFromStore(svfg->getFormalIns(barFn)));
+}
+
+TEST_F(SVFGMemorySSATest, OnTheFlyIndirectCallUpdatesRefinedCallGraph) {
+  const char *source = R"(
+    define void @target(i8* %p) {
+    entry:
+      ret void
+    }
+
+    define void @apply(void (i8*)* %fp, i8* %arg) {
+    entry:
+      call void %fp(i8* %arg)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = false;
+  cfg.resolveIndirectCalls = false;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> svfg(builder.build(&icfg));
+  ASSERT_NE(svfg, nullptr);
+
+  const Function *applyFn = module->getFunction("apply");
+  const Function *targetFn = module->getFunction("target");
+  ASSERT_NE(applyFn, nullptr);
+  ASSERT_NE(targetFn, nullptr);
+
+  const CallBase *indCall = findSingleIndirectCall(applyFn);
+  ASSERT_NE(indCall, nullptr);
+
+  std::vector<SVFGEdge *> newEdges;
+  EXPECT_TRUE(builder.connectCallSiteToCalleeOnTheFly(svfg.get(), indCall,
+                                                      targetFn, newEdges));
+
+  const LTCallGraph *cg = builder.getRefinedCallGraph();
+  ASSERT_NE(cg, nullptr);
+  EXPECT_TRUE(callGraphHasEdge(*cg, applyFn, indCall, targetFn));
+}
+
+TEST_F(SVFGMemorySSATest, MultiReturnFunctionUsesDedicatedExitNode) {
+  const char *source = R"(
+    define i8* @pick(i1 %cond, i8* %a, i8* %b) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      ret i8* %a
+    else:
+      ret i8* %b
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = true;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> svfg(builder.build(&icfg));
+  ASSERT_NE(svfg, nullptr);
+
+  const Function *pickFn = module->getFunction("pick");
+  ASSERT_NE(pickFn, nullptr);
+
+  const ICFGNode *exitNode = icfg.getFunExitICFGNode(pickFn);
+  ASSERT_NE(exitNode, nullptr);
+
+  const auto &formalRets = svfg->getFormalRets(pickFn);
+  ASSERT_EQ(formalRets.size(), 1u);
+  auto *formalRet = dyn_cast<FormalRetSVFGNode>(*formalRets.begin());
+  ASSERT_NE(formalRet, nullptr);
+  EXPECT_EQ(formalRet->getICFGNode(), exitNode);
+}
+
+TEST_F(SVFGMemorySSATest, NoReturnFunctionMemorySummaryUsesDedicatedExitNode) {
+  const char *source = R"(
+    declare void @abort() noreturn
+
+    define void @die(i8* %p) {
+    entry:
+      store i8 1, i8* %p
+      call void @abort()
+      unreachable
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = true;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> svfg(builder.build(&icfg));
+  ASSERT_NE(svfg, nullptr);
+
+  const Function *dieFn = module->getFunction("die");
+  ASSERT_NE(dieFn, nullptr);
+
+  const ICFGNode *exitNode = icfg.getFunExitICFGNode(dieFn);
+  ASSERT_NE(exitNode, nullptr);
+
+  const auto &formalOuts = svfg->getFormalOuts(dieFn);
+  ASSERT_FALSE(formalOuts.empty());
+  for (SVFGNode *node : formalOuts) {
+    auto *formalOut = dyn_cast<FormalOutSVFGNode>(node);
+    ASSERT_NE(formalOut, nullptr);
+    EXPECT_EQ(formalOut->getICFGNode(), exitNode);
+  }
 }
 
 TEST_F(SVFGMemorySSATest, UntouchedPointerFormalsDoNotCreateMemoryNodes) {

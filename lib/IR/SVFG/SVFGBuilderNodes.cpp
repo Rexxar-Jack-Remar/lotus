@@ -23,6 +23,7 @@
 #include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFGBuilder.h"
 
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 
@@ -42,6 +43,27 @@ static const Module *getModuleFromICFG(const ICFG *icfg) {
     }
   }
   return nullptr;
+}
+
+static const ICFGNode *getFunctionEntryICFGNode(const ICFG *icfg,
+                                                const Function *F) {
+  if (!icfg || !F || F->isDeclaration())
+    return nullptr;
+  return const_cast<ICFG *>(icfg)->getFunEntryICFGNode(F);
+}
+
+static const ICFGNode *getFunctionExitICFGNode(const ICFG *icfg,
+                                               const Function *F) {
+  if (!icfg || !F || F->isDeclaration())
+    return nullptr;
+  return const_cast<ICFG *>(icfg)->getFunExitICFGNode(F);
+}
+
+static const ICFGNode *getReturnSiteICFGNode(const ICFG *icfg,
+                                             const CallBase *call) {
+  if (!icfg || !call)
+    return nullptr;
+  return const_cast<ICFG *>(icfg)->getRetICFGNode(call);
 }
 
 void SVFGBuilder::buildNodes() {
@@ -422,13 +444,11 @@ void SVFGBuilder::buildAddressTakenNodes() {
             }
           }
           // If no direct users found, fall back to first non-declaration
-          // function.
+          // function set.
           if (entryFuncs.empty()) {
             for (const Function &F : *M) {
-              if (!F.isDeclaration()) {
+              if (!F.isDeclaration())
                 entryFuncs.push_back(&F);
-                break;
-              }
             }
           }
         }
@@ -466,7 +486,8 @@ void SVFGBuilder::buildFormalParmNodes() {
         continue;
 
       uint32_t nodeId = nextNode();
-      auto *formalParm = new FormalParmSVFGNode(nodeId, nullptr, &F, idx);
+      auto *formalParm = new FormalParmSVFGNode(
+          nodeId, getFunctionEntryICFGNode(icfg, &F), &F, idx);
       svfg->addNode(formalParm);
       svfg->addFormalParm(&F, formalParm);
       valueToNode[arg] = nodeId;
@@ -494,7 +515,8 @@ void SVFGBuilder::buildFormalParmNodes() {
     // Create VarArgSVFGNode for variadic functions
     if (F.isVarArg()) {
       uint32_t varArgNodeId = nextNode();
-      auto *varArgNode = new VarArgSVFGNode(varArgNodeId, nullptr, &F);
+      auto *varArgNode = new VarArgSVFGNode(
+          varArgNodeId, getFunctionEntryICFGNode(icfg, &F), &F);
       svfg->addNode(varArgNode);
       svfg->addFormalParm(&F, varArgNode); // Treat as a formal parameter
       // Note: valueToNode mapping is not needed here since vararg has no
@@ -581,7 +603,8 @@ void SVFGBuilder::buildFormalRetNodes() {
 
     // Create formal return node (one per function, not per return statement)
     uint32_t nodeId = nextNode();
-    auto *formalRet = new FormalRetSVFGNode(nodeId, nullptr, &F);
+    auto *formalRet = new FormalRetSVFGNode(
+        nodeId, getFunctionExitICFGNode(icfg, &F), &F);
     svfg->addNode(formalRet);
     svfg->addFormalRet(&F, formalRet);
 
@@ -623,7 +646,8 @@ void SVFGBuilder::buildActualRetNodes() {
       // Handle call return value (if call result is used)
       if (call->getType()->isPointerTy()) {
         uint32_t nodeId = nextNode();
-        auto *actualRet = new ActualRetSVFGNode(nodeId, blockNode, call);
+        auto *actualRet =
+            new ActualRetSVFGNode(nodeId, getReturnSiteICFGNode(icfg, call), call);
         svfg->addNode(actualRet);
         svfg->addActualRet(call, actualRet);
 

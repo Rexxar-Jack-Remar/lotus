@@ -25,7 +25,7 @@ class ICFGNode : public GenericICFGNodeTy {
 
 public:
   /// kinds of ICFG node
-  enum ICFGNodeK { IntraBlock, FunEntryBlock, FunRetBlock };
+  enum ICFGNodeK { IntraBlock, FunEntryBlock, FunExitBlock, CallRetBlock };
 
 public:
   /// @brief Constructs an ICFG node.
@@ -92,72 +92,67 @@ public:
   std::string toString() const;
 };
 
-///*!
-// * Function entry ICFGNode containing a set of FormalParmVFGNodes of a
-// function
-// */
-// class FunEntryBlockNode : public ICFGNode
-//{
-// public:
-//    FunEntryBlockNode(NodeID id, const llvm::BasicBlock* bb) : ICFGNode(id,
-//    FunEntryBlock)
-//    {
-//        _basic_block = bb;
-//        _function = bb->getParent();
-//    }
-//
-//    ///Methods for support type inquiry through isa, cast, and dyn_cast:
-//    //@{
-//    static inline bool classof(const FunEntryBlockNode *)
-//    {
-//        return true;
-//    }
-//
-//    static inline bool classof(const ICFGNode *node)
-//    {
-//        return node->getNodeKind() == FunEntryBlock;
-//    }
-//
-//    static inline bool classof(const GenericICFGNodeTy *node)
-//    {
-//        return node->getNodeKind() == FunEntryBlock;
-//    }
-//    //@}
-//
-//    virtual std::string toString() const;
-//};
-//
-///*!
-// * Function return ICFGNode containing (at most one) FormalRetVFGNodes of a
-// function
-// */
-// class RetBlockNode : public ICFGNode
-//{
-// public:
-//    RetBlockNode(NodeID id, const llvm::BasicBlock* bb) : ICFGNode(id,
-//    FunRetBlock)
-//    {
-//        _basic_block = bb;
-//        _function = bb->getParent();
-//    }
-//
-//    ///Methods for support type inquiry through isa, cast, and dyn_cast:
-//    //@{
-//    static inline bool classof(const RetBlockNode *)
-//    {
-//        return true;
-//    }
-//
-//    static inline bool classof(const ICFGNode *node)
-//    {
-//        return node->getNodeKind() == FunRetBlock;
-//    }
-//
-//    static inline bool classof(const GenericICFGNodeTy *node)
-//    {
-//        return node->getNodeKind() == FunRetBlock;
-//    }
-//    //@}
-//
-//    virtual std::string toString() const;
-//};
+/// @brief Dedicated function-entry node used for interprocedural summaries.
+class FunEntryBlockNode : public ICFGNode {
+public:
+  FunEntryBlockNode(NodeID id, const llvm::BasicBlock *bb)
+      : ICFGNode(id, FunEntryBlock) {
+    _basic_block = bb;
+    _function = bb ? bb->getParent() : nullptr;
+  }
+
+  static inline bool classof(const FunEntryBlockNode *) { return true; }
+  static inline bool classof(const ICFGNode *node) {
+    return node->getNodeKind() == FunEntryBlock;
+  }
+  static inline bool classof(const GenericICFGNodeTy *node) {
+    return node->getNodeKind() == FunEntryBlock;
+  }
+
+  std::string toString() const;
+};
+
+/// @brief Dedicated function-exit node shared by all returns of a function.
+class FunExitBlockNode : public ICFGNode {
+public:
+  FunExitBlockNode(NodeID id, const llvm::BasicBlock *bb)
+      : ICFGNode(id, FunExitBlock) {
+    _basic_block = bb;
+    _function = bb ? bb->getParent() : nullptr;
+  }
+
+  static inline bool classof(const FunExitBlockNode *) { return true; }
+  static inline bool classof(const ICFGNode *node) {
+    return node->getNodeKind() == FunExitBlock;
+  }
+  static inline bool classof(const GenericICFGNodeTy *node) {
+    return node->getNodeKind() == FunExitBlock;
+  }
+
+  std::string toString() const;
+};
+
+/// @brief Dedicated call return-site node keyed by call instruction.
+class CallRetBlockNode : public ICFGNode {
+  const llvm::Instruction *callSite;
+
+public:
+  CallRetBlockNode(NodeID id, const llvm::Instruction *cs,
+                   const llvm::BasicBlock *bb)
+      : ICFGNode(id, CallRetBlock), callSite(cs) {
+    _basic_block = bb;
+    _function = cs ? cs->getFunction() : (bb ? bb->getParent() : nullptr);
+  }
+
+  const llvm::Instruction *getCallSite() const { return callSite; }
+
+  static inline bool classof(const CallRetBlockNode *) { return true; }
+  static inline bool classof(const ICFGNode *node) {
+    return node->getNodeKind() == CallRetBlock;
+  }
+  static inline bool classof(const GenericICFGNodeTy *node) {
+    return node->getNodeKind() == CallRetBlock;
+  }
+
+  std::string toString() const;
+};

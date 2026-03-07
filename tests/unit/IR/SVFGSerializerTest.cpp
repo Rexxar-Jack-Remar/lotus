@@ -386,7 +386,7 @@ TEST_F(SVFGSerializerTest, RoundTripsDeferredIndirectCallState) {
   EXPECT_NE(reloaded.getCallSiteId(indCall, targetFn), 0u);
 
   ICFGNode *callerNode = icfg.getIntraBlockNode(indCall->getParent());
-  ICFGNode *calleeEntryNode = icfg.getIntraBlockNode(&targetFn->getEntryBlock());
+  ICFGNode *calleeEntryNode = icfg.getFunEntryICFGNode(targetFn);
   ASSERT_NE(callerNode, nullptr);
   ASSERT_NE(calleeEntryNode, nullptr);
 

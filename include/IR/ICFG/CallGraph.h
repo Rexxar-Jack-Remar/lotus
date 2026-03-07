@@ -119,6 +119,14 @@ public:
   /// Similar to operator[], but this will insert a new LTCallGraphNode for
   /// \c F if one does not already exist.
   LTCallGraphNode *getOrInsertFunction(const llvm::Function *F);
+
+  /// @brief Adds an explicit resolved edge for an indirect callsite.
+  ///
+  /// Existing external-summary edges for the same callsite are preserved so
+  /// partial refinements remain conservative.
+  void addResolvedCallEdge(const llvm::Instruction *CS,
+                           const llvm::Function *Caller,
+                           const llvm::Function *Callee);
 };
 
 /// @brief A node in the call graph representing a function.
@@ -197,6 +205,15 @@ public:
     CalledFunctions.emplace_back(
         const_cast<llvm::Value *>(static_cast<const llvm::Value *>(CS)), M);
     M->AddRef();
+  }
+
+  bool hasCallEdge(const llvm::Instruction *CS,
+                   const LTCallGraphNode *Callee) const {
+    for (const CallRecord &CR : CalledFunctions) {
+      if (CR.first == CS && CR.second == Callee)
+        return true;
+    }
+    return false;
   }
 
   void removeCallEdge(iterator I) {

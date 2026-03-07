@@ -50,6 +50,7 @@
 
 #pragma once
 
+#include "IR/ICFG/CallGraph.h"
 #include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/PointsToSetHash.h"
@@ -292,6 +293,9 @@ private:
   /// inter-procedural edges when points-to information changes.
   std::unordered_set<SVFGEdge *> vfEdgesAtIndCallSite;
 
+  /// @brief Explicit call graph snapshot kept in sync with SVFG refinements.
+  std::unique_ptr<LTCallGraph> refinedCallGraph;
+
 public:
   /// @brief Constructor
   SVFGBuilder(const SVFGBuilderConfig &cfg = SVFGBuilderConfig())
@@ -369,6 +373,14 @@ public:
   /// This is best-effort incremental maintenance; full rebuild remains the
   /// correctness fallback for complex structural updates.
   void updateMemorySSAEdges(SVFG *svfg);
+
+  /// @brief Get the explicit call-graph snapshot maintained by the builder.
+  ///
+  /// Direct-call edges come from the initial module scan; resolved indirect
+  /// callees are appended as SVFG refinement materializes them.
+  const LTCallGraph *getRefinedCallGraph() const {
+    return refinedCallGraph.get();
+  }
 
   /// @brief SVF-style on-the-fly connection of an indirect callsite to a callee.
   ///
@@ -457,6 +469,10 @@ private:
   ///
   /// Internal creator. Public read API is getUnknownObjId().
   uint32_t getOrCreateUnknownObjId();
+
+  /// @brief Record an explicit caller->callee edge in the refined call graph.
+  void recordRefinedCallEdge(const llvm::CallBase *call,
+                             const llvm::Function *callee);
 
 
   /// @brief Get or create a canonical memory-region ID for a points-to set.

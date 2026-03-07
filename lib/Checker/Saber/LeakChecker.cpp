@@ -263,7 +263,10 @@ void LeakChecker::initSnks() {
                 addToSinks(snkNode);
               if (arg->getType()->getPointerElementType()->isPointerTy()) {
                 for (auto &edge : snkNode->getOutEdges()) {
-                  if (edge->getEdgeKind() == SVFGEdgeK::IntraLoad)
+                  if (edge->getEdgeKind() == SVFGEdgeK::IntraLoad ||
+                      (edge->getEdgeKind() == SVFGEdgeK::IntraDirect &&
+                       edge->getDstNode() &&
+                       edge->getDstNode()->getNodeKind() == SVFGK::Load))
                     addToSinks(edge->getDstNode());
                 }
               }

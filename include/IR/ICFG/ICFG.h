@@ -35,17 +35,21 @@ public:
       blockToIntraNodeMapTy;
   typedef std::unordered_map<const llvm::Function *, IntraBlockNode *>
       functionToEntryIntraNodeMapTy;
-  //    typedef std::unordered_map<const llvm::BasicBlock*, FunEntryBlockNode*>
-  //    blockToEntryNodeMapTy; typedef std::unordered_map<const
-  //    llvm::BasicBlock*, RetBlockNode*> blockToRetNodeMapTy;
+  typedef std::unordered_map<const llvm::Function *, FunEntryBlockNode *>
+      functionToEntryNodeMapTy;
+  typedef std::unordered_map<const llvm::Function *, FunExitBlockNode *>
+      functionToExitNodeMapTy;
+  typedef std::unordered_map<const llvm::Instruction *, CallRetBlockNode *>
+      callToRetNodeMapTy;
 
   NodeID totalICFGNode;
 
 private:
   blockToIntraNodeMapTy blockToIntraNodeMap;
   functionToEntryIntraNodeMapTy functionToEntryIntraNodeMap;
-  //    blockToEntryNodeMapTy blockToEntryNodeMap;
-  //    blockToRetNodeMapTy blockToRetNodeMap;
+  functionToEntryNodeMapTy functionToEntryNodeMap;
+  functionToExitNodeMapTy functionToExitNodeMap;
+  callToRetNodeMapTy callToRetNodeMap;
 
 public:
   /// @brief Constructs an empty ICFG.
@@ -106,6 +110,9 @@ public:
   /// @brief Removes an ICFG node and all its incident edges from the graph.
   /// @param node Node to remove.
   inline void removeICFGNode(ICFGNode *node) {
+    if (!node)
+      return;
+
     // Collect edges first to avoid iterator invalidation during removal.
     std::vector<ICFGEdge *> edgesToRemove;
     for (auto *e : node->getOutEdges())
@@ -114,6 +121,21 @@ public:
       edgesToRemove.push_back(e);
     for (auto *e : edgesToRemove)
       removeICFGEdge(e);
+
+    if (auto *intra = llvm::dyn_cast<IntraBlockNode>(node)) {
+      blockToIntraNodeMap.erase(intra->getBasicBlock());
+      const llvm::Function *F = intra->getFunction();
+      auto it = functionToEntryIntraNodeMap.find(F);
+      if (it != functionToEntryIntraNodeMap.end() && it->second == intra)
+        functionToEntryIntraNodeMap.erase(it);
+    } else if (auto *entry = llvm::dyn_cast<FunEntryBlockNode>(node)) {
+      functionToEntryNodeMap.erase(entry->getFunction());
+    } else if (auto *exit = llvm::dyn_cast<FunExitBlockNode>(node)) {
+      functionToExitNodeMap.erase(exit->getFunction());
+    } else if (auto *ret = llvm::dyn_cast<CallRetBlockNode>(node)) {
+      callToRetNodeMap.erase(ret->getCallSite());
+    }
+
     removeGNode(node);
   }
 
@@ -190,6 +212,15 @@ public:
   /// @return Pointer to the ICFG node.
   IntraBlockNode *getIntraBlockNode(const llvm::BasicBlock *bb);
 
+  /// @brief Gets or creates the dedicated function-entry node.
+  FunEntryBlockNode *getFunEntryICFGNode(const llvm::Function *F);
+
+  /// @brief Gets or creates the dedicated function-exit node.
+  FunExitBlockNode *getFunExitICFGNode(const llvm::Function *F);
+
+  /// @brief Gets or creates the dedicated call return-site node.
+  CallRetBlockNode *getRetICFGNode(const llvm::Instruction *callInst);
+
 private:
   /// Get/Add IntraBlock ICFGNode
   inline IntraBlockNode *getIntraBlockICFGNode(const llvm::BasicBlock *bb) {
@@ -211,36 +242,22 @@ private:
     return sNode;
   }
 
-  /// Get/Add a function entry node
-  //    inline FunEntryBlockNode* getFunEntryICFGNode(const llvm::BasicBlock*
-  //    bb)
-  //    {
-  //        blockToEntryNodeMapTy::const_iterator it =
-  //        blockToEntryNodeMap.find(bb); if (it == blockToEntryNodeMap.end())
-  //            return nullptr;
-  //        return it->second;
-  //    }
-  //    inline FunEntryBlockNode* addFunEntryICFGNode(const llvm::BasicBlock*
-  //    bb)
-  //    {
-  //        FunEntryBlockNode* sNode = new FunEntryBlockNode(totalICFGNode++,
-  //        bb); addICFGNode(sNode); blockToEntryNodeMap[bb] = sNode; return
-  //        sNode;
-  //    }
-  //
-  //    /// Get/Add a return node
-  //    inline RetBlockNode* getRetICFGNode(const llvm::BasicBlock* bb)
-  //    {
-  //        blockToRetNodeMapTy::const_iterator it = blockToRetNodeMap.find(bb);
-  //        if (it == blockToRetNodeMap.end())
-  //            return nullptr;
-  //        return it->second;
-  //    }
-  //    inline RetBlockNode* addRetICFGNode(const llvm::BasicBlock* bb)
-  //    {
-  //        RetBlockNode* sNode = new RetBlockNode(totalICFGNode++, bb);
-  //        addICFGNode(sNode);
-  //        blockToRetNodeMap[bb] = sNode;
-  //        return sNode;
-  //    }
+  inline FunEntryBlockNode *getFunEntryNode(const llvm::Function *F) {
+    auto it = functionToEntryNodeMap.find(F);
+    return it == functionToEntryNodeMap.end() ? nullptr : it->second;
+  }
+
+  inline FunExitBlockNode *getFunExitNode(const llvm::Function *F) {
+    auto it = functionToExitNodeMap.find(F);
+    return it == functionToExitNodeMap.end() ? nullptr : it->second;
+  }
+
+  inline CallRetBlockNode *getRetNode(const llvm::Instruction *callInst) {
+    auto it = callToRetNodeMap.find(callInst);
+    return it == callToRetNodeMap.end() ? nullptr : it->second;
+  }
+
+  FunEntryBlockNode *addFunEntryICFGNode(const llvm::Function *F);
+  FunExitBlockNode *addFunExitICFGNode(const llvm::Function *F);
+  CallRetBlockNode *addRetICFGNode(const llvm::Instruction *callInst);
 };

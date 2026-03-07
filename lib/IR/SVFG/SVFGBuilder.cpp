@@ -151,7 +151,7 @@ static bool icfgHasCallEdgeTo(const ICFG *icfg, const CallBase *call,
   const ICFGNode *callerNode =
       const_cast<ICFG *>(icfg)->getIntraBlockNode(call->getParent());
   const ICFGNode *calleeEntry =
-      const_cast<ICFG *>(icfg)->getIntraBlockNode(&callee->getEntryBlock());
+      const_cast<ICFG *>(icfg)->getFunEntryICFGNode(callee);
   if (!callerNode || !calleeEntry)
     return false;
 
@@ -217,6 +217,9 @@ void SVFGBuilder::initialize(const ICFG *cfg) {
   icfg = cfg;
   svfg = std::make_unique<SVFG>();
   svfg->setICFG(icfg);
+  const Module *M = getModuleFromICFG(icfg);
+  refinedCallGraph =
+      M ? std::make_unique<LTCallGraph>(*const_cast<Module *>(M)) : nullptr;
   nextNodeId = 0;
   nextMemRegId = 1;
   // Clean up previous solver wrapper if exists
@@ -251,6 +254,16 @@ void SVFGBuilder::initialize(const ICFG *cfg) {
   argToMemRegs.clear();
   previousPTSets.clear();
   funcEntryChiMemRegs.clear();
+}
+
+void SVFGBuilder::recordRefinedCallEdge(const CallBase *call,
+                                        const Function *callee) {
+  if (!refinedCallGraph || !call || !callee)
+    return;
+  const Function *caller = call->getFunction();
+  if (!caller)
+    return;
+  refinedCallGraph->addResolvedCallEdge(call, caller, callee);
 }
 
 void SVFGBuilder::runPointerAnalysis() {

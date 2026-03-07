@@ -253,7 +253,9 @@ bool SrcSnkDDA::isInAWrapper(const SVFGNode *src, CallSiteSet &csIdSet) {
             sk == SVFGK::Store || sk == SVFGK::InterPhi)
           worklist.push_back(succ);
       } else if (k == SVFGEdgeK::IntraLoad || k == SVFGEdgeK::IntraMu ||
-                 k == SVFGEdgeK::IntraIndirect) {
+                 k == SVFGEdgeK::IntraIndirect ||
+                 (k == SVFGEdgeK::IntraDirect &&
+                  succ->getNodeKind() == SVFGK::Load)) {
         SVFGK sk = succ->getNodeKind();
         if (sk == SVFGK::Load || sk == SVFGK::MIntraPhi ||
             sk == SVFGK::MInterPhi)

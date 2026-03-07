@@ -25,6 +25,7 @@
 
 #include <queue>
 
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Module.h>
@@ -54,6 +55,20 @@ static const ICFGNode *findICFGNodeForBlock(const ICFG *icfg,
   return const_cast<ICFG *>(icfg)->getIntraBlockNode(bb);
 }
 
+static const ICFGNode *findReturnSiteICFGNode(const ICFG *icfg,
+                                              const CallBase *call) {
+  if (!icfg || !call)
+    return nullptr;
+  return const_cast<ICFG *>(icfg)->getRetICFGNode(call);
+}
+
+static const ICFGNode *findFunctionExitICFGNode(const ICFG *icfg,
+                                                const Function *F) {
+  if (!icfg || !F || F->isDeclaration())
+    return nullptr;
+  return const_cast<ICFG *>(icfg)->getFunExitICFGNode(F);
+}
+
 static bool icfgHasCallEdgeTo(const ICFG *icfg, const CallBase *call,
                               const Function *callee) {
   if (!icfg || !call || !callee || callee->isDeclaration())
@@ -61,8 +76,7 @@ static bool icfgHasCallEdgeTo(const ICFG *icfg, const CallBase *call,
 
   const ICFGNode *callerNode =
       const_cast<ICFG *>(icfg)->getIntraBlockNode(call->getParent());
-  const ICFGNode *calleeEntry =
-      const_cast<ICFG *>(icfg)->getIntraBlockNode(&callee->getEntryBlock());
+  const ICFGNode *calleeEntry = const_cast<ICFG *>(icfg)->getFunEntryICFGNode(callee);
   if (!callerNode || !calleeEntry)
     return false;
 
@@ -84,36 +98,19 @@ static void ensureICFGInterEdges(const ICFG *icfg, const CallBase *call,
 
   ICFG *mutableICFG = const_cast<ICFG *>(icfg);
   ICFGNode *callerNode = mutableICFG->getIntraBlockNode(call->getParent());
-  ICFGNode *calleeEntryNode =
-      mutableICFG->getIntraBlockNode(&callee->getEntryBlock());
+  ICFGNode *calleeEntryNode = mutableICFG->getFunEntryICFGNode(callee);
   if (!callerNode || !calleeEntryNode)
     return;
 
   (void)mutableICFG->addCallEdge(callerNode, calleeEntryNode, call);
 
-  ICFGNode *returnSiteNode = nullptr;
-  if (const auto *invokeInst = dyn_cast<InvokeInst>(call)) {
-    returnSiteNode =
-        mutableICFG->getIntraBlockNode(invokeInst->getNormalDest());
-  } else {
-    const BasicBlock *callBB = call->getParent();
-    if (succ_begin(callBB) != succ_end(callBB))
-      returnSiteNode = mutableICFG->getIntraBlockNode(*succ_begin(callBB));
-    else
-      returnSiteNode = callerNode;
-  }
+  ICFGNode *returnSiteNode = mutableICFG->getRetICFGNode(call);
   if (!returnSiteNode)
     return;
 
-  for (const BasicBlock &bb : *callee) {
-    for (const Instruction &inst : bb) {
-      if (!isa<ReturnInst>(&inst))
-        continue;
-      ICFGNode *calleeExitNode = mutableICFG->getIntraBlockNode(&bb);
-      if (calleeExitNode)
-        (void)mutableICFG->addRetEdge(calleeExitNode, returnSiteNode, call);
-    }
-  }
+  ICFGNode *calleeExitNode = mutableICFG->getFunExitICFGNode(callee);
+  if (calleeExitNode)
+    (void)mutableICFG->addRetEdge(calleeExitNode, returnSiteNode, call);
 }
 
 static std::vector<const Function *>
@@ -932,8 +929,10 @@ void SVFGBuilder::buildMemorySSA() {
               const SVFGNodeBS &pts = entry.second;
               const uint32_t actualOutId = nextNode();
               const uint32_t actualOutVersion = nextVersion(&F, memRegId);
-              auto *actualOut = new ActualOutSVFGNode(
-                  actualOutId, icfgNode, call, memRegId, pts, actualOutVersion);
+              auto *actualOut =
+                  new ActualOutSVFGNode(actualOutId,
+                                        findReturnSiteICFGNode(icfg, call), call,
+                                        memRegId, pts, actualOutVersion);
               svfg->addNode(actualOut);
               svfg->addActualOut(call, actualOut);
               chiVec.push_back(actualOutId);
@@ -1017,8 +1016,9 @@ void SVFGBuilder::buildMemorySSA() {
 
     for (const auto &entry : formalOutRegs) {
       const uint32_t formalOutId = nextNode();
-      auto *formalOut = new FormalOutSVFGNode(formalOutId, entryICFGNode, &F,
-                                              entry.first, entry.second);
+      auto *formalOut = new FormalOutSVFGNode(
+          formalOutId, findFunctionExitICFGNode(icfg, &F), &F, entry.first,
+          entry.second);
       svfg->addNode(formalOut);
       svfg->addFormalOut(&F, formalOut);
     }
@@ -1857,6 +1857,7 @@ void SVFGBuilder::buildCallEdges() {
           continue;
         for (const Function *callee : callees) {
           svfg->markConnectedCallee(call, callee);
+          recordRefinedCallEdge(call, callee);
 
           const unsigned actualIdx = actualParm->getParamIndex();
           const bool isVarArgExtra =
@@ -1914,6 +1915,7 @@ void SVFGBuilder::buildCallEdges() {
           continue;
         for (const Function *callee : callees) {
           svfg->markConnectedCallee(call, callee);
+          recordRefinedCallEdge(call, callee);
           for (SVFGNode *formal : svfg->getFormalIns(callee)) {
             auto *formalIn = dyn_cast<FormalInSVFGNode>(formal);
             if (!formalIn)
@@ -1964,6 +1966,7 @@ void SVFGBuilder::buildReturnEdges() {
           continue;
         for (const Function *callee : callees) {
           svfg->markConnectedCallee(call, callee);
+          recordRefinedCallEdge(call, callee);
           for (SVFGNode *formal : svfg->getFormalRets(callee)) {
             auto *formalRet = dyn_cast<FormalRetSVFGNode>(formal);
             if (!formalRet)
@@ -1989,6 +1992,7 @@ void SVFGBuilder::buildReturnEdges() {
           continue;
         for (const Function *callee : callees) {
           svfg->markConnectedCallee(call, callee);
+          recordRefinedCallEdge(call, callee);
           for (SVFGNode *formal : svfg->getFormalOuts(callee)) {
             auto *formalOut = dyn_cast<FormalOutSVFGNode>(formal);
             if (!formalOut)
@@ -2021,6 +2025,7 @@ bool SVFGBuilder::connectCallSiteToCalleeOnTheFly(
   // De-duplicate refinements per (callsite, callee).
   if (!g->markConnectedCallee(cs, callee))
     return false;
+  recordRefinedCallEdge(cs, callee);
 
   const Function *directCallee = cs->getCalledFunction();
   const bool isDirectEdge = (directCallee && directCallee == callee &&
