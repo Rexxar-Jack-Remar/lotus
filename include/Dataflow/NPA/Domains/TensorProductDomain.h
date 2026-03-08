@@ -8,8 +8,7 @@
 namespace npa {
 
 /**
- * TensorProductDomain<D> – Paired semiring for LCFL regularization
- * (Reps et al., "Newtonian Program Analysis via Tensor Product", TOPLAS 2016).
+ * TensorProductDomain<D> – utility paired domains for tensorized solving.
  *
  * This file provides:
  * - TensorProductDomain<D>: the classic *pair* construction (fast, but when
@@ -18,6 +17,12 @@ namespace npa {
  * - TensorProductExactDomain<D>: an *exact correlated* representation for
  *   idempotent domains, modeling sums as finite sets of pairs so readout
  *   preserves correlation.
+ *
+ * These paired domains are useful implementation utilities, but by themselves
+ * they are not the full admissible-semiring construction of TOPLAS 2016
+ * Defn. 4.1. Paper-faithful tensor semantics come from a domain-specific
+ * `TensorSemiringTraits<D>` specialization (for example, the predicate-relation
+ * domain).
  */
 template <class D> struct TensorProductDomain {
   using V = typename D::value_type;

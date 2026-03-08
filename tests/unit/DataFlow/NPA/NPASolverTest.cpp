@@ -152,3 +152,21 @@ TEST(NPA, ProgramTransferDomainPreservesMayWriteAcrossCombineAndExtend) {
   EXPECT_TRUE(composed.may_write.count(&slot_a));
   EXPECT_TRUE(composed.may_write.count(&slot_b));
 }
+
+TEST(NPA, ProgramTransferDomainCondCombineRespectsBooleanGuard) {
+  using D = npa::ProgramTransferDomain<char>;
+
+  auto thenV = D::singleton('t');
+  auto elseV = D::singleton('e');
+
+  auto chosenThen = D::condCombine(true, thenV, elseV);
+  auto chosenElse = D::condCombine(false, thenV, elseV);
+
+  EXPECT_EQ(chosenThen.paths.size(), 1u);
+  EXPECT_TRUE(chosenThen.paths.count(std::vector<char>{'t'}));
+  EXPECT_FALSE(chosenThen.paths.count(std::vector<char>{'e'}));
+
+  EXPECT_EQ(chosenElse.paths.size(), 1u);
+  EXPECT_TRUE(chosenElse.paths.count(std::vector<char>{'e'}));
+  EXPECT_FALSE(chosenElse.paths.count(std::vector<char>{'t'}));
+}

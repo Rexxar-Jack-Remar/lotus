@@ -45,6 +45,9 @@ private:
       mark(e->t1);
       mark(e->t2);
       break;
+    case Exp0<D>::Project:
+      mark(e->t);
+      break;
     case Exp0<D>::Bound:
     case Exp0<D>::Hole:
       break;
@@ -81,6 +84,9 @@ private:
       break;
     case Exp0<D>::Ndet:
       v = D::ndetCombine(rec(nu, env, e->t1), rec(nu, env, e->t2));
+      break;
+    case Exp0<D>::Project:
+      v = domain_project<D>(rec(nu, env, e->t));
       break;
     case Exp0<D>::Hole:
       v = nu.at(e->sym);
@@ -164,6 +170,9 @@ private:
       break;
     case K::Ndet:
       v = D::ndetCombine(rec(vars, env, e->t1), rec(vars, env, e->t2));
+      break;
+    case K::Project:
+      v = domain_project<D>(rec(vars, env, e->t));
       break;
     case K::Hole:
       v = vars.at(e->sym);

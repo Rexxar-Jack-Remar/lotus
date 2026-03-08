@@ -32,12 +32,24 @@ template <class D> using E0 = std::shared_ptr<Exp0<D>>;
 
 /// Polynomial expression (full equation system f(X)).
 /// Kinds: Term (constant), Seq (c·t), Mul (t1·t2), Call (procedure call),
-/// Cond, Ndet, Hole/Bound (variable), Concat (t1·X·t2, LCFL form), InfClos
-/// (Kleene star).
+/// Cond, Ndet, Project, Hole/Bound (variable), Concat (t1·X·t2, LCFL form),
+/// InfClos (Kleene star).
 template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
   using V = DomVal<D>;
   using T = DomTest<D>;
-  enum K { Term, Seq, Mul, Call, Cond, Ndet, Hole, Bound, Concat, InfClos };
+  enum K {
+    Term,
+    Seq,
+    Mul,
+    Call,
+    Cond,
+    Ndet,
+    Project,
+    Hole,
+    Bound,
+    Concat,
+    InfClos
+  };
   K k;
   V c;
   E0<D> t;
@@ -85,6 +97,12 @@ template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
     e->k = Ndet;
     e->t1 = a;
     e->t2 = b;
+    return e;
+  }
+  static E0<D> project(E0<D> t) {
+    auto e = std::make_shared<Exp0>();
+    e->k = Project;
+    e->t = t;
     return e;
   }
   static E0<D> hole(Symbol x) {
@@ -135,6 +153,7 @@ template <class D> struct Exp1 : Dirty {
     Call,
     Cond,
     Ndet,
+    Project,
     Hole,
     Bound,
     Concat,
@@ -205,6 +224,12 @@ template <class D> struct Exp1 : Dirty {
     e->t2 = b;
     return e;
   }
+  static E1<D> project(E1<D> t) {
+    auto e = std::make_shared<Exp1>();
+    e->k = Project;
+    e->t = t;
+    return e;
+  }
   static E1<D> hole(Symbol x) {
     auto e = std::make_shared<Exp1>();
     e->k = Hole;
@@ -261,6 +286,7 @@ template <class D> struct DepFinder {
       deps.insert(e->sym);
       find(e->t, deps);
       break;
+    case K::Project:
     case K::SeqR:
       find(e->t, deps);
       break;
@@ -285,6 +311,7 @@ template <class D> struct ExprFeatureDetector {
       return true;
     case Exp0<D>::Seq:
     case Exp0<D>::Call:
+    case Exp0<D>::Project:
       return has_infclos(e->t);
     case Exp0<D>::Mul:
     case Exp0<D>::Cond:
@@ -305,6 +332,7 @@ template <class D> struct ExprFeatureDetector {
       return true;
     case K::Seq:
     case K::SeqR:
+    case K::Project:
       return has_infclos(e->t);
     case K::Cond:
     case K::Add:

@@ -60,9 +60,9 @@ TaintTransferDomain::ndetCombine(const value_type &a, const value_type &b) {
 }
 
 TaintTransferDomain::value_type
-TaintTransferDomain::condCombine(bool /*phi*/, const value_type &t,
+TaintTransferDomain::condCombine(bool phi, const value_type &t,
                                  const value_type &e) {
-  return combine(t, e);
+  return phi ? t : e;
 }
 
 llvm::APInt TaintTransferDomain::applyRel(const std::vector<llvm::APInt> &rel,

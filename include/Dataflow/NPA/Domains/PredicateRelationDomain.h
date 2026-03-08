@@ -35,9 +35,12 @@ public:
 
   static void configure(unsigned predicate_count,
                         unsigned local_predicate_count = 0);
+  static void configure(unsigned predicate_count,
+                        const std::vector<unsigned> &local_predicates);
   static unsigned getPredicateCount();
   static unsigned getLocalPredicateCount();
   static unsigned getGlobalPredicateCount();
+  static bool isLocalPredicate(unsigned predicate);
 
   static value_type zero();
   static value_type one();
@@ -122,8 +125,18 @@ template <> struct TensorSemiringTraits<PredicateRelationDomain> {
   static bool available() { return true; }
 
   static tensor_domain::value_type
-  constant(const PredicateRelationDomain::value_type &value) {
+  right_constant(const PredicateRelationDomain::value_type &value) {
     return tensor_domain::couple(PredicateRelationDomain::one(), value);
+  }
+
+  static tensor_domain::value_type
+  left_constant(const PredicateRelationDomain::value_type &value) {
+    return tensor_domain::couple(value, PredicateRelationDomain::one());
+  }
+
+  static tensor_domain::value_type
+  constant(const PredicateRelationDomain::value_type &value) {
+    return right_constant(value);
   }
 
   static tensor_domain::value_type

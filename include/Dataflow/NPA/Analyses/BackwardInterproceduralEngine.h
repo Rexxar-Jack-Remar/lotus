@@ -3,6 +3,7 @@
 
 #include "Dataflow/NPA/Analyses/InterproceduralEngine.h"
 #include "Dataflow/NPA/NPA.h"
+#include "Utils/Algorithms/PathExpressions/PathExpressions.h"
 
 #include <deque>
 #include <map>
@@ -102,6 +103,218 @@ private:
     return D::one();
   }
 
+  struct FunctionRegexArtifacts {
+    E summaryExpr;
+    E fullSummaryExpr;
+    std::unordered_map<std::string, E> blockSummaryExprs;
+  };
+
+  static bool isZeroExpr(const E &expr) {
+    return expr && expr->k == Exp::Term && D::equal(expr->c, D::zero());
+  }
+
+  static bool isOneExpr(const E &expr) {
+    return expr && expr->k == Exp::Term && D::equal(expr->c, D::one());
+  }
+
+  static E combineExpr(E lhs, E rhs) {
+    if (!lhs)
+      return rhs;
+    if (!rhs)
+      return lhs;
+    if (isZeroExpr(lhs))
+      return rhs;
+    if (isZeroExpr(rhs))
+      return lhs;
+    return Exp::ndet(lhs, rhs);
+  }
+
+  static E multiplyExpr(E lhs, E rhs) {
+    if (!lhs || !rhs)
+      return Exp::term(D::zero());
+    if (isZeroExpr(lhs) || isZeroExpr(rhs))
+      return Exp::term(D::zero());
+    if (isOneExpr(lhs))
+      return rhs;
+    if (isOneExpr(rhs))
+      return lhs;
+    if (lhs->k == Exp::Term && rhs->k == Exp::Term)
+      return Exp::term(D::extend(lhs->c, rhs->c));
+    if (lhs->k == Exp::Term)
+      return Exp::seq(lhs->c, rhs);
+    return Exp::mul(lhs, rhs);
+  }
+
+  static E starExpr(E inner, unsigned &counter) {
+    if (!inner || isZeroExpr(inner) || isOneExpr(inner))
+      return Exp::term(D::one());
+    Symbol bound = "__bwd_regex_star_" + std::to_string(counter++);
+    return Exp::inf(
+        combineExpr(Exp::term(D::one()), Exp::mul(Exp::bound(bound), inner)),
+        bound);
+  }
+
+  class RegexToExpr final
+      : public lotus::pathexpressions::IRegexVisitor<int, E, std::nullptr_t> {
+  public:
+    RegexToExpr(const std::vector<E> &labels, unsigned &star_counter)
+        : labels_(labels), starCounter_(star_counter) {}
+
+    E visit(const lotus::pathexpressions::Union<int> &re,
+            std::nullptr_t) override {
+      return combineExpr(re.getFirst()->accept(*this),
+                         re.getSecond()->accept(*this));
+    }
+
+    E visit(const lotus::pathexpressions::Concatenation<int> &re,
+            std::nullptr_t) override {
+      return multiplyExpr(re.getSecond()->accept(*this),
+                          re.getFirst()->accept(*this));
+    }
+
+    E visit(const lotus::pathexpressions::Star<int> &re,
+            std::nullptr_t) override {
+      return starExpr(re.getInner()->accept(*this), starCounter_);
+    }
+
+    E visit(const lotus::pathexpressions::Literal<int> &re,
+            std::nullptr_t) override {
+      return labels_.at(static_cast<std::size_t>(re.getLetter()));
+    }
+
+    E visit(const lotus::pathexpressions::Epsilon<int> &,
+            std::nullptr_t) override {
+      return Exp::term(D::one());
+    }
+
+    E visit(const lotus::pathexpressions::EmptySet<int> &,
+            std::nullptr_t) override {
+      return Exp::term(D::zero());
+    }
+
+  private:
+    const std::vector<E> &labels_;
+    unsigned &starCounter_;
+  };
+
+  static E translateRegex(
+      const lotus::pathexpressions::RegexRef<int> &regex,
+      const std::vector<E> &labels, unsigned &star_counter) {
+    RegexToExpr translator(labels, star_counter);
+    return regex->accept(translator, nullptr);
+  }
+
+  template <class T = D>
+  static typename std::enable_if<DomainHasProject<T>::value, E>::type
+  makeSummaryEquationExpr(E expr) {
+    return Exp::project(std::move(expr));
+  }
+
+  template <class T = D>
+  static typename std::enable_if<!DomainHasProject<T>::value, E>::type
+  makeSummaryEquationExpr(E expr) {
+    return expr;
+  }
+
+  static E makeCallSummaryExpr(Symbol sym) {
+    return Exp::hole(std::move(sym));
+  }
+
+  static E buildBlockBodyExpr(Analysis &analysis, llvm::Instruction &I, E currentPath,
+                              llvm::Module &M, std::deque<llvm::Function *> &worklist,
+                              std::set<llvm::Function *> &visited) {
+    if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
+      std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+      if (!Callees.empty()) {
+        E callBranches = nullptr;
+        for (llvm::Function *Callee : Callees) {
+          const Symbol callee_sym =
+              InterproceduralEngine<D, Analysis>::getFuncSymbol(Callee);
+          if (visited.insert(Callee).second)
+            worklist.push_back(Callee);
+          E branch = Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
+                              currentPath);
+          branch = multiplyExpr(makeCallSummaryExpr(callee_sym), branch);
+          branch =
+              Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0), branch);
+          callBranches = combineExpr(callBranches, branch);
+        }
+        currentPath = callBranches;
+      } else {
+        currentPath =
+            Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+      }
+    }
+    return analysis.getTransfer(I, currentPath);
+  }
+
+  static FunctionRegexArtifacts
+  buildFunctionRegexArtifacts(llvm::Module &M, llvm::Function &F, Analysis &analysis,
+                              std::deque<llvm::Function *> &worklist,
+                              std::set<llvm::Function *> &visited) {
+    using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
+
+    std::unordered_map<const llvm::BasicBlock *, int> blockIds;
+    int nextId = 0;
+    for (auto &BB : F)
+      blockIds[&BB] = nextId++;
+    const int exitId = nextId;
+
+    Graph graph;
+    graph.addNode(exitId);
+
+    std::vector<E> labels;
+    labels.reserve(F.size() * 2U + 1U);
+    auto addLabel = [&](E expr) {
+      labels.push_back(expr ? expr : Exp::term(D::zero()));
+      return static_cast<int>(labels.size() - 1);
+    };
+
+    for (auto &BB : F) {
+      const int fromId = blockIds.at(&BB);
+      graph.addNode(fromId);
+
+      E currentPath = Exp::term(D::one());
+      for (auto It = BB.rbegin(); It != BB.rend(); ++It)
+        currentPath = buildBlockBodyExpr(analysis, *It, currentPath, M, worklist,
+                                         visited);
+
+      auto *Term = BB.getTerminator();
+      if (!Term || Term->getNumSuccessors() == 0) {
+        graph.addEdge(fromId, addLabel(currentPath), exitId);
+        continue;
+      }
+
+      for (unsigned i = 0; i < Term->getNumSuccessors(); ++i) {
+        auto *Succ = Term->getSuccessor(i);
+        if (!Succ)
+          continue;
+        E edgeExpr = Exp::seq(getEdgeTransfer(analysis, *Term, *Succ, 0), currentPath);
+        graph.addEdge(fromId, addLabel(edgeExpr), blockIds.at(Succ));
+      }
+    }
+
+    lotus::pathexpressions::PathExpressionComputer<int, int> computer(graph);
+    unsigned starCounter = 0;
+
+    FunctionRegexArtifacts out;
+    llvm::BasicBlock *Entry = F.empty() ? nullptr : &F.getEntryBlock();
+    out.fullSummaryExpr =
+        Entry ? translateRegex(computer.exprBetween(blockIds.at(Entry), exitId),
+                               labels, starCounter)
+              : Exp::term(D::one());
+    out.summaryExpr = makeSummaryEquationExpr(out.fullSummaryExpr);
+    for (auto &BB : F) {
+      const std::string bSym =
+          InterproceduralEngine<D, Analysis>::getBlockSymbol(&BB);
+      out.blockSummaryExprs.emplace(
+          bSym,
+          translateRegex(computer.exprBetween(blockIds.at(&BB), exitId), labels,
+                         starCounter));
+    }
+    return out;
+  }
+
 public:
   static std::vector<llvm::Function *>
   getPossibleCallees(llvm::Module &M, const llvm::CallBase &Call) {
@@ -114,7 +327,7 @@ public:
     std::deque<llvm::Function *> worklist;
     std::set<llvm::Function *> visited;
     std::unordered_map<std::string, FunctionKey> functionSymbols;
-    std::unordered_map<std::string, BlockKey> blockSymbols;
+    std::unordered_map<std::string, E> fullSummaryExprs;
 
     std::vector<llvm::Function *> entries =
         InterproceduralEngine<D, Analysis>::getEntryFunctions(M);
@@ -129,79 +342,12 @@ public:
 
       std::string fSym = InterproceduralEngine<D, Analysis>::getFuncSymbol(F);
       functionSymbols[fSym] = {F};
-
-      llvm::BasicBlock *Entry = F->empty() ? nullptr : &F->getEntryBlock();
-      for (auto &BB : *F) {
-        std::string bSym =
-            InterproceduralEngine<D, Analysis>::getBlockSymbol(&BB);
-        blockSymbols[bSym] = {&BB};
-
-        E outExpr = nullptr;
-        auto *Term = BB.getTerminator();
-        if (Term) {
-          if (Term->getNumSuccessors() == 0) {
-            outExpr = Exp::term(D::one());
-          } else {
-            for (unsigned i = 0; i < Term->getNumSuccessors(); ++i) {
-              auto *Succ = Term->getSuccessor(i);
-              if (!Succ)
-                continue;
-              auto succSym =
-                  InterproceduralEngine<D, Analysis>::getBlockSymbol(Succ);
-              E branch = Exp::hole(succSym);
-              branch = Exp::seq(getEdgeTransfer(analysis, *Term, *Succ, 0),
-                                branch);
-              if (!outExpr)
-                outExpr = branch;
-              else
-                outExpr = Exp::ndet(outExpr, branch);
-            }
-          }
-        }
-        if (!outExpr)
-          outExpr = Exp::term(D::one());
-
-        E currentPath = outExpr;
-        for (auto It = BB.rbegin(); It != BB.rend(); ++It) {
-          llvm::Instruction &I = *It;
-          if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
-            if (!Callees.empty()) {
-              E callBranches = nullptr;
-              for (llvm::Function *Callee : Callees) {
-                if (visited.insert(Callee).second)
-                  worklist.push_back(Callee);
-                E branch = Exp::seq(
-                    getCallReturnTransfer(analysis, *CI, *Callee, 0),
-                    currentPath);
-                branch =
-                    Exp::call(InterproceduralEngine<D, Analysis>::getFuncSymbol(
-                                  Callee),
-                              branch);
-                branch = Exp::seq(
-                    getCallEntryTransfer(analysis, *CI, *Callee, 0), branch);
-                callBranches =
-                    callBranches ? Exp::ndet(callBranches, branch) : branch;
-              }
-              currentPath = callBranches;
-            } else {
-              currentPath =
-                  Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
-            }
-          }
-          currentPath = analysis.getTransfer(I, currentPath);
-        }
-
-        eqns.emplace_back(bSym, currentPath);
-      }
-
-      if (Entry) {
-        eqns.emplace_back(
-            fSym,
-            Exp::hole(InterproceduralEngine<D, Analysis>::getBlockSymbol(Entry)));
-      } else {
-        eqns.emplace_back(fSym, Exp::term(D::one()));
-      }
+      auto artifacts =
+          buildFunctionRegexArtifacts(M, *F, analysis, worklist, visited);
+      eqns.emplace_back(fSym, artifacts.summaryExpr);
+      fullSummaryExprs.emplace(fSym, artifacts.fullSummaryExpr);
+      for (const auto &blockExpr : artifacts.blockSummaryExprs)
+        eqns.emplace_back(blockExpr.first, blockExpr.second);
     }
 
     auto rawRes = NewtonSolver<D>::solve(eqns, verbose, -1, linearStrategy);
@@ -211,9 +357,10 @@ public:
 
     Result res;
     for (const auto &entry : functionSymbols) {
-      auto It = solvedMap.find(entry.first);
-      if (It != solvedMap.end())
-        res.summaries[entry.second] = It->second;
+      auto exprIt = fullSummaryExprs.find(entry.first);
+      if (exprIt == fullSummaryExprs.end())
+        continue;
+      res.summaries[entry.second] = I0<D>::eval(false, solvedMap, exprIt->second);
     }
 
     std::deque<llvm::Function *> worklist2;
@@ -320,7 +467,7 @@ public:
                 E branch = Exp::seq(
                     getCallReturnTransfer(analysis, *CI, *Callee, 0),
                     currentPath);
-                branch = Exp::call(calleeSym, branch);
+                branch = multiplyExpr(makeCallSummaryExpr(calleeSym), branch);
                 branch = Exp::seq(
                     getCallEntryTransfer(analysis, *CI, *Callee, 0), branch);
                 callBranches =

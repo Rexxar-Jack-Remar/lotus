@@ -128,6 +128,34 @@ public:
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
+template <class D> struct DomainHasProject {
+  template <class T>
+  static auto test(int)
+      -> typename std::enable_if<
+          std::is_same<decltype(T::project(T::zero())),
+                       typename T::value_type>::value,
+          std::true_type>::type;
+  template <class> static std::false_type test(...);
+
+public:
+  static constexpr bool value =
+      std::is_same<decltype(test<D>(0)), std::true_type>::value;
+};
+
+template <class D> struct DomainHasProjectT {
+  template <class T>
+  static auto test(int)
+      -> typename std::enable_if<
+          std::is_same<decltype(T::projectT(T::zero())),
+                       typename T::value_type>::value,
+          std::true_type>::type;
+  template <class> static std::false_type test(...);
+
+public:
+  static constexpr bool value =
+      std::is_same<decltype(test<D>(0)), std::true_type>::value;
+};
+
 template <class D> struct DomainHasMaxFixpointIters {
   template <class T>
   static auto test(int) -> decltype(T::max_fixpoint_iters, std::true_type{});
@@ -208,6 +236,33 @@ inline bool domain_leq_idempotent(const DomVal<D> &a, const DomVal<D> &b) {
   static_assert(D::idempotent,
                 "domain_leq_idempotent requires an idempotent domain");
   return domain_equal<D>(D::combine(a, b), b);
+}
+
+namespace detail {
+template <class D>
+inline DomVal<D> domain_project_impl(const DomVal<D> &v, std::true_type,
+                                     std::false_type) {
+  return D::project(v);
+}
+template <class D>
+inline DomVal<D> domain_project_impl(const DomVal<D> &v, std::false_type,
+                                     std::true_type) {
+  return D::projectT(v);
+}
+template <class D>
+inline DomVal<D> domain_project_impl(const DomVal<D> &,
+                                     std::false_type /* has_project */,
+                                     std::false_type /* has_project_t */) {
+  assert(false && "Domain must implement project() or projectT() to evaluate "
+                  "projection expressions");
+  return D::zero();
+}
+} // namespace detail
+
+template <class D> inline DomVal<D> domain_project(const DomVal<D> &v) {
+  return detail::domain_project_impl<D>(
+      v, std::integral_constant<bool, DomainHasProject<D>::value>{},
+      std::integral_constant<bool, DomainHasProjectT<D>::value>{});
 }
 
 namespace detail {

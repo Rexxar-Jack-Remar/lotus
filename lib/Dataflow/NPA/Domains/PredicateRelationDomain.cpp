@@ -47,6 +47,11 @@ unsigned &configuredLocalPredicateCountRef() {
   return count;
 }
 
+std::vector<bool> &configuredLocalPredicateMaskRef() {
+  static std::vector<bool> mask;
+  return mask;
+}
+
 unsigned activePredicateCount() {
   const unsigned count = configuredPredicateCountRef();
   assert(count > 0 &&
@@ -64,6 +69,19 @@ unsigned activeGlobalPredicateCount() {
   return activePredicateCount() - activeLocalPredicateCount();
 }
 
+const std::vector<bool> &activeLocalPredicateMask() {
+  const auto &mask = configuredLocalPredicateMaskRef();
+  assert(mask.size() == activePredicateCount() &&
+         "PredicateRelationDomain::configure must initialize the local mask");
+  return mask;
+}
+
+bool isConfiguredLocalPredicate(unsigned predicate) {
+  const auto &mask = activeLocalPredicateMask();
+  assert(predicate < mask.size());
+  return mask[predicate];
+}
+
 unsigned baseVarIndex(unsigned predicate, BaseVarGroup group) {
   return predicate * 3 + static_cast<unsigned>(group);
 }
@@ -75,23 +93,6 @@ unsigned tensorVarIndex(unsigned predicate, TensorVarGroup group) {
 unsigned baseTotalVars(unsigned predicate_count) { return predicate_count * 3; }
 
 unsigned tensorTotalVars(unsigned predicate_count) { return predicate_count * 6; }
-
-std::uint64_t bitMask(unsigned width) {
-  return width >= 64 ? ~std::uint64_t{0}
-                     : ((std::uint64_t{1} << width) - std::uint64_t{1});
-}
-
-std::uint64_t globalBits(std::uint64_t value) {
-  return value & bitMask(activeGlobalPredicateCount());
-}
-
-std::uint64_t localBits(std::uint64_t value) {
-  return value >> activeGlobalPredicateCount();
-}
-
-std::uint64_t composeBits(std::uint64_t globals, std::uint64_t locals) {
-  return globals | (locals << activeGlobalPredicateCount());
-}
 
 struct ManagerState {
   DdManager *base_manager = nullptr;
@@ -400,6 +401,26 @@ DdNode *baseGroupCube(unsigned predicate_count,
   });
 }
 
+DdNode *baseGroupCubeForIndices(unsigned predicate_count,
+                                const std::vector<BaseVarGroup> &groups,
+                                const std::vector<unsigned> &indices) {
+  DdManager *manager = getBaseManager(predicate_count);
+  std::vector<DdNode *> vars;
+  std::vector<int> phase;
+  vars.reserve(groups.size() * indices.size());
+  phase.reserve(groups.size() * indices.size());
+  for (BaseVarGroup group : groups) {
+    for (unsigned idx : indices) {
+      vars.push_back(baseVarAt(predicate_count, group, idx));
+      phase.push_back(1);
+    }
+  }
+  return withRef(manager, [&] {
+    return Cudd_bddComputeCube(manager, vars.data(), phase.data(),
+                               static_cast<int>(vars.size()));
+  });
+}
+
 DdNode *tensorGroupCube(unsigned predicate_count,
                         const std::vector<TensorVarGroup> &groups,
                         unsigned begin, unsigned end) {
@@ -413,6 +434,26 @@ DdNode *tensorGroupCube(unsigned predicate_count,
   for (TensorVarGroup group : groups) {
     for (unsigned i = begin; i < end; ++i) {
       vars.push_back(tensorVarAt(predicate_count, group, i));
+      phase.push_back(1);
+    }
+  }
+  return withRef(manager, [&] {
+    return Cudd_bddComputeCube(manager, vars.data(), phase.data(),
+                               static_cast<int>(vars.size()));
+  });
+}
+
+DdNode *tensorGroupCubeForIndices(unsigned predicate_count,
+                                  const std::vector<TensorVarGroup> &groups,
+                                  const std::vector<unsigned> &indices) {
+  DdManager *manager = getTensorManager(predicate_count);
+  std::vector<DdNode *> vars;
+  std::vector<int> phase;
+  vars.reserve(groups.size() * indices.size());
+  phase.reserve(groups.size() * indices.size());
+  for (TensorVarGroup group : groups) {
+    for (unsigned idx : indices) {
+      vars.push_back(tensorVarAt(predicate_count, group, idx));
       phase.push_back(1);
     }
   }
@@ -440,6 +481,23 @@ DdNode *baseEqualityNode(unsigned predicate_count, BaseVarGroup lhs,
   return node;
 }
 
+DdNode *baseEqualityNodeForIndices(unsigned predicate_count, BaseVarGroup lhs,
+                                   BaseVarGroup rhs,
+                                   const std::vector<unsigned> &indices) {
+  DdManager *manager = getBaseManager(predicate_count);
+  DdNode *node = logicOne(manager);
+  Cudd_Ref(node);
+  for (unsigned idx : indices) {
+    DdNode *eq = bddXnor(manager, baseVarAt(predicate_count, lhs, idx),
+                         baseVarAt(predicate_count, rhs, idx));
+    DdNode *tmp = bddAnd(manager, node, eq);
+    Cudd_RecursiveDeref(manager, eq);
+    Cudd_RecursiveDeref(manager, node);
+    node = tmp;
+  }
+  return node;
+}
+
 DdNode *tensorEqualityNode(unsigned predicate_count, TensorVarGroup lhs,
                            TensorVarGroup rhs, unsigned begin, unsigned end) {
   DdManager *manager = getTensorManager(predicate_count);
@@ -450,6 +508,23 @@ DdNode *tensorEqualityNode(unsigned predicate_count, TensorVarGroup lhs,
   for (unsigned i = begin; i < end; ++i) {
     DdNode *eq = bddXnor(manager, tensorVarAt(predicate_count, lhs, i),
                          tensorVarAt(predicate_count, rhs, i));
+    DdNode *tmp = bddAnd(manager, node, eq);
+    Cudd_RecursiveDeref(manager, eq);
+    Cudd_RecursiveDeref(manager, node);
+    node = tmp;
+  }
+  return node;
+}
+
+DdNode *tensorEqualityNodeForIndices(unsigned predicate_count,
+                                     TensorVarGroup lhs, TensorVarGroup rhs,
+                                     const std::vector<unsigned> &indices) {
+  DdManager *manager = getTensorManager(predicate_count);
+  DdNode *node = logicOne(manager);
+  Cudd_Ref(node);
+  for (unsigned idx : indices) {
+    DdNode *eq = bddXnor(manager, tensorVarAt(predicate_count, lhs, idx),
+                         tensorVarAt(predicate_count, rhs, idx));
     DdNode *tmp = bddAnd(manager, node, eq);
     Cudd_RecursiveDeref(manager, eq);
     Cudd_RecursiveDeref(manager, node);
@@ -764,20 +839,30 @@ PredicateRelation readoutTensorImpl(const PredicateTensorRelation &relation) {
   return relationFromNode(predicate_count, base);
 }
 
+std::vector<unsigned> localPredicateIndices(unsigned predicate_count) {
+  std::vector<unsigned> indices;
+  const auto &mask = activeLocalPredicateMask();
+  indices.reserve(activeLocalPredicateCount());
+  for (unsigned predicate = 0; predicate < predicate_count; ++predicate) {
+    if (mask[predicate])
+      indices.push_back(predicate);
+  }
+  return indices;
+}
+
 PredicateRelation projectRelationImpl(const PredicateRelation &relation) {
   const unsigned predicate_count = implOf(relation)->predicate_count;
   const unsigned local_count = activeLocalPredicateCount();
   if (local_count == 0)
     return relation;
-  const unsigned local_begin = predicate_count - local_count;
+  const auto local_indices = localPredicateIndices(predicate_count);
   DdManager *manager = getBaseManager(predicate_count);
-  DdNode *cube = baseGroupCube(predicate_count,
-                               {BaseVarGroup::Cur, BaseVarGroup::Next},
-                               local_begin, predicate_count);
+  DdNode *cube = baseGroupCubeForIndices(
+      predicate_count, {BaseVarGroup::Cur, BaseVarGroup::Next}, local_indices);
   DdNode *abstracted =
       withRef(manager, [&] { return Cudd_bddExistAbstract(manager, implOf(relation)->bdd, cube); });
-  DdNode *eq = baseEqualityNode(predicate_count, BaseVarGroup::Cur,
-                                BaseVarGroup::Next, local_begin, predicate_count);
+  DdNode *eq = baseEqualityNodeForIndices(predicate_count, BaseVarGroup::Cur,
+                                          BaseVarGroup::Next, local_indices);
   DdNode *projected = bddAnd(manager, abstracted, eq);
   Cudd_RecursiveDeref(manager, cube);
   Cudd_RecursiveDeref(manager, abstracted);
@@ -790,25 +875,25 @@ PredicateTensorRelation projectTensorImpl(const PredicateTensorRelation &relatio
   const unsigned local_count = activeLocalPredicateCount();
   if (local_count == 0)
     return relation;
-  const unsigned local_begin = predicate_count - local_count;
+  const auto local_indices = localPredicateIndices(predicate_count);
   DdManager *manager = getTensorManager(predicate_count);
-  DdNode *match_in = tensorEqualityNode(predicate_count, TensorVarGroup::APrime,
-                                        TensorVarGroup::B, local_begin,
-                                        predicate_count);
+  DdNode *match_in =
+      tensorEqualityNodeForIndices(predicate_count, TensorVarGroup::APrime,
+                                   TensorVarGroup::B, local_indices);
   DdNode *restricted = bddAnd(manager, implOf(relation)->bdd, match_in);
-  DdNode *cube =
-      tensorGroupCube(predicate_count,
-                      {TensorVarGroup::APrime, TensorVarGroup::B,
-                       TensorVarGroup::A, TensorVarGroup::BPrime},
-                      local_begin, predicate_count);
+  DdNode *cube = tensorGroupCubeForIndices(
+      predicate_count,
+      {TensorVarGroup::APrime, TensorVarGroup::B, TensorVarGroup::A,
+       TensorVarGroup::BPrime},
+      local_indices);
   DdNode *abstracted =
       withRef(manager, [&] { return Cudd_bddExistAbstract(manager, restricted, cube); });
-  DdNode *left_eq = tensorEqualityNode(predicate_count, TensorVarGroup::APrime,
-                                       TensorVarGroup::A, local_begin,
-                                       predicate_count);
-  DdNode *right_eq = tensorEqualityNode(predicate_count, TensorVarGroup::B,
-                                        TensorVarGroup::BPrime, local_begin,
-                                        predicate_count);
+  DdNode *left_eq =
+      tensorEqualityNodeForIndices(predicate_count, TensorVarGroup::APrime,
+                                   TensorVarGroup::A, local_indices);
+  DdNode *right_eq =
+      tensorEqualityNodeForIndices(predicate_count, TensorVarGroup::B,
+                                   TensorVarGroup::BPrime, local_indices);
   DdNode *eq_out = bddAnd(manager, left_eq, right_eq);
   DdNode *projected = bddAnd(manager, abstracted, eq_out);
   Cudd_RecursiveDeref(manager, match_in);
@@ -875,8 +960,26 @@ PredicateTensorRelation::~PredicateTensorRelation() = default;
 void PredicateRelationDomain::configure(unsigned predicate_count,
                                         unsigned local_predicate_count) {
   assert(local_predicate_count <= predicate_count);
+  std::vector<unsigned> local_predicates;
+  local_predicates.reserve(local_predicate_count);
+  for (unsigned predicate = predicate_count - local_predicate_count;
+       predicate < predicate_count; ++predicate) {
+    local_predicates.push_back(predicate);
+  }
+  configure(predicate_count, local_predicates);
+}
+
+void PredicateRelationDomain::configure(
+    unsigned predicate_count, const std::vector<unsigned> &local_predicates) {
   configuredPredicateCountRef() = predicate_count;
-  configuredLocalPredicateCountRef() = local_predicate_count;
+  configuredLocalPredicateCountRef() = static_cast<unsigned>(local_predicates.size());
+  auto &mask = configuredLocalPredicateMaskRef();
+  mask.assign(predicate_count, false);
+  for (unsigned predicate : local_predicates) {
+    assert(predicate < predicate_count);
+    assert(!mask[predicate] && "local predicate indices must be unique");
+    mask[predicate] = true;
+  }
 }
 
 unsigned PredicateRelationDomain::getPredicateCount() {
@@ -889,6 +992,11 @@ unsigned PredicateRelationDomain::getLocalPredicateCount() {
 
 unsigned PredicateRelationDomain::getGlobalPredicateCount() {
   return activeGlobalPredicateCount();
+}
+
+bool PredicateRelationDomain::isLocalPredicate(unsigned predicate) {
+  assert(predicate < activePredicateCount());
+  return isConfiguredLocalPredicate(predicate);
 }
 
 PredicateRelationDomain::value_type PredicateRelationDomain::zero() {
@@ -924,9 +1032,9 @@ PredicateRelationDomain::ndetCombine(const value_type &a, const value_type &b) {
 }
 
 PredicateRelationDomain::value_type
-PredicateRelationDomain::condCombine(bool /*phi*/, const value_type &t,
+PredicateRelationDomain::condCombine(bool phi, const value_type &t,
                                      const value_type &e) {
-  return combine(t, e);
+  return phi ? t : e;
 }
 
 PredicateRelationDomain::value_type
@@ -1049,9 +1157,9 @@ PredicateTensorDomain::ndetCombine(const value_type &a, const value_type &b) {
 }
 
 PredicateTensorDomain::value_type
-PredicateTensorDomain::condCombine(bool /*phi*/, const value_type &t,
+PredicateTensorDomain::condCombine(bool phi, const value_type &t,
                                    const value_type &e) {
-  return combine(t, e);
+  return phi ? t : e;
 }
 
 PredicateTensorDomain::value_type

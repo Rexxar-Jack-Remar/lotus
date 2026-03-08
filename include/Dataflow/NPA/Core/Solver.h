@@ -150,7 +150,7 @@ template <class D> struct NewtonIter {
       if (use_tensor) {
         rhs_tensor.emplace_back(
             e.first,
-            Exp1<TD>::add(Exp1<TD>::term(TensorTraits::constant(delta0)),
+            Exp1<TD>::add(Exp1<TD>::term(TensorTraits::right_constant(delta0)),
                           TensorDiff<D>::build(nu, e.second)));
       } else {
         auto d = Diff<D>::build(nu, e.second);

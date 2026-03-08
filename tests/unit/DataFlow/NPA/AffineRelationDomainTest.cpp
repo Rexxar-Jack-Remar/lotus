@@ -141,3 +141,27 @@ TEST(AffineRelationDomain, BottomIsDistinctFromIdentity) {
   auto id = npa::AffineRelationDomain::identity();
   EXPECT_FALSE(npa::AffineRelationDomain::equal(bottom, id));
 }
+
+TEST(AffineRelationDomain, CondCombineRespectsBooleanGuard) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i32 %x) {
+    entry:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  auto id = npa::AffineRelationDomain::identity();
+  auto bottom = npa::AffineRelationDomain::zero();
+
+  EXPECT_TRUE(
+      npa::AffineRelationDomain::equal(
+          npa::AffineRelationDomain::condCombine(true, id, bottom), id));
+  EXPECT_TRUE(
+      npa::AffineRelationDomain::equal(
+          npa::AffineRelationDomain::condCombine(false, id, bottom), bottom));
+}

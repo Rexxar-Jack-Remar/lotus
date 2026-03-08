@@ -54,7 +54,7 @@ public:
 
   static value_type condCombine(bool phi, const value_type &t,
                                 const value_type &e) {
-    return combine(t, e);
+    return phi ? t : e;
   }
 
   // extend(a, b) means "apply a AFTER b" (a o b)

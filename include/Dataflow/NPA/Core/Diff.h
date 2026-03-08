@@ -70,6 +70,8 @@ private:
       // Paper Defn 3.1: D(∑ f_i)|ν(b) = ∑ Df_i|ν(b). So D(ndet(t1,t2)) = D(t1)
       // ⊕ D(t2).
       return Exp1<D>::add(aux(nu, o->t1, cur->t1), aux(nu, o->t2, cur->t2));
+    case K0::Project:
+      return Exp1<D>::project(aux(nu, o->t, cur->t));
     case K0::Hole:
       return Exp1<D>::hole(o->sym);
     case K0::Bound:

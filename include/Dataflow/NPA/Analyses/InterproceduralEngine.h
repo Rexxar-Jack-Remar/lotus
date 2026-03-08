@@ -221,20 +221,33 @@ private:
     return inExpr;
   }
 
-  static Val getIncomingBlockTransfer(Analysis &analysis, llvm::BasicBlock &BB,
-                                      llvm::BasicBlock &Pred) {
-    if (!llvm::isa<llvm::PHINode>(BB.begin()))
-      return D::one();
+  static Symbol getSyntheticIncomingSymbol(const llvm::BasicBlock *BB) {
+    std::string s;
+    s.reserve(2 + sizeof(BB));
+    s.push_back('I');
+    s.push_back('N');
+    s.append(reinterpret_cast<const char *>(&BB), sizeof(BB));
+    return s;
+  }
 
-    E entryExpr = buildBlockEntryExpr(analysis, BB, Exp::term(D::zero()), 0);
+  static Val getBlockEntryTransfer(Analysis &analysis, llvm::BasicBlock &BB,
+                                   const llvm::BasicBlock *Pred) {
+    const Symbol incomingSym = getSyntheticIncomingSymbol(&BB);
+    E entryExpr = buildBlockEntryExpr(analysis, BB, Exp::hole(incomingSym), 0);
     std::unordered_map<Symbol, Val> env;
-    for (auto *OtherPred : predecessors(&BB))
-      env[getBlockSymbol(OtherPred)] = (OtherPred == &Pred) ? D::one() : D::zero();
+    env[incomingSym] = Pred && Pred->getTerminator()
+                           ? getEdgeTransfer(analysis, *Pred->getTerminator(), BB, 0)
+                           : D::one();
+    for (auto *OtherPred : predecessors(&BB)) {
+      env[getBlockSymbol(OtherPred)] =
+          (Pred != nullptr && OtherPred == Pred) ? D::one() : D::zero();
+    }
     return I0<D>::eval(false, env, entryExpr);
   }
 
   struct FunctionRegexArtifacts {
     E summaryExpr;
+    E fullSummaryExpr;
     std::unordered_map<std::string, E> blockEntryExprs;
     std::unordered_map<std::string, E> blockExitExprs;
   };
@@ -245,6 +258,22 @@ private:
 
   static bool isOneExpr(const E &expr) {
     return expr && expr->k == Exp::Term && D::equal(expr->c, D::one());
+  }
+
+  template <class T = D>
+  static typename std::enable_if<DomainHasProject<T>::value, E>::type
+  makeSummaryEquationExpr(E expr) {
+    return Exp::project(std::move(expr));
+  }
+
+  template <class T = D>
+  static typename std::enable_if<!DomainHasProject<T>::value, E>::type
+  makeSummaryEquationExpr(E expr) {
+    return expr;
+  }
+
+  static E makeCallSummaryExpr(Symbol sym) {
+    return Exp::hole(std::move(sym));
   }
 
   static E combineExpr(E lhs, E rhs) {
@@ -342,11 +371,12 @@ private:
       if (!Callees.empty()) {
         E callBranches = nullptr;
         for (llvm::Function *Callee : Callees) {
+          const Symbol callee_sym = getFuncSymbol(Callee);
           if (visited.insert(Callee).second)
             worklist.push_back(Callee);
           E branch = Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
                               currentPath);
-          branch = multiplyExpr(Exp::hole(getFuncSymbol(Callee)), branch);
+          branch = multiplyExpr(makeCallSummaryExpr(callee_sym), branch);
           branch =
               Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0), branch);
           callBranches = combineExpr(callBranches, branch);
@@ -371,10 +401,12 @@ private:
     int nextId = 1;
     for (auto &BB : F)
       blockIds[&BB] = nextId++;
+    const int sourceId = 0;
     const int entryId = blockIds.at(&F.getEntryBlock());
     const int exitId = nextId;
 
     Graph graph;
+    graph.addNode(sourceId);
     graph.addNode(exitId);
 
     std::vector<E> labels;
@@ -384,6 +416,11 @@ private:
       labels.push_back(expr ? expr : Exp::term(D::zero()));
       return static_cast<int>(labels.size() - 1);
     };
+
+    graph.addEdge(sourceId,
+                  addLabel(
+                      Exp::term(getBlockEntryTransfer(analysis, F.getEntryBlock(), nullptr))),
+                  entryId);
 
     for (auto &BB : F) {
       const int fromId = blockIds.at(&BB);
@@ -408,9 +445,7 @@ private:
         auto *Succ = SuccInst ? SuccInst->getParent() : nullptr;
         if (!Succ)
           continue;
-        Val transfer = llvm::isa<llvm::PHINode>(Succ->begin())
-                           ? getIncomingBlockTransfer(analysis, *Succ, BB)
-                           : getEdgeTransfer(analysis, *Term, *Succ, 0);
+        Val transfer = getBlockEntryTransfer(analysis, *Succ, &BB);
         E edgeExpr = Exp::seq(transfer, currentPath);
         graph.addEdge(fromId, addLabel(edgeExpr), blockIds.at(Succ));
       }
@@ -420,16 +455,18 @@ private:
     unsigned starCounter = 0;
 
     FunctionRegexArtifacts out;
-    out.summaryExpr = translateRegex(computer.exprBetween(entryId, exitId), labels,
-                                     starCounter);
+    out.fullSummaryExpr =
+        translateRegex(computer.exprBetween(sourceId, exitId), labels,
+                       starCounter);
+    out.summaryExpr = makeSummaryEquationExpr(out.fullSummaryExpr);
     for (auto &BB : F) {
       const std::string bSym = getBlockSymbol(&BB);
       E entryExpr =
-          translateRegex(computer.exprBetween(entryId, blockIds.at(&BB)), labels,
+          translateRegex(computer.exprBetween(sourceId, blockIds.at(&BB)), labels,
                          starCounter);
       out.blockEntryExprs.emplace(bSym, entryExpr);
-      out.blockExitExprs.emplace(bSym,
-                                 multiplyExpr(blockBodyExprs.at(bSym), entryExpr));
+      out.blockExitExprs.emplace(
+          bSym, multiplyExpr(blockBodyExprs.at(bSym), entryExpr));
     }
     return out;
   }
@@ -472,6 +509,7 @@ public:
     std::deque<llvm::Function *> worklist;
     std::set<llvm::Function *> visited;
     std::unordered_map<std::string, FunctionKey> functionSymbols;
+    std::unordered_map<std::string, E> fullSummaryExprs;
     std::unordered_map<std::string, E> blockEntryExprs;
     std::unordered_map<std::string, E> blockExitExprs;
 
@@ -490,6 +528,7 @@ public:
       auto artifacts =
           buildFunctionRegexArtifacts(M, *F, analysis, worklist, visited);
       eqns.emplace_back(fSym, artifacts.summaryExpr);
+      fullSummaryExprs.emplace(fSym, artifacts.fullSummaryExpr);
       for (auto &blockExpr : artifacts.blockEntryExprs)
         blockEntryExprs.emplace(blockExpr.first, blockExpr.second);
       for (auto &blockExpr : artifacts.blockExitExprs)
@@ -503,9 +542,10 @@ public:
 
     Result res;
     for (const auto &entry : functionSymbols) {
-      auto It = solvedMap.find(entry.first);
-      if (It != solvedMap.end())
-        res.summaries[entry.second] = It->second;
+      auto exprIt = fullSummaryExprs.find(entry.first);
+      if (exprIt == fullSummaryExprs.end())
+        continue;
+      res.summaries[entry.second] = I0<D>::eval(false, solvedMap, exprIt->second);
     }
 
     std::deque<llvm::Function *> worklist2;
@@ -543,7 +583,8 @@ public:
           continue;
         Val entryToBlockStart = D::zero();
         if (llvm::isa<llvm::PHINode>(BB.begin())) {
-          auto blockExpr = buildBlockEntryExpr(analysis, BB, Exp::term(D::zero()), 0);
+          auto blockExpr =
+              buildBlockEntryExpr(analysis, BB, Exp::term(D::zero()), 0);
           std::unordered_map<Symbol, Val> env = solvedMap;
           for (auto *Pred : predecessors(&BB)) {
             const std::string predSym = getBlockSymbol(Pred);
@@ -601,7 +642,7 @@ public:
                 E branch =
                     Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
                              currentPath);
-                branch = Exp::call(getFuncSymbol(Callee), branch);
+                branch = multiplyExpr(makeCallSummaryExpr(calleeFSym), branch);
                 branch =
                     Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
                              branch);

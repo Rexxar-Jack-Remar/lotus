@@ -33,6 +33,13 @@ template <class D> struct Exp1ConstEval {
   using V = DomVal<D>;
   using E = E1<D>;
   static Optional<V> eval(const E &e) {
+    std::unordered_map<Symbol, V> env;
+    return eval_with_env(e, env);
+  }
+
+private:
+  static Optional<V> eval_with_env(const E &e,
+                                   const std::unordered_map<Symbol, V> &env) {
     if (!e)
       return {};
     using K = typename Exp1<D>::K;
@@ -43,7 +50,7 @@ template <class D> struct Exp1ConstEval {
       return out;
     }
     case K::Seq: {
-      auto t = eval(e->t);
+      auto t = eval_with_env(e->t, env);
       if (!t.has_value())
         return {};
       Optional<V> out;
@@ -51,7 +58,7 @@ template <class D> struct Exp1ConstEval {
       return out;
     }
     case K::SeqR: {
-      auto t = eval(e->t);
+      auto t = eval_with_env(e->t, env);
       if (!t.has_value())
         return {};
       Optional<V> out;
@@ -59,7 +66,7 @@ template <class D> struct Exp1ConstEval {
       return out;
     }
     case K::Add: {
-      auto a = eval(e->t1), b = eval(e->t2);
+      auto a = eval_with_env(e->t1, env), b = eval_with_env(e->t2, env);
       if (!a.has_value() || !b.has_value())
         return {};
       Optional<V> out;
@@ -69,7 +76,7 @@ template <class D> struct Exp1ConstEval {
     case K::Sub: {
       if (!DomainHasSubtract<D>::value)
         return {};
-      auto a = eval(e->t1), b = eval(e->t2);
+      auto a = eval_with_env(e->t1, env), b = eval_with_env(e->t2, env);
       if (!a.has_value() || !b.has_value())
         return {};
       Optional<V> out;
@@ -77,19 +84,51 @@ template <class D> struct Exp1ConstEval {
       return out;
     }
     case K::Ndet: {
-      auto a = eval(e->t1), b = eval(e->t2);
+      auto a = eval_with_env(e->t1, env), b = eval_with_env(e->t2, env);
       if (!a.has_value() || !b.has_value())
         return {};
       Optional<V> out;
       out = D::ndetCombine(*a, *b);
       return out;
     }
+    case K::Project: {
+      auto t = eval_with_env(e->t, env);
+      if (!t.has_value())
+        return {};
+      Optional<V> out;
+      out = domain_project<D>(*t);
+      return out;
+    }
     case K::Cond: {
-      auto t = eval(e->t1), f = eval(e->t2);
+      auto t = eval_with_env(e->t1, env), f = eval_with_env(e->t2, env);
       if (!t.has_value() || !f.has_value())
         return {};
       Optional<V> out;
       out = D::condCombine(e->phi, *t, *f);
+      return out;
+    }
+    case K::Bound: {
+      auto it = env.find(e->sym);
+      if (it == env.end())
+        return {};
+      Optional<V> out;
+      out = it->second;
+      return out;
+    }
+    case K::InfClos: {
+      V fixed = fix<D>(false, D::zero(), [&](const V &cur) {
+        auto env2 = env;
+        env2[e->sym] = cur;
+        auto body = eval_with_env(e->t, env2);
+        return body.has_value() ? *body : D::zero();
+      });
+      auto env2 = env;
+      env2[e->sym] = fixed;
+      auto body = eval_with_env(e->t, env2);
+      if (!body.has_value())
+        return {};
+      Optional<V> out;
+      out = fixed;
       return out;
     }
     default:
@@ -105,6 +144,29 @@ template <class D> struct Exp1ToTensor {
   using TD = typename Traits::tensor_domain;
   using E1D = E1<D>;
   using E1T = E1<TD>;
+  static bool is_tensor_convertible(const E1D &e) {
+    if (!e)
+      return true;
+    using K = typename Exp1<D>::K;
+    switch (e->k) {
+    case K::Sub:
+      return false;
+    case K::Concat: {
+      auto a = Exp1ConstEval<D>::eval(e->t1);
+      auto b = Exp1ConstEval<D>::eval(e->t2);
+      return a.has_value() && b.has_value();
+    }
+    default:
+      break;
+    }
+    if (e->t && !is_tensor_convertible(e->t))
+      return false;
+    if (e->t1 && !is_tensor_convertible(e->t1))
+      return false;
+    if (e->t2 && !is_tensor_convertible(e->t2))
+      return false;
+    return true;
+  }
   static bool is_regularizable(const E1D &e) {
     if (!e)
       return true;
@@ -115,13 +177,17 @@ template <class D> struct Exp1ToTensor {
       // subtraction is outside that fragment and must stay on the base solver.
       return false;
     case K::InfClos:
-      // `InfClos` is outside the TOPLAS tensor regularization used here.
-      return false;
+      // The Tarjan extractor can only consume InfClos when it constant-folds
+      // to a tensor-side coefficient. Non-constant starred fragments still
+      // require the tensor worklist solver.
+      return Exp1ConstEval<D>::eval(e).has_value();
     case K::Concat: {
       auto a = Exp1ConstEval<D>::eval(e->t1);
       auto b = Exp1ConstEval<D>::eval(e->t2);
       return a.has_value() && b.has_value();
     }
+    case K::Project:
+      return is_regularizable(e->t);
     default:
       break;
     }
@@ -139,16 +205,17 @@ template <class D> struct Exp1ToTensor {
     using K = typename Exp1<D>::K;
     switch (e->k) {
     case K::Term:
-      return Exp1<TD>::term(Traits::constant(e->c));
+      return Exp1<TD>::term(Traits::right_constant(e->c));
     case K::Seq:
-      // Base: c ⊗ t. Use seqR so projection yields c ⊗ R(t).
-      return Exp1<TD>::seqR(convert(e->t), Traits::constant(e->c));
+      // Base: c ⊗ t. Right-multiply by c^t ⊙ 1 so readout yields c ⊗ R(t).
+      return Exp1<TD>::seqR(convert(e->t), Traits::left_constant(e->c));
     case K::SeqR:
-      // Base: t ⊗ c. Use seq so projection yields R(t) ⊗ c.
-      return Exp1<TD>::seq(Traits::constant(e->c), convert(e->t));
+      // Base: t ⊗ c. Right-multiply by 1^t ⊙ c so readout yields R(t) ⊗ c.
+      return Exp1<TD>::seqR(convert(e->t), Traits::right_constant(e->c));
     case K::Call:
-      // Base: f ⊗ c. Encode as seq so projection yields R(f) ⊗ c.
-      return Exp1<TD>::seq(Traits::constant(e->c), Exp1<TD>::hole(e->sym));
+      // Base: f ⊗ c.
+      return Exp1<TD>::seqR(Exp1<TD>::hole(e->sym),
+                            Traits::right_constant(e->c));
     case K::Cond:
       return Exp1<TD>::cond(e->phi, convert(e->t1), convert(e->t2));
     case K::Add:
@@ -157,8 +224,12 @@ template <class D> struct Exp1ToTensor {
       return Exp1<TD>::sub(convert(e->t1), convert(e->t2));
     case K::Ndet:
       return Exp1<TD>::ndet(convert(e->t1), convert(e->t2));
+    case K::Project:
+      return Exp1<TD>::project(convert(e->t));
     case K::Hole:
       return Exp1<TD>::hole(e->sym);
+    case K::Bound:
+      return Exp1<TD>::bound(e->sym);
     case K::Concat:
       // Regularization: a·X·b -> X ⊗_p (a,b) (TOPLAS 2016, Alg. 3.4).
       {
@@ -224,11 +295,52 @@ template <class TD> struct TensorLeftLinearFragment {
   std::vector<std::pair<Symbol, V>> terms;
 };
 
+template <class TD> struct TensorProjectionSystemDetector {
+  using E = E1<TD>;
+
+  static bool
+  is_projection_equation_system(const std::vector<std::pair<Symbol, E>> &rhs) {
+    bool saw_project = false;
+    for (const auto &eqn : rhs) {
+      if (has_nonconstant_nested_project(eqn.second, true))
+        return false;
+      if (eqn.second && eqn.second->k == Exp1<TD>::Project &&
+          !Exp1ConstEval<TD>::eval(eqn.second).has_value()) {
+        saw_project = true;
+      }
+    }
+    return saw_project;
+  }
+
+private:
+  static bool has_nonconstant_nested_project(const E &e, bool at_root) {
+    if (!e)
+      return false;
+    if (Exp1ConstEval<TD>::eval(e).has_value())
+      return false;
+    using K = typename Exp1<TD>::K;
+    if (e->k == K::Project) {
+      if (!at_root)
+        return true;
+      return has_nonconstant_nested_project(e->t, false);
+    }
+    if (e->t && has_nonconstant_nested_project(e->t, false))
+      return true;
+    if (e->t1 && has_nonconstant_nested_project(e->t1, false))
+      return true;
+    if (e->t2 && has_nonconstant_nested_project(e->t2, false))
+      return true;
+    return false;
+  }
+};
+
 template <class TD> struct TensorLeftLinearExtractor {
   using V = typename TD::value_type;
   using Frag = TensorLeftLinearFragment<TD>;
 
-  static Optional<Frag> extract(const E1<TD> &e) {
+  static Optional<Frag> extract(const E1<TD> &e,
+                                bool allow_project_pushdown = false,
+                                bool at_root = true) {
     auto c = Exp1ConstEval<TD>::eval(e);
     if (c.has_value()) {
       Optional<Frag> out;
@@ -248,7 +360,7 @@ template <class TD> struct TensorLeftLinearExtractor {
       return out;
     }
     case K::SeqR: {
-      auto inner = extract(e->t);
+      auto inner = extract(e->t, allow_project_pushdown, false);
       if (!inner.has_value())
         return {};
       Frag frag = *inner;
@@ -259,10 +371,18 @@ template <class TD> struct TensorLeftLinearExtractor {
       out = frag;
       return out;
     }
+    case K::Project: {
+      if (!allow_project_pushdown || !at_root)
+        return {};
+      auto inner = extract(e->t, false, false);
+      if (!inner.has_value())
+        return {};
+      return project_fragment(*inner);
+    }
     case K::Add:
     case K::Ndet: {
-      auto lhs = extract(e->t1);
-      auto rhs = extract(e->t2);
+      auto lhs = extract(e->t1, allow_project_pushdown, false);
+      auto rhs = extract(e->t2, allow_project_pushdown, false);
       if (!lhs.has_value() || !rhs.has_value())
         return {};
       Frag frag;
@@ -277,6 +397,25 @@ template <class TD> struct TensorLeftLinearExtractor {
       return {};
     }
   }
+
+private:
+  template <class T = TD>
+  static typename std::enable_if<DomainHasProjectT<T>::value, Optional<Frag>>::type
+  project_fragment(const Frag &frag_in) {
+    Frag frag = frag_in;
+    frag.constant = T::projectT(frag.constant);
+    for (auto &term : frag.terms)
+      term.second = T::projectT(term.second);
+    Optional<Frag> out;
+    out = frag;
+    return out;
+  }
+
+  template <class T = TD>
+  static typename std::enable_if<!DomainHasProjectT<T>::value, Optional<Frag>>::type
+  project_fragment(const Frag &) {
+    return {};
+  }
 };
 
 template <class TD> struct TensorTarjanPlan {
@@ -284,44 +423,44 @@ template <class TD> struct TensorTarjanPlan {
   std::vector<RegexRef> regexes;
 };
 
+/// Build and cache the dependency-graph regex topology used by the Tarjan fast
+/// path. This is the implementation's equivalent of Alg. 7.1's parameterized
+/// regular-expression step: the cached plan captures the left-linear dependency
+/// structure and regex topology, while the tensor labels are supplied freshly on
+/// each Newton round.
 template <class TD>
 Optional<TensorTarjanPlan<TD>>
 get_tensor_tarjan_plan(bool verbose,
                        const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
                        std::vector<typename TD::value_type> &labels_out) {
   using V = typename TD::value_type;
+  using Frag = typename TensorLeftLinearExtractor<TD>::Frag;
   using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
 
   std::unordered_map<Symbol, int> sym_to_node;
   for (int i = 0; i < static_cast<int>(rhs.size()); ++i)
     sym_to_node[rhs[i].first] = i + 1;
 
-  Graph graph;
-  graph.addNode(0);
-  for (int i = 0; i < static_cast<int>(rhs.size()); ++i)
-    graph.addNode(i + 1);
-
   std::ostringstream signature;
   signature << rhs.size() << ';';
+  std::vector<Frag> fragments;
+  fragments.reserve(rhs.size());
   labels_out.clear();
-
-  auto add_label = [&](const V &label) {
-    labels_out.push_back(label);
-    return static_cast<int>(labels_out.size() - 1);
-  };
+  const bool projection_system =
+      TensorProjectionSystemDetector<TD>::is_projection_equation_system(rhs);
 
   for (int i = 0; i < static_cast<int>(rhs.size()); ++i) {
-    auto extracted = TensorLeftLinearExtractor<TD>::extract(rhs[i].second);
+    auto extracted =
+        TensorLeftLinearExtractor<TD>::extract(rhs[i].second, projection_system);
     if (!extracted.has_value()) {
       if (verbose)
         std::cerr << "[tensor] expression not extractable to left-linear graph; "
                      "falling back to tensor worklist\n";
       return {};
     }
+    fragments.push_back(*extracted);
 
     signature << "C:";
-    graph.addEdge(0, add_label((*extracted).constant), i + 1);
-
     for (const auto &term : (*extracted).terms) {
       auto it = sym_to_node.find(term.first);
       if (it == sym_to_node.end()) {
@@ -331,9 +470,14 @@ get_tensor_tarjan_plan(bool verbose,
         return {};
       }
       signature << "T:" << term.first << ';';
-      graph.addEdge(it->second, add_label(term.second), i + 1);
     }
     signature << '|';
+  }
+
+  for (const auto &frag : fragments) {
+    labels_out.push_back(frag.constant);
+    for (const auto &term : frag.terms)
+      labels_out.push_back(term.second);
   }
 
   using Plan = TensorTarjanPlan<TD>;
@@ -349,6 +493,23 @@ get_tensor_tarjan_plan(bool verbose,
       out = it->second;
       return out;
     }
+  }
+
+  Graph graph;
+  graph.addNode(0);
+  for (int i = 0; i < static_cast<int>(rhs.size()); ++i)
+    graph.addNode(i + 1);
+
+  std::size_t next_label = 0;
+  auto add_label = [&](const V &) {
+    return static_cast<int>(next_label++);
+  };
+
+  for (int i = 0; i < static_cast<int>(rhs.size()); ++i) {
+    const Frag &frag = fragments[static_cast<std::size_t>(i)];
+    graph.addEdge(0, add_label(frag.constant), i + 1);
+    for (const auto &term : frag.terms)
+      graph.addEdge(sym_to_node.at(term.first), add_label(term.second), i + 1);
   }
 
   lotus::pathexpressions::PathExpressionComputer<int, int> computer(graph);
@@ -405,6 +566,7 @@ std::vector<DomVal<D>> solve_linear_tensorized_impl(
     const std::vector<std::pair<
         Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>> &rhs_tensor,
     std::vector<DomVal<D>> init) {
+  validate_tensor_trait_api<D>();
   using Traits = TensorSemiringTraits<D>;
   using TD = typename Traits::tensor_domain;
   using VT = typename TD::value_type;
@@ -431,8 +593,9 @@ std::vector<DomVal<D>>
 solve_linear_tensor_impl(bool verbose,
                          const std::vector<std::pair<Symbol, E1<D>>> &rhs,
                          std::vector<DomVal<D>> init) {
+  validate_tensor_trait_api<D>();
   using Traits = TensorSemiringTraits<D>;
-  using TD = typename Traits::tensor_domain;
+    using TD = typename Traits::tensor_domain;
   if (!Traits::available()) {
     if (verbose)
       std::cerr << "[tensor] tensor traits unavailable for domain; "
@@ -440,9 +603,9 @@ solve_linear_tensor_impl(bool verbose,
     return solve_linear_worklist_impl<D>(verbose, rhs, init);
   }
   for (const auto &p : rhs) {
-    if (!Exp1ToTensor<D>::is_regularizable(p.second)) {
+    if (!Exp1ToTensor<D>::is_tensor_convertible(p.second)) {
       if (verbose)
-        std::cerr << "[tensor] not regularizable; falling back to worklist\n";
+        std::cerr << "[tensor] not tensor-convertible; falling back to worklist\n";
       return solve_linear_worklist_impl<D>(verbose, rhs, init);
     }
   }

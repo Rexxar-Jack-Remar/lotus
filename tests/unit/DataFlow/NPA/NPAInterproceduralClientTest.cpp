@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cctype>
 #include <iterator>
 #include <limits>
 #include <llvm/ADT/APInt.h>
@@ -121,6 +122,131 @@ void expectConstValue(const npa::ConstantPropagationValue &value,
   EXPECT_TRUE(value.constant.eq(expected));
 }
 
+using EntryHookDomain = npa::ProgramTransferDomain<char>;
+
+struct ProjectedStringDomain {
+  using value_type = std::set<std::string>;
+  using test_type = bool;
+  static constexpr bool idempotent = true;
+
+  static value_type zero() { return {}; }
+  static value_type one() { return {""}; }
+
+  static bool equal(const value_type &lhs, const value_type &rhs) {
+    return lhs == rhs;
+  }
+
+  static value_type combine(const value_type &lhs, const value_type &rhs) {
+    value_type out = lhs;
+    out.insert(rhs.begin(), rhs.end());
+    return out;
+  }
+
+  static value_type ndetCombine(const value_type &lhs, const value_type &rhs) {
+    return combine(lhs, rhs);
+  }
+
+  static value_type condCombine(bool phi, const value_type &t,
+                                const value_type &e) {
+    return phi ? t : e;
+  }
+
+  static value_type extend(const value_type &lhs, const value_type &rhs) {
+    value_type out;
+    for (const auto &x : lhs) {
+      for (const auto &y : rhs)
+        out.insert(x + y);
+    }
+    return out;
+  }
+
+  static value_type extend_lin(const value_type &lhs, const value_type &rhs) {
+    return extend(lhs, rhs);
+  }
+
+  static value_type subtract(const value_type &lhs, const value_type &rhs) {
+    value_type out;
+    for (const auto &item : lhs) {
+      if (!rhs.count(item))
+        out.insert(item);
+    }
+    return out;
+  }
+
+  static value_type project(const value_type &value) {
+    value_type out;
+    for (const auto &path : value) {
+      std::string projected;
+      projected.reserve(path.size());
+      for (char ch : path) {
+        if (ch != 'l')
+          projected.push_back(ch);
+      }
+      out.insert(std::move(projected));
+    }
+    return out;
+  }
+};
+
+class EntryHookAnalysis {
+public:
+  using FactType = EntryHookDomain::value_type;
+  using E = npa::E0<EntryHookDomain>;
+  using Exp = npa::Exp0<EntryHookDomain>;
+
+  FactType getEntryValue() const { return EntryHookDomain::one(); }
+
+  E buildBlockEntryExpr(llvm::BasicBlock &BB, E inExpr) {
+    char label = 'B';
+    if (BB.hasName() && !BB.getName().empty())
+      label = static_cast<char>(std::toupper(BB.getName().front()));
+    return Exp::seq(EntryHookDomain::singleton(label), inExpr);
+  }
+
+  E getTransfer(llvm::Instruction &, E currentPath) { return currentPath; }
+
+  FactType applySummary(const FactType &summary, const FactType &fact) {
+    return EntryHookDomain::extend(summary, fact);
+  }
+
+  FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
+    return EntryHookDomain::combine(lhs, rhs);
+  }
+
+  bool factsEqual(const FactType &lhs, const FactType &rhs) const {
+    return EntryHookDomain::equal(lhs, rhs);
+  }
+};
+
+class ProjectedSummaryAnalysis {
+public:
+  using FactType = ProjectedStringDomain::value_type;
+  using E = npa::E0<ProjectedStringDomain>;
+  using Exp = npa::Exp0<ProjectedStringDomain>;
+
+  FactType getEntryValue() const { return ProjectedStringDomain::one(); }
+
+  E getTransfer(llvm::Instruction &inst, E currentPath) const {
+    if (inst.getFunction() && inst.getFunction()->getName() == "callee" &&
+        llvm::isa<llvm::ReturnInst>(&inst)) {
+      return Exp::seq(ProjectedStringDomain::value_type{"l"}, currentPath);
+    }
+    return currentPath;
+  }
+
+  FactType applySummary(const FactType &summary, const FactType &fact) const {
+    return ProjectedStringDomain::extend(summary, fact);
+  }
+
+  FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
+    return ProjectedStringDomain::combine(lhs, rhs);
+  }
+
+  bool factsEqual(const FactType &lhs, const FactType &rhs) const {
+    return ProjectedStringDomain::equal(lhs, rhs);
+  }
+};
+
 void expectIntervalPoint(const npa::Interval &value, const llvm::APInt &expected,
                          npa::IntervalOrdering ordering) {
   EXPECT_FALSE(value.bottom);
@@ -201,6 +327,46 @@ TEST(NPAInterproceduralClients, MaybeUninitializedStoreClearsBeforeCall) {
   EXPECT_EQ(entryFact.countPopulation(), 0u);
 }
 
+TEST(NPAInterproceduralClients, GenericBlockEntryHookAppliesToEntryAndSuccessorBlocks) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main() {
+    entry:
+      br label %mid
+
+    mid:
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  EntryHookAnalysis analysis;
+  auto result =
+      npa::InterproceduralEngine<EntryHookDomain, EntryHookAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::Worklist);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto EntryIt = Main->begin();
+  auto MidIt = std::next(Main->begin(), 1);
+  auto ExitIt = std::next(Main->begin(), 2);
+  ASSERT_NE(ExitIt, Main->end());
+
+  auto entryStates = statesForBlock(result.blockEntryFacts, &*EntryIt);
+  auto midStates = statesForBlock(result.blockEntryFacts, &*MidIt);
+  auto exitStates = statesForBlock(result.blockEntryFacts, &*ExitIt);
+  ASSERT_EQ(entryStates.size(), 1u);
+  ASSERT_EQ(midStates.size(), 1u);
+  ASSERT_EQ(exitStates.size(), 1u);
+
+  EXPECT_TRUE(containsPath(*entryStates.front(), {'E'}));
+  EXPECT_TRUE(containsPath(*midStates.front(), {'E', 'M'}));
+  EXPECT_TRUE(containsPath(*exitStates.front(), {'E', 'M', 'E'}));
+}
+
 TEST(NPAInterproceduralClients, ConstantPropagationTransfersArgumentsAcrossCall) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
@@ -257,6 +423,72 @@ TEST(NPAInterproceduralClients, InterproceduralClientsAcceptTensorStrategyOnDema
   auto It = states.front()->values.find(Arg);
   ASSERT_NE(It, states.front()->values.end());
   expectConstValue(It->second, signedAPInt(32, 5));
+}
+
+TEST(NPAInterproceduralClients, PublicSummariesRemainUnprojectedWhenDomainProjects) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @callee() {
+    entry:
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @callee()
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  ProjectedSummaryAnalysis analysis;
+  auto result =
+      npa::InterproceduralEngine<ProjectedStringDomain,
+                                 ProjectedSummaryAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::Worklist);
+
+  auto *Callee = module->getFunction("callee");
+  ASSERT_NE(Callee, nullptr);
+  auto it = result.summaries.find(npa::FunctionKey{Callee});
+  ASSERT_NE(it, result.summaries.end());
+  EXPECT_EQ(it->second, (ProjectedStringDomain::value_type{"l"}));
+}
+
+TEST(NPAInterproceduralClients,
+     DomainsWithProjectOnlyProjectCalleeSummariesAtCallSites) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @callee() {
+    entry:
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @callee()
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  ProjectedSummaryAnalysis analysis;
+  auto result =
+      npa::InterproceduralEngine<ProjectedStringDomain,
+                                 ProjectedSummaryAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::Worklist);
+
+  auto *Main = module->getFunction("main");
+  auto *Callee = module->getFunction("callee");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Callee, nullptr);
+
+  auto main_it = result.summaries.find(npa::FunctionKey{Main});
+  auto callee_it = result.summaries.find(npa::FunctionKey{Callee});
+  ASSERT_NE(main_it, result.summaries.end());
+  ASSERT_NE(callee_it, result.summaries.end());
+
+  EXPECT_EQ(callee_it->second, (ProjectedStringDomain::value_type{"l"}));
+  EXPECT_EQ(main_it->second, (ProjectedStringDomain::value_type{""}));
 }
 
 TEST(NPAInterproceduralClients,
@@ -1187,6 +1419,79 @@ namespace {
 
 using TraceTransferDomain = npa::ProgramTransferDomain<char>;
 
+struct BackwardTensorLangDomain {
+  using value_type = std::set<std::string>;
+  using test_type = bool;
+  static constexpr bool idempotent = true;
+  static constexpr bool commutative_extend = false;
+  static constexpr std::size_t MaxLen = 8;
+
+  static value_type zero() { return {}; }
+  static value_type one() { return {""}; }
+  static bool equal(const value_type &a, const value_type &b) { return a == b; }
+  static value_type combine(const value_type &a, const value_type &b) {
+    value_type out = a;
+    out.insert(b.begin(), b.end());
+    return out;
+  }
+  static value_type ndetCombine(const value_type &a, const value_type &b) {
+    return combine(a, b);
+  }
+  static value_type condCombine(bool phi, const value_type &t,
+                                const value_type &e) {
+    return phi ? t : e;
+  }
+  static value_type extend(const value_type &a, const value_type &b) {
+    value_type out;
+    for (const auto &lhs : a) {
+      for (const auto &rhs : b) {
+        std::string s = lhs + rhs;
+        if (s.size() <= MaxLen)
+          out.insert(std::move(s));
+      }
+    }
+    return out;
+  }
+  static value_type extend_lin(const value_type &a, const value_type &b) {
+    return extend(a, b);
+  }
+  static value_type subtract(const value_type &a, const value_type &) { return a; }
+};
+
+class BackwardTensorAnalysis {
+public:
+  using FactType = BackwardTensorLangDomain::value_type;
+  using E = npa::E0<BackwardTensorLangDomain>;
+
+  FactType getExitValue(const llvm::Function &) const {
+    return BackwardTensorLangDomain::one();
+  }
+
+  E getTransfer(llvm::Instruction &, E current) const { return current; }
+
+  FactType getCallReturnTransfer(const llvm::CallBase &,
+                                 const llvm::Function &) const {
+    return {std::string("r")};
+  }
+
+  FactType getCallEntryTransfer(const llvm::CallBase &,
+                                const llvm::Function &) const {
+    return {std::string("e")};
+  }
+
+  FactType applySummary(const FactType &summary, const FactType &fact) const {
+    return BackwardTensorLangDomain::extend(summary, fact);
+  }
+
+  FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
+    return BackwardTensorLangDomain::combine(lhs, rhs);
+  }
+
+  bool factsEqual(const FactType &lhs, const FactType &rhs) const {
+    return BackwardTensorLangDomain::equal(lhs, rhs);
+  }
+};
+
 class BackwardEdgeTransferAnalysis {
 public:
   using FactType = TraceTransferDomain::value_type;
@@ -1225,6 +1530,46 @@ public:
 
 } // namespace
 
+namespace npa {
+template <> struct TensorSemiringTraits<BackwardTensorLangDomain> {
+  using tensor_domain = TensorProductExactDomain<BackwardTensorLangDomain>;
+
+  static bool available() { return true; }
+
+  static tensor_domain::value_type
+  right_constant(const BackwardTensorLangDomain::value_type &v) {
+    return domain_equal<BackwardTensorLangDomain>(v, BackwardTensorLangDomain::zero())
+               ? tensor_domain::zero()
+               : tensor_domain::singleton(BackwardTensorLangDomain::one(), v);
+  }
+
+  static tensor_domain::value_type
+  left_constant(const BackwardTensorLangDomain::value_type &v) {
+    return domain_equal<BackwardTensorLangDomain>(v, BackwardTensorLangDomain::zero())
+               ? tensor_domain::zero()
+               : tensor_domain::singleton(v, BackwardTensorLangDomain::one());
+  }
+
+  static tensor_domain::value_type
+  constant(const BackwardTensorLangDomain::value_type &v) {
+    return right_constant(v);
+  }
+
+  static tensor_domain::value_type
+  couple(const BackwardTensorLangDomain::value_type &lhs,
+         const BackwardTensorLangDomain::value_type &rhs) {
+    return tensor_domain::singleton(lhs, rhs);
+  }
+
+  static BackwardTensorLangDomain::value_type
+  readout(const tensor_domain::value_type &v) {
+    return tensor_domain::project(v);
+  }
+};
+} // namespace npa
+
+namespace {
+
 TEST(NPAInterproceduralClients, BackwardEngineAppliesEdgeTransfers) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
@@ -1254,6 +1599,39 @@ TEST(NPAInterproceduralClients, BackwardEngineAppliesEdgeTransfers) {
   ASSERT_EQ(Facts.size(), 1u);
   EXPECT_TRUE(containsPath(*Facts.front(), {'T'}));
   EXPECT_TRUE(containsPath(*Facts.front(), {'F'}));
+}
+
+TEST(NPAInterproceduralClients,
+     BackwardTensorStrategyHandlesInterproceduralCallsWithoutFallback) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @callee() {
+    entry:
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @callee()
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BackwardTensorAnalysis analysis;
+  testing::internal::CaptureStderr();
+  auto result =
+      npa::BackwardInterproceduralEngine<BackwardTensorLangDomain,
+                                         BackwardTensorAnalysis>::run(
+          *module, analysis, true, npa::LinearStrategy::TensorProduct);
+  std::string stderrOutput = testing::internal::GetCapturedStderr();
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto Facts = statesForBlock(result.blockEntryFacts, &Main->getEntryBlock());
+  ASSERT_EQ(Facts.size(), 1u);
+  EXPECT_TRUE(Facts.front()->count("er"));
+  EXPECT_EQ(stderrOutput.find("falling back"), std::string::npos);
 }
 
 TEST(NPAInterproceduralClients, ProgramTransferDomainPreservesLongPaths) {
@@ -1379,3 +1757,5 @@ TEST(NPAInterproceduralClients, IntervalCompareAndSelectUseForcedRanges) {
   expectIntervalPoint(SelIt->second, signedAPInt(32, 9),
                       npa::IntervalOrdering::Signed);
 }
+
+} // namespace

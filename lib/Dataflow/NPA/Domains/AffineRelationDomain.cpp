@@ -354,9 +354,9 @@ AffineRelationDomain::ndetCombine(const value_type &lhs, const value_type &rhs) 
 }
 
 AffineRelationDomain::value_type
-AffineRelationDomain::condCombine(bool /*phi*/, const value_type &t,
+AffineRelationDomain::condCombine(bool phi, const value_type &t,
                                   const value_type &e) {
-  return combine(t, e);
+  return phi ? t : e;
 }
 
 AffineRelationDomain::value_type

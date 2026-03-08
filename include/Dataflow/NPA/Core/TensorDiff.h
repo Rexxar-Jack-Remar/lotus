@@ -24,26 +24,30 @@ private:
     case K0::Term:
       return Exp1<TD>::term(TD::zero());
     case K0::Seq:
-      return Exp1<TD>::seqR(aux(nu, o->t), Traits::constant(o->c));
+      return Exp1<TD>::seqR(aux(nu, o->t), Traits::left_constant(o->c));
     case K0::Mul: {
       assert(o->t1->val.has_value() && o->t2->val.has_value());
       auto lhs = aux(nu, o->t1);
       auto rhs = aux(nu, o->t2);
-      return Exp1<TD>::add(Exp1<TD>::seqR(lhs, Traits::constant(*o->t2->val)),
-                           Exp1<TD>::seq(Traits::constant(*o->t1->val), rhs));
+      return Exp1<TD>::add(
+          Exp1<TD>::seqR(lhs, Traits::right_constant(*o->t2->val)),
+          Exp1<TD>::seqR(rhs, Traits::left_constant(*o->t1->val)));
     }
     case K0::Call: {
       auto dArg = aux(nu, o->t);
-      auto left = Exp1<TD>::seqR(dArg, Traits::constant(nu.at(o->sym)));
+      auto left = Exp1<TD>::seqR(dArg, Traits::left_constant(nu.at(o->sym)));
       assert(o->t->val.has_value());
-      auto right = Exp1<TD>::seq(Traits::constant(*o->t->val),
-                                 Exp1<TD>::hole(o->sym));
+      auto right =
+          Exp1<TD>::seqR(Exp1<TD>::hole(o->sym),
+                         Traits::right_constant(*o->t->val));
       return Exp1<TD>::add(left, right);
     }
     case K0::Cond:
       return Exp1<TD>::cond(o->phi, aux(nu, o->t1), aux(nu, o->t2));
     case K0::Ndet:
       return Exp1<TD>::add(aux(nu, o->t1), aux(nu, o->t2));
+    case K0::Project:
+      return Exp1<TD>::project(aux(nu, o->t));
     case K0::Hole:
       return Exp1<TD>::hole(o->sym);
     case K0::Bound:
@@ -55,12 +59,12 @@ private:
       V nu_x = nu.at(o->sym);
       auto d1 = aux(nu, o->t1);
       auto d2 = aux(nu, o->t2);
-      auto term1 =
-          Exp1<TD>::seqR(d1, Traits::constant(D::extend(nu_x, t2_val)));
+      auto term1 = Exp1<TD>::seqR(
+          d1, Traits::right_constant(D::extend(nu_x, t2_val)));
       auto term2 =
           Exp1<TD>::seqR(Exp1<TD>::hole(o->sym), Traits::couple(t1_val, t2_val));
-      auto term3 = Exp1<TD>::seqR(Exp1<TD>::seqR(d2, Traits::constant(nu_x)),
-                                  Traits::constant(t1_val));
+      auto term3 = Exp1<TD>::seqR(
+          d2, Traits::left_constant(D::extend(t1_val, nu_x)));
       return Exp1<TD>::add(Exp1<TD>::add(term1, term2), term3);
     }
     case K0::InfClos:

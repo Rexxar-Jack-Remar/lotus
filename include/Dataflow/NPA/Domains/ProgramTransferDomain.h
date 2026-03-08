@@ -66,9 +66,9 @@ public:
     return combine(a, b);
   }
 
-  static value_type condCombine(bool /*phi*/, const value_type &t,
+  static value_type condCombine(bool phi, const value_type &t,
                                 const value_type &e) {
-    return combine(t, e);
+    return phi ? t : e;
   }
 
   static value_type extend(const value_type &a, const value_type &b) {
