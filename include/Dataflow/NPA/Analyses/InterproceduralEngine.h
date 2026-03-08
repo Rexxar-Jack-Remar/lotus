@@ -3,6 +3,7 @@
 
 #include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/NPA/NPA.h"
+#include "Utils/Algorithms/PathExpressions/PathExpressions.h"
 
 #include <deque>
 #include <map>
@@ -220,6 +221,219 @@ private:
     return inExpr;
   }
 
+  static Val getIncomingBlockTransfer(Analysis &analysis, llvm::BasicBlock &BB,
+                                      llvm::BasicBlock &Pred) {
+    if (!llvm::isa<llvm::PHINode>(BB.begin()))
+      return D::one();
+
+    E entryExpr = buildBlockEntryExpr(analysis, BB, Exp::term(D::zero()), 0);
+    std::unordered_map<Symbol, Val> env;
+    for (auto *OtherPred : predecessors(&BB))
+      env[getBlockSymbol(OtherPred)] = (OtherPred == &Pred) ? D::one() : D::zero();
+    return I0<D>::eval(false, env, entryExpr);
+  }
+
+  struct FunctionRegexArtifacts {
+    E summaryExpr;
+    std::unordered_map<std::string, E> blockEntryExprs;
+    std::unordered_map<std::string, E> blockExitExprs;
+  };
+
+  static bool isZeroExpr(const E &expr) {
+    return expr && expr->k == Exp::Term && D::equal(expr->c, D::zero());
+  }
+
+  static bool isOneExpr(const E &expr) {
+    return expr && expr->k == Exp::Term && D::equal(expr->c, D::one());
+  }
+
+  static E combineExpr(E lhs, E rhs) {
+    if (!lhs)
+      return rhs;
+    if (!rhs)
+      return lhs;
+    if (isZeroExpr(lhs))
+      return rhs;
+    if (isZeroExpr(rhs))
+      return lhs;
+    return Exp::ndet(lhs, rhs);
+  }
+
+  static E multiplyExpr(E lhs, E rhs) {
+    if (!lhs || !rhs)
+      return Exp::term(D::zero());
+    if (isZeroExpr(lhs) || isZeroExpr(rhs))
+      return Exp::term(D::zero());
+    if (isOneExpr(lhs))
+      return rhs;
+    if (isOneExpr(rhs))
+      return lhs;
+    if (lhs->k == Exp::Term && rhs->k == Exp::Term)
+      return Exp::term(D::extend(lhs->c, rhs->c));
+    if (lhs->k == Exp::Term)
+      return Exp::seq(lhs->c, rhs);
+    return Exp::mul(lhs, rhs);
+  }
+
+  static E starExpr(E inner, unsigned &counter) {
+    if (!inner || isZeroExpr(inner) || isOneExpr(inner))
+      return Exp::term(D::one());
+    Symbol bound = "__regex_star_" + std::to_string(counter++);
+    return Exp::inf(
+        combineExpr(Exp::term(D::one()), Exp::mul(Exp::bound(bound), inner)),
+        bound);
+  }
+
+  class RegexToExpr final
+      : public lotus::pathexpressions::IRegexVisitor<int, E, std::nullptr_t> {
+  public:
+    RegexToExpr(const std::vector<E> &labels, unsigned &star_counter)
+        : labels_(labels), starCounter_(star_counter) {}
+
+    E visit(const lotus::pathexpressions::Union<int> &re,
+            std::nullptr_t) override {
+      return combineExpr(re.getFirst()->accept(*this),
+                         re.getSecond()->accept(*this));
+    }
+
+    E visit(const lotus::pathexpressions::Concatenation<int> &re,
+            std::nullptr_t) override {
+      return multiplyExpr(re.getSecond()->accept(*this),
+                          re.getFirst()->accept(*this));
+    }
+
+    E visit(const lotus::pathexpressions::Star<int> &re,
+            std::nullptr_t) override {
+      return starExpr(re.getInner()->accept(*this), starCounter_);
+    }
+
+    E visit(const lotus::pathexpressions::Literal<int> &re,
+            std::nullptr_t) override {
+      return labels_.at(static_cast<std::size_t>(re.getLetter()));
+    }
+
+    E visit(const lotus::pathexpressions::Epsilon<int> &,
+            std::nullptr_t) override {
+      return Exp::term(D::one());
+    }
+
+    E visit(const lotus::pathexpressions::EmptySet<int> &,
+            std::nullptr_t) override {
+      return Exp::term(D::zero());
+    }
+
+  private:
+    const std::vector<E> &labels_;
+    unsigned &starCounter_;
+  };
+
+  static E translateRegex(
+      const lotus::pathexpressions::RegexRef<int> &regex,
+      const std::vector<E> &labels, unsigned &star_counter) {
+    RegexToExpr translator(labels, star_counter);
+    return regex->accept(translator, nullptr);
+  }
+
+  static E buildBlockBodyExpr(Analysis &analysis, llvm::Instruction &I, E currentPath,
+                              llvm::Module &M, std::deque<llvm::Function *> &worklist,
+                              std::set<llvm::Function *> &visited) {
+    if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
+      std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+      if (!Callees.empty()) {
+        E callBranches = nullptr;
+        for (llvm::Function *Callee : Callees) {
+          if (visited.insert(Callee).second)
+            worklist.push_back(Callee);
+          E branch = Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
+                              currentPath);
+          branch = multiplyExpr(Exp::hole(getFuncSymbol(Callee)), branch);
+          branch =
+              Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0), branch);
+          callBranches = combineExpr(callBranches, branch);
+        }
+        currentPath = callBranches;
+      } else {
+        currentPath =
+            Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+      }
+    }
+    return analysis.getTransfer(I, currentPath);
+  }
+
+  static FunctionRegexArtifacts
+  buildFunctionRegexArtifacts(llvm::Module &M, llvm::Function &F, Analysis &analysis,
+                              std::deque<llvm::Function *> &worklist,
+                              std::set<llvm::Function *> &visited) {
+    using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
+
+    ::dataflow::controlflow::LLVMIntraCFG CFG;
+    std::unordered_map<const llvm::BasicBlock *, int> blockIds;
+    int nextId = 1;
+    for (auto &BB : F)
+      blockIds[&BB] = nextId++;
+    const int entryId = blockIds.at(&F.getEntryBlock());
+    const int exitId = nextId;
+
+    Graph graph;
+    graph.addNode(exitId);
+
+    std::vector<E> labels;
+    labels.reserve(F.size() * 2U + 1U);
+    std::unordered_map<std::string, E> blockBodyExprs;
+    auto addLabel = [&](E expr) {
+      labels.push_back(expr ? expr : Exp::term(D::zero()));
+      return static_cast<int>(labels.size() - 1);
+    };
+
+    for (auto &BB : F) {
+      const int fromId = blockIds.at(&BB);
+      graph.addNode(fromId);
+
+      E currentPath = Exp::term(D::one());
+      for (auto &I : BB)
+        currentPath = buildBlockBodyExpr(analysis, I, currentPath, M, worklist,
+                                         visited);
+      blockBodyExprs.emplace(getBlockSymbol(&BB), currentPath);
+
+      auto *Term = BB.getTerminator();
+      auto Succs =
+          Term ? CFG.getSuccsOf(Term, ::dataflow::controlflow::FlowDirection::Forward)
+               : std::vector<llvm::Instruction *>{};
+      if (Term == nullptr || Succs.empty()) {
+        graph.addEdge(fromId, addLabel(currentPath), exitId);
+        continue;
+      }
+
+      for (auto *SuccInst : Succs) {
+        auto *Succ = SuccInst ? SuccInst->getParent() : nullptr;
+        if (!Succ)
+          continue;
+        Val transfer = llvm::isa<llvm::PHINode>(Succ->begin())
+                           ? getIncomingBlockTransfer(analysis, *Succ, BB)
+                           : getEdgeTransfer(analysis, *Term, *Succ, 0);
+        E edgeExpr = Exp::seq(transfer, currentPath);
+        graph.addEdge(fromId, addLabel(edgeExpr), blockIds.at(Succ));
+      }
+    }
+
+    lotus::pathexpressions::PathExpressionComputer<int, int> computer(graph);
+    unsigned starCounter = 0;
+
+    FunctionRegexArtifacts out;
+    out.summaryExpr = translateRegex(computer.exprBetween(entryId, exitId), labels,
+                                     starCounter);
+    for (auto &BB : F) {
+      const std::string bSym = getBlockSymbol(&BB);
+      E entryExpr =
+          translateRegex(computer.exprBetween(entryId, blockIds.at(&BB)), labels,
+                         starCounter);
+      out.blockEntryExprs.emplace(bSym, entryExpr);
+      out.blockExitExprs.emplace(bSym,
+                                 multiplyExpr(blockBodyExprs.at(bSym), entryExpr));
+    }
+    return out;
+  }
+
 public:
   static std::vector<llvm::Function *> getEntryFunctions(llvm::Module &M) {
     if (llvm::Function *Main = M.getFunction("main"))
@@ -254,12 +468,12 @@ public:
 
   static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false,
                     LinearStrategy linearStrategy = LinearStrategy::Worklist) {
-    ::dataflow::controlflow::LLVMIntraCFG CFG;
     std::vector<std::pair<Symbol, E>> eqns;
     std::deque<llvm::Function *> worklist;
     std::set<llvm::Function *> visited;
     std::unordered_map<std::string, FunctionKey> functionSymbols;
-    std::unordered_map<std::string, BlockKey> blockSymbols;
+    std::unordered_map<std::string, E> blockEntryExprs;
+    std::unordered_map<std::string, E> blockExitExprs;
 
     std::vector<llvm::Function *> entries = getEntryFunctions(M);
     for (llvm::Function *Entry : entries) {
@@ -273,82 +487,13 @@ public:
 
       std::string fSym = getFuncSymbol(F);
       functionSymbols[fSym] = {F};
-      E exitExpr = nullptr;
-
-      for (auto &BB : *F) {
-        std::string bSym = getBlockSymbol(&BB);
-        blockSymbols[bSym] = {&BB};
-
-        E inExpr = nullptr;
-        if (&BB == &F->getEntryBlock()) {
-          inExpr = Exp::term(D::one());
-        } else {
-          bool hasPreds = false;
-          auto *First = BB.empty() ? nullptr : &BB.front();
-          for (auto *PredInst : CFG.getPredsOf(
-                   First, ::dataflow::controlflow::FlowDirection::Forward)) {
-            auto *Pred = PredInst ? PredInst->getParent() : nullptr;
-            if (!Pred)
-              continue;
-            hasPreds = true;
-            E pHole = Exp::hole(getBlockSymbol(Pred));
-            if (auto *PredTerm = Pred->getTerminator()) {
-              pHole = Exp::seq(getEdgeTransfer(analysis, *PredTerm, BB, 0), pHole);
-            }
-            if (!inExpr)
-              inExpr = pHole;
-            else
-              inExpr = Exp::ndet(inExpr, pHole);
-          }
-          if (!hasPreds)
-            inExpr = Exp::term(D::zero());
-        }
-
-        E currentPath = buildBlockEntryExpr(analysis, BB, inExpr, 0);
-        for (auto &I : BB) {
-          if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
-            if (!Callees.empty()) {
-              E callBranches = nullptr;
-              for (llvm::Function *Callee : Callees) {
-                if (visited.insert(Callee).second)
-                  worklist.push_back(Callee);
-                E branch =
-                    Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
-                             currentPath);
-                branch = Exp::call(getFuncSymbol(Callee), branch);
-                branch =
-                    Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
-                             branch);
-                callBranches =
-                    callBranches ? Exp::ndet(callBranches, branch) : branch;
-              }
-              currentPath = callBranches;
-            } else {
-              currentPath =
-                  Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
-            }
-          }
-          currentPath = analysis.getTransfer(I, currentPath);
-        }
-
-        eqns.emplace_back(bSym, currentPath);
-
-        auto *Term = BB.getTerminator();
-        if (Term == nullptr ||
-            CFG.getSuccsOf(Term,
-                           ::dataflow::controlflow::FlowDirection::Forward)
-                .empty()) {
-          if (!exitExpr)
-            exitExpr = Exp::hole(bSym);
-          else
-            exitExpr = Exp::ndet(exitExpr, Exp::hole(bSym));
-        }
-      }
-
-      if (!exitExpr)
-        exitExpr = Exp::term(D::zero());
-      eqns.emplace_back(fSym, exitExpr);
+      auto artifacts =
+          buildFunctionRegexArtifacts(M, *F, analysis, worklist, visited);
+      eqns.emplace_back(fSym, artifacts.summaryExpr);
+      for (auto &blockExpr : artifacts.blockEntryExprs)
+        blockEntryExprs.emplace(blockExpr.first, blockExpr.second);
+      for (auto &blockExpr : artifacts.blockExitExprs)
+        blockExitExprs.emplace(blockExpr.first, blockExpr.second);
     }
 
     auto rawRes = NewtonSolver<D>::solve(eqns, verbose, -1, linearStrategy);
@@ -393,35 +538,24 @@ public:
 
       for (auto &BB : *F) {
         std::string bSym = getBlockSymbol(&BB);
-        if (!solvedMap.count(bSym))
+        auto blockExprIt = blockEntryExprs.find(bSym);
+        if (blockExprIt == blockEntryExprs.end())
           continue;
-
-        E inExpr = nullptr;
-        if (&BB == &F->getEntryBlock()) {
-          inExpr = Exp::term(D::one());
-        } else {
-          bool hasPreds = false;
-          auto *First = BB.empty() ? nullptr : &BB.front();
-          for (auto *PredInst : CFG.getPredsOf(
-                   First, ::dataflow::controlflow::FlowDirection::Forward)) {
-            auto *Pred = PredInst ? PredInst->getParent() : nullptr;
-            if (!Pred)
+        Val entryToBlockStart = D::zero();
+        if (llvm::isa<llvm::PHINode>(BB.begin())) {
+          auto blockExpr = buildBlockEntryExpr(analysis, BB, Exp::term(D::zero()), 0);
+          std::unordered_map<Symbol, Val> env = solvedMap;
+          for (auto *Pred : predecessors(&BB)) {
+            const std::string predSym = getBlockSymbol(Pred);
+            auto predIt = blockExitExprs.find(predSym);
+            if (predIt == blockExitExprs.end())
               continue;
-            hasPreds = true;
-            E pHole = Exp::hole(getBlockSymbol(Pred));
-            if (auto *PredTerm = Pred->getTerminator()) {
-              pHole = Exp::seq(getEdgeTransfer(analysis, *PredTerm, BB, 0), pHole);
-            }
-            if (!inExpr)
-              inExpr = pHole;
-            else
-              inExpr = Exp::ndet(inExpr, pHole);
+            env[predSym] = I0<D>::eval(false, solvedMap, predIt->second);
           }
-          if (!hasPreds)
-            inExpr = Exp::term(D::zero());
+          entryToBlockStart = I0<D>::eval(false, env, blockExpr);
+        } else {
+          entryToBlockStart = I0<D>::eval(false, solvedMap, blockExprIt->second);
         }
-        E blockEntryExpr = buildBlockEntryExpr(analysis, BB, inExpr, 0);
-        Val entryToBlockStart = I0<D>::eval(false, solvedMap, blockEntryExpr);
 
         auto blockEntryFact =
             analysis.applySummary(entryToBlockStart, inputVal);

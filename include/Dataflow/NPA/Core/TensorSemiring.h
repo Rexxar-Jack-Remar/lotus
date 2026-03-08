@@ -13,12 +13,14 @@ namespace npa {
 /// - coupling of left/right coefficients (`couple`)
 /// - readout/detensor operation (`readout`)
 ///
-/// The default uses the exact-correlated paired tensor domain for idempotent
-/// semirings.
+/// The default is unavailable: domains must opt in explicitly with a
+/// specialization that defines the tensor-side semantics they want to use.
+/// This keeps `LinearStrategy::TensorProduct` aligned with paper-specific
+/// admissible semiring constructions instead of silently applying a fallback.
 template <class D> struct TensorSemiringTraits {
   using tensor_domain = TensorProductExactDomain<D>;
 
-  static bool available() { return D::idempotent; }
+  static bool available() { return false; }
 
   static typename tensor_domain::value_type constant(const DomVal<D> &v) {
     return domain_equal<D>(v, D::zero()) ? tensor_domain::zero()

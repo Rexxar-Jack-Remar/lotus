@@ -31,12 +31,13 @@ template <class D> struct Exp0;
 template <class D> using E0 = std::shared_ptr<Exp0<D>>;
 
 /// Polynomial expression (full equation system f(X)).
-/// Kinds: Term (constant), Seq (c·t), Call (procedure call), Cond, Ndet,
-/// Hole/Bound (variable), Concat (t1·X·t2, LCFL form), InfClos (Kleene star).
+/// Kinds: Term (constant), Seq (c·t), Mul (t1·t2), Call (procedure call),
+/// Cond, Ndet, Hole/Bound (variable), Concat (t1·X·t2, LCFL form), InfClos
+/// (Kleene star).
 template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
   using V = DomVal<D>;
   using T = DomTest<D>;
-  enum K { Term, Seq, Call, Cond, Ndet, Hole, Bound, Concat, InfClos };
+  enum K { Term, Seq, Mul, Call, Cond, Ndet, Hole, Bound, Concat, InfClos };
   K k;
   V c;
   E0<D> t;
@@ -55,6 +56,13 @@ template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
     e->k = Seq;
     e->c = c;
     e->t = t;
+    return e;
+  }
+  static E0<D> mul(E0<D> lhs, E0<D> rhs) {
+    auto e = std::make_shared<Exp0>();
+    e->k = Mul;
+    e->t1 = lhs;
+    e->t2 = rhs;
     return e;
   }
   static E0<D> call(Symbol f, E0<D> arg) {
@@ -278,6 +286,7 @@ template <class D> struct ExprFeatureDetector {
     case Exp0<D>::Seq:
     case Exp0<D>::Call:
       return has_infclos(e->t);
+    case Exp0<D>::Mul:
     case Exp0<D>::Cond:
     case Exp0<D>::Ndet:
     case Exp0<D>::Concat:

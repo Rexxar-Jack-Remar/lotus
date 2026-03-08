@@ -49,6 +49,13 @@ private:
       return Exp1<D>::term(D::zero());
     case K0::Seq:
       return Exp1<D>::seq(o->c, aux(nu, o->t, cur->t));
+    case K0::Mul: {
+      assert(o->t1->val.has_value() && o->t2->val.has_value());
+      M1 lhs = aux(nu, o->t1, cur->t1);
+      M1 rhs = aux(nu, o->t2, cur->t2);
+      return Exp1<D>::add(Exp1<D>::seqR(lhs, *o->t2->val),
+                          Exp1<D>::seq(*o->t1->val, rhs));
+    }
     case K0::Call: {
       auto dArg = aux(nu, o->t, cur->t);
       auto left = Exp1<D>::seq(nu.at(o->sym), dArg);

@@ -231,114 +231,77 @@ void setTensorAssignment(std::vector<int> &values, unsigned predicate_count,
 template <typename GroupFn>
 DdNode *transitionCubeGeneric(DdManager *manager, unsigned predicate_count,
                               GroupFn &&group_fn);
+template <typename MapperFn>
+DdNode *remapBddBetweenManagers(DdManager *src_manager, DdManager *dst_manager,
+                                DdNode *node, unsigned src_var_count,
+                                MapperFn &&mapper);
+
+template <typename GroupEnum>
+std::vector<DdNode *> varsForGroupRange(unsigned predicate_count, GroupEnum group,
+                                        unsigned begin, unsigned end);
+DdNode *baseGroupCube(unsigned predicate_count,
+                      const std::vector<BaseVarGroup> &groups,
+                      unsigned begin = 0, unsigned end = 0);
+DdNode *tensorGroupCube(unsigned predicate_count,
+                        const std::vector<TensorVarGroup> &groups,
+                        unsigned begin = 0, unsigned end = 0);
+DdNode *baseEqualityNode(unsigned predicate_count, BaseVarGroup lhs,
+                         BaseVarGroup rhs, unsigned begin = 0,
+                         unsigned end = 0);
+DdNode *tensorEqualityNode(unsigned predicate_count, TensorVarGroup lhs,
+                           TensorVarGroup rhs, unsigned begin = 0,
+                           unsigned end = 0);
+template <typename GroupEnum>
+DdNode *swapVariableGroups(DdManager *manager, DdNode *node,
+                           unsigned predicate_count,
+                           const std::vector<std::pair<GroupEnum, GroupEnum>> &pairs);
+DdNode *remapBaseBddToTensor(DdNode *node, unsigned predicate_count,
+                             BaseVarGroup next_group, BaseVarGroup cur_group,
+                             TensorVarGroup mapped_next,
+                             TensorVarGroup mapped_cur);
+DdNode *remapTensorBddToBase(DdNode *node, unsigned predicate_count,
+                             TensorVarGroup mapped_cur,
+                             TensorVarGroup mapped_next);
 
 DdNode *baseComposeNode(unsigned predicate_count, DdNode *outer, DdNode *inner) {
   DdManager *manager = getBaseManager(predicate_count);
-  DdNode *result = logicZero(manager);
-  Cudd_Ref(result);
-  std::vector<int> values = assignmentVector(predicate_count);
-  enumerateBitVectors(predicate_count, [&](std::uint64_t cur_bits) {
-    enumerateBitVectors(predicate_count, [&](std::uint64_t next_bits) {
-      bool reachable = false;
-      enumerateBitVectors(predicate_count, [&](std::uint64_t mid_bits) {
-        if (reachable)
-          return;
-        std::fill(values.begin(), values.end(), 0);
-        setAssignment(values, predicate_count, BaseVarGroup::Cur, cur_bits);
-        setAssignment(values, predicate_count, BaseVarGroup::Next, mid_bits);
-        const bool outer_ok =
-            Cudd_Eval(manager, outer, values.data()) != logicZero(manager);
-        std::fill(values.begin(), values.end(), 0);
-        setAssignment(values, predicate_count, BaseVarGroup::Cur, mid_bits);
-        setAssignment(values, predicate_count, BaseVarGroup::Next, next_bits);
-        const bool inner_ok =
-            Cudd_Eval(manager, inner, values.data()) != logicZero(manager);
-        reachable = outer_ok && inner_ok;
-      });
-      if (!reachable)
-        return;
-      DdNode *cube = transitionCubeGeneric(
-          manager, predicate_count, [&](unsigned idx) {
-            return std::array<std::pair<DdNode *, int>, 2>{
-                std::make_pair(baseVarAt(predicate_count, BaseVarGroup::Cur, idx),
-                               static_cast<int>((cur_bits >> idx) & 1U)),
-                std::make_pair(
-                    baseVarAt(predicate_count, BaseVarGroup::Next, idx),
-                    static_cast<int>((next_bits >> idx) & 1U))};
-          });
-      DdNode *merged = bddOr(manager, result, cube);
-      Cudd_RecursiveDeref(manager, cube);
-      Cudd_RecursiveDeref(manager, result);
-      result = merged;
-    });
-  });
+  DdNode *outer_mid = swapVariableGroups<BaseVarGroup>(
+      manager, outer, predicate_count,
+      {{BaseVarGroup::Next, BaseVarGroup::Mid}});
+  DdNode *inner_mid = swapVariableGroups<BaseVarGroup>(
+      manager, inner, predicate_count,
+      {{BaseVarGroup::Cur, BaseVarGroup::Mid}});
+  DdNode *joined = bddAnd(manager, outer_mid, inner_mid);
+  DdNode *mid_cube =
+      baseGroupCube(predicate_count, {BaseVarGroup::Mid});
+  DdNode *result =
+      withRef(manager, [&] { return Cudd_bddExistAbstract(manager, joined, mid_cube); });
+  Cudd_RecursiveDeref(manager, outer_mid);
+  Cudd_RecursiveDeref(manager, inner_mid);
+  Cudd_RecursiveDeref(manager, joined);
+  Cudd_RecursiveDeref(manager, mid_cube);
   return result;
 }
 
 DdNode *tensorComposeNode(unsigned predicate_count, DdNode *outer, DdNode *inner) {
   DdManager *manager = getTensorManager(predicate_count);
-  DdNode *result = logicZero(manager);
-  Cudd_Ref(result);
-  std::vector<int> values = tensorAssignmentVector(predicate_count);
-  enumerateBitVectors(predicate_count, [&](std::uint64_t a_prime) {
-    enumerateBitVectors(predicate_count, [&](std::uint64_t b) {
-      enumerateBitVectors(predicate_count, [&](std::uint64_t a) {
-        enumerateBitVectors(predicate_count, [&](std::uint64_t b_prime) {
-          bool reachable = false;
-          enumerateBitVectors(predicate_count, [&](std::uint64_t mid_a) {
-            enumerateBitVectors(predicate_count, [&](std::uint64_t mid_b) {
-              if (reachable)
-                return;
-              std::fill(values.begin(), values.end(), 0);
-              setTensorAssignment(values, predicate_count,
-                                  TensorVarGroup::APrime, a_prime);
-              setTensorAssignment(values, predicate_count, TensorVarGroup::B, b);
-              setTensorAssignment(values, predicate_count, TensorVarGroup::A,
-                                  mid_a);
-              setTensorAssignment(values, predicate_count,
-                                  TensorVarGroup::BPrime, mid_b);
-              const bool outer_ok =
-                  Cudd_Eval(manager, outer, values.data()) != logicZero(manager);
-
-              std::fill(values.begin(), values.end(), 0);
-              setTensorAssignment(values, predicate_count,
-                                  TensorVarGroup::APrime, mid_a);
-              setTensorAssignment(values, predicate_count, TensorVarGroup::B,
-                                  mid_b);
-              setTensorAssignment(values, predicate_count, TensorVarGroup::A, a);
-              setTensorAssignment(values, predicate_count,
-                                  TensorVarGroup::BPrime, b_prime);
-              const bool inner_ok =
-                  Cudd_Eval(manager, inner, values.data()) != logicZero(manager);
-              reachable = outer_ok && inner_ok;
-            });
-          });
-          if (!reachable)
-            return;
-          DdNode *cube = transitionCubeGeneric(
-              manager, predicate_count, [&](unsigned idx) {
-                return std::array<std::pair<DdNode *, int>, 4>{
-                    std::make_pair(
-                        tensorVarAt(predicate_count, TensorVarGroup::APrime, idx),
-                        static_cast<int>((a_prime >> idx) & 1U)),
-                    std::make_pair(
-                        tensorVarAt(predicate_count, TensorVarGroup::B, idx),
-                        static_cast<int>((b >> idx) & 1U)),
-                    std::make_pair(
-                        tensorVarAt(predicate_count, TensorVarGroup::A, idx),
-                        static_cast<int>((a >> idx) & 1U)),
-                    std::make_pair(
-                        tensorVarAt(predicate_count, TensorVarGroup::BPrime, idx),
-                        static_cast<int>((b_prime >> idx) & 1U))};
-              });
-          DdNode *merged = bddOr(manager, result, cube);
-          Cudd_RecursiveDeref(manager, cube);
-          Cudd_RecursiveDeref(manager, result);
-          result = merged;
-        });
-      });
-    });
-  });
+  DdNode *outer_tmp = swapVariableGroups<TensorVarGroup>(
+      manager, outer, predicate_count,
+      {{TensorVarGroup::A, TensorVarGroup::TmpA},
+       {TensorVarGroup::BPrime, TensorVarGroup::TmpB}});
+  DdNode *inner_tmp = swapVariableGroups<TensorVarGroup>(
+      manager, inner, predicate_count,
+      {{TensorVarGroup::APrime, TensorVarGroup::TmpA},
+       {TensorVarGroup::B, TensorVarGroup::TmpB}});
+  DdNode *joined = bddAnd(manager, outer_tmp, inner_tmp);
+  DdNode *tmp_cube = tensorGroupCube(
+      predicate_count, {TensorVarGroup::TmpA, TensorVarGroup::TmpB});
+  DdNode *result =
+      withRef(manager, [&] { return Cudd_bddExistAbstract(manager, joined, tmp_cube); });
+  Cudd_RecursiveDeref(manager, outer_tmp);
+  Cudd_RecursiveDeref(manager, inner_tmp);
+  Cudd_RecursiveDeref(manager, joined);
+  Cudd_RecursiveDeref(manager, tmp_cube);
   return result;
 }
 
@@ -396,6 +359,222 @@ DdNode *transitionCubeGeneric(DdManager *manager, unsigned predicate_count,
     }
   }
   return node;
+}
+
+template <typename GroupEnum>
+std::vector<DdNode *> varsForGroupRange(unsigned predicate_count, GroupEnum group,
+                                        unsigned begin, unsigned end) {
+  if (end == 0 || end > predicate_count)
+    end = predicate_count;
+  std::vector<DdNode *> vars;
+  vars.reserve(end - begin);
+  for (unsigned i = begin; i < end; ++i) {
+    if (std::is_same<GroupEnum, BaseVarGroup>::value)
+      vars.push_back(baseVarAt(predicate_count, static_cast<BaseVarGroup>(group), i));
+    else
+      vars.push_back(
+          tensorVarAt(predicate_count, static_cast<TensorVarGroup>(group), i));
+  }
+  return vars;
+}
+
+DdNode *baseGroupCube(unsigned predicate_count,
+                      const std::vector<BaseVarGroup> &groups, unsigned begin,
+                      unsigned end) {
+  DdManager *manager = getBaseManager(predicate_count);
+  if (end == 0 || end > predicate_count)
+    end = predicate_count;
+  std::vector<DdNode *> vars;
+  std::vector<int> phase;
+  vars.reserve(groups.size() * (end - begin));
+  phase.reserve(groups.size() * (end - begin));
+  for (BaseVarGroup group : groups) {
+    for (unsigned i = begin; i < end; ++i) {
+      vars.push_back(baseVarAt(predicate_count, group, i));
+      phase.push_back(1);
+    }
+  }
+  return withRef(manager, [&] {
+    return Cudd_bddComputeCube(manager, vars.data(), phase.data(),
+                               static_cast<int>(vars.size()));
+  });
+}
+
+DdNode *tensorGroupCube(unsigned predicate_count,
+                        const std::vector<TensorVarGroup> &groups,
+                        unsigned begin, unsigned end) {
+  DdManager *manager = getTensorManager(predicate_count);
+  if (end == 0 || end > predicate_count)
+    end = predicate_count;
+  std::vector<DdNode *> vars;
+  std::vector<int> phase;
+  vars.reserve(groups.size() * (end - begin));
+  phase.reserve(groups.size() * (end - begin));
+  for (TensorVarGroup group : groups) {
+    for (unsigned i = begin; i < end; ++i) {
+      vars.push_back(tensorVarAt(predicate_count, group, i));
+      phase.push_back(1);
+    }
+  }
+  return withRef(manager, [&] {
+    return Cudd_bddComputeCube(manager, vars.data(), phase.data(),
+                               static_cast<int>(vars.size()));
+  });
+}
+
+DdNode *baseEqualityNode(unsigned predicate_count, BaseVarGroup lhs,
+                         BaseVarGroup rhs, unsigned begin, unsigned end) {
+  DdManager *manager = getBaseManager(predicate_count);
+  if (end == 0 || end > predicate_count)
+    end = predicate_count;
+  DdNode *node = logicOne(manager);
+  Cudd_Ref(node);
+  for (unsigned i = begin; i < end; ++i) {
+    DdNode *eq = bddXnor(manager, baseVarAt(predicate_count, lhs, i),
+                         baseVarAt(predicate_count, rhs, i));
+    DdNode *tmp = bddAnd(manager, node, eq);
+    Cudd_RecursiveDeref(manager, eq);
+    Cudd_RecursiveDeref(manager, node);
+    node = tmp;
+  }
+  return node;
+}
+
+DdNode *tensorEqualityNode(unsigned predicate_count, TensorVarGroup lhs,
+                           TensorVarGroup rhs, unsigned begin, unsigned end) {
+  DdManager *manager = getTensorManager(predicate_count);
+  if (end == 0 || end > predicate_count)
+    end = predicate_count;
+  DdNode *node = logicOne(manager);
+  Cudd_Ref(node);
+  for (unsigned i = begin; i < end; ++i) {
+    DdNode *eq = bddXnor(manager, tensorVarAt(predicate_count, lhs, i),
+                         tensorVarAt(predicate_count, rhs, i));
+    DdNode *tmp = bddAnd(manager, node, eq);
+    Cudd_RecursiveDeref(manager, eq);
+    Cudd_RecursiveDeref(manager, node);
+    node = tmp;
+  }
+  return node;
+}
+
+template <typename GroupEnum>
+DdNode *swapVariableGroups(DdManager *manager, DdNode *node,
+                           unsigned predicate_count,
+                           const std::vector<std::pair<GroupEnum, GroupEnum>> &pairs) {
+  std::vector<int> permutation(static_cast<std::size_t>(Cudd_ReadSize(manager)));
+  for (int i = 0; i < Cudd_ReadSize(manager); ++i)
+    permutation[static_cast<std::size_t>(i)] = i;
+  for (const auto &pair : pairs) {
+    for (unsigned i = 0; i < predicate_count; ++i) {
+      int lhs = 0;
+      int rhs = 0;
+      if (std::is_same<GroupEnum, BaseVarGroup>::value) {
+        lhs = static_cast<int>(
+            baseVarIndex(i, static_cast<BaseVarGroup>(pair.first)));
+        rhs = static_cast<int>(
+            baseVarIndex(i, static_cast<BaseVarGroup>(pair.second)));
+      } else {
+        lhs = static_cast<int>(
+            tensorVarIndex(i, static_cast<TensorVarGroup>(pair.first)));
+        rhs = static_cast<int>(
+            tensorVarIndex(i, static_cast<TensorVarGroup>(pair.second)));
+      }
+      std::swap(permutation[static_cast<std::size_t>(lhs)],
+                permutation[static_cast<std::size_t>(rhs)]);
+    }
+  }
+  return remapBddBetweenManagers(
+      manager, manager, node, static_cast<unsigned>(Cudd_ReadSize(manager)),
+      [&](unsigned src_index) { return permutation.at(src_index); });
+}
+
+DdNode *remapBddRecursive(
+    DdManager *src_manager, DdManager *dst_manager, DdNode *node,
+    const std::vector<int> &index_map,
+    std::unordered_map<DdNode *, DdNode *> &memo) {
+  const bool complemented = Cudd_IsComplement(node);
+  DdNode *regular = Cudd_Regular(node);
+  if (Cudd_IsConstant(regular)) {
+    DdNode *base =
+        regular == Cudd_ReadOne(src_manager) ? logicOne(dst_manager)
+                                             : logicZero(dst_manager);
+    DdNode *out = complemented ? Cudd_Not(base) : base;
+    Cudd_Ref(out);
+    return out;
+  }
+
+  auto it = memo.find(regular);
+  if (it != memo.end()) {
+    DdNode *out = complemented ? Cudd_Not(it->second) : it->second;
+    Cudd_Ref(out);
+    return out;
+  }
+
+  const unsigned src_index = Cudd_NodeReadIndex(regular);
+  assert(src_index < index_map.size() && index_map[src_index] >= 0);
+  DdNode *var = Cudd_bddIthVar(dst_manager, index_map[src_index]);
+  DdNode *then_branch = remapBddRecursive(src_manager, dst_manager, Cudd_T(regular),
+                                          index_map, memo);
+  DdNode *else_branch = remapBddRecursive(src_manager, dst_manager, Cudd_E(regular),
+                                          index_map, memo);
+  DdNode *rebuilt =
+      withRef(dst_manager, [&] { return Cudd_bddIte(dst_manager, var, then_branch, else_branch); });
+  Cudd_RecursiveDeref(dst_manager, then_branch);
+  Cudd_RecursiveDeref(dst_manager, else_branch);
+  memo.emplace(regular, rebuilt);
+
+  DdNode *out = complemented ? Cudd_Not(rebuilt) : rebuilt;
+  Cudd_Ref(out);
+  return out;
+}
+
+template <typename MapperFn>
+DdNode *remapBddBetweenManagers(DdManager *src_manager, DdManager *dst_manager,
+                                DdNode *node, unsigned src_var_count,
+                                MapperFn &&mapper) {
+  std::vector<int> index_map(src_var_count, -1);
+  for (unsigned i = 0; i < src_var_count; ++i)
+    index_map[i] = mapper(i);
+  std::unordered_map<DdNode *, DdNode *> memo;
+  DdNode *result =
+      remapBddRecursive(src_manager, dst_manager, node, index_map, memo);
+  for (const auto &entry : memo)
+    Cudd_RecursiveDeref(dst_manager, entry.second);
+  return result;
+}
+
+DdNode *remapBaseBddToTensor(DdNode *node, unsigned predicate_count,
+                             BaseVarGroup next_group, BaseVarGroup cur_group,
+                             TensorVarGroup mapped_next,
+                             TensorVarGroup mapped_cur) {
+  return remapBddBetweenManagers(
+      getBaseManager(predicate_count), getTensorManager(predicate_count), node,
+      baseTotalVars(predicate_count), [&](unsigned src_index) {
+        const unsigned predicate = src_index / 3;
+        const unsigned group = src_index % 3;
+        if (group == static_cast<unsigned>(next_group))
+          return static_cast<int>(tensorVarIndex(predicate, mapped_next));
+        if (group == static_cast<unsigned>(cur_group))
+          return static_cast<int>(tensorVarIndex(predicate, mapped_cur));
+        return -1;
+      });
+}
+
+DdNode *remapTensorBddToBase(DdNode *node, unsigned predicate_count,
+                             TensorVarGroup mapped_cur,
+                             TensorVarGroup mapped_next) {
+  return remapBddBetweenManagers(
+      getTensorManager(predicate_count), getBaseManager(predicate_count), node,
+      tensorTotalVars(predicate_count), [&](unsigned src_index) {
+        const unsigned predicate = src_index / 6;
+        const unsigned group = src_index % 6;
+        if (group == static_cast<unsigned>(mapped_cur))
+          return static_cast<int>(baseVarIndex(predicate, BaseVarGroup::Cur));
+        if (group == static_cast<unsigned>(mapped_next))
+          return static_cast<int>(baseVarIndex(predicate, BaseVarGroup::Next));
+        return -1;
+      });
 }
 
 std::shared_ptr<PredicateRelation::Impl> makeRelationImpl(unsigned predicate_count,
@@ -540,39 +719,49 @@ materializeTensorImpl(const PredicateTensorRelation &relation) {
 
 PredicateRelation transposeRelationImpl(const PredicateRelation &relation) {
   const unsigned predicate_count = implOf(relation)->predicate_count;
-  std::vector<std::pair<std::uint64_t, std::uint64_t>> transitions;
-  for (const auto &transition : materializeRelationImpl(relation))
-    transitions.emplace_back(transition.second, transition.first);
-  return relationFromTransitionsImpl(predicate_count, transitions);
+  return relationFromNode(
+      predicate_count,
+      swapVariableGroups<BaseVarGroup>(getBaseManager(predicate_count),
+                                       implOf(relation)->bdd, predicate_count,
+                                       {{BaseVarGroup::Cur, BaseVarGroup::Next}}));
 }
 
 PredicateTensorRelation coupleRelationImpl(const PredicateRelation &lhs,
                                           const PredicateRelation &rhs) {
   const unsigned predicate_count = implOf(lhs)->predicate_count;
   assert(predicate_count == implOf(rhs)->predicate_count);
-  std::vector<
-      std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>>
-      transitions;
-  const auto lhs_transitions = materializeRelationImpl(lhs);
-  const auto rhs_transitions = materializeRelationImpl(rhs);
-  transitions.reserve(lhs_transitions.size() * rhs_transitions.size());
-  for (const auto &lt : lhs_transitions) {
-    for (const auto &rt : rhs_transitions) {
-      transitions.emplace_back(lt.second, rt.first, lt.first, rt.second);
-    }
-  }
-  return tensorFromTransitionsImpl(predicate_count, transitions);
+  DdManager *manager = getTensorManager(predicate_count);
+  DdNode *lhs_tensor = remapBaseBddToTensor(implOf(lhs)->bdd, predicate_count,
+                                            BaseVarGroup::Next, BaseVarGroup::Cur,
+                                            TensorVarGroup::APrime,
+                                            TensorVarGroup::A);
+  DdNode *rhs_tensor = remapBaseBddToTensor(implOf(rhs)->bdd, predicate_count,
+                                            BaseVarGroup::Next, BaseVarGroup::Cur,
+                                            TensorVarGroup::BPrime,
+                                            TensorVarGroup::B);
+  DdNode *coupled = bddAnd(manager, lhs_tensor, rhs_tensor);
+  Cudd_RecursiveDeref(manager, lhs_tensor);
+  Cudd_RecursiveDeref(manager, rhs_tensor);
+  return tensorFromNode(predicate_count, coupled);
 }
 
 PredicateRelation readoutTensorImpl(const PredicateTensorRelation &relation) {
   const unsigned predicate_count = implOf(relation)->predicate_count;
-  std::vector<std::pair<std::uint64_t, std::uint64_t>> transitions;
-  for (const auto &tuple : materializeTensorImpl(relation)) {
-    if (std::get<0>(tuple) != std::get<1>(tuple))
-      continue;
-    transitions.emplace_back(std::get<2>(tuple), std::get<3>(tuple));
-  }
-  return relationFromTransitionsImpl(predicate_count, transitions);
+  DdManager *manager = getTensorManager(predicate_count);
+  DdNode *eq = tensorEqualityNode(predicate_count, TensorVarGroup::APrime,
+                                  TensorVarGroup::B);
+  DdNode *restricted = bddAnd(manager, implOf(relation)->bdd, eq);
+  DdNode *cube =
+      tensorGroupCube(predicate_count, {TensorVarGroup::APrime, TensorVarGroup::B});
+  DdNode *abstracted =
+      withRef(manager, [&] { return Cudd_bddExistAbstract(manager, restricted, cube); });
+  Cudd_RecursiveDeref(manager, eq);
+  Cudd_RecursiveDeref(manager, restricted);
+  Cudd_RecursiveDeref(manager, cube);
+  DdNode *base = remapTensorBddToBase(abstracted, predicate_count, TensorVarGroup::A,
+                                      TensorVarGroup::BPrime);
+  Cudd_RecursiveDeref(manager, abstracted);
+  return relationFromNode(predicate_count, base);
 }
 
 PredicateRelation projectRelationImpl(const PredicateRelation &relation) {
@@ -580,17 +769,20 @@ PredicateRelation projectRelationImpl(const PredicateRelation &relation) {
   const unsigned local_count = activeLocalPredicateCount();
   if (local_count == 0)
     return relation;
-
-  std::vector<std::pair<std::uint64_t, std::uint64_t>> projected;
-  for (const auto &transition : materializeRelationImpl(relation)) {
-    const std::uint64_t src_globals = globalBits(transition.first);
-    const std::uint64_t dst_globals = globalBits(transition.second);
-    enumerateBitVectors(local_count, [&](std::uint64_t caller_locals) {
-      projected.emplace_back(composeBits(src_globals, caller_locals),
-                             composeBits(dst_globals, caller_locals));
-    });
-  }
-  return relationFromTransitionsImpl(predicate_count, projected);
+  const unsigned local_begin = predicate_count - local_count;
+  DdManager *manager = getBaseManager(predicate_count);
+  DdNode *cube = baseGroupCube(predicate_count,
+                               {BaseVarGroup::Cur, BaseVarGroup::Next},
+                               local_begin, predicate_count);
+  DdNode *abstracted =
+      withRef(manager, [&] { return Cudd_bddExistAbstract(manager, implOf(relation)->bdd, cube); });
+  DdNode *eq = baseEqualityNode(predicate_count, BaseVarGroup::Cur,
+                                BaseVarGroup::Next, local_begin, predicate_count);
+  DdNode *projected = bddAnd(manager, abstracted, eq);
+  Cudd_RecursiveDeref(manager, cube);
+  Cudd_RecursiveDeref(manager, abstracted);
+  Cudd_RecursiveDeref(manager, eq);
+  return relationFromNode(predicate_count, projected);
 }
 
 PredicateTensorRelation projectTensorImpl(const PredicateTensorRelation &relation) {
@@ -598,31 +790,35 @@ PredicateTensorRelation projectTensorImpl(const PredicateTensorRelation &relatio
   const unsigned local_count = activeLocalPredicateCount();
   if (local_count == 0)
     return relation;
-
-  std::vector<
-      std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>>
-      projected;
-  for (const auto &tuple : materializeTensorImpl(relation)) {
-    const std::uint64_t a_prime = std::get<0>(tuple);
-    const std::uint64_t b = std::get<1>(tuple);
-    const std::uint64_t a = std::get<2>(tuple);
-    const std::uint64_t b_prime = std::get<3>(tuple);
-    if (localBits(a_prime) != localBits(b))
-      continue;
-    const std::uint64_t a_prime_globals = globalBits(a_prime);
-    const std::uint64_t b_globals = globalBits(b);
-    const std::uint64_t a_globals = globalBits(a);
-    const std::uint64_t b_prime_globals = globalBits(b_prime);
-    enumerateBitVectors(local_count, [&](std::uint64_t caller_left) {
-      enumerateBitVectors(local_count, [&](std::uint64_t caller_right) {
-        projected.emplace_back(composeBits(a_prime_globals, caller_left),
-                               composeBits(b_globals, caller_right),
-                               composeBits(a_globals, caller_left),
-                               composeBits(b_prime_globals, caller_right));
-      });
-    });
-  }
-  return tensorFromTransitionsImpl(predicate_count, projected);
+  const unsigned local_begin = predicate_count - local_count;
+  DdManager *manager = getTensorManager(predicate_count);
+  DdNode *match_in = tensorEqualityNode(predicate_count, TensorVarGroup::APrime,
+                                        TensorVarGroup::B, local_begin,
+                                        predicate_count);
+  DdNode *restricted = bddAnd(manager, implOf(relation)->bdd, match_in);
+  DdNode *cube =
+      tensorGroupCube(predicate_count,
+                      {TensorVarGroup::APrime, TensorVarGroup::B,
+                       TensorVarGroup::A, TensorVarGroup::BPrime},
+                      local_begin, predicate_count);
+  DdNode *abstracted =
+      withRef(manager, [&] { return Cudd_bddExistAbstract(manager, restricted, cube); });
+  DdNode *left_eq = tensorEqualityNode(predicate_count, TensorVarGroup::APrime,
+                                       TensorVarGroup::A, local_begin,
+                                       predicate_count);
+  DdNode *right_eq = tensorEqualityNode(predicate_count, TensorVarGroup::B,
+                                        TensorVarGroup::BPrime, local_begin,
+                                        predicate_count);
+  DdNode *eq_out = bddAnd(manager, left_eq, right_eq);
+  DdNode *projected = bddAnd(manager, abstracted, eq_out);
+  Cudd_RecursiveDeref(manager, match_in);
+  Cudd_RecursiveDeref(manager, restricted);
+  Cudd_RecursiveDeref(manager, cube);
+  Cudd_RecursiveDeref(manager, abstracted);
+  Cudd_RecursiveDeref(manager, left_eq);
+  Cudd_RecursiveDeref(manager, right_eq);
+  Cudd_RecursiveDeref(manager, eq_out);
+  return tensorFromNode(predicate_count, projected);
 }
 
 } // namespace

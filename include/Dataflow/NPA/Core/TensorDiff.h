@@ -25,6 +25,13 @@ private:
       return Exp1<TD>::term(TD::zero());
     case K0::Seq:
       return Exp1<TD>::seqR(aux(nu, o->t), Traits::constant(o->c));
+    case K0::Mul: {
+      assert(o->t1->val.has_value() && o->t2->val.has_value());
+      auto lhs = aux(nu, o->t1);
+      auto rhs = aux(nu, o->t2);
+      return Exp1<TD>::add(Exp1<TD>::seqR(lhs, Traits::constant(*o->t2->val)),
+                           Exp1<TD>::seq(Traits::constant(*o->t1->val), rhs));
+    }
     case K0::Call: {
       auto dArg = aux(nu, o->t);
       auto left = Exp1<TD>::seqR(dArg, Traits::constant(nu.at(o->sym)));

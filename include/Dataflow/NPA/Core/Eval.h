@@ -39,10 +39,8 @@ private:
     case Exp0<D>::Seq:
       mark(e->t);
       break;
+    case Exp0<D>::Mul:
     case Exp0<D>::Cond:
-      mark(e->t1);
-      mark(e->t2);
-      break;
     case Exp0<D>::Ndet:
       mark(e->t1);
       mark(e->t2);
@@ -71,6 +69,9 @@ private:
       break;
     case Exp0<D>::Seq:
       v = D::extend(e->c, rec(nu, env, e->t));
+      break;
+    case Exp0<D>::Mul:
+      v = D::extend(rec(nu, env, e->t1), rec(nu, env, e->t2));
       break;
     case Exp0<D>::Call:
       v = D::extend(nu.at(e->sym), rec(nu, env, e->t));

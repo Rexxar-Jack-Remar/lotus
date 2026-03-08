@@ -259,6 +259,39 @@ TEST(NPAInterproceduralClients, InterproceduralClientsAcceptTensorStrategyOnDema
   expectConstValue(It->second, signedAPInt(32, 5));
 }
 
+TEST(NPAInterproceduralClients,
+     TensorStrategyFallsBackForNonAdmissibleInterproceduralDomains) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @main() {
+    entry:
+      %r = call i32 @id(i32 5)
+      ret i32 %r
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  testing::internal::CaptureStderr();
+  auto result = npa::InterproceduralConstantPropagation::run(
+      *module, true, npa::LinearStrategy::TensorProduct);
+  std::string stderrOutput = testing::internal::GetCapturedStderr();
+
+  auto *Id = module->getFunction("id");
+  ASSERT_NE(Id, nullptr);
+  auto states = statesForBlock(result.blockFacts, &Id->getEntryBlock());
+  ASSERT_EQ(states.size(), 1u);
+  auto *Arg = &*Id->arg_begin();
+  auto It = states.front()->values.find(Arg);
+  ASSERT_NE(It, states.front()->values.end());
+  expectConstValue(It->second, signedAPInt(32, 5));
+  EXPECT_NE(stderrOutput.find("falling back"), std::string::npos);
+}
+
 TEST(NPAInterproceduralClients, ConstantPropagationUsesLLVMIntegerSemantics) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(

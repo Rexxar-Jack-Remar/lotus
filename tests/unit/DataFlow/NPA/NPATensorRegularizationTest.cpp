@@ -116,6 +116,30 @@ static BoundedLangSemiring::value_type singleton(const std::string &s) {
 } // namespace
 
 namespace npa {
+template <> struct TensorSemiringTraits<BoundedLangSemiring> {
+  using tensor_domain = TensorProductExactDomain<BoundedLangSemiring>;
+
+  static bool available() { return true; }
+
+  static tensor_domain::value_type
+  constant(const BoundedLangSemiring::value_type &v) {
+    return domain_equal<BoundedLangSemiring>(v, BoundedLangSemiring::zero())
+               ? tensor_domain::zero()
+               : tensor_domain::singleton(v, BoundedLangSemiring::one());
+  }
+
+  static tensor_domain::value_type
+  couple(const BoundedLangSemiring::value_type &lhs,
+         const BoundedLangSemiring::value_type &rhs) {
+    return tensor_domain::singleton(lhs, rhs);
+  }
+
+  static BoundedLangSemiring::value_type
+  readout(const tensor_domain::value_type &v) {
+    return tensor_domain::project(v);
+  }
+};
+
 template <> struct TensorSemiringTraits<CustomTensorLangSemiring> {
   using tensor_domain = TensorProductExactDomain<CustomTensorLangSemiring>;
 
