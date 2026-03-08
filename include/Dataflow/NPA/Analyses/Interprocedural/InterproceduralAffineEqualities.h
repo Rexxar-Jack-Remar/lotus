@@ -2,12 +2,11 @@
 #define NPA_INTERPROC_AFFINE_EQUALITIES_H
 
 #include "Dataflow/NPA/Analyses/InterproceduralEngine.h"
-#include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
+#include "Dataflow/NPA/Domains/AffineRelationDomain.h"
 
 #include <cstdint>
 #include <map>
 #include <unordered_map>
-#include <vector>
 
 namespace llvm {
 class Value;
@@ -36,41 +35,18 @@ struct AffineState {
   }
 };
 
-struct AffineOp {
-  enum class Kind {
-    AssignConst,
-    Copy,
-    Add,
-    Sub,
-    Scale,
-    Select,
-    Phi,
-    Forget,
-  };
-
-  Kind kind = Kind::Forget;
-  const llvm::Value *dest = nullptr;
-  const llvm::Value *lhs = nullptr;
-  const llvm::Value *rhs = nullptr;
-  const llvm::Value *cond = nullptr;
-  int64_t constant = 0;
-  std::vector<const llvm::Value *> inputs;
-
-  bool operator<(const AffineOp &other) const;
-  bool operator==(const AffineOp &other) const;
-};
-
-using AffineDomain = ProgramTransferDomain<AffineOp>;
-
 class InterproceduralAffineEqualities {
 public:
   struct Result {
-    std::map<FunctionKey, AffineDomain::value_type> summaries;
-    std::map<BlockKey, AffineState> blockFacts;
+    std::map<FunctionKey, AffineRelationDomain::value_type> summaries;
+    std::map<BlockKey, AffineRelationDomain::value_type> blockRelations;
   };
 
   static Result run(llvm::Module &M, bool verbose = false);
 };
+
+AffineState
+materializeAffineExpressions(const AffineRelationDomain::value_type &relation);
 
 } // namespace npa
 

@@ -53,6 +53,7 @@ struct IntervalOp {
   enum class Kind {
     AssignConst,
     Copy,
+    Cast,
     Binary,
     Compare,
     Select,
@@ -66,6 +67,8 @@ struct IntervalOp {
   const llvm::Value *rhs = nullptr;
   const llvm::Value *cond = nullptr;
   unsigned opcode = 0;
+  unsigned bitWidth = 0;
+  unsigned sourceBitWidth = 0;
   int64_t constant = 0;
   std::vector<const llvm::Value *> inputs;
 

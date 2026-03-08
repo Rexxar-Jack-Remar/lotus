@@ -121,6 +121,30 @@ private:
     return D::one();
   }
 
+  template <typename A>
+  static auto getEdgeTransfer(A &analysis, const llvm::Instruction &term,
+                              const llvm::BasicBlock &succ, int)
+      -> decltype(analysis.getEdgeTransfer(term, succ)) {
+    return analysis.getEdgeTransfer(term, succ);
+  }
+
+  static typename D::value_type
+  getEdgeTransfer(Analysis &, const llvm::Instruction &, const llvm::BasicBlock &,
+                  long) {
+    return D::one();
+  }
+
+  template <typename A>
+  static auto buildBlockEntryExpr(A &analysis, llvm::BasicBlock &BB, E inExpr,
+                                  int)
+      -> decltype(analysis.buildBlockEntryExpr(BB, inExpr)) {
+    return analysis.buildBlockEntryExpr(BB, inExpr);
+  }
+
+  static E buildBlockEntryExpr(Analysis &, llvm::BasicBlock &, E inExpr, long) {
+    return inExpr;
+  }
+
 public:
   static std::vector<llvm::Function *> getEntryFunctions(llvm::Module &M) {
     if (llvm::Function *Main = M.getFunction("main"))
@@ -188,7 +212,10 @@ public:
             if (!Pred)
               continue;
             hasPreds = true;
-            auto pHole = Exp::hole(getBlockSymbol(Pred));
+            E pHole = Exp::hole(getBlockSymbol(Pred));
+            if (auto *PredTerm = Pred->getTerminator()) {
+              pHole = Exp::seq(getEdgeTransfer(analysis, *PredTerm, BB, 0), pHole);
+            }
             if (!inExpr)
               inExpr = pHole;
             else
@@ -198,7 +225,7 @@ public:
             inExpr = Exp::term(D::zero());
         }
 
-        E currentPath = inExpr;
+        E currentPath = buildBlockEntryExpr(analysis, BB, inExpr, 0);
         for (auto &I : BB) {
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
             if (auto *Callee = CI->getCalledFunction()) {

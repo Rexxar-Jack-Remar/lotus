@@ -1,5 +1,6 @@
 # NPA sources
 set(NPA_SOURCES
+  Domains/AffineRelationDomain.cpp
   Domains/BitVectorDomain.cpp
   Domains/GenKillDomain.cpp
   Domains/TaintTransferDomain.cpp
