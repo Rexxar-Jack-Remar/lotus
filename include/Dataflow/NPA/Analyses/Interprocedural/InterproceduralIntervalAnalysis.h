@@ -115,7 +115,8 @@ public:
     std::map<BlockKey, IntervalState> blockFacts;
   };
 
-  static Result run(llvm::Module &M, bool verbose = false);
+  static Result run(llvm::Module &M, bool verbose = false,
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
 };
 
 } // namespace npa

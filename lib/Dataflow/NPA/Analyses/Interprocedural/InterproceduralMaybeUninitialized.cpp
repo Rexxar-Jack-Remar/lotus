@@ -311,12 +311,14 @@ private:
 } // namespace
 
 InterproceduralMaybeUninitialized::Result
-InterproceduralMaybeUninitialized::run(llvm::Module &M, bool verbose) {
+InterproceduralMaybeUninitialized::run(llvm::Module &M, bool verbose,
+                                       LinearStrategy linearStrategy) {
   MaybeUninitializedAnalysis analysis(M);
   auto engineResult =
       InterproceduralEngine<TaintTransferDomain,
                             MaybeUninitializedAnalysis>::run(M, analysis,
-                                                             verbose);
+                                                             verbose,
+                                                             linearStrategy);
 
   InterproceduralMaybeUninitialized::Result result;
   result.summaries.insert(engineResult.summaries.begin(),

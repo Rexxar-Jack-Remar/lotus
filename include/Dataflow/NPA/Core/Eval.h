@@ -142,15 +142,15 @@ private:
       v = e->c;
       break;
     case K::Seq:
-      v = D::extend(e->c, rec(vars, env, e->t));
+      v = D::extend_lin(e->c, rec(vars, env, e->t));
       break;
     case K::SeqR:
-      v = D::extend(rec(vars, env, e->t), e->c);
+      v = D::extend_lin(rec(vars, env, e->t), e->c);
       break;
     case K::Call: {
       auto it = env.find(e->sym);
       const V &f = (it != env.end()) ? it->second : vars.at(e->sym);
-      v = D::extend(f, e->c);
+      v = D::extend_lin(f, e->c);
     } break;
     case K::Cond:
       v = D::condCombine(e->phi, rec(vars, env, e->t1), rec(vars, env, e->t2));
@@ -174,8 +174,8 @@ private:
       // LCFL: a·Y·b -> a_val ⊗ Y ⊗ b_val (coefficients on both sides).
       auto it = env.find(e->sym);
       const V &mid = (it != env.end()) ? it->second : vars.at(e->sym);
-      v = D::extend(rec(vars, env, e->t1),
-                    D::extend(mid, rec(vars, env, e->t2)));
+      v = D::extend_lin(rec(vars, env, e->t1),
+                        D::extend_lin(mid, rec(vars, env, e->t2)));
     } break;
     case K::InfClos: {
       V init = D::zero();

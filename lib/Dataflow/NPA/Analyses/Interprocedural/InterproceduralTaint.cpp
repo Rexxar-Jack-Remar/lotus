@@ -503,7 +503,8 @@ private:
 };
 
 InterproceduralTaint::Result InterproceduralTaint::run(
-    llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis, bool verbose) {
+    llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis, bool verbose,
+    LinearStrategy linearStrategy) {
   if (!taint_config::load_default_config()) {
     llvm::errs() << "Error: Could not load taint configuration\n";
   }
@@ -512,7 +513,8 @@ InterproceduralTaint::Result InterproceduralTaint::run(
   auto engineResult =
       InterproceduralEngine<TaintTransferDomain, TaintAnalysis>::run(M,
                                                                      analysis,
-                                                                     verbose);
+                                                                     verbose,
+                                                                     linearStrategy);
 
   InterproceduralTaint::Result res;
   res.summaries.insert(engineResult.summaries.begin(),

@@ -71,31 +71,78 @@ public:
     if (auto *CalleeValue = Call.getCalledOperand()) {
       auto *Stripped = CalleeValue->stripPointerCasts();
       if (auto *Direct = llvm::dyn_cast<llvm::Function>(Stripped)) {
-        if (!Direct->isDeclaration())
+        if (!Direct->isDeclaration() &&
+            isCallCompatibleWithFunction(Call, *Direct, M.getDataLayout()))
           return {Direct};
         return {};
       }
     }
 
     std::vector<llvm::Function *> matches;
-    llvm::FunctionType *CallTy = Call.getFunctionType();
     for (auto &F : M) {
       if (F.isDeclaration())
         continue;
-      if (F.getFunctionType() == CallTy)
+      if (isCallCompatibleWithFunction(Call, F, M.getDataLayout()))
         matches.push_back(&F);
     }
     return matches;
   }
 
 private:
+  static bool typesAreCompatible(const llvm::Type *lhs, const llvm::Type *rhs) {
+    if (lhs == rhs)
+      return true;
+    if (!lhs || !rhs)
+      return false;
+    if (lhs->isPointerTy() || rhs->isPointerTy())
+      return false;
+    if (lhs->isIntegerTy() && rhs->isIntegerTy())
+      return lhs->getIntegerBitWidth() == rhs->getIntegerBitWidth();
+    if (lhs->isFloatingPointTy() && rhs->isFloatingPointTy())
+      return lhs->getTypeID() == rhs->getTypeID();
+    return lhs->isVoidTy() && rhs->isVoidTy();
+  }
+
+  static bool isCallCompatibleWithFunction(const llvm::CallBase &Call,
+                                           const llvm::Function &F,
+                                           const llvm::DataLayout &DL) {
+    if (Call.getCallingConv() != F.getCallingConv())
+      return false;
+    if (auto *CalledOperand = Call.getCalledOperand()) {
+      if (!llvm::CastInst::isBitOrNoopPointerCastable(
+              F.getType(), CalledOperand->getType(), DL)) {
+        return false;
+      }
+    }
+    llvm::FunctionType *calleeTy = F.getFunctionType();
+    if (!typesAreCompatible(Call.getType(), calleeTy->getReturnType()))
+      return false;
+    if (!calleeTy->isVarArg() && Call.arg_size() != calleeTy->getNumParams())
+      return false;
+    if (calleeTy->isVarArg() && Call.arg_size() < calleeTy->getNumParams())
+      return false;
+    for (unsigned i = 0; i < calleeTy->getNumParams(); ++i) {
+      llvm::Type *argTy = Call.getArgOperand(i)->getType();
+      llvm::Type *paramTy = calleeTy->getParamType(i);
+      if (argTy->isPointerTy() || paramTy->isPointerTy()) {
+        if (!llvm::CastInst::isBitOrNoopPointerCastable(argTy, paramTy, DL))
+          return false;
+        continue;
+      }
+      if (!typesAreCompatible(argTy, paramTy)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   template <typename A>
   static auto getMaxPropagationSteps(const A &analysis, int)
       -> decltype(analysis.getMaxPropagationSteps()) {
     return analysis.getMaxPropagationSteps();
   }
 
-  static long getMaxPropagationSteps(const Analysis &, long) { return 100000; }
+  static long getMaxPropagationSteps(const Analysis &, long) { return -1; }
 
   template <typename A>
   static auto widenFacts(A &analysis, const Fact &oldFact, const Fact &newFact,
@@ -187,9 +234,12 @@ public:
       for (auto &BB : F) {
         for (auto &I : BB) {
           auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
-          auto *Callee = CB ? CB->getCalledFunction() : nullptr;
-          if (Callee && !Callee->isDeclaration())
-            called.insert(Callee);
+          if (!CB)
+            continue;
+          for (llvm::Function *Callee : getPossibleCallees(M, *CB)) {
+            if (!Callee->isDeclaration())
+              called.insert(Callee);
+          }
         }
       }
     }
@@ -202,7 +252,8 @@ public:
     return roots.empty() ? defined : roots;
   }
 
-  static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false) {
+  static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false,
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist) {
     ::dataflow::controlflow::LLVMIntraCFG CFG;
     std::vector<std::pair<Symbol, E>> eqns;
     std::deque<llvm::Function *> worklist;
@@ -300,7 +351,7 @@ public:
       eqns.emplace_back(fSym, exitExpr);
     }
 
-    auto rawRes = NewtonSolver<D>::solve(eqns, verbose);
+    auto rawRes = NewtonSolver<D>::solve(eqns, verbose, -1, linearStrategy);
     std::unordered_map<Symbol, Val> solvedMap;
     for (auto &p : rawRes.first)
       solvedMap[p.first] = p.second;

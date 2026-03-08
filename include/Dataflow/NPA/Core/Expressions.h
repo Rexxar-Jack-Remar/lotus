@@ -268,6 +268,47 @@ template <class D> struct DepFinder {
   }
 };
 
+template <class D> struct ExprFeatureDetector {
+  static bool has_infclos(const E0<D> &e) {
+    if (!e)
+      return false;
+    switch (e->k) {
+    case Exp0<D>::InfClos:
+      return true;
+    case Exp0<D>::Seq:
+    case Exp0<D>::Call:
+      return has_infclos(e->t);
+    case Exp0<D>::Cond:
+    case Exp0<D>::Ndet:
+    case Exp0<D>::Concat:
+      return has_infclos(e->t1) || has_infclos(e->t2);
+    default:
+      return false;
+    }
+  }
+
+  static bool has_infclos(const E1<D> &e) {
+    if (!e)
+      return false;
+    using K = typename Exp1<D>::K;
+    switch (e->k) {
+    case K::InfClos:
+      return true;
+    case K::Seq:
+    case K::SeqR:
+      return has_infclos(e->t);
+    case K::Cond:
+    case K::Add:
+    case K::Sub:
+    case K::Ndet:
+    case K::Concat:
+      return has_infclos(e->t1) || has_infclos(e->t2);
+    default:
+      return false;
+    }
+  }
+};
+
 } // namespace npa
 
 #endif // NPA_EXPRESSIONS_H

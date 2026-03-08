@@ -230,6 +230,35 @@ TEST(NPAInterproceduralClients, ConstantPropagationTransfersArgumentsAcrossCall)
   expectConstValue(It->second, signedAPInt(32, 5));
 }
 
+TEST(NPAInterproceduralClients, InterproceduralClientsAcceptTensorStrategyOnDemand) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @main() {
+    entry:
+      %r = call i32 @id(i32 5)
+      ret i32 %r
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Id = module->getFunction("id");
+  ASSERT_NE(Id, nullptr);
+  auto *Arg = &*Id->arg_begin();
+
+  auto result = npa::InterproceduralConstantPropagation::run(
+      *module, false, npa::LinearStrategy::TensorProduct);
+  auto states = statesForBlock(result.blockFacts, &Id->getEntryBlock());
+  ASSERT_EQ(states.size(), 1u);
+  auto It = states.front()->values.find(Arg);
+  ASSERT_NE(It, states.front()->values.end());
+  expectConstValue(It->second, signedAPInt(32, 5));
+}
+
 TEST(NPAInterproceduralClients, ConstantPropagationUsesLLVMIntegerSemantics) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
@@ -377,6 +406,122 @@ TEST(NPAInterproceduralClients, ConstantPropagationResolvesIndirectSingleTargetC
     entry:
       %fp = select i1 true, i32 (i32)* @id, i32 (i32)* @id
       %r = call i32 %fp(i32 7)
+      ret i32 %r
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Id = module->getFunction("id");
+  ASSERT_NE(Id, nullptr);
+  auto *Arg = &*Id->arg_begin();
+
+  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto states = statesForBlock(result.blockFacts, &Id->getEntryBlock());
+  ASSERT_EQ(states.size(), 1u);
+
+  auto It = states.front()->values.find(Arg);
+  ASSERT_NE(It, states.front()->values.end());
+  expectConstValue(It->second, signedAPInt(32, 7));
+}
+
+TEST(NPAInterproceduralClients,
+     ConstantPropagationResolvesCompatibleBitcastedIndirectTargets) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @inc(i32 %x) {
+    entry:
+      %y = add i32 %x, 1
+      ret i32 %y
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      %id.cast = bitcast i32 (i32)* @id to i32 (...)*
+      %inc.cast = bitcast i32 (i32)* @inc to i32 (...)*
+      %fp = select i1 %cond, i32 (...)* %id.cast, i32 (...)* %inc.cast
+      %r = call i32 (...) %fp(i32 7)
+      ret i32 %r
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Id = module->getFunction("id");
+  auto *Inc = module->getFunction("inc");
+  ASSERT_NE(Id, nullptr);
+  ASSERT_NE(Inc, nullptr);
+
+  auto *IdArg = &*Id->arg_begin();
+  auto *IncArg = &*Inc->arg_begin();
+
+  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto idStates = statesForBlock(result.blockFacts, &Id->getEntryBlock());
+  auto incStates = statesForBlock(result.blockFacts, &Inc->getEntryBlock());
+  ASSERT_EQ(idStates.size(), 1u);
+  ASSERT_EQ(incStates.size(), 1u);
+
+  auto IdIt = idStates.front()->values.find(IdArg);
+  auto IncIt = incStates.front()->values.find(IncArg);
+  ASSERT_NE(IdIt, idStates.front()->values.end());
+  ASSERT_NE(IncIt, incStates.front()->values.end());
+  expectConstValue(IdIt->second, signedAPInt(32, 7));
+  expectConstValue(IncIt->second, signedAPInt(32, 7));
+}
+
+TEST(NPAInterproceduralClients,
+     ConstantPropagationRejectsIncompatibleBitcastedDirectCallee) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define i32 @bad(i8* %p) {
+    entry:
+      ret i32 42
+    }
+
+    define void @main() {
+    entry:
+      %fp = bitcast i32 (i8*)* @bad to i32 (i32)*
+      %r = call i32 %fp(i32 7)
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *R = findInstructionByName(*Main, "r");
+  ASSERT_NE(R, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto states = statesForBlock(result.blockFacts, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto It = states.front()->values.find(R);
+  EXPECT_EQ(It, states.front()->values.end());
+}
+
+TEST(NPAInterproceduralClients,
+     ConstantPropagationUsesIndirectCallTargetsWhenDiscoveringEntries) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @caller() {
+    entry:
+      %fp = bitcast i32 (i32)* @id to i32 (...)*
+      %r = call i32 (...) %fp(i32 7)
       ret i32 %r
     }
   )");
@@ -1076,6 +1221,18 @@ TEST(NPAInterproceduralClients, BackwardEngineAppliesEdgeTransfers) {
   ASSERT_EQ(Facts.size(), 1u);
   EXPECT_TRUE(containsPath(*Facts.front(), {'T'}));
   EXPECT_TRUE(containsPath(*Facts.front(), {'F'}));
+}
+
+TEST(NPAInterproceduralClients, ProgramTransferDomainPreservesLongPaths) {
+  using Domain = npa::ProgramTransferDomain<char>;
+
+  Domain::value_type path = Domain::one();
+  for (int i = 0; i < 300; ++i)
+    path = Domain::extend(Domain::singleton('a'), path);
+
+  std::vector<char> expected(300, 'a');
+  EXPECT_EQ(path.paths.size(), 1u);
+  EXPECT_EQ(path.paths.count(expected), 1u);
 }
 
 TEST(NPAInterproceduralClients, AffineTracksModularWrapForConstants) {

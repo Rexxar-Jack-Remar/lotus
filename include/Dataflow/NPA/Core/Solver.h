@@ -133,16 +133,33 @@ template <class D> struct NewtonIter {
     for (auto &b : binds)
       nu[b.first] = b.second;
     std::vector<std::pair<Symbol, E1<D>>> rhs;
+    using TensorTraits = TensorSemiringTraits<D>;
+    using TD = typename TensorTraits::tensor_domain;
+    std::vector<std::pair<Symbol, E1<TD>>> rhs_tensor;
+    const bool use_tensor =
+        linStrat == LinearStrategy::TensorProduct && TensorTraits::available();
+    if (linStrat == LinearStrategy::TensorProduct && !use_tensor && verbose)
+      std::cerr << "[tensor] tensor traits unavailable for domain; "
+                   "falling back to worklist\n";
     for (auto &e : eqns) {
       V v = I0<D>::eval(verbose, nu, e.second);
-      auto d = Diff<D>::build(nu, e.second);
       V delta0 = detail::compute_delta<D>(
           v, nu[e.first],
           std::integral_constant<bool, DomainHasChooseDelta<D>::value>{},
           std::integral_constant<bool, D::idempotent>{});
-      rhs.emplace_back(e.first, Exp1<D>::add(Exp1<D>::term(delta0), d));
+      if (use_tensor) {
+        rhs_tensor.emplace_back(
+            e.first,
+            Exp1<TD>::add(Exp1<TD>::term(TensorTraits::constant(delta0)),
+                          TensorDiff<D>::build(nu, e.second)));
+      } else {
+        auto d = Diff<D>::build(nu, e.second);
+        rhs.emplace_back(e.first, Exp1<D>::add(Exp1<D>::term(delta0), d));
+      }
     }
-    std::vector<V> init(rhs.size(), D::zero()), delta;
+    std::vector<V> init(use_tensor ? rhs_tensor.size() : rhs.size(),
+                        D::zero()),
+        delta;
     if (linStrat == LinearStrategy::Naive) {
       delta = fix_vec<D>(verbose, init, [&](const std::vector<V> &cur) {
         std::unordered_map<Symbol, V> env;
@@ -155,11 +172,8 @@ template <class D> struct NewtonIter {
       });
     } else if (linStrat == LinearStrategy::SCC) {
       delta = solve_linear_scc_impl<D>(verbose, rhs, init);
-    } else if (linStrat == LinearStrategy::TensorProduct) {
-      // Tensor lifting is only meaningful for LCFL-shaped linear systems.
-      delta = system_has_lcfl_structure<D>(rhs)
-                  ? solve_linear_tensor_impl<D>(verbose, rhs, init)
-                  : solve_linear_worklist_impl<D>(verbose, rhs, init);
+    } else if (use_tensor) {
+      delta = solve_linear_tensorized_impl<D>(verbose, rhs_tensor, init);
     } else {
       delta = solve_linear_worklist_impl<D>(verbose, rhs, init);
     }

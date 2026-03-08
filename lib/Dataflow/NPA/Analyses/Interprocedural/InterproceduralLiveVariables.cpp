@@ -189,12 +189,13 @@ private:
 } // namespace
 
 InterproceduralLiveVariables::Result
-InterproceduralLiveVariables::run(llvm::Module &M, bool verbose) {
+InterproceduralLiveVariables::run(llvm::Module &M, bool verbose,
+                                  LinearStrategy linearStrategy) {
   InterproceduralLiveAnalysis analysis(M);
   auto engineResult =
       BackwardInterproceduralEngine<TaintTransferDomain,
                                     InterproceduralLiveAnalysis>::run(
-          M, analysis, verbose);
+          M, analysis, verbose, linearStrategy);
 
   Result result;
   result.summaries.insert(engineResult.summaries.begin(),

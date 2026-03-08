@@ -27,7 +27,9 @@ The engine supports **TOPLAS 2016**-style algorithms for LCFL (linear context-fr
 
 - **LinearStrategy**: `Naive`, `Worklist`, `SCC`, `TensorProduct`
 - **SCC**: Solve in topological order of strongly connected components; fixpoint per SCC.
-- **TensorProduct**: Rewrite LCFL terms into left-linear form \(Y \otimes_p (a,b)\), lift to the tensor-product semiring, solve there, project back (see `TensorProductDomain.h`). Falls back to worklist if regularization preconditions are not met (non-constant coefficients or `InfClos`).
+- **TensorProduct**: Rewrite LCFL terms into a tensorized left-linear system, solve there via Tarjan path expressions when extractable to a left-linear graph, and otherwise fall back to tensor-space worklist iteration.
+- **TensorDiff**: Direct tensor-side differential builder used by the Newton tensor path.
+- **TensorSemiringTraits**: Optional specialization point for domains that want to supply a custom tensor semiring/readout instead of the default exact-correlated tensor domain.
 - **LCFLDetector**: `has_lcfl_structure(E1)` detects Concat/InfClos in linear RHS (used to decide whether tensor is applicable).
 
 Use `NewtonSolver<D>::solve(eqns, verbose, -1, LinearStrategy::SCC)` or `LinearStrategy::TensorProduct`; or pass `LinearStrategy` into `BitVectorSolver::run` (optional 5th parameter).

@@ -648,11 +648,12 @@ materializeAffineExpressions(const AffineRelationDomain::value_type &relation) {
 }
 
 InterproceduralAffineEqualities::Result
-InterproceduralAffineEqualities::run(llvm::Module &M, bool verbose) {
+InterproceduralAffineEqualities::run(llvm::Module &M, bool verbose,
+                                     LinearStrategy linearStrategy) {
   AffineRelationAnalysis analysis(M);
   auto engineResult =
       InterproceduralEngine<AffineRelationDomain, AffineRelationAnalysis>::run(
-          M, analysis, verbose);
+          M, analysis, verbose, linearStrategy);
   return analysis.buildResult(engineResult);
 }
 

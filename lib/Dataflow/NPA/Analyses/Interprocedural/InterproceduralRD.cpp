@@ -71,12 +71,13 @@ public:
   bool factsEqual(const llvm::APInt &a, const llvm::APInt &b) { return a == b; }
 };
 
-InterproceduralRD::Result InterproceduralRD::run(llvm::Module &M,
-                                                 bool verbose) {
+InterproceduralRD::Result InterproceduralRD::run(llvm::Module &M, bool verbose,
+                                                 LinearStrategy linearStrategy) {
   RDAnalysis analysis(M);
   auto engineResult =
       InterproceduralEngine<GenKillTransferDomain, RDAnalysis>::run(M, analysis,
-                                                                    verbose);
+                                                                    verbose,
+                                                                    linearStrategy);
 
   InterproceduralRD::Result res;
   res.summaries.insert(engineResult.summaries.begin(),

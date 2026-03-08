@@ -3,6 +3,7 @@ set(NPA_SOURCES
   Domains/AffineRelationDomain.cpp
   Domains/BitVectorDomain.cpp
   Domains/GenKillDomain.cpp
+  Domains/PredicateRelationDomain.cpp
   Domains/TaintTransferDomain.cpp
 
   Analyses/BitVectorSolver.cpp
@@ -19,3 +20,4 @@ set(NPA_SOURCES
 )
 
 add_library(NPADataFlow STATIC ${NPA_SOURCES})
+target_link_libraries(NPADataFlow PUBLIC CanaryCUDD)

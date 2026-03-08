@@ -34,10 +34,8 @@ public:
   using value_type = ProgramTransfer<Op, OpLess>;
   using test_type = bool;
   static constexpr bool idempotent = true;
-  static constexpr int max_fixpoint_iters = 256;
-  static constexpr long max_linear_steps = 100000;
   static constexpr std::size_t max_paths = 4096;
-  static constexpr std::size_t max_path_length = 256;
+  static constexpr std::size_t max_path_length = 320;
 
   static value_type zero() { return {}; }
 
@@ -58,6 +56,7 @@ public:
   static value_type combine(const value_type &a, const value_type &b) {
     value_type out = a;
     out.overflow = a.overflow || b.overflow;
+    out.may_write.insert(b.may_write.begin(), b.may_write.end());
     for (const auto &path : b.paths)
       insertPath(out, path);
     return out;
@@ -77,6 +76,8 @@ public:
       return zero();
     value_type out;
     out.overflow = a.overflow || b.overflow;
+    out.may_write.insert(a.may_write.begin(), a.may_write.end());
+    out.may_write.insert(b.may_write.begin(), b.may_write.end());
     for (const auto &bp : b.paths) {
       for (const auto &ap : a.paths) {
         typename value_type::path_type composed;

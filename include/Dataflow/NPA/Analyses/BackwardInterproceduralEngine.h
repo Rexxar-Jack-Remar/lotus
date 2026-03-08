@@ -35,7 +35,7 @@ private:
     return analysis.getMaxPropagationSteps();
   }
 
-  static long getMaxPropagationSteps(const Analysis &, long) { return 100000; }
+  static long getMaxPropagationSteps(const Analysis &, long) { return -1; }
 
   template <typename A>
   static auto widenFacts(A &analysis, const Fact &oldFact, const Fact &newFact,
@@ -108,7 +108,8 @@ public:
     return InterproceduralEngine<D, Analysis>::getPossibleCallees(M, Call);
   }
 
-  static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false) {
+  static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false,
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist) {
     std::vector<std::pair<Symbol, E>> eqns;
     std::deque<llvm::Function *> worklist;
     std::set<llvm::Function *> visited;
@@ -203,7 +204,7 @@ public:
       }
     }
 
-    auto rawRes = NewtonSolver<D>::solve(eqns, verbose);
+    auto rawRes = NewtonSolver<D>::solve(eqns, verbose, -1, linearStrategy);
     std::unordered_map<Symbol, Val> solvedMap;
     for (auto &p : rawRes.first)
       solvedMap[p.first] = p.second;

@@ -55,6 +55,52 @@ struct BoundedLangSemiring {
   }
 };
 
+struct CustomTensorLangSemiring {
+  using value_type = std::set<std::string>;
+  using test_type = bool;
+  static constexpr bool idempotent = true;
+  static constexpr bool commutative_extend = false;
+  static constexpr size_t MaxLen = 3;
+
+  static value_type zero() { return {}; }
+  static value_type one() { return {""}; }
+
+  static bool equal(const value_type &a, const value_type &b) { return a == b; }
+  static value_type combine(const value_type &a, const value_type &b) {
+    value_type out = a;
+    out.insert(b.begin(), b.end());
+    return out;
+  }
+  static value_type ndetCombine(const value_type &a, const value_type &b) {
+    return combine(a, b);
+  }
+  static value_type condCombine(test_type phi, const value_type &t,
+                                const value_type &e) {
+    return phi ? t : e;
+  }
+  static value_type extend(const value_type &a, const value_type &b) {
+    value_type out;
+    for (const auto &x : a) {
+      for (const auto &y : b) {
+        std::string s = x + y;
+        if (s.size() <= MaxLen)
+          out.insert(std::move(s));
+      }
+    }
+    return out;
+  }
+  static value_type extend_lin(const value_type &a, const value_type &b) {
+    return extend(a, b);
+  }
+  static value_type subtract(const value_type &a, const value_type &b) {
+    value_type out;
+    for (const auto &x : a)
+      if (b.find(x) == b.end())
+        out.insert(x);
+    return out;
+  }
+};
+
 template <class D>
 std::unordered_map<npa::Symbol, npa::DomVal<D>>
 toMap(const std::vector<std::pair<npa::Symbol, npa::DomVal<D>>> &pairs) {
@@ -68,6 +114,32 @@ static BoundedLangSemiring::value_type singleton(const std::string &s) {
 }
 
 } // namespace
+
+namespace npa {
+template <> struct TensorSemiringTraits<CustomTensorLangSemiring> {
+  using tensor_domain = TensorProductExactDomain<CustomTensorLangSemiring>;
+
+  static bool available() { return true; }
+
+  static tensor_domain::value_type
+  constant(const CustomTensorLangSemiring::value_type &v) {
+    return domain_equal<CustomTensorLangSemiring>(v, CustomTensorLangSemiring::zero())
+               ? tensor_domain::zero()
+               : tensor_domain::singleton(v, CustomTensorLangSemiring::one());
+  }
+
+  static tensor_domain::value_type
+  couple(const CustomTensorLangSemiring::value_type &lhs,
+         const CustomTensorLangSemiring::value_type &rhs) {
+    return tensor_domain::singleton(lhs, rhs);
+  }
+
+  static CustomTensorLangSemiring::value_type
+  readout(const tensor_domain::value_type &v) {
+    return tensor_domain::project(v);
+  }
+};
+} // namespace npa
 
 TEST(NPA, TensorRegularizationMatchesWorklistOnConstantConcat) {
   using D = BoundedLangSemiring;
@@ -134,6 +206,147 @@ TEST(NPA, TensorRegularizationPreservesCorrelationAcrossAlternatives) {
   EXPECT_EQ(wl[0], expect);
 }
 
+TEST(NPA, TensorRegularizationPreservesNonZeroInitialSeeds) {
+  using D = BoundedLangSemiring;
+  using E1 = npa::E1<D>;
+  using Exp = npa::Exp1<D>;
+
+  auto a = Exp::term(singleton("a"));
+  auto b = Exp::term(singleton("b"));
+  E1 rhs = Exp::add(Exp::hole("X"), Exp::concat(a, "X", b));
+
+  std::vector<std::pair<npa::Symbol, E1>> eqns;
+  eqns.emplace_back("X", rhs);
+
+  std::vector<npa::DomVal<D>> init = {singleton("x")};
+  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
+
+  ASSERT_EQ(wl.size(), 1u);
+  ASSERT_EQ(tp.size(), 1u);
+  EXPECT_EQ(tp[0], wl[0]);
+  BoundedLangSemiring::value_type expect = {"x", "axb"};
+  EXPECT_EQ(wl[0], expect);
+}
+
+TEST(NPA, TensorRegularizationRejectsInfClos) {
+  using D = BoundedLangSemiring;
+  using E1 = npa::E1<D>;
+  using Exp = npa::Exp1<D>;
+
+  E1 rhs = Exp::inf(Exp::hole("X"), "Z");
+  EXPECT_FALSE(npa::Exp1ToTensor<D>::is_regularizable(rhs));
+}
+
+TEST(NPA, TensorRegularizationRejectsSubExpressions) {
+  using D = BoundedLangSemiring;
+  using E1 = npa::E1<D>;
+  using Exp = npa::Exp1<D>;
+
+  E1 rhs = Exp::sub(Exp::term(BoundedLangSemiring::value_type{"a", "b"}),
+                    Exp::term(BoundedLangSemiring::value_type{"b"}));
+  EXPECT_FALSE(npa::Exp1ToTensor<D>::is_regularizable(rhs));
+
+  std::vector<std::pair<npa::Symbol, E1>> eqns;
+  eqns.emplace_back("X", rhs);
+
+  std::vector<npa::DomVal<D>> init = {D::zero()};
+  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
+
+  ASSERT_EQ(wl.size(), 1u);
+  ASSERT_EQ(tp.size(), 1u);
+  EXPECT_EQ(tp[0], wl[0]);
+  EXPECT_EQ(wl[0], (BoundedLangSemiring::value_type{"a"}));
+}
+
+TEST(NPA, TensorRegularizationFallsBackForCallTerms) {
+  using D = BoundedLangSemiring;
+  using E1 = npa::E1<D>;
+  using Exp = npa::Exp1<D>;
+
+  E1 rhs = Exp::call("X", singleton("a"));
+
+  std::vector<std::pair<npa::Symbol, E1>> eqns;
+  eqns.emplace_back("X", rhs);
+
+  std::vector<npa::DomVal<D>> init = {singleton("x")};
+  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
+
+  ASSERT_EQ(wl.size(), 1u);
+  ASSERT_EQ(tp.size(), 1u);
+  EXPECT_EQ(tp[0], wl[0]);
+}
+
+TEST(NPA, TensorRegularizationPreservesZeroRhsWithNonZeroSeed) {
+  using D = BoundedLangSemiring;
+  using E1 = npa::E1<D>;
+  using Exp = npa::Exp1<D>;
+
+  std::vector<std::pair<npa::Symbol, E1>> eqns;
+  eqns.emplace_back("X", Exp::term(D::zero()));
+
+  std::vector<npa::DomVal<D>> init = {singleton("x")};
+  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
+
+  ASSERT_EQ(wl.size(), 1u);
+  ASSERT_EQ(tp.size(), 1u);
+  EXPECT_EQ(wl[0], D::zero());
+  EXPECT_EQ(tp[0], wl[0]);
+}
+
+TEST(NPA, TensorRegularizationSupportsCustomTensorTraits) {
+  using D = CustomTensorLangSemiring;
+  using E1 = npa::E1<D>;
+  using Exp = npa::Exp1<D>;
+
+  auto a = Exp::term(D::value_type{"a"});
+  auto b = Exp::term(D::value_type{"b"});
+  auto c = Exp::term(D::value_type{"c"});
+  E1 rhs = Exp::add(Exp::concat(a, "X", b), c);
+
+  std::vector<std::pair<npa::Symbol, E1>> eqns;
+  eqns.emplace_back("X", rhs);
+
+  std::vector<npa::DomVal<D>> init = {D::zero()};
+  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
+
+  ASSERT_EQ(wl.size(), 1u);
+  ASSERT_EQ(tp.size(), 1u);
+  EXPECT_EQ(tp[0], wl[0]);
+}
+
+TEST(NPA, DirectTensorDiffMatchesConvertedOrdinaryDiff) {
+  using D = BoundedLangSemiring;
+  using Exp0 = npa::Exp0<D>;
+  using E0 = npa::E0<D>;
+  using TD = typename npa::TensorSemiringTraits<D>::tensor_domain;
+
+  std::unordered_map<npa::Symbol, npa::DomVal<D>> nu;
+  nu["X"] = singleton("x");
+  nu["F"] = singleton("f");
+
+  E0 expr = Exp0::ndet(
+      Exp0::call("F", Exp0::hole("X")),
+      Exp0::concat(Exp0::term(singleton("a")), "X", Exp0::term(singleton("b"))));
+
+  (void)npa::I0<D>::eval(false, nu, expr);
+
+  auto ordinary = npa::Exp1ToTensor<D>::convert(npa::Diff<D>::build(nu, expr));
+  auto direct = npa::TensorDiff<D>::build(nu, expr);
+
+  std::unordered_map<npa::Symbol, typename TD::value_type> env;
+  env["X"] = npa::lift_base_value_to_tensor<D>(singleton("x"));
+  env["F"] = npa::lift_base_value_to_tensor<D>(singleton("f"));
+
+  auto ordinary_val = npa::I1<TD>::eval(false, env, ordinary);
+  auto direct_val = npa::I1<TD>::eval(false, env, direct);
+  EXPECT_TRUE(TD::equal(ordinary_val, direct_val));
+}
+
 TEST(NPA, NewtonInitUsesFOfBottom) {
   using D = BoundedLangSemiring;
   using E0 = npa::E0<D>;
@@ -143,6 +356,39 @@ TEST(NPA, NewtonInitUsesFOfBottom) {
   eqns.emplace_back("X", Exp0::term(singleton("a")));
 
   auto res = npa::NewtonSolver<D>::solve(eqns, false, 0);
+  auto m = toMap<D>(res.first);
+
+  EXPECT_EQ(m.at("X"), singleton("a"));
+}
+
+TEST(NPA, StarDifferentialEliminatesInfClos) {
+  using D = BoundedLangSemiring;
+  using E0 = npa::E0<D>;
+  using Exp0 = npa::Exp0<D>;
+  using TD = typename npa::TensorSemiringTraits<D>::tensor_domain;
+
+  std::unordered_map<npa::Symbol, npa::DomVal<D>> nu;
+  nu["X"] = singleton("x");
+
+  E0 expr = Exp0::inf(Exp0::ndet(Exp0::hole("X"), Exp0::bound("Z")), "Z");
+  (void)npa::I0<D>::eval(false, nu, expr);
+
+  auto ordinary = npa::Diff<D>::build(nu, expr);
+  auto tensor = npa::TensorDiff<D>::build(nu, expr);
+
+  EXPECT_FALSE(npa::ExprFeatureDetector<D>::has_infclos(ordinary));
+  EXPECT_FALSE(npa::ExprFeatureDetector<TD>::has_infclos(tensor));
+}
+
+TEST(NPA, NewtonHandlesInfClosEquationsWithoutFallback) {
+  using D = BoundedLangSemiring;
+  using E0 = npa::E0<D>;
+  using Exp0 = npa::Exp0<D>;
+
+  std::vector<std::pair<npa::Symbol, E0>> eqns;
+  eqns.emplace_back("X", Exp0::inf(Exp0::term(singleton("a")), "Z"));
+
+  auto res = npa::NewtonSolver<D>::solve(eqns, false, 1);
   auto m = toMap<D>(res.first);
 
   EXPECT_EQ(m.at("X"), singleton("a"));

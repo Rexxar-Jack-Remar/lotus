@@ -1,4 +1,5 @@
 #include "Dataflow/NPA/NPA.h"
+#include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
 
 #include <gtest/gtest.h>
 
@@ -94,6 +95,13 @@ struct TraceSemiring {
   }
 };
 
+struct WriteOp {
+  const void *dest = nullptr;
+
+  bool operator<(const WriteOp &other) const { return dest < other.dest; }
+  bool operator==(const WriteOp &other) const { return dest == other.dest; }
+};
+
 } // namespace
 
 TEST(NPA, ConcatRepresentsTwoSidedMultiplication) {
@@ -125,4 +133,22 @@ TEST(NPA, BoundVariablesDoNotAliasEquationVariables) {
   E e = Exp::inf(Exp::bound("x"), "x");
   auto v = npa::I0<D>::eval(false, nu, e);
   EXPECT_EQ(v, "0");
+}
+
+TEST(NPA, ProgramTransferDomainPreservesMayWriteAcrossCombineAndExtend) {
+  using D = npa::ProgramTransferDomain<WriteOp>;
+
+  static int slot_a = 0;
+  static int slot_b = 0;
+
+  auto a = D::singleton(WriteOp{&slot_a});
+  auto b = D::singleton(WriteOp{&slot_b});
+
+  auto joined = D::combine(a, b);
+  EXPECT_TRUE(joined.may_write.count(&slot_a));
+  EXPECT_TRUE(joined.may_write.count(&slot_b));
+
+  auto composed = D::extend(a, b);
+  EXPECT_TRUE(composed.may_write.count(&slot_a));
+  EXPECT_TRUE(composed.may_write.count(&slot_b));
 }

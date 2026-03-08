@@ -21,7 +21,8 @@ public:
     unsigned bitWidth = 1;
   };
 
-  static Result run(llvm::Module &M, bool verbose = false);
+  static Result run(llvm::Module &M, bool verbose = false,
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
 };
 
 } // namespace npa

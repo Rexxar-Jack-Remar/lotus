@@ -13,7 +13,8 @@
  *
  * Rules: Term -> 0; Seq -> c·d(t); Call -> ν(f)·d(arg) + f(ν(arg)); Cond -> by
  * branch; Ndet -> D(t1) ⊕ D(t2) (Defn 3.1 sum); Hole -> X; Bound -> 0;
- * Concat -> D(t1)·ν_X·t2 + t1·X·t2 + t1·ν_X·D(t2); InfClos -> d(body).
+ * Concat -> D(t1)·ν_X·t2 + t1·X·t2 + t1·ν_X·D(t2); InfClos -> g(ν)*·D(g)·g(ν)*
+ * (TOPLAS 2016, Eq. (60)).
  */
 
 #include "Dataflow/NPA/Core/Expressions.h"
@@ -81,8 +82,13 @@ private:
       M1 term3 = Exp1<D>::seq(t1_val, Exp1<D>::seq(nu_x, d2));
       return Exp1<D>::add(Exp1<D>::add(term1, term2), term3);
     }
-    case K0::InfClos:
-      return Exp1<D>::inf(aux(nu, o->t, cur->t), o->sym);
+    case K0::InfClos: {
+      // TOPLAS 2016, Eq. (60): D(g*) = g(ν)* · D(g) · g(ν)*.
+      assert(o->val.has_value());
+      V star_val = *o->val;
+      M1 body_diff = aux(nu, o->t, cur->t);
+      return Exp1<D>::seq(star_val, Exp1<D>::seqR(body_diff, star_val));
+    }
     }
     return nullptr;
   }

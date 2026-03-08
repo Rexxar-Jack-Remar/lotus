@@ -22,7 +22,8 @@ public:
   };
 
   static Result run(llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis,
-                    bool verbose = false);
+                    bool verbose = false,
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
 };
 
 } // namespace npa

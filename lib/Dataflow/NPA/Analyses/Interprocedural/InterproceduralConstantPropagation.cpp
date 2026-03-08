@@ -217,10 +217,6 @@ public:
   FactType applySummary(const D::value_type &summary, const FactType &fact) {
     if (!fact.reachable)
       return {false, {}};
-    if (summary.paths.empty())
-      return summary.overflow ? overflowFact(summary, fact) : FactType{false, {}};
-    if (summary.overflow)
-      return overflowFact(summary, fact);
 
     bool first = true;
     FactType joined;
@@ -238,7 +234,14 @@ public:
         joined = joinFacts(joined, current);
       }
     }
-    return first ? FactType{false, {}} : joined;
+
+    if (!summary.overflow)
+      return first ? FactType{false, {}} : joined;
+
+    FactType overflow = overflowFact(summary, fact);
+    if (first)
+      return overflow;
+    return joinFacts(joined, overflow);
   }
 
   FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
@@ -575,12 +578,14 @@ private:
 } // namespace
 
 InterproceduralConstantPropagation::Result
-InterproceduralConstantPropagation::run(llvm::Module &M, bool verbose) {
+InterproceduralConstantPropagation::run(llvm::Module &M, bool verbose,
+                                        LinearStrategy linearStrategy) {
   ConstantPropagationAnalysis analysis;
   auto engineResult =
       InterproceduralEngine<ConstantPropagationDomain,
                             ConstantPropagationAnalysis>::run(M, analysis,
-                                                              verbose);
+                                                              verbose,
+                                                              linearStrategy);
 
   Result result;
   result.summaries.insert(engineResult.summaries.begin(),
