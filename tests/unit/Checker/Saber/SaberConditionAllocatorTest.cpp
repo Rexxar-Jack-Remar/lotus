@@ -1,7 +1,10 @@
 #include "Checker/Saber/SaberCondAllocator.h"
+#include "Checker/Saber/DoubleFreeChecker.h"
+#include "Checker/Saber/FileChecker.h"
 #include "Checker/Saber/LeakChecker.h"
 #include "Checker/Saber/SaberSVFGBuilder.h"
 #include "Checker/Saber/SrcSnkDDA.h"
+#include "Checker/Report/BugReportMgr.h"
 #include "IR/ICFG/ICFG.h"
 #include "IR/ICFG/ICFGBuilder.h"
 #include "IR/SVFG/SVFG.h"
@@ -75,6 +78,24 @@ const StoreInst *getOnlyStore(const Module &module, StringRef functionName) {
   return store;
 }
 
+size_t getReportCountForType(BugReportMgr &mgr, StringRef bugTypeName) {
+  int bugTypeId = mgr.find_bug_type(bugTypeName);
+  if (bugTypeId < 0)
+    return 0;
+  const auto *reports = mgr.get_reports_for_type(bugTypeId);
+  return reports ? reports->size() : 0;
+}
+
+const BugReport *getLastReportForType(BugReportMgr &mgr, StringRef bugTypeName) {
+  int bugTypeId = mgr.find_bug_type(bugTypeName);
+  if (bugTypeId < 0)
+    return nullptr;
+  const auto *reports = mgr.get_reports_for_type(bugTypeId);
+  if (!reports || reports->empty())
+    return nullptr;
+  return reports->back();
+}
+
 } // namespace
 
 namespace {
@@ -105,13 +126,16 @@ TEST(SaberConditionAllocatorTest, MultiSuccessorGuardsAreExhaustiveAndExclusive)
       switch i32 %x, label %default [
         i32 0, label %case0
         i32 1, label %case1
+        i32 2, label %case2
       ]
     case0:
       ret i32 0
     case1:
       ret i32 1
-    default:
+    case2:
       ret i32 2
+    default:
+      ret i32 3
     }
   )");
   ASSERT_NE(module, nullptr);
@@ -131,15 +155,44 @@ TEST(SaberConditionAllocatorTest, MultiSuccessorGuardsAreExhaustiveAndExclusive)
     disjunction = allocator.condOr(disjunction, guard);
   }
 
-  ASSERT_EQ(guards.size(), 3u);
+  ASSERT_EQ(guards.size(), 4u);
   EXPECT_TRUE(
       allocator.isEquivalentBranchCond(disjunction, allocator.getTrueCond()));
-  EXPECT_TRUE(allocator.isEquivalentBranchCond(
-      allocator.condAnd(guards[0], guards[1]), allocator.getFalseCond()));
-  EXPECT_TRUE(allocator.isEquivalentBranchCond(
-      allocator.condAnd(guards[0], guards[2]), allocator.getFalseCond()));
-  EXPECT_TRUE(allocator.isEquivalentBranchCond(
-      allocator.condAnd(guards[1], guards[2]), allocator.getFalseCond()));
+  for (size_t i = 0; i < guards.size(); ++i) {
+    for (size_t j = i + 1; j < guards.size(); ++j) {
+      EXPECT_TRUE(allocator.isEquivalentBranchCond(
+          allocator.condAnd(guards[i], guards[j]), allocator.getFalseCond()));
+    }
+  }
+}
+
+TEST(SaberConditionAllocatorTest, FourWayBranchUsesCeilLog2DecisionVariables) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    define i32 @f(i32 %x) {
+    entry:
+      switch i32 %x, label %default [
+        i32 0, label %case0
+        i32 1, label %case1
+        i32 2, label %case2
+      ]
+    case0:
+      ret i32 0
+    case1:
+      ret i32 1
+    case2:
+      ret i32 2
+    default:
+      ret i32 3
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  SaberCondAllocator allocator;
+  allocator.setModule(module.get());
+  allocator.allocate();
+
+  EXPECT_EQ(allocator.getCondNum(), 2u);
 }
 
 TEST(SaberConditionAllocatorTest, ResetDropsConditionStateBetweenModules) {
@@ -415,4 +468,275 @@ TEST(SaberConditionAllocatorTest,
 
   uint32_t singleton = 0;
   EXPECT_FALSE(builder.isStrongUpdatePublic(storeNode, singleton));
+}
+
+TEST(SaberConditionAllocatorTest, LeakCheckerReportsCallsiteAsSourceStep) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+
+    define void @cleanup() {
+    entry:
+      call void @free(i8* null)
+      ret void
+    }
+
+    define void @leak() {
+    entry:
+      %p = call i8* @malloc(i64 4)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @leak()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t reportsBefore = getReportCountForType(mgr, "Memory Leak");
+
+  LeakChecker checker;
+  checker.runOnModule(*module);
+
+  const size_t reportsAfter = getReportCountForType(mgr, "Memory Leak");
+  ASSERT_EQ(reportsAfter, reportsBefore + 1);
+
+  const BugReport *report = getLastReportForType(mgr, "Memory Leak");
+  ASSERT_NE(report, nullptr);
+  ASSERT_FALSE(report->get_steps().empty());
+
+  const BugDiagStep *sourceStep = report->get_steps().front();
+  ASSERT_NE(sourceStep, nullptr);
+  EXPECT_EQ(sourceStep->tip, "Memory allocated here is never freed");
+  const auto *call = dyn_cast_or_null<CallBase>(sourceStep->inst);
+  ASSERT_NE(call, nullptr);
+  ASSERT_NE(call->getCalledFunction(), nullptr);
+  EXPECT_EQ(call->getCalledFunction()->getName(), "malloc");
+}
+
+TEST(SaberConditionAllocatorTest,
+     DoubleFreeCheckerReportsAllocationCallsiteAsSourceStep) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+
+    define void @df() {
+    entry:
+      %p = call i8* @malloc(i64 4)
+      call void @free(i8* %p)
+      call void @free(i8* %p)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @df()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t reportsBefore = getReportCountForType(mgr, "Double Free");
+
+  DoubleFreeChecker checker;
+  checker.runOnModule(*module);
+
+  const size_t reportsAfter = getReportCountForType(mgr, "Double Free");
+  ASSERT_EQ(reportsAfter, reportsBefore + 1);
+
+  const BugReport *report = getLastReportForType(mgr, "Double Free");
+  ASSERT_NE(report, nullptr);
+  ASSERT_FALSE(report->get_steps().empty());
+
+  const BugDiagStep *sourceStep = report->get_steps().front();
+  ASSERT_NE(sourceStep, nullptr);
+  EXPECT_EQ(sourceStep->tip, "Memory allocated here");
+  const auto *call = dyn_cast_or_null<CallBase>(sourceStep->inst);
+  ASSERT_NE(call, nullptr);
+  ASSERT_NE(call->getCalledFunction(), nullptr);
+  EXPECT_EQ(call->getCalledFunction()->getName(), "malloc");
+
+  bool sawFreeStep = false;
+  for (const BugDiagStep *step : report->get_steps()) {
+    if (step && step->tip == "Memory deallocated along double-free path") {
+      sawFreeStep = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(sawFreeStep);
+}
+
+TEST(SaberConditionAllocatorTest, FileCheckerReportsFopenCallsiteAsSourceStep) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    %struct._IO_FILE = type opaque
+    @path = private unnamed_addr constant [9 x i8] c"test.txt\00"
+    @mode = private unnamed_addr constant [2 x i8] c"r\00"
+
+    declare %struct._IO_FILE* @fopen(i8*, i8*)
+    declare i32 @fclose(%struct._IO_FILE*)
+
+    define void @cleanup() {
+    entry:
+      call i32 @fclose(%struct._IO_FILE* null)
+      ret void
+    }
+
+    define void @leak_file() {
+    entry:
+      %path.ptr = getelementptr inbounds [9 x i8], [9 x i8]* @path, i64 0, i64 0
+      %mode.ptr = getelementptr inbounds [2 x i8], [2 x i8]* @mode, i64 0, i64 0
+      %fp = call %struct._IO_FILE* @fopen(i8* %path.ptr, i8* %mode.ptr)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @leak_file()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t reportsBefore = getReportCountForType(mgr, "File Descriptor Leak");
+
+  FileChecker checker;
+  checker.runOnModule(*module);
+
+  const size_t reportsAfter = getReportCountForType(mgr, "File Descriptor Leak");
+  ASSERT_EQ(reportsAfter, reportsBefore + 1);
+
+  const BugReport *report = getLastReportForType(mgr, "File Descriptor Leak");
+  ASSERT_NE(report, nullptr);
+  ASSERT_FALSE(report->get_steps().empty());
+
+  const BugDiagStep *sourceStep = report->get_steps().front();
+  ASSERT_NE(sourceStep, nullptr);
+  EXPECT_EQ(sourceStep->tip, "File opened here");
+  const auto *call = dyn_cast_or_null<CallBase>(sourceStep->inst);
+  ASSERT_NE(call, nullptr);
+  ASSERT_NE(call->getCalledFunction(), nullptr);
+  EXPECT_EQ(call->getCalledFunction()->getName(), "fopen");
+}
+
+TEST(SaberConditionAllocatorTest,
+     LeakCheckerDetectsBitcastedDirectAllocatorCalls) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+
+    define void @cleanup() {
+    entry:
+      call void @free(i8* null)
+      ret void
+    }
+
+    define void @leak() {
+    entry:
+      %p = call i8* (i64, ...) bitcast (i8* (i64)* @malloc to i8* (i64, ...)*)(i64 4)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @leak()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t reportsBefore = getReportCountForType(mgr, "Memory Leak");
+
+  LeakChecker checker;
+  checker.runOnModule(*module);
+
+  const size_t reportsAfter = getReportCountForType(mgr, "Memory Leak");
+  ASSERT_EQ(reportsAfter, reportsBefore + 1);
+}
+
+TEST(SaberConditionAllocatorTest,
+     DoubleFreeCheckerDetectsBitcastedDirectDeallocatorCalls) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+
+    define void @df() {
+    entry:
+      %p = call i8* @malloc(i64 4)
+      call void (i8*, ...) bitcast (void (i8*)* @free to void (i8*, ...)*)(i8* %p)
+      call void (i8*, ...) bitcast (void (i8*)* @free to void (i8*, ...)*)(i8* %p)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @df()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t reportsBefore = getReportCountForType(mgr, "Double Free");
+
+  DoubleFreeChecker checker;
+  checker.runOnModule(*module);
+
+  const size_t reportsAfter = getReportCountForType(mgr, "Double Free");
+  ASSERT_EQ(reportsAfter, reportsBefore + 1);
+}
+
+TEST(SaberConditionAllocatorTest,
+     FileCheckerDetectsBitcastedDirectFopenCalls) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    %struct._IO_FILE = type opaque
+    @path = private unnamed_addr constant [9 x i8] c"test.txt\00"
+    @mode = private unnamed_addr constant [2 x i8] c"r\00"
+
+    declare %struct._IO_FILE* @fopen(i8*, i8*)
+    declare i32 @fclose(%struct._IO_FILE*)
+
+    define void @cleanup() {
+    entry:
+      call i32 @fclose(%struct._IO_FILE* null)
+      ret void
+    }
+
+    define void @leak_file() {
+    entry:
+      %path.ptr = getelementptr inbounds [9 x i8], [9 x i8]* @path, i64 0, i64 0
+      %mode.ptr = getelementptr inbounds [2 x i8], [2 x i8]* @mode, i64 0, i64 0
+      %fp = call %struct._IO_FILE* (i8*, i8*, ...) bitcast (%struct._IO_FILE* (i8*, i8*)* @fopen to %struct._IO_FILE* (i8*, i8*, ...)*)(i8* %path.ptr, i8* %mode.ptr)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @leak_file()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t reportsBefore =
+      getReportCountForType(mgr, "File Descriptor Leak");
+
+  FileChecker checker;
+  checker.runOnModule(*module);
+
+  const size_t reportsAfter =
+      getReportCountForType(mgr, "File Descriptor Leak");
+  ASSERT_EQ(reportsAfter, reportsBefore + 1);
 }

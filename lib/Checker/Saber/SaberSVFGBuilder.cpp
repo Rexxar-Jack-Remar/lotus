@@ -40,6 +40,17 @@ static void addDefinedFunction(FuncGraph &graph, const Function *F) {
     graph.emplace(F, FuncSet{});
 }
 
+static const Function *getDirectCallee(const CallBase *call) {
+  if (!call)
+    return nullptr;
+  if (const Function *callee = call->getCalledFunction())
+    return callee;
+  const Value *called = call->getCalledOperand();
+  if (!called)
+    return nullptr;
+  return dyn_cast<Function>(called->stripPointerCasts());
+}
+
 static void buildResolvedCallGraph(
     const Module *M, FuncGraph &graph,
     const std::function<std::vector<const Function *>(const CallBase *)>
@@ -62,7 +73,7 @@ static void buildResolvedCallGraph(
         const auto *CB = dyn_cast<CallBase>(&I);
         if (!CB)
           continue;
-        const Function *callee = CB->getCalledFunction();
+        const Function *callee = getDirectCallee(CB);
         if (callee) {
           if (!callee->isDeclaration())
             it->second.insert(callee);
@@ -250,7 +261,7 @@ void SaberSVFGBuilder::AddExtActualParmSVFGNodes() {
         if (!cs)
           continue;
         bool sinkLikeCallee = false;
-        if (Function *callee = cs->getCalledFunction()) {
+        if (const Function *callee = getDirectCallee(cs)) {
           sinkLikeCallee = api->isMemDealloc(callee->getName().str()) ||
                            api->isFClose(callee->getName().str());
         } else {

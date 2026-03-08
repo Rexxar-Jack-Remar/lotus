@@ -17,6 +17,7 @@
 
 #include <cassert>
 #include <deque>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -45,12 +46,33 @@ static void appendPathConditionEvents(BugReport *report,
   }
 }
 
+static const llvm::Function *getDirectCallee(const llvm::CallBase *call) {
+  if (!call)
+    return nullptr;
+  if (const llvm::Function *callee = call->getCalledFunction())
+    return callee;
+  const llvm::Value *called = call->getCalledOperand();
+  if (!called)
+    return nullptr;
+  return llvm::dyn_cast<llvm::Function>(called->stripPointerCasts());
+}
+
+static const llvm::Value *getReportValueForNode(const SVFGNode *node) {
+  if (!node)
+    return nullptr;
+  if (const Instruction *inst = node->getInstruction())
+    return inst;
+  if (const auto *actualParm = dyn_cast<ActualParmSVFGNode>(node))
+    return actualParm->getCallSite();
+  return nullptr;
+}
+
 static std::vector<const llvm::Function *>
 collectResolvedCallees(const llvm::CallBase *call, SaberSVFGBuilder &builder) {
   std::vector<const llvm::Function *> callees;
   if (!call)
     return callees;
-  if (const llvm::Function *directCallee = call->getCalledFunction()) {
+  if (const llvm::Function *directCallee = getDirectCallee(call)) {
     callees.push_back(directCallee);
     return callees;
   }
@@ -84,7 +106,10 @@ static void addFunctionSeedsFromGlobalArray(const GlobalVariable *gv,
   }
 }
 
-static FuncSet computeReachableFunctions(const Module *M) {
+static FuncSet
+computeReachableFunctions(const Module *M,
+                          const std::function<std::vector<const Function *>(
+                              const CallBase *)> &resolveIndirectTargets) {
   FuncSet reachable;
   FuncSet seeds;
   FuncGraph graph;
@@ -118,10 +143,16 @@ static FuncSet computeReachableFunctions(const Module *M) {
         const auto *CB = dyn_cast<CallBase>(&I);
         if (!CB)
           continue;
-        const Function *callee = CB->getCalledFunction();
-        if (!callee || callee->isDeclaration())
+        const Function *callee = getDirectCallee(CB);
+        if (callee) {
+          if (!callee->isDeclaration())
+            it->second.insert(callee);
           continue;
-        it->second.insert(callee);
+        }
+        for (const Function *target : resolveIndirectTargets(CB)) {
+          if (target && !target->isDeclaration())
+            it->second.insert(target);
+        }
       }
     }
   }
@@ -154,7 +185,10 @@ void LeakChecker::initSrcs() {
     return;
 
   // SVF parity: skip sources in dead/uncalled functions.
-  const FuncSet reachableFunctions = computeReachableFunctions(module_);
+  const FuncSet reachableFunctions =
+      computeReachableFunctions(module_, [this](const CallBase *call) {
+        return memSSA.getIndirectCallTargets(call);
+      });
 
   CSWorkList worklist;
   SVFGNodeBS visited;
@@ -297,6 +331,10 @@ void LeakChecker::reportBug(ProgSlice *slice) {
   const SVFGNode *source = slice->getSource();
   if (!source)
     return;
+  const llvm::CallBase *sourceCall = getSrcCSID(source);
+  const llvm::Value *reportSource =
+      sourceCall ? static_cast<const llvm::Value *>(sourceCall)
+                 : static_cast<const llvm::Value *>(source->getInstruction());
 
   // Match SVF: only report when there is a leak (never free or partial leak).
   const bool allReachable = isAllPathReachable();
@@ -312,31 +350,20 @@ void LeakChecker::reportBug(ProgSlice *slice) {
 
   BugReport *report = new BugReport(bugTypeId);
 
-  if (const Instruction *inst = source->getInstruction()) {
+  if (reportSource) {
     std::string tip = !someReachable
                           ? "Memory allocated here is never freed"
                           : "Memory may leak on some paths (partial leak)";
-    report->append_step(const_cast<Instruction *>(inst), tip);
-
-    if (const DebugLoc &DL = inst->getDebugLoc()) {
-      if (MDNode *N = inst->getMetadata("dbg")) {
-        DILocation *Loc = N ? dyn_cast<DILocation>(N) : nullptr;
-        if (Loc) {
-          report->get_steps().back()->src_file = Loc->getFilename().str();
-          report->get_steps().back()->src_line = Loc->getLine();
-          report->get_steps().back()->src_column = Loc->getColumn();
-        }
-      }
-    }
+    report->append_step(const_cast<Value *>(reportSource), tip);
   }
   if (!neverFree)
     appendPathConditionEvents(report, slice);
 
   for (auto it = slice->sinksBegin(), et = slice->sinksEnd(); it != et; ++it) {
     const SVFGNode *snk = *it;
-    if (const Instruction *inst = snk->getInstruction()) {
+    if (const Value *sinkValue = getReportValueForNode(snk)) {
       std::string tip = "Memory deallocated here";
-      report->append_step(const_cast<Instruction *>(inst), tip, 1);
+      report->append_step(const_cast<Value *>(sinkValue), tip, 1);
     }
   }
 
@@ -346,7 +373,7 @@ void LeakChecker::reportBug(ProgSlice *slice) {
     testsValidation(slice);
 
   outs() << "Memory Leak detected at ";
-  if (const Instruction *inst = source->getInstruction()) {
+  if (const auto *inst = dyn_cast_or_null<Instruction>(reportSource)) {
     if (const Function *F = inst->getFunction()) {
       outs() << F->getName();
     }

@@ -37,10 +37,24 @@ static void appendPathConditionEvents(BugReport *report,
   }
 }
 
+static const llvm::Value *getReportValueForNode(const SVFGNode *node) {
+  if (!node)
+    return nullptr;
+  if (const Instruction *inst = node->getInstruction())
+    return inst;
+  if (const auto *actualParm = dyn_cast<ActualParmSVFGNode>(node))
+    return actualParm->getCallSite();
+  return nullptr;
+}
+
 void DoubleFreeChecker::reportBug(ProgSlice *slice) {
   const SVFGNode *source = slice->getSource();
   if (!source)
     return;
+  const llvm::CallBase *sourceCall = getSrcCSID(source);
+  const llvm::Value *reportSource =
+      sourceCall ? static_cast<const llvm::Value *>(sourceCall)
+                 : static_cast<const llvm::Value *>(source->getInstruction());
 
   // Match SVF: only report when a double-free path exists (two free sinks
   // reachable on the same path).
@@ -53,17 +67,17 @@ void DoubleFreeChecker::reportBug(ProgSlice *slice) {
 
   BugReport *report = new BugReport(bugTypeId);
 
-  if (const Instruction *inst = source->getInstruction()) {
-    std::string tip = "Memory freed here";
-    report->append_step(const_cast<Instruction *>(inst), tip);
+  if (reportSource) {
+    report->append_step(const_cast<Value *>(reportSource),
+                        "Memory allocated here");
   }
   appendPathConditionEvents(report, slice);
 
   for (auto it = slice->sinksBegin(), et = slice->sinksEnd(); it != et; ++it) {
     const SVFGNode *snk = *it;
-    if (const Instruction *inst = snk->getInstruction()) {
-      std::string tip = "Memory freed again - double free!";
-      report->append_step(const_cast<Instruction *>(inst), tip, 1);
+    if (const Value *sinkValue = getReportValueForNode(snk)) {
+      std::string tip = "Memory deallocated along double-free path";
+      report->append_step(const_cast<Value *>(sinkValue), tip, 1);
     }
   }
 
@@ -73,7 +87,7 @@ void DoubleFreeChecker::reportBug(ProgSlice *slice) {
     testsValidation(slice);
 
   outs() << "Double Free detected at ";
-  if (const Instruction *inst = source->getInstruction()) {
+  if (const auto *inst = dyn_cast_or_null<Instruction>(reportSource)) {
     if (const Function *F = inst->getFunction()) {
       outs() << F->getName();
     }

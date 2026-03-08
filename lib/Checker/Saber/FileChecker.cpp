@@ -36,10 +36,24 @@ static void appendPathConditionEvents(BugReport *report,
   }
 }
 
+static const llvm::Value *getReportValueForNode(const SVFGNode *node) {
+  if (!node)
+    return nullptr;
+  if (const Instruction *inst = node->getInstruction())
+    return inst;
+  if (const auto *actualParm = dyn_cast<ActualParmSVFGNode>(node))
+    return actualParm->getCallSite();
+  return nullptr;
+}
+
 void FileChecker::reportBug(ProgSlice *slice) {
   const SVFGNode *source = slice->getSource();
   if (!source)
     return;
+  const llvm::CallBase *sourceCall = getSrcCSID(source);
+  const llvm::Value *reportSource =
+      sourceCall ? static_cast<const llvm::Value *>(sourceCall)
+                 : static_cast<const llvm::Value *>(source->getInstruction());
 
   // Match SVF: only report when there is a file descriptor leak (never close
   // or partial close). Skip when all paths reach a close.
@@ -57,17 +71,16 @@ void FileChecker::reportBug(ProgSlice *slice) {
 
   BugReport *report = new BugReport(bugTypeId);
 
-  if (const Instruction *inst = source->getInstruction()) {
-    report->append_step(const_cast<Instruction *>(inst), "File opened here");
+  if (reportSource) {
+    report->append_step(const_cast<Value *>(reportSource), "File opened here");
   }
   if (!neverClose)
     appendPathConditionEvents(report, slice);
 
   for (auto it = slice->sinksBegin(), et = slice->sinksEnd(); it != et; ++it) {
     const SVFGNode *snk = *it;
-    if (const Instruction *inst = snk->getInstruction()) {
-      report->append_step(const_cast<Instruction *>(inst), "File closed here",
-                          1);
+    if (const Value *sinkValue = getReportValueForNode(snk)) {
+      report->append_step(const_cast<Value *>(sinkValue), "File closed here", 1);
     }
   }
 
@@ -77,7 +90,7 @@ void FileChecker::reportBug(ProgSlice *slice) {
     outs() << "File never closed (full leak) at ";
   else
     outs() << "File may not be closed on some paths (partial) at ";
-  if (const Instruction *inst = source->getInstruction()) {
+  if (const auto *inst = dyn_cast_or_null<Instruction>(reportSource)) {
     if (const Function *F = inst->getFunction())
       outs() << F->getName();
   }

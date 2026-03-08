@@ -16,10 +16,21 @@
 using namespace lotus::analysis;
 using Condition = SaberCondAllocator::Condition;
 
+static const llvm::Function *getDirectCallee(const llvm::CallBase *cs) {
+  if (!cs)
+    return nullptr;
+  if (const llvm::Function *callee = cs->getCalledFunction())
+    return callee;
+  const llvm::Value *called = cs->getCalledOperand();
+  if (!called)
+    return nullptr;
+  return llvm::dyn_cast<llvm::Function>(called->stripPointerCasts());
+}
+
 static bool isProgExitCall(const llvm::CallBase *cs) {
   if (!cs)
     return false;
-  if (const llvm::Function *callee = cs->getCalledFunction()) {
+  if (const llvm::Function *callee = getDirectCallee(cs)) {
     llvm::StringRef name = callee->getName();
     return name == "exit" || name == "_exit" || name == "abort" ||
            name == "quick_exit" || name == "__cxa_abort";
@@ -163,21 +174,22 @@ void SaberCondAllocator::allocateForBB(const llvm::BasicBlock *bb) {
 
   if (succNum > 1) {
     const llvm::Instruction *term = bb->getTerminator();
+    double num = log(static_cast<double>(succNum)) / log(2.0);
+    unsigned bitNum = static_cast<unsigned>(ceil(num));
+    unsigned succIndex = 0;
     std::vector<Condition> selectorConds;
-    selectorConds.reserve(succNum > 0 ? succNum - 1 : 0);
-    for (unsigned i = 0; i + 1 < succNum; ++i)
+    selectorConds.reserve(bitNum);
+    for (unsigned i = 0; i < bitNum; ++i)
       selectorConds.push_back(newCond(term));
 
-    unsigned succIndex = 0;
     for (const llvm::BasicBlock *succ : llvm::successors(bb)) {
       Condition pathCond = getTrueCond();
-      if (succIndex + 1 < succNum) {
-        for (unsigned j = 0; j < succIndex; ++j)
+      for (unsigned j = 0; j < bitNum; ++j) {
+        unsigned tool = 0x01U << j;
+        if (tool & succIndex)
           pathCond = condAnd(pathCond, condNeg(selectorConds.at(j)));
-        pathCond = condAnd(pathCond, selectorConds.at(succIndex));
-      } else {
-        for (const Condition &selector : selectorConds)
-          pathCond = condAnd(pathCond, condNeg(selector));
+        else
+          pathCond = condAnd(pathCond, selectorConds.at(j));
       }
       setBranchCond(bb, succ, pathCond);
       ++succIndex;
