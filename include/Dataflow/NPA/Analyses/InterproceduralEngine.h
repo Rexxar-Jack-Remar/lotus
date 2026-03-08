@@ -60,6 +60,34 @@ public:
     return s;
   }
 
+  static std::vector<llvm::Function *>
+  getPossibleCallees(llvm::Module &M, const llvm::CallBase &Call) {
+    if (llvm::Function *Direct = Call.getCalledFunction()) {
+      if (!Direct->isDeclaration())
+        return {Direct};
+      return {};
+    }
+
+    if (auto *CalleeValue = Call.getCalledOperand()) {
+      auto *Stripped = CalleeValue->stripPointerCasts();
+      if (auto *Direct = llvm::dyn_cast<llvm::Function>(Stripped)) {
+        if (!Direct->isDeclaration())
+          return {Direct};
+        return {};
+      }
+    }
+
+    std::vector<llvm::Function *> matches;
+    llvm::FunctionType *CallTy = Call.getFunctionType();
+    for (auto &F : M) {
+      if (F.isDeclaration())
+        continue;
+      if (F.getFunctionType() == CallTy)
+        matches.push_back(&F);
+    }
+    return matches;
+  }
+
 private:
   template <typename A>
   static auto getMaxPropagationSteps(const A &analysis, int)
@@ -228,24 +256,26 @@ public:
         E currentPath = buildBlockEntryExpr(analysis, BB, inExpr, 0);
         for (auto &I : BB) {
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            if (auto *Callee = CI->getCalledFunction()) {
-              if (!Callee->isDeclaration()) {
+            std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+            if (!Callees.empty()) {
+              E callBranches = nullptr;
+              for (llvm::Function *Callee : Callees) {
                 if (visited.insert(Callee).second)
                   worklist.push_back(Callee);
-                currentPath =
+                E branch =
                     Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
                              currentPath);
-                currentPath = Exp::call(getFuncSymbol(Callee), currentPath);
-                currentPath =
+                branch = Exp::call(getFuncSymbol(Callee), branch);
+                branch =
                     Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
-                             currentPath);
-              } else {
-                currentPath = Exp::seq(
-                    getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+                             branch);
+                callBranches =
+                    callBranches ? Exp::ndet(callBranches, branch) : branch;
               }
+              currentPath = callBranches;
             } else {
-              currentPath = Exp::seq(getCallToReturnTransfer(analysis, *CI, 0),
-                                     currentPath);
+              currentPath =
+                  Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
             }
           }
           currentPath = analysis.getTransfer(I, currentPath);
@@ -315,29 +345,32 @@ public:
         if (!solvedMap.count(bSym))
           continue;
 
-        Val entryToBlockStart = D::zero();
+        E inExpr = nullptr;
         if (&BB == &F->getEntryBlock()) {
-          entryToBlockStart = D::one();
+          inExpr = Exp::term(D::one());
         } else {
-          bool first = true;
+          bool hasPreds = false;
           auto *First = BB.empty() ? nullptr : &BB.front();
           for (auto *PredInst : CFG.getPredsOf(
                    First, ::dataflow::controlflow::FlowDirection::Forward)) {
             auto *Pred = PredInst ? PredInst->getParent() : nullptr;
             if (!Pred)
               continue;
-            std::string pSym = getBlockSymbol(Pred);
-            if (solvedMap.count(pSym)) {
-              if (first) {
-                entryToBlockStart = solvedMap[pSym];
-                first = false;
-              } else {
-                entryToBlockStart =
-                    D::combine(entryToBlockStart, solvedMap[pSym]);
-              }
+            hasPreds = true;
+            E pHole = Exp::hole(getBlockSymbol(Pred));
+            if (auto *PredTerm = Pred->getTerminator()) {
+              pHole = Exp::seq(getEdgeTransfer(analysis, *PredTerm, BB, 0), pHole);
             }
+            if (!inExpr)
+              inExpr = pHole;
+            else
+              inExpr = Exp::ndet(inExpr, pHole);
           }
+          if (!hasPreds)
+            inExpr = Exp::term(D::zero());
         }
+        E blockEntryExpr = buildBlockEntryExpr(analysis, BB, inExpr, 0);
+        Val entryToBlockStart = I0<D>::eval(false, solvedMap, blockEntryExpr);
 
         auto blockEntryFact =
             analysis.applySummary(entryToBlockStart, inputVal);
@@ -347,11 +380,13 @@ public:
 
         for (auto &I : BB) {
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            if (auto *Callee = CI->getCalledFunction()) {
-              if (!Callee->isDeclaration()) {
+            std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+            if (!Callees.empty()) {
+              Val currentPathVal = I0<D>::eval(false, solvedMap, currentPath);
+              E callBranches = nullptr;
+              for (llvm::Function *Callee : Callees) {
                 std::string calleeFSym = getFuncSymbol(Callee);
 
-                Val currentPathVal = I0<D>::eval(false, solvedMap, currentPath);
                 Val callEntry =
                     D::extend(getCallEntryTransfer(analysis, *CI, *Callee, 0),
                               currentPathVal);
@@ -370,31 +405,29 @@ public:
                     size_t updateCount = ++funcUpdates[calleeFSym];
                     Fact widened =
                         widenFacts(analysis, oldVal, newVal, updateCount, 0);
-                    if (analysis.factsEqual(oldVal, widened))
-                      continue;
-                    funcInput[calleeFSym] = widened;
-                    if (inWorklist2.insert(Callee).second)
-                      worklist2.push_back(Callee);
+                    if (!analysis.factsEqual(oldVal, widened)) {
+                      funcInput[calleeFSym] = widened;
+                      if (inWorklist2.insert(Callee).second)
+                        worklist2.push_back(Callee);
+                    }
                   }
                 }
-              }
-            }
-          }
 
-          if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            if (auto *Callee = CI->getCalledFunction()) {
-              if (!Callee->isDeclaration()) {
-                currentPath =
+                E branch =
                     Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
                              currentPath);
-                currentPath = Exp::call(getFuncSymbol(Callee), currentPath);
-                currentPath =
+                branch = Exp::call(getFuncSymbol(Callee), branch);
+                branch =
                     Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
-                             currentPath);
-              } else {
-                currentPath = Exp::seq(
-                    getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+                             branch);
+                callBranches =
+                    callBranches ? Exp::ndet(callBranches, branch) : branch;
               }
+              currentPath = callBranches;
+            }
+            else {
+              currentPath =
+                  Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
             }
           }
           currentPath = analysis.getTransfer(I, currentPath);

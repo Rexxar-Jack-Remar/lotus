@@ -384,7 +384,11 @@ public:
             relationForValue(Phi, Phi->getIncomingValueForBlock(Pred));
         phiTransfer = D::extend(assign, phiTransfer);
       }
-      E branch = Exp::seq(phiTransfer, Exp::hole(Engine::getBlockSymbol(Pred)));
+      E branch = Exp::hole(Engine::getBlockSymbol(Pred));
+      if (auto *PredTerm = Pred->getTerminator()) {
+        branch = Exp::seq(getEdgeTransfer(*PredTerm, BB), branch);
+      }
+      branch = Exp::seq(phiTransfer, branch);
       result = result ? Exp::ndet(result, branch) : branch;
     }
     return result ? result : inExpr;

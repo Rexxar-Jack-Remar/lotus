@@ -89,7 +89,25 @@ private:
     return D::one();
   }
 
+  template <typename A>
+  static auto getEdgeTransfer(A &analysis, const llvm::Instruction &term,
+                              const llvm::BasicBlock &succ, int)
+      -> decltype(analysis.getEdgeTransfer(term, succ)) {
+    return analysis.getEdgeTransfer(term, succ);
+  }
+
+  static typename D::value_type
+  getEdgeTransfer(Analysis &, const llvm::Instruction &, const llvm::BasicBlock &,
+                  long) {
+    return D::one();
+  }
+
 public:
+  static std::vector<llvm::Function *>
+  getPossibleCallees(llvm::Module &M, const llvm::CallBase &Call) {
+    return InterproceduralEngine<D, Analysis>::getPossibleCallees(M, Call);
+  }
+
   static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false) {
     std::vector<std::pair<Symbol, E>> eqns;
     std::deque<llvm::Function *> worklist;
@@ -129,10 +147,13 @@ public:
                 continue;
               auto succSym =
                   InterproceduralEngine<D, Analysis>::getBlockSymbol(Succ);
+              E branch = Exp::hole(succSym);
+              branch = Exp::seq(getEdgeTransfer(analysis, *Term, *Succ, 0),
+                                branch);
               if (!outExpr)
-                outExpr = Exp::hole(succSym);
+                outExpr = branch;
               else
-                outExpr = Exp::ndet(outExpr, Exp::hole(succSym));
+                outExpr = Exp::ndet(outExpr, branch);
             }
           }
         }
@@ -143,23 +164,25 @@ public:
         for (auto It = BB.rbegin(); It != BB.rend(); ++It) {
           llvm::Instruction &I = *It;
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            if (auto *Callee = CI->getCalledFunction()) {
-              if (!Callee->isDeclaration()) {
+            std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+            if (!Callees.empty()) {
+              E callBranches = nullptr;
+              for (llvm::Function *Callee : Callees) {
                 if (visited.insert(Callee).second)
                   worklist.push_back(Callee);
-                currentPath = Exp::seq(
+                E branch = Exp::seq(
                     getCallReturnTransfer(analysis, *CI, *Callee, 0),
                     currentPath);
-                currentPath =
+                branch =
                     Exp::call(InterproceduralEngine<D, Analysis>::getFuncSymbol(
                                   Callee),
-                              currentPath);
-                currentPath = Exp::seq(
-                    getCallEntryTransfer(analysis, *CI, *Callee, 0), currentPath);
-              } else {
-                currentPath =
-                    Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+                              branch);
+                branch = Exp::seq(
+                    getCallEntryTransfer(analysis, *CI, *Callee, 0), branch);
+                callBranches =
+                    callBranches ? Exp::ndet(callBranches, branch) : branch;
               }
+              currentPath = callBranches;
             } else {
               currentPath =
                   Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
@@ -243,11 +266,14 @@ public:
             auto SuccIt = solvedMap.find(succSym);
             if (SuccIt == solvedMap.end())
               continue;
+            Val succToExit =
+                D::extend(getEdgeTransfer(analysis, *Term, *Succ, 0),
+                          SuccIt->second);
             if (first) {
-              blockEndToExit = SuccIt->second;
+              blockEndToExit = succToExit;
               first = false;
             } else {
-              blockEndToExit = D::combine(blockEndToExit, SuccIt->second);
+              blockEndToExit = D::combine(blockEndToExit, succToExit);
             }
           }
         }
@@ -256,11 +282,13 @@ public:
         for (auto It = BB.rbegin(); It != BB.rend(); ++It) {
           llvm::Instruction &I = *It;
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            if (auto *Callee = CI->getCalledFunction()) {
-              if (!Callee->isDeclaration()) {
+            std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+            if (!Callees.empty()) {
+              Val currentPathVal = I0<D>::eval(false, solvedMap, currentPath);
+              E callBranches = nullptr;
+              for (llvm::Function *Callee : Callees) {
                 std::string calleeSym =
                     InterproceduralEngine<D, Analysis>::getFuncSymbol(Callee);
-                Val currentPathVal = I0<D>::eval(false, solvedMap, currentPath);
                 Val afterCallToExit = D::extend(currentPathVal, blockEndToExit);
                 Val calleeExitToExit =
                     D::extend(getCallReturnTransfer(analysis, *CI, *Callee, 0),
@@ -280,24 +308,24 @@ public:
                     size_t updateCount = ++funcUpdates[calleeSym];
                     Fact widened = widenFacts(analysis, Existing->second, joined,
                                               updateCount, 0);
-                    if (analysis.factsEqual(widened, Existing->second))
-                      continue;
-                    Existing->second = widened;
-                    if (inWorklist2.insert(Callee).second)
-                      worklist2.push_back(Callee);
+                    if (!analysis.factsEqual(widened, Existing->second)) {
+                      Existing->second = widened;
+                      if (inWorklist2.insert(Callee).second)
+                        worklist2.push_back(Callee);
+                    }
                   }
                 }
 
-                currentPath = Exp::seq(
+                E branch = Exp::seq(
                     getCallReturnTransfer(analysis, *CI, *Callee, 0),
                     currentPath);
-                currentPath = Exp::call(calleeSym, currentPath);
-                currentPath = Exp::seq(
-                    getCallEntryTransfer(analysis, *CI, *Callee, 0), currentPath);
-              } else {
-                currentPath =
-                    Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+                branch = Exp::call(calleeSym, branch);
+                branch = Exp::seq(
+                    getCallEntryTransfer(analysis, *CI, *Callee, 0), branch);
+                callBranches =
+                    callBranches ? Exp::ndet(callBranches, branch) : branch;
               }
+              currentPath = callBranches;
             } else {
               currentPath =
                   Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);

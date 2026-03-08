@@ -4,6 +4,8 @@
 #include "Dataflow/NPA/Core/NPACommon.h"
 
 #include <set>
+#include <type_traits>
+#include <unordered_set>
 #include <vector>
 
 namespace npa {
@@ -19,9 +21,11 @@ template <class Op, class OpLess = std::less<Op>> struct ProgramTransfer {
   using path_type = std::vector<Op>;
   std::set<path_type, PathLess<Op, OpLess>> paths;
   bool overflow = false;
+  std::unordered_set<const void *> may_write;
 
   bool operator==(const ProgramTransfer &other) const {
-    return overflow == other.overflow && paths == other.paths;
+    return overflow == other.overflow && paths == other.paths &&
+           may_write == other.may_write;
   }
 };
 
@@ -30,10 +34,10 @@ public:
   using value_type = ProgramTransfer<Op, OpLess>;
   using test_type = bool;
   static constexpr bool idempotent = true;
-  static constexpr int max_fixpoint_iters = 64;
-  static constexpr long max_linear_steps = 10000;
-  static constexpr std::size_t max_paths = 256;
-  static constexpr std::size_t max_path_length = 64;
+  static constexpr int max_fixpoint_iters = 256;
+  static constexpr long max_linear_steps = 100000;
+  static constexpr std::size_t max_paths = 4096;
+  static constexpr std::size_t max_path_length = 256;
 
   static value_type zero() { return {}; }
 
@@ -94,7 +98,29 @@ public:
   }
 
 private:
+  template <typename... Ts> using void_t = void;
+
+  template <typename T, typename = void> struct HasPointerDest : std::false_type {};
+
+  template <typename T>
+  struct HasPointerDest<T, void_t<decltype(std::declval<T>().dest)>>
+      : std::integral_constant<bool,
+                               std::is_pointer<decltype(std::declval<T>().dest)>::value> {};
+
+  template <typename T = Op>
+  static typename std::enable_if<HasPointerDest<T>::value, void>::type
+  noteWrite(value_type &out, const T &op) {
+    if (op.dest)
+      out.may_write.insert(op.dest);
+  }
+
+  template <typename T = Op>
+  static typename std::enable_if<!HasPointerDest<T>::value, void>::type
+  noteWrite(value_type &, const T &) {}
+
   static void insertPath(value_type &out, typename value_type::path_type path) {
+    for (const auto &op : path)
+      noteWrite(out, op);
     if (path.size() > max_path_length) {
       out.overflow = true;
       return;

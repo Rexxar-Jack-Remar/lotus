@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <llvm/ADT/APInt.h>
+
 namespace llvm {
 class Value;
 class Module;
@@ -23,10 +25,15 @@ enum class ConstantPropagationTag {
 
 struct ConstantPropagationValue {
   ConstantPropagationTag tag = ConstantPropagationTag::Top;
-  int64_t constant = 0;
+  llvm::APInt constant = llvm::APInt(1, 0);
+
+  bool isConstant() const { return tag == ConstantPropagationTag::Const; }
 
   bool operator==(const ConstantPropagationValue &other) const {
-    return tag == other.tag && constant == other.constant;
+    return tag == other.tag &&
+           (!isConstant() ||
+            (constant.getBitWidth() == other.constant.getBitWidth() &&
+             constant.eq(other.constant)));
   }
 };
 
@@ -43,8 +50,10 @@ struct ConstantPropagationOp {
   enum class Kind {
     AssignConst,
     Copy,
+    Cast,
     Binary,
     Compare,
+    AssumeNotCases,
     Phi,
     Select,
     Forget,
@@ -56,7 +65,9 @@ struct ConstantPropagationOp {
   const llvm::Value *rhs = nullptr;
   const llvm::Value *cond = nullptr;
   unsigned opcode = 0;
-  int64_t constant = 0;
+  unsigned bitWidth = 0;
+  unsigned sourceBitWidth = 0;
+  llvm::APInt constant = llvm::APInt(1, 0);
   std::vector<const llvm::Value *> inputs;
 
   bool operator<(const ConstantPropagationOp &other) const;

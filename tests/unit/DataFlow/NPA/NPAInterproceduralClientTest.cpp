@@ -1,12 +1,15 @@
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralAffineEqualities.h"
+#include "Dataflow/NPA/Analyses/BackwardInterproceduralEngine.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralConstantPropagation.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralIntervalAnalysis.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralLiveVariables.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralMaybeUninitialized.h"
+#include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
 
 #include <gtest/gtest.h>
 
 #include <iterator>
+#include <limits>
 #include <llvm/ADT/APInt.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
@@ -14,6 +17,7 @@
 #include <llvm/Support/SourceMgr.h>
 
 #include <set>
+#include <string>
 #include <vector>
 
 namespace {
@@ -92,6 +96,54 @@ llvm::APInt unionFactForBlock(const std::map<npa::BlockKey, llvm::APInt> &facts,
   }
   EXPECT_TRUE(found);
   return fact;
+}
+
+template <typename Op, typename OpLess>
+bool containsPath(
+    const npa::ProgramTransfer<Op, OpLess> &transfer,
+    std::initializer_list<Op> expected) {
+  typename npa::ProgramTransfer<Op, OpLess>::path_type path(expected);
+  return transfer.paths.count(path) != 0;
+}
+
+llvm::APInt signedAPInt(unsigned bitWidth, int64_t value) {
+  return llvm::APInt(bitWidth, static_cast<uint64_t>(value), true);
+}
+
+llvm::APInt unsignedAPInt(unsigned bitWidth, uint64_t value) {
+  return llvm::APInt(bitWidth, value, false);
+}
+
+void expectConstValue(const npa::ConstantPropagationValue &value,
+                      const llvm::APInt &expected) {
+  EXPECT_EQ(value.tag, npa::ConstantPropagationTag::Const);
+  EXPECT_EQ(value.constant.getBitWidth(), expected.getBitWidth());
+  EXPECT_TRUE(value.constant.eq(expected));
+}
+
+void expectIntervalPoint(const npa::Interval &value, const llvm::APInt &expected,
+                         npa::IntervalOrdering ordering) {
+  EXPECT_FALSE(value.bottom);
+  EXPECT_TRUE(value.hasLower);
+  EXPECT_TRUE(value.hasUpper);
+  EXPECT_EQ(value.ordering, ordering);
+  ASSERT_EQ(value.lower.getBitWidth(), expected.getBitWidth());
+  ASSERT_EQ(value.upper.getBitWidth(), expected.getBitWidth());
+  EXPECT_TRUE(value.lower.eq(expected));
+  EXPECT_TRUE(value.upper.eq(expected));
+}
+
+void expectIntervalRange(const npa::Interval &value, const llvm::APInt &lower,
+                         const llvm::APInt &upper,
+                         npa::IntervalOrdering ordering) {
+  EXPECT_FALSE(value.bottom);
+  EXPECT_TRUE(value.hasLower);
+  EXPECT_TRUE(value.hasUpper);
+  EXPECT_EQ(value.ordering, ordering);
+  ASSERT_EQ(value.lower.getBitWidth(), lower.getBitWidth());
+  ASSERT_EQ(value.upper.getBitWidth(), upper.getBitWidth());
+  EXPECT_TRUE(value.lower.eq(lower));
+  EXPECT_TRUE(value.upper.eq(upper));
 }
 
 } // namespace
@@ -175,8 +227,218 @@ TEST(NPAInterproceduralClients, ConstantPropagationTransfersArgumentsAcrossCall)
   ASSERT_EQ(states.size(), 1u);
   auto It = states.front()->values.find(Arg);
   ASSERT_NE(It, states.front()->values.end());
-  EXPECT_EQ(It->second.tag, npa::ConstantPropagationTag::Const);
-  EXPECT_EQ(It->second.constant, 5);
+  expectConstValue(It->second, signedAPInt(32, 5));
+}
+
+TEST(NPAInterproceduralClients, ConstantPropagationUsesLLVMIntegerSemantics) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main() {
+    entry:
+      %z = zext i1 true to i32
+      %t = trunc i32 256 to i8
+      %cmp = icmp ugt i32 -1, 1
+      %q = udiv i32 -1, 2
+      %s = lshr i32 -1, 1
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *Z = findInstructionByName(*Main, "z");
+  auto *T = findInstructionByName(*Main, "t");
+  auto *Cmp = findInstructionByName(*Main, "cmp");
+  auto *Q = findInstructionByName(*Main, "q");
+  auto *S = findInstructionByName(*Main, "s");
+  ASSERT_NE(Z, nullptr);
+  ASSERT_NE(T, nullptr);
+  ASSERT_NE(Cmp, nullptr);
+  ASSERT_NE(Q, nullptr);
+  ASSERT_NE(S, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto states = statesForBlock(result.blockFacts, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto ZIt = states.front()->values.find(Z);
+  auto TIt = states.front()->values.find(T);
+  auto CmpIt = states.front()->values.find(Cmp);
+  auto QIt = states.front()->values.find(Q);
+  auto SIt = states.front()->values.find(S);
+  ASSERT_NE(ZIt, states.front()->values.end());
+  ASSERT_NE(TIt, states.front()->values.end());
+  ASSERT_NE(CmpIt, states.front()->values.end());
+  ASSERT_NE(QIt, states.front()->values.end());
+  ASSERT_NE(SIt, states.front()->values.end());
+
+  expectConstValue(ZIt->second, unsignedAPInt(32, 1));
+  expectConstValue(TIt->second, signedAPInt(8, 0));
+  expectConstValue(CmpIt->second, unsignedAPInt(1, 1));
+  expectConstValue(QIt->second, unsignedAPInt(32, 2147483647));
+  expectConstValue(SIt->second, unsignedAPInt(32, 2147483647));
+}
+
+TEST(NPAInterproceduralClients, ConstantPropagationSupportsLargeUnsignedValues) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main() {
+    entry:
+      %q = udiv i64 -1, 1
+      %s = lshr i64 -1, 0
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *Q = findInstructionByName(*Main, "q");
+  auto *S = findInstructionByName(*Main, "s");
+  ASSERT_NE(Q, nullptr);
+  ASSERT_NE(S, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto states = statesForBlock(result.blockFacts, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto QIt = states.front()->values.find(Q);
+  auto SIt = states.front()->values.find(S);
+  ASSERT_NE(QIt, states.front()->values.end());
+  ASSERT_NE(SIt, states.front()->values.end());
+  expectConstValue(QIt->second, unsignedAPInt(64, std::numeric_limits<uint64_t>::max()));
+  expectConstValue(SIt->second, unsignedAPInt(64, std::numeric_limits<uint64_t>::max()));
+}
+
+TEST(NPAInterproceduralClients, ConstantPropagationPreservesPhiConditionCorrelation) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %left, label %right
+
+    left:
+      br label %merge
+
+    right:
+      br label %merge
+
+    merge:
+      %x = phi i32 [ 1, %left ], [ 2, %right ]
+      %c = zext i1 %cond to i32
+      %y = add i32 %x, %c
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *Y = findInstructionByName(*Main, "y");
+  ASSERT_NE(Y, nullptr);
+  auto NextIt = std::next(Main->begin(), 4);
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto states = statesForBlock(result.blockFacts, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto It = states.front()->values.find(Y);
+  ASSERT_NE(It, states.front()->values.end());
+  expectConstValue(It->second, signedAPInt(32, 2));
+}
+
+TEST(NPAInterproceduralClients, ConstantPropagationResolvesIndirectSingleTargetCall) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @main() {
+    entry:
+      %fp = select i1 true, i32 (i32)* @id, i32 (i32)* @id
+      %r = call i32 %fp(i32 7)
+      ret i32 %r
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Id = module->getFunction("id");
+  ASSERT_NE(Id, nullptr);
+  auto *Arg = &*Id->arg_begin();
+
+  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto states = statesForBlock(result.blockFacts, &Id->getEntryBlock());
+  ASSERT_EQ(states.size(), 1u);
+
+  auto It = states.front()->values.find(Arg);
+  ASSERT_NE(It, states.front()->values.end());
+  expectConstValue(It->second, signedAPInt(32, 7));
+}
+
+TEST(NPAInterproceduralClients, ConstantPropagationDefaultSwitchCanBeUnreachable) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main() {
+    entry:
+      switch i32 3, label %default [ i32 1, label %case1
+                                     i32 3, label %case3 ]
+
+    case1:
+      %x1 = add i32 1, 1
+      br label %join
+
+    case3:
+      %x3 = add i32 4, 5
+      br label %join
+
+    default:
+      %xd = add i32 7, 8
+      br label %join
+
+    join:
+      %x = phi i32 [ %x1, %case1 ], [ %x3, %case3 ], [ %xd, %default ]
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *X = findInstructionByName(*Main, "x");
+  ASSERT_NE(X, nullptr);
+  auto NextIt = std::next(Main->begin(), 4);
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto states = statesForBlock(result.blockFacts, Next);
+  ASSERT_EQ(states.size(), 1u);
+  auto It = states.front()->values.find(X);
+  ASSERT_NE(It, states.front()->values.end());
+  expectConstValue(It->second, signedAPInt(32, 9));
 }
 
 TEST(NPAInterproceduralClients, IntervalAnalysisJoinsAtSingleFunctionEntry) {
@@ -206,10 +468,8 @@ TEST(NPAInterproceduralClients, IntervalAnalysisJoinsAtSingleFunctionEntry) {
   ASSERT_EQ(states.size(), 1u);
   auto It = states.front()->values.find(Arg);
   ASSERT_NE(It, states.front()->values.end());
-  EXPECT_TRUE(It->second.hasLower);
-  EXPECT_TRUE(It->second.hasUpper);
-  EXPECT_EQ(It->second.lower, 2);
-  EXPECT_EQ(It->second.upper, 10);
+  expectIntervalRange(It->second, signedAPInt(32, 2), signedAPInt(32, 10),
+                      npa::IntervalOrdering::Signed);
 }
 
 TEST(NPAInterproceduralClients, AffineEqualitiesTransferSymbolicRelations) {
@@ -374,10 +634,8 @@ TEST(NPAInterproceduralClients, IntervalCastKeepsZextTrueAsOne) {
 
   auto It = states.front()->values.find(Value);
   ASSERT_NE(It, states.front()->values.end());
-  EXPECT_TRUE(It->second.hasLower);
-  EXPECT_TRUE(It->second.hasUpper);
-  EXPECT_EQ(It->second.lower, 1);
-  EXPECT_EQ(It->second.upper, 1);
+  expectIntervalPoint(It->second, unsignedAPInt(32, 1),
+                      npa::IntervalOrdering::Unsigned);
 }
 
 TEST(NPAInterproceduralClients, IntervalSignedDivisionUsesAllEndpointPairs) {
@@ -410,10 +668,8 @@ TEST(NPAInterproceduralClients, IntervalSignedDivisionUsesAllEndpointPairs) {
 
   auto It = states.front()->values.find(Quotient);
   ASSERT_NE(It, states.front()->values.end());
-  EXPECT_TRUE(It->second.hasLower);
-  EXPECT_TRUE(It->second.hasUpper);
-  EXPECT_EQ(It->second.lower, -5);
-  EXPECT_EQ(It->second.upper, 10);
+  expectIntervalRange(It->second, signedAPInt(32, -5), signedAPInt(32, 10),
+                      npa::IntervalOrdering::Signed);
 }
 
 TEST(NPAInterproceduralClients, IntervalUnsignedOpsUseUnsignedSemantics) {
@@ -447,17 +703,175 @@ TEST(NPAInterproceduralClients, IntervalUnsignedOpsUseUnsignedSemantics) {
 
   auto CmpIt = states.front()->values.find(Cmp);
   ASSERT_NE(CmpIt, states.front()->values.end());
-  EXPECT_TRUE(CmpIt->second.hasLower);
-  EXPECT_TRUE(CmpIt->second.hasUpper);
-  EXPECT_EQ(CmpIt->second.lower, 1);
-  EXPECT_EQ(CmpIt->second.upper, 1);
+  expectIntervalPoint(CmpIt->second, unsignedAPInt(1, 1),
+                      npa::IntervalOrdering::Signed);
 
   auto QuotientIt = states.front()->values.find(Quotient);
   ASSERT_NE(QuotientIt, states.front()->values.end());
-  EXPECT_TRUE(QuotientIt->second.hasLower);
-  EXPECT_TRUE(QuotientIt->second.hasUpper);
-  EXPECT_EQ(QuotientIt->second.lower, 2147483647);
-  EXPECT_EQ(QuotientIt->second.upper, 2147483647);
+  expectIntervalPoint(QuotientIt->second, unsignedAPInt(32, 2147483647),
+                      npa::IntervalOrdering::Unsigned);
+}
+
+TEST(NPAInterproceduralClients, IntervalSupportsLargeUnsignedValues) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main() {
+    entry:
+      %q = udiv i64 -1, 1
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *Q = findInstructionByName(*Main, "q");
+  ASSERT_NE(Q, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto states = statesForBlock(result.blockFacts, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto It = states.front()->values.find(Q);
+  ASSERT_NE(It, states.front()->values.end());
+  expectIntervalPoint(It->second, unsignedAPInt(64, std::numeric_limits<uint64_t>::max()),
+                      npa::IntervalOrdering::Unsigned);
+}
+
+TEST(NPAInterproceduralClients, IntervalPreservesPhiConditionCorrelation) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %left, label %right
+
+    left:
+      br label %merge
+
+    right:
+      br label %merge
+
+    merge:
+      %x = phi i32 [ 1, %left ], [ 2, %right ]
+      %c = zext i1 %cond to i32
+      %y = add i32 %x, %c
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *Y = findInstructionByName(*Main, "y");
+  ASSERT_NE(Y, nullptr);
+  auto NextIt = std::next(Main->begin(), 4);
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto states = statesForBlock(result.blockFacts, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto It = states.front()->values.find(Y);
+  ASSERT_NE(It, states.front()->values.end());
+  expectIntervalPoint(It->second, signedAPInt(32, 2),
+                      npa::IntervalOrdering::Signed);
+}
+
+TEST(NPAInterproceduralClients, IntervalDefaultSwitchNarrowsRepresentableRange) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i1 %c1, i1 %c2) {
+    entry:
+      %x = select i1 %c1, i32 0, i32 2
+      %y = select i1 %c2, i32 %x, i32 1
+      switch i32 %y, label %default [ i32 0, label %case0 ]
+
+    case0:
+      br label %join
+
+    default:
+      br label %join
+
+    join:
+      %z = phi i32 [ 0, %case0 ], [ %y, %default ]
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto DefaultIt = std::next(Main->begin(), 2);
+  ASSERT_NE(DefaultIt, Main->end());
+  auto *Default = &*DefaultIt;
+
+  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto states = statesForBlock(result.blockFacts, Default);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto *Y = findInstructionByName(*Main, "y");
+  ASSERT_NE(Y, nullptr);
+  auto It = states.front()->values.find(Y);
+  ASSERT_NE(It, states.front()->values.end());
+  expectIntervalRange(It->second, signedAPInt(32, 1), signedAPInt(32, 2),
+                      npa::IntervalOrdering::Signed);
+}
+
+TEST(NPAInterproceduralClients, AffineDefaultSwitchRemainsUnrefinedByDisequality) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i32 %x) {
+    entry:
+      switch i32 %x, label %default [ i32 0, label %case0 ]
+
+    case0:
+      br label %join
+
+    default:
+      br label %join
+
+    join:
+      %y = phi i32 [ 0, %case0 ], [ %x, %default ]
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto DefaultIt = std::next(Main->begin(), 2);
+  ASSERT_NE(DefaultIt, Main->end());
+  auto *Default = &*DefaultIt;
+
+  auto result = npa::InterproceduralAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Default);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto *X = &*Main->arg_begin();
+  auto It = states.front().values.find(X);
+  ASSERT_NE(It, states.front().values.end());
+  EXPECT_FALSE(It->second.top);
+  EXPECT_EQ(It->second.constant, 0);
+  ASSERT_EQ(It->second.terms.size(), 1u);
+  auto XIt = It->second.terms.find(X);
+  ASSERT_NE(XIt, It->second.terms.end());
+  EXPECT_EQ(XIt->second, 1);
 }
 
 TEST(NPAInterproceduralClients, AffineCastAndSelectUseKnownConditionValue) {
@@ -543,6 +957,125 @@ TEST(NPAInterproceduralClients, AffineCompareOfSameValueProducesConstant) {
   EXPECT_FALSE(SelIt->second.top);
   EXPECT_TRUE(SelIt->second.terms.empty());
   EXPECT_EQ(SelIt->second.constant, 11);
+}
+
+TEST(NPAInterproceduralClients, AffinePhiKeepsBranchConditionAtMerge) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %left, label %right
+
+    left:
+      br label %merge
+
+    right:
+      br label %merge
+
+    merge:
+      %x = phi i32 [ 1, %left ], [ 2, %right ]
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *Cond = &*Main->arg_begin();
+  auto MergeIt = std::next(Main->begin(), 3);
+  ASSERT_NE(MergeIt, Main->end());
+  auto *Merge = &*MergeIt;
+  auto *X = findInstructionByName(*Main, "x");
+  ASSERT_NE(X, nullptr);
+
+  auto result = npa::InterproceduralAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Merge);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto XIt = states.front().values.find(X);
+  ASSERT_NE(XIt, states.front().values.end());
+  EXPECT_FALSE(XIt->second.top);
+  EXPECT_EQ(XIt->second.constant, 2);
+  ASSERT_EQ(XIt->second.terms.size(), 1u);
+  auto CondIt = XIt->second.terms.find(Cond);
+  ASSERT_NE(CondIt, XIt->second.terms.end());
+  EXPECT_EQ(CondIt->second, -1);
+}
+
+namespace {
+
+using TraceTransferDomain = npa::ProgramTransferDomain<char>;
+
+class BackwardEdgeTransferAnalysis {
+public:
+  using FactType = TraceTransferDomain::value_type;
+  using E = npa::E0<TraceTransferDomain>;
+
+  FactType getExitValue(const llvm::Function &) const {
+    return TraceTransferDomain::one();
+  }
+
+  E getTransfer(llvm::Instruction &, E current) const {
+    return current;
+  }
+
+  FactType getEdgeTransfer(const llvm::Instruction &term,
+                           const llvm::BasicBlock &succ) const {
+    auto *Branch = llvm::dyn_cast<llvm::BranchInst>(&term);
+    if (!Branch || !Branch->isConditional())
+      return TraceTransferDomain::one();
+    return Branch->getSuccessor(0) == &succ
+               ? TraceTransferDomain::singleton('T')
+               : TraceTransferDomain::singleton('F');
+  }
+
+  FactType applySummary(const FactType &summary, const FactType &fact) const {
+    return TraceTransferDomain::extend(summary, fact);
+  }
+
+  FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
+    return TraceTransferDomain::combine(lhs, rhs);
+  }
+
+  bool factsEqual(const FactType &lhs, const FactType &rhs) const {
+    return TraceTransferDomain::equal(lhs, rhs);
+  }
+};
+
+} // namespace
+
+TEST(NPAInterproceduralClients, BackwardEngineAppliesEdgeTransfers) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %left, label %right
+
+    left:
+      ret void
+
+    right:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  BackwardEdgeTransferAnalysis analysis;
+  auto result =
+      npa::BackwardInterproceduralEngine<TraceTransferDomain,
+                                         BackwardEdgeTransferAnalysis>::run(
+          *module, analysis);
+
+  auto Facts = statesForBlock(result.blockEntryFacts, &Main->getEntryBlock());
+  ASSERT_EQ(Facts.size(), 1u);
+  EXPECT_TRUE(containsPath(*Facts.front(), {'T'}));
+  EXPECT_TRUE(containsPath(*Facts.front(), {'F'}));
 }
 
 TEST(NPAInterproceduralClients, AffineTracksModularWrapForConstants) {
@@ -648,15 +1181,11 @@ TEST(NPAInterproceduralClients, IntervalCompareAndSelectUseForcedRanges) {
 
   auto CmpIt = states.front()->values.find(Cmp);
   ASSERT_NE(CmpIt, states.front()->values.end());
-  EXPECT_TRUE(CmpIt->second.hasLower);
-  EXPECT_TRUE(CmpIt->second.hasUpper);
-  EXPECT_EQ(CmpIt->second.lower, 1);
-  EXPECT_EQ(CmpIt->second.upper, 1);
+  expectIntervalPoint(CmpIt->second, unsignedAPInt(1, 1),
+                      npa::IntervalOrdering::Signed);
 
   auto SelIt = states.front()->values.find(Sel);
   ASSERT_NE(SelIt, states.front()->values.end());
-  EXPECT_TRUE(SelIt->second.hasLower);
-  EXPECT_TRUE(SelIt->second.hasUpper);
-  EXPECT_EQ(SelIt->second.lower, 9);
-  EXPECT_EQ(SelIt->second.upper, 9);
+  expectIntervalPoint(SelIt->second, signedAPInt(32, 9),
+                      npa::IntervalOrdering::Signed);
 }
