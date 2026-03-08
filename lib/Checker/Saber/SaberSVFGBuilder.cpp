@@ -40,7 +40,10 @@ static void addDefinedFunction(FuncGraph &graph, const Function *F) {
     graph.emplace(F, FuncSet{});
 }
 
-static void buildDirectCallGraph(const Module *M, FuncGraph &graph) {
+static void buildResolvedCallGraph(
+    const Module *M, FuncGraph &graph,
+    const std::function<std::vector<const Function *>(const CallBase *)>
+        &resolveIndirectTargets) {
   if (!M)
     return;
 
@@ -60,9 +63,15 @@ static void buildDirectCallGraph(const Module *M, FuncGraph &graph) {
         if (!CB)
           continue;
         const Function *callee = CB->getCalledFunction();
-        if (!callee || callee->isDeclaration())
+        if (callee) {
+          if (!callee->isDeclaration())
+            it->second.insert(callee);
           continue;
-        it->second.insert(callee);
+        }
+        for (const Function *target : resolveIndirectTargets(CB)) {
+          if (target && !target->isDeclaration())
+            it->second.insert(target);
+        }
       }
     }
   }
@@ -135,7 +144,7 @@ computeRecursiveFunctions(const FuncGraph &graph) {
 
 SVFG *SaberSVFGBuilder::buildSVFG(const ICFG *icfg) {
   SVFGBuilderConfig cfg;
-  cfg.resolveIndirectCalls = false;
+  cfg.resolveIndirectCalls = true;
   cfg.buildMSSA = true;
   SVFG *svfg = build(icfg, cfg);
   currentSVFG_ = svfg;
@@ -485,7 +494,10 @@ bool SaberSVFGBuilder::isStrongUpdate(const SVFGNode *node,
           recursiveFunctionsReady_ = true;
           recursiveFunctionsCache_.clear();
           FuncGraph callGraph;
-          buildDirectCallGraph(module_, callGraph);
+          buildResolvedCallGraph(
+              module_, callGraph, [this](const CallBase *call) {
+                return this->getIndirectCallTargets(call);
+              });
           recursiveFunctionsCache_ = computeRecursiveFunctions(callGraph);
         }
         if (currentSVFG_->isStackObject(objId)) {

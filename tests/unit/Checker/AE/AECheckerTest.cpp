@@ -45,7 +45,7 @@ protected:
     return module;
   }
 
-  AEResult runAE(Module *module) {
+  AEResult runAE(Module *module, bool analyzeAllFunctions = true) {
     if (!module->getFunction("main")) {
       FunctionType *MainTy =
           FunctionType::get(Type::getInt32Ty(context), false);
@@ -59,6 +59,7 @@ protected:
     AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
     ae.reset();
     ae.setStrictCheckpoint(false);
+    ae.setAnalyzeAllFunctions(analyzeAllFunctions);
 
     auto overflowDetector = std::make_unique<BufOverflowDetector>();
     auto *overflowDetectorPtr = overflowDetector.get();
@@ -96,7 +97,7 @@ TEST_F(AECheckerTest, ConstantArrayBufferOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_EQ(result.overflow_bugs, 0u);
+  EXPECT_GT(result.overflow_bugs, 0u);
 }
 
 // Test 2: Variable-length array (VLA) handling
@@ -196,7 +197,7 @@ TEST_F(AECheckerTest, MemcpyBufferOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_EQ(result.overflow_bugs, 0u);
+  EXPECT_GT(result.overflow_bugs, 0u);
 }
 
 // Test 7: External API - strcpy buffer overflow
@@ -218,7 +219,7 @@ TEST_F(AECheckerTest, StrcpyBufferOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_EQ(result.overflow_bugs, 0u);
+  EXPECT_GT(result.overflow_bugs, 0u);
 }
 
 // Test 8: Safe buffer access (no overflow)
@@ -268,7 +269,7 @@ TEST_F(AECheckerTest, ComplexControlFlow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_EQ(result.overflow_bugs, 0u);
+  EXPECT_GT(result.overflow_bugs, 0u);
 }
 
 // Test 10: VLA with tracked size from abstract state
@@ -309,7 +310,7 @@ TEST_F(AECheckerTest, HeapAllocationOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_EQ(result.overflow_bugs, 0u);
+  EXPECT_GT(result.overflow_bugs, 0u);
 }
 
 // Test 12: Struct field access
@@ -370,19 +371,19 @@ TEST_F(AECheckerTest, InterproceduralOverflow) {
       ret void
     }
     
-    define void @test_interproc() {
+    define i32 @main() {
       %arr = alloca [10 x i32], align 4
       %arr_ptr = bitcast [10 x i32]* %arr to i32*
       call void @helper(i32* %arr_ptr, i32 15)
-      ret void
+      ret i32 0
     }
   )";
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
 
-  AEResult result = runAE(module.get());
-  EXPECT_EQ(result.overflow_bugs, 0u);
+  AEResult result = runAE(module.get(), false);
+  EXPECT_GT(result.overflow_bugs, 0u);
 }
 
 // Test 15: Stub function SAFE_BUFACCESS
@@ -489,7 +490,7 @@ TEST_F(AECheckerTest, BoundaryOverflow) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_EQ(result.overflow_bugs, 0u);
+  EXPECT_GT(result.overflow_bugs, 0u);
 }
 
 // Test 20: Multiple detectors interaction
@@ -512,7 +513,7 @@ TEST_F(AECheckerTest, MultipleDetectors) {
   ASSERT_NE(module, nullptr);
 
   AEResult result = runAE(module.get());
-  EXPECT_EQ(result.overflow_bugs, 0u);
+  EXPECT_GT(result.overflow_bugs, 0u);
   EXPECT_GT(result.null_bugs, 0u);
 }
 
@@ -555,4 +556,67 @@ TEST_F(AECheckerTest, InvalidFreeDetection) {
 
   AEResult result = runAE(module.get());
   EXPECT_GT(result.invalid_free_bugs, 0u);
+}
+
+TEST_F(AECheckerTest, FirstFreeIsNotInvalid) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+
+    define void @test_free_once() {
+      %p = call i8* @malloc(i64 32)
+      call void @free(i8* %p)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  AEResult result = runAE(module.get());
+  EXPECT_EQ(result.invalid_free_bugs, 0u);
+}
+
+TEST_F(AECheckerTest, GlobalPointerInitializer) {
+  const char *source = R"(
+    @g = global i32 0
+    @p = global i32* @g
+
+    define i32 @main() {
+    entry:
+      %q = load i32*, i32** @p
+      store i32 1, i32* %q
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  AEResult result = runAE(module.get(), false);
+  EXPECT_EQ(result.null_bugs, 0u);
+}
+
+TEST_F(AECheckerTest, MainRootedAnalysisSkipsUnreachableHelpers) {
+  const char *source = R"(
+    define void @helper() {
+    entry:
+      %ptr = alloca i32*
+      store i32* null, i32** %ptr
+      %p = load i32*, i32** %ptr
+      %val = load i32, i32* %p
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  AEResult result = runAE(module.get(), false);
+  EXPECT_EQ(result.null_bugs, 0u);
 }

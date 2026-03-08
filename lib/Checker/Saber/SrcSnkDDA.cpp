@@ -97,7 +97,10 @@ void SrcSnkDDA::initialize() {
       memSSA.setModule(module_);
       memSSA.setSaberCondAllocator(getSaberCondAllocator());
       SVFGBuilderConfig buildCfg;
-      buildCfg.resolveIndirectCalls = false;
+      // Upstream SABER builds on top of Andersen's resolved call graph. Keep
+      // indirect-call refinement enabled so source/sink reachability across
+      // function pointers is preserved.
+      buildCfg.resolveIndirectCalls = true;
       buildCfg.buildMSSA = SaberOptions::fullSVFG();
       SVFG *built = memSSA.build(icfg_.get(), buildCfg);
       if (!built) {

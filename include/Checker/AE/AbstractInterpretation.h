@@ -197,6 +197,7 @@ public:
   void setEnableDivZeroCheck(bool enable) { enableDivZeroCheck_ = enable; }
   void setEnableOverflowCheck(bool enable) { enableOverflowCheck_ = enable; }
   void setEnableMemLeakCheck(bool enable) { enableMemLeakCheck_ = enable; }
+  void setAnalyzeAllFunctions(bool enable) { analyzeAllFunctions_ = enable; }
 
   std::set<const llvm::CallBase *> checkpoints;
 
@@ -270,6 +271,7 @@ private:
   bool enableDivZeroCheck_{false};
   bool enableOverflowCheck_{false};
   bool enableMemLeakCheck_{false}; // Disabled by default
+  bool analyzeAllFunctions_{false};
 
   // Track which checkpoints have been checked
   std::set<const llvm::CallBase *> checkedCheckpoints_;

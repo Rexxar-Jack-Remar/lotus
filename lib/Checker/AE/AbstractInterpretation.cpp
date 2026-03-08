@@ -39,6 +39,68 @@
 namespace lotus {
 namespace analysis {
 
+namespace {
+
+AbstractValue getGlobalInitializerValue(const llvm::Constant *init) {
+  if (!init) {
+    return AbstractValue(IntervalValue::top());
+  }
+
+  if (llvm::isa<llvm::ConstantPointerNull>(init)) {
+    return AbstractValue(AddressValue(NullMemAddr));
+  }
+
+  if (const auto *ci = llvm::dyn_cast<llvm::ConstantInt>(init)) {
+    return AbstractValue(IntervalValue(ci->getSExtValue()));
+  }
+
+  if (const auto *cfp = llvm::dyn_cast<llvm::ConstantFP>(init)) {
+    double val = cfp->getValueAPF().convertToDouble();
+    return AbstractValue(IntervalValue(val, val));
+  }
+
+  const llvm::Value *base = init->stripPointerCasts();
+  if (const auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(init)) {
+    if (ce->getOpcode() == llvm::Instruction::GetElementPtr) {
+      base = ce->getOperand(0)->stripPointerCasts();
+    }
+  }
+
+  if (const auto *gv = llvm::dyn_cast<llvm::GlobalValue>(base)) {
+    uint32_t targetId = AbstractInterpretation::getValueIdStatic(gv);
+    return AbstractValue(
+        AddressValue(AddressValue::getVirtualMemAddress(targetId)));
+  }
+
+  return AbstractValue(IntervalValue::top());
+}
+
+void materializeConstantValue(AbstractState &as, const llvm::Value *val,
+                              uint32_t valueId) {
+  if (!val)
+    return;
+
+  if (as.inVarToValTable(valueId) || as.inVarToAddrsTable(valueId))
+    return;
+
+  if (const auto *ci = llvm::dyn_cast<llvm::ConstantInt>(val)) {
+    as[valueId] = AbstractValue(IntervalValue(ci->getSExtValue()));
+    return;
+  }
+
+  if (const auto *cfp = llvm::dyn_cast<llvm::ConstantFP>(val)) {
+    double num = cfp->getValueAPF().convertToDouble();
+    as[valueId] = AbstractValue(IntervalValue(num, num));
+    return;
+  }
+
+  if (llvm::isa<llvm::ConstantPointerNull>(val)) {
+    as[valueId] = AbstractValue(AddressValue(NullMemAddr));
+  }
+}
+
+} // namespace
+
 // Opaque pointer implementation for AserPTA
 using PTASolver = aser::WavePropagation<aser::DefaultLangModel<
     aser::NoCtx, aser::FSMemModel<aser::NoCtx>, aser::BitVectorPTS>>;
@@ -207,12 +269,15 @@ void AbstractInterpretation::analyse() {
     }
   }
 
-  // Analyze from main first when present, then cover any remaining defined
-  // functions. This keeps the normal entrypoint behavior while still handling
-  // standalone test/helper functions that are not called from main.
+  // Match SVF by default: start from main when present.
+  // Whole-module analysis remains available for testing/debugging.
   const llvm::Function *mainFunc = module_->getFunction("main");
   if (mainFunc && !mainFunc->isDeclaration()) {
     handleFunction(mainFunc);
+  }
+
+  if (mainFunc && !analyzeAllFunctions_) {
+    return;
   }
 
   for (const llvm::Function *func : functions) {
@@ -226,73 +291,27 @@ void AbstractInterpretation::analyse() {
 
 /// Handle global node
 void AbstractInterpretation::handleGlobalNode() {
-  // Process global variables (matching SVF's global ICFG node processing)
+  const llvm::DataLayout &dl = module_->getDataLayout();
+
   for (auto &global : module_->globals()) {
     uint32_t globalId = getValueId(&global);
+    uint32_t globalAddr = AddressValue::getVirtualMemAddress(globalId);
 
-    // Initialize global variable state
-    if (global.getValueType()->isPointerTy()) {
-      globalState[globalId] = AbstractValue(
-          AddressValue(AddressValue::getVirtualMemAddress(globalId)));
-    } else if (global.getValueType()->isIntegerTy()) {
-      if (global.hasInitializer()) {
-        if (llvm::ConstantInt *ci =
-                llvm::dyn_cast<llvm::ConstantInt>(global.getInitializer())) {
-          globalState[globalId] =
-              AbstractValue(IntervalValue(ci->getSExtValue()));
-        } else {
-          globalState[globalId] = AbstractValue(IntervalValue::top());
-        }
-      } else {
-        globalState[globalId] = AbstractValue(IntervalValue::top());
-      }
-    } else if (global.getValueType()->isFloatingPointTy()) {
-      if (global.hasInitializer()) {
-        if (llvm::ConstantFP *cfp =
-                llvm::dyn_cast<llvm::ConstantFP>(global.getInitializer())) {
-          double val = cfp->getValueAPF().convertToDouble();
-          globalState[globalId] = AbstractValue(IntervalValue(val, val));
-        } else {
-          globalState[globalId] = AbstractValue(IntervalValue::top());
-        }
-      } else {
-        globalState[globalId] = AbstractValue(IntervalValue::top());
-      }
-    } else {
-      // For other types (structs, arrays, etc.), use top
-      globalState[globalId] = AbstractValue(IntervalValue::top());
+    // In LLVM IR a global variable is used as its address.
+    globalState[globalId] = AbstractValue(AddressValue(globalAddr));
+    if (global.getValueType()->isSized()) {
+      globalState.setObjSize(globalId, dl.getTypeAllocSize(global.getValueType()));
     }
 
-    // Process global initializer if it's a constant expression
     if (global.hasInitializer() && !global.isDeclaration()) {
-      llvm::Constant *init = global.getInitializer();
-
-      // Handle constant arrays/structs
-      if (llvm::isa<llvm::ConstantArray>(init) ||
-          llvm::isa<llvm::ConstantStruct>(init)) {
-        // For complex initializers, we conservatively set to top
-        // In a more precise implementation, we could process each element
-        globalState[globalId] = AbstractValue(IntervalValue::top());
-      }
+      globalState.store(globalAddr,
+                        getGlobalInitializerValue(global.getInitializer()));
     }
   }
-
-  // Initialize abstract state for global node (used as entry point)
-  // This matches SVF's approach where global ICFG node has an abstract state
-  AbstractState globalNodeState;
-
-  // Copy global variable states to the global node state
-  for (const auto &item : globalState._varToAbsVal) {
-    globalNodeState[item.first] = item.second;
-  }
-
-  // Store global node state (we'll use the first instruction of main as proxy,
-  // or create a synthetic state entry)
-  // For now, the globalState member variable serves this purpose
 
   // Initialize null pointer constant (ID 0) in global state
-  // This ensures null pointers are properly tracked throughout the analysis
   globalState[0] = AbstractValue(AddressValue(NullMemAddr));
+  globalState[AbstractState::BlkPtr] = AbstractValue(IntervalValue::top());
 }
 
 void AbstractInterpretation::initCallGraphSCC() {
@@ -1083,6 +1102,8 @@ bool AbstractInterpretation::handleInstruction(const llvm::Instruction *inst) {
   for (auto &detector : detectors)
     detector->detect(as, inst);
 
+  as.commitPendingFrees();
+
   this->currentInstruction_ = nullptr;
 
   return true;
@@ -1181,6 +1202,9 @@ void AbstractInterpretation::updateStateOnCmp(const llvm::CmpInst *cmp) {
   uint32_t op1Id = getValueId(cmp->getOperand(1));
 
   AbstractState &as = abstractTrace[cmp];
+
+  materializeConstantValue(as, cmp->getOperand(0), op0Id);
+  materializeConstantValue(as, cmp->getOperand(1), op1Id);
 
   // Handle address comparisons
   if (as.inVarToAddrsTable(op0Id) && as.inVarToAddrsTable(op1Id)) {
@@ -1714,6 +1738,9 @@ void AbstractInterpretation::updateStateOnPhi(const llvm::PHINode *phi) {
           bool isTrueEdge = branch->getSuccessor(0) == phi->getParent();
           AbstractState testState = opAs;
           edgeFeasible = isBranchFeasible(branch, testState, isTrueEdge);
+          if (edgeFeasible) {
+            opAs = testState;
+          }
         }
       } else if (const llvm::SwitchInst *switchInst =
                      llvm::dyn_cast<llvm::SwitchInst>(term)) {
@@ -1758,6 +1785,7 @@ void AbstractInterpretation::updateStateOnPhi(const llvm::PHINode *phi) {
               int64_t caseValue = caseVal->getSExtValue();
               AbstractState testState = opAs;
               if (isSwitchBranchFeasible(switchInst, caseValue, testState)) {
+                opAs = testState;
                 edgeFeasible = true;
                 break;
               }
@@ -1769,6 +1797,8 @@ void AbstractInterpretation::updateStateOnPhi(const llvm::PHINode *phi) {
       if (!edgeFeasible) {
         continue; // Skip infeasible edge
       }
+
+      materializeConstantValue(opAs, val, curId);
 
       if (opAs.inVarToValTable(curId) || opAs.inVarToAddrsTable(curId)) {
         if (first) {
@@ -2604,6 +2634,9 @@ bool AbstractInterpretation::isCmpBranchFeasible(const llvm::CmpInst *cmpInst,
   uint32_t op1Id = getValueId(cmpInst->getOperand(1));
   const llvm::Value *op0Val = cmpInst->getOperand(0);
   const llvm::Value *op1Val = cmpInst->getOperand(1);
+
+  materializeConstantValue(as, op0Val, op0Id);
+  materializeConstantValue(as, op1Val, op1Id);
 
   int32_t predicate = cmpInst->getPredicate();
   if (!succ) {

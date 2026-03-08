@@ -156,6 +156,19 @@ void BufOverflowDetector::detect(AbstractState &as,
   // Check for buffer overflow in external API calls
   // Use annotation-based classification from AEExtAPI
   if (const auto *call = llvm::dyn_cast<llvm::CallBase>(inst)) {
+    if (const llvm::Function *direct = call->getCalledFunction()) {
+      AEExtAPI *utils = AbstractInterpretation::getAEInstance().getUtils();
+      if (direct->isDeclaration() &&
+          (utils == nullptr ||
+           utils->getExtAPIType(direct) == AEExtAPI::MEMCPY ||
+           utils->getExtAPIType(direct) == AEExtAPI::MEMSET ||
+           utils->getExtAPIType(direct) == AEExtAPI::STRCPY ||
+           utils->getExtAPIType(direct) == AEExtAPI::STRCAT)) {
+        detectExtAPI(as, call);
+        return;
+      }
+    }
+
     // Get all possible callees (direct + indirect resolved via PTA)
     AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
     std::vector<const llvm::Function *> callees = ae.getCallees(call);
@@ -413,10 +426,15 @@ void BufOverflowDetector::detectExtAPI(AbstractState &as,
               uint32_t lenId = AbstractInterpretation::getValueIdStatic(
                   call->getArgOperand(sizeArg));
 
-              if (!as.inVarToValTable(lenId))
-                continue;
-
-              IntervalValue len = as[lenId].getInterval();
+              IntervalValue len;
+              if (const auto *csize = llvm::dyn_cast<llvm::ConstantInt>(
+                      call->getArgOperand(sizeArg))) {
+                len = IntervalValue(csize->getSExtValue());
+              } else {
+                if (!as.inVarToValTable(lenId))
+                  continue;
+                len = as[lenId].getInterval();
+              }
               if (!canSafelyAccessMemory(as, bufId, len)) {
                 AEException bug("Buffer overflow in " + funcName +
                                 ": access length " + len.toString() +
@@ -450,10 +468,15 @@ void BufOverflowDetector::detectExtAPI(AbstractState &as,
     uint32_t lenId = AbstractInterpretation::getValueIdStatic(
         call->getArgOperand(arg.second));
 
-    if (!as.inVarToValTable(lenId))
-      continue;
-
-    IntervalValue len = as[lenId].getInterval();
+    IntervalValue len;
+    if (const auto *csize =
+            llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(arg.second))) {
+      len = IntervalValue(csize->getSExtValue());
+    } else {
+      if (!as.inVarToValTable(lenId))
+        continue;
+      len = as[lenId].getInterval();
+    }
     if (!canSafelyAccessMemory(as, bufId, len)) {
       AEException bug("Buffer overflow in " + funcName + ": access length " +
                       len.toString() + " may exceed buffer bounds");
@@ -902,11 +925,7 @@ bool NullptrDerefDetector::canSafelyDerefPtr(AbstractState &as,
 
   // Check each address
   for (const auto &addr : absVal.getAddrs()) {
-    if (AbstractState::isInvalidMem(addr))
-      return false;
     if (AbstractState::isNullMem(addr))
-      return false;
-    if (as.isFreedMem(addr))
       return false;
   }
 
@@ -918,12 +937,6 @@ BufOverflowDetector::getAccessOffset(AbstractState &as, uint32_t objId,
                                      const llvm::GetElementPtrInst *gep) {
   // Get the offset from the GEP instruction
   IntervalValue offset = as.getByteOffset(gep);
-
-  // If we have tracked offset by object ID, prefer it.
-  auto objIt = gepObjOffsetFromBaseByObjId.find(objId);
-  if (objIt != gepObjOffsetFromBaseByObjId.end()) {
-    return objIt->second;
-  }
 
   // If we have tracked offset from base for this GEP, use it
   // (it already includes accumulated offsets from nested GEPs)
@@ -938,6 +951,12 @@ BufOverflowDetector::getAccessOffset(AbstractState &as, uint32_t objId,
       IntervalValue prevOffset = getGepObjOffsetFromBase(prevGep);
       return prevOffset + offset;
     }
+  }
+
+  // Fallback to object-level cache only when we have no GEP-local information.
+  auto objIt = gepObjOffsetFromBaseByObjId.find(objId);
+  if (objIt != gepObjOffsetFromBaseByObjId.end()) {
+    return objIt->second;
   }
 
   return offset;

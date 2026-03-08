@@ -45,6 +45,18 @@ static void appendPathConditionEvents(BugReport *report,
   }
 }
 
+static std::vector<const llvm::Function *>
+collectResolvedCallees(const llvm::CallBase *call, SaberSVFGBuilder &builder) {
+  std::vector<const llvm::Function *> callees;
+  if (!call)
+    return callees;
+  if (const llvm::Function *directCallee = call->getCalledFunction()) {
+    callees.push_back(directCallee);
+    return callees;
+  }
+  return builder.getIndirectCallTargets(call);
+}
+
 using FuncSet = std::unordered_set<const Function *>;
 using FuncGraph = std::unordered_map<const Function *, FuncSet>;
 
@@ -156,14 +168,10 @@ void LeakChecker::initSrcs() {
           if (!CI->getType()->isPointerTy())
             continue;
           bool sourceLike = false;
-          if (llvm::Function *Callee = CI->getCalledFunction()) {
-            sourceLike = isSourceLikeFun(Callee->getName().str());
-          } else {
-            for (const llvm::Function *c : memSSA.getIndirectCallTargets(CI)) {
-              if (c && isSourceLikeFun(c->getName().str())) {
-                sourceLike = true;
-                break;
-              }
+          for (const llvm::Function *c : collectResolvedCallees(CI, memSSA)) {
+            if (c && isSourceLikeFun(c->getName().str())) {
+              sourceLike = true;
+              break;
             }
           }
           if (sourceLike)
@@ -218,14 +226,15 @@ void LeakChecker::initSnks() {
       for (auto &I : BB) {
         if (auto *CI = dyn_cast<CallBase>(&I)) {
           bool sinkLike = false;
-          if (llvm::Function *Callee = CI->getCalledFunction()) {
-            sinkLike = isSinkLikeFun(Callee->getName().str());
-          } else {
-            for (const llvm::Function *c : memSSA.getIndirectCallTargets(CI)) {
-              if (c && isSinkLikeFun(c->getName().str())) {
-                sinkLike = true;
-                break;
-              }
+          bool multiLevelSink = false;
+          for (const llvm::Function *c : collectResolvedCallees(CI, memSSA)) {
+            if (!c)
+              continue;
+            if (isSinkLikeFun(c->getName().str())) {
+              sinkLike = true;
+              multiLevelSink =
+                  multiLevelSink ||
+                  SaberCheckerAPI::getCheckerAPI()->isMultiLevelMemDealloc(c);
             }
           }
           if (!sinkLike)
@@ -261,13 +270,17 @@ void LeakChecker::initSnks() {
             if (snkNode) {
               if (!actualParmNode)
                 addToSinks(snkNode);
-              if (arg->getType()->getPointerElementType()->isPointerTy()) {
-                for (auto &edge : snkNode->getOutEdges()) {
-                  if (edge->getEdgeKind() == SVFGEdgeK::IntraLoad ||
-                      (edge->getEdgeKind() == SVFGEdgeK::IntraDirect &&
-                       edge->getDstNode() &&
-                       edge->getDstNode()->getNodeKind() == SVFGK::Load))
-                    addToSinks(edge->getDstNode());
+              if (multiLevelSink &&
+                  arg->getType()->getPointerElementType()->isPointerTy()) {
+                for (const User *user : arg.get()->users()) {
+                  const auto *load = dyn_cast<LoadInst>(user);
+                  if (!load || load->getPointerOperand() != arg.get())
+                    continue;
+                  if (SVFGNode *loadNode = svfg->getDef(load)) {
+                    addToSinks(loadNode);
+                  } else if (SVFGNode *loadNode = svfg->getValueNode(load)) {
+                    addToSinks(loadNode);
+                  }
                 }
               }
             }

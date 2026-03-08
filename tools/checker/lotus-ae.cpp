@@ -38,10 +38,14 @@ static cl::opt<bool> InvalidFreeCheck("invalid-free",
                                       cl::desc("Check for invalid free bugs"),
                                       cl::init(false));
 
+static cl::opt<bool> MemLeakCheck("mem-leak",
+                                  cl::desc("Check for memory leaks"),
+                                  cl::init(false));
+
 static cl::opt<bool>
     AllChecks("all",
               cl::desc("Run all checkers (overflow, null-deref, "
-                       "use-after-free, invalid-free)"),
+                       "use-after-free, invalid-free, mem-leak)"),
               cl::init(false));
 
 static cl::opt<lotus::analysis::AbstractInterpretation::HandleRecur>
@@ -88,9 +92,11 @@ int main(int argc, char **argv) {
   bool runNullDeref = NullDerefCheck || AllChecks;
   bool runUseAfterFree = UseAfterFreeCheck || AllChecks;
   bool runInvalidFree = InvalidFreeCheck || AllChecks;
+  bool runMemLeak = MemLeakCheck || AllChecks;
 
   // If no specific checkers are enabled, default to all
-  if (!runOverflow && !runNullDeref && !runUseAfterFree && !runInvalidFree) {
+  if (!runOverflow && !runNullDeref && !runUseAfterFree && !runInvalidFree &&
+      !runMemLeak) {
     runOverflow = true;
     runNullDeref = true;
     runUseAfterFree = true;
@@ -105,6 +111,7 @@ int main(int argc, char **argv) {
   ae.setStrictCheckpoint(StrictCheckpointOpt);
   ae.setEnableBufOverflowCheck(runOverflow);
   ae.setEnableNullDerefCheck(runNullDeref);
+  ae.setEnableMemLeakCheck(runMemLeak);
 
   // Add detectors based on options
   if (runOverflow) {
@@ -125,6 +132,11 @@ int main(int argc, char **argv) {
   if (runInvalidFree) {
     ae.addDetector(std::make_unique<lotus::analysis::InvalidFreeDetector>());
     outs() << "Running invalid free checker...\n";
+  }
+
+  if (runMemLeak) {
+    ae.addDetector(std::make_unique<lotus::analysis::MemLeakDetector>());
+    outs() << "Running memory leak checker...\n";
   }
 
   // Run the analysis

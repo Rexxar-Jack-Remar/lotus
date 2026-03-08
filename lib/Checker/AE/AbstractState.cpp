@@ -368,6 +368,7 @@ IntervalValue AbstractState::getByteOffset(const llvm::GetElementPtrInst *gep) {
   const llvm::DataLayout &dl = gep->getModule()->getDataLayout();
   llvm::Type *curType = gep->getSourceElementType();
   IntervalValue offset(0);
+  bool firstIndex = true;
 
   for (const auto *idxIt = gep->idx_begin(); idxIt != gep->idx_end(); ++idxIt) {
     llvm::Value *idx = *idxIt;
@@ -382,6 +383,24 @@ IntervalValue AbstractState::getByteOffset(const llvm::GetElementPtrInst *gep) {
       if (inVarToValTable(idxId)) {
         idxVal = _varToAbsVal[idxId].getInterval();
       }
+    }
+
+    if (firstIndex) {
+      if (!curType || !curType->isSized()) {
+        return IntervalValue(0, MaxFieldLimit);
+      }
+
+      uint64_t elemSize = dl.getTypeAllocSize(curType);
+      if (elemSize == 0) {
+        elemSize = 1;
+      }
+      if (elemSize > static_cast<uint64_t>(MaxFieldLimit)) {
+        elemSize = MaxFieldLimit;
+      }
+
+      offset = offset + idxVal * IntervalValue(static_cast<int64_t>(elemSize));
+      firstIndex = false;
+      continue;
     }
 
     // Struct indexing: only constant field indices are valid in LLVM IR.

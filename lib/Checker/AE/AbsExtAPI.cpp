@@ -1507,7 +1507,10 @@ void AEExtAPI::handleExtAlloc(const llvm::CallBase *call) {
   uint32_t sizeId = getValueId(call->getArgOperand(0));
   uint32_t objId = AddressValue::getInternalID(newAddr);
 
-  if (as.inVarToValTable(sizeId)) {
+  if (const auto *csize =
+          llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(0))) {
+    as.setObjSize(objId, static_cast<uint32_t>(csize->getZExtValue()));
+  } else if (as.inVarToValTable(sizeId)) {
     IntervalValue size = as[sizeId].getInterval();
     if (size.is_infinite()) {
       // Bounds are unbounded; getIntNumeral() would assert. Use conservative
@@ -1539,7 +1542,10 @@ void AEExtAPI::handleExtRealloc(const llvm::CallBase *call) {
   uint32_t sizeId = getValueId(call->getArgOperand(1));
   uint32_t objId = AddressValue::getInternalID(newAddr);
 
-  if (as.inVarToValTable(sizeId)) {
+  if (const auto *csize =
+          llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(1))) {
+    as.setObjSize(objId, static_cast<uint32_t>(csize->getZExtValue()));
+  } else if (as.inVarToValTable(sizeId)) {
     IntervalValue size = as[sizeId].getInterval();
     if (size.is_infinite()) {
       // Bounds are unbounded; getIntNumeral() would assert. Use conservative
@@ -1567,7 +1573,7 @@ void AEExtAPI::handleExtFree(const llvm::CallBase *call) {
   uint32_t freePtr = getValueId(call->getArgOperand(0));
   for (auto addr : as[freePtr].getAddrs()) {
     if (!AbstractState::isInvalidMem(addr)) {
-      as.addToFreedAddrs(addr);
+      as.addToPendingFreedAddrs(addr);
     }
   }
 }
@@ -1754,9 +1760,9 @@ IntervalValue AEExtAPI::getStrlen(AbstractState &as, uint32_t strId) {
     }
 
     if (!hasValue) {
-      // No value stored - could be null terminator or uninitialized
-      // Conservative: assume we might have found null
-      foundNull = true;
+      // No value stored - treat as unknown/uninitialized.
+      // Conservatively return a length range later rather than a fixed 0.
+      allNull = false;
       break;
     }
 

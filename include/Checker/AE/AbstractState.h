@@ -69,10 +69,11 @@ public:
   /// Special sentinel IDs for null and black-hole pointers
   static constexpr uint32_t NullPtr = 0; ///< Null pointer constant (ID 0)
   static constexpr uint32_t BlkPtr =
-      1; ///< Black-hole pointer (absorbs all unknown pointers)
+      2; ///< Black-hole pointer (absorbs all unknown pointers)
 
   /// Set of freed memory object IDs (for use-after-free detection)
   std::unordered_set<uint32_t> _freedAddrs;
+  std::unordered_set<uint32_t> _pendingFreedAddrs;
 
   /// Maps SSA value IDs to their abstract values (intervals or addresses)
   VarToAbsValMap _varToAbsVal;
@@ -93,6 +94,7 @@ public:
   /// Copy constructor - performs deep copy of all state components
   AbstractState(const AbstractState &rhs)
       : _freedAddrs(rhs._freedAddrs), _varToAbsVal(rhs._varToAbsVal),
+        _pendingFreedAddrs(rhs._pendingFreedAddrs),
         _addrToAbsVal(rhs._addrToAbsVal), svfir_(rhs.svfir_),
         _objToSize(rhs._objToSize) {}
 
@@ -104,6 +106,7 @@ public:
       _varToAbsVal = rhs._varToAbsVal;
       _addrToAbsVal = rhs._addrToAbsVal;
       _freedAddrs = rhs._freedAddrs;
+      _pendingFreedAddrs = rhs._pendingFreedAddrs;
       _objToSize = rhs._objToSize;
       svfir_ = rhs.svfir_;
     }
@@ -113,6 +116,7 @@ public:
   /// Move constructor - transfers ownership of state components
   AbstractState(AbstractState &&rhs)
       : _freedAddrs(std::move(rhs._freedAddrs)),
+        _pendingFreedAddrs(std::move(rhs._pendingFreedAddrs)),
         _varToAbsVal(std::move(rhs._varToAbsVal)),
         _addrToAbsVal(std::move(rhs._addrToAbsVal)), svfir_(rhs.svfir_),
         _objToSize(std::move(rhs._objToSize)) {}
@@ -123,6 +127,7 @@ public:
       _varToAbsVal = std::move(rhs._varToAbsVal);
       _addrToAbsVal = std::move(rhs._addrToAbsVal);
       _freedAddrs = std::move(rhs._freedAddrs);
+      _pendingFreedAddrs = std::move(rhs._pendingFreedAddrs);
       _objToSize = std::move(rhs._objToSize);
       svfir_ = rhs.svfir_;
     }
@@ -220,6 +225,21 @@ public:
       _freedAddrs.insert(addr);
     }
   }
+
+  void addToPendingFreedAddrs(uint32_t addr) {
+    if (AddressValue::isVirtualMemAddress(addr)) {
+      _pendingFreedAddrs.insert(AddressValue::getInternalID(addr));
+    } else {
+      _pendingFreedAddrs.insert(addr);
+    }
+  }
+
+  void commitPendingFrees() {
+    _freedAddrs.insert(_pendingFreedAddrs.begin(), _pendingFreedAddrs.end());
+    _pendingFreedAddrs.clear();
+  }
+
+  void clearPendingFrees() { _pendingFreedAddrs.clear(); }
 
   /// Check if a memory address has been freed
   /// @param addr Memory object ID to check

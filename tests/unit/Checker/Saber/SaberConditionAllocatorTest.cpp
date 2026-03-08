@@ -1,7 +1,11 @@
 #include "Checker/Saber/SaberCondAllocator.h"
+#include "Checker/Saber/LeakChecker.h"
+#include "Checker/Saber/SaberSVFGBuilder.h"
 #include "Checker/Saber/SrcSnkDDA.h"
 #include "IR/ICFG/ICFG.h"
+#include "IR/ICFG/ICFGBuilder.h"
 #include "IR/SVFG/SVFG.h"
+#include "IR/SVFG/SVFGNode.h"
 
 #include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
@@ -37,6 +41,40 @@ const BasicBlock *getBlock(const Module &module, StringRef functionName,
   return nullptr;
 }
 
+const CallBase *getOnlyCall(const Module &module, StringRef functionName) {
+  const Function *function = module.getFunction(functionName);
+  if (!function)
+    return nullptr;
+  const CallBase *call = nullptr;
+  for (const BasicBlock &bb : *function) {
+    for (const Instruction &inst : bb) {
+      if (const auto *cb = dyn_cast<CallBase>(&inst)) {
+        if (call)
+          return nullptr;
+        call = cb;
+      }
+    }
+  }
+  return call;
+}
+
+const StoreInst *getOnlyStore(const Module &module, StringRef functionName) {
+  const Function *function = module.getFunction(functionName);
+  if (!function)
+    return nullptr;
+  const StoreInst *store = nullptr;
+  for (const BasicBlock &bb : *function) {
+    for (const Instruction &inst : bb) {
+      if (const auto *si = dyn_cast<StoreInst>(&inst)) {
+        if (store)
+          return nullptr;
+        store = si;
+      }
+    }
+  }
+  return store;
+}
+
 } // namespace
 
 namespace {
@@ -48,6 +86,13 @@ public:
   bool isSourceLikeFun(const std::string &) override { return false; }
   bool isSinkLikeFun(const std::string &) override { return false; }
   void reportBug(ProgSlice *) override {}
+};
+
+class TestSaberSVFGBuilder final : public SaberSVFGBuilder {
+public:
+  bool isStrongUpdatePublic(const SVFGNode *node, uint32_t &singleton) {
+    return isStrongUpdate(node, singleton);
+  }
 };
 
 } // namespace
@@ -240,4 +285,134 @@ TEST(SaberConditionAllocatorTest,
   EXPECT_EQ(it->second.size(), 1u);
   EXPECT_EQ(*it->second.begin(), sink);
   EXPECT_TRUE(checker.hasSVFGAndICFG());
+}
+
+TEST(SaberConditionAllocatorTest,
+     InitializeResolvesIndirectCallsForSourceSinkTraversal) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    define i8* @target() {
+    entry:
+      ret i8* null
+    }
+
+    define i8* @caller(i8* ()* %fp) {
+    entry:
+      %r = call i8* %fp()
+      ret i8* %r
+    }
+
+    define i32 @main() {
+    entry:
+      %r = call i8* @caller(i8* ()* @target)
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  DummySrcSnkDDA checker;
+  checker.setModule(module.get());
+  checker.initialize();
+
+  const CallBase *indirectCall = getOnlyCall(*module, "caller");
+  const Function *target = module->getFunction("target");
+  ASSERT_NE(indirectCall, nullptr);
+  ASSERT_NE(target, nullptr);
+  ASSERT_NE(checker.getSVFG(), nullptr);
+
+  EXPECT_NE(checker.getSVFG()->getCallSiteId(indirectCall, target), 0u);
+}
+
+TEST(SaberConditionAllocatorTest,
+     LeakCheckerAddsExtraLoadSinkOnlyForMultiLevelFreeApis) {
+  LLVMContext context;
+  auto xfreeModule = parseModule(context, R"(
+    declare void @XFree(i8**)
+
+    define void @test() {
+    entry:
+      %slot = alloca i8*
+      store i8* null, i8** %slot
+      %loaded = load i8*, i8** %slot
+      call void @XFree(i8** %slot)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @test()
+      ret i32 0
+    }
+  )");
+  auto freeModule = parseModule(context, R"(
+    declare void @free(i8**)
+
+    define void @test() {
+    entry:
+      %slot = alloca i8*
+      store i8* null, i8** %slot
+      %loaded = load i8*, i8** %slot
+      call void @free(i8** %slot)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @test()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(xfreeModule, nullptr);
+  ASSERT_NE(freeModule, nullptr);
+
+  LeakChecker xfreeChecker;
+  xfreeChecker.setModule(xfreeModule.get());
+  xfreeChecker.initialize();
+  EXPECT_EQ(xfreeChecker.getSinks().size(), 2u);
+
+  LeakChecker freeChecker;
+  freeChecker.setModule(freeModule.get());
+  freeChecker.initialize();
+  EXPECT_EQ(freeChecker.getSinks().size(), 1u);
+}
+
+TEST(SaberConditionAllocatorTest,
+     StrongUpdateIsDisabledForIndirectRecursiveStackObjects) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    @fp = global void ()* @f
+
+    define void @f() {
+    entry:
+      %slot = alloca i8*
+      store i8* null, i8** %slot
+      %callee = load void ()*, void ()** @fp
+      call void %callee()
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @f()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto icfg = std::make_unique<ICFG>();
+  ICFGBuilder icfgBuilder(icfg.get());
+  icfgBuilder.build(module.get());
+
+  TestSaberSVFGBuilder builder;
+  builder.setModule(module.get());
+  SVFG *svfg = builder.buildSVFG(icfg.get());
+  ASSERT_NE(svfg, nullptr);
+
+  const StoreInst *store = getOnlyStore(*module, "f");
+  ASSERT_NE(store, nullptr);
+  SVFGNode *storeNode = svfg->getDef(store);
+  ASSERT_NE(storeNode, nullptr);
+
+  uint32_t singleton = 0;
+  EXPECT_FALSE(builder.isStrongUpdatePublic(storeNode, singleton));
 }

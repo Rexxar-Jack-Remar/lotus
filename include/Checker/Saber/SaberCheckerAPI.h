@@ -75,6 +75,15 @@ public:
     return getType(funName) == CK_FREE;
   }
 
+  /// Return true if this deallocation API frees through an extra load.
+  ///
+  /// SVF's SABER only applies the extra sink modeling for ExtAPI
+  /// `EFT_FREE_MULTILEVEL` functions such as `XFree`, not for arbitrary
+  /// pointer-to-pointer actual arguments.
+  inline bool isMultiLevelMemDealloc(const std::string &funName) const {
+    return funName == "XFree";
+  }
+
   /// Return true if this call is a file open
   inline bool isFOpen(const std::string &funName) const {
     return getType(funName) == CK_FOPEN;
@@ -101,6 +110,9 @@ public:
   inline bool isMemDealloc(llvm::Function const *fun) const {
     return getType(fun) == CK_FREE;
   }
+  inline bool isMultiLevelMemDealloc(llvm::Function const *fun) const {
+    return fun && isMultiLevelMemDealloc(fun->getName().str());
+  }
   inline bool isFOpen(llvm::Function const *fun) const {
     return getType(fun) == CK_FOPEN;
   }
@@ -114,6 +126,10 @@ public:
   inline bool isMemDealloc(llvm::CallBase const *cs) const {
     llvm::Function const *F = cs ? cs->getCalledFunction() : nullptr;
     return isMemDealloc(F);
+  }
+  inline bool isMultiLevelMemDealloc(llvm::CallBase const *cs) const {
+    llvm::Function const *F = cs ? cs->getCalledFunction() : nullptr;
+    return isMultiLevelMemDealloc(F);
   }
   inline bool isFOpen(llvm::CallBase const *cs) const {
     llvm::Function const *F = cs ? cs->getCalledFunction() : nullptr;
