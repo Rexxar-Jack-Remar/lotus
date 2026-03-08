@@ -4,6 +4,7 @@
  */
 #include "Checker/GVFA/UseOfUninitializedVariableChecker.h"
 
+#include <llvm/IR/Dominators.h>
 #include "Analysis/GVFA/GlobalValueFlowAnalysis.h"
 #include "Checker/GVFA/CheckerUtils.h"
 #include "Checker/Report/BugReport.h"
@@ -17,37 +18,64 @@
 using namespace llvm;
 using namespace CheckerUtils;
 
+namespace {
+
+bool isUninitializedSentinel(const Value *V) {
+  return isa<UndefValue>(V) || isa<PoisonValue>(V);
+}
+
+bool hasDominatingStore(const AllocaInst *AI, const LoadInst *LI,
+                        const DominatorTree &DT) {
+  for (const User *U : AI->users()) {
+    const auto *SI = dyn_cast<StoreInst>(U);
+    if (!SI || SI->getFunction() != LI->getFunction()) {
+      continue;
+    }
+    if (SI->getPointerOperand()->stripPointerCasts() != AI) {
+      continue;
+    }
+    if (DT.dominates(SI, LI)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+} // namespace
+
 //===----------------------------------------------------------------------===//
 // Source and Sink Identification
 //===----------------------------------------------------------------------===//
 
 void UseOfUninitializedVariableChecker::getSources(
     Module *M, VulnerabilitySourcesType &Sources) {
-  forEachInstruction(M, [&Sources](const Instruction *I) {
-    // Uninitialized allocas
-    if (auto *AI = dyn_cast<AllocaInst>(I)) {
-      bool hasInitialStore = false;
-      for (auto *U : AI->users()) {
-        if (auto *SI = dyn_cast<StoreInst>(U)) {
-          if (SI->getPointerOperand() == AI &&
-              SI->getParent() == AI->getParent()) {
-            hasInitialStore = true;
-            break;
-          }
+  int site_id = 1;
+  DenseMap<const Function *, std::unique_ptr<DominatorTree>> DTCache;
+
+  auto getDT = [&DTCache](const Function *F) -> DominatorTree & {
+    auto &Entry = DTCache[F];
+    if (!Entry) {
+      Entry = std::make_unique<DominatorTree>(*const_cast<Function *>(F));
+    }
+    return *Entry;
+  };
+
+  forEachInstruction(M, [&Sources, &site_id, &getDT](const Instruction *I) {
+    for (const Use &Operand : I->operands()) {
+      const Value *Op = Operand.get();
+      if (isUninitializedSentinel(Op)) {
+        Sources[{Op, site_id++}] = 1;
+      }
+    }
+
+    if (auto *LI = dyn_cast<LoadInst>(I)) {
+      const Value *Base = LI->getPointerOperand()->stripPointerCasts();
+      if (auto *AI = dyn_cast<AllocaInst>(Base)) {
+        DominatorTree &DT = getDT(LI->getFunction());
+        if (!hasDominatingStore(AI, LI, DT)) {
+          Sources[{LI, site_id++}] = 1;
         }
-      }
-      if (!hasInitialStore) {
-        Sources[{AI, 1}] = 1;
-      }
-    }
-    // Explicit undef
-    else if (isa<UndefValue>(I)) {
-      Sources[{I, 1}] = 1;
-    }
-    // Load from potentially uninitialized memory
-    else if (auto *LI = dyn_cast<LoadInst>(I)) {
-      if (auto *AI = dyn_cast<AllocaInst>(LI->getPointerOperand())) {
-        Sources[{LI, 1}] = 1;
       }
     }
   });
@@ -56,34 +84,40 @@ void UseOfUninitializedVariableChecker::getSources(
 void UseOfUninitializedVariableChecker::getSinks(
     Module *M, VulnerabilitySinksType &Sinks) {
   forEachInstruction(M, [&Sinks](const Instruction *I) {
-    const Value *UncheckedOp = nullptr;
-
-    if (isa<BinaryOperator>(I) || isa<UnaryOperator>(I)) {
-      if (I->getNumOperands() > 0)
-        UncheckedOp = I->getOperand(0);
-    } else if (auto *Cmp = dyn_cast<CmpInst>(I)) {
-      UncheckedOp = Cmp->getOperand(0);
-    } else if (auto *RI = dyn_cast<ReturnInst>(I)) {
-      if (RI->getReturnValue())
-        UncheckedOp = RI->getReturnValue();
-    } else if (auto *CI = dyn_cast<CallInst>(I)) {
-      if (CI->getNumOperands() > 0) {
-        for (unsigned i = 0; i < CI->arg_size(); ++i) {
-          Value *Arg = CI->getArgOperand(i);
-          if (!isa<Function>(Arg)) {
-            Sinks[Arg] = new std::set<const Value *>();
-            Sinks[Arg]->insert(CI);
-          }
-        }
+    auto addSink = [&Sinks](const Value *V, const Instruction *I) {
+      if (!V || isa<Function>(V)) {
         return;
       }
-    } else if (auto *SI = dyn_cast<StoreInst>(I)) {
-      UncheckedOp = SI->getValueOperand();
-    }
+      Sinks[V].insert(I);
+    };
 
-    if (UncheckedOp) {
-      Sinks[UncheckedOp] = new std::set<const Value *>();
-      Sinks[UncheckedOp]->insert(I);
+    if (isa<BinaryOperator>(I) || isa<UnaryOperator>(I)) {
+      for (const Use &Operand : I->operands()) {
+        addSink(Operand.get(), I);
+      }
+    } else if (auto *Cmp = dyn_cast<CmpInst>(I)) {
+      addSink(Cmp->getOperand(0), I);
+      addSink(Cmp->getOperand(1), I);
+    } else if (auto *BI = dyn_cast<BranchInst>(I)) {
+      if (BI->isConditional()) {
+        addSink(BI->getCondition(), I);
+      }
+    } else if (auto *SI = dyn_cast<SwitchInst>(I)) {
+      addSink(SI->getCondition(), I);
+    } else if (auto *Sel = dyn_cast<SelectInst>(I)) {
+      addSink(Sel->getCondition(), I);
+      addSink(Sel->getTrueValue(), I);
+      addSink(Sel->getFalseValue(), I);
+    } else if (auto *RI = dyn_cast<ReturnInst>(I)) {
+      if (RI->getReturnValue()) {
+        addSink(RI->getReturnValue(), I);
+      }
+    } else if (auto *CI = dyn_cast<CallInst>(I)) {
+      for (unsigned i = 0; i < CI->arg_size(); ++i) {
+        addSink(CI->getArgOperand(i), I);
+      }
+    } else if (auto *SI = dyn_cast<StoreInst>(I)) {
+      addSink(SI->getValueOperand(), I);
     }
   });
 }
@@ -108,8 +142,10 @@ int UseOfUninitializedVariableChecker::registerBugType() {
 }
 
 void UseOfUninitializedVariableChecker::reportVulnerability(
-    int bugTypeId, const Value *Source, const Value *Sink,
-    const std::set<const Value *> *SinkInsts) {
+    int bugTypeId, const ValueSitePairType &SourceSite, const Value *Sink,
+    const std::set<const Value *> &SinkInsts,
+    const std::vector<const Value *> *WitnessPath) {
+  const Value *Source = SourceSite.first;
 
   BugReport *report = new BugReport(bugTypeId);
   int trace_level = 0;
@@ -136,7 +172,7 @@ void UseOfUninitializedVariableChecker::reportVulnerability(
   if (GVFA && Sink) {
     try {
       std::vector<const Value *> witnessPath =
-          GVFA->getWitnessPath(Source, Sink);
+          WitnessPath ? *WitnessPath : GVFA->getWitnessPath(Source, Sink);
       if (witnessPath.size() > 2) {
         for (size_t i = 1; i + 1 < witnessPath.size(); ++i) {
           const Value *V = witnessPath[i];
@@ -159,28 +195,26 @@ void UseOfUninitializedVariableChecker::reportVulnerability(
   }
 
   // Sink step
-  if (SinkInsts) {
-    for (const Value *SI : *SinkInsts) {
-      if (auto *SinkInst = dyn_cast<Instruction>(SI)) {
-        std::string desc = "Use of potentially uninitialized value";
-        std::string access = "use";
-        std::vector<NodeTag> tags;
+  for (const Value *SI : SinkInsts) {
+    if (auto *SinkInst = dyn_cast<Instruction>(SI)) {
+      std::string desc = "Use of potentially uninitialized value";
+      std::string access = "use";
+      std::vector<NodeTag> tags;
 
-        if (isa<ReturnInst>(SinkInst)) {
-          desc = "Return of potentially uninitialized value";
-          access = "return";
-          tags.push_back(NodeTag::RETURN_SITE);
-        } else if (isa<CallInst>(SinkInst)) {
-          desc = "Potentially uninitialized value passed to function";
-          access = "call";
-          tags.push_back(NodeTag::CALL_SITE);
-        } else if (isa<StoreInst>(SinkInst)) {
-          desc = "Store of potentially uninitialized value";
-          access = "store";
-        }
-        report->append_step(const_cast<Instruction *>(SinkInst), desc,
-                            trace_level, tags, access);
+      if (isa<ReturnInst>(SinkInst)) {
+        desc = "Return of potentially uninitialized value";
+        access = "return";
+        tags.push_back(NodeTag::RETURN_SITE);
+      } else if (isa<CallInst>(SinkInst)) {
+        desc = "Potentially uninitialized value passed to function";
+        access = "call";
+        tags.push_back(NodeTag::CALL_SITE);
+      } else if (isa<StoreInst>(SinkInst)) {
+        desc = "Store of potentially uninitialized value";
+        access = "store";
       }
+      report->append_step(const_cast<Instruction *>(SinkInst), desc,
+                          trace_level, tags, access);
     }
   }
 

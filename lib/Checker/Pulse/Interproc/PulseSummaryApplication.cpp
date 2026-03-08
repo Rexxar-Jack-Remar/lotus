@@ -479,7 +479,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
       continue;
     }
     if (!callee->isVarArg() && actual_arg_count != formal_arg_count) {
-      return handleCall(CI, caller_state, pred, 0);
+      continue;
     }
 
     // Normalize all abstract values in caller state before comparison

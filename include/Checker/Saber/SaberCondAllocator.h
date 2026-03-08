@@ -45,6 +45,7 @@ public:
   virtual ~SaberCondAllocator() = default;
 
   void allocate();
+  void reset(bool preserve_removed_su_vfg_edges = false);
 
   Condition newCond(const llvm::Instruction *inst);
   void setCondInst(Condition cond, const llvm::Instruction *inst);

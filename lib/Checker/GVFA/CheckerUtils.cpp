@@ -75,8 +75,9 @@ bool doesLibFunctionDereferenceArg(StringRef Name, unsigned ArgIdx) {
 }
 
 bool isInitializationFunction(StringRef Name) {
-  return Name.contains("init") || Name.contains("memset") ||
-         Name.contains("bzero") || Name.contains("memcpy");
+  return Name.contains("init") || Name == "memset" ||
+         Name.startswith("__memset_chk") || Name == "bzero" ||
+         Name == "explicit_bzero";
 }
 
 bool isSafeStackCaptureFunction(StringRef Name) {

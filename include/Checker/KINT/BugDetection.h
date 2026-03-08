@@ -50,6 +50,8 @@ struct BugPath {
       : bugInstruction(bugInst), bugType(type) {}
 };
 
+using BugKey = std::pair<const Instruction *, interr>;
+
 class BugDetection {
 public:
   BugDetection() = default;
@@ -105,9 +107,13 @@ public:
   const std::vector<PathPoint> &getCurrentPath() const {
     return m_current_path;
   }
+  void clearState() {
+    m_current_path.clear();
+    m_bug_paths.clear();
+  }
 
   // Get bug paths
-  const std::map<const Instruction *, BugPath> &getBugPaths() const {
+  const std::map<BugKey, BugPath> &getBugPaths() const {
     return m_bug_paths;
   }
 
@@ -134,8 +140,8 @@ private:
   // Store the current execution path being analyzed
   std::vector<PathPoint> m_current_path;
 
-  // Map from bug instruction to its execution path
-  std::map<const Instruction *, BugPath> m_bug_paths;
+  // Map from (bug instruction, bug type) to its execution path.
+  std::map<BugKey, BugPath> m_bug_paths;
 
   // Helper to record a bug with its path
   void recordBugWithPath(const Instruction *inst, interr type);

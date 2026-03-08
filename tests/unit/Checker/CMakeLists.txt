@@ -1,6 +1,13 @@
 # Checker Unit Tests
 
 add_lotus_test(pulse_checker_test Pulse/PulseCheckerTest.cpp)
+target_link_libraries(pulse_checker_test PulseChecker)
 add_lotus_test(gvfa_checker_test GVFA/GVFACheckerTest.cpp)
+target_link_libraries(gvfa_checker_test GVFAChecker)
 add_lotus_test(concurrency_checker_test Concurrency/ConcurrencyCheckerTest.cpp)
 add_lotus_test(ae_checker_test AE/AECheckerTest.cpp)
+add_lotus_test(kint_checker_test KINT/KINTCheckerTest.cpp)
+target_link_libraries(kint_checker_test CanaryKint)
+add_lotus_test(saber_condition_allocator_test Saber/SaberConditionAllocatorTest.cpp)
+target_link_libraries(saber_condition_allocator_test Saber)
+target_compile_definitions(saber_condition_allocator_test PRIVATE USE_Z3)

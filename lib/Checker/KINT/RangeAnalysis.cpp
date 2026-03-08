@@ -689,7 +689,7 @@ void RangeAnalysis::range_analysis(
           }
 
           if (cond_rng.getBitWidth() == emp_rng.getBitWidth()) {
-            branch_rng[cond] = cond_rng.unionWith(emp_rng);
+            branch_rng[cond] = cond_rng.intersectWith(emp_rng);
           } else {
             branch_rng[cond] = cond_rng;
           }
@@ -810,9 +810,9 @@ void RangeAnalysis::init_ranges(
         }
       } else {
         for (const auto &u : cur->users()) {
-          if (auto *uu = dyn_cast<CallInst>(u)) {
-            auto *caller = uu->getCalledFunction();
-            if (!hist.contains(caller)) {
+          if (auto *uu = dyn_cast<CallBase>(u)) {
+            auto *caller = uu->getFunction();
+            if (caller && !hist.contains(caller)) {
               worklist.push_back(caller);
               hist.insert(caller);
             }

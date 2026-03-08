@@ -176,25 +176,6 @@ std::vector<const Value *> getWitnessPath(const Value *From, const Value *To,
     }
   }
 
-  // Limit path length to avoid overwhelming reports (keep first few and last
-  // few)
-  const size_t MAX_PATH_STEPS = 8;
-  if (path.size() > MAX_PATH_STEPS) {
-    std::vector<const Value *> truncated;
-    // Keep first 3 (including source)
-    for (size_t i = 0; i < 3 && i < path.size(); ++i) {
-      truncated.push_back(path[i]);
-    }
-    // Add ellipsis marker (null pointer)
-    truncated.push_back(nullptr);
-    // Keep last 3 (including sink)
-    size_t start = path.size() - 3;
-    for (size_t i = start; i < path.size(); ++i) {
-      truncated.push_back(path[i]);
-    }
-    path = truncated;
-  }
-
   return path;
 }
 

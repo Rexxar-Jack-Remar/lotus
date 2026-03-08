@@ -44,7 +44,8 @@ public:
   // Query Interface
   virtual int reachable(const Value *V, int Mask);
   virtual bool backwardReachable(const Value *V);
-  virtual bool srcReachable(const Value *V, const Value *Src) const = 0;
+  virtual bool srcReachable(const Value *V,
+                            const ValueSitePairType &Src) const = 0;
   virtual bool backwardReachableSink(const Value *V);
   virtual bool backwardReachableAllSinks(const Value *V);
   virtual std::vector<const Value *> getWitnessPath(const Value *From,

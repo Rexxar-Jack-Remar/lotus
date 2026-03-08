@@ -54,6 +54,7 @@ public:
 
   void collectGlobals();
   void recomputeGlobalSVFGNodes();
+  void reset();
 
   /// Called after building SVFG (e.g. from SrcSnkDDA::initialize).
   void rmDerefDirSVFGEdges();

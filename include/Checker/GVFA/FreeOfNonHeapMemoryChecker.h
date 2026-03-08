@@ -20,9 +20,10 @@ public:
   bool isValidTransfer(const Value *From, const Value *To) const override;
   std::string getCategory() const override { return "Free of Non-Heap Memory"; }
   int registerBugType() override;
-  void reportVulnerability(int bugTypeId, const Value *Source,
-                           const Value *Sink,
-                           const std::set<const Value *> *SinkInsts) override;
+  void reportVulnerability(
+      int bugTypeId, const ValueSitePairType &SourceSite, const Value *Sink,
+      const std::set<const Value *> &SinkInsts,
+      const std::vector<const Value *> *WitnessPath = nullptr) override;
 };
 
 #endif // CHECKER_GVFA_FREEOFNONHEAPMEMORYCHECKER_H

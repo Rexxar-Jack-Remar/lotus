@@ -6,11 +6,18 @@
  * including null pointer checks, use-after-free, and other security issues.
  */
 
+#include "Alias/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/DyckAA/DyckModRefAnalysis.h"
+#include "Alias/DyckAA/DyckVFG.h"
+#include "Checker/GVFA/NullPointerChecker.h"
+#include "Checker/GVFA/UseAfterFreeChecker.h"
+#include "Checker/GVFA/UseOfUninitializedVariableChecker.h"
 #include "Checker/GVFA/GVFAVulnerabilityChecker.h"
 #include "Analysis/GVFA/GlobalValueFlowAnalysis.h"
 
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
@@ -28,6 +35,24 @@ protected:
       err.print("GVFACheckerTest", errs());
     }
     return module;
+  }
+
+  template <typename CheckerT>
+  int runChecker(Module *M, std::unique_ptr<CheckerT> checker) {
+    legacy::PassManager PM;
+    auto *DAA = new DyckAliasAnalysis();
+    auto *DMRA = new DyckModRefAnalysis();
+    PM.add(DAA);
+    PM.add(DMRA);
+    PM.run(*M);
+
+    DyckVFG VFG(DAA, DMRA, M);
+    DyckGlobalValueFlowAnalysis GVFA(M, &VFG, DAA, DMRA);
+
+    CheckerT *RawChecker = checker.get();
+    GVFA.setVulnerabilityChecker(std::move(checker));
+    GVFA.run();
+    return RawChecker->detectAndReport(M, &GVFA, false, false);
   }
 };
 
@@ -393,6 +418,123 @@ TEST_F(GVFACheckerTest, SelectInstruction) {
   
   ASSERT_NE(sel, nullptr);
   EXPECT_TRUE(sel->getCondition()->getType()->isIntegerTy(1));
+}
+
+TEST_F(GVFACheckerTest, UseAfterFreeRequiresPostFreeUse) {
+  const char *source = R"(
+    declare void @free(i8*)
+    declare i8* @malloc(i64)
+
+    define i32 @test_uaf_before_free() {
+      %ptr = call i8* @malloc(i64 16)
+      %val = load i8, i8* %ptr
+      call void @free(i8* %ptr)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  int vulnCount =
+      runChecker(module.get(), std::make_unique<UseAfterFreeChecker>());
+  EXPECT_EQ(vulnCount, 0);
+}
+
+TEST_F(GVFACheckerTest, NullPointerSinkCollectionAccumulatesAllUses) {
+  const char *source = R"(
+    define void @test_null_sinks(i32* %ptr) {
+      %a = load i32, i32* %ptr
+      %b = load i32, i32* %ptr
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  NullPointerChecker checker;
+  VulnerabilitySinksType sinks;
+  checker.getSinks(module.get(), sinks);
+
+  Argument *ptrArg = module->getFunction("test_null_sinks")->getArg(0);
+  auto it = sinks.find(ptrArg);
+  ASSERT_NE(it, sinks.end());
+  EXPECT_EQ(it->second.size(), 2u);
+}
+
+TEST_F(GVFACheckerTest, UseOfUninitializedVariableRequiresDominatingStore) {
+  const char *source = R"(
+    define i32 @test_uninit() {
+      %x = alloca i32
+      %val = load i32, i32* %x
+      ret i32 %val
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  int vulnCount = runChecker(
+      module.get(), std::make_unique<UseOfUninitializedVariableChecker>());
+  EXPECT_GT(vulnCount, 0);
+}
+
+TEST_F(GVFACheckerTest, UseOfUninitializedVariableSkipsInitializedLoad) {
+  const char *source = R"(
+    define i32 @test_init() {
+      %x = alloca i32
+      store i32 42, i32* %x
+      %val = load i32, i32* %x
+      ret i32 %val
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  int vulnCount = runChecker(
+      module.get(), std::make_unique<UseOfUninitializedVariableChecker>());
+  EXPECT_EQ(vulnCount, 0);
+}
+
+TEST_F(GVFACheckerTest, UseOfUninitializedVariableReportsExplicitUndef) {
+  const char *source = R"(
+    define i32 @test_explicit_undef() {
+      %sum = add i32 undef, 1
+      ret i32 %sum
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  int vulnCount = runChecker(
+      module.get(), std::make_unique<UseOfUninitializedVariableChecker>());
+  EXPECT_GT(vulnCount, 0);
+}
+
+TEST_F(GVFACheckerTest, NullPointerTransferFilterBlocksCheckWrapper) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+
+    define i8* @null_check(i8* %p) {
+      ret i8* %p
+    }
+
+    define i32 @test_checked_malloc() {
+      %ptr = call i8* @malloc(i64 16)
+      %checked = call i8* @null_check(i8* %ptr)
+      %val = load i8, i8* %checked
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  int vulnCount = runChecker(module.get(), std::make_unique<NullPointerChecker>());
+  EXPECT_EQ(vulnCount, 0);
 }
 
 int main(int argc, char **argv) {

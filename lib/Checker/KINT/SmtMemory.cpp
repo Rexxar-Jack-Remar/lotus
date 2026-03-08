@@ -57,7 +57,7 @@ z3::expr SmtMemory::loadBytes(const z3::expr &addr, unsigned numBytes,
   for (unsigned i = 1; i < numBytes; ++i) {
     const unsigned byteIndex = littleEndian ? (numBytes - 1 - i) : i;
     z3::expr b = z3::select(m_mem, addrAdd(addr, byteIndex));
-    result = z3::concat(b, result);
+    result = z3::concat(result, b);
   }
   return result;
 }

@@ -6,7 +6,9 @@
 
 #include <algorithm>
 
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -21,7 +23,6 @@ namespace kint {
 constexpr const char *MKINT_IR_TAINT = "mkint.taint";
 constexpr const char *MKINT_IR_SINK = "mkint.sink";
 constexpr const char *MKINT_TAINT_SRC_SUFFX = ".mkint.arg";
-
 constexpr auto MKINT_SINKS = std::array<std::pair<const char *, size_t>, 19>{
     {std::pair<const char *, size_t>("malloc", 0),
      std::pair<const char *, size_t>("__mkint_sink0", 0),
@@ -42,6 +43,129 @@ constexpr auto MKINT_SINKS = std::array<std::pair<const char *, size_t>, 19>{
      std::pair<const char *, size_t>("gdth_ioctl_alloc", 1),
      std::pair<const char *, size_t>("sock_alloc_send_skb", 1),
      std::pair<const char *, size_t>("memcpy", 2)}};
+
+namespace {
+
+static void markTaintImpl(Instruction &inst, StringRef taint_name = "") {
+  auto &ctx = inst.getContext();
+  auto *md = MDNode::get(ctx, MDString::get(ctx, taint_name));
+  inst.setMetadata(MKINT_IR_TAINT, md);
+}
+
+static Function *resolveCalledFunction(const CallBase *call) {
+  if (!call)
+    return nullptr;
+  if (const Function *callee = call->getCalledFunction())
+    return const_cast<Function *>(callee);
+  const Value *called = call->getCalledOperand();
+  if (!called)
+    return nullptr;
+  if (const auto *callee = dyn_cast<Function>(called->stripPointerCasts()))
+    return const_cast<Function *>(callee);
+  return nullptr;
+}
+
+static llvm::Optional<size_t> getSinkArgIndex(const Function *callee) {
+  if (!callee)
+    return llvm::None;
+  const auto dname = DemangleUtils::demangle(callee->getName().str());
+  auto it = std::find_if(MKINT_SINKS.begin(), MKINT_SINKS.end(),
+                         [&dname](const auto &s) { return dname == s.first; });
+  if (it == MKINT_SINKS.end())
+    return llvm::None;
+  return it->second;
+}
+
+static bool isDirectSinkUse(const Value *source, const User *user,
+                            SetVector<Function *> &taint_funcs) {
+  auto *call = dyn_cast_or_null<CallBase>(user);
+  if (!call)
+    return false;
+  Function *callee = resolveCalledFunction(call);
+  auto sink_idx = getSinkArgIndex(callee);
+  if (!sink_idx || *sink_idx >= call->arg_size())
+    return false;
+  if (call->getArgOperand(*sink_idx) != source)
+    return false;
+  taint_funcs.insert(callee);
+  return true;
+}
+
+static bool isSinkReachableImpl(Instruction *inst,
+                                SetVector<Function *> &taint_funcs,
+                                SmallPtrSetImpl<const Instruction *> &visiting) {
+  if (inst == nullptr)
+    return false;
+  if (!visiting.insert(inst).second)
+    return false;
+
+  if (inst->getMetadata(MKINT_IR_SINK)) {
+    for (auto *f : TaintAnalysis::get_sink_fns(inst)) {
+      taint_funcs.insert(f);
+    }
+    visiting.erase(inst);
+    return true;
+  }
+
+  bool you_see_sink = false;
+
+  if (auto *store = dyn_cast<StoreInst>(inst)) {
+    auto *ptr = store->getPointerOperand();
+    if (auto *gv = dyn_cast<GlobalVariable>(ptr)) {
+      for (auto *user : gv->users()) {
+        if (auto *user_inst = dyn_cast<Instruction>(user)) {
+          if (user != store)
+            you_see_sink |= isSinkReachableImpl(user_inst, taint_funcs, visiting);
+        }
+      }
+
+      if (you_see_sink) {
+        markTaintImpl(*inst);
+        gv->setMetadata(MKINT_IR_TAINT, inst->getMetadata(MKINT_IR_TAINT));
+        visiting.erase(inst);
+        return true;
+      }
+    }
+  } else {
+    if (auto *call = dyn_cast<CallBase>(inst)) {
+      if (auto *f = resolveCalledFunction(call)) {
+        // if func's impl is known, approximate taint flow through its arguments.
+        if (!f->isDeclaration() && TaintAnalysis().taint_bcast_sink(
+                                      f->args(), taint_funcs)) {
+          you_see_sink = true;
+          taint_funcs.insert(f);
+        }
+      }
+    }
+
+    for (auto *user : inst->users()) {
+      if (isDirectSinkUse(inst, user, taint_funcs)) {
+        you_see_sink = true;
+      }
+      if (auto *user_inst = dyn_cast<Instruction>(user)) {
+        you_see_sink |= isSinkReachableImpl(user_inst, taint_funcs, visiting);
+      }
+    }
+
+    if (you_see_sink) {
+      markTaintImpl(*inst);
+      if (auto *call = dyn_cast<CallBase>(inst)) {
+        if (auto *f = resolveCalledFunction(call)) {
+          if (!f->getReturnType()->isVoidTy()) {
+            taint_funcs.insert(f);
+          }
+        }
+      }
+      visiting.erase(inst);
+      return true;
+    }
+  }
+
+  visiting.erase(inst);
+  return false;
+}
+
+} // namespace
 
 void TaintAnalysis::mark_taint(Instruction &inst,
                                const std::string &taint_name) {
@@ -87,13 +211,15 @@ bool TaintAnalysis::is_taint_src_arg_call(StringRef s) {
 SmallVector<Function *, 2> TaintAnalysis::get_sink_fns(Instruction *inst) {
   SmallVector<Function *, 2> ret;
   for (auto *user : inst->users()) {
-    if (auto *call = dyn_cast<CallInst>(user)) {
-      auto dname =
-          DemangleUtils::demangle(call->getCalledFunction()->getName().str());
+    if (auto *call = dyn_cast<CallBase>(user)) {
+      Function *callee = resolveCalledFunction(call);
+      if (!callee)
+        continue;
+      auto dname = DemangleUtils::demangle(callee->getName().str());
       if (std::find_if(MKINT_SINKS.begin(), MKINT_SINKS.end(),
                        [&dname](const auto &s) { return dname == s.first; }) !=
           MKINT_SINKS.end()) {
-        ret.push_back(call->getCalledFunction());
+        ret.push_back(callee);
       }
     }
   }
@@ -102,78 +228,8 @@ SmallVector<Function *, 2> TaintAnalysis::get_sink_fns(Instruction *inst) {
 
 bool TaintAnalysis::is_sink_reachable(Instruction *inst,
                                       SetVector<Function *> &taint_funcs) {
-  // we want to only mark sink-reachable taints; and
-  // find out if the return value is tainted.
-  if (nullptr == inst) {
-    return false;
-  } else if (inst->getMetadata(MKINT_IR_SINK)) {
-    for (auto *f : get_sink_fns(inst)) {
-      taint_funcs.insert(f); // sink are tainted.
-    }
-    return true;
-  }
-
-  bool you_see_sink /* ? */ = false;
-
-  // if store
-  if (auto *store = dyn_cast<StoreInst>(inst)) {
-    auto *ptr = store->getPointerOperand();
-    if (auto *gv = dyn_cast<GlobalVariable>(ptr)) {
-      for (auto *user : gv->users()) {
-        if (auto *user_inst = dyn_cast<Instruction>(user)) {
-          if (user != store) // no self-loop.
-            you_see_sink |= is_sink_reachable(user_inst, taint_funcs);
-        }
-      }
-
-      if (you_see_sink) {
-        mark_taint(*inst);
-        gv->setMetadata(MKINT_IR_TAINT, inst->getMetadata(MKINT_IR_TAINT));
-        return true;
-      }
-    }
-  } else {
-    if (auto *call = dyn_cast<CallInst>(inst)) {
-      if (auto *f = call->getCalledFunction()) {
-        // How to do taint analysis for call func?
-        // if func's impl is unknow we simply assume it is related.
-        // if func's impl is known, we analyze which arg determines the return
-        // value. if unrelated -> cut off the connection.
-        // FIXME: But we simply assume it is related and people won't wrote
-        // stupid code that results are not related to inputs.
-        if (!f->isDeclaration() && taint_bcast_sink(f->args(), taint_funcs)) {
-          you_see_sink = true;
-          taint_funcs.insert(f);
-        }
-      }
-    }
-
-    for (auto *user : inst->users()) {
-      if (auto *user_inst = dyn_cast<Instruction>(user)) {
-        // if used by phi whose id is even smaller than you. -> loop
-        if (auto *phi = dyn_cast<PHINode>(user_inst)) {
-          if (get_id(phi) < get_id(inst)) {
-            continue;
-          }
-        }
-        you_see_sink |= is_sink_reachable(user_inst, taint_funcs);
-      }
-    }
-
-    if (you_see_sink) {
-      mark_taint(*inst);
-      if (auto *call = dyn_cast<CallInst>(inst)) {
-        if (auto *f = call->getCalledFunction()) {
-          if (!f->getReturnType()->isVoidTy()) {
-            taint_funcs.insert(f);
-          }
-        }
-      }
-      return true;
-    }
-  }
-
-  return false;
+  SmallPtrSet<const Instruction *, 32> visiting;
+  return isSinkReachableImpl(inst, taint_funcs, visiting);
 }
 
 bool TaintAnalysis::taint_bcast_sink(
@@ -219,6 +275,9 @@ bool TaintAnalysis::taint_bcast_sink(Iter taint_source,
 
   for (auto &ts : taint_source) {
     for (auto *user : ts.users()) {
+      if (isDirectSinkUse(&ts, user, taint_funcs)) {
+        ret = true;
+      }
       if (auto user_inst = dyn_cast<Instruction>(user)) {
         if (is_sink_reachable(user_inst, taint_funcs)) {
           mark_taint(*user_inst);
@@ -240,12 +299,12 @@ void TaintAnalysis::mark_func_sinks(Function &F,
   };
 
   for (auto &inst : instructions(F)) {
-    if (auto *call = dyn_cast<CallInst>(&inst)) {
+    if (auto *call = dyn_cast<CallBase>(&inst)) {
       // call in MKINT_SINKS
       for (const auto &sink_pair : MKINT_SINKS) {
         const char *name = sink_pair.first;
         size_t idx = sink_pair.second;
-        if (auto *called_fn = call->getCalledFunction()) {
+        if (auto *called_fn = resolveCalledFunction(call)) {
           const auto demangled_func_name =
               DemangleUtils::demangle(called_fn->getName().str());
           if (demangled_func_name == name) {
@@ -305,15 +364,22 @@ void TaintAnalysis::propagate_taint_across_functions(
     }
   }
 
-  size_t n_tfunc_before = 0;
-  do {
-    n_tfunc_before = taint_funcs.size();
-    for (auto *f : taint_funcs) {
-      if (!is_taint_src(f->getName())) {
-        taint_bcast_sink(f->args(), taint_funcs);
+  SmallVector<Function *, 8> worklist(taint_funcs.begin(), taint_funcs.end());
+  SmallPtrSet<Function *, 8> enqueued;
+  for (auto *tainted : taint_funcs) {
+    enqueued.insert(tainted);
+  }
+  for (size_t i = 0; i < worklist.size(); ++i) {
+    Function *f = worklist[i];
+    if (is_taint_src(f->getName()))
+      continue;
+    taint_bcast_sink(f->args(), taint_funcs);
+    for (auto *tainted : taint_funcs) {
+      if (enqueued.insert(tainted).second) {
+        worklist.push_back(tainted);
       }
     }
-  } while (n_tfunc_before != taint_funcs.size());
+  }
 }
 
 } // namespace kint

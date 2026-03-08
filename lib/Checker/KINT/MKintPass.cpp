@@ -22,12 +22,25 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Module.h>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/Support/raw_ostream.h>
 #include <z3++.h>
 
 using namespace llvm;
 
 namespace kint {
+
+namespace {
+
+static z3::expr bvValFromAPInt(z3::context &ctx, const llvm::APInt &value) {
+  llvm::SmallString<64> decimal;
+  value.toString(decimal, 10, /*Signed=*/false, /*formatAsCLiteral=*/false);
+  Z3_sort sort = Z3_mk_bv_sort(ctx, value.getBitWidth());
+  Z3_ast ast = Z3_mk_numeral(ctx, decimal.c_str(), sort);
+  return z3::to_expr(ctx, ast);
+}
+
+} // namespace
 
 static const char *bugTypeToString(interr t) {
   switch (t) {
@@ -250,11 +263,38 @@ PreservedAnalyses MKintPass::run(Module &M, ModuleAnalysisManager &MAM) {
   m_dl = &M.getDataLayout();
   m_ptr_bits = m_dl->getPointerSizeInBits(0);
   m_smt_mem = std::make_unique<SmtMemory>(*ctx, m_ptr_bits);
+  m_func2tsrc.clear();
+  m_taint_funcs.clear();
+  m_backedges.clear();
+  m_callback_tsrc_fn.clear();
+  m_func2range_info.clear();
+  m_func2ret_range.clear();
+  m_range_analysis_funcs.clear();
+  m_global2range.clear();
+  m_garr2ranges.clear();
+  m_impossible_branches.clear();
+  m_gep_oob.clear();
+  m_overflow_insts.clear();
+  m_bad_shift_insts.clear();
+  m_div_zero_insts.clear();
+  if (m_bug_detection) {
+    m_bug_detection->clearState();
+  }
   m_obj_base.clear();
   m_obj_size.clear();
   m_obj_list.clear();
+  m_obj_mem.clear();
+  m_bbpaths.clear();
+  m_v2sym.clear();
+  m_aa = nullptr;
+  m_mssa = nullptr;
+  m_fam = nullptr;
   m_sym_change_log.clear();
   m_sym_change_frames.clear();
+  m_path_constraints.clear();
+  m_constraint_frames.clear();
+  m_universal_vars.clear();
+  m_universal_var_ids.clear();
 
   // Mark taint sources.
   for (auto &F : M) {
@@ -377,6 +417,9 @@ void MKintPass::smt_solving(Module &M) {
     m_constraint_frames.clear();
     m_universal_vars.clear();
     m_universal_var_ids.clear();
+    if (m_bug_detection) {
+      m_bug_detection->clearCurrentPath();
+    }
 
     // Record start time for this function
     m_function_start_time = std::chrono::steady_clock::now();
@@ -655,18 +698,16 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
           for (auto c : swt->cases()) {
             auto *case_val = c.getCaseValue();
             addConstraint(getIntExpr(cond, pred, nullptr) !=
-                          m_solver.getValue().ctx().bv_val(
-                              case_val->getZExtValue(),
-                              cond->getType()->getIntegerBitWidth()));
+                          bvValFromAPInt(m_solver.getValue().ctx(),
+                                         case_val->getValue()));
           }
         } else {
           for (auto c : swt->cases()) {
             if (c.getCaseSuccessor() == cur) {
               auto *case_val = c.getCaseValue();
               addConstraint(getIntExpr(cond, pred, nullptr) ==
-                            m_solver.getValue().ctx().bv_val(
-                                case_val->getZExtValue(),
-                                cond->getType()->getIntegerBitWidth()));
+                            bvValFromAPInt(m_solver.getValue().ctx(),
+                                           case_val->getValue()));
               break;
             }
           }
@@ -1432,7 +1473,7 @@ z3::expr MKintPass::loadBytesFromMem(const z3::expr &mem,
   for (unsigned i = 1; i < numBytes; ++i) {
     const unsigned byteIndex = littleEndian ? (numBytes - 1 - i) : i;
     z3::expr b = z3::select(mem, offset + ctx.bv_val(byteIndex, m_ptr_bits));
-    result = z3::concat(b, result);
+    result = z3::concat(result, b);
   }
   return result;
 }
@@ -1799,7 +1840,7 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
   auto &ctx = m_solver.getValue().ctx();
 
   if (const auto *ci = dyn_cast<ConstantInt>(v)) {
-    return ctx.bv_val(ci->getZExtValue(), ci->getType()->getIntegerBitWidth());
+    return bvValFromAPInt(ctx, ci->getValue());
   }
 
   if (const auto *fr = dyn_cast<FreezeInst>(v)) {

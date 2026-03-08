@@ -100,6 +100,11 @@ protected:
     return worklistSet_.find(item) != worklistSet_.end();
   }
 
+  void clearWorklist() {
+    worklist_.clear();
+    worklistSet_.clear();
+  }
+
 private:
   SVFG *graph_ = nullptr;
   WorkList worklist_;

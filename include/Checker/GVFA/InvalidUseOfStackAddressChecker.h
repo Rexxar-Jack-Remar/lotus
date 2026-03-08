@@ -22,9 +22,10 @@ public:
     return "Invalid Use of Stack Address";
   }
   int registerBugType() override;
-  void reportVulnerability(int bugTypeId, const Value *Source,
-                           const Value *Sink,
-                           const std::set<const Value *> *SinkInsts) override;
+  void reportVulnerability(
+      int bugTypeId, const ValueSitePairType &SourceSite, const Value *Sink,
+      const std::set<const Value *> &SinkInsts,
+      const std::vector<const Value *> *WitnessPath = nullptr) override;
 };
 
 #endif // CHECKER_GVFA_INVALIDUSEOFSTACKADDRESSCHECKER_H

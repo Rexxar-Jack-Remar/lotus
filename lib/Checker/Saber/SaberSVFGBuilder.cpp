@@ -150,6 +150,16 @@ SVFG *SaberSVFGBuilder::buildSVFG(const ICFG *icfg) {
   return svfg;
 }
 
+void SaberSVFGBuilder::reset() {
+  globs.clear();
+  globSVFGNodes.clear();
+  currentSVFG_ = nullptr;
+  recursiveFunctionsCache_.clear();
+  recursiveFunctionsReady_ = false;
+  module_ = nullptr;
+  saberCondAllocator = nullptr;
+}
+
 static const Value *getPointerOperandForStmt(const SVFGNode *node) {
   const Instruction *inst = node->getInstruction();
   if (!inst)

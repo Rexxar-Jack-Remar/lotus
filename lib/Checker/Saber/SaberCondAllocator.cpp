@@ -41,6 +41,26 @@ SaberCondAllocator::SaberCondAllocator() : totalCondNum_(0), module_(nullptr) {}
 
 void SaberCondAllocator::setModule(llvm::Module *M) { module_ = M; }
 
+void SaberCondAllocator::reset(bool preserveRemovedSUVFEdges) {
+  dtCache_.clear();
+  pdtCache_.clear();
+  loopInfoCache_.clear();
+  retBlocksCache_.clear();
+  if (!preserveRemovedSUVFEdges)
+    removedSUVFEdges.clear();
+  bbConds.clear();
+  condToInst.clear();
+  negCondIds.clear();
+  funToExitBBsMap.clear();
+  cfConds.clear();
+  conditionVec.clear();
+  finalCond = getFalseCond();
+  totalCondNum_ = 0;
+  curEvalInst = nullptr;
+  curEvalSVFGNode = nullptr;
+  module_ = nullptr;
+}
+
 void SaberCondAllocator::setCFCond(const llvm::BasicBlock *bb,
                                    const Condition &cond) {
   if (bb)
@@ -142,29 +162,25 @@ void SaberCondAllocator::allocateForBB(const llvm::BasicBlock *bb) {
   unsigned succNum = bb->getTerminator()->getNumSuccessors();
 
   if (succNum > 1) {
-    double num = log(succNum) / log(2);
-    unsigned bitNum = (unsigned)ceil(num);
-    unsigned succIndex = 0;
-    std::vector<Condition> condVec;
-
     const llvm::Instruction *term = bb->getTerminator();
-    for (unsigned i = 0; i < bitNum; i++) {
-      condVec.push_back(newCond(term));
-    }
+    std::vector<Condition> selectorConds;
+    selectorConds.reserve(succNum > 0 ? succNum - 1 : 0);
+    for (unsigned i = 0; i + 1 < succNum; ++i)
+      selectorConds.push_back(newCond(term));
 
+    unsigned succIndex = 0;
     for (const llvm::BasicBlock *succ : llvm::successors(bb)) {
       Condition pathCond = getTrueCond();
-
-      for (unsigned j = 0; j < bitNum; j++) {
-        unsigned tool = 0x01 << j;
-        if (tool & succIndex) {
-          pathCond = condAnd(pathCond, condNeg(condVec.at(j)));
-        } else {
-          pathCond = condAnd(pathCond, condVec.at(j));
-        }
+      if (succIndex + 1 < succNum) {
+        for (unsigned j = 0; j < succIndex; ++j)
+          pathCond = condAnd(pathCond, condNeg(selectorConds.at(j)));
+        pathCond = condAnd(pathCond, selectorConds.at(succIndex));
+      } else {
+        for (const Condition &selector : selectorConds)
+          pathCond = condAnd(pathCond, condNeg(selector));
       }
       setBranchCond(bb, succ, pathCond);
-      succIndex++;
+      ++succIndex;
     }
   }
 }
@@ -364,6 +380,8 @@ SaberCondAllocator::evaluateLoopExitBranch(const llvm::BasicBlock *bb,
     if (!isBBCallsProgExit(exitBB))
       filtered.insert(exitBB);
   }
+  if (filtered.empty())
+    return Condition::nullExpr();
   bool allPostDom = true;
   for (const llvm::BasicBlock *e : filtered) {
     if (!postDominate(dst, e)) {

@@ -101,17 +101,27 @@ void DyckGlobalValueFlowAnalysis::run() {
   }
 
   // Convert sources to vector format
+  SourcesVec.clear();
+  SourceSitesVec.clear();
+  int source_index = 0;
   for (auto &It : Sources) {
-    auto *SrcValue = It.first.first;
-    int Mask = It.second;
+    const ValueSitePairType &SourceSite = It.first;
+    auto *SrcValue = SourceSite.first;
+    int Mask = 0;
+    if (source_index < static_cast<int>(sizeof(int) * 8 - 1)) {
+      Mask = 1 << source_index;
+    }
+    ++source_index;
     SourcesVec.emplace_back(SrcValue, Mask);
+    SourceSitesVec.push_back(SourceSite);
   }
 
   outs() << "#Sources: " << SourcesVec.size() << "\n";
   outs() << "#Sinks: " << Sinks.size() << "\n";
 
   Engine = std::make_unique<HybridGVFAEngine>(M, VFG, DyckAA, DyckMRA,
-                                              std::move(SourcesVec), Sinks);
+                                              std::move(SourcesVec),
+                                              std::move(SourceSitesVec), Sinks);
 
   Engine->run();
 }
@@ -133,8 +143,8 @@ int DyckGlobalValueFlowAnalysis::reachable(const Value *V, int Mask) {
   return 0;
 }
 
-bool DyckGlobalValueFlowAnalysis::srcReachable(const Value *V,
-                                               const Value *Src) const {
+bool DyckGlobalValueFlowAnalysis::srcReachable(
+    const Value *V, const ValueSitePairType &Src) const {
   if (Engine) {
     return Engine->srcReachable(V, Src);
   }

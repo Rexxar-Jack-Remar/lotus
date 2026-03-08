@@ -24,6 +24,7 @@ public:
   HybridGVFAEngine(Module *M, DyckVFG *VFG, DyckAliasAnalysis *DyckAA,
                    DyckModRefAnalysis *DyckMRA,
                    std::vector<std::pair<const Value *, int>> SourcesVec,
+                   std::vector<ValueSitePairType> SourceSitesVec,
                    const VulnerabilitySinksType &Sinks);
   ~HybridGVFAEngine() override;
 
@@ -31,7 +32,8 @@ public:
 
   int reachable(const Value *V, int Mask) override;
   bool backwardReachable(const Value *V) override;
-  bool srcReachable(const Value *V, const Value *Src) const override;
+  bool srcReachable(const Value *V,
+                    const ValueSitePairType &Src) const override;
   bool backwardReachableAllSinks(const Value *V) override;
   std::vector<const Value *> getWitnessPath(const Value *From,
                                             const Value *To) const override;
@@ -40,6 +42,7 @@ private:
   void ensurePrecise() const;
 
   std::vector<std::pair<const Value *, int>> OriginalSourcesVec;
+  std::vector<ValueSitePairType> OriginalSourceSites;
 
   std::unique_ptr<FastGVFAEngine> Fast;
   mutable std::unique_ptr<PreciseGVFAEngine> Precise;

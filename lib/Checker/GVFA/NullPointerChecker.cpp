@@ -26,17 +26,18 @@ using namespace CheckerUtils;
 
 void NullPointerChecker::getSources(Module *M,
                                     VulnerabilitySourcesType &Sources) {
-  forEachInstruction(M, [&Sources](const Instruction *I) {
+  int site_id = 1;
+  forEachInstruction(M, [&Sources, &site_id](const Instruction *I) {
     // 1. NULL constants stored to variables
     if (auto *SI = dyn_cast<StoreInst>(I)) {
       if (isa<ConstantPointerNull>(SI->getValueOperand())) {
-        Sources[{SI, 1}] = 1;
+        Sources[{SI, site_id++}] = 1;
       }
     }
     // 2. Memory allocation functions (can return NULL on failure)
     else if (auto *Call = dyn_cast<CallInst>(I)) {
       if (isMemoryAllocation(Call)) {
-        Sources[{Call, 1}] = 1;
+        Sources[{Call, site_id++}] = 1;
       }
     }
   });
@@ -49,10 +50,7 @@ void NullPointerChecker::getSinks(Module *M, VulnerabilitySinksType &Sinks) {
     if (isProvenNonNull(PtrOp, I))
       return; // Filter out proven safe pointers
 
-    if (Sinks.find(PtrOp) == Sinks.end()) {
-      Sinks[PtrOp] = new std::set<const Value *>();
-    }
-    Sinks[PtrOp]->insert(I);
+    Sinks[PtrOp].insert(I);
   };
 
   forEachInstruction(M, [&](const Instruction *I) {
@@ -119,8 +117,10 @@ int NullPointerChecker::registerBugType() {
 }
 
 void NullPointerChecker::reportVulnerability(
-    int bugTypeId, const Value *Source, const Value *Sink,
-    const std::set<const Value *> *SinkInsts) {
+    int bugTypeId, const ValueSitePairType &SourceSite, const Value *Sink,
+    const std::set<const Value *> &SinkInsts,
+    const std::vector<const Value *> *WitnessPath) {
+  const Value *Source = SourceSite.first;
 
   BugReport *report = new BugReport(bugTypeId);
   int trace_level = 0;
@@ -138,8 +138,8 @@ void NullPointerChecker::reportVulnerability(
                         "source");
     trace_level++;
   } else {
-    if (SinkInsts && !SinkInsts->empty()) {
-      if (auto *FirstSinkInst = dyn_cast<Instruction>(*SinkInsts->begin())) {
+    if (!SinkInsts.empty()) {
+      if (auto *FirstSinkInst = dyn_cast<Instruction>(*SinkInsts.begin())) {
         std::string sourceDesc = "Null value source: ";
         llvm::raw_string_ostream OS(sourceDesc);
         Source->print(OS);
@@ -154,7 +154,7 @@ void NullPointerChecker::reportVulnerability(
   if (GVFA && Sink) {
     try {
       std::vector<const Value *> witnessPath =
-          GVFA->getWitnessPath(Source, Sink);
+          WitnessPath ? *WitnessPath : GVFA->getWitnessPath(Source, Sink);
       if (witnessPath.size() > 2) {
         for (size_t i = 1; i + 1 < witnessPath.size(); ++i) {
           const Value *V = witnessPath[i];
@@ -202,30 +202,28 @@ void NullPointerChecker::reportVulnerability(
   }
 
   // Sink step
-  if (SinkInsts) {
-    for (const Value *SI : *SinkInsts) {
-      if (auto *SinkInst = dyn_cast<Instruction>(SI)) {
-        std::string sinkDesc = "Potential null pointer dereference";
-        std::string access = "dereference";
-        std::vector<NodeTag> tags;
+  for (const Value *SI : SinkInsts) {
+    if (auto *SinkInst = dyn_cast<Instruction>(SI)) {
+      std::string sinkDesc = "Potential null pointer dereference";
+      std::string access = "dereference";
+      std::vector<NodeTag> tags;
 
-        if (isa<LoadInst>(SinkInst)) {
-          sinkDesc = "Load from potentially null pointer";
-          access = "load";
-        } else if (isa<StoreInst>(SinkInst)) {
-          sinkDesc = "Store to potentially null pointer";
-          access = "store";
-        } else if (isa<GetElementPtrInst>(SinkInst)) {
-          sinkDesc = "GEP on potentially null pointer";
-          access = "gep";
-        } else if (isa<CallInst>(SinkInst)) {
-          sinkDesc = "Call with potentially null pointer argument";
-          access = "call";
-          tags.push_back(NodeTag::CALL_SITE);
-        }
-        report->append_step(const_cast<Instruction *>(SinkInst), sinkDesc,
-                            trace_level, tags, access);
+      if (isa<LoadInst>(SinkInst)) {
+        sinkDesc = "Load from potentially null pointer";
+        access = "load";
+      } else if (isa<StoreInst>(SinkInst)) {
+        sinkDesc = "Store to potentially null pointer";
+        access = "store";
+      } else if (isa<GetElementPtrInst>(SinkInst)) {
+        sinkDesc = "GEP on potentially null pointer";
+        access = "gep";
+      } else if (isa<CallInst>(SinkInst)) {
+        sinkDesc = "Call with potentially null pointer argument";
+        access = "call";
+        tags.push_back(NodeTag::CALL_SITE);
       }
+      report->append_step(const_cast<Instruction *>(SinkInst), sinkDesc,
+                          trace_level, tags, access);
     }
   }
 

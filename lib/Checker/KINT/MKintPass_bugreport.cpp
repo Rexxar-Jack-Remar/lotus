@@ -14,41 +14,43 @@ void MKintPass::reportBugsToManager() {
 
   // Report bugs that have path information. Track which instructions have
   // already been reported to avoid duplicates with the raw sets below.
-  std::set<const Instruction *> reported;
+  std::set<BugKey> reported;
   for (const auto &pair : bug_paths) {
-    const Instruction *inst = pair.first;
+    const BugKey &key = pair.first;
+    const Instruction *inst = key.first;
     const BugPath &bug_path = pair.second;
     reportBug(bug_path.bugType, inst, bug_path.path);
-    reported.insert(inst);
+    reported.insert(key);
   }
 
   // Report bugs from raw sets only if they were not already reported above.
   for (const auto *inst : m_overflow_insts) {
-    if (!reported.count(inst))
+    if (!reported.count(BugKey(inst, interr::INT_OVERFLOW)))
       reportBug(interr::INT_OVERFLOW, inst);
   }
 
   for (const auto *inst : m_div_zero_insts) {
-    if (!reported.count(inst))
+    if (!reported.count(BugKey(inst, interr::DIV_BY_ZERO)))
       reportBug(interr::DIV_BY_ZERO, inst);
   }
 
   for (const auto *inst : m_bad_shift_insts) {
-    if (!reported.count(inst))
+    if (!reported.count(BugKey(inst, interr::BAD_SHIFT)))
       reportBug(interr::BAD_SHIFT, inst);
   }
 
   for (const auto *gep : m_gep_oob) {
-    if (!reported.count(gep))
+    if (!reported.count(BugKey(gep, interr::ARRAY_OOB)))
       reportBug(interr::ARRAY_OOB, gep);
   }
 
   for (const auto &pair : m_impossible_branches) {
     const ICmpInst *cmp = pair.first;
-    if (!reported.count(cmp)) {
-      bool is_true_branch = pair.second;
-      reportBug(is_true_branch ? interr::DEAD_TRUE_BR : interr::DEAD_FALSE_BR,
-                cmp);
+    bool is_true_branch = pair.second;
+    interr type =
+        is_true_branch ? interr::DEAD_TRUE_BR : interr::DEAD_FALSE_BR;
+    if (!reported.count(BugKey(cmp, type))) {
+      reportBug(type, cmp);
     }
   }
 }

@@ -23,13 +23,14 @@ using namespace CheckerUtils;
 
 void InvalidUseOfStackAddressChecker::getSources(
     Module *M, VulnerabilitySourcesType &Sources) {
-  forEachInstruction(M, [&Sources](const Instruction *I) {
+  int site_id = 1;
+  forEachInstruction(M, [&Sources, &site_id](const Instruction *I) {
     // Skip main function - stack addresses in main often have global lifetime
     if (I->getFunction()->getName() == "main")
       return;
 
     if (auto *AI = dyn_cast<AllocaInst>(I)) {
-      Sources[{AI, 1}] = 1;
+      Sources[{AI, site_id++}] = 1;
     }
   });
 }
@@ -41,8 +42,7 @@ void InvalidUseOfStackAddressChecker::getSinks(Module *M,
     if (auto *RI = dyn_cast<ReturnInst>(I)) {
       if (const Value *RetVal = RI->getReturnValue()) {
         if (RetVal->getType()->isPointerTy()) {
-          Sinks[RetVal] = new std::set<const Value *>();
-          Sinks[RetVal]->insert(RI);
+          Sinks[RetVal].insert(RI);
         }
       }
     }
@@ -52,8 +52,7 @@ void InvalidUseOfStackAddressChecker::getSinks(Module *M,
       if (isa<GlobalVariable>(PtrOp)) {
         const Value *ValOp = SI->getValueOperand();
         if (ValOp->getType()->isPointerTy()) {
-          Sinks[ValOp] = new std::set<const Value *>();
-          Sinks[ValOp]->insert(SI);
+          Sinks[ValOp].insert(SI);
         }
       }
     }
@@ -71,8 +70,7 @@ void InvalidUseOfStackAddressChecker::getSinks(Module *M,
             // Conservative: assume pointer arguments might escape
             // unless function is known to be safe
             if (Callee->isDeclaration()) {
-              Sinks[Arg] = new std::set<const Value *>();
-              Sinks[Arg]->insert(CI);
+              Sinks[Arg].insert(CI);
             }
           }
         }
@@ -94,8 +92,10 @@ int InvalidUseOfStackAddressChecker::registerBugType() {
 }
 
 void InvalidUseOfStackAddressChecker::reportVulnerability(
-    int bugTypeId, const Value *Source, const Value *Sink,
-    const std::set<const Value *> *SinkInsts) {
+    int bugTypeId, const ValueSitePairType &SourceSite, const Value *Sink,
+    const std::set<const Value *> &SinkInsts,
+    const std::vector<const Value *> *WitnessPath) {
+  const Value *Source = SourceSite.first;
 
   BugReport *report = new BugReport(bugTypeId);
   int trace_level = 0;
@@ -116,7 +116,7 @@ void InvalidUseOfStackAddressChecker::reportVulnerability(
   if (GVFA && Sink) {
     try {
       std::vector<const Value *> witnessPath =
-          GVFA->getWitnessPath(Source, Sink);
+          WitnessPath ? *WitnessPath : GVFA->getWitnessPath(Source, Sink);
       if (witnessPath.size() > 2) {
         for (size_t i = 1; i + 1 < witnessPath.size(); ++i) {
           const Value *V = witnessPath[i];
@@ -150,26 +150,24 @@ void InvalidUseOfStackAddressChecker::reportVulnerability(
   }
 
   // Sink step
-  if (SinkInsts) {
-    for (const Value *SI : *SinkInsts) {
-      if (auto *RI = dyn_cast<ReturnInst>(SI)) {
-        report->append_step(const_cast<ReturnInst *>(RI),
-                            "Stack address returned (escapes scope)",
-                            trace_level, {NodeTag::RETURN_SITE}, "return");
-      } else if (auto *StoreI = dyn_cast<StoreInst>(SI)) {
-        report->append_step(const_cast<StoreInst *>(StoreI),
-                            "Stack address stored to global memory",
-                            trace_level, {}, "store");
-      } else if (auto *CI = dyn_cast<CallInst>(SI)) {
-        report->append_step(
-            const_cast<CallInst *>(CI),
-            "Stack address passed to external function (may escape)",
-            trace_level, {NodeTag::CALL_SITE}, "call");
-      } else if (auto *SinkInst = dyn_cast<Instruction>(SI)) {
-        report->append_step(const_cast<Instruction *>(SinkInst),
-                            "Stack address escapes here", trace_level, {},
-                            "escape");
-      }
+  for (const Value *SI : SinkInsts) {
+    if (auto *RI = dyn_cast<ReturnInst>(SI)) {
+      report->append_step(const_cast<ReturnInst *>(RI),
+                          "Stack address returned (escapes scope)", trace_level,
+                          {NodeTag::RETURN_SITE}, "return");
+    } else if (auto *StoreI = dyn_cast<StoreInst>(SI)) {
+      report->append_step(const_cast<StoreInst *>(StoreI),
+                          "Stack address stored to global memory", trace_level,
+                          {}, "store");
+    } else if (auto *CI = dyn_cast<CallInst>(SI)) {
+      report->append_step(
+          const_cast<CallInst *>(CI),
+          "Stack address passed to external function (may escape)",
+          trace_level, {NodeTag::CALL_SITE}, "call");
+    } else if (auto *SinkInst = dyn_cast<Instruction>(SI)) {
+      report->append_step(const_cast<Instruction *>(SinkInst),
+                          "Stack address escapes here", trace_level, {},
+                          "escape");
     }
   }
 

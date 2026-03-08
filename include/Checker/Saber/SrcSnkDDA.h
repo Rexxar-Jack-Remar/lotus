@@ -146,7 +146,7 @@ public:
     return saberCondAllocator.get();
   }
 
-  void setModule(llvm::Module *M) { module_ = M; }
+  void setModule(llvm::Module *M);
 
   /// Set shared SVFG and ICFG (for optimization when running multiple checkers)
   /// Ownership is transferred - the checker will take ownership of these
@@ -163,6 +163,8 @@ public:
   /// Ownership is transferred to the caller
   std::pair<std::unique_ptr<SVFG>, std::unique_ptr<::ICFG>>
   extractSVFGAndICFG() {
+    svfg = nullptr;
+    setGraph(nullptr);
     return std::make_pair(std::move(svfg_), std::move(icfg_));
   }
 
@@ -170,6 +172,8 @@ public:
   bool hasSVFGAndICFG() const { return svfg_ != nullptr && icfg_ != nullptr; }
 
 protected:
+  void resetAnalysisState(bool preserveSharedGraph, bool preservePrecomputedSrcSnk);
+
   void FWProcessCurNode(const DPIm &item) override {
     const SVFGNode *node = getNode(item.getCurNodeID());
     if (isSink(node)) {

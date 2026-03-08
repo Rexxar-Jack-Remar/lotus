@@ -63,7 +63,8 @@ void FastGVFAEngine::run() {
          << "\n";
 }
 
-bool FastGVFAEngine::srcReachable(const Value *V, const Value *Src) const {
+bool FastGVFAEngine::srcReachable(const Value *V,
+                                  const ValueSitePairType &Src) const {
   // Fast mode does not track specific source reachability map (Value ->
   // Set<Src>). It only tracks (Value -> Mask). While we could check if the Mask
   // of Src is set in V's mask, this function expects precise object identity

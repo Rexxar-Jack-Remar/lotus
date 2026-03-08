@@ -42,9 +42,43 @@ SrcSnkDDA::~SrcSnkDDA() {
   _curSlice = nullptr;
 }
 
+void SrcSnkDDA::setModule(llvm::Module *M) {
+  module_ = M;
+}
+
+void SrcSnkDDA::resetAnalysisState(bool preserveSharedGraph,
+                                   bool preservePrecomputedSrcSnk) {
+  delete _curSlice;
+  _curSlice = nullptr;
+  clearVisitedMap();
+  clearWorklist();
+  sliceStats_.reset();
+
+  if (!preservePrecomputedSrcSnk) {
+    sources.clear();
+    sinks.clear();
+    srcToCSMap.clear();
+    hasPrecomputedSrcSnk_ = false;
+  }
+
+  if (!preserveSharedGraph) {
+    svfg_.reset();
+    icfg_.reset();
+    icfgBuilder_.reset();
+    svfg = nullptr;
+    setGraph(nullptr);
+  }
+
+  if (saberCondAllocator)
+    saberCondAllocator->reset(preserveSharedGraph);
+  memSSA.reset();
+}
+
 void SrcSnkDDA::initialize() {
   if (!module_)
     return;
+
+  resetAnalysisState(hasSVFGAndICFG(), hasPrecomputedSrcSnk_);
 
   RecursiveTimer timer("Saber initialization");
   const bool needsBuild = !hasSVFGAndICFG();

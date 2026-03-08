@@ -9,14 +9,18 @@
  */
 
 #include "Checker/Pulse/Checker/PulseChecker.h"
+#include "Checker/Pulse/Report/PulseReport.h"
 #include "Checker/Report/BugReportMgr.h"
 
 #include <llvm/AsmParser/Parser.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
+
+#include <iterator>
 
 using namespace llvm;
 using namespace pulse;
@@ -24,6 +28,7 @@ using namespace pulse;
 class PulseCheckerTest : public ::testing::Test {
 protected:
   LLVMContext context;
+
   std::unique_ptr<Module> parseModule(const char *source) {
     SMDiagnostic err;
     auto module = parseAssemblyString(source, err, context);
@@ -31,6 +36,23 @@ protected:
       err.print("PulseCheckerTest", errs());
     }
     return module;
+  }
+
+  ExecutionDomain executeEntryBlock(PulseChecker &checker, Function *F,
+                                    const Instruction *stop_after = nullptr) {
+    ExecutionDomain state = checker.initializeFunction(F);
+    for (auto &I : F->getEntryBlock()) {
+      auto states = checker.executeInstruction(&I, std::move(state), nullptr, 0);
+      EXPECT_FALSE(states.empty());
+      if (states.empty()) {
+        return ExecutionDomain();
+      }
+      state = std::move(states.front());
+      if (&I == stop_after) {
+        break;
+      }
+    }
+    return state;
   }
 };
 
@@ -382,6 +404,127 @@ TEST_F(PulseCheckerTest, BitwiseOperations) {
   }
   
   EXPECT_EQ(binOpCount, 4u);
+}
+
+TEST_F(PulseCheckerTest, LatentIssuesAreNotReportedAtShutdown) {
+  const char *source = R"(
+    define void @latent_branch() {
+    entry:
+      %p = alloca i8
+      %cmp = icmp eq i8* %p, null
+      br i1 %cmp, label %bad, label %ok
+
+    bad:
+      ret void
+
+    ok:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  DiagnosticManager::getInstance().clear();
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const int reports_before = mgr.get_total_reports();
+  {
+    PulseChecker checker(module.get());
+    checker.analyze();
+  }
+
+  EXPECT_EQ(mgr.get_total_reports(), reports_before);
+}
+
+TEST_F(PulseCheckerTest, UnlockDoesNotInvalidateLockMemory) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_unlock(i8*)
+
+    define void @unlock_ok() {
+    entry:
+      %m = alloca i8
+      %r = call i32 @pthread_mutex_unlock(i8* %m)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("unlock_ok");
+  ASSERT_NE(F, nullptr);
+
+  auto *alloca_inst = llvm::dyn_cast<AllocaInst>(&*F->getEntryBlock().begin());
+  ASSERT_NE(alloca_inst, nullptr);
+
+  auto call_it = std::next(F->getEntryBlock().begin());
+  auto *unlock_call = llvm::dyn_cast<CallInst>(&*call_it);
+  ASSERT_NE(unlock_call, nullptr);
+
+  PulseChecker checker(module.get());
+  ExecutionDomain state = executeEntryBlock(checker, F, unlock_call);
+  auto *astate = state.getAstate();
+  ASSERT_NE(astate, nullptr);
+
+  AbstractValue lock_addr = checker.getFactory().getOrCreate(alloca_inst);
+  EXPECT_FALSE(
+      astate->getPostAttrs().has(lock_addr, pulse::Attribute::Invalid));
+}
+
+TEST_F(PulseCheckerTest, NonReallocAssignmentDoesNotInvalidatePreviousValue) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+
+    define void @assign(i8** %slot) {
+    entry:
+      %new = call i8* @malloc(i64 8)
+      store i8* %new, i8** %slot
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("assign");
+  ASSERT_NE(F, nullptr);
+
+  Argument *slot_arg = F->arg_empty() ? nullptr : &*F->arg_begin();
+  ASSERT_NE(slot_arg, nullptr);
+
+  auto call_it = F->getEntryBlock().begin();
+  auto *malloc_call = llvm::dyn_cast<CallInst>(&*call_it);
+  ASSERT_NE(malloc_call, nullptr);
+
+  auto store_it = std::next(call_it);
+  auto *store = llvm::dyn_cast<StoreInst>(&*store_it);
+  ASSERT_NE(store, nullptr);
+
+  PulseChecker checker(module.get());
+  ExecutionDomain state = checker.initializeFunction(F);
+  auto *astate = state.getAstate();
+  ASSERT_NE(astate, nullptr);
+
+  AbstractValue old_value = checker.getFactory().createFresh();
+  checker.getOperations().allocate(*astate, old_value, nullptr);
+  astate->getPostStack().add(slot_arg, Address(old_value));
+  astate->getPostAttrs().remove(old_value, pulse::Attribute::Invalid);
+  astate->getPostAttrs().remove(old_value,
+                                pulse::Attribute::Uninitialized);
+
+  auto malloc_states =
+      checker.executeInstruction(malloc_call, std::move(state), nullptr, 0);
+  ASSERT_EQ(malloc_states.size(), 1u);
+  state = std::move(malloc_states.front());
+
+  auto store_states = checker.executeInstruction(store, std::move(state),
+                                                 nullptr, 0);
+  ASSERT_EQ(store_states.size(), 1u);
+  astate = store_states.front().getAstate();
+  ASSERT_NE(astate, nullptr);
+
+  EXPECT_FALSE(
+      astate->getPostAttrs().has(old_value, pulse::Attribute::Invalid));
 }
 
 int main(int argc, char **argv) {

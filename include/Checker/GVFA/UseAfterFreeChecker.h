@@ -21,9 +21,19 @@ public:
   int registerBugType() override;
 
   /// Report a vulnerability to BugReportMgr
-  void reportVulnerability(int bugTypeId, const Value *Source,
-                           const Value *Sink,
-                           const std::set<const Value *> *SinkInsts) override;
+  void reportVulnerability(
+      int bugTypeId, const ValueSitePairType &SourceSite, const Value *Sink,
+      const std::set<const Value *> &SinkInsts,
+      const std::vector<const Value *> *WitnessPath = nullptr) override;
+
+protected:
+  std::set<const Value *> filterSinkInstructions(
+      const ValueSitePairType &SourceSite, const Value *Sink,
+      const std::set<const Value *> &SinkInsts,
+      const std::vector<const Value *> &WitnessPath) const override;
+
+private:
+  std::map<ValueSitePairType, const Instruction *> FreeSites;
 };
 
 #endif // CHECKER_GVFA_USEAFTERFREECHECKER_H

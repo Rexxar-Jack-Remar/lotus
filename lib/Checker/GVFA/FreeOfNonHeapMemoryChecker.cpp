@@ -23,14 +23,15 @@ using namespace CheckerUtils;
 
 void FreeOfNonHeapMemoryChecker::getSources(Module *M,
                                             VulnerabilitySourcesType &Sources) {
-  forEachInstruction(M, [&Sources](const Instruction *I) {
+  int site_id = 1;
+  forEachInstruction(M, [&Sources, &site_id](const Instruction *I) {
     if (auto *AI = dyn_cast<AllocaInst>(I)) {
-      Sources[{AI, 1}] = 1;
+      Sources[{AI, site_id++}] = 1;
     }
   });
 
   for (auto &GV : M->globals()) {
-    Sources[{&GV, 1}] = 1;
+    Sources[{&GV, site_id++}] = 1;
   }
 }
 
@@ -40,8 +41,7 @@ void FreeOfNonHeapMemoryChecker::getSinks(Module *M,
     if (auto *CI = dyn_cast<CallInst>(I)) {
       if (isMemoryDeallocation(CI) && CI->arg_size() > 0) {
         const Value *PtrArg = CI->getArgOperand(0);
-        Sinks[PtrArg] = new std::set<const Value *>();
-        Sinks[PtrArg]->insert(CI);
+        Sinks[PtrArg].insert(CI);
       }
     }
   });
@@ -65,8 +65,10 @@ int FreeOfNonHeapMemoryChecker::registerBugType() {
 }
 
 void FreeOfNonHeapMemoryChecker::reportVulnerability(
-    int bugTypeId, const Value *Source, const Value *Sink,
-    const std::set<const Value *> *SinkInsts) {
+    int bugTypeId, const ValueSitePairType &SourceSite, const Value *Sink,
+    const std::set<const Value *> &SinkInsts,
+    const std::vector<const Value *> *WitnessPath) {
+  const Value *Source = SourceSite.first;
 
   BugReport *report = new BugReport(bugTypeId);
   int trace_level = 0;
@@ -77,8 +79,8 @@ void FreeOfNonHeapMemoryChecker::reportVulnerability(
                         "Stack memory allocated here", trace_level, {},
                         "alloca");
   } else if (auto *GV = dyn_cast<GlobalVariable>(Source)) {
-    if (SinkInsts && !SinkInsts->empty()) {
-      if (auto *FirstSink = dyn_cast<Instruction>(*SinkInsts->begin())) {
+    if (!SinkInsts.empty()) {
+      if (auto *FirstSink = dyn_cast<Instruction>(*SinkInsts.begin())) {
         std::string desc = "Global variable '";
         desc += GV->getName().str();
         desc += "' is not on the heap";
@@ -97,7 +99,7 @@ void FreeOfNonHeapMemoryChecker::reportVulnerability(
   if (GVFA && Sink) {
     try {
       std::vector<const Value *> witnessPath =
-          GVFA->getWitnessPath(Source, Sink);
+          WitnessPath ? *WitnessPath : GVFA->getWitnessPath(Source, Sink);
       if (witnessPath.size() > 2) {
         for (size_t i = 1; i + 1 < witnessPath.size(); ++i) {
           const Value *V = witnessPath[i];
@@ -128,13 +130,11 @@ void FreeOfNonHeapMemoryChecker::reportVulnerability(
   }
 
   // Sink step
-  if (SinkInsts) {
-    for (const Value *SI : *SinkInsts) {
-      if (auto *CI = dyn_cast<CallInst>(SI)) {
-        report->append_step(const_cast<CallInst *>(CI),
-                            "Attempt to free non-heap memory", trace_level,
-                            {NodeTag::CALL_SITE}, "free");
-      }
+  for (const Value *SI : SinkInsts) {
+    if (auto *CI = dyn_cast<CallInst>(SI)) {
+      report->append_step(const_cast<CallInst *>(CI),
+                          "Attempt to free non-heap memory", trace_level,
+                          {NodeTag::CALL_SITE}, "free");
     }
   }
 

@@ -19,9 +19,11 @@ HybridGVFAEngine::HybridGVFAEngine(
     Module *M, DyckVFG *VFG, DyckAliasAnalysis *DyckAA,
     DyckModRefAnalysis *DyckMRA,
     std::vector<std::pair<const Value *, int>> SourcesVec,
+    std::vector<ValueSitePairType> SourceSitesVec,
     const VulnerabilitySinksType &Sinks)
     : GVFAEngine(M, VFG, DyckAA, DyckMRA, {}, Sinks),
-      OriginalSourcesVec(std::move(SourcesVec)) {}
+      OriginalSourcesVec(std::move(SourcesVec)),
+      OriginalSourceSites(std::move(SourceSitesVec)) {}
 
 HybridGVFAEngine::~HybridGVFAEngine() = default;
 
@@ -48,13 +50,15 @@ bool HybridGVFAEngine::backwardReachable(const Value *V) {
 void HybridGVFAEngine::ensurePrecise() const {
   std::call_once(PreciseOnce, [this]() {
     auto engine = std::make_unique<PreciseGVFAEngine>(
-        M, VFG, DyckAA, DyckMRA, OriginalSourcesVec, Sinks);
+        M, VFG, DyckAA, DyckMRA, OriginalSourcesVec, OriginalSourceSites,
+        Sinks);
     engine->run();
     Precise = std::move(engine);
   });
 }
 
-bool HybridGVFAEngine::srcReachable(const Value *V, const Value *Src) const {
+bool HybridGVFAEngine::srcReachable(const Value *V,
+                                    const ValueSitePairType &Src) const {
   ensurePrecise();
   return Precise ? Precise->srcReachable(V, Src) : false;
 }

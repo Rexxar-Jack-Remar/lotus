@@ -28,24 +28,35 @@ using namespace gvfa;
 
 #define DEBUG_TYPE "dyck-gvfa"
 
+PreciseGVFAEngine::PreciseGVFAEngine(
+    Module *M, DyckVFG *VFG, DyckAliasAnalysis *DyckAA,
+    DyckModRefAnalysis *DyckMRA,
+    std::vector<std::pair<const Value *, int>> SourcesVec,
+    std::vector<ValueSitePairType> SourceSitesVec,
+    const VulnerabilitySinksType &Sinks)
+    : GVFAEngine(M, VFG, DyckAA, DyckMRA, std::move(SourcesVec), Sinks),
+      OriginalSourceSites(std::move(SourceSitesVec)) {
+  for (size_t I = 0; I < OriginalSourceSites.size() && I < this->SourcesVec.size();
+       ++I) {
+    SourceSiteMasks[OriginalSourceSites[I].second] = this->SourcesVec[I].second;
+  }
+}
+
 void PreciseGVFAEngine::run() {
   RecursiveTimer Timer("DyckGVFA-Detailed");
 
   // Clear previous results
   AllReachabilityMap.clear();
 
-  // Process sources iteratively as they are discovered/extended
-  while (!SourcesVec.empty()) {
-    LLVM_DEBUG(dbgs() << "[DEBUG] SrcVecSzBeforeExtend: " << SourcesVec.size()
-                      << "\n");
-    // Expand sources (e.g. handle aliases, globals)
-    extendSources(SourcesVec);
-    LLVM_DEBUG(dbgs() << "[DEBUG] SrcVecSzAfterExtend: " << SourcesVec.size()
-                      << "\n");
+  auto ExpandedSourceSites = OriginalSourceSites;
+  LLVM_DEBUG(dbgs() << "[DEBUG] SrcSiteSzBeforeExtend: "
+                    << ExpandedSourceSites.size() << "\n");
+  extendSourceSites(ExpandedSourceSites);
+  LLVM_DEBUG(dbgs() << "[DEBUG] SrcSiteSzAfterExtend: "
+                    << ExpandedSourceSites.size() << "\n");
 
-    // Run forward analysis for the current batch of sources
-    detailedForwardRun();
-  }
+  // Run forward analysis for all expanded source sites
+  detailedForwardRun(ExpandedSourceSites);
 
   outs() << "[Indexing FW] Map Size: " << AllReachabilityMap.size() << "\n";
 
@@ -62,12 +73,9 @@ int PreciseGVFAEngine::reachable(const Value *V, int Mask) {
   int ResultMask = 0;
   auto It = AllReachabilityMap.find(V);
   if (It != AllReachabilityMap.end()) {
-    // Check if any of the reachable sources overlap with the requested Mask
-    // Note: This assumes sources in ReachabilityMap (from base class) map to
-    // the Mask bits
-    for (const Value *Src : It->second) {
-      auto SrcIt = ReachabilityMap.find(Src);
-      if (SrcIt != ReachabilityMap.end()) {
+    for (const ValueSitePairType &Src : It->second) {
+      auto SrcIt = SourceSiteMasks.find(Src.second);
+      if (SrcIt != SourceSiteMasks.end()) {
         ResultMask |= (SrcIt->second & Mask);
       }
     }
@@ -76,7 +84,8 @@ int PreciseGVFAEngine::reachable(const Value *V, int Mask) {
 }
 
 // Precise check: Is specific Src in the reachability set of V?
-bool PreciseGVFAEngine::srcReachable(const Value *V, const Value *Src) const {
+bool PreciseGVFAEngine::srcReachable(const Value *V,
+                                     const ValueSitePairType &Src) const {
   auto It = AllReachabilityMap.find(V);
   return (It != AllReachabilityMap.end()) && It->second.count(Src);
 }
@@ -103,23 +112,81 @@ bool PreciseGVFAEngine::backwardReachableAllSinks(const Value *V) {
 
 std::vector<const Value *>
 PreciseGVFAEngine::getWitnessPath(const Value *From, const Value *To) const {
-  // If we have reachability info, use it to guide the BFS/DFS to find the path
-  // faster
-  if (!AllReachabilityMap.empty()) {
-    auto It = AllReachabilityMap.find(To);
-    if (It == AllReachabilityMap.end() || !It->second.count(From)) {
-      return {}; // Early exit if we know there is no path
-    }
-    return GVFAUtils::getWitnessPathGuided(From, To, VFG, AllReachabilityMap);
-  }
   return GVFAUtils::getWitnessPath(From, To, VFG);
 }
 
-void PreciseGVFAEngine::detailedForwardRun() {
-  auto SourceList = std::move(SourcesVec);
-  // For every individual source, run a traversal to mark everything it reaches
-  for (const auto &Src : SourceList) {
-    detailedForwardReachability(Src.first, Src.first);
+void PreciseGVFAEngine::extendSourceSites(
+    std::vector<ValueSitePairType> &SourceSites) {
+  std::queue<ValueSitePairType> WorkQueue;
+  std::unordered_set<ValueSitePairType, SourceSiteHash> Visited;
+  std::unordered_map<const Value *, std::vector<const Value *>> PredCache;
+
+  auto getPredecessors = [&PredCache, this](const Value *V)
+      -> const std::vector<const Value *> & {
+    auto It = PredCache.find(V);
+    if (It != PredCache.end()) {
+      return It->second;
+    }
+
+    std::vector<const Value *> Preds;
+    if (auto *Arg = dyn_cast<Argument>(V)) {
+      const Function *F = Arg->getParent();
+      unsigned ArgIdx = Arg->getArgNo();
+      for (auto *User : F->users()) {
+        if (auto *CI = dyn_cast<CallInst>(User)) {
+          if (CI->getCalledFunction() == F && ArgIdx < CI->arg_size()) {
+            Preds.push_back(CI->getArgOperand(ArgIdx));
+          }
+        }
+      }
+    } else if (auto *CI = dyn_cast<CallInst>(V)) {
+      if (auto *F = CI->getCalledFunction()) {
+        for (auto &BB : *F) {
+          for (auto &I : BB) {
+            if (auto *RI = dyn_cast<ReturnInst>(&I)) {
+              if (RI->getReturnValue()) {
+                Preds.push_back(RI->getReturnValue());
+              }
+            }
+          }
+        }
+      }
+    } else if (auto *Node = VFG->getVFGNode(const_cast<Value *>(V))) {
+      for (auto ItPred = Node->in_begin(); ItPred != Node->in_end(); ++ItPred) {
+        Preds.push_back(ItPred->first->getValue());
+      }
+    }
+
+    auto Inserted = PredCache.emplace(V, std::move(Preds));
+    return Inserted.first->second;
+  };
+
+  for (const ValueSitePairType &Site : SourceSites) {
+    WorkQueue.push(Site);
+  }
+
+  SourceSites.clear();
+
+  while (!WorkQueue.empty()) {
+    ValueSitePairType CurrentSite = WorkQueue.front();
+    WorkQueue.pop();
+
+    if (!Visited.insert(CurrentSite).second) {
+      continue;
+    }
+
+    SourceSites.push_back(CurrentSite);
+    const auto &Preds = getPredecessors(CurrentSite.first);
+    for (const Value *Pred : Preds) {
+      WorkQueue.emplace(Pred, CurrentSite.second);
+    }
+  }
+}
+
+void PreciseGVFAEngine::detailedForwardRun(
+    const std::vector<ValueSitePairType> &SourceSites) {
+  for (const ValueSitePairType &Src : SourceSites) {
+    detailedForwardReachability(Src.first, Src);
   }
 }
 
@@ -132,7 +199,7 @@ void PreciseGVFAEngine::detailedBackwardRun() {
 
 // BFS to propagate reachability of 'Src' to all reachable nodes
 void PreciseGVFAEngine::detailedForwardReachability(const Value *V,
-                                                    const Value *Src) {
+                                                    const ValueSitePairType &Src) {
   std::queue<const Value *> WorkQueue;
   std::unordered_set<const Value *> Visited;
 
@@ -193,7 +260,8 @@ void PreciseGVFAEngine::detailedBackwardReachability(const Value *V,
 }
 
 // Helper: check if V is already marked as reached by Src
-bool PreciseGVFAEngine::allCount(const Value *V, const Value *Src) {
+bool PreciseGVFAEngine::allCount(const Value *V,
+                                 const ValueSitePairType &Src) {
   auto &Set = AllReachabilityMap[V];
   if (Set.count(Src)) {
     return true;

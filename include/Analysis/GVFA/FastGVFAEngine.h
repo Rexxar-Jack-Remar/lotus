@@ -10,7 +10,8 @@ public:
   using GVFAEngine::GVFAEngine;
 
   void run() override;
-  bool srcReachable(const Value *V, const Value *Src) const override;
+  bool srcReachable(const Value *V,
+                    const ValueSitePairType &Src) const override;
   std::vector<const Value *> getWitnessPath(const Value *From,
                                             const Value *To) const override;
 

@@ -67,8 +67,7 @@ using VulnerabilitySourcesType = std::map<ValueSitePairType, int>;
  * @typedef VulnerabilitySinksType
  * @brief Map of values to their sink values
  */
-using VulnerabilitySinksType =
-    std::map<const Value *, std::set<const Value *> *>;
+using VulnerabilitySinksType = std::map<const Value *, std::set<const Value *>>;
 
 /**
  * @class DyckGlobalValueFlowAnalysis
@@ -102,6 +101,7 @@ private:
   // Sources and sinks
   VulnerabilitySourcesType Sources; ///< Map of vulnerability sources
   std::vector<std::pair<const Value *, int>> SourcesVec; ///< Vector of sources
+  std::vector<ValueSitePairType> SourceSitesVec; ///< Source sites for precise attribution
   VulnerabilitySinksType Sinks; ///< Map of vulnerability sinks
 
   // Vulnerability checker
@@ -163,7 +163,7 @@ public:
    * @param Src The source value to check
    * @return true if Src can reach V
    */
-  bool srcReachable(const Value *V, const Value *Src) const;
+  bool srcReachable(const Value *V, const ValueSitePairType &Src) const;
 
   /**
    * @brief Check if any sink can reach a value backward

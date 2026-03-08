@@ -4,11 +4,15 @@
  */
 #include "Checker/GVFA/UseAfterFreeChecker.h"
 
+#include "Analysis/CFG/CFGReachability.h"
 #include "Analysis/GVFA/GlobalValueFlowAnalysis.h"
 #include "Checker/GVFA/CheckerUtils.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/BugTypes.h"
+
+#include <memory>
+#include <unordered_map>
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -23,12 +27,16 @@ using namespace CheckerUtils;
 
 void UseAfterFreeChecker::getSources(Module *M,
                                      VulnerabilitySourcesType &Sources) {
-  forEachInstruction(M, [&Sources](const Instruction *I) {
+  FreeSites.clear();
+  int site_id = 1;
+  forEachInstruction(M, [this, &Sources, &site_id](const Instruction *I) {
     if (auto *Call = dyn_cast<CallInst>(I)) {
       if (isMemoryDeallocation(Call) && Call->arg_size() > 0) {
         // Mark the freed pointer (first argument) as a source
         auto *Arg = Call->getArgOperand(0);
-        Sources[{Arg, 1}] = 1;
+        ValueSitePairType SourceSite{Arg, site_id++};
+        Sources[SourceSite] = 1;
+        FreeSites[SourceSite] = Call;
       }
     }
   });
@@ -56,8 +64,7 @@ void UseAfterFreeChecker::getSinks(Module *M, VulnerabilitySinksType &Sinks) {
           for (unsigned i = 0; i < Call->arg_size(); ++i) {
             auto *Arg = Call->getArgOperand(i);
             if (Arg->getType()->isPointerTy()) {
-              Sinks[Arg] = new std::set<const Value *>();
-              Sinks[Arg]->insert(Call);
+              Sinks[Arg].insert(Call);
             }
           }
         }
@@ -65,8 +72,7 @@ void UseAfterFreeChecker::getSinks(Module *M, VulnerabilitySinksType &Sinks) {
     }
 
     if (PtrOp) {
-      Sinks[PtrOp] = new std::set<const Value *>();
-      Sinks[PtrOp]->insert(I);
+      Sinks[PtrOp].insert(I);
     }
   });
 }
@@ -83,6 +89,48 @@ bool UseAfterFreeChecker::isValidTransfer(const Value * /*From*/,
   return true;
 }
 
+std::set<const Value *> UseAfterFreeChecker::filterSinkInstructions(
+    const ValueSitePairType &SourceSite, const Value * /*Sink*/,
+    const std::set<const Value *> &SinkInsts,
+    const std::vector<const Value *> & /*WitnessPath*/) const {
+  auto FreeSiteIt = FreeSites.find(SourceSite);
+  if (FreeSiteIt == FreeSites.end() || !FreeSiteIt->second) {
+    return {};
+  }
+
+  const Instruction *FreeInst = FreeSiteIt->second;
+  std::set<const Value *> Filtered;
+  std::unordered_map<const Function *, std::unique_ptr<CFGReachability>>
+      ReachabilityCache;
+
+  for (const Value *SinkValue : SinkInsts) {
+    const Instruction *SinkInst = dyn_cast<Instruction>(SinkValue);
+    if (!SinkInst || SinkInst->getFunction() != FreeInst->getFunction()) {
+      continue;
+    }
+
+    if (SinkInst->getParent() == FreeInst->getParent()) {
+      if (FreeInst->comesBefore(SinkInst)) {
+        Filtered.insert(SinkValue);
+      }
+      continue;
+    }
+
+    auto &Reachability = ReachabilityCache[FreeInst->getFunction()];
+    if (!Reachability) {
+      Reachability = std::make_unique<CFGReachability>(
+          const_cast<Function *>(FreeInst->getFunction()));
+    }
+
+    if (Reachability->reachable(const_cast<Instruction *>(FreeInst),
+                                const_cast<Instruction *>(SinkInst))) {
+      Filtered.insert(SinkValue);
+    }
+  }
+
+  return Filtered;
+}
+
 int UseAfterFreeChecker::registerBugType() {
   BugReportMgr &mgr = BugReportMgr::get_instance();
   return mgr.register_bug_type("Use After Free", BugDescription::BI_HIGH,
@@ -90,20 +138,29 @@ int UseAfterFreeChecker::registerBugType() {
 }
 
 void UseAfterFreeChecker::reportVulnerability(
-    int bugTypeId, const Value *Source, const Value *Sink,
-    const std::set<const Value *> *SinkInsts) {
+    int bugTypeId, const ValueSitePairType &SourceSite, const Value *Sink,
+    const std::set<const Value *> &SinkInsts,
+    const std::vector<const Value *> *WitnessPath) {
+  const Value *Source = SourceSite.first;
 
   BugReport *report = new BugReport(bugTypeId);
   int trace_level = 0;
 
   // Source step
-  if (auto *SourceInst = dyn_cast<Instruction>(Source)) {
+  auto FreeSiteIt = FreeSites.find(SourceSite);
+  if (FreeSiteIt != FreeSites.end()) {
+    const Instruction *FreeInst = FreeSiteIt->second;
     std::vector<NodeTag> tags;
-    if (isa<CallInst>(SourceInst)) {
+    if (isa<CallInst>(FreeInst)) {
       tags.push_back(NodeTag::CALL_SITE);
     }
-    report->append_step(const_cast<Instruction *>(SourceInst),
+    report->append_step(const_cast<Instruction *>(FreeInst),
                         "Memory freed here", trace_level, tags, "free");
+    trace_level++;
+  } else if (auto *SourceInst = dyn_cast<Instruction>(Source)) {
+    report->append_step(const_cast<Instruction *>(SourceInst),
+                        "Freed pointer originates here", trace_level, {},
+                        "source");
     trace_level++;
   }
 
@@ -111,7 +168,7 @@ void UseAfterFreeChecker::reportVulnerability(
   if (GVFA && Sink) {
     try {
       std::vector<const Value *> witnessPath =
-          GVFA->getWitnessPath(Source, Sink);
+          WitnessPath ? *WitnessPath : GVFA->getWitnessPath(Source, Sink);
       if (witnessPath.size() > 2) {
         for (size_t i = 1; i + 1 < witnessPath.size(); ++i) {
           const Value *V = witnessPath[i];
@@ -159,30 +216,28 @@ void UseAfterFreeChecker::reportVulnerability(
   }
 
   // Sink step
-  if (SinkInsts) {
-    for (const Value *SI : *SinkInsts) {
-      if (auto *SinkInst = dyn_cast<Instruction>(SI)) {
-        std::string sinkDesc = "Use of freed memory";
-        std::string access = "use";
-        std::vector<NodeTag> tags;
+  for (const Value *SI : SinkInsts) {
+    if (auto *SinkInst = dyn_cast<Instruction>(SI)) {
+      std::string sinkDesc = "Use of freed memory";
+      std::string access = "use";
+      std::vector<NodeTag> tags;
 
-        if (isa<LoadInst>(SinkInst)) {
-          sinkDesc = "Load from freed memory";
-          access = "load";
-        } else if (isa<StoreInst>(SinkInst)) {
-          sinkDesc = "Store to freed memory";
-          access = "store";
-        } else if (isa<GetElementPtrInst>(SinkInst)) {
-          sinkDesc = "GEP on freed memory";
-          access = "gep";
-        } else if (isa<CallInst>(SinkInst)) {
-          sinkDesc = "Function call with freed memory";
-          access = "call";
-          tags.push_back(NodeTag::CALL_SITE);
-        }
-        report->append_step(const_cast<Instruction *>(SinkInst), sinkDesc,
-                            trace_level, tags, access);
+      if (isa<LoadInst>(SinkInst)) {
+        sinkDesc = "Load from freed memory";
+        access = "load";
+      } else if (isa<StoreInst>(SinkInst)) {
+        sinkDesc = "Store to freed memory";
+        access = "store";
+      } else if (isa<GetElementPtrInst>(SinkInst)) {
+        sinkDesc = "GEP on freed memory";
+        access = "gep";
+      } else if (isa<CallInst>(SinkInst)) {
+        sinkDesc = "Function call with freed memory";
+        access = "call";
+        tags.push_back(NodeTag::CALL_SITE);
       }
+      report->append_step(const_cast<Instruction *>(SinkInst), sinkDesc,
+                          trace_level, tags, access);
     }
   }
 

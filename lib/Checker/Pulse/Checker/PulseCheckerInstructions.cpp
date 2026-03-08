@@ -579,6 +579,23 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
   if (!value_opt)
     return exec_state;
 
+  auto isReallocResult = [](const Address &addr) {
+    for (const auto &event : addr.history.getEvents()) {
+      if (event.kind != ValueHistory::EventKind::Allocation ||
+          !event.location) {
+        continue;
+      }
+      auto *call = llvm::dyn_cast<llvm::CallInst>(event.location);
+      if (!call)
+        continue;
+      auto *callee = call->getCalledFunction();
+      if (callee && callee->getName() == "realloc") {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const llvm::Value *ptr_operand = SI->getPointerOperand();
 
   // Sound incorrectness: report stack address escape only when provable.
@@ -678,7 +695,8 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
       // size); p = new_p;
       AbstractValue canon_value = astate->getCanonical(value_opt->addr);
       if (astate->getPostAttrs().has(canon_value, Attribute::Allocated) &&
-          !astate->getPostAttrs().has(canon_value, Attribute::Invalid)) {
+          !astate->getPostAttrs().has(canon_value, Attribute::Invalid) &&
+          isReallocResult(*value_opt)) {
         // This is a valid allocation (likely from realloc). Since we're storing
         // it back to the original variable, the old value is now invalid
         // (realloc succeeded). Invalidate the old value, then update the stack

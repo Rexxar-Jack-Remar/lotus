@@ -678,15 +678,11 @@ ModelResult PulseModels::modelLock(const llvm::CallInst *call,
 ModelResult PulseModels::modelUnlock(const llvm::CallInst *call,
                                      ExecutionDomain &state,
                                      const llvm::BasicBlock *pred) {
-  if (call->arg_size() < 1)
-    return ModelResult::success({state});
-
-  auto *astate = state.getAstate();
-  auto ptr_opt = ops_.eval(*astate, call->getArgOperand(0), call, pred);
-  if (ptr_opt) {
-    // Mark as unlocked?
-    ops_.invalidate(*astate, *ptr_opt, call, InvalidationKind::LockReleased);
-  }
+  (void)call;
+  (void)pred;
+  // Unlocking releases synchronization state; it does not destroy the lock.
+  // Reusing memory invalidation here causes spurious use-after-free reports on
+  // subsequent accesses to the same lock object.
   return ModelResult::success({state});
 }
 

@@ -65,19 +65,9 @@ PulseChecker::PulseChecker(llvm::Module *M, lotus::AliasAnalysisWrapper *AA)
 }
 
 PulseChecker::~PulseChecker() {
-  // Report any remaining latent issues before flushing
-  for (const auto &latent : latent_issues_) {
-    Trace trace = latent.getTrace();
-    OperationResult kind = latent.getDiagnostic();
-    const llvm::Instruction *loc = latent.getLocation();
-    AbstractValue addr = latent.getAddress();
-
-    // Create a dummy astate for reporting (latent issues don't have astate)
-    // We'll report without astate context
-    reportBug(kind, loc, addr, trace, nullptr);
-  }
-
-  // Flush diagnostics at end of analysis
+  // Flush diagnostics at end of analysis. Latent issues are intentionally not
+  // auto-reported here: they must only become reports when caller context makes
+  // them manifest.
   DiagnosticManager::getInstance().flush();
 }
 
