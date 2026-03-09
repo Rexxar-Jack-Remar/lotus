@@ -24,7 +24,7 @@
  *   - Core/Fixpoint.h         : fix / fix_vec (Kleene-like iteration)
  *   - Core/Eval.h             : I0 (Exp0) / I1 (Exp1) evaluators
  *   - Core/Diff.h              : differential Df|ν construction
- *   - Core/LCFLDetector.h     : detect LCFL structure (Concat/InfClos)
+ *   - Core/LCFLDetector.h     : detect LCFL structure (Concat/Star)
  *   - Core/LinearSolvers.h    : worklist, SCC, tensor linear solvers
  *   - Core/TensorLinearSolve.h: tensor-product solver (Alg. 3.4)
  *   - Core/Solver.h           : KleeneIter / NewtonIter, Solver<D,ITER>

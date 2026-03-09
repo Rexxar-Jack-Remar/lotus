@@ -231,6 +231,14 @@ TEST(NPA, TensorRegularizationMatchesWorklistOnConstantConcat) {
   EXPECT_EQ(wl[0], expect);
 }
 
+TEST(NPA, TensorTraitsDistinguishPaperAdmissibleAndUtilityModes) {
+  EXPECT_TRUE(
+      npa::TensorSemiringTraits<npa::PredicateRelationDomain>::paper_admissible());
+  EXPECT_FALSE(npa::TensorSemiringTraits<BoundedLangSemiring>::paper_admissible());
+  EXPECT_FALSE(
+      npa::TensorSemiringTraits<CustomTensorLangSemiring>::paper_admissible());
+}
+
 TEST(NPA, TensorRegularizationPreservesCorrelationAcrossAlternatives) {
   using D = BoundedLangSemiring;
   using E1 = npa::E1<D>;
@@ -351,16 +359,16 @@ TEST(NPA, TensorTraitCoupleReadoutMatchesMatchedComposition) {
   EXPECT_EQ(readout, (D::value_type{"cb"}));
 }
 
-TEST(NPA, TensorTarjanExtractsSelfContainedInfClos) {
+TEST(NPA, TensorTarjanExtractsSelfContainedStar) {
   using D = BoundedLangSemiring;
   using E1 = npa::E1<D>;
   using Exp = npa::Exp1<D>;
   using TD = typename npa::TensorSemiringTraits<D>::tensor_domain;
 
   E1 rhs =
-      Exp::inf(Exp::add(Exp::term(D::one()),
-                        Exp::seqR(Exp::bound("Z"), singleton("a"))),
-               "Z");
+      Exp::star(Exp::add(Exp::term(D::one()),
+                         Exp::seqR(Exp::bound("Z"), singleton("a"))),
+                "Z");
   EXPECT_TRUE(npa::Exp1ToTensor<D>::is_regularizable(rhs));
 
   std::vector<std::pair<npa::Symbol, E1>> eqns;
@@ -383,24 +391,24 @@ TEST(NPA, TensorTarjanExtractsSelfContainedInfClos) {
   EXPECT_EQ(tp[0], (D::value_type{"", "a", "aa", "aaa"}));
 }
 
-TEST(NPA, TensorRegularizationRejectsNonConstantInfClosForTarjanPath) {
+TEST(NPA, TensorRegularizationRejectsNonConstantStarForTarjanPath) {
   using D = BoundedLangSemiring;
   using E1 = npa::E1<D>;
   using Exp = npa::Exp1<D>;
 
-  E1 rhs = Exp::inf(Exp::add(Exp::hole("X"), Exp::bound("Z")), "Z");
+  E1 rhs = Exp::star(Exp::add(Exp::hole("X"), Exp::bound("Z")), "Z");
 
   EXPECT_FALSE(npa::Exp1ToTensor<D>::is_regularizable(rhs));
   EXPECT_TRUE(npa::Exp1ToTensor<D>::is_tensor_convertible(rhs));
 }
 
-TEST(NPA, TensorRegularizationSupportsNonConstantInfClosViaTensorizedFallback) {
+TEST(NPA, TensorRegularizationSupportsNonConstantStarViaTensorizedFallback) {
   using D = BoundedLangSemiring;
   using E1 = npa::E1<D>;
   using Exp = npa::Exp1<D>;
   using TD = typename npa::TensorSemiringTraits<D>::tensor_domain;
 
-  E1 rhs = Exp::inf(Exp::add(Exp::hole("X"), Exp::bound("Z")), "Z");
+  E1 rhs = Exp::star(Exp::add(Exp::hole("X"), Exp::bound("Z")), "Z");
 
   std::vector<std::pair<npa::Symbol, E1>> eqns;
   eqns.emplace_back("X", rhs);
@@ -474,6 +482,35 @@ TEST(NPA, TensorTarjanRejectsProjectOutsideProjectionEquationSystems) {
   ASSERT_EQ(wl.size(), 1u);
   ASSERT_EQ(tp.size(), 1u);
   EXPECT_TRUE(D::equal(wl[0], tp[0]));
+}
+
+TEST(NPA, HighLevelTensorFallsBackForProjectOutsideProjectionEquationSystems) {
+  using D = npa::PredicateRelationDomain;
+  using E1 = npa::E1<D>;
+  using Exp = npa::Exp1<D>;
+
+  D::configure(2, 1);
+
+  auto set_global_true = Exp::term(D::assignConst(0, true));
+  auto set_local_true = Exp::term(D::assignConst(1, true));
+  auto id = Exp::term(D::one());
+  E1 rhs = Exp::add(Exp::project(Exp::concat(set_global_true, "X", set_local_true)),
+                    id);
+
+  std::vector<std::pair<npa::Symbol, E1>> eqns;
+  eqns.emplace_back("X", rhs);
+
+  std::vector<npa::DomVal<D>> init = {D::zero()};
+  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+
+  testing::internal::CaptureStderr();
+  auto tp = npa::solve_linear_tensor_impl<D>(true, eqns, init);
+  std::string stderr_output = testing::internal::GetCapturedStderr();
+
+  ASSERT_EQ(wl.size(), 1u);
+  ASSERT_EQ(tp.size(), 1u);
+  EXPECT_TRUE(D::equal(wl[0], tp[0]));
+  EXPECT_NE(stderr_output.find("projection equation fragment"), std::string::npos);
 }
 
 TEST(NPA, TensorRegularizationSupportsCallTerms) {
@@ -602,7 +639,7 @@ TEST(NPA, NewtonInitUsesFOfBottom) {
   EXPECT_EQ(m.at("X"), singleton("a"));
 }
 
-TEST(NPA, StarDifferentialEliminatesInfClos) {
+TEST(NPA, StarDifferentialEliminatesStarNodes) {
   using D = BoundedLangSemiring;
   using E0 = npa::E0<D>;
   using Exp0 = npa::Exp0<D>;
@@ -611,26 +648,24 @@ TEST(NPA, StarDifferentialEliminatesInfClos) {
   std::unordered_map<npa::Symbol, npa::DomVal<D>> nu;
   nu["X"] = singleton("x");
 
-  E0 expr = Exp0::inf(Exp0::ndet(Exp0::hole("X"), Exp0::bound("Z")), "Z");
+  E0 expr = Exp0::star(Exp0::ndet(Exp0::hole("X"), Exp0::bound("Z")), "Z");
   (void)npa::I0<D>::eval(false, nu, expr);
 
   auto ordinary = npa::Diff<D>::build(nu, expr);
   auto tensor = npa::TensorDiff<D>::build(nu, expr);
 
-  EXPECT_FALSE(npa::ExprFeatureDetector<D>::has_infclos(ordinary));
-  EXPECT_FALSE(npa::ExprFeatureDetector<TD>::has_infclos(tensor));
+  EXPECT_FALSE(npa::ExprFeatureDetector<D>::has_star(ordinary));
+  EXPECT_FALSE(npa::ExprFeatureDetector<TD>::has_star(tensor));
 }
 
-TEST(NPA, NewtonHandlesInfClosEquationsWithoutFallback) {
+TEST(NPA, NewtonRejectsMuEquations) {
   using D = BoundedLangSemiring;
   using E0 = npa::E0<D>;
   using Exp0 = npa::Exp0<D>;
 
   std::vector<std::pair<npa::Symbol, E0>> eqns;
-  eqns.emplace_back("X", Exp0::inf(Exp0::term(singleton("a")), "Z"));
+  eqns.emplace_back("X", Exp0::mu(Exp0::term(singleton("a")), "Z"));
 
-  auto res = npa::NewtonSolver<D>::solve(eqns, false, 1);
-  auto m = toMap<D>(res.first);
-
-  EXPECT_EQ(m.at("X"), singleton("a"));
+  EXPECT_THROW((void)npa::NewtonSolver<D>::solve(eqns, false, 1),
+               npa::UnsupportedNewtonMuError);
 }

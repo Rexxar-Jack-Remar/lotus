@@ -12,10 +12,10 @@
  * of an \e LCFL equation system (linear context-free language).
  *
  * - \e Exp0: polynomial expressions (terms, seq, call, cond, ndet, hole/bound,
- *   concat, inf-closure). Used for the full system f(X).
+ *   concat, star, mu). Used for the full system f(X).
  * - \e Exp1: linearized expressions; adds Add/Sub for the differential form.
  *   Used for the right-hand side of Df|ν(X) + δ = X. Concat (t1·X·t2) and
- *   InfClos correspond to LCFL structure (coefficients on both sides of X).
+ *   Star correspond to LCFL structure (coefficients on both sides of X).
  *
  * References:
  * - Esparza et al. (JACM): differential Df|ν; linearized system.
@@ -33,7 +33,7 @@ template <class D> using E0 = std::shared_ptr<Exp0<D>>;
 /// Polynomial expression (full equation system f(X)).
 /// Kinds: Term (constant), Seq (c·t), Mul (t1·t2), Call (procedure call),
 /// Cond, Ndet, Project, Hole/Bound (variable), Concat (t1·X·t2, LCFL form),
-/// InfClos (Kleene star).
+/// Star (Kleene star), Mu (generic least fixpoint).
 template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
   using V = DomVal<D>;
   using T = DomTest<D>;
@@ -48,7 +48,8 @@ template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
     Hole,
     Bound,
     Concat,
-    InfClos
+    Star,
+    Mu
   };
   K k;
   V c;
@@ -129,9 +130,16 @@ template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
     e->sym = x;
     return e;
   }
-  static E0<D> inf(E0<D> body, Symbol x) {
+  static E0<D> star(E0<D> body, Symbol x) {
     auto e = std::make_shared<Exp0>();
-    e->k = InfClos;
+    e->k = Star;
+    e->t = body;
+    e->sym = x;
+    return e;
+  }
+  static E0<D> mu(E0<D> body, Symbol x) {
+    auto e = std::make_shared<Exp0>();
+    e->k = Mu;
     e->t = body;
     e->sym = x;
     return e;
@@ -142,7 +150,7 @@ template <class D> struct Exp1;
 template <class D> using E1 = std::shared_ptr<Exp1<D>>;
 
 /// Linearized expression (right-hand side of Df|ν(X) + δ = X). Adds Add/Sub
-/// for combine and differential; Concat/InfClos preserved from Exp0 (LCFL).
+/// for combine and differential; Concat/Star/Mu preserved from Exp0.
 template <class D> struct Exp1 : Dirty {
   using V = DomVal<D>;
   using T = DomTest<D>;
@@ -157,7 +165,8 @@ template <class D> struct Exp1 : Dirty {
     Hole,
     Bound,
     Concat,
-    InfClos,
+    Star,
+    Mu,
     Add,
     Sub
   };
@@ -251,9 +260,16 @@ template <class D> struct Exp1 : Dirty {
     e->sym = x;
     return e;
   }
-  static E1<D> inf(E1<D> body, Symbol x) {
+  static E1<D> star(E1<D> body, Symbol x) {
     auto e = std::make_shared<Exp1>();
-    e->k = InfClos;
+    e->k = Star;
+    e->t = body;
+    e->sym = x;
+    return e;
+  }
+  static E1<D> mu(E1<D> body, Symbol x) {
+    auto e = std::make_shared<Exp1>();
+    e->k = Mu;
     e->t = body;
     e->sym = x;
     return e;
@@ -261,7 +277,7 @@ template <class D> struct Exp1 : Dirty {
 };
 
 /// Collects variable symbols on which a linearized expression depends
-/// (Hole, Call, Concat, InfClos). Used for worklist and dependency graph.
+/// (Hole, Call, Concat, Star, Mu). Used for worklist and dependency graph.
 template <class D> struct DepFinder {
   using Set = std::unordered_set<Symbol>;
   static void find(const E1<D> &e, Set &deps) {
@@ -282,7 +298,8 @@ template <class D> struct DepFinder {
       find(e->t1, deps);
       find(e->t2, deps);
       break;
-    case K::InfClos:
+    case K::Star:
+    case K::Mu:
       deps.insert(e->sym);
       find(e->t, deps);
       break;
@@ -303,43 +320,135 @@ template <class D> struct DepFinder {
 };
 
 template <class D> struct ExprFeatureDetector {
-  static bool has_infclos(const E0<D> &e) {
+  static bool has_star(const E0<D> &e) {
     if (!e)
       return false;
     switch (e->k) {
-    case Exp0<D>::InfClos:
+    case Exp0<D>::Star:
       return true;
     case Exp0<D>::Seq:
     case Exp0<D>::Call:
     case Exp0<D>::Project:
-      return has_infclos(e->t);
+    case Exp0<D>::Mu:
+      return has_star(e->t);
     case Exp0<D>::Mul:
     case Exp0<D>::Cond:
     case Exp0<D>::Ndet:
     case Exp0<D>::Concat:
-      return has_infclos(e->t1) || has_infclos(e->t2);
+      return has_star(e->t1) || has_star(e->t2);
     default:
       return false;
     }
   }
 
-  static bool has_infclos(const E1<D> &e) {
+  static bool has_star(const E1<D> &e) {
     if (!e)
       return false;
     using K = typename Exp1<D>::K;
     switch (e->k) {
-    case K::InfClos:
+    case K::Star:
       return true;
     case K::Seq:
     case K::SeqR:
     case K::Project:
-      return has_infclos(e->t);
+      return has_star(e->t);
     case K::Cond:
     case K::Add:
     case K::Sub:
     case K::Ndet:
     case K::Concat:
-      return has_infclos(e->t1) || has_infclos(e->t2);
+    case K::Mu:
+      return has_star(e->t1) || has_star(e->t2) || has_star(e->t);
+    default:
+      return false;
+    }
+  }
+
+  static bool has_mu(const E0<D> &e) {
+    if (!e)
+      return false;
+    switch (e->k) {
+    case Exp0<D>::Mu:
+      return true;
+    case Exp0<D>::Seq:
+    case Exp0<D>::Call:
+    case Exp0<D>::Project:
+    case Exp0<D>::Star:
+      return has_mu(e->t);
+    case Exp0<D>::Mul:
+    case Exp0<D>::Cond:
+    case Exp0<D>::Ndet:
+    case Exp0<D>::Concat:
+      return has_mu(e->t1) || has_mu(e->t2);
+    default:
+      return false;
+    }
+  }
+
+  static bool has_mu(const E1<D> &e) {
+    if (!e)
+      return false;
+    using K = typename Exp1<D>::K;
+    switch (e->k) {
+    case K::Mu:
+      return true;
+    case K::Seq:
+    case K::SeqR:
+    case K::Project:
+      return has_mu(e->t);
+    case K::Cond:
+    case K::Add:
+    case K::Sub:
+    case K::Ndet:
+    case K::Concat:
+      return has_mu(e->t1) || has_mu(e->t2);
+    case K::Star:
+      return has_mu(e->t);
+    default:
+      return false;
+    }
+  }
+
+  static bool has_project(const E0<D> &e) {
+    if (!e)
+      return false;
+    switch (e->k) {
+    case Exp0<D>::Project:
+      return true;
+    case Exp0<D>::Seq:
+    case Exp0<D>::Call:
+      return has_project(e->t);
+    case Exp0<D>::Mul:
+    case Exp0<D>::Cond:
+    case Exp0<D>::Ndet:
+    case Exp0<D>::Concat:
+      return has_project(e->t1) || has_project(e->t2);
+    case Exp0<D>::Star:
+    case Exp0<D>::Mu:
+      return has_project(e->t);
+    default:
+      return false;
+    }
+  }
+
+  static bool has_project(const E1<D> &e) {
+    if (!e)
+      return false;
+    using K = typename Exp1<D>::K;
+    switch (e->k) {
+    case K::Project:
+      return true;
+    case K::Seq:
+    case K::SeqR:
+    case K::Star:
+    case K::Mu:
+      return has_project(e->t);
+    case K::Cond:
+    case K::Add:
+    case K::Sub:
+    case K::Ndet:
+    case K::Concat:
+      return has_project(e->t1) || has_project(e->t2);
     default:
       return false;
     }

@@ -181,7 +181,7 @@ private:
     if (!inner || isZeroExpr(inner) || isOneExpr(inner))
       return Exp::term(D::one());
     Symbol bound = "__bwd_regex_star_" + std::to_string(counter++);
-    return Exp::inf(
+    return Exp::star(
         combineExpr(Exp::term(D::one()), Exp::mul(Exp::bound(bound), inner)),
         bound);
   }

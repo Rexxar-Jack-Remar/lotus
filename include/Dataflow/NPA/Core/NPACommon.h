@@ -50,7 +50,7 @@ enum class LinearStrategy {
   SCC,
   /// Tensor-product (TOPLAS 2016): lift LCFL system to paired semiring,
   /// solve as left-linear (regular) system, then project back. Only used when
-  /// the linear system has LCFL structure (Concat/InfClos).
+  /// the linear system has LCFL structure (Concat/Star).
   TensorProduct
 };
 
@@ -170,6 +170,16 @@ public:
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
+template <class D> struct DomainHasProjectNewtonSafe {
+  template <class T>
+  static auto test(int) -> decltype(T::project_newton_safe, std::true_type{});
+  template <class> static std::false_type test(...);
+
+public:
+  static constexpr bool value =
+      std::is_same<decltype(test<D>(0)), std::true_type>::value;
+};
+
 template <class D> struct DomainHasMaxFixpointIters {
   template <class T>
   static auto test(int) -> decltype(T::max_fixpoint_iters, std::true_type{});
@@ -236,8 +246,12 @@ inline bool domain_equal_impl(const DomVal<D> &a, const DomVal<D> &b,
 }
 } // namespace detail
 
-/// Default equality used across solvers. Domains may provide approx_equal()
-/// for numeric semirings where exact equality is too strong for convergence.
+/// Default equality used across solvers.
+///
+/// Paper-faithful domains should normally rely on exact semiring equality.
+/// Domains may provide approx_equal() as a pragmatic extension for numeric
+/// semirings where exact equality is too strong for convergence; once used,
+/// stability/convergence checks become approximate rather than theorem-exact.
 template <class D>
 inline bool domain_equal(const DomVal<D> &a, const DomVal<D> &b) {
   return detail::domain_equal_impl<D>(
@@ -291,12 +305,25 @@ template <class D> inline bool domain_commutative_extend_impl(std::true_type) {
 template <class D> inline bool domain_commutative_extend_impl(std::false_type) {
   return false;
 }
+template <class D>
+inline bool domain_project_newton_safe_impl(std::true_type) {
+  return D::project_newton_safe;
+}
+template <class D>
+inline bool domain_project_newton_safe_impl(std::false_type) {
+  return false;
+}
 } // namespace detail
 
 /// Returns true if D declares commutative_extend, otherwise false.
 template <class D> inline bool domain_commutative_extend() {
   return detail::domain_commutative_extend_impl<D>(
       std::integral_constant<bool, DomainHasCommutativeExtend<D>::value>{});
+}
+
+template <class D> inline bool domain_project_newton_safe() {
+  return detail::domain_project_newton_safe_impl<D>(
+      std::integral_constant<bool, DomainHasProjectNewtonSafe<D>::value>{});
 }
 
 namespace detail {
@@ -349,10 +376,27 @@ public:
                          "combine(nu, delta) == f(nu)") {}
 };
 
+class UnsupportedNewtonMuError : public std::logic_error {
+public:
+  UnsupportedNewtonMuError()
+      : std::logic_error("unsupported Newton expression: Mu is evaluable but "
+                         "outside the paper-faithful Newton/tensor fragment") {}
+};
+
+class UnsafeNewtonProjectError : public std::logic_error {
+public:
+  UnsafeNewtonProjectError()
+      : std::logic_error("unsafe Newton projection: domains must opt in with "
+                         "project_newton_safe for Project on Newton/tensor paths") {}
+};
+
 template <class D>
 inline void require_valid_newton_delta(const DomVal<D> &f_nu,
                                        const DomVal<D> &nu,
                                        const DomVal<D> &delta) {
+  // This check keeps the non-idempotent Newton hook honest: choose_delta() /
+  // subtract() may be domain-specific, but they must still produce a residual
+  // that exactly reconstructs f(nu) under combine().
   if (valid_newton_delta<D>(f_nu, nu, delta))
     return;
   throw InvalidNewtonDeltaError{};

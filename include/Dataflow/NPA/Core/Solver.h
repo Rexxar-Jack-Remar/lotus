@@ -48,6 +48,13 @@ DomVal<D> compute_delta(const DomVal<D> &v, const DomVal<D> &nu_sym,
                         std::false_type /* idempotent */) {
   return D::subtract(v, nu_sym);
 }
+
+template <class D> inline void require_newton_compatible_expr(const E0<D> &e) {
+  if (ExprFeatureDetector<D>::has_mu(e))
+    throw UnsupportedNewtonMuError{};
+  if (ExprFeatureDetector<D>::has_project(e) && !domain_project_newton_safe<D>())
+    throw UnsafeNewtonProjectError{};
+}
 } // namespace detail
 
 template <class D, class ITER> struct Solver {
@@ -123,6 +130,11 @@ template <class D> struct KleeneIter {
 
 /// Newton iteration: one round = f(ν) plus least solution of Df|ν(X)+δ = X.
 /// δ = f(ν)−ν (or f(ν) when idempotent); Δ = solve linear system; ν' = ν⊕Δ.
+///
+/// This is the paper-faithful core when the domain uses exact equality and the
+/// selected linear solver reaches the least solution without hitting any
+/// bounding hooks. Tensor mode is only used through paper-admissible traits;
+/// otherwise the implementation deliberately falls back to the base solver.
 template <class D> struct NewtonIter {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
@@ -132,8 +144,10 @@ template <class D> struct NewtonIter {
       nu0[e.first] = D::zero();
     std::vector<std::pair<Symbol, V>> cur;
     cur.reserve(eqns.size());
-    for (auto &e : eqns)
+    for (auto &e : eqns) {
+      detail::require_newton_compatible_expr<D>(e.second);
       cur.emplace_back(e.first, I0<D>::eval(false, nu0, e.second));
+    }
     return cur;
   }
   static std::vector<std::pair<Symbol, V>>
@@ -153,6 +167,7 @@ template <class D> struct NewtonIter {
     const bool tensor_admissible =
         tensor_available && TensorTraits::paper_admissible();
     for (auto &e : eqns) {
+      detail::require_newton_compatible_expr<D>(e.second);
       V v = I0<D>::eval(verbose, nu, e.second);
       V delta0 = detail::compute_delta<D>(
           v, nu[e.first],
@@ -164,10 +179,19 @@ template <class D> struct NewtonIter {
       has_lcfl_structure = has_lcfl_structure || LCFLDetector<D>::has_lcfl_structure(d);
       rhs.emplace_back(e.first, Exp1<D>::add(Exp1<D>::term(delta0), d));
       if (tensor_admissible) {
-        rhs_tensor.emplace_back(
-            e.first,
+        auto tensor_d = TensorDiff<D>::build(nu, e.second);
+        E1<TD> tensor_rhs =
             Exp1<TD>::add(Exp1<TD>::term(TensorTraits::right_constant(delta0)),
-                          TensorDiff<D>::build(nu, e.second)));
+                          tensor_d);
+        if (tensor_supports_projection_equations<D>() && e.second &&
+            e.second->k == Exp0<D>::Project && tensor_d &&
+            tensor_d->k == Exp1<TD>::Project) {
+          tensor_rhs = Exp1<TD>::project(
+              Exp1<TD>::add(Exp1<TD>::term(TensorTraits::right_constant(delta0)),
+                            tensor_d->t));
+        }
+        rhs_tensor.emplace_back(
+            e.first, tensor_rhs);
       }
     }
     const bool use_tensor = tensor_admissible && has_lcfl_structure;
@@ -199,7 +223,7 @@ template <class D> struct NewtonIter {
     } else if (linStrat == LinearStrategy::SCC) {
       delta = solve_linear_scc_impl<D>(verbose, rhs, init);
     } else if (use_tensor) {
-      delta = solve_linear_tensorized_impl<D>(verbose, rhs_tensor, init);
+      delta = solve_linear_tensor_paper_impl<D>(verbose, rhs, rhs_tensor, init);
     } else {
       delta = solve_linear_worklist_impl<D>(verbose, rhs, init);
     }
@@ -223,7 +247,8 @@ template <class D> struct NewtonSolver {
     // JACM (Esparza et al.) shows: for idempotent + commutative semirings,
     // Newton terminates after at most n iterations for a system of n equations.
     // We only apply this bound when the domain explicitly declares
-    // commutativity.
+    // commutativity. If that declared contract is insufficient in practice,
+    // we continue uncapped rather than silently returning a bounded result.
     int effective_max = max;
     const bool auto_cap =
         effective_max < 0 && D::idempotent && domain_commutative_extend<D>();

@@ -8,10 +8,12 @@
  * Converts the LCFL linear system into a \e left-linear system over the
  * paired semiring (TensorProductDomain): pair (a,b) represents left/right
  * context so that a·Y·b becomes Y ⊗_p (a,b). The left-linear system is
- * solved by worklist (or could use Tarjan path expressions); then we
- * \e project back to the base domain (readout R((w1,w2)) = w1⊗w2).
- * Regularization requires Concat coefficients to be constant; otherwise we
- * fall back to worklist.
+ * solved by Tarjan-style parameterized path expressions (with a tensor-space
+ * worklist fallback only for non-Project systems); then we \e project back to
+ * the base domain (readout R((w1,w2)) = w1⊗w2). Projection operators are kept
+ * on the tensor path only for the Section 8 projection-equation fragment, where
+ * ProjectT can be pushed to constants; broader Project shapes fall back to the
+ * base worklist solver.
  *
  * The implementation uses an exact correlated representation in tensor space
  * for idempotent domains. This avoids correlation loss at projection time, at
@@ -115,7 +117,8 @@ private:
       out = it->second;
       return out;
     }
-    case K::InfClos: {
+    case K::Star:
+    case K::Mu: {
       V fixed = fix<D>(false, D::zero(), [&](const V &cur) {
         auto env2 = env;
         env2[e->sym] = cur;
@@ -150,6 +153,7 @@ template <class D> struct Exp1ToTensor {
     using K = typename Exp1<D>::K;
     switch (e->k) {
     case K::Sub:
+    case K::Mu:
       return false;
     case K::Concat: {
       auto a = Exp1ConstEval<D>::eval(e->t1);
@@ -173,11 +177,13 @@ template <class D> struct Exp1ToTensor {
     using K = typename Exp1<D>::K;
     switch (e->k) {
     case K::Sub:
+    case K::Mu:
       // Tensor regularization is defined for semiring expressions; explicit
-      // subtraction is outside that fragment and must stay on the base solver.
+      // subtraction and generic Mu are outside that fragment and must stay on
+      // the base solver.
       return false;
-    case K::InfClos:
-      // The Tarjan extractor can only consume InfClos when it constant-folds
+    case K::Star:
+      // The Tarjan extractor can only consume Star when it constant-folds
       // to a tensor-side coefficient. Non-constant starred fragments still
       // require the tensor worklist solver.
       return Exp1ConstEval<D>::eval(e).has_value();
@@ -237,8 +243,10 @@ template <class D> struct Exp1ToTensor {
         auto b = Exp1ConstEval<D>::eval(e->t2);
         return Exp1<TD>::seqR(Exp1<TD>::hole(e->sym), Traits::couple(*a, *b));
       }
-    case K::InfClos:
-      return Exp1<TD>::inf(convert(e->t), e->sym);
+    case K::Star:
+      return Exp1<TD>::star(convert(e->t), e->sym);
+    case K::Mu:
+      return Exp1<TD>::mu(convert(e->t), e->sym);
     default:
       return nullptr;
     }
@@ -421,6 +429,7 @@ private:
 template <class TD> struct TensorTarjanPlan {
   using RegexRef = lotus::pathexpressions::RegexRef<int>;
   std::vector<RegexRef> regexes;
+  std::size_t label_count = 0;
 };
 
 /// Build and cache the dependency-graph regex topology used by the Tarjan fast
@@ -431,8 +440,7 @@ template <class TD> struct TensorTarjanPlan {
 template <class TD>
 Optional<TensorTarjanPlan<TD>>
 get_tensor_tarjan_plan(bool verbose,
-                       const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
-                       std::vector<typename TD::value_type> &labels_out) {
+                       const std::vector<std::pair<Symbol, E1<TD>>> &rhs) {
   using V = typename TD::value_type;
   using Frag = typename TensorLeftLinearExtractor<TD>::Frag;
   using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
@@ -445,7 +453,6 @@ get_tensor_tarjan_plan(bool verbose,
   signature << rhs.size() << ';';
   std::vector<Frag> fragments;
   fragments.reserve(rhs.size());
-  labels_out.clear();
   const bool projection_system =
       TensorProjectionSystemDetector<TD>::is_projection_equation_system(rhs);
 
@@ -472,12 +479,6 @@ get_tensor_tarjan_plan(bool verbose,
       signature << "T:" << term.first << ';';
     }
     signature << '|';
-  }
-
-  for (const auto &frag : fragments) {
-    labels_out.push_back(frag.constant);
-    for (const auto &term : frag.terms)
-      labels_out.push_back(term.second);
   }
 
   using Plan = TensorTarjanPlan<TD>;
@@ -517,6 +518,7 @@ get_tensor_tarjan_plan(bool verbose,
   plan.regexes.reserve(rhs.size());
   for (int i = 0; i < static_cast<int>(rhs.size()); ++i)
     plan.regexes.push_back(computer.exprBetween(0, i + 1));
+  plan.label_count = next_label;
 
   {
     std::lock_guard<std::mutex> lock(cache_mu);
@@ -525,6 +527,50 @@ get_tensor_tarjan_plan(bool verbose,
     out = inserted.first->second;
     return out;
   }
+}
+
+/// Instantiate the current-round coefficient labels used by the parameterized
+/// regex topology from `get_tensor_tarjan_plan`. This corresponds to Alg. 7.1's
+/// substitution step that rebinds the edge alphabet to the current Newton-round
+/// tensor coefficients.
+template <class TD>
+std::vector<typename TD::value_type> instantiate_tensor_tarjan_labels(
+    const std::vector<std::pair<Symbol, E1<TD>>> &rhs) {
+  using V = typename TD::value_type;
+  using Frag = typename TensorLeftLinearExtractor<TD>::Frag;
+
+  std::vector<V> labels;
+  labels.reserve(rhs.size() * 2U);
+  const bool projection_system =
+      TensorProjectionSystemDetector<TD>::is_projection_equation_system(rhs);
+
+  for (const auto &eqn : rhs) {
+    auto extracted =
+        TensorLeftLinearExtractor<TD>::extract(eqn.second, projection_system);
+    assert(extracted.has_value() &&
+           "instantiate_tensor_tarjan_labels must be called only after a "
+           "successful get_tensor_tarjan_plan()");
+    labels.push_back((*extracted).constant);
+    for (const auto &term : (*extracted).terms)
+      labels.push_back(term.second);
+  }
+  return labels;
+}
+
+template <class TD>
+std::vector<typename TD::value_type> evaluate_tensor_tarjan_plan(
+    const TensorTarjanPlan<TD> &plan,
+    const std::vector<typename TD::value_type> &labels) {
+  using V = typename TD::value_type;
+  assert(labels.size() == plan.label_count &&
+         "Tensor Tarjan labels must match the cached parameterized plan");
+
+  TensorRegexEvaluator<TD> evaluator(labels);
+  std::vector<V> out;
+  out.reserve(plan.regexes.size());
+  for (const auto &regex : plan.regexes)
+    out.push_back(regex->accept(evaluator, nullptr));
+  return out;
 }
 
 template <class TD>
@@ -541,22 +587,57 @@ Optional<std::vector<typename TD::value_type>> solve_linear_tensor_tarjan_impl(
     }
   }
 
-  std::vector<V> labels;
-  auto plan = get_tensor_tarjan_plan<TD>(verbose, rhs, labels);
+  auto plan = get_tensor_tarjan_plan<TD>(verbose, rhs);
   if (!plan.has_value())
     return {};
-
-  TensorRegexEvaluator<TD> evaluator(labels);
-
-  std::vector<V> out;
-  out.reserve(rhs.size());
-  for (int i = 0; i < static_cast<int>(rhs.size()); ++i) {
-    auto regex = (*plan).regexes[static_cast<std::size_t>(i)];
-    out.push_back(regex->accept(evaluator, nullptr));
-  }
+  auto labels = instantiate_tensor_tarjan_labels<TD>(rhs);
+  auto out = evaluate_tensor_tarjan_plan<TD>(*plan, labels);
 
   Optional<std::vector<V>> solved;
   solved = out;
+  return solved;
+}
+
+template <class TD>
+bool tensor_rhs_has_nonconstant_project(
+    const std::vector<std::pair<Symbol, E1<TD>>> &rhs) {
+  for (const auto &eqn : rhs) {
+    if (ExprFeatureDetector<TD>::has_project(eqn.second) &&
+        !Exp1ConstEval<TD>::eval(eqn.second).has_value()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <class D>
+Optional<std::vector<DomVal<D>>> solve_linear_tensor_tarjan_only_impl(
+    bool verbose,
+    const std::vector<std::pair<
+        Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>> &rhs_tensor,
+    const std::vector<DomVal<D>> &init) {
+  validate_tensor_trait_api<D>();
+  using Traits = TensorSemiringTraits<D>;
+  using TD = typename Traits::tensor_domain;
+  using VT = typename TD::value_type;
+
+  std::vector<VT> init_tensor;
+  init_tensor.reserve(init.size());
+  for (const auto &v : init)
+    init_tensor.emplace_back(lift_base_value_to_tensor<D>(v));
+
+  auto delta_tensor =
+      solve_linear_tensor_tarjan_impl<TD>(verbose, rhs_tensor, init_tensor);
+  if (!delta_tensor.has_value())
+    return {};
+
+  std::vector<DomVal<D>> delta;
+  delta.reserve((*delta_tensor).size());
+  for (const auto &p : *delta_tensor)
+    delta.push_back(Traits::readout(p));
+
+  Optional<std::vector<DomVal<D>>> solved;
+  solved = delta;
   return solved;
 }
 
@@ -586,6 +667,51 @@ std::vector<DomVal<D>> solve_linear_tensorized_impl(
   return delta;
 }
 
+template <class D>
+std::vector<DomVal<D>> solve_linear_tensor_paper_impl(
+    bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
+    const std::vector<std::pair<
+        Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>> &rhs_tensor,
+    std::vector<DomVal<D>> init) {
+  validate_tensor_trait_api<D>();
+  using TD = typename TensorSemiringTraits<D>::tensor_domain;
+
+  const bool projection_system =
+      TensorProjectionSystemDetector<TD>::is_projection_equation_system(rhs_tensor);
+  const bool projection_sensitive =
+      tensor_rhs_has_nonconstant_project<TD>(rhs_tensor);
+  const bool projection_fragment_supported =
+      tensor_supports_projection_equations<D>();
+
+  if (projection_sensitive && !projection_fragment_supported) {
+    if (verbose)
+      std::cerr << "[tensor] domain does not claim the paper-backed "
+                   "projection-equation laws; falling back to worklist\n";
+    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+  }
+
+  if (projection_sensitive && !projection_system) {
+    if (verbose)
+      std::cerr << "[tensor] Project is outside the paper-backed projection "
+                   "equation fragment; falling back to worklist\n";
+    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+  }
+
+  if (projection_system) {
+    auto tarjan_only =
+        solve_linear_tensor_tarjan_only_impl<D>(verbose, rhs_tensor, init);
+    if (tarjan_only.has_value())
+      return *tarjan_only;
+    if (verbose)
+      std::cerr << "[tensor] projection equation system is not Tarjan-"
+                   "extractable after ProjectT pushdown; falling back to "
+                   "worklist\n";
+    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+  }
+
+  return solve_linear_tensorized_impl<D>(verbose, rhs_tensor, init);
+}
+
 /// Solve LCFL linear system by lifting to tensor space: convert RHS to
 /// TensorProductDomain, solve (left-linear over pairs), project back via R.
 template <class D>
@@ -609,6 +735,11 @@ solve_linear_tensor_impl(bool verbose,
     return solve_linear_worklist_impl<D>(verbose, rhs, init);
   }
   for (const auto &p : rhs) {
+    if (ExprFeatureDetector<D>::has_mu(p.second))
+      throw UnsupportedNewtonMuError{};
+    if (ExprFeatureDetector<D>::has_project(p.second) &&
+        !domain_project_newton_safe<D>())
+      throw UnsafeNewtonProjectError{};
     if (!Exp1ToTensor<D>::is_tensor_convertible(p.second)) {
       if (verbose)
         std::cerr << "[tensor] not tensor-convertible; falling back to worklist\n";
@@ -620,7 +751,8 @@ solve_linear_tensor_impl(bool verbose,
   rhs_tensor.reserve(rhs.size());
   for (const auto &p : rhs)
     rhs_tensor.emplace_back(p.first, Exp1ToTensor<D>::convert(p.second));
-  return solve_linear_tensorized_impl<D>(verbose, rhs_tensor, init);
+  return solve_linear_tensor_paper_impl<D>(verbose, rhs, rhs_tensor,
+                                           std::move(init));
 }
 
 } // namespace npa

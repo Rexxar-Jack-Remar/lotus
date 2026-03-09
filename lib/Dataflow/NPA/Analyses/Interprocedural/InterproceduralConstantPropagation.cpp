@@ -220,10 +220,10 @@ public:
 
     bool first = true;
     FactType joined;
-    for (const auto &path : summary.paths) {
+    for (const auto &transformer : summary.transformers) {
       FactType current = fact;
       current.reachable = true;
-      for (const auto &op : path)
+      for (const auto &op : transformer)
         applyOp(current, op);
       if (!current.reachable)
         continue;

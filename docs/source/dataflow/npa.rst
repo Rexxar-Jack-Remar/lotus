@@ -147,7 +147,11 @@ semiring :math:`(a,b) \otimes_p (a',b') = (a' \otimes a, b \otimes b')`,
 (e.g. by worklist or path expressions); (3) **project** back via :math:`R`.
 The paired structure maintains the mirrored correlation of left/right
 coefficients. The implementation uses ``TensorProductDomain`` and
-``solve_linear_tensor_impl`` when the system has LCFL structure (Concat/InfClos).
+``solve_linear_tensor_impl`` when the system has LCFL structure (Concat/Star).
+
+``Star`` is the paper-faithful Kleene-star construct used by Newton/tensor
+regularization. ``Mu`` remains available as a generic least-fixpoint construct
+for plain evaluation, but it is intentionally rejected on Newton/tensor paths.
 
 Implementation note: to preserve left/right correlation during projection, the
 tensor solver uses an exact correlated representation for idempotent domains
@@ -173,7 +177,9 @@ NPA supports both **distributive** and **non-distributive** program analyses:
 * **Non-distributive analyses**: Only subdistributivity holds
   (:math:`a \cdot (b + c) \sqsupseteq a \cdot b + a \cdot c`). In this case, the least
   fixed point is an **overapproximation** of the JOP solution, but still provides a
-  sound analysis result. Examples include constant propagation analysis.
+  sound analysis result. In-tree clients such as constant propagation and interval
+  analysis use ``SummaryTransformerDomain`` as NPA's current abstract-summary path
+  for this fragment.
 
 Core Implementation (include/Dataflow/NPA/Core)
 ===============================================
@@ -183,12 +189,14 @@ The core headers implement the algorithms from Esparza et al. (JACM) and Reps et
 * **NPACommon.h**: Domain concept (ω-continuous semiring), ``LinearStrategy``
   (Naive, Worklist, SCC, TensorProduct).
 * **Expressions.h**: ``Exp0`` (polynomial equation AST), ``Exp1`` (linearized AST);
-  ``Concat`` encodes the LCFL form :math:`a \cdot X \cdot b`.
+  ``Concat`` encodes the LCFL form :math:`a \cdot X \cdot b`; ``Star`` is the
+  Newton/tensor Kleene-star fragment and ``Mu`` is a generic least-fixpoint node.
 * **Diff.h**: Builds the differential :math:`Df|_\nu` from a polynomial expression
-  (Esparza et al. JACM, Defn. 3.1, 3.5).
+  (Esparza et al. JACM, Defn. 3.1, 3.5) and caches differential shape plans across
+  Newton rounds.
 * **Eval.h**: ``I0`` evaluates Exp0 (full system); ``I1`` evaluates Exp1 (linear RHS).
 * **Fixpoint.h**: ``fix`` / ``fix_vec`` for Kleene-like iteration.
-* **LCFLDetector.h**: Detects Concat/InfClos (LCFL structure).
+* **LCFLDetector.h**: Detects Concat/Star (LCFL structure).
 * **LinearSolvers.h**: ``solve_linear_worklist_impl``, ``solve_linear_scc_impl``,
   ``solve_linear_tensor_impl`` for the linearized system.
 * **TensorLinearSolve.h**: Tensor-product solver (Reps et al. Alg. 3.4).
@@ -203,6 +211,10 @@ Clients that use NPA are expected to be familiar with the above papers
 and to instantiate the provided abstractions for their specific numeric
 domains and recurrence schemes.
 
+Interprocedural clients currently assume a closed-world LLVM module for indirect
+calls: if no stronger resolver is attached, unknown call sites are approximated
+by the set of type-compatible defined functions in the current module.
+
 Practical notes for numeric domains
 ===================================
 
@@ -213,8 +225,13 @@ of ``equal(a,b)``.
 
 Domains may also opt into bounding iteration:
 
-* ``max_fixpoint_iters`` caps generic fixpoint loops (e.g. Kleene-star bodies).
+* ``max_fixpoint_iters`` caps generic fixpoint loops (e.g. ``Star`` / ``Mu`` bodies).
 * ``max_linear_steps`` caps worklist/SCC steps for the linearized system.
+
+If a domain implements ``project()``, Newton/tensor paths require an additional
+opt-in ``project_newton_safe`` contract. That contract is the domain author's
+assertion that projection is monotone and compatible with ``combine`` and the
+linearized summary equations used by the Newton pipeline.
 
 This engine is **not** currently wired into a dedicated command-line
 tool; instead, it serves as a building block for experimental analyses

@@ -340,3 +340,37 @@ TEST(NPA, PredicateTensorDiffSupportsProjectionNodes) {
 
   EXPECT_TRUE(TDom::equal(ordinary_val, direct_val));
 }
+
+TEST(NPA, PredicateNewtonTensorStrategyExecutesWithoutFallbackOnProjectedRecursiveEquation) {
+  D::configure(2, 1);
+
+  using E0 = npa::E0<D>;
+  using Exp0 = npa::Exp0<D>;
+
+  E0 set_global_true = Exp0::term(D::assignConst(0, true));
+  E0 set_local_true = Exp0::term(D::assignConst(1, true));
+  E0 id = Exp0::term(D::one());
+  E0 rhs = Exp0::project(
+      Exp0::ndet(id, Exp0::concat(set_global_true, "X", set_local_true)));
+
+  std::vector<std::pair<npa::Symbol, E0>> eqns;
+  eqns.emplace_back("X", rhs);
+
+  auto wl =
+      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::Worklist);
+
+  testing::internal::CaptureStderr();
+  auto tp = npa::NewtonSolver<D>::solve(eqns, true, -1,
+                                        npa::LinearStrategy::TensorProduct);
+  std::string stderr_output = testing::internal::GetCapturedStderr();
+
+  ASSERT_EQ(wl.first.size(), 1u);
+  ASSERT_EQ(tp.first.size(), 1u);
+  EXPECT_TRUE(wl.second.converged);
+  EXPECT_TRUE(tp.second.converged);
+  EXPECT_TRUE(D::equal(wl.first[0].second, tp.first[0].second));
+  EXPECT_EQ(sortedTransitions(tp.first[0].second),
+            (std::vector<std::pair<std::uint64_t, std::uint64_t>>{
+                {0, 0}, {0, 1}, {1, 1}, {2, 2}, {2, 3}, {3, 3}}));
+  EXPECT_EQ(stderr_output.find("falling back"), std::string::npos);
+}

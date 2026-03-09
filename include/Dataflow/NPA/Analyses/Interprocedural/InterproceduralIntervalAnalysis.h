@@ -2,7 +2,7 @@
 #define NPA_INTERPROC_INTERVAL_ANALYSIS_H
 
 #include "Dataflow/NPA/Analyses/InterproceduralEngine.h"
-#include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
+#include "Dataflow/NPA/Domains/SummaryTransformerDomain.h"
 
 #include <cstdint>
 #include <map>
@@ -106,7 +106,7 @@ struct IntervalOp {
   bool operator==(const IntervalOp &other) const;
 };
 
-using IntervalDomain = ProgramTransferDomain<IntervalOp>;
+using IntervalDomain = SummaryTransformerDomain<IntervalOp>;
 
 class InterproceduralIntervalAnalysis {
 public:

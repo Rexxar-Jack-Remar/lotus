@@ -12,7 +12,7 @@
  *   substitution (worklist, SCC, or after tensor conversion).
  *
  * Concat is evaluated as extend(t1_val, extend(mid, t2_val)) (LCFL form
- * t1·X·t2). InfClos is the least fixpoint in the bound variable (Kleene star).
+ * t1·X·t2). Star and Mu are least fixpoints in the bound variable.
  */
 
 #include "Dataflow/NPA/Core/Expressions.h"
@@ -55,7 +55,8 @@ private:
       mark(e->t1);
       mark(e->t2);
       break;
-    case Exp0<D>::InfClos:
+    case Exp0<D>::Star:
+    case Exp0<D>::Mu:
       mark(e->t);
       break;
     default:
@@ -100,7 +101,8 @@ private:
       const V &mid = (it != env.end()) ? it->second : nu.at(e->sym);
       v = D::extend(rec(nu, env, e->t1), D::extend(mid, rec(nu, env, e->t2)));
     } break;
-    case Exp0<D>::InfClos: {
+    case Exp0<D>::Star:
+    case Exp0<D>::Mu: {
       V init = D::zero();
       v = fix<D>(false, init, [&](V cur) {
         auto env2 = env;
@@ -187,7 +189,8 @@ private:
       v = D::extend_lin(rec(vars, env, e->t1),
                         D::extend_lin(mid, rec(vars, env, e->t2)));
     } break;
-    case K::InfClos: {
+    case K::Star:
+    case K::Mu: {
       V init = D::zero();
       v = fix<D>(false, init, [&](V cur) {
         auto env2 = env;

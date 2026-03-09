@@ -64,6 +64,8 @@ public:
 
   static std::vector<llvm::Function *>
   getPossibleCallees(llvm::Module &M, const llvm::CallBase &Call) {
+    // Closed-world assumption: without an external resolver, indirect calls are
+    // approximated by type-compatible defined functions in the current module.
     if (llvm::Function *Direct = Call.getCalledFunction()) {
       if (!Direct->isDeclaration())
         return {Direct};
@@ -340,7 +342,7 @@ private:
     if (!inner || isZeroExpr(inner) || isOneExpr(inner))
       return Exp::term(D::one());
     Symbol bound = "__regex_star_" + std::to_string(counter++);
-    return Exp::inf(
+    return Exp::star(
         combineExpr(Exp::term(D::one()), Exp::mul(Exp::bound(bound), inner)),
         bound);
   }

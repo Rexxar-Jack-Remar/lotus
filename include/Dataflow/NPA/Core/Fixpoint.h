@@ -7,7 +7,7 @@
  *
  * Used for:
  * (1) Kleene sequence κ^(i+1) = f(κ^(i)) (single variable);
- * (2) solving linear sub-systems (e.g. InfClos, or vector fixpoint for
+ * (2) solving linear sub-systems (e.g. Star/Mu, or vector fixpoint for
  * the linearized system). NPA's Newton iteration uses these to compute
  * Δ^(i) as the least solution of Df|ν^(i)(X) + δ^(i) = X (Esparza et al.).
  */

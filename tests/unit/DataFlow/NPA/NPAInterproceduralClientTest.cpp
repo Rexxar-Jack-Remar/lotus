@@ -4,6 +4,7 @@
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralIntervalAnalysis.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralLiveVariables.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralMaybeUninitialized.h"
+#include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
 
 #include <gtest/gtest.h>
@@ -122,12 +123,21 @@ void expectConstValue(const npa::ConstantPropagationValue &value,
   EXPECT_TRUE(value.constant.eq(expected));
 }
 
+std::vector<std::pair<std::uint64_t, std::uint64_t>>
+sortedPredicateTransitions(
+    const npa::PredicateRelationDomain::value_type &relation) {
+  auto transitions = npa::PredicateRelationDomain::materialize(relation);
+  std::sort(transitions.begin(), transitions.end());
+  return transitions;
+}
+
 using EntryHookDomain = npa::ProgramTransferDomain<char>;
 
 struct ProjectedStringDomain {
   using value_type = std::set<std::string>;
   using test_type = bool;
   static constexpr bool idempotent = true;
+  static constexpr bool project_newton_safe = true;
 
   static value_type zero() { return {}; }
   static value_type one() { return {""}; }
@@ -286,6 +296,114 @@ public:
   }
 };
 
+class PredicateProjectedLoopAnalysis {
+public:
+  using Domain = npa::PredicateRelationDomain;
+  using FactType = Domain::value_type;
+  using E = npa::E0<Domain>;
+  using Exp = npa::Exp0<Domain>;
+
+  FactType getEntryValue() const { return Domain::one(); }
+
+  E getTransfer(llvm::Instruction &inst, E currentPath) const {
+    if (inst.hasName() && inst.getName() == "set_local")
+      return Exp::seq(Domain::assignConst(1, true), currentPath);
+    return currentPath;
+  }
+
+  FactType applySummary(const FactType &summary, const FactType &fact) const {
+    return Domain::extend(summary, fact);
+  }
+
+  FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
+    return Domain::combine(lhs, rhs);
+  }
+
+  bool factsEqual(const FactType &lhs, const FactType &rhs) const {
+    return Domain::equal(lhs, rhs);
+  }
+};
+
+using RecursiveSummaryDomain = npa::ProgramTransferDomain<char>;
+
+class RecursivePropagationLimitedForwardAnalysis {
+public:
+  using FactType = RecursiveSummaryDomain::value_type;
+  using E = npa::E0<RecursiveSummaryDomain>;
+
+  FactType getEntryValue() const { return RecursiveSummaryDomain::one(); }
+
+  E getTransfer(llvm::Instruction &, E currentPath) const { return currentPath; }
+
+  FactType getCallEntryTransfer(const llvm::CallBase &,
+                                const llvm::Function &) const {
+    return RecursiveSummaryDomain::zero();
+  }
+
+  FactType getCallReturnTransfer(const llvm::CallBase &,
+                                 const llvm::Function &) const {
+    return RecursiveSummaryDomain::one();
+  }
+
+  FactType getCallToReturnTransfer(const llvm::CallBase &) const {
+    return RecursiveSummaryDomain::one();
+  }
+
+  FactType applySummary(const FactType &summary, const FactType &fact) const {
+    return RecursiveSummaryDomain::extend(summary, fact);
+  }
+
+  FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
+    return RecursiveSummaryDomain::combine(lhs, rhs);
+  }
+
+  bool factsEqual(const FactType &lhs, const FactType &rhs) const {
+    return RecursiveSummaryDomain::equal(lhs, rhs);
+  }
+
+  long getMaxPropagationSteps() const { return 0; }
+};
+
+class RecursivePropagationLimitedBackwardAnalysis {
+public:
+  using FactType = RecursiveSummaryDomain::value_type;
+  using E = npa::E0<RecursiveSummaryDomain>;
+
+  FactType getExitValue(const llvm::Function &) const {
+    return RecursiveSummaryDomain::one();
+  }
+
+  E getTransfer(llvm::Instruction &, E currentPath) const { return currentPath; }
+
+  FactType getCallReturnTransfer(const llvm::CallBase &,
+                                 const llvm::Function &) const {
+    return RecursiveSummaryDomain::zero();
+  }
+
+  FactType getCallEntryTransfer(const llvm::CallBase &,
+                                const llvm::Function &) const {
+    return RecursiveSummaryDomain::one();
+  }
+
+  FactType getCallToReturnTransfer(const llvm::CallBase &) const {
+    return RecursiveSummaryDomain::one();
+  }
+
+  FactType applySummary(const FactType &summary, const FactType &fact) const {
+    return RecursiveSummaryDomain::extend(summary, fact);
+  }
+
+  FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
+    return RecursiveSummaryDomain::combine(lhs, rhs);
+  }
+
+  bool factsEqual(const FactType &lhs, const FactType &rhs) const {
+    return RecursiveSummaryDomain::equal(lhs, rhs);
+  }
+
+  long getMaxPropagationSteps() const { return 0; }
+};
+
 void expectIntervalPoint(const npa::Interval &value, const llvm::APInt &expected,
                          npa::IntervalOrdering ordering) {
   EXPECT_FALSE(value.bottom);
@@ -428,6 +546,41 @@ TEST(NPAInterproceduralClients, InterproceduralEngineReportsBoundedSolverResults
   EXPECT_TRUE(result.status.approximated);
 }
 
+TEST(NPAInterproceduralClients,
+     ForwardEngineSeparatesExactSummarySolveFromPropagationLimitOnRecursion) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @recur() {
+    entry:
+      call void @recur()
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @recur()
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  RecursivePropagationLimitedForwardAnalysis analysis;
+  auto result =
+      npa::InterproceduralEngine<RecursiveSummaryDomain,
+                                 RecursivePropagationLimitedForwardAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::Worklist);
+
+  auto *Recur = module->getFunction("recur");
+  ASSERT_NE(Recur, nullptr);
+  EXPECT_TRUE(result.status.summary_solve.converged);
+  EXPECT_FALSE(result.status.summary_solve.hit_limit);
+  EXPECT_FALSE(result.status.propagation_converged);
+  EXPECT_TRUE(result.status.propagation_hit_limit);
+  EXPECT_FALSE(result.status.overall_converged);
+  EXPECT_TRUE(result.status.approximated);
+  EXPECT_NE(result.summaries.find(npa::FunctionKey{Recur}), result.summaries.end());
+}
+
 TEST(NPAInterproceduralClients, ConstantPropagationTransfersArgumentsAcrossCall) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
@@ -555,6 +708,69 @@ TEST(NPAInterproceduralClients,
 
   EXPECT_EQ(callee_it->second, (ProjectedStringDomain::value_type{"l"}));
   EXPECT_EQ(main_it->second, (ProjectedStringDomain::value_type{""}));
+}
+
+TEST(NPAInterproceduralClients,
+     PredicateRelationTensorStrategyPreservesProjectedLoopSummarySemantics) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @callee(i1 %cond) {
+    entry:
+      br label %loop
+
+    loop:
+      %set_local = xor i1 %cond, false
+      br i1 %cond, label %loop, label %exit
+
+    exit:
+      ret void
+    }
+
+    define void @main(i1 %cond) {
+    entry:
+      call void @callee(i1 %cond)
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  npa::PredicateRelationDomain::configure(2, 1);
+  PredicateProjectedLoopAnalysis analysis;
+
+  auto worklist =
+      npa::InterproceduralEngine<npa::PredicateRelationDomain,
+                                 PredicateProjectedLoopAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::Worklist);
+
+  auto tensor =
+      npa::InterproceduralEngine<npa::PredicateRelationDomain,
+                                 PredicateProjectedLoopAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::TensorProduct);
+
+  auto *Main = module->getFunction("main");
+  auto *Callee = module->getFunction("callee");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Callee, nullptr);
+
+  auto worklist_main = worklist.summaries.find(npa::FunctionKey{Main});
+  auto worklist_callee = worklist.summaries.find(npa::FunctionKey{Callee});
+  auto tensor_main = tensor.summaries.find(npa::FunctionKey{Main});
+  auto tensor_callee = tensor.summaries.find(npa::FunctionKey{Callee});
+  ASSERT_NE(worklist_main, worklist.summaries.end());
+  ASSERT_NE(worklist_callee, worklist.summaries.end());
+  ASSERT_NE(tensor_main, tensor.summaries.end());
+  ASSERT_NE(tensor_callee, tensor.summaries.end());
+
+  EXPECT_TRUE(npa::PredicateRelationDomain::equal(worklist_main->second,
+                                                  tensor_main->second));
+  EXPECT_TRUE(npa::PredicateRelationDomain::equal(worklist_callee->second,
+                                                  tensor_callee->second));
+  EXPECT_EQ(sortedPredicateTransitions(tensor_main->second),
+            sortedPredicateTransitions(npa::PredicateRelationDomain::one()));
+  EXPECT_EQ(
+      sortedPredicateTransitions(tensor_callee->second),
+      (std::vector<std::pair<std::uint64_t, std::uint64_t>>{
+          {0, 2}, {1, 3}, {2, 2}, {3, 3}}));
 }
 
 TEST(NPAInterproceduralClients,
@@ -1028,6 +1244,42 @@ TEST(NPAInterproceduralClients, LiveVariablesFlowBackThroughCall) {
 
   llvm::APInt liveIn = unionFactForBlock(result.blockFacts, &Id->getEntryBlock());
   EXPECT_TRUE(liveIn[BitIt->second]);
+}
+
+TEST(NPAInterproceduralClients,
+     BackwardEngineSeparatesExactSummarySolveFromPropagationLimitOnRecursion) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @recur() {
+    entry:
+      call void @recur()
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @recur()
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  RecursivePropagationLimitedBackwardAnalysis analysis;
+  auto result =
+      npa::BackwardInterproceduralEngine<
+          RecursiveSummaryDomain,
+          RecursivePropagationLimitedBackwardAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::Worklist);
+
+  auto *Recur = module->getFunction("recur");
+  ASSERT_NE(Recur, nullptr);
+  EXPECT_TRUE(result.status.summary_solve.converged);
+  EXPECT_FALSE(result.status.summary_solve.hit_limit);
+  EXPECT_FALSE(result.status.propagation_converged);
+  EXPECT_TRUE(result.status.propagation_hit_limit);
+  EXPECT_FALSE(result.status.overall_converged);
+  EXPECT_TRUE(result.status.approximated);
+  EXPECT_NE(result.summaries.find(npa::FunctionKey{Recur}), result.summaries.end());
 }
 
 TEST(NPAInterproceduralClients, RecursiveIntervalAnalysisConverges) {

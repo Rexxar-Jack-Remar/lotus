@@ -30,7 +30,13 @@ The engine supports **TOPLAS 2016**-style algorithms for LCFL (linear context-fr
 - **TensorProduct**: Rewrite LCFL terms into a tensorized left-linear system, solve there via Tarjan path expressions when extractable to a left-linear graph, and otherwise fall back to tensor-space worklist iteration.
 - **TensorDiff**: Direct tensor-side differential builder used by the Newton tensor path.
 - **TensorSemiringTraits**: Optional specialization point for domains that want to supply a custom tensor semiring/readout instead of the default exact-correlated tensor domain.
-- **LCFLDetector**: `has_lcfl_structure(E1)` detects Concat/InfClos in linear RHS (used to decide whether tensor is applicable).
+- **LCFLDetector**: `has_lcfl_structure(E1)` detects Concat/Star in linear RHS (used to decide whether tensor is applicable).
+
+`Star` is the paper-faithful Newton/tensor construct. `Mu` is evaluable as a
+generic least fixpoint, but NPA rejects it on Newton/tensor paths.
+
+Domains that expose `project()` must additionally opt into `project_newton_safe`
+before projection is accepted on Newton/tensor paths.
 
 Use `NewtonSolver<D>::solve(eqns, verbose, -1, LinearStrategy::SCC)` or `LinearStrategy::TensorProduct`; or pass `LinearStrategy` into `BitVectorSolver::run` (optional 5th parameter).
 

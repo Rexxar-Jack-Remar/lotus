@@ -201,7 +201,7 @@ solve_linear_tensor_impl(bool verbose,
                          const std::vector<std::pair<Symbol, E1<D>>> &rhs,
                          std::vector<DomVal<D>> init);
 
-/// True if any equation has LCFL structure (Concat or InfClos). The tensor
+/// True if any equation has LCFL structure (Concat or Star). The tensor
 /// strategy is only considered when this holds; the tensor solver may still
 /// fall back to worklist if regularization preconditions are not met.
 template <class D>

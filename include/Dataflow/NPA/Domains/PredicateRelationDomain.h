@@ -32,6 +32,7 @@ public:
   using value_type = PredicateRelation;
   using test_type = bool;
   static constexpr bool idempotent = true;
+  static constexpr bool project_newton_safe = true;
 
   static void configure(unsigned predicate_count,
                         unsigned local_predicate_count = 0);
@@ -86,6 +87,7 @@ public:
   using value_type = PredicateTensorRelation;
   using test_type = bool;
   static constexpr bool idempotent = true;
+  static constexpr bool project_newton_safe = true;
 
   static value_type zero();
   static value_type one();
@@ -124,6 +126,7 @@ template <> struct TensorSemiringTraits<PredicateRelationDomain> {
 
   static bool available() { return true; }
   static bool paper_admissible() { return true; }
+  static bool paper_projection_equations() { return true; }
 
   static tensor_domain::value_type
   right_constant(const PredicateRelationDomain::value_type &value) {

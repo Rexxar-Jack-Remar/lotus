@@ -1,5 +1,6 @@
 #include "Dataflow/NPA/NPA.h"
 #include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
+#include "Dataflow/NPA/Domains/SummaryTransformerDomain.h"
 
 #include <gtest/gtest.h>
 
@@ -32,6 +33,16 @@ std::unordered_map<npa::Symbol, npa::DomVal<D>>
 toMap(const std::vector<std::pair<npa::Symbol, npa::DomVal<D>>> &pairs) {
   std::unordered_map<npa::Symbol, npa::DomVal<D>> out;
   for (const auto &p : pairs) out.emplace(p.first, p.second);
+  return out;
+}
+
+template <class D>
+std::unordered_map<npa::Symbol, npa::DomVal<D>>
+evalSystem(const std::vector<std::pair<npa::Symbol, npa::E0<D>>> &eqns,
+           const std::unordered_map<npa::Symbol, npa::DomVal<D>> &env) {
+  std::unordered_map<npa::Symbol, npa::DomVal<D>> out;
+  for (const auto &eqn : eqns)
+    out.emplace(eqn.first, npa::I0<D>::eval(false, env, eqn.second));
   return out;
 }
 
@@ -81,6 +92,91 @@ TEST(NPA, SolverReportsWhenOuterIterationCapReturnsApproximation) {
   EXPECT_TRUE(cappedMap.at("y"));
   EXPECT_FALSE(capped.second.converged);
   EXPECT_TRUE(capped.second.hit_limit);
+}
+
+TEST(NPA, NewtonInitMatchesFOfBottomAndApproximantsAreMonotone) {
+  using D = BoolSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  std::vector<std::pair<npa::Symbol, E>> eqns;
+  eqns.emplace_back("x", Exp::hole("y"));
+  eqns.emplace_back("y", Exp::term(D::one()));
+
+  std::unordered_map<npa::Symbol, npa::DomVal<D>> bottom;
+  for (const auto &eqn : eqns)
+    bottom.emplace(eqn.first, D::zero());
+  auto f0 = evalSystem<D>(eqns, bottom);
+
+  auto nu0 = npa::NewtonIter<D>::init(eqns);
+  auto nu0Map = toMap<D>(nu0);
+  EXPECT_EQ(nu0Map, f0);
+
+  auto nu1 = npa::NewtonIter<D>::run(false, eqns, nu0);
+  auto nu1Map = toMap<D>(nu1);
+  auto fNu0 = evalSystem<D>(eqns, nu0Map);
+
+  for (const auto &eqn : eqns) {
+    const auto &sym = eqn.first;
+    EXPECT_TRUE(npa::domain_leq_idempotent<D>(nu0Map.at(sym), fNu0.at(sym)));
+    EXPECT_TRUE(npa::domain_leq_idempotent<D>(fNu0.at(sym), nu1Map.at(sym)));
+    EXPECT_TRUE(npa::domain_leq_idempotent<D>(nu0Map.at(sym), nu1Map.at(sym)));
+  }
+}
+
+TEST(NPA, NewtonDominatesKleeneOnIdempotentSystem) {
+  using D = BoolSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  std::vector<std::pair<npa::Symbol, E>> eqns;
+  eqns.emplace_back("x", Exp::hole("y"));
+  eqns.emplace_back("y", Exp::term(D::one()));
+
+  auto k0 = npa::KleeneIter<D>::init(eqns);
+  auto k1 = npa::KleeneIter<D>::run(false, eqns, k0);
+  auto nu0 = npa::NewtonIter<D>::init(eqns);
+  auto nu1 = npa::NewtonIter<D>::run(false, eqns, nu0);
+
+  auto k0Map = toMap<D>(k0);
+  auto k1Map = toMap<D>(k1);
+  auto nu0Map = toMap<D>(nu0);
+  auto nu1Map = toMap<D>(nu1);
+
+  for (const auto &eqn : eqns) {
+    const auto &sym = eqn.first;
+    EXPECT_TRUE(npa::domain_leq_idempotent<D>(k0Map.at(sym), nu0Map.at(sym)));
+    EXPECT_TRUE(npa::domain_leq_idempotent<D>(k1Map.at(sym), nu1Map.at(sym)));
+  }
+}
+
+TEST(NPA, NewtonIdempotentUpdateMatchesSolvedLinearizedSystem) {
+  using D = BoolSemiring;
+  using Exp0 = npa::Exp0<D>;
+  using E0 = npa::E0<D>;
+  using Exp1 = npa::Exp1<D>;
+  using E1 = npa::E1<D>;
+
+  std::vector<std::pair<npa::Symbol, E0>> eqns;
+  eqns.emplace_back("x", Exp0::hole("y"));
+  eqns.emplace_back("y", Exp0::term(D::one()));
+
+  auto nu0 = npa::NewtonIter<D>::init(eqns);
+  auto nu0Map = toMap<D>(nu0);
+
+  std::vector<std::pair<npa::Symbol, E1>> rhs;
+  for (const auto &eqn : eqns) {
+    auto fNu = npa::I0<D>::eval(false, nu0Map, eqn.second);
+    auto diff = npa::Diff<D>::build(nu0Map, eqn.second);
+    rhs.emplace_back(eqn.first, Exp1::add(Exp1::term(fNu), diff));
+  }
+
+  std::vector<npa::DomVal<D>> init(rhs.size(), D::zero());
+  auto delta = npa::solve_linear_worklist_impl<D>(false, rhs, init);
+  auto nu1 = npa::NewtonIter<D>::run(false, eqns, nu0);
+
+  for (size_t i = 0; i < nu1.size(); ++i)
+    EXPECT_EQ(nu1[i].second, delta[i]);
 }
 
 namespace {
@@ -134,6 +230,112 @@ struct BadDeltaSemiring {
 
   // Intentionally invalid: combine(nu, subtract(f(nu), nu)) != f(nu) in general.
   static value_type subtract(value_type, value_type) { return 0; }
+};
+
+struct ExactDeltaSemiring {
+  using value_type = int;
+  using test_type = bool;
+  static constexpr bool idempotent = false;
+
+  static value_type zero() { return 0; }
+  static value_type one() { return 1; }
+  static bool equal(value_type a, value_type b) { return a == b; }
+  static value_type combine(value_type a, value_type b) { return a + b; }
+  static value_type extend(value_type a, value_type b) { return a * b; }
+  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
+  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type condCombine(test_type phi, value_type t, value_type e) {
+    return phi ? t : e;
+  }
+  static value_type subtract(value_type a, value_type b) { return a - b; }
+};
+
+struct ApproxEqualityBoolSemiring {
+  using value_type = bool;
+  using test_type = bool;
+  static constexpr bool idempotent = true;
+  static constexpr bool commutative_extend = true;
+
+  static void resetApproxCounter() { ApproxCounter = 0; }
+  static int getApproxCounter() { return ApproxCounter; }
+
+  static value_type zero() { return false; }
+  static value_type one() { return true; }
+  static bool equal(value_type a, value_type b) { return a == b; }
+  static bool approx_equal(value_type a, value_type b) {
+    return a == b && ApproxCounter++ >= 3;
+  }
+  static value_type combine(value_type a, value_type b) { return a || b; }
+  static value_type extend(value_type a, value_type b) { return a && b; }
+  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
+  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type condCombine(test_type phi, value_type t, value_type e) {
+    return phi ? t : e;
+  }
+  static value_type subtract(value_type a, value_type b) { return a && !b; }
+
+private:
+  static int ApproxCounter;
+};
+
+int ApproxEqualityBoolSemiring::ApproxCounter = 0;
+
+struct LimitedLinearBoolSemiring {
+  using value_type = bool;
+  using test_type = bool;
+  static constexpr bool idempotent = true;
+  static constexpr long max_linear_steps = 0;
+
+  static value_type zero() { return false; }
+  static value_type one() { return true; }
+  static bool equal(value_type a, value_type b) { return a == b; }
+  static value_type combine(value_type a, value_type b) { return a || b; }
+  static value_type extend(value_type a, value_type b) { return a && b; }
+  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
+  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type condCombine(test_type phi, value_type t, value_type e) {
+    return phi ? t : e;
+  }
+  static value_type subtract(value_type a, value_type b) { return a && !b; }
+};
+
+struct LimitedFixpointBoolSemiring {
+  using value_type = bool;
+  using test_type = bool;
+  static constexpr bool idempotent = true;
+  static constexpr int max_fixpoint_iters = 0;
+
+  static value_type zero() { return false; }
+  static value_type one() { return true; }
+  static bool equal(value_type a, value_type b) { return a == b; }
+  static value_type combine(value_type a, value_type b) { return a || b; }
+  static value_type extend(value_type a, value_type b) { return a && b; }
+  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
+  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type condCombine(test_type phi, value_type t, value_type e) {
+    return phi ? t : e;
+  }
+  static value_type subtract(value_type a, value_type b) { return a && !b; }
+};
+
+struct UnsafeProjectedBoolSemiring {
+  using value_type = bool;
+  using test_type = bool;
+  static constexpr bool idempotent = true;
+  static constexpr bool commutative_extend = true;
+
+  static value_type zero() { return false; }
+  static value_type one() { return true; }
+  static bool equal(value_type a, value_type b) { return a == b; }
+  static value_type combine(value_type a, value_type b) { return a || b; }
+  static value_type extend(value_type a, value_type b) { return a && b; }
+  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
+  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type condCombine(test_type phi, value_type t, value_type e) {
+    return phi ? t : e;
+  }
+  static value_type subtract(value_type a, value_type b) { return a && !b; }
+  static value_type project(value_type v) { return v; }
 };
 
 struct WriteOp {
@@ -198,11 +400,11 @@ TEST(NPA, BoundVariablesDoNotAliasEquationVariables) {
   std::unordered_map<npa::Symbol, npa::DomVal<D>> nu;
   nu["x"] = "GLOBAL";
 
-  // inf(body, x) where body references x as a *bound* variable.
+  // mu(body, x) where body references x as a *bound* variable.
   // With our TraceSemiring, fixpoint starting at 0:
   //   cur0=0, body = (A*cur), so it stabilizes at "0" only if A is "1".
   // Use body = bound(x) so result should be the initial "0".
-  E e = Exp::inf(Exp::bound("x"), "x");
+  E e = Exp::mu(Exp::bound("x"), "x");
   auto v = npa::I0<D>::eval(false, nu, e);
   EXPECT_EQ(v, "0");
 }
@@ -219,8 +421,123 @@ TEST(NPA, InvalidNonIdempotentDeltaFailsFast) {
                npa::InvalidNewtonDeltaError);
 }
 
+TEST(NPA, ValidNonIdempotentResidualReconstructsFunctionValue) {
+  using D = ExactDeltaSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  std::unordered_map<npa::Symbol, npa::DomVal<D>> nu;
+  nu["x"] = 2;
+
+  E expr = Exp::ndet(Exp::hole("x"), Exp::term(3));
+  auto fNu = npa::I0<D>::eval(false, nu, expr);
+  auto delta = D::subtract(fNu, nu.at("x"));
+
+  EXPECT_EQ(fNu, 5);
+  EXPECT_EQ(delta, 3);
+  EXPECT_NO_THROW(npa::require_valid_newton_delta<D>(fNu, nu.at("x"), delta));
+}
+
+TEST(NPA, AutomaticNIterationBoundFallsBackWhenEqualityIsApproximate) {
+  using D = ApproxEqualityBoolSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  D::resetApproxCounter();
+
+  std::vector<std::pair<npa::Symbol, E>> eqns;
+  eqns.emplace_back("x", Exp::term(D::one()));
+
+  testing::internal::CaptureStderr();
+  auto result = npa::NewtonSolver<D>::solve(eqns, true);
+  std::string stderrOutput = testing::internal::GetCapturedStderr();
+
+  auto solved = toMap<D>(result.first);
+  EXPECT_TRUE(result.second.converged);
+  EXPECT_FALSE(result.second.hit_limit);
+  EXPECT_TRUE(solved.at("x"));
+  EXPECT_GE(D::getApproxCounter(), 4);
+  EXPECT_NE(stderrOutput.find("automatic n-iteration bound was insufficient"),
+            std::string::npos);
+}
+
+TEST(NPA, LinearStepLimitMarksNewtonResultAsApproximate) {
+  using D = LimitedLinearBoolSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  std::vector<std::pair<npa::Symbol, E>> eqns;
+  eqns.emplace_back("x", Exp::hole("y"));
+  eqns.emplace_back("y", Exp::term(D::one()));
+
+  auto result =
+      npa::NewtonSolver<D>::solve(eqns, false, 1, npa::LinearStrategy::Worklist);
+
+  EXPECT_FALSE(result.second.converged);
+  EXPECT_TRUE(result.second.hit_limit);
+}
+
+TEST(NPA, NewtonRejectsMuExpressions) {
+  using D = BoolSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  std::vector<std::pair<npa::Symbol, E>> eqns;
+  eqns.emplace_back("x", Exp::mu(Exp::term(D::one()), "b"));
+
+  EXPECT_THROW((void)npa::NewtonSolver<D>::solve(eqns),
+               npa::UnsupportedNewtonMuError);
+}
+
+TEST(NPA, NewtonRejectsUnsafeProjectExpressions) {
+  using D = UnsafeProjectedBoolSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  std::vector<std::pair<npa::Symbol, E>> eqns;
+  eqns.emplace_back("x", Exp::project(Exp::term(D::one())));
+
+  EXPECT_THROW((void)npa::NewtonSolver<D>::solve(eqns),
+               npa::UnsafeNewtonProjectError);
+}
+
+TEST(NPA, FixpointIterationLimitMarksMuClosureAsApproximate) {
+  using D = LimitedFixpointBoolSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  std::vector<std::pair<npa::Symbol, E>> eqns;
+  eqns.emplace_back(
+      "x", Exp::mu(Exp::ndet(Exp::bound("b"), Exp::term(D::one())), "b"));
+
+  auto result = npa::KleeneSolver<D>::solve(eqns, false, 2);
+  auto solved = toMap<D>(result.first);
+
+  EXPECT_TRUE(solved.at("x"));
+  EXPECT_FALSE(result.second.converged);
+  EXPECT_TRUE(result.second.hit_limit);
+}
+
 TEST(NPA, ProgramTransferDomainPreservesMayWriteAcrossCombineAndExtend) {
   using D = npa::ProgramTransferDomain<WriteOp>;
+
+  static int slot_a = 0;
+  static int slot_b = 0;
+
+  auto a = D::singleton(WriteOp{&slot_a});
+  auto b = D::singleton(WriteOp{&slot_b});
+
+  auto joined = D::combine(a, b);
+  EXPECT_TRUE(joined.may_write.count(&slot_a));
+  EXPECT_TRUE(joined.may_write.count(&slot_b));
+
+  auto composed = D::extend(a, b);
+  EXPECT_TRUE(composed.may_write.count(&slot_a));
+  EXPECT_TRUE(composed.may_write.count(&slot_b));
+}
+
+TEST(NPA, SummaryTransformerDomainPreservesMayWriteAcrossCombineAndExtend) {
+  using D = npa::SummaryTransformerDomain<WriteOp>;
 
   static int slot_a = 0;
   static int slot_b = 0;
@@ -253,6 +570,24 @@ TEST(NPA, ProgramTransferDomainCondCombineRespectsBooleanGuard) {
   EXPECT_EQ(chosenElse.paths.size(), 1u);
   EXPECT_TRUE(chosenElse.paths.count(std::vector<char>{'e'}));
   EXPECT_FALSE(chosenElse.paths.count(std::vector<char>{'t'}));
+}
+
+TEST(NPA, SummaryTransformerDomainCondCombineRespectsBooleanGuard) {
+  using D = npa::SummaryTransformerDomain<char>;
+
+  auto thenV = D::singleton('t');
+  auto elseV = D::singleton('e');
+
+  auto chosenThen = D::condCombine(true, thenV, elseV);
+  auto chosenElse = D::condCombine(false, thenV, elseV);
+
+  EXPECT_EQ(chosenThen.transformers.size(), 1u);
+  EXPECT_TRUE(chosenThen.transformers.count(std::vector<char>{'t'}));
+  EXPECT_FALSE(chosenThen.transformers.count(std::vector<char>{'e'}));
+
+  EXPECT_EQ(chosenElse.transformers.size(), 1u);
+  EXPECT_TRUE(chosenElse.transformers.count(std::vector<char>{'e'}));
+  EXPECT_FALSE(chosenElse.transformers.count(std::vector<char>{'t'}));
 }
 
 } // namespace

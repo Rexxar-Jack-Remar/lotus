@@ -45,6 +45,29 @@ public:
   static constexpr bool value =
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
+
+template <class D> struct TensorTraitsHasPaperProjectionEquations {
+private:
+  template <class T>
+  static auto test(int)
+      -> decltype(TensorSemiringTraits<T>::paper_projection_equations(),
+                  std::true_type{});
+  template <class> static std::false_type test(...);
+
+public:
+  static constexpr bool value =
+      std::is_same<decltype(test<D>(0)), std::true_type>::value;
+};
+
+template <class D>
+inline bool tensor_projection_equations_impl(std::true_type) {
+  return TensorSemiringTraits<D>::paper_projection_equations();
+}
+
+template <class D>
+inline bool tensor_projection_equations_impl(std::false_type) {
+  return false;
+}
 } // namespace detail
 
 template <class D> inline void validate_tensor_trait_api() {
@@ -78,6 +101,12 @@ template <class D> struct TensorSemiringTraits {
   /// a utility tensorization with compatible types.
   static bool paper_admissible() { return false; }
 
+  /// Whether the specialization also claims the Section 8 projection-equation
+  /// laws needed for Project/ProjectT pushdown. This is intentionally stricter
+  /// than `paper_admissible()`: only domains with the full projection fragment
+  /// may use the tensor-side Project normalization path.
+  static bool paper_projection_equations() { return false; }
+
   static typename tensor_domain::value_type right_constant(const DomVal<D> &v) {
     return domain_equal<D>(v, D::zero()) ? tensor_domain::zero()
                                          : tensor_domain::singleton(D::one(), v);
@@ -106,6 +135,12 @@ template <class D>
 inline typename TensorSemiringTraits<D>::tensor_domain::value_type
 lift_base_value_to_tensor(const DomVal<D> &v) {
   return TensorSemiringTraits<D>::right_constant(v);
+}
+
+template <class D> inline bool tensor_supports_projection_equations() {
+  return detail::tensor_projection_equations_impl<D>(
+      std::integral_constant<
+          bool, detail::TensorTraitsHasPaperProjectionEquations<D>::value>{});
 }
 
 } // namespace npa
