@@ -60,6 +60,7 @@ solve_linear_worklist_impl(bool verbose,
     in_queue[idx] = false;
     steps++;
     if (max_steps >= 0 && steps > max_steps) {
+      npa_note_limit_hit();
       if (verbose)
         std::cerr << "[linear-wl] hit max_linear_steps=" << max_steps << "\n";
       break;
@@ -174,6 +175,7 @@ solve_linear_scc_impl(bool verbose,
         }
         ++steps;
         if (max_steps >= 0 && steps > max_steps) {
+          npa_note_limit_hit();
           if (verbose)
             std::cerr << "[linear-scc] hit max_linear_steps=" << max_steps
                       << "\n";

@@ -459,6 +459,7 @@ public:
   InterproceduralAffineEqualities::Result buildResult(
       const typename Engine::Result &engineResult) const {
     InterproceduralAffineEqualities::Result result;
+    result.status = engineResult.status;
     result.summaries.insert(engineResult.summaries.begin(),
                             engineResult.summaries.end());
     for (const auto &entry : engineResult.blockEntryFacts) {

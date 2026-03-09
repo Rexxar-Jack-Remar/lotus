@@ -57,9 +57,11 @@ template <class D, class ITER> struct Solver {
   solve(const std::vector<Eqn> &eqns, bool verbose = false, int max = -1,
         LinearStrategy linStrat = LinearStrategy::Worklist) {
     NPA_REQUIRE_DOMAIN(D);
+    npa_reset_limit_hit();
     std::vector<std::pair<Symbol, V>> cur = ITER::init(eqns);
     auto tic = std::chrono::high_resolution_clock::now();
     int it = 0;
+    bool converged = false;
     while (max < 0 || it < max) {
       auto nxt = ITER::run(verbose, eqns, cur, linStrat);
       bool stable = true;
@@ -71,15 +73,24 @@ template <class D, class ITER> struct Solver {
       cur.swap(nxt);
       ++it;
       if (stable) {
+        converged = true;
         if (verbose)
           std::cerr << "[conv] " << it << "\n";
         break;
       }
     }
+    const bool hit_outer_limit = !converged && max >= 0 && it >= max;
+    if (hit_outer_limit) {
+      npa_note_limit_hit();
+      if (verbose)
+        std::cerr << "[conv] hit outer iteration cap=" << max << "\n";
+    }
     auto toc = std::chrono::high_resolution_clock::now();
     Stat st;
     st.iters = it;
     st.time = std::chrono::duration<double>(toc - tic).count();
+    st.hit_limit = npa_limit_hit();
+    st.converged = converged && !st.hit_limit;
     return {cur, st};
   }
 };
@@ -136,25 +147,40 @@ template <class D> struct NewtonIter {
     using TensorTraits = TensorSemiringTraits<D>;
     using TD = typename TensorTraits::tensor_domain;
     std::vector<std::pair<Symbol, E1<TD>>> rhs_tensor;
-    const bool use_tensor =
-        linStrat == LinearStrategy::TensorProduct && TensorTraits::available();
-    if (linStrat == LinearStrategy::TensorProduct && !use_tensor && verbose)
-      std::cerr << "[tensor] tensor traits unavailable for domain; "
-                   "falling back to worklist\n";
+    bool has_lcfl_structure = false;
+    const bool tensor_requested = linStrat == LinearStrategy::TensorProduct;
+    const bool tensor_available = tensor_requested && TensorTraits::available();
+    const bool tensor_admissible =
+        tensor_available && TensorTraits::paper_admissible();
     for (auto &e : eqns) {
       V v = I0<D>::eval(verbose, nu, e.second);
       V delta0 = detail::compute_delta<D>(
           v, nu[e.first],
           std::integral_constant<bool, DomainHasChooseDelta<D>::value>{},
           std::integral_constant<bool, D::idempotent>{});
-      if (use_tensor) {
+      if (!D::idempotent)
+        require_valid_newton_delta<D>(v, nu[e.first], delta0);
+      auto d = Diff<D>::build(nu, e.second);
+      has_lcfl_structure = has_lcfl_structure || LCFLDetector<D>::has_lcfl_structure(d);
+      rhs.emplace_back(e.first, Exp1<D>::add(Exp1<D>::term(delta0), d));
+      if (tensor_admissible) {
         rhs_tensor.emplace_back(
             e.first,
             Exp1<TD>::add(Exp1<TD>::term(TensorTraits::right_constant(delta0)),
                           TensorDiff<D>::build(nu, e.second)));
-      } else {
-        auto d = Diff<D>::build(nu, e.second);
-        rhs.emplace_back(e.first, Exp1<D>::add(Exp1<D>::term(delta0), d));
+      }
+    }
+    const bool use_tensor = tensor_admissible && has_lcfl_structure;
+    if (tensor_requested && verbose) {
+      if (!TensorTraits::available()) {
+        std::cerr << "[tensor] tensor traits unavailable for domain; "
+                     "falling back to worklist\n";
+      } else if (!has_lcfl_structure) {
+        std::cerr << "[tensor] linearized system is already left-linear; "
+                     "falling back to worklist\n";
+      } else if (!TensorTraits::paper_admissible()) {
+        std::cerr << "[tensor] tensor traits are not paper-admissible; "
+                     "falling back to worklist\n";
       }
     }
     std::vector<V> init(use_tensor ? rhs_tensor.size() : rhs.size(),
@@ -199,11 +225,20 @@ template <class D> struct NewtonSolver {
     // We only apply this bound when the domain explicitly declares
     // commutativity.
     int effective_max = max;
-    if (effective_max < 0 && D::idempotent && domain_commutative_extend<D>()) {
+    const bool auto_cap =
+        effective_max < 0 && D::idempotent && domain_commutative_extend<D>();
+    if (auto_cap) {
       effective_max = static_cast<int>(eqns.size());
     }
-    return Solver<D, NewtonIter<D>>::solve(eqns, verbose, effective_max,
-                                           linStrat);
+    auto res =
+        Solver<D, NewtonIter<D>>::solve(eqns, verbose, effective_max, linStrat);
+    if (auto_cap && !res.second.converged) {
+      if (verbose)
+        std::cerr << "[conv] automatic n-iteration bound was insufficient; "
+                     "continuing without the cap\n";
+      res = Solver<D, NewtonIter<D>>::solve(eqns, verbose, -1, linStrat);
+    }
+    return res;
   }
 };
 

@@ -111,6 +111,7 @@ using IntervalDomain = ProgramTransferDomain<IntervalOp>;
 class InterproceduralIntervalAnalysis {
 public:
   struct Result {
+    AnalysisStatus status;
     std::map<FunctionKey, IntervalDomain::value_type> summaries;
     std::map<BlockKey, IntervalState> blockFacts;
   };

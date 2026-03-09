@@ -38,6 +38,7 @@ struct AffineState {
 class InterproceduralAffineEqualities {
 public:
   struct Result {
+    AnalysisStatus status;
     std::map<FunctionKey, AffineRelationDomain::value_type> summaries;
     std::map<BlockKey, AffineRelationDomain::value_type> blockRelations;
   };

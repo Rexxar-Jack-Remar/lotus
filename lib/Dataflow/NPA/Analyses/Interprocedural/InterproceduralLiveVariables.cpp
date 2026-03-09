@@ -198,6 +198,7 @@ InterproceduralLiveVariables::run(llvm::Module &M, bool verbose,
           M, analysis, verbose, linearStrategy);
 
   Result result;
+  result.status = engineResult.status;
   result.summaries.insert(engineResult.summaries.begin(),
                           engineResult.summaries.end());
   result.blockFacts.insert(engineResult.blockEntryFacts.begin(),

@@ -80,6 +80,7 @@ InterproceduralRD::Result InterproceduralRD::run(llvm::Module &M, bool verbose,
                                                                     linearStrategy);
 
   InterproceduralRD::Result res;
+  res.status = engineResult.status;
   res.summaries.insert(engineResult.summaries.begin(),
                        engineResult.summaries.end());
   for (auto &kv : engineResult.blockEntryFacts) {

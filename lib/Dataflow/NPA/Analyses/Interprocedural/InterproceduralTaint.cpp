@@ -517,6 +517,7 @@ InterproceduralTaint::Result InterproceduralTaint::run(
                                                                      linearStrategy);
 
   InterproceduralTaint::Result res;
+  res.status = engineResult.status;
   res.summaries.insert(engineResult.summaries.begin(),
                        engineResult.summaries.end());
   for (auto &kv : engineResult.blockEntryFacts)

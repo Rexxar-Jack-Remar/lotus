@@ -22,10 +22,12 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <cstdlib>
 #include <deque>
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -59,6 +61,18 @@ template <class T> inline void hash_combine(std::size_t &h, const T &v) {
 struct Stat {
   double time{};
   int iters{};
+  bool converged = true;
+  bool hit_limit = false;
+};
+
+struct AnalysisStatus {
+  Stat summary_solve;
+  long propagation_steps = 0;
+  bool propagation_converged = true;
+  bool propagation_hit_limit = false;
+  bool approximated = false;
+  bool overall_converged = true;
+  bool overall_hit_limit = false;
 };
 
 /**********************************************************************
@@ -230,6 +244,11 @@ inline bool domain_equal(const DomVal<D> &a, const DomVal<D> &b) {
       a, b, std::integral_constant<bool, DomainHasApproxEqual<D>::value>{});
 }
 
+template <class D>
+inline bool domain_exact_equal(const DomVal<D> &a, const DomVal<D> &b) {
+  return D::equal(a, b);
+}
+
 /// Natural order for idempotent semirings: a ⊑ b  iff  a ⊕ b = b.
 template <class D>
 inline bool domain_leq_idempotent(const DomVal<D> &a, const DomVal<D> &b) {
@@ -303,6 +322,40 @@ template <class D> inline int domain_max_fixpoint_iters() {
 template <class D> inline long domain_max_linear_steps() {
   return detail::domain_max_linear_steps_impl<D>(
       std::integral_constant<bool, DomainHasMaxLinearSteps<D>::value>{});
+}
+
+inline bool &npa_limit_hit_flag() {
+  static thread_local bool flag = false;
+  return flag;
+}
+
+inline void npa_reset_limit_hit() { npa_limit_hit_flag() = false; }
+
+inline void npa_note_limit_hit() { npa_limit_hit_flag() = true; }
+
+inline bool npa_limit_hit() { return npa_limit_hit_flag(); }
+
+template <class D>
+inline bool valid_newton_delta(const DomVal<D> &f_nu, const DomVal<D> &nu,
+                               const DomVal<D> &delta) {
+  return domain_exact_equal<D>(D::combine(nu, delta), f_nu);
+}
+
+class InvalidNewtonDeltaError : public std::logic_error {
+public:
+  InvalidNewtonDeltaError()
+      : std::logic_error("invalid Newton delta: non-idempotent domains must "
+                         "provide subtract()/choose_delta() such that "
+                         "combine(nu, delta) == f(nu)") {}
+};
+
+template <class D>
+inline void require_valid_newton_delta(const DomVal<D> &f_nu,
+                                       const DomVal<D> &nu,
+                                       const DomVal<D> &delta) {
+  if (valid_newton_delta<D>(f_nu, nu, delta))
+    return;
+  throw InvalidNewtonDeltaError{};
 }
 
 } // namespace npa

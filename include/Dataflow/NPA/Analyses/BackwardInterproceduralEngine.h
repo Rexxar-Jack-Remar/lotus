@@ -25,6 +25,7 @@ public:
   using Fact = typename Analysis::FactType;
 
   struct Result {
+    AnalysisStatus status;
     std::map<FunctionKey, Val> summaries;
     std::map<BlockKey, Fact> blockEntryFacts;
   };
@@ -48,6 +49,37 @@ private:
   static Fact widenFacts(Analysis &, const Fact &, const Fact &newFact, size_t,
                          long) {
     return newFact;
+  }
+
+  template <typename A>
+  static auto hasCustomWidenFacts(const A &, int)
+      -> decltype(std::declval<A &>().widenFacts(std::declval<const Fact &>(),
+                                                 std::declval<const Fact &>(),
+                                                 std::size_t{}),
+                  bool()) {
+    return true;
+  }
+
+  static bool hasCustomWidenFacts(const Analysis &, long) { return false; }
+
+  template <typename A>
+  static auto summaryIsApproximate(const A &analysis, const Val &summary, int)
+      -> decltype(analysis.summaryIsApproximate(summary)) {
+    return analysis.summaryIsApproximate(summary);
+  }
+
+  static bool summaryIsApproximate(const Analysis &, const Val &, long) {
+    return false;
+  }
+
+  template <typename A>
+  static auto factIsApproximate(const A &analysis, const Fact &fact, int)
+      -> decltype(analysis.factIsApproximate(fact)) {
+    return analysis.factIsApproximate(fact);
+  }
+
+  static bool factIsApproximate(const Analysis &, const Fact &, long) {
+    return false;
   }
 
   template <typename A>
@@ -356,11 +388,16 @@ public:
       solvedMap[p.first] = p.second;
 
     Result res;
+    res.status.summary_solve = rawRes.second;
+    res.status.approximated = !rawRes.second.converged;
     for (const auto &entry : functionSymbols) {
       auto exprIt = fullSummaryExprs.find(entry.first);
       if (exprIt == fullSummaryExprs.end())
         continue;
-      res.summaries[entry.second] = I0<D>::eval(false, solvedMap, exprIt->second);
+      Val summary = I0<D>::eval(false, solvedMap, exprIt->second);
+      if (summaryIsApproximate(analysis, summary, 0))
+        res.status.approximated = true;
+      res.summaries[entry.second] = summary;
     }
 
     std::deque<llvm::Function *> worklist2;
@@ -379,6 +416,9 @@ public:
 
     while (!worklist2.empty()) {
       if (maxPropagationSteps >= 0 && propagationSteps++ >= maxPropagationSteps) {
+        res.status.propagation_hit_limit = true;
+        res.status.propagation_converged = false;
+        res.status.approximated = true;
         if (verbose)
           std::cerr << "[interproc-bwd] hit max propagation steps="
                     << maxPropagationSteps << "\n";
@@ -400,6 +440,8 @@ public:
 
         res.blockEntryFacts[{&BB}] =
             analysis.applySummary(SolvedBlockIt->second, exitFact);
+        if (factIsApproximate(analysis, res.blockEntryFacts[{&BB}], 0))
+          res.status.approximated = true;
 
         Val blockEndToExit = D::one();
         auto *Term = BB.getTerminator();
@@ -456,6 +498,8 @@ public:
                     size_t updateCount = ++funcUpdates[calleeSym];
                     Fact widened = widenFacts(analysis, Existing->second, joined,
                                               updateCount, 0);
+                    if (hasCustomWidenFacts(analysis, 0))
+                      res.status.approximated = true;
                     if (!analysis.factsEqual(widened, Existing->second)) {
                       Existing->second = widened;
                       if (inWorklist2.insert(Callee).second)
@@ -483,6 +527,11 @@ public:
         }
       }
     }
+    res.status.propagation_steps = propagationSteps;
+    res.status.overall_hit_limit =
+        res.status.summary_solve.hit_limit || res.status.propagation_hit_limit;
+    res.status.overall_converged =
+        res.status.summary_solve.converged && res.status.propagation_converged;
 
     return res;
   }

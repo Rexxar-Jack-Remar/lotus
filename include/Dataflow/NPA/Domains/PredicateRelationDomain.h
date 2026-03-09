@@ -123,6 +123,7 @@ template <> struct TensorSemiringTraits<PredicateRelationDomain> {
   using tensor_domain = PredicateTensorDomain;
 
   static bool available() { return true; }
+  static bool paper_admissible() { return true; }
 
   static tensor_domain::value_type
   right_constant(const PredicateRelationDomain::value_type &value) {

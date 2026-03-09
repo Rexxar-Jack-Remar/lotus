@@ -13,6 +13,7 @@ namespace npa {
 class InterproceduralRD {
 public:
   struct Result {
+    AnalysisStatus status;
     std::map<FunctionKey, GenKillDomain::value_type> summaries;
     std::map<BlockKey, llvm::APInt> blockFacts;
   };

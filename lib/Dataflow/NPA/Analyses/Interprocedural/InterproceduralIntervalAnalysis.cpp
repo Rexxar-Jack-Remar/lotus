@@ -496,6 +496,10 @@ public:
     return lhs == rhs;
   }
 
+  bool summaryIsApproximate(const D::value_type &summary) const {
+    return summary.overflow;
+  }
+
 private:
   FactType overflowFact(const D::value_type &summary, const FactType &fact) const {
     FactType out;
@@ -900,6 +904,7 @@ InterproceduralIntervalAnalysis::run(llvm::Module &M, bool verbose,
                                                                    linearStrategy);
 
   Result result;
+  result.status = engineResult.status;
   result.summaries.insert(engineResult.summaries.begin(),
                           engineResult.summaries.end());
   result.blockFacts.insert(engineResult.blockEntryFacts.begin(),

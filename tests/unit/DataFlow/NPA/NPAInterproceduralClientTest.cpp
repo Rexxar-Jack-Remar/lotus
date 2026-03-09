@@ -218,6 +218,45 @@ public:
   }
 };
 
+struct LimitedBoolDomain {
+  using value_type = bool;
+  using test_type = bool;
+  static constexpr bool idempotent = true;
+  static constexpr long max_linear_steps = 0;
+
+  static value_type zero() { return false; }
+  static value_type one() { return true; }
+  static bool equal(value_type lhs, value_type rhs) { return lhs == rhs; }
+  static value_type combine(value_type lhs, value_type rhs) {
+    return lhs || rhs;
+  }
+  static value_type ndetCombine(value_type lhs, value_type rhs) {
+    return combine(lhs, rhs);
+  }
+  static value_type condCombine(bool phi, value_type t, value_type e) {
+    return phi ? t : e;
+  }
+  static value_type extend(value_type lhs, value_type rhs) { return lhs && rhs; }
+  static value_type extend_lin(value_type lhs, value_type rhs) {
+    return extend(lhs, rhs);
+  }
+  static value_type subtract(value_type lhs, value_type rhs) {
+    return lhs && !rhs;
+  }
+};
+
+class LimitedBoolAnalysis {
+public:
+  using FactType = bool;
+  using E = npa::E0<LimitedBoolDomain>;
+
+  FactType getEntryValue() const { return true; }
+  E getTransfer(llvm::Instruction &, E currentPath) const { return currentPath; }
+  FactType applySummary(bool summary, bool fact) const { return summary && fact; }
+  FactType joinFacts(bool lhs, bool rhs) const { return lhs || rhs; }
+  bool factsEqual(bool lhs, bool rhs) const { return lhs == rhs; }
+};
+
 class ProjectedSummaryAnalysis {
 public:
   using FactType = ProjectedStringDomain::value_type;
@@ -367,6 +406,28 @@ TEST(NPAInterproceduralClients, GenericBlockEntryHookAppliesToEntryAndSuccessorB
   EXPECT_TRUE(containsPath(*exitStates.front(), {'E', 'M', 'E'}));
 }
 
+TEST(NPAInterproceduralClients, InterproceduralEngineReportsBoundedSolverResults) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main() {
+    entry:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  LimitedBoolAnalysis analysis;
+  auto result =
+      npa::InterproceduralEngine<LimitedBoolDomain, LimitedBoolAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::Worklist);
+
+  EXPECT_FALSE(result.status.summary_solve.converged);
+  EXPECT_TRUE(result.status.summary_solve.hit_limit);
+  EXPECT_FALSE(result.status.overall_converged);
+  EXPECT_TRUE(result.status.overall_hit_limit);
+  EXPECT_TRUE(result.status.approximated);
+}
+
 TEST(NPAInterproceduralClients, ConstantPropagationTransfersArgumentsAcrossCall) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
@@ -418,6 +479,11 @@ TEST(NPAInterproceduralClients, InterproceduralClientsAcceptTensorStrategyOnDema
 
   auto result = npa::InterproceduralConstantPropagation::run(
       *module, false, npa::LinearStrategy::TensorProduct);
+  EXPECT_TRUE(result.status.summary_solve.converged);
+  EXPECT_FALSE(result.status.summary_solve.hit_limit);
+  EXPECT_TRUE(result.status.overall_converged);
+  EXPECT_FALSE(result.status.overall_hit_limit);
+  EXPECT_FALSE(result.status.approximated);
   auto states = statesForBlock(result.blockFacts, &Id->getEntryBlock());
   ASSERT_EQ(states.size(), 1u);
   auto It = states.front()->values.find(Arg);
@@ -1535,6 +1601,7 @@ template <> struct TensorSemiringTraits<BackwardTensorLangDomain> {
   using tensor_domain = TensorProductExactDomain<BackwardTensorLangDomain>;
 
   static bool available() { return true; }
+  static bool paper_admissible() { return false; }
 
   static tensor_domain::value_type
   right_constant(const BackwardTensorLangDomain::value_type &v) {
@@ -1602,7 +1669,7 @@ TEST(NPAInterproceduralClients, BackwardEngineAppliesEdgeTransfers) {
 }
 
 TEST(NPAInterproceduralClients,
-     BackwardTensorStrategyHandlesInterproceduralCallsWithoutFallback) {
+     BackwardTensorStrategyFallsBackCleanlyForLeftLinearInterproceduralCalls) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @callee() {
@@ -1631,7 +1698,7 @@ TEST(NPAInterproceduralClients,
   auto Facts = statesForBlock(result.blockEntryFacts, &Main->getEntryBlock());
   ASSERT_EQ(Facts.size(), 1u);
   EXPECT_TRUE(Facts.front()->count("er"));
-  EXPECT_EQ(stderrOutput.find("falling back"), std::string::npos);
+  EXPECT_NE(stderrOutput.find("already left-linear"), std::string::npos);
 }
 
 TEST(NPAInterproceduralClients, ProgramTransferDomainPreservesLongPaths) {

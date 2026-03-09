@@ -32,6 +32,7 @@ template <class D, class F> auto fix(bool verbose, DomVal<D> init, F f) {
     last = std::move(nxt);
     ++cnt;
     if (max_iters >= 0 && cnt >= max_iters) {
+      npa_note_limit_hit();
       if (verbose)
         std::cerr << "[fp] hit max_fixpoint_iters=" << max_iters << "\n";
       return last;
@@ -62,6 +63,7 @@ Vec fix_vec(bool verbose, Vec init, F f) {
     init.swap(nxt);
     ++cnt;
     if (max_iters >= 0 && cnt >= max_iters) {
+      npa_note_limit_hit();
       if (verbose)
         std::cerr << "[fp] hit max_fixpoint_iters=" << max_iters << "\n";
       return init;

@@ -15,6 +15,8 @@ private:
       -> typename std::enable_if<
           std::is_same<decltype(TensorSemiringTraits<T>::available()),
                        bool>::value &&
+              std::is_same<decltype(TensorSemiringTraits<T>::paper_admissible()),
+                           bool>::value &&
               std::is_same<
                   decltype(TensorSemiringTraits<T>::right_constant(
                       std::declval<const DomVal<T> &>())),
@@ -48,6 +50,7 @@ public:
 template <class D> inline void validate_tensor_trait_api() {
   static_assert(detail::TensorTraitsWellFormed<D>::value,
                 "TensorSemiringTraits<D> must define available(), "
+                "paper_admissible(), "
                 "right_constant(), left_constant(), couple(), and readout() "
                 "with the expected tensor/base-domain types");
 }
@@ -69,6 +72,11 @@ template <class D> struct TensorSemiringTraits {
   using tensor_domain = TensorProductExactDomain<D>;
 
   static bool available() { return false; }
+
+  /// Whether the specialization claims to satisfy the admissible-semiring
+  /// laws from TOPLAS 2016 Defn. 4.1 / Thm. 5.1, rather than merely providing
+  /// a utility tensorization with compatible types.
+  static bool paper_admissible() { return false; }
 
   static typename tensor_domain::value_type right_constant(const DomVal<D> &v) {
     return domain_equal<D>(v, D::zero()) ? tensor_domain::zero()

@@ -13,6 +13,7 @@ namespace npa {
 class InterproceduralMaybeUninitialized {
 public:
   struct Result {
+    AnalysisStatus status;
     std::map<FunctionKey, TaintTransferDomain::value_type> summaries;
     std::map<BlockKey, llvm::APInt> blockFacts;
   };

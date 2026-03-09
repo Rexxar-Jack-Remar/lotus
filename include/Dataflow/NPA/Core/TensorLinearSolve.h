@@ -425,9 +425,9 @@ template <class TD> struct TensorTarjanPlan {
 
 /// Build and cache the dependency-graph regex topology used by the Tarjan fast
 /// path. This is the implementation's equivalent of Alg. 7.1's parameterized
-/// regular-expression step: the cached plan captures the left-linear dependency
-/// structure and regex topology, while the tensor labels are supplied freshly on
-/// each Newton round.
+/// regular-expression step: the cache stores the topology and symbol slots of
+/// the left-linear dependency graph, while the current-round tensor labels are
+/// supplied separately on each Newton round.
 template <class TD>
 Optional<TensorTarjanPlan<TD>>
 get_tensor_tarjan_plan(bool verbose,
@@ -595,10 +595,16 @@ solve_linear_tensor_impl(bool verbose,
                          std::vector<DomVal<D>> init) {
   validate_tensor_trait_api<D>();
   using Traits = TensorSemiringTraits<D>;
-    using TD = typename Traits::tensor_domain;
+  using TD = typename Traits::tensor_domain;
   if (!Traits::available()) {
     if (verbose)
       std::cerr << "[tensor] tensor traits unavailable for domain; "
+                   "falling back to worklist\n";
+    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+  }
+  if (!Traits::paper_admissible()) {
+    if (verbose)
+      std::cerr << "[tensor] tensor traits are not paper-admissible; "
                    "falling back to worklist\n";
     return solve_linear_worklist_impl<D>(verbose, rhs, init);
   }

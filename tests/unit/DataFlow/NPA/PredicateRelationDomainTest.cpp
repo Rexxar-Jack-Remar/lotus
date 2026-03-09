@@ -15,7 +15,20 @@ sortedTransitions(const D::value_type &relation) {
   return transitions;
 }
 
+std::vector<
+    std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>>
+sortedTensorTransitions(const TD::value_type &relation) {
+  auto transitions = TD::materialize(relation);
+  std::sort(transitions.begin(), transitions.end());
+  return transitions;
+}
+
 } // namespace
+
+TEST(NPA, PredicateTensorTraitsDeclarePaperAdmissibility) {
+  EXPECT_TRUE(npa::TensorSemiringTraits<D>::available());
+  EXPECT_TRUE(npa::TensorSemiringTraits<D>::paper_admissible());
+}
 
 TEST(NPA, PredicateRelationIdentityAndAssignmentCompose) {
   D::configure(1);
@@ -92,6 +105,39 @@ TEST(NPA, PredicateRelationTransposeIsInvolutive) {
   EXPECT_TRUE(D::equal(twice, relation));
 }
 
+TEST(NPA, PredicateRelationTransposeReversesCompositionOrder) {
+  D::configure(1);
+
+  auto lhs = D::assignConst(0, true);
+  auto rhs = D::assume(0, false);
+
+  auto composed_then_transposed = D::transpose(D::extend(lhs, rhs));
+  auto transposed_then_composed =
+      D::extend(D::transpose(rhs), D::transpose(lhs));
+
+  EXPECT_TRUE(D::equal(composed_then_transposed, transposed_then_composed));
+}
+
+TEST(NPA, PredicateTensorCoupleMatchesTransposeKroneckerLayout) {
+  D::configure(1);
+
+  auto lhs = D::assignConst(0, true);
+  auto rhs = D::assume(0, false);
+  auto coupled = TD::couple(lhs, rhs);
+
+  std::vector<
+      std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>>
+      expected;
+  for (const auto &left : D::materialize(D::transpose(lhs))) {
+    for (const auto &right : D::materialize(rhs)) {
+      expected.emplace_back(left.first, right.first, left.second, right.second);
+    }
+  }
+  std::sort(expected.begin(), expected.end());
+
+  EXPECT_EQ(sortedTensorTransitions(coupled), expected);
+}
+
 TEST(NPA, PredicateTensorCoupleCompositionMatchesMatchedContexts) {
   D::configure(1);
 
@@ -105,6 +151,32 @@ TEST(NPA, PredicateTensorCoupleCompositionMatchesMatchedContexts) {
   auto expected = D::extend(D::extend(a2, a1), D::extend(b1, b2));
 
   EXPECT_TRUE(D::equal(readout, expected));
+}
+
+TEST(NPA, PredicateTensorComposeMatchesCoupledMatchedComposition) {
+  D::configure(1);
+
+  auto a1 = D::one();
+  auto b1 = D::assignConst(0, true);
+  auto a2 = D::assume(0, false);
+  auto b2 = D::one();
+
+  auto lhs = TD::extend(TD::couple(a1, b1), TD::couple(a2, b2));
+  auto rhs = TD::couple(D::extend(a2, a1), D::extend(b1, b2));
+
+  EXPECT_TRUE(TD::equal(lhs, rhs));
+}
+
+TEST(NPA, PredicateTensorReadoutDistributesOverFiniteCombine) {
+  D::configure(1);
+
+  auto first = TD::couple(D::one(), D::assignConst(0, true));
+  auto second = TD::couple(D::assume(0, false), D::one());
+
+  auto lhs = TD::readout(TD::combine(first, second));
+  auto rhs = D::combine(TD::readout(first), TD::readout(second));
+
+  EXPECT_TRUE(D::equal(lhs, rhs));
 }
 
 TEST(NPA, PredicateRelationProjectElidesLocalUpdates) {

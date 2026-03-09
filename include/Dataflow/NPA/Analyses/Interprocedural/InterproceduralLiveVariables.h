@@ -15,6 +15,7 @@ namespace npa {
 class InterproceduralLiveVariables {
 public:
   struct Result {
+    AnalysisStatus status;
     std::map<FunctionKey, TaintTransferDomain::value_type> summaries;
     std::map<BlockKey, llvm::APInt> blockFacts;
     std::unordered_map<const llvm::Value *, unsigned> valueBits;

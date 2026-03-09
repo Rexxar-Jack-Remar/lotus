@@ -80,6 +80,7 @@ using ConstantPropagationDomain =
 class InterproceduralConstantPropagation {
 public:
   struct Result {
+    AnalysisStatus status;
     std::map<FunctionKey, ConstantPropagationDomain::value_type> summaries;
     std::map<BlockKey, ConstantPropagationState> blockFacts;
   };
