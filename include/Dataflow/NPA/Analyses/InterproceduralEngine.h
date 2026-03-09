@@ -232,6 +232,33 @@ private:
   }
 
   template <typename A>
+  static auto getPossibleCalleesForAnalysis(A &analysis, llvm::Module &M,
+                                            const llvm::CallBase &call, int)
+      -> decltype(analysis.getPossibleCallees(M, call)) {
+    return analysis.getPossibleCallees(M, call);
+  }
+
+  static std::vector<llvm::Function *>
+  getPossibleCalleesForAnalysis(Analysis &, llvm::Module &M,
+                                const llvm::CallBase &call, long) {
+    return getPossibleCallees(M, call);
+  }
+
+  template <typename A>
+  static auto getCallFallbackTransfer(A &analysis, const llvm::CallBase &call,
+                                      const std::vector<llvm::Function *> &callees,
+                                      int)
+      -> decltype(analysis.getCallFallbackTransfer(call, callees)) {
+    return analysis.getCallFallbackTransfer(call, callees);
+  }
+
+  static typename D::value_type
+  getCallFallbackTransfer(Analysis &, const llvm::CallBase &,
+                          const std::vector<llvm::Function *> &, long) {
+    return D::zero();
+  }
+
+  template <typename A>
   static auto getEdgeTransfer(A &analysis, const llvm::Instruction &term,
                               const llvm::BasicBlock &succ, int)
       -> decltype(analysis.getEdgeTransfer(term, succ)) {
@@ -401,7 +428,8 @@ private:
                               llvm::Module &M, std::deque<llvm::Function *> &worklist,
                               std::set<llvm::Function *> &visited) {
     if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-      std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+      std::vector<llvm::Function *> Callees =
+          getPossibleCalleesForAnalysis(analysis, M, *CI, 0);
       if (!Callees.empty()) {
         E callBranches = nullptr;
         for (llvm::Function *Callee : Callees) {
@@ -414,6 +442,12 @@ private:
           branch =
               Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0), branch);
           callBranches = combineExpr(callBranches, branch);
+        }
+        Val fallbackTransfer =
+            getCallFallbackTransfer(analysis, *CI, Callees, 0);
+        if (!D::equal(fallbackTransfer, D::zero())) {
+          E fallbackBranch = Exp::seq(fallbackTransfer, currentPath);
+          callBranches = combineExpr(callBranches, fallbackBranch);
         }
         currentPath = callBranches;
       } else {

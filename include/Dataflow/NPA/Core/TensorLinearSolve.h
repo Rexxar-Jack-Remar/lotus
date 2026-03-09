@@ -9,11 +9,10 @@
  * paired semiring (TensorProductDomain): pair (a,b) represents left/right
  * context so that a·Y·b becomes Y ⊗_p (a,b). The left-linear system is
  * solved by Tarjan-style parameterized path expressions (with a tensor-space
- * worklist fallback only for non-Project systems); then we \e project back to
- * the base domain (readout R((w1,w2)) = w1⊗w2). Projection operators are kept
- * on the tensor path only for the Section 8 projection-equation fragment, where
- * ProjectT can be pushed to constants; broader Project shapes fall back to the
- * base worklist solver.
+ * worklist fallback when extraction fails); then we \e project back to the base
+ * domain (readout R((w1,w2)) = w1⊗w2). For domains that implement the Section 8
+ * ProjectT laws, projected left-linear fragments stay on the tensor path by
+ * pushing ProjectT down to tensor coefficients before extraction.
  *
  * The implementation uses an exact correlated representation in tensor space
  * for idempotent domains. This avoids correlation loss at projection time, at
@@ -303,52 +302,12 @@ template <class TD> struct TensorLeftLinearFragment {
   std::vector<std::pair<Symbol, V>> terms;
 };
 
-template <class TD> struct TensorProjectionSystemDetector {
-  using E = E1<TD>;
-
-  static bool
-  is_projection_equation_system(const std::vector<std::pair<Symbol, E>> &rhs) {
-    bool saw_project = false;
-    for (const auto &eqn : rhs) {
-      if (has_nonconstant_nested_project(eqn.second, true))
-        return false;
-      if (eqn.second && eqn.second->k == Exp1<TD>::Project &&
-          !Exp1ConstEval<TD>::eval(eqn.second).has_value()) {
-        saw_project = true;
-      }
-    }
-    return saw_project;
-  }
-
-private:
-  static bool has_nonconstant_nested_project(const E &e, bool at_root) {
-    if (!e)
-      return false;
-    if (Exp1ConstEval<TD>::eval(e).has_value())
-      return false;
-    using K = typename Exp1<TD>::K;
-    if (e->k == K::Project) {
-      if (!at_root)
-        return true;
-      return has_nonconstant_nested_project(e->t, false);
-    }
-    if (e->t && has_nonconstant_nested_project(e->t, false))
-      return true;
-    if (e->t1 && has_nonconstant_nested_project(e->t1, false))
-      return true;
-    if (e->t2 && has_nonconstant_nested_project(e->t2, false))
-      return true;
-    return false;
-  }
-};
-
 template <class TD> struct TensorLeftLinearExtractor {
   using V = typename TD::value_type;
   using Frag = TensorLeftLinearFragment<TD>;
 
   static Optional<Frag> extract(const E1<TD> &e,
-                                bool allow_project_pushdown = false,
-                                bool at_root = true) {
+                                bool allow_project_pushdown = false) {
     auto c = Exp1ConstEval<TD>::eval(e);
     if (c.has_value()) {
       Optional<Frag> out;
@@ -368,7 +327,7 @@ template <class TD> struct TensorLeftLinearExtractor {
       return out;
     }
     case K::SeqR: {
-      auto inner = extract(e->t, allow_project_pushdown, false);
+      auto inner = extract(e->t, allow_project_pushdown);
       if (!inner.has_value())
         return {};
       Frag frag = *inner;
@@ -380,17 +339,17 @@ template <class TD> struct TensorLeftLinearExtractor {
       return out;
     }
     case K::Project: {
-      if (!allow_project_pushdown || !at_root)
+      if (!allow_project_pushdown)
         return {};
-      auto inner = extract(e->t, false, false);
+      auto inner = extract(e->t, allow_project_pushdown);
       if (!inner.has_value())
         return {};
       return project_fragment(*inner);
     }
     case K::Add:
     case K::Ndet: {
-      auto lhs = extract(e->t1, allow_project_pushdown, false);
-      auto rhs = extract(e->t2, allow_project_pushdown, false);
+      auto lhs = extract(e->t1, allow_project_pushdown);
+      auto rhs = extract(e->t2, allow_project_pushdown);
       if (!lhs.has_value() || !rhs.has_value())
         return {};
       Frag frag;
@@ -440,7 +399,8 @@ template <class TD> struct TensorTarjanPlan {
 template <class TD>
 Optional<TensorTarjanPlan<TD>>
 get_tensor_tarjan_plan(bool verbose,
-                       const std::vector<std::pair<Symbol, E1<TD>>> &rhs) {
+                       const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
+                       bool allow_project_pushdown = false) {
   using V = typename TD::value_type;
   using Frag = typename TensorLeftLinearExtractor<TD>::Frag;
   using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
@@ -453,12 +413,10 @@ get_tensor_tarjan_plan(bool verbose,
   signature << rhs.size() << ';';
   std::vector<Frag> fragments;
   fragments.reserve(rhs.size());
-  const bool projection_system =
-      TensorProjectionSystemDetector<TD>::is_projection_equation_system(rhs);
 
   for (int i = 0; i < static_cast<int>(rhs.size()); ++i) {
-    auto extracted =
-        TensorLeftLinearExtractor<TD>::extract(rhs[i].second, projection_system);
+    auto extracted = TensorLeftLinearExtractor<TD>::extract(
+        rhs[i].second, allow_project_pushdown);
     if (!extracted.has_value()) {
       if (verbose)
         std::cerr << "[tensor] expression not extractable to left-linear graph; "
@@ -535,18 +493,17 @@ get_tensor_tarjan_plan(bool verbose,
 /// tensor coefficients.
 template <class TD>
 std::vector<typename TD::value_type> instantiate_tensor_tarjan_labels(
-    const std::vector<std::pair<Symbol, E1<TD>>> &rhs) {
+    const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
+    bool allow_project_pushdown = false) {
   using V = typename TD::value_type;
   using Frag = typename TensorLeftLinearExtractor<TD>::Frag;
 
   std::vector<V> labels;
   labels.reserve(rhs.size() * 2U);
-  const bool projection_system =
-      TensorProjectionSystemDetector<TD>::is_projection_equation_system(rhs);
 
   for (const auto &eqn : rhs) {
-    auto extracted =
-        TensorLeftLinearExtractor<TD>::extract(eqn.second, projection_system);
+    auto extracted = TensorLeftLinearExtractor<TD>::extract(
+        eqn.second, allow_project_pushdown);
     assert(extracted.has_value() &&
            "instantiate_tensor_tarjan_labels must be called only after a "
            "successful get_tensor_tarjan_plan()");
@@ -576,7 +533,8 @@ std::vector<typename TD::value_type> evaluate_tensor_tarjan_plan(
 template <class TD>
 Optional<std::vector<typename TD::value_type>> solve_linear_tensor_tarjan_impl(
     bool verbose, const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
-    const std::vector<typename TD::value_type> &init) {
+    const std::vector<typename TD::value_type> &init,
+    bool allow_project_pushdown = DomainHasProjectT<TD>::value) {
   using V = typename TD::value_type;
   for (const auto &seed : init) {
     if (!domain_equal<TD>(seed, TD::zero())) {
@@ -587,10 +545,11 @@ Optional<std::vector<typename TD::value_type>> solve_linear_tensor_tarjan_impl(
     }
   }
 
-  auto plan = get_tensor_tarjan_plan<TD>(verbose, rhs);
+  auto plan = get_tensor_tarjan_plan<TD>(verbose, rhs, allow_project_pushdown);
   if (!plan.has_value())
     return {};
-  auto labels = instantiate_tensor_tarjan_labels<TD>(rhs);
+  auto labels =
+      instantiate_tensor_tarjan_labels<TD>(rhs, allow_project_pushdown);
   auto out = evaluate_tensor_tarjan_plan<TD>(*plan, labels);
 
   Optional<std::vector<V>> solved;
@@ -620,6 +579,7 @@ Optional<std::vector<DomVal<D>>> solve_linear_tensor_tarjan_only_impl(
   using Traits = TensorSemiringTraits<D>;
   using TD = typename Traits::tensor_domain;
   using VT = typename TD::value_type;
+  const bool allow_project_pushdown = tensor_supports_projection_equations<D>();
 
   std::vector<VT> init_tensor;
   init_tensor.reserve(init.size());
@@ -627,7 +587,8 @@ Optional<std::vector<DomVal<D>>> solve_linear_tensor_tarjan_only_impl(
     init_tensor.emplace_back(lift_base_value_to_tensor<D>(v));
 
   auto delta_tensor =
-      solve_linear_tensor_tarjan_impl<TD>(verbose, rhs_tensor, init_tensor);
+      solve_linear_tensor_tarjan_impl<TD>(verbose, rhs_tensor, init_tensor,
+                                          allow_project_pushdown);
   if (!delta_tensor.has_value())
     return {};
 
@@ -651,13 +612,15 @@ std::vector<DomVal<D>> solve_linear_tensorized_impl(
   using Traits = TensorSemiringTraits<D>;
   using TD = typename Traits::tensor_domain;
   using VT = typename TD::value_type;
+  const bool allow_project_pushdown = tensor_supports_projection_equations<D>();
 
   std::vector<VT> init_tensor;
   init_tensor.reserve(init.size());
   for (const auto &v : init)
     init_tensor.emplace_back(lift_base_value_to_tensor<D>(v));
   auto delta_tensor =
-      solve_linear_tensor_tarjan_impl<TD>(verbose, rhs_tensor, init_tensor);
+      solve_linear_tensor_tarjan_impl<TD>(verbose, rhs_tensor, init_tensor,
+                                          allow_project_pushdown);
   if (!delta_tensor.has_value())
     delta_tensor = solve_linear_worklist_impl<TD>(verbose, rhs_tensor, init_tensor);
   std::vector<DomVal<D>> delta;
@@ -676,8 +639,6 @@ std::vector<DomVal<D>> solve_linear_tensor_paper_impl(
   validate_tensor_trait_api<D>();
   using TD = typename TensorSemiringTraits<D>::tensor_domain;
 
-  const bool projection_system =
-      TensorProjectionSystemDetector<TD>::is_projection_equation_system(rhs_tensor);
   const bool projection_sensitive =
       tensor_rhs_has_nonconstant_project<TD>(rhs_tensor);
   const bool projection_fragment_supported =
@@ -690,23 +651,15 @@ std::vector<DomVal<D>> solve_linear_tensor_paper_impl(
     return solve_linear_worklist_impl<D>(verbose, rhs, init);
   }
 
-  if (projection_sensitive && !projection_system) {
-    if (verbose)
-      std::cerr << "[tensor] Project is outside the paper-backed projection "
-                   "equation fragment; falling back to worklist\n";
-    return solve_linear_worklist_impl<D>(verbose, rhs, init);
-  }
-
-  if (projection_system) {
+  if (projection_sensitive) {
     auto tarjan_only =
         solve_linear_tensor_tarjan_only_impl<D>(verbose, rhs_tensor, init);
     if (tarjan_only.has_value())
       return *tarjan_only;
     if (verbose)
-      std::cerr << "[tensor] projection equation system is not Tarjan-"
+      std::cerr << "[tensor] Project-sensitive tensor system is not Tarjan-"
                    "extractable after ProjectT pushdown; falling back to "
-                   "worklist\n";
-    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+                   "tensor worklist\n";
   }
 
   return solve_linear_tensorized_impl<D>(verbose, rhs_tensor, init);

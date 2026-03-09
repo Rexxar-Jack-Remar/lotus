@@ -83,12 +83,32 @@ void TaintConfigParser::parse_line(const std::string &line,
   } else if (directive == "SINK") {
     config.sinks.insert(func_name);
 
-    // Parse sink specifications similarly
-    for (size_t i = 2; i + 3 <= tokens.size(); i += 3) {
+    // Parse sink specifications.
+    // Most sink specs use the compact 2-token form:
+    //   SINK printf Arg0 D
+    // where the taint type is implicitly "T".
+    // Keep support for an explicit 3-token form as well.
+    for (size_t i = 2; i < tokens.size();) {
       TaintSpec spec;
-      if (parse_taint_spec(tokens, i, spec)) {
+      bool parsed = false;
+      size_t advance = 0;
+
+      if (i + 3 <= tokens.size() &&
+          (tokens[i + 2] == "T" || tokens[i + 2] == "U")) {
+        parsed = parse_taint_spec(tokens, i, spec);
+        advance = 3;
+      } else if (i + 2 <= tokens.size()) {
+        std::vector<std::string> implicit_tokens = {tokens[i], tokens[i + 1], "T"};
+        parsed = parse_taint_spec(implicit_tokens, 0, spec);
+        advance = 2;
+      } else {
+        break;
+      }
+
+      if (parsed) {
         config.function_specs[func_name].sink_specs.push_back(spec);
       }
+      i += advance;
     }
   } else if (directive == "IGNORE") {
     config.ignored.insert(func_name);

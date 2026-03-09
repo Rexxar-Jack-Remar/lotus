@@ -451,7 +451,7 @@ TEST(NPA, TensorRegularizationRejectsSubExpressions) {
   EXPECT_EQ(wl[0], (BoundedLangSemiring::value_type{"a"}));
 }
 
-TEST(NPA, TensorTarjanRejectsProjectOutsideProjectionEquationSystems) {
+TEST(NPA, TensorTarjanSupportsProjectedLeftLinearFragments) {
   using D = npa::PredicateRelationDomain;
   using E1 = npa::E1<D>;
   using Exp = npa::Exp1<D>;
@@ -478,13 +478,15 @@ TEST(NPA, TensorTarjanRejectsProjectOutsideProjectionEquationSystems) {
   auto tarjan = npa::solve_linear_tensor_tarjan_impl<TD>(false, rhs_tensor,
                                                          init_tensor);
 
-  ASSERT_FALSE(tarjan.has_value());
+  ASSERT_TRUE(tarjan.has_value());
+  ASSERT_EQ((*tarjan).size(), 1u);
   ASSERT_EQ(wl.size(), 1u);
   ASSERT_EQ(tp.size(), 1u);
   EXPECT_TRUE(D::equal(wl[0], tp[0]));
+  EXPECT_TRUE(D::equal(npa::TensorSemiringTraits<D>::readout((*tarjan)[0]), wl[0]));
 }
 
-TEST(NPA, HighLevelTensorFallsBackForProjectOutsideProjectionEquationSystems) {
+TEST(NPA, HighLevelTensorKeepsProjectedLeftLinearFragmentsOnTensorPath) {
   using D = npa::PredicateRelationDomain;
   using E1 = npa::E1<D>;
   using Exp = npa::Exp1<D>;
@@ -510,7 +512,7 @@ TEST(NPA, HighLevelTensorFallsBackForProjectOutsideProjectionEquationSystems) {
   ASSERT_EQ(wl.size(), 1u);
   ASSERT_EQ(tp.size(), 1u);
   EXPECT_TRUE(D::equal(wl[0], tp[0]));
-  EXPECT_NE(stderr_output.find("projection equation fragment"), std::string::npos);
+  EXPECT_EQ(stderr_output.find("falling back"), std::string::npos);
 }
 
 TEST(NPA, TensorRegularizationSupportsCallTerms) {
