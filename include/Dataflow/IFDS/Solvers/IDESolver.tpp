@@ -64,6 +64,9 @@ IDESolver<Problem>::compose_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2) {
 template<typename Problem>
 typename IDESolver<Problem>::EdgeFunctionPtr
 IDESolver<Problem>::join_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2) {
+    if (f1 == f2) {
+        return f1;
+    }
     if (!m_config.enable_edge_function_caching()) {
         EdgeFunction joined = m_problem.join_edge_functions(*f1, *f2);
         if (m_problem.edge_function_equivalent(joined, *f1)) {
@@ -257,12 +260,15 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         }
     };
 
-    // Initialize initial seeds
-    auto seeds = m_graph_context.build_initial_seeds(m_problem, module);
+    // Initialize initial seeds (Phasar-style: instruction -> fact -> value)
+    auto ide_seeds = m_problem.initial_ide_seeds(module);
 
-    for (const auto& pair : seeds.get_seeds()) {
+    for (const auto& pair : ide_seeds.get_seeds()) {
         const llvm::Instruction* entry = pair.first;
-        FactSet facts = pair.second;
+        FactSet facts;
+        for (const auto& fv : pair.second) {
+            facts.insert(fv.first);
+        }
         if (m_problem.auto_add_zero()) {
             bool has_zero = false;
             for (const auto& fact : facts) {
@@ -567,9 +573,13 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     };
 
     std::vector<StartKey> value_worklist;
-    for (const auto& pair : seeds.get_seeds()) {
+    for (const auto& pair : ide_seeds.get_seeds()) {
         const llvm::Instruction* entry = pair.first;
-        FactSet facts = pair.second;
+        auto seed_values = pair.second;
+        FactSet facts;
+        for (const auto& fv : seed_values) {
+            facts.insert(fv.first);
+        }
         if (m_problem.auto_add_zero()) {
             bool has_zero = false;
             for (const auto& fact : facts) {
@@ -579,11 +589,16 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                 }
             }
             if (!has_zero) {
-                facts.insert(m_problem.zero_fact());
+                const Fact zero_fact = m_problem.zero_fact();
+                facts.insert(zero_fact);
+                seed_values[zero_fact] = m_problem.top_value();
             }
         }
         for (const auto& fact : facts) {
-            if (update_value(entry, fact, m_problem.top_value())) {
+            auto it = seed_values.find(fact);
+            Value seed_value =
+                (it != seed_values.end()) ? it->second : m_problem.top_value();
+            if (update_value(entry, fact, seed_value)) {
                 value_worklist.push_back(StartKey{entry, fact});
             }
         }

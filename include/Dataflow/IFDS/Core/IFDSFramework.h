@@ -171,6 +171,30 @@ template <typename Fact> struct InitialSeeds {
   SeedMap seeds;
 };
 
+template <typename Fact, typename Value> struct IDEInitialSeeds {
+  using ValueMap = std::unordered_map<Fact, Value>;
+  using SeedMap = std::unordered_map<const llvm::Instruction *, ValueMap>;
+
+  void add_seed(const llvm::Instruction *inst, const Fact &fact,
+                const Value &value) {
+    seeds[inst][fact] = value;
+  }
+
+  void add_seed(const llvm::Instruction *inst, const ValueMap &facts) {
+    auto &map = seeds[inst];
+    map.insert(facts.begin(), facts.end());
+  }
+
+  void add_seed_instruction(const llvm::Instruction *inst) {
+    (void)seeds[inst];
+  }
+
+  const SeedMap &get_seeds() const { return seeds; }
+  bool empty() const { return seeds.empty(); }
+
+  SeedMap seeds;
+};
+
 // ============================================================================
 // IFDS Problem Interface
 // ============================================================================
@@ -196,13 +220,10 @@ public:
                               const llvm::Instruction *exit_inst,
                               const llvm::Instruction *return_site,
                               const llvm::Function *callee,
-                              const Fact &exit_fact,
-                              const Fact &call_fact) = 0;
-  virtual FactSet call_to_return_flow(const llvm::CallBase *call,
-                                      const llvm::Instruction *return_site,
-                                      llvm::ArrayRef<const llvm::Function *>
-                                          callees,
-                                      const Fact &fact) = 0;
+                              const Fact &exit_fact, const Fact &call_fact) = 0;
+  virtual FactSet call_to_return_flow(
+      const llvm::CallBase *call, const llvm::Instruction *return_site,
+      llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) = 0;
 
   // Initial facts at program entry
   virtual FactSet initial_facts(const llvm::Function *main) = 0;
@@ -273,6 +294,7 @@ public:
   using ValueType = Value;
   using EdgeFunction = std::function<Value(const Value &)>;
   using FactSet = typename IFDSProblem<Fact>::FactSet;
+  using IDEInitialSeeds = ifds::IDEInitialSeeds<Fact, Value>;
 
   // Edge functions for IDE
   virtual EdgeFunction normal_edge_function(const llvm::Instruction *stmt,
@@ -283,26 +305,27 @@ public:
                                           const llvm::Function *callee,
                                           const Fact &src_fact,
                                           const Fact &tgt_fact) = 0;
-  virtual EdgeFunction return_edge_function(
-      const llvm::CallBase *call, const llvm::Function *callee,
-      const llvm::Instruction *exit_inst,
-      const llvm::Instruction *return_site, const Fact &exit_fact,
-      const Fact &ret_fact) = 0;
-  virtual EdgeFunction call_to_return_edge_function(
-      const llvm::CallBase *call, const llvm::Instruction *return_site,
-      llvm::ArrayRef<const llvm::Function *> callees,
-      const Fact &src_fact, const Fact &tgt_fact) = 0;
+  virtual EdgeFunction
+  return_edge_function(const llvm::CallBase *call, const llvm::Function *callee,
+                       const llvm::Instruction *exit_inst,
+                       const llvm::Instruction *return_site,
+                       const Fact &exit_fact, const Fact &ret_fact) = 0;
+  virtual EdgeFunction
+  call_to_return_edge_function(const llvm::CallBase *call,
+                               const llvm::Instruction *return_site,
+                               llvm::ArrayRef<const llvm::Function *> callees,
+                               const Fact &src_fact, const Fact &tgt_fact) = 0;
   // Optional summary flow/edge functions (for special-cased callees)
   virtual FactSet summary_flow(const llvm::CallBase * /*call*/,
                                const llvm::Function * /*callee*/,
                                const Fact & /*fact*/) {
     return {};
   }
-  virtual EdgeFunction summary_edge_function(const llvm::CallBase * /*call*/,
-                                             const llvm::Function * /*callee*/,
-                                             const llvm::Instruction * /*return_site*/,
-                                             const Fact & /*src_fact*/,
-                                             const Fact & /*tgt_fact*/) {
+  virtual EdgeFunction
+  summary_edge_function(const llvm::CallBase * /*call*/,
+                        const llvm::Function * /*callee*/,
+                        const llvm::Instruction * /*return_site*/,
+                        const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
     return identity();
   }
 
@@ -310,6 +333,12 @@ public:
   virtual Value top_value() const = 0;
   virtual Value bottom_value() const = 0;
   virtual Value join(const Value &v1, const Value &v2) const = 0;
+
+  // IDE initial seeds (Phasar-style: statement -> fact -> lattice value).
+  // Default behavior lifts IFDS seeds and initializes each fact with
+  // top_value() to preserve existing Lotus clients that define only
+  // initial_facts().
+  virtual IDEInitialSeeds initial_ide_seeds(const llvm::Module &module);
 
   // Edge function composition
   virtual EdgeFunction compose(const EdgeFunction &f1,
@@ -514,14 +543,79 @@ inline bool IDEProblem<Fact, Value>::edge_function_equivalent(
     const EdgeFunction &f1, const EdgeFunction &f2) const {
   const Value top = top_value();
   const Value bottom = bottom_value();
-  if (!(f1(top) == f2(top))) {
-    return false;
+  std::vector<Value> probes;
+  probes.push_back(top);
+  if (!(bottom == top)) {
+    probes.push_back(bottom);
   }
-  if (!(f1(bottom) == f2(bottom))) {
-    return false;
+
+  const Value join_tb = join(top, bottom);
+  if (!(join_tb == top) && !(join_tb == bottom)) {
+    probes.push_back(join_tb);
   }
-  const Value joined_probe = join(top, bottom);
-  return f1(joined_probe) == f2(joined_probe);
+  const Value join_bt = join(bottom, top);
+  if (!(join_bt == top) && !(join_bt == bottom) && !(join_bt == join_tb)) {
+    probes.push_back(join_bt);
+  }
+
+  constexpr size_t MAX_PROBES = 16;
+  constexpr size_t MAX_ROUNDS = 3;
+  size_t idx = 0;
+  size_t rounds = 0;
+
+  while (idx < probes.size()) {
+    const Value &probe = probes[idx++];
+    Value out1 = f1(probe);
+    Value out2 = f2(probe);
+    if (!(out1 == out2)) {
+      return false;
+    }
+
+    if (rounds < MAX_ROUNDS && probes.size() < MAX_PROBES) {
+      bool seen1 = false;
+      for (const Value &v : probes) {
+        if (v == out1) {
+          seen1 = true;
+          break;
+        }
+      }
+      if (!seen1) {
+        probes.push_back(out1);
+      }
+
+      bool seen2 = false;
+      for (const Value &v : probes) {
+        if (v == out2) {
+          seen2 = true;
+          break;
+        }
+      }
+      if (!seen2 && probes.size() < MAX_PROBES) {
+        probes.push_back(out2);
+      }
+    }
+
+    if (idx == probes.size()) {
+      ++rounds;
+    }
+  }
+
+  return true;
+}
+
+template <typename Fact, typename Value>
+inline typename IDEProblem<Fact, Value>::IDEInitialSeeds
+IDEProblem<Fact, Value>::initial_ide_seeds(const llvm::Module &module) {
+  IDEInitialSeeds ide_seeds;
+  auto ifds_seeds = this->initial_seeds(module);
+  for (const auto &entry : ifds_seeds.get_seeds()) {
+    const llvm::Instruction *inst = entry.first;
+    ide_seeds.add_seed_instruction(inst);
+    for (const Fact &fact : entry.second) {
+      ide_seeds.add_seed(inst, fact, top_value());
+    }
+  }
+  return ide_seeds;
 }
 
 template <typename Fact, typename Value>
