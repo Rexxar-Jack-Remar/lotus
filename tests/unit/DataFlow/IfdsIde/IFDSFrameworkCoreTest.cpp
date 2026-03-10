@@ -40,6 +40,7 @@ public:
   SimpleIntFact zero_fact() const override { return SimpleIntFact(0); }
 
   FactSet normal_flow(const llvm::Instruction *stmt,
+                      const llvm::Instruction *succ,
                       const SimpleIntFact &fact) override {
     (void)stmt;
     FactSet result;
@@ -56,7 +57,7 @@ public:
     return result;
   }
 
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *exit_inst, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const SimpleIntFact &exit_fact,
                       const SimpleIntFact &call_fact) override {
     (void)call;
@@ -68,7 +69,8 @@ public:
   }
 
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const llvm::Instruction *return_site, const SimpleIntFact &fact) override {
+                              const llvm::Instruction *return_site,
+                              llvm::ArrayRef<const llvm::Function *> callees, const SimpleIntFact &fact) override {
     (void)call;
     FactSet result;
     result.insert(fact);
@@ -189,7 +191,7 @@ TEST_F(IFDSFrameworkCoreTest, SimpleProblemNormalFlow) {
   SimpleIFDSProblem problem;
   SimpleIntFact fact(5);
 
-  auto result = problem.normal_flow(inst, fact);
+  auto result = problem.normal_flow(inst, nullptr, fact);
 
   EXPECT_EQ(result.size(), 1u);
   EXPECT_TRUE(result.count(SimpleIntFact(5)));
@@ -209,7 +211,8 @@ TEST_F(IFDSFrameworkCoreTest, SimpleProblemInitialFacts) {
 
 TEST_F(IFDSFrameworkCoreTest, ProblemFactSetType) {
   SimpleIFDSProblem problem;
-  using FactSet = decltype(problem.normal_flow(nullptr, SimpleIntFact()));
+  using FactSet = decltype(problem.normal_flow(nullptr, nullptr,
+                                               SimpleIntFact()));
 
   FactSet facts;
   facts.insert(SimpleIntFact(1));

@@ -17,6 +17,7 @@ IDEFeatureTaintAnalysis::IDEFeatureTaintAnalysis() {
 
 IDEFeatureTaintAnalysis::FactSet
 IDEFeatureTaintAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                     const llvm::Instruction *succ,
                                      const Fact &fact) {
   FactSet out;
   out.insert(fact);
@@ -58,8 +59,11 @@ IDEFeatureTaintAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 IDEFeatureTaintAnalysis::FactSet IDEFeatureTaintAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *exit_inst,
+    const llvm::Instruction *return_site, const llvm::Function *callee,
     const Fact &exit_fact, const Fact &call_fact) {
+  (void)exit_inst;
+  (void)return_site;
   FactSet out;
   if (!call) {
     return out;
@@ -86,7 +90,8 @@ IDEFeatureTaintAnalysis::FactSet IDEFeatureTaintAnalysis::return_flow(
 
 IDEFeatureTaintAnalysis::FactSet
 IDEFeatureTaintAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                             const llvm::Instruction *return_site, const Fact &fact) {
+                                             const llvm::Instruction *return_site,
+                                             llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) {
   FactSet out;
   out.insert(fact);
   if (call && !call->getType()->isVoidTy()) {
@@ -124,13 +129,15 @@ IDEFeatureTaintAnalysis::join(const Value &v1, const Value &v2) const {
 
 IDEFeatureTaintAnalysis::EdgeFunction
 IDEFeatureTaintAnalysis::normal_edge_function(
-    const llvm::Instruction * /*stmt*/, const Fact & /*src_fact*/,
+    const llvm::Instruction * /*stmt*/, const llvm::Instruction * /*succ*/,
+    const Fact & /*src_fact*/,
     const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
 }
 
 IDEFeatureTaintAnalysis::EdgeFunction
 IDEFeatureTaintAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
+                                            const llvm::Function * /*callee*/,
                                             const Fact & /*src_fact*/,
                                             const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
@@ -138,15 +145,21 @@ IDEFeatureTaintAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
 
 IDEFeatureTaintAnalysis::EdgeFunction
 IDEFeatureTaintAnalysis::return_edge_function(const llvm::CallBase * /*call*/,
+                                              const llvm::Function * /*callee*/,
+                                              const llvm::Instruction * /*exit_inst*/,
                                               const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
                                               const Fact & /*ret_fact*/) {
+  (void)return_site;
   return [](const Value &v) { return v; };
 }
 
 IDEFeatureTaintAnalysis::EdgeFunction
 IDEFeatureTaintAnalysis::call_to_return_edge_function(
-    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site, const Fact & /*src_fact*/,
+    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site,
+    llvm::ArrayRef<const llvm::Function *> /*callees*/,
+    const Fact & /*src_fact*/,
     const Fact & /*tgt_fact*/) {
+  (void)return_site;
   return [](const Value &v) { return v; };
 }
 
@@ -170,9 +183,12 @@ IDEFeatureTaintAnalysis::summary_flow(const llvm::CallBase *call,
 
 IDEFeatureTaintAnalysis::EdgeFunction
 IDEFeatureTaintAnalysis::summary_edge_function(const llvm::CallBase *call,
+                                               const llvm::Function *callee,
+                                               const llvm::Instruction *return_site,
                                                const Fact & /*src_fact*/,
                                                const Fact & /*tgt_fact*/) {
-  const llvm::Function *callee = call ? call->getCalledFunction() : nullptr;
+  (void)call;
+  (void)return_site;
   if (!callee) {
     return [](const Value &v) { return v; };
   }

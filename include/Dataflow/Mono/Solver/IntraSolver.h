@@ -139,39 +139,42 @@ public:
       // re-evaluation of Node when they are processed later.
       auto Preds = CFG->getPredsOf(Node, Problem.direction());
       mono_container_t NewIn = Problem.allTop();
-      bool HasPredOut = false;
+      bool HasContrib = false;
+
+      // Preserve explicit seed facts as boundary conditions on every
+      // recomputation: IN[n] = seed[n] merge merge(OUT[p] for preds p of n).
+      // This matches the interprocedural engine's SeedIns semantics and makes
+      // mid-function/source seeds persistent rather than one-shot
+      // initializations.
+      auto SeedIt = SeedFacts.find(Node);
+      if (SeedIt != SeedFacts.end()) {
+        NewIn = SeedIt->second;
+        HasContrib = true;
+      }
+
       for (auto *Pred : Preds) {
         auto OutIt = AnalysisOut.find(Pred);
         if (OutIt == AnalysisOut.end()) {
           continue; // predecessor not yet computed
         }
         Stats.merge_operations++;
-        if (!HasPredOut) {
+        if (!HasContrib) {
           NewIn = OutIt->second;
-          HasPredOut = true;
+          HasContrib = true;
         } else {
           NewIn = Problem.merge(NewIn, OutIt->second);
         }
       }
 
-      if (!HasPredOut) {
-        // No predecessor has a computed OUT yet.  Use the existing AnalysisIn
-        // value (which may be a seed or allTop()).  Do NOT overwrite it with
-        // allTop() — that would erase seeds at entry/exit nodes.
+      if (!HasContrib) {
+        // No seed and no predecessor has a computed OUT yet. Use the existing
+        // AnalysisIn value (which may be allTop()) rather than overwriting it.
         auto InIt = AnalysisIn.find(Node);
         if (InIt != AnalysisIn.end()) {
           NewIn = InIt->second;
         }
         // else: NewIn stays as allTop() (the default initial value)
       }
-      // When predecessors do have computed OUTs, NewIn is the merge of those
-      // OUTs.  We do NOT additionally merge the seed value here: seeds
-      // represent boundary conditions that initialise AnalysisIn before the
-      // fixpoint loop starts.  Once predecessors are computed their OUT
-      // correctly determines IN[Node] via the dataflow equations.  Merging
-      // the seed again on every iteration would prevent convergence for
-      // must-analyses (intersection-based) and produce over-approximate
-      // results for may-analyses.
 
       // Step 2: check whether IN[Node] changed.
       Stats.stabilization_checks++;
@@ -317,6 +320,7 @@ private:
     InitialNodes.clear();
     AnalysisIn.clear();
     AnalysisOut.clear();
+    SeedFacts.clear();
     NodeIterCount.clear();
     Stats = SolverStatistics{};
   }
@@ -342,6 +346,7 @@ private:
     // worklist so propagation from that seed can occur (correctness when
     // initialSeeds() targets instructions outside EntryPoints).
     auto Seeds = Problem.initialSeeds();
+    SeedFacts = Seeds;
     for (const auto &Entry : Seeds) {
       auto *BB = Entry.first ? Entry.first->getParent() : nullptr;
       auto *F = BB ? BB->getParent() : nullptr;
@@ -355,13 +360,9 @@ private:
       }
     }
 
-    // Fix #10: validate that each seed instruction is a valid start point for
-    // the chosen analysis direction.  For a forward analysis the seed must be
-    // at the entry of its function (or at least reachable from it without
-    // crossing a back-edge); for a backward analysis it must be at an exit
-    // (return) instruction.  We emit a diagnostic and skip invalid seeds
-    // rather than silently producing wrong results.
-    const auto Dir = Problem.direction();
+    // Apply explicit seed facts as boundary conditions. Seeds are allowed at
+    // arbitrary program points; they persist across recomputation via
+    // SeedFacts in the solve() loop.
     for (const auto &Entry : Seeds) {
       auto *SeedInst = Entry.first;
       if (SeedInst == nullptr) {
@@ -372,32 +373,6 @@ private:
       if (F == nullptr || F->isDeclaration()) {
         continue;
       }
-
-      bool Valid = true;
-      if (Dir == ::dataflow::controlflow::FlowDirection::Backward) {
-        // For a backward analysis seeds should be at exit instructions
-        // (i.e., return instructions).  Seeding at a non-exit node means
-        // facts will never propagate backward past that point correctly.
-        if (!llvm::isa<llvm::ReturnInst>(SeedInst)) {
-          llvm::errs()
-              << "[IntraMonoSolver] WARNING: backward analysis seed is not a "
-                 "return instruction — facts may not propagate correctly.\n"
-              << "  Seed instruction: " << *SeedInst << "\n";
-          Valid = false;
-        }
-      } else {
-        // For a forward analysis seeds should be at the function entry.
-        auto *EntryInst = &*F->getEntryBlock().begin();
-        if (SeedInst != EntryInst) {
-          llvm::errs()
-              << "[IntraMonoSolver] WARNING: forward analysis seed is not the "
-                 "function entry instruction — facts may not propagate to all "
-                 "predecessors of the seed.\n"
-              << "  Seed instruction: " << *SeedInst << "\n";
-          // We still apply the seed; the warning is informational.
-        }
-      }
-      (void)Valid; // seed is applied regardless; warning is advisory
       AnalysisIn[SeedInst] = Entry.second;
     }
   }
@@ -410,6 +385,7 @@ private:
   std::vector<n_t> InitialNodes;
   std::unordered_map<n_t, mono_container_t> AnalysisIn;
   std::unordered_map<n_t, mono_container_t> AnalysisOut;
+  std::unordered_map<n_t, mono_container_t> SeedFacts;
   mono_container_t DefaultValue{};
   DebugConfig DebugCfg;
   SolverStatistics Stats;

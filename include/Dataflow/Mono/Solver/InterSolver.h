@@ -30,9 +30,19 @@ public:
   explicit InterMonoSolver(ProblemTy &Problem) : Problem(Problem) {}
 
   void solve() {
+    if (Problem.direction() !=
+        ::dataflow::controlflow::FlowDirection::Forward) {
+      llvm::errs()
+          << "[InterMonoSolver] ERROR: backward interprocedural Mono analyses "
+             "are not supported by the current call-string engine.\n";
+      Result.reset();
+      return;
+    }
+
     auto &Entries = Problem.getEntryPoints();
     const auto Seeds = Problem.initialSeeds();
     if (Entries.empty() && Seeds.empty()) {
+      Result.reset();
       return;
     }
 
@@ -116,7 +126,7 @@ public:
   /// container if no results or \p Stmt has no entries.
   mono_container_t getResultsAt(llvm::Instruction *Stmt) const {
     if (!Result) {
-      return mono_container_t{};
+      return Problem.allTop();
     }
     mono_container_t merged;
     bool first = true;
@@ -130,6 +140,9 @@ public:
       } else {
         merged = Problem.merge(merged, Cell.second);
       }
+    }
+    if (first) {
+      return Problem.allTop();
     }
     return merged;
   }
@@ -262,12 +275,27 @@ private:
         Incoming = Problem.returnFlow(CallSite, PredInst->getFunction(),
                                       PredInst, Inst, PredOut);
       } else {
-        // Empty context: fan out to all callers and merge return-flow facts.
+        // Empty context: merge return-flow facts only from callers whose
+        // concrete continuation actually reaches this return site.
+        //
+        // Without this filter, K=0 (or explicit empty-context seeds inside a
+        // callee) causes facts from every caller of the callee to flow into
+        // every return site of that callee.
         Incoming = Problem.allTop();
         if (ICF != nullptr) {
           bool FirstCaller = true;
           mono_container_t Merged;
           for (auto *Caller : ICF->getCallersOf(PredInst->getFunction())) {
+            bool ReachesInst = false;
+            for (auto *RetSite : ICF->getReturnSitesOfCallAt(Caller)) {
+              if (RetSite == Inst) {
+                ReachesInst = true;
+                break;
+              }
+            }
+            if (!ReachesInst) {
+              continue;
+            }
             auto RetFacts = Problem.returnFlow(Caller, PredInst->getFunction(),
                                                PredInst, Inst, PredOut);
             if (FirstCaller) {

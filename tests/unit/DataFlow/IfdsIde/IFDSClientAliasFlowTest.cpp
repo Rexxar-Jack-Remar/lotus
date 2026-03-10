@@ -101,7 +101,8 @@ TEST(IFDSConstAnalysisFlowTest, ReturnFlowMapsFormalBackToActual) {
   auto IR = buildIFDSFlowFixture();
   ifds::ConstAnalysis Analysis;
 
-  auto Out = Analysis.return_flow(IR.Call, IR.CallReturnSite, IR.Callee,
+  auto Out = Analysis.return_flow(IR.Call, IR.CalleeEntryInst,
+                                  IR.CallReturnSite, IR.Callee,
                                   ifds::ConstFact::mutable_mem(IR.Formal),
                                   ifds::ConstFact::zero());
 
@@ -113,7 +114,9 @@ TEST(IFDSConstAnalysisFlowTest, CallToReturnKillsPointerArgFact) {
   ifds::ConstAnalysis Analysis;
 
   auto Out = Analysis.call_to_return_flow(
-      IR.Call, IR.CallReturnSite, ifds::ConstFact::initialized(IR.Actual));
+      IR.Call, IR.CallReturnSite,
+      llvm::ArrayRef<const llvm::Function *>{IR.Callee},
+      ifds::ConstFact::initialized(IR.Actual));
 
   EXPECT_TRUE(Out.empty());
 }
@@ -124,11 +127,14 @@ TEST(IFDSConstAnalysisFlowTest, CallToReturnPreservesZeroAndGlobalFacts) {
 
   auto ZeroOut =
       Analysis.call_to_return_flow(IR.Call, IR.CallReturnSite,
+                                   llvm::ArrayRef<const llvm::Function *>{IR.Callee},
                                    ifds::ConstFact::zero());
   EXPECT_EQ(ZeroOut.count(ifds::ConstFact::zero()), 1U);
 
   auto GlobalOut = Analysis.call_to_return_flow(
-      IR.Call, IR.CallReturnSite, ifds::ConstFact::initialized(IR.Global));
+      IR.Call, IR.CallReturnSite,
+      llvm::ArrayRef<const llvm::Function *>{IR.Callee},
+      ifds::ConstFact::initialized(IR.Global));
   EXPECT_EQ(GlobalOut.count(ifds::ConstFact::initialized(IR.Global)), 1U);
 }
 
@@ -148,7 +154,7 @@ TEST(IFDSReachingDefinitionsFlowTest, ReturnFlowMapsReturnValueToCallResult) {
   ifds::ReachingDefinitionsAnalysis Analysis;
 
   auto Out = Analysis.return_flow(
-      IR.Call, IR.CallReturnSite, IR.Callee,
+      IR.Call, IR.CalleeEntryInst, IR.CallReturnSite, IR.Callee,
       ifds::DefinitionFact::definition(IR.Formal, IR.CalleeEntryInst),
       ifds::DefinitionFact::zero());
 
@@ -161,6 +167,7 @@ TEST(IFDSReachingDefinitionsFlowTest, CallToReturnKillsCalleeNonLocalFacts) {
 
   auto Out = Analysis.call_to_return_flow(
       IR.Call, IR.CallReturnSite,
+      llvm::ArrayRef<const llvm::Function *>{IR.Callee},
       ifds::DefinitionFact::definition(IR.Formal, IR.CalleeEntryInst));
 
   EXPECT_TRUE(Out.empty());
@@ -171,7 +178,9 @@ TEST(IFDSReachingDefinitionsFlowTest, CallToReturnKeepsCallerLocalFacts) {
   ifds::ReachingDefinitionsAnalysis Analysis;
 
   auto InFact = ifds::DefinitionFact::definition(IR.Actual, IR.Call);
-  auto Out = Analysis.call_to_return_flow(IR.Call, IR.CallReturnSite, InFact);
+  auto Out = Analysis.call_to_return_flow(
+      IR.Call, IR.CallReturnSite,
+      llvm::ArrayRef<const llvm::Function *>{IR.Callee}, InFact);
 
   EXPECT_EQ(Out.count(InFact), 1U);
 }
@@ -182,10 +191,14 @@ TEST(IFDSReachingDefinitionsFlowTest, ExternalCallKillsGlobalsAndKeepsZero) {
 
   auto GlobalFact = ifds::DefinitionFact::definition(IR.Global, IR.Call);
   auto GlobalOut =
-      Analysis.call_to_return_flow(IR.ExtCall, IR.ExtCallReturnSite, GlobalFact);
+      Analysis.call_to_return_flow(
+          IR.ExtCall, IR.ExtCallReturnSite,
+          llvm::ArrayRef<const llvm::Function *>{IR.ExtCall->getCalledFunction()},
+          GlobalFact);
   EXPECT_TRUE(GlobalOut.empty());
 
   auto ZeroOut = Analysis.call_to_return_flow(IR.ExtCall, IR.ExtCallReturnSite,
+                                              llvm::ArrayRef<const llvm::Function *>{IR.ExtCall->getCalledFunction()},
                                               ifds::DefinitionFact::zero());
   EXPECT_EQ(ZeroOut.count(ifds::DefinitionFact::zero()), 1U);
 }

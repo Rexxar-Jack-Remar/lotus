@@ -54,6 +54,7 @@ IDEGeneralizedLCA::cap_constants(std::set<int64_t> values) {
 
 IDEGeneralizedLCA::FactSet
 IDEGeneralizedLCA::normal_flow(const llvm::Instruction *stmt,
+                               const llvm::Instruction *succ,
                                const Fact &fact) {
   FactSet out;
   out.insert(fact);
@@ -95,6 +96,7 @@ IDEGeneralizedLCA::call_flow(const llvm::CallBase *call,
 
 IDEGeneralizedLCA::FactSet
 IDEGeneralizedLCA::return_flow(const llvm::CallBase *call,
+                               const llvm::Instruction *exit_inst,
                                const llvm::Instruction *return_site, const llvm::Function *callee,
                                const Fact &exit_fact, const Fact &call_fact) {
   FactSet out;
@@ -123,7 +125,8 @@ IDEGeneralizedLCA::return_flow(const llvm::CallBase *call,
 
 IDEGeneralizedLCA::FactSet
 IDEGeneralizedLCA::call_to_return_flow(const llvm::CallBase *call,
-                                       const llvm::Instruction *return_site, const Fact &fact) {
+                                       const llvm::Instruction *return_site,
+                                       llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) {
   FactSet out;
   out.insert(fact);
   if (call && !call->getType()->isVoidTy()) {
@@ -162,7 +165,9 @@ IDEGeneralizedLCA::Value IDEGeneralizedLCA::join(const Value &v1,
 }
 
 IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::normal_edge_function(
-    const llvm::Instruction *stmt, const Fact &src_fact, const Fact &tgt_fact) {
+    const llvm::Instruction *stmt, const llvm::Instruction *succ,
+    const Fact &src_fact, const Fact &tgt_fact) {
+  (void)succ;
   if (!stmt) {
     return [](const Value &v) { return v; };
   }
@@ -236,6 +241,7 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::normal_edge_function(
 
 IDEGeneralizedLCA::EdgeFunction
 IDEGeneralizedLCA::call_edge_function(const llvm::CallBase * /*call*/,
+                                      const llvm::Function * /*callee*/,
                                       const Fact & /*src_fact*/,
                                       const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
@@ -243,15 +249,21 @@ IDEGeneralizedLCA::call_edge_function(const llvm::CallBase * /*call*/,
 
 IDEGeneralizedLCA::EdgeFunction
 IDEGeneralizedLCA::return_edge_function(const llvm::CallBase * /*call*/,
+                                        const llvm::Function * /*callee*/,
+                                        const llvm::Instruction * /*exit_inst*/,
                                         const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
                                         const Fact & /*ret_fact*/) {
+  (void)return_site;
   return [](const Value &v) { return v; };
 }
 
 IDEGeneralizedLCA::EdgeFunction
 IDEGeneralizedLCA::call_to_return_edge_function(const llvm::CallBase * /*call*/,
-                                                const llvm::Instruction *return_site, const Fact & /*src_fact*/,
+                                                const llvm::Instruction *return_site,
+                                                llvm::ArrayRef<const llvm::Function *> /*callees*/,
+                                                const Fact & /*src_fact*/,
                                                 const Fact & /*tgt_fact*/) {
+  (void)return_site;
   return [](const Value &v) { return v; };
 }
 

@@ -7,6 +7,7 @@
 #include "Dataflow/Mono/Analyses/Intra/IntraLiveVariables.h"
 #include "Dataflow/Mono/Analyses/Intra/IntraUninitVariables.h"
 #include "Dataflow/Mono/Analyses/Inter/InterTaintAnalysis.h"
+#include "Dataflow/Mono/Core/CallStringSolver.h"
 #include "Dataflow/Mono/Solver/IntraSolver.h"
 #include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/Mono/Solver/InterSolver.h"
@@ -17,6 +18,8 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
+
+#include <vector>
 
 using namespace llvm;
 using namespace mono;
@@ -275,6 +278,76 @@ TEST_F(MonoTest, UninitVariablesMustAliasClear) {
   // Load should not be uninitialized after a definite store to the same location.
   auto &inSet = result->IN(load);
   EXPECT_EQ(inSet.count(load), 0u);
+}
+
+TEST_F(MonoTest, IntraMonoSolverPreservesExplicitMidFunctionSeed) {
+  const char *source = R"(
+    define void @test(i32 %x) {
+    entry:
+      %a = add i32 %x, 1
+      %b = add i32 %a, 1
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  struct Domain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+  class ProblemT : public IntraMonoProblem<Domain> {
+  public:
+    ProblemT(Function *Fn, Instruction *SeedInst, Value *SeedFact)
+        : IntraMonoProblem<Domain>({Fn}), SeedInst(SeedInst),
+          SeedFact(SeedFact) {}
+
+    mono_container_t normalFlow(Instruction *Inst,
+                                const mono_container_t &In) override {
+      mono_container_t Out = In;
+      if (Inst != nullptr) {
+        Out.insert(Inst);
+      }
+      return Out;
+    }
+
+    mono_container_t merge(const mono_container_t &Lhs,
+                           const mono_container_t &Rhs) override {
+      mono_container_t Out = Lhs;
+      Out.insert(Rhs.begin(), Rhs.end());
+      return Out;
+    }
+
+    bool equal_to(const mono_container_t &Lhs,
+                  const mono_container_t &Rhs) override {
+      return Lhs == Rhs;
+    }
+
+    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+      std::unordered_map<Instruction *, mono_container_t> Seeds;
+      if (SeedInst != nullptr && SeedFact != nullptr) {
+        Seeds[SeedInst].insert(SeedFact);
+      }
+      return Seeds;
+    }
+
+  private:
+    Instruction *SeedInst;
+    Value *SeedFact;
+  };
+
+  auto *SecondInst = F->getEntryBlock().begin()->getNextNode();
+  auto *FirstInst = &F->getEntryBlock().front();
+  ASSERT_NE(SecondInst, nullptr);
+  ASSERT_NE(FirstInst, nullptr);
+
+  ProblemT Problem(F, SecondInst, &*F->arg_begin());
+  IntraMonoSolver<Domain> Solver(Problem);
+  Solver.solve();
+
+  const auto &Facts = Solver.getInResultsAt(SecondInst);
+  EXPECT_EQ(Facts.count(&*F->arg_begin()), 1u);
+  EXPECT_EQ(Facts.count(FirstInst), 1u);
 }
 
 TEST_F(MonoTest, InterMonoSolverRecomputesIN) {
@@ -803,6 +876,327 @@ TEST_F(MonoTest, InterMonoSolverContextSeedPreservedAcrossContexts) {
     }
   }
   EXPECT_TRUE(SeedReachedCaller);
+}
+
+TEST_F(MonoTest, CallStringEngineProcessesSeedInsWithoutSeeds) {
+  const char *source = R"(
+    define void @seeded(i32 %x) {
+    entry:
+      %y = add i32 %x, 1
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  auto *Seeded = module->getFunction("seeded");
+  ASSERT_NE(Seeded, nullptr);
+
+  using Container = std::set<Value *>;
+  using Engine = dataflow::CallStringInterProceduralDataFlowEngine<0, Container>;
+  using ResultTy = Engine::ResultTy;
+  using Context = Engine::Context;
+  using ContextKey = Engine::ContextKey;
+
+  dataflow::controlflow::LLVMInterCFG ICF(module.get());
+  Engine E;
+  Context EmptyCtx;
+
+  auto *EntryInst = &Seeded->getEntryBlock().front();
+  auto *Ret = findFirst<ReturnInst>(Seeded);
+  ASSERT_NE(Ret, nullptr);
+
+  std::vector<ContextKey> Seeds;
+  std::map<ContextKey, Container> SeedIns;
+  SeedIns[{EntryInst, EmptyCtx}].insert(&*Seeded->arg_begin());
+
+  auto ComputeGEN = [](Instruction *, ResultTy *) {};
+  auto ComputeKILL = [](Instruction *, ResultTy *) {};
+  auto InitializeIN = [](Instruction *, Container &IN) { IN.clear(); };
+  auto InitializeOUT = [](Instruction *, Container &OUT) { OUT.clear(); };
+  auto ComputeIN = [](Instruction *, Instruction *Pred, const Context &PredCtx,
+                      Container &IN, ResultTy *DF) {
+    const auto &PredOut = DF->OUT(Pred, PredCtx);
+    IN.insert(PredOut.begin(), PredOut.end());
+  };
+  auto ComputeOUT = [](Instruction *Inst, const Context &Ctx, Container &OUT,
+                       ResultTy *DF) {
+    OUT = DF->IN(Inst, Ctx);
+  };
+  auto Equal = [](const Container &Lhs, const Container &Rhs) {
+    return Lhs == Rhs;
+  };
+
+  auto Result = E.applyForwardFromSeeds(module.get(), Seeds, &ICF, SeedIns,
+                                        ComputeGEN, ComputeKILL, InitializeIN,
+                                        InitializeOUT, ComputeIN, ComputeOUT,
+                                        Equal);
+  ASSERT_NE(Result, nullptr);
+
+  const auto &RetIn = Result->IN(Ret, EmptyCtx);
+  EXPECT_EQ(RetIn.count(&*Seeded->arg_begin()), 1u);
+}
+
+TEST_F(MonoTest, InterMonoSolverRejectsBackwardDirection) {
+  const char *source = R"(
+    define void @test() {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  struct Domain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+  class ProblemT : public InterMonoProblem<Domain> {
+  public:
+    explicit ProblemT(Function *Entry) : InterMonoProblem<Domain>({Entry}) {}
+
+    ::dataflow::controlflow::FlowDirection direction() const override {
+      return ::dataflow::controlflow::FlowDirection::Backward;
+    }
+
+    mono_container_t normalFlow(Instruction *, const mono_container_t &In) override {
+      return In;
+    }
+
+    mono_container_t merge(const mono_container_t &Lhs,
+                           const mono_container_t &Rhs) override {
+      mono_container_t Out = Lhs;
+      Out.insert(Rhs.begin(), Rhs.end());
+      return Out;
+    }
+
+    bool equal_to(const mono_container_t &Lhs,
+                  const mono_container_t &Rhs) override {
+      return Lhs == Rhs;
+    }
+
+    mono_container_t callFlow(Instruction *, Function *,
+                              const mono_container_t &In) override {
+      return In;
+    }
+
+    mono_container_t returnFlow(Instruction *, Function *, Instruction *,
+                                Instruction *, const mono_container_t &In) override {
+      return In;
+    }
+
+    mono_container_t callToRetFlow(Instruction *, Instruction *,
+                                   ArrayRef<Function *>,
+                                   const mono_container_t &In) override {
+      return In;
+    }
+
+    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+      return {};
+    }
+  };
+
+  ProblemT Problem(F);
+  InterMonoSolver<Domain, 0> Solver(Problem);
+  Solver.solve();
+
+  EXPECT_EQ(Solver.getResults(), nullptr);
+  EXPECT_EQ(Solver.getAnalysisINMap(), nullptr);
+  EXPECT_EQ(Solver.getAnalysisOUTMap(), nullptr);
+}
+
+TEST_F(MonoTest, InterMonoSolverEmptyContextReturnStaysAtMatchingCallSite) {
+  const char *source = R"(
+    define i32 @callee(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @main(i32 %a, i32 %b) {
+    entry:
+      %r1 = call i32 @callee(i32 %a)
+      %r2 = call i32 @callee(i32 %b)
+      ret i32 %r2
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  struct Domain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+  class ProblemT : public InterMonoProblem<Domain> {
+  public:
+    explicit ProblemT(Function *Entry) : InterMonoProblem<Domain>({Entry}) {}
+
+    mono_container_t normalFlow(Instruction *Inst,
+                                const mono_container_t &In) override {
+      if (isa<CallBase>(Inst)) {
+        return {};
+      }
+      return In;
+    }
+
+    mono_container_t merge(const mono_container_t &Lhs,
+                           const mono_container_t &Rhs) override {
+      mono_container_t Out = Lhs;
+      Out.insert(Rhs.begin(), Rhs.end());
+      return Out;
+    }
+
+    bool equal_to(const mono_container_t &Lhs,
+                  const mono_container_t &Rhs) override {
+      return Lhs == Rhs;
+    }
+
+    mono_container_t callFlow(Instruction *CallSite, Function *,
+                              const mono_container_t &) override {
+      mono_container_t Out;
+      if (CallSite != nullptr) {
+        Out.insert(CallSite);
+      }
+      return Out;
+    }
+
+    mono_container_t returnFlow(Instruction *CallSite, Function *, Instruction *,
+                                Instruction *, const mono_container_t &) override {
+      mono_container_t Out;
+      if (CallSite != nullptr) {
+        Out.insert(CallSite);
+      }
+      return Out;
+    }
+
+    mono_container_t callToRetFlow(Instruction *, Instruction *,
+                                   ArrayRef<Function *>,
+                                   const mono_container_t &) override {
+      return {};
+    }
+
+    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+      std::unordered_map<Instruction *, mono_container_t> Seeds;
+      Seeds[&getEntryPoints().front()->getEntryBlock().front()] = {};
+      return Seeds;
+    }
+  };
+
+  std::vector<CallBase *> Calls;
+  for (auto &BB : *Main) {
+    for (auto &I : BB) {
+      if (auto *Call = dyn_cast<CallBase>(&I)) {
+        Calls.push_back(Call);
+      }
+    }
+  }
+  ASSERT_EQ(Calls.size(), 2u);
+
+  Instruction *FirstCont = Calls[1];
+  auto *FinalRet = findFirst<ReturnInst>(Main);
+  ASSERT_NE(FirstCont, nullptr);
+  ASSERT_NE(FinalRet, nullptr);
+
+  ProblemT Problem(Main);
+  InterMonoSolver<Domain, 0> Solver(Problem);
+  Solver.solve();
+
+  auto FirstFacts = Solver.getResultsAt(FirstCont);
+  EXPECT_EQ(FirstFacts.count(Calls[0]), 1u);
+  EXPECT_EQ(FirstFacts.count(Calls[1]), 0u);
+
+  auto RetFacts = Solver.getResultsAt(FinalRet);
+  EXPECT_EQ(RetFacts.count(Calls[0]), 0u);
+  EXPECT_EQ(RetFacts.count(Calls[1]), 1u);
+}
+
+TEST_F(MonoTest, InterMonoSolverMissingNodeQueryReturnsAllTopForMustAnalysis) {
+  const char *source = R"(
+    @g = global i32 0
+
+    define void @entry() {
+    entry:
+      ret void
+    }
+
+    define void @other() {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  auto *Entry = module->getFunction("entry");
+  auto *Other = module->getFunction("other");
+  auto *G = module->getNamedGlobal("g");
+  ASSERT_NE(Entry, nullptr);
+  ASSERT_NE(Other, nullptr);
+  ASSERT_NE(G, nullptr);
+
+  struct Domain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+  class ProblemT : public InterMonoProblem<Domain> {
+  public:
+    ProblemT(Function *Entry, Value *TopFact)
+        : InterMonoProblem<Domain>({Entry}), TopFact(TopFact) {}
+
+    mono_container_t allTop() override { return {TopFact}; }
+
+    mono_container_t normalFlow(Instruction *, const mono_container_t &In) override {
+      return In;
+    }
+
+    mono_container_t merge(const mono_container_t &Lhs,
+                           const mono_container_t &Rhs) override {
+      mono_container_t Out;
+      for (auto *V : Lhs) {
+        if (Rhs.count(V)) {
+          Out.insert(V);
+        }
+      }
+      return Out;
+    }
+
+    bool equal_to(const mono_container_t &Lhs,
+                  const mono_container_t &Rhs) override {
+      return Lhs == Rhs;
+    }
+
+    mono_container_t callFlow(Instruction *, Function *,
+                              const mono_container_t &In) override {
+      return In;
+    }
+
+    mono_container_t returnFlow(Instruction *, Function *, Instruction *,
+                                Instruction *, const mono_container_t &In) override {
+      return In;
+    }
+
+    mono_container_t callToRetFlow(Instruction *, Instruction *,
+                                   ArrayRef<Function *>,
+                                   const mono_container_t &In) override {
+      return In;
+    }
+
+    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+      std::unordered_map<Instruction *, mono_container_t> Seeds;
+      Seeds[&getEntryPoints().front()->getEntryBlock().front()] = allTop();
+      return Seeds;
+    }
+
+  private:
+    Value *TopFact;
+  };
+
+  ProblemT Problem(Entry, G);
+  InterMonoSolver<Domain, 0> Solver(Problem);
+  Solver.solve();
+
+  auto *OtherRet = findFirst<ReturnInst>(Other);
+  ASSERT_NE(OtherRet, nullptr);
+
+  auto Facts = Solver.getResultsAt(OtherRet);
+  EXPECT_EQ(Facts.size(), 1u);
+  EXPECT_EQ(Facts.count(G), 1u);
 }
 
 int main(int argc, char **argv) {

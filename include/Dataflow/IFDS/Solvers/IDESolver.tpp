@@ -212,7 +212,8 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                                          const llvm::Instruction* exit_inst,
                                          const Fact& exit_fact,
                                          EdgeFunctionPtr summary_phi) {
-        auto call_ef = m_problem.call_edge_function(incoming.call, incoming.call_fact, callee_fact);
+        auto call_ef = m_problem.call_edge_function(
+            incoming.call, callee, incoming.call_fact, callee_fact);
         EdgeFunctionPtr call_phi = make_edge_function(call_ef);
 
         // Look up the *current* (possibly updated) jump function for the
@@ -234,11 +235,13 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                 on_summary_edge_added(summary_edge);
             }
             FactSet return_facts = m_problem.return_flow(
-                incoming.call, ret_site, callee, exit_fact, incoming.call_fact);
+                incoming.call, exit_inst, ret_site, callee, exit_fact,
+                incoming.call_fact);
             preserve_zero(return_facts, exit_fact);
             for (const auto& ret_fact : return_facts) {
-                auto ret_ef = m_problem.return_edge_function(incoming.call, ret_site,
-                                                             exit_fact, ret_fact);
+                auto ret_ef = m_problem.return_edge_function(
+                    incoming.call, callee, exit_inst, ret_site, exit_fact,
+                    ret_fact);
                 EdgeFunctionPtr ret_phi = make_edge_function(ret_ef);
                 EdgeFunctionPtr composed = compose_cached(ret_phi,
                                           compose_cached(summary_phi,
@@ -309,7 +312,8 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                     FactSet summary_facts = m_problem.summary_flow(call, callee, fact);
                     preserve_zero(summary_facts, fact);
                     for (const auto& tgt_fact : summary_facts) {
-                        auto ef = m_problem.summary_edge_function(call, fact, tgt_fact);
+                        auto ef = m_problem.summary_edge_function(
+                            call, callee, ret_site, fact, tgt_fact);
                         EdgeFunctionPtr edge_fn = make_edge_function(ef);
                         EdgeFunctionPtr new_phi = compose_cached(edge_fn, phi);
                         on_summary_transition(Node(call, fact), Node(ret_site, tgt_fact));
@@ -322,7 +326,10 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
 
             // Always generate call-to-return edges
             for (const llvm::Instruction* ret_site : get_return_sites(call)) {
-                FactSet ctr_facts = m_problem.call_to_return_flow(call, ret_site, fact);
+                llvm::ArrayRef<const llvm::Function *> callee_set(callees);
+                FactSet ctr_facts =
+                    m_problem.call_to_return_flow(call, ret_site, callee_set,
+                                                  fact);
                 preserve_zero(ctr_facts, fact);
                 for (const auto& tgt_fact : ctr_facts) {
                     EdgeFunctionPtr edge_fn;
@@ -333,14 +340,15 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                             edge_fn = eit->second;
                         } else {
                             edge_fn = make_edge_function(
-                                m_problem.call_to_return_edge_function(call, ret_site,
-                                                                       fact, tgt_fact));
+                                m_problem.call_to_return_edge_function(
+                                    call, ret_site, callee_set, fact,
+                                    tgt_fact));
                             m_call_to_return_edge_cache[ckey] = edge_fn;
                         }
                     } else {
                         edge_fn = make_edge_function(
-                            m_problem.call_to_return_edge_function(call, ret_site, fact,
-                                                                   tgt_fact));
+                            m_problem.call_to_return_edge_function(
+                                call, ret_site, callee_set, fact, tgt_fact));
                     }
                     EdgeFunctionPtr new_phi = compose_cached(edge_fn, phi);
                     on_call_to_return_transition(Node(call, fact),
@@ -415,13 +423,15 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                         for (const llvm::CallBase* call : callee_calls_it->second) {
                             for (const llvm::Instruction* ret_site : get_return_sites(call)) {
                                 FactSet return_facts =
-                                    m_problem.return_flow(call, ret_site, func, fact,
+                                    m_problem.return_flow(call, ret, ret_site,
+                                                          func, fact,
                                                           zero_fact);
                                 preserve_zero(return_facts, fact);
                                 for (const Fact& rf : return_facts) {
                                     auto ret_ef =
-                                        m_problem.return_edge_function(call, ret_site,
-                                                                       fact, rf);
+                                        m_problem.return_edge_function(
+                                            call, func, ret, ret_site, fact,
+                                            rf);
                                     EdgeFunctionPtr ret_phi = make_edge_function(ret_ef);
                                     EdgeFunctionPtr composed = compose_cached(ret_phi, phi);
                                     // BUG (fixed): the old code created a self-loop path edge
@@ -448,10 +458,10 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
             auto succs = m_graph_context.get_successors(curr);
             if (!succs.empty()) {
                 for (const llvm::Instruction* succ : succs) {
-                    FactSet next_facts = m_problem.normal_flow(curr, fact);
+                    FactSet next_facts = m_problem.normal_flow(curr, succ, fact);
                     preserve_zero(next_facts, fact);
                     for (const auto& tgt_fact : next_facts) {
-                        NormalEdgeKey nkey(curr, fact, tgt_fact);
+                        NormalEdgeKey nkey(curr, succ, fact, tgt_fact);
                         EdgeFunctionPtr edge_fn;
                         if (m_config.enable_edge_function_caching()) {
                             auto eit = m_normal_edge_cache.find(nkey);
@@ -459,12 +469,15 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                                 edge_fn = eit->second;
                             } else {
                                 edge_fn = make_edge_function(
-                                    m_problem.normal_edge_function(curr, fact, tgt_fact));
+                                    m_problem.normal_edge_function(curr, succ,
+                                                                   fact,
+                                                                   tgt_fact));
                                 m_normal_edge_cache[nkey] = edge_fn;
                             }
                         } else {
                             edge_fn = make_edge_function(
-                                m_problem.normal_edge_function(curr, fact, tgt_fact));
+                                m_problem.normal_edge_function(curr, succ, fact,
+                                                               tgt_fact));
                         }
                         EdgeFunctionPtr new_phi = compose_cached(edge_fn, phi);
                         on_normal_transition(Node(curr, fact), Node(succ, tgt_fact));
@@ -513,7 +526,13 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     for (const auto& entry : m_incoming) {
         const StartKey& callee_key = entry.first;
         for (const auto& incoming : entry.second) {
-            auto call_ef = m_problem.call_edge_function(incoming.call, incoming.call_fact, callee_key.start_fact);
+            const llvm::Function *callee = nullptr;
+            const llvm::Instruction *callee_start = callee_key.start_node;
+            if (callee_start != nullptr) {
+                callee = callee_start->getFunction();
+            }
+            auto call_ef = m_problem.call_edge_function(
+                incoming.call, callee, incoming.call_fact, callee_key.start_fact);
             EdgeFunctionPtr call_phi = make_edge_function(call_ef);
             // BUG (fixed): the old code used incoming.caller_phi directly.
             // caller_phi is the jump-function value at the time the incoming

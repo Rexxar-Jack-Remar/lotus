@@ -100,6 +100,7 @@ public:
   Fact zero_fact() const override { return nullptr; }
 
   FactSet normal_flow(const llvm::Instruction *stmt,
+                      const llvm::Instruction *succ,
                       const Fact &fact) override {
     (void)stmt;
     if (!fact)
@@ -116,7 +117,7 @@ public:
     return {fact};
   }
 
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *exit_inst, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const Fact &exit_fact, const Fact &call_fact) override {
     (void)call;
     (void)callee;
@@ -127,7 +128,8 @@ public:
   }
 
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const llvm::Instruction *return_site, const Fact &fact) override {
+                              const llvm::Instruction *return_site,
+                              llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) override {
     (void)call;
     if (!fact)
       return {};

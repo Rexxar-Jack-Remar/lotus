@@ -26,6 +26,7 @@ void ConstAnalysis::set_alias_analysis(lotus::AliasAnalysisWrapper *aa) {
 ConstFact ConstAnalysis::zero_fact() const { return ConstFact::zero(); }
 
 ConstAnalysis::FactSet ConstAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                                  const llvm::Instruction *succ,
                                                   const ConstFact &fact) {
   FactSet result;
 
@@ -65,7 +66,11 @@ ConstAnalysis::FactSet ConstAnalysis::normal_flow(const llvm::Instruction *stmt,
       }
     }
 
-    if (fact.value == pointer_op) {
+    const bool fact_tracks_location =
+        !fact.is_zero() && fact.value != nullptr &&
+        may_alias_or_equal(fact.value, pointer_op);
+
+    if (fact.is_zero() || fact_tracks_location) {
       if (already_initialized) {
         // Second write - mark as mutable
         result.insert(ConstFact::mutable_mem(pointer_op));
@@ -74,21 +79,9 @@ ConstAnalysis::FactSet ConstAnalysis::normal_flow(const llvm::Instruction *stmt,
         result.insert(ConstFact::initialized(pointer_op));
         mark_initialized(pointer_op);
       }
+    }
 
-      // Alias-aware post-processing in store context.
-      expand_facts_with_aliases_in_context(
-          result, store,
-          [](const ConstFact &f) -> const llvm::Value * { return f.value; },
-          [this](const llvm::Value *alias, const ConstFact &f) {
-            if (f.is_initialized()) {
-              mark_initialized(alias);
-            }
-            return ConstFact(f.type, alias);
-          },
-          [](const ConstFact &f) {
-            return !f.is_zero() && f.value != nullptr;
-          });
-    } else {
+    if (!fact.is_zero()) {
       result.insert(fact);
     }
   } else {
@@ -121,8 +114,10 @@ ConstAnalysis::FactSet ConstAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 ConstAnalysis::FactSet ConstAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *exit_inst,
+    const llvm::Instruction *return_site, const llvm::Function *callee,
     const ConstFact &exit_fact, const ConstFact & /*call_fact*/) {
+  (void)exit_inst;
   FactSet result;
 
   if (exit_fact.is_zero()) {
@@ -150,7 +145,8 @@ ConstAnalysis::FactSet ConstAnalysis::return_flow(
 
 ConstAnalysis::FactSet
 ConstAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                   const llvm::Instruction *return_site, const ConstFact &fact) {
+                                   const llvm::Instruction *return_site,
+                                   llvm::ArrayRef<const llvm::Function *> callees, const ConstFact &fact) {
   FactSet result;
 
   // Handle memory intrinsics

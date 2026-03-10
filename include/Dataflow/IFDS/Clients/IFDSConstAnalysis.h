@@ -42,6 +42,8 @@ struct ConstFact {
     return type == other.type && value == other.value;
   }
 
+  bool operator!=(const ConstFact &other) const { return !(*this == other); }
+
   bool operator<(const ConstFact &other) const {
     if (type != other.type)
       return type < other.type;
@@ -78,14 +80,16 @@ public:
 
   ConstFact zero_fact() const override;
   FactSet normal_flow(const llvm::Instruction *stmt,
+                      const llvm::Instruction *succ,
                       const ConstFact &fact) override;
   FactSet call_flow(const llvm::CallBase *call, const llvm::Function *callee,
                     const ConstFact &fact) override;
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *exit_inst, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const ConstFact &exit_fact,
                       const ConstFact &call_fact) override;
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const llvm::Instruction *return_site, const ConstFact &fact) override;
+                              const llvm::Instruction *return_site,
+                              llvm::ArrayRef<const llvm::Function *> callees, const ConstFact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 
   void set_alias_analysis(lotus::AliasAnalysisWrapper *aa) override;

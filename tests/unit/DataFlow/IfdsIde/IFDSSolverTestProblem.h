@@ -88,6 +88,7 @@ public:
   IFDSTestFact zero_fact() const override { return IFDSTestFact::zero(); }
 
   FactSet normal_flow(const llvm::Instruction *stmt,
+                      const llvm::Instruction *succ,
                       const IFDSTestFact &fact) override {
     (void)stmt;
     if (m_mode == KILL_AT_EXIT)
@@ -106,7 +107,7 @@ public:
     return {fact};
   }
 
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *exit_inst, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const IFDSTestFact &exit_fact,
                       const IFDSTestFact &call_fact) override {
     (void)call;
@@ -118,7 +119,8 @@ public:
   }
 
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const llvm::Instruction *return_site, const IFDSTestFact &fact) override {
+                              const llvm::Instruction *return_site,
+                              llvm::ArrayRef<const llvm::Function *> callees, const IFDSTestFact &fact) override {
     (void)call;
     if (fact.is_zero())
       return {fact};

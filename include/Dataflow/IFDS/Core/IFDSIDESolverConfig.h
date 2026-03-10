@@ -176,9 +176,7 @@ struct IFDSIDESolverConfig {
   }
 
   static lotus::AAConfig default_alias_analysis_config() {
-    return lotus::AAConfig(lotus::AAConfig::Implementation::BasicAA,
-                           lotus::AAConfig::ContextSensitivity::None, 0, true,
-                           lotus::AAConfig::Solver::Default);
+    return lotus::AAConfig::SparrowAA_NoCtx();
   }
 
 private:

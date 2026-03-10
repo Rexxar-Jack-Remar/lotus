@@ -25,6 +25,9 @@ struct IntFact {
 class CustomZeroProblem : public IFDSProblem<IntFact> {
 public:
   bool alias_configured = false;
+  bool alias_initialized = false;
+  lotus::AAConfig::Implementation alias_impl =
+      lotus::AAConfig::Implementation::UnderApprox;
 
   IntFact zero_fact() const override { return IntFact{-1}; }
   bool auto_add_zero() const override { return false; }
@@ -34,8 +37,14 @@ public:
   void set_alias_analysis(lotus::AliasAnalysisWrapper *aa) override {
     IFDSProblem<IntFact>::set_alias_analysis(aa);
     alias_configured = aa != nullptr;
+    alias_initialized = aa != nullptr && aa->isInitialized();
+    if (aa != nullptr) {
+      alias_impl = aa->getConfig().impl;
+    }
   }
-  FactSet normal_flow(const llvm::Instruction *, const IntFact &fact) override {
+  FactSet normal_flow(const llvm::Instruction *,
+                      const llvm::Instruction *,
+                      const IntFact &fact) override {
     return {fact};
   }
   FactSet call_flow(const llvm::CallBase *, const llvm::Function *,
@@ -43,12 +52,14 @@ public:
     return {fact};
   }
   FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
-                      const llvm::Function *, const IntFact &exit_fact,
+                      const llvm::Instruction *, const llvm::Function *,
+                      const IntFact &exit_fact,
                       const IntFact &) override {
     return {exit_fact};
   }
   FactSet call_to_return_flow(const llvm::CallBase *,
                               const llvm::Instruction *,
+                              llvm::ArrayRef<const llvm::Function *>,
                               const IntFact &fact) override {
     return {fact};
   }
@@ -64,7 +75,8 @@ public:
   bool is_zero_fact(const IntFact &fact) const override {
     return fact.value == 0;
   }
-  FactSet normal_flow(const llvm::Instruction *, const IntFact &fact) override {
+  FactSet normal_flow(const llvm::Instruction *, const llvm::Instruction *,
+                      const IntFact &fact) override {
     return {fact};
   }
   FactSet call_flow(const llvm::CallBase *, const llvm::Function *,
@@ -72,7 +84,8 @@ public:
     return {fact};
   }
   FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
-                      const llvm::Function *, const IntFact &exit_fact,
+                      const llvm::Instruction *, const llvm::Function *,
+                      const IntFact &exit_fact,
                       const IntFact &) override {
     if (exit_fact.value == 1) {
       return {IntFact{2}};
@@ -81,6 +94,7 @@ public:
   }
   FactSet call_to_return_flow(const llvm::CallBase *,
                               const llvm::Instruction *,
+                              llvm::ArrayRef<const llvm::Function *>,
                               const IntFact &) override {
     return {};
   }
@@ -472,6 +486,8 @@ TEST_F(PathAwareSolverTest, PathAwareWrapperForwardsAliasInjection) {
   solver.solve(*m);
 
   EXPECT_TRUE(problem.alias_configured);
+  EXPECT_TRUE(problem.alias_initialized);
+  EXPECT_EQ(problem.alias_impl, lotus::AAConfig::Implementation::SparrowAA);
 }
 
 TEST_F(PathAwareSolverTest, AutoInjectedAliasIsClearedWhenIFDSSolverDies) {

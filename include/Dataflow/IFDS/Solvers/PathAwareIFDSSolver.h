@@ -60,8 +60,9 @@ public:
     }
 
     FactSet normal_flow(const llvm::Instruction *stmt,
+                        const llvm::Instruction *succ,
                         const Fact &fact) override {
-      return m_ifds_problem.normal_flow(stmt, fact);
+      return m_ifds_problem.normal_flow(stmt, succ, fact);
     }
 
     FactSet call_flow(const llvm::CallBase *call, const llvm::Function *callee,
@@ -70,17 +71,20 @@ public:
     }
 
     FactSet return_flow(const llvm::CallBase *call,
+                        const llvm::Instruction *exit_inst,
                         const llvm::Instruction *return_site,
                         const llvm::Function *callee, const Fact &exit_fact,
                         const Fact &call_fact) override {
-      return m_ifds_problem.return_flow(call, return_site, callee, exit_fact,
-                                        call_fact);
+      return m_ifds_problem.return_flow(call, exit_inst, return_site, callee,
+                                        exit_fact, call_fact);
     }
 
     FactSet call_to_return_flow(const llvm::CallBase *call,
                                 const llvm::Instruction *return_site,
+                                llvm::ArrayRef<const llvm::Function *> callees,
                                 const Fact &fact) override {
-      return m_ifds_problem.call_to_return_flow(call, return_site, fact);
+      return m_ifds_problem.call_to_return_flow(call, return_site, callees,
+                                                fact);
     }
 
     FactSet initial_facts(const llvm::Function *main) override {
@@ -94,19 +98,22 @@ public:
 
     // IDE interface - identity edge functions
     typename IDEProblem<Fact, BinaryValue>::EdgeFunction
-    normal_edge_function(const llvm::Instruction *, const Fact &,
+    normal_edge_function(const llvm::Instruction *, const llvm::Instruction *,
+                         const Fact &,
                          const Fact &) override {
       return this->identity();
     }
 
     typename IDEProblem<Fact, BinaryValue>::EdgeFunction
-    call_edge_function(const llvm::CallBase *, const Fact &,
+    call_edge_function(const llvm::CallBase *, const llvm::Function *,
+                       const Fact &,
                        const Fact &) override {
       return this->identity();
     }
 
     typename IDEProblem<Fact, BinaryValue>::EdgeFunction
-    return_edge_function(const llvm::CallBase *,
+    return_edge_function(const llvm::CallBase *, const llvm::Function *,
+                         const llvm::Instruction *,
                          const llvm::Instruction *, const Fact &,
                          const Fact &) override {
       return this->identity();
@@ -114,7 +121,9 @@ public:
 
     typename IDEProblem<Fact, BinaryValue>::EdgeFunction
     call_to_return_edge_function(const llvm::CallBase *,
-                                 const llvm::Instruction *, const Fact &,
+                                 const llvm::Instruction *,
+                                 llvm::ArrayRef<const llvm::Function *>,
+                                 const Fact &,
                                  const Fact &) override {
       return this->identity();
     }

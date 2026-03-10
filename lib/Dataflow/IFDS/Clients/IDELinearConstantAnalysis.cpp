@@ -38,6 +38,7 @@ IDELinearConstantAnalysis::Fact IDELinearConstantAnalysis::zero_fact() const {
 
 IDELinearConstantAnalysis::FactSet
 IDELinearConstantAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                       const llvm::Instruction *succ,
                                        const Fact &fact) {
   FactSet result;
 
@@ -173,8 +174,10 @@ IDELinearConstantAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 IDELinearConstantAnalysis::FactSet IDELinearConstantAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *exit_inst,
+    const llvm::Instruction *return_site, const llvm::Function *callee,
     const Fact &exit_fact, const Fact & /*call_fact*/) {
+  (void)exit_inst;
   FactSet result;
 
   if (exit_fact == zero_fact()) {
@@ -213,7 +216,8 @@ IDELinearConstantAnalysis::FactSet IDELinearConstantAnalysis::return_flow(
 
 IDELinearConstantAnalysis::FactSet
 IDELinearConstantAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                               const llvm::Instruction *return_site, const Fact &fact) {
+                                               const llvm::Instruction *return_site,
+                                               llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) {
   FactSet result;
 
   // For non-pointer facts, pass through
@@ -260,6 +264,7 @@ IDELinearConstantAnalysis::join(const Value &v1, const Value &v2) const {
 
 IDELinearConstantAnalysis::EdgeFunction
 IDELinearConstantAnalysis::normal_edge_function(const llvm::Instruction *stmt,
+                                                const llvm::Instruction *succ,
                                                 const Fact &src_fact,
                                                 const Fact &tgt_fact) {
   // Identity by default
@@ -365,6 +370,7 @@ IDELinearConstantAnalysis::normal_edge_function(const llvm::Instruction *stmt,
 
 IDELinearConstantAnalysis::EdgeFunction
 IDELinearConstantAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
+                                              const llvm::Function * /*callee*/,
                                               const Fact & /*src_fact*/,
                                               const Fact & /*tgt_fact*/) {
   return create_identity();
@@ -372,15 +378,21 @@ IDELinearConstantAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
 
 IDELinearConstantAnalysis::EdgeFunction
 IDELinearConstantAnalysis::return_edge_function(const llvm::CallBase * /*call*/,
+                                                const llvm::Function * /*callee*/,
+                                                const llvm::Instruction * /*exit_inst*/,
                                                 const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
                                                 const Fact & /*ret_fact*/) {
+  (void)return_site;
   return create_identity();
 }
 
 IDELinearConstantAnalysis::EdgeFunction
 IDELinearConstantAnalysis::call_to_return_edge_function(
-    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site, const Fact & /*src_fact*/,
+    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site,
+    llvm::ArrayRef<const llvm::Function *> /*callees*/,
+    const Fact & /*src_fact*/,
     const Fact & /*tgt_fact*/) {
+  (void)return_site;
   return create_identity();
 }
 

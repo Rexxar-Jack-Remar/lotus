@@ -752,6 +752,15 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
       if (CallInst != nullptr) {
         Result.push_back({CallInst, CallerCtx});
       }
+    } else if (ICF != nullptr) {
+      // Context-insensitive entry: merge call-flow facts from all callers.
+      // Without this, K=0 loses every interprocedural call edge because the
+      // empty call string cannot name a single caller.
+      for (auto *CallInst : ICF->getCallersOf(Inst->getFunction())) {
+        if (CallInst != nullptr) {
+          Result.push_back({CallInst, Ctx});
+        }
+      }
     }
     return Result;
   }
@@ -846,7 +855,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
   // Assert ICF is non-null.
   assert(ICF != nullptr && "CallStringInterProceduralDataFlowEngine::"
                            "applyForwardFromSeeds: ICF must not be null");
-  if (M == nullptr || Seeds.empty()) {
+  if (M == nullptr || (Seeds.empty() && SeedIns.empty())) {
     return {};
   }
 
@@ -891,6 +900,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
 
   WorkQueue Queue;
   std::set<ContextKey> InQueue;
+  std::set<ContextKey> Processed;
 
   auto Enqueue = [&](const ContextKey &Key) {
     if (InQueue.insert(Key).second) {
@@ -900,6 +910,9 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
 
   for (const auto &Seed : Seeds) {
     Enqueue(Seed);
+  }
+  for (const auto &Seed : SeedIns) {
+    Enqueue(Seed.first);
   }
 
   // Inject explicit IN seeds at empty context (Phasar-like).
@@ -913,6 +926,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     Queue.pop_front();
     InQueue.erase(Current);
 
+    const bool FirstProcess = Processed.insert(Current).second;
     ensureInitialized(Current, initializeIN, initializeOUT, DF.get());
 
     auto &InSet = DF->IN(Current);
@@ -939,7 +953,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     ContainerT OldOut = OutSet;
     computeOUT(Current.Inst, Current.Ctx, OutSet, DF.get());
 
-    if (!equal(OutSet, OldOut) || !equal(InSet, OldIn)) {
+    if (FirstProcess || !equal(OutSet, OldOut) || !equal(InSet, OldIn)) {
       for (const auto &SuccKey : successors(Current, ICF)) {
         Enqueue(SuccKey);
       }

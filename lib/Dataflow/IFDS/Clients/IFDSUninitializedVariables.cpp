@@ -18,6 +18,7 @@ UninitVarFact UninitializedVariablesAnalysis::zero_fact() const {
 
 UninitializedVariablesAnalysis::FactSet
 UninitializedVariablesAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                            const llvm::Instruction *succ,
                                             const UninitVarFact &fact) {
   FactSet result;
 
@@ -123,8 +124,10 @@ UninitializedVariablesAnalysis::call_flow(const llvm::CallBase *call,
 
 UninitializedVariablesAnalysis::FactSet
 UninitializedVariablesAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *exit_inst,
+    const llvm::Instruction *return_site, const llvm::Function *callee,
     const UninitVarFact &exit_fact, const UninitVarFact & /*call_fact*/) {
+  (void)exit_inst;
   FactSet result;
 
   if (exit_fact.is_zero()) {
@@ -164,7 +167,8 @@ UninitializedVariablesAnalysis::return_flow(
 
 UninitializedVariablesAnalysis::FactSet
 UninitializedVariablesAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                                    const llvm::Instruction *return_site, const UninitVarFact &fact) {
+                                                    const llvm::Instruction *return_site,
+                                                    llvm::ArrayRef<const llvm::Function *> callees, const UninitVarFact &fact) {
   FactSet result;
 
   // For most facts, pass them through

@@ -145,7 +145,8 @@ class ReturnSiteIFDSProblem : public IFDSProblem<ReturnSiteFact> {
 public:
   ReturnSiteFact zero_fact() const override { return ReturnSiteFact::zero(); }
 
-  FactSet normal_flow(const llvm::Instruction *, const ReturnSiteFact &fact) override {
+  FactSet normal_flow(const llvm::Instruction *, const llvm::Instruction *,
+                      const ReturnSiteFact &fact) override {
     return {fact};
   }
 
@@ -154,14 +155,16 @@ public:
     return {};
   }
 
-  FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *return_site,
+  FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
+                      const llvm::Instruction *return_site,
                       const llvm::Function *, const ReturnSiteFact &exit_fact,
                       const ReturnSiteFact &) override {
-    return call_to_return_flow(nullptr, return_site, exit_fact);
+    return call_to_return_flow(nullptr, return_site, {}, exit_fact);
   }
 
   FactSet call_to_return_flow(const llvm::CallBase *,
                               const llvm::Instruction *return_site,
+                              llvm::ArrayRef<const llvm::Function *>,
                               const ReturnSiteFact &fact) override {
     FactSet out{fact};
     if (return_site && return_site->getParent()->getName() == "normal") {
@@ -181,7 +184,8 @@ class SummaryReturnSiteIFDSProblem : public IFDSProblem<ReturnSiteFact> {
 public:
   ReturnSiteFact zero_fact() const override { return ReturnSiteFact::zero(); }
 
-  FactSet normal_flow(const llvm::Instruction *, const ReturnSiteFact &fact) override {
+  FactSet normal_flow(const llvm::Instruction *, const llvm::Instruction *,
+                      const ReturnSiteFact &fact) override {
     return {fact};
   }
 
@@ -190,7 +194,8 @@ public:
     return {fact};
   }
 
-  FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *return_site,
+  FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
+                      const llvm::Instruction *return_site,
                       const llvm::Function *, const ReturnSiteFact &exit_fact,
                       const ReturnSiteFact &) override {
     FactSet out{exit_fact};
@@ -203,6 +208,7 @@ public:
   }
 
   FactSet call_to_return_flow(const llvm::CallBase *, const llvm::Instruction *,
+                              llvm::ArrayRef<const llvm::Function *>,
                               const ReturnSiteFact &) override {
     return {};
   }
@@ -217,7 +223,8 @@ class ReturnSiteIDEProblem
 public:
   ReturnSiteFact zero_fact() const override { return ReturnSiteFact::zero(); }
 
-  FactSet normal_flow(const llvm::Instruction *, const ReturnSiteFact &fact) override {
+  FactSet normal_flow(const llvm::Instruction *, const llvm::Instruction *,
+                      const ReturnSiteFact &fact) override {
     return {fact};
   }
 
@@ -226,14 +233,16 @@ public:
     return {};
   }
 
-  FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *return_site,
+  FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
+                      const llvm::Instruction *return_site,
                       const llvm::Function *, const ReturnSiteFact &exit_fact,
                       const ReturnSiteFact &) override {
-    return call_to_return_flow(nullptr, return_site, exit_fact);
+    return call_to_return_flow(nullptr, return_site, {}, exit_fact);
   }
 
   FactSet call_to_return_flow(const llvm::CallBase *,
                               const llvm::Instruction *,
+                              llvm::ArrayRef<const llvm::Function *>,
                               const ReturnSiteFact &fact) override {
     return {fact};
   }
@@ -242,27 +251,35 @@ public:
     return {ReturnSiteFact::zero()};
   }
 
-  EdgeFunction normal_edge_function(const llvm::Instruction *, const ReturnSiteFact &,
+  EdgeFunction normal_edge_function(const llvm::Instruction *,
+                                    const llvm::Instruction *,
+                                    const ReturnSiteFact &,
                                     const ReturnSiteFact &) override {
     return identity();
   }
 
-  EdgeFunction call_edge_function(const llvm::CallBase *, const ReturnSiteFact &,
+  EdgeFunction call_edge_function(const llvm::CallBase *,
+                                  const llvm::Function *,
+                                  const ReturnSiteFact &,
                                   const ReturnSiteFact &) override {
     return identity();
   }
 
   EdgeFunction return_edge_function(const llvm::CallBase *,
+                                    const llvm::Function *,
+                                    const llvm::Instruction *,
                                     const llvm::Instruction *return_site,
                                     const ReturnSiteFact &,
                                     const ReturnSiteFact &) override {
     return call_to_return_edge_function(nullptr, return_site,
+                                        {},
                                         ReturnSiteFact::zero(),
                                         ReturnSiteFact::zero());
   }
 
   EdgeFunction call_to_return_edge_function(const llvm::CallBase *,
                                             const llvm::Instruction *return_site,
+                                            llvm::ArrayRef<const llvm::Function *>,
                                             const ReturnSiteFact &,
                                             const ReturnSiteFact &) override {
     if (return_site && return_site->getParent()->getName() == "normal") {

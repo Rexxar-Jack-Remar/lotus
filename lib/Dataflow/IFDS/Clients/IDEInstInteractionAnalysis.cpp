@@ -6,6 +6,7 @@ namespace ifds {
 
 IDEInstInteractionAnalysis::FactSet
 IDEInstInteractionAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                        const llvm::Instruction *succ,
                                         const Fact &fact) {
   FactSet out;
   out.insert(fact);
@@ -54,8 +55,11 @@ IDEInstInteractionAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 IDEInstInteractionAnalysis::FactSet IDEInstInteractionAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *exit_inst,
+    const llvm::Instruction *return_site, const llvm::Function *callee,
     const Fact &exit_fact, const Fact &call_fact) {
+  (void)exit_inst;
+  (void)return_site;
   FactSet out;
   if (!call) {
     return out;
@@ -80,7 +84,8 @@ IDEInstInteractionAnalysis::FactSet IDEInstInteractionAnalysis::return_flow(
 
 IDEInstInteractionAnalysis::FactSet
 IDEInstInteractionAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                                const llvm::Instruction *return_site, const Fact &fact) {
+                                                const llvm::Instruction *return_site,
+                                                llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) {
   FactSet out;
   out.insert(fact);
   if (call && !call->getType()->isVoidTy()) {
@@ -132,6 +137,7 @@ IDEInstInteractionAnalysis::join(const Value &v1, const Value &v2) const {
 
 IDEInstInteractionAnalysis::EdgeFunction
 IDEInstInteractionAnalysis::normal_edge_function(const llvm::Instruction *stmt,
+                                                 const llvm::Instruction *succ,
                                                  const Fact &src_fact,
                                                  const Fact &tgt_fact) {
   if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(stmt)) {
@@ -160,6 +166,7 @@ IDEInstInteractionAnalysis::normal_edge_function(const llvm::Instruction *stmt,
 
 IDEInstInteractionAnalysis::EdgeFunction
 IDEInstInteractionAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
+                                               const llvm::Function * /*callee*/,
                                                const Fact & /*src_fact*/,
                                                const Fact & /*tgt_fact*/) {
   return [](const Value &v) { return v; };
@@ -167,15 +174,21 @@ IDEInstInteractionAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
 
 IDEInstInteractionAnalysis::EdgeFunction
 IDEInstInteractionAnalysis::return_edge_function(
-    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
+    const llvm::CallBase * /*call*/, const llvm::Function * /*callee*/,
+    const llvm::Instruction * /*exit_inst*/,
+    const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
     const Fact & /*ret_fact*/) {
+  (void)return_site;
   return [](const Value &v) { return v; };
 }
 
 IDEInstInteractionAnalysis::EdgeFunction
 IDEInstInteractionAnalysis::call_to_return_edge_function(
-    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site, const Fact & /*src_fact*/,
+    const llvm::CallBase * /*call*/, const llvm::Instruction *return_site,
+    llvm::ArrayRef<const llvm::Function *> /*callees*/,
+    const Fact & /*src_fact*/,
     const Fact & /*tgt_fact*/) {
+  (void)return_site;
   return [](const Value &v) { return v; };
 }
 

@@ -70,14 +70,16 @@ public:
   // IFDS interface implementation
   DefinitionFact zero_fact() const override;
   FactSet normal_flow(const llvm::Instruction *stmt,
+                      const llvm::Instruction *succ,
                       const DefinitionFact &fact) override;
   FactSet call_flow(const llvm::CallBase *call, const llvm::Function *callee,
                     const DefinitionFact &fact) override;
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *exit_inst, const llvm::Instruction *return_site, const llvm::Function *callee,
                       const DefinitionFact &exit_fact,
                       const DefinitionFact &call_fact) override;
   FactSet call_to_return_flow(const llvm::CallBase *call,
-                              const llvm::Instruction *return_site, const DefinitionFact &fact) override;
+                              const llvm::Instruction *return_site,
+                              llvm::ArrayRef<const llvm::Function *> callees, const DefinitionFact &fact) override;
   FactSet initial_facts(const llvm::Function *main) override;
 
   // Query interface

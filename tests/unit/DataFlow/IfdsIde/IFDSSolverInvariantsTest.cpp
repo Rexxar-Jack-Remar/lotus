@@ -40,6 +40,7 @@ public:
   SeedFact zero_fact() const override { return SeedFact{0}; }
 
   FactSet normal_flow(const llvm::Instruction *stmt,
+                      const llvm::Instruction *succ,
                       const SeedFact &fact) override {
     if (fact.value == 0 && !llvm::isa<llvm::ReturnInst>(stmt)) {
       return {};
@@ -53,13 +54,15 @@ public:
   }
 
   FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
-                      const llvm::Function *, const SeedFact &exit_fact,
+                      const llvm::Instruction *, const llvm::Function *,
+                      const SeedFact &exit_fact,
                       const SeedFact &) override {
     return {exit_fact};
   }
 
   FactSet call_to_return_flow(const llvm::CallBase *,
                               const llvm::Instruction *,
+                              llvm::ArrayRef<const llvm::Function *>,
                               const SeedFact &) override {
     return {};
   }

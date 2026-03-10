@@ -84,6 +84,7 @@ bool TaintAnalysis::taint_may_alias(const llvm::Value *v1,
 TaintFact TaintAnalysis::zero_fact() const { return TaintFact::zero(); }
 
 TaintAnalysis::FactSet TaintAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                                  const llvm::Instruction *succ,
                                                   const TaintFact &fact) {
   FactSet result;
 
@@ -115,17 +116,14 @@ TaintAnalysis::FactSet TaintAnalysis::normal_flow(const llvm::Instruction *stmt,
     const llvm::Value *ptr = store->getPointerOperand();
 
     if (matches_tainted_value(value)) {
-      // Alias-aware store fanout: taint the destination and known aliases.
-      for (const llvm::Value *alias : get_aliases_including_self(ptr)) {
-        result.insert(TaintFact::tainted_memory(alias, fact.get_source()));
-      }
+      result.insert(TaintFact::tainted_memory(ptr, fact.get_source()));
 
-      // Track global variable stores
+      // Track direct and derived global stores without requiring alias-set
+      // enumeration from the backend.
       if (m_config.track_globals) {
-        for (const llvm::Value *alias : get_aliases_including_self(ptr)) {
-          if (auto *gv = llvm::dyn_cast<llvm::GlobalVariable>(alias)) {
-            result.insert(TaintFact::tainted_global(gv, fact.get_source()));
-          }
+        const llvm::Value *base = llvm::getUnderlyingObject(ptr);
+        if (auto *gv = llvm::dyn_cast_or_null<llvm::GlobalVariable>(base)) {
+          result.insert(TaintFact::tainted_global(gv, fact.get_source()));
         }
       }
     }
@@ -408,6 +406,7 @@ TaintAnalysis::FactSet TaintAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 TaintAnalysis::FactSet TaintAnalysis::return_flow(const llvm::CallBase *call,
+                                                  const llvm::Instruction *exit_inst,
                                                   const llvm::Instruction *return_site, const llvm::Function *callee,
                                                   const TaintFact &exit_fact,
                                                   const TaintFact &call_fact) {
@@ -439,17 +438,6 @@ TaintAnalysis::FactSet TaintAnalysis::return_flow(const llvm::CallBase *call,
         return TaintFact::tainted_var(call, source.get_source());
       });
 
-  // Alias-aware return post-processing for memory taint in call context.
-  expand_facts_with_aliases_in_context(
-      result, call,
-      [](const TaintFact &f) -> const llvm::Value * {
-        return f.is_tainted_memory() ? f.get_memory_location() : nullptr;
-      },
-      [](const llvm::Value *alias, const TaintFact &f) {
-        return TaintFact::tainted_memory(alias, f.get_source());
-      },
-      [](const TaintFact &f) { return f.is_tainted_memory(); });
-
   if (!call_fact.is_zero()) {
     result.insert(call_fact);
   }
@@ -459,7 +447,8 @@ TaintAnalysis::FactSet TaintAnalysis::return_flow(const llvm::CallBase *call,
 
 TaintAnalysis::FactSet
 TaintAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                   const llvm::Instruction *return_site, const TaintFact &fact) {
+                                   const llvm::Instruction *return_site,
+                                   llvm::ArrayRef<const llvm::Function *> callees, const TaintFact &fact) {
   FactSet result;
 
   const llvm::Function *callee = call->getCalledFunction();

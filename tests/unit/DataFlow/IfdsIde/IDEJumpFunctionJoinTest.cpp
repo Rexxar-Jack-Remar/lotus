@@ -37,6 +37,7 @@ public:
 
   Fact zero_fact() const override { return nullptr; }
   FactSet normal_flow(const llvm::Instruction * /*stmt*/,
+                      const llvm::Instruction * /*succ*/,
                       const Fact &fact) override {
     return {fact};
   }
@@ -46,13 +47,18 @@ public:
     return {};
   }
   FactSet return_flow(const llvm::CallBase * /*call*/,
+                      const llvm::Instruction * /*exit_inst*/,
                       const llvm::Instruction *return_site, const llvm::Function * /*callee*/,
                       const Fact & /*exit_fact*/,
                       const Fact & /*call_fact*/) override {
+    (void)return_site;
     return {};
   }
   FactSet call_to_return_flow(const llvm::CallBase * /*call*/,
-                              const llvm::Instruction *return_site, const Fact &fact) override {
+                              const llvm::Instruction *return_site,
+                              llvm::ArrayRef<const llvm::Function *> /*callees*/,
+                              const Fact &fact) override {
+    (void)return_site;
     return {fact};
   }
   FactSet initial_facts(const llvm::Function * /*main*/) override {
@@ -76,6 +82,7 @@ public:
   }
 
   EdgeFunction normal_edge_function(const llvm::Instruction *stmt,
+                                    const llvm::Instruction * /*succ*/,
                                     const Fact & /*src_fact*/,
                                     const Fact & /*tgt_fact*/) override {
     if (const auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(stmt)) {
@@ -89,18 +96,25 @@ public:
     return identity();
   }
   EdgeFunction call_edge_function(const llvm::CallBase * /*call*/,
+                                  const llvm::Function * /*callee*/,
                                   const Fact & /*src_fact*/,
                                   const Fact & /*tgt_fact*/) override {
     return identity();
   }
   EdgeFunction return_edge_function(const llvm::CallBase * /*call*/,
+                                    const llvm::Function * /*callee*/,
+                                    const llvm::Instruction * /*exit_inst*/,
                                     const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
                                     const Fact & /*ret_fact*/) override {
+    (void)return_site;
     return identity();
   }
   EdgeFunction call_to_return_edge_function(const llvm::CallBase * /*call*/,
-                                            const llvm::Instruction *return_site, const Fact & /*src_fact*/,
+                                            const llvm::Instruction *return_site,
+                                            llvm::ArrayRef<const llvm::Function *> /*callees*/,
+                                            const Fact & /*src_fact*/,
                                             const Fact & /*tgt_fact*/) override {
+    (void)return_site;
     return identity();
   }
 };
@@ -111,7 +125,8 @@ public:
   using Value = SetValue;
 
   Fact zero_fact() const override { return nullptr; }
-  FactSet normal_flow(const llvm::Instruction *, const Fact &fact) override {
+  FactSet normal_flow(const llvm::Instruction *, const llvm::Instruction *,
+                      const Fact &fact) override {
     return {fact};
   }
   FactSet call_flow(const llvm::CallBase *, const llvm::Function *,
@@ -119,11 +134,14 @@ public:
     return {};
   }
   FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
-                      const llvm::Function *, const Fact &, const Fact &) override {
+                      const llvm::Instruction *, const llvm::Function *,
+                      const Fact &, const Fact &) override {
     return {};
   }
   FactSet call_to_return_flow(const llvm::CallBase *,
-                              const llvm::Instruction *, const Fact &) override {
+                              const llvm::Instruction *,
+                              llvm::ArrayRef<const llvm::Function *>,
+                              const Fact &) override {
     return {};
   }
   FactSet initial_facts(const llvm::Function *) override { return {zero_fact()}; }
@@ -144,7 +162,8 @@ public:
     return out;
   }
 
-  EdgeFunction normal_edge_function(const llvm::Instruction *stmt, const Fact &,
+  EdgeFunction normal_edge_function(const llvm::Instruction *stmt,
+                                    const llvm::Instruction *, const Fact &,
                                     const Fact &) override {
     if (const auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(stmt)) {
       if (bin->getName() == "loop_add") {
@@ -153,17 +172,21 @@ public:
     }
     return identity();
   }
-  EdgeFunction call_edge_function(const llvm::CallBase *, const Fact &,
+  EdgeFunction call_edge_function(const llvm::CallBase *,
+                                  const llvm::Function *, const Fact &,
                                   const Fact &) override {
     return identity();
   }
   EdgeFunction return_edge_function(const llvm::CallBase *,
+                                    const llvm::Function *,
+                                    const llvm::Instruction *,
                                     const llvm::Instruction *, const Fact &,
                                     const Fact &) override {
     return identity();
   }
   EdgeFunction call_to_return_edge_function(const llvm::CallBase *,
                                             const llvm::Instruction *,
+                                            llvm::ArrayRef<const llvm::Function *>,
                                             const Fact &, const Fact &) override {
     return identity();
   }

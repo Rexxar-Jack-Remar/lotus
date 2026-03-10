@@ -148,6 +148,7 @@ IDEConstantPropagation::applyBinOp(unsigned opcode, long long a, long long b) {
 
 IDEConstantPropagation::FactSet
 IDEConstantPropagation::normal_flow(const llvm::Instruction *stmt,
+                                    const llvm::Instruction *succ,
                                     const Fact &fact) {
   FactSet out;
   // propagate same fact by default
@@ -234,8 +235,10 @@ IDEConstantPropagation::call_flow(const llvm::CallBase *call,
 }
 
 IDEConstantPropagation::FactSet IDEConstantPropagation::return_flow(
-    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *exit_inst,
+    const llvm::Instruction *return_site, const llvm::Function *callee,
     const Fact &exit_fact, const Fact &call_fact) {
+  (void)exit_inst;
   FactSet out;
   if (!callee || callee->isDeclaration())
     return out;
@@ -260,7 +263,8 @@ IDEConstantPropagation::FactSet IDEConstantPropagation::return_flow(
 
 IDEConstantPropagation::FactSet
 IDEConstantPropagation::call_to_return_flow(const llvm::CallBase *call,
-                                            const llvm::Instruction *return_site, const Fact &fact) {
+                                            const llvm::Instruction *return_site,
+                                            llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) {
   FactSet out;
   // conservative: propagate caller facts across unknown call
   if (fact)
@@ -273,6 +277,7 @@ IDEConstantPropagation::call_to_return_flow(const llvm::CallBase *call,
 
 IDEConstantPropagation::EdgeFunction
 IDEConstantPropagation::normal_edge_function(const llvm::Instruction *stmt,
+                                             const llvm::Instruction *succ,
                                              const Fact &src_fact,
                                              const Fact &tgt_fact) {
   if (auto *allocaInst = llvm::dyn_cast<llvm::AllocaInst>(stmt)) {
@@ -369,10 +374,10 @@ IDEConstantPropagation::normal_edge_function(const llvm::Instruction *stmt,
 }
 
 IDEConstantPropagation::EdgeFunction IDEConstantPropagation::call_edge_function(
-    const llvm::CallBase *call, const Fact &src_fact, const Fact &tgt_fact) {
+    const llvm::CallBase *call, const llvm::Function *callee,
+    const Fact &src_fact, const Fact &tgt_fact) {
   // actual to formal: identity on carried constant, constant propagation for
   // literal args
-  const llvm::Function *callee = call->getCalledFunction();
   if (callee) {
     unsigned idx = 0;
     for (const llvm::Argument &arg : callee->args()) {
@@ -398,6 +403,8 @@ IDEConstantPropagation::EdgeFunction IDEConstantPropagation::call_edge_function(
 
 IDEConstantPropagation::EdgeFunction
 IDEConstantPropagation::return_edge_function(const llvm::CallBase *call,
+                                             const llvm::Function *callee,
+                                             const llvm::Instruction *exit_inst,
                                              const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
                                              const Fact &ret_fact) {
   // callee return to caller result
@@ -413,8 +420,12 @@ IDEConstantPropagation::return_edge_function(const llvm::CallBase *call,
 
 IDEConstantPropagation::EdgeFunction
 IDEConstantPropagation::call_to_return_edge_function(const llvm::CallBase *call,
-                                                     const llvm::Instruction *return_site, const Fact &src_fact,
+                                                     const llvm::Instruction *return_site,
+                                                     llvm::ArrayRef<const llvm::Function *> callees,
+                                                     const Fact &src_fact,
                                                      const Fact &tgt_fact) {
+  (void)return_site;
+  (void)callees;
   // unknown function: kill definition of call result => top; keep others
   if (!call->getType()->isVoidTy()) {
     const llvm::Value *callDef = static_cast<const llvm::Value *>(call);
@@ -452,9 +463,11 @@ IDEConstantPropagation::summary_flow(const llvm::CallBase *call,
 
 IDEConstantPropagation::EdgeFunction
 IDEConstantPropagation::summary_edge_function(const llvm::CallBase *call,
+                                              const llvm::Function *callee,
+                                              const llvm::Instruction *return_site,
                                               const Fact &src_fact,
                                               const Fact &tgt_fact) {
-  const llvm::Function *callee = call->getCalledFunction();
+  (void)return_site;
   if (!callee || !callee->isIntrinsic()) {
     return [](const Value &v) { return v; };
   }

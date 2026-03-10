@@ -166,21 +166,24 @@ void IFDSSolver<Problem>::process_normal_edge(const PathEdgeType& current_edge,
     // exit-facts recording and the propagation target DO depend on `next`.
     // We cache the flow-function result (which is successor-independent) but
     // always propagate to the correct `next` instruction.
-    NormalFlowKey nkey{current_edge.target_node, current_edge.target_fact};
+    NormalFlowKey nkey{current_edge.target_node, next,
+                       current_edge.target_fact};
     FactSet new_facts;
     if (m_config.enable_flow_function_caching()) {
         auto cit = m_normal_flow_cache.find(nkey);
         if (cit != m_normal_flow_cache.end()) {
             new_facts = cit->second;
         } else {
-            new_facts = m_problem.normal_flow(current_edge.target_node, current_edge.target_fact);
+            new_facts = m_problem.normal_flow(current_edge.target_node, next,
+                                              current_edge.target_fact);
             if (m_problem.auto_add_zero() && m_problem.is_zero_fact(current_edge.target_fact)) {
                 new_facts.insert(m_problem.zero_fact());
             }
             m_normal_flow_cache[nkey] = new_facts;
         }
     } else {
-        new_facts = m_problem.normal_flow(current_edge.target_node, current_edge.target_fact);
+        new_facts = m_problem.normal_flow(current_edge.target_node, next,
+                                          current_edge.target_fact);
         if (m_problem.auto_add_zero() && m_problem.is_zero_fact(current_edge.target_fact)) {
             new_facts.insert(m_problem.zero_fact());
         }
@@ -248,7 +251,8 @@ void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
             for (const ExitSummary& summary : summary_it->second) {
                 for (const llvm::Instruction* return_site : get_return_sites(call)) {
                     FactSet return_facts = m_problem.return_flow(
-                        call, return_site, callee, summary.exit_fact,
+                        call, summary.exit_inst, return_site, callee,
+                        summary.exit_fact,
                         current_edge.target_fact);
                     if (m_problem.auto_add_zero() &&
                         m_problem.is_zero_fact(summary.exit_fact)) {
@@ -306,7 +310,7 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
                                             edge_info.call_fact, exit_fact);
                 m_state.add_summary_edge(new_summary);
                 FactSet return_facts = m_problem.return_flow(
-                    edge_info.call_node, return_site, func, exit_fact,
+                    edge_info.call_node, ret, return_site, func, exit_fact,
                     edge_info.call_fact);
                 if (m_problem.auto_add_zero() &&
                     m_problem.is_zero_fact(exit_fact)) {
@@ -348,8 +352,8 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
         Fact zero = m_problem.zero_fact();
         for (const llvm::CallBase* call : callee_calls_it->second) {
             for (const llvm::Instruction* return_site : get_return_sites(call)) {
-                FactSet return_facts =
-                    m_problem.return_flow(call, return_site, func, exit_fact, zero);
+                FactSet return_facts = m_problem.return_flow(
+                    call, ret, return_site, func, exit_fact, zero);
                 for (const Fact& rf : return_facts) {
                     if (m_problem.is_zero_fact(rf)) {
                         continue;
@@ -377,8 +381,13 @@ void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& curren
             if (cit != m_call_to_return_flow_cache.end()) {
                 ctr_facts = cit->second;
             } else {
-                ctr_facts = m_problem.call_to_return_flow(call, return_site,
-                                                          current_edge.target_fact);
+                llvm::ArrayRef<const llvm::Function *> callees;
+                auto callees_it = m_graph_context.call_to_callees().find(call);
+                if (callees_it != m_graph_context.call_to_callees().end()) {
+                    callees = callees_it->second;
+                }
+                ctr_facts = m_problem.call_to_return_flow(
+                    call, return_site, callees, current_edge.target_fact);
                 if (m_problem.auto_add_zero() &&
                     m_problem.is_zero_fact(current_edge.target_fact)) {
                     ctr_facts.insert(m_problem.zero_fact());
@@ -386,8 +395,13 @@ void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& curren
                 m_call_to_return_flow_cache[ckey] = ctr_facts;
             }
         } else {
-            ctr_facts = m_problem.call_to_return_flow(call, return_site,
-                                                      current_edge.target_fact);
+            llvm::ArrayRef<const llvm::Function *> callees;
+            auto callees_it = m_graph_context.call_to_callees().find(call);
+            if (callees_it != m_graph_context.call_to_callees().end()) {
+                callees = callees_it->second;
+            }
+            ctr_facts = m_problem.call_to_return_flow(
+                call, return_site, callees, current_edge.target_fact);
             if (m_problem.auto_add_zero() &&
                 m_problem.is_zero_fact(current_edge.target_fact)) {
                 ctr_facts.insert(m_problem.zero_fact());

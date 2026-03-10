@@ -55,6 +55,7 @@ llvm::Optional<SignFact::Sign> SignAnalysis::eval_binary(unsigned opcode,
 }
 
 SignAnalysis::FactSet SignAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                                const llvm::Instruction *succ,
                                                 const SignFact &fact) {
   FactSet result;
   if (!stmt) {
@@ -130,6 +131,7 @@ SignAnalysis::FactSet SignAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 SignAnalysis::FactSet SignAnalysis::return_flow(const llvm::CallBase *call,
+                                                const llvm::Instruction *exit_inst,
                                                 const llvm::Instruction *return_site, const llvm::Function *callee,
                                                 const SignFact &exit_fact,
                                                 const SignFact &call_fact) {
@@ -162,7 +164,12 @@ SignAnalysis::FactSet SignAnalysis::return_flow(const llvm::CallBase *call,
 
 SignAnalysis::FactSet
 SignAnalysis::call_to_return_flow(const llvm::CallBase * /*call*/,
-                                  const llvm::Instruction *return_site, const SignFact &fact) {
+                                  const llvm::Instruction *return_site,
+                                  llvm::ArrayRef<const llvm::Function *>
+                                      callees,
+                                  const SignFact &fact) {
+  (void)return_site;
+  (void)callees;
   FactSet result;
   result.insert(fact);
   return result;

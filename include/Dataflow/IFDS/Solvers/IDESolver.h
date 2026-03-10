@@ -256,12 +256,17 @@ private:
       m_join_cache;
 
   // Edge function caches (avoid recomputing same edge function)
-  using NormalEdgeKey = std::tuple<const llvm::Instruction *, Fact, Fact>;
+  using NormalEdgeKey =
+      std::tuple<const llvm::Instruction *, const llvm::Instruction *, Fact,
+                 Fact>;
   using CallToReturnEdgeKey =
       std::tuple<const llvm::CallBase *, const llvm::Instruction *, Fact, Fact>;
-  std::unordered_map<NormalEdgeKey, EdgeFunctionPtr,
-                     detail::TripleHash<const llvm::Instruction *, Fact, Fact>,
-                     detail::TripleEq<const llvm::Instruction *, Fact, Fact>>
+  std::unordered_map<
+      NormalEdgeKey, EdgeFunctionPtr,
+      detail::QuadHash<const llvm::Instruction *, const llvm::Instruction *,
+                       Fact, Fact>,
+      detail::QuadEq<const llvm::Instruction *, const llvm::Instruction *, Fact,
+                     Fact>>
       m_normal_edge_cache;
   std::unordered_map<CallToReturnEdgeKey, EdgeFunctionPtr,
                      detail::QuadHash<const llvm::CallBase *,

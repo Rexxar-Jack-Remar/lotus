@@ -122,6 +122,7 @@ IDETypeState::Value IDETypeState::join(const Value &v1, const Value &v2) const {
 }
 
 IDETypeState::FactSet IDETypeState::normal_flow(const llvm::Instruction *stmt,
+                                                const llvm::Instruction *succ,
                                                 const Fact &fact) {
   FactSet out;
 
@@ -236,6 +237,7 @@ IDETypeState::FactSet IDETypeState::call_flow(const llvm::CallBase *call,
 }
 
 IDETypeState::FactSet IDETypeState::return_flow(const llvm::CallBase *call,
+                                                const llvm::Instruction *exit_inst,
                                                 const llvm::Instruction *return_site, const llvm::Function *callee,
                                                 const Fact &exit_fact,
                                                 const Fact &call_fact) {
@@ -259,7 +261,8 @@ IDETypeState::FactSet IDETypeState::return_flow(const llvm::CallBase *call,
 
 IDETypeState::FactSet
 IDETypeState::call_to_return_flow(const llvm::CallBase *call,
-                                  const llvm::Instruction *return_site, const Fact &fact) {
+                                  const llvm::Instruction *return_site,
+                                  llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) {
   FactSet out;
 
   // Keep the fact (it's not killed by the call)
@@ -277,6 +280,7 @@ IDETypeState::call_to_return_flow(const llvm::CallBase *call,
 
 IDETypeState::EdgeFunction
 IDETypeState::normal_edge_function(const llvm::Instruction *stmt,
+                                   const llvm::Instruction *succ,
                                    const Fact &src_fact, const Fact &tgt_fact) {
   (void)src_fact;
   (void)tgt_fact;
@@ -294,7 +298,9 @@ IDETypeState::normal_edge_function(const llvm::Instruction *stmt,
 
 IDETypeState::EdgeFunction
 IDETypeState::call_edge_function(const llvm::CallBase *call,
+                                 const llvm::Function *callee,
                                  const Fact &src_fact, const Fact &tgt_fact) {
+  (void)callee;
   (void)src_fact;
   (void)tgt_fact;
 
@@ -310,8 +316,14 @@ IDETypeState::call_edge_function(const llvm::CallBase *call,
 }
 
 IDETypeState::EdgeFunction IDETypeState::return_edge_function(
-    const llvm::CallBase *call, const llvm::Instruction *return_site, const Fact &exit_fact, const Fact &ret_fact) {
+    const llvm::CallBase *call, const llvm::Function *callee,
+    const llvm::Instruction *exit_inst,
+    const llvm::Instruction *return_site, const Fact &exit_fact,
+    const Fact &ret_fact) {
   (void)call;
+  (void)callee;
+  (void)exit_inst;
+  (void)return_site;
   (void)exit_fact;
   (void)ret_fact;
 
@@ -320,8 +332,12 @@ IDETypeState::EdgeFunction IDETypeState::return_edge_function(
 }
 
 IDETypeState::EdgeFunction IDETypeState::call_to_return_edge_function(
-    const llvm::CallBase *call, const llvm::Instruction *return_site, const Fact &src_fact, const Fact &tgt_fact) {
+    const llvm::CallBase *call, const llvm::Instruction *return_site,
+    llvm::ArrayRef<const llvm::Function *> callees, const Fact &src_fact,
+    const Fact &tgt_fact) {
   (void)call;
+  (void)return_site;
+  (void)callees;
   (void)src_fact;
   (void)tgt_fact;
 

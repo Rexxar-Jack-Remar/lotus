@@ -228,11 +228,14 @@ private:
       m_call_edge_info_seen;
 
   // Flow function result caches (key -> FactSet) to avoid recomputation
-  using NormalFlowKey = std::pair<const llvm::Instruction *, Fact>;
+  using NormalFlowKey =
+      std::tuple<const llvm::Instruction *, const llvm::Instruction *, Fact>;
   using CallToReturnFlowKey =
       std::tuple<const llvm::CallBase *, const llvm::Instruction *, Fact>;
-  std::unordered_map<NormalFlowKey, FactSet,
-                     PairHash<const llvm::Instruction *, Fact>>
+  std::unordered_map<
+      NormalFlowKey, FactSet,
+      TripleHash<const llvm::Instruction *, const llvm::Instruction *, Fact>,
+      TripleEq<const llvm::Instruction *, const llvm::Instruction *, Fact>>
       m_normal_flow_cache;
   std::unordered_map<
       CallToReturnFlowKey, FactSet,

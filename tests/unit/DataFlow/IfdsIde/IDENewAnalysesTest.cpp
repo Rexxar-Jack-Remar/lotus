@@ -41,7 +41,8 @@ TEST_F(IDENewAnalysesTest, ExtendedTaintMarksSourceCallResultTainted) {
   auto SF = Problem.summary_flow(CallRecv, Recv, Problem.zero_fact());
   EXPECT_TRUE(SF.count(CallRecv) > 0);
 
-  auto EF = Problem.summary_edge_function(CallRecv, Problem.zero_fact(), CallRecv);
+  auto EF = Problem.summary_edge_function(CallRecv, Recv, CallRecv,
+                                          Problem.zero_fact(), CallRecv);
   auto V = EF(Problem.bottom_value());
   EXPECT_EQ(V.kind, ExtendedTaintValue::Tainted);
 }
@@ -65,7 +66,8 @@ TEST_F(IDENewAnalysesTest, FeatureTaintAssignsSourceFeatureBit) {
   auto SF = Problem.summary_flow(CallRecv, Recv, Problem.zero_fact());
   EXPECT_TRUE(SF.count(CallRecv) > 0);
 
-  auto EF = Problem.summary_edge_function(CallRecv, Problem.zero_fact(), CallRecv);
+  auto EF = Problem.summary_edge_function(CallRecv, Recv, CallRecv,
+                                          Problem.zero_fact(), CallRecv);
   auto V = EF(Problem.bottom_value());
   EXPECT_EQ(V.kind, FeatureTaintValue::Features);
   EXPECT_NE(V.mask & (1ull << 0), 0ull);
@@ -93,8 +95,8 @@ TEST_F(IDENewAnalysesTest, SecureHeapMarksAllocatorResultAllocated) {
   auto SF = Problem.summary_flow(CallMalloc, Malloc, Problem.zero_fact());
   EXPECT_TRUE(SF.count(CallMalloc) > 0);
 
-  auto EF =
-      Problem.summary_edge_function(CallMalloc, Problem.zero_fact(), CallMalloc);
+  auto EF = Problem.summary_edge_function(CallMalloc, Malloc, CallMalloc,
+                                          Problem.zero_fact(), CallMalloc);
   auto V = EF(Problem.bottom_value());
   EXPECT_EQ(V.kind, SecureHeapValue::Allocated);
 }

@@ -91,6 +91,7 @@ DefinitionFact ReachingDefinitionsAnalysis::zero_fact() const {
 
 ReachingDefinitionsAnalysis::FactSet
 ReachingDefinitionsAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                         const llvm::Instruction *succ,
                                          const DefinitionFact &fact) {
   FactSet result;
 
@@ -175,8 +176,10 @@ ReachingDefinitionsAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::return_flow(
-    const llvm::CallBase *call, const llvm::Instruction *return_site, const llvm::Function *callee,
+    const llvm::CallBase *call, const llvm::Instruction *exit_inst,
+    const llvm::Instruction *return_site, const llvm::Function *callee,
     const DefinitionFact &exit_fact, const DefinitionFact &call_fact) {
+  (void)exit_inst;
   FactSet result;
 
   // Always propagate zero fact
@@ -209,7 +212,8 @@ ReachingDefinitionsAnalysis::FactSet ReachingDefinitionsAnalysis::return_flow(
 
 ReachingDefinitionsAnalysis::FactSet
 ReachingDefinitionsAnalysis::call_to_return_flow(const llvm::CallBase *call,
-                                                 const llvm::Instruction *return_site, const DefinitionFact &fact) {
+                                                 const llvm::Instruction *return_site,
+                                                 llvm::ArrayRef<const llvm::Function *> callees, const DefinitionFact &fact) {
   FactSet result;
 
   const llvm::Function *callee = call->getCalledFunction();

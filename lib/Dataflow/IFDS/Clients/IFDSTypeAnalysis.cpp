@@ -5,6 +5,7 @@
 namespace ifds {
 
 TypeAnalysis::FactSet TypeAnalysis::normal_flow(const llvm::Instruction *stmt,
+                                                const llvm::Instruction *succ,
                                                 const Fact &fact) {
   FactSet result;
   if (!stmt) {
@@ -64,6 +65,7 @@ TypeAnalysis::FactSet TypeAnalysis::call_flow(const llvm::CallBase *call,
 }
 
 TypeAnalysis::FactSet TypeAnalysis::return_flow(const llvm::CallBase *call,
+                                                const llvm::Instruction *exit_inst,
                                                 const llvm::Instruction *return_site, const llvm::Function *callee,
                                                 const Fact &exit_fact,
                                                 const Fact &call_fact) {
@@ -115,7 +117,12 @@ TypeAnalysis::FactSet TypeAnalysis::return_flow(const llvm::CallBase *call,
 
 TypeAnalysis::FactSet
 TypeAnalysis::call_to_return_flow(const llvm::CallBase * /*call*/,
-                                  const llvm::Instruction *return_site, const Fact &fact) {
+                                  const llvm::Instruction *return_site,
+                                  llvm::ArrayRef<const llvm::Function *>
+                                      callees,
+                                  const Fact &fact) {
+  (void)return_site;
+  (void)callees;
   FactSet result;
   result.insert(fact);
   return result;
