@@ -96,8 +96,9 @@ public:
     return out;
   }
 
-  std::vector<unsigned> getMemoryBitsForAccess(
-      const llvm::Value *ptr, TaintSpec::AccessMode mode) const {
+  std::vector<unsigned>
+  getMemoryBitsForAccess(const llvm::Value *ptr,
+                         TaintSpec::AccessMode mode) const {
     if (mode == TaintSpec::VALUE || !ptr || !ptr->getType()->isPointerTy())
       return {};
     if (mode == TaintSpec::DIRECT_DEREF)
@@ -109,7 +110,8 @@ public:
 
   static unsigned invalidBit() { return static_cast<unsigned>(-1); }
 
-  const std::unordered_map<const llvm::Value *, unsigned> &getValueBits() const {
+  const std::unordered_map<const llvm::Value *, unsigned> &
+  getValueBits() const {
     return valueBits;
   }
 
@@ -187,7 +189,8 @@ public:
 
     if (out.empty() && relative.derived &&
         (relative.unknown || relative.offset == 0)) {
-      out = relative.unknown ? getReachableMemBits(actual) : getAliasMemBits(actual);
+      out = relative.unknown ? getReachableMemBits(actual)
+                             : getAliasMemBits(actual);
     }
 
     std::sort(out.begin(), out.end());
@@ -255,19 +258,24 @@ private:
   bool mayAlias(const MemKey &a, const MemKey &b) const {
     if (!a.ptr || !b.ptr)
       return false;
-    bool baseAlias = (a.base == b.base);
-    if (!baseAlias)
-      baseAlias = aliasAnalysis.mayAlias(a.ptr, b.ptr);
-    if (!baseAlias)
+    if (a.base == b.base) {
+      if (a.unknown || b.unknown)
+        return true;
+      return a.offset == b.offset;
+    }
+
+    if (a.base && b.base && llvm::isIdentifiedObject(a.base) &&
+        llvm::isIdentifiedObject(b.base) && a.base != b.base)
       return false;
-    if (a.unknown || b.unknown)
-      return true;
-    return a.offset == b.offset;
+
+    if (!aliasAnalysis.mayAlias(a.ptr, b.ptr))
+      return false;
+    return true;
   }
 
-  RelativeOffsetInfo
-  getRelativeOffsetInfoImpl(const llvm::Value *ptr, const llvm::Value *root,
-                            std::unordered_set<const llvm::Value *> &visited) const {
+  RelativeOffsetInfo getRelativeOffsetInfoImpl(
+      const llvm::Value *ptr, const llvm::Value *root,
+      std::unordered_set<const llvm::Value *> &visited) const {
     RelativeOffsetInfo out;
     if (!ptr || !root)
       return out;
@@ -389,7 +397,8 @@ private:
   }
 
   void addReachableSeed(unsigned memBit, const llvm::Value *pointerValue) {
-    if (memBit == invalidBit() || !pointerValue || !pointerValue->getType()->isPointerTy())
+    if (memBit == invalidBit() || !pointerValue ||
+        !pointerValue->getType()->isPointerTy())
       return;
     auto &seeds = reachablePointerSeeds[memBit];
     if (std::find(seeds.begin(), seeds.end(), pointerValue) == seeds.end())
@@ -428,7 +437,8 @@ private:
           if (store) {
             const llvm::Value *stored = store->getValueOperand();
             if (stored && stored->getType()->isPointerTy()) {
-              for (unsigned memBit : getAliasMemBits(store->getPointerOperand()))
+              for (unsigned memBit :
+                   getAliasMemBits(store->getPointerOperand()))
                 addReachableSeed(memBit, stored);
             }
             continue;
@@ -438,9 +448,9 @@ private:
               continue;
             for (unsigned memBit : getAliasMemBits(load->getPointerOperand()))
               addReachableSeed(memBit, load);
+          }
+        }
       }
-    }
-  }
     }
   }
 
@@ -544,7 +554,8 @@ public:
 
   bool addMemoryIdentityFlow(D::value_type &transfer, const llvm::Value *src,
                              const llvm::Value *dst) const {
-    if (!src || !dst || !src->getType()->isPointerTy() || !dst->getType()->isPointerTy())
+    if (!src || !dst || !src->getType()->isPointerTy() ||
+        !dst->getType()->isPointerTy())
       return false;
     bool updated = false;
     auto dstBits = info.getAliasMemBits(dst);
@@ -581,13 +592,16 @@ public:
       }
     } else if (auto *load = llvm::dyn_cast<llvm::LoadInst>(&I)) {
       const llvm::Value *ptr = load->getPointerOperand();
-      unsigned ptrBit = info.getValueBit(ptr);
       unsigned loadBit = info.getValueBit(load);
+      (void)loadBit;
 
-      if (ptrBit != TaintInfo::invalidBit() &&
-          loadBit != TaintInfo::invalidBit()) {
-        D::addEdge(transfer, ptrBit, loadBit);
-        updated = true;
+      if (options.propagate_pointer_value_on_load) {
+        unsigned ptrBit = info.getValueBit(ptr);
+        if (ptrBit != TaintInfo::invalidBit() &&
+            loadBit != TaintInfo::invalidBit()) {
+          D::addEdge(transfer, ptrBit, loadBit);
+          updated = true;
+        }
       }
 
       for (unsigned memBit : info.getAliasMemBits(ptr)) {
@@ -630,8 +644,9 @@ public:
         D::addEdge(transfer, inBit, outBit);
         updated = true;
       }
-      updated = addMemoryIdentityFlow(transfer, gep->getPointerOperand(), gep) ||
-                updated;
+      updated =
+          addMemoryIdentityFlow(transfer, gep->getPointerOperand(), gep) ||
+          updated;
     } else if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&I)) {
       unsigned outBit = info.getValueBit(phi);
       if (outBit != TaintInfo::invalidBit()) {
@@ -641,25 +656,31 @@ public:
             D::addEdge(transfer, inBit, outBit);
             updated = true;
           }
-          updated = addMemoryIdentityFlow(transfer, phi->getIncomingValue(i), phi) ||
-                    updated;
+          updated =
+              addMemoryIdentityFlow(transfer, phi->getIncomingValue(i), phi) ||
+              updated;
         }
       }
     } else if (auto *cmp = llvm::dyn_cast<llvm::ICmpInst>(&I)) {
       updated = addValueFlow(transfer, cmp->getOperand(0), cmp) || updated;
       updated = addValueFlow(transfer, cmp->getOperand(1), cmp) || updated;
     } else if (auto *select = llvm::dyn_cast<llvm::SelectInst>(&I)) {
-      updated = addValueFlow(transfer, select->getCondition(), select) || updated;
-      updated = addValueFlow(transfer, select->getTrueValue(), select) || updated;
-      updated = addValueFlow(transfer, select->getFalseValue(), select) || updated;
-      updated = addMemoryIdentityFlow(transfer, select->getTrueValue(), select) ||
-                updated;
-      updated = addMemoryIdentityFlow(transfer, select->getFalseValue(), select) ||
-                updated;
+      updated =
+          addValueFlow(transfer, select->getCondition(), select) || updated;
+      updated =
+          addValueFlow(transfer, select->getTrueValue(), select) || updated;
+      updated =
+          addValueFlow(transfer, select->getFalseValue(), select) || updated;
+      updated =
+          addMemoryIdentityFlow(transfer, select->getTrueValue(), select) ||
+          updated;
+      updated =
+          addMemoryIdentityFlow(transfer, select->getFalseValue(), select) ||
+          updated;
     } else if (auto *unary = llvm::dyn_cast<llvm::UnaryOperator>(&I)) {
       updated = addValueFlow(transfer, unary->getOperand(0), unary) || updated;
-      updated =
-          addMemoryIdentityFlow(transfer, unary->getOperand(0), unary) || updated;
+      updated = addMemoryIdentityFlow(transfer, unary->getOperand(0), unary) ||
+                updated;
     } else if (auto *insert = llvm::dyn_cast<llvm::InsertValueInst>(&I)) {
       updated = addValueFlow(transfer, insert->getAggregateOperand(), insert) ||
                 updated;
@@ -667,22 +688,24 @@ public:
           addValueFlow(transfer, insert->getInsertedValueOperand(), insert) ||
           updated;
     } else if (auto *extract = llvm::dyn_cast<llvm::ExtractValueInst>(&I)) {
-      updated = addValueFlow(transfer, extract->getAggregateOperand(), extract) ||
-                updated;
+      updated =
+          addValueFlow(transfer, extract->getAggregateOperand(), extract) ||
+          updated;
     } else if (auto *insertElem = llvm::dyn_cast<llvm::InsertElementInst>(&I)) {
       updated = addValueFlow(transfer, insertElem->getOperand(0), insertElem) ||
                 updated;
       updated = addValueFlow(transfer, insertElem->getOperand(1), insertElem) ||
                 updated;
-    } else if (auto *extractElem = llvm::dyn_cast<llvm::ExtractElementInst>(&I)) {
-      updated =
-          addValueFlow(transfer, extractElem->getVectorOperand(), extractElem) ||
-          updated;
+    } else if (auto *extractElem =
+                   llvm::dyn_cast<llvm::ExtractElementInst>(&I)) {
+      updated = addValueFlow(transfer, extractElem->getVectorOperand(),
+                             extractElem) ||
+                updated;
     } else if (auto *shuffle = llvm::dyn_cast<llvm::ShuffleVectorInst>(&I)) {
-      updated = addValueFlow(transfer, shuffle->getOperand(0), shuffle) ||
-                updated;
-      updated = addValueFlow(transfer, shuffle->getOperand(1), shuffle) ||
-                updated;
+      updated =
+          addValueFlow(transfer, shuffle->getOperand(0), shuffle) || updated;
+      updated =
+          addValueFlow(transfer, shuffle->getOperand(1), shuffle) || updated;
     }
 
     if (!updated)
@@ -720,6 +743,10 @@ public:
   D::value_type getCallReturnTransfer(const llvm::CallBase &call,
                                       const llvm::Function &callee) {
     D::value_type transfer = D::one();
+    std::vector<unsigned> callReachableBits;
+    if (call.getType()->isPointerTy())
+      callReachableBits = bitsForAccess(&call, TaintSpec::REACHABLE_DEREF);
+
     if (!call.getType()->isVoidTy()) {
       unsigned callBit = info.getValueBit(&call);
       if (callBit != TaintInfo::invalidBit()) {
@@ -730,6 +757,15 @@ public:
               unsigned retBit = info.getValueBit(retVal);
               if (retBit != TaintInfo::invalidBit()) {
                 D::addEdge(transfer, retBit, callBit);
+              }
+
+              if (retVal->getType()->isPointerTy() &&
+                  !callReachableBits.empty()) {
+                for (unsigned sourceBit :
+                     bitsForAccess(retVal, TaintSpec::REACHABLE_DEREF)) {
+                  for (unsigned targetBit : callReachableBits)
+                    D::addEdge(transfer, sourceBit, targetBit);
+                }
               }
             }
           }
@@ -794,7 +830,8 @@ public:
 
   bool factsEqual(const FactType &a, const FactType &b) { return a == b; }
 
-  const std::unordered_map<const llvm::Value *, unsigned> &getValueBits() const {
+  const std::unordered_map<const llvm::Value *, unsigned> &
+  getValueBits() const {
     return info.getValueBits();
   }
 
@@ -832,7 +869,8 @@ private:
 
   std::vector<const llvm::Function *>
   getSpecCandidateCallees(const llvm::CallBase &call) const {
-    std::function<void(const llvm::Value *, std::vector<const llvm::Function *> &)>
+    std::function<void(const llvm::Value *,
+                       std::vector<const llvm::Function *> &)>
         addConstantBackedTargets =
             [&](const llvm::Value *value,
                 std::vector<const llvm::Function *> &targets) {
@@ -887,7 +925,8 @@ private:
     return out;
   }
 
-  void applySourceSpecs(const llvm::CallBase &call, const llvm::Function &callee,
+  void applySourceSpecs(const llvm::CallBase &call,
+                        const llvm::Function &callee,
                         D::value_type &transfer) const {
     std::string funcName = taint_config::normalize_name(callee.getName().str());
     const FunctionTaintConfig *cfg =
@@ -994,10 +1033,11 @@ private:
   void applySanitizerSpecs(const llvm::CallBase &call,
                            const llvm::Function &callee,
                            D::value_type &transfer) const {
-    std::string calleeName = taint_config::normalize_name(callee.getName().str());
+    std::string calleeName =
+        taint_config::normalize_name(callee.getName().str());
     static const std::unordered_set<std::string> sanitizers = {
         "strlen",  "strcmp", "strncmp", "isdigit", "isalpha", "isalnum",
-        "isspace", "atoi",   "atol",   "strtol",  "strtoul"};
+        "isspace", "atoi",   "atol",    "strtol",  "strtoul"};
     if (!sanitizers.count(calleeName))
       return;
 
@@ -1020,15 +1060,16 @@ private:
     return transfer;
   }
 
-  D::value_type buildCallToReturnSpecTransfer(const llvm::CallBase &call) const {
+  D::value_type
+  buildCallToReturnSpecTransfer(const llvm::CallBase &call) const {
     auto callees = getSpecCandidateCallees(call);
     if (callees.empty())
       return D::one();
 
     D::value_type combined = D::zero();
     for (const auto *callee : callees)
-      combined = D::combine(
-          combined, buildSpecTransferForCallee(call, *callee, true));
+      combined =
+          D::combine(combined, buildSpecTransferForCallee(call, *callee, true));
     return combined;
   }
 
@@ -1037,7 +1078,8 @@ public:
     if (llvm::isa<llvm::CallBase>(&instruction))
       return D::one();
     auto current = Exp::term(D::one());
-    auto next = getTransfer(const_cast<llvm::Instruction &>(instruction), current);
+    auto next =
+        getTransfer(const_cast<llvm::Instruction &>(instruction), current);
     if (!next || next == current || next->k != Exp0<D>::Seq)
       return D::one();
     return next->c;
@@ -1045,27 +1087,42 @@ public:
 
   D::value_type buildCallTransfer(
       const llvm::CallBase &call,
-      const std::unordered_map<const llvm::Function *, D::value_type> &summaries) {
+      const std::unordered_map<const llvm::Function *, D::value_type>
+          &summaries) {
     auto callees = getPossibleCallees(module, call);
+    auto explicitCandidates = getSpecCandidateCallees(call);
 
     D::value_type combined = D::zero();
     for (const auto *callee : callees) {
       auto it = summaries.find(callee);
       if (it == summaries.end())
         continue;
-      D::value_type effect = D::extend(
-          getCallReturnTransfer(call, *callee),
-          D::extend(it->second, getCallEntryTransfer(call, *callee)));
+      D::value_type effect =
+          D::extend(getCallReturnTransfer(call, *callee),
+                    D::extend(it->second, getCallEntryTransfer(call, *callee)));
       combined = D::combine(combined, effect);
     }
+
+    bool sawDeclarationWithoutSummary = false;
+    for (const auto *candidate : explicitCandidates) {
+      if (!candidate || !candidate->isDeclaration())
+        continue;
+      if (summaries.find(candidate) == summaries.end() &&
+          !hasExternalTransferSpec(*candidate)) {
+        sawDeclarationWithoutSummary = true;
+        break;
+      }
+    }
+    if (sawDeclarationWithoutSummary)
+      combined = D::combine(combined, getConservativeExternalTransfer(call));
     combined = D::combine(combined, getCallFallbackTransfer(call, callees));
     if (D::equal(combined, D::zero()))
       return getCallToReturnTransfer(call);
     return combined;
   }
 
-  std::vector<llvm::Function *> getPossibleCallees(
-      llvm::Module &M, const llvm::CallBase &call) const {
+  std::vector<llvm::Function *>
+  getPossibleCallees(llvm::Module &M, const llvm::CallBase &call) const {
     std::vector<llvm::Function *> explicitDefined;
     auto explicitTargets = getSpecCandidateCallees(call);
     for (const auto *target : explicitTargets) {
@@ -1073,11 +1130,48 @@ public:
         explicitDefined.push_back(const_cast<llvm::Function *>(target));
     }
     std::sort(explicitDefined.begin(), explicitDefined.end());
-    explicitDefined.erase(std::unique(explicitDefined.begin(), explicitDefined.end()),
-                          explicitDefined.end());
+    explicitDefined.erase(
+        std::unique(explicitDefined.begin(), explicitDefined.end()),
+        explicitDefined.end());
     if (!explicitTargets.empty())
       return explicitDefined;
     return Engine::getPossibleCallees(M, call);
+  }
+
+  D::value_type
+  getConservativeExternalTransfer(const llvm::CallBase &call) const {
+    D::value_type transfer = D::one();
+
+    if (!call.getType()->isVoidTy()) {
+      unsigned callBit = info.getValueBit(&call);
+      if (callBit != TaintInfo::invalidBit())
+        D::addGen(transfer, callBit);
+      for (unsigned memBit : bitsForAccess(&call, TaintSpec::REACHABLE_DEREF))
+        D::addGen(transfer, memBit);
+    }
+
+    for (unsigned i = 0; i < call.arg_size(); ++i) {
+      const llvm::Value *arg = call.getArgOperand(i);
+      if (!arg || !arg->getType()->isPointerTy())
+        continue;
+      for (unsigned memBit : bitsForAccess(arg, TaintSpec::REACHABLE_DEREF))
+        D::addGen(transfer, memBit);
+    }
+
+    return transfer;
+  }
+
+  bool hasExternalTransferSpec(const llvm::Function &callee) const {
+    std::string funcName = taint_config::normalize_name(callee.getName().str());
+    const FunctionTaintConfig *cfg =
+        taint_config::get_function_config(funcName);
+    if (cfg && (cfg->has_source_specs() || cfg->has_pipe_specs()))
+      return true;
+
+    static const std::unordered_set<std::string> sanitizers = {
+        "strlen",  "strcmp", "strncmp", "isdigit", "isalpha", "isalnum",
+        "isspace", "atoi",   "atol",    "strtol",  "strtoul"};
+    return sanitizers.count(funcName) != 0;
   }
 
   D::value_type
@@ -1092,8 +1186,8 @@ public:
         continue;
       if (resolvedSet.count(candidate))
         continue;
-      combined = D::combine(
-          combined, buildSpecTransferForCallee(call, *candidate, true));
+      combined = D::combine(combined,
+                            buildSpecTransferForCallee(call, *candidate, true));
       sawFallback = true;
     }
     return sawFallback ? combined : D::zero();
@@ -1286,12 +1380,18 @@ InterproceduralTaint::Result InterproceduralTaint::run(
     llvm::errs() << "Error: Could not load taint configuration\n";
   }
 
+  LinearStrategy strategy = linearStrategy;
+  if (strategy == LinearStrategy::TensorProduct) {
+    strategy = LinearStrategy::Worklist;
+    if (verbose)
+      llvm::errs() << "[npa-taint] tensor strategy is unsupported for "
+                      "TaintTransferDomain; using worklist\n";
+  }
+
   TaintAnalysis analysis(M, aliasAnalysis, options);
   auto engineResult =
-      InterproceduralEngine<TaintTransferDomain, TaintAnalysis>::run(M,
-                                                                     analysis,
-                                                                     verbose,
-                                                                     linearStrategy);
+      InterproceduralEngine<TaintTransferDomain, TaintAnalysis>::run(
+          M, analysis, verbose, strategy);
 
   InterproceduralTaint::Result res;
   res.status = engineResult.status;
@@ -1314,8 +1414,9 @@ InterproceduralTaint::Result InterproceduralTaint::run(
     for (auto &BB : F) {
       auto factIt = engineResult.blockEntryFacts.find(BlockKey{&BB});
       llvm::APInt currentFact =
-          (&BB == &F.getEntryBlock()) ? analysis.getEntryValue()
-                                      : llvm::APInt(analysis.getEntryValue().getBitWidth(), 0);
+          (&BB == &F.getEntryBlock())
+              ? analysis.getEntryValue()
+              : llvm::APInt(analysis.getEntryValue().getBitWidth(), 0);
       if (factIt != engineResult.blockEntryFacts.end())
         currentFact = factIt->second;
       else if (&BB != &F.getEntryBlock())
@@ -1340,9 +1441,10 @@ InterproceduralTaint::Result InterproceduralTaint::run(
   return res;
 }
 
-InterproceduralTaint::Result InterproceduralTaint::run(
-    llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis, bool verbose,
-    LinearStrategy linearStrategy) {
+InterproceduralTaint::Result
+InterproceduralTaint::run(llvm::Module &M,
+                          lotus::AliasAnalysisWrapper &aliasAnalysis,
+                          bool verbose, LinearStrategy linearStrategy) {
   return run(M, aliasAnalysis, Options{}, verbose, linearStrategy);
 }
 

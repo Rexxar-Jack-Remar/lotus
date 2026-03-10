@@ -2,7 +2,6 @@
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralTaint.h"
 
 #include <gtest/gtest.h>
-
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
@@ -58,7 +57,8 @@ TEST(NPA, InterproceduralTaintDirectSourceSpecTaintsReturnValue) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -87,7 +87,8 @@ TEST(NPA, InterproceduralTaintIndirectSourceSpecMatchesDirectCall) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -115,7 +116,8 @@ TEST(NPA, InterproceduralTaintIgnoresUninitializedOnlySources) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -150,7 +152,8 @@ TEST(NPA, InterproceduralTaintStoreDoesNotBackTaintStoredValue) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -186,7 +189,8 @@ TEST(NPA, InterproceduralTaintWritesBackPointerMemoryFromCallee) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -226,7 +230,8 @@ TEST(NPA, InterproceduralTaintWritesBackOffsetSensitivePointerMemory) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -260,7 +265,8 @@ TEST(NPA, InterproceduralTaintTracksGlobalStoreThenLoad) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -295,7 +301,8 @@ TEST(NPA, InterproceduralTaintTracksGlobalPointerReachability) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -319,7 +326,8 @@ TEST(NPA, InterproceduralTaintMainPointerArgsAreNotSeededByDefault) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -346,7 +354,8 @@ TEST(NPA, InterproceduralTaintMainPointerArgsCanBeSeededExplicitly) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   npa::InterproceduralTaint::Options options;
   options.seed_main_pointer_args = true;
   auto result = npa::InterproceduralTaint::run(*module, wrapper, options);
@@ -383,7 +392,8 @@ TEST(NPA, InterproceduralTaintPropagatesThroughIcmpAndSelect) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -419,7 +429,8 @@ TEST(NPA, InterproceduralTaintPropagatesThroughAggregateAndVectorOps) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -458,7 +469,8 @@ TEST(NPA, InterproceduralTaintDifferentConstantOffsetsDoNotAlias) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -493,7 +505,8 @@ TEST(NPA, InterproceduralTaintUnknownOffsetsAliasConservatively) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -535,7 +548,8 @@ TEST(NPA, InterproceduralTaintReachableDerefPipePropagatesTransitively) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -568,7 +582,8 @@ TEST(NPA, InterproceduralTaintResolvesIndirectExternalSourceViaAliasWrapper) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -596,12 +611,14 @@ TEST(NPA, InterproceduralTaintDetectsSinkHits) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const auto *sink = llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
+  const auto *sink =
+      llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
   ASSERT_NE(sink, nullptr);
   EXPECT_TRUE(result.isSinkTriggered(sink));
   EXPECT_FALSE(result.sinkHits.empty());
@@ -626,11 +643,13 @@ TEST(NPA, InterproceduralTaintResolvesIndirectExternalSinkViaAliasWrapper) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
-  const auto *sink = llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
+  const auto *sink =
+      llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
   ASSERT_NE(sink, nullptr);
   EXPECT_TRUE(result.isSinkTriggered(sink));
 }
@@ -659,12 +678,14 @@ TEST(NPA, InterproceduralTaintSinkReplayUsesAnalysisSpecificCalleeResolution) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const auto *sink = llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
+  const auto *sink =
+      llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
   ASSERT_NE(sink, nullptr);
   ASSERT_EQ(result.sinkHits.size(), 1u);
   EXPECT_TRUE(result.isSinkTriggered(sink));
@@ -685,12 +706,14 @@ TEST(NPA, InterproceduralTaintIgnoresUninitializedOnlySinkPaths) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const auto *sink = llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
+  const auto *sink =
+      llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
   ASSERT_NE(sink, nullptr);
   EXPECT_FALSE(result.isSinkTriggered(sink));
 }
@@ -715,7 +738,8 @@ TEST(NPA, InterproceduralTaintSanitizerKillsArgumentTaint) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
@@ -747,11 +771,95 @@ TEST(NPA, InterproceduralTaintSinkReplayAfterSelectTransformation) {
   )");
   ASSERT_TRUE(module);
 
-  lotus::AliasAnalysisWrapper wrapper(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
   auto result = npa::InterproceduralTaint::run(*module, wrapper);
 
   const auto *mainFn = module->getFunction("main");
-  const auto *sink = llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
+  const auto *sink =
+      llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
   ASSERT_NE(sink, nullptr);
   EXPECT_TRUE(result.isSinkTriggered(sink));
+}
+
+TEST(NPA, InterproceduralTaintLoadDoesNotUsePointerValueTaintByDefault) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    declare i32 @getchar()
+
+    define i32 @main() {
+    entry:
+      %slot = alloca i32, align 4
+      store i32 7, i32* %slot, align 4
+      %t = call i32 @getchar()
+      %cmp = icmp eq i32 %t, 0
+      %p = select i1 %cmp, i32* %slot, i32* %slot
+      %x = load i32, i32* %p, align 4
+      br label %after
+
+    after:
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
+  auto result = npa::InterproceduralTaint::run(*module, wrapper);
+
+  const auto *mainFn = module->getFunction("main");
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *x = findInstructionByName(*mainFn, "x");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(x, nullptr);
+  EXPECT_FALSE(result.isValueTainted(after, x));
+}
+
+TEST(NPA, InterproceduralTaintUnknownExternalCallIsConservative) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    declare i8* @mystery(i8*)
+    declare i32 @system(i8*)
+
+    define i32 @main() {
+    entry:
+      %buf = alloca [8 x i8], align 1
+      %p0 = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      %r = call i8* @mystery(i8* %p0)
+      %sink = call i32 @system(i8* %p0)
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
+  auto result = npa::InterproceduralTaint::run(*module, wrapper);
+
+  const auto *mainFn = module->getFunction("main");
+  const auto *sink =
+      llvm::dyn_cast<llvm::CallBase>(findInstructionByName(*mainFn, "sink"));
+  ASSERT_NE(sink, nullptr);
+  EXPECT_TRUE(result.isSinkTriggered(sink));
+}
+
+TEST(NPA, InterproceduralTaintTensorStrategyFallsBackToWorklist) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    declare i32 @getchar()
+
+    define i32 @main() {
+    entry:
+      %x = call i32 @getchar()
+      ret i32 %x
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
+  auto result = npa::InterproceduralTaint::run(
+      *module, wrapper, false, npa::LinearStrategy::TensorProduct);
+
+  EXPECT_TRUE(result.status.summary_solve.converged);
 }

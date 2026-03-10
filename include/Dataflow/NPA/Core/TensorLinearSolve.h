@@ -399,16 +399,57 @@ template <class TD> struct TensorTarjanPlan {
   std::size_t label_count = 0;
 };
 
+template <class TD> struct TensorTarjanPreparedInput {
+  using Frag = typename TensorLeftLinearExtractor<TD>::Frag;
+  std::vector<Frag> fragments;
+  std::string signature;
+};
+
+template <class TD>
+Optional<TensorTarjanPreparedInput<TD>>
+prepare_tensor_tarjan_input(bool verbose,
+                            const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
+                            bool allow_project_pushdown = false) {
+  TensorTarjanPreparedInput<TD> prepared;
+  prepared.fragments.reserve(rhs.size());
+
+  std::ostringstream signature;
+  signature << rhs.size() << ';';
+
+  for (const auto &eqn : rhs) {
+    auto extracted = TensorLeftLinearExtractor<TD>::extract(
+        eqn.second, allow_project_pushdown);
+    if (!extracted.has_value()) {
+      if (verbose)
+        std::cerr
+            << "[tensor] expression not extractable to left-linear graph; "
+               "falling back to tensor worklist\n";
+      return {};
+    }
+    prepared.fragments.push_back(*extracted);
+
+    signature << "C:";
+    for (const auto &term : (*extracted).terms)
+      signature << "T:" << term.first << ';';
+    signature << '|';
+  }
+
+  prepared.signature = signature.str();
+  Optional<TensorTarjanPreparedInput<TD>> out;
+  out = prepared;
+  return out;
+}
+
 /// Build and cache the dependency-graph regex topology used by the Tarjan fast
 /// path. This is the implementation's equivalent of Alg. 7.1's parameterized
 /// regular-expression step: the cache stores the topology and symbol slots of
 /// the left-linear dependency graph, while the current-round tensor labels are
 /// supplied separately on each Newton round.
 template <class TD>
-Optional<TensorTarjanPlan<TD>>
-get_tensor_tarjan_plan(bool verbose,
-                       const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
-                       bool allow_project_pushdown = false) {
+Optional<TensorTarjanPlan<TD>> get_tensor_tarjan_plan(
+    bool verbose, const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
+    bool allow_project_pushdown = false,
+    const TensorTarjanPreparedInput<TD> *prepared_input = nullptr) {
   using V = typename TD::value_type;
   using Frag = typename TensorLeftLinearExtractor<TD>::Frag;
   using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
@@ -417,42 +458,35 @@ get_tensor_tarjan_plan(bool verbose,
   for (int i = 0; i < static_cast<int>(rhs.size()); ++i)
     sym_to_node[rhs[i].first] = i + 1;
 
-  std::ostringstream signature;
-  signature << rhs.size() << ';';
   std::vector<Frag> fragments;
-  fragments.reserve(rhs.size());
-
-  for (int i = 0; i < static_cast<int>(rhs.size()); ++i) {
-    auto extracted = TensorLeftLinearExtractor<TD>::extract(
-        rhs[i].second, allow_project_pushdown);
-    if (!extracted.has_value()) {
-      if (verbose)
-        std::cerr
-            << "[tensor] expression not extractable to left-linear graph; "
-               "falling back to tensor worklist\n";
+  std::string key;
+  if (prepared_input) {
+    fragments = prepared_input->fragments;
+    key = prepared_input->signature;
+  } else {
+    auto prepared =
+        prepare_tensor_tarjan_input<TD>(verbose, rhs, allow_project_pushdown);
+    if (!prepared.has_value())
       return {};
-    }
-    fragments.push_back(*extracted);
+    fragments = (*prepared).fragments;
+    key = (*prepared).signature;
+  }
 
-    signature << "C:";
-    for (const auto &term : (*extracted).terms) {
-      auto it = sym_to_node.find(term.first);
-      if (it == sym_to_node.end()) {
+  for (const auto &frag : fragments) {
+    for (const auto &term : frag.terms) {
+      if (sym_to_node.find(term.first) == sym_to_node.end()) {
         if (verbose)
           std::cerr << "[tensor] unknown symbol in left-linear extraction; "
                        "falling back to tensor worklist\n";
         return {};
       }
-      signature << "T:" << term.first << ';';
     }
-    signature << '|';
   }
 
   using Plan = TensorTarjanPlan<TD>;
   static std::mutex cache_mu;
   static std::unordered_map<std::string, Plan> cache;
 
-  const std::string key = signature.str();
   {
     std::lock_guard<std::mutex> lock(cache_mu);
     auto it = cache.find(key);
@@ -501,11 +535,21 @@ get_tensor_tarjan_plan(bool verbose,
 template <class TD>
 std::vector<typename TD::value_type> instantiate_tensor_tarjan_labels(
     const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
-    bool allow_project_pushdown = false) {
+    bool allow_project_pushdown = false,
+    const TensorTarjanPreparedInput<TD> *prepared_input = nullptr) {
   using V = typename TD::value_type;
 
   std::vector<V> labels;
   labels.reserve(rhs.size() * 2U);
+
+  if (prepared_input) {
+    for (const auto &frag : prepared_input->fragments) {
+      labels.push_back(frag.constant);
+      for (const auto &term : frag.terms)
+        labels.push_back(term.second);
+    }
+    return labels;
+  }
 
   for (const auto &eqn : rhs) {
     auto extracted = TensorLeftLinearExtractor<TD>::extract(
@@ -552,11 +596,17 @@ Optional<std::vector<typename TD::value_type>> solve_linear_tensor_tarjan_impl(
     }
   }
 
-  auto plan = get_tensor_tarjan_plan<TD>(verbose, rhs, allow_project_pushdown);
+  auto prepared =
+      prepare_tensor_tarjan_input<TD>(verbose, rhs, allow_project_pushdown);
+  if (!prepared.has_value())
+    return {};
+
+  auto plan = get_tensor_tarjan_plan<TD>(verbose, rhs, allow_project_pushdown,
+                                         &(*prepared));
   if (!plan.has_value())
     return {};
-  auto labels =
-      instantiate_tensor_tarjan_labels<TD>(rhs, allow_project_pushdown);
+  auto labels = instantiate_tensor_tarjan_labels<TD>(
+      rhs, allow_project_pushdown, &(*prepared));
   auto out = evaluate_tensor_tarjan_plan<TD>(*plan, labels);
 
   Optional<std::vector<V>> solved;

@@ -23,6 +23,7 @@ class InterproceduralTaint {
 public:
   struct Options {
     bool seed_main_pointer_args = false;
+    bool propagate_pointer_value_on_load = false;
   };
 
   struct Result {
