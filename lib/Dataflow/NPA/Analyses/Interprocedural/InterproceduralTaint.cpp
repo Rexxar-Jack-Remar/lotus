@@ -56,7 +56,9 @@ public:
   };
 
   TaintInfo(llvm::Module &M, lotus::AliasAnalysisWrapper &aa)
-      : module(M), aliasAnalysis(aa), dataLayout(M.getDataLayout()) {
+      : module(M), aliasAnalysis(aa),
+        dataLayout(M.getDataLayoutStr().empty() ? llvm::DataLayout("e-p:64:64")
+                                                : M.getDataLayout()) {
     buildUniverse();
     buildReachabilitySeeds();
   }
@@ -82,6 +84,21 @@ public:
     return it->second;
   }
 
+  std::vector<unsigned> getDirectAccessMemBits(const llvm::Value *ptr) const {
+    if (!ptr || !ptr->getType()->isPointerTy())
+      return {};
+
+    MemKey key = buildMemKey(ptr);
+    auto it = memBits.find(key);
+    bool stableDirectKey =
+        !key.unknown && key.base &&
+        (key.base != ptr || llvm::isa<llvm::Argument>(ptr) ||
+         llvm::isa<llvm::GlobalValue>(ptr) || llvm::isa<llvm::AllocaInst>(ptr));
+    if (it != memBits.end() && stableDirectKey)
+      return {it->second};
+    return getAliasMemBits(ptr);
+  }
+
   std::vector<unsigned> getAliasMemBits(const llvm::Value *ptr) const {
     std::vector<unsigned> out;
     if (!ptr || !ptr->getType()->isPointerTy())
@@ -102,7 +119,7 @@ public:
     if (mode == TaintSpec::VALUE || !ptr || !ptr->getType()->isPointerTy())
       return {};
     if (mode == TaintSpec::DIRECT_DEREF)
-      return getAliasMemBits(ptr);
+      return getDirectAccessMemBits(ptr);
     return getReachableMemBits(ptr);
   }
 
@@ -122,7 +139,7 @@ public:
       if (!ptr)
         continue;
       auto &bits = out[ptr];
-      bits = getAliasMemBits(ptr);
+      bits = getDirectAccessMemBits(ptr);
       std::sort(bits.begin(), bits.end());
       bits.erase(std::unique(bits.begin(), bits.end()), bits.end());
     }
@@ -169,6 +186,34 @@ public:
     if (!actual || !actual->getType()->isPointerTy())
       return out;
 
+    MemKey actualKey = buildMemKey(actual);
+    if (actualKey.base && !actualKey.unknown && relative.derived &&
+        !relative.unknown) {
+      const int64_t wantedOffset = actualKey.offset + relative.offset;
+      for (const auto *candidate : memoryPointers) {
+        if (!candidate)
+          continue;
+        const llvm::Function *owner = getOwningFunction(candidate);
+        if (caller && owner && owner != caller)
+          continue;
+
+        MemKey candidateKey = buildMemKey(candidate);
+        if (candidateKey.base != actualKey.base || candidateKey.unknown ||
+            candidateKey.offset != wantedOffset) {
+          continue;
+        }
+
+        unsigned bit = getMemBitForPtr(candidate);
+        if (bit != invalidBit())
+          out.push_back(bit);
+      }
+      if (!out.empty()) {
+        std::sort(out.begin(), out.end());
+        out.erase(std::unique(out.begin(), out.end()), out.end());
+        return out;
+      }
+    }
+
     for (const auto *candidate : memoryPointers) {
       if (!candidate)
         continue;
@@ -201,7 +246,7 @@ public:
 private:
   llvm::Module &module;
   lotus::AliasAnalysisWrapper &aliasAnalysis;
-  const llvm::DataLayout &dataLayout;
+  llvm::DataLayout dataLayout;
   unsigned nextBit = 0;
   std::unordered_map<const llvm::Value *, unsigned> valueBits;
   std::unordered_map<MemKey, unsigned, MemKeyHash, MemKeyEq> memBits;
@@ -438,7 +483,7 @@ private:
             const llvm::Value *stored = store->getValueOperand();
             if (stored && stored->getType()->isPointerTy()) {
               for (unsigned memBit :
-                   getAliasMemBits(store->getPointerOperand()))
+                   getDirectAccessMemBits(store->getPointerOperand()))
                 addReachableSeed(memBit, stored);
             }
             continue;
@@ -446,7 +491,8 @@ private:
           if (auto *load = llvm::dyn_cast<llvm::LoadInst>(&I)) {
             if (!load->getType()->isPointerTy())
               continue;
-            for (unsigned memBit : getAliasMemBits(load->getPointerOperand()))
+            for (unsigned memBit :
+                 getDirectAccessMemBits(load->getPointerOperand()))
               addReachableSeed(memBit, load);
           }
         }
@@ -508,6 +554,7 @@ public:
     TaintTransferDomain::setBitWidth(bitWidth);
     entryFacts = llvm::APInt(bitWidth, 0);
     initializeEntryFacts();
+    scanUnsupportedSpecs();
   }
 
   FactType getEntryValue() const { return entryFacts; }
@@ -558,8 +605,8 @@ public:
         !dst->getType()->isPointerTy())
       return false;
     bool updated = false;
-    auto dstBits = info.getAliasMemBits(dst);
-    for (unsigned srcBit : info.getAliasMemBits(src)) {
+    auto dstBits = info.getDirectAccessMemBits(dst);
+    for (unsigned srcBit : info.getDirectAccessMemBits(src)) {
       for (unsigned dstBit : dstBits) {
         D::addEdge(transfer, srcBit, dstBit);
         updated = true;
@@ -581,11 +628,13 @@ public:
 
       unsigned valueBit = info.getValueBit(value);
       if (valueBit != TaintInfo::invalidBit()) {
-        for (unsigned memBit : info.getAliasMemBits(ptr)) {
+        for (unsigned memBit : info.getDirectAccessMemBits(ptr)) {
           D::addEdge(transfer, valueBit, memBit);
           updated = true;
         }
       }
+      if (value && value->getType()->isPointerTy())
+        updated = addMemoryIdentityFlow(transfer, value, ptr) || updated;
       if (auto *global =
               llvm::dyn_cast<llvm::GlobalVariable>(ptr->stripPointerCasts())) {
         updated = addValueFlow(transfer, value, global) || updated;
@@ -604,10 +653,12 @@ public:
         }
       }
 
-      for (unsigned memBit : info.getAliasMemBits(ptr)) {
+      for (unsigned memBit : info.getDirectAccessMemBits(ptr)) {
         D::addEdge(transfer, memBit, loadBit);
         updated = true;
       }
+      if (load->getType()->isPointerTy())
+        updated = addMemoryIdentityFlow(transfer, ptr, load) || updated;
       if (auto *global =
               llvm::dyn_cast<llvm::GlobalVariable>(ptr->stripPointerCasts())) {
         updated = addValueFlow(transfer, global, load) || updated;
@@ -731,7 +782,7 @@ public:
       if (arg && arg->getType()->isPointerTy()) {
         unsigned paramMemBit = info.getMemBitForPtr(&*paramIt);
         if (paramMemBit != TaintInfo::invalidBit()) {
-          for (unsigned memBit : info.getAliasMemBits(arg)) {
+          for (unsigned memBit : info.getDirectAccessMemBits(arg)) {
             D::addEdge(transfer, memBit, paramMemBit);
           }
         }
@@ -785,7 +836,7 @@ public:
         continue;
       auto relative = info.getRelativeOffsetInfo(&*paramIt, &*paramIt);
       (void)relative;
-      for (unsigned memBit : info.getAliasMemBits(arg))
+      for (unsigned memBit : info.getDirectAccessMemBits(arg))
         D::addEdge(transfer, paramMemBit, memBit);
     }
 
@@ -807,9 +858,10 @@ public:
         const llvm::Function *caller = call.getFunction();
         auto targetBits =
             info.getCallerBitsForRelativeAccess(actual, relative, caller);
-        unsigned sourceBit = info.getMemBitForPtr(candidate);
-        for (unsigned targetBit : targetBits)
-          D::addEdge(transfer, sourceBit, targetBit);
+        for (unsigned sourceBit : info.getDirectAccessMemBits(candidate)) {
+          for (unsigned targetBit : targetBits)
+            D::addEdge(transfer, sourceBit, targetBit);
+        }
       }
     }
 
@@ -829,6 +881,8 @@ public:
   FactType joinFacts(const FactType &a, const FactType &b) { return a | b; }
 
   bool factsEqual(const FactType &a, const FactType &b) { return a == b; }
+
+  bool hasUnsupportedSpecs() const { return unsupportedSpecsEncountered; }
 
   const std::unordered_map<const llvm::Value *, unsigned> &
   getValueBits() const {
@@ -852,6 +906,53 @@ private:
   unsigned bitWidth = 1;
   FactType entryFacts;
   InterproceduralTaint::Options options;
+  bool unsupportedSpecsEncountered = false;
+
+  void markUnsupportedSpec(const llvm::Function &callee, const char *kind) {
+    unsupportedSpecsEncountered = true;
+    llvm::errs() << "[npa-taint] unsupported non-taint " << kind << " spec on '"
+                 << callee.getName() << "'\n";
+  }
+
+  bool containsUnsupportedSpec(const llvm::Function &callee) {
+    std::string funcName = taint_config::normalize_name(callee.getName().str());
+    const FunctionTaintConfig *cfg =
+        taint_config::get_function_config(funcName);
+    if (!cfg)
+      return false;
+
+    for (const auto &spec : cfg->source_specs) {
+      if (spec.taint_type != TaintSpec::TAINTED) {
+        markUnsupportedSpec(callee, "source");
+        return true;
+      }
+    }
+    for (const auto &spec : cfg->sink_specs) {
+      if (spec.taint_type != TaintSpec::TAINTED) {
+        markUnsupportedSpec(callee, "sink");
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void scanUnsupportedSpecs() {
+    for (auto &F : module) {
+      if (F.isDeclaration() && containsUnsupportedSpec(F))
+        continue;
+      for (auto &BB : F) {
+        for (auto &I : BB) {
+          auto *call = llvm::dyn_cast<llvm::CallBase>(&I);
+          if (!call)
+            continue;
+          for (const auto *callee : getSpecCandidateCallees(*call)) {
+            if (callee && containsUnsupportedSpec(*callee))
+              break;
+          }
+        }
+      }
+    }
+  }
 
   void initializeEntryFacts() {
     if (!options.seed_main_pointer_args)
@@ -898,26 +999,31 @@ private:
             };
 
     std::vector<const llvm::Function *> out;
+    std::vector<const llvm::Function *> strongTargets;
     if (const auto *direct = call.getCalledFunction()) {
       out.push_back(direct);
       return out;
     }
 
-    auto possible = Engine::getPossibleCallees(module, call);
-    for (const auto *callee : possible)
-      out.push_back(callee);
-
     std::vector<const llvm::Function *> aaTargets;
     aliasAnalysis.getIndirectCallTargets(const_cast<llvm::CallBase *>(&call),
                                          aaTargets);
     for (const auto *callee : aaTargets)
-      out.push_back(callee);
+      strongTargets.push_back(callee);
 
     if (auto *calledOperand = call.getCalledOperand()) {
       auto *stripped = calledOperand->stripPointerCasts();
       if (auto *direct = llvm::dyn_cast<llvm::Function>(stripped))
-        out.push_back(direct);
-      addConstantBackedTargets(calledOperand, out);
+        strongTargets.push_back(direct);
+      addConstantBackedTargets(calledOperand, strongTargets);
+    }
+
+    if (!strongTargets.empty())
+      out = std::move(strongTargets);
+    else {
+      auto possible = Engine::getPossibleCallees(module, call);
+      for (const auto *callee : possible)
+        out.push_back(callee);
     }
 
     std::sort(out.begin(), out.end());
@@ -942,6 +1048,11 @@ private:
         unsigned bit = info.getValueBit(&call);
         if (bit != TaintInfo::invalidBit())
           D::addGen(transfer, bit);
+      } else if (spec.location == TaintSpec::RET &&
+                 (spec.access_mode == TaintSpec::DIRECT_DEREF ||
+                  spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
+        for (unsigned memBit : bitsForAccess(&call, spec.access_mode))
+          D::addGen(transfer, memBit);
       } else if (spec.location == TaintSpec::ARG &&
                  (spec.access_mode == TaintSpec::DIRECT_DEREF ||
                   spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
@@ -978,7 +1089,16 @@ private:
 
     for (const auto &pipe : cfg->pipe_specs) {
       std::vector<unsigned> fromBits;
-      if (pipe.from.location == TaintSpec::ARG) {
+      if (pipe.from.location == TaintSpec::RET) {
+        if (pipe.from.access_mode == TaintSpec::VALUE) {
+          unsigned bit = info.getValueBit(&call);
+          if (bit != TaintInfo::invalidBit())
+            fromBits.push_back(bit);
+        } else {
+          auto memBits = bitsForAccess(&call, pipe.from.access_mode);
+          fromBits.insert(fromBits.end(), memBits.begin(), memBits.end());
+        }
+      } else if (pipe.from.location == TaintSpec::ARG) {
         int idx = pipe.from.arg_index;
         if (idx >= 0 && idx < (int)call.arg_size()) {
           const llvm::Value *arg = call.getArgOperand(idx);
@@ -1030,33 +1150,13 @@ private:
     }
   }
 
-  void applySanitizerSpecs(const llvm::CallBase &call,
-                           const llvm::Function &callee,
-                           D::value_type &transfer) const {
-    std::string calleeName =
-        taint_config::normalize_name(callee.getName().str());
-    static const std::unordered_set<std::string> sanitizers = {
-        "strlen",  "strcmp", "strncmp", "isdigit", "isalpha", "isalnum",
-        "isspace", "atoi",   "atol",    "strtol",  "strtoul"};
-    if (!sanitizers.count(calleeName))
-      return;
-
-    for (unsigned i = 0; i < call.arg_size(); ++i) {
-      const llvm::Value *arg = call.getArgOperand(i);
-      killAccess(transfer, arg, TaintSpec::VALUE);
-      killAccess(transfer, arg, TaintSpec::DIRECT_DEREF);
-      killAccess(transfer, arg, TaintSpec::REACHABLE_DEREF);
-    }
-  }
-
   D::value_type buildSpecTransferForCallee(const llvm::CallBase &call,
                                            const llvm::Function &callee,
-                                           bool include_sanitizers) const {
+                                           bool include_extra_specs) const {
+    (void)include_extra_specs;
     D::value_type transfer = D::one();
     applySourceSpecs(call, callee, transfer);
     applyPipeSpecs(call, callee, transfer);
-    if (include_sanitizers)
-      applySanitizerSpecs(call, callee, transfer);
     return transfer;
   }
 
@@ -1165,13 +1265,7 @@ public:
     std::string funcName = taint_config::normalize_name(callee.getName().str());
     const FunctionTaintConfig *cfg =
         taint_config::get_function_config(funcName);
-    if (cfg && (cfg->has_source_specs() || cfg->has_pipe_specs()))
-      return true;
-
-    static const std::unordered_set<std::string> sanitizers = {
-        "strlen",  "strcmp", "strncmp", "isdigit", "isalpha", "isalnum",
-        "isspace", "atoi",   "atol",    "strtol",  "strtoul"};
-    return sanitizers.count(funcName) != 0;
+    return cfg && (cfg->has_source_specs() || cfg->has_pipe_specs());
   }
 
   D::value_type
@@ -1181,6 +1275,15 @@ public:
                                                            resolved.end());
     D::value_type combined = D::zero();
     bool sawFallback = false;
+    for (const auto *callee : resolved) {
+      if (!callee || !callee->isDeclaration())
+        continue;
+      if (hasExternalTransferSpec(*callee))
+        continue;
+      combined = D::combine(combined, getConservativeExternalTransfer(call));
+      sawFallback = true;
+      break;
+    }
     for (const auto *candidate : getSpecCandidateCallees(call)) {
       if (!candidate)
         continue;
@@ -1376,8 +1479,19 @@ void InterproceduralTaint::Result::reportVulnerabilities(
 InterproceduralTaint::Result InterproceduralTaint::run(
     llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis,
     const Options &options, bool verbose, LinearStrategy linearStrategy) {
-  if (!taint_config::load_default_config()) {
+  bool configLoaded =
+      options.taint_config_path.empty()
+          ? taint_config::load_default_config()
+          : taint_config::load_config(options.taint_config_path);
+  if (!configLoaded) {
     llvm::errs() << "Error: Could not load taint configuration\n";
+    InterproceduralTaint::Result res;
+    res.status.configuration_error = true;
+    res.status.approximated = true;
+    res.status.summary_solve.converged = false;
+    res.status.propagation_converged = false;
+    res.status.overall_converged = false;
+    return res;
   }
 
   LinearStrategy strategy = linearStrategy;
@@ -1389,12 +1503,26 @@ InterproceduralTaint::Result InterproceduralTaint::run(
   }
 
   TaintAnalysis analysis(M, aliasAnalysis, options);
+  if (analysis.hasUnsupportedSpecs() && options.fail_on_unsupported_specs) {
+    InterproceduralTaint::Result res;
+    res.status.unsupported_specs = true;
+    res.status.approximated = true;
+    res.status.summary_solve.converged = false;
+    res.status.propagation_converged = false;
+    res.status.overall_converged = false;
+    return res;
+  }
   auto engineResult =
       InterproceduralEngine<TaintTransferDomain, TaintAnalysis>::run(
           M, analysis, verbose, strategy);
 
   InterproceduralTaint::Result res;
   res.status = engineResult.status;
+  if (analysis.hasUnsupportedSpecs()) {
+    res.status.unsupported_specs = true;
+    res.status.approximated = true;
+    res.status.overall_converged = false;
+  }
   res.summaries.insert(engineResult.summaries.begin(),
                        engineResult.summaries.end());
   for (auto &kv : engineResult.blockEntryFacts)

@@ -245,9 +245,9 @@ private:
   }
 
   template <typename A>
-  static auto getCallFallbackTransfer(A &analysis, const llvm::CallBase &call,
-                                      const std::vector<llvm::Function *> &callees,
-                                      int)
+  static auto
+  getCallFallbackTransfer(A &analysis, const llvm::CallBase &call,
+                          const std::vector<llvm::Function *> &callees, int)
       -> decltype(analysis.getCallFallbackTransfer(call, callees)) {
     return analysis.getCallFallbackTransfer(call, callees);
   }
@@ -265,9 +265,10 @@ private:
     return analysis.getEdgeTransfer(term, succ);
   }
 
-  static typename D::value_type
-  getEdgeTransfer(Analysis &, const llvm::Instruction &, const llvm::BasicBlock &,
-                  long) {
+  static typename D::value_type getEdgeTransfer(Analysis &,
+                                                const llvm::Instruction &,
+                                                const llvm::BasicBlock &,
+                                                long) {
     return D::one();
   }
 
@@ -296,9 +297,10 @@ private:
     const Symbol incomingSym = getSyntheticIncomingSymbol(&BB);
     E entryExpr = buildBlockEntryExpr(analysis, BB, Exp::hole(incomingSym), 0);
     std::unordered_map<Symbol, Val> env;
-    env[incomingSym] = Pred && Pred->getTerminator()
-                           ? getEdgeTransfer(analysis, *Pred->getTerminator(), BB, 0)
-                           : D::one();
+    env[incomingSym] =
+        Pred && Pred->getTerminator()
+            ? getEdgeTransfer(analysis, *Pred->getTerminator(), BB, 0)
+            : D::one();
     for (auto *OtherPred : predecessors(&BB)) {
       env[getBlockSymbol(OtherPred)] =
           (Pred != nullptr && OtherPred == Pred) ? D::one() : D::zero();
@@ -333,9 +335,7 @@ private:
     return expr;
   }
 
-  static E makeCallSummaryExpr(Symbol sym) {
-    return Exp::hole(std::move(sym));
-  }
+  static E makeCallSummaryExpr(Symbol sym) { return Exp::hole(std::move(sym)); }
 
   static E combineExpr(E lhs, E rhs) {
     if (!lhs)
@@ -417,15 +417,16 @@ private:
     unsigned &starCounter_;
   };
 
-  static E translateRegex(
-      const lotus::pathexpressions::RegexRef<int> &regex,
-      const std::vector<E> &labels, unsigned &star_counter) {
+  static E translateRegex(const lotus::pathexpressions::RegexRef<int> &regex,
+                          const std::vector<E> &labels,
+                          unsigned &star_counter) {
     RegexToExpr translator(labels, star_counter);
     return regex->accept(translator, nullptr);
   }
 
-  static E buildBlockBodyExpr(Analysis &analysis, llvm::Instruction &I, E currentPath,
-                              llvm::Module &M, std::deque<llvm::Function *> &worklist,
+  static E buildBlockBodyExpr(Analysis &analysis, llvm::Instruction &I,
+                              E currentPath, llvm::Module &M,
+                              std::deque<llvm::Function *> &worklist,
                               std::set<llvm::Function *> &visited) {
     if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
       std::vector<llvm::Function *> Callees =
@@ -433,14 +434,20 @@ private:
       if (!Callees.empty()) {
         E callBranches = nullptr;
         for (llvm::Function *Callee : Callees) {
-          const Symbol callee_sym = getFuncSymbol(Callee);
-          if (visited.insert(Callee).second)
-            worklist.push_back(Callee);
-          E branch = Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
+          E branch = nullptr;
+          if (Callee->isDeclaration()) {
+            branch = Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
                               currentPath);
-          branch = multiplyExpr(makeCallSummaryExpr(callee_sym), branch);
-          branch =
-              Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0), branch);
+          } else {
+            const Symbol callee_sym = getFuncSymbol(Callee);
+            if (visited.insert(Callee).second)
+              worklist.push_back(Callee);
+            branch = Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
+                              currentPath);
+            branch = multiplyExpr(makeCallSummaryExpr(callee_sym), branch);
+            branch = Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
+                              branch);
+          }
           callBranches = combineExpr(callBranches, branch);
         }
         Val fallbackTransfer =
@@ -459,7 +466,8 @@ private:
   }
 
   static FunctionRegexArtifacts
-  buildFunctionRegexArtifacts(llvm::Module &M, llvm::Function &F, Analysis &analysis,
+  buildFunctionRegexArtifacts(llvm::Module &M, llvm::Function &F,
+                              Analysis &analysis,
                               std::deque<llvm::Function *> &worklist,
                               std::set<llvm::Function *> &visited) {
     using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
@@ -486,8 +494,8 @@ private:
     };
 
     graph.addEdge(sourceId,
-                  addLabel(
-                      Exp::term(getBlockEntryTransfer(analysis, F.getEntryBlock(), nullptr))),
+                  addLabel(Exp::term(getBlockEntryTransfer(
+                      analysis, F.getEntryBlock(), nullptr))),
                   entryId);
 
     for (auto &BB : F) {
@@ -496,13 +504,14 @@ private:
 
       E currentPath = Exp::term(D::one());
       for (auto &I : BB)
-        currentPath = buildBlockBodyExpr(analysis, I, currentPath, M, worklist,
-                                         visited);
+        currentPath =
+            buildBlockBodyExpr(analysis, I, currentPath, M, worklist, visited);
       blockBodyExprs.emplace(getBlockSymbol(&BB), currentPath);
 
       auto *Term = BB.getTerminator();
       auto Succs =
-          Term ? CFG.getSuccsOf(Term, ::dataflow::controlflow::FlowDirection::Forward)
+          Term ? CFG.getSuccsOf(Term,
+                                ::dataflow::controlflow::FlowDirection::Forward)
                : std::vector<llvm::Instruction *>{};
       if (Term == nullptr || Succs.empty()) {
         graph.addEdge(fromId, addLabel(currentPath), exitId);
@@ -523,15 +532,14 @@ private:
     unsigned starCounter = 0;
 
     FunctionRegexArtifacts out;
-    out.fullSummaryExpr =
-        translateRegex(computer.exprBetween(sourceId, exitId), labels,
-                       starCounter);
+    out.fullSummaryExpr = translateRegex(computer.exprBetween(sourceId, exitId),
+                                         labels, starCounter);
     out.summaryExpr = makeSummaryEquationExpr(out.fullSummaryExpr);
     for (auto &BB : F) {
       const std::string bSym = getBlockSymbol(&BB);
       E entryExpr =
-          translateRegex(computer.exprBetween(sourceId, blockIds.at(&BB)), labels,
-                         starCounter);
+          translateRegex(computer.exprBetween(sourceId, blockIds.at(&BB)),
+                         labels, starCounter);
       out.blockEntryExprs.emplace(bSym, entryExpr);
       out.blockExitExprs.emplace(
           bSym, multiplyExpr(blockBodyExprs.at(bSym), entryExpr));
@@ -636,7 +644,8 @@ public:
     }
 
     while (!worklist2.empty()) {
-      if (maxPropagationSteps >= 0 && propagationSteps++ >= maxPropagationSteps) {
+      if (maxPropagationSteps >= 0 &&
+          propagationSteps++ >= maxPropagationSteps) {
         res.status.propagation_hit_limit = true;
         res.status.propagation_converged = false;
         res.status.approximated = true;
@@ -671,7 +680,8 @@ public:
           }
           entryToBlockStart = I0<D>::eval(false, env, blockExpr);
         } else {
-          entryToBlockStart = I0<D>::eval(false, solvedMap, blockExprIt->second);
+          entryToBlockStart =
+              I0<D>::eval(false, solvedMap, blockExprIt->second);
         }
 
         auto blockEntryFact =
@@ -684,56 +694,72 @@ public:
 
         for (auto &I : BB) {
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+            std::vector<llvm::Function *> Callees =
+                getPossibleCalleesForAnalysis(analysis, M, *CI, 0);
             if (!Callees.empty()) {
               Val currentPathVal = I0<D>::eval(false, solvedMap, currentPath);
               E callBranches = nullptr;
               for (llvm::Function *Callee : Callees) {
-                std::string calleeFSym = getFuncSymbol(Callee);
-
-                Val callEntry =
-                    D::extend(getCallEntryTransfer(analysis, *CI, *Callee, 0),
-                              currentPathVal);
-                Val totalToCall = D::extend(callEntry, entryToBlockStart);
-
-                auto factAtCall = analysis.applySummary(totalToCall, inputVal);
-
-                if (!funcInput.count(calleeFSym)) {
-                  funcInput[calleeFSym] = factAtCall;
-                  if (inWorklist2.insert(Callee).second)
-                    worklist2.push_back(Callee);
+                E branch = nullptr;
+                if (Callee->isDeclaration()) {
+                  branch =
+                      Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
+                               currentPath);
                 } else {
-                  auto oldVal = funcInput[calleeFSym];
-                  auto newVal = analysis.joinFacts(oldVal, factAtCall);
-                  if (!analysis.factsEqual(oldVal, newVal)) {
-                    size_t updateCount = ++funcUpdates[calleeFSym];
-                    Fact widened =
-                        widenFacts(analysis, oldVal, newVal, updateCount, 0);
-                    if (hasCustomWidenFacts(analysis, 0))
-                      res.status.approximated = true;
-                    if (!analysis.factsEqual(oldVal, widened)) {
-                      funcInput[calleeFSym] = widened;
-                      if (inWorklist2.insert(Callee).second)
-                        worklist2.push_back(Callee);
+                  std::string calleeFSym = getFuncSymbol(Callee);
+
+                  Val callEntry =
+                      D::extend(getCallEntryTransfer(analysis, *CI, *Callee, 0),
+                                currentPathVal);
+                  Val totalToCall = D::extend(callEntry, entryToBlockStart);
+
+                  auto factAtCall =
+                      analysis.applySummary(totalToCall, inputVal);
+
+                  if (!funcInput.count(calleeFSym)) {
+                    funcInput[calleeFSym] = factAtCall;
+                    if (inWorklist2.insert(Callee).second)
+                      worklist2.push_back(Callee);
+                  } else {
+                    auto oldVal = funcInput[calleeFSym];
+                    auto newVal = analysis.joinFacts(oldVal, factAtCall);
+                    if (!analysis.factsEqual(oldVal, newVal)) {
+                      size_t updateCount = ++funcUpdates[calleeFSym];
+                      Fact widened =
+                          widenFacts(analysis, oldVal, newVal, updateCount, 0);
+                      if (hasCustomWidenFacts(analysis, 0))
+                        res.status.approximated = true;
+                      if (!analysis.factsEqual(oldVal, widened)) {
+                        funcInput[calleeFSym] = widened;
+                        if (inWorklist2.insert(Callee).second)
+                          worklist2.push_back(Callee);
+                      }
                     }
                   }
-                }
 
-                E branch =
-                    Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
-                             currentPath);
-                branch = multiplyExpr(makeCallSummaryExpr(calleeFSym), branch);
-                branch =
-                    Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
-                             branch);
+                  branch =
+                      Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
+                               currentPath);
+                  branch =
+                      multiplyExpr(makeCallSummaryExpr(calleeFSym), branch);
+                  branch = Exp::seq(
+                      getCallReturnTransfer(analysis, *CI, *Callee, 0), branch);
+                }
                 callBranches =
                     callBranches ? Exp::ndet(callBranches, branch) : branch;
               }
+              Val fallbackTransfer =
+                  getCallFallbackTransfer(analysis, *CI, Callees, 0);
+              if (!D::equal(fallbackTransfer, D::zero())) {
+                E fallbackBranch = Exp::seq(fallbackTransfer, currentPath);
+                callBranches = callBranches
+                                   ? Exp::ndet(callBranches, fallbackBranch)
+                                   : fallbackBranch;
+              }
               currentPath = callBranches;
-            }
-            else {
-              currentPath =
-                  Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+            } else {
+              currentPath = Exp::seq(getCallToReturnTransfer(analysis, *CI, 0),
+                                     currentPath);
             }
           }
           currentPath = analysis.getTransfer(I, currentPath);

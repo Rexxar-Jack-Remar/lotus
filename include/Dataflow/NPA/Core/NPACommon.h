@@ -70,6 +70,8 @@ struct AnalysisStatus {
   long propagation_steps = 0;
   bool propagation_converged = true;
   bool propagation_hit_limit = false;
+  bool configuration_error = false;
+  bool unsupported_specs = false;
   bool approximated = false;
   bool overall_converged = true;
   bool overall_hit_limit = false;
@@ -144,11 +146,10 @@ public:
 
 template <class D> struct DomainHasProject {
   template <class T>
-  static auto test(int)
-      -> typename std::enable_if<
-          std::is_same<decltype(T::project(T::zero())),
-                       typename T::value_type>::value,
-          std::true_type>::type;
+  static auto test(int) ->
+      typename std::enable_if<std::is_same<decltype(T::project(T::zero())),
+                                           typename T::value_type>::value,
+                              std::true_type>::type;
   template <class> static std::false_type test(...);
 
 public:
@@ -158,11 +159,10 @@ public:
 
 template <class D> struct DomainHasProjectT {
   template <class T>
-  static auto test(int)
-      -> typename std::enable_if<
-          std::is_same<decltype(T::projectT(T::zero())),
-                       typename T::value_type>::value,
-          std::true_type>::type;
+  static auto test(int) ->
+      typename std::enable_if<std::is_same<decltype(T::projectT(T::zero())),
+                                           typename T::value_type>::value,
+                              std::true_type>::type;
   template <class> static std::false_type test(...);
 
 public:
@@ -305,8 +305,7 @@ template <class D> inline bool domain_commutative_extend_impl(std::true_type) {
 template <class D> inline bool domain_commutative_extend_impl(std::false_type) {
   return false;
 }
-template <class D>
-inline bool domain_project_newton_safe_impl(std::true_type) {
+template <class D> inline bool domain_project_newton_safe_impl(std::true_type) {
   return D::project_newton_safe;
 }
 template <class D>
@@ -386,8 +385,9 @@ public:
 class UnsafeNewtonProjectError : public std::logic_error {
 public:
   UnsafeNewtonProjectError()
-      : std::logic_error("unsafe Newton projection: domains must opt in with "
-                         "project_newton_safe for Project on Newton/tensor paths") {}
+      : std::logic_error(
+            "unsafe Newton projection: domains must opt in with "
+            "project_newton_safe for Project on Newton/tensor paths") {}
 };
 
 template <class D>
