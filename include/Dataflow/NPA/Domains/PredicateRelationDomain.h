@@ -38,6 +38,7 @@ public:
                         unsigned local_predicate_count = 0);
   static void configure(unsigned predicate_count,
                         const std::vector<unsigned> &local_predicates);
+  static bool isConfigured();
   static unsigned getPredicateCount();
   static unsigned getLocalPredicateCount();
   static unsigned getGlobalPredicateCount();
@@ -51,7 +52,8 @@ public:
   static value_type condCombine(bool /*phi*/, const value_type &t,
                                 const value_type &e);
   static value_type extend(const value_type &outer, const value_type &inner);
-  static value_type extend_lin(const value_type &outer, const value_type &inner);
+  static value_type extend_lin(const value_type &outer,
+                               const value_type &inner);
   static value_type subtract(const value_type &a, const value_type &b);
 
   static value_type assume(unsigned predicate, bool truthy);
@@ -59,9 +61,8 @@ public:
   static value_type transpose(const value_type &relation);
   static value_type project(const value_type &relation);
   static value_type merge(const value_type &lhs, const value_type &rhs);
-  static value_type
-  fromTransitions(const std::vector<std::pair<std::uint64_t, std::uint64_t>>
-                      &transitions);
+  static value_type fromTransitions(
+      const std::vector<std::pair<std::uint64_t, std::uint64_t>> &transitions);
 
   static std::vector<std::pair<std::uint64_t, std::uint64_t>>
   materialize(const value_type &relation);
@@ -97,7 +98,8 @@ public:
   static value_type condCombine(bool /*phi*/, const value_type &t,
                                 const value_type &e);
   static value_type extend(const value_type &outer, const value_type &inner);
-  static value_type extend_lin(const value_type &outer, const value_type &inner);
+  static value_type extend_lin(const value_type &outer,
+                               const value_type &inner);
   static value_type subtract(const value_type &a, const value_type &b);
 
   static value_type couple(const PredicateRelation &lhs,
@@ -105,10 +107,10 @@ public:
   static PredicateRelation readout(const value_type &relation);
   static value_type projectT(const value_type &relation);
   static value_type merge(const value_type &lhs, const value_type &rhs);
+  static bool validatePaperLaws();
   static value_type fromTransitions(
-      const std::vector<
-          std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>>
-          &transitions);
+      const std::vector<std::tuple<std::uint64_t, std::uint64_t, std::uint64_t,
+                                   std::uint64_t>> &transitions);
 
   static std::vector<
       std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>>
@@ -127,6 +129,9 @@ template <> struct TensorSemiringTraits<PredicateRelationDomain> {
   static bool available() { return true; }
   static bool paper_admissible() { return true; }
   static bool paper_projection_equations() { return true; }
+  static bool validate_paper_laws() {
+    return PredicateTensorDomain::validatePaperLaws();
+  }
 
   static tensor_domain::value_type
   right_constant(const PredicateRelationDomain::value_type &value) {

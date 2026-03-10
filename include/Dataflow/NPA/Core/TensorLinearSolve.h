@@ -259,19 +259,23 @@ class TensorRegexEvaluator final
 public:
   using V = typename TD::value_type;
 
-  explicit TensorRegexEvaluator(const std::vector<V> &labels) : labels_(labels) {}
+  explicit TensorRegexEvaluator(const std::vector<V> &labels)
+      : labels_(labels) {}
 
-  V visit(const lotus::pathexpressions::Union<int> &re, std::nullptr_t) override {
+  V visit(const lotus::pathexpressions::Union<int> &re,
+          std::nullptr_t) override {
     return TD::combine(re.getFirst()->accept(*this),
                        re.getSecond()->accept(*this));
   }
 
   V visit(const lotus::pathexpressions::Concatenation<int> &re,
           std::nullptr_t) override {
-    return TD::extend(re.getFirst()->accept(*this), re.getSecond()->accept(*this));
+    return TD::extend(re.getFirst()->accept(*this),
+                      re.getSecond()->accept(*this));
   }
 
-  V visit(const lotus::pathexpressions::Star<int> &re, std::nullptr_t) override {
+  V visit(const lotus::pathexpressions::Star<int> &re,
+          std::nullptr_t) override {
     const V inner = re.getInner()->accept(*this);
     return fix<TD>(false, TD::one(), [&](V cur) {
       return TD::combine(TD::one(), TD::extend(inner, cur));
@@ -283,7 +287,8 @@ public:
     return labels_.at(static_cast<std::size_t>(re.getLetter()));
   }
 
-  V visit(const lotus::pathexpressions::Epsilon<int> &, std::nullptr_t) override {
+  V visit(const lotus::pathexpressions::Epsilon<int> &,
+          std::nullptr_t) override {
     return TD::one();
   }
 
@@ -355,7 +360,8 @@ template <class TD> struct TensorLeftLinearExtractor {
       Frag frag;
       frag.constant = TD::combine((*lhs).constant, (*rhs).constant);
       frag.terms = (*lhs).terms;
-      frag.terms.insert(frag.terms.end(), (*rhs).terms.begin(), (*rhs).terms.end());
+      frag.terms.insert(frag.terms.end(), (*rhs).terms.begin(),
+                        (*rhs).terms.end());
       Optional<Frag> out;
       out = frag;
       return out;
@@ -367,8 +373,9 @@ template <class TD> struct TensorLeftLinearExtractor {
 
 private:
   template <class T = TD>
-  static typename std::enable_if<DomainHasProjectT<T>::value, Optional<Frag>>::type
-  project_fragment(const Frag &frag_in) {
+  static
+      typename std::enable_if<DomainHasProjectT<T>::value, Optional<Frag>>::type
+      project_fragment(const Frag &frag_in) {
     Frag frag = frag_in;
     frag.constant = T::projectT(frag.constant);
     for (auto &term : frag.terms)
@@ -379,7 +386,8 @@ private:
   }
 
   template <class T = TD>
-  static typename std::enable_if<!DomainHasProjectT<T>::value, Optional<Frag>>::type
+  static typename std::enable_if<!DomainHasProjectT<T>::value,
+                                 Optional<Frag>>::type
   project_fragment(const Frag &) {
     return {};
   }
@@ -419,8 +427,9 @@ get_tensor_tarjan_plan(bool verbose,
         rhs[i].second, allow_project_pushdown);
     if (!extracted.has_value()) {
       if (verbose)
-        std::cerr << "[tensor] expression not extractable to left-linear graph; "
-                     "falling back to tensor worklist\n";
+        std::cerr
+            << "[tensor] expression not extractable to left-linear graph; "
+               "falling back to tensor worklist\n";
       return {};
     }
     fragments.push_back(*extracted);
@@ -460,9 +469,7 @@ get_tensor_tarjan_plan(bool verbose,
     graph.addNode(i + 1);
 
   std::size_t next_label = 0;
-  auto add_label = [&](const V &) {
-    return static_cast<int>(next_label++);
-  };
+  auto add_label = [&](const V &) { return static_cast<int>(next_label++); };
 
   for (int i = 0; i < static_cast<int>(rhs.size()); ++i) {
     const Frag &frag = fragments[static_cast<std::size_t>(i)];
@@ -496,7 +503,6 @@ std::vector<typename TD::value_type> instantiate_tensor_tarjan_labels(
     const std::vector<std::pair<Symbol, E1<TD>>> &rhs,
     bool allow_project_pushdown = false) {
   using V = typename TD::value_type;
-  using Frag = typename TensorLeftLinearExtractor<TD>::Frag;
 
   std::vector<V> labels;
   labels.reserve(rhs.size() * 2U);
@@ -539,8 +545,9 @@ Optional<std::vector<typename TD::value_type>> solve_linear_tensor_tarjan_impl(
   for (const auto &seed : init) {
     if (!domain_equal<TD>(seed, TD::zero())) {
       if (verbose)
-        std::cerr << "[tensor] non-zero initial seeds require iterative solving; "
-                     "falling back to tensor worklist\n";
+        std::cerr
+            << "[tensor] non-zero initial seeds require iterative solving; "
+               "falling back to tensor worklist\n";
       return {};
     }
   }
@@ -572,8 +579,9 @@ bool tensor_rhs_has_nonconstant_project(
 template <class D>
 Optional<std::vector<DomVal<D>>> solve_linear_tensor_tarjan_only_impl(
     bool verbose,
-    const std::vector<std::pair<
-        Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>> &rhs_tensor,
+    const std::vector<
+        std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
+        &rhs_tensor,
     const std::vector<DomVal<D>> &init) {
   validate_tensor_trait_api<D>();
   using Traits = TensorSemiringTraits<D>;
@@ -586,9 +594,8 @@ Optional<std::vector<DomVal<D>>> solve_linear_tensor_tarjan_only_impl(
   for (const auto &v : init)
     init_tensor.emplace_back(lift_base_value_to_tensor<D>(v));
 
-  auto delta_tensor =
-      solve_linear_tensor_tarjan_impl<TD>(verbose, rhs_tensor, init_tensor,
-                                          allow_project_pushdown);
+  auto delta_tensor = solve_linear_tensor_tarjan_impl<TD>(
+      verbose, rhs_tensor, init_tensor, allow_project_pushdown);
   if (!delta_tensor.has_value())
     return {};
 
@@ -605,8 +612,9 @@ Optional<std::vector<DomVal<D>>> solve_linear_tensor_tarjan_only_impl(
 template <class D>
 std::vector<DomVal<D>> solve_linear_tensorized_impl(
     bool verbose,
-    const std::vector<std::pair<
-        Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>> &rhs_tensor,
+    const std::vector<
+        std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
+        &rhs_tensor,
     std::vector<DomVal<D>> init) {
   validate_tensor_trait_api<D>();
   using Traits = TensorSemiringTraits<D>;
@@ -618,11 +626,11 @@ std::vector<DomVal<D>> solve_linear_tensorized_impl(
   init_tensor.reserve(init.size());
   for (const auto &v : init)
     init_tensor.emplace_back(lift_base_value_to_tensor<D>(v));
-  auto delta_tensor =
-      solve_linear_tensor_tarjan_impl<TD>(verbose, rhs_tensor, init_tensor,
-                                          allow_project_pushdown);
+  auto delta_tensor = solve_linear_tensor_tarjan_impl<TD>(
+      verbose, rhs_tensor, init_tensor, allow_project_pushdown);
   if (!delta_tensor.has_value())
-    delta_tensor = solve_linear_worklist_impl<TD>(verbose, rhs_tensor, init_tensor);
+    delta_tensor =
+        solve_linear_worklist_impl<TD>(verbose, rhs_tensor, init_tensor);
   std::vector<DomVal<D>> delta;
   delta.reserve((*delta_tensor).size());
   for (const auto &p : *delta_tensor)
@@ -633,8 +641,9 @@ std::vector<DomVal<D>> solve_linear_tensorized_impl(
 template <class D>
 std::vector<DomVal<D>> solve_linear_tensor_paper_impl(
     bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
-    const std::vector<std::pair<
-        Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>> &rhs_tensor,
+    const std::vector<
+        std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
+        &rhs_tensor,
     std::vector<DomVal<D>> init) {
   validate_tensor_trait_api<D>();
   using TD = typename TensorSemiringTraits<D>::tensor_domain;
@@ -687,6 +696,12 @@ solve_linear_tensor_impl(bool verbose,
                    "falling back to worklist\n";
     return solve_linear_worklist_impl<D>(verbose, rhs, init);
   }
+  if (!npa::tensor_paper_laws_validated<D>()) {
+    if (verbose)
+      std::cerr << "[tensor] tensor traits did not pass/declare paper-law "
+                   "validation; falling back to worklist\n";
+    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+  }
   for (const auto &p : rhs) {
     if (ExprFeatureDetector<D>::has_mu(p.second))
       throw UnsupportedNewtonMuError{};
@@ -695,11 +710,11 @@ solve_linear_tensor_impl(bool verbose,
       throw UnsafeNewtonProjectError{};
     if (!Exp1ToTensor<D>::is_tensor_convertible(p.second)) {
       if (verbose)
-        std::cerr << "[tensor] not tensor-convertible; falling back to worklist\n";
+        std::cerr
+            << "[tensor] not tensor-convertible; falling back to worklist\n";
       return solve_linear_worklist_impl<D>(verbose, rhs, init);
     }
   }
-  using VT = typename TD::value_type;
   std::vector<std::pair<Symbol, E1<TD>>> rhs_tensor;
   rhs_tensor.reserve(rhs.size());
   for (const auto &p : rhs)

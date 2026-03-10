@@ -11,34 +11,29 @@ namespace detail {
 template <class D> struct TensorTraitsWellFormed {
 private:
   template <class T>
-  static auto test(int)
-      -> typename std::enable_if<
-          std::is_same<decltype(TensorSemiringTraits<T>::available()),
+  static auto test(int) -> typename std::enable_if<
+      std::is_same<decltype(TensorSemiringTraits<T>::available()),
+                   bool>::value &&
+          std::is_same<decltype(TensorSemiringTraits<T>::paper_admissible()),
                        bool>::value &&
-              std::is_same<decltype(TensorSemiringTraits<T>::paper_admissible()),
-                           bool>::value &&
-              std::is_same<
-                  decltype(TensorSemiringTraits<T>::right_constant(
-                      std::declval<const DomVal<T> &>())),
-                  typename TensorSemiringTraits<T>::tensor_domain::value_type>::
-                  value &&
-              std::is_same<
-                  decltype(TensorSemiringTraits<T>::left_constant(
-                      std::declval<const DomVal<T> &>())),
-                  typename TensorSemiringTraits<T>::tensor_domain::value_type>::
-                  value &&
-              std::is_same<
-                  decltype(TensorSemiringTraits<T>::couple(
-                      std::declval<const DomVal<T> &>(),
-                      std::declval<const DomVal<T> &>())),
-                  typename TensorSemiringTraits<T>::tensor_domain::value_type>::
-                  value &&
-              std::is_same<
-                  decltype(TensorSemiringTraits<T>::readout(std::declval<
-                           const typename TensorSemiringTraits<
+          std::is_same<decltype(TensorSemiringTraits<T>::right_constant(
+                           std::declval<const DomVal<T> &>())),
+                       typename TensorSemiringTraits<
+                           T>::tensor_domain::value_type>::value &&
+          std::is_same<decltype(TensorSemiringTraits<T>::left_constant(
+                           std::declval<const DomVal<T> &>())),
+                       typename TensorSemiringTraits<
+                           T>::tensor_domain::value_type>::value &&
+          std::is_same<decltype(TensorSemiringTraits<T>::couple(
+                           std::declval<const DomVal<T> &>(),
+                           std::declval<const DomVal<T> &>())),
+                       typename TensorSemiringTraits<
+                           T>::tensor_domain::value_type>::value &&
+          std::is_same<decltype(TensorSemiringTraits<T>::readout(
+                           std::declval<const typename TensorSemiringTraits<
                                T>::tensor_domain::value_type &>())),
-                  DomVal<T>>::value,
-          std::true_type>::type;
+                       DomVal<T>>::value,
+      std::true_type>::type;
   template <class> static std::false_type test(...);
 
 public:
@@ -59,6 +54,19 @@ public:
       std::is_same<decltype(test<D>(0)), std::true_type>::value;
 };
 
+template <class D> struct TensorTraitsHasPaperLawValidation {
+private:
+  template <class T>
+  static auto test(int)
+      -> decltype(TensorSemiringTraits<T>::validate_paper_laws(),
+                  std::true_type{});
+  template <class> static std::false_type test(...);
+
+public:
+  static constexpr bool value =
+      std::is_same<decltype(test<D>(0)), std::true_type>::value;
+};
+
 template <class D>
 inline bool tensor_projection_equations_impl(std::true_type) {
   return TensorSemiringTraits<D>::paper_projection_equations();
@@ -66,6 +74,16 @@ inline bool tensor_projection_equations_impl(std::true_type) {
 
 template <class D>
 inline bool tensor_projection_equations_impl(std::false_type) {
+  return false;
+}
+
+template <class D>
+inline bool tensor_paper_laws_validated_impl(std::true_type) {
+  return TensorSemiringTraits<D>::validate_paper_laws();
+}
+
+template <class D>
+inline bool tensor_paper_laws_validated_impl(std::false_type) {
   return false;
 }
 } // namespace detail
@@ -108,13 +126,15 @@ template <class D> struct TensorSemiringTraits {
   static bool paper_projection_equations() { return false; }
 
   static typename tensor_domain::value_type right_constant(const DomVal<D> &v) {
-    return domain_equal<D>(v, D::zero()) ? tensor_domain::zero()
-                                         : tensor_domain::singleton(D::one(), v);
+    return domain_equal<D>(v, D::zero())
+               ? tensor_domain::zero()
+               : tensor_domain::singleton(D::one(), v);
   }
 
   static typename tensor_domain::value_type left_constant(const DomVal<D> &v) {
-    return domain_equal<D>(v, D::zero()) ? tensor_domain::zero()
-                                         : tensor_domain::singleton(v, D::one());
+    return domain_equal<D>(v, D::zero())
+               ? tensor_domain::zero()
+               : tensor_domain::singleton(v, D::one());
   }
 
   static typename tensor_domain::value_type constant(const DomVal<D> &v) {
@@ -141,6 +161,12 @@ template <class D> inline bool tensor_supports_projection_equations() {
   return detail::tensor_projection_equations_impl<D>(
       std::integral_constant<
           bool, detail::TensorTraitsHasPaperProjectionEquations<D>::value>{});
+}
+
+template <class D> inline bool tensor_paper_laws_validated() {
+  return detail::tensor_paper_laws_validated_impl<D>(
+      std::integral_constant<
+          bool, detail::TensorTraitsHasPaperLawValidation<D>::value>{});
 }
 
 } // namespace npa

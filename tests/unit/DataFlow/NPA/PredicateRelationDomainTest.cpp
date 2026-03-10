@@ -1,4 +1,5 @@
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
+
 #include "Dataflow/NPA/NPA.h"
 
 #include <gtest/gtest.h>
@@ -30,6 +31,11 @@ TEST(NPA, PredicateTensorTraitsDeclarePaperAdmissibility) {
   EXPECT_TRUE(npa::TensorSemiringTraits<D>::paper_admissible());
 }
 
+TEST(NPA, PredicateTensorTraitsValidatePaperLawsWhenConfigured) {
+  D::configure(1);
+  EXPECT_TRUE(npa::TensorSemiringTraits<D>::validate_paper_laws());
+}
+
 TEST(NPA, PredicateRelationIdentityAndAssignmentCompose) {
   D::configure(1);
 
@@ -38,8 +44,9 @@ TEST(NPA, PredicateRelationIdentityAndAssignmentCompose) {
   auto assume_false = D::assume(0, false);
   auto composed = D::extend(set_true, assume_false);
 
-  EXPECT_EQ(sortedTransitions(id),
-            (std::vector<std::pair<std::uint64_t, std::uint64_t>>{{0, 0}, {1, 1}}));
+  EXPECT_EQ(
+      sortedTransitions(id),
+      (std::vector<std::pair<std::uint64_t, std::uint64_t>>{{0, 0}, {1, 1}}));
   EXPECT_TRUE(sortedTransitions(composed).empty());
 }
 
@@ -64,8 +71,9 @@ TEST(NPA, PredicateRelationTensorRegularizationMatchesWorklist) {
   ASSERT_EQ(wl.size(), 1u);
   ASSERT_EQ(tp.size(), 1u);
   EXPECT_TRUE(D::equal(wl[0], tp[0]));
-  EXPECT_EQ(sortedTransitions(tp[0]),
-            (std::vector<std::pair<std::uint64_t, std::uint64_t>>{{0, 0}, {1, 1}}));
+  EXPECT_EQ(
+      sortedTransitions(tp[0]),
+      (std::vector<std::pair<std::uint64_t, std::uint64_t>>{{0, 0}, {1, 1}}));
 }
 
 TEST(NPA, PredicateTensorReadoutMatchesBaseExtend) {
@@ -91,8 +99,8 @@ TEST(NPA, PredicateTensorReadoutAvoidsCrossTermsAcrossAlternatives) {
                              TD::couple(assume_false, identity));
   auto readout = TD::readout(coupled);
 
-  auto expected =
-      D::combine(D::extend(identity, set_true), D::extend(assume_false, identity));
+  auto expected = D::combine(D::extend(identity, set_true),
+                             D::extend(assume_false, identity));
   EXPECT_TRUE(D::equal(readout, expected));
 }
 
@@ -305,12 +313,13 @@ TEST(NPA, PredicateTensorTarjanSupportsProjectedLinearEquations) {
   rhs_tensor.emplace_back("X", npa::Exp1ToTensor<D>::convert(rhs));
 
   std::vector<typename TD::value_type> init_tensor = {TD::zero()};
-  auto tarjan = npa::solve_linear_tensor_tarjan_impl<TD>(false, rhs_tensor,
-                                                         init_tensor);
+  auto tarjan =
+      npa::solve_linear_tensor_tarjan_impl<TD>(false, rhs_tensor, init_tensor);
 
   ASSERT_TRUE(tarjan.has_value());
   ASSERT_EQ((*tarjan).size(), 1u);
-  EXPECT_TRUE(D::equal(npa::TensorSemiringTraits<D>::readout((*tarjan)[0]), wl[0]));
+  EXPECT_TRUE(
+      D::equal(npa::TensorSemiringTraits<D>::readout((*tarjan)[0]), wl[0]));
 }
 
 TEST(NPA, PredicateTensorDiffSupportsProjectionNodes) {
@@ -341,7 +350,9 @@ TEST(NPA, PredicateTensorDiffSupportsProjectionNodes) {
   EXPECT_TRUE(TDom::equal(ordinary_val, direct_val));
 }
 
-TEST(NPA, PredicateNewtonTensorStrategyExecutesWithoutFallbackOnProjectedRecursiveEquation) {
+TEST(
+    NPA,
+    PredicateNewtonTensorStrategyExecutesWithoutFallbackOnProjectedRecursiveEquation) {
   D::configure(2, 1);
 
   using E0 = npa::E0<D>;
@@ -356,8 +367,8 @@ TEST(NPA, PredicateNewtonTensorStrategyExecutesWithoutFallbackOnProjectedRecursi
   std::vector<std::pair<npa::Symbol, E0>> eqns;
   eqns.emplace_back("X", rhs);
 
-  auto wl =
-      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::Worklist);
+  auto wl = npa::NewtonSolver<D>::solve(eqns, false, -1,
+                                        npa::LinearStrategy::Worklist);
 
   testing::internal::CaptureStderr();
   auto tp = npa::NewtonSolver<D>::solve(eqns, true, -1,
