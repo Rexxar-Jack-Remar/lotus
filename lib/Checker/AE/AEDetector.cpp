@@ -469,8 +469,8 @@ void BufOverflowDetector::detectExtAPI(AbstractState &as,
         call->getArgOperand(arg.second));
 
     IntervalValue len;
-    if (const auto *csize =
-            llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(arg.second))) {
+    if (const auto *csize = llvm::dyn_cast<llvm::ConstantInt>(
+            call->getArgOperand(arg.second))) {
       len = IntervalValue(csize->getSExtValue());
     } else {
       if (!as.inVarToValTable(lenId))
@@ -1053,6 +1053,7 @@ void UseAfterFreeDetector::detect(AbstractState &as,
 }
 
 void UseAfterFreeDetector::handleStubFunctions(const llvm::CallBase *call) {
+  (void)call;
   // Track allocation/free events
 }
 
@@ -1144,6 +1145,7 @@ void InvalidFreeDetector::detect(AbstractState &as,
 }
 
 void InvalidFreeDetector::handleStubFunctions(const llvm::CallBase *call) {
+  (void)call;
   // Track allocation/free events
 }
 
@@ -1236,7 +1238,7 @@ void MemLeakDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
           funcName == "strdup" || funcName == "strndup") {
 
         uint32_t retId = AbstractInterpretation::getValueIdStatic(call);
-        if (as.inVarToValTable(retId)) {
+        if (as.inVarToAddrsTable(retId)) {
           AddressValue addrs = as[retId].getAddrs();
           for (uint64_t addr : addrs.getVals()) {
             uint32_t objId = as.getIDFromAddr(addr);
@@ -1253,7 +1255,7 @@ void MemLeakDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
         const llvm::Value *arg = call->getArgOperand(i);
         if (arg->getType()->isPointerTy()) {
           uint32_t argId = AbstractInterpretation::getValueIdStatic(arg);
-          if (as.inVarToValTable(argId)) {
+          if (as.inVarToAddrsTable(argId)) {
             AddressValue addrs = as[argId].getAddrs();
             for (uint64_t addr : addrs.getVals()) {
               uint32_t objId = as.getIDFromAddr(addr);

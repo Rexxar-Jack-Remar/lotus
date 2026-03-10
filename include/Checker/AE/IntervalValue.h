@@ -101,48 +101,101 @@ public:
   bool eq(const BoundedInt &other) const { return equal(other); }
 
   // Arithmetic operators
-  BoundedInt operator+(const BoundedInt &other) const {
-    if (is_infinity() || other.is_infinity()) {
-      if (is_minus_infinity() || other.is_minus_infinity())
-        return minus_infinity();
-      if (is_plus_infinity() || other.is_plus_infinity())
-        return plus_infinity();
+  static BoundedInt safeAdd(const BoundedInt &lhs, const BoundedInt &rhs) {
+    // +inf + -inf is undefined in the original SVF model.
+    if ((lhs.is_plus_infinity() && rhs.is_minus_infinity()) ||
+        (lhs.is_minus_infinity() && rhs.is_plus_infinity())) {
+      assert(false && "invalid add");
     }
-    return BoundedInt(value + other.value);
+
+    if (lhs.is_plus_infinity() || rhs.is_plus_infinity())
+      return plus_infinity();
+    if (lhs.is_minus_infinity() || rhs.is_minus_infinity())
+      return minus_infinity();
+
+    if (lhs.value > 0 && rhs.value > 0 &&
+        (std::numeric_limits<int64_t>::max() - lhs.value) < rhs.value)
+      return plus_infinity();
+
+    if (lhs.value < 0 && rhs.value < 0 &&
+        (std::numeric_limits<int64_t>::lowest() - lhs.value) > rhs.value)
+      return minus_infinity();
+
+    return BoundedInt(lhs.value + rhs.value);
+  }
+
+  static BoundedInt safeMul(const BoundedInt &lhs, const BoundedInt &rhs) {
+    if (lhs.is_zero() || rhs.is_zero())
+      return BoundedInt(0);
+
+    if (lhs.is_infinity() || rhs.is_infinity()) {
+      // Sign of infinity follows operand sign parity.
+      int lhsSign =
+          lhs.is_minus_infinity()
+              ? -1
+              : (lhs.is_plus_infinity() ? 1 : (lhs.value < 0 ? -1 : 1));
+      int rhsSign =
+          rhs.is_minus_infinity()
+              ? -1
+              : (rhs.is_plus_infinity() ? 1 : (rhs.value < 0 ? -1 : 1));
+      return (lhsSign * rhsSign > 0) ? plus_infinity() : minus_infinity();
+    }
+
+    if (lhs.value > 0 && rhs.value > 0 &&
+        lhs.value > std::numeric_limits<int64_t>::max() / rhs.value)
+      return plus_infinity();
+
+    if (lhs.value < 0 && rhs.value < 0 &&
+        lhs.value < std::numeric_limits<int64_t>::max() / rhs.value)
+      return plus_infinity();
+
+    if ((lhs.value > 0 && rhs.value < 0 &&
+         rhs.value < std::numeric_limits<int64_t>::lowest() / lhs.value) ||
+        (lhs.value < 0 && rhs.value > 0 &&
+         lhs.value < std::numeric_limits<int64_t>::lowest() / rhs.value))
+      return minus_infinity();
+
+    return BoundedInt(lhs.value * rhs.value);
+  }
+
+  BoundedInt operator+(const BoundedInt &other) const {
+    return safeAdd(*this, other);
   }
 
   BoundedInt operator-(const BoundedInt &other) const {
-    if (is_infinity() || other.is_infinity()) {
-      if (is_minus_infinity() || other.is_plus_infinity())
-        return minus_infinity();
-      if (is_plus_infinity() || other.is_minus_infinity())
-        return plus_infinity();
-    }
-    return BoundedInt(value - other.value);
+    return safeAdd(*this, -other);
   }
 
   BoundedInt operator*(const BoundedInt &other) const {
-    if (is_infinity() || other.is_infinity()) {
-      // Simplified handling
-      return plus_infinity();
-    }
-    return BoundedInt(value * other.value);
+    return safeMul(*this, other);
   }
 
   BoundedInt operator/(const BoundedInt &other) const {
-    if (other.is_zero())
+    if (other.is_zero()) {
+      assert(false && "divide by zero");
       return plus_infinity();
-    if (is_infinity() || other.is_infinity())
-      return plus_infinity();
-    return BoundedInt(value / other.value);
+    }
+    if (!is_infinity() && !other.is_infinity())
+      return BoundedInt(value / other.value);
+    if (!is_infinity() && other.is_infinity())
+      return BoundedInt(0);
+    if (is_infinity() && !other.is_infinity())
+      return (other.value >= 0) ? *this : -*this;
+    return equal(other) ? plus_infinity() : minus_infinity();
   }
 
   BoundedInt operator%(const BoundedInt &other) const {
-    if (other.is_zero())
+    if (other.is_zero()) {
+      assert(false && "divide by zero");
       return BoundedInt(0);
-    if (is_infinity() || other.is_infinity())
+    }
+    if (!is_infinity() && !other.is_infinity())
+      return BoundedInt(value % other.value);
+    if (!is_infinity() && other.is_infinity())
       return BoundedInt(0);
-    return BoundedInt(value % other.value);
+    if (is_infinity() && !other.is_infinity())
+      return (other.value > 0) ? *this : -*this;
+    return equal(other) ? plus_infinity() : minus_infinity();
   }
 
   BoundedInt operator&(const BoundedInt &other) const {
@@ -164,14 +217,24 @@ public:
   }
 
   BoundedInt operator<<(const BoundedInt &other) const {
-    if (is_infinity() || other.is_infinity())
-      return plus_infinity();
+    assert(other.geq(BoundedInt(0)) && "rhs should be >= 0");
+    if (is_zero())
+      return *this;
+    if (is_infinity())
+      return *this;
+    if (other.is_infinity())
+      return geq(BoundedInt(0)) ? plus_infinity() : minus_infinity();
     return BoundedInt(value << other.value);
   }
 
   BoundedInt operator>>(const BoundedInt &other) const {
-    if (is_infinity() || other.is_infinity())
-      return plus_infinity();
+    assert(other.geq(BoundedInt(0)) && "rhs should be >= 0");
+    if (is_zero())
+      return *this;
+    if (is_infinity())
+      return *this;
+    if (other.is_infinity())
+      return geq(BoundedInt(0)) ? BoundedInt(0) : BoundedInt(-1);
     return BoundedInt(value >> other.value);
   }
 
@@ -489,8 +552,24 @@ inline IntervalValue operator/(const IntervalValue &lhs,
                                const IntervalValue &rhs) {
   if (lhs.isBottom() || rhs.isBottom())
     return IntervalValue::bottom();
-  if (rhs.contains(0))
-    return IntervalValue::top();
+  if (rhs.contains(0)) {
+    IntervalValue lb = IntervalValue::create(rhs.lb(), BoundedInt(-1));
+    IntervalValue ub = IntervalValue::create(BoundedInt(1), rhs.ub());
+    IntervalValue lRes = lhs / lb;
+    IntervalValue rRes = lhs / ub;
+    lRes.join_with(rRes);
+    return lRes;
+  }
+  if (lhs.contains(0)) {
+    IntervalValue lb = IntervalValue::create(lhs.lb(), BoundedInt(-1));
+    IntervalValue ub = IntervalValue::create(BoundedInt(1), lhs.ub());
+    IntervalValue lRes = lb / rhs;
+    IntervalValue rRes = ub / rhs;
+    lRes.join_with(rRes);
+    lRes.join_with(IntervalValue(0));
+    return lRes;
+  }
+
   BoundedInt ll = lhs._lb / rhs._lb;
   BoundedInt lu = lhs._lb / rhs._ub;
   BoundedInt ul = lhs._ub / rhs._lb;
@@ -545,6 +624,18 @@ inline IntervalValue operator|(const IntervalValue &lhs,
     return IntervalValue::bottom();
   if (lhs.is_numeral() && rhs.is_numeral())
     return IntervalValue(lhs._lb | rhs._lb);
+  auto next_power_of_2 = [](int64_t num) {
+    int i = 1;
+    while ((num >> i) != 0)
+      ++i;
+    return int64_t(1) << i;
+  };
+  if (!lhs.is_infinite() && !rhs.is_infinite() && lhs._lb.getNumeral() >= 0 &&
+      rhs._lb.getNumeral() >= 0) {
+    int64_t m = std::max(lhs._ub.getNumeral(), rhs._ub.getNumeral());
+    int64_t ub = next_power_of_2(m) - 1;
+    return IntervalValue(int64_t(0), ub);
+  }
   return IntervalValue::top();
 }
 
@@ -561,23 +652,57 @@ inline IntervalValue operator<<(const IntervalValue &lhs,
                                 const IntervalValue &rhs) {
   if (lhs.isBottom() || rhs.isBottom())
     return IntervalValue::bottom();
-  if (lhs.is_infinite() || rhs.is_infinite())
-    return IntervalValue::top();
   if (lhs.isTop() && rhs.isTop())
     return IntervalValue::top();
-  return lhs *
-         IntervalValue(static_cast<int64_t>(1 << rhs._lb.getIntNumeral()),
-                       static_cast<int64_t>(1 << rhs._ub.getIntNumeral()));
+
+  IntervalValue shift = rhs;
+  shift.meet_with(IntervalValue(BoundedInt(0), IntervalValue::plus_infinity()));
+  if (shift.isBottom())
+    return IntervalValue::bottom();
+
+  BoundedInt lb(0);
+  if (shift.lb().getNumeral() >= 32 || shift.lb().is_infinity()) {
+    lb = IntervalValue::minus_infinity();
+  } else {
+    lb = BoundedInt(int64_t(1) << static_cast<int>(shift.lb().getNumeral()));
+  }
+
+  BoundedInt ub(0);
+  if (shift.ub().is_infinity()) {
+    ub = IntervalValue::plus_infinity();
+  } else {
+    ub = BoundedInt(int64_t(1) << static_cast<int>(shift.ub().getNumeral()));
+  }
+
+  IntervalValue coeff(lb, ub);
+  return lhs * coeff;
 }
 
 inline IntervalValue operator>>(const IntervalValue &lhs,
                                 const IntervalValue &rhs) {
   if (lhs.isBottom() || rhs.isBottom())
     return IntervalValue::bottom();
-  BoundedInt ll = lhs._lb >> rhs._lb;
-  BoundedInt lu = lhs._lb >> rhs._ub;
-  BoundedInt ul = lhs._ub >> rhs._lb;
-  BoundedInt uu = lhs._ub >> rhs._ub;
+  if (lhs.isTop() && rhs.isTop())
+    return IntervalValue::top();
+
+  IntervalValue shift = rhs;
+  shift.meet_with(IntervalValue(BoundedInt(0), IntervalValue::plus_infinity()));
+  if (shift.isBottom())
+    return IntervalValue::bottom();
+
+  if (lhs.contains(0)) {
+    IntervalValue l = IntervalValue::create(lhs.lb(), BoundedInt(-1));
+    IntervalValue u = IntervalValue::create(BoundedInt(1), lhs.ub());
+    IntervalValue tmp = l >> rhs;
+    tmp.join_with(u >> rhs);
+    tmp.join_with(IntervalValue(0));
+    return tmp;
+  }
+
+  BoundedInt ll = lhs._lb >> shift._lb;
+  BoundedInt lu = lhs._lb >> shift._ub;
+  BoundedInt ul = lhs._ub >> shift._lb;
+  BoundedInt uu = lhs._ub >> shift._ub;
   return IntervalValue(BoundedInt::min({ll, lu, ul, uu}),
                        BoundedInt::max({ll, lu, ul, uu}));
 }
