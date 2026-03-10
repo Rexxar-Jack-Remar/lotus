@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cassert>
 #include <mutex>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace npa {
@@ -36,6 +37,9 @@ enum class TensorVarGroup {
   TmpA = 4,
   TmpB = 5,
 };
+
+constexpr unsigned kMaxMaterializePredicatesRelation = 12;
+constexpr unsigned kMaxMaterializePredicatesTensor = 6;
 
 unsigned &configuredPredicateCountRef() {
   static unsigned count = 0;
@@ -729,6 +733,11 @@ materializeRelationImpl(const PredicateRelation &relation) {
   const unsigned predicate_count = implOf(relation)->predicate_count;
   assert(predicate_count <= 63 &&
          "materialize() supports at most 63 predicates");
+  if (predicate_count > kMaxMaterializePredicatesRelation) {
+    throw std::runtime_error(
+        "materialize() refused: exact enumeration is infeasible for this "
+        "predicate count");
+  }
   DdManager *manager = getBaseManager(predicate_count);
   std::vector<std::pair<std::uint64_t, std::uint64_t>> out;
   std::vector<int> values = assignmentVector(predicate_count);
@@ -752,6 +761,11 @@ materializeTensorImpl(const PredicateTensorRelation &relation) {
   const unsigned predicate_count = implOf(relation)->predicate_count;
   assert(predicate_count <= 63 &&
          "tensor materialization supports at most 63 predicates");
+  if (predicate_count > kMaxMaterializePredicatesTensor) {
+    throw std::runtime_error(
+        "tensor materialize() refused: exact enumeration is infeasible for "
+        "this predicate count");
+  }
   DdManager *manager = getTensorManager(predicate_count);
   std::vector<
       std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>>

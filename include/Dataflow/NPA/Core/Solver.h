@@ -28,6 +28,7 @@ template <class D>
 DomVal<D> compute_delta(const DomVal<D> &v, const DomVal<D> &nu_sym,
                         std::true_type /* has_choose_delta */,
                         std::true_type /* idempotent */) {
+  (void)nu_sym;
   return v;
 }
 template <class D>
@@ -40,6 +41,7 @@ template <class D>
 DomVal<D> compute_delta(const DomVal<D> &v, const DomVal<D> &nu_sym,
                         std::false_type /* has_choose_delta */,
                         std::true_type /* idempotent */) {
+  (void)nu_sym;
   return v;
 }
 template <class D>
@@ -52,7 +54,8 @@ DomVal<D> compute_delta(const DomVal<D> &v, const DomVal<D> &nu_sym,
 template <class D> inline void require_newton_compatible_expr(const E0<D> &e) {
   if (ExprFeatureDetector<D>::has_mu(e))
     throw UnsupportedNewtonMuError{};
-  if (ExprFeatureDetector<D>::has_project(e) && !domain_project_newton_safe<D>())
+  if (ExprFeatureDetector<D>::has_project(e) &&
+      !domain_project_newton_safe<D>())
     throw UnsafeNewtonProjectError{};
 }
 } // namespace detail
@@ -166,6 +169,8 @@ template <class D> struct NewtonIter {
     const bool tensor_available = tensor_requested && TensorTraits::available();
     const bool tensor_admissible =
         tensor_available && TensorTraits::paper_admissible();
+    const bool tensor_laws_validated =
+        tensor_admissible && tensor_paper_laws_validated<D>();
     for (auto &e : eqns) {
       detail::require_newton_compatible_expr<D>(e.second);
       V v = I0<D>::eval(verbose, nu, e.second);
@@ -176,25 +181,24 @@ template <class D> struct NewtonIter {
       if (!D::idempotent)
         require_valid_newton_delta<D>(v, nu[e.first], delta0);
       auto d = Diff<D>::build(nu, e.second);
-      has_lcfl_structure = has_lcfl_structure || LCFLDetector<D>::has_lcfl_structure(d);
+      has_lcfl_structure =
+          has_lcfl_structure || LCFLDetector<D>::has_lcfl_structure(d);
       rhs.emplace_back(e.first, Exp1<D>::add(Exp1<D>::term(delta0), d));
-      if (tensor_admissible) {
+      if (tensor_laws_validated) {
         auto tensor_d = TensorDiff<D>::build(nu, e.second);
-        E1<TD> tensor_rhs =
-            Exp1<TD>::add(Exp1<TD>::term(TensorTraits::right_constant(delta0)),
-                          tensor_d);
+        E1<TD> tensor_rhs = Exp1<TD>::add(
+            Exp1<TD>::term(TensorTraits::right_constant(delta0)), tensor_d);
         if (tensor_supports_projection_equations<D>() && e.second &&
             e.second->k == Exp0<D>::Project && tensor_d &&
             tensor_d->k == Exp1<TD>::Project) {
-          tensor_rhs = Exp1<TD>::project(
-              Exp1<TD>::add(Exp1<TD>::term(TensorTraits::right_constant(delta0)),
-                            tensor_d->t));
+          tensor_rhs = Exp1<TD>::project(Exp1<TD>::add(
+              Exp1<TD>::term(TensorTraits::right_constant(delta0)),
+              tensor_d->t));
         }
-        rhs_tensor.emplace_back(
-            e.first, tensor_rhs);
+        rhs_tensor.emplace_back(e.first, tensor_rhs);
       }
     }
-    const bool use_tensor = tensor_admissible && has_lcfl_structure;
+    const bool use_tensor = tensor_laws_validated && has_lcfl_structure;
     if (tensor_requested && verbose) {
       if (!TensorTraits::available()) {
         std::cerr << "[tensor] tensor traits unavailable for domain; "
@@ -205,10 +209,12 @@ template <class D> struct NewtonIter {
       } else if (!TensorTraits::paper_admissible()) {
         std::cerr << "[tensor] tensor traits are not paper-admissible; "
                      "falling back to worklist\n";
+      } else if (!tensor_paper_laws_validated<D>()) {
+        std::cerr << "[tensor] tensor traits did not pass/declare paper-law "
+                     "validation; falling back to worklist\n";
       }
     }
-    std::vector<V> init(use_tensor ? rhs_tensor.size() : rhs.size(),
-                        D::zero()),
+    std::vector<V> init(use_tensor ? rhs_tensor.size() : rhs.size(), D::zero()),
         delta;
     if (linStrat == LinearStrategy::Naive) {
       delta = fix_vec<D>(verbose, init, [&](const std::vector<V> &cur) {

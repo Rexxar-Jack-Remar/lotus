@@ -2,6 +2,8 @@
 
 #include "Dataflow/NPA/NPA.h"
 
+#include <stdexcept>
+
 #include <gtest/gtest.h>
 
 namespace {
@@ -34,6 +36,16 @@ TEST(NPA, PredicateTensorTraitsDeclarePaperAdmissibility) {
 TEST(NPA, PredicateTensorTraitsValidatePaperLawsWhenConfigured) {
   D::configure(1);
   EXPECT_TRUE(npa::TensorSemiringTraits<D>::validate_paper_laws());
+}
+
+TEST(NPA, PredicateRelationMaterializeRejectsInfeasibleEnumeration) {
+  D::configure(13);
+  EXPECT_THROW((void)D::materialize(D::one()), std::runtime_error);
+}
+
+TEST(NPA, PredicateTensorMaterializeRejectsInfeasibleEnumeration) {
+  D::configure(7);
+  EXPECT_THROW((void)TD::materialize(TD::one()), std::runtime_error);
 }
 
 TEST(NPA, PredicateRelationIdentityAndAssignmentCompose) {
