@@ -12,6 +12,7 @@ set(NPA_SOURCES
   Analyses/Interprocedural/InterproceduralConstantPropagation.cpp
   Analyses/Interprocedural/InterproceduralIntervalAnalysis.cpp
   Analyses/Interprocedural/InterproceduralLiveVariables.cpp
+  Analyses/Interprocedural/InterproceduralNullability.cpp
   Analyses/Intraprocedural/ReachingDefinitions.cpp
   Analyses/Intraprocedural/ReachableBlocks.cpp
   Analyses/Interprocedural/InterproceduralMaybeUninitialized.cpp

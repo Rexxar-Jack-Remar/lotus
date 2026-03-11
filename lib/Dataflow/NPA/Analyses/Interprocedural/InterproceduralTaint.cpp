@@ -717,8 +717,130 @@ public:
     return out;
   }
 
+  PointerValueList
+  collectStoredPointerValuesAtCall(const llvm::Value *stored,
+                                   const llvm::CallBase &call,
+                                   const llvm::Function &callee) const {
+    PointerValueList out;
+    if (!stored || !stored->getType()->isPointerTy())
+      return out;
+
+    const llvm::Value *stripped = stored->stripPointerCasts();
+    if (llvm::isa<llvm::ConstantPointerNull>(stripped) ||
+        llvm::isa<llvm::Function>(stripped) ||
+        llvm::isa<llvm::UndefValue>(stripped) ||
+        llvm::isa<llvm::PoisonValue>(stripped)) {
+      return out;
+    }
+
+    unsigned numArgs = static_cast<unsigned>(
+        std::min<size_t>(call.arg_size(), callee.arg_size()));
+    const auto *formalIt = callee.arg_begin();
+    for (unsigned i = 0; i < numArgs; ++i, ++formalIt) {
+      const llvm::Value *formal = &*formalIt;
+      auto relative = info.getRelativeOffsetInfo(stored, formal);
+      if (!relative.derived)
+        continue;
+      const llvm::Value *actual = call.getArgOperand(i);
+      if (!actual || !actual->getType()->isPointerTy())
+        continue;
+      out.push_back(actual);
+    }
+
+    if (out.empty())
+      return collectStoredPointerValues(stored);
+
+    normalizePointerValues(out);
+    return out;
+  }
+
+  std::vector<unsigned>
+  collectCallStoreTargetBits(const llvm::StoreInst &store,
+                             const llvm::CallBase &call,
+                             const llvm::Function &callee) const {
+    std::vector<unsigned> out;
+    bool mappedToCaller = false;
+
+    unsigned numArgs = static_cast<unsigned>(
+        std::min<size_t>(call.arg_size(), callee.arg_size()));
+    const auto *formalIt = callee.arg_begin();
+    for (unsigned i = 0; i < numArgs; ++i, ++formalIt) {
+      if (!formalIt->getType()->isPointerTy())
+        continue;
+      auto relative =
+          info.getRelativeOffsetInfo(store.getPointerOperand(), &*formalIt);
+      if (!relative.derived)
+        continue;
+      mappedToCaller = true;
+      const llvm::Value *actual = call.getArgOperand(i);
+      auto mappedBits =
+          info.getCallerBitsForRelativeAccess(actual, relative, call.getFunction());
+      out.insert(out.end(), mappedBits.begin(), mappedBits.end());
+    }
+
+    if (!mappedToCaller) {
+      const llvm::Value *base = llvm::getUnderlyingObject(
+          store.getPointerOperand()->stripPointerCasts());
+      if (llvm::isa<llvm::GlobalValue>(base)) {
+        auto directBits = info.getDirectAccessMemBits(store.getPointerOperand());
+        out.insert(out.end(), directBits.begin(), directBits.end());
+      }
+    }
+
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+  }
+
+  void applyCalleePointerStoreEffects(PointerStoreState &state,
+                                      const llvm::CallBase &call,
+                                      const llvm::Function &callee,
+                                      bool allowStrongUpdate) const {
+    for (const auto &BB : callee) {
+      for (const auto &I : BB) {
+        auto *store = llvm::dyn_cast<llvm::StoreInst>(&I);
+        if (!store || !store->getValueOperand()->getType()->isPointerTy())
+          continue;
+
+        auto targetBits = collectCallStoreTargetBits(*store, call, callee);
+        if (targetBits.empty())
+          continue;
+
+        PointerValueList storedValues = collectStoredPointerValuesAtCall(
+            store->getValueOperand(), call, callee);
+
+        if (allowStrongUpdate && targetBits.size() == 1) {
+          state[targetBits.front()] = std::move(storedValues);
+          continue;
+        }
+
+        if (storedValues.empty())
+          continue;
+
+        for (unsigned memBit : targetBits)
+          mergePointerValues(state[memBit], storedValues);
+      }
+    }
+  }
+
   void applyPointerStoreTransfer(PointerStoreState &state,
                                  const llvm::Instruction &I) const {
+    if (auto *call = llvm::dyn_cast<llvm::CallBase>(&I)) {
+      auto possibleCallees = getPossibleCallees(module, *call);
+      size_t definedCalleeCount = 0;
+      for (const auto *callee : possibleCallees) {
+        if (callee && !callee->isDeclaration())
+          ++definedCalleeCount;
+      }
+      const bool allowStrongUpdate = definedCalleeCount == 1;
+      for (const auto *callee : possibleCallees) {
+        if (!callee || callee->isDeclaration())
+          continue;
+        applyCalleePointerStoreEffects(state, *call, *callee, allowStrongUpdate);
+      }
+      return;
+    }
+
     auto *store = llvm::dyn_cast<llvm::StoreInst>(&I);
     if (!store || !store->getValueOperand()->getType()->isPointerTy())
       return;
@@ -1368,10 +1490,8 @@ private:
       return;
 
     for (const auto &pipe : cfg->pipe_specs) {
-      // The shipped taint spec uses PIPE as "<dst> <src>" rather than the
-      // historical field names in PipeSpec.
-      auto targetBits = collectSpecBits(call, pipe.from);
-      auto sourceBits = collectSpecBits(call, pipe.to);
+      auto sourceBits = collectSpecBits(call, pipe.from);
+      auto targetBits = collectSpecBits(call, pipe.to);
       if (targetBits.empty() || sourceBits.empty())
         continue;
 
