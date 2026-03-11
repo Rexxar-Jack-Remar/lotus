@@ -23,6 +23,18 @@ typedef GenericEdge<ICFGNode> GenericICFGEdgeTy;
 class ICFGEdge : public GenericICFGEdgeTy {
 
 public:
+  struct equalGEdge {
+    bool operator()(const ICFGEdge *lhs, const ICFGEdge *rhs) const {
+      if (lhs->getEdgeKind() != rhs->getEdgeKind())
+        return lhs->getEdgeKind() < rhs->getEdgeKind();
+      if (lhs->getSrcNode() != rhs->getSrcNode())
+        return lhs->getSrcNode() < rhs->getSrcNode();
+      if (lhs->getDstNode() != rhs->getDstNode())
+        return lhs->getDstNode() < rhs->getDstNode();
+      return lhs->getCallSite() < rhs->getCallSite();
+    }
+  };
+
   /// @brief Edge kinds for different control flow types.
   enum ICFGEdgeK {
     IntraCF, ///< Intraprocedural control flow
@@ -60,6 +72,9 @@ public:
   /// @return True if this edge is within a single function.
   inline bool isIntraCFGEdge() const { return getEdgeKind() == IntraCF; }
 
+  /// @brief Returns the callsite associated with this edge, if any.
+  virtual const llvm::Instruction *getCallSite() const { return nullptr; }
+
   /// @brief Stream operator for printing edge information.
   friend llvm::raw_ostream &operator<<(llvm::raw_ostream &o,
                                        const ICFGEdge &edge) {
@@ -94,7 +109,7 @@ public:
 
   /// @brief Returns a string representation of this intra edge.
   /// @return String description.
-  virtual std::string toString() const;
+  std::string toString() const override;
 };
 
 /// @brief Call edge from caller to callee entry.
@@ -115,7 +130,7 @@ public:
 
   /// @brief Returns the call instruction associated with this edge.
   /// @return Pointer to the call instruction.
-  inline const llvm::Instruction *getCallSite() const { return cs; }
+  inline const llvm::Instruction *getCallSite() const override { return cs; }
 
   /// @brief Type inquiry support for LLVM-style RTTI.
   static inline bool classof(const CallCFGEdge *) { return true; }
@@ -128,7 +143,7 @@ public:
 
   /// @brief Returns a string representation of this call edge.
   /// @return String description.
-  virtual std::string toString() const;
+  std::string toString() const override;
 };
 
 /// @brief Return edge from callee exit to caller.
@@ -150,7 +165,7 @@ public:
 
   /// @brief Returns the call instruction associated with this return.
   /// @return Pointer to the call instruction.
-  inline const llvm::Instruction *getCallSite() const { return cs; }
+  inline const llvm::Instruction *getCallSite() const override { return cs; }
 
   /// @brief Type inquiry support for LLVM-style RTTI.
   static inline bool classof(const RetCFGEdge *) { return true; }
@@ -163,5 +178,5 @@ public:
 
   /// @brief Returns a string representation of this return edge.
   /// @return String description.
-  virtual std::string toString() const;
+  std::string toString() const override;
 };

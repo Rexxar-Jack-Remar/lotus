@@ -28,6 +28,7 @@ struct MemKey {
   const llvm::Value *ptr = nullptr;
   int64_t offset = 0;
   bool unknown = false;
+  bool precise = false;
 };
 
 struct MemKeyHash {
@@ -36,13 +37,15 @@ struct MemKeyHash {
     h ^= std::hash<const void *>{}(k.base) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= std::hash<int64_t>{}(k.offset) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= std::hash<bool>{}(k.unknown) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash<bool>{}(k.precise) + 0x9e3779b9 + (h << 6) + (h >> 2);
     return h;
   }
 };
 
 struct MemKeyEq {
   bool operator()(const MemKey &a, const MemKey &b) const {
-    return a.base == b.base && a.offset == b.offset && a.unknown == b.unknown;
+    return a.base == b.base && a.offset == b.offset && a.unknown == b.unknown &&
+           a.precise == b.precise;
   }
 };
 
@@ -81,11 +84,7 @@ public:
 
     MemKey key = buildMemKey(Pointer);
     auto It = memoryBits.find(key);
-    bool stableDirectKey =
-        !key.unknown && key.base &&
-        (key.base != Pointer || llvm::isa<llvm::Argument>(Pointer) ||
-         llvm::isa<llvm::GlobalValue>(Pointer) || llvm::isa<llvm::AllocaInst>(Pointer));
-    if (It == memoryBits.end() || !stableDirectKey)
+    if (It == memoryBits.end() || !key.precise)
       return false;
 
     bit = It->second;
@@ -373,32 +372,65 @@ private:
     memoryBits.emplace(key, nextBit++);
   }
 
+  bool buildPreciseMemKey(const llvm::Value *Pointer, MemKey &key) const {
+    if (!Pointer || !Pointer->getType()->isPointerTy())
+      return false;
+
+    const llvm::Value *stripped = Pointer->stripPointerCasts();
+    if (auto *GEP = llvm::dyn_cast<llvm::GEPOperator>(stripped)) {
+      if (!buildPreciseMemKey(GEP->getPointerOperand(), key))
+        return false;
+      llvm::APInt offAP(64, 0, true);
+      if (!GEP->accumulateConstantOffset(dataLayout, offAP))
+        return false;
+      key.offset += offAP.getSExtValue();
+      return true;
+    }
+
+    if (auto *Root = llvm::dyn_cast<llvm::Argument>(stripped)) {
+      key.base = Root;
+      key.offset = 0;
+      key.unknown = false;
+      key.precise = true;
+      return true;
+    }
+    if (auto *Root = llvm::dyn_cast<llvm::GlobalValue>(stripped)) {
+      key.base = Root;
+      key.offset = 0;
+      key.unknown = false;
+      key.precise = true;
+      return true;
+    }
+    if (auto *Root = llvm::dyn_cast<llvm::AllocaInst>(stripped)) {
+      key.base = Root;
+      key.offset = 0;
+      key.unknown = false;
+      key.precise = true;
+      return true;
+    }
+
+    return false;
+  }
+
   MemKey buildMemKey(const llvm::Value *Pointer) const {
     MemKey key;
     key.ptr = Pointer;
     if (!Pointer)
       return key;
 
-    int64_t constantOffset = 0;
-    if (const llvm::Value *base = llvm::GetPointerBaseWithConstantOffset(
-            Pointer, constantOffset, dataLayout)) {
-      key.base = base;
-      key.offset = constantOffset;
-      key.unknown = false;
+    if (buildPreciseMemKey(Pointer, key))
       return key;
-    }
 
     const llvm::Value *stripped = Pointer->stripPointerCasts();
     key.base = llvm::getUnderlyingObject(stripped);
     key.offset = 0;
-    key.unknown = false;
+    key.unknown = true;
+    key.precise = false;
 
     if (auto *GEP = llvm::dyn_cast<llvm::GEPOperator>(stripped)) {
       llvm::APInt offAP(64, 0, true);
       if (GEP->accumulateConstantOffset(dataLayout, offAP))
         key.offset = offAP.getSExtValue();
-      else
-        key.unknown = true;
     }
 
     return key;

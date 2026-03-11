@@ -142,29 +142,33 @@ ICFGEdge *ICFG::hasIntraICFGEdge(ICFGNode *src, ICFGNode *dst,
 
 /// @brief Checks if an interprocedural edge exists between two nodes.
 ICFGEdge *ICFG::hasInterICFGEdge(ICFGNode *src, ICFGNode *dst,
-                                 ICFGEdge::ICFGEdgeK kind) {
-  ICFGEdge edge(src, dst, kind);
-  ICFGEdge *outEdge = src->hasOutgoingEdge(&edge);
-  ICFGEdge *inEdge = dst->hasIncomingEdge(&edge);
-  if (outEdge && inEdge) {
-    assert(outEdge == inEdge && "edges not match");
-    return outEdge;
-  }
-  return nullptr;
+                                 ICFGEdge::ICFGEdgeK kind,
+                                 const llvm::Instruction *cs) {
+  return getICFGEdge(src, dst, kind, cs);
 }
 
 /// @brief Retrieves an edge between two nodes of a specific kind.
 ICFGEdge *ICFG::getICFGEdge(const ICFGNode *src, const ICFGNode *dst,
-                            ICFGEdge::ICFGEdgeK kind) {
+                            ICFGEdge::ICFGEdgeK kind,
+                            const llvm::Instruction *cs) {
   ICFGEdge *edge = nullptr;
   size_t counter = 0;
   for (auto iter = src->OutEdgeBegin(); iter != src->OutEdgeEnd(); ++iter) {
+    if ((*iter)->getDstID() != dst->getId() || (*iter)->getEdgeKind() != kind)
+      continue;
+    if (cs && (*iter)->getCallSite() != cs)
+      continue;
+    if (!cs && (kind == ICFGEdge::CallCF || kind == ICFGEdge::RetCF) &&
+        edge != nullptr && edge->getCallSite() != (*iter)->getCallSite()) {
+      return nullptr;
+    }
     if ((*iter)->getDstID() == dst->getId() && (*iter)->getEdgeKind() == kind) {
       counter++;
       edge = (*iter);
     }
   }
-  assert(counter <= 1 && "there's more than one edge between two ICFG nodes");
+  assert((kind != ICFGEdge::IntraCF || counter <= 1) &&
+         "there's more than one edge between two ICFG nodes");
   return edge;
 }
 
@@ -180,7 +184,7 @@ ICFGEdge *ICFG::addIntraEdge(ICFGNode *srcNode, ICFGNode *dstNode) {
 /// @brief Adds an interprocedural call edge from caller to callee.
 ICFGEdge *ICFG::addCallEdge(ICFGNode *srcNode, ICFGNode *dstNode,
                             const llvm::Instruction *cs) {
-  if (hasInterICFGEdge(srcNode, dstNode, ICFGEdge::CallCF))
+  if (hasInterICFGEdge(srcNode, dstNode, ICFGEdge::CallCF, cs))
     return nullptr;
   CallCFGEdge *callEdge = new CallCFGEdge(srcNode, dstNode, cs);
   return addICFGEdge(callEdge) ? callEdge : nullptr;
@@ -189,7 +193,7 @@ ICFGEdge *ICFG::addCallEdge(ICFGNode *srcNode, ICFGNode *dstNode,
 /// @brief Adds an interprocedural return edge from callee to caller.
 ICFGEdge *ICFG::addRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
                            const llvm::Instruction *cs) {
-  if (hasInterICFGEdge(srcNode, dstNode, ICFGEdge::RetCF))
+  if (hasInterICFGEdge(srcNode, dstNode, ICFGEdge::RetCF, cs))
     return nullptr;
   RetCFGEdge *retEdge = new RetCFGEdge(srcNode, dstNode, cs);
   return addICFGEdge(retEdge) ? retEdge : nullptr;

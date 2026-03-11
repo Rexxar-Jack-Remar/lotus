@@ -17,6 +17,8 @@
 #include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
+#include <vector>
+
 using namespace llvm;
 
 class ICFGTest : public ::testing::Test {
@@ -55,6 +57,21 @@ protected:
       }
     }
     return nullptr;
+  }
+
+  std::vector<const CallBase *> findCalls(const Function *F, StringRef calleeName) {
+    std::vector<const CallBase *> calls;
+    for (const auto &BB : *F) {
+      for (const auto &I : BB) {
+        if (auto *CB = dyn_cast<CallBase>(&I)) {
+          if (auto *callee = CB->getCalledFunction()) {
+            if (callee->getName() == calleeName)
+              calls.push_back(CB);
+          }
+        }
+      }
+    }
+    return calls;
   }
 };
 
@@ -397,6 +414,134 @@ TEST_F(ICFGTest, MultipleCallSites) {
   EXPECT_TRUE(true);
 }
 
+TEST_F(ICFGTest, MultipleCallSitesToSameCalleeKeepDistinctCallEdges) {
+  const char *source = R"(
+    define i32 @helper() {
+      ret i32 42
+    }
+
+    define i32 @multi_call() {
+    entry:
+      %r1 = call i32 @helper()
+      %r2 = call i32 @helper()
+      %r3 = call i32 @helper()
+      ret i32 %r3
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *helper = module->getFunction("helper");
+  Function *multiCall = module->getFunction("multi_call");
+  ASSERT_NE(helper, nullptr);
+  ASSERT_NE(multiCall, nullptr);
+
+  IntraBlockNode *callerNode = icfg.getIntraBlockNode(&multiCall->getEntryBlock());
+  FunEntryBlockNode *calleeEntry = icfg.getFunEntryICFGNode(helper);
+  ASSERT_NE(callerNode, nullptr);
+  ASSERT_NE(calleeEntry, nullptr);
+
+  auto calls = findCalls(multiCall, "helper");
+  ASSERT_EQ(calls.size(), 3u);
+
+  size_t callEdgeCount = 0;
+  for (ICFGEdge *edge : callerNode->getOutEdges()) {
+    auto *callEdge = dyn_cast<CallCFGEdge>(edge);
+    if (!callEdge || callEdge->getDstNode() != calleeEntry)
+      continue;
+    ++callEdgeCount;
+  }
+  EXPECT_EQ(callEdgeCount, 3u);
+
+  for (const CallBase *call : calls) {
+    EXPECT_NE(icfg.getICFGEdge(callerNode, calleeEntry, ICFGEdge::CallCF, call),
+              nullptr);
+  }
+}
+
+TEST_F(ICFGTest, ReturnSiteBranchesToAllSuccessorsAfterDirectCall) {
+  const char *source = R"(
+    define void @callee() {
+      ret void
+    }
+
+    define i32 @caller(i1 %cond) {
+    entry:
+      call void @callee()
+      br i1 %cond, label %then, label %else
+    then:
+      ret i32 1
+    else:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *caller = module->getFunction("caller");
+  ASSERT_NE(caller, nullptr);
+  const CallBase *call = findCall(caller, "callee");
+  ASSERT_NE(call, nullptr);
+
+  CallRetBlockNode *retSite = icfg.getRetICFGNode(call);
+  IntraBlockNode *thenNode = icfg.getIntraBlockNode(findBlock(caller, "then"));
+  IntraBlockNode *elseNode = icfg.getIntraBlockNode(findBlock(caller, "else"));
+  ASSERT_NE(retSite, nullptr);
+  ASSERT_NE(thenNode, nullptr);
+  ASSERT_NE(elseNode, nullptr);
+
+  EXPECT_NE(icfg.getICFGEdge(retSite, thenNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(retSite, elseNode, ICFGEdge::IntraCF), nullptr);
+}
+
+TEST_F(ICFGTest, ExternalCallStillBuildsReturnSiteContinuation) {
+  const char *source = R"(
+    declare void @ext()
+
+    define i32 @caller(i1 %cond) {
+    entry:
+      call void @ext()
+      br i1 %cond, label %then, label %else
+    then:
+      ret i32 1
+    else:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *caller = module->getFunction("caller");
+  ASSERT_NE(caller, nullptr);
+  const CallBase *call = findCall(caller, "ext");
+  ASSERT_NE(call, nullptr);
+
+  CallRetBlockNode *retSite = icfg.getRetICFGNode(call);
+  IntraBlockNode *thenNode = icfg.getIntraBlockNode(findBlock(caller, "then"));
+  IntraBlockNode *elseNode = icfg.getIntraBlockNode(findBlock(caller, "else"));
+  ASSERT_NE(retSite, nullptr);
+  ASSERT_NE(thenNode, nullptr);
+  ASSERT_NE(elseNode, nullptr);
+
+  EXPECT_NE(icfg.getICFGEdge(retSite, thenNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(retSite, elseNode, ICFGEdge::IntraCF), nullptr);
+}
+
 // Test 9: Loop in control flow
 TEST_F(ICFGTest, LoopInControlFlow) {
   const char *source = R"(
@@ -597,14 +742,49 @@ TEST_F(ICFGTest, RemoveDedicatedNodesClearsSideMaps) {
   ASSERT_NE(entryNode, nullptr);
   ASSERT_NE(exitNode, nullptr);
   ASSERT_NE(retNode, nullptr);
+  NodeID entryId = entryNode->getId();
+  NodeID exitId = exitNode->getId();
+  NodeID retId = retNode->getId();
 
   icfg.removeICFGNode(entryNode);
   icfg.removeICFGNode(exitNode);
   icfg.removeICFGNode(retNode);
 
-  EXPECT_NE(icfg.getFunEntryICFGNode(callee), entryNode);
-  EXPECT_NE(icfg.getFunExitICFGNode(callee), exitNode);
-  EXPECT_NE(icfg.getRetICFGNode(call), retNode);
+  EXPECT_NE(icfg.getFunEntryICFGNode(callee)->getId(), entryId);
+  EXPECT_NE(icfg.getFunExitICFGNode(callee)->getId(), exitId);
+  EXPECT_NE(icfg.getRetICFGNode(call)->getId(), retId);
+}
+
+TEST_F(ICFGTest, RemovingSelfLoopNodeDoesNotDoubleDeleteEdges) {
+  const char *source = R"(
+    define void @loop_example() {
+    entry:
+      br label %loop
+
+    loop:
+      br label %loop
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *F = module->getFunction("loop_example");
+  ASSERT_NE(F, nullptr);
+  const BasicBlock *loopBB = findBlock(F, "loop");
+  ASSERT_NE(loopBB, nullptr);
+
+  IntraBlockNode *loopNode = icfg.getIntraBlockNode(loopBB);
+  ASSERT_NE(loopNode, nullptr);
+  NodeID loopNodeId = loopNode->getId();
+
+  icfg.removeICFGNode(loopNode);
+
+  EXPECT_FALSE(icfg.hasICFGNode(loopNodeId));
 }
 
 // Test 12: Empty function handling

@@ -37,8 +37,7 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
   ICFGNode *entryBlockNode = getOrAddIntraBlockICFGNode(&func->getEntryBlock());
   if (funEntryNode && entryBlockNode)
     icfg->addIntraEdge(funEntryNode, entryBlockNode);
-
-  ICFGNode *funExitNode = icfg->getFunExitICFGNode(func);
+  (void)icfg->getFunExitICFGNode(func);
 
   std::queue<const llvm::BasicBlock *> worklist;
   worklist.push(&func->getEntryBlock());
@@ -66,6 +65,25 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
       for (auto &i : *bb) {
 
         if (auto *call = dyn_cast<CallBase>(&i)) {
+          ICFGNode *returnSiteNode = nullptr;
+          if (!call->doesNotReturn()) {
+            returnSiteNode = icfg->getRetICFGNode(call);
+            if (auto *invokeInst = dyn_cast<InvokeInst>(call)) {
+              ICFGNode *continuationNode =
+                  getOrAddIntraBlockICFGNode(invokeInst->getNormalDest());
+              if (returnSiteNode && continuationNode)
+                icfg->addIntraEdge(returnSiteNode, continuationNode);
+            } else {
+              const BasicBlock *callBB = call->getParent();
+              for (auto succIt = succ_begin(callBB), succEnd = succ_end(callBB);
+                   succIt != succEnd; ++succIt) {
+                ICFGNode *continuationNode =
+                    getOrAddIntraBlockICFGNode(*succIt);
+                if (returnSiteNode && continuationNode)
+                  icfg->addIntraEdge(returnSiteNode, continuationNode);
+              }
+            }
+          }
 
           Function *calledFunc = call->getCalledFunction();
           if (!calledFunc || calledFunc->isDeclaration())
@@ -74,21 +92,7 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
           ICFGNode *calleeEntryNode = icfg->getFunEntryICFGNode(calledFunc);
           icfg->addCallEdge(srcNode, calleeEntryNode, call);
 
-          ICFGNode *returnSiteNode = icfg->getRetICFGNode(call);
-          ICFGNode *continuationNode = nullptr;
-          if (auto *invokeInst = dyn_cast<InvokeInst>(call)) {
-            continuationNode =
-                getOrAddIntraBlockICFGNode(invokeInst->getNormalDest());
-          } else {
-            const BasicBlock *callBB = call->getParent();
-            if (succ_begin(callBB) != succ_end(callBB))
-              continuationNode =
-                  getOrAddIntraBlockICFGNode(*succ_begin(callBB));
-          }
-          if (returnSiteNode && continuationNode)
-            icfg->addIntraEdge(returnSiteNode, continuationNode);
-
-          if (returnSiteNode && funExitNode) {
+          if (returnSiteNode) {
             for (inst_iterator I = inst_begin(calledFunc),
                                E = inst_end(calledFunc);
                  I != E; ++I) {
@@ -107,8 +111,6 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
       }
     }
   }
-
-  (void)funExitNode;
 }
 
 void ICFGBuilder::removeIntraBlockCycle() {

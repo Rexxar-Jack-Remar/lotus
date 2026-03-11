@@ -13,6 +13,8 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <unordered_set>
+
 // #include <iostream>
 
 #include "IR/ICFG/ICFGEdge.h"
@@ -81,17 +83,21 @@ public:
   /// @param src Source node.
   /// @param dst Destination node.
   /// @param kind Edge kind.
+  /// @param cs Optional callsite for call/return edges.
   /// @return Pointer to the edge if it exists, nullptr otherwise.
   ICFGEdge *hasInterICFGEdge(ICFGNode *src, ICFGNode *dst,
-                             ICFGEdge::ICFGEdgeK kind);
+                             ICFGEdge::ICFGEdgeK kind,
+                             const llvm::Instruction *cs = nullptr);
 
   /// @brief Retrieves an edge between two nodes.
   /// @param src Source node.
   /// @param dst Destination node.
   /// @param kind Edge kind.
+  /// @param cs Optional callsite for call/return edges.
   /// @return Pointer to the edge, or nullptr if not found.
   ICFGEdge *getICFGEdge(const ICFGNode *src, const ICFGNode *dst,
-                        ICFGEdge::ICFGEdgeK kind);
+                        ICFGEdge::ICFGEdgeK kind,
+                        const llvm::Instruction *cs = nullptr);
 
   /// @brief Gets the mapping from functions to their entry nodes.
   /// @return Const reference to the map of function to entry node.
@@ -116,10 +122,13 @@ public:
 
     // Collect edges first to avoid iterator invalidation during removal.
     std::vector<ICFGEdge *> edgesToRemove;
+    std::unordered_set<ICFGEdge *> seenEdges;
     for (auto *e : node->getOutEdges())
-      edgesToRemove.push_back(e);
+      if (seenEdges.insert(e).second)
+        edgesToRemove.push_back(e);
     for (auto *e : node->getInEdges())
-      edgesToRemove.push_back(e);
+      if (seenEdges.insert(e).second)
+        edgesToRemove.push_back(e);
     for (auto *e : edgesToRemove)
       removeICFGEdge(e);
 
@@ -138,6 +147,7 @@ public:
     }
 
     removeGNode(node);
+    delete node;
   }
 
   /// @brief Adds an intraprocedural edge between two nodes.
