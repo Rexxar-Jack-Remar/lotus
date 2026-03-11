@@ -951,6 +951,144 @@ TEST(NPA, InterproceduralTaintReachabilityTracksCurrentPointerSlotContents) {
   EXPECT_FALSE(result.isReachableMemoryTainted(after, slot));
 }
 
+TEST(NPA, InterproceduralTaintReachabilityTracksCalleePointerStores) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    declare i8* @fgets(i8*, i64, i8*)
+
+    define void @store_ptr(i8** %slot, i8* %p) {
+    entry:
+      store i8* %p, i8** %slot, align 8
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %buf = alloca [8 x i8], align 1
+      %p0 = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      %slot = alloca i8*, align 8
+      store i8* null, i8** %slot, align 8
+      %src = call i8* @fgets(i8* %p0, i64 8, i8* null)
+      call void @store_ptr(i8** %slot, i8* %p0)
+      br label %after
+
+    after:
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
+  const std::string configPath = writeTempTaintConfig("SOURCE fgets Arg0 D T\n");
+  ASSERT_FALSE(configPath.empty());
+
+  npa::InterproceduralTaint::Options options;
+  options.taint_config_path = configPath;
+  auto result = npa::InterproceduralTaint::run(*module, wrapper, options);
+  llvm::sys::fs::remove(configPath);
+
+  const auto *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *slot = findInstructionByName(*mainFn, "slot");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(slot, nullptr);
+  EXPECT_TRUE(result.isReachableMemoryTainted(after, slot));
+}
+
+TEST(NPA, InterproceduralTaintReachabilityTracksCalleeGlobalPointerStores) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    @gp = global i8* null
+    declare i8* @fgets(i8*, i64, i8*)
+
+    define void @set_global_ptr(i8* %p) {
+    entry:
+      store i8* %p, i8** @gp, align 8
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %buf = alloca [8 x i8], align 1
+      %p0 = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      %src = call i8* @fgets(i8* %p0, i64 8, i8* null)
+      call void @set_global_ptr(i8* %p0)
+      br label %after
+
+    after:
+      %q = load i8*, i8** @gp, align 8
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
+  const std::string configPath = writeTempTaintConfig("SOURCE fgets Arg0 D T\n");
+  ASSERT_FALSE(configPath.empty());
+
+  npa::InterproceduralTaint::Options options;
+  options.taint_config_path = configPath;
+  auto result = npa::InterproceduralTaint::run(*module, wrapper, options);
+  llvm::sys::fs::remove(configPath);
+
+  const auto *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *gp = module->getGlobalVariable("gp");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(gp, nullptr);
+  EXPECT_TRUE(result.isReachableMemoryTainted(after, gp));
+}
+
+TEST(NPA, InterproceduralTaintReachabilityTracksCalleePointerStoreClears) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    declare i8* @fgets(i8*, i64, i8*)
+
+    define void @clear_slot(i8** %slot) {
+    entry:
+      store i8* null, i8** %slot, align 8
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %buf = alloca [8 x i8], align 1
+      %p0 = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      %slot = alloca i8*, align 8
+      store i8* %p0, i8** %slot, align 8
+      %src = call i8* @fgets(i8* %p0, i64 8, i8* null)
+      call void @clear_slot(i8** %slot)
+      br label %after
+
+    after:
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
+  const std::string configPath = writeTempTaintConfig("SOURCE fgets Arg0 D T\n");
+  ASSERT_FALSE(configPath.empty());
+
+  npa::InterproceduralTaint::Options options;
+  options.taint_config_path = configPath;
+  auto result = npa::InterproceduralTaint::run(*module, wrapper, options);
+  llvm::sys::fs::remove(configPath);
+
+  const auto *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *slot = findInstructionByName(*mainFn, "slot");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(slot, nullptr);
+  EXPECT_FALSE(result.isReachableMemoryTainted(after, slot));
+}
+
 TEST(NPA, InterproceduralTaintReachableDerefPipePropagatesTransitively) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
@@ -1272,7 +1410,7 @@ TEST(NPA, InterproceduralTaintFailsClosedWhenConfigIsMissing) {
   EXPECT_TRUE(result.sinkHits.empty());
 }
 
-TEST(NPA, InterproceduralTaintRejectsUnsupportedUninitializedSpecs) {
+TEST(NPA, InterproceduralTaintUnsupportedUninitializedSpecsDoNotAbortByDefault) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     declare i32 @getchar()
@@ -1297,6 +1435,40 @@ TEST(NPA, InterproceduralTaintRejectsUnsupportedUninitializedSpecs) {
   llvm::sys::fs::remove(configPath);
 
   EXPECT_TRUE(result.status.unsupported_specs);
+  EXPECT_TRUE(result.status.summary_solve.converged);
+  EXPECT_FALSE(result.valueBits.empty());
+  EXPECT_TRUE(result.status.approximated);
+  EXPECT_FALSE(result.status.overall_converged);
+}
+
+TEST(NPA, InterproceduralTaintRejectsUnsupportedUninitializedSpecsInStrictMode) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    declare i32 @getchar()
+
+    define i32 @main() {
+    entry:
+      %x = call i32 @getchar()
+      ret i32 %x
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  const std::string configPath =
+      writeTempTaintConfig("SOURCE getchar Ret V U\n");
+  ASSERT_FALSE(configPath.empty());
+
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
+  npa::InterproceduralTaint::Options options;
+  options.taint_config_path = configPath;
+  options.fail_on_unsupported_specs = true;
+  auto result = npa::InterproceduralTaint::run(*module, wrapper, options);
+  llvm::sys::fs::remove(configPath);
+
+  EXPECT_TRUE(result.status.unsupported_specs);
+  EXPECT_FALSE(result.status.summary_solve.converged);
+  EXPECT_TRUE(result.valueBits.empty());
   EXPECT_FALSE(result.status.overall_converged);
 }
 
@@ -1537,6 +1709,76 @@ TEST(NPA, InterproceduralTaintUnresolvedIndirectCallIsNoop) {
   ASSERT_NE(after, nullptr);
   ASSERT_NE(p, nullptr);
   EXPECT_FALSE(result.isMemoryTainted(after, p));
+}
+
+TEST(NPA, InterproceduralTaintHandlesExternalPointerGlobalsWithoutInitializers) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    @ext = external global i8*
+
+    define i32 @main() {
+    entry:
+      %p = load i8*, i8** @ext, align 8
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  const std::string configPath =
+      writeTempTaintConfig("SOURCE getchar Ret V T\n");
+  ASSERT_FALSE(configPath.empty());
+
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
+  npa::InterproceduralTaint::Options options;
+  options.taint_config_path = configPath;
+  auto result = npa::InterproceduralTaint::run(*module, wrapper, options);
+  llvm::sys::fs::remove(configPath);
+
+  EXPECT_FALSE(result.status.configuration_error);
+  EXPECT_TRUE(result.status.summary_solve.converged);
+}
+
+TEST(NPA, InterproceduralTaintHandlesCyclicConstantBackedIndirectTargets) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    @fp = global i8* bitcast (i8** @fp to i8*)
+
+    define i32 @main() {
+    entry:
+      %buf = alloca [8 x i8], align 1
+      %p0 = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      %raw = load i8*, i8** @fp, align 8
+      %callee = bitcast i8* %raw to i32 (i8*)*
+      %r = call i32 %callee(i8* %p0)
+      br label %after
+
+    after:
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  const std::string configPath =
+      writeTempTaintConfig("SOURCE getchar Ret V T\n");
+  ASSERT_FALSE(configPath.empty());
+
+  lotus::AliasAnalysisWrapper wrapper(*module,
+                                      lotus::AAConfig::SparrowAA_NoCtx());
+  npa::InterproceduralTaint::Options options;
+  options.taint_config_path = configPath;
+  auto result = npa::InterproceduralTaint::run(*module, wrapper, options);
+  llvm::sys::fs::remove(configPath);
+
+  const auto *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *p0 = findInstructionByName(*mainFn, "p0");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(p0, nullptr);
+  EXPECT_FALSE(result.status.configuration_error);
+  EXPECT_TRUE(result.status.summary_solve.converged);
+  EXPECT_FALSE(result.isMemoryTainted(after, p0));
 }
 
 TEST(NPA, InterproceduralTaintTensorStrategyFallsBackToWorklist) {

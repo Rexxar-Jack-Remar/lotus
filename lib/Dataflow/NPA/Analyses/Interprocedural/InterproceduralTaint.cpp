@@ -509,7 +509,7 @@ private:
     for (auto &global : module.globals()) {
       if (global.getType()->isPointerTy()) {
         unsigned memBit = getMemBitForPtr(&global);
-        if (memBit != invalidBit())
+        if (memBit != invalidBit() && global.hasInitializer())
           seedFromConstant(memBit, global.getInitializer());
       }
     }
@@ -707,7 +707,7 @@ public:
   PointerStoreState buildInitialPointerStoreState() const {
     PointerStoreState out;
     for (auto &global : module.globals()) {
-      if (!global.getValueType()->isPointerTy())
+      if (!global.getValueType()->isPointerTy() || !global.hasInitializer())
         continue;
       unsigned memBit = TaintInfo::invalidBit();
       if (!info.getPreciseDirectMemBit(&global, memBit))
@@ -760,11 +760,16 @@ public:
           out.push_back(memBit);
 
         auto dynamicIt = state.find(memBit);
-        if (dynamicIt != state.end()) {
+        const bool hasDynamicValues =
+            dynamicIt != state.end() && !dynamicIt->second.empty();
+        if (const auto *staticSeeds = info.findStaticReachableSeeds(memBit)) {
+          if (dynamicIt == state.end() || hasDynamicValues) {
+            for (const auto *nextPtr : *staticSeeds)
+              work.push(nextPtr);
+          }
+        }
+        if (hasDynamicValues) {
           for (const auto *nextPtr : dynamicIt->second)
-            work.push(nextPtr);
-        } else if (const auto *staticSeeds = info.findStaticReachableSeeds(memBit)) {
-          for (const auto *nextPtr : *staticSeeds)
             work.push(nextPtr);
         }
       }
@@ -1269,6 +1274,7 @@ private:
 
   std::vector<const llvm::Function *>
   getSpecCandidateCallees(const llvm::CallBase &call) const {
+    std::unordered_set<const llvm::Value *> visitedConstantBacked;
     std::function<void(const llvm::Value *,
                        std::vector<const llvm::Function *> &)>
         addConstantBackedTargets =
@@ -1277,6 +1283,8 @@ private:
               if (!value)
                 return;
               const llvm::Value *stripped = value->stripPointerCasts();
+              if (!visitedConstantBacked.insert(stripped).second)
+                return;
               if (auto *function = llvm::dyn_cast<llvm::Function>(stripped)) {
                 targets.push_back(function);
                 return;
@@ -1287,11 +1295,11 @@ private:
                   addConstantBackedTargets(global->getInitializer(), targets);
                 return;
               }
-              if (auto *load = llvm::dyn_cast<llvm::LoadInst>(value)) {
+              if (auto *load = llvm::dyn_cast<llvm::LoadInst>(stripped)) {
                 addConstantBackedTargets(load->getPointerOperand(), targets);
                 return;
               }
-              if (auto *constant = llvm::dyn_cast<llvm::Constant>(value)) {
+              if (auto *constant = llvm::dyn_cast<llvm::Constant>(stripped)) {
                 for (unsigned i = 0; i < constant->getNumOperands(); ++i)
                   addConstantBackedTargets(constant->getOperand(i), targets);
               }
@@ -1559,6 +1567,8 @@ public:
         };
 
         if (spec.location == TaintSpec::ARG) {
+          if (spec.arg_index < 0)
+            return;
           checkArg(static_cast<unsigned>(spec.arg_index));
           return;
         }

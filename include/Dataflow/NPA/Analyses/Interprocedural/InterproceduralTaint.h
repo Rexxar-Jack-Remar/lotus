@@ -24,7 +24,7 @@ public:
   struct Options {
     bool seed_main_pointer_args = false;
     bool propagate_pointer_value_on_load = false;
-    bool fail_on_unsupported_specs = true;
+    bool fail_on_unsupported_specs = false;
     std::string taint_config_path;
   };
 

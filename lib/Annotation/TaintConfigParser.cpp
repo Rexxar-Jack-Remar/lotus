@@ -123,18 +123,18 @@ void TaintConfigParser::parse_line(const std::string &line,
       return;
     }
     PipeSpec pipe_spec;
-    // Parse 'from' spec (tokens[2], tokens[3], implicit taint type "T")
-    std::vector<std::string> from_tokens = {tokens[2], tokens[3], "T"};
-    if (!parse_taint_spec(from_tokens, 0, pipe_spec.from)) {
+    // The shipped syntax is PIPE <dst_loc> <dst_access> <src_loc> <src_access>.
+    // Normalize it into PipeSpec's semantic fields: from=source, to=destination.
+    std::vector<std::string> src_tokens = {tokens[4], tokens[5], "T"};
+    if (!parse_taint_spec(src_tokens, 0, pipe_spec.from)) {
       llvm::errs() << "[TaintConfigParser] Warning: PIPE for '" << func_name
-                   << "' has invalid 'from' spec — entry skipped\n";
+                   << "' has invalid source spec — entry skipped\n";
       return;
     }
-    // Parse 'to' spec (tokens[4], tokens[5], implicit taint type "T")
-    std::vector<std::string> to_tokens = {tokens[4], tokens[5], "T"};
-    if (!parse_taint_spec(to_tokens, 0, pipe_spec.to)) {
+    std::vector<std::string> dst_tokens = {tokens[2], tokens[3], "T"};
+    if (!parse_taint_spec(dst_tokens, 0, pipe_spec.to)) {
       llvm::errs() << "[TaintConfigParser] Warning: PIPE for '" << func_name
-                   << "' has invalid 'to' spec — entry skipped\n";
+                   << "' has invalid destination spec — entry skipped\n";
       return;
     }
     config.function_specs[func_name].pipe_specs.push_back(pipe_spec);
