@@ -6,7 +6,7 @@
 
 namespace npa {
 
-unsigned TaintTransferDomain::BitWidth = 1;
+thread_local unsigned TaintTransferDomain::BitWidth = 1;
 
 std::vector<llvm::APInt> TaintTransferDomain::identityRel() {
   std::vector<llvm::APInt> rel;

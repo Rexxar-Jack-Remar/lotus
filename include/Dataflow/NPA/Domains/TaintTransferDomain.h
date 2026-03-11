@@ -44,7 +44,7 @@ private:
   static llvm::APInt applyRel(const std::vector<llvm::APInt> &rel,
                               const llvm::APInt &in);
   static std::vector<llvm::APInt> identityRel();
-  static unsigned BitWidth;
+  thread_local static unsigned BitWidth;
 };
 
 } // namespace npa

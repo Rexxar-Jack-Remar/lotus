@@ -37,6 +37,10 @@ public:
     AnalysisStatus status;
     std::map<FunctionKey, TaintTransferDomain::value_type> summaries;
     std::map<BlockKey, llvm::APInt> blockFacts;
+    std::map<BlockKey, llvm::APInt> blockExitFacts;
+    std::map<BlockKey,
+             std::unordered_map<const llvm::Value *, std::vector<unsigned>>>
+        blockReachablePointerMemoryBits;
     std::unordered_map<const llvm::Value *, unsigned> valueBits;
     std::unordered_map<const llvm::Value *, std::vector<unsigned>>
         pointerMemoryBits;

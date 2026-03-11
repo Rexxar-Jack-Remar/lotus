@@ -458,8 +458,13 @@ private:
         }
         currentPath = callBranches;
       } else {
-        currentPath =
-            Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+        Val fallbackTransfer =
+            getCallFallbackTransfer(analysis, *CI, Callees, 0);
+        if (!D::equal(fallbackTransfer, D::zero()))
+          currentPath = Exp::seq(fallbackTransfer, currentPath);
+        else
+          currentPath =
+              Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
       }
     }
     return analysis.getTransfer(I, currentPath);
@@ -758,8 +763,13 @@ public:
               }
               currentPath = callBranches;
             } else {
-              currentPath = Exp::seq(getCallToReturnTransfer(analysis, *CI, 0),
-                                     currentPath);
+              Val fallbackTransfer =
+                  getCallFallbackTransfer(analysis, *CI, Callees, 0);
+              if (!D::equal(fallbackTransfer, D::zero()))
+                currentPath = Exp::seq(fallbackTransfer, currentPath);
+              else
+                currentPath = Exp::seq(
+                    getCallToReturnTransfer(analysis, *CI, 0), currentPath);
             }
           }
           currentPath = analysis.getTransfer(I, currentPath);
