@@ -166,6 +166,38 @@ public:
     return memoryPointers;
   }
 
+  bool getPreciseSingletonMemBit(const llvm::Value *Pointer,
+                                 const llvm::Function *FunctionScope,
+                                 unsigned &bit) const {
+    if (!getPreciseDirectMemBit(Pointer, bit))
+      return false;
+
+    auto bits = getMemoryBitsForPointer(Pointer, FunctionScope);
+    return bits.size() == 1 && bits.front() == bit;
+  }
+
+  std::vector<unsigned>
+  getReachableMemoryBitsFromRoot(const llvm::Value *Root,
+                                 const llvm::Function *FunctionScope = nullptr) const {
+    std::vector<unsigned> out = getAliasMemBits(Root, FunctionScope);
+    if (Root && Root->getType()->isPointerTy()) {
+      for (const auto *candidate : memoryPointers) {
+        if (!candidate || !isValueInFunctionScope(candidate, FunctionScope))
+          continue;
+        auto candidateRelative = getRelativeOffsetInfo(candidate, Root);
+        if (!candidateRelative.derived)
+          continue;
+        unsigned bit = getMemoryBit(candidate);
+        if (bit != invalidBit())
+          out.push_back(bit);
+      }
+    }
+
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+  }
+
   RelativeOffsetInfo getRelativeOffsetInfo(const llvm::Value *Pointer,
                                            const llvm::Value *Root) const {
     std::unordered_set<const llvm::Value *> visited;
@@ -226,6 +258,13 @@ public:
       }
     }
 
+    if (out.empty() && relative.derived) {
+      for (const llvm::Value *root :
+           getAliasingRootPointers(Actual, Caller, /*includeActual=*/true)) {
+        appendDerivedBitsForRoot(out, root, relative, Caller);
+      }
+    }
+
     if (out.empty() && relative.derived &&
         (relative.unknown || relative.offset == 0)) {
       out = getAliasMemBits(Actual, Caller);
@@ -254,6 +293,62 @@ private:
   std::unordered_map<const llvm::Value *, unsigned> valueBits;
   std::unordered_map<MemKey, unsigned, MemKeyHash, MemKeyEq> memoryBits;
   std::unordered_set<const llvm::Value *> memoryPointers;
+
+  bool isValueInFunctionScope(const llvm::Value *value,
+                              const llvm::Function *FunctionScope) const {
+    if (!FunctionScope)
+      return true;
+    const llvm::Function *owner = getOwningFunction(value);
+    return owner == nullptr || owner == FunctionScope;
+  }
+
+  void appendDerivedBitsForRoot(std::vector<unsigned> &out,
+                                const llvm::Value *Root,
+                                const RelativeOffsetInfo &relative,
+                                const llvm::Function *FunctionScope) const {
+    if (!Root || !relative.derived)
+      return;
+
+    for (const auto *candidate : memoryPointers) {
+      if (!candidate || !isValueInFunctionScope(candidate, FunctionScope))
+        continue;
+
+      auto candidateRelative = getRelativeOffsetInfo(candidate, Root);
+      if (!candidateRelative.derived)
+        continue;
+      if (relative.unknown || candidateRelative.unknown ||
+          candidateRelative.offset == relative.offset) {
+        auto bits = getMemoryBitsForPointer(candidate, FunctionScope);
+        out.insert(out.end(), bits.begin(), bits.end());
+      }
+    }
+  }
+
+  std::vector<const llvm::Value *>
+  getAliasingRootPointers(const llvm::Value *Pointer,
+                          const llvm::Function *FunctionScope,
+                          bool includeActual) const {
+    std::vector<const llvm::Value *> out;
+    if (!Pointer || !Pointer->getType()->isPointerTy())
+      return out;
+
+    if (includeActual)
+      out.push_back(Pointer);
+
+    for (const auto &entry : valueBits) {
+      const llvm::Value *candidate = entry.first;
+      if (!candidate || candidate == Pointer ||
+          !isValueInFunctionScope(candidate, FunctionScope))
+        continue;
+      if (!aliasAnalysis.mayAlias(candidate, Pointer))
+        continue;
+      out.push_back(candidate);
+    }
+
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+  }
 
   static bool pointsToPointerStorage(const llvm::Value *Pointer) {
     if (!Pointer || !Pointer->getType()->isPointerTy())
@@ -479,9 +574,12 @@ public:
         auto targetBits =
             info.getMemoryBitsForPointer(Store->getPointerOperand(), I.getFunction());
         auto source = sourceFromValue(Store->getValueOperand());
-        if (targetBits.size() == 1) {
-          updated |= assignFromSources(transfer, targetBits.front(), source.bits,
-                                       source.gen);
+        unsigned preciseBit = NullabilityInfo::invalidBit();
+        if (targetBits.size() == 1 &&
+            info.getPreciseSingletonMemBit(Store->getPointerOperand(),
+                                           I.getFunction(), preciseBit)) {
+          updated |=
+              assignFromSources(transfer, preciseBit, source.bits, source.gen);
         } else {
           for (unsigned targetBit : targetBits) {
             updated |= assignFromSourcesWeak(transfer, targetBit, source.bits,
@@ -930,8 +1028,8 @@ private:
                                   const llvm::Function &Callee,
                                   const llvm::Value *Formal,
                                   const llvm::Value *Actual) const {
-    bool updated = false;
     const llvm::Function *Caller = Call.getFunction();
+    std::unordered_map<unsigned, SourceInfo> pending;
     for (const auto *Pointer : info.getMemoryPointers()) {
       if (NullabilityInfo::getOwningFunction(Pointer) != &Callee)
         continue;
@@ -939,12 +1037,24 @@ private:
       if (!relative.derived)
         continue;
 
-      unsigned destBit = info.getMemoryBit(Pointer);
-      if (destBit == NullabilityInfo::invalidBit())
+      auto destBits = info.getMemoryBitsForPointer(Pointer, &Callee);
+      if (destBits.empty())
         continue;
 
       auto srcBits = info.getCallerBitsForRelativeAccess(Actual, relative, Caller);
-      updated |= assignFromSources(transfer, destBit, srcBits, srcBits.empty());
+      for (unsigned destBit : destBits) {
+        auto &entry = pending[destBit];
+        entry.bits.insert(entry.bits.end(), srcBits.begin(), srcBits.end());
+        entry.gen = entry.gen || srcBits.empty();
+      }
+    }
+
+    bool updated = false;
+    for (auto &entry : pending) {
+      auto &bits = entry.second.bits;
+      std::sort(bits.begin(), bits.end());
+      bits.erase(std::unique(bits.begin(), bits.end()), bits.end());
+      updated |= assignFromSources(transfer, entry.first, bits, entry.second.gen);
     }
     return updated;
   }
@@ -953,8 +1063,13 @@ private:
                                    const llvm::Function &Callee,
                                    const llvm::Value *Formal,
                                    const llvm::Value *Actual) const {
-    bool updated = false;
+    struct ProjectionInfo {
+      std::vector<unsigned> srcBits;
+      bool weak = false;
+    };
+
     const llvm::Function *Caller = Call.getFunction();
+    std::unordered_map<unsigned, ProjectionInfo> pending;
     for (const auto *Pointer : info.getMemoryPointers()) {
       if (NullabilityInfo::getOwningFunction(Pointer) != &Callee)
         continue;
@@ -962,18 +1077,38 @@ private:
       if (!relative.derived)
         continue;
 
-      unsigned srcBit = info.getMemoryBit(Pointer);
-      if (srcBit == NullabilityInfo::invalidBit())
+      auto srcBits = info.getMemoryBitsForPointer(Pointer, &Callee);
+      if (srcBits.empty())
         continue;
 
       auto dstBits = info.getCallerBitsForRelativeAccess(Actual, relative, Caller);
-      if (dstBits.size() == 1) {
-        updated |= assignFromSources(transfer, dstBits.front(), {srcBit}, false);
-      } else {
-        for (unsigned dstBit : dstBits)
-          updated |= assignFromSourcesWeak(transfer, dstBit, {srcBit}, false);
+      if (dstBits.empty())
+        continue;
+
+      unsigned preciseSrcBit = NullabilityInfo::invalidBit();
+      const bool preciseSource =
+          info.getPreciseSingletonMemBit(Pointer, &Callee, preciseSrcBit);
+      const bool weakUpdate = dstBits.size() != 1 || !preciseSource;
+
+      for (unsigned dstBit : dstBits) {
+        auto &entry = pending[dstBit];
+        entry.srcBits.insert(entry.srcBits.end(), srcBits.begin(), srcBits.end());
+        entry.weak = entry.weak || weakUpdate;
       }
     }
+
+    bool updated = false;
+    for (auto &entry : pending) {
+      auto &srcBits = entry.second.srcBits;
+      std::sort(srcBits.begin(), srcBits.end());
+      srcBits.erase(std::unique(srcBits.begin(), srcBits.end()), srcBits.end());
+      if (entry.second.weak) {
+        updated |= assignFromSourcesWeak(transfer, entry.first, srcBits, false);
+      } else {
+        updated |= assignFromSources(transfer, entry.first, srcBits, false);
+      }
+    }
+
     return updated;
   }
 
@@ -986,7 +1121,7 @@ private:
       if (!Arg || !Arg->getType()->isPointerTy())
         continue;
       for (unsigned memBit :
-           info.getMemoryBitsForPointer(Arg, Call.getFunction()))
+           info.getReachableMemoryBitsFromRoot(Arg, Call.getFunction()))
         assignUnknown(transfer, memBit);
     }
     return transfer;

@@ -406,6 +406,213 @@ TEST(NPA, InterproceduralNullabilityMapsPartitionedFieldsAcrossCalls) {
   EXPECT_FALSE(result.isMaybeNull(after, ret));
 }
 
+TEST(NPA, InterproceduralNullabilityUsesWeakUpdatesForMergedUnknownOffsets) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define i32 @main(i64 %i, i64 %j) {
+    entry:
+      %arr = alloca [4 x i8*], align 8
+      %buf = alloca [8 x i8], align 1
+      %nonnull = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      %pi = getelementptr inbounds [4 x i8*], [4 x i8*]* %arr, i64 0, i64 %i
+      %pj = getelementptr inbounds [4 x i8*], [4 x i8*]* %arr, i64 0, i64 %j
+      store i8* null, i8** %pi, align 8
+      store i8* %nonnull, i8** %pj, align 8
+      %x = load i8*, i8** %pi, align 8
+      br label %after
+
+    after:
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  auto result = npa::InterproceduralNullability::run(*module);
+  const auto *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *x = findInstructionByName(*mainFn, "x");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(x, nullptr);
+
+  EXPECT_TRUE(result.isMaybeNull(after, x));
+}
+
+TEST(NPA, InterproceduralNullabilityPropagatesImpreciseFormalMemoryAcrossCalls) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @clear_at(i8** %base, i64 %idx) {
+    entry:
+      %slot = getelementptr inbounds i8*, i8** %base, i64 %idx
+      store i8* null, i8** %slot, align 8
+      ret void
+    }
+
+    define i32 @main(i64 %idx) {
+    entry:
+      %arr = alloca [4 x i8*], align 8
+      %buf = alloca [8 x i8], align 1
+      %nonnull = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      %slot = getelementptr inbounds [4 x i8*], [4 x i8*]* %arr, i64 0, i64 %idx
+      %base = getelementptr inbounds [4 x i8*], [4 x i8*]* %arr, i64 0, i64 0
+      store i8* %nonnull, i8** %slot, align 8
+      call void @clear_at(i8** %base, i64 %idx)
+      %x = load i8*, i8** %slot, align 8
+      br label %after
+
+    after:
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  auto result = npa::InterproceduralNullability::run(*module);
+  const auto *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *x = findInstructionByName(*mainFn, "x");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(x, nullptr);
+
+  EXPECT_TRUE(result.isMaybeNull(after, x));
+}
+
+TEST(NPA, InterproceduralNullabilityMapsExactOffsetsBackToImpreciseCallerCells) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @clear_next(i8** %base) {
+    entry:
+      %slot = getelementptr inbounds i8*, i8** %base, i64 1
+      store i8* null, i8** %slot, align 8
+      ret void
+    }
+
+    define i32 @main(i64 %idx) {
+    entry:
+      %arr = alloca [8 x i8*], align 8
+      %buf = alloca [8 x i8], align 1
+      %nonnull = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      %base = getelementptr inbounds [8 x i8*], [8 x i8*]* %arr, i64 0, i64 %idx
+      %next_idx = add i64 %idx, 1
+      %next = getelementptr inbounds [8 x i8*], [8 x i8*]* %arr, i64 0, i64 %next_idx
+      store i8* %nonnull, i8** %next, align 8
+      call void @clear_next(i8** %base)
+      %x = load i8*, i8** %next, align 8
+      br label %after
+
+    after:
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  auto result = npa::InterproceduralNullability::run(*module);
+  const auto *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *x = findInstructionByName(*mainFn, "x");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(x, nullptr);
+
+  EXPECT_TRUE(result.isMaybeNull(after, x));
+}
+
+TEST(NPA, InterproceduralNullabilityClobbersReachableFieldsAtExternalCalls) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    %pair = type { i8*, i8* }
+
+    declare void @ext_write(%pair*)
+
+    define i32 @main() {
+    entry:
+      %pair = alloca %pair, align 8
+      %a = getelementptr inbounds %pair, %pair* %pair, i32 0, i32 0
+      %b = getelementptr inbounds %pair, %pair* %pair, i32 0, i32 1
+      %buf = alloca [8 x i8], align 1
+      %nonnull = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      store i8* %nonnull, i8** %a, align 8
+      store i8* %nonnull, i8** %b, align 8
+      call void @ext_write(%pair* %pair)
+      %x = load i8*, i8** %b, align 8
+      br label %after
+
+    after:
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  auto result = npa::InterproceduralNullability::run(*module);
+  const auto *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *b = findInstructionByName(*mainFn, "b");
+  const auto *x = findInstructionByName(*mainFn, "x");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(b, nullptr);
+  ASSERT_NE(x, nullptr);
+
+  EXPECT_TRUE(result.isMaybeNullMemory(after, b));
+  EXPECT_TRUE(result.isMaybeNull(after, x));
+}
+
+TEST(NPA, InterproceduralNullabilityMapsNonZeroFieldWritesFromAliasingActuals) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    %pair = type { i8*, i8* }
+
+    define void @clear_second(%pair* %p) {
+    entry:
+      %b = getelementptr inbounds %pair, %pair* %p, i32 0, i32 1
+      store i8* null, i8** %b, align 8
+      ret void
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      %pair1 = alloca %pair, align 8
+      %pair2 = alloca %pair, align 8
+      %b1 = getelementptr inbounds %pair, %pair* %pair1, i32 0, i32 1
+      %b2 = getelementptr inbounds %pair, %pair* %pair2, i32 0, i32 1
+      %buf = alloca [8 x i8], align 1
+      %nonnull = getelementptr inbounds [8 x i8], [8 x i8]* %buf, i64 0, i64 0
+      store i8* %nonnull, i8** %b1, align 8
+      store i8* %nonnull, i8** %b2, align 8
+      br i1 %cond, label %t, label %f
+
+    t:
+      br label %merge
+
+    f:
+      br label %merge
+
+    merge:
+      %alias = phi %pair* [ %pair1, %t ], [ %pair2, %f ]
+      call void @clear_second(%pair* %alias)
+      %x = load i8*, i8** %b1, align 8
+      br label %after
+
+    after:
+      ret i32 0
+    }
+  )");
+  ASSERT_TRUE(module);
+
+  auto result = npa::InterproceduralNullability::run(*module);
+  const auto *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *b1 = findInstructionByName(*mainFn, "b1");
+  const auto *x = findInstructionByName(*mainFn, "x");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(b1, nullptr);
+  ASSERT_NE(x, nullptr);
+
+  EXPECT_TRUE(result.isMaybeNullMemory(after, b1));
+  EXPECT_TRUE(result.isMaybeNull(after, x));
+}
+
 TEST(NPA, InterproceduralNullabilityPropagatesAcrossMayAliasMemory) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
