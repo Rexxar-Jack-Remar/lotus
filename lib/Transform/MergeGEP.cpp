@@ -28,7 +28,7 @@ STATISTIC(numMerged, "Number of GEPs merged");
 
 using namespace llvm;
 
-static void simplifyGEP(GetElementPtrInst *GEP);
+static bool simplifyGEP(GetElementPtrInst *GEP);
 //
 // Method: runOnModule()
 //
@@ -48,6 +48,7 @@ static void simplifyGEP(GetElementPtrInst *GEP);
 //
 bool MergeArrayGEP::runOnModule(Module &M) {
   bool changed;
+  bool changed_any = false;
   do {
     changed = false;
     for (Module::iterator F = M.begin(); F != M.end(); ++F) {
@@ -56,12 +57,15 @@ bool MergeArrayGEP::runOnModule(Module &M) {
           GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(I++);
           if (GEP == NULL)
             continue;
-          simplifyGEP(GEP);
+          if (simplifyGEP(GEP)) {
+            changed = true;
+            changed_any = true;
+          }
         }
       }
     }
   } while (changed);
-  return true;
+  return changed_any;
 }
 
 //
@@ -74,7 +78,7 @@ bool MergeArrayGEP::runOnModule(Module &M) {
 // Inputs:
 //  GEP - A pointer to the GEP to simplify
 //
-static void simplifyGEP(GetElementPtrInst *GEP) {
+static bool simplifyGEP(GetElementPtrInst *GEP) {
   Value *PtrOp = GEP->getOperand(0);
   if (GEPOperator *Src = dyn_cast<GEPOperator>(PtrOp)) {
     // Note that if our source is a gep chain itself that we wait for that
@@ -84,7 +88,7 @@ static void simplifyGEP(GetElementPtrInst *GEP) {
     if (GetElementPtrInst *SrcGEP =
             dyn_cast<GetElementPtrInst>(Src->getOperand(0)))
       if (SrcGEP->getNumOperands() == 2)
-        return; // Wait until our source is folded to completion.
+        return false; // Wait until our source is folded to completion.
 
     SmallVector<Value *, 8> Indices;
 
@@ -112,7 +116,7 @@ static void simplifyGEP(GetElementPtrInst *GEP) {
         // intptr_t).  Just avoid transforming this until the input has been
         // normalized.
         if (SO1->getType() != GO1->getType())
-          return;
+          return false;
         Sum = llvm::BinaryOperator::Create(BinaryOperator::Add, SO1, GO1,
                                            PtrOp->getName() + ".sum", GEP);
       }
@@ -122,7 +126,7 @@ static void simplifyGEP(GetElementPtrInst *GEP) {
         GEP->setOperand(0, Src->getOperand(0));
         GEP->setOperand(1, Sum);
         numMerged++;
-        return;
+        return true;
       }
       Indices.append(Src->op_begin() + 1, Src->op_end() - 1);
       Indices.push_back(Sum);
@@ -147,8 +151,10 @@ static void simplifyGEP(GetElementPtrInst *GEP) {
       numMerged++;
       GEP->replaceAllUsesWith(GEPNew);
       GEP->eraseFromParent();
+      return true;
     }
   }
+  return false;
 }
 
 // Pass ID variable

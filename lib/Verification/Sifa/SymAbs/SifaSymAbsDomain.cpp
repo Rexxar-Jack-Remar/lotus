@@ -1,10 +1,12 @@
 #include "Verification/Sifa/SymAbs/SifaSymAbsDomain.h"
 
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 
 #include "Verification/Sifa/Log/SifaLogger.h"
+#include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 #include "Verification/SymAbsAI/Core/FragmentDecomposition.h"
 #include "Verification/SymAbsAI/Core/FunctionContext.h"
 #include "Verification/SymAbsAI/Core/InstructionSemantics.h"
@@ -36,6 +38,28 @@ llvm::BasicBlock *transitionTarget(const Transition &t) {
 
 bool isBlockEntryPoint(const Transition &t) {
   return t.sourceOrdinal == 0 && (!t.target || t.targetOrdinal == 0);
+}
+
+const llvm::Function *owningFunction(llvm::BasicBlock *bb) {
+  if (!bb || bb == symabs_ai::Fragment::EXIT) {
+    return nullptr;
+  }
+  return bb->getParent();
+}
+
+z3::expr valueExprAtCall(const symabs_ai::FunctionContext &fctx,
+                        const symabs_ai::ValueMapping &vm,
+                        llvm::Value *value) {
+  if (fctx.isRepresentedValue(value)) {
+    return vm.getFullRepresentation(value);
+  }
+  if (auto *constant = llvm::dyn_cast<llvm::ConstantInt>(value)) {
+    return makeConstantInt(&fctx.getZ3(), constant);
+  }
+  if (llvm::isa<llvm::ConstantPointerNull>(value)) {
+    return fctx.getMemoryModel().make_nullptr();
+  }
+  return vm.getFullRepresentation(value);
 }
 
 z3::expr directCallSummaryFormula(const symabs_ai::FunctionContext &fctx,
@@ -101,6 +125,8 @@ preserveUnchangedRepresentedValues(const symabs_ai::FunctionContext &fctx,
 
 } // namespace
 
+SifaSymAbsDomain::~SifaSymAbsDomain() = default;
+
 SymAbsState SifaSymAbsDomain::top() const {
   llvm::Function *fn = fctx_.getFunction();
   if (!fn || fn->empty())
@@ -109,17 +135,96 @@ SymAbsState SifaSymAbsDomain::top() const {
   return makeTopAt(entry, /*after=*/false);
 }
 
-SymAbsState SifaSymAbsDomain::makeBottomAt(llvm::BasicBlock *bb,
+const SifaSymAbsDomain::Bundle &
+SifaSymAbsDomain::bundleFor(const llvm::Function *fn) const {
+  if (!fn || fn == fctx_.getFunction()) {
+    static Bundle rootBundle{nullptr, nullptr, symabs_ai::DomainConstructor(),
+                             nullptr};
+    return rootBundle;
+  }
+
+  auto it = bundles_.find(fn);
+  if (it != bundles_.end()) {
+    return *it->second;
+  }
+
+  auto bundle = std::make_unique<Bundle>();
+  auto fctx = fctx_.getModuleContext().createFunctionContext(
+      const_cast<llvm::Function *>(fn));
+  bundle->domainCtor = symabs_ai::DomainConstructor(fctx->getConfig());
+  auto fragDecomp =
+      std::make_unique<symabs_ai::FragmentDecomposition>(
+          symabs_ai::FragmentDecomposition::For(*fctx));
+  bundle->analyzer =
+      symabs_ai::Analyzer::New(*fctx, *fragDecomp, bundle->domainCtor);
+  bundle->fctx = std::move(fctx);
+  bundle->fragDecomp = std::move(fragDecomp);
+
+  auto inserted = bundles_.emplace(fn, std::move(bundle));
+  return *inserted.first->second;
+}
+
+const SifaSymAbsDomain::Bundle &
+SifaSymAbsDomain::bundleFor(const Label &t) const {
+  if (const llvm::Function *fn = owningFunction(t.source)) {
+    if (fn != fctx_.getFunction()) {
+      return bundleFor(fn);
+    }
+  }
+  if (const llvm::Function *fn = owningFunction(t.target)) {
+    if (fn != fctx_.getFunction()) {
+      return bundleFor(fn);
+    }
+  }
+  if (t.callee && t.callee != fctx_.getFunction()) {
+    return bundleFor(t.callee);
+  }
+  static Bundle rootBundle{nullptr, nullptr, symabs_ai::DomainConstructor(),
+                           nullptr};
+  return rootBundle;
+}
+
+const SifaSymAbsDomain::Bundle &
+SifaSymAbsDomain::bundleFor(llvm::BasicBlock *bb) const {
+  if (const llvm::Function *fn = owningFunction(bb)) {
+    if (fn != fctx_.getFunction()) {
+      return bundleFor(fn);
+    }
+  }
+  static Bundle rootBundle{nullptr, nullptr, symabs_ai::DomainConstructor(),
+                           nullptr};
+  return rootBundle;
+}
+
+SymAbsState SifaSymAbsDomain::makeBottomAt(const Bundle &bundle,
+                                           llvm::BasicBlock *bb,
                                            bool after) const {
+  if (bundle.fctx) {
+    auto v = bundle.domainCtor.makeBottom(*bundle.fctx, bb, after);
+    return SymAbsState(v.release());
+  }
   auto v = domainCtor_.makeBottom(fctx_, bb, after);
   return SymAbsState(v.release());
 }
 
+SymAbsState SifaSymAbsDomain::makeTopAt(const Bundle &bundle,
+                                        llvm::BasicBlock *bb,
+                                        bool after) const {
+  SymAbsState v = makeBottomAt(bundle, bb, after);
+  if (v) {
+    v->havoc();
+  }
+  return v;
+}
+
+SymAbsState SifaSymAbsDomain::makeBottomAt(llvm::BasicBlock *bb,
+                                           bool after) const {
+  return makeBottomAt(bundleFor(bb), bb, after);
+}
+
 SymAbsState SifaSymAbsDomain::makeTopAt(llvm::BasicBlock *bb,
                                         bool after) const {
-  auto v = domainCtor_.makeBottom(fctx_, bb, after);
-  v->havoc();
-  return SymAbsState(v.release());
+  return makeTopAt(bundleFor(bb), bb, after);
 }
 
 bool SifaSymAbsDomain::supportsBestTransformer(const Label &t) const {
@@ -135,44 +240,48 @@ bool SifaSymAbsDomain::supportsBestTransformer(const Label &t) const {
 
 SymAbsState SifaSymAbsDomain::fallbackReturnSummary(const Label &t,
                                                     const State &in) const {
+  const Bundle &bundle = bundleFor(owningFunction(t.source));
+  const symabs_ai::FunctionContext &fctx = bundle.fctx ? *bundle.fctx : fctx_;
+  const symabs_ai::Analyzer &analyzer = bundle.analyzer ? *bundle.analyzer
+                                                        : analyzer_;
   const auto *call = llvm::dyn_cast_or_null<llvm::CallBase>(t.call);
   if (!call) {
-    return makeTopAt(transitionTarget(t), /*after=*/false);
+    return makeTopAt(bundle, transitionTarget(t), /*after=*/false);
   }
   if (const auto *callInst = llvm::dyn_cast<llvm::CallInst>(call)) {
     auto frag =
-        symabs_ai::FragmentDecomposition::FragmentForBody(fctx_, t.source);
-    symabs_ai::InstructionSemantics instSem(fctx_, frag);
+        symabs_ai::FragmentDecomposition::FragmentForBody(fctx, t.source);
+    symabs_ai::InstructionSemantics instSem(fctx, frag);
     auto vmIn = symabs_ai::ValueMapping::before(
-        fctx_, frag, const_cast<llvm::CallInst *>(callInst));
+        fctx, frag, const_cast<llvm::CallInst *>(callInst));
     auto vmOut = symabs_ai::ValueMapping::after(
-        fctx_, frag, const_cast<llvm::CallInst *>(callInst));
+        fctx, frag, const_cast<llvm::CallInst *>(callInst));
 
-    z3::expr phi = in->toFormula(vmIn, fctx_.getZ3()) &&
+    z3::expr phi = in->toFormula(vmIn, fctx.getZ3()) &&
                    instSem.visit(*const_cast<llvm::CallInst *>(callInst));
 
-    auto out = makeBottomAt(t.source, /*after=*/true);
-    analyzer_.strongestConsequence(out.get(), phi, vmOut);
+    auto out = makeBottomAt(bundle, t.source, /*after=*/true);
+    analyzer.strongestConsequence(out.get(), phi, vmOut);
     return out;
   }
 
   if (const auto *invoke = llvm::dyn_cast<llvm::InvokeInst>(call)) {
     std::set<symabs_ai::Fragment::edge> edges;
     edges.insert({t.source, transitionTarget(t)});
-    symabs_ai::Fragment frag(fctx_, t.source, transitionTarget(t), edges,
+    symabs_ai::Fragment frag(fctx, t.source, transitionTarget(t), edges,
                              /*includes_end_body=*/false);
-    symabs_ai::InstructionSemantics instSem(fctx_, frag);
+    symabs_ai::InstructionSemantics instSem(fctx, frag);
 
     auto vmIn = symabs_ai::ValueMapping::before(
-        fctx_, frag, const_cast<llvm::InvokeInst *>(invoke));
-    auto vmOut = symabs_ai::ValueMapping::atEnd(fctx_, frag);
+        fctx, frag, const_cast<llvm::InvokeInst *>(invoke));
+    auto vmOut = symabs_ai::ValueMapping::atEnd(fctx, frag);
 
-    z3::expr phi = in->toFormula(vmIn, fctx_.getZ3());
-    phi = phi && directCallSummaryFormula(fctx_, vmIn, vmOut, *invoke);
-    phi = phi && preserveUnchangedRepresentedValues(fctx_, frag, vmIn, vmOut);
+    z3::expr phi = in->toFormula(vmIn, fctx.getZ3());
+    phi = phi && directCallSummaryFormula(fctx, vmIn, vmOut, *invoke);
+    phi = phi && preserveUnchangedRepresentedValues(fctx, frag, vmIn, vmOut);
 
     for (llvm::BasicBlock *succ : llvm::successors(t.source)) {
-      z3::expr edgeVar = fctx_.getEdgeVariable(t.source, succ);
+      z3::expr edgeVar = fctx.getEdgeVariable(t.source, succ);
       phi = phi && (succ == t.target ? edgeVar : !edgeVar);
     }
     for (const auto &edge : frag.edges()) {
@@ -181,12 +290,76 @@ SymAbsState SifaSymAbsDomain::fallbackReturnSummary(const Label &t,
       }
     }
 
-    auto out = makeBottomAt(t.target, /*after=*/false);
-    analyzer_.strongestConsequence(out.get(), phi, vmOut);
+    auto out = makeBottomAt(bundle, t.target, /*after=*/false);
+    analyzer.strongestConsequence(out.get(), phi, vmOut);
     return out;
   }
 
-  return makeTopAt(transitionTarget(t), /*after=*/false);
+  return makeTopAt(bundle, transitionTarget(t), /*after=*/false);
+}
+
+SymAbsState SifaSymAbsDomain::projectEnterCall(const Label &t,
+                                               const State &callerState) const {
+  if (!t.call || !t.callee || !t.source || !t.target) {
+    return callerState;
+  }
+
+  const Bundle &callerBundle = bundleFor(owningFunction(t.source));
+  const Bundle &calleeBundle = bundleFor(t.callee);
+  const symabs_ai::FunctionContext &callerFctx =
+      callerBundle.fctx ? *callerBundle.fctx : fctx_;
+  const symabs_ai::FunctionContext &calleeFctx =
+      calleeBundle.fctx ? *calleeBundle.fctx : fctx_;
+  const symabs_ai::Analyzer &calleeAnalyzer =
+      calleeBundle.analyzer ? *calleeBundle.analyzer : analyzer_;
+
+  auto callerFrag =
+      symabs_ai::FragmentDecomposition::FragmentForBody(callerFctx, t.source);
+  auto callerVm = symabs_ai::ValueMapping::before(
+      callerFctx, callerFrag, const_cast<llvm::Instruction *>(
+                                 llvm::cast<llvm::Instruction>(t.call)));
+  auto calleeEntryFrag =
+      symabs_ai::FragmentDecomposition::FragmentForBody(calleeFctx, t.target);
+  auto calleeVm = symabs_ai::ValueMapping::atBeginning(calleeFctx,
+                                                       calleeEntryFrag);
+
+  z3::expr phi = callerState->toFormula(callerVm, callerFctx.getZ3());
+  phi = phi && (callerVm.memory() == calleeVm.memory());
+
+  unsigned actualIndex = 0;
+  for (const auto &formal : t.callee->args()) {
+    if (!calleeFctx.isRepresentedValue(const_cast<llvm::Argument *>(&formal))) {
+      ++actualIndex;
+      continue;
+    }
+    while (actualIndex < t.call->arg_size() &&
+           t.call->getArgOperand(actualIndex)->getType()->isMetadataTy()) {
+      ++actualIndex;
+    }
+    if (actualIndex >= t.call->arg_size()) {
+      break;
+    }
+    llvm::Value *actual = t.call->getArgOperand(actualIndex);
+    phi = phi && (calleeVm.getFullRepresentation(
+                      const_cast<llvm::Argument *>(&formal)) ==
+                  valueExprAtCall(callerFctx, callerVm, actual));
+    ++actualIndex;
+  }
+
+  for (const auto &represented : calleeFctx.representedValues()) {
+    llvm::Value *value = represented;
+    if (llvm::isa<llvm::Argument>(value)) {
+      continue;
+    }
+    if (callerFctx.isRepresentedValue(value)) {
+      phi = phi && (calleeVm.getFullRepresentation(value) ==
+                    callerVm.getFullRepresentation(value));
+    }
+  }
+
+  auto out = makeBottomAt(calleeBundle, t.target, /*after=*/false);
+  calleeAnalyzer.strongestConsequence(out.get(), phi, calleeVm);
+  return out;
 }
 
 SymAbsState SifaSymAbsDomain::fallbackPost(const Label &t,
@@ -195,28 +368,33 @@ SymAbsState SifaSymAbsDomain::fallbackPost(const Label &t,
     throw std::logic_error("SifaSymAbs fallback requires a source block");
   }
 
+  const Bundle &bundle = bundleFor(owningFunction(t.source));
+  const symabs_ai::FunctionContext &fctx = bundle.fctx ? *bundle.fctx : fctx_;
+  const symabs_ai::Analyzer &analyzer = bundle.analyzer ? *bundle.analyzer
+                                                        : analyzer_;
+
   const bool crossesEdge = transitionTarget(t) != t.source;
   std::vector<symabs_ai::Fragment::edge> edges;
   if (crossesEdge) {
     edges.push_back({t.source, transitionTarget(t)});
   }
 
-  symabs_ai::Fragment frag(fctx_, t.source, transitionTarget(t), edges,
+  symabs_ai::Fragment frag(fctx, t.source, transitionTarget(t), edges,
                            /*includes_end_body=*/false);
-  symabs_ai::InstructionSemantics instSem(fctx_, frag);
+  symabs_ai::InstructionSemantics instSem(fctx, frag);
 
   const llvm::Instruction *segmentStart =
       t.segmentStart ? t.segmentStart : firstNonPhi(t.source);
   if (!segmentStart) {
-    return makeTopAt(transitionTarget(t), /*after=*/false);
+    return makeTopAt(bundle, transitionTarget(t), /*after=*/false);
   }
   if (t.stopBefore == segmentStart) {
     return in;
   }
 
   auto vmIn = symabs_ai::ValueMapping::before(
-      fctx_, frag, const_cast<llvm::Instruction *>(segmentStart));
-  z3::expr phi = in->toFormula(vmIn, fctx_.getZ3());
+      fctx, frag, const_cast<llvm::Instruction *>(segmentStart));
+  z3::expr phi = in->toFormula(vmIn, fctx.getZ3());
 
   for (auto it = const_cast<llvm::Instruction *>(segmentStart)->getIterator(),
             end = t.source->end();
@@ -231,9 +409,9 @@ SymAbsState SifaSymAbsDomain::fallbackPost(const Label &t,
   if (crossesEdge) {
     const llvm::Instruction *terminator = t.source->getTerminator();
     if (terminator && terminator != t.stopBefore) {
-      z3::expr chosen = fctx_.getEdgeVariable(t.source, transitionTarget(t));
+      z3::expr chosen = fctx.getEdgeVariable(t.source, transitionTarget(t));
       for (llvm::BasicBlock *succ : llvm::successors(t.source)) {
-        z3::expr edgeVar = fctx_.getEdgeVariable(t.source, succ);
+        z3::expr edgeVar = fctx.getEdgeVariable(t.source, succ);
         phi = phi && (succ == t.target ? edgeVar : !edgeVar);
       }
       if (llvm::isa<llvm::ReturnInst>(terminator) && !t.target) {
@@ -241,10 +419,10 @@ SymAbsState SifaSymAbsDomain::fallbackPost(const Label &t,
       }
 
       auto vmBeforeTerm = symabs_ai::ValueMapping::before(
-          fctx_, frag, const_cast<llvm::Instruction *>(terminator));
-      auto vmOut = symabs_ai::ValueMapping::atEnd(fctx_, frag);
+          fctx, frag, const_cast<llvm::Instruction *>(terminator));
+      auto vmOut = symabs_ai::ValueMapping::atEnd(fctx, frag);
       phi = phi &&
-            fctx_.getMemoryModel().copy(vmBeforeTerm.memory(), vmOut.memory());
+            fctx.getMemoryModel().copy(vmBeforeTerm.memory(), vmOut.memory());
 
       for (const auto &edge : frag.edges()) {
         for (llvm::Instruction &I : frag.edgePhis(edge)) {
@@ -252,18 +430,18 @@ SymAbsState SifaSymAbsDomain::fallbackPost(const Label &t,
         }
       }
 
-      auto out = makeBottomAt(t.target, /*after=*/false);
-      analyzer_.strongestConsequence(out.get(), phi, vmOut);
+      auto out = makeBottomAt(bundle, t.target, /*after=*/false);
+      analyzer.strongestConsequence(out.get(), phi, vmOut);
       return out;
     }
   }
 
-  auto out = makeBottomAt(t.source, /*after=*/true);
+  auto out = makeBottomAt(bundle, t.source, /*after=*/true);
   auto vmOut = t.stopBefore ? symabs_ai::ValueMapping::before(
-                                  fctx_, frag,
+                                  fctx, frag,
                                   const_cast<llvm::Instruction *>(t.stopBefore))
-                            : symabs_ai::ValueMapping::atEnd(fctx_, frag);
-  analyzer_.strongestConsequence(out.get(), phi, vmOut);
+                            : symabs_ai::ValueMapping::atEnd(fctx, frag);
+  analyzer.strongestConsequence(out.get(), phi, vmOut);
   return out;
 }
 
@@ -282,16 +460,21 @@ SymAbsState SifaSymAbsDomain::post(const Label &t, const State &in) const {
     return fallbackPost(t, in);
   }
 
+  const Bundle &bundle = bundleFor(owningFunction(t.source));
+  const symabs_ai::FunctionContext &fctx = bundle.fctx ? *bundle.fctx : fctx_;
+  const symabs_ai::Analyzer &analyzer = bundle.analyzer ? *bundle.analyzer
+                                                        : analyzer_;
   llvm::BasicBlock *src = t.source;
   llvm::BasicBlock *dst = t.target;
 
   std::set<symabs_ai::Fragment::edge> edges;
   edges.insert({src, dst});
-  const symabs_ai::Fragment frag(fctx_, src, dst, edges,
+  const symabs_ai::Fragment frag(fctx, src, dst, edges,
                                  /*includes_end_body=*/false);
 
   // Result is a bottom at the end location (state at dst after phi nodes).
-  auto out = domainCtor_.makeBottom(fctx_, dst, /*after=*/false);
+  auto out = (bundle.fctx ? bundle.domainCtor.makeBottom(fctx, dst, false)
+                          : domainCtor_.makeBottom(fctx_, dst, false));
   if (SifaLogger::isEnabled(SifaLogLevel::Debug)) {
     ++postCount_;
     if (postCount_ <= 10 || postCount_ % 25 == 0 || postCount_ == 11) {
@@ -305,7 +488,7 @@ SymAbsState SifaSymAbsDomain::post(const Label &t, const State &in) const {
                         ": " + srcName + " -> " + dstName);
     }
   }
-  analyzer_.bestTransformer(in.get(), frag, out.get());
+  analyzer.bestTransformer(in.get(), frag, out.get());
   return SymAbsState(out.release());
 }
 
@@ -317,7 +500,7 @@ SymAbsState SifaSymAbsDomain::postCall(const Label &t,
     return fallbackReturnSummary(t, callerState);
   }
   if (t.kind == TransitionKind::EnterCall && t.target) {
-    return makeTopAt(t.target, /*after=*/false);
+    return projectEnterCall(t, callerState);
   }
   return callerState;
 }

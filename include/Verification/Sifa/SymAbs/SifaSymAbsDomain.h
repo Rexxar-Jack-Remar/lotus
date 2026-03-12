@@ -1,12 +1,13 @@
 //===-- Verification/Sifa/SymAbs/SifaSymAbsDomain.h -----------------------===//
 //
-// Intraprocedural Sifa helper domain implemented using SymAbsAI's
-// AbstractValue on whole-block CFG edges, with an SMT-based fallback for
-// segmented intra-block transfers that do not fit bestTransformer's fragment
-// shape.
+// SymAbsAI-backed Sifa domain implemented using whole-block CFG edges, with an
+// SMT fallback for segmented intra-block transfers that do not fit
+// bestTransformer's fragment shape.
 //
-// This is intentionally not a full Sifa interprocedural domain adapter.
-// Enter-call transitions still fall back to a coarse top-at-entry state.
+// The public SifaSymAbs helpers remain intraprocedural, but this domain lazily
+// materializes per-function SymAbsAI state so EnterCall / ReturnSummary
+// transitions can preserve direct-call interprocedural semantics when used via
+// IcfgInterpreter.
 //
 //===----------------------------------------------------------------------===//
 
@@ -24,9 +25,12 @@
 #include <cstdint>
 #include <memory>
 #include <set>
+#include <unordered_map>
 
 namespace symabs_ai {
 class FunctionContext;
+class FragmentDecomposition;
+class ModuleContext;
 } // namespace symabs_ai
 
 namespace lotus {
@@ -44,6 +48,7 @@ public:
                    const symabs_ai::DomainConstructor &domainCtor,
                    const symabs_ai::Analyzer &analyzer)
       : fctx_(fctx), domainCtor_(domainCtor), analyzer_(analyzer) {}
+  ~SifaSymAbsDomain() override;
 
   State top() const override;
   State bottom() const override { return nullptr; }
@@ -88,14 +93,31 @@ public:
   State makeTopAt(llvm::BasicBlock *bb, bool after) const;
 
 private:
+  struct Bundle {
+    std::unique_ptr<symabs_ai::FunctionContext> fctx;
+    std::unique_ptr<symabs_ai::FragmentDecomposition> fragDecomp;
+    symabs_ai::DomainConstructor domainCtor;
+    std::unique_ptr<symabs_ai::Analyzer> analyzer;
+  };
+
   State fallbackPost(const Label &t, const State &in) const;
   State fallbackReturnSummary(const Label &t, const State &in) const;
+  State projectEnterCall(const Label &t, const State &callerState) const;
   bool supportsBestTransformer(const Label &t) const;
+  const Bundle &bundleFor(const llvm::Function *fn) const;
+  const Bundle &bundleFor(const Label &t) const;
+  const Bundle &bundleFor(llvm::BasicBlock *bb) const;
+  State makeBottomAt(const Bundle &bundle, llvm::BasicBlock *bb,
+                     bool after) const;
+  State makeTopAt(const Bundle &bundle, llvm::BasicBlock *bb, bool after) const;
+  const symabs_ai::FunctionContext &rootContext() const { return fctx_; }
 
   const symabs_ai::FunctionContext &fctx_;
   const symabs_ai::DomainConstructor &domainCtor_;
   const symabs_ai::Analyzer &analyzer_;
   mutable std::uint64_t postCount_ = 0;
+  mutable std::unordered_map<const llvm::Function *, std::unique_ptr<Bundle>>
+      bundles_;
 };
 
 } // namespace sifa

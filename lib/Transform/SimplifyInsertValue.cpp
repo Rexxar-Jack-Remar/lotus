@@ -49,6 +49,7 @@ STATISTIC(numErased, "Number of Instructions Deleted");
 // false - The module was not modified.
 //
 bool SimplifyIV::runOnModule(Module &M) {
+  bool erased_this_run = false;
   // Repeat till no change
   bool changed;
   do {
@@ -71,6 +72,7 @@ bool SimplifyIV::runOnModule(Module &M) {
           if (SI->getOperand(0) != IV)
             continue;
           changed = true;
+          erased_this_run = true;
           numErased++;
           do {
             // replace by a series of gep/stores
@@ -100,7 +102,7 @@ bool SimplifyIV::runOnModule(Module &M) {
       SI->eraseFromParent();
     }
   } while (changed);
-  return (numErased > 0);
+  return erased_this_run;
 }
 
 // Pass ID variable

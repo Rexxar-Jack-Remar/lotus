@@ -167,9 +167,8 @@ static IntervalState runToReturnWithIntervalDomain(
                                                             fluid, ipr);
   ipr.setLoopSummarizer(loopSum);
   ProcedureResources res(stats, F, std::vector<llvm::BasicBlock *>{});
-  IntervalState entryState = initial.isBottom() ? domain.top() : initial;
   return ipr.interpretForSingleMarker(
-      res.getRegexDag(), res.getDagOverlayPathToReturn(), entryState);
+      res.getRegexDag(), res.getDagOverlayPathToReturn(), initial);
 }
 
 IntervalState lotus::sifa::analyzeToReturnWithIntervalDomain(
@@ -199,9 +198,8 @@ static OctagonState runToReturnWithOctagonDomain(
                                                            ipr);
   ipr.setLoopSummarizer(loopSum);
   ProcedureResources res(stats, F, std::vector<llvm::BasicBlock *>{});
-  OctagonState entryState = initial.isBottom() ? domain.top() : initial;
   return ipr.interpretForSingleMarker(
-      res.getRegexDag(), res.getDagOverlayPathToReturn(), entryState);
+      res.getRegexDag(), res.getDagOverlayPathToReturn(), initial);
 }
 
 OctagonState lotus::sifa::analyzeToReturnWithOctagonDomain(

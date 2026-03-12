@@ -47,9 +47,13 @@ PreservedAnalyses LowerSelectPass::run(Module &M, ModuleAnalysisManager &) {
   for (auto &F : M) {
     for (auto &B : F) {
       for (auto &I : B) {
-        if (I.getType()->isPointerTy())
-          continue;
         if (auto *SI = dyn_cast<SelectInst>(&I)) {
+          if (SI->getType()->isPointerTy())
+            continue;
+          // Lowering below creates a conditional branch and therefore only
+          // supports scalar i1 conditions.
+          if (!SI->getCondition()->getType()->isIntegerTy(1))
+            continue;
           Selects.push_back(SI);
         }
       }

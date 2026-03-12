@@ -113,7 +113,7 @@ redirectValues(BasicBlock *newB, ValueToValueMapTy &VMap,
   for (auto &I : *newB) {
     if (isa<PHINode>(&I)) {
       llvm::errs() << "PHI nodes are not supported yet\n";
-      abort();
+      return;
       // for (auto i = 0; i < PHI->getNumIncomingValues(); ++i) {
       // }
     } else {
@@ -167,8 +167,20 @@ bool LoopUnroll::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
   std::vector<BasicBlock *> LastBlocks(Blocks.begin(), Blocks.end());
   // the code relies on the fact that the header is the first
   // basic block in the vector
-  if (LastBlocks[0] != L->getHeader())
-    abort();
+  if (LastBlocks[0] != L->getHeader()) {
+    errs() << "[Unrolling] unsupported loop block ordering in function "
+           << F->getName() << "\n";
+    return false;
+  }
+
+  // This pass does not support PHI nodes in cloned loop blocks.
+  for (auto *BB : LastBlocks) {
+    if (isa<PHINode>(BB->begin())) {
+      errs() << "[Unrolling] skipping loop with PHI nodes in function "
+             << F->getName() << "\n";
+      return false;
+    }
+  }
 
   for (unsigned n = 1; n < UnrollCount; ++n)
     LastBlocks = cloneLoopBody(F, LastBlocks);

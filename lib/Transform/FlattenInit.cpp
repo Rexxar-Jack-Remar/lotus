@@ -1272,6 +1272,12 @@ bool State::stepCall(CallBase *Call, CallBase *OldCall, BasicBlock *NormalDest,
   Function *Callee = getCallee(Call->getCalledOperand());
   FunctionType *CallSig = Call->getFunctionType();
 
+  // Unknown/indirect callee that cannot be resolved to a Function.
+  // Fail conservatively so the caller can unwind instead of dereferencing null.
+  if (Callee == nullptr) {
+    return false;
+  }
+
   if (Callee->isIntrinsic() && CallSig == Callee->getFunctionType()) {
     // Each of `stepFoo` functions called here (e.g. `stepMemset`) is expected
     // to dispose of `Call` appropriately (either deleting it or adding it to

@@ -6,8 +6,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/PassManager.h"
@@ -82,6 +84,24 @@ public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
     bool Changed = false;
     SlotForPhi.clear();
+
+    // Conservative safety check: this transform currently handles only
+    // predecessor edges from BranchInst terminators.
+    SmallPtrSet<BasicBlock *, 8> PhiBlocks;
+    for (auto &BB : F)
+      if (isa<PHINode>(BB.begin()))
+        PhiBlocks.insert(&BB);
+
+    for (BasicBlock *SuccBB : PhiBlocks) {
+      for (BasicBlock *PredBB : predecessors(SuccBB)) {
+        if (!isa<BranchInst>(PredBB->getTerminator())) {
+          LLVM_DEBUG(dbgs()
+                     << "  skipping elim-phi for function " << F.getName()
+                     << ": unsupported non-branch predecessor edge\n");
+          return PreservedAnalyses::all();
+        }
+      }
+    }
 
     /* Collect all branch terminators first (iterator invalidation safety). */
     SmallVector<BranchInst *, 8> WorkList;

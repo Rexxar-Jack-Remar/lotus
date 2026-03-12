@@ -45,6 +45,7 @@ STATISTIC(numErased, "Number of Instructions Deleted");
 // false - The module was not modified.
 //
 bool SimplifyEV::runOnModule(Module &M) {
+  bool erased_this_run = false;
   // Repeat till no change
   bool changed;
   do {
@@ -60,6 +61,7 @@ bool SimplifyEV::runOnModule(Module &M) {
             EV->replaceAllUsesWith(Agg);
             EV->eraseFromParent();
             numErased++;
+            erased_this_run = true;
             changed = true;
             continue;
           }
@@ -68,6 +70,7 @@ bool SimplifyEV::runOnModule(Module &M) {
               EV->replaceAllUsesWith(UndefValue::get(EV->getType()));
               EV->eraseFromParent();
               numErased++;
+              erased_this_run = true;
               changed = true;
               continue;
             }
@@ -75,6 +78,7 @@ bool SimplifyEV::runOnModule(Module &M) {
               EV->replaceAllUsesWith(Constant::getNullValue(EV->getType()));
               EV->eraseFromParent();
               numErased++;
+              erased_this_run = true;
               changed = true;
               continue;
             }
@@ -90,12 +94,14 @@ bool SimplifyEV::runOnModule(Module &M) {
                 EV->replaceAllUsesWith(EV_new);
                 EV->eraseFromParent();
                 numErased++;
+                erased_this_run = true;
                 changed = true;
                 continue;
               } else {
                 EV->replaceAllUsesWith(V);
                 EV->eraseFromParent();
                 numErased++;
+                erased_this_run = true;
                 changed = true;
                 continue;
               }
@@ -125,6 +131,7 @@ bool SimplifyEV::runOnModule(Module &M) {
             EV->eraseFromParent();
             changed = true;
             numErased++;
+            erased_this_run = true;
             continue;
           }
           if (InsertValueInst *IV = dyn_cast<InsertValueInst>(Agg)) {
@@ -148,6 +155,7 @@ bool SimplifyEV::runOnModule(Module &M) {
                 EV->replaceAllUsesWith(EV_new);
                 EV->eraseFromParent();
                 numErased++;
+                erased_this_run = true;
                 done = true;
                 changed = true;
                 break;
@@ -162,6 +170,7 @@ bool SimplifyEV::runOnModule(Module &M) {
               EV->replaceAllUsesWith(IV->getInsertedValueOperand());
               EV->eraseFromParent();
               numErased++;
+              erased_this_run = true;
               changed = true;
               continue;
             }
@@ -182,6 +191,7 @@ bool SimplifyEV::runOnModule(Module &M) {
               EV->replaceAllUsesWith(NewIV);
               EV->eraseFromParent();
               numErased++;
+              erased_this_run = true;
               changed = true;
               continue;
             }
@@ -198,6 +208,7 @@ bool SimplifyEV::runOnModule(Module &M) {
               EV->replaceAllUsesWith(EV_new);
               EV->eraseFromParent();
               numErased++;
+              erased_this_run = true;
               changed = true;
               continue;
             }
@@ -206,7 +217,7 @@ bool SimplifyEV::runOnModule(Module &M) {
       }
     }
   } while (changed);
-  return (numErased > 0);
+  return erased_this_run;
 }
 
 // Pass ID variable

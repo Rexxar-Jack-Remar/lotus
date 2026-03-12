@@ -1,4 +1,5 @@
 #include "Verification/Sifa/SifaSymAbs.h"
+#include "Verification/Sifa/Sifa.h"
 #include "Verification/Sifa/Fluid/NeverFluid.h"
 #include "Verification/Sifa/Interpreter/DagInterpreter.h"
 #include "Verification/Sifa/Procedure/ProcedureResources.h"
@@ -325,6 +326,61 @@ TEST(SifaSymAbs, HybridFallbackHandlesInvokeReturnSummary) {
                                          initial));
   ASSERT_NE(out, nullptr);
   EXPECT_FALSE(out->isBottom());
+}
+
+TEST(SifaSymAbs, InterproceduralEnterCallProjectsArguments) {
+  const char *ir = R"IR(
+    define void @callee(i32 %x) {
+    entry:
+      %cmp = icmp eq i32 %x, 42
+      br i1 %cmp, label %good, label %bad
+
+    good:
+      ret void
+
+    bad:
+      ret void
+    }
+
+    define void @main(i32 %seed) {
+    entry:
+      %unused = add i32 %seed, 0
+      call void @callee(i32 42)
+      ret void
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  llvm::Function *mainFn = M->getFunction("main");
+  llvm::Function *calleeFn = M->getFunction("callee");
+  ASSERT_NE(mainFn, nullptr);
+  ASSERT_NE(calleeFn, nullptr);
+
+  llvm::BasicBlock *good = getBlockByName(*calleeFn, "good");
+  llvm::BasicBlock *bad = getBlockByName(*calleeFn, "bad");
+  ASSERT_NE(good, nullptr);
+  ASSERT_NE(bad, nullptr);
+
+  symabs_ai::ModuleContext mctx(M.get(), makeSymAbsConfig());
+  auto rootFctx = mctx.createFunctionContext(mainFn);
+  auto fragDecomp = symabs_ai::FragmentDecomposition::For(*rootFctx);
+  symabs_ai::DomainConstructor dom(rootFctx->getConfig());
+  auto analyzer = symabs_ai::Analyzer::New(*rootFctx, fragDecomp, dom);
+
+  lotus::sifa::SifaSymAbsDomain domain(*rootFctx, dom, *analyzer);
+
+  auto goodState = lotus::sifa::analyzeInterproceduralTo<lotus::sifa::SymAbsState>(
+      *M, mainFn, *calleeFn, *good, domain.top(), domain);
+  ASSERT_NE(goodState, nullptr);
+  EXPECT_FALSE(goodState->isBottom());
+
+  auto badState = lotus::sifa::analyzeInterproceduralTo<lotus::sifa::SymAbsState>(
+      *M, mainFn, *calleeFn, *bad, domain.top(), domain);
+  EXPECT_TRUE(!badState || badState->isBottom());
 }
 
 } // namespace

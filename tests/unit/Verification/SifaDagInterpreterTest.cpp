@@ -706,4 +706,31 @@ TEST(SifaDagInterpreter, AnalyzeToCanUseCustomFluidPolicy) {
   EXPECT_EQ(lotus::sifa::analyzeTo<int>(*F, *target, 1, domain, fluid), 100);
 }
 
+TEST(SifaDagInterpreter, AnalyzeToReturnPreservesBottomInitialState) {
+  const char *ir = R"IR(
+    define i32 @main() {
+    entry:
+      ret i32 0
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  llvm::SMDiagnostic err;
+  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
+  ASSERT_NE(M, nullptr);
+
+  const llvm::Function *F = M->getFunction("main");
+  ASSERT_NE(F, nullptr);
+
+  lotus::sifa::IntervalState intervalBottom(true);
+  lotus::sifa::IntervalState intervalResult =
+      lotus::sifa::analyzeToReturnWithIntervalDomain(*F, intervalBottom);
+  EXPECT_TRUE(intervalResult.isBottom());
+
+  lotus::sifa::OctagonState octagonBottom(true);
+  lotus::sifa::OctagonState octagonResult =
+      lotus::sifa::analyzeToReturnWithOctagonDomain(*F, octagonBottom);
+  EXPECT_TRUE(octagonResult.isBottom());
+}
+
 } // namespace

@@ -22,8 +22,7 @@ char LowerGlobalConstantArraySelect::ID = 0;
 static RegisterPass<LowerGlobalConstantArraySelect>
     X(DEBUG_TYPE, "G[a] -> switch(a) -> phi(G[x])");
 
-void LowerGlobalConstantArraySelect::getAnalysisUsage(AnalysisUsage &AU) const {
-}
+void LowerGlobalConstantArraySelect::getAnalysisUsage(AnalysisUsage &) const {}
 
 // Main pass entry point. Scans for GEP instructions that access global constant
 // arrays and replaces them with function calls that use switch statements for
@@ -31,16 +30,17 @@ void LowerGlobalConstantArraySelect::getAnalysisUsage(AnalysisUsage &AU) const {
 bool LowerGlobalConstantArraySelect::runOnModule(Module &M) {
   std::vector<Instruction *> ToRemoveLd;
   std::vector<Instruction *> ToRemoveGep;
+  bool Changed = false;
   for (auto &F : M) {
     for (auto &B : F) {
       for (auto &I : B) {
         if (!isSelectGlobalConstantArray(I))
           continue;
+        Changed = true;
         auto *GP = dyn_cast<GlobalVariable>(I.getOperand(0));
         auto *Idx = I.getOperand(2);
         auto *ConstArray = dyn_cast<ConstantDataArray>(GP->getInitializer());
         auto *ElmtTy = ConstArray->getElementType();
-        auto *NextLoad = I.getNextNode();
 
         Function *Func = nullptr;
         auto It = SelectFuncMap.find(GP);
@@ -83,7 +83,7 @@ bool LowerGlobalConstantArraySelect::runOnModule(Module &M) {
   if (verifyModule(M, &errs()))
     llvm_unreachable("Error: LowerGlobalConstantArraySelect fails...");
 
-  return false;
+  return Changed;
 }
 
 // Check if an instruction is a GEP that accesses a global constant array with a
