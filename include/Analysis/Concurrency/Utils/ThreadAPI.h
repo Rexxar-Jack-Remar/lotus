@@ -291,6 +291,19 @@ public:
   JoinArgIndices getJoinArgIndices(const llvm::Function *F) const;
 
 private:
+  /// Return true if the callee is registered in the explicit API map/config.
+  bool hasMappedAPIEntry(const llvm::Function *F) const;
+
+  /// Return true for std::thread-like constructors whose operand layout is not
+  /// pthread-compatible.
+  bool isCppThreadLikeFork(const llvm::Function *F) const;
+
+  /// Safely fetch a call operand, returning nullptr when the argument is absent.
+  const llvm::Value *getCallArg(const llvm::Instruction *inst, unsigned idx) const;
+
+  /// Best-effort extraction of a direct callable passed to std::thread.
+  const llvm::Value *getCppThreadCallable(const llvm::Instruction *inst) const;
+
   /// API map, from a string to threadAPI type
   TDAPIMap tdAPIMap;
   std::unordered_map<std::string, ForkArgIndices> m_fork_args;
@@ -372,10 +385,12 @@ public:
   //@{
   /// Return the thread handle argument (configurable via thread.spec; default 0)
   inline const llvm::Value *getForkedThread(const llvm::Instruction *inst) const {
-    assert(isTDFork(inst) && "not a thread fork function!");
-    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!isTDFork(inst))
+      return nullptr;
+    if (isCppThreadLikeFork(getCallee(inst)) || !hasMappedAPIEntry(getCallee(inst)))
+      return nullptr;
     unsigned idx = getForkArgIndices(getCallee(inst)).thread_arg;
-    return cb->getArgOperand(idx);
+    return getCallArg(inst, idx);
   }
   inline const llvm::Value *getForkedThread(const llvm::CallBase *cb) const {
     return getForkedThread(llvm::dyn_cast<llvm::Instruction>(cb));
@@ -383,10 +398,16 @@ public:
 
   /// Return the start-routine argument (configurable; default 2)
   inline const llvm::Value *getForkedFun(const llvm::Instruction *inst) const {
-    assert(isTDFork(inst) && "not a thread fork function!");
-    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!isTDFork(inst))
+      return nullptr;
+    if (isCppThreadLikeFork(getCallee(inst)))
+      return getCppThreadCallable(inst);
+    if (!hasMappedAPIEntry(getCallee(inst)))
+      return nullptr;
     unsigned idx = getForkArgIndices(getCallee(inst)).start_routine_arg;
-    return cb->getArgOperand(idx)->stripPointerCasts();
+    if (const llvm::Value *arg = getCallArg(inst, idx))
+      return arg->stripPointerCasts();
+    return nullptr;
   }
   inline const llvm::Value *getForkedFun(const llvm::CallBase *cb) const {
     return getForkedFun(llvm::dyn_cast<llvm::Instruction>(cb));
@@ -394,10 +415,12 @@ public:
 
   /// Return the user-argument passed to the start routine (configurable; default 3)
   inline const llvm::Value *getActualParmAtForkSite(const llvm::Instruction *inst) const {
-    assert(isTDFork(inst) && "not a thread fork function!");
-    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!isTDFork(inst))
+      return nullptr;
+    if (isCppThreadLikeFork(getCallee(inst)) || !hasMappedAPIEntry(getCallee(inst)))
+      return nullptr;
     unsigned idx = getForkArgIndices(getCallee(inst)).arg_arg;
-    return cb->getArgOperand(idx);
+    return getCallArg(inst, idx);
   }
   inline const llvm::Value *getActualParmAtForkSite(const llvm::CallBase *cb) const {
     return getActualParmAtForkSite(llvm::dyn_cast<llvm::Instruction>(cb));

@@ -135,6 +135,53 @@ void ThreadAPI::addEntry(const std::string &name, TD_TYPE type) {
   tdAPIMap[name] = type;
 }
 
+bool ThreadAPI::hasMappedAPIEntry(const Function *F) const {
+  if (!F)
+    return false;
+
+  std::string name = F->getName().str();
+  if (tdAPIMap.count(name))
+    return true;
+
+  if (!name.empty() && name[0] == '\01')
+    name.erase(0, 1);
+  if (!name.empty() && name[0] == '_')
+    name.erase(0, 1);
+  return tdAPIMap.count(name) != 0;
+}
+
+bool ThreadAPI::isCppThreadLikeFork(const Function *F) const {
+  if (!F)
+    return false;
+  StringRef name = F->getName();
+  return CppThreadingModel::isFork(name) || CppThreadingModel::isJthreadConstructor(name);
+}
+
+const Value *ThreadAPI::getCallArg(const Instruction *inst, unsigned idx) const {
+  const CallBase *cb = getLLVMCallSite(inst);
+  if (!cb || idx >= cb->arg_size())
+    return nullptr;
+  return cb->getArgOperand(idx);
+}
+
+const Value *ThreadAPI::getCppThreadCallable(const Instruction *inst) const {
+  const CallBase *cb = getLLVMCallSite(inst);
+  if (!cb)
+    return nullptr;
+
+  // Skip the constructor `this` parameter and look for a direct function-like
+  // operand. If none exists, callers fall back to unresolved-fork conservatism.
+  for (unsigned idx = 1; idx < cb->arg_size(); ++idx) {
+    const Value *candidate = cb->getArgOperand(idx);
+    if (!candidate)
+      continue;
+    candidate = candidate->stripPointerCasts();
+    if (isa<Function>(candidate))
+      return candidate;
+  }
+  return nullptr;
+}
+
 ThreadAPI::TD_TYPE ThreadAPI::stringToType(StringRef s) {
   static const auto *type_map =
       []() -> std::unordered_map<std::string, ThreadAPI::TD_TYPE> * {

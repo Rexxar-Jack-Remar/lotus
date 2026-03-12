@@ -17,6 +17,12 @@ Function *getCalledFunction(const CallInst &CI) {
   }
   return CalledF;
 }
+
+static bool isIntrinsicCall(const CallInst &CI) {
+  Function *CalledF = getCalledFunction(CI);
+  return CalledF && CalledF->isIntrinsic();
+}
+
 void DebugLocation::printDebugLocation() {
   for (auto& Iter : FileLinesMap) {
     LLVM_DEBUG(dbgs() << "\n file:" << Iter.first);
@@ -374,9 +380,6 @@ bool MemoryLdStMapClass::FuncParamInfoClass::doValuesAlias(
 
 void MemoryLdStMapClass::FuncParamInfoClass::handleFuncCall(
     const CallInst &CI, const MemoryLdStMapClass &MemInfo) {
-  auto *F = CI.getCalledFunction();
-  LLVM_DEBUG(dbgs() << "\n handle func alias: " << F->getName()
-                    << " CI:" << CI);
   auto IndirectCallIter = MemUseDefGlobalAnalysis::IndirectCallsMap.find(&CI);
   if (IndirectCallIter != MemUseDefGlobalAnalysis::IndirectCallsMap.end()) {
     for (auto Iter : IndirectCallIter->second) {
@@ -385,6 +388,11 @@ void MemoryLdStMapClass::FuncParamInfoClass::handleFuncCall(
       setValuesAlias(Arg, Param);
     }
   } else {
+    auto *F = getCalledFunction(CI);
+    if (F == nullptr)
+      return;
+    LLVM_DEBUG(dbgs() << "\n handle func alias: " << F->getName()
+                      << " CI:" << CI);
     SmallVector<ConstValuePtr, 5> FParams;
     for (auto &A : F->args()) {
       FParams.push_back(&A);
@@ -659,9 +667,11 @@ ConstValuePtr MemoryLdStMapClass::insertLoadStore(ConstInstrPtr LdSt) {
 void MemoryLdStMapClass::addReachingCall(ConstInstrPtr User,
                                          ConstInstrPtr Call) {
   const auto *C = dyn_cast<CallInst>(Call);
+  if (C == nullptr)
+    return;
   auto *F = getCalledFunction(*C); // C->getCalledFunction();
   // No need to track intrinsic functions.
-  if (F->isIntrinsic() /*|| F->isDeclaration()*/)
+  if (F && F->isIntrinsic() /*|| F->isDeclaration()*/)
     return;
   CallInstToUsersMap[Call].insert(User);
 }
@@ -826,7 +836,7 @@ bool MemoryLdStMapClass::insertReachingDef(ConstInstrPtr MemUseInstr,
   bool NewElemInserted = false;
   if (const auto *C = dyn_cast<CallInst>(MemUseInstr)) {
     auto *F = getCalledFunction(*C); // C->getCalledFunction();
-    if (F->isIntrinsic() /*|| F->isDeclaration()*/)
+    if (F && F->isIntrinsic() /*|| F->isDeclaration()*/)
       return NewElemInserted;
     CheckAlias = false;
   }
@@ -1073,7 +1083,7 @@ void MemorySSAUseDefWalker::addToGeneratingDefs(
     LLVM_DEBUG(dbgs() << "\n Adding reaching Call instruction::" << *Call);
     // No need to track intrinsic functions, since they cannot generate any
     // defs.
-    if (!Call->getCalledFunction()->isIntrinsic())
+    if (!isIntrinsicCall(*Call))
       BBGeneratingCalls[parentBB].insert(Call);
   }
   const auto *memVal = LdStToMem.insertLoadStore(Instr);
@@ -1372,9 +1382,9 @@ void MemorySSAUseDefWalker::computeGenDefs(
         MemInstr = MemDef->getMemoryInst();
         if (MemInstr == nullptr)
           continue;
-        if (isa<CallInst>(MemInstr) &&
-            (dyn_cast<CallInst>(MemInstr))->getCalledFunction()->isIntrinsic())
-          continue;
+        if (const auto *Call = dyn_cast<CallInst>(MemInstr))
+          if (isIntrinsicCall(*Call))
+            continue;
         LdStToMem.insertLoadStore(MemInstr);
         LLVM_DEBUG(dbgs() << "\n Memdef:" << *MemDef);
         addToGeneratingDefs(MemDef, BBGeneratingDefs, BBGeneratingCalls);
@@ -1401,9 +1411,9 @@ void MemorySSAUseDefWalker::updateBasicBlock(const BasicBlock *BB) {
       continue;
     if (const auto *MemDef = dyn_cast<MemoryDef>(&MA)) {
       MemInstr = MemDef->getMemoryInst();
-      if (isa<CallInst>(MemInstr) &&
-          (dyn_cast<CallInst>(MemInstr))->getCalledFunction()->isIntrinsic())
-        continue;
+      if (const auto *Call = dyn_cast<CallInst>(MemInstr))
+        if (isIntrinsicCall(*Call))
+          continue;
       LLVM_DEBUG(dbgs() << "\n Memdef:" << *MemDef);
       if (isa<CallInst>(MemInstr)) {
         LdStToMem.insertReachingDef(MemInstr, ReachingDefsATBB,
@@ -1413,16 +1423,16 @@ void MemorySSAUseDefWalker::updateBasicBlock(const BasicBlock *BB) {
         ReachingCalls.insert(MemInstr);
       }
       ReachingDefsATBB.insert(MemInstr);
-    } else if (const auto *MemUse = dyn_cast<MemoryUse>(&MA)) {
-      MemInstr = MemUse->getMemoryInst();
-      LLVM_DEBUG(dbgs() << "\n Memuse:" << *MemUse);
-      auto *UserInstr = MemUse->getMemoryInst();
-      if (isa<CallInst>(UserInstr)) {
-        if ((dyn_cast<CallInst>(UserInstr))->getCalledFunction()->isIntrinsic())
-          continue;
-        ReachingCalls.insert(MemInstr);
-        LdStToMem.insertReachingDef(UserInstr, ReachingDefsATBB,
-                                    /*Donot check for aliasing, since the memory
+      } else if (const auto *MemUse = dyn_cast<MemoryUse>(&MA)) {
+        MemInstr = MemUse->getMemoryInst();
+        LLVM_DEBUG(dbgs() << "\n Memuse:" << *MemUse);
+        auto *UserInstr = MemUse->getMemoryInst();
+        if (isa<CallInst>(UserInstr)) {
+          if (isIntrinsicCall(*cast<CallInst>(UserInstr)))
+            continue;
+          ReachingCalls.insert(MemInstr);
+          LdStToMem.insertReachingDef(UserInstr, ReachingDefsATBB,
+                                      /*Donot check for aliasing, since the memory
                                        written is not known for call inst.*/
                                     false);
       }
@@ -1688,8 +1698,7 @@ void InterproceduralMemDFA::handleReachingDefsIntoCall(const CallInst &CI,
   // auto ThisFunc = CI.getFunction();
   // auto LdStToMemFunc = FuncToMemInfo[ThisFunc];
   Function *CalledF = getCalledFunction(CI); // nullptr ;
-  assert(CalledF != nullptr && "Cannot get the called function ");
-  if (CalledF->isDeclaration())
+  if (CalledF == nullptr || CalledF->isDeclaration())
     return;
   LLVM_DEBUG(dbgs() << "\n Called F ::" << CalledF->getName());
   // Record the aliasing information of the actual parameter and the formal
@@ -1754,8 +1763,7 @@ void InterproceduralMemDFA::updateReachingDefsDueToCall(
     //  Iter->second->getParent();
     //} else
     //  CalledF = CallInstr->getCalledFunction();
-    assert(CalledF != nullptr && "Cannot get the called function ");
-    if (CalledF->isDeclaration())
+    if (CalledF == nullptr || CalledF->isDeclaration())
       continue;
     // TODO: no def generated, but we need to propagate into the func, cannot
     // continue here. if (!EXISTSinMap(FuncToMemInfo, CalledF)) continue;
@@ -1837,7 +1845,8 @@ void InterproceduralMemDFA::updateReachingDefsOfBB(
       //  = Iter->second->getParent();
       //} else
       //  CalledF = CallInstr->getCalledFunction();
-      assert(CalledF != nullptr && "Cannot get the called function ");
+      if (CalledF == nullptr)
+        continue;
       // if (!EXISTSinMap(FuncToMemInfo, CalledF)) continue;
       LLVM_DEBUG(dbgs() << "\n Called F ::" << CalledF->getName());
       FuncQueue.push(CalledF);

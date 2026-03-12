@@ -96,3 +96,4 @@ callgrind.out.*
 dist/*
 docs/build
 /.vs
+.worktrees/
