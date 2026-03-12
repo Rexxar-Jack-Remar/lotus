@@ -203,8 +203,16 @@ inline bool isWaitForCompletion(const llvm::StringRef& funcName) {
          funcName.equals("wait_for_completion_timeout");
 }
 
+inline bool isCompleteOne(const llvm::StringRef& funcName) {
+  return funcName.equals("complete");
+}
+
+inline bool isCompleteAll(const llvm::StringRef& funcName) {
+  return funcName.equals("complete_all");
+}
+
 inline bool isComplete(const llvm::StringRef& funcName) {
-  return funcName.equals("complete") || funcName.equals("complete_all");
+  return isCompleteOne(funcName) || isCompleteAll(funcName);
 }
 
 // ============================================================================

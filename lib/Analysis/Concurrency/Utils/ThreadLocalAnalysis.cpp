@@ -4,6 +4,7 @@
  */
 
 #include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
@@ -122,6 +123,7 @@ bool ThreadLocalAnalysis::escapesThread(const Value *val) const {
   
   worklist.push_back(val);
   visited.insert(val);
+  ThreadAPI *thread_api = ThreadAPI::getThreadAPI();
   
   while (!worklist.empty()) {
     const Value *current = worklist.front();
@@ -153,28 +155,44 @@ bool ThreadLocalAnalysis::escapesThread(const Value *val) const {
         }
       }
       else if (const CallBase *call = dyn_cast<CallBase>(user)) {
-        const Function *callee = call->getCalledFunction();
-        if (!callee) {
-          callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+        const unsigned op_no = use.getOperandNo();
+        const bool is_call_arg = op_no < call->arg_size();
+        const bool no_capture = is_call_arg && call->doesNotCapture(op_no);
+
+        // Passing an address to thread creation APIs is a direct cross-thread escape.
+        if (thread_api && thread_api->isTDFork(call)) {
+          return true;
         }
-        if (callee) {
-          StringRef name = callee->getName();
-          
-          // Known thread-creation functions = escape
-          if (name.contains("pthread_create") || 
-              name.contains("std::thread") ||
-              name.contains("std::async")) {
+
+        const Function *callee = thread_api ? thread_api->getCallee(call) : nullptr;
+        if (!callee) {
+          // Unresolved call target (e.g., function pointer/virtual dispatch):
+          // unless we can prove nocapture, conservatively treat as escaping.
+          if (is_call_arg && !no_capture) {
             return true;
           }
-          
-          // Unknown external functions = potential escape (conservative)
-          if (callee->isDeclaration() && !callee->isIntrinsic()) {
-            // Allow some known safe functions
-            if (!name.startswith("llvm.") && 
-                !name.equals("malloc") && 
-                !name.equals("free")) {
-              return true;
+          continue;
+        }
+
+        StringRef name = callee->getName();
+
+        // Known thread/task creation functions = escape
+        if (name.contains("pthread_create") ||
+            name.contains("std::thread") ||
+            name.contains("std::async")) {
+          return true;
+        }
+
+        // Unknown external functions = potential escape (conservative), unless
+        // the specific argument is marked nocapture.
+        if (callee->isDeclaration() && !callee->isIntrinsic()) {
+          if (!name.startswith("llvm.") &&
+              !name.equals("malloc") &&
+              !name.equals("free")) {
+            if (is_call_arg && no_capture) {
+              continue;
             }
+            return true;
           }
         }
       }

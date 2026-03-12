@@ -15,6 +15,7 @@
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
+#include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
@@ -157,6 +158,7 @@ private:
   // Thread-flow graph owned by this analysis
   ThreadAPI *m_thread_api = nullptr;
   std::unique_ptr<ThreadFlowGraph> m_tfg;
+  std::unique_ptr<llvm::CallGraph> m_call_graph;
 
   // Static thread management
   std::unordered_map<Context, StaticThreadID, ContextHash> m_ctx_to_stid;

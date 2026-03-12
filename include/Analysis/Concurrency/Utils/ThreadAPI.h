@@ -259,7 +259,8 @@ public:
     // Linux Kernel Completion Variables
     TD_KERNEL_INIT_COMPLETION,   ///< init_completion
     TD_KERNEL_WAIT_FOR_COMPLETION, ///< wait_for_completion, wait_for_completion_interruptible, wait_for_completion_killable, wait_for_completion_timeout
-    TD_KERNEL_COMPLETE,           ///< complete, complete_all
+    TD_KERNEL_COMPLETE,           ///< complete (wakes one waiter)
+    TD_KERNEL_COMPLETE_ALL,       ///< complete_all (wakes all waiters)
     
     // Linux Kernel Wait Queues
     TD_KERNEL_INIT_WAITQUEUE_HEAD, ///< init_waitqueue_head
@@ -316,6 +317,7 @@ private:
 public:
   /// Get the function type if it is a threadAPI function
   TD_TYPE getType(const llvm::Function *F) const;
+  TD_TYPE getType(const llvm::CallBase *cb) const { return getType(getCallee(cb)); }
   
   /// Get the concurrency configuration
   const concurrency::ConcurrencyConfig& getConfig() const { return m_config; }
@@ -601,16 +603,12 @@ public:
   //@{
   inline bool isTDBarWait(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_BAR_WAIT ||
-           // Linux kernel barriers (RCU synchronize acts as barrier)
-           t == TD_KERNEL_SYNCHRONIZE_RCU;
+    return t == TD_BAR_WAIT;
   }
 
   inline bool isTDBarWait(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
-    return t == TD_BAR_WAIT ||
-           // Linux kernel barriers (RCU synchronize acts as barrier)
-           t == TD_KERNEL_SYNCHRONIZE_RCU;
+    return t == TD_BAR_WAIT;
   }
   //@}
 
@@ -620,6 +618,8 @@ public:
   inline const llvm::Value *getBarrierVal(const llvm::Instruction *inst) const {
     assert(isTDBarWait(inst) && "not a barrier wait function");
     const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!cb || cb->arg_size() < 1)
+      return nullptr;
     return cb->getArgOperand(0);
   }
   inline const llvm::Value *getBarrierVal(const llvm::CallBase *cb) const {
@@ -631,16 +631,12 @@ public:
   //@{
   inline bool isTDCondWait(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_COND_WAIT ||
-           // Linux kernel completion variables and wait queues
-           t == TD_KERNEL_WAIT_FOR_COMPLETION || t == TD_KERNEL_WAIT_EVENT;
+    return t == TD_COND_WAIT;
   }
 
   inline bool isTDCondWait(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
-    return t == TD_COND_WAIT ||
-           // Linux kernel completion variables and wait queues
-           t == TD_KERNEL_WAIT_FOR_COMPLETION || t == TD_KERNEL_WAIT_EVENT;
+    return t == TD_COND_WAIT;
   }
   //@}
 
@@ -648,16 +644,12 @@ public:
   //@{
   inline bool isTDCondSignal(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_COND_SIGNAL ||
-           // Linux kernel completion variables and wait queues
-           t == TD_KERNEL_COMPLETE || t == TD_KERNEL_WAKE_UP;
+    return t == TD_COND_SIGNAL;
   }
 
   inline bool isTDCondSignal(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
-    return t == TD_COND_SIGNAL ||
-           // Linux kernel completion variables and wait queues
-           t == TD_KERNEL_COMPLETE || t == TD_KERNEL_WAKE_UP;
+    return t == TD_COND_SIGNAL;
   }
   //@}
 
@@ -665,16 +657,12 @@ public:
   //@{
   inline bool isTDCondBroadcast(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_COND_BROADCAST ||
-           // Linux kernel completion variables (complete_all broadcasts)
-           t == TD_KERNEL_COMPLETE; // complete_all acts as broadcast
+    return t == TD_COND_BROADCAST;
   }
 
   inline bool isTDCondBroadcast(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
-    return t == TD_COND_BROADCAST ||
-           // Linux kernel completion variables (complete_all broadcasts)
-           t == TD_KERNEL_COMPLETE; // complete_all acts as broadcast
+    return t == TD_COND_BROADCAST;
   }
   //@}
 
@@ -686,6 +674,8 @@ public:
             isTDCondBroadcast(inst)) &&
            "not a condition variable function");
     const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!cb || cb->arg_size() < 1)
+      return nullptr;
     return cb->getArgOperand(0);
   }
   inline const llvm::Value *getCondVal(const llvm::CallBase *cb) const {
@@ -699,6 +689,8 @@ public:
   inline const llvm::Value *getCondMutex(const llvm::Instruction *inst) const {
     assert(isTDCondWait(inst) && "not a condition wait function");
     const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!cb || cb->arg_size() < 2)
+      return nullptr;
     return cb->getArgOperand(1);
   }
   inline const llvm::Value *getCondMutex(const llvm::CallBase *cb) const {

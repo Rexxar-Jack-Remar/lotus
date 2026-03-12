@@ -580,7 +580,9 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_INIT_COMPLETION;
     if (LinuxKernelModel::isWaitForCompletion(name))
       return TD_KERNEL_WAIT_FOR_COMPLETION;
-    if (LinuxKernelModel::isComplete(name))
+    if (LinuxKernelModel::isCompleteAll(name))
+      return TD_KERNEL_COMPLETE_ALL;
+    if (LinuxKernelModel::isCompleteOne(name))
       return TD_KERNEL_COMPLETE;
     
     // Wait Queues
@@ -608,7 +610,10 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
  */
 const Function *ThreadAPI::getCallee(const Instruction *inst) const {
   if (const CallBase *cb = dyn_cast<CallBase>(inst)) {
-    return cb->getCalledFunction();
+    if (const Function *direct = cb->getCalledFunction())
+      return direct;
+    if (const Value *called = cb->getCalledOperand())
+      return dyn_cast<Function>(called->stripPointerCasts());
   }
   return nullptr;
 }
@@ -618,7 +623,10 @@ const Function *ThreadAPI::getCallee(const Instruction *inst) const {
  */
 const Function *ThreadAPI::getCallee(const CallBase *cb) const {
   if (cb) {
-    return cb->getCalledFunction();
+    if (const Function *direct = cb->getCalledFunction())
+      return direct;
+    if (const Value *called = cb->getCalledOperand())
+      return dyn_cast<Function>(called->stripPointerCasts());
   }
   return nullptr;
 }
@@ -949,6 +957,7 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
   case TD_KERNEL_INIT_COMPLETION: return "TD_KERNEL_INIT_COMPLETION";
   case TD_KERNEL_WAIT_FOR_COMPLETION: return "TD_KERNEL_WAIT_FOR_COMPLETION";
   case TD_KERNEL_COMPLETE:    return "TD_KERNEL_COMPLETE";
+  case TD_KERNEL_COMPLETE_ALL: return "TD_KERNEL_COMPLETE_ALL";
   case TD_KERNEL_INIT_WAITQUEUE_HEAD: return "TD_KERNEL_INIT_WAITQUEUE_HEAD";
   case TD_KERNEL_WAIT_EVENT:  return "TD_KERNEL_WAIT_EVENT";
   case TD_KERNEL_WAKE_UP:     return "TD_KERNEL_WAKE_UP";

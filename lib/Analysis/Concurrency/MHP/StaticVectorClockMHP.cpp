@@ -696,6 +696,7 @@ void StaticVectorClockMHP::printResults(raw_ostream &os) const {
 
 void StaticVectorClockMHP::buildThreadFlowGraph() {
   m_tfg = std::make_unique<ThreadFlowGraph>();
+  m_call_graph = std::make_unique<CallGraph>(m_module);
 
   Function *main_func = m_module.getFunction("main");
   if (!main_func) {
@@ -808,8 +809,10 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
         } else if (m_thread_api->isTDBarWait(&inst)) {
           handleBarrier(&inst, node);
         } else {
-          const Function *callee = cb->getCalledFunction();
-          if (callee && !callee->isDeclaration()) {
+          auto processCallee = [&](const Function *callee) {
+            if (!callee || callee->isDeclaration())
+              return;
+
             CallContextID callee_ctx = node->getNodeID();
             processFunction(callee, tid, callee_ctx);
             SyncNode *callee_entry =
@@ -819,23 +822,42 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
             }
             SyncNode *callee_exit =
                 m_tfg->getFunctionExitNode(tid, callee, callee_ctx);
-            if (callee_exit) {
-              const Instruction *next_inst = inst.getNextNode();
-              if (next_inst) {
-                SyncNode *return_site = m_tfg->getNode(next_inst, tid, ctx);
+            if (!callee_exit) {
+              return;
+            }
+
+            const Instruction *next_inst = inst.getNextNode();
+            if (next_inst) {
+              SyncNode *return_site = m_tfg->getNode(next_inst, tid, ctx);
+              if (return_site) {
+                m_tfg->addRetEdge(callee_exit, return_site);
+                m_ret_to_call[return_site] = node;
+              }
+            } else if (inst.isTerminator()) {
+              for (const BasicBlock *succ : successors(inst.getParent())) {
+                if (succ->empty()) {
+                  continue;
+                }
+                SyncNode *return_site = m_tfg->getNode(&succ->front(), tid, ctx);
                 if (return_site) {
                   m_tfg->addRetEdge(callee_exit, return_site);
                   m_ret_to_call[return_site] = node;
                 }
-              } else if (inst.isTerminator()) {
-                for (const BasicBlock *succ : successors(inst.getParent())) {
-                  if (!succ->empty()) {
-                    SyncNode *return_site = m_tfg->getNode(&succ->front(), tid, ctx);
-                    if (return_site) {
-                      m_tfg->addRetEdge(callee_exit, return_site);
-                      m_ret_to_call[return_site] = node;
-                    }
-                  }
+              }
+            }
+          };
+
+          if (const Function *direct = m_thread_api->getCallee(cb)) {
+            processCallee(direct);
+          } else if (m_call_graph) {
+            if (CallGraphNode *cgNode = (*m_call_graph)[cb->getFunction()]) {
+              for (auto &callRecord : *cgNode) {
+                if (!callRecord.first.hasValue() ||
+                    dyn_cast_or_null<CallBase>(*callRecord.first) != cb) {
+                  continue;
+                }
+                if (CallGraphNode *calleeNode = callRecord.second) {
+                  processCallee(calleeNode->getFunction());
                 }
               }
             }
@@ -1065,6 +1087,9 @@ void StaticVectorClockMHP::handleCondSignal(const Instruction *signal_inst,
 void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
                                          SyncNode *node) {
   const Value *barrier = m_thread_api->getBarrierVal(barrier_inst);
+  if (!barrier) {
+    barrier = barrier_inst;
+  }
   node->setLockValue(barrier);
   m_barrier_waits[barrier].push_back(node);
 }

@@ -722,9 +722,7 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
   } else if (m_thread_api->isTDCondWait(inst)) {
     // pthread_cond_wait atomically releases the mutex and re-acquires on return; lock set unchanged.
   } else if (const CallBase *call = dyn_cast<CallBase>(inst)) {
-    const Function *func = call->getCalledFunction();
-    if (func) {
-      ThreadAPI::TD_TYPE type = m_thread_api->getType(func);
+    ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
       
       // Handle modern C++ synchronization primitives
       switch (type) {
@@ -899,7 +897,6 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         default:
           break;
       }
-    }
     
     // Handle regular function calls with interprocedural summaries (existing code continues)
     // Try-lock is handled above (not added to set). Handle other calls.
@@ -1008,11 +1005,9 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       }
     }
   } else if (const CallBase *call = dyn_cast<CallBase>(inst)) {
-    const Function *func = call->getCalledFunction();
-    if (func) {
-      ThreadAPI::TD_TYPE type = m_thread_api->getType(func);
+    ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
       
-      switch (type) {
+    switch (type) {
         case ThreadAPI::TD_SHARED_RDLOCK:
           // std::shared_mutex::lock_shared - acquire read lock
           if (call->arg_size() >= 1) {
@@ -1076,7 +1071,6 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         default:
           break;
       }
-    }
   }
 }
 
@@ -1118,12 +1112,8 @@ void LockSetAnalysis::identifyLocks() {
           m_lock_acquires[lock].push_back(inst);
 
           // Check for try-lock
-          if (const CallBase *call = dyn_cast<CallBase>(inst)) {
-            if (call->getCalledFunction() &&
-                call->getCalledFunction()->getName().contains("trylock")) {
-              m_lock_try_acquires[lock].push_back(inst);
-            }
-          }
+          if (m_thread_api->isTryLock(inst))
+            m_lock_try_acquires[lock].push_back(inst);
         }
       } else if (m_thread_api->isTDRelease(inst)) {
         LockID lock = getLockValue(inst);
@@ -1262,12 +1252,7 @@ LockID LockSetAnalysis::getCppWrapperLockValue(const Instruction *inst) const {
     return nullptr;
   }
 
-  const Function *func = call->getCalledFunction();
-  if (!func) {
-    return nullptr;
-  }
-
-  switch (m_thread_api->getType(func)) {
+  switch (m_thread_api->getType(call)) {
   case ThreadAPI::TD_SHARED_RDLOCK:
   case ThreadAPI::TD_SHARED_WRLOCK:
   case ThreadAPI::TD_SHARED_UNLOCK:
@@ -1319,12 +1304,7 @@ bool LockSetAnalysis::isLockOperation(const Instruction *inst) const {
     return false;
   }
 
-  const Function *func = call->getCalledFunction();
-  if (!func) {
-    return false;
-  }
-
-  switch (m_thread_api->getType(func)) {
+  switch (m_thread_api->getType(call)) {
   case ThreadAPI::TD_SHARED_RDLOCK:
   case ThreadAPI::TD_SHARED_WRLOCK:
   case ThreadAPI::TD_SHARED_UNLOCK:

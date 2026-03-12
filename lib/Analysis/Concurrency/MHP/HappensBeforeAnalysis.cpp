@@ -58,11 +58,12 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       
       // C++11 future/promise synchronization
       const CallBase *call = dyn_cast<CallBase>(inst);
-      if (call && call->getCalledFunction()) {
-        const Function *callee = call->getCalledFunction();
-        ThreadAPI::TD_TYPE type = threadAPI->getType(callee);
+      if (call) {
+        const Function *callee = threadAPI->getCallee(call);
+        ThreadAPI::TD_TYPE type = threadAPI->getType(call);
 
-        if (callee->getName().contains("get_future") && call->arg_size() >= 1) {
+        if (callee && callee->getName().contains("get_future") &&
+            call->arg_size() >= 1) {
           const Value *promise_obj = traceSharedState(call->getArgOperand(0));
           if (promise_obj) {
             m_future_shared_state[call] = promise_obj;

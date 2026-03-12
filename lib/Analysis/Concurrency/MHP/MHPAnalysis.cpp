@@ -517,7 +517,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
           handleBarrier(&inst, node);
         } else {
           // Handle both direct and indirect calls
-          const Function *callee = cb->getCalledFunction();
+          const Function *callee = m_thread_api->getCallee(cb);
 
           if (!callee) {
             // Indirect call: use call graph to find possible callees

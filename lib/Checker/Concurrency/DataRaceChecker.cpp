@@ -546,9 +546,8 @@ void DataRaceChecker::buildSyncObjectSet() {
         v = m_threadAPI->getBarrierVal(inst);
 
       // Modern C++ synchronization primitives
-      else if (cb->getCalledFunction()) {
-        const Function *func = cb->getCalledFunction();
-        ThreadAPI::TD_TYPE type = m_threadAPI->getType(func);
+      else {
+        ThreadAPI::TD_TYPE type = m_threadAPI->getType(cb);
 
         switch (type) {
         case ThreadAPI::TD_SHARED_RDLOCK:

@@ -19,6 +19,9 @@ bool RAIILockTracker::isRAIILockConstructor(const llvm::Instruction *inst) {
   if (!call) return false;
   
   const auto *func = call->getCalledFunction();
+  if (!func) {
+    func = llvm::dyn_cast<llvm::Function>(call->getCalledOperand()->stripPointerCasts());
+  }
   if (!func || !func->hasName()) return false;
   
   llvm::StringRef name = func->getName();
@@ -33,6 +36,9 @@ bool RAIILockTracker::isRAIILockDestructor(const llvm::Instruction *inst) {
   if (!call) return false;
   
   const auto *func = call->getCalledFunction();
+  if (!func) {
+    func = llvm::dyn_cast<llvm::Function>(call->getCalledOperand()->stripPointerCasts());
+  }
   if (!func || !func->hasName()) return false;
   
   llvm::StringRef name = func->getName();
@@ -47,6 +53,9 @@ bool RAIILockTracker::isSharedLock(const llvm::Instruction *inst) {
   if (!call) return false;
   
   const auto *func = call->getCalledFunction();
+  if (!func) {
+    func = llvm::dyn_cast<llvm::Function>(call->getCalledOperand()->stripPointerCasts());
+  }
   if (!func || !func->hasName()) return false;
   
   return CppThreadingModel::isSharedLockConstructor(func->getName());
@@ -152,8 +161,12 @@ void RAIILockTracker::processConstructor(const llvm::CallBase *ctor, const llvm:
   lifetime.constructor = ctor;
   lifetime.underlyingLock = extractUnderlyingLock(ctor);
   lifetime.isShared = isSharedLock(ctor);
-  lifetime.isScoped = CppThreadingModel::isScopedLockConstructor(
-      ctor->getCalledFunction()->getName());
+  const llvm::Function *ctorFunc = ctor->getCalledFunction();
+  if (!ctorFunc) {
+    ctorFunc = llvm::dyn_cast<llvm::Function>(ctor->getCalledOperand()->stripPointerCasts());
+  }
+  lifetime.isScoped =
+      ctorFunc && CppThreadingModel::isScopedLockConstructor(ctorFunc->getName());
   
   // Find all destructor calls for this lock object
   lifetime.destructors = findDestructorsForLockObject(lockObj, F);
