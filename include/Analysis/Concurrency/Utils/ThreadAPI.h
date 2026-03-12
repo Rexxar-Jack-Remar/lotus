@@ -513,50 +513,22 @@ public:
   /// Return true if this call acquire a lock (mutex or rwlock read/write)
   //@{
   inline bool isTDAcquire(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
-    return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_RDLOCK ||
-           t == TD_RWLOCK_WRLOCK ||
-           // Linux kernel locks
-           t == TD_KERNEL_SPIN_LOCK || t == TD_KERNEL_SPIN_TRYLOCK ||
-           t == TD_KERNEL_MUTEX_LOCK || t == TD_KERNEL_MUTEX_TRYLOCK ||
-           t == TD_KERNEL_DOWN || t == TD_KERNEL_READ_LOCK ||
-           t == TD_KERNEL_WRITE_LOCK || t == TD_KERNEL_DOWN_READ ||
-           t == TD_KERNEL_DOWN_WRITE;
+    return isExclusiveLockAcquire(inst) || isSharedLockAcquire(inst);
   }
 
   inline bool isTDAcquire(const llvm::CallBase *cb) const {
-    TD_TYPE t = getType(getCallee(cb));
-    return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_RDLOCK ||
-           t == TD_RWLOCK_WRLOCK ||
-           // Linux kernel locks
-           t == TD_KERNEL_SPIN_LOCK || t == TD_KERNEL_SPIN_TRYLOCK ||
-           t == TD_KERNEL_MUTEX_LOCK || t == TD_KERNEL_MUTEX_TRYLOCK ||
-           t == TD_KERNEL_DOWN || t == TD_KERNEL_READ_LOCK ||
-           t == TD_KERNEL_WRITE_LOCK || t == TD_KERNEL_DOWN_READ ||
-           t == TD_KERNEL_DOWN_WRITE;
+    return isExclusiveLockAcquire(cb) || isSharedLockAcquire(cb);
   }
   //@}
 
   /// Return true if this call release a lock
   //@{
   inline bool isTDRelease(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
-    return t == TD_RELEASE ||
-           // Linux kernel locks
-           t == TD_KERNEL_SPIN_UNLOCK || t == TD_KERNEL_MUTEX_UNLOCK ||
-           t == TD_KERNEL_UP || t == TD_KERNEL_READ_UNLOCK ||
-           t == TD_KERNEL_WRITE_UNLOCK || t == TD_KERNEL_UP_READ ||
-           t == TD_KERNEL_UP_WRITE;
+    return isExclusiveLockRelease(inst) || isSharedLockRelease(inst);
   }
 
   inline bool isTDRelease(const llvm::CallBase *cb) const {
-    TD_TYPE t = getType(getCallee(cb));
-    return t == TD_RELEASE ||
-           // Linux kernel locks
-           t == TD_KERNEL_SPIN_UNLOCK || t == TD_KERNEL_MUTEX_UNLOCK ||
-           t == TD_KERNEL_UP || t == TD_KERNEL_READ_UNLOCK ||
-           t == TD_KERNEL_WRITE_UNLOCK || t == TD_KERNEL_UP_READ ||
-           t == TD_KERNEL_UP_WRITE;
+    return isExclusiveLockRelease(cb) || isSharedLockRelease(cb);
   }
   //@}
 
@@ -565,12 +537,14 @@ public:
   inline bool isTryLock(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_TRY_ACQUIRE ||
+           t == TD_SEMAPHORE_TRY_ACQUIRE ||
            // Linux kernel try-locks
            t == TD_KERNEL_SPIN_TRYLOCK || t == TD_KERNEL_MUTEX_TRYLOCK;
   }
   inline bool isTryLock(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
     return t == TD_TRY_ACQUIRE ||
+           t == TD_SEMAPHORE_TRY_ACQUIRE ||
            // Linux kernel try-locks
            t == TD_KERNEL_SPIN_TRYLOCK || t == TD_KERNEL_MUTEX_TRYLOCK;
   }
@@ -615,7 +589,54 @@ public:
     assert((isTDAcquire(inst) || isTDRelease(inst)) &&
            "not a lock acquire or release function");
     const llvm::CallBase *cb = getLLVMCallSite(inst);
-    return cb->getArgOperand(0);
+    if (!cb || cb->arg_size() == 0)
+      return nullptr;
+
+    TD_TYPE t = getType(getCallee(inst));
+    switch (t) {
+    case TD_LOCK_GUARD_CTOR:
+    case TD_UNIQUE_LOCK_CTOR:
+    case TD_SCOPED_LOCK_CTOR:
+    case TD_SHARED_LOCK_CTOR:
+      return cb->arg_size() > 1 ? cb->getArgOperand(1) : nullptr;
+    case TD_SEMAPHORE_ACQUIRE:
+    case TD_SEMAPHORE_RELEASE:
+    case TD_SEMAPHORE_TRY_ACQUIRE:
+    case TD_SHARED_RDLOCK:
+    case TD_SHARED_WRLOCK:
+    case TD_SHARED_UNLOCK:
+    case TD_ACQUIRE:
+    case TD_TRY_ACQUIRE:
+    case TD_RWLOCK_RDLOCK:
+    case TD_RWLOCK_WRLOCK:
+    case TD_RELEASE:
+    case TD_KERNEL_SPIN_LOCK:
+    case TD_KERNEL_SPIN_TRYLOCK:
+    case TD_KERNEL_MUTEX_LOCK:
+    case TD_KERNEL_MUTEX_TRYLOCK:
+    case TD_KERNEL_DOWN:
+    case TD_KERNEL_READ_LOCK:
+    case TD_KERNEL_WRITE_LOCK:
+    case TD_KERNEL_DOWN_READ:
+    case TD_KERNEL_DOWN_WRITE:
+    case TD_KERNEL_SPIN_UNLOCK:
+    case TD_KERNEL_MUTEX_UNLOCK:
+    case TD_KERNEL_UP:
+    case TD_KERNEL_READ_UNLOCK:
+    case TD_KERNEL_WRITE_UNLOCK:
+    case TD_KERNEL_UP_READ:
+    case TD_KERNEL_UP_WRITE:
+      return cb->getArgOperand(0);
+    case TD_LOCK_GUARD_DTOR:
+    case TD_UNIQUE_LOCK_DTOR:
+    case TD_UNIQUE_LOCK_LOCK:
+    case TD_UNIQUE_LOCK_UNLOCK:
+    case TD_SCOPED_LOCK_DTOR:
+    case TD_SHARED_LOCK_DTOR:
+      return nullptr;
+    default:
+      return cb->getArgOperand(0);
+    }
   }
   inline const llvm::Value *getLockVal(const llvm::CallBase *cb) const {
     return getLockVal(llvm::dyn_cast<llvm::Instruction>(cb));
@@ -625,13 +646,11 @@ public:
   /// Return true if this call waits for a barrier
   //@{
   inline bool isTDBarWait(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
-    return t == TD_BAR_WAIT;
+    return isBarrierWaitLike(inst);
   }
 
   inline bool isTDBarWait(const llvm::CallBase *cb) const {
-    TD_TYPE t = getType(getCallee(cb));
-    return t == TD_BAR_WAIT;
+    return isBarrierWaitLike(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
@@ -728,6 +747,57 @@ public:
   // Convenience group predicates (avoid enumerating all enum values at call sites)
   // ========================================================================
 
+  inline bool isExclusiveLockAcquire(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_WRLOCK ||
+           t == TD_LOCK_GUARD_CTOR || t == TD_UNIQUE_LOCK_CTOR ||
+           t == TD_UNIQUE_LOCK_LOCK || t == TD_SCOPED_LOCK_CTOR ||
+           t == TD_SEMAPHORE_ACQUIRE || t == TD_SEMAPHORE_TRY_ACQUIRE ||
+           t == TD_KERNEL_SPIN_LOCK || t == TD_KERNEL_SPIN_TRYLOCK ||
+           t == TD_KERNEL_MUTEX_LOCK || t == TD_KERNEL_MUTEX_TRYLOCK ||
+           t == TD_KERNEL_DOWN || t == TD_KERNEL_WRITE_LOCK ||
+           t == TD_KERNEL_DOWN_WRITE;
+  }
+
+  inline bool isExclusiveLockAcquire(const llvm::CallBase *cb) const {
+    return isExclusiveLockAcquire(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
+  inline bool isExclusiveLockRelease(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_RELEASE || t == TD_LOCK_GUARD_DTOR ||
+           t == TD_UNIQUE_LOCK_DTOR || t == TD_UNIQUE_LOCK_UNLOCK ||
+           t == TD_SCOPED_LOCK_DTOR || t == TD_SEMAPHORE_RELEASE ||
+           t == TD_KERNEL_SPIN_UNLOCK || t == TD_KERNEL_MUTEX_UNLOCK ||
+           t == TD_KERNEL_UP || t == TD_KERNEL_WRITE_UNLOCK ||
+           t == TD_KERNEL_UP_WRITE;
+  }
+
+  inline bool isExclusiveLockRelease(const llvm::CallBase *cb) const {
+    return isExclusiveLockRelease(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
+  inline bool isSharedLockAcquire(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_RWLOCK_RDLOCK || t == TD_SHARED_RDLOCK ||
+           t == TD_SHARED_LOCK_CTOR || t == TD_KERNEL_READ_LOCK ||
+           t == TD_KERNEL_DOWN_READ;
+  }
+
+  inline bool isSharedLockAcquire(const llvm::CallBase *cb) const {
+    return isSharedLockAcquire(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
+  inline bool isSharedLockRelease(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_SHARED_UNLOCK || t == TD_SHARED_LOCK_DTOR ||
+           t == TD_KERNEL_READ_UNLOCK || t == TD_KERNEL_UP_READ;
+  }
+
+  inline bool isSharedLockRelease(const llvm::CallBase *cb) const {
+    return isSharedLockRelease(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
   /// True for any C++20 barrier/latch/semaphore synchronization operation.
   inline bool isBarrierOp(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
@@ -742,6 +812,62 @@ public:
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_SEMAPHORE_ACQUIRE || t == TD_SEMAPHORE_RELEASE ||
            t == TD_SEMAPHORE_TRY_ACQUIRE;
+  }
+
+  inline bool isLatchLike(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_LATCH_COUNT_DOWN || t == TD_LATCH_WAIT ||
+           t == TD_LATCH_ARRIVE_WAIT;
+  }
+
+  inline bool isBarrierWaitLike(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_BAR_WAIT || t == TD_BARRIER_ARRIVE_WAIT ||
+           t == TD_BARRIER_WAIT_CPP20;
+  }
+
+  inline bool isBlockingMPIBarrier(const llvm::Instruction *inst) const {
+    const llvm::Function *callee = getCallee(inst);
+    if (!callee)
+      return false;
+    return getType(callee) == TD_MPI_BARRIER &&
+           callee->getName() == "MPI_Barrier";
+  }
+
+  inline bool isNonBlockingMPIBarrier(const llvm::Instruction *inst) const {
+    const llvm::Function *callee = getCallee(inst);
+    if (!callee)
+      return false;
+    return getType(callee) == TD_MPI_BARRIER &&
+           callee->getName() == "MPI_Ibarrier";
+  }
+
+  inline bool isBlockingMPICollective(const llvm::Instruction *inst) const {
+    const llvm::Function *callee = getCallee(inst);
+    if (!callee)
+      return false;
+    TD_TYPE t = getType(callee);
+    if (!(t == TD_MPI_BCAST || t == TD_MPI_SCATTER || t == TD_MPI_GATHER ||
+          t == TD_MPI_ALLGATHER || t == TD_MPI_ALLTOALL ||
+          t == TD_MPI_REDUCE || t == TD_MPI_ALLREDUCE ||
+          t == TD_MPI_REDUCE_SCATTER || t == TD_MPI_SCAN)) {
+      return false;
+    }
+    return !callee->getName().startswith("MPI_I");
+  }
+
+  inline bool isNonBlockingMPICollective(const llvm::Instruction *inst) const {
+    const llvm::Function *callee = getCallee(inst);
+    if (!callee)
+      return false;
+    TD_TYPE t = getType(callee);
+    if (!(t == TD_MPI_BCAST || t == TD_MPI_SCATTER || t == TD_MPI_GATHER ||
+          t == TD_MPI_ALLGATHER || t == TD_MPI_ALLTOALL ||
+          t == TD_MPI_REDUCE || t == TD_MPI_ALLREDUCE ||
+          t == TD_MPI_REDUCE_SCATTER || t == TD_MPI_SCAN)) {
+      return false;
+    }
+    return callee->getName().startswith("MPI_I");
   }
 
   /// True for any atomic synchronization operation (future/promise/call_once).

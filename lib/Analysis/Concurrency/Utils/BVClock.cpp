@@ -49,6 +49,42 @@ bool BVClock::leq(const BVClock &vc) const{
   return true;
 }
 
+bool BVClock::lt(const BVClock &vc) const{
+  return leq(vc) && *this != vc;
+}
+
+bool BVClock::gt(const BVClock &vc) const{
+  return vc.lt(*this);
+}
+
+bool BVClock::geq(const BVClock &vc) const{
+  return vc.leq(*this);
+}
+
+bool BVClock::operator==(const BVClock &vc) const{
+  return leq(vc) && vc.leq(*this);
+}
+
+bool BVClock::operator!=(const BVClock &vc) const{
+  return !(*this == vc);
+}
+
+bool BVClock::operator<(const BVClock &vc) const{
+  return lt(vc);
+}
+
+bool BVClock::operator<=(const BVClock &vc) const{
+  return leq(vc);
+}
+
+bool BVClock::operator>(const BVClock &vc) const{
+  return gt(vc);
+}
+
+bool BVClock::operator>=(const BVClock &vc) const{
+  return geq(vc);
+}
+
 BVClock &BVClock::operator=(FBVClock &vc){
   const int sz = vc.size();
   vec.resize(sz,false);

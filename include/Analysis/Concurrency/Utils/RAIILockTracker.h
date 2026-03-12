@@ -34,8 +34,8 @@ struct LockLifetime {
   const llvm::AllocaInst *lockObject;     ///< The alloca for the lock object
   const llvm::CallBase *constructor;      ///< Constructor call (acquire point)
   std::vector<const llvm::Instruction *> destructors; ///< Destructor calls (release points)
-  const llvm::Value *underlyingLock;      ///< The actual mutex/lock being protected
-  bool isShared;                          ///< True for shared_lock (read lock)
+  std::vector<const llvm::Value *> underlyingLocks;   ///< Ordered mutexes protected by this RAII object
+  std::vector<bool> sharedModes;                      ///< Per-lock mode: true for shared/read, false for exclusive
   bool isScoped;                          ///< True for scoped_lock (multi-lock)
 };
 
@@ -104,7 +104,8 @@ public:
    * @param ctor Constructor call instruction
    * @return The mutex value being locked, or nullptr
    */
-  static const llvm::Value *extractUnderlyingLock(const llvm::CallBase *ctor);
+  static std::vector<const llvm::Value *>
+  extractUnderlyingLocks(const llvm::CallBase *ctor);
 
   /**
    * @brief Check if this is a shared (read) lock

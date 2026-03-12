@@ -16,6 +16,7 @@
 #include <llvm/IR/Module.h>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 namespace OpenMP {
@@ -45,6 +46,9 @@ struct Dependency {
 struct Task {
   const llvm::Instruction *task_create;  ///< __kmpc_omp_task call
   const llvm::Function *task_function;   ///< Task body function
+  const llvm::Function *parent_context = nullptr; ///< Scheduling context
+  size_t taskgroup_id = 0;               ///< Innermost taskgroup if known
+  size_t sequence_index = 0;             ///< Instruction order within parent context
   std::vector<Dependency> dependencies;  ///< Task dependencies
   std::set<Task *> predecessors;         ///< Tasks that must complete before this
   std::set<Task *> successors;           ///< Tasks that depend on this
@@ -87,6 +91,7 @@ private:
   llvm::Module &m_module;
   std::vector<std::unique_ptr<Task>> m_tasks;
   std::map<const llvm::Instruction *, Task *> m_inst_to_task;
+  std::unordered_map<const llvm::Function *, std::vector<size_t>> m_wait_boundaries;
   
   /**
    * @brief Identify all OpenMP task creation sites

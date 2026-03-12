@@ -51,6 +51,27 @@ LockSetAnalysis::LockSetAnalysis(Function &func)
 void LockSetAnalysis::analyze() {
   errs() << "Starting Lock Set Analysis...\n";
 
+  m_may_locksets_entry.clear();
+  m_may_locksets_exit.clear();
+  m_must_locksets_entry.clear();
+  m_must_locksets_exit.clear();
+  m_may_read_locks_entry.clear();
+  m_may_read_locks_exit.clear();
+  m_may_write_locks_entry.clear();
+  m_may_write_locks_exit.clear();
+  m_must_read_locks_entry.clear();
+  m_must_read_locks_exit.clear();
+  m_must_write_locks_entry.clear();
+  m_must_write_locks_exit.clear();
+  m_all_locks.clear();
+  m_lock_acquires.clear();
+  m_lock_releases.clear();
+  m_lock_try_acquires.clear();
+  m_observed_lock_orders.clear();
+  m_reentrant_locks.clear();
+  m_raii_locks.clear();
+  m_function_summaries.clear();
+
   // Identify all locks in the program
   identifyLocks();
 
@@ -686,11 +707,26 @@ void LockSetAnalysis::computeInterproceduralLockSets() {
 LockSet LockSetAnalysis::transfer(const Instruction *inst,
                                    const LockSet &in_set, bool is_must) const {
   LockSet out_set = in_set;
+  const CallBase *call = dyn_cast<CallBase>(inst);
+  ThreadAPI::TD_TYPE call_type =
+      call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
+  const bool raw_lock_api =
+      call_type == ThreadAPI::TD_ACQUIRE || call_type == ThreadAPI::TD_TRY_ACQUIRE ||
+      call_type == ThreadAPI::TD_RWLOCK_RDLOCK || call_type == ThreadAPI::TD_RWLOCK_WRLOCK ||
+      call_type == ThreadAPI::TD_RELEASE ||
+      call_type == ThreadAPI::TD_KERNEL_SPIN_LOCK || call_type == ThreadAPI::TD_KERNEL_SPIN_TRYLOCK ||
+      call_type == ThreadAPI::TD_KERNEL_MUTEX_LOCK || call_type == ThreadAPI::TD_KERNEL_MUTEX_TRYLOCK ||
+      call_type == ThreadAPI::TD_KERNEL_DOWN || call_type == ThreadAPI::TD_KERNEL_READ_LOCK ||
+      call_type == ThreadAPI::TD_KERNEL_WRITE_LOCK || call_type == ThreadAPI::TD_KERNEL_DOWN_READ ||
+      call_type == ThreadAPI::TD_KERNEL_DOWN_WRITE || call_type == ThreadAPI::TD_KERNEL_SPIN_UNLOCK ||
+      call_type == ThreadAPI::TD_KERNEL_MUTEX_UNLOCK || call_type == ThreadAPI::TD_KERNEL_UP ||
+      call_type == ThreadAPI::TD_KERNEL_READ_UNLOCK || call_type == ThreadAPI::TD_KERNEL_WRITE_UNLOCK ||
+      call_type == ThreadAPI::TD_KERNEL_UP_READ || call_type == ThreadAPI::TD_KERNEL_UP_WRITE;
 
   // Check if this is a lock operation
-  if (m_thread_api->isTDAcquire(inst)) {
-    // Try-lock may fail; without checking return value we don't add to either set
-    if (!m_thread_api->isTryLock(inst)) {
+  if (m_thread_api->isTDAcquire(inst) && raw_lock_api) {
+    // Try-lock may fail, so it is only added to the may-set.
+    if (!m_thread_api->isTryLock(inst) || !is_must) {
       LockID lock = getLockValue(inst);
       if (lock) {
         out_set.insert(lock);
@@ -721,8 +757,8 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
     }
   } else if (m_thread_api->isTDCondWait(inst)) {
     // pthread_cond_wait atomically releases the mutex and re-acquires on return; lock set unchanged.
-  } else if (const CallBase *call = dyn_cast<CallBase>(inst)) {
-    ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
+  } else if (call) {
+    ThreadAPI::TD_TYPE type = call_type;
       
       // Handle modern C++ synchronization primitives
       switch (type) {
@@ -758,20 +794,22 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
             if (raii_it != m_raii_locks.end()) {
               for (const auto &raii_entry : raii_it->second) {
                 const RAIILock::LockLifetime &lifetime = raii_entry.second;
-                if (lifetime.constructor == call && lifetime.underlyingLock) {
-                  LockID lock = getCanonicalLock(lifetime.underlyingLock);
-                  if (lock) {
-                    out_set.insert(lock);
-                    return out_set;
+                if (lifetime.constructor == call &&
+                    !lifetime.underlyingLocks.empty()) {
+                  for (const Value *underlying : lifetime.underlyingLocks) {
+                    if (LockID lock = getCanonicalLock(underlying)) {
+                      out_set.insert(lock);
+                    }
                   }
+                  return out_set;
                 }
               }
             }
             // Fallback to argument-based detection
-            if (call->arg_size() >= 2) {
-              // Second argument is typically the mutex
-              LockID lock = getCanonicalLock(call->getArgOperand(1));
-              if (lock) out_set.insert(lock);
+            for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
+              if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+                out_set.insert(lock);
+              }
             }
           }
           return out_set;
@@ -791,10 +829,12 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
                 const RAIILock::LockLifetime &lifetime = raii_entry.second;
                 // Check if this destructor call corresponds to this lock lifetime
                 for (const Instruction *dtor : lifetime.destructors) {
-                  if (dtor == inst && lifetime.underlyingLock) {
-                    // Found the lock being released
-                    LockID lock = getCanonicalLock(lifetime.underlyingLock);
-                    if (lock) {
+                  if (dtor == inst && !lifetime.underlyingLocks.empty()) {
+                    for (const Value *underlying : lifetime.underlyingLocks) {
+                      LockID lock = getCanonicalLock(underlying);
+                      if (!lock) {
+                        continue;
+                      }
                       out_set.erase(lock);
                       if (is_must && m_alias_analysis) {
                         LockSet to_remove;
@@ -967,21 +1007,40 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
                                          bool is_must) const {
   out_read = in_read;
   out_write = in_write;
+  const CallBase *call = dyn_cast<CallBase>(inst);
+  ThreadAPI::TD_TYPE call_type =
+      call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
+  const bool raw_lock_api =
+      call_type == ThreadAPI::TD_ACQUIRE || call_type == ThreadAPI::TD_TRY_ACQUIRE ||
+      call_type == ThreadAPI::TD_RWLOCK_RDLOCK || call_type == ThreadAPI::TD_RWLOCK_WRLOCK ||
+      call_type == ThreadAPI::TD_RELEASE ||
+      call_type == ThreadAPI::TD_KERNEL_SPIN_LOCK || call_type == ThreadAPI::TD_KERNEL_SPIN_TRYLOCK ||
+      call_type == ThreadAPI::TD_KERNEL_MUTEX_LOCK || call_type == ThreadAPI::TD_KERNEL_MUTEX_TRYLOCK ||
+      call_type == ThreadAPI::TD_KERNEL_DOWN || call_type == ThreadAPI::TD_KERNEL_READ_LOCK ||
+      call_type == ThreadAPI::TD_KERNEL_WRITE_LOCK || call_type == ThreadAPI::TD_KERNEL_DOWN_READ ||
+      call_type == ThreadAPI::TD_KERNEL_DOWN_WRITE || call_type == ThreadAPI::TD_KERNEL_SPIN_UNLOCK ||
+      call_type == ThreadAPI::TD_KERNEL_MUTEX_UNLOCK || call_type == ThreadAPI::TD_KERNEL_UP ||
+      call_type == ThreadAPI::TD_KERNEL_READ_UNLOCK || call_type == ThreadAPI::TD_KERNEL_WRITE_UNLOCK ||
+      call_type == ThreadAPI::TD_KERNEL_UP_READ || call_type == ThreadAPI::TD_KERNEL_UP_WRITE;
 
   if (m_thread_api->isReadLockAcquire(inst)) {
-    LockID lock = getLockValue(inst);
-    if (lock) out_read.insert(lock);
+    if (!m_thread_api->isTryLock(inst) || !is_must) {
+      LockID lock = getLockValue(inst);
+      if (lock) out_read.insert(lock);
+    }
   } else if (m_thread_api->isWriteLockAcquire(inst)) {
-    LockID lock = getLockValue(inst);
-    if (lock) {
-      out_write.insert(lock);
-      for (const auto *l : in_read) {
-        if (mayAlias(l, lock)) out_read.erase(l);
+    if (!m_thread_api->isTryLock(inst) || !is_must) {
+      LockID lock = getLockValue(inst);
+      if (lock) {
+        out_write.insert(lock);
+        for (const auto *l : in_read) {
+          if (mayAlias(l, lock)) out_read.erase(l);
+        }
       }
     }
-  } else if (m_thread_api->isTDAcquire(inst)) {
-    // Try-lock may fail; don't add to write set
-    if (!m_thread_api->isTryLock(inst)) {
+  } else if (m_thread_api->isTDAcquire(inst) && raw_lock_api) {
+    // Try-lock may fail; add only to the may-set.
+    if (!m_thread_api->isTryLock(inst) || !is_must) {
       LockID lock = getLockValue(inst);
       if (lock) out_write.insert(lock);
     }
@@ -1004,8 +1063,8 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         for (const auto *l : to_remove_w) out_write.erase(l);
       }
     }
-  } else if (const CallBase *call = dyn_cast<CallBase>(inst)) {
-    ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
+  } else if (call) {
+    ThreadAPI::TD_TYPE type = call_type;
       
     switch (type) {
         case ThreadAPI::TD_SHARED_RDLOCK:
@@ -1052,9 +1111,10 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
           
         case ThreadAPI::TD_SHARED_LOCK_CTOR:
           // std::shared_lock constructor - acquire read lock
-          if (call->arg_size() >= 2) {
-            LockID lock = getCanonicalLock(call->getArgOperand(1));
-            if (lock) out_read.insert(lock);
+          for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
+            if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+              out_read.insert(lock);
+            }
           }
           break;
           
@@ -1062,9 +1122,57 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
         case ThreadAPI::TD_SCOPED_LOCK_CTOR:
           // These acquire write/exclusive locks
-          if (call->arg_size() >= 2) {
-            LockID lock = getCanonicalLock(call->getArgOperand(1));
-            if (lock) out_write.insert(lock);
+          for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
+            if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+              out_write.insert(lock);
+            }
+          }
+          break;
+
+        case ThreadAPI::TD_SHARED_LOCK_DTOR:
+        case ThreadAPI::TD_LOCK_GUARD_DTOR:
+        case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+        case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+        case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+          {
+            std::vector<LockID> locks = getUnderlyingRAIILocks(inst, call->getArgOperand(0));
+            if (locks.empty()) {
+              if (LockID lock = getCppWrapperLockValue(inst)) {
+                locks.push_back(lock);
+              }
+            }
+            if (locks.empty() && is_must) {
+              out_read.clear();
+              out_write.clear();
+              break;
+            }
+            for (LockID lock : locks) {
+              out_read.erase(lock);
+              out_write.erase(lock);
+              if (is_must && m_alias_analysis) {
+                LockSet to_remove_r, to_remove_w;
+                for (const auto *l : out_read)
+                  if (mayAlias(l, lock)) to_remove_r.insert(l);
+                for (const auto *l : out_write)
+                  if (mayAlias(l, lock)) to_remove_w.insert(l);
+                for (const auto *l : to_remove_r) out_read.erase(l);
+                for (const auto *l : to_remove_w) out_write.erase(l);
+              }
+            }
+          }
+          break;
+
+        case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+          {
+            std::vector<LockID> locks = getUnderlyingRAIILocks(inst, call->getArgOperand(0));
+            if (locks.empty()) {
+              if (LockID lock = getCppWrapperLockValue(inst)) {
+                locks.push_back(lock);
+              }
+            }
+            for (LockID lock : locks) {
+              out_write.insert(lock);
+            }
           }
           break;
           
@@ -1141,24 +1249,24 @@ void LockSetAnalysis::trackLockOrdering() {
   for (const auto &pair : m_may_locksets_entry) {
     const Instruction *inst = pair.first;
     const LockSet &locks_held = pair.second;
+    auto exit_it = m_may_locksets_exit.find(inst);
+    if (exit_it == m_may_locksets_exit.end()) {
+      continue;
+    }
 
-    // If this instruction acquires a new lock, record the ordering
-    if (m_thread_api->isTDAcquire(inst)) {
-      LockID new_lock = getLockValue(inst);
-      if (new_lock) {
-        // Check if lock is already in the lockset (reentrant)
-        if (locks_held.find(new_lock) == locks_held.end()) {
-          // Not reentrant
-        } else {
-          // Reentrant lock
-          m_reentrant_locks.insert(new_lock);
-        }
+    LockSet newly_acquired;
+    std::set_difference(exit_it->second.begin(), exit_it->second.end(),
+                        locks_held.begin(), locks_held.end(),
+                        std::inserter(newly_acquired, newly_acquired.begin()));
 
-        // Record ordering with all currently held locks
-        for (const auto *held_lock : locks_held) {
-          if (held_lock != new_lock) {
-            m_observed_lock_orders.insert({held_lock, new_lock});
-          }
+    for (LockID new_lock : newly_acquired) {
+      if (locks_held.find(new_lock) != locks_held.end()) {
+        m_reentrant_locks.insert(new_lock);
+      }
+
+      for (const auto *held_lock : locks_held) {
+        if (held_lock != new_lock) {
+          m_observed_lock_orders.insert({held_lock, new_lock});
         }
       }
     }
@@ -1217,14 +1325,22 @@ LockID LockSetAnalysis::getCanonicalLock(LockID lock) const {
 
 LockID LockSetAnalysis::getUnderlyingRAIILock(const Instruction *inst,
                                               const Value *lock_obj) const {
+  std::vector<LockID> locks = getUnderlyingRAIILocks(inst, lock_obj);
+  return locks.empty() ? nullptr : locks.front();
+}
+
+std::vector<LockID>
+LockSetAnalysis::getUnderlyingRAIILocks(const Instruction *inst,
+                                        const Value *lock_obj) const {
+  std::vector<LockID> locks;
   if (!inst || !lock_obj) {
-    return nullptr;
+    return locks;
   }
 
   const Function *parent_func = inst->getFunction();
   auto raii_it = m_raii_locks.find(parent_func);
   if (raii_it == m_raii_locks.end()) {
-    return nullptr;
+    return locks;
   }
 
   const Value *base = lock_obj->stripPointerCasts();
@@ -1234,16 +1350,20 @@ LockID LockSetAnalysis::getUnderlyingRAIILock(const Instruction *inst,
 
   const auto *alloca = dyn_cast<AllocaInst>(base);
   if (!alloca) {
-    return nullptr;
+    return locks;
   }
 
   auto lifetime_it = raii_it->second.find(alloca);
-  if (lifetime_it == raii_it->second.end() ||
-      !lifetime_it->second.underlyingLock) {
-    return nullptr;
+  if (lifetime_it == raii_it->second.end()) {
+    return locks;
   }
 
-  return getCanonicalLock(lifetime_it->second.underlyingLock);
+  for (const Value *lock : lifetime_it->second.underlyingLocks) {
+    if (LockID canonical = getCanonicalLock(lock)) {
+      locks.push_back(canonical);
+    }
+  }
+  return locks;
 }
 
 LockID LockSetAnalysis::getCppWrapperLockValue(const Instruction *inst) const {

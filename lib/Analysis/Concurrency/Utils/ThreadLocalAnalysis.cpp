@@ -17,6 +17,10 @@ using namespace ThreadLocal;
 ThreadLocalAnalysis::ThreadLocalAnalysis(Module &module) : m_module(module) {}
 
 void ThreadLocalAnalysis::analyze() {
+  m_tls_globals.clear();
+  m_tls_allocas.clear();
+  m_tls_values.clear();
+  m_pthread_keys.clear();
   identifyThreadLocalGlobals();
   identifyThreadLocalAllocas();
   identifyPthreadSpecificData();

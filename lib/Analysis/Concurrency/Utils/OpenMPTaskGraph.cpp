@@ -90,7 +90,9 @@ OpenMPTaskGraph::OpenMPTaskGraph(Module &module) : m_module(module) {}
 
 void OpenMPTaskGraph::analyze() {
   errs() << "Starting OpenMP Task Dependency Analysis...\n";
-  
+  m_tasks.clear();
+  m_inst_to_task.clear();
+  m_wait_boundaries.clear();
   identifyTasks();
   buildDependencyEdges();
   
@@ -101,24 +103,41 @@ void OpenMPTaskGraph::identifyTasks() {
   ThreadAPI *api = ThreadAPI::getThreadAPI();
   
   for (Function &func : m_module) {
+    size_t sequence_index = 0;
+    size_t next_taskgroup_id = 1;
+    std::vector<size_t> taskgroup_stack;
     for (BasicBlock &bb : func) {
       for (Instruction &inst : bb) {
         if (CallBase *call = dyn_cast<CallBase>(&inst)) {
           // Check for __kmpc_omp_task_with_deps or __kmpc_omp_task
           ThreadAPI::TD_TYPE type = api->getType(api->getCallee(call));
-          
+
+          if (type == ThreadAPI::TD_OMP_TASKWAIT) {
+            m_wait_boundaries[&func].push_back(sequence_index);
+            continue;
+          }
+
+          if (type == ThreadAPI::TD_OMP_TASKGROUP_START) {
+            taskgroup_stack.push_back(next_taskgroup_id++);
+            continue;
+          }
+
+          if (type == ThreadAPI::TD_OMP_TASKGROUP_END) {
+            m_wait_boundaries[&func].push_back(sequence_index);
+            if (!taskgroup_stack.empty()) {
+              taskgroup_stack.pop_back();
+            }
+            continue;
+          }
+
           if (type == ThreadAPI::TD_OMP_TASK_WITH_DEPS || 
               type == ThreadAPI::TD_OMP_TASK) {
             auto task = std::make_unique<Task>();
             task->task_create = call;
-            
-            // Extract task function (typically the second argument)
-            if (call->arg_size() >= 3) {
-              if (Function *task_fn =
-                      dyn_cast<Function>(call->getArgOperand(2)->stripPointerCasts())) {
-                task->task_function = task_fn;
-              }
-            }
+            task->task_function = nullptr;
+            task->parent_context = &func;
+            task->taskgroup_id = taskgroup_stack.empty() ? 0 : taskgroup_stack.back();
+            task->sequence_index = sequence_index++;
             
             // Extract dependencies if this is a task_with_deps
             if (type == ThreadAPI::TD_OMP_TASK_WITH_DEPS) {
@@ -129,6 +148,7 @@ void OpenMPTaskGraph::identifyTasks() {
             m_tasks.push_back(std::move(task));
           }
         }
+
       }
     }
   }
@@ -266,6 +286,12 @@ void OpenMPTaskGraph::buildDependencyEdges() {
     
     for (size_t j = i + 1; j < m_tasks.size(); ++j) {
       Task *task_j = m_tasks[j].get();
+      if (task_i->parent_context != task_j->parent_context) {
+        continue;
+      }
+      if (task_i->taskgroup_id != task_j->taskgroup_id) {
+        continue;
+      }
       
       // Check if tasks have conflicting dependencies
       for (const Dependency &dep_i : task_i->dependencies) {
@@ -276,6 +302,24 @@ void OpenMPTaskGraph::buildDependencyEdges() {
             task_i->successors.insert(task_j);
             task_j->predecessors.insert(task_i);
           }
+        }
+      }
+    }
+  }
+
+  for (const auto &entry : m_wait_boundaries) {
+    const Function *context = entry.first;
+    for (size_t boundary : entry.second) {
+      for (const auto &lhs : m_tasks) {
+        if (lhs->parent_context != context || lhs->sequence_index >= boundary) {
+          continue;
+        }
+        for (const auto &rhs : m_tasks) {
+          if (rhs->parent_context != context || rhs->sequence_index <= boundary) {
+            continue;
+          }
+          lhs->successors.insert(rhs.get());
+          rhs->predecessors.insert(lhs.get());
         }
       }
     }

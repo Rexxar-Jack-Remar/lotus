@@ -20,7 +20,8 @@ namespace mpi {
 // MPIProcessModel Implementation
 // ============================================================================
 
-MPIOpKind MPIProcessModel::classifyOperation(ThreadAPI::TD_TYPE type) const {
+MPIOpKind MPIProcessModel::classifyOperation(const Instruction* inst,
+                                             ThreadAPI::TD_TYPE type) const {
   switch (type) {
     case ThreadAPI::TD_MPI_INIT:
       return MPIOpKind::INIT;
@@ -48,7 +49,9 @@ MPIOpKind MPIProcessModel::classifyOperation(ThreadAPI::TD_TYPE type) const {
     case ThreadAPI::TD_MPI_TESTSOME:
       return MPIOpKind::TEST;
     case ThreadAPI::TD_MPI_BARRIER:
-      return MPIOpKind::BARRIER;
+      return thread_api_->isNonBlockingMPIBarrier(inst)
+                 ? MPIOpKind::BARRIER_NONBLOCKING
+                 : MPIOpKind::BARRIER_BLOCKING;
     case ThreadAPI::TD_MPI_BCAST:
     case ThreadAPI::TD_MPI_SCATTER:
     case ThreadAPI::TD_MPI_GATHER:
@@ -58,7 +61,9 @@ MPIOpKind MPIProcessModel::classifyOperation(ThreadAPI::TD_TYPE type) const {
     case ThreadAPI::TD_MPI_ALLREDUCE:
     case ThreadAPI::TD_MPI_REDUCE_SCATTER:
     case ThreadAPI::TD_MPI_SCAN:
-      return MPIOpKind::COLLECTIVE;
+      return thread_api_->isNonBlockingMPICollective(inst)
+                 ? MPIOpKind::COLLECTIVE_NONBLOCKING
+                 : MPIOpKind::COLLECTIVE_BLOCKING;
     case ThreadAPI::TD_MPI_PUT:
     case ThreadAPI::TD_MPI_GET:
     case ThreadAPI::TD_MPI_ACCUMULATE:
@@ -79,6 +84,9 @@ MPIOpKind MPIProcessModel::classifyOperation(ThreadAPI::TD_TYPE type) const {
     case ThreadAPI::TD_MPI_COMM_CREATE:
     case ThreadAPI::TD_MPI_COMM_FREE:
       return MPIOpKind::COMM_MANAGEMENT;
+    case ThreadAPI::TD_MPI_REQUEST_FREE:
+    case ThreadAPI::TD_MPI_CANCEL:
+      return MPIOpKind::REQUEST_MANAGEMENT;
     default:
       return MPIOpKind::UNKNOWN;
   }
@@ -130,9 +138,8 @@ void MPIProcessModel::extractOperationDetails(MPIOperation& op) {
     }
   }
   
-  // For wait operations, extract request
+  // For wait/test operations, extract request or request-array handle.
   if (op.kind == MPIOpKind::WAIT || op.kind == MPIOpKind::TEST) {
-    // MPI_Wait(request, status)
     if (numArgs >= 1) {
       op.request = CB->getArgOperand(0);
     }
@@ -147,6 +154,33 @@ void MPIProcessModel::extractOperationDetails(MPIOperation& op) {
         op.target_rank = target->getSExtValue();
       }
       op.window = CB->getArgOperand(7);
+    }
+  }
+
+  if (op.kind == MPIOpKind::RMA_SYNC) {
+    switch (op.td_type) {
+      case ThreadAPI::TD_MPI_WIN_FENCE:
+        if (numArgs >= 2) op.window = CB->getArgOperand(1);
+        break;
+      case ThreadAPI::TD_MPI_WIN_LOCK:
+        if (numArgs >= 4) op.window = CB->getArgOperand(3);
+        break;
+      case ThreadAPI::TD_MPI_WIN_UNLOCK:
+      case ThreadAPI::TD_MPI_WIN_FLUSH:
+        if (numArgs >= 2) op.window = CB->getArgOperand(1);
+        break;
+      case ThreadAPI::TD_MPI_WIN_SYNC:
+      case ThreadAPI::TD_MPI_WIN_COMPLETE:
+      case ThreadAPI::TD_MPI_WIN_WAIT:
+      case ThreadAPI::TD_MPI_WIN_TEST:
+        if (numArgs >= 1) op.window = CB->getArgOperand(0);
+        break;
+      case ThreadAPI::TD_MPI_WIN_POST:
+      case ThreadAPI::TD_MPI_WIN_START:
+        if (numArgs >= 3) op.window = CB->getArgOperand(2);
+        break;
+      default:
+        break;
     }
   }
 }
@@ -167,7 +201,7 @@ void MPIProcessModel::analyzeModule() {
       if (type == ThreadAPI::TD_DUMMY) continue;
       
       // Check if this is an MPI operation
-      MPIOpKind kind = classifyOperation(type);
+      MPIOpKind kind = classifyOperation(I, type);
       if (kind == MPIOpKind::UNKNOWN) continue;
       
       // Create operation record
@@ -199,12 +233,23 @@ void MPIProcessModel::matchNonBlockingOps() {
   for (const MPIOperation& op : all_operations_) {
     if (op.kind != MPIOpKind::WAIT && op.kind != MPIOpKind::TEST) continue;
     if (!op.request) continue;
-    
+
     // Find the corresponding non-blocking operation
     auto it = non_blocking_ops_.find(op.request);
     if (it != non_blocking_ops_.end()) {
       it->second.is_completed = true;
       it->second.wait_inst = op.inst;
+      continue;
+    }
+
+    if (op.td_type == ThreadAPI::TD_MPI_WAITALL ||
+        op.td_type == ThreadAPI::TD_MPI_WAITSOME ||
+        op.td_type == ThreadAPI::TD_MPI_TESTALL ||
+        op.td_type == ThreadAPI::TD_MPI_TESTSOME) {
+      for (auto &entry : non_blocking_ops_) {
+        entry.second.is_completed = true;
+        entry.second.wait_inst = op.inst;
+      }
     }
   }
 }
@@ -316,7 +361,10 @@ void MPICollectiveAnalysis::analyzeCollectives() {
   collective_calls_.clear();
   
   for (const MPIOperation& op : process_model_.getAllOperations()) {
-    if (op.kind == MPIOpKind::COLLECTIVE || op.kind == MPIOpKind::BARRIER) {
+    if (op.kind == MPIOpKind::COLLECTIVE_BLOCKING ||
+        op.kind == MPIOpKind::COLLECTIVE_NONBLOCKING ||
+        op.kind == MPIOpKind::BARRIER_BLOCKING ||
+        op.kind == MPIOpKind::BARRIER_NONBLOCKING) {
       CollectiveCall call;
       call.inst = op.inst;
       call.type = op.td_type;
@@ -368,9 +416,7 @@ MPICollectiveAnalysis::findMismatchedCollectives() const {
       const CollectiveCall& c1 = collective_calls_[i];
       const CollectiveCall& c2 = collective_calls_[j];
       
-      // If they're in the same function at different program points,
-      // they might be called by different processes differently
-      if (c1.function == c2.function && !areCollectivesCompatible(c1, c2)) {
+      if (!areCollectivesCompatible(c1, c2)) {
         mismatches.emplace_back(c1, c2);
       }
     }

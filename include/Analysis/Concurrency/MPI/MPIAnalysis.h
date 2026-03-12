@@ -76,11 +76,14 @@ enum class MPIOpKind {
   RECV_NONBLOCKING,  ///< Non-blocking recv (MPI_Irecv)
   WAIT,              ///< Wait operations (MPI_Wait, MPI_Waitall, etc.)
   TEST,              ///< Test operations (MPI_Test, etc.)
-  BARRIER,           ///< MPI_Barrier
-  COLLECTIVE,        ///< Other collective operations
+  BARRIER_BLOCKING,  ///< MPI_Barrier
+  BARRIER_NONBLOCKING, ///< MPI_Ibarrier
+  COLLECTIVE_BLOCKING, ///< Blocking collective operations
+  COLLECTIVE_NONBLOCKING, ///< Non-blocking collective operations
   RMA_DATA,          ///< RMA data operations (Put/Get/Accumulate)
   RMA_SYNC,          ///< RMA synchronization
   COMM_MANAGEMENT,   ///< Communicator operations
+  REQUEST_MANAGEMENT, ///< MPI_Request_free / MPI_Cancel
   UNKNOWN
 };
 
@@ -205,7 +208,8 @@ private:
   std::map<RequestID, NonBlockingOp> non_blocking_ops_;
   
   // Helper methods
-  MPIOpKind classifyOperation(ThreadAPI::TD_TYPE type) const;
+  MPIOpKind classifyOperation(const llvm::Instruction* inst,
+                              ThreadAPI::TD_TYPE type) const;
   void extractOperationDetails(MPIOperation& op);
   void matchNonBlockingOps();
 };

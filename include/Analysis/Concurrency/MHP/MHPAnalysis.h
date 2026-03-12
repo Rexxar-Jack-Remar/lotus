@@ -22,6 +22,7 @@
 #define MHP_ANALYSIS_H
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
@@ -356,6 +357,7 @@ private:
 
   // Call Graph for interprocedural analysis
   std::unique_ptr<llvm::CallGraph> m_call_graph;
+  std::unique_ptr<mhp::JoinTargetAnalysis> m_join_target_analysis;
 
   // Thread ID allocation
   ThreadID m_next_thread_id = 1; // 0 is reserved for main thread
@@ -396,9 +398,13 @@ private:
     SyncNode *arrival = nullptr;
     std::vector<SyncNode *> continuations;
   };
-  // Map barrier object -> barrier participants seen so far.
-  std::unordered_map<const llvm::Value *, std::vector<BarrierParticipant>>
+  // Map barrier object -> phase ordinal -> barrier participants seen so far.
+  std::unordered_map<const llvm::Value *,
+                     std::unordered_map<size_t, std::vector<BarrierParticipant>>>
       m_barrier_waits;
+  std::unordered_map<const llvm::Value *,
+                     std::unordered_map<ThreadID, size_t>>
+      m_barrier_phase_by_thread;
 
   // Per-thread set of functions already processed to avoid reprocessing
   std::unordered_map<ThreadID,

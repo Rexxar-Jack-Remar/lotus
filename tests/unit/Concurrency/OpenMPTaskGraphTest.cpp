@@ -139,6 +139,63 @@ TEST_F(OpenMPTaskGraphTest, DisjointOffsetsDoNotConflict) {
   EXPECT_TRUE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
 }
 
+TEST_F(OpenMPTaskGraphTest, ConflictingTasksInDifferentContextsDoNotOrder) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @shared = global i32 0, align 4
+    @deps = global [1 x %kmp_depend_info] [
+      %kmp_depend_info {
+        i8* bitcast (i32* @shared to i8*),
+        i64 4,
+        i8 2
+      }
+    ]
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+
+    define void @producer() {
+    entry:
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+               [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      %t = call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      ret void
+    }
+
+    define void @consumer() {
+    entry:
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+               [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      %t = call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @producer()
+      call void @consumer()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_TRUE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

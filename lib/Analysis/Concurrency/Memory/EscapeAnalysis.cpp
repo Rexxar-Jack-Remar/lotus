@@ -15,6 +15,8 @@ namespace lotus {
 EscapeAnalysis::EscapeAnalysis(Module &module) : m_module(module) {}
 
 void EscapeAnalysis::analyze() {
+  m_escaped_values.clear();
+  m_visited.clear();
   runEscapeAnalysis();
 }
 
@@ -193,4 +195,3 @@ void EscapeAnalysis::runEscapeAnalysis() {
 }
 
 } // namespace lotus
-

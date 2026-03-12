@@ -50,6 +50,15 @@ public:
    */
   bool isUnambiguousJoin(const llvm::Instruction *joinInst) const;
 
+  /**
+   * @brief Trace an SSA pthread_t handle back to a stable origin when possible.
+   *
+   * Supports load/phi/select/bitcast/gep forwarding and, when a module is
+   * provided, walks direct callers to map formal arguments back to actuals.
+   */
+  static const llvm::Value *traceThreadHandleRoot(const llvm::Value *value,
+                                                  const llvm::Module *module = nullptr);
+
 private:
   void collectForksAndJoins();
 

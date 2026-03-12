@@ -23,6 +23,35 @@ StaticVectorClockMHP::StaticVectorClockMHP(Module &module)
 }
 
 void StaticVectorClockMHP::analyze() {
+  m_ctx_to_stid.clear();
+  m_static_threads.clear();
+  m_node_to_static_thread.clear();
+  m_inst_to_static_thread.clear();
+  m_node_clocks.clear();
+  m_mhp_pairs.clear();
+  m_reachable_from_cs.clear();
+  m_node_id_to_node.clear();
+  m_ret_to_call.clear();
+  m_inst_to_thread.clear();
+  m_thread_fork_sites.clear();
+  m_thread_parents.clear();
+  m_thread_children.clear();
+  m_fork_to_thread.clear();
+  m_join_to_thread.clear();
+  m_pthread_value_to_thread.clear();
+  m_thread_to_pthread_value.clear();
+  m_visited_functions_by_thread.clear();
+  m_condvar_signals.clear();
+  m_condvar_waits.clear();
+  m_barrier_waits.clear();
+  m_barrier_phase_by_thread.clear();
+  m_thread_entry_candidates.clear();
+  m_has_unresolved_fork = false;
+  m_next_thread_id = 1;
+  m_post_dom_cache.clear();
+  m_tfg = std::make_unique<ThreadFlowGraph>();
+  m_call_graph = std::make_unique<CallGraph>(m_module);
+  m_join_target_analysis = std::make_unique<JoinTargetAnalysis>(m_module);
   buildThreadFlowGraph();
   buildStaticThreads();
   computeReachabilityPerStaticThread();
@@ -695,13 +724,14 @@ void StaticVectorClockMHP::printResults(raw_ostream &os) const {
 // === Thread-flow graph construction (self contained, no MHPAnalysis) ========
 
 void StaticVectorClockMHP::buildThreadFlowGraph() {
-  m_tfg = std::make_unique<ThreadFlowGraph>();
-  m_call_graph = std::make_unique<CallGraph>(m_module);
-
   Function *main_func = m_module.getFunction("main");
   if (!main_func) {
     errs() << "SVC-MHP: no main function found\n";
     return;
+  }
+
+  if (m_join_target_analysis) {
+    m_join_target_analysis->analyze();
   }
 
   m_tfg->addThread(0, main_func);
@@ -992,6 +1022,7 @@ void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
   m_thread_fork_sites[new_tid] = fork_inst;
   m_thread_parents[new_tid] = parent_tid;
   m_thread_children[parent_tid].push_back(new_tid);
+  m_fork_to_thread[fork_inst] = new_tid;
 
   const Value *pthread_ptr = m_thread_api->getForkedThread(fork_inst);
   if (pthread_ptr) {
@@ -1019,17 +1050,23 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
   bool found = false;
 
   if (joined_thread_val) {
-    auto it = m_pthread_value_to_thread.find(joined_thread_val);
+    const Value *root =
+        JoinTargetAnalysis::traceThreadHandleRoot(joined_thread_val, &m_module);
+    auto it = m_pthread_value_to_thread.find(root ? root : joined_thread_val);
     if (it != m_pthread_value_to_thread.end()) {
       joined_tid = it->second;
       found = true;
-    } else if (const LoadInst *load = dyn_cast<LoadInst>(joined_thread_val)) {
-      const Value *loaded_from = load->getPointerOperand();
-      auto it2 = m_pthread_value_to_thread.find(loaded_from);
-      if (it2 != m_pthread_value_to_thread.end()) {
-        joined_tid = it2->second;
+    }
+  }
+
+  if (!found && m_join_target_analysis) {
+    std::vector<const Instruction *> possible_forks =
+        m_join_target_analysis->getPossibleJoinedForks(join_inst);
+    if (possible_forks.size() == 1) {
+      auto it = m_fork_to_thread.find(possible_forks.front());
+      if (it != m_fork_to_thread.end()) {
+        joined_tid = it->second;
         found = true;
-        m_pthread_value_to_thread[joined_thread_val] = joined_tid;
       }
     }
   }
@@ -1045,14 +1082,7 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
   if (found && joined_tid != 0) {
     add_join_edge(joined_tid);
   } else {
-    // Conservative per paper: when join target is unresolved, add HB from
-    // every known thread exit to this join site so we don't weaken ordering.
-    for (const auto &entry : m_tfg->getAllThreads()) {
-      ThreadID other_tid = entry;
-      if (other_tid == parent_tid || other_tid == 0)
-        continue;
-      add_join_edge(other_tid);
-    }
+    (void)parent_tid;
   }
 }
 
@@ -1091,7 +1121,8 @@ void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
     barrier = barrier_inst;
   }
   node->setLockValue(barrier);
-  m_barrier_waits[barrier].push_back(node);
+  size_t phase = m_barrier_phase_by_thread[barrier][node->getThreadID()]++;
+  m_barrier_waits[barrier][phase].push_back(node);
 }
 
 void StaticVectorClockMHP::wireSynchronizationEdges() {
@@ -1109,15 +1140,17 @@ void StaticVectorClockMHP::wireSynchronizationEdges() {
   // directed edge per pair is sufficient to enforce the all-before-all
   // barrier semantics without introducing cycles.
   for (const auto &kv : m_barrier_waits) {
-    const std::vector<SyncNode *> &waits = kv.second;
-    for (size_t i = 0; i < waits.size(); ++i) {
-      SyncNode *ni = waits[i];
-      if (!ni)
-        continue;
-      for (size_t j = i + 1; j < waits.size(); ++j) {
-        SyncNode *nj = waits[j];
-        if (nj && nj->getThreadID() != ni->getThreadID()) {
-          m_tfg->addInterThreadEdge(ni, nj, EdgeKind::Barrier);
+    for (const auto &phase_entry : kv.second) {
+      const std::vector<SyncNode *> &waits = phase_entry.second;
+      for (size_t i = 0; i < waits.size(); ++i) {
+        SyncNode *ni = waits[i];
+        if (!ni)
+          continue;
+        for (size_t j = i + 1; j < waits.size(); ++j) {
+          SyncNode *nj = waits[j];
+          if (nj && nj->getThreadID() != ni->getThreadID()) {
+            m_tfg->addInterThreadEdge(ni, nj, EdgeKind::Barrier);
+          }
         }
       }
     }

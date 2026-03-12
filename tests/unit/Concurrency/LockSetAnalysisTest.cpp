@@ -131,8 +131,44 @@ TEST_F(LockSetAnalysisTest, TryLockIsMayOnly) {
   const GlobalVariable *lock = module->getNamedGlobal("lock");
   ASSERT_NE(lock, nullptr);
 
-  EXPECT_FALSE(lsa.mayHoldLock(after, lock));
+  EXPECT_TRUE(lsa.mayHoldLock(after, lock));
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
+TEST_F(LockSetAnalysisTest, ScopedLockTracksAllUnderlyingMutexes) {
+  const char *source = R"(
+    declare void @fake_scoped_lock_C1E(i8*, i8*, i8*)
+
+    @lock1 = global i8 0
+    @lock2 = global i8 0
+
+    define i32 @main() {
+    entry:
+      %sl = alloca i8
+      call void @fake_scoped_lock_C1E(i8* %sl, i8* @lock1, i8* @lock2)
+      %after = add i32 1, 2
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *after = findInstructionByName(*main_func, "after");
+  ASSERT_NE(after, nullptr);
+
+  const GlobalVariable *lock1 = module->getNamedGlobal("lock1");
+  const GlobalVariable *lock2 = module->getNamedGlobal("lock2");
+  ASSERT_NE(lock1, nullptr);
+  ASSERT_NE(lock2, nullptr);
+
+  EXPECT_TRUE(lsa.mustHoldLock(after, lock1));
+  EXPECT_TRUE(lsa.mustHoldLock(after, lock2));
 }
 
 TEST_F(LockSetAnalysisTest, DetectLockOrderInversion) {

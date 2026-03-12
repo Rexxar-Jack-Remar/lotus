@@ -86,16 +86,21 @@ const llvm::AllocaInst *RAIILockTracker::findLockObjectForConstructor(const llvm
   return nullptr;
 }
 
-const llvm::Value *RAIILockTracker::extractUnderlyingLock(const llvm::CallBase *ctor) {
-  if (!ctor) return nullptr;
-  
-  // For most RAII locks, the mutex is the second argument (after 'this')
-  // lock_guard<mutex>(m), unique_lock<mutex>(m), etc.
-  if (ctor->arg_size() >= 2) {
-    return ctor->getArgOperand(1);
+std::vector<const llvm::Value *>
+RAIILockTracker::extractUnderlyingLocks(const llvm::CallBase *ctor) {
+  std::vector<const llvm::Value *> locks;
+  if (!ctor) {
+    return locks;
   }
-  
-  return nullptr;
+
+  for (unsigned idx = 1; idx < ctor->arg_size(); ++idx) {
+    const llvm::Value *lock = ctor->getArgOperand(idx);
+    if (lock) {
+      locks.push_back(lock);
+    }
+  }
+
+  return locks;
 }
 
 std::vector<const llvm::Instruction *> RAIILockTracker::findDestructorsForLockObject(
@@ -125,7 +130,7 @@ std::vector<const llvm::Instruction *> RAIILockTracker::findDestructorsForLockOb
   }
   
   // If no explicit destructors found, look for lifetime.end intrinsics
-  // or function return points as implicit destructor locations
+  // or function exits as implicit destructor locations
   if (destructors.empty()) {
     for (llvm::const_inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
       const llvm::Instruction *inst = &*I;
@@ -139,8 +144,10 @@ std::vector<const llvm::Instruction *> RAIILockTracker::findDestructorsForLockOb
         }
       }
       
-      // Return instructions are implicit destructor points
-      if (llvm::isa<llvm::ReturnInst>(inst)) {
+      // Function exits are implicit destructor points on both normal and EH paths.
+      if (llvm::isa<llvm::ReturnInst>(inst) || llvm::isa<llvm::ResumeInst>(inst) ||
+          llvm::isa<llvm::CleanupReturnInst>(inst) ||
+          llvm::isa<llvm::CatchReturnInst>(inst)) {
         destructors.push_back(inst);
       }
     }
@@ -159,14 +166,14 @@ void RAIILockTracker::processConstructor(const llvm::CallBase *ctor, const llvm:
   LockLifetime lifetime;
   lifetime.lockObject = lockObj;
   lifetime.constructor = ctor;
-  lifetime.underlyingLock = extractUnderlyingLock(ctor);
-  lifetime.isShared = isSharedLock(ctor);
+  lifetime.underlyingLocks = extractUnderlyingLocks(ctor);
   const llvm::Function *ctorFunc = ctor->getCalledFunction();
   if (!ctorFunc) {
     ctorFunc = llvm::dyn_cast<llvm::Function>(ctor->getCalledOperand()->stripPointerCasts());
   }
   lifetime.isScoped =
       ctorFunc && CppThreadingModel::isScopedLockConstructor(ctorFunc->getName());
+  lifetime.sharedModes.assign(lifetime.underlyingLocks.size(), isSharedLock(ctor));
   
   // Find all destructor calls for this lock object
   lifetime.destructors = findDestructorsForLockObject(lockObj, F);

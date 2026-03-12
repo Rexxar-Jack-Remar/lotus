@@ -12,6 +12,7 @@
 #ifndef STATIC_VECTOR_CLOCK_MHP_H
 #define STATIC_VECTOR_CLOCK_MHP_H
 
+#include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
@@ -159,6 +160,7 @@ private:
   ThreadAPI *m_thread_api = nullptr;
   std::unique_ptr<ThreadFlowGraph> m_tfg;
   std::unique_ptr<llvm::CallGraph> m_call_graph;
+  std::unique_ptr<JoinTargetAnalysis> m_join_target_analysis;
 
   // Static thread management
   std::unordered_map<Context, StaticThreadID, ContextHash> m_ctx_to_stid;
@@ -223,6 +225,7 @@ private:
   std::unordered_map<ThreadID, const llvm::Instruction *> m_thread_fork_sites;
   std::unordered_map<ThreadID, ThreadID> m_thread_parents;
   std::unordered_map<ThreadID, std::vector<ThreadID>> m_thread_children;
+  std::unordered_map<const llvm::Instruction *, ThreadID> m_fork_to_thread;
   std::unordered_map<const llvm::Instruction *, ThreadID> m_join_to_thread;
   std::unordered_map<const llvm::Value *, ThreadID> m_pthread_value_to_thread;
   std::unordered_map<ThreadID, const llvm::Value *> m_thread_to_pthread_value;
@@ -232,7 +235,11 @@ private:
       m_visited_functions_by_thread;
   std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_condvar_signals;
   std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_condvar_waits;
-  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_barrier_waits;
+  std::unordered_map<const llvm::Value *,
+                     std::unordered_map<size_t, std::vector<SyncNode *>>>
+      m_barrier_waits;
+  std::unordered_map<const llvm::Value *,
+                     std::unordered_map<ThreadID, size_t>> m_barrier_phase_by_thread;
 
   // Indirect fork handling (conservative)
   bool m_has_unresolved_fork = false;

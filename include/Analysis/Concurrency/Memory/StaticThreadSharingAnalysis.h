@@ -23,6 +23,12 @@ namespace lotus {
 
 class StaticThreadSharingAnalysis : public llvm::ModulePass {
 public:
+  enum class SharingClassification {
+    DefinitelyThreadLocal,
+    MaybeShared,
+    DefinitelyShared
+  };
+
   static char ID;
   StaticThreadSharingAnalysis();
 
@@ -35,6 +41,9 @@ public:
   
   /// Returns true if the object (represented by allocation site) is shared
   bool isShared(const llvm::Value *AllocSite) const;
+
+  SharingClassification classify(const llvm::Instruction *Inst) const;
+  SharingClassification classify(const llvm::Value *AllocSite) const;
 
 private:
   struct AccessInfo {
@@ -54,6 +63,7 @@ private:
 
   // Set of thread entry functions
   std::vector<const llvm::Function*> m_threads;
+  bool m_threads_complete = true;
   
   void findStaticThreads(llvm::Module &M);
   void visitThread(const llvm::Function *ThreadEntry);
@@ -69,4 +79,3 @@ private:
 } // namespace lotus
 
 #endif // STATIC_THREAD_SHARING_ANALYSIS_H
-

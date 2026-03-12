@@ -38,6 +38,7 @@ void StaticThreadSharingAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
 bool StaticThreadSharingAnalysis::runOnModule(Module &M) {
   m_allocAccesses.clear();
   m_threads.clear();
+  m_threads_complete = true;
   
   // Get SeaDSA analysis
   DsaAnalysis &dsaPass = getAnalysis<DsaAnalysis>();
@@ -66,6 +67,10 @@ void StaticThreadSharingAnalysis::findStaticThreads(Module &M) {
     for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
       if (api->isTDFork(&*I)) {
         const Value *entry = api->getForkedFun(&*I);
+        if (!entry) {
+          m_threads_complete = false;
+          continue;
+        }
         if (const Function *entryFunc = dyn_cast<Function>(entry)) {
            // Avoid duplicates
            if (std::find(m_threads.begin(), m_threads.end(), entryFunc) == m_threads.end())
@@ -76,6 +81,8 @@ void StaticThreadSharingAnalysis::findStaticThreads(Module &M) {
             if (const Function *f = dyn_cast<Function>(stripped)) {
                 if (std::find(m_threads.begin(), m_threads.end(), f) == m_threads.end())
                     m_threads.push_back(f);
+            } else {
+                m_threads_complete = false;
             }
         }
       }
@@ -175,9 +182,14 @@ bool StaticThreadSharingAnalysis::isMultiRunThread(const Function *ThreadEntry) 
     return true; 
 }
 
-bool StaticThreadSharingAnalysis::isShared(const Value *AllocSite) const {
+StaticThreadSharingAnalysis::SharingClassification
+StaticThreadSharingAnalysis::classify(const Value *AllocSite) const {
+   if (!m_threads_complete) {
+     return SharingClassification::MaybeShared;
+   }
+
    auto it = m_allocAccesses.find(AllocSite);
-   if (it == m_allocAccesses.end()) return false;
+   if (it == m_allocAccesses.end()) return SharingClassification::DefinitelyThreadLocal;
    
    // Check if any field is shared
    for (auto &pair : it->second) {
@@ -192,25 +204,22 @@ bool StaticThreadSharingAnalysis::isShared(const Value *AllocSite) const {
           // According to the paper (Section 1, "Limitations of Escape Analysis" point 4, and Algorithm 3),
           // we must distinguish immutable data. Data is shared only if there is at least one write.
           // "thread-shared but immutable data... our algorithm also distinguishes between reads and writes"
-          if (writerCount > 0) return true;
-      }
-      
-      if (allThreads.size() == 1) {
-         const Function *th = *allThreads.begin();
-         // If accessed by one thread multiple times, it must be written to be considered shared (race candidate)
-         if (writerCount > 0 && isMultiRunThread(th)) {
-             return true;
-         }
+          if (writerCount > 0) return SharingClassification::DefinitelyShared;
       }
    }
-   return false;
+   return SharingClassification::DefinitelyThreadLocal;
 }
 
-bool StaticThreadSharingAnalysis::isShared(const Instruction *Inst) const {
-    if (!m_dsa) return false;
+bool StaticThreadSharingAnalysis::isShared(const Value *AllocSite) const {
+   return classify(AllocSite) == SharingClassification::DefinitelyShared;
+}
+
+StaticThreadSharingAnalysis::SharingClassification
+StaticThreadSharingAnalysis::classify(const Instruction *Inst) const {
+    if (!m_dsa || !m_threads_complete) return SharingClassification::MaybeShared;
     
     const Function *F = Inst->getFunction();
-    if (!m_dsa->hasGraph(*F)) return false;
+    if (!m_dsa->hasGraph(*F)) return SharingClassification::MaybeShared;
     
     Graph &G = m_dsa->getGraph(*F);
     const Value *Ptr = nullptr;
@@ -218,19 +227,25 @@ bool StaticThreadSharingAnalysis::isShared(const Instruction *Inst) const {
     if (const LoadInst *LI = dyn_cast<LoadInst>(Inst)) Ptr = LI->getPointerOperand();
     else if (const StoreInst *SI = dyn_cast<StoreInst>(Inst)) Ptr = SI->getPointerOperand();
     
-    if (!Ptr || !G.hasCell(*Ptr)) return false;
+    if (!Ptr || !G.hasCell(*Ptr)) return SharingClassification::MaybeShared;
     
     const Cell &C = G.getCell(*Ptr);
     Node *N = C.getNode();
-    if (!N) return false;
+    if (!N) return SharingClassification::MaybeShared;
     
     // Check if any alloc site of this node is shared
     for (const Value *Alloc : N->getAllocSites()) {
-        if (isShared(Alloc)) return true;
+        SharingClassification classification = classify(Alloc);
+        if (classification != SharingClassification::DefinitelyThreadLocal) {
+            return classification;
+        }
     }
     
-    return false;
+    return SharingClassification::DefinitelyThreadLocal;
+}
+
+bool StaticThreadSharingAnalysis::isShared(const Instruction *Inst) const {
+    return classify(Inst) == SharingClassification::DefinitelyShared;
 }
 
 } // namespace lotus
-

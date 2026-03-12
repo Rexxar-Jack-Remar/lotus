@@ -420,6 +420,8 @@ private:
    */
   LockID getUnderlyingRAIILock(const llvm::Instruction *inst,
                                const llvm::Value *lock_obj) const;
+  std::vector<LockID> getUnderlyingRAIILocks(const llvm::Instruction *inst,
+                                             const llvm::Value *lock_obj) const;
 
   /**
    * @brief Resolve the lock identity for explicit C++ wrapper operations

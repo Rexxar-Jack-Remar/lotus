@@ -119,9 +119,18 @@ inline bool isBarrier(const llvm::StringRef& funcName) {
   return funcName.equals("MPI_Barrier") || funcName.equals("MPI_Ibarrier"); 
 }
 
+inline bool isBlockingBarrier(const llvm::StringRef& funcName) {
+  return funcName.equals("MPI_Barrier");
+}
+
+inline bool isNonBlockingBarrier(const llvm::StringRef& funcName) {
+  return funcName.equals("MPI_Ibarrier");
+}
+
 inline bool isBcast(const llvm::StringRef& funcName) { 
   return funcName.equals("MPI_Bcast") || funcName.equals("MPI_Ibcast"); 
 }
+
 
 inline bool isScatter(const llvm::StringRef& funcName) { 
   return funcName.equals("MPI_Scatter") || funcName.equals("MPI_Scatterv") || 
@@ -160,6 +169,22 @@ inline bool isReduceScatter(const llvm::StringRef& funcName) {
 inline bool isScan(const llvm::StringRef& funcName) { 
   return funcName.equals("MPI_Scan") || funcName.equals("MPI_Iscan") ||
          funcName.equals("MPI_Exscan") || funcName.equals("MPI_Iexscan"); 
+}
+
+inline bool isBlockingCollective(const llvm::StringRef& funcName) {
+  return (isBcast(funcName) || isScatter(funcName) || isGather(funcName) ||
+          isAllgather(funcName) || isAlltoall(funcName) || isReduce(funcName) ||
+          isAllreduce(funcName) || isReduceScatter(funcName) ||
+          isScan(funcName)) &&
+         !funcName.startswith("MPI_I");
+}
+
+inline bool isNonBlockingCollective(const llvm::StringRef& funcName) {
+  return (isBcast(funcName) || isScatter(funcName) || isGather(funcName) ||
+          isAllgather(funcName) || isAlltoall(funcName) || isReduce(funcName) ||
+          isAllreduce(funcName) || isReduceScatter(funcName) ||
+          isScan(funcName)) &&
+         funcName.startswith("MPI_I");
 }
 
 // ============================================================================

@@ -500,6 +500,60 @@ TEST_F(MHPAnalysisTest, JoinTargetThroughPhiResolves) {
   EXPECT_TRUE(mhp.mustBeSequential(worker_inst, post));
 }
 
+TEST_F(MHPAnalysisTest, AmbiguousJoinDoesNotCreateDefiniteHB) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      %w1 = add i32 1, 2
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      %w2 = add i32 3, 4
+      ret i8* null
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @worker1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @worker2, i8* null)
+      %join_tid = select i1 %cond, i8* %tid1, i8* %tid2
+      call i32 @pthread_join(i8* %join_tid, i8* null)
+      %post = add i32 5, 6
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  const Function *worker1 = module->getFunction("worker1");
+  const Function *worker2 = module->getFunction("worker2");
+  ASSERT_NE(main_func, nullptr);
+  ASSERT_NE(worker1, nullptr);
+  ASSERT_NE(worker2, nullptr);
+
+  const Instruction *post = findInstructionByName(*main_func, "post");
+  const Instruction *w1 = findInstructionByName(*worker1, "w1");
+  const Instruction *w2 = findInstructionByName(*worker2, "w2");
+  ASSERT_NE(post, nullptr);
+  ASSERT_NE(w1, nullptr);
+  ASSERT_NE(w2, nullptr);
+
+  EXPECT_FALSE(mhp.mustPrecede(w1, post));
+  EXPECT_FALSE(mhp.mustPrecede(w2, post));
+}
+
 TEST_F(MHPAnalysisTest, RegionPartitionDoesNotOverlapAcrossBranchMerge) {
   const char *source = R"(
     declare i32 @pthread_mutex_lock(i8*)

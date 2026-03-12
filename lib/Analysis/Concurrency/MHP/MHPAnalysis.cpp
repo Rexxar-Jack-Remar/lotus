@@ -354,6 +354,41 @@ MHPAnalysis::~MHPAnalysis() = default;
 void MHPAnalysis::analyze() {
   errs() << "Starting MHP Analysis...\n";
 
+  m_hb_cache.clear();
+  m_mhp_cache.clear();
+  m_mhp_pairs.clear();
+  m_inst_to_thread.clear();
+  m_thread_fork_sites.clear();
+  m_thread_parents.clear();
+  m_thread_children.clear();
+  m_fork_to_thread.clear();
+  m_join_to_thread.clear();
+  m_pthread_value_to_thread.clear();
+  m_thread_to_pthread_value.clear();
+  m_condvar_signals.clear();
+  m_condvar_waits.clear();
+  m_barrier_waits.clear();
+  m_barrier_phase_by_thread.clear();
+  m_visited_functions_by_thread.clear();
+  m_pre_fork_main_nodes.clear();
+  m_thread_entry_candidates.clear();
+  m_has_unresolved_fork = false;
+  m_has_multi_context_nodes = false;
+  m_hb_transitive_closure.clear();
+  m_hb_closure_computed = false;
+  m_multi_instance_threads.clear();
+  m_atomic_instructions.clear();
+  m_atomic_hb_pairs.clear();
+  m_atomic_sync_witnesses.clear();
+  m_next_thread_id = 1;
+  m_next_call_context_id = 1;
+  m_region_analysis.reset();
+  m_lockset.reset();
+  m_tfg = std::make_unique<ThreadFlowGraph>();
+  m_call_graph = std::make_unique<CallGraph>(m_module);
+  m_join_target_analysis = std::make_unique<JoinTargetAnalysis>(
+      m_module, m_alias_analysis.get());
+
   // Run TLS analysis first
   m_tls_analysis->analyze();
 
@@ -386,6 +421,10 @@ void MHPAnalysis::buildThreadFlowGraph() {
   if (!main_func) {
     errs() << "Warning: No main function found\n";
     return;
+  }
+
+  if (m_join_target_analysis) {
+    m_join_target_analysis->analyze();
   }
 
   // Main thread (thread 0)
@@ -714,71 +753,7 @@ void MHPAnalysis::enableIndirectForkConservatism() {
 // Value Tracing Helpers
 // ============================================================================
 const Value *MHPAnalysis::tracePthreadT(const Value *val) const {
-  // Use a worklist to trace back through the def-use chain of the value.
-  std::deque<const Value *> worklist;
-  worklist.push_back(val);
-  std::set<const Value *> visited;
-
-  while (!worklist.empty()) {
-    const Value *v = worklist.front();
-    worklist.pop_front();
-
-    if (visited.count(v)) {
-      continue;
-    }
-    visited.insert(v);
-
-    // Base case 1: We found the allocation site of the pthread_t variable.
-    if (isa<AllocaInst>(v)) {
-      return v;
-    }
-
-    // Base case 2: We found a value that is already directly mapped to a thread
-    // ID.
-    if (m_pthread_value_to_thread.count(v)) {
-      return v;
-    }
-
-    // Recursive step: add operands to the worklist.
-    if (const LoadInst *load = dyn_cast<LoadInst>(v)) {
-      worklist.push_back(load->getPointerOperand());
-    } else if (const StoreInst *store = dyn_cast<StoreInst>(v)) {
-      worklist.push_back(store->getPointerOperand());
-      worklist.push_back(store->getValueOperand());
-    } else if (const BitCastInst *cast = dyn_cast<BitCastInst>(v)) {
-      worklist.push_back(cast->getOperand(0));
-    } else if (const GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(v)) {
-      worklist.push_back(gep->getPointerOperand());
-    } else if (const PHINode *phi = dyn_cast<PHINode>(v)) {
-      for (const Value *incoming : phi->incoming_values()) {
-        worklist.push_back(incoming);
-      }
-    } else if (const SelectInst *select = dyn_cast<SelectInst>(v)) {
-      worklist.push_back(select->getTrueValue());
-      worklist.push_back(select->getFalseValue());
-    } else if (const Argument *arg = dyn_cast<Argument>(v)) {
-      const Function *parent = arg->getParent();
-      if (!parent) {
-        continue;
-      }
-      if (parent->hasAddressTaken()) {
-        for (const Use &use : parent->uses()) {
-          const auto *cb = dyn_cast<CallBase>(use.getUser());
-          if (!cb || arg->getArgNo() >= cb->arg_size()) {
-            continue;
-          }
-          worklist.push_back(cb->getArgOperand(arg->getArgNo()));
-        }
-      }
-    } else if (const Instruction *inst = dyn_cast<Instruction>(v)) {
-      // General case for other instructions, trace all operands.
-      for (const Use &use : inst->operands()) {
-        worklist.push_back(use.get());
-      }
-    }
-  }
-
-  return nullptr; // Could not trace back to a known origin.
+  return JoinTargetAnalysis::traceThreadHandleRoot(val, &m_module);
 }
 
 void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
@@ -808,6 +783,18 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
     }
   }
 
+  if (!found_thread && m_join_target_analysis) {
+    std::vector<const Instruction *> possible_forks =
+        m_join_target_analysis->getPossibleJoinedForks(join_inst);
+    if (possible_forks.size() == 1) {
+      auto it = m_fork_to_thread.find(possible_forks.front());
+      if (it != m_fork_to_thread.end()) {
+        joined_tid = it->second;
+        found_thread = true;
+      }
+    }
+  }
+
   if (found_thread && joined_tid != 0) {
     // We successfully identified the joined thread
     SyncNode *child_exit = m_tfg->getThreadExitNode(joined_tid);
@@ -817,10 +804,8 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
       m_join_to_thread[join_inst] = joined_tid;
     }
   } else {
-    // Fallback: couldn't determine specific thread, so conservatively
-    // assume it could be any child thread of the current thread
+    // Ambiguous joins must not create definite HB edges.
     (void)parent_tid;
-    // Unknown join target: skip adding HB edges to avoid unsound ordering.
   }
 }
 
@@ -873,7 +858,8 @@ void MHPAnalysis::handleBarrier(const Instruction *barrier_inst,
   current.arrival = node;
   current.continuations = getBarrierContinuations(barrier_inst);
 
-  auto &participants = m_barrier_waits[barrier];
+  size_t phase = m_barrier_phase_by_thread[barrier][node->getThreadID()]++;
+  auto &participants = m_barrier_waits[barrier][phase];
   for (const BarrierParticipant &previous : participants) {
     if (!previous.arrival ||
         previous.arrival->getThreadID() == node->getThreadID()) {
@@ -1630,115 +1616,19 @@ bool MHPAnalysis::isReachableWithoutBackEdges(const Instruction *from,
 void MHPAnalysis::computeAtomicHappensBefore() {
   errs() << "Computing Atomic Happens-Before...\n";
 
-  // Phase 1: Collect all atomic instructions if not already done
-  if (m_atomic_instructions.empty()) {
-    for (Function &F : m_module) {
-      for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
-        if (CppAtomics::isAtomic(&*I)) {
-          m_atomic_instructions.push_back(&*I);
-        }
+  m_atomic_instructions.clear();
+  m_atomic_hb_pairs.clear();
+  m_atomic_sync_witnesses.clear();
+
+  for (Function &F : m_module) {
+    for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
+      if (CppAtomics::isAtomic(&*I)) {
+        m_atomic_instructions.push_back(&*I);
       }
     }
   }
 
-  // Clear the old pairs and rebuild
-  m_atomic_hb_pairs.clear();
-  m_atomic_sync_witnesses.clear();
-  size_t pairs_found = 0;
-
-  // Phase 2: Find release-acquire pairs for synchronizing variables.
-  // This used to be O(#atomic_insts^2). We reduce AA queries by bucketing
-  // by atomic pointer value and querying aliasing per-pointer-bucket pair.
-  using InstVec = std::vector<const Instruction *>;
-  std::unordered_map<const Value *, InstVec> releasesByPtr;
-  std::unordered_map<const Value *, InstVec> acquiresByPtr;
-  releasesByPtr.reserve(m_atomic_instructions.size());
-  acquiresByPtr.reserve(m_atomic_instructions.size());
-
-  auto canonPtr = [](const Value *p) -> const Value * {
-    return p ? p->stripPointerCasts() : nullptr;
-  };
-
-  for (const Instruction *inst : m_atomic_instructions) {
-    const Value *ptr = canonPtr(CppAtomics::getAtomicPointer(inst));
-    if (!ptr)
-      continue;
-
-    const auto mo = CppAtomics::getMemoryOrder(inst);
-    const bool has_release =
-        (mo == CppAtomics::MemoryOrder::Release ||
-         mo == CppAtomics::MemoryOrder::AcquireRelease ||
-         mo == CppAtomics::MemoryOrder::SequentiallyConsistent);
-    const bool has_acquire =
-        (mo == CppAtomics::MemoryOrder::Acquire ||
-         mo == CppAtomics::MemoryOrder::AcquireRelease ||
-         mo == CppAtomics::MemoryOrder::SequentiallyConsistent);
-
-    if (CppAtomics::isStore(inst) && has_release)
-      releasesByPtr[ptr].push_back(inst);
-    if (CppAtomics::isLoad(inst) && has_acquire)
-      acquiresByPtr[ptr].push_back(inst);
-  }
-
-  std::vector<const Value *> releasePtrs;
-  std::vector<const Value *> acquirePtrs;
-  releasePtrs.reserve(releasesByPtr.size());
-  acquirePtrs.reserve(acquiresByPtr.size());
-  for (auto &kv : releasesByPtr)
-    releasePtrs.push_back(kv.first);
-  for (auto &kv : acquiresByPtr)
-    acquirePtrs.push_back(kv.first);
-
-  auto addEdge = [&](const Instruction *release_inst,
-                     const Instruction *acquire_inst) {
-    if (isInSameThread(release_inst, acquire_inst))
-      return;
-    if (CppAtomics::getAtomicPointer(release_inst)->stripPointerCasts() !=
-        CppAtomics::getAtomicPointer(acquire_inst)->stripPointerCasts()) {
-      return;
-    }
-    // Without reads-from information, same-location atomics do not prove a
-    // synchronizes-with edge. Keep only exact-location candidates as witnesses.
-    const Instruction *ca = release_inst < acquire_inst ? release_inst : acquire_inst;
-    const Instruction *cb = release_inst < acquire_inst ? acquire_inst : release_inst;
-    m_atomic_hb_pairs.insert({ca, cb});
-    m_atomic_sync_witnesses.push_back(
-        {release_inst, acquire_inst,
-         CppAtomics::getAtomicPointer(release_inst)->stripPointerCasts()});
-    ++pairs_found;
-  };
-
-  // First, handle identical-pointer buckets without AA queries.
-  for (const Value *p : releasePtrs) {
-    auto itA = acquiresByPtr.find(p);
-    if (itA == acquiresByPtr.end())
-      continue;
-    const InstVec &rels = releasesByPtr[p];
-    const InstVec &acqs = itA->second;
-    for (const Instruction *r : rels)
-      for (const Instruction *a : acqs)
-        addEdge(r, a);
-  }
-
-  // Then, handle cross-pointer aliasing (AA query per pointer-pair).
-  for (const Value *rp : releasePtrs) {
-    for (const Value *ap : acquirePtrs) {
-      if (rp == ap)
-        continue; // already handled
-      // Cross-pointer aliasing is not enough to prove a reads-from relation.
-      (void)rp;
-      (void)ap;
-    }
-  }
-
-  // Phase 3: Fence-based synchronization
-  computeFenceBasedHappensBefore();
-
-  // Phase 4: Sequential consistency total order
-  computeSeqCstTotalOrder();
-
-  errs() << "Recorded " << pairs_found
-         << " exact-location atomic synchronization candidates.\n";
+  errs() << "Skipped synthetic atomic/fence HB edges without a proven witness.\n";
 }
 
 std::vector<const Instruction *>
@@ -1818,74 +1708,7 @@ MHPAnalysis::getBarrierContinuations(const Instruction *barrier_inst) const {
 }
 
 void MHPAnalysis::computeFenceBasedHappensBefore() {
-  std::vector<const Instruction *> release_fences;
-  std::vector<const Instruction *> acquire_fences;
-
-  for (const Instruction *inst : m_atomic_instructions) {
-    if (CppAtomics::isFence(inst)) {
-      if (CppAtomics::isFenceRelease(inst) || CppAtomics::isFenceAcqRel(inst) ||
-          CppAtomics::isFenceSeqCst(inst)) {
-        release_fences.push_back(inst);
-      }
-
-      if (CppAtomics::isFenceAcquire(inst) || CppAtomics::isFenceAcqRel(inst) ||
-          CppAtomics::isFenceSeqCst(inst)) {
-        acquire_fences.push_back(inst);
-      }
-    }
-  }
-
-  size_t fence_pairs = 0;
-
-  for (const Instruction *rel_fence : release_fences) {
-    const auto release_ops = collectFenceWitnesses(rel_fence, true);
-    if (release_ops.empty()) {
-      continue;
-    }
-
-    for (const Instruction *acq_fence : acquire_fences) {
-      if (isInSameThread(rel_fence, acq_fence)) {
-        continue;
-      }
-
-      const auto acquire_ops = collectFenceWitnesses(acq_fence, false);
-      if (acquire_ops.empty()) {
-        continue;
-      }
-
-      bool synchronized = false;
-      for (const Instruction *release_op : release_ops) {
-        if (synchronized) {
-          break;
-        }
-        for (const Instruction *acquire_op : acquire_ops) {
-          const Instruction *ca = release_op < acquire_op ? release_op : acquire_op;
-          const Instruction *cb = release_op < acquire_op ? acquire_op : release_op;
-          if (!m_atomic_hb_pairs.count({ca, cb})) {
-            continue;
-          }
-
-          for (SyncNode *rel_node : m_tfg->getNodes(rel_fence, getThreadID(rel_fence))) {
-            for (SyncNode *acq_node :
-                 m_tfg->getNodes(acq_fence, getThreadID(acq_fence))) {
-              if (!rel_node || !acq_node) {
-                continue;
-              }
-              const Instruction *fa = rel_fence < acq_fence ? rel_fence : acq_fence;
-              const Instruction *fb = rel_fence < acq_fence ? acq_fence : rel_fence;
-              m_atomic_hb_pairs.insert({fa, fb});
-              m_tfg->addInterThreadEdge(rel_node, acq_node);
-              ++fence_pairs;
-            }
-          }
-          synchronized = true;
-          break;
-        }
-      }
-    }
-  }
-
-  errs() << "Added " << fence_pairs << " fence-based HB edges.\n";
+  errs() << "Skipped fence HB edges without a proven atomic witness.\n";
 }
 
 void MHPAnalysis::computeSeqCstTotalOrder() {
