@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
 #include <map>
@@ -95,7 +96,7 @@ private:
   /**
    * @brief Extract dependencies from task creation call
    */
-  std::vector<Dependency> extractDependencies(const llvm::CallInst *task_call);
+  std::vector<Dependency> extractDependencies(const llvm::CallBase *task_call);
   
   /**
    * @brief Build dependency edges between tasks

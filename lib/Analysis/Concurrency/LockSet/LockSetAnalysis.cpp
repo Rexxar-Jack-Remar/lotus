@@ -55,6 +55,10 @@ void LockSetAnalysis::analyze() {
   identifyLocks();
 
   if (m_module) {
+    if (!m_call_graph) {
+      m_owned_call_graph = std::make_unique<CallGraph>(*m_module);
+      m_call_graph = m_owned_call_graph.get();
+    }
     // Module-wide analysis
     for (Function &func : *m_module) {
       if (!func.isDeclaration()) {
@@ -660,7 +664,7 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
 
 void LockSetAnalysis::computeInterproceduralLockSets() {
   if (!m_call_graph) {
-    errs() << "Warning: CallGraph not set. Skipping interprocedural analysis.\n";
+    errs() << "Warning: CallGraph not available. Skipping interprocedural analysis.\n";
     return;
   }
 
@@ -717,7 +721,7 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
     }
   } else if (m_thread_api->isTDCondWait(inst)) {
     // pthread_cond_wait atomically releases the mutex and re-acquires on return; lock set unchanged.
-  } else if (const CallInst *call = dyn_cast<CallInst>(inst)) {
+  } else if (const CallBase *call = dyn_cast<CallBase>(inst)) {
     const Function *func = call->getCalledFunction();
     if (func) {
       ThreadAPI::TD_TYPE type = m_thread_api->getType(func);
@@ -992,7 +996,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         for (const auto *l : to_remove_w) out_write.erase(l);
       }
     }
-  } else if (const CallInst *call = dyn_cast<CallInst>(inst)) {
+  } else if (const CallBase *call = dyn_cast<CallBase>(inst)) {
     const Function *func = call->getCalledFunction();
     if (func) {
       ThreadAPI::TD_TYPE type = m_thread_api->getType(func);
@@ -1103,7 +1107,7 @@ void LockSetAnalysis::identifyLocks() {
           m_lock_acquires[lock].push_back(inst);
 
           // Check for try-lock
-          if (const CallInst *call = dyn_cast<CallInst>(inst)) {
+          if (const CallBase *call = dyn_cast<CallBase>(inst)) {
             if (call->getCalledFunction() &&
                 call->getCalledFunction()->getName().contains("trylock")) {
               m_lock_try_acquires[lock].push_back(inst);
@@ -1225,7 +1229,7 @@ LockID LockSetAnalysis::getLockValue(const Instruction *inst) const {
 // Interprocedural Analysis Implementation
 // ============================================================================
 
-std::set<Function *> LockSetAnalysis::getCallees(const CallInst *call) const {
+std::set<Function *> LockSetAnalysis::getCallees(const CallBase *call) const {
   std::set<Function *> callees;
   
   if (!call) {
@@ -1239,13 +1243,26 @@ std::set<Function *> LockSetAnalysis::getCallees(const CallInst *call) const {
     }
     return callees;
   }
+
+  if (const Value *called = call->getCalledOperand()) {
+    if (const Function *direct_target =
+            dyn_cast<Function>(called->stripPointerCasts())) {
+      if (!direct_target->isDeclaration()) {
+        callees.insert(const_cast<Function *>(direct_target));
+      }
+      return callees;
+    }
+  }
   
   // For indirect calls, use call graph if available
   if (m_call_graph) {
     Function *caller = const_cast<Function*>(call->getFunction());
     if (CallGraphNode *cgNode = (*m_call_graph)[caller]) {
-      // Iterate over all callees from this caller
       for (auto &callRecord : *cgNode) {
+        if (!callRecord.first.hasValue() ||
+            dyn_cast_or_null<CallBase>(*callRecord.first) != call) {
+          continue;
+        }
         if (Function *callee = callRecord.second->getFunction()) {
           if (!callee->isDeclaration()) {
             callees.insert(callee);
@@ -1345,7 +1362,7 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   errs() << "  Must acquire (at exit): " << summary.must_acquire.size() << " locks\n";
 }
 
-void LockSetAnalysis::applyFunctionSummary(const CallInst *call,
+void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
                                            const Function *callee,
                                            LockSet &may_locks,
                                            LockSet &must_locks) const {

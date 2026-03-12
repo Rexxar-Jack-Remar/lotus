@@ -31,8 +31,10 @@
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/raw_ostream.h>
@@ -292,6 +294,7 @@ private:
   ThreadAPI *m_thread_api;
   lotus::AliasAnalysisWrapper *m_alias_analysis;
   llvm::CallGraph *m_call_graph;  // For interprocedural analysis
+  std::unique_ptr<llvm::CallGraph> m_owned_call_graph;
 
   // Lockset results (combined for backward compat; read/write for rwlock)
   std::unordered_map<const llvm::Instruction *, LockSet> m_may_locksets_entry;
@@ -430,14 +433,14 @@ private:
   /**
    * @brief Apply function summary at call site
    */
-  void applyFunctionSummary(const llvm::CallInst *call, 
+  void applyFunctionSummary(const llvm::CallBase *call,
                             const llvm::Function *callee,
                             LockSet &may_locks, LockSet &must_locks) const;
 
   /**
    * @brief Get callees at a call site using CallGraph
    */
-  std::set<llvm::Function *> getCallees(const llvm::CallInst *call) const;
+  std::set<llvm::Function *> getCallees(const llvm::CallBase *call) const;
 
   /**
    * @brief Perform bottom-up call graph traversal for interprocedural analysis

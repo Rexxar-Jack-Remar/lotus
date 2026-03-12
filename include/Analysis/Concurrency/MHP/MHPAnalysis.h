@@ -41,6 +41,7 @@ class ThreadLocalAnalysis;
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/BitVector.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/BasicBlock.h>
@@ -70,11 +71,8 @@ using InstructionSet = std::unordered_set<const llvm::Instruction *>;
 using InstructionVector = std::vector<const llvm::Instruction *>;
 using LockID = const llvm::Value *;
 
-// Maximum regions supported by bitvector (adjust if needed)
-constexpr size_t kMaxRegions = 4096;
-
 // Bitvector for efficient region parallelism representation
-using RegionBitVector = std::bitset<kMaxRegions>;
+using RegionBitVector = llvm::BitVector;
 
 // ============================================================================
 // Thread Region Analysis
@@ -361,6 +359,7 @@ private:
 
   // Thread ID allocation
   ThreadID m_next_thread_id = 1; // 0 is reserved for main thread
+  CallContextID m_next_call_context_id = 1;
 
   // Multi-instance thread tracking
   std::unordered_set<ThreadID> m_multi_instance_threads;
@@ -385,16 +384,16 @@ private:
   // Condition variable tracking (for happens-before)
   // Map condition variable -> list of signal/broadcast instructions
   std::unordered_map<const llvm::Value *,
-                     std::vector<const llvm::Instruction *>>
+                     std::vector<SyncNode *>>
       m_condvar_signals;
   // Map condition variable -> list of wait instructions
   std::unordered_map<const llvm::Value *,
-                     std::vector<const llvm::Instruction *>>
+                     std::vector<SyncNode *>>
       m_condvar_waits;
 
   // Barrier tracking (for happens-before)
   struct BarrierParticipant {
-    const llvm::Instruction *arrival = nullptr;
+    SyncNode *arrival = nullptr;
     std::vector<SyncNode *> continuations;
   };
   // Map barrier object -> barrier participants seen so far.
@@ -402,11 +401,13 @@ private:
       m_barrier_waits;
 
   // Per-thread set of functions already processed to avoid reprocessing
-  std::unordered_map<ThreadID, std::unordered_set<const llvm::Function *>>
+  std::unordered_map<ThreadID,
+                     std::unordered_map<CallContextID,
+                                        std::unordered_set<const llvm::Function *>>>
       m_visited_functions_by_thread;
-  // Instructions in thread 0 before the first fork in main's execution phase.
-  // These cannot run in parallel with child-thread instructions.
-  std::unordered_set<const llvm::Instruction *> m_pre_fork_main_insts;
+  // Context-sensitive nodes in thread 0 before the first fork in main's
+  // execution phase. These cannot run in parallel with child-thread nodes.
+  std::unordered_set<const SyncNode *> m_pre_fork_main_nodes;
 
   // Indirect fork handling (conservative)
   bool m_has_unresolved_fork = false;
@@ -429,6 +430,7 @@ private:
   mutable std::unordered_map<const llvm::Instruction *,
                              std::unordered_set<const llvm::Instruction *>>
       m_hb_transitive_closure;
+  bool m_has_multi_context_nodes = false;
 
   // ========================================================================
   // Analysis Phases
@@ -512,11 +514,13 @@ private:
   // ========================================================================
 
   void processFunction(const llvm::Function *func, ThreadID tid,
+                       CallContextID ctx = 0,
                        bool inPreForkMainPhase = false);
   void processInstruction(const llvm::Instruction *inst, ThreadID tid,
                           SyncNode *&current_node);
 
   ThreadID allocateThreadID();
+  CallContextID allocateCallContextID();
   void mapInstructionToThread(const llvm::Instruction *inst, ThreadID tid);
 
   // Fork-join analysis

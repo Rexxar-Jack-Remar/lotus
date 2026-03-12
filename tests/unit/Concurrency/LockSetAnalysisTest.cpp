@@ -183,6 +183,102 @@ TEST_F(LockSetAnalysisTest, DetectLockOrderInversion) {
   EXPECT_GT(lsa.detectLockOrderInversions().size(), 0u);
 }
 
+TEST_F(LockSetAnalysisTest, InvokeAppliesInterproceduralSummaries) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @__gxx_personality_v0(...)
+
+    @lock = global i8 0
+
+    define void @lock_helper(i8* %m) {
+    entry:
+      %l = call i32 @pthread_mutex_lock(i8* %m)
+      ret void
+    }
+
+    define i32 @main() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      invoke void @lock_helper(i8* @lock) to label %cont unwind label %lpad
+
+    cont:
+      %after = add i32 1, 2
+      ret i32 0
+
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      ret i32 1
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *after = findInstructionByName(*main_func, "after");
+  ASSERT_NE(after, nullptr);
+
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+}
+
+TEST_F(LockSetAnalysisTest, IndirectInvokeDoesNotInheritOtherCallersCallees) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @__gxx_personality_v0(...)
+
+    @lock = global i8 0
+
+    define void @lock_helper(i8* %m) {
+    entry:
+      %l = call i32 @pthread_mutex_lock(i8* %m)
+      ret void
+    }
+
+    define void @noop(i8* %m) {
+    entry:
+      ret void
+    }
+
+    define i32 @main() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %fn = select i1 true, void (i8*)* @noop, void (i8*)* @noop
+      invoke void %fn(i8* @lock) to label %cont unwind label %lpad
+
+    cont:
+      %after = add i32 1, 2
+      call void @lock_helper(i8* @lock)
+      ret i32 0
+
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      ret i32 1
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *after = findInstructionByName(*main_func, "after");
+  ASSERT_NE(after, nullptr);
+
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_FALSE(lsa.mayHoldLock(after, lock));
+  EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

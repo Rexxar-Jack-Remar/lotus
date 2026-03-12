@@ -89,13 +89,10 @@ TEST_F(AtomicHappensBeforeTest, ReleaseAcquireOrdering) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
 
-  // Due to the release-acquire semantics on @flag, the store to @data in the writer
-  // MUST happen-before the load from @data in the reader.
-  // Therefore, they CANNOT happen in parallel.
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_data, load_data));
-  
-  // A stronger check is that the store must precede the load.
-  EXPECT_TRUE(mhp.mustPrecede(store_data, load_data));
+  // Without a reads-from witness, release/acquire on @flag is not enough for
+  // the analysis to prove a definite HB edge for the non-atomic accesses.
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+  EXPECT_FALSE(mhp.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, SequentialConsistency) {
@@ -153,9 +150,10 @@ TEST_F(AtomicHappensBeforeTest, SequentialConsistency) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
 
-  // Sequential consistency provides total ordering
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_TRUE(mhp.mustPrecede(store_data, load_data));
+  // Seq-cst alone does not let the analysis prove a cross-thread HB edge
+  // without a concrete reads-from witness.
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+  EXPECT_FALSE(mhp.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, RelaxedAtomicsNoSynchronization) {
@@ -293,11 +291,12 @@ TEST_F(AtomicHappensBeforeTest, AcquireReleaseOrdering) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
 
-  // Acquire-release provides synchronization
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_data1, load_data1));
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_data2, load_data2));
-  EXPECT_TRUE(mhp.mustPrecede(store_data1, load_data1));
-  EXPECT_TRUE(mhp.mustPrecede(store_data2, load_data2));
+  // These atomic pairs are synchronization candidates, but the analysis no
+  // longer turns them into definite HB edges without reads-from evidence.
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data1, load_data1));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data2, load_data2));
+  EXPECT_FALSE(mhp.mustPrecede(store_data1, load_data1));
+  EXPECT_FALSE(mhp.mustPrecede(store_data2, load_data2));
 }
 
 TEST_F(AtomicHappensBeforeTest, MultipleAtomicVariables) {
@@ -382,11 +381,12 @@ TEST_F(AtomicHappensBeforeTest, MultipleAtomicVariables) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
 
-  // Both pairs should be synchronized
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_x, load_x));
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_y, load_y));
-  EXPECT_TRUE(mhp.mustPrecede(store_x, load_x));
-  EXPECT_TRUE(mhp.mustPrecede(store_y, load_y));
+  // Same-location release/acquire operations are not upgraded to definite HB
+  // edges without a reads-from witness, so both non-atomic pairs remain MHP.
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_x, load_x));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_y, load_y));
+  EXPECT_FALSE(mhp.mustPrecede(store_x, load_x));
+  EXPECT_FALSE(mhp.mustPrecede(store_y, load_y));
 }
 
 TEST_F(AtomicHappensBeforeTest, AtomicChain) {
@@ -461,9 +461,10 @@ TEST_F(AtomicHappensBeforeTest, AtomicChain) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
 
-  // The chain: thread1 -> thread2 -> thread3 should synchronize
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_TRUE(mhp.mustPrecede(store_data, load_data));
+  // The analysis does not build transitive HB through atomic chains without
+  // concrete reads-from evidence at each synchronization step.
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+  EXPECT_FALSE(mhp.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, CompareAndSwap) {
@@ -522,9 +523,10 @@ TEST_F(AtomicHappensBeforeTest, CompareAndSwap) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
 
-  // CAS with acq_rel and subsequent release should synchronize with acquire load
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_TRUE(mhp.mustPrecede(store_data, load_data));
+  // Even with CAS/RMW, the analysis now requires a definite reads-from witness
+  // before proving a cross-thread HB edge.
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+  EXPECT_FALSE(mhp.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, NoSynchronizationWithoutMatchingOrdering) {
@@ -660,9 +662,10 @@ TEST_F(AtomicHappensBeforeTest, SequentialConsistencyMultipleThreads) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
 
-  // Sequential consistency provides total ordering across all threads
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_x, load_x));
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_y, load_y));
+  // Seq-cst does not by itself establish definite HB from these stores to the
+  // later loads without a reads-from witness.
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_x, load_x));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_y, load_y));
 }
 
 TEST_F(AtomicHappensBeforeTest, UnrelatedFencesDoNotSynchronize) {
@@ -777,6 +780,59 @@ TEST_F(AtomicHappensBeforeTest, SeqCstDifferentLocationsStayParallel) {
   mhp.analyze();
 
   EXPECT_TRUE(mhp.mayHappenInParallel(store_x, load_x));
+}
+
+TEST_F(AtomicHappensBeforeTest, MatchingFencesCreateHappensBefore) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 99, i32* @data, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      fence release
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      fence acquire
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %val = load i32, i32* @data, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer_func = module->getFunction("writer");
+  const Function *reader_func = module->getFunction("reader");
+  ASSERT_NE(writer_func, nullptr);
+  ASSERT_NE(reader_func, nullptr);
+
+  const Instruction *store_data = &writer_func->getEntryBlock().front();
+  const Instruction *load_data = findInstructionByName(*reader_func, "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  EXPECT_TRUE(mhp.mustPrecede(store_data, load_data));
+  EXPECT_FALSE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
 // Main function for tests

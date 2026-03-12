@@ -14,6 +14,7 @@
 
 #include <map>
 #include <memory>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -31,6 +32,7 @@ namespace mhp {
 // ============================================================================
 
 using ThreadID = size_t;
+using CallContextID = size_t;
 
 // ============================================================================
 // Synchronization Node Types
@@ -73,13 +75,15 @@ enum class EdgeKind {
  */
 class SyncNode {
 public:
-  SyncNode(const llvm::Instruction *inst, SyncNodeType type, ThreadID tid)
-      : m_instruction(inst), m_type(type), m_thread_id(tid),
+  SyncNode(const llvm::Instruction *inst, SyncNodeType type, ThreadID tid,
+           CallContextID ctx = 0)
+      : m_instruction(inst), m_type(type), m_thread_id(tid), m_call_context_id(ctx),
         m_node_id(next_id++) {}
 
   const llvm::Instruction *getInstruction() const { return m_instruction; }
   SyncNodeType getType() const { return m_type; }
   ThreadID getThreadID() const { return m_thread_id; }
+  CallContextID getCallContextID() const { return m_call_context_id; }
   size_t getNodeID() const { return m_node_id; }
 
   // Synchronization-specific data
@@ -112,6 +116,7 @@ private:
   const llvm::Instruction *m_instruction;
   SyncNodeType m_type;
   ThreadID m_thread_id;
+  CallContextID m_call_context_id;
   size_t m_node_id;
 
   // Synchronization-specific data
@@ -145,8 +150,14 @@ public:
 
   // Node management
   SyncNode *createNode(const llvm::Instruction *inst, SyncNodeType type,
-                       ThreadID tid);
+                       ThreadID tid, CallContextID ctx = 0);
+  SyncNode *getNode(const llvm::Instruction *inst, ThreadID tid,
+                    CallContextID ctx) const;
+  SyncNode *getNode(const llvm::Instruction *inst, ThreadID tid) const;
   SyncNode *getNode(const llvm::Instruction *inst) const;
+  std::vector<SyncNode *> getNodes(const llvm::Instruction *inst) const;
+  std::vector<SyncNode *> getNodes(const llvm::Instruction *inst,
+                                   ThreadID tid) const;
   const std::vector<SyncNode *> &getAllNodes() const { return m_all_nodes; }
 
   // Thread management
@@ -170,8 +181,9 @@ public:
 
   // Per-function exit node (for ret edges); key is (ThreadID, Function*)
   void setFunctionExitNode(ThreadID tid, const llvm::Function *func,
-                           SyncNode *exit_node);
-  SyncNode *getFunctionExitNode(ThreadID tid, const llvm::Function *func) const;
+                           SyncNode *exit_node, CallContextID ctx = 0);
+  SyncNode *getFunctionExitNode(ThreadID tid, const llvm::Function *func,
+                                CallContextID ctx = 0) const;
 
   // Query interface
   std::vector<SyncNode *> getNodesOfType(SyncNodeType type) const;
@@ -193,14 +205,37 @@ public:
   void dumpToFile(const std::string &filename) const;
 
 private:
+  struct InstThreadKey {
+    const llvm::Instruction *inst;
+    ThreadID tid;
+    CallContextID ctx;
+
+    bool operator==(const InstThreadKey &other) const {
+      return inst == other.inst && tid == other.tid && ctx == other.ctx;
+    }
+  };
+
+  struct InstThreadKeyHash {
+    size_t operator()(const InstThreadKey &key) const {
+      size_t h1 = std::hash<const void *>{}(key.inst);
+      size_t h2 = std::hash<ThreadID>{}(key.tid);
+      size_t h3 = std::hash<CallContextID>{}(key.ctx);
+      size_t seed = h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
+      return seed ^ (h3 + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2));
+    }
+  };
+
   std::vector<SyncNode *> m_all_nodes;
-  std::unordered_map<const llvm::Instruction *, SyncNode *> m_inst_to_node;
+  std::unordered_map<InstThreadKey, SyncNode *, InstThreadKeyHash>
+      m_inst_thread_to_node;
+  std::unordered_map<const llvm::Instruction *, std::vector<SyncNode *>>
+      m_inst_to_nodes;
   std::unordered_map<ThreadID, const llvm::Function *> m_thread_entries;
   std::unordered_map<ThreadID, SyncNode *> m_thread_entry_nodes;
   std::unordered_map<ThreadID, SyncNode *> m_thread_exit_nodes;
   std::map<std::pair<const SyncNode *, const SyncNode *>, EdgeKind>
       m_edge_kinds;
-  std::map<std::pair<ThreadID, const llvm::Function *>, SyncNode *>
+  std::map<std::tuple<ThreadID, const llvm::Function *, CallContextID>, SyncNode *>
       m_func_exit_nodes;
 
   // Reachability index structures

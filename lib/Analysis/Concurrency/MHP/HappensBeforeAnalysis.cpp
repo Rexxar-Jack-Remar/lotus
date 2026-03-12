@@ -16,6 +16,7 @@ HappensBeforeAnalysis::HappensBeforeAnalysis(Module &module, mhp::MHPAnalysis &m
     : m_module(module), m_mhp(mhp) {}
 
 void HappensBeforeAnalysis::analyze() {
+  m_hb_cache.clear();
   buildSynchronizesWith();
 }
 
@@ -102,17 +103,11 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
   }
 
-  // 1. Atomic release-acquire pairs
-  for (const Instruction *R : release_ops) {
-    for (const Instruction *A : acquire_ops) {
-      if (R == A) continue;
-      if (!isFence(R) && !isFence(A) && sameAtomicLocation(R, A))
-        m_sync_with.emplace_back(R, A);
-      else if (isFence(R) || isFence(A))
-        // Fences create more conservative synchronization
-        m_sync_with.emplace_back(R, A);
-    }
-  }
+  // 1. Plain atomics and fences are intentionally excluded here.
+  // Without a reads-from / release-sequence witness, same-location atomics do
+  // not prove a definite synchronizes-with edge.
+  (void)release_ops;
+  (void)acquire_ops;
 
   // 2. Promise-Future synchronization
   // promise.set_value() synchronizes-with future.get()
@@ -124,35 +119,13 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
   }
 
-  // 3. call_once synchronization
-  // First call_once execution synchronizes-with all subsequent ones
-  for (size_t i = 0; i < call_once_ops.size(); ++i) {
-    for (size_t j = i + 1; j < call_once_ops.size(); ++j) {
-      if (sameOnceFlag(call_once_ops[i], call_once_ops[j])) {
-        m_sync_with.emplace_back(call_once_ops[i], call_once_ops[j]);
-      }
-    }
-  }
-
-  // 4. Latch synchronization
-  // count_down synchronizes-with wait
-  for (const Instruction *C : latch_countdowns) {
-    for (const Instruction *W : latch_waits) {
-      if (C == W) continue;
-      if (sameLatch(C, W))
-        m_sync_with.emplace_back(C, W);
-    }
-  }
-
-  // 5. Barrier synchronization
-  // All arrives synchronize-with all waits at same barrier
-  for (const Instruction *A : barrier_arrives) {
-    for (const Instruction *W : barrier_waits) {
-      if (A == W) continue;
-      if (sameBarrier(A, W))
-        m_sync_with.emplace_back(A, W);
-    }
-  }
+  // 3-5. `call_once`, latches, and barriers need dynamic winner/phase/state
+  // tracking to prove HB. Do not add synthetic definite edges here.
+  (void)call_once_ops;
+  (void)latch_countdowns;
+  (void)latch_waits;
+  (void)barrier_arrives;
+  (void)barrier_waits;
 }
 
 bool HappensBeforeAnalysis::sameAtomicLocation(const llvm::Instruction *store_inst,
@@ -188,8 +161,8 @@ bool HappensBeforeAnalysis::samePromiseFuturePair(const llvm::Instruction *promi
 
 bool HappensBeforeAnalysis::sameOnceFlag(const llvm::Instruction *call1,
                                           const llvm::Instruction *call2) const {
-  const CallInst *c1 = dyn_cast<CallInst>(call1);
-  const CallInst *c2 = dyn_cast<CallInst>(call2);
+  const CallBase *c1 = dyn_cast<CallBase>(call1);
+  const CallBase *c2 = dyn_cast<CallBase>(call2);
   if (!c1 || !c2) return false;
   
   // call_once takes once_flag as first argument
@@ -206,8 +179,8 @@ bool HappensBeforeAnalysis::sameOnceFlag(const llvm::Instruction *call1,
 
 bool HappensBeforeAnalysis::sameLatch(const llvm::Instruction *inst1,
                                        const llvm::Instruction *inst2) const {
-  const CallInst *c1 = dyn_cast<CallInst>(inst1);
-  const CallInst *c2 = dyn_cast<CallInst>(inst2);
+  const CallBase *c1 = dyn_cast<CallBase>(inst1);
+  const CallBase *c2 = dyn_cast<CallBase>(inst2);
   if (!c1 || !c2) return false;
   
   // Latch operations take latch object as first argument (this pointer)
@@ -224,8 +197,8 @@ bool HappensBeforeAnalysis::sameLatch(const llvm::Instruction *inst1,
 
 bool HappensBeforeAnalysis::sameBarrier(const llvm::Instruction *inst1,
                                          const llvm::Instruction *inst2) const {
-  const CallInst *c1 = dyn_cast<CallInst>(inst1);
-  const CallInst *c2 = dyn_cast<CallInst>(inst2);
+  const CallBase *c1 = dyn_cast<CallBase>(inst1);
+  const CallBase *c2 = dyn_cast<CallBase>(inst2);
   if (!c1 || !c2) return false;
   
   // Barrier operations take barrier object as first argument (this pointer)

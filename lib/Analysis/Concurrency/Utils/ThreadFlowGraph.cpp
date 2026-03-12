@@ -33,6 +33,9 @@ void SyncNode::print(raw_ostream &os) const {
   os << "SyncNode[" << m_node_id << "]: ";
   os << "Type=" << getSyncNodeTypeName(m_type);
   os << ", Thread=" << m_thread_id;
+  if (m_call_context_id != 0) {
+    os << ", Ctx=" << m_call_context_id;
+  }
 
   if (m_instruction) {
     os << ", Inst=";
@@ -71,26 +74,81 @@ ThreadFlowGraph::~ThreadFlowGraph() {
 }
 
 SyncNode *ThreadFlowGraph::createNode(const Instruction *inst,
-                                      SyncNodeType type, ThreadID tid) {
+                                      SyncNodeType type, ThreadID tid,
+                                      CallContextID ctx) {
   if (inst) {
-    auto it = m_inst_to_node.find(inst);
-    if (it != m_inst_to_node.end()) {
+    InstThreadKey key{inst, tid, ctx};
+    auto it = m_inst_thread_to_node.find(key);
+    if (it != m_inst_thread_to_node.end()) {
       return it->second;
     }
   }
-  auto *node = new SyncNode(inst, type, tid);
+  auto *node = new SyncNode(inst, type, tid, ctx);
   m_all_nodes.push_back(node);
 
   if (inst) {
-    m_inst_to_node[inst] = node;
+    InstThreadKey key{inst, tid, ctx};
+    m_inst_thread_to_node[key] = node;
+    m_inst_to_nodes[inst].push_back(node);
   }
 
   return node;
 }
 
+SyncNode *ThreadFlowGraph::getNode(const Instruction *inst,
+                                   ThreadID tid,
+                                   CallContextID ctx) const {
+  if (!inst) {
+    return nullptr;
+  }
+  auto it = m_inst_thread_to_node.find({inst, tid, ctx});
+  return it != m_inst_thread_to_node.end() ? it->second : nullptr;
+}
+
+SyncNode *ThreadFlowGraph::getNode(const Instruction *inst,
+                                   ThreadID tid) const {
+  if (!inst) {
+    return nullptr;
+  }
+  SyncNode *match = nullptr;
+  for (SyncNode *node : getNodes(inst, tid)) {
+    if (match) {
+      return nullptr;
+    }
+    match = node;
+  }
+  return match;
+}
+
 SyncNode *ThreadFlowGraph::getNode(const Instruction *inst) const {
-  auto it = m_inst_to_node.find(inst);
-  return it != m_inst_to_node.end() ? it->second : nullptr;
+  auto it = m_inst_to_nodes.find(inst);
+  if (it != m_inst_to_nodes.end() && it->second.size() == 1) {
+    return it->second.front();
+  }
+  return nullptr;
+}
+
+std::vector<SyncNode *> ThreadFlowGraph::getNodes(const Instruction *inst) const {
+  auto it = m_inst_to_nodes.find(inst);
+  if (it == m_inst_to_nodes.end()) {
+    return {};
+  }
+  return it->second;
+}
+
+std::vector<SyncNode *> ThreadFlowGraph::getNodes(const Instruction *inst,
+                                                  ThreadID tid) const {
+  std::vector<SyncNode *> result;
+  auto it = m_inst_to_nodes.find(inst);
+  if (it == m_inst_to_nodes.end()) {
+    return result;
+  }
+  for (SyncNode *node : it->second) {
+    if (node->getThreadID() == tid) {
+      result.push_back(node);
+    }
+  }
+  return result;
 }
 
 void ThreadFlowGraph::addThread(ThreadID tid, const Function *entry) {
@@ -178,14 +236,16 @@ EdgeKind ThreadFlowGraph::getEdgeKind(const SyncNode *from,
 
 void ThreadFlowGraph::setFunctionExitNode(ThreadID tid,
                                           const llvm::Function *func,
-                                          SyncNode *exit_node) {
-  m_func_exit_nodes[{tid, func}] = exit_node;
+                                          SyncNode *exit_node,
+                                          CallContextID ctx) {
+  m_func_exit_nodes[{tid, func, ctx}] = exit_node;
 }
 
 SyncNode *
 ThreadFlowGraph::getFunctionExitNode(ThreadID tid,
-                                     const llvm::Function *func) const {
-  auto it = m_func_exit_nodes.find({tid, func});
+                                     const llvm::Function *func,
+                                     CallContextID ctx) const {
+  auto it = m_func_exit_nodes.find({tid, func, ctx});
   return it != m_func_exit_nodes.end() ? it->second : nullptr;
 }
 
@@ -429,6 +489,10 @@ void ThreadFlowGraph::buildSCCs(ThreadID tid) {
 bool ThreadFlowGraph::canReach(const SyncNode *from, const SyncNode *to) const {
   if (!from || !to || from == to) {
     return false;
+  }
+
+  if (m_index_built && from->getThreadID() == to->getThreadID()) {
+    return canReachViaIndex(from, to);
   }
 
   std::deque<const SyncNode *> worklist;

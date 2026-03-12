@@ -594,17 +594,35 @@ bool StaticVectorClockMHP::happensBefore(const Instruction *i1,
   if (isInstructionThreadAmbiguous(i1) || isInstructionThreadAmbiguous(i2))
     return false;
 
-  const SyncNode *n1 = m_tfg->getNode(i1);
-  const SyncNode *n2 = m_tfg->getNode(i2);
-  if (!n1 || !n2)
+  auto tid1 = m_inst_to_thread.find(i1);
+  auto tid2 = m_inst_to_thread.find(i2);
+  if (tid1 == m_inst_to_thread.end() || tid2 == m_inst_to_thread.end()) {
+    return false;
+  }
+
+  std::vector<SyncNode *> n1s = m_tfg->getNodes(i1, tid1->second);
+  std::vector<SyncNode *> n2s = m_tfg->getNodes(i2, tid2->second);
+  if (n1s.empty() || n2s.empty())
     return false;
 
-  auto it1 = m_node_clocks.find(n1);
-  auto it2 = m_node_clocks.find(n2);
-  if (it1 == m_node_clocks.end() || it2 == m_node_clocks.end())
-    return false;
+  for (const SyncNode *n1 : n1s) {
+    auto it1 = m_node_clocks.find(n1);
+    if (it1 == m_node_clocks.end()) {
+      return false;
+    }
+    for (const SyncNode *n2 : n2s) {
+      auto it2 = m_node_clocks.find(n2);
+      if (it2 == m_node_clocks.end()) {
+        return false;
+      }
+      if (!(svcLeq(it1->second, it2->second) &&
+            !svcLeq(it2->second, it1->second))) {
+        return false;
+      }
+    }
+  }
 
-  return svcLeq(it1->second, it2->second) && !svcLeq(it2->second, it1->second);
+  return true;
 }
 
 void StaticVectorClockMHP::computeMHPPairs() {
@@ -686,15 +704,16 @@ void StaticVectorClockMHP::buildThreadFlowGraph() {
   }
 
   m_tfg->addThread(0, main_func);
-  processFunction(main_func, 0);
+  processFunction(main_func, 0, 0);
   wireSynchronizationEdges();
 }
 
-void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid) {
+void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
+                                          CallContextID ctx) {
   if (!func || func->isDeclaration())
     return;
 
-  auto &visited = m_visited_functions_by_thread[tid];
+  auto &visited = m_visited_functions_by_thread[tid][ctx];
   if (!visited.insert(func).second)
     return;
 
@@ -726,15 +745,15 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid) {
           node_type = SyncNodeType::BARRIER_WAIT;
         }
       }
-      m_tfg->createNode(&inst, node_type, tid);
+      m_tfg->createNode(&inst, node_type, tid, ctx);
     }
   }
 
   // --- Pass 2: Add edges and handle synchronization logic ---
   SyncNode *entry_node = nullptr;
   if (!func->empty() && !func->front().empty()) {
-    entry_node = m_tfg->getNode(&func->front().front());
-    if (entry_node) {
+    entry_node = m_tfg->getNode(&func->front().front(), tid, ctx);
+    if (entry_node && ctx == 0) {
       m_tfg->setThreadEntryNode(tid, entry_node);
     }
   }
@@ -743,7 +762,7 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid) {
 
   for (const BasicBlock &bb : *func) {
     for (const Instruction &inst : bb) {
-      SyncNode *node = m_tfg->getNode(&inst);
+      SyncNode *node = m_tfg->getNode(&inst, tid, ctx);
       if (!node) {
         continue;
       }
@@ -753,7 +772,7 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid) {
       if (&inst != &bb.front()) {
         const Instruction *prev_inst = inst.getPrevNode();
         if (prev_inst) {
-          SyncNode *prev_node = m_tfg->getNode(prev_inst);
+          SyncNode *prev_node = m_tfg->getNode(prev_inst, tid, ctx);
           if (prev_node) {
             m_tfg->addIntraThreadEdge(prev_node, node);
           }
@@ -763,7 +782,7 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid) {
       if (inst.isTerminator()) {
         for (const BasicBlock *succ : successors(inst.getParent())) {
           if (!succ->empty()) {
-            SyncNode *succ_node = m_tfg->getNode(&succ->front());
+            SyncNode *succ_node = m_tfg->getNode(&succ->front(), tid, ctx);
             if (succ_node) {
               m_tfg->addIntraThreadEdge(node, succ_node);
             }
@@ -791,16 +810,19 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid) {
         } else {
           const Function *callee = cb->getCalledFunction();
           if (callee && !callee->isDeclaration()) {
-            processFunction(callee, tid);
-            SyncNode *callee_entry = m_tfg->getNode(&callee->front().front());
+            CallContextID callee_ctx = node->getNodeID();
+            processFunction(callee, tid, callee_ctx);
+            SyncNode *callee_entry =
+                m_tfg->getNode(&callee->front().front(), tid, callee_ctx);
             if (callee_entry) {
               m_tfg->addCallEdge(node, callee_entry);
             }
-            SyncNode *callee_exit = m_tfg->getFunctionExitNode(tid, callee);
+            SyncNode *callee_exit =
+                m_tfg->getFunctionExitNode(tid, callee, callee_ctx);
             if (callee_exit) {
               const Instruction *next_inst = inst.getNextNode();
               if (next_inst) {
-                SyncNode *return_site = m_tfg->getNode(next_inst);
+                SyncNode *return_site = m_tfg->getNode(next_inst, tid, ctx);
                 if (return_site) {
                   m_tfg->addRetEdge(callee_exit, return_site);
                   m_ret_to_call[return_site] = node;
@@ -808,7 +830,7 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid) {
               } else if (inst.isTerminator()) {
                 for (const BasicBlock *succ : successors(inst.getParent())) {
                   if (!succ->empty()) {
-                    SyncNode *return_site = m_tfg->getNode(&succ->front());
+                    SyncNode *return_site = m_tfg->getNode(&succ->front(), tid, ctx);
                     if (return_site) {
                       m_tfg->addRetEdge(callee_exit, return_site);
                       m_ret_to_call[return_site] = node;
@@ -827,7 +849,7 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid) {
     if (!m_tfg->getThreadExitNode(tid)) {
       m_tfg->setThreadExitNode(tid, exit_node);
     }
-    m_tfg->setFunctionExitNode(tid, func, exit_node);
+    m_tfg->setFunctionExitNode(tid, func, exit_node, ctx);
   }
 }
 
@@ -958,7 +980,7 @@ void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
   const Value *forked_fun_val = m_thread_api->getForkedFun(fork_inst);
   if (const Function *forked_fun = dyn_cast_or_null<Function>(forked_fun_val)) {
     m_tfg->addThread(new_tid, forked_fun);
-    processFunction(forked_fun, new_tid);
+    processFunction(forked_fun, new_tid, 0);
     if (SyncNode *child_entry = m_tfg->getThreadEntryNode(new_tid)) {
       m_tfg->addInterThreadEdge(node, child_entry);
     }
@@ -1030,21 +1052,21 @@ void StaticVectorClockMHP::handleCondWait(const Instruction *wait_inst,
   const Value *mutex = m_thread_api->getCondMutex(wait_inst);
   node->setCondValue(cond);
   node->setLockValue(mutex);
-  m_condvar_waits[cond].push_back(wait_inst);
+  m_condvar_waits[cond].push_back(node);
 }
 
 void StaticVectorClockMHP::handleCondSignal(const Instruction *signal_inst,
                                             SyncNode *node) {
   const Value *cond = m_thread_api->getCondVal(signal_inst);
   node->setCondValue(cond);
-  m_condvar_signals[cond].push_back(signal_inst);
+  m_condvar_signals[cond].push_back(node);
 }
 
 void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
                                          SyncNode *node) {
   const Value *barrier = m_thread_api->getBarrierVal(barrier_inst);
   node->setLockValue(barrier);
-  m_barrier_waits[barrier].push_back(barrier_inst);
+  m_barrier_waits[barrier].push_back(node);
 }
 
 void StaticVectorClockMHP::wireSynchronizationEdges() {
@@ -1055,13 +1077,11 @@ void StaticVectorClockMHP::wireSynchronizationEdges() {
     auto wait_it = m_condvar_waits.find(cond);
     if (wait_it == m_condvar_waits.end())
       continue;
-    for (const Instruction *signal_inst : kv.second) {
-      SyncNode *signal_node = m_tfg->getNode(signal_inst);
+    for (SyncNode *signal_node : kv.second) {
       if (!signal_node)
         continue;
-      for (const Instruction *wait_inst : wait_it->second) {
-        SyncNode *wait_node = m_tfg->getNode(wait_inst);
-        if (wait_node) {
+      for (SyncNode *wait_node : wait_it->second) {
+        if (wait_node && wait_node->getThreadID() != signal_node->getThreadID()) {
           m_tfg->addInterThreadEdge(signal_node, wait_node, EdgeKind::Signal);
         }
       }
@@ -1075,14 +1095,14 @@ void StaticVectorClockMHP::wireSynchronizationEdges() {
   // directed edge per pair is sufficient to enforce the all-before-all
   // barrier semantics without introducing cycles.
   for (const auto &kv : m_barrier_waits) {
-    const std::vector<const Instruction *> &waits = kv.second;
+    const std::vector<SyncNode *> &waits = kv.second;
     for (size_t i = 0; i < waits.size(); ++i) {
-      SyncNode *ni = m_tfg->getNode(waits[i]);
+      SyncNode *ni = waits[i];
       if (!ni)
         continue;
       for (size_t j = i + 1; j < waits.size(); ++j) {
-        SyncNode *nj = m_tfg->getNode(waits[j]);
-        if (nj) {
+        SyncNode *nj = waits[j];
+        if (nj && nj->getThreadID() != ni->getThreadID()) {
           m_tfg->addInterThreadEdge(ni, nj, EdgeKind::Barrier);
         }
       }

@@ -174,7 +174,8 @@ private:
 
   // Construction
   void buildThreadFlowGraph();
-  void processFunction(const llvm::Function *func, ThreadID tid);
+  void processFunction(const llvm::Function *func, ThreadID tid,
+                       CallContextID ctx = 0);
   void mapInstructionToThread(const llvm::Instruction *inst, ThreadID tid);
   ThreadID allocateThreadID();
   void handleThreadFork(const llvm::Instruction *fork_inst, SyncNode *node,
@@ -223,10 +224,13 @@ private:
   std::unordered_map<const llvm::Instruction *, ThreadID> m_join_to_thread;
   std::unordered_map<const llvm::Value *, ThreadID> m_pthread_value_to_thread;
   std::unordered_map<ThreadID, const llvm::Value *> m_thread_to_pthread_value;
-  std::unordered_map<ThreadID, std::unordered_set<const llvm::Function *>> m_visited_functions_by_thread;
-  std::unordered_map<const llvm::Value *, std::vector<const llvm::Instruction *>> m_condvar_signals;
-  std::unordered_map<const llvm::Value *, std::vector<const llvm::Instruction *>> m_condvar_waits;
-  std::unordered_map<const llvm::Value *, std::vector<const llvm::Instruction *>> m_barrier_waits;
+  std::unordered_map<ThreadID,
+                     std::unordered_map<CallContextID,
+                                        std::unordered_set<const llvm::Function *>>>
+      m_visited_functions_by_thread;
+  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_condvar_signals;
+  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_condvar_waits;
+  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_barrier_waits;
 
   // Indirect fork handling (conservative)
   bool m_has_unresolved_fork = false;

@@ -485,6 +485,54 @@ TEST_F(MHPAnalysisTest, RegionPartitionDoesNotOverlapAcrossBranchMerge) {
   EXPECT_EQ(covered, inst_count);
 }
 
+TEST_F(MHPAnalysisTest, HelperCalledBeforeAndAfterForkIsNotGloballyPrefork) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i32 @helper() {
+    entry:
+      %h = add i32 1, 2
+      ret i32 %h
+    }
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 3, 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %pre = call i32 @helper()
+      %tid = alloca i8
+      %fork = call i32 @pthread_create(i8* %tid, i8* null,
+                                       i8* (i8*)* @worker, i8* null)
+      %post = call i32 @helper()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *helper_func = module->getFunction("helper");
+  const Function *worker_func = module->getFunction("worker");
+  ASSERT_NE(helper_func, nullptr);
+  ASSERT_NE(worker_func, nullptr);
+
+  const Instruction *helper_inst = findInstructionByName(*helper_func, "h");
+  const Instruction *worker_inst = findInstructionByName(*worker_func, "w");
+  ASSERT_NE(helper_inst, nullptr);
+  ASSERT_NE(worker_inst, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  EXPECT_EQ(mhp.getThreadFlowGraph().getNodes(helper_inst).size(), 2u);
+  EXPECT_FALSE(mhp.mustPrecede(helper_inst, worker_inst));
+  EXPECT_TRUE(mhp.mayHappenInParallel(helper_inst, worker_inst));
+}
+
 // Main function for tests
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

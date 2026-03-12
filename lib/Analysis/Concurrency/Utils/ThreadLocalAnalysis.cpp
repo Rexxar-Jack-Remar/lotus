@@ -4,6 +4,7 @@
  */
 
 #include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
@@ -63,8 +64,11 @@ void ThreadLocalAnalysis::identifyPthreadSpecificData() {
     
     for (BasicBlock &bb : func) {
       for (Instruction &inst : bb) {
-        if (CallInst *call = dyn_cast<CallInst>(&inst)) {
+        if (CallBase *call = dyn_cast<CallBase>(&inst)) {
           Function *callee = call->getCalledFunction();
+          if (!callee) {
+            callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+          }
           if (!callee) {
             continue;
           }
@@ -129,21 +133,30 @@ bool ThreadLocalAnalysis::escapesThread(const Value *val) const {
       // Check for escape scenarios
       if (const StoreInst *store = dyn_cast<StoreInst>(user)) {
         const Value *ptr = store->getPointerOperand();
+        const Value *base = getUnderlyingObject(ptr);
+        base = base ? base->stripPointerCasts() : nullptr;
         
         // Storing to a global = escape
-        if (isa<GlobalVariable>(ptr)) {
+        if (base && isa<GlobalVariable>(base)) {
           return true;
         }
         
         // Storing to heap memory = potential escape
         // (We'd need more sophisticated analysis to determine if heap is shared)
         // For now, conservatively assume heap storage escapes
-        if (!isa<AllocaInst>(ptr)) {
+        if (base) {
+          if (!isa<AllocaInst>(base)) {
+            return true;
+          }
+        } else if (!isa<AllocaInst>(ptr)) {
           return true;
         }
       }
-      else if (const CallInst *call = dyn_cast<CallInst>(user)) {
+      else if (const CallBase *call = dyn_cast<CallBase>(user)) {
         const Function *callee = call->getCalledFunction();
+        if (!callee) {
+          callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+        }
         if (callee) {
           StringRef name = callee->getName();
           
