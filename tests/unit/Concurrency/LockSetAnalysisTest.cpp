@@ -183,6 +183,42 @@ TEST_F(LockSetAnalysisTest, DetectLockOrderInversion) {
   EXPECT_GT(lsa.detectLockOrderInversions().size(), 0u);
 }
 
+TEST_F(LockSetAnalysisTest, UniqueLockManualLockUnlockUsesUnderlyingMutex) {
+  const char *source = R"(
+    declare void @fake_unique_lock_C1E(i8*, i8*)
+    declare void @fake_unique_lock_unlockEv(i8*)
+    declare void @fake_unique_lock_lockEv(i8*)
+
+    @lock = global i8 0
+
+    define i32 @main() {
+    entry:
+      %ul = alloca i8
+      call void @fake_unique_lock_C1E(i8* %ul, i8* @lock)
+      call void @fake_unique_lock_unlockEv(i8* %ul)
+      call void @fake_unique_lock_lockEv(i8* %ul)
+      %after = add i32 1, 2
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *after = findInstructionByName(*main_func, "after");
+  ASSERT_NE(after, nullptr);
+
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mustHoldLock(after, lock));
+}
+
 TEST_F(LockSetAnalysisTest, InvokeAppliesInterproceduralSummaries) {
   const char *source = R"(
     declare i32 @pthread_mutex_lock(i8*)

@@ -815,6 +815,21 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
                 }
               }
             }
+            if (LockID lock = getCppWrapperLockValue(inst)) {
+              out_set.erase(lock);
+              if (is_must && m_alias_analysis) {
+                LockSet to_remove;
+                for (const auto *l : out_set) {
+                  if (mayAlias(l, lock)) {
+                    to_remove.insert(l);
+                  }
+                }
+                for (const auto *l : to_remove) {
+                  out_set.erase(l);
+                }
+              }
+              return out_set;
+            }
             // Fallback: if we couldn't track the specific lock, be conservative
             if (is_must) {
               out_set.clear(); // Conservative: all locks may be released
@@ -825,28 +840,24 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         // unique_lock manual operations
         case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
           // Manual lock() call on unique_lock
-          if (call->arg_size() >= 1) {
-            LockID lock_obj = getCanonicalLock(call->getArgOperand(0));
-            if (lock_obj) out_set.insert(lock_obj);
+          if (LockID lock = getCppWrapperLockValue(inst)) {
+            out_set.insert(lock);
           }
           return out_set;
           
         case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
           // Manual unlock() call on unique_lock
-          if (call->arg_size() >= 1) {
-            LockID lock_obj = getCanonicalLock(call->getArgOperand(0));
-            if (lock_obj) {
-              out_set.erase(lock_obj);
-              if (is_must && m_alias_analysis) {
-                LockSet to_remove;
-                for (const auto *l : out_set)
-                  if (mayAlias(l, lock_obj)) to_remove.insert(l);
-                for (const auto *l : to_remove) out_set.erase(l);
-              }
+          if (LockID lock = getCppWrapperLockValue(inst)) {
+            out_set.erase(lock);
+            if (is_must && m_alias_analysis) {
+              LockSet to_remove;
+              for (const auto *l : out_set)
+                if (mayAlias(l, lock)) to_remove.insert(l);
+              for (const auto *l : to_remove) out_set.erase(l);
             }
           }
           return out_set;
-        
+
         // C++20 semaphores
         case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
           if (call->arg_size() >= 1) {
@@ -1214,15 +1225,133 @@ LockID LockSetAnalysis::getCanonicalLock(LockID lock) const {
   return lock;
 }
 
+LockID LockSetAnalysis::getUnderlyingRAIILock(const Instruction *inst,
+                                              const Value *lock_obj) const {
+  if (!inst || !lock_obj) {
+    return nullptr;
+  }
+
+  const Function *parent_func = inst->getFunction();
+  auto raii_it = m_raii_locks.find(parent_func);
+  if (raii_it == m_raii_locks.end()) {
+    return nullptr;
+  }
+
+  const Value *base = lock_obj->stripPointerCasts();
+  if (const Value *underlying = getUnderlyingObject(base, 32)) {
+    base = underlying->stripPointerCasts();
+  }
+
+  const auto *alloca = dyn_cast<AllocaInst>(base);
+  if (!alloca) {
+    return nullptr;
+  }
+
+  auto lifetime_it = raii_it->second.find(alloca);
+  if (lifetime_it == raii_it->second.end() ||
+      !lifetime_it->second.underlyingLock) {
+    return nullptr;
+  }
+
+  return getCanonicalLock(lifetime_it->second.underlyingLock);
+}
+
+LockID LockSetAnalysis::getCppWrapperLockValue(const Instruction *inst) const {
+  const auto *call = dyn_cast<CallBase>(inst);
+  if (!call) {
+    return nullptr;
+  }
+
+  const Function *func = call->getCalledFunction();
+  if (!func) {
+    return nullptr;
+  }
+
+  switch (m_thread_api->getType(func)) {
+  case ThreadAPI::TD_SHARED_RDLOCK:
+  case ThreadAPI::TD_SHARED_WRLOCK:
+  case ThreadAPI::TD_SHARED_UNLOCK:
+  case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
+  case ThreadAPI::TD_SEMAPHORE_RELEASE:
+  case ThreadAPI::TD_SEMAPHORE_TRY_ACQUIRE:
+    if (call->arg_size() >= 1) {
+      return getCanonicalLock(call->getArgOperand(0));
+    }
+    return nullptr;
+
+  case ThreadAPI::TD_LOCK_GUARD_CTOR:
+  case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+  case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+  case ThreadAPI::TD_SHARED_LOCK_CTOR:
+    if (call->arg_size() >= 1) {
+      if (LockID tracked = getUnderlyingRAIILock(inst, call->getArgOperand(0))) {
+        return tracked;
+      }
+    }
+    if (call->arg_size() >= 2) {
+      return getCanonicalLock(call->getArgOperand(1));
+    }
+    return nullptr;
+
+  case ThreadAPI::TD_LOCK_GUARD_DTOR:
+  case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+  case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+  case ThreadAPI::TD_SHARED_LOCK_DTOR:
+  case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+  case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+    if (call->arg_size() >= 1) {
+      return getUnderlyingRAIILock(inst, call->getArgOperand(0));
+    }
+    return nullptr;
+
+  default:
+    return nullptr;
+  }
+}
+
 bool LockSetAnalysis::isLockOperation(const Instruction *inst) const {
-  return m_thread_api->isTDAcquire(inst) || m_thread_api->isTDRelease(inst);
+  if (m_thread_api->isTDAcquire(inst) || m_thread_api->isTDRelease(inst)) {
+    return true;
+  }
+
+  const auto *call = dyn_cast<CallBase>(inst);
+  if (!call) {
+    return false;
+  }
+
+  const Function *func = call->getCalledFunction();
+  if (!func) {
+    return false;
+  }
+
+  switch (m_thread_api->getType(func)) {
+  case ThreadAPI::TD_SHARED_RDLOCK:
+  case ThreadAPI::TD_SHARED_WRLOCK:
+  case ThreadAPI::TD_SHARED_UNLOCK:
+  case ThreadAPI::TD_LOCK_GUARD_CTOR:
+  case ThreadAPI::TD_LOCK_GUARD_DTOR:
+  case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+  case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+  case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+  case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+  case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+  case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+  case ThreadAPI::TD_SHARED_LOCK_CTOR:
+  case ThreadAPI::TD_SHARED_LOCK_DTOR:
+  case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
+  case ThreadAPI::TD_SEMAPHORE_RELEASE:
+  case ThreadAPI::TD_SEMAPHORE_TRY_ACQUIRE:
+    return true;
+  default:
+    return false;
+  }
 }
 
 LockID LockSetAnalysis::getLockValue(const Instruction *inst) const {
   if (m_thread_api->isTDAcquire(inst) || m_thread_api->isTDRelease(inst)) {
     return getCanonicalLock(m_thread_api->getLockVal(inst));
   }
-  return nullptr;
+  return getCppWrapperLockValue(inst);
 }
 
 // ============================================================================

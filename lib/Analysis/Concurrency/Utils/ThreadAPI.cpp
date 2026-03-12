@@ -63,7 +63,7 @@ static const ei_pair ei_pairs[] = {
     {"apr_thread_create", ThreadAPI::TD_FORK},
     {"pthread_join", ThreadAPI::TD_JOIN},
     {"\01_pthread_join", ThreadAPI::TD_JOIN},
-    {"pthread_cancel", ThreadAPI::TD_JOIN},
+    {"pthread_cancel", ThreadAPI::TD_CANCEL},
     {"pthread_mutex_lock", ThreadAPI::TD_ACQUIRE},
     {"sem_wait", ThreadAPI::TD_ACQUIRE},
     {"_spin_lock", ThreadAPI::TD_ACQUIRE},
@@ -135,48 +135,23 @@ void ThreadAPI::addEntry(const std::string &name, TD_TYPE type) {
   tdAPIMap[name] = type;
 }
 
-static ThreadAPI::TD_TYPE stringToType(const std::string &s) {
-  if (s == "TD_FORK")
-    return ThreadAPI::TD_FORK;
-  if (s == "TD_JOIN")
-    return ThreadAPI::TD_JOIN;
-  if (s == "TD_DETACH")
-    return ThreadAPI::TD_DETACH;
-  if (s == "TD_ACQUIRE")
-    return ThreadAPI::TD_ACQUIRE;
-  if (s == "TD_TRY_ACQUIRE")
-    return ThreadAPI::TD_TRY_ACQUIRE;
-  if (s == "TD_RWLOCK_RDLOCK")
-    return ThreadAPI::TD_RWLOCK_RDLOCK;
-  if (s == "TD_RWLOCK_WRLOCK")
-    return ThreadAPI::TD_RWLOCK_WRLOCK;
-  if (s == "TD_RELEASE")
-    return ThreadAPI::TD_RELEASE;
-  if (s == "TD_EXIT")
-    return ThreadAPI::TD_EXIT;
-  if (s == "TD_CANCEL")
-    return ThreadAPI::TD_CANCEL;
-  if (s == "TD_COND_WAIT")
-    return ThreadAPI::TD_COND_WAIT;
-  if (s == "TD_COND_SIGNAL")
-    return ThreadAPI::TD_COND_SIGNAL;
-  if (s == "TD_COND_BROADCAST")
-    return ThreadAPI::TD_COND_BROADCAST;
-  if (s == "TD_MUTEX_INI")
-    return ThreadAPI::TD_MUTEX_INI;
-  if (s == "TD_MUTEX_DESTROY")
-    return ThreadAPI::TD_MUTEX_DESTROY;
-  if (s == "TD_CONDVAR_INI")
-    return ThreadAPI::TD_CONDVAR_INI;
-  if (s == "TD_CONDVAR_DESTROY")
-    return ThreadAPI::TD_CONDVAR_DESTROY;
-  if (s == "TD_BAR_INIT")
-    return ThreadAPI::TD_BAR_INIT;
-  if (s == "TD_BAR_WAIT")
-    return ThreadAPI::TD_BAR_WAIT;
-  if (s == "HARE_PAR_FOR")
-    return ThreadAPI::HARE_PAR_FOR;
-  return ThreadAPI::TD_DUMMY;
+ThreadAPI::TD_TYPE ThreadAPI::stringToType(StringRef s) {
+  static const auto *type_map =
+      []() -> std::unordered_map<std::string, ThreadAPI::TD_TYPE> * {
+    auto *map = new std::unordered_map<std::string, ThreadAPI::TD_TYPE>();
+    for (int raw = static_cast<int>(ThreadAPI::TD_DUMMY);
+         raw <= static_cast<int>(ThreadAPI::TD_KERNEL_MEMORY_BARRIER); ++raw) {
+      ThreadAPI::TD_TYPE type = static_cast<ThreadAPI::TD_TYPE>(raw);
+      const char *name = ThreadAPI::tdTypeToString(type);
+      if (name && name[0] != '<') {
+        (*map)[name] = type;
+      }
+    }
+    return map;
+  }();
+
+  auto it = type_map->find(s.str());
+  return it != type_map->end() ? it->second : ThreadAPI::TD_DUMMY;
 }
 
 ThreadAPI::ForkArgIndices ThreadAPI::getForkArgIndices(const Function *F) const {
@@ -206,7 +181,7 @@ void ThreadAPI::loadConfig(const std::string &filename) {
     std::stringstream ss(line);
     std::string name, typeStr;
     if (ss >> name >> typeStr) {
-      TD_TYPE type = stringToType(typeStr);
+      TD_TYPE type = ThreadAPI::stringToType(typeStr);
       if (type != TD_DUMMY) {
         addEntry(name, type);
         if (type == TD_FORK) {

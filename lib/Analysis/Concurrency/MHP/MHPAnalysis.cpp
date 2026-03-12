@@ -13,7 +13,9 @@
  *   - Fork/Join: Precisely models ancestor relationships.
  *   - Locks: Uses LockSet analysis (if enabled) to rule out parallelism guarded
  * by common locks.
- *   - Condition Variables: Conservatively assumes a signal may wake any wait.
+ *   - Condition Variables: Treats wait/signal/broadcast as synchronization
+ *     boundaries, but does not synthesize definite inter-thread HB edges
+ *     without waiter-state analysis.
  *   - Barriers: Enforces program order across barriers.
  * - Thread Instances: Conservatively assumes spawned threads may have multiple
  * instances.
@@ -835,111 +837,28 @@ void MHPAnalysis::handleLockRelease(const Instruction *unlock_inst,
 }
 
 void MHPAnalysis::handleCondWait(const Instruction *wait_inst, SyncNode *node) {
-  // Condition variable wait handling with improved precision
-  // pthread_cond_wait atomically releases the mutex and waits for a signal
-  // When woken up, it reacquires the mutex
-  //
-  // Improvement: Track mutex association to enable more precise signal-wait
-  // pairing. A signal can only wake a wait if they use the same mutex (per
-  // POSIX semantics).
-
   const Value *cond = m_thread_api->getCondVal(wait_inst);
   const Value *mutex = m_thread_api->getCondMutex(wait_inst);
 
   node->setCondValue(cond);
   node->setLockValue(mutex);
 
-  // Track this wait with its associated mutex for precise pairing
+  // Track the wait as a region boundary. We intentionally avoid adding a
+  // definite signal->wait HB edge here: without waiter queue / phase analysis
+  // we cannot prove that this wait is the one resumed by a later signal.
   m_condvar_waits[cond].push_back(node);
-
-  // Add happens-before edges from signals on the same condition variable
-  // Improved: Only add edges from signals that could actually wake this wait
-  auto it = m_condvar_signals.find(cond);
-  if (it != m_condvar_signals.end()) {
-    for (SyncNode *signal_node : it->second) {
-      if (!signal_node ||
-          signal_node->getThreadID() == node->getThreadID()) {
-        continue;
-      }
-
-      // Check mutex compatibility: signal and wait should use same mutex
-      // for the signal to potentially wake the wait (POSIX requirement)
-      const Value *signal_mutex = signal_node->getLockValue();
-      bool mutex_compatible = true;
-
-      if (mutex && signal_mutex && m_alias_analysis) {
-        // If mutexes don't alias, this signal cannot wake this wait
-        if (!m_alias_analysis->mayAlias(mutex, signal_mutex)) {
-          mutex_compatible = false;
-        }
-      }
-
-      if (mutex_compatible) {
-        m_tfg->addInterThreadEdge(signal_node, node);
-      }
-    }
-  }
 }
 
 void MHPAnalysis::handleCondSignal(const Instruction *signal_inst,
                                    SyncNode *node) {
-  // Condition variable signal/broadcast handling with improved precision
-  // Wakes up one or more waiting threads
-  //
-  // Improvement: Only pair signals with waits that use compatible mutexes,
-  // and track broadcast vs signal for different precision levels.
-
   // B2 fix: use getCondVal (not getLockVal) for the condition variable.
   // getLockVal asserts isTDAcquire||isTDRelease and would crash on a signal.
   const Value *cond = m_thread_api->getCondVal(signal_inst);
-  // The mutex is not directly available from a signal instruction; leave null.
-  const Value *mutex = nullptr;
-
   node->setCondValue(cond);
-  if (mutex) {
-    node->setLockValue(mutex);
-  }
-
-  // Track this signal for happens-before analysis
+  // Record the signal/broadcast as a region boundary only. A single signal does
+  // not yield a definite HB edge to every matching wait, and even broadcast
+  // requires waiter-state reasoning to avoid ordering waits that occur later.
   m_condvar_signals[cond].push_back(node);
-
-  // Check if this is a broadcast (wakes all waiters) or signal (wakes one)
-  // pthread_cond_signal vs pthread_cond_broadcast
-  bool is_broadcast = false;
-  if (const CallBase *cb = dyn_cast<CallBase>(signal_inst)) {
-    if (const Function *callee = cb->getCalledFunction()) {
-      StringRef name = callee->getName();
-      is_broadcast = name.contains("broadcast");
-    }
-  }
-
-  // Add happens-before edges to waits on the same condition variable
-  auto it = m_condvar_waits.find(cond);
-  if (it != m_condvar_waits.end()) {
-    for (SyncNode *wait_node : it->second) {
-      if (!wait_node || wait_node->getThreadID() == node->getThreadID()) {
-        continue;
-      }
-
-      // Check mutex compatibility
-      const Value *wait_mutex = wait_node->getLockValue();
-      bool mutex_compatible = true;
-
-      if (mutex && wait_mutex && m_alias_analysis) {
-        if (!m_alias_analysis->mayAlias(mutex, wait_mutex)) {
-          mutex_compatible = false;
-        }
-      }
-
-      if (mutex_compatible) {
-        // For broadcast: add edge to all compatible waits
-        // For signal: conservatively add edge to all compatible waits
-        // (a more precise analysis would track waiter queues)
-        (void)is_broadcast; // Reserved for future optimization
-        m_tfg->addInterThreadEdge(node, wait_node);
-      }
-    }
-  }
 }
 
 void MHPAnalysis::handleBarrier(const Instruction *barrier_inst,

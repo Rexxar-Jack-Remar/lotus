@@ -59,11 +59,11 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 
 ### Synchronization Primitives
 - **std::condition_variable**: wait, notify_one, notify_all
-- **std::call_once** / **std::once_flag**: One-time initialization
+- **std::call_once** / **std::once_flag**: Recognized; definite HB still needs winner tracking
 - **std::future** / **std::promise**: Task-based synchronization (get, wait, set_value, set_exception)
 - **std::async**: Asynchronous task creation
-- **std::latch** (C++20): Single-use countdown synchronization
-- **std::barrier** (C++20): Reusable thread barrier
+- **std::latch** (C++20): Recognized; definite HB still needs phase/count tracking
+- **std::barrier** (C++20): Recognized; definite HB still needs phase tracking
 - **std::counting_semaphore** / **std::binary_semaphore** (C++20): Semaphore primitives
 
 ### Atomic Operations
@@ -168,10 +168,11 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 ### Happens-Before Analysis
 - **Atomic synchronization**: Full acquire-release semantics with all memory orders
 - **Fence synchronization**: atomic_thread_fence properly modeled
+- **Condition variables**: wait/signal/broadcast are region boundaries; definite signal→wait HB edges are not synthesized yet
 - **Future/Promise synchronization**: promise.set_value() → future.get() edges
-- **call_once synchronization**: First execution synchronizes-with subsequent calls
-- **Latch synchronization**: count_down → wait edges
-- **Barrier synchronization**: arrive → wait edges at barriers
+- **call_once synchronization**: Recognized, but no definite HB edges are emitted yet
+- **Latch synchronization**: Recognized, but no definite HB edges are emitted yet
+- **Barrier synchronization**: Recognized, but no definite HB edges are emitted yet
 - **Release sequences**: RMW chains properly modeled for happens-before
 
 ### Data Race Detection

@@ -756,6 +756,9 @@ public:
 
   /// Convert a TD_TYPE to a human-readable string (for diagnostics).
   static const char *tdTypeToString(TD_TYPE t);
+
+  /// Parse a TD_TYPE name (used by thread.spec and tests).
+  static TD_TYPE stringToType(llvm::StringRef name);
 };
 
 #endif // THREADAPI_H

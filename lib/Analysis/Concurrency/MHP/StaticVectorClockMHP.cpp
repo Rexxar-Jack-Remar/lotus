@@ -1072,21 +1072,10 @@ void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
 void StaticVectorClockMHP::wireSynchronizationEdges() {
   if (!m_tfg)
     return;
-  for (const auto &kv : m_condvar_signals) {
-    const Value *cond = kv.first;
-    auto wait_it = m_condvar_waits.find(cond);
-    if (wait_it == m_condvar_waits.end())
-      continue;
-    for (SyncNode *signal_node : kv.second) {
-      if (!signal_node)
-        continue;
-      for (SyncNode *wait_node : wait_it->second) {
-        if (wait_node && wait_node->getThreadID() != signal_node->getThreadID()) {
-          m_tfg->addInterThreadEdge(signal_node, wait_node, EdgeKind::Signal);
-        }
-      }
-    }
-  }
+  // Do not synthesize definite condition-variable HB edges here. Without
+  // waiter queue / phase analysis, connecting a signal to all waits can hide
+  // real races by ordering waits that are resumed by a different signal or
+  // that start waiting later.
   // B12 fix: barrier semantics require that every arrival HB every other
   // arrival, but adding edges in BOTH directions between the same pair
   // creates a cycle in the HB graph (n_i HB n_j AND n_j HB n_i).

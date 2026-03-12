@@ -383,6 +383,73 @@ TEST_F(MHPAnalysisTest, BarrierOrdersPreAndPostRegions) {
   EXPECT_FALSE(mhp.mayHappenInParallel(store_shared, load_shared));
 }
 
+TEST_F(MHPAnalysisTest, CondSignalDoesNotCreateDefiniteHBToAllWaiters) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_cond_wait(i8*, i8*)
+    declare i32 @pthread_cond_signal(i8*)
+
+    @cond = global i8 0
+    @mutex = global i8 0
+    @shared = global i32 0
+
+    define i8* @waiter1(i8* %arg) {
+    entry:
+      %w1 = call i32 @pthread_cond_wait(i8* @cond, i8* @mutex)
+      %load1 = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @waiter2(i8* %arg) {
+    entry:
+      %w2 = call i32 @pthread_cond_wait(i8* @cond, i8* @mutex)
+      %load2 = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @signaler(i8* %arg) {
+    entry:
+      store i32 7, i32* @shared, align 4
+      %sig = call i32 @pthread_cond_signal(i8* @cond)
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      %tid3 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @waiter1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @waiter2, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @signaler, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *signaler_func = module->getFunction("signaler");
+  const Function *waiter1_func = module->getFunction("waiter1");
+  const Function *waiter2_func = module->getFunction("waiter2");
+  ASSERT_NE(signaler_func, nullptr);
+  ASSERT_NE(waiter1_func, nullptr);
+  ASSERT_NE(waiter2_func, nullptr);
+
+  const Instruction *store_shared = &signaler_func->getEntryBlock().front();
+  const Instruction *load1 = findInstructionByName(*waiter1_func, "load1");
+  const Instruction *load2 = findInstructionByName(*waiter2_func, "load2");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load1, nullptr);
+  ASSERT_NE(load2, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  EXPECT_FALSE(mhp.mustPrecede(store_shared, load1));
+  EXPECT_FALSE(mhp.mustPrecede(store_shared, load2));
+}
+
 TEST_F(MHPAnalysisTest, JoinTargetThroughPhiResolves) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)

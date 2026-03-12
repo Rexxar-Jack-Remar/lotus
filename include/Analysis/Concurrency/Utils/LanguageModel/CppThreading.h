@@ -141,7 +141,8 @@ inline bool isSharedLockDestructor(const llvm::StringRef& funcName) {
 
 // std::unique_lock manual lock/unlock
 inline bool isUniqueLockLock(const llvm::StringRef& funcName) {
-  return funcName.contains("unique_lock") && funcName.contains("lockEv");
+  return funcName.contains("unique_lock") && funcName.contains("lockEv") &&
+         !funcName.contains("unlock");
 }
 
 inline bool isUniqueLockUnlock(const llvm::StringRef& funcName) {
@@ -228,4 +229,3 @@ inline bool isSemaphoreTryAcquire(const llvm::StringRef& funcName) {
 }
 
 } // namespace CppThreadingModel
-

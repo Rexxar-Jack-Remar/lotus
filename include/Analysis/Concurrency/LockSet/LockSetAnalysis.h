@@ -416,6 +416,17 @@ private:
   LockID getCanonicalLock(LockID lock) const;
 
   /**
+   * @brief Resolve the underlying mutex for a RAII lock object when known
+   */
+  LockID getUnderlyingRAIILock(const llvm::Instruction *inst,
+                               const llvm::Value *lock_obj) const;
+
+  /**
+   * @brief Resolve the lock identity for explicit C++ wrapper operations
+   */
+  LockID getCppWrapperLockValue(const llvm::Instruction *inst) const;
+
+  /**
    * @brief Check if instruction is a lock operation
    */
   bool isLockOperation(const llvm::Instruction *inst) const;
