@@ -187,6 +187,7 @@ void OpenMPTaskGraph::analyze() {
 }
 
 void OpenMPTaskGraph::identifyTasks() {
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
   std::set<const Function *> directly_called;
   for (const Function &func : m_module) {
     if (func.isDeclaration()) {
@@ -206,6 +207,14 @@ void OpenMPTaskGraph::identifyTasks() {
         }
         if (callee && !callee->isDeclaration()) {
           directly_called.insert(callee);
+        }
+        if (api->isForkLike(call)) {
+          if (const auto *fork_target =
+                  dyn_cast_or_null<Function>(api->getForkedFun(call))) {
+            if (!fork_target->isDeclaration()) {
+              directly_called.insert(fork_target);
+            }
+          }
         }
       }
     }
@@ -305,6 +314,54 @@ void OpenMPTaskGraph::scanSchedulingContext(
 
       const Function *callee = api->getCallee(call);
       ThreadAPI::TD_TYPE type = api->getType(callee);
+      ThreadAPI::RuntimeLibrary library = api->getRuntimeLibrary(callee);
+
+      if (library == ThreadAPI::RuntimeLibrary::OpenMP) {
+        if (type == ThreadAPI::TD_FORK) {
+          ++m_summary.parallel_region_count;
+          if (const auto *fork_target =
+                  dyn_cast_or_null<Function>(api->getForkedFun(call))) {
+            TraversalState fork_state;
+            fork_state.scheduling_context_id = m_next_scheduling_context_id++;
+            fork_state.phase_stack.push_back(0);
+            fork_state.anchor_inst = call;
+            std::set<const Function *> nested_call_stack;
+            scanSchedulingContext(fork_target, fork_state, nested_call_stack);
+          }
+          continue;
+        }
+
+        if (type == ThreadAPI::TD_BAR_WAIT) {
+          ++m_summary.barrier_count;
+          continue;
+        }
+
+        if (type == ThreadAPI::TD_OMP_TASKYIELD) {
+          ++m_summary.taskyield_count;
+          continue;
+        }
+
+        if (type == ThreadAPI::TD_ACQUIRE || type == ThreadAPI::TD_RELEASE ||
+            type == ThreadAPI::TD_TRY_ACQUIRE) {
+          if (api->semanticTagStartsWith(callee, "critical")) {
+            if (type == ThreadAPI::TD_ACQUIRE) {
+              ++m_summary.critical_region_count;
+            }
+          } else {
+            ++m_summary.lock_api_count;
+          }
+          continue;
+        }
+
+        if (type == ThreadAPI::TD_OMP_CANCEL) {
+          if (api->hasSemanticTag(callee, "cancellation-point")) {
+            ++m_summary.cancellation_point_count;
+          } else {
+            ++m_summary.cancel_count;
+          }
+          continue;
+        }
+      }
 
       if (type == ThreadAPI::TD_OMP_TASKWAIT_DEPS) {
         // wait_deps is a selective wait and does not imply full sibling-phase
@@ -449,14 +506,11 @@ void OpenMPTaskGraph::scanSchedulingContext(
           type == ThreadAPI::TD_OMP_ORDERED_END ||
           type == ThreadAPI::TD_OMP_REDUCE_END ||
           type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_END ||
-          type == ThreadAPI::TD_OMP_FLUSH || type == ThreadAPI::TD_OMP_CANCEL) {
+          type == ThreadAPI::TD_OMP_FLUSH) {
         const char *reason = nullptr;
         if (type == ThreadAPI::TD_OMP_FLUSH) {
           ++m_summary.flush_count;
           reason = "omp_flush_witness_required";
-        } else if (type == ThreadAPI::TD_OMP_CANCEL) {
-          ++m_summary.cancel_count;
-          reason = "omp_cancel_unknown";
         } else if (type == ThreadAPI::TD_OMP_ORDERED_END) {
           reason = "omp_ordered_region_tracked";
         } else {

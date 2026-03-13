@@ -22,9 +22,12 @@ ConcurrencyFacade::analyzeOpenMP(llvm::Module &module) {
   summary.untied_task_count = graph_summary.untied_task_count;
   summary.detached_task_count = graph_summary.detached_task_count;
   summary.taskloop_count = graph_summary.taskloop_count;
+  summary.taskyield_count = graph_summary.taskyield_count;
+  summary.parallel_region_count = graph_summary.parallel_region_count;
   summary.wait_boundary_count = graph_summary.wait_boundary_count;
   summary.partial_wait_boundary_count =
       graph_summary.partial_wait_boundary_count;
+  summary.barrier_count = graph_summary.barrier_count;
   summary.taskgroup_region_count = graph_summary.taskgroup_region_count;
   summary.single_region_count = graph_summary.single_region_count;
   summary.master_region_count = graph_summary.master_region_count;
@@ -37,9 +40,12 @@ ConcurrencyFacade::analyzeOpenMP(llvm::Module &module) {
       graph_summary.worksharing_loop_count +
       graph_summary.reduction_region_count +
       graph_summary.ordered_region_count + graph_summary.master_region_count;
+  summary.critical_region_count = graph_summary.critical_region_count;
+  summary.lock_api_count = graph_summary.lock_api_count;
   summary.atomic_region_count = graph_summary.atomic_region_count;
   summary.flush_count = graph_summary.flush_count;
   summary.cancel_count = graph_summary.cancel_count;
+  summary.cancellation_point_count = graph_summary.cancellation_point_count;
   summary.target_region_count = graph_summary.target_region_count;
   summary.target_data_region_count = graph_summary.target_data_region_count;
   summary.detach_completion_count = graph_summary.detach_completion_count;
@@ -100,6 +106,37 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
       analysis.getOperationCount(mpi::MPIOpKind::COMM_MANAGEMENT);
   summary.request_management_count =
       analysis.getOperationCount(mpi::MPIOpKind::REQUEST_MANAGEMENT);
+  for (const auto &op : operations) {
+    if (op.td_type == ThreadAPI::TD_MPI_SENDRECV) {
+      ++summary.sendrecv_operation_count;
+    }
+    if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT ||
+        op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT) {
+      ++summary.persistent_request_init_count;
+    }
+    if (op.td_type == ThreadAPI::TD_MPI_REQUEST_START) {
+      ++summary.request_start_count;
+    }
+    if (op.protocol_reachability == mpi::ProtocolReachability::SomeRanks) {
+      ++summary.rank_restricted_operation_count;
+    }
+    if (op.kind == mpi::MPIOpKind::SEND_BLOCKING ||
+        op.kind == mpi::MPIOpKind::SEND_NONBLOCKING) {
+      if (op.dest_rank < 0 || op.tag < 0) {
+        ++summary.wildcard_endpoint_operation_count;
+      }
+      continue;
+    }
+    if (op.kind == mpi::MPIOpKind::RECV_BLOCKING ||
+        op.kind == mpi::MPIOpKind::RECV_NONBLOCKING ||
+        op.kind == mpi::MPIOpKind::PROBE_BLOCKING ||
+        op.kind == mpi::MPIOpKind::PROBE_NONBLOCKING) {
+      if (op.source_rank < 0 || op.tag < 0) {
+        ++summary.wildcard_endpoint_operation_count;
+      }
+    }
+  }
+  summary.sendrecv_operation_count /= 2;
   summary.rma_window_count =
       analysis.getOperationCount(mpi::MPIOpKind::RMA_WINDOW);
   summary.rma_operation_count =
@@ -175,7 +212,10 @@ void ConcurrencyFacade::printOpenMPResults(llvm::Module &module,
   os << "  Included/final/untied/detached: " << summary.included_task_count
      << "/" << summary.final_task_count << "/" << summary.untied_task_count
      << "/" << summary.detached_task_count << "\n";
-  os << "  Taskloop tasks: " << summary.taskloop_count << "\n";
+  os << "  Taskloop/taskyield: " << summary.taskloop_count << "/"
+     << summary.taskyield_count << "\n";
+  os << "Parallel/barrier regions: " << summary.parallel_region_count << "/"
+     << summary.barrier_count << "\n";
   os << "Scheduling boundaries (wait/partial/taskgroup): "
      << summary.wait_boundary_count << "/"
      << summary.partial_wait_boundary_count << "/"
@@ -187,8 +227,11 @@ void ConcurrencyFacade::printOpenMPResults(llvm::Module &module,
      << summary.ordered_region_count << "/" << summary.sections_region_count
      << "/" << summary.worksharing_loop_count << "/"
      << summary.reduction_region_count << "\n";
-  os << "Atomic/flush/cancel regions: " << summary.atomic_region_count << "/"
-     << summary.flush_count << "/" << summary.cancel_count << "\n";
+  os << "Critical/lock APIs: " << summary.critical_region_count << "/"
+     << summary.lock_api_count << "\n";
+  os << "Atomic/flush/cancel/cancel-point: " << summary.atomic_region_count
+     << "/" << summary.flush_count << "/" << summary.cancel_count << "/"
+     << summary.cancellation_point_count << "\n";
   os << "Target regions (target/target-data): " << summary.target_region_count
      << "/" << summary.target_data_region_count << "\n";
   os << "Detach completions: " << summary.detach_completion_count << "\n";

@@ -113,8 +113,11 @@ public:
     size_t untied_task_count = 0;
     size_t detached_task_count = 0;
     size_t taskloop_count = 0;
+    size_t taskyield_count = 0;
+    size_t parallel_region_count = 0;
     size_t wait_boundary_count = 0;
     size_t partial_wait_boundary_count = 0;
+    size_t barrier_count = 0;
     size_t taskgroup_region_count = 0;
     size_t single_region_count = 0;
     size_t master_region_count = 0;
@@ -122,9 +125,12 @@ public:
     size_t sections_region_count = 0;
     size_t worksharing_loop_count = 0;
     size_t reduction_region_count = 0;
+    size_t critical_region_count = 0;
+    size_t lock_api_count = 0;
     size_t atomic_region_count = 0;
     size_t flush_count = 0;
     size_t cancel_count = 0;
+    size_t cancellation_point_count = 0;
     size_t target_region_count = 0;
     size_t target_data_region_count = 0;
     size_t detach_completion_count = 0;

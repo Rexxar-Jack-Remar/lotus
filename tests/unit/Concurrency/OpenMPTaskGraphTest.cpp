@@ -1,10 +1,10 @@
 #include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
 
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace OpenMP;
@@ -197,6 +197,38 @@ TEST_F(OpenMPTaskGraphTest, ConflictingHelperTasksShareSchedulingContext) {
   ASSERT_EQ(tasks.size(), 2u);
   EXPECT_TRUE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
   EXPECT_FALSE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
+}
+
+TEST_F(OpenMPTaskGraphTest,
+       RepeatedForkedOutlinedTaskBodiesAreTrackedPerCallSite) {
+  const char *source = R"(
+    declare void @__kmpc_fork_call(i8*, i32, void (i32*, i32*, ...)*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+
+    define internal void @.omp_outlined.(i32* %gtid, i32* %btid, ...) {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @__kmpc_fork_call(i8* null, i32 0,
+                                  void (i32*, i32*, ...)* @.omp_outlined.)
+      call void @__kmpc_fork_call(i8* null, i32 0,
+                                  void (i32*, i32*, ...)* @.omp_outlined.)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  EXPECT_EQ(graph.getAllTasks().size(), 2u);
+  EXPECT_EQ(graph.getSummary().parallel_region_count, 2u);
 }
 
 TEST_F(OpenMPTaskGraphTest, MutexInoutsetCreatesExclusionWithoutHB) {
@@ -484,7 +516,8 @@ TEST_F(OpenMPTaskGraphTest, InlineTaskRuntimeVariantIsTracked) {
             TaskExecutionMode::Included);
 }
 
-TEST_F(OpenMPTaskGraphTest, SameBaseUnknownOffsetsAreDeferredWithoutDefiniteHB) {
+TEST_F(OpenMPTaskGraphTest,
+       SameBaseUnknownOffsetsAreDeferredWithoutDefiniteHB) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }
 

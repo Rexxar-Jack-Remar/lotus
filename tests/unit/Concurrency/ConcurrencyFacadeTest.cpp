@@ -97,6 +97,55 @@ TEST_F(ConcurrencyFacadeTest, SummarizesOpenMPTaskGraph) {
   EXPECT_EQ(summary.unknown_reason_bucket_count, 2u);
 }
 
+TEST_F(ConcurrencyFacadeTest, SummarizesOutlinedOpenMPAndExtendedSyncCounters) {
+  const char *source = R"(
+    declare void @__kmpc_fork_call(i8*, i32, void (i32*, i32*, ...)*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__kmpc_omp_taskyield(i8*, i32, i32)
+    declare void @__kmpc_barrier(i8*, i32)
+    declare void @__kmpc_critical(i8*, i32, i8*)
+    declare void @__kmpc_end_critical(i8*, i32, i8*)
+    declare void @omp_set_lock(i8*)
+    declare void @omp_unset_lock(i8*)
+    declare i32 @__kmpc_cancellationpoint(i8*, i32, i32)
+    @lock = global i8 0, align 1
+
+    define internal void @.omp_outlined.(i32* %gtid, i32* %btid, ...) {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      call i32 @__kmpc_omp_taskyield(i8* null, i32 0, i32 0)
+      call void @__kmpc_barrier(i8* null, i32 0)
+      call void @__kmpc_critical(i8* null, i32 0, i8* @lock)
+      call void @__kmpc_end_critical(i8* null, i32 0, i8* @lock)
+      call void @omp_set_lock(i8* @lock)
+      call void @omp_unset_lock(i8* @lock)
+      call i32 @__kmpc_cancellationpoint(i8* null, i32 0, i32 0)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @__kmpc_fork_call(i8* null, i32 0,
+                                  void (i32*, i32*, ...)* @.omp_outlined.)
+      call void @__kmpc_fork_call(i8* null, i32 0,
+                                  void (i32*, i32*, ...)* @.omp_outlined.)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto summary = concurrency::ConcurrencyFacade::analyzeOpenMP(*module);
+  EXPECT_EQ(summary.task_count, 2u);
+  EXPECT_EQ(summary.parallel_region_count, 2u);
+  EXPECT_EQ(summary.taskyield_count, 2u);
+  EXPECT_EQ(summary.barrier_count, 2u);
+  EXPECT_EQ(summary.critical_region_count, 2u);
+  EXPECT_EQ(summary.lock_api_count, 4u);
+  EXPECT_EQ(summary.cancellation_point_count, 2u);
+}
+
 TEST_F(ConcurrencyFacadeTest, SummarizesMPIIssues) {
   const char *source = R"(
     declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
@@ -165,6 +214,53 @@ TEST_F(ConcurrencyFacadeTest, SummarizesMPIIssues) {
   EXPECT_EQ(summary.deferred_semantic_lowering_count, 1u);
 }
 
+TEST_F(ConcurrencyFacadeTest, SummarizesExtendedMPIProtocolCounters) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_rank(i8*, i32*)
+    declare i32 @MPI_Barrier(i8*)
+    declare i32 @MPI_Sendrecv(i8*, i32, i32, i32, i32,
+                              i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Send_init(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Start(i8*)
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %rank_slot = alloca i32, align 4
+      %req = alloca i8, align 1
+      call i32 @MPI_Comm_rank(i8* %comm, i32* %rank_slot)
+      %rank = load i32, i32* %rank_slot, align 4
+      %is_root = icmp eq i32 %rank, 0
+      br i1 %is_root, label %root, label %cont
+
+    root:
+      call i32 @MPI_Barrier(i8* %comm)
+      br label %cont
+
+    cont:
+      call i32 @MPI_Sendrecv(i8* null, i32 1, i32 0, i32 1, i32 7,
+                             i8* null, i32 1, i32 0, i32 2, i32 7,
+                             i8* %comm, i8* null)
+      call i32 @MPI_Send_init(i8* null, i32 1, i32 0, i32 3, i32 9,
+                              i8* %comm, i8* %req)
+      call i32 @MPI_Start(i8* %req)
+      call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 -1, i32 -2,
+                         i8* %comm, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto summary = concurrency::ConcurrencyFacade::analyzeMPI(*module);
+  EXPECT_EQ(summary.sendrecv_operation_count, 1u);
+  EXPECT_EQ(summary.persistent_request_init_count, 1u);
+  EXPECT_EQ(summary.request_start_count, 1u);
+  EXPECT_EQ(summary.rank_restricted_operation_count, 1u);
+  EXPECT_EQ(summary.wildcard_endpoint_operation_count, 1u);
+}
+
 TEST_F(ConcurrencyFacadeTest, PrintsOpenMPSummaryReport) {
   const char *source = R"(
     declare i32 @__kmpc_omp_task_begin_if0(i8*, i32, i8*)
@@ -190,6 +286,7 @@ TEST_F(ConcurrencyFacadeTest, PrintsOpenMPSummaryReport) {
 
   EXPECT_NE(output.find("OpenMP Analysis Results"), std::string::npos);
   EXPECT_NE(output.find("Tasks: 1"), std::string::npos);
+  EXPECT_NE(output.find("Taskloop/taskyield: 0/0"), std::string::npos);
   EXPECT_NE(
       output.find("Scheduling boundaries (wait/partial/taskgroup): 1/0/0"),
       std::string::npos);
