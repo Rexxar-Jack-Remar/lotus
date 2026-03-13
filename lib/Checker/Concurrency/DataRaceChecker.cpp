@@ -208,17 +208,17 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
         return nullptr;
       const Instruction *I = cast<Instruction>(CB);
       if (wantAcquire && m_threadAPI->isTDAcquire(I))
-        return m_threadAPI->getLockVal(I);
+        return m_threadAPI->getAnalysisLockIdentity(I);
       if (!wantAcquire && m_threadAPI->isTDRelease(I))
-        return m_threadAPI->getLockVal(I);
+        return m_threadAPI->getAnalysisLockIdentity(I);
       Function *callee = CB->getCalledFunction();
       if (!callee || callee->isDeclaration())
         return nullptr;
       for (const Instruction &CI : instructions(callee)) {
         if (wantAcquire && m_threadAPI->isTDAcquire(&CI))
-          return m_threadAPI->getLockVal(&CI);
+          return m_threadAPI->getAnalysisLockIdentity(&CI);
         if (!wantAcquire && m_threadAPI->isTDRelease(&CI))
-          return m_threadAPI->getLockVal(&CI);
+          return m_threadAPI->getAnalysisLockIdentity(&CI);
       }
       return nullptr;
     };
@@ -537,7 +537,7 @@ void DataRaceChecker::buildSyncObjectSet() {
 
       // Traditional pthread primitives
       if (m_threadAPI->isTDAcquire(inst) || m_threadAPI->isTDRelease(inst))
-        v = m_threadAPI->getLockVal(inst);
+        v = m_threadAPI->getAnalysisLockIdentity(inst);
       else if (m_threadAPI->isTDCondWait(inst) ||
                m_threadAPI->isTDCondSignal(inst) ||
                m_threadAPI->isTDCondBroadcast(inst))

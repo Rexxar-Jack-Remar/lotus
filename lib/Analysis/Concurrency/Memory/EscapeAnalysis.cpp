@@ -70,6 +70,29 @@ void EscapeAnalysis::runEscapeAnalysis() {
              worklist.push_back(val);
            }
         }
+      } else if (auto *call = dyn_cast<CallBase>(inst)) {
+        Function *callee = call->getCalledFunction();
+        if (!callee) {
+          callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+        }
+
+        for (unsigned arg_idx = 0; arg_idx < call->arg_size(); ++arg_idx) {
+          const Value *arg = call->getArgOperand(arg_idx);
+          if (!arg || !arg->getType()->isPointerTy()) {
+            continue;
+          }
+
+          bool escapes_via_call = false;
+          if (!callee) {
+            escapes_via_call = !call->doesNotCapture(arg_idx);
+          } else if (callee->isDeclaration() && !callee->isIntrinsic()) {
+            escapes_via_call = !call->doesNotCapture(arg_idx);
+          }
+
+          if (escapes_via_call && m_escaped_values.insert(arg).second) {
+            worklist.push_back(arg);
+          }
+        }
       }
     }
   }

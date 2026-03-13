@@ -22,7 +22,7 @@ static cl::opt<std::string>
 static cl::opt<std::string>
     ChecksList("checks",
                cl::desc("Comma-separated checks to run: "
-                        "race,deadlock,atomicity,condvar,lock-mismatch "
+                        "race,deadlock,atomicity,condvar,lock-mismatch,openmp,mpi "
                         "(overrides individual flags)"),
                cl::value_desc("list"));
 static cl::opt<bool> EnableDataRaces("check-data-races",
@@ -43,6 +43,12 @@ static cl::opt<bool> EnableLockMismatch(
     "check-lock-mismatch",
     cl::desc("Enable lock acquisition/release mismatch detection"),
     cl::init(true));
+static cl::opt<bool> EnableOpenMP("check-openmp",
+                                  cl::desc("Enable dedicated OpenMP bug checks"),
+                                  cl::init(true));
+static cl::opt<bool> EnableMPI("check-mpi",
+                               cl::desc("Enable dedicated MPI bug checks"),
+                               cl::init(true));
 static cl::opt<bool> AnalysisOnly(
     "analysis-only",
     cl::desc("Run analysis only (no bug checking), dump analysis results"),
@@ -86,12 +92,16 @@ int main(int argc, char **argv) {
     checker.enableCondVarCheck(list.find("condvar") != std::string::npos);
     checker.enableLockMismatchCheck(list.find("lock-mismatch") !=
                                     std::string::npos);
+    checker.enableOpenMPCheck(list.find("openmp") != std::string::npos);
+    checker.enableMPICheck(list.find("mpi") != std::string::npos);
   } else {
     checker.enableDataRaceCheck(EnableDataRaces);
     checker.enableDeadlockCheck(EnableDeadlocks);
     checker.enableAtomicityCheck(EnableAtomicity);
     checker.enableCondVarCheck(EnableCondVar);
     checker.enableLockMismatchCheck(EnableLockMismatch);
+    checker.enableOpenMPCheck(EnableOpenMP);
+    checker.enableMPICheck(EnableMPI);
   }
 
   if (AnalysisOnly) {
@@ -100,6 +110,8 @@ int main(int argc, char **argv) {
     checker.enableAtomicityCheck(true);
     checker.enableCondVarCheck(true);
     checker.enableLockMismatchCheck(true);
+    checker.enableOpenMPCheck(true);
+    checker.enableMPICheck(true);
   }
 
   checker.runAnalyses();
@@ -140,6 +152,8 @@ int main(int argc, char **argv) {
          << "\n";
   outs() << "Cond Var Bugs Found: " << stats.condVarBugsFound << "\n";
   outs() << "Lock Mismatches Found: " << stats.lockMismatchesFound << "\n";
+  outs() << "OpenMP Bugs Found: " << stats.openMPBugsFound << "\n";
+  outs() << "MPI Bugs Found: " << stats.mpiBugsFound << "\n";
 
   // Post-processing: Suppression and Deduplication
   BugReportMgr &mgr = BugReportMgr::get_instance();
@@ -195,6 +209,7 @@ int main(int argc, char **argv) {
 
   size_t total_bugs = stats.dataRacesFound + stats.deadlocksFound +
                       stats.atomicityViolationsFound + stats.condVarBugsFound +
-                      stats.lockMismatchesFound;
+                      stats.lockMismatchesFound + stats.openMPBugsFound +
+                      stats.mpiBugsFound;
   return total_bugs > 0 ? 1 : 0;
 }

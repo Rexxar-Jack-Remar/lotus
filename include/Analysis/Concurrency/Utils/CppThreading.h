@@ -19,23 +19,48 @@
 
 namespace CppThreadingModel {
 
+inline bool isStdThreadEntity(const llvm::StringRef &funcName) {
+  return funcName.contains("St6thread") || funcName.contains("St3__16thread");
+}
+
+inline bool containsCtorCode(const llvm::StringRef &funcName) {
+  return funcName.contains("C1E") || funcName.contains("C2E") ||
+         funcName.contains("C1I") || funcName.contains("C2I");
+}
+
+inline bool containsDtorCode(const llvm::StringRef &funcName) {
+  return funcName.contains("D1Ev") || funcName.contains("D2Ev");
+}
+
+inline bool isTaggedWrapperCtor(const llvm::StringRef &funcName,
+                                const llvm::StringRef &wrapper,
+                                const llvm::StringRef &tag) {
+  return funcName.contains(wrapper) && containsCtorCode(funcName) &&
+         funcName.contains(tag);
+}
+
 // Check if the function is std::thread constructor (fork)
 inline bool isFork(const llvm::StringRef& funcName) {
-  // Mangled name for std::thread::thread matches
-  // _ZNSt6threadC1IRFivEJEEEOT_DpOT0_ and similar patterns
-  // We look for "std::thread::thread" in the demangled name or specific mangled patterns
-  // A robust heuristic for mangled names: _ZNSt6threadC[12]
-  return funcName.contains("_ZNSt6threadC");
+  // Thread-launch constructors are templated and carry callable argument encodings.
+  // Exclude move/copy/default ctors to avoid classifying non-launch operations.
+  if (!isStdThreadEntity(funcName) || !containsCtorCode(funcName)) {
+    return false;
+  }
+  if (funcName.contains("EOS_") || funcName.contains("ERKS_") ||
+      funcName.contains("C1Ev") || funcName.contains("C2Ev")) {
+    return false;
+  }
+  return funcName.contains("threadC") || funcName.contains("threadIC");
 }
 
 // Check if the function is std::thread::join
 inline bool isJoin(const llvm::StringRef& funcName) {
-  return funcName.contains("_ZNSt6thread4joinEv");
+  return isStdThreadEntity(funcName) && funcName.contains("thread4joinEv");
 }
 
 // Check if the function is std::thread::detach
 inline bool isDetach(const llvm::StringRef& funcName) {
-  return funcName.contains("_ZNSt6thread6detachEv");
+  return isStdThreadEntity(funcName) && funcName.contains("thread6detachEv");
 }
 
 // Check if the function is std::mutex::lock or std::recursive_mutex::lock.
@@ -78,7 +103,9 @@ inline bool isCondBroadcast(const llvm::StringRef& funcName) {
 // C++17 std::shared_mutex support
 // Check for std::shared_mutex::lock_shared (read lock)
 inline bool isSharedLockAcquire(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_mutex") && funcName.contains("lock_sharedEv");
+  return funcName.contains("shared_mutex") &&
+         funcName.contains("lock_sharedEv") &&
+         !funcName.contains("unlock");
 }
 
 // Check for std::shared_mutex::lock (write/exclusive lock)
@@ -98,45 +125,58 @@ inline bool isSharedLockExclusiveRelease(const llvm::StringRef& funcName) {
 
 // Check for std::shared_timed_mutex operations
 inline bool isSharedTimedLockAcquire(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_timed_mutex") && funcName.contains("lock_sharedEv");
+  return funcName.contains("shared_timed_mutex") &&
+         funcName.contains("lock_sharedEv") &&
+         !funcName.contains("unlock");
 }
 
 inline bool isSharedTimedLockExclusiveAcquire(const llvm::StringRef& funcName) {
   return funcName.contains("shared_timed_mutex") && funcName.contains("lockEv") && !funcName.contains("unlock");
 }
 
+inline bool isSharedTimedLockRelease(const llvm::StringRef& funcName) {
+  return funcName.contains("shared_timed_mutex") &&
+         funcName.contains("unlock_sharedEv");
+}
+
+inline bool isSharedTimedLockExclusiveRelease(const llvm::StringRef& funcName) {
+  return funcName.contains("shared_timed_mutex") &&
+         funcName.contains("unlockEv") &&
+         !funcName.contains("unlock_shared");
+}
+
 // RAII lock wrappers - constructors act as acquire
 inline bool isLockGuardConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("lock_guard") && funcName.contains("C1E");
+  return funcName.contains("lock_guard") && containsCtorCode(funcName);
 }
 
 inline bool isUniqueLockConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("unique_lock") && funcName.contains("C1E");
+  return funcName.contains("unique_lock") && containsCtorCode(funcName);
 }
 
 inline bool isScopedLockConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("scoped_lock") && funcName.contains("C1E");
+  return funcName.contains("scoped_lock") && containsCtorCode(funcName);
 }
 
 inline bool isSharedLockConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_lock") && funcName.contains("C1E");
+  return funcName.contains("shared_lock") && containsCtorCode(funcName);
 }
 
 // RAII lock wrappers - destructors act as release
 inline bool isLockGuardDestructor(const llvm::StringRef& funcName) {
-  return funcName.contains("lock_guard") && funcName.contains("D1Ev");
+  return funcName.contains("lock_guard") && containsDtorCode(funcName);
 }
 
 inline bool isUniqueLockDestructor(const llvm::StringRef& funcName) {
-  return funcName.contains("unique_lock") && funcName.contains("D1Ev");
+  return funcName.contains("unique_lock") && containsDtorCode(funcName);
 }
 
 inline bool isScopedLockDestructor(const llvm::StringRef& funcName) {
-  return funcName.contains("scoped_lock") && funcName.contains("D1Ev");
+  return funcName.contains("scoped_lock") && containsDtorCode(funcName);
 }
 
 inline bool isSharedLockDestructor(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_lock") && funcName.contains("D1Ev");
+  return funcName.contains("shared_lock") && containsDtorCode(funcName);
 }
 
 // std::unique_lock manual lock/unlock
@@ -178,7 +218,7 @@ inline bool isAsync(const llvm::StringRef& funcName) {
 
 // C++20 std::jthread
 inline bool isJthreadConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("jthread") && funcName.contains("C1");
+  return funcName.contains("jthread") && containsCtorCode(funcName);
 }
 
 inline bool isJthreadJoin(const llvm::StringRef& funcName) {
@@ -226,6 +266,22 @@ inline bool isSemaphoreRelease(const llvm::StringRef& funcName) {
 
 inline bool isSemaphoreTryAcquire(const llvm::StringRef& funcName) {
   return funcName.contains("semaphore") && funcName.contains("try_acquire");
+}
+
+inline bool isDeferLockConstructor(const llvm::StringRef &funcName) {
+  return isTaggedWrapperCtor(funcName, "unique_lock", "defer_lock") ||
+         isTaggedWrapperCtor(funcName, "shared_lock", "defer_lock");
+}
+
+inline bool isTryToLockConstructor(const llvm::StringRef &funcName) {
+  return isTaggedWrapperCtor(funcName, "unique_lock", "try_to_lock") ||
+         isTaggedWrapperCtor(funcName, "shared_lock", "try_to_lock");
+}
+
+inline bool isAdoptLockConstructor(const llvm::StringRef &funcName) {
+  return isTaggedWrapperCtor(funcName, "lock_guard", "adopt_lock") ||
+         isTaggedWrapperCtor(funcName, "unique_lock", "adopt_lock") ||
+         isTaggedWrapperCtor(funcName, "shared_lock", "adopt_lock");
 }
 
 } // namespace CppThreadingModel

@@ -67,11 +67,11 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 - **std::counting_semaphore** / **std::binary_semaphore** (C++20): Semaphore primitives
 
 ### Atomic Operations
-- **Full memory ordering support**: relaxed, acquire, release, acq_rel, seq_cst
+- **Memory-order recognition**: relaxed, acquire, release, acq_rel, seq_cst
 - **Atomic operations**: load, store, exchange, compare_exchange, fetch_add, etc.
 - **Fence instructions**: atomic_thread_fence with all memory orders
-- **Synchronizes-with relationship tracking**: Proper acquire-release semantics for happens-before analysis
-- **Release sequences**: RMW chains properly tracked
+- **Synchronizes-with relationship tracking**: witness-based fence ordering; plain release/acquire remains deferred unless proven
+- **Release sequences**: recognized, but no synthetic global ordering is emitted without witnesses
 
 ## OpenMP Support (3.0 - 5.x)
 
@@ -166,8 +166,8 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 - **Interprocedural**: Function summaries for context-sensitive lock analysis
 
 ### Happens-Before Analysis
-- **Atomic synchronization**: Full acquire-release semantics with all memory orders
-- **Fence synchronization**: atomic_thread_fence properly modeled
+- **Atomic synchronization**: witness-based fence synchronization; plain release/acquire edges are deferred by default
+- **Fence synchronization**: modeled when a same-location atomic witness chain is provable
 - **Condition variables**: wait/signal/broadcast are region boundaries; definite signal→wait HB edges are not synthesized yet
 - **Future/Promise synchronization**: promise.set_value() → future.get() edges
 - **call_once synchronization**: Recognized, but no definite HB edges are emitted yet

@@ -1,6 +1,7 @@
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
@@ -29,6 +30,24 @@ protected:
           }
       }
       return nullptr;
+  }
+
+  const Instruction *findStoreToGlobal(const Function &func, StringRef global_name) {
+    for (const auto &bb : func) {
+      for (const auto &inst : bb) {
+        const auto *store = dyn_cast<StoreInst>(&inst);
+        if (!store) {
+          continue;
+        }
+        const Value *ptr = store->getPointerOperand()->stripPointerCasts();
+        if (const auto *gv = dyn_cast<GlobalVariable>(ptr)) {
+          if (gv->getName() == global_name) {
+            return &inst;
+          }
+        }
+      }
+    }
+    return nullptr;
   }
 };
 
@@ -824,6 +843,61 @@ TEST_F(AtomicHappensBeforeTest, MatchingFencesCreateHappensBefore) {
   ASSERT_NE(reader_func, nullptr);
 
   const Instruction *store_data = &writer_func->getEntryBlock().front();
+  const Instruction *load_data = findInstructionByName(*reader_func, "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  EXPECT_TRUE(mhp.mustPrecede(store_data, load_data));
+  EXPECT_FALSE(mhp.mayHappenInParallel(store_data, load_data));
+}
+
+TEST_F(AtomicHappensBeforeTest, MatchingFencesWithAliasedAtomicPointersCreateHB) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag_storage = global [1 x i32] zeroinitializer, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      %flag_ptr = getelementptr inbounds [1 x i32], [1 x i32]* @flag_storage, i64 0, i64 0
+      store i32 7, i32* @data, align 4
+      store atomic i32 1, i32* %flag_ptr release, align 4
+      fence release
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %flag_alias = bitcast [1 x i32]* @flag_storage to i32*
+      fence acquire
+      %seen = load atomic i32, i32* %flag_alias acquire, align 4
+      %val = load i32, i32* @data, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer_func = module->getFunction("writer");
+  const Function *reader_func = module->getFunction("reader");
+  ASSERT_NE(writer_func, nullptr);
+  ASSERT_NE(reader_func, nullptr);
+
+  const Instruction *store_data = findStoreToGlobal(*writer_func, "data");
   const Instruction *load_data = findInstructionByName(*reader_func, "val");
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);

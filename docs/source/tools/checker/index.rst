@@ -133,7 +133,8 @@ For end-to-end examples (command injection, SQL injection, etc.), see
 lotus-concur – Concurrency Bug Checker
 ---------------------------------------
 
-Static analysis for data races and other concurrency issues.
+Static analysis for shared-memory concurrency bugs plus dedicated OpenMP and
+MPI checks.
 
 **Binary**: ``lotus-concur``  
 **Location**: ``tools/checker/lotus_concur.cpp``
@@ -143,12 +144,21 @@ Static analysis for data races and other concurrency issues.
 - Data races on shared variables
 - Locking discipline violations
 - Potential deadlocks (lock ordering issues)
+- OpenMP taskgroup/atomic-region mismatches and partial task synchronization
+- MPI request lifecycle bugs, collective mismatches, simple MPI deadlocks, and RMA issues
 
 **Usage**:
 
 .. code-block:: bash
 
    ./build/bin/lotus-concur [options] input.bc
+
+Key options:
+
+- ``--checks=race,deadlock,atomicity,condvar,lock-mismatch,openmp,mpi`` – enable only the listed checks
+- ``--check-openmp`` – run dedicated OpenMP checks
+- ``--check-mpi`` – run dedicated MPI checks
+- ``--analysis-only`` – dump analysis facts without bug emission
 
 Typical workflow:
 

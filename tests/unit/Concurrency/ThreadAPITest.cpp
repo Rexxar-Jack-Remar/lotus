@@ -28,6 +28,12 @@ TEST_F(ThreadAPITest, ParsesExtendedTypeNames) {
             ThreadAPI::TD_MPI_BARRIER);
   EXPECT_EQ(ThreadAPI::stringToType("TD_SHARED_LOCK_DTOR"),
             ThreadAPI::TD_SHARED_LOCK_DTOR);
+  EXPECT_EQ(ThreadAPI::stringToType("TD_OMP_TASKWAIT_DEPS"),
+            ThreadAPI::TD_OMP_TASKWAIT_DEPS);
+  EXPECT_EQ(ThreadAPI::stringToType("TD_OMP_SINGLE_END"),
+            ThreadAPI::TD_OMP_SINGLE_END);
+  EXPECT_EQ(ThreadAPI::stringToType("TD_OMP_ORDERED_START"),
+            ThreadAPI::TD_OMP_ORDERED_START);
 }
 
 TEST_F(ThreadAPITest, PthreadCancelIsNotClassifiedAsJoin) {
@@ -91,4 +97,396 @@ TEST_F(ThreadAPITest, DistinguishesBlockingAndNonBlockingMPICollectives) {
   EXPECT_TRUE(api->isNonBlockingMPIBarrier(ibar));
   EXPECT_TRUE(api->isBlockingMPICollective(bcast));
   EXPECT_TRUE(api->isNonBlockingMPICollective(ibcast));
+}
+
+TEST_F(ThreadAPITest, NormalizesPMPIAliasesForMPIClassification) {
+  const char *source = R"(
+    declare i32 @PMPI_Ibarrier(i8*, i8*)
+    declare i32 @PMPI_Ibcast(i8*, i32, i32, i32, i8*, i8*)
+
+    define i32 @main(i8* %comm, i8* %req) {
+    entry:
+      %ibar = call i32 @PMPI_Ibarrier(i8* %comm, i8* %req)
+      %ibcast = call i32 @PMPI_Ibcast(i8* null, i32 0, i32 0, i32 0, i8* %comm, i8* %req)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *ibar = &*it++;
+  const Instruction *ibcast = &*it++;
+
+  EXPECT_EQ(api->getType(module->getFunction("PMPI_Ibarrier")),
+            ThreadAPI::TD_MPI_BARRIER);
+  EXPECT_EQ(api->getType(module->getFunction("PMPI_Ibcast")),
+            ThreadAPI::TD_MPI_BCAST);
+  EXPECT_TRUE(api->isNonBlockingMPIBarrier(ibar));
+  EXPECT_TRUE(api->isNonBlockingMPICollective(ibcast));
+}
+
+TEST_F(ThreadAPITest, MatchesSpecificOpenMPTargetDataBeforeGenericTarget) {
+  const char *source = R"(
+    declare void @__tgt_target_data_begin(i64, i8*)
+    declare void @__tgt_target_data_end(i64, i8*)
+
+    define void @main() {
+    entry:
+      call void @__tgt_target_data_begin(i64 0, i8* null)
+      call void @__tgt_target_data_end(i64 0, i8* null)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__tgt_target_data_begin")),
+            ThreadAPI::TD_OMP_TARGET_DATA_BEGIN);
+  EXPECT_EQ(api->getType(module->getFunction("__tgt_target_data_end")),
+            ThreadAPI::TD_OMP_TARGET_DATA_END);
+}
+
+TEST_F(ThreadAPITest, RecognizesJthreadAndTreatsItAsForkLike) {
+  const char *source = R"(
+    declare void @_ZNSt7jthreadC1EPFvPvES0_(i8*, i8* (i8*)*, i8*)
+    declare void @_ZNSt7jthread4joinEv(i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define void @main() {
+    entry:
+      %thr = alloca i8
+      call void @_ZNSt7jthreadC1EPFvPvES0_(i8* %thr, i8* (i8*)* @worker, i8* null)
+      call void @_ZNSt7jthread4joinEv(i8* %thr)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *fork = nullptr;
+  const Instruction *join = nullptr;
+  for (const Instruction &inst : main_func->getEntryBlock()) {
+    if (isa<CallBase>(&inst)) {
+      if (!fork) {
+        fork = &inst;
+      } else if (!join) {
+        join = &inst;
+        break;
+      }
+    }
+  }
+  ASSERT_NE(fork, nullptr);
+  ASSERT_NE(join, nullptr);
+
+  EXPECT_EQ(api->getType(module->getFunction("_ZNSt7jthreadC1EPFvPvES0_")),
+            ThreadAPI::TD_JTHREAD_FORK);
+  EXPECT_EQ(api->getType(module->getFunction("_ZNSt7jthread4joinEv")),
+            ThreadAPI::TD_JTHREAD_JOIN);
+  EXPECT_TRUE(api->isTDFork(fork));
+  EXPECT_TRUE(api->isTDJoin(join));
+}
+
+TEST_F(ThreadAPITest, StdThreadMoveConstructorIsNotFork) {
+  const char *source = R"(
+    declare void @_ZNSt6threadC1EOS_(i8*, i8*)
+
+    define void @main() {
+    entry:
+      %dst = alloca i8
+      %src = alloca i8
+      call void @_ZNSt6threadC1EOS_(i8* %dst, i8* %src)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *move_ctor = module->getFunction("_ZNSt6threadC1EOS_");
+  ASSERT_NE(move_ctor, nullptr);
+  EXPECT_EQ(api->getType(move_ctor), ThreadAPI::TD_DUMMY);
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *call = &main_func->getEntryBlock().front();
+  EXPECT_FALSE(api->isTDFork(call));
+}
+
+TEST_F(ThreadAPITest, RecognizesLibcxxJoinDetachManglings) {
+  const char *source = R"(
+    declare void @_ZNSt3__16thread4joinEv(i8*)
+    declare void @_ZNSt3__16thread6detachEv(i8*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("_ZNSt3__16thread4joinEv")),
+            ThreadAPI::TD_JOIN);
+  EXPECT_EQ(api->getType(module->getFunction("_ZNSt3__16thread6detachEv")),
+            ThreadAPI::TD_DETACH);
+}
+
+TEST_F(ThreadAPITest, MapsOpenMPTaskwaitWithDepsVariants) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_taskwait(i8*, i32)
+    declare i32 @__kmpc_omp_wait_deps(i8*, i32, i32, i8*, i32, i8*)
+    declare i32 @__kmpc_omp_taskwait_deps_51(i8*, i32, i32, i8*, i32, i8*, i8*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_omp_taskwait")),
+            ThreadAPI::TD_OMP_TASKWAIT);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_omp_wait_deps")),
+            ThreadAPI::TD_OMP_TASKWAIT_DEPS);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_omp_taskwait_deps_51")),
+            ThreadAPI::TD_OMP_TASKWAIT_DEPS);
+}
+
+TEST_F(ThreadAPITest, ClassifiesSharedTimedMutexReleases) {
+  const char *source = R"(
+    declare void @_ZNSt18shared_timed_mutex13unlock_sharedEv(i8*)
+    declare void @_ZNSt18shared_timed_mutex6unlockEv(i8*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(
+      api->getType(module->getFunction("_ZNSt18shared_timed_mutex13unlock_sharedEv")),
+      ThreadAPI::TD_SHARED_UNLOCK);
+  EXPECT_EQ(api->getType(module->getFunction("_ZNSt18shared_timed_mutex6unlockEv")),
+            ThreadAPI::TD_SHARED_UNLOCK);
+}
+
+TEST_F(ThreadAPITest, ExtractsOutlinedOpenMPForkTarget) {
+  const char *source = R"(
+    declare void @__kmpc_fork_call(i8*, i32, void (i32*, i32*, ...)*)
+
+    define internal void @.omp_outlined.(i32* %gtid, i32* %btid, ...) {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @__kmpc_fork_call(i8* null, i32 0,
+                                  void (i32*, i32*, ...)* @.omp_outlined.)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *fork = &main_func->getEntryBlock().front();
+  EXPECT_TRUE(api->isTDFork(fork));
+  EXPECT_EQ(api->getForkedFun(fork), module->getFunction(".omp_outlined."));
+}
+
+TEST_F(ThreadAPITest, SharedLockPredicatesAreConsistentAcrossOverloads) {
+  const char *source = R"(
+    declare void @_ZNSt12shared_mutex11lock_sharedEv(i8*)
+    declare void @_ZNSt12shared_mutex4lockEv(i8*)
+
+    define void @main(i8* %m) {
+    entry:
+      call void @_ZNSt12shared_mutex11lock_sharedEv(i8* %m)
+      call void @_ZNSt12shared_mutex4lockEv(i8* %m)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  auto it = main_func->getEntryBlock().begin();
+  const auto *shared_call = llvm::dyn_cast<CallBase>(&*it++);
+  const auto *exclusive_call = llvm::dyn_cast<CallBase>(&*it++);
+  ASSERT_NE(shared_call, nullptr);
+  ASSERT_NE(exclusive_call, nullptr);
+
+  EXPECT_EQ(api->isReadLockAcquire(shared_call),
+            api->isReadLockAcquire(&*shared_call));
+  EXPECT_EQ(api->isWriteLockAcquire(shared_call),
+            api->isWriteLockAcquire(&*shared_call));
+  EXPECT_EQ(api->isReadLockAcquire(exclusive_call),
+            api->isReadLockAcquire(&*exclusive_call));
+  EXPECT_EQ(api->isWriteLockAcquire(exclusive_call),
+            api->isWriteLockAcquire(&*exclusive_call));
+}
+
+TEST_F(ThreadAPITest, MapsOpenMPTaskRuntimeVariants) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task_begin_if0(i8*, i32, i8*)
+    declare i32 @__kmpc_omp_task_with_deps_51(i8*, i32, i8*, i32, i8*, i32, i8*, i8*)
+    declare void @__kmpc_omp_task_complete_if0(i8*, i32, i8*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_omp_task_begin_if0")),
+            ThreadAPI::TD_OMP_TASK);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_omp_task_with_deps_51")),
+            ThreadAPI::TD_OMP_TASK_WITH_DEPS);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_omp_task_complete_if0")),
+            ThreadAPI::TD_OMP_TASK_COMPLETE);
+}
+
+TEST_F(ThreadAPITest, MapsOpenMPRegionRuntimeVariants) {
+  const char *source = R"(
+    declare i32 @__kmpc_single(i8*, i32)
+    declare void @__kmpc_end_single(i8*, i32)
+    declare i32 @__kmpc_master(i8*, i32)
+    declare void @__kmpc_end_master(i8*, i32)
+    declare void @__kmpc_ordered(i8*, i32)
+    declare void @__kmpc_end_ordered(i8*, i32)
+    declare i32 @__kmpc_reduce(i8*, i32, i32, i64, i8*, void (i8*, i8*)*, [8 x i32]*)
+    declare void @__kmpc_for_static_fini(i8*, i32)
+    declare void @__kmpc_dispatch_fini_4(i8*, i32)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_single")),
+            ThreadAPI::TD_OMP_SINGLE_START);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_end_single")),
+            ThreadAPI::TD_OMP_SINGLE_END);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_master")),
+            ThreadAPI::TD_OMP_MASTER_START);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_end_master")),
+            ThreadAPI::TD_OMP_MASTER_END);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_ordered")),
+            ThreadAPI::TD_OMP_ORDERED_START);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_end_ordered")),
+            ThreadAPI::TD_OMP_ORDERED_END);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_reduce")),
+            ThreadAPI::TD_OMP_REDUCE_START);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_for_static_fini")),
+            ThreadAPI::TD_OMP_FOR_STATIC_FINI);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_dispatch_fini_4")),
+            ThreadAPI::TD_OMP_FOR_DISPATCH_FINI);
+}
+
+TEST_F(ThreadAPITest, UsesCriticalNameAsAnalysisLockIdentity) {
+  const char *source = R"(
+    @crit = global [8 x i32] zeroinitializer
+
+    declare void @__kmpc_critical(i8*, i32, [8 x i32]*)
+    declare void @__kmpc_end_critical(i8*, i32, [8 x i32]*)
+
+    define void @main() {
+    entry:
+      call void @__kmpc_critical(i8* null, i32 0, [8 x i32]* @crit)
+      call void @__kmpc_end_critical(i8* null, i32 0, [8 x i32]* @crit)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *enter = &*it++;
+  const Instruction *exit = &*it++;
+
+  EXPECT_EQ(api->getAnalysisLockIdentity(enter), module->getNamedGlobal("crit"));
+  EXPECT_EQ(api->getAnalysisLockIdentity(exit), module->getNamedGlobal("crit"));
+}
+
+TEST_F(ThreadAPITest, WrapperOperationsShareAnalysisLockIdentity) {
+  const char *source = R"(
+    @lock = global i8 0
+
+    declare void @fake_unique_lockC1E(i8*, i8*)
+    declare void @fake_unique_lockD1Ev(i8*)
+    declare void @fake_unique_locklockEv(i8*)
+    declare void @fake_unique_lockunlockEv(i8*)
+
+    define void @main() {
+    entry:
+      %wrapper = alloca i8
+      call void @fake_unique_lockC1E(i8* %wrapper, i8* @lock)
+      call void @fake_unique_lockunlockEv(i8* %wrapper)
+      call void @fake_unique_locklockEv(i8* %wrapper)
+      call void @fake_unique_lockD1Ev(i8* %wrapper)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  std::vector<const Instruction *> calls;
+  for (const Instruction &inst : main_func->getEntryBlock()) {
+    if (isa<CallBase>(&inst)) {
+      calls.push_back(&inst);
+    }
+  }
+  ASSERT_EQ(calls.size(), 4u);
+  const Instruction *ctor = calls[0];
+  const Instruction *unlock = calls[1];
+  const Instruction *lock = calls[2];
+  const Instruction *dtor = calls[3];
+
+  const Value *identity = api->getAnalysisLockIdentity(ctor);
+  ASSERT_NE(identity, nullptr);
+  EXPECT_EQ(identity, api->getAnalysisLockIdentity(unlock));
+  EXPECT_EQ(identity, api->getAnalysisLockIdentity(lock));
+  EXPECT_EQ(identity, api->getAnalysisLockIdentity(dtor));
 }

@@ -23,6 +23,14 @@
 
 namespace RAIILock {
 
+enum class OwnershipKind {
+  Immediate,
+  Deferred,
+  Try,
+  Adopt,
+  Unknown
+};
+
 /**
  * @struct LockLifetime
  * @brief Represents the lifetime of a RAII lock object
@@ -36,6 +44,7 @@ struct LockLifetime {
   std::vector<const llvm::Instruction *> destructors; ///< Destructor calls (release points)
   std::vector<const llvm::Value *> underlyingLocks;   ///< Ordered mutexes protected by this RAII object
   std::vector<bool> sharedModes;                      ///< Per-lock mode: true for shared/read, false for exclusive
+  OwnershipKind ownership = OwnershipKind::Immediate; ///< Constructor ownership policy
   bool isScoped;                          ///< True for scoped_lock (multi-lock)
 };
 
@@ -113,6 +122,10 @@ public:
    * @return True if this acquires a shared/read lock
    */
   static bool isSharedLock(const llvm::Instruction *inst);
+
+  /// Determine the constructor ownership policy for a wrapper object.
+  static OwnershipKind
+  getOwnershipKind(const llvm::CallBase *ctor);
 
   /**
    * @brief Find all destructor calls for a lock object

@@ -25,6 +25,7 @@
 #include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
+#include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
@@ -319,6 +320,12 @@ private:
       return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
     }
   };
+  struct ThreadPairHash {
+    size_t operator()(const std::pair<ThreadID, ThreadID> &p) const {
+      return std::hash<ThreadID>()(p.first) ^
+             (std::hash<ThreadID>()(p.second) << 1U);
+    }
+  };
 
   llvm::Module &m_module;
   ThreadAPI *m_thread_api;
@@ -503,8 +510,11 @@ private:
   std::vector<const llvm::Instruction *>
   collectFenceWitnesses(const llvm::Instruction *fence,
                         bool require_release_semantics) const;
+  bool atomicLocationsMayAlias(const llvm::Instruction *lhs,
+                               const llvm::Instruction *rhs) const;
   std::vector<SyncNode *>
   getBarrierContinuations(const llvm::Instruction *barrier_inst) const;
+  void lowerOpenMPTasks();
 
   /**
    * @brief Compute transitive closure of happens-before relation (optional
@@ -578,8 +588,14 @@ private:
 
   void enableIndirectForkConservatism();
 
+  std::pair<ThreadID, ThreadID> normalizeThreadPair(ThreadID lhs,
+                                                    ThreadID rhs) const;
+
   static constexpr ThreadID kUnknownThread =
       std::numeric_limits<ThreadID>::max();
+  std::unordered_map<const llvm::Instruction *, ThreadID> m_openmp_task_threads;
+  std::unordered_set<std::pair<ThreadID, ThreadID>, ThreadPairHash>
+      m_openmp_task_exclusions;
 };
 
 } // namespace mhp

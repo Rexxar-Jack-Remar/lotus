@@ -3,10 +3,12 @@
  * Author: rainoftime
 */
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
+#include <set>
 
 using namespace llvm;
 
@@ -23,6 +25,7 @@ void HappensBeforeAnalysis::analyze() {
 void HappensBeforeAnalysis::buildSynchronizesWith() {
   m_sync_with.clear();
   m_future_shared_state.clear();
+  m_deferred_sync_counts.clear();
   using namespace CppAtomics;
 
   std::vector<const Instruction *> release_ops;
@@ -34,6 +37,17 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   std::vector<const Instruction *> latch_waits;
   std::vector<const Instruction *> barrier_arrives;
   std::vector<const Instruction *> barrier_waits;
+  std::vector<const Instruction *> omp_task_ops;
+
+  std::set<std::pair<const Instruction *, const Instruction *>> seen_sync_edges;
+  auto addSyncEdge = [&](const Instruction *from, const Instruction *to) {
+    if (!from || !to || from == to) {
+      return;
+    }
+    if (seen_sync_edges.emplace(from, to).second) {
+      m_sync_with.emplace_back(from, to);
+    }
+  };
 
   ThreadAPI *threadAPI = ThreadAPI::getThreadAPI();
 
@@ -97,6 +111,33 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
           case ThreadAPI::TD_BARRIER_WAIT_CPP20:
             barrier_waits.push_back(inst);
             break;
+          case ThreadAPI::TD_OMP_TASK:
+          case ThreadAPI::TD_OMP_TASKWAIT:
+          case ThreadAPI::TD_OMP_TASKWAIT_DEPS:
+          case ThreadAPI::TD_OMP_TASKYIELD:
+          case ThreadAPI::TD_OMP_TASKGROUP_START:
+          case ThreadAPI::TD_OMP_TASKGROUP_END:
+          case ThreadAPI::TD_OMP_TASK_WITH_DEPS:
+          case ThreadAPI::TD_OMP_TASKLOOP:
+          case ThreadAPI::TD_OMP_TASK_COMPLETE:
+          case ThreadAPI::TD_OMP_SINGLE_START:
+          case ThreadAPI::TD_OMP_SINGLE_END:
+          case ThreadAPI::TD_OMP_MASTER_START:
+          case ThreadAPI::TD_OMP_MASTER_END:
+          case ThreadAPI::TD_OMP_ORDERED_START:
+          case ThreadAPI::TD_OMP_ORDERED_END:
+          case ThreadAPI::TD_OMP_REDUCE_START:
+          case ThreadAPI::TD_OMP_REDUCE_END:
+          case ThreadAPI::TD_OMP_REDUCE_NOWAIT_START:
+          case ThreadAPI::TD_OMP_REDUCE_NOWAIT_END:
+          case ThreadAPI::TD_OMP_FOR_STATIC_INIT:
+          case ThreadAPI::TD_OMP_FOR_STATIC_FINI:
+          case ThreadAPI::TD_OMP_FOR_DISPATCH_INIT:
+          case ThreadAPI::TD_OMP_FOR_DISPATCH_NEXT:
+          case ThreadAPI::TD_OMP_FOR_DISPATCH_FINI:
+          case ThreadAPI::TD_OMP_FLUSH:
+            omp_task_ops.push_back(inst);
+            break;
           default:
             break;
         }
@@ -114,19 +155,56 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   // promise.set_value() synchronizes-with future.get()
   for (const Instruction *P : promise_sets) {
     for (const Instruction *F : future_gets) {
-      if (P == F) continue;
       if (samePromiseFuturePair(P, F))
-        m_sync_with.emplace_back(P, F);
+        addSyncEdge(P, F);
     }
   }
 
-  // 3-5. `call_once`, latches, and barriers need dynamic winner/phase/state
+  // 3. OpenMP task dependency ordering from explicit task graph edges.
+  size_t omp_task_dependency_edges = 0;
+  OpenMP::OpenMPTaskGraph task_graph(m_module);
+  task_graph.analyze();
+  for (const auto &task_uptr : task_graph.getAllTasks()) {
+    const OpenMP::Task *task = task_uptr.get();
+    if (!task || !task->task_create) {
+      continue;
+    }
+    for (const OpenMP::Task *pred : task->predecessors) {
+      if (!pred || !pred->task_create) {
+        continue;
+      }
+      size_t before = m_sync_with.size();
+      addSyncEdge(pred->task_create, task->task_create);
+      if (m_sync_with.size() != before) {
+        ++omp_task_dependency_edges;
+      }
+    }
+  }
+
+  // 4-6. `call_once`, latches, and barriers need dynamic winner/phase/state
   // tracking to prove HB. Do not add synthetic definite edges here.
-  (void)call_once_ops;
-  (void)latch_countdowns;
-  (void)latch_waits;
-  (void)barrier_arrives;
-  (void)barrier_waits;
+  m_deferred_sync_counts["atomic_release_candidates"] = release_ops.size();
+  m_deferred_sync_counts["atomic_acquire_candidates"] = acquire_ops.size();
+  m_deferred_sync_counts["call_once_ops"] = call_once_ops.size();
+  m_deferred_sync_counts["latch_ops"] =
+      latch_countdowns.size() + latch_waits.size();
+  m_deferred_sync_counts["barrier_ops"] =
+      barrier_arrives.size() + barrier_waits.size();
+  m_deferred_sync_counts["omp_task_api_ops"] = omp_task_ops.size();
+  m_deferred_sync_counts["omp_task_dependency_edges"] =
+      omp_task_dependency_edges;
+  for (const auto &entry : task_graph.getDeferredReasonCounts()) {
+    m_deferred_sync_counts[entry.first] += entry.second;
+  }
+
+  errs() << "HB deferred sync candidates: atomics="
+         << m_deferred_sync_counts["atomic_release_candidates"] + 
+                m_deferred_sync_counts["atomic_acquire_candidates"]
+         << ", call_once=" << m_deferred_sync_counts["call_once_ops"]
+         << ", latches=" << m_deferred_sync_counts["latch_ops"]
+         << ", barriers=" << m_deferred_sync_counts["barrier_ops"]
+         << ", omp_task_ops=" << m_deferred_sync_counts["omp_task_api_ops"]
+         << ", omp_task_edges=" << omp_task_dependency_edges << "\n";
 }
 
 bool HappensBeforeAnalysis::sameAtomicLocation(const llvm::Instruction *store_inst,
@@ -324,7 +402,8 @@ bool HappensBeforeAnalysis::happensBefore(const Instruction *A, const Instructio
     for (const auto &p : m_sync_with) {
       const Instruction *S = p.first;
       const Instruction *L = p.second;
-      if (m_mhp.mustPrecede(A, S) && m_mhp.mustPrecede(L, B)) {
+      if ((A == S || m_mhp.mustPrecede(A, S)) &&
+          (L == B || m_mhp.mustPrecede(L, B))) {
         result = true;
         break;
       }

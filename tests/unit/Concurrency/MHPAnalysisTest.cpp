@@ -112,6 +112,106 @@ TEST_F(MHPAnalysisTest, LockOperations) {
   EXPECT_GE(stats.num_unlocks, 1);
 }
 
+TEST_F(MHPAnalysisTest, WrapperAndCriticalLocksReachMHPNodes) {
+  const char *source = R"(
+    @lock = global i8 0
+    @crit = global [8 x i32] zeroinitializer
+
+    declare void @fake_unique_lockC1E(i8*, i8*)
+    declare void @fake_unique_lockD1Ev(i8*)
+    declare void @__kmpc_critical(i8*, i32, [8 x i32]*)
+    declare void @__kmpc_end_critical(i8*, i32, [8 x i32]*)
+
+    define i32 @main() {
+    entry:
+      %wrapper = alloca i8
+      call void @fake_unique_lockC1E(i8* %wrapper, i8* @lock)
+      call void @fake_unique_lockD1Ev(i8* %wrapper)
+      call void @__kmpc_critical(i8* null, i32 0, [8 x i32]* @crit)
+      call void @__kmpc_end_critical(i8* null, i32 0, [8 x i32]* @crit)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  std::vector<const Instruction *> calls;
+  for (const Instruction &inst : main_func->getEntryBlock()) {
+    if (isa<CallBase>(&inst)) {
+      calls.push_back(&inst);
+    }
+  }
+  ASSERT_EQ(calls.size(), 4u);
+  const Instruction *ctor = calls[0];
+  const Instruction *dtor = calls[1];
+  const Instruction *critical = calls[2];
+  const Instruction *end_critical = calls[3];
+
+  const ThreadFlowGraph &tfg = mhp.getThreadFlowGraph();
+  auto ctor_nodes = tfg.getNodes(ctor);
+  auto dtor_nodes = tfg.getNodes(dtor);
+  auto critical_nodes = tfg.getNodes(critical);
+  auto end_critical_nodes = tfg.getNodes(end_critical);
+  ASSERT_FALSE(ctor_nodes.empty());
+  ASSERT_FALSE(dtor_nodes.empty());
+  ASSERT_FALSE(critical_nodes.empty());
+  ASSERT_FALSE(end_critical_nodes.empty());
+
+  EXPECT_EQ(ctor_nodes.front()->getLockValue(), dtor_nodes.front()->getLockValue());
+  EXPECT_EQ(critical_nodes.front()->getLockValue(), module->getNamedGlobal("crit"));
+  EXPECT_EQ(end_critical_nodes.front()->getLockValue(), module->getNamedGlobal("crit"));
+}
+
+TEST_F(MHPAnalysisTest, OpenMPTaskBodyMustPrecedeTaskwaitContinuation) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__kmpc_omp_taskwait(i8*, i32)
+
+    define i8* @task_body(i8* %arg) {
+    entry:
+      store i32 42, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %task = alloca i8* (i8*)*, align 8
+      store i8* (i8*)* @task_body, i8* (i8*)** %task, align 8
+      %task_raw = bitcast i8* (i8*)** %task to i8*
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %task_raw)
+      call i32 @__kmpc_omp_taskwait(i8* null, i32 0)
+      %after = load i32, i32* @shared, align 4
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Function *task_body = module->getFunction("task_body");
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(task_body, nullptr);
+  ASSERT_NE(main_func, nullptr);
+
+  const Instruction *task_store = &task_body->getEntryBlock().front();
+  const Instruction *after = findInstructionByName(*main_func, "after");
+  ASSERT_NE(task_store, nullptr);
+  ASSERT_NE(after, nullptr);
+
+  EXPECT_TRUE(mhp.mustPrecede(task_store, after));
+}
+
 TEST_F(MHPAnalysisTest, JoinStatistics) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)

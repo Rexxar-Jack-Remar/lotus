@@ -11,7 +11,7 @@ Lotus includes multiple bug detection tools:
 1. **Kint**: Integer-related bugs (overflow, division by zero, bad shift, array bounds)
 2. **GVFA**: Memory safety bugs (null pointer dereference, use-after-free)
 3. **Taint Analysis**: Information flow and injection vulnerabilities
-4. **Concurrency Checker**: Race conditions and deadlocks
+4. **Concurrency Checker**: Race conditions, deadlocks, OpenMP misuse, and MPI protocol bugs
 
 Bug Categories
 --------------
@@ -581,6 +581,8 @@ Capabilities
 2. **Deadlock Detection**: Lock ordering issues
 3. **Atomicity Violations**: Non-atomic operation sequences
 4. **Lock/Unlock Pairing**: Mismatched lock operations
+5. **OpenMP Checks**: Taskgroup/atomic region mismatches and partial task synchronization
+6. **MPI Checks**: Request lifecycle bugs, collective mismatches, blocking deadlocks, and RMA issues
 
 Basic Usage
 ~~~~~~~~~~~
@@ -589,6 +591,32 @@ Basic Usage
 
    ./build/bin/lotus-concur program.bc
    ./build/bin/lotus-concur -verbose program.bc
+   ./build/bin/lotus-concur --checks=openmp,mpi program.bc
+
+OpenMP and MPI Examples
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The concurrency checker also includes dedicated runtime-aware checks for
+OpenMP and MPI programs.
+
+**OpenMP examples**:
+
+* unmatched ``__kmpc_taskgroup`` / ``__kmpc_end_taskgroup`` pairs
+* unmatched ``__kmpc_atomic_start`` / ``__kmpc_atomic_end`` pairs
+* selective ``__kmpc_omp_wait_deps`` synchronization that may not fully order sibling tasks
+
+**MPI examples**:
+
+* ``MPI_Isend`` / ``MPI_Irecv`` requests that are never completed
+* mismatched or rank-conditional collectives
+* simple blocking send/recv deadlock cycles
+* unsynchronized RMA operations or leaked windows
+
+For MPI/OpenMP-heavy codebases, a useful first pass is:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-concur --checks=openmp,mpi --report-json=parallel.json program.bc
 
 Example: Data Race
 ~~~~~~~~~~~~~~~~~~

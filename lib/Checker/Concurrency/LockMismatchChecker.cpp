@@ -36,7 +36,7 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
 
       if (m_threadAPI->isTDRelease(inst)) {
         // Check for Unlock without Lock
-        LockID lock = m_threadAPI->getLockVal(inst);
+        LockID lock = m_threadAPI->getAnalysisLockIdentity(inst);
         if (!lock)
           continue;
         lock = lock->stripPointerCasts();
@@ -67,12 +67,12 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
             for (Instruction *prev = inst->getPrevNode(); prev;
                  prev = prev->getPrevNode()) {
               if (m_threadAPI->isTDRelease(prev)) {
-                LockID prevLock = m_threadAPI->getLockVal(prev);
+                LockID prevLock = m_threadAPI->getAnalysisLockIdentity(prev);
                 if (prevLock && prevLock->stripPointerCasts() == lock)
                   break; // saw release of same lock first
               }
               if (m_threadAPI->isTDAcquire(prev)) {
-                LockID prevLock = m_threadAPI->getLockVal(prev);
+                LockID prevLock = m_threadAPI->getAnalysisLockIdentity(prev);
                 if (prevLock && prevLock->stripPointerCasts() == lock) {
                   sameBlockAcquire = true;
                   break;
@@ -97,11 +97,11 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
                    J != E; ++J) {
                 Instruction *o = &*J;
                 if (m_threadAPI->isTDAcquire(o)) {
-                  LockID lockVal = m_threadAPI->getLockVal(o);
+                  LockID lockVal = m_threadAPI->getAnalysisLockIdentity(o);
                   if (sameLockValue(lockVal, lock))
                     ++acqInFunc;
                 } else if (m_threadAPI->isTDRelease(o)) {
-                  LockID lockVal = m_threadAPI->getLockVal(o);
+                  LockID lockVal = m_threadAPI->getAnalysisLockIdentity(o);
                   if (sameLockValue(lockVal, lock))
                     ++relInFunc;
                 }
@@ -136,7 +136,7 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
                 for (const Instruction &CI : instructions(callee)) {
                   if (!m_threadAPI->isTDAcquire(&CI))
                     continue;
-                  LockID L = m_threadAPI->getLockVal(&CI);
+                  LockID L = m_threadAPI->getAnalysisLockIdentity(&CI);
                   if (!L)
                     continue;
                   if (L->stripPointerCasts() == lock)
@@ -183,7 +183,7 @@ std::vector<ConcurrencyBugReport> LockMismatchChecker::checkLockMisuse() {
         }
       } else if (m_threadAPI->isTDAcquire(inst)) {
         // Check for Double Lock
-        LockID lock = m_threadAPI->getLockVal(inst);
+        LockID lock = m_threadAPI->getAnalysisLockIdentity(inst);
         if (!lock)
           continue;
         lock = lock->stripPointerCasts();

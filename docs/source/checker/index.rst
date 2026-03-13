@@ -17,7 +17,7 @@ The Checker Framework consists of four main checker categories, all unified thro
 * **GVFA Checkers** – Memory safety vulnerabilities using Global Value Flow Analysis
 * **FiTx Checkers** – Daily development-friendly bug detection using typestate analysis (path-insensitive, return-code aware; see Suzuki et al., USENIX ATC 2024)
 * **KINT Checkers** – Numerical bugs (overflow, division by zero, array bounds) using range analysis and SMT solving
-* **Concurrency Checkers** – Thread safety issues (data races, deadlocks, atomicity violations) using MHP and lock set analysis
+* **Concurrency Checkers** – Thread safety and parallel-runtime issues (data races, deadlocks, atomicity violations, OpenMP bugs, MPI bugs) using MHP, lock set, OpenMP, and MPI analyses
 * **Pulse Checker** – Memory safety and other bugs using biabductive analysis with path-sensitive interprocedural reasoning
 
 All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools.
@@ -31,6 +31,8 @@ Components
 * ``DataRaceChecker.cpp`` – Data race detection using MHP (May Happen in Parallel) analysis
 * ``DeadlockChecker.cpp`` – Deadlock detection using lock set analysis
 * ``AtomicityChecker.cpp`` – Atomicity violation detection
+* ``OpenMPChecker.cpp`` – Dedicated OpenMP bug checks built on OpenMP task analysis
+* ``MPIChecker.cpp`` – Dedicated MPI bug checks built on MPI communication/RMA analysis
 
 **FiTx Bug Checkers** (``lib/Checker/FiTx/``):
 
@@ -122,6 +124,7 @@ Usage
 
    ./build/bin/lotus-concur --check-data-races input.bc
    ./build/bin/lotus-concur --check-deadlocks --check-atomicity input.bc
+   ./build/bin/lotus-concur --checks=openmp,mpi input.bc
    ./build/bin/lotus-concur --report-json=report.json input.bc
 
 **Pulse Tool**:
@@ -160,7 +163,7 @@ The framework detects the following bug categories:
 
 * **Memory Safety**: Null pointer dereference, use-after-free, uninitialized variables, invalid free, stack address misuse, memory leaks
 * **Numerical Errors**: Integer overflow, division by zero, bad shift, array out-of-bounds, dead branches
-* **Concurrency**: Data races, deadlocks, atomicity violations
+* **Concurrency**: Data races, deadlocks, atomicity violations, lock mismatches, condition-variable misuse, OpenMP runtime misuse, MPI protocol/RMA bugs
 * **Security**: Taint errors (untrusted data flows), use-after-free, null dereferences
 * **Performance**: Unnecessary copies, const-refable parameters
 

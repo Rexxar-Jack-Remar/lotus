@@ -89,7 +89,7 @@ void AtomicityChecker::collectCriticalSections() {
       if (m_threadAPI->isTDRelease(&I) && !LockStack.empty()) {
         // Find the most recent matching acquire for *the same lock value*.
         const Instruction *Rel = &I;
-        mhp::LockID RelLock = m_threadAPI->getLockVal(Rel);
+        mhp::LockID RelLock = m_threadAPI->getAnalysisLockIdentity(Rel);
         if (!RelLock)
           continue;
         RelLock = RelLock->stripPointerCasts();
@@ -97,7 +97,7 @@ void AtomicityChecker::collectCriticalSections() {
         const Instruction *Acq = nullptr;
         while (!LockStack.empty()) {
           const Instruction *Candidate = LockStack.pop_back_val();
-          mhp::LockID AcqLock = m_threadAPI->getLockVal(Candidate);
+          mhp::LockID AcqLock = m_threadAPI->getAnalysisLockIdentity(Candidate);
           if (AcqLock)
             AcqLock = AcqLock->stripPointerCasts();
           if (AcqLock == RelLock) {
@@ -186,7 +186,7 @@ std::vector<ConcurrencyBugReport> AtomicityChecker::checkAtomicityViolations() {
   SmallVector<std::pair<const CriticalSection *, mhp::LockID>, 16> AllSections;
   for (auto &FuncPair : m_csPerFunc) {
     for (const auto &CS : FuncPair.second) {
-      AllSections.push_back({&CS, m_threadAPI->getLockVal(CS.Acquire)});
+      AllSections.push_back({&CS, m_threadAPI->getAnalysisLockIdentity(CS.Acquire)});
     }
   }
 

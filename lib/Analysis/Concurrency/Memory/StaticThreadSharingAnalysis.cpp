@@ -199,8 +199,11 @@ StaticThreadSharingAnalysis::classify(const Value *AllocSite) const {
       // Create a set of all unique threads accessing this location
       std::set<const Function*> allThreads = info.Readers;
       allThreads.insert(info.Writers.begin(), info.Writers.end());
+      bool multi_run_writer =
+          std::any_of(info.Writers.begin(), info.Writers.end(),
+                      [this](const Function *F) { return isMultiRunThread(F); });
       
-      if (allThreads.size() > 1) {
+      if (allThreads.size() > 1 || multi_run_writer) {
           // According to the paper (Section 1, "Limitations of Escape Analysis" point 4, and Algorithm 3),
           // we must distinguish immutable data. Data is shared only if there is at least one write.
           // "thread-shared but immutable data... our algorithm also distinguishes between reads and writes"

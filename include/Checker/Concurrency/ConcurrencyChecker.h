@@ -4,13 +4,17 @@
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/MPI/MPIAnalysis.h"
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
+#include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
 #include "Checker/Concurrency/AtomicityChecker.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 #include "Checker/Concurrency/ConditionVariableChecker.h"
 #include "Checker/Concurrency/DataRaceChecker.h"
 #include "Checker/Concurrency/DeadlockChecker.h"
 #include "Checker/Concurrency/LockMismatchChecker.h"
+#include "Checker/Concurrency/MPIChecker.h"
+#include "Checker/Concurrency/OpenMPChecker.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
 
@@ -83,6 +87,16 @@ public:
   void checkLockMismatches();
 
   /**
+   * @brief Run dedicated OpenMP checks and report to BugReportMgr
+   */
+  void checkOpenMPBugs();
+
+  /**
+   * @brief Run dedicated MPI checks and report to BugReportMgr
+   */
+  void checkMPIBugs();
+
+  /**
    * @brief Set alias analysis wrapper for better precision
    */
   void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) {
@@ -106,6 +120,8 @@ public:
   }
   void enableCondVarCheck(bool enable) { m_checkCondVars = enable; }
   void enableLockMismatchCheck(bool enable) { m_checkLockMismatches = enable; }
+  void enableOpenMPCheck(bool enable) { m_checkOpenMP = enable; }
+  void enableMPICheck(bool enable) { m_checkMPI = enable; }
 
   /**
    * @brief Get statistics about the analysis
@@ -119,6 +135,8 @@ public:
     size_t atomicityViolationsFound;
     size_t condVarBugsFound;
     size_t lockMismatchesFound;
+    size_t openMPBugsFound;
+    size_t mpiBugsFound;
   };
 
   Statistics getStatistics() const { return m_stats; }
@@ -144,6 +162,8 @@ private:
   mhp::LockSetAnalysis *m_locksetAnalysisView = nullptr;
   std::unique_ptr<lotus::EscapeAnalysis> m_escapeAnalysis;
   std::unique_ptr<lotus::HappensBeforeAnalysis> m_happensBeforeAnalysis;
+  std::unique_ptr<OpenMP::OpenMPTaskGraph> m_openMPTaskGraph;
+  std::unique_ptr<mpi::MPIAnalysis> m_mpiAnalysis;
   lotus::AliasAnalysisWrapper *m_aliasAnalysis;
   ThreadAPI *m_threadAPI;
 
@@ -153,6 +173,8 @@ private:
   std::unique_ptr<AtomicityChecker> m_atomicityChecker;
   std::unique_ptr<ConditionVariableChecker> m_condVarChecker;
   std::unique_ptr<LockMismatchChecker> m_lockMismatchChecker;
+  std::unique_ptr<OpenMPChecker> m_openMPChecker;
+  std::unique_ptr<MPIChecker> m_mpiChecker;
 
   // Configuration
   bool m_checkDataRaces = true;
@@ -160,6 +182,8 @@ private:
   bool m_checkAtomicityViolations = true;
   bool m_checkCondVars = true;
   bool m_checkLockMismatches = true;
+  bool m_checkOpenMP = true;
+  bool m_checkMPI = true;
 
   // Bug type IDs (registered with BugReportMgr)
   int m_dataRaceTypeId;
@@ -167,6 +191,16 @@ private:
   int m_atomicityViolationTypeId;
   int m_condVarMisuseTypeId;
   int m_lockMismatchTypeId;
+  int m_openMPTaskgroupMismatchTypeId;
+  int m_openMPAtomicMismatchTypeId;
+  int m_openMPPartialSyncTypeId;
+  int m_mpiOrphanedRequestTypeId;
+  int m_mpiDeadlockTypeId;
+  int m_mpiCollectiveMismatchTypeId;
+  int m_mpiConditionalCollectiveTypeId;
+  int m_mpiUnsyncRMATypeId;
+  int m_mpiRMARaceTypeId;
+  int m_mpiWindowLeakTypeId;
 
   // Results tracking
   Statistics m_stats;

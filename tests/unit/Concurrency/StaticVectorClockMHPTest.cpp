@@ -1,0 +1,165 @@
+#include "Analysis/Concurrency/MHP/StaticVectorClockMHP.h"
+
+#include <llvm/AsmParser/Parser.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Support/SourceMgr.h>
+#include <gtest/gtest.h>
+
+using namespace llvm;
+using namespace mhp;
+
+static const Instruction *findInstructionByName(const Function &func,
+                                                StringRef name) {
+  for (const auto &bb : func) {
+    for (const auto &inst : bb) {
+      if (inst.getName() == name) {
+        return &inst;
+      }
+    }
+  }
+  return nullptr;
+}
+
+class StaticVectorClockMHPTest : public ::testing::Test {
+protected:
+  LLVMContext context;
+
+  std::unique_ptr<Module> parseModule(const char *source) {
+    SMDiagnostic err;
+    auto module = parseAssemblyString(source, err, context);
+    if (!module) {
+      err.print("StaticVectorClockMHPTest", errs());
+    }
+    return module;
+  }
+};
+
+TEST_F(StaticVectorClockMHPTest, LoopForkCreatesMultiInstanceThread) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w1 = add i32 10, 20
+      %w2 = add i32 %w1, 1
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      br label %loop
+
+    loop:
+      %i = phi i32 [0, %entry], [%inc, %loop]
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      %inc = add i32 %i, 1
+      %cond = icmp slt i32 %inc, 2
+      br i1 %cond, label %loop, label %exit
+
+    exit:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Function *worker_func = module->getFunction("worker");
+  ASSERT_NE(worker_func, nullptr);
+  const Instruction *w1 = findInstructionByName(*worker_func, "w1");
+  const Instruction *w2 = findInstructionByName(*worker_func, "w2");
+  ASSERT_NE(w1, nullptr);
+  ASSERT_NE(w2, nullptr);
+  EXPECT_TRUE(svc.mayHappenInParallel(w1, w2));
+}
+
+TEST_F(StaticVectorClockMHPTest, BarrierOrdersPostBarrierContinuation) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_barrier_wait(i8*)
+
+    @bar = global i8 0
+    @shared = global i32 0
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 42, i32* @shared, align 4
+      call i32 @pthread_barrier_wait(i8* @bar)
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      call i32 @pthread_barrier_wait(i8* @bar)
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+  EXPECT_TRUE(svc.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(StaticVectorClockMHPTest, StdThreadJoinCreatesJoinLikeHB) {
+  const char *source = R"(
+    declare void @_ZNSt6threadC1EPFvPvES0_(i8*, i8* (i8*)*, i8*)
+    declare void @_ZNSt6thread4joinEv(i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 1, 2
+      ret i8* null
+    }
+
+    define void @main() {
+    entry:
+      %thr = alloca i8
+      call void @_ZNSt6threadC1EPFvPvES0_(i8* %thr, i8* (i8*)* @worker, i8* null)
+      call void @_ZNSt6thread4joinEv(i8* %thr)
+      %post = add i32 3, 4
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Instruction *worker_inst = findInstructionByName(*module->getFunction("worker"), "w");
+  const Instruction *post = findInstructionByName(*module->getFunction("main"), "post");
+  ASSERT_NE(worker_inst, nullptr);
+  ASSERT_NE(post, nullptr);
+  EXPECT_FALSE(svc.mayHappenInParallel(worker_inst, post));
+}
+
+int main(int argc, char **argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

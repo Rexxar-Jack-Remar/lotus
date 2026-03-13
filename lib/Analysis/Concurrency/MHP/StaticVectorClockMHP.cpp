@@ -5,6 +5,8 @@
 
 #include "Analysis/Concurrency/MHP/StaticVectorClockMHP.h"
 
+#include <llvm/Analysis/LoopInfo.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -45,6 +47,7 @@ void StaticVectorClockMHP::analyze() {
   m_condvar_waits.clear();
   m_barrier_waits.clear();
   m_barrier_phase_by_thread.clear();
+  m_multi_instance_threads.clear();
   m_thread_entry_candidates.clear();
   m_has_unresolved_fork = false;
   m_next_thread_id = 1;
@@ -671,6 +674,15 @@ void StaticVectorClockMHP::computeMHPPairs() {
       const Instruction *a = all_insts[i];
       const Instruction *b = all_insts[j];
 
+      auto tid_it_a = m_inst_to_thread.find(a);
+      auto tid_it_b = m_inst_to_thread.find(b);
+      if (tid_it_a != m_inst_to_thread.end() && tid_it_b != m_inst_to_thread.end() &&
+          tid_it_a->second == tid_it_b->second &&
+          m_multi_instance_threads.count(tid_it_a->second)) {
+        m_mhp_pairs.insert({a, b});
+        continue;
+      }
+
       if (happensBefore(a, b) || happensBefore(b, a)) {
         continue;
       }
@@ -684,6 +696,14 @@ bool StaticVectorClockMHP::mayHappenInParallel(const Instruction *i1,
                                                const Instruction *i2) const {
   if (!i1 || !i2 || i1 == i2)
     return false;
+
+  auto tid1 = m_inst_to_thread.find(i1);
+  auto tid2 = m_inst_to_thread.find(i2);
+  if (tid1 != m_inst_to_thread.end() && tid2 != m_inst_to_thread.end() &&
+      tid1->second == tid2->second &&
+      m_multi_instance_threads.count(tid1->second)) {
+    return true;
+  }
 
   if (m_mhp_pairs.count({i1, i2}) || m_mhp_pairs.count({i2, i1}))
     return true;
@@ -1017,6 +1037,17 @@ void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
                                             ThreadID parent_tid) {
   ThreadID new_tid = allocateThreadID();
 
+  bool in_loop = false;
+  if (fork_inst && fork_inst->getFunction()) {
+    llvm::DominatorTree DT(const_cast<Function &>(*fork_inst->getFunction()));
+    llvm::LoopInfo LI;
+    LI.analyze(DT);
+    in_loop = (LI.getLoopFor(fork_inst->getParent()) != nullptr);
+  }
+  if (in_loop) {
+    m_multi_instance_threads.insert(new_tid);
+  }
+
   node->setForkedThread(new_tid);
 
   m_thread_fork_sites[new_tid] = fork_inst;
@@ -1088,13 +1119,13 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
 
 void StaticVectorClockMHP::handleLockAcquire(const Instruction *lock_inst,
                                              SyncNode *node) {
-  const Value *lock = m_thread_api->getLockVal(lock_inst);
+  const Value *lock = m_thread_api->getAnalysisLockIdentity(lock_inst);
   node->setLockValue(lock);
 }
 
 void StaticVectorClockMHP::handleLockRelease(const Instruction *unlock_inst,
                                              SyncNode *node) {
-  const Value *lock = m_thread_api->getLockVal(unlock_inst);
+  const Value *lock = m_thread_api->getAnalysisLockIdentity(unlock_inst);
   node->setLockValue(lock);
 }
 
@@ -1121,8 +1152,30 @@ void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
     barrier = barrier_inst;
   }
   node->setLockValue(barrier);
+
+  BarrierParticipant current;
+  current.arrival = node;
+  current.continuations = getBarrierContinuations(barrier_inst);
   size_t phase = m_barrier_phase_by_thread[barrier][node->getThreadID()]++;
-  m_barrier_waits[barrier][phase].push_back(node);
+  auto &participants = m_barrier_waits[barrier][phase];
+  for (const BarrierParticipant &previous : participants) {
+    if (!previous.arrival ||
+        previous.arrival->getThreadID() == node->getThreadID()) {
+      continue;
+    }
+
+    for (SyncNode *cont : current.continuations) {
+      if (cont) {
+        m_tfg->addInterThreadEdge(previous.arrival, cont, EdgeKind::Barrier);
+      }
+    }
+    for (SyncNode *cont : previous.continuations) {
+      if (cont) {
+        m_tfg->addInterThreadEdge(node, cont, EdgeKind::Barrier);
+      }
+    }
+  }
+  participants.push_back(std::move(current));
 }
 
 void StaticVectorClockMHP::wireSynchronizationEdges() {
@@ -1139,20 +1192,39 @@ void StaticVectorClockMHP::wireSynchronizationEdges() {
   // The SVC transfer function treats Barrier edges with SVMax, so a single
   // directed edge per pair is sufficient to enforce the all-before-all
   // barrier semantics without introducing cycles.
-  for (const auto &kv : m_barrier_waits) {
-    for (const auto &phase_entry : kv.second) {
-      const std::vector<SyncNode *> &waits = phase_entry.second;
-      for (size_t i = 0; i < waits.size(); ++i) {
-        SyncNode *ni = waits[i];
-        if (!ni)
-          continue;
-        for (size_t j = i + 1; j < waits.size(); ++j) {
-          SyncNode *nj = waits[j];
-          if (nj && nj->getThreadID() != ni->getThreadID()) {
-            m_tfg->addInterThreadEdge(ni, nj, EdgeKind::Barrier);
-          }
-        }
+}
+
+std::vector<SyncNode *>
+StaticVectorClockMHP::getBarrierContinuations(const Instruction *barrier_inst) const {
+  std::vector<SyncNode *> continuations;
+  if (!barrier_inst) {
+    return continuations;
+  }
+
+  if (const Instruction *next = barrier_inst->getNextNode()) {
+    for (SyncNode *next_node : m_tfg->getNodes(next, m_inst_to_thread.at(barrier_inst))) {
+      continuations.push_back(next_node);
+    }
+  }
+
+  if (barrier_inst->isTerminator()) {
+    for (const BasicBlock *succ : successors(barrier_inst->getParent())) {
+      if (succ->empty()) {
+        continue;
+      }
+      for (SyncNode *succ_node :
+           m_tfg->getNodes(&succ->front(), m_inst_to_thread.at(barrier_inst))) {
+        continuations.push_back(succ_node);
       }
     }
   }
+
+  if (continuations.empty()) {
+    for (SyncNode *self :
+         m_tfg->getNodes(barrier_inst, m_inst_to_thread.at(barrier_inst))) {
+      continuations.push_back(self);
+    }
+  }
+
+  return continuations;
 }

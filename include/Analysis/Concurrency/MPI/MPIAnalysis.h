@@ -24,6 +24,7 @@
 #define MPI_ANALYSIS_H
 
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/ADT/DenseMap.h>
@@ -36,7 +37,9 @@
 #include <llvm/IR/Module.h>
 
 #include <map>
+#include <memory>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -72,8 +75,10 @@ enum class MPIOpKind {
   FINALIZE,          ///< MPI_Finalize
   SEND_BLOCKING,     ///< Blocking send (MPI_Send, etc.)
   RECV_BLOCKING,     ///< Blocking recv (MPI_Recv)
+  PROBE_BLOCKING,    ///< Blocking probe (MPI_Probe)
   SEND_NONBLOCKING,  ///< Non-blocking send (MPI_Isend, etc.)
   RECV_NONBLOCKING,  ///< Non-blocking recv (MPI_Irecv)
+  PROBE_NONBLOCKING, ///< Non-blocking probe (MPI_Iprobe)
   WAIT,              ///< Wait operations (MPI_Wait, MPI_Waitall, etc.)
   TEST,              ///< Test operations (MPI_Test, etc.)
   BARRIER_BLOCKING,  ///< MPI_Barrier
@@ -102,11 +107,18 @@ struct MPIOperation {
   // Context information
   const llvm::Function* function;
   CommunicatorID communicator = nullptr;
+  size_t communicator_class_id = 0;
+  size_t protocol_sequence_id = 0;
+  MPI::RankExpr process_rank;
   
   // For point-to-point operations
-  int source_rank = -1; // -1 means any source (MPI_ANY_SOURCE)
+  int source_rank = -1; // -1/-2 are treated as wildcard source in matching
   int dest_rank = -1;   // -1 means unknown
-  int tag = -1;         // -1 means any tag (MPI_ANY_TAG)
+  int tag = -1;         // -1/-2 are treated as wildcard tag in matching
+  int source_rank_min = -1;
+  int source_rank_max = -1;
+  int dest_rank_min = -1;
+  int dest_rank_max = -1;
   
   // For non-blocking operations
   RequestID request = nullptr;
@@ -115,6 +127,10 @@ struct MPIOperation {
   // For RMA operations
   WindowID window = nullptr;
   int target_rank = -1;
+  int target_rank_min = -1;
+  int target_rank_max = -1;
+  int64_t target_disp = -1;
+  int64_t byte_length = -1;
   
   MPIOperation() = default;
   MPIOperation(const llvm::Instruction* i, MPIOpKind k, ThreadAPI::TD_TYPE t)
@@ -152,6 +168,7 @@ public:
     RequestID request;
     bool is_completed = false;
     const llvm::Instruction* wait_inst = nullptr; // MPI_Wait/Test
+    bool is_terminal = false; // Request_free / Cancel / completed collective request
     
     // Communication details
     int peer_rank = -1;
@@ -173,6 +190,15 @@ public:
   const std::vector<MPIOperation>& getAllOperations() const { 
     return all_operations_; 
   }
+
+  const llvm::Module &getModule() const { return module_; }
+
+  const std::unordered_map<std::string, size_t> &
+  getDeferredLoweringStats() const {
+    return deferred_lowering_stats_;
+  }
+
+  size_t getCommunicatorClassID(CommunicatorID communicator) const;
 
   /**
    * @brief Get operations of a specific kind
@@ -206,12 +232,42 @@ private:
   
   std::vector<MPIOperation> all_operations_;
   std::map<RequestID, NonBlockingOp> non_blocking_ops_;
+  std::unordered_map<const llvm::Value *, CommunicatorID> canonical_communicators_;
+  std::unordered_map<const llvm::Value *, size_t> communicator_class_ids_;
+  mutable size_t next_communicator_class_id_ = 1;
+  std::unique_ptr<MPI::MPIRankAnalysis> rank_analysis_;
   
   // Helper methods
   MPIOpKind classifyOperation(const llvm::Instruction* inst,
                               ThreadAPI::TD_TYPE type) const;
   void extractOperationDetails(MPIOperation& op);
+  bool tryGetConstantInt(const llvm::Value *value, int &out) const;
+  void extractPointToPointDetails(MPIOperation &op, const llvm::CallBase *cb);
+  void extractSendrecvDetails(MPIOperation &op, const llvm::CallBase *cb) const;
+  void extractProbeDetails(MPIOperation &op, const llvm::CallBase *cb) const;
+  void extractCollectiveDetails(MPIOperation &op, const llvm::CallBase *cb) const;
+  void extractRequestDetails(MPIOperation &op, const llvm::CallBase *cb) const;
+  void extractRMADataDetails(MPIOperation &op, const llvm::CallBase *cb,
+                             llvm::StringRef callee_name) const;
+  void extractRMASyncDetails(MPIOperation &op, const llvm::CallBase *cb,
+                             llvm::StringRef callee_name) const;
+  std::vector<RequestID>
+  collectRequestOperands(const llvm::Value *request_arg,
+                         const llvm::Instruction *context) const;
+  std::vector<int>
+  collectCompletedRequestIndices(const llvm::Value *indices_arg, size_t bound,
+                                 const llvm::Instruction *context) const;
+  bool tryReadScalarInt(const llvm::Value *scalar_arg, int &out,
+                        const llvm::Instruction *context) const;
+  CommunicatorID canonicalizeCommunicator(const llvm::Value *communicator) const;
+  void registerCommunicatorAlias(const llvm::Value *alias,
+                                 const llvm::Value *root);
+  size_t assignCommunicatorClass(CommunicatorID canonical);
+  void annotateRankConstraints(MPIOperation &op) const;
+  int64_t getDatatypeExtent(const llvm::Value *datatype_arg,
+                            const llvm::Instruction *context) const;
   void matchNonBlockingOps();
+  std::unordered_map<std::string, size_t> deferred_lowering_stats_;
 };
 
 // ============================================================================
@@ -230,10 +286,18 @@ public:
     const llvm::Instruction* inst;
     ThreadAPI::TD_TYPE type;
     CommunicatorID comm;
+    size_t communicator_class_id = 0;
     const llvm::Function* function;
+    size_t sequence_index = 0;
     
     // For rank-specific collectives
     int root_rank = -1; // For operations like MPI_Bcast, MPI_Gather
+    int count = -1;
+    int recv_count = -1;
+    int datatype = -1;
+    int recv_datatype = -1;
+    int reduction_op = -1;
+    bool in_place = false;
   };
 
   MPICollectiveAnalysis(const MPIProcessModel& model)
@@ -265,6 +329,7 @@ private:
   
   bool areCollectivesCompatible(const CollectiveCall& c1, 
                                 const CollectiveCall& c2) const;
+  static int getRootArgIndex(ThreadAPI::TD_TYPE type);
 };
 
 // ============================================================================
@@ -304,9 +369,15 @@ public:
 
   struct RMAOperation {
     const llvm::Instruction* inst;
+    const llvm::Function* function = nullptr;
     WindowID window;
     int target_rank = -1;
+    int target_rank_min = -1;
+    int target_rank_max = -1;
+    int64_t target_disp = -1;
+    int64_t byte_length = -1;
     SyncModel sync_model = SyncModel::NONE;
+    size_t epoch_id = 0;
     
     // Synchronization epoch tracking
     const llvm::Instruction* sync_start = nullptr; // Fence/Lock/Start

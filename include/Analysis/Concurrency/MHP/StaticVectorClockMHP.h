@@ -191,6 +191,8 @@ private:
   void handleCondWait(const llvm::Instruction *wait_inst, SyncNode *node);
   void handleCondSignal(const llvm::Instruction *signal_inst, SyncNode *node);
   void handleBarrier(const llvm::Instruction *barrier_inst, SyncNode *node);
+  std::vector<SyncNode *>
+  getBarrierContinuations(const llvm::Instruction *barrier_inst) const;
   void wireSynchronizationEdges();
   void buildStaticThreads();
   void initializeNodeClocks();
@@ -235,11 +237,16 @@ private:
       m_visited_functions_by_thread;
   std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_condvar_signals;
   std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_condvar_waits;
+  struct BarrierParticipant {
+    SyncNode *arrival = nullptr;
+    std::vector<SyncNode *> continuations;
+  };
   std::unordered_map<const llvm::Value *,
-                     std::unordered_map<size_t, std::vector<SyncNode *>>>
+                     std::unordered_map<size_t, std::vector<BarrierParticipant>>>
       m_barrier_waits;
   std::unordered_map<const llvm::Value *,
                      std::unordered_map<ThreadID, size_t>> m_barrier_phase_by_thread;
+  std::unordered_set<ThreadID> m_multi_instance_threads;
 
   // Indirect fork handling (conservative)
   bool m_has_unresolved_fork = false;

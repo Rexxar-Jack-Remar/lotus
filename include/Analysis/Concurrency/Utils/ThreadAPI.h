@@ -23,6 +23,7 @@
 
 #include "Analysis/Concurrency/ConcurrencyConfig.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -123,11 +124,28 @@ public:
     // OpenMP Task Support (3.0+)
     TD_OMP_TASK,          ///< __kmpc_omp_task - explicit task creation
     TD_OMP_TASKWAIT,      ///< __kmpc_omp_taskwait - wait for child tasks
+    TD_OMP_TASKWAIT_DEPS, ///< __kmpc_omp_wait_deps* - partial task dependency wait
     TD_OMP_TASKYIELD,     ///< __kmpc_omp_taskyield - yield to other tasks
     TD_OMP_TASKGROUP_START, ///< __kmpc_taskgroup - start task group
     TD_OMP_TASKGROUP_END, ///< __kmpc_end_taskgroup - end task group
     TD_OMP_TASK_WITH_DEPS, ///< __kmpc_omp_task_with_deps - task with dependencies
     TD_OMP_TASKLOOP,      ///< __kmpc_taskloop - taskloop construct
+    TD_OMP_TASK_COMPLETE, ///< detached/inline task completion callback
+    TD_OMP_SINGLE_START,  ///< __kmpc_single - single region entry
+    TD_OMP_SINGLE_END,    ///< __kmpc_end_single - implicit single barrier
+    TD_OMP_MASTER_START,  ///< __kmpc_master - master region entry
+    TD_OMP_MASTER_END,    ///< __kmpc_end_master - master region exit
+    TD_OMP_ORDERED_START, ///< __kmpc_ordered - ordered region entry
+    TD_OMP_ORDERED_END,   ///< __kmpc_end_ordered - ordered region exit
+    TD_OMP_REDUCE_START,  ///< __kmpc_reduce - reduction with implicit barrier
+    TD_OMP_REDUCE_END,    ///< __kmpc_end_reduce - reduction region exit
+    TD_OMP_REDUCE_NOWAIT_START, ///< __kmpc_reduce_nowait - reduction without barrier
+    TD_OMP_REDUCE_NOWAIT_END,   ///< __kmpc_end_reduce_nowait - reduction-nowait exit
+    TD_OMP_FOR_STATIC_INIT, ///< __kmpc_for_static_init_* - worksharing loop entry
+    TD_OMP_FOR_STATIC_FINI, ///< __kmpc_for_static_fini - worksharing loop end
+    TD_OMP_FOR_DISPATCH_INIT, ///< __kmpc_dispatch_init_* - dynamic loop entry
+    TD_OMP_FOR_DISPATCH_NEXT, ///< __kmpc_dispatch_next_* - loop chunk fetch
+    TD_OMP_FOR_DISPATCH_FINI, ///< __kmpc_dispatch_fini_* - dynamic loop end
     
     // OpenMP Additional Constructs
     TD_OMP_SECTIONS_INIT, ///< __kmpc_sections_init - sections construct
@@ -298,6 +316,9 @@ private:
   /// pthread-compatible.
   bool isCppThreadLikeFork(const llvm::Function *F) const;
 
+  /// Return true if this std::async call is a definite asynchronous launch.
+  bool isDefiniteAsyncLaunch(const llvm::Instruction *inst) const;
+
   /// Safely fetch a call operand, returning nullptr when the argument is absent.
   const llvm::Value *getCallArg(const llvm::Instruction *inst, unsigned idx) const;
 
@@ -363,11 +384,19 @@ public:
 
   /// Return true if this call create a new thread
   //@{
+  inline bool isForkLike(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_FORK || t == TD_JTHREAD_FORK ||
+           (t == TD_ASYNC && isDefiniteAsyncLaunch(inst));
+  }
+  inline bool isForkLike(const llvm::CallBase *cb) const {
+    return isForkLike(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
   inline bool isTDFork(const llvm::Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_FORK;
+    return isForkLike(inst);
   }
   inline bool isTDFork(const llvm::CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_FORK;
+    return isForkLike(cb);
   }
   //@}
 
@@ -385,11 +414,16 @@ public:
   //@{
   /// Return the thread handle argument (configurable via thread.spec; default 0)
   inline const llvm::Value *getForkedThread(const llvm::Instruction *inst) const {
-    if (!isTDFork(inst))
+    if (!isForkLike(inst))
       return nullptr;
-    if (isCppThreadLikeFork(getCallee(inst)) || !hasMappedAPIEntry(getCallee(inst)))
+    const llvm::Function *callee = getCallee(inst);
+    if (getType(callee) == TD_ASYNC)
       return nullptr;
-    unsigned idx = getForkArgIndices(getCallee(inst)).thread_arg;
+    if (isCppThreadLikeFork(callee))
+      return getCallArg(inst, 0);
+    if (!hasMappedAPIEntry(callee))
+      return nullptr;
+    unsigned idx = getForkArgIndices(callee).thread_arg;
     return getCallArg(inst, idx);
   }
   inline const llvm::Value *getForkedThread(const llvm::CallBase *cb) const {
@@ -398,13 +432,28 @@ public:
 
   /// Return the start-routine argument (configurable; default 2)
   inline const llvm::Value *getForkedFun(const llvm::Instruction *inst) const {
-    if (!isTDFork(inst))
+    if (!isForkLike(inst))
       return nullptr;
-    if (isCppThreadLikeFork(getCallee(inst)))
+    const llvm::Function *callee = getCallee(inst);
+    if (isCppThreadLikeFork(callee))
       return getCppThreadCallable(inst);
-    if (!hasMappedAPIEntry(getCallee(inst)))
+
+    // __kmpc_fork_call passes the outlined microtask at operand #2.
+    if (callee && callee->getName().equals("__kmpc_fork_call")) {
+      if (const llvm::Value *arg = getCallArg(inst, 2)) {
+        arg = arg->stripPointerCasts();
+        if (const auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(arg)) {
+          if (ce->isCast())
+            arg = ce->getOperand(0)->stripPointerCasts();
+        }
+        return arg;
+      }
       return nullptr;
-    unsigned idx = getForkArgIndices(getCallee(inst)).start_routine_arg;
+    }
+
+    if (!hasMappedAPIEntry(callee))
+      return nullptr;
+    unsigned idx = getForkArgIndices(callee).start_routine_arg;
     if (const llvm::Value *arg = getCallArg(inst, idx))
       return arg->stripPointerCasts();
     return nullptr;
@@ -415,7 +464,7 @@ public:
 
   /// Return the user-argument passed to the start routine (configurable; default 3)
   inline const llvm::Value *getActualParmAtForkSite(const llvm::Instruction *inst) const {
-    if (!isTDFork(inst))
+    if (!isForkLike(inst))
       return nullptr;
     if (isCppThreadLikeFork(getCallee(inst)) || !hasMappedAPIEntry(getCallee(inst)))
       return nullptr;
@@ -457,11 +506,18 @@ public:
 
   /// Return true if this call wait for a worker thread
   //@{
+  inline bool isJoinLike(const llvm::Instruction *inst) const {
+    TD_TYPE t = getType(getCallee(inst));
+    return t == TD_JOIN || t == TD_JTHREAD_JOIN;
+  }
+  inline bool isJoinLike(const llvm::CallBase *cb) const {
+    return isJoinLike(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
   inline bool isTDJoin(const llvm::Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_JOIN;
+    return isJoinLike(inst);
   }
   inline bool isTDJoin(const llvm::CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_JOIN;
+    return isJoinLike(cb);
   }
   //@}
 
@@ -554,13 +610,13 @@ public:
   //@{
   inline bool isReadLockAcquire(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_RWLOCK_RDLOCK ||
+    return t == TD_RWLOCK_RDLOCK || t == TD_SHARED_RDLOCK ||
            // Linux kernel read locks
            t == TD_KERNEL_READ_LOCK || t == TD_KERNEL_DOWN_READ;
   }
   inline bool isReadLockAcquire(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
-    return t == TD_RWLOCK_RDLOCK ||
+    return t == TD_RWLOCK_RDLOCK || t == TD_SHARED_RDLOCK ||
            // Linux kernel read locks
            t == TD_KERNEL_READ_LOCK || t == TD_KERNEL_DOWN_READ;
   }
@@ -570,13 +626,13 @@ public:
   //@{
   inline bool isWriteLockAcquire(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_RWLOCK_WRLOCK ||
+    return t == TD_RWLOCK_WRLOCK || t == TD_SHARED_WRLOCK ||
            // Linux kernel write locks
            t == TD_KERNEL_WRITE_LOCK || t == TD_KERNEL_DOWN_WRITE;
   }
   inline bool isWriteLockAcquire(const llvm::CallBase *cb) const {
     TD_TYPE t = getType(getCallee(cb));
-    return t == TD_RWLOCK_WRLOCK ||
+    return t == TD_RWLOCK_WRLOCK || t == TD_SHARED_WRLOCK ||
            // Linux kernel write locks
            t == TD_KERNEL_WRITE_LOCK || t == TD_KERNEL_DOWN_WRITE;
   }
@@ -605,6 +661,8 @@ public:
     case TD_SHARED_RDLOCK:
     case TD_SHARED_WRLOCK:
     case TD_SHARED_UNLOCK:
+    case TD_OMP_ORDERED_START:
+    case TD_OMP_ORDERED_END:
     case TD_ACQUIRE:
     case TD_TRY_ACQUIRE:
     case TD_RWLOCK_RDLOCK:
@@ -643,6 +701,57 @@ public:
   }
   //@}
 
+  /// Return the lock/synchronization identity used by analyses.
+  /// This differs from getLockVal() for wrapper-style locks and OpenMP
+  /// critical regions where the raw lock operand is not the stable analysis key.
+  inline const llvm::Value *
+  getAnalysisLockIdentity(const llvm::Instruction *inst) const {
+    if (!inst) {
+      return nullptr;
+    }
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!cb || cb->arg_size() == 0) {
+      return nullptr;
+    }
+
+    TD_TYPE t = getType(getCallee(inst));
+    switch (t) {
+    case TD_LOCK_GUARD_CTOR:
+    case TD_LOCK_GUARD_DTOR:
+    case TD_UNIQUE_LOCK_CTOR:
+    case TD_UNIQUE_LOCK_DTOR:
+    case TD_UNIQUE_LOCK_LOCK:
+    case TD_UNIQUE_LOCK_UNLOCK:
+    case TD_SCOPED_LOCK_CTOR:
+    case TD_SCOPED_LOCK_DTOR:
+    case TD_SHARED_LOCK_CTOR:
+    case TD_SHARED_LOCK_DTOR:
+      return cb->getArgOperand(0)->stripPointerCasts();
+    case TD_ACQUIRE:
+    case TD_RELEASE:
+    case TD_OMP_ORDERED_START:
+    case TD_OMP_ORDERED_END:
+      if (cb->arg_size() >= 3) {
+        const llvm::Function *callee = getCallee(inst);
+        if (callee && (callee->getName().equals("__kmpc_critical") ||
+                       callee->getName().equals("__kmpc_end_critical"))) {
+          return cb->getArgOperand(2)->stripPointerCasts();
+        }
+      }
+      if (t == TD_OMP_ORDERED_START || t == TD_OMP_ORDERED_END) {
+        return inst;
+      }
+      return getLockVal(inst);
+    default:
+      return getLockVal(inst);
+    }
+  }
+
+  inline const llvm::Value *
+  getAnalysisLockIdentity(const llvm::CallBase *cb) const {
+    return getAnalysisLockIdentity(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
   /// Return true if this call waits for a barrier
   //@{
   inline bool isTDBarWait(const llvm::Instruction *inst) const {
@@ -660,8 +769,17 @@ public:
   inline const llvm::Value *getBarrierVal(const llvm::Instruction *inst) const {
     assert(isTDBarWait(inst) && "not a barrier wait function");
     const llvm::CallBase *cb = getLLVMCallSite(inst);
-    if (!cb || cb->arg_size() < 1)
+    if (!cb)
       return nullptr;
+    TD_TYPE t = getType(getCallee(inst));
+    if (t == TD_OMP_SINGLE_END || t == TD_OMP_SECTIONS_END ||
+        t == TD_OMP_FOR_STATIC_FINI || t == TD_OMP_FOR_DISPATCH_FINI ||
+        t == TD_OMP_REDUCE_START) {
+      return inst;
+    }
+    if (cb->arg_size() < 1) {
+      return nullptr;
+    }
     return cb->getArgOperand(0);
   }
   inline const llvm::Value *getBarrierVal(const llvm::CallBase *cb) const {
@@ -750,6 +868,7 @@ public:
   inline bool isExclusiveLockAcquire(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_WRLOCK ||
+           t == TD_SHARED_WRLOCK || t == TD_OMP_ORDERED_START ||
            t == TD_LOCK_GUARD_CTOR || t == TD_UNIQUE_LOCK_CTOR ||
            t == TD_UNIQUE_LOCK_LOCK || t == TD_SCOPED_LOCK_CTOR ||
            t == TD_SEMAPHORE_ACQUIRE || t == TD_SEMAPHORE_TRY_ACQUIRE ||
@@ -765,7 +884,8 @@ public:
 
   inline bool isExclusiveLockRelease(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_RELEASE || t == TD_LOCK_GUARD_DTOR ||
+    return t == TD_RELEASE || t == TD_OMP_ORDERED_END ||
+           t == TD_LOCK_GUARD_DTOR ||
            t == TD_UNIQUE_LOCK_DTOR || t == TD_UNIQUE_LOCK_UNLOCK ||
            t == TD_SCOPED_LOCK_DTOR || t == TD_SEMAPHORE_RELEASE ||
            t == TD_KERNEL_SPIN_UNLOCK || t == TD_KERNEL_MUTEX_UNLOCK ||
@@ -823,29 +943,49 @@ public:
   inline bool isBarrierWaitLike(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_BAR_WAIT || t == TD_BARRIER_ARRIVE_WAIT ||
-           t == TD_BARRIER_WAIT_CPP20;
+           t == TD_BARRIER_WAIT_CPP20 ||
+           t == TD_OMP_SINGLE_END || t == TD_OMP_SECTIONS_END ||
+           t == TD_OMP_FOR_STATIC_FINI || t == TD_OMP_FOR_DISPATCH_FINI ||
+           t == TD_OMP_REDUCE_START;
+  }
+
+  inline bool isBarrierLike(const llvm::Instruction *inst) const {
+    return isBarrierOp(inst) || isMPICollective(inst) || isOMPTaskOp(inst);
+  }
+
+  inline bool isLockLike(const llvm::Instruction *inst) const {
+    return isTDAcquire(inst) || isTDRelease(inst);
   }
 
   inline bool isBlockingMPIBarrier(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
     if (!callee)
       return false;
+    llvm::StringRef name = callee->getName();
+    if (name.startswith("PMPI_"))
+      name = name.drop_front(1);
     return getType(callee) == TD_MPI_BARRIER &&
-           callee->getName() == "MPI_Barrier";
+           name == "MPI_Barrier";
   }
 
   inline bool isNonBlockingMPIBarrier(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
     if (!callee)
       return false;
+    llvm::StringRef name = callee->getName();
+    if (name.startswith("PMPI_"))
+      name = name.drop_front(1);
     return getType(callee) == TD_MPI_BARRIER &&
-           callee->getName() == "MPI_Ibarrier";
+           name == "MPI_Ibarrier";
   }
 
   inline bool isBlockingMPICollective(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
     if (!callee)
       return false;
+    llvm::StringRef name = callee->getName();
+    if (name.startswith("PMPI_"))
+      name = name.drop_front(1);
     TD_TYPE t = getType(callee);
     if (!(t == TD_MPI_BCAST || t == TD_MPI_SCATTER || t == TD_MPI_GATHER ||
           t == TD_MPI_ALLGATHER || t == TD_MPI_ALLTOALL ||
@@ -853,13 +993,16 @@ public:
           t == TD_MPI_REDUCE_SCATTER || t == TD_MPI_SCAN)) {
       return false;
     }
-    return !callee->getName().startswith("MPI_I");
+    return !name.startswith("MPI_I");
   }
 
   inline bool isNonBlockingMPICollective(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
     if (!callee)
       return false;
+    llvm::StringRef name = callee->getName();
+    if (name.startswith("PMPI_"))
+      name = name.drop_front(1);
     TD_TYPE t = getType(callee);
     if (!(t == TD_MPI_BCAST || t == TD_MPI_SCATTER || t == TD_MPI_GATHER ||
           t == TD_MPI_ALLGATHER || t == TD_MPI_ALLTOALL ||
@@ -867,7 +1010,7 @@ public:
           t == TD_MPI_REDUCE_SCATTER || t == TD_MPI_SCAN)) {
       return false;
     }
-    return callee->getName().startswith("MPI_I");
+    return name.startswith("MPI_I");
   }
 
   /// True for any atomic synchronization operation (future/promise/call_once).
@@ -890,9 +1033,18 @@ public:
   /// True for any OpenMP task-related operation.
   inline bool isOMPTaskOp(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_OMP_TASK || t == TD_OMP_TASKWAIT || t == TD_OMP_TASKYIELD ||
+    return t == TD_OMP_TASK || t == TD_OMP_TASKWAIT ||
+           t == TD_OMP_TASKWAIT_DEPS || t == TD_OMP_TASKYIELD ||
            t == TD_OMP_TASKGROUP_START || t == TD_OMP_TASKGROUP_END ||
-           t == TD_OMP_TASK_WITH_DEPS || t == TD_OMP_TASKLOOP;
+           t == TD_OMP_TASK_WITH_DEPS || t == TD_OMP_TASKLOOP ||
+           t == TD_OMP_TASK_COMPLETE || t == TD_OMP_SINGLE_START ||
+           t == TD_OMP_SINGLE_END || t == TD_OMP_MASTER_START ||
+           t == TD_OMP_MASTER_END || t == TD_OMP_ORDERED_START ||
+           t == TD_OMP_ORDERED_END || t == TD_OMP_REDUCE_START ||
+           t == TD_OMP_REDUCE_END || t == TD_OMP_REDUCE_NOWAIT_START ||
+           t == TD_OMP_REDUCE_NOWAIT_END || t == TD_OMP_FOR_STATIC_INIT ||
+           t == TD_OMP_FOR_STATIC_FINI || t == TD_OMP_FOR_DISPATCH_INIT ||
+           t == TD_OMP_FOR_DISPATCH_NEXT || t == TD_OMP_FOR_DISPATCH_FINI;
   }
 
   /// Convert a TD_TYPE to a human-readable string (for diagnostics).

@@ -243,9 +243,17 @@ bool ThreadLocalAnalysis::isThreadLocal(const Value *val) const {
   if (const BitCastInst *cast = dyn_cast<BitCastInst>(val)) {
     return isThreadLocal(cast->getOperand(0));
   }
-  
+
+  // Soundness fix:
+  // A load from thread-local storage does NOT imply the loaded pointee/value is
+  // itself thread-local. TLS slots frequently store pointers to shared/global
+  // state.  Treating the loaded SSA value as thread-local can suppress real
+  // races on the referenced object.
   if (const LoadInst *load = dyn_cast<LoadInst>(val)) {
-    return isThreadLocal(load->getPointerOperand());
+    if (m_tls_values.count(load)) {
+      return true;
+    }
+    return false;
   }
   
   return false;

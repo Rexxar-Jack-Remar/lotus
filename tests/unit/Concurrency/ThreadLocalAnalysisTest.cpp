@@ -97,6 +97,40 @@ TEST_F(ThreadLocalAnalysisTest, InvokeGetspecificIsRecognizedAsThreadLocal) {
   EXPECT_TRUE(tla.isThreadLocal(tls));
 }
 
+TEST_F(ThreadLocalAnalysisTest, LoadFromTlsSlotDoesNotMakeSharedPointeeThreadLocal) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i8* @pthread_getspecific(i32)
+
+    define i32 @main() {
+    entry:
+      %slot = call i8* @pthread_getspecific(i32 0)
+      %typed = bitcast i8* %slot to i32**
+      store i32* @shared, i32** %typed, align 8
+      %loaded_ptr = load i32*, i32** %typed, align 8
+      %loaded_val = load i32, i32* %loaded_ptr, align 4
+      ret i32 %loaded_val
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadLocalAnalysis tla(*module);
+  tla.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *loaded_ptr = findInstructionByName(*main_func, "loaded_ptr");
+  const Instruction *loaded_val = findInstructionByName(*main_func, "loaded_val");
+  ASSERT_NE(loaded_ptr, nullptr);
+  ASSERT_NE(loaded_val, nullptr);
+
+  EXPECT_FALSE(tla.isThreadLocal(loaded_ptr));
+  EXPECT_FALSE(tla.accessesThreadLocalStorage(loaded_val));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

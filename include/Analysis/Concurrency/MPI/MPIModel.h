@@ -1,5 +1,5 @@
 /**
- * @file MPI.h
+ * @file MPIModel.h
  * @brief MPI (Message Passing Interface) Language Model
  *
  * This file provides pattern matching and recognition for MPI library functions.

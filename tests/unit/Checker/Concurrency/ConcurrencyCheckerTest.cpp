@@ -363,6 +363,58 @@ TEST_F(ConcurrencyCheckerTest, CompareAndSwap) {
   EXPECT_TRUE(hasCmpXchg);
 }
 
+TEST_F(ConcurrencyCheckerTest, DetectsOpenMPAtomicMismatch) {
+  const char *source = R"(
+    declare void @__kmpc_atomic_start()
+
+    define void @test_openmp_atomic_mismatch() {
+      call void @__kmpc_atomic_start()
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::OpenMPChecker checker(*module, nullptr, ThreadAPI::getThreadAPI());
+  auto reports = checker.checkOpenMPBugs();
+
+  bool found = false;
+  for (const auto &report : reports) {
+    if (report.bugType == concurrency::ConcurrencyBugType::OPENMP_ATOMIC_MISMATCH) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST_F(ConcurrencyCheckerTest, DetectsMPIOrphanedRequest) {
+  const char *source = R"(
+    declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8**)
+
+    define void @test_mpi_orphan(i8* %buf, i8* %comm, i8** %req) {
+      %call = call i32 @MPI_Isend(i8* %buf, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8** %req)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::MPIChecker checker(*module);
+  auto reports = checker.checkMPIBugs();
+
+  bool found = false;
+  for (const auto &report : reports) {
+    if (report.bugType == concurrency::ConcurrencyBugType::MPI_ORPHANED_REQUEST) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

@@ -6,7 +6,7 @@ set(Concurrency_SOURCES
   Utils/RAIILockTracker.cpp
   Utils/CppAtomics.cpp
   Utils/ThreadLocalAnalysis.cpp
-  Utils/OpenMPTaskGraph.cpp
+  OpenMP/OpenMPTaskGraph.cpp
   MHP/MHPAnalysis.cpp
   MHP/StaticVectorClockMHP.cpp
   MHP/HappensBeforeAnalysis.cpp

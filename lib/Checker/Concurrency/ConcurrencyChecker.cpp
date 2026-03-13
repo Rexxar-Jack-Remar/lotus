@@ -41,6 +41,41 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
   m_lockMismatchTypeId = mgr.register_bug_type(
       "Lock Mismatch", BugDescription::BI_HIGH, BugDescription::BC_ERROR,
       "Lock acquisition/release mismatch");
+  m_openMPTaskgroupMismatchTypeId = mgr.register_bug_type(
+      "OpenMP Taskgroup Mismatch", BugDescription::BI_HIGH,
+      BugDescription::BC_ERROR, "Unbalanced OpenMP taskgroup region");
+  m_openMPAtomicMismatchTypeId = mgr.register_bug_type(
+      "OpenMP Atomic Region Mismatch", BugDescription::BI_HIGH,
+      BugDescription::BC_ERROR, "Unbalanced OpenMP atomic region");
+  m_openMPPartialSyncTypeId = mgr.register_bug_type(
+      "OpenMP Partial Task Synchronization", BugDescription::BI_MEDIUM,
+      BugDescription::BC_ERROR,
+      "Selective task wait may leave sibling tasks unsynchronized");
+  m_mpiOrphanedRequestTypeId = mgr.register_bug_type(
+      "MPI Orphaned Request", BugDescription::BI_HIGH,
+      BugDescription::BC_ERROR,
+      "Non-blocking MPI request without matching completion");
+  m_mpiDeadlockTypeId = mgr.register_bug_type(
+      "MPI Deadlock", BugDescription::BI_HIGH, BugDescription::BC_ERROR,
+      "Potential blocking communication deadlock");
+  m_mpiCollectiveMismatchTypeId = mgr.register_bug_type(
+      "MPI Collective Mismatch", BugDescription::BI_HIGH,
+      BugDescription::BC_ERROR,
+      "Incompatible collective operations across processes");
+  m_mpiConditionalCollectiveTypeId = mgr.register_bug_type(
+      "MPI Conditional Collective", BugDescription::BI_HIGH,
+      BugDescription::BC_ERROR,
+      "Collective may be executed only by a subset of ranks");
+  m_mpiUnsyncRMATypeId = mgr.register_bug_type(
+      "MPI Unsynchronized RMA", BugDescription::BI_HIGH,
+      BugDescription::BC_ERROR,
+      "RMA operation without recognized synchronization");
+  m_mpiRMARaceTypeId = mgr.register_bug_type(
+      "MPI RMA Race", BugDescription::BI_HIGH, BugDescription::BC_ERROR,
+      "Conflicting RMA operations without sufficient synchronization");
+  m_mpiWindowLeakTypeId = mgr.register_bug_type(
+      "MPI Window Leak", BugDescription::BI_MEDIUM,
+      BugDescription::BC_ERROR, "RMA window may not be freed");
 
   m_stats.totalInstructions = 0;
   m_stats.mhpPairs = 0;
@@ -50,6 +85,8 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
   m_stats.atomicityViolationsFound = 0;
   m_stats.condVarBugsFound = 0;
   m_stats.lockMismatchesFound = 0;
+  m_stats.openMPBugsFound = 0;
+  m_stats.mpiBugsFound = 0;
 
   for (Function &func : module) {
     if (!func.isDeclaration()) {
@@ -69,6 +106,8 @@ void ConcurrencyChecker::runAnalyses() {
                      m_checkLockMismatches;
   bool needEscape = m_checkDataRaces;
   bool needHappensBefore = m_checkDataRaces;
+  bool needOpenMP = m_checkOpenMP;
+  bool needMPI = m_checkMPI;
 
   if (needMHP) {
     m_mhpAnalysis = std::make_unique<MHPAnalysis>(m_module);
@@ -103,12 +142,22 @@ void ConcurrencyChecker::runAnalyses() {
   if (needHappensBefore && m_mhpAnalysis) {
     m_happensBeforeAnalysis =
         std::make_unique<HappensBeforeAnalysis>(m_module, *m_mhpAnalysis);
-    m_happensBeforeAnalysis->analyze();
     lotus::AliasAnalysisWrapper *aa = m_aliasAnalysis;
     if (!aa)
       aa = m_mhpAnalysis->getAliasAnalysis();
     if (aa)
       m_happensBeforeAnalysis->setAliasAnalysis(aa);
+    m_happensBeforeAnalysis->analyze();
+  }
+
+  if (needOpenMP) {
+    m_openMPTaskGraph = std::make_unique<OpenMP::OpenMPTaskGraph>(m_module);
+    m_openMPTaskGraph->analyze();
+  }
+
+  if (needMPI) {
+    m_mpiAnalysis = std::make_unique<mpi::MPIAnalysis>(m_module);
+    m_mpiAnalysis->runAnalysis();
   }
 
   lotus::AliasAnalysisWrapper *aa = m_aliasAnalysis;
@@ -126,6 +175,9 @@ void ConcurrencyChecker::runAnalyses() {
       m_module, m_threadAPI, m_locksetAnalysisView);
   m_lockMismatchChecker = std::make_unique<LockMismatchChecker>(
       m_module, m_locksetAnalysisView, m_threadAPI);
+  m_openMPChecker =
+      std::make_unique<OpenMPChecker>(m_module, m_openMPTaskGraph.get(), m_threadAPI);
+  m_mpiChecker = std::make_unique<MPIChecker>(m_module, m_mpiAnalysis.get());
 }
 
 void ConcurrencyChecker::runChecks() {
@@ -147,6 +199,14 @@ void ConcurrencyChecker::runChecks() {
 
   if (m_checkLockMismatches) {
     checkLockMismatches();
+  }
+
+  if (m_checkOpenMP) {
+    checkOpenMPBugs();
+  }
+
+  if (m_checkMPI) {
+    checkMPIBugs();
   }
 }
 
@@ -200,6 +260,66 @@ void ConcurrencyChecker::checkLockMismatches() {
   }
 }
 
+void ConcurrencyChecker::checkOpenMPBugs() {
+  if (!m_openMPChecker) {
+    return;
+  }
+
+  auto reports = m_openMPChecker->checkOpenMPBugs();
+  m_stats.openMPBugsFound = reports.size();
+  for (const auto &report : reports) {
+    switch (report.bugType) {
+    case ConcurrencyBugType::OPENMP_TASKGROUP_MISMATCH:
+      reportBug(report, m_openMPTaskgroupMismatchTypeId);
+      break;
+    case ConcurrencyBugType::OPENMP_ATOMIC_MISMATCH:
+      reportBug(report, m_openMPAtomicMismatchTypeId);
+      break;
+    case ConcurrencyBugType::OPENMP_PARTIAL_SYNC:
+      reportBug(report, m_openMPPartialSyncTypeId);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+void ConcurrencyChecker::checkMPIBugs() {
+  if (!m_mpiChecker) {
+    return;
+  }
+
+  auto reports = m_mpiChecker->checkMPIBugs();
+  m_stats.mpiBugsFound = reports.size();
+  for (const auto &report : reports) {
+    switch (report.bugType) {
+    case ConcurrencyBugType::MPI_ORPHANED_REQUEST:
+      reportBug(report, m_mpiOrphanedRequestTypeId);
+      break;
+    case ConcurrencyBugType::MPI_DEADLOCK:
+      reportBug(report, m_mpiDeadlockTypeId);
+      break;
+    case ConcurrencyBugType::MPI_COLLECTIVE_MISMATCH:
+      reportBug(report, m_mpiCollectiveMismatchTypeId);
+      break;
+    case ConcurrencyBugType::MPI_CONDITIONAL_COLLECTIVE:
+      reportBug(report, m_mpiConditionalCollectiveTypeId);
+      break;
+    case ConcurrencyBugType::MPI_UNSYNC_RMA:
+      reportBug(report, m_mpiUnsyncRMATypeId);
+      break;
+    case ConcurrencyBugType::MPI_RMA_RACE:
+      reportBug(report, m_mpiRMARaceTypeId);
+      break;
+    case ConcurrencyBugType::MPI_WINDOW_LEAK:
+      reportBug(report, m_mpiWindowLeakTypeId);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
 void ConcurrencyChecker::reportBug(const ConcurrencyBugReport &bug_report,
                                    int bug_type_id) {
   // Create a new BugReport following Clearblue pattern
@@ -246,6 +366,19 @@ void ConcurrencyChecker::reportBug(const ConcurrencyBugReport &bug_report,
 
   // Add metadata (Infer-inspired feature)
   report->add_metadata("checker", "ConcurrencyChecker");
+  if (bug_report.bugType == ConcurrencyBugType::OPENMP_TASKGROUP_MISMATCH ||
+      bug_report.bugType == ConcurrencyBugType::OPENMP_ATOMIC_MISMATCH ||
+      bug_report.bugType == ConcurrencyBugType::OPENMP_PARTIAL_SYNC) {
+    report->add_metadata("checker", "OpenMPChecker");
+  } else if (bug_report.bugType == ConcurrencyBugType::MPI_ORPHANED_REQUEST ||
+             bug_report.bugType == ConcurrencyBugType::MPI_DEADLOCK ||
+             bug_report.bugType == ConcurrencyBugType::MPI_COLLECTIVE_MISMATCH ||
+             bug_report.bugType == ConcurrencyBugType::MPI_CONDITIONAL_COLLECTIVE ||
+             bug_report.bugType == ConcurrencyBugType::MPI_UNSYNC_RMA ||
+             bug_report.bugType == ConcurrencyBugType::MPI_RMA_RACE ||
+             bug_report.bugType == ConcurrencyBugType::MPI_WINDOW_LEAK) {
+    report->add_metadata("checker", "MPIChecker");
+  }
   report->add_metadata(
       "importance",
       bug_report.importance == BugDescription::BI_HIGH ? "HIGH" : "MEDIUM");

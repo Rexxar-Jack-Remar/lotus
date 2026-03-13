@@ -83,7 +83,10 @@ inline bool isTaskAlloc(const llvm::StringRef& funcName) { return funcName.equal
 inline bool isGetThreadNum(const llvm::StringRef& funcName) { return funcName.equals("omp_get_thread_num"); }
 
 // OpenMP 3.0+ Task Support
-inline bool isTask(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_task"); }
+inline bool isTask(const llvm::StringRef& funcName) {
+  return funcName.equals("__kmpc_omp_task") ||
+         funcName.equals("__kmpc_omp_task_begin_if0");
+}
 inline bool isTask(const llvm::CallBase* callInst) {
   if (!callInst) return false;
   auto const func = callInst->getCalledFunction();
@@ -100,9 +103,14 @@ inline bool isTaskgroupStart(const llvm::StringRef& funcName) { return funcName.
 inline bool isTaskgroupEnd(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_end_taskgroup"); }
 
 // OpenMP 4.0+ Task Dependencies
-inline bool isTaskWithDeps(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_task_with_deps"); }
+inline bool isTaskWithDeps(const llvm::StringRef& funcName) {
+  return funcName.startswith("__kmpc_omp_task_with_deps");
+}
 
-inline bool isTaskwaitWithDeps(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_wait_deps"); }
+inline bool isTaskwaitWithDeps(const llvm::StringRef& funcName) {
+  return matchesAny(funcName, {"__kmpc_omp_wait_deps",
+                               "__kmpc_omp_taskwait_deps_51"});
+}
 
 // OpenMP 4.5+ Taskloop Support
 inline bool isTaskloop(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_taskloop"); }
@@ -119,7 +127,10 @@ inline bool isTargetDataEnd(const llvm::StringRef& funcName) { return funcName.e
 inline bool isTargetDataUpdate(const llvm::StringRef& funcName) { return funcName.equals("__tgt_target_data_update"); }
 
 // OpenMP 5.0+ Task Detach
-inline bool isTaskDetach(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_omp_task_complete"); }
+inline bool isTaskDetach(const llvm::StringRef& funcName) {
+  return funcName.equals("__kmpc_omp_task_complete") ||
+         funcName.equals("__kmpc_omp_task_complete_if0");
+}
 
 // OpenMP Sections Support
 inline bool isSectionsInit(const llvm::StringRef& funcName) { return funcName.equals("__kmpc_sections_init"); }
@@ -148,9 +159,11 @@ inline bool isCancellationPoint(const llvm::StringRef& funcName) { return funcNa
 
 // Check if function is a task-related operation (for aggregation)
 inline bool isTaskRelated(const llvm::StringRef& funcName) {
-  return isTask(funcName) || isTaskwait(funcName) || isTaskyield(funcName) ||
+  return isTask(funcName) || isTaskwait(funcName) ||
+         isTaskwaitWithDeps(funcName) || isTaskyield(funcName) ||
          isTaskgroupStart(funcName) || isTaskgroupEnd(funcName) ||
-         isTaskWithDeps(funcName) || isTaskloop(funcName) || isTaskloopNoWait(funcName);
+         isTaskWithDeps(funcName) || isTaskloop(funcName) ||
+         isTaskloopNoWait(funcName) || isTaskDetach(funcName);
 }
 
 // Update isNoEffect to include new constructs that don't need modeling

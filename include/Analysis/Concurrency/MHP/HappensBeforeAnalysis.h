@@ -5,6 +5,7 @@
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
+#include <string>
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +24,10 @@ public:
    * @brief Set optional alias analysis for synchronizes-with same-location check
    */
   void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) { m_alias_analysis = aa; }
+
+  const std::unordered_map<std::string, size_t> &getDeferredSyncCounts() const {
+    return m_deferred_sync_counts;
+  }
 
   /**
    * @brief Check if instruction A happens-before instruction B
@@ -70,6 +75,7 @@ private:
   lotus::AliasAnalysisWrapper *m_alias_analysis = nullptr;
   std::unordered_map<const llvm::Value *, const llvm::Value *>
       m_future_shared_state;
+  std::unordered_map<std::string, size_t> m_deferred_sync_counts;
 
   /// Pairs (release/seq_cst store, acquire/seq_cst load) on same location
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>

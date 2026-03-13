@@ -788,6 +788,31 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         case ThreadAPI::TD_SCOPED_LOCK_CTOR:
         case ThreadAPI::TD_SHARED_LOCK_CTOR:
           {
+            auto shouldAddAtCtor = [&](LockID lock,
+                                       RAIILock::OwnershipKind ownership) {
+              switch (ownership) {
+              case RAIILock::OwnershipKind::Immediate:
+                return true;
+              case RAIILock::OwnershipKind::Deferred:
+                return false;
+              case RAIILock::OwnershipKind::Try:
+                return !is_must;
+              case RAIILock::OwnershipKind::Adopt:
+                if (!is_must) {
+                  return true;
+                }
+                for (const auto *held : in_set) {
+                  if (held == lock || mayAlias(held, lock)) {
+                    return true;
+                  }
+                }
+                return false;
+              case RAIILock::OwnershipKind::Unknown:
+                return !is_must;
+              }
+              return false;
+            };
+
             // Use RAII tracker to get the underlying mutex
             const Function *parent_func = inst->getFunction();
             auto raii_it = m_raii_locks.find(parent_func);
@@ -798,7 +823,9 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
                     !lifetime.underlyingLocks.empty()) {
                   for (const Value *underlying : lifetime.underlyingLocks) {
                     if (LockID lock = getCanonicalLock(underlying)) {
-                      out_set.insert(lock);
+                      if (shouldAddAtCtor(lock, lifetime.ownership)) {
+                        out_set.insert(lock);
+                      }
                     }
                   }
                   return out_set;
@@ -806,9 +833,13 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
               }
             }
             // Fallback to argument-based detection
+            RAIILock::OwnershipKind fallback_ownership =
+                RAIILock::RAIILockTracker::getOwnershipKind(call);
             for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
               if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
-                out_set.insert(lock);
+                if (shouldAddAtCtor(lock, fallback_ownership)) {
+                  out_set.insert(lock);
+                }
               }
             }
           }
@@ -835,6 +866,11 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
                       if (!lock) {
                         continue;
                       }
+                      if (!is_must &&
+                          lifetime.ownership != RAIILock::OwnershipKind::Immediate &&
+                          lifetime.ownership != RAIILock::OwnershipKind::Adopt) {
+                        continue;
+                      }
                       out_set.erase(lock);
                       if (is_must && m_alias_analysis) {
                         LockSet to_remove;
@@ -854,6 +890,13 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
               }
             }
             if (LockID lock = getCppWrapperLockValue(inst)) {
+              RAIILock::OwnershipKind fallback_ownership =
+                  RAIILock::RAIILockTracker::getOwnershipKind(call);
+              if (!is_must &&
+                  fallback_ownership != RAIILock::OwnershipKind::Immediate &&
+                  fallback_ownership != RAIILock::OwnershipKind::Adopt) {
+                return out_set;
+              }
               out_set.erase(lock);
               if (is_must && m_alias_analysis) {
                 LockSet to_remove;
@@ -929,6 +972,7 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
         case ThreadAPI::TD_BARRIER_WAIT_CPP20:
         case ThreadAPI::TD_OMP_TASKWAIT:
+        case ThreadAPI::TD_OMP_TASKWAIT_DEPS:
         case ThreadAPI::TD_OMP_TASKGROUP_END:
         case ThreadAPI::TD_OMP_FLUSH:
           // These are synchronization points but don't modify lock sets
@@ -1111,8 +1155,38 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
           
         case ThreadAPI::TD_SHARED_LOCK_CTOR:
           // std::shared_lock constructor - acquire read lock
+          {
+            RAIILock::OwnershipKind ownership =
+                RAIILock::RAIILockTracker::getOwnershipKind(call);
+            bool should_add = ownership == RAIILock::OwnershipKind::Immediate ||
+                              (!is_must &&
+                               (ownership == RAIILock::OwnershipKind::Try ||
+                                ownership == RAIILock::OwnershipKind::Unknown));
+            if (!should_add) {
+              if (ownership != RAIILock::OwnershipKind::Adopt) {
+                break;
+              }
+            }
+          }
           for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
             if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+              if (RAIILock::RAIILockTracker::getOwnershipKind(call) ==
+                  RAIILock::OwnershipKind::Adopt) {
+                bool held = false;
+                for (const auto *candidate : in_read) {
+                  if (mayAlias(candidate, lock)) {
+                    held = true;
+                    break;
+                  }
+                }
+                if (!held && is_must) {
+                  continue;
+                }
+                if (!held && !is_must) {
+                  out_read.insert(lock);
+                  continue;
+                }
+              }
               out_read.insert(lock);
             }
           }
@@ -1122,8 +1196,41 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
         case ThreadAPI::TD_SCOPED_LOCK_CTOR:
           // These acquire write/exclusive locks
+          {
+            RAIILock::OwnershipKind ownership =
+                RAIILock::RAIILockTracker::getOwnershipKind(call);
+            bool should_add = ownership == RAIILock::OwnershipKind::Immediate ||
+                              (!is_must &&
+                               (ownership == RAIILock::OwnershipKind::Try ||
+                                ownership == RAIILock::OwnershipKind::Unknown));
+            if (ownership == RAIILock::OwnershipKind::Deferred) {
+              should_add = false;
+            }
+            if (!should_add) {
+              if (ownership != RAIILock::OwnershipKind::Adopt) {
+                break;
+              }
+            }
+          }
           for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
             if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+              if (RAIILock::RAIILockTracker::getOwnershipKind(call) ==
+                  RAIILock::OwnershipKind::Adopt) {
+                bool held = false;
+                for (const auto *candidate : in_write) {
+                  if (mayAlias(candidate, lock)) {
+                    held = true;
+                    break;
+                  }
+                }
+                if (!held && is_must) {
+                  continue;
+                }
+                if (!held && !is_must) {
+                  out_write.insert(lock);
+                  continue;
+                }
+              }
               out_write.insert(lock);
             }
           }
@@ -1144,6 +1251,13 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
             if (locks.empty() && is_must) {
               out_read.clear();
               out_write.clear();
+              break;
+            }
+            RAIILock::OwnershipKind ownership =
+                RAIILock::RAIILockTracker::getOwnershipKind(call);
+            if (!is_must &&
+                ownership != RAIILock::OwnershipKind::Immediate &&
+                ownership != RAIILock::OwnershipKind::Adopt) {
               break;
             }
             for (LockID lock : locks) {
@@ -1608,12 +1722,17 @@ void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
   
   // Apply lock acquisitions
   may_locks.insert(summary.may_acquire.begin(), summary.may_acquire.end());
-  
-  // For must-locks, be conservative
-  // Only add to must_locks if the callee must-acquires the lock
-  for (LockID lock : summary.must_acquire) {
-    must_locks.insert(lock);
-  }
+
+  // Soundness fix:
+  // Do NOT blindly add callee-held exit locks into the caller's must-set.
+  // A callee summary computed in isolation does not encode whether those locks
+  // were already held on entry, adopted through wrapper state, or only held on
+  // a subset of dynamically reachable paths at this call site.  Injecting such
+  // locks into the caller's must-set can unsoundly suppress races.
+  //
+  // We therefore only use summaries to *remove* locks from the caller's
+  // must-set when the callee may release them, and keep must-acquire
+  // propagation disabled until entry->exit delta summaries are available.
   
   // Apply lock releases (remove from locksets)
   for (LockID lock : summary.may_release) {

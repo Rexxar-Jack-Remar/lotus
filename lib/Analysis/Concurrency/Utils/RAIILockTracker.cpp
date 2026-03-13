@@ -7,7 +7,7 @@
  */
 
 #include "Analysis/Concurrency/Utils/RAIILockTracker.h"
-#include "Analysis/Concurrency/Utils/LanguageModel/CppThreading.h"
+#include "Analysis/Concurrency/Utils/CppThreading.h"
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
@@ -61,6 +61,33 @@ bool RAIILockTracker::isSharedLock(const llvm::Instruction *inst) {
   return CppThreadingModel::isSharedLockConstructor(func->getName());
 }
 
+OwnershipKind RAIILockTracker::getOwnershipKind(const llvm::CallBase *ctor) {
+  if (!ctor) {
+    return OwnershipKind::Unknown;
+  }
+
+  const auto *func = ctor->getCalledFunction();
+  if (!func) {
+    func = llvm::dyn_cast<llvm::Function>(
+        ctor->getCalledOperand()->stripPointerCasts());
+  }
+  if (!func || !func->hasName()) {
+    return OwnershipKind::Unknown;
+  }
+
+  llvm::StringRef name = func->getName();
+  if (CppThreadingModel::isDeferLockConstructor(name)) {
+    return OwnershipKind::Deferred;
+  }
+  if (CppThreadingModel::isTryToLockConstructor(name)) {
+    return OwnershipKind::Try;
+  }
+  if (CppThreadingModel::isAdoptLockConstructor(name)) {
+    return OwnershipKind::Adopt;
+  }
+  return OwnershipKind::Immediate;
+}
+
 const llvm::AllocaInst *RAIILockTracker::findLockObjectForConstructor(const llvm::CallBase *ctor) {
   if (!ctor || ctor->getNumOperands() == 0) return nullptr;
   
@@ -93,7 +120,21 @@ RAIILockTracker::extractUnderlyingLocks(const llvm::CallBase *ctor) {
     return locks;
   }
 
-  for (unsigned idx = 1; idx < ctor->arg_size(); ++idx) {
+  const auto *func = ctor->getCalledFunction();
+  if (!func) {
+    func = llvm::dyn_cast<llvm::Function>(
+        ctor->getCalledOperand()->stripPointerCasts());
+  }
+  llvm::StringRef name = func ? func->getName() : llvm::StringRef();
+  unsigned last_lock_arg = ctor->arg_size();
+  if ((CppThreadingModel::isAdoptLockConstructor(name) ||
+       CppThreadingModel::isDeferLockConstructor(name) ||
+       CppThreadingModel::isTryToLockConstructor(name)) &&
+      last_lock_arg > 2) {
+    last_lock_arg = 2;
+  }
+
+  for (unsigned idx = 1; idx < last_lock_arg; ++idx) {
     const llvm::Value *lock = ctor->getArgOperand(idx);
     if (lock) {
       locks.push_back(lock);
@@ -167,6 +208,7 @@ void RAIILockTracker::processConstructor(const llvm::CallBase *ctor, const llvm:
   lifetime.lockObject = lockObj;
   lifetime.constructor = ctor;
   lifetime.underlyingLocks = extractUnderlyingLocks(ctor);
+  lifetime.ownership = getOwnershipKind(ctor);
   const llvm::Function *ctorFunc = ctor->getCalledFunction();
   if (!ctorFunc) {
     ctorFunc = llvm::dyn_cast<llvm::Function>(ctor->getCalledOperand()->stripPointerCasts());

@@ -16,10 +16,10 @@
  */
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
-#include "Analysis/Concurrency/Utils/LanguageModel/CppThreading.h"
-#include "Analysis/Concurrency/Utils/LanguageModel/LinuxKernel.h"
-#include "Analysis/Concurrency/Utils/LanguageModel/MPI.h"
-#include "Analysis/Concurrency/Utils/LanguageModel/OpenMP.h"
+#include "Analysis/Concurrency/Utils/CppThreading.h"
+#include "Analysis/Concurrency/Utils/LinuxKernel.h"
+#include "Analysis/Concurrency/MPI/MPIModel.h"
+#include "Analysis/Concurrency/OpenMP/OpenMPModel.h"
 
 #include <fstream>
 #include <iomanip>
@@ -50,6 +50,17 @@ struct ei_pair {
   const char *n;        ///< Function name
   ThreadAPI::TD_TYPE t; ///< Thread API type
 };
+
+static std::string normalizeAPIName(StringRef name) {
+  std::string normalized = name.str();
+  if (!normalized.empty() && normalized[0] == '\01')
+    normalized.erase(0, 1);
+  if (!normalized.empty() && normalized[0] == '_')
+    normalized.erase(0, 1);
+  if (StringRef(normalized).startswith("PMPI_"))
+    normalized.replace(0, 5, "MPI_");
+  return normalized;
+}
 
 /**
  * @brief Thread API mapping table
@@ -139,14 +150,7 @@ bool ThreadAPI::hasMappedAPIEntry(const Function *F) const {
   if (!F)
     return false;
 
-  std::string name = F->getName().str();
-  if (tdAPIMap.count(name))
-    return true;
-
-  if (!name.empty() && name[0] == '\01')
-    name.erase(0, 1);
-  if (!name.empty() && name[0] == '_')
-    name.erase(0, 1);
+  std::string name = normalizeAPIName(F->getName());
   return tdAPIMap.count(name) != 0;
 }
 
@@ -154,7 +158,28 @@ bool ThreadAPI::isCppThreadLikeFork(const Function *F) const {
   if (!F)
     return false;
   StringRef name = F->getName();
-  return CppThreadingModel::isFork(name) || CppThreadingModel::isJthreadConstructor(name);
+  return CppThreadingModel::isFork(name) ||
+         CppThreadingModel::isJthreadConstructor(name) ||
+         CppThreadingModel::isAsync(name);
+}
+
+bool ThreadAPI::isDefiniteAsyncLaunch(const Instruction *inst) const {
+  const CallBase *cb = getLLVMCallSite(inst);
+  const Function *callee = getCallee(inst);
+  if (!cb || !callee || getType(callee) != TD_ASYNC)
+    return false;
+
+  if (cb->arg_size() == 0)
+    return true;
+
+  const Value *policy = cb->getArgOperand(0)->stripPointerCasts();
+  const auto *launch_bits = dyn_cast<ConstantInt>(policy);
+  if (!launch_bits)
+    return false;
+
+  // std::launch::async is specified as bit 0 in all supported libstdc++/libc++
+  // implementations we target here.
+  return (launch_bits->getZExtValue() & 0x1ULL) != 0;
 }
 
 const Value *ThreadAPI::getCallArg(const Instruction *inst, unsigned idx) const {
@@ -169,9 +194,16 @@ const Value *ThreadAPI::getCppThreadCallable(const Instruction *inst) const {
   if (!cb)
     return nullptr;
 
+  unsigned first_callable_idx = 1;
+  if (const Function *callee = getCallee(inst)) {
+    if (getType(callee) == TD_ASYNC) {
+      first_callable_idx = isDefiniteAsyncLaunch(inst) ? 1 : 0;
+    }
+  }
+
   // Skip the constructor `this` parameter and look for a direct function-like
   // operand. If none exists, callers fall back to unresolved-fork conservatism.
-  for (unsigned idx = 1; idx < cb->arg_size(); ++idx) {
+  for (unsigned idx = first_callable_idx; idx < cb->arg_size(); ++idx) {
     const Value *candidate = cb->getArgOperand(idx);
     if (!candidate)
       continue;
@@ -203,14 +235,14 @@ ThreadAPI::TD_TYPE ThreadAPI::stringToType(StringRef s) {
 
 ThreadAPI::ForkArgIndices ThreadAPI::getForkArgIndices(const Function *F) const {
   if (!F) return ForkArgIndices{};
-  auto it = m_fork_args.find(F->getName().str());
+  auto it = m_fork_args.find(normalizeAPIName(F->getName()));
   if (it != m_fork_args.end()) return it->second;
   return ForkArgIndices{};
 }
 
 ThreadAPI::JoinArgIndices ThreadAPI::getJoinArgIndices(const Function *F) const {
   if (!F) return JoinArgIndices{};
-  auto it = m_join_args.find(F->getName().str());
+  auto it = m_join_args.find(normalizeAPIName(F->getName()));
   if (it != m_join_args.end()) return it->second;
   return JoinArgIndices{};
 }
@@ -250,21 +282,16 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
     return TD_DUMMY;
 
   // 1. Exact match (including loaded config)
-  std::string nameStr = F->getName().str();
+  std::string nameStr = normalizeAPIName(F->getName());
   TDAPIMap::const_iterator it = tdAPIMap.find(nameStr);
   if (it != tdAPIMap.end())
     return it->second;
 
-  // Try with LLVM name prefix stripped (e.g. \01) and leading underscore (macOS)
-  if (nameStr.size() > 0 && nameStr[0] == '\01')
-    nameStr = nameStr.substr(1);
-  if (!nameStr.empty() && nameStr[0] == '_')
-    nameStr = nameStr.substr(1);
-  it = tdAPIMap.find(nameStr);
-  if (it != tdAPIMap.end())
-    return it->second;
-
   StringRef name = F->getName();
+  if (name.startswith("\01"))
+    name = name.drop_front();
+  if (name.startswith("PMPI_"))
+    name = name.drop_front(1);
 
   // 2. OpenMP Support (if enabled)
   if (m_config.enable_openmp()) {
@@ -284,6 +311,8 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_OMP_TASK;
     if (OpenMPModel::isTaskwait(name))
       return TD_OMP_TASKWAIT;
+    if (OpenMPModel::isTaskwaitWithDeps(name))
+      return TD_OMP_TASKWAIT_DEPS;
     if (OpenMPModel::isTaskyield(name))
       return TD_OMP_TASKYIELD;
     if (OpenMPModel::isTaskgroupStart(name))
@@ -294,6 +323,38 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_OMP_TASK_WITH_DEPS;
     if (OpenMPModel::isTaskloop(name) || OpenMPModel::isTaskloopNoWait(name))
       return TD_OMP_TASKLOOP;
+    if (OpenMPModel::isTaskDetach(name))
+      return TD_OMP_TASK_COMPLETE;
+    if (OpenMPModel::isSingleStart(name))
+      return TD_OMP_SINGLE_START;
+    if (OpenMPModel::isSingleEnd(name))
+      return TD_OMP_SINGLE_END;
+    if (OpenMPModel::isMasterStart(name))
+      return TD_OMP_MASTER_START;
+    if (OpenMPModel::isMasterEnd(name))
+      return TD_OMP_MASTER_END;
+    if (OpenMPModel::isOrderedStart(name))
+      return TD_OMP_ORDERED_START;
+    if (OpenMPModel::isOrderedEnd(name))
+      return TD_OMP_ORDERED_END;
+    if (OpenMPModel::isReduceStart(name))
+      return TD_OMP_REDUCE_START;
+    if (OpenMPModel::isReduceEnd(name))
+      return TD_OMP_REDUCE_END;
+    if (OpenMPModel::isReduceNowaitStart(name))
+      return TD_OMP_REDUCE_NOWAIT_START;
+    if (OpenMPModel::isReduceNowaitEnd(name))
+      return TD_OMP_REDUCE_NOWAIT_END;
+    if (OpenMPModel::isForStaticInit(name))
+      return TD_OMP_FOR_STATIC_INIT;
+    if (OpenMPModel::isForStaticFini(name))
+      return TD_OMP_FOR_STATIC_FINI;
+    if (OpenMPModel::isForDispatchInit(name))
+      return TD_OMP_FOR_DISPATCH_INIT;
+    if (OpenMPModel::isForDispatchNext(name))
+      return TD_OMP_FOR_DISPATCH_NEXT;
+    if (OpenMPModel::isForDispatchFini(name))
+      return TD_OMP_FOR_DISPATCH_FINI;
     
     // OpenMP Sections
     if (OpenMPModel::isSectionsInit(name))
@@ -318,12 +379,12 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_OMP_CANCEL;
     
     // OpenMP Target Offloading
-    if (OpenMPModel::isTargetInit(name))
-      return TD_OMP_TARGET;
     if (OpenMPModel::isTargetDataBegin(name))
       return TD_OMP_TARGET_DATA_BEGIN;
     if (OpenMPModel::isTargetDataEnd(name))
       return TD_OMP_TARGET_DATA_END;
+    if (OpenMPModel::isTargetInit(name))
+      return TD_OMP_TARGET;
   }
 
   // 3. C++11/17/20 Support (if enabled)
@@ -357,7 +418,10 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_SHARED_RDLOCK;
     if (CppThreadingModel::isSharedLockExclusiveAcquire(name) || CppThreadingModel::isSharedTimedLockExclusiveAcquire(name))
       return TD_SHARED_WRLOCK;
-    if (CppThreadingModel::isSharedLockRelease(name) || CppThreadingModel::isSharedLockExclusiveRelease(name))
+    if (CppThreadingModel::isSharedLockRelease(name) ||
+        CppThreadingModel::isSharedLockExclusiveRelease(name) ||
+        CppThreadingModel::isSharedTimedLockRelease(name) ||
+        CppThreadingModel::isSharedTimedLockExclusiveRelease(name))
       return TD_SHARED_UNLOCK;
     
     // RAII lock wrappers
@@ -907,11 +971,28 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
   case TD_SEMAPHORE_TRY_ACQUIRE: return "TD_SEMAPHORE_TRY_ACQUIRE";
   case TD_OMP_TASK:           return "TD_OMP_TASK";
   case TD_OMP_TASKWAIT:       return "TD_OMP_TASKWAIT";
+  case TD_OMP_TASKWAIT_DEPS:  return "TD_OMP_TASKWAIT_DEPS";
   case TD_OMP_TASKYIELD:      return "TD_OMP_TASKYIELD";
   case TD_OMP_TASKGROUP_START: return "TD_OMP_TASKGROUP_START";
   case TD_OMP_TASKGROUP_END:  return "TD_OMP_TASKGROUP_END";
   case TD_OMP_TASK_WITH_DEPS: return "TD_OMP_TASK_WITH_DEPS";
   case TD_OMP_TASKLOOP:       return "TD_OMP_TASKLOOP";
+  case TD_OMP_TASK_COMPLETE:  return "TD_OMP_TASK_COMPLETE";
+  case TD_OMP_SINGLE_START:   return "TD_OMP_SINGLE_START";
+  case TD_OMP_SINGLE_END:     return "TD_OMP_SINGLE_END";
+  case TD_OMP_MASTER_START:   return "TD_OMP_MASTER_START";
+  case TD_OMP_MASTER_END:     return "TD_OMP_MASTER_END";
+  case TD_OMP_ORDERED_START:  return "TD_OMP_ORDERED_START";
+  case TD_OMP_ORDERED_END:    return "TD_OMP_ORDERED_END";
+  case TD_OMP_REDUCE_START:   return "TD_OMP_REDUCE_START";
+  case TD_OMP_REDUCE_END:     return "TD_OMP_REDUCE_END";
+  case TD_OMP_REDUCE_NOWAIT_START: return "TD_OMP_REDUCE_NOWAIT_START";
+  case TD_OMP_REDUCE_NOWAIT_END: return "TD_OMP_REDUCE_NOWAIT_END";
+  case TD_OMP_FOR_STATIC_INIT: return "TD_OMP_FOR_STATIC_INIT";
+  case TD_OMP_FOR_STATIC_FINI: return "TD_OMP_FOR_STATIC_FINI";
+  case TD_OMP_FOR_DISPATCH_INIT: return "TD_OMP_FOR_DISPATCH_INIT";
+  case TD_OMP_FOR_DISPATCH_NEXT: return "TD_OMP_FOR_DISPATCH_NEXT";
+  case TD_OMP_FOR_DISPATCH_FINI: return "TD_OMP_FOR_DISPATCH_FINI";
   case TD_OMP_SECTIONS_INIT:  return "TD_OMP_SECTIONS_INIT";
   case TD_OMP_SECTIONS_NEXT:  return "TD_OMP_SECTIONS_NEXT";
   case TD_OMP_SECTIONS_END:   return "TD_OMP_SECTIONS_END";

@@ -11,10 +11,12 @@
 #pragma once
 
 #include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 #include <map>
 #include <set>
+#include <utility>
 
 namespace MPI {
 
@@ -34,27 +36,31 @@ public:
   int concrete_value;  ///< For Concrete kind
   int range_min;       ///< For Range kind
   int range_max;       ///< For Range kind
-  
+  const llvm::Value *communicator = nullptr; ///< Communicator that owns the rank
+
   RankExpr() : kind(Unknown), concrete_value(-1), range_min(0), range_max(-1) {}
   
-  static RankExpr makeConcrete(int rank) {
+  static RankExpr makeConcrete(int rank, const llvm::Value *comm = nullptr) {
     RankExpr expr;
     expr.kind = Concrete;
     expr.concrete_value = rank;
+    expr.communicator = comm;
     return expr;
   }
   
-  static RankExpr makeSymbolic() {
+  static RankExpr makeSymbolic(const llvm::Value *comm = nullptr) {
     RankExpr expr;
     expr.kind = Symbolic;
+    expr.communicator = comm;
     return expr;
   }
   
-  static RankExpr makeRange(int min, int max) {
+  static RankExpr makeRange(int min, int max, const llvm::Value *comm = nullptr) {
     RankExpr expr;
     expr.kind = Range;
     expr.range_min = min;
     expr.range_max = max;
+    expr.communicator = comm;
     return expr;
   }
   
@@ -98,6 +104,15 @@ public:
    */
   std::set<int> getPossibleRanks(const llvm::Instruction *inst) const;
 
+  static constexpr int defaultCommSizeUpperBound() {
+    return 1024;
+  }
+
+  /**
+   * @brief Check whether a value depends on MPI rank information
+   */
+  bool dependsOnRank(const llvm::Value *val) const;
+
 private:
   llvm::Module &m_module;
   
@@ -109,6 +124,7 @@ private:
   
   // Size of communicators
   std::map<const llvm::Value *, int> m_comm_size;
+  std::map<const llvm::Value *, std::pair<int, int>> m_value_to_size_range;
   
   /**
    * @brief Identify MPI_Comm_rank calls
@@ -118,12 +134,19 @@ private:
   /**
    * @brief Propagate rank information through control flow
    */
+  void propagateValueFacts();
   void propagateRankInfo();
   
   /**
    * @brief Analyze rank-dependent branches
    */
   void analyzeRankBranches();
+
+  RankExpr mergeRankExpr(const RankExpr &lhs, const RankExpr &rhs) const;
+  bool refineRankFromBranch(const llvm::BranchInst *br, unsigned succ_idx,
+                            RankExpr current, RankExpr &refined) const;
+  bool tryEvaluateIntRange(const llvm::Value *val, int &min_value,
+                           int &max_value) const;
 };
 
 } // namespace MPI

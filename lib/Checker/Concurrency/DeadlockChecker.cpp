@@ -192,7 +192,7 @@ bool DeadlockChecker::isLockOperation(const Instruction *inst) const {
 }
 
 mhp::LockID DeadlockChecker::getLockID(const Instruction *inst) const {
-  return m_threadAPI->getLockVal(inst);
+  return m_threadAPI->getAnalysisLockIdentity(inst);
 }
 
 const Instruction *
