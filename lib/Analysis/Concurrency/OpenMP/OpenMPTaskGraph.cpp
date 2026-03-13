@@ -189,7 +189,7 @@ void OpenMPTaskGraph::analyze() {
   m_inst_to_task.clear();
   m_wait_boundaries.clear();
   m_wait_boundary_infos.clear();
-  m_unknown_relations.clear();
+  m_relations.clear();
   m_next_scheduling_context_id = 1;
   m_deferred_wait_deps_count = 0;
   m_deferred_imprecise_conflict_count = 0;
@@ -466,6 +466,12 @@ void OpenMPTaskGraph::scanSchedulingContext(
         auto task = std::make_unique<Task>();
         task->task_create = call;
         task->task_function = extractTaskFunction(call);
+        if (callee && callee->hasName()) {
+          StringRef callee_name = callee->getName();
+          if (callee_name.equals("__kmpc_omp_task_begin_if0")) {
+            task->execution_mode = TaskExecutionMode::Included;
+          }
+        }
         task->parent_context = func;
         task->generating_context = state.anchor_inst ? state.anchor_inst : call;
         task->scheduling_context_id = state.scheduling_context_id;
@@ -478,6 +484,11 @@ void OpenMPTaskGraph::scanSchedulingContext(
 
         if (type == ThreadAPI::TD_OMP_TASK_WITH_DEPS) {
           task->dependencies = extractDependencies(call);
+          for (const Dependency &dep : task->dependencies) {
+            if (dep.canonical_base) {
+              task->synchronization_objects.insert(dep.canonical_base);
+            }
+          }
         }
 
         m_inst_to_task[call] = task.get();
@@ -705,6 +716,27 @@ const Function *OpenMPTaskGraph::extractTaskFunction(const CallBase *task_call) 
 void OpenMPTaskGraph::buildDependencyEdges() {
   // Build happens-before edges based on task dependencies
 
+  auto recordRelation = [&](const Task *lhs, const Task *rhs,
+                            concurrency::RelationKind kind,
+                            concurrency::ProofStrength proof,
+                            StringRef reason) {
+    if (!lhs || !rhs || lhs == rhs) {
+      return;
+    }
+    auto key = normalizeTaskPair(lhs, rhs);
+    concurrency::Relation relation;
+    relation.kind = kind;
+    relation.proof = proof;
+    relation.reason = reason.str();
+
+    auto it = m_relations.find(key);
+    if (it == m_relations.end() ||
+        concurrency::relationPriority(kind) >
+            concurrency::relationPriority(it->second.kind)) {
+      m_relations[key] = std::move(relation);
+    }
+  };
+
   auto crossesPartialWaitBoundary = [&](const Task *lhs,
                                         const Task *rhs) -> bool {
     if (!lhs || !rhs ||
@@ -725,47 +757,6 @@ void OpenMPTaskGraph::buildDependencyEdges() {
     return false;
   };
 
-  auto recordUnknownRelation = [&](const Task *lhs, const Task *rhs) {
-    if (!lhs || !rhs || lhs == rhs) {
-      return;
-    }
-    m_unknown_relations.insert(normalizeTaskPair(lhs, rhs));
-  };
-
-  auto dependenciesMayConflictUnknown = [&](const Dependency &d1,
-                                            const Dependency &d2) {
-    const DataLayout &DL = m_module.getDataLayout();
-    int64_t offset1 = d1.offset;
-    int64_t offset2 = d2.offset;
-    bool precise1 = d1.has_precise_offset;
-    bool precise2 = d2.has_precise_offset;
-    const Value *base1 = d1.canonical_base ? d1.canonical_base
-                                           : canonicalizeDependencyAddress(
-                                                 d1.address, DL, offset1, precise1);
-    const Value *base2 = d2.canonical_base ? d2.canonical_base
-                                           : canonicalizeDependencyAddress(
-                                                 d2.address, DL, offset2, precise2);
-    if (!base1 || !base2 || base1 != base2) {
-      return false;
-    }
-
-    bool is_write1 = (d1.type == DependType::OUT ||
-                      d1.type == DependType::INOUT ||
-                      d1.type == DependType::MUTEXINOUTSET);
-    bool is_write2 = (d2.type == DependType::OUT ||
-                      d2.type == DependType::INOUT ||
-                      d2.type == DependType::MUTEXINOUTSET);
-    if (!(is_write1 || is_write2)) {
-      return false;
-    }
-
-    if (precise1 && precise2 && d1.size != 0 && d2.size != 0) {
-      return false;
-    }
-    return !(stripValue(d1.address) &&
-             stripValue(d1.address) == stripValue(d2.address));
-  };
-
   for (size_t i = 0; i < m_tasks.size(); ++i) {
     Task *task_i = m_tasks[i].get();
 
@@ -778,7 +769,10 @@ void OpenMPTaskGraph::buildDependencyEdges() {
       // Without precise lowering of the dependency objects, we avoid adding a
       // definite HB edge across that boundary.
       if (crossesPartialWaitBoundary(task_i, task_j)) {
-        recordUnknownRelation(task_i, task_j);
+        recordRelation(task_i, task_j,
+                       concurrency::RelationKind::UnknownDueToModelGap,
+                       concurrency::ProofStrength::Unknown,
+                       "omp_taskwait_deps_partial");
         continue;
       }
 
@@ -788,11 +782,14 @@ void OpenMPTaskGraph::buildDependencyEdges() {
       bool saw_unknown_conflict = false;
       for (const Dependency &dep_i : task_i->dependencies) {
         for (const Dependency &dep_j : task_j->dependencies) {
-          if (dependenciesConflict(dep_i, dep_j)) {
+          DependencyConflict conflict =
+              classifyDependencyConflict(dep_i, dep_j);
+          if (conflict == DependencyConflict::MustConflict) {
             saw_conflict = true;
             saw_mutex_exclusion = saw_mutex_exclusion ||
                                   isMutexLikeExclusion(dep_i, dep_j);
-          } else if (dependenciesMayConflictUnknown(dep_i, dep_j)) {
+          } else if (conflict == DependencyConflict::MayConflict ||
+                     conflict == DependencyConflict::Unknown) {
             saw_unknown_conflict = true;
           }
         }
@@ -800,7 +797,10 @@ void OpenMPTaskGraph::buildDependencyEdges() {
 
       if (!saw_conflict) {
         if (saw_unknown_conflict) {
-          recordUnknownRelation(task_i, task_j);
+          recordRelation(task_i, task_j,
+                         concurrency::RelationKind::UnknownDueToModelGap,
+                         concurrency::ProofStrength::May,
+                         "omp_depend_may_conflict");
         }
         continue;
       }
@@ -808,18 +808,33 @@ void OpenMPTaskGraph::buildDependencyEdges() {
       if (saw_mutex_exclusion) {
         task_i->exclusions.insert(task_j);
         task_j->exclusions.insert(task_i);
+        recordRelation(task_i, task_j,
+                       concurrency::RelationKind::MutuallyExclusive,
+                       concurrency::ProofStrength::Must,
+                       "omp_mutexinoutset");
         continue;
       }
 
       if (mustHappenBefore(taskOrderingSite(task_i), taskOrderingSite(task_j))) {
         task_i->successors.insert(task_j);
         task_j->predecessors.insert(task_i);
+        recordRelation(task_i, task_j,
+                       concurrency::RelationKind::MustHappenBefore,
+                       concurrency::ProofStrength::Must,
+                       "omp_depend_ordered");
       } else if (mustHappenBefore(taskOrderingSite(task_j),
                                   taskOrderingSite(task_i))) {
         task_j->successors.insert(task_i);
         task_i->predecessors.insert(task_j);
+        recordRelation(task_i, task_j,
+                       concurrency::RelationKind::MustHappenBefore,
+                       concurrency::ProofStrength::Must,
+                       "omp_depend_ordered");
       } else {
-        recordUnknownRelation(task_i, task_j);
+        recordRelation(task_i, task_j,
+                       concurrency::RelationKind::UnknownDueToModelGap,
+                       concurrency::ProofStrength::Unknown,
+                       "omp_nonlexical_task_order");
       }
     }
   }
@@ -854,8 +869,15 @@ void OpenMPTaskGraph::buildDependencyEdges() {
               mustHappenBefore(boundary.inst, taskOrderingSite(rhs.get()))) {
             lhs->successors.insert(rhs.get());
             rhs->predecessors.insert(lhs.get());
+            recordRelation(lhs.get(), rhs.get(),
+                           concurrency::RelationKind::MustHappenBefore,
+                           concurrency::ProofStrength::Must,
+                           "omp_wait_boundary");
           } else {
-            recordUnknownRelation(lhs.get(), rhs.get());
+            recordRelation(lhs.get(), rhs.get(),
+                           concurrency::RelationKind::UnknownDueToModelGap,
+                           concurrency::ProofStrength::Unknown,
+                           "omp_conditional_wait_boundary");
           }
         }
       }
@@ -865,6 +887,12 @@ void OpenMPTaskGraph::buildDependencyEdges() {
 
 bool OpenMPTaskGraph::dependenciesConflict(const Dependency &d1, 
                                            const Dependency &d2) const {
+  return classifyDependencyConflict(d1, d2) == DependencyConflict::MustConflict;
+}
+
+DependencyConflict
+OpenMPTaskGraph::classifyDependencyConflict(const Dependency &d1,
+                                            const Dependency &d2) const {
   // Two dependencies conflict if:
   // 1. They access the same memory location (alias analysis needed)
   // 2. At least one is a write (OUT, INOUT, MUTEXINOUTSET)
@@ -881,8 +909,11 @@ bool OpenMPTaskGraph::dependenciesConflict(const Dependency &d1,
                                          : canonicalizeDependencyAddress(
                                                d2.address, DL, offset2, precise2);
 
-  if (!base1 || !base2 || base1 != base2) {
-    return false;
+  if (!base1 || !base2) {
+    return DependencyConflict::Unknown;
+  }
+  if (base1 != base2) {
+    return DependencyConflict::NoConflict;
   }
   
   // Check for write dependency
@@ -894,7 +925,7 @@ bool OpenMPTaskGraph::dependenciesConflict(const Dependency &d1,
                     d2.type == DependType::MUTEXINOUTSET);
   
   if (!(is_write1 || is_write2)) {
-    return false;
+    return DependencyConflict::NoConflict;
   }
 
   if (precise1 && precise2 && d1.size != 0 && d2.size != 0) {
@@ -902,18 +933,19 @@ bool OpenMPTaskGraph::dependenciesConflict(const Dependency &d1,
     uint64_t begin2 = static_cast<uint64_t>(offset2);
     uint64_t end1 = begin1 + d1.size;
     uint64_t end2 = begin2 + d2.size;
-    return begin1 < end2 && begin2 < end1;
+    return begin1 < end2 && begin2 < end1 ? DependencyConflict::MustConflict
+                                          : DependencyConflict::NoConflict;
   }
 
   if (stripValue(d1.address) && stripValue(d1.address) == stripValue(d2.address)) {
-    return true;
+    return DependencyConflict::MustConflict;
   }
 
   // Shared base but imprecise offsets are recognized as potential depend
-  // conflicts, but we do not create a definite HB edge without a provable
-  // overlap witness.
+  // conflicts. Keep them conservative instead of treating them as parallel.
   ++m_deferred_imprecise_conflict_count;
-  return false;
+  ++m_deferred_reason_counts["omp_depend_may_conflict"];
+  return DependencyConflict::MayConflict;
 }
 
 bool OpenMPTaskGraph::isMutexLikeExclusion(const Dependency &d1,
@@ -965,7 +997,7 @@ OpenMPTaskGraph::classifyTaskRelation(const Task *t1, const Task *t2) const {
       t2->exclusions.count(const_cast<Task *>(t1))) {
     return TaskRelation::Excluded;
   }
-  if (m_unknown_relations.count(normalizeTaskPair(t1, t2))) {
+  if (m_relations.count(normalizeTaskPair(t1, t2))) {
     return TaskRelation::Unknown;
   }
   return TaskRelation::Parallel;
@@ -975,9 +1007,5 @@ bool OpenMPTaskGraph::mayBeParallel(const Task *t1, const Task *t2) const {
   if (!t1 || !t2 || t1 == t2) {
     return false;
   }
-  if (t1->exclusions.count(const_cast<Task *>(t2)) ||
-      t2->exclusions.count(const_cast<Task *>(t1))) {
-    return false;
-  }
-  return !happensBefore(t1, t2) && !happensBefore(t2, t1);
+  return classifyTaskRelation(t1, t2) == TaskRelation::Parallel;
 }

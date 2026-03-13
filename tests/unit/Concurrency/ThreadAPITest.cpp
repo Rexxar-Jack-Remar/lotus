@@ -373,6 +373,10 @@ TEST_F(ThreadAPITest, MapsOpenMPTaskRuntimeVariants) {
             ThreadAPI::TD_OMP_TASK_WITH_DEPS);
   EXPECT_EQ(api->getType(module->getFunction("__kmpc_omp_task_complete_if0")),
             ThreadAPI::TD_OMP_TASK_COMPLETE);
+  EXPECT_EQ(api->getRuntimeLibrary(module->getFunction("__kmpc_omp_task_with_deps_51")),
+            ThreadAPI::RuntimeLibrary::OpenMP);
+  EXPECT_EQ(api->getSemanticTag(module->getFunction("__kmpc_omp_task_with_deps_51")),
+            "task-with-deps");
 }
 
 TEST_F(ThreadAPITest, MapsOpenMPRegionRuntimeVariants) {
@@ -411,6 +415,23 @@ TEST_F(ThreadAPITest, MapsOpenMPRegionRuntimeVariants) {
             ThreadAPI::TD_OMP_FOR_STATIC_FINI);
   EXPECT_EQ(api->getType(module->getFunction("__kmpc_dispatch_fini_4")),
             ThreadAPI::TD_OMP_FOR_DISPATCH_FINI);
+}
+
+TEST_F(ThreadAPITest, DescribesMPIBarrierUsingStructuredConfig) {
+  const char *source = R"(
+    declare i32 @MPI_Ibarrier(i8*, i8*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  ThreadAPI::APIDescription desc = api->describe(module->getFunction("MPI_Ibarrier"));
+  EXPECT_EQ(desc.type, ThreadAPI::TD_MPI_BARRIER);
+  EXPECT_EQ(desc.library, ThreadAPI::RuntimeLibrary::MPI);
+  EXPECT_EQ(desc.semantic_tag, "ibarrier");
+  EXPECT_TRUE(desc.from_config);
 }
 
 TEST_F(ThreadAPITest, UsesCriticalNameAsAnalysisLockIdentity) {

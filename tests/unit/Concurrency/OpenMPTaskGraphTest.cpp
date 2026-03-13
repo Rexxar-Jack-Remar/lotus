@@ -480,6 +480,8 @@ TEST_F(OpenMPTaskGraphTest, InlineTaskRuntimeVariantIsTracked) {
   graph.analyze();
 
   EXPECT_EQ(graph.getAllTasks().size(), 1u);
+  EXPECT_EQ(graph.getAllTasks().front()->execution_mode,
+            TaskExecutionMode::Included);
 }
 
 TEST_F(OpenMPTaskGraphTest, SameBaseUnknownOffsetsAreDeferredWithoutDefiniteHB) {
@@ -534,8 +536,13 @@ TEST_F(OpenMPTaskGraphTest, SameBaseUnknownOffsetsAreDeferredWithoutDefiniteHB) 
   const auto &tasks = graph.getAllTasks();
   ASSERT_EQ(tasks.size(), 2u);
   EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
-  EXPECT_TRUE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
+  EXPECT_FALSE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
+  EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
+            OpenMPTaskGraph::TaskRelation::Unknown);
   EXPECT_GT(graph.getDeferredImpreciseConflictCount(), 0u);
+  auto it = graph.getUnknownReasonCounts().find("omp_depend_may_conflict");
+  ASSERT_NE(it, graph.getUnknownReasonCounts().end());
+  EXPECT_GT(it->second, 0u);
 }
 
 TEST_F(OpenMPTaskGraphTest, NestedTaskgroupBoundaryAdvancesOnlyInnerPhase) {

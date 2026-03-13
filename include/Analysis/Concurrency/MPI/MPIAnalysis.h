@@ -25,6 +25,7 @@
 
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
+#include "Analysis/Concurrency/ConcurrencyRelation.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/ADT/DenseMap.h>
@@ -62,6 +63,32 @@ using ProcessID = int; // MPI rank (can be symbolic for static analysis)
 using CommunicatorID = const llvm::Value*; // MPI_Comm handle
 using RequestID = const llvm::Value*; // MPI_Request handle
 using WindowID = const llvm::Value*; // MPI_Win handle
+
+enum class MPICommunicationMatch {
+  NoMatch,
+  MustMatch,
+  MayMatch,
+  Unknown
+};
+
+enum class RequestCompletionState {
+  Pending,
+  MayComplete,
+  MustComplete,
+  Terminal
+};
+
+enum class ProtocolReachability {
+  AllRanks,
+  SomeRanks,
+  Unknown
+};
+
+enum class RMAEpochKind {
+  None,
+  Access,
+  Exposure
+};
 
 // ============================================================================
 // MPI Operation Types
@@ -108,8 +135,11 @@ struct MPIOperation {
   const llvm::Function* function;
   CommunicatorID communicator = nullptr;
   size_t communicator_class_id = 0;
+  size_t communicator_subgroup_id = 0;
   size_t protocol_sequence_id = 0;
+  ProtocolReachability protocol_reachability = ProtocolReachability::Unknown;
   MPI::RankExpr process_rank;
+  std::string rank_path_summary;
   
   // For point-to-point operations
   int source_rank = -1; // -1/-2 are treated as wildcard source in matching
@@ -123,6 +153,7 @@ struct MPIOperation {
   // For non-blocking operations
   RequestID request = nullptr;
   const llvm::Instruction* completion_inst = nullptr; // Matching wait/test
+  RequestCompletionState request_state = RequestCompletionState::Pending;
   
   // For RMA operations
   WindowID window = nullptr;
@@ -131,6 +162,9 @@ struct MPIOperation {
   int target_rank_max = -1;
   int64_t target_disp = -1;
   int64_t byte_length = -1;
+  RMAEpochKind rma_epoch_kind = RMAEpochKind::None;
+  concurrency::ProofStrength synchronization_proof =
+      concurrency::ProofStrength::Unknown;
   
   MPIOperation() = default;
   MPIOperation(const llvm::Instruction* i, MPIOpKind k, ThreadAPI::TD_TYPE t)
@@ -166,9 +200,8 @@ public:
   struct NonBlockingOp {
     const llvm::Instruction* issue_inst;  // MPI_Isend/Irecv
     RequestID request;
-    bool is_completed = false;
+    RequestCompletionState completion_state = RequestCompletionState::Pending;
     const llvm::Instruction* wait_inst = nullptr; // MPI_Wait/Test
-    bool is_terminal = false; // Request_free / Cancel / completed collective request
     
     // Communication details
     int peer_rank = -1;
@@ -212,6 +245,9 @@ public:
    * rank, tag, and communicator.
    */
   bool canCommunicate(const MPIOperation& op1, const MPIOperation& op2) const;
+  MPICommunicationMatch
+  classifyCommunicationMatch(const MPIOperation& op1,
+                             const MPIOperation& op2) const;
 
   /**
    * @brief Find all non-blocking operations without matching wait
@@ -322,10 +358,14 @@ public:
    * E.g., collective inside a rank-dependent if statement.
    */
   std::vector<const llvm::Instruction*> findConditionalCollectives() const;
+  const std::unordered_map<std::string, size_t> &getProtocolDiagnostics() const {
+    return protocol_diagnostics_;
+  }
 
 private:
   const MPIProcessModel& process_model_;
   std::vector<CollectiveCall> collective_calls_;
+  mutable std::unordered_map<std::string, size_t> protocol_diagnostics_;
   
   bool areCollectivesCompatible(const CollectiveCall& c1, 
                                 const CollectiveCall& c2) const;
@@ -376,6 +416,9 @@ public:
     int target_rank_max = -1;
     int64_t target_disp = -1;
     int64_t byte_length = -1;
+    RMAEpochKind rma_epoch_kind = RMAEpochKind::None;
+    concurrency::ProofStrength synchronization_proof =
+        concurrency::ProofStrength::Unknown;
     SyncModel sync_model = SyncModel::NONE;
     size_t epoch_id = 0;
     

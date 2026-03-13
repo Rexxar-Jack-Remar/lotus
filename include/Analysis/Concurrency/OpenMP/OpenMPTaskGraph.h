@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "Analysis/Concurrency/ConcurrencyRelation.h"
+
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
@@ -47,6 +49,21 @@ enum class DependencyProof {
   Unknown
 };
 
+enum class TaskExecutionMode {
+  Deferred,
+  Included,
+  Final,
+  Detached,
+  Untied
+};
+
+enum class DependencyConflict {
+  NoConflict,
+  MustConflict,
+  MayConflict,
+  Unknown
+};
+
 /**
  * @brief Represents a dependency on a memory location
  */
@@ -67,6 +84,7 @@ struct Dependency {
 struct Task {
   const llvm::Instruction *task_create;  ///< __kmpc_omp_task call
   const llvm::Function *task_function;   ///< Task body function
+  TaskExecutionMode execution_mode = TaskExecutionMode::Deferred;
   const llvm::Function *parent_context = nullptr; ///< Scheduling context
   const llvm::Instruction *generating_context = nullptr; ///< Active lexical region
   size_t scheduling_context_id = 0;      ///< Stable scheduling context across helper calls
@@ -79,6 +97,7 @@ struct Task {
   std::set<Task *> predecessors;         ///< Tasks that must complete before this
   std::set<Task *> successors;           ///< Tasks that depend on this
   std::set<Task *> exclusions;           ///< Mutual exclusion without happens-before
+  std::set<const llvm::Value *> synchronization_objects; ///< Runtime sync objects touched by task creation
 };
 
 /**
@@ -145,6 +164,9 @@ public:
   size_t getDeferredImpreciseConflictCount() const {
     return m_deferred_imprecise_conflict_count;
   }
+  const std::unordered_map<std::string, size_t> &getUnknownReasonCounts() const {
+    return m_deferred_reason_counts;
+  }
   const std::unordered_map<std::string, size_t> &getDeferredReasonCounts() const {
     return m_deferred_reason_counts;
   }
@@ -162,6 +184,9 @@ public:
    * edge either.
    */
   TaskRelation classifyTaskRelation(const Task *t1, const Task *t2) const;
+
+  DependencyConflict classifyDependencyConflict(const Dependency &d1,
+                                                const Dependency &d2) const;
   
   /**
    * @brief Check if two tasks may execute in parallel
@@ -200,11 +225,12 @@ private:
   std::map<const llvm::Instruction *, Task *> m_inst_to_task;
   std::unordered_map<size_t, std::vector<WaitBoundary>> m_wait_boundaries;
   std::vector<WaitBoundaryInfo> m_wait_boundary_infos;
-  std::set<std::pair<const Task *, const Task *>> m_unknown_relations;
+  std::map<std::pair<const Task *, const Task *>, concurrency::Relation>
+      m_relations;
   size_t m_next_scheduling_context_id = 1;
   size_t m_deferred_wait_deps_count = 0;
   mutable size_t m_deferred_imprecise_conflict_count = 0;
-  std::unordered_map<std::string, size_t> m_deferred_reason_counts;
+  mutable std::unordered_map<std::string, size_t> m_deferred_reason_counts;
   
   /**
    * @brief Identify all OpenMP task creation sites

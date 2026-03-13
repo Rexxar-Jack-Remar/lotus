@@ -30,6 +30,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 // Do NOT use `using namespace llvm` in headers — it pollutes every TU that
 // includes this file.  All LLVM types are qualified explicitly below.
@@ -54,6 +55,17 @@ typedef unsigned u32_t;
 class ThreadAPI {
 
 public:
+  enum class RuntimeLibrary {
+    Unknown,
+    PThread,
+    OpenMP,
+    MPI,
+    Cpp,
+    LinuxKernel,
+    Hare,
+    Custom
+  };
+
   /**
    * @enum TD_TYPE
    * @brief Thread API function types
@@ -291,6 +303,19 @@ public:
     TD_KERNEL_MEMORY_BARRIER      ///< mb, rmb, wmb, smp_mb, smp_rmb, smp_wmb, barrier
   };
 
+  struct APIDescription {
+    TD_TYPE type = TD_DUMMY;
+    RuntimeLibrary library = RuntimeLibrary::Unknown;
+    std::string semantic_tag;
+    std::vector<std::string> traits;
+    bool from_config = false;
+  };
+
+  enum class MatchKind {
+    Exact,
+    Prefix
+  };
+
   /// Map type for API name to TD_TYPE conversion
   using TDAPIMap = llvm::StringMap<TD_TYPE>;
 
@@ -329,6 +354,13 @@ private:
   TDAPIMap tdAPIMap;
   std::unordered_map<std::string, ForkArgIndices> m_fork_args;
   std::unordered_map<std::string, JoinArgIndices> m_join_args;
+  std::unordered_map<std::string, APIDescription> m_api_descriptions;
+  struct MatchRule {
+    std::string pattern;
+    MatchKind kind = MatchKind::Exact;
+    APIDescription description;
+  };
+  std::vector<MatchRule> m_match_rules;
   
   /// Configuration for threading models
   concurrency::ConcurrencyConfig m_config;
@@ -344,9 +376,18 @@ private:
 
   /// Load configuration from a file
   void loadConfig(const std::string &filename);
+  void loadSemanticConfig(const std::string &filename);
 
   /// Add a new entry to the API map
   void addEntry(const std::string &name, TD_TYPE type);
+  void addDescription(const std::string &name, const APIDescription &description);
+  void addMatchRule(const std::string &pattern, MatchKind kind,
+                    const APIDescription &description);
+  RuntimeLibrary inferLibrary(TD_TYPE type) const;
+  bool isLibraryEnabled(RuntimeLibrary library) const;
+  const APIDescription *lookupDescription(const llvm::Function *F) const;
+  const MatchRule *lookupMatchRule(llvm::StringRef normalized_name) const;
+  TD_TYPE getConfiguredType(llvm::StringRef normalized_name) const;
 
 public:
   /// Get the function type if it is a threadAPI function
@@ -358,6 +399,30 @@ public:
   
   /// Set the concurrency configuration
   void setConfig(const concurrency::ConcurrencyConfig& config) { m_config = config; }
+
+  APIDescription describe(const llvm::Function *F) const;
+  RuntimeLibrary getRuntimeLibrary(const llvm::Function *F) const {
+    return describe(F).library;
+  }
+  std::string getSemanticTag(const llvm::Function *F) const {
+    return describe(F).semantic_tag;
+  }
+  bool hasSemanticTag(const llvm::Function *F, llvm::StringRef tag) const {
+    return describe(F).semantic_tag == tag;
+  }
+  bool semanticTagStartsWith(const llvm::Function *F,
+                             llvm::StringRef prefix) const {
+    return llvm::StringRef(describe(F).semantic_tag).startswith(prefix);
+  }
+  bool hasTrait(const llvm::Function *F, llvm::StringRef trait) const {
+    const APIDescription description = describe(F);
+    for (const std::string &entry : description.traits) {
+      if (entry == trait) {
+        return true;
+      }
+    }
+    return false;
+  }
   
   /// Return a static reference to the singleton instance.
   static ThreadAPI *getThreadAPI() {
@@ -438,8 +503,7 @@ public:
     if (isCppThreadLikeFork(callee))
       return getCppThreadCallable(inst);
 
-    // __kmpc_fork_call passes the outlined microtask at operand #2.
-    if (callee && callee->getName().equals("__kmpc_fork_call")) {
+    if (hasSemanticTag(callee, "fork")) {
       if (const llvm::Value *arg = getCallArg(inst, 2)) {
         arg = arg->stripPointerCasts();
         if (const auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(arg)) {
@@ -733,8 +797,8 @@ public:
     case TD_OMP_ORDERED_END:
       if (cb->arg_size() >= 3) {
         const llvm::Function *callee = getCallee(inst);
-        if (callee && (callee->getName().equals("__kmpc_critical") ||
-                       callee->getName().equals("__kmpc_end_critical"))) {
+        if (callee && (hasSemanticTag(callee, "critical-enter") ||
+                       hasSemanticTag(callee, "critical-exit"))) {
           return cb->getArgOperand(2)->stripPointerCasts();
         }
       }
@@ -941,12 +1005,13 @@ public:
   }
 
   inline bool isBarrierWaitLike(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::Function *callee = getCallee(inst);
+    if (callee && hasTrait(callee, "barrier-wait-like")) {
+      return true;
+    }
+    TD_TYPE t = getType(callee);
     return t == TD_BAR_WAIT || t == TD_BARRIER_ARRIVE_WAIT ||
-           t == TD_BARRIER_WAIT_CPP20 ||
-           t == TD_OMP_SINGLE_END || t == TD_OMP_SECTIONS_END ||
-           t == TD_OMP_FOR_STATIC_FINI || t == TD_OMP_FOR_DISPATCH_FINI ||
-           t == TD_OMP_REDUCE_START;
+           t == TD_BARRIER_WAIT_CPP20;
   }
 
   inline bool isBarrierLike(const llvm::Instruction *inst) const {
@@ -961,56 +1026,28 @@ public:
     const llvm::Function *callee = getCallee(inst);
     if (!callee)
       return false;
-    llvm::StringRef name = callee->getName();
-    if (name.startswith("PMPI_"))
-      name = name.drop_front(1);
-    return getType(callee) == TD_MPI_BARRIER &&
-           name == "MPI_Barrier";
+    return hasTrait(callee, "mpi-barrier-blocking");
   }
 
   inline bool isNonBlockingMPIBarrier(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
     if (!callee)
       return false;
-    llvm::StringRef name = callee->getName();
-    if (name.startswith("PMPI_"))
-      name = name.drop_front(1);
-    return getType(callee) == TD_MPI_BARRIER &&
-           name == "MPI_Ibarrier";
+    return hasTrait(callee, "mpi-barrier-nonblocking");
   }
 
   inline bool isBlockingMPICollective(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
     if (!callee)
       return false;
-    llvm::StringRef name = callee->getName();
-    if (name.startswith("PMPI_"))
-      name = name.drop_front(1);
-    TD_TYPE t = getType(callee);
-    if (!(t == TD_MPI_BCAST || t == TD_MPI_SCATTER || t == TD_MPI_GATHER ||
-          t == TD_MPI_ALLGATHER || t == TD_MPI_ALLTOALL ||
-          t == TD_MPI_REDUCE || t == TD_MPI_ALLREDUCE ||
-          t == TD_MPI_REDUCE_SCATTER || t == TD_MPI_SCAN)) {
-      return false;
-    }
-    return !name.startswith("MPI_I");
+    return hasTrait(callee, "mpi-collective-blocking");
   }
 
   inline bool isNonBlockingMPICollective(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
     if (!callee)
       return false;
-    llvm::StringRef name = callee->getName();
-    if (name.startswith("PMPI_"))
-      name = name.drop_front(1);
-    TD_TYPE t = getType(callee);
-    if (!(t == TD_MPI_BCAST || t == TD_MPI_SCATTER || t == TD_MPI_GATHER ||
-          t == TD_MPI_ALLGATHER || t == TD_MPI_ALLTOALL ||
-          t == TD_MPI_REDUCE || t == TD_MPI_ALLREDUCE ||
-          t == TD_MPI_REDUCE_SCATTER || t == TD_MPI_SCAN)) {
-      return false;
-    }
-    return name.startswith("MPI_I");
+    return hasTrait(callee, "mpi-collective-nonblocking");
   }
 
   /// True for any atomic synchronization operation (future/promise/call_once).
@@ -1022,29 +1059,14 @@ public:
 
   /// True for any MPI collective or barrier (synchronization point).
   inline bool isMPICollective(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
-    return t == TD_MPI_BARRIER || t == TD_MPI_BCAST || t == TD_MPI_SCATTER ||
-           t == TD_MPI_GATHER || t == TD_MPI_ALLGATHER ||
-           t == TD_MPI_ALLTOALL || t == TD_MPI_REDUCE ||
-           t == TD_MPI_ALLREDUCE || t == TD_MPI_REDUCE_SCATTER ||
-           t == TD_MPI_SCAN;
+    const llvm::Function *callee = getCallee(inst);
+    return callee && hasTrait(callee, "mpi-collective");
   }
 
   /// True for any OpenMP task-related operation.
   inline bool isOMPTaskOp(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
-    return t == TD_OMP_TASK || t == TD_OMP_TASKWAIT ||
-           t == TD_OMP_TASKWAIT_DEPS || t == TD_OMP_TASKYIELD ||
-           t == TD_OMP_TASKGROUP_START || t == TD_OMP_TASKGROUP_END ||
-           t == TD_OMP_TASK_WITH_DEPS || t == TD_OMP_TASKLOOP ||
-           t == TD_OMP_TASK_COMPLETE || t == TD_OMP_SINGLE_START ||
-           t == TD_OMP_SINGLE_END || t == TD_OMP_MASTER_START ||
-           t == TD_OMP_MASTER_END || t == TD_OMP_ORDERED_START ||
-           t == TD_OMP_ORDERED_END || t == TD_OMP_REDUCE_START ||
-           t == TD_OMP_REDUCE_END || t == TD_OMP_REDUCE_NOWAIT_START ||
-           t == TD_OMP_REDUCE_NOWAIT_END || t == TD_OMP_FOR_STATIC_INIT ||
-           t == TD_OMP_FOR_STATIC_FINI || t == TD_OMP_FOR_DISPATCH_INIT ||
-           t == TD_OMP_FOR_DISPATCH_NEXT || t == TD_OMP_FOR_DISPATCH_FINI;
+    const llvm::Function *callee = getCallee(inst);
+    return callee && hasTrait(callee, "omp-task-op");
   }
 
   /// Convert a TD_TYPE to a human-readable string (for diagnostics).

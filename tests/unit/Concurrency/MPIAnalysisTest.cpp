@@ -80,6 +80,9 @@ TEST_F(MPIAnalysisTest, RankIncompatiblePointToPointDoesNotMatch) {
   ASSERT_EQ(sends.size(), 1u);
   ASSERT_EQ(recvs.size(), 1u);
   EXPECT_FALSE(analysis.getProcessModel().canCommunicate(sends.front(), recvs.front()));
+  EXPECT_EQ(analysis.getProcessModel().classifyCommunicationMatch(
+                sends.front(), recvs.front()),
+            MPICommunicationMatch::NoMatch);
 }
 
 TEST_F(MPIAnalysisTest, WaitAllCompletesOnlyListedRequests) {
@@ -190,11 +193,18 @@ TEST_F(MPIAnalysisTest, TestanyWithoutRecoverableIndexDoesNotCompleteRequest) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_EQ(analysis.getResults().orphaned_requests.size(), 2u);
+  EXPECT_TRUE(analysis.getResults().orphaned_requests.empty());
   const auto &deferred = analysis.getProcessModel().getDeferredLoweringStats();
   auto it = deferred.find("testany_unknown_index");
   ASSERT_NE(it, deferred.end());
   EXPECT_GT(it->second, 0u);
+  size_t may_complete = 0;
+  for (const auto &op : analysis.getProcessModel().getAllOperations()) {
+    if (op.request_state == RequestCompletionState::MayComplete) {
+      ++may_complete;
+    }
+  }
+  EXPECT_EQ(may_complete, 2u);
 }
 
 TEST_F(MPIAnalysisTest, WaitanyWithoutRecoverableIndexDoesNotCompleteRequest) {
@@ -225,7 +235,7 @@ TEST_F(MPIAnalysisTest, WaitanyWithoutRecoverableIndexDoesNotCompleteRequest) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_EQ(analysis.getResults().orphaned_requests.size(), 2u);
+  EXPECT_TRUE(analysis.getResults().orphaned_requests.empty());
   const auto &deferred = analysis.getProcessModel().getDeferredLoweringStats();
   auto it = deferred.find("waitany_unknown_index");
   ASSERT_NE(it, deferred.end());
@@ -332,7 +342,14 @@ TEST_F(MPIAnalysisTest, WaitsomeWithoutRecoverableIndicesKeepsRequestsPending) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_EQ(analysis.getResults().orphaned_requests.size(), 2u);
+  EXPECT_TRUE(analysis.getResults().orphaned_requests.empty());
+  size_t may_complete = 0;
+  for (const auto &op : analysis.getProcessModel().getAllOperations()) {
+    if (op.request_state == RequestCompletionState::MayComplete) {
+      ++may_complete;
+    }
+  }
+  EXPECT_EQ(may_complete, 2u);
 }
 
 TEST_F(MPIAnalysisTest, WaitsomeCompletesOnlyRecoveredIndices) {
@@ -426,6 +443,9 @@ TEST_F(MPIAnalysisTest, WildcardSourceAndTagSupportMinusTwoSentinel) {
   ASSERT_EQ(sends.size(), 1u);
   ASSERT_EQ(recvs.size(), 1u);
   EXPECT_TRUE(analysis.getProcessModel().canCommunicate(sends.front(), recvs.front()));
+  EXPECT_EQ(analysis.getProcessModel().classifyCommunicationMatch(
+                sends.front(), recvs.front()),
+            MPICommunicationMatch::MayMatch);
 }
 
 TEST_F(MPIAnalysisTest, CollectivesComparedPerCommunicatorAndSequenceSlot) {
@@ -582,6 +602,11 @@ TEST_F(MPIAnalysisTest, RankGuardedCollectiveIsReportedConditional) {
   analysis.runAnalysis();
 
   EXPECT_EQ(analysis.getResults().conditional_collectives.size(), 1u);
+  const auto &diagnostics =
+      analysis.getCollectiveAnalysis().getProtocolDiagnostics();
+  auto it = diagnostics.find("collective_rank_filtered");
+  ASSERT_NE(it, diagnostics.end());
+  EXPECT_GT(it->second, 0u);
 }
 
 TEST_F(MPIAnalysisTest, RMAExtractionHandlesLockAllAndAtomicOps) {

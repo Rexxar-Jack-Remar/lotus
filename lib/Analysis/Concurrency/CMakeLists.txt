@@ -1,4 +1,5 @@
 set(Concurrency_SOURCES
+  ConcurrencyFacade.cpp
   Utils/ThreadAPI.cpp
   Utils/ThreadFlowGraph.cpp
   Utils/BVClock.cpp

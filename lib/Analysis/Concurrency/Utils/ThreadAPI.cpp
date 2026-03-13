@@ -18,8 +18,6 @@
 
 #include "Analysis/Concurrency/Utils/CppThreading.h"
 #include "Analysis/Concurrency/Utils/LinuxKernel.h"
-#include "Analysis/Concurrency/MPI/MPIModel.h"
-#include "Analysis/Concurrency/OpenMP/OpenMPModel.h"
 
 #include <fstream>
 #include <iomanip>
@@ -60,6 +58,18 @@ static std::string normalizeAPIName(StringRef name) {
   if (StringRef(normalized).startswith("PMPI_"))
     normalized.replace(0, 5, "MPI_");
   return normalized;
+}
+
+static ThreadAPI::RuntimeLibrary parseRuntimeLibrary(StringRef value) {
+  std::string lowered = value.lower();
+  if (lowered == "pthread") return ThreadAPI::RuntimeLibrary::PThread;
+  if (lowered == "openmp") return ThreadAPI::RuntimeLibrary::OpenMP;
+  if (lowered == "mpi") return ThreadAPI::RuntimeLibrary::MPI;
+  if (lowered == "cpp") return ThreadAPI::RuntimeLibrary::Cpp;
+  if (lowered == "linux-kernel") return ThreadAPI::RuntimeLibrary::LinuxKernel;
+  if (lowered == "hare") return ThreadAPI::RuntimeLibrary::Hare;
+  if (lowered == "custom") return ThreadAPI::RuntimeLibrary::Custom;
+  return ThreadAPI::RuntimeLibrary::Unknown;
 }
 
 /**
@@ -140,10 +150,26 @@ void ThreadAPI::init() {
   // Load optional thread.spec so custom APIs (e.g. kernel mutex_lock) are recognized
   loadConfig("config/thread.spec");
   loadConfig("../config/thread.spec");
+  loadSemanticConfig("config/concurrency_api.spec");
+  loadSemanticConfig("../config/concurrency_api.spec");
 }
 
 void ThreadAPI::addEntry(const std::string &name, TD_TYPE type) {
-  tdAPIMap[name] = type;
+  tdAPIMap[normalizeAPIName(name)] = type;
+}
+
+void ThreadAPI::addDescription(const std::string &name,
+                               const APIDescription &description) {
+  m_api_descriptions[normalizeAPIName(name)] = description;
+}
+
+void ThreadAPI::addMatchRule(const std::string &pattern, MatchKind kind,
+                             const APIDescription &description) {
+  MatchRule rule;
+  rule.pattern = normalizeAPIName(pattern);
+  rule.kind = kind;
+  rule.description = description;
+  m_match_rules.push_back(std::move(rule));
 }
 
 bool ThreadAPI::hasMappedAPIEntry(const Function *F) const {
@@ -277,15 +303,302 @@ void ThreadAPI::loadConfig(const std::string &filename) {
   }
 }
 
+void ThreadAPI::loadSemanticConfig(const std::string &filename) {
+  std::ifstream file(filename);
+  if (!file.is_open()) {
+    return;
+  }
+
+  std::string line;
+  while (std::getline(file, line)) {
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+
+    std::stringstream ss(line);
+    std::string name;
+    std::string typeStr;
+    if (!(ss >> name >> typeStr)) {
+      continue;
+    }
+
+    TD_TYPE type = ThreadAPI::stringToType(typeStr);
+    if (type == TD_DUMMY) {
+      continue;
+    }
+
+    APIDescription description;
+    description.type = type;
+    description.from_config = true;
+    description.library = inferLibrary(type);
+    MatchKind match_kind = MatchKind::Exact;
+
+    std::string token;
+    while (ss >> token) {
+      size_t eq = token.find('=');
+      if (eq == std::string::npos) {
+        continue;
+      }
+      StringRef key(token.data(), eq);
+      StringRef value(token.data() + eq + 1, token.size() - eq - 1);
+      if (key.equals("library")) {
+        description.library = parseRuntimeLibrary(value);
+      } else if (key.equals("semantic")) {
+        description.semantic_tag = value.str();
+      } else if (key.equals("match")) {
+        std::string lowered = value.lower();
+        match_kind = lowered == "prefix" ? MatchKind::Prefix
+                                          : MatchKind::Exact;
+      } else if (key.equals("traits")) {
+        SmallVector<StringRef, 8> entries;
+        value.split(entries, ',', -1, false);
+        for (StringRef entry : entries) {
+          if (!entry.empty()) {
+            description.traits.push_back(entry.trim().str());
+          }
+        }
+      }
+    }
+
+    if (match_kind == MatchKind::Exact) {
+      addEntry(name, type);
+      addDescription(name, description);
+    }
+    addMatchRule(name, match_kind, description);
+  }
+}
+
+ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
+  switch (type) {
+  case TD_FORK:
+  case TD_JOIN:
+  case TD_DETACH:
+  case TD_ACQUIRE:
+  case TD_TRY_ACQUIRE:
+  case TD_RWLOCK_RDLOCK:
+  case TD_RWLOCK_WRLOCK:
+  case TD_RELEASE:
+  case TD_EXIT:
+  case TD_CANCEL:
+  case TD_COND_WAIT:
+  case TD_COND_SIGNAL:
+  case TD_COND_BROADCAST:
+  case TD_MUTEX_INI:
+  case TD_MUTEX_DESTROY:
+  case TD_CONDVAR_INI:
+  case TD_CONDVAR_DESTROY:
+  case TD_BAR_INIT:
+  case TD_BAR_WAIT:
+    return RuntimeLibrary::PThread;
+  case HARE_PAR_FOR:
+    return RuntimeLibrary::Hare;
+  case TD_SHARED_RDLOCK:
+  case TD_SHARED_WRLOCK:
+  case TD_SHARED_UNLOCK:
+  case TD_CALL_ONCE:
+  case TD_FUTURE_GET:
+  case TD_FUTURE_WAIT:
+  case TD_PROMISE_SET:
+  case TD_ASYNC:
+  case TD_LOCK_GUARD_CTOR:
+  case TD_LOCK_GUARD_DTOR:
+  case TD_UNIQUE_LOCK_CTOR:
+  case TD_UNIQUE_LOCK_DTOR:
+  case TD_UNIQUE_LOCK_LOCK:
+  case TD_UNIQUE_LOCK_UNLOCK:
+  case TD_SCOPED_LOCK_CTOR:
+  case TD_SCOPED_LOCK_DTOR:
+  case TD_SHARED_LOCK_CTOR:
+  case TD_SHARED_LOCK_DTOR:
+  case TD_JTHREAD_FORK:
+  case TD_JTHREAD_JOIN:
+  case TD_LATCH_COUNT_DOWN:
+  case TD_LATCH_WAIT:
+  case TD_LATCH_ARRIVE_WAIT:
+  case TD_BARRIER_ARRIVE_WAIT:
+  case TD_BARRIER_ARRIVE:
+  case TD_BARRIER_WAIT_CPP20:
+  case TD_SEMAPHORE_ACQUIRE:
+  case TD_SEMAPHORE_RELEASE:
+  case TD_SEMAPHORE_TRY_ACQUIRE:
+    return RuntimeLibrary::Cpp;
+  case TD_OMP_TASK:
+  case TD_OMP_TASKWAIT:
+  case TD_OMP_TASKWAIT_DEPS:
+  case TD_OMP_TASKYIELD:
+  case TD_OMP_TASKGROUP_START:
+  case TD_OMP_TASKGROUP_END:
+  case TD_OMP_TASK_WITH_DEPS:
+  case TD_OMP_TASKLOOP:
+  case TD_OMP_TASK_COMPLETE:
+  case TD_OMP_SINGLE_START:
+  case TD_OMP_SINGLE_END:
+  case TD_OMP_MASTER_START:
+  case TD_OMP_MASTER_END:
+  case TD_OMP_ORDERED_START:
+  case TD_OMP_ORDERED_END:
+  case TD_OMP_REDUCE_START:
+  case TD_OMP_REDUCE_END:
+  case TD_OMP_REDUCE_NOWAIT_START:
+  case TD_OMP_REDUCE_NOWAIT_END:
+  case TD_OMP_FOR_STATIC_INIT:
+  case TD_OMP_FOR_STATIC_FINI:
+  case TD_OMP_FOR_DISPATCH_INIT:
+  case TD_OMP_FOR_DISPATCH_NEXT:
+  case TD_OMP_FOR_DISPATCH_FINI:
+  case TD_OMP_SECTIONS_INIT:
+  case TD_OMP_SECTIONS_NEXT:
+  case TD_OMP_SECTIONS_END:
+  case TD_OMP_ATOMIC_START:
+  case TD_OMP_ATOMIC_END:
+  case TD_OMP_FLUSH:
+  case TD_OMP_TARGET:
+  case TD_OMP_TARGET_DATA_BEGIN:
+  case TD_OMP_TARGET_DATA_END:
+    return RuntimeLibrary::OpenMP;
+  case TD_MPI_INIT:
+  case TD_MPI_FINALIZE:
+  case TD_MPI_SEND:
+  case TD_MPI_RECV:
+  case TD_MPI_SENDRECV:
+  case TD_MPI_PROBE:
+  case TD_MPI_ISEND:
+  case TD_MPI_IRECV:
+  case TD_MPI_IPROBE:
+  case TD_MPI_WAIT:
+  case TD_MPI_WAITALL:
+  case TD_MPI_WAITANY:
+  case TD_MPI_WAITSOME:
+  case TD_MPI_TEST:
+  case TD_MPI_TESTALL:
+  case TD_MPI_TESTANY:
+  case TD_MPI_TESTSOME:
+  case TD_MPI_BARRIER:
+  case TD_MPI_BCAST:
+  case TD_MPI_SCATTER:
+  case TD_MPI_GATHER:
+  case TD_MPI_ALLGATHER:
+  case TD_MPI_ALLTOALL:
+  case TD_MPI_REDUCE:
+  case TD_MPI_ALLREDUCE:
+  case TD_MPI_REDUCE_SCATTER:
+  case TD_MPI_SCAN:
+  case TD_MPI_WIN_CREATE:
+  case TD_MPI_WIN_FREE:
+  case TD_MPI_PUT:
+  case TD_MPI_GET:
+  case TD_MPI_ACCUMULATE:
+  case TD_MPI_WIN_FENCE:
+  case TD_MPI_WIN_LOCK:
+  case TD_MPI_WIN_UNLOCK:
+  case TD_MPI_WIN_FLUSH:
+  case TD_MPI_WIN_SYNC:
+  case TD_MPI_WIN_POST:
+  case TD_MPI_WIN_START:
+  case TD_MPI_WIN_COMPLETE:
+  case TD_MPI_WIN_WAIT:
+  case TD_MPI_WIN_TEST:
+  case TD_MPI_COMM_DUP:
+  case TD_MPI_COMM_SPLIT:
+  case TD_MPI_COMM_CREATE:
+  case TD_MPI_COMM_FREE:
+  case TD_MPI_REQUEST_FREE:
+  case TD_MPI_CANCEL:
+    return RuntimeLibrary::MPI;
+  default:
+    return RuntimeLibrary::Unknown;
+  }
+}
+
+bool ThreadAPI::isLibraryEnabled(RuntimeLibrary library) const {
+  switch (library) {
+  case RuntimeLibrary::OpenMP:
+    return m_config.enable_openmp();
+  case RuntimeLibrary::MPI:
+    return m_config.enable_mpi();
+  case RuntimeLibrary::Cpp:
+    return m_config.enable_cpp11();
+  case RuntimeLibrary::LinuxKernel:
+    return m_config.enable_linux_kernel();
+  case RuntimeLibrary::PThread:
+  case RuntimeLibrary::Hare:
+  case RuntimeLibrary::Custom:
+  case RuntimeLibrary::Unknown:
+    return true;
+  }
+  return true;
+}
+
+const ThreadAPI::APIDescription *
+ThreadAPI::lookupDescription(const Function *F) const {
+  if (!F) {
+    return nullptr;
+  }
+  auto it = m_api_descriptions.find(normalizeAPIName(F->getName()));
+  return it != m_api_descriptions.end() ? &it->second : nullptr;
+}
+
+const ThreadAPI::MatchRule *
+ThreadAPI::lookupMatchRule(StringRef normalized_name) const {
+  for (const MatchRule &rule : m_match_rules) {
+    if (rule.kind == MatchKind::Exact) {
+      if (normalized_name.equals(rule.pattern)) {
+        return &rule;
+      }
+      continue;
+    }
+    if (normalized_name.startswith(rule.pattern)) {
+      return &rule;
+    }
+  }
+  return nullptr;
+}
+
+ThreadAPI::TD_TYPE ThreadAPI::getConfiguredType(StringRef normalized_name) const {
+  TDAPIMap::const_iterator it = tdAPIMap.find(normalized_name);
+  if (it != tdAPIMap.end()) {
+    auto desc_it = m_api_descriptions.find(normalized_name.str());
+    if (desc_it == m_api_descriptions.end() ||
+        isLibraryEnabled(desc_it->second.library)) {
+      return it->second;
+    }
+    return TD_DUMMY;
+  }
+  if (const MatchRule *rule = lookupMatchRule(normalized_name)) {
+    return isLibraryEnabled(rule->description.library)
+               ? rule->description.type
+               : TD_DUMMY;
+  }
+  return TD_DUMMY;
+}
+
+ThreadAPI::APIDescription ThreadAPI::describe(const Function *F) const {
+  APIDescription description;
+  if (!F) {
+    return description;
+  }
+  if (const APIDescription *configured = lookupDescription(F)) {
+    return *configured;
+  }
+  std::string normalized_name = normalizeAPIName(F->getName());
+  if (const MatchRule *rule = lookupMatchRule(normalized_name)) {
+    return rule->description;
+  }
+  description.type = getType(F);
+  description.library = inferLibrary(description.type);
+  return description;
+}
+
 ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
   if (!F)
     return TD_DUMMY;
 
   // 1. Exact match (including loaded config)
   std::string nameStr = normalizeAPIName(F->getName());
-  TDAPIMap::const_iterator it = tdAPIMap.find(nameStr);
-  if (it != tdAPIMap.end())
-    return it->second;
+  TD_TYPE configured_type = getConfiguredType(nameStr);
+  if (configured_type != TD_DUMMY) {
+    return configured_type;
+  }
 
   StringRef name = F->getName();
   if (name.startswith("\01"))
@@ -293,101 +606,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
   if (name.startswith("PMPI_"))
     name = name.drop_front(1);
 
-  // 2. OpenMP Support (if enabled)
-  if (m_config.enable_openmp()) {
-    if (OpenMPModel::isFork(name))
-      return TD_FORK;
-    if (OpenMPModel::isBarrier(name))
-      return TD_BAR_WAIT;
-    if (OpenMPModel::isSetLock(name) || OpenMPModel::isSetNestLock(name) ||
-        OpenMPModel::isCriticalStart(name))
-      return TD_ACQUIRE;
-    if (OpenMPModel::isUnsetLock(name) || OpenMPModel::isUnsetNestLock(name) ||
-        OpenMPModel::isCriticalEnd(name))
-      return TD_RELEASE;
-    
-    // OpenMP Task Support (3.0+)
-    if (OpenMPModel::isTask(name))
-      return TD_OMP_TASK;
-    if (OpenMPModel::isTaskwait(name))
-      return TD_OMP_TASKWAIT;
-    if (OpenMPModel::isTaskwaitWithDeps(name))
-      return TD_OMP_TASKWAIT_DEPS;
-    if (OpenMPModel::isTaskyield(name))
-      return TD_OMP_TASKYIELD;
-    if (OpenMPModel::isTaskgroupStart(name))
-      return TD_OMP_TASKGROUP_START;
-    if (OpenMPModel::isTaskgroupEnd(name))
-      return TD_OMP_TASKGROUP_END;
-    if (OpenMPModel::isTaskWithDeps(name))
-      return TD_OMP_TASK_WITH_DEPS;
-    if (OpenMPModel::isTaskloop(name) || OpenMPModel::isTaskloopNoWait(name))
-      return TD_OMP_TASKLOOP;
-    if (OpenMPModel::isTaskDetach(name))
-      return TD_OMP_TASK_COMPLETE;
-    if (OpenMPModel::isSingleStart(name))
-      return TD_OMP_SINGLE_START;
-    if (OpenMPModel::isSingleEnd(name))
-      return TD_OMP_SINGLE_END;
-    if (OpenMPModel::isMasterStart(name))
-      return TD_OMP_MASTER_START;
-    if (OpenMPModel::isMasterEnd(name))
-      return TD_OMP_MASTER_END;
-    if (OpenMPModel::isOrderedStart(name))
-      return TD_OMP_ORDERED_START;
-    if (OpenMPModel::isOrderedEnd(name))
-      return TD_OMP_ORDERED_END;
-    if (OpenMPModel::isReduceStart(name))
-      return TD_OMP_REDUCE_START;
-    if (OpenMPModel::isReduceEnd(name))
-      return TD_OMP_REDUCE_END;
-    if (OpenMPModel::isReduceNowaitStart(name))
-      return TD_OMP_REDUCE_NOWAIT_START;
-    if (OpenMPModel::isReduceNowaitEnd(name))
-      return TD_OMP_REDUCE_NOWAIT_END;
-    if (OpenMPModel::isForStaticInit(name))
-      return TD_OMP_FOR_STATIC_INIT;
-    if (OpenMPModel::isForStaticFini(name))
-      return TD_OMP_FOR_STATIC_FINI;
-    if (OpenMPModel::isForDispatchInit(name))
-      return TD_OMP_FOR_DISPATCH_INIT;
-    if (OpenMPModel::isForDispatchNext(name))
-      return TD_OMP_FOR_DISPATCH_NEXT;
-    if (OpenMPModel::isForDispatchFini(name))
-      return TD_OMP_FOR_DISPATCH_FINI;
-    
-    // OpenMP Sections
-    if (OpenMPModel::isSectionsInit(name))
-      return TD_OMP_SECTIONS_INIT;
-    if (OpenMPModel::isSectionsNext(name))
-      return TD_OMP_SECTIONS_NEXT;
-    if (OpenMPModel::isSectionsEnd(name))
-      return TD_OMP_SECTIONS_END;
-    
-    // OpenMP Atomic
-    if (OpenMPModel::isAtomicStart(name))
-      return TD_OMP_ATOMIC_START;
-    if (OpenMPModel::isAtomicEnd(name))
-      return TD_OMP_ATOMIC_END;
-    
-    // OpenMP Flush
-    if (OpenMPModel::isFlush(name))
-      return TD_OMP_FLUSH;
-    
-    // OpenMP Cancellation
-    if (OpenMPModel::isCancel(name) || OpenMPModel::isCancellationPoint(name))
-      return TD_OMP_CANCEL;
-    
-    // OpenMP Target Offloading
-    if (OpenMPModel::isTargetDataBegin(name))
-      return TD_OMP_TARGET_DATA_BEGIN;
-    if (OpenMPModel::isTargetDataEnd(name))
-      return TD_OMP_TARGET_DATA_END;
-    if (OpenMPModel::isTargetInit(name))
-      return TD_OMP_TARGET;
-  }
-
-  // 3. C++11/17/20 Support (if enabled)
+  // 2. C++11/17/20 Support (if enabled)
   if (m_config.enable_cpp11()) {
     // Basic threading
     if (CppThreadingModel::isFork(name))
@@ -491,124 +710,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_SEMAPHORE_TRY_ACQUIRE;
   }
 
-  // 4. MPI Support (if enabled)
-  if (m_config.enable_mpi()) {
-    // Process management
-    if (MPIModel::isInit(name))
-      return TD_MPI_INIT;
-    if (MPIModel::isFinalize(name))
-      return TD_MPI_FINALIZE;
-      
-    // Point-to-point blocking
-    if (MPIModel::isSend(name))
-      return TD_MPI_SEND;
-    if (MPIModel::isRecv(name))
-      return TD_MPI_RECV;
-    if (MPIModel::isSendrecv(name))
-      return TD_MPI_SENDRECV;
-    if (MPIModel::isProbe(name))
-      return TD_MPI_PROBE;
-      
-    // Point-to-point non-blocking
-    if (MPIModel::isIsend(name))
-      return TD_MPI_ISEND;
-    if (MPIModel::isIrecv(name))
-      return TD_MPI_IRECV;
-    if (MPIModel::isIprobe(name))
-      return TD_MPI_IPROBE;
-      
-    // Synchronization
-    if (MPIModel::isWait(name))
-      return TD_MPI_WAIT;
-    if (MPIModel::isWaitall(name))
-      return TD_MPI_WAITALL;
-    if (MPIModel::isWaitany(name))
-      return TD_MPI_WAITANY;
-    if (MPIModel::isWaitsome(name))
-      return TD_MPI_WAITSOME;
-    if (MPIModel::isTest(name))
-      return TD_MPI_TEST;
-    if (MPIModel::isTestall(name))
-      return TD_MPI_TESTALL;
-    if (MPIModel::isTestany(name))
-      return TD_MPI_TESTANY;
-    if (MPIModel::isTestsome(name))
-      return TD_MPI_TESTSOME;
-    if (MPIModel::isBarrier(name))
-      return TD_MPI_BARRIER;
-      
-    // Collectives
-    if (MPIModel::isBcast(name))
-      return TD_MPI_BCAST;
-    if (MPIModel::isScatter(name))
-      return TD_MPI_SCATTER;
-    if (MPIModel::isGather(name))
-      return TD_MPI_GATHER;
-    if (MPIModel::isAllgather(name))
-      return TD_MPI_ALLGATHER;
-    if (MPIModel::isAlltoall(name))
-      return TD_MPI_ALLTOALL;
-    if (MPIModel::isReduce(name))
-      return TD_MPI_REDUCE;
-    if (MPIModel::isAllreduce(name))
-      return TD_MPI_ALLREDUCE;
-    if (MPIModel::isReduceScatter(name))
-      return TD_MPI_REDUCE_SCATTER;
-    if (MPIModel::isScan(name))
-      return TD_MPI_SCAN;
-      
-    // RMA (one-sided)
-    if (MPIModel::isWinCreate(name))
-      return TD_MPI_WIN_CREATE;
-    if (MPIModel::isWinFree(name))
-      return TD_MPI_WIN_FREE;
-    if (MPIModel::isPut(name))
-      return TD_MPI_PUT;
-    if (MPIModel::isGet(name))
-      return TD_MPI_GET;
-    if (MPIModel::isAccumulate(name))
-      return TD_MPI_ACCUMULATE;
-    
-    // RMA synchronization
-    if (MPIModel::isWinFence(name))
-      return TD_MPI_WIN_FENCE;
-    if (MPIModel::isWinLock(name))
-      return TD_MPI_WIN_LOCK;
-    if (MPIModel::isWinUnlock(name))
-      return TD_MPI_WIN_UNLOCK;
-    if (MPIModel::isWinFlush(name))
-      return TD_MPI_WIN_FLUSH;
-    if (MPIModel::isWinSync(name))
-      return TD_MPI_WIN_SYNC;
-    if (MPIModel::isWinPost(name))
-      return TD_MPI_WIN_POST;
-    if (MPIModel::isWinStart(name))
-      return TD_MPI_WIN_START;
-    if (MPIModel::isWinComplete(name))
-      return TD_MPI_WIN_COMPLETE;
-    if (MPIModel::isWinWait(name))
-      return TD_MPI_WIN_WAIT;
-    if (MPIModel::isWinTest(name))
-      return TD_MPI_WIN_TEST;
-    
-    // Communicator management
-    if (MPIModel::isCommDup(name))
-      return TD_MPI_COMM_DUP;
-    if (MPIModel::isCommSplit(name))
-      return TD_MPI_COMM_SPLIT;
-    if (MPIModel::isCommCreate(name))
-      return TD_MPI_COMM_CREATE;
-    if (MPIModel::isCommFree(name))
-      return TD_MPI_COMM_FREE;
-    
-    // Request management
-    if (MPIModel::isRequestFree(name))
-      return TD_MPI_REQUEST_FREE;
-    if (MPIModel::isCancel(name))
-      return TD_MPI_CANCEL;
-  }
-
-  // 5. Linux Kernel Support (if enabled)
+  // 4. Linux Kernel Support (if enabled)
   if (m_config.enable_linux_kernel()) {
     // Spinlocks
     if (LinuxKernelModel::isSpinLockInit(name))
