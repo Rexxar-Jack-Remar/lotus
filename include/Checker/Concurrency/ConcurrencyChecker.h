@@ -1,6 +1,7 @@
 #ifndef CONCURRENCY_CHECKER_H
 #define CONCURRENCY_CHECKER_H
 
+#include "Analysis/Concurrency/ConcurrencyFacade.h"
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
@@ -137,6 +138,8 @@ public:
     size_t lockMismatchesFound;
     size_t openMPBugsFound;
     size_t mpiBugsFound;
+    OpenMP::OpenMPTaskGraph::AnalysisSummary openMPSummary;
+    ConcurrencyFacade::MPISummary mpiSummary;
   };
 
   Statistics getStatistics() const { return m_stats; }

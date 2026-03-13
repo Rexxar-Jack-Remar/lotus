@@ -12,8 +12,14 @@ __kmpc_critical TD_ACQUIRE library=openmp semantic=critical-enter
 __kmpc_end_critical TD_RELEASE library=openmp semantic=critical-exit
 omp_set_lock TD_ACQUIRE library=openmp semantic=lock
 omp_unset_lock TD_RELEASE library=openmp semantic=unlock
+omp_test_lock TD_TRY_ACQUIRE library=openmp semantic=try-lock
+omp_init_lock TD_MUTEX_INI library=openmp semantic=init-lock
+omp_destroy_lock TD_MUTEX_DESTROY library=openmp semantic=destroy-lock
 omp_set_nest_lock TD_ACQUIRE library=openmp semantic=nest-lock
 omp_unset_nest_lock TD_RELEASE library=openmp semantic=nest-unlock
+omp_test_nest_lock TD_TRY_ACQUIRE library=openmp semantic=nest-try-lock
+omp_init_nest_lock TD_MUTEX_INI library=openmp semantic=init-nest-lock
+omp_destroy_nest_lock TD_MUTEX_DESTROY library=openmp semantic=destroy-nest-lock
 __kmpc_omp_task TD_OMP_TASK library=openmp semantic=task traits=omp-task-op
 __kmpc_omp_task_begin_if0 TD_OMP_TASK library=openmp semantic=task-inline traits=omp-task-op
 __kmpc_omp_taskwait TD_OMP_TASKWAIT library=openmp semantic=taskwait traits=omp-task-op
@@ -45,8 +51,15 @@ __kmpc_atomic_end TD_OMP_ATOMIC_END library=openmp semantic=atomic-end
 __kmpc_flush TD_OMP_FLUSH library=openmp semantic=flush
 __kmpc_cancel TD_OMP_CANCEL library=openmp semantic=cancel
 __kmpc_cancellationpoint TD_OMP_CANCEL library=openmp semantic=cancellation-point
-__tgt_target_data_begin TD_OMP_TARGET_DATA_BEGIN library=openmp semantic=target-data-begin
-__tgt_target_data_end TD_OMP_TARGET_DATA_END library=openmp semantic=target-data-end
+__tgt_target_data_begin TD_OMP_TARGET_DATA_BEGIN library=openmp semantic=target-data-begin traits=omp-target-op,omp-target-data-op
+__tgt_target_data_end TD_OMP_TARGET_DATA_END library=openmp semantic=target-data-end traits=omp-target-op,omp-target-data-op
+__tgt_target_data_update TD_OMP_TARGET_DATA_UPDATE library=openmp semantic=target-data-update traits=omp-target-op,omp-target-data-op
+__tgt_target_data_begin_nowait TD_OMP_TARGET_DATA_BEGIN library=openmp semantic=target-data-begin-nowait traits=omp-target-op,omp-target-data-op
+__tgt_target_data_end_nowait TD_OMP_TARGET_DATA_END library=openmp semantic=target-data-end-nowait traits=omp-target-op,omp-target-data-op
+__tgt_target_data_update_nowait TD_OMP_TARGET_DATA_UPDATE library=openmp semantic=target-data-update-nowait traits=omp-target-op,omp-target-data-op
+__tgt_target_enter_data TD_OMP_TARGET_DATA_BEGIN library=openmp semantic=target-enter-data traits=omp-target-op,omp-target-data-op
+__tgt_target_exit_data TD_OMP_TARGET_DATA_END library=openmp semantic=target-exit-data traits=omp-target-op,omp-target-data-op
+__tgt_target_update TD_OMP_TARGET_DATA_UPDATE library=openmp semantic=target-update traits=omp-target-op,omp-target-data-op
 
 # OpenMP prefix matches
 __kmpc_omp_task_with_deps TD_OMP_TASK_WITH_DEPS library=openmp semantic=task-with-deps traits=omp-task-op match=prefix
@@ -54,7 +67,7 @@ __kmpc_for_static_init TD_OMP_FOR_STATIC_INIT library=openmp semantic=for-static
 __kmpc_dispatch_init TD_OMP_FOR_DISPATCH_INIT library=openmp semantic=dispatch-init traits=omp-task-op match=prefix
 __kmpc_dispatch_next TD_OMP_FOR_DISPATCH_NEXT library=openmp semantic=dispatch-next traits=omp-task-op match=prefix
 __kmpc_dispatch_fini TD_OMP_FOR_DISPATCH_FINI library=openmp semantic=dispatch-fini traits=omp-task-op,barrier-wait-like match=prefix
-__tgt_target TD_OMP_TARGET library=openmp semantic=target match=prefix
+__tgt_target TD_OMP_TARGET library=openmp semantic=target traits=omp-target-op match=prefix
 
 # MPI process management and point-to-point
 MPI_Init TD_MPI_INIT library=mpi semantic=init
@@ -157,6 +170,17 @@ MPI_Comm_split TD_MPI_COMM_SPLIT library=mpi semantic=comm-split
 MPI_Comm_split_type TD_MPI_COMM_SPLIT library=mpi semantic=comm-split-type
 MPI_Comm_create TD_MPI_COMM_CREATE library=mpi semantic=comm-create
 MPI_Comm_create_group TD_MPI_COMM_CREATE library=mpi semantic=comm-create-group
+MPI_Intercomm_create TD_MPI_COMM_CREATE library=mpi semantic=intercomm-create
+MPI_Intercomm_create_from_groups TD_MPI_COMM_CREATE library=mpi semantic=intercomm-create-from-groups
+MPI_Intercomm_merge TD_MPI_COMM_CREATE library=mpi semantic=intercomm-merge
 MPI_Comm_free TD_MPI_COMM_FREE library=mpi semantic=comm-free
+MPI_Comm_disconnect TD_MPI_COMM_FREE library=mpi semantic=comm-disconnect
 MPI_Request_free TD_MPI_REQUEST_FREE library=mpi semantic=request-free
 MPI_Cancel TD_MPI_CANCEL library=mpi semantic=cancel
+MPI_Send_init TD_MPI_PERSISTENT_SEND_INIT library=mpi semantic=persistent-send-init traits=mpi-persistent-init
+MPI_Ssend_init TD_MPI_PERSISTENT_SEND_INIT library=mpi semantic=persistent-ssend-init traits=mpi-persistent-init
+MPI_Bsend_init TD_MPI_PERSISTENT_SEND_INIT library=mpi semantic=persistent-bsend-init traits=mpi-persistent-init
+MPI_Rsend_init TD_MPI_PERSISTENT_SEND_INIT library=mpi semantic=persistent-rsend-init traits=mpi-persistent-init
+MPI_Recv_init TD_MPI_PERSISTENT_RECV_INIT library=mpi semantic=persistent-recv-init traits=mpi-persistent-init
+MPI_Start TD_MPI_REQUEST_START library=mpi semantic=start traits=mpi-request-start
+MPI_Startall TD_MPI_REQUEST_START library=mpi semantic=startall traits=mpi-request-start

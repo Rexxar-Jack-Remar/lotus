@@ -19,12 +19,12 @@ using namespace concurrency;
 
 static cl::opt<std::string>
     InputFilename(cl::Positional, cl::desc("<input file>"), cl::Required);
-static cl::opt<std::string>
-    ChecksList("checks",
-               cl::desc("Comma-separated checks to run: "
-                        "race,deadlock,atomicity,condvar,lock-mismatch,openmp,mpi "
-                        "(overrides individual flags)"),
-               cl::value_desc("list"));
+static cl::opt<std::string> ChecksList(
+    "checks",
+    cl::desc("Comma-separated checks to run: "
+             "race,deadlock,atomicity,condvar,lock-mismatch,openmp,mpi "
+             "(overrides individual flags)"),
+    cl::value_desc("list"));
 static cl::opt<bool> EnableDataRaces("check-data-races",
                                      cl::desc("Enable data race detection"),
                                      cl::init(true));
@@ -43,9 +43,9 @@ static cl::opt<bool> EnableLockMismatch(
     "check-lock-mismatch",
     cl::desc("Enable lock acquisition/release mismatch detection"),
     cl::init(true));
-static cl::opt<bool> EnableOpenMP("check-openmp",
-                                  cl::desc("Enable dedicated OpenMP bug checks"),
-                                  cl::init(true));
+static cl::opt<bool>
+    EnableOpenMP("check-openmp", cl::desc("Enable dedicated OpenMP bug checks"),
+                 cl::init(true));
 static cl::opt<bool> EnableMPI("check-mpi",
                                cl::desc("Enable dedicated MPI bug checks"),
                                cl::init(true));
@@ -153,7 +153,57 @@ int main(int argc, char **argv) {
   outs() << "Cond Var Bugs Found: " << stats.condVarBugsFound << "\n";
   outs() << "Lock Mismatches Found: " << stats.lockMismatchesFound << "\n";
   outs() << "OpenMP Bugs Found: " << stats.openMPBugsFound << "\n";
+  outs() << "  OpenMP Tasks Tracked: " << stats.openMPSummary.task_count
+         << "\n";
+  outs() << "  OpenMP Tasks With Dependencies: "
+         << stats.openMPSummary.task_with_dependencies_count << "\n";
+  outs() << "  OpenMP Included Tasks: "
+         << stats.openMPSummary.included_task_count << "\n";
+  outs() << "  OpenMP Taskloops: " << stats.openMPSummary.taskloop_count
+         << "\n";
+  outs() << "  OpenMP Wait Boundaries: "
+         << stats.openMPSummary.wait_boundary_count << "\n";
+  outs() << "  OpenMP Partial Wait Boundaries: "
+         << stats.openMPSummary.partial_wait_boundary_count << "\n";
+  outs() << "  OpenMP Taskgroups: "
+         << stats.openMPSummary.taskgroup_region_count << "\n";
+  outs() << "  OpenMP Worksharing Regions: "
+         << stats.openMPSummary.single_region_count +
+                stats.openMPSummary.sections_region_count +
+                stats.openMPSummary.worksharing_loop_count +
+                stats.openMPSummary.reduction_region_count +
+                stats.openMPSummary.ordered_region_count +
+                stats.openMPSummary.master_region_count
+         << "\n";
+  outs() << "  OpenMP Atomic Regions: "
+         << stats.openMPSummary.atomic_region_count << "\n";
+  outs() << "  OpenMP Flushes: " << stats.openMPSummary.flush_count << "\n";
+  outs() << "  OpenMP Cancels: " << stats.openMPSummary.cancel_count << "\n";
+  outs() << "  OpenMP Target Regions: "
+         << stats.openMPSummary.target_region_count +
+                stats.openMPSummary.target_data_region_count
+         << "\n";
   outs() << "MPI Bugs Found: " << stats.mpiBugsFound << "\n";
+  outs() << "  MPI Operations Tracked: " << stats.mpiSummary.operation_count
+         << "\n";
+  outs() << "  MPI Nonblocking Operations: "
+         << stats.mpiSummary.nonblocking_operation_count << "\n";
+  outs() << "  MPI Collective Operations: "
+         << stats.mpiSummary.collective_operation_count << "\n";
+  outs() << "  MPI Communicator Management Ops: "
+         << stats.mpiSummary.communicator_management_count << "\n";
+  outs() << "  MPI Request Management Ops: "
+         << stats.mpiSummary.request_management_count << "\n";
+  outs() << "  MPI RMA Data Ops: " << stats.mpiSummary.rma_operation_count
+         << "\n";
+  outs() << "  MPI RMA Sync Ops: " << stats.mpiSummary.rma_sync_count << "\n";
+  outs() << "  MPI Unsynchronized RMA Ops: "
+         << stats.mpiSummary.unsynchronized_rma_count << "\n";
+  outs() << "  MPI RMA Races: " << stats.mpiSummary.rma_race_count << "\n";
+  outs() << "  MPI Leaked Windows: " << stats.mpiSummary.leaked_window_count
+         << "\n";
+  outs() << "  MPI Collective Slots Tracked: "
+         << stats.mpiSummary.collective_slot_count << "\n";
 
   // Post-processing: Suppression and Deduplication
   BugReportMgr &mgr = BugReportMgr::get_instance();

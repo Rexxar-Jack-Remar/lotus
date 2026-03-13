@@ -7,21 +7,22 @@
  */
 
 #include "Analysis/Concurrency/MPI/MPIAnalysis.h"
-#include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
+
 #include "Analysis/Concurrency/MPI/MPIModel.h"
+#include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
 
 #include <algorithm>
+#include <deque>
+#include <functional>
+#include <set>
+#include <string>
+
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Operator.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <deque>
-#include <functional>
-#include <set>
-#include <string>
 
 using namespace llvm;
 
@@ -125,7 +126,8 @@ const Value *traceCommunicatorRoot(const Value *value) {
   return resolved ? resolved : value->stripPointerCasts();
 }
 
-bool sameCommunicatorForProof(const MPIOperation &lhs, const MPIOperation &rhs) {
+bool sameCommunicatorForProof(const MPIOperation &lhs,
+                              const MPIOperation &rhs) {
   if (lhs.communicator_class_id != 0 && rhs.communicator_class_id != 0 &&
       lhs.communicator_class_id == rhs.communicator_class_id) {
     return true;
@@ -215,78 +217,84 @@ bool getIndexedStoreTarget(const StoreInst *store, const Value *base,
 // MPIProcessModel Implementation
 // ============================================================================
 
-MPIOpKind MPIProcessModel::classifyOperation(const Instruction* inst,
+MPIOpKind MPIProcessModel::classifyOperation(const Instruction *inst,
                                              ThreadAPI::TD_TYPE type) const {
   switch (type) {
-    case ThreadAPI::TD_MPI_INIT:
-      return MPIOpKind::INIT;
-    case ThreadAPI::TD_MPI_FINALIZE:
-      return MPIOpKind::FINALIZE;
-    case ThreadAPI::TD_MPI_SEND:
-      return MPIOpKind::SEND_BLOCKING;
-    case ThreadAPI::TD_MPI_RECV:
-      return MPIOpKind::RECV_BLOCKING;
-    case ThreadAPI::TD_MPI_PROBE:
-      return MPIOpKind::PROBE_BLOCKING;
-    case ThreadAPI::TD_MPI_SENDRECV:
-      return MPIOpKind::UNKNOWN;
-    case ThreadAPI::TD_MPI_ISEND:
-      return MPIOpKind::SEND_NONBLOCKING;
-    case ThreadAPI::TD_MPI_IRECV:
-      return MPIOpKind::RECV_NONBLOCKING;
-    case ThreadAPI::TD_MPI_IPROBE:
-      return MPIOpKind::PROBE_NONBLOCKING;
-    case ThreadAPI::TD_MPI_WAIT:
-    case ThreadAPI::TD_MPI_WAITALL:
-    case ThreadAPI::TD_MPI_WAITANY:
-    case ThreadAPI::TD_MPI_WAITSOME:
-      return MPIOpKind::WAIT;
-    case ThreadAPI::TD_MPI_TEST:
-    case ThreadAPI::TD_MPI_TESTALL:
-    case ThreadAPI::TD_MPI_TESTANY:
-    case ThreadAPI::TD_MPI_TESTSOME:
-      return MPIOpKind::TEST;
-    case ThreadAPI::TD_MPI_BARRIER:
-      return thread_api_->isNonBlockingMPIBarrier(inst)
-                 ? MPIOpKind::BARRIER_NONBLOCKING
-                 : MPIOpKind::BARRIER_BLOCKING;
-    case ThreadAPI::TD_MPI_BCAST:
-    case ThreadAPI::TD_MPI_SCATTER:
-    case ThreadAPI::TD_MPI_GATHER:
-    case ThreadAPI::TD_MPI_ALLGATHER:
-    case ThreadAPI::TD_MPI_ALLTOALL:
-    case ThreadAPI::TD_MPI_REDUCE:
-    case ThreadAPI::TD_MPI_ALLREDUCE:
-    case ThreadAPI::TD_MPI_REDUCE_SCATTER:
-    case ThreadAPI::TD_MPI_SCAN:
-      return thread_api_->isNonBlockingMPICollective(inst)
-                 ? MPIOpKind::COLLECTIVE_NONBLOCKING
-                 : MPIOpKind::COLLECTIVE_BLOCKING;
-    case ThreadAPI::TD_MPI_PUT:
-    case ThreadAPI::TD_MPI_GET:
-    case ThreadAPI::TD_MPI_ACCUMULATE:
-      return MPIOpKind::RMA_DATA;
-    case ThreadAPI::TD_MPI_WIN_FENCE:
-    case ThreadAPI::TD_MPI_WIN_LOCK:
-    case ThreadAPI::TD_MPI_WIN_UNLOCK:
-    case ThreadAPI::TD_MPI_WIN_FLUSH:
-    case ThreadAPI::TD_MPI_WIN_SYNC:
-    case ThreadAPI::TD_MPI_WIN_POST:
-    case ThreadAPI::TD_MPI_WIN_START:
-    case ThreadAPI::TD_MPI_WIN_COMPLETE:
-    case ThreadAPI::TD_MPI_WIN_WAIT:
-    case ThreadAPI::TD_MPI_WIN_TEST:
-      return MPIOpKind::RMA_SYNC;
-    case ThreadAPI::TD_MPI_COMM_DUP:
-    case ThreadAPI::TD_MPI_COMM_SPLIT:
-    case ThreadAPI::TD_MPI_COMM_CREATE:
-    case ThreadAPI::TD_MPI_COMM_FREE:
-      return MPIOpKind::COMM_MANAGEMENT;
-    case ThreadAPI::TD_MPI_REQUEST_FREE:
-    case ThreadAPI::TD_MPI_CANCEL:
-      return MPIOpKind::REQUEST_MANAGEMENT;
-    default:
-      return MPIOpKind::UNKNOWN;
+  case ThreadAPI::TD_MPI_INIT:
+    return MPIOpKind::INIT;
+  case ThreadAPI::TD_MPI_FINALIZE:
+    return MPIOpKind::FINALIZE;
+  case ThreadAPI::TD_MPI_SEND:
+    return MPIOpKind::SEND_BLOCKING;
+  case ThreadAPI::TD_MPI_RECV:
+    return MPIOpKind::RECV_BLOCKING;
+  case ThreadAPI::TD_MPI_PROBE:
+    return MPIOpKind::PROBE_BLOCKING;
+  case ThreadAPI::TD_MPI_SENDRECV:
+    return MPIOpKind::UNKNOWN;
+  case ThreadAPI::TD_MPI_ISEND:
+    return MPIOpKind::SEND_NONBLOCKING;
+  case ThreadAPI::TD_MPI_IRECV:
+    return MPIOpKind::RECV_NONBLOCKING;
+  case ThreadAPI::TD_MPI_IPROBE:
+    return MPIOpKind::PROBE_NONBLOCKING;
+  case ThreadAPI::TD_MPI_WAIT:
+  case ThreadAPI::TD_MPI_WAITALL:
+  case ThreadAPI::TD_MPI_WAITANY:
+  case ThreadAPI::TD_MPI_WAITSOME:
+    return MPIOpKind::WAIT;
+  case ThreadAPI::TD_MPI_TEST:
+  case ThreadAPI::TD_MPI_TESTALL:
+  case ThreadAPI::TD_MPI_TESTANY:
+  case ThreadAPI::TD_MPI_TESTSOME:
+    return MPIOpKind::TEST;
+  case ThreadAPI::TD_MPI_BARRIER:
+    return thread_api_->isNonBlockingMPIBarrier(inst)
+               ? MPIOpKind::BARRIER_NONBLOCKING
+               : MPIOpKind::BARRIER_BLOCKING;
+  case ThreadAPI::TD_MPI_BCAST:
+  case ThreadAPI::TD_MPI_SCATTER:
+  case ThreadAPI::TD_MPI_GATHER:
+  case ThreadAPI::TD_MPI_ALLGATHER:
+  case ThreadAPI::TD_MPI_ALLTOALL:
+  case ThreadAPI::TD_MPI_REDUCE:
+  case ThreadAPI::TD_MPI_ALLREDUCE:
+  case ThreadAPI::TD_MPI_REDUCE_SCATTER:
+  case ThreadAPI::TD_MPI_SCAN:
+    return thread_api_->isNonBlockingMPICollective(inst)
+               ? MPIOpKind::COLLECTIVE_NONBLOCKING
+               : MPIOpKind::COLLECTIVE_BLOCKING;
+  case ThreadAPI::TD_MPI_WIN_CREATE:
+  case ThreadAPI::TD_MPI_WIN_FREE:
+    return MPIOpKind::RMA_WINDOW;
+  case ThreadAPI::TD_MPI_PUT:
+  case ThreadAPI::TD_MPI_GET:
+  case ThreadAPI::TD_MPI_ACCUMULATE:
+    return MPIOpKind::RMA_DATA;
+  case ThreadAPI::TD_MPI_WIN_FENCE:
+  case ThreadAPI::TD_MPI_WIN_LOCK:
+  case ThreadAPI::TD_MPI_WIN_UNLOCK:
+  case ThreadAPI::TD_MPI_WIN_FLUSH:
+  case ThreadAPI::TD_MPI_WIN_SYNC:
+  case ThreadAPI::TD_MPI_WIN_POST:
+  case ThreadAPI::TD_MPI_WIN_START:
+  case ThreadAPI::TD_MPI_WIN_COMPLETE:
+  case ThreadAPI::TD_MPI_WIN_WAIT:
+  case ThreadAPI::TD_MPI_WIN_TEST:
+    return MPIOpKind::RMA_SYNC;
+  case ThreadAPI::TD_MPI_COMM_DUP:
+  case ThreadAPI::TD_MPI_COMM_SPLIT:
+  case ThreadAPI::TD_MPI_COMM_CREATE:
+  case ThreadAPI::TD_MPI_COMM_FREE:
+    return MPIOpKind::COMM_MANAGEMENT;
+  case ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT:
+  case ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT:
+  case ThreadAPI::TD_MPI_REQUEST_START:
+  case ThreadAPI::TD_MPI_REQUEST_FREE:
+  case ThreadAPI::TD_MPI_CANCEL:
+    return MPIOpKind::REQUEST_MANAGEMENT;
+  default:
+    return MPIOpKind::UNKNOWN;
   }
 }
 
@@ -356,7 +364,8 @@ size_t MPIProcessModel::assignCommunicatorClass(CommunicatorID canonical) {
   return id;
 }
 
-size_t MPIProcessModel::getCommunicatorClassID(CommunicatorID communicator) const {
+size_t
+MPIProcessModel::getCommunicatorClassID(CommunicatorID communicator) const {
   CommunicatorID canonical = canonicalizeCommunicator(communicator);
   if (!canonical) {
     return 0;
@@ -379,8 +388,8 @@ void MPIProcessModel::annotateRankConstraints(MPIOperation &op) const {
     break;
   case MPI::RankExpr::Range:
     op.protocol_reachability = ProtocolReachability::SomeRanks;
-    op.rank_path_summary = ("rank in [" + std::to_string(rank.range_min) + ", " +
-                            std::to_string(rank.range_max) + "]");
+    op.rank_path_summary = ("rank in [" + std::to_string(rank.range_min) +
+                            ", " + std::to_string(rank.range_max) + "]");
     break;
   case MPI::RankExpr::Symbolic:
     op.protocol_reachability = ProtocolReachability::AllRanks;
@@ -438,7 +447,14 @@ void MPIProcessModel::extractPointToPointDetails(MPIOperation &op,
   }
 
   unsigned num_args = cb->arg_size();
-  if (op.kind == MPIOpKind::SEND_BLOCKING || op.kind == MPIOpKind::SEND_NONBLOCKING) {
+  const bool send_like = op.kind == MPIOpKind::SEND_BLOCKING ||
+                         op.kind == MPIOpKind::SEND_NONBLOCKING ||
+                         op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT;
+  const bool recv_like = op.kind == MPIOpKind::RECV_BLOCKING ||
+                         op.kind == MPIOpKind::RECV_NONBLOCKING ||
+                         op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT;
+
+  if (send_like) {
     if (num_args >= 6) {
       int value = -1;
       if (tryGetConstantInt(cb->getArgOperand(3), value)) {
@@ -452,10 +468,13 @@ void MPIProcessModel::extractPointToPointDetails(MPIOperation &op,
     if (op.kind == MPIOpKind::SEND_NONBLOCKING && num_args >= 7) {
       op.request = cb->getArgOperand(6);
     }
+    if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT && num_args >= 7) {
+      op.request = cb->getArgOperand(6);
+    }
     return;
   }
 
-  if (op.kind == MPIOpKind::RECV_BLOCKING || op.kind == MPIOpKind::RECV_NONBLOCKING) {
+  if (recv_like) {
     if (num_args >= 6) {
       int value = -1;
       if (tryGetConstantInt(cb->getArgOperand(3), value)) {
@@ -467,6 +486,9 @@ void MPIProcessModel::extractPointToPointDetails(MPIOperation &op,
       op.communicator = canonicalizeCommunicator(cb->getArgOperand(5));
     }
     if (op.kind == MPIOpKind::RECV_NONBLOCKING && num_args >= 7) {
+      op.request = cb->getArgOperand(6);
+    }
+    if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT && num_args >= 7) {
       op.request = cb->getArgOperand(6);
     }
   }
@@ -481,7 +503,8 @@ void MPIProcessModel::extractSendrecvDetails(MPIOperation &op,
   unsigned num_args = cb->arg_size();
   int value = -1;
   if (num_args >= 11) {
-    // MPI_Sendrecv(..., dest(3), sendtag(4), ..., source(8), recvtag(9), comm(10), ...)
+    // MPI_Sendrecv(..., dest(3), sendtag(4), ..., source(8), recvtag(9),
+    // comm(10), ...)
     if (op.kind == MPIOpKind::SEND_BLOCKING) {
       if (tryGetConstantInt(cb->getArgOperand(3), value)) {
         op.dest_rank = value;
@@ -502,7 +525,8 @@ void MPIProcessModel::extractSendrecvDetails(MPIOperation &op,
   }
 
   if (num_args >= 8) {
-    // MPI_Sendrecv_replace(..., dest(3), sendtag(4), source(5), recvtag(6), comm(7), ...)
+    // MPI_Sendrecv_replace(..., dest(3), sendtag(4), source(5), recvtag(6),
+    // comm(7), ...)
     if (op.kind == MPIOpKind::SEND_BLOCKING) {
       if (tryGetConstantInt(cb->getArgOperand(3), value)) {
         op.dest_rank = value;
@@ -546,9 +570,8 @@ void MPIProcessModel::extractCollectiveDetails(MPIOperation &op,
   if (!callee) {
     return;
   }
-  const bool nonblocking =
-      op.kind == MPIOpKind::BARRIER_NONBLOCKING ||
-      op.kind == MPIOpKind::COLLECTIVE_NONBLOCKING;
+  const bool nonblocking = op.kind == MPIOpKind::BARRIER_NONBLOCKING ||
+                           op.kind == MPIOpKind::COLLECTIVE_NONBLOCKING;
   unsigned comm_idx = cb->arg_size() - 1;
   if (nonblocking && cb->arg_size() >= 2) {
     comm_idx = cb->arg_size() - 2;
@@ -590,12 +613,52 @@ void MPIProcessModel::extractRequestDetails(MPIOperation &op,
       op.request = cb->getArgOperand(0);
     }
     break;
+  case ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT:
+    if (num_args >= 7) {
+      op.request = cb->getArgOperand(6);
+    }
+    break;
+  case ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT:
+    if (num_args >= 7) {
+      op.request = cb->getArgOperand(6);
+    }
+    break;
+  case ThreadAPI::TD_MPI_REQUEST_START:
+    if (num_args >= 2) {
+      op.request = cb->getArgOperand(1);
+    } else if (num_args >= 1) {
+      op.request = cb->getArgOperand(0);
+    }
+    break;
   default:
     break;
   }
 }
 
-void MPIProcessModel::extractRMADataDetails(MPIOperation &op, const CallBase *cb,
+void MPIProcessModel::extractRMAWindowDetails(MPIOperation &op,
+                                              const CallBase *cb,
+                                              StringRef callee_name) const {
+  if (!cb) {
+    return;
+  }
+  if (callee_name.equals("MPI_Win_create") ||
+      callee_name.equals("MPI_Win_allocate") ||
+      callee_name.equals("MPI_Win_allocate_shared") ||
+      callee_name.equals("MPI_Win_create_dynamic")) {
+    if (cb->arg_size() >= 2) {
+      op.communicator =
+          canonicalizeCommunicator(cb->getArgOperand(cb->arg_size() - 2));
+      op.window = cb->getArgOperand(cb->arg_size() - 1);
+    }
+    return;
+  }
+  if (callee_name.equals("MPI_Win_free") && cb->arg_size() >= 1) {
+    op.window = cb->getArgOperand(0);
+  }
+}
+
+void MPIProcessModel::extractRMADataDetails(MPIOperation &op,
+                                            const CallBase *cb,
                                             StringRef callee_name) const {
   if (!cb) {
     return;
@@ -607,7 +670,8 @@ void MPIProcessModel::extractRMADataDetails(MPIOperation &op, const CallBase *cb
     if (!tryReadScalarInt(cb->getArgOperand(count_idx), count, op.inst)) {
       return;
     }
-    int64_t extent = getDatatypeExtent(cb->getArgOperand(datatype_idx), op.inst);
+    int64_t extent =
+        getDatatypeExtent(cb->getArgOperand(datatype_idx), op.inst);
     if (extent <= 0) {
       return;
     }
@@ -615,7 +679,8 @@ void MPIProcessModel::extractRMADataDetails(MPIOperation &op, const CallBase *cb
   };
   if ((callee_name.equals("MPI_Put") || callee_name.equals("MPI_Rput") ||
        callee_name.equals("MPI_Get") || callee_name.equals("MPI_Rget") ||
-       callee_name.equals("MPI_Accumulate") || callee_name.equals("MPI_Raccumulate")) &&
+       callee_name.equals("MPI_Accumulate") ||
+       callee_name.equals("MPI_Raccumulate")) &&
       num_args >= 8) {
     setByteLength(1, 2);
     if (tryGetConstantInt(cb->getArgOperand(3), value)) {
@@ -678,7 +743,8 @@ void MPIProcessModel::extractRMADataDetails(MPIOperation &op, const CallBase *cb
   }
 }
 
-void MPIProcessModel::extractRMASyncDetails(MPIOperation &op, const CallBase *cb,
+void MPIProcessModel::extractRMASyncDetails(MPIOperation &op,
+                                            const CallBase *cb,
                                             StringRef callee_name) const {
   if (!cb) {
     return;
@@ -734,15 +800,16 @@ void MPIProcessModel::extractRMASyncDetails(MPIOperation &op, const CallBase *cb
     }
     return;
   }
-  if (callee_name.equals("MPI_Win_post") || callee_name.equals("MPI_Win_start")) {
+  if (callee_name.equals("MPI_Win_post") ||
+      callee_name.equals("MPI_Win_start")) {
     if (num_args >= 3) {
       op.window = cb->getArgOperand(2);
     }
   }
 }
 
-void MPIProcessModel::extractOperationDetails(MPIOperation& op) {
-  const CallBase* cb = dyn_cast<CallBase>(op.inst);
+void MPIProcessModel::extractOperationDetails(MPIOperation &op) {
+  const CallBase *cb = dyn_cast<CallBase>(op.inst);
   if (!cb) {
     return;
   }
@@ -777,7 +844,14 @@ void MPIProcessModel::extractOperationDetails(MPIOperation& op) {
     extractCollectiveDetails(op, cb);
     break;
   case MPIOpKind::REQUEST_MANAGEMENT:
+    if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT ||
+        op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT) {
+      extractPointToPointDetails(op, cb);
+    }
     extractRequestDetails(op, cb);
+    break;
+  case MPIOpKind::RMA_WINDOW:
+    extractRMAWindowDetails(op, cb, callee_name);
     break;
   case MPIOpKind::RMA_DATA:
     extractRMADataDetails(op, cb, callee_name);
@@ -793,6 +867,8 @@ void MPIProcessModel::extractOperationDetails(MPIOperation& op) {
 void MPIProcessModel::analyzeModule() {
   all_operations_.clear();
   non_blocking_ops_.clear();
+  persistent_request_templates_.clear();
+  operation_kind_counts_.clear();
   canonical_communicators_.clear();
   communicator_class_ids_.clear();
   next_communicator_class_id_ = 1;
@@ -801,41 +877,46 @@ void MPIProcessModel::analyzeModule() {
   rank_analysis_->analyze();
 
   // Iterate through all instructions in the module
-  for (Function& F : module_) {
+  for (Function &F : module_) {
     for (inst_iterator II = inst_begin(F), E = inst_end(F); II != E; ++II) {
-      Instruction* I = &*II;
-      
-      const Function* callee = thread_api_->getCallee(I);
-      if (!callee) continue;
-      
+      Instruction *I = &*II;
+
+      const Function *callee = thread_api_->getCallee(I);
+      if (!callee)
+        continue;
+
       ThreadAPI::TD_TYPE type = thread_api_->getType(callee);
-      if (type == ThreadAPI::TD_DUMMY) continue;
+      if (type == ThreadAPI::TD_DUMMY)
+        continue;
 
       if (type == ThreadAPI::TD_MPI_SENDRECV) {
         MPIOperation send_op(I, MPIOpKind::SEND_BLOCKING, type);
         extractOperationDetails(send_op);
         annotateRankConstraints(send_op);
         if (send_op.communicator) {
-          send_op.communicator_class_id =
-              assignCommunicatorClass(canonicalizeCommunicator(send_op.communicator));
+          send_op.communicator_class_id = assignCommunicatorClass(
+              canonicalizeCommunicator(send_op.communicator));
         }
         all_operations_.push_back(send_op);
+        ++operation_kind_counts_[send_op.kind];
 
         MPIOperation recv_op(I, MPIOpKind::RECV_BLOCKING, type);
         extractOperationDetails(recv_op);
         annotateRankConstraints(recv_op);
         if (recv_op.communicator) {
-          recv_op.communicator_class_id =
-              assignCommunicatorClass(canonicalizeCommunicator(recv_op.communicator));
+          recv_op.communicator_class_id = assignCommunicatorClass(
+              canonicalizeCommunicator(recv_op.communicator));
         }
         all_operations_.push_back(recv_op);
+        ++operation_kind_counts_[recv_op.kind];
         continue;
       }
-      
+
       // Check if this is an MPI operation
       MPIOpKind kind = classifyOperation(I, type);
-      if (kind == MPIOpKind::UNKNOWN) continue;
-      
+      if (kind == MPIOpKind::UNKNOWN)
+        continue;
+
       // Create operation record
       MPIOperation op(I, kind, type);
       extractOperationDetails(op);
@@ -850,18 +931,21 @@ void MPIProcessModel::analyzeModule() {
           const std::string normalized_name =
               callee ? normalizeMPIName(callee->getName()) : std::string();
           StringRef callee_name = normalized_name;
-          const Value *root = cb->arg_size() >= 1 ? cb->getArgOperand(0) : nullptr;
+          const Value *root =
+              cb->arg_size() >= 1 ? cb->getArgOperand(0) : nullptr;
           if ((callee_name.equals("MPI_Comm_dup") ||
                callee_name.equals("MPI_Comm_dup_with_info") ||
                callee_name.equals("MPI_Comm_idup")) &&
               cb->arg_size() >= 2) {
             registerCommunicatorAlias(cb->getArgOperand(1), root);
-          } else if (callee_name.equals("MPI_Comm_split") && cb->arg_size() >= 4) {
+          } else if (callee_name.equals("MPI_Comm_split") &&
+                     cb->arg_size() >= 4) {
             registerCommunicatorAlias(cb->getArgOperand(3), root);
           } else if (callee_name.equals("MPI_Comm_split_type") &&
                      cb->arg_size() >= 5) {
             registerCommunicatorAlias(cb->getArgOperand(4), root);
-          } else if (callee_name.equals("MPI_Comm_create") && cb->arg_size() >= 3) {
+          } else if (callee_name.equals("MPI_Comm_create") &&
+                     cb->arg_size() >= 3) {
             registerCommunicatorAlias(cb->getArgOperand(2), root);
           } else if (callee_name.equals("MPI_Comm_create_group") &&
                      cb->arg_size() >= 4) {
@@ -869,9 +953,27 @@ void MPIProcessModel::analyzeModule() {
           }
         }
       }
-      
+
       all_operations_.push_back(op);
-      
+      ++operation_kind_counts_[kind];
+
+      if (kind == MPIOpKind::REQUEST_MANAGEMENT && op.request) {
+        if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT ||
+            op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT) {
+          NonBlockingOp persistent_op;
+          persistent_op.issue_inst = I;
+          persistent_op.request = op.request;
+          persistent_op.completion_state = RequestCompletionState::Pending;
+          persistent_op.peer_rank =
+              op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT
+                  ? op.dest_rank
+                  : op.source_rank;
+          persistent_op.tag = op.tag;
+          persistent_op.comm = op.communicator;
+          persistent_request_templates_[op.request] = persistent_op;
+        }
+      }
+
       // Track non-blocking operations
       if (kind == MPIOpKind::SEND_NONBLOCKING ||
           kind == MPIOpKind::RECV_NONBLOCKING ||
@@ -882,7 +984,9 @@ void MPIProcessModel::analyzeModule() {
           nbOp.issue_inst = I;
           nbOp.request = op.request;
           nbOp.completion_state = RequestCompletionState::Pending;
-          nbOp.peer_rank = (kind == MPIOpKind::SEND_NONBLOCKING) ? op.dest_rank : op.source_rank;
+          nbOp.peer_rank = (kind == MPIOpKind::SEND_NONBLOCKING)
+                               ? op.dest_rank
+                               : op.source_rank;
           nbOp.tag = op.tag;
           nbOp.comm = op.communicator;
           non_blocking_ops_[op.request] = nbOp;
@@ -890,7 +994,7 @@ void MPIProcessModel::analyzeModule() {
       }
     }
   }
-  
+
   // Match non-blocking operations with their completions
   matchNonBlockingOps();
 
@@ -901,6 +1005,22 @@ void MPIProcessModel::analyzeModule() {
     }
     errs() << "\n";
   }
+}
+
+size_t MPIAnalysis::getProtocolDiagnosticCount(StringRef key) const {
+  const auto &diagnostics = collective_analysis_.getProtocolDiagnostics();
+  auto it = diagnostics.find(key.str());
+  return it != diagnostics.end() ? it->second : 0;
+}
+
+size_t MPIAnalysis::getOperationCount(MPIOpKind kind) const {
+  const auto &counts = process_model_.getOperationKindCounts();
+  auto it = counts.find(kind);
+  return it != counts.end() ? it->second : 0;
+}
+
+size_t MPIAnalysis::getTrackedWindowCount() const {
+  return rma_analysis_.getTrackedWindowCount();
 }
 
 std::vector<RequestID>
@@ -981,10 +1101,8 @@ MPIProcessModel::collectRequestOperands(const Value *request_arg,
   return requests;
 }
 
-std::vector<int>
-MPIProcessModel::collectCompletedRequestIndices(const Value *indices_arg,
-                                                size_t bound,
-                                                const Instruction *context) const {
+std::vector<int> MPIProcessModel::collectCompletedRequestIndices(
+    const Value *indices_arg, size_t bound, const Instruction *context) const {
   std::set<int> completed;
   if (!indices_arg || bound == 0) {
     return {};
@@ -1015,8 +1133,8 @@ MPIProcessModel::collectCompletedRequestIndices(const Value *indices_arg,
           break;
         }
         const auto *store = dyn_cast<StoreInst>(&inst);
-        const auto *stored_idx = store ? dyn_cast<ConstantInt>(store->getValueOperand())
-                                       : nullptr;
+        const auto *stored_idx =
+            store ? dyn_cast<ConstantInt>(store->getValueOperand()) : nullptr;
         uint64_t array_index = 0;
         if (!stored_idx || !getIndexedStoreTarget(store, base, array_index)) {
           continue;
@@ -1125,7 +1243,8 @@ bool MPIProcessModel::tryReadScalarInt(const Value *scalar_arg, int &out,
       if (!isDirectStoreToLocation(store, base)) {
         continue;
       }
-      if (const auto *stored = dyn_cast<ConstantInt>(store->getValueOperand())) {
+      if (const auto *stored =
+              dyn_cast<ConstantInt>(store->getValueOperand())) {
         seen_values.insert(stored->getSExtValue());
       } else {
         return false;
@@ -1141,7 +1260,24 @@ bool MPIProcessModel::tryReadScalarInt(const Value *scalar_arg, int &out,
 }
 
 void MPIProcessModel::matchNonBlockingOps() {
-  for (const MPIOperation& op : all_operations_) {
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind == MPIOpKind::REQUEST_MANAGEMENT &&
+        op.td_type == ThreadAPI::TD_MPI_REQUEST_START && op.request) {
+      std::vector<RequestID> requests =
+          collectRequestOperands(op.request, op.inst);
+      for (RequestID request : requests) {
+        auto it = persistent_request_templates_.find(request);
+        if (it == persistent_request_templates_.end()) {
+          continue;
+        }
+        NonBlockingOp active_op = it->second;
+        active_op.issue_inst = op.inst;
+        active_op.completion_state = RequestCompletionState::Pending;
+        active_op.wait_inst = nullptr;
+        non_blocking_ops_[request] = active_op;
+      }
+      continue;
+    }
     if (op.kind == MPIOpKind::REQUEST_MANAGEMENT && op.request) {
       std::vector<RequestID> requests =
           collectRequestOperands(op.request, op.inst);
@@ -1160,7 +1296,8 @@ void MPIProcessModel::matchNonBlockingOps() {
     if (!op.request)
       continue;
 
-    std::vector<RequestID> requests = collectRequestOperands(op.request, op.inst);
+    std::vector<RequestID> requests =
+        collectRequestOperands(op.request, op.inst);
     if (requests.empty()) {
       continue;
     }
@@ -1178,18 +1315,20 @@ void MPIProcessModel::matchNonBlockingOps() {
         it->second.completion_state = state;
       }
     };
-    auto markAllMayComplete = [&](const std::vector<RequestID> &pending_requests) {
-      for (RequestID request : pending_requests) {
-        auto it = non_blocking_ops_.find(request);
-        if (it == non_blocking_ops_.end()) {
-          continue;
-        }
-        if (it->second.completion_state == RequestCompletionState::Pending) {
-          it->second.completion_state = RequestCompletionState::MayComplete;
-        }
-        it->second.wait_inst = op.inst;
-      }
-    };
+    auto markAllMayComplete =
+        [&](const std::vector<RequestID> &pending_requests) {
+          for (RequestID request : pending_requests) {
+            auto it = non_blocking_ops_.find(request);
+            if (it == non_blocking_ops_.end()) {
+              continue;
+            }
+            if (it->second.completion_state ==
+                RequestCompletionState::Pending) {
+              it->second.completion_state = RequestCompletionState::MayComplete;
+            }
+            it->second.wait_inst = op.inst;
+          }
+        };
 
     for (RequestID request : requests) {
       markObserved(request);
@@ -1287,8 +1426,8 @@ void MPIProcessModel::matchNonBlockingOps() {
       } else {
         deferred_lowering_stats_["testany_unknown_flag"]++;
       }
-      if (testany_true && selected_known &&
-          selected >= 0 && static_cast<size_t>(selected) < requests.size()) {
+      if (testany_true && selected_known && selected >= 0 &&
+          static_cast<size_t>(selected) < requests.size()) {
         markCompleted(requests[static_cast<size_t>(selected)],
                       RequestCompletionState::MustComplete);
       } else if (testany_true) {
@@ -1375,10 +1514,10 @@ void MPIProcessModel::matchNonBlockingOps() {
   }
 }
 
-std::vector<MPIOperation> 
+std::vector<MPIOperation>
 MPIProcessModel::getOperationsByKind(MPIOpKind kind) const {
   std::vector<MPIOperation> result;
-  for (const MPIOperation& op : all_operations_) {
+  for (const MPIOperation &op : all_operations_) {
     if (op.kind == kind) {
       result.push_back(op);
     }
@@ -1387,22 +1526,22 @@ MPIProcessModel::getOperationsByKind(MPIOpKind kind) const {
 }
 
 MPICommunicationMatch
-MPIProcessModel::classifyCommunicationMatch(const MPIOperation& op1,
-                                            const MPIOperation& op2) const {
+MPIProcessModel::classifyCommunicationMatch(const MPIOperation &op1,
+                                            const MPIOperation &op2) const {
   // One must be send, other must be recv
-  bool op1_is_send = (op1.kind == MPIOpKind::SEND_BLOCKING || 
+  bool op1_is_send = (op1.kind == MPIOpKind::SEND_BLOCKING ||
                       op1.kind == MPIOpKind::SEND_NONBLOCKING);
-  bool op2_is_send = (op2.kind == MPIOpKind::SEND_BLOCKING || 
+  bool op2_is_send = (op2.kind == MPIOpKind::SEND_BLOCKING ||
                       op2.kind == MPIOpKind::SEND_NONBLOCKING);
-  
+
   if (op1_is_send == op2_is_send) {
     return MPICommunicationMatch::NoMatch;
   }
-  
-  const MPIOperation& send = op1_is_send ? op1 : op2;
-  const MPIOperation& recv = op1_is_send ? op2 : op1;
+
+  const MPIOperation &send = op1_is_send ? op1 : op2;
+  const MPIOperation &recv = op1_is_send ? op2 : op1;
   bool precise = true;
-  
+
   // Check if ranks match (send.dest == recv.source process)
   if (!isMPIWildcardValue(send.dest_rank) &&
       !isMPIWildcardValue(recv.source_rank) &&
@@ -1415,11 +1554,11 @@ MPIProcessModel::classifyCommunicationMatch(const MPIOperation& op1,
                             recv.source_rank_min, recv.source_rank_max)) {
     return MPICommunicationMatch::NoMatch;
   } else if (isMPIWildcardValue(send.dest_rank) ||
-             isMPIWildcardValue(recv.source_rank) ||
-             send.dest_rank < 0 || recv.source_rank < 0) {
+             isMPIWildcardValue(recv.source_rank) || send.dest_rank < 0 ||
+             recv.source_rank < 0) {
     precise = false;
   }
-  
+
   // Check if tags match
   if (!isMPIWildcardValue(send.tag) && !isMPIWildcardValue(recv.tag) &&
       send.tag != recv.tag) {
@@ -1429,13 +1568,13 @@ MPIProcessModel::classifyCommunicationMatch(const MPIOperation& op1,
       send.tag < 0 || recv.tag < 0) {
     precise = false;
   }
-  
+
   // Check if communicators match
   if (send.communicator_class_id != 0 && recv.communicator_class_id != 0 &&
       send.communicator_class_id == recv.communicator_class_id) {
     // Proven same communicator class, continue with rank/tag checks only.
   } else if (send.communicator && recv.communicator &&
-      !communicatorsMayAlias(send.communicator, recv.communicator)) {
+             !communicatorsMayAlias(send.communicator, recv.communicator)) {
     return MPICommunicationMatch::NoMatch;
   } else {
     precise = false;
@@ -1445,17 +1584,17 @@ MPIProcessModel::classifyCommunicationMatch(const MPIOperation& op1,
                  : MPICommunicationMatch::MayMatch;
 }
 
-bool MPIProcessModel::canCommunicate(const MPIOperation& op1, 
-                                     const MPIOperation& op2) const {
+bool MPIProcessModel::canCommunicate(const MPIOperation &op1,
+                                     const MPIOperation &op2) const {
   MPICommunicationMatch match = classifyCommunicationMatch(op1, op2);
   return match == MPICommunicationMatch::MustMatch ||
          match == MPICommunicationMatch::MayMatch;
 }
 
-std::vector<MPIProcessModel::NonBlockingOp> 
+std::vector<MPIProcessModel::NonBlockingOp>
 MPIProcessModel::findOrphanedNonBlockingOps() const {
   std::vector<NonBlockingOp> orphaned;
-  for (const auto& pair : non_blocking_ops_) {
+  for (const auto &pair : non_blocking_ops_) {
     if (pair.second.completion_state == RequestCompletionState::Pending) {
       orphaned.push_back(pair.second);
     }
@@ -1463,9 +1602,9 @@ MPIProcessModel::findOrphanedNonBlockingOps() const {
   return orphaned;
 }
 
-std::vector<std::pair<const Instruction*, const Instruction*>>
+std::vector<std::pair<const Instruction *, const Instruction *>>
 MPIProcessModel::findPotentialDeadlocks() const {
-  std::vector<std::pair<const Instruction*, const Instruction*>> deadlocks;
+  std::vector<std::pair<const Instruction *, const Instruction *>> deadlocks;
 
   std::map<const Function *, std::vector<const MPIOperation *>> ops_by_func;
   for (const MPIOperation &op : all_operations_) {
@@ -1511,7 +1650,8 @@ MPIProcessModel::findPotentialDeadlocks() const {
       return op.process_rank.concrete_value == rank;
     }
     if (op.process_rank.kind == MPI::RankExpr::Range) {
-      return rank >= op.process_rank.range_min && rank <= op.process_rank.range_max;
+      return rank >= op.process_rank.range_min &&
+             rank <= op.process_rank.range_max;
     }
     return true;
   };
@@ -1552,7 +1692,8 @@ MPIProcessModel::findPotentialDeadlocks() const {
     }
   }
 
-  std::set<std::pair<const Instruction *, const Instruction *>> unique_deadlocks;
+  std::set<std::pair<const Instruction *, const Instruction *>>
+      unique_deadlocks;
 
   std::vector<size_t> stack;
   std::vector<int> color(wait_states.size(), 0);
@@ -1634,8 +1775,8 @@ void MPICollectiveAnalysis::analyzeCollectives() {
     out = ci->getSExtValue();
     return true;
   };
-  
-  for (const MPIOperation& op : process_model_.getAllOperations()) {
+
+  for (const MPIOperation &op : process_model_.getAllOperations()) {
     if (op.kind == MPIOpKind::COLLECTIVE_BLOCKING ||
         op.kind == MPIOpKind::COLLECTIVE_NONBLOCKING ||
         op.kind == MPIOpKind::BARRIER_BLOCKING ||
@@ -1646,22 +1787,24 @@ void MPICollectiveAnalysis::analyzeCollectives() {
       call.comm = op.communicator;
       call.communicator_class_id = op.communicator_class_id;
       call.function = op.function;
-      call.sequence_index =
-          sequence_by_function_and_comm[{op.communicator_class_id, op.function}]++;
+      call.sequence_index = sequence_by_function_and_comm[{
+          op.communicator_class_id, op.function}]++;
       protocol_diagnostics_["collective_slots_tracked"]++;
       if (op.protocol_reachability != ProtocolReachability::AllRanks) {
         protocol_diagnostics_["collective_partial_reachability"]++;
       }
-      
+
       // Extract root rank for operations that need it
-      if (op.td_type == ThreadAPI::TD_MPI_BCAST || 
+      if (op.td_type == ThreadAPI::TD_MPI_BCAST ||
           op.td_type == ThreadAPI::TD_MPI_REDUCE ||
           op.td_type == ThreadAPI::TD_MPI_GATHER ||
           op.td_type == ThreadAPI::TD_MPI_SCATTER) {
-        const CallBase* CB = dyn_cast<CallBase>(op.inst);
+        const CallBase *CB = dyn_cast<CallBase>(op.inst);
         int root_arg = getRootArgIndex(op.td_type);
-        if (CB && root_arg >= 0 && static_cast<unsigned>(root_arg) < CB->arg_size()) {
-          if (const ConstantInt* root = dyn_cast<ConstantInt>(CB->getArgOperand(root_arg))) {
+        if (CB && root_arg >= 0 &&
+            static_cast<unsigned>(root_arg) < CB->arg_size()) {
+          if (const ConstantInt *root =
+                  dyn_cast<ConstantInt>(CB->getArgOperand(root_arg))) {
             call.root_rank = root->getSExtValue();
           }
         }
@@ -1710,7 +1853,7 @@ void MPICollectiveAnalysis::analyzeCollectives() {
           break;
         }
       }
-      
+
       collective_calls_.push_back(call);
     }
   }
@@ -1731,7 +1874,7 @@ int MPICollectiveAnalysis::getRootArgIndex(ThreadAPI::TD_TYPE type) {
 }
 
 bool MPICollectiveAnalysis::areCollectivesCompatible(
-    const CollectiveCall& c1, const CollectiveCall& c2) const {
+    const CollectiveCall &c1, const CollectiveCall &c2) const {
   // Calls on different or unknown communicators are not comparable here.
   // We only prove incompatibility when both are known to be in the same
   // communicator class.
@@ -1746,10 +1889,12 @@ bool MPICollectiveAnalysis::areCollectivesCompatible(
   }
 
   // Same communicator must use compatible collective kinds.
-  if (c1.type != c2.type) return false;
-  
+  if (c1.type != c2.type)
+    return false;
+
   // For rooted collectives, check root
-  if (c1.root_rank != -1 && c2.root_rank != -1 && c1.root_rank != c2.root_rank) {
+  if (c1.root_rank != -1 && c2.root_rank != -1 &&
+      c1.root_rank != c2.root_rank) {
     return false;
   }
   if (c1.count != -1 && c2.count != -1 && c1.count != c2.count) {
@@ -1773,11 +1918,11 @@ bool MPICollectiveAnalysis::areCollectivesCompatible(
   if (c1.in_place != c2.in_place) {
     return false;
   }
-  
+
   return true;
 }
 
-std::vector<std::pair<MPICollectiveAnalysis::CollectiveCall, 
+std::vector<std::pair<MPICollectiveAnalysis::CollectiveCall,
                       MPICollectiveAnalysis::CollectiveCall>>
 MPICollectiveAnalysis::findMismatchedCollectives() const {
   std::vector<std::pair<CollectiveCall, CollectiveCall>> mismatches;
@@ -1824,15 +1969,15 @@ MPICollectiveAnalysis::findMismatchedCollectives() const {
   return mismatches;
 }
 
-std::vector<const Instruction*> 
+std::vector<const Instruction *>
 MPICollectiveAnalysis::findConditionalCollectives() const {
-  std::vector<const Instruction*> conditional;
+  std::vector<const Instruction *> conditional;
   MPI::MPIRankAnalysis rank_analysis(
       const_cast<Module &>(process_model_.getModule()));
   rank_analysis.analyze();
 
-  for (const CollectiveCall& call : collective_calls_) {
-    const BasicBlock* BB = call.inst->getParent();
+  for (const CollectiveCall &call : collective_calls_) {
+    const BasicBlock *BB = call.inst->getParent();
 
     MPI::RankExpr rank = rank_analysis.getRankAtInstruction(call.inst);
     if (rank.kind == MPI::RankExpr::Concrete ||
@@ -1860,7 +2005,7 @@ MPICollectiveAnalysis::findConditionalCollectives() const {
       conditional.push_back(call.inst);
     }
   }
-  
+
   return conditional;
 }
 
@@ -1871,22 +2016,22 @@ MPICollectiveAnalysis::findConditionalCollectives() const {
 void MPIRMAAnalysis::analyzeRMA() {
   windows_.clear();
   rma_operations_.clear();
-  
+
   // First pass: identify windows
-  for (const MPIOperation& op : process_model_.getAllOperations()) {
+  for (const MPIOperation &op : process_model_.getAllOperations()) {
     if (op.td_type == ThreadAPI::TD_MPI_WIN_CREATE) {
       RMAWindow window;
       window.window = nullptr; // Would need to extract from call
       window.create_inst = op.inst;
-      
+
       // Extract window handle (typically last argument)
-      const CallBase* CB = dyn_cast<CallBase>(op.inst);
+      const CallBase *CB = dyn_cast<CallBase>(op.inst);
       if (CB && CB->arg_size() > 0) {
         window.window = CB->getArgOperand(CB->arg_size() - 1);
         windows_[window.window] = window;
       }
     } else if (op.td_type == ThreadAPI::TD_MPI_WIN_FREE) {
-      const CallBase* CB = dyn_cast<CallBase>(op.inst);
+      const CallBase *CB = dyn_cast<CallBase>(op.inst);
       if (CB && CB->arg_size() > 0) {
         WindowID win = CB->getArgOperand(0);
         auto it = windows_.find(win);
@@ -1896,7 +2041,7 @@ void MPIRMAAnalysis::analyzeRMA() {
       }
     }
   }
-  
+
   struct PendingEpoch {
     SyncModel model = SyncModel::NONE;
     const Instruction *start = nullptr;
@@ -1910,7 +2055,7 @@ void MPIRMAAnalysis::analyzeRMA() {
   size_t next_epoch_id = 1;
 
   // Second pass: collect RMA operations and sync
-  for (const MPIOperation& op : process_model_.getAllOperations()) {
+  for (const MPIOperation &op : process_model_.getAllOperations()) {
     if (op.kind == MPIOpKind::RMA_DATA) {
       RMAOperation rma_op;
       rma_op.inst = op.inst;
@@ -2003,7 +2148,8 @@ void MPIRMAAnalysis::analyzeRMA() {
         break;
       case ThreadAPI::TD_MPI_WIN_FLUSH:
       case ThreadAPI::TD_MPI_WIN_SYNC:
-        // Completion/refinement only. They do not start a synchronization epoch.
+        // Completion/refinement only. They do not start a synchronization
+        // epoch.
         break;
       case ThreadAPI::TD_MPI_WIN_START:
         epoch.model = SyncModel::PSCW;
@@ -2030,8 +2176,8 @@ void MPIRMAAnalysis::analyzeRMA() {
       case ThreadAPI::TD_MPI_WIN_POST:
       case ThreadAPI::TD_MPI_WIN_WAIT:
       case ThreadAPI::TD_MPI_WIN_TEST:
-        // Exposure-side PSCW synchronization does not itself open a local access
-        // epoch, but it should not discard an already-open access epoch.
+        // Exposure-side PSCW synchronization does not itself open a local
+        // access epoch, but it should not discard an already-open access epoch.
         break;
       default:
         break;
@@ -2040,15 +2186,16 @@ void MPIRMAAnalysis::analyzeRMA() {
   }
 }
 
-MPIRMAAnalysis::SyncModel 
-MPIRMAAnalysis::determineSyncModel(const RMAOperation& op) const {
+MPIRMAAnalysis::SyncModel
+MPIRMAAnalysis::determineSyncModel(const RMAOperation &op) const {
   return op.sync_model;
 }
 
-bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation& op1, 
-                                         const RMAOperation& op2) const {
+bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation &op1,
+                                          const RMAOperation &op2) const {
   // Same window
-  if (op1.window != op2.window) return false;
+  if (op1.window != op2.window)
+    return false;
   if (!rangesOverlap(op1.target_rank, op1.target_rank, op2.target_rank,
                      op2.target_rank) &&
       !rangesOverlap(op1.target_rank_min, op1.target_rank_max,
@@ -2064,25 +2211,28 @@ bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation& op1,
       return false;
     }
   }
-  
+
   // At least one is a write (put or accumulate)
-  const CallBase* CB1 = dyn_cast<CallBase>(op1.inst);
-  const CallBase* CB2 = dyn_cast<CallBase>(op2.inst);
-  if (!CB1 || !CB2) return false;
-  
-  const Function* F1 = CB1->getCalledFunction();
-  const Function* F2 = CB2->getCalledFunction();
-  if (!F1 || !F2) return false;
+  const CallBase *CB1 = dyn_cast<CallBase>(op1.inst);
+  const CallBase *CB2 = dyn_cast<CallBase>(op2.inst);
+  if (!CB1 || !CB2)
+    return false;
+
+  const Function *F1 = CB1->getCalledFunction();
+  const Function *F2 = CB2->getCalledFunction();
+  if (!F1 || !F2)
+    return false;
 
   ThreadAPI::TD_TYPE t1 = thread_api_->getType(F1);
   ThreadAPI::TD_TYPE t2 = thread_api_->getType(F2);
-  bool op1_is_write = (t1 == ThreadAPI::TD_MPI_PUT ||
-                       t1 == ThreadAPI::TD_MPI_ACCUMULATE);
-  bool op2_is_write = (t2 == ThreadAPI::TD_MPI_PUT ||
-                       t2 == ThreadAPI::TD_MPI_ACCUMULATE);
-  
-  if (!op1_is_write && !op2_is_write) return false; // Both reads
-  
+  bool op1_is_write =
+      (t1 == ThreadAPI::TD_MPI_PUT || t1 == ThreadAPI::TD_MPI_ACCUMULATE);
+  bool op2_is_write =
+      (t2 == ThreadAPI::TD_MPI_PUT || t2 == ThreadAPI::TD_MPI_ACCUMULATE);
+
+  if (!op1_is_write && !op2_is_write)
+    return false; // Both reads
+
   // Different sync models or no sync
   if (op1.sync_model == SyncModel::NONE || op2.sync_model == SyncModel::NONE) {
     return true;
@@ -2098,7 +2248,8 @@ bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation& op1,
     const auto *rhs_cb = dyn_cast_or_null<CallBase>(rhs);
     const Function *lhs_callee = lhs_cb ? lhs_cb->getCalledFunction() : nullptr;
     const Function *rhs_callee = rhs_cb ? rhs_cb->getCalledFunction() : nullptr;
-    return lhs_callee && rhs_callee && lhs_callee->getName() == rhs_callee->getName();
+    return lhs_callee && rhs_callee &&
+           lhs_callee->getName() == rhs_callee->getName();
   };
   if (op1.sync_start && op1.sync_end && op2.sync_start && op2.sync_end &&
       sameSyncSiteShape(op1.sync_start, op2.sync_start) &&
@@ -2107,15 +2258,15 @@ bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation& op1,
   }
 
   // Two different ranks/process contexts using the same synchronization regime
-  // can still race on the same location. Without a stronger cross-process proof,
-  // keep the race report.
+  // can still race on the same location. Without a stronger cross-process
+  // proof, keep the race report.
   return true;
 }
 
-std::vector<MPIRMAAnalysis::RMAOperation> 
+std::vector<MPIRMAAnalysis::RMAOperation>
 MPIRMAAnalysis::findUnsynchronizedRMAOps() const {
   std::vector<RMAOperation> unsync;
-  for (const RMAOperation& op : rma_operations_) {
+  for (const RMAOperation &op : rma_operations_) {
     if (op.sync_model == SyncModel::NONE) {
       unsync.push_back(op);
     }
@@ -2123,10 +2274,11 @@ MPIRMAAnalysis::findUnsynchronizedRMAOps() const {
   return unsync;
 }
 
-std::vector<std::pair<MPIRMAAnalysis::RMAOperation, MPIRMAAnalysis::RMAOperation>>
+std::vector<
+    std::pair<MPIRMAAnalysis::RMAOperation, MPIRMAAnalysis::RMAOperation>>
 MPIRMAAnalysis::findRMARaces() const {
   std::vector<std::pair<RMAOperation, RMAOperation>> races;
-  
+
   for (size_t i = 0; i < rma_operations_.size(); ++i) {
     for (size_t j = i + 1; j < rma_operations_.size(); ++j) {
       if (areRMAOpsConflicting(rma_operations_[i], rma_operations_[j])) {
@@ -2134,13 +2286,13 @@ MPIRMAAnalysis::findRMARaces() const {
       }
     }
   }
-  
+
   return races;
 }
 
 std::vector<WindowID> MPIRMAAnalysis::findLeakedWindows() const {
   std::vector<WindowID> leaked;
-  for (const auto& pair : windows_) {
+  for (const auto &pair : windows_) {
     if (!pair.second.free_inst) {
       leaked.push_back(pair.first);
     }
@@ -2155,92 +2307,199 @@ std::vector<WindowID> MPIRMAAnalysis::findLeakedWindows() const {
 void MPIAnalysis::runAnalysis() {
   // Run process model analysis
   process_model_.analyzeModule();
-  
+
   // Run collective analysis
   collective_analysis_.analyzeCollectives();
-  
+
   // Run RMA analysis
   rma_analysis_.analyzeRMA();
-  
+
   // Collect results
   results_.orphaned_requests = process_model_.findOrphanedNonBlockingOps();
   results_.potential_deadlocks = process_model_.findPotentialDeadlocks();
-  results_.mismatched_collectives = collective_analysis_.findMismatchedCollectives();
-  results_.conditional_collectives = collective_analysis_.findConditionalCollectives();
+  results_.mismatched_collectives =
+      collective_analysis_.findMismatchedCollectives();
+  results_.conditional_collectives =
+      collective_analysis_.findConditionalCollectives();
   results_.unsynchronized_rma = rma_analysis_.findUnsynchronizedRMAOps();
   results_.rma_races = rma_analysis_.findRMARaces();
   results_.leaked_windows = rma_analysis_.findLeakedWindows();
 }
 
-void MPIAnalysis::printResults(raw_ostream& OS) const {
+void MPIAnalysis::printResults(raw_ostream &OS) const {
+  const auto &operations = process_model_.getAllOperations();
+  const auto &deferred = process_model_.getDeferredLoweringStats();
+
+  auto countRequestStates = [&](RequestCompletionState state) {
+    auto requestStatePriority = [](RequestCompletionState value) {
+      switch (value) {
+      case RequestCompletionState::Pending:
+        return 0;
+      case RequestCompletionState::MayComplete:
+        return 1;
+      case RequestCompletionState::MustComplete:
+        return 2;
+      case RequestCompletionState::Terminal:
+        return 3;
+      }
+      return 0;
+    };
+
+    std::unordered_map<RequestID, RequestCompletionState> request_states;
+    for (const auto &op : operations) {
+      if (op.kind != MPIOpKind::SEND_NONBLOCKING &&
+          op.kind != MPIOpKind::RECV_NONBLOCKING &&
+          op.kind != MPIOpKind::BARRIER_NONBLOCKING &&
+          op.kind != MPIOpKind::COLLECTIVE_NONBLOCKING) {
+        continue;
+      }
+      if (!op.request) {
+        continue;
+      }
+      auto it = request_states.find(op.request);
+      if (it == request_states.end() || requestStatePriority(op.request_state) >
+                                            requestStatePriority(it->second)) {
+        request_states[op.request] = op.request_state;
+      }
+    }
+
+    size_t count = 0;
+    for (const auto &entry : request_states) {
+      if (entry.second == state) {
+        ++count;
+      }
+    }
+    return count;
+  };
+
+  size_t deferred_total = 0;
+  for (const auto &entry : deferred) {
+    deferred_total += entry.second;
+  }
+
   OS << "========================================\n";
   OS << "MPI Analysis Results\n";
   OS << "========================================\n\n";
-  
-  OS << "Total MPI operations found: " << process_model_.getAllOperations().size() << "\n\n";
-  
+
+  OS << "Total MPI operations found: " << operations.size() << "\n";
+  OS << "MPI init/finalize ops: " << getOperationCount(MPIOpKind::INIT) << "/"
+     << getOperationCount(MPIOpKind::FINALIZE) << "\n";
+  OS << "Blocking point-to-point ops: "
+     << getOperationCount(MPIOpKind::SEND_BLOCKING) +
+            getOperationCount(MPIOpKind::RECV_BLOCKING)
+     << "\n";
+  OS << "Non-blocking MPI operations: "
+     << getOperationCount(MPIOpKind::SEND_NONBLOCKING) +
+            getOperationCount(MPIOpKind::RECV_NONBLOCKING) +
+            getOperationCount(MPIOpKind::BARRIER_NONBLOCKING) +
+            getOperationCount(MPIOpKind::COLLECTIVE_NONBLOCKING)
+     << "\n";
+  OS << "  Non-blocking point-to-point ops: "
+     << getOperationCount(MPIOpKind::SEND_NONBLOCKING) +
+            getOperationCount(MPIOpKind::RECV_NONBLOCKING)
+     << "\n";
+  OS << "  Probe ops (blocking/non-blocking): "
+     << getOperationCount(MPIOpKind::PROBE_BLOCKING) << "/"
+     << getOperationCount(MPIOpKind::PROBE_NONBLOCKING) << "\n";
+  OS << "  Wait/Test ops: " << getOperationCount(MPIOpKind::WAIT) << "/"
+     << getOperationCount(MPIOpKind::TEST) << "\n";
+  OS << "Collective/barrier operations: "
+     << getOperationCount(MPIOpKind::BARRIER_BLOCKING) +
+            getOperationCount(MPIOpKind::BARRIER_NONBLOCKING) +
+            getOperationCount(MPIOpKind::COLLECTIVE_BLOCKING) +
+            getOperationCount(MPIOpKind::COLLECTIVE_NONBLOCKING)
+     << "\n";
+  OS << "  Blocking collective/barrier ops: "
+     << getOperationCount(MPIOpKind::BARRIER_BLOCKING) +
+            getOperationCount(MPIOpKind::COLLECTIVE_BLOCKING)
+     << "\n";
+  OS << "  Non-blocking collective/barrier ops: "
+     << getOperationCount(MPIOpKind::BARRIER_NONBLOCKING) +
+            getOperationCount(MPIOpKind::COLLECTIVE_NONBLOCKING)
+     << "\n";
+  OS << "Communicator management ops: "
+     << getOperationCount(MPIOpKind::COMM_MANAGEMENT) << "\n";
+  OS << "Request management ops: "
+     << getOperationCount(MPIOpKind::REQUEST_MANAGEMENT) << "\n";
+  OS << "RMA window lifecycle ops: " << getOperationCount(MPIOpKind::RMA_WINDOW)
+     << "\n";
+  OS << "RMA data ops: " << getOperationCount(MPIOpKind::RMA_DATA) << "\n";
+  OS << "RMA sync ops: " << getOperationCount(MPIOpKind::RMA_SYNC) << "\n";
+  OS << "Collective protocol slots tracked: "
+     << getProtocolDiagnosticCount("collective_slots_tracked") << "\n";
+  OS << "Collective partial-reachability observations: "
+     << getProtocolDiagnosticCount("collective_partial_reachability") << "\n";
+  OS << "Requests with may-complete status: "
+     << countRequestStates(RequestCompletionState::MayComplete) << "\n";
+  OS << "Requests with terminal status: "
+     << countRequestStates(RequestCompletionState::Terminal) << "\n";
+  OS << "Deferred MPI semantic lowering total: " << deferred_total << "\n\n";
+
   // Orphaned requests
-  OS << "Orphaned non-blocking operations: " << results_.orphaned_requests.size() << "\n";
-  for (const auto& req : results_.orphaned_requests) {
+  OS << "Orphaned non-blocking operations: "
+     << results_.orphaned_requests.size() << "\n";
+  for (const auto &req : results_.orphaned_requests) {
     OS << "  ";
     req.issue_inst->print(OS);
     OS << "\n";
   }
   OS << "\n";
-  
+
   // Potential deadlocks
   OS << "Potential deadlocks: " << results_.potential_deadlocks.size() << "\n";
-  for (const auto& pair : results_.potential_deadlocks) {
+  for (const auto &pair : results_.potential_deadlocks) {
     OS << "  Send: ";
     pair.first->print(OS);
     OS << "\n  Recv: ";
     pair.second->print(OS);
     OS << "\n\n";
   }
-  
+
   // Mismatched collectives
-  OS << "Mismatched collectives: " << results_.mismatched_collectives.size() << "\n";
-  for (const auto& pair : results_.mismatched_collectives) {
+  OS << "Mismatched collectives: " << results_.mismatched_collectives.size()
+     << "\n";
+  for (const auto &pair : results_.mismatched_collectives) {
     OS << "  Collective 1: ";
     pair.first.inst->print(OS);
     OS << "\n  Collective 2: ";
     pair.second.inst->print(OS);
     OS << "\n\n";
   }
-  
+
   // Conditional collectives
-  OS << "Conditional collectives (may not be called by all processes): " 
+  OS << "Conditional collectives (may not be called by all processes): "
      << results_.conditional_collectives.size() << "\n";
-  for (const auto* inst : results_.conditional_collectives) {
+  for (const auto *inst : results_.conditional_collectives) {
     OS << "  ";
     inst->print(OS);
     OS << "\n";
   }
   OS << "\n";
-  
+
   // Unsynchronized RMA
-  OS << "Unsynchronized RMA operations: " << results_.unsynchronized_rma.size() << "\n";
-  for (const auto& op : results_.unsynchronized_rma) {
+  OS << "Unsynchronized RMA operations: " << results_.unsynchronized_rma.size()
+     << "\n";
+  for (const auto &op : results_.unsynchronized_rma) {
     OS << "  ";
     op.inst->print(OS);
     OS << "\n";
   }
   OS << "\n";
-  
+
   // RMA races
   OS << "Potential RMA data races: " << results_.rma_races.size() << "\n";
-  for (const auto& pair : results_.rma_races) {
+  for (const auto &pair : results_.rma_races) {
     OS << "  Op 1: ";
     pair.first.inst->print(OS);
     OS << "\n  Op 2: ";
     pair.second.inst->print(OS);
     OS << "\n\n";
   }
-  
+
   // Leaked windows
+  OS << "Tracked RMA windows: " << getTrackedWindowCount() << "\n";
   OS << "Leaked RMA windows: " << results_.leaked_windows.size() << "\n\n";
 
-  const auto &deferred = process_model_.getDeferredLoweringStats();
   if (!deferred.empty()) {
     OS << "Deferred MPI semantic lowering:\n";
     for (const auto &entry : deferred) {
@@ -2248,7 +2507,7 @@ void MPIAnalysis::printResults(raw_ostream& OS) const {
     }
     OS << "\n";
   }
-  
+
   OS << "========================================\n";
 }
 

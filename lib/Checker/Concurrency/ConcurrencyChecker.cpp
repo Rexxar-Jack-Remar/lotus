@@ -52,8 +52,7 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
       BugDescription::BC_ERROR,
       "Selective task wait may leave sibling tasks unsynchronized");
   m_mpiOrphanedRequestTypeId = mgr.register_bug_type(
-      "MPI Orphaned Request", BugDescription::BI_HIGH,
-      BugDescription::BC_ERROR,
+      "MPI Orphaned Request", BugDescription::BI_HIGH, BugDescription::BC_ERROR,
       "Non-blocking MPI request without matching completion");
   m_mpiDeadlockTypeId = mgr.register_bug_type(
       "MPI Deadlock", BugDescription::BI_HIGH, BugDescription::BC_ERROR,
@@ -66,16 +65,16 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
       "MPI Conditional Collective", BugDescription::BI_HIGH,
       BugDescription::BC_ERROR,
       "Collective may be executed only by a subset of ranks");
-  m_mpiUnsyncRMATypeId = mgr.register_bug_type(
-      "MPI Unsynchronized RMA", BugDescription::BI_HIGH,
-      BugDescription::BC_ERROR,
-      "RMA operation without recognized synchronization");
+  m_mpiUnsyncRMATypeId =
+      mgr.register_bug_type("MPI Unsynchronized RMA", BugDescription::BI_HIGH,
+                            BugDescription::BC_ERROR,
+                            "RMA operation without recognized synchronization");
   m_mpiRMARaceTypeId = mgr.register_bug_type(
       "MPI RMA Race", BugDescription::BI_HIGH, BugDescription::BC_ERROR,
       "Conflicting RMA operations without sufficient synchronization");
   m_mpiWindowLeakTypeId = mgr.register_bug_type(
-      "MPI Window Leak", BugDescription::BI_MEDIUM,
-      BugDescription::BC_ERROR, "RMA window may not be freed");
+      "MPI Window Leak", BugDescription::BI_MEDIUM, BugDescription::BC_ERROR,
+      "RMA window may not be freed");
 
   m_stats.totalInstructions = 0;
   m_stats.mhpPairs = 0;
@@ -87,6 +86,8 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
   m_stats.lockMismatchesFound = 0;
   m_stats.openMPBugsFound = 0;
   m_stats.mpiBugsFound = 0;
+  m_stats.openMPSummary = OpenMP::OpenMPTaskGraph::AnalysisSummary{};
+  m_stats.mpiSummary = ConcurrencyFacade::MPISummary{};
 
   for (Function &func : module) {
     if (!func.isDeclaration()) {
@@ -153,11 +154,49 @@ void ConcurrencyChecker::runAnalyses() {
   if (needOpenMP) {
     m_openMPTaskGraph = std::make_unique<OpenMP::OpenMPTaskGraph>(m_module);
     m_openMPTaskGraph->analyze();
+    m_stats.openMPSummary = m_openMPTaskGraph->getSummary();
   }
 
   if (needMPI) {
     m_mpiAnalysis = std::make_unique<mpi::MPIAnalysis>(m_module);
     m_mpiAnalysis->runAnalysis();
+    const auto &mpi_results = m_mpiAnalysis->getResults();
+    m_stats.mpiSummary.operation_count =
+        m_mpiAnalysis->getProcessModel().getAllOperations().size();
+    m_stats.mpiSummary.nonblocking_operation_count =
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::SEND_NONBLOCKING) +
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::RECV_NONBLOCKING) +
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::BARRIER_NONBLOCKING) +
+        m_mpiAnalysis->getOperationCount(
+            mpi::MPIOpKind::COLLECTIVE_NONBLOCKING);
+    m_stats.mpiSummary.collective_operation_count =
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::BARRIER_BLOCKING) +
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::BARRIER_NONBLOCKING) +
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::COLLECTIVE_BLOCKING) +
+        m_mpiAnalysis->getOperationCount(
+            mpi::MPIOpKind::COLLECTIVE_NONBLOCKING);
+    m_stats.mpiSummary.communicator_management_count =
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::COMM_MANAGEMENT);
+    m_stats.mpiSummary.request_management_count =
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::REQUEST_MANAGEMENT);
+    m_stats.mpiSummary.rma_operation_count =
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::RMA_DATA);
+    m_stats.mpiSummary.rma_sync_count =
+        m_mpiAnalysis->getOperationCount(mpi::MPIOpKind::RMA_SYNC);
+    m_stats.mpiSummary.orphaned_request_count =
+        mpi_results.orphaned_requests.size();
+    m_stats.mpiSummary.potential_deadlock_count =
+        mpi_results.potential_deadlocks.size();
+    m_stats.mpiSummary.mismatched_collective_count =
+        mpi_results.mismatched_collectives.size();
+    m_stats.mpiSummary.conditional_collective_count =
+        mpi_results.conditional_collectives.size();
+    m_stats.mpiSummary.unsynchronized_rma_count =
+        mpi_results.unsynchronized_rma.size();
+    m_stats.mpiSummary.rma_race_count = mpi_results.rma_races.size();
+    m_stats.mpiSummary.leaked_window_count = mpi_results.leaked_windows.size();
+    m_stats.mpiSummary.collective_slot_count =
+        m_mpiAnalysis->getProtocolDiagnosticCount("collective_slots_tracked");
   }
 
   lotus::AliasAnalysisWrapper *aa = m_aliasAnalysis;
@@ -175,8 +214,8 @@ void ConcurrencyChecker::runAnalyses() {
       m_module, m_threadAPI, m_locksetAnalysisView);
   m_lockMismatchChecker = std::make_unique<LockMismatchChecker>(
       m_module, m_locksetAnalysisView, m_threadAPI);
-  m_openMPChecker =
-      std::make_unique<OpenMPChecker>(m_module, m_openMPTaskGraph.get(), m_threadAPI);
+  m_openMPChecker = std::make_unique<OpenMPChecker>(
+      m_module, m_openMPTaskGraph.get(), m_threadAPI);
   m_mpiChecker = std::make_unique<MPIChecker>(m_module, m_mpiAnalysis.get());
 }
 
@@ -370,14 +409,44 @@ void ConcurrencyChecker::reportBug(const ConcurrencyBugReport &bug_report,
       bug_report.bugType == ConcurrencyBugType::OPENMP_ATOMIC_MISMATCH ||
       bug_report.bugType == ConcurrencyBugType::OPENMP_PARTIAL_SYNC) {
     report->add_metadata("checker", "OpenMPChecker");
+    report->add_metadata("openmp_task_count",
+                         std::to_string(m_stats.openMPSummary.task_count));
+    report->add_metadata(
+        "openmp_task_with_dependencies_count",
+        std::to_string(m_stats.openMPSummary.task_with_dependencies_count));
+    report->add_metadata(
+        "openmp_wait_boundary_count",
+        std::to_string(m_stats.openMPSummary.wait_boundary_count));
+    report->add_metadata(
+        "openmp_partial_wait_boundary_count",
+        std::to_string(m_stats.openMPSummary.partial_wait_boundary_count));
   } else if (bug_report.bugType == ConcurrencyBugType::MPI_ORPHANED_REQUEST ||
              bug_report.bugType == ConcurrencyBugType::MPI_DEADLOCK ||
-             bug_report.bugType == ConcurrencyBugType::MPI_COLLECTIVE_MISMATCH ||
-             bug_report.bugType == ConcurrencyBugType::MPI_CONDITIONAL_COLLECTIVE ||
+             bug_report.bugType ==
+                 ConcurrencyBugType::MPI_COLLECTIVE_MISMATCH ||
+             bug_report.bugType ==
+                 ConcurrencyBugType::MPI_CONDITIONAL_COLLECTIVE ||
              bug_report.bugType == ConcurrencyBugType::MPI_UNSYNC_RMA ||
              bug_report.bugType == ConcurrencyBugType::MPI_RMA_RACE ||
              bug_report.bugType == ConcurrencyBugType::MPI_WINDOW_LEAK) {
     report->add_metadata("checker", "MPIChecker");
+    report->add_metadata("mpi_operation_count",
+                         std::to_string(m_stats.mpiSummary.operation_count));
+    report->add_metadata(
+        "mpi_nonblocking_operation_count",
+        std::to_string(m_stats.mpiSummary.nonblocking_operation_count));
+    report->add_metadata(
+        "mpi_collective_operation_count",
+        std::to_string(m_stats.mpiSummary.collective_operation_count));
+    report->add_metadata(
+        "mpi_collective_slot_count",
+        std::to_string(m_stats.mpiSummary.collective_slot_count));
+    report->add_metadata(
+        "mpi_rma_operation_count",
+        std::to_string(m_stats.mpiSummary.rma_operation_count));
+    report->add_metadata(
+        "mpi_leaked_window_count",
+        std::to_string(m_stats.mpiSummary.leaked_window_count));
   }
   report->add_metadata(
       "importance",

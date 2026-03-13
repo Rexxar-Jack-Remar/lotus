@@ -1,7 +1,7 @@
 /**
  * @file ConcurrencyCheckerTest.cpp
  * @brief Unit tests for Concurrency checker
- * 
+ *
  * The Concurrency checker detects concurrency-related bugs including:
  * - Data races
  * - Deadlocks
@@ -11,12 +11,12 @@
 
 #include "Checker/Concurrency/ConcurrencyChecker.h"
 
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 
@@ -48,23 +48,25 @@ TEST_F(ConcurrencyCheckerTest, LockAcquireRelease) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   Function *F = module->getFunction("test_lock");
   ASSERT_NE(F, nullptr);
-  
+
   unsigned lockCount = 0, unlockCount = 0;
   for (auto &BB : *F) {
     for (auto &I : BB) {
       if (auto *CI = dyn_cast<CallInst>(&I)) {
         if (auto *callee = CI->getCalledFunction()) {
           StringRef name = callee->getName();
-          if (name == "pthread_mutex_lock") ++lockCount;
-          else if (name == "pthread_mutex_unlock") ++unlockCount;
+          if (name == "pthread_mutex_lock")
+            ++lockCount;
+          else if (name == "pthread_mutex_unlock")
+            ++unlockCount;
         }
       }
     }
   }
-  
+
   EXPECT_EQ(lockCount, 1u);
   EXPECT_EQ(unlockCount, 1u);
 }
@@ -84,25 +86,26 @@ TEST_F(ConcurrencyCheckerTest, ThreadCreation) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   Function *testFunc = module->getFunction("test_thread_create");
   Function *threadFunc = module->getFunction("thread_func");
-  
+
   ASSERT_NE(testFunc, nullptr);
   ASSERT_NE(threadFunc, nullptr);
-  
+
   CallInst *createCall = nullptr;
   for (auto &BB : *testFunc) {
     for (auto &I : BB) {
       if (auto *CI = dyn_cast<CallInst>(&I)) {
-        if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "pthread_create") {
+        if (CI->getCalledFunction() &&
+            CI->getCalledFunction()->getName() == "pthread_create") {
           createCall = CI;
           break;
         }
       }
     }
   }
-  
+
   ASSERT_NE(createCall, nullptr);
   EXPECT_EQ(createCall->arg_size(), 4u);
 }
@@ -122,21 +125,23 @@ TEST_F(ConcurrencyCheckerTest, SharedVariableAccess) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   GlobalVariable *shared = module->getNamedGlobal("shared_counter");
   ASSERT_NE(shared, nullptr);
-  
+
   Function *F = module->getFunction("increment");
   ASSERT_NE(F, nullptr);
-  
+
   unsigned loadCount = 0, storeCount = 0;
   for (auto &BB : *F) {
     for (auto &I : BB) {
-      if (isa<LoadInst>(&I)) ++loadCount;
-      if (isa<StoreInst>(&I)) ++storeCount;
+      if (isa<LoadInst>(&I))
+        ++loadCount;
+      if (isa<StoreInst>(&I))
+        ++storeCount;
     }
   }
-  
+
   EXPECT_EQ(loadCount, 1u);
   EXPECT_EQ(storeCount, 1u);
 }
@@ -166,27 +171,30 @@ TEST_F(ConcurrencyCheckerTest, LockOrderInconsistency) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   Function *f1 = module->getFunction("func1");
   Function *f2 = module->getFunction("func2");
-  
+
   ASSERT_NE(f1, nullptr);
   ASSERT_NE(f2, nullptr);
-  
+
   bool f1HasLocks = false, f2HasLocks = false;
   for (auto *F : {f1, f2}) {
     for (auto &BB : *F) {
       for (auto &I : BB) {
         if (auto *CI = dyn_cast<CallInst>(&I)) {
-          if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "pthread_mutex_lock") {
-            if (F == f1) f1HasLocks = true;
-            else f2HasLocks = true;
+          if (CI->getCalledFunction() &&
+              CI->getCalledFunction()->getName() == "pthread_mutex_lock") {
+            if (F == f1)
+              f1HasLocks = true;
+            else
+              f2HasLocks = true;
           }
         }
       }
     }
   }
-  
+
   EXPECT_TRUE(f1HasLocks);
   EXPECT_TRUE(f2HasLocks);
 }
@@ -202,10 +210,10 @@ TEST_F(ConcurrencyCheckerTest, AtomicOperation) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   Function *F = module->getFunction("atomic_fetch_add");
   ASSERT_NE(F, nullptr);
-  
+
   AtomicRMWInst *atomicrmw = nullptr;
   for (auto &BB : *F) {
     for (auto &I : BB) {
@@ -215,7 +223,7 @@ TEST_F(ConcurrencyCheckerTest, AtomicOperation) {
       }
     }
   }
-  
+
   ASSERT_NE(atomicrmw, nullptr);
   EXPECT_EQ(atomicrmw->getOperation(), AtomicRMWInst::Add);
 }
@@ -234,22 +242,23 @@ TEST_F(ConcurrencyCheckerTest, ThreadJoin) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   Function *F = module->getFunction("test_join");
   ASSERT_NE(F, nullptr);
-  
+
   CallInst *joinCall = nullptr;
   for (auto &BB : *F) {
     for (auto &I : BB) {
       if (auto *CI = dyn_cast<CallInst>(&I)) {
-        if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "pthread_join") {
+        if (CI->getCalledFunction() &&
+            CI->getCalledFunction()->getName() == "pthread_join") {
           joinCall = CI;
           break;
         }
       }
     }
   }
-  
+
   ASSERT_NE(joinCall, nullptr);
   EXPECT_EQ(joinCall->arg_size(), 2u);
 }
@@ -268,10 +277,10 @@ TEST_F(ConcurrencyCheckerTest, ConditionVariable) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   Function *waitFunc = module->getFunction("test_cond_wait");
   ASSERT_NE(waitFunc, nullptr);
-  
+
   EXPECT_FALSE(waitFunc->empty());
 }
 
@@ -292,25 +301,26 @@ TEST_F(ConcurrencyCheckerTest, OnceInitialization) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   Function *testOnce = module->getFunction("test_once");
   Function *initFunc = module->getFunction("init_func");
-  
+
   ASSERT_NE(testOnce, nullptr);
   ASSERT_NE(initFunc, nullptr);
-  
+
   CallInst *onceCall = nullptr;
   for (auto &BB : *testOnce) {
     for (auto &I : BB) {
       if (auto *CI = dyn_cast<CallInst>(&I)) {
-        if (CI->getCalledFunction() && CI->getCalledFunction()->getName() == "pthread_once") {
+        if (CI->getCalledFunction() &&
+            CI->getCalledFunction()->getName() == "pthread_once") {
           onceCall = CI;
           break;
         }
       }
     }
   }
-  
+
   ASSERT_NE(onceCall, nullptr);
   EXPECT_EQ(onceCall->arg_size(), 2u);
 }
@@ -328,10 +338,10 @@ TEST_F(ConcurrencyCheckerTest, MemoryFence) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   Function *F = module->getFunction("test_fence");
   ASSERT_NE(F, nullptr);
-  
+
   EXPECT_FALSE(F->empty());
 }
 
@@ -346,10 +356,10 @@ TEST_F(ConcurrencyCheckerTest, CompareAndSwap) {
 
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
-  
+
   Function *F = module->getFunction("test_cas");
   ASSERT_NE(F, nullptr);
-  
+
   bool hasCmpXchg = false;
   for (auto &BB : *F) {
     for (auto &I : BB) {
@@ -359,7 +369,7 @@ TEST_F(ConcurrencyCheckerTest, CompareAndSwap) {
       }
     }
   }
-  
+
   EXPECT_TRUE(hasCmpXchg);
 }
 
@@ -376,12 +386,14 @@ TEST_F(ConcurrencyCheckerTest, DetectsOpenMPAtomicMismatch) {
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
 
-  concurrency::OpenMPChecker checker(*module, nullptr, ThreadAPI::getThreadAPI());
+  concurrency::OpenMPChecker checker(*module, nullptr,
+                                     ThreadAPI::getThreadAPI());
   auto reports = checker.checkOpenMPBugs();
 
   bool found = false;
   for (const auto &report : reports) {
-    if (report.bugType == concurrency::ConcurrencyBugType::OPENMP_ATOMIC_MISMATCH) {
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::OPENMP_ATOMIC_MISMATCH) {
       found = true;
       break;
     }
@@ -407,12 +419,120 @@ TEST_F(ConcurrencyCheckerTest, DetectsMPIOrphanedRequest) {
 
   bool found = false;
   for (const auto &report : reports) {
-    if (report.bugType == concurrency::ConcurrencyBugType::MPI_ORPHANED_REQUEST) {
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::MPI_ORPHANED_REQUEST) {
       found = true;
       break;
     }
   }
   EXPECT_TRUE(found);
+}
+
+TEST_F(ConcurrencyCheckerTest, TracksOpenMPSummaryInCheckerStatistics) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+    @shared = global i32 0, align 4
+    @deps = global [1 x %kmp_depend_info] [
+      %kmp_depend_info { i8* bitcast (i32* @shared to i8*), i64 4, i8 2 }
+    ]
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+    declare i32 @__kmpc_omp_wait_deps(i8*, i32, i32, i8*, i32, i8*)
+    declare i32 @__kmpc_taskloop(i8*, i32, i8*, i32, i64*, i64, i32, i32, i64)
+    declare void @__kmpc_taskgroup(i8*, i32)
+    declare i32 @__kmpc_atomic_start()
+    declare i32 @__kmpc_atomic_end()
+    declare i32 @__kmpc_flush(i8*)
+
+    define i32 @main() {
+    entry:
+      call void @__kmpc_taskgroup(i8* null, i32 0)
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+              [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
+                                          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      call i32 @__kmpc_omp_wait_deps(i8* null, i32 0, i32 0, i8* null, i32 0, i8* null)
+      call i32 @__kmpc_taskloop(i8* null, i32 0, i8* null, i32 0,
+                                i64* null, i64 0, i32 0, i32 0, i64 0)
+      call i32 @__kmpc_atomic_start()
+      call i32 @__kmpc_atomic_end()
+      call i32 @__kmpc_flush(i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::ConcurrencyChecker checker(*module);
+  checker.enableDataRaceCheck(false);
+  checker.enableDeadlockCheck(false);
+  checker.enableAtomicityCheck(false);
+  checker.enableCondVarCheck(false);
+  checker.enableLockMismatchCheck(false);
+  checker.enableMPICheck(false);
+  checker.enableOpenMPCheck(true);
+  checker.runAnalyses();
+
+  auto stats = checker.getStatistics();
+  EXPECT_EQ(stats.openMPSummary.task_count, 2u);
+  EXPECT_EQ(stats.openMPSummary.task_with_dependencies_count, 1u);
+  EXPECT_EQ(stats.openMPSummary.taskloop_count, 1u);
+  EXPECT_EQ(stats.openMPSummary.partial_wait_boundary_count, 1u);
+  EXPECT_EQ(stats.openMPSummary.taskgroup_region_count, 1u);
+  EXPECT_EQ(stats.openMPSummary.atomic_region_count, 1u);
+  EXPECT_EQ(stats.openMPSummary.flush_count, 1u);
+}
+
+TEST_F(ConcurrencyCheckerTest, TracksMPISummaryInCheckerStatistics) {
+  const char *source = R"(
+    @win = global i8 0, align 1
+    declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Ibarrier(i8*, i8*)
+    declare i32 @MPI_Request_free(i8*)
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_lock(i32, i32, i32, i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+    declare i32 @MPI_Win_unlock(i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req)
+      call i32 @MPI_Ibarrier(i8* %comm, i8* %req)
+      call i32 @MPI_Request_free(i8* %req)
+      call i32 @MPI_Win_create(i8* null, i64 8, i32 4, i8* %comm, i8* @win)
+      call i32 @MPI_Win_lock(i32 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 1, i64 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Win_unlock(i32 1, i8* @win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::ConcurrencyChecker checker(*module);
+  checker.enableDataRaceCheck(false);
+  checker.enableDeadlockCheck(false);
+  checker.enableAtomicityCheck(false);
+  checker.enableCondVarCheck(false);
+  checker.enableLockMismatchCheck(false);
+  checker.enableOpenMPCheck(false);
+  checker.enableMPICheck(true);
+  checker.runAnalyses();
+
+  auto stats = checker.getStatistics();
+  EXPECT_EQ(stats.mpiSummary.operation_count, 7u);
+  EXPECT_EQ(stats.mpiSummary.nonblocking_operation_count, 2u);
+  EXPECT_EQ(stats.mpiSummary.collective_operation_count, 1u);
+  EXPECT_EQ(stats.mpiSummary.request_management_count, 1u);
+  EXPECT_EQ(stats.mpiSummary.rma_operation_count, 1u);
+  EXPECT_EQ(stats.mpiSummary.rma_sync_count, 2u);
+  EXPECT_EQ(stats.mpiSummary.leaked_window_count, 1u);
+  EXPECT_EQ(stats.mpiSummary.collective_slot_count, 1u);
 }
 
 int main(int argc, char **argv) {

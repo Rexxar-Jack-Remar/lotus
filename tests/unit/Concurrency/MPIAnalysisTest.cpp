@@ -1,10 +1,11 @@
 #include "Analysis/Concurrency/MPI/MPIAnalysis.h"
 
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 using namespace mpi;
@@ -52,8 +53,14 @@ TEST_F(MPIAnalysisTest, SendRecvCreatesSendAndReceiveOperations) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_EQ(analysis.getProcessModel().getOperationsByKind(MPIOpKind::SEND_BLOCKING).size(), 1u);
-  EXPECT_EQ(analysis.getProcessModel().getOperationsByKind(MPIOpKind::RECV_BLOCKING).size(), 1u);
+  EXPECT_EQ(analysis.getProcessModel()
+                .getOperationsByKind(MPIOpKind::SEND_BLOCKING)
+                .size(),
+            1u);
+  EXPECT_EQ(analysis.getProcessModel()
+                .getOperationsByKind(MPIOpKind::RECV_BLOCKING)
+                .size(),
+            1u);
 }
 
 TEST_F(MPIAnalysisTest, RankIncompatiblePointToPointDoesNotMatch) {
@@ -75,11 +82,14 @@ TEST_F(MPIAnalysisTest, RankIncompatiblePointToPointDoesNotMatch) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  auto sends = analysis.getProcessModel().getOperationsByKind(MPIOpKind::SEND_BLOCKING);
-  auto recvs = analysis.getProcessModel().getOperationsByKind(MPIOpKind::RECV_BLOCKING);
+  auto sends =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::SEND_BLOCKING);
+  auto recvs =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::RECV_BLOCKING);
   ASSERT_EQ(sends.size(), 1u);
   ASSERT_EQ(recvs.size(), 1u);
-  EXPECT_FALSE(analysis.getProcessModel().canCommunicate(sends.front(), recvs.front()));
+  EXPECT_FALSE(
+      analysis.getProcessModel().canCommunicate(sends.front(), recvs.front()));
   EXPECT_EQ(analysis.getProcessModel().classifyCommunicationMatch(
                 sends.front(), recvs.front()),
             MPICommunicationMatch::NoMatch);
@@ -288,6 +298,87 @@ TEST_F(MPIAnalysisTest, RequestFreeTerminatesOutstandingRequest) {
   EXPECT_TRUE(analysis.getResults().orphaned_requests.empty());
 }
 
+TEST_F(MPIAnalysisTest, StartedPersistentRequestWithoutCompletionIsOrphaned) {
+  const char *source = R"(
+    declare i32 @MPI_Send_init(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Start(i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Send_init(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req)
+      call i32 @MPI_Start(i8* %req)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  ASSERT_EQ(analysis.getResults().orphaned_requests.size(), 1u);
+  EXPECT_NE(analysis.getResults().orphaned_requests.front().issue_inst,
+            nullptr);
+}
+
+TEST_F(MPIAnalysisTest, StartedPersistentRequestCompletesThroughWait) {
+  const char *source = R"(
+    declare i32 @MPI_Send_init(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Start(i8*)
+    declare i32 @MPI_Wait(i8*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Send_init(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req)
+      call i32 @MPI_Start(i8* %req)
+      call i32 @MPI_Wait(i8* %req, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_TRUE(analysis.getResults().orphaned_requests.empty());
+}
+
+TEST_F(MPIAnalysisTest, StartallActivatesPersistentRequestArrays) {
+  const char *source = R"(
+    declare i32 @MPI_Send_init(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Recv_init(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Startall(i32, i8**)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req1 = alloca i8, align 1
+      %req2 = alloca i8, align 1
+      %reqs = alloca [2 x i8*], align 8
+      %slot0 = getelementptr inbounds [2 x i8*], [2 x i8*]* %reqs, i64 0, i64 0
+      %slot1 = getelementptr inbounds [2 x i8*], [2 x i8*]* %reqs, i64 0, i64 1
+      store i8* %req1, i8** %slot0, align 8
+      store i8* %req2, i8** %slot1, align 8
+      call i32 @MPI_Send_init(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req1)
+      call i32 @MPI_Recv_init(i8* null, i32 1, i32 0, i32 2, i32 8, i8* %comm, i8* %req2)
+      call i32 @MPI_Startall(i32 2, i8** %slot0)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getResults().orphaned_requests.size(), 2u);
+}
+
 TEST_F(MPIAnalysisTest, CancelTerminatesOutstandingRequest) {
   const char *source = R"(
     declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
@@ -309,6 +400,70 @@ TEST_F(MPIAnalysisTest, CancelTerminatesOutstandingRequest) {
   analysis.runAnalysis();
 
   EXPECT_TRUE(analysis.getResults().orphaned_requests.empty());
+}
+
+TEST_F(MPIAnalysisTest, PrintResultsIncludesDetailedCounters) {
+  const char *source = R"(
+    declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Testany(i32, i8**, i32*, i32*, i8*)
+    declare i32 @MPI_Ibarrier(i8*, i8*)
+    declare i32 @MPI_Request_free(i8*)
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_lock(i32, i32, i32, i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+    declare i32 @MPI_Win_unlock(i32, i8*)
+    @win = global i8 0, align 1
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req1 = alloca i8, align 1
+      %req2 = alloca i8, align 1
+      %reqs = alloca [2 x i8*], align 8
+      %slot0 = getelementptr inbounds [2 x i8*], [2 x i8*]* %reqs, i64 0, i64 0
+      %slot1 = getelementptr inbounds [2 x i8*], [2 x i8*]* %reqs, i64 0, i64 1
+      %index = alloca i32, align 4
+      %flag = alloca i32, align 4
+      store i8* %req1, i8** %slot0, align 8
+      store i8* %req2, i8** %slot1, align 8
+      store i32 1, i32* %flag, align 4
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req1)
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 2, i32 8, i8* %comm, i8* %req2)
+      call i32 @MPI_Ibarrier(i8* %comm, i8* %req2)
+      call i32 @MPI_Testany(i32 2, i8** %slot0, i32* %index, i32* %flag, i8* null)
+      call i32 @MPI_Request_free(i8* %req2)
+      call i32 @MPI_Win_create(i8* null, i64 8, i32 4, i8* %comm, i8* @win)
+      call i32 @MPI_Win_lock(i32 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 1, i64 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Win_unlock(i32 1, i8* @win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  std::string output;
+  raw_string_ostream os(output);
+  analysis.printResults(os);
+  os.flush();
+
+  EXPECT_NE(output.find("MPI init/finalize ops: 0/0"), std::string::npos);
+  EXPECT_NE(output.find("Blocking point-to-point ops: 0"), std::string::npos);
+  EXPECT_NE(output.find("Non-blocking MPI operations: 3"), std::string::npos);
+  EXPECT_NE(output.find("Non-blocking point-to-point ops: 2"),
+            std::string::npos);
+  EXPECT_NE(output.find("Wait/Test ops: 0/1"), std::string::npos);
+  EXPECT_NE(output.find("RMA window lifecycle ops: 1"), std::string::npos);
+  EXPECT_NE(output.find("Collective partial-reachability observations: 0"),
+            std::string::npos);
+  EXPECT_NE(output.find("Requests with may-complete status: 1"),
+            std::string::npos);
+  EXPECT_NE(output.find("Requests with terminal status: 1"), std::string::npos);
+  EXPECT_NE(output.find("Deferred MPI semantic lowering total: 1"),
+            std::string::npos);
 }
 
 TEST_F(MPIAnalysisTest, WaitsomeWithoutRecoverableIndicesKeepsRequestsPending) {
@@ -438,11 +593,14 @@ TEST_F(MPIAnalysisTest, WildcardSourceAndTagSupportMinusTwoSentinel) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  auto sends = analysis.getProcessModel().getOperationsByKind(MPIOpKind::SEND_BLOCKING);
-  auto recvs = analysis.getProcessModel().getOperationsByKind(MPIOpKind::RECV_BLOCKING);
+  auto sends =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::SEND_BLOCKING);
+  auto recvs =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::RECV_BLOCKING);
   ASSERT_EQ(sends.size(), 1u);
   ASSERT_EQ(recvs.size(), 1u);
-  EXPECT_TRUE(analysis.getProcessModel().canCommunicate(sends.front(), recvs.front()));
+  EXPECT_TRUE(
+      analysis.getProcessModel().canCommunicate(sends.front(), recvs.front()));
   EXPECT_EQ(analysis.getProcessModel().classifyCommunicationMatch(
                 sends.front(), recvs.front()),
             MPICommunicationMatch::MayMatch);
@@ -472,7 +630,8 @@ TEST_F(MPIAnalysisTest, CollectivesComparedPerCommunicatorAndSequenceSlot) {
   EXPECT_TRUE(analysis.getResults().mismatched_collectives.empty());
 }
 
-TEST_F(MPIAnalysisTest, CommunicatorDupReusesCanonicalIdentityWithoutFalseMismatch) {
+TEST_F(MPIAnalysisTest,
+       CommunicatorDupReusesCanonicalIdentityWithoutFalseMismatch) {
   const char *source = R"(
     declare i32 @MPI_Comm_dup(i8*, i8**)
     declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)

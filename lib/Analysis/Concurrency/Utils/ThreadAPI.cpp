@@ -6,7 +6,7 @@
  * categorizing thread-related API calls in multithreaded programs.
  *
  * @author Lotus Analysis Framework
- * @date 2026 
+ * @date 2026
  * @ingroup Concurrency
  */
 
@@ -62,13 +62,20 @@ static std::string normalizeAPIName(StringRef name) {
 
 static ThreadAPI::RuntimeLibrary parseRuntimeLibrary(StringRef value) {
   std::string lowered = value.lower();
-  if (lowered == "pthread") return ThreadAPI::RuntimeLibrary::PThread;
-  if (lowered == "openmp") return ThreadAPI::RuntimeLibrary::OpenMP;
-  if (lowered == "mpi") return ThreadAPI::RuntimeLibrary::MPI;
-  if (lowered == "cpp") return ThreadAPI::RuntimeLibrary::Cpp;
-  if (lowered == "linux-kernel") return ThreadAPI::RuntimeLibrary::LinuxKernel;
-  if (lowered == "hare") return ThreadAPI::RuntimeLibrary::Hare;
-  if (lowered == "custom") return ThreadAPI::RuntimeLibrary::Custom;
+  if (lowered == "pthread")
+    return ThreadAPI::RuntimeLibrary::PThread;
+  if (lowered == "openmp")
+    return ThreadAPI::RuntimeLibrary::OpenMP;
+  if (lowered == "mpi")
+    return ThreadAPI::RuntimeLibrary::MPI;
+  if (lowered == "cpp")
+    return ThreadAPI::RuntimeLibrary::Cpp;
+  if (lowered == "linux-kernel")
+    return ThreadAPI::RuntimeLibrary::LinuxKernel;
+  if (lowered == "hare")
+    return ThreadAPI::RuntimeLibrary::Hare;
+  if (lowered == "custom")
+    return ThreadAPI::RuntimeLibrary::Custom;
   return ThreadAPI::RuntimeLibrary::Unknown;
 }
 
@@ -147,7 +154,8 @@ void ThreadAPI::init() {
     }
     tdAPIMap[p->n] = p->t;
   }
-  // Load optional thread.spec so custom APIs (e.g. kernel mutex_lock) are recognized
+  // Load optional thread.spec so custom APIs (e.g. kernel mutex_lock) are
+  // recognized
   loadConfig("config/thread.spec");
   loadConfig("../config/thread.spec");
   loadSemanticConfig("config/concurrency_api.spec");
@@ -208,7 +216,8 @@ bool ThreadAPI::isDefiniteAsyncLaunch(const Instruction *inst) const {
   return (launch_bits->getZExtValue() & 0x1ULL) != 0;
 }
 
-const Value *ThreadAPI::getCallArg(const Instruction *inst, unsigned idx) const {
+const Value *ThreadAPI::getCallArg(const Instruction *inst,
+                                   unsigned idx) const {
   const CallBase *cb = getLLVMCallSite(inst);
   if (!cb || idx >= cb->arg_size())
     return nullptr;
@@ -259,17 +268,23 @@ ThreadAPI::TD_TYPE ThreadAPI::stringToType(StringRef s) {
   return it != type_map->end() ? it->second : ThreadAPI::TD_DUMMY;
 }
 
-ThreadAPI::ForkArgIndices ThreadAPI::getForkArgIndices(const Function *F) const {
-  if (!F) return ForkArgIndices{};
+ThreadAPI::ForkArgIndices
+ThreadAPI::getForkArgIndices(const Function *F) const {
+  if (!F)
+    return ForkArgIndices{};
   auto it = m_fork_args.find(normalizeAPIName(F->getName()));
-  if (it != m_fork_args.end()) return it->second;
+  if (it != m_fork_args.end())
+    return it->second;
   return ForkArgIndices{};
 }
 
-ThreadAPI::JoinArgIndices ThreadAPI::getJoinArgIndices(const Function *F) const {
-  if (!F) return JoinArgIndices{};
+ThreadAPI::JoinArgIndices
+ThreadAPI::getJoinArgIndices(const Function *F) const {
+  if (!F)
+    return JoinArgIndices{};
   auto it = m_join_args.find(normalizeAPIName(F->getName()));
-  if (it != m_join_args.end()) return it->second;
+  if (it != m_join_args.end())
+    return it->second;
   return JoinArgIndices{};
 }
 
@@ -347,8 +362,7 @@ void ThreadAPI::loadSemanticConfig(const std::string &filename) {
         description.semantic_tag = value.str();
       } else if (key.equals("match")) {
         std::string lowered = value.lower();
-        match_kind = lowered == "prefix" ? MatchKind::Prefix
-                                          : MatchKind::Exact;
+        match_kind = lowered == "prefix" ? MatchKind::Prefix : MatchKind::Exact;
       } else if (key.equals("traits")) {
         SmallVector<StringRef, 8> entries;
         value.split(entries, ',', -1, false);
@@ -455,6 +469,7 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_OMP_TARGET:
   case TD_OMP_TARGET_DATA_BEGIN:
   case TD_OMP_TARGET_DATA_END:
+  case TD_OMP_TARGET_DATA_UPDATE:
     return RuntimeLibrary::OpenMP;
   case TD_MPI_INIT:
   case TD_MPI_FINALIZE:
@@ -465,6 +480,9 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_MPI_ISEND:
   case TD_MPI_IRECV:
   case TD_MPI_IPROBE:
+  case TD_MPI_PERSISTENT_SEND_INIT:
+  case TD_MPI_PERSISTENT_RECV_INIT:
+  case TD_MPI_REQUEST_START:
   case TD_MPI_WAIT:
   case TD_MPI_WAITALL:
   case TD_MPI_WAITANY:
@@ -554,7 +572,8 @@ ThreadAPI::lookupMatchRule(StringRef normalized_name) const {
   return nullptr;
 }
 
-ThreadAPI::TD_TYPE ThreadAPI::getConfiguredType(StringRef normalized_name) const {
+ThreadAPI::TD_TYPE
+ThreadAPI::getConfiguredType(StringRef normalized_name) const {
   TDAPIMap::const_iterator it = tdAPIMap.find(normalized_name);
   if (it != tdAPIMap.end()) {
     auto desc_it = m_api_descriptions.find(normalized_name.str());
@@ -565,9 +584,8 @@ ThreadAPI::TD_TYPE ThreadAPI::getConfiguredType(StringRef normalized_name) const
     return TD_DUMMY;
   }
   if (const MatchRule *rule = lookupMatchRule(normalized_name)) {
-    return isLibraryEnabled(rule->description.library)
-               ? rule->description.type
-               : TD_DUMMY;
+    return isLibraryEnabled(rule->description.library) ? rule->description.type
+                                                       : TD_DUMMY;
   }
   return TD_DUMMY;
 }
@@ -615,7 +633,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_JOIN;
     if (CppThreadingModel::isDetach(name))
       return TD_DETACH;
-    
+
     // Basic mutex operations
     if (CppThreadingModel::isAcquire(name))
       return TD_ACQUIRE;
@@ -623,7 +641,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_TRY_ACQUIRE;
     if (CppThreadingModel::isRelease(name))
       return TD_RELEASE;
-    
+
     // Condition variables
     if (CppThreadingModel::isCondWait(name))
       return TD_COND_WAIT;
@@ -631,18 +649,20 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_COND_SIGNAL;
     if (CppThreadingModel::isCondBroadcast(name))
       return TD_COND_BROADCAST;
-    
+
     // C++17 shared_mutex
-    if (CppThreadingModel::isSharedLockAcquire(name) || CppThreadingModel::isSharedTimedLockAcquire(name))
+    if (CppThreadingModel::isSharedLockAcquire(name) ||
+        CppThreadingModel::isSharedTimedLockAcquire(name))
       return TD_SHARED_RDLOCK;
-    if (CppThreadingModel::isSharedLockExclusiveAcquire(name) || CppThreadingModel::isSharedTimedLockExclusiveAcquire(name))
+    if (CppThreadingModel::isSharedLockExclusiveAcquire(name) ||
+        CppThreadingModel::isSharedTimedLockExclusiveAcquire(name))
       return TD_SHARED_WRLOCK;
     if (CppThreadingModel::isSharedLockRelease(name) ||
         CppThreadingModel::isSharedLockExclusiveRelease(name) ||
         CppThreadingModel::isSharedTimedLockRelease(name) ||
         CppThreadingModel::isSharedTimedLockExclusiveRelease(name))
       return TD_SHARED_UNLOCK;
-    
+
     // RAII lock wrappers
     if (CppThreadingModel::isLockGuardConstructor(name))
       return TD_LOCK_GUARD_CTOR;
@@ -664,27 +684,28 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_SHARED_LOCK_CTOR;
     if (CppThreadingModel::isSharedLockDestructor(name))
       return TD_SHARED_LOCK_DTOR;
-    
+
     // std::call_once
     if (CppThreadingModel::isCallOnce(name))
       return TD_CALL_ONCE;
-    
+
     // Future/Promise synchronization
     if (CppThreadingModel::isFutureGet(name))
       return TD_FUTURE_GET;
     if (CppThreadingModel::isFutureWait(name))
       return TD_FUTURE_WAIT;
-    if (CppThreadingModel::isPromiseSetValue(name) || CppThreadingModel::isPromiseSetException(name))
+    if (CppThreadingModel::isPromiseSetValue(name) ||
+        CppThreadingModel::isPromiseSetException(name))
       return TD_PROMISE_SET;
     if (CppThreadingModel::isAsync(name))
       return TD_ASYNC;
-    
+
     // C++20 jthread
     if (CppThreadingModel::isJthreadConstructor(name))
       return TD_JTHREAD_FORK;
     if (CppThreadingModel::isJthreadJoin(name))
       return TD_JTHREAD_JOIN;
-    
+
     // C++20 latch
     if (CppThreadingModel::isLatchCountDown(name))
       return TD_LATCH_COUNT_DOWN;
@@ -692,7 +713,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_LATCH_WAIT;
     if (CppThreadingModel::isLatchArriveAndWait(name))
       return TD_LATCH_ARRIVE_WAIT;
-    
+
     // C++20 barrier
     if (CppThreadingModel::isBarrierArriveAndWait(name))
       return TD_BARRIER_ARRIVE_WAIT;
@@ -700,7 +721,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_BARRIER_ARRIVE;
     if (CppThreadingModel::isBarrierWait(name))
       return TD_BARRIER_WAIT_CPP20;
-    
+
     // C++20 semaphore
     if (CppThreadingModel::isSemaphoreAcquire(name))
       return TD_SEMAPHORE_ACQUIRE;
@@ -721,7 +742,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_SPIN_UNLOCK;
     if (LinuxKernelModel::isSpinTryLock(name))
       return TD_KERNEL_SPIN_TRYLOCK;
-    
+
     // Mutexes
     if (LinuxKernelModel::isMutexInit(name))
       return TD_KERNEL_MUTEX_INIT;
@@ -731,7 +752,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_MUTEX_UNLOCK;
     if (LinuxKernelModel::isMutexTryLock(name))
       return TD_KERNEL_MUTEX_TRYLOCK;
-    
+
     // Semaphores
     if (LinuxKernelModel::isSemaInit(name))
       return TD_KERNEL_SEMA_INIT;
@@ -739,7 +760,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_DOWN;
     if (LinuxKernelModel::isUp(name))
       return TD_KERNEL_UP;
-    
+
     // Read-Write Locks
     if (LinuxKernelModel::isReadLock(name))
       return TD_KERNEL_READ_LOCK;
@@ -749,7 +770,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_WRITE_LOCK;
     if (LinuxKernelModel::isWriteUnlock(name))
       return TD_KERNEL_WRITE_UNLOCK;
-    
+
     // Read-Write Semaphores
     if (LinuxKernelModel::isDownRead(name))
       return TD_KERNEL_DOWN_READ;
@@ -761,7 +782,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_UP_WRITE;
     if (LinuxKernelModel::isInitRwsem(name))
       return TD_KERNEL_INIT_RWSEM;
-    
+
     // RCU
     if (LinuxKernelModel::isRcuReadLock(name))
       return TD_KERNEL_RCU_READ_LOCK;
@@ -775,7 +796,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_RCU_DEREFERENCE;
     if (LinuxKernelModel::isRcuAssignPointer(name))
       return TD_KERNEL_RCU_ASSIGN_POINTER;
-    
+
     // Seq Locks
     if (LinuxKernelModel::isSeqlockInit(name))
       return TD_KERNEL_SEQLOCK_INIT;
@@ -787,7 +808,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_WRITE_SEQLOCK;
     if (LinuxKernelModel::isWriteSequnlock(name))
       return TD_KERNEL_WRITE_SEQUNLOCK;
-    
+
     // Completion Variables
     if (LinuxKernelModel::isInitCompletion(name))
       return TD_KERNEL_INIT_COMPLETION;
@@ -797,7 +818,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_COMPLETE_ALL;
     if (LinuxKernelModel::isCompleteOne(name))
       return TD_KERNEL_COMPLETE;
-    
+
     // Wait Queues
     if (LinuxKernelModel::isInitWaitqueueHead(name))
       return TD_KERNEL_INIT_WAITQUEUE_HEAD;
@@ -809,7 +830,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_PREPARE_TO_WAIT;
     if (LinuxKernelModel::isFinishWait(name))
       return TD_KERNEL_FINISH_WAIT;
-    
+
     // Memory Barriers
     if (LinuxKernelModel::isMemoryBarrier(name))
       return TD_KERNEL_MEMORY_BARRIER;
@@ -991,8 +1012,8 @@ void ThreadAPI::performAPIStat(Module *module) {
       }
       case TD_DUMMY:
       default: {
-        // Handle TD_DUMMY and all other thread API types (C++11/17/20, OpenMP, MPI, etc.)
-        // These are not explicitly tracked in statistics
+        // Handle TD_DUMMY and all other thread API types (C++11/17/20, OpenMP,
+        // MPI, etc.) These are not explicitly tracked in statistics
         break;
       }
       }
@@ -1021,179 +1042,361 @@ void ThreadAPI::performAPIStat(Module *module) {
 
 const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
   switch (t) {
-  case TD_DUMMY:              return "TD_DUMMY";
-  case TD_FORK:               return "TD_FORK";
-  case TD_JOIN:               return "TD_JOIN";
-  case TD_DETACH:             return "TD_DETACH";
-  case TD_ACQUIRE:            return "TD_ACQUIRE";
-  case TD_TRY_ACQUIRE:        return "TD_TRY_ACQUIRE";
-  case TD_RWLOCK_RDLOCK:      return "TD_RWLOCK_RDLOCK";
-  case TD_RWLOCK_WRLOCK:      return "TD_RWLOCK_WRLOCK";
-  case TD_RELEASE:            return "TD_RELEASE";
-  case TD_EXIT:               return "TD_EXIT";
-  case TD_CANCEL:             return "TD_CANCEL";
-  case TD_COND_WAIT:          return "TD_COND_WAIT";
-  case TD_COND_SIGNAL:        return "TD_COND_SIGNAL";
-  case TD_COND_BROADCAST:     return "TD_COND_BROADCAST";
-  case TD_MUTEX_INI:          return "TD_MUTEX_INI";
-  case TD_MUTEX_DESTROY:      return "TD_MUTEX_DESTROY";
-  case TD_CONDVAR_INI:        return "TD_CONDVAR_INI";
-  case TD_CONDVAR_DESTROY:    return "TD_CONDVAR_DESTROY";
-  case TD_BAR_INIT:           return "TD_BAR_INIT";
-  case TD_BAR_WAIT:           return "TD_BAR_WAIT";
-  case HARE_PAR_FOR:          return "HARE_PAR_FOR";
-  case TD_SHARED_RDLOCK:      return "TD_SHARED_RDLOCK";
-  case TD_SHARED_WRLOCK:      return "TD_SHARED_WRLOCK";
-  case TD_SHARED_UNLOCK:      return "TD_SHARED_UNLOCK";
-  case TD_CALL_ONCE:          return "TD_CALL_ONCE";
-  case TD_FUTURE_GET:         return "TD_FUTURE_GET";
-  case TD_FUTURE_WAIT:        return "TD_FUTURE_WAIT";
-  case TD_PROMISE_SET:        return "TD_PROMISE_SET";
-  case TD_ASYNC:              return "TD_ASYNC";
-  case TD_LOCK_GUARD_CTOR:    return "TD_LOCK_GUARD_CTOR";
-  case TD_LOCK_GUARD_DTOR:    return "TD_LOCK_GUARD_DTOR";
-  case TD_UNIQUE_LOCK_CTOR:   return "TD_UNIQUE_LOCK_CTOR";
-  case TD_UNIQUE_LOCK_DTOR:   return "TD_UNIQUE_LOCK_DTOR";
-  case TD_UNIQUE_LOCK_LOCK:   return "TD_UNIQUE_LOCK_LOCK";
-  case TD_UNIQUE_LOCK_UNLOCK: return "TD_UNIQUE_LOCK_UNLOCK";
-  case TD_SCOPED_LOCK_CTOR:   return "TD_SCOPED_LOCK_CTOR";
-  case TD_SCOPED_LOCK_DTOR:   return "TD_SCOPED_LOCK_DTOR";
-  case TD_SHARED_LOCK_CTOR:   return "TD_SHARED_LOCK_CTOR";
-  case TD_SHARED_LOCK_DTOR:   return "TD_SHARED_LOCK_DTOR";
-  case TD_JTHREAD_FORK:       return "TD_JTHREAD_FORK";
-  case TD_JTHREAD_JOIN:       return "TD_JTHREAD_JOIN";
-  case TD_LATCH_COUNT_DOWN:   return "TD_LATCH_COUNT_DOWN";
-  case TD_LATCH_WAIT:         return "TD_LATCH_WAIT";
-  case TD_LATCH_ARRIVE_WAIT:  return "TD_LATCH_ARRIVE_WAIT";
-  case TD_BARRIER_ARRIVE_WAIT: return "TD_BARRIER_ARRIVE_WAIT";
-  case TD_BARRIER_ARRIVE:     return "TD_BARRIER_ARRIVE";
-  case TD_BARRIER_WAIT_CPP20: return "TD_BARRIER_WAIT_CPP20";
-  case TD_SEMAPHORE_ACQUIRE:  return "TD_SEMAPHORE_ACQUIRE";
-  case TD_SEMAPHORE_RELEASE:  return "TD_SEMAPHORE_RELEASE";
-  case TD_SEMAPHORE_TRY_ACQUIRE: return "TD_SEMAPHORE_TRY_ACQUIRE";
-  case TD_OMP_TASK:           return "TD_OMP_TASK";
-  case TD_OMP_TASKWAIT:       return "TD_OMP_TASKWAIT";
-  case TD_OMP_TASKWAIT_DEPS:  return "TD_OMP_TASKWAIT_DEPS";
-  case TD_OMP_TASKYIELD:      return "TD_OMP_TASKYIELD";
-  case TD_OMP_TASKGROUP_START: return "TD_OMP_TASKGROUP_START";
-  case TD_OMP_TASKGROUP_END:  return "TD_OMP_TASKGROUP_END";
-  case TD_OMP_TASK_WITH_DEPS: return "TD_OMP_TASK_WITH_DEPS";
-  case TD_OMP_TASKLOOP:       return "TD_OMP_TASKLOOP";
-  case TD_OMP_TASK_COMPLETE:  return "TD_OMP_TASK_COMPLETE";
-  case TD_OMP_SINGLE_START:   return "TD_OMP_SINGLE_START";
-  case TD_OMP_SINGLE_END:     return "TD_OMP_SINGLE_END";
-  case TD_OMP_MASTER_START:   return "TD_OMP_MASTER_START";
-  case TD_OMP_MASTER_END:     return "TD_OMP_MASTER_END";
-  case TD_OMP_ORDERED_START:  return "TD_OMP_ORDERED_START";
-  case TD_OMP_ORDERED_END:    return "TD_OMP_ORDERED_END";
-  case TD_OMP_REDUCE_START:   return "TD_OMP_REDUCE_START";
-  case TD_OMP_REDUCE_END:     return "TD_OMP_REDUCE_END";
-  case TD_OMP_REDUCE_NOWAIT_START: return "TD_OMP_REDUCE_NOWAIT_START";
-  case TD_OMP_REDUCE_NOWAIT_END: return "TD_OMP_REDUCE_NOWAIT_END";
-  case TD_OMP_FOR_STATIC_INIT: return "TD_OMP_FOR_STATIC_INIT";
-  case TD_OMP_FOR_STATIC_FINI: return "TD_OMP_FOR_STATIC_FINI";
-  case TD_OMP_FOR_DISPATCH_INIT: return "TD_OMP_FOR_DISPATCH_INIT";
-  case TD_OMP_FOR_DISPATCH_NEXT: return "TD_OMP_FOR_DISPATCH_NEXT";
-  case TD_OMP_FOR_DISPATCH_FINI: return "TD_OMP_FOR_DISPATCH_FINI";
-  case TD_OMP_SECTIONS_INIT:  return "TD_OMP_SECTIONS_INIT";
-  case TD_OMP_SECTIONS_NEXT:  return "TD_OMP_SECTIONS_NEXT";
-  case TD_OMP_SECTIONS_END:   return "TD_OMP_SECTIONS_END";
-  case TD_OMP_ATOMIC_START:   return "TD_OMP_ATOMIC_START";
-  case TD_OMP_ATOMIC_END:     return "TD_OMP_ATOMIC_END";
-  case TD_OMP_FLUSH:          return "TD_OMP_FLUSH";
-  case TD_OMP_CANCEL:         return "TD_OMP_CANCEL";
-  case TD_OMP_TARGET:         return "TD_OMP_TARGET";
-  case TD_OMP_TARGET_DATA_BEGIN: return "TD_OMP_TARGET_DATA_BEGIN";
-  case TD_OMP_TARGET_DATA_END: return "TD_OMP_TARGET_DATA_END";
-  case TD_MPI_INIT:           return "TD_MPI_INIT";
-  case TD_MPI_FINALIZE:       return "TD_MPI_FINALIZE";
-  case TD_MPI_SEND:           return "TD_MPI_SEND";
-  case TD_MPI_RECV:           return "TD_MPI_RECV";
-  case TD_MPI_SENDRECV:       return "TD_MPI_SENDRECV";
-  case TD_MPI_PROBE:          return "TD_MPI_PROBE";
-  case TD_MPI_ISEND:          return "TD_MPI_ISEND";
-  case TD_MPI_IRECV:          return "TD_MPI_IRECV";
-  case TD_MPI_IPROBE:         return "TD_MPI_IPROBE";
-  case TD_MPI_WAIT:           return "TD_MPI_WAIT";
-  case TD_MPI_WAITALL:        return "TD_MPI_WAITALL";
-  case TD_MPI_WAITANY:        return "TD_MPI_WAITANY";
-  case TD_MPI_WAITSOME:       return "TD_MPI_WAITSOME";
-  case TD_MPI_TEST:           return "TD_MPI_TEST";
-  case TD_MPI_TESTALL:        return "TD_MPI_TESTALL";
-  case TD_MPI_TESTANY:        return "TD_MPI_TESTANY";
-  case TD_MPI_TESTSOME:       return "TD_MPI_TESTSOME";
-  case TD_MPI_BARRIER:        return "TD_MPI_BARRIER";
-  case TD_MPI_BCAST:          return "TD_MPI_BCAST";
-  case TD_MPI_SCATTER:        return "TD_MPI_SCATTER";
-  case TD_MPI_GATHER:         return "TD_MPI_GATHER";
-  case TD_MPI_ALLGATHER:      return "TD_MPI_ALLGATHER";
-  case TD_MPI_ALLTOALL:       return "TD_MPI_ALLTOALL";
-  case TD_MPI_REDUCE:         return "TD_MPI_REDUCE";
-  case TD_MPI_ALLREDUCE:      return "TD_MPI_ALLREDUCE";
-  case TD_MPI_REDUCE_SCATTER: return "TD_MPI_REDUCE_SCATTER";
-  case TD_MPI_SCAN:           return "TD_MPI_SCAN";
-  case TD_MPI_WIN_CREATE:     return "TD_MPI_WIN_CREATE";
-  case TD_MPI_WIN_FREE:       return "TD_MPI_WIN_FREE";
-  case TD_MPI_PUT:            return "TD_MPI_PUT";
-  case TD_MPI_GET:            return "TD_MPI_GET";
-  case TD_MPI_ACCUMULATE:     return "TD_MPI_ACCUMULATE";
-  case TD_MPI_WIN_FENCE:      return "TD_MPI_WIN_FENCE";
-  case TD_MPI_WIN_LOCK:       return "TD_MPI_WIN_LOCK";
-  case TD_MPI_WIN_UNLOCK:     return "TD_MPI_WIN_UNLOCK";
-  case TD_MPI_WIN_FLUSH:      return "TD_MPI_WIN_FLUSH";
-  case TD_MPI_WIN_SYNC:       return "TD_MPI_WIN_SYNC";
-  case TD_MPI_WIN_POST:       return "TD_MPI_WIN_POST";
-  case TD_MPI_WIN_START:      return "TD_MPI_WIN_START";
-  case TD_MPI_WIN_COMPLETE:   return "TD_MPI_WIN_COMPLETE";
-  case TD_MPI_WIN_WAIT:       return "TD_MPI_WIN_WAIT";
-  case TD_MPI_WIN_TEST:       return "TD_MPI_WIN_TEST";
-  case TD_MPI_COMM_DUP:       return "TD_MPI_COMM_DUP";
-  case TD_MPI_COMM_SPLIT:     return "TD_MPI_COMM_SPLIT";
-  case TD_MPI_COMM_CREATE:    return "TD_MPI_COMM_CREATE";
-  case TD_MPI_COMM_FREE:      return "TD_MPI_COMM_FREE";
-  case TD_MPI_REQUEST_FREE:   return "TD_MPI_REQUEST_FREE";
-  case TD_MPI_CANCEL:         return "TD_MPI_CANCEL";
-  case TD_KERNEL_SPIN_LOCK_INIT: return "TD_KERNEL_SPIN_LOCK_INIT";
-  case TD_KERNEL_SPIN_LOCK:   return "TD_KERNEL_SPIN_LOCK";
-  case TD_KERNEL_SPIN_UNLOCK: return "TD_KERNEL_SPIN_UNLOCK";
-  case TD_KERNEL_SPIN_TRYLOCK: return "TD_KERNEL_SPIN_TRYLOCK";
-  case TD_KERNEL_MUTEX_INIT:  return "TD_KERNEL_MUTEX_INIT";
-  case TD_KERNEL_MUTEX_LOCK:  return "TD_KERNEL_MUTEX_LOCK";
-  case TD_KERNEL_MUTEX_UNLOCK: return "TD_KERNEL_MUTEX_UNLOCK";
-  case TD_KERNEL_MUTEX_TRYLOCK: return "TD_KERNEL_MUTEX_TRYLOCK";
-  case TD_KERNEL_SEMA_INIT:   return "TD_KERNEL_SEMA_INIT";
-  case TD_KERNEL_DOWN:        return "TD_KERNEL_DOWN";
-  case TD_KERNEL_UP:          return "TD_KERNEL_UP";
-  case TD_KERNEL_READ_LOCK:   return "TD_KERNEL_READ_LOCK";
-  case TD_KERNEL_READ_UNLOCK: return "TD_KERNEL_READ_UNLOCK";
-  case TD_KERNEL_WRITE_LOCK:  return "TD_KERNEL_WRITE_LOCK";
-  case TD_KERNEL_WRITE_UNLOCK: return "TD_KERNEL_WRITE_UNLOCK";
-  case TD_KERNEL_DOWN_READ:   return "TD_KERNEL_DOWN_READ";
-  case TD_KERNEL_UP_READ:     return "TD_KERNEL_UP_READ";
-  case TD_KERNEL_DOWN_WRITE:  return "TD_KERNEL_DOWN_WRITE";
-  case TD_KERNEL_UP_WRITE:    return "TD_KERNEL_UP_WRITE";
-  case TD_KERNEL_INIT_RWSEM:  return "TD_KERNEL_INIT_RWSEM";
-  case TD_KERNEL_RCU_READ_LOCK: return "TD_KERNEL_RCU_READ_LOCK";
-  case TD_KERNEL_RCU_READ_UNLOCK: return "TD_KERNEL_RCU_READ_UNLOCK";
-  case TD_KERNEL_SYNCHRONIZE_RCU: return "TD_KERNEL_SYNCHRONIZE_RCU";
-  case TD_KERNEL_CALL_RCU:    return "TD_KERNEL_CALL_RCU";
-  case TD_KERNEL_RCU_DEREFERENCE: return "TD_KERNEL_RCU_DEREFERENCE";
-  case TD_KERNEL_RCU_ASSIGN_POINTER: return "TD_KERNEL_RCU_ASSIGN_POINTER";
-  case TD_KERNEL_SEQLOCK_INIT: return "TD_KERNEL_SEQLOCK_INIT";
-  case TD_KERNEL_READ_SEQBEGIN: return "TD_KERNEL_READ_SEQBEGIN";
-  case TD_KERNEL_READ_SEQRETRY: return "TD_KERNEL_READ_SEQRETRY";
-  case TD_KERNEL_WRITE_SEQLOCK: return "TD_KERNEL_WRITE_SEQLOCK";
-  case TD_KERNEL_WRITE_SEQUNLOCK: return "TD_KERNEL_WRITE_SEQUNLOCK";
-  case TD_KERNEL_INIT_COMPLETION: return "TD_KERNEL_INIT_COMPLETION";
-  case TD_KERNEL_WAIT_FOR_COMPLETION: return "TD_KERNEL_WAIT_FOR_COMPLETION";
-  case TD_KERNEL_COMPLETE:    return "TD_KERNEL_COMPLETE";
-  case TD_KERNEL_COMPLETE_ALL: return "TD_KERNEL_COMPLETE_ALL";
-  case TD_KERNEL_INIT_WAITQUEUE_HEAD: return "TD_KERNEL_INIT_WAITQUEUE_HEAD";
-  case TD_KERNEL_WAIT_EVENT:  return "TD_KERNEL_WAIT_EVENT";
-  case TD_KERNEL_WAKE_UP:     return "TD_KERNEL_WAKE_UP";
-  case TD_KERNEL_PREPARE_TO_WAIT: return "TD_KERNEL_PREPARE_TO_WAIT";
-  case TD_KERNEL_FINISH_WAIT: return "TD_KERNEL_FINISH_WAIT";
-  case TD_KERNEL_MEMORY_BARRIER: return "TD_KERNEL_MEMORY_BARRIER";
-  default:                    return "<unknown TD_TYPE>";
+  case TD_DUMMY:
+    return "TD_DUMMY";
+  case TD_FORK:
+    return "TD_FORK";
+  case TD_JOIN:
+    return "TD_JOIN";
+  case TD_DETACH:
+    return "TD_DETACH";
+  case TD_ACQUIRE:
+    return "TD_ACQUIRE";
+  case TD_TRY_ACQUIRE:
+    return "TD_TRY_ACQUIRE";
+  case TD_RWLOCK_RDLOCK:
+    return "TD_RWLOCK_RDLOCK";
+  case TD_RWLOCK_WRLOCK:
+    return "TD_RWLOCK_WRLOCK";
+  case TD_RELEASE:
+    return "TD_RELEASE";
+  case TD_EXIT:
+    return "TD_EXIT";
+  case TD_CANCEL:
+    return "TD_CANCEL";
+  case TD_COND_WAIT:
+    return "TD_COND_WAIT";
+  case TD_COND_SIGNAL:
+    return "TD_COND_SIGNAL";
+  case TD_COND_BROADCAST:
+    return "TD_COND_BROADCAST";
+  case TD_MUTEX_INI:
+    return "TD_MUTEX_INI";
+  case TD_MUTEX_DESTROY:
+    return "TD_MUTEX_DESTROY";
+  case TD_CONDVAR_INI:
+    return "TD_CONDVAR_INI";
+  case TD_CONDVAR_DESTROY:
+    return "TD_CONDVAR_DESTROY";
+  case TD_BAR_INIT:
+    return "TD_BAR_INIT";
+  case TD_BAR_WAIT:
+    return "TD_BAR_WAIT";
+  case HARE_PAR_FOR:
+    return "HARE_PAR_FOR";
+  case TD_SHARED_RDLOCK:
+    return "TD_SHARED_RDLOCK";
+  case TD_SHARED_WRLOCK:
+    return "TD_SHARED_WRLOCK";
+  case TD_SHARED_UNLOCK:
+    return "TD_SHARED_UNLOCK";
+  case TD_CALL_ONCE:
+    return "TD_CALL_ONCE";
+  case TD_FUTURE_GET:
+    return "TD_FUTURE_GET";
+  case TD_FUTURE_WAIT:
+    return "TD_FUTURE_WAIT";
+  case TD_PROMISE_SET:
+    return "TD_PROMISE_SET";
+  case TD_ASYNC:
+    return "TD_ASYNC";
+  case TD_LOCK_GUARD_CTOR:
+    return "TD_LOCK_GUARD_CTOR";
+  case TD_LOCK_GUARD_DTOR:
+    return "TD_LOCK_GUARD_DTOR";
+  case TD_UNIQUE_LOCK_CTOR:
+    return "TD_UNIQUE_LOCK_CTOR";
+  case TD_UNIQUE_LOCK_DTOR:
+    return "TD_UNIQUE_LOCK_DTOR";
+  case TD_UNIQUE_LOCK_LOCK:
+    return "TD_UNIQUE_LOCK_LOCK";
+  case TD_UNIQUE_LOCK_UNLOCK:
+    return "TD_UNIQUE_LOCK_UNLOCK";
+  case TD_SCOPED_LOCK_CTOR:
+    return "TD_SCOPED_LOCK_CTOR";
+  case TD_SCOPED_LOCK_DTOR:
+    return "TD_SCOPED_LOCK_DTOR";
+  case TD_SHARED_LOCK_CTOR:
+    return "TD_SHARED_LOCK_CTOR";
+  case TD_SHARED_LOCK_DTOR:
+    return "TD_SHARED_LOCK_DTOR";
+  case TD_JTHREAD_FORK:
+    return "TD_JTHREAD_FORK";
+  case TD_JTHREAD_JOIN:
+    return "TD_JTHREAD_JOIN";
+  case TD_LATCH_COUNT_DOWN:
+    return "TD_LATCH_COUNT_DOWN";
+  case TD_LATCH_WAIT:
+    return "TD_LATCH_WAIT";
+  case TD_LATCH_ARRIVE_WAIT:
+    return "TD_LATCH_ARRIVE_WAIT";
+  case TD_BARRIER_ARRIVE_WAIT:
+    return "TD_BARRIER_ARRIVE_WAIT";
+  case TD_BARRIER_ARRIVE:
+    return "TD_BARRIER_ARRIVE";
+  case TD_BARRIER_WAIT_CPP20:
+    return "TD_BARRIER_WAIT_CPP20";
+  case TD_SEMAPHORE_ACQUIRE:
+    return "TD_SEMAPHORE_ACQUIRE";
+  case TD_SEMAPHORE_RELEASE:
+    return "TD_SEMAPHORE_RELEASE";
+  case TD_SEMAPHORE_TRY_ACQUIRE:
+    return "TD_SEMAPHORE_TRY_ACQUIRE";
+  case TD_OMP_TASK:
+    return "TD_OMP_TASK";
+  case TD_OMP_TASKWAIT:
+    return "TD_OMP_TASKWAIT";
+  case TD_OMP_TASKWAIT_DEPS:
+    return "TD_OMP_TASKWAIT_DEPS";
+  case TD_OMP_TASKYIELD:
+    return "TD_OMP_TASKYIELD";
+  case TD_OMP_TASKGROUP_START:
+    return "TD_OMP_TASKGROUP_START";
+  case TD_OMP_TASKGROUP_END:
+    return "TD_OMP_TASKGROUP_END";
+  case TD_OMP_TASK_WITH_DEPS:
+    return "TD_OMP_TASK_WITH_DEPS";
+  case TD_OMP_TASKLOOP:
+    return "TD_OMP_TASKLOOP";
+  case TD_OMP_TASK_COMPLETE:
+    return "TD_OMP_TASK_COMPLETE";
+  case TD_OMP_SINGLE_START:
+    return "TD_OMP_SINGLE_START";
+  case TD_OMP_SINGLE_END:
+    return "TD_OMP_SINGLE_END";
+  case TD_OMP_MASTER_START:
+    return "TD_OMP_MASTER_START";
+  case TD_OMP_MASTER_END:
+    return "TD_OMP_MASTER_END";
+  case TD_OMP_ORDERED_START:
+    return "TD_OMP_ORDERED_START";
+  case TD_OMP_ORDERED_END:
+    return "TD_OMP_ORDERED_END";
+  case TD_OMP_REDUCE_START:
+    return "TD_OMP_REDUCE_START";
+  case TD_OMP_REDUCE_END:
+    return "TD_OMP_REDUCE_END";
+  case TD_OMP_REDUCE_NOWAIT_START:
+    return "TD_OMP_REDUCE_NOWAIT_START";
+  case TD_OMP_REDUCE_NOWAIT_END:
+    return "TD_OMP_REDUCE_NOWAIT_END";
+  case TD_OMP_FOR_STATIC_INIT:
+    return "TD_OMP_FOR_STATIC_INIT";
+  case TD_OMP_FOR_STATIC_FINI:
+    return "TD_OMP_FOR_STATIC_FINI";
+  case TD_OMP_FOR_DISPATCH_INIT:
+    return "TD_OMP_FOR_DISPATCH_INIT";
+  case TD_OMP_FOR_DISPATCH_NEXT:
+    return "TD_OMP_FOR_DISPATCH_NEXT";
+  case TD_OMP_FOR_DISPATCH_FINI:
+    return "TD_OMP_FOR_DISPATCH_FINI";
+  case TD_OMP_SECTIONS_INIT:
+    return "TD_OMP_SECTIONS_INIT";
+  case TD_OMP_SECTIONS_NEXT:
+    return "TD_OMP_SECTIONS_NEXT";
+  case TD_OMP_SECTIONS_END:
+    return "TD_OMP_SECTIONS_END";
+  case TD_OMP_ATOMIC_START:
+    return "TD_OMP_ATOMIC_START";
+  case TD_OMP_ATOMIC_END:
+    return "TD_OMP_ATOMIC_END";
+  case TD_OMP_FLUSH:
+    return "TD_OMP_FLUSH";
+  case TD_OMP_CANCEL:
+    return "TD_OMP_CANCEL";
+  case TD_OMP_TARGET:
+    return "TD_OMP_TARGET";
+  case TD_OMP_TARGET_DATA_BEGIN:
+    return "TD_OMP_TARGET_DATA_BEGIN";
+  case TD_OMP_TARGET_DATA_END:
+    return "TD_OMP_TARGET_DATA_END";
+  case TD_OMP_TARGET_DATA_UPDATE:
+    return "TD_OMP_TARGET_DATA_UPDATE";
+  case TD_MPI_INIT:
+    return "TD_MPI_INIT";
+  case TD_MPI_FINALIZE:
+    return "TD_MPI_FINALIZE";
+  case TD_MPI_SEND:
+    return "TD_MPI_SEND";
+  case TD_MPI_RECV:
+    return "TD_MPI_RECV";
+  case TD_MPI_SENDRECV:
+    return "TD_MPI_SENDRECV";
+  case TD_MPI_PROBE:
+    return "TD_MPI_PROBE";
+  case TD_MPI_ISEND:
+    return "TD_MPI_ISEND";
+  case TD_MPI_IRECV:
+    return "TD_MPI_IRECV";
+  case TD_MPI_IPROBE:
+    return "TD_MPI_IPROBE";
+  case TD_MPI_PERSISTENT_SEND_INIT:
+    return "TD_MPI_PERSISTENT_SEND_INIT";
+  case TD_MPI_PERSISTENT_RECV_INIT:
+    return "TD_MPI_PERSISTENT_RECV_INIT";
+  case TD_MPI_REQUEST_START:
+    return "TD_MPI_REQUEST_START";
+  case TD_MPI_WAIT:
+    return "TD_MPI_WAIT";
+  case TD_MPI_WAITALL:
+    return "TD_MPI_WAITALL";
+  case TD_MPI_WAITANY:
+    return "TD_MPI_WAITANY";
+  case TD_MPI_WAITSOME:
+    return "TD_MPI_WAITSOME";
+  case TD_MPI_TEST:
+    return "TD_MPI_TEST";
+  case TD_MPI_TESTALL:
+    return "TD_MPI_TESTALL";
+  case TD_MPI_TESTANY:
+    return "TD_MPI_TESTANY";
+  case TD_MPI_TESTSOME:
+    return "TD_MPI_TESTSOME";
+  case TD_MPI_BARRIER:
+    return "TD_MPI_BARRIER";
+  case TD_MPI_BCAST:
+    return "TD_MPI_BCAST";
+  case TD_MPI_SCATTER:
+    return "TD_MPI_SCATTER";
+  case TD_MPI_GATHER:
+    return "TD_MPI_GATHER";
+  case TD_MPI_ALLGATHER:
+    return "TD_MPI_ALLGATHER";
+  case TD_MPI_ALLTOALL:
+    return "TD_MPI_ALLTOALL";
+  case TD_MPI_REDUCE:
+    return "TD_MPI_REDUCE";
+  case TD_MPI_ALLREDUCE:
+    return "TD_MPI_ALLREDUCE";
+  case TD_MPI_REDUCE_SCATTER:
+    return "TD_MPI_REDUCE_SCATTER";
+  case TD_MPI_SCAN:
+    return "TD_MPI_SCAN";
+  case TD_MPI_WIN_CREATE:
+    return "TD_MPI_WIN_CREATE";
+  case TD_MPI_WIN_FREE:
+    return "TD_MPI_WIN_FREE";
+  case TD_MPI_PUT:
+    return "TD_MPI_PUT";
+  case TD_MPI_GET:
+    return "TD_MPI_GET";
+  case TD_MPI_ACCUMULATE:
+    return "TD_MPI_ACCUMULATE";
+  case TD_MPI_WIN_FENCE:
+    return "TD_MPI_WIN_FENCE";
+  case TD_MPI_WIN_LOCK:
+    return "TD_MPI_WIN_LOCK";
+  case TD_MPI_WIN_UNLOCK:
+    return "TD_MPI_WIN_UNLOCK";
+  case TD_MPI_WIN_FLUSH:
+    return "TD_MPI_WIN_FLUSH";
+  case TD_MPI_WIN_SYNC:
+    return "TD_MPI_WIN_SYNC";
+  case TD_MPI_WIN_POST:
+    return "TD_MPI_WIN_POST";
+  case TD_MPI_WIN_START:
+    return "TD_MPI_WIN_START";
+  case TD_MPI_WIN_COMPLETE:
+    return "TD_MPI_WIN_COMPLETE";
+  case TD_MPI_WIN_WAIT:
+    return "TD_MPI_WIN_WAIT";
+  case TD_MPI_WIN_TEST:
+    return "TD_MPI_WIN_TEST";
+  case TD_MPI_COMM_DUP:
+    return "TD_MPI_COMM_DUP";
+  case TD_MPI_COMM_SPLIT:
+    return "TD_MPI_COMM_SPLIT";
+  case TD_MPI_COMM_CREATE:
+    return "TD_MPI_COMM_CREATE";
+  case TD_MPI_COMM_FREE:
+    return "TD_MPI_COMM_FREE";
+  case TD_MPI_REQUEST_FREE:
+    return "TD_MPI_REQUEST_FREE";
+  case TD_MPI_CANCEL:
+    return "TD_MPI_CANCEL";
+  case TD_KERNEL_SPIN_LOCK_INIT:
+    return "TD_KERNEL_SPIN_LOCK_INIT";
+  case TD_KERNEL_SPIN_LOCK:
+    return "TD_KERNEL_SPIN_LOCK";
+  case TD_KERNEL_SPIN_UNLOCK:
+    return "TD_KERNEL_SPIN_UNLOCK";
+  case TD_KERNEL_SPIN_TRYLOCK:
+    return "TD_KERNEL_SPIN_TRYLOCK";
+  case TD_KERNEL_MUTEX_INIT:
+    return "TD_KERNEL_MUTEX_INIT";
+  case TD_KERNEL_MUTEX_LOCK:
+    return "TD_KERNEL_MUTEX_LOCK";
+  case TD_KERNEL_MUTEX_UNLOCK:
+    return "TD_KERNEL_MUTEX_UNLOCK";
+  case TD_KERNEL_MUTEX_TRYLOCK:
+    return "TD_KERNEL_MUTEX_TRYLOCK";
+  case TD_KERNEL_SEMA_INIT:
+    return "TD_KERNEL_SEMA_INIT";
+  case TD_KERNEL_DOWN:
+    return "TD_KERNEL_DOWN";
+  case TD_KERNEL_UP:
+    return "TD_KERNEL_UP";
+  case TD_KERNEL_READ_LOCK:
+    return "TD_KERNEL_READ_LOCK";
+  case TD_KERNEL_READ_UNLOCK:
+    return "TD_KERNEL_READ_UNLOCK";
+  case TD_KERNEL_WRITE_LOCK:
+    return "TD_KERNEL_WRITE_LOCK";
+  case TD_KERNEL_WRITE_UNLOCK:
+    return "TD_KERNEL_WRITE_UNLOCK";
+  case TD_KERNEL_DOWN_READ:
+    return "TD_KERNEL_DOWN_READ";
+  case TD_KERNEL_UP_READ:
+    return "TD_KERNEL_UP_READ";
+  case TD_KERNEL_DOWN_WRITE:
+    return "TD_KERNEL_DOWN_WRITE";
+  case TD_KERNEL_UP_WRITE:
+    return "TD_KERNEL_UP_WRITE";
+  case TD_KERNEL_INIT_RWSEM:
+    return "TD_KERNEL_INIT_RWSEM";
+  case TD_KERNEL_RCU_READ_LOCK:
+    return "TD_KERNEL_RCU_READ_LOCK";
+  case TD_KERNEL_RCU_READ_UNLOCK:
+    return "TD_KERNEL_RCU_READ_UNLOCK";
+  case TD_KERNEL_SYNCHRONIZE_RCU:
+    return "TD_KERNEL_SYNCHRONIZE_RCU";
+  case TD_KERNEL_CALL_RCU:
+    return "TD_KERNEL_CALL_RCU";
+  case TD_KERNEL_RCU_DEREFERENCE:
+    return "TD_KERNEL_RCU_DEREFERENCE";
+  case TD_KERNEL_RCU_ASSIGN_POINTER:
+    return "TD_KERNEL_RCU_ASSIGN_POINTER";
+  case TD_KERNEL_SEQLOCK_INIT:
+    return "TD_KERNEL_SEQLOCK_INIT";
+  case TD_KERNEL_READ_SEQBEGIN:
+    return "TD_KERNEL_READ_SEQBEGIN";
+  case TD_KERNEL_READ_SEQRETRY:
+    return "TD_KERNEL_READ_SEQRETRY";
+  case TD_KERNEL_WRITE_SEQLOCK:
+    return "TD_KERNEL_WRITE_SEQLOCK";
+  case TD_KERNEL_WRITE_SEQUNLOCK:
+    return "TD_KERNEL_WRITE_SEQUNLOCK";
+  case TD_KERNEL_INIT_COMPLETION:
+    return "TD_KERNEL_INIT_COMPLETION";
+  case TD_KERNEL_WAIT_FOR_COMPLETION:
+    return "TD_KERNEL_WAIT_FOR_COMPLETION";
+  case TD_KERNEL_COMPLETE:
+    return "TD_KERNEL_COMPLETE";
+  case TD_KERNEL_COMPLETE_ALL:
+    return "TD_KERNEL_COMPLETE_ALL";
+  case TD_KERNEL_INIT_WAITQUEUE_HEAD:
+    return "TD_KERNEL_INIT_WAITQUEUE_HEAD";
+  case TD_KERNEL_WAIT_EVENT:
+    return "TD_KERNEL_WAIT_EVENT";
+  case TD_KERNEL_WAKE_UP:
+    return "TD_KERNEL_WAKE_UP";
+  case TD_KERNEL_PREPARE_TO_WAIT:
+    return "TD_KERNEL_PREPARE_TO_WAIT";
+  case TD_KERNEL_FINISH_WAIT:
+    return "TD_KERNEL_FINISH_WAIT";
+  case TD_KERNEL_MEMORY_BARRIER:
+    return "TD_KERNEL_MEMORY_BARRIER";
+  default:
+    return "<unknown TD_TYPE>";
   }
 }

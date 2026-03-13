@@ -1,10 +1,10 @@
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 
@@ -34,6 +34,14 @@ TEST_F(ThreadAPITest, ParsesExtendedTypeNames) {
             ThreadAPI::TD_OMP_SINGLE_END);
   EXPECT_EQ(ThreadAPI::stringToType("TD_OMP_ORDERED_START"),
             ThreadAPI::TD_OMP_ORDERED_START);
+  EXPECT_EQ(ThreadAPI::stringToType("TD_OMP_TARGET_DATA_UPDATE"),
+            ThreadAPI::TD_OMP_TARGET_DATA_UPDATE);
+  EXPECT_EQ(ThreadAPI::stringToType("TD_MPI_PERSISTENT_SEND_INIT"),
+            ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT);
+  EXPECT_EQ(ThreadAPI::stringToType("TD_MPI_PERSISTENT_RECV_INIT"),
+            ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT);
+  EXPECT_EQ(ThreadAPI::stringToType("TD_MPI_REQUEST_START"),
+            ThreadAPI::TD_MPI_REQUEST_START);
 }
 
 TEST_F(ThreadAPITest, PthreadCancelIsNotClassifiedAsJoin) {
@@ -154,6 +162,159 @@ TEST_F(ThreadAPITest, MatchesSpecificOpenMPTargetDataBeforeGenericTarget) {
             ThreadAPI::TD_OMP_TARGET_DATA_BEGIN);
   EXPECT_EQ(api->getType(module->getFunction("__tgt_target_data_end")),
             ThreadAPI::TD_OMP_TARGET_DATA_END);
+}
+
+TEST_F(ThreadAPITest, RecognizesExtendedOpenMPTargetDataVariantsAndHelpers) {
+  const char *source = R"(
+    declare void @__tgt_target_data_update(i64, i8*)
+    declare void @__tgt_target_enter_data(i64, i8*)
+    declare void @__tgt_target_exit_data(i64, i8*)
+
+    define void @main() {
+    entry:
+      call void @__tgt_target_data_update(i64 0, i8* null)
+      call void @__tgt_target_enter_data(i64 0, i8* null)
+      call void @__tgt_target_exit_data(i64 0, i8* null)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__tgt_target_data_update")),
+            ThreadAPI::TD_OMP_TARGET_DATA_UPDATE);
+  EXPECT_EQ(api->getType(module->getFunction("__tgt_target_enter_data")),
+            ThreadAPI::TD_OMP_TARGET_DATA_BEGIN);
+  EXPECT_EQ(api->getType(module->getFunction("__tgt_target_exit_data")),
+            ThreadAPI::TD_OMP_TARGET_DATA_END);
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *update = &*it++;
+  const Instruction *enter = &*it++;
+  const Instruction *exit = &*it++;
+
+  EXPECT_TRUE(api->isOMPTargetOp(update));
+  EXPECT_TRUE(api->isOMPTargetDataOp(update));
+  EXPECT_TRUE(api->isOMPTargetDataOp(enter));
+  EXPECT_TRUE(api->isOMPTargetDataOp(exit));
+}
+
+TEST_F(ThreadAPITest, RecognizesOpenMPLockLifecycleAndTryLockRoutines) {
+  const char *source = R"(
+    declare void @omp_init_lock(i8*)
+    declare i32 @omp_test_lock(i8*)
+    declare void @omp_destroy_lock(i8*)
+    declare void @omp_init_nest_lock(i8*)
+    declare i32 @omp_test_nest_lock(i8*)
+    declare void @omp_destroy_nest_lock(i8*)
+
+    define void @main(i8* %lock, i8* %nest) {
+    entry:
+      call void @omp_init_lock(i8* %lock)
+      call i32 @omp_test_lock(i8* %lock)
+      call void @omp_destroy_lock(i8* %lock)
+      call void @omp_init_nest_lock(i8* %nest)
+      call i32 @omp_test_nest_lock(i8* %nest)
+      call void @omp_destroy_nest_lock(i8* %nest)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("omp_init_lock")),
+            ThreadAPI::TD_MUTEX_INI);
+  EXPECT_EQ(api->getType(module->getFunction("omp_test_lock")),
+            ThreadAPI::TD_TRY_ACQUIRE);
+  EXPECT_EQ(api->getType(module->getFunction("omp_destroy_lock")),
+            ThreadAPI::TD_MUTEX_DESTROY);
+  EXPECT_EQ(api->getType(module->getFunction("omp_init_nest_lock")),
+            ThreadAPI::TD_MUTEX_INI);
+  EXPECT_EQ(api->getType(module->getFunction("omp_test_nest_lock")),
+            ThreadAPI::TD_TRY_ACQUIRE);
+  EXPECT_EQ(api->getType(module->getFunction("omp_destroy_nest_lock")),
+            ThreadAPI::TD_MUTEX_DESTROY);
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  auto it = main_func->getEntryBlock().begin();
+  ++it;
+  const Instruction *test_lock = &*it++;
+  ++it;
+  ++it;
+  const Instruction *test_nest_lock = &*it;
+  EXPECT_TRUE(api->isTryLock(test_lock));
+  EXPECT_TRUE(api->isTryLock(test_nest_lock));
+}
+
+TEST_F(ThreadAPITest, RecognizesAdditionalMPICommunicatorManagementAPIs) {
+  const char *source = R"(
+    declare i32 @MPI_Intercomm_create(i8*, i32, i8*, i32, i32, i8**)
+    declare i32 @MPI_Intercomm_merge(i8*, i32, i8**)
+    declare i32 @MPI_Comm_disconnect(i8**)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("MPI_Intercomm_create")),
+            ThreadAPI::TD_MPI_COMM_CREATE);
+  EXPECT_EQ(api->getType(module->getFunction("MPI_Intercomm_merge")),
+            ThreadAPI::TD_MPI_COMM_CREATE);
+  EXPECT_EQ(api->getType(module->getFunction("MPI_Comm_disconnect")),
+            ThreadAPI::TD_MPI_COMM_FREE);
+}
+
+TEST_F(ThreadAPITest, RecognizesPersistentMPIRequestLifecycleHelpers) {
+  const char *source = R"(
+    declare i32 @MPI_Send_init(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Recv_init(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Start(i8*)
+
+    define i32 @main(i8* %comm, i8* %req1, i8* %req2) {
+    entry:
+      call i32 @MPI_Send_init(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req1)
+      call i32 @MPI_Recv_init(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req2)
+      call i32 @MPI_Start(i8* %req1)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("MPI_Send_init")),
+            ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT);
+  EXPECT_EQ(api->getType(module->getFunction("MPI_Recv_init")),
+            ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT);
+  EXPECT_EQ(api->getType(module->getFunction("MPI_Start")),
+            ThreadAPI::TD_MPI_REQUEST_START);
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *send_init = &*it++;
+  const Instruction *recv_init = &*it++;
+  const Instruction *start = &*it++;
+
+  EXPECT_TRUE(api->isMPIRequestManagement(send_init));
+  EXPECT_TRUE(api->isMPIRequestManagement(recv_init));
+  EXPECT_TRUE(api->isMPIRequestManagement(start));
+  EXPECT_TRUE(api->isPersistentMPIRequestInit(send_init));
+  EXPECT_TRUE(api->isPersistentMPIRequestInit(recv_init));
+  EXPECT_TRUE(api->isPersistentMPIRequestStart(start));
 }
 
 TEST_F(ThreadAPITest, RecognizesJthreadAndTreatsItAsForkLike) {
@@ -282,11 +443,12 @@ TEST_F(ThreadAPITest, ClassifiesSharedTimedMutexReleases) {
 
   ThreadAPI::resetThreadAPI();
   ThreadAPI *api = ThreadAPI::getThreadAPI();
-  EXPECT_EQ(
-      api->getType(module->getFunction("_ZNSt18shared_timed_mutex13unlock_sharedEv")),
-      ThreadAPI::TD_SHARED_UNLOCK);
-  EXPECT_EQ(api->getType(module->getFunction("_ZNSt18shared_timed_mutex6unlockEv")),
+  EXPECT_EQ(api->getType(module->getFunction(
+                "_ZNSt18shared_timed_mutex13unlock_sharedEv")),
             ThreadAPI::TD_SHARED_UNLOCK);
+  EXPECT_EQ(
+      api->getType(module->getFunction("_ZNSt18shared_timed_mutex6unlockEv")),
+      ThreadAPI::TD_SHARED_UNLOCK);
 }
 
 TEST_F(ThreadAPITest, ExtractsOutlinedOpenMPForkTarget) {
@@ -373,10 +535,12 @@ TEST_F(ThreadAPITest, MapsOpenMPTaskRuntimeVariants) {
             ThreadAPI::TD_OMP_TASK_WITH_DEPS);
   EXPECT_EQ(api->getType(module->getFunction("__kmpc_omp_task_complete_if0")),
             ThreadAPI::TD_OMP_TASK_COMPLETE);
-  EXPECT_EQ(api->getRuntimeLibrary(module->getFunction("__kmpc_omp_task_with_deps_51")),
+  EXPECT_EQ(api->getRuntimeLibrary(
+                module->getFunction("__kmpc_omp_task_with_deps_51")),
             ThreadAPI::RuntimeLibrary::OpenMP);
-  EXPECT_EQ(api->getSemanticTag(module->getFunction("__kmpc_omp_task_with_deps_51")),
-            "task-with-deps");
+  EXPECT_EQ(
+      api->getSemanticTag(module->getFunction("__kmpc_omp_task_with_deps_51")),
+      "task-with-deps");
 }
 
 TEST_F(ThreadAPITest, MapsOpenMPRegionRuntimeVariants) {
@@ -427,7 +591,8 @@ TEST_F(ThreadAPITest, DescribesMPIBarrierUsingStructuredConfig) {
 
   ThreadAPI::resetThreadAPI();
   ThreadAPI *api = ThreadAPI::getThreadAPI();
-  ThreadAPI::APIDescription desc = api->describe(module->getFunction("MPI_Ibarrier"));
+  ThreadAPI::APIDescription desc =
+      api->describe(module->getFunction("MPI_Ibarrier"));
   EXPECT_EQ(desc.type, ThreadAPI::TD_MPI_BARRIER);
   EXPECT_EQ(desc.library, ThreadAPI::RuntimeLibrary::MPI);
   EXPECT_EQ(desc.semantic_tag, "ibarrier");
@@ -461,7 +626,8 @@ TEST_F(ThreadAPITest, UsesCriticalNameAsAnalysisLockIdentity) {
   const Instruction *enter = &*it++;
   const Instruction *exit = &*it++;
 
-  EXPECT_EQ(api->getAnalysisLockIdentity(enter), module->getNamedGlobal("crit"));
+  EXPECT_EQ(api->getAnalysisLockIdentity(enter),
+            module->getNamedGlobal("crit"));
   EXPECT_EQ(api->getAnalysisLockIdentity(exit), module->getNamedGlobal("crit"));
 }
 
