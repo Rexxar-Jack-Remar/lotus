@@ -5,11 +5,11 @@
 
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace mhp;
@@ -255,6 +255,59 @@ TEST_F(LockSetAnalysisTest, UniqueLockManualLockUnlockUsesUnderlyingMutex) {
   EXPECT_TRUE(lsa.mustHoldLock(after, lock));
 }
 
+TEST_F(LockSetAnalysisTest, ConditionalLockDoesNotBecomeMustCommonLock) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+
+    @lock = global i8 0
+    @flag = external global i1
+
+    define void @worker1() {
+    entry:
+      %cond = load i1, i1* @flag
+      br i1 %cond, label %locked, label %merge
+
+    locked:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      br label %merge
+
+    merge:
+      %store1 = add i32 1, 2
+      ret void
+    }
+
+    define void @worker2() {
+    entry:
+      %cond = load i1, i1* @flag
+      br i1 %cond, label %locked, label %merge
+
+    locked:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      br label %merge
+
+    merge:
+      %store2 = add i32 3, 4
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *store1 =
+      findInstructionByName(*module->getFunction("worker1"), "store1");
+  const Instruction *store2 =
+      findInstructionByName(*module->getFunction("worker2"), "store2");
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldCommonLock(store1, store2));
+  EXPECT_FALSE(lsa.mustHoldCommonLock(store1, store2));
+}
+
 TEST_F(LockSetAnalysisTest, InvokeAppliesInterproceduralSummaries) {
   const char *source = R"(
     declare i32 @pthread_mutex_lock(i8*)
@@ -373,7 +426,8 @@ TEST_F(LockSetAnalysisTest, UniqueLockDeferDoesNotAcquireAtConstruction) {
   LockSetAnalysis lsa(*module);
   lsa.analyze();
 
-  const Instruction *after = findInstructionByName(*module->getFunction("main"), "after");
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
   const GlobalVariable *lock = module->getNamedGlobal("lock");
   ASSERT_NE(after, nullptr);
   ASSERT_NE(lock, nullptr);
@@ -403,7 +457,8 @@ TEST_F(LockSetAnalysisTest, UniqueLockTryToLockIsMayOnly) {
   LockSetAnalysis lsa(*module);
   lsa.analyze();
 
-  const Instruction *after = findInstructionByName(*module->getFunction("main"), "after");
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
   const GlobalVariable *lock = module->getNamedGlobal("lock");
   ASSERT_NE(after, nullptr);
   ASSERT_NE(lock, nullptr);
@@ -432,7 +487,8 @@ TEST_F(LockSetAnalysisTest, SharedLockCountsAsReadLockOnly) {
   LockSetAnalysis lsa(*module);
   lsa.analyze();
 
-  const Instruction *after = findInstructionByName(*module->getFunction("main"), "after");
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
   const GlobalVariable *lock = module->getNamedGlobal("lock");
   ASSERT_NE(after, nullptr);
   ASSERT_NE(lock, nullptr);
@@ -466,7 +522,8 @@ TEST_F(LockSetAnalysisTest, CalleeHeldExitLocksDoNotBecomeCallerMustLocks) {
   LockSetAnalysis lsa(*module);
   lsa.analyze();
 
-  const Instruction *after = findInstructionByName(*module->getFunction("main"), "after");
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
   const GlobalVariable *lock = module->getNamedGlobal("lock");
   ASSERT_NE(after, nullptr);
   ASSERT_NE(lock, nullptr);

@@ -5,11 +5,11 @@
 
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace mhp;
@@ -163,9 +163,12 @@ TEST_F(MHPAnalysisTest, WrapperAndCriticalLocksReachMHPNodes) {
   ASSERT_FALSE(critical_nodes.empty());
   ASSERT_FALSE(end_critical_nodes.empty());
 
-  EXPECT_EQ(ctor_nodes.front()->getLockValue(), dtor_nodes.front()->getLockValue());
-  EXPECT_EQ(critical_nodes.front()->getLockValue(), module->getNamedGlobal("crit"));
-  EXPECT_EQ(end_critical_nodes.front()->getLockValue(), module->getNamedGlobal("crit"));
+  EXPECT_EQ(ctor_nodes.front()->getLockValue(),
+            dtor_nodes.front()->getLockValue());
+  EXPECT_EQ(critical_nodes.front()->getLockValue(),
+            module->getNamedGlobal("crit"));
+  EXPECT_EQ(end_critical_nodes.front()->getLockValue(),
+            module->getNamedGlobal("crit"));
 }
 
 TEST_F(MHPAnalysisTest, OpenMPTaskBodyMustPrecedeTaskwaitContinuation) {
@@ -548,6 +551,46 @@ TEST_F(MHPAnalysisTest, CondSignalDoesNotCreateDefiniteHBToAllWaiters) {
 
   EXPECT_FALSE(mhp.mustPrecede(store_shared, load1));
   EXPECT_FALSE(mhp.mustPrecede(store_shared, load2));
+}
+
+TEST_F(MHPAnalysisTest, IncludedOpenMPTaskRunsInlineWithParentContinuation) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i32 @__kmpc_omp_task_begin_if0(i8*, i32, i8*)
+
+    define i8* @task_body(i8* %arg) {
+    entry:
+      store i32 42, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %task = alloca i8* (i8*)*, align 8
+      store i8* (i8*)* @task_body, i8* (i8*)** %task, align 8
+      %task_raw = bitcast i8* (i8*)** %task to i8*
+      call i32 @__kmpc_omp_task_begin_if0(i8* null, i32 0, i8* %task_raw)
+      %after = load i32, i32* @shared, align 4
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Instruction *task_store =
+      &module->getFunction("task_body")->getEntryBlock().front();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  ASSERT_NE(task_store, nullptr);
+  ASSERT_NE(after, nullptr);
+
+  EXPECT_FALSE(mhp.mayHappenInParallel(task_store, after));
+  EXPECT_TRUE(mhp.mustBeSequential(task_store, after));
 }
 
 TEST_F(MHPAnalysisTest, JoinTargetThroughPhiResolves) {

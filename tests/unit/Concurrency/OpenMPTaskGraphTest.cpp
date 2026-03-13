@@ -578,6 +578,67 @@ TEST_F(OpenMPTaskGraphTest,
   EXPECT_GT(it->second, 0u);
 }
 
+TEST_F(OpenMPTaskGraphTest, DistinctSummaryBasesStayConservative) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @shared = global i32 0, align 4
+    @slot1 = global i8* bitcast (i32* @shared to i8*)
+    @slot2 = global i8* bitcast (i32* @shared to i8*)
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+
+    define i32 @main() {
+    entry:
+      %deps1 = alloca [1 x %kmp_depend_info], align 8
+      %deps2 = alloca [1 x %kmp_depend_info], align 8
+
+      %addr1 = load i8*, i8** @slot1, align 8
+      %addr2 = load i8*, i8** @slot2, align 8
+
+      %d10 = getelementptr inbounds [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %deps1, i64 0, i64 0, i32 0
+      %d11 = getelementptr inbounds [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %deps1, i64 0, i64 0, i32 1
+      %d12 = getelementptr inbounds [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %deps1, i64 0, i64 0, i32 2
+      store i8* %addr1, i8** %d10, align 8
+      store i64 4, i64* %d11, align 8
+      store i8 2, i8* %d12, align 1
+
+      %d20 = getelementptr inbounds [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %deps2, i64 0, i64 0, i32 0
+      %d21 = getelementptr inbounds [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %deps2, i64 0, i64 0, i32 1
+      %d22 = getelementptr inbounds [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %deps2, i64 0, i64 0, i32 2
+      store i8* %addr2, i8** %d20, align 8
+      store i64 4, i64* %d21, align 8
+      store i8 2, i8* %d22, align 1
+
+      %dep1 = getelementptr inbounds [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %deps1, i64 0, i64 0
+      %dep2 = getelementptr inbounds [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %deps2, i64 0, i64 0
+
+      call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
+                                          %kmp_depend_info* %dep1, i32 0, %kmp_depend_info* null)
+      call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
+                                          %kmp_depend_info* %dep2, i32 0, %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
+            OpenMPTaskGraph::TaskRelation::Unknown);
+  auto it =
+      graph.getUnknownReasonCounts().find("omp_depend_distinct_base_may_alias");
+  ASSERT_NE(it, graph.getUnknownReasonCounts().end());
+  EXPECT_GT(it->second, 0u);
+}
+
 TEST_F(OpenMPTaskGraphTest, NestedTaskgroupBoundaryAdvancesOnlyInnerPhase) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }

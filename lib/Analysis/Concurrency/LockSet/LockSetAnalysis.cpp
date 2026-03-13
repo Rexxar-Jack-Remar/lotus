@@ -4,18 +4,26 @@
  *
  * This analysis tracks the set of locks held at each program point.
  * It computes two sets for each instruction:
- * 1. May-Lock Set: Locks that MIGHT be held. Used for deadlock detection and reducing false positives.
+ * 1. May-Lock Set: Locks that MIGHT be held. Used for deadlock detection and
+ * reducing false positives.
  *    - Join operator: Union
  *    - Try-lock: Assumed successful
- * 2. Must-Lock Set: Locks that MUST be held. Used for proving mutual exclusion (safety).
+ * 2. Must-Lock Set: Locks that MUST be held. Used for proving mutual exclusion
+ * (safety).
  *    - Join operator: Intersection
  *    - Try-lock: Assumed failed (safe approximation)
  *    - Release: Removes all aliasing locks to ensure soundness.
  */
 
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
+
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/Utils/RAIILockTracker.h"
+
+#include <algorithm>
+#include <cstdlib>
+#include <queue>
+#include <stack>
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/MemoryLocation.h>
@@ -25,11 +33,6 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <algorithm>
-#include <cstdlib>
-#include <queue>
-#include <stack>
 
 using namespace llvm;
 using namespace mhp;
@@ -107,19 +110,22 @@ LockSet LockSetAnalysis::getMayLockSetAt(const Instruction *inst) const {
   auto it = m_may_locksets_entry.find(inst);
   if (it != m_may_locksets_entry.end() && !it->second.empty())
     return it->second;
-  // Fallback: on a linear path, entry at inst = exit of prev (fixes worklist order)
+  // Fallback: on a linear path, entry at inst = exit of prev (fixes worklist
+  // order)
   if (const Instruction *prev = inst->getPrevNode()) {
     auto it_exit = m_may_locksets_exit.find(prev);
     if (it_exit != m_may_locksets_exit.end())
       return it_exit->second;
   }
-  // Fallback for block head: union of predecessors' terminator exit (fixes merge/empty entry)
+  // Fallback for block head: union of predecessors' terminator exit (fixes
+  // merge/empty entry)
   const BasicBlock *bb = inst->getParent();
   if (bb && inst == &bb->front()) {
     LockSet merged;
     for (const BasicBlock *pred : predecessors(bb)) {
       const Instruction *term = pred->getTerminator();
-      if (!term) continue;
+      if (!term)
+        continue;
       auto it_exit = m_may_locksets_exit.find(term);
       if (it_exit != m_may_locksets_exit.end())
         merged.insert(it_exit->second.begin(), it_exit->second.end());
@@ -145,7 +151,8 @@ LockSet LockSetAnalysis::getMayReadLockSetAt(const Instruction *inst) const {
     LockSet merged;
     for (const BasicBlock *pred : predecessors(bb)) {
       const Instruction *term = pred->getTerminator();
-      if (!term) continue;
+      if (!term)
+        continue;
       auto it_exit = m_may_read_locks_exit.find(term);
       if (it_exit != m_may_read_locks_exit.end())
         merged.insert(it_exit->second.begin(), it_exit->second.end());
@@ -160,7 +167,8 @@ LockSet LockSetAnalysis::getMayWriteLockSetAt(const Instruction *inst) const {
   auto it = m_may_write_locks_entry.find(inst);
   if (it != m_may_write_locks_entry.end() && !it->second.empty())
     return it->second;
-  // Fallback: entry at inst = exit of prev on linear path (fixes worklist order)
+  // Fallback: entry at inst = exit of prev on linear path (fixes worklist
+  // order)
   if (const Instruction *prev = inst->getPrevNode()) {
     auto it_exit = m_may_write_locks_exit.find(prev);
     if (it_exit != m_may_write_locks_exit.end())
@@ -173,7 +181,8 @@ LockSet LockSetAnalysis::getMayWriteLockSetAt(const Instruction *inst) const {
     LockSet merged;
     for (const BasicBlock *pred : predecessors(bb)) {
       const Instruction *term = pred->getTerminator();
-      if (!term) continue;
+      if (!term)
+        continue;
       auto it_exit = m_may_write_locks_exit.find(term);
       if (it_exit != m_may_write_locks_exit.end())
         merged.insert(it_exit->second.begin(), it_exit->second.end());
@@ -188,7 +197,8 @@ LockSet LockSetAnalysis::getMustLockSetAt(const Instruction *inst) const {
   auto it = m_must_locksets_entry.find(inst);
   if (it != m_must_locksets_entry.end())
     return it->second;
-  // Fallback: entry at inst = exit of prev on linear path (so double-lock sees held lock)
+  // Fallback: entry at inst = exit of prev on linear path (so double-lock sees
+  // held lock)
   if (const Instruction *prev = inst->getPrevNode()) {
     auto it_exit = m_must_locksets_exit.find(prev);
     if (it_exit != m_must_locksets_exit.end())
@@ -249,12 +259,14 @@ LockSetAnalysis::getInstructionsHoldingLock(LockID lock) const {
 }
 
 bool LockSetAnalysis::mayHoldCommonLock(const Instruction *i1,
-                                         const Instruction *i2) const {
+                                        const Instruction *i2) const {
   auto common = [this](const LockSet &a, const LockSet &b) {
     for (const auto *lock : a) {
-      if (b.find(lock) != b.end()) return true;
+      if (b.find(lock) != b.end())
+        return true;
       for (const auto *lock2 : b) {
-        if (mayAlias(lock, lock2)) return true;
+        if (mayAlias(lock, lock2))
+          return true;
       }
     }
     return false;
@@ -266,6 +278,50 @@ bool LockSetAnalysis::mayHoldCommonLock(const Instruction *i1,
   // Also check combined may-lock set (has block-head fallbacks for DCL pattern)
   LockSet m1 = getMayLockSetAt(i1), m2 = getMayLockSetAt(i2);
   return common(m1, m2);
+}
+
+bool LockSetAnalysis::mustHoldCommonLock(const Instruction *i1,
+                                         const Instruction *i2) const {
+  auto matches = [this](LockID a, LockID b) {
+    const LockID ca = getCanonicalLock(a);
+    const LockID cb = getCanonicalLock(b);
+    if (ca && cb && ca == cb)
+      return true;
+    return m_alias_analysis && ca && cb && m_alias_analysis->mustAlias(ca, cb);
+  };
+
+  LockSet combined1 = getMustLockSetAt(i1);
+  LockSet combined2 = getMustLockSetAt(i2);
+  LockSet read1 = getMustReadLockSetAt(i1);
+  LockSet read2 = getMustReadLockSetAt(i2);
+
+  for (LockID lock1 : combined1) {
+    for (LockID lock2 : combined2) {
+      if (!matches(lock1, lock2))
+        continue;
+
+      bool is_read1 = false;
+      bool is_read2 = false;
+      for (LockID read_lock : read1) {
+        if (matches(lock1, read_lock)) {
+          is_read1 = true;
+          break;
+        }
+      }
+      for (LockID read_lock : read2) {
+        if (matches(lock2, read_lock)) {
+          is_read2 = true;
+          break;
+        }
+      }
+
+      if (is_read1 && is_read2)
+        continue;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 LockSet LockSetAnalysis::getAllLocksInFunction(const Function *func) const {
@@ -314,7 +370,7 @@ size_t LockSetAnalysis::getLockNestingDepth(const Instruction *inst) const {
 }
 
 bool LockSetAnalysis::areLocksOrderedConsistently(LockID lock1,
-                                                   LockID lock2) const {
+                                                  LockID lock2) const {
   bool found_12 = m_observed_lock_orders.find({lock1, lock2}) !=
                   m_observed_lock_orders.end();
   bool found_21 = m_observed_lock_orders.find({lock2, lock1}) !=
@@ -430,7 +486,7 @@ void LockSetAnalysis::printResults(raw_ostream &os) const {
 }
 
 void LockSetAnalysis::printLockSetsForFunction(const Function *func,
-                                                raw_ostream &os) const {
+                                               raw_ostream &os) const {
   os << "Lock Sets for Function: " << func->getName() << "\n";
   os << "=============================================\n";
 
@@ -469,9 +525,7 @@ void LockSetAnalysis::printLockSetsForFunction(const Function *func,
   }
 }
 
-void LockSetAnalysis::print(raw_ostream &os) const {
-  printResults(os);
-}
+void LockSetAnalysis::print(raw_ostream &os) const { printResults(os); }
 
 // ============================================================================
 // Visualization
@@ -538,7 +592,7 @@ void LockSetAnalysis::analyzeFunction(Function *func) {
   // First, analyze RAII lock lifetimes in this function
   RAIILock::RAIILockTracker raii_tracker;
   raii_tracker.analyzeFunction(func);
-  
+
   // Store RAII lock info for use during transfer function
   m_raii_locks[func] = raii_tracker.getAllLockLifetimes();
 
@@ -550,18 +604,20 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
   //
   // Lattice: Sets of LockIDs.
   // - May-Analysis: Union (Join).
-  //   Effect: Collects all locks that *might* be held on any path to this point.
+  //   Effect: Collects all locks that *might* be held on any path to this
+  //   point.
   // - Must-Analysis: Intersection (Join).
-  //   Effect: Collects all locks that *must* be held on all paths to this point.
-  
+  //   Effect: Collects all locks that *must* be held on all paths to this
+  //   point.
+
   // Worklist algorithm for dataflow analysis
   std::queue<const Instruction *> worklist;
   std::set<const Instruction *> in_worklist;
 
   const Instruction *entry = &func->getEntryBlock().front();
-  // Do not pre-initialize entry's maps: then the first time we process it we have
-  // had_entry=false and we add successors (otherwise we never propagate when
-  // the computed value is empty).
+  // Do not pre-initialize entry's maps: then the first time we process it we
+  // have had_entry=false and we add successors (otherwise we never propagate
+  // when the computed value is empty).
   worklist.push(entry);
   in_worklist.insert(entry);
 
@@ -594,69 +650,137 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
             auto it_ur = m_must_read_locks_exit.find(pred_term);
             auto it_uw = m_must_write_locks_exit.find(pred_term);
             // Use exit sets when available; otherwise treat as empty and ensure
-            // predecessor is processed first so we re-visit this block with full data.
+            // predecessor is processed first so we re-visit this block with
+            // full data.
             if (it_may == m_may_locksets_exit.end() &&
                 in_worklist.find(pred_term) == in_worklist.end()) {
               worklist.push(pred_term);
               in_worklist.insert(pred_term);
             }
-            may_inputs.push_back(it_may != m_may_locksets_exit.end() ? it_may->second : LockSet());
-            must_inputs.push_back(it_must != m_must_locksets_exit.end() ? it_must->second : LockSet());
-            may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
-            may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
-            must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end() ? it_ur->second : LockSet());
-            must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end() ? it_uw->second : LockSet());
+            may_inputs.push_back(it_may != m_may_locksets_exit.end()
+                                     ? it_may->second
+                                     : LockSet());
+            must_inputs.push_back(it_must != m_must_locksets_exit.end()
+                                      ? it_must->second
+                                      : LockSet());
+            may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end()
+                                          ? it_mr->second
+                                          : LockSet());
+            may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end()
+                                           ? it_mw->second
+                                           : LockSet());
+            must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end()
+                                           ? it_ur->second
+                                           : LockSet());
+            must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end()
+                                            ? it_uw->second
+                                            : LockSet());
           }
         }
       } else {
         const Instruction *prev = inst->getPrevNode();
-        auto it_may = prev ? m_may_locksets_exit.find(prev) : m_may_locksets_exit.end();
-        auto it_must = prev ? m_must_locksets_exit.find(prev) : m_must_locksets_exit.end();
-        auto it_mr = prev ? m_may_read_locks_exit.find(prev) : m_may_read_locks_exit.end();
-        auto it_mw = prev ? m_may_write_locks_exit.find(prev) : m_may_write_locks_exit.end();
-        auto it_ur = prev ? m_must_read_locks_exit.find(prev) : m_must_read_locks_exit.end();
-        auto it_uw = prev ? m_must_write_locks_exit.find(prev) : m_must_write_locks_exit.end();
-        may_inputs.push_back(it_may != m_may_locksets_exit.end() ? it_may->second : LockSet());
-        must_inputs.push_back(it_must != m_must_locksets_exit.end() ? it_must->second : LockSet());
-        may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
-        may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
-        must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end() ? it_ur->second : LockSet());
-        must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end() ? it_uw->second : LockSet());
+        auto it_may =
+            prev ? m_may_locksets_exit.find(prev) : m_may_locksets_exit.end();
+        auto it_must =
+            prev ? m_must_locksets_exit.find(prev) : m_must_locksets_exit.end();
+        auto it_mr = prev ? m_may_read_locks_exit.find(prev)
+                          : m_may_read_locks_exit.end();
+        auto it_mw = prev ? m_may_write_locks_exit.find(prev)
+                          : m_may_write_locks_exit.end();
+        auto it_ur = prev ? m_must_read_locks_exit.find(prev)
+                          : m_must_read_locks_exit.end();
+        auto it_uw = prev ? m_must_write_locks_exit.find(prev)
+                          : m_must_write_locks_exit.end();
+        may_inputs.push_back(
+            it_may != m_may_locksets_exit.end() ? it_may->second : LockSet());
+        must_inputs.push_back(it_must != m_must_locksets_exit.end()
+                                  ? it_must->second
+                                  : LockSet());
+        may_read_inputs.push_back(
+            it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
+        may_write_inputs.push_back(
+            it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
+        must_read_inputs.push_back(
+            it_ur != m_must_read_locks_exit.end() ? it_ur->second : LockSet());
+        must_write_inputs.push_back(
+            it_uw != m_must_write_locks_exit.end() ? it_uw->second : LockSet());
       }
     }
 
-    LockSet may_read_in = may_read_inputs.empty() ? LockSet() : merge(may_read_inputs, false);
-    LockSet may_write_in = may_write_inputs.empty() ? LockSet() : merge(may_write_inputs, false);
-    LockSet must_read_in = must_read_inputs.empty() ? LockSet() : merge(must_read_inputs, true);
-    LockSet must_write_in = must_write_inputs.empty() ? LockSet() : merge(must_write_inputs, true);
+    LockSet may_read_in =
+        may_read_inputs.empty() ? LockSet() : merge(may_read_inputs, false);
+    LockSet may_write_in =
+        may_write_inputs.empty() ? LockSet() : merge(may_write_inputs, false);
+    LockSet must_read_in =
+        must_read_inputs.empty() ? LockSet() : merge(must_read_inputs, true);
+    LockSet must_write_in =
+        must_write_inputs.empty() ? LockSet() : merge(must_write_inputs, true);
     LockSet may_in = may_read_in;
     may_in.insert(may_write_in.begin(), may_write_in.end());
     LockSet must_in = must_read_in;
     must_in.insert(must_write_in.begin(), must_write_in.end());
 
     LockSet may_read_out, may_write_out, must_read_out, must_write_out;
-    transferReadWrite(inst, may_read_in, may_write_in, may_read_out, may_write_out, false);
-    transferReadWrite(inst, must_read_in, must_write_in, must_read_out, must_write_out, true);
+    transferReadWrite(inst, may_read_in, may_write_in, may_read_out,
+                      may_write_out, false);
+    transferReadWrite(inst, must_read_in, must_write_in, must_read_out,
+                      must_write_out, true);
 
     LockSet may_out = transfer(inst, may_in, false);
     LockSet must_out = transfer(inst, must_in, true);
 
-    // First time we see this instruction we must propagate (otherwise we never add
-    // successors when the computed value equals the default empty set).
+    // First time we see this instruction we must propagate (otherwise we never
+    // add successors when the computed value equals the default empty set).
     bool had_entry = m_may_locksets_entry.count(inst);
     bool changed = !had_entry;
-    if (m_may_read_locks_entry[inst] != may_read_in) { m_may_read_locks_entry[inst] = may_read_in; changed = true; }
-    if (m_may_read_locks_exit[inst] != may_read_out) { m_may_read_locks_exit[inst] = may_read_out; changed = true; }
-    if (m_may_write_locks_entry[inst] != may_write_in) { m_may_write_locks_entry[inst] = may_write_in; changed = true; }
-    if (m_may_write_locks_exit[inst] != may_write_out) { m_may_write_locks_exit[inst] = may_write_out; changed = true; }
-    if (m_must_read_locks_entry[inst] != must_read_in) { m_must_read_locks_entry[inst] = must_read_in; changed = true; }
-    if (m_must_read_locks_exit[inst] != must_read_out) { m_must_read_locks_exit[inst] = must_read_out; changed = true; }
-    if (m_must_write_locks_entry[inst] != must_write_in) { m_must_write_locks_entry[inst] = must_write_in; changed = true; }
-    if (m_must_write_locks_exit[inst] != must_write_out) { m_must_write_locks_exit[inst] = must_write_out; changed = true; }
-    if (m_may_locksets_entry[inst] != may_in) { m_may_locksets_entry[inst] = may_in; changed = true; }
-    if (m_may_locksets_exit[inst] != may_out) { m_may_locksets_exit[inst] = may_out; changed = true; }
-    if (m_must_locksets_entry[inst] != must_in) { m_must_locksets_entry[inst] = must_in; changed = true; }
-    if (m_must_locksets_exit[inst] != must_out) { m_must_locksets_exit[inst] = must_out; changed = true; }
+    if (m_may_read_locks_entry[inst] != may_read_in) {
+      m_may_read_locks_entry[inst] = may_read_in;
+      changed = true;
+    }
+    if (m_may_read_locks_exit[inst] != may_read_out) {
+      m_may_read_locks_exit[inst] = may_read_out;
+      changed = true;
+    }
+    if (m_may_write_locks_entry[inst] != may_write_in) {
+      m_may_write_locks_entry[inst] = may_write_in;
+      changed = true;
+    }
+    if (m_may_write_locks_exit[inst] != may_write_out) {
+      m_may_write_locks_exit[inst] = may_write_out;
+      changed = true;
+    }
+    if (m_must_read_locks_entry[inst] != must_read_in) {
+      m_must_read_locks_entry[inst] = must_read_in;
+      changed = true;
+    }
+    if (m_must_read_locks_exit[inst] != must_read_out) {
+      m_must_read_locks_exit[inst] = must_read_out;
+      changed = true;
+    }
+    if (m_must_write_locks_entry[inst] != must_write_in) {
+      m_must_write_locks_entry[inst] = must_write_in;
+      changed = true;
+    }
+    if (m_must_write_locks_exit[inst] != must_write_out) {
+      m_must_write_locks_exit[inst] = must_write_out;
+      changed = true;
+    }
+    if (m_may_locksets_entry[inst] != may_in) {
+      m_may_locksets_entry[inst] = may_in;
+      changed = true;
+    }
+    if (m_may_locksets_exit[inst] != may_out) {
+      m_may_locksets_exit[inst] = may_out;
+      changed = true;
+    }
+    if (m_must_locksets_entry[inst] != must_in) {
+      m_must_locksets_entry[inst] = must_in;
+      changed = true;
+    }
+    if (m_must_locksets_exit[inst] != must_out) {
+      m_must_locksets_exit[inst] = must_out;
+      changed = true;
+    }
 
     // Add successors to worklist if changed
     if (changed) {
@@ -680,48 +804,57 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
       }
     }
   }
-
 }
 
 void LockSetAnalysis::computeInterproceduralLockSets() {
   if (!m_call_graph) {
-    errs() << "Warning: CallGraph not available. Skipping interprocedural analysis.\n";
+    errs() << "Warning: CallGraph not available. Skipping interprocedural "
+              "analysis.\n";
     return;
   }
 
   errs() << "Computing interprocedural lock sets using CallGraph...\n";
-  
+
   // Perform bottom-up traversal of call graph to compute function summaries
   bottomUpTraversal();
-  
+
   // Re-analyze each function with interprocedural context
   for (Function &func : *m_module) {
     if (!func.isDeclaration()) {
       analyzeFunction(&func);
     }
   }
-  
+
   errs() << "Interprocedural lock set analysis complete.\n";
 }
 
 LockSet LockSetAnalysis::transfer(const Instruction *inst,
-                                   const LockSet &in_set, bool is_must) const {
+                                  const LockSet &in_set, bool is_must) const {
   LockSet out_set = in_set;
   const CallBase *call = dyn_cast<CallBase>(inst);
   ThreadAPI::TD_TYPE call_type =
       call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
-  const bool raw_lock_api =
-      call_type == ThreadAPI::TD_ACQUIRE || call_type == ThreadAPI::TD_TRY_ACQUIRE ||
-      call_type == ThreadAPI::TD_RWLOCK_RDLOCK || call_type == ThreadAPI::TD_RWLOCK_WRLOCK ||
-      call_type == ThreadAPI::TD_RELEASE ||
-      call_type == ThreadAPI::TD_KERNEL_SPIN_LOCK || call_type == ThreadAPI::TD_KERNEL_SPIN_TRYLOCK ||
-      call_type == ThreadAPI::TD_KERNEL_MUTEX_LOCK || call_type == ThreadAPI::TD_KERNEL_MUTEX_TRYLOCK ||
-      call_type == ThreadAPI::TD_KERNEL_DOWN || call_type == ThreadAPI::TD_KERNEL_READ_LOCK ||
-      call_type == ThreadAPI::TD_KERNEL_WRITE_LOCK || call_type == ThreadAPI::TD_KERNEL_DOWN_READ ||
-      call_type == ThreadAPI::TD_KERNEL_DOWN_WRITE || call_type == ThreadAPI::TD_KERNEL_SPIN_UNLOCK ||
-      call_type == ThreadAPI::TD_KERNEL_MUTEX_UNLOCK || call_type == ThreadAPI::TD_KERNEL_UP ||
-      call_type == ThreadAPI::TD_KERNEL_READ_UNLOCK || call_type == ThreadAPI::TD_KERNEL_WRITE_UNLOCK ||
-      call_type == ThreadAPI::TD_KERNEL_UP_READ || call_type == ThreadAPI::TD_KERNEL_UP_WRITE;
+  const bool raw_lock_api = call_type == ThreadAPI::TD_ACQUIRE ||
+                            call_type == ThreadAPI::TD_TRY_ACQUIRE ||
+                            call_type == ThreadAPI::TD_RWLOCK_RDLOCK ||
+                            call_type == ThreadAPI::TD_RWLOCK_WRLOCK ||
+                            call_type == ThreadAPI::TD_RELEASE ||
+                            call_type == ThreadAPI::TD_KERNEL_SPIN_LOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_SPIN_TRYLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_MUTEX_LOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_MUTEX_TRYLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_DOWN ||
+                            call_type == ThreadAPI::TD_KERNEL_READ_LOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_WRITE_LOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_DOWN_READ ||
+                            call_type == ThreadAPI::TD_KERNEL_DOWN_WRITE ||
+                            call_type == ThreadAPI::TD_KERNEL_SPIN_UNLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_MUTEX_UNLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_UP ||
+                            call_type == ThreadAPI::TD_KERNEL_READ_UNLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_WRITE_UNLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_UP_READ ||
+                            call_type == ThreadAPI::TD_KERNEL_UP_WRITE;
 
   // Check if this is a lock operation
   if (m_thread_api->isTDAcquire(inst) && raw_lock_api) {
@@ -740,9 +873,10 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
 
       // Only in must-analysis do we safely drop aliasing locks.
       // In may-analysis this would under-approximate the held set.
-      // For Must-Lock analysis: If we release 'lock', we must also remove any lock 'l'
-      // that *might* be an alias of 'lock'. If we kept 'l', we might falsely believe
-      // we still hold 'l' when we actually released it via 'lock'.
+      // For Must-Lock analysis: If we release 'lock', we must also remove any
+      // lock 'l' that *might* be an alias of 'lock'. If we kept 'l', we might
+      // falsely believe we still hold 'l' when we actually released it via
+      // 'lock'.
       if (is_must && m_alias_analysis) {
         LockSet to_remove;
         for (const auto *l : out_set) {
@@ -756,234 +890,230 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
       }
     }
   } else if (m_thread_api->isTDCondWait(inst)) {
-    // pthread_cond_wait atomically releases the mutex and re-acquires on return; lock set unchanged.
+    // pthread_cond_wait atomically releases the mutex and re-acquires on
+    // return; lock set unchanged.
   } else if (call) {
     ThreadAPI::TD_TYPE type = call_type;
-      
-      // Handle modern C++ synchronization primitives
-      switch (type) {
-        case ThreadAPI::TD_SHARED_RDLOCK:
-        case ThreadAPI::TD_SHARED_WRLOCK:
-          // Handled in transferReadWrite, but also update combined set
-          if (LockID lock = getLockValue(inst))
-            out_set.insert(lock);
-          return out_set;
-          
-        case ThreadAPI::TD_SHARED_UNLOCK:
-          // Release both read and write locks
-          if (LockID lock = getLockValue(inst)) {
-            out_set.erase(lock);
-            if (is_must && m_alias_analysis) {
-              LockSet to_remove;
-              for (const auto *l : out_set)
-                if (mayAlias(l, lock)) to_remove.insert(l);
-              for (const auto *l : to_remove) out_set.erase(l);
+
+    // Handle modern C++ synchronization primitives
+    switch (type) {
+    case ThreadAPI::TD_SHARED_RDLOCK:
+    case ThreadAPI::TD_SHARED_WRLOCK:
+      // Handled in transferReadWrite, but also update combined set
+      if (LockID lock = getLockValue(inst))
+        out_set.insert(lock);
+      return out_set;
+
+    case ThreadAPI::TD_SHARED_UNLOCK:
+      // Release both read and write locks
+      if (LockID lock = getLockValue(inst)) {
+        out_set.erase(lock);
+        if (is_must && m_alias_analysis) {
+          LockSet to_remove;
+          for (const auto *l : out_set)
+            if (mayAlias(l, lock))
+              to_remove.insert(l);
+          for (const auto *l : to_remove)
+            out_set.erase(l);
+        }
+      }
+      return out_set;
+
+    // RAII lock constructors (acquire)
+    case ThreadAPI::TD_LOCK_GUARD_CTOR:
+    case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+    case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+    case ThreadAPI::TD_SHARED_LOCK_CTOR: {
+      auto shouldAddAtCtor = [&](LockID lock,
+                                 RAIILock::OwnershipKind ownership) {
+        switch (ownership) {
+        case RAIILock::OwnershipKind::Immediate:
+          return true;
+        case RAIILock::OwnershipKind::Deferred:
+          return false;
+        case RAIILock::OwnershipKind::Try:
+          return !is_must;
+        case RAIILock::OwnershipKind::Adopt:
+          if (!is_must) {
+            return true;
+          }
+          for (const auto *held : in_set) {
+            if (held == lock || mayAlias(held, lock)) {
+              return true;
             }
           }
-          return out_set;
-        
-        // RAII lock constructors (acquire)
-        case ThreadAPI::TD_LOCK_GUARD_CTOR:
-        case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
-        case ThreadAPI::TD_SCOPED_LOCK_CTOR:
-        case ThreadAPI::TD_SHARED_LOCK_CTOR:
-          {
-            auto shouldAddAtCtor = [&](LockID lock,
-                                       RAIILock::OwnershipKind ownership) {
-              switch (ownership) {
-              case RAIILock::OwnershipKind::Immediate:
-                return true;
-              case RAIILock::OwnershipKind::Deferred:
-                return false;
-              case RAIILock::OwnershipKind::Try:
-                return !is_must;
-              case RAIILock::OwnershipKind::Adopt:
-                if (!is_must) {
-                  return true;
-                }
-                for (const auto *held : in_set) {
-                  if (held == lock || mayAlias(held, lock)) {
-                    return true;
-                  }
-                }
-                return false;
-              case RAIILock::OwnershipKind::Unknown:
-                return !is_must;
-              }
-              return false;
-            };
+          return false;
+        case RAIILock::OwnershipKind::Unknown:
+          return !is_must;
+        }
+        return false;
+      };
 
-            // Use RAII tracker to get the underlying mutex
-            const Function *parent_func = inst->getFunction();
-            auto raii_it = m_raii_locks.find(parent_func);
-            if (raii_it != m_raii_locks.end()) {
-              for (const auto &raii_entry : raii_it->second) {
-                const RAIILock::LockLifetime &lifetime = raii_entry.second;
-                if (lifetime.constructor == call &&
-                    !lifetime.underlyingLocks.empty()) {
-                  for (const Value *underlying : lifetime.underlyingLocks) {
-                    if (LockID lock = getCanonicalLock(underlying)) {
-                      if (shouldAddAtCtor(lock, lifetime.ownership)) {
-                        out_set.insert(lock);
-                      }
-                    }
-                  }
-                  return out_set;
-                }
-              }
-            }
-            // Fallback to argument-based detection
-            RAIILock::OwnershipKind fallback_ownership =
-                RAIILock::RAIILockTracker::getOwnershipKind(call);
-            for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
-              if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
-                if (shouldAddAtCtor(lock, fallback_ownership)) {
+      // Use RAII tracker to get the underlying mutex
+      const Function *parent_func = inst->getFunction();
+      auto raii_it = m_raii_locks.find(parent_func);
+      if (raii_it != m_raii_locks.end()) {
+        for (const auto &raii_entry : raii_it->second) {
+          const RAIILock::LockLifetime &lifetime = raii_entry.second;
+          if (lifetime.constructor == call &&
+              !lifetime.underlyingLocks.empty()) {
+            for (const Value *underlying : lifetime.underlyingLocks) {
+              if (LockID lock = getCanonicalLock(underlying)) {
+                if (shouldAddAtCtor(lock, lifetime.ownership)) {
                   out_set.insert(lock);
                 }
               }
             }
+            return out_set;
           }
-          return out_set;
-        
-        // RAII lock destructors (release)
-        case ThreadAPI::TD_LOCK_GUARD_DTOR:
-        case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
-        case ThreadAPI::TD_SCOPED_LOCK_DTOR:
-        case ThreadAPI::TD_SHARED_LOCK_DTOR:
-          // Use RAII tracker to find which lock is being released
-          {
-            const Function *parent_func = inst->getFunction();
-            auto raii_it = m_raii_locks.find(parent_func);
-            if (raii_it != m_raii_locks.end()) {
-              // Find the RAII lock object for this destructor
-              for (const auto &raii_entry : raii_it->second) {
-                const RAIILock::LockLifetime &lifetime = raii_entry.second;
-                // Check if this destructor call corresponds to this lock lifetime
-                for (const Instruction *dtor : lifetime.destructors) {
-                  if (dtor == inst && !lifetime.underlyingLocks.empty()) {
-                    for (const Value *underlying : lifetime.underlyingLocks) {
-                      LockID lock = getCanonicalLock(underlying);
-                      if (!lock) {
-                        continue;
-                      }
-                      if (!is_must &&
-                          lifetime.ownership != RAIILock::OwnershipKind::Immediate &&
-                          lifetime.ownership != RAIILock::OwnershipKind::Adopt) {
-                        continue;
-                      }
-                      out_set.erase(lock);
-                      if (is_must && m_alias_analysis) {
-                        LockSet to_remove;
-                        for (const auto *l : out_set) {
-                          if (mayAlias(l, lock)) {
-                            to_remove.insert(l);
-                          }
-                        }
-                        for (const auto *l : to_remove) {
-                          out_set.erase(l);
-                        }
-                      }
-                    }
-                    return out_set;
-                  }
-                }
-              }
-            }
-            if (LockID lock = getCppWrapperLockValue(inst)) {
-              RAIILock::OwnershipKind fallback_ownership =
-                  RAIILock::RAIILockTracker::getOwnershipKind(call);
-              if (!is_must &&
-                  fallback_ownership != RAIILock::OwnershipKind::Immediate &&
-                  fallback_ownership != RAIILock::OwnershipKind::Adopt) {
-                return out_set;
-              }
-              out_set.erase(lock);
-              if (is_must && m_alias_analysis) {
-                LockSet to_remove;
-                for (const auto *l : out_set) {
-                  if (mayAlias(l, lock)) {
-                    to_remove.insert(l);
-                  }
-                }
-                for (const auto *l : to_remove) {
-                  out_set.erase(l);
-                }
-              }
-              return out_set;
-            }
-            // Fallback: if we couldn't track the specific lock, be conservative
-            if (is_must) {
-              out_set.clear(); // Conservative: all locks may be released
-            }
-          }
-          return out_set;
-        
-        // unique_lock manual operations
-        case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
-          // Manual lock() call on unique_lock
-          if (LockID lock = getCppWrapperLockValue(inst)) {
+        }
+      }
+      // Fallback to argument-based detection
+      RAIILock::OwnershipKind fallback_ownership =
+          RAIILock::RAIILockTracker::getOwnershipKind(call);
+      for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
+        if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+          if (shouldAddAtCtor(lock, fallback_ownership)) {
             out_set.insert(lock);
           }
-          return out_set;
-          
-        case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
-          // Manual unlock() call on unique_lock
-          if (LockID lock = getCppWrapperLockValue(inst)) {
-            out_set.erase(lock);
-            if (is_must && m_alias_analysis) {
-              LockSet to_remove;
-              for (const auto *l : out_set)
-                if (mayAlias(l, lock)) to_remove.insert(l);
-              for (const auto *l : to_remove) out_set.erase(l);
-            }
-          }
-          return out_set;
+        }
+      }
+    }
+      return out_set;
 
-        // C++20 semaphores
-        case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
-          if (call->arg_size() >= 1) {
-            LockID sem = getCanonicalLock(call->getArgOperand(0));
-            if (sem) out_set.insert(sem);
-          }
-          return out_set;
-          
-        case ThreadAPI::TD_SEMAPHORE_RELEASE:
-          if (call->arg_size() >= 1) {
-            LockID sem = getCanonicalLock(call->getArgOperand(0));
-            if (sem) {
-              out_set.erase(sem);
-              if (is_must && m_alias_analysis) {
-                LockSet to_remove;
-                for (const auto *l : out_set)
-                  if (mayAlias(l, sem)) to_remove.insert(l);
-                for (const auto *l : to_remove) out_set.erase(l);
+    // RAII lock destructors (release)
+    case ThreadAPI::TD_LOCK_GUARD_DTOR:
+    case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+    case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+    case ThreadAPI::TD_SHARED_LOCK_DTOR:
+      // Use RAII tracker to find which lock is being released
+      {
+        const Function *parent_func = inst->getFunction();
+        auto raii_it = m_raii_locks.find(parent_func);
+        if (raii_it != m_raii_locks.end()) {
+          // Find the RAII lock object for this destructor
+          for (const auto &raii_entry : raii_it->second) {
+            const RAIILock::LockLifetime &lifetime = raii_entry.second;
+            // Check if this destructor call corresponds to this lock lifetime
+            for (const Instruction *dtor : lifetime.destructors) {
+              if (dtor == inst && !lifetime.underlyingLocks.empty()) {
+                for (const Value *underlying : lifetime.underlyingLocks) {
+                  LockID lock = getCanonicalLock(underlying);
+                  if (!lock) {
+                    continue;
+                  }
+                  out_set.erase(lock);
+                  if (is_must && m_alias_analysis) {
+                    LockSet to_remove;
+                    for (const auto *l : out_set) {
+                      if (mayAlias(l, lock)) {
+                        to_remove.insert(l);
+                      }
+                    }
+                    for (const auto *l : to_remove) {
+                      out_set.erase(l);
+                    }
+                  }
+                }
+                return out_set;
               }
             }
           }
+        }
+        if (LockID lock = getCppWrapperLockValue(inst)) {
+          out_set.erase(lock);
+          if (is_must && m_alias_analysis) {
+            LockSet to_remove;
+            for (const auto *l : out_set) {
+              if (mayAlias(l, lock)) {
+                to_remove.insert(l);
+              }
+            }
+            for (const auto *l : to_remove) {
+              out_set.erase(l);
+            }
+          }
           return out_set;
-        
-        // Synchronization primitives (don't hold locks, but create sync edges)
-        case ThreadAPI::TD_CALL_ONCE:
-        case ThreadAPI::TD_FUTURE_GET:
-        case ThreadAPI::TD_FUTURE_WAIT:
-        case ThreadAPI::TD_PROMISE_SET:
-        case ThreadAPI::TD_LATCH_WAIT:
-        case ThreadAPI::TD_LATCH_ARRIVE_WAIT:
-        case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
-        case ThreadAPI::TD_BARRIER_WAIT_CPP20:
-        case ThreadAPI::TD_OMP_TASKWAIT:
-        case ThreadAPI::TD_OMP_TASKWAIT_DEPS:
-        case ThreadAPI::TD_OMP_TASKGROUP_END:
-        case ThreadAPI::TD_OMP_FLUSH:
-          // These are synchronization points but don't modify lock sets
-          return out_set;
-        
-        default:
-          break;
+        }
+        // Fallback: if we couldn't track the specific lock, be conservative
+        if (is_must) {
+          out_set.clear(); // Conservative: all locks may be released
+        }
       }
-    
-    // Handle regular function calls with interprocedural summaries (existing code continues)
-    // Try-lock is handled above (not added to set). Handle other calls.
+      return out_set;
+
+    // unique_lock manual operations
+    case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+      // Manual lock() call on unique_lock
+      if (LockID lock = getCppWrapperLockValue(inst)) {
+        out_set.insert(lock);
+      }
+      return out_set;
+
+    case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+      // Manual unlock() call on unique_lock
+      if (LockID lock = getCppWrapperLockValue(inst)) {
+        out_set.erase(lock);
+        if (is_must && m_alias_analysis) {
+          LockSet to_remove;
+          for (const auto *l : out_set)
+            if (mayAlias(l, lock))
+              to_remove.insert(l);
+          for (const auto *l : to_remove)
+            out_set.erase(l);
+        }
+      }
+      return out_set;
+
+    // C++20 semaphores
+    case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
+      if (call->arg_size() >= 1) {
+        LockID sem = getCanonicalLock(call->getArgOperand(0));
+        if (sem)
+          out_set.insert(sem);
+      }
+      return out_set;
+
+    case ThreadAPI::TD_SEMAPHORE_RELEASE:
+      if (call->arg_size() >= 1) {
+        LockID sem = getCanonicalLock(call->getArgOperand(0));
+        if (sem) {
+          out_set.erase(sem);
+          if (is_must && m_alias_analysis) {
+            LockSet to_remove;
+            for (const auto *l : out_set)
+              if (mayAlias(l, sem))
+                to_remove.insert(l);
+            for (const auto *l : to_remove)
+              out_set.erase(l);
+          }
+        }
+      }
+      return out_set;
+
+    // Synchronization primitives (don't hold locks, but create sync edges)
+    case ThreadAPI::TD_CALL_ONCE:
+    case ThreadAPI::TD_FUTURE_GET:
+    case ThreadAPI::TD_FUTURE_WAIT:
+    case ThreadAPI::TD_PROMISE_SET:
+    case ThreadAPI::TD_LATCH_WAIT:
+    case ThreadAPI::TD_LATCH_ARRIVE_WAIT:
+    case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
+    case ThreadAPI::TD_BARRIER_WAIT_CPP20:
+    case ThreadAPI::TD_OMP_TASKWAIT:
+    case ThreadAPI::TD_OMP_TASKWAIT_DEPS:
+    case ThreadAPI::TD_OMP_TASKGROUP_END:
+    case ThreadAPI::TD_OMP_FLUSH:
+      // These are synchronization points but don't modify lock sets
+      return out_set;
+
+    default:
+      break;
+    }
+
+    // Handle regular function calls with interprocedural summaries (existing
+    // code continues) Try-lock is handled above (not added to set). Handle
+    // other calls.
     if (!m_thread_api->isTDAcquire(call) && !m_thread_api->isTDRelease(call) &&
         !m_thread_api->isTDCondWait(call)) {
       auto applyCalleeBodyFallback = [&](const Function *callee) {
@@ -1045,32 +1175,42 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
 }
 
 void LockSetAnalysis::transferReadWrite(const Instruction *inst,
-                                         const LockSet &in_read,
-                                         const LockSet &in_write,
-                                         LockSet &out_read, LockSet &out_write,
-                                         bool is_must) const {
+                                        const LockSet &in_read,
+                                        const LockSet &in_write,
+                                        LockSet &out_read, LockSet &out_write,
+                                        bool is_must) const {
   out_read = in_read;
   out_write = in_write;
   const CallBase *call = dyn_cast<CallBase>(inst);
   ThreadAPI::TD_TYPE call_type =
       call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
-  const bool raw_lock_api =
-      call_type == ThreadAPI::TD_ACQUIRE || call_type == ThreadAPI::TD_TRY_ACQUIRE ||
-      call_type == ThreadAPI::TD_RWLOCK_RDLOCK || call_type == ThreadAPI::TD_RWLOCK_WRLOCK ||
-      call_type == ThreadAPI::TD_RELEASE ||
-      call_type == ThreadAPI::TD_KERNEL_SPIN_LOCK || call_type == ThreadAPI::TD_KERNEL_SPIN_TRYLOCK ||
-      call_type == ThreadAPI::TD_KERNEL_MUTEX_LOCK || call_type == ThreadAPI::TD_KERNEL_MUTEX_TRYLOCK ||
-      call_type == ThreadAPI::TD_KERNEL_DOWN || call_type == ThreadAPI::TD_KERNEL_READ_LOCK ||
-      call_type == ThreadAPI::TD_KERNEL_WRITE_LOCK || call_type == ThreadAPI::TD_KERNEL_DOWN_READ ||
-      call_type == ThreadAPI::TD_KERNEL_DOWN_WRITE || call_type == ThreadAPI::TD_KERNEL_SPIN_UNLOCK ||
-      call_type == ThreadAPI::TD_KERNEL_MUTEX_UNLOCK || call_type == ThreadAPI::TD_KERNEL_UP ||
-      call_type == ThreadAPI::TD_KERNEL_READ_UNLOCK || call_type == ThreadAPI::TD_KERNEL_WRITE_UNLOCK ||
-      call_type == ThreadAPI::TD_KERNEL_UP_READ || call_type == ThreadAPI::TD_KERNEL_UP_WRITE;
+  const bool raw_lock_api = call_type == ThreadAPI::TD_ACQUIRE ||
+                            call_type == ThreadAPI::TD_TRY_ACQUIRE ||
+                            call_type == ThreadAPI::TD_RWLOCK_RDLOCK ||
+                            call_type == ThreadAPI::TD_RWLOCK_WRLOCK ||
+                            call_type == ThreadAPI::TD_RELEASE ||
+                            call_type == ThreadAPI::TD_KERNEL_SPIN_LOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_SPIN_TRYLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_MUTEX_LOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_MUTEX_TRYLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_DOWN ||
+                            call_type == ThreadAPI::TD_KERNEL_READ_LOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_WRITE_LOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_DOWN_READ ||
+                            call_type == ThreadAPI::TD_KERNEL_DOWN_WRITE ||
+                            call_type == ThreadAPI::TD_KERNEL_SPIN_UNLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_MUTEX_UNLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_UP ||
+                            call_type == ThreadAPI::TD_KERNEL_READ_UNLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_WRITE_UNLOCK ||
+                            call_type == ThreadAPI::TD_KERNEL_UP_READ ||
+                            call_type == ThreadAPI::TD_KERNEL_UP_WRITE;
 
   if (m_thread_api->isReadLockAcquire(inst)) {
     if (!m_thread_api->isTryLock(inst) || !is_must) {
       LockID lock = getLockValue(inst);
-      if (lock) out_read.insert(lock);
+      if (lock)
+        out_read.insert(lock);
     }
   } else if (m_thread_api->isWriteLockAcquire(inst)) {
     if (!m_thread_api->isTryLock(inst) || !is_must) {
@@ -1078,7 +1218,8 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       if (lock) {
         out_write.insert(lock);
         for (const auto *l : in_read) {
-          if (mayAlias(l, lock)) out_read.erase(l);
+          if (mayAlias(l, lock))
+            out_read.erase(l);
         }
       }
     }
@@ -1086,10 +1227,12 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
     // Try-lock may fail; add only to the may-set.
     if (!m_thread_api->isTryLock(inst) || !is_must) {
       LockID lock = getLockValue(inst);
-      if (lock) out_write.insert(lock);
+      if (lock)
+        out_write.insert(lock);
     }
   } else if (m_thread_api->isTDCondWait(inst)) {
-    // pthread_cond_wait releases then re-acquires the mutex; read/write sets unchanged.
+    // pthread_cond_wait releases then re-acquires the mutex; read/write sets
+    // unchanged.
   } else if (m_thread_api->isTDRelease(inst)) {
     LockID lock = getLockValue(inst);
     if (lock) {
@@ -1098,206 +1241,211 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       if (is_must && m_alias_analysis) {
         LockSet to_remove_r, to_remove_w;
         for (const auto *l : out_read) {
-          if (mayAlias(l, lock)) to_remove_r.insert(l);
+          if (mayAlias(l, lock))
+            to_remove_r.insert(l);
         }
         for (const auto *l : out_write) {
-          if (mayAlias(l, lock)) to_remove_w.insert(l);
+          if (mayAlias(l, lock))
+            to_remove_w.insert(l);
         }
-        for (const auto *l : to_remove_r) out_read.erase(l);
-        for (const auto *l : to_remove_w) out_write.erase(l);
+        for (const auto *l : to_remove_r)
+          out_read.erase(l);
+        for (const auto *l : to_remove_w)
+          out_write.erase(l);
       }
     }
   } else if (call) {
     ThreadAPI::TD_TYPE type = call_type;
-      
+
     switch (type) {
-        case ThreadAPI::TD_SHARED_RDLOCK:
-          // std::shared_mutex::lock_shared - acquire read lock
-          if (call->arg_size() >= 1) {
-            LockID lock = getCanonicalLock(call->getArgOperand(0));
-            if (lock) out_read.insert(lock);
-          }
-          break;
-          
-        case ThreadAPI::TD_SHARED_WRLOCK:
-          // std::shared_mutex::lock - acquire write lock
-          if (call->arg_size() >= 1) {
-            LockID lock = getCanonicalLock(call->getArgOperand(0));
-            if (lock) {
-              out_write.insert(lock);
-              // Remove any read locks on the same mutex
-              for (const auto *l : in_read) {
-                if (mayAlias(l, lock)) out_read.erase(l);
-              }
-            }
-          }
-          break;
-          
-        case ThreadAPI::TD_SHARED_UNLOCK:
-          // std::shared_mutex::unlock[_shared] - release lock
-          if (call->arg_size() >= 1) {
-            LockID lock = getCanonicalLock(call->getArgOperand(0));
-            if (lock) {
-              out_read.erase(lock);
-              out_write.erase(lock);
-              if (is_must && m_alias_analysis) {
-                LockSet to_remove_r, to_remove_w;
-                for (const auto *l : out_read)
-                  if (mayAlias(l, lock)) to_remove_r.insert(l);
-                for (const auto *l : out_write)
-                  if (mayAlias(l, lock)) to_remove_w.insert(l);
-                for (const auto *l : to_remove_r) out_read.erase(l);
-                for (const auto *l : to_remove_w) out_write.erase(l);
-              }
-            }
-          }
-          break;
-          
-        case ThreadAPI::TD_SHARED_LOCK_CTOR:
-          // std::shared_lock constructor - acquire read lock
-          {
-            RAIILock::OwnershipKind ownership =
-                RAIILock::RAIILockTracker::getOwnershipKind(call);
-            bool should_add = ownership == RAIILock::OwnershipKind::Immediate ||
-                              (!is_must &&
-                               (ownership == RAIILock::OwnershipKind::Try ||
-                                ownership == RAIILock::OwnershipKind::Unknown));
-            if (!should_add) {
-              if (ownership != RAIILock::OwnershipKind::Adopt) {
-                break;
-              }
-            }
-          }
-          for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
-            if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
-              if (RAIILock::RAIILockTracker::getOwnershipKind(call) ==
-                  RAIILock::OwnershipKind::Adopt) {
-                bool held = false;
-                for (const auto *candidate : in_read) {
-                  if (mayAlias(candidate, lock)) {
-                    held = true;
-                    break;
-                  }
-                }
-                if (!held && is_must) {
-                  continue;
-                }
-                if (!held && !is_must) {
-                  out_read.insert(lock);
-                  continue;
-                }
-              }
-              out_read.insert(lock);
-            }
-          }
-          break;
-          
-        case ThreadAPI::TD_LOCK_GUARD_CTOR:
-        case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
-        case ThreadAPI::TD_SCOPED_LOCK_CTOR:
-          // These acquire write/exclusive locks
-          {
-            RAIILock::OwnershipKind ownership =
-                RAIILock::RAIILockTracker::getOwnershipKind(call);
-            bool should_add = ownership == RAIILock::OwnershipKind::Immediate ||
-                              (!is_must &&
-                               (ownership == RAIILock::OwnershipKind::Try ||
-                                ownership == RAIILock::OwnershipKind::Unknown));
-            if (ownership == RAIILock::OwnershipKind::Deferred) {
-              should_add = false;
-            }
-            if (!should_add) {
-              if (ownership != RAIILock::OwnershipKind::Adopt) {
-                break;
-              }
-            }
-          }
-          for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
-            if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
-              if (RAIILock::RAIILockTracker::getOwnershipKind(call) ==
-                  RAIILock::OwnershipKind::Adopt) {
-                bool held = false;
-                for (const auto *candidate : in_write) {
-                  if (mayAlias(candidate, lock)) {
-                    held = true;
-                    break;
-                  }
-                }
-                if (!held && is_must) {
-                  continue;
-                }
-                if (!held && !is_must) {
-                  out_write.insert(lock);
-                  continue;
-                }
-              }
-              out_write.insert(lock);
-            }
-          }
-          break;
-
-        case ThreadAPI::TD_SHARED_LOCK_DTOR:
-        case ThreadAPI::TD_LOCK_GUARD_DTOR:
-        case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
-        case ThreadAPI::TD_SCOPED_LOCK_DTOR:
-        case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
-          {
-            std::vector<LockID> locks = getUnderlyingRAIILocks(inst, call->getArgOperand(0));
-            if (locks.empty()) {
-              if (LockID lock = getCppWrapperLockValue(inst)) {
-                locks.push_back(lock);
-              }
-            }
-            if (locks.empty() && is_must) {
-              out_read.clear();
-              out_write.clear();
-              break;
-            }
-            RAIILock::OwnershipKind ownership =
-                RAIILock::RAIILockTracker::getOwnershipKind(call);
-            if (!is_must &&
-                ownership != RAIILock::OwnershipKind::Immediate &&
-                ownership != RAIILock::OwnershipKind::Adopt) {
-              break;
-            }
-            for (LockID lock : locks) {
-              out_read.erase(lock);
-              out_write.erase(lock);
-              if (is_must && m_alias_analysis) {
-                LockSet to_remove_r, to_remove_w;
-                for (const auto *l : out_read)
-                  if (mayAlias(l, lock)) to_remove_r.insert(l);
-                for (const auto *l : out_write)
-                  if (mayAlias(l, lock)) to_remove_w.insert(l);
-                for (const auto *l : to_remove_r) out_read.erase(l);
-                for (const auto *l : to_remove_w) out_write.erase(l);
-              }
-            }
-          }
-          break;
-
-        case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
-          {
-            std::vector<LockID> locks = getUnderlyingRAIILocks(inst, call->getArgOperand(0));
-            if (locks.empty()) {
-              if (LockID lock = getCppWrapperLockValue(inst)) {
-                locks.push_back(lock);
-              }
-            }
-            for (LockID lock : locks) {
-              out_write.insert(lock);
-            }
-          }
-          break;
-          
-        default:
-          break;
+    case ThreadAPI::TD_SHARED_RDLOCK:
+      // std::shared_mutex::lock_shared - acquire read lock
+      if (call->arg_size() >= 1) {
+        LockID lock = getCanonicalLock(call->getArgOperand(0));
+        if (lock)
+          out_read.insert(lock);
       }
+      break;
+
+    case ThreadAPI::TD_SHARED_WRLOCK:
+      // std::shared_mutex::lock - acquire write lock
+      if (call->arg_size() >= 1) {
+        LockID lock = getCanonicalLock(call->getArgOperand(0));
+        if (lock) {
+          out_write.insert(lock);
+          // Remove any read locks on the same mutex
+          for (const auto *l : in_read) {
+            if (mayAlias(l, lock))
+              out_read.erase(l);
+          }
+        }
+      }
+      break;
+
+    case ThreadAPI::TD_SHARED_UNLOCK:
+      // std::shared_mutex::unlock[_shared] - release lock
+      if (call->arg_size() >= 1) {
+        LockID lock = getCanonicalLock(call->getArgOperand(0));
+        if (lock) {
+          out_read.erase(lock);
+          out_write.erase(lock);
+          if (is_must && m_alias_analysis) {
+            LockSet to_remove_r, to_remove_w;
+            for (const auto *l : out_read)
+              if (mayAlias(l, lock))
+                to_remove_r.insert(l);
+            for (const auto *l : out_write)
+              if (mayAlias(l, lock))
+                to_remove_w.insert(l);
+            for (const auto *l : to_remove_r)
+              out_read.erase(l);
+            for (const auto *l : to_remove_w)
+              out_write.erase(l);
+          }
+        }
+      }
+      break;
+
+    case ThreadAPI::TD_SHARED_LOCK_CTOR:
+      // std::shared_lock constructor - acquire read lock
+      {
+        RAIILock::OwnershipKind ownership =
+            RAIILock::RAIILockTracker::getOwnershipKind(call);
+        bool should_add =
+            ownership == RAIILock::OwnershipKind::Immediate ||
+            (!is_must && (ownership == RAIILock::OwnershipKind::Try ||
+                          ownership == RAIILock::OwnershipKind::Unknown));
+        if (!should_add) {
+          if (ownership != RAIILock::OwnershipKind::Adopt) {
+            break;
+          }
+        }
+      }
+      for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
+        if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+          if (RAIILock::RAIILockTracker::getOwnershipKind(call) ==
+              RAIILock::OwnershipKind::Adopt) {
+            bool held = false;
+            for (const auto *candidate : in_read) {
+              if (mayAlias(candidate, lock)) {
+                held = true;
+                break;
+              }
+            }
+            if (!held && is_must) {
+              continue;
+            }
+            if (!held && !is_must) {
+              out_read.insert(lock);
+              continue;
+            }
+          }
+          out_read.insert(lock);
+        }
+      }
+      break;
+
+    case ThreadAPI::TD_LOCK_GUARD_CTOR:
+    case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+    case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+      // These acquire write/exclusive locks
+      {
+        RAIILock::OwnershipKind ownership =
+            RAIILock::RAIILockTracker::getOwnershipKind(call);
+        bool should_add =
+            ownership == RAIILock::OwnershipKind::Immediate ||
+            (!is_must && (ownership == RAIILock::OwnershipKind::Try ||
+                          ownership == RAIILock::OwnershipKind::Unknown));
+        if (ownership == RAIILock::OwnershipKind::Deferred) {
+          should_add = false;
+        }
+        if (!should_add) {
+          if (ownership != RAIILock::OwnershipKind::Adopt) {
+            break;
+          }
+        }
+      }
+      for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
+        if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+          if (RAIILock::RAIILockTracker::getOwnershipKind(call) ==
+              RAIILock::OwnershipKind::Adopt) {
+            bool held = false;
+            for (const auto *candidate : in_write) {
+              if (mayAlias(candidate, lock)) {
+                held = true;
+                break;
+              }
+            }
+            if (!held && is_must) {
+              continue;
+            }
+            if (!held && !is_must) {
+              out_write.insert(lock);
+              continue;
+            }
+          }
+          out_write.insert(lock);
+        }
+      }
+      break;
+
+    case ThreadAPI::TD_SHARED_LOCK_DTOR:
+    case ThreadAPI::TD_LOCK_GUARD_DTOR:
+    case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+    case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+    case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK: {
+      std::vector<LockID> locks =
+          getUnderlyingRAIILocks(inst, call->getArgOperand(0));
+      if (locks.empty()) {
+        if (LockID lock = getCppWrapperLockValue(inst)) {
+          locks.push_back(lock);
+        }
+      }
+      if (locks.empty() && is_must) {
+        out_read.clear();
+        out_write.clear();
+        break;
+      }
+      for (LockID lock : locks) {
+        out_read.erase(lock);
+        out_write.erase(lock);
+        if (is_must && m_alias_analysis) {
+          LockSet to_remove_r, to_remove_w;
+          for (const auto *l : out_read)
+            if (mayAlias(l, lock))
+              to_remove_r.insert(l);
+          for (const auto *l : out_write)
+            if (mayAlias(l, lock))
+              to_remove_w.insert(l);
+          for (const auto *l : to_remove_r)
+            out_read.erase(l);
+          for (const auto *l : to_remove_w)
+            out_write.erase(l);
+        }
+      }
+    } break;
+
+    case ThreadAPI::TD_UNIQUE_LOCK_LOCK: {
+      std::vector<LockID> locks =
+          getUnderlyingRAIILocks(inst, call->getArgOperand(0));
+      if (locks.empty()) {
+        if (LockID lock = getCppWrapperLockValue(inst)) {
+          locks.push_back(lock);
+        }
+      }
+      for (LockID lock : locks) {
+        out_write.insert(lock);
+      }
+    } break;
+
+    default:
+      break;
+    }
   }
 }
 
 LockSet LockSetAnalysis::merge(const std::vector<LockSet> &sets,
-                                bool is_must) const {
+                               bool is_must) const {
   if (sets.empty()) {
     return LockSet();
   }
@@ -1313,13 +1461,12 @@ LockSet LockSetAnalysis::merge(const std::vector<LockSet> &sets,
       result = intersection;
     }
     return result;
-  }      // May-analysis: union
-    LockSet result;
-    for (const auto &set : sets) {
-      result.insert(set.begin(), set.end());
-    }
-    return result;
- 
+  } // May-analysis: union
+  LockSet result;
+  for (const auto &set : sets) {
+    result.insert(set.begin(), set.end());
+  }
+  return result;
 }
 
 void LockSetAnalysis::identifyLocks() {
@@ -1503,7 +1650,8 @@ LockID LockSetAnalysis::getCppWrapperLockValue(const Instruction *inst) const {
   case ThreadAPI::TD_SCOPED_LOCK_CTOR:
   case ThreadAPI::TD_SHARED_LOCK_CTOR:
     if (call->arg_size() >= 1) {
-      if (LockID tracked = getUnderlyingRAIILock(inst, call->getArgOperand(0))) {
+      if (LockID tracked =
+              getUnderlyingRAIILock(inst, call->getArgOperand(0))) {
         return tracked;
       }
     }
@@ -1574,11 +1722,11 @@ LockID LockSetAnalysis::getLockValue(const Instruction *inst) const {
 
 std::set<Function *> LockSetAnalysis::getCallees(const CallBase *call) const {
   std::set<Function *> callees;
-  
+
   if (!call) {
     return callees;
   }
-  
+
   // Try direct call first
   if (Function *direct_callee = call->getCalledFunction()) {
     if (!direct_callee->isDeclaration()) {
@@ -1596,10 +1744,10 @@ std::set<Function *> LockSetAnalysis::getCallees(const CallBase *call) const {
       return callees;
     }
   }
-  
+
   // For indirect calls, use call graph if available
   if (m_call_graph) {
-    Function *caller = const_cast<Function*>(call->getFunction());
+    Function *caller = const_cast<Function *>(call->getFunction());
     if (CallGraphNode *cgNode = (*m_call_graph)[caller]) {
       for (auto &callRecord : *cgNode) {
         if (!callRecord.first.hasValue() ||
@@ -1614,7 +1762,7 @@ std::set<Function *> LockSetAnalysis::getCallees(const CallBase *call) const {
       }
     }
   }
-  
+
   return callees;
 }
 
@@ -1622,28 +1770,30 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   if (!func || func->isDeclaration()) {
     return;
   }
-  
+
   auto &summary = m_function_summaries[func];
   if (summary.is_analyzed) {
     return;
   }
-  
+
   errs() << "Computing summary for function: " << func->getName() << "\n";
-  
-  // Computes a summary of lock behaviors for the function to enable interprocedural analysis.
+
+  // Computes a summary of lock behaviors for the function to enable
+  // interprocedural analysis.
   // - MayAcquire: Locks that *may* be acquired and held upon return.
   // - MustAcquire: Locks that *must* be acquired and held upon return.
   // - Releases: Locks released within the function.
-  // This summary allows callers to update their locksets without re-analyzing the callee inline.
+  // This summary allows callers to update their locksets without re-analyzing
+  // the callee inline.
 
   // Run intraprocedural analysis to get flow-sensitive results
   computeIntraproceduralLockSets(func);
-  
+
   summary.may_acquire.clear();
   summary.must_acquire.clear();
   summary.may_release.clear();
   summary.must_release.clear();
-  
+
   // Collect return instructions
   std::vector<const ReturnInst *> returns;
   for (const BasicBlock &bb : *func) {
@@ -1651,27 +1801,28 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
       returns.push_back(ret);
     }
   }
-  
+
   if (!returns.empty()) {
     // Compute must_acquire (Intersection of exit sets)
     auto it = m_must_locksets_exit.find(returns[0]);
     if (it != m_must_locksets_exit.end()) {
       summary.must_acquire = it->second;
     }
-    
+
     for (size_t i = 1; i < returns.size(); ++i) {
       auto it = m_must_locksets_exit.find(returns[i]);
       if (it != m_must_locksets_exit.end()) {
         LockSet intersection;
-        std::set_intersection(summary.must_acquire.begin(), summary.must_acquire.end(),
-                              it->second.begin(), it->second.end(),
-                              std::inserter(intersection, intersection.begin()));
+        std::set_intersection(
+            summary.must_acquire.begin(), summary.must_acquire.end(),
+            it->second.begin(), it->second.end(),
+            std::inserter(intersection, intersection.begin()));
         summary.must_acquire = intersection;
       } else {
         summary.must_acquire.clear();
       }
     }
-    
+
     // Compute may_acquire (Union of exit sets)
     for (const auto *ret : returns) {
       auto it = m_may_locksets_exit.find(ret);
@@ -1680,11 +1831,12 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
       }
     }
   }
-  
+
   // Handle releases
-  // summary.must_release (used to update caller's must_locks) should contain MayReleased locks
-  // summary.may_release (used to update caller's may_locks) should contain MustReleased locks
-  
+  // summary.must_release (used to update caller's must_locks) should contain
+  // MayReleased locks summary.may_release (used to update caller's may_locks)
+  // should contain MustReleased locks
+
   // We scan for all releases to populate summary.must_release (MayReleased)
   for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
     Instruction *inst = &*I;
@@ -1695,14 +1847,17 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
       }
     }
   }
-  
-  // We leave summary.may_release empty (MustReleased) as we can't compute it safely
-  // This is safe for may-analysis (we won't remove locks that might still be held)
-  
+
+  // We leave summary.may_release empty (MustReleased) as we can't compute it
+  // safely This is safe for may-analysis (we won't remove locks that might
+  // still be held)
+
   summary.is_analyzed = true;
-  
-  errs() << "  May acquire (at exit): " << summary.may_acquire.size() << " locks\n";
-  errs() << "  Must acquire (at exit): " << summary.must_acquire.size() << " locks\n";
+
+  errs() << "  May acquire (at exit): " << summary.may_acquire.size()
+         << " locks\n";
+  errs() << "  Must acquire (at exit): " << summary.must_acquire.size()
+         << " locks\n";
 }
 
 void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
@@ -1712,14 +1867,14 @@ void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
   if (!call || !callee) {
     return;
   }
-  
+
   auto it = m_function_summaries.find(callee);
   if (it == m_function_summaries.end() || !it->second.is_analyzed) {
     return;
   }
-  
+
   const FunctionSummary &summary = it->second;
-  
+
   // Apply lock acquisitions
   may_locks.insert(summary.may_acquire.begin(), summary.may_acquire.end());
 
@@ -1733,11 +1888,11 @@ void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
   // We therefore only use summaries to *remove* locks from the caller's
   // must-set when the callee may release them, and keep must-acquire
   // propagation disabled until entry->exit delta summaries are available.
-  
+
   // Apply lock releases (remove from locksets)
   for (LockID lock : summary.may_release) {
     may_locks.erase(lock);
-    
+
     // Also remove aliases if alias analysis is available
     if (m_alias_analysis) {
       LockSet to_remove;
@@ -1751,10 +1906,10 @@ void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
       }
     }
   }
-  
+
   for (LockID lock : summary.must_release) {
     must_locks.erase(lock);
-    
+
     // Also remove aliases if alias analysis is available
     if (m_alias_analysis) {
       LockSet to_remove;
@@ -1774,43 +1929,43 @@ void LockSetAnalysis::bottomUpTraversal() {
   if (!m_call_graph) {
     return;
   }
-  
+
   errs() << "Performing bottom-up call graph traversal...\n";
-  
+
   // Compute post-order traversal for bottom-up analysis using LLVM CallGraph
   std::vector<Function *> post_order;
   std::set<Function *> visited;
   std::stack<std::pair<Function *, bool>> stack;
-  
+
   // Start from all functions in the module
   for (Function &func : *m_module) {
     if (!func.isDeclaration()) {
       if (visited.find(&func) == visited.end()) {
         stack.push({&func, false});
-        
+
         while (!stack.empty()) {
           auto top_pair = stack.top();
           stack.pop();
           Function *current = top_pair.first;
           bool children_visited = top_pair.second;
-          
+
           if (children_visited) {
             post_order.push_back(current);
             continue;
           }
-          
+
           if (visited.find(current) != visited.end()) {
             continue;
           }
-          
+
           visited.insert(current);
           stack.push({current, true});
-          
+
           // Get callees from LLVM CallGraph
           if (CallGraphNode *cgNode = (*m_call_graph)[current]) {
             for (auto &callRecord : *cgNode) {
               if (Function *callee = callRecord.second->getFunction()) {
-                if (callee && !callee->isDeclaration() && 
+                if (callee && !callee->isDeclaration() &&
                     visited.find(callee) == visited.end()) {
                   stack.push({callee, false});
                 }
@@ -1821,13 +1976,14 @@ void LockSetAnalysis::bottomUpTraversal() {
       }
     }
   }
-  
-  errs() << "Processing " << post_order.size() << " functions in bottom-up order\n";
-  
+
+  errs() << "Processing " << post_order.size()
+         << " functions in bottom-up order\n";
+
   // Compute summaries in post-order (callees before callers)
   for (Function *func : post_order) {
     computeFunctionSummary(func);
   }
-  
+
   errs() << "Bottom-up traversal complete\n";
 }

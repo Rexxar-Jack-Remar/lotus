@@ -991,17 +991,26 @@ OpenMPTaskGraph::classifyDependencyConflict(const Dependency &d1,
   if (!base1 || !base2) {
     return DependencyConflict::Unknown;
   }
-  if (base1 != base2) {
-    return DependencyConflict::NoConflict;
-  }
 
-  // Check for write dependency
   bool is_write1 =
       (d1.type == DependType::OUT || d1.type == DependType::INOUT ||
        d1.type == DependType::MUTEXINOUTSET);
   bool is_write2 =
       (d2.type == DependType::OUT || d2.type == DependType::INOUT ||
        d2.type == DependType::MUTEXINOUTSET);
+
+  if (base1 != base2) {
+    if ((is_write1 || is_write2) &&
+        (d1.proof != DependencyProof::Definite ||
+         d2.proof != DependencyProof::Definite ||
+         d1.source_kind != DependencySourceKind::DirectAddress ||
+         d2.source_kind != DependencySourceKind::DirectAddress)) {
+      ++m_deferred_imprecise_conflict_count;
+      ++m_deferred_reason_counts["omp_depend_distinct_base_may_alias"];
+      return DependencyConflict::MayConflict;
+    }
+    return DependencyConflict::NoConflict;
+  }
 
   if (!(is_write1 || is_write2)) {
     return DependencyConflict::NoConflict;

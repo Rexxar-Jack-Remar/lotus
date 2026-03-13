@@ -1152,7 +1152,7 @@ TEST_F(MPIAnalysisTest, ThreeRankBlockingCycleIsDetected) {
   EXPECT_GE(analysis.getResults().potential_deadlocks.size(), 3u);
 }
 
-TEST_F(MPIAnalysisTest, SameRMALockEpochDoesNotSelfRace) {
+TEST_F(MPIAnalysisTest, SameShapedRMALockEpochsAcrossRanksStillRace) {
   const char *source = R"(
     @win = global i8 0, align 1
     declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
@@ -1192,7 +1192,7 @@ TEST_F(MPIAnalysisTest, SameRMALockEpochDoesNotSelfRace) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_TRUE(analysis.getResults().rma_races.empty());
+  EXPECT_EQ(analysis.getResults().rma_races.size(), 1u);
 }
 
 int main(int argc, char **argv) {

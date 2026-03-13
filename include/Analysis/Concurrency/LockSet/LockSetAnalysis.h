@@ -1,7 +1,7 @@
 /**
  * @file LockSetAnalysis.h
  * @brief Production-ready Lock Set Analysis for Multithreaded Programs
- * 
+ *
  * This file provides a comprehensive lock set analysis that computes the
  * sets of locks that may or must be held at each program point. This is
  * essential for:
@@ -9,7 +9,7 @@
  * - Deadlock detection
  * - MHP (May-Happen-in-Parallel) analysis
  * - Lock ordering verification
- * 
+ *
  * Key Features:
  * - Intraprocedural lock set computation
  * - Interprocedural lock set propagation
@@ -18,7 +18,7 @@
  * - Lock aliasing support
  * - Reentrant lock handling
  * - Support for try-lock operations
- * 
+ *
  * @author rainoftime
  * @date 2026
  */
@@ -26,8 +26,14 @@
 #ifndef LOCKSET_ANALYSIS_H
 #define LOCKSET_ANALYSIS_H
 
-#include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/RAIILockTracker.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
+
+#include <map>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallVector.h>
@@ -38,12 +44,6 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <map>
-#include <set>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
 
 namespace lotus {
 class AliasAnalysisWrapper;
@@ -68,7 +68,7 @@ using LockSet = std::set<LockID>;
 
 /**
  * @brief Comprehensive lock set analysis for concurrent programs
- * 
+ *
  * Computes may-locksets and must-locksets at each program point using
  * dataflow analysis. Handles:
  * - pthread_mutex_lock/unlock
@@ -76,7 +76,7 @@ using LockSet = std::set<LockID>;
  * - sem_wait/post
  * - Reentrant locks
  * - Try-lock operations
- * 
+ *
  * Usage:
  *   LockSetAnalysis lsa(module);
  *   lsa.analyze();
@@ -111,8 +111,8 @@ public:
    * @brief Set alias analysis wrapper for better precision
    * @param aa_wrapper Alias analysis wrapper instance
    */
-  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa_wrapper) { 
-    m_alias_analysis = aa_wrapper; 
+  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa_wrapper) {
+    m_alias_analysis = aa_wrapper;
   }
 
   /**
@@ -183,13 +183,17 @@ public:
 
   /**
    * @brief Check if two instructions may hold a common lock (mutex or rwlock).
-   * For rwlocks: true if both hold same lock in write mode, or both in read mode.
+   * For rwlocks: true if both hold same lock in write mode, or both in read
+   * mode.
    * @param i1 First instruction
    * @param i2 Second instruction
    * @return true if they may hold a common lock
    */
   bool mayHoldCommonLock(const llvm::Instruction *i1,
                          const llvm::Instruction *i2) const;
+
+  bool mustHoldCommonLock(const llvm::Instruction *i1,
+                          const llvm::Instruction *i2) const;
 
   /**
    * @brief Get all locks that may be held in a function
@@ -203,16 +207,14 @@ public:
    * @param lock Lock value
    * @return Vector of acquire instructions
    */
-  std::vector<const llvm::Instruction *>
-  getLockAcquires(LockID lock) const;
+  std::vector<const llvm::Instruction *> getLockAcquires(LockID lock) const;
 
   /**
    * @brief Get lock release instructions for a specific lock
    * @param lock Lock value
    * @return Vector of release instructions
    */
-  std::vector<const llvm::Instruction *>
-  getLockReleases(LockID lock) const;
+  std::vector<const llvm::Instruction *> getLockReleases(LockID lock) const;
 
   // ========================================================================
   // Advanced Queries
@@ -251,13 +253,13 @@ public:
   // ========================================================================
 
   struct Statistics {
-    size_t num_locks;              ///< Total number of distinct locks
-    size_t num_acquires;           ///< Total lock acquire operations
-    size_t num_releases;           ///< Total lock release operations
-    size_t num_try_acquires;       ///< Total try-lock operations
-    size_t max_nesting_depth;      ///< Maximum observed lock nesting
-    size_t num_reentrant_locks;    ///< Number of reentrant locks
-    size_t num_potential_deadlocks;///< Number of potential deadlocks
+    size_t num_locks;               ///< Total number of distinct locks
+    size_t num_acquires;            ///< Total lock acquire operations
+    size_t num_releases;            ///< Total lock release operations
+    size_t num_try_acquires;        ///< Total try-lock operations
+    size_t max_nesting_depth;       ///< Maximum observed lock nesting
+    size_t num_reentrant_locks;     ///< Number of reentrant locks
+    size_t num_potential_deadlocks; ///< Number of potential deadlocks
 
     void print(llvm::raw_ostream &os) const;
   };
@@ -266,7 +268,7 @@ public:
   void printStatistics(llvm::raw_ostream &os) const;
   void printResults(llvm::raw_ostream &os) const;
   void printLockSetsForFunction(const llvm::Function *func,
-                                 llvm::raw_ostream &os) const;
+                                llvm::raw_ostream &os) const;
 
   // ========================================================================
   // Visualization
@@ -293,7 +295,7 @@ private:
   llvm::Function *m_single_function; // For single-function analysis
   ThreadAPI *m_thread_api;
   lotus::AliasAnalysisWrapper *m_alias_analysis;
-  llvm::CallGraph *m_call_graph;  // For interprocedural analysis
+  llvm::CallGraph *m_call_graph; // For interprocedural analysis
   std::unique_ptr<llvm::CallGraph> m_owned_call_graph;
 
   // Lockset results (combined for backward compat; read/write for rwlock)
@@ -303,12 +305,16 @@ private:
   std::unordered_map<const llvm::Instruction *, LockSet> m_must_locksets_exit;
   std::unordered_map<const llvm::Instruction *, LockSet> m_may_read_locks_entry;
   std::unordered_map<const llvm::Instruction *, LockSet> m_may_read_locks_exit;
-  std::unordered_map<const llvm::Instruction *, LockSet> m_may_write_locks_entry;
+  std::unordered_map<const llvm::Instruction *, LockSet>
+      m_may_write_locks_entry;
   std::unordered_map<const llvm::Instruction *, LockSet> m_may_write_locks_exit;
-  std::unordered_map<const llvm::Instruction *, LockSet> m_must_read_locks_entry;
+  std::unordered_map<const llvm::Instruction *, LockSet>
+      m_must_read_locks_entry;
   std::unordered_map<const llvm::Instruction *, LockSet> m_must_read_locks_exit;
-  std::unordered_map<const llvm::Instruction *, LockSet> m_must_write_locks_entry;
-  std::unordered_map<const llvm::Instruction *, LockSet> m_must_write_locks_exit;
+  std::unordered_map<const llvm::Instruction *, LockSet>
+      m_must_write_locks_entry;
+  std::unordered_map<const llvm::Instruction *, LockSet>
+      m_must_write_locks_exit;
 
   // Lock tracking
   std::unordered_set<LockID> m_all_locks;
@@ -337,23 +343,25 @@ private:
 
   std::unordered_set<LockPair, LockPair::Hash> m_observed_lock_orders;
   std::unordered_set<LockID> m_reentrant_locks;
-  
+
   // RAII lock tracking per function (type alias avoids C++11 >> parse issue)
-  typedef std::map<const llvm::AllocaInst *, RAIILock::LockLifetime> RAIILockMap;
+  typedef std::map<const llvm::AllocaInst *, RAIILock::LockLifetime>
+      RAIILockMap;
   std::unordered_map<const llvm::Function *, RAIILockMap> m_raii_locks;
 
   // Interprocedural analysis data structures
   struct FunctionSummary {
-    LockSet may_acquire;    ///< Locks that may be acquired
-    LockSet may_release;    ///< Locks that may be released
-    LockSet must_acquire;   ///< Locks that must be acquired
-    LockSet must_release;   ///< Locks that must be released
-    bool is_analyzed;       ///< Whether function has been analyzed
-    
+    LockSet may_acquire;  ///< Locks that may be acquired
+    LockSet may_release;  ///< Locks that may be released
+    LockSet must_acquire; ///< Locks that must be acquired
+    LockSet must_release; ///< Locks that must be released
+    bool is_analyzed;     ///< Whether function has been analyzed
+
     FunctionSummary() : is_analyzed(false) {}
   };
-  
-  std::unordered_map<const llvm::Function *, FunctionSummary> m_function_summaries;
+
+  std::unordered_map<const llvm::Function *, FunctionSummary>
+      m_function_summaries;
 
   // ========================================================================
   // Analysis Implementation
@@ -375,7 +383,8 @@ private:
   void computeInterproceduralLockSets();
 
   /**
-   * @brief Transfer function for lockset analysis (combined set for backward compat)
+   * @brief Transfer function for lockset analysis (combined set for backward
+   * compat)
    */
   LockSet transfer(const llvm::Instruction *inst, const LockSet &in_set,
                    bool is_must) const;
@@ -383,9 +392,9 @@ private:
   /**
    * @brief Transfer for read/write locks (rdlock, wrlock, unlock)
    */
-  void transferReadWrite(const llvm::Instruction *inst,
-                         const LockSet &in_read, const LockSet &in_write,
-                         LockSet &out_read, LockSet &out_write, bool is_must) const;
+  void transferReadWrite(const llvm::Instruction *inst, const LockSet &in_read,
+                         const LockSet &in_write, LockSet &out_read,
+                         LockSet &out_write, bool is_must) const;
 
   /**
    * @brief Merge locksets from multiple predecessors
@@ -447,8 +456,8 @@ private:
    * @brief Apply function summary at call site
    */
   void applyFunctionSummary(const llvm::CallBase *call,
-                            const llvm::Function *callee,
-                            LockSet &may_locks, LockSet &must_locks) const;
+                            const llvm::Function *callee, LockSet &may_locks,
+                            LockSet &must_locks) const;
 
   /**
    * @brief Get callees at a call site using CallGraph

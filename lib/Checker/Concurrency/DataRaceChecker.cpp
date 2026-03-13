@@ -129,70 +129,36 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
   if (areIndependent(inst1, inst2))
     return false;
 
-  // Suppress false positives by checking if accesses could be protected by a
-  // common lock. Use MAY-lock analysis (union of paths) rather than MUST-lock
-  // (intersection of paths) because we only need to verify accesses COULD be
-  // protected, not that they're ALWAYS protected. This avoids false positives
-  // when lock acquisition is on a subset of paths.
-  // Also use alias analysis for lock comparison to handle cases where lock
-  // values might be different pointers to the same underlying mutex.
   if (m_locksetAnalysis) {
-    const bool w1 = isWriteAccess(inst1);
-    const bool w2 = isWriteAccess(inst2);
+    if (m_locksetAnalysis->mustHoldCommonLock(inst1, inst2)) {
+      return false;
+    }
 
-    if (w1 || w2) {
-      // Use MAY-lock analysis to check if accesses could share a common lock.
-      // Take union of write-lock set and combined lock set - the combined set
-      // has block-head fallbacks that fix DCL/singleton patterns; the write set
-      // is more precise when populated.
-      const auto mayProtectedSet = [this](const Instruction *I, bool isWrite) {
-        LockSet s = m_locksetAnalysis->getMayLockSetAt(I);
-        if (isWrite) {
-          LockSet ws = m_locksetAnalysis->getMayWriteLockSetAt(I);
-          s.insert(ws.begin(), ws.end());
-        }
-        return s;
-      };
-
-      const LockSet s1 = mayProtectedSet(inst1, w1);
-      const LockSet s2 = mayProtectedSet(inst2, w2);
-
-      // Check if any lock in s1 might alias any lock in s2
-      for (const auto *lock1 : s1) {
-        for (const auto *lock2 : s2) {
-          if (mayAlias(lock1, lock2)) {
-            return false; // Could be protected by common lock - no race
-                          // reported
-          }
-        }
-      }
-
-      // Fallback for DCL/singleton: both in same function - use dominance to
-      // detect critical sections when lock-set lookup is imprecise.
-      const Function *F1 = inst1->getFunction();
-      const Function *F2 = inst2->getFunction();
-      if (F1 && F2 && F1 == F2) {
-        DominatorTree DT(const_cast<Function &>(*F1));
-        PostDominatorTree PDT(const_cast<Function &>(*F1));
-        const BasicBlock *BB1 = inst1->getParent();
-        const BasicBlock *BB2 = inst2->getParent();
-        LockSet funcLocks = m_locksetAnalysis->getAllLocksInFunction(F1);
-        for (LockID lock : funcLocks) {
-          for (const Instruction *Acq :
-               m_locksetAnalysis->getLockAcquires(lock)) {
-            if (Acq->getFunction() != F1)
+    // Fallback for DCL/singleton: both in same function - use dominance to
+    // detect critical sections when lock-set lookup is imprecise.
+    const Function *F1 = inst1->getFunction();
+    const Function *F2 = inst2->getFunction();
+    if (F1 && F2 && F1 == F2) {
+      DominatorTree DT(const_cast<Function &>(*F1));
+      PostDominatorTree PDT(const_cast<Function &>(*F1));
+      const BasicBlock *BB1 = inst1->getParent();
+      const BasicBlock *BB2 = inst2->getParent();
+      LockSet funcLocks = m_locksetAnalysis->getAllLocksInFunction(F1);
+      for (LockID lock : funcLocks) {
+        for (const Instruction *Acq :
+             m_locksetAnalysis->getLockAcquires(lock)) {
+          if (Acq->getFunction() != F1)
+            continue;
+          const BasicBlock *AcqBB = Acq->getParent();
+          if (!DT.dominates(AcqBB, BB1) || !DT.dominates(AcqBB, BB2))
+            continue;
+          for (const Instruction *Rel :
+               m_locksetAnalysis->getLockReleases(lock)) {
+            if (Rel->getFunction() != F1)
               continue;
-            const BasicBlock *AcqBB = Acq->getParent();
-            if (!DT.dominates(AcqBB, BB1) || !DT.dominates(AcqBB, BB2))
-              continue;
-            for (const Instruction *Rel :
-                 m_locksetAnalysis->getLockReleases(lock)) {
-              if (Rel->getFunction() != F1)
-                continue;
-              const BasicBlock *RelBB = Rel->getParent();
-              if (PDT.dominates(RelBB, BB1) && PDT.dominates(RelBB, BB2))
-                return false; // Both in same critical section
-            }
+            const BasicBlock *RelBB = Rel->getParent();
+            if (PDT.dominates(RelBB, BB1) && PDT.dominates(RelBB, BB2))
+              return false;
           }
         }
       }

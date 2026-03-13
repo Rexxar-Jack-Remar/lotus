@@ -388,8 +388,8 @@ void MHPAnalysis::analyze() {
   m_lockset.reset();
   m_tfg = std::make_unique<ThreadFlowGraph>();
   m_call_graph = std::make_unique<CallGraph>(m_module);
-  m_join_target_analysis = std::make_unique<JoinTargetAnalysis>(
-      m_module, m_alias_analysis.get());
+  m_join_target_analysis =
+      std::make_unique<JoinTargetAnalysis>(m_module, m_alias_analysis.get());
 
   // Run TLS analysis first
   m_tls_analysis->analyze();
@@ -450,6 +450,51 @@ void MHPAnalysis::lowerOpenMPTasks() {
   OpenMP::OpenMPTaskGraph task_graph(m_module);
   task_graph.analyze();
 
+  auto wireInlineTask = [&](const OpenMP::Task *task, ThreadID parent_tid) {
+    SyncNode *create_node = m_tfg->getNode(task->task_create, parent_tid);
+    if (!create_node) {
+      return;
+    }
+
+    const bool in_prefork_main_phase =
+        parent_tid == 0 && m_pre_fork_main_nodes.count(create_node) > 0;
+    CallContextID callee_ctx = create_node->getNodeID();
+    m_has_multi_context_nodes = true;
+    processFunction(task->task_function, parent_tid, callee_ctx,
+                    in_prefork_main_phase);
+
+    if (SyncNode *task_entry = m_tfg->getNode(
+            &task->task_function->front().front(), parent_tid, callee_ctx)) {
+      m_tfg->addCallEdge(create_node, task_entry);
+    }
+
+    SyncNode *task_exit =
+        m_tfg->getFunctionExitNode(parent_tid, task->task_function, callee_ctx);
+    if (!task_exit) {
+      return;
+    }
+
+    if (const Instruction *next_inst = task->task_create->getNextNode()) {
+      if (SyncNode *return_site = m_tfg->getNode(next_inst, parent_tid)) {
+        m_tfg->addRetEdge(task_exit, return_site);
+      }
+      return;
+    }
+
+    if (task->task_create->isTerminator()) {
+      for (const BasicBlock *succ :
+           successors(task->task_create->getParent())) {
+        if (succ->empty()) {
+          continue;
+        }
+        if (SyncNode *return_site =
+                m_tfg->getNode(&succ->front(), parent_tid)) {
+          m_tfg->addRetEdge(task_exit, return_site);
+        }
+      }
+    }
+  };
+
   for (const auto &task_uptr : task_graph.getAllTasks()) {
     const OpenMP::Task *task = task_uptr.get();
     if (!task || !task->task_create || !task->task_function ||
@@ -459,6 +504,11 @@ void MHPAnalysis::lowerOpenMPTasks() {
 
     ThreadID parent_tid = getThreadID(task->task_create);
     if (parent_tid == kUnknownThread) {
+      continue;
+    }
+
+    if (task->execution_mode == OpenMP::TaskExecutionMode::Included) {
+      wireInlineTask(task, parent_tid);
       continue;
     }
 
@@ -498,7 +548,8 @@ void MHPAnalysis::lowerOpenMPTasks() {
     SyncNode *task_entry = m_tfg->getThreadEntryNode(task_tid);
     for (const OpenMP::Task *pred : task->predecessors) {
       ThreadID pred_tid = getTaskThread(pred);
-      SyncNode *pred_exit = pred_tid ? m_tfg->getThreadExitNode(pred_tid) : nullptr;
+      SyncNode *pred_exit =
+          pred_tid ? m_tfg->getThreadExitNode(pred_tid) : nullptr;
       if (pred_exit && task_entry) {
         m_tfg->addInterThreadEdge(pred_exit, task_entry);
       }
@@ -533,12 +584,14 @@ void MHPAnalysis::lowerOpenMPTasks() {
 
     for (const auto &task_uptr : task_graph.getAllTasks()) {
       const OpenMP::Task *task = task_uptr.get();
-      if (!task || task->scheduling_context_id != boundary.scheduling_context_id ||
+      if (!task ||
+          task->scheduling_context_id != boundary.scheduling_context_id ||
           task->sequence_index >= boundary.sequence_index) {
         continue;
       }
       if (boundary.is_taskgroup_end) {
-        if (boundary.taskgroup_id == 0 || task->taskgroup_id != boundary.taskgroup_id) {
+        if (boundary.taskgroup_id == 0 ||
+            task->taskgroup_id != boundary.taskgroup_id) {
           continue;
         }
       } else if (task->phase_id != boundary.phase_id) {
@@ -546,7 +599,8 @@ void MHPAnalysis::lowerOpenMPTasks() {
       }
 
       ThreadID task_tid = getTaskThread(task);
-      SyncNode *task_exit = task_tid ? m_tfg->getThreadExitNode(task_tid) : nullptr;
+      SyncNode *task_exit =
+          task_tid ? m_tfg->getThreadExitNode(task_tid) : nullptr;
       if (task_exit) {
         m_tfg->addInterThreadEdge(task_exit, wait_node);
       }
@@ -555,8 +609,7 @@ void MHPAnalysis::lowerOpenMPTasks() {
 }
 
 void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
-                                  CallContextID ctx,
-                                  bool inPreForkMainPhase) {
+                                  CallContextID ctx, bool inPreForkMainPhase) {
   if (!func || func->isDeclaration())
     return;
 
@@ -712,8 +765,8 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
                               if (succ->empty()) {
                                 continue;
                               }
-                              if (SyncNode *return_site =
-                                      m_tfg->getNode(&succ->front(), tid, ctx)) {
+                              if (SyncNode *return_site = m_tfg->getNode(
+                                      &succ->front(), tid, ctx)) {
                                 m_tfg->addRetEdge(callee_exit, return_site);
                               }
                             }
@@ -740,7 +793,8 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
             if (callee_exit) {
               const Instruction *next_inst = inst.getNextNode();
               if (next_inst) {
-                if (SyncNode *return_site = m_tfg->getNode(next_inst, tid, ctx)) {
+                if (SyncNode *return_site =
+                        m_tfg->getNode(next_inst, tid, ctx)) {
                   m_tfg->addRetEdge(callee_exit, return_site);
                 }
               } else if (inst.isTerminator()) {
@@ -1458,56 +1512,10 @@ bool MHPAnalysis::isInSameThread(const Instruction *i1,
 
 bool MHPAnalysis::isOrderedByLocks(const Instruction *i1,
                                    const Instruction *i2) const {
-  // Use LockSetAnalysis if available to determine if both instructions
-  // are protected by the same exclusive lock
   if (!m_lockset) {
-    return false; // Conservative: assume no lock-based ordering
+    return false;
   }
-
-  // Get lock sets at both instructions
-  LockSet locks1 = m_lockset->getMayLockSetAt(i1);
-  LockSet locks2 = m_lockset->getMayLockSetAt(i2);
-
-  // Check for common exclusive locks
-  // Two accesses under the same exclusive lock cannot be MHP
-  for (LockID lock1 : locks1) {
-    for (LockID lock2 : locks2) {
-      // Check if locks may alias
-      if (lock1 == lock2) {
-        // Same lock: check if it's exclusive (not read-locked)
-        LockSet read_locks1 = m_lockset->getMayReadLockSetAt(i1);
-        LockSet read_locks2 = m_lockset->getMayReadLockSetAt(i2);
-
-        // Both under read lock: can be parallel (readers-writers semantics)
-        if (read_locks1.count(lock1) && read_locks2.count(lock2)) {
-          continue;
-        }
-
-        // At least one is write-locked: mutually exclusive
-        return true;
-      }
-
-      // Use alias analysis to check if locks may be the same
-      if (m_alias_analysis && m_alias_analysis->mayAlias(lock1, lock2)) {
-        // Potentially same lock, check read/write status
-        LockSet read_locks1 = m_lockset->getMayReadLockSetAt(i1);
-        LockSet read_locks2 = m_lockset->getMayReadLockSetAt(i2);
-
-        bool is_read1 = read_locks1.count(lock1) > 0;
-        bool is_read2 = read_locks2.count(lock2) > 0;
-
-        // Both read-locked: can be parallel
-        if (is_read1 && is_read2) {
-          continue;
-        }
-
-        // At least one write-locked: conservatively assume ordered
-        return true;
-      }
-    }
-  }
-
-  return false; // No common lock found
+  return m_lockset->mustHoldCommonLock(i1, i2);
 }
 
 // ============================================================================
@@ -1804,14 +1812,16 @@ void MHPAnalysis::computeAtomicHappensBefore() {
 
   for (const llvm::Instruction *release_fence : release_fences) {
     std::vector<const llvm::Instruction *> release_witnesses =
-        collectFenceWitnesses(release_fence, /*require_release_semantics=*/true);
+        collectFenceWitnesses(release_fence,
+                              /*require_release_semantics=*/true);
     if (release_witnesses.empty()) {
       continue;
     }
 
     for (const llvm::Instruction *acquire_fence : acquire_fences) {
       std::vector<const llvm::Instruction *> acquire_witnesses =
-          collectFenceWitnesses(acquire_fence, /*require_release_semantics=*/false);
+          collectFenceWitnesses(acquire_fence,
+                                /*require_release_semantics=*/false);
       if (acquire_witnesses.empty()) {
         continue;
       }
@@ -1864,7 +1874,8 @@ MHPAnalysis::collectFenceWitnesses(const Instruction *fence,
     }
 
     if (require_release_semantics) {
-      if (!CppAtomics::hasReleaseSemantics(inst) || !CppAtomics::isStore(inst)) {
+      if (!CppAtomics::hasReleaseSemantics(inst) ||
+          !CppAtomics::isStore(inst)) {
         continue;
       }
       if (!hasHappenBeforeRelation(inst, fence)) {
@@ -1914,7 +1925,8 @@ MHPAnalysis::getBarrierContinuations(const Instruction *barrier_inst) const {
   }
 
   if (const Instruction *next = barrier_inst->getNextNode()) {
-    for (SyncNode *next_node : m_tfg->getNodes(next, getThreadID(barrier_inst))) {
+    for (SyncNode *next_node :
+         m_tfg->getNodes(next, getThreadID(barrier_inst))) {
       continuations.push_back(next_node);
     }
   }
@@ -1932,7 +1944,8 @@ MHPAnalysis::getBarrierContinuations(const Instruction *barrier_inst) const {
   }
 
   if (continuations.empty()) {
-    for (SyncNode *self : m_tfg->getNodes(barrier_inst, getThreadID(barrier_inst))) {
+    for (SyncNode *self :
+         m_tfg->getNodes(barrier_inst, getThreadID(barrier_inst))) {
       continuations.push_back(self);
     }
   }
@@ -2023,7 +2036,8 @@ void MHPAnalysis::computeHappensBeforeTransitiveClosure() const {
   }
 
   if (m_has_multi_context_nodes) {
-    errs() << "Skipping HB transitive closure for context-cloned call graphs.\n";
+    errs()
+        << "Skipping HB transitive closure for context-cloned call graphs.\n";
     m_hb_closure_computed = true;
     return;
   }

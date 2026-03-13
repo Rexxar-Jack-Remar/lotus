@@ -2243,20 +2243,6 @@ bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation &op1,
   if (op1.epoch_id != 0 && op1.epoch_id == op2.epoch_id) {
     return false;
   }
-  auto sameSyncSiteShape = [](const Instruction *lhs, const Instruction *rhs) {
-    const auto *lhs_cb = dyn_cast_or_null<CallBase>(lhs);
-    const auto *rhs_cb = dyn_cast_or_null<CallBase>(rhs);
-    const Function *lhs_callee = lhs_cb ? lhs_cb->getCalledFunction() : nullptr;
-    const Function *rhs_callee = rhs_cb ? rhs_cb->getCalledFunction() : nullptr;
-    return lhs_callee && rhs_callee &&
-           lhs_callee->getName() == rhs_callee->getName();
-  };
-  if (op1.sync_start && op1.sync_end && op2.sync_start && op2.sync_end &&
-      sameSyncSiteShape(op1.sync_start, op2.sync_start) &&
-      sameSyncSiteShape(op1.sync_end, op2.sync_end)) {
-    return false;
-  }
-
   // Two different ranks/process contexts using the same synchronization regime
   // can still race on the same location. Without a stronger cross-process
   // proof, keep the race report.

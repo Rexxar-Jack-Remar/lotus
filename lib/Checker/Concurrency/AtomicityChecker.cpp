@@ -186,7 +186,8 @@ std::vector<ConcurrencyBugReport> AtomicityChecker::checkAtomicityViolations() {
   SmallVector<std::pair<const CriticalSection *, mhp::LockID>, 16> AllSections;
   for (auto &FuncPair : m_csPerFunc) {
     for (const auto &CS : FuncPair.second) {
-      AllSections.push_back({&CS, m_threadAPI->getAnalysisLockIdentity(CS.Acquire)});
+      AllSections.push_back(
+          {&CS, m_threadAPI->getAnalysisLockIdentity(CS.Acquire)});
     }
   }
 
@@ -308,11 +309,9 @@ std::vector<ConcurrencyBugReport> AtomicityChecker::checkAtomicityViolations() {
       if (!(isWrite(*I1) || isWrite(*I2)))
         continue;
 
-      // Only report when both accesses have no lock held (definitely
-      // unprotected); avoids FP when CS not recognized.
       if (m_locksetAnalysis &&
-          (!m_locksetAnalysis->getMayLockSetAt(I1).empty() ||
-           !m_locksetAnalysis->getMayLockSetAt(I2).empty()))
+          (!m_locksetAnalysis->getMustLockSetAt(I1).empty() ||
+           !m_locksetAnalysis->getMustLockSetAt(I2).empty()))
         continue;
 
       // Unprotected pair (I1, I2) in same function to same location. Check if
