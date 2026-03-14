@@ -1853,7 +1853,7 @@ void MHPAnalysis::computeAtomicHappensBefore() {
   }
 
   errs() << "Recorded " << m_atomic_hb_pairs.size()
-         << " atomic fence witness edges.\n";
+         << " atomic HB edges from fence witnesses.\n";
 }
 
 std::vector<const Instruction *>

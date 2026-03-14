@@ -107,6 +107,7 @@ void LockSetAnalysis::analyze() {
 // ============================================================================
 
 LockSet LockSetAnalysis::getMayLockSetAt(const Instruction *inst) const {
+  // Entry map is authoritative when present and non-empty.
   auto it = m_may_locksets_entry.find(inst);
   if (it != m_may_locksets_entry.end() && !it->second.empty())
     return it->second;
@@ -1035,9 +1036,12 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
           }
           return out_set;
         }
-        // Fallback: if we couldn't track the specific lock, be conservative
+        // Fallback: if we couldn't match this dtor to any RAII lifetime (e.g.
+        // indirect call or unrecognized wrapper), clear entire must-set for
+        // soundness: we must not claim any lock is still held after an
+        // unknown release.
         if (is_must) {
-          out_set.clear(); // Conservative: all locks may be released
+          out_set.clear();
         }
       }
       return out_set;

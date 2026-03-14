@@ -74,6 +74,8 @@ TEST_F(JoinTargetAnalysisTest, ResolvesJoinThroughPhi) {
 
   ASSERT_NE(join_inst, nullptr);
   EXPECT_TRUE(analysis.isUnambiguousJoin(join_inst));
+  auto forks = analysis.getPossibleJoinedForks(join_inst);
+  EXPECT_EQ(forks.size(), 1u);
 }
 
 TEST_F(JoinTargetAnalysisTest, LeavesAmbiguousJoinAmbiguous) {
@@ -124,6 +126,8 @@ TEST_F(JoinTargetAnalysisTest, LeavesAmbiguousJoinAmbiguous) {
 
   ASSERT_NE(join_inst, nullptr);
   EXPECT_FALSE(analysis.isUnambiguousJoin(join_inst));
+  auto forks = analysis.getPossibleJoinedForks(join_inst);
+  EXPECT_EQ(forks.size(), 2u);
 }
 
 int main(int argc, char **argv) {

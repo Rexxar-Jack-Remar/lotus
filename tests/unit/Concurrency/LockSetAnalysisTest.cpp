@@ -5,6 +5,10 @@
 
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 
+#include "Analysis/Concurrency/Utils/RAIILockTracker.h"
+
+#include <algorithm>
+
 #include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
@@ -530,6 +534,79 @@ TEST_F(LockSetAnalysisTest, CalleeHeldExitLocksDoNotBecomeCallerMustLocks) {
 
   EXPECT_TRUE(lsa.mayHoldLock(after, lock));
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
+TEST_F(LockSetAnalysisTest,
+       RAIILifetimeKeepsExplicitDestructorAndExceptionalExitReleasePoints) {
+  const char *source = R"(
+    declare void @fake_lock_guard_C1E(i8*, i8*)
+    declare void @fake_lock_guard_D1Ev(i8*)
+    declare void @may_throw()
+    declare i32 @__gxx_personality_v0(...)
+
+    @lock = global i8 0
+
+    define i32 @main() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %lg = alloca i8
+      call void @fake_lock_guard_C1E(i8* %lg, i8* @lock)
+      invoke void @may_throw() to label %cont unwind label %lpad
+
+    cont:
+      call void @fake_lock_guard_D1Ev(i8* %lg)
+      ret i32 0
+
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      resume { i8*, i32 } %lp
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  RAIILock::RAIILockTracker tracker;
+  tracker.analyzeFunction(main_func);
+
+  const auto &lifetimes = tracker.getAllLockLifetimes();
+  ASSERT_EQ(lifetimes.size(), 1u);
+
+  const auto &lifetime = lifetimes.begin()->second;
+  EXPECT_FALSE(lifetime.destructors.empty());
+
+  const Instruction *explicit_dtor = nullptr;
+  const Instruction *resume_inst = nullptr;
+  for (const auto &bb : *main_func) {
+    for (const auto &inst : bb) {
+      if (auto *call = dyn_cast<CallBase>(&inst)) {
+        if (const Function *callee = call->getCalledFunction()) {
+          if (callee->getName().contains("fake_lock_guard_D1Ev")) {
+            explicit_dtor = &inst;
+          }
+        }
+      }
+      if (isa<ResumeInst>(inst)) {
+        resume_inst = &inst;
+      }
+    }
+  }
+
+  ASSERT_NE(explicit_dtor, nullptr);
+  ASSERT_NE(resume_inst, nullptr);
+
+  EXPECT_NE(std::find(lifetime.destructors.begin(), lifetime.destructors.end(),
+                      explicit_dtor),
+            lifetime.destructors.end());
+  EXPECT_NE(std::find(lifetime.destructors.begin(), lifetime.destructors.end(),
+                      resume_inst),
+            lifetime.destructors.end());
+
+  for (const Instruction *inst : lifetime.destructors) {
+    EXPECT_FALSE(isa<ReturnInst>(inst));
+  }
 }
 
 int main(int argc, char **argv) {

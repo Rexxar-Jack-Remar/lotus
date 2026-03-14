@@ -797,6 +797,54 @@ TEST_F(MHPAnalysisTest, HelperCalledBeforeAndAfterForkIsNotGloballyPrefork) {
   EXPECT_TRUE(mhp.mayHappenInParallel(helper_inst, worker_inst));
 }
 
+TEST_F(MHPAnalysisTest, MultiInstanceThread_InstructionsMayHappenInParallel) {
+  const char *source = R"(
+    @x = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %a = add i32 1, 2
+      %b = add i32 3, 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      br label %loop
+
+    loop:
+      %i = phi i32 [ 0, %entry ], [ %next, %loop ]
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      call i32 @pthread_join(i8* %tid, i8* null)
+      %next = add i32 %i, 1
+      %cond = icmp slt i32 %next, 2
+      br i1 %cond, label %loop, label %exit
+
+    exit:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Function *worker_func = module->getFunction("worker");
+  ASSERT_NE(worker_func, nullptr);
+  const Instruction *inst_a = findInstructionByName(*worker_func, "a");
+  const Instruction *inst_b = findInstructionByName(*worker_func, "b");
+  ASSERT_NE(inst_a, nullptr);
+  ASSERT_NE(inst_b, nullptr);
+
+  EXPECT_TRUE(mhp.mayHappenInParallel(inst_a, inst_b));
+}
+
 // Main function for tests
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

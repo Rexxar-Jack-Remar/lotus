@@ -1,9 +1,11 @@
 /*
  *
  * Author: rainoftime
-*/
+ */
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
+
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
+
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
@@ -21,9 +23,11 @@ void EscapeAnalysis::analyze() {
 }
 
 bool EscapeAnalysis::isEscaped(const Value *val) const {
-  if (!val) return false;
+  if (!val)
+    return false;
   // Globals are always escaped (shared)
-  if (isa<GlobalValue>(val)) return true;
+  if (isa<GlobalValue>(val))
+    return true;
   return m_escaped_values.count(val);
 }
 
@@ -37,7 +41,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
   // 1. Identify sources of escape
   // - Global variables
   // - Arguments to thread creation functions (pthread_create)
-  
+
   for (const GlobalValue &gv : m_module.globals()) {
     m_escaped_values.insert(&gv);
     worklist.push_back(&gv);
@@ -48,7 +52,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
   for (Function &F : m_module) {
     for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
       Instruction *inst = &*I;
-      
+
       // Check for thread creation
       if (threadAPI->isTDFork(inst)) {
         // The argument passed to the thread function escapes
@@ -56,24 +60,48 @@ void EscapeAnalysis::runEscapeAnalysis() {
           if (m_escaped_values.insert(arg).second) {
             worklist.push_back(arg);
           }
+        } else if (const auto *cb = dyn_cast<CallBase>(inst)) {
+          unsigned first_payload_idx = 0;
+          const ThreadAPI::TD_TYPE forkType = threadAPI->getType(cb);
+          if (forkType == ThreadAPI::TD_JTHREAD_FORK) {
+            first_payload_idx = 1;
+          }
+
+          for (unsigned arg_idx = first_payload_idx; arg_idx < cb->arg_size();
+               ++arg_idx) {
+            const Value *arg = cb->getArgOperand(arg_idx);
+            if (!arg || !arg->getType()->isPointerTy()) {
+              continue;
+            }
+
+            Type *pointee = arg->getType()->getPointerElementType();
+            if (pointee && pointee->isFunctionTy()) {
+              continue;
+            }
+
+            if (m_escaped_values.insert(arg).second) {
+              worklist.push_back(arg);
+            }
+          }
         }
       }
-      
+
       // Check for stores to escaped values
       if (auto *store = dyn_cast<StoreInst>(inst)) {
         Value *ptr = store->getPointerOperand();
         Value *val = store->getValueOperand();
-        
+
         // If we store a value into an escaped pointer, the value escapes
         if (isEscaped(ptr)) {
-           if (m_escaped_values.insert(val).second) {
-             worklist.push_back(val);
-           }
+          if (m_escaped_values.insert(val).second) {
+            worklist.push_back(val);
+          }
         }
       } else if (auto *call = dyn_cast<CallBase>(inst)) {
         Function *callee = call->getCalledFunction();
         if (!callee) {
-          callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+          callee =
+              dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
         }
 
         for (unsigned arg_idx = 0; arg_idx < call->arg_size(); ++arg_idx) {
@@ -83,9 +111,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
           }
 
           bool escapes_via_call = false;
-          if (!callee) {
-            escapes_via_call = !call->doesNotCapture(arg_idx);
-          } else if (callee->isDeclaration() && !callee->isIntrinsic()) {
+          if (!callee || (callee->isDeclaration() && !callee->isIntrinsic())) {
             escapes_via_call = !call->doesNotCapture(arg_idx);
           }
 
@@ -118,46 +144,53 @@ void EscapeAnalysis::runEscapeAnalysis() {
       }
     }
 
-    // Handle CallSite Result -> Callee Return Value
+    // Handle CallSite Result -> Callee Return Value only when the call site
+    // itself escapes (e.g. result stored to global or passed to thread). This
+    // avoids over-escaping when the caller does not expose the return value.
     if (auto *CB = dyn_cast<CallBase>(curr)) {
-       Function *callee = CB->getCalledFunction();
-       if (callee && !callee->isDeclaration()) {
-         for (BasicBlock &BB : *callee) {
-           if (auto *ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
-             if (Value *retVal = ret->getReturnValue()) {
-               if (m_escaped_values.insert(retVal).second) {
-                 worklist.push_back(retVal);
-               }
-             }
-           }
-         }
-       }
+      if (!m_escaped_values.count(CB))
+        continue;
+      Function *callee = CB->getCalledFunction();
+      if (callee && !callee->isDeclaration()) {
+        for (BasicBlock &BB : *callee) {
+          if (auto *ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
+            if (Value *retVal = ret->getReturnValue()) {
+              if (m_escaped_values.insert(retVal).second) {
+                worklist.push_back(retVal);
+              }
+            }
+          }
+        }
+      }
     }
 
     // Find all uses of this escaped value
     for (const Use &U : curr->uses()) {
       const User *user = U.getUser();
-      
+
       if (auto *inst = dyn_cast<Instruction>(user)) {
-        // If used in a store as the value being stored, the pointer doesn't necessarily escape
-        // But if used as the pointer, the value stored escapes (handled above/below)
-        
+        // If used in a store as the value being stored, the pointer doesn't
+        // necessarily escape But if used as the pointer, the value stored
+        // escapes (handled above/below)
+
         if (auto *store = dyn_cast<StoreInst>(inst)) {
           if (store->getValueOperand() == curr) {
-             // Storing an escaped value into a pointer doesn't make the pointer escape
-             // But storing INTO an escaped pointer makes the value escape (handled in initial scan + loop)
-             const Value *ptr = store->getPointerOperand();
-             // If we store an escaped value into a pointer, does the pointer escape? No.
-             // But if we store a value into an escaped pointer, the value escapes.
-             if (isEscaped(ptr)) {
-                 // Already handled
-             }
+            // Storing an escaped value into a pointer doesn't make the pointer
+            // escape But storing INTO an escaped pointer makes the value escape
+            // (handled in initial scan + loop)
+            const Value *ptr = store->getPointerOperand();
+            // If we store an escaped value into a pointer, does the pointer
+            // escape? No. But if we store a value into an escaped pointer, the
+            // value escapes.
+            if (isEscaped(ptr)) {
+              // Already handled
+            }
           } else if (store->getPointerOperand() == curr) {
-             // Storing into an escaped pointer -> value escapes
-             const Value *val = store->getValueOperand();
-             if (m_escaped_values.insert(val).second) {
-               worklist.push_back(val);
-             }
+            // Storing into an escaped pointer -> value escapes
+            const Value *val = store->getValueOperand();
+            if (m_escaped_values.insert(val).second) {
+              worklist.push_back(val);
+            }
           }
         } else if (auto *load = dyn_cast<LoadInst>(inst)) {
           // Loading from an escaped pointer -> result escapes
@@ -185,32 +218,32 @@ void EscapeAnalysis::runEscapeAnalysis() {
             worklist.push_back(select);
           }
         } else if (auto *call = dyn_cast<CallBase>(inst)) {
-           // Propagate from Actual Argument -> Formal Argument
-           Function *callee = call->getCalledFunction();
-           if (callee && !callee->isDeclaration()) {
-             for (unsigned i = 0; i < call->arg_size(); ++i) {
-               if (call->getArgOperand(i) == curr) {
-                 if (i < callee->arg_size()) {
-                    Argument *formalArg = callee->getArg(i);
-                    if (m_escaped_values.insert(formalArg).second) {
-                      worklist.push_back(formalArg);
-                    }
-                 }
-               }
-             }
-           }
+          // Propagate from Actual Argument -> Formal Argument
+          Function *callee = call->getCalledFunction();
+          if (callee && !callee->isDeclaration()) {
+            for (unsigned i = 0; i < call->arg_size(); ++i) {
+              if (call->getArgOperand(i) == curr) {
+                if (i < callee->arg_size()) {
+                  Argument *formalArg = callee->getArg(i);
+                  if (m_escaped_values.insert(formalArg).second) {
+                    worklist.push_back(formalArg);
+                  }
+                }
+              }
+            }
+          }
         } else if (auto *ret = dyn_cast<ReturnInst>(inst)) {
-           // Propagate from Return Value -> Call Site
-           const Function *F = ret->getFunction();
-           for (const User *U : F->users()) {
-             if (auto *CB = dyn_cast<CallBase>(U)) {
-               if (CB->getCalledFunction() == F) {
-                 if (m_escaped_values.insert(CB).second) {
-                   worklist.push_back(CB);
-                 }
-               }
-             }
-           }
+          // Propagate from Return Value -> Call Site
+          const Function *F = ret->getFunction();
+          for (const User *U : F->users()) {
+            if (auto *CB = dyn_cast<CallBase>(U)) {
+              if (CB->getCalledFunction() == F) {
+                if (m_escaped_values.insert(CB).second) {
+                  worklist.push_back(CB);
+                }
+              }
+            }
+          }
         }
       }
     }

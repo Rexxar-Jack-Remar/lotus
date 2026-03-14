@@ -1,5 +1,7 @@
 add_lotus_test(mhp_analysis_test MHPAnalysisTest.cpp)
 add_lotus_test(lockset_analysis_test LockSetAnalysisTest.cpp)
+add_lotus_test(escape_analysis_test EscapeAnalysisTest.cpp)
+add_lotus_test(static_thread_sharing_analysis_test StaticThreadSharingAnalysisTest.cpp)
 add_lotus_test(simple_atomic_test AtomicTest.cpp)
 add_lotus_test(happens_before_test HappensBeforeAnalysisTest.cpp)
 add_lotus_test(thread_local_analysis_test ThreadLocalAnalysisTest.cpp)

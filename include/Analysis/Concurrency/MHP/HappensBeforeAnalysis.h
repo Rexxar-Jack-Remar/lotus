@@ -1,19 +1,30 @@
 #ifndef HAPPENS_BEFORE_ANALYSIS_H
 #define HAPPENS_BEFORE_ANALYSIS_H
 
-#include "Analysis/Concurrency/Utils/CppAtomics.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/Utils/CppAtomics.h"
+
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
-#include <string>
-#include <unordered_set>
-#include <unordered_map>
-#include <vector>
 
 namespace lotus {
 
 class AliasAnalysisWrapper;
 
+/**
+ * Happens-before relation for race detection. HB is the union of:
+ * - Program order (TFG): intra-thread and fork/join/lock/barrier edges.
+ * - Synchronizes-with (m_sync_with): promise/future and OpenMP task
+ *   dependency edges. Plain same-location release/acquire atomics are
+ *   deferred without witness evidence.
+ * - MHP's computeAtomicHappensBefore contributes witness-backed fence
+ *   atomic HB edges used by mustPrecede/hasHappenBeforeRelation.
+ */
 class HappensBeforeAnalysis {
 public:
   explicit HappensBeforeAnalysis(llvm::Module &module, mhp::MHPAnalysis &mhp);
@@ -21,9 +32,12 @@ public:
   void analyze();
 
   /**
-   * @brief Set optional alias analysis for synchronizes-with same-location check
+   * @brief Set optional alias analysis for synchronizes-with same-location
+   * check
    */
-  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) { m_alias_analysis = aa; }
+  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) {
+    m_alias_analysis = aa;
+  }
 
   const std::unordered_map<std::string, size_t> &getDeferredSyncCounts() const {
     return m_deferred_sync_counts;
@@ -31,37 +45,39 @@ public:
 
   /**
    * @brief Check if instruction A happens-before instruction B
-   * Includes program order (TFG) and C11 synchronizes-with from atomics.
+   * Includes program order (TFG) and synchronizes-with (atomics,
+   * promise/future, task deps).
    * @param A The first instruction
    * @param B The second instruction
    * @return true if A happens-before B
    */
-  bool happensBefore(const llvm::Instruction *A, const llvm::Instruction *B) const;
+  bool happensBefore(const llvm::Instruction *A,
+                     const llvm::Instruction *B) const;
 
 private:
   void buildSynchronizesWith();
 
   bool sameAtomicLocation(const llvm::Instruction *store_inst,
                           const llvm::Instruction *load_inst) const;
-  
+
   /**
    * @brief Check if promise and future operate on the same shared state
    */
   bool samePromiseFuturePair(const llvm::Instruction *promise,
                              const llvm::Instruction *future) const;
-  
+
   /**
    * @brief Check if two call_once calls use the same once_flag
    */
   bool sameOnceFlag(const llvm::Instruction *call1,
                     const llvm::Instruction *call2) const;
-  
+
   /**
    * @brief Check if two latch operations use the same latch object
    */
   bool sameLatch(const llvm::Instruction *inst1,
                  const llvm::Instruction *inst2) const;
-  
+
   /**
    * @brief Check if two barrier operations use the same barrier object
    */
@@ -77,14 +93,13 @@ private:
       m_future_shared_state;
   std::unordered_map<std::string, size_t> m_deferred_sync_counts;
 
-  /// Pairs (release/seq_cst store, acquire/seq_cst load) on same location
+  /// Synchronizes-with pairs proven by non-atomic witness mechanisms.
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
       m_sync_with;
 
   struct InstPairHash {
-    size_t operator()(
-        const std::pair<const llvm::Instruction *, const llvm::Instruction *>
-            &p) const {
+    size_t operator()(const std::pair<const llvm::Instruction *,
+                                      const llvm::Instruction *> &p) const {
       return std::hash<const llvm::Instruction *>()(p.first) ^
              std::hash<const llvm::Instruction *>()(p.second);
     }

@@ -130,6 +130,10 @@ static const ei_pair ei_pairs[] = {
  *
  * Populates the tdAPIMap with function name to type mappings from ei_pairs.
  * Validates that entries are grouped by type for maintainability.
+ * Then loads config/thread.spec and config/concurrency_api.spec. API recognition
+ * precedence: exact tdAPIMap first, then match rules (first match in order;
+ * prefer more specific rules when adding new ones), then C++/OpenMP/MPI/kernel
+ * name checks.
  */
 void ThreadAPI::init() {
   set<TD_TYPE> t_seen;

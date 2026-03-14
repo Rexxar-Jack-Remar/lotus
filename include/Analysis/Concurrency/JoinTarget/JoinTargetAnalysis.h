@@ -18,6 +18,7 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
 
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -58,6 +59,11 @@ public:
    */
   static const llvm::Value *traceThreadHandleRoot(const llvm::Value *value,
                                                   const llvm::Module *module = nullptr);
+
+  /// Collect all allocas/globals reachable from value (for phi/select gives multiple roots).
+  static void traceThreadHandleRoots(const llvm::Value *value,
+                                     const llvm::Module *module,
+                                     std::unordered_set<const llvm::Value *> &roots);
 
 private:
   void collectForksAndJoins();
