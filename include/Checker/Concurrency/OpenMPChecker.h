@@ -26,6 +26,22 @@ private:
   std::vector<ConcurrencyBugReport> checkPartialTaskSynchronization() const;
   std::vector<ConcurrencyBugReport> checkTaskgroupStructure() const;
   std::vector<ConcurrencyBugReport> checkAtomicRegionStructure() const;
+  std::vector<ConcurrencyBugReport> checkDetachedTaskLeak() const;
+  std::vector<ConcurrencyBugReport> checkNestedSingle() const;
+  std::vector<ConcurrencyBugReport> checkNowaitMissingBarrier() const;
+  std::vector<ConcurrencyBugReport> checkMissingFlush() const;
+  std::vector<ConcurrencyBugReport> checkIncorrectNumThreads() const;
+  std::vector<ConcurrencyBugReport> checkReductionError() const;
+  std::vector<ConcurrencyBugReport> checkTaskwaitMissing() const;
+  std::vector<ConcurrencyBugReport> checkNestedParallelDisabled() const;
+  std::vector<ConcurrencyBugReport> checkSharedPrivateConflict() const;
+  std::vector<ConcurrencyBugReport> checkIfFalseParallel() const;
+  std::vector<ConcurrencyBugReport> checkOrderedDependency() const;
+  std::vector<ConcurrencyBugReport> checkLastprivateMissing() const;
+  std::vector<ConcurrencyBugReport> checkCopyinNotShared() const;
+  std::vector<ConcurrencyBugReport> checkBarrierInCritical() const;
+  std::vector<ConcurrencyBugReport> checkPrivateInLoop() const;
+  std::vector<ConcurrencyBugReport> checkMissingSchedule() const;
 };
 
 } // namespace concurrency

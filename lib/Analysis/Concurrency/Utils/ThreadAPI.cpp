@@ -164,6 +164,10 @@ void ThreadAPI::init() {
   loadConfig("../config/thread.spec");
   loadSemanticConfig("config/concurrency_api.spec");
   loadSemanticConfig("../config/concurrency_api.spec");
+  loadSemanticConfig("config/openmp_api.spec");
+  loadSemanticConfig("../config/openmp_api.spec");
+  loadSemanticConfig("config/mpi_api.spec");
+  loadSemanticConfig("../config/mpi_api.spec");
 }
 
 void ThreadAPI::addEntry(const std::string &name, TD_TYPE type) {
@@ -470,6 +474,9 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_OMP_ATOMIC_START:
   case TD_OMP_ATOMIC_END:
   case TD_OMP_FLUSH:
+  case TD_OMP_CRITICAL_START:
+  case TD_OMP_CRITICAL_END:
+  case TD_OMP_PARALLEL_START:
   case TD_OMP_TARGET:
   case TD_OMP_TARGET_DATA_BEGIN:
   case TD_OMP_TARGET_DATA_END:

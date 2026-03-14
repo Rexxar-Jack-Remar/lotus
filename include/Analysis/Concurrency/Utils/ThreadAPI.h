@@ -173,6 +173,9 @@ public:
     TD_OMP_ATOMIC_END,        ///< __kmpc_atomic_end - atomic region end
     TD_OMP_FLUSH,             ///< __kmpc_flush - memory fence
     TD_OMP_CANCEL,            ///< __kmpc_cancel - cancellation
+    TD_OMP_CRITICAL_START,    ///< __kmpc_critical - critical section entry
+    TD_OMP_CRITICAL_END,      ///< __kmpc_end_critical - critical section exit
+    TD_OMP_PARALLEL_START,    ///< __kmpc_fork_call - parallel region entry
     TD_OMP_TARGET,            ///< __tgt_target* - target offloading
     TD_OMP_TARGET_DATA_BEGIN, ///< __tgt_target_data_begin
     TD_OMP_TARGET_DATA_END,   ///< __tgt_target_data_end
@@ -211,6 +214,56 @@ public:
     TD_OMP_DOACROSS_INIT,   ///< __kmpc_doacross*
     TD_OMP_DOACROSS_WAIT,   ///< __kmpc_doacross_wait*
     TD_OMP_DOACROSS_SUBMIT, ///< __kmpc_doacross_submit*
+
+    // MPI Session Management (MPI-4.0)
+    TD_MPI_SESSION_INIT,             ///< MPI_Session_init
+    TD_MPI_SESSION_FINALIZE,         ///< MPI_Session_finalize
+    TD_MPI_SESSION_GET_INFO,         ///< MPI_Session_get_info
+    TD_MPI_SESSION_GET_NUM_ERRCODES, ///< MPI_Session_get_num_errcodes
+    TD_MPI_SESSION_GET_ERRHANDLER,   ///< MPI_Session_get_errhandler
+    TD_MPI_SESSION_SET_ERRHANDLER,   ///< MPI_Session_set_errhandler
+
+    // MPI Error Handling
+    TD_MPI_ERRHANDLER_CREATE,    ///< MPI_Errhandler_create
+    TD_MPI_ERRHANDLER_FREE,      ///< MPI_Errhandler_free
+    TD_MPI_COMM_GET_ERRHANDLER,  ///< MPI_Comm_get_errhandler
+    TD_MPI_COMM_SET_ERRHANDLER,  ///< MPI_Comm_set_errhandler
+    TD_MPI_COMM_CALL_ERRHANDLER, ///< MPI_Comm_call_errhandler
+    TD_MPI_WIN_GET_ERRHANDLER,   ///< MPI_Win_get_errhandler
+    TD_MPI_WIN_SET_ERRHANDLER,   ///< MPI_Win_set_errhandler
+    TD_MPI_FILE_GET_ERRHANDLER,  ///< MPI_File_get_errhandler
+    TD_MPI_FILE_SET_ERRHANDLER,  ///< MPI_File_set_errhandler
+    TD_MPI_ERROR_CLASS,          ///< MPI_Error_class
+    TD_MPI_ERROR_STRING,         ///< MPI_Error_string
+
+    // MPI Info Management
+    TD_MPI_INFO_CREATE,       ///< MPI_Info_create
+    TD_MPI_INFO_DUP,          ///< MPI_Info_dup
+    TD_MPI_INFO_FREE,         ///< MPI_Info_free
+    TD_MPI_INFO_GET,          ///< MPI_Info_get
+    TD_MPI_INFO_GET_VALUELEN, ///< MPI_Info_get_valuelen
+    TD_MPI_INFO_GET_NKEYS,    ///< MPI_Info_get_nkeys
+    TD_MPI_INFO_GET_NTHKEY,   ///< MPI_Info_get_nthkey
+    TD_MPI_INFO_GET_KEYVAL,   ///< MPI_Info_get_keyval
+    TD_MPI_INFO_SET,          ///< MPI_Info_set
+    TD_MPI_INFO_DELETE,       ///< MPI_Info_delete
+    TD_MPI_INFO_C2F,          ///< MPI_Info_c2f
+    TD_MPI_INFO_CREATE_ENV,   ///< MPI_Info_create_env
+    TD_MPI_INFO_FREE_ENV,     ///< MPI_Info_free_env
+
+    // MPI Buffer Query Operations
+    TD_MPI_GET_COUNT,             ///< MPI_Get_count
+    TD_MPI_GET_ELEMENTS,          ///< MPI_Get_elements
+    TD_MPI_GET_ELEMENTS_X,        ///< MPI_Get_elements_x
+    TD_MPI_STATUS_SIZE,           ///< MPI_Status_size
+    TD_MPI_STATUS_SET_ELEMENTS,   ///< MPI_Status_set_elements
+    TD_MPI_STATUS_SET_ELEMENTS_X, ///< MPI_Status_set_elements_x
+
+    // MPI Message Matching (MPI-3.0)
+    TD_MPI_MPROBE,  ///< MPI_Mprobe
+    TD_MPI_IMPROBE, ///< MPI_Improbe
+    TD_MPI_IMRECV,  ///< MPI_Imrecv
+    TD_MPI_MRECV,   ///< MPI_Mrecv
 
     // MPI Process Management
     TD_MPI_INIT,     ///< MPI_Init, MPI_Init_thread
@@ -290,14 +343,22 @@ public:
     TD_MPI_CANCEL,       ///< MPI_Cancel
 
     // MPI Datatype Management
-    TD_MPI_TYPE_CONTIGUOUS,    ///< MPI_Type_contiguous
-    TD_MPI_TYPE_VECTOR,        ///< MPI_Type_vector
-    TD_MPI_TYPE_HVECTOR,       ///< MPI_Type_hvector
-    TD_MPI_TYPE_INDEXED,       ///< MPI_Type_indexed
-    TD_MPI_TYPE_HINDEXED,      ///< MPI_Type_hindexed
-    TD_MPI_TYPE_STRUCT,        ///< MPI_Type_struct
-    TD_MPI_TYPE_CREATE_DLPACK, ///< MPI_Type_create_dlpack (MPI-4.1)
-    TD_MPI_TYPE_COMMIT,        ///< MPI_Type_commit
+    TD_MPI_TYPE_CONTIGUOUS,      ///< MPI_Type_contiguous
+    TD_MPI_TYPE_VECTOR,          ///< MPI_Type_vector
+    TD_MPI_TYPE_HVECTOR,         ///< MPI_Type_hvector
+    TD_MPI_TYPE_INDEXED,         ///< MPI_Type_indexed
+    TD_MPI_TYPE_HINDEXED,        ///< MPI_Type_hindexed
+    TD_MPI_TYPE_STRUCT,          ///< MPI_Type_struct
+    TD_MPI_TYPE_CREATE_DLPACK,   ///< MPI_Type_create_dlpack (MPI-4.1)
+    TD_MPI_TYPE_CREATE_SUBARRAY, ///< MPI_Type_create_subarray
+    TD_MPI_TYPE_CREATE_DARRAY,   ///< MPI_Type_create_darray
+    TD_MPI_TYPE_CREATE_RESIZED,  ///< MPI_Type_create_resized
+    TD_MPI_TYPE_CREATE_HINDEXED, ///< MPI_Type_create_hindexed (legacy)
+    TD_MPI_TYPE_CREATE_HVECTOR,  ///< MPI_Type_create_hvector (legacy)
+    TD_MPI_TYPE_GET_EXTENT,      ///< MPI_Type_get_extent
+    TD_MPI_TYPE_GET_TRUE_EXTENT, ///< MPI_Type_get_true_extent
+    TD_MPI_TYPE_SIZE,            ///< MPI_Type_size
+    TD_MPI_TYPE_COMMIT,          ///< MPI_Type_commit
 
     // Linux Kernel Spinlocks
     TD_KERNEL_SPIN_LOCK_INIT, ///< spin_lock_init, raw_spin_lock_init

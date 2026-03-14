@@ -31,20 +31,22 @@ std::vector<ConcurrencyBugReport> MPIChecker::checkMPIBugs() {
         ConcurrencyBugType::MPI_ORPHANED_REQUEST,
         "MPI non-blocking request may never be completed",
         BugDescription::BI_HIGH, BugDescription::BC_ERROR);
-    report.addStep(req.issue_inst,
-                   "Non-blocking MPI request is issued here without a matching completion");
+    report.addStep(req.issue_inst, "Non-blocking MPI request is issued here "
+                                   "without a matching completion");
     reports.push_back(std::move(report));
   }
 
   for (const auto &pair : results.potential_deadlocks) {
-    ConcurrencyBugReport report(
-        ConcurrencyBugType::MPI_DEADLOCK,
-        "Potential MPI blocking communication deadlock",
-        BugDescription::BI_HIGH, BugDescription::BC_ERROR);
-    report.addStep(pair.first,
-                   "Blocking communication participating in a potential deadlock cycle");
-    report.addStep(pair.second,
-                   "Another blocking communication may wait cyclically with the first");
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_DEADLOCK,
+                                "Potential MPI blocking communication deadlock",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(
+        pair.first,
+        "Blocking communication participating in a potential deadlock cycle");
+    report.addStep(
+        pair.second,
+        "Another blocking communication may wait cyclically with the first");
     reports.push_back(std::move(report));
   }
 
@@ -61,12 +63,14 @@ std::vector<ConcurrencyBugReport> MPIChecker::checkMPIBugs() {
   }
 
   for (const Instruction *inst : results.conditional_collectives) {
-    ConcurrencyBugReport report(
-        ConcurrencyBugType::MPI_CONDITIONAL_COLLECTIVE,
-        "MPI collective may be executed conditionally by only a subset of ranks",
-        BugDescription::BI_HIGH, BugDescription::BC_ERROR);
-    report.addStep(inst,
-                   "Collective call appears rank-guarded or control-dependent on rank");
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_CONDITIONAL_COLLECTIVE,
+                                "MPI collective may be executed conditionally "
+                                "by only a subset of ranks",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(
+        inst,
+        "Collective call appears rank-guarded or control-dependent on rank");
     reports.push_back(std::move(report));
   }
 
@@ -82,8 +86,7 @@ std::vector<ConcurrencyBugReport> MPIChecker::checkMPIBugs() {
 
   for (const auto &pair : results.rma_races) {
     ConcurrencyBugReport report(
-        ConcurrencyBugType::MPI_RMA_RACE,
-        "Potential MPI RMA data race",
+        ConcurrencyBugType::MPI_RMA_RACE, "Potential MPI RMA data race",
         BugDescription::BI_HIGH, BugDescription::BC_ERROR);
     report.addStep(pair.first.inst,
                    "First conflicting RMA operation occurs here");
@@ -92,12 +95,136 @@ std::vector<ConcurrencyBugReport> MPIChecker::checkMPIBugs() {
     reports.push_back(std::move(report));
   }
 
-  for (auto window : results.leaked_windows) {
+  for (const auto *window : results.leaked_windows) {
     (void)window;
     ConcurrencyBugReport report(
-        ConcurrencyBugType::MPI_WINDOW_LEAK,
-        "MPI RMA window may be leaked",
+        ConcurrencyBugType::MPI_WINDOW_LEAK, "MPI RMA window may be leaked",
         BugDescription::BI_MEDIUM, BugDescription::BC_ERROR);
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.double_finalize) {
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_DOUBLE_FINALIZE,
+                                "Multiple MPI_Finalize calls detected",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(inst, "Second MPI_Finalize call detected");
+    reports.push_back(std::move(report));
+  }
+
+  if (results.missing_finalize) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_MISSING_FINALIZE,
+        "MPI_Finalize may not be called before program exits",
+        BugDescription::BI_MEDIUM, BugDescription::BC_ERROR);
+    report.addStep(nullptr,
+                   "MPI_Init was called but MPI_Finalize was not found");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto &pair : results.tag_mismatches) {
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_TAG_MISMATCH,
+                                "MPI send and receive have mismatched tags",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(pair.first, "Send operation with tag value");
+    report.addStep(pair.second, "Receive operation with different tag");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto &pair : results.count_datatype_mismatches) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_COUNT_DATATYPE_MISMATCH,
+        "MPI send and receive have mismatched count or datatype",
+        BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+    report.addStep(pair.first, "Send operation");
+    report.addStep(pair.second,
+                   "Receive operation with incompatible parameters");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.rank_out_of_bounds) {
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_RANK_OUT_OF_BOUNDS,
+                                "MPI operation may use invalid rank (negative)",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(inst, "Rank value is negative or invalid");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto &req : results.persistent_request_leaks) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_PERSISTENT_REQUEST_LEAK,
+        "MPI persistent request may not be properly completed",
+        BugDescription::BI_MEDIUM, BugDescription::BC_ERROR);
+    report.addStep(nullptr,
+                   "Persistent request template created but never started");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto &pair : results.wrong_root_ranks) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_WRONG_ROOT_RANK,
+        "MPI collective operations use inconsistent root ranks",
+        BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+    report.addStep(pair.first.inst, "Collective call with one root rank");
+    report.addStep(pair.second.inst,
+                   "Conflicting collective call with different root");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.cancel_without_wait) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_CANCEL_WITHOUT_WAIT,
+        "MPI_Cancel may be called without subsequent wait/test",
+        BugDescription::BI_MEDIUM, BugDescription::BC_ERROR);
+    report.addStep(inst, "MPI_Cancel called without guaranteed completion");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto &pair : results.buffer_overlaps) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_BUFFER_OVERLAP,
+        "MPI_Sendrecv may use overlapping send and receive buffers",
+        BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+    report.addStep(pair.first,
+                   "Sendrecv operation with same buffer for send and receive");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.wildcard_in_collective) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_WILDCARD_IN_COLLECTIVE,
+        "MPI collective operation may use wildcard source rank",
+        BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+    report.addStep(inst, "Collective with wildcard source rank");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.in_place_conflicts) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_IN_PLACE_CONFLICT,
+        "MPI_IN_PLACE may be used incorrectly in collective operation",
+        BugDescription::BI_MEDIUM, BugDescription::BC_ERROR);
+    report.addStep(inst, "Potential incorrect MPI_IN_PLACE usage");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.null_handles) {
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_NULL_HANDLES,
+                                "MPI operation may use NULL handle incorrectly",
+                                BugDescription::BI_MEDIUM,
+                                BugDescription::BC_WARNING);
+    report.addStep(inst, "NULL handle used in MPI operation");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.negative_root) {
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_ROOT_NEGATIVE,
+                                "MPI collective has negative root rank",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(inst, "Negative root rank in bcast/gather/reduce");
     reports.push_back(std::move(report));
   }
 

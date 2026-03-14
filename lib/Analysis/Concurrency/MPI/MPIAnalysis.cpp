@@ -220,6 +220,13 @@ bool getIndexedStoreTarget(const StoreInst *store, const Value *base,
 MPIOpKind MPIProcessModel::classifyOperation(const Instruction *inst,
                                              ThreadAPI::TD_TYPE type) const {
   switch (type) {
+  case ThreadAPI::TD_MPI_SESSION_INIT:
+  case ThreadAPI::TD_MPI_SESSION_FINALIZE:
+  case ThreadAPI::TD_MPI_SESSION_GET_INFO:
+  case ThreadAPI::TD_MPI_SESSION_GET_NUM_ERRCODES:
+  case ThreadAPI::TD_MPI_SESSION_GET_ERRHANDLER:
+  case ThreadAPI::TD_MPI_SESSION_SET_ERRHANDLER:
+    return MPIOpKind::INIT;
   case ThreadAPI::TD_MPI_INIT:
     return MPIOpKind::INIT;
   case ThreadAPI::TD_MPI_FINALIZE:
@@ -293,6 +300,28 @@ MPIOpKind MPIProcessModel::classifyOperation(const Instruction *inst,
   case ThreadAPI::TD_MPI_REQUEST_FREE:
   case ThreadAPI::TD_MPI_CANCEL:
     return MPIOpKind::REQUEST_MANAGEMENT;
+  case ThreadAPI::TD_MPI_MPROBE:
+  case ThreadAPI::TD_MPI_IMPROBE:
+  case ThreadAPI::TD_MPI_IMRECV:
+  case ThreadAPI::TD_MPI_MRECV:
+    return MPIOpKind::PROBE_NONBLOCKING;
+  case ThreadAPI::TD_MPI_TYPE_CONTIGUOUS:
+  case ThreadAPI::TD_MPI_TYPE_VECTOR:
+  case ThreadAPI::TD_MPI_TYPE_HVECTOR:
+  case ThreadAPI::TD_MPI_TYPE_INDEXED:
+  case ThreadAPI::TD_MPI_TYPE_HINDEXED:
+  case ThreadAPI::TD_MPI_TYPE_STRUCT:
+  case ThreadAPI::TD_MPI_TYPE_CREATE_DLPACK:
+  case ThreadAPI::TD_MPI_TYPE_CREATE_SUBARRAY:
+  case ThreadAPI::TD_MPI_TYPE_CREATE_DARRAY:
+  case ThreadAPI::TD_MPI_TYPE_CREATE_RESIZED:
+  case ThreadAPI::TD_MPI_TYPE_CREATE_HINDEXED:
+  case ThreadAPI::TD_MPI_TYPE_CREATE_HVECTOR:
+  case ThreadAPI::TD_MPI_TYPE_GET_EXTENT:
+  case ThreadAPI::TD_MPI_TYPE_GET_TRUE_EXTENT:
+  case ThreadAPI::TD_MPI_TYPE_SIZE:
+  case ThreadAPI::TD_MPI_TYPE_COMMIT:
+    return MPIOpKind::DATATYPE_CREATE;
   default:
     return MPIOpKind::UNKNOWN;
   }
@@ -1754,6 +1783,402 @@ MPIProcessModel::findPotentialDeadlocks() const {
   return deadlocks;
 }
 
+std::vector<std::pair<const Instruction *, const Instruction *>>
+MPIProcessModel::findTagMismatches() const {
+  std::vector<std::pair<const Instruction *, const Instruction *>> mismatches;
+
+  std::map<std::pair<size_t, size_t>,
+           std::pair<const MPIOperation *, const MPIOperation *>>
+      matched_pairs;
+
+  for (const MPIOperation &op1 : all_operations_) {
+    if (op1.kind != MPIOpKind::SEND_BLOCKING &&
+        op1.kind != MPIOpKind::SEND_NONBLOCKING) {
+      continue;
+    }
+    if (op1.tag < 0) {
+      continue;
+    }
+
+    for (const MPIOperation &op2 : all_operations_) {
+      if (op2.kind != MPIOpKind::RECV_BLOCKING &&
+          op2.kind != MPIOpKind::RECV_NONBLOCKING) {
+        continue;
+      }
+      if (!sameCommunicatorForProof(op1, op2)) {
+        continue;
+      }
+      if (!rangesOverlap(op1.dest_rank_min, op1.dest_rank_max,
+                         op2.source_rank_min, op2.source_rank_max)) {
+        continue;
+      }
+
+      if (op2.tag >= 0 && op2.tag != op1.tag) {
+        auto key = std::make_pair(op1.communicator_class_id,
+                                  op2.communicator_class_id);
+        matched_pairs[key] = {&op1, &op2};
+      }
+    }
+  }
+
+  for (const auto &pair : matched_pairs) {
+    mismatches.emplace_back(pair.second.first->inst, pair.second.second->inst);
+  }
+
+  return mismatches;
+}
+
+std::vector<std::pair<const Instruction *, const Instruction *>>
+MPIProcessModel::findCountDatatypeMismatches() const {
+  std::vector<std::pair<const Instruction *, const Instruction *>> mismatches;
+
+  std::set<std::pair<const Instruction *, const Instruction *>> added;
+
+  for (const MPIOperation &send_op : all_operations_) {
+    if (send_op.kind != MPIOpKind::SEND_BLOCKING &&
+        send_op.kind != MPIOpKind::SEND_NONBLOCKING) {
+      continue;
+    }
+
+    for (const MPIOperation &recv_op : all_operations_) {
+      if (recv_op.kind != MPIOpKind::RECV_BLOCKING &&
+          recv_op.kind != MPIOpKind::RECV_NONBLOCKING) {
+        continue;
+      }
+      if (!sameCommunicatorForProof(send_op, recv_op)) {
+        continue;
+      }
+      if (!rangesOverlap(send_op.dest_rank_min, send_op.dest_rank_max,
+                         recv_op.source_rank_min, recv_op.source_rank_max)) {
+        continue;
+      }
+
+      bool count_mismatch = false;
+      bool datatype_mismatch = false;
+
+      if (send_op.datatype && recv_op.datatype &&
+          send_op.datatype != recv_op.datatype) {
+        datatype_mismatch = true;
+      }
+
+      if (count_mismatch || datatype_mismatch) {
+        auto pair = std::make_pair(send_op.inst, recv_op.inst);
+        if (added.insert(pair).second) {
+          mismatches.push_back(pair);
+        }
+      }
+    }
+  }
+
+  return mismatches;
+}
+
+std::vector<const Instruction *> MPIProcessModel::findRankOutOfBounds() const {
+  std::vector<const Instruction *> out_of_bounds;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind != MPIOpKind::SEND_BLOCKING &&
+        op.kind != MPIOpKind::SEND_NONBLOCKING &&
+        op.kind != MPIOpKind::RECV_BLOCKING &&
+        op.kind != MPIOpKind::RECV_NONBLOCKING) {
+      continue;
+    }
+
+    if (op.dest_rank < 0 || op.source_rank < 0) {
+      out_of_bounds.push_back(op.inst);
+    }
+  }
+
+  return out_of_bounds;
+}
+
+std::vector<RequestID> MPIProcessModel::findPersistentRequestLeaks() const {
+  std::vector<RequestID> leaks;
+
+  for (const auto &pair : persistent_request_templates_) {
+    const NonBlockingOp &persistent_op = pair.second;
+    if (persistent_op.completion_state == RequestCompletionState::Pending) {
+      leaks.push_back(pair.first);
+    }
+  }
+
+  return leaks;
+}
+
+std::vector<const Instruction *>
+MPIProcessModel::findCancelWithoutWait() const {
+  std::vector<const Instruction *> issues;
+
+  std::map<RequestID, const Instruction *> cancel_ops;
+  std::map<RequestID, const Instruction *> wait_after_cancel;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.td_type == ThreadAPI::TD_MPI_CANCEL && op.request) {
+      cancel_ops[op.request] = op.inst;
+    }
+    if ((op.td_type == ThreadAPI::TD_MPI_WAIT ||
+         op.td_type == ThreadAPI::TD_MPI_WAITALL ||
+         op.td_type == ThreadAPI::TD_MPI_WAITANY ||
+         op.td_type == ThreadAPI::TD_MPI_WAITSOME) &&
+        op.request) {
+      auto cancel_it = cancel_ops.find(op.request);
+      if (cancel_it != cancel_ops.end()) {
+        if (cancel_it->second && op.inst) {
+          if (cancel_it->second->getParent() == op.inst->getParent()) {
+            const auto *iter = cancel_it->second;
+            bool found_wait = false;
+            for (auto I = iter->getIterator(), E = op.inst->getIterator();
+                 I != E; ++I) {
+              if (isa<CallInst>(&*I)) {
+                const Function *F = cast<CallInst>(&*I)->getCalledFunction();
+                if (F && (F->getName().contains("MPI_Wait") ||
+                          F->getName().contains("MPI_Test"))) {
+                  found_wait = true;
+                  break;
+                }
+              }
+            }
+            if (!found_wait) {
+              issues.push_back(cancel_it->second);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+std::vector<std::pair<const Instruction *, const Instruction *>>
+MPIProcessModel::findBufferOverlaps() const {
+  std::vector<std::pair<const Instruction *, const Instruction *>> overlaps;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.td_type != ThreadAPI::TD_MPI_SENDRECV) {
+      continue;
+    }
+
+    const CallBase *cb = dyn_cast<CallBase>(op.inst);
+    if (!cb || cb->arg_size() < 11) {
+      continue;
+    }
+
+    const Value *sendbuf = cb->getArgOperand(0);
+    const Value *recvbuf = cb->getArgOperand(5);
+
+    if (sendbuf && recvbuf && sendbuf == recvbuf) {
+      overlaps.emplace_back(op.inst, op.inst);
+    }
+  }
+
+  return overlaps;
+}
+
+std::vector<const Instruction *>
+MPIProcessModel::findWildcardInCollective() const {
+  std::vector<const Instruction *> issues;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind != MPIOpKind::COLLECTIVE_BLOCKING &&
+        op.kind != MPIOpKind::COLLECTIVE_NONBLOCKING) {
+      continue;
+    }
+
+    if (op.source_rank == -1) {
+      issues.push_back(op.inst);
+    }
+  }
+
+  return issues;
+}
+
+std::vector<const Instruction *> MPIProcessModel::findInPlaceConflicts() const {
+  std::vector<const Instruction *> issues;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind != MPIOpKind::COLLECTIVE_BLOCKING &&
+        op.kind != MPIOpKind::COLLECTIVE_NONBLOCKING) {
+      continue;
+    }
+
+    if (op.td_type == ThreadAPI::TD_MPI_GATHER ||
+        op.td_type == ThreadAPI::TD_MPI_ALLGATHER ||
+        op.td_type == ThreadAPI::TD_MPI_ALLTOALL) {
+      const CallBase *cb = dyn_cast<CallBase>(op.inst);
+      if (cb && cb->arg_size() > 0) {
+        const Value *sendbuf = cb->getArgOperand(0);
+        if (sendbuf && sendbuf->getName().contains("MPI_IN_PLACE")) {
+          issues.push_back(op.inst);
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+std::vector<const Instruction *> MPIProcessModel::findNullHandles() const {
+  std::vector<const Instruction *> issues;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind == MPIOpKind::REQUEST_MANAGEMENT ||
+        op.kind == MPIOpKind::COMM_MANAGEMENT) {
+      const CallBase *cb = dyn_cast<CallBase>(op.inst);
+      if (cb && cb->arg_size() > 0) {
+        const Value *arg = cb->getArgOperand(0);
+        if (arg && (arg->getName().contains("MPI_REQUEST_NULL") ||
+                    arg->getName().contains("MPI_COMM_NULL"))) {
+          issues.push_back(op.inst);
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+std::vector<const Instruction *> MPIProcessModel::findNegativeRoot() const {
+  std::vector<const Instruction *> issues;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind != MPIOpKind::COLLECTIVE_BLOCKING &&
+        op.kind != MPIOpKind::COLLECTIVE_NONBLOCKING) {
+      continue;
+    }
+
+    if (op.td_type == ThreadAPI::TD_MPI_BCAST ||
+        op.td_type == ThreadAPI::TD_MPI_REDUCE ||
+        op.td_type == ThreadAPI::TD_MPI_GATHER ||
+        op.td_type == ThreadAPI::TD_MPI_SCATTER) {
+      const CallBase *cb = dyn_cast<CallBase>(op.inst);
+      if (cb) {
+        int root_arg = -1;
+        switch (op.td_type) {
+        case ThreadAPI::TD_MPI_BCAST:
+          root_arg = 3;
+          break;
+        case ThreadAPI::TD_MPI_REDUCE:
+          root_arg = 5;
+          break;
+        case ThreadAPI::TD_MPI_GATHER:
+        case ThreadAPI::TD_MPI_SCATTER:
+          root_arg = 6;
+          break;
+        default:
+          break;
+        }
+        if (root_arg >= 0 && static_cast<unsigned>(root_arg) < cb->arg_size()) {
+          if (const auto *ci =
+                  dyn_cast<ConstantInt>(cb->getArgOperand(root_arg))) {
+            if (ci->getSExtValue() < 0) {
+              issues.push_back(op.inst);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+std::vector<const Instruction *> MPIProcessModel::findInvalidTags() const {
+  std::vector<const Instruction *> issues;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind != MPIOpKind::SEND_BLOCKING &&
+        op.kind != MPIOpKind::SEND_NONBLOCKING &&
+        op.kind != MPIOpKind::RECV_BLOCKING &&
+        op.kind != MPIOpKind::RECV_NONBLOCKING) {
+      continue;
+    }
+
+    if (op.tag < 0) {
+      issues.push_back(op.inst);
+    }
+  }
+
+  return issues;
+}
+
+std::vector<const Instruction *> MPIProcessModel::findInvalidRanks() const {
+  std::vector<const Instruction *> issues;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind != MPIOpKind::SEND_BLOCKING &&
+        op.kind != MPIOpKind::SEND_NONBLOCKING &&
+        op.kind != MPIOpKind::RECV_BLOCKING &&
+        op.kind != MPIOpKind::RECV_NONBLOCKING) {
+      continue;
+    }
+
+    if (op.dest_rank > 0 || op.source_rank > 0) {
+      issues.push_back(op.inst);
+    }
+  }
+
+  return issues;
+}
+
+std::vector<std::pair<const Instruction *, const Instruction *>>
+MPIProcessModel::findTypeSizeMismatches() const {
+  return {};
+}
+
+std::vector<const Instruction *> MPIProcessModel::findDestroyNullComm() const {
+  std::vector<const Instruction *> issues;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind != MPIOpKind::COMM_MANAGEMENT) {
+      continue;
+    }
+    if (op.td_type == ThreadAPI::TD_MPI_COMM_FREE) {
+      const CallBase *cb = dyn_cast<CallBase>(op.inst);
+      if (cb && cb->arg_size() > 0) {
+        const Value *comm = cb->getArgOperand(0);
+        if (comm && comm->getName().contains("MPI_COMM_NULL")) {
+          issues.push_back(op.inst);
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+std::vector<const Instruction *>
+MPIProcessModel::findRequestFreeAfterWait() const {
+  std::vector<const Instruction *> issues;
+  return issues;
+}
+
+std::vector<const Instruction *> MPIProcessModel::findInPlaceWrongOp() const {
+  std::vector<const Instruction *> issues;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (op.kind != MPIOpKind::COLLECTIVE_BLOCKING &&
+        op.kind != MPIOpKind::COLLECTIVE_NONBLOCKING) {
+      continue;
+    }
+
+    if (op.td_type == ThreadAPI::TD_MPI_REDUCE ||
+        op.td_type == ThreadAPI::TD_MPI_SCAN ||
+        op.td_type == ThreadAPI::TD_MPI_BCAST ||
+        op.td_type == ThreadAPI::TD_MPI_SCATTER) {
+      const CallBase *cb = dyn_cast<CallBase>(op.inst);
+      if (cb && cb->arg_size() > 0) {
+        const Value *sendbuf = cb->getArgOperand(0);
+        if (sendbuf && sendbuf->getName().contains("MPI_IN_PLACE")) {
+          issues.push_back(op.inst);
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
 // ============================================================================
 // MPICollectiveAnalysis Implementation
 // ============================================================================
@@ -2007,6 +2432,36 @@ MPICollectiveAnalysis::findConditionalCollectives() const {
   }
 
   return conditional;
+}
+
+std::vector<std::pair<MPICollectiveAnalysis::CollectiveCall,
+                      MPICollectiveAnalysis::CollectiveCall>>
+MPICollectiveAnalysis::findWrongRootRanks() const {
+  std::vector<std::pair<CollectiveCall, CollectiveCall>> wrong_roots;
+
+  std::map<size_t, std::vector<const CollectiveCall *>> by_comm_and_seq;
+  for (const CollectiveCall &call : collective_calls_) {
+    if (call.root_rank < 0) {
+      continue;
+    }
+    by_comm_and_seq[call.communicator_class_id].push_back(&call);
+  }
+
+  for (auto &entry : by_comm_and_seq) {
+    auto &calls = entry.second;
+    for (size_t i = 0; i < calls.size(); ++i) {
+      for (size_t j = i + 1; j < calls.size(); ++j) {
+        if (calls[i]->type != calls[j]->type) {
+          continue;
+        }
+        if (calls[i]->root_rank != calls[j]->root_rank) {
+          wrong_roots.emplace_back(*calls[i], *calls[j]);
+        }
+      }
+    }
+  }
+
+  return wrong_roots;
 }
 
 // ============================================================================
@@ -2291,16 +2746,10 @@ std::vector<WindowID> MPIRMAAnalysis::findLeakedWindows() const {
 // ============================================================================
 
 void MPIAnalysis::runAnalysis() {
-  // Run process model analysis
   process_model_.analyzeModule();
-
-  // Run collective analysis
   collective_analysis_.analyzeCollectives();
-
-  // Run RMA analysis
   rma_analysis_.analyzeRMA();
 
-  // Collect results
   results_.orphaned_requests = process_model_.findOrphanedNonBlockingOps();
   results_.potential_deadlocks = process_model_.findPotentialDeadlocks();
   results_.mismatched_collectives =
@@ -2310,6 +2759,36 @@ void MPIAnalysis::runAnalysis() {
   results_.unsynchronized_rma = rma_analysis_.findUnsynchronizedRMAOps();
   results_.rma_races = rma_analysis_.findRMARaces();
   results_.leaked_windows = rma_analysis_.findLeakedWindows();
+
+  const MPIOperation *first_finalize = nullptr;
+  bool has_init = false;
+  for (const MPIOperation &op : process_model_.getAllOperations()) {
+    if (op.kind == MPIOpKind::FINALIZE) {
+      if (first_finalize) {
+        results_.double_finalize.push_back(op.inst);
+      } else {
+        first_finalize = &op;
+      }
+    }
+    if (op.kind == MPIOpKind::INIT) {
+      has_init = true;
+    }
+  }
+
+  if (has_init && !first_finalize) {
+    results_.missing_finalize = true;
+  }
+
+  results_.tag_mismatches = process_model_.findTagMismatches();
+  results_.count_datatype_mismatches =
+      process_model_.findCountDatatypeMismatches();
+  results_.rank_out_of_bounds = process_model_.findRankOutOfBounds();
+  results_.persistent_request_leaks =
+      process_model_.findPersistentRequestLeaks();
+  results_.wrong_root_ranks = collective_analysis_.findWrongRootRanks();
+  results_.cancel_without_wait = process_model_.findCancelWithoutWait();
+  results_.buffer_overlaps = process_model_.findBufferOverlaps();
+  results_.wildcard_in_collective = process_model_.findWildcardInCollective();
 }
 
 void MPIAnalysis::printResults(raw_ostream &OS) const {

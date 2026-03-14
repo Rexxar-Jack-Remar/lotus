@@ -264,6 +264,42 @@ public:
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
   findPotentialDeadlocks() const;
 
+  std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+  findTagMismatches() const;
+
+  std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+  findCountDatatypeMismatches() const;
+
+  std::vector<const llvm::Instruction *> findRankOutOfBounds() const;
+
+  std::vector<RequestID> findPersistentRequestLeaks() const;
+
+  std::vector<const llvm::Instruction *> findCancelWithoutWait() const;
+
+  std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+  findBufferOverlaps() const;
+
+  std::vector<const llvm::Instruction *> findWildcardInCollective() const;
+
+  std::vector<const llvm::Instruction *> findInPlaceConflicts() const;
+
+  std::vector<const llvm::Instruction *> findNullHandles() const;
+
+  std::vector<const llvm::Instruction *> findNegativeRoot() const;
+
+  std::vector<const llvm::Instruction *> findInvalidTags() const;
+
+  std::vector<const llvm::Instruction *> findInvalidRanks() const;
+
+  std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+  findTypeSizeMismatches() const;
+
+  std::vector<const llvm::Instruction *> findDestroyNullComm() const;
+
+  std::vector<const llvm::Instruction *> findRequestFreeAfterWait() const;
+
+  std::vector<const llvm::Instruction *> findInPlaceWrongOp() const;
+
 private:
   llvm::Module &module_;
   ThreadAPI *thread_api_;
@@ -366,6 +402,8 @@ public:
    * E.g., collective inside a rank-dependent if statement.
    */
   std::vector<const llvm::Instruction *> findConditionalCollectives() const;
+  std::vector<std::pair<CollectiveCall, CollectiveCall>>
+  findWrongRootRanks() const;
   const std::unordered_map<std::string, size_t> &
   getProtocolDiagnostics() const {
     return protocol_diagnostics_;
@@ -500,7 +538,7 @@ public:
   void printResults(llvm::raw_ostream &OS) const;
 
   /**
-   * @brief Get detected issues
+   * @brief Detected issues
    */
   struct AnalysisResults {
     std::vector<MPIProcessModel::NonBlockingOp> orphaned_requests;
@@ -515,6 +553,31 @@ public:
         std::pair<MPIRMAAnalysis::RMAOperation, MPIRMAAnalysis::RMAOperation>>
         rma_races;
     std::vector<WindowID> leaked_windows;
+    std::vector<const llvm::Instruction *> double_finalize;
+    std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+        tag_mismatches;
+    std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+        count_datatype_mismatches;
+    std::vector<const llvm::Instruction *> rank_out_of_bounds;
+    bool missing_finalize = false;
+    std::vector<RequestID> persistent_request_leaks;
+    std::vector<std::pair<MPICollectiveAnalysis::CollectiveCall,
+                          MPICollectiveAnalysis::CollectiveCall>>
+        wrong_root_ranks;
+    std::vector<const llvm::Instruction *> cancel_without_wait;
+    std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+        buffer_overlaps;
+    std::vector<const llvm::Instruction *> wildcard_in_collective;
+    std::vector<const llvm::Instruction *> in_place_conflicts;
+    std::vector<const llvm::Instruction *> null_handles;
+    std::vector<const llvm::Instruction *> negative_root;
+    std::vector<const llvm::Instruction *> invalid_tags;
+    std::vector<const llvm::Instruction *> invalid_ranks;
+    std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+        type_size_mismatches;
+    std::vector<const llvm::Instruction *> destroy_null_comm;
+    std::vector<const llvm::Instruction *> request_free_after_wait;
+    std::vector<const llvm::Instruction *> in_place_wrong_op;
   };
 
   const AnalysisResults &getResults() const { return results_; }
