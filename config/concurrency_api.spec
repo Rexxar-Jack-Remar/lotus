@@ -69,6 +69,19 @@ __kmpc_dispatch_next TD_OMP_FOR_DISPATCH_NEXT library=openmp semantic=dispatch-n
 __kmpc_dispatch_fini TD_OMP_FOR_DISPATCH_FINI library=openmp semantic=dispatch-fini traits=omp-task-op,barrier-wait-like match=prefix
 __tgt_target TD_OMP_TARGET library=openmp semantic=target traits=omp-target-op match=prefix
 
+# OpenMP 5.0+ Teams and Distribute prefix matches
+__kmpc_teams TD_OMP_TEAMS library=openmp semantic=teams match=prefix
+__kmpc_distribute TD_OMP_DISTRIBUTE library=openmp semantic=distribute match=prefix
+__kmpc_loop TD_OMP_LOOP_STATIC_INIT library=openmp semantic=loop-static-init match=prefix
+__kmpc_affinity TD_OMP_AFFINITY library=openmp semantic=affinity match=prefix
+__kmpc_scope TD_OMP_SCOPE_START library=openmp semantic=scope-start match=prefix
+__kmpc_end_scope TD_OMP_SCOPE_END library=openmp semantic=scope-end match=prefix
+__kmpc_taskloop_simd TD_OMP_TASKLOOP_SIMD library=openmp semantic=taskloop-simd match=prefix
+__kmpc_taskloop_fini TD_OMP_TASKLOOP_FINI library=openmp semantic=taskloop-fini match=prefix
+__kmpc_interop TD_OMP_INTEROP_INIT library=openmp semantic=interop-init match=prefix
+__kmpc_interop_fini TD_OMP_INTEROP_FINI library=openmp semantic=interop-fini match=prefix
+__kmpc_doacross TD_OMP_DOACROSS_INIT library=openmp semantic=doacross-init match=prefix
+
 # MPI process management and point-to-point
 MPI_Init TD_MPI_INIT library=mpi semantic=init
 MPI_Init_thread TD_MPI_INIT library=mpi semantic=init-thread
@@ -177,6 +190,14 @@ MPI_Comm_free TD_MPI_COMM_FREE library=mpi semantic=comm-free
 MPI_Comm_disconnect TD_MPI_COMM_FREE library=mpi semantic=comm-disconnect
 MPI_Request_free TD_MPI_REQUEST_FREE library=mpi semantic=request-free
 MPI_Cancel TD_MPI_CANCEL library=mpi semantic=cancel
+MPI_Type_contiguous TD_MPI_TYPE_CONTIGUOUS library=mpi semantic=type-contiguous
+MPI_Type_vector TD_MPI_TYPE_VECTOR library=mpi semantic=type-vector
+MPI_Type_hvector TD_MPI_TYPE_HVECTOR library=mpi semantic=type-hvector
+MPI_Type_indexed TD_MPI_TYPE_INDEXED library=mpi semantic=type-indexed
+MPI_Type_hindexed TD_MPI_TYPE_HINDEXED library=mpi semantic=type-hindexed
+MPI_Type_struct TD_MPI_TYPE_STRUCT library=mpi semantic=type-struct
+MPI_Type_create_dlpack TD_MPI_TYPE_CREATE_DLPACK library=mpi semantic=type-create-dlpack
+MPI_Type_commit TD_MPI_TYPE_COMMIT library=mpi semantic=type-commit
 MPI_Send_init TD_MPI_PERSISTENT_SEND_INIT library=mpi semantic=persistent-send-init traits=mpi-persistent-init
 MPI_Ssend_init TD_MPI_PERSISTENT_SEND_INIT library=mpi semantic=persistent-ssend-init traits=mpi-persistent-init
 MPI_Bsend_init TD_MPI_PERSISTENT_SEND_INIT library=mpi semantic=persistent-bsend-init traits=mpi-persistent-init

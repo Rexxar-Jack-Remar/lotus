@@ -70,7 +70,6 @@
 #include "Alias/DDA/FlowDDA.h"
 
 #include <memory>
-#include <string>
 
 namespace llvm {
 class Module;
@@ -109,6 +108,15 @@ public:
   void setDDAKind(DDAKind k) { kind_ = k; }
   DDAKind getDDAKind() const { return kind_; }
 
+  void setMaxContextLen(uint32_t max) { maxContextLen_ = max; }
+  uint32_t getMaxContextLen() const { return maxContextLen_; }
+
+  void setMaxPathLen(uint32_t max) { maxPathLen_ = max; }
+  uint32_t getMaxPathLen() const { return maxPathLen_; }
+
+  void setMaxBudget(uint32_t max) { maxBudget_ = max; }
+  uint32_t getMaxBudget() const { return maxBudget_; }
+
   FlowDDA *getFlowDDA() const { return flowDDA_.get(); }
   ContextDDA *getContextDDA() const { return contextDDA_.get(); }
   /// Convenience alias query over the current FlowDDA results.
@@ -118,6 +126,9 @@ private:
   void runPointerAnalysis(llvm::Module &M, DDAKind k);
 
   DDAKind kind_ = DDAKind::FlowS_DDA;
+  uint32_t maxContextLen_ = 3u;
+  uint32_t maxPathLen_ = 0u;
+  uint32_t maxBudget_ = 100000u;
   std::unique_ptr<DDAClient> client_;
   std::unique_ptr<FlowDDA> flowDDA_;
   std::unique_ptr<ContextDDA> contextDDA_;

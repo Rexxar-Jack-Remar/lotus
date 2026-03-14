@@ -130,10 +130,10 @@ static const ei_pair ei_pairs[] = {
  *
  * Populates the tdAPIMap with function name to type mappings from ei_pairs.
  * Validates that entries are grouped by type for maintainability.
- * Then loads config/thread.spec and config/concurrency_api.spec. API recognition
- * precedence: exact tdAPIMap first, then match rules (first match in order;
- * prefer more specific rules when adding new ones), then C++/OpenMP/MPI/kernel
- * name checks.
+ * Then loads config/thread.spec and config/concurrency_api.spec. API
+ * recognition precedence: exact tdAPIMap first, then match rules (first match
+ * in order; prefer more specific rules when adding new ones), then
+ * C++/OpenMP/MPI/kernel name checks.
  */
 void ThreadAPI::init() {
   set<TD_TYPE> t_seen;
@@ -474,6 +474,26 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_OMP_TARGET_DATA_BEGIN:
   case TD_OMP_TARGET_DATA_END:
   case TD_OMP_TARGET_DATA_UPDATE:
+  case TD_OMP_TEAMS:
+  case TD_OMP_TEAMS_HOST:
+  case TD_OMP_TEAMS_DISTRIBUTE:
+  case TD_OMP_DISTRIBUTE:
+  case TD_OMP_DISTRIBUTE_STATIC:
+  case TD_OMP_DISTRIBUTE_DYNAMIC:
+  case TD_OMP_DISTRIBUTE_GUIDANCE:
+  case TD_OMP_LOOP_STATIC_INIT:
+  case TD_OMP_LOOP_DYNAMIC_INIT:
+  case TD_OMP_LOOP_GUIDANCE_INIT:
+  case TD_OMP_AFFINITY:
+  case TD_OMP_SCOPE_START:
+  case TD_OMP_SCOPE_END:
+  case TD_OMP_TASKLOOP_SIMD:
+  case TD_OMP_TASKLOOP_FINI:
+  case TD_OMP_INTEROP_INIT:
+  case TD_OMP_INTEROP_FINI:
+  case TD_OMP_DOACROSS_INIT:
+  case TD_OMP_DOACROSS_WAIT:
+  case TD_OMP_DOACROSS_SUBMIT:
     return RuntimeLibrary::OpenMP;
   case TD_MPI_INIT:
   case TD_MPI_FINALIZE:
@@ -526,6 +546,14 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_MPI_COMM_FREE:
   case TD_MPI_REQUEST_FREE:
   case TD_MPI_CANCEL:
+  case TD_MPI_TYPE_CONTIGUOUS:
+  case TD_MPI_TYPE_VECTOR:
+  case TD_MPI_TYPE_HVECTOR:
+  case TD_MPI_TYPE_INDEXED:
+  case TD_MPI_TYPE_HINDEXED:
+  case TD_MPI_TYPE_STRUCT:
+  case TD_MPI_TYPE_CREATE_DLPACK:
+  case TD_MPI_TYPE_COMMIT:
     return RuntimeLibrary::MPI;
   default:
     return RuntimeLibrary::Unknown;
@@ -1216,6 +1244,46 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_OMP_TARGET_DATA_END";
   case TD_OMP_TARGET_DATA_UPDATE:
     return "TD_OMP_TARGET_DATA_UPDATE";
+  case TD_OMP_TEAMS:
+    return "TD_OMP_TEAMS";
+  case TD_OMP_TEAMS_HOST:
+    return "TD_OMP_TEAMS_HOST";
+  case TD_OMP_TEAMS_DISTRIBUTE:
+    return "TD_OMP_TEAMS_DISTRIBUTE";
+  case TD_OMP_DISTRIBUTE:
+    return "TD_OMP_DISTRIBUTE";
+  case TD_OMP_DISTRIBUTE_STATIC:
+    return "TD_OMP_DISTRIBUTE_STATIC";
+  case TD_OMP_DISTRIBUTE_DYNAMIC:
+    return "TD_OMP_DISTRIBUTE_DYNAMIC";
+  case TD_OMP_DISTRIBUTE_GUIDANCE:
+    return "TD_OMP_DISTRIBUTE_GUIDANCE";
+  case TD_OMP_LOOP_STATIC_INIT:
+    return "TD_OMP_LOOP_STATIC_INIT";
+  case TD_OMP_LOOP_DYNAMIC_INIT:
+    return "TD_OMP_LOOP_DYNAMIC_INIT";
+  case TD_OMP_LOOP_GUIDANCE_INIT:
+    return "TD_OMP_LOOP_GUIDANCE_INIT";
+  case TD_OMP_AFFINITY:
+    return "TD_OMP_AFFINITY";
+  case TD_OMP_SCOPE_START:
+    return "TD_OMP_SCOPE_START";
+  case TD_OMP_SCOPE_END:
+    return "TD_OMP_SCOPE_END";
+  case TD_OMP_TASKLOOP_SIMD:
+    return "TD_OMP_TASKLOOP_SIMD";
+  case TD_OMP_TASKLOOP_FINI:
+    return "TD_OMP_TASKLOOP_FINI";
+  case TD_OMP_INTEROP_INIT:
+    return "TD_OMP_INTEROP_INIT";
+  case TD_OMP_INTEROP_FINI:
+    return "TD_OMP_INTEROP_FINI";
+  case TD_OMP_DOACROSS_INIT:
+    return "TD_OMP_DOACROSS_INIT";
+  case TD_OMP_DOACROSS_WAIT:
+    return "TD_OMP_DOACROSS_WAIT";
+  case TD_OMP_DOACROSS_SUBMIT:
+    return "TD_OMP_DOACROSS_SUBMIT";
   case TD_MPI_INIT:
     return "TD_MPI_INIT";
   case TD_MPI_FINALIZE:
@@ -1318,6 +1386,22 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_MPI_REQUEST_FREE";
   case TD_MPI_CANCEL:
     return "TD_MPI_CANCEL";
+  case TD_MPI_TYPE_CONTIGUOUS:
+    return "TD_MPI_TYPE_CONTIGUOUS";
+  case TD_MPI_TYPE_VECTOR:
+    return "TD_MPI_TYPE_VECTOR";
+  case TD_MPI_TYPE_HVECTOR:
+    return "TD_MPI_TYPE_HVECTOR";
+  case TD_MPI_TYPE_INDEXED:
+    return "TD_MPI_TYPE_INDEXED";
+  case TD_MPI_TYPE_HINDEXED:
+    return "TD_MPI_TYPE_HINDEXED";
+  case TD_MPI_TYPE_STRUCT:
+    return "TD_MPI_TYPE_STRUCT";
+  case TD_MPI_TYPE_CREATE_DLPACK:
+    return "TD_MPI_TYPE_CREATE_DLPACK";
+  case TD_MPI_TYPE_COMMIT:
+    return "TD_MPI_TYPE_COMMIT";
   case TD_KERNEL_SPIN_LOCK_INIT:
     return "TD_KERNEL_SPIN_LOCK_INIT";
   case TD_KERNEL_SPIN_LOCK:

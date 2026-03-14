@@ -469,6 +469,34 @@ void OpenMPTaskGraph::scanSchedulingContext(
         ++m_summary.detach_completion_count;
         continue;
       }
+      if (type == ThreadAPI::TD_OMP_TEAMS ||
+          type == ThreadAPI::TD_OMP_TEAMS_HOST ||
+          type == ThreadAPI::TD_OMP_TEAMS_DISTRIBUTE) {
+        ++m_summary.teams_region_count;
+        continue;
+      }
+      if (type == ThreadAPI::TD_OMP_DISTRIBUTE ||
+          type == ThreadAPI::TD_OMP_DISTRIBUTE_STATIC ||
+          type == ThreadAPI::TD_OMP_DISTRIBUTE_DYNAMIC ||
+          type == ThreadAPI::TD_OMP_DISTRIBUTE_GUIDANCE) {
+        ++m_summary.distribute_region_count;
+        continue;
+      }
+      if (type == ThreadAPI::TD_OMP_LOOP_STATIC_INIT ||
+          type == ThreadAPI::TD_OMP_LOOP_DYNAMIC_INIT ||
+          type == ThreadAPI::TD_OMP_LOOP_GUIDANCE_INIT) {
+        ++m_summary.loop_region_count;
+        continue;
+      }
+      if (type == ThreadAPI::TD_OMP_AFFINITY) {
+        ++m_summary.affinity_region_count;
+        continue;
+      }
+      if (type == ThreadAPI::TD_OMP_SCOPE_START ||
+          type == ThreadAPI::TD_OMP_SCOPE_END) {
+        ++m_summary.scope_region_count;
+        continue;
+      }
 
       if (type == ThreadAPI::TD_OMP_SINGLE_END ||
           type == ThreadAPI::TD_OMP_SECTIONS_END ||

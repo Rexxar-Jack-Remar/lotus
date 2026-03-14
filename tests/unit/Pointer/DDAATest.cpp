@@ -3,21 +3,23 @@
  * @brief Unit tests for SVF-style demand-driven analysis (DDA) on SVFG
  */
 
-#include "Alias/DDA/FlowDDA.h"
 #include "Alias/DDA/ContextDDA.h"
 #include "Alias/DDA/CxtDPItem.h"
+#include "Alias/DDA/DDAPass.h"
+#include "Alias/DDA/FlowDDA.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGStats.h"
 
 #include <algorithm>
+#include <set>
 
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus::analysis;
@@ -139,7 +141,8 @@ TEST_F(DDAATest, PropagatesThroughMemoryViaSVFGIndirectEdges) {
   ASSERT_NE(x, nullptr);
   ASSERT_NE(q, nullptr);
 
-  // Sanity: address-taken alloca should have a non-empty points-to (it points to itself).
+  // Sanity: address-taken alloca should have a non-empty points-to (it points
+  // to itself).
   {
     DemandDrivenAA::PtsSet xPts = dda.getPointsTo(x);
     ASSERT_FALSE(xPts.empty());
@@ -330,7 +333,8 @@ TEST_F(DDAATest, ContextSensitiveBKConditionOnCallAInRetAOut) {
                        callAInEdge->getSrcNode());
   EXPECT_FALSE(ctx.handleBKCondition(callDpm, callAInEdge));
 
-  // RetAOut: seeing same callsite already in context triggers OOB prune (false).
+  // RetAOut: seeing same callsite already in context triggers OOB prune
+  // (false).
   ContextCond retCond;
   EXPECT_TRUE(retCond.pushContext(retCsId));
   CxtLocDPItem retDpm(CxtVar(retCond, retAOutEdge->getSrcNode()->getId()),
@@ -397,9 +401,8 @@ TEST_F(DDAATest, HandlesVarArgValueFlowNodes) {
   for (const SVFGEdge *e : extraArg->getOutEdges()) {
     if (!e)
       continue;
-    if (e->getDstNode() == varArg &&
-        (e->getEdgeKind() == SVFGEdgeK::CallDir ||
-         e->getEdgeKind() == SVFGEdgeK::CallInd)) {
+    if (e->getDstNode() == varArg && (e->getEdgeKind() == SVFGEdgeK::CallDir ||
+                                      e->getEdgeKind() == SVFGEdgeK::CallInd)) {
       connected = true;
       break;
     }
@@ -479,6 +482,96 @@ TEST_F(DDAATest, OutOfBudgetFallbackIsConservativeAndNonEmpty) {
   EXPECT_FALSE(pts.empty());
   ASSERT_NE(flow.getStat(), nullptr);
   EXPECT_GE(flow.getStat()->numOutOfBudgetQueries, 1u);
+
+  FlowDDA::setDefaultMaxBudget(oldBudget);
+}
+
+TEST_F(DDAATest, ContextOutOfBudgetFallbackMatchesFlowDDA) {
+  const char *source = R"(
+    define void @test() {
+      %x = alloca i32
+      %p = alloca i32*
+      store i32* %x, i32** %p
+      %q = load i32*, i32** %p
+      ret void
+    }
+
+    define i32 @main() {
+      call void @test()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const uint32_t oldBudget = FlowDDA::getDefaultMaxBudget();
+  FlowDDA::setDefaultMaxBudget(0);
+
+  const Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  const LoadInst *q = nullptr;
+  for (const BasicBlock &BB : *F) {
+    for (const Instruction &I : BB) {
+      if (const auto *LI = dyn_cast<LoadInst>(&I))
+        q = LI;
+    }
+  }
+  ASSERT_NE(q, nullptr);
+
+  FlowDDA flow;
+  ASSERT_TRUE(flow.run(*module));
+  ContextDDA ctx(&flow, nullptr);
+  ASSERT_TRUE(ctx.run(*module));
+
+  FlowDDA::PtsSet flowPts = flow.getPointsTo(q);
+  const CxtPtSet &cxtPts = ctx.computeDDAPts(q);
+
+  ASSERT_FALSE(flowPts.empty());
+  ASSERT_FALSE(cxtPts.empty());
+  ASSERT_NE(ctx.getDDAStat(), nullptr);
+  EXPECT_GE(ctx.getDDAStat()->numOutOfBudgetQueries, 1u);
+
+  std::set<uint32_t> cxtObjIds;
+  for (const CxtVar &var : cxtPts) {
+    EXPECT_TRUE(var.get_cond().getContexts().empty());
+    cxtObjIds.insert(var.get_id());
+  }
+
+  std::set<uint32_t> flowObjIds(flowPts.begin(), flowPts.end());
+  EXPECT_EQ(cxtObjIds, flowObjIds);
+
+  FlowDDA::setDefaultMaxBudget(oldBudget);
+}
+
+TEST_F(DDAATest, DDAPassAppliesConfiguredContextLimits) {
+  const char *source = R"(
+    define i32 @main() {
+      %x = alloca i32
+      %p = alloca i32*
+      store i32* %x, i32** %p
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ContextDDA::setMaxCxtLen(3);
+  ContextDDA::setMaxPathLen(0);
+  const uint32_t oldBudget = FlowDDA::getDefaultMaxBudget();
+
+  DDAPass dda;
+  dda.setDDAKind(DDAKind::Cxt_DDA);
+  dda.setMaxContextLen(5);
+  dda.setMaxPathLen(17);
+  dda.setMaxBudget(23);
+  dda.runOnModule(*module);
+
+  EXPECT_EQ(ContextCond::getMaxCxtLen(), 5u);
+  EXPECT_EQ(ContextCond::getMaxPathLen(), 17u);
+  EXPECT_EQ(FlowDDA::getDefaultMaxBudget(), 23u);
+  ASSERT_NE(dda.getContextDDA(), nullptr);
 
   FlowDDA::setDefaultMaxBudget(oldBudget);
 }

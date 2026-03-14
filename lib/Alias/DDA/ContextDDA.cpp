@@ -106,7 +106,9 @@ bool ContextDDA::isDirectEdge(SVFGEdge *e) { return isDirectEdgeImpl(e); }
 bool ContextDDA::isIndirectEdge(SVFGEdge *e) { return isIndirectEdgeImpl(e); }
 
 ContextDDA::ContextDDA(FlowDDA *flowDDA, DDAClient *client)
-    : flowDDA_(flowDDA), client_(client) {}
+    : flowDDA_(flowDDA), client_(client) {
+  setDDAStat(flowDDA_ ? flowDDA_->getStat() : nullptr);
+}
 
 ContextDDA::~ContextDDA() = default;
 
@@ -204,14 +206,24 @@ bool ContextDDA::handleBKCondition(CxtLocDPItem &dpm, SVFGEdge *edge) {
 }
 
 void ContextDDA::handleOutOfBudgetDpm(const CxtLocDPItem &dpm) {
-  // Match SVF ContextDDA::handleOutOfBudgetDpm: downgrade to FlowDDA
   if (!flowDDA_ || !getSVFG())
     return;
 
-  const CxtPtSet conservativePts = getConservativeCPts(dpm);
-  if (!conservativePts.empty())
+  CxtPtSet downgradedPts;
+  const std::vector<const llvm::Value *> values =
+      collectFallbackPointerValues(dpm, getSVFG());
+  for (const llvm::Value *v : values) {
+    FlowDDA::PtsSet flowPts = flowDDA_->getPointsTo(v);
+    for (uint32_t objId : flowPts)
+      downgradedPts.insert(CxtVar(ContextCond(), objId));
+  }
+
+  if (downgradedPts.empty())
+    downgradedPts = getConservativeCPts(dpm);
+
+  if (!downgradedPts.empty())
     DDAVFSolver<CxtVar, CxtPtSet, CxtLocDPItem,
-                ContextDDA>::updateCachedPointsTo(dpm, conservativePts);
+                ContextDDA>::updateCachedPointsTo(dpm, downgradedPts);
   DDAVFSolver<CxtVar, CxtPtSet, CxtLocDPItem, ContextDDA>::addOutOfBudgetDpm(
       dpm);
 }

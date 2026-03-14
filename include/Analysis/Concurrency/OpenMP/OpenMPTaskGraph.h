@@ -134,6 +134,11 @@ public:
     size_t target_region_count = 0;
     size_t target_data_region_count = 0;
     size_t detach_completion_count = 0;
+    size_t teams_region_count = 0;
+    size_t distribute_region_count = 0;
+    size_t loop_region_count = 0;
+    size_t affinity_region_count = 0;
+    size_t scope_region_count = 0;
   };
 
   enum class TaskRelation { HappensBefore, Excluded, Parallel, Unknown };

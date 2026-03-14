@@ -178,6 +178,40 @@ public:
     TD_OMP_TARGET_DATA_END,   ///< __tgt_target_data_end
     TD_OMP_TARGET_DATA_UPDATE,
 
+    // OpenMP 5.0+ Teams and Distribute
+    TD_OMP_TEAMS,               ///< __kmpc_teams* - teams construct
+    TD_OMP_TEAMS_HOST,          ///< __kmpc_teams_host
+    TD_OMP_TEAMS_DISTRIBUTE,    ///< __kmpc_teams_distribute*
+    TD_OMP_DISTRIBUTE,          ///< __kmpc_distribute* - distribute construct
+    TD_OMP_DISTRIBUTE_STATIC,   ///< __kmpc_distribute_static*
+    TD_OMP_DISTRIBUTE_DYNAMIC,  ///< __kmpc_distribute_dynamic*
+    TD_OMP_DISTRIBUTE_GUIDANCE, ///< __kmpc_distribute_guidance*
+
+    // OpenMP 5.0+ Loop
+    TD_OMP_LOOP_STATIC_INIT,   ///< __kmpc_loop_static
+    TD_OMP_LOOP_DYNAMIC_INIT,  ///< __kmpc_loop_dynamic
+    TD_OMP_LOOP_GUIDANCE_INIT, ///< __kmpc_loop_guidance
+
+    // OpenMP 5.0+ Affinity
+    TD_OMP_AFFINITY, ///< __kmpc_affinity*
+
+    // OpenMP 5.0+ Scope
+    TD_OMP_SCOPE_START, ///< __kmpc_scope
+    TD_OMP_SCOPE_END,   ///< __kmpc_end_scope
+
+    // OpenMP 5.0+ Taskloop variants
+    TD_OMP_TASKLOOP_SIMD, ///< __kmpc_taskloop_simd
+    TD_OMP_TASKLOOP_FINI, ///< __kmpc_taskloop_fini
+
+    // OpenMP 5.0+ Interop
+    TD_OMP_INTEROP_INIT, ///< __kmpc_interop*
+    TD_OMP_INTEROP_FINI, ///< __kmpc_interop_fini*
+
+    // OpenMP 5.1+ Doacross
+    TD_OMP_DOACROSS_INIT,   ///< __kmpc_doacross*
+    TD_OMP_DOACROSS_WAIT,   ///< __kmpc_doacross_wait*
+    TD_OMP_DOACROSS_SUBMIT, ///< __kmpc_doacross_submit*
+
     // MPI Process Management
     TD_MPI_INIT,     ///< MPI_Init, MPI_Init_thread
     TD_MPI_FINALIZE, ///< MPI_Finalize
@@ -254,6 +288,16 @@ public:
     // MPI Request Management
     TD_MPI_REQUEST_FREE, ///< MPI_Request_free
     TD_MPI_CANCEL,       ///< MPI_Cancel
+
+    // MPI Datatype Management
+    TD_MPI_TYPE_CONTIGUOUS,    ///< MPI_Type_contiguous
+    TD_MPI_TYPE_VECTOR,        ///< MPI_Type_vector
+    TD_MPI_TYPE_HVECTOR,       ///< MPI_Type_hvector
+    TD_MPI_TYPE_INDEXED,       ///< MPI_Type_indexed
+    TD_MPI_TYPE_HINDEXED,      ///< MPI_Type_hindexed
+    TD_MPI_TYPE_STRUCT,        ///< MPI_Type_struct
+    TD_MPI_TYPE_CREATE_DLPACK, ///< MPI_Type_create_dlpack (MPI-4.1)
+    TD_MPI_TYPE_COMMIT,        ///< MPI_Type_commit
 
     // Linux Kernel Spinlocks
     TD_KERNEL_SPIN_LOCK_INIT, ///< spin_lock_init, raw_spin_lock_init

@@ -61,6 +61,9 @@ void DDAPass::runOnModule(Module &M) {
 }
 
 void DDAPass::runPointerAnalysis(Module &M, DDAKind k) {
+  ContextDDA::setMaxPathLen(this->getMaxPathLen());
+  ContextDDA::setMaxCxtLen(this->getMaxContextLen());
+  FlowDDA::setDefaultMaxBudget(maxBudget_);
   flowDDA_ = std::make_unique<FlowDDA>();
   if (!flowDDA_->run(M))
     return;

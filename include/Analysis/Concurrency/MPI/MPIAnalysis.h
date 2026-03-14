@@ -103,7 +103,9 @@ enum class MPIOpKind {
   RMA_DATA,               ///< RMA data operations (Put/Get/Accumulate)
   RMA_SYNC,               ///< RMA synchronization
   COMM_MANAGEMENT,        ///< Communicator operations
+  INTERCOMM_CREATION,     ///< MPI_Intercomm_create, MPI_Intercomm_merge
   REQUEST_MANAGEMENT,     ///< MPI_Request_free / MPI_Cancel
+  DATATYPE_CREATE,        ///< MPI_Type_create_* operations
   UNKNOWN
 };
 
@@ -128,6 +130,7 @@ struct MPIOperation {
   ProtocolReachability protocol_reachability = ProtocolReachability::Unknown;
   MPI::RankExpr process_rank;
   std::string rank_path_summary;
+  bool is_intercommunicator = false; ///< True if using intercommunicator
 
   // For point-to-point operations
   int source_rank = -1; // -1/-2 are treated as wildcard source in matching
@@ -150,6 +153,13 @@ struct MPIOperation {
   int target_rank_max = -1;
   int64_t target_disp = -1;
   int64_t byte_length = -1;
+
+  // For datatype tracking
+  const llvm::Value *datatype = nullptr; ///< MPI datatype handle
+  int64_t datatype_size = -1; ///< Computed size in bytes (-1 if unknown)
+  bool is_derived_datatype =
+      false; ///< True if derived (contiguous, vector, etc.)
+
   RMAEpochKind rma_epoch_kind = RMAEpochKind::None;
   concurrency::ProofStrength synchronization_proof =
       concurrency::ProofStrength::Unknown;
