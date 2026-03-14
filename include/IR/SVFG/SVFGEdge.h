@@ -1,4 +1,5 @@
-//===- SVFGEdge.h -- SVFG Edge Definitions ------------------------------------//
+//===- SVFGEdge.h -- SVFG Edge Definitions
+//------------------------------------//
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -117,6 +118,16 @@
 namespace lotus {
 namespace analysis {
 
+#if defined(__has_cpp_attribute)
+#if __has_cpp_attribute(deprecated)
+#define LOTUS_SVFG_LEGACY_API(MSG) [[deprecated(MSG)]]
+#else
+#define LOTUS_SVFG_LEGACY_API(MSG)
+#endif
+#else
+#define LOTUS_SVFG_LEGACY_API(MSG)
+#endif
+
 class SVFGNode;
 
 /// @brief Value-flow edge connecting SVFG nodes
@@ -234,7 +245,9 @@ public:
 };
 
 /// @brief Memory use edge (load)
-class IntraMuVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API(
+    "Legacy wrapper; use SVFGEdge with SVFGEdgeK::IntraMu") IntraMuVFGEdge
+    : public SVFGEdge {
 public:
   IntraMuVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::IntraMu) {}
@@ -242,7 +255,9 @@ public:
 };
 
 /// @brief Memory def edge (store)
-class IntraChiVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API(
+    "Legacy wrapper; use SVFGEdge with SVFGEdgeK::IntraChi") IntraChiVFGEdge
+    : public SVFGEdge {
 public:
   IntraChiVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::IntraChi) {}
@@ -266,7 +281,9 @@ public:
 };
 
 /// @brief Call actual-in to formal-in edge
-class CallAInVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API(
+    "Legacy wrapper; use SVFGEdge with SVFGEdgeK::CallAIn") CallAInVFGEdge
+    : public SVFGEdge {
 public:
   CallAInVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::CallAIn) {}
@@ -274,7 +291,9 @@ public:
 };
 
 /// @brief Call formal-in edge
-class CallFInVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API(
+    "Legacy compatibility wrapper; canonical runtime edge kind is CallAIn")
+    CallFInVFGEdge : public SVFGEdge {
 public:
   CallFInVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::CallFIn) {}
@@ -282,7 +301,9 @@ public:
 };
 
 /// @brief Parameter call edge
-class ParamCallVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API("Legacy compatibility wrapper; canonical runtime "
+                            "edge kind is CallDir or CallInd") ParamCallVFGEdge
+    : public SVFGEdge {
 public:
   ParamCallVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::ParamCall) {}
@@ -304,7 +325,9 @@ public:
 };
 
 /// @brief Return actual-out to formal-out edge
-class RetAOutVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API(
+    "Legacy wrapper; use SVFGEdge with SVFGEdgeK::RetAOut") RetAOutVFGEdge
+    : public SVFGEdge {
 public:
   RetAOutVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::RetAOut) {}
@@ -312,7 +335,9 @@ public:
 };
 
 /// @brief Return formal-out edge
-class RetFOutVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API(
+    "Legacy compatibility wrapper; canonical runtime edge kind is RetAOut")
+    RetFOutVFGEdge : public SVFGEdge {
 public:
   RetFOutVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::RetFOut) {}
@@ -320,7 +345,9 @@ public:
 };
 
 /// @brief Parameter return edge
-class ParamRetVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API("Legacy compatibility wrapper; canonical runtime "
+                            "edge kind is RetDir or RetInd") ParamRetVFGEdge
+    : public SVFGEdge {
 public:
   ParamRetVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::ParamRet) {}
@@ -330,7 +357,9 @@ public:
 /// @brief Intra-procedural indirect value-flow edge
 /// Represents indirect value flows through pointers (load, store, etc.)
 /// Carries points-to set for precision in alias analysis.
-class IntraIndirectVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API(
+    "Legacy wrapper; use SVFGEdge with SVFGEdgeK::IntraIndirect")
+    IntraIndirectVFGEdge : public SVFGEdge {
 public:
   IntraIndirectVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::IntraIndirect) {}
@@ -340,7 +369,9 @@ public:
 /// @brief Thread MHP (May-Happen-in-Parallel) indirect edge
 /// Represents indirect value-flows between memory accesses that may happen
 /// in parallel in multithreaded programs. Used for concurrent analysis.
-class ThreadMHPIndVFGEdge : public SVFGEdge {
+class LOTUS_SVFG_LEGACY_API(
+    "Legacy wrapper; use SVFGEdge with SVFGEdgeK::ThreadMHPIndirectVF")
+    ThreadMHPIndVFGEdge : public SVFGEdge {
 public:
   ThreadMHPIndVFGEdge(SVFGNode *s, SVFGNode *d)
       : SVFGEdge(s, d, SVFGEdgeK::ThreadMHPIndirectVF) {}
@@ -349,3 +380,5 @@ public:
 
 } // namespace analysis
 } // namespace lotus
+
+#undef LOTUS_SVFG_LEGACY_API

@@ -2,9 +2,14 @@
 #include "IR/ICFG/ICFGBuilder.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBuilder.h"
-#include "IR/SVFG/SVFGOPT.h"
 #include "IR/SVFG/SVFGNode.h"
+#include "IR/SVFG/SVFGOPT.h"
 
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
@@ -12,10 +17,6 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/SourceMgr.h>
-
-#include <gtest/gtest.h>
-
-#include <algorithm>
 #include <unistd.h>
 
 using namespace llvm;
@@ -35,7 +36,8 @@ protected:
     return module;
   }
 
-  static const CallBase *findDirectCall(const Function *F, StringRef calleeName) {
+  static const CallBase *findDirectCall(const Function *F,
+                                        StringRef calleeName) {
     for (const BasicBlock &BB : *F) {
       for (const Instruction &I : BB) {
         const auto *CB = dyn_cast<CallBase>(&I);
@@ -102,7 +104,8 @@ TEST_F(SVFGSerializerTest, RoundTripsSemanticBindings) {
 
   SmallString<256> path;
   int fd = -1;
-  ASSERT_FALSE(sys::fs::createTemporaryFile("svfg-serializer", "txt", fd, path));
+  ASSERT_FALSE(
+      sys::fs::createTemporaryFile("svfg-serializer", "txt", fd, path));
   ::close(fd);
 
   ASSERT_TRUE(original->writeToFile(path.str().str()));
@@ -229,12 +232,14 @@ TEST_F(SVFGSerializerTest, RoundTripsInterPhiOperands) {
       continue;
     originalInterPhiOperandCounts.push_back(interPhi->getOpVerNum());
   }
-  std::sort(originalInterPhiOperandCounts.begin(), originalInterPhiOperandCounts.end());
+  std::sort(originalInterPhiOperandCounts.begin(),
+            originalInterPhiOperandCounts.end());
   ASSERT_FALSE(originalInterPhiOperandCounts.empty());
 
   SmallString<256> path;
   int fd = -1;
-  ASSERT_FALSE(sys::fs::createTemporaryFile("svfgopt-serializer", "txt", fd, path));
+  ASSERT_FALSE(
+      sys::fs::createTemporaryFile("svfgopt-serializer", "txt", fd, path));
   ::close(fd);
 
   ASSERT_TRUE(optimized.writeToFile(path.str().str()));
@@ -259,7 +264,8 @@ TEST_F(SVFGSerializerTest, RoundTripsInterPhiOperands) {
   }
 
   EXPECT_TRUE(foundInterPhi);
-  std::sort(reloadedInterPhiOperandCounts.begin(), reloadedInterPhiOperandCounts.end());
+  std::sort(reloadedInterPhiOperandCounts.begin(),
+            reloadedInterPhiOperandCounts.end());
   EXPECT_EQ(reloadedInterPhiOperandCounts, originalInterPhiOperandCounts);
 }
 
@@ -284,15 +290,16 @@ TEST_F(SVFGSerializerTest, PreservesExplicitNullInterPhiOperand) {
   SVFG graph;
   graph.setICFG(&icfg);
 
-  auto *phi = new InterPhiSVFGNode(graph.getNextNodeId(),
-                                   icfg.getIntraBlockNode(&mainFn->getEntryBlock()),
-                                   mainFn);
+  auto *phi = new InterPhiSVFGNode(
+      graph.getNextNodeId(), icfg.getIntraBlockNode(&mainFn->getEntryBlock()),
+      mainFn);
   phi->setOpVer(0, nullptr);
   graph.addNode(phi);
 
   SmallString<256> path;
   int fd = -1;
-  ASSERT_FALSE(sys::fs::createTemporaryFile("svfg-null-interphi", "txt", fd, path));
+  ASSERT_FALSE(
+      sys::fs::createTemporaryFile("svfg-null-interphi", "txt", fd, path));
   ::close(fd);
 
   ASSERT_TRUE(graph.writeToFile(path.str().str()));
@@ -309,6 +316,160 @@ TEST_F(SVFGSerializerTest, PreservesExplicitNullInterPhiOperand) {
   EXPECT_EQ(reloadedPhi->getFunction(), mainFn);
   EXPECT_EQ(reloadedPhi->getOpVerNum(), 1u);
   EXPECT_EQ(reloadedPhi->getOpVer(0), nullptr);
+}
+
+TEST_F(SVFGSerializerTest, CanonicalizesLegacyCallMuNodeOnRead) {
+  const char *source = R"(
+    declare void @callee(i8*)
+
+    define void @main(i8* %p) {
+    entry:
+      call void @callee(i8* %p)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SmallString<256> path;
+  int fd = -1;
+  ASSERT_FALSE(
+      sys::fs::createTemporaryFile("svfg-legacy-callmu", "txt", fd, path));
+  ::close(fd);
+
+  std::ofstream out(path.str().str());
+  ASSERT_TRUE(out.is_open());
+  out << "SVFG-TEXT-V6\n";
+  out << "D 1 4 \"\" \"main\" 0 0 0\n";
+  out << "N 1 " << static_cast<uint32_t>(SVFGK::CallMu) << " 7 3 0 0 1 42\n";
+  out.close();
+
+  SVFG reloaded;
+  reloaded.setICFG(&icfg);
+  ASSERT_TRUE(reloaded.readFromFile(path.str().str()));
+  sys::fs::remove(path);
+
+  SVFGNode *node = reloaded.getNode(1);
+  ASSERT_NE(node, nullptr);
+  EXPECT_TRUE(isa<ActualInSVFGNode>(node));
+  EXPECT_FALSE(isa<CallMuSVFGNode>(node));
+  auto *actualIn = dyn_cast<ActualInSVFGNode>(node);
+  ASSERT_NE(actualIn, nullptr);
+  EXPECT_EQ(actualIn->getMemReg(), 7u);
+  EXPECT_EQ(actualIn->getSSAVersion(), 3u);
+}
+
+TEST_F(SVFGSerializerTest, CanonicalizesLegacyEdgeKindsOnRead) {
+  const char *source = R"(
+    define i8* @touch(i8* %p) {
+    entry:
+      %v = load i8, i8* %p
+      store i8 %v, i8* %p
+      ret i8* %p
+    }
+
+    define i32 @main() {
+    entry:
+      %x = alloca i8
+      %r = call i8* @touch(i8* %x)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = true;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> original(builder.build(&icfg));
+  ASSERT_NE(original, nullptr);
+
+  SmallString<256> path;
+  int fd = -1;
+  ASSERT_FALSE(
+      sys::fs::createTemporaryFile("svfg-legacy-edges", "txt", fd, path));
+  ::close(fd);
+
+  ASSERT_TRUE(original->writeToFile(path.str().str()));
+
+  std::ifstream in(path.str().str());
+  ASSERT_TRUE(in.is_open());
+  std::vector<std::string> lines;
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line[0] == 'E') {
+      std::istringstream iss(line);
+      char tag = 0;
+      uint32_t src = 0;
+      uint32_t dst = 0;
+      uint32_t kind = 0;
+      iss >> tag >> src >> dst >> kind;
+      std::string rest;
+      std::getline(iss, rest);
+
+      if (kind == static_cast<uint32_t>(SVFGEdgeK::CallDir))
+        kind = static_cast<uint32_t>(SVFGEdgeK::ParamCall);
+      else if (kind == static_cast<uint32_t>(SVFGEdgeK::RetDir))
+        kind = static_cast<uint32_t>(SVFGEdgeK::ParamRet);
+      else if (kind == static_cast<uint32_t>(SVFGEdgeK::CallAIn))
+        kind = static_cast<uint32_t>(SVFGEdgeK::CallFIn);
+      else if (kind == static_cast<uint32_t>(SVFGEdgeK::RetAOut))
+        kind = static_cast<uint32_t>(SVFGEdgeK::RetFOut);
+
+      std::ostringstream oss;
+      oss << tag << " " << src << " " << dst << " " << kind << rest;
+      line = oss.str();
+    }
+    lines.push_back(line);
+  }
+  in.close();
+
+  std::ofstream out(path.str().str(), std::ios::trunc);
+  ASSERT_TRUE(out.is_open());
+  for (const std::string &updated : lines)
+    out << updated << "\n";
+  out.close();
+
+  SVFG reloaded;
+  reloaded.setICFG(&icfg);
+  ASSERT_TRUE(reloaded.readFromFile(path.str().str()));
+  sys::fs::remove(path);
+
+  bool sawCallDir = false;
+  bool sawRetDir = false;
+  bool sawCallAIn = false;
+  bool sawRetAOut = false;
+
+  for (const auto &pair : reloaded) {
+    for (SVFGEdge *edge : pair.second->getOutEdges()) {
+      ASSERT_NE(edge, nullptr);
+      EXPECT_NE(edge->getEdgeKind(), SVFGEdgeK::ParamCall);
+      EXPECT_NE(edge->getEdgeKind(), SVFGEdgeK::ParamRet);
+      EXPECT_NE(edge->getEdgeKind(), SVFGEdgeK::CallFIn);
+      EXPECT_NE(edge->getEdgeKind(), SVFGEdgeK::RetFOut);
+      sawCallDir = sawCallDir || edge->getEdgeKind() == SVFGEdgeK::CallDir;
+      sawRetDir = sawRetDir || edge->getEdgeKind() == SVFGEdgeK::RetDir;
+      sawCallAIn = sawCallAIn || edge->getEdgeKind() == SVFGEdgeK::CallAIn;
+      sawRetAOut = sawRetAOut || edge->getEdgeKind() == SVFGEdgeK::RetAOut;
+    }
+  }
+
+  EXPECT_TRUE(sawCallDir);
+  EXPECT_TRUE(sawRetDir);
+  EXPECT_TRUE(sawCallAIn);
+  EXPECT_TRUE(sawRetAOut);
 }
 
 TEST_F(SVFGSerializerTest, RoundTripsDeferredIndirectCallState) {
@@ -379,9 +540,8 @@ TEST_F(SVFGSerializerTest, RoundTripsDeferredIndirectCallState) {
   EXPECT_EQ(reloaded.getIndCallSites(fpNode->getId()).count(indCall), 1u);
 
   std::vector<SVFGEdge *> newEdges;
-  EXPECT_TRUE(
-      builder.connectCallSiteToCalleeOnTheFly(&reloaded, indCall, targetFn,
-                                              newEdges));
+  EXPECT_TRUE(builder.connectCallSiteToCalleeOnTheFly(&reloaded, indCall,
+                                                      targetFn, newEdges));
   EXPECT_FALSE(newEdges.empty());
   EXPECT_NE(reloaded.getCallSiteId(indCall, targetFn), 0u);
 

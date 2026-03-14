@@ -205,21 +205,6 @@ static Anchor getAnchorForValue(const Value *V) {
   return anchor;
 }
 
-static const Function *resolveFunctionAnchor(const Module *M,
-                                             const Anchor &anchor) {
-  if (!M)
-    return nullptr;
-  switch (anchor.kind) {
-  case AnchorKind::Function:
-    return M->getFunction(anchor.symbolName);
-  case AnchorKind::Argument:
-  case AnchorKind::Instruction:
-    return M->getFunction(anchor.functionName);
-  default:
-    return nullptr;
-  }
-}
-
 static const Value *resolveValueAnchor(const Module *M, const Anchor &anchor) {
   if (!M)
     return nullptr;
@@ -252,6 +237,24 @@ static const Value *resolveValueAnchor(const Module *M, const Anchor &anchor) {
 static const CallBase *resolveCallAnchor(const Module *M,
                                          const Anchor &anchor) {
   return dyn_cast_or_null<CallBase>(resolveValueAnchor(M, anchor));
+}
+
+static SVFGEdgeK canonicalizeEdgeKind(SVFGEdgeK kind,
+                                      const CallBase *callSite) {
+  switch (kind) {
+  case SVFGEdgeK::ParamCall:
+    return (callSite && callSite->getCalledFunction()) ? SVFGEdgeK::CallDir
+                                                       : SVFGEdgeK::CallInd;
+  case SVFGEdgeK::ParamRet:
+    return (callSite && callSite->getCalledFunction()) ? SVFGEdgeK::RetDir
+                                                       : SVFGEdgeK::RetInd;
+  case SVFGEdgeK::CallFIn:
+    return SVFGEdgeK::CallAIn;
+  case SVFGEdgeK::RetFOut:
+    return SVFGEdgeK::RetAOut;
+  default:
+    return kind;
+  }
 }
 
 static const ICFGNode *resolveICFGNode(const SVFG &graph, const Anchor &anchor,
@@ -509,7 +512,8 @@ static SVFGNode *createNodeForKind(const ParsedNode &parsed,
     default:
       if (!icfgNode && resolvedCall)
         icfgNode = mutableICFG->getIntraBlockNode(resolvedCall->getParent());
-      else if (!icfgNode && resolvedFunction && !resolvedFunction->isDeclaration())
+      else if (!icfgNode && resolvedFunction &&
+               !resolvedFunction->isDeclaration())
         icfgNode = mutableICFG->getFunEntryICFGNode(resolvedFunction);
       break;
     }
@@ -579,16 +583,16 @@ static SVFGNode *createNodeForKind(const ParsedNode &parsed,
                                 dyn_cast_or_null<StoreInst>(resolvedInst),
                                 parsed.memReg, parsed.pts, parsed.version);
   case SVFGK::CallMu:
-    return new CallMuSVFGNode(parsed.id, icfgNode, resolvedCall, parsed.memReg,
-                              parsed.pts, parsed.version);
+    return new ActualInSVFGNode(parsed.id, icfgNode, resolvedCall,
+                                parsed.memReg, parsed.pts, parsed.version);
   case SVFGK::CallChi:
-    return new CallChiSVFGNode(parsed.id, icfgNode, resolvedCall, parsed.memReg,
-                               parsed.pts, parsed.version);
+    return new ActualOutSVFGNode(parsed.id, icfgNode, resolvedCall,
+                                 parsed.memReg, parsed.pts, parsed.version);
   case SVFGK::RetMu:
-    return new RetMuSVFGNode(parsed.id, icfgNode, resolvedFunction,
-                             parsed.memReg, parsed.pts, parsed.version);
+    return new FormalOutSVFGNode(parsed.id, icfgNode, resolvedFunction,
+                                 parsed.memReg, parsed.pts, parsed.version);
   case SVFGK::EntryChi:
-    return new EntryChiSVFGNode(parsed.id, icfgNode, resolvedFunction,
+    return new FormalInSVFGNode(parsed.id, icfgNode, resolvedFunction,
                                 parsed.memReg, parsed.pts, parsed.version);
   case SVFGK::FormalParm:
     return new FormalParmSVFGNode(parsed.id, icfgNode, resolvedFunction,
@@ -1142,9 +1146,10 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
     SVFGNode *dst = graph.getNode(edgeInfo.dst);
     if (src && dst) {
       const CallBase *callSite = resolveCallAnchor(module, edgeInfo.callAnchor);
-      SVFGEdge *edge =
-          graph.addEdge(src, dst, static_cast<SVFGEdgeK>(edgeInfo.kind),
-                        callSite, edgeInfo.pts, edgeInfo.callSiteDebug);
+      SVFGEdgeK kind =
+          canonicalizeEdgeKind(static_cast<SVFGEdgeK>(edgeInfo.kind), callSite);
+      SVFGEdge *edge = graph.addEdge(src, dst, kind, callSite, edgeInfo.pts,
+                                     edgeInfo.callSiteDebug);
       if (edge)
         edge->setWeight(static_cast<SVFGEdge::EdgeWeight>(edgeInfo.weight));
     }

@@ -76,7 +76,8 @@ static bool icfgHasCallEdgeTo(const ICFG *icfg, const CallBase *call,
 
   const ICFGNode *callerNode =
       const_cast<ICFG *>(icfg)->getIntraBlockNode(call->getParent());
-  const ICFGNode *calleeEntry = const_cast<ICFG *>(icfg)->getFunEntryICFGNode(callee);
+  const ICFGNode *calleeEntry =
+      const_cast<ICFG *>(icfg)->getFunEntryICFGNode(callee);
   if (!callerNode || !calleeEntry)
     return false;
 
@@ -787,8 +788,8 @@ void SVFGBuilder::buildMemorySSA() {
                     const uint32_t chiNodeId = nextNode();
                     const uint32_t chiVersion = nextVersion(&F, memRegId);
                     auto *chiNode = new StoreChiSVFGNode(
-                        chiNodeId, icfgNode, nullptr, memRegId, SVFGNodeBS{},
-                        chiVersion);
+                        chiNodeId, icfgNode, nullptr, memRegId,
+                        SVFGNodeBS{getOrCreateUnknownObjId()}, chiVersion);
                     svfg->addNode(chiNode);
                     dstChiNodes.push_back(chiNodeId);
                     svfg->setMSSADef(memRegId, chiNode, chiVersion);
@@ -821,9 +822,9 @@ void SVFGBuilder::buildMemorySSA() {
                         if (srcObjIds.empty()) {
                           const uint32_t memRegId = getOrCreateMemReg(srcPtr);
                           const uint32_t muNodeId = nextNode();
-                          auto *muNode =
-                              new LoadMuSVFGNode(muNodeId, icfgNode, nullptr,
-                                                 memRegId, SVFGNodeBS{});
+                          auto *muNode = new LoadMuSVFGNode(
+                              muNodeId, icfgNode, nullptr, memRegId,
+                              SVFGNodeBS{getOrCreateUnknownObjId()});
                           svfg->addNode(muNode);
                           srcMuNodes.push_back(muNodeId);
                         } else {
@@ -929,10 +930,9 @@ void SVFGBuilder::buildMemorySSA() {
               const SVFGNodeBS &pts = entry.second;
               const uint32_t actualOutId = nextNode();
               const uint32_t actualOutVersion = nextVersion(&F, memRegId);
-              auto *actualOut =
-                  new ActualOutSVFGNode(actualOutId,
-                                        findReturnSiteICFGNode(icfg, call), call,
-                                        memRegId, pts, actualOutVersion);
+              auto *actualOut = new ActualOutSVFGNode(
+                  actualOutId, findReturnSiteICFGNode(icfg, call), call,
+                  memRegId, pts, actualOutVersion);
               svfg->addNode(actualOut);
               svfg->addActualOut(call, actualOut);
               chiVec.push_back(actualOutId);
@@ -1016,9 +1016,9 @@ void SVFGBuilder::buildMemorySSA() {
 
     for (const auto &entry : formalOutRegs) {
       const uint32_t formalOutId = nextNode();
-      auto *formalOut = new FormalOutSVFGNode(
-          formalOutId, findFunctionExitICFGNode(icfg, &F), &F, entry.first,
-          entry.second);
+      auto *formalOut =
+          new FormalOutSVFGNode(formalOutId, findFunctionExitICFGNode(icfg, &F),
+                                &F, entry.first, entry.second);
       svfg->addNode(formalOut);
       svfg->addFormalOut(&F, formalOut);
     }
@@ -1220,8 +1220,8 @@ void SVFGBuilder::buildMemoryPHINodes() {
             SVFGNodeBS edgePts = phiNode->getDefSVFVars();
             if (edgePts.empty())
               edgePts.insert(getOrCreateUnknownObjId());
-            svfg->addEdge(incomingDef, phiNode, SVFGEdgeK::IntraPhi, nullptr,
-                          edgePts);
+            svfg->addEdge(incomingDef, phiNode, SVFGEdgeK::IntraIndirect,
+                          nullptr, edgePts);
             if (auto *defMem = dyn_cast<MSSASVFGNode>(incomingDef)) {
               phiNode->setOpVer(predIdx, defMem->getMemReg(),
                                 defMem->getSSAVersion());
@@ -1397,9 +1397,9 @@ void SVFGBuilder::connectMemorySSAEdges() {
                     if (edgePts.empty())
                       edgePts.insert(getOrCreateUnknownObjId());
                     svfg->addEdge(existingDefIt->second, phiNode,
-                                  SVFGEdgeK::IntraPhi, nullptr, edgePts);
-                    svfg->addEdge(def, phiNode, SVFGEdgeK::IntraPhi, nullptr,
-                                  edgePts);
+                                  SVFGEdgeK::IntraIndirect, nullptr, edgePts);
+                    svfg->addEdge(def, phiNode, SVFGEdgeK::IntraIndirect,
+                                  nullptr, edgePts);
                     lastDef[memReg] = phiNode;
                     // Bug #8 fix: the on-demand PHI changes the out-state of
                     // this block, so successors must be re-queued. The old
@@ -1449,6 +1449,8 @@ void SVFGBuilder::connectMemorySSAEdges() {
               }
 
               if (reachingDef) {
+                if (auto *reachingMem = dyn_cast<MSSASVFGNode>(reachingDef))
+                  mu->setSSAVersion(reachingMem->getSSAVersion());
                 SVFGNodeBS edgePts = muNode->getDefSVFVars();
                 if (edgePts.empty())
                   edgePts.insert(getOrCreateUnknownObjId());
@@ -1493,6 +1495,8 @@ void SVFGBuilder::connectMemorySSAEdges() {
             }
 
             if (reachingDef) {
+              if (auto *reachingMem = dyn_cast<MSSASVFGNode>(reachingDef))
+                mu->setSSAVersion(reachingMem->getSSAVersion());
               SVFGNodeBS edgePts = muNode->getDefSVFVars();
               if (edgePts.empty())
                 edgePts.insert(getOrCreateUnknownObjId());
@@ -1610,6 +1614,10 @@ void SVFGBuilder::connectMemorySSAEdges() {
                   (defIt != lastDef.end()) ? defIt->second : nullptr;
 
               if (actualInNode && reachingDef) {
+                if (auto *actualIn = dyn_cast<ActualInSVFGNode>(actualInNode)) {
+                  if (auto *reachingMem = dyn_cast<MSSASVFGNode>(reachingDef))
+                    actualIn->setSSAVersion(reachingMem->getSSAVersion());
+                }
                 SVFGNodeBS edgePts = actualInNode->getDefSVFVars();
                 if (edgePts.empty())
                   edgePts.insert(getOrCreateUnknownObjId());

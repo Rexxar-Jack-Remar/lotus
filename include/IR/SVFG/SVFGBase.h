@@ -194,8 +194,7 @@ inline bool isMemSVFGNode(SVFGK k) {
 inline bool isMemDefSVFGNode(SVFGK k) {
   return k == SVFGK::FormalIn || k == SVFGK::ActualOut || k == SVFGK::MPhi ||
          k == SVFGK::MIntraPhi || k == SVFGK::MInterPhi ||
-         k == SVFGK::StoreChi || k == SVFGK::CallChi ||
-         k == SVFGK::EntryChi;
+         k == SVFGK::StoreChi || k == SVFGK::CallChi || k == SVFGK::EntryChi;
 }
 
 /// @brief Check if node kind is a PHI node
@@ -226,7 +225,8 @@ inline bool isIntraVFGEdge(SVFGEdgeK k) {
          k == SVFGEdgeK::IntraLoad || k == SVFGEdgeK::IntraStore ||
          k == SVFGEdgeK::IntraGep || k == SVFGEdgeK::IntraCmp ||
          k == SVFGEdgeK::IntraBranch || k == SVFGEdgeK::IntraPhi ||
-         k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi;
+         k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
+         k == SVFGEdgeK::IntraIndirect;
 }
 
 /// @brief Check if edge kind is a call edge

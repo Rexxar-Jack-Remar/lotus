@@ -111,6 +111,16 @@
 namespace lotus {
 namespace analysis {
 
+#if defined(__has_cpp_attribute)
+#if __has_cpp_attribute(deprecated)
+#define LOTUS_SVFG_LEGACY_NODE(MSG) [[deprecated(MSG)]]
+#else
+#define LOTUS_SVFG_LEGACY_NODE(MSG)
+#endif
+#else
+#define LOTUS_SVFG_LEGACY_NODE(MSG)
+#endif
+
 // Forward declarations
 class SVFGEdge;
 
@@ -514,6 +524,7 @@ public:
   const SVFGNodeBS *getPointsTo() const override { return &pointsTo; }
   uint32_t getMemReg() const override { return memReg; }
   uint32_t getSSAVersion() const override { return ssaVersion; }
+  void setSSAVersion(uint32_t ver) { ssaVersion = ver; }
   SVFGNodeBS getDefSVFVars() const override { return pointsTo; }
 
   static inline bool classof(const SVFGNode *n) {
@@ -574,7 +585,9 @@ public:
 };
 
 /// @brief Inter-procedural memory PHI
-class InterMSSAPhiSVFGNode : public MSSAPhiSVFGNode {
+class LOTUS_SVFG_LEGACY_NODE("Serializer-only legacy node; runtime SVFG does "
+                             "not build InterMSSAPhi nodes")
+    InterMSSAPhiSVFGNode : public MSSAPhiSVFGNode {
 private:
   const llvm::Function *func;
   const llvm::CallBase *callSite;
@@ -697,7 +710,9 @@ public:
 };
 
 /// @brief Call memory use
-class CallMuSVFGNode : public MSSASVFGNode {
+class LOTUS_SVFG_LEGACY_NODE(
+    "Serializer-only legacy node; canonical runtime node is ActualIn")
+    CallMuSVFGNode : public MSSASVFGNode {
 private:
   const llvm::CallBase *callSite;
 
@@ -712,7 +727,9 @@ public:
 };
 
 /// @brief Call memory def
-class CallChiSVFGNode : public MSSASVFGNode {
+class LOTUS_SVFG_LEGACY_NODE(
+    "Serializer-only legacy node; canonical runtime node is ActualOut")
+    CallChiSVFGNode : public MSSASVFGNode {
 private:
   const llvm::CallBase *callSite;
 
@@ -727,7 +744,9 @@ public:
 };
 
 /// @brief Return memory use
-class RetMuSVFGNode : public MSSASVFGNode {
+class LOTUS_SVFG_LEGACY_NODE(
+    "Serializer-only legacy node; canonical runtime node is FormalOut")
+    RetMuSVFGNode : public MSSASVFGNode {
 private:
   const llvm::Function *func;
 
@@ -742,7 +761,9 @@ public:
 };
 
 /// @brief Entry memory chi (function entry point)
-class EntryChiSVFGNode : public MSSASVFGNode {
+class LOTUS_SVFG_LEGACY_NODE(
+    "Serializer-only legacy node; canonical runtime node is FormalIn")
+    EntryChiSVFGNode : public MSSASVFGNode {
 private:
   const llvm::Function *func;
 
@@ -891,3 +912,5 @@ public:
 
 } // namespace analysis
 } // namespace lotus
+
+#undef LOTUS_SVFG_LEGACY_NODE

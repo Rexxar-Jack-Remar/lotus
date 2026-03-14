@@ -1,17 +1,16 @@
+#include "IR/ICFG/CallGraph.h"
 #include "IR/ICFG/ICFG.h"
 #include "IR/ICFG/ICFGBuilder.h"
-#include "IR/ICFG/CallGraph.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBuilder.h"
 #include "IR/SVFG/SVFGNode.h"
 
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-
-#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus::analysis;
@@ -42,7 +41,8 @@ protected:
     return std::unique_ptr<SVFG>(builder.build(&icfg));
   }
 
-  static const CallBase *findDirectCall(const Function *F, StringRef calleeName) {
+  static const CallBase *findDirectCall(const Function *F,
+                                        StringRef calleeName) {
     for (const BasicBlock &BB : *F) {
       for (const Instruction &I : BB) {
         const auto *CB = dyn_cast<CallBase>(&I);
@@ -198,6 +198,89 @@ TEST_F(SVFGMemorySSATest, DistinctReachingDefsCreateMemoryPhi) {
   EXPECT_TRUE(sawTwoOperandPhi);
 }
 
+TEST_F(SVFGMemorySSATest, MemoryPhiIncomingEdgesAreGuardedIndirectFlow) {
+  const char *source = R"(
+    define i32 @main(i1 %cond) {
+    entry:
+      %x = alloca i8
+      br i1 %cond, label %then, label %join
+
+    then:
+      store i8 1, i8* %x
+      br label %join
+
+    join:
+      %v = load i8, i8* %x
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  std::unique_ptr<SVFG> svfg = buildSVFG(module.get(), icfg);
+  ASSERT_NE(svfg, nullptr);
+
+  bool sawIncomingIndirectPhiEdge = false;
+  for (const auto &pair : *svfg) {
+    auto *phi = dyn_cast<IntraMSSAPhiSVFGNode>(pair.second);
+    if (!phi)
+      continue;
+
+    for (SVFGEdge *edge : phi->getInEdges()) {
+      ASSERT_NE(edge, nullptr);
+      EXPECT_EQ(edge->getEdgeKind(), SVFGEdgeK::IntraIndirect);
+      EXPECT_TRUE(isIntraVFGEdge(edge->getEdgeKind()));
+      EXPECT_TRUE(isIndirectVFGEdge(edge->getEdgeKind()));
+      if (edge->getEdgeKind() == SVFGEdgeK::IntraIndirect)
+        sawIncomingIndirectPhiEdge = true;
+    }
+  }
+
+  EXPECT_TRUE(sawIncomingIndirectPhiEdge);
+}
+
+TEST_F(SVFGMemorySSATest, LoadMuCapturesReachingDefVersion) {
+  const char *source = R"(
+    @g = global i8 0
+
+    define i32 @main() {
+    entry:
+      store i8 1, i8* @g
+      %v = load i8, i8* @g
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  std::unique_ptr<SVFG> svfg = buildSVFG(module.get(), icfg);
+  ASSERT_NE(svfg, nullptr);
+
+  const LoadMuSVFGNode *loadMu = nullptr;
+  for (const auto &pair : *svfg) {
+    loadMu = dyn_cast<LoadMuSVFGNode>(pair.second);
+    if (loadMu)
+      break;
+  }
+
+  ASSERT_NE(loadMu, nullptr);
+
+  bool versionMatchesIncomingDef = false;
+  for (SVFGEdge *edge : loadMu->getInEdges()) {
+    auto *srcMem = dyn_cast<MSSASVFGNode>(edge ? edge->getSrcNode() : nullptr);
+    if (!srcMem)
+      continue;
+    if (srcMem->getSSAVersion() == loadMu->getSSAVersion())
+      versionMatchesIncomingDef = true;
+  }
+
+  EXPECT_TRUE(versionMatchesIncomingDef);
+}
+
 TEST_F(SVFGMemorySSATest, GlobalOnlyCalleeCreatesInterproceduralMemoryNodes) {
   const char *source = R"(
     @g = global i8 0
@@ -253,6 +336,7 @@ TEST_F(SVFGMemorySSATest, CallsiteMemoryNodesTrackOnlyTouchedArguments) {
     entry:
       %x = alloca i8
       %y = alloca i8
+      store i8 1, i8* %x
       %v = call i8 @touch_first(i8* %x, i8* %y)
       ret i32 0
     }
@@ -272,6 +356,20 @@ TEST_F(SVFGMemorySSATest, CallsiteMemoryNodesTrackOnlyTouchedArguments) {
 
   EXPECT_EQ(svfg->getActualIns(call).size(), 1u);
   EXPECT_TRUE(svfg->getActualOuts(call).empty());
+
+  auto *actualIn =
+      dyn_cast<ActualInSVFGNode>(*svfg->getActualIns(call).begin());
+  ASSERT_NE(actualIn, nullptr);
+
+  bool actualInVersionMatchesIncomingDef = false;
+  for (SVFGEdge *edge : actualIn->getInEdges()) {
+    auto *srcMem = dyn_cast<MSSASVFGNode>(edge ? edge->getSrcNode() : nullptr);
+    if (!srcMem)
+      continue;
+    if (srcMem->getSSAVersion() == actualIn->getSSAVersion())
+      actualInVersionMatchesIncomingDef = true;
+  }
+  EXPECT_TRUE(actualInVersionMatchesIncomingDef);
 
   size_t callMuCount = 0;
   for (const auto &pair : *svfg) {
