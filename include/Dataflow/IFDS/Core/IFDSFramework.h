@@ -224,6 +224,11 @@ public:
   virtual FactSet call_to_return_flow(
       const llvm::CallBase *call, const llvm::Instruction *return_site,
       llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) = 0;
+  virtual FactSet summary_flow(const llvm::CallBase * /*call*/,
+                               const llvm::Function * /*callee*/,
+                               const Fact & /*fact*/) {
+    return {};
+  }
 
   // Initial facts at program entry
   virtual FactSet initial_facts(const llvm::Function *main) = 0;
@@ -335,10 +340,7 @@ public:
   virtual Value join(const Value &v1, const Value &v2) const = 0;
 
   // IDE initial seeds (Phasar-style: statement -> fact -> lattice value).
-  // Default behavior lifts IFDS seeds and initializes each fact with
-  // top_value() to preserve existing Lotus clients that define only
-  // initial_facts().
-  virtual IDEInitialSeeds initial_ide_seeds(const llvm::Module &module);
+  virtual IDEInitialSeeds initial_ide_seeds(const llvm::Module &module) = 0;
 
   // Edge function composition
   virtual EdgeFunction compose(const EdgeFunction &f1,
@@ -352,6 +354,10 @@ public:
 
   // Identity edge function
   EdgeFunction identity() const;
+
+protected:
+  IDEInitialSeeds lift_ifds_initial_seeds(const llvm::Module &module,
+                                          const Value &seed_value);
 };
 
 template <typename Fact, typename Value>
@@ -605,14 +611,15 @@ inline bool IDEProblem<Fact, Value>::edge_function_equivalent(
 
 template <typename Fact, typename Value>
 inline typename IDEProblem<Fact, Value>::IDEInitialSeeds
-IDEProblem<Fact, Value>::initial_ide_seeds(const llvm::Module &module) {
+IDEProblem<Fact, Value>::lift_ifds_initial_seeds(const llvm::Module &module,
+                                                 const Value &seed_value) {
   IDEInitialSeeds ide_seeds;
   auto ifds_seeds = this->initial_seeds(module);
   for (const auto &entry : ifds_seeds.get_seeds()) {
     const llvm::Instruction *inst = entry.first;
     ide_seeds.add_seed_instruction(inst);
     for (const Fact &fact : entry.second) {
-      ide_seeds.add_seed(inst, fact, top_value());
+      ide_seeds.add_seed(inst, fact, seed_value);
     }
   }
   return ide_seeds;

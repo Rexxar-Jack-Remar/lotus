@@ -373,7 +373,32 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
 template<typename Problem>
 void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& current_edge,
                                                       const llvm::CallBase* call) {
+    std::vector<const llvm::Function*> callees_vec;
+    auto callees_it = m_graph_context.call_to_callees().find(call);
+    if (callees_it != m_graph_context.call_to_callees().end()) {
+        callees_vec = callees_it->second;
+    }
+    if (callees_vec.empty()) {
+        callees_vec.push_back(nullptr);
+    }
+
     for (const llvm::Instruction* return_site : get_return_sites(call)) {
+        for (const llvm::Function* callee : callees_vec) {
+            FactSet summary_facts =
+                m_problem.summary_flow(call, callee, current_edge.target_fact);
+            if (m_problem.auto_add_zero() &&
+                m_problem.is_zero_fact(current_edge.target_fact)) {
+                summary_facts.insert(m_problem.zero_fact());
+            }
+            for (const auto& summary_fact : summary_facts) {
+                on_summary_transition(Node(call, current_edge.target_fact),
+                                      Node(return_site, summary_fact));
+                propagate_path_edge(PathEdgeType(current_edge.start_node,
+                                                 current_edge.start_fact,
+                                                 return_site, summary_fact));
+            }
+        }
+
         CallToReturnFlowKey ckey{call, return_site, current_edge.target_fact};
         FactSet ctr_facts;
         if (m_config.enable_flow_function_caching()) {
@@ -381,11 +406,7 @@ void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& curren
             if (cit != m_call_to_return_flow_cache.end()) {
                 ctr_facts = cit->second;
             } else {
-                llvm::ArrayRef<const llvm::Function *> callees;
-                auto callees_it = m_graph_context.call_to_callees().find(call);
-                if (callees_it != m_graph_context.call_to_callees().end()) {
-                    callees = callees_it->second;
-                }
+                llvm::ArrayRef<const llvm::Function *> callees(callees_vec);
                 ctr_facts = m_problem.call_to_return_flow(
                     call, return_site, callees, current_edge.target_fact);
                 if (m_problem.auto_add_zero() &&
@@ -395,11 +416,7 @@ void IFDSSolver<Problem>::process_call_to_return_edge(const PathEdgeType& curren
                 m_call_to_return_flow_cache[ckey] = ctr_facts;
             }
         } else {
-            llvm::ArrayRef<const llvm::Function *> callees;
-            auto callees_it = m_graph_context.call_to_callees().find(call);
-            if (callees_it != m_graph_context.call_to_callees().end()) {
-                callees = callees_it->second;
-            }
+            llvm::ArrayRef<const llvm::Function *> callees(callees_vec);
             ctr_facts = m_problem.call_to_return_flow(
                 call, return_site, callees, current_edge.target_fact);
             if (m_problem.auto_add_zero() &&

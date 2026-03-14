@@ -3,23 +3,23 @@
  * @brief Unit tests for Mono (monotone dataflow framework)
  */
 
+#include "Dataflow/Mono/Analyses/Inter/InterTaintAnalysis.h"
 #include "Dataflow/Mono/Analyses/Intra/IntraConstantPropagation.h"
 #include "Dataflow/Mono/Analyses/Intra/IntraLiveVariables.h"
 #include "Dataflow/Mono/Analyses/Intra/IntraUninitVariables.h"
-#include "Dataflow/Mono/Analyses/Inter/InterTaintAnalysis.h"
 #include "Dataflow/Mono/Core/CallStringSolver.h"
+#include "Dataflow/Mono/Solver/InterSolver.h"
 #include "Dataflow/Mono/Solver/IntraSolver.h"
 #include "Dataflow/Mono/Support/Result.h"
-#include "Dataflow/Mono/Solver/InterSolver.h"
 
+#include <vector>
+
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
-
-#include <vector>
 
 using namespace llvm;
 using namespace mono;
@@ -36,8 +36,7 @@ protected:
     return module;
   }
 
-  template <typename InstT>
-  InstT *findFirst(Function *F) {
+  template <typename InstT> InstT *findFirst(Function *F) {
     for (auto &BB : *F) {
       for (auto &I : BB) {
         if (auto *Match = dyn_cast<InstT>(&I)) {
@@ -275,7 +274,8 @@ TEST_F(MonoTest, UninitVariablesMustAliasClear) {
   auto *load = findFirst<LoadInst>(F);
   ASSERT_NE(load, nullptr);
 
-  // Load should not be uninitialized after a definite store to the same location.
+  // Load should not be uninitialized after a definite store to the same
+  // location.
   auto &inSet = result->IN(load);
   EXPECT_EQ(inSet.count(load), 0u);
 }
@@ -323,7 +323,8 @@ TEST_F(MonoTest, IntraMonoSolverPreservesExplicitMidFunctionSeed) {
       return Lhs == Rhs;
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
       if (SeedInst != nullptr && SeedFact != nullptr) {
         Seeds[SeedInst].insert(SeedFact);
@@ -403,7 +404,8 @@ TEST_F(MonoTest, InterMonoSolverRecomputesIN) {
     }
 
     mono_container_t returnFlow(Instruction *, Function *, Instruction *,
-                                Instruction *, const mono_container_t &In) override {
+                                Instruction *,
+                                const mono_container_t &In) override {
       return In;
     }
 
@@ -417,10 +419,11 @@ TEST_F(MonoTest, InterMonoSolverRecomputesIN) {
       return Out;
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
-      if (auto *Entry = getEntryPoints().empty() ? nullptr
-                                                 : getEntryPoints().front()) {
+      if (auto *Entry =
+              getEntryPoints().empty() ? nullptr : getEntryPoints().front()) {
         Seeds[&Entry->getEntryBlock().front()] = {};
       }
       return Seeds;
@@ -480,6 +483,128 @@ TEST_F(MonoTest, InterMonoTaintStrongWeakUpdate) {
   EXPECT_TRUE(FoundLeak);
 }
 
+TEST_F(MonoTest, InterMonoSolverUsesIndirectCallResolverHook) {
+  const char *source = R"(
+    define void @callee(i32* %p) {
+    entry:
+      ret void
+    }
+
+    define void @main(i32* %p) {
+    entry:
+      %slot = alloca void (i32*)*
+      store void (i32*)* @callee, void (i32*)** %slot
+      %fp = load void (i32*)*, void (i32*)** %slot
+      call void %fp(i32* %p)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  auto *Main = module->getFunction("main");
+  auto *Callee = module->getFunction("callee");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Callee, nullptr);
+
+  struct Domain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+  class ProblemT : public InterMonoProblem<Domain> {
+  public:
+    using n_t = typename InterMonoProblem<Domain>::n_t;
+    using f_t = typename InterMonoProblem<Domain>::f_t;
+    using UnresolvedCallPolicy =
+        typename InterMonoProblem<Domain>::UnresolvedCallPolicy;
+
+    ProblemT(Function *Entry, Function *Resolved)
+        : InterMonoProblem<Domain>({Entry}), Resolved(Resolved) {}
+
+    mono_container_t normalFlow(Instruction *Inst,
+                                const mono_container_t &In) override {
+      if (isa<CallBase>(Inst)) {
+        return {};
+      }
+      return In;
+    }
+
+    mono_container_t merge(const mono_container_t &Lhs,
+                           const mono_container_t &Rhs) override {
+      mono_container_t Out = Lhs;
+      Out.insert(Rhs.begin(), Rhs.end());
+      return Out;
+    }
+
+    bool equal_to(const mono_container_t &Lhs,
+                  const mono_container_t &Rhs) override {
+      return Lhs == Rhs;
+    }
+
+    mono_container_t callFlow(Instruction *CallSite, Function *,
+                              const mono_container_t &) override {
+      mono_container_t Out;
+      if (CallSite != nullptr) {
+        Out.insert(CallSite);
+      }
+      return Out;
+    }
+
+    mono_container_t returnFlow(Instruction *CallSite, Function *,
+                                Instruction *, Instruction *,
+                                const mono_container_t &) override {
+      mono_container_t Out;
+      if (CallSite != nullptr) {
+        Out.insert(CallSite);
+      }
+      return Out;
+    }
+
+    mono_container_t callToRetFlow(Instruction *, Instruction *,
+                                   ArrayRef<Function *>,
+                                   const mono_container_t &) override {
+      return {};
+    }
+
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
+      std::unordered_map<Instruction *, mono_container_t> Seeds;
+      Seeds[&getEntryPoints().front()->getEntryBlock().front()] = {};
+      return Seeds;
+    }
+
+    std::vector<f_t> resolve_indirect_callees(n_t CallSite) const override {
+      if (CallSite != nullptr && isa<CallBase>(CallSite) &&
+          Resolved != nullptr) {
+        return {Resolved};
+      }
+      return {};
+    }
+
+    UnresolvedCallPolicy unresolved_call_policy() const override {
+      return UnresolvedCallPolicy::Ignore;
+    }
+
+  private:
+    Function *Resolved;
+  };
+
+  auto *FinalRet = findFirst<ReturnInst>(Main);
+  ASSERT_NE(FinalRet, nullptr);
+
+  ProblemT Problem(Main, Callee);
+  InterMonoSolver<Domain, 2> Solver(Problem);
+  Solver.solve();
+
+  auto Facts = Solver.getResultsAt(FinalRet);
+  bool SawCallFact = false;
+  for (auto &BB : *Main) {
+    for (auto &I : BB) {
+      if (isa<CallBase>(&I)) {
+        SawCallFact = Facts.count(&I) == 1u;
+      }
+    }
+  }
+  EXPECT_TRUE(SawCallFact);
+}
+
 TEST_F(MonoTest, CallBrContinuation) {
   const char *source = R"(
     declare void @callee()
@@ -534,7 +659,8 @@ TEST_F(MonoTest, CallBrContinuation) {
     }
 
     mono_container_t returnFlow(Instruction *, Function *, Instruction *,
-                                Instruction *, const mono_container_t &In) override {
+                                Instruction *,
+                                const mono_container_t &In) override {
       return In;
     }
 
@@ -544,10 +670,11 @@ TEST_F(MonoTest, CallBrContinuation) {
       return In;
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
-      if (auto *Entry = getEntryPoints().empty() ? nullptr
-                                                 : getEntryPoints().front()) {
+      if (auto *Entry =
+              getEntryPoints().empty() ? nullptr : getEntryPoints().front()) {
         Seeds[&Entry->getEntryBlock().front()] = {};
       }
       return Seeds;
@@ -613,7 +740,8 @@ TEST_F(MonoTest, IntraMonoSolverReentrantSolveStable) {
       return Lhs == Rhs;
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
       Seeds[&getEntryPoints().front()->getEntryBlock().front()] = {};
       return Seeds;
@@ -674,7 +802,8 @@ TEST_F(MonoTest, IntraMonoSolverSingleNodeProcessed) {
       return Lhs == Rhs;
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
       Seeds[&getEntryPoints().front()->getEntryBlock().front()] = {};
       return Seeds;
@@ -741,7 +870,8 @@ TEST_F(MonoTest, IntraMonoSolverWideningCounterResetsAcrossRuns) {
       return Out;
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
       Seeds[&getEntryPoints().front()->getEntryBlock().front()] = {};
       return Seeds;
@@ -797,7 +927,8 @@ TEST_F(MonoTest, InterMonoSolverContextSeedPreservedAcrossContexts) {
     explicit ProblemT(Function *Entry, Function *CalleeFn)
         : InterMonoProblem<Domain>({Entry}), CalleeFn(CalleeFn) {}
 
-    mono_container_t normalFlow(Instruction *, const mono_container_t &In) override {
+    mono_container_t normalFlow(Instruction *,
+                                const mono_container_t &In) override {
       return In;
     }
 
@@ -823,7 +954,8 @@ TEST_F(MonoTest, InterMonoSolverContextSeedPreservedAcrossContexts) {
     }
 
     mono_container_t returnFlow(Instruction *, Function *, Instruction *,
-                                Instruction *, const mono_container_t &In) override {
+                                Instruction *,
+                                const mono_container_t &In) override {
       return In;
     }
 
@@ -833,7 +965,8 @@ TEST_F(MonoTest, InterMonoSolverContextSeedPreservedAcrossContexts) {
       return In;
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
       auto *EntryInst = &getEntryPoints().front()->getEntryBlock().front();
       Seeds[EntryInst] = {};
@@ -893,7 +1026,8 @@ TEST_F(MonoTest, CallStringEngineProcessesSeedInsWithoutSeeds) {
   ASSERT_NE(Seeded, nullptr);
 
   using Container = std::set<Value *>;
-  using Engine = dataflow::CallStringInterProceduralDataFlowEngine<0, Container>;
+  using Engine =
+      dataflow::CallStringInterProceduralDataFlowEngine<0, Container>;
   using ResultTy = Engine::ResultTy;
   using Context = Engine::Context;
   using ContextKey = Engine::ContextKey;
@@ -915,33 +1049,36 @@ TEST_F(MonoTest, CallStringEngineProcessesSeedInsWithoutSeeds) {
   auto InitializeIN = [](Instruction *, Container &IN) { IN.clear(); };
   auto InitializeOUT = [](Instruction *, Container &OUT) { OUT.clear(); };
   auto ComputeIN = [](Instruction *, Instruction *Pred, const Context &PredCtx,
-                      Container &IN, ResultTy *DF) {
+                      const Context &, Container &IN, ResultTy *DF) {
     const auto &PredOut = DF->OUT(Pred, PredCtx);
     IN.insert(PredOut.begin(), PredOut.end());
   };
   auto ComputeOUT = [](Instruction *Inst, const Context &Ctx, Container &OUT,
-                       ResultTy *DF) {
-    OUT = DF->IN(Inst, Ctx);
-  };
+                       ResultTy *DF) { OUT = DF->IN(Inst, Ctx); };
   auto Equal = [](const Container &Lhs, const Container &Rhs) {
     return Lhs == Rhs;
   };
 
-  auto Result = E.applyForwardFromSeeds(module.get(), Seeds, &ICF, SeedIns,
-                                        ComputeGEN, ComputeKILL, InitializeIN,
-                                        InitializeOUT, ComputeIN, ComputeOUT,
-                                        Equal);
+  auto Result = E.applyForwardFromSeeds(
+      module.get(), Seeds, &ICF, SeedIns, ComputeGEN, ComputeKILL, InitializeIN,
+      InitializeOUT, ComputeIN, ComputeOUT, Equal);
   ASSERT_NE(Result, nullptr);
 
   const auto &RetIn = Result->IN(Ret, EmptyCtx);
   EXPECT_EQ(RetIn.count(&*Seeded->arg_begin()), 1u);
 }
 
-TEST_F(MonoTest, InterMonoSolverRejectsBackwardDirection) {
+TEST_F(MonoTest, InterMonoSolverSupportsBackwardDirection) {
   const char *source = R"(
-    define void @test() {
+    define i32 @callee(i32 %x) {
     entry:
-      ret void
+      ret i32 %x
+    }
+
+    define i32 @test(i32 %y) {
+    entry:
+      %r = call i32 @callee(i32 %y)
+      ret i32 %r
     }
   )";
 
@@ -959,7 +1096,8 @@ TEST_F(MonoTest, InterMonoSolverRejectsBackwardDirection) {
       return ::dataflow::controlflow::FlowDirection::Backward;
     }
 
-    mono_container_t normalFlow(Instruction *, const mono_container_t &In) override {
+    mono_container_t normalFlow(Instruction *,
+                                const mono_container_t &In) override {
       return In;
     }
 
@@ -975,14 +1113,29 @@ TEST_F(MonoTest, InterMonoSolverRejectsBackwardDirection) {
       return Lhs == Rhs;
     }
 
-    mono_container_t callFlow(Instruction *, Function *,
+    mono_container_t callFlow(Instruction *CallSite, Function *Callee,
                               const mono_container_t &In) override {
-      return In;
+      mono_container_t Out;
+      auto *Call = dyn_cast_or_null<CallBase>(CallSite);
+      if (Call == nullptr || Callee == nullptr || Callee->arg_empty()) {
+        return Out;
+      }
+      if (In.count(Callee->arg_begin())) {
+        Out.insert(Call->getArgOperand(0));
+      }
+      return Out;
     }
 
-    mono_container_t returnFlow(Instruction *, Function *, Instruction *,
-                                Instruction *, const mono_container_t &In) override {
-      return In;
+    mono_container_t returnFlow(Instruction *CallSite, Function *,
+                                Instruction *ExitStmt, Instruction *,
+                                const mono_container_t &In) override {
+      mono_container_t Out;
+      auto *Ret = dyn_cast_or_null<ReturnInst>(ExitStmt);
+      if (CallSite != nullptr && Ret != nullptr && In.count(CallSite) > 0 &&
+          Ret->getReturnValue() != nullptr) {
+        Out.insert(Ret->getReturnValue());
+      }
+      return Out;
     }
 
     mono_container_t callToRetFlow(Instruction *, Instruction *,
@@ -991,8 +1144,18 @@ TEST_F(MonoTest, InterMonoSolverRejectsBackwardDirection) {
       return In;
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
-      return {};
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
+      std::unordered_map<Instruction *, mono_container_t> Seeds;
+      for (auto &BB : *getEntryPoints().front()) {
+        if (auto *RetInst = dyn_cast<ReturnInst>(BB.getTerminator())) {
+          auto *Call = dyn_cast<CallBase>(RetInst->getReturnValue());
+          if (Call != nullptr) {
+            Seeds[RetInst].insert(Call);
+          }
+        }
+      }
+      return Seeds;
     }
   };
 
@@ -1000,9 +1163,11 @@ TEST_F(MonoTest, InterMonoSolverRejectsBackwardDirection) {
   InterMonoSolver<Domain, 0> Solver(Problem);
   Solver.solve();
 
-  EXPECT_EQ(Solver.getResults(), nullptr);
-  EXPECT_EQ(Solver.getAnalysisINMap(), nullptr);
-  EXPECT_EQ(Solver.getAnalysisOUTMap(), nullptr);
+  ASSERT_NE(Solver.getResults(), nullptr);
+  auto *Call = findFirst<CallInst>(F);
+  ASSERT_NE(Call, nullptr);
+  auto Facts = Solver.getResultsAt(Call);
+  EXPECT_EQ(Facts.count(F->getArg(0)), 1u);
 }
 
 TEST_F(MonoTest, InterMonoSolverEmptyContextReturnStaysAtMatchingCallSite) {
@@ -1059,8 +1224,9 @@ TEST_F(MonoTest, InterMonoSolverEmptyContextReturnStaysAtMatchingCallSite) {
       return Out;
     }
 
-    mono_container_t returnFlow(Instruction *CallSite, Function *, Instruction *,
-                                Instruction *, const mono_container_t &) override {
+    mono_container_t returnFlow(Instruction *CallSite, Function *,
+                                Instruction *, Instruction *,
+                                const mono_container_t &) override {
       mono_container_t Out;
       if (CallSite != nullptr) {
         Out.insert(CallSite);
@@ -1074,7 +1240,8 @@ TEST_F(MonoTest, InterMonoSolverEmptyContextReturnStaysAtMatchingCallSite) {
       return {};
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
       Seeds[&getEntryPoints().front()->getEntryBlock().front()] = {};
       return Seeds;
@@ -1141,7 +1308,8 @@ TEST_F(MonoTest, InterMonoSolverMissingNodeQueryReturnsAllTopForMustAnalysis) {
 
     mono_container_t allTop() override { return {TopFact}; }
 
-    mono_container_t normalFlow(Instruction *, const mono_container_t &In) override {
+    mono_container_t normalFlow(Instruction *,
+                                const mono_container_t &In) override {
       return In;
     }
 
@@ -1167,7 +1335,8 @@ TEST_F(MonoTest, InterMonoSolverMissingNodeQueryReturnsAllTopForMustAnalysis) {
     }
 
     mono_container_t returnFlow(Instruction *, Function *, Instruction *,
-                                Instruction *, const mono_container_t &In) override {
+                                Instruction *,
+                                const mono_container_t &In) override {
       return In;
     }
 
@@ -1177,7 +1346,8 @@ TEST_F(MonoTest, InterMonoSolverMissingNodeQueryReturnsAllTopForMustAnalysis) {
       return In;
     }
 
-    std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
       std::unordered_map<Instruction *, mono_container_t> Seeds;
       Seeds[&getEntryPoints().front()->getEntryBlock().front()] = allTop();
       return Seeds;

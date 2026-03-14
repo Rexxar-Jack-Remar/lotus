@@ -30,15 +30,6 @@ public:
   explicit InterMonoSolver(ProblemTy &Problem) : Problem(Problem) {}
 
   void solve() {
-    if (Problem.direction() !=
-        ::dataflow::controlflow::FlowDirection::Forward) {
-      llvm::errs()
-          << "[InterMonoSolver] ERROR: backward interprocedural Mono analyses "
-             "are not supported by the current call-string engine.\n";
-      Result.reset();
-      return;
-    }
-
     auto &Entries = Problem.getEntryPoints();
     const auto Seeds = Problem.initialSeeds();
     if (Entries.empty() && Seeds.empty()) {
@@ -64,8 +55,9 @@ public:
     };
     auto ComputeIN = [this](llvm::Instruction *Inst,
                             llvm::Instruction *PredInst, const Context &PredCtx,
-                            mono_container_t &IN, ResultTy *DF) {
-      computeIN(Inst, PredInst, PredCtx, IN, DF);
+                            const Context &CurrentCtx, mono_container_t &IN,
+                            ResultTy *DF) {
+      computeIN(Inst, PredInst, PredCtx, CurrentCtx, IN, DF);
     };
     auto ComputeOUT = [this](llvm::Instruction *Inst, const Context &Ctx,
                              mono_container_t &OUT,
@@ -85,13 +77,32 @@ public:
     }
 
     if (RootKeys.empty()) {
-      // Default seed: start at each entry's first instruction with TOP.
       for (auto *Entry : Entries) {
         if (Entry == nullptr || Entry->isDeclaration() || Entry->empty()) {
           continue;
         }
-        RootKeys.push_back(
-            ContextKey{&*Entry->getEntryBlock().begin(), EmptyCtx});
+        if (Problem.direction() ==
+            ::dataflow::controlflow::FlowDirection::Backward) {
+          for (auto *Exit :
+               Entry->getBasicBlockList().back().getTerminator()
+                   ? std::vector<llvm::Instruction *>{Entry->getBasicBlockList()
+                                                          .back()
+                                                          .getTerminator()}
+                   : std::vector<llvm::Instruction *>{}) {
+            if (Exit != nullptr) {
+              RootKeys.push_back(ContextKey{Exit, EmptyCtx});
+            }
+          }
+          for (auto &BB : *Entry) {
+            if (auto *Ret =
+                    llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
+              RootKeys.push_back(ContextKey{Ret, EmptyCtx});
+            }
+          }
+        } else {
+          RootKeys.push_back(
+              ContextKey{&*Entry->getEntryBlock().begin(), EmptyCtx});
+        }
       }
     }
 
@@ -114,9 +125,16 @@ public:
       ICF = OwnedICF.get();
     }
 
-    Result = Engine.applyForwardFromSeeds(
-        M, RootKeys, ICF, SeedIns, ComputeGEN, ComputeKILL, InitializeIN,
-        InitializeOUT, ComputeIN, ComputeOUT, Equal);
+    if (Problem.direction() ==
+        ::dataflow::controlflow::FlowDirection::Backward) {
+      Result = Engine.applyBackwardFromSeeds(
+          M, RootKeys, ICF, SeedIns, ComputeGEN, ComputeKILL, InitializeIN,
+          InitializeOUT, ComputeIN, ComputeOUT, Equal);
+    } else {
+      Result = Engine.applyForwardFromSeeds(
+          M, RootKeys, ICF, SeedIns, ComputeGEN, ComputeKILL, InitializeIN,
+          InitializeOUT, ComputeIN, ComputeOUT, Equal);
+    }
   }
 
   const ResultTy *getResults() const { return Result.get(); }
@@ -241,7 +259,8 @@ private:
   void computeKILL(llvm::Instruction * /*Inst*/, ResultTy * /*DF*/) {}
 
   void computeIN(llvm::Instruction *Inst, llvm::Instruction *PredInst,
-                 const Context &PredCtx, mono_container_t &IN, ResultTy *DF) {
+                 const Context &PredCtx, const Context &CurrentCtx,
+                 mono_container_t &IN, ResultTy *DF) {
     mono_container_t Incoming;
 
     // Bug A fix: use DF->OUT(PredInst, PredCtx) — the already-computed OUT of
@@ -250,7 +269,64 @@ private:
     // here to produce OUT[PredInst] would double-apply the transfer function.
     const auto &PredOut = DF->OUT(PredInst, PredCtx);
 
-    if (isFunctionEntry(Inst) && llvm::isa<llvm::CallBase>(PredInst)) {
+    if (Problem.direction() ==
+        ::dataflow::controlflow::FlowDirection::Backward) {
+      if (llvm::isa<llvm::CallBase>(Inst) && isFunctionEntry(PredInst)) {
+        const auto Callees = getCalleesForCall(Inst);
+        bool Matches = false;
+        for (auto *Callee : Callees) {
+          if (Callee == PredInst->getFunction()) {
+            Matches = true;
+            break;
+          }
+        }
+        Incoming =
+            Matches ? Problem.callFlow(Inst, PredInst->getFunction(), PredOut)
+                    : Problem.allTop();
+      } else if (llvm::isa<llvm::CallBase>(Inst) &&
+                 isContinuationOfCall(PredInst, Inst)) {
+        const auto Callees = getCalleesForCall(Inst);
+        Incoming = Problem.callToRetFlow(Inst, PredInst, Callees, PredOut);
+      } else if (llvm::isa<llvm::ReturnInst>(Inst)) {
+        if (!CurrentCtx.empty()) {
+          auto ExitCtx = CurrentCtx;
+          auto *CallSite = ExitCtx.pop_back();
+          Incoming = Problem.returnFlow(CallSite, Inst->getFunction(), Inst,
+                                        PredInst, PredOut);
+        } else {
+          Incoming = Problem.allTop();
+          if (ICF != nullptr) {
+            bool FirstCaller = true;
+            mono_container_t Merged;
+            for (auto *Caller : ICF->getCallersOf(Inst->getFunction())) {
+              bool ReachesPred = false;
+              for (auto *RetSite : ICF->getReturnSitesOfCallAt(Caller)) {
+                if (RetSite == PredInst) {
+                  ReachesPred = true;
+                  break;
+                }
+              }
+              if (!ReachesPred) {
+                continue;
+              }
+              auto RetFacts = Problem.returnFlow(Caller, Inst->getFunction(),
+                                                 Inst, PredInst, PredOut);
+              if (FirstCaller) {
+                Merged = RetFacts;
+                FirstCaller = false;
+              } else {
+                Merged = Problem.merge(Merged, RetFacts);
+              }
+            }
+            if (!FirstCaller) {
+              Incoming = Merged;
+            }
+          }
+        }
+      } else {
+        Incoming = PredOut;
+      }
+    } else if (isFunctionEntry(Inst) && llvm::isa<llvm::CallBase>(PredInst)) {
       // Call edge: PredInst is the call site, Inst is the callee entry.
       // Use callFlow to map caller facts to callee entry facts.
       const auto Callees = getCalleesForCall(PredInst);
@@ -344,7 +420,8 @@ private:
     OUT = Problem.normalFlow(Inst, DF->IN(Inst, Ctx));
   }
 
-  std::vector<llvm::Function *> getCalleesForCall(llvm::Instruction *Inst) const {
+  std::vector<llvm::Function *>
+  getCalleesForCall(llvm::Instruction *Inst) const {
     if (ICF == nullptr) {
       return Problem.getCalleesOfCallAt(Inst);
     }

@@ -242,6 +242,11 @@ protected:
 template <typename AnalysisDomainTy>
 class InterMonoProblem : public IntraMonoProblem<AnalysisDomainTy> {
 public:
+  enum class UnresolvedCallPolicy {
+    Ignore,
+    WarnAndIgnore,
+  };
+
   using n_t = typename AnalysisDomainTy::n_t;
   using d_t = typename AnalysisDomainTy::d_t;
   using f_t = typename AnalysisDomainTy::f_t;
@@ -336,17 +341,23 @@ public:
     if (auto *Callee = Call->getCalledFunction()) {
       Callees.push_back(Callee);
     } else {
-      // Indirect call — warn instead of silently dropping.
-      // The default implementation cannot resolve indirect calls; the analysis
-      // will be unsound at this call site.  Override getCalleesOfCallAt() and
-      // use points-to information to handle indirect calls correctly.
-      llvm::errs()
-          << "[InterMonoProblem] WARNING: indirect call site encountered "
-             "but getCalleesOfCallAt() not overridden — callee(s) will be "
-             "ignored and the analysis may be unsound.\n"
-          << "  Call site: " << *CallSite << "\n";
+      Callees = resolve_indirect_callees(CallSite);
+      if (Callees.empty() &&
+          unresolved_call_policy() == UnresolvedCallPolicy::WarnAndIgnore) {
+        llvm::errs()
+            << "[InterMonoProblem] WARNING: indirect call site encountered "
+               "but no callee resolution was provided — callee(s) will be "
+               "ignored and the analysis may be unsound.\n"
+            << "  Call site: " << *CallSite << "\n";
+      }
     }
     return Callees;
+  }
+
+  virtual std::vector<f_t> resolve_indirect_callees(n_t) const { return {}; }
+
+  virtual UnresolvedCallPolicy unresolved_call_policy() const {
+    return UnresolvedCallPolicy::WarnAndIgnore;
   }
 
   const i_t *getICFG() const { return ICF; }

@@ -1,5 +1,12 @@
 #include <Dataflow/IFDS/Solvers/IDESolver.h>
 #include <gtest/gtest.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Type.h>
 
 namespace ifds {
 namespace {
@@ -37,6 +44,9 @@ public:
     return {fact};
   }
   FactSet initial_facts(const llvm::Function * /*main*/) override { return {}; }
+  IDEInitialSeeds initial_ide_seeds(const llvm::Module &module) override {
+    return this->lift_ifds_initial_seeds(module, bottom_value());
+  }
 
   Value top_value() const override { return 0; }
   Value bottom_value() const override { return 0; }
@@ -70,6 +80,21 @@ public:
       llvm::ArrayRef<const llvm::Function *> /*callees*/,
       const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) override {
     return identity();
+  }
+};
+
+class SeedValueProblem : public DummyIDEProblem {
+public:
+  IDEInitialSeeds initial_ide_seeds(const llvm::Module &module) override {
+    IDEInitialSeeds seeds;
+    auto *main = module.getFunction("main");
+    auto *entry = main == nullptr || main->empty()
+                      ? nullptr
+                      : &main->getEntryBlock().front();
+    if (entry != nullptr) {
+      seeds.add_seed(entry, zero_fact(), 42);
+    }
+    return seeds;
   }
 };
 
@@ -110,6 +135,25 @@ TEST(IDEEdgeFunctionTest, EquivalenceIsConservativeWhenTopEqualsBottom) {
   auto plus1 = [](int x) { return x + 1; };
   auto plus2 = [](int x) { return x + 2; };
   EXPECT_FALSE(P.edge_function_equivalent(plus1, plus2));
+}
+
+TEST(IDEEdgeFunctionTest, ExplicitSeedValuesPropagate) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("seed_values", Ctx);
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto *FTy = llvm::FunctionType::get(I32, {}, false);
+  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "main",
+                                   M.get());
+
+  auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", F);
+  llvm::IRBuilder<> B(Entry);
+  auto *Ret = B.CreateRet(llvm::ConstantInt::get(I32, 0));
+
+  SeedValueProblem Problem;
+  IDESolver<SeedValueProblem> Solver(Problem);
+  Solver.solve(*M);
+
+  EXPECT_EQ(Solver.get_value_at(Ret, 0), 42);
 }
 
 } // namespace

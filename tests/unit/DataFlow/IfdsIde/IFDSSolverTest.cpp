@@ -122,7 +122,6 @@ protected:
   std::unique_ptr<Module> createBranchFlow() {
     auto module = std::make_unique<Module>("branch_flow", *context);
     auto *i32 = Type::getInt32Ty(*context);
-    auto *i1 = Type::getInt1Ty(*context);
     auto *mainTy = FunctionType::get(i32, {}, false);
     auto *sourceTy = FunctionType::get(i32, {}, false);
     auto *sinkTy = FunctionType::get(Type::getVoidTy(*context), {i32}, false);
@@ -160,6 +159,54 @@ protected:
     return module;
   }
 };
+
+namespace {
+
+class ExternalSummaryProblem : public IFDSProblem<const llvm::Value *> {
+public:
+  using Fact = const llvm::Value *;
+
+  Fact zero_fact() const override { return nullptr; }
+
+  FactSet normal_flow(const llvm::Instruction *, const llvm::Instruction *,
+                      const Fact &fact) override {
+    return {fact};
+  }
+
+  FactSet call_flow(const llvm::CallBase *, const llvm::Function *,
+                    const Fact &) override {
+    return {};
+  }
+
+  FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
+                      const llvm::Instruction *, const llvm::Function *,
+                      const Fact &, const Fact &) override {
+    return {};
+  }
+
+  FactSet call_to_return_flow(const llvm::CallBase *, const llvm::Instruction *,
+                              llvm::ArrayRef<const llvm::Function *>,
+                              const Fact &fact) override {
+    return fact ? FactSet{fact} : FactSet{};
+  }
+
+  FactSet summary_flow(const llvm::CallBase *call, const llvm::Function *callee,
+                       const Fact &fact) override {
+    if (!is_zero_fact(fact) || call == nullptr || callee == nullptr) {
+      return {};
+    }
+    if (callee->getName() == "recv") {
+      return {call};
+    }
+    return {};
+  }
+
+  FactSet initial_facts(const llvm::Function *) override {
+    return {zero_fact()};
+  }
+};
+
+} // namespace
 
 // ============================================================================
 // Test Cases - IFDS Summary Types
@@ -309,6 +356,30 @@ TEST_F(IFDSSolverTest, UnboundedSolver) {
   EXPECT_FALSE(solver.bound_reached());
   EXPECT_GT(solver.get_steps_performed(), 0u);
   EXPECT_EQ(solver.get_max_steps(), 0u);
+}
+
+TEST_F(IFDSSolverTest, ExternalSummaryFlowBypassesUnknownCallee) {
+  auto module = std::make_unique<Module>("external_summary", *context);
+  auto *i32 = Type::getInt32Ty(*context);
+  auto *mainTy = FunctionType::get(i32, {}, false);
+  auto *recvTy = FunctionType::get(i32, {}, false);
+
+  auto *main =
+      Function::Create(mainTy, Function::ExternalLinkage, "main", module.get());
+  auto *recv =
+      Function::Create(recvTy, Function::ExternalLinkage, "recv", module.get());
+
+  auto *entry = BasicBlock::Create(*context, "entry", main);
+  IRBuilder<> builder(entry);
+  auto *recvCall = builder.CreateCall(recvTy, recv, {}, "recv_value");
+  auto *ret = builder.CreateRet(recvCall);
+
+  ExternalSummaryProblem problem;
+  IFDSSolver<ExternalSummaryProblem> solver(problem);
+  solver.solve(*module);
+
+  auto facts = solver.get_facts_at_entry(ret);
+  EXPECT_EQ(facts.count(recvCall), 1u);
 }
 
 // ============================================================================

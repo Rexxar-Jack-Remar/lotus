@@ -3,7 +3,6 @@
 #include <Dataflow/IFDS/Solvers/IDESolver.h>
 #include <Dataflow/IFDS/Solvers/IFDSSolver.h>
 #include <gtest/gtest.h>
-
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -16,7 +15,8 @@ namespace ifds {
 namespace {
 
 struct InvokeFixture {
-  std::unique_ptr<llvm::LLVMContext> ctx = std::make_unique<llvm::LLVMContext>();
+  std::unique_ptr<llvm::LLVMContext> ctx =
+      std::make_unique<llvm::LLVMContext>();
   std::unique_ptr<llvm::Module> module;
   const llvm::InvokeInst *invoke = nullptr;
   const llvm::Instruction *normal_site = nullptr;
@@ -31,15 +31,16 @@ InvokeFixture buildInternalInvokeFixture() {
   auto *i32 = llvm::Type::getInt32Ty(*fixture.ctx);
   auto *i8ptr = llvm::Type::getInt8PtrTy(*fixture.ctx);
   auto *personality_ty = llvm::FunctionType::get(i32, true);
-  auto *personality = llvm::Function::Create(
-      personality_ty, llvm::Function::ExternalLinkage, "__gxx_personality_v0",
-      fixture.module.get());
+  auto *personality =
+      llvm::Function::Create(personality_ty, llvm::Function::ExternalLinkage,
+                             "__gxx_personality_v0", fixture.module.get());
   auto *callee_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *callee = llvm::Function::Create(callee_ty, llvm::Function::InternalLinkage,
-                                        "returns_normally", fixture.module.get());
+  auto *callee =
+      llvm::Function::Create(callee_ty, llvm::Function::InternalLinkage,
+                             "returns_normally", fixture.module.get());
   auto *main_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *main_fn = llvm::Function::Create(main_ty, llvm::Function::ExternalLinkage,
-                                         "main", fixture.module.get());
+  auto *main_fn = llvm::Function::Create(
+      main_ty, llvm::Function::ExternalLinkage, "main", fixture.module.get());
   main_fn->setPersonalityFn(personality);
 
   auto *callee_entry = llvm::BasicBlock::Create(*fixture.ctx, "entry", callee);
@@ -54,34 +55,36 @@ InvokeFixture buildInternalInvokeFixture() {
   fixture.invoke = entry_builder.CreateInvoke(callee, normal, lpad, {}, "inv");
 
   llvm::IRBuilder<> normal_builder(normal);
-  fixture.normal_site = normal_builder.CreateRet(llvm::ConstantInt::get(i32, 0));
+  fixture.normal_site =
+      normal_builder.CreateRet(llvm::ConstantInt::get(i32, 0));
 
   llvm::IRBuilder<> lpad_builder(lpad);
   auto *lpad_ty = llvm::StructType::get(i8ptr, i32);
   auto *landing_pad = lpad_builder.CreateLandingPad(lpad_ty, 0);
   landing_pad->setCleanup(true);
-  fixture.unwind_site =
-      lpad_builder.CreateRet(llvm::ConstantInt::get(i32, 1));
+  fixture.unwind_site = lpad_builder.CreateRet(llvm::ConstantInt::get(i32, 1));
 
   return fixture;
 }
 
 InvokeFixture buildInvokeFixture() {
   InvokeFixture fixture;
-  fixture.module = std::make_unique<llvm::Module>("invoke_fixture", *fixture.ctx);
+  fixture.module =
+      std::make_unique<llvm::Module>("invoke_fixture", *fixture.ctx);
 
   auto *i32 = llvm::Type::getInt32Ty(*fixture.ctx);
   auto *i8ptr = llvm::Type::getInt8PtrTy(*fixture.ctx);
   auto *personality_ty = llvm::FunctionType::get(i32, true);
-  auto *personality = llvm::Function::Create(
-      personality_ty, llvm::Function::ExternalLinkage, "__gxx_personality_v0",
-      fixture.module.get());
+  auto *personality =
+      llvm::Function::Create(personality_ty, llvm::Function::ExternalLinkage,
+                             "__gxx_personality_v0", fixture.module.get());
   auto *callee_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *callee = llvm::Function::Create(callee_ty, llvm::Function::ExternalLinkage,
-                                        "may_throw", fixture.module.get());
+  auto *callee =
+      llvm::Function::Create(callee_ty, llvm::Function::ExternalLinkage,
+                             "may_throw", fixture.module.get());
   auto *main_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *main_fn = llvm::Function::Create(main_ty, llvm::Function::ExternalLinkage,
-                                         "main", fixture.module.get());
+  auto *main_fn = llvm::Function::Create(
+      main_ty, llvm::Function::ExternalLinkage, "main", fixture.module.get());
   main_fn->setPersonalityFn(personality);
 
   auto *entry = llvm::BasicBlock::Create(*fixture.ctx, "entry", main_fn);
@@ -92,14 +95,14 @@ InvokeFixture buildInvokeFixture() {
   fixture.invoke = entry_builder.CreateInvoke(callee, normal, lpad, {}, "inv");
 
   llvm::IRBuilder<> normal_builder(normal);
-  fixture.normal_site = normal_builder.CreateRet(llvm::ConstantInt::get(i32, 0));
+  fixture.normal_site =
+      normal_builder.CreateRet(llvm::ConstantInt::get(i32, 0));
 
   llvm::IRBuilder<> lpad_builder(lpad);
   auto *lpad_ty = llvm::StructType::get(i8ptr, i32);
   auto *landing_pad = lpad_builder.CreateLandingPad(lpad_ty, 0);
   landing_pad->setCleanup(true);
-  fixture.unwind_site =
-      lpad_builder.CreateRet(llvm::ConstantInt::get(i32, 1));
+  fixture.unwind_site = lpad_builder.CreateRet(llvm::ConstantInt::get(i32, 1));
 
   return fixture;
 }
@@ -107,9 +110,15 @@ InvokeFixture buildInvokeFixture() {
 struct ReturnSiteFact {
   enum Kind { Zero, Normal, Exceptional } kind = Zero;
 
-  bool operator==(const ReturnSiteFact &other) const { return kind == other.kind; }
-  bool operator!=(const ReturnSiteFact &other) const { return !(*this == other); }
-  bool operator<(const ReturnSiteFact &other) const { return kind < other.kind; }
+  bool operator==(const ReturnSiteFact &other) const {
+    return kind == other.kind;
+  }
+  bool operator!=(const ReturnSiteFact &other) const {
+    return !(*this == other);
+  }
+  bool operator<(const ReturnSiteFact &other) const {
+    return kind < other.kind;
+  }
 
   static ReturnSiteFact zero() { return {Zero}; }
   static ReturnSiteFact normal() { return {Normal}; }
@@ -119,7 +128,9 @@ struct ReturnSiteFact {
 struct ReturnSiteValue {
   int value = -1;
 
-  bool operator==(const ReturnSiteValue &other) const { return value == other.value; }
+  bool operator==(const ReturnSiteValue &other) const {
+    return value == other.value;
+  }
 
   static ReturnSiteValue top() { return {0}; }
   static ReturnSiteValue bottom() { return {-1}; }
@@ -240,8 +251,7 @@ public:
     return call_to_return_flow(nullptr, return_site, {}, exit_fact);
   }
 
-  FactSet call_to_return_flow(const llvm::CallBase *,
-                              const llvm::Instruction *,
+  FactSet call_to_return_flow(const llvm::CallBase *, const llvm::Instruction *,
                               llvm::ArrayRef<const llvm::Function *>,
                               const ReturnSiteFact &fact) override {
     return {fact};
@@ -249,6 +259,9 @@ public:
 
   FactSet initial_facts(const llvm::Function *) override {
     return {ReturnSiteFact::zero()};
+  }
+  IDEInitialSeeds initial_ide_seeds(const llvm::Module &module) override {
+    return this->lift_ifds_initial_seeds(module, bottom_value());
   }
 
   EdgeFunction normal_edge_function(const llvm::Instruction *,
@@ -271,25 +284,26 @@ public:
                                     const llvm::Instruction *return_site,
                                     const ReturnSiteFact &,
                                     const ReturnSiteFact &) override {
-    return call_to_return_edge_function(nullptr, return_site,
-                                        {},
+    return call_to_return_edge_function(nullptr, return_site, {},
                                         ReturnSiteFact::zero(),
                                         ReturnSiteFact::zero());
   }
 
-  EdgeFunction call_to_return_edge_function(const llvm::CallBase *,
-                                            const llvm::Instruction *return_site,
-                                            llvm::ArrayRef<const llvm::Function *>,
-                                            const ReturnSiteFact &,
-                                            const ReturnSiteFact &) override {
+  EdgeFunction call_to_return_edge_function(
+      const llvm::CallBase *, const llvm::Instruction *return_site,
+      llvm::ArrayRef<const llvm::Function *>, const ReturnSiteFact &,
+      const ReturnSiteFact &) override {
     if (return_site && return_site->getParent()->getName() == "normal") {
       return [](const ReturnSiteValue &) { return ReturnSiteValue::normal(); };
     }
-    return [](const ReturnSiteValue &) { return ReturnSiteValue::exceptional(); };
+    return
+        [](const ReturnSiteValue &) { return ReturnSiteValue::exceptional(); };
   }
 
   ReturnSiteValue top_value() const override { return ReturnSiteValue::top(); }
-  ReturnSiteValue bottom_value() const override { return ReturnSiteValue::bottom(); }
+  ReturnSiteValue bottom_value() const override {
+    return ReturnSiteValue::bottom();
+  }
   ReturnSiteValue join(const ReturnSiteValue &lhs,
                        const ReturnSiteValue &rhs) const override {
     if (lhs.value == -1) {
@@ -348,7 +362,8 @@ TEST(ReturnSiteAwareSolverTest, SummaryEdgesRetainReturnSiteIdentity) {
       continue;
     }
     if (summary.return_site && summary.return_site->getParent()) {
-      saw_normal_site |= summary.return_site->getParent()->getName() == "normal";
+      saw_normal_site |=
+          summary.return_site->getParent()->getName() == "normal";
       saw_unwind_site |= summary.return_site->getParent()->getName() == "lpad";
     }
   }
@@ -362,8 +377,8 @@ TEST(IDEConfigTest, ComputeValuesFalseSkipsValueMaterialization) {
   auto module = std::make_unique<llvm::Module>("compute_values_disabled", ctx);
   auto *i32 = llvm::Type::getInt32Ty(ctx);
   auto *main_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *main_fn = llvm::Function::Create(main_ty, llvm::Function::ExternalLinkage,
-                                         "main", module.get());
+  auto *main_fn = llvm::Function::Create(
+      main_ty, llvm::Function::ExternalLinkage, "main", module.get());
   auto *entry = llvm::BasicBlock::Create(ctx, "entry", main_fn);
   llvm::IRBuilder<> builder(entry);
   auto *slot = builder.CreateAlloca(i32, nullptr, "x");
@@ -388,8 +403,8 @@ TEST(IDEConfigTest, DisablingCachesPreservesResults) {
   auto module = std::make_unique<llvm::Module>("cache_toggle", ctx);
   auto *i32 = llvm::Type::getInt32Ty(ctx);
   auto *main_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *main_fn = llvm::Function::Create(main_ty, llvm::Function::ExternalLinkage,
-                                         "main", module.get());
+  auto *main_fn = llvm::Function::Create(
+      main_ty, llvm::Function::ExternalLinkage, "main", module.get());
   auto *entry = llvm::BasicBlock::Create(ctx, "entry", main_fn);
   llvm::IRBuilder<> builder(entry);
   auto *slot = builder.CreateAlloca(i32, nullptr, "x");

@@ -480,7 +480,8 @@ public:
       std::function<void(llvm::Instruction *Inst, ContainerT &OUT)>
           initializeOUT,
       std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
-                         const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
+                         const Context &PredCtx, const Context &CurrentCtx,
+                         ContainerT &IN, ResultTy *DF)>
           computeIN,
       std::function<void(llvm::Instruction *Inst, const Context &Ctx,
                          ContainerT &OUT, ResultTy *DF)>
@@ -536,9 +537,9 @@ public:
    * seedFacts[{source, Context()}].insert(source);
    *
    * auto results = engine.applyForwardFromSeeds(module, seeds, icfg,
- * seedFacts, ...);
- * ```
- */
+   * seedFacts, ...);
+   * ```
+   */
   std::unique_ptr<ResultTy> applyForwardFromSeeds(
       llvm::Module *M, const std::vector<ContextKey> &Seeds, const ICFG *ICF,
       const std::map<ContextKey, ContainerT> &SeedIns,
@@ -548,7 +549,41 @@ public:
       std::function<void(llvm::Instruction *Inst, ContainerT &OUT)>
           initializeOUT,
       std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
-                         const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
+                         const Context &PredCtx, const Context &CurrentCtx,
+                         ContainerT &IN, ResultTy *DF)>
+          computeIN,
+      std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                         ContainerT &OUT, ResultTy *DF)>
+          computeOUT,
+      std::function<bool(const ContainerT &, const ContainerT &)> equal);
+
+  std::unique_ptr<ResultTy> applyBackward(
+      llvm::Function *Entry, const ICFG *ICF,
+      std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
+      std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
+      std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
+      std::function<void(llvm::Instruction *Inst, ContainerT &OUT)>
+          initializeOUT,
+      std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
+                         const Context &PredCtx, const Context &CurrentCtx,
+                         ContainerT &IN, ResultTy *DF)>
+          computeIN,
+      std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                         ContainerT &OUT, ResultTy *DF)>
+          computeOUT,
+      std::function<bool(const ContainerT &, const ContainerT &)> equal);
+
+  std::unique_ptr<ResultTy> applyBackwardFromSeeds(
+      llvm::Module *M, const std::vector<ContextKey> &Seeds, const ICFG *ICF,
+      const std::map<ContextKey, ContainerT> &SeedIns,
+      std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
+      std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
+      std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
+      std::function<void(llvm::Instruction *Inst, ContainerT &OUT)>
+          initializeOUT,
+      std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
+                         const Context &PredCtx, const Context &CurrentCtx,
+                         ContainerT &IN, ResultTy *DF)>
           computeIN,
       std::function<void(llvm::Instruction *Inst, const Context &Ctx,
                          ContainerT &OUT, ResultTy *DF)>
@@ -566,7 +601,8 @@ public:
       std::function<void(llvm::Instruction *Inst, ContainerT &OUT)>
           initializeOUT,
       std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
-                         const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
+                         const Context &PredCtx, const Context &CurrentCtx,
+                         ContainerT &IN, ResultTy *DF)>
           computeIN,
       std::function<void(llvm::Instruction *Inst, const Context &Ctx,
                          ContainerT &OUT, ResultTy *DF)>
@@ -611,9 +647,28 @@ private:
           &CallToReturns,
       const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>>
           &ContinuationToCalls,
-      const ICFG *ICF);
+      const ICFG *ICF, dataflow::controlflow::FlowDirection Dir);
 
-  std::vector<ContextKey> successors(const ContextKey &Key, const ICFG *ICF);
+  std::vector<ContextKey> successors(const ContextKey &Key, const ICFG *ICF,
+                                     dataflow::controlflow::FlowDirection Dir);
+
+  std::unique_ptr<ResultTy> applyFromSeeds(
+      llvm::Module *M, const std::vector<ContextKey> &Seeds, const ICFG *ICF,
+      const std::map<ContextKey, ContainerT> &SeedIns,
+      dataflow::controlflow::FlowDirection Dir,
+      std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
+      std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
+      std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
+      std::function<void(llvm::Instruction *Inst, ContainerT &OUT)>
+          initializeOUT,
+      std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
+                         const Context &PredCtx, const Context &CurrentCtx,
+                         ContainerT &IN, ResultTy *DF)>
+          computeIN,
+      std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                         ContainerT &OUT, ResultTy *DF)>
+          computeOUT,
+      std::function<bool(const ContainerT &, const ContainerT &)> equal);
 };
 
 // ---- Header-only template implementation ----
@@ -671,10 +726,98 @@ template <unsigned K, typename ContainerT>
 std::vector<
     typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ContextKey>
 CallStringInterProceduralDataFlowEngine<K, ContainerT>::successors(
-    const ContextKey &Key, const ICFG *ICF) {
+    const ContextKey &Key, const ICFG *ICF,
+    dataflow::controlflow::FlowDirection Dir) {
   std::vector<ContextKey> Result;
   auto *Inst = Key.Inst;
   auto Ctx = Key.Ctx;
+
+  if (Dir == dataflow::controlflow::FlowDirection::Backward) {
+    if (ICF->isStartPoint(Inst,
+                          dataflow::controlflow::FlowDirection::Forward)) {
+      if (!Ctx.empty()) {
+        auto CallerCtx = Ctx;
+        auto *CallInst = CallerCtx.pop_back();
+        if (CallInst != nullptr) {
+          Result.push_back({CallInst, CallerCtx});
+        }
+      } else if (ICF != nullptr) {
+        for (auto *CallInst : ICF->getCallersOf(Inst->getFunction())) {
+          if (CallInst != nullptr) {
+            Result.push_back({CallInst, Ctx});
+          }
+        }
+      }
+      return Result;
+    }
+
+    if (auto *Call = llvm::dyn_cast<llvm::CallBase>(Inst)) {
+      for (auto *Cont : ICF->getReturnSitesOfCallAt(Call)) {
+        if (Cont != nullptr) {
+          Result.push_back({Cont, Ctx});
+        }
+      }
+      return Result;
+    }
+
+    auto ContCtx = Ctx;
+    llvm::Instruction *CallInstFromCtx = nullptr;
+    if (!ContCtx.empty()) {
+      CallInstFromCtx = ContCtx.pop_back();
+    }
+
+    std::vector<llvm::Instruction *> CallSites;
+    if (CallInstFromCtx != nullptr) {
+      CallSites.push_back(CallInstFromCtx);
+    } else {
+      for (auto *PredInst : ICF->getPredsOf(
+               Inst, dataflow::controlflow::FlowDirection::Forward)) {
+        if (PredInst != nullptr && llvm::isa<llvm::CallBase>(PredInst)) {
+          for (auto *RetSite : ICF->getReturnSitesOfCallAt(PredInst)) {
+            if (RetSite == Inst) {
+              CallSites.push_back(PredInst);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    for (auto *CallSite : CallSites) {
+      Context ExitCtx = Ctx;
+      if (CallInstFromCtx == nullptr) {
+        ExitCtx.push_back(CallSite);
+      }
+      for (auto *Callee : ICF->getCalleesOfCallAt(CallSite)) {
+        if (Callee == nullptr || Callee->isDeclaration() || Callee->empty()) {
+          continue;
+        }
+        for (auto *Exit : ICF->getExitPointsOf(Callee)) {
+          if (Exit != nullptr) {
+            Result.push_back({Exit, ExitCtx});
+          }
+        }
+      }
+    }
+
+    if (CallInstFromCtx != nullptr) {
+      for (auto *PredInst : ICF->getPredsOf(
+               Inst, dataflow::controlflow::FlowDirection::Forward)) {
+        if (PredInst != nullptr && PredInst != CallInstFromCtx) {
+          Result.push_back({PredInst, ContCtx});
+        }
+      }
+      return Result;
+    }
+
+    for (auto *PredInst :
+         ICF->getPredsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
+      if (PredInst != nullptr) {
+        Result.push_back({PredInst, Ctx});
+      }
+    }
+    return Result;
+  }
 
   if (auto *Ret = llvm::dyn_cast<llvm::ReturnInst>(Inst)) {
     if (!Ctx.empty()) {
@@ -740,10 +883,62 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
         &CallToReturns,
     const std::map<llvm::Instruction *, std::vector<llvm::Instruction *>>
         &ContinuationToCalls,
-    const ICFG *ICF) {
+    const ICFG *ICF, dataflow::controlflow::FlowDirection Dir) {
   std::vector<ContextKey> Result;
   auto *Inst = Key.Inst;
   auto Ctx = Key.Ctx;
+
+  if (Dir == dataflow::controlflow::FlowDirection::Backward) {
+    if (auto *Call = llvm::dyn_cast<llvm::CallBase>(Inst)) {
+      Context CalleeCtx = Ctx;
+      CalleeCtx.push_back(Call);
+      for (auto *Callee : ICF->getCalleesOfCallAt(Call)) {
+        if (Callee == nullptr || Callee->isDeclaration() || Callee->empty()) {
+          continue;
+        }
+        for (auto *Start : ICF->getStartPointsOf(Callee)) {
+          if (Start != nullptr) {
+            Result.push_back({Start, CalleeCtx});
+          }
+        }
+      }
+      for (auto *Cont : ICF->getReturnSitesOfCallAt(Call)) {
+        if (Cont != nullptr) {
+          Result.push_back({Cont, Ctx});
+        }
+      }
+      return Result;
+    }
+
+    if (ICF->isExitInst(Inst, dataflow::controlflow::FlowDirection::Forward)) {
+      if (!Ctx.empty()) {
+        auto CallerCtx = Ctx;
+        auto *CallInst = CallerCtx.pop_back();
+        for (auto *Cont : ICF->getReturnSitesOfCallAt(CallInst)) {
+          if (Cont != nullptr) {
+            Result.push_back({Cont, CallerCtx});
+          }
+        }
+      } else if (ICF != nullptr) {
+        for (auto *CallInst : ICF->getCallersOf(Inst->getFunction())) {
+          for (auto *Cont : ICF->getReturnSitesOfCallAt(CallInst)) {
+            if (Cont != nullptr) {
+              Result.push_back({Cont, Ctx});
+            }
+          }
+        }
+      }
+      return Result;
+    }
+
+    for (auto *PredInst :
+         ICF->getSuccsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
+      if (PredInst != nullptr) {
+        Result.push_back({PredInst, Ctx});
+      }
+    }
+    return Result;
+  }
 
   if (isFunctionEntry(Inst)) {
     if (!Ctx.empty()) {
@@ -810,7 +1005,8 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
     std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
     std::function<void(llvm::Instruction *Inst, ContainerT &OUT)> initializeOUT,
     std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
-                       const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
+                       const Context &PredCtx, const Context &CurrentCtx,
+                       ContainerT &IN, ResultTy *DF)>
         computeIN,
     std::function<void(llvm::Instruction *Inst, const Context &Ctx,
                        ContainerT &OUT, ResultTy *DF)>
@@ -838,6 +1034,45 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForward(
 template <unsigned K, typename ContainerT>
 std::unique_ptr<
     typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ResultTy>
+CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyBackward(
+    llvm::Function *Entry, const ICFG *ICF,
+    std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
+    std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
+    std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
+    std::function<void(llvm::Instruction *Inst, ContainerT &OUT)> initializeOUT,
+    std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
+                       const Context &PredCtx, const Context &CurrentCtx,
+                       ContainerT &IN, ResultTy *DF)>
+        computeIN,
+    std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                       ContainerT &OUT, ResultTy *DF)>
+        computeOUT,
+    std::function<bool(const ContainerT &, const ContainerT &)> equal) {
+  assert(ICF != nullptr &&
+         "CallStringInterProceduralDataFlowEngine::applyBackward: "
+         "ICF must not be null");
+  if (Entry == nullptr || Entry->isDeclaration()) {
+    return nullptr;
+  }
+
+  auto *Module = Entry->getParent();
+  Context EmptyCtx;
+  std::vector<ContextKey> Seeds;
+  for (auto *Exit : ICF->getExitPointsOf(Entry)) {
+    if (Exit != nullptr) {
+      Seeds.push_back(ContextKey{Exit, EmptyCtx});
+    }
+  }
+  std::map<ContextKey, ContainerT> SeedIns;
+  return applyBackwardFromSeeds(
+      Module, Seeds, ICF, SeedIns, std::move(computeGEN),
+      std::move(computeKILL), std::move(initializeIN), std::move(initializeOUT),
+      std::move(computeIN), std::move(computeOUT), std::move(equal));
+}
+
+template <unsigned K, typename ContainerT>
+std::unique_ptr<
+    typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ResultTy>
 CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     llvm::Module *M, const std::vector<ContextKey> &Seeds, const ICFG *ICF,
     const std::map<ContextKey, ContainerT> &SeedIns,
@@ -846,7 +1081,8 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
     std::function<void(llvm::Instruction *Inst, ContainerT &OUT)> initializeOUT,
     std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
-                       const Context &PredCtx, ContainerT &IN, ResultTy *DF)>
+                       const Context &PredCtx, const Context &CurrentCtx,
+                       ContainerT &IN, ResultTy *DF)>
         computeIN,
     std::function<void(llvm::Instruction *Inst, const Context &Ctx,
                        ContainerT &OUT, ResultTy *DF)>
@@ -943,9 +1179,11 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     }
 
     for (const auto &PredKey :
-         predecessors(Current, CallToReturns, ContinuationToCalls, ICF)) {
+         predecessors(Current, CallToReturns, ContinuationToCalls, ICF,
+                      dataflow::controlflow::FlowDirection::Forward)) {
       ensureInitialized(PredKey, initializeIN, initializeOUT, DF.get());
-      computeIN(Current.Inst, PredKey.Inst, PredKey.Ctx, NewIn, DF.get());
+      computeIN(Current.Inst, PredKey.Inst, PredKey.Ctx, Current.Ctx, NewIn,
+                DF.get());
     }
     InSet = std::move(NewIn);
 
@@ -954,7 +1192,136 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     computeOUT(Current.Inst, Current.Ctx, OutSet, DF.get());
 
     if (FirstProcess || !equal(OutSet, OldOut) || !equal(InSet, OldIn)) {
-      for (const auto &SuccKey : successors(Current, ICF)) {
+      for (const auto &SuccKey : successors(
+               Current, ICF, dataflow::controlflow::FlowDirection::Forward)) {
+        Enqueue(SuccKey);
+      }
+    }
+  }
+
+  return DF;
+}
+
+template <unsigned K, typename ContainerT>
+std::unique_ptr<
+    typename CallStringInterProceduralDataFlowEngine<K, ContainerT>::ResultTy>
+CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyBackwardFromSeeds(
+    llvm::Module *M, const std::vector<ContextKey> &Seeds, const ICFG *ICF,
+    const std::map<ContextKey, ContainerT> &SeedIns,
+    std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
+    std::function<void(llvm::Instruction *, ResultTy *)> computeKILL,
+    std::function<void(llvm::Instruction *Inst, ContainerT &IN)> initializeIN,
+    std::function<void(llvm::Instruction *Inst, ContainerT &OUT)> initializeOUT,
+    std::function<void(llvm::Instruction *Inst, llvm::Instruction *PredInst,
+                       const Context &PredCtx, const Context &CurrentCtx,
+                       ContainerT &IN, ResultTy *DF)>
+        computeIN,
+    std::function<void(llvm::Instruction *Inst, const Context &Ctx,
+                       ContainerT &OUT, ResultTy *DF)>
+        computeOUT,
+    std::function<bool(const ContainerT &, const ContainerT &)> equal) {
+  assert(ICF != nullptr && "CallStringInterProceduralDataFlowEngine::"
+                           "applyBackwardFromSeeds: ICF must not be null");
+  if (M == nullptr || (Seeds.empty() && SeedIns.empty())) {
+    return {};
+  }
+
+  auto DF = std::make_unique<ResultTy>();
+  computeGenKill(M, computeGEN, computeKILL, DF.get());
+
+  std::map<llvm::Instruction *, std::vector<llvm::Instruction *>> CallToReturns;
+  std::map<llvm::Instruction *, std::vector<llvm::Instruction *>>
+      ContinuationToCalls;
+  for (auto &F : *M) {
+    if (F.isDeclaration()) {
+      continue;
+    }
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        if (ICF->isCallSite(&I)) {
+          for (auto *Cont : ICF->getReturnSitesOfCallAt(&I)) {
+            if (Cont != nullptr) {
+              ContinuationToCalls[Cont].push_back(&I);
+            }
+          }
+        }
+
+        if (isCallToDefinedFunction(&I, ICF)) {
+          std::vector<llvm::Instruction *> Returns;
+          for (auto *Callee : ICF->getCalleesOfCallAt(&I)) {
+            if (Callee == nullptr) {
+              continue;
+            }
+            auto CalleeReturns = ICF->getExitPointsOf(Callee);
+            for (auto *RetInst : CalleeReturns) {
+              if (RetInst != nullptr) {
+                Returns.push_back(RetInst);
+              }
+            }
+          }
+          CallToReturns[&I] = std::move(Returns);
+        }
+      }
+    }
+  }
+
+  WorkQueue Queue;
+  std::set<ContextKey> InQueue;
+  std::set<ContextKey> Processed;
+
+  auto Enqueue = [&](const ContextKey &Key) {
+    if (InQueue.insert(Key).second) {
+      Queue.push_back(Key);
+    }
+  };
+
+  for (const auto &Seed : Seeds) {
+    Enqueue(Seed);
+  }
+  for (const auto &Seed : SeedIns) {
+    Enqueue(Seed.first);
+  }
+
+  for (const auto &Seed : SeedIns) {
+    ensureInitialized(Seed.first, initializeIN, initializeOUT, DF.get());
+    DF->IN(Seed.first) = Seed.second;
+  }
+
+  while (!Queue.empty()) {
+    ContextKey Current = Queue.front();
+    Queue.pop_front();
+    InQueue.erase(Current);
+
+    const bool FirstProcess = Processed.insert(Current).second;
+    ensureInitialized(Current, initializeIN, initializeOUT, DF.get());
+
+    auto &InSet = DF->IN(Current);
+    ContainerT OldIn = InSet;
+    ContainerT NewIn;
+    initializeIN(Current.Inst, NewIn);
+    {
+      auto SeedIt = SeedIns.find(Current);
+      if (SeedIt != SeedIns.end()) {
+        NewIn = SeedIt->second;
+      }
+    }
+
+    for (const auto &PredKey :
+         predecessors(Current, CallToReturns, ContinuationToCalls, ICF,
+                      dataflow::controlflow::FlowDirection::Backward)) {
+      ensureInitialized(PredKey, initializeIN, initializeOUT, DF.get());
+      computeIN(Current.Inst, PredKey.Inst, PredKey.Ctx, Current.Ctx, NewIn,
+                DF.get());
+    }
+    InSet = std::move(NewIn);
+
+    auto &OutSet = DF->OUT(Current);
+    ContainerT OldOut = OutSet;
+    computeOUT(Current.Inst, Current.Ctx, OutSet, DF.get());
+
+    if (FirstProcess || !equal(OutSet, OldOut) || !equal(InSet, OldIn)) {
+      for (const auto &SuccKey : successors(
+               Current, ICF, dataflow::controlflow::FlowDirection::Backward)) {
         Enqueue(SuccKey);
       }
     }

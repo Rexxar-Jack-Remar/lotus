@@ -37,8 +37,12 @@ public:
                       const Fact &call_fact) override;
   FactSet call_to_return_flow(const llvm::CallBase * /*call*/,
                               const llvm::Instruction * /*return_site*/,
-                              llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) override;
+                              llvm::ArrayRef<const llvm::Function *> callees,
+                              const Fact &fact) override;
   FactSet initial_facts(const llvm::Function * /*main*/) override;
+  IDEInitialSeeds initial_ide_seeds(const llvm::Module &module) override {
+    return this->lift_ifds_initial_seeds(module, bottom_value());
+  }
 
   // Value domain
   Value top_value() const override { return nullptr; }
@@ -66,8 +70,7 @@ public:
       const llvm::CallBase * /*call*/,
       const llvm::Instruction * /*return_site*/,
       llvm::ArrayRef<const llvm::Function *> /*callees*/,
-      const Fact & /*src_fact*/,
-      const Fact & /*tgt_fact*/) override;
+      const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) override;
 };
 
 } // namespace ifds

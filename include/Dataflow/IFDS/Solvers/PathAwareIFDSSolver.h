@@ -95,27 +95,28 @@ public:
     initial_seeds(const llvm::Module &module) override {
       return m_ifds_problem.initial_seeds(module);
     }
+    typename IDEProblem<Fact, BinaryValue>::IDEInitialSeeds
+    initial_ide_seeds(const llvm::Module &module) override {
+      return this->lift_ifds_initial_seeds(module, bottom_value());
+    }
 
     // IDE interface - identity edge functions
     typename IDEProblem<Fact, BinaryValue>::EdgeFunction
     normal_edge_function(const llvm::Instruction *, const llvm::Instruction *,
-                         const Fact &,
-                         const Fact &) override {
+                         const Fact &, const Fact &) override {
       return this->identity();
     }
 
     typename IDEProblem<Fact, BinaryValue>::EdgeFunction
     call_edge_function(const llvm::CallBase *, const llvm::Function *,
-                       const Fact &,
-                       const Fact &) override {
+                       const Fact &, const Fact &) override {
       return this->identity();
     }
 
     typename IDEProblem<Fact, BinaryValue>::EdgeFunction
     return_edge_function(const llvm::CallBase *, const llvm::Function *,
-                         const llvm::Instruction *,
-                         const llvm::Instruction *, const Fact &,
-                         const Fact &) override {
+                         const llvm::Instruction *, const llvm::Instruction *,
+                         const Fact &, const Fact &) override {
       return this->identity();
     }
 
@@ -123,8 +124,7 @@ public:
     call_to_return_edge_function(const llvm::CallBase *,
                                  const llvm::Instruction *,
                                  llvm::ArrayRef<const llvm::Function *>,
-                                 const Fact &,
-                                 const Fact &) override {
+                                 const Fact &, const Fact &) override {
       return this->identity();
     }
 

@@ -38,7 +38,9 @@ IDESolver<Problem>::~IDESolver() {
 template<typename Problem>
 typename IDESolver<Problem>::EdgeFunctionPtr
 IDESolver<Problem>::make_edge_function(const EdgeFunction& ef) {
-    return std::make_shared<EdgeFunction>(ef);
+    EdgeFunctionPtr result = std::make_shared<EdgeFunction>(ef);
+    m_join_members[result.get()].insert(result.get());
+    return result;
 }
 
 template<typename Problem>
@@ -67,6 +69,12 @@ IDESolver<Problem>::join_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2) {
     if (f1 == f2) {
         return f1;
     }
+    if (join_contains(f1, f2)) {
+        return f1;
+    }
+    if (join_contains(f2, f1)) {
+        return f2;
+    }
     if (!m_config.enable_edge_function_caching()) {
         EdgeFunction joined = m_problem.join_edge_functions(*f1, *f2);
         if (m_problem.edge_function_equivalent(joined, *f1)) {
@@ -75,7 +83,9 @@ IDESolver<Problem>::join_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2) {
         if (m_problem.edge_function_equivalent(joined, *f2)) {
             return f2;
         }
-        return make_edge_function(joined);
+        EdgeFunctionPtr result = make_edge_function(joined);
+        record_join_members(result, f1, f2);
+        return result;
     }
     ComposePair key{f1, f2};
     auto it = m_join_cache.find(key);
@@ -84,16 +94,52 @@ IDESolver<Problem>::join_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2) {
     }
 
     EdgeFunction joined = m_problem.join_edge_functions(*f1, *f2);
-    EdgeFunctionPtr result;
     if (m_problem.edge_function_equivalent(joined, *f1)) {
-        result = f1;
-    } else if (m_problem.edge_function_equivalent(joined, *f2)) {
-        result = f2;
-    } else {
-        result = make_edge_function(joined);
+        m_join_cache[key] = f1;
+        return f1;
     }
+    if (m_problem.edge_function_equivalent(joined, *f2)) {
+        m_join_cache[key] = f2;
+        return f2;
+    }
+    EdgeFunctionPtr result = make_edge_function(joined);
+    record_join_members(result, f1, f2);
     m_join_cache[key] = result;
     return result;
+}
+
+template<typename Problem>
+bool IDESolver<Problem>::join_contains(EdgeFunctionPtr aggregate,
+                                       EdgeFunctionPtr member) const {
+    if (!aggregate || !member) {
+        return false;
+    }
+    auto it = m_join_members.find(aggregate.get());
+    if (it == m_join_members.end()) {
+        return aggregate == member;
+    }
+    return it->second.count(member.get()) > 0;
+}
+
+template<typename Problem>
+void IDESolver<Problem>::record_join_members(EdgeFunctionPtr aggregate,
+                                             EdgeFunctionPtr f1,
+                                             EdgeFunctionPtr f2) {
+    auto &members = m_join_members[aggregate.get()];
+    auto add_members = [&](EdgeFunctionPtr fn) {
+        if (!fn) {
+            return;
+        }
+        auto it = m_join_members.find(fn.get());
+        if (it == m_join_members.end()) {
+            members.insert(fn.get());
+            return;
+        }
+        members.insert(it->second.begin(), it->second.end());
+    };
+    add_members(f1);
+    add_members(f2);
+    members.insert(aggregate.get());
 }
 
 template<typename Problem>
@@ -127,6 +173,7 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     m_summary_edges.clear();
     m_compose_cache.clear();
     m_join_cache.clear();
+    m_join_members.clear();
     m_normal_edge_cache.clear();
     m_call_to_return_edge_cache.clear();
     m_worklist.clear();
@@ -201,7 +248,7 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
         auto& vec = m_end_summaries[key];
         for (const auto& summary : vec) {
             if (summary.exit_inst == exit_inst && summary.exit_fact == exit_fact &&
-                m_problem.edge_function_equivalent(*summary.phi, *phi)) {
+                summary.phi == phi) {
                 return false;
             }
         }

@@ -1,6 +1,7 @@
-#include <gtest/gtest.h>
-#include <Dataflow/IFDS/Solvers/IDESolver.h>
+#include <set>
 
+#include <Dataflow/IFDS/Solvers/IDESolver.h>
+#include <gtest/gtest.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -8,8 +9,6 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
-
-#include <set>
 
 namespace ifds {
 namespace {
@@ -48,21 +47,26 @@ public:
   }
   FactSet return_flow(const llvm::CallBase * /*call*/,
                       const llvm::Instruction * /*exit_inst*/,
-                      const llvm::Instruction *return_site, const llvm::Function * /*callee*/,
+                      const llvm::Instruction *return_site,
+                      const llvm::Function * /*callee*/,
                       const Fact & /*exit_fact*/,
                       const Fact & /*call_fact*/) override {
     (void)return_site;
     return {};
   }
-  FactSet call_to_return_flow(const llvm::CallBase * /*call*/,
-                              const llvm::Instruction *return_site,
-                              llvm::ArrayRef<const llvm::Function *> /*callees*/,
-                              const Fact &fact) override {
+  FactSet
+  call_to_return_flow(const llvm::CallBase * /*call*/,
+                      const llvm::Instruction *return_site,
+                      llvm::ArrayRef<const llvm::Function *> /*callees*/,
+                      const Fact &fact) override {
     (void)return_site;
     return {fact};
   }
   FactSet initial_facts(const llvm::Function * /*main*/) override {
     return {zero_fact()};
+  }
+  IDEInitialSeeds initial_ide_seeds(const llvm::Module &module) override {
+    return this->lift_ifds_initial_seeds(module, bottom_value());
   }
 
   Value top_value() const override { return Value::bottom(); }
@@ -104,16 +108,16 @@ public:
   EdgeFunction return_edge_function(const llvm::CallBase * /*call*/,
                                     const llvm::Function * /*callee*/,
                                     const llvm::Instruction * /*exit_inst*/,
-                                    const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
+                                    const llvm::Instruction *return_site,
+                                    const Fact & /*exit_fact*/,
                                     const Fact & /*ret_fact*/) override {
     (void)return_site;
     return identity();
   }
-  EdgeFunction call_to_return_edge_function(const llvm::CallBase * /*call*/,
-                                            const llvm::Instruction *return_site,
-                                            llvm::ArrayRef<const llvm::Function *> /*callees*/,
-                                            const Fact & /*src_fact*/,
-                                            const Fact & /*tgt_fact*/) override {
+  EdgeFunction call_to_return_edge_function(
+      const llvm::CallBase * /*call*/, const llvm::Instruction *return_site,
+      llvm::ArrayRef<const llvm::Function *> /*callees*/,
+      const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) override {
     (void)return_site;
     return identity();
   }
@@ -138,13 +142,17 @@ public:
                       const Fact &, const Fact &) override {
     return {};
   }
-  FactSet call_to_return_flow(const llvm::CallBase *,
-                              const llvm::Instruction *,
+  FactSet call_to_return_flow(const llvm::CallBase *, const llvm::Instruction *,
                               llvm::ArrayRef<const llvm::Function *>,
                               const Fact &) override {
     return {};
   }
-  FactSet initial_facts(const llvm::Function *) override { return {zero_fact()}; }
+  FactSet initial_facts(const llvm::Function *) override {
+    return {zero_fact()};
+  }
+  IDEInitialSeeds initial_ide_seeds(const llvm::Module &module) override {
+    return this->lift_ifds_initial_seeds(module, bottom_value());
+  }
 
   Value top_value() const override { return Value::bottom(); }
   Value bottom_value() const override { return Value::bottom(); }
@@ -184,10 +192,11 @@ public:
                                     const Fact &) override {
     return identity();
   }
-  EdgeFunction call_to_return_edge_function(const llvm::CallBase *,
-                                            const llvm::Instruction *,
-                                            llvm::ArrayRef<const llvm::Function *>,
-                                            const Fact &, const Fact &) override {
+  EdgeFunction
+  call_to_return_edge_function(const llvm::CallBase *,
+                               const llvm::Instruction *,
+                               llvm::ArrayRef<const llvm::Function *>,
+                               const Fact &, const Fact &) override {
     return identity();
   }
 };

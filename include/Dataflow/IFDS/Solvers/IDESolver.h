@@ -73,8 +73,7 @@ template <typename A, typename B, typename C, typename D> struct QuadEq {
                   const std::tuple<A, B, C, D> &b) const {
     return std::get<0>(a) == std::get<0>(b) &&
            std::get<1>(a) == std::get<1>(b) &&
-           std::get<2>(a) == std::get<2>(b) &&
-           std::get<3>(a) == std::get<3>(b);
+           std::get<2>(a) == std::get<2>(b) && std::get<3>(a) == std::get<3>(b);
   }
 };
 } // namespace detail
@@ -217,6 +216,9 @@ private:
   EdgeFunctionPtr compose_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2);
   // Helper: memoized join for jump-function updates
   EdgeFunctionPtr join_cached(EdgeFunctionPtr f1, EdgeFunctionPtr f2);
+  bool join_contains(EdgeFunctionPtr aggregate, EdgeFunctionPtr member) const;
+  void record_join_members(EdgeFunctionPtr aggregate, EdgeFunctionPtr f1,
+                           EdgeFunctionPtr f2);
 
   // Helper: create shared pointer to edge function
   EdgeFunctionPtr make_edge_function(const EdgeFunction &ef);
@@ -254,19 +256,20 @@ private:
       m_compose_cache;
   std::unordered_map<ComposePair, EdgeFunctionPtr, ComposePairHash>
       m_join_cache;
+  std::unordered_map<const EdgeFunction *,
+                     std::unordered_set<const EdgeFunction *>>
+      m_join_members;
 
   // Edge function caches (avoid recomputing same edge function)
-  using NormalEdgeKey =
-      std::tuple<const llvm::Instruction *, const llvm::Instruction *, Fact,
-                 Fact>;
+  using NormalEdgeKey = std::tuple<const llvm::Instruction *,
+                                   const llvm::Instruction *, Fact, Fact>;
   using CallToReturnEdgeKey =
       std::tuple<const llvm::CallBase *, const llvm::Instruction *, Fact, Fact>;
-  std::unordered_map<
-      NormalEdgeKey, EdgeFunctionPtr,
-      detail::QuadHash<const llvm::Instruction *, const llvm::Instruction *,
-                       Fact, Fact>,
-      detail::QuadEq<const llvm::Instruction *, const llvm::Instruction *, Fact,
-                     Fact>>
+  std::unordered_map<NormalEdgeKey, EdgeFunctionPtr,
+                     detail::QuadHash<const llvm::Instruction *,
+                                      const llvm::Instruction *, Fact, Fact>,
+                     detail::QuadEq<const llvm::Instruction *,
+                                    const llvm::Instruction *, Fact, Fact>>
       m_normal_edge_cache;
   std::unordered_map<CallToReturnEdgeKey, EdgeFunctionPtr,
                      detail::QuadHash<const llvm::CallBase *,

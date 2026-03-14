@@ -86,6 +86,9 @@ struct IDETestValue {
 class IDESolverTestProblem
     : public IDEProblem<const llvm::Value *, IDETestValue> {
 public:
+  using Fact = const llvm::Value *;
+  using Value = IDETestValue;
+
   enum TestMode {
     IDENTITY_FUNCTIONS,
     CONSTANT_ADDITION,
@@ -103,6 +106,7 @@ public:
                       const llvm::Instruction *succ,
                       const Fact &fact) override {
     (void)stmt;
+    (void)succ;
     if (!fact)
       return {};
     return {fact};
@@ -117,9 +121,14 @@ public:
     return {fact};
   }
 
-  FactSet return_flow(const llvm::CallBase *call, const llvm::Instruction *exit_inst, const llvm::Instruction *return_site, const llvm::Function *callee,
-                      const Fact &exit_fact, const Fact &call_fact) override {
+  FactSet return_flow(const llvm::CallBase *call,
+                      const llvm::Instruction *exit_inst,
+                      const llvm::Instruction *return_site,
+                      const llvm::Function *callee, const Fact &exit_fact,
+                      const Fact &call_fact) override {
     (void)call;
+    (void)exit_inst;
+    (void)return_site;
     (void)callee;
     (void)call_fact;
     if (!exit_fact)
@@ -129,8 +138,11 @@ public:
 
   FactSet call_to_return_flow(const llvm::CallBase *call,
                               const llvm::Instruction *return_site,
-                              llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) override {
+                              llvm::ArrayRef<const llvm::Function *> callees,
+                              const Fact &fact) override {
     (void)call;
+    (void)return_site;
+    (void)callees;
     if (!fact)
       return {};
     return {fact};
@@ -140,24 +152,32 @@ public:
     (void)main;
     return {nullptr};
   }
+  IDEInitialSeeds initial_ide_seeds(const llvm::Module &module) override {
+    return this->lift_ifds_initial_seeds(module, bottom_value());
+  }
 
-  EdgeFunction normal_edge_function(const llvm::Instruction *, const Fact &,
-                                    const Fact &) override {
-    return identity();
-  }
-  EdgeFunction call_edge_function(const llvm::CallBase *, const Fact &,
-                                  const Fact &) override {
-    return identity();
-  }
-  EdgeFunction return_edge_function(const llvm::CallBase *,
+  EdgeFunction normal_edge_function(const llvm::Instruction *,
                                     const llvm::Instruction *, const Fact &,
                                     const Fact &) override {
     return identity();
   }
-  EdgeFunction call_to_return_edge_function(const llvm::CallBase *,
-                                            const llvm::Instruction *,
-                                            const Fact &,
-                                            const Fact &) override {
+  EdgeFunction call_edge_function(const llvm::CallBase *,
+                                  const llvm::Function *, const Fact &,
+                                  const Fact &) override {
+    return identity();
+  }
+  EdgeFunction return_edge_function(const llvm::CallBase *,
+                                    const llvm::Function *,
+                                    const llvm::Instruction *,
+                                    const llvm::Instruction *, const Fact &,
+                                    const Fact &) override {
+    return identity();
+  }
+  EdgeFunction
+  call_to_return_edge_function(const llvm::CallBase *,
+                               const llvm::Instruction *,
+                               llvm::ArrayRef<const llvm::Function *>,
+                               const Fact &, const Fact &) override {
     return identity();
   }
 
