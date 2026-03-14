@@ -100,6 +100,18 @@ TEST(NPA, PredicateTensorReadoutMatchesBaseExtend) {
   EXPECT_TRUE(D::equal(readout, D::extend(lhs, rhs)));
 }
 
+TEST(NPA, PredicateTensorConstantEmbeddingsReadBackToOriginalRelation) {
+  D::configure(1);
+
+  auto relation = D::assignConst(0, true);
+
+  auto right = npa::TensorSemiringTraits<D>::right_constant(relation);
+  auto left = npa::TensorSemiringTraits<D>::left_constant(relation);
+
+  EXPECT_TRUE(D::equal(TD::readout(right), relation));
+  EXPECT_TRUE(D::equal(TD::readout(left), relation));
+}
+
 TEST(NPA, PredicateTensorReadoutAvoidsCrossTermsAcrossAlternatives) {
   D::configure(1);
 
@@ -220,6 +232,16 @@ TEST(NPA, PredicateRelationMergeUsesProjectedSecondOperand) {
   EXPECT_TRUE(D::equal(merged, set_global_true));
 }
 
+TEST(NPA, PredicateRelationProjectDistributesOverCombine) {
+  D::configure(2, 1);
+
+  auto first = D::assignConst(0, true);
+  auto second = D::assignConst(1, true);
+
+  EXPECT_TRUE(D::equal(D::project(D::combine(first, second)),
+                       D::combine(D::project(first), D::project(second))));
+}
+
 TEST(NPA, PredicateRelationProjectSupportsExplicitLocalPredicateIndices) {
   D::configure(2, std::vector<unsigned>{0});
 
@@ -273,6 +295,11 @@ TEST(NPA, PredicateTensorProjectTSatisfiesLemma88Laws) {
 
   EXPECT_TRUE(TD::equal(lhs, rhs1));
   EXPECT_TRUE(TD::equal(lhs, rhs2));
+}
+
+TEST(NPA, PredicateTensorTraitsValidatePaperLawsWithLocalPredicates) {
+  D::configure(2, 1);
+  EXPECT_TRUE(npa::TensorSemiringTraits<D>::validate_paper_laws());
 }
 
 TEST(NPA, PredicateTensorRegularizationSupportsProjectedLinearEquations) {

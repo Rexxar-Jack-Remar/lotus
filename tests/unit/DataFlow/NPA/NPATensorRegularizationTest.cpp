@@ -3,12 +3,12 @@
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/NPA.h"
 
-#include <gtest/gtest.h>
-
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 namespace {
 
@@ -40,7 +40,8 @@ struct BoundedLangSemiring {
     for (const auto &x : a) {
       for (const auto &y : b) {
         std::string s = x + y;
-        if (s.size() <= MaxLen) out.insert(std::move(s));
+        if (s.size() <= MaxLen)
+          out.insert(std::move(s));
       }
     }
     return out;
@@ -51,7 +52,8 @@ struct BoundedLangSemiring {
   static value_type subtract(const value_type &a, const value_type &b) {
     value_type out;
     for (const auto &x : a)
-      if (b.find(x) == b.end()) out.insert(x);
+      if (b.find(x) == b.end())
+        out.insert(x);
     return out;
   }
 };
@@ -106,7 +108,8 @@ template <class D>
 std::unordered_map<npa::Symbol, npa::DomVal<D>>
 toMap(const std::vector<std::pair<npa::Symbol, npa::DomVal<D>>> &pairs) {
   std::unordered_map<npa::Symbol, npa::DomVal<D>> out;
-  for (const auto &p : pairs) out.emplace(p.first, p.second);
+  for (const auto &p : pairs)
+    out.emplace(p.first, p.second);
   return out;
 }
 
@@ -122,7 +125,8 @@ std::vector<npa::DomVal<D>> solve_with_unchecked_tensorized_helper(
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
   rhs_tensor.reserve(eqns.size());
   for (const auto &eqn : eqns)
-    rhs_tensor.emplace_back(eqn.first, npa::Exp1ToTensor<D>::convert(eqn.second));
+    rhs_tensor.emplace_back(eqn.first,
+                            npa::Exp1ToTensor<D>::convert(eqn.second));
   return npa::solve_linear_tensorized_impl<D>(false, rhs_tensor, init);
 }
 
@@ -174,14 +178,16 @@ template <> struct TensorSemiringTraits<CustomTensorLangSemiring> {
 
   static tensor_domain::value_type
   right_constant(const CustomTensorLangSemiring::value_type &v) {
-    return domain_equal<CustomTensorLangSemiring>(v, CustomTensorLangSemiring::zero())
+    return domain_equal<CustomTensorLangSemiring>(
+               v, CustomTensorLangSemiring::zero())
                ? tensor_domain::zero()
                : tensor_domain::singleton(CustomTensorLangSemiring::one(), v);
   }
 
   static tensor_domain::value_type
   left_constant(const CustomTensorLangSemiring::value_type &v) {
-    return domain_equal<CustomTensorLangSemiring>(v, CustomTensorLangSemiring::zero())
+    return domain_equal<CustomTensorLangSemiring>(
+               v, CustomTensorLangSemiring::zero())
                ? tensor_domain::zero()
                : tensor_domain::singleton(v, CustomTensorLangSemiring::one());
   }
@@ -232,9 +238,10 @@ TEST(NPA, TensorRegularizationMatchesWorklistOnConstantConcat) {
 }
 
 TEST(NPA, TensorTraitsDistinguishPaperAdmissibleAndUtilityModes) {
-  EXPECT_TRUE(
-      npa::TensorSemiringTraits<npa::PredicateRelationDomain>::paper_admissible());
-  EXPECT_FALSE(npa::TensorSemiringTraits<BoundedLangSemiring>::paper_admissible());
+  EXPECT_TRUE(npa::TensorSemiringTraits<
+              npa::PredicateRelationDomain>::paper_admissible());
+  EXPECT_FALSE(
+      npa::TensorSemiringTraits<BoundedLangSemiring>::paper_admissible());
   EXPECT_FALSE(
       npa::TensorSemiringTraits<CustomTensorLangSemiring>::paper_admissible());
 }
@@ -260,7 +267,8 @@ TEST(NPA, TensorRegularizationPreservesCorrelationAcrossAlternatives) {
   auto d = Exp::term(singleton("d"));
   auto x = Exp::term(singleton("x"));
 
-  E1 rhs = Exp::add(Exp::add(Exp::concat(a, "X", b), Exp::concat(c, "X", d)), x);
+  E1 rhs =
+      Exp::add(Exp::add(Exp::concat(a, "X", b), Exp::concat(c, "X", d)), x);
 
   std::vector<std::pair<npa::Symbol, E1>> eqns;
   eqns.emplace_back("X", rhs);
@@ -310,10 +318,10 @@ TEST(NPA, TensorConversionPreservesLeftAndRightCoefficientOrientation) {
   base_env["F"] = singleton("ab");
 
   std::unordered_map<npa::Symbol, typename TD::value_type> tensor_env;
-  tensor_env["X"] = npa::TensorSemiringTraits<D>::couple(singleton("a"),
-                                                         singleton("b"));
-  tensor_env["F"] = npa::TensorSemiringTraits<D>::couple(singleton("a"),
-                                                         singleton("b"));
+  tensor_env["X"] =
+      npa::TensorSemiringTraits<D>::couple(singleton("a"), singleton("b"));
+  tensor_env["F"] =
+      npa::TensorSemiringTraits<D>::couple(singleton("a"), singleton("b"));
 
   auto left = Exp::seq(singleton("c"), Exp::hole("X"));
   auto right = Exp::seqR(Exp::hole("X"), singleton("d"));
@@ -323,12 +331,12 @@ TEST(NPA, TensorConversionPreservesLeftAndRightCoefficientOrientation) {
   auto right_base = npa::I1<D>::eval(false, base_env, right);
   auto call_base = npa::I1<D>::eval(false, base_env, call);
 
-  auto left_tensor = npa::TensorSemiringTraits<D>::readout(
-      npa::I1<TD>::eval(false, tensor_env, npa::Exp1ToTensor<D>::convert(left)));
-  auto right_tensor = npa::TensorSemiringTraits<D>::readout(
-      npa::I1<TD>::eval(false, tensor_env, npa::Exp1ToTensor<D>::convert(right)));
-  auto call_tensor = npa::TensorSemiringTraits<D>::readout(
-      npa::I1<TD>::eval(false, tensor_env, npa::Exp1ToTensor<D>::convert(call)));
+  auto left_tensor = npa::TensorSemiringTraits<D>::readout(npa::I1<TD>::eval(
+      false, tensor_env, npa::Exp1ToTensor<D>::convert(left)));
+  auto right_tensor = npa::TensorSemiringTraits<D>::readout(npa::I1<TD>::eval(
+      false, tensor_env, npa::Exp1ToTensor<D>::convert(right)));
+  auto call_tensor = npa::TensorSemiringTraits<D>::readout(npa::I1<TD>::eval(
+      false, tensor_env, npa::Exp1ToTensor<D>::convert(call)));
 
   EXPECT_EQ(left_tensor, left_base);
   EXPECT_EQ(right_tensor, right_base);
@@ -352,8 +360,7 @@ TEST(NPA, TensorTraitCoupleReadoutMatchesMatchedComposition) {
   auto composed = TD::extend(coupled1, coupled2);
 
   auto readout = npa::TensorSemiringTraits<D>::readout(composed);
-  auto expected =
-      D::extend(D::extend(a2, a1), D::extend(b1, b2));
+  auto expected = D::extend(D::extend(a2, a1), D::extend(b1, b2));
 
   EXPECT_EQ(readout, expected);
   EXPECT_EQ(readout, (D::value_type{"cb"}));
@@ -365,10 +372,9 @@ TEST(NPA, TensorTarjanExtractsSelfContainedStar) {
   using Exp = npa::Exp1<D>;
   using TD = typename npa::TensorSemiringTraits<D>::tensor_domain;
 
-  E1 rhs =
-      Exp::star(Exp::add(Exp::term(D::one()),
-                         Exp::seqR(Exp::bound("Z"), singleton("a"))),
-                "Z");
+  E1 rhs = Exp::star(
+      Exp::add(Exp::term(D::one()), Exp::seqR(Exp::bound("Z"), singleton("a"))),
+      "Z");
   EXPECT_TRUE(npa::Exp1ToTensor<D>::is_regularizable(rhs));
 
   std::vector<std::pair<npa::Symbol, E1>> eqns;
@@ -380,8 +386,8 @@ TEST(NPA, TensorTarjanExtractsSelfContainedStar) {
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
   rhs_tensor.emplace_back("X", npa::Exp1ToTensor<D>::convert(rhs));
   std::vector<typename TD::value_type> init_tensor = {TD::zero()};
-  auto tarjan = npa::solve_linear_tensor_tarjan_impl<TD>(false, rhs_tensor,
-                                                         init_tensor);
+  auto tarjan =
+      npa::solve_linear_tensor_tarjan_impl<TD>(false, rhs_tensor, init_tensor);
 
   ASSERT_EQ(wl.size(), 1u);
   ASSERT_EQ(tp.size(), 1u);
@@ -462,8 +468,8 @@ TEST(NPA, TensorTarjanSupportsProjectedLeftLinearFragments) {
   auto set_global_true = Exp::term(D::assignConst(0, true));
   auto set_local_true = Exp::term(D::assignConst(1, true));
   auto id = Exp::term(D::one());
-  E1 rhs = Exp::add(Exp::project(Exp::concat(set_global_true, "X", set_local_true)),
-                    id);
+  E1 rhs = Exp::add(
+      Exp::project(Exp::concat(set_global_true, "X", set_local_true)), id);
 
   std::vector<std::pair<npa::Symbol, E1>> eqns;
   eqns.emplace_back("X", rhs);
@@ -475,15 +481,16 @@ TEST(NPA, TensorTarjanSupportsProjectedLeftLinearFragments) {
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
   rhs_tensor.emplace_back("X", npa::Exp1ToTensor<D>::convert(rhs));
   std::vector<typename TD::value_type> init_tensor = {TD::zero()};
-  auto tarjan = npa::solve_linear_tensor_tarjan_impl<TD>(false, rhs_tensor,
-                                                         init_tensor);
+  auto tarjan =
+      npa::solve_linear_tensor_tarjan_impl<TD>(false, rhs_tensor, init_tensor);
 
   ASSERT_TRUE(tarjan.has_value());
   ASSERT_EQ((*tarjan).size(), 1u);
   ASSERT_EQ(wl.size(), 1u);
   ASSERT_EQ(tp.size(), 1u);
   EXPECT_TRUE(D::equal(wl[0], tp[0]));
-  EXPECT_TRUE(D::equal(npa::TensorSemiringTraits<D>::readout((*tarjan)[0]), wl[0]));
+  EXPECT_TRUE(
+      D::equal(npa::TensorSemiringTraits<D>::readout((*tarjan)[0]), wl[0]));
 }
 
 TEST(NPA, HighLevelTensorKeepsProjectedLeftLinearFragmentsOnTensorPath) {
@@ -496,8 +503,8 @@ TEST(NPA, HighLevelTensorKeepsProjectedLeftLinearFragmentsOnTensorPath) {
   auto set_global_true = Exp::term(D::assignConst(0, true));
   auto set_local_true = Exp::term(D::assignConst(1, true));
   auto id = Exp::term(D::one());
-  E1 rhs = Exp::add(Exp::project(Exp::concat(set_global_true, "X", set_local_true)),
-                    id);
+  E1 rhs = Exp::add(
+      Exp::project(Exp::concat(set_global_true, "X", set_local_true)), id);
 
   std::vector<std::pair<npa::Symbol, E1>> eqns;
   eqns.emplace_back("X", rhs);
@@ -609,9 +616,43 @@ TEST(NPA, DirectTensorDiffMatchesConvertedOrdinaryDiff) {
   nu["X"] = singleton("x");
   nu["F"] = singleton("f");
 
-  E0 expr = Exp0::ndet(
-      Exp0::call("F", Exp0::hole("X")),
-      Exp0::concat(Exp0::term(singleton("a")), "X", Exp0::term(singleton("b"))));
+  E0 expr = Exp0::ndet(Exp0::call("F", Exp0::hole("X")),
+                       Exp0::concat(Exp0::term(singleton("a")), "X",
+                                    Exp0::term(singleton("b"))));
+
+  (void)npa::I0<D>::eval(false, nu, expr);
+
+  auto ordinary = npa::Exp1ToTensor<D>::convert(npa::Diff<D>::build(nu, expr));
+  auto direct = npa::TensorDiff<D>::build(nu, expr);
+
+  std::unordered_map<npa::Symbol, typename TD::value_type> env;
+  env["X"] = npa::lift_base_value_to_tensor<D>(singleton("x"));
+  env["F"] = npa::lift_base_value_to_tensor<D>(singleton("f"));
+
+  auto ordinary_val = npa::I1<TD>::eval(false, env, ordinary);
+  auto direct_val = npa::I1<TD>::eval(false, env, direct);
+  EXPECT_TRUE(TD::equal(ordinary_val, direct_val));
+}
+
+TEST(NPA, DirectTensorDiffMatchesConvertedOrdinaryDiffAcrossCoreCases) {
+  using D = BoundedLangSemiring;
+  using Exp0 = npa::Exp0<D>;
+  using E0 = npa::E0<D>;
+  using TD = typename npa::TensorSemiringTraits<D>::tensor_domain;
+
+  std::unordered_map<npa::Symbol, npa::DomVal<D>> nu;
+  nu["X"] = singleton("x");
+  nu["F"] = singleton("f");
+
+  E0 seq_call = Exp0::seq(singleton("l"), Exp0::call("F", Exp0::hole("X")));
+  E0 star = Exp0::star(
+      Exp0::ndet(Exp0::term(D::one()),
+                 Exp0::mul(Exp0::bound("Z"), Exp0::term(singleton("s")))),
+      "Z");
+  E0 concat =
+      Exp0::concat(Exp0::term(singleton("a")), "X", Exp0::term(singleton("b")));
+  E0 expr = Exp0::ndet(Exp0::mul(seq_call, Exp0::term(singleton("r"))),
+                       Exp0::ndet(concat, star));
 
   (void)npa::I0<D>::eval(false, nu, expr);
 

@@ -909,6 +909,187 @@ projectTensorImpl(const PredicateTensorRelation &relation) {
   return tensorFromNode(predicate_count, projected);
 }
 
+std::string currentPredicateConfigurationKey() {
+  const unsigned predicate_count = PredicateRelationDomain::getPredicateCount();
+  std::string key = std::to_string(predicate_count) + ":";
+  for (unsigned predicate = 0; predicate < predicate_count; ++predicate)
+    key.push_back(PredicateRelationDomain::isLocalPredicate(predicate) ? 'L'
+                                                                       : 'G');
+  return key;
+}
+
+std::vector<PredicateRelation> validationBaseSamples() {
+  std::vector<PredicateRelation> samples;
+  samples.push_back(PredicateRelationDomain::zero());
+  samples.push_back(PredicateRelationDomain::one());
+
+  const unsigned predicate_count = PredicateRelationDomain::getPredicateCount();
+  for (unsigned predicate = 0; predicate < predicate_count; ++predicate) {
+    samples.push_back(PredicateRelationDomain::assume(predicate, false));
+    samples.push_back(PredicateRelationDomain::assume(predicate, true));
+    samples.push_back(PredicateRelationDomain::assignConst(predicate, false));
+    samples.push_back(PredicateRelationDomain::assignConst(predicate, true));
+  }
+  return samples;
+}
+
+std::vector<PredicateTensorRelation>
+validationTensorSamples(const std::vector<PredicateRelation> &base_samples) {
+  std::vector<PredicateTensorRelation> samples;
+  for (const auto &lhs : base_samples)
+    for (const auto &rhs : base_samples)
+      samples.push_back(PredicateTensorDomain::couple(lhs, rhs));
+  return samples;
+}
+
+bool validatePredicateTensorCoreLaws(
+    const std::vector<PredicateRelation> &base,
+    const std::vector<PredicateTensorRelation> &tensor) {
+  for (const auto &value : base) {
+    if (!PredicateRelationDomain::equal(
+            PredicateTensorDomain::readout(
+                TensorSemiringTraits<PredicateRelationDomain>::right_constant(
+                    value)),
+            value)) {
+      return false;
+    }
+    if (!PredicateRelationDomain::equal(
+            PredicateTensorDomain::readout(
+                TensorSemiringTraits<PredicateRelationDomain>::left_constant(
+                    value)),
+            value)) {
+      return false;
+    }
+    if (!PredicateRelationDomain::equal(
+            PredicateRelationDomain::transpose(
+                PredicateRelationDomain::transpose(value)),
+            value)) {
+      return false;
+    }
+  }
+
+  for (const auto &lhs : base) {
+    for (const auto &rhs : base) {
+      if (!PredicateRelationDomain::equal(
+              PredicateTensorDomain::readout(
+                  PredicateTensorDomain::couple(lhs, rhs)),
+              PredicateRelationDomain::extend(lhs, rhs))) {
+        return false;
+      }
+      if (!PredicateRelationDomain::equal(
+              PredicateRelationDomain::transpose(
+                  PredicateRelationDomain::extend(lhs, rhs)),
+              PredicateRelationDomain::extend(
+                  PredicateRelationDomain::transpose(rhs),
+                  PredicateRelationDomain::transpose(lhs)))) {
+        return false;
+      }
+    }
+  }
+
+  for (const auto &lhs : tensor) {
+    if (!PredicateTensorDomain::equal(PredicateTensorDomain::projectT(
+                                          PredicateTensorDomain::projectT(lhs)),
+                                      PredicateTensorDomain::projectT(lhs))) {
+      return false;
+    }
+    for (const auto &rhs : tensor) {
+      if (!PredicateRelationDomain::equal(
+              PredicateTensorDomain::readout(
+                  PredicateTensorDomain::combine(lhs, rhs)),
+              PredicateRelationDomain::combine(
+                  PredicateTensorDomain::readout(lhs),
+                  PredicateTensorDomain::readout(rhs)))) {
+        return false;
+      }
+    }
+  }
+
+  for (const auto &a : base) {
+    for (const auto &b : base) {
+      for (const auto &c : base) {
+        for (const auto &d : base) {
+          const auto lhs = PredicateTensorDomain::extend(
+              PredicateTensorDomain::couple(a, b),
+              PredicateTensorDomain::couple(c, d));
+          const auto rhs = PredicateTensorDomain::couple(
+              PredicateRelationDomain::extend(c, a),
+              PredicateRelationDomain::extend(b, d));
+          if (!PredicateTensorDomain::equal(lhs, rhs))
+            return false;
+          if (!PredicateRelationDomain::equal(
+                  PredicateTensorDomain::readout(lhs),
+                  PredicateRelationDomain::extend(
+                      PredicateRelationDomain::extend(c, a),
+                      PredicateRelationDomain::extend(b, d)))) {
+            return false;
+          }
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+bool validatePredicateTensorProjectionLaws(
+    const std::vector<PredicateRelation> &base,
+    const std::vector<PredicateTensorRelation> &tensor) {
+  for (const auto &lhs : base) {
+    for (const auto &rhs : base) {
+      if (!PredicateRelationDomain::equal(
+              PredicateRelationDomain::project(
+                  PredicateRelationDomain::combine(lhs, rhs)),
+              PredicateRelationDomain::combine(
+                  PredicateRelationDomain::project(lhs),
+                  PredicateRelationDomain::project(rhs)))) {
+        return false;
+      }
+      if (!PredicateRelationDomain::equal(
+              PredicateRelationDomain::merge(lhs, rhs),
+              PredicateRelationDomain::extend(
+                  lhs, PredicateRelationDomain::project(rhs)))) {
+        return false;
+      }
+    }
+  }
+
+  for (const auto &lhs : tensor) {
+    for (const auto &rhs : tensor) {
+      if (!PredicateTensorDomain::equal(
+              PredicateTensorDomain::projectT(
+                  PredicateTensorDomain::combine(lhs, rhs)),
+              PredicateTensorDomain::combine(
+                  PredicateTensorDomain::projectT(lhs),
+                  PredicateTensorDomain::projectT(rhs)))) {
+        return false;
+      }
+      const auto projected_lhs = PredicateTensorDomain::projectT(lhs);
+      const auto projected_rhs = PredicateTensorDomain::projectT(rhs);
+      if (!PredicateTensorDomain::equal(
+              PredicateTensorDomain::extend(projected_lhs, projected_rhs),
+              PredicateTensorDomain::projectT(
+                  PredicateTensorDomain::extend(lhs, projected_rhs)))) {
+        return false;
+      }
+      if (!PredicateTensorDomain::equal(
+              PredicateTensorDomain::extend(projected_lhs, projected_rhs),
+              PredicateTensorDomain::projectT(
+                  PredicateTensorDomain::extend(projected_lhs, rhs)))) {
+        return false;
+      }
+      if (!PredicateTensorDomain::equal(
+              PredicateTensorDomain::merge(lhs, rhs),
+              PredicateTensorDomain::extend(
+                  lhs, PredicateTensorDomain::projectT(rhs)))) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 } // namespace
 
 PredicateRelation::Impl::~Impl() {
@@ -1220,40 +1401,28 @@ bool PredicateTensorDomain::validatePaperLaws() {
   if (!PredicateRelationDomain::isConfigured())
     return false;
 
-  const auto base_zero = PredicateRelationDomain::zero();
-  const auto base_one = PredicateRelationDomain::one();
+  static std::mutex cache_mu;
+  static std::unordered_map<std::string, bool> cache;
 
-  const auto coupled_identity = couple(base_one, base_one);
-  if (!PredicateRelationDomain::equal(readout(coupled_identity),
-                                      PredicateRelationDomain::one())) {
-    return false;
+  const std::string key = currentPredicateConfigurationKey();
+  {
+    std::lock_guard<std::mutex> lock(cache_mu);
+    const auto it = cache.find(key);
+    if (it != cache.end())
+      return it->second;
   }
 
-  const auto sample_lhs = PredicateRelationDomain::assume(0, true);
-  const auto sample_rhs = PredicateRelationDomain::assignConst(0, false);
+  const auto base_samples = validationBaseSamples();
+  const auto tensor_samples = validationTensorSamples(base_samples);
+  const bool valid =
+      validatePredicateTensorCoreLaws(base_samples, tensor_samples) &&
+      validatePredicateTensorProjectionLaws(base_samples, tensor_samples);
 
-  const auto c1 = couple(base_one, sample_lhs);
-  const auto c2 = couple(sample_rhs, base_one);
-  if (!PredicateRelationDomain::equal(
-          readout(combine(c1, c2)),
-          PredicateRelationDomain::combine(readout(c1), readout(c2)))) {
-    return false;
+  {
+    std::lock_guard<std::mutex> lock(cache_mu);
+    cache[key] = valid;
   }
-
-  const auto composed =
-      extend(couple(base_one, sample_lhs), couple(sample_rhs, base_one));
-  const auto expected = PredicateRelationDomain::extend(
-      PredicateRelationDomain::extend(sample_rhs, base_one),
-      PredicateRelationDomain::extend(sample_lhs, base_one));
-  if (!PredicateRelationDomain::equal(readout(composed), expected)) {
-    return false;
-  }
-
-  const auto projected_once = projectT(couple(base_zero, base_one));
-  if (!equal(projectT(projected_once), projected_once))
-    return false;
-
-  return true;
+  return valid;
 }
 
 PredicateTensorDomain::value_type PredicateTensorDomain::fromTransitions(
