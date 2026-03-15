@@ -153,6 +153,7 @@ public:
       ForFini,
       DispatchFini,
       Reduce,
+      Flush,
       Unknown
     };
 
@@ -202,6 +203,10 @@ public:
     return m_deferred_reason_counts;
   }
   size_t getRelationCount(concurrency::RelationKind kind) const;
+  const std::map<std::pair<const Task *, const Task *>, concurrency::Relation> &
+  getRelations() const {
+    return m_relations;
+  }
 
   /**
    * @brief Check if two tasks have a happens-before relationship
@@ -233,6 +238,9 @@ private:
     size_t sibling_group = 0;
     size_t taskgroup_id = 0;
     bool is_taskgroup_end = false;
+    bool is_partial_wait = false;
+    WaitBoundaryInfo::Kind kind = WaitBoundaryInfo::Kind::Unknown;
+    std::vector<Dependency> dependencies;
   };
 
   struct TraversalState {
@@ -276,6 +284,9 @@ private:
    * @brief Extract dependencies from task creation call
    */
   std::vector<Dependency> extractDependencies(const llvm::CallBase *task_call);
+  std::vector<Dependency> extractRuntimeDependencies(const llvm::CallBase *call,
+                                                     unsigned ndeps_arg_idx,
+                                                     unsigned dep_arg_idx);
   const llvm::Function *extractTaskFunction(const llvm::CallBase *task_call);
 
   /**

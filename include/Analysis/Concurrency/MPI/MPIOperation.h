@@ -102,6 +102,7 @@ struct MPIOperation {
   size_t communicator_subgroup_id = 0;
   size_t protocol_sequence_id = 0;
   ProtocolReachability protocol_reachability = ProtocolReachability::Unknown;
+  concurrency::Relation semantic_relation;
   MPI::RankExpr process_rank;
   std::string rank_path_summary;
   bool is_intercommunicator = false;
@@ -124,6 +125,7 @@ struct MPIOperation {
   int target_rank_max = -1;
   int64_t target_disp = -1;
   int64_t byte_length = -1;
+  bool rma_local_completion_only = false;
 
   const llvm::Value *datatype = nullptr;
   int64_t datatype_size = -1;

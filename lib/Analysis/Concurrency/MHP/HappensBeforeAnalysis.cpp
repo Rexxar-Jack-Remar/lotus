@@ -165,20 +165,21 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   size_t omp_task_dependency_edges = 0;
   OpenMP::OpenMPTaskGraph task_graph(m_module);
   task_graph.analyze();
-  for (const auto &task_uptr : task_graph.getAllTasks()) {
-    const OpenMP::Task *task = task_uptr.get();
-    if (!task || !task->task_create) {
+  for (const auto &entry : task_graph.getRelations()) {
+    const OpenMP::Task *lhs = entry.first.first;
+    const OpenMP::Task *rhs = entry.first.second;
+    const concurrency::Relation &relation = entry.second;
+    if (!lhs || !rhs || !lhs->task_create || !rhs->task_create) {
       continue;
     }
-    for (const OpenMP::Task *pred : task->predecessors) {
-      if (!pred || !pred->task_create) {
-        continue;
-      }
-      size_t before = m_sync_with.size();
-      addSyncEdge(pred->task_create, task->task_create);
-      if (m_sync_with.size() != before) {
-        ++omp_task_dependency_edges;
-      }
+    if (relation.kind != concurrency::RelationKind::MustHappenBefore &&
+        relation.kind != concurrency::RelationKind::SelectiveHappenBefore) {
+      continue;
+    }
+    size_t before = m_sync_with.size();
+    addSyncEdge(lhs->task_create, rhs->task_create);
+    if (m_sync_with.size() != before) {
+      ++omp_task_dependency_edges;
     }
   }
 

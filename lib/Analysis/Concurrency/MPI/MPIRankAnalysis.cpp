@@ -431,6 +431,21 @@ RankExpr MPIRankAnalysis::getRankAtInstruction(const Instruction *inst) const {
   return RankExpr::makeSymbolic(); // Conservative: any rank
 }
 
+MPIRankAnalysis::ReachabilityKind
+MPIRankAnalysis::getReachabilityAtInstruction(const Instruction *inst) const {
+  RankExpr rank = getRankAtInstruction(inst);
+  switch (rank.kind) {
+  case RankExpr::Concrete:
+  case RankExpr::Range:
+    return ReachabilityKind::SomeRanks;
+  case RankExpr::Symbolic:
+    return ReachabilityKind::AllRanks;
+  case RankExpr::Unknown:
+    return ReachabilityKind::Unknown;
+  }
+  return ReachabilityKind::Unknown;
+}
+
 bool MPIRankAnalysis::sameRank(const Instruction *i1, 
                                 const Instruction *i2) const {
   RankExpr rank1 = getRankAtInstruction(i1);

@@ -424,6 +424,142 @@ TEST_F(OpenMPTaskGraphTest, WaitDepsDoesNotImposeFullTaskwaitBarrier) {
   EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
 }
 
+TEST_F(OpenMPTaskGraphTest, WaitDepsSelectivelyOrdersMatchingDependencies) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @shared = global i32 0, align 4
+    @deps = global [1 x %kmp_depend_info] [
+      %kmp_depend_info {
+        i8* bitcast (i32* @shared to i8*),
+        i64 4,
+        i8 2
+      }
+    ]
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+    declare i32 @__kmpc_omp_wait_deps(i8*, i32, i32, %kmp_depend_info*, i32, %kmp_depend_info*)
+
+    define i32 @main() {
+    entry:
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+              [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      call i32 @__kmpc_omp_wait_deps(i8* null, i32 0, i32 1,
+                                     %kmp_depend_info* %dep, i32 0,
+                                     %kmp_depend_info* null)
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  EXPECT_TRUE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
+            OpenMPTaskGraph::TaskRelation::HappensBefore);
+  EXPECT_EQ(graph.getDeferredWaitDepsCount(), 0u);
+}
+
+TEST_F(OpenMPTaskGraphTest, IndirectDependencyPointerIsLowered) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @shared = global i32 0, align 4
+    @deps = global [1 x %kmp_depend_info] [
+      %kmp_depend_info {
+        i8* bitcast (i32* @shared to i8*),
+        i64 4,
+        i8 2
+      }
+    ]
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+
+    define i32 @main() {
+    entry:
+      %slot = alloca %kmp_depend_info*, align 8
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+              [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      store %kmp_depend_info* %dep, %kmp_depend_info** %slot, align 8
+      %loaded = load %kmp_depend_info*, %kmp_depend_info** %slot, align 8
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %loaded, i32 0, %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 1u);
+  ASSERT_EQ(tasks.front()->dependencies.size(), 1u);
+  EXPECT_NE(tasks.front()->dependencies.front().canonical_base, nullptr);
+}
+
+TEST_F(OpenMPTaskGraphTest, FlushSelectivelyOrdersMatchingTaskDependencies) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @shared = global i32 0, align 4
+    @deps = global [1 x %kmp_depend_info] [
+      %kmp_depend_info {
+        i8* bitcast (i32* @shared to i8*),
+        i64 4,
+        i8 2
+      }
+    ]
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+    declare i32 @__kmpc_flush(i8*)
+
+    define i32 @main() {
+    entry:
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+              [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      call i32 @__kmpc_flush(i8* bitcast (i32* @shared to i8*))
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  EXPECT_TRUE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+}
+
 TEST_F(OpenMPTaskGraphTest, NestedTaskgroupDoesNotSuppressSiblingDependencies) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }

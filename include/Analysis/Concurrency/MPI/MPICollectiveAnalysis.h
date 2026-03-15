@@ -34,8 +34,12 @@ public:
     ThreadAPI::TD_TYPE type;
     CommunicatorID comm;
     size_t communicator_class_id = 0;
+    size_t communicator_subgroup_id = 0;
     const llvm::Function *function;
     size_t sequence_index = 0;
+    size_t protocol_sequence_id = 0;
+    ProtocolReachability reachability = ProtocolReachability::Unknown;
+    concurrency::Relation protocol_relation;
 
     int root_rank = -1;
     int count = -1;
@@ -61,6 +65,10 @@ public:
   getProtocolDiagnostics() const {
     return protocol_diagnostics_;
   }
+  const std::vector<CollectiveCall> &getProtocolRelations() const {
+    return collective_calls_;
+  }
+  size_t getProtocolRelationCount(concurrency::RelationKind kind) const;
 
 private:
   const MPIProcessModel &process_model_;

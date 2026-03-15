@@ -18,6 +18,8 @@
 #include <llvm/IR/Operator.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <deque>
+
 using namespace llvm;
 using namespace OpenMP;
 
@@ -364,12 +366,22 @@ void OpenMPTaskGraph::scanSchedulingContext(
       }
 
       if (type == ThreadAPI::TD_OMP_TASKWAIT_DEPS) {
-        // wait_deps is a selective wait and does not imply full sibling-phase
-        // ordering in the absence of precise dependency-object lowering.
-        recordBoundary(call, WaitBoundaryInfo::Kind::TaskwaitDeps, true);
-        ++m_deferred_wait_deps_count;
+        WaitBoundary boundary;
+        boundary.inst = call;
+        boundary.scheduling_context_id = state.scheduling_context_id;
+        boundary.sequence_index = state.sequence_index;
+        boundary.sibling_group = currentPhaseToken();
+        boundary.is_partial_wait = true;
+        boundary.kind = WaitBoundaryInfo::Kind::TaskwaitDeps;
+        boundary.dependencies = extractRuntimeDependencies(call, 2, 3);
+        m_wait_boundaries[state.scheduling_context_id].push_back(boundary);
+        recordBoundary(call, WaitBoundaryInfo::Kind::TaskwaitDeps,
+                       boundary.dependencies.empty());
         ++m_summary.partial_wait_boundary_count;
-        ++m_deferred_reason_counts["omp_taskwait_deps_partial"];
+        if (boundary.dependencies.empty()) {
+          ++m_deferred_wait_deps_count;
+          ++m_deferred_reason_counts["omp_taskwait_deps_partial"];
+        }
         continue;
       }
 
@@ -379,6 +391,7 @@ void OpenMPTaskGraph::scanSchedulingContext(
         boundary.scheduling_context_id = state.scheduling_context_id;
         boundary.sequence_index = state.sequence_index;
         boundary.sibling_group = currentPhaseToken();
+        boundary.kind = WaitBoundaryInfo::Kind::Taskwait;
         m_wait_boundaries[state.scheduling_context_id].push_back(boundary);
         recordBoundary(call, WaitBoundaryInfo::Kind::Taskwait);
         ++m_summary.wait_boundary_count;
@@ -401,6 +414,7 @@ void OpenMPTaskGraph::scanSchedulingContext(
         boundary.sequence_index = state.sequence_index;
         boundary.sibling_group = currentPhaseToken();
         boundary.is_taskgroup_end = true;
+        boundary.kind = WaitBoundaryInfo::Kind::TaskgroupEnd;
         WaitBoundaryInfo info = recordBoundary(
             call, WaitBoundaryInfo::Kind::TaskgroupEnd, false, true);
         if (!state.taskgroup_stack.empty()) {
@@ -425,12 +439,12 @@ void OpenMPTaskGraph::scanSchedulingContext(
         continue;
       }
       if (type == ThreadAPI::TD_OMP_MASTER_START) {
-        pushRegion(WaitBoundaryInfo::Kind::Unknown);
+        pushRegion(WaitBoundaryInfo::Kind::SingleEnd);
         ++m_summary.master_region_count;
         continue;
       }
       if (type == ThreadAPI::TD_OMP_ORDERED_START) {
-        pushRegion(WaitBoundaryInfo::Kind::Unknown);
+        pushRegion(WaitBoundaryInfo::Kind::SingleEnd);
         ++m_summary.ordered_region_count;
         continue;
       }
@@ -499,6 +513,8 @@ void OpenMPTaskGraph::scanSchedulingContext(
       }
 
       if (type == ThreadAPI::TD_OMP_SINGLE_END ||
+          type == ThreadAPI::TD_OMP_MASTER_END ||
+          type == ThreadAPI::TD_OMP_ORDERED_END ||
           type == ThreadAPI::TD_OMP_SECTIONS_END ||
           type == ThreadAPI::TD_OMP_FOR_STATIC_FINI ||
           type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI ||
@@ -513,6 +529,10 @@ void OpenMPTaskGraph::scanSchedulingContext(
         WaitBoundaryInfo::Kind kind = WaitBoundaryInfo::Kind::Unknown;
         if (type == ThreadAPI::TD_OMP_SINGLE_END) {
           kind = WaitBoundaryInfo::Kind::SingleEnd;
+        } else if (type == ThreadAPI::TD_OMP_MASTER_END) {
+          kind = WaitBoundaryInfo::Kind::SingleEnd;
+        } else if (type == ThreadAPI::TD_OMP_ORDERED_END) {
+          kind = WaitBoundaryInfo::Kind::SingleEnd;
         } else if (type == ThreadAPI::TD_OMP_SECTIONS_END) {
           kind = WaitBoundaryInfo::Kind::SectionsEnd;
         } else if (type == ThreadAPI::TD_OMP_FOR_STATIC_FINI) {
@@ -522,6 +542,7 @@ void OpenMPTaskGraph::scanSchedulingContext(
         } else if (type == ThreadAPI::TD_OMP_REDUCE_START) {
           kind = WaitBoundaryInfo::Kind::Reduce;
         }
+        m_wait_boundaries[state.scheduling_context_id].back().kind = kind;
         WaitBoundaryInfo info = recordBoundary(call, kind);
         info.region_id = popRegion(kind);
         m_wait_boundary_infos.back() = info;
@@ -530,24 +551,47 @@ void OpenMPTaskGraph::scanSchedulingContext(
         continue;
       }
 
-      if (type == ThreadAPI::TD_OMP_MASTER_END ||
-          type == ThreadAPI::TD_OMP_ORDERED_END ||
-          type == ThreadAPI::TD_OMP_REDUCE_END ||
+      if (type == ThreadAPI::TD_OMP_REDUCE_END ||
           type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_END ||
           type == ThreadAPI::TD_OMP_FLUSH) {
         const char *reason = nullptr;
         if (type == ThreadAPI::TD_OMP_FLUSH) {
           ++m_summary.flush_count;
-          reason = "omp_flush_witness_required";
-        } else if (type == ThreadAPI::TD_OMP_ORDERED_END) {
-          reason = "omp_ordered_region_tracked";
+          WaitBoundary boundary;
+          boundary.inst = call;
+          boundary.scheduling_context_id = state.scheduling_context_id;
+          boundary.sequence_index = state.sequence_index;
+          boundary.sibling_group = currentPhaseToken();
+          boundary.is_partial_wait = true;
+          boundary.kind = WaitBoundaryInfo::Kind::Flush;
+          if (call->arg_size() >= 1) {
+            const Value *flush_obj = stripValue(call->getArgOperand(0));
+            if (flush_obj) {
+              Dependency dep;
+              dep.address = flush_obj;
+              dep.type = DependType::INOUT;
+              dep.size = 0;
+              dep.source_kind = DependencySourceKind::DirectAddress;
+              dep.proof = DependencyProof::Possible;
+              int64_t offset = 0;
+              bool precise = false;
+              dep.canonical_base = canonicalizeDependencyAddress(
+                  flush_obj, m_module.getDataLayout(), offset, precise);
+              dep.offset = offset;
+              dep.has_precise_offset = precise;
+              boundary.dependencies.push_back(dep);
+            }
+          }
+          m_wait_boundaries[state.scheduling_context_id].push_back(boundary);
+          if (boundary.dependencies.empty()) {
+            reason = "omp_flush_witness_required";
+            ++m_deferred_reason_counts[reason];
+          }
         } else {
           reason = "omp_region_boundary_observed";
+          ++m_deferred_reason_counts[reason];
         }
-        ++m_deferred_reason_counts[reason];
-        if (type == ThreadAPI::TD_OMP_MASTER_END ||
-            type == ThreadAPI::TD_OMP_ORDERED_END ||
-            type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_END) {
+        if (type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_END) {
           popRegion(WaitBoundaryInfo::Kind::Unknown);
         }
         continue;
@@ -623,8 +667,88 @@ const Task *OpenMPTaskGraph::getTaskForCreate(const Instruction *inst) const {
   return it != m_inst_to_task.end() ? it->second : nullptr;
 }
 
+namespace {
+
+const Value *resolveDependencyListValue(const Value *value) {
+  if (!value) {
+    return nullptr;
+  }
+  std::deque<const Value *> worklist;
+  std::set<const Value *> visited;
+  const Value *resolved = nullptr;
+  worklist.push_back(value);
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+    if (!current || !visited.insert(current).second) {
+      continue;
+    }
+
+    current = current->stripPointerCasts();
+    if (const auto *load = dyn_cast<LoadInst>(current)) {
+      worklist.push_back(load->getPointerOperand());
+      continue;
+    }
+    if (const auto *store = dyn_cast<StoreInst>(current)) {
+      worklist.push_back(store->getValueOperand());
+      continue;
+    }
+    if (const auto *phi = dyn_cast<PHINode>(current)) {
+      for (const Value *incoming : phi->incoming_values()) {
+        worklist.push_back(incoming);
+      }
+      continue;
+    }
+    if (const auto *select = dyn_cast<SelectInst>(current)) {
+      worklist.push_back(select->getTrueValue());
+      worklist.push_back(select->getFalseValue());
+      continue;
+    }
+    if (const auto *gep = dyn_cast<GEPOperator>(current)) {
+      worklist.push_back(gep->getPointerOperand());
+      continue;
+    }
+
+    if (isa<AllocaInst>(current) || isa<GlobalVariable>(current) ||
+        isa<Argument>(current)) {
+      bool saw_stored_pointer = false;
+      for (const Use &use : current->uses()) {
+        if (const auto *store = dyn_cast<StoreInst>(use.getUser())) {
+          if (store->getPointerOperand()->stripPointerCasts() == current) {
+            worklist.push_back(store->getValueOperand());
+            saw_stored_pointer = true;
+          }
+        }
+      }
+      if (saw_stored_pointer) {
+        continue;
+      }
+    }
+
+    const Value *underlying = getUnderlyingObject(current);
+    if (underlying) {
+      current = underlying->stripPointerCasts();
+    }
+    if (!resolved) {
+      resolved = current;
+    } else if (resolved != current) {
+      return nullptr;
+    }
+  }
+
+  return resolved ? resolved : value->stripPointerCasts();
+}
+
+} // namespace
+
 std::vector<Dependency>
 OpenMPTaskGraph::extractDependencies(const CallBase *task_call) {
+  return extractRuntimeDependencies(task_call, 3, 4);
+}
+
+std::vector<Dependency> OpenMPTaskGraph::extractRuntimeDependencies(
+    const CallBase *task_call, unsigned ndeps_arg_idx, unsigned dep_arg_idx) {
   std::vector<Dependency> deps;
   const DataLayout &DL = m_module.getDataLayout();
 
@@ -638,12 +762,12 @@ OpenMPTaskGraph::extractDependencies(const CallBase *task_call) {
   //   - len: size_t
   //   - flags: unsigned char (0x1=IN, 0x2=OUT, 0x3=INOUT)
 
-  if (task_call->arg_size() < 5) {
+  if (!task_call || task_call->arg_size() <= std::max(ndeps_arg_idx, dep_arg_idx)) {
     return deps; // Not enough arguments
   }
 
   // Number of dependencies
-  const Value *ndeps_val = task_call->getArgOperand(3);
+  const Value *ndeps_val = task_call->getArgOperand(ndeps_arg_idx);
   const ConstantInt *CI = dyn_cast<ConstantInt>(ndeps_val);
   if (!CI) {
     return deps;
@@ -651,8 +775,13 @@ OpenMPTaskGraph::extractDependencies(const CallBase *task_call) {
   uint64_t ndeps = CI->getZExtValue();
 
   // Dependency list pointer
-  const Value *dep_list = task_call->getArgOperand(4);
-  const Value *dep_base = getUnderlyingObject(dep_list->stripPointerCasts());
+  const Value *dep_list = task_call->getArgOperand(dep_arg_idx);
+  const Value *dep_root = resolveDependencyListValue(dep_list);
+  const Value *dep_base =
+      dep_root ? getUnderlyingObject(dep_root->stripPointerCasts()) : nullptr;
+  if (!dep_base && dep_root) {
+    dep_base = dep_root->stripPointerCasts();
+  }
 
   if (const auto *gv = dyn_cast_or_null<GlobalVariable>(dep_base)) {
     if (const auto *init = gv->getInitializer()) {
@@ -847,21 +976,26 @@ void OpenMPTaskGraph::buildDependencyEdges() {
         }
       };
 
-  auto crossesPartialWaitBoundary = [&](const Task *lhs,
-                                        const Task *rhs) -> bool {
+  auto crossesDeferredPartialWaitBoundary = [&](const Task *lhs,
+                                                const Task *rhs) -> bool {
     if (!lhs || !rhs ||
         lhs->scheduling_context_id != rhs->scheduling_context_id) {
       return false;
     }
     const size_t earlier = std::min(lhs->sequence_index, rhs->sequence_index);
     const size_t later = std::max(lhs->sequence_index, rhs->sequence_index);
-    for (const WaitBoundaryInfo &info : m_wait_boundary_infos) {
-      if (!info.is_partial_wait ||
-          info.scheduling_context_id != lhs->scheduling_context_id) {
+    for (const auto &entry : m_wait_boundaries) {
+      if (entry.first != lhs->scheduling_context_id) {
         continue;
       }
-      if (earlier < info.sequence_index && info.sequence_index <= later) {
-        return true;
+      for (const WaitBoundary &boundary : entry.second) {
+        if (!boundary.is_partial_wait || !boundary.dependencies.empty()) {
+          continue;
+        }
+        if (earlier < boundary.sequence_index &&
+            boundary.sequence_index <= later) {
+          return true;
+        }
       }
     }
     return false;
@@ -875,16 +1009,12 @@ void OpenMPTaskGraph::buildDependencyEdges() {
       if (task_i->scheduling_context_id != task_j->scheduling_context_id) {
         continue;
       }
-      // __kmpc_omp_wait_deps synchronizes only a selected subset of tasks.
-      // Without precise lowering of the dependency objects, we avoid adding a
-      // definite HB edge across that boundary.
-      if (crossesPartialWaitBoundary(task_i, task_j)) {
+      if (crossesDeferredPartialWaitBoundary(task_i, task_j)) {
         recordRelation(
             task_i, task_j, concurrency::RelationKind::UnknownDueToModelGap,
             concurrency::ProofStrength::Unknown, "omp_taskwait_deps_partial");
         continue;
       }
-
       // Check if tasks have conflicting dependencies
       bool saw_conflict = false;
       bool saw_mutex_exclusion = false;
@@ -956,7 +1086,7 @@ void OpenMPTaskGraph::buildDependencyEdges() {
              lhs->taskgroup_id != boundary.taskgroup_id)) {
           continue;
         }
-        if (!boundary.is_taskgroup_end &&
+        if (!boundary.is_taskgroup_end && !boundary.is_partial_wait &&
             lhs->phase_id != boundary.sibling_group) {
           continue;
         }
@@ -966,8 +1096,55 @@ void OpenMPTaskGraph::buildDependencyEdges() {
               rhs->sequence_index < boundary.sequence_index) {
             continue;
           }
-          if (!boundary.is_taskgroup_end &&
+          if (!boundary.is_taskgroup_end && !boundary.is_partial_wait &&
               rhs->phase_id <= boundary.sibling_group) {
+            continue;
+          }
+          if (boundary.is_partial_wait) {
+            bool lhs_selected = false;
+            bool rhs_selected = false;
+            for (const Dependency &wait_dep : boundary.dependencies) {
+              for (const Dependency &lhs_dep : lhs->dependencies) {
+                if (classifyDependencyConflict(lhs_dep, wait_dep) ==
+                    DependencyConflict::MustConflict) {
+                  lhs_selected = true;
+                  break;
+                }
+              }
+              for (const Dependency &rhs_dep : rhs->dependencies) {
+                if (classifyDependencyConflict(rhs_dep, wait_dep) !=
+                    DependencyConflict::NoConflict) {
+                  rhs_selected = true;
+                  break;
+                }
+              }
+              if (lhs_selected && rhs_selected) {
+                break;
+              }
+            }
+            StringRef selective_reason =
+                boundary.kind == WaitBoundaryInfo::Kind::Flush
+                    ? "omp_flush_selective"
+                    : "omp_taskwait_deps_selective";
+            StringRef deferred_reason =
+                boundary.kind == WaitBoundaryInfo::Kind::Flush
+                    ? "omp_flush_witness_required"
+                    : "omp_taskwait_deps_partial";
+            if (!boundary.dependencies.empty() && lhs_selected && rhs_selected &&
+                mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst) &&
+                mustHappenBefore(boundary.inst, taskOrderingSite(rhs.get()))) {
+              lhs->successors.insert(rhs.get());
+              rhs->predecessors.insert(lhs.get());
+              recordRelation(lhs.get(), rhs.get(),
+                             concurrency::RelationKind::SelectiveHappenBefore,
+                             concurrency::ProofStrength::Must,
+                             selective_reason);
+            } else {
+              recordRelation(lhs.get(), rhs.get(),
+                             concurrency::RelationKind::UnknownDueToModelGap,
+                             concurrency::ProofStrength::Unknown,
+                             deferred_reason);
+            }
             continue;
           }
           if (mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst) &&

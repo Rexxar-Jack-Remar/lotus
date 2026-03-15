@@ -48,8 +48,6 @@ bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) {
 void MPICollectiveAnalysis::analyzeCollectives() {
   collective_calls_.clear();
   protocol_diagnostics_.clear();
-  std::map<std::pair<size_t, const llvm::Function *>, size_t>
-      sequence_by_function_and_comm;
 
   auto readConstArg = [](const CallBase *cb, int idx, int &out) {
     if (!cb || idx < 0 || static_cast<unsigned>(idx) >= cb->arg_size()) {
@@ -73,9 +71,18 @@ void MPICollectiveAnalysis::analyzeCollectives() {
       call.type = op.td_type;
       call.comm = op.communicator;
       call.communicator_class_id = op.communicator_class_id;
+      call.communicator_subgroup_id = op.communicator_subgroup_id;
       call.function = op.function;
-      call.sequence_index = sequence_by_function_and_comm[{
-          op.communicator_class_id, op.function}]++;
+      call.sequence_index = op.protocol_sequence_id;
+      call.protocol_sequence_id = op.protocol_sequence_id;
+      call.reachability = op.protocol_reachability;
+      call.protocol_relation.kind =
+          concurrency::RelationKind::SameProtocolSlot;
+      call.protocol_relation.proof =
+          op.protocol_reachability == ProtocolReachability::AllRanks
+              ? concurrency::ProofStrength::Must
+              : concurrency::ProofStrength::May;
+      call.protocol_relation.reason = "mpi_collective_protocol_slot";
       protocol_diagnostics_["collective_slots_tracked"]++;
       if (op.protocol_reachability != ProtocolReachability::AllRanks) {
         protocol_diagnostics_["collective_partial_reachability"]++;
@@ -143,6 +150,17 @@ void MPICollectiveAnalysis::analyzeCollectives() {
       collective_calls_.push_back(call);
     }
   }
+}
+
+size_t
+MPICollectiveAnalysis::getProtocolRelationCount(concurrency::RelationKind kind) const {
+  size_t count = 0;
+  for (const CollectiveCall &call : collective_calls_) {
+    if (call.protocol_relation.kind == kind) {
+      ++count;
+    }
+  }
+  return count;
 }
 
 int MPICollectiveAnalysis::getRootArgIndex(ThreadAPI::TD_TYPE type) {
@@ -224,14 +242,16 @@ MPICollectiveAnalysis::findMismatchedCollectives() const {
         if ((!communicatorsMayAlias(c1.comm, c2.comm) &&
              !(c1.communicator_class_id != 0 &&
                c1.communicator_class_id == c2.communicator_class_id)) ||
-            c1.sequence_index != c2.sequence_index) {
+            c1.protocol_sequence_id != c2.protocol_sequence_id ||
+            c1.communicator_subgroup_id != c2.communicator_subgroup_id) {
           continue;
         }
       } else {
         if (c1.function == c2.function) {
           continue;
         }
-        if (c1.sequence_index != c2.sequence_index ||
+        if (c1.protocol_sequence_id != c2.protocol_sequence_id ||
+            c1.communicator_subgroup_id != c2.communicator_subgroup_id ||
             (!communicatorsMayAlias(c1.comm, c2.comm) &&
              !(c1.communicator_class_id != 0 &&
                c1.communicator_class_id == c2.communicator_class_id))) {

@@ -87,6 +87,8 @@ void MPIRMAAnalysis::analyzeRMA() {
       rma_op.target_disp = op.target_disp;
       rma_op.byte_length = op.byte_length;
       rma_op.rma_epoch_kind = RMAEpochKind::Access;
+      rma_op.lock_all = op.td_type == ThreadAPI::TD_MPI_WIN_LOCK &&
+                        op.target_rank < 0;
 
       size_t op_index = rma_operations_.size();
       rma_operations_.push_back(rma_op);
@@ -135,6 +137,11 @@ void MPIRMAAnalysis::analyzeRMA() {
             rma_operations_[idx].epoch_id = epoch.epoch_id;
             rma_operations_[idx].synchronization_proof =
                 concurrency::ProofStrength::Must;
+            rma_operations_[idx].relation.kind =
+                concurrency::RelationKind::SameSynchronizationEpoch;
+            rma_operations_[idx].relation.proof =
+                concurrency::ProofStrength::Must;
+            rma_operations_[idx].relation.reason = "mpi_rma_fence_epoch";
           }
           epoch.op_indices.clear();
         }
@@ -159,6 +166,11 @@ void MPIRMAAnalysis::analyzeRMA() {
             rma_operations_[idx].epoch_id = epoch.epoch_id;
             rma_operations_[idx].synchronization_proof =
                 concurrency::ProofStrength::Must;
+            rma_operations_[idx].relation.kind =
+                concurrency::RelationKind::SameSynchronizationEpoch;
+            rma_operations_[idx].relation.proof =
+                concurrency::ProofStrength::Must;
+            rma_operations_[idx].relation.reason = "mpi_rma_lock_epoch";
           }
         }
         epoch.model = SyncModel::NONE;
@@ -168,6 +180,27 @@ void MPIRMAAnalysis::analyzeRMA() {
         break;
       case ThreadAPI::TD_MPI_WIN_FLUSH:
       case ThreadAPI::TD_MPI_WIN_SYNC:
+        for (size_t idx : epoch.op_indices) {
+          rma_operations_[idx].flush_completed = true;
+          rma_operations_[idx].local_completion_only =
+              op.rma_local_completion_only;
+          if (op.rma_local_completion_only) {
+            rma_operations_[idx].relation.kind =
+                concurrency::RelationKind::UnknownDueToModelGap;
+            rma_operations_[idx].relation.proof =
+                concurrency::ProofStrength::May;
+            rma_operations_[idx].relation.reason =
+                "mpi_rma_flush_local_completion";
+            continue;
+          }
+          rma_operations_[idx].relation.kind =
+              concurrency::RelationKind::SameSynchronizationEpoch;
+          rma_operations_[idx].relation.proof = concurrency::ProofStrength::May;
+          rma_operations_[idx].relation.reason =
+              op.td_type == ThreadAPI::TD_MPI_WIN_SYNC
+                  ? "mpi_rma_sync_completion"
+                  : "mpi_rma_flush_completion";
+        }
         break;
       case ThreadAPI::TD_MPI_WIN_START:
         epoch.model = SyncModel::PSCW;
@@ -184,6 +217,11 @@ void MPIRMAAnalysis::analyzeRMA() {
             rma_operations_[idx].epoch_id = epoch.epoch_id;
             rma_operations_[idx].synchronization_proof =
                 concurrency::ProofStrength::Must;
+            rma_operations_[idx].relation.kind =
+                concurrency::RelationKind::SameSynchronizationEpoch;
+            rma_operations_[idx].relation.proof =
+                concurrency::ProofStrength::Must;
+            rma_operations_[idx].relation.reason = "mpi_rma_pscw_epoch";
           }
         }
         epoch.model = SyncModel::NONE;
@@ -194,6 +232,9 @@ void MPIRMAAnalysis::analyzeRMA() {
       case ThreadAPI::TD_MPI_WIN_POST:
       case ThreadAPI::TD_MPI_WIN_WAIT:
       case ThreadAPI::TD_MPI_WIN_TEST:
+        for (size_t idx : epoch.op_indices) {
+          rma_operations_[idx].exposure_epoch_observed = true;
+        }
         break;
       default:
         break;
@@ -251,6 +292,9 @@ bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation &op1,
     return true;
   }
   if (op1.sync_model != op2.sync_model) {
+    return true;
+  }
+  if (op1.local_completion_only || op2.local_completion_only) {
     return true;
   }
   if (op1.epoch_id != 0 && op1.epoch_id == op2.epoch_id) {

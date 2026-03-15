@@ -389,6 +389,79 @@ TEST_F(HappensBeforeAnalysisTest, OpenMPSingleBoundaryOrdersTaskContinuation) {
   EXPECT_TRUE(hb.happensBefore(task_store, after));
 }
 
+TEST_F(HappensBeforeAnalysisTest, OpenMPFlushRelationFeedsHBAnalysis) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @shared = global i32 0, align 4
+    @deps = global [1 x %kmp_depend_info] [
+      %kmp_depend_info {
+        i8* bitcast (i32* @shared to i8*),
+        i64 4,
+        i8 2
+      }
+    ]
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+    declare i32 @__kmpc_flush(i8*)
+
+    define i8* @producer_task(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @consumer_task(i8* %arg) {
+    entry:
+      %loaded = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %task1 = alloca i8* (i8*)*, align 8
+      %task2 = alloca i8* (i8*)*, align 8
+      store i8* (i8*)* @producer_task, i8* (i8*)** %task1, align 8
+      store i8* (i8*)* @consumer_task, i8* (i8*)** %task2, align 8
+      %task1_raw = bitcast i8* (i8*)** %task1 to i8*
+      %task2_raw = bitcast i8* (i8*)** %task2 to i8*
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+             [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* %task1_raw, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      call i32 @__kmpc_flush(i8* bitcast (i32* @shared to i8*))
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* %task2_raw, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *producer = module->getFunction("producer_task");
+  const Function *consumer = module->getFunction("consumer_task");
+  ASSERT_NE(producer, nullptr);
+  ASSERT_NE(consumer, nullptr);
+
+  const Instruction *store_shared = &producer->getEntryBlock().front();
+  const Instruction *load_shared = findInstructionByName(*consumer, "loaded");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
 TEST_F(HappensBeforeAnalysisTest,
        PlainReleaseAcquireWithoutWitnessDoesNotCreateHB) {
   const char *source = R"(

@@ -77,6 +77,8 @@ public:
  */
 class MPIRankAnalysis {
 public:
+  enum class ReachabilityKind { AllRanks, SomeRanks, Unknown };
+
   explicit MPIRankAnalysis(llvm::Module &module);
   
   /**
@@ -93,6 +95,9 @@ public:
    * @brief Get the rank at a specific instruction
    */
   RankExpr getRankAtInstruction(const llvm::Instruction *inst) const;
+
+  ReachabilityKind
+  getReachabilityAtInstruction(const llvm::Instruction *inst) const;
   
   /**
    * @brief Check if two instructions are in the same rank

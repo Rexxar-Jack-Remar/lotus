@@ -372,6 +372,27 @@ void MPIProcessModel::registerCommunicatorAlias(const Value *alias,
   assignCommunicatorClass(canonical_root);
 }
 
+void MPIProcessModel::registerCommunicatorSubgroup(const Value *alias,
+                                                   const Value *root,
+                                                   int subgroup_token) {
+  if (!alias) {
+    return;
+  }
+  registerCommunicatorAlias(alias, root);
+  const Value *alias_key = alias->stripPointerCasts();
+  if (const Value *underlying = getUnderlyingObject(alias_key)) {
+    alias_key = underlying->stripPointerCasts();
+  }
+  CommunicatorID canonical_root =
+      root ? canonicalizeCommunicator(root) : alias_key;
+  const std::string subgroup_key =
+      std::to_string(assignCommunicatorClass(canonical_root)) + ":" +
+      std::to_string(subgroup_token);
+  size_t subgroup_id = std::hash<std::string>{}(subgroup_key) + 1;
+  communicator_subgroup_ids_[alias_key] = subgroup_id;
+  communicator_subgroup_ids_[canonical_root] = subgroup_id;
+}
+
 size_t MPIProcessModel::assignCommunicatorClass(CommunicatorID canonical) {
   if (!canonical) {
     return 0;
@@ -396,6 +417,19 @@ MPIProcessModel::getCommunicatorClassID(CommunicatorID communicator) const {
   return it != communicator_class_ids_.end() ? it->second : 0;
 }
 
+size_t
+MPIProcessModel::getCommunicatorSubgroupID(const Value *communicator) const {
+  if (!communicator) {
+    return 0;
+  }
+  const Value *key = traceCommunicatorRoot(communicator);
+  if (!key) {
+    key = communicator->stripPointerCasts();
+  }
+  auto it = communicator_subgroup_ids_.find(key);
+  return it != communicator_subgroup_ids_.end() ? it->second : 0;
+}
+
 void MPIProcessModel::annotateRankConstraints(MPIOperation &op) const {
   if (!rank_analysis_ || !op.inst) {
     return;
@@ -403,21 +437,21 @@ void MPIProcessModel::annotateRankConstraints(MPIOperation &op) const {
 
   MPI::RankExpr rank = rank_analysis_->getRankAtInstruction(op.inst);
   op.process_rank = rank;
-  switch (rank.kind) {
-  case MPI::RankExpr::Concrete:
+  switch (rank_analysis_->getReachabilityAtInstruction(op.inst)) {
+  case MPI::MPIRankAnalysis::ReachabilityKind::SomeRanks:
     op.protocol_reachability = ProtocolReachability::SomeRanks;
-    op.rank_path_summary = ("rank==" + std::to_string(rank.concrete_value));
+    if (rank.kind == MPI::RankExpr::Concrete) {
+      op.rank_path_summary = ("rank==" + std::to_string(rank.concrete_value));
+    } else {
+      op.rank_path_summary = ("rank in [" + std::to_string(rank.range_min) +
+                              ", " + std::to_string(rank.range_max) + "]");
+    }
     break;
-  case MPI::RankExpr::Range:
-    op.protocol_reachability = ProtocolReachability::SomeRanks;
-    op.rank_path_summary = ("rank in [" + std::to_string(rank.range_min) +
-                            ", " + std::to_string(rank.range_max) + "]");
-    break;
-  case MPI::RankExpr::Symbolic:
+  case MPI::MPIRankAnalysis::ReachabilityKind::AllRanks:
     op.protocol_reachability = ProtocolReachability::AllRanks;
     op.rank_path_summary = "rank symbolic";
     break;
-  case MPI::RankExpr::Unknown:
+  case MPI::MPIRankAnalysis::ReachabilityKind::Unknown:
     op.protocol_reachability = ProtocolReachability::Unknown;
     op.rank_path_summary = "rank unknown";
     break;
@@ -596,6 +630,8 @@ void MPIProcessModel::extractCollectiveDetails(MPIOperation &op,
   }
   if (comm_idx < cb->arg_size()) {
     op.communicator = canonicalizeCommunicator(cb->getArgOperand(comm_idx));
+    op.communicator_subgroup_id =
+        getCommunicatorSubgroupID(cb->getArgOperand(comm_idx));
   }
   if (nonblocking) {
     op.request = cb->getArgOperand(cb->arg_size() - 1);
@@ -799,6 +835,7 @@ void MPIProcessModel::extractRMASyncDetails(MPIOperation &op,
       }
       op.window = cb->getArgOperand(1);
     }
+    op.rma_local_completion_only = callee_name.equals("MPI_Win_flush_local");
     return;
   }
   if (callee_name.equals("MPI_Win_unlock_all") ||
@@ -807,6 +844,8 @@ void MPIProcessModel::extractRMASyncDetails(MPIOperation &op,
     if (num_args >= 1) {
       op.window = cb->getArgOperand(0);
     }
+    op.rma_local_completion_only =
+        callee_name.equals("MPI_Win_flush_local_all");
     return;
   }
   if (callee_name.equals("MPI_Win_sync") ||
@@ -890,6 +929,8 @@ void MPIProcessModel::analyzeModule() {
   canonical_communicators_.clear();
   communicator_class_ids_.clear();
   next_communicator_class_id_ = 1;
+  communicator_subgroup_ids_.clear();
+  next_communicator_subgroup_id_ = 1;
   deferred_lowering_stats_.clear();
   rank_analysis_ = std::make_unique<MPI::MPIRankAnalysis>(module_);
   rank_analysis_->analyze();
@@ -939,6 +980,11 @@ void MPIProcessModel::analyzeModule() {
       if (op.communicator) {
         op.communicator_class_id =
             assignCommunicatorClass(canonicalizeCommunicator(op.communicator));
+        if (op.communicator_subgroup_id == 0 &&
+            op.protocol_reachability == ProtocolReachability::SomeRanks) {
+          op.communicator_subgroup_id =
+              std::hash<std::string>{}(op.rank_path_summary) + 1;
+        }
       }
 
       if (kind == MPIOpKind::COMM_MANAGEMENT) {
@@ -955,10 +1001,21 @@ void MPIProcessModel::analyzeModule() {
             registerCommunicatorAlias(cb->getArgOperand(1), root);
           } else if (callee_name.equals("MPI_Comm_split") &&
                      cb->arg_size() >= 4) {
-            registerCommunicatorAlias(cb->getArgOperand(3), root);
+            int color = 0;
+            if (tryReadScalarInt(cb->getArgOperand(1), color, I)) {
+              registerCommunicatorSubgroup(cb->getArgOperand(3), root, color);
+            } else {
+              registerCommunicatorAlias(cb->getArgOperand(3), root);
+            }
           } else if (callee_name.equals("MPI_Comm_split_type") &&
                      cb->arg_size() >= 5) {
-            registerCommunicatorAlias(cb->getArgOperand(4), root);
+            int split_type = 0;
+            if (tryReadScalarInt(cb->getArgOperand(1), split_type, I)) {
+              registerCommunicatorSubgroup(cb->getArgOperand(4), root,
+                                           split_type);
+            } else {
+              registerCommunicatorAlias(cb->getArgOperand(4), root);
+            }
           } else if (callee_name.equals("MPI_Comm_create") &&
                      cb->arg_size() >= 3) {
             registerCommunicatorAlias(cb->getArgOperand(2), root);
@@ -1007,6 +1064,27 @@ void MPIProcessModel::analyzeModule() {
         }
       }
     }
+  }
+
+  std::map<std::tuple<size_t, size_t, const Function *>, size_t>
+      protocol_sequence_by_scope;
+  for (MPIOperation &op : all_operations_) {
+    if (op.kind != MPIOpKind::BARRIER_BLOCKING &&
+        op.kind != MPIOpKind::BARRIER_NONBLOCKING &&
+        op.kind != MPIOpKind::COLLECTIVE_BLOCKING &&
+        op.kind != MPIOpKind::COLLECTIVE_NONBLOCKING) {
+      continue;
+    }
+    auto key =
+        std::make_tuple(op.communicator_class_id, op.communicator_subgroup_id,
+                        op.function);
+    op.protocol_sequence_id = protocol_sequence_by_scope[key]++;
+    op.semantic_relation.kind = concurrency::RelationKind::SameProtocolSlot;
+    op.semantic_relation.proof =
+        op.protocol_reachability == ProtocolReachability::AllRanks
+            ? concurrency::ProofStrength::Must
+            : concurrency::ProofStrength::May;
+    op.semantic_relation.reason = "mpi_collective_protocol_slot";
   }
 
   matchNonBlockingOps();
@@ -1570,6 +1648,17 @@ MPIProcessModel::classifyCommunicationMatch(const MPIOperation &op1,
     return MPICommunicationMatch::NoMatch;
   } else {
     precise = false;
+  }
+
+  if (send.protocol_reachability == ProtocolReachability::SomeRanks &&
+      recv.protocol_reachability == ProtocolReachability::SomeRanks &&
+      send.rank_path_summary != recv.rank_path_summary) {
+    precise = false;
+  }
+
+  if (send.datatype_size > 0 && recv.datatype_size > 0 &&
+      send.datatype_size != recv.datatype_size) {
+    return MPICommunicationMatch::NoMatch;
   }
 
   return precise ? MPICommunicationMatch::MustMatch

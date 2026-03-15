@@ -50,7 +50,8 @@ ConcurrencyFacade::analyzeOpenMP(llvm::Module &module) {
   summary.target_data_region_count = graph_summary.target_data_region_count;
   summary.detach_completion_count = graph_summary.detach_completion_count;
   summary.happens_before_relation_count =
-      graph.getRelationCount(concurrency::RelationKind::MustHappenBefore);
+      graph.getRelationCount(concurrency::RelationKind::MustHappenBefore) +
+      graph.getRelationCount(concurrency::RelationKind::SelectiveHappenBefore);
   summary.exclusion_relation_count =
       graph.getRelationCount(concurrency::RelationKind::MutuallyExclusive);
   summary.unknown_relation_count =

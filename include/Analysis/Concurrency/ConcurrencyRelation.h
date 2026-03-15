@@ -12,8 +12,11 @@ enum class ProofStrength {
 
 enum class RelationKind {
   MustHappenBefore,
+  SelectiveHappenBefore,
   MayHappenBefore,
   MutuallyExclusive,
+  SameSynchronizationEpoch,
+  SameProtocolSlot,
   UnknownDueToModelGap
 };
 
@@ -26,8 +29,14 @@ struct Relation {
 inline int relationPriority(RelationKind kind) {
   switch (kind) {
   case RelationKind::MustHappenBefore:
-    return 4;
+    return 6;
+  case RelationKind::SelectiveHappenBefore:
+    return 5;
   case RelationKind::MutuallyExclusive:
+    return 4;
+  case RelationKind::SameSynchronizationEpoch:
+    return 3;
+  case RelationKind::SameProtocolSlot:
     return 3;
   case RelationKind::MayHappenBefore:
     return 2;

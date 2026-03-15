@@ -42,6 +42,11 @@ public:
   const std::unordered_map<std::string, size_t> &getDeferredSyncCounts() const {
     return m_deferred_sync_counts;
   }
+  const std::vector<std::pair<const llvm::Instruction *,
+                              const llvm::Instruction *>> &
+  getSynchronizesWithEdges() const {
+    return m_sync_with;
+  }
 
   /**
    * @brief Check if instruction A happens-before instruction B

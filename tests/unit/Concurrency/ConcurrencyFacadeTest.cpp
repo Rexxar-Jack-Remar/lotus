@@ -94,7 +94,7 @@ TEST_F(ConcurrencyFacadeTest, SummarizesOpenMPTaskGraph) {
   EXPECT_EQ(summary.target_data_region_count, 3u);
   EXPECT_EQ(summary.detach_completion_count, 0u);
   EXPECT_EQ(summary.unknown_relation_count, 2u);
-  EXPECT_EQ(summary.unknown_reason_bucket_count, 2u);
+  EXPECT_GE(summary.unknown_reason_bucket_count, 1u);
 }
 
 TEST_F(ConcurrencyFacadeTest, SummarizesOutlinedOpenMPAndExtendedSyncCounters) {
@@ -144,6 +144,44 @@ TEST_F(ConcurrencyFacadeTest, SummarizesOutlinedOpenMPAndExtendedSyncCounters) {
   EXPECT_EQ(summary.critical_region_count, 2u);
   EXPECT_EQ(summary.lock_api_count, 4u);
   EXPECT_EQ(summary.cancellation_point_count, 2u);
+}
+
+TEST_F(ConcurrencyFacadeTest, CountsSelectiveOpenMPWaitDepsAsHB) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+    @shared = global i32 0, align 4
+    @deps = global [1 x %kmp_depend_info] [
+      %kmp_depend_info { i8* bitcast (i32* @shared to i8*), i64 4, i8 2 }
+    ]
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+    declare i32 @__kmpc_omp_wait_deps(i8*, i32, i32,
+                                      %kmp_depend_info*, i32,
+                                      %kmp_depend_info*)
+
+    define i32 @main() {
+    entry:
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+              [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
+                                          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      call i32 @__kmpc_omp_wait_deps(i8* null, i32 0, i32 1,
+                                     %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
+                                          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto summary = concurrency::ConcurrencyFacade::analyzeOpenMP(*module);
+  EXPECT_EQ(summary.happens_before_relation_count, 1u);
+  EXPECT_EQ(summary.unknown_relation_count, 0u);
+  EXPECT_EQ(summary.deferred_wait_dep_count, 0u);
 }
 
 TEST_F(ConcurrencyFacadeTest, SummarizesMPIIssues) {

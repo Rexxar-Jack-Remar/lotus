@@ -61,8 +61,13 @@ public:
     RMAEpochKind rma_epoch_kind = RMAEpochKind::None;
     concurrency::ProofStrength synchronization_proof =
         concurrency::ProofStrength::Unknown;
+    concurrency::Relation relation;
     SyncModel sync_model = SyncModel::NONE;
     size_t epoch_id = 0;
+    bool lock_all = false;
+    bool flush_completed = false;
+    bool local_completion_only = false;
+    bool exposure_epoch_observed = false;
 
     const llvm::Instruction *sync_start = nullptr;
     const llvm::Instruction *sync_end = nullptr;
@@ -79,6 +84,9 @@ public:
 
   std::vector<WindowID> findLeakedWindows() const;
   size_t getTrackedWindowCount() const { return windows_.size(); }
+  const std::vector<RMAOperation> &getSynchronizationRelations() const {
+    return rma_operations_;
+  }
 
 private:
   const MPIProcessModel &process_model_;

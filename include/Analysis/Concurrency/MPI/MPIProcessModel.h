@@ -138,6 +138,8 @@ private:
       canonical_communicators_;
   std::unordered_map<const llvm::Value *, size_t> communicator_class_ids_;
   mutable size_t next_communicator_class_id_ = 1;
+  mutable size_t next_communicator_subgroup_id_ = 1;
+  std::unordered_map<const llvm::Value *, size_t> communicator_subgroup_ids_;
   std::unique_ptr<MPI::MPIRankAnalysis> rank_analysis_;
 
   MPIOpKind classifyOperation(const llvm::Instruction *inst,
@@ -168,7 +170,11 @@ private:
   canonicalizeCommunicator(const llvm::Value *communicator) const;
   void registerCommunicatorAlias(const llvm::Value *alias,
                                  const llvm::Value *root);
+  void registerCommunicatorSubgroup(const llvm::Value *alias,
+                                    const llvm::Value *root,
+                                    int subgroup_token);
   size_t assignCommunicatorClass(CommunicatorID canonical);
+  size_t getCommunicatorSubgroupID(const llvm::Value *communicator) const;
   void annotateRankConstraints(MPIOperation &op) const;
   int64_t getDatatypeExtent(const llvm::Value *datatype_arg,
                             const llvm::Instruction *context) const;

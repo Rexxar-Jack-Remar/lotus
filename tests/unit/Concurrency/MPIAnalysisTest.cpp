@@ -466,6 +466,79 @@ TEST_F(MPIAnalysisTest, PrintResultsIncludesDetailedCounters) {
             std::string::npos);
 }
 
+TEST_F(MPIAnalysisTest, RankRestrictedCollectivesUseDistinctProtocolSlots) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_rank(i8*, i32*)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %rank = alloca i32, align 4
+      call i32 @MPI_Comm_rank(i8* %comm, i32* %rank)
+      %rankv = load i32, i32* %rank, align 4
+      %in_low_half = icmp slt i32 %rankv, 2
+      br i1 %in_low_half, label %low, label %high
+
+    low:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      br label %join
+
+    high:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      br label %join
+
+    join:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto collectives =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::COLLECTIVE_BLOCKING);
+  ASSERT_EQ(collectives.size(), 2u);
+  EXPECT_NE(collectives[0].communicator_subgroup_id, 0u);
+  EXPECT_NE(collectives[1].communicator_subgroup_id, 0u);
+  EXPECT_NE(collectives[0].communicator_subgroup_id,
+            collectives[1].communicator_subgroup_id);
+  EXPECT_EQ(collectives[0].protocol_sequence_id, 0u);
+  EXPECT_EQ(collectives[1].protocol_sequence_id, 0u);
+}
+
+TEST_F(MPIAnalysisTest, FlushMarksTrackedRMACompletion) {
+  const char *source = R"(
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_lock(i32, i32, i32, i8*)
+    declare i32 @MPI_Get(i8*, i32, i32, i32, i64, i32, i32, i8*)
+    declare i32 @MPI_Win_flush(i32, i8*)
+    declare i32 @MPI_Win_unlock(i32, i8*)
+    @win = global i8 0, align 1
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Win_create(i8* null, i64 8, i32 4, i8* %comm, i8* @win)
+      call i32 @MPI_Win_lock(i32 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Get(i8* null, i32 1, i32 0, i32 1, i64 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Win_flush(i32 1, i8* @win)
+      call i32 @MPI_Win_unlock(i32 1, i8* @win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_TRUE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_TRUE(analysis.getResults().rma_races.empty());
+}
+
 TEST_F(MPIAnalysisTest, WaitsomeWithoutRecoverableIndicesKeepsRequestsPending) {
   const char *source = R"(
     declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
@@ -1106,6 +1179,97 @@ TEST_F(MPIAnalysisTest, CollectiveCountMismatchIsReportedPerCommunicatorClass) {
   analysis.runAnalysis();
 
   EXPECT_EQ(analysis.getResults().mismatched_collectives.size(), 1u);
+}
+
+TEST_F(MPIAnalysisTest, CommunicatorSplitSharesStableSubgroupAcrossRanks) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_split(i8*, i32, i32, i8**)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @rank0(i8* %comm) {
+    entry:
+      %split = alloca i8*, align 8
+      call i32 @MPI_Comm_split(i8* %comm, i32 7, i32 0, i8** %split)
+      %split_loaded = load i8*, i8** %split, align 8
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %split_loaded)
+      ret i32 0
+    }
+
+    define i32 @rank1(i8* %comm) {
+    entry:
+      %split = alloca i8*, align 8
+      call i32 @MPI_Comm_split(i8* %comm, i32 7, i32 1, i8** %split)
+      %split_loaded = load i8*, i8** %split, align 8
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %split_loaded)
+      ret i32 0
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %a = call i32 @rank0(i8* %comm)
+      %b = call i32 @rank1(i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto collectives =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::COLLECTIVE_BLOCKING);
+  ASSERT_EQ(collectives.size(), 2u);
+  EXPECT_NE(collectives[0].communicator_subgroup_id, 0u);
+  EXPECT_NE(collectives[1].communicator_subgroup_id, 0u);
+  EXPECT_TRUE(analysis.getResults().mismatched_collectives.empty());
+}
+
+TEST_F(MPIAnalysisTest, FlushLocalDoesNotSuppressPotentialRaces) {
+  const char *source = R"(
+    @win = global i8 0, align 1
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_lock_all(i32, i8*)
+    declare i32 @MPI_Win_flush_local_all(i8*)
+    declare i32 @MPI_Win_unlock_all(i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+
+    define i32 @rank0(i8* %comm) {
+    entry:
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* @win)
+      call i32 @MPI_Win_lock_all(i32 0, i8* @win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 1, i64 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Win_flush_local_all(i8* @win)
+      call i32 @MPI_Win_unlock_all(i8* @win)
+      ret i32 0
+    }
+
+    define i32 @rank1(i8* %comm) {
+    entry:
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* @win)
+      call i32 @MPI_Win_lock_all(i32 0, i8* @win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 1, i64 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Win_flush_local_all(i8* @win)
+      call i32 @MPI_Win_unlock_all(i8* @win)
+      ret i32 0
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %a = call i32 @rank0(i8* %comm)
+      %b = call i32 @rank1(i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_FALSE(analysis.getResults().rma_races.empty());
 }
 
 TEST_F(MPIAnalysisTest, ThreeRankBlockingCycleIsDetected) {
