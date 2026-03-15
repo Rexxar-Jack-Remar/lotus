@@ -43,6 +43,32 @@ std::string normalizeMPIName(StringRef raw_name) {
 
 bool isMPIWildcardValue(int value) { return value == -1 || value == -2; }
 
+bool isMPIValidRankLikeValue(int value) { return value >= 0 || value == -1 || value == -2; }
+
+bool isLikelyNullHandle(const Value *value) {
+  if (!value) {
+    return true;
+  }
+  value = value->stripPointerCasts();
+  if (isa<ConstantPointerNull>(value)) {
+    return true;
+  }
+  if (!value->hasName()) {
+    return false;
+  }
+  StringRef name = value->getName();
+  return name.contains("MPI_REQUEST_NULL") || name.contains("MPI_COMM_NULL") ||
+         name.contains("MPI_WIN_NULL") || name.contains("MPI_INFO_NULL");
+}
+
+bool isLikelyMPIInPlace(const Value *value) {
+  if (!value) {
+    return false;
+  }
+  value = value->stripPointerCasts();
+  return value->hasName() && value->getName().contains("MPI_IN_PLACE");
+}
+
 bool rangesOverlap(int lhs_min, int lhs_max, int rhs_min, int rhs_max) {
   if (lhs_min < 0 || lhs_max < 0 || rhs_min < 0 || rhs_max < 0) {
     return true;
@@ -329,6 +355,22 @@ bool MPIProcessModel::tryGetConstantInt(const Value *value, int &out) const {
   return true;
 }
 
+bool MPIProcessModel::tryGetScalarRange(const Value *value, int &min_out,
+                                        int &max_out) const {
+  if (!value) {
+    return false;
+  }
+  if (const auto *ci = dyn_cast<ConstantInt>(value)) {
+    min_out = ci->getSExtValue();
+    max_out = min_out;
+    return true;
+  }
+  if (rank_analysis_) {
+    return rank_analysis_->tryEvaluateIntRange(value, min_out, max_out);
+  }
+  return false;
+}
+
 CommunicatorID
 MPIProcessModel::canonicalizeCommunicator(const Value *communicator) const {
   if (!communicator) {
@@ -512,9 +554,19 @@ void MPIProcessModel::extractPointToPointDetails(MPIOperation &op,
 
   if (send_like) {
     if (num_args >= 6) {
+      op.datatype = cb->getArgOperand(2);
+      op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
+      int count = 0;
+      if (tryReadScalarInt(cb->getArgOperand(1), count, op.inst) &&
+          op.datatype_size > 0) {
+        op.byte_length = static_cast<int64_t>(count) * op.datatype_size;
+      }
       int value = -1;
       if (tryGetConstantInt(cb->getArgOperand(3), value)) {
         op.dest_rank = value;
+      } else {
+        tryGetScalarRange(cb->getArgOperand(3), op.dest_rank_min,
+                          op.dest_rank_max);
       }
       if (tryGetConstantInt(cb->getArgOperand(4), value)) {
         op.tag = value;
@@ -532,9 +584,19 @@ void MPIProcessModel::extractPointToPointDetails(MPIOperation &op,
 
   if (recv_like) {
     if (num_args >= 6) {
+      op.datatype = cb->getArgOperand(2);
+      op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
+      int count = 0;
+      if (tryReadScalarInt(cb->getArgOperand(1), count, op.inst) &&
+          op.datatype_size > 0) {
+        op.byte_length = static_cast<int64_t>(count) * op.datatype_size;
+      }
       int value = -1;
       if (tryGetConstantInt(cb->getArgOperand(3), value)) {
         op.source_rank = value;
+      } else {
+        tryGetScalarRange(cb->getArgOperand(3), op.source_rank_min,
+                          op.source_rank_max);
       }
       if (tryGetConstantInt(cb->getArgOperand(4), value)) {
         op.tag = value;
@@ -560,15 +622,35 @@ void MPIProcessModel::extractSendrecvDetails(MPIOperation &op,
   int value = -1;
   if (num_args >= 11) {
     if (op.kind == MPIOpKind::SEND_BLOCKING) {
+      op.datatype = cb->getArgOperand(2);
+      op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
+      int count = 0;
+      if (tryReadScalarInt(cb->getArgOperand(1), count, op.inst) &&
+          op.datatype_size > 0) {
+        op.byte_length = static_cast<int64_t>(count) * op.datatype_size;
+      }
       if (tryGetConstantInt(cb->getArgOperand(3), value)) {
         op.dest_rank = value;
+      } else {
+        tryGetScalarRange(cb->getArgOperand(3), op.dest_rank_min,
+                          op.dest_rank_max);
       }
       if (tryGetConstantInt(cb->getArgOperand(4), value)) {
         op.tag = value;
       }
     } else {
+      op.datatype = cb->getArgOperand(7);
+      op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
+      int count = 0;
+      if (tryReadScalarInt(cb->getArgOperand(6), count, op.inst) &&
+          op.datatype_size > 0) {
+        op.byte_length = static_cast<int64_t>(count) * op.datatype_size;
+      }
       if (tryGetConstantInt(cb->getArgOperand(8), value)) {
         op.source_rank = value;
+      } else {
+        tryGetScalarRange(cb->getArgOperand(8), op.source_rank_min,
+                          op.source_rank_max);
       }
       if (tryGetConstantInt(cb->getArgOperand(9), value)) {
         op.tag = value;
@@ -580,15 +662,35 @@ void MPIProcessModel::extractSendrecvDetails(MPIOperation &op,
 
   if (num_args >= 8) {
     if (op.kind == MPIOpKind::SEND_BLOCKING) {
+      op.datatype = cb->getArgOperand(2);
+      op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
+      int count = 0;
+      if (tryReadScalarInt(cb->getArgOperand(1), count, op.inst) &&
+          op.datatype_size > 0) {
+        op.byte_length = static_cast<int64_t>(count) * op.datatype_size;
+      }
       if (tryGetConstantInt(cb->getArgOperand(3), value)) {
         op.dest_rank = value;
+      } else {
+        tryGetScalarRange(cb->getArgOperand(3), op.dest_rank_min,
+                          op.dest_rank_max);
       }
       if (tryGetConstantInt(cb->getArgOperand(4), value)) {
         op.tag = value;
       }
     } else {
+      op.datatype = cb->getArgOperand(4);
+      op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
+      int count = 0;
+      if (tryReadScalarInt(cb->getArgOperand(3), count, op.inst) &&
+          op.datatype_size > 0) {
+        op.byte_length = static_cast<int64_t>(count) * op.datatype_size;
+      }
       if (tryGetConstantInt(cb->getArgOperand(5), value)) {
         op.source_rank = value;
+      } else {
+        tryGetScalarRange(cb->getArgOperand(5), op.source_rank_min,
+                          op.source_rank_max);
       }
       if (tryGetConstantInt(cb->getArgOperand(6), value)) {
         op.tag = value;
@@ -606,6 +708,9 @@ void MPIProcessModel::extractProbeDetails(MPIOperation &op,
   int value = -1;
   if (tryGetConstantInt(cb->getArgOperand(0), value)) {
     op.source_rank = value;
+  } else {
+    tryGetScalarRange(cb->getArgOperand(0), op.source_rank_min,
+                      op.source_rank_max);
   }
   if (tryGetConstantInt(cb->getArgOperand(1), value)) {
     op.tag = value;
@@ -739,6 +844,9 @@ void MPIProcessModel::extractRMADataDetails(MPIOperation &op,
     setByteLength(1, 2);
     if (tryGetConstantInt(cb->getArgOperand(3), value)) {
       op.target_rank = value;
+    } else {
+      tryGetScalarRange(cb->getArgOperand(3), op.target_rank_min,
+                        op.target_rank_max);
     }
     if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(4))) {
       op.target_disp = disp->getSExtValue();
@@ -753,6 +861,9 @@ void MPIProcessModel::extractRMADataDetails(MPIOperation &op,
     setByteLength(4, 5);
     if (tryGetConstantInt(cb->getArgOperand(6), value)) {
       op.target_rank = value;
+    } else {
+      tryGetScalarRange(cb->getArgOperand(6), op.target_rank_min,
+                        op.target_rank_max);
     }
     if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(7))) {
       op.target_disp = disp->getSExtValue();
@@ -765,6 +876,9 @@ void MPIProcessModel::extractRMADataDetails(MPIOperation &op,
     op.byte_length = 1;
     if (tryGetConstantInt(cb->getArgOperand(3), value)) {
       op.target_rank = value;
+    } else {
+      tryGetScalarRange(cb->getArgOperand(3), op.target_rank_min,
+                        op.target_rank_max);
     }
     if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(4))) {
       op.target_disp = disp->getSExtValue();
@@ -777,6 +891,9 @@ void MPIProcessModel::extractRMADataDetails(MPIOperation &op,
     op.byte_length = 1;
     if (tryGetConstantInt(cb->getArgOperand(4), value)) {
       op.target_rank = value;
+    } else {
+      tryGetScalarRange(cb->getArgOperand(4), op.target_rank_min,
+                        op.target_rank_max);
     }
     if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(5))) {
       op.target_disp = disp->getSExtValue();
@@ -789,6 +906,9 @@ void MPIProcessModel::extractRMADataDetails(MPIOperation &op,
     setByteLength(1, 2);
     if (tryGetConstantInt(cb->getArgOperand(3), value)) {
       op.target_rank = value;
+    } else {
+      tryGetScalarRange(cb->getArgOperand(3), op.target_rank_min,
+                        op.target_rank_max);
     }
     if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(4))) {
       op.target_disp = disp->getSExtValue();
@@ -815,6 +935,9 @@ void MPIProcessModel::extractRMASyncDetails(MPIOperation &op,
     if (num_args >= 4) {
       if (tryGetConstantInt(cb->getArgOperand(1), value)) {
         op.target_rank = value;
+      } else {
+        tryGetScalarRange(cb->getArgOperand(1), op.target_rank_min,
+                          op.target_rank_max);
       }
       op.window = cb->getArgOperand(3);
     }
@@ -832,6 +955,9 @@ void MPIProcessModel::extractRMASyncDetails(MPIOperation &op,
     if (num_args >= 2) {
       if (tryGetConstantInt(cb->getArgOperand(0), value)) {
         op.target_rank = value;
+      } else {
+        tryGetScalarRange(cb->getArgOperand(0), op.target_rank_min,
+                          op.target_rank_max);
       }
       op.window = cb->getArgOperand(1);
     }
@@ -1909,8 +2035,14 @@ MPIProcessModel::findCountDatatypeMismatches() const {
       bool datatype_mismatch = false;
 
       if (send_op.datatype && recv_op.datatype &&
-          send_op.datatype != recv_op.datatype) {
+          send_op.datatype != recv_op.datatype &&
+          send_op.datatype_size > 0 && recv_op.datatype_size > 0 &&
+          send_op.datatype_size != recv_op.datatype_size) {
         datatype_mismatch = true;
+      }
+      if (send_op.byte_length > 0 && recv_op.byte_length > 0 &&
+          send_op.byte_length != recv_op.byte_length) {
+        count_mismatch = true;
       }
 
       if (count_mismatch || datatype_mismatch) {
@@ -1936,7 +2068,16 @@ std::vector<const Instruction *> MPIProcessModel::findRankOutOfBounds() const {
       continue;
     }
 
-    if (op.dest_rank < 0 || op.source_rank < 0) {
+    if ((op.kind == MPIOpKind::SEND_BLOCKING ||
+         op.kind == MPIOpKind::SEND_NONBLOCKING) &&
+        op.dest_rank < -2) {
+      out_of_bounds.push_back(op.inst);
+      continue;
+    }
+
+    if ((op.kind == MPIOpKind::RECV_BLOCKING ||
+         op.kind == MPIOpKind::RECV_NONBLOCKING) &&
+        op.source_rank < -2) {
       out_of_bounds.push_back(op.inst);
     }
   }
@@ -1962,40 +2103,27 @@ MPIProcessModel::findCancelWithoutWait() const {
   std::vector<const Instruction *> issues;
 
   std::map<RequestID, const Instruction *> cancel_ops;
-  std::map<RequestID, const Instruction *> wait_after_cancel;
+  std::set<RequestID> observed_after_cancel;
 
   for (const MPIOperation &op : all_operations_) {
     if (op.td_type == ThreadAPI::TD_MPI_CANCEL && op.request) {
       cancel_ops[op.request] = op.inst;
+      continue;
     }
-    if ((op.td_type == ThreadAPI::TD_MPI_WAIT ||
-         op.td_type == ThreadAPI::TD_MPI_WAITALL ||
-         op.td_type == ThreadAPI::TD_MPI_WAITANY ||
-         op.td_type == ThreadAPI::TD_MPI_WAITSOME) &&
-        op.request) {
-      auto cancel_it = cancel_ops.find(op.request);
-      if (cancel_it != cancel_ops.end()) {
-        if (cancel_it->second && op.inst) {
-          if (cancel_it->second->getParent() == op.inst->getParent()) {
-            const auto *iter = cancel_it->second;
-            bool found_wait = false;
-            for (auto I = iter->getIterator(), E = op.inst->getIterator();
-                 I != E; ++I) {
-              if (isa<CallInst>(&*I)) {
-                const Function *F = cast<CallInst>(&*I)->getCalledFunction();
-                if (F && (F->getName().contains("MPI_Wait") ||
-                          F->getName().contains("MPI_Test"))) {
-                  found_wait = true;
-                  break;
-                }
-              }
-            }
-            if (!found_wait) {
-              issues.push_back(cancel_it->second);
-            }
-          }
-        }
-      }
+
+    if (!op.request) {
+      continue;
+    }
+
+    if ((op.kind == MPIOpKind::WAIT || op.kind == MPIOpKind::TEST) &&
+        cancel_ops.count(op.request)) {
+      observed_after_cancel.insert(op.request);
+    }
+  }
+
+  for (const auto &entry : cancel_ops) {
+    if (!observed_after_cancel.count(entry.first)) {
+      issues.push_back(entry.second);
     }
   }
 
@@ -2060,7 +2188,7 @@ std::vector<const Instruction *> MPIProcessModel::findInPlaceConflicts() const {
       const CallBase *cb = dyn_cast<CallBase>(op.inst);
       if (cb && cb->arg_size() > 0) {
         const Value *sendbuf = cb->getArgOperand(0);
-        if (sendbuf && sendbuf->getName().contains("MPI_IN_PLACE")) {
+        if (isLikelyMPIInPlace(sendbuf)) {
           issues.push_back(op.inst);
         }
       }
@@ -2079,8 +2207,7 @@ std::vector<const Instruction *> MPIProcessModel::findNullHandles() const {
       const CallBase *cb = dyn_cast<CallBase>(op.inst);
       if (cb && cb->arg_size() > 0) {
         const Value *arg = cb->getArgOperand(0);
-        if (arg && (arg->getName().contains("MPI_REQUEST_NULL") ||
-                    arg->getName().contains("MPI_COMM_NULL"))) {
+        if (isLikelyNullHandle(arg)) {
           issues.push_back(op.inst);
         }
       }
@@ -2165,7 +2292,16 @@ std::vector<const Instruction *> MPIProcessModel::findInvalidRanks() const {
       continue;
     }
 
-    if (op.dest_rank > 0 || op.source_rank > 0) {
+    if ((op.kind == MPIOpKind::SEND_BLOCKING ||
+         op.kind == MPIOpKind::SEND_NONBLOCKING) &&
+        op.dest_rank < -2) {
+      issues.push_back(op.inst);
+      continue;
+    }
+
+    if ((op.kind == MPIOpKind::RECV_BLOCKING ||
+         op.kind == MPIOpKind::RECV_NONBLOCKING) &&
+        !isMPIValidRankLikeValue(op.source_rank)) {
       issues.push_back(op.inst);
     }
   }
@@ -2175,7 +2311,41 @@ std::vector<const Instruction *> MPIProcessModel::findInvalidRanks() const {
 
 std::vector<std::pair<const Instruction *, const Instruction *>>
 MPIProcessModel::findTypeSizeMismatches() const {
-  return {};
+  std::vector<std::pair<const Instruction *, const Instruction *>> mismatches;
+  std::set<std::pair<const Instruction *, const Instruction *>> added;
+
+  for (const MPIOperation &send_op : all_operations_) {
+    if (send_op.kind != MPIOpKind::SEND_BLOCKING &&
+        send_op.kind != MPIOpKind::SEND_NONBLOCKING) {
+      continue;
+    }
+
+    for (const MPIOperation &recv_op : all_operations_) {
+      if (recv_op.kind != MPIOpKind::RECV_BLOCKING &&
+          recv_op.kind != MPIOpKind::RECV_NONBLOCKING) {
+        continue;
+      }
+      if (!sameCommunicatorForProof(send_op, recv_op)) {
+        continue;
+      }
+      if (!rangesOverlap(send_op.dest_rank_min, send_op.dest_rank_max,
+                         recv_op.source_rank_min, recv_op.source_rank_max)) {
+        continue;
+      }
+      if (send_op.byte_length <= 0 || recv_op.byte_length <= 0) {
+        continue;
+      }
+      if (send_op.byte_length == recv_op.byte_length) {
+        continue;
+      }
+      auto pair = std::make_pair(send_op.inst, recv_op.inst);
+      if (added.insert(pair).second) {
+        mismatches.push_back(pair);
+      }
+    }
+  }
+
+  return mismatches;
 }
 
 std::vector<const Instruction *> MPIProcessModel::findDestroyNullComm() const {
@@ -2189,7 +2359,7 @@ std::vector<const Instruction *> MPIProcessModel::findDestroyNullComm() const {
       const CallBase *cb = dyn_cast<CallBase>(op.inst);
       if (cb && cb->arg_size() > 0) {
         const Value *comm = cb->getArgOperand(0);
-        if (comm && comm->getName().contains("MPI_COMM_NULL")) {
+        if (isLikelyNullHandle(comm)) {
           issues.push_back(op.inst);
         }
       }
@@ -2202,6 +2372,25 @@ std::vector<const Instruction *> MPIProcessModel::findDestroyNullComm() const {
 std::vector<const Instruction *>
 MPIProcessModel::findRequestFreeAfterWait() const {
   std::vector<const Instruction *> issues;
+  std::set<RequestID> completed_requests;
+
+  for (const MPIOperation &op : all_operations_) {
+    if (!op.request) {
+      continue;
+    }
+
+    if ((op.kind == MPIOpKind::WAIT || op.kind == MPIOpKind::TEST ||
+         op.kind == MPIOpKind::REQUEST_MANAGEMENT) &&
+        op.request_state == RequestCompletionState::Terminal) {
+      completed_requests.insert(op.request);
+    }
+
+    if (op.td_type == ThreadAPI::TD_MPI_REQUEST_FREE &&
+        completed_requests.count(op.request)) {
+      issues.push_back(op.inst);
+    }
+  }
+
   return issues;
 }
 
@@ -2221,7 +2410,7 @@ std::vector<const Instruction *> MPIProcessModel::findInPlaceWrongOp() const {
       const CallBase *cb = dyn_cast<CallBase>(op.inst);
       if (cb && cb->arg_size() > 0) {
         const Value *sendbuf = cb->getArgOperand(0);
-        if (sendbuf && sendbuf->getName().contains("MPI_IN_PLACE")) {
+        if (isLikelyMPIInPlace(sendbuf)) {
           issues.push_back(op.inst);
         }
       }

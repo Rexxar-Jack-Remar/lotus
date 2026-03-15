@@ -360,6 +360,25 @@ public:
     TD_MPI_TYPE_SIZE,            ///< MPI_Type_size
     TD_MPI_TYPE_COMMIT,          ///< MPI_Type_commit
 
+    // MPI Process Topology (MPI-2.2+)
+    TD_MPI_CART_CREATE,       ///< MPI_Cart_create - Cartesian topology
+    TD_MPI_CART_DIMS_CREATE,  ///< MPI_Cart_dims_create - create dimension sizes
+    TD_MPI_CART_GET,          ///< MPI_Cart_get - get Cartesian topology info
+    TD_MPI_CART_SHIFT,        ///< MPI_Cart_shift - get shift source/dest
+    TD_MPI_CART_COORDS,       ///< MPI_Cart_coords - get coords from rank
+    TD_MPI_CART_RANK,         ///< MPI_Cart_rank - get rank from coords
+    TD_MPI_CART_SUB,          ///< MPI_Cart_sub - create sub-grid
+    TD_MPI_DIST_GRAPH_CREATE, ///< MPI_Dist_graph_create - distributed graph
+    TD_MPI_DIST_GRAPH_CREATE_ADJACENT, ///< MPI_Dist_graph_create_adjacent
+    TD_MPI_DIST_GRAPH_NEIGHBORS,       ///< MPI_Dist_graph_neighbors
+    TD_MPI_DIST_GRAPH_NEIGHBORS_COUNT, ///< MPI_Dist_graph_neighbors_count
+    TD_MPI_GRAPH_CREATE,    ///< MPI_Graph_create - deprecated but still used
+    TD_MPI_GRAPH_GET,       ///< MPI_Graph_get
+    TD_MPI_GRAPH_NEIGHBORS, ///< MPI_Graph_neighbors
+    TD_MPI_GRAPH_NEIGHBORS_COUNT, ///< MPI_Graph_neighbors_count
+    TD_MPI_GRAPH_DIMS_GET,        ///< MPI_Graphdims_get
+    TD_MPI_GRAPH_MAP,             ///< MPI_Graph_map
+
     // Linux Kernel Spinlocks
     TD_KERNEL_SPIN_LOCK_INIT, ///< spin_lock_init, raw_spin_lock_init
     TD_KERNEL_SPIN_LOCK,      ///< spin_lock, spin_lock_irq, spin_lock_irqsave,

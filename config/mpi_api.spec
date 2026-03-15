@@ -202,3 +202,26 @@ MPI_Rsend_init TD_MPI_PERSISTENT_SEND_INIT library=mpi semantic=persistent-rsend
 MPI_Recv_init TD_MPI_PERSISTENT_RECV_INIT library=mpi semantic=persistent-recv-init traits=mpi-persistent-init
 MPI_Start TD_MPI_REQUEST_START library=mpi semantic=start traits=mpi-request-start
 MPI_Startall TD_MPI_REQUEST_START library=mpi semantic=startall traits=mpi-request-start
+
+# MPI Process Topology (Cartesian)
+MPI_Cart_create TD_MPI_CART_CREATE library=mpi semantic=cart-create
+MPI_Cart_dims_create TD_MPI_CART_DIMS_CREATE library=mpi semantic=cart-dims-create
+MPI_Cart_get TD_MPI_CART_GET library=mpi semantic=cart-get
+MPI_Cart_shift TD_MPI_CART_SHIFT library=mpi semantic=cart-shift
+MPI_Cart_coords TD_MPI_CART_COORDS library=mpi semantic=cart-coords
+MPI_Cart_rank TD_MPI_CART_RANK library=mpi semantic=cart-rank
+MPI_Cart_sub TD_MPI_CART_SUB library=mpi semantic=cart-sub
+
+# MPI Process Topology (Distributed Graph - MPI-2.2+)
+MPI_Dist_graph_create TD_MPI_DIST_GRAPH_CREATE library=mpi semantic=dist-graph-create
+MPI_Dist_graph_create_adjacent TD_MPI_DIST_GRAPH_CREATE_ADJACENT library=mpi semantic=dist-graph-create-adjacent
+MPI_Dist_graph_neighbors TD_MPI_DIST_GRAPH_NEIGHBORS library=mpi semantic=dist-graph-neighbors
+MPI_Dist_graph_neighbors_count TD_MPI_DIST_GRAPH_NEIGHBORS_COUNT library=mpi semantic=dist-graph-neighbors-count
+
+# MPI Process Topology (Legacy Graph - still used)
+MPI_Graph_create TD_MPI_GRAPH_CREATE library=mpi semantic=graph-create
+MPI_Graph_get TD_MPI_GRAPH_GET library=mpi semantic=graph-get
+MPI_Graph_neighbors TD_MPI_GRAPH_NEIGHBORS library=mpi semantic=graph-neighbors
+MPI_Graph_neighbors_count TD_MPI_GRAPH_NEIGHBORS_COUNT library=mpi semantic=graph-neighbors-count
+MPI_Graphdims_get TD_MPI_GRAPH_DIMS_GET library=mpi semantic=graph-dims-get
+MPI_Graph_map TD_MPI_GRAPH_MAP library=mpi semantic=graph-map

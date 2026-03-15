@@ -83,6 +83,20 @@ void MPIAnalysis::runAnalysis() {
   results_.cancel_without_wait = process_model_.findCancelWithoutWait();
   results_.buffer_overlaps = process_model_.findBufferOverlaps();
   results_.wildcard_in_collective = process_model_.findWildcardInCollective();
+  results_.in_place_conflicts = process_model_.findInPlaceConflicts();
+  results_.null_handles = process_model_.findNullHandles();
+  results_.negative_root = process_model_.findNegativeRoot();
+  results_.invalid_tags = process_model_.findInvalidTags();
+  results_.invalid_ranks = process_model_.findInvalidRanks();
+  results_.type_size_mismatches = process_model_.findTypeSizeMismatches();
+  results_.destroy_null_comm = process_model_.findDestroyNullComm();
+  results_.request_free_after_wait =
+      process_model_.findRequestFreeAfterWait();
+  results_.in_place_wrong_op = process_model_.findInPlaceWrongOp();
+  results_.invalid_rma_transitions =
+      rma_analysis_.findInvalidEpochTransitions();
+  results_.use_after_free_windows = rma_analysis_.findUseAfterFreeWindows();
+  results_.double_window_free = rma_analysis_.findDoubleWindowFree();
 }
 
 void MPIAnalysis::printResults(raw_ostream &OS) const {

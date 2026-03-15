@@ -8,6 +8,8 @@
 #include "Analysis/Concurrency/OpenMP/OpenMPModel.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
+#include <deque>
+
 #include <llvm/Analysis/CFG.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Analysis/ValueTracking.h>
@@ -17,8 +19,6 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Operator.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <deque>
 
 using namespace llvm;
 using namespace OpenMP;
@@ -321,6 +321,19 @@ void OpenMPTaskGraph::scanSchedulingContext(
       if (library == ThreadAPI::RuntimeLibrary::OpenMP) {
         if (type == ThreadAPI::TD_FORK) {
           ++m_summary.parallel_region_count;
+          size_t current_depth = state.region_stack.size() + 1;
+          if (current_depth > m_nested_depth) {
+            m_nested_depth = current_depth;
+          }
+          if (current_depth > m_summary.nested_parallelism_max_depth) {
+            m_summary.nested_parallelism_max_depth = current_depth;
+          }
+          if (current_depth > 1) {
+            ++m_summary.nested_parallelism_nested_regions;
+          } else {
+            ++m_summary.nested_parallelism_flat_regions;
+          }
+          m_region_nesting_depth[state.next_region_id - 1] = current_depth;
           if (const auto *fork_target =
                   dyn_cast_or_null<Function>(api->getForkedFun(call))) {
             TraversalState fork_state;
@@ -762,7 +775,8 @@ std::vector<Dependency> OpenMPTaskGraph::extractRuntimeDependencies(
   //   - len: size_t
   //   - flags: unsigned char (0x1=IN, 0x2=OUT, 0x3=INOUT)
 
-  if (!task_call || task_call->arg_size() <= std::max(ndeps_arg_idx, dep_arg_idx)) {
+  if (!task_call ||
+      task_call->arg_size() <= std::max(ndeps_arg_idx, dep_arg_idx)) {
     return deps; // Not enough arguments
   }
 
@@ -1130,7 +1144,8 @@ void OpenMPTaskGraph::buildDependencyEdges() {
                 boundary.kind == WaitBoundaryInfo::Kind::Flush
                     ? "omp_flush_witness_required"
                     : "omp_taskwait_deps_partial";
-            if (!boundary.dependencies.empty() && lhs_selected && rhs_selected &&
+            if (!boundary.dependencies.empty() && lhs_selected &&
+                rhs_selected &&
                 mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst) &&
                 mustHappenBefore(boundary.inst, taskOrderingSite(rhs.get()))) {
               lhs->successors.insert(rhs.get());
@@ -1287,6 +1302,22 @@ size_t OpenMPTaskGraph::getRelationCount(concurrency::RelationKind kind) const {
     }
   }
   return count;
+}
+
+bool OpenMPTaskGraph::isNestedRegion(size_t region_id) const {
+  auto it = m_region_nesting_depth.find(region_id);
+  if (it == m_region_nesting_depth.end()) {
+    return false;
+  }
+  return it->second > 1;
+}
+
+size_t OpenMPTaskGraph::getRegionNestingDepth(size_t region_id) const {
+  auto it = m_region_nesting_depth.find(region_id);
+  if (it == m_region_nesting_depth.end()) {
+    return 0;
+  }
+  return it->second;
 }
 
 OpenMPTaskGraph::TaskRelation

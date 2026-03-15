@@ -34,11 +34,158 @@ bool rangesOverlap(int lhs_min, int lhs_max, int rhs_min, int rhs_max) {
   return !(lhs_max < rhs_min || rhs_max < lhs_min);
 }
 
+bool isLockAllOperation(const MPIOperation &op) {
+  return op.td_type == ThreadAPI::TD_MPI_WIN_LOCK && op.target_rank < 0;
+}
+
 } // namespace
+
+void MPIRMAAnalysis::annotateOperationsInMachine(
+    EpochMachine &machine, const Instruction *end_inst,
+    concurrency::ProofStrength proof, StringRef reason,
+    bool close_epoch) const {
+  for (size_t idx : machine.op_indices) {
+    auto &rma_op = const_cast<RMAOperation &>(rma_operations_[idx]);
+    rma_op.sync_model = machine.model;
+    rma_op.sync_start = machine.start;
+    rma_op.sync_end = end_inst;
+    rma_op.epoch_id = machine.epoch_id;
+    rma_op.local_completion_only = machine.local_completion_only;
+    rma_op.flush_completed = machine.remote_completion_observed;
+    rma_op.exposure_epoch_observed = machine.exposure_epoch_observed;
+    rma_op.synchronization_proof = proof;
+    rma_op.relation.kind = concurrency::RelationKind::SameSynchronizationEpoch;
+    rma_op.relation.proof = proof;
+    rma_op.relation.reason = reason.str();
+  }
+
+  if (close_epoch) {
+    machine.state = EpochState::Idle;
+    machine.model = SyncModel::NONE;
+    machine.start = nullptr;
+    machine.epoch_id = 0;
+    machine.local_completion_only = false;
+    machine.remote_completion_observed = false;
+    machine.exposure_epoch_observed = false;
+    machine.op_indices.clear();
+  }
+}
+
+bool MPIRMAAnalysis::transitionEpochMachine(EpochMachine &machine,
+                                            const MPIOperation &op,
+                                            size_t next_epoch_id) const {
+  switch (op.td_type) {
+  case ThreadAPI::TD_MPI_WIN_FENCE:
+    if (machine.state == EpochState::FenceOpen) {
+      annotateOperationsInMachine(machine, op.inst,
+                                  concurrency::ProofStrength::Must,
+                                  "mpi_rma_fence_epoch", true);
+      return true;
+    }
+    if (machine.state == EpochState::Idle) {
+      machine.state = EpochState::FenceOpen;
+      machine.model = SyncModel::FENCE;
+      machine.start = op.inst;
+      machine.epoch_id = next_epoch_id;
+      return true;
+    }
+    return false;
+  case ThreadAPI::TD_MPI_WIN_LOCK:
+    if (machine.state != EpochState::Idle) {
+      return false;
+    }
+    machine.state = isLockAllOperation(op) ? EpochState::LockAllOpen
+                                           : EpochState::LockOpen;
+    machine.model = SyncModel::LOCK_UNLOCK;
+    machine.start = op.inst;
+    machine.epoch_id = next_epoch_id;
+    return true;
+  case ThreadAPI::TD_MPI_WIN_UNLOCK:
+    if (machine.state == EpochState::LockOpen) {
+      annotateOperationsInMachine(machine, op.inst,
+                                  concurrency::ProofStrength::Must,
+                                  "mpi_rma_lock_epoch", true);
+      return true;
+    }
+    if (machine.state == EpochState::LockAllOpen) {
+      annotateOperationsInMachine(machine, op.inst,
+                                  concurrency::ProofStrength::Must,
+                                  "mpi_rma_lock_all_epoch", true);
+      return true;
+    }
+    return false;
+  case ThreadAPI::TD_MPI_WIN_FLUSH:
+  case ThreadAPI::TD_MPI_WIN_SYNC:
+    if (machine.state != EpochState::LockOpen &&
+        machine.state != EpochState::LockAllOpen) {
+      return false;
+    }
+    machine.remote_completion_observed =
+        op.td_type != ThreadAPI::TD_MPI_WIN_FLUSH || !op.rma_local_completion_only;
+    machine.local_completion_only = op.rma_local_completion_only;
+    annotateOperationsInMachine(
+        machine, op.inst,
+        op.rma_local_completion_only ? concurrency::ProofStrength::May
+                                     : concurrency::ProofStrength::Must,
+        op.rma_local_completion_only ? "mpi_rma_flush_local_completion"
+                                     : "mpi_rma_flush_completion",
+        false);
+    return true;
+  case ThreadAPI::TD_MPI_WIN_START:
+    if (machine.state != EpochState::Idle) {
+      return false;
+    }
+    machine.state = EpochState::PSCWAccessOpen;
+    machine.model = SyncModel::PSCW;
+    machine.start = op.inst;
+    machine.epoch_id = next_epoch_id;
+    return true;
+  case ThreadAPI::TD_MPI_WIN_COMPLETE:
+    if (machine.state != EpochState::PSCWAccessOpen) {
+      return false;
+    }
+    annotateOperationsInMachine(machine, op.inst,
+                                concurrency::ProofStrength::Must,
+                                "mpi_rma_pscw_access_epoch", true);
+    return true;
+  case ThreadAPI::TD_MPI_WIN_POST:
+    if (machine.state != EpochState::Idle) {
+      return false;
+    }
+    machine.state = EpochState::PSCWExposureOpen;
+    machine.model = SyncModel::PSCW;
+    machine.start = op.inst;
+    machine.epoch_id = next_epoch_id;
+    return true;
+  case ThreadAPI::TD_MPI_WIN_WAIT:
+    if (machine.state != EpochState::PSCWExposureOpen) {
+      return false;
+    }
+    machine.exposure_epoch_observed = true;
+    annotateOperationsInMachine(machine, op.inst,
+                                concurrency::ProofStrength::Must,
+                                "mpi_rma_pscw_exposure_epoch", true);
+    return true;
+  case ThreadAPI::TD_MPI_WIN_TEST:
+    if (machine.state == EpochState::PSCWExposureOpen) {
+      machine.exposure_epoch_observed = true;
+      annotateOperationsInMachine(machine, op.inst,
+                                  concurrency::ProofStrength::May,
+                                  "mpi_rma_pscw_exposure_test", false);
+      return true;
+    }
+    return false;
+  default:
+    return false;
+  }
+}
 
 void MPIRMAAnalysis::analyzeRMA() {
   windows_.clear();
   rma_operations_.clear();
+  invalid_epoch_transitions_.clear();
+  use_after_free_windows_.clear();
+  double_window_free_.clear();
 
   for (const MPIOperation &op : process_model_.getAllOperations()) {
     if (op.td_type == ThreadAPI::TD_MPI_WIN_CREATE) {
@@ -57,25 +204,28 @@ void MPIRMAAnalysis::analyzeRMA() {
         WindowID win = CB->getArgOperand(0);
         auto it = windows_.find(win);
         if (it != windows_.end()) {
+          if (it->second.free_inst) {
+            double_window_free_.push_back(op.inst);
+          }
           it->second.free_inst = op.inst;
         }
       }
     }
   }
 
-  struct PendingEpoch {
-    SyncModel model = SyncModel::NONE;
-    const Instruction *start = nullptr;
-    std::vector<size_t> op_indices;
-    size_t epoch_id = 0;
-  };
-
-  std::map<std::pair<const Function *, WindowID>, PendingEpoch> pending_epochs;
-  std::map<std::pair<const Function *, WindowID>, const Instruction *>
-      last_fence_by_window;
+  std::map<std::pair<const Function *, WindowID>, EpochMachine> epoch_machines;
   size_t next_epoch_id = 1;
 
   for (const MPIOperation &op : process_model_.getAllOperations()) {
+    if ((op.kind == MPIOpKind::RMA_DATA || op.kind == MPIOpKind::RMA_SYNC) &&
+        op.window) {
+      auto win_it = windows_.find(op.window);
+      if (win_it != windows_.end() && win_it->second.free_inst &&
+          win_it->second.free_inst != op.inst) {
+        use_after_free_windows_.push_back(op.inst);
+      }
+    }
+
     if (op.kind == MPIOpKind::RMA_DATA) {
       RMAOperation rma_op;
       rma_op.inst = op.inst;
@@ -94,10 +244,9 @@ void MPIRMAAnalysis::analyzeRMA() {
       rma_operations_.push_back(rma_op);
 
       auto key = std::make_pair(op.function, op.window);
-      auto epoch_it = pending_epochs.find(key);
-      if (epoch_it != pending_epochs.end() &&
-          epoch_it->second.model != SyncModel::NONE) {
-        epoch_it->second.op_indices.push_back(op_index);
+      auto &machine = epoch_machines[key];
+      if (machine.state != EpochState::Idle) {
+        machine.op_indices.push_back(op_index);
       }
 
       auto it = windows_.find(op.window);
@@ -125,122 +274,38 @@ void MPIRMAAnalysis::analyzeRMA() {
       }
 
       auto key = std::make_pair(op.function, op.window);
-      PendingEpoch &epoch = pending_epochs[key];
-      switch (op.td_type) {
-      case ThreadAPI::TD_MPI_WIN_FENCE: {
-        auto fence_it = last_fence_by_window.find(key);
-        if (fence_it != last_fence_by_window.end()) {
-          for (size_t idx : epoch.op_indices) {
-            rma_operations_[idx].sync_model = SyncModel::FENCE;
-            rma_operations_[idx].sync_start = fence_it->second;
-            rma_operations_[idx].sync_end = op.inst;
-            rma_operations_[idx].epoch_id = epoch.epoch_id;
-            rma_operations_[idx].synchronization_proof =
-                concurrency::ProofStrength::Must;
-            rma_operations_[idx].relation.kind =
-                concurrency::RelationKind::SameSynchronizationEpoch;
-            rma_operations_[idx].relation.proof =
-                concurrency::ProofStrength::Must;
-            rma_operations_[idx].relation.reason = "mpi_rma_fence_epoch";
-          }
-          epoch.op_indices.clear();
+      auto &machine = epoch_machines[key];
+      if (transitionEpochMachine(machine, op, next_epoch_id)) {
+        if (machine.epoch_id == next_epoch_id) {
+          ++next_epoch_id;
         }
-        epoch.model = SyncModel::FENCE;
-        epoch.start = op.inst;
-        epoch.epoch_id = next_epoch_id++;
-        last_fence_by_window[key] = op.inst;
-        break;
-      }
-      case ThreadAPI::TD_MPI_WIN_LOCK:
-        epoch.model = SyncModel::LOCK_UNLOCK;
-        epoch.start = op.inst;
-        epoch.epoch_id = next_epoch_id++;
-        epoch.op_indices.clear();
-        break;
-      case ThreadAPI::TD_MPI_WIN_UNLOCK:
-        if (epoch.model == SyncModel::LOCK_UNLOCK && epoch.start) {
-          for (size_t idx : epoch.op_indices) {
-            rma_operations_[idx].sync_model = SyncModel::LOCK_UNLOCK;
-            rma_operations_[idx].sync_start = epoch.start;
-            rma_operations_[idx].sync_end = op.inst;
-            rma_operations_[idx].epoch_id = epoch.epoch_id;
-            rma_operations_[idx].synchronization_proof =
-                concurrency::ProofStrength::Must;
-            rma_operations_[idx].relation.kind =
-                concurrency::RelationKind::SameSynchronizationEpoch;
-            rma_operations_[idx].relation.proof =
-                concurrency::ProofStrength::Must;
-            rma_operations_[idx].relation.reason = "mpi_rma_lock_epoch";
-          }
-        }
-        epoch.model = SyncModel::NONE;
-        epoch.start = nullptr;
-        epoch.epoch_id = 0;
-        epoch.op_indices.clear();
-        break;
-      case ThreadAPI::TD_MPI_WIN_FLUSH:
-      case ThreadAPI::TD_MPI_WIN_SYNC:
-        for (size_t idx : epoch.op_indices) {
-          rma_operations_[idx].flush_completed = true;
-          rma_operations_[idx].local_completion_only =
-              op.rma_local_completion_only;
-          if (op.rma_local_completion_only) {
-            rma_operations_[idx].relation.kind =
-                concurrency::RelationKind::UnknownDueToModelGap;
-            rma_operations_[idx].relation.proof =
-                concurrency::ProofStrength::May;
-            rma_operations_[idx].relation.reason =
-                "mpi_rma_flush_local_completion";
-            continue;
-          }
+      } else {
+        invalid_epoch_transitions_.push_back(op.inst);
+        for (size_t idx : machine.op_indices) {
           rma_operations_[idx].relation.kind =
-              concurrency::RelationKind::SameSynchronizationEpoch;
-          rma_operations_[idx].relation.proof = concurrency::ProofStrength::May;
+              concurrency::RelationKind::UnknownDueToModelGap;
+          rma_operations_[idx].relation.proof =
+              concurrency::ProofStrength::May;
           rma_operations_[idx].relation.reason =
-              op.td_type == ThreadAPI::TD_MPI_WIN_SYNC
-                  ? "mpi_rma_sync_completion"
-                  : "mpi_rma_flush_completion";
+              "mpi_rma_invalid_epoch_transition";
         }
-        break;
-      case ThreadAPI::TD_MPI_WIN_START:
-        epoch.model = SyncModel::PSCW;
-        epoch.start = op.inst;
-        epoch.epoch_id = next_epoch_id++;
-        epoch.op_indices.clear();
-        break;
-      case ThreadAPI::TD_MPI_WIN_COMPLETE:
-        if (epoch.model == SyncModel::PSCW && epoch.start) {
-          for (size_t idx : epoch.op_indices) {
-            rma_operations_[idx].sync_model = SyncModel::PSCW;
-            rma_operations_[idx].sync_start = epoch.start;
-            rma_operations_[idx].sync_end = op.inst;
-            rma_operations_[idx].epoch_id = epoch.epoch_id;
-            rma_operations_[idx].synchronization_proof =
-                concurrency::ProofStrength::Must;
-            rma_operations_[idx].relation.kind =
-                concurrency::RelationKind::SameSynchronizationEpoch;
-            rma_operations_[idx].relation.proof =
-                concurrency::ProofStrength::Must;
-            rma_operations_[idx].relation.reason = "mpi_rma_pscw_epoch";
-          }
-        }
-        epoch.model = SyncModel::NONE;
-        epoch.start = nullptr;
-        epoch.epoch_id = 0;
-        epoch.op_indices.clear();
-        break;
-      case ThreadAPI::TD_MPI_WIN_POST:
-      case ThreadAPI::TD_MPI_WIN_WAIT:
-      case ThreadAPI::TD_MPI_WIN_TEST:
-        for (size_t idx : epoch.op_indices) {
-          rma_operations_[idx].exposure_epoch_observed = true;
-        }
-        break;
-      default:
-        break;
+        machine = EpochMachine{};
       }
     }
   }
+}
+
+std::vector<const Instruction *>
+MPIRMAAnalysis::findInvalidEpochTransitions() const {
+  return invalid_epoch_transitions_;
+}
+
+std::vector<const Instruction *> MPIRMAAnalysis::findUseAfterFreeWindows() const {
+  return use_after_free_windows_;
+}
+
+std::vector<const Instruction *> MPIRMAAnalysis::findDoubleWindowFree() const {
+  return double_window_free_;
 }
 
 MPIRMAAnalysis::SyncModel

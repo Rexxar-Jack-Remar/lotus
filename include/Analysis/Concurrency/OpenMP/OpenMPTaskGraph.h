@@ -139,6 +139,9 @@ public:
     size_t loop_region_count = 0;
     size_t affinity_region_count = 0;
     size_t scope_region_count = 0;
+    size_t nested_parallelism_max_depth = 0;
+    size_t nested_parallelism_flat_regions = 0;
+    size_t nested_parallelism_nested_regions = 0;
   };
 
   enum class TaskRelation { HappensBefore, Excluded, Parallel, Unknown };
@@ -230,6 +233,21 @@ public:
    */
   bool mayBeParallel(const Task *t1, const Task *t2) const;
 
+  /**
+   * @brief Get the maximum nested parallelism depth encountered
+   */
+  size_t getMaxNestedDepth() const { return m_nested_depth; }
+
+  /**
+   * @brief Check if a region is nested (true) or flat (false)
+   */
+  bool isNestedRegion(size_t region_id) const;
+
+  /**
+   * @brief Get nesting depth for a specific region
+   */
+  size_t getRegionNestingDepth(size_t region_id) const;
+
 private:
   struct WaitBoundary {
     const llvm::Instruction *inst = nullptr;
@@ -272,6 +290,8 @@ private:
   mutable size_t m_deferred_imprecise_conflict_count = 0;
   mutable std::unordered_map<std::string, size_t> m_deferred_reason_counts;
   AnalysisSummary m_summary;
+  size_t m_nested_depth = 0;
+  std::unordered_map<size_t, size_t> m_region_nesting_depth;
 
   /**
    * @brief Identify all OpenMP task creation sites

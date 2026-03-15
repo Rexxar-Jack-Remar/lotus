@@ -83,6 +83,9 @@ public:
     std::vector<const llvm::Instruction *> destroy_null_comm;
     std::vector<const llvm::Instruction *> request_free_after_wait;
     std::vector<const llvm::Instruction *> in_place_wrong_op;
+    std::vector<const llvm::Instruction *> invalid_rma_transitions;
+    std::vector<const llvm::Instruction *> use_after_free_windows;
+    std::vector<const llvm::Instruction *> double_window_free;
   };
 
   const AnalysisResults &getResults() const { return results_; }

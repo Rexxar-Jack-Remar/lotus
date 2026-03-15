@@ -34,6 +34,15 @@ class MPIRMAAnalysis {
 public:
   enum class SyncModel { FENCE, LOCK_UNLOCK, PSCW, NONE };
 
+  enum class EpochState {
+    Idle,
+    FenceOpen,
+    LockOpen,
+    LockAllOpen,
+    PSCWAccessOpen,
+    PSCWExposureOpen
+  };
+
   struct RMAWindow {
     WindowID window;
     const llvm::Instruction *create_inst;
@@ -80,6 +89,12 @@ public:
 
   std::vector<RMAOperation> findUnsynchronizedRMAOps() const;
 
+  std::vector<const llvm::Instruction *> findInvalidEpochTransitions() const;
+
+  std::vector<const llvm::Instruction *> findUseAfterFreeWindows() const;
+
+  std::vector<const llvm::Instruction *> findDoubleWindowFree() const;
+
   std::vector<std::pair<RMAOperation, RMAOperation>> findRMARaces() const;
 
   std::vector<WindowID> findLeakedWindows() const;
@@ -89,12 +104,33 @@ public:
   }
 
 private:
+  struct EpochMachine {
+    EpochState state = EpochState::Idle;
+    SyncModel model = SyncModel::NONE;
+    const llvm::Instruction *start = nullptr;
+    size_t epoch_id = 0;
+    bool local_completion_only = false;
+    bool remote_completion_observed = false;
+    bool exposure_epoch_observed = false;
+    std::vector<size_t> op_indices;
+  };
+
   const MPIProcessModel &process_model_;
   ThreadAPI *thread_api_;
 
   std::map<WindowID, RMAWindow> windows_;
   std::vector<RMAOperation> rma_operations_;
+  std::vector<const llvm::Instruction *> invalid_epoch_transitions_;
+  std::vector<const llvm::Instruction *> use_after_free_windows_;
+  std::vector<const llvm::Instruction *> double_window_free_;
 
+  bool transitionEpochMachine(EpochMachine &machine, const MPIOperation &op,
+                              size_t next_epoch_id) const;
+  void annotateOperationsInMachine(EpochMachine &machine,
+                                   const llvm::Instruction *end_inst,
+                                   concurrency::ProofStrength proof,
+                                   llvm::StringRef reason,
+                                   bool close_epoch) const;
   SyncModel determineSyncModel(const RMAOperation &op) const;
   bool areRMAOpsConflicting(const RMAOperation &op1,
                             const RMAOperation &op2) const;

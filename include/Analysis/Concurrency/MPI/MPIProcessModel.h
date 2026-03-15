@@ -146,6 +146,8 @@ private:
                               ThreadAPI::TD_TYPE type) const;
   void extractOperationDetails(MPIOperation &op);
   bool tryGetConstantInt(const llvm::Value *value, int &out) const;
+  bool tryGetScalarRange(const llvm::Value *value, int &min_out,
+                         int &max_out) const;
   void extractPointToPointDetails(MPIOperation &op, const llvm::CallBase *cb);
   void extractSendrecvDetails(MPIOperation &op, const llvm::CallBase *cb) const;
   void extractProbeDetails(MPIOperation &op, const llvm::CallBase *cb) const;

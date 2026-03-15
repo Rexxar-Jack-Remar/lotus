@@ -118,6 +118,12 @@ public:
    */
   bool dependsOnRank(const llvm::Value *val) const;
 
+  /**
+   * @brief Try to recover an integer range for a scalar value
+   */
+  bool tryEvaluateIntRange(const llvm::Value *val, int &min_value,
+                           int &max_value) const;
+
 private:
   llvm::Module &m_module;
   
@@ -150,8 +156,6 @@ private:
   RankExpr mergeRankExpr(const RankExpr &lhs, const RankExpr &rhs) const;
   bool refineRankFromBranch(const llvm::BranchInst *br, unsigned succ_idx,
                             RankExpr current, RankExpr &refined) const;
-  bool tryEvaluateIntRange(const llvm::Value *val, int &min_value,
-                           int &max_value) const;
 };
 
 } // namespace MPI
