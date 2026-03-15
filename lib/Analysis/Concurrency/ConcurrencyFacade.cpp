@@ -145,14 +145,26 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
   summary.rma_sync_count = analysis.getOperationCount(mpi::MPIOpKind::RMA_SYNC);
   auto requestStatePriority = [](mpi::RequestCompletionState state) {
     switch (state) {
-    case mpi::RequestCompletionState::Pending:
+    case mpi::RequestCompletionState::Created:
       return 0;
-    case mpi::RequestCompletionState::MayComplete:
+    case mpi::RequestCompletionState::Active:
       return 1;
-    case mpi::RequestCompletionState::MustComplete:
+    case mpi::RequestCompletionState::Pending:
       return 2;
-    case mpi::RequestCompletionState::Terminal:
+    case mpi::RequestCompletionState::MayComplete:
       return 3;
+    case mpi::RequestCompletionState::MustComplete:
+      return 4;
+    case mpi::RequestCompletionState::Terminal:
+      return 5;
+    case mpi::RequestCompletionState::Consumed:
+      return 6;
+    case mpi::RequestCompletionState::Freed:
+      return 7;
+    case mpi::RequestCompletionState::Escaped:
+      return 8;
+    case mpi::RequestCompletionState::Unknown:
+      return 9;
     }
     return 0;
   };
@@ -178,8 +190,12 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
     if (entry.second == mpi::RequestCompletionState::MayComplete) {
       ++summary.may_complete_request_count;
     }
-    if (entry.second == mpi::RequestCompletionState::Terminal) {
+    if (entry.second == mpi::RequestCompletionState::Terminal ||
+        entry.second == mpi::RequestCompletionState::Freed) {
       ++summary.terminal_request_count;
+    }
+    if (entry.second == mpi::RequestCompletionState::Freed) {
+      ++summary.freed_request_count;
     }
   }
   summary.orphaned_request_count = results.orphaned_requests.size();
@@ -197,8 +213,26 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
   summary.deferred_semantic_lowering_count = std::accumulate(
       deferred.begin(), deferred.end(), size_t{0},
       [](size_t total, const std::pair<const std::string, size_t> &entry) {
+        if (entry.first == "unknown_flag_value" ||
+            entry.first == "unknown_completed_index_set") {
+          return total;
+        }
         return total + entry.second;
       });
+  const auto &normalization =
+      analysis.getProcessModel().getNormalizationConfidenceCounts();
+  auto normalizationCount = [&](mpi::NormalizationConfidence confidence) {
+    auto it = normalization.find(confidence);
+    return it == normalization.end() ? size_t{0} : it->second;
+  };
+  summary.normalization_exact_count =
+      normalizationCount(mpi::NormalizationConfidence::ExactMPI);
+  summary.normalization_pmpi_wrapper_count =
+      normalizationCount(mpi::NormalizationConfidence::PMPIWrapper);
+  summary.normalization_openmpi_forwarder_count =
+      normalizationCount(mpi::NormalizationConfidence::KnownOpenMPIForwarder);
+  summary.normalization_unknown_internal_count =
+      normalizationCount(mpi::NormalizationConfidence::UnknownVendorInternal);
   return summary;
 }
 

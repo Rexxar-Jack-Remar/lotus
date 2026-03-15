@@ -57,6 +57,7 @@ getProtocolScopeKey(const MPICollectiveAnalysis::CollectiveCall &call) {
 
 void MPICollectiveAnalysis::analyzeCollectives() {
   collective_calls_.clear();
+  this->protocol_states_.clear();
   protocol_diagnostics_.clear();
 
   auto readConstArg = [](const CallBase *cb, int idx, int &out) {
@@ -92,7 +93,7 @@ void MPICollectiveAnalysis::analyzeCollectives() {
           op.protocol_reachability == ProtocolReachability::AllRanks
               ? concurrency::ProofStrength::Must
               : concurrency::ProofStrength::May;
-      call.protocol_relation.reason = "mpi_collective_protocol_slot";
+      call.protocol_relation.reason = "mpi_collective_protocol_automaton_slot";
       protocol_diagnostics_["collective_slots_tracked"]++;
       if (op.protocol_reachability != ProtocolReachability::AllRanks) {
         protocol_diagnostics_["collective_partial_reachability"]++;
@@ -156,6 +157,24 @@ void MPICollectiveAnalysis::analyzeCollectives() {
           break;
         }
       }
+
+      MPICollectiveAnalysis::CollectiveStateKey state_key;
+      state_key.communicator_class_id = call.communicator_class_id;
+      state_key.communicator_subgroup_id = call.communicator_subgroup_id;
+      state_key.collective_protocol_class_id =
+          call.collective_protocol_class_id;
+      MPICollectiveAnalysis::CollectiveProtocolState &state =
+          this->protocol_states_[state_key];
+      if (state.next_slot != call.protocol_sequence_id) {
+        protocol_diagnostics_["collective_automaton_slot_gap"]++;
+      }
+      if (!state.has_expected_type) {
+        state.expected_type = call.type;
+        state.has_expected_type = true;
+      } else if (state.expected_type != call.type) {
+        protocol_diagnostics_["collective_automaton_type_drift"]++;
+      }
+      state.next_slot = call.protocol_sequence_id + 1;
 
       collective_calls_.push_back(call);
     }

@@ -29,6 +29,28 @@ class MPIProcessModel;
 
 class MPICollectiveAnalysis {
 public:
+  struct CollectiveStateKey {
+    size_t communicator_class_id = 0;
+    size_t communicator_subgroup_id = 0;
+    size_t collective_protocol_class_id = 0;
+
+    bool operator<(const CollectiveStateKey &other) const {
+      if (communicator_class_id != other.communicator_class_id) {
+        return communicator_class_id < other.communicator_class_id;
+      }
+      if (communicator_subgroup_id != other.communicator_subgroup_id) {
+        return communicator_subgroup_id < other.communicator_subgroup_id;
+      }
+      return collective_protocol_class_id < other.collective_protocol_class_id;
+    }
+  };
+
+  struct CollectiveProtocolState {
+    size_t next_slot = 0;
+    ThreadAPI::TD_TYPE expected_type = ThreadAPI::TD_DUMMY;
+    bool has_expected_type = false;
+  };
+
   struct CollectiveCall {
     const llvm::Instruction *inst;
     ThreadAPI::TD_TYPE type;
@@ -74,6 +96,7 @@ public:
 private:
   const MPIProcessModel &process_model_;
   std::vector<CollectiveCall> collective_calls_;
+  std::map<CollectiveStateKey, CollectiveProtocolState> protocol_states_;
   mutable std::unordered_map<std::string, size_t> protocol_diagnostics_;
 
   bool areCollectivesCompatible(const CollectiveCall &c1,

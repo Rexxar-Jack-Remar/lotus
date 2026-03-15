@@ -96,6 +96,23 @@ void MPIAnalysis::runAnalysis() {
       rma_analysis_.findInvalidEpochTransitions();
   results_.use_after_free_windows = rma_analysis_.findUseAfterFreeWindows();
   results_.double_window_free = rma_analysis_.findDoubleWindowFree();
+
+  results_.diagnostics.clear();
+  for (const MPIOperation &op : process_model_.getAllOperations()) {
+    if (op.semantic_relation.kind ==
+            concurrency::RelationKind::UnknownDueToModelGap &&
+        op.semantic_relation.reason.empty()) {
+      continue;
+    }
+    MPIAnalysis::MPIDiagnostic diagnostic;
+    diagnostic.inst = op.inst;
+    diagnostic.relation = op.semantic_relation;
+    diagnostic.confidence = op.normalization_confidence;
+    diagnostic.code = op.semantic_relation.reason.empty()
+                          ? "mpi_relation"
+                          : op.semantic_relation.reason;
+    results_.diagnostics.push_back(diagnostic);
+  }
 }
 
 void MPIAnalysis::printResults(raw_ostream &OS) const {
@@ -105,14 +122,26 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
   auto countRequestStates = [&](RequestCompletionState state) {
     auto requestStatePriority = [](RequestCompletionState value) {
       switch (value) {
-      case RequestCompletionState::Pending:
+      case RequestCompletionState::Created:
         return 0;
-      case RequestCompletionState::MayComplete:
+      case RequestCompletionState::Active:
         return 1;
-      case RequestCompletionState::MustComplete:
+      case RequestCompletionState::Pending:
         return 2;
-      case RequestCompletionState::Terminal:
+      case RequestCompletionState::MayComplete:
         return 3;
+      case RequestCompletionState::MustComplete:
+        return 4;
+      case RequestCompletionState::Terminal:
+        return 5;
+      case RequestCompletionState::Consumed:
+        return 6;
+      case RequestCompletionState::Freed:
+        return 7;
+      case RequestCompletionState::Escaped:
+        return 8;
+      case RequestCompletionState::Unknown:
+        return 9;
       }
       return 0;
     };
@@ -137,7 +166,9 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
 
     size_t count = 0;
     for (const auto &entry : request_states) {
-      if (entry.second == state) {
+      if (entry.second == state ||
+          (state == RequestCompletionState::Terminal &&
+           entry.second == RequestCompletionState::Freed)) {
         ++count;
       }
     }
@@ -146,6 +177,10 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
 
   size_t deferred_total = 0;
   for (const auto &entry : deferred) {
+    if (entry.first == "unknown_flag_value" ||
+        entry.first == "unknown_completed_index_set") {
+      continue;
+    }
     deferred_total += entry.second;
   }
 
@@ -208,6 +243,19 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
      << countRequestStates(RequestCompletionState::MayComplete) << "\n";
   OS << "Requests with terminal status: "
      << countRequestStates(RequestCompletionState::Terminal) << "\n";
+  OS << "Requests with freed status: "
+     << countRequestStates(RequestCompletionState::Freed) << "\n";
+  const auto &normalization_counts =
+      process_model_.getNormalizationConfidenceCounts();
+  auto readConfidence = [&](NormalizationConfidence confidence) {
+    auto it = normalization_counts.find(confidence);
+    return it == normalization_counts.end() ? size_t{0} : it->second;
+  };
+  OS << "Normalization confidence (exact/pmpi/openmpi-forwarder/unknown): "
+     << readConfidence(NormalizationConfidence::ExactMPI) << "/"
+     << readConfidence(NormalizationConfidence::PMPIWrapper) << "/"
+     << readConfidence(NormalizationConfidence::KnownOpenMPIForwarder) << "/"
+     << readConfidence(NormalizationConfidence::UnknownVendorInternal) << "\n";
   OS << "Deferred MPI semantic lowering total: " << deferred_total << "\n\n";
 
   OS << "Orphaned non-blocking operations: "

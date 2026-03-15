@@ -16,6 +16,7 @@
 
 #include "Analysis/Concurrency/MPI/MPICollectiveAnalysis.h"
 #include "Analysis/Concurrency/MPI/MPIModel.h"
+#include "Analysis/Concurrency/MPI/MPINormalization.h"
 #include "Analysis/Concurrency/MPI/MPIOperation.h"
 #include "Analysis/Concurrency/MPI/MPIProcessModel.h"
 #include "Analysis/Concurrency/MPI/MPIRMAAnalysis.h"
@@ -36,6 +37,14 @@ namespace mpi {
 
 class MPIAnalysis {
 public:
+  struct MPIDiagnostic {
+    const llvm::Instruction *inst = nullptr;
+    concurrency::Relation relation;
+    NormalizationConfidence confidence =
+        NormalizationConfidence::UnknownVendorInternal;
+    std::string code;
+  };
+
   MPIAnalysis(llvm::Module &M)
       : module_(M), thread_api_(ThreadAPI::getThreadAPI()),
         process_model_(M, thread_api_), collective_analysis_(process_model_),
@@ -86,6 +95,7 @@ public:
     std::vector<const llvm::Instruction *> invalid_rma_transitions;
     std::vector<const llvm::Instruction *> use_after_free_windows;
     std::vector<const llvm::Instruction *> double_window_free;
+    std::vector<MPIDiagnostic> diagnostics;
   };
 
   const AnalysisResults &getResults() const { return results_; }

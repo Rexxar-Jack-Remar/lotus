@@ -14,6 +14,7 @@
 #define MPI_OPERATION_H
 
 #include "Analysis/Concurrency/ConcurrencyRelation.h"
+#include "Analysis/Concurrency/MPI/MPINormalization.h"
 #include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
@@ -51,12 +52,20 @@ using WindowID = const llvm::Value *;
 
 enum class MPICommunicationMatch { NoMatch, MustMatch, MayMatch, Unknown };
 
-enum class RequestCompletionState {
+enum class MPIRequestState {
+  Created,
+  Active,
   Pending,
   MayComplete,
   MustComplete,
-  Terminal
+  Terminal,
+  Consumed,
+  Freed,
+  Escaped,
+  Unknown
 };
+
+using RequestCompletionState = MPIRequestState;
 
 enum class ProtocolReachability { AllRanks, SomeRanks, Unknown };
 
@@ -98,6 +107,8 @@ struct MPIOperation {
   ThreadAPI::TD_TYPE td_type;
 
   const llvm::Function *function;
+  NormalizationConfidence normalization_confidence =
+      NormalizationConfidence::UnknownVendorInternal;
   CommunicatorID communicator = nullptr;
   size_t communicator_class_id = 0;
   size_t communicator_subgroup_id = 0;
@@ -119,7 +130,7 @@ struct MPIOperation {
 
   RequestID request = nullptr;
   const llvm::Instruction *completion_inst = nullptr;
-  RequestCompletionState request_state = RequestCompletionState::Pending;
+  MPIRequestState request_state = MPIRequestState::Pending;
 
   WindowID window = nullptr;
   int target_rank = -1;

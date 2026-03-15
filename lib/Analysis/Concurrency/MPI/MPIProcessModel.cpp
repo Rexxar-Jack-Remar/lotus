@@ -74,6 +74,10 @@ bool isLikelyMPIInPlace(const Value *value) {
   return value->hasName() && value->getName().contains("MPI_IN_PLACE");
 }
 
+bool disablesDeterministicMPIOrdering(int provided_level) {
+  return provided_level >= 2;
+}
+
 bool rangesOverlap(int lhs_min, int lhs_max, int rhs_min, int rhs_max) {
   if (lhs_min < 0 || lhs_max < 0 || rhs_min < 0 || rhs_max < 0) {
     return true;
@@ -1061,6 +1065,11 @@ void MPIProcessModel::analyzeModule() {
   next_communicator_subgroup_id_ = 1;
   deferred_lowering_stats_.clear();
   datatype_extent_bytes_.clear();
+  normalization_confidence_counts_.clear();
+  init_thread_required_level_ = -1;
+  has_init_thread_level_ = false;
+  init_thread_provided_level_ = -1;
+  has_provided_init_thread_level_ = false;
   rank_analysis_ = std::make_unique<MPI::MPIRankAnalysis>(module_);
   rank_analysis_->analyze();
 
@@ -1072,13 +1081,16 @@ void MPIProcessModel::analyzeModule() {
       if (!callee)
         continue;
 
-      ThreadAPI::TD_TYPE type = thread_api_->getType(callee);
+      MPIEffect effect = buildMPIEffect(I, thread_api_);
+      ThreadAPI::TD_TYPE type = effect.type;
       if (type == ThreadAPI::TD_DUMMY)
         continue;
+      normalization_confidence_counts_[effect.confidence]++;
 
-      const MPISemanticDescriptor *descriptor = lookupMPISemantic(type);
+      const MPISemanticDescriptor *descriptor = effect.descriptor;
       if (descriptor && descriptor->split_into_sendrecv) {
         MPIOperation send_op(I, MPIOpKind::SEND_BLOCKING, type);
+        send_op.normalization_confidence = effect.confidence;
         extractOperationDetails(send_op);
         annotateRankConstraints(send_op);
         if (send_op.communicator) {
@@ -1089,6 +1101,7 @@ void MPIProcessModel::analyzeModule() {
         ++operation_kind_counts_[send_op.kind];
 
         MPIOperation recv_op(I, MPIOpKind::RECV_BLOCKING, type);
+        recv_op.normalization_confidence = effect.confidence;
         extractOperationDetails(recv_op);
         annotateRankConstraints(recv_op);
         if (recv_op.communicator) {
@@ -1105,7 +1118,29 @@ void MPIProcessModel::analyzeModule() {
         continue;
 
       MPIOperation op(I, kind, type);
+      op.normalization_confidence = effect.confidence;
       extractOperationDetails(op);
+
+      if (kind == MPIOpKind::INIT && callee) {
+        std::string semantic_tag_storage = thread_api_->getSemanticTag(callee);
+        StringRef semantic_tag = semantic_tag_storage;
+        if (semantic_tag.equals("init-thread")) {
+          const auto *cb = dyn_cast<CallBase>(I);
+          int required_level = -1;
+          if (cb && tryReadScalarInt(getOperandBySignedIndex(cb, 2),
+                                     required_level, I)) {
+            has_init_thread_level_ = true;
+            init_thread_required_level_ = required_level;
+          }
+          int provided_level = -1;
+          if (cb && tryReadScalarInt(getOperandBySignedIndex(cb, 3),
+                                     provided_level, I)) {
+            has_provided_init_thread_level_ = true;
+            init_thread_provided_level_ = provided_level;
+          }
+        }
+      }
+
       annotateRankConstraints(op);
       if (op.communicator) {
         op.communicator_class_id =
@@ -1156,7 +1191,7 @@ void MPIProcessModel::analyzeModule() {
           NonBlockingOp persistent_op;
           persistent_op.issue_inst = I;
           persistent_op.request = op.request;
-          persistent_op.completion_state = RequestCompletionState::Pending;
+          persistent_op.completion_state = RequestCompletionState::Created;
           persistent_op.peer_rank =
               op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT
                   ? op.dest_rank
@@ -1175,7 +1210,7 @@ void MPIProcessModel::analyzeModule() {
           NonBlockingOp nbOp;
           nbOp.issue_inst = I;
           nbOp.request = op.request;
-          nbOp.completion_state = RequestCompletionState::Pending;
+          nbOp.completion_state = RequestCompletionState::Active;
           nbOp.peer_rank = (kind == MPIOpKind::SEND_NONBLOCKING)
                                ? op.dest_rank
                                : op.source_rank;
@@ -1204,6 +1239,14 @@ void MPIProcessModel::analyzeModule() {
         op.protocol_reachability == ProtocolReachability::AllRanks
             ? concurrency::ProofStrength::Must
             : concurrency::ProofStrength::May;
+    if (op.semantic_relation.proof == concurrency::ProofStrength::Must &&
+        has_provided_init_thread_level_ &&
+        disablesDeterministicMPIOrdering(init_thread_provided_level_)) {
+      op.semantic_relation.proof = concurrency::ProofStrength::May;
+      op.semantic_relation.reason =
+          "mpi_collective_protocol_slot_thread_downgrade";
+      continue;
+    }
     op.semantic_relation.reason = "mpi_collective_protocol_slot";
   }
 
@@ -1467,7 +1510,7 @@ void MPIProcessModel::matchNonBlockingOps() {
         }
         NonBlockingOp active_op = it->second;
         active_op.issue_inst = op.inst;
-        active_op.completion_state = RequestCompletionState::Pending;
+        active_op.completion_state = RequestCompletionState::Active;
         active_op.wait_inst = nullptr;
         non_blocking_ops_[request] = active_op;
       }
@@ -1481,7 +1524,7 @@ void MPIProcessModel::matchNonBlockingOps() {
         if (it == non_blocking_ops_.end()) {
           continue;
         }
-        it->second.completion_state = RequestCompletionState::Terminal;
+        it->second.completion_state = RequestCompletionState::Freed;
         it->second.wait_inst = op.inst;
       }
       continue;
@@ -1503,7 +1546,7 @@ void MPIProcessModel::matchNonBlockingOps() {
         it->second.wait_inst = op.inst;
       }
     };
-    auto markCompleted = [&](RequestID request, RequestCompletionState state) {
+    auto markCompleted = [&](RequestID request, MPIRequestState state) {
       auto it = non_blocking_ops_.find(request);
       if (it != non_blocking_ops_.end()) {
         it->second.wait_inst = op.inst;
@@ -1517,9 +1560,10 @@ void MPIProcessModel::matchNonBlockingOps() {
             if (it == non_blocking_ops_.end()) {
               continue;
             }
-            if (it->second.completion_state ==
-                RequestCompletionState::Pending) {
-              it->second.completion_state = RequestCompletionState::MayComplete;
+            if (it->second.completion_state == MPIRequestState::Pending ||
+                it->second.completion_state == MPIRequestState::Active ||
+                it->second.completion_state == MPIRequestState::Created) {
+              it->second.completion_state = MPIRequestState::MayComplete;
             }
             it->second.wait_inst = op.inst;
           }
@@ -1532,7 +1576,7 @@ void MPIProcessModel::matchNonBlockingOps() {
     const CallBase *cb = dyn_cast<CallBase>(op.inst);
     switch (op.td_type) {
     case ThreadAPI::TD_MPI_WAIT:
-      markCompleted(requests.front(), RequestCompletionState::MustComplete);
+      markCompleted(requests.front(), MPIRequestState::MustComplete);
       break;
     case ThreadAPI::TD_MPI_TEST: {
       bool test_true = false;
@@ -1542,17 +1586,19 @@ void MPIProcessModel::matchNonBlockingOps() {
         if (tryReadScalarInt(cb->getArgOperand(1), flag, op.inst)) {
           test_true = flag != 0;
         } else {
+          deferred_lowering_stats_["unknown_flag_value"]++;
           deferred_lowering_stats_["test_unknown_flag"]++;
           flag_unknown = true;
         }
       } else {
+        deferred_lowering_stats_["unknown_flag_value"]++;
         deferred_lowering_stats_["test_unknown_flag"]++;
         flag_unknown = true;
       }
       if (test_true) {
-        markCompleted(requests.front(), RequestCompletionState::MustComplete);
+        markCompleted(requests.front(), MPIRequestState::MustComplete);
       } else if (flag_unknown) {
-        markCompleted(requests.front(), RequestCompletionState::MayComplete);
+        markCompleted(requests.front(), MPIRequestState::MayComplete);
       }
       break;
     }
@@ -1578,7 +1624,7 @@ void MPIProcessModel::matchNonBlockingOps() {
       }
       if (testall_true) {
         for (RequestID request : requests) {
-          markCompleted(request, RequestCompletionState::MustComplete);
+          markCompleted(request, MPIRequestState::MustComplete);
         }
       } else if (flag_unknown) {
         markAllMayComplete(requests);
@@ -1596,7 +1642,7 @@ void MPIProcessModel::matchNonBlockingOps() {
       }
       if (selected >= 0 && static_cast<size_t>(selected) < requests.size()) {
         markCompleted(requests[static_cast<size_t>(selected)],
-                      RequestCompletionState::MustComplete);
+                      MPIRequestState::MustComplete);
       } else {
         markAllMayComplete(requests);
       }
@@ -1611,20 +1657,23 @@ void MPIProcessModel::matchNonBlockingOps() {
         if (tryReadScalarInt(cb->getArgOperand(3), flag, op.inst)) {
           testany_true = flag != 0;
         } else {
+          deferred_lowering_stats_["unknown_flag_value"]++;
           deferred_lowering_stats_["testany_unknown_flag"]++;
         }
         if (tryReadScalarInt(cb->getArgOperand(2), selected, op.inst)) {
           selected_known = true;
         } else {
+          deferred_lowering_stats_["unknown_completed_index_set"]++;
           deferred_lowering_stats_["testany_unknown_index"]++;
         }
       } else {
+        deferred_lowering_stats_["unknown_flag_value"]++;
         deferred_lowering_stats_["testany_unknown_flag"]++;
       }
       if (testany_true && selected_known && selected >= 0 &&
           static_cast<size_t>(selected) < requests.size()) {
         markCompleted(requests[static_cast<size_t>(selected)],
-                      RequestCompletionState::MustComplete);
+                      MPIRequestState::MustComplete);
       } else if (testany_true) {
         markAllMayComplete(requests);
       }
@@ -1646,7 +1695,7 @@ void MPIProcessModel::matchNonBlockingOps() {
           continue;
         }
         markCompleted(requests[static_cast<size_t>(index)],
-                      RequestCompletionState::MustComplete);
+                      MPIRequestState::MustComplete);
       }
       break;
     }
@@ -1687,7 +1736,7 @@ void MPIProcessModel::matchNonBlockingOps() {
           continue;
         }
         markCompleted(requests[static_cast<size_t>(index)],
-                      RequestCompletionState::MustComplete);
+                      MPIRequestState::MustComplete);
       }
       break;
     }
@@ -1796,7 +1845,9 @@ std::vector<MPIProcessModel::NonBlockingOp>
 MPIProcessModel::findOrphanedNonBlockingOps() const {
   std::vector<NonBlockingOp> orphaned;
   for (const auto &pair : non_blocking_ops_) {
-    if (pair.second.completion_state == RequestCompletionState::Pending) {
+    if (pair.second.completion_state == MPIRequestState::Pending ||
+        pair.second.completion_state == MPIRequestState::Active ||
+        pair.second.completion_state == MPIRequestState::Created) {
       orphaned.push_back(pair.second);
     }
   }
@@ -2084,7 +2135,9 @@ std::vector<RequestID> MPIProcessModel::findPersistentRequestLeaks() const {
 
   for (const auto &pair : persistent_request_templates_) {
     const NonBlockingOp &persistent_op = pair.second;
-    if (persistent_op.completion_state == RequestCompletionState::Pending) {
+    if (persistent_op.completion_state == MPIRequestState::Pending ||
+        persistent_op.completion_state == MPIRequestState::Created ||
+        persistent_op.completion_state == MPIRequestState::Active) {
       leaks.push_back(pair.first);
     }
   }
@@ -2375,7 +2428,9 @@ MPIProcessModel::findRequestFreeAfterWait() const {
 
     if ((op.kind == MPIOpKind::WAIT || op.kind == MPIOpKind::TEST ||
          op.kind == MPIOpKind::REQUEST_MANAGEMENT) &&
-        op.request_state == RequestCompletionState::Terminal) {
+        (op.request_state == RequestCompletionState::MustComplete ||
+         op.request_state == RequestCompletionState::Terminal ||
+         op.request_state == RequestCompletionState::Freed)) {
       completed_requests.insert(op.request);
     }
 

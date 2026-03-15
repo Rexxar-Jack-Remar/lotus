@@ -68,6 +68,7 @@ public:
     size_t rma_sync_count = 0;
     size_t may_complete_request_count = 0;
     size_t terminal_request_count = 0;
+    size_t freed_request_count = 0;
     size_t rank_restricted_operation_count = 0;
     size_t wildcard_endpoint_operation_count = 0;
     size_t orphaned_request_count = 0;
@@ -81,6 +82,10 @@ public:
     size_t leaked_window_count = 0;
     size_t collective_slot_count = 0;
     size_t deferred_semantic_lowering_count = 0;
+    size_t normalization_exact_count = 0;
+    size_t normalization_pmpi_wrapper_count = 0;
+    size_t normalization_openmpi_forwarder_count = 0;
+    size_t normalization_unknown_internal_count = 0;
   };
 
   static OpenMPSummary analyzeOpenMP(llvm::Module &module);

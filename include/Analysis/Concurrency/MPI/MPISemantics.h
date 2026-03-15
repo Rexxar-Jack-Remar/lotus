@@ -1,9 +1,27 @@
 #pragma once
 
+#include "Analysis/Concurrency/MPI/MPINormalization.h"
 #include "Analysis/Concurrency/MPI/MPIOperation.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
+#include <string>
+
 namespace mpi {
+
+enum class MPIEffectKind {
+  Lifecycle,
+  Session,
+  PointToPoint,
+  Probe,
+  Request,
+  Collective,
+  Communicator,
+  RMAWindow,
+  RMAData,
+  RMASync,
+  Datatype,
+  Unknown
+};
 
 enum class MPISemanticFamily {
   Lifecycle,
@@ -45,6 +63,18 @@ struct MPISemanticDescriptor {
   int collective_nonblocking_request_arg = -1;
 };
 
+struct MPIEffect {
+  MPIEffectKind effect_kind = MPIEffectKind::Unknown;
+  ThreadAPI::TD_TYPE type = ThreadAPI::TD_DUMMY;
+  MPIOpKind kind = MPIOpKind::UNKNOWN;
+  MPISemanticFamily family = MPISemanticFamily::Unknown;
+  NormalizationConfidence confidence =
+      NormalizationConfidence::UnknownVendorInternal;
+  std::string semantic_tag;
+  const MPISemanticDescriptor *descriptor = nullptr;
+};
+
 const MPISemanticDescriptor *lookupMPISemantic(ThreadAPI::TD_TYPE type);
+MPIEffect buildMPIEffect(const llvm::Instruction *inst, ThreadAPI *api);
 
 } // namespace mpi

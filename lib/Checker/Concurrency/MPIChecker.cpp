@@ -153,6 +153,7 @@ std::vector<ConcurrencyBugReport> MPIChecker::checkMPIBugs() {
   }
 
   for (const auto &req : results.persistent_request_leaks) {
+    (void)req;
     ConcurrencyBugReport report(
         ConcurrencyBugType::MPI_PERSISTENT_REQUEST_LEAK,
         "MPI persistent request may not be properly completed",
@@ -225,6 +226,91 @@ std::vector<ConcurrencyBugReport> MPIChecker::checkMPIBugs() {
                                 BugDescription::BI_HIGH,
                                 BugDescription::BC_ERROR);
     report.addStep(inst, "Negative root rank in bcast/gather/reduce");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.invalid_tags) {
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_INVALID_TAG,
+                                "MPI operation uses an invalid tag value",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(inst, "Tag value is negative and not MPI_ANY_TAG");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.invalid_ranks) {
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_INVALID_RANK,
+                                "MPI operation uses an invalid rank value",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(inst,
+                   "Rank value is invalid and not an allowed MPI wildcard");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto &pair : results.type_size_mismatches) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_TYPE_SIZE_MISMATCH,
+        "MPI send and receive payload sizes may be incompatible",
+        BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+    report.addStep(pair.first, "Send operation payload size");
+    report.addStep(pair.second, "Receive operation payload size");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.destroy_null_comm) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_DESTROY_NULL_COMM,
+        "MPI_Comm_free may be called with a null communicator",
+        BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
+    report.addStep(inst, "Communicator free on null-like handle");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.request_free_after_wait) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_REQUEST_FREE_AFTER_WAIT,
+        "MPI_Request_free may be called after request completion",
+        BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
+    report.addStep(inst,
+                   "Request free observed after wait/test completion state");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.in_place_wrong_op) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_IN_PLACE_WRONG_OP,
+        "MPI_IN_PLACE may be used on an unsupported collective operand",
+        BugDescription::BI_MEDIUM, BugDescription::BC_ERROR);
+    report.addStep(inst,
+                   "Collective send buffer uses MPI_IN_PLACE where disallowed");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.invalid_rma_transitions) {
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_INVALID_RMA_TRANSITION,
+                                "MPI RMA epoch transition is invalid",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(inst, "RMA sync call violates epoch-state transition rules");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.use_after_free_windows) {
+    ConcurrencyBugReport report(ConcurrencyBugType::MPI_USE_AFTER_FREE_WINDOW,
+                                "MPI RMA operation may use a freed window",
+                                BugDescription::BI_HIGH,
+                                BugDescription::BC_ERROR);
+    report.addStep(inst, "Window handle used after MPI_Win_free");
+    reports.push_back(std::move(report));
+  }
+
+  for (const auto *inst : results.double_window_free) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::MPI_DOUBLE_WINDOW_FREE,
+        "MPI_Win_free may be called multiple times on the same window",
+        BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+    report.addStep(inst, "Repeated window free detected");
     reports.push_back(std::move(report));
   }
 

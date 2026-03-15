@@ -1,5 +1,10 @@
 #include "Analysis/Concurrency/MPI/MPISemantics.h"
 
+#include "Analysis/Concurrency/MPI/MPISymbol.h"
+
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
+
 namespace mpi {
 
 namespace {
@@ -163,6 +168,18 @@ constexpr MPISemanticDescriptor kDescriptors[] = {
              MPISemanticFamily::Request, -1, 0),
     makeDesc(TD::TD_MPI_CANCEL, MPIOpKind::REQUEST_MANAGEMENT,
              MPISemanticFamily::Request, -1, 0),
+    makeDesc(TD::TD_MPI_GET_COUNT, MPIOpKind::REQUEST_MANAGEMENT,
+             MPISemanticFamily::Request),
+    makeDesc(TD::TD_MPI_GET_ELEMENTS, MPIOpKind::REQUEST_MANAGEMENT,
+             MPISemanticFamily::Request),
+    makeDesc(TD::TD_MPI_GET_ELEMENTS_X, MPIOpKind::REQUEST_MANAGEMENT,
+             MPISemanticFamily::Request),
+    makeDesc(TD::TD_MPI_STATUS_SIZE, MPIOpKind::REQUEST_MANAGEMENT,
+             MPISemanticFamily::Request),
+    makeDesc(TD::TD_MPI_STATUS_SET_ELEMENTS, MPIOpKind::REQUEST_MANAGEMENT,
+             MPISemanticFamily::Request),
+    makeDesc(TD::TD_MPI_STATUS_SET_ELEMENTS_X, MPIOpKind::REQUEST_MANAGEMENT,
+             MPISemanticFamily::Request),
     makeDesc(TD::TD_MPI_MPROBE, MPIOpKind::PROBE_NONBLOCKING,
              MPISemanticFamily::Probe, 2, -1, -1, -1, 0, 1, false),
     makeDesc(TD::TD_MPI_IMPROBE, MPIOpKind::PROBE_NONBLOCKING,
@@ -203,6 +220,40 @@ constexpr MPISemanticDescriptor kDescriptors[] = {
              MPISemanticFamily::Datatype),
     makeDesc(TD::TD_MPI_TYPE_COMMIT, MPIOpKind::DATATYPE_CREATE,
              MPISemanticFamily::Datatype),
+    makeDesc(TD::TD_MPI_CART_CREATE, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_CART_DIMS_CREATE, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_CART_GET, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_CART_SHIFT, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_CART_COORDS, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_CART_RANK, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_CART_SUB, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_DIST_GRAPH_CREATE, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_DIST_GRAPH_CREATE_ADJACENT, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_DIST_GRAPH_NEIGHBORS, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_DIST_GRAPH_NEIGHBORS_COUNT, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_GRAPH_CREATE, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_GRAPH_GET, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_GRAPH_NEIGHBORS, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_GRAPH_NEIGHBORS_COUNT, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_GRAPH_DIMS_GET, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
+    makeDesc(TD::TD_MPI_GRAPH_MAP, MPIOpKind::COMM_MANAGEMENT,
+             MPISemanticFamily::Communicator),
 };
 
 } // namespace
@@ -214,6 +265,75 @@ const MPISemanticDescriptor *lookupMPISemantic(ThreadAPI::TD_TYPE type) {
     }
   }
   return nullptr;
+}
+
+MPIEffect buildMPIEffect(const llvm::Instruction *inst, ThreadAPI *api) {
+  MPIEffect effect;
+  if (!inst || !api) {
+    return effect;
+  }
+
+  const auto *cb = llvm::dyn_cast<llvm::CallBase>(inst);
+  if (!cb) {
+    return effect;
+  }
+
+  const llvm::Function *callee = cb->getCalledFunction();
+  if (!callee) {
+    return effect;
+  }
+
+  MPISymbolNormalization normalization = normalizeMPISymbol(callee->getName());
+  effect.confidence = normalization.confidence;
+  effect.semantic_tag = api->getSemanticTag(callee);
+  effect.type = api->getType(callee);
+  effect.descriptor = lookupMPISemantic(effect.type);
+  if (!effect.descriptor) {
+    return effect;
+  }
+
+  effect.family = effect.descriptor->family;
+  effect.kind = effect.descriptor->kind;
+  switch (effect.family) {
+  case MPISemanticFamily::Lifecycle:
+    effect.effect_kind = MPIEffectKind::Lifecycle;
+    break;
+  case MPISemanticFamily::Session:
+    effect.effect_kind = MPIEffectKind::Session;
+    break;
+  case MPISemanticFamily::PointToPoint:
+    effect.effect_kind = MPIEffectKind::PointToPoint;
+    break;
+  case MPISemanticFamily::Probe:
+    effect.effect_kind = MPIEffectKind::Probe;
+    break;
+  case MPISemanticFamily::Request:
+    effect.effect_kind = MPIEffectKind::Request;
+    break;
+  case MPISemanticFamily::Collective:
+    effect.effect_kind = MPIEffectKind::Collective;
+    break;
+  case MPISemanticFamily::Communicator:
+    effect.effect_kind = MPIEffectKind::Communicator;
+    break;
+  case MPISemanticFamily::RMAWindow:
+    effect.effect_kind = MPIEffectKind::RMAWindow;
+    break;
+  case MPISemanticFamily::RMAData:
+    effect.effect_kind = MPIEffectKind::RMAData;
+    break;
+  case MPISemanticFamily::RMASync:
+    effect.effect_kind = MPIEffectKind::RMASync;
+    break;
+  case MPISemanticFamily::Datatype:
+    effect.effect_kind = MPIEffectKind::Datatype;
+    break;
+  case MPISemanticFamily::Unknown:
+    effect.effect_kind = MPIEffectKind::Unknown;
+    break;
+  }
+
+  return effect;
 }
 
 } // namespace mpi

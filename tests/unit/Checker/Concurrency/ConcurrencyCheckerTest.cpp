@@ -618,6 +618,150 @@ TEST_F(ConcurrencyCheckerTest, TracksMPISummaryInCheckerStatistics) {
   EXPECT_EQ(stats.mpiSummary.collective_slot_count, 1u);
 }
 
+TEST_F(ConcurrencyCheckerTest, DetectsMPIInvalidTagBug) {
+  const char *source = R"(
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+
+    define void @test_mpi_invalid_tag(i8* %buf, i8* %comm) {
+      %call = call i32 @MPI_Send(i8* %buf, i32 1, i32 0, i32 1, i32 -1, i8* %comm)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::MPIChecker checker(*module);
+  auto reports = checker.checkMPIBugs();
+
+  bool found = false;
+  for (const auto &report : reports) {
+    if (report.bugType == concurrency::ConcurrencyBugType::MPI_INVALID_TAG) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST_F(ConcurrencyCheckerTest, DetectsMPIWindowLifecycleBugs) {
+  const char *source = R"(
+    @win = global i8 0, align 1
+
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_free(i8*)
+    declare i32 @MPI_Win_unlock(i32, i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Win_create(i8* null, i64 8, i32 4, i8* %comm, i8* @win)
+      call i32 @MPI_Win_free(i8* @win)
+      call i32 @MPI_Win_free(i8* @win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 1, i64 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Win_unlock(i32 1, i8* @win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::MPIChecker checker(*module);
+  auto reports = checker.checkMPIBugs();
+
+  bool found_invalid_transition = false;
+  bool found_use_after_free = false;
+  bool found_double_free = false;
+  for (const auto &report : reports) {
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::MPI_INVALID_RMA_TRANSITION) {
+      found_invalid_transition = true;
+    }
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::MPI_USE_AFTER_FREE_WINDOW) {
+      found_use_after_free = true;
+    }
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::MPI_DOUBLE_WINDOW_FREE) {
+      found_double_free = true;
+    }
+  }
+
+  EXPECT_TRUE(found_invalid_transition);
+  EXPECT_TRUE(found_use_after_free);
+  EXPECT_TRUE(found_double_free);
+}
+
+TEST_F(ConcurrencyCheckerTest, DetectsAdditionalMPIMappingBugs) {
+  const char *source = R"(
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Request_free(i8*)
+    declare i32 @MPI_Wait(i8*, i8*)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+    declare i32 @MPI_Comm_free(i8*)
+
+    @MPI_IN_PLACE = external global i8
+    @MPI_COMM_NULL = external global i8
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 -3, i32 7, i8* %comm)
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm)
+      call i32 @MPI_Recv(i8* null, i32 2, i32 0, i32 1, i32 7, i8* %comm, i8* null)
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 1, i32 9, i8* %comm, i8* %req)
+      call i32 @MPI_Wait(i8* %req, i8* null)
+      call i32 @MPI_Request_free(i8* %req)
+      call i32 @MPI_Bcast(i8* @MPI_IN_PLACE, i32 1, i32 0, i32 -1, i8* %comm)
+      call i32 @MPI_Comm_free(i8* @MPI_COMM_NULL)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::MPIChecker checker(*module);
+  auto reports = checker.checkMPIBugs();
+
+  bool found_invalid_rank = false;
+  bool found_type_size_mismatch = false;
+  bool found_destroy_null_comm = false;
+  bool found_request_free_after_wait = false;
+  bool found_in_place_wrong_op = false;
+
+  for (const auto &report : reports) {
+    if (report.bugType == concurrency::ConcurrencyBugType::MPI_INVALID_RANK) {
+      found_invalid_rank = true;
+    }
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::MPI_TYPE_SIZE_MISMATCH) {
+      found_type_size_mismatch = true;
+    }
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::MPI_DESTROY_NULL_COMM) {
+      found_destroy_null_comm = true;
+    }
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::MPI_REQUEST_FREE_AFTER_WAIT) {
+      found_request_free_after_wait = true;
+    }
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::MPI_IN_PLACE_WRONG_OP) {
+      found_in_place_wrong_op = true;
+    }
+  }
+
+  EXPECT_TRUE(found_invalid_rank);
+  EXPECT_TRUE(found_type_size_mismatch);
+  EXPECT_TRUE(found_destroy_null_comm);
+  EXPECT_TRUE(found_request_free_after_wait);
+  EXPECT_TRUE(found_in_place_wrong_op);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

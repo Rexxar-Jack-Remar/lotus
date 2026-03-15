@@ -468,6 +468,11 @@ TEST_F(MPIAnalysisTest, PrintResultsIncludesDetailedCounters) {
   EXPECT_NE(output.find("Requests with may-complete status: 1"),
             std::string::npos);
   EXPECT_NE(output.find("Requests with terminal status: 1"), std::string::npos);
+  EXPECT_NE(output.find("Requests with freed status: 1"), std::string::npos);
+  EXPECT_NE(
+      output.find(
+          "Normalization confidence (exact/pmpi/openmpi-forwarder/unknown):"),
+      std::string::npos);
   EXPECT_NE(output.find("Deferred MPI semantic lowering total: 1"),
             std::string::npos);
 }
@@ -997,6 +1002,39 @@ TEST_F(MPIAnalysisTest, SemanticDescriptorCoverageForCoreMPITypes) {
       EXPECT_NE(descriptor->request_arg, -1);
     }
   }
+}
+
+TEST_F(MPIAnalysisTest,
+       SemanticDescriptorCoverageForNewStatusAndTopologyTypes) {
+  const MPISemanticDescriptor *get_count =
+      lookupMPISemantic(ThreadAPI::TD_MPI_GET_COUNT);
+  ASSERT_NE(get_count, nullptr);
+  EXPECT_EQ(get_count->kind, MPIOpKind::REQUEST_MANAGEMENT);
+  EXPECT_EQ(get_count->family, MPISemanticFamily::Request);
+
+  const MPISemanticDescriptor *status_set =
+      lookupMPISemantic(ThreadAPI::TD_MPI_STATUS_SET_ELEMENTS);
+  ASSERT_NE(status_set, nullptr);
+  EXPECT_EQ(status_set->kind, MPIOpKind::REQUEST_MANAGEMENT);
+  EXPECT_EQ(status_set->family, MPISemanticFamily::Request);
+
+  const MPISemanticDescriptor *cart_create =
+      lookupMPISemantic(ThreadAPI::TD_MPI_CART_CREATE);
+  ASSERT_NE(cart_create, nullptr);
+  EXPECT_EQ(cart_create->kind, MPIOpKind::COMM_MANAGEMENT);
+  EXPECT_EQ(cart_create->family, MPISemanticFamily::Communicator);
+
+  const MPISemanticDescriptor *dist_graph_neighbors =
+      lookupMPISemantic(ThreadAPI::TD_MPI_DIST_GRAPH_NEIGHBORS);
+  ASSERT_NE(dist_graph_neighbors, nullptr);
+  EXPECT_EQ(dist_graph_neighbors->kind, MPIOpKind::COMM_MANAGEMENT);
+  EXPECT_EQ(dist_graph_neighbors->family, MPISemanticFamily::Communicator);
+
+  const MPISemanticDescriptor *graph_map =
+      lookupMPISemantic(ThreadAPI::TD_MPI_GRAPH_MAP);
+  ASSERT_NE(graph_map, nullptr);
+  EXPECT_EQ(graph_map->kind, MPIOpKind::COMM_MANAGEMENT);
+  EXPECT_EQ(graph_map->family, MPISemanticFamily::Communicator);
 }
 
 TEST_F(MPIAnalysisTest, MPISpecDescriptorsAreExplicitlyCovered) {
@@ -1842,6 +1880,193 @@ TEST_F(MPIAnalysisTest, SameShapedRMALockEpochsAcrossRanksStillRace) {
   analysis.runAnalysis();
 
   EXPECT_EQ(analysis.getResults().rma_races.size(), 1u);
+}
+
+TEST_F(MPIAnalysisTest, PMPIAndOpenMPINormalizationConfidenceIsExposed) {
+  const char *source = R"(
+    declare i32 @PMPI_Bcast(i8*, i32, i32, i32, i8*)
+    declare i32 @ompi_mpi_bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @PMPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      call i32 @ompi_mpi_bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_pmpi = false;
+  bool saw_openmpi = false;
+  for (const auto &op : analysis.getProcessModel().getAllOperations()) {
+    if (op.normalization_confidence == NormalizationConfidence::PMPIWrapper) {
+      saw_pmpi = true;
+    }
+    if (op.normalization_confidence ==
+        NormalizationConfidence::KnownOpenMPIForwarder) {
+      saw_openmpi = true;
+    }
+  }
+  EXPECT_TRUE(saw_pmpi);
+  EXPECT_TRUE(saw_openmpi);
+}
+
+TEST_F(MPIAnalysisTest, StructuredDiagnosticsCaptureSemanticRelationAndCode) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+    declare i32 @MPI_Gather(i8*, i32, i32, i8*, i32, i32, i32, i8*)
+
+    define i32 @rank0(i8* %comm) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+
+    define i32 @rank1(i8* %comm) {
+    entry:
+      call i32 @MPI_Gather(i8* null, i32 1, i32 0, i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %a = call i32 @rank0(i8* %comm)
+      %b = call i32 @rank1(i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_FALSE(analysis.getResults().diagnostics.empty());
+  bool saw_protocol_code = false;
+  for (const auto &diag : analysis.getResults().diagnostics) {
+    if (diag.code == "mpi_collective_protocol_slot" ||
+        diag.code == "mpi_collective_protocol_automaton_slot") {
+      saw_protocol_code = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(saw_protocol_code);
+}
+
+TEST_F(MPIAnalysisTest,
+       InitThreadRequiredMultipleWithoutProvidedKeepsMustProof) {
+  const char *source = R"(
+    declare i32 @MPI_Init_thread(i32*, i8***, i32, i32*)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %provided = alloca i32, align 4
+      call i32 @MPI_Init_thread(i32* null, i8*** null, i32 3, i32* %provided)
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_TRUE(analysis.getProcessModel().hasInitThreadLevel());
+  EXPECT_EQ(analysis.getProcessModel().getRequiredInitThreadLevel(), 3);
+  EXPECT_FALSE(analysis.getProcessModel().hasProvidedInitThreadLevel());
+
+  bool saw_protocol_slot = false;
+  bool saw_downgraded_collective = false;
+  for (const auto &diag : analysis.getResults().diagnostics) {
+    if (diag.code == "mpi_collective_protocol_slot") {
+      saw_protocol_slot = true;
+      EXPECT_EQ(diag.relation.proof, concurrency::ProofStrength::Must);
+    }
+    if (diag.code == "mpi_collective_protocol_slot_thread_downgrade") {
+      saw_downgraded_collective = true;
+    }
+  }
+  EXPECT_TRUE(saw_protocol_slot);
+  EXPECT_FALSE(saw_downgraded_collective);
+}
+
+TEST_F(MPIAnalysisTest, InitThreadProvidedMultipleDowngradesCollectiveProof) {
+  const char *source = R"(
+    declare i32 @MPI_Init_thread(i32*, i8***, i32, i32)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Init_thread(i32* null, i8*** null, i32 3, i32 3)
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_TRUE(analysis.getProcessModel().hasProvidedInitThreadLevel());
+  EXPECT_EQ(analysis.getProcessModel().getProvidedInitThreadLevel(), 3);
+
+  bool saw_downgraded_collective = false;
+  for (const auto &diag : analysis.getResults().diagnostics) {
+    if (diag.code == "mpi_collective_protocol_slot_thread_downgrade") {
+      saw_downgraded_collective = true;
+      EXPECT_EQ(diag.relation.proof, concurrency::ProofStrength::May);
+    }
+  }
+  EXPECT_TRUE(saw_downgraded_collective);
+}
+
+TEST_F(MPIAnalysisTest,
+       InitThreadRequiredMultipleProvidedFunneledDoesNotDowngrade) {
+  const char *source = R"(
+    declare i32 @MPI_Init_thread(i32*, i8***, i32, i32)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Init_thread(i32* null, i8*** null, i32 3, i32 1)
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_TRUE(analysis.getProcessModel().hasProvidedInitThreadLevel());
+  EXPECT_EQ(analysis.getProcessModel().getProvidedInitThreadLevel(), 1);
+
+  bool saw_protocol_slot = false;
+  bool saw_downgraded_collective = false;
+  for (const auto &diag : analysis.getResults().diagnostics) {
+    if (diag.code == "mpi_collective_protocol_slot") {
+      saw_protocol_slot = true;
+      EXPECT_EQ(diag.relation.proof, concurrency::ProofStrength::Must);
+    }
+    if (diag.code == "mpi_collective_protocol_slot_thread_downgrade") {
+      saw_downgraded_collective = true;
+    }
+  }
+  EXPECT_TRUE(saw_protocol_slot);
+  EXPECT_FALSE(saw_downgraded_collective);
 }
 
 int main(int argc, char **argv) {

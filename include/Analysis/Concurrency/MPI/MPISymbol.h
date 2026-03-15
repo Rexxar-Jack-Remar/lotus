@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Analysis/Concurrency/MPI/MPINormalization.h"
+
 #include <cctype>
 #include <string>
 
@@ -7,30 +9,79 @@
 
 namespace mpi {
 
-inline std::string normalizeMPISymbolName(llvm::StringRef raw_name) {
+inline MPISymbolNormalization normalizeMPISymbol(llvm::StringRef raw_name) {
   llvm::StringRef name = raw_name;
   while (name.startswith("\01")) {
     name = name.drop_front();
   }
+
   if (name.startswith("_") && !name.startswith("__wrap_")) {
     name = name.drop_front();
   }
+
+  MPISymbolNormalization result;
+  result.canonical_name = name.str();
+  result.confidence = NormalizationConfidence::UnknownVendorInternal;
+
   if (name.startswith("__wrap_")) {
-    name = name.drop_front(7);
+    llvm::StringRef wrapped = name.drop_front(7);
+    if (wrapped.startswith("MPI_")) {
+      result.canonical_name = wrapped.str();
+      result.confidence = NormalizationConfidence::PMPIWrapper;
+      return result;
+    }
+    if (wrapped.startswith("PMPI_")) {
+      result.canonical_name =
+          (std::string("MPI_") + wrapped.drop_front(5).str());
+      result.confidence = NormalizationConfidence::PMPIWrapper;
+      return result;
+    }
+    result.canonical_name = wrapped.str();
+    result.confidence = NormalizationConfidence::UnknownVendorInternal;
+    return result;
   }
+
   if (name.startswith("PMPI_")) {
-    return std::string("MPI_") + name.drop_front(5).str();
+    result.canonical_name = std::string("MPI_") + name.drop_front(5).str();
+    result.confidence = NormalizationConfidence::PMPIWrapper;
+    return result;
   }
+
   if (name.startswith("ompi_mpi_")) {
-    return std::string("MPI_") + name.drop_front(9).str();
+    result.canonical_name = std::string("MPI_") + name.drop_front(9).str();
+    result.confidence = NormalizationConfidence::KnownOpenMPIForwarder;
+    return result;
   }
+
   if (name.startswith("pmpi_")) {
-    return std::string("MPI_") + name.drop_front(5).str();
+    result.canonical_name = std::string("MPI_") + name.drop_front(5).str();
+    result.confidence = NormalizationConfidence::PMPIWrapper;
+    return result;
   }
+
   if (name.startswith("mpi_")) {
-    return std::string("MPI_") + name.drop_front(4).str();
+    result.canonical_name = std::string("MPI_") + name.drop_front(4).str();
+    result.confidence = NormalizationConfidence::ExactMPI;
+    return result;
   }
-  return name.str();
+
+  if (name.startswith("MPI_")) {
+    result.canonical_name = name.str();
+    result.confidence = NormalizationConfidence::ExactMPI;
+    return result;
+  }
+
+  if (name.startswith("ompi_")) {
+    result.confidence = NormalizationConfidence::UnknownVendorInternal;
+    return result;
+  }
+
+  result.confidence = NormalizationConfidence::ExactMPI;
+  return result;
+}
+
+inline std::string normalizeMPISymbolName(llvm::StringRef raw_name) {
+  return normalizeMPISymbol(raw_name).canonical_name;
 }
 
 inline bool equalsCaseInsensitiveASCII(llvm::StringRef lhs,

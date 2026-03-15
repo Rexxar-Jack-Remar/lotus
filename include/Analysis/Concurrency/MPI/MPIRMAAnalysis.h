@@ -32,6 +32,9 @@ class MPIProcessModel;
 
 class MPIRMAAnalysis {
 public:
+  enum class EpochCompletion { None, LocalOnly, RemoteGuaranteed };
+  enum class EpochProof { Must, May, Unknown };
+
   enum class SyncModel { FENCE, LOCK_UNLOCK, PSCW, NONE };
 
   enum class EpochState {
@@ -77,6 +80,8 @@ public:
     bool flush_completed = false;
     bool local_completion_only = false;
     bool exposure_epoch_observed = false;
+    EpochCompletion epoch_completion = EpochCompletion::None;
+    EpochProof epoch_proof = EpochProof::Unknown;
 
     const llvm::Instruction *sync_start = nullptr;
     const llvm::Instruction *sync_end = nullptr;

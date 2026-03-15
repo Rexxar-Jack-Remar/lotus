@@ -54,6 +54,21 @@ void MPIRMAAnalysis::annotateOperationsInMachine(
     rma_op.flush_completed = machine.remote_completion_observed;
     rma_op.exposure_epoch_observed = machine.exposure_epoch_observed;
     rma_op.synchronization_proof = proof;
+    if (machine.remote_completion_observed) {
+      rma_op.epoch_completion =
+          MPIRMAAnalysis::EpochCompletion::RemoteGuaranteed;
+    } else if (machine.local_completion_only) {
+      rma_op.epoch_completion = MPIRMAAnalysis::EpochCompletion::LocalOnly;
+    } else {
+      rma_op.epoch_completion = MPIRMAAnalysis::EpochCompletion::None;
+    }
+    if (proof == concurrency::ProofStrength::Must) {
+      rma_op.epoch_proof = MPIRMAAnalysis::EpochProof::Must;
+    } else if (proof == concurrency::ProofStrength::May) {
+      rma_op.epoch_proof = MPIRMAAnalysis::EpochProof::May;
+    } else {
+      rma_op.epoch_proof = MPIRMAAnalysis::EpochProof::Unknown;
+    }
     rma_op.relation.kind = concurrency::RelationKind::SameSynchronizationEpoch;
     rma_op.relation.proof = proof;
     rma_op.relation.reason = reason.str();
@@ -94,8 +109,8 @@ bool MPIRMAAnalysis::transitionEpochMachine(EpochMachine &machine,
     if (machine.state != EpochState::Idle) {
       return false;
     }
-    machine.state = isLockAllOperation(op) ? EpochState::LockAllOpen
-                                           : EpochState::LockOpen;
+    machine.state =
+        isLockAllOperation(op) ? EpochState::LockAllOpen : EpochState::LockOpen;
     machine.model = SyncModel::LOCK_UNLOCK;
     machine.start = op.inst;
     machine.epoch_id = next_epoch_id;
@@ -121,7 +136,8 @@ bool MPIRMAAnalysis::transitionEpochMachine(EpochMachine &machine,
       return false;
     }
     machine.remote_completion_observed =
-        op.td_type != ThreadAPI::TD_MPI_WIN_FLUSH || !op.rma_local_completion_only;
+        op.td_type != ThreadAPI::TD_MPI_WIN_FLUSH ||
+        !op.rma_local_completion_only;
     machine.local_completion_only = op.rma_local_completion_only;
     annotateOperationsInMachine(
         machine, op.inst,
@@ -237,8 +253,8 @@ void MPIRMAAnalysis::analyzeRMA() {
       rma_op.target_disp = op.target_disp;
       rma_op.byte_length = op.byte_length;
       rma_op.rma_epoch_kind = RMAEpochKind::Access;
-      rma_op.lock_all = op.td_type == ThreadAPI::TD_MPI_WIN_LOCK &&
-                        op.target_rank < 0;
+      rma_op.lock_all =
+          op.td_type == ThreadAPI::TD_MPI_WIN_LOCK && op.target_rank < 0;
 
       size_t op_index = rma_operations_.size();
       rma_operations_.push_back(rma_op);
@@ -284,8 +300,7 @@ void MPIRMAAnalysis::analyzeRMA() {
         for (size_t idx : machine.op_indices) {
           rma_operations_[idx].relation.kind =
               concurrency::RelationKind::UnknownDueToModelGap;
-          rma_operations_[idx].relation.proof =
-              concurrency::ProofStrength::May;
+          rma_operations_[idx].relation.proof = concurrency::ProofStrength::May;
           rma_operations_[idx].relation.reason =
               "mpi_rma_invalid_epoch_transition";
         }
@@ -300,7 +315,8 @@ MPIRMAAnalysis::findInvalidEpochTransitions() const {
   return invalid_epoch_transitions_;
 }
 
-std::vector<const Instruction *> MPIRMAAnalysis::findUseAfterFreeWindows() const {
+std::vector<const Instruction *>
+MPIRMAAnalysis::findUseAfterFreeWindows() const {
   return use_after_free_windows_;
 }
 

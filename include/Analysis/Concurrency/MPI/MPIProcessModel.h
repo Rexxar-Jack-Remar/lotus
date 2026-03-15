@@ -13,6 +13,7 @@
 #ifndef MPI_PROCESS_MODEL_H
 #define MPI_PROCESS_MODEL_H
 
+#include "Analysis/Concurrency/MPI/MPINormalization.h"
 #include "Analysis/Concurrency/MPI/MPIOperation.h"
 #include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
 #include "Analysis/Concurrency/MPI/MPISemantics.h"
@@ -76,6 +77,21 @@ public:
   getDeferredLoweringStats() const {
     return deferred_lowering_stats_;
   }
+
+  const std::unordered_map<NormalizationConfidence, size_t> &
+  getNormalizationConfidenceCounts() const {
+    return normalization_confidence_counts_;
+  }
+
+  bool hasInitThreadLevel() const { return has_init_thread_level_; }
+
+  int getRequiredInitThreadLevel() const { return init_thread_required_level_; }
+
+  bool hasProvidedInitThreadLevel() const {
+    return has_provided_init_thread_level_;
+  }
+
+  int getProvidedInitThreadLevel() const { return init_thread_provided_level_; }
 
   size_t getCommunicatorClassID(CommunicatorID communicator) const;
 
@@ -196,6 +212,12 @@ private:
   void matchNonBlockingOps();
   std::unordered_map<std::string, size_t> deferred_lowering_stats_;
   std::unordered_map<const llvm::Value *, int64_t> datatype_extent_bytes_;
+  std::unordered_map<NormalizationConfidence, size_t>
+      normalization_confidence_counts_;
+  int init_thread_required_level_ = -1;
+  bool has_init_thread_level_ = false;
+  int init_thread_provided_level_ = -1;
+  bool has_provided_init_thread_level_ = false;
 };
 
 } // namespace mpi
