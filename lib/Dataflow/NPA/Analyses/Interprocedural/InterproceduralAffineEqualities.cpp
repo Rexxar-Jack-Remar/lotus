@@ -55,13 +55,6 @@ AffineExpr constExpr(int64_t value) {
   return out;
 }
 
-AffineExpr symbolicExpr(const llvm::Value *V) {
-  AffineExpr out;
-  out.top = false;
-  out.terms[V] = 1;
-  return out;
-}
-
 AffineExpr normalizeExpr(AffineExpr expr, unsigned bitWidth) {
   if (expr.top)
     return expr;
@@ -167,10 +160,10 @@ std::vector<Row> howellize(std::vector<Row> rows) {
     }
 
     rows.erase(std::remove_if(rows.begin(), rows.end(), isZeroRow), rows.end());
-    auto it = std::find_if(rows.begin() + nextRow, rows.end(),
-                           [col](const Row &row) {
-                             return leadingIndex(row) == static_cast<int>(col);
-                           });
+    auto it =
+        std::find_if(rows.begin() + nextRow, rows.end(), [col](const Row &row) {
+          return leadingIndex(row) == static_cast<int>(col);
+        });
     if (it == rows.end())
       continue;
     std::iter_swap(rows.begin() + nextRow, it);
@@ -246,8 +239,7 @@ AffineState materializeAffineExpressionsImpl(const Relation &state) {
           continue;
         llvm::APInt inv = oddInverse(coeff);
         unsigned actualWidth = vocab->actualBitWidths.at(vocab->values[preCol]);
-        AffineExpr expr =
-            constExpr((-row.back() * inv).getSExtValue());
+        AffineExpr expr = constExpr((-row.back() * inv).getSExtValue());
         bool ok = true;
         for (unsigned other = 0; other < vars; ++other) {
           if (other == preCol || row[vars + other].isZero())
@@ -347,9 +339,8 @@ public:
         return D::identity();
       if (!D::isTrackedValue(Branch->getCondition()))
         return D::identity();
-      return D::addPrecondition(
-          D::identity(), Branch->getCondition(),
-          Branch->getSuccessor(0) == &succ ? 1 : 0);
+      return D::addPrecondition(D::identity(), Branch->getCondition(),
+                                Branch->getSuccessor(0) == &succ ? 1 : 0);
     }
     if (auto *Switch = llvm::dyn_cast<llvm::SwitchInst>(&term)) {
       if (!D::isTrackedValue(Switch->getCondition()))
@@ -456,8 +447,8 @@ public:
     return D::equal(lhs, rhs);
   }
 
-  InterproceduralAffineEqualities::Result buildResult(
-      const typename Engine::Result &engineResult) const {
+  InterproceduralAffineEqualities::Result
+  buildResult(const typename Engine::Result &engineResult) const {
     InterproceduralAffineEqualities::Result result;
     result.status = engineResult.status;
     result.summaries.insert(engineResult.summaries.begin(),
@@ -495,12 +486,12 @@ private:
     }
   }
 
-  Relation relationForValue(const llvm::Value *dest, const llvm::Value *src) const {
+  Relation relationForValue(const llvm::Value *dest,
+                            const llvm::Value *src) const {
     int64_t constant = 0;
     if (getConstantIntValue(src, constant))
-      return D::makeAffineAssignment(dest,
-                                     wrapToBitWidth(constant, D::bitWidthOf(dest)),
-                                     {});
+      return D::makeAffineAssignment(
+          dest, wrapToBitWidth(constant, D::bitWidthOf(dest)), {});
     if (D::isTrackedValue(src))
       return D::makeAffineAssignment(dest, 0, {{src, 1}});
     return D::makeForget(dest);
@@ -557,7 +548,8 @@ private:
                            static_cast<uint64_t>(lhs), true);
       llvm::APInt rhsValue(Cmp.getOperand(1)->getType()->getIntegerBitWidth(),
                            static_cast<uint64_t>(rhs), true);
-      bool result = llvm::ICmpInst::compare(lhsValue, rhsValue, Cmp.getPredicate());
+      bool result =
+          llvm::ICmpInst::compare(lhsValue, rhsValue, Cmp.getPredicate());
       return D::makeAffineAssignment(&Cmp, result ? 1 : 0, {});
     }
     if (Cmp.getOperand(0) == Cmp.getOperand(1)) {
@@ -648,13 +640,13 @@ materializeAffineExpressions(const AffineRelationDomain::value_type &relation) {
   return materializeAffineExpressionsImpl(relation);
 }
 
-InterproceduralAffineEqualities::Result
-InterproceduralAffineEqualities::run(llvm::Module &M, bool verbose,
-                                     LinearStrategy linearStrategy) {
+InterproceduralAffineEqualities::Result InterproceduralAffineEqualities::run(
+    llvm::Module &M, bool verbose, LinearStrategy linearStrategy,
+    IndirectCallResolutionMode callResolutionMode) {
   AffineRelationAnalysis analysis(M);
   auto engineResult =
       InterproceduralEngine<AffineRelationDomain, AffineRelationAnalysis>::run(
-          M, analysis, verbose, linearStrategy);
+          M, analysis, verbose, linearStrategy, callResolutionMode);
   return analysis.buildResult(engineResult);
 }
 

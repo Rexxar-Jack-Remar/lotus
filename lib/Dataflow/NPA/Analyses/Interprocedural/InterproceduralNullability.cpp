@@ -136,11 +136,13 @@ public:
     return out;
   }
 
-  const std::unordered_map<const llvm::Value *, unsigned> &getValueBits() const {
+  const std::unordered_map<const llvm::Value *, unsigned> &
+  getValueBits() const {
     return valueBits;
   }
 
-  std::unordered_map<const llvm::Value *, unsigned> buildPreciseMemoryBits() const {
+  std::unordered_map<const llvm::Value *, unsigned>
+  buildPreciseMemoryBits() const {
     std::unordered_map<const llvm::Value *, unsigned> out;
     for (const auto *Pointer : memoryPointers) {
       unsigned bit = invalidBit();
@@ -175,9 +177,9 @@ public:
     return bits.size() == 1 && bits.front() == bit;
   }
 
-  std::vector<unsigned>
-  getReachableMemoryBitsFromRoot(const llvm::Value *Root,
-                                 const llvm::Function *FunctionScope = nullptr) const {
+  std::vector<unsigned> getReachableMemoryBitsFromRoot(
+      const llvm::Value *Root,
+      const llvm::Function *FunctionScope = nullptr) const {
     std::vector<unsigned> out = getAliasMemBits(Root, FunctionScope);
     if (Root && Root->getType()->isPointerTy()) {
       for (const auto *candidate : memoryPointers) {
@@ -453,9 +455,9 @@ private:
     return aliasAnalysis.mayAlias(a.ptr, b.ptr);
   }
 
-  RelativeOffsetInfo
-  getRelativeOffsetInfoImpl(const llvm::Value *Pointer, const llvm::Value *Root,
-                            std::unordered_set<const llvm::Value *> &visited) const {
+  RelativeOffsetInfo getRelativeOffsetInfoImpl(
+      const llvm::Value *Pointer, const llvm::Value *Root,
+      std::unordered_set<const llvm::Value *> &visited) const {
     RelativeOffsetInfo out;
     if (!Pointer || !Root)
       return out;
@@ -595,7 +597,8 @@ public:
     return Exp::seq(transfer, currentPath);
   }
 
-  bool buildNormalTransfer(llvm::Instruction &I, D::value_type &transfer) const {
+  bool buildNormalTransfer(llvm::Instruction &I,
+                           D::value_type &transfer) const {
     transfer = D::one();
     bool updated = false;
 
@@ -603,8 +606,8 @@ public:
       updated |= assignNonNull(transfer, info.getValueBit(Alloca));
     } else if (auto *Store = llvm::dyn_cast<llvm::StoreInst>(&I)) {
       if (Store->getValueOperand()->getType()->isPointerTy()) {
-        auto targetBits =
-            info.getMemoryBitsForPointer(Store->getPointerOperand(), I.getFunction());
+        auto targetBits = info.getMemoryBitsForPointer(
+            Store->getPointerOperand(), I.getFunction());
         auto source = sourceFromValue(Store->getValueOperand());
         unsigned preciseBit = NullabilityInfo::invalidBit();
         if (targetBits.size() == 1 &&
@@ -621,8 +624,8 @@ public:
       }
     } else if (auto *Load = llvm::dyn_cast<llvm::LoadInst>(&I)) {
       if (Load->getType()->isPointerTy()) {
-        auto srcBits =
-            info.getMemoryBitsForPointer(Load->getPointerOperand(), I.getFunction());
+        auto srcBits = info.getMemoryBitsForPointer(Load->getPointerOperand(),
+                                                    I.getFunction());
         updated |= assignFromSources(transfer, info.getValueBit(Load), srcBits,
                                      srcBits.empty());
       }
@@ -636,9 +639,9 @@ public:
                                     {GEP->getPointerOperand()});
     } else if (auto *Select = llvm::dyn_cast<llvm::SelectInst>(&I)) {
       if (Select->getType()->isPointerTy()) {
-        updated |= assignFromOperands(transfer, info.getValueBit(Select),
-                                      {Select->getTrueValue(),
-                                       Select->getFalseValue()});
+        updated |= assignFromOperands(
+            transfer, info.getValueBit(Select),
+            {Select->getTrueValue(), Select->getFalseValue()});
       }
     } else if (auto *Phi = llvm::dyn_cast<llvm::PHINode>(&I)) {
       if (Phi->getType()->isPointerTy()) {
@@ -646,7 +649,8 @@ public:
         incoming.reserve(Phi->getNumIncomingValues());
         for (unsigned i = 0; i < Phi->getNumIncomingValues(); ++i)
           incoming.push_back(Phi->getIncomingValue(i));
-        updated |= assignFromOperands(transfer, info.getValueBit(Phi), incoming);
+        updated |=
+            assignFromOperands(transfer, info.getValueBit(Phi), incoming);
       }
     } else if (I.getType()->isPointerTy()) {
       updated |= assignUnknown(transfer, info.getValueBit(&I));
@@ -659,8 +663,8 @@ public:
                                      const llvm::Function &Callee) const {
     D::value_type transfer = D::one();
     bool updated = false;
-    const size_t count =
-        std::min<size_t>(Call.arg_size(), static_cast<size_t>(Callee.arg_size()));
+    const size_t count = std::min<size_t>(
+        Call.arg_size(), static_cast<size_t>(Callee.arg_size()));
     const auto *ParamIt = Callee.arg_begin();
     for (size_t i = 0; i < count; ++i, ++ParamIt) {
       const llvm::Value *Arg = Call.getArgOperand(i);
@@ -668,7 +672,8 @@ public:
         continue;
 
       updated |= assignFromValue(transfer, info.getValueBit(&*ParamIt), Arg);
-      updated |= seedFormalMemoryFromActual(transfer, Call, Callee, &*ParamIt, Arg);
+      updated |=
+          seedFormalMemoryFromActual(transfer, Call, Callee, &*ParamIt, Arg);
     }
     return updated ? transfer : D::one();
   }
@@ -705,14 +710,15 @@ public:
                                    retMayBeNull);
     }
 
-    const size_t count =
-        std::min<size_t>(Call.arg_size(), static_cast<size_t>(Callee.arg_size()));
+    const size_t count = std::min<size_t>(
+        Call.arg_size(), static_cast<size_t>(Callee.arg_size()));
     const auto *ParamIt = Callee.arg_begin();
     for (size_t i = 0; i < count; ++i, ++ParamIt) {
       const llvm::Value *Arg = Call.getArgOperand(i);
       if (!Arg->getType()->isPointerTy() || !ParamIt->getType()->isPointerTy())
         continue;
-      updated |= projectFormalMemoryToActual(transfer, Call, Callee, &*ParamIt, Arg);
+      updated |=
+          projectFormalMemoryToActual(transfer, Call, Callee, &*ParamIt, Arg);
     }
 
     return updated ? transfer : D::one();
@@ -743,11 +749,11 @@ public:
     return getConservativeExternalTransfer(Call);
   }
 
-  D::value_type
-  buildCallTransfer(const llvm::CallBase &Call,
-                    const std::map<const llvm::Function *, D::value_type>
-                        &summaryMap) const {
-    std::vector<llvm::Function *> Callees = Engine::getPossibleCallees(module, Call);
+  D::value_type buildCallTransfer(
+      const llvm::CallBase &Call,
+      const std::map<const llvm::Function *, D::value_type> &summaryMap) const {
+    std::vector<llvm::Function *> Callees =
+        Engine::getPossibleCallees(module, Call);
     D::value_type combined = D::zero();
     bool hasBranch = false;
 
@@ -781,7 +787,8 @@ public:
     return combined;
   }
 
-  FactType applySummary(const D::value_type &summary, const FactType &fact) const {
+  FactType applySummary(const D::value_type &summary,
+                        const FactType &fact) const {
     return D::apply(summary, fact);
   }
 
@@ -793,7 +800,8 @@ public:
     return lhs == rhs;
   }
 
-  const std::unordered_map<const llvm::Value *, unsigned> &getValueBits() const {
+  const std::unordered_map<const llvm::Value *, unsigned> &
+  getValueBits() const {
     return info.getValueBits();
   }
 
@@ -824,9 +832,11 @@ private:
     const llvm::Value *Stripped = V->stripPointerCasts();
     if (llvm::isa<llvm::ConstantPointerNull>(Stripped))
       return NullKind::KnownNull;
-    if (llvm::isa<llvm::UndefValue>(Stripped) || llvm::isa<llvm::PoisonValue>(Stripped))
+    if (llvm::isa<llvm::UndefValue>(Stripped) ||
+        llvm::isa<llvm::PoisonValue>(Stripped))
       return NullKind::Unknown;
-    if (llvm::isa<llvm::Function>(Stripped) || llvm::isa<llvm::GlobalValue>(Stripped) ||
+    if (llvm::isa<llvm::Function>(Stripped) ||
+        llvm::isa<llvm::GlobalValue>(Stripped) ||
         llvm::isa<llvm::AllocaInst>(Stripped))
       return NullKind::KnownNonNull;
     if (auto *C = llvm::dyn_cast<llvm::Constant>(Stripped))
@@ -868,21 +878,22 @@ private:
           module.getDataLayout().getStructLayout(StructTy);
       for (unsigned i = 0; i < StructTy->getNumElements(); ++i) {
         llvm::Type *ElementTy = StructTy->getElementType(i);
-        collectPointerInitializerKinds(getAggregateElementConstant(Init, i, ElementTy),
-                                       ElementTy,
-                                       baseOffset +
-                                           static_cast<int64_t>(Layout->getElementOffset(i)),
-                                       out);
+        collectPointerInitializerKinds(
+            getAggregateElementConstant(Init, i, ElementTy), ElementTy,
+            baseOffset + static_cast<int64_t>(Layout->getElementOffset(i)),
+            out);
       }
       return;
     }
 
     if (auto *ArrayTy = llvm::dyn_cast<llvm::ArrayType>(Ty)) {
       llvm::Type *ElementTy = ArrayTy->getElementType();
-      const uint64_t elementSize = module.getDataLayout().getTypeAllocSize(ElementTy);
+      const uint64_t elementSize =
+          module.getDataLayout().getTypeAllocSize(ElementTy);
       for (uint64_t i = 0; i < ArrayTy->getNumElements(); ++i) {
         collectPointerInitializerKinds(
-            getAggregateElementConstant(Init, static_cast<unsigned>(i), ElementTy),
+            getAggregateElementConstant(Init, static_cast<unsigned>(i),
+                                        ElementTy),
             ElementTy, baseOffset + static_cast<int64_t>(i * elementSize), out);
       }
       return;
@@ -892,7 +903,8 @@ private:
   void seedDerivedMemoryFromRoot(const llvm::Value *Root,
                                  const llvm::Function *Owner = nullptr) {
     for (const auto *Pointer : info.getMemoryPointers()) {
-      const llvm::Function *PointerOwner = NullabilityInfo::getOwningFunction(Pointer);
+      const llvm::Function *PointerOwner =
+          NullabilityInfo::getOwningFunction(Pointer);
       if (Owner && PointerOwner != Owner)
         continue;
       auto relative = info.getRelativeOffsetInfo(Pointer, Root);
@@ -923,7 +935,8 @@ private:
     for (auto &Global : module.globals()) {
       std::unordered_map<int64_t, NullKind> initializerKinds;
       if (Global.hasInitializer()) {
-        collectPointerInitializerKinds(Global.getInitializer(), Global.getValueType(), 0,
+        collectPointerInitializerKinds(Global.getInitializer(),
+                                       Global.getValueType(), 0,
                                        initializerKinds);
       }
 
@@ -1016,8 +1029,9 @@ private:
     return assignFromSources(transfer, destBit, source.bits, source.gen);
   }
 
-  bool assignFromOperands(D::value_type &transfer, unsigned destBit,
-                          std::initializer_list<const llvm::Value *> ops) const {
+  bool
+  assignFromOperands(D::value_type &transfer, unsigned destBit,
+                     std::initializer_list<const llvm::Value *> ops) const {
     std::vector<const llvm::Value *> values(ops.begin(), ops.end());
     return assignFromOperands(transfer, destBit, values);
   }
@@ -1039,7 +1053,8 @@ private:
       NullKind kind = classifyPointerValue(Op);
       if (kind == NullKind::KnownNull)
         gen = true;
-      else if (kind == NullKind::Unknown && bit == NullabilityInfo::invalidBit())
+      else if (kind == NullKind::Unknown &&
+               bit == NullabilityInfo::invalidBit())
         gen = true;
     }
 
@@ -1056,7 +1071,8 @@ private:
     return assignFromSources(transfer, destBit, {}, true);
   }
 
-  bool seedFormalMemoryFromActual(D::value_type &transfer, const llvm::CallBase &Call,
+  bool seedFormalMemoryFromActual(D::value_type &transfer,
+                                  const llvm::CallBase &Call,
                                   const llvm::Function &Callee,
                                   const llvm::Value *Formal,
                                   const llvm::Value *Actual) const {
@@ -1073,7 +1089,8 @@ private:
       if (destBits.empty())
         continue;
 
-      auto srcBits = info.getCallerBitsForRelativeAccess(Actual, relative, Caller);
+      auto srcBits =
+          info.getCallerBitsForRelativeAccess(Actual, relative, Caller);
       for (unsigned destBit : destBits) {
         auto &entry = pending[destBit];
         entry.bits.insert(entry.bits.end(), srcBits.begin(), srcBits.end());
@@ -1086,12 +1103,14 @@ private:
       auto &bits = entry.second.bits;
       std::sort(bits.begin(), bits.end());
       bits.erase(std::unique(bits.begin(), bits.end()), bits.end());
-      updated |= assignFromSources(transfer, entry.first, bits, entry.second.gen);
+      updated |=
+          assignFromSources(transfer, entry.first, bits, entry.second.gen);
     }
     return updated;
   }
 
-  bool projectFormalMemoryToActual(D::value_type &transfer, const llvm::CallBase &Call,
+  bool projectFormalMemoryToActual(D::value_type &transfer,
+                                   const llvm::CallBase &Call,
                                    const llvm::Function &Callee,
                                    const llvm::Value *Formal,
                                    const llvm::Value *Actual) const {
@@ -1113,7 +1132,8 @@ private:
       if (srcBits.empty())
         continue;
 
-      auto dstBits = info.getCallerBitsForRelativeAccess(Actual, relative, Caller);
+      auto dstBits =
+          info.getCallerBitsForRelativeAccess(Actual, relative, Caller);
       if (dstBits.empty())
         continue;
 
@@ -1124,7 +1144,8 @@ private:
 
       for (unsigned dstBit : dstBits) {
         auto &entry = pending[dstBit];
-        entry.srcBits.insert(entry.srcBits.end(), srcBits.begin(), srcBits.end());
+        entry.srcBits.insert(entry.srcBits.end(), srcBits.begin(),
+                             srcBits.end());
         entry.weak = entry.weak || weakUpdate;
       }
     }
@@ -1144,7 +1165,8 @@ private:
     return updated;
   }
 
-  D::value_type getConservativeExternalTransfer(const llvm::CallBase &Call) const {
+  D::value_type
+  getConservativeExternalTransfer(const llvm::CallBase &Call) const {
     D::value_type transfer = D::one();
     if (Call.getType()->isPointerTy())
       assignUnknown(transfer, info.getValueBit(&Call));
@@ -1203,15 +1225,13 @@ bool InterproceduralNullability::Result::isMaybeNullMemory(
          (*fact)[bitIt->second];
 }
 
-InterproceduralNullability::Result
-InterproceduralNullability::run(llvm::Module &M,
-                                lotus::AliasAnalysisWrapper &aliasAnalysis,
-                                const Options &options, bool verbose,
-                                LinearStrategy linearStrategy) {
+InterproceduralNullability::Result InterproceduralNullability::run(
+    llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis,
+    const Options &options, bool verbose, LinearStrategy linearStrategy) {
   NullabilityAnalysis analysis(M, aliasAnalysis, options);
   auto engineResult =
       InterproceduralEngine<TaintTransferDomain, NullabilityAnalysis>::run(
-          M, analysis, verbose, linearStrategy);
+          M, analysis, verbose, linearStrategy, options.call_resolution_mode);
 
   InterproceduralNullability::Result result;
   result.status = engineResult.status;
@@ -1263,8 +1283,11 @@ InterproceduralNullability::run(llvm::Module &M,
 InterproceduralNullability::Result
 InterproceduralNullability::run(llvm::Module &M,
                                 lotus::AliasAnalysisWrapper &aliasAnalysis,
-                                bool verbose, LinearStrategy linearStrategy) {
-  return run(M, aliasAnalysis, Options{}, verbose, linearStrategy);
+                                bool verbose, LinearStrategy linearStrategy,
+                                IndirectCallResolutionMode callResolutionMode) {
+  Options options;
+  options.call_resolution_mode = callResolutionMode;
+  return run(M, aliasAnalysis, options, verbose, linearStrategy);
 }
 
 InterproceduralNullability::Result
@@ -1276,8 +1299,11 @@ InterproceduralNullability::run(llvm::Module &M, const Options &options,
 
 InterproceduralNullability::Result
 InterproceduralNullability::run(llvm::Module &M, bool verbose,
-                                LinearStrategy linearStrategy) {
-  return run(M, Options{}, verbose, linearStrategy);
+                                LinearStrategy linearStrategy,
+                                IndirectCallResolutionMode callResolutionMode) {
+  Options options;
+  options.call_resolution_mode = callResolutionMode;
+  return run(M, options, verbose, linearStrategy);
 }
 
 } // namespace npa

@@ -627,7 +627,8 @@ public:
       appendBitsForValue(bits, &call, spec.access_mode);
       break;
     case TaintSpec::ARG:
-      if (spec.arg_index >= 0 && spec.arg_index < static_cast<int>(call.arg_size()))
+      if (spec.arg_index >= 0 &&
+          spec.arg_index < static_cast<int>(call.arg_size()))
         appendBitsForValue(bits, call.getArgOperand(spec.arg_index),
                            spec.access_mode);
       break;
@@ -773,8 +774,8 @@ public:
         continue;
       mappedToCaller = true;
       const llvm::Value *actual = call.getArgOperand(i);
-      auto mappedBits =
-          info.getCallerBitsForRelativeAccess(actual, relative, call.getFunction());
+      auto mappedBits = info.getCallerBitsForRelativeAccess(actual, relative,
+                                                            call.getFunction());
       out.insert(out.end(), mappedBits.begin(), mappedBits.end());
     }
 
@@ -782,7 +783,8 @@ public:
       const llvm::Value *base = llvm::getUnderlyingObject(
           store.getPointerOperand()->stripPointerCasts());
       if (llvm::isa<llvm::GlobalValue>(base)) {
-        auto directBits = info.getDirectAccessMemBits(store.getPointerOperand());
+        auto directBits =
+            info.getDirectAccessMemBits(store.getPointerOperand());
         out.insert(out.end(), directBits.begin(), directBits.end());
       }
     }
@@ -836,7 +838,8 @@ public:
       for (const auto *callee : possibleCallees) {
         if (!callee || callee->isDeclaration())
           continue;
-        applyCalleePointerStoreEffects(state, *call, *callee, allowStrongUpdate);
+        applyCalleePointerStoreEffects(state, *call, *callee,
+                                       allowStrongUpdate);
       }
       return;
     }
@@ -857,12 +860,14 @@ public:
     if (storedValues.empty())
       return;
 
-    for (unsigned memBit : info.getDirectAccessMemBits(store->getPointerOperand()))
+    for (unsigned memBit :
+         info.getDirectAccessMemBits(store->getPointerOperand()))
       mergePointerValues(state[memBit], storedValues);
   }
 
-  std::vector<unsigned> getReachableMemBitsAt(const llvm::Value *ptr,
-                                              const PointerStoreState &state) const {
+  std::vector<unsigned>
+  getReachableMemBitsAt(const llvm::Value *ptr,
+                        const PointerStoreState &state) const {
     std::vector<unsigned> out;
     std::unordered_set<unsigned> visitedBits;
     std::unordered_set<const llvm::Value *> visitedPtrs;
@@ -1260,9 +1265,11 @@ public:
     return info.buildReachablePointerMemoryBits();
   }
 
-  std::map<BlockKey, std::unordered_map<const llvm::Value *, std::vector<unsigned>>>
+  std::map<BlockKey,
+           std::unordered_map<const llvm::Value *, std::vector<unsigned>>>
   buildFlowSensitiveReachablePointerMemoryBits() const {
-    std::map<BlockKey, std::unordered_map<const llvm::Value *, std::vector<unsigned>>>
+    std::map<BlockKey,
+             std::unordered_map<const llvm::Value *, std::vector<unsigned>>>
         out;
 
     PointerStoreState initialState = buildInitialPointerStoreState();
@@ -1270,7 +1277,8 @@ public:
       if (F.isDeclaration())
         continue;
 
-      std::unordered_map<const llvm::BasicBlock *, PointerStoreState> exitStates;
+      std::unordered_map<const llvm::BasicBlock *, PointerStoreState>
+          exitStates;
       std::queue<const llvm::BasicBlock *> worklist;
       std::unordered_set<const llvm::BasicBlock *> inWorklist;
 
@@ -1855,7 +1863,7 @@ InterproceduralTaint::Result InterproceduralTaint::run(
   }
   auto engineResult =
       InterproceduralEngine<TaintTransferDomain, TaintAnalysis>::run(
-          M, analysis, verbose, strategy);
+          M, analysis, verbose, strategy, options.call_resolution_mode);
 
   InterproceduralTaint::Result res;
   res.status = engineResult.status;
@@ -1916,8 +1924,11 @@ InterproceduralTaint::Result InterproceduralTaint::run(
 InterproceduralTaint::Result
 InterproceduralTaint::run(llvm::Module &M,
                           lotus::AliasAnalysisWrapper &aliasAnalysis,
-                          bool verbose, LinearStrategy linearStrategy) {
-  return run(M, aliasAnalysis, Options{}, verbose, linearStrategy);
+                          bool verbose, LinearStrategy linearStrategy,
+                          IndirectCallResolutionMode callResolutionMode) {
+  Options options;
+  options.call_resolution_mode = callResolutionMode;
+  return run(M, aliasAnalysis, options, verbose, linearStrategy);
 }
 
 } // namespace npa

@@ -59,7 +59,8 @@ ConstantPropagationValue constValue(const llvm::APInt &value) {
 
 } // namespace
 
-bool ConstantPropagationOp::operator<(const ConstantPropagationOp &other) const {
+bool ConstantPropagationOp::operator<(
+    const ConstantPropagationOp &other) const {
   if (kind != other.kind)
     return kind < other.kind;
   if (dest != other.dest)
@@ -81,11 +82,11 @@ bool ConstantPropagationOp::operator<(const ConstantPropagationOp &other) const 
   return inputs < other.inputs;
 }
 
-bool ConstantPropagationOp::operator==(const ConstantPropagationOp &other) const {
+bool ConstantPropagationOp::operator==(
+    const ConstantPropagationOp &other) const {
   return kind == other.kind && dest == other.dest && lhs == other.lhs &&
          rhs == other.rhs && cond == other.cond && opcode == other.opcode &&
-         bitWidth == other.bitWidth &&
-         sourceBitWidth == other.sourceBitWidth &&
+         bitWidth == other.bitWidth && sourceBitWidth == other.sourceBitWidth &&
          apIntEqual(constant, other.constant) && inputs == other.inputs;
 }
 
@@ -105,12 +106,14 @@ public:
         return D::one();
       llvm::APInt condValue(1, 0);
       if (getConstantAPInt(Branch->getCondition(), condValue))
-        return Branch->getSuccessor(condValue.isOne() ? 0 : 1) == &succ ? D::one()
-                                                                         : D::zero();
+        return Branch->getSuccessor(condValue.isOne() ? 0 : 1) == &succ
+                   ? D::one()
+                   : D::zero();
       if (!isTrackedScalar(Branch->getCondition()))
         return D::one();
-      return buildAssign(Branch->getCondition(),
-                         llvm::APInt(1, Branch->getSuccessor(0) == &succ ? 1 : 0));
+      return buildAssign(
+          Branch->getCondition(),
+          llvm::APInt(1, Branch->getSuccessor(0) == &succ ? 1 : 0));
     }
     if (auto *Switch = llvm::dyn_cast<llvm::SwitchInst>(&term)) {
       llvm::APInt condValue(1, 0);
@@ -124,7 +127,8 @@ public:
         return D::one();
       for (const auto &Case : Switch->cases()) {
         if (Case.getCaseSuccessor() == &succ)
-          return buildAssign(Switch->getCondition(), Case.getCaseValue()->getValue());
+          return buildAssign(Switch->getCondition(),
+                             Case.getCaseValue()->getValue());
       }
       if (Switch->getDefaultDest() == &succ && !Switch->cases().empty()) {
         ConstantPropagationOp op;
@@ -152,8 +156,8 @@ public:
         auto *Phi = llvm::dyn_cast<llvm::PHINode>(&Inst);
         if (!Phi)
           break;
-        transfer = D::extend(buildAssign(Phi, Phi->getIncomingValueForBlock(Pred)),
-                             transfer);
+        transfer = D::extend(
+            buildAssign(Phi, Phi->getIncomingValueForBlock(Pred)), transfer);
       }
       E branch = Exp::seq(transfer, Exp::hole(Engine::getBlockSymbol(Pred)));
       result = result ? Exp::ndet(result, branch) : branch;
@@ -180,7 +184,8 @@ public:
          ++i, ++ParamIt) {
       if (!isTrackedScalar(&*ParamIt))
         continue;
-      transfer = D::extend(buildAssign(&*ParamIt, Call.getArgOperand(i)), transfer);
+      transfer =
+          D::extend(buildAssign(&*ParamIt, Call.getArgOperand(i)), transfer);
     }
     return transfer;
   }
@@ -271,7 +276,8 @@ public:
   }
 
 private:
-  FactType overflowFact(const D::value_type &summary, const FactType &fact) const {
+  FactType overflowFact(const D::value_type &summary,
+                        const FactType &fact) const {
     FactType out;
     out.reachable = fact.reachable;
     for (const auto &entry : fact.values)
@@ -280,7 +286,8 @@ private:
     return out;
   }
 
-  D::value_type buildAssign(const llvm::Value *dest, const llvm::APInt &value) const {
+  D::value_type buildAssign(const llvm::Value *dest,
+                            const llvm::APInt &value) const {
     ConstantPropagationOp op;
     op.dest = dest;
     op.kind = ConstantPropagationOp::Kind::AssignConst;
@@ -289,7 +296,8 @@ private:
     return D::singleton(op);
   }
 
-  D::value_type buildAssign(const llvm::Value *dest, const llvm::Value *src) const {
+  D::value_type buildAssign(const llvm::Value *dest,
+                            const llvm::Value *src) const {
     ConstantPropagationOp op;
     op.dest = dest;
     op.bitWidth = getIntegerBitWidth(dest);
@@ -567,8 +575,9 @@ private:
         writeValue(state, op.dest,
                    readValue(state, cond.constant.isZero() ? op.rhs : op.lhs));
       } else {
-        writeValue(state, op.dest,
-                   joinValues(readValue(state, op.lhs), readValue(state, op.rhs)));
+        writeValue(
+            state, op.dest,
+            joinValues(readValue(state, op.lhs), readValue(state, op.rhs)));
       }
       return;
     }
@@ -582,14 +591,14 @@ private:
 } // namespace
 
 InterproceduralConstantPropagation::Result
-InterproceduralConstantPropagation::run(llvm::Module &M, bool verbose,
-                                        LinearStrategy linearStrategy) {
+InterproceduralConstantPropagation::run(
+    llvm::Module &M, bool verbose, LinearStrategy linearStrategy,
+    IndirectCallResolutionMode callResolutionMode) {
   ConstantPropagationAnalysis analysis;
-  auto engineResult =
-      InterproceduralEngine<ConstantPropagationDomain,
-                            ConstantPropagationAnalysis>::run(M, analysis,
-                                                              verbose,
-                                                              linearStrategy);
+  auto engineResult = InterproceduralEngine<
+      ConstantPropagationDomain,
+      ConstantPropagationAnalysis>::run(M, analysis, verbose, linearStrategy,
+                                        callResolutionMode);
 
   Result result;
   result.status = engineResult.status;

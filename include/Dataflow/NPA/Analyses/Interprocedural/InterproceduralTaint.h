@@ -26,6 +26,8 @@ public:
     bool propagate_pointer_value_on_load = false;
     bool fail_on_unsupported_specs = false;
     std::string taint_config_path;
+    IndirectCallResolutionMode call_resolution_mode =
+        IndirectCallResolutionMode::ClosedWorldTypeCompatible;
   };
 
   struct Result {
@@ -64,7 +66,9 @@ public:
                     LinearStrategy linearStrategy = LinearStrategy::Worklist);
   static Result run(llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis,
                     bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    IndirectCallResolutionMode callResolutionMode =
+                        IndirectCallResolutionMode::ClosedWorldTypeCompatible);
 };
 
 } // namespace npa

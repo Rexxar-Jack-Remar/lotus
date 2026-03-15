@@ -123,21 +123,24 @@ public:
         updated = true;
       }
     } else if (auto *Store = llvm::dyn_cast<llvm::StoreInst>(&I)) {
-      updated |= assignFromValue(transfer, info.getMemoryBit(Store->getPointerOperand()),
+      updated |= assignFromValue(transfer,
+                                 info.getMemoryBit(Store->getPointerOperand()),
                                  Store->getValueOperand());
     } else if (auto *Load = llvm::dyn_cast<llvm::LoadInst>(&I)) {
       unsigned srcBit = info.getMemoryBit(Load->getPointerOperand());
       unsigned dstBit = info.getValueBit(Load);
       updated |= assignFromSources(transfer, dstBit, {srcBit}, false);
     } else if (auto *Cast = llvm::dyn_cast<llvm::CastInst>(&I)) {
-      updated |= assignFromOperands(transfer, info.getValueBit(Cast), {Cast->getOperand(0)});
+      updated |= assignFromOperands(transfer, info.getValueBit(Cast),
+                                    {Cast->getOperand(0)});
     } else if (auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(&I)) {
       updated |= assignFromOperands(transfer, info.getValueBit(GEP),
                                     {GEP->getPointerOperand()});
     } else if (auto *Select = llvm::dyn_cast<llvm::SelectInst>(&I)) {
-      updated |= assignFromOperands(transfer, info.getValueBit(Select),
-                                    {Select->getCondition(), Select->getTrueValue(),
-                                     Select->getFalseValue()});
+      updated |=
+          assignFromOperands(transfer, info.getValueBit(Select),
+                             {Select->getCondition(), Select->getTrueValue(),
+                              Select->getFalseValue()});
     } else if (auto *Phi = llvm::dyn_cast<llvm::PHINode>(&I)) {
       std::vector<const llvm::Value *> incoming;
       incoming.reserve(Phi->getNumIncomingValues());
@@ -148,8 +151,9 @@ public:
       updated |= assignFromOperands(transfer, info.getValueBit(Cmp),
                                     {Cmp->getOperand(0), Cmp->getOperand(1)});
     } else if (auto *BinOp = llvm::dyn_cast<llvm::BinaryOperator>(&I)) {
-      updated |= assignFromOperands(transfer, info.getValueBit(BinOp),
-                                    {BinOp->getOperand(0), BinOp->getOperand(1)});
+      updated |=
+          assignFromOperands(transfer, info.getValueBit(BinOp),
+                             {BinOp->getOperand(0), BinOp->getOperand(1)});
     } else if (!I.getType()->isVoidTy()) {
       unsigned dstBit = info.getValueBit(&I);
       if (dstBit != UninitializedInfo::invalidBit()) {
@@ -166,12 +170,14 @@ public:
   D::value_type getCallEntryTransfer(const llvm::CallBase &Call,
                                      const llvm::Function &Callee) {
     D::value_type transfer = D::one();
-    const size_t count =
-        std::min<size_t>(Call.arg_size(), static_cast<size_t>(Callee.arg_size()));
+    const size_t count = std::min<size_t>(
+        Call.arg_size(), static_cast<size_t>(Callee.arg_size()));
     const auto *ParamIt = Callee.arg_begin();
     for (size_t i = 0; i < count; ++i, ++ParamIt) {
-      assignFromValue(transfer, info.getValueBit(&*ParamIt), Call.getArgOperand(i));
-      assignPointerMemory(transfer, info.getMemoryBit(&*ParamIt), Call.getArgOperand(i));
+      assignFromValue(transfer, info.getValueBit(&*ParamIt),
+                      Call.getArgOperand(i));
+      assignPointerMemory(transfer, info.getMemoryBit(&*ParamIt),
+                          Call.getArgOperand(i));
     }
     return transfer;
   }
@@ -197,11 +203,12 @@ public:
       assignFromSources(transfer, info.getValueBit(&Call), retBits, gen);
     }
 
-    const size_t count =
-        std::min<size_t>(Call.arg_size(), static_cast<size_t>(Callee.arg_size()));
+    const size_t count = std::min<size_t>(
+        Call.arg_size(), static_cast<size_t>(Callee.arg_size()));
     const auto *ParamIt = Callee.arg_begin();
     for (size_t i = 0; i < count; ++i, ++ParamIt)
-      assignPointerMemory(transfer, info.getMemoryBit(Call.getArgOperand(i)), &*ParamIt);
+      assignPointerMemory(transfer, info.getMemoryBit(Call.getArgOperand(i)),
+                          &*ParamIt);
 
     return transfer;
   }
@@ -217,9 +224,13 @@ public:
     return D::apply(summary, fact);
   }
 
-  FactType joinFacts(const FactType &lhs, const FactType &rhs) { return lhs | rhs; }
+  FactType joinFacts(const FactType &lhs, const FactType &rhs) {
+    return lhs | rhs;
+  }
 
-  bool factsEqual(const FactType &lhs, const FactType &rhs) { return lhs == rhs; }
+  bool factsEqual(const FactType &lhs, const FactType &rhs) {
+    return lhs == rhs;
+  }
 
 private:
   UninitializedInfo info;
@@ -247,7 +258,8 @@ private:
   }
 
   bool assignFromSources(D::value_type &transfer, unsigned destBit,
-                         const std::vector<unsigned> &sourceBits, bool gen) const {
+                         const std::vector<unsigned> &sourceBits,
+                         bool gen) const {
     if (destBit == UninitializedInfo::invalidBit())
       return false;
     clearDestination(transfer, destBit);
@@ -279,8 +291,9 @@ private:
     return assignFromSources(transfer, destBit, bits, false);
   }
 
-  bool assignFromOperands(D::value_type &transfer, unsigned destBit,
-                          std::initializer_list<const llvm::Value *> ops) const {
+  bool
+  assignFromOperands(D::value_type &transfer, unsigned destBit,
+                     std::initializer_list<const llvm::Value *> ops) const {
     std::vector<unsigned> bits;
     bool gen = false;
     for (const llvm::Value *Op : ops) {
@@ -311,14 +324,15 @@ private:
 } // namespace
 
 InterproceduralMaybeUninitialized::Result
-InterproceduralMaybeUninitialized::run(llvm::Module &M, bool verbose,
-                                       LinearStrategy linearStrategy) {
+InterproceduralMaybeUninitialized::run(
+    llvm::Module &M, bool verbose, LinearStrategy linearStrategy,
+    IndirectCallResolutionMode callResolutionMode) {
   MaybeUninitializedAnalysis analysis(M);
-  auto engineResult =
-      InterproceduralEngine<TaintTransferDomain,
-                            MaybeUninitializedAnalysis>::run(M, analysis,
-                                                             verbose,
-                                                             linearStrategy);
+  auto engineResult = InterproceduralEngine<
+      TaintTransferDomain, MaybeUninitializedAnalysis>::run(M, analysis,
+                                                            verbose,
+                                                            linearStrategy,
+                                                            callResolutionMode);
 
   InterproceduralMaybeUninitialized::Result result;
   result.status = engineResult.status;

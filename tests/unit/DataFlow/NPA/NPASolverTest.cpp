@@ -1,10 +1,10 @@
-#include "Dataflow/NPA/NPA.h"
 #include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
 #include "Dataflow/NPA/Domains/SummaryTransformerDomain.h"
-
-#include <gtest/gtest.h>
+#include "Dataflow/NPA/NPA.h"
 
 #include <unordered_map>
+
+#include <gtest/gtest.h>
 
 namespace {
 
@@ -20,8 +20,12 @@ struct BoolSemiring {
   static bool equal(value_type a, value_type b) { return a == b; }
   static value_type combine(value_type a, value_type b) { return a || b; }
   static value_type extend(value_type a, value_type b) { return a && b; }
-  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
-  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type extend_lin(value_type a, value_type b) {
+    return extend(a, b);
+  }
+  static value_type ndetCombine(value_type a, value_type b) {
+    return combine(a, b);
+  }
   static value_type condCombine(test_type phi, value_type t, value_type e) {
     return phi ? t : e;
   }
@@ -32,7 +36,8 @@ template <class D>
 std::unordered_map<npa::Symbol, npa::DomVal<D>>
 toMap(const std::vector<std::pair<npa::Symbol, npa::DomVal<D>>> &pairs) {
   std::unordered_map<npa::Symbol, npa::DomVal<D>> out;
-  for (const auto &p : pairs) out.emplace(p.first, p.second);
+  for (const auto &p : pairs)
+    out.emplace(p.first, p.second);
   return out;
 }
 
@@ -58,7 +63,8 @@ TEST(NPA, HoleCanReferenceOtherEquationVariable) {
   //
   // This exercises:
   // - Exp0::Hole lookup against ν in I0 (Kleene/Newton evaluation)
-  // - Exp1::Hole lookup against the linear-solver environment in I1 (Newton step)
+  // - Exp1::Hole lookup against the linear-solver environment in I1 (Newton
+  // step)
   std::vector<std::pair<npa::Symbol, E>> eqns;
   eqns.emplace_back("x", Exp::hole("y"));
   eqns.emplace_back("y", Exp::term(D::one()));
@@ -92,6 +98,10 @@ TEST(NPA, SolverReportsWhenOuterIterationCapReturnsApproximation) {
   EXPECT_TRUE(cappedMap.at("y"));
   EXPECT_FALSE(capped.second.converged);
   EXPECT_TRUE(capped.second.hit_limit);
+  EXPECT_EQ(capped.second.equation_count, 2);
+  EXPECT_EQ(capped.second.requested_max_iters, 1);
+  EXPECT_EQ(capped.second.effective_max_iters, 1);
+  EXPECT_EQ(capped.second.linear_strategy, npa::LinearStrategy::Worklist);
 }
 
 TEST(NPA, NewtonInitMatchesFOfBottomAndApproximantsAreMonotone) {
@@ -222,13 +232,18 @@ struct BadDeltaSemiring {
   static bool equal(value_type a, value_type b) { return a == b; }
   static value_type combine(value_type a, value_type b) { return a + b; }
   static value_type extend(value_type a, value_type b) { return a * b; }
-  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
-  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type extend_lin(value_type a, value_type b) {
+    return extend(a, b);
+  }
+  static value_type ndetCombine(value_type a, value_type b) {
+    return combine(a, b);
+  }
   static value_type condCombine(test_type phi, value_type t, value_type e) {
     return phi ? t : e;
   }
 
-  // Intentionally invalid: combine(nu, subtract(f(nu), nu)) != f(nu) in general.
+  // Intentionally invalid: combine(nu, subtract(f(nu), nu)) != f(nu) in
+  // general.
   static value_type subtract(value_type, value_type) { return 0; }
 };
 
@@ -242,8 +257,12 @@ struct ExactDeltaSemiring {
   static bool equal(value_type a, value_type b) { return a == b; }
   static value_type combine(value_type a, value_type b) { return a + b; }
   static value_type extend(value_type a, value_type b) { return a * b; }
-  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
-  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type extend_lin(value_type a, value_type b) {
+    return extend(a, b);
+  }
+  static value_type ndetCombine(value_type a, value_type b) {
+    return combine(a, b);
+  }
   static value_type condCombine(test_type phi, value_type t, value_type e) {
     return phi ? t : e;
   }
@@ -267,8 +286,12 @@ struct ApproxEqualityBoolSemiring {
   }
   static value_type combine(value_type a, value_type b) { return a || b; }
   static value_type extend(value_type a, value_type b) { return a && b; }
-  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
-  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type extend_lin(value_type a, value_type b) {
+    return extend(a, b);
+  }
+  static value_type ndetCombine(value_type a, value_type b) {
+    return combine(a, b);
+  }
   static value_type condCombine(test_type phi, value_type t, value_type e) {
     return phi ? t : e;
   }
@@ -291,8 +314,12 @@ struct LimitedLinearBoolSemiring {
   static bool equal(value_type a, value_type b) { return a == b; }
   static value_type combine(value_type a, value_type b) { return a || b; }
   static value_type extend(value_type a, value_type b) { return a && b; }
-  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
-  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type extend_lin(value_type a, value_type b) {
+    return extend(a, b);
+  }
+  static value_type ndetCombine(value_type a, value_type b) {
+    return combine(a, b);
+  }
   static value_type condCombine(test_type phi, value_type t, value_type e) {
     return phi ? t : e;
   }
@@ -310,8 +337,34 @@ struct LimitedFixpointBoolSemiring {
   static bool equal(value_type a, value_type b) { return a == b; }
   static value_type combine(value_type a, value_type b) { return a || b; }
   static value_type extend(value_type a, value_type b) { return a && b; }
-  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
-  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type extend_lin(value_type a, value_type b) {
+    return extend(a, b);
+  }
+  static value_type ndetCombine(value_type a, value_type b) {
+    return combine(a, b);
+  }
+  static value_type condCombine(test_type phi, value_type t, value_type e) {
+    return phi ? t : e;
+  }
+  static value_type subtract(value_type a, value_type b) { return a && !b; }
+};
+
+struct ContractViolationSemiring {
+  using value_type = bool;
+  using test_type = bool;
+  static constexpr bool idempotent = true;
+
+  static value_type zero() { return false; }
+  static value_type one() { return true; }
+  static bool equal(value_type, value_type) { return false; }
+  static value_type combine(value_type a, value_type b) { return a || b; }
+  static value_type extend(value_type a, value_type b) { return a && b; }
+  static value_type extend_lin(value_type a, value_type b) {
+    return extend(a, b);
+  }
+  static value_type ndetCombine(value_type a, value_type b) {
+    return combine(a, b);
+  }
   static value_type condCombine(test_type phi, value_type t, value_type e) {
     return phi ? t : e;
   }
@@ -329,8 +382,12 @@ struct UnsafeProjectedBoolSemiring {
   static bool equal(value_type a, value_type b) { return a == b; }
   static value_type combine(value_type a, value_type b) { return a || b; }
   static value_type extend(value_type a, value_type b) { return a && b; }
-  static value_type extend_lin(value_type a, value_type b) { return extend(a, b); }
-  static value_type ndetCombine(value_type a, value_type b) { return combine(a, b); }
+  static value_type extend_lin(value_type a, value_type b) {
+    return extend(a, b);
+  }
+  static value_type ndetCombine(value_type a, value_type b) {
+    return combine(a, b);
+  }
   static value_type condCombine(test_type phi, value_type t, value_type e) {
     return phi ? t : e;
   }
@@ -354,18 +411,19 @@ template <> struct TensorSemiringTraits<BadDeltaSemiring> {
   static bool available() { return false; }
   static bool paper_admissible() { return false; }
 
-  static tensor_domain::value_type right_constant(
-      const BadDeltaSemiring::value_type &v) {
+  static tensor_domain::value_type
+  right_constant(const BadDeltaSemiring::value_type &v) {
     return {BadDeltaSemiring::one(), v};
   }
 
-  static tensor_domain::value_type left_constant(
-      const BadDeltaSemiring::value_type &v) {
+  static tensor_domain::value_type
+  left_constant(const BadDeltaSemiring::value_type &v) {
     return {v, BadDeltaSemiring::one()};
   }
 
-  static tensor_domain::value_type couple(const BadDeltaSemiring::value_type &lhs,
-                                          const BadDeltaSemiring::value_type &rhs) {
+  static tensor_domain::value_type
+  couple(const BadDeltaSemiring::value_type &lhs,
+         const BadDeltaSemiring::value_type &rhs) {
     return {lhs, rhs};
   }
 
@@ -455,10 +513,29 @@ TEST(NPA, AutomaticNIterationBoundFallsBackWhenEqualityIsApproximate) {
   auto solved = toMap<D>(result.first);
   EXPECT_TRUE(result.second.converged);
   EXPECT_FALSE(result.second.hit_limit);
+  EXPECT_TRUE(result.second.used_approx_equal);
+  EXPECT_TRUE(result.second.used_auto_n_cap);
+  EXPECT_TRUE(result.second.retried_without_auto_n_cap);
   EXPECT_TRUE(solved.at("x"));
   EXPECT_GE(D::getApproxCounter(), 4);
   EXPECT_NE(stderrOutput.find("automatic n-iteration bound was insufficient"),
             std::string::npos);
+}
+
+TEST(NPA, SolverCanReportDomainContractCheckFailures) {
+  using D = ContractViolationSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  std::vector<std::pair<npa::Symbol, E>> eqns;
+  eqns.emplace_back("x", Exp::term(D::one()));
+
+  auto result =
+      npa::NewtonSolver<D>::solve(eqns, false, 1, npa::LinearStrategy::Worklist,
+                                  npa::DomainContractMode::BasicChecks);
+
+  EXPECT_TRUE(result.second.domain_contract_checks_run);
+  EXPECT_TRUE(result.second.domain_contract_checks_failed);
 }
 
 TEST(NPA, LinearStepLimitMarksNewtonResultAsApproximate) {
@@ -470,8 +547,8 @@ TEST(NPA, LinearStepLimitMarksNewtonResultAsApproximate) {
   eqns.emplace_back("x", Exp::hole("y"));
   eqns.emplace_back("y", Exp::term(D::one()));
 
-  auto result =
-      npa::NewtonSolver<D>::solve(eqns, false, 1, npa::LinearStrategy::Worklist);
+  auto result = npa::NewtonSolver<D>::solve(eqns, false, 1,
+                                            npa::LinearStrategy::Worklist);
 
   EXPECT_FALSE(result.second.converged);
   EXPECT_TRUE(result.second.hit_limit);

@@ -65,9 +65,15 @@ template <class D, class ITER> struct Solver {
   using Eqn = std::pair<Symbol, E0<D>>;
   static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
   solve(const std::vector<Eqn> &eqns, bool verbose = false, int max = -1,
-        LinearStrategy linStrat = LinearStrategy::Worklist) {
+        LinearStrategy linStrat = LinearStrategy::Worklist,
+        DomainContractMode contractMode = DomainContractMode::Off) {
     NPA_REQUIRE_DOMAIN(D);
     npa_reset_limit_hit();
+    bool contractOk = true;
+    const bool checksRun = contractMode == DomainContractMode::BasicChecks;
+    if (checksRun) {
+      contractOk = run_basic_domain_contract_checks<D>(verbose);
+    }
     std::vector<std::pair<Symbol, V>> cur = ITER::init(eqns);
     auto tic = std::chrono::high_resolution_clock::now();
     int it = 0;
@@ -101,6 +107,13 @@ template <class D, class ITER> struct Solver {
     st.time = std::chrono::duration<double>(toc - tic).count();
     st.hit_limit = npa_limit_hit();
     st.converged = converged && !st.hit_limit;
+    st.equation_count = static_cast<int>(eqns.size());
+    st.requested_max_iters = max;
+    st.effective_max_iters = max;
+    st.linear_strategy = linStrat;
+    st.used_approx_equal = DomainHasApproxEqual<D>::value;
+    st.domain_contract_checks_run = checksRun;
+    st.domain_contract_checks_failed = checksRun && !contractOk;
     return {cur, st};
   }
 };
@@ -249,7 +262,8 @@ template <class D> struct NewtonSolver {
   using Eqn = std::pair<Symbol, E0<D>>;
   static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
   solve(const std::vector<Eqn> &eqns, bool verbose = false, int max = -1,
-        LinearStrategy linStrat = LinearStrategy::Worklist) {
+        LinearStrategy linStrat = LinearStrategy::Worklist,
+        DomainContractMode contractMode = DomainContractMode::Off) {
     // JACM (Esparza et al.) shows: for idempotent + commutative semirings,
     // Newton terminates after at most n iterations for a system of n equations.
     // We only apply this bound when the domain explicitly declares
@@ -261,13 +275,18 @@ template <class D> struct NewtonSolver {
     if (auto_cap) {
       effective_max = static_cast<int>(eqns.size());
     }
-    auto res =
-        Solver<D, NewtonIter<D>>::solve(eqns, verbose, effective_max, linStrat);
+    auto res = Solver<D, NewtonIter<D>>::solve(eqns, verbose, effective_max,
+                                               linStrat, contractMode);
+    res.second.used_auto_n_cap = auto_cap;
+    res.second.effective_max_iters = effective_max;
     if (auto_cap && !res.second.converged) {
       if (verbose)
         std::cerr << "[conv] automatic n-iteration bound was insufficient; "
                      "continuing without the cap\n";
-      res = Solver<D, NewtonIter<D>>::solve(eqns, verbose, -1, linStrat);
+      res = Solver<D, NewtonIter<D>>::solve(eqns, verbose, -1, linStrat,
+                                            contractMode);
+      res.second.used_auto_n_cap = true;
+      res.second.retried_without_auto_n_cap = true;
     }
     return res;
   }

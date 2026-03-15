@@ -160,7 +160,8 @@ public:
     return transfer;
   }
 
-  FactType applySummary(const D::value_type &summary, const FactType &fact) const {
+  FactType applySummary(const D::value_type &summary,
+                        const FactType &fact) const {
     return D::apply(summary, fact);
   }
 
@@ -188,14 +189,14 @@ private:
 
 } // namespace
 
-InterproceduralLiveVariables::Result
-InterproceduralLiveVariables::run(llvm::Module &M, bool verbose,
-                                  LinearStrategy linearStrategy) {
+InterproceduralLiveVariables::Result InterproceduralLiveVariables::run(
+    llvm::Module &M, bool verbose, LinearStrategy linearStrategy,
+    IndirectCallResolutionMode callResolutionMode) {
   InterproceduralLiveAnalysis analysis(M);
-  auto engineResult =
-      BackwardInterproceduralEngine<TaintTransferDomain,
-                                    InterproceduralLiveAnalysis>::run(
-          M, analysis, verbose, linearStrategy);
+  auto engineResult = BackwardInterproceduralEngine<
+      TaintTransferDomain,
+      InterproceduralLiveAnalysis>::run(M, analysis, verbose, linearStrategy,
+                                        callResolutionMode);
 
   Result result;
   result.status = engineResult.status;

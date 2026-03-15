@@ -92,8 +92,6 @@ llvm::APInt orderedMax(const llvm::APInt &lhs, const llvm::APInt &rhs,
   return orderedLess(rhs, lhs, ordering) ? lhs : rhs;
 }
 
-bool intervalIsExact(const Interval &I) { return I.isExact(); }
-
 Interval joinIntervals(const Interval &lhs, const Interval &rhs) {
   if (lhs.bottom)
     return rhs;
@@ -191,7 +189,10 @@ Interval refineDefaultSwitch(Interval current,
   if (current.isExact()) {
     for (const auto &value : excluded)
       if (apIntEqual(current.lower, value))
-        return Interval{true, false, false, current.ordering,
+        return Interval{true,
+                        false,
+                        false,
+                        current.ordering,
                         llvm::APInt(intervalBitWidth(current), 0),
                         llvm::APInt(intervalBitWidth(current), 0)};
     return current;
@@ -287,9 +288,9 @@ bool IntervalOp::operator<(const IntervalOp &other) const {
 bool IntervalOp::operator==(const IntervalOp &other) const {
   return kind == other.kind && dest == other.dest && lhs == other.lhs &&
          rhs == other.rhs && cond == other.cond && opcode == other.opcode &&
-         bitWidth == other.bitWidth &&
-         sourceBitWidth == other.sourceBitWidth && ordering == other.ordering &&
-         apIntEqual(constant, other.constant) && inputs == other.inputs;
+         bitWidth == other.bitWidth && sourceBitWidth == other.sourceBitWidth &&
+         ordering == other.ordering && apIntEqual(constant, other.constant) &&
+         inputs == other.inputs;
 }
 
 namespace {
@@ -308,13 +309,15 @@ public:
         return D::one();
       llvm::APInt condValue(1, 0);
       if (getConstantAPInt(Branch->getCondition(), condValue))
-        return Branch->getSuccessor(condValue.isOne() ? 0 : 1) == &succ ? D::one()
-                                                                         : D::zero();
+        return Branch->getSuccessor(condValue.isOne() ? 0 : 1) == &succ
+                   ? D::one()
+                   : D::zero();
       if (!isTrackedScalar(Branch->getCondition()))
         return D::one();
-      return buildAssign(Branch->getCondition(),
-                         llvm::APInt(1, Branch->getSuccessor(0) == &succ ? 1 : 0),
-                         IntervalOrdering::Signed);
+      return buildAssign(
+          Branch->getCondition(),
+          llvm::APInt(1, Branch->getSuccessor(0) == &succ ? 1 : 0),
+          IntervalOrdering::Signed);
     }
     if (auto *Switch = llvm::dyn_cast<llvm::SwitchInst>(&term)) {
       llvm::APInt condValue(1, 0);
@@ -328,7 +331,8 @@ public:
         return D::one();
       for (const auto &Case : Switch->cases()) {
         if (Case.getCaseSuccessor() == &succ)
-          return buildAssign(Switch->getCondition(), Case.getCaseValue()->getValue(),
+          return buildAssign(Switch->getCondition(),
+                             Case.getCaseValue()->getValue(),
                              IntervalOrdering::Signed);
       }
       if (Switch->getDefaultDest() == &succ && !Switch->cases().empty()) {
@@ -358,8 +362,8 @@ public:
         auto *Phi = llvm::dyn_cast<llvm::PHINode>(&Inst);
         if (!Phi)
           break;
-        transfer = D::extend(buildAssign(Phi, Phi->getIncomingValueForBlock(Pred)),
-                             transfer);
+        transfer = D::extend(
+            buildAssign(Phi, Phi->getIncomingValueForBlock(Pred)), transfer);
       }
       E branch = Exp::seq(transfer, Exp::hole(Engine::getBlockSymbol(Pred)));
       result = result ? Exp::ndet(result, branch) : branch;
@@ -386,7 +390,8 @@ public:
          ++i, ++ParamIt) {
       if (!isTrackedScalar(&*ParamIt))
         continue;
-      transfer = D::extend(buildAssign(&*ParamIt, Call.getArgOperand(i)), transfer);
+      transfer =
+          D::extend(buildAssign(&*ParamIt, Call.getArgOperand(i)), transfer);
     }
     return transfer;
   }
@@ -501,7 +506,8 @@ public:
   }
 
 private:
-  FactType overflowFact(const D::value_type &summary, const FactType &fact) const {
+  FactType overflowFact(const D::value_type &summary,
+                        const FactType &fact) const {
     FactType out;
     out.reachable = fact.reachable;
     for (const auto &entry : fact.values)
@@ -510,8 +516,9 @@ private:
     return out;
   }
 
-  D::value_type buildAssign(const llvm::Value *dest, const llvm::APInt &value,
-                            IntervalOrdering ordering = IntervalOrdering::Signed) const {
+  D::value_type
+  buildAssign(const llvm::Value *dest, const llvm::APInt &value,
+              IntervalOrdering ordering = IntervalOrdering::Signed) const {
     IntervalOp op;
     op.dest = dest;
     op.kind = IntervalOp::Kind::AssignConst;
@@ -521,7 +528,8 @@ private:
     return D::singleton(op);
   }
 
-  D::value_type buildAssign(const llvm::Value *dest, const llvm::Value *src) const {
+  D::value_type buildAssign(const llvm::Value *dest,
+                            const llvm::Value *src) const {
     IntervalOp op;
     op.dest = dest;
     op.bitWidth = getIntegerBitWidth(dest);
@@ -707,7 +715,8 @@ private:
                        Interval rhs) const {
     if (lhs.isExact() && rhs.isExact()) {
       bool result = llvm::ICmpInst::compare(
-          lhs.lower, rhs.lower, static_cast<llvm::CmpInst::Predicate>(predicate));
+          lhs.lower, rhs.lower,
+          static_cast<llvm::CmpInst::Predicate>(predicate));
       return pointInterval(llvm::APInt(1, result ? 1 : 0));
     }
 
@@ -812,13 +821,21 @@ private:
     case llvm::Instruction::SExt:
       if (src.ordering != IntervalOrdering::Signed)
         return topInterval(op.bitWidth);
-      return Interval{false, true, true, IntervalOrdering::Signed,
-                      src.lower.sext(op.bitWidth), src.upper.sext(op.bitWidth)};
+      return Interval{false,
+                      true,
+                      true,
+                      IntervalOrdering::Signed,
+                      src.lower.sext(op.bitWidth),
+                      src.upper.sext(op.bitWidth)};
     case llvm::Instruction::ZExt:
       if (src.ordering != IntervalOrdering::Unsigned)
         return topInterval(op.bitWidth, IntervalOrdering::Unsigned);
-      return Interval{false, true, true, IntervalOrdering::Unsigned,
-                      src.lower.zext(op.bitWidth), src.upper.zext(op.bitWidth)};
+      return Interval{false,
+                      true,
+                      true,
+                      IntervalOrdering::Unsigned,
+                      src.lower.zext(op.bitWidth),
+                      src.upper.zext(op.bitWidth)};
     case llvm::Instruction::Trunc:
       return topInterval(op.bitWidth);
     default:
@@ -861,12 +878,13 @@ private:
     case IntervalOp::Kind::Select: {
       Interval cond = readValue(state, op.cond);
       if (isDefinitelyZero(cond) || isDefinitelyNonZero(cond)) {
-        writeValue(state, op.dest,
-                   readValue(state, isDefinitelyNonZero(cond) ? op.lhs : op.rhs));
+        writeValue(
+            state, op.dest,
+            readValue(state, isDefinitelyNonZero(cond) ? op.lhs : op.rhs));
       } else {
-        writeValue(state, op.dest,
-                   joinIntervals(readValue(state, op.lhs),
-                                 readValue(state, op.rhs)));
+        writeValue(
+            state, op.dest,
+            joinIntervals(readValue(state, op.lhs), readValue(state, op.rhs)));
       }
       return;
     }
@@ -894,14 +912,13 @@ private:
 
 } // namespace
 
-InterproceduralIntervalAnalysis::Result
-InterproceduralIntervalAnalysis::run(llvm::Module &M, bool verbose,
-                                     LinearStrategy linearStrategy) {
+InterproceduralIntervalAnalysis::Result InterproceduralIntervalAnalysis::run(
+    llvm::Module &M, bool verbose, LinearStrategy linearStrategy,
+    IndirectCallResolutionMode callResolutionMode) {
   IntervalAnalysis analysis;
   auto engineResult =
-      InterproceduralEngine<IntervalDomain, IntervalAnalysis>::run(M, analysis,
-                                                                   verbose,
-                                                                   linearStrategy);
+      InterproceduralEngine<IntervalDomain, IntervalAnalysis>::run(
+          M, analysis, verbose, linearStrategy, callResolutionMode);
 
   Result result;
   result.status = engineResult.status;

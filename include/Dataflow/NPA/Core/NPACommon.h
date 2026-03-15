@@ -54,6 +54,17 @@ enum class LinearStrategy {
   TensorProduct
 };
 
+enum class DomainContractMode {
+  Off,
+  BasicChecks,
+};
+
+enum class IndirectCallResolutionMode {
+  ClosedWorldTypeCompatible,
+  DeclaredOnlyFallback,
+  CustomResolverRequired,
+};
+
 template <class T> inline void hash_combine(std::size_t &h, const T &v) {
   h ^= std::hash<T>{}(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
 }
@@ -63,6 +74,15 @@ struct Stat {
   int iters{};
   bool converged = true;
   bool hit_limit = false;
+  int equation_count = 0;
+  int requested_max_iters = -1;
+  int effective_max_iters = -1;
+  LinearStrategy linear_strategy = LinearStrategy::Worklist;
+  bool used_approx_equal = false;
+  bool used_auto_n_cap = false;
+  bool retried_without_auto_n_cap = false;
+  bool domain_contract_checks_run = false;
+  bool domain_contract_checks_failed = false;
 };
 
 struct AnalysisStatus {
@@ -75,6 +95,13 @@ struct AnalysisStatus {
   bool approximated = false;
   bool overall_converged = true;
   bool overall_hit_limit = false;
+  IndirectCallResolutionMode call_resolution_mode =
+      IndirectCallResolutionMode::ClosedWorldTypeCompatible;
+  long indirect_calls_seen = 0;
+  long unresolved_indirect_calls = 0;
+  long fallback_call_edges = 0;
+  bool requires_external_callee_resolver = false;
+  bool open_world_unsound_mode = true;
 };
 
 /**********************************************************************
@@ -365,6 +392,34 @@ template <class D>
 inline bool valid_newton_delta(const DomVal<D> &f_nu, const DomVal<D> &nu,
                                const DomVal<D> &delta) {
   return domain_exact_equal<D>(D::combine(nu, delta), f_nu);
+}
+
+template <class D>
+inline bool run_basic_domain_contract_checks(bool verbose = false) {
+  bool ok = true;
+  if (!D::equal(D::zero(), D::zero())) {
+    ok = false;
+    if (verbose)
+      std::cerr << "[npa-contract] zero() must equal itself\n";
+  }
+  if (!D::equal(D::one(), D::one())) {
+    ok = false;
+    if (verbose)
+      std::cerr << "[npa-contract] one() must equal itself\n";
+  }
+  if (D::idempotent) {
+    if (!D::equal(D::combine(D::zero(), D::zero()), D::zero())) {
+      ok = false;
+      if (verbose)
+        std::cerr << "[npa-contract] idempotent domain: zero⊕zero != zero\n";
+    }
+    if (!D::equal(D::combine(D::one(), D::one()), D::one())) {
+      ok = false;
+      if (verbose)
+        std::cerr << "[npa-contract] idempotent domain: one⊕one != one\n";
+    }
+  }
+  return ok;
 }
 
 class InvalidNewtonDeltaError : public std::logic_error {

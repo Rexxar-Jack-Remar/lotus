@@ -44,7 +44,9 @@ public:
   };
 
   static Result run(llvm::Module &M, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    IndirectCallResolutionMode callResolutionMode =
+                        IndirectCallResolutionMode::ClosedWorldTypeCompatible);
 };
 
 AffineState

@@ -21,6 +21,8 @@ public:
   struct Options {
     bool seed_entry_pointer_args = true;
     bool treat_unknown_calls_as_maybe_null = true;
+    IndirectCallResolutionMode call_resolution_mode =
+        IndirectCallResolutionMode::ClosedWorldTypeCompatible;
   };
 
   struct Result {
@@ -44,12 +46,16 @@ public:
                     LinearStrategy linearStrategy = LinearStrategy::Worklist);
   static Result run(llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis,
                     bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    IndirectCallResolutionMode callResolutionMode =
+                        IndirectCallResolutionMode::ClosedWorldTypeCompatible);
   static Result run(llvm::Module &M, const Options &options,
                     bool verbose = false,
                     LinearStrategy linearStrategy = LinearStrategy::Worklist);
   static Result run(llvm::Module &M, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    IndirectCallResolutionMode callResolutionMode =
+                        IndirectCallResolutionMode::ClosedWorldTypeCompatible);
 };
 
 } // namespace npa

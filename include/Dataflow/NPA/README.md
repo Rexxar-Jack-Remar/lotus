@@ -52,6 +52,29 @@ For numeric semirings where exact equality is too strong, a domain may optionall
 - The interprocedural engines use a closed-world, whole-module assumption for indirect calls: unknown call targets are approximated by type-compatible defined functions in the current LLVM module unless a stronger resolver is supplied outside NPA.
 - Non-idempotent Newton support exists at the core API level through `subtract` / `choose_delta`, but the current in-tree analyses are still centered on idempotent domains.
 
+## Soundness modes matrix
+
+| Axis | Mode / Hook | Meaning | Status signal |
+|---|---|---|---|
+| Equality | `equal` (default) | Exact semiring equality for convergence checks | `Stat::used_approx_equal == false` |
+| Equality | `approx_equal` (optional) | Pragmatic convergence hook for numeric domains; weakens theorem-exact equality reasoning | `Stat::used_approx_equal == true` |
+| Outer bound | explicit `max` in solver API | User-requested outer cap on solver rounds | `Stat::requested_max_iters`, `Stat::effective_max_iters`, `Stat::hit_limit` |
+| Outer bound | automatic `n` cap (`idempotent && commutative_extend`) | Convenience optimization from JACM bound; solver retries uncapped if cap was insufficient | `Stat::used_auto_n_cap`, `Stat::retried_without_auto_n_cap` |
+| Domain checks | `DomainContractMode::BasicChecks` | Lightweight runtime domain sanity probes (development/debug aid) | `Stat::domain_contract_checks_run`, `Stat::domain_contract_checks_failed` |
+| Indirect calls | `ClosedWorldTypeCompatible` | Resolve indirect calls using type-compatible defined functions in module | `AnalysisStatus::open_world_unsound_mode == true` |
+| Indirect calls | `DeclaredOnlyFallback` | Do not synthesize indirect targets; use fallback/call-to-return behavior | `AnalysisStatus::unresolved_indirect_calls` |
+| Indirect calls | `CustomResolverRequired` | Require analysis-provided resolver for indirect calls; unresolved calls are reported | `AnalysisStatus::requires_external_callee_resolver` |
+| Bounded inner solve | `max_fixpoint_iters`, `max_linear_steps` | Converts exact least-solution target into bounded approximation when cap hits | `Stat::hit_limit`, `Stat::converged` |
+
+## Domain author checklist
+
+- Provide a semiring implementation satisfying the NPA contract (`zero`, `one`, `combine`, `extend`, `extend_lin`, `ndetCombine`, `condCombine`, `equal`).
+- For non-idempotent domains, provide `subtract` or `choose_delta` such that `combine(nu, delta) == f(nu)`.
+- If enabling `approx_equal`, document tolerance semantics and accept that convergence is pragmatic, not theorem-exact.
+- If enabling `project_newton_safe`, ensure projection is compatible with Newton linearization and summary composition used by your domain.
+- If enabling tensor traits, ensure `paper_admissible()` and projection/readout obligations hold for your domain.
+- If enabling bounded hooks (`max_fixpoint_iters` / `max_linear_steps`), treat results as approximations and propagate status to callers.
+
 ## References
 
 - **Esparza et al.**, "Newtonian Program Analysis", JACM.  

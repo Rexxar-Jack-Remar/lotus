@@ -59,12 +59,10 @@ struct Interval {
   bool operator==(const Interval &other) const {
     return bottom == other.bottom && hasLower == other.hasLower &&
            hasUpper == other.hasUpper && ordering == other.ordering &&
-           (!hasLower ||
-            (lower.getBitWidth() == other.lower.getBitWidth() &&
-             lower.eq(other.lower))) &&
-           (!hasUpper ||
-            (upper.getBitWidth() == other.upper.getBitWidth() &&
-             upper.eq(other.upper)));
+           (!hasLower || (lower.getBitWidth() == other.lower.getBitWidth() &&
+                          lower.eq(other.lower))) &&
+           (!hasUpper || (upper.getBitWidth() == other.upper.getBitWidth() &&
+                          upper.eq(other.upper)));
   }
 };
 
@@ -117,7 +115,9 @@ public:
   };
 
   static Result run(llvm::Module &M, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    IndirectCallResolutionMode callResolutionMode =
+                        IndirectCallResolutionMode::ClosedWorldTypeCompatible);
 };
 
 } // namespace npa

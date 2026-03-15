@@ -62,13 +62,18 @@ public:
     return s;
   }
 
-  static std::vector<llvm::Function *>
-  getPossibleCallees(llvm::Module &M, const llvm::CallBase &Call) {
-    // Closed-world assumption: without an external resolver, indirect calls are
-    // approximated by type-compatible defined functions in the current module.
+  static std::vector<llvm::Function *> getPossibleCallees(
+      llvm::Module &M, const llvm::CallBase &Call,
+      IndirectCallResolutionMode mode =
+          IndirectCallResolutionMode::ClosedWorldTypeCompatible) {
     if (llvm::Function *Direct = Call.getCalledFunction()) {
       if (!Direct->isDeclaration())
         return {Direct};
+      return {};
+    }
+
+    if (mode == IndirectCallResolutionMode::DeclaredOnlyFallback ||
+        mode == IndirectCallResolutionMode::CustomResolverRequired) {
       return {};
     }
 
@@ -233,15 +238,28 @@ private:
 
   template <typename A>
   static auto getPossibleCalleesForAnalysis(A &analysis, llvm::Module &M,
-                                            const llvm::CallBase &call, int)
+                                            const llvm::CallBase &call,
+                                            IndirectCallResolutionMode, int)
       -> decltype(analysis.getPossibleCallees(M, call)) {
     return analysis.getPossibleCallees(M, call);
   }
 
   static std::vector<llvm::Function *>
   getPossibleCalleesForAnalysis(Analysis &, llvm::Module &M,
-                                const llvm::CallBase &call, long) {
-    return getPossibleCallees(M, call);
+                                const llvm::CallBase &call,
+                                IndirectCallResolutionMode mode, long) {
+    return getPossibleCallees(M, call, mode);
+  }
+
+  template <typename A>
+  static auto getCallResolutionMode(const A &analysis, int)
+      -> decltype(analysis.getCallResolutionMode()) {
+    return analysis.getCallResolutionMode();
+  }
+
+  static IndirectCallResolutionMode getCallResolutionMode(const Analysis &,
+                                                          long) {
+    return IndirectCallResolutionMode::ClosedWorldTypeCompatible;
   }
 
   template <typename A>
@@ -427,10 +445,14 @@ private:
   static E buildBlockBodyExpr(Analysis &analysis, llvm::Instruction &I,
                               E currentPath, llvm::Module &M,
                               std::deque<llvm::Function *> &worklist,
-                              std::set<llvm::Function *> &visited) {
+                              std::set<llvm::Function *> &visited,
+                              AnalysisStatus &status,
+                              IndirectCallResolutionMode callResolutionMode) {
     if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-      std::vector<llvm::Function *> Callees =
-          getPossibleCalleesForAnalysis(analysis, M, *CI, 0);
+      if (CI->getCalledFunction() == nullptr)
+        ++status.indirect_calls_seen;
+      std::vector<llvm::Function *> Callees = getPossibleCalleesForAnalysis(
+          analysis, M, *CI, callResolutionMode, 0);
       if (!Callees.empty()) {
         E callBranches = nullptr;
         for (llvm::Function *Callee : Callees) {
@@ -453,16 +475,26 @@ private:
         Val fallbackTransfer =
             getCallFallbackTransfer(analysis, *CI, Callees, 0);
         if (!D::equal(fallbackTransfer, D::zero())) {
+          ++status.fallback_call_edges;
           E fallbackBranch = Exp::seq(fallbackTransfer, currentPath);
           callBranches = combineExpr(callBranches, fallbackBranch);
         }
         currentPath = callBranches;
       } else {
+        if (CI->getCalledFunction() == nullptr) {
+          ++status.unresolved_indirect_calls;
+          if (callResolutionMode ==
+              IndirectCallResolutionMode::CustomResolverRequired) {
+            status.requires_external_callee_resolver = true;
+            status.approximated = true;
+          }
+        }
         Val fallbackTransfer =
             getCallFallbackTransfer(analysis, *CI, Callees, 0);
-        if (!D::equal(fallbackTransfer, D::zero()))
+        if (!D::equal(fallbackTransfer, D::zero())) {
+          ++status.fallback_call_edges;
           currentPath = Exp::seq(fallbackTransfer, currentPath);
-        else
+        } else
           currentPath =
               Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
       }
@@ -470,11 +502,11 @@ private:
     return analysis.getTransfer(I, currentPath);
   }
 
-  static FunctionRegexArtifacts
-  buildFunctionRegexArtifacts(llvm::Module &M, llvm::Function &F,
-                              Analysis &analysis,
-                              std::deque<llvm::Function *> &worklist,
-                              std::set<llvm::Function *> &visited) {
+  static FunctionRegexArtifacts buildFunctionRegexArtifacts(
+      llvm::Module &M, llvm::Function &F, Analysis &analysis,
+      std::deque<llvm::Function *> &worklist,
+      std::set<llvm::Function *> &visited, AnalysisStatus &status,
+      IndirectCallResolutionMode callResolutionMode) {
     using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
 
     ::dataflow::controlflow::LLVMIntraCFG CFG;
@@ -509,8 +541,8 @@ private:
 
       E currentPath = Exp::term(D::one());
       for (auto &I : BB)
-        currentPath =
-            buildBlockBodyExpr(analysis, I, currentPath, M, worklist, visited);
+        currentPath = buildBlockBodyExpr(analysis, I, currentPath, M, worklist,
+                                         visited, status, callResolutionMode);
       blockBodyExprs.emplace(getBlockSymbol(&BB), currentPath);
 
       auto *Term = BB.getTerminator();
@@ -585,7 +617,9 @@ public:
   }
 
   static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist) {
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    IndirectCallResolutionMode callResolutionMode =
+                        IndirectCallResolutionMode::ClosedWorldTypeCompatible) {
     std::vector<std::pair<Symbol, E>> eqns;
     std::deque<llvm::Function *> worklist;
     std::set<llvm::Function *> visited;
@@ -593,6 +627,12 @@ public:
     std::unordered_map<std::string, E> fullSummaryExprs;
     std::unordered_map<std::string, E> blockEntryExprs;
     std::unordered_map<std::string, E> blockExitExprs;
+
+    Result res;
+    res.status.call_resolution_mode = callResolutionMode;
+    res.status.open_world_unsound_mode =
+        res.status.call_resolution_mode ==
+        IndirectCallResolutionMode::ClosedWorldTypeCompatible;
 
     std::vector<llvm::Function *> entries = getEntryFunctions(M);
     for (llvm::Function *Entry : entries) {
@@ -606,8 +646,9 @@ public:
 
       std::string fSym = getFuncSymbol(F);
       functionSymbols[fSym] = {F};
-      auto artifacts =
-          buildFunctionRegexArtifacts(M, *F, analysis, worklist, visited);
+      auto artifacts = buildFunctionRegexArtifacts(
+          M, *F, analysis, worklist, visited, res.status,
+          res.status.call_resolution_mode);
       eqns.emplace_back(fSym, artifacts.summaryExpr);
       fullSummaryExprs.emplace(fSym, artifacts.fullSummaryExpr);
       for (auto &blockExpr : artifacts.blockEntryExprs)
@@ -621,7 +662,6 @@ public:
     for (auto &p : rawRes.first)
       solvedMap[p.first] = p.second;
 
-    Result res;
     res.status.summary_solve = rawRes.second;
     res.status.approximated = !rawRes.second.converged;
     for (const auto &entry : functionSymbols) {
@@ -699,8 +739,11 @@ public:
 
         for (auto &I : BB) {
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
+            if (CI->getCalledFunction() == nullptr)
+              ++res.status.indirect_calls_seen;
             std::vector<llvm::Function *> Callees =
-                getPossibleCalleesForAnalysis(analysis, M, *CI, 0);
+                getPossibleCalleesForAnalysis(
+                    analysis, M, *CI, res.status.call_resolution_mode, 0);
             if (!Callees.empty()) {
               Val currentPathVal = I0<D>::eval(false, solvedMap, currentPath);
               E callBranches = nullptr;
@@ -756,6 +799,7 @@ public:
               Val fallbackTransfer =
                   getCallFallbackTransfer(analysis, *CI, Callees, 0);
               if (!D::equal(fallbackTransfer, D::zero())) {
+                ++res.status.fallback_call_edges;
                 E fallbackBranch = Exp::seq(fallbackTransfer, currentPath);
                 callBranches = callBranches
                                    ? Exp::ndet(callBranches, fallbackBranch)
@@ -763,11 +807,20 @@ public:
               }
               currentPath = callBranches;
             } else {
+              if (CI->getCalledFunction() == nullptr) {
+                ++res.status.unresolved_indirect_calls;
+                if (res.status.call_resolution_mode ==
+                    IndirectCallResolutionMode::CustomResolverRequired) {
+                  res.status.requires_external_callee_resolver = true;
+                  res.status.approximated = true;
+                }
+              }
               Val fallbackTransfer =
                   getCallFallbackTransfer(analysis, *CI, Callees, 0);
-              if (!D::equal(fallbackTransfer, D::zero()))
+              if (!D::equal(fallbackTransfer, D::zero())) {
+                ++res.status.fallback_call_edges;
                 currentPath = Exp::seq(fallbackTransfer, currentPath);
-              else
+              } else
                 currentPath = Exp::seq(
                     getCallToReturnTransfer(analysis, *CI, 0), currentPath);
             }

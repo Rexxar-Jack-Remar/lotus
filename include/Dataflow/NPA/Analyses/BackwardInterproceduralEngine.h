@@ -129,9 +129,10 @@ private:
     return analysis.getEdgeTransfer(term, succ);
   }
 
-  static typename D::value_type
-  getEdgeTransfer(Analysis &, const llvm::Instruction &, const llvm::BasicBlock &,
-                  long) {
+  static typename D::value_type getEdgeTransfer(Analysis &,
+                                                const llvm::Instruction &,
+                                                const llvm::BasicBlock &,
+                                                long) {
     return D::one();
   }
 
@@ -229,9 +230,9 @@ private:
     unsigned &starCounter_;
   };
 
-  static E translateRegex(
-      const lotus::pathexpressions::RegexRef<int> &regex,
-      const std::vector<E> &labels, unsigned &star_counter) {
+  static E translateRegex(const lotus::pathexpressions::RegexRef<int> &regex,
+                          const std::vector<E> &labels,
+                          unsigned &star_counter) {
     RegexToExpr translator(labels, star_counter);
     return regex->accept(translator, nullptr);
   }
@@ -248,15 +249,19 @@ private:
     return expr;
   }
 
-  static E makeCallSummaryExpr(Symbol sym) {
-    return Exp::hole(std::move(sym));
-  }
+  static E makeCallSummaryExpr(Symbol sym) { return Exp::hole(std::move(sym)); }
 
-  static E buildBlockBodyExpr(Analysis &analysis, llvm::Instruction &I, E currentPath,
-                              llvm::Module &M, std::deque<llvm::Function *> &worklist,
-                              std::set<llvm::Function *> &visited) {
+  static E buildBlockBodyExpr(Analysis &analysis, llvm::Instruction &I,
+                              E currentPath, llvm::Module &M,
+                              std::deque<llvm::Function *> &worklist,
+                              std::set<llvm::Function *> &visited,
+                              AnalysisStatus &status,
+                              IndirectCallResolutionMode callResolutionMode) {
     if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-      std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+      if (CI->getCalledFunction() == nullptr)
+        ++status.indirect_calls_seen;
+      std::vector<llvm::Function *> Callees =
+          getPossibleCallees(M, *CI, callResolutionMode);
       if (!Callees.empty()) {
         E callBranches = nullptr;
         for (llvm::Function *Callee : Callees) {
@@ -273,6 +278,14 @@ private:
         }
         currentPath = callBranches;
       } else {
+        if (CI->getCalledFunction() == nullptr) {
+          ++status.unresolved_indirect_calls;
+          if (callResolutionMode ==
+              IndirectCallResolutionMode::CustomResolverRequired) {
+            status.requires_external_callee_resolver = true;
+            status.approximated = true;
+          }
+        }
         currentPath =
             Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
       }
@@ -280,10 +293,11 @@ private:
     return analysis.getTransfer(I, currentPath);
   }
 
-  static FunctionRegexArtifacts
-  buildFunctionRegexArtifacts(llvm::Module &M, llvm::Function &F, Analysis &analysis,
-                              std::deque<llvm::Function *> &worklist,
-                              std::set<llvm::Function *> &visited) {
+  static FunctionRegexArtifacts buildFunctionRegexArtifacts(
+      llvm::Module &M, llvm::Function &F, Analysis &analysis,
+      std::deque<llvm::Function *> &worklist,
+      std::set<llvm::Function *> &visited, AnalysisStatus &status,
+      IndirectCallResolutionMode callResolutionMode) {
     using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
 
     std::unordered_map<const llvm::BasicBlock *, int> blockIds;
@@ -308,8 +322,9 @@ private:
 
       E currentPath = Exp::term(D::one());
       for (auto It = BB.rbegin(); It != BB.rend(); ++It)
-        currentPath = buildBlockBodyExpr(analysis, *It, currentPath, M, worklist,
-                                         visited);
+        currentPath =
+            buildBlockBodyExpr(analysis, *It, currentPath, M, worklist, visited,
+                               status, callResolutionMode);
 
       auto *Term = BB.getTerminator();
       if (!Term || Term->getNumSuccessors() == 0) {
@@ -321,7 +336,8 @@ private:
         auto *Succ = Term->getSuccessor(i);
         if (!Succ)
           continue;
-        E edgeExpr = Exp::seq(getEdgeTransfer(analysis, *Term, *Succ, 0), currentPath);
+        E edgeExpr =
+            Exp::seq(getEdgeTransfer(analysis, *Term, *Succ, 0), currentPath);
         graph.addEdge(fromId, addLabel(edgeExpr), blockIds.at(Succ));
       }
     }
@@ -340,26 +356,36 @@ private:
       const std::string bSym =
           InterproceduralEngine<D, Analysis>::getBlockSymbol(&BB);
       out.blockSummaryExprs.emplace(
-          bSym,
-          translateRegex(computer.exprBetween(blockIds.at(&BB), exitId), labels,
-                         starCounter));
+          bSym, translateRegex(computer.exprBetween(blockIds.at(&BB), exitId),
+                               labels, starCounter));
     }
     return out;
   }
 
 public:
-  static std::vector<llvm::Function *>
-  getPossibleCallees(llvm::Module &M, const llvm::CallBase &Call) {
-    return InterproceduralEngine<D, Analysis>::getPossibleCallees(M, Call);
+  static std::vector<llvm::Function *> getPossibleCallees(
+      llvm::Module &M, const llvm::CallBase &Call,
+      IndirectCallResolutionMode mode =
+          IndirectCallResolutionMode::ClosedWorldTypeCompatible) {
+    return InterproceduralEngine<D, Analysis>::getPossibleCallees(M, Call,
+                                                                  mode);
   }
 
   static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist) {
+                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    IndirectCallResolutionMode callResolutionMode =
+                        IndirectCallResolutionMode::ClosedWorldTypeCompatible) {
     std::vector<std::pair<Symbol, E>> eqns;
     std::deque<llvm::Function *> worklist;
     std::set<llvm::Function *> visited;
     std::unordered_map<std::string, FunctionKey> functionSymbols;
     std::unordered_map<std::string, E> fullSummaryExprs;
+
+    Result res;
+    res.status.call_resolution_mode = callResolutionMode;
+    res.status.open_world_unsound_mode =
+        res.status.call_resolution_mode ==
+        IndirectCallResolutionMode::ClosedWorldTypeCompatible;
 
     std::vector<llvm::Function *> entries =
         InterproceduralEngine<D, Analysis>::getEntryFunctions(M);
@@ -374,8 +400,9 @@ public:
 
       std::string fSym = InterproceduralEngine<D, Analysis>::getFuncSymbol(F);
       functionSymbols[fSym] = {F};
-      auto artifacts =
-          buildFunctionRegexArtifacts(M, *F, analysis, worklist, visited);
+      auto artifacts = buildFunctionRegexArtifacts(
+          M, *F, analysis, worklist, visited, res.status,
+          res.status.call_resolution_mode);
       eqns.emplace_back(fSym, artifacts.summaryExpr);
       fullSummaryExprs.emplace(fSym, artifacts.fullSummaryExpr);
       for (const auto &blockExpr : artifacts.blockSummaryExprs)
@@ -387,7 +414,6 @@ public:
     for (auto &p : rawRes.first)
       solvedMap[p.first] = p.second;
 
-    Result res;
     res.status.summary_solve = rawRes.second;
     res.status.approximated = !rawRes.second.converged;
     for (const auto &entry : functionSymbols) {
@@ -408,14 +434,16 @@ public:
     long propagationSteps = 0;
 
     for (llvm::Function *Entry : entries) {
-      std::string sym = InterproceduralEngine<D, Analysis>::getFuncSymbol(Entry);
+      std::string sym =
+          InterproceduralEngine<D, Analysis>::getFuncSymbol(Entry);
       funcExitFacts[sym] = analysis.getExitValue(*Entry);
       worklist2.push_back(Entry);
       inWorklist2.insert(Entry);
     }
 
     while (!worklist2.empty()) {
-      if (maxPropagationSteps >= 0 && propagationSteps++ >= maxPropagationSteps) {
+      if (maxPropagationSteps >= 0 &&
+          propagationSteps++ >= maxPropagationSteps) {
         res.status.propagation_hit_limit = true;
         res.status.propagation_converged = false;
         res.status.approximated = true;
@@ -456,9 +484,8 @@ public:
             auto SuccIt = solvedMap.find(succSym);
             if (SuccIt == solvedMap.end())
               continue;
-            Val succToExit =
-                D::extend(getEdgeTransfer(analysis, *Term, *Succ, 0),
-                          SuccIt->second);
+            Val succToExit = D::extend(
+                getEdgeTransfer(analysis, *Term, *Succ, 0), SuccIt->second);
             if (first) {
               blockEndToExit = succToExit;
               first = false;
@@ -472,7 +499,10 @@ public:
         for (auto It = BB.rbegin(); It != BB.rend(); ++It) {
           llvm::Instruction &I = *It;
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-            std::vector<llvm::Function *> Callees = getPossibleCallees(M, *CI);
+            if (CI->getCalledFunction() == nullptr)
+              ++res.status.indirect_calls_seen;
+            std::vector<llvm::Function *> Callees =
+                getPossibleCallees(M, *CI, res.status.call_resolution_mode);
             if (!Callees.empty()) {
               Val currentPathVal = I0<D>::eval(false, solvedMap, currentPath);
               E callBranches = nullptr;
@@ -496,8 +526,8 @@ public:
                       analysis.joinFacts(Existing->second, calleeExitFact);
                   if (!analysis.factsEqual(joined, Existing->second)) {
                     size_t updateCount = ++funcUpdates[calleeSym];
-                    Fact widened = widenFacts(analysis, Existing->second, joined,
-                                              updateCount, 0);
+                    Fact widened = widenFacts(analysis, Existing->second,
+                                              joined, updateCount, 0);
                     if (hasCustomWidenFacts(analysis, 0))
                       res.status.approximated = true;
                     if (!analysis.factsEqual(widened, Existing->second)) {
@@ -508,9 +538,9 @@ public:
                   }
                 }
 
-                E branch = Exp::seq(
-                    getCallReturnTransfer(analysis, *CI, *Callee, 0),
-                    currentPath);
+                E branch =
+                    Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
+                             currentPath);
                 branch = multiplyExpr(makeCallSummaryExpr(calleeSym), branch);
                 branch = Exp::seq(
                     getCallEntryTransfer(analysis, *CI, *Callee, 0), branch);
@@ -519,8 +549,17 @@ public:
               }
               currentPath = callBranches;
             } else {
-              currentPath =
-                  Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+              if (CI->getCalledFunction() == nullptr) {
+                ++res.status.unresolved_indirect_calls;
+                if (res.status.call_resolution_mode ==
+                    IndirectCallResolutionMode::CustomResolverRequired) {
+                  res.status.requires_external_callee_resolver = true;
+                  res.status.approximated = true;
+                }
+              }
+              ++res.status.fallback_call_edges;
+              currentPath = Exp::seq(getCallToReturnTransfer(analysis, *CI, 0),
+                                     currentPath);
             }
           }
           currentPath = analysis.getTransfer(I, currentPath);

@@ -1,5 +1,5 @@
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralAffineEqualities.h"
 #include "Dataflow/NPA/Analyses/BackwardInterproceduralEngine.h"
+#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralAffineEqualities.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralConstantPropagation.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralIntervalAnalysis.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralLiveVariables.h"
@@ -7,20 +7,19 @@
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
 
-#include <gtest/gtest.h>
-
 #include <cctype>
 #include <iterator>
 #include <limits>
+#include <set>
+#include <string>
+#include <vector>
+
+#include <gtest/gtest.h>
 #include <llvm/ADT/APInt.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-
-#include <set>
-#include <string>
-#include <vector>
 
 namespace {
 
@@ -56,8 +55,7 @@ std::vector<const T *> statesForBlock(const std::map<npa::BlockKey, T> &facts,
   return out;
 }
 
-std::vector<npa::AffineState>
-materializedAffineStatesForBlock(
+std::vector<npa::AffineState> materializedAffineStatesForBlock(
     const std::map<npa::BlockKey, npa::AffineRelationDomain::value_type> &facts,
     const llvm::BasicBlock *block) {
   std::vector<npa::AffineState> out;
@@ -69,8 +67,7 @@ materializedAffineStatesForBlock(
   return out;
 }
 
-std::vector<const npa::AffineRelationDomain::value_type *>
-relationsForBlock(
+std::vector<const npa::AffineRelationDomain::value_type *> relationsForBlock(
     const std::map<npa::BlockKey, npa::AffineRelationDomain::value_type> &facts,
     const llvm::BasicBlock *block) {
   std::vector<const npa::AffineRelationDomain::value_type *> out;
@@ -101,9 +98,8 @@ llvm::APInt unionFactForBlock(const std::map<npa::BlockKey, llvm::APInt> &facts,
 }
 
 template <typename Op, typename OpLess>
-bool containsPath(
-    const npa::ProgramTransfer<Op, OpLess> &transfer,
-    std::initializer_list<Op> expected) {
+bool containsPath(const npa::ProgramTransfer<Op, OpLess> &transfer,
+                  std::initializer_list<Op> expected) {
   typename npa::ProgramTransfer<Op, OpLess>::path_type path(expected);
   return transfer.paths.count(path) != 0;
 }
@@ -123,8 +119,7 @@ void expectConstValue(const npa::ConstantPropagationValue &value,
   EXPECT_TRUE(value.constant.eq(expected));
 }
 
-std::vector<std::pair<std::uint64_t, std::uint64_t>>
-sortedPredicateTransitions(
+std::vector<std::pair<std::uint64_t, std::uint64_t>> sortedPredicateTransitions(
     const npa::PredicateRelationDomain::value_type &relation) {
   auto transitions = npa::PredicateRelationDomain::materialize(relation);
   std::sort(transitions.begin(), transitions.end());
@@ -246,7 +241,9 @@ struct LimitedBoolDomain {
   static value_type condCombine(bool phi, value_type t, value_type e) {
     return phi ? t : e;
   }
-  static value_type extend(value_type lhs, value_type rhs) { return lhs && rhs; }
+  static value_type extend(value_type lhs, value_type rhs) {
+    return lhs && rhs;
+  }
   static value_type extend_lin(value_type lhs, value_type rhs) {
     return extend(lhs, rhs);
   }
@@ -261,8 +258,12 @@ public:
   using E = npa::E0<LimitedBoolDomain>;
 
   FactType getEntryValue() const { return true; }
-  E getTransfer(llvm::Instruction &, E currentPath) const { return currentPath; }
-  FactType applySummary(bool summary, bool fact) const { return summary && fact; }
+  E getTransfer(llvm::Instruction &, E currentPath) const {
+    return currentPath;
+  }
+  FactType applySummary(bool summary, bool fact) const {
+    return summary && fact;
+  }
   FactType joinFacts(bool lhs, bool rhs) const { return lhs || rhs; }
   bool factsEqual(bool lhs, bool rhs) const { return lhs == rhs; }
 };
@@ -333,7 +334,9 @@ public:
 
   FactType getEntryValue() const { return RecursiveSummaryDomain::one(); }
 
-  E getTransfer(llvm::Instruction &, E currentPath) const { return currentPath; }
+  E getTransfer(llvm::Instruction &, E currentPath) const {
+    return currentPath;
+  }
 
   FactType getCallEntryTransfer(const llvm::CallBase &,
                                 const llvm::Function &) const {
@@ -373,7 +376,9 @@ public:
     return RecursiveSummaryDomain::one();
   }
 
-  E getTransfer(llvm::Instruction &, E currentPath) const { return currentPath; }
+  E getTransfer(llvm::Instruction &, E currentPath) const {
+    return currentPath;
+  }
 
   FactType getCallReturnTransfer(const llvm::CallBase &,
                                  const llvm::Function &) const {
@@ -404,7 +409,8 @@ public:
   long getMaxPropagationSteps() const { return 0; }
 };
 
-void expectIntervalPoint(const npa::Interval &value, const llvm::APInt &expected,
+void expectIntervalPoint(const npa::Interval &value,
+                         const llvm::APInt &expected,
                          npa::IntervalOrdering ordering) {
   EXPECT_FALSE(value.bottom);
   EXPECT_TRUE(value.hasLower);
@@ -453,7 +459,8 @@ TEST(NPAInterproceduralClients, MaybeUninitializedFlowsThroughCall) {
   ASSERT_NE(Id, nullptr);
 
   auto result = npa::InterproceduralMaybeUninitialized::run(*module);
-  llvm::APInt entryFact = unionFactForBlock(result.blockFacts, &Id->getEntryBlock());
+  llvm::APInt entryFact =
+      unionFactForBlock(result.blockFacts, &Id->getEntryBlock());
   EXPECT_GT(entryFact.countPopulation(), 0u);
 }
 
@@ -480,11 +487,13 @@ TEST(NPAInterproceduralClients, MaybeUninitializedStoreClearsBeforeCall) {
   ASSERT_NE(Id, nullptr);
 
   auto result = npa::InterproceduralMaybeUninitialized::run(*module);
-  llvm::APInt entryFact = unionFactForBlock(result.blockFacts, &Id->getEntryBlock());
+  llvm::APInt entryFact =
+      unionFactForBlock(result.blockFacts, &Id->getEntryBlock());
   EXPECT_EQ(entryFact.countPopulation(), 0u);
 }
 
-TEST(NPAInterproceduralClients, GenericBlockEntryHookAppliesToEntryAndSuccessorBlocks) {
+TEST(NPAInterproceduralClients,
+     GenericBlockEntryHookAppliesToEntryAndSuccessorBlocks) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @main() {
@@ -524,7 +533,8 @@ TEST(NPAInterproceduralClients, GenericBlockEntryHookAppliesToEntryAndSuccessorB
   EXPECT_TRUE(containsPath(*exitStates.front(), {'E', 'M', 'E'}));
 }
 
-TEST(NPAInterproceduralClients, InterproceduralEngineReportsBoundedSolverResults) {
+TEST(NPAInterproceduralClients,
+     InterproceduralEngineReportsBoundedSolverResults) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @main() {
@@ -567,8 +577,8 @@ TEST(NPAInterproceduralClients,
   RecursivePropagationLimitedForwardAnalysis analysis;
   auto result =
       npa::InterproceduralEngine<RecursiveSummaryDomain,
-                                 RecursivePropagationLimitedForwardAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::Worklist);
+                                 RecursivePropagationLimitedForwardAnalysis>::
+          run(*module, analysis, false, npa::LinearStrategy::Worklist);
 
   auto *Recur = module->getFunction("recur");
   ASSERT_NE(Recur, nullptr);
@@ -578,10 +588,12 @@ TEST(NPAInterproceduralClients,
   EXPECT_TRUE(result.status.propagation_hit_limit);
   EXPECT_FALSE(result.status.overall_converged);
   EXPECT_TRUE(result.status.approximated);
-  EXPECT_NE(result.summaries.find(npa::FunctionKey{Recur}), result.summaries.end());
+  EXPECT_NE(result.summaries.find(npa::FunctionKey{Recur}),
+            result.summaries.end());
 }
 
-TEST(NPAInterproceduralClients, ConstantPropagationTransfersArgumentsAcrossCall) {
+TEST(NPAInterproceduralClients,
+     ConstantPropagationTransfersArgumentsAcrossCall) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define i32 @add2(i32 %x) {
@@ -610,7 +622,8 @@ TEST(NPAInterproceduralClients, ConstantPropagationTransfersArgumentsAcrossCall)
   expectConstValue(It->second, signedAPInt(32, 5));
 }
 
-TEST(NPAInterproceduralClients, InterproceduralClientsAcceptTensorStrategyOnDemand) {
+TEST(NPAInterproceduralClients,
+     InterproceduralClientsAcceptTensorStrategyOnDemand) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define i32 @id(i32 %x) {
@@ -644,7 +657,8 @@ TEST(NPAInterproceduralClients, InterproceduralClientsAcceptTensorStrategyOnDema
   expectConstValue(It->second, signedAPInt(32, 5));
 }
 
-TEST(NPAInterproceduralClients, PublicSummariesRemainUnprojectedWhenDomainProjects) {
+TEST(NPAInterproceduralClients,
+     PublicSummariesRemainUnprojectedWhenDomainProjects) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @callee() {
@@ -661,10 +675,10 @@ TEST(NPAInterproceduralClients, PublicSummariesRemainUnprojectedWhenDomainProjec
   ASSERT_NE(module, nullptr);
 
   ProjectedSummaryAnalysis analysis;
-  auto result =
-      npa::InterproceduralEngine<ProjectedStringDomain,
-                                 ProjectedSummaryAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::Worklist);
+  auto result = npa::InterproceduralEngine<
+      ProjectedStringDomain,
+      ProjectedSummaryAnalysis>::run(*module, analysis, false,
+                                     npa::LinearStrategy::Worklist);
 
   auto *Callee = module->getFunction("callee");
   ASSERT_NE(Callee, nullptr);
@@ -691,10 +705,10 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(module, nullptr);
 
   ProjectedSummaryAnalysis analysis;
-  auto result =
-      npa::InterproceduralEngine<ProjectedStringDomain,
-                                 ProjectedSummaryAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::Worklist);
+  auto result = npa::InterproceduralEngine<
+      ProjectedStringDomain,
+      ProjectedSummaryAnalysis>::run(*module, analysis, false,
+                                     npa::LinearStrategy::Worklist);
 
   auto *Main = module->getFunction("main");
   auto *Callee = module->getFunction("callee");
@@ -737,15 +751,15 @@ TEST(NPAInterproceduralClients,
   npa::PredicateRelationDomain::configure(2, 1);
   PredicateProjectedLoopAnalysis analysis;
 
-  auto worklist =
-      npa::InterproceduralEngine<npa::PredicateRelationDomain,
-                                 PredicateProjectedLoopAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::Worklist);
+  auto worklist = npa::InterproceduralEngine<
+      npa::PredicateRelationDomain,
+      PredicateProjectedLoopAnalysis>::run(*module, analysis, false,
+                                           npa::LinearStrategy::Worklist);
 
-  auto tensor =
-      npa::InterproceduralEngine<npa::PredicateRelationDomain,
-                                 PredicateProjectedLoopAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::TensorProduct);
+  auto tensor = npa::InterproceduralEngine<
+      npa::PredicateRelationDomain,
+      PredicateProjectedLoopAnalysis>::run(*module, analysis, false,
+                                           npa::LinearStrategy::TensorProduct);
 
   auto *Main = module->getFunction("main");
   auto *Callee = module->getFunction("callee");
@@ -767,10 +781,9 @@ TEST(NPAInterproceduralClients,
                                                   tensor_callee->second));
   EXPECT_EQ(sortedPredicateTransitions(tensor_main->second),
             sortedPredicateTransitions(npa::PredicateRelationDomain::one()));
-  EXPECT_EQ(
-      sortedPredicateTransitions(tensor_callee->second),
-      (std::vector<std::pair<std::uint64_t, std::uint64_t>>{
-          {0, 2}, {1, 3}, {2, 2}, {3, 3}}));
+  EXPECT_EQ(sortedPredicateTransitions(tensor_callee->second),
+            (std::vector<std::pair<std::uint64_t, std::uint64_t>>{
+                {0, 2}, {1, 3}, {2, 2}, {3, 3}}));
 }
 
 TEST(NPAInterproceduralClients,
@@ -862,7 +875,8 @@ TEST(NPAInterproceduralClients, ConstantPropagationUsesLLVMIntegerSemantics) {
   expectConstValue(SIt->second, unsignedAPInt(32, 2147483647));
 }
 
-TEST(NPAInterproceduralClients, ConstantPropagationSupportsLargeUnsignedValues) {
+TEST(NPAInterproceduralClients,
+     ConstantPropagationSupportsLargeUnsignedValues) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @main() {
@@ -895,11 +909,14 @@ TEST(NPAInterproceduralClients, ConstantPropagationSupportsLargeUnsignedValues) 
   auto SIt = states.front()->values.find(S);
   ASSERT_NE(QIt, states.front()->values.end());
   ASSERT_NE(SIt, states.front()->values.end());
-  expectConstValue(QIt->second, unsignedAPInt(64, std::numeric_limits<uint64_t>::max()));
-  expectConstValue(SIt->second, unsignedAPInt(64, std::numeric_limits<uint64_t>::max()));
+  expectConstValue(QIt->second,
+                   unsignedAPInt(64, std::numeric_limits<uint64_t>::max()));
+  expectConstValue(SIt->second,
+                   unsignedAPInt(64, std::numeric_limits<uint64_t>::max()));
 }
 
-TEST(NPAInterproceduralClients, ConstantPropagationPreservesPhiConditionCorrelation) {
+TEST(NPAInterproceduralClients,
+     ConstantPropagationPreservesPhiConditionCorrelation) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @main(i1 %cond) {
@@ -941,7 +958,8 @@ TEST(NPAInterproceduralClients, ConstantPropagationPreservesPhiConditionCorrelat
   expectConstValue(It->second, signedAPInt(32, 2));
 }
 
-TEST(NPAInterproceduralClients, ConstantPropagationResolvesIndirectSingleTargetCall) {
+TEST(NPAInterproceduralClients,
+     ConstantPropagationResolvesIndirectSingleTargetCall) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define i32 @id(i32 %x) {
@@ -969,6 +987,80 @@ TEST(NPAInterproceduralClients, ConstantPropagationResolvesIndirectSingleTargetC
   auto It = states.front()->values.find(Arg);
   ASSERT_NE(It, states.front()->values.end());
   expectConstValue(It->second, signedAPInt(32, 7));
+}
+
+TEST(NPAInterproceduralClients,
+     CallResolutionModeControlsIndirectCalleeDiscovery) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @main() {
+    entry:
+      %fp = select i1 true, i32 (i32)* @id, i32 (i32)* @id
+      %r = call i32 %fp(i32 9)
+      ret i32 %r
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Id = module->getFunction("id");
+  ASSERT_NE(Id, nullptr);
+
+  EntryHookAnalysis analysis;
+  auto closedWorld =
+      npa::InterproceduralEngine<EntryHookDomain, EntryHookAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::Worklist,
+          npa::IndirectCallResolutionMode::ClosedWorldTypeCompatible);
+  auto fallbackOnly =
+      npa::InterproceduralEngine<EntryHookDomain, EntryHookAnalysis>::run(
+          *module, analysis, false, npa::LinearStrategy::Worklist,
+          npa::IndirectCallResolutionMode::DeclaredOnlyFallback);
+
+  EXPECT_EQ(closedWorld.status.call_resolution_mode,
+            npa::IndirectCallResolutionMode::ClosedWorldTypeCompatible);
+  EXPECT_EQ(fallbackOnly.status.call_resolution_mode,
+            npa::IndirectCallResolutionMode::DeclaredOnlyFallback);
+  EXPECT_GE(closedWorld.status.indirect_calls_seen, 1);
+  EXPECT_GE(fallbackOnly.status.indirect_calls_seen, 1);
+  EXPECT_EQ(closedWorld.status.unresolved_indirect_calls, 0);
+  EXPECT_GE(fallbackOnly.status.unresolved_indirect_calls, 1);
+
+  auto closedStates =
+      statesForBlock(closedWorld.blockEntryFacts, &Id->getEntryBlock());
+  auto fallbackStates =
+      statesForBlock(fallbackOnly.blockEntryFacts, &Id->getEntryBlock());
+  EXPECT_EQ(closedStates.size(), 1u);
+  EXPECT_TRUE(fallbackStates.empty());
+}
+
+TEST(NPAInterproceduralClients,
+     ConstantPropagationWrapperExposesCallResolutionMode) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @main() {
+    entry:
+      %fp = select i1 true, i32 (i32)* @id, i32 (i32)* @id
+      %r = call i32 %fp(i32 1)
+      ret i32 %r
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto result = npa::InterproceduralConstantPropagation::run(
+      *module, false, npa::LinearStrategy::Worklist,
+      npa::IndirectCallResolutionMode::DeclaredOnlyFallback);
+  EXPECT_EQ(result.status.call_resolution_mode,
+            npa::IndirectCallResolutionMode::DeclaredOnlyFallback);
+  EXPECT_GE(result.status.unresolved_indirect_calls, 1);
 }
 
 TEST(NPAInterproceduralClients,
@@ -1087,7 +1179,8 @@ TEST(NPAInterproceduralClients,
   expectConstValue(It->second, signedAPInt(32, 7));
 }
 
-TEST(NPAInterproceduralClients, ConstantPropagationDefaultSwitchCanBeUnreachable) {
+TEST(NPAInterproceduralClients,
+     ConstantPropagationDefaultSwitchCanBeUnreachable) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @main() {
@@ -1192,11 +1285,12 @@ TEST(NPAInterproceduralClients, AffineEqualitiesTransferSymbolicRelations) {
   auto *A = &*Caller->arg_begin();
 
   auto result = npa::InterproceduralAffineEqualities::run(*module);
-  auto relations = relationsForBlock(result.blockRelations, &Sink->getEntryBlock());
+  auto relations =
+      relationsForBlock(result.blockRelations, &Sink->getEntryBlock());
   ASSERT_EQ(relations.size(), 1u);
   EXPECT_FALSE(relations.front()->bottom);
-  auto states =
-      materializedAffineStatesForBlock(result.blockRelations, &Sink->getEntryBlock());
+  auto states = materializedAffineStatesForBlock(result.blockRelations,
+                                                 &Sink->getEntryBlock());
   ASSERT_EQ(states.size(), 1u);
   auto XIt = states.front().values.find(X);
   auto YValueIt = states.front().values.find(Y);
@@ -1242,7 +1336,8 @@ TEST(NPAInterproceduralClients, LiveVariablesFlowBackThroughCall) {
   auto BitIt = result.valueBits.find(Arg);
   ASSERT_NE(BitIt, result.valueBits.end());
 
-  llvm::APInt liveIn = unionFactForBlock(result.blockFacts, &Id->getEntryBlock());
+  llvm::APInt liveIn =
+      unionFactForBlock(result.blockFacts, &Id->getEntryBlock());
   EXPECT_TRUE(liveIn[BitIt->second]);
 }
 
@@ -1265,11 +1360,9 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(module, nullptr);
 
   RecursivePropagationLimitedBackwardAnalysis analysis;
-  auto result =
-      npa::BackwardInterproceduralEngine<
-          RecursiveSummaryDomain,
-          RecursivePropagationLimitedBackwardAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::Worklist);
+  auto result = npa::BackwardInterproceduralEngine<
+      RecursiveSummaryDomain, RecursivePropagationLimitedBackwardAnalysis>::
+      run(*module, analysis, false, npa::LinearStrategy::Worklist);
 
   auto *Recur = module->getFunction("recur");
   ASSERT_NE(Recur, nullptr);
@@ -1279,7 +1372,8 @@ TEST(NPAInterproceduralClients,
   EXPECT_TRUE(result.status.propagation_hit_limit);
   EXPECT_FALSE(result.status.overall_converged);
   EXPECT_TRUE(result.status.approximated);
-  EXPECT_NE(result.summaries.find(npa::FunctionKey{Recur}), result.summaries.end());
+  EXPECT_NE(result.summaries.find(npa::FunctionKey{Recur}),
+            result.summaries.end());
 }
 
 TEST(NPAInterproceduralClients, RecursiveIntervalAnalysisConverges) {
@@ -1468,7 +1562,8 @@ TEST(NPAInterproceduralClients, IntervalSupportsLargeUnsignedValues) {
 
   auto It = states.front()->values.find(Q);
   ASSERT_NE(It, states.front()->values.end());
-  expectIntervalPoint(It->second, unsignedAPInt(64, std::numeric_limits<uint64_t>::max()),
+  expectIntervalPoint(It->second,
+                      unsignedAPInt(64, std::numeric_limits<uint64_t>::max()),
                       npa::IntervalOrdering::Unsigned);
 }
 
@@ -1515,7 +1610,8 @@ TEST(NPAInterproceduralClients, IntervalPreservesPhiConditionCorrelation) {
                       npa::IntervalOrdering::Signed);
 }
 
-TEST(NPAInterproceduralClients, IntervalDefaultSwitchNarrowsRepresentableRange) {
+TEST(NPAInterproceduralClients,
+     IntervalDefaultSwitchNarrowsRepresentableRange) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @main(i1 %c1, i1 %c2) {
@@ -1558,7 +1654,8 @@ TEST(NPAInterproceduralClients, IntervalDefaultSwitchNarrowsRepresentableRange) 
                       npa::IntervalOrdering::Signed);
 }
 
-TEST(NPAInterproceduralClients, AffineDefaultSwitchRemainsUnrefinedByDisequality) {
+TEST(NPAInterproceduralClients,
+     AffineDefaultSwitchRemainsUnrefinedByDisequality) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @main(i32 %x) {
@@ -1588,7 +1685,8 @@ TEST(NPAInterproceduralClients, AffineDefaultSwitchRemainsUnrefinedByDisequality
   auto *Default = &*DefaultIt;
 
   auto result = npa::InterproceduralAffineEqualities::run(*module);
-  auto states = materializedAffineStatesForBlock(result.blockRelations, Default);
+  auto states =
+      materializedAffineStatesForBlock(result.blockRelations, Default);
   ASSERT_EQ(states.size(), 1u);
 
   auto *X = &*Main->arg_begin();
@@ -1773,7 +1871,9 @@ struct BackwardTensorLangDomain {
   static value_type extend_lin(const value_type &a, const value_type &b) {
     return extend(a, b);
   }
-  static value_type subtract(const value_type &a, const value_type &) { return a; }
+  static value_type subtract(const value_type &a, const value_type &) {
+    return a;
+  }
 };
 
 class BackwardTensorAnalysis {
@@ -1819,9 +1919,7 @@ public:
     return TraceTransferDomain::one();
   }
 
-  E getTransfer(llvm::Instruction &, E current) const {
-    return current;
-  }
+  E getTransfer(llvm::Instruction &, E current) const { return current; }
 
   FactType getEdgeTransfer(const llvm::Instruction &term,
                            const llvm::BasicBlock &succ) const {
@@ -1857,14 +1955,16 @@ template <> struct TensorSemiringTraits<BackwardTensorLangDomain> {
 
   static tensor_domain::value_type
   right_constant(const BackwardTensorLangDomain::value_type &v) {
-    return domain_equal<BackwardTensorLangDomain>(v, BackwardTensorLangDomain::zero())
+    return domain_equal<BackwardTensorLangDomain>(
+               v, BackwardTensorLangDomain::zero())
                ? tensor_domain::zero()
                : tensor_domain::singleton(BackwardTensorLangDomain::one(), v);
   }
 
   static tensor_domain::value_type
   left_constant(const BackwardTensorLangDomain::value_type &v) {
-    return domain_equal<BackwardTensorLangDomain>(v, BackwardTensorLangDomain::zero())
+    return domain_equal<BackwardTensorLangDomain>(
+               v, BackwardTensorLangDomain::zero())
                ? tensor_domain::zero()
                : tensor_domain::singleton(v, BackwardTensorLangDomain::one());
   }
@@ -1909,10 +2009,9 @@ TEST(NPAInterproceduralClients, BackwardEngineAppliesEdgeTransfers) {
   ASSERT_NE(Main, nullptr);
 
   BackwardEdgeTransferAnalysis analysis;
-  auto result =
-      npa::BackwardInterproceduralEngine<TraceTransferDomain,
-                                         BackwardEdgeTransferAnalysis>::run(
-          *module, analysis);
+  auto result = npa::BackwardInterproceduralEngine<
+      TraceTransferDomain, BackwardEdgeTransferAnalysis>::run(*module,
+                                                              analysis);
 
   auto Facts = statesForBlock(result.blockEntryFacts, &Main->getEntryBlock());
   ASSERT_EQ(Facts.size(), 1u);
@@ -1939,10 +2038,10 @@ TEST(NPAInterproceduralClients,
 
   BackwardTensorAnalysis analysis;
   testing::internal::CaptureStderr();
-  auto result =
-      npa::BackwardInterproceduralEngine<BackwardTensorLangDomain,
-                                         BackwardTensorAnalysis>::run(
-          *module, analysis, true, npa::LinearStrategy::TensorProduct);
+  auto result = npa::BackwardInterproceduralEngine<
+      BackwardTensorLangDomain,
+      BackwardTensorAnalysis>::run(*module, analysis, true,
+                                   npa::LinearStrategy::TensorProduct);
   std::string stderrOutput = testing::internal::GetCapturedStderr();
 
   auto *Main = module->getFunction("main");
