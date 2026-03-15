@@ -17,7 +17,15 @@ set(Concurrency_SOURCES
   Memory/MemUseDefAnalysis.cpp
   JoinTarget/JoinTargetAnalysis.cpp
   MPI/MPIAnalysis.cpp
+  MPI/MPIProcessModel.cpp
+  MPI/MPICollectiveAnalysis.cpp
+  MPI/MPIRMAAnalysis.cpp
   MPI/MPIRankAnalysis.cpp
+  LinuxKernel/LinuxKernelAnalysis.cpp
+  LinuxKernel/LinuxKernelProcessModel.cpp
+  LinuxKernel/LinuxKernelLockAnalysis.cpp
+  LinuxKernel/LinuxKernelRCUAnalysis.cpp
+  LinuxKernel/LinuxKernelWaitAnalysis.cpp
 )
 add_library(Concurrency STATIC ${Concurrency_SOURCES})
 target_link_libraries(Concurrency CanaryLLVMUtils CanaryAliasAnalysisWrapper)
