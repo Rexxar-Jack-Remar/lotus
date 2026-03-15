@@ -7,6 +7,11 @@
 
 namespace tpa {
 
+// Program-point input state cache for semi-sparse fixpoint iteration.
+//
+// Memo stores the incoming Store for each ProgramPoint. update() performs join
+// semantics (mergeWith / weakUpdate), and callers use its boolean return value
+// to decide whether a successor should be re-enqueued.
 class Memo {
 private:
   using MapType = std::unordered_map<ProgramPoint, Store>;
@@ -20,7 +25,7 @@ public:
   Memo &operator=(const Memo &) = delete;
   Memo &operator=(Memo &&) = delete;
 
-  // Return NULL if store not found
+  // Return nullptr if no state has been recorded for pp.
   const Store *lookup(const ProgramPoint &pp) const {
     auto itr = inState.find(pp);
     if (itr == inState.end())
@@ -29,7 +34,8 @@ public:
       return &itr->second;
   }
 
-  // Return true if memo changes
+  // Join incoming store into pp's cached in-state.
+  // Returns true when the cached state strictly grows.
   template <typename StoreType>
   bool update(const ProgramPoint &pp, StoreType &&store) {
     static_assert(
@@ -45,6 +51,8 @@ public:
     }
   }
 
+  // Convenience update used by transfers that only write one abstract cell.
+  // Creates the Store lazily when pp has not been seen.
   bool update(const ProgramPoint &pp, const MemoryObject *obj, PtsSet pSet) {
     auto itr = inState.find(pp);
     if (itr == inState.end()) {
