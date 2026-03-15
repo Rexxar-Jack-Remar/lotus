@@ -16,9 +16,11 @@
  */
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
+#include "Analysis/Concurrency/MPI/MPISymbol.h"
 #include "Analysis/Concurrency/Utils/CppThreading.h"
 #include "Analysis/Concurrency/Utils/LinuxKernel.h"
 
+#include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -50,14 +52,7 @@ struct ei_pair {
 };
 
 static std::string normalizeAPIName(StringRef name) {
-  std::string normalized = name.str();
-  if (!normalized.empty() && normalized[0] == '\01')
-    normalized.erase(0, 1);
-  if (!normalized.empty() && normalized[0] == '_')
-    normalized.erase(0, 1);
-  if (StringRef(normalized).startswith("PMPI_"))
-    normalized.replace(0, 5, "MPI_");
-  return normalized;
+  return mpi::normalizeMPISymbolName(name);
 }
 
 static ThreadAPI::RuntimeLibrary parseRuntimeLibrary(StringRef value) {
@@ -626,6 +621,24 @@ ThreadAPI::getConfiguredType(StringRef normalized_name) const {
     return isLibraryEnabled(rule->description.library) ? rule->description.type
                                                        : TD_DUMMY;
   }
+
+  if (normalized_name.startswith("MPI_")) {
+    for (const auto &entry : tdAPIMap) {
+      StringRef configured = entry.first();
+      if (!configured.startswith("MPI_")) {
+        continue;
+      }
+      if (mpi::equalsCaseInsensitiveASCII(configured, normalized_name)) {
+        auto desc_it = m_api_descriptions.find(configured.str());
+        if (desc_it == m_api_descriptions.end() ||
+            isLibraryEnabled(desc_it->second.library)) {
+          return entry.second;
+        }
+        return TD_DUMMY;
+      }
+    }
+  }
+
   return TD_DUMMY;
 }
 
@@ -657,11 +670,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
     return configured_type;
   }
 
-  StringRef name = F->getName();
-  if (name.startswith("\01"))
-    name = name.drop_front();
-  if (name.startswith("PMPI_"))
-    name = name.drop_front(1);
+  StringRef name = nameStr;
 
   // 2. C++11/17/20 Support (if enabled)
   if (m_config.enable_cpp11()) {

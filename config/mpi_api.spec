@@ -119,6 +119,17 @@ MPI_Scan TD_MPI_SCAN library=mpi semantic=scan traits=mpi-collective,mpi-collect
 MPI_Iscan TD_MPI_SCAN library=mpi semantic=iscan traits=mpi-collective,mpi-collective-nonblocking
 MPI_Exscan TD_MPI_SCAN library=mpi semantic=exscan traits=mpi-collective,mpi-collective-blocking
 MPI_Iexscan TD_MPI_SCAN library=mpi semantic=iexscan traits=mpi-collective,mpi-collective-nonblocking
+MPI_Neighbor_allgather TD_MPI_ALLGATHER library=mpi semantic=neighbor-allgather traits=mpi-collective,mpi-collective-blocking
+MPI_Neighbor_allgatherv TD_MPI_ALLGATHER library=mpi semantic=neighbor-allgatherv traits=mpi-collective,mpi-collective-blocking
+MPI_Ineighbor_allgather TD_MPI_ALLGATHER library=mpi semantic=ineighbor-allgather traits=mpi-collective,mpi-collective-nonblocking
+MPI_Ineighbor_allgatherv TD_MPI_ALLGATHER library=mpi semantic=ineighbor-allgatherv traits=mpi-collective,mpi-collective-nonblocking
+MPI_Neighbor_alltoall TD_MPI_ALLTOALL library=mpi semantic=neighbor-alltoall traits=mpi-collective,mpi-collective-blocking
+MPI_Neighbor_alltoallv TD_MPI_ALLTOALL library=mpi semantic=neighbor-alltoallv traits=mpi-collective,mpi-collective-blocking
+MPI_Neighbor_alltoallw TD_MPI_ALLTOALL library=mpi semantic=neighbor-alltoallw traits=mpi-collective,mpi-collective-blocking
+MPI_Ineighbor_alltoall TD_MPI_ALLTOALL library=mpi semantic=ineighbor-alltoall traits=mpi-collective,mpi-collective-nonblocking
+MPI_Ineighbor_alltoallv TD_MPI_ALLTOALL library=mpi semantic=ineighbor-alltoallv traits=mpi-collective,mpi-collective-nonblocking
+MPI_Ineighbor_alltoallw TD_MPI_ALLTOALL library=mpi semantic=ineighbor-alltoallw traits=mpi-collective,mpi-collective-nonblocking
+MPI_Intercomm_bcast TD_MPI_BCAST library=mpi semantic=intercomm-bcast traits=mpi-collective,mpi-collective-blocking
 
 # MPI RMA Window Management
 MPI_Win_create TD_MPI_WIN_CREATE library=mpi semantic=win-create

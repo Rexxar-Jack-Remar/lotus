@@ -371,7 +371,9 @@ inline bool isBlockingP2P(const llvm::StringRef &funcName) {
 
 // Check if any MPI function (for debug/stats)
 inline bool isMPI(const llvm::StringRef &funcName) {
-  return funcName.startswith("MPI_") || funcName.startswith("PMPI_");
+  return funcName.startswith("MPI_") || funcName.startswith("PMPI_") ||
+         funcName.startswith("ompi_mpi_") || funcName.startswith("mpi_") ||
+         funcName.startswith("pmpi_");
 }
 
 // ============================================================================

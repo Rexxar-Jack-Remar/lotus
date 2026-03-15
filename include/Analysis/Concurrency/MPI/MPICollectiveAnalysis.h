@@ -35,6 +35,7 @@ public:
     CommunicatorID comm;
     size_t communicator_class_id = 0;
     size_t communicator_subgroup_id = 0;
+    size_t collective_protocol_class_id = 0;
     const llvm::Function *function;
     size_t sequence_index = 0;
     size_t protocol_sequence_id = 0;

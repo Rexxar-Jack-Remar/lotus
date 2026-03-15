@@ -38,6 +38,8 @@ The top-level results include:
 - Point-to-point: blocking and non-blocking send/recv, plus `MPI_Sendrecv`
 - Collectives: barriers and common blocking/non-blocking collectives
 - Requests: `Wait*`, `Test*`, `Request_free`, `Cancel`
+- Symbol aliases: `PMPI_*`, `__wrap_MPI_*`, and OpenMPI internal
+  `ompi_mpi_*` symbols are normalized to MPI semantics
 - Communicators: basic alias/canonicalization support for duplicated or split
   communicators
 - RMA: `Put`, `Get`, `Accumulate`, selected atomic ops, and lock/fence-style

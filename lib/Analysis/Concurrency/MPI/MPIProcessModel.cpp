@@ -8,8 +8,8 @@
 
 #include "Analysis/Concurrency/MPI/MPIProcessModel.h"
 
-#include "Analysis/Concurrency/MPI/MPIModel.h"
 #include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
+#include "Analysis/Concurrency/MPI/MPISemantics.h"
 
 #include <algorithm>
 #include <deque>
@@ -30,20 +30,25 @@ namespace mpi {
 
 namespace {
 
-std::string normalizeMPIName(StringRef raw_name) {
-  StringRef name = raw_name;
-  if (name.startswith("\01")) {
-    name = name.drop_front();
+const Value *getOperandBySignedIndex(const CallBase *cb, int index) {
+  if (!cb) {
+    return nullptr;
   }
-  if (name.startswith("PMPI_")) {
-    return ("MPI_" + name.drop_front(5)).str();
+  int resolved = index;
+  if (resolved < 0) {
+    resolved = static_cast<int>(cb->arg_size()) + resolved;
   }
-  return name.str();
+  if (resolved < 0 || resolved >= static_cast<int>(cb->arg_size())) {
+    return nullptr;
+  }
+  return cb->getArgOperand(static_cast<unsigned>(resolved));
 }
 
 bool isMPIWildcardValue(int value) { return value == -1 || value == -2; }
 
-bool isMPIValidRankLikeValue(int value) { return value >= 0 || value == -1 || value == -2; }
+bool isMPIValidRankLikeValue(int value) {
+  return value >= 0 || value == -1 || value == -2;
+}
 
 bool isLikelyNullHandle(const Value *value) {
   if (!value) {
@@ -238,112 +243,36 @@ bool getIndexedStoreTarget(const StoreInst *store, const Value *base,
 
 MPIOpKind MPIProcessModel::classifyOperation(const Instruction *inst,
                                              ThreadAPI::TD_TYPE type) const {
-  switch (type) {
-  case ThreadAPI::TD_MPI_SESSION_INIT:
-  case ThreadAPI::TD_MPI_SESSION_FINALIZE:
-  case ThreadAPI::TD_MPI_SESSION_GET_INFO:
-  case ThreadAPI::TD_MPI_SESSION_GET_NUM_ERRCODES:
-  case ThreadAPI::TD_MPI_SESSION_GET_ERRHANDLER:
-  case ThreadAPI::TD_MPI_SESSION_SET_ERRHANDLER:
-    return MPIOpKind::INIT;
-  case ThreadAPI::TD_MPI_INIT:
-    return MPIOpKind::INIT;
-  case ThreadAPI::TD_MPI_FINALIZE:
-    return MPIOpKind::FINALIZE;
-  case ThreadAPI::TD_MPI_SEND:
-    return MPIOpKind::SEND_BLOCKING;
-  case ThreadAPI::TD_MPI_RECV:
-    return MPIOpKind::RECV_BLOCKING;
-  case ThreadAPI::TD_MPI_PROBE:
-    return MPIOpKind::PROBE_BLOCKING;
-  case ThreadAPI::TD_MPI_SENDRECV:
+  const MPISemanticDescriptor *descriptor = lookupMPISemantic(type);
+  if (!descriptor) {
     return MPIOpKind::UNKNOWN;
-  case ThreadAPI::TD_MPI_ISEND:
-    return MPIOpKind::SEND_NONBLOCKING;
-  case ThreadAPI::TD_MPI_IRECV:
-    return MPIOpKind::RECV_NONBLOCKING;
-  case ThreadAPI::TD_MPI_IPROBE:
-    return MPIOpKind::PROBE_NONBLOCKING;
-  case ThreadAPI::TD_MPI_WAIT:
-  case ThreadAPI::TD_MPI_WAITALL:
-  case ThreadAPI::TD_MPI_WAITANY:
-  case ThreadAPI::TD_MPI_WAITSOME:
-    return MPIOpKind::WAIT;
-  case ThreadAPI::TD_MPI_TEST:
-  case ThreadAPI::TD_MPI_TESTALL:
-  case ThreadAPI::TD_MPI_TESTANY:
-  case ThreadAPI::TD_MPI_TESTSOME:
-    return MPIOpKind::TEST;
-  case ThreadAPI::TD_MPI_BARRIER:
+  }
+
+  if (descriptor->split_into_sendrecv) {
+    return MPIOpKind::UNKNOWN;
+  }
+
+  if (descriptor->trait_driven_barrier_kind) {
     return thread_api_->isNonBlockingMPIBarrier(inst)
                ? MPIOpKind::BARRIER_NONBLOCKING
                : MPIOpKind::BARRIER_BLOCKING;
-  case ThreadAPI::TD_MPI_BCAST:
-  case ThreadAPI::TD_MPI_SCATTER:
-  case ThreadAPI::TD_MPI_GATHER:
-  case ThreadAPI::TD_MPI_ALLGATHER:
-  case ThreadAPI::TD_MPI_ALLTOALL:
-  case ThreadAPI::TD_MPI_REDUCE:
-  case ThreadAPI::TD_MPI_ALLREDUCE:
-  case ThreadAPI::TD_MPI_REDUCE_SCATTER:
-  case ThreadAPI::TD_MPI_SCAN:
+  }
+
+  if (descriptor->trait_driven_collective_kind) {
     return thread_api_->isNonBlockingMPICollective(inst)
                ? MPIOpKind::COLLECTIVE_NONBLOCKING
                : MPIOpKind::COLLECTIVE_BLOCKING;
-  case ThreadAPI::TD_MPI_WIN_CREATE:
-  case ThreadAPI::TD_MPI_WIN_FREE:
-    return MPIOpKind::RMA_WINDOW;
-  case ThreadAPI::TD_MPI_PUT:
-  case ThreadAPI::TD_MPI_GET:
-  case ThreadAPI::TD_MPI_ACCUMULATE:
-    return MPIOpKind::RMA_DATA;
-  case ThreadAPI::TD_MPI_WIN_FENCE:
-  case ThreadAPI::TD_MPI_WIN_LOCK:
-  case ThreadAPI::TD_MPI_WIN_UNLOCK:
-  case ThreadAPI::TD_MPI_WIN_FLUSH:
-  case ThreadAPI::TD_MPI_WIN_SYNC:
-  case ThreadAPI::TD_MPI_WIN_POST:
-  case ThreadAPI::TD_MPI_WIN_START:
-  case ThreadAPI::TD_MPI_WIN_COMPLETE:
-  case ThreadAPI::TD_MPI_WIN_WAIT:
-  case ThreadAPI::TD_MPI_WIN_TEST:
-    return MPIOpKind::RMA_SYNC;
-  case ThreadAPI::TD_MPI_COMM_DUP:
-  case ThreadAPI::TD_MPI_COMM_SPLIT:
-  case ThreadAPI::TD_MPI_COMM_CREATE:
-  case ThreadAPI::TD_MPI_COMM_FREE:
-    return MPIOpKind::COMM_MANAGEMENT;
-  case ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT:
-  case ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT:
-  case ThreadAPI::TD_MPI_REQUEST_START:
-  case ThreadAPI::TD_MPI_REQUEST_FREE:
-  case ThreadAPI::TD_MPI_CANCEL:
-    return MPIOpKind::REQUEST_MANAGEMENT;
-  case ThreadAPI::TD_MPI_MPROBE:
-  case ThreadAPI::TD_MPI_IMPROBE:
-  case ThreadAPI::TD_MPI_IMRECV:
-  case ThreadAPI::TD_MPI_MRECV:
-    return MPIOpKind::PROBE_NONBLOCKING;
-  case ThreadAPI::TD_MPI_TYPE_CONTIGUOUS:
-  case ThreadAPI::TD_MPI_TYPE_VECTOR:
-  case ThreadAPI::TD_MPI_TYPE_HVECTOR:
-  case ThreadAPI::TD_MPI_TYPE_INDEXED:
-  case ThreadAPI::TD_MPI_TYPE_HINDEXED:
-  case ThreadAPI::TD_MPI_TYPE_STRUCT:
-  case ThreadAPI::TD_MPI_TYPE_CREATE_DLPACK:
-  case ThreadAPI::TD_MPI_TYPE_CREATE_SUBARRAY:
-  case ThreadAPI::TD_MPI_TYPE_CREATE_DARRAY:
-  case ThreadAPI::TD_MPI_TYPE_CREATE_RESIZED:
-  case ThreadAPI::TD_MPI_TYPE_CREATE_HINDEXED:
-  case ThreadAPI::TD_MPI_TYPE_CREATE_HVECTOR:
-  case ThreadAPI::TD_MPI_TYPE_GET_EXTENT:
-  case ThreadAPI::TD_MPI_TYPE_GET_TRUE_EXTENT:
-  case ThreadAPI::TD_MPI_TYPE_SIZE:
-  case ThreadAPI::TD_MPI_TYPE_COMMIT:
-    return MPIOpKind::DATATYPE_CREATE;
-  default:
-    return MPIOpKind::UNKNOWN;
   }
+
+  if (type == ThreadAPI::TD_MPI_COMM_CREATE && inst) {
+    const Function *callee = thread_api_->getCallee(inst);
+    if (callee && StringRef(thread_api_->getSemanticTag(callee))
+                      .startswith("intercomm-")) {
+      return MPIOpKind::INTERCOMM_CREATION;
+    }
+  }
+
+  return descriptor->kind;
 }
 
 bool MPIProcessModel::tryGetConstantInt(const Value *value, int &out) const {
@@ -440,6 +369,17 @@ size_t MPIProcessModel::assignCommunicatorClass(CommunicatorID canonical) {
     return 0;
   }
   canonical = canonical->stripPointerCasts();
+
+  if (const auto *arg = dyn_cast<Argument>(canonical)) {
+    for (const auto &entry : communicator_class_ids_) {
+      const auto *other_arg = dyn_cast<Argument>(entry.first);
+      if (other_arg && other_arg->getArgNo() == arg->getArgNo()) {
+        communicator_class_ids_[canonical] = entry.second;
+        return entry.second;
+      }
+    }
+  }
+
   auto it = communicator_class_ids_.find(canonical);
   if (it != communicator_class_ids_.end()) {
     return it->second;
@@ -520,95 +460,119 @@ void MPIProcessModel::annotateRankConstraints(MPIOperation &op) const {
 
 int64_t MPIProcessModel::getDatatypeExtent(const Value *datatype_arg,
                                            const Instruction *context) const {
+  auto resolveBuiltinExtent = [](int datatype) {
+    switch (datatype) {
+    case 0:
+      return int64_t(1);
+    case 1:
+      return int64_t(2);
+    case 2:
+      return int64_t(4);
+    case 3:
+      return int64_t(8);
+    default:
+      return int64_t(-1);
+    }
+  };
+
+  const Value *canonical = canonicalizeDatatypeHandle(datatype_arg);
+  if (canonical) {
+    auto it = datatype_extent_bytes_.find(canonical);
+    if (it != datatype_extent_bytes_.end()) {
+      return it->second;
+    }
+  }
+
+  if (const auto *load = dyn_cast_or_null<LoadInst>(datatype_arg)) {
+    const Value *loaded_from =
+        canonicalizeDatatypeHandle(load->getPointerOperand());
+    if (loaded_from) {
+      auto it = datatype_extent_bytes_.find(loaded_from);
+      if (it != datatype_extent_bytes_.end()) {
+        return it->second;
+      }
+    }
+  }
+
   int datatype = 0;
-  if (!tryReadScalarInt(datatype_arg, datatype, context)) {
-    return -1;
+  if (tryReadScalarInt(datatype_arg, datatype, context)) {
+    return resolveBuiltinExtent(datatype);
   }
-  switch (datatype) {
-  case 0:
-    return 1;
-  case 1:
-    return 2;
-  case 2:
-    return 4;
-  case 3:
-    return 8;
-  default:
-    return -1;
-  }
+  return -1;
 }
 
-void MPIProcessModel::extractPointToPointDetails(MPIOperation &op,
-                                                 const CallBase *cb) {
+const Value *
+MPIProcessModel::canonicalizeDatatypeHandle(const Value *handle) const {
+  if (!handle) {
+    return nullptr;
+  }
+  handle = handle->stripPointerCasts();
+  if (const Value *underlying = getUnderlyingObject(handle)) {
+    handle = underlying->stripPointerCasts();
+  }
+  return handle;
+}
+
+void MPIProcessModel::registerDatatypeExtent(const Value *handle,
+                                             int64_t extent) {
+  if (!handle || extent <= 0) {
+    return;
+  }
+  datatype_extent_bytes_[canonicalizeDatatypeHandle(handle)] = extent;
+}
+
+void MPIProcessModel::extractPointToPointDetails(
+    MPIOperation &op, const CallBase *cb,
+    const MPISemanticDescriptor &descriptor) {
   if (!cb) {
     return;
   }
 
-  unsigned num_args = cb->arg_size();
-  const bool send_like = op.kind == MPIOpKind::SEND_BLOCKING ||
-                         op.kind == MPIOpKind::SEND_NONBLOCKING ||
-                         op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT;
-  const bool recv_like = op.kind == MPIOpKind::RECV_BLOCKING ||
-                         op.kind == MPIOpKind::RECV_NONBLOCKING ||
-                         op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT;
+  const Value *datatype = getOperandBySignedIndex(cb, descriptor.datatype_arg);
+  op.datatype = datatype;
+  op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
 
-  if (send_like) {
-    if (num_args >= 6) {
-      op.datatype = cb->getArgOperand(2);
-      op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
-      int count = 0;
-      if (tryReadScalarInt(cb->getArgOperand(1), count, op.inst) &&
-          op.datatype_size > 0) {
-        op.byte_length = static_cast<int64_t>(count) * op.datatype_size;
-      }
-      int value = -1;
-      if (tryGetConstantInt(cb->getArgOperand(3), value)) {
-        op.dest_rank = value;
-      } else {
-        tryGetScalarRange(cb->getArgOperand(3), op.dest_rank_min,
-                          op.dest_rank_max);
-      }
-      if (tryGetConstantInt(cb->getArgOperand(4), value)) {
-        op.tag = value;
-      }
-      op.communicator = canonicalizeCommunicator(cb->getArgOperand(5));
-    }
-    if (op.kind == MPIOpKind::SEND_NONBLOCKING && num_args >= 7) {
-      op.request = cb->getArgOperand(6);
-    }
-    if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT && num_args >= 7) {
-      op.request = cb->getArgOperand(6);
-    }
-    return;
+  const Value *count_arg = getOperandBySignedIndex(cb, descriptor.count_arg);
+  int count = 0;
+  if (count_arg && tryReadScalarInt(count_arg, count, op.inst) &&
+      op.datatype_size > 0) {
+    op.byte_length = static_cast<int64_t>(count) * op.datatype_size;
   }
 
-  if (recv_like) {
-    if (num_args >= 6) {
-      op.datatype = cb->getArgOperand(2);
-      op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
-      int count = 0;
-      if (tryReadScalarInt(cb->getArgOperand(1), count, op.inst) &&
-          op.datatype_size > 0) {
-        op.byte_length = static_cast<int64_t>(count) * op.datatype_size;
-      }
-      int value = -1;
-      if (tryGetConstantInt(cb->getArgOperand(3), value)) {
-        op.source_rank = value;
+  const Value *peer_arg = getOperandBySignedIndex(cb, descriptor.peer_rank_arg);
+  if (peer_arg) {
+    int value = -1;
+    if (tryGetConstantInt(peer_arg, value)) {
+      if (descriptor.peer_rank_is_dest) {
+        op.dest_rank = value;
       } else {
-        tryGetScalarRange(cb->getArgOperand(3), op.source_rank_min,
-                          op.source_rank_max);
+        op.source_rank = value;
       }
-      if (tryGetConstantInt(cb->getArgOperand(4), value)) {
-        op.tag = value;
-      }
-      op.communicator = canonicalizeCommunicator(cb->getArgOperand(5));
+    } else if (descriptor.peer_rank_is_dest) {
+      tryGetScalarRange(peer_arg, op.dest_rank_min, op.dest_rank_max);
+    } else {
+      tryGetScalarRange(peer_arg, op.source_rank_min, op.source_rank_max);
     }
-    if (op.kind == MPIOpKind::RECV_NONBLOCKING && num_args >= 7) {
-      op.request = cb->getArgOperand(6);
+  }
+
+  const Value *tag_arg = getOperandBySignedIndex(cb, descriptor.tag_arg);
+  if (tag_arg) {
+    int value = -1;
+    if (tryGetConstantInt(tag_arg, value)) {
+      op.tag = value;
     }
-    if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT && num_args >= 7) {
-      op.request = cb->getArgOperand(6);
-    }
+  }
+
+  const Value *comm_arg =
+      getOperandBySignedIndex(cb, descriptor.communicator_arg);
+  if (comm_arg) {
+    op.communicator = canonicalizeCommunicator(comm_arg);
+  }
+
+  const Value *request_arg =
+      getOperandBySignedIndex(cb, descriptor.request_arg);
+  if (request_arg) {
+    op.request = request_arg;
   }
 }
 
@@ -700,293 +664,334 @@ void MPIProcessModel::extractSendrecvDetails(MPIOperation &op,
   }
 }
 
-void MPIProcessModel::extractProbeDetails(MPIOperation &op,
-                                          const CallBase *cb) const {
-  if (!cb || cb->arg_size() < 3) {
+void MPIProcessModel::extractProbeDetails(
+    MPIOperation &op, const CallBase *cb,
+    const MPISemanticDescriptor &descriptor) const {
+  if (!cb) {
     return;
   }
-  int value = -1;
-  if (tryGetConstantInt(cb->getArgOperand(0), value)) {
-    op.source_rank = value;
-  } else {
-    tryGetScalarRange(cb->getArgOperand(0), op.source_rank_min,
-                      op.source_rank_max);
+  const Value *peer_arg = getOperandBySignedIndex(cb, descriptor.peer_rank_arg);
+  if (peer_arg) {
+    int value = -1;
+    if (tryGetConstantInt(peer_arg, value)) {
+      op.source_rank = value;
+    } else {
+      tryGetScalarRange(peer_arg, op.source_rank_min, op.source_rank_max);
+    }
   }
-  if (tryGetConstantInt(cb->getArgOperand(1), value)) {
-    op.tag = value;
+
+  const Value *tag_arg = getOperandBySignedIndex(cb, descriptor.tag_arg);
+  if (tag_arg) {
+    int value = -1;
+    if (tryGetConstantInt(tag_arg, value)) {
+      op.tag = value;
+    }
   }
-  op.communicator = canonicalizeCommunicator(cb->getArgOperand(2));
+
+  const Value *comm_arg =
+      getOperandBySignedIndex(cb, descriptor.communicator_arg);
+  if (comm_arg) {
+    op.communicator = canonicalizeCommunicator(comm_arg);
+  }
 }
 
-void MPIProcessModel::extractCollectiveDetails(MPIOperation &op,
-                                               const CallBase *cb) const {
+void MPIProcessModel::extractCollectiveDetails(
+    MPIOperation &op, const CallBase *cb, StringRef semantic_tag,
+    const MPISemanticDescriptor &descriptor) const {
   if (!cb || cb->arg_size() == 0) {
     return;
   }
-  const Function *callee = cb->getCalledFunction();
-  if (!callee) {
-    return;
-  }
+
   const bool nonblocking = op.kind == MPIOpKind::BARRIER_NONBLOCKING ||
                            op.kind == MPIOpKind::COLLECTIVE_NONBLOCKING;
-  unsigned comm_idx = cb->arg_size() - 1;
-  if (nonblocking && cb->arg_size() >= 2) {
-    comm_idx = cb->arg_size() - 2;
+  int comm_index = descriptor.communicator_arg;
+  if (nonblocking && descriptor.collective_nonblocking_comm_arg != -1) {
+    comm_index = descriptor.collective_nonblocking_comm_arg;
   }
-  if (comm_idx < cb->arg_size()) {
-    op.communicator = canonicalizeCommunicator(cb->getArgOperand(comm_idx));
-    op.communicator_subgroup_id =
-        getCommunicatorSubgroupID(cb->getArgOperand(comm_idx));
+  const Value *comm_arg = getOperandBySignedIndex(cb, comm_index);
+  if (comm_arg) {
+    op.communicator = canonicalizeCommunicator(comm_arg);
+    op.communicator_subgroup_id = getCommunicatorSubgroupID(comm_arg);
   }
+
   if (nonblocking) {
-    op.request = cb->getArgOperand(cb->arg_size() - 1);
+    const Value *request_arg = getOperandBySignedIndex(
+        cb, descriptor.collective_nonblocking_request_arg);
+    if (request_arg) {
+      op.request = request_arg;
+    }
+  }
+
+  if (semantic_tag.startswith("neighbor-") ||
+      semantic_tag.startswith("ineighbor-")) {
+    op.collective_protocol_class_id = 1;
+  } else if (semantic_tag.startswith("intercomm-")) {
+    op.collective_protocol_class_id = 2;
+  } else {
+    op.collective_protocol_class_id = 0;
   }
 }
 
-void MPIProcessModel::extractRequestDetails(MPIOperation &op,
-                                            const CallBase *cb) const {
+void MPIProcessModel::extractRequestDetails(
+    MPIOperation &op, const CallBase *cb,
+    const MPISemanticDescriptor &descriptor) const {
   if (!cb) {
     return;
   }
-  unsigned num_args = cb->arg_size();
-  switch (op.td_type) {
-  case ThreadAPI::TD_MPI_WAIT:
-  case ThreadAPI::TD_MPI_TEST:
-    if (num_args >= 1) {
-      op.request = cb->getArgOperand(0);
-    }
-    break;
-  case ThreadAPI::TD_MPI_WAITALL:
-  case ThreadAPI::TD_MPI_WAITANY:
-  case ThreadAPI::TD_MPI_WAITSOME:
-  case ThreadAPI::TD_MPI_TESTALL:
-  case ThreadAPI::TD_MPI_TESTANY:
-  case ThreadAPI::TD_MPI_TESTSOME:
-    if (num_args >= 2) {
-      op.request = cb->getArgOperand(1);
-    }
-    break;
-  case ThreadAPI::TD_MPI_REQUEST_FREE:
-  case ThreadAPI::TD_MPI_CANCEL:
-    if (num_args >= 1) {
-      op.request = cb->getArgOperand(0);
-    }
-    break;
-  case ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT:
-    if (num_args >= 7) {
-      op.request = cb->getArgOperand(6);
-    }
-    break;
-  case ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT:
-    if (num_args >= 7) {
-      op.request = cb->getArgOperand(6);
-    }
-    break;
-  case ThreadAPI::TD_MPI_REQUEST_START:
-    if (num_args >= 2) {
-      op.request = cb->getArgOperand(1);
-    } else if (num_args >= 1) {
-      op.request = cb->getArgOperand(0);
-    }
-    break;
-  default:
-    break;
+  const Value *request_arg =
+      getOperandBySignedIndex(cb, descriptor.request_arg);
+  if (request_arg) {
+    op.request = request_arg;
+    return;
+  }
+
+  if (op.td_type == ThreadAPI::TD_MPI_REQUEST_START) {
+    op.request = getOperandBySignedIndex(cb, 0);
   }
 }
 
-void MPIProcessModel::extractRMAWindowDetails(MPIOperation &op,
-                                              const CallBase *cb,
-                                              StringRef callee_name) const {
+void MPIProcessModel::extractRMAWindowDetails(
+    MPIOperation &op, const CallBase *cb, StringRef semantic_tag,
+    const MPISemanticDescriptor &descriptor) const {
   if (!cb) {
     return;
   }
-  if (callee_name.equals("MPI_Win_create") ||
-      callee_name.equals("MPI_Win_allocate") ||
-      callee_name.equals("MPI_Win_allocate_shared") ||
-      callee_name.equals("MPI_Win_create_dynamic")) {
+  if (StringRef(semantic_tag).startswith("win-create") ||
+      StringRef(semantic_tag).equals("win-allocate") ||
+      StringRef(semantic_tag).equals("win-allocate-shared")) {
     if (cb->arg_size() >= 2) {
-      op.communicator =
-          canonicalizeCommunicator(cb->getArgOperand(cb->arg_size() - 2));
-      op.window = cb->getArgOperand(cb->arg_size() - 1);
+      const Value *comm_arg = getOperandBySignedIndex(cb, -2);
+      const Value *window_arg = getOperandBySignedIndex(cb, -1);
+      op.communicator = canonicalizeCommunicator(comm_arg);
+      op.window = window_arg;
     }
     return;
   }
-  if (callee_name.equals("MPI_Win_free") && cb->arg_size() >= 1) {
-    op.window = cb->getArgOperand(0);
+
+  if (StringRef(semantic_tag).equals("win-free")) {
+    op.window = getOperandBySignedIndex(cb, descriptor.window_arg);
   }
 }
 
-void MPIProcessModel::extractRMADataDetails(MPIOperation &op,
-                                            const CallBase *cb,
-                                            StringRef callee_name) const {
+void MPIProcessModel::extractRMADataDetails(
+    MPIOperation &op, const CallBase *cb, StringRef semantic_tag,
+    const MPISemanticDescriptor &descriptor) const {
   if (!cb) {
     return;
   }
-  unsigned num_args = cb->arg_size();
-  int value = -1;
-  auto setByteLength = [&](unsigned count_idx, unsigned datatype_idx) {
-    int count = 0;
-    if (!tryReadScalarInt(cb->getArgOperand(count_idx), count, op.inst)) {
+
+  auto setByteLength = [&](int count_idx, int datatype_idx) {
+    const Value *count_value = getOperandBySignedIndex(cb, count_idx);
+    const Value *datatype_value = getOperandBySignedIndex(cb, datatype_idx);
+    if (!count_value || !datatype_value) {
       return;
     }
-    int64_t extent =
-        getDatatypeExtent(cb->getArgOperand(datatype_idx), op.inst);
+    int count = 0;
+    if (!tryReadScalarInt(count_value, count, op.inst)) {
+      return;
+    }
+    int64_t extent = getDatatypeExtent(datatype_value, op.inst);
     if (extent <= 0) {
       return;
     }
     op.byte_length = static_cast<int64_t>(count) * extent;
   };
-  if ((callee_name.equals("MPI_Put") || callee_name.equals("MPI_Rput") ||
-       callee_name.equals("MPI_Get") || callee_name.equals("MPI_Rget") ||
-       callee_name.equals("MPI_Accumulate") ||
-       callee_name.equals("MPI_Raccumulate")) &&
-      num_args >= 8) {
-    setByteLength(1, 2);
-    if (tryGetConstantInt(cb->getArgOperand(3), value)) {
-      op.target_rank = value;
-    } else {
-      tryGetScalarRange(cb->getArgOperand(3), op.target_rank_min,
-                        op.target_rank_max);
-    }
-    if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(4))) {
-      op.target_disp = disp->getSExtValue();
-    }
-    op.window = cb->getArgOperand(7);
-    return;
-  }
 
-  if ((callee_name.equals("MPI_Get_accumulate") ||
-       callee_name.equals("MPI_Rget_accumulate")) &&
-      num_args >= 12) {
-    setByteLength(4, 5);
-    if (tryGetConstantInt(cb->getArgOperand(6), value)) {
-      op.target_rank = value;
-    } else {
-      tryGetScalarRange(cb->getArgOperand(6), op.target_rank_min,
-                        op.target_rank_max);
-    }
-    if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(7))) {
-      op.target_disp = disp->getSExtValue();
-    }
-    op.window = cb->getArgOperand(11);
-    return;
-  }
+  int count_idx = descriptor.count_arg;
+  int datatype_idx = descriptor.datatype_arg;
+  int rank_idx = descriptor.target_rank_arg;
+  int disp_idx = descriptor.target_disp_arg;
+  int window_idx = descriptor.window_arg;
 
-  if (callee_name.equals("MPI_Fetch_and_op") && num_args >= 7) {
+  if (StringRef(semantic_tag).equals("get-accumulate") ||
+      StringRef(semantic_tag).equals("rget-accumulate")) {
+    count_idx = 4;
+    datatype_idx = 5;
+    rank_idx = 6;
+    disp_idx = 7;
+    window_idx = 11;
+  } else if (StringRef(semantic_tag).equals("fetch-and-op")) {
+    count_idx = -1;
+    datatype_idx = -1;
+    rank_idx = 3;
+    disp_idx = 4;
+    window_idx = 6;
     op.byte_length = 1;
-    if (tryGetConstantInt(cb->getArgOperand(3), value)) {
-      op.target_rank = value;
-    } else {
-      tryGetScalarRange(cb->getArgOperand(3), op.target_rank_min,
-                        op.target_rank_max);
-    }
-    if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(4))) {
-      op.target_disp = disp->getSExtValue();
-    }
-    op.window = cb->getArgOperand(6);
-    return;
-  }
-
-  if (callee_name.equals("MPI_Compare_and_swap") && num_args >= 7) {
+  } else if (StringRef(semantic_tag).equals("compare-and-swap")) {
+    count_idx = -1;
+    datatype_idx = -1;
+    rank_idx = 4;
+    disp_idx = 5;
+    window_idx = 6;
     op.byte_length = 1;
-    if (tryGetConstantInt(cb->getArgOperand(4), value)) {
-      op.target_rank = value;
-    } else {
-      tryGetScalarRange(cb->getArgOperand(4), op.target_rank_min,
-                        op.target_rank_max);
-    }
-    if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(5))) {
-      op.target_disp = disp->getSExtValue();
-    }
-    op.window = cb->getArgOperand(6);
-    return;
   }
 
-  if (num_args >= 8) {
-    setByteLength(1, 2);
-    if (tryGetConstantInt(cb->getArgOperand(3), value)) {
+  if (count_idx >= 0 && datatype_idx >= 0) {
+    setByteLength(count_idx, datatype_idx);
+  }
+
+  const Value *target_rank_arg = getOperandBySignedIndex(cb, rank_idx);
+  if (target_rank_arg) {
+    int value = -1;
+    if (tryGetConstantInt(target_rank_arg, value)) {
       op.target_rank = value;
     } else {
-      tryGetScalarRange(cb->getArgOperand(3), op.target_rank_min,
+      tryGetScalarRange(target_rank_arg, op.target_rank_min,
                         op.target_rank_max);
     }
-    if (const auto *disp = dyn_cast<ConstantInt>(cb->getArgOperand(4))) {
-      op.target_disp = disp->getSExtValue();
-    }
-    op.window = cb->getArgOperand(7);
   }
+
+  const Value *disp_arg = getOperandBySignedIndex(cb, disp_idx);
+  if (const auto *disp = dyn_cast_or_null<ConstantInt>(disp_arg)) {
+    op.target_disp = disp->getSExtValue();
+  }
+
+  op.window = getOperandBySignedIndex(cb, window_idx);
 }
 
-void MPIProcessModel::extractRMASyncDetails(MPIOperation &op,
-                                            const CallBase *cb,
-                                            StringRef callee_name) const {
+void MPIProcessModel::extractRMASyncDetails(
+    MPIOperation &op, const CallBase *cb, StringRef semantic_tag,
+    const MPISemanticDescriptor &descriptor) const {
   if (!cb) {
     return;
   }
-  unsigned num_args = cb->arg_size();
-  int value = -1;
-  if (callee_name.equals("MPI_Win_fence")) {
-    if (num_args >= 2) {
-      op.window = cb->getArgOperand(1);
-    }
+
+  StringRef tag = semantic_tag;
+  if (tag.equals("win-fence")) {
+    op.window = getOperandBySignedIndex(cb, 1);
     return;
   }
-  if (callee_name.equals("MPI_Win_lock")) {
-    if (num_args >= 4) {
-      if (tryGetConstantInt(cb->getArgOperand(1), value)) {
+
+  if (tag.equals("win-lock")) {
+    const Value *target_rank_arg = getOperandBySignedIndex(cb, 1);
+    if (target_rank_arg) {
+      int value = -1;
+      if (tryGetConstantInt(target_rank_arg, value)) {
         op.target_rank = value;
       } else {
-        tryGetScalarRange(cb->getArgOperand(1), op.target_rank_min,
+        tryGetScalarRange(target_rank_arg, op.target_rank_min,
                           op.target_rank_max);
       }
-      op.window = cb->getArgOperand(3);
     }
+    op.window = getOperandBySignedIndex(cb, 3);
     return;
   }
-  if (callee_name.equals("MPI_Win_lock_all")) {
-    if (num_args >= 2) {
-      op.window = cb->getArgOperand(1);
-    }
+
+  if (tag.equals("win-lock-all")) {
+    op.window = getOperandBySignedIndex(cb, 1);
     return;
   }
-  if (callee_name.equals("MPI_Win_unlock") ||
-      callee_name.equals("MPI_Win_flush") ||
-      callee_name.equals("MPI_Win_flush_local")) {
-    if (num_args >= 2) {
-      if (tryGetConstantInt(cb->getArgOperand(0), value)) {
+
+  if (tag.equals("win-unlock") || tag.equals("win-flush") ||
+      tag.equals("win-flush-local")) {
+    const Value *target_rank_arg = getOperandBySignedIndex(cb, 0);
+    if (target_rank_arg) {
+      int value = -1;
+      if (tryGetConstantInt(target_rank_arg, value)) {
         op.target_rank = value;
       } else {
-        tryGetScalarRange(cb->getArgOperand(0), op.target_rank_min,
+        tryGetScalarRange(target_rank_arg, op.target_rank_min,
                           op.target_rank_max);
       }
-      op.window = cb->getArgOperand(1);
     }
-    op.rma_local_completion_only = callee_name.equals("MPI_Win_flush_local");
+    op.window = getOperandBySignedIndex(cb, 1);
+    op.rma_local_completion_only = tag.equals("win-flush-local");
     return;
   }
-  if (callee_name.equals("MPI_Win_unlock_all") ||
-      callee_name.equals("MPI_Win_flush_all") ||
-      callee_name.equals("MPI_Win_flush_local_all")) {
-    if (num_args >= 1) {
-      op.window = cb->getArgOperand(0);
-    }
-    op.rma_local_completion_only =
-        callee_name.equals("MPI_Win_flush_local_all");
+
+  if (tag.equals("win-unlock-all") || tag.equals("win-flush-all") ||
+      tag.equals("win-flush-local-all")) {
+    op.window = getOperandBySignedIndex(cb, 0);
+    op.rma_local_completion_only = tag.equals("win-flush-local-all");
     return;
   }
-  if (callee_name.equals("MPI_Win_sync") ||
-      callee_name.equals("MPI_Win_complete") ||
-      callee_name.equals("MPI_Win_wait") ||
-      callee_name.equals("MPI_Win_test")) {
-    if (num_args >= 1) {
-      op.window = cb->getArgOperand(0);
+
+  if (tag.equals("win-sync") || tag.equals("win-complete") ||
+      tag.equals("win-wait") || tag.equals("win-test")) {
+    op.window = getOperandBySignedIndex(cb, 0);
+    return;
+  }
+
+  if (tag.equals("win-post") || tag.equals("win-start")) {
+    op.window = getOperandBySignedIndex(cb, 2);
+    return;
+  }
+
+  if (descriptor.window_arg != -1) {
+    op.window = getOperandBySignedIndex(cb, descriptor.window_arg);
+  }
+}
+
+void MPIProcessModel::extractDatatypeDetails(MPIOperation &op,
+                                             const CallBase *cb,
+                                             StringRef semantic_tag) {
+  if (!cb) {
+    return;
+  }
+
+  auto readConstExtent = [&](const Value *value) -> int64_t {
+    int int_value = 0;
+    if (!tryReadScalarInt(value, int_value, op.inst)) {
+      return -1;
+    }
+    return static_cast<int64_t>(int_value);
+  };
+
+  if (semantic_tag.equals("type-contiguous") && cb->arg_size() >= 3) {
+    int64_t count = readConstExtent(cb->getArgOperand(0));
+    int64_t base_extent = getDatatypeExtent(cb->getArgOperand(1), op.inst);
+    if (count > 0 && base_extent > 0) {
+      registerDatatypeExtent(cb->getArgOperand(2), count * base_extent);
+      op.is_derived_datatype = true;
+      op.datatype_size = count * base_extent;
+      op.datatype = cb->getArgOperand(2);
     }
     return;
   }
-  if (callee_name.equals("MPI_Win_post") ||
-      callee_name.equals("MPI_Win_start")) {
-    if (num_args >= 3) {
-      op.window = cb->getArgOperand(2);
+
+  if ((semantic_tag.equals("type-vector") ||
+       semantic_tag.equals("type-hvector") ||
+       semantic_tag.equals("type-create-hvector")) &&
+      cb->arg_size() >= 5) {
+    int64_t count = readConstExtent(cb->getArgOperand(0));
+    int64_t blocklength = readConstExtent(cb->getArgOperand(1));
+    int64_t base_extent = getDatatypeExtent(cb->getArgOperand(3), op.inst);
+    if (count > 0 && blocklength > 0 && base_extent > 0) {
+      int64_t extent = count * blocklength * base_extent;
+      registerDatatypeExtent(cb->getArgOperand(4), extent);
+      op.is_derived_datatype = true;
+      op.datatype_size = extent;
+      op.datatype = cb->getArgOperand(4);
+    }
+    return;
+  }
+
+  if (semantic_tag.equals("type-create-resized") && cb->arg_size() >= 4) {
+    int64_t extent = readConstExtent(cb->getArgOperand(2));
+    if (extent > 0) {
+      registerDatatypeExtent(cb->getArgOperand(3), extent);
+      op.is_derived_datatype = true;
+      op.datatype_size = extent;
+      op.datatype = cb->getArgOperand(3);
+    }
+    return;
+  }
+
+  if (semantic_tag.equals("type-create-subarray") && cb->arg_size() >= 8) {
+    int64_t base_extent = getDatatypeExtent(cb->getArgOperand(6), op.inst);
+    if (base_extent > 0) {
+      registerDatatypeExtent(cb->getArgOperand(7), base_extent);
+      op.is_derived_datatype = true;
+      op.datatype_size = base_extent;
+      op.datatype = cb->getArgOperand(7);
+    }
+    return;
+  }
+
+  if (semantic_tag.equals("type-commit") && cb->arg_size() >= 1) {
+    int64_t existing_extent = getDatatypeExtent(cb->getArgOperand(0), op.inst);
+    if (existing_extent > 0) {
+      registerDatatypeExtent(cb->getArgOperand(0), existing_extent);
     }
   }
 }
@@ -997,50 +1002,47 @@ void MPIProcessModel::extractOperationDetails(MPIOperation &op) {
     return;
   }
   const Function *callee = cb->getCalledFunction();
-  const std::string normalized_name =
-      callee ? normalizeMPIName(callee->getName()) : std::string();
-  StringRef callee_name = normalized_name;
+  const std::string semantic_tag_storage =
+      callee ? thread_api_->getSemanticTag(callee) : std::string();
+  const StringRef semantic_tag = semantic_tag_storage;
 
-  switch (op.kind) {
-  case MPIOpKind::SEND_BLOCKING:
-  case MPIOpKind::RECV_BLOCKING:
-  case MPIOpKind::SEND_NONBLOCKING:
-  case MPIOpKind::RECV_NONBLOCKING:
-    if (op.td_type == ThreadAPI::TD_MPI_SENDRECV) {
+  const MPISemanticDescriptor *descriptor = lookupMPISemantic(op.td_type);
+  if (!descriptor) {
+    return;
+  }
+
+  switch (descriptor->family) {
+  case MPISemanticFamily::PointToPoint:
+    if (descriptor->split_into_sendrecv) {
       extractSendrecvDetails(op, cb);
     } else {
-      extractPointToPointDetails(op, cb);
+      extractPointToPointDetails(op, cb, *descriptor);
     }
     break;
-  case MPIOpKind::PROBE_BLOCKING:
-  case MPIOpKind::PROBE_NONBLOCKING:
-    extractProbeDetails(op, cb);
+  case MPISemanticFamily::Probe:
+    extractProbeDetails(op, cb, *descriptor);
     break;
-  case MPIOpKind::WAIT:
-  case MPIOpKind::TEST:
-    extractRequestDetails(op, cb);
-    break;
-  case MPIOpKind::BARRIER_BLOCKING:
-  case MPIOpKind::BARRIER_NONBLOCKING:
-  case MPIOpKind::COLLECTIVE_BLOCKING:
-  case MPIOpKind::COLLECTIVE_NONBLOCKING:
-    extractCollectiveDetails(op, cb);
-    break;
-  case MPIOpKind::REQUEST_MANAGEMENT:
+  case MPISemanticFamily::Request:
     if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT ||
         op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT) {
-      extractPointToPointDetails(op, cb);
+      extractPointToPointDetails(op, cb, *descriptor);
     }
-    extractRequestDetails(op, cb);
+    extractRequestDetails(op, cb, *descriptor);
     break;
-  case MPIOpKind::RMA_WINDOW:
-    extractRMAWindowDetails(op, cb, callee_name);
+  case MPISemanticFamily::Collective:
+    extractCollectiveDetails(op, cb, semantic_tag, *descriptor);
     break;
-  case MPIOpKind::RMA_DATA:
-    extractRMADataDetails(op, cb, callee_name);
+  case MPISemanticFamily::RMAWindow:
+    extractRMAWindowDetails(op, cb, semantic_tag, *descriptor);
     break;
-  case MPIOpKind::RMA_SYNC:
-    extractRMASyncDetails(op, cb, callee_name);
+  case MPISemanticFamily::RMAData:
+    extractRMADataDetails(op, cb, semantic_tag, *descriptor);
+    break;
+  case MPISemanticFamily::RMASync:
+    extractRMASyncDetails(op, cb, semantic_tag, *descriptor);
+    break;
+  case MPISemanticFamily::Datatype:
+    extractDatatypeDetails(op, cb, semantic_tag);
     break;
   default:
     break;
@@ -1058,6 +1060,7 @@ void MPIProcessModel::analyzeModule() {
   communicator_subgroup_ids_.clear();
   next_communicator_subgroup_id_ = 1;
   deferred_lowering_stats_.clear();
+  datatype_extent_bytes_.clear();
   rank_analysis_ = std::make_unique<MPI::MPIRankAnalysis>(module_);
   rank_analysis_->analyze();
 
@@ -1073,7 +1076,8 @@ void MPIProcessModel::analyzeModule() {
       if (type == ThreadAPI::TD_DUMMY)
         continue;
 
-      if (type == ThreadAPI::TD_MPI_SENDRECV) {
+      const MPISemanticDescriptor *descriptor = lookupMPISemantic(type);
+      if (descriptor && descriptor->split_into_sendrecv) {
         MPIOperation send_op(I, MPIOpKind::SEND_BLOCKING, type);
         extractOperationDetails(send_op);
         annotateRankConstraints(send_op);
@@ -1113,41 +1117,32 @@ void MPIProcessModel::analyzeModule() {
         }
       }
 
-      if (kind == MPIOpKind::COMM_MANAGEMENT) {
+      if (kind == MPIOpKind::COMM_MANAGEMENT ||
+          kind == MPIOpKind::INTERCOMM_CREATION) {
         if (const auto *cb = dyn_cast<CallBase>(I)) {
-          const std::string normalized_name =
-              callee ? normalizeMPIName(callee->getName()) : std::string();
-          StringRef callee_name = normalized_name;
           const Value *root =
               cb->arg_size() >= 1 ? cb->getArgOperand(0) : nullptr;
-          if ((callee_name.equals("MPI_Comm_dup") ||
-               callee_name.equals("MPI_Comm_dup_with_info") ||
-               callee_name.equals("MPI_Comm_idup")) &&
-              cb->arg_size() >= 2) {
+
+          if (kind == MPIOpKind::INTERCOMM_CREATION && cb->arg_size() >= 1) {
+            registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
+                                      root);
+          } else if (type == ThreadAPI::TD_MPI_COMM_DUP &&
+                     cb->arg_size() >= 2) {
             registerCommunicatorAlias(cb->getArgOperand(1), root);
-          } else if (callee_name.equals("MPI_Comm_split") &&
+          } else if (type == ThreadAPI::TD_MPI_COMM_SPLIT &&
                      cb->arg_size() >= 4) {
             int color = 0;
             if (tryReadScalarInt(cb->getArgOperand(1), color, I)) {
-              registerCommunicatorSubgroup(cb->getArgOperand(3), root, color);
+              registerCommunicatorSubgroup(
+                  cb->getArgOperand(cb->arg_size() - 1), root, color);
             } else {
-              registerCommunicatorAlias(cb->getArgOperand(3), root);
+              registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
+                                        root);
             }
-          } else if (callee_name.equals("MPI_Comm_split_type") &&
-                     cb->arg_size() >= 5) {
-            int split_type = 0;
-            if (tryReadScalarInt(cb->getArgOperand(1), split_type, I)) {
-              registerCommunicatorSubgroup(cb->getArgOperand(4), root,
-                                           split_type);
-            } else {
-              registerCommunicatorAlias(cb->getArgOperand(4), root);
-            }
-          } else if (callee_name.equals("MPI_Comm_create") &&
+          } else if (type == ThreadAPI::TD_MPI_COMM_CREATE &&
                      cb->arg_size() >= 3) {
-            registerCommunicatorAlias(cb->getArgOperand(2), root);
-          } else if (callee_name.equals("MPI_Comm_create_group") &&
-                     cb->arg_size() >= 4) {
-            registerCommunicatorAlias(cb->getArgOperand(3), root);
+            registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
+                                      root);
           }
         }
       }
@@ -1201,9 +1196,8 @@ void MPIProcessModel::analyzeModule() {
         op.kind != MPIOpKind::COLLECTIVE_NONBLOCKING) {
       continue;
     }
-    auto key =
-        std::make_tuple(op.communicator_class_id, op.communicator_subgroup_id,
-                        op.function);
+    auto key = std::make_tuple(op.communicator_class_id,
+                               op.communicator_subgroup_id, op.function);
     op.protocol_sequence_id = protocol_sequence_by_scope[key]++;
     op.semantic_relation.kind = concurrency::RelationKind::SameProtocolSlot;
     op.semantic_relation.proof =
@@ -2035,8 +2029,8 @@ MPIProcessModel::findCountDatatypeMismatches() const {
       bool datatype_mismatch = false;
 
       if (send_op.datatype && recv_op.datatype &&
-          send_op.datatype != recv_op.datatype &&
-          send_op.datatype_size > 0 && recv_op.datatype_size > 0 &&
+          send_op.datatype != recv_op.datatype && send_op.datatype_size > 0 &&
+          recv_op.datatype_size > 0 &&
           send_op.datatype_size != recv_op.datatype_size) {
         datatype_mismatch = true;
       }

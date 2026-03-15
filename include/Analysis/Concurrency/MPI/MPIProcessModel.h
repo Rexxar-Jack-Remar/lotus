@@ -15,6 +15,7 @@
 
 #include "Analysis/Concurrency/MPI/MPIOperation.h"
 #include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
+#include "Analysis/Concurrency/MPI/MPISemantics.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include <map>
@@ -148,18 +149,27 @@ private:
   bool tryGetConstantInt(const llvm::Value *value, int &out) const;
   bool tryGetScalarRange(const llvm::Value *value, int &min_out,
                          int &max_out) const;
-  void extractPointToPointDetails(MPIOperation &op, const llvm::CallBase *cb);
+  void extractPointToPointDetails(MPIOperation &op, const llvm::CallBase *cb,
+                                  const MPISemanticDescriptor &descriptor);
   void extractSendrecvDetails(MPIOperation &op, const llvm::CallBase *cb) const;
-  void extractProbeDetails(MPIOperation &op, const llvm::CallBase *cb) const;
-  void extractCollectiveDetails(MPIOperation &op,
-                                const llvm::CallBase *cb) const;
-  void extractRequestDetails(MPIOperation &op, const llvm::CallBase *cb) const;
+  void extractProbeDetails(MPIOperation &op, const llvm::CallBase *cb,
+                           const MPISemanticDescriptor &descriptor) const;
+  void extractCollectiveDetails(MPIOperation &op, const llvm::CallBase *cb,
+                                llvm::StringRef semantic_tag,
+                                const MPISemanticDescriptor &descriptor) const;
+  void extractRequestDetails(MPIOperation &op, const llvm::CallBase *cb,
+                             const MPISemanticDescriptor &descriptor) const;
   void extractRMAWindowDetails(MPIOperation &op, const llvm::CallBase *cb,
-                               llvm::StringRef callee_name) const;
+                               llvm::StringRef semantic_tag,
+                               const MPISemanticDescriptor &descriptor) const;
   void extractRMADataDetails(MPIOperation &op, const llvm::CallBase *cb,
-                             llvm::StringRef callee_name) const;
+                             llvm::StringRef semantic_tag,
+                             const MPISemanticDescriptor &descriptor) const;
   void extractRMASyncDetails(MPIOperation &op, const llvm::CallBase *cb,
-                             llvm::StringRef callee_name) const;
+                             llvm::StringRef semantic_tag,
+                             const MPISemanticDescriptor &descriptor) const;
+  void extractDatatypeDetails(MPIOperation &op, const llvm::CallBase *cb,
+                              llvm::StringRef semantic_tag);
   std::vector<RequestID>
   collectRequestOperands(const llvm::Value *request_arg,
                          const llvm::Instruction *context) const;
@@ -180,8 +190,12 @@ private:
   void annotateRankConstraints(MPIOperation &op) const;
   int64_t getDatatypeExtent(const llvm::Value *datatype_arg,
                             const llvm::Instruction *context) const;
+  const llvm::Value *
+  canonicalizeDatatypeHandle(const llvm::Value *handle) const;
+  void registerDatatypeExtent(const llvm::Value *handle, int64_t extent);
   void matchNonBlockingOps();
   std::unordered_map<std::string, size_t> deferred_lowering_stats_;
+  std::unordered_map<const llvm::Value *, int64_t> datatype_extent_bytes_;
 };
 
 } // namespace mpi

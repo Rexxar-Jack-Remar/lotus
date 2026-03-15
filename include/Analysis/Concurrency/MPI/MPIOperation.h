@@ -65,6 +65,7 @@ enum class RMAEpochKind { None, Access, Exposure };
 enum class MPIOpKind {
   INIT,
   FINALIZE,
+  SESSION,
   SEND_BLOCKING,
   RECV_BLOCKING,
   PROBE_BLOCKING,
@@ -100,6 +101,7 @@ struct MPIOperation {
   CommunicatorID communicator = nullptr;
   size_t communicator_class_id = 0;
   size_t communicator_subgroup_id = 0;
+  size_t collective_protocol_class_id = 0;
   size_t protocol_sequence_id = 0;
   ProtocolReachability protocol_reachability = ProtocolReachability::Unknown;
   concurrency::Relation semantic_relation;

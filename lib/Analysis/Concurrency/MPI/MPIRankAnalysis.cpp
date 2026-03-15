@@ -4,33 +4,24 @@
  */
 
 #include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
+
+#include "Analysis/Concurrency/MPI/MPISymbol.h"
+
+#include <deque>
+
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/Support/raw_ostream.h>
-#include <deque>
 
 using namespace llvm;
 using namespace MPI;
 
 namespace {
 
-std::string normalizeMPIName(StringRef raw_name) {
-  StringRef name = raw_name;
-  if (name.startswith("\01")) {
-    name = name.drop_front();
-  }
-  if (name.startswith("PMPI_")) {
-    return ("MPI_" + name.drop_front(5)).str();
-  }
-  return name.str();
-}
-
 bool sameRankExpr(const RankExpr &lhs, const RankExpr &rhs) {
-  return lhs.kind == rhs.kind &&
-         lhs.concrete_value == rhs.concrete_value &&
-         lhs.range_min == rhs.range_min &&
-         lhs.range_max == rhs.range_max &&
+  return lhs.kind == rhs.kind && lhs.concrete_value == rhs.concrete_value &&
+         lhs.range_min == rhs.range_min && lhs.range_max == rhs.range_max &&
          lhs.communicator == rhs.communicator;
 }
 
@@ -44,26 +35,26 @@ bool RankExpr::mayEqual(const RankExpr &other) const {
   if (kind == Unknown || other.kind == Unknown) {
     return true; // Conservative
   }
-  
+
   if (kind == Concrete && other.kind == Concrete) {
     return concrete_value == other.concrete_value;
   }
-  
+
   if (kind == Concrete && other.kind == Range) {
-    return concrete_value >= other.range_min && 
+    return concrete_value >= other.range_min &&
            concrete_value <= other.range_max;
   }
-  
+
   if (kind == Range && other.kind == Concrete) {
-    return other.concrete_value >= range_min && 
+    return other.concrete_value >= range_min &&
            other.concrete_value <= range_max;
   }
-  
+
   if (kind == Range && other.kind == Range) {
     // Ranges overlap
     return !(range_max < other.range_min || other.range_max < range_min);
   }
-  
+
   // Symbolic ranks may be equal
   return true;
 }
@@ -72,7 +63,7 @@ bool RankExpr::mustEqual(const RankExpr &other) const {
   if (kind == Concrete && other.kind == Concrete) {
     return concrete_value == other.concrete_value;
   }
-  
+
   // Cannot prove must-equality for symbolic/range/unknown
   return false;
 }
@@ -91,25 +82,27 @@ void MPIRankAnalysis::analyze() {
   propagateValueFacts();
   propagateRankInfo();
   analyzeRankBranches();
-  
+
   errs() << "MPI Rank Analysis Complete!\n";
 }
 
 void MPIRankAnalysis::identifyRankQueries() {
   // Find all MPI_Comm_rank and MPI_Comm_size calls
-  
+
   for (Function &func : m_module) {
     for (BasicBlock &bb : func) {
       for (Instruction &inst : bb) {
         if (CallBase *call = dyn_cast<CallBase>(&inst)) {
           Function *callee = call->getCalledFunction();
-          if (!callee) continue;
-          
-          std::string normalized_name = normalizeMPIName(callee->getName());
+          if (!callee)
+            continue;
+
+          std::string normalized_name =
+              mpi::normalizeMPISymbolName(callee->getName());
           StringRef name = normalized_name;
-          
+
           // MPI_Comm_rank(MPI_Comm comm, int *rank)
-          if (name.equals("MPI_Comm_rank")) {
+          if (mpi::equalsCaseInsensitiveASCII(name, "MPI_Comm_rank")) {
             if (call->arg_size() >= 2) {
               const Value *rank_ptr = call->getArgOperand(1);
               const Value *comm = call->getArgOperand(0);
@@ -125,9 +118,9 @@ void MPIRankAnalysis::identifyRankQueries() {
               }
             }
           }
-          
+
           // MPI_Comm_size(MPI_Comm comm, int *size)
-          if (name.equals("MPI_Comm_size")) {
+          if (mpi::equalsCaseInsensitiveASCII(name, "MPI_Comm_size")) {
             if (call->arg_size() >= 2) {
               const Value *comm = call->getArgOperand(0);
               const Value *size_ptr = call->getArgOperand(1);
@@ -170,7 +163,8 @@ void MPIRankAnalysis::propagateValueFacts() {
           auto updateSizeRange = [&](const Value *value,
                                      const std::pair<int, int> &range) {
             auto it = m_value_to_size_range.find(value);
-            if (it != m_value_to_size_range.end() && sameRange(it->second, range)) {
+            if (it != m_value_to_size_range.end() &&
+                sameRange(it->second, range)) {
               return;
             }
             m_value_to_size_range[value] = range;
@@ -191,12 +185,13 @@ void MPIRankAnalysis::propagateValueFacts() {
           }
 
           if (const auto *load = dyn_cast<LoadInst>(&inst)) {
-            RankExpr expr = getRankExpr(load->getPointerOperand()->stripPointerCasts());
+            RankExpr expr =
+                getRankExpr(load->getPointerOperand()->stripPointerCasts());
             if (expr.kind != RankExpr::Unknown) {
               updateRank(load, expr);
             }
-            auto size_it =
-                m_value_to_size_range.find(load->getPointerOperand()->stripPointerCasts());
+            auto size_it = m_value_to_size_range.find(
+                load->getPointerOperand()->stripPointerCasts());
             if (size_it != m_value_to_size_range.end()) {
               updateSizeRange(load, size_it->second);
             }
@@ -211,7 +206,8 @@ void MPIRankAnalysis::propagateValueFacts() {
             for (const Value *incoming : phi->incoming_values()) {
               RankExpr expr = getRankExpr(incoming);
               if (expr.kind != RankExpr::Unknown) {
-                merged_rank = saw_rank ? mergeRankExpr(merged_rank, expr) : expr;
+                merged_rank =
+                    saw_rank ? mergeRankExpr(merged_rank, expr) : expr;
                 saw_rank = true;
               }
               auto size_it = m_value_to_size_range.find(incoming);
@@ -220,8 +216,10 @@ void MPIRankAnalysis::propagateValueFacts() {
                   merged_size = size_it->second;
                   saw_size = true;
                 } else {
-                  merged_size.first = std::min(merged_size.first, size_it->second.first);
-                  merged_size.second = std::max(merged_size.second, size_it->second.second);
+                  merged_size.first =
+                      std::min(merged_size.first, size_it->second.first);
+                  merged_size.second =
+                      std::max(merged_size.second, size_it->second.second);
                 }
               }
             }
@@ -237,7 +235,8 @@ void MPIRankAnalysis::propagateValueFacts() {
           if (const auto *select = dyn_cast<SelectInst>(&inst)) {
             RankExpr lhs = getRankExpr(select->getTrueValue());
             RankExpr rhs = getRankExpr(select->getFalseValue());
-            if (lhs.kind != RankExpr::Unknown || rhs.kind != RankExpr::Unknown) {
+            if (lhs.kind != RankExpr::Unknown ||
+                rhs.kind != RankExpr::Unknown) {
               updateRank(select, mergeRankExpr(lhs, rhs));
             }
             auto lhs_size = m_value_to_size_range.find(select->getTrueValue());
@@ -271,8 +270,8 @@ void MPIRankAnalysis::propagateValueFacts() {
               continue;
             }
 
-            for (unsigned arg_idx = 0; arg_idx < cb->arg_size() &&
-                                      arg_idx < callee->arg_size();
+            for (unsigned arg_idx = 0;
+                 arg_idx < cb->arg_size() && arg_idx < callee->arg_size();
                  ++arg_idx) {
               const Argument *formal = callee->getArg(arg_idx);
               RankExpr formal_rank = getRankExpr(formal);
@@ -362,7 +361,8 @@ void MPIRankAnalysis::propagateRankInfo() {
       const Instruction *terminator = bb->getTerminator();
       const auto *br = dyn_cast_or_null<BranchInst>(terminator);
       if (br) {
-        for (unsigned succ_idx = 0; succ_idx < br->getNumSuccessors(); ++succ_idx) {
+        for (unsigned succ_idx = 0; succ_idx < br->getNumSuccessors();
+             ++succ_idx) {
           const BasicBlock *succ = br->getSuccessor(succ_idx);
           RankExpr propagated = current_rank;
           RankExpr refined = current_rank;
@@ -371,8 +371,9 @@ void MPIRankAnalysis::propagateRankInfo() {
           }
 
           auto it = in_rank.find(succ);
-          RankExpr merged =
-              it == in_rank.end() ? propagated : mergeRankExpr(it->second, propagated);
+          RankExpr merged = it == in_rank.end()
+                                ? propagated
+                                : mergeRankExpr(it->second, propagated);
           bool changed = it == in_rank.end() ||
                          merged.kind != it->second.kind ||
                          merged.concrete_value != it->second.concrete_value ||
@@ -391,10 +392,10 @@ void MPIRankAnalysis::propagateRankInfo() {
 
       for (const BasicBlock *succ : successors(bb)) {
         auto it = in_rank.find(succ);
-        RankExpr merged =
-            it == in_rank.end() ? current_rank : mergeRankExpr(it->second, current_rank);
-        bool changed = it == in_rank.end() ||
-                       merged.kind != it->second.kind ||
+        RankExpr merged = it == in_rank.end()
+                              ? current_rank
+                              : mergeRankExpr(it->second, current_rank);
+        bool changed = it == in_rank.end() || merged.kind != it->second.kind ||
                        merged.concrete_value != it->second.concrete_value ||
                        merged.range_min != it->second.range_min ||
                        merged.range_max != it->second.range_max;
@@ -446,19 +447,19 @@ MPIRankAnalysis::getReachabilityAtInstruction(const Instruction *inst) const {
   return ReachabilityKind::Unknown;
 }
 
-bool MPIRankAnalysis::sameRank(const Instruction *i1, 
-                                const Instruction *i2) const {
+bool MPIRankAnalysis::sameRank(const Instruction *i1,
+                               const Instruction *i2) const {
   RankExpr rank1 = getRankAtInstruction(i1);
   RankExpr rank2 = getRankAtInstruction(i2);
-  
+
   return rank1.mustEqual(rank2);
 }
 
 std::set<int> MPIRankAnalysis::getPossibleRanks(const Instruction *inst) const {
   std::set<int> ranks;
-  
+
   RankExpr rank = getRankAtInstruction(inst);
-  
+
   if (rank.kind == RankExpr::Concrete) {
     ranks.insert(rank.concrete_value);
   } else if (rank.kind == RankExpr::Range) {
@@ -469,7 +470,7 @@ std::set<int> MPIRankAnalysis::getPossibleRanks(const Instruction *inst) const {
     // Symbolic or Unknown: conservatively return empty set
     // Caller should interpret this as "any rank"
   }
-  
+
   return ranks;
 }
 
@@ -557,8 +558,7 @@ RankExpr MPIRankAnalysis::mergeRankExpr(const RankExpr &lhs,
 }
 
 bool MPIRankAnalysis::refineRankFromBranch(const BranchInst *br,
-                                           unsigned succ_idx,
-                                           RankExpr current,
+                                           unsigned succ_idx, RankExpr current,
                                            RankExpr &refined) const {
   if (!br || !br->isConditional()) {
     return false;
@@ -593,8 +593,9 @@ bool MPIRankAnalysis::refineRankFromBranch(const BranchInst *br,
     return false;
   }
 
-  int current_max = current.kind == RankExpr::Range ? current.range_max
-                                                     : defaultCommSizeUpperBound();
+  int current_max = current.kind == RankExpr::Range
+                        ? current.range_max
+                        : defaultCommSizeUpperBound();
   if (current_max < 0) {
     current_max = defaultCommSizeUpperBound();
   }
@@ -629,9 +630,8 @@ bool MPIRankAnalysis::refineRankFromBranch(const BranchInst *br,
     if (takes_edge) {
       refined = RankExpr::makeRange(0, bound_max, current.communicator);
     } else {
-      refined =
-          RankExpr::makeRange(std::max(0, bound_min + 1), current_max,
-                              current.communicator);
+      refined = RankExpr::makeRange(std::max(0, bound_min + 1), current_max,
+                                    current.communicator);
     }
     return true;
   case CmpInst::ICMP_SGT:

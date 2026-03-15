@@ -14,6 +14,7 @@
 
 #include <map>
 #include <set>
+#include <tuple>
 #include <utility>
 
 #include <llvm/IR/BasicBlock.h>
@@ -41,6 +42,15 @@ bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) {
     return true;
   }
   return false;
+}
+
+using ProtocolScopeKey = std::tuple<size_t, size_t, size_t, size_t>;
+
+ProtocolScopeKey
+getProtocolScopeKey(const MPICollectiveAnalysis::CollectiveCall &call) {
+  return std::make_tuple(
+      call.communicator_class_id, call.communicator_subgroup_id,
+      call.collective_protocol_class_id, call.protocol_sequence_id);
 }
 
 } // namespace
@@ -72,12 +82,12 @@ void MPICollectiveAnalysis::analyzeCollectives() {
       call.comm = op.communicator;
       call.communicator_class_id = op.communicator_class_id;
       call.communicator_subgroup_id = op.communicator_subgroup_id;
+      call.collective_protocol_class_id = op.collective_protocol_class_id;
       call.function = op.function;
       call.sequence_index = op.protocol_sequence_id;
       call.protocol_sequence_id = op.protocol_sequence_id;
       call.reachability = op.protocol_reachability;
-      call.protocol_relation.kind =
-          concurrency::RelationKind::SameProtocolSlot;
+      call.protocol_relation.kind = concurrency::RelationKind::SameProtocolSlot;
       call.protocol_relation.proof =
           op.protocol_reachability == ProtocolReachability::AllRanks
               ? concurrency::ProofStrength::Must
@@ -152,8 +162,8 @@ void MPICollectiveAnalysis::analyzeCollectives() {
   }
 }
 
-size_t
-MPICollectiveAnalysis::getProtocolRelationCount(concurrency::RelationKind kind) const {
+size_t MPICollectiveAnalysis::getProtocolRelationCount(
+    concurrency::RelationKind kind) const {
   size_t count = 0;
   for (const CollectiveCall &call : collective_calls_) {
     if (call.protocol_relation.kind == kind) {
@@ -225,43 +235,28 @@ std::vector<std::pair<MPICollectiveAnalysis::CollectiveCall,
 MPICollectiveAnalysis::findMismatchedCollectives() const {
   std::vector<std::pair<CollectiveCall, CollectiveCall>> mismatches;
 
-  std::set<const Function *> collective_functions;
+  std::map<ProtocolScopeKey, std::vector<const CollectiveCall *>> by_scope;
   for (const CollectiveCall &call : collective_calls_) {
-    if (call.function) {
-      collective_functions.insert(call.function);
-    }
+    by_scope[getProtocolScopeKey(call)].push_back(&call);
   }
 
-  const bool single_function_model = collective_functions.size() <= 1;
-  for (size_t i = 0; i < collective_calls_.size(); ++i) {
-    for (size_t j = i + 1; j < collective_calls_.size(); ++j) {
-      const CollectiveCall &c1 = collective_calls_[i];
-      const CollectiveCall &c2 = collective_calls_[j];
+  for (const auto &entry : by_scope) {
+    const auto &calls = entry.second;
+    for (size_t i = 0; i < calls.size(); ++i) {
+      for (size_t j = i + 1; j < calls.size(); ++j) {
+        const CollectiveCall &c1 = *calls[i];
+        const CollectiveCall &c2 = *calls[j];
 
-      if (single_function_model) {
-        if ((!communicatorsMayAlias(c1.comm, c2.comm) &&
-             !(c1.communicator_class_id != 0 &&
-               c1.communicator_class_id == c2.communicator_class_id)) ||
-            c1.protocol_sequence_id != c2.protocol_sequence_id ||
-            c1.communicator_subgroup_id != c2.communicator_subgroup_id) {
+        if (!communicatorsMayAlias(c1.comm, c2.comm) &&
+            !(c1.communicator_class_id != 0 &&
+              c1.communicator_class_id == c2.communicator_class_id)) {
           continue;
         }
-      } else {
-        if (c1.function == c2.function) {
-          continue;
-        }
-        if (c1.protocol_sequence_id != c2.protocol_sequence_id ||
-            c1.communicator_subgroup_id != c2.communicator_subgroup_id ||
-            (!communicatorsMayAlias(c1.comm, c2.comm) &&
-             !(c1.communicator_class_id != 0 &&
-               c1.communicator_class_id == c2.communicator_class_id))) {
-          continue;
-        }
-      }
 
-      if (!areCollectivesCompatible(c1, c2)) {
-        protocol_diagnostics_["collective_mismatch_pairs"]++;
-        mismatches.emplace_back(c1, c2);
+        if (!areCollectivesCompatible(c1, c2)) {
+          protocol_diagnostics_["collective_mismatch_pairs"]++;
+          mismatches.emplace_back(c1, c2);
+        }
       }
     }
   }
@@ -274,9 +269,23 @@ MPICollectiveAnalysis::findConditionalCollectives() const {
   std::vector<const Instruction *> conditional;
   MPI::MPIRankAnalysis rank_analysis(
       const_cast<Module &>(process_model_.getModule()));
-  rank_analysis.analyze();
+  bool rank_analysis_ready = false;
 
   for (const CollectiveCall &call : collective_calls_) {
+    if (call.reachability == ProtocolReachability::SomeRanks) {
+      protocol_diagnostics_["collective_rank_filtered"]++;
+      conditional.push_back(call.inst);
+      continue;
+    }
+    if (call.reachability == ProtocolReachability::AllRanks) {
+      continue;
+    }
+
+    if (!rank_analysis_ready) {
+      rank_analysis.analyze();
+      rank_analysis_ready = true;
+    }
+
     const BasicBlock *BB = call.inst->getParent();
 
     MPI::RankExpr rank = rank_analysis.getRankAtInstruction(call.inst);
@@ -314,15 +323,15 @@ std::vector<std::pair<MPICollectiveAnalysis::CollectiveCall,
 MPICollectiveAnalysis::findWrongRootRanks() const {
   std::vector<std::pair<CollectiveCall, CollectiveCall>> wrong_roots;
 
-  std::map<size_t, std::vector<const CollectiveCall *>> by_comm_and_seq;
+  std::map<ProtocolScopeKey, std::vector<const CollectiveCall *>> by_scope;
   for (const CollectiveCall &call : collective_calls_) {
     if (call.root_rank < 0) {
       continue;
     }
-    by_comm_and_seq[call.communicator_class_id].push_back(&call);
+    by_scope[getProtocolScopeKey(call)].push_back(&call);
   }
 
-  for (auto &entry : by_comm_and_seq) {
+  for (auto &entry : by_scope) {
     auto &calls = entry.second;
     for (size_t i = 0; i < calls.size(); ++i) {
       for (size_t j = i + 1; j < calls.size(); ++j) {

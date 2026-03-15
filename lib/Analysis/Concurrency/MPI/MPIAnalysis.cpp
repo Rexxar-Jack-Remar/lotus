@@ -90,8 +90,7 @@ void MPIAnalysis::runAnalysis() {
   results_.invalid_ranks = process_model_.findInvalidRanks();
   results_.type_size_mismatches = process_model_.findTypeSizeMismatches();
   results_.destroy_null_comm = process_model_.findDestroyNullComm();
-  results_.request_free_after_wait =
-      process_model_.findRequestFreeAfterWait();
+  results_.request_free_after_wait = process_model_.findRequestFreeAfterWait();
   results_.in_place_wrong_op = process_model_.findInPlaceWrongOp();
   results_.invalid_rma_transitions =
       rma_analysis_.findInvalidEpochTransitions();
@@ -157,6 +156,7 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
   OS << "Total MPI operations found: " << operations.size() << "\n";
   OS << "MPI init/finalize ops: " << getOperationCount(MPIOpKind::INIT) << "/"
      << getOperationCount(MPIOpKind::FINALIZE) << "\n";
+  OS << "MPI session ops: " << getOperationCount(MPIOpKind::SESSION) << "\n";
   OS << "Blocking point-to-point ops: "
      << getOperationCount(MPIOpKind::SEND_BLOCKING) +
             getOperationCount(MPIOpKind::RECV_BLOCKING)
@@ -192,6 +192,8 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
      << "\n";
   OS << "Communicator management ops: "
      << getOperationCount(MPIOpKind::COMM_MANAGEMENT) << "\n";
+  OS << "Intercommunicator creation ops: "
+     << getOperationCount(MPIOpKind::INTERCOMM_CREATION) << "\n";
   OS << "Request management ops: "
      << getOperationCount(MPIOpKind::REQUEST_MANAGEMENT) << "\n";
   OS << "RMA window lifecycle ops: " << getOperationCount(MPIOpKind::RMA_WINDOW)
