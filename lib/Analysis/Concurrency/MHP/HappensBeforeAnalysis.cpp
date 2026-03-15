@@ -163,6 +163,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
   // 2. OpenMP task dependency ordering from explicit task graph edges.
   size_t omp_task_dependency_edges = 0;
+  size_t omp_task_exclusion_relations = 0;
+  size_t omp_task_unknown_relations = 0;
   OpenMP::OpenMPTaskGraph task_graph(m_module);
   task_graph.analyze();
   for (const auto &entry : task_graph.getRelations()) {
@@ -170,6 +172,14 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     const OpenMP::Task *rhs = entry.first.second;
     const concurrency::Relation &relation = entry.second;
     if (!lhs || !rhs || !lhs->task_create || !rhs->task_create) {
+      continue;
+    }
+    if (relation.kind == concurrency::RelationKind::MutuallyExclusive) {
+      ++omp_task_exclusion_relations;
+      continue;
+    }
+    if (relation.kind == concurrency::RelationKind::UnknownDueToModelGap) {
+      ++omp_task_unknown_relations;
       continue;
     }
     if (relation.kind != concurrency::RelationKind::MustHappenBefore &&
@@ -196,6 +206,10 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   m_deferred_sync_counts["omp_task_api_ops"] = omp_task_ops.size();
   m_deferred_sync_counts["omp_task_dependency_edges"] =
       omp_task_dependency_edges;
+  m_deferred_sync_counts["omp_task_exclusion_relations"] =
+      omp_task_exclusion_relations;
+  m_deferred_sync_counts["omp_task_unknown_relations"] =
+      omp_task_unknown_relations;
   for (const auto &entry : task_graph.getDeferredReasonCounts()) {
     m_deferred_sync_counts[entry.first] += entry.second;
   }

@@ -47,10 +47,15 @@ public:
 private:
   llvm::Module &m_module;
   std::map<const llvm::Value *, DataSharingAttribute> m_variable_attributes;
+  std::map<const llvm::Value *, std::vector<DataSharingEntry>> m_region_entries;
   std::vector<DataSharingEntry> m_entries;
 
   void scanGlobalAnnotations();
   void scanFunctionArguments(llvm::Function &func);
+  void inferOutlinedFunctionCaptures(llvm::Function &func);
+  const llvm::Value *canonicalizeValue(const llvm::Value *value) const;
+  void addEntry(const llvm::Value *variable, DataSharingAttribute attribute,
+                const std::string &clause, const llvm::Value *region = nullptr);
   DataSharingAttribute parseAttribute(const std::string &attr_str);
 };
 } // namespace OpenMP

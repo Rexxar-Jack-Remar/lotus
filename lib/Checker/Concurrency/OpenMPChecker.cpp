@@ -534,44 +534,469 @@ OpenMPChecker::checkNestedParallelDisabled() const {
 std::vector<ConcurrencyBugReport>
 OpenMPChecker::checkSharedPrivateConflict() const {
   std::vector<ConcurrencyBugReport> reports;
+  if (!m_threadAPI) {
+    return reports;
+  }
+
+  for (const Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+
+    const Instruction *copyprivate_inst = nullptr;
+    const Instruction *task_inst = nullptr;
+    for (const Instruction &inst : instructions(func)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+
+      const Function *callee = call->getCalledFunction();
+      if (!callee) {
+        continue;
+      }
+
+      const ThreadAPI::TD_TYPE type = m_threadAPI->getType(callee);
+      if (type == ThreadAPI::TD_OMP_TASK ||
+          type == ThreadAPI::TD_OMP_TASK_WITH_DEPS ||
+          type == ThreadAPI::TD_OMP_TASKLOOP) {
+        task_inst = &inst;
+      }
+      if (callee->getName().contains("copyprivate")) {
+        copyprivate_inst = &inst;
+      }
+    }
+
+    if (copyprivate_inst && task_inst) {
+      ConcurrencyBugReport report(
+          ConcurrencyBugType::OMP_SHARED_PRIVATE_CONFLICT,
+          "OpenMP copyprivate state crosses tasking boundary; shared/private "
+          "intent may be inconsistent",
+          BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
+      report.addStep(copyprivate_inst, "copyprivate-style operation here");
+      report.addStep(task_inst, "tasking operation in same region");
+      reports.push_back(std::move(report));
+    }
+  }
+
   return reports;
 }
 
 std::vector<ConcurrencyBugReport> OpenMPChecker::checkIfFalseParallel() const {
   std::vector<ConcurrencyBugReport> reports;
+  if (!m_threadAPI) {
+    return reports;
+  }
+
+  for (const Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+
+    const Instruction *set_num_threads_inst = nullptr;
+    const Instruction *fork_inst = nullptr;
+
+    for (const Instruction &inst : instructions(func)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+      const Function *callee = call->getCalledFunction();
+      if (!callee) {
+        continue;
+      }
+
+      if (callee->getName().contains("omp_set_num_threads") &&
+          call->arg_size() >= 1) {
+        if (const auto *ci = dyn_cast<ConstantInt>(call->getArgOperand(0))) {
+          if (ci->getSExtValue() <= 1) {
+            set_num_threads_inst = &inst;
+          }
+        }
+      }
+
+      if (m_threadAPI->getType(callee) == ThreadAPI::TD_FORK) {
+        fork_inst = &inst;
+      }
+    }
+
+    if (set_num_threads_inst && fork_inst) {
+      ConcurrencyBugReport report(
+          ConcurrencyBugType::OMP_IF_FALSE_PARALLEL,
+          "Parallel region may be serialized because thread count is forced to "
+          "1",
+          BugDescription::BI_LOW, BugDescription::BC_WARNING);
+      report.addStep(set_num_threads_inst,
+                     "omp_set_num_threads forces a single worker");
+      report.addStep(fork_inst, "parallel region launch occurs here");
+      reports.push_back(std::move(report));
+    }
+  }
+
   return reports;
 }
 
 std::vector<ConcurrencyBugReport>
 OpenMPChecker::checkOrderedDependency() const {
   std::vector<ConcurrencyBugReport> reports;
+  if (!m_threadAPI) {
+    return reports;
+  }
+
+  for (const Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+
+    size_t ordered_count = 0;
+    size_t doacross_wait_count = 0;
+    size_t doacross_submit_count = 0;
+    const Instruction *first_ordered = nullptr;
+    const Instruction *first_wait = nullptr;
+    const Instruction *first_submit = nullptr;
+
+    for (const Instruction &inst : instructions(func)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+
+      const Function *callee = call->getCalledFunction();
+      if (!callee) {
+        continue;
+      }
+
+      const auto type = m_threadAPI->getType(callee);
+      if (type == ThreadAPI::TD_OMP_ORDERED_START) {
+        ++ordered_count;
+        if (!first_ordered) {
+          first_ordered = &inst;
+        }
+      } else if (type == ThreadAPI::TD_OMP_DOACROSS_WAIT) {
+        ++doacross_wait_count;
+        if (!first_wait) {
+          first_wait = &inst;
+        }
+      } else if (type == ThreadAPI::TD_OMP_DOACROSS_SUBMIT) {
+        ++doacross_submit_count;
+        if (!first_submit) {
+          first_submit = &inst;
+        }
+      }
+    }
+
+    const bool missing_doacross = ordered_count > 0 &&
+                                  doacross_wait_count == 0 &&
+                                  doacross_submit_count == 0;
+    const bool imbalance = doacross_wait_count != doacross_submit_count;
+    if (missing_doacross || imbalance) {
+      ConcurrencyBugReport report(
+          ConcurrencyBugType::OMP_ORDERED_DEPENDENCY,
+          "OpenMP ordered dependency protocol appears incomplete",
+          BugDescription::BI_MEDIUM, BugDescription::BC_ERROR);
+      if (first_ordered) {
+        report.addStep(first_ordered, "ordered region starts here");
+      }
+      if (missing_doacross) {
+        report.addStep(nullptr,
+                       "no doacross wait/submit operations were observed");
+      }
+      if (imbalance) {
+        if (first_wait) {
+          report.addStep(first_wait, "doacross wait observed");
+        }
+        if (first_submit) {
+          report.addStep(first_submit, "doacross submit observed");
+        }
+      }
+      reports.push_back(std::move(report));
+    }
+  }
+
   return reports;
 }
 
 std::vector<ConcurrencyBugReport>
 OpenMPChecker::checkLastprivateMissing() const {
   std::vector<ConcurrencyBugReport> reports;
+  if (!m_threadAPI) {
+    return reports;
+  }
+
+  for (const Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+
+    bool saw_loop_init = false;
+    bool saw_loop_fini = false;
+    const Instruction *loop_init_inst = nullptr;
+
+    for (const Instruction &inst : instructions(func)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+      const Function *callee = call->getCalledFunction();
+      if (!callee) {
+        continue;
+      }
+
+      const auto type = m_threadAPI->getType(callee);
+      if (type == ThreadAPI::TD_OMP_FOR_STATIC_INIT ||
+          type == ThreadAPI::TD_OMP_FOR_DISPATCH_INIT) {
+        saw_loop_init = true;
+        if (!loop_init_inst) {
+          loop_init_inst = &inst;
+        }
+      }
+      if (type == ThreadAPI::TD_OMP_FOR_STATIC_FINI ||
+          type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI) {
+        saw_loop_fini = true;
+      }
+    }
+
+    if (saw_loop_init && !saw_loop_fini && loop_init_inst) {
+      ConcurrencyBugReport report(
+          ConcurrencyBugType::OMP_LASTPRIVATE_MISSING,
+          "OpenMP worksharing loop init has no matching finalize; trailing "
+          "lastprivate update may be skipped",
+          BugDescription::BI_MEDIUM, BugDescription::BC_ERROR);
+      report.addStep(loop_init_inst,
+                     "loop worksharing initialization appears unmatched");
+      reports.push_back(std::move(report));
+    }
+  }
+
   return reports;
 }
 
 std::vector<ConcurrencyBugReport> OpenMPChecker::checkCopyinNotShared() const {
   std::vector<ConcurrencyBugReport> reports;
+  if (!m_threadAPI) {
+    return reports;
+  }
+
+  for (const Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+
+    const Instruction *copyprivate_inst = nullptr;
+    bool saw_single_region = false;
+    for (const Instruction &inst : instructions(func)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+      const Function *callee = call->getCalledFunction();
+      if (!callee) {
+        continue;
+      }
+
+      if (m_threadAPI->getType(callee) == ThreadAPI::TD_OMP_SINGLE_START ||
+          m_threadAPI->getType(callee) == ThreadAPI::TD_OMP_SINGLE_END) {
+        saw_single_region = true;
+      }
+      if (callee->getName().contains("copyprivate")) {
+        copyprivate_inst = &inst;
+      }
+    }
+
+    if (copyprivate_inst && !saw_single_region) {
+      ConcurrencyBugReport report(
+          ConcurrencyBugType::OMP_COPYIN_NOT_SHARED,
+          "copyprivate/copyin-style operation appears outside single region",
+          BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
+      report.addStep(copyprivate_inst,
+                     "copyprivate-like operation observed without single");
+      reports.push_back(std::move(report));
+    }
+  }
+
   return reports;
 }
 
 std::vector<ConcurrencyBugReport>
 OpenMPChecker::checkBarrierInCritical() const {
   std::vector<ConcurrencyBugReport> reports;
+  if (!m_threadAPI) {
+    return reports;
+  }
+
+  for (const Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+
+    int critical_depth = 0;
+    const Instruction *critical_entry = nullptr;
+
+    for (const Instruction &inst : instructions(func)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+
+      const Function *callee = call->getCalledFunction();
+      if (!callee) {
+        continue;
+      }
+
+      const auto type = m_threadAPI->getType(callee);
+      if (type == ThreadAPI::TD_ACQUIRE &&
+          m_threadAPI->semanticTagStartsWith(callee, "critical")) {
+        ++critical_depth;
+        if (!critical_entry) {
+          critical_entry = &inst;
+        }
+        continue;
+      }
+
+      if (type == ThreadAPI::TD_RELEASE &&
+          m_threadAPI->semanticTagStartsWith(callee, "critical")) {
+        if (critical_depth > 0) {
+          --critical_depth;
+          if (critical_depth == 0) {
+            critical_entry = nullptr;
+          }
+        }
+        continue;
+      }
+
+      if (type == ThreadAPI::TD_BAR_WAIT && critical_depth > 0) {
+        ConcurrencyBugReport report(
+            ConcurrencyBugType::OMP_BARRIER_IN_CRITICAL,
+            "Barrier encountered in active critical region",
+            BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+        if (critical_entry) {
+          report.addStep(critical_entry, "critical region begins here");
+        }
+        report.addStep(&inst, "barrier inside critical may deadlock");
+        reports.push_back(std::move(report));
+        break;
+      }
+    }
+  }
+
   return reports;
 }
 
 std::vector<ConcurrencyBugReport> OpenMPChecker::checkPrivateInLoop() const {
   std::vector<ConcurrencyBugReport> reports;
+  if (!m_threadAPI) {
+    return reports;
+  }
+
+  for (const Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+
+    bool in_loop_region = false;
+    const Instruction *loop_enter = nullptr;
+    const Instruction *task_call_in_loop = nullptr;
+
+    for (const Instruction &inst : instructions(func)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+
+      const Function *callee = call->getCalledFunction();
+      if (!callee) {
+        continue;
+      }
+
+      const auto type = m_threadAPI->getType(callee);
+      if (type == ThreadAPI::TD_OMP_FOR_STATIC_INIT ||
+          type == ThreadAPI::TD_OMP_FOR_DISPATCH_INIT ||
+          type == ThreadAPI::TD_OMP_LOOP_STATIC_INIT ||
+          type == ThreadAPI::TD_OMP_LOOP_DYNAMIC_INIT ||
+          type == ThreadAPI::TD_OMP_LOOP_GUIDANCE_INIT) {
+        in_loop_region = true;
+        if (!loop_enter) {
+          loop_enter = &inst;
+        }
+        continue;
+      }
+
+      if (in_loop_region && (type == ThreadAPI::TD_OMP_TASK ||
+                             type == ThreadAPI::TD_OMP_TASK_WITH_DEPS ||
+                             type == ThreadAPI::TD_OMP_TASKLOOP)) {
+        task_call_in_loop = &inst;
+      }
+
+      if (type == ThreadAPI::TD_OMP_FOR_STATIC_FINI ||
+          type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI) {
+        in_loop_region = false;
+      }
+    }
+
+    if (loop_enter && task_call_in_loop) {
+      ConcurrencyBugReport report(
+          ConcurrencyBugType::OMP_PRIVATE_IN_LOOP,
+          "Tasking inside OpenMP loop may capture loop-private values "
+          "unsafely",
+          BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
+      report.addStep(loop_enter, "OpenMP loop region starts here");
+      report.addStep(task_call_in_loop, "tasking operation within loop region");
+      reports.push_back(std::move(report));
+    }
+  }
+
   return reports;
 }
 
 std::vector<ConcurrencyBugReport> OpenMPChecker::checkMissingSchedule() const {
   std::vector<ConcurrencyBugReport> reports;
+  if (!m_threadAPI) {
+    return reports;
+  }
+
+  for (const Function &func : m_module) {
+    if (func.isDeclaration()) {
+      continue;
+    }
+
+    bool has_static_loop = false;
+    bool has_dynamic_loop = false;
+    const Instruction *loop_inst = nullptr;
+
+    for (const Instruction &inst : instructions(func)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+      const Function *callee = call->getCalledFunction();
+      if (!callee) {
+        continue;
+      }
+
+      const auto type = m_threadAPI->getType(callee);
+      if (type == ThreadAPI::TD_OMP_FOR_STATIC_INIT) {
+        has_static_loop = true;
+        if (!loop_inst) {
+          loop_inst = &inst;
+        }
+      }
+      if (type == ThreadAPI::TD_OMP_FOR_DISPATCH_INIT) {
+        has_dynamic_loop = true;
+      }
+    }
+
+    if (has_static_loop && !has_dynamic_loop && loop_inst) {
+      ConcurrencyBugReport report(
+          ConcurrencyBugType::OMP_MISSING_SCHEDULE,
+          "OpenMP loop appears to rely on implicit default scheduling",
+          BugDescription::BI_LOW, BugDescription::BC_WARNING);
+      report.addStep(loop_inst,
+                     "static loop init observed without explicit dispatch "
+                     "runtime path");
+      reports.push_back(std::move(report));
+    }
+  }
+
   return reports;
 }
 

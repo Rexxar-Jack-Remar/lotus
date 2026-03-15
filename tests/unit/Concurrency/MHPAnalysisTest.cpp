@@ -845,6 +845,60 @@ TEST_F(MHPAnalysisTest, MultiInstanceThread_InstructionsMayHappenInParallel) {
   EXPECT_TRUE(mhp.mayHappenInParallel(inst_a, inst_b));
 }
 
+TEST_F(MHPAnalysisTest, OpenMPTargetDataBoundaryOrdersTaskContinuation) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__tgt_target_data_end(i8*, i32)
+
+    define i8* @producer_task(i8* %arg) {
+    entry:
+      store i32 11, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @consumer_task(i8* %arg) {
+    entry:
+      %loaded = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %task1 = alloca i8* (i8*)*, align 8
+      %task2 = alloca i8* (i8*)*, align 8
+      store i8* (i8*)* @producer_task, i8* (i8*)** %task1, align 8
+      store i8* (i8*)* @consumer_task, i8* (i8*)** %task2, align 8
+      %task1_raw = bitcast i8* (i8*)** %task1 to i8*
+      %task2_raw = bitcast i8* (i8*)** %task2 to i8*
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %task1_raw)
+      call i32 @__tgt_target_data_end(i8* null, i32 0)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %task2_raw)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Function *producer = module->getFunction("producer_task");
+  const Function *consumer = module->getFunction("consumer_task");
+  ASSERT_NE(producer, nullptr);
+  ASSERT_NE(consumer, nullptr);
+
+  const Instruction *store_shared = &producer->getEntryBlock().front();
+  const Instruction *load_shared = findInstructionByName(*consumer, "loaded");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_TRUE(mhp.mustPrecede(store_shared, load_shared));
+  EXPECT_FALSE(mhp.mayHappenInParallel(store_shared, load_shared));
+}
+
 // Main function for tests
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

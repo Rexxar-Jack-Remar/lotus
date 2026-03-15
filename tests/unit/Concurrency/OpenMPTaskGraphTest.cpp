@@ -83,9 +83,9 @@ TEST_F(OpenMPTaskGraphTest, ParsesStackBuiltDependencies) {
   ASSERT_EQ(tasks.size(), 2u);
   EXPECT_EQ(tasks[0]->dependencies.size(), 1u);
   EXPECT_EQ(tasks[1]->dependencies.size(), 1u);
-  EXPECT_EQ(tasks[0]->dependencies[0].proof, DependencyProof::Possible);
+  EXPECT_EQ(tasks[0]->dependencies[0].proof, DependencyProof::Definite);
   EXPECT_EQ(tasks[0]->dependencies[0].source_kind,
-            DependencySourceKind::RegionSummary);
+            DependencySourceKind::DirectAddress);
   EXPECT_TRUE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
   EXPECT_FALSE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
 }
@@ -929,6 +929,146 @@ TEST_F(OpenMPTaskGraphTest, ConflictingConditionalTasksStayUnknown) {
   EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
   EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
             OpenMPTaskGraph::TaskRelation::Unknown);
+}
+
+TEST_F(OpenMPTaskGraphTest, BarrierCreatesDefiniteBoundaryAcrossTasks) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare void @__kmpc_barrier(i8*, i32)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      call void @__kmpc_barrier(i8* null, i32 0)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  EXPECT_TRUE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_EQ(graph.getSummary().barrier_count, 1u);
+}
+
+TEST_F(OpenMPTaskGraphTest, DoacrossWaitWithoutWitnessStaysPartialUnknown) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare void @__kmpc_doacross_wait(i8*, i32, i64*)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      call void @__kmpc_doacross_wait(i8* null, i32 0, i64* null)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
+            OpenMPTaskGraph::TaskRelation::Unknown);
+  auto it = graph.getDeferredReasonCounts().find("omp_doacross_partial");
+  ASSERT_NE(it, graph.getDeferredReasonCounts().end());
+  EXPECT_GT(it->second, 0u);
+}
+
+TEST_F(OpenMPTaskGraphTest, TargetDataEndNowaitProducesPartialBoundary) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__tgt_target_data_end_nowait(i8*, i32)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      call i32 @__tgt_target_data_end_nowait(i8* null, i32 0)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
+            OpenMPTaskGraph::TaskRelation::Unknown);
+  EXPECT_GT(graph.getSummary().target_nowait_boundary_count, 0u);
+}
+
+TEST_F(OpenMPTaskGraphTest, TargetDataEndCreatesDefiniteBoundary) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__tgt_target_data_end(i8*, i32)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      call i32 @__tgt_target_data_end(i8* null, i32 0)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  EXPECT_TRUE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+}
+
+TEST_F(OpenMPTaskGraphTest, ReduceNowaitEndProducesPartialBoundary) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__kmpc_reduce_nowait(i8*, i32, i32, i64, i8*, i8*, i8*)
+    declare i32 @__kmpc_end_reduce_nowait(i8*, i32, i8*)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      call i32 @__kmpc_reduce_nowait(i8* null, i32 0, i32 1, i64 4,
+                                     i8* null, i8* null, i8* null)
+      call i32 @__kmpc_end_reduce_nowait(i8* null, i32 0, i8* null)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
+            OpenMPTaskGraph::TaskRelation::Unknown);
+  EXPECT_GT(graph.getSummary().reduction_nowait_boundary_count, 0u);
 }
 
 int main(int argc, char **argv) {

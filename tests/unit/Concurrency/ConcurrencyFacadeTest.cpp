@@ -79,7 +79,7 @@ TEST_F(ConcurrencyFacadeTest, SummarizesOpenMPTaskGraph) {
   EXPECT_EQ(summary.untied_task_count, 0u);
   EXPECT_EQ(summary.detached_task_count, 0u);
   EXPECT_EQ(summary.deferred_wait_dep_count, 1u);
-  EXPECT_EQ(summary.wait_boundary_count, 1u);
+  EXPECT_EQ(summary.wait_boundary_count, 4u);
   EXPECT_EQ(summary.partial_wait_boundary_count, 1u);
   EXPECT_EQ(summary.taskgroup_region_count, 1u);
   EXPECT_EQ(summary.single_region_count, 0u);
@@ -326,7 +326,7 @@ TEST_F(ConcurrencyFacadeTest, PrintsOpenMPSummaryReport) {
   EXPECT_NE(output.find("Tasks: 1"), std::string::npos);
   EXPECT_NE(output.find("Taskloop/taskyield: 0/0"), std::string::npos);
   EXPECT_NE(
-      output.find("Scheduling boundaries (wait/partial/taskgroup): 1/0/0"),
+      output.find("Scheduling boundaries (wait/partial/taskgroup): 2/0/0"),
       std::string::npos);
   EXPECT_NE(output.find("Target regions (target/target-data): 0/1"),
             std::string::npos);

@@ -564,6 +564,23 @@ void MHPAnalysis::lowerOpenMPTasks() {
     }
   }
 
+  for (const auto &entry : task_graph.getRelations()) {
+    if (entry.second.kind != concurrency::RelationKind::MutuallyExclusive) {
+      continue;
+    }
+    const OpenMP::Task *lhs = entry.first.first;
+    const OpenMP::Task *rhs = entry.first.second;
+    if (!lhs || !rhs) {
+      continue;
+    }
+    ThreadID lhs_tid = getTaskThread(lhs);
+    ThreadID rhs_tid = getTaskThread(rhs);
+    if (!lhs_tid || !rhs_tid || lhs_tid == rhs_tid) {
+      continue;
+    }
+    m_openmp_task_exclusions.insert(normalizeThreadPair(lhs_tid, rhs_tid));
+  }
+
   for (const auto &boundary : task_graph.getWaitBoundaries()) {
     if (!boundary.inst) {
       continue;

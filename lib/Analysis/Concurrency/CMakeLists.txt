@@ -8,6 +8,7 @@ set(Concurrency_SOURCES
   Utils/CppAtomics.cpp
   Utils/ThreadLocalAnalysis.cpp
   OpenMP/OpenMPTaskGraph.cpp
+  OpenMP/DataSharingAnalysis.cpp
   MHP/MHPAnalysis.cpp
   MHP/StaticVectorClockMHP.cpp
   MHP/HappensBeforeAnalysis.cpp

@@ -43,6 +43,36 @@ const Value *stripValue(const Value *value) {
   return value ? value->stripPointerCasts() : nullptr;
 }
 
+std::pair<DependencySourceKind, DependencyProof>
+classifyDependencyAddressEvidence(const Value *value) {
+  if (!value) {
+    return {DependencySourceKind::RegionSummary, DependencyProof::Unknown};
+  }
+
+  value = value->stripPointerCasts();
+  if (isa<GlobalValue>(value) || isa<AllocaInst>(value)) {
+    return {DependencySourceKind::DirectAddress, DependencyProof::Definite};
+  }
+
+  if (const auto *ce = dyn_cast<ConstantExpr>(value)) {
+    if (ce->isCast() || ce->getOpcode() == Instruction::GetElementPtr) {
+      const Value *base =
+          getUnderlyingObject(ce->getOperand(0)->stripPointerCasts());
+      if (isa<GlobalValue>(base) || isa<AllocaInst>(base)) {
+        return {DependencySourceKind::DirectAddress, DependencyProof::Definite};
+      }
+    }
+  }
+
+  if (const auto *arg = dyn_cast<Argument>(value)) {
+    return {DependencySourceKind::Iterator, arg->getType()->isPointerTy()
+                                                ? DependencyProof::Possible
+                                                : DependencyProof::Unknown};
+  }
+
+  return {DependencySourceKind::RegionSummary, DependencyProof::Possible};
+}
+
 const Value *canonicalizeDependencyAddress(const Value *value,
                                            const DataLayout &DL,
                                            int64_t &offset,
@@ -175,7 +205,12 @@ void OpenMPTaskGraph::analyze() {
 
   m_summary.task_count = m_tasks.size();
   m_summary.wait_boundary_count = m_wait_boundary_infos.size();
-  m_summary.partial_wait_boundary_count = m_deferred_wait_deps_count;
+  m_summary.partial_wait_boundary_count = 0;
+  for (const WaitBoundaryInfo &info : m_wait_boundary_infos) {
+    if (info.is_partial_wait) {
+      ++m_summary.partial_wait_boundary_count;
+    }
+  }
 
   errs() << "Found " << m_tasks.size() << " OpenMP tasks with dependencies\n";
   if (m_deferred_wait_deps_count) {
@@ -317,6 +352,18 @@ void OpenMPTaskGraph::scanSchedulingContext(
       const Function *callee = api->getCallee(call);
       ThreadAPI::TD_TYPE type = api->getType(callee);
       ThreadAPI::RuntimeLibrary library = api->getRuntimeLibrary(callee);
+      bool is_nowait_variant = callee && callee->getName().contains("nowait");
+
+      if (library == ThreadAPI::RuntimeLibrary::OpenMP && callee) {
+        StringRef callee_name = callee->getName();
+        if (callee_name.startswith("__kmpc_doacross_wait")) {
+          type = ThreadAPI::TD_OMP_DOACROSS_WAIT;
+        } else if (callee_name.startswith("__kmpc_doacross_submit")) {
+          type = ThreadAPI::TD_OMP_DOACROSS_SUBMIT;
+        } else if (callee_name.startswith("__kmpc_doacross")) {
+          type = ThreadAPI::TD_OMP_DOACROSS_INIT;
+        }
+      }
 
       if (library == ThreadAPI::RuntimeLibrary::OpenMP) {
         if (type == ThreadAPI::TD_FORK) {
@@ -348,6 +395,16 @@ void OpenMPTaskGraph::scanSchedulingContext(
 
         if (type == ThreadAPI::TD_BAR_WAIT) {
           ++m_summary.barrier_count;
+          WaitBoundary boundary;
+          boundary.inst = call;
+          boundary.scheduling_context_id = state.scheduling_context_id;
+          boundary.sequence_index = state.sequence_index;
+          boundary.sibling_group = currentPhaseToken();
+          boundary.kind = WaitBoundaryInfo::Kind::Barrier;
+          m_wait_boundaries[state.scheduling_context_id].push_back(boundary);
+          recordBoundary(call, WaitBoundaryInfo::Kind::Barrier);
+          ++m_summary.wait_boundary_count;
+          advanceCurrentPhase();
           continue;
         }
 
@@ -484,12 +541,93 @@ void OpenMPTaskGraph::scanSchedulingContext(
       }
       if (type == ThreadAPI::TD_OMP_TARGET) {
         ++m_summary.target_region_count;
+        WaitBoundary boundary;
+        boundary.inst = call;
+        boundary.scheduling_context_id = state.scheduling_context_id;
+        boundary.sequence_index = state.sequence_index;
+        boundary.sibling_group = currentPhaseToken();
+        boundary.kind = is_nowait_variant ? WaitBoundaryInfo::Kind::TargetNowait
+                                          : WaitBoundaryInfo::Kind::Target;
+        boundary.is_partial_wait = is_nowait_variant;
+        m_wait_boundaries[state.scheduling_context_id].push_back(boundary);
+        recordBoundary(call, boundary.kind, boundary.is_partial_wait);
+        ++m_summary.wait_boundary_count;
+        if (is_nowait_variant) {
+          ++m_summary.target_nowait_boundary_count;
+          ++m_deferred_reason_counts["omp_target_nowait_partial"];
+        } else {
+          advanceCurrentPhase();
+        }
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TARGET_DATA_BEGIN ||
           type == ThreadAPI::TD_OMP_TARGET_DATA_END ||
           type == ThreadAPI::TD_OMP_TARGET_DATA_UPDATE) {
         ++m_summary.target_data_region_count;
+        if (type == ThreadAPI::TD_OMP_TARGET_DATA_END ||
+            type == ThreadAPI::TD_OMP_TARGET_DATA_UPDATE) {
+          WaitBoundary boundary;
+          boundary.inst = call;
+          boundary.scheduling_context_id = state.scheduling_context_id;
+          boundary.sequence_index = state.sequence_index;
+          boundary.sibling_group = currentPhaseToken();
+          boundary.kind = is_nowait_variant
+                              ? WaitBoundaryInfo::Kind::TargetDataNowait
+                              : WaitBoundaryInfo::Kind::TargetData;
+          boundary.is_partial_wait = is_nowait_variant;
+          m_wait_boundaries[state.scheduling_context_id].push_back(boundary);
+          recordBoundary(call, boundary.kind, boundary.is_partial_wait);
+          ++m_summary.wait_boundary_count;
+          if (is_nowait_variant) {
+            ++m_summary.target_nowait_boundary_count;
+            ++m_deferred_reason_counts["omp_target_data_nowait_partial"];
+          } else {
+            advanceCurrentPhase();
+          }
+        }
+        continue;
+      }
+      if (type == ThreadAPI::TD_OMP_DOACROSS_INIT) {
+        ++m_summary.doacross_init_count;
+        continue;
+      }
+      if (type == ThreadAPI::TD_OMP_DOACROSS_WAIT) {
+        ++m_summary.doacross_wait_count;
+        WaitBoundary boundary;
+        boundary.inst = call;
+        boundary.scheduling_context_id = state.scheduling_context_id;
+        boundary.sequence_index = state.sequence_index;
+        boundary.sibling_group = currentPhaseToken();
+        boundary.is_partial_wait = true;
+        boundary.kind = WaitBoundaryInfo::Kind::DoacrossWait;
+        if (call->arg_size() >= 3) {
+          const Value *witness = stripValue(call->getArgOperand(2));
+          if (witness) {
+            Dependency dep;
+            dep.address = witness;
+            dep.type = DependType::INOUT;
+            dep.size = 0;
+            dep.source_kind = DependencySourceKind::Iterator;
+            dep.proof = DependencyProof::Possible;
+            int64_t offset = 0;
+            bool precise = false;
+            dep.canonical_base = canonicalizeDependencyAddress(
+                witness, m_module.getDataLayout(), offset, precise);
+            dep.offset = offset;
+            dep.has_precise_offset = precise;
+            boundary.dependencies.push_back(dep);
+          }
+        }
+        m_wait_boundaries[state.scheduling_context_id].push_back(boundary);
+        recordBoundary(call, WaitBoundaryInfo::Kind::DoacrossWait, true);
+        ++m_summary.wait_boundary_count;
+        if (boundary.dependencies.empty()) {
+          ++m_deferred_reason_counts["omp_doacross_partial"];
+        }
+        continue;
+      }
+      if (type == ThreadAPI::TD_OMP_DOACROSS_SUBMIT) {
+        ++m_summary.doacross_submit_count;
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TASK_COMPLETE) {
@@ -606,6 +744,18 @@ void OpenMPTaskGraph::scanSchedulingContext(
         }
         if (type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_END) {
           popRegion(WaitBoundaryInfo::Kind::Unknown);
+          WaitBoundary boundary;
+          boundary.inst = call;
+          boundary.scheduling_context_id = state.scheduling_context_id;
+          boundary.sequence_index = state.sequence_index;
+          boundary.sibling_group = currentPhaseToken();
+          boundary.is_partial_wait = true;
+          boundary.kind = WaitBoundaryInfo::Kind::ReduceNowait;
+          m_wait_boundaries[state.scheduling_context_id].push_back(boundary);
+          recordBoundary(call, WaitBoundaryInfo::Kind::ReduceNowait, true);
+          ++m_summary.wait_boundary_count;
+          ++m_summary.reduction_nowait_boundary_count;
+          ++m_deferred_reason_counts["omp_reduction_nowait_partial"];
         }
         continue;
       }
@@ -805,8 +955,11 @@ std::vector<Dependency> OpenMPTaskGraph::extractRuntimeDependencies(
           Dependency dep;
           if (decodeConstantDependency(dyn_cast<Constant>(array->getOperand(i)),
                                        dep)) {
-            dep.source_kind = DependencySourceKind::DirectAddress;
-            dep.proof = DependencyProof::Definite;
+            dep.source_kind = gv->isConstant()
+                                  ? DependencySourceKind::DirectAddress
+                                  : DependencySourceKind::RegionSummary;
+            dep.proof = gv->isConstant() ? DependencyProof::Definite
+                                         : DependencyProof::Possible;
             dep.canonical_base = canonicalizeDependencyAddress(
                 dep.address, DL, dep.offset, dep.has_precise_offset);
             deps.push_back(dep);
@@ -819,6 +972,8 @@ std::vector<Dependency> OpenMPTaskGraph::extractRuntimeDependencies(
       const Value *address = nullptr;
       uint64_t size = 0;
       uint64_t flags = 0;
+      DependencySourceKind source_kind = DependencySourceKind::RegionSummary;
+      DependencyProof proof = DependencyProof::Unknown;
       bool has_address = false;
       bool has_size = false;
       bool has_flags = false;
@@ -867,6 +1022,9 @@ std::vector<Dependency> OpenMPTaskGraph::extractRuntimeDependencies(
       if (field_idx == 0) {
         partial.address = stripValue(stored);
         partial.has_address = partial.address != nullptr;
+        auto evidence = classifyDependencyAddressEvidence(stored);
+        partial.source_kind = evidence.first;
+        partial.proof = evidence.second;
       } else if (field_idx == 1) {
         if (const auto *len = dyn_cast<ConstantInt>(stored)) {
           partial.size = len->getZExtValue();
@@ -890,9 +1048,9 @@ std::vector<Dependency> OpenMPTaskGraph::extractRuntimeDependencies(
       dep.size = it->second.has_size ? it->second.size : 0;
       dep.type =
           decodeDependType(it->second.has_flags ? it->second.flags : 0x3);
-      dep.source_kind = DependencySourceKind::RegionSummary;
-      dep.proof = it->second.has_address ? DependencyProof::Possible
-                                         : DependencyProof::Unknown;
+      dep.source_kind = it->second.source_kind;
+      dep.proof =
+          it->second.has_address ? it->second.proof : DependencyProof::Unknown;
       dep.canonical_base = canonicalizeDependencyAddress(
           dep.address, DL, dep.offset, dep.has_precise_offset);
       deps.push_back(dep);
@@ -1136,14 +1294,25 @@ void OpenMPTaskGraph::buildDependencyEdges() {
                 break;
               }
             }
-            StringRef selective_reason =
-                boundary.kind == WaitBoundaryInfo::Kind::Flush
-                    ? "omp_flush_selective"
-                    : "omp_taskwait_deps_selective";
-            StringRef deferred_reason =
-                boundary.kind == WaitBoundaryInfo::Kind::Flush
-                    ? "omp_flush_witness_required"
-                    : "omp_taskwait_deps_partial";
+            StringRef selective_reason = "omp_taskwait_deps_selective";
+            StringRef deferred_reason = "omp_taskwait_deps_partial";
+            if (boundary.kind == WaitBoundaryInfo::Kind::Flush) {
+              selective_reason = "omp_flush_selective";
+              deferred_reason = "omp_flush_witness_required";
+            } else if (boundary.kind == WaitBoundaryInfo::Kind::DoacrossWait) {
+              selective_reason = "omp_doacross_selective";
+              deferred_reason = "omp_doacross_partial";
+            } else if (boundary.kind == WaitBoundaryInfo::Kind::TargetNowait) {
+              selective_reason = "omp_target_nowait_selective";
+              deferred_reason = "omp_target_nowait_partial";
+            } else if (boundary.kind ==
+                       WaitBoundaryInfo::Kind::TargetDataNowait) {
+              selective_reason = "omp_target_data_nowait_selective";
+              deferred_reason = "omp_target_data_nowait_partial";
+            } else if (boundary.kind == WaitBoundaryInfo::Kind::ReduceNowait) {
+              selective_reason = "omp_reduction_nowait_selective";
+              deferred_reason = "omp_reduction_nowait_partial";
+            }
             if (!boundary.dependencies.empty() && lhs_selected &&
                 rhs_selected &&
                 mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst) &&
@@ -1155,6 +1324,7 @@ void OpenMPTaskGraph::buildDependencyEdges() {
                              concurrency::ProofStrength::Must,
                              selective_reason);
             } else {
+              ++m_deferred_reason_counts[deferred_reason.str()];
               recordRelation(lhs.get(), rhs.get(),
                              concurrency::RelationKind::UnknownDueToModelGap,
                              concurrency::ProofStrength::Unknown,

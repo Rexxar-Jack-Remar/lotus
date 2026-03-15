@@ -401,6 +401,132 @@ TEST_F(ConcurrencyCheckerTest, DetectsOpenMPAtomicMismatch) {
   EXPECT_TRUE(found);
 }
 
+TEST_F(ConcurrencyCheckerTest, DetectsOpenMPBarrierInCritical) {
+  const char *source = R"(
+    declare void @__kmpc_critical(i8*, i32, i8*)
+    declare void @__kmpc_end_critical(i8*, i32, i8*)
+    declare void @__kmpc_barrier(i8*, i32)
+
+    define void @test_openmp_barrier_in_critical() {
+      call void @__kmpc_critical(i8* null, i32 0, i8* null)
+      call void @__kmpc_barrier(i8* null, i32 0)
+      call void @__kmpc_end_critical(i8* null, i32 0, i8* null)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::OpenMPChecker checker(*module, nullptr,
+                                     ThreadAPI::getThreadAPI());
+  auto reports = checker.checkOpenMPBugs();
+
+  bool found = false;
+  for (const auto &report : reports) {
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::OMP_BARRIER_IN_CRITICAL) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST_F(ConcurrencyCheckerTest, DetectsOpenMPOrderedDependencyGap) {
+  const char *source = R"(
+    declare i32 @__kmpc_ordered(i8*, i32)
+    declare void @__kmpc_end_ordered(i8*, i32)
+
+    define void @test_openmp_ordered_gap() {
+      %x = call i32 @__kmpc_ordered(i8* null, i32 0)
+      call void @__kmpc_end_ordered(i8* null, i32 0)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::OpenMPChecker checker(*module, nullptr,
+                                     ThreadAPI::getThreadAPI());
+  auto reports = checker.checkOpenMPBugs();
+
+  bool found = false;
+  for (const auto &report : reports) {
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::OMP_ORDERED_DEPENDENCY) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST_F(ConcurrencyCheckerTest, DetectsOpenMPIfFalseParallelPattern) {
+  const char *source = R"(
+    declare void @omp_set_num_threads(i32)
+    declare void @__kmpc_fork_call(i8*, i32, i8*, ...)
+
+    define void @test_openmp_if_false_parallel() {
+      call void @omp_set_num_threads(i32 1)
+      call void (i8*, i32, i8*, ...) @__kmpc_fork_call(i8* null, i32 0, i8* null)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::OpenMPChecker checker(*module, nullptr,
+                                     ThreadAPI::getThreadAPI());
+  auto reports = checker.checkOpenMPBugs();
+
+  bool found = false;
+  for (const auto &report : reports) {
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::OMP_IF_FALSE_PARALLEL) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST_F(ConcurrencyCheckerTest, DetectsOpenMPMissingSchedulePattern) {
+  const char *source = R"(
+    declare void @__kmpc_for_static_init_4(i8*, i32, i32*, i32*, i32*, i32*, i32, i32)
+
+    define void @test_openmp_missing_schedule() {
+      %last = alloca i32
+      %lower = alloca i32
+      %upper = alloca i32
+      %stride = alloca i32
+      call void @__kmpc_for_static_init_4(i8* null, i32 0, i32* %last,
+                                          i32* %lower, i32* %upper,
+                                          i32* %stride, i32 1, i32 1)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::OpenMPChecker checker(*module, nullptr,
+                                     ThreadAPI::getThreadAPI());
+  auto reports = checker.checkOpenMPBugs();
+
+  bool found = false;
+  for (const auto &report : reports) {
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::OMP_MISSING_SCHEDULE) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
 TEST_F(ConcurrencyCheckerTest, DetectsMPIOrphanedRequest) {
   const char *source = R"(
     declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8**)

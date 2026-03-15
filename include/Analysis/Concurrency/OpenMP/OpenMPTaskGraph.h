@@ -133,6 +133,11 @@ public:
     size_t cancellation_point_count = 0;
     size_t target_region_count = 0;
     size_t target_data_region_count = 0;
+    size_t target_nowait_boundary_count = 0;
+    size_t doacross_init_count = 0;
+    size_t doacross_wait_count = 0;
+    size_t doacross_submit_count = 0;
+    size_t reduction_nowait_boundary_count = 0;
     size_t detach_completion_count = 0;
     size_t teams_region_count = 0;
     size_t distribute_region_count = 0;
@@ -157,6 +162,13 @@ public:
       DispatchFini,
       Reduce,
       Flush,
+      Barrier,
+      DoacrossWait,
+      Target,
+      TargetNowait,
+      TargetData,
+      TargetDataNowait,
+      ReduceNowait,
       Unknown
     };
 
