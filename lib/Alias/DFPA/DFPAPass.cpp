@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <utility>
+#include <vector>
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DataLayout.h>
@@ -178,6 +179,10 @@ private:
   std::set<const CallBase *> coarse_missing_targets_;
   std::size_t unknown_slot_degradations_ = 0;
   std::size_t demand_steps_ = 0;
+  std::map<unsigned, std::vector<StoreInst *>> stores_by_object_;
+  std::vector<StoreInst *> stores_with_unknown_base_;
+  std::map<unsigned, std::vector<CallBase *>> memtransfers_by_dst_object_;
+  std::vector<CallBase *> memtransfers_with_unknown_base_;
 
   struct LocalState {
     std::map<Value *, AbstractValue> value_cache;
@@ -192,6 +197,86 @@ private:
       summaries_[&F] = Summary;
     }
     seedGlobalInitializers();
+  }
+
+  void buildDemandIndexes() {
+    stores_by_object_.clear();
+    stores_with_unknown_base_.clear();
+    memtransfers_by_dst_object_.clear();
+    memtransfers_with_unknown_base_.clear();
+
+    for (StoreInst *SI : index_.getStores()) {
+      std::set<unsigned> BaseObjects;
+      bool UnknownBase = false;
+      collectSyntacticBaseObjects(SI->getPointerOperand(), BaseObjects,
+                                  UnknownBase);
+      if (BaseObjects.empty() || UnknownBase) {
+        stores_with_unknown_base_.push_back(SI);
+      }
+      for (unsigned ObjectId : BaseObjects) {
+        stores_by_object_[ObjectId].push_back(SI);
+      }
+    }
+
+    for (CallBase *CB : index_.getMemTransfers()) {
+      std::set<unsigned> BaseObjects;
+      bool UnknownBase = false;
+      collectSyntacticBaseObjects(CB->getArgOperand(0), BaseObjects,
+                                  UnknownBase);
+      if (BaseObjects.empty() || UnknownBase) {
+        memtransfers_with_unknown_base_.push_back(CB);
+      }
+      for (unsigned ObjectId : BaseObjects) {
+        memtransfers_by_dst_object_[ObjectId].push_back(CB);
+      }
+    }
+  }
+
+  void collectSyntacticBaseObjects(Value *V, std::set<unsigned> &Objects,
+                                   bool &UnknownBase) const {
+    if (!V)
+      return;
+
+    V = V->stripPointerCasts();
+    if (const AbstractObject *Obj = index_.lookupObject(V)) {
+      Objects.insert(Obj->id);
+      return;
+    }
+    if (auto *Arg = dyn_cast<Argument>(V)) {
+      if (const AbstractObject *Obj = index_.lookupFormalObject(Arg)) {
+        Objects.insert(Obj->id);
+        return;
+      }
+      UnknownBase = true;
+      return;
+    }
+    if (auto *GEP = dyn_cast<GEPOperator>(V)) {
+      collectSyntacticBaseObjects(GEP->getPointerOperand(), Objects,
+                                  UnknownBase);
+      return;
+    }
+    if (auto *BCO = dyn_cast<BitCastOperator>(V)) {
+      collectSyntacticBaseObjects(BCO->getOperand(0), Objects, UnknownBase);
+      return;
+    }
+    if (auto *BCI = dyn_cast<BitCastInst>(V)) {
+      collectSyntacticBaseObjects(BCI->getOperand(0), Objects, UnknownBase);
+      return;
+    }
+    if (auto *PN = dyn_cast<PHINode>(V)) {
+      for (unsigned I = 0; I < PN->getNumIncomingValues(); ++I) {
+        collectSyntacticBaseObjects(PN->getIncomingValue(I), Objects,
+                                    UnknownBase);
+      }
+      return;
+    }
+    if (auto *SI = dyn_cast<SelectInst>(V)) {
+      collectSyntacticBaseObjects(SI->getTrueValue(), Objects, UnknownBase);
+      collectSyntacticBaseObjects(SI->getFalseValue(), Objects, UnknownBase);
+      return;
+    }
+
+    UnknownBase = true;
   }
 
   void seedGlobalInitializers() {
@@ -743,6 +828,7 @@ private:
   std::map<DemandSlotKey, DemandOutcome> slot_cache_;
 
   void runDemandRefinement() {
+    buildDemandIndexes();
     DFPAStats Stats = result_.getStats();
     for (const auto &Entry : coarse_targets_) {
       const CallBase *CB = Entry.first;
@@ -999,7 +1085,7 @@ private:
     }
     active_slot_states_.insert(Key);
 
-    for (StoreInst *SI : index_.getStores()) {
+    auto VisitStore = [&](StoreInst *SI) {
       LocalState State;
       PointerTargets Ptrs =
           resolvePointerTargets(SI->getPointerOperand(), *SI->getFunction(), State);
@@ -1012,9 +1098,17 @@ private:
       }
       if (Ptrs.unknown)
         Outcome.unknown = true;
-    }
+    };
 
-    for (CallBase *CB : index_.getMemTransfers()) {
+    auto StoreIt = stores_by_object_.find(Slot.object_id);
+    if (StoreIt != stores_by_object_.end()) {
+      for (StoreInst *SI : StoreIt->second)
+        VisitStore(SI);
+    }
+    for (StoreInst *SI : stores_with_unknown_base_)
+      VisitStore(SI);
+
+    auto VisitMemTransfer = [&](CallBase *CB) {
       LocalState State;
       PointerTargets Dst =
           resolvePointerTargets(CB->getArgOperand(0), *CB->getFunction(), State);
@@ -1031,7 +1125,15 @@ private:
         if (Src.unknown)
           Outcome.unknown = true;
       }
+    };
+
+    auto MemTransferIt = memtransfers_by_dst_object_.find(Slot.object_id);
+    if (MemTransferIt != memtransfers_by_dst_object_.end()) {
+      for (CallBase *CB : MemTransferIt->second)
+        VisitMemTransfer(CB);
     }
+    for (CallBase *CB : memtransfers_with_unknown_base_)
+      VisitMemTransfer(CB);
 
     if (slot_state_[Slot].from_unknown_slot)
       Outcome.unknown = true;

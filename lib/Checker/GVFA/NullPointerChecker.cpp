@@ -98,10 +98,8 @@ bool NullPointerChecker::isProvenNonNull(const Value *Ptr,
 
   if (NCA)
     return !NCA->mayNull(MutablePtr, MutableInst);
-  if (CSNCA) {
-    Context emptyCtx;
-    return !CSNCA->mayNull(MutablePtr, MutableInst, emptyCtx);
-  }
+  if (CSNCA)
+    return !CSNCA->mayNull(MutablePtr, MutableInst);
   return false;
 }
 

@@ -4,7 +4,6 @@ set(CanaryNullPointer_SOURCES
   NullCheckAnalysis.cpp
   NullEquivalenceAnalysis.cpp
   NullFlowAnalysis.cpp
-  ContextSensitiveLocalNullCheckAnalysis.cpp
   ContextSensitiveNullCheckAnalysis.cpp
   ContextSensitiveNullFlowAnalysis.cpp
   AliasAnalysisAdapter.cpp
