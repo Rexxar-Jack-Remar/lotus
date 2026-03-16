@@ -98,6 +98,19 @@ detail. The engines first build path expressions and then evaluate them over a
 client-provided lattice. As a result, path-expression growth is one of the main
 performance risks in this subsystem.
 
+For ADT methods, the solver accepts either client-provided reducible metadata
+(`IntraReducibleEliminationProblem`) or a synthesized reducible view. The
+synthesized path is accepted only when all nodes are entry-reachable, immediate
+dominators are computable, and removing back edges yields a DAG whose
+topological order starts with entry.
+
+Backward clients with multiple exits (for example liveness and very-busy)
+typically run one solve per return instruction and combine per-node facts across
+solves:
+
+- liveness (may analysis): union
+- very-busy (must analysis): intersection
+
 ## Runtime status and diagnostics
 
 - `IntraEliminationSolver::solve()` returns `SolveStatus`:

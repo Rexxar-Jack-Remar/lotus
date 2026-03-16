@@ -1,5 +1,3 @@
-#include "Dataflow/APA/Clients/LLVM/Intra/NonNull.h"
-
 #include "llvm/Analysis/AssumeBundleQueries.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DataLayout.h"
@@ -8,6 +6,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 
 #include "Dataflow/APA/Adapters/LLVM/ForwardProblem.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/NonNull.h"
 #include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/APA/Engines/Solver.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
@@ -422,6 +421,8 @@ private:
   }
 
   void addNonNullFromAssumeBundles(llvm::Instruction *Src, fact_t &Out) const {
+    // This helper intentionally delegates to ValueTracking knowledge at Src.
+    // It does not enumerate assume operand bundles directly.
     if (AC == nullptr || Src == nullptr) {
       return;
     }

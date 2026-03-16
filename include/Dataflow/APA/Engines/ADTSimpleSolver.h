@@ -23,7 +23,6 @@ bool computeADTSimplePathExpr(
     const std::vector<
         typename IntraEliminationSolverContext<AnalysisDomainTy>::ADTNode *>
         &LeafByPos) {
-  using Context = IntraEliminationSolverContext<AnalysisDomainTy>;
   if (!W) {
     return false;
   }
@@ -50,6 +49,12 @@ bool computeADTSimplePathExpr(
   // X collects cross edges that enter the right interval, while Y collects
   // back edges that re-enter the left interval. These correspond to the paper's
   // interval summary equations for a composition node.
+  //
+  // F/B classification is expected to be normalized so that:
+  //   - each F edge has destination R2 (right-entry)
+  //   - each B edge has destination R1 (left-entry)
+  // Any mismatch indicates malformed ADT edge classification and we reject
+  // this engine invocation.
   auto X = Ctx.Exprs.zero();
   for (const auto &E : W->F) {
     auto It = LeafOf.find(E.Src);

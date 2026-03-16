@@ -20,6 +20,8 @@ using VeryBusyExpressionsResult =
     DataFlowResultT<llvm::Instruction *, VeryBusyExpressionsFact,
                     llvm::Instruction *>;
 
+// Backward, must-style very-busy expressions. For multi-return functions, the
+// implementation solves one reverse problem per return and intersects facts.
 VeryBusyExpressionsResult
 runIntraElimVeryBusyExpressions(llvm::Function *F,
                                 EliminationOptions Opts = {});

@@ -13,6 +13,8 @@
 namespace elimination {
 
 using NonNullFact = std::set<const llvm::Value *>;
+// Edge-sensitive transfer for branch-conditioned facts (e.g., pointer != null
+// on one successor only).
 struct NonNullEdgeTransfer {
   llvm::Instruction *Src = nullptr;
   llvm::Instruction *Dst = nullptr;

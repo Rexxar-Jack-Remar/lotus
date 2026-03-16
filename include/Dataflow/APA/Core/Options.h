@@ -50,6 +50,8 @@ struct EliminationOptions final {
   OnNonConvergentStar NonConvergentStarPolicy = OnNonConvergentStar::Fail;
   // 0 means "use Problem.maxStarIterations()".
   std::size_t MaxStarIterations = 0;
+  // Reserved for future conditional collection. Diagnostics are currently
+  // recorded unconditionally by the solver and attached to result metadata.
   bool RecordDiagnostics = true;
 };
 

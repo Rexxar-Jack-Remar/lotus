@@ -1,5 +1,3 @@
-#include "Dataflow/APA/Clients/LLVM/Intra/VeryBusyExpressions.h"
-
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -7,6 +5,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 
+#include "Dataflow/APA/Clients/LLVM/Intra/VeryBusyExpressions.h"
 #include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/APA/Engines/Solver.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
@@ -359,6 +358,8 @@ VeryBusyExpressionsResult runIntraElimVeryBusyExpressions(
   OverallDiag.executed_method = Opts.Method;
   bool Initialized = false;
 
+  // Multi-exit handling: solve one reverse problem rooted at each return and
+  // merge with intersection (must semantics: busy on all return paths).
   for (auto *Exit : Exits) {
     ReverseVeryBusyProblem Problem(F, Exit, AA, DT, TLI, MSSA);
     IntraEliminationSolver<VeryBusyDomain> Solver(Problem, Opts);
@@ -394,6 +395,7 @@ VeryBusyExpressionsResult runIntraElimVeryBusyExpressions(
         if (InFacts == nullptr) {
           continue;
         }
+        // Seed the first solve with the universe to implement intersection.
         if (!Initialized) {
           Out = Problem.allExprs();
         }

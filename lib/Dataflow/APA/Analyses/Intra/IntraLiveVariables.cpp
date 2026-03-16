@@ -1,9 +1,8 @@
-#include "Dataflow/APA/Clients/LLVM/Intra/LiveVariables.h"
-
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 
 #include "Dataflow/APA/Adapters/LLVM/BackwardProblem.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/LiveVariables.h"
 #include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/APA/Engines/Solver.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
@@ -101,6 +100,8 @@ LiveVariablesResult runIntraElimLiveVariables(llvm::Function *F,
   OverallDiag.requested_method = Opts.Method;
   OverallDiag.executed_method = Opts.Method;
 
+  // Multi-exit handling: solve one reverse problem rooted at each return and
+  // merge with set-union (may semantics: live on any feasible return path).
   for (auto *Exit : Exits) {
     ReverseLiveVariablesProblem Problem(F, Exit);
     IntraEliminationSolver<LiveVariablesDomain> Solver(Problem, Opts);
@@ -123,6 +124,9 @@ LiveVariablesResult runIntraElimLiveVariables(llvm::Function *F,
     }
     auto Res = Solver.getResults();
 
+    // The reverse adapter associates edge transfer with Dst. Re-apply transfer
+    // at the synthetic exit root so combined facts model program-point liveness
+    // after processing the exit instruction itself.
     const auto *ExitFacts = Res.tryIN(Exit);
     if (ExitFacts != nullptr) {
       Res.IN(Exit) = Problem.applyTransfer(Exit, *ExitFacts);

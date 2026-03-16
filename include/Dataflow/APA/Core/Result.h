@@ -17,11 +17,15 @@ public:
   using expr_factory_t = PathExprFactory<TransferT>;
   using expr_ref_t = typename expr_factory_t::Ref;
 
+  // Builder-style accessor: creates a fact entry on demand.
   FactT &IN(const NodeT &N) { return In[N]; }
+  // Builder-style accessor for path-expression summaries.
   expr_ref_t &ExprTo(const NodeT &N) { return Expr[N]; }
 
   bool containsNode(const NodeT &N) const { return In.find(N) != In.end(); }
 
+  // Read-only lookup that preserves the distinction between
+  // "node has no recorded fact" and "node maps to a default-like fact".
   const FactT *tryIN(const NodeT &N) const {
     auto It = In.find(N);
     if (It != In.end()) {

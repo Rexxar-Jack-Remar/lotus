@@ -15,6 +15,8 @@ using LiveVariablesResult =
     DataFlowResultT<llvm::Instruction *, LiveVariablesFact,
                     llvm::Instruction *>;
 
+// Backward, may-style liveness. For multi-return functions, the implementation
+// solves one reverse problem per return and unions per-node facts.
 LiveVariablesResult runIntraElimLiveVariables(llvm::Function *F,
                                               EliminationOptions Opts = {});
 

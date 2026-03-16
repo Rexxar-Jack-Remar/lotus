@@ -12,6 +12,11 @@
 
 namespace elimination {
 
+// Canonical key for expression-availability style analyses.
+//
+// Important: operands/types/metadata are compared by pointer identity. Keys are
+// therefore intended for in-process analysis of one LLVM context/module, not as
+// a stable cross-process serialization format.
 struct ExpressionKey {
   unsigned Opcode = 0;
   unsigned Predicate = 0;
@@ -89,6 +94,8 @@ inline bool isCommutativeOpcode(unsigned Opcode) {
 }
 
 inline ExpressionKey makeExpressionKey(const llvm::Instruction *Inst) {
+  // Normalize instruction semantics into a structural key. Commutative ops and
+  // comparisons are canonicalized so equivalent forms map to one key.
   ExpressionKey Key;
   if (Inst == nullptr) {
     return Key;

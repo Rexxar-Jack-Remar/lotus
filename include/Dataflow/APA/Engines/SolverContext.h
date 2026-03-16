@@ -1,9 +1,9 @@
 #ifndef DATAFLOW_APA_ENGINES_SOLVERCONTEXT_H_
 #define DATAFLOW_APA_ENGINES_SOLVERCONTEXT_H_
 
-#include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/APA/Core/Options.h"
 #include "Dataflow/APA/Core/PathExpr.h"
+#include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/APA/Core/Result.h"
 
 #include <algorithm>
@@ -289,6 +289,14 @@ public:
     return X->UFExpr;
   }
 
+  // Build reducible metadata from a plain CFG.
+  //
+  // The ADT engines require stronger invariants than state elimination. This
+  // routine rejects the ADT path unless all of the following hold:
+  //   1) every listed node is reachable from entry,
+  //   2) immediate dominators can be computed for all nodes,
+  //   3) removing back edges yields an acyclic graph with entry first in topo.
+  // When any check fails, the caller falls back to StateElimination.
   bool buildComputedReducibleView(ComputedReducibleView &Out) const {
     Out = ComputedReducibleView{};
     Out.Problem = &Problem;
@@ -473,8 +481,8 @@ public:
       DomStack.pop_back();
     }
 
-    // Topologically sort only the non-back edges. If that fails, the graph does
-    // not satisfy the reducibility assumptions required by the ADT algorithms.
+    // Topologically sort only the non-back edges. Failure here means the graph
+    // violates reducibility assumptions required by the ADT engines.
     std::vector<std::vector<std::size_t>> SuccF(N);
     std::vector<std::size_t> InDeg(N, 0);
     for (const auto &E : Out.Edges) {

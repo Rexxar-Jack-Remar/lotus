@@ -20,7 +20,6 @@ bool computeADTDelayedPathExpr(
         typename IntraEliminationSolverContext<AnalysisDomainTy>::n_t,
         typename IntraEliminationSolverContext<AnalysisDomainTy>::ADTNode *>
         &LeafOf) {
-  using Context = IntraEliminationSolverContext<AnalysisDomainTy>;
   if (!W) {
     return false;
   }
@@ -48,6 +47,10 @@ bool computeADTDelayedPathExpr(
   // interval and Y summarizes back crossings into the left interval. The
   // difference is that we keep the resulting prefixes on ADT edges rather than
   // pushing them immediately to every descendant leaf.
+  //
+  // F/B sets are expected to be normalized so each cross edge targets the
+  // corresponding interval entry (R2 for F, R1 for B). If not, we treat the
+  // reducible view as inconsistent and reject this ADT attempt.
   auto X = Ctx.Exprs.zero();
   for (const auto &E : W->F) {
     auto It = LeafOf.find(E.Src);

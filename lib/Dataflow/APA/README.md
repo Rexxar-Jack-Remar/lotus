@@ -82,26 +82,30 @@ Three elimination-style solvers are exposed via `elimination::EliminationOptions
 - `NonConvergentStarPolicy = Fail | ReturnLast | ReturnIdentity`
 - `MaxStarIterations` (0 means use `Problem.maxStarIterations()`).
 
-The public facade `IntraEliminationSolver.h` dispatches to one of three engine
-headers in `include/Dataflow/APA/Engines/`:
+The public facade `Engines/Solver.h` dispatches to one of three engine headers
+in `include/Dataflow/APA/Engines/`:
 
-- `EngineCommon.h` (shared internals: reducible-view construction, ADT
+- `SolverContext.h` (shared internals: reducible-view construction, ADT
   building, expression evaluation)
-- `StateElimination.h`
-- `ADTSimple.h`
-- `ADTDelayed.h`
+- `StateEliminationSolver.h`
+- `ADTSimpleSolver.h`
+- `ADTDelayedSolver.h`
 
 Roughly, the split is:
 
-- `IntraEliminationSolver.h`: API surface and fallback policy
-- `StateEliminationEngine.h`: generic full-CFG elimination
-- `ADTSimpleEngine.h`: eager leaf-update ADT evaluation
-- `ADTDelayedEngine.h`: deferred prefix composition with union-find style links
+- `Solver.h`: API surface and fallback policy
+- `StateEliminationSolver.h`: generic full-CFG elimination
+- `ADTSimpleSolver.h`: eager leaf-update ADT evaluation
+- `ADTDelayedSolver.h`: deferred prefix composition with union-find style links
 
 For ADT-based methods, you can optionally implement
 `elimination::IntraReducibleEliminationProblem`
 (dominators + topological order + edge list). If not provided, the solver computes reducible
 flowgraph metadata internally and falls back to `StateElimination` when reducibility assumptions fail.
+
+The synthesized reducible view accepts ADT only when all nodes are entry-reachable,
+immediate dominators are computable, and the non-back-edge subgraph is acyclic
+with entry first in topological order.
 
 
 ## Intraprocedural LLVM analyses
@@ -121,7 +125,7 @@ paper), and serve as examples for adding additional analyses:
 
 ## LLVM pass wrappers
 
-For convenient use under LLVM's legacy pass manager, three function passes are
+For convenient use under LLVM's legacy pass manager, eight function passes are
 provided:
 
 - `-elim-reachable` (reachability)
