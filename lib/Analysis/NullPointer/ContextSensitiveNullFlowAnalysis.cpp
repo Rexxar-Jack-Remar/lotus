@@ -19,6 +19,20 @@
 
 using namespace llvm;
 
+namespace lotus {
+namespace nullpointer {
+namespace testing {
+
+static int ContextDepthOverride = -1;
+
+void setContextSensitiveNullContextDepthOverrideForTesting(int Depth) {
+  ContextDepthOverride = Depth;
+}
+
+} // namespace testing
+} // namespace nullpointer
+} // namespace lotus
+
 namespace {
 
 static cl::opt<unsigned> CSContextDepth(
@@ -44,6 +58,10 @@ static cl::opt<bool> LegacyCSPrintPerFunction(
     cl::desc("Deprecated no-op compatibility option."));
 
 unsigned configuredContextDepth() {
+  if (lotus::nullpointer::testing::ContextDepthOverride >= 0) {
+    return static_cast<unsigned>(
+        lotus::nullpointer::testing::ContextDepthOverride);
+  }
   if (LegacyCSNFAMaxDepth.getNumOccurrences() > 0) {
     return LegacyCSNFAMaxDepth;
   }
@@ -201,9 +219,15 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
   }
 
   for (auto &F : M) {
-    if (!F.empty() && (ExternalEntryFunctions.count(&F) ||
-                       !FunctionsWithInternalCallers.count(&F))) {
+    if (!F.empty() && !FunctionsWithInternalCallers.count(&F)) {
       EntryFunctions.insert(&F);
+    }
+  }
+  if (EntryFunctions.empty()) {
+    for (auto &F : M) {
+      if (!F.empty() && ExternalEntryFunctions.count(&F)) {
+        EntryFunctions.insert(&F);
+      }
     }
   }
   if (EntryFunctions.empty()) {
@@ -488,6 +512,29 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
 
     const BitVector In = FactsIt->second;
     BitVector LocalOut = ApplyLocalTransfer(Key.Inst, Key.Ctx, In);
+    auto PropagateReturnToCall = [&](ReturnInst *Ret, CallBase *Call,
+                                     const Context &CallerCtx) {
+      if (!Call) {
+        return;
+      }
+
+      auto CallIt = InFacts.find({Call, CallerCtx});
+      if (CallIt == InFacts.end()) {
+        return;
+      }
+
+      BitVector ReturnFacts =
+          ApplyLocalTransfer(Call, CallerCtx, CallIt->second);
+      if (auto *RetVal = Ret->getReturnValue()) {
+        if (Call->getType()->isPointerTy() && TestFact(In, RetVal)) {
+          SetFact(ReturnFacts, Call);
+        }
+      }
+
+      for (auto *RetSite : ICFG.getReturnSitesOfCallAt(Call)) {
+        MergeState({RetSite, CallerCtx}, ReturnFacts);
+      }
+    };
 
     if (auto *CB = dyn_cast<CallBase>(Key.Inst)) {
       auto Callees = ICFG.getCalleesOfCallAt(CB);
@@ -532,22 +579,16 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
       if (!Key.Ctx.empty()) {
         Context CallerCtx = Key.Ctx;
         auto *Call = CallerCtx.popBack();
-        if (Call) {
-          auto CallIt = InFacts.find({Call, CallerCtx});
-          BitVector ReturnFacts = EmptyFacts();
-          if (CallIt != InFacts.end()) {
-            ReturnFacts = ApplyLocalTransfer(Call, CallerCtx, CallIt->second);
+        if (Call != nullptr) {
+          PropagateReturnToCall(Ret, Call, CallerCtx);
+        }
+      } else {
+        for (auto *CallerInst : ICFG.getCallersOf(Ret->getFunction())) {
+          auto *Caller = dyn_cast<CallBase>(CallerInst);
+          if (Caller == nullptr) {
+            continue;
           }
-
-          if (auto *RetVal = Ret->getReturnValue()) {
-            if (Call->getType()->isPointerTy() && TestFact(In, RetVal)) {
-              SetFact(ReturnFacts, Call);
-            }
-          }
-
-          for (auto *RetSite : ICFG.getReturnSitesOfCallAt(Call)) {
-            MergeState({RetSite, CallerCtx}, ReturnFacts);
-          }
+          PropagateReturnToCall(Ret, Caller, Context());
         }
       }
       continue;

@@ -10,6 +10,14 @@
 #include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
+namespace lotus {
+namespace nullpointer {
+namespace testing {
+void setContextSensitiveNullContextDepthOverrideForTesting(int Depth);
+} // namespace testing
+} // namespace nullpointer
+} // namespace lotus
+
 namespace {
 
 using Context = ContextSensitiveNullCheckAnalysis::Context;
@@ -71,6 +79,19 @@ bool contextEquals(const Context &Ctx,
 struct AnalysisHarness {
   std::unique_ptr<llvm::legacy::PassManager> PassManager;
   ContextSensitiveNullCheckAnalysis *Analysis = nullptr;
+};
+
+class ScopedContextDepthOverride {
+public:
+  explicit ScopedContextDepthOverride(int Depth) {
+    lotus::nullpointer::testing::
+        setContextSensitiveNullContextDepthOverrideForTesting(Depth);
+  }
+
+  ~ScopedContextDepthOverride() {
+    lotus::nullpointer::testing::
+        setContextSensitiveNullContextDepthOverrideForTesting(-1);
+  }
 };
 
 AnalysisHarness runContextSensitiveNCA(llvm::Module &Module) {
@@ -232,6 +253,83 @@ TEST(ContextSensitiveNullCheckAnalysisTest,
 }
 
 TEST(ContextSensitiveNullCheckAnalysisTest,
+     KZeroReturnPropagationKeepsSingleCallerResults) {
+  ScopedContextDepthOverride DepthOverride(0);
+
+  llvm::LLVMContext ContextStorage;
+  auto Module = parseModule(ContextStorage, R"(
+    define i8* @identity(i8* %p) {
+    entry:
+      ret i8* %p
+    }
+
+    define i32 @main() {
+    entry:
+      %stack = alloca i8, align 1
+      %ret = call i8* @identity(i8* %stack)
+      %load = load i8, i8* %ret, align 1
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(Module, nullptr);
+
+  auto Harness = runContextSensitiveNCA(*Module);
+  auto *Analysis = Harness.Analysis;
+  auto *Main = Module->getFunction("main");
+  ASSERT_NE(Analysis, nullptr);
+  ASSERT_NE(Main, nullptr);
+
+  auto *Ret = findInstructionByName(Main, "ret");
+  auto *Load = findInstructionByName(Main, "load");
+  ASSERT_NE(Ret, nullptr);
+  ASSERT_NE(Load, nullptr);
+
+  EXPECT_FALSE(Analysis->mayNull(Ret, Load));
+}
+
+TEST(ContextSensitiveNullCheckAnalysisTest,
+     KZeroMergesReturnFactsAcrossCallersConservatively) {
+  ScopedContextDepthOverride DepthOverride(0);
+
+  llvm::LLVMContext ContextStorage;
+  auto Module = parseModule(ContextStorage, R"(
+    define i8* @identity(i8* %p) {
+    entry:
+      ret i8* %p
+    }
+
+    define i32 @main() {
+    entry:
+      %stack = alloca i8, align 1
+      %nonnull = call i8* @identity(i8* %stack)
+      %nullable = call i8* @identity(i8* null)
+      %load_nonnull = load i8, i8* %nonnull, align 1
+      %load_nullable = load i8, i8* %nullable, align 1
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(Module, nullptr);
+
+  auto Harness = runContextSensitiveNCA(*Module);
+  auto *Analysis = Harness.Analysis;
+  auto *Main = Module->getFunction("main");
+  ASSERT_NE(Analysis, nullptr);
+  ASSERT_NE(Main, nullptr);
+
+  auto *NonNullRet = findInstructionByName(Main, "nonnull");
+  auto *NullableRet = findInstructionByName(Main, "nullable");
+  auto *LoadNonNull = findInstructionByName(Main, "load_nonnull");
+  auto *LoadNullable = findInstructionByName(Main, "load_nullable");
+  ASSERT_NE(NonNullRet, nullptr);
+  ASSERT_NE(NullableRet, nullptr);
+  ASSERT_NE(LoadNonNull, nullptr);
+  ASSERT_NE(LoadNullable, nullptr);
+
+  EXPECT_TRUE(Analysis->mayNull(NonNullRet, LoadNonNull));
+  EXPECT_TRUE(Analysis->mayNull(NullableRet, LoadNullable));
+}
+
+TEST(ContextSensitiveNullCheckAnalysisTest,
      KLimitingDoesNotProduceFalseNotNullWhenOlderPrefixesDiffer) {
   llvm::LLVMContext ContextStorage;
   auto Module = parseModule(ContextStorage, R"(
@@ -247,54 +345,29 @@ TEST(ContextSensitiveNullCheckAnalysisTest,
       ret void
     }
 
-    define void @leaf_nullable(i8* %p) {
-    entry:
-      call void @callee(i8* %p)
-      ret void
-    }
-
-    define void @mid_a_nonnull(i8* %p) {
+    define void @mid_a(i8* %p) {
     entry:
       call void @leaf_nonnull(i8* %p)
       ret void
     }
 
-    define void @mid_a_nullable(i8* %p) {
+    define void @mid_b(i8* %p) {
     entry:
-      call void @leaf_nullable(i8* %p)
-      ret void
-    }
-
-    define void @mid_b_nonnull(i8* %p) {
-    entry:
-      call void @mid_a_nonnull(i8* %p)
-      ret void
-    }
-
-    define void @mid_b_nullable(i8* %p) {
-    entry:
-      call void @mid_a_nullable(i8* %p)
+      call void @mid_a(i8* %p)
       ret void
     }
 
     define void @root_nonnull() {
     entry:
       %stack = alloca i8, align 1
-      call void @mid_b_nonnull(i8* %stack)
+      call void @mid_b(i8* %stack)
       ret void
     }
 
-    define void @root_nullable(i8* %p) {
+    define void @root_nullable() {
     entry:
-      call void @mid_b_nullable(i8* %p)
+      call void @mid_b(i8* null)
       ret void
-    }
-
-    define i32 @main() {
-    entry:
-      call void @root_nonnull()
-      call void @root_nullable(i8* null)
-      ret i32 0
     }
   )");
   ASSERT_NE(Module, nullptr);
@@ -316,6 +389,62 @@ TEST(ContextSensitiveNullCheckAnalysisTest,
     }
   }
   EXPECT_TRUE(SawCollapsedMayNull);
+  EXPECT_TRUE(Analysis->mayNull(Callee->getArg(0), Load));
+}
+
+TEST(ContextSensitiveNullCheckAnalysisTest,
+     KOneCollapsesSameSuffixContextsConservatively) {
+  ScopedContextDepthOverride DepthOverride(1);
+
+  llvm::LLVMContext ContextStorage;
+  auto Module = parseModule(ContextStorage, R"(
+    define void @callee(i8* %p) {
+    entry:
+      %load = load i8, i8* %p, align 1
+      ret void
+    }
+
+    define void @dispatch(i8* %p) {
+    entry:
+      call void @callee(i8* %p)
+      ret void
+    }
+
+    define void @root_nonnull() {
+    entry:
+      %stack = alloca i8, align 1
+      call void @dispatch(i8* %stack)
+      ret void
+    }
+
+    define void @root_nullable() {
+    entry:
+      call void @dispatch(i8* null)
+      ret void
+    }
+  )");
+  ASSERT_NE(Module, nullptr);
+
+  auto Harness = runContextSensitiveNCA(*Module);
+  auto *Analysis = Harness.Analysis;
+  auto *Callee = Module->getFunction("callee");
+  auto *Dispatch = Module->getFunction("dispatch");
+  auto *Load = findInstructionByName(Callee, "load");
+  ASSERT_NE(Analysis, nullptr);
+  ASSERT_NE(Callee, nullptr);
+  ASSERT_NE(Dispatch, nullptr);
+  ASSERT_NE(Load, nullptr);
+
+  auto DispatchToCallee = findCallsTo(Dispatch, "callee");
+  ASSERT_EQ(DispatchToCallee.size(), 1u);
+  auto *DispatchCall = DispatchToCallee.front();
+
+  auto Reachable = Analysis->getReachableContexts(Load);
+  ASSERT_EQ(Reachable.size(), 1u);
+  auto DispatchReachable = Analysis->getReachableContexts(DispatchCall);
+  EXPECT_EQ(DispatchReachable.size(), 2u);
+  EXPECT_TRUE(contextEquals(Reachable.front(), {DispatchToCallee.front()}));
+  EXPECT_TRUE(Analysis->mayNull(Callee->getArg(0), Load, Reachable.front()));
   EXPECT_TRUE(Analysis->mayNull(Callee->getArg(0), Load));
 }
 
@@ -361,6 +490,46 @@ TEST(ContextSensitiveNullCheckAnalysisTest,
 
 TEST(ContextSensitiveNullCheckAnalysisTest,
      RecursiveReturnPropagationReachesAFixpoint) {
+  llvm::LLVMContext ContextStorage;
+  auto Module = parseModule(ContextStorage, R"(
+    define i8* @recur(i8* %p, i1 %stop) {
+    entry:
+      br i1 %stop, label %base, label %step
+    base:
+      ret i8* %p
+    step:
+      %next = call i8* @recur(i8* %p, i1 true)
+      ret i8* %next
+    }
+
+    define i32 @main() {
+    entry:
+      %stack = alloca i8, align 1
+      %ret = call i8* @recur(i8* %stack, i1 false)
+      %load = load i8, i8* %ret, align 1
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(Module, nullptr);
+
+  auto Harness = runContextSensitiveNCA(*Module);
+  auto *Analysis = Harness.Analysis;
+  auto *Main = Module->getFunction("main");
+  ASSERT_NE(Analysis, nullptr);
+  ASSERT_NE(Main, nullptr);
+
+  auto *Ret = findInstructionByName(Main, "ret");
+  auto *Load = findInstructionByName(Main, "load");
+  ASSERT_NE(Ret, nullptr);
+  ASSERT_NE(Load, nullptr);
+
+  EXPECT_FALSE(Analysis->mayNull(Ret, Load));
+}
+
+TEST(ContextSensitiveNullCheckAnalysisTest,
+     RecursiveReturnPropagationStaysSoundUnderKOneTruncation) {
+  ScopedContextDepthOverride DepthOverride(1);
+
   llvm::LLVMContext ContextStorage;
   auto Module = parseModule(ContextStorage, R"(
     define i8* @recur(i8* %p, i1 %stop) {
