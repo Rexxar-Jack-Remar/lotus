@@ -392,7 +392,8 @@ void CacheModel::dump(bool verbose) const {
     if (entry.first->hasName()) {
       dbgs() << entry.first->getName() << "\n";
     } else {
-      entry.first->dump();
+      entry.first->print(dbgs());
+      dbgs() << "\n";
     }
     if (verbose) {
       dbgs() << "\taddrB: " << var->AddrB << " addrE: " << var->AddrE
