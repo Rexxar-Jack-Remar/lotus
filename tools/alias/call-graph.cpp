@@ -28,6 +28,7 @@
 #include "Alias/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
 #include "Alias/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
 #include "Alias/AserPTA/Util/Log.h"
+#include "Alias/DFPA/DFPAPass.h"
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/DyckAA/DyckCallGraph.h"
 #include "Alias/DyckAA/DyckCallGraphNode.h"
@@ -54,6 +55,7 @@ static cl::OptionCategory CGCat("CallGraph");
 enum class CGType {
   DyckAA,
   LotusAA,
+  DFPA,
   FPA_FLTA,
   FPA_MLTA,
   FPA_MLTADF,
@@ -68,6 +70,8 @@ static cl::opt<CGType> AnalysisType(
     cl::values(
         clEnumValN(CGType::DyckAA, "dyck", "DyckAA"),
         clEnumValN(CGType::LotusAA, "lotus", "LotusAA"),
+        clEnumValN(CGType::DFPA, "dfpa",
+                   "Demand-refined function pointer analysis"),
         clEnumValN(CGType::FPA_FLTA, "fpa-flta", "FPA FLTA"),
         clEnumValN(CGType::FPA_MLTA, "fpa-mlta", "FPA MLTA"),
         clEnumValN(CGType::FPA_MLTADF, "fpa-mltadf", "FPA MLTA+DF"),
@@ -95,6 +99,14 @@ static cl::opt<std::string> IRFile(cl::Positional, cl::Required,
 static cl::opt<int> FPAMaxTypeLayer("fpa-max-type-layer",
                                     cl::desc("Max type layer for FPA"),
                                     cl::init(10), cl::cat(CGCat));
+static cl::opt<unsigned long long>
+    DFPAMaxDemandStates("dfpa-max-demand-states",
+                        cl::desc("Demand-state budget for DFPA"),
+                        cl::init(50000), cl::cat(CGCat));
+static cl::opt<unsigned>
+    DFPAIndirectCtxK("dfpa-indirect-ctx-k",
+                     cl::desc("Selective indirect-edge context depth for DFPA"),
+                     cl::init(1), cl::cat(CGCat));
 
 struct DiagTimer {
   std::chrono::steady_clock::time_point Start;
@@ -128,6 +140,11 @@ static void addCallEdge(llvm::CallGraph &CG, llvm::Function *Caller,
   if (!Caller || !Callee || Callee->isDeclaration())
     return;
   if (auto *Node = CG[Caller]) {
+    for (auto &Entry : *Node) {
+      if (Entry.first.hasValue() && Entry.first.getValue() == CS &&
+          Entry.second == CG[Callee])
+        return;
+    }
     Node->addCalledFunction(CS, CG[Callee]);
   }
 }
@@ -352,6 +369,32 @@ static void buildCGWithFPA(llvm::Module &M, llvm::CallGraph &CG, CGType Type) {
   }
 }
 
+static void buildCGWithDFPA(llvm::Module &M, llvm::CallGraph &CG) {
+  llvm::legacy::PassManager PM;
+  PM.add(new aser::CanonicalizeGEPPass());
+  PM.add(new aser::LoweringMemCpyPass());
+  PM.add(new aser::RemoveExceptionHandlerPass());
+  PM.add(new aser::RemoveASMInstPass());
+  PM.add(new StandardHeapAPIRewritePass());
+
+  dfpa::DFPAConfig Config;
+  Config.indirect_ctx_k = DFPAIndirectCtxK;
+  Config.max_demand_states = DFPAMaxDemandStates;
+  auto *Pass = new dfpa::DFPAPass(Config);
+  PM.add(Pass);
+  PM.run(M);
+
+  processDirectCalls(M, CG);
+
+  for (const auto &Entry : Pass->getResult().getAllTargets()) {
+    auto *CB = const_cast<llvm::CallBase *>(Entry.first);
+    if (!CB || !CB->getFunction() || CB->getFunction()->isDeclaration())
+      continue;
+    for (auto *Callee : Entry.second.targets)
+      addCallEdge(CG, CB->getFunction(), CB, Callee);
+  }
+}
+
 int main(int Argc, char *Argv[]) {
   llvm::InitLLVM X(Argc, Argv);
   cl::HideUnrelatedOptions(CGCat);
@@ -375,6 +418,9 @@ int main(int Argc, char *Argv[]) {
       break;
     case CGType::LotusAA:
       buildCGWithLotusAA(*M, CG);
+      break;
+    case CGType::DFPA:
+      buildCGWithDFPA(*M, CG);
       break;
     case CGType::AserPTA_CI:
     case CGType::AserPTA_1CFA:

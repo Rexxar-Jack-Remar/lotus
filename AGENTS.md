@@ -19,7 +19,7 @@ lotus/
 │   ├── Checker/       # Bug checkers (Concurrency, FiTx, GVFA, KINT, Pulse)
 │   ├── Dataflow/      # APA, IFDS/IDE, Mono, NPA, WPDS
 │   ├── IR/            # GSA, ICFG, MemorySSA, PDG, SSI, SVFG, vSSA
-│   ├── Solvers/       # SMT, BDD (CUDD)
+│   ├── Solvers/       # SMT
 │   ├── Transform/     # LLVM bitcode transformations
 │   ├── Utils/         # LLVM utilities, ThreadPool, formats, etc.
 │   └── Verification/  # SIFA, CLAM, SymbolicAbstraction, Seahorn
