@@ -1,6 +1,6 @@
-#include "Apps/Fuzzing/AFLGoLinker/FunctionDistanceInstrumentation.h"
-#include "Apps/Fuzzing/Analysis/FunctionDistance.h"
-#include "Apps/Fuzzing/Analysis/TargetDetection.h"
+#include "Fuzzing/AFLGoLinker/FunctionDistanceInstrumentation.h"
+#include "Fuzzing/Analysis/FunctionDistance.h"
+#include "Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>

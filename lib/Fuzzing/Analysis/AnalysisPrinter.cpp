@@ -1,8 +1,8 @@
-#include "Apps/Fuzzing/Analysis/BasicBlockDistance.h"  
-#include "Apps/Fuzzing/Analysis/DAFL.h"
-#include "Apps/Fuzzing/Analysis/ExtendedCallGraph.h"
-#include "Apps/Fuzzing/Analysis/FunctionDistance.h"
-#include "Apps/Fuzzing/Analysis/TargetDetection.h"
+#include "Fuzzing/Analysis/BasicBlockDistance.h"  
+#include "Fuzzing/Analysis/DAFL.h"
+#include "Fuzzing/Analysis/ExtendedCallGraph.h"
+#include "Fuzzing/Analysis/FunctionDistance.h"
+#include "Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Passes/PassBuilder.h>

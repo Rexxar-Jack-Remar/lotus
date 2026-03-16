@@ -4,9 +4,9 @@
 // It computes call graph distances from each function to functions containing
 // target locations, supporting both AFLGo (BFS) and Hawkeye (weighted) metrics.
 
-#include "Apps/Fuzzing/Analysis/ExtendedCallGraph.h"
-#include "Apps/Fuzzing/Analysis/FunctionDistance.h"
-#include "Apps/Fuzzing/Analysis/TargetDetection.h"
+#include "Fuzzing/Analysis/ExtendedCallGraph.h"
+#include "Fuzzing/Analysis/FunctionDistance.h"
+#include "Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/ADT/BreadthFirstIterator.h>
 #include <llvm/ADT/GraphTraits.h>

@@ -1,5 +1,5 @@
-#include "Apps/Fuzzing/AFLGoLinker/TargetInjectionFixup.h"
-#include "Apps/Fuzzing/Analysis/TargetDetection.h"
+#include "Fuzzing/AFLGoLinker/TargetInjectionFixup.h"
+#include "Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/PassManager.h>

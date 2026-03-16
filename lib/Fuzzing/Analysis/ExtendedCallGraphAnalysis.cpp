@@ -1,5 +1,5 @@
 // ExtendedCallGraph using DyckAA for indirect call resolution
-#include "Apps/Fuzzing/Analysis/ExtendedCallGraph.h"
+#include "Fuzzing/Analysis/ExtendedCallGraph.h"
 
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/DyckAA/DyckCallGraph.h"

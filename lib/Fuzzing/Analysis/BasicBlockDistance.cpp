@@ -4,10 +4,10 @@
 // It computes the control-flow distance from each basic block to target
 // locations, used to guide fuzzing towards specific program points.
 
-#include "Apps/Fuzzing/Analysis/BasicBlockDistance.h"
-#include "Apps/Fuzzing/Analysis/ExtendedCallGraph.h"
-#include "Apps/Fuzzing/Analysis/FunctionDistance.h"
-#include "Apps/Fuzzing/Analysis/TargetDetection.h"
+#include "Fuzzing/Analysis/BasicBlockDistance.h"
+#include "Fuzzing/Analysis/ExtendedCallGraph.h"
+#include "Fuzzing/Analysis/FunctionDistance.h"
+#include "Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/ADT/BreadthFirstIterator.h>
 #include <llvm/Analysis/CallGraph.h>

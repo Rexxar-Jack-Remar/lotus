@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Apps/Fuzzing/Analysis/FunctionDistance.h"
+#include "Fuzzing/Analysis/FunctionDistance.h"
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/PassManager.h>

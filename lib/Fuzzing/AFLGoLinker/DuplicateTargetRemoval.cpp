@@ -1,5 +1,5 @@
-#include "Apps/Fuzzing/AFLGoLinker/DuplicateTargetRemoval.h"
-#include "Apps/Fuzzing/Analysis/TargetDetection.h"
+#include "Fuzzing/AFLGoLinker/DuplicateTargetRemoval.h"
+#include "Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/PassManager.h>

@@ -1,5 +1,5 @@
-#include "Apps/Fuzzing/AFLGoCompiler/TargetInjection.h"
-#include "Apps/Fuzzing/Analysis/TargetDetection.h"
+#include "Fuzzing/AFLGoCompiler/TargetInjection.h"
+#include "Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/ADT/SmallSet.h>
 #include <llvm/ADT/SmallString.h>

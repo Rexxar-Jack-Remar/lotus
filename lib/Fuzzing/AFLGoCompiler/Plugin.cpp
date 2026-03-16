@@ -1,4 +1,4 @@
-#include "Apps/Fuzzing/AFLGoCompiler/TargetInjection.h"
+#include "Fuzzing/AFLGoCompiler/TargetInjection.h"
 
 #include <llvm/Passes/PassPlugin.h>
 

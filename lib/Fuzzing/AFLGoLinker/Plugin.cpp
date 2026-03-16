@@ -1,14 +1,14 @@
-#include "Apps/Fuzzing/AFLGoLinker/DAFL.h"
-#include "Apps/Fuzzing/AFLGoLinker/DistanceInstrumentation.h"
-#include "Apps/Fuzzing/AFLGoLinker/DuplicateTargetRemoval.h"
-#include "Apps/Fuzzing/AFLGoLinker/FunctionDistanceInstrumentation.h"
-#include "Apps/Fuzzing/AFLGoLinker/TargetInjectionFixup.h"
+#include "Fuzzing/AFLGoLinker/DAFL.h"
+#include "Fuzzing/AFLGoLinker/DistanceInstrumentation.h"
+#include "Fuzzing/AFLGoLinker/DuplicateTargetRemoval.h"
+#include "Fuzzing/AFLGoLinker/FunctionDistanceInstrumentation.h"
+#include "Fuzzing/AFLGoLinker/TargetInjectionFixup.h"
 
-#include "Apps/Fuzzing/Analysis/BasicBlockDistance.h"
-#include "Apps/Fuzzing/Analysis/DAFL.h"
-#include "Apps/Fuzzing/Analysis/ExtendedCallGraph.h"
-#include "Apps/Fuzzing/Analysis/FunctionDistance.h"
-#include "Apps/Fuzzing/Analysis/TargetDetection.h"
+#include "Fuzzing/Analysis/BasicBlockDistance.h"
+#include "Fuzzing/Analysis/DAFL.h"
+#include "Fuzzing/Analysis/ExtendedCallGraph.h"
+#include "Fuzzing/Analysis/FunctionDistance.h"
+#include "Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/IR/PassManager.h>
 #include <llvm/Passes/PassBuilder.h>

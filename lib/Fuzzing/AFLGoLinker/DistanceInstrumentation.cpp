@@ -1,5 +1,5 @@
-#include "Apps/Fuzzing/AFLGoLinker/DistanceInstrumentation.h"
-#include "Apps/Fuzzing/Analysis/BasicBlockDistance.h"
+#include "Fuzzing/AFLGoLinker/DistanceInstrumentation.h"
+#include "Fuzzing/Analysis/BasicBlockDistance.h"
 
 #include <llvm/IR/IRBuilder.h>
 

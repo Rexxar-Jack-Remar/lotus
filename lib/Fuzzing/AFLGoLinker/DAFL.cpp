@@ -1,5 +1,5 @@
-#include "Apps/Fuzzing/AFLGoLinker/DAFL.h"
-#include "Apps/Fuzzing/Analysis/DAFL.h"
+#include "Fuzzing/AFLGoLinker/DAFL.h"
+#include "Fuzzing/Analysis/DAFL.h"
 
 #include <llvm/IR/Attributes.h>
 #include <llvm/Support/Error.h>

@@ -1,4 +1,4 @@
-#include "Apps/Fuzzing/Analysis/TargetDetection.h"
+#include "Fuzzing/Analysis/TargetDetection.h"
 
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/Support/Error.h>
