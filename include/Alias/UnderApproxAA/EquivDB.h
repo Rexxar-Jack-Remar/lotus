@@ -1,16 +1,18 @@
 /**
  * @file EquivDB.h
- * @brief Equivalence database for must-alias analysis using union-find
+ * @brief Equivalence database for lightweight must-alias analysis
  *
  * This file defines EquivDB, the core data structure for under-approximation
- * alias analysis. It implements union-find with congruence closure to track
- * equivalence classes of pointer values within a single function.
+ * alias analysis. It implements union-find, normalized pointer-term
+ * congruence, and a singleton-slot memory abstraction to track equivalence
+ * classes of pointer values within a single function.
  */
 
 #ifndef UNDERAPPROX_EQUIVDB_H
 #define UNDERAPPROX_EQUIVDB_H
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include <llvm/ADT/DenseMap.h>
@@ -30,25 +32,30 @@ namespace UnderApprox {
 
 /**
  * @class EquivDB
- * @brief Equivalence database: union-find with congruence closure over one
+ * @brief Equivalence database: union-find with normalized term congruence over
  * function's IR
  *
  * This class maintains equivalence classes of pointer values using union-find
- * data structures. Two pointers in the same equivalence class are guaranteed
- * to alias (must-alias). The database is built once during construction using
- * a two-phase algorithm (seed + propagate), then queried efficiently.
+ * data structures, congruence over normalized pointer terms, and singleton
+ * memory-slot reasoning. Two pointers in the same equivalence class are
+ * guaranteed to alias (must-alias). The database is built once during
+ * construction using a two-phase algorithm (seed + propagate), then queried
+ * efficiently.
  *
  * Data Structures:
  * - Union-Find: Nodes array with parent pointers and ranks for efficient
  *   union/find operations with path compression and union-by-rank
  * - Value Mapping: Bidirectional mapping between LLVM Values and integer IDs
  * - Watch Lists: Per-class lists of instructions to revisit when classes merge
+ * - Term Buckets: Congruence table for normalized pointer terms
+ * - Singleton Slot IDs: Memory abstraction for alloca/global/direct-allocation
+ *   constant offsets
  * - Worklist deduplication: Avoids redundant pair processing
  *
  * Algorithm:
  * 1. Seed phase: Apply atomic (syntactic) rules to find initial must-alias
  * pairs
- * 2. Propagate phase: Use semantic (inductive) rules to discover new
+ * 2. Propagate phase: Rebuild normalized pointer terms and discover new
  * equivalences as classes merge, until saturation
  * 3. Optional seeding extensions (MemorySSA, DominatorTree, call summaries)
  *
@@ -59,16 +66,14 @@ namespace UnderApprox {
  */
 class EquivDB {
 public:
-  friend bool ruleClosedGEP(const llvm::Instruction *, const EquivDB &,
-                            const llvm::Value *&);
-
   /**
    * @brief Construct equivalence database for a function
    *
    * Builds the complete equivalence database by:
    * 1. Seeding with atomic must-alias pairs from syntactic rules
-   * 2. Propagating equivalences using semantic rules until saturation
-   * 3. Optional DominatorTree-based seeding for single-store allocas
+   * 2. Propagating equivalences using normalized term congruence until
+   *    saturation
+   * 3. Optional DominatorTree/MemorySSA seeding for singleton memory slots
    *
    * After construction, queries are very fast (effectively constant time).
    *
@@ -167,8 +172,41 @@ private:
                  llvm::SmallVector<const llvm::GetElementPtrInst *, 4>>
       GEPIndexBuckets;
 
-  /// Instructions for which a semantic rule has already fired
-  llvm::DenseSet<const llvm::Instruction *> FiredSemantic;
+  enum class TermKind : uint8_t { Invalid, GEPConst, GEPIndex };
+
+  struct SlotId {
+    const llvm::Value *Object = nullptr;
+    int64_t ByteOffset = 0;
+
+    bool operator==(const SlotId &Other) const {
+      return Object == Other.Object && ByteOffset == Other.ByteOffset;
+    }
+  };
+
+  struct SlotIdHash {
+    size_t operator()(const SlotId &Slot) const;
+  };
+
+  struct TermKey {
+    TermKind Kind = TermKind::Invalid;
+    std::vector<uint64_t> Components;
+
+    bool operator==(const TermKey &Other) const {
+      return Kind == Other.Kind && Components == Other.Components;
+    }
+  };
+
+  struct TermKeyHash {
+    size_t operator()(const TermKey &Key) const;
+  };
+
+  /// Congruence table for normalized pointer terms.
+  std::unordered_map<TermKey, llvm::SmallVector<const llvm::Value *, 4>,
+                     TermKeyHash>
+      TermBuckets;
+
+  /// Stable numbering for singleton memory slots used by load/store reasoning.
+  std::unordered_map<SlotId, uint64_t, SlotIdHash> SlotNumbers;
 
   struct ReturnSummary {
     enum class Kind : uint8_t { Unknown, Arg, Null, Global };
@@ -191,8 +229,9 @@ private:
   void seedReturnValueForwarding(
       std::vector<std::pair<const llvm::Value *, const llvm::Value *>> &WL);
 
-  /// Phase 1b (DT): Seed from single-store allocas when DominatorTree available
-  /// Sound: one store to alloca dominating all loads ⇒ load equals stored value
+  /// Phase 1b (DT): Seed from singleton slots when DominatorTree available.
+  /// Sound: one store to a singleton slot dominating all loads from that slot
+  /// ⇒ load equals stored value.
   /// @param WL Output worklist to populate
   void seedSingleStoreAlloca(
       std::vector<std::pair<const llvm::Value *, const llvm::Value *>> &WL);
@@ -208,12 +247,6 @@ private:
   /// @param Op The operand whose class to watch
   /// @param I The instruction to register
   void registerWatch(const llvm::Value *Op, llvm::Instruction *I);
-
-  /// Check if all pointer operands of an instruction are in the same class
-  /// Used by semantic rules to detect closed patterns (PHI, Select, etc.)
-  /// @param I The instruction to check
-  /// @return true if all pointer operands unified, false otherwise
-  bool operandsInSameClass(const llvm::Instruction *I) const;
 
   // ---------- Extension: Store-Load Forwarding with MemorySSA --------------
 
@@ -231,6 +264,17 @@ private:
   bool equivalentGEPIndexOperand(const llvm::Value *A,
                                  const llvm::Value *B) const;
   uint64_t gepIndexSignature(const llvm::Value *GEP) const;
+  const llvm::Value *valueForRoot(IdTy Root) const;
+  const llvm::Value *resolveNormalizedValue(const llvm::Value *V) const;
+  bool buildNormalizedTermKey(const llvm::Value *V, TermKey &Key) const;
+  bool termsCongruent(const llvm::Value *A, const llvm::Value *B,
+                      const TermKey &Key) const;
+  void propagateNormalizedTerm(
+      llvm::Instruction *I,
+      std::vector<std::pair<const llvm::Value *, const llvm::Value *>> &WL);
+  bool tryGetSingletonSlot(const llvm::Value *Ptr, SlotId &Out) const;
+  bool sameSingletonSlot(const llvm::Value *P, const llvm::Value *Q) const;
+  uint64_t internSlot(const SlotId &Slot);
 
   bool dominatesInst(const llvm::Instruction *Def,
                      const llvm::Instruction *Use) const;
@@ -244,10 +288,6 @@ private:
   int resolveReturnedArgNo(const llvm::Value *V, const llvm::Function *Callee,
                            unsigned Depth = 0) const;
 };
-
-/// Forward declaration for ruleClosedGEP (friend, defined in EquivDB.cpp)
-bool ruleClosedGEP(const llvm::Instruction *, const EquivDB &,
-                   const llvm::Value *&);
 
 } // end namespace UnderApprox
 #endif

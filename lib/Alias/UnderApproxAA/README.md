@@ -4,15 +4,26 @@ Sound but incomplete alias analysis for identifying **must-alias** relationships
 
 ## Overview
 
-This analysis computes pointer equivalence using union-find with congruence closure. If two pointers are in the same equivalence class, they are **guaranteed** to alias (sound under-approximation). We never produce false positives, but may miss some true aliases.
+This analysis computes pointer equivalence using union-find plus congruence over
+**normalized pointer terms**. If two pointers are in the same equivalence class,
+they are **guaranteed** to alias (sound under-approximation). We never produce
+false positives, but may miss some true aliases.
 
 ## Algorithm
 
 ### Phase 1: SEED with Atomic Rules
-Scan all instructions and apply local syntactic rules to identify must-alias pairs. Each matching pair is added to a worklist. All pointer-producing instructions register "watches" on their operand classes.
+Scan all instructions and apply local syntactic rules to identify must-alias
+pairs. Each matching pair is added to a worklist. Pointer-producing
+instructions also register watches on operand classes and emit normalized term
+keys for congruence.
 
-### Phase 2: PROPAGATE with Semantic Rules
-Process the worklist, unifying equivalence classes. When classes merge, revisit watched instructions to check if semantic rules can now fire (e.g., a PHI becomes "closed" when all operands unify).
+### Phase 2: PROPAGATE with Normalized Terms
+Process the worklist, unifying equivalence classes. When classes merge, revisit
+watched instructions and rebuild their normalized terms:
+
+- closed `phi`/`select` nodes collapse to the common operand class
+- `gep` terms are matched by base-class plus normalized offset/index structure
+- congruent terms are unified through a lightweight term table
 
 ## Data Structures
 
@@ -20,6 +31,9 @@ Process the worklist, unifying equivalence classes. When classes merge, revisit 
 - **Id2Val**: `vector<const Value*>` - ID → value mapping  
 - **Nodes**: `vector<{Parent, Rank}>` - union-find forest with path compression
 - **Watches**: `vector<SmallVector<Inst*>>` - per-class watch lists for incremental updates
+- **TermBuckets**: normalized term → representative candidates for congruence
+- **SlotId**: singleton memory slot `(object, constant byte offset)` for
+  alloca/global/direct-allocation load-store reasoning
 
 ## Files
 
@@ -28,29 +42,12 @@ Process the worklist, unifying equivalence classes. When classes merge, revisit 
 - `Canonical.cpp` - Pointer canonicalization helpers
 - `AliasGraph.cpp` / `AliasGraph.h` - CC'18 alias graph data structure (see below)
 
-## AliasGraph (CC'18)
+## AliasGraph (Separate Prototype)
 
-An **alias graph** data structure implements the representation from *An Efficient Data Structure for Must-Alias Analysis* (Kastrinis et al., CC'18). It encodes must-alias equivalence classes and field links compactly:
-
-- **Nodes** = abstract objects (alias classes); each node holds a set of variables.
-- **Edges** = field-labeled: `(node --f--> node)` means “field f of objects in the first node points to objects in the second”.
-
-Two variables must-alias iff they are in the same node. Access paths `var.fld1.fld2...` are represented implicitly as paths in the graph.
-
-**Operations:**
-
-| Operation | Description |
-|----------|-------------|
-| `addVariable(V)` | Create or get node for variable V |
-| `moveMerge(X, Y)` | Merge nodes of X and Y (Move: x = y) |
-| `storeEdge(Base, F, Target)` | Add edge Base --F--> Target (Store: base.f = target) |
-| `loadEdge(Base, F, Z)` | Z = base.F: new node for Z, edge Base --F--> Z |
-| `intersect(G1, G2)` | Merge-point intersection: alias holds iff in both graphs |
-| `gc()` | Remove nodes that encode no useful alias pairs |
-| `allAliases(Base, Path, maxLen, Out)` | Find all (var, path) that must-alias Base+Path |
-| `mustAliasAccessPath(Base1, Path1, Base2, Path2)` | Check if two access paths must-alias |
-
-This structure can be used alongside or instead of an explicit pair representation for flow-sensitive, access-path must-alias analyses (e.g. per-program-point graphs with intersection at control-flow merges).
+`AliasGraph.cpp` / `AliasGraph.h` implement a CC'18-style access-path
+must-alias graph. That structure is tested independently, but it is **not**
+the engine queried by `UnderApproxAA` today. `UnderApproxAA` is the lightweight
+term-and-slot analysis described in this document.
 
 ## Rules
 
@@ -72,22 +69,23 @@ Local, syntactic patterns applied during seeding:
 | 10 | Same Allocation Site | Same malloc/new call | `%p = malloc(); %q = bitcast %p` → `%p ≡ %q` |
 | 11 | Enhanced Round-Trip | ptr→int→ptr with no-op arithmetic | `inttoptr(ptrtoint(%p) + 0)` and `%p` |
 
-### Semantic Rules (Phase 2)
-Inductive patterns checked during propagation:
+### Normalized Term Rules (Phase 2)
+Congruence patterns checked during propagation:
 
 | Rule | Description | When It Fires |
 |------|-------------|---------------|
-| **Closed PHI** | `phi [p₁, bb₁], ..., [pₙ, bbₙ]` where `p₁ ≡ ... ≡ pₙ` | All incoming values unify → PHI equals common class |
-| **Closed Select** | `select cond, pTrue, pFalse` where `pTrue ≡ pFalse` | Both branches unify → Select equals common class |
-| **Closed GEP** | `GEP(base₁, idx...)` and `GEP(base₂, idx...)` where `base₁ ≡ base₂` | Indexed lookup with equivalent index operands (SSA or no-op integer-normalized equal) |
+| **Closed PHI** | `phi [p₁, bb₁], ..., [pₙ, bbₙ]` where `p₁ ≡ ... ≡ pₙ` | PHI normalizes to the common pointer class |
+| **Closed Select** | `select cond, pTrue, pFalse` where `pTrue ≡ pFalse` | Select normalizes to the common pointer class |
+| **Congruent Constant GEP** | Same constant offset from must-alias bases | Rebuilt term key matches another `gep` term |
+| **Congruent Indexed GEP** | Same source element type and equivalent index expressions from must-alias bases | Rebuilt term key matches another `gep` term |
 
 ### Extension Rules (Phase 3 - Optional)
 
 | Rule | Description | Requirement |
 |------|-------------|-------------|
 | **Return-Value Forwarding** | `call/invoke/callbr` result forwarded from pointer argument | `returned` attribute, wrapper-style return expression resolves to one arg, or callee summary |
-| **Store-Load Forwarding** | `store v, p; load p` → load equals v (pointer stores only) | MemorySSA walker finds unique clobber store (including compatible `MemoryPhi`) |
-| **Alloca Forwarding** | For each load, unique dominating pointer store to same alloca → load equals stored value | DominatorTree with instruction-level dominance |
+| **Store-Load Forwarding** | `store v, p; load q` → load equals `v` when `p` and `q` name the same singleton slot or MemorySSA proves one unique clobber | MemorySSA walker plus singleton-slot abstraction |
+| **Singleton-Slot Forwarding** | For each load, unique dominating pointer store to same singleton slot → load equals stored value | DominatorTree with `SlotId = (alloca/global/direct-allocation, constant offset)` |
 
 ## Query Interface
 
@@ -203,13 +201,19 @@ merge:
 
 **Query:** `mustAlias(%x, %z)` → **true**
 
-## Limitations
+## Contract
 
-- **Intra-procedural only**: No reasoning across function boundaries
-- **Allocation tracking**: Tracks same allocation site for heap (malloc/new); other heap patterns limited
-- **Syntactic patterns**: Limited arithmetic reasoning
-- **Conservative**: Under-approximation means we may miss true aliases
-- **Context-insensitive**: No path-sensitive reasoning
+- **Intra-procedural only**: no whole-program memory state or cross-function
+  fixpoint
+- **Path-insensitive**: merges control flow conservatively
+- **Must-alias only**: `true` means same concrete address is proven;
+  `false` means unknown
+- **Field-sensitive only for constant paths**: via normalized constant-offset
+  or indexed `gep` terms
+- **Memory-sensitive only for singleton slots**: allocas, globals, and direct
+  allocation results with constant byte offsets
+- **Lightweight interprocedural support**: direct-call return forwarding and
+  simple summaries, not general heap effect summaries
 
 ## Implemented Extensions (Sound)
 
@@ -221,7 +225,8 @@ The following extensions have been implemented while preserving under-approximat
 - **Interprocedural Return Summaries**: Tracks `ret ≡ arg_i`, `ret ≡ null`, and fixed global-return forms for direct callees
 - **Store-Load Forwarding**: Via MemorySSA walker with unique-store extraction (including simple `MemoryPhi` cases)
 - **Alloca Forwarding**: Per-load unique dominating store forwarding via DominatorTree
-- **Closed-GEP Indexing**: Candidate bucketing plus index-operand normalization for better precision/scalability
+- **Normalized GEP Terms**: congruence over constant-offset and indexed GEP
+  terms, guarded by source-element-type checks
 - **Worklist Dedup**: Pair deduplication prevents redundant propagation churn
 
 ## Future Improvement Ideas

@@ -175,12 +175,15 @@ bool UnderApprox::isZeroGEP(const Value *V) {
   return false;
 }
 
-/// Check if two GEPs have the same base (after stripping no-op casts) and
-/// identical index operands (same SSA values). Sound under-approximation.
+/// Check if two GEPs have the same source element type, same base (after
+/// stripping no-op casts), and identical index operands (same SSA values).
+/// Sound under-approximation.
 bool UnderApprox::sameGEPOperands(const Value *A, const Value *B) {
   auto *GEP1 = dyn_cast<GEPOperator>(A);
   auto *GEP2 = dyn_cast<GEPOperator>(B);
   if (!GEP1 || !GEP2)
+    return false;
+  if (GEP1->getSourceElementType() != GEP2->getSourceElementType())
     return false;
   if (stripNoopCasts(GEP1->getPointerOperand()) !=
       stripNoopCasts(GEP2->getPointerOperand()))

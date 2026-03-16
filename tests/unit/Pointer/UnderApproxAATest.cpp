@@ -158,6 +158,71 @@ TEST_F(UnderApproxAATest, SingleStoreAllocaIsSlotSensitive) {
   EXPECT_TRUE(DB.mustAlias(L0, A));
 }
 
+TEST_F(UnderApproxAATest, SingleStoreGlobalSlotIsForwarded) {
+  const char *Source = R"(
+    @G = global [2 x i8*] zeroinitializer
+
+    define void @test(i8* %a, i8* %b) {
+    entry:
+      %g0 = getelementptr inbounds [2 x i8*], [2 x i8*]* @G, i64 0, i64 0
+      %g1 = getelementptr inbounds [2 x i8*], [2 x i8*]* @G, i64 0, i64 1
+      %g0_alias = bitcast i8** %g0 to i8**
+      store i8* %a, i8** %g0
+      store i8* %b, i8** %g1
+      %l0 = load i8*, i8** %g0_alias
+      ret void
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *A = F->getArg(0);
+  auto *L0 = findInst(F, "l0");
+  ASSERT_NE(A, nullptr);
+  ASSERT_NE(L0, nullptr);
+
+  DominatorTree DT(*F);
+  EquivDB DB(*F, nullptr, &DT);
+  EXPECT_TRUE(DB.mustAlias(L0, A));
+}
+
+TEST_F(UnderApproxAATest, SingleStoreHeapSlotIsForwarded) {
+  const char *Source = R"(
+    declare noalias i8* @malloc(i64)
+
+    define void @test(i8* %a, i8* %b) {
+    entry:
+      %buf = call i8* @malloc(i64 16)
+      %slot0 = bitcast i8* %buf to i8**
+      %slot1 = getelementptr inbounds i8*, i8** %slot0, i64 1
+      %slot0_alias = bitcast i8** %slot0 to i8**
+      store i8* %a, i8** %slot0
+      store i8* %b, i8** %slot1
+      %l0 = load i8*, i8** %slot0_alias
+      ret void
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *A = F->getArg(0);
+  auto *L0 = findInst(F, "l0");
+  ASSERT_NE(A, nullptr);
+  ASSERT_NE(L0, nullptr);
+
+  DominatorTree DT(*F);
+  EquivDB DB(*F, nullptr, &DT);
+  EXPECT_TRUE(DB.mustAlias(L0, A));
+}
+
 TEST_F(UnderApproxAATest, UnderApproxAAHandlesGlobalVsLocalFunctionQuery) {
   const char *Source = R"(
     @G = global i8 0
@@ -211,6 +276,38 @@ TEST_F(UnderApproxAATest, ClosedGEPSupportsEquivalentIntegerIndexExprs) {
 
   EquivDB DB(*F);
   EXPECT_TRUE(DB.mustAlias(P, Q));
+}
+
+TEST_F(UnderApproxAATest, UnderApproxAACacheRefreshesAfterIRMutation) {
+  const char *Source = R"(
+    define void @test(i8* %p, i8* %q) {
+    entry:
+      %s = select i1 true, i8* %p, i8* %q
+      ret void
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *P = F->getArg(0);
+  auto *Q = F->getArg(1);
+  auto *S = dyn_cast<SelectInst>(findInst(F, "s"));
+  ASSERT_NE(P, nullptr);
+  ASSERT_NE(Q, nullptr);
+  ASSERT_NE(S, nullptr);
+
+  UnderApproxAA AA(*M);
+  EXPECT_FALSE(AA.mustAlias(S, Q));
+
+  S->setCondition(ConstantInt::getTrue(Ctx));
+  S->setTrueValue(P);
+  S->setFalseValue(P);
+
+  EXPECT_TRUE(AA.mustAlias(S, P));
 }
 
 } // namespace

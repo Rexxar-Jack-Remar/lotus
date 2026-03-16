@@ -21,7 +21,9 @@
 
 #include <unordered_map>
 
+#include <llvm/ADT/Hashing.h>
 #include <llvm/Analysis/MemoryLocation.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 
 using namespace llvm;
@@ -52,17 +54,40 @@ struct CacheKeyHash {
 };
 
 /// Cache type: maps each cache key to its equivalence database
-using CacheTy =
-    std::unordered_map<CacheKey, std::unique_ptr<EquivDB>, CacheKeyHash>;
+struct CacheEntry {
+  uint64_t Fingerprint = 0;
+  std::unique_ptr<EquivDB> DB;
+};
 
-/// Global per-function EquivDB cache.
-///
-/// WARNING: This cache is never automatically invalidated.  Any pass that
-/// modifies the IR of a function F after the first alias query on F will
-/// silently receive stale results.  Call UnderApproxAA::invalidateCache(F)
-/// (or UnderApproxAA::invalidateAllCaches()) before re-querying a modified
-/// function.
+using CacheTy = std::unordered_map<CacheKey, CacheEntry, CacheKeyHash>;
+
+/// Global per-function EquivDB cache. Entries are rebuilt lazily if the
+/// function fingerprint changes.
 static CacheTy EquivCache;
+
+uint64_t computeFunctionFingerprint(const Function &F) {
+  hash_code H = hash_value(F.getName());
+  H = hash_combine(H, F.arg_size(), F.size());
+
+  for (const Argument &A : F.args())
+    H = hash_combine(H, A.getArgNo(), A.getType());
+
+  for (const BasicBlock &BB : F) {
+    H = hash_combine(H, BB.size(), BB.hasName() ? BB.getName() : StringRef{});
+    for (const Instruction &I : BB) {
+      H = hash_combine(H, I.getOpcode(), I.getType(), I.getNumOperands());
+
+      if (const auto *GEP = dyn_cast<GetElementPtrInst>(&I))
+        H = hash_combine(H, GEP->getSourceElementType());
+      if (const auto *CB = dyn_cast<CallBase>(&I))
+        H = hash_combine(H, CB->getCalledOperand(), CB->arg_size());
+      for (const Value *Op : I.operands())
+        H = hash_combine(H, Op, Op->getType());
+    }
+  }
+
+  return static_cast<uint64_t>(H);
+}
 
 /// Extract the parent function of a value
 /// @param V The value (instruction or argument) to query
@@ -94,7 +119,7 @@ UnderApproxAA::UnderApproxAA(Module &M) : _module(M) {
 
 UnderApproxAA::~UnderApproxAA() {
   // The cache is static, so it persists across analysis instances.
-  // Call invalidateCache(F) or invalidateAllCaches() if the IR changes.
+  // Entries rebuild automatically when the function fingerprint changes.
 }
 
 void UnderApproxAA::invalidateCache(const llvm::Function *F) {
@@ -192,14 +217,16 @@ bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {
 
   // Lazy initialization: build EquivDB for QueryF on first query
   // The cache ensures we only build it once per function+configuration
-  auto &Ptr = EquivCache[Key];
-  if (!Ptr) {
+  const uint64_t Fingerprint = computeFunctionFingerprint(*QueryF);
+  auto &Entry = EquivCache[Key];
+  if (!Entry.DB || Entry.Fingerprint != Fingerprint) {
     // Note: const_cast is necessary because EquivDB constructor takes
     // a non-const Function&, but we only have const Function* from
     // getParentFunction. This is safe because EquivDB only reads the IR.
     try {
-      Ptr =
+      Entry.DB =
           std::make_unique<EquivDB>(*const_cast<Function *>(QueryF), MSSA, DT);
+      Entry.Fingerprint = Fingerprint;
     } catch (...) {
       // If EquivDB construction fails, return false (no must-alias)
       return false;
@@ -207,11 +234,11 @@ bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {
   }
 
   // Safety check: ensure EquivDB was successfully created
-  if (!Ptr)
+  if (!Entry.DB)
     return false;
 
   // Query the equivalence database for this function
-  return Ptr->mustAlias(V1, V2);
+  return Entry.DB->mustAlias(V1, V2);
 }
 
 bool UnderApproxAA::isValidPointerQuery(const Value *v1,

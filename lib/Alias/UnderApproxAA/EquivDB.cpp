@@ -43,8 +43,8 @@
 //   Additionally, register each pointer-producing instruction I as "watched"
 //   by the equivalence classes of its pointer operands.
 //
-//   Phase 2: PROPAGATE with semantic rules
-//   ───────────────────────────────────────
+//   Phase 2: PROPAGATE with normalized pointer terms
+//   ────────────────────────────────────────────────
 //   Process the worklist WL:
 //
 //     while WL not empty:
@@ -57,24 +57,19 @@
 //       // Revisit all instructions watching the merged class
 //       for each instruction I in Watches[NewRoot]:
 //         if I is a pointer instruction:
-//           try semantic rules (e.g., closed PHI, closed Select):
-//             if all pointer operands of I are now in the same class:
-//               Rep ← representative of that class
-//               push (I, Rep) to WL  // I must equal Rep
+//           rebuild I's normalized term:
+//             - closed phi/select collapse to a common class
+//             - congruent geps match by normalized base/index structure
+//             - matching terms yield more must-alias pairs
 //
-//   Semantic rules capture higher-order patterns:
-//     • Closed PHI:    phi [p₁, bb₁], ..., [pₙ, bbₙ] where p₁ ≡ ... ≡ pₙ
-//                      → the PHI must equal the common class
-//     • Closed Select: select cond, pTrue, pFalse where pTrue ≡ pFalse
-//                      → the Select must equal the common class
-//
-//   These rules are *inductive*: as more values unify, previously non-closed
-//   instructions may become closed, enabling further propagation.
+//   These term rules are *inductive*: as more values unify, previously
+//   distinct terms may collapse and enable further propagation.
 //
 //   Phase 3: REFINE with external analyses (optional)
 //   ─────────────────────────────────────────────────
 //   If MemorySSA is available:
-//     • Store-Load forwarding: load p after store v to p = v (no clobber)
+//     • Store-Load forwarding: load p after store v to the same singleton
+//       slot = v (no clobber)
 //
 //   If DominatorTree is available:
 //     • Single-store alloca forwarding when store dominates all loads
@@ -113,6 +108,11 @@
 
 using namespace llvm;
 using namespace UnderApprox;
+
+static uint64_t encodeSignedInt64(int64_t Value) {
+  const uint64_t Bits = static_cast<uint64_t>(Value);
+  return (Bits << 1) ^ static_cast<uint64_t>(Value >> 63);
+}
 
 //
 //===----------------------------------------------------------------------===//
@@ -592,6 +592,17 @@ static const Value *uniquePtrOperandClass(const Instruction *I,
   return Rep;
 }
 
+size_t EquivDB::SlotIdHash::operator()(const SlotId &Slot) const {
+  return static_cast<size_t>(hash_combine(Slot.Object, Slot.ByteOffset));
+}
+
+size_t EquivDB::TermKeyHash::operator()(const TermKey &Key) const {
+  hash_code H = hash_value(static_cast<unsigned>(Key.Kind));
+  for (uint64_t Component : Key.Components)
+    H = hash_combine(H, Component);
+  return static_cast<size_t>(H);
+}
+
 /// Semantic Rule S1: Closed PHI Node
 ///
 /// A PHI node is "closed" when all of its incoming pointer values belong
@@ -664,35 +675,6 @@ static bool ruleClosedSelect(const Instruction *I, const EquivDB &DB,
   return false; // Select not closed - branches still in different classes
 }
 
-/// Semantic Rule S3: Closed GEP
-///
-/// A GEP is "closed" when there exists another GEP with the same number of
-/// operands, equivalent base (must-alias), and identical index operands (same
-/// SSA values). Then the two GEP results must alias.
-///
-/// Example:
-///   %base2 ≡ %base1 (after propagation)
-///   %a = GEP %base1, 0, %i
-///   %b = GEP %base2, 0, %i
-///   → %a ≡ %b (rule fires when base classes merge)
-bool UnderApprox::ruleClosedGEP(const Instruction *I, const EquivDB &DB,
-                                const Value *&Rep) {
-  auto *GEPI = dyn_cast<GetElementPtrInst>(I);
-  if (!GEPI)
-    return false;
-  return DB.findClosedGEPCandidate(GEPI, Rep);
-}
-
-//-----------------------------------------------------------------------
-// Dispatcher table
-//-----------------------------------------------------------------------
-using RuleTy = bool (*)(const Instruction *, const EquivDB &, const Value *&);
-static constexpr RuleTy SemanticRules[] = {
-    ruleClosedPHI,
-    ruleClosedSelect,
-    ruleClosedGEP,
-};
-
 /// Constructor: Build the equivalence database for a function
 ///
 /// This is a three-phase process:
@@ -754,8 +736,9 @@ EquivDB::EquivDB(Function &Func, MemorySSA *MemSSA, DominatorTree *DomTree)
   // Sound: callee "return arg_i" ⇒ call result must-alias arg_i at call site
   seedReturnValueForwarding(WorkList);
 
-  // Phase 1b: Seed from single-store allocas when DominatorTree available
-  // Sound: one store to alloca dominating all loads ⇒ load equals stored value
+  // Phase 1b: Seed from singleton slots when DominatorTree available.
+  // Sound: one store to a singleton slot dominating all loads from that slot
+  // ⇒ load equals stored value.
   if (DT) {
     seedSingleStoreAlloca(WorkList);
   }
@@ -777,6 +760,205 @@ EquivDB::EquivDB(Function &Func, MemorySSA *MemSSA, DominatorTree *DomTree)
       propagate(WorkList);
     }
   }
+}
+
+const Value *EquivDB::valueForRoot(IdTy Root) const {
+  Root = const_cast<EquivDB *>(this)->find(Root);
+  if (Root >= Id2Val.size())
+    return nullptr;
+  return Id2Val[Root];
+}
+
+const Value *EquivDB::resolveNormalizedValue(const Value *V) const {
+  if (!V || !V->getType()->isPointerTy())
+    return V;
+
+  V = stripNoopCasts(V);
+
+  if (const auto *GEP = dyn_cast<GEPOperator>(V))
+    if (GEP->hasAllZeroIndices())
+      return stripNoopCasts(GEP->getPointerOperand());
+
+  const auto *I = dyn_cast<Instruction>(V);
+  if (!I)
+    return V;
+
+  const Value *Rep = nullptr;
+  if (ruleClosedPHI(I, *this, Rep) || ruleClosedSelect(I, *this, Rep)) {
+    IdTy Root = const_cast<EquivDB *>(this)->find(
+        const_cast<EquivDB *>(this)->id(Rep));
+    if (const Value *Normalized = valueForRoot(Root))
+      return Normalized;
+    return Rep;
+  }
+
+  return V;
+}
+
+bool EquivDB::buildNormalizedTermKey(const Value *V, TermKey &Key) const {
+  Key = TermKey{};
+
+  auto *GEP = dyn_cast<GEPOperator>(V);
+  if (!GEP)
+    return false;
+
+  APInt Offset(DL.getPointerSizeInBits(GEP->getPointerAddressSpace()), 0);
+  const Value *Base = V->stripAndAccumulateInBoundsConstantOffsets(DL, Offset);
+  if (Base != V) {
+    Base = resolveNormalizedValue(Base);
+    IdTy BaseRoot = const_cast<EquivDB *>(this)->find(
+        const_cast<EquivDB *>(this)->id(Base));
+    Key.Kind = TermKind::GEPConst;
+    Key.Components.push_back(static_cast<uint64_t>(BaseRoot));
+    Key.Components.push_back(encodeSignedInt64(Offset.getSExtValue()));
+    Key.Components.push_back(
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
+            GEP->getSourceElementType())));
+    return true;
+  }
+
+  const Value *BasePtr = resolveNormalizedValue(GEP->getPointerOperand());
+  IdTy BaseRoot = const_cast<EquivDB *>(this)->find(
+      const_cast<EquivDB *>(this)->id(BasePtr));
+
+  Key.Kind = TermKind::GEPIndex;
+  Key.Components.push_back(static_cast<uint64_t>(BaseRoot));
+  Key.Components.push_back(
+      static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
+          GEP->getSourceElementType())));
+  Key.Components.push_back(static_cast<uint64_t>(GEP->getNumOperands()));
+
+  for (unsigned I = 1, E = GEP->getNumOperands(); I < E; ++I) {
+    const Value *Idx = GEP->getOperand(I);
+    if (Idx->getType()->isIntegerTy()) {
+      Idx = stripNoopArithmetic(Idx);
+      if (const auto *CI = dyn_cast<ConstantInt>(Idx)) {
+        Key.Components.push_back(1);
+        Key.Components.push_back(CI->getValue().getSExtValue());
+        continue;
+      }
+      if (const auto *Op = dyn_cast<Operator>(Idx)) {
+        Key.Components.push_back(2);
+        Key.Components.push_back(Op->getOpcode());
+        Key.Components.push_back(
+            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(Op->getType())));
+        continue;
+      }
+    }
+
+    Key.Components.push_back(3);
+    Key.Components.push_back(
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(Idx->getType())));
+    Key.Components.push_back(
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(Idx)));
+  }
+
+  return true;
+}
+
+bool EquivDB::termsCongruent(const Value *A, const Value *B,
+                             const TermKey &Key) const {
+  auto *GEPA = dyn_cast<GEPOperator>(A);
+  auto *GEPB = dyn_cast<GEPOperator>(B);
+  if (!GEPA || !GEPB)
+    return false;
+
+  switch (Key.Kind) {
+  case TermKind::GEPConst: {
+    APInt OffA(DL.getPointerSizeInBits(GEPA->getPointerAddressSpace()), 0);
+    APInt OffB(DL.getPointerSizeInBits(GEPB->getPointerAddressSpace()), 0);
+    const Value *BaseA = A->stripAndAccumulateInBoundsConstantOffsets(DL, OffA);
+    const Value *BaseB = B->stripAndAccumulateInBoundsConstantOffsets(DL, OffB);
+    if (OffA != OffB)
+      return false;
+    BaseA = resolveNormalizedValue(BaseA);
+    BaseB = resolveNormalizedValue(BaseB);
+    const_cast<EquivDB *>(this)->id(BaseA);
+    const_cast<EquivDB *>(this)->id(BaseB);
+    return BaseA && BaseB && mustAlias(BaseA, BaseB) &&
+           GEPA->getSourceElementType() == GEPB->getSourceElementType();
+  }
+  case TermKind::GEPIndex:
+    if (GEPA->getSourceElementType() != GEPB->getSourceElementType())
+      return false;
+    if (GEPA->getNumOperands() != GEPB->getNumOperands())
+      return false;
+
+    if (!mustAlias(resolveNormalizedValue(GEPA->getPointerOperand()),
+                   resolveNormalizedValue(GEPB->getPointerOperand())))
+      return false;
+
+    for (unsigned I = 1, E = GEPA->getNumOperands(); I < E; ++I)
+      if (!equivalentGEPIndexOperand(GEPA->getOperand(I), GEPB->getOperand(I)))
+        return false;
+    return true;
+  case TermKind::Invalid:
+    return false;
+  }
+
+  return false;
+}
+
+void EquivDB::propagateNormalizedTerm(
+    Instruction *I,
+    std::vector<std::pair<const Value *, const Value *>> &WL) {
+  if (!I || !I->getType()->isPointerTy())
+    return;
+
+  if (const Value *Rep = resolveNormalizedValue(I)) {
+    if (Rep != I)
+      enqueuePair(WL, I, Rep);
+  }
+
+  TermKey Key;
+  if (!buildNormalizedTermKey(I, Key))
+    return;
+
+  auto &Bucket = TermBuckets[Key];
+  for (const Value *Other : Bucket) {
+    if (Other == I)
+      return;
+    if (termsCongruent(I, Other, Key)) {
+      enqueuePair(WL, I, Other);
+      return;
+    }
+  }
+
+  Bucket.push_back(I);
+}
+
+bool EquivDB::tryGetSingletonSlot(const Value *Ptr, SlotId &Out) const {
+  if (!Ptr || !Ptr->getType()->isPointerTy())
+    return false;
+
+  const unsigned AddrSpace = Ptr->getType()->getPointerAddressSpace();
+  APInt Offset(DL.getPointerSizeInBits(AddrSpace), 0);
+  const Value *Base = Ptr->stripAndAccumulateInBoundsConstantOffsets(DL, Offset);
+  const Value *Obj = getUnderlyingObject(Ptr);
+  if (!Obj || Base != Obj)
+    return false;
+  if (!isa<AllocaInst>(Obj) && !isa<GlobalVariable>(Obj) &&
+      !isAllocationCall(Obj))
+    return false;
+
+  Out.Object = Obj;
+  Out.ByteOffset = Offset.getSExtValue();
+  return true;
+}
+
+bool EquivDB::sameSingletonSlot(const Value *P, const Value *Q) const {
+  SlotId SP, SQ;
+  return tryGetSingletonSlot(P, SP) && tryGetSingletonSlot(Q, SQ) && SP == SQ;
+}
+
+uint64_t EquivDB::internSlot(const SlotId &Slot) {
+  auto It = SlotNumbers.find(Slot);
+  if (It != SlotNumbers.end())
+    return It->second;
+
+  const uint64_t Next = SlotNumbers.size() + 1;
+  SlotNumbers.emplace(Slot, Next);
+  return Next;
 }
 
 /// Phase 1: Seed the worklist with atomic (syntactic) must-alias pairs
@@ -842,6 +1024,7 @@ void EquivDB::seedAtomicEqualities(
       for (Value *Op : I.operands())
         if (Op->getType()->isPointerTy())
           registerWatch(Op, &I);
+      propagateNormalizedTerm(&I, WL);
     }
 }
 
@@ -939,62 +1122,48 @@ void EquivDB::seedReturnValueForwarding(
   }
 }
 
-/// Phase 1c: Seed from single-store allocas when DominatorTree available
+/// Phase 1c: Seed from singleton slots when DominatorTree available
 ///
-/// For each load from an alloca, if there is exactly one dominating store
-/// (pointer-typed value) to that alloca, then the load must-alias the stored
-/// value. This handles both the classic single-store case and per-load unique
-/// reaching store patterns.
+/// For each load from a singleton slot, if there is exactly one dominating
+/// store (pointer-typed value) to that slot, then the load must-alias the
+/// stored value. This handles both the classic single-store case and per-load
+/// unique reaching store patterns for allocas/globals at constant offsets.
 void EquivDB::seedSingleStoreAlloca(
     std::vector<std::pair<const Value *, const Value *>> &WL) {
   if (!DT)
     return;
 
-  auto sameMemorySlot = [&](const Value *P, const Value *Q) -> bool {
-    if (!P || !Q || !P->getType()->isPointerTy() ||
-        !Q->getType()->isPointerTy())
-      return false;
-    if (stripNoopCasts(P) == stripNoopCasts(Q))
-      return true;
-    if (sameConstOffset(DL, P, Q))
-      return true;
-    if (sameGEPOperands(P, Q))
-      return true;
-    return false;
-  };
-
-  // Build alloca → {stores, loads} maps in a single O(N) pass instead of
-  // re-scanning all instructions for every alloca (which was O(A×N)).
-  using AllocaStores = SmallVector<StoreInst *, 2>;
-  using AllocaLoads = SmallVector<LoadInst *, 4>;
-  llvm::DenseMap<const Value *, AllocaStores> AllocaToStores;
-  llvm::DenseMap<const Value *, AllocaLoads> AllocaToLoads;
+  using SlotStores = SmallVector<StoreInst *, 2>;
+  using SlotLoads = SmallVector<LoadInst *, 4>;
+  llvm::DenseMap<uint64_t, SlotStores> SlotToStores;
+  llvm::DenseMap<uint64_t, SlotLoads> SlotToLoads;
 
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
       if (auto *SI = dyn_cast<StoreInst>(&I)) {
-        const Value *Base = getUnderlyingObject(SI->getPointerOperand());
-        if (isa<AllocaInst>(Base))
-          AllocaToStores[Base].push_back(SI);
+        SlotId Slot;
+        if (tryGetSingletonSlot(SI->getPointerOperand(), Slot))
+          SlotToStores[internSlot(Slot)].push_back(SI);
       } else if (auto *LI = dyn_cast<LoadInst>(&I)) {
         if (!LI->getType()->isPointerTy())
           continue;
-        const Value *Base = getUnderlyingObject(LI->getPointerOperand());
-        if (isa<AllocaInst>(Base))
-          AllocaToLoads[Base].push_back(LI);
+        SlotId Slot;
+        if (tryGetSingletonSlot(LI->getPointerOperand(), Slot))
+          SlotToLoads[internSlot(Slot)].push_back(LI);
       }
     }
   }
 
-  // For each alloca that has both stores and loads, check per-load uniqueness.
-  for (auto &KV : AllocaToLoads) {
-    const Value *AllocaV = KV.first;
-    auto SIt = AllocaToStores.find(AllocaV);
-    if (SIt == AllocaToStores.end())
+  // For each singleton slot that has both stores and loads, check per-load
+  // uniqueness.
+  for (auto &KV : SlotToLoads) {
+    const uint64_t SlotNo = KV.first;
+    auto SIt = SlotToStores.find(SlotNo);
+    if (SIt == SlotToStores.end())
       continue;
 
-    const AllocaStores &Stores = SIt->second;
-    const AllocaLoads &Loads = KV.second;
+    const SlotStores &Stores = SIt->second;
+    const SlotLoads &Loads = KV.second;
 
     for (LoadInst *LI : Loads) {
       StoreInst *UniqueStore = nullptr;
@@ -1003,7 +1172,7 @@ void EquivDB::seedSingleStoreAlloca(
       for (StoreInst *SI : Stores) {
         if (!dominatesInst(SI, LI))
           continue;
-        if (!sameMemorySlot(SI->getPointerOperand(), LI->getPointerOperand()))
+        if (!sameSingletonSlot(SI->getPointerOperand(), LI->getPointerOperand()))
           continue;
 
         if (!UniqueStore) {
@@ -1056,51 +1225,7 @@ void EquivDB::registerWatch(const Value *Op, Instruction *I) {
   // check semantic rules only when needed, and duplicate checks are harmless.
 }
 
-/// Check if all pointer operands of an instruction are in the same equivalence
-/// class
-///
-/// This is a helper used by semantic rules to detect when an instruction's
-/// pointer operands have unified. When they are all in the same class, certain
-/// patterns (like closed PHI or closed Select) can be applied.
-///
-/// Note: This is similar to uniquePtrOperandClass but uses a different
-/// implementation that's more efficient when we already have the EquivDB.
-///
-/// @param I The instruction to check
-/// @return true if all pointer operands are in the same class (or there are
-///         no pointer operands), false otherwise
-///
-/// Time complexity: O(P·α(N)) where P = number of pointer operands
-bool EquivDB::operandsInSameClass(const Instruction *I) const {
-  IdTy Root = 0;
-  bool HaveRoot = false;
-
-  // Check each pointer operand
-  for (const Value *Op : I->operands())
-    if (Op->getType()->isPointerTy()) {
-      // Get the root of the class containing this operand
-      // Note: const_cast needed because find() is non-const (mutates path
-      // compression) This is safe because we're only querying, not modifying
-      // the structure
-      IdTy Cur = const_cast<EquivDB *>(this)->find(
-          const_cast<EquivDB *>(this)->id(Op));
-
-      if (!HaveRoot) {
-        // First pointer operand - establish the reference class
-        Root = Cur;
-        HaveRoot = true;
-      } else if (Root != Cur) {
-        // Found an operand in a different class - not all unified
-        return false;
-      }
-      // If we get here, this operand is in the same class as the first
-    }
-
-  // All pointer operands (if any) are in the same class
-  return true;
-}
-
-/// Phase 2: Propagate equivalences using semantic (inductive) rules
+/// Phase 2: Propagate equivalences using normalized pointer terms
 ///
 /// This function processes the worklist until saturation. For each pair
 /// (A, B) that must-alias:
@@ -1153,33 +1278,8 @@ void EquivDB::propagate(
 
       // Check each instruction watching this class
       for (Instruction *I : Snapshot) {
-        // Only process pointer-producing instructions (semantic rules apply to
-        // these)
-        if (!I->getType()->isPointerTy())
-          continue;
-        // FiredSemantic guards PHI/Select (which can fire at most once: once
-        // all operands are in the same class the result is fixed).  GEPs are
-        // different: a GEP may gain new matching partners as more base-pointer
-        // classes merge, so we must NOT block ruleClosedGEP with FiredSemantic.
-        // We still block ruleClosedPHI / ruleClosedSelect after they fire to
-        // avoid redundant re-enqueueing.
-        const Value *Rep = nullptr;
-        for (RuleTy R : SemanticRules) {
-          bool isGEPRule = (R == static_cast<RuleTy>(ruleClosedGEP));
-          if (!isGEPRule && FiredSemantic.count(I))
-            continue;
-          if (R(I, *this, Rep)) {
-            if (!isGEPRule)
-              FiredSemantic.insert(I);
-            enqueuePair(WL, I, Rep);
-            break;
-          }
-        }
+        propagateNormalizedTerm(I, WL);
       }
-      // Note: We keep the List intact. Each instruction may be revisited
-      // multiple times as its operand classes continue to merge, but semantic
-      // rules typically fire at most once per instruction (when it becomes
-      // "closed").
     };
 
     // Revisit instructions watching the merged class
@@ -1263,6 +1363,8 @@ void EquivDB::seedStoreLoadForwarding(
       return false;
     if (!A->getType()->isPointerTy() || !B->getType()->isPointerTy())
       return false;
+    if (sameSingletonSlot(A, B))
+      return true;
     if (atomicMustAlias(DL, A, B))
       return true;
 
@@ -1286,7 +1388,8 @@ void EquivDB::seedStoreLoadForwarding(
       auto *SI = dyn_cast_or_null<StoreInst>(MUD->getMemoryInst());
       if (!SI)
         return false;
-      if (!mustAliasNow(SI->getPointerOperand(), LI->getPointerOperand()))
+      if (!sameSingletonSlot(SI->getPointerOperand(), LI->getPointerOperand()) &&
+          !mustAliasNow(SI->getPointerOperand(), LI->getPointerOperand()))
         return false;
 
       const Value *StoredVal = SI->getValueOperand();

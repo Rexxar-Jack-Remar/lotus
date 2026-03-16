@@ -80,9 +80,9 @@ bool isZeroGEP(const llvm::Value *V);
 /**
  * @brief Check if two GEPs have the same base and identical index operands
  *
- * Two GEPs with the same base pointer (after stripping no-op casts) and
- * identical index operands (same SSA values) must alias. Sound under-approx:
- * no false positives.
+ * Two GEPs with the same source element type, same base pointer (after
+ * stripping no-op casts), and identical index operands (same SSA values) must
+ * alias. Sound under-approx: no false positives.
  *
  * @param A First pointer value (should be a GEP)
  * @param B Second pointer value (should be a GEP)

@@ -13,14 +13,16 @@
  * - Sound: Never produces false positives (if MustAlias, they definitely alias)
  * - Fast: O(α(N)) query time after construction (effectively constant)
  * - Intra-procedural: Analyzes within a single function at a time
- * - Per-function caching: Equivalence databases are built once per function
+ * - Per-function caching: Equivalence databases are reused until the function
+ *   IR fingerprint changes
  * - Optional MemorySSA: Store-load forwarding when available (sound)
- * - Optional DominatorTree: Single-store alloca forwarding when available
+ * - Optional DominatorTree: Single-store singleton-slot forwarding when
+ *   available
  *
  * Algorithm Overview:
  * The analysis uses a three-phase approach:
  * 1. Seed: Apply atomic (syntactic) rules to find initial must-alias pairs
- * 2. Propagate: Use semantic (inductive) rules to discover additional
+ * 2. Propagate: Use normalized term congruence to discover additional
  * equivalences
  * 3. Refine: Apply external analyses (MemorySSA, DominatorTree) for more
  * precision
@@ -64,12 +66,15 @@ namespace UnderApprox {
  * arithmetic)
  * - Trivial PHI/Select: all operands identical
  * - Same underlying object: derived from same alloca/global/allocation
+ * - Singleton-slot forwarding: loads/stores on allocas, globals, and direct
+ *   allocation results at constant offsets
  *
  * With optional MemorySSA:
  * - Store-load forwarding: load after store to same location = stored value
  *
  * With optional DominatorTree:
- * - Single-store alloca forwarding: load-after-dominating-store precision
+ * - Single-store singleton-slot forwarding: load-after-dominating-store
+ *   precision
  *
  * The analysis is an under-approximation: it only reports MustAlias when
  * certain, otherwise returns NoAlias. It never reports MayAlias, making it
@@ -98,8 +103,8 @@ public:
    * @brief Destructor
    *
    * Note: The per-function cache is static and persists across instances.
-   * This allows reuse of built databases even if new UnderApproxAA instances
-   * are created (assuming the IR hasn't changed).
+   * Cached entries are rebuilt automatically when the function IR fingerprint
+   * changes.
    */
   ~UnderApproxAA();
 
@@ -194,9 +199,9 @@ public:
   /**
    * @brief Invalidate the cached EquivDB for a specific function.
    *
-   * Must be called whenever the IR of @p F is modified after the first alias
-   * query on that function.  Failure to do so will cause subsequent queries
-   * to return results based on the old (stale) IR.
+   * This is optional: cached entries are rebuilt automatically when the
+   * function IR fingerprint changes. Call this if you want to eagerly discard
+   * the cached entry after modifying @p F.
    *
    * @param F The function whose cached analysis should be discarded.
    */
@@ -205,8 +210,8 @@ public:
   /**
    * @brief Invalidate all cached EquivDB entries.
    *
-   * Clears the entire per-function cache.  Use this when multiple functions
-   * may have been modified, or when starting a fresh compilation pipeline.
+   * Clears the entire per-function cache. Use this when starting a fresh
+   * compilation pipeline or when eager cache cleanup is preferable.
    */
   static void invalidateAllCaches();
 
