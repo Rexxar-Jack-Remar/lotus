@@ -1,5 +1,5 @@
-#ifndef DATAFLOW_ELIMINATION_SUPPORT_EXPRESSIONKEY_H_
-#define DATAFLOW_ELIMINATION_SUPPORT_EXPRESSIONKEY_H_
+#ifndef DATAFLOW_APA_CLIENTS_LLVM_EXPRESSIONKEY_H_
+#define DATAFLOW_APA_CLIENTS_LLVM_EXPRESSIONKEY_H_
 
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
@@ -14,11 +14,11 @@ namespace elimination {
 
 struct ExpressionKey {
   unsigned Opcode = 0;
-  unsigned Predicate = 0; // For icmp/fcmp
+  unsigned Predicate = 0;
   const llvm::Type *Ty = nullptr;
   std::vector<const llvm::Value *> Ops;
   unsigned FMF = 0;
-  unsigned OverflowFlags = 0; // bit0=nuw, bit1=nsw
+  unsigned OverflowFlags = 0;
   bool Exact = false;
   bool IsVolatile = false;
   bool IsAtomic = false;
@@ -173,4 +173,4 @@ inline const llvm::Value *getLoadPointerOperand(const ExpressionKey &Key) {
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_SUPPORT_EXPRESSIONKEY_H_
+#endif // DATAFLOW_APA_CLIENTS_LLVM_EXPRESSIONKEY_H_

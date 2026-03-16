@@ -1,7 +1,7 @@
-#ifndef DATAFLOW_ELIMINATION_SOLVER_STATEELIMINATIONENGINE_H_
-#define DATAFLOW_ELIMINATION_SOLVER_STATEELIMINATIONENGINE_H_
+#ifndef DATAFLOW_APA_ENGINES_STATEELIMINATIONSOLVER_H_
+#define DATAFLOW_APA_ENGINES_STATEELIMINATIONSOLVER_H_
 
-#include "Dataflow/APA/Solver/EngineCommon.h"
+#include "Dataflow/APA/Engines/SolverContext.h"
 
 namespace elimination {
 namespace detail {
@@ -150,4 +150,4 @@ bool solveStateElimination(
 } // namespace detail
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_SOLVER_STATEELIMINATIONENGINE_H_
+#endif // DATAFLOW_APA_ENGINES_STATEELIMINATIONSOLVER_H_

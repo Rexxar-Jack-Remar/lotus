@@ -1,51 +1,79 @@
-# APA Dataflow (Elimination / State Elimination)
+# APA Dataflow
 
-Header layout for the APA-based intraprocedural dataflow solver. Structure mirrors `Dataflow/Mono`.
+Header layout for the APA-based intraprocedural elimination framework.
+
+The important architectural split is:
+
+- `Core/`: generic problem, path-expression, options, and result types
+- `Engines/`: generic elimination algorithms
+- `Adapters/`: CFG/domain adapters, currently LLVM-specific
+- `Clients/`: concrete analyses built on top of the framework
+
+There are no compatibility header aliases for the pre-reorg layout. The
+directories in this README are the public header structure.
 
 ## Directory structure
 
 ```
 include/Dataflow/APA/
-├── DataFlow.h                     # Umbrella header (include this for full API)
-├── Core/                          # Core abstractions (header-only)
-│   ├── Framework.h                # IntraEliminationProblem, IntraReducibleEliminationProblem
-│   ├── PathExpression.h           # Transfer-expression AST (PathExprFactory, etc.)
-│   └── Options.h                  # EliminationMethod, EliminationOptions
-├── Support/                       # Support utilities (header-only)
-│   └── Result.h                   # DataFlowResultT
-├── Solver/                        # Solver (header-only)
-│   ├── IntraEliminationSolver.h   # Public facade / method dispatch
-│   ├── EngineCommon.h             # Shared ADT / CFG / evaluation helpers
-│   ├── StateEliminationEngine.h   # Generic O(n^3) elimination engine
-│   ├── ADTSimpleEngine.h          # ADT "simple" engine
-│   └── ADTDelayedEngine.h         # ADT "delayed" engine
-├── LLVM/                          # LLVM IR adapter (header-only)
-│   ├── LLVMEliminationProblem.h
-│   └── LLVMReverseEliminationProblem.h
-├── Analyses/                      # Analysis headers (implementations in lib/)
-│   └── Intra/                     # Intra*.h — Reachable, ConstantPropagation, etc.
+├── APA.h                          # Canonical umbrella for the framework
+├── Core/                          # Generic framework API
+│   ├── Problem.h                  # IntraEliminationProblem, reducible extension
+│   ├── PathExpr.h                 # Path-expression AST
+│   ├── Result.h                   # DataFlowResultT
+│   └── Options.h                  # Solver options and diagnostics
+├── Engines/                       # Canonical solver-engine surface
+│   ├── Solver.h
+│   ├── SolverContext.h
+│   ├── StateEliminationSolver.h
+│   ├── ADTSimpleSolver.h
+│   └── ADTDelayedSolver.h
+├── Adapters/
+│   └── LLVM/
+│       ├── ForwardProblem.h       # Forward CFG adapter for LLVM instructions
+│       └── BackwardProblem.h      # Backward CFG adapter for LLVM instructions
+├── Clients/
+│   └── LLVM/
+│       ├── ExpressionKey.h
+│       └── Intra/
+│           ├── Reachability.h
+│           ├── ConstantPropagation.h
+│           ├── ReachingDefinitions.h
+│           ├── AvailableExpressions.h
+│           ├── UninitializedVariables.h
+│           ├── LiveVariables.h
+│           ├── VeryBusyExpressions.h
+│           └── NonNull.h
 └── Passes/                        # LLVM pass wrappers
     └── EliminationPasses.h
 ```
 
 ## Quick include guide
 
-- **Single include:** `#include "Dataflow/APA/DataFlow.h"` (pulls in Core, Support, Solver, LLVM).
-- **Minimal:** include only what you need, e.g. `Core/Framework.h`, `Support/Result.h`, `Solver/IntraEliminationSolver.h`, `LLVM/LLVMEliminationProblem.h`.
+- **Framework umbrella:** `#include "Dataflow/APA/APA.h"`
+- **Minimal framework:** `Core/Problem.h`, `Core/Result.h`,
+  `Engines/Solver.h`, `Adapters/LLVM/ForwardProblem.h`
+- **LLVM clients:** `Clients/LLVM/Intra/*.h`
 - **Passes:** `#include "Dataflow/APA/Passes/EliminationPasses.h"` for LLVM pass classes.
-- **Internal engine headers:** `Solver/EngineCommon.h` and the three `*Engine.h`
-  headers are solver internals; downstream analyses should normally include only
-  `Solver/IntraEliminationSolver.h`.
+- **Internal engine headers:** `Engines/SolverContext.h` and the concrete
+  `*Solver.h` files are solver internals; downstream analyses should normally
+  include only `Engines/Solver.h`.
 
-## Conventions
+## Layering
 
-- **Legacy identifiers:** include guards and several type names still use
-  `Elimination` / `DATAFLOW_ELIMINATION_*` for source compatibility (e.g.
-  `DATAFLOW_ELIMINATION_CORE_FRAMEWORK_H_`).
+- `Core/` is generic. It does not know about LLVM.
+- `Engines/` is generic. It builds and evaluates path expressions.
+- `Adapters/LLVM/` maps LLVM CFGs into the generic problem interface.
+- `Clients/LLVM/` defines concrete lattices and transfer semantics for
+  particular analyses.
+
+This means APA is a generic elimination framework, but not a complete
+"analysis generator." Each client analysis still implements lattice semantics,
+transfer behavior, and any LLVM-specific modeling it needs.
 
 ## Path-expression terminology
 
-- `Core/PathExpression.h` is APA-specific. It models transfer-function
+- `Core/PathExpr.h` is APA-specific. It models transfer-function
   expressions (`Atom`, `Union`, `Concat`, `Star`) that the solver later
   evaluates over a dataflow lattice.
 - `Utils/Algorithms/PathExpressions/` is a separate utility library for
@@ -55,13 +83,20 @@ include/Dataflow/APA/
 
 ## Solver architecture
 
-- `IntraEliminationSolver.h` owns the shared context and performs method
+- `Engines/Solver.h` owns the shared context and performs method
   dispatch.
-- `EngineCommon.h` centralizes shared graph metadata, ADT construction,
+- `Engines/SolverContext.h` centralizes shared graph metadata, ADT construction,
   reducibility checks, and expression evaluation.
-- `StateEliminationEngine.h` is the always-available baseline algorithm.
-- `ADTSimpleEngine.h` and `ADTDelayedEngine.h` implement the two paper-style
+- `Engines/StateEliminationSolver.h` is the always-available baseline
+  algorithm.
+- `Engines/ADTSimpleSolver.h` and
+  `Engines/ADTDelayedSolver.h` implement the two paper-style
   reducible-graph variants.
+
+Path-expression construction is part of the solver itself, not an incidental
+detail. The engines first build path expressions and then evaluate them over a
+client-provided lattice. As a result, path-expression growth is one of the main
+performance risks in this subsystem.
 
 ## Runtime status and diagnostics
 

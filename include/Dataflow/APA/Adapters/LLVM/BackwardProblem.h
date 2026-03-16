@@ -1,5 +1,5 @@
-#ifndef DATAFLOW_ELIMINATION_LLVM_LLVMREVERSEELIMINATIONPROBLEM_H_
-#define DATAFLOW_ELIMINATION_LLVM_LLVMREVERSEELIMINATIONPROBLEM_H_
+#ifndef DATAFLOW_APA_ADAPTERS_LLVM_BACKWARDPROBLEM_H_
+#define DATAFLOW_APA_ADAPTERS_LLVM_BACKWARDPROBLEM_H_
 
 // Backward-flow intraprocedural elimination problem (e.g., liveness, very
 // busy). Uses PostDominatorTree: dominators in the backward CFG =
@@ -10,8 +10,8 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 
-#include "Dataflow/APA/Core/Framework.h"
-#include "Dataflow/APA/LLVM/LLVMEliminationProblem.h"
+#include "Dataflow/APA/Adapters/LLVM/ForwardProblem.h"
+#include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
 
 #include <cstddef>
@@ -244,4 +244,4 @@ protected:
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_LLVM_LLVMREVERSEELIMINATIONPROBLEM_H_
+#endif // DATAFLOW_APA_ADAPTERS_LLVM_BACKWARDPROBLEM_H_

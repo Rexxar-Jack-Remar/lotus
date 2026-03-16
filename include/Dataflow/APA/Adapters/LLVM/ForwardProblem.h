@@ -1,11 +1,11 @@
-#ifndef DATAFLOW_ELIMINATION_LLVM_LLVMELIMINATIONPROBLEM_H_
-#define DATAFLOW_ELIMINATION_LLVM_LLVMELIMINATIONPROBLEM_H_
+#ifndef DATAFLOW_APA_ADAPTERS_LLVM_FORWARDPROBLEM_H_
+#define DATAFLOW_APA_ADAPTERS_LLVM_FORWARDPROBLEM_H_
 
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 
-#include "Dataflow/APA/Core/Framework.h"
+#include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
 
 #include <cstddef>
@@ -244,4 +244,4 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_LLVM_LLVMELIMINATIONPROBLEM_H_
+#endif // DATAFLOW_APA_ADAPTERS_LLVM_FORWARDPROBLEM_H_

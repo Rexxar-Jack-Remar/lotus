@@ -1,10 +1,10 @@
-#ifndef DATAFLOW_ELIMINATION_SOLVER_INTRAELIMINATIONSOLVER_H_
-#define DATAFLOW_ELIMINATION_SOLVER_INTRAELIMINATIONSOLVER_H_
+#ifndef DATAFLOW_APA_ENGINES_SOLVER_H_
+#define DATAFLOW_APA_ENGINES_SOLVER_H_
 
 #include "Dataflow/APA/Core/Options.h"
-#include "Dataflow/APA/Solver/ADTDelayedEngine.h"
-#include "Dataflow/APA/Solver/ADTSimpleEngine.h"
-#include "Dataflow/APA/Solver/StateEliminationEngine.h"
+#include "Dataflow/APA/Engines/ADTDelayedSolver.h"
+#include "Dataflow/APA/Engines/ADTSimpleSolver.h"
+#include "Dataflow/APA/Engines/StateEliminationSolver.h"
 
 namespace elimination {
 
@@ -97,4 +97,4 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_SOLVER_INTRAELIMINATIONSOLVER_H_
+#endif // DATAFLOW_APA_ENGINES_SOLVER_H_

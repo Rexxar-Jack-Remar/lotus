@@ -1,5 +1,5 @@
-#ifndef DATAFLOW_ELIMINATION_CORE_PATHEXPRESSION_H_
-#define DATAFLOW_ELIMINATION_CORE_PATHEXPRESSION_H_
+#ifndef DATAFLOW_APA_CORE_PATHEXPR_H_
+#define DATAFLOW_APA_CORE_PATHEXPR_H_
 
 #include <memory>
 #include <utility>
@@ -77,10 +77,9 @@ public:
   }
 
   static bool isZero(const Ref &E) { return E && E->K == Kind::Zero; }
-
   static bool isOne(const Ref &E) { return E && E->K == Kind::One; }
 };
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_CORE_PATHEXPRESSION_H_
+#endif // DATAFLOW_APA_CORE_PATHEXPR_H_

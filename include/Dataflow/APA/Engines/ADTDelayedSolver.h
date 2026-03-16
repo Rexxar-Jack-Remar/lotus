@@ -1,7 +1,7 @@
-#ifndef DATAFLOW_ELIMINATION_SOLVER_ADTDELAYEDENGINE_H_
-#define DATAFLOW_ELIMINATION_SOLVER_ADTDELAYEDENGINE_H_
+#ifndef DATAFLOW_APA_ENGINES_ADTDELAYEDSOLVER_H_
+#define DATAFLOW_APA_ENGINES_ADTDELAYEDSOLVER_H_
 
-#include "Dataflow/APA/Solver/EngineCommon.h"
+#include "Dataflow/APA/Engines/SolverContext.h"
 
 namespace elimination {
 namespace detail {
@@ -165,4 +165,4 @@ bool solveADTDelayed(IntraEliminationSolverContext<AnalysisDomainTy> &Ctx) {
 } // namespace detail
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_SOLVER_ADTDELAYEDENGINE_H_
+#endif // DATAFLOW_APA_ENGINES_ADTDELAYEDSOLVER_H_

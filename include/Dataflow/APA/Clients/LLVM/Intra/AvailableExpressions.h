@@ -1,5 +1,5 @@
-#ifndef DATAFLOW_ELIMINATION_ANALYSES_INTRA_AVAILABLEEXPRESSIONS_H_
-#define DATAFLOW_ELIMINATION_ANALYSES_INTRA_AVAILABLEEXPRESSIONS_H_
+#ifndef DATAFLOW_APA_CLIENTS_LLVM_INTRA_AVAILABLEEXPRESSIONS_H_
+#define DATAFLOW_APA_CLIENTS_LLVM_INTRA_AVAILABLEEXPRESSIONS_H_
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/MemorySSA.h"
@@ -8,9 +8,9 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 
-#include "Dataflow/APA/DataFlow.h"
-#include "Dataflow/APA/LLVM/LLVMEliminationProblem.h"
-#include "Dataflow/APA/Support/ExpressionKey.h"
+#include "Dataflow/APA/APA.h"
+#include "Dataflow/APA/Adapters/LLVM/ForwardProblem.h"
+#include "Dataflow/APA/Clients/LLVM/ExpressionKey.h"
 
 #include <set>
 
@@ -40,4 +40,4 @@ AvailableExpressionsResult runIntraElimAvailableExpressions(
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRAAVAILABLEEXPRESSIONS_H_
+#endif // DATAFLOW_APA_CLIENTS_LLVM_INTRA_AVAILABLEEXPRESSIONS_H_

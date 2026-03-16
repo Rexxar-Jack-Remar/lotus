@@ -1,8 +1,8 @@
-#ifndef DATAFLOW_ELIMINATION_SUPPORT_RESULT_H_
-#define DATAFLOW_ELIMINATION_SUPPORT_RESULT_H_
+#ifndef DATAFLOW_APA_CORE_RESULT_H_
+#define DATAFLOW_APA_CORE_RESULT_H_
 
-#include "Dataflow/APA/Core/PathExpression.h"
 #include "Dataflow/APA/Core/Options.h"
+#include "Dataflow/APA/Core/PathExpr.h"
 
 #include <unordered_map>
 
@@ -58,4 +58,4 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_SUPPORT_RESULT_H_
+#endif // DATAFLOW_APA_CORE_RESULT_H_

@@ -1,13 +1,13 @@
-#ifndef DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRAREACHINGDEFINITIONS_H_
-#define DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRAREACHINGDEFINITIONS_H_
+#ifndef DATAFLOW_APA_CLIENTS_LLVM_INTRA_REACHINGDEFINITIONS_H_
+#define DATAFLOW_APA_CLIENTS_LLVM_INTRA_REACHINGDEFINITIONS_H_
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 
-#include "Dataflow/APA/DataFlow.h"
-#include "Dataflow/APA/LLVM/LLVMEliminationProblem.h"
+#include "Dataflow/APA/APA.h"
+#include "Dataflow/APA/Adapters/LLVM/ForwardProblem.h"
 
 #include <set>
 
@@ -33,4 +33,4 @@ runIntraElimReachingDefinitions(llvm::Function *F, llvm::AAResults *AA,
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRAREACHINGDEFINITIONS_H_
+#endif // DATAFLOW_APA_CLIENTS_LLVM_INTRA_REACHINGDEFINITIONS_H_

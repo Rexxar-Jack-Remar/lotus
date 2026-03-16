@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/Intra/IntraVeryBusyExpressions.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/VeryBusyExpressions.h"
 
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/MemorySSA.h"
@@ -7,8 +7,8 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 
-#include "Dataflow/APA/Core/Framework.h"
-#include "Dataflow/APA/Solver/IntraEliminationSolver.h"
+#include "Dataflow/APA/Core/Problem.h"
+#include "Dataflow/APA/Engines/Solver.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
 
 #include <algorithm>

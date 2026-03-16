@@ -17,12 +17,12 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils.h"
 
-#include "Dataflow/APA/Analyses/Intra/IntraAvailableExpressions.h"
-#include "Dataflow/APA/Analyses/Intra/IntraConstantPropagation.h"
-#include "Dataflow/APA/Analyses/Intra/IntraLiveVariables.h"
-#include "Dataflow/APA/Analyses/Intra/IntraReachable.h"
-#include "Dataflow/APA/Analyses/Intra/IntraReachingDefinitions.h"
-#include "Dataflow/APA/Analyses/Intra/IntraUninitVariables.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/AvailableExpressions.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/ConstantPropagation.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/LiveVariables.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/Reachability.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/ReachingDefinitions.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/UninitializedVariables.h"
 
 #include <algorithm>
 #include <memory>

@@ -83,13 +83,13 @@ Three elimination-style solvers are exposed via `elimination::EliminationOptions
 - `MaxStarIterations` (0 means use `Problem.maxStarIterations()`).
 
 The public facade `IntraEliminationSolver.h` dispatches to one of three engine
-headers in `include/Dataflow/APA/Solver/`:
+headers in `include/Dataflow/APA/Engines/`:
 
 - `EngineCommon.h` (shared internals: reducible-view construction, ADT
   building, expression evaluation)
-- `StateEliminationEngine.h`
-- `ADTSimpleEngine.h`
-- `ADTDelayedEngine.h`
+- `StateElimination.h`
+- `ADTSimple.h`
+- `ADTDelayed.h`
 
 Roughly, the split is:
 
@@ -98,7 +98,8 @@ Roughly, the split is:
 - `ADTSimpleEngine.h`: eager leaf-update ADT evaluation
 - `ADTDelayedEngine.h`: deferred prefix composition with union-find style links
 
-For ADT-based methods, you can optionally implement `elimination::IntraReducibleEliminationProblem`
+For ADT-based methods, you can optionally implement
+`elimination::IntraReducibleEliminationProblem`
 (dominators + topological order + edge list). If not provided, the solver computes reducible
 flowgraph metadata internally and falls back to `StateElimination` when reducibility assumptions fail.
 

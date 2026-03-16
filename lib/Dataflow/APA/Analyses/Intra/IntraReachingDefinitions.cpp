@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/Intra/IntraReachingDefinitions.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/ReachingDefinitions.h"
 
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/MemorySSA.h"

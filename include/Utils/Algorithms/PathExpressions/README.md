@@ -14,7 +14,7 @@ Path expressions over labeled graphs: compute a **regular expression** that desc
 ## Relation to APA
 
 This utility computes ordinary regex-style path expressions over graph labels.
-It is separate from `Dataflow/APA/Core/PathExpression.h`, which is the
+It is separate from `Dataflow/APA/Core/PathExpr.h`, which is the
 APA-specific transfer-expression AST used by the intraprocedural dataflow
 solver.
 

@@ -1,10 +1,10 @@
-#ifndef DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRALIVEVARIABLES_H_
-#define DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRALIVEVARIABLES_H_
+#ifndef DATAFLOW_APA_CLIENTS_LLVM_INTRA_LIVEVARIABLES_H_
+#define DATAFLOW_APA_CLIENTS_LLVM_INTRA_LIVEVARIABLES_H_
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 
-#include "Dataflow/APA/DataFlow.h"
+#include "Dataflow/APA/APA.h"
 
 #include <set>
 
@@ -20,4 +20,4 @@ LiveVariablesResult runIntraElimLiveVariables(llvm::Function *F,
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRALIVEVARIABLES_H_
+#endif // DATAFLOW_APA_CLIENTS_LLVM_INTRA_LIVEVARIABLES_H_

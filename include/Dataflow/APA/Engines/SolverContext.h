@@ -1,10 +1,10 @@
-#ifndef DATAFLOW_ELIMINATION_SOLVER_DETAIL_ENGINECOMMON_H_
-#define DATAFLOW_ELIMINATION_SOLVER_DETAIL_ENGINECOMMON_H_
+#ifndef DATAFLOW_APA_ENGINES_SOLVERCONTEXT_H_
+#define DATAFLOW_APA_ENGINES_SOLVERCONTEXT_H_
 
-#include "Dataflow/APA/Core/Framework.h"
+#include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/APA/Core/Options.h"
-#include "Dataflow/APA/Core/PathExpression.h"
-#include "Dataflow/APA/Support/Result.h"
+#include "Dataflow/APA/Core/PathExpr.h"
+#include "Dataflow/APA/Core/Result.h"
 
 #include <algorithm>
 #include <cassert>
@@ -808,4 +808,4 @@ private:
 } // namespace detail
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_SOLVER_DETAIL_ENGINECOMMON_H_
+#endif // DATAFLOW_APA_ENGINES_SOLVERCONTEXT_H_

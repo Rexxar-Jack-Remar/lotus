@@ -1,5 +1,5 @@
-#ifndef DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRACONSTANTPROPAGATION_H_
-#define DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRACONSTANTPROPAGATION_H_
+#ifndef DATAFLOW_APA_CLIENTS_LLVM_INTRA_CONSTANTPROPAGATION_H_
+#define DATAFLOW_APA_CLIENTS_LLVM_INTRA_CONSTANTPROPAGATION_H_
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
@@ -11,8 +11,8 @@
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Value.h"
 
-#include "Dataflow/APA/DataFlow.h"
-#include "Dataflow/APA/LLVM/LLVMEliminationProblem.h"
+#include "Dataflow/APA/APA.h"
+#include "Dataflow/APA/Adapters/LLVM/ForwardProblem.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -43,4 +43,4 @@ ConstantPropagationResult runIntraElimConstantPropagation(
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRACONSTANTPROPAGATION_H_
+#endif // DATAFLOW_APA_CLIENTS_LLVM_INTRA_CONSTANTPROPAGATION_H_

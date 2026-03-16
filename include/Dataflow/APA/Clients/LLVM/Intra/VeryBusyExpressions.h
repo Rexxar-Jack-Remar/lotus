@@ -1,5 +1,5 @@
-#ifndef DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRAVERYBUSYEXPRESSIONS_H_
-#define DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRAVERYBUSYEXPRESSIONS_H_
+#ifndef DATAFLOW_APA_CLIENTS_LLVM_INTRA_VERYBUSYEXPRESSIONS_H_
+#define DATAFLOW_APA_CLIENTS_LLVM_INTRA_VERYBUSYEXPRESSIONS_H_
 
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/MemorySSA.h"
@@ -8,8 +8,8 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 
-#include "Dataflow/APA/DataFlow.h"
-#include "Dataflow/APA/Support/ExpressionKey.h"
+#include "Dataflow/APA/APA.h"
+#include "Dataflow/APA/Clients/LLVM/ExpressionKey.h"
 
 #include <set>
 
@@ -39,4 +39,4 @@ VeryBusyExpressionsResult runIntraElimVeryBusyExpressions(
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_ANALYSES_INTRA_INTRAVERYBUSYEXPRESSIONS_H_
+#endif // DATAFLOW_APA_CLIENTS_LLVM_INTRA_VERYBUSYEXPRESSIONS_H_

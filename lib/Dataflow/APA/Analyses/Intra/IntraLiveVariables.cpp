@@ -1,11 +1,11 @@
-#include "Dataflow/APA/Analyses/Intra/IntraLiveVariables.h"
+#include "Dataflow/APA/Clients/LLVM/Intra/LiveVariables.h"
 
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 
-#include "Dataflow/APA/Core/Framework.h"
-#include "Dataflow/APA/LLVM/LLVMReverseEliminationProblem.h"
-#include "Dataflow/APA/Solver/IntraEliminationSolver.h"
+#include "Dataflow/APA/Adapters/LLVM/BackwardProblem.h"
+#include "Dataflow/APA/Core/Problem.h"
+#include "Dataflow/APA/Engines/Solver.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
 
 #include <unordered_set>
