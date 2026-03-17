@@ -2,6 +2,7 @@
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
+#include "Fuzzing/TargetGeneration.h"
 
 #include <cstddef>
 #include <string>
@@ -230,6 +231,24 @@ int main(int argc, char **argv) {
   mgr.print_summary(outs());
 
   // 4. Handle centralized output formats (applies to all checkers)
+  if (!report_options::TargetsOutputFile.empty()) {
+    lotus::fuzzing::TargetGenerationOptions options;
+    options.min_confidence_score = report_options::MinConfidenceScore;
+    options.include_invalid_reports = report_options::ShowInvalidReports;
+    auto findings = lotus::fuzzing::collectFindings(mgr, options);
+    auto targets = lotus::fuzzing::collectTargets(findings);
+
+    std::string errorMessage;
+    if (!lotus::fuzzing::writeTargetsToFile(targets,
+                                            report_options::TargetsOutputFile,
+                                            &errorMessage)) {
+      errs() << "Error writing fuzz targets: " << errorMessage << "\n";
+      return 1;
+    }
+    outs() << "\nFuzz targets written to: " << report_options::TargetsOutputFile
+           << " (" << targets.size() << " targets)\n";
+  }
+
   if (!report_options::JsonOutputFile.empty()) {
     std::error_code EC;
     raw_fd_ostream json_out(report_options::JsonOutputFile, EC,

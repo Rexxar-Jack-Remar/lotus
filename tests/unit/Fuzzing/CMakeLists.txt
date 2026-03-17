@@ -1,0 +1,2 @@
+add_lotus_test(fuzz_target_generation_test FuzzTargetGenerationTest.cpp)
+target_link_libraries(fuzz_target_generation_test CanaryFuzzing CanaryReport)

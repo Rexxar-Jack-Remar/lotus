@@ -12,6 +12,7 @@
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
+#include "Fuzzing/TargetGeneration.h"
 
 #include <memory>
 #include <string>
@@ -138,6 +139,25 @@ int main(int argc, char **argv) {
   }
 
   // 4. Generate JSON report if requested
+  if (!report_options::TargetsOutputFile.empty()) {
+    lotus::fuzzing::TargetGenerationOptions options;
+    options.min_confidence_score =
+        std::max(MinScore, report_options::MinConfidenceScore);
+    options.include_invalid_reports = report_options::ShowInvalidReports;
+    auto findings = lotus::fuzzing::collectFindings(mgr, options);
+    auto targets = lotus::fuzzing::collectTargets(findings);
+
+    std::string errorMessage;
+    if (!lotus::fuzzing::writeTargetsToFile(targets,
+                                            report_options::TargetsOutputFile,
+                                            &errorMessage)) {
+      errs() << "Error writing fuzz targets: " << errorMessage << "\n";
+      return 1;
+    }
+    outs() << "\nFuzz targets written to: " << report_options::TargetsOutputFile
+           << " (" << targets.size() << " targets)\n";
+  }
+
   if (!JsonOutput.empty()) {
     std::error_code EC;
     raw_fd_ostream json_out(JsonOutput, EC);

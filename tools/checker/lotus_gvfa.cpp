@@ -15,6 +15,7 @@
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
+#include "Fuzzing/TargetGeneration.h"
 #include "Utils/LLVM/RecursiveTimer.h"
 
 #include <llvm/IR/LegacyPassManager.h>
@@ -183,6 +184,24 @@ int main(int argc, char **argv) {
   // 4. Generate JSON report if requested
   int effectiveMinScore =
       std::max(MinScore, report_options::MinConfidenceScore);
+  if (!report_options::TargetsOutputFile.empty()) {
+    lotus::fuzzing::TargetGenerationOptions options;
+    options.min_confidence_score = effectiveMinScore;
+    options.include_invalid_reports = report_options::ShowInvalidReports;
+    auto findings = lotus::fuzzing::collectFindings(bugMgr, options);
+    auto targets = lotus::fuzzing::collectTargets(findings);
+
+    std::string errorMessage;
+    if (!lotus::fuzzing::writeTargetsToFile(targets,
+                                            report_options::TargetsOutputFile,
+                                            &errorMessage)) {
+      errs() << "Error writing fuzz targets: " << errorMessage << "\n";
+      return 1;
+    }
+    outs() << "Fuzz targets written to: " << report_options::TargetsOutputFile
+           << " (" << targets.size() << " targets)\n";
+  }
+
   if (!JsonOutput.empty() || !report_options::JsonOutputFile.empty()) {
     std::string jsonFile =
         !JsonOutput.empty() ? JsonOutput : report_options::JsonOutputFile;

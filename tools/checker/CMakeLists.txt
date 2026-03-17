@@ -11,6 +11,7 @@ add_executable(lotus-gvfa lotus_gvfa.cpp)
 target_link_libraries(lotus-gvfa PRIVATE
   GVFAChecker
   CanaryReport
+  CanaryFuzzing
   Annotation
   CanaryDyckAA
   CanaryNullPointer
@@ -25,6 +26,7 @@ add_executable(lotus-kint lotus_kint.cpp)
 target_link_libraries(lotus-kint PRIVATE
         CanaryKint
         CanaryReport
+        CanaryFuzzing
         CanarySupport
         ${LLVM_LINK_COMPONENTS_KINT}
         ${Z3_LIBRARIES} 
@@ -46,6 +48,7 @@ add_executable(lotus-concur lotus_concur.cpp)
 target_link_libraries(lotus-concur
   ConcurrencyChecker
   CanaryReport
+  CanaryFuzzing
 )
 
 # Pulse Bug Finder Tool
@@ -54,6 +57,7 @@ target_link_libraries(lotus-pulse PRIVATE
   PulseChecker
   CanaryAliasAnalysisWrapper
   CanaryReport
+  CanaryFuzzing
   ${LLVM_LINK_COMPONENTS}
   ${Z3_LIBRARIES}
 )

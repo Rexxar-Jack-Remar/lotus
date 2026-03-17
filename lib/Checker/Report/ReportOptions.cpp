@@ -20,6 +20,13 @@ llvm::cl::opt<std::string> SarifOutputFile(
     llvm::cl::desc("Output bug reports in SARIF format to the specified file"),
     llvm::cl::value_desc("filename"), llvm::cl::cat(OutputCategory));
 
+// Directed fuzzing target output
+llvm::cl::opt<std::string> TargetsOutputFile(
+    "report-targets",
+    llvm::cl::desc("Output ranked fuzz targets in file:line format to the "
+                   "specified file"),
+    llvm::cl::value_desc("filename"), llvm::cl::cat(OutputCategory));
+
 // Suppression file
 llvm::cl::opt<std::string> SuppressionFile(
     "suppressions", llvm::cl::desc("Path to suppression JSON file"),
