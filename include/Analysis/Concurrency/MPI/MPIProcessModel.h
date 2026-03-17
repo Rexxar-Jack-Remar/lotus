@@ -16,6 +16,7 @@
 #include "Analysis/Concurrency/MPI/MPINormalization.h"
 #include "Analysis/Concurrency/MPI/MPIOperation.h"
 #include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
+#include "Analysis/Concurrency/MPI/MPISemanticEvent.h"
 #include "Analysis/Concurrency/MPI/MPISemantics.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
@@ -65,6 +66,24 @@ public:
 
   const std::vector<MPIOperation> &getAllOperations() const {
     return all_operations_;
+  }
+
+  std::vector<MPIOperation> &getMutableOperations() { return all_operations_; }
+
+  const std::vector<MPIEvent> &getSemanticEvents() const {
+    return semantic_events_;
+  }
+
+  std::vector<MPIEvent> &getMutableSemanticEvents() { return semantic_events_; }
+
+  const std::vector<MPIPointToPointObligation> &
+  getPointToPointObligations() const {
+    return point_to_point_obligations_;
+  }
+
+  const std::map<RequestID, MPIRequestStateSummary> &
+  getRequestStateSummaries() const {
+    return request_state_summaries_;
   }
 
   const std::unordered_map<MPIOpKind, size_t> &getOperationKindCounts() const {
@@ -149,7 +168,9 @@ private:
 
   std::vector<MPIOperation> all_operations_;
   std::map<RequestID, NonBlockingOp> non_blocking_ops_;
-  std::map<RequestID, NonBlockingOp> persistent_request_templates_;
+  std::map<RequestID, MPIRequestStateSummary> request_state_summaries_;
+  std::vector<MPIEvent> semantic_events_;
+  std::vector<MPIPointToPointObligation> point_to_point_obligations_;
   std::unordered_map<MPIOpKind, size_t> operation_kind_counts_;
   std::unordered_map<const llvm::Value *, CommunicatorID>
       canonical_communicators_;
@@ -209,7 +230,9 @@ private:
   const llvm::Value *
   canonicalizeDatatypeHandle(const llvm::Value *handle) const;
   void registerDatatypeExtent(const llvm::Value *handle, int64_t extent);
-  void matchNonBlockingOps();
+  void buildSemanticEvents();
+  void buildPointToPointObligations();
+  void analyzeRequestStateDomain();
   std::unordered_map<std::string, size_t> deferred_lowering_stats_;
   std::unordered_map<const llvm::Value *, int64_t> datatype_extent_bytes_;
   std::unordered_map<NormalizationConfidence, size_t>

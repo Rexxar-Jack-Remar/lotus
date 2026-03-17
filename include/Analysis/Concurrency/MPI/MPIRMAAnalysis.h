@@ -87,7 +87,7 @@ public:
     const llvm::Instruction *sync_end = nullptr;
   };
 
-  MPIRMAAnalysis(const MPIProcessModel &model, ThreadAPI *api)
+  MPIRMAAnalysis(MPIProcessModel &model, ThreadAPI *api)
       : process_model_(model), thread_api_(api) {}
 
   void analyzeRMA();
@@ -120,7 +120,7 @@ private:
     std::vector<size_t> op_indices;
   };
 
-  const MPIProcessModel &process_model_;
+  MPIProcessModel &process_model_;
   ThreadAPI *thread_api_;
 
   std::map<WindowID, RMAWindow> windows_;

@@ -74,10 +74,6 @@ bool isLikelyMPIInPlace(const Value *value) {
   return value->hasName() && value->getName().contains("MPI_IN_PLACE");
 }
 
-bool disablesDeterministicMPIOrdering(int provided_level) {
-  return provided_level >= 2;
-}
-
 bool rangesOverlap(int lhs_min, int lhs_max, int rhs_min, int rhs_max) {
   if (lhs_min < 0 || lhs_max < 0 || rhs_min < 0 || rhs_max < 0) {
     return true;
@@ -241,6 +237,70 @@ bool getIndexedStoreTarget(const StoreInst *store, const Value *base,
   }
   index_out = idx->getZExtValue();
   return true;
+}
+
+bool readConstCallArg(const CallBase *cb, unsigned index, int &out) {
+  if (!cb || index >= cb->arg_size()) {
+    return false;
+  }
+  const auto *ci = dyn_cast<ConstantInt>(cb->getArgOperand(index));
+  if (!ci) {
+    return false;
+  }
+  out = ci->getSExtValue();
+  return true;
+}
+
+MPIEventKind classifySemanticEventKind(const MPIOperation &op) {
+  switch (op.kind) {
+  case MPIOpKind::INIT:
+  case MPIOpKind::FINALIZE:
+    return MPIEventKind::Lifecycle;
+  case MPIOpKind::SESSION:
+    return MPIEventKind::Session;
+  case MPIOpKind::SEND_BLOCKING:
+  case MPIOpKind::RECV_BLOCKING:
+  case MPIOpKind::PROBE_BLOCKING:
+  case MPIOpKind::SEND_NONBLOCKING:
+  case MPIOpKind::RECV_NONBLOCKING:
+  case MPIOpKind::PROBE_NONBLOCKING:
+    return MPIEventKind::PointToPoint;
+  case MPIOpKind::BARRIER_BLOCKING:
+  case MPIOpKind::BARRIER_NONBLOCKING:
+  case MPIOpKind::COLLECTIVE_BLOCKING:
+  case MPIOpKind::COLLECTIVE_NONBLOCKING:
+    return MPIEventKind::Collective;
+  case MPIOpKind::WAIT:
+  case MPIOpKind::TEST:
+  case MPIOpKind::REQUEST_MANAGEMENT:
+    return MPIEventKind::Request;
+  case MPIOpKind::COMM_MANAGEMENT:
+  case MPIOpKind::INTERCOMM_CREATION:
+    return MPIEventKind::Communicator;
+  case MPIOpKind::RMA_WINDOW:
+  case MPIOpKind::RMA_DATA:
+  case MPIOpKind::RMA_SYNC:
+    return MPIEventKind::RMA;
+  case MPIOpKind::DATATYPE_CREATE:
+    return MPIEventKind::Datatype;
+  case MPIOpKind::UNKNOWN:
+    return MPIEventKind::Unknown;
+  }
+  return MPIEventKind::Unknown;
+}
+
+bool isNonBlockingRequestKind(MPIOpKind kind) {
+  return kind == MPIOpKind::SEND_NONBLOCKING ||
+         kind == MPIOpKind::RECV_NONBLOCKING ||
+         kind == MPIOpKind::BARRIER_NONBLOCKING ||
+         kind == MPIOpKind::COLLECTIVE_NONBLOCKING;
+}
+
+bool isCollectiveKind(MPIOpKind kind) {
+  return kind == MPIOpKind::BARRIER_BLOCKING ||
+         kind == MPIOpKind::BARRIER_NONBLOCKING ||
+         kind == MPIOpKind::COLLECTIVE_BLOCKING ||
+         kind == MPIOpKind::COLLECTIVE_NONBLOCKING;
 }
 
 } // namespace
@@ -1056,7 +1116,9 @@ void MPIProcessModel::extractOperationDetails(MPIOperation &op) {
 void MPIProcessModel::analyzeModule() {
   all_operations_.clear();
   non_blocking_ops_.clear();
-  persistent_request_templates_.clear();
+  request_state_summaries_.clear();
+  semantic_events_.clear();
+  point_to_point_obligations_.clear();
   operation_kind_counts_.clear();
   canonical_communicators_.clear();
   communicator_class_ids_.clear();
@@ -1184,73 +1246,12 @@ void MPIProcessModel::analyzeModule() {
 
       all_operations_.push_back(op);
       ++operation_kind_counts_[kind];
-
-      if (kind == MPIOpKind::REQUEST_MANAGEMENT && op.request) {
-        if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT ||
-            op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT) {
-          NonBlockingOp persistent_op;
-          persistent_op.issue_inst = I;
-          persistent_op.request = op.request;
-          persistent_op.completion_state = RequestCompletionState::Created;
-          persistent_op.peer_rank =
-              op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT
-                  ? op.dest_rank
-                  : op.source_rank;
-          persistent_op.tag = op.tag;
-          persistent_op.comm = op.communicator;
-          persistent_request_templates_[op.request] = persistent_op;
-        }
-      }
-
-      if (kind == MPIOpKind::SEND_NONBLOCKING ||
-          kind == MPIOpKind::RECV_NONBLOCKING ||
-          kind == MPIOpKind::BARRIER_NONBLOCKING ||
-          kind == MPIOpKind::COLLECTIVE_NONBLOCKING) {
-        if (op.request) {
-          NonBlockingOp nbOp;
-          nbOp.issue_inst = I;
-          nbOp.request = op.request;
-          nbOp.completion_state = RequestCompletionState::Active;
-          nbOp.peer_rank = (kind == MPIOpKind::SEND_NONBLOCKING)
-                               ? op.dest_rank
-                               : op.source_rank;
-          nbOp.tag = op.tag;
-          nbOp.comm = op.communicator;
-          non_blocking_ops_[op.request] = nbOp;
-        }
-      }
     }
   }
 
-  std::map<std::tuple<size_t, size_t, const Function *>, size_t>
-      protocol_sequence_by_scope;
-  for (MPIOperation &op : all_operations_) {
-    if (op.kind != MPIOpKind::BARRIER_BLOCKING &&
-        op.kind != MPIOpKind::BARRIER_NONBLOCKING &&
-        op.kind != MPIOpKind::COLLECTIVE_BLOCKING &&
-        op.kind != MPIOpKind::COLLECTIVE_NONBLOCKING) {
-      continue;
-    }
-    auto key = std::make_tuple(op.communicator_class_id,
-                               op.communicator_subgroup_id, op.function);
-    op.protocol_sequence_id = protocol_sequence_by_scope[key]++;
-    op.semantic_relation.kind = concurrency::RelationKind::SameProtocolSlot;
-    op.semantic_relation.proof =
-        op.protocol_reachability == ProtocolReachability::AllRanks
-            ? concurrency::ProofStrength::Must
-            : concurrency::ProofStrength::May;
-    if (op.semantic_relation.proof == concurrency::ProofStrength::Must &&
-        has_provided_init_thread_level_ &&
-        disablesDeterministicMPIOrdering(init_thread_provided_level_)) {
-      op.semantic_relation.proof = concurrency::ProofStrength::May;
-      op.semantic_relation.reason =
-          "mpi_collective_protocol_slot_thread_downgrade";
-      continue;
-    }
-    op.semantic_relation.reason = "mpi_collective_protocol_slot";
-  }
-
-  matchNonBlockingOps();
+  buildSemanticEvents();
+  buildPointToPointObligations();
+  analyzeRequestStateDomain();
 
   if (!deferred_lowering_stats_.empty()) {
     errs() << "MPI deferred lowering:";
@@ -1497,264 +1498,539 @@ bool MPIProcessModel::tryReadScalarInt(const Value *scalar_arg, int &out,
   return true;
 }
 
-void MPIProcessModel::matchNonBlockingOps() {
-  for (const MPIOperation &op : all_operations_) {
-    if (op.kind == MPIOpKind::REQUEST_MANAGEMENT &&
-        op.td_type == ThreadAPI::TD_MPI_REQUEST_START && op.request) {
-      std::vector<RequestID> requests =
-          collectRequestOperands(op.request, op.inst);
-      for (RequestID request : requests) {
-        auto it = persistent_request_templates_.find(request);
-        if (it == persistent_request_templates_.end()) {
-          continue;
-        }
-        NonBlockingOp active_op = it->second;
-        active_op.issue_inst = op.inst;
-        active_op.completion_state = RequestCompletionState::Active;
-        active_op.wait_inst = nullptr;
-        non_blocking_ops_[request] = active_op;
-      }
-      continue;
-    }
-    if (op.kind == MPIOpKind::REQUEST_MANAGEMENT && op.request) {
-      std::vector<RequestID> requests =
-          collectRequestOperands(op.request, op.inst);
-      for (RequestID request : requests) {
-        auto it = non_blocking_ops_.find(request);
-        if (it == non_blocking_ops_.end()) {
-          continue;
-        }
-        it->second.completion_state = RequestCompletionState::Freed;
-        it->second.wait_inst = op.inst;
-      }
-      continue;
-    }
-    if (op.kind != MPIOpKind::WAIT && op.kind != MPIOpKind::TEST)
-      continue;
-    if (!op.request)
-      continue;
+void MPIProcessModel::buildSemanticEvents() {
+  semantic_events_.clear();
+  semantic_events_.reserve(all_operations_.size());
 
-    std::vector<RequestID> requests =
-        collectRequestOperands(op.request, op.inst);
-    if (requests.empty()) {
-      continue;
+  for (size_t index = 0; index < all_operations_.size(); ++index) {
+    const MPIOperation &op = all_operations_[index];
+    MPIEvent event;
+    event.operation_index = index;
+    event.inst = op.inst;
+    event.operation = &op;
+    event.kind = classifySemanticEventKind(op);
+    event.relation = op.semantic_relation;
+
+    if (isCollectiveKind(op.kind)) {
+      event.has_collective_semantics = true;
+      event.collective.scope.communicator_class_id = op.communicator_class_id;
+      event.collective.scope.communicator_subgroup_id =
+          op.communicator_subgroup_id;
+      event.collective.scope.protocol_class_id =
+          op.collective_protocol_class_id;
+      event.collective.type = op.td_type;
+      event.collective.reachability = op.protocol_reachability;
+
+      const auto *cb = dyn_cast<CallBase>(op.inst);
+      switch (op.td_type) {
+      case ThreadAPI::TD_MPI_BCAST:
+        readConstCallArg(cb, 1, event.collective.count);
+        readConstCallArg(cb, 2, event.collective.datatype);
+        readConstCallArg(cb, 3, event.collective.root_rank);
+        break;
+      case ThreadAPI::TD_MPI_REDUCE:
+        readConstCallArg(cb, 2, event.collective.count);
+        readConstCallArg(cb, 3, event.collective.datatype);
+        readConstCallArg(cb, 4, event.collective.reduction_op);
+        readConstCallArg(cb, 5, event.collective.root_rank);
+        break;
+      case ThreadAPI::TD_MPI_GATHER:
+      case ThreadAPI::TD_MPI_SCATTER:
+        readConstCallArg(cb, 1, event.collective.count);
+        readConstCallArg(cb, 2, event.collective.datatype);
+        readConstCallArg(cb, 4, event.collective.recv_count);
+        readConstCallArg(cb, 5, event.collective.recv_datatype);
+        readConstCallArg(cb, 6, event.collective.root_rank);
+        if (cb && cb->arg_size() > 3) {
+          event.collective.in_place =
+              cb->getArgOperand(0) == cb->getArgOperand(3);
+        }
+        break;
+      case ThreadAPI::TD_MPI_ALLGATHER:
+      case ThreadAPI::TD_MPI_ALLTOALL:
+        readConstCallArg(cb, 1, event.collective.count);
+        readConstCallArg(cb, 2, event.collective.datatype);
+        readConstCallArg(cb, 4, event.collective.recv_count);
+        readConstCallArg(cb, 5, event.collective.recv_datatype);
+        break;
+      case ThreadAPI::TD_MPI_ALLREDUCE:
+        readConstCallArg(cb, 2, event.collective.count);
+        readConstCallArg(cb, 3, event.collective.datatype);
+        readConstCallArg(cb, 4, event.collective.reduction_op);
+        break;
+      case ThreadAPI::TD_MPI_REDUCE_SCATTER:
+      case ThreadAPI::TD_MPI_SCAN:
+        readConstCallArg(cb, 2, event.collective.datatype);
+        readConstCallArg(cb, 3, event.collective.reduction_op);
+        break;
+      default:
+        break;
+      }
     }
 
-    auto markObserved = [&](RequestID request) {
-      auto it = non_blocking_ops_.find(request);
-      if (it != non_blocking_ops_.end()) {
-        it->second.wait_inst = op.inst;
+    if (event.kind == MPIEventKind::PointToPoint) {
+      event.has_point_to_point_semantics = true;
+      event.point_to_point.is_send = op.kind == MPIOpKind::SEND_BLOCKING ||
+                                     op.kind == MPIOpKind::SEND_NONBLOCKING;
+      event.point_to_point.is_recv = op.kind == MPIOpKind::RECV_BLOCKING ||
+                                     op.kind == MPIOpKind::RECV_NONBLOCKING;
+      event.point_to_point.is_probe = op.kind == MPIOpKind::PROBE_BLOCKING ||
+                                      op.kind == MPIOpKind::PROBE_NONBLOCKING;
+      if (event.point_to_point.is_send) {
+        event.point_to_point.peer_rank = op.dest_rank;
+        event.point_to_point.peer_rank_min = op.dest_rank_min;
+        event.point_to_point.peer_rank_max = op.dest_rank_max;
+      } else {
+        event.point_to_point.peer_rank = op.source_rank;
+        event.point_to_point.peer_rank_min = op.source_rank_min;
+        event.point_to_point.peer_rank_max = op.source_rank_max;
       }
-    };
-    auto markCompleted = [&](RequestID request, MPIRequestState state) {
-      auto it = non_blocking_ops_.find(request);
-      if (it != non_blocking_ops_.end()) {
-        it->second.wait_inst = op.inst;
-        it->second.completion_state = state;
-      }
-    };
-    auto markAllMayComplete =
-        [&](const std::vector<RequestID> &pending_requests) {
-          for (RequestID request : pending_requests) {
-            auto it = non_blocking_ops_.find(request);
-            if (it == non_blocking_ops_.end()) {
-              continue;
-            }
-            if (it->second.completion_state == MPIRequestState::Pending ||
-                it->second.completion_state == MPIRequestState::Active ||
-                it->second.completion_state == MPIRequestState::Created) {
-              it->second.completion_state = MPIRequestState::MayComplete;
-            }
-            it->second.wait_inst = op.inst;
+      event.point_to_point.local_rank =
+          op.process_rank.kind == MPI::RankExpr::Concrete
+              ? op.process_rank.concrete_value
+              : -1;
+      event.point_to_point.tag = op.tag;
+      event.point_to_point.communicator_class_id = op.communicator_class_id;
+      event.point_to_point.reachability = op.protocol_reachability;
+    }
+
+    if (event.kind == MPIEventKind::RMA) {
+      event.has_rma_semantics = true;
+      event.rma.window = op.window;
+      event.rma.is_window_lifecycle = op.kind == MPIOpKind::RMA_WINDOW;
+      event.rma.is_data_operation = op.kind == MPIOpKind::RMA_DATA;
+      event.rma.is_sync_operation = op.kind == MPIOpKind::RMA_SYNC;
+      event.rma.target_rank = op.target_rank;
+      event.rma.target_rank_min = op.target_rank_min;
+      event.rma.target_rank_max = op.target_rank_max;
+      event.rma.target_disp = op.target_disp;
+      event.rma.byte_length = op.byte_length;
+      event.rma.epoch_kind = op.rma_epoch_kind;
+      event.rma.local_completion_only = op.rma_local_completion_only;
+      event.rma.lock_all =
+          op.td_type == ThreadAPI::TD_MPI_WIN_LOCK && op.target_rank < 0;
+    }
+
+    if (isNonBlockingRequestKind(op.kind) || op.kind == MPIOpKind::WAIT ||
+        op.kind == MPIOpKind::TEST ||
+        op.kind == MPIOpKind::REQUEST_MANAGEMENT) {
+      event.has_request_semantics = true;
+      if (isNonBlockingRequestKind(op.kind) && op.request) {
+        event.request.action = MPIRequestActionKind::IssueNonBlocking;
+        event.request.requests.push_back(op.request);
+      } else if (op.kind == MPIOpKind::REQUEST_MANAGEMENT && op.request) {
+        event.request.requests = collectRequestOperands(op.request, op.inst);
+        switch (op.td_type) {
+        case ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT:
+        case ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT:
+          event.request.action = MPIRequestActionKind::CreatePersistent;
+          if (event.request.requests.empty()) {
+            event.request.requests.push_back(op.request);
           }
-        };
+          break;
+        case ThreadAPI::TD_MPI_REQUEST_START:
+          event.request.action = MPIRequestActionKind::ActivatePersistent;
+          break;
+        case ThreadAPI::TD_MPI_REQUEST_FREE:
+          event.request.action = MPIRequestActionKind::Free;
+          break;
+        case ThreadAPI::TD_MPI_CANCEL:
+          event.request.action = MPIRequestActionKind::Cancel;
+          break;
+        default:
+          event.request.action = MPIRequestActionKind::Observe;
+          break;
+        }
+      } else if (op.request) {
+        event.request.requests = collectRequestOperands(op.request, op.inst);
+        event.request.action = MPIRequestActionKind::Observe;
 
-    for (RequestID request : requests) {
-      markObserved(request);
+        const auto *cb = dyn_cast<CallBase>(op.inst);
+        switch (op.td_type) {
+        case ThreadAPI::TD_MPI_WAIT:
+        case ThreadAPI::TD_MPI_WAITALL:
+          event.request.action = MPIRequestActionKind::CompleteMust;
+          break;
+        case ThreadAPI::TD_MPI_TEST:
+          if (cb && cb->arg_size() >= 2) {
+            int flag = 0;
+            if (tryReadScalarInt(cb->getArgOperand(1), flag, op.inst)) {
+              event.request.completion_flag_known = true;
+              event.request.completion_flag = flag != 0;
+            }
+          }
+          break;
+        case ThreadAPI::TD_MPI_TESTALL:
+          if (cb && cb->arg_size() >= 3) {
+            int flag = 0;
+            if (tryReadScalarInt(cb->getArgOperand(2), flag, op.inst)) {
+              event.request.completion_flag_known = true;
+              event.request.completion_flag = flag != 0;
+            }
+          }
+          break;
+        case ThreadAPI::TD_MPI_WAITANY:
+          if (cb && cb->arg_size() >= 3) {
+            int selected = -1;
+            if (tryReadScalarInt(cb->getArgOperand(2), selected, op.inst)) {
+              event.request.completed_indices.push_back(selected);
+            }
+          }
+          break;
+        case ThreadAPI::TD_MPI_TESTANY:
+          if (cb && cb->arg_size() >= 4) {
+            int flag = 0;
+            if (tryReadScalarInt(cb->getArgOperand(3), flag, op.inst)) {
+              event.request.completion_flag_known = true;
+              event.request.completion_flag = flag != 0;
+            }
+            int selected = -1;
+            if (tryReadScalarInt(cb->getArgOperand(2), selected, op.inst)) {
+              event.request.completed_indices.push_back(selected);
+            }
+          }
+          break;
+        case ThreadAPI::TD_MPI_WAITSOME:
+          if (cb && cb->arg_size() >= 4) {
+            event.request.completed_indices = collectCompletedRequestIndices(
+                cb->getArgOperand(3), event.request.requests.size(), op.inst);
+          }
+          break;
+        case ThreadAPI::TD_MPI_TESTSOME:
+          if (cb && cb->arg_size() >= 3) {
+            int outcount = 0;
+            if (tryReadScalarInt(cb->getArgOperand(2), outcount, op.inst)) {
+              event.request.outcount_known = true;
+              event.request.outcount = outcount;
+            }
+          }
+          if (cb && cb->arg_size() >= 4) {
+            event.request.completed_indices = collectCompletedRequestIndices(
+                cb->getArgOperand(3), event.request.requests.size(), op.inst);
+          }
+          break;
+        default:
+          break;
+        }
+      }
     }
 
-    const CallBase *cb = dyn_cast<CallBase>(op.inst);
-    switch (op.td_type) {
-    case ThreadAPI::TD_MPI_WAIT:
-      markCompleted(requests.front(), MPIRequestState::MustComplete);
+    semantic_events_.push_back(std::move(event));
+  }
+}
+
+void MPIProcessModel::buildPointToPointObligations() {
+  point_to_point_obligations_.clear();
+  for (size_t lhs = 0; lhs < all_operations_.size(); ++lhs) {
+    const MPIOperation &op1 = all_operations_[lhs];
+    bool lhs_is_send = op1.kind == MPIOpKind::SEND_BLOCKING ||
+                       op1.kind == MPIOpKind::SEND_NONBLOCKING;
+    bool lhs_is_recv = op1.kind == MPIOpKind::RECV_BLOCKING ||
+                       op1.kind == MPIOpKind::RECV_NONBLOCKING;
+    if (!lhs_is_send && !lhs_is_recv) {
+      continue;
+    }
+    for (size_t rhs = lhs + 1; rhs < all_operations_.size(); ++rhs) {
+      const MPIOperation &op2 = all_operations_[rhs];
+      bool rhs_is_send = op2.kind == MPIOpKind::SEND_BLOCKING ||
+                         op2.kind == MPIOpKind::SEND_NONBLOCKING;
+      bool rhs_is_recv = op2.kind == MPIOpKind::RECV_BLOCKING ||
+                         op2.kind == MPIOpKind::RECV_NONBLOCKING;
+      if ((lhs_is_send && !rhs_is_recv) || (lhs_is_recv && !rhs_is_send)) {
+        continue;
+      }
+
+      MPICommunicationMatch match = classifyCommunicationMatch(op1, op2);
+      if (match == MPICommunicationMatch::NoMatch) {
+        continue;
+      }
+
+      MPIPointToPointObligation obligation;
+      obligation.lhs_operation_index = lhs;
+      obligation.rhs_operation_index = rhs;
+      obligation.lhs_inst = op1.inst;
+      obligation.rhs_inst = op2.inst;
+      obligation.communicator_class_id = op1.communicator_class_id != 0
+                                             ? op1.communicator_class_id
+                                             : op2.communicator_class_id;
+      const MPIOperation &send = lhs_is_send ? op1 : op2;
+      const MPIOperation &recv = lhs_is_send ? op2 : op1;
+      obligation.send_rank = send.dest_rank;
+      obligation.recv_rank = recv.source_rank;
+      obligation.tag = send.tag >= 0 ? send.tag : recv.tag;
+      switch (match) {
+      case MPICommunicationMatch::MustMatch:
+        obligation.proof = MPIMatchProofKind::MustMatch;
+        obligation.relation.kind = concurrency::RelationKind::MustHappenBefore;
+        obligation.relation.proof = concurrency::ProofStrength::Must;
+        obligation.relation.reason = "mpi_point_to_point_match_obligation";
+        break;
+      case MPICommunicationMatch::MayMatch:
+        obligation.proof = MPIMatchProofKind::MayMatch;
+        obligation.relation.kind = concurrency::RelationKind::MayHappenBefore;
+        obligation.relation.proof = concurrency::ProofStrength::May;
+        obligation.relation.reason = "mpi_point_to_point_match_obligation";
+        break;
+      case MPICommunicationMatch::Unknown:
+        obligation.proof = MPIMatchProofKind::Unknown;
+        obligation.relation.kind =
+            concurrency::RelationKind::UnknownDueToModelGap;
+        obligation.relation.proof = concurrency::ProofStrength::Unknown;
+        obligation.relation.reason = "mpi_point_to_point_match_obligation";
+        break;
+      case MPICommunicationMatch::NoMatch:
+        obligation.proof = MPIMatchProofKind::NoMatch;
+        break;
+      }
+      point_to_point_obligations_.push_back(obligation);
+    }
+  }
+}
+
+void MPIProcessModel::analyzeRequestStateDomain() {
+  non_blocking_ops_.clear();
+  request_state_summaries_.clear();
+
+  auto ensureSummary = [&](RequestID request, const MPIOperation &op,
+                           bool persistent) -> MPIRequestStateSummary & {
+    MPIRequestStateSummary &summary = request_state_summaries_[request];
+    if (!summary.request) {
+      summary.request = request;
+      summary.origin_inst = op.inst;
+      summary.peer_rank = op.kind == MPIOpKind::SEND_NONBLOCKING
+                              ? op.dest_rank
+                              : op.source_rank;
+      summary.tag = op.tag;
+      summary.communicator = op.communicator;
+      summary.state =
+          persistent ? MPIRequestState::Created : MPIRequestState::Pending;
+      summary.is_collective = op.kind == MPIOpKind::BARRIER_NONBLOCKING ||
+                              op.kind == MPIOpKind::COLLECTIVE_NONBLOCKING;
+    }
+    summary.is_persistent = summary.is_persistent || persistent;
+    return summary;
+  };
+
+  auto recordTransition =
+      [&](MPIRequestStateSummary &summary, MPIRequestActionKind action,
+          MPIRequestState next_state, const Instruction *inst) {
+        MPIRequestTransition transition;
+        transition.action = action;
+        transition.from_state = summary.state;
+        transition.to_state = joinRequestState(summary.state, next_state);
+        transition.inst = inst;
+        summary.state = transition.to_state;
+        summary.last_transition_inst = inst;
+        summary.history.push_back(transition);
+      };
+
+  auto markAllMayComplete = [&](const MPIEvent &event, const MPIOperation &op) {
+    for (RequestID request : event.request.requests) {
+      MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+      recordTransition(summary, MPIRequestActionKind::CompleteMay,
+                       MPIRequestState::MayComplete, op.inst);
+    }
+  };
+
+  for (const MPIEvent &event : semantic_events_) {
+    if (!event.has_request_semantics || event.request.requests.empty()) {
+      continue;
+    }
+    const MPIOperation &op = all_operations_[event.operation_index];
+
+    switch (event.request.action) {
+    case MPIRequestActionKind::IssueNonBlocking:
+      for (RequestID request : event.request.requests) {
+        MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+        summary.activation_inst = op.inst;
+        recordTransition(summary, MPIRequestActionKind::IssueNonBlocking,
+                         MPIRequestState::Active, op.inst);
+      }
       break;
-    case ThreadAPI::TD_MPI_TEST: {
-      bool test_true = false;
-      bool flag_unknown = false;
-      if (cb && cb->arg_size() >= 2) {
-        int flag = 0;
-        if (tryReadScalarInt(cb->getArgOperand(1), flag, op.inst)) {
-          test_true = flag != 0;
-        } else {
+    case MPIRequestActionKind::CreatePersistent:
+      for (RequestID request : event.request.requests) {
+        MPIRequestStateSummary &summary = ensureSummary(request, op, true);
+        recordTransition(summary, MPIRequestActionKind::CreatePersistent,
+                         MPIRequestState::Created, op.inst);
+      }
+      break;
+    case MPIRequestActionKind::ActivatePersistent:
+      for (RequestID request : event.request.requests) {
+        MPIRequestStateSummary &summary = ensureSummary(request, op, true);
+        summary.activation_inst = op.inst;
+        recordTransition(summary, MPIRequestActionKind::ActivatePersistent,
+                         MPIRequestState::Active, op.inst);
+      }
+      break;
+    case MPIRequestActionKind::Free:
+      for (RequestID request : event.request.requests) {
+        MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+        recordTransition(summary, MPIRequestActionKind::Free,
+                         MPIRequestState::Freed, op.inst);
+      }
+      break;
+    case MPIRequestActionKind::Cancel:
+      for (RequestID request : event.request.requests) {
+        MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+        recordTransition(summary, MPIRequestActionKind::Cancel,
+                         MPIRequestState::Terminal, op.inst);
+      }
+      break;
+    case MPIRequestActionKind::CompleteMust:
+      for (RequestID request : event.request.requests) {
+        MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+        recordTransition(summary, MPIRequestActionKind::CompleteMust,
+                         MPIRequestState::MustComplete, op.inst);
+      }
+      break;
+    case MPIRequestActionKind::Observe:
+      switch (op.td_type) {
+      case ThreadAPI::TD_MPI_TEST:
+        if (!event.request.completion_flag_known) {
           deferred_lowering_stats_["unknown_flag_value"]++;
           deferred_lowering_stats_["test_unknown_flag"]++;
-          flag_unknown = true;
+          markAllMayComplete(event, op);
+          break;
         }
-      } else {
-        deferred_lowering_stats_["unknown_flag_value"]++;
-        deferred_lowering_stats_["test_unknown_flag"]++;
-        flag_unknown = true;
-      }
-      if (test_true) {
-        markCompleted(requests.front(), MPIRequestState::MustComplete);
-      } else if (flag_unknown) {
-        markCompleted(requests.front(), MPIRequestState::MayComplete);
-      }
-      break;
-    }
-    case ThreadAPI::TD_MPI_WAITALL:
-      for (RequestID request : requests) {
-        markCompleted(request, RequestCompletionState::MustComplete);
-      }
-      break;
-    case ThreadAPI::TD_MPI_TESTALL: {
-      bool testall_true = false;
-      bool flag_unknown = false;
-      if (cb && cb->arg_size() >= 3) {
-        int flag = 0;
-        if (tryReadScalarInt(cb->getArgOperand(2), flag, op.inst)) {
-          testall_true = flag != 0;
-        } else {
+        if (event.request.completion_flag) {
+          RequestID request = event.request.requests.front();
+          MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+          recordTransition(summary, MPIRequestActionKind::CompleteMust,
+                           MPIRequestState::MustComplete, op.inst);
+        }
+        break;
+      case ThreadAPI::TD_MPI_TESTALL:
+        if (!event.request.completion_flag_known) {
           deferred_lowering_stats_["testall_unknown_flag"]++;
-          flag_unknown = true;
+          markAllMayComplete(event, op);
+          break;
         }
-      } else {
-        deferred_lowering_stats_["testall_unknown_flag"]++;
-        flag_unknown = true;
-      }
-      if (testall_true) {
-        for (RequestID request : requests) {
-          markCompleted(request, MPIRequestState::MustComplete);
+        if (event.request.completion_flag) {
+          for (RequestID request : event.request.requests) {
+            MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+            recordTransition(summary, MPIRequestActionKind::CompleteMust,
+                             MPIRequestState::MustComplete, op.inst);
+          }
         }
-      } else if (flag_unknown) {
-        markAllMayComplete(requests);
-      }
-      break;
-    }
-    case ThreadAPI::TD_MPI_WAITANY: {
-      int selected = -1;
-      if (cb && cb->arg_size() >= 3) {
-        if (!tryReadScalarInt(cb->getArgOperand(2), selected, op.inst)) {
+        break;
+      case ThreadAPI::TD_MPI_WAITANY:
+        if (event.request.completed_indices.empty()) {
           deferred_lowering_stats_["waitany_unknown_index"]++;
+          markAllMayComplete(event, op);
+          break;
         }
-      } else {
-        deferred_lowering_stats_["waitany_unknown_index"]++;
-      }
-      if (selected >= 0 && static_cast<size_t>(selected) < requests.size()) {
-        markCompleted(requests[static_cast<size_t>(selected)],
-                      MPIRequestState::MustComplete);
-      } else {
-        markAllMayComplete(requests);
-      }
-      break;
-    }
-    case ThreadAPI::TD_MPI_TESTANY: {
-      bool testany_true = false;
-      int selected = -1;
-      bool selected_known = false;
-      if (cb && cb->arg_size() >= 4) {
-        int flag = 0;
-        if (tryReadScalarInt(cb->getArgOperand(3), flag, op.inst)) {
-          testany_true = flag != 0;
-        } else {
+        if (event.request.completed_indices.front() >= 0 &&
+            static_cast<size_t>(event.request.completed_indices.front()) <
+                event.request.requests.size()) {
+          RequestID request = event.request.requests[static_cast<size_t>(
+              event.request.completed_indices.front())];
+          MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+          recordTransition(summary, MPIRequestActionKind::CompleteMust,
+                           MPIRequestState::MustComplete, op.inst);
+        }
+        break;
+      case ThreadAPI::TD_MPI_TESTANY:
+        if (!event.request.completion_flag_known) {
           deferred_lowering_stats_["unknown_flag_value"]++;
           deferred_lowering_stats_["testany_unknown_flag"]++;
         }
-        if (tryReadScalarInt(cb->getArgOperand(2), selected, op.inst)) {
-          selected_known = true;
-        } else {
-          deferred_lowering_stats_["unknown_completed_index_set"]++;
-          deferred_lowering_stats_["testany_unknown_index"]++;
+        if (event.request.completion_flag &&
+            !event.request.completed_indices.empty() &&
+            event.request.completed_indices.front() >= 0 &&
+            static_cast<size_t>(event.request.completed_indices.front()) <
+                event.request.requests.size()) {
+          RequestID request = event.request.requests[static_cast<size_t>(
+              event.request.completed_indices.front())];
+          MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+          recordTransition(summary, MPIRequestActionKind::CompleteMust,
+                           MPIRequestState::MustComplete, op.inst);
+        } else if (event.request.completion_flag ||
+                   !event.request.completion_flag_known) {
+          if (event.request.completed_indices.empty()) {
+            deferred_lowering_stats_["unknown_completed_index_set"]++;
+            deferred_lowering_stats_["testany_unknown_index"]++;
+          }
+          markAllMayComplete(event, op);
         }
-      } else {
-        deferred_lowering_stats_["unknown_flag_value"]++;
-        deferred_lowering_stats_["testany_unknown_flag"]++;
-      }
-      if (testany_true && selected_known && selected >= 0 &&
-          static_cast<size_t>(selected) < requests.size()) {
-        markCompleted(requests[static_cast<size_t>(selected)],
-                      MPIRequestState::MustComplete);
-      } else if (testany_true) {
-        markAllMayComplete(requests);
-      }
-      break;
-    }
-    case ThreadAPI::TD_MPI_WAITSOME: {
-      std::vector<int> completed_indices;
-      if (cb && cb->arg_size() >= 4) {
-        completed_indices = collectCompletedRequestIndices(
-            cb->getArgOperand(3), requests.size(), op.inst);
-      }
-      if (completed_indices.empty()) {
-        deferred_lowering_stats_["waitsome_unknown_indices"]++;
-        markAllMayComplete(requests);
         break;
-      }
-      for (int index : completed_indices) {
-        if (index < 0 || static_cast<size_t>(index) >= requests.size()) {
-          continue;
+      case ThreadAPI::TD_MPI_WAITSOME:
+        if (event.request.completed_indices.empty()) {
+          deferred_lowering_stats_["waitsome_unknown_indices"]++;
+          markAllMayComplete(event, op);
+          break;
         }
-        markCompleted(requests[static_cast<size_t>(index)],
-                      MPIRequestState::MustComplete);
-      }
-      break;
-    }
-    case ThreadAPI::TD_MPI_TESTSOME: {
-      int outcount = 0;
-      bool has_positive_outcount = false;
-      bool outcount_unknown = false;
-      if (cb && cb->arg_size() >= 3) {
-        if (tryReadScalarInt(cb->getArgOperand(2), outcount, op.inst)) {
-          has_positive_outcount = outcount > 0;
-        } else {
+        for (int index : event.request.completed_indices) {
+          if (index < 0 ||
+              static_cast<size_t>(index) >= event.request.requests.size()) {
+            continue;
+          }
+          RequestID request =
+              event.request.requests[static_cast<size_t>(index)];
+          MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+          recordTransition(summary, MPIRequestActionKind::CompleteMust,
+                           MPIRequestState::MustComplete, op.inst);
+        }
+        break;
+      case ThreadAPI::TD_MPI_TESTSOME:
+        if (!event.request.outcount_known) {
           deferred_lowering_stats_["testsome_unknown_outcount"]++;
-          outcount_unknown = true;
+          markAllMayComplete(event, op);
+          break;
         }
-      } else {
-        deferred_lowering_stats_["testsome_unknown_outcount"]++;
-        outcount_unknown = true;
-      }
-      if (!has_positive_outcount) {
-        if (outcount_unknown) {
-          markAllMayComplete(requests);
+        if (event.request.outcount <= 0) {
+          break;
+        }
+        if (event.request.completed_indices.empty()) {
+          deferred_lowering_stats_["testsome_unknown_indices"]++;
+          markAllMayComplete(event, op);
+          break;
+        }
+        for (int index : event.request.completed_indices) {
+          if (index < 0 ||
+              static_cast<size_t>(index) >= event.request.requests.size()) {
+            continue;
+          }
+          RequestID request =
+              event.request.requests[static_cast<size_t>(index)];
+          MPIRequestStateSummary &summary = ensureSummary(request, op, false);
+          recordTransition(summary, MPIRequestActionKind::CompleteMust,
+                           MPIRequestState::MustComplete, op.inst);
         }
         break;
+      default:
+        break;
       }
+      break;
+    case MPIRequestActionKind::None:
+    case MPIRequestActionKind::CompleteMay:
+      break;
+    }
+  }
 
-      std::vector<int> completed_indices;
-      if (cb && cb->arg_size() >= 4) {
-        completed_indices = collectCompletedRequestIndices(
-            cb->getArgOperand(3), requests.size(), op.inst);
-      }
-      if (completed_indices.empty()) {
-        deferred_lowering_stats_["testsome_unknown_indices"]++;
-        markAllMayComplete(requests);
-        break;
-      }
-      for (int index : completed_indices) {
-        if (index < 0 || static_cast<size_t>(index) >= requests.size()) {
-          continue;
-        }
-        markCompleted(requests[static_cast<size_t>(index)],
-                      MPIRequestState::MustComplete);
-      }
-      break;
-    }
-    default:
-      break;
-    }
+  for (const auto &entry : request_state_summaries_) {
+    const MPIRequestStateSummary &summary = entry.second;
+    NonBlockingOp op;
+    op.issue_inst =
+        summary.activation_inst ? summary.activation_inst : summary.origin_inst;
+    op.request = summary.request;
+    op.completion_state = summary.state;
+    op.wait_inst = summary.last_transition_inst;
+    op.peer_rank = summary.peer_rank;
+    op.tag = summary.tag;
+    op.comm = summary.communicator;
+    non_blocking_ops_[summary.request] = op;
   }
 
   for (MPIOperation &issued_op : all_operations_) {
     if (!issued_op.request) {
       continue;
     }
-    auto it = non_blocking_ops_.find(issued_op.request);
-    if (it == non_blocking_ops_.end()) {
+    auto it = request_state_summaries_.find(issued_op.request);
+    if (it == request_state_summaries_.end()) {
       continue;
     }
-    issued_op.request_state = it->second.completion_state;
-    issued_op.completion_inst = it->second.wait_inst;
+    issued_op.request_state = it->second.state;
+    issued_op.completion_inst = it->second.last_transition_inst;
   }
 }
 
@@ -2133,11 +2409,14 @@ std::vector<const Instruction *> MPIProcessModel::findRankOutOfBounds() const {
 std::vector<RequestID> MPIProcessModel::findPersistentRequestLeaks() const {
   std::vector<RequestID> leaks;
 
-  for (const auto &pair : persistent_request_templates_) {
-    const NonBlockingOp &persistent_op = pair.second;
-    if (persistent_op.completion_state == MPIRequestState::Pending ||
-        persistent_op.completion_state == MPIRequestState::Created ||
-        persistent_op.completion_state == MPIRequestState::Active) {
+  for (const auto &pair : request_state_summaries_) {
+    const MPIRequestStateSummary &summary = pair.second;
+    if (!summary.is_persistent) {
+      continue;
+    }
+    if (summary.state == MPIRequestState::Pending ||
+        summary.state == MPIRequestState::Created ||
+        summary.state == MPIRequestState::Active) {
       leaks.push_back(pair.first);
     }
   }
@@ -2419,24 +2698,21 @@ std::vector<const Instruction *> MPIProcessModel::findDestroyNullComm() const {
 std::vector<const Instruction *>
 MPIProcessModel::findRequestFreeAfterWait() const {
   std::vector<const Instruction *> issues;
-  std::set<RequestID> completed_requests;
-
-  for (const MPIOperation &op : all_operations_) {
-    if (!op.request) {
-      continue;
+  for (const auto &entry : request_state_summaries_) {
+    const MPIRequestStateSummary &summary = entry.second;
+    const Instruction *free_inst = nullptr;
+    bool observed_completion_before_free = false;
+    for (const MPIRequestTransition &transition : summary.history) {
+      if (transition.action == MPIRequestActionKind::Free) {
+        free_inst = transition.inst;
+        break;
+      }
+      if (transition.action == MPIRequestActionKind::CompleteMust) {
+        observed_completion_before_free = true;
+      }
     }
-
-    if ((op.kind == MPIOpKind::WAIT || op.kind == MPIOpKind::TEST ||
-         op.kind == MPIOpKind::REQUEST_MANAGEMENT) &&
-        (op.request_state == RequestCompletionState::MustComplete ||
-         op.request_state == RequestCompletionState::Terminal ||
-         op.request_state == RequestCompletionState::Freed)) {
-      completed_requests.insert(op.request);
-    }
-
-    if (op.td_type == ThreadAPI::TD_MPI_REQUEST_FREE &&
-        completed_requests.count(op.request)) {
-      issues.push_back(op.inst);
+    if (observed_completion_before_free && free_inst) {
+      issues.push_back(free_inst);
     }
   }
 

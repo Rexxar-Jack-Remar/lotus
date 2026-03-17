@@ -38,6 +38,45 @@ bool isLockAllOperation(const MPIOperation &op) {
   return op.td_type == ThreadAPI::TD_MPI_WIN_LOCK && op.target_rank < 0;
 }
 
+MPIRMASyncModel toSemanticSyncModel(MPIRMAAnalysis::SyncModel model) {
+  switch (model) {
+  case MPIRMAAnalysis::SyncModel::FENCE:
+    return MPIRMASyncModel::Fence;
+  case MPIRMAAnalysis::SyncModel::LOCK_UNLOCK:
+    return MPIRMASyncModel::LockUnlock;
+  case MPIRMAAnalysis::SyncModel::PSCW:
+    return MPIRMASyncModel::PSCW;
+  case MPIRMAAnalysis::SyncModel::NONE:
+    return MPIRMASyncModel::None;
+  }
+  return MPIRMASyncModel::None;
+}
+
+MPIRMAEpochCompletionKind
+toSemanticEpochCompletion(MPIRMAAnalysis::EpochCompletion completion) {
+  switch (completion) {
+  case MPIRMAAnalysis::EpochCompletion::None:
+    return MPIRMAEpochCompletionKind::None;
+  case MPIRMAAnalysis::EpochCompletion::LocalOnly:
+    return MPIRMAEpochCompletionKind::LocalOnly;
+  case MPIRMAAnalysis::EpochCompletion::RemoteGuaranteed:
+    return MPIRMAEpochCompletionKind::RemoteGuaranteed;
+  }
+  return MPIRMAEpochCompletionKind::None;
+}
+
+MPIRMAEpochProofKind toSemanticEpochProof(MPIRMAAnalysis::EpochProof proof) {
+  switch (proof) {
+  case MPIRMAAnalysis::EpochProof::Must:
+    return MPIRMAEpochProofKind::Must;
+  case MPIRMAAnalysis::EpochProof::May:
+    return MPIRMAEpochProofKind::May;
+  case MPIRMAAnalysis::EpochProof::Unknown:
+    return MPIRMAEpochProofKind::Unknown;
+  }
+  return MPIRMAEpochProofKind::Unknown;
+}
+
 } // namespace
 
 void MPIRMAAnalysis::annotateOperationsInMachine(
@@ -306,6 +345,36 @@ void MPIRMAAnalysis::analyzeRMA() {
         }
         machine = EpochMachine{};
       }
+    }
+  }
+
+  for (MPIEvent &event : process_model_.getMutableSemanticEvents()) {
+    if (!event.has_rma_semantics) {
+      continue;
+    }
+    const MPIOperation &op =
+        process_model_.getAllOperations()[event.operation_index];
+    event.relation = op.semantic_relation;
+    if (op.kind == MPIOpKind::RMA_SYNC) {
+      event.rma.is_sync_operation = true;
+    }
+    for (const RMAOperation &rma_op : rma_operations_) {
+      if (rma_op.inst != event.inst) {
+        continue;
+      }
+      event.rma.sync_model = toSemanticSyncModel(rma_op.sync_model);
+      event.rma.epoch_id = rma_op.epoch_id;
+      event.rma.lock_all = rma_op.lock_all;
+      event.rma.flush_completed = rma_op.flush_completed;
+      event.rma.local_completion_only = rma_op.local_completion_only;
+      event.rma.exposure_epoch_observed = rma_op.exposure_epoch_observed;
+      event.rma.epoch_completion =
+          toSemanticEpochCompletion(rma_op.epoch_completion);
+      event.rma.epoch_proof = toSemanticEpochProof(rma_op.epoch_proof);
+      event.rma.sync_start = rma_op.sync_start;
+      event.rma.sync_end = rma_op.sync_end;
+      event.relation = rma_op.relation;
+      break;
     }
   }
 }

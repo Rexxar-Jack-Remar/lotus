@@ -22,6 +22,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/CommandLine.h"
+
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -140,11 +141,12 @@ void initGraph(string input, vs &vertex, vps &edges, si &ST, si &revST, mss &in,
 /// \param debug Flag for the debug messages.
 /// \return The weights of the edges, initialized at 0, or at the total value
 /// given in the input file.
-vi initWeights(string input, vpi &prof, int edgeCount, int instCount, bool debug) {
+vi initWeights(string input, vpi &prof, int edgeCount, int instCount,
+               bool debug) {
   vi weights(edgeCount, 0);
-  for (const auto& pair : prof) {
-    const auto& edge = pair.first;
-    const auto& weight = pair.second;
+  for (const auto &pair : prof) {
+    const auto &edge = pair.first;
+    const auto &weight = pair.second;
     weights[edge] = weight;
   }
 
@@ -152,7 +154,7 @@ vi initWeights(string input, vpi &prof, int edgeCount, int instCount, bool debug
     for (auto i : weights) {
       cout << i << " ";
     }
-    cout << endl;
+    cout << '\n';
   }
 
   return weights;
@@ -196,8 +198,8 @@ void propagation(vps &edges, si &ST, mss &in, mss &out, vi &weights, string v,
 void outputCout(vps &edges, vi &weights) {
   int size = edges.size();
   for (int i = 0; i < size; i++) {
-    cout << edges[i].first << " -> " << edges[i].second << " : "
-         << weights[i] << '\n';
+    cout << edges[i].first << " -> " << edges[i].second << " : " << weights[i]
+         << '\n';
   }
   cout << '\n';
 }
@@ -208,38 +210,38 @@ void outputCout(vps &edges, vi &weights) {
 /// \param weights The edge's weights.
 void outputFile(string filename, vps &edges, vi &weights) {
   ofstream file, bbFile;
-  file.open(filename+".edges", ios::out | ios::app);
+  file.open(filename + ".edges", ios::out | ios::app);
 
   if (file.bad()) {
-    cout << "Could not open file " << filename+".edges" << '\n';
+    cout << "Could not open file " << filename + ".edges" << '\n';
     outputCout(edges, weights);
   }
 
   int size = edges.size();
   for (int i = 0; i < size; i++) {
-    file << edges[i].first << " -> " << edges[i].second << " : "
-         << weights[i] << '\n';
+    file << edges[i].first << " -> " << edges[i].second << " : " << weights[i]
+         << '\n';
   }
 
   file << '\n';
   file.close();
 
-  bbFile.open(filename+".bb", ios::out | ios::app);
+  bbFile.open(filename + ".bb", ios::out | ios::app);
 
   if (bbFile.bad()) {
-    cout << "Could not open file " << filename+".bb" << '\n';
+    cout << "Could not open file " << filename + ".bb" << '\n';
     outputCout(edges, weights);
   }
 
-  map<string,ll> bbFrequency;
+  map<string, ll> bbFrequency;
   for (int i = 0; i < size; i++) {
     // if (edges[i].first == "0") bbFrequency["0"] += weights[i];
     bbFrequency[edges[i].second] += weights[i];
   }
 
-  for (const auto& pair : bbFrequency) {
-    const auto& bb = pair.first;
-    const auto& freq = pair.second;
+  for (const auto &pair : bbFrequency) {
+    const auto &bb = pair.first;
+    const auto &freq = pair.second;
     bbFile << bb << " : " << freq << '\n';
   }
 
@@ -255,11 +257,11 @@ void outputFile(string filename, vps &edges, vi &weights) {
 /// \return 0
 int main(int argc, char **argv) {
   cl::opt<string> InfoFilename(cl::Positional, cl::desc("<info file>"),
-                                cl::Required);
+                               cl::Required);
   cl::opt<string> ProfFilename(cl::Positional, cl::desc("<prof file>"),
-                                cl::Required);
+                               cl::Required);
   cl::opt<string> OutputExtension("o", cl::desc("Specify output extension"),
-                                 cl::value_desc("extension"));
+                                  cl::value_desc("extension"));
   cl::opt<bool> Debug("d", cl::desc("Enable debug messages"));
   cl::opt<bool> Separate(
       "s", cl::desc("Do separate profilings for each function execution"));
@@ -268,7 +270,7 @@ int main(int argc, char **argv) {
   vector<string> functions;
   map<string, int> functionSizes;
   map<string, vpi> functionProfiles;
-  
+
   {
     ifstream info_file;
     info_file.open(InfoFilename);
@@ -280,7 +282,6 @@ int main(int argc, char **argv) {
     }
     info_file.close();
   }
-
 
   {
     ifstream prof_file;
@@ -316,7 +317,8 @@ int main(int argc, char **argv) {
       cout << "\nComputing the input weights\n\n";
     }
 
-    weights.push_back(initWeights(function_name, prof, edges.size(), revST.size(), Debug));
+    weights.push_back(
+        initWeights(function_name, prof, edges.size(), revST.size(), Debug));
 
     if (Debug) {
       cout << "\nPropagating the weights\n\n";
@@ -327,7 +329,8 @@ int main(int argc, char **argv) {
 
       if (OutputExtension.size() > 0) {
         if (to_print) {
-          cout << "Writing '" << function_name << OutputExtension << "'... and\n";
+          cout << "Writing '" << function_name << OutputExtension
+               << "'... and\n";
           to_print = false;
         }
         outputFile(function_name + OutputExtension, edges, w);
@@ -340,7 +343,6 @@ int main(int argc, char **argv) {
       }
     }
   }
-
 
   return 0;
 }

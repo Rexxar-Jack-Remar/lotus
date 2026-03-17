@@ -20,6 +20,7 @@ set(Concurrency_SOURCES
   MPI/MPIAnalysis.cpp
   MPI/MPISemantics.cpp
   MPI/MPIProcessModel.cpp
+  MPI/MPIProtocolAutomaton.cpp
   MPI/MPICollectiveAnalysis.cpp
   MPI/MPIRMAAnalysis.cpp
   MPI/MPIRankAnalysis.cpp

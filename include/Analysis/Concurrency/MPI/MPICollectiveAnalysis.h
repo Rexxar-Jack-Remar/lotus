@@ -14,6 +14,7 @@
 #define MPI_COLLECTIVE_ANALYSIS_H
 
 #include "Analysis/Concurrency/MPI/MPIProcessModel.h"
+#include "Analysis/Concurrency/MPI/MPIProtocolAutomaton.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include <map>
@@ -29,28 +30,6 @@ class MPIProcessModel;
 
 class MPICollectiveAnalysis {
 public:
-  struct CollectiveStateKey {
-    size_t communicator_class_id = 0;
-    size_t communicator_subgroup_id = 0;
-    size_t collective_protocol_class_id = 0;
-
-    bool operator<(const CollectiveStateKey &other) const {
-      if (communicator_class_id != other.communicator_class_id) {
-        return communicator_class_id < other.communicator_class_id;
-      }
-      if (communicator_subgroup_id != other.communicator_subgroup_id) {
-        return communicator_subgroup_id < other.communicator_subgroup_id;
-      }
-      return collective_protocol_class_id < other.collective_protocol_class_id;
-    }
-  };
-
-  struct CollectiveProtocolState {
-    size_t next_slot = 0;
-    ThreadAPI::TD_TYPE expected_type = ThreadAPI::TD_DUMMY;
-    bool has_expected_type = false;
-  };
-
   struct CollectiveCall {
     const llvm::Instruction *inst;
     ThreadAPI::TD_TYPE type;
@@ -73,7 +52,7 @@ public:
     bool in_place = false;
   };
 
-  explicit MPICollectiveAnalysis(const MPIProcessModel &model)
+  explicit MPICollectiveAnalysis(MPIProcessModel &model)
       : process_model_(model) {}
 
   void analyzeCollectives();
@@ -88,15 +67,19 @@ public:
   getProtocolDiagnostics() const {
     return protocol_diagnostics_;
   }
+  const std::map<CollectiveStateKey, MPIProtocolInstance> &
+  getProtocolAutomata() const {
+    return protocol_automaton_.instances();
+  }
   const std::vector<CollectiveCall> &getProtocolRelations() const {
     return collective_calls_;
   }
   size_t getProtocolRelationCount(concurrency::RelationKind kind) const;
 
 private:
-  const MPIProcessModel &process_model_;
+  MPIProcessModel &process_model_;
   std::vector<CollectiveCall> collective_calls_;
-  std::map<CollectiveStateKey, CollectiveProtocolState> protocol_states_;
+  MPIProtocolAutomaton protocol_automaton_;
   mutable std::unordered_map<std::string, size_t> protocol_diagnostics_;
 
   bool areCollectivesCompatible(const CollectiveCall &c1,

@@ -21,10 +21,11 @@
 /// related to the Nisse plugin.
 //===----------------------------------------------------------------------===//
 //
-#include "Transform/Nisse/Nisse.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Transforms/Utils/BreakCriticalEdges.h"
+
+#include "Transform/Nisse/Nisse.h"
 
 using namespace llvm;
 
@@ -45,11 +46,11 @@ bool registerPipeline(StringRef Name, ModulePassManager &MPM,
                       ArrayRef<PassBuilder::PipelineElement>) {
 
   if (Name == "nisse") {
-    //FunctionPassManager FPM;
-    //FPM.addPass(LoopSimplifyPass());
-    //FPM.addPass(BreakCriticalEdgesPass());
+    // FunctionPassManager FPM;
+    // FPM.addPass(LoopSimplifyPass());
+    // FPM.addPass(BreakCriticalEdgesPass());
 
-    //MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
+    // MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
     MPM.addPass(nisse::NissePass());
     return true;
   }

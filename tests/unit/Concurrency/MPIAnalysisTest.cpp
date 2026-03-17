@@ -76,7 +76,7 @@ TEST_F(MPIAnalysisTest, RankIncompatiblePointToPointDoesNotMatch) {
 
     define i32 @main(i8* %comm) {
     entry:
-      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm)
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 0, i32 7, i8* %comm)
       call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 2, i32 7, i8* %comm, i8* null)
       ret i32 0
     }
@@ -304,6 +304,131 @@ TEST_F(MPIAnalysisTest, RequestFreeTerminatesOutstandingRequest) {
   EXPECT_TRUE(analysis.getResults().orphaned_requests.empty());
 }
 
+TEST_F(MPIAnalysisTest, SemanticEventsCaptureCollectiveAndRequestSemantics) {
+  const char *source = R"(
+    declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Wait(i8*, i8*)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req)
+      call i32 @MPI_Wait(i8* %req, i8* null)
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_request_issue = false;
+  bool saw_request_completion = false;
+  bool saw_collective = false;
+  for (const auto &event : analysis.getProcessModel().getSemanticEvents()) {
+    if (event.request.action == MPIRequestActionKind::IssueNonBlocking) {
+      saw_request_issue = true;
+    }
+    if (event.request.action == MPIRequestActionKind::CompleteMust) {
+      saw_request_completion = true;
+    }
+    if (event.has_collective_semantics &&
+        event.collective.type == ThreadAPI::TD_MPI_BCAST &&
+        event.collective.count == 1 && event.collective.root_rank == 0) {
+      saw_collective = true;
+    }
+  }
+
+  EXPECT_TRUE(saw_request_issue);
+  EXPECT_TRUE(saw_request_completion);
+  EXPECT_TRUE(saw_collective);
+}
+
+TEST_F(MPIAnalysisTest, SemanticEventsCapturePointToPointObligations) {
+  const char *source = R"(
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 0, i32 7, i8* %comm)
+      call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 0, i32 7, i8* %comm, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_send_event = false;
+  bool saw_recv_event = false;
+  for (const auto &event : analysis.getProcessModel().getSemanticEvents()) {
+    if (!event.has_point_to_point_semantics) {
+      continue;
+    }
+    saw_send_event = saw_send_event || event.point_to_point.is_send;
+    saw_recv_event = saw_recv_event || event.point_to_point.is_recv;
+  }
+
+  const auto &obligations =
+      analysis.getProcessModel().getPointToPointObligations();
+  ASSERT_EQ(obligations.size(), 1u);
+  EXPECT_TRUE(saw_send_event);
+  EXPECT_TRUE(saw_recv_event);
+  EXPECT_EQ(obligations.front().proof, MPIMatchProofKind::MustMatch);
+  EXPECT_EQ(obligations.front().relation.proof,
+            concurrency::ProofStrength::Must);
+}
+
+TEST_F(MPIAnalysisTest, SemanticEventsCaptureRMAEpochFacts) {
+  const char *source = R"(
+    declare i32 @MPI_Win_create(i8*, i32, i32, i8*, i8*)
+    declare i32 @MPI_Win_lock(i32, i32, i32, i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Win_flush(i32, i8*)
+    declare i32 @MPI_Win_unlock(i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %win = alloca i8, align 1
+      call i32 @MPI_Win_create(i8* null, i32 8, i32 4, i8* %comm, i8* %win)
+      call i32 @MPI_Win_lock(i32 0, i32 1, i32 0, i8* %win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i8* %win)
+      call i32 @MPI_Win_flush(i32 1, i8* %win)
+      call i32 @MPI_Win_unlock(i32 1, i8* %win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_epoch = false;
+  bool saw_flush_completion = false;
+  for (const auto &event : analysis.getProcessModel().getSemanticEvents()) {
+    if (!event.has_rma_semantics || !event.rma.is_data_operation) {
+      continue;
+    }
+    saw_epoch = event.rma.epoch_id != 0 &&
+                event.rma.sync_model == MPIRMASyncModel::LockUnlock;
+    saw_flush_completion = event.rma.epoch_completion ==
+                           MPIRMAEpochCompletionKind::RemoteGuaranteed;
+  }
+
+  EXPECT_TRUE(saw_epoch);
+  EXPECT_TRUE(saw_flush_completion);
+}
+
 TEST_F(MPIAnalysisTest, StartedPersistentRequestWithoutCompletionIsOrphaned) {
   const char *source = R"(
     declare i32 @MPI_Send_init(i8*, i32, i32, i32, i32, i8*, i8*)
@@ -352,6 +477,43 @@ TEST_F(MPIAnalysisTest, StartedPersistentRequestCompletesThroughWait) {
   analysis.runAnalysis();
 
   EXPECT_TRUE(analysis.getResults().orphaned_requests.empty());
+}
+
+TEST_F(MPIAnalysisTest, RequestStateDomainTracksPersistentLifecycleHistory) {
+  const char *source = R"(
+    declare i32 @MPI_Send_init(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Start(i8*)
+    declare i32 @MPI_Wait(i8*, i8*)
+    declare i32 @MPI_Request_free(i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Send_init(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req)
+      call i32 @MPI_Start(i8* %req)
+      call i32 @MPI_Wait(i8* %req, i8* null)
+      call i32 @MPI_Request_free(i8* %req)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &summaries = analysis.getProcessModel().getRequestStateSummaries();
+  ASSERT_EQ(summaries.size(), 1u);
+  const auto &summary = summaries.begin()->second;
+  EXPECT_TRUE(summary.is_persistent);
+  EXPECT_EQ(summary.state, MPIRequestState::Freed);
+  ASSERT_EQ(summary.history.size(), 4u);
+  EXPECT_EQ(summary.history[0].action, MPIRequestActionKind::CreatePersistent);
+  EXPECT_EQ(summary.history[1].action,
+            MPIRequestActionKind::ActivatePersistent);
+  EXPECT_EQ(summary.history[2].action, MPIRequestActionKind::CompleteMust);
+  EXPECT_EQ(summary.history[3].action, MPIRequestActionKind::Free);
 }
 
 TEST_F(MPIAnalysisTest, StartallActivatesPersistentRequestArrays) {
@@ -814,6 +976,48 @@ TEST_F(MPIAnalysisTest, CollectiveMatchingUsesPerCommunicatorSequenceSlots) {
   analysis.runAnalysis();
 
   EXPECT_EQ(analysis.getResults().mismatched_collectives.size(), 1u);
+}
+
+TEST_F(MPIAnalysisTest, CollectiveProtocolAutomatonTracksParticipantSlots) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+    declare i32 @MPI_Gather(i8*, i32, i32, i8*, i32, i32, i32, i8*)
+    declare i32 @MPI_Reduce(i8*, i8*, i32, i32, i32, i32, i8*)
+
+    define i32 @rank0(i8* %comm) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      call i32 @MPI_Gather(i8* null, i32 1, i32 0, i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+
+    define i32 @rank1(i8* %comm) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      call i32 @MPI_Reduce(i8* null, i8* null, i32 1, i32 0, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %a = call i32 @rank0(i8* %comm)
+      %b = call i32 @rank1(i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &automata = analysis.getCollectiveAnalysis().getProtocolAutomata();
+  ASSERT_EQ(automata.size(), 1u);
+  const auto &automaton = automata.begin()->second;
+  EXPECT_EQ(automaton.participant_slots.size(), 2u);
+  EXPECT_EQ(automaton.slots.size(), 2u);
+  EXPECT_EQ(automaton.slots.at(0).expected_type, ThreadAPI::TD_MPI_BCAST);
 }
 
 TEST_F(MPIAnalysisTest, RankGuardedCollectiveIsReportedConditional) {

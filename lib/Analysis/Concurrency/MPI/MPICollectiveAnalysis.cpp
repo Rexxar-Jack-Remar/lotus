@@ -44,6 +44,10 @@ bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) {
   return false;
 }
 
+bool disablesDeterministicMPIOrdering(int provided_level) {
+  return provided_level >= 2;
+}
+
 using ProtocolScopeKey = std::tuple<size_t, size_t, size_t, size_t>;
 
 ProtocolScopeKey
@@ -57,127 +61,96 @@ getProtocolScopeKey(const MPICollectiveAnalysis::CollectiveCall &call) {
 
 void MPICollectiveAnalysis::analyzeCollectives() {
   collective_calls_.clear();
-  this->protocol_states_.clear();
+  protocol_automaton_ = MPIProtocolAutomaton();
   protocol_diagnostics_.clear();
 
-  auto readConstArg = [](const CallBase *cb, int idx, int &out) {
-    if (!cb || idx < 0 || static_cast<unsigned>(idx) >= cb->arg_size()) {
-      return false;
+  for (const MPIEvent &event : process_model_.getSemanticEvents()) {
+    if (!event.has_collective_semantics) {
+      continue;
     }
-    const auto *ci = dyn_cast<ConstantInt>(cb->getArgOperand(idx));
-    if (!ci) {
-      return false;
+
+    const MPIOperation &op =
+        process_model_.getAllOperations()[event.operation_index];
+    CollectiveCall call;
+    call.inst = op.inst;
+    call.type = op.td_type;
+    call.comm = op.communicator;
+    call.communicator_class_id = event.collective.scope.communicator_class_id;
+    call.communicator_subgroup_id =
+        event.collective.scope.communicator_subgroup_id;
+    call.collective_protocol_class_id =
+        event.collective.scope.protocol_class_id;
+    call.function = op.function;
+    call.reachability = event.collective.reachability;
+    call.root_rank = event.collective.root_rank;
+    call.count = event.collective.count;
+    call.recv_count = event.collective.recv_count;
+    call.datatype = event.collective.datatype;
+    call.recv_datatype = event.collective.recv_datatype;
+    call.reduction_op = event.collective.reduction_op;
+    call.in_place = event.collective.in_place;
+
+    CollectiveStateKey state_key;
+    state_key.communicator_class_id = call.communicator_class_id;
+    state_key.communicator_subgroup_id = call.communicator_subgroup_id;
+    state_key.collective_protocol_class_id = call.collective_protocol_class_id;
+
+    size_t slot = protocol_automaton_.allocateSlot(state_key, call.function);
+    MPIProtocolState &slot_state =
+        protocol_automaton_.getOrCreateState(state_key, slot);
+    call.sequence_index = slot;
+    call.protocol_sequence_id = slot;
+    call.protocol_relation.kind = concurrency::RelationKind::SameProtocolSlot;
+    call.protocol_relation.proof =
+        call.reachability == ProtocolReachability::AllRanks
+            ? concurrency::ProofStrength::Must
+            : concurrency::ProofStrength::May;
+    call.protocol_relation.reason = "mpi_collective_protocol_slot";
+
+    if (call.protocol_relation.proof == concurrency::ProofStrength::Must &&
+        process_model_.hasProvidedInitThreadLevel() &&
+        disablesDeterministicMPIOrdering(
+            process_model_.getProvidedInitThreadLevel())) {
+      call.protocol_relation.proof = concurrency::ProofStrength::May;
+      call.protocol_relation.reason =
+          "mpi_collective_protocol_slot_thread_downgrade";
     }
-    out = ci->getSExtValue();
-    return true;
-  };
 
-  for (const MPIOperation &op : process_model_.getAllOperations()) {
-    if (op.kind == MPIOpKind::COLLECTIVE_BLOCKING ||
-        op.kind == MPIOpKind::COLLECTIVE_NONBLOCKING ||
-        op.kind == MPIOpKind::BARRIER_BLOCKING ||
-        op.kind == MPIOpKind::BARRIER_NONBLOCKING) {
-      CollectiveCall call;
-      call.inst = op.inst;
-      call.type = op.td_type;
-      call.comm = op.communicator;
-      call.communicator_class_id = op.communicator_class_id;
-      call.communicator_subgroup_id = op.communicator_subgroup_id;
-      call.collective_protocol_class_id = op.collective_protocol_class_id;
-      call.function = op.function;
-      call.sequence_index = op.protocol_sequence_id;
-      call.protocol_sequence_id = op.protocol_sequence_id;
-      call.reachability = op.protocol_reachability;
-      call.protocol_relation.kind = concurrency::RelationKind::SameProtocolSlot;
-      call.protocol_relation.proof =
-          op.protocol_reachability == ProtocolReachability::AllRanks
-              ? concurrency::ProofStrength::Must
-              : concurrency::ProofStrength::May;
-      call.protocol_relation.reason = "mpi_collective_protocol_automaton_slot";
-      protocol_diagnostics_["collective_slots_tracked"]++;
-      if (op.protocol_reachability != ProtocolReachability::AllRanks) {
-        protocol_diagnostics_["collective_partial_reachability"]++;
-      }
-
-      if (op.td_type == ThreadAPI::TD_MPI_BCAST ||
-          op.td_type == ThreadAPI::TD_MPI_REDUCE ||
-          op.td_type == ThreadAPI::TD_MPI_GATHER ||
-          op.td_type == ThreadAPI::TD_MPI_SCATTER) {
-        const CallBase *CB = dyn_cast<CallBase>(op.inst);
-        int root_arg = getRootArgIndex(op.td_type);
-        if (CB && root_arg >= 0 &&
-            static_cast<unsigned>(root_arg) < CB->arg_size()) {
-          if (const ConstantInt *root =
-                  dyn_cast<ConstantInt>(CB->getArgOperand(root_arg))) {
-            call.root_rank = root->getSExtValue();
-          }
-        }
-      }
-
-      const CallBase *cb = dyn_cast<CallBase>(op.inst);
-      if (cb) {
-        switch (op.td_type) {
-        case ThreadAPI::TD_MPI_BCAST:
-          readConstArg(cb, 1, call.count);
-          readConstArg(cb, 2, call.datatype);
-          break;
-        case ThreadAPI::TD_MPI_REDUCE:
-        case ThreadAPI::TD_MPI_ALLREDUCE:
-          readConstArg(cb, 2, call.count);
-          readConstArg(cb, 3, call.datatype);
-          readConstArg(cb, 4, call.reduction_op);
-          break;
-        case ThreadAPI::TD_MPI_GATHER:
-          readConstArg(cb, 1, call.count);
-          readConstArg(cb, 2, call.datatype);
-          readConstArg(cb, 4, call.recv_count);
-          readConstArg(cb, 5, call.recv_datatype);
-          call.in_place = cb->getArgOperand(0) == cb->getArgOperand(3);
-          break;
-        case ThreadAPI::TD_MPI_SCATTER:
-          readConstArg(cb, 1, call.count);
-          readConstArg(cb, 2, call.datatype);
-          readConstArg(cb, 4, call.recv_count);
-          readConstArg(cb, 5, call.recv_datatype);
-          call.in_place = cb->getArgOperand(0) == cb->getArgOperand(3);
-          break;
-        case ThreadAPI::TD_MPI_ALLGATHER:
-        case ThreadAPI::TD_MPI_ALLTOALL:
-          readConstArg(cb, 1, call.count);
-          readConstArg(cb, 2, call.datatype);
-          readConstArg(cb, 4, call.recv_count);
-          readConstArg(cb, 5, call.recv_datatype);
-          break;
-        case ThreadAPI::TD_MPI_REDUCE_SCATTER:
-        case ThreadAPI::TD_MPI_SCAN:
-          readConstArg(cb, 2, call.datatype);
-          readConstArg(cb, 3, call.reduction_op);
-          break;
-        default:
-          break;
-        }
-      }
-
-      MPICollectiveAnalysis::CollectiveStateKey state_key;
-      state_key.communicator_class_id = call.communicator_class_id;
-      state_key.communicator_subgroup_id = call.communicator_subgroup_id;
-      state_key.collective_protocol_class_id =
-          call.collective_protocol_class_id;
-      MPICollectiveAnalysis::CollectiveProtocolState &state =
-          this->protocol_states_[state_key];
-      if (state.next_slot != call.protocol_sequence_id) {
-        protocol_diagnostics_["collective_automaton_slot_gap"]++;
-      }
-      if (!state.has_expected_type) {
-        state.expected_type = call.type;
-        state.has_expected_type = true;
-      } else if (state.expected_type != call.type) {
-        protocol_diagnostics_["collective_automaton_type_drift"]++;
-      }
-      state.next_slot = call.protocol_sequence_id + 1;
-
-      collective_calls_.push_back(call);
+    protocol_diagnostics_["collective_slots_tracked"]++;
+    if (call.reachability != ProtocolReachability::AllRanks) {
+      protocol_diagnostics_["collective_partial_reachability"]++;
     }
+
+    MPIProtocolTransition transition;
+    transition.slot_id = slot;
+    transition.type = call.type;
+    transition.root_rank = call.root_rank;
+    transition.count = call.count;
+    transition.recv_count = call.recv_count;
+    transition.datatype = call.datatype;
+    transition.recv_datatype = call.recv_datatype;
+    transition.reduction_op = call.reduction_op;
+    transition.in_place = call.in_place;
+
+    if (!slot_state.has_expected_type) {
+      slot_state.has_expected_type = true;
+      slot_state.expected_type = call.type;
+      slot_state.expected_root_rank = call.root_rank;
+      slot_state.expected_count = call.count;
+      slot_state.expected_recv_count = call.recv_count;
+      slot_state.expected_datatype = call.datatype;
+      slot_state.expected_recv_datatype = call.recv_datatype;
+      slot_state.expected_reduction_op = call.reduction_op;
+      slot_state.expected_in_place = call.in_place;
+    } else if (!MPIProtocolAutomaton::isCompatible(slot_state, transition)) {
+      protocol_diagnostics_["collective_automaton_type_drift"]++;
+    }
+
+    MPIOperation &mutable_op =
+        process_model_.getMutableOperations()[event.operation_index];
+    mutable_op.protocol_sequence_id = slot;
+    mutable_op.semantic_relation = call.protocol_relation;
+    collective_calls_.push_back(call);
   }
 }
 
