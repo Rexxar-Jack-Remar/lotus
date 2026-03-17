@@ -16,3 +16,5 @@ add_library(CanaryTransform STATIC
         SimplifyInsertValue.cpp
         CastElimPass.cpp
 )
+
+add_subdirectory(Nisse)
