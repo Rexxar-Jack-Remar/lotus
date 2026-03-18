@@ -5,7 +5,7 @@
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
+#include "Analysis/Concurrency/OpenMP/OpenMPSemantics.h"
 
 #include <set>
 
@@ -161,13 +161,18 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
   }
 
-  // 2. OpenMP task dependency ordering from explicit task graph edges.
+  // 2. OpenMP task dependency ordering from normalized OpenMP semantics.
   size_t omp_task_dependency_edges = 0;
   size_t omp_task_exclusion_relations = 0;
   size_t omp_task_unknown_relations = 0;
-  OpenMP::OpenMPTaskGraph task_graph(m_module);
-  task_graph.analyze();
-  for (const auto &entry : task_graph.getRelations()) {
+  std::unique_ptr<OpenMP::OpenMPSemantics> owned_semantics;
+  const OpenMP::OpenMPSemantics *semantics = m_mhp.getOpenMPSemantics();
+  if (!semantics) {
+    owned_semantics = std::make_unique<OpenMP::OpenMPSemantics>(m_module);
+    owned_semantics->analyze();
+    semantics = owned_semantics.get();
+  }
+  for (const auto &entry : semantics->getRelations()) {
     const OpenMP::Task *lhs = entry.first.first;
     const OpenMP::Task *rhs = entry.first.second;
     const concurrency::Relation &relation = entry.second;
@@ -210,7 +215,11 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       omp_task_exclusion_relations;
   m_deferred_sync_counts["omp_task_unknown_relations"] =
       omp_task_unknown_relations;
-  for (const auto &entry : task_graph.getDeferredReasonCounts()) {
+  m_deferred_sync_counts["omp_semantic_entities"] =
+      semantics->getSemanticEntities().size();
+  m_deferred_sync_counts["omp_semantic_events"] =
+      semantics->getSemanticEvents().size();
+  for (const auto &entry : semantics->getDeferredReasonCounts()) {
     m_deferred_sync_counts[entry.first] += entry.second;
   }
 

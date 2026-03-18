@@ -14,6 +14,7 @@
 
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -242,28 +243,50 @@ void MPIRMAAnalysis::analyzeRMA() {
   use_after_free_windows_.clear();
   double_window_free_.clear();
 
+  std::unordered_map<const Instruction *, size_t> instruction_position;
+  size_t next_position = 0;
   for (const MPIOperation &op : process_model_.getAllOperations()) {
-    if (op.td_type == ThreadAPI::TD_MPI_WIN_CREATE) {
+    if (!op.inst) {
+      continue;
+    }
+    instruction_position.emplace(op.inst, next_position++);
+  }
+
+  auto happensAfter = [&](const Instruction *lhs, const Instruction *rhs) {
+    if (!lhs || !rhs) {
+      return false;
+    }
+    auto lhs_it = instruction_position.find(lhs);
+    auto rhs_it = instruction_position.find(rhs);
+    if (lhs_it == instruction_position.end() ||
+        rhs_it == instruction_position.end()) {
+      return false;
+    }
+    return lhs_it->second > rhs_it->second;
+  };
+
+  for (const MPIOperation &op : process_model_.getAllOperations()) {
+    if (op.kind == MPIOpKind::RMA_WINDOW && op.window &&
+        op.td_type == ThreadAPI::TD_MPI_WIN_CREATE) {
       RMAWindow window;
-      window.window = nullptr;
+      window.window = op.window;
       window.create_inst = op.inst;
 
-      const CallBase *CB = dyn_cast<CallBase>(op.inst);
-      if (CB && CB->arg_size() > 0) {
-        window.window = CB->getArgOperand(CB->arg_size() - 1);
-        windows_[window.window] = window;
-      }
-    } else if (op.td_type == ThreadAPI::TD_MPI_WIN_FREE) {
-      const CallBase *CB = dyn_cast<CallBase>(op.inst);
-      if (CB && CB->arg_size() > 0) {
-        WindowID win = CB->getArgOperand(0);
-        auto it = windows_.find(win);
-        if (it != windows_.end()) {
-          if (it->second.free_inst) {
-            double_window_free_.push_back(op.inst);
-          }
-          it->second.free_inst = op.inst;
+      auto inserted = windows_.emplace(window.window, window);
+      if (!inserted.second) {
+        RMAWindow &tracked = inserted.first->second;
+        if (!tracked.create_inst) {
+          tracked.create_inst = op.inst;
         }
+      }
+    } else if (op.kind == MPIOpKind::RMA_WINDOW && op.window &&
+               op.td_type == ThreadAPI::TD_MPI_WIN_FREE) {
+      auto it = windows_.find(op.window);
+      if (it != windows_.end()) {
+        if (it->second.free_inst) {
+          double_window_free_.push_back(op.inst);
+        }
+        it->second.free_inst = op.inst;
       }
     }
   }
@@ -276,7 +299,7 @@ void MPIRMAAnalysis::analyzeRMA() {
         op.window) {
       auto win_it = windows_.find(op.window);
       if (win_it != windows_.end() && win_it->second.free_inst &&
-          win_it->second.free_inst != op.inst) {
+          happensAfter(op.inst, win_it->second.free_inst)) {
         use_after_free_windows_.push_back(op.inst);
       }
     }
@@ -374,6 +397,11 @@ void MPIRMAAnalysis::analyzeRMA() {
       event.rma.sync_start = rma_op.sync_start;
       event.rma.sync_end = rma_op.sync_end;
       event.relation = rma_op.relation;
+
+      MPIOperation &mutable_op =
+          process_model_.getMutableOperations()[event.operation_index];
+      mutable_op.semantic_relation = rma_op.relation;
+      mutable_op.synchronization_proof = rma_op.synchronization_proof;
       break;
     }
   }

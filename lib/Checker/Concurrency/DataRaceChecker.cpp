@@ -8,6 +8,8 @@
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
 
+#include <deque>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -25,6 +27,103 @@ using namespace mhp;
 using namespace lotus;
 
 namespace concurrency {
+
+namespace {
+
+bool isPrivateLike(OpenMP::DataSharingAttribute attribute) {
+  switch (attribute) {
+  case OpenMP::DataSharingAttribute::Private:
+  case OpenMP::DataSharingAttribute::Firstprivate:
+  case OpenMP::DataSharingAttribute::Lastprivate:
+  case OpenMP::DataSharingAttribute::Linear:
+    return true;
+  default:
+    return false;
+  }
+}
+
+const Value *stripValue(const Value *value) {
+  return value ? value->stripPointerCasts() : nullptr;
+}
+
+const Value *resolveRegionKey(const Value *value, const DataLayout &DL,
+                              int64_t &offset, bool &has_precise_offset) {
+  offset = 0;
+  has_precise_offset = false;
+  if (!value) {
+    return nullptr;
+  }
+
+  std::deque<const Value *> worklist;
+  std::set<const Value *> visited;
+  worklist.push_back(value);
+  const Value *resolved = nullptr;
+  int64_t resolved_offset = 0;
+  bool resolved_precise = false;
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+    if (!current || !visited.insert(current).second) {
+      continue;
+    }
+
+    current = stripValue(current);
+    if (const auto *load = dyn_cast<LoadInst>(current)) {
+      worklist.push_back(load->getPointerOperand());
+      continue;
+    }
+    if (const auto *phi = dyn_cast<PHINode>(current)) {
+      for (const Value *incoming : phi->incoming_values()) {
+        worklist.push_back(incoming);
+      }
+      continue;
+    }
+    if (const auto *select = dyn_cast<SelectInst>(current)) {
+      worklist.push_back(select->getTrueValue());
+      worklist.push_back(select->getFalseValue());
+      continue;
+    }
+
+    int64_t current_offset = 0;
+    bool current_precise = false;
+    const Value *base = nullptr;
+    if (current->getType()->isPointerTy()) {
+      if (const Value *base_with_offset =
+              GetPointerBaseWithConstantOffset(current, current_offset, DL)) {
+        base = stripValue(base_with_offset);
+        if (!(isa<GEPOperator>(current) && base == stripValue(current))) {
+          current_precise = true;
+        }
+      }
+    }
+    if (!base && current->getType()->isPointerTy()) {
+      base = stripValue(getUnderlyingObject(current));
+    }
+    if (!base) {
+      base = current;
+    }
+
+    if (!resolved) {
+      resolved = base;
+      resolved_offset = current_offset;
+      resolved_precise = current_precise;
+    } else if (resolved != base) {
+      has_precise_offset = false;
+      offset = 0;
+      return nullptr;
+    } else if (resolved_precise && current_precise &&
+               resolved_offset != current_offset) {
+      resolved_precise = false;
+    }
+  }
+
+  offset = resolved_precise ? resolved_offset : 0;
+  has_precise_offset = resolved_precise;
+  return resolved;
+}
+
+} // namespace
 
 DataRaceChecker::DataRaceChecker(Module &module, MHPAnalysis *mhpAnalysis,
                                  LockSetAnalysis *locksetAnalysis,
@@ -361,6 +460,8 @@ void DataRaceChecker::collectVariableAccesses(
       if (isMemoryAccess(&*I)) {
         const Value *memLoc = getMemoryLocation(&*I);
         if (memLoc) {
+          if (isOpenMPPrivateLikeAccess(&*I, memLoc))
+            continue;
           if (isSyncObjectAccess(memLoc))
             continue;
           if (isIgnorableTypeForRace(memLoc->getType()))
@@ -381,6 +482,56 @@ void DataRaceChecker::collectVariableAccesses(
       }
     }
   }
+}
+
+bool DataRaceChecker::isOpenMPPrivateLikeAccess(const Instruction *inst,
+                                                const Value *loc) const {
+  if (!inst || !loc || !m_mhpAnalysis) {
+    return false;
+  }
+  const OpenMP::OpenMPSemantics *semantics = m_mhpAnalysis->getOpenMPSemantics();
+  if (!semantics) {
+    return false;
+  }
+
+  const Function *func = inst->getFunction();
+  if (!func) {
+    return false;
+  }
+
+  int64_t offset = 0;
+  bool precise = false;
+  const Value *base = resolveRegionKey(loc, m_module.getDataLayout(), offset, precise);
+  if (!base) {
+    base = stripValue(loc);
+  }
+
+  bool saw_matching_task = false;
+  for (const auto &task_uptr : semantics->getTasks()) {
+    const OpenMP::Task *task = task_uptr.get();
+    if (!task || task->task_function != func) {
+      continue;
+    }
+    saw_matching_task = true;
+    for (const OpenMP::DataSharingEntry &entry : task->data_sharing_entries) {
+      if (!isPrivateLike(entry.attribute) || !entry.canonical_base) {
+        continue;
+      }
+      if (entry.canonical_base != base) {
+        continue;
+      }
+      if (entry.has_precise_offset && precise && entry.offset != offset) {
+        continue;
+      }
+      return true;
+    }
+  }
+
+  if (!saw_matching_task) {
+    return false;
+  }
+
+  return false;
 }
 
 // Checks if two instructions may access the same memory location using alias

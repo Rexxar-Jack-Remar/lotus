@@ -1071,6 +1071,32 @@ TEST_F(OpenMPTaskGraphTest, ReduceNowaitEndProducesPartialBoundary) {
   EXPECT_GT(graph.getSummary().reduction_nowait_boundary_count, 0u);
 }
 
+TEST_F(OpenMPTaskGraphTest, DependencyConflictClassificationDelegatesToSemantics) {
+  const char *source = R"(
+    define i32 @main() {
+    entry:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  OpenMPTaskGraph graph(*module);
+  semantics.analyze();
+
+  Dependency lhs;
+  lhs.type = DependType::OUT;
+  lhs.address = nullptr;
+  lhs.size = 4;
+
+  Dependency rhs = lhs;
+
+  EXPECT_EQ(graph.classifyDependencyConflict(lhs, rhs),
+            semantics.classifyDependencyConflictForTesting(lhs, rhs));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

@@ -1884,6 +1884,67 @@ TEST_F(MPIAnalysisTest, UseAfterFreeWindowIsReported) {
   EXPECT_EQ(analysis.getResults().use_after_free_windows.size(), 1u);
 }
 
+TEST_F(MPIAnalysisTest, OperationBeforeWindowFreeIsNotUseAfterFree) {
+  const char *source = R"(
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_free(i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %win = alloca i8, align 1
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* %win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 0, i64 0, i32 1, i32 0, i8* %win)
+      call i32 @MPI_Win_free(i8* %win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_TRUE(analysis.getResults().use_after_free_windows.empty());
+}
+
+TEST_F(MPIAnalysisTest, RMAEpochRelationFlowsIntoDiagnostics) {
+  const char *source = R"(
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_lock(i32, i32, i32, i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+    declare i32 @MPI_Win_unlock(i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %win = alloca i8, align 1
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* %win)
+      call i32 @MPI_Win_lock(i32 0, i32 0, i32 0, i8* %win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 0, i64 0, i32 1, i32 0, i8* %win)
+      call i32 @MPI_Win_unlock(i32 0, i8* %win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_epoch_relation = false;
+  for (const auto &diag : analysis.getResults().diagnostics) {
+    if (diag.relation.kind ==
+            concurrency::RelationKind::SameSynchronizationEpoch &&
+        diag.relation.reason == "mpi_rma_lock_epoch") {
+      saw_epoch_relation = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(saw_epoch_relation);
+}
+
 TEST_F(MPIAnalysisTest, DoubleWindowFreeIsReported) {
   const char *source = R"(
     declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)

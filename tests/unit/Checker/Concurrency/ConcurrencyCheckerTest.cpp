@@ -527,6 +527,97 @@ TEST_F(ConcurrencyCheckerTest, DetectsOpenMPMissingSchedulePattern) {
   EXPECT_TRUE(found);
 }
 
+TEST_F(ConcurrencyCheckerTest, SuppressesPrivateInLoopWarningForSharedOnlyTask) {
+  const char *source = R"(
+    declare void @__kmpc_for_static_init_4(i8*, i32, i32*, i32*, i32*, i32*, i32, i32)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+
+    define internal void @.omp_outlined.(i32* %.omp.shared_ptr) {
+    entry:
+      %v = load i32, i32* %.omp.shared_ptr, align 4
+      store i32 %v, i32* %.omp.shared_ptr, align 4
+      ret void
+    }
+
+    define void @test_openmp_loop_shared_only_task() {
+    entry:
+      %last = alloca i32
+      %lower = alloca i32
+      %upper = alloca i32
+      %stride = alloca i32
+      call void @__kmpc_for_static_init_4(i8* null, i32 0, i32* %last,
+                                          i32* %lower, i32* %upper,
+                                          i32* %stride, i32 1, i32 1)
+      %t = call i32 @__kmpc_omp_task(
+          i8* null, i32 0,
+          i8* bitcast (void (i32*)* @.omp_outlined. to i8*))
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::OpenMPChecker checker(*module, nullptr,
+                                     ThreadAPI::getThreadAPI());
+  auto reports = checker.checkOpenMPBugs();
+
+  bool found = false;
+  for (const auto &report : reports) {
+    if (report.bugType == concurrency::ConcurrencyBugType::OMP_PRIVATE_IN_LOOP) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_FALSE(found);
+}
+
+TEST_F(ConcurrencyCheckerTest, DetectsPrivateInLoopWarningForPrivateLikeTask) {
+  const char *source = R"(
+    declare void @__kmpc_for_static_init_4(i8*, i32, i32*, i32*, i32*, i32*, i32, i32)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+
+    define internal void @.omp_outlined.(i32* %.omp.shared_ptr, i32 %.omp.val) {
+    entry:
+      %v = load i32, i32* %.omp.shared_ptr, align 4
+      store i32 %v, i32* %.omp.shared_ptr, align 4
+      %x = add i32 %.omp.val, 1
+      ret void
+    }
+
+    define void @test_openmp_loop_private_like_task() {
+    entry:
+      %last = alloca i32
+      %lower = alloca i32
+      %upper = alloca i32
+      %stride = alloca i32
+      call void @__kmpc_for_static_init_4(i8* null, i32 0, i32* %last,
+                                          i32* %lower, i32* %upper,
+                                          i32* %stride, i32 1, i32 1)
+      %t = call i32 @__kmpc_omp_task(
+          i8* null, i32 0,
+          i8* bitcast (void (i32*, i32)* @.omp_outlined. to i8*))
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::OpenMPChecker checker(*module, nullptr,
+                                     ThreadAPI::getThreadAPI());
+  auto reports = checker.checkOpenMPBugs();
+
+  bool found = false;
+  for (const auto &report : reports) {
+    if (report.bugType == concurrency::ConcurrencyBugType::OMP_PRIVATE_IN_LOOP) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
 TEST_F(ConcurrencyCheckerTest, DetectsMPIOrphanedRequest) {
   const char *source = R"(
     declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8**)
@@ -606,7 +697,7 @@ TEST_F(ConcurrencyCheckerTest, TracksOpenMPSummaryInCheckerStatistics) {
   EXPECT_EQ(stats.openMPSummary.task_count, 2u);
   EXPECT_EQ(stats.openMPSummary.task_with_dependencies_count, 1u);
   EXPECT_EQ(stats.openMPSummary.taskloop_count, 1u);
-  EXPECT_EQ(stats.openMPSummary.partial_wait_boundary_count, 1u);
+  EXPECT_EQ(stats.openMPSummary.partial_wait_boundary_count, 2u);
   EXPECT_EQ(stats.openMPSummary.taskgroup_region_count, 1u);
   EXPECT_EQ(stats.openMPSummary.atomic_region_count, 1u);
   EXPECT_EQ(stats.openMPSummary.flush_count, 1u);
@@ -693,6 +784,73 @@ TEST_F(ConcurrencyCheckerTest, ConditionalMayLockDoesNotSuppressRealRace) {
   ASSERT_NE(store1, nullptr);
   ASSERT_NE(store2, nullptr);
   EXPECT_TRUE(checker.wouldReportDataRace(store1, store2));
+}
+
+TEST_F(ConcurrencyCheckerTest, SuppressesRaceForOpenMPPrivateLikeCaptures) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+
+    define internal void @task1(i32* %.omp.private_buf) {
+    entry:
+      %tmp = alloca i32*, align 8
+      store i32* %.omp.private_buf, i32** %tmp, align 8
+      %loaded = load i32*, i32** %tmp, align 8
+      %elt = getelementptr inbounds i32, i32* %loaded, i64 1
+      store i32 1, i32* %elt, align 4
+      ret void
+    }
+
+    define internal void @task2(i32* %.omp.private_buf) {
+    entry:
+      %tmp = alloca i32*, align 8
+      store i32* %.omp.private_buf, i32** %tmp, align 8
+      %loaded = load i32*, i32** %tmp, align 8
+      %elt = getelementptr inbounds i32, i32* %loaded, i64 1
+      store i32 2, i32* %elt, align 4
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %t1 = call i32 @__kmpc_omp_task(
+          i8* null, i32 0, i8* bitcast (void (i32*)* @task1 to i8*))
+      %t2 = call i32 @__kmpc_omp_task(
+          i8* null, i32 0, i8* bitcast (void (i32*)* @task2 to i8*))
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  mhp::MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  lotus::EscapeAnalysis escape(*module);
+  escape.analyze();
+
+  concurrency::DataRaceChecker checker(*module, &mhp, mhp.getLockSetAnalysis(),
+                                       &escape, mhp.getAliasAnalysis(),
+                                       nullptr);
+
+  const Instruction *store1 = nullptr;
+  const Instruction *store2 = nullptr;
+  for (const Instruction &inst : instructions(*module->getFunction("task1"))) {
+    if (isa<StoreInst>(&inst)) {
+      store1 = &inst;
+      break;
+    }
+  }
+  for (const Instruction &inst : instructions(*module->getFunction("task2"))) {
+    if (isa<StoreInst>(&inst)) {
+      store2 = &inst;
+      break;
+    }
+  }
+
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+  EXPECT_FALSE(checker.wouldReportDataRace(store1, store2));
 }
 
 TEST_F(ConcurrencyCheckerTest, TracksMPISummaryInCheckerStatistics) {

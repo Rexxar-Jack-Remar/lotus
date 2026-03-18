@@ -79,6 +79,8 @@ private:
   collectVariableAccesses(std::vector<const llvm::Instruction *> &accesses);
   bool mayAccessSameLocation(const llvm::Instruction *inst1,
                              const llvm::Instruction *inst2) const;
+  bool isOpenMPPrivateLikeAccess(const llvm::Instruction *inst,
+                                 const llvm::Value *loc) const;
 
   void buildSyncObjectSet();
   bool isSyncObjectAccess(const llvm::Value *loc) const;

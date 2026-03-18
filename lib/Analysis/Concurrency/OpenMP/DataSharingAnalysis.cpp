@@ -3,6 +3,7 @@
 #include <deque>
 #include <set>
 
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Metadata.h>
@@ -13,6 +14,91 @@
 using namespace llvm;
 
 namespace OpenMP {
+
+namespace {
+
+const Value *stripValue(const Value *value) {
+  return value ? value->stripPointerCasts() : nullptr;
+}
+
+const Value *resolveRegionKey(const Value *value, const DataLayout &DL,
+                              int64_t &offset, bool &has_precise_offset) {
+  offset = 0;
+  has_precise_offset = false;
+  if (!value) {
+    return nullptr;
+  }
+
+  std::deque<const Value *> worklist;
+  std::set<const Value *> visited;
+  worklist.push_back(value);
+  const Value *resolved = nullptr;
+  int64_t resolved_offset = 0;
+  bool resolved_precise = false;
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+    if (!current || !visited.insert(current).second) {
+      continue;
+    }
+
+    current = stripValue(current);
+    if (const auto *load = dyn_cast<LoadInst>(current)) {
+      worklist.push_back(load->getPointerOperand());
+      continue;
+    }
+    if (const auto *phi = dyn_cast<PHINode>(current)) {
+      for (const Value *incoming : phi->incoming_values()) {
+        worklist.push_back(incoming);
+      }
+      continue;
+    }
+    if (const auto *select = dyn_cast<SelectInst>(current)) {
+      worklist.push_back(select->getTrueValue());
+      worklist.push_back(select->getFalseValue());
+      continue;
+    }
+
+    int64_t current_offset = 0;
+    bool current_precise = false;
+    const Value *base = nullptr;
+    if (current->getType()->isPointerTy()) {
+      if (const Value *base_with_offset =
+              GetPointerBaseWithConstantOffset(current, current_offset, DL)) {
+        base = stripValue(base_with_offset);
+        if (!(isa<GEPOperator>(current) && base == stripValue(current))) {
+          current_precise = true;
+        }
+      }
+    }
+    if (!base && current->getType()->isPointerTy()) {
+      base = stripValue(getUnderlyingObject(current));
+    }
+    if (!base) {
+      base = current;
+    }
+
+    if (!resolved) {
+      resolved = base;
+      resolved_offset = current_offset;
+      resolved_precise = current_precise;
+    } else if (resolved != base) {
+      has_precise_offset = false;
+      offset = 0;
+      return nullptr;
+    } else if (resolved_precise && current_precise &&
+               resolved_offset != current_offset) {
+      resolved_precise = false;
+    }
+  }
+
+  offset = resolved_precise ? resolved_offset : 0;
+  has_precise_offset = resolved_precise;
+  return resolved;
+}
+
+} // namespace
 
 DataSharingAnalysis::DataSharingAnalysis(Module &module) : m_module(module) {}
 
@@ -236,7 +322,11 @@ void DataSharingAnalysis::addEntry(const Value *variable,
   }
 
   m_variable_attributes[canonical] = attribute;
-  DataSharingEntry entry{canonical, attribute, clause};
+  int64_t offset = 0;
+  bool precise = false;
+  const Value *base =
+      resolveRegionKey(canonical, m_module.getDataLayout(), offset, precise);
+  DataSharingEntry entry{canonical, attribute, clause, base, offset, precise};
   m_entries.push_back(entry);
   if (region) {
     m_region_entries[region].push_back(entry);

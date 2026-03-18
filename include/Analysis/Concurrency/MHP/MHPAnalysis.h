@@ -24,8 +24,8 @@
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
+#include "Analysis/Concurrency/OpenMP/OpenMPSemantics.h"
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
-#include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
@@ -41,9 +41,9 @@ class ThreadLocalAnalysis;
 #include <unordered_set>
 #include <vector>
 
+#include <llvm/ADT/BitVector.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
-#include <llvm/ADT/BitVector.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/BasicBlock.h>
@@ -173,6 +173,10 @@ public:
   // Alias analysis used internally (also useful for other analyses/checkers).
   lotus::AliasAnalysisWrapper *getAliasAnalysis() const {
     return m_alias_analysis.get();
+  }
+
+  const OpenMP::OpenMPSemantics *getOpenMPSemantics() const {
+    return m_openmp_semantics.get();
   }
 
   // ========================================================================
@@ -514,7 +518,7 @@ private:
                                const llvm::Instruction *rhs) const;
   std::vector<SyncNode *>
   getBarrierContinuations(const llvm::Instruction *barrier_inst) const;
-  void lowerOpenMPTasks();
+  void lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics);
 
   /**
    * @brief Compute transitive closure of happens-before relation (optional
@@ -596,6 +600,7 @@ private:
   std::unordered_map<const llvm::Instruction *, ThreadID> m_openmp_task_threads;
   std::unordered_set<std::pair<ThreadID, ThreadID>, ThreadPairHash>
       m_openmp_task_exclusions;
+  std::unique_ptr<OpenMP::OpenMPSemantics> m_openmp_semantics;
 };
 
 } // namespace mhp

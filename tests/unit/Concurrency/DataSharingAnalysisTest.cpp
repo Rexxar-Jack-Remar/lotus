@@ -101,6 +101,42 @@ TEST_F(DataSharingAnalysisTest, EscapingPointerCaptureStaysConservativeShared) {
   EXPECT_EQ(analysis.getAttribute(arg0), DataSharingAttribute::Shared);
 }
 
+TEST_F(DataSharingAnalysisTest, EntriesCarryCanonicalRegionKeys) {
+  const char *source = R"(
+    define internal void @.omp_outlined.(i32* %.omp.shared_ptr, i32 %.omp.val) {
+    entry:
+      %tmp = alloca i32*, align 8
+      store i32* %.omp.shared_ptr, i32** %tmp, align 8
+      %loaded = load i32*, i32** %tmp, align 8
+      %elt = getelementptr inbounds i32, i32* %loaded, i64 1
+      store i32 7, i32* %elt, align 4
+      %x = add i32 %.omp.val, 1
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  DataSharingAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *outlined = module->getFunction(".omp_outlined.");
+  ASSERT_NE(outlined, nullptr);
+  auto entries = analysis.getEntriesForRegion(outlined);
+  ASSERT_EQ(entries.size(), 2u);
+
+  const Argument *arg0 = outlined->arg_begin();
+  bool found_region_key = false;
+  for (const auto &entry : entries) {
+    if (entry.variable == arg0) {
+      found_region_key = true;
+      EXPECT_EQ(entry.canonical_base, arg0);
+    }
+  }
+  EXPECT_TRUE(found_region_key);
+}
+
 TEST_F(DataSharingAnalysisTest,
        GlobalAnnotationParsesFirstprivateBeforePrivate) {
   const char *source = R"(

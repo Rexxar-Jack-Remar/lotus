@@ -28,6 +28,9 @@ struct DataSharingEntry {
   const llvm::Value *variable;
   DataSharingAttribute attribute;
   std::string clause;
+  const llvm::Value *canonical_base = nullptr;
+  int64_t offset = 0;
+  bool has_precise_offset = false;
 };
 
 class DataSharingAnalysis {

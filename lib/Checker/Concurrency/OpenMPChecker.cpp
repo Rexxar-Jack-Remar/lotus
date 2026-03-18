@@ -6,6 +6,35 @@ using namespace llvm;
 
 namespace concurrency {
 
+namespace {
+
+bool isPrivateLike(OpenMP::DataSharingAttribute attribute) {
+  switch (attribute) {
+  case OpenMP::DataSharingAttribute::Private:
+  case OpenMP::DataSharingAttribute::Firstprivate:
+  case OpenMP::DataSharingAttribute::Lastprivate:
+  case OpenMP::DataSharingAttribute::Linear:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool isSharedLike(OpenMP::DataSharingAttribute attribute) {
+  switch (attribute) {
+  case OpenMP::DataSharingAttribute::Shared:
+  case OpenMP::DataSharingAttribute::SharedNoModify:
+  case OpenMP::DataSharingAttribute::Copyin:
+  case OpenMP::DataSharingAttribute::Copyout:
+  case OpenMP::DataSharingAttribute::Reduction:
+    return true;
+  default:
+    return false;
+  }
+}
+
+} // namespace
+
 OpenMPChecker::OpenMPChecker(Module &module,
                              OpenMP::OpenMPTaskGraph *task_graph,
                              ThreadAPI *thread_api)
@@ -568,6 +597,23 @@ OpenMPChecker::checkSharedPrivateConflict() const {
     }
 
     if (copyprivate_inst && task_inst) {
+      bool semantic_conflict = true;
+      if (m_taskGraph) {
+        if (const OpenMP::Task *task = m_taskGraph->getTaskForCreate(task_inst)) {
+          bool saw_private_like = false;
+          bool saw_shared_like = false;
+          for (const OpenMP::DataSharingEntry &entry : task->data_sharing_entries) {
+            saw_private_like = saw_private_like || isPrivateLike(entry.attribute);
+            saw_shared_like = saw_shared_like || isSharedLike(entry.attribute);
+          }
+          if (!task->data_sharing_entries.empty()) {
+            semantic_conflict = saw_private_like && saw_shared_like;
+          }
+        }
+      }
+      if (!semantic_conflict) {
+        continue;
+      }
       ConcurrencyBugReport report(
           ConcurrencyBugType::OMP_SHARED_PRIVATE_CONFLICT,
           "OpenMP copyprivate state crosses tasking boundary; shared/private "
@@ -934,6 +980,25 @@ std::vector<ConcurrencyBugReport> OpenMPChecker::checkPrivateInLoop() const {
     }
 
     if (loop_enter && task_call_in_loop) {
+      bool captures_loop_private = true;
+      if (m_taskGraph) {
+        if (const OpenMP::Task *task =
+                m_taskGraph->getTaskForCreate(task_call_in_loop)) {
+          if (!task->data_sharing_entries.empty()) {
+            captures_loop_private = false;
+            for (const OpenMP::DataSharingEntry &entry :
+                 task->data_sharing_entries) {
+              if (isPrivateLike(entry.attribute)) {
+                captures_loop_private = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (!captures_loop_private) {
+        continue;
+      }
       ConcurrencyBugReport report(
           ConcurrencyBugType::OMP_PRIVATE_IN_LOOP,
           "Tasking inside OpenMP loop may capture loop-private values "

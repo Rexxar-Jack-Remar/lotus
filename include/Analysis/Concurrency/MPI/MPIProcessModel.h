@@ -112,6 +112,10 @@ public:
 
   int getProvidedInitThreadLevel() const { return init_thread_provided_level_; }
 
+  const MPI::MPIRankAnalysis *getRankAnalysis() const {
+    return rank_analysis_.get();
+  }
+
   size_t getCommunicatorClassID(CommunicatorID communicator) const;
 
   std::vector<MPIOperation> getOperationsByKind(MPIOpKind kind) const;

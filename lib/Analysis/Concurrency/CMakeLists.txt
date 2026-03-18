@@ -7,6 +7,7 @@ set(Concurrency_SOURCES
   Utils/RAIILockTracker.cpp
   Utils/CppAtomics.cpp
   Utils/ThreadLocalAnalysis.cpp
+  OpenMP/OpenMPSemantics.cpp
   OpenMP/OpenMPTaskGraph.cpp
   OpenMP/DataSharingAnalysis.cpp
   MHP/MHPAnalysis.cpp

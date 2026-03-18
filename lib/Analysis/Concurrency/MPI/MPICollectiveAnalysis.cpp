@@ -259,9 +259,7 @@ MPICollectiveAnalysis::findMismatchedCollectives() const {
 std::vector<const Instruction *>
 MPICollectiveAnalysis::findConditionalCollectives() const {
   std::vector<const Instruction *> conditional;
-  MPI::MPIRankAnalysis rank_analysis(
-      const_cast<Module &>(process_model_.getModule()));
-  bool rank_analysis_ready = false;
+  const MPI::MPIRankAnalysis *rank_analysis = process_model_.getRankAnalysis();
 
   for (const CollectiveCall &call : collective_calls_) {
     if (call.reachability == ProtocolReachability::SomeRanks) {
@@ -273,14 +271,14 @@ MPICollectiveAnalysis::findConditionalCollectives() const {
       continue;
     }
 
-    if (!rank_analysis_ready) {
-      rank_analysis.analyze();
-      rank_analysis_ready = true;
+    if (!rank_analysis) {
+      conditional.push_back(call.inst);
+      continue;
     }
 
     const BasicBlock *BB = call.inst->getParent();
 
-    MPI::RankExpr rank = rank_analysis.getRankAtInstruction(call.inst);
+    MPI::RankExpr rank = rank_analysis->getRankAtInstruction(call.inst);
     if (rank.kind == MPI::RankExpr::Concrete ||
         rank.kind == MPI::RankExpr::Range) {
       protocol_diagnostics_["collective_rank_filtered"]++;
@@ -295,7 +293,7 @@ MPICollectiveAnalysis::findConditionalCollectives() const {
       if (!br || !br->isConditional()) {
         continue;
       }
-      if (rank_analysis.dependsOnRank(br->getCondition())) {
+      if (rank_analysis->dependsOnRank(br->getCondition())) {
         rank_guarded_predecessor = true;
         break;
       }

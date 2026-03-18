@@ -382,6 +382,8 @@ void MHPAnalysis::analyze() {
   m_atomic_sync_witnesses.clear();
   m_openmp_task_threads.clear();
   m_openmp_task_exclusions.clear();
+  m_openmp_semantics = std::make_unique<OpenMP::OpenMPSemantics>(m_module);
+  m_openmp_semantics->analyze();
   m_next_thread_id = 1;
   m_next_call_context_id = 1;
   m_region_analysis.reset();
@@ -432,7 +434,9 @@ void MHPAnalysis::buildThreadFlowGraph() {
   // Main thread (thread 0)
   m_tfg->addThread(0, main_func);
   processFunction(main_func, 0, 0, true);
-  lowerOpenMPTasks();
+  if (m_openmp_semantics) {
+    lowerOpenMPTasks(*m_openmp_semantics);
+  }
 
   // Build reachability index for faster HB queries
   m_tfg->buildReachabilityIndex();
@@ -446,10 +450,7 @@ MHPAnalysis::normalizeThreadPair(ThreadID lhs, ThreadID rhs) const {
   return lhs < rhs ? std::make_pair(lhs, rhs) : std::make_pair(rhs, lhs);
 }
 
-void MHPAnalysis::lowerOpenMPTasks() {
-  OpenMP::OpenMPTaskGraph task_graph(m_module);
-  task_graph.analyze();
-
+void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
   auto wireInlineTask = [&](const OpenMP::Task *task, ThreadID parent_tid) {
     SyncNode *create_node = m_tfg->getNode(task->task_create, parent_tid);
     if (!create_node) {
@@ -495,7 +496,7 @@ void MHPAnalysis::lowerOpenMPTasks() {
     }
   };
 
-  for (const auto &task_uptr : task_graph.getAllTasks()) {
+  for (const auto &task_uptr : semantics.getTasks()) {
     const OpenMP::Task *task = task_uptr.get();
     if (!task || !task->task_create || !task->task_function ||
         task->task_function->isDeclaration()) {
@@ -538,7 +539,7 @@ void MHPAnalysis::lowerOpenMPTasks() {
     return it != m_openmp_task_threads.end() ? it->second : 0;
   };
 
-  for (const auto &task_uptr : task_graph.getAllTasks()) {
+  for (const auto &task_uptr : semantics.getTasks()) {
     const OpenMP::Task *task = task_uptr.get();
     ThreadID task_tid = getTaskThread(task);
     if (!task_tid) {
@@ -564,24 +565,23 @@ void MHPAnalysis::lowerOpenMPTasks() {
     }
   }
 
-  for (const auto &entry : task_graph.getRelations()) {
-    if (entry.second.kind != concurrency::RelationKind::MutuallyExclusive) {
+  for (const auto &task_uptr : semantics.getTasks()) {
+    const OpenMP::Task *task = task_uptr.get();
+    ThreadID task_tid = getTaskThread(task);
+    if (!task_tid) {
       continue;
     }
-    const OpenMP::Task *lhs = entry.first.first;
-    const OpenMP::Task *rhs = entry.first.second;
-    if (!lhs || !rhs) {
-      continue;
+    for (const OpenMP::Task *excluded : task->exclusions) {
+      ThreadID excluded_tid = getTaskThread(excluded);
+      if (!excluded_tid || task_tid == excluded_tid) {
+        continue;
+      }
+      m_openmp_task_exclusions.insert(
+          normalizeThreadPair(task_tid, excluded_tid));
     }
-    ThreadID lhs_tid = getTaskThread(lhs);
-    ThreadID rhs_tid = getTaskThread(rhs);
-    if (!lhs_tid || !rhs_tid || lhs_tid == rhs_tid) {
-      continue;
-    }
-    m_openmp_task_exclusions.insert(normalizeThreadPair(lhs_tid, rhs_tid));
   }
 
-  for (const auto &boundary : task_graph.getWaitBoundaries()) {
+  for (const auto &boundary : semantics.getWaitBoundaryInfos()) {
     if (!boundary.inst) {
       continue;
     }
@@ -599,7 +599,7 @@ void MHPAnalysis::lowerOpenMPTasks() {
       continue;
     }
 
-    for (const auto &task_uptr : task_graph.getAllTasks()) {
+    for (const auto &task_uptr : semantics.getTasks()) {
       const OpenMP::Task *task = task_uptr.get();
       if (!task ||
           task->scheduling_context_id != boundary.scheduling_context_id ||
