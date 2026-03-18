@@ -42,6 +42,7 @@ class ControlDependenceAnalysisImpl : public ControlDependenceAnalysis {
   mutable DenseMap<const BasicBlock *, SparseBitVector<>> m_reach;
   // Maps a basic block to the blocks it is control dependent on.
   DenseMap<const BasicBlock *, SmallVector<BasicBlock *, 4>> m_cdInfo;
+  SmallVector<BasicBlock *, 0> m_empty;
 
 public:
   ControlDependenceAnalysisImpl(Function &f, PostDominatorTree &pdt)
@@ -50,10 +51,15 @@ public:
     calculate(pdt);
   }
 
+  bool isTracked(const BasicBlock &BB) const override {
+    return m_BBToIdx.count(&BB) > 0;
+  }
+
   ArrayRef<BasicBlock *> getCDBlocks(BasicBlock *BB) const override {
+    if (BB == nullptr || !isTracked(*BB))
+      return m_empty;
     auto it = m_cdInfo.find(BB);
-    assert(it != m_cdInfo.end());
-    return it->second;
+    return it != m_cdInfo.end() ? ArrayRef<BasicBlock *>(it->second) : m_empty;
   }
 
   bool isReachable(BasicBlock *Src, BasicBlock *Dst) const override {
@@ -71,12 +77,7 @@ public:
 
   unsigned getBBTopoIdx(BasicBlock *BB) const override {
     auto it = m_BBToIdx.find(BB);
-    // Unreachable blocks were not assigned a post-order index.  Return 0 as
-    // a safe sentinel — the caller (GreaterThanTopo comparator) will place
-    // such blocks at the very front of the sorted set, which is harmless
-    // because control-dependent blocks are always reachable in practice.
-    if (it == m_BBToIdx.end())
-      return 0;
+    assert(it != m_BBToIdx.end() && "Topology queried for untracked block");
     // m_BBToIdx supplies post-order numbers; reverse gives topo order.
     return m_BBToIdx.size() - it->second;
   }

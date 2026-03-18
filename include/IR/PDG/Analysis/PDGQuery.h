@@ -14,6 +14,6 @@
 #pragma once
 
 #include "IR/PDG/Analysis/PDGQueryCore.h"
-#include "IR/PDG/Analysis/SummaryQuery.h"
 #include "IR/PDG/Analysis/ImpactQuery.h"
 #include "IR/PDG/Analysis/ResourceFlowQuery.h"
+#include "IR/PDG/Analysis/SummaryQuery.h"
