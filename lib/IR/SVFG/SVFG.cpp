@@ -595,26 +595,30 @@ SVFGNode *SVFG::getLHSTopLevPtr(SVFGNode *node) const {
 }
 
 const llvm::CallBase *SVFG::isCallSiteRetSVFGNode(const SVFGNode *n) const {
+  if (!n)
+    return nullptr;
   if (const auto *ar = llvm::dyn_cast_or_null<ActualRetSVFGNode>(n))
     return ar->getCallSite();
   if (const auto *phi = llvm::dyn_cast_or_null<InterPhiSVFGNode>(n))
     return phi->isActualRetPHI() ? phi->getCallSite() : nullptr;
   if (const auto *ao = llvm::dyn_cast_or_null<ActualOutSVFGNode>(n))
     return ao->getCallSite();
-  if (const auto *mphi = llvm::dyn_cast_or_null<InterMSSAPhiSVFGNode>(n))
-    return mphi->isActualRetPHI() ? mphi->getCallSite() : nullptr;
+  if (n->getNodeKind() == SVFGK::MInterPhi)
+    return n->getCallSite();
   return nullptr;
 }
 
 const llvm::Function *SVFG::isFunEntrySVFGNode(const SVFGNode *n) const {
+  if (!n)
+    return nullptr;
   if (const auto *fp = llvm::dyn_cast_or_null<FormalParmSVFGNode>(n))
     return fp->getFunction();
   if (const auto *phi = llvm::dyn_cast_or_null<InterPhiSVFGNode>(n))
     return phi->isFormalParmPHI() ? phi->getFunction() : nullptr;
   if (const auto *fi = llvm::dyn_cast_or_null<FormalInSVFGNode>(n))
     return fi->getFunction();
-  if (const auto *mphi = llvm::dyn_cast_or_null<InterMSSAPhiSVFGNode>(n))
-    return mphi->isFormalParmPHI() ? mphi->getFunction() : nullptr;
+  if (n->getNodeKind() == SVFGK::MInterPhi)
+    return n->getFunction();
   return nullptr;
 }
 

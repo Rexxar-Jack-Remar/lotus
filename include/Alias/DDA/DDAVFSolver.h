@@ -429,7 +429,7 @@ protected:
           // memory node that may merge multiple definitions (PHI, FormalIn).
           const bool isMemMergeNode = llvm::isa<IntraMSSAPhiSVFGNode>(dst) ||
                                       llvm::isa<FormalInSVFGNode>(dst) ||
-                                      llvm::isa<EntryChiSVFGNode>(dst);
+                                      dst->getNodeKind() == SVFGK::EntryChi;
           if (dstDpm.getCurNodeID() == dpm.getCurNodeID() || isMemMergeNode) {
             if (ddaStat_)
               ddaStat_->numOfStepInCycle++;

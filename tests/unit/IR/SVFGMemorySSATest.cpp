@@ -114,11 +114,11 @@ TEST_F(SVFGMemorySSATest, ReadOnlyCalleeDoesNotCreateCallerSideDefs) {
   size_t callMuCount = 0;
   size_t callChiCount = 0;
   for (const auto &pair : *svfg) {
-    if (const auto *mu = dyn_cast<CallMuSVFGNode>(pair.second)) {
-      if (mu->getCallSite() == call)
+    if (pair.second->getNodeKind() == SVFGK::CallMu) {
+      if (pair.second->getCallSite() == call)
         ++callMuCount;
-    } else if (const auto *chi = dyn_cast<CallChiSVFGNode>(pair.second)) {
-      if (chi->getCallSite() == call)
+    } else if (pair.second->getNodeKind() == SVFGK::CallChi) {
+      if (pair.second->getCallSite() == call)
         ++callChiCount;
     }
   }
@@ -317,10 +317,10 @@ TEST_F(SVFGMemorySSATest, GlobalOnlyCalleeCreatesInterproceduralMemoryNodes) {
   EXPECT_FALSE(svfg->getFormalOuts(writerFn).empty());
 
   for (const auto &pair : *svfg) {
-    EXPECT_FALSE(isa<CallMuSVFGNode>(pair.second));
-    EXPECT_FALSE(isa<CallChiSVFGNode>(pair.second));
-    EXPECT_FALSE(isa<RetMuSVFGNode>(pair.second));
-    EXPECT_FALSE(isa<EntryChiSVFGNode>(pair.second));
+    EXPECT_NE(pair.second->getNodeKind(), SVFGK::CallMu);
+    EXPECT_NE(pair.second->getNodeKind(), SVFGK::CallChi);
+    EXPECT_NE(pair.second->getNodeKind(), SVFGK::RetMu);
+    EXPECT_NE(pair.second->getNodeKind(), SVFGK::EntryChi);
   }
 }
 
@@ -373,8 +373,8 @@ TEST_F(SVFGMemorySSATest, CallsiteMemoryNodesTrackOnlyTouchedArguments) {
 
   size_t callMuCount = 0;
   for (const auto &pair : *svfg) {
-    if (const auto *mu = dyn_cast<CallMuSVFGNode>(pair.second)) {
-      if (mu->getCallSite() == call)
+    if (pair.second->getNodeKind() == SVFGK::CallMu) {
+      if (pair.second->getCallSite() == call)
         ++callMuCount;
     }
   }

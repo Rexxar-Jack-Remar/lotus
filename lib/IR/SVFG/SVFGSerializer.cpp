@@ -344,22 +344,8 @@ static Anchor getNodeFunctionAnchor(const SVFGNode *node) {
 static Anchor getNodeCallAnchor(const SVFGNode *node) {
   if (!node)
     return {};
-  if (const auto *actualParm = dyn_cast<ActualParmSVFGNode>(node))
-    return getAnchorForValue(actualParm->getCallSite());
-  if (const auto *actualRet = dyn_cast<ActualRetSVFGNode>(node))
-    return getAnchorForValue(actualRet->getCallSite());
-  if (const auto *actualIn = dyn_cast<ActualInSVFGNode>(node))
-    return getAnchorForValue(actualIn->getCallSite());
-  if (const auto *actualOut = dyn_cast<ActualOutSVFGNode>(node))
-    return getAnchorForValue(actualOut->getCallSite());
-  if (const auto *callMu = dyn_cast<CallMuSVFGNode>(node))
-    return getAnchorForValue(callMu->getCallSite());
-  if (const auto *callChi = dyn_cast<CallChiSVFGNode>(node))
-    return getAnchorForValue(callChi->getCallSite());
-  if (const auto *interPhi = dyn_cast<InterPhiSVFGNode>(node))
-    return getAnchorForValue(interPhi->getCallSite());
-  if (const auto *interMPhi = dyn_cast<InterMSSAPhiSVFGNode>(node))
-    return getAnchorForValue(interMPhi->getCallSite());
+  if (const CallBase *callSite = node->getCallSite())
+    return getAnchorForValue(callSite);
   return {};
 }
 
@@ -465,6 +451,29 @@ static void populateDerivedValueOperands(SVFGNode *node) {
   }
 }
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+static SVFGNode *createLegacyInterMSSAPhiNode(uint32_t id,
+                                              const ICFGNode *icfgNode,
+                                              const CallBase *resolvedCall,
+                                              const Function *resolvedFunction,
+                                              uint32_t memReg,
+                                              const SVFGNodeBS &pts) {
+  if (resolvedCall)
+    return new InterMSSAPhiSVFGNode(id, icfgNode, resolvedCall, memReg, pts);
+  return new InterMSSAPhiSVFGNode(id, icfgNode, resolvedFunction, memReg, pts);
+}
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 static SVFGNode *createNodeForKind(const ParsedNode &parsed,
                                    const ParsedNodeMeta &meta,
                                    const Module *module, const SVFG &graph) {
@@ -557,11 +566,9 @@ static SVFGNode *createNodeForKind(const ParsedNode &parsed,
     return new IntraMSSAPhiSVFGNode(parsed.id, icfgNode, parsed.memReg,
                                     parsed.version, parsed.pts);
   case SVFGK::MInterPhi:
-    if (resolvedCall)
-      return new InterMSSAPhiSVFGNode(parsed.id, icfgNode, resolvedCall,
-                                      parsed.memReg, parsed.pts);
-    return new InterMSSAPhiSVFGNode(parsed.id, icfgNode, resolvedFunction,
-                                    parsed.memReg, parsed.pts);
+    return createLegacyInterMSSAPhiNode(parsed.id, icfgNode, resolvedCall,
+                                        resolvedFunction, parsed.memReg,
+                                        parsed.pts);
   case SVFGK::FormalIn:
     return new FormalInSVFGNode(parsed.id, icfgNode, resolvedFunction,
                                 parsed.memReg, parsed.pts, parsed.version);
@@ -749,84 +756,16 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
       }
     }
     if (csDebug.empty()) {
-      if (const auto *actualParm = dyn_cast<ActualParmSVFGNode>(node)) {
-        if (actualParm->getCallSite()) {
-          std::string label;
-          llvm::raw_string_ostream os(label);
-          os << actualParm->getCallSite()->getFunction()->getName() << "->";
-          if (const llvm::Function *callee =
-                  actualParm->getCallSite()->getCalledFunction()) {
-            os << callee->getName();
-          } else {
-            os << "ind";
-          }
-          csDebug = os.str();
+      if (const CallBase *callSite = node->getCallSite()) {
+        std::string label;
+        llvm::raw_string_ostream os(label);
+        os << callSite->getFunction()->getName() << "->";
+        if (const llvm::Function *callee = callSite->getCalledFunction()) {
+          os << callee->getName();
+        } else {
+          os << "ind";
         }
-      } else if (const auto *actualRet = dyn_cast<ActualRetSVFGNode>(node)) {
-        if (actualRet->getCallSite()) {
-          std::string label;
-          llvm::raw_string_ostream os(label);
-          os << actualRet->getCallSite()->getFunction()->getName() << "->";
-          if (const llvm::Function *callee =
-                  actualRet->getCallSite()->getCalledFunction()) {
-            os << callee->getName();
-          } else {
-            os << "ind";
-          }
-          csDebug = os.str();
-        }
-      } else if (const auto *actualIn = dyn_cast<ActualInSVFGNode>(node)) {
-        if (actualIn->getCallSite()) {
-          std::string label;
-          llvm::raw_string_ostream os(label);
-          os << actualIn->getCallSite()->getFunction()->getName() << "->";
-          if (const llvm::Function *callee =
-                  actualIn->getCallSite()->getCalledFunction()) {
-            os << callee->getName();
-          } else {
-            os << "ind";
-          }
-          csDebug = os.str();
-        }
-      } else if (const auto *actualOut = dyn_cast<ActualOutSVFGNode>(node)) {
-        if (actualOut->getCallSite()) {
-          std::string label;
-          llvm::raw_string_ostream os(label);
-          os << actualOut->getCallSite()->getFunction()->getName() << "->";
-          if (const llvm::Function *callee =
-                  actualOut->getCallSite()->getCalledFunction()) {
-            os << callee->getName();
-          } else {
-            os << "ind";
-          }
-          csDebug = os.str();
-        }
-      } else if (const auto *callMu = dyn_cast<CallMuSVFGNode>(node)) {
-        if (callMu->getCallSite()) {
-          std::string label;
-          llvm::raw_string_ostream os(label);
-          os << callMu->getCallSite()->getFunction()->getName() << "->";
-          if (const llvm::Function *callee =
-                  callMu->getCallSite()->getCalledFunction()) {
-            os << callee->getName();
-          } else {
-            os << "ind";
-          }
-          csDebug = os.str();
-        }
-      } else if (const auto *callChi = dyn_cast<CallChiSVFGNode>(node)) {
-        if (callChi->getCallSite()) {
-          std::string label;
-          llvm::raw_string_ostream os(label);
-          os << callChi->getCallSite()->getFunction()->getName() << "->";
-          if (const llvm::Function *callee =
-                  callChi->getCallSite()->getCalledFunction()) {
-            os << callee->getName();
-          } else {
-            os << "ind";
-          }
-          csDebug = os.str();
-        }
+        csDebug = os.str();
       }
     }
     if (!fnDebug.empty() || !csDebug.empty()) {

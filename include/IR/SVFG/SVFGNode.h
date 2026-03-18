@@ -208,6 +208,9 @@ public:
   /// @brief Get function containing this node
   virtual const llvm::Function *getFunction() const;
 
+  /// @brief Get call site associated with this node, if any.
+  virtual const llvm::CallBase *getCallSite() const { return nullptr; }
+
   /// @brief Get memory region (for memory SSA nodes)
   virtual uint32_t getMemReg() const { return 0; }
 
@@ -504,7 +507,7 @@ public:
   inline bool isFormalParmPHI() const { return func != nullptr; }
   inline bool isActualRetPHI() const { return callSite != nullptr; }
   const llvm::Function *getFunction() const override { return func; }
-  inline const llvm::CallBase *getCallSite() const { return callSite; }
+  const llvm::CallBase *getCallSite() const override { return callSite; }
 
   SVFG_NODE_KIND(InterPhi)
 };
@@ -608,7 +611,7 @@ public:
   bool isFormalParmPHI() const { return func != nullptr; }
   bool isActualRetPHI() const { return callSite != nullptr; }
   const llvm::Function *getFunction() const override { return func; }
-  inline const llvm::CallBase *getCallSite() const { return callSite; }
+  const llvm::CallBase *getCallSite() const override { return callSite; }
 
   SVFG_NODE_KIND(MInterPhi)
 };
@@ -653,7 +656,7 @@ public:
                    uint32_t reg, const SVFGNodeBS &pts, uint32_t ver = 0)
       : MSSASVFGNode(id, SVFGK::ActualIn, icfg, reg, pts, ver), callSite(cs) {}
 
-  inline const llvm::CallBase *getCallSite() const { return callSite; }
+  const llvm::CallBase *getCallSite() const override { return callSite; }
 
   SVFG_NODE_KIND(ActualIn)
 };
@@ -668,7 +671,7 @@ public:
                     uint32_t reg, const SVFGNodeBS &pts, uint32_t ver = 0)
       : MSSASVFGNode(id, SVFGK::ActualOut, icfg, reg, pts, ver), callSite(cs) {}
 
-  inline const llvm::CallBase *getCallSite() const { return callSite; }
+  const llvm::CallBase *getCallSite() const override { return callSite; }
 
   SVFG_NODE_KIND(ActualOut)
 };
@@ -721,7 +724,7 @@ public:
                  uint32_t reg, const SVFGNodeBS &pts, uint32_t ver = 0)
       : MSSASVFGNode(id, SVFGK::CallMu, icfg, reg, pts, ver), callSite(cs) {}
 
-  inline const llvm::CallBase *getCallSite() const { return callSite; }
+  const llvm::CallBase *getCallSite() const override { return callSite; }
 
   SVFG_NODE_KIND(CallMu)
 };
@@ -738,7 +741,7 @@ public:
                   uint32_t reg, const SVFGNodeBS &pts, uint32_t ver = 0)
       : MSSASVFGNode(id, SVFGK::CallChi, icfg, reg, pts, ver), callSite(cs) {}
 
-  inline const llvm::CallBase *getCallSite() const { return callSite; }
+  const llvm::CallBase *getCallSite() const override { return callSite; }
 
   SVFG_NODE_KIND(CallChi)
 };
@@ -805,7 +808,7 @@ public:
                      const llvm::CallBase *cs, unsigned idx)
       : SVFGNode(id, SVFGK::ActualParm, icfg), callSite(cs), paramIdx(idx) {}
 
-  inline const llvm::CallBase *getCallSite() const { return callSite; }
+  const llvm::CallBase *getCallSite() const override { return callSite; }
   inline unsigned getParamIndex() const { return paramIdx; }
 
   SVFG_NODE_KIND(ActualParm)
@@ -834,7 +837,7 @@ public:
   ActualRetSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::CallBase *cs)
       : SVFGNode(id, SVFGK::ActualRet, icfg), callSite(cs) {}
 
-  inline const llvm::CallBase *getCallSite() const { return callSite; }
+  const llvm::CallBase *getCallSite() const override { return callSite; }
 
   SVFG_NODE_KIND(ActualRet)
 };

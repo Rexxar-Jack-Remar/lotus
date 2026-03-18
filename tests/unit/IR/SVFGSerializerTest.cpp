@@ -357,7 +357,7 @@ TEST_F(SVFGSerializerTest, CanonicalizesLegacyCallMuNodeOnRead) {
   SVFGNode *node = reloaded.getNode(1);
   ASSERT_NE(node, nullptr);
   EXPECT_TRUE(isa<ActualInSVFGNode>(node));
-  EXPECT_FALSE(isa<CallMuSVFGNode>(node));
+  EXPECT_NE(node->getNodeKind(), SVFGK::CallMu);
   auto *actualIn = dyn_cast<ActualInSVFGNode>(node);
   ASSERT_NE(actualIn, nullptr);
   EXPECT_EQ(actualIn->getMemReg(), 7u);
