@@ -551,6 +551,9 @@ TEST(NPAInterproceduralClients,
 
   EXPECT_FALSE(result.status.summary_solve.converged);
   EXPECT_TRUE(result.status.summary_solve.hit_limit);
+  EXPECT_TRUE(result.status.summary_solve.hit_linear_limit);
+  EXPECT_FALSE(result.status.summary_solve.hit_fixpoint_limit);
+  EXPECT_TRUE(result.status.used_bounded_inner_solve);
   EXPECT_FALSE(result.status.overall_converged);
   EXPECT_TRUE(result.status.overall_hit_limit);
   EXPECT_TRUE(result.status.approximated);
@@ -584,6 +587,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(Recur, nullptr);
   EXPECT_TRUE(result.status.summary_solve.converged);
   EXPECT_FALSE(result.status.summary_solve.hit_limit);
+  EXPECT_FALSE(result.status.used_bounded_inner_solve);
   EXPECT_FALSE(result.status.propagation_converged);
   EXPECT_TRUE(result.status.propagation_hit_limit);
   EXPECT_FALSE(result.status.overall_converged);
@@ -647,6 +651,7 @@ TEST(NPAInterproceduralClients,
       *module, false, npa::LinearStrategy::TensorProduct);
   EXPECT_TRUE(result.status.summary_solve.converged);
   EXPECT_FALSE(result.status.summary_solve.hit_limit);
+  EXPECT_FALSE(result.status.used_bounded_inner_solve);
   EXPECT_TRUE(result.status.overall_converged);
   EXPECT_FALSE(result.status.overall_hit_limit);
   EXPECT_FALSE(result.status.approximated);
@@ -1426,6 +1431,39 @@ TEST(NPAInterproceduralClients, RecursiveIntervalAnalysisConverges) {
   auto It = states.front()->values.find(Arg);
   if (It != states.front()->values.end())
     EXPECT_TRUE(It->second.hasLower || It->second.hasUpper);
+}
+
+TEST(NPAInterproceduralClients, IntervalAnalysisReportsFactWidening) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @grow(i32 %x) {
+    entry:
+      %cmp = icmp slt i32 %x, 10
+      br i1 %cmp, label %step, label %exit
+
+    step:
+      %next = add i32 %x, 1
+      call void @grow(i32 %next)
+      ret void
+
+    exit:
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @grow(i32 0)
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+
+  EXPECT_TRUE(result.status.summary_solve.converged);
+  EXPECT_TRUE(result.status.used_fact_widening);
+  EXPECT_TRUE(result.status.approximated);
+  EXPECT_FALSE(result.status.overall_converged);
 }
 
 TEST(NPAInterproceduralClients, IntervalCastKeepsZextTrueAsOne) {

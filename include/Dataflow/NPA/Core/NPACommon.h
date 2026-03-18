@@ -74,6 +74,9 @@ struct Stat {
   int iters{};
   bool converged = true;
   bool hit_limit = false;
+  bool hit_outer_limit = false;
+  bool hit_linear_limit = false;
+  bool hit_fixpoint_limit = false;
   int equation_count = 0;
   int requested_max_iters = -1;
   int effective_max_iters = -1;
@@ -93,6 +96,9 @@ struct AnalysisStatus {
   bool configuration_error = false;
   bool unsupported_specs = false;
   bool approximated = false;
+  bool used_summary_overflow = false;
+  bool used_fact_widening = false;
+  bool used_bounded_inner_solve = false;
   bool overall_converged = true;
   bool overall_hit_limit = false;
   IndirectCallResolutionMode call_resolution_mode =
@@ -377,16 +383,50 @@ template <class D> inline long domain_max_linear_steps() {
       std::integral_constant<bool, DomainHasMaxLinearSteps<D>::value>{});
 }
 
-inline bool &npa_limit_hit_flag() {
-  static thread_local bool flag = false;
-  return flag;
+struct ApproximationSourceFlags {
+  bool hit_outer_limit = false;
+  bool hit_linear_limit = false;
+  bool hit_fixpoint_limit = false;
+};
+
+inline ApproximationSourceFlags &npa_approximation_source_flags() {
+  static thread_local ApproximationSourceFlags flags;
+  return flags;
 }
 
-inline void npa_reset_limit_hit() { npa_limit_hit_flag() = false; }
+inline void npa_reset_limit_hit() {
+  npa_approximation_source_flags() = ApproximationSourceFlags{};
+}
 
-inline void npa_note_limit_hit() { npa_limit_hit_flag() = true; }
+inline void npa_note_outer_limit_hit() {
+  npa_approximation_source_flags().hit_outer_limit = true;
+}
 
-inline bool npa_limit_hit() { return npa_limit_hit_flag(); }
+inline void npa_note_linear_limit_hit() {
+  npa_approximation_source_flags().hit_linear_limit = true;
+}
+
+inline void npa_note_fixpoint_limit_hit() {
+  npa_approximation_source_flags().hit_fixpoint_limit = true;
+}
+
+inline bool npa_hit_outer_limit() {
+  return npa_approximation_source_flags().hit_outer_limit;
+}
+
+inline bool npa_hit_linear_limit() {
+  return npa_approximation_source_flags().hit_linear_limit;
+}
+
+inline bool npa_hit_fixpoint_limit() {
+  return npa_approximation_source_flags().hit_fixpoint_limit;
+}
+
+inline bool npa_limit_hit() {
+  const auto &flags = npa_approximation_source_flags();
+  return flags.hit_outer_limit || flags.hit_linear_limit ||
+         flags.hit_fixpoint_limit;
+}
 
 template <class D>
 inline bool valid_newton_delta(const DomVal<D> &f_nu, const DomVal<D> &nu,

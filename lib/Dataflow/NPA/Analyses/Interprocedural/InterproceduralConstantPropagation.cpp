@@ -222,6 +222,8 @@ public:
   FactType applySummary(const D::value_type &summary, const FactType &fact) {
     if (!fact.reachable)
       return {false, {}};
+    if (summary.overflow)
+      used_summary_overflow_ = true;
 
     bool first = true;
     FactType joined;
@@ -275,6 +277,8 @@ public:
     return summary.overflow;
   }
 
+  bool usedSummaryOverflow() const { return used_summary_overflow_; }
+
 private:
   FactType overflowFact(const D::value_type &summary,
                         const FactType &fact) const {
@@ -285,6 +289,8 @@ private:
         out.values.insert(entry);
     return out;
   }
+
+  mutable bool used_summary_overflow_ = false;
 
   D::value_type buildAssign(const llvm::Value *dest,
                             const llvm::APInt &value) const {

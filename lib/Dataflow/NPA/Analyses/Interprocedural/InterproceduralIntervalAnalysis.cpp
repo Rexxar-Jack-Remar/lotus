@@ -429,6 +429,8 @@ public:
   FactType applySummary(const D::value_type &summary, const FactType &fact) {
     if (!fact.reachable)
       return {false, {}};
+    if (summary.overflow)
+      used_summary_overflow_ = true;
 
     bool first = true;
     FactType joined;
@@ -482,6 +484,7 @@ public:
     if (!newFact.reachable)
       return oldFact;
 
+    used_fact_widening_ = true;
     FactType widened;
     widened.reachable = true;
     for (const auto &entry : newFact.values) {
@@ -504,6 +507,10 @@ public:
   bool summaryIsApproximate(const D::value_type &summary) const {
     return summary.overflow;
   }
+
+  bool usedSummaryOverflow() const { return used_summary_overflow_; }
+
+  bool usedFactWidening() const { return used_fact_widening_; }
 
 private:
   FactType overflowFact(const D::value_type &summary,
@@ -908,6 +915,9 @@ private:
       return;
     }
   }
+
+  mutable bool used_summary_overflow_ = false;
+  mutable bool used_fact_widening_ = false;
 };
 
 } // namespace

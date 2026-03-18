@@ -187,6 +187,14 @@ private:
   }
 
   template <typename A>
+  static auto usedSummaryOverflow(const A &analysis, int)
+      -> decltype(analysis.usedSummaryOverflow()) {
+    return analysis.usedSummaryOverflow();
+  }
+
+  static bool usedSummaryOverflow(const Analysis &, long) { return false; }
+
+  template <typename A>
   static auto factIsApproximate(const A &analysis, const Fact &fact, int)
       -> decltype(analysis.factIsApproximate(fact)) {
     return analysis.factIsApproximate(fact);
@@ -195,6 +203,14 @@ private:
   static bool factIsApproximate(const Analysis &, const Fact &, long) {
     return false;
   }
+
+  template <typename A>
+  static auto usedFactWidening(const A &analysis, int)
+      -> decltype(analysis.usedFactWidening()) {
+    return analysis.usedFactWidening();
+  }
+
+  static bool usedFactWidening(const Analysis &, long) { return false; }
 
   template <typename A>
   static auto getCallEntryTransfer(A &analysis, const llvm::CallBase &call,
@@ -663,7 +679,10 @@ public:
       solvedMap[p.first] = p.second;
 
     res.status.summary_solve = rawRes.second;
-    res.status.approximated = !rawRes.second.converged;
+    res.status.used_bounded_inner_solve =
+        rawRes.second.hit_linear_limit || rawRes.second.hit_fixpoint_limit;
+    res.status.approximated =
+        !rawRes.second.converged || res.status.used_bounded_inner_solve;
     for (const auto &entry : functionSymbols) {
       auto exprIt = fullSummaryExprs.find(entry.first);
       if (exprIt == fullSummaryExprs.end())
@@ -829,11 +848,20 @@ public:
         }
       }
     }
+    if (usedSummaryOverflow(analysis, 0)) {
+      res.status.used_summary_overflow = true;
+      res.status.approximated = true;
+    }
+    if (usedFactWidening(analysis, 0)) {
+      res.status.used_fact_widening = true;
+      res.status.approximated = true;
+    }
     res.status.propagation_steps = propagationSteps;
     res.status.overall_hit_limit =
         res.status.summary_solve.hit_limit || res.status.propagation_hit_limit;
     res.status.overall_converged =
-        res.status.summary_solve.converged && res.status.propagation_converged;
+        res.status.summary_solve.converged && res.status.propagation_converged &&
+        !res.status.used_summary_overflow && !res.status.used_fact_widening;
     return res;
   }
 };

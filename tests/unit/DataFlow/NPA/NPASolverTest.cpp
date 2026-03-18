@@ -80,6 +80,9 @@ TEST(NPA, HoleCanReferenceOtherEquationVariable) {
   EXPECT_TRUE(newtonMap.at("x"));
   EXPECT_TRUE(newtonRes.second.converged);
   EXPECT_FALSE(newtonRes.second.hit_limit);
+  EXPECT_FALSE(newtonRes.second.hit_outer_limit);
+  EXPECT_FALSE(newtonRes.second.hit_linear_limit);
+  EXPECT_FALSE(newtonRes.second.hit_fixpoint_limit);
 }
 
 TEST(NPA, SolverReportsWhenOuterIterationCapReturnsApproximation) {
@@ -98,10 +101,35 @@ TEST(NPA, SolverReportsWhenOuterIterationCapReturnsApproximation) {
   EXPECT_TRUE(cappedMap.at("y"));
   EXPECT_FALSE(capped.second.converged);
   EXPECT_TRUE(capped.second.hit_limit);
+  EXPECT_TRUE(capped.second.hit_outer_limit);
+  EXPECT_FALSE(capped.second.hit_linear_limit);
+  EXPECT_FALSE(capped.second.hit_fixpoint_limit);
   EXPECT_EQ(capped.second.equation_count, 2);
   EXPECT_EQ(capped.second.requested_max_iters, 1);
   EXPECT_EQ(capped.second.effective_max_iters, 1);
   EXPECT_EQ(capped.second.linear_strategy, npa::LinearStrategy::Worklist);
+}
+
+TEST(NPA, ExactModeNewtonReportsNoApproximationSources) {
+  using D = BoolSemiring;
+  using Exp = npa::Exp0<D>;
+  using E = npa::E0<D>;
+
+  std::vector<std::pair<npa::Symbol, E>> eqns;
+  eqns.emplace_back("x", Exp::hole("y"));
+  eqns.emplace_back("y", Exp::term(D::one()));
+
+  auto result = npa::NewtonSolver<D>::solve(eqns);
+  auto solved = toMap<D>(result.first);
+
+  EXPECT_TRUE(solved.at("x"));
+  EXPECT_TRUE(solved.at("y"));
+  EXPECT_TRUE(result.second.converged);
+  EXPECT_FALSE(result.second.hit_limit);
+  EXPECT_FALSE(result.second.used_approx_equal);
+  EXPECT_FALSE(result.second.hit_outer_limit);
+  EXPECT_FALSE(result.second.hit_linear_limit);
+  EXPECT_FALSE(result.second.hit_fixpoint_limit);
 }
 
 TEST(NPA, NewtonInitMatchesFOfBottomAndApproximantsAreMonotone) {
@@ -511,11 +539,14 @@ TEST(NPA, AutomaticNIterationBoundFallsBackWhenEqualityIsApproximate) {
   std::string stderrOutput = testing::internal::GetCapturedStderr();
 
   auto solved = toMap<D>(result.first);
-  EXPECT_TRUE(result.second.converged);
+  EXPECT_FALSE(result.second.converged);
   EXPECT_FALSE(result.second.hit_limit);
   EXPECT_TRUE(result.second.used_approx_equal);
   EXPECT_TRUE(result.second.used_auto_n_cap);
   EXPECT_TRUE(result.second.retried_without_auto_n_cap);
+  EXPECT_FALSE(result.second.hit_outer_limit);
+  EXPECT_FALSE(result.second.hit_linear_limit);
+  EXPECT_FALSE(result.second.hit_fixpoint_limit);
   EXPECT_TRUE(solved.at("x"));
   EXPECT_GE(D::getApproxCounter(), 4);
   EXPECT_NE(stderrOutput.find("automatic n-iteration bound was insufficient"),
@@ -552,6 +583,9 @@ TEST(NPA, LinearStepLimitMarksNewtonResultAsApproximate) {
 
   EXPECT_FALSE(result.second.converged);
   EXPECT_TRUE(result.second.hit_limit);
+  EXPECT_TRUE(result.second.hit_outer_limit);
+  EXPECT_TRUE(result.second.hit_linear_limit);
+  EXPECT_FALSE(result.second.hit_fixpoint_limit);
 }
 
 TEST(NPA, NewtonRejectsMuExpressions) {
@@ -593,6 +627,9 @@ TEST(NPA, FixpointIterationLimitMarksMuClosureAsApproximate) {
   EXPECT_TRUE(solved.at("x"));
   EXPECT_FALSE(result.second.converged);
   EXPECT_TRUE(result.second.hit_limit);
+  EXPECT_FALSE(result.second.hit_outer_limit);
+  EXPECT_FALSE(result.second.hit_linear_limit);
+  EXPECT_TRUE(result.second.hit_fixpoint_limit);
 }
 
 TEST(NPA, ProgramTransferDomainPreservesMayWriteAcrossCombineAndExtend) {

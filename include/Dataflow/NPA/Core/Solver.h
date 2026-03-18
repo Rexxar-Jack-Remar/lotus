@@ -14,6 +14,13 @@
  *   ν^(i+1) = ν^(i) + Δ^(i) (non-idempotent). The linear system is solved
  *   by Naive, Worklist, SCC, or TensorProduct (LinearStrategy).
  *
+ * Exact-vs-approximate status:
+ * - `Stat::converged` means theorem-faithful convergence: equality stabilized
+ *   and no approximation hook fired.
+ * - `used_approx_equal`, `hit_outer_limit`, `hit_linear_limit`, and
+ *   `hit_fixpoint_limit` record the approximation sources explicitly.
+ * - `hit_limit` remains the aggregate of the bounding hooks only.
+ *
  * References: Esparza et al. (JACM); Reps et al. (TOPLAS 2016).
  */
 
@@ -97,7 +104,7 @@ template <class D, class ITER> struct Solver {
     }
     const bool hit_outer_limit = !converged && max >= 0 && it >= max;
     if (hit_outer_limit) {
-      npa_note_limit_hit();
+      npa_note_outer_limit_hit();
       if (verbose)
         std::cerr << "[conv] hit outer iteration cap=" << max << "\n";
     }
@@ -106,12 +113,15 @@ template <class D, class ITER> struct Solver {
     st.iters = it;
     st.time = std::chrono::duration<double>(toc - tic).count();
     st.hit_limit = npa_limit_hit();
-    st.converged = converged && !st.hit_limit;
+    st.hit_outer_limit = npa_hit_outer_limit();
+    st.hit_linear_limit = npa_hit_linear_limit();
+    st.hit_fixpoint_limit = npa_hit_fixpoint_limit();
     st.equation_count = static_cast<int>(eqns.size());
     st.requested_max_iters = max;
     st.effective_max_iters = max;
     st.linear_strategy = linStrat;
     st.used_approx_equal = DomainHasApproxEqual<D>::value;
+    st.converged = converged && !st.hit_limit && !st.used_approx_equal;
     st.domain_contract_checks_run = checksRun;
     st.domain_contract_checks_failed = checksRun && !contractOk;
     return {cur, st};
@@ -149,7 +159,9 @@ template <class D> struct KleeneIter {
 ///
 /// This is the paper-faithful core when the domain uses exact equality and the
 /// selected linear solver reaches the least solution without hitting any
-/// bounding hooks. Tensor mode is only used through paper-admissible traits;
+/// bounding hooks. `approx_equal`, bounded fixpoint/linear hooks, or explicit
+/// outer caps intentionally move the result into the approximate mode recorded
+/// in `Stat`. Tensor mode is only used through paper-admissible traits;
 /// otherwise the implementation deliberately falls back to the base solver.
 template <class D> struct NewtonIter {
   using V = DomVal<D>;
