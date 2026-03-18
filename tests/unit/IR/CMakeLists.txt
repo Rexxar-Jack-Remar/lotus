@@ -1,6 +1,5 @@
-add_lotus_test(pdg_slicing_test PDGSlicingTest.cpp)
+add_lotus_test(pdg_query_test PDGQueryTest.cpp)
 add_lotus_test(cypher_query_test CypherQueryTest.cpp)
-add_lotus_test(pdg_optimizer_query_test PDGOptimizerQueryTest.cpp)
 add_lotus_test(property_baased_slicing_test PropertyBasedSlicingTest.cpp)
 add_lotus_test(svfg_serializer_test SVFGSerializerTest.cpp)
 add_lotus_test(svfg_memoryssa_test SVFGMemorySSATest.cpp)

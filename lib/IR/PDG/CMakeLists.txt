@@ -14,16 +14,12 @@ add_library(CanaryPDG STATIC
   Core/PDGNode.cpp
   Core/ProgramDependencyGraph.cpp
   Core/Tree.cpp
-  Analysis/ContextSensitiveSlicing.cpp
   Analysis/CypherQuery.cpp
-  Analysis/DataFlowQuery.cpp
-  Analysis/DependenceQuery.cpp
-  Analysis/MotionLegality.cpp
-  Analysis/PDGDiff.cpp
+  Analysis/PDGQuery.cpp
+  Analysis/SummaryQuery.cpp
+  Analysis/ImpactQuery.cpp
+  Analysis/ResourceFlowQuery.cpp
   Analysis/PropertyBasedSlicing.cpp
-  Analysis/SchedulingQuery.cpp
-  Analysis/Slicing.cpp
-  Analysis/ThinSlicing.cpp
   Support/DebugInfoUtils.cpp
   Support/GraphWriter.cpp
   Support/PDGUtils.cpp

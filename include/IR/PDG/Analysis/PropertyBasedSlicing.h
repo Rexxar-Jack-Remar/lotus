@@ -1,14 +1,7 @@
 #pragma once
 
-#include "IR/PDG/Analysis/Slicing.h"
-
-#include <set>
 #include <string>
 #include <vector>
-
-namespace llvm {
-class Module;
-} // namespace llvm
 
 namespace pdg {
 
@@ -29,15 +22,15 @@ enum class PropertyKind {
 };
 
 enum class PropertyType {
-  CHECK, // Safety property
-  COVER  // Coverage property
+  CHECK,
+  COVER
 };
 
 struct PropertyRule {
   PropertyType type = PropertyType::CHECK;
   PropertyKind kind = PropertyKind::Unknown;
-  std::string target;   // For call() targets
-  bool negated = false; // For ! operator in LTL
+  std::string target;
+  bool negated = false;
 };
 
 class PropertySpec {
@@ -56,23 +49,6 @@ private:
   PropertyType _type = PropertyType::CHECK;
 
   friend class PropertyParser;
-};
-
-class PropertyBasedSlicing {
-public:
-  using NodeSet = std::set<Node *>;
-
-  explicit PropertyBasedSlicing(GenericGraph &pdg) : _pdg(pdg) {}
-
-  NodeSet resolveCriteria(const llvm::Module &M,
-                          const PropertySpec &spec) const;
-  NodeSet computeBackwardSlice(const llvm::Module &M,
-                               const PropertySpec &spec) const;
-  NodeSet computeForwardSlice(const llvm::Module &M,
-                              const PropertySpec &spec) const;
-
-private:
-  GenericGraph &_pdg;
 };
 
 } // namespace pdg

@@ -71,10 +71,12 @@ public:
   /// @brief Gets the set of incoming edges
   /// @return Reference to the set of incoming edges
   EdgeSet &getInEdgeSet() { return _in_edge_set; }
+  const EdgeSet &getInEdgeSet() const { return _in_edge_set; }
 
   /// @brief Gets the set of outgoing edges
   /// @return Reference to the set of outgoing edges
   EdgeSet &getOutEdgeSet() { return _out_edge_set; }
+  const EdgeSet &getOutEdgeSet() const { return _out_edge_set; }
 
   /// @brief Sets the node type
   /// @param node_type Type of the node (formal in/out, actual in/out, global,
@@ -87,7 +89,7 @@ public:
 
   /// @brief Checks if this node has been visited (for graph traversal)
   /// @return True if visited, false otherwise
-  bool isVisited() { return _is_visited; }
+  bool isVisited() const { return _is_visited; }
 
   /// @brief Gets the function containing this node (if any)
   /// @return Pointer to the containing function, or nullptr
@@ -100,6 +102,7 @@ public:
   /// @brief Gets the LLVM value associated with this node
   /// @return Pointer to the LLVM value, or nullptr
   llvm::Value *getValue() { return _val; }
+  const llvm::Value *getValue() const { return _val; }
 
   /// @brief Gets the debug information type for this node
   /// @return Pointer to the DIType, or nullptr

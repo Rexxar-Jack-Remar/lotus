@@ -70,11 +70,17 @@ public:
 
   /// @brief Adds an edge to the graph
   /// @param e Edge to add
-  void addEdge(Edge &e) { _edge_set.insert(&e); }
+  void addEdge(Edge &e) {
+    _edge_set.insert(&e);
+    bumpEpoch();
+  }
 
   /// @brief Adds a node to the graph
   /// @param n Node to add
-  void addNode(Node &n) { _node_set.insert(&n); }
+  void addNode(Node &n) {
+    _node_set.insert(&n);
+    bumpEpoch();
+  }
 
   /// @brief Gets the node associated with an LLVM value
   /// @param v The LLVM value to look up
@@ -109,6 +115,7 @@ public:
   /// (each edge appears exactly once there) and delete them before deleting
   /// the nodes themselves.
   void reset() {
+    bumpEpoch();
     _is_build = false;
     // Collect every edge exactly once via out-edge sets.
     std::unordered_set<Edge *> edges_to_delete;
@@ -130,6 +137,8 @@ public:
     _edge_set.clear();
     _node_set.clear();
   }
+
+  unsigned long long getEpoch() const { return _epoch; }
 
   /// @brief Checks if there is a path from src to dst
   /// @param src Source node
@@ -154,10 +163,13 @@ public:
   void dumpGraph();
 
 protected:
+  void bumpEpoch() { ++_epoch; }
+
   ValueNodeMap _val_node_map;
   EdgeSet _edge_set;
   NodeSet _node_set;
   bool _is_build = false;
+  unsigned long long _epoch = 1;
 };
 
 /// @brief Program-specific graph container (singleton)

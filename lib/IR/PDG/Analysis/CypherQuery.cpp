@@ -3,8 +3,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "IR/PDG/Analysis/MotionLegality.h"
-#include "IR/PDG/Analysis/SchedulingQuery.h"
+#include "IR/PDG/Analysis/PDGQuery.h"
 #include "IR/PDG/Support/DebugInfoUtils.h"
 
 #include <algorithm>
@@ -2659,8 +2658,10 @@ CypherQueryExecutor::canMoveEarlier(Node *moving, Node *anchor) {
     return result;
   }
 
-  MotionLegalityQuery mlq(pdg_);
-  MotionLegalityResult legality = mlq.canMoveEarlier(*moving, *anchor);
+  TransformQuery query(pdg_);
+  LLVMQueryContext llvm_context;
+  MotionCheckResult legality =
+      query.canMoveEarlier(*moving, *anchor, llvm_context);
   result->setBooleanValue(legality.legal);
   return result;
 }
@@ -2674,8 +2675,10 @@ std::unique_ptr<CypherResult> CypherQueryExecutor::canMoveLater(Node *moving,
     return result;
   }
 
-  MotionLegalityQuery mlq(pdg_);
-  MotionLegalityResult legality = mlq.canMoveLater(*moving, *anchor);
+  TransformQuery query(pdg_);
+  LLVMQueryContext llvm_context;
+  MotionCheckResult legality =
+      query.canMoveLater(*moving, *anchor, llvm_context);
   result->setBooleanValue(legality.legal);
   return result;
 }
@@ -2689,8 +2692,9 @@ std::unique_ptr<CypherResult> CypherQueryExecutor::independent(Node *a,
     return result;
   }
 
-  SchedulingQuery sq(pdg_);
-  IndependenceResult indep = sq.independent(*a, *b);
+  TransformQuery query(pdg_);
+  LLVMQueryContext llvm_context;
+  IndependenceCheckResult indep = query.independent(*a, *b, llvm_context);
   result->setBooleanValue(indep.independent);
   return result;
 }
@@ -2703,10 +2707,12 @@ CypherQueryExecutor::readySet(const std::vector<Node *> &region,
   std::set<Node *> region_set(region.begin(), region.end());
   std::set<Node *> scheduled_set(scheduled.begin(), scheduled.end());
 
-  SchedulingQuery sq(pdg_);
-  auto ready = sq.readySet(region_set, scheduled_set);
+  TransformQuery query(pdg_);
+  LLVMQueryContext llvm_context;
+  PDGQueryResult ready = query.readySet(PDGQueryScope::nodeSet(region_set),
+                                        scheduled_set, llvm_context);
 
-  for (Node *n : ready) {
+  for (Node *n : ready.nodes) {
     result->addNode(n);
   }
 
@@ -2719,8 +2725,10 @@ CypherQueryExecutor::criticalPath(const std::vector<Node *> &region) {
       std::make_unique<CypherResult>(CypherResult::ResultType::INTEGER);
 
   std::set<Node *> region_set(region.begin(), region.end());
-  SchedulingQuery sq(pdg_);
-  size_t length = sq.criticalPathLength(region_set);
+  TransformQuery query(pdg_);
+  LLVMQueryContext llvm_context;
+  size_t length = query.criticalPathLength(PDGQueryScope::nodeSet(region_set),
+                                           llvm_context);
 
   result->setIntegerValue(static_cast<int64_t>(length));
   return result;
