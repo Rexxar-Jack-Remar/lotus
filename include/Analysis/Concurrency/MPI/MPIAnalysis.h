@@ -46,6 +46,10 @@ public:
     MPIModelGapDomain model_gap_domain = MPIModelGapDomain::None;
     size_t communicator_class_id = 0;
     size_t participant_class_id = 0;
+    size_t channel_class_id = 0;
+    size_t request_set_id = 0;
+    std::string subsystem;
+    std::string reason_bucket;
     std::string code;
     std::string detail;
   };
@@ -100,6 +104,8 @@ public:
     std::vector<const llvm::Instruction *> invalid_rma_transitions;
     std::vector<const llvm::Instruction *> use_after_free_windows;
     std::vector<const llvm::Instruction *> double_window_free;
+    std::vector<MPIProcessSetFact> process_set_facts;
+    std::vector<MPIRequestSetFact> request_set_facts;
     std::vector<MPIParticipantSet> participant_sets;
     std::vector<MPIChannelObligation> channel_obligations;
     std::vector<CollectiveProtocolFrontier> protocol_frontiers;
@@ -118,6 +124,9 @@ public:
   }
   const std::vector<MPIRequestFact> &getRequestFacts() const {
     return abstract_state_.request_facts;
+  }
+  const std::vector<MPIRequestSetFact> &getRequestSetFacts() const {
+    return abstract_state_.request_set_facts;
   }
   const std::vector<MPIChannelAutomaton> &getChannelAutomata() const {
     return abstract_state_.channel_automata;

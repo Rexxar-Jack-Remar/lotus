@@ -6,9 +6,11 @@ communication structure in the SPMD model rather than shared-memory threading.
 ## Components
 
 - `MPIProcessModel`: extracts MPI operations and records metadata such as
-  communicator, rank, tag, request, and window handles.
-- `MPICollectiveAnalysis`: checks collective compatibility and flags
-  rank-guarded collectives.
+  communicator, rank, tag, request, and window handles. It is the emitter of
+  normalized MPI facts, not the final semantic owner of point-to-point or
+  request truth.
+- `MPICollectiveAnalysis`: owns collective protocol composition, collective
+  compatibility, and rank-guarded collective reasoning.
 - `MPIRMAAnalysis`: tracks RMA windows, synchronization epochs, and possible
   RMA races.
 - `MPIRankAnalysis`: symbolic rank reasoning used by the collective checker.
@@ -18,10 +20,14 @@ communication structure in the SPMD model rather than shared-memory threading.
 The following internal facts are the primary reasoning surfaces for the MPI
 subsystem:
 
-- `MPIParticipantSet`: canonical participant/rank scope facts
-- `MPIChannelObligation`: point-to-point and request/discharge facts
+- `MPIProcessSetFact` / `MPIParticipantSet`: canonical process/rank scope facts
+- `MPIRequestSetFact`: request lifecycle and completion-scope facts
+- `MPIChannelAutomaton`: channel state, ambiguity, and discharge facts
+- `MPIChannelObligation`: projected point-to-point and request/discharge facts
 - `CollectiveProtocolFrontier`: collective grouping/proof state
 - `RMASynchronizationFact`: RMA epoch, completion, and synchronization facts
+- `MPIFunctionSummary`: projected function exit-state across channel/request and
+  collective effects
 
 Legacy result buckets and summary counters are projected from these facts for
 compatibility.
@@ -62,11 +68,13 @@ The top-level results include:
 
 - Deadlock detection is static and conservative; unresolved request/channel
   facts degrade to explicit model gaps.
-- Collective checking is frontier-based but still intraprocedural and
-  conservative when communicator or participant scopes are unresolved.
+- Collective checking is summary-driven but still conservative when
+  communicator, participant, or helper-summary scopes are unresolved.
 - Unknown ranks, tags, or communicators are handled conservatively.
 - PSCW RMA synchronization is modeled, but unresolved access/exposure scopes
   still degrade to model gaps rather than strong proofs.
+- Some public result buckets remain compatibility projections of richer
+  automaton/summary state rather than direct user-facing semantic APIs.
 
 ## Tests
 

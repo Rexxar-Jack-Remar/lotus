@@ -18,6 +18,7 @@
 #include <utility>
 
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
@@ -66,6 +67,42 @@ getFrontierScopeKey(const MPICollectiveAnalysis::CollectiveCall &call) {
       call.protocol_sequence_id);
 }
 
+const Function *getInstructionCallee(const Instruction *inst) {
+  const auto *cb = dyn_cast_or_null<CallBase>(inst);
+  return cb ? cb->getCalledFunction() : nullptr;
+}
+
+std::vector<const Function *> collectRootFunctions(Module &module) {
+  std::vector<const Function *> roots;
+  std::set<const Function *> called_functions;
+
+  for (const Function &function : module) {
+    if (function.isDeclaration()) {
+      continue;
+    }
+    for (const Instruction &inst : instructions(function)) {
+      const Function *callee = getInstructionCallee(&inst);
+      if (callee && !callee->isDeclaration()) {
+        called_functions.insert(callee);
+      }
+    }
+  }
+
+  for (const Function &function : module) {
+    if (!function.isDeclaration() && called_functions.count(&function) == 0) {
+      roots.push_back(&function);
+    }
+  }
+  if (roots.empty()) {
+    for (const Function &function : module) {
+      if (!function.isDeclaration()) {
+        roots.push_back(&function);
+      }
+    }
+  }
+  return roots;
+}
+
 } // namespace
 
 void MPICollectiveAnalysis::analyzeCollectives() {
@@ -77,12 +114,34 @@ void MPICollectiveAnalysis::analyzeCollectives() {
   size_t next_frontier_id = 1;
   std::map<size_t, size_t> frontier_indices;
   const MPI::MPIRankAnalysis *rank_analysis = process_model_.getRankAnalysis();
-
+  std::unordered_map<size_t, const MPIEvent *> collective_event_by_op_index;
   for (const MPIEvent &event : process_model_.getSemanticEvents()) {
-    if (!event.has_collective_semantics) {
-      continue;
+    if (event.has_collective_semantics) {
+      collective_event_by_op_index[event.operation_index] = &event;
     }
+  }
 
+  std::unordered_map<const Function *, const MPIFunctionSummary *> summary_by_function;
+  for (const MPIFunctionSummary &summary : process_model_.getFunctionSummaries()) {
+    summary_by_function[summary.function] = &summary;
+  }
+
+  std::vector<const MPIFunctionSummary *> root_summaries;
+  for (const Function *root : collectRootFunctions(
+           const_cast<Module &>(process_model_.getModule()))) {
+    auto it = summary_by_function.find(root);
+    if (it != summary_by_function.end()) {
+      root_summaries.push_back(it->second);
+    }
+  }
+  if (root_summaries.empty()) {
+    for (const auto &entry : summary_by_function) {
+      root_summaries.push_back(entry.second);
+    }
+  }
+
+  auto emitCollectiveCall = [&](const MPIEvent &event,
+                                const Function *participant_context) {
     const MPIOperation &op =
         process_model_.getAllOperations()[event.operation_index];
     CollectiveCall call;
@@ -95,7 +154,7 @@ void MPICollectiveAnalysis::analyzeCollectives() {
     call.participant_class_id = event.collective.scope.participant_class_id;
     call.collective_protocol_class_id =
         event.collective.scope.protocol_class_id;
-    call.function = op.function;
+    call.function = participant_context ? participant_context : op.function;
     call.participants = op.participant_set;
     call.reachability = event.collective.reachability;
     call.root_rank = event.collective.root_rank;
@@ -220,6 +279,97 @@ void MPICollectiveAnalysis::analyzeCollectives() {
       }
     }
     collective_calls_.push_back(call);
+  };
+
+  for (const MPIFunctionSummary *summary : root_summaries) {
+    if (!summary) {
+      continue;
+    }
+    const std::vector<size_t> &collective_ops =
+        !summary->expanded_collective_operation_indices.empty()
+            ? summary->expanded_collective_operation_indices
+            : summary->expanded_operation_indices;
+    for (size_t op_index : collective_ops) {
+      auto event_it = collective_event_by_op_index.find(op_index);
+      if (event_it == collective_event_by_op_index.end()) {
+        continue;
+      }
+      emitCollectiveCall(*event_it->second, summary->function);
+    }
+    if (summary->unresolved_indirect_call_effect &&
+        !summary->expanded_collective_operation_indices.empty()) {
+      protocol_diagnostics_["collective_summary_unresolved"]++;
+    }
+  }
+
+  if (collective_calls_.empty()) {
+    for (const MPIEvent &event : process_model_.getSemanticEvents()) {
+      if (event.has_collective_semantics) {
+        emitCollectiveCall(event, nullptr);
+      }
+    }
+  }
+
+  std::unordered_map<const Instruction *, size_t> op_index_by_inst;
+  for (size_t idx = 0; idx < process_model_.getAllOperations().size(); ++idx) {
+    const Instruction *inst = process_model_.getAllOperations()[idx].inst;
+    if (inst) {
+      op_index_by_inst[inst] = idx;
+    }
+  }
+
+  std::unordered_map<const Function *, MPIFunctionSummary *> mutable_summary_by_function;
+  for (MPIFunctionSummary &summary : process_model_.getMutableFunctionSummaries()) {
+    mutable_summary_by_function[summary.function] = &summary;
+    summary.collective_call_operation_indices.clear();
+    summary.entered_collective_protocol_slots.clear();
+    summary.outstanding_collective_frontier_ids.clear();
+    summary.unresolved_collective_summary_effect = false;
+  }
+
+  for (const CollectiveCall &call : collective_calls_) {
+    auto summary_it = mutable_summary_by_function.find(call.function);
+    if (summary_it == mutable_summary_by_function.end() || !call.inst) {
+      continue;
+    }
+    auto op_it = op_index_by_inst.find(call.inst);
+    if (op_it == op_index_by_inst.end()) {
+      continue;
+    }
+    MPIFunctionSummary &summary = *summary_it->second;
+    summary.collective_call_operation_indices.push_back(op_it->second);
+    summary.entered_collective_protocol_slots.push_back(call.protocol_sequence_id);
+    if (call.protocol_relation.proof != concurrency::ProofStrength::Must) {
+      summary.unresolved_collective_summary_effect = true;
+    }
+  }
+
+  for (const CollectiveProtocolFrontier &frontier : protocol_frontiers_) {
+    for (const Instruction *inst : frontier.transitions) {
+      auto summary_it = mutable_summary_by_function.find(inst ? inst->getFunction() : nullptr);
+      if (summary_it == mutable_summary_by_function.end()) {
+        continue;
+      }
+      MPIFunctionSummary &summary = *summary_it->second;
+      if (frontier.relation.proof != concurrency::ProofStrength::Must) {
+        summary.outstanding_collective_frontier_ids.push_back(frontier.frontier_id);
+        summary.unresolved_collective_summary_effect = true;
+      }
+    }
+  }
+
+  for (MPIFunctionSummary &summary : process_model_.getMutableFunctionSummaries()) {
+    auto dedup = [](std::vector<size_t> &values) {
+      std::sort(values.begin(), values.end());
+      values.erase(std::unique(values.begin(), values.end()), values.end());
+    };
+    dedup(summary.collective_call_operation_indices);
+    dedup(summary.entered_collective_protocol_slots);
+    dedup(summary.outstanding_collective_frontier_ids);
+    if (summary.unresolved_indirect_call_effect &&
+        !summary.collective_call_operation_indices.empty()) {
+      summary.unresolved_collective_summary_effect = true;
+    }
   }
 }
 

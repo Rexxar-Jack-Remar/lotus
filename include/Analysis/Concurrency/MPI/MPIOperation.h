@@ -118,6 +118,44 @@ enum class MPICollectiveShape {
   Intercommunicator
 };
 
+enum class MPIProcessSetScopeKind {
+  Unknown,
+  All,
+  ExactRank,
+  RankRange,
+  AllExcept
+};
+
+enum class MPICommunicatorSubgroupTokenKind {
+  None,
+  SplitColorConst,
+  SplitColorUnknown,
+  CreateGroup,
+  Intercomm
+};
+
+enum class MPICommunicatorSide { Unknown, Local, Remote, Both };
+
+enum class MPITagClassKind { Exact, Wildcard };
+
+enum class MPIRequestCompletionScopeKind {
+  None,
+  Single,
+  OneOfSet,
+  SubsetOfSet,
+  AllOfSet,
+  Unknown
+};
+
+enum class MPIChannelEndpointKind { Send, Receive };
+
+enum class MPIRequestSetKind {
+  Unknown,
+  PointToPoint,
+  Collective,
+  Persistent
+};
+
 enum class MPIRMAAccessKind { None, Put, Get, Accumulate, Atomic };
 
 enum class MPIRMASyncKind {
@@ -180,8 +218,14 @@ enum class MPIOpKind {
   UNKNOWN
 };
 
-struct MPIParticipantSet {
+struct MPIProcessSetFact {
   CommunicatorID communicator = nullptr;
+  size_t communicator_class_id = 0;
+  size_t subgroup_id = 0;
+  MPICommunicatorSubgroupTokenKind subgroup_token_kind =
+      MPICommunicatorSubgroupTokenKind::None;
+  MPICommunicatorSide communicator_side = MPICommunicatorSide::Unknown;
+  MPIProcessSetScopeKind scope_kind = MPIProcessSetScopeKind::Unknown;
   bool unknown = true;
   bool universal = false;
   int min_rank = 0;
@@ -189,30 +233,99 @@ struct MPIParticipantSet {
   std::set<int> excluded_ranks;
   size_t predicate_class_id = 0;
   size_t participant_class_id = 0;
+  std::string provenance;
+  std::string detail;
+
+  static MPIProcessSetScopeKind
+  classifyScope(bool unknown, bool universal, int min_rank, int max_rank,
+                const std::set<int> &excluded_ranks) {
+    if (unknown) {
+      return MPIProcessSetScopeKind::Unknown;
+    }
+    if (universal && excluded_ranks.empty() && max_rank < 0) {
+      return MPIProcessSetScopeKind::All;
+    }
+    if (!universal && excluded_ranks.empty() && min_rank == max_rank) {
+      return MPIProcessSetScopeKind::ExactRank;
+    }
+    if (universal && !excluded_ranks.empty()) {
+      return MPIProcessSetScopeKind::AllExcept;
+    }
+    return MPIProcessSetScopeKind::RankRange;
+  }
+
+  static MPIProcessSetFact
+  fromPredicate(const MPI::MPIRankPredicate &predicate, size_t communicator_class,
+                size_t subgroup, size_t predicate_class,
+                size_t participant_class,
+                MPICommunicatorSubgroupTokenKind subgroup_kind =
+                    MPICommunicatorSubgroupTokenKind::None,
+                MPICommunicatorSide side = MPICommunicatorSide::Unknown,
+                llvm::StringRef provenance = "rank-predicate") {
+    MPIProcessSetFact fact;
+    fact.communicator = predicate.communicator;
+    fact.communicator_class_id = communicator_class;
+    fact.subgroup_id = subgroup;
+    fact.subgroup_token_kind = subgroup_kind;
+    fact.communicator_side = side;
+    fact.unknown = predicate.unknown;
+    fact.universal = predicate.universal;
+    fact.min_rank = predicate.min_rank;
+    fact.max_rank = predicate.max_rank;
+    fact.excluded_ranks = predicate.excluded_ranks;
+    fact.predicate_class_id = predicate_class;
+    fact.participant_class_id = participant_class;
+    fact.scope_kind = classifyScope(fact.unknown, fact.universal, fact.min_rank,
+                                    fact.max_rank, fact.excluded_ranks);
+    fact.provenance = provenance.str();
+    return fact;
+  }
+};
+
+struct MPIParticipantSet {
+  CommunicatorID communicator = nullptr;
+  bool unknown = true;
+  bool universal = false;
+  int min_rank = 0;
+  int max_rank = -1;
+  std::set<int> excluded_ranks;
+  MPIProcessSetScopeKind scope_kind = MPIProcessSetScopeKind::Unknown;
+  size_t subgroup_id = 0;
+  MPICommunicatorSubgroupTokenKind subgroup_token_kind =
+      MPICommunicatorSubgroupTokenKind::None;
+  MPICommunicatorSide communicator_side = MPICommunicatorSide::Unknown;
+  size_t predicate_class_id = 0;
+  size_t participant_class_id = 0;
+  std::string provenance;
 
   static MPIParticipantSet fromPredicate(const MPI::MPIRankPredicate &predicate,
                                          size_t predicate_class,
                                          size_t participant_class) {
+    return fromProcessSetFact(MPIProcessSetFact::fromPredicate(
+        predicate, 0, 0, predicate_class, participant_class));
+  }
+
+  static MPIParticipantSet fromProcessSetFact(const MPIProcessSetFact &fact) {
     MPIParticipantSet set;
-    set.communicator = predicate.communicator;
-    set.unknown = predicate.unknown;
-    set.universal = predicate.universal;
-    set.min_rank = predicate.min_rank;
-    set.max_rank = predicate.max_rank;
-    set.excluded_ranks = predicate.excluded_ranks;
-    set.predicate_class_id = predicate_class;
-    set.participant_class_id = participant_class;
+    set.communicator = fact.communicator;
+    set.unknown = fact.unknown;
+    set.universal = fact.universal;
+    set.min_rank = fact.min_rank;
+    set.max_rank = fact.max_rank;
+    set.excluded_ranks = fact.excluded_ranks;
+    set.scope_kind = fact.scope_kind;
+    set.subgroup_id = fact.subgroup_id;
+    set.subgroup_token_kind = fact.subgroup_token_kind;
+    set.communicator_side = fact.communicator_side;
+    set.predicate_class_id = fact.predicate_class_id;
+    set.participant_class_id = fact.participant_class_id;
+    set.provenance = fact.provenance;
     return set;
   }
 
   bool constrainsParticipants() const {
-    if (unknown) {
-      return false;
-    }
-    if (!universal) {
-      return true;
-    }
-    return !excluded_ranks.empty() || max_rank >= 0;
+    return scope_kind != MPIProcessSetScopeKind::Unknown &&
+           scope_kind != MPIProcessSetScopeKind::All;
   }
 
   bool contains(int rank) const {
@@ -231,6 +344,16 @@ struct MPIParticipantSet {
   bool mayOverlap(const MPIParticipantSet &other) const {
     if (unknown || other.unknown) {
       return true;
+    }
+    if (communicator && other.communicator && communicator != other.communicator) {
+      return false;
+    }
+    if (subgroup_id != 0 && other.subgroup_id != 0 && subgroup_id != other.subgroup_id &&
+        subgroup_token_kind != MPICommunicatorSubgroupTokenKind::None &&
+        other.subgroup_token_kind != MPICommunicatorSubgroupTokenKind::None &&
+        subgroup_token_kind != MPICommunicatorSubgroupTokenKind::SplitColorUnknown &&
+        other.subgroup_token_kind != MPICommunicatorSubgroupTokenKind::SplitColorUnknown) {
+      return false;
     }
     const int lhs_upper = max_rank >= 0 ? max_rank : other.max_rank;
     const int rhs_upper = other.max_rank >= 0 ? other.max_rank : max_rank;
@@ -252,7 +375,9 @@ struct MPIParticipantSet {
   bool mustEqual(const MPIParticipantSet &other) const {
     return communicator == other.communicator && unknown == other.unknown &&
            universal == other.universal && min_rank == other.min_rank &&
-           max_rank == other.max_rank &&
+           max_rank == other.max_rank && scope_kind == other.scope_kind &&
+           subgroup_id == other.subgroup_id &&
+           subgroup_token_kind == other.subgroup_token_kind &&
            excluded_ranks == other.excluded_ranks;
   }
 
@@ -260,10 +385,13 @@ struct MPIParticipantSet {
     if (unknown) {
       return "participants:unknown";
     }
-    std::string key = universal ? "participants:universal"
-                                : "participants:bounded";
+    std::string key = "participants";
+    key += ":scope=" + std::to_string(static_cast<int>(scope_kind));
     key += ":min=" + std::to_string(min_rank);
     key += ":max=" + std::to_string(max_rank);
+    key += ":subgroup=" + std::to_string(subgroup_id);
+    key += ":subgroup-kind=" +
+           std::to_string(static_cast<int>(subgroup_token_kind));
     key += ":predicate=" + std::to_string(predicate_class_id);
     key += ":participant=" + std::to_string(participant_class_id);
     if (!excluded_ranks.empty()) {
@@ -286,13 +414,58 @@ struct MPIModelGap {
   const llvm::Instruction *inst = nullptr;
   CommunicatorID communicator = nullptr;
   size_t communicator_class_id = 0;
+  size_t subgroup_id = 0;
   size_t participant_class_id = 0;
+  size_t channel_class_id = 0;
+  size_t request_set_id = 0;
   concurrency::Relation relation;
   std::string code;
+  std::string provenance;
   std::string detail;
 };
 
+struct MPIChannelEndpointObligation {
+  size_t obligation_id = 0;
+  size_t operation_index = 0;
+  const llvm::Instruction *inst = nullptr;
+  size_t communicator_class_id = 0;
+  size_t channel_class_id = 0;
+  MPIChannelEndpointKind endpoint_kind = MPIChannelEndpointKind::Send;
+  MPIParticipantSet participants;
+  int peer_rank = -1;
+  int peer_rank_min = -1;
+  int peer_rank_max = -1;
+  int tag = -1;
+  MPITagClassKind tag_class = MPITagClassKind::Wildcard;
+  int64_t datatype_size = -1;
+  MPISendMode send_mode = MPISendMode::Unknown;
+  RequestID request = nullptr;
+  bool blocking = false;
+  bool communicator_resolved = false;
+  std::vector<size_t> candidate_ids;
+};
+
+struct MPIRequestSetFact {
+  size_t request_set_id = 0;
+  size_t communicator_class_id = 0;
+  size_t channel_class_id = 0;
+  std::vector<RequestID> requests;
+  MPIRequestArity arity = MPIRequestArity::None;
+  MPIRequestSetKind kind = MPIRequestSetKind::Unknown;
+  MPIRequestState state = MPIRequestState::Unknown;
+  MPIRequestCompletionScopeKind completion_scope =
+      MPIRequestCompletionScopeKind::Unknown;
+  const llvm::Instruction *origin_inst = nullptr;
+  const llvm::Instruction *transition_inst = nullptr;
+  concurrency::Relation relation;
+  std::string provenance;
+};
+
 struct MPIChannelObligation {
+  size_t channel_class_id = 0;
+  size_t sender_obligation_id = 0;
+  size_t receiver_obligation_id = 0;
+  size_t request_set_id = 0;
   size_t lhs_operation_index = 0;
   size_t rhs_operation_index = 0;
   size_t sender_operation_index = 0;
@@ -305,6 +478,7 @@ struct MPIChannelObligation {
   MPIParticipantSet sender_set;
   MPIParticipantSet receiver_set;
   int tag = -1;
+  MPITagClassKind tag_class = MPITagClassKind::Wildcard;
   int64_t send_datatype_size = -1;
   int64_t recv_datatype_size = -1;
   MPISendMode send_mode = MPISendMode::Unknown;
@@ -316,6 +490,7 @@ struct MPIChannelObligation {
   bool discharged = false;
   const llvm::Instruction *discharge_inst = nullptr;
   MPICommunicationMatch proof = MPICommunicationMatch::Unknown;
+  std::string proof_source;
   concurrency::Relation relation;
 };
 
@@ -372,6 +547,7 @@ struct MPIOperation {
   concurrency::Relation semantic_relation;
   MPI::RankExpr process_rank;
   MPI::MPIRankPredicate rank_predicate;
+  MPIProcessSetFact process_set_fact;
   MPIParticipantSet participant_set;
   std::string rank_path_summary;
   bool is_intercommunicator = false;

@@ -39,6 +39,10 @@ class MPIRMAAnalysis;
 // MPI Process Model
 // ============================================================================
 
+// MPIProcessModel is the normalized fact emitter for MPI analysis. It extracts
+// operations, endpoint obligations, request events, and communicator/process-set
+// metadata. Downstream code should prefer builder-owned automata/summaries as
+// semantic truth when both representations are available.
 class MPIProcessModel {
 public:
   struct ProcessInfo {
@@ -90,14 +94,35 @@ public:
     return participant_sets_;
   }
 
+  const std::vector<MPIProcessSetFact> &getProcessSetFacts() const {
+    return process_set_facts_;
+  }
+
   const std::vector<MPIModelGap> &getModelGaps() const { return model_gaps_; }
   const std::vector<MPICommunicatorFact> &getCommunicatorFacts() const {
     return communicator_facts_;
   }
 
+  const std::vector<MPIFunctionSummary> &getFunctionSummaries() const {
+    return function_summaries_;
+  }
+
+  std::vector<MPIFunctionSummary> &getMutableFunctionSummaries() {
+    return function_summaries_;
+  }
+
   const std::map<RequestID, MPIRequestStateSummary> &
   getRequestStateSummaries() const {
     return request_state_summaries_;
+  }
+
+  const std::vector<MPIRequestSetFact> &getRequestSetFacts() const {
+    return request_set_facts_;
+  }
+
+  const std::vector<MPIChannelEndpointObligation> &
+  getChannelEndpointObligations() const {
+    return channel_endpoint_obligations_;
   }
 
   const std::unordered_map<MPIOpKind, size_t> &getOperationKindCounts() const {
@@ -187,12 +212,16 @@ private:
   std::vector<MPIOperation> all_operations_;
   std::map<RequestID, NonBlockingOp> non_blocking_ops_;
   std::map<RequestID, MPIRequestStateSummary> request_state_summaries_;
+  std::vector<MPIRequestSetFact> request_set_facts_;
   std::vector<MPIEvent> semantic_events_;
   std::vector<MPIPointToPointObligation> point_to_point_obligations_;
+  std::vector<MPIChannelEndpointObligation> channel_endpoint_obligations_;
   std::vector<MPIChannelObligation> channel_obligations_;
+  std::vector<MPIProcessSetFact> process_set_facts_;
   std::vector<MPIParticipantSet> participant_sets_;
   std::vector<MPIModelGap> model_gaps_;
   std::vector<MPICommunicatorFact> communicator_facts_;
+  std::vector<MPIFunctionSummary> function_summaries_;
   std::unordered_map<MPIOpKind, size_t> operation_kind_counts_;
   std::unordered_map<const llvm::Value *, CommunicatorID>
       canonical_communicators_;
@@ -200,12 +229,14 @@ private:
   mutable size_t next_communicator_class_id_ = 1;
   mutable size_t next_communicator_subgroup_id_ = 1;
   std::unordered_map<const llvm::Value *, size_t> communicator_subgroup_ids_;
+  std::unordered_map<const llvm::Value *, MPICommunicatorSubgroupTokenKind>
+      communicator_subgroup_token_kinds_;
   std::unordered_map<const llvm::Value *, CommunicatorID> communicator_parents_;
   std::unordered_map<const llvm::Value *, MPICommunicatorCreationKind>
       communicator_creation_kinds_;
   std::unordered_map<const llvm::Value *, std::string> communicator_topologies_;
-  std::unordered_map<const llvm::Value *, MPI::MPIRankPredicate>
-      communicator_subgroups_;
+  std::unordered_map<const llvm::Value *, MPIProcessSetFact>
+      communicator_process_sets_;
   std::unordered_map<const llvm::Value *, std::pair<int, int>>
       communicator_size_ranges_;
   std::unordered_set<const llvm::Value *> intercommunicators_;
@@ -252,16 +283,21 @@ private:
                                  const llvm::Value *root);
   void registerCommunicatorSubgroup(const llvm::Value *alias,
                                     const llvm::Value *root,
-                                    int subgroup_token);
+                                    MPICommunicatorSubgroupTokenKind token_kind,
+                                    int subgroup_token = -1);
   void recordCommunicatorCreation(const llvm::Value *alias,
                                   const llvm::Value *root,
                                   MPICommunicatorCreationKind creation_kind,
-                                  const MPI::MPIRankPredicate *subgroup = nullptr,
+                                  const MPIProcessSetFact *subgroup = nullptr,
                                   llvm::StringRef topology = "",
                                   bool is_intercommunicator = false);
   size_t assignCommunicatorClass(CommunicatorID canonical);
   size_t getCommunicatorSubgroupID(const llvm::Value *communicator) const;
+  MPICommunicatorSubgroupTokenKind
+  getCommunicatorSubgroupTokenKind(const llvm::Value *communicator) const;
   void buildCommunicatorFacts();
+  void buildFunctionSummaries();
+  void augmentFunctionSummaries();
   void annotateRankConstraints(MPIOperation &op) const;
   int64_t getDatatypeExtent(const llvm::Value *datatype_arg,
                             const llvm::Instruction *context) const;

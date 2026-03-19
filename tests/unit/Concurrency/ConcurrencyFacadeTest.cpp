@@ -252,6 +252,52 @@ TEST_F(ConcurrencyFacadeTest, SummarizesMPIIssues) {
   EXPECT_EQ(summary.deferred_semantic_lowering_count, 1u);
 }
 
+TEST_F(ConcurrencyFacadeTest, SummarizesValidatedMPIStateCounters) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_rank(i8*, i32*)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+    declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Testany(i32, i8**, i32*, i32*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %rank = alloca i32, align 4
+      %req1 = alloca i8, align 1
+      %req2 = alloca i8, align 1
+      %reqs = alloca [2 x i8*], align 8
+      %slot0 = getelementptr inbounds [2 x i8*], [2 x i8*]* %reqs, i64 0, i64 0
+      %slot1 = getelementptr inbounds [2 x i8*], [2 x i8*]* %reqs, i64 0, i64 1
+      %index = alloca i32, align 4
+      %flag = alloca i32, align 4
+      store i8* %req1, i8** %slot0, align 8
+      store i8* %req2, i8** %slot1, align 8
+      store i32 1, i32* %flag, align 4
+      call i32 @MPI_Comm_rank(i8* %comm, i32* %rank)
+      %loaded = load i32, i32* %rank, align 4
+      %is_root = icmp eq i32 %loaded, 0
+      br i1 %is_root, label %then, label %cont
+
+    then:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      br label %cont
+
+    cont:
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req1)
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 2, i32 8, i8* %comm, i8* %req2)
+      call i32 @MPI_Testany(i32 2, i8** %slot0, i32* %index, i32* %flag, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto summary = concurrency::ConcurrencyFacade::analyzeMPI(*module);
+  EXPECT_GE(summary.collective_slot_count, 1u);
+  EXPECT_GE(summary.deferred_semantic_lowering_count, 1u);
+  EXPECT_GE(summary.rank_restricted_operation_count, 1u);
+}
+
 TEST_F(ConcurrencyFacadeTest, SummarizesExtendedMPIProtocolCounters) {
   const char *source = R"(
     declare i32 @MPI_Comm_rank(i8*, i32*)

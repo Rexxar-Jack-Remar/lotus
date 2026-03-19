@@ -28,6 +28,9 @@ namespace mpi {
 
 class MPIProcessModel;
 
+// MPICollectiveAnalysis owns collective protocol composition. It consumes the
+// normalized process-model facts plus function summaries and projects collective
+// protocol/frontier results for the public API.
 class MPICollectiveAnalysis {
 public:
   struct CollectiveCall {

@@ -48,7 +48,23 @@ void MPIAnalysis::runAnalysis() {
                               rma_analysis_)
           .build();
 
-  results_.orphaned_requests = process_model_.findOrphanedNonBlockingOps();
+  results_.orphaned_requests.clear();
+  for (const MPIRequestFact &fact : abstract_state_.request_facts) {
+    if (fact.state != MPIRequestState::Pending &&
+        fact.state != MPIRequestState::Active &&
+        fact.state != MPIRequestState::Created) {
+      continue;
+    }
+    MPIProcessModel::NonBlockingOp op;
+    op.issue_inst = fact.activation_inst ? fact.activation_inst : fact.origin_inst;
+    op.request = fact.request;
+    op.completion_state = fact.state;
+    op.wait_inst = fact.last_transition_inst;
+    op.peer_rank = fact.peer_rank;
+    op.tag = fact.tag;
+    op.comm = fact.communicator;
+    results_.orphaned_requests.push_back(op);
+  }
   results_.potential_deadlocks = abstract_state_.potential_deadlocks;
   results_.mismatched_collectives.clear();
   results_.conditional_collectives = abstract_state_.conditional_collective_insts;
@@ -97,6 +113,8 @@ void MPIAnalysis::runAnalysis() {
   results_.invalid_rma_transitions = abstract_state_.invalid_epoch_transitions;
   results_.use_after_free_windows = abstract_state_.use_after_free_windows;
   results_.double_window_free = abstract_state_.double_window_free;
+  results_.process_set_facts = abstract_state_.process_set_facts;
+  results_.request_set_facts = abstract_state_.request_set_facts;
   results_.participant_sets = abstract_state_.participant_sets;
   results_.channel_obligations = abstract_state_.channel_obligations;
   results_.protocol_frontiers = abstract_state_.protocol_frontiers;
@@ -157,6 +175,21 @@ void MPIAnalysis::runAnalysis() {
     diagnostic.model_gap_domain = gap.domain;
     diagnostic.communicator_class_id = gap.communicator_class_id;
     diagnostic.participant_class_id = gap.participant_class_id;
+    diagnostic.channel_class_id = gap.channel_class_id;
+    diagnostic.request_set_id = gap.request_set_id;
+    diagnostic.subsystem =
+        gap.provenance.empty() ? "process_model" : gap.provenance;
+    if (gap.code.find("identity_unresolved") != std::string::npos) {
+      diagnostic.reason_bucket = "identity_unresolved";
+    } else if (gap.code.find("candidate_nonunique") != std::string::npos) {
+      diagnostic.reason_bucket = "candidate_nonunique";
+    } else if (gap.code.find("subset_unresolved") != std::string::npos ||
+               gap.code.find("index_unresolved") != std::string::npos ||
+               gap.code.find("flag_unresolved") != std::string::npos) {
+      diagnostic.reason_bucket = "subset_unresolved";
+    } else if (gap.code.find("summary") != std::string::npos) {
+      diagnostic.reason_bucket = "summary_unresolved";
+    }
     diagnostic.code = gap.code;
     diagnostic.detail = gap.detail;
     results_.diagnostics.push_back(diagnostic);
@@ -177,6 +210,8 @@ void MPIAnalysis::runAnalysis() {
             : MPIModelGapDomain::None;
     diagnostic.communicator_class_id = op.communicator_class_id;
     diagnostic.participant_class_id = op.participant_class_id;
+    diagnostic.channel_class_id = op.channel_class_id;
+    diagnostic.subsystem = "process_model";
     diagnostic.code = op.semantic_relation.reason.empty()
                           ? "mpi_relation"
                           : op.semantic_relation.reason;
@@ -313,11 +348,41 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
      << getProtocolDiagnosticCount("collective_partial_reachability") << "\n";
   OS << "Participant sets tracked: " << results_.participant_sets.size()
      << "\n";
+  OS << "Request sets tracked: " << results_.request_set_facts.size() << "\n";
   OS << "Point-to-point channel obligations: "
      << results_.channel_obligations.size() << "\n";
+  size_t nonunique_channel_count = 0;
+  size_t unresolved_identity_channel_count = 0;
+  for (const MPIChannelAutomaton &automaton : abstract_state_.channel_automata) {
+    if (automaton.ambiguity_state == MPIChannelAutomaton::AmbiguityState::NonUnique) {
+      ++nonunique_channel_count;
+    } else if (automaton.ambiguity_state ==
+               MPIChannelAutomaton::AmbiguityState::UnresolvedIdentity) {
+      ++unresolved_identity_channel_count;
+    }
+  }
+  OS << "Non-unique channel automata: " << nonunique_channel_count << "\n";
+  OS << "Unresolved-identity channel automata: "
+     << unresolved_identity_channel_count << "\n";
+  size_t unresolved_request_sets = 0;
+  for (const MPIRequestSetFact &fact : abstract_state_.request_set_facts) {
+    if (fact.state == MPIRequestState::MayComplete ||
+        fact.completion_scope == MPIRequestCompletionScopeKind::Unknown) {
+      ++unresolved_request_sets;
+    }
+  }
+  OS << "Unresolved request sets: " << unresolved_request_sets << "\n";
   OS << "RMA synchronization facts: "
      << results_.rma_synchronization_facts.size() << "\n";
   OS << "Structured model gaps: " << results_.model_gaps.size() << "\n";
+  size_t unresolved_collective_summaries = 0;
+  for (const MPIFunctionSummary &summary : abstract_state_.function_summaries) {
+    if (summary.unresolved_collective_summary_effect) {
+      ++unresolved_collective_summaries;
+    }
+  }
+  OS << "Unresolved collective summaries: "
+     << unresolved_collective_summaries << "\n";
   OS << "Requests with may-complete status: "
      << countRequestStates(RequestCompletionState::MayComplete) << "\n";
   OS << "Requests with terminal status: "

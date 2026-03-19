@@ -4,6 +4,7 @@
 #include "Analysis/Concurrency/MPI/MPIOperation.h"
 
 #include <map>
+#include <string>
 #include <vector>
 
 namespace mpi {
@@ -96,16 +97,21 @@ struct MPIRequestEventState {
 
 struct MPIRequestStateSummary {
   RequestID request = nullptr;
+  size_t request_set_id = 0;
+  size_t channel_class_id = 0;
   const llvm::Instruction *origin_inst = nullptr;
   const llvm::Instruction *activation_inst = nullptr;
   const llvm::Instruction *last_transition_inst = nullptr;
   MPIRequestState state = MPIRequestState::Unknown;
+  MPIRequestCompletionScopeKind completion_scope =
+      MPIRequestCompletionScopeKind::Unknown;
   bool is_persistent = false;
   bool is_collective = false;
   int peer_rank = -1;
   int tag = -1;
   CommunicatorID communicator = nullptr;
   MPISendMode send_mode = MPISendMode::Unknown;
+  std::string provenance;
   std::vector<MPIRequestTransition> history;
 };
 

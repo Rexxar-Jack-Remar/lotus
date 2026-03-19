@@ -61,6 +61,9 @@ bool MPIRankPredicate::mayOverlap(const MPIRankPredicate &other) const {
   if (unknown || other.unknown) {
     return true;
   }
+  if (communicator && other.communicator && communicator != other.communicator) {
+    return false;
+  }
   const int lhs_upper = predicateUpperBound(*this);
   const int rhs_upper = predicateUpperBound(other);
   const int overlap_min = std::max(min_rank, other.min_rank);
@@ -78,6 +81,9 @@ bool MPIRankPredicate::mayOverlap(const MPIRankPredicate &other) const {
 
 bool MPIRankPredicate::mustEqual(const MPIRankPredicate &other) const {
   if (unknown || other.unknown) {
+    return false;
+  }
+  if (communicator && other.communicator && communicator != other.communicator) {
     return false;
   }
   return isConcrete() && other.isConcrete() && min_rank == other.min_rank &&
@@ -675,7 +681,7 @@ MPIRankAnalysis::getRankPredicateAtInstruction(const Instruction *inst) const {
 MPIRankAnalysis::ReachabilityKind
 MPIRankAnalysis::getReachabilityAtInstruction(const Instruction *inst) const {
   MPIRankPredicate predicate = getRankPredicateAtInstruction(inst);
-  if (predicate.unknown) {
+  if (predicate.unknown || !predicate.communicator) {
     return ReachabilityKind::Unknown;
   }
   return predicate.constrainsParticipants() ? ReachabilityKind::SomeRanks
@@ -811,6 +817,9 @@ MPIRankPredicate MPIRankAnalysis::mergePredicate(
   }
   if (rhs.unknown) {
     return lhs;
+  }
+  if (lhs.communicator && rhs.communicator && lhs.communicator != rhs.communicator) {
+    return MPIRankPredicate::makeUnknown();
   }
 
   MPIRankPredicate merged;
