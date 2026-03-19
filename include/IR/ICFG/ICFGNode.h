@@ -25,7 +25,14 @@ class ICFGNode : public GenericICFGNodeTy {
 
 public:
   /// kinds of ICFG node
-  enum ICFGNodeK { IntraBlock, FunEntryBlock, FunExitBlock, CallRetBlock };
+  enum ICFGNodeK {
+    IntraBlock,
+    FunEntryBlock,
+    FunExitBlock,
+    FunUnwindExitBlock,
+    CallRetBlock,
+    CallUnwindBlock
+  };
 
 public:
   /// @brief Constructs an ICFG node.
@@ -132,6 +139,26 @@ public:
   std::string toString() const;
 };
 
+/// @brief Dedicated function unwind-exit node shared by all escaping EH exits.
+class FunUnwindExitBlockNode : public ICFGNode {
+public:
+  FunUnwindExitBlockNode(NodeID id, const llvm::BasicBlock *bb)
+      : ICFGNode(id, FunUnwindExitBlock) {
+    _basic_block = bb;
+    _function = bb ? bb->getParent() : nullptr;
+  }
+
+  static inline bool classof(const FunUnwindExitBlockNode *) { return true; }
+  static inline bool classof(const ICFGNode *node) {
+    return node->getNodeKind() == FunUnwindExitBlock;
+  }
+  static inline bool classof(const GenericICFGNodeTy *node) {
+    return node->getNodeKind() == FunUnwindExitBlock;
+  }
+
+  std::string toString() const;
+};
+
 /// @brief Dedicated call return-site node keyed by call instruction.
 class CallRetBlockNode : public ICFGNode {
   const llvm::Instruction *callSite;
@@ -152,6 +179,31 @@ public:
   }
   static inline bool classof(const GenericICFGNodeTy *node) {
     return node->getNodeKind() == CallRetBlock;
+  }
+
+  std::string toString() const;
+};
+
+/// @brief Dedicated call unwind-site node keyed by call instruction.
+class CallUnwindBlockNode : public ICFGNode {
+  const llvm::Instruction *callSite;
+
+public:
+  CallUnwindBlockNode(NodeID id, const llvm::Instruction *cs,
+                      const llvm::BasicBlock *bb)
+      : ICFGNode(id, CallUnwindBlock), callSite(cs) {
+    _basic_block = bb;
+    _function = cs ? cs->getFunction() : (bb ? bb->getParent() : nullptr);
+  }
+
+  const llvm::Instruction *getCallSite() const { return callSite; }
+
+  static inline bool classof(const CallUnwindBlockNode *) { return true; }
+  static inline bool classof(const ICFGNode *node) {
+    return node->getNodeKind() == CallUnwindBlock;
+  }
+  static inline bool classof(const GenericICFGNodeTy *node) {
+    return node->getNodeKind() == CallUnwindBlock;
   }
 
   std::string toString() const;

@@ -9,6 +9,20 @@
 
 using namespace llvm;
 
+namespace {
+
+bool isExceptionalFunctionExitInst(const Instruction &inst) {
+  if (isa<ResumeInst>(inst))
+    return true;
+
+  if (const auto *cleanupRet = dyn_cast<CleanupReturnInst>(&inst))
+    return cleanupRet->unwindsToCaller();
+
+  return false;
+}
+
+} // namespace
+
 //
 //=============================================================================
 // ICFG Node
@@ -68,10 +82,30 @@ std::string FunExitBlockNode::toString() const {
   return rawstr.str();
 }
 
+std::string FunUnwindExitBlockNode::toString() const {
+  std::string str;
+  raw_string_ostream rawstr(str);
+  rawstr << "FunUnwindExitBlockNode ID: " << getId();
+  if (getFunction())
+    rawstr << ", Function: " << getFunction()->getName();
+  return rawstr.str();
+}
+
 std::string CallRetBlockNode::toString() const {
   std::string str;
   raw_string_ostream rawstr(str);
   rawstr << "CallRetBlockNode ID: " << getId();
+  if (getFunction())
+    rawstr << ", Function: " << getFunction()->getName();
+  if (callSite)
+    rawstr << ", CallSite: " << *callSite;
+  return rawstr.str();
+}
+
+std::string CallUnwindBlockNode::toString() const {
+  std::string str;
+  raw_string_ostream rawstr(str);
+  rawstr << "CallUnwindBlockNode ID: " << getId();
   if (getFunction())
     rawstr << ", Function: " << getFunction()->getName();
   if (callSite)
@@ -118,6 +152,15 @@ std::string RetCFGEdge::toString() const {
   return rawstr.str();
 }
 
+std::string ExcRetCFGEdge::toString() const {
+  std::string str;
+  raw_string_ostream rawstr(str);
+  rawstr << "ExcRetCFGEdge "
+         << "[" << getDstID() << "<--" << getSrcID() << "]\t CallSite: "
+         << *cs << "\t";
+  return rawstr.str();
+}
+
 //
 //=============================================================================
 // ICFG
@@ -158,7 +201,8 @@ ICFGEdge *ICFG::getICFGEdge(const ICFGNode *src, const ICFGNode *dst,
       continue;
     if (cs && (*iter)->getCallSite() != cs)
       continue;
-    if (!cs && (kind == ICFGEdge::CallCF || kind == ICFGEdge::RetCF) &&
+    if (!cs && (kind == ICFGEdge::CallCF || kind == ICFGEdge::RetCF ||
+                kind == ICFGEdge::ExcRetCF) &&
         edge != nullptr && edge->getCallSite() != (*iter)->getCallSite()) {
       return nullptr;
     }
@@ -196,6 +240,14 @@ ICFGEdge *ICFG::addRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
   if (hasInterICFGEdge(srcNode, dstNode, ICFGEdge::RetCF, cs))
     return nullptr;
   RetCFGEdge *retEdge = new RetCFGEdge(srcNode, dstNode, cs);
+  return addICFGEdge(retEdge) ? retEdge : nullptr;
+}
+
+ICFGEdge *ICFG::addExcRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
+                              const llvm::Instruction *cs) {
+  if (hasInterICFGEdge(srcNode, dstNode, ICFGEdge::ExcRetCF, cs))
+    return nullptr;
+  auto *retEdge = new ExcRetCFGEdge(srcNode, dstNode, cs);
   return addICFGEdge(retEdge) ? retEdge : nullptr;
 }
 
@@ -239,6 +291,25 @@ FunExitBlockNode *ICFG::addFunExitICFGNode(const llvm::Function *F) {
   return node;
 }
 
+FunUnwindExitBlockNode *ICFG::addFunUnwindExitICFGNode(const llvm::Function *F) {
+  if (!F || F->isDeclaration())
+    return nullptr;
+
+  const BasicBlock *anchor = &F->getEntryBlock();
+  for (const BasicBlock &bb : *F) {
+    const Instruction *terminator = bb.getTerminator();
+    if (terminator && isExceptionalFunctionExitInst(*terminator)) {
+      anchor = &bb;
+      break;
+    }
+  }
+
+  auto *node = new FunUnwindExitBlockNode(totalICFGNode++, anchor);
+  addICFGNode(node);
+  functionToUnwindExitNodeMap[F] = node;
+  return node;
+}
+
 CallRetBlockNode *ICFG::addRetICFGNode(const llvm::Instruction *callInst) {
   if (!callInst)
     return nullptr;
@@ -248,6 +319,19 @@ CallRetBlockNode *ICFG::addRetICFGNode(const llvm::Instruction *callInst) {
   auto *node = new CallRetBlockNode(totalICFGNode++, callInst, retBB);
   addICFGNode(node);
   callToRetNodeMap[callInst] = node;
+  return node;
+}
+
+CallUnwindBlockNode *ICFG::addUnwindICFGNode(
+    const llvm::Instruction *callInst) {
+  if (!callInst)
+    return nullptr;
+  const BasicBlock *unwindBB = callInst->getParent();
+  if (const auto *invokeInst = dyn_cast<InvokeInst>(callInst))
+    unwindBB = invokeInst->getUnwindDest();
+  auto *node = new CallUnwindBlockNode(totalICFGNode++, callInst, unwindBB);
+  addICFGNode(node);
+  callToUnwindNodeMap[callInst] = node;
   return node;
 }
 
@@ -263,8 +347,22 @@ FunExitBlockNode *ICFG::getFunExitICFGNode(const llvm::Function *F) {
   return addFunExitICFGNode(F);
 }
 
+FunUnwindExitBlockNode *ICFG::getFunUnwindExitICFGNode(
+    const llvm::Function *F) {
+  if (auto *node = getFunUnwindExitNode(F))
+    return node;
+  return addFunUnwindExitICFGNode(F);
+}
+
 CallRetBlockNode *ICFG::getRetICFGNode(const llvm::Instruction *callInst) {
   if (auto *node = getRetNode(callInst))
     return node;
   return addRetICFGNode(callInst);
+}
+
+CallUnwindBlockNode *ICFG::getUnwindICFGNode(
+    const llvm::Instruction *callInst) {
+  if (auto *node = getUnwindNode(callInst))
+    return node;
+  return addUnwindICFGNode(callInst);
 }

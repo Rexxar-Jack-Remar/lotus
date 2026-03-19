@@ -42,8 +42,12 @@ public:
       std::unordered_map<const llvm::Function *, FunEntryBlockNode *>;
   using functionToExitNodeMapTy =
       std::unordered_map<const llvm::Function *, FunExitBlockNode *>;
+  using functionToUnwindExitNodeMapTy =
+      std::unordered_map<const llvm::Function *, FunUnwindExitBlockNode *>;
   using callToRetNodeMapTy =
       std::unordered_map<const llvm::Instruction *, CallRetBlockNode *>;
+  using callToUnwindNodeMapTy =
+      std::unordered_map<const llvm::Instruction *, CallUnwindBlockNode *>;
 
   NodeID totalICFGNode;
 
@@ -52,7 +56,9 @@ private:
   functionToEntryIntraNodeMapTy functionToEntryIntraNodeMap;
   functionToEntryNodeMapTy functionToEntryNodeMap;
   functionToExitNodeMapTy functionToExitNodeMap;
+  functionToUnwindExitNodeMapTy functionToUnwindExitNodeMap;
   callToRetNodeMapTy callToRetNodeMap;
+  callToUnwindNodeMapTy callToUnwindNodeMap;
 
 public:
   /// @brief Constructs an empty ICFG.
@@ -142,8 +148,13 @@ public:
       functionToEntryNodeMap.erase(entry->getFunction());
     } else if (auto *exit = llvm::dyn_cast<FunExitBlockNode>(node)) {
       functionToExitNodeMap.erase(exit->getFunction());
+    } else if (auto *unwindExit =
+                   llvm::dyn_cast<FunUnwindExitBlockNode>(node)) {
+      functionToUnwindExitNodeMap.erase(unwindExit->getFunction());
     } else if (auto *ret = llvm::dyn_cast<CallRetBlockNode>(node)) {
       callToRetNodeMap.erase(ret->getCallSite());
+    } else if (auto *unwind = llvm::dyn_cast<CallUnwindBlockNode>(node)) {
+      callToUnwindNodeMap.erase(unwind->getCallSite());
     }
 
     removeGNode(node);
@@ -171,6 +182,10 @@ public:
   /// @return Pointer to the created edge, or nullptr if already exists.
   ICFGEdge *addRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
                        const llvm::Instruction *cs);
+
+  /// @brief Adds an exceptional return edge from callee unwind exit to caller.
+  ICFGEdge *addExcRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
+                          const llvm::Instruction *cs);
 
   /// @brief Verifies that both nodes of an intra edge belong to the same
   /// function.
@@ -229,8 +244,14 @@ public:
   /// @brief Gets or creates the dedicated function-exit node.
   FunExitBlockNode *getFunExitICFGNode(const llvm::Function *F);
 
+  /// @brief Gets or creates the dedicated function unwind-exit node.
+  FunUnwindExitBlockNode *getFunUnwindExitICFGNode(const llvm::Function *F);
+
   /// @brief Gets or creates the dedicated call return-site node.
   CallRetBlockNode *getRetICFGNode(const llvm::Instruction *callInst);
+
+  /// @brief Gets or creates the dedicated call unwind-site node.
+  CallUnwindBlockNode *getUnwindICFGNode(const llvm::Instruction *callInst);
 
 private:
   /// Get/Add IntraBlock ICFGNode
@@ -263,12 +284,26 @@ private:
     return it == functionToExitNodeMap.end() ? nullptr : it->second;
   }
 
+  inline FunUnwindExitBlockNode *getFunUnwindExitNode(
+      const llvm::Function *F) {
+    auto it = functionToUnwindExitNodeMap.find(F);
+    return it == functionToUnwindExitNodeMap.end() ? nullptr : it->second;
+  }
+
   inline CallRetBlockNode *getRetNode(const llvm::Instruction *callInst) {
     auto it = callToRetNodeMap.find(callInst);
     return it == callToRetNodeMap.end() ? nullptr : it->second;
   }
 
+  inline CallUnwindBlockNode *getUnwindNode(
+      const llvm::Instruction *callInst) {
+    auto it = callToUnwindNodeMap.find(callInst);
+    return it == callToUnwindNodeMap.end() ? nullptr : it->second;
+  }
+
   FunEntryBlockNode *addFunEntryICFGNode(const llvm::Function *F);
   FunExitBlockNode *addFunExitICFGNode(const llvm::Function *F);
+  FunUnwindExitBlockNode *addFunUnwindExitICFGNode(const llvm::Function *F);
   CallRetBlockNode *addRetICFGNode(const llvm::Instruction *callInst);
+  CallUnwindBlockNode *addUnwindICFGNode(const llvm::Instruction *callInst);
 };

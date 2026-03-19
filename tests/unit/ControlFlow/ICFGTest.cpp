@@ -8,6 +8,7 @@
 
 #include "IR/ICFG/ICFG.h"
 #include "IR/ICFG/ICFGBuilder.h"
+#include "IR/ICFG/GraphAnalysis.h"
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/AsmParser/Parser.h>
@@ -493,13 +494,17 @@ TEST_F(ICFGTest, ReturnSiteBranchesToAllSuccessorsAfterDirectCall) {
   const CallBase *call = findCall(caller, "callee");
   ASSERT_NE(call, nullptr);
 
+  IntraBlockNode *callerNode = icfg.getIntraBlockNode(&caller->getEntryBlock());
   CallRetBlockNode *retSite = icfg.getRetICFGNode(call);
   IntraBlockNode *thenNode = icfg.getIntraBlockNode(findBlock(caller, "then"));
   IntraBlockNode *elseNode = icfg.getIntraBlockNode(findBlock(caller, "else"));
+  ASSERT_NE(callerNode, nullptr);
   ASSERT_NE(retSite, nullptr);
   ASSERT_NE(thenNode, nullptr);
   ASSERT_NE(elseNode, nullptr);
 
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, thenNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, elseNode, ICFGEdge::IntraCF), nullptr);
   EXPECT_NE(icfg.getICFGEdge(retSite, thenNode, ICFGEdge::IntraCF), nullptr);
   EXPECT_NE(icfg.getICFGEdge(retSite, elseNode, ICFGEdge::IntraCF), nullptr);
 }
@@ -531,15 +536,249 @@ TEST_F(ICFGTest, ExternalCallStillBuildsReturnSiteContinuation) {
   const CallBase *call = findCall(caller, "ext");
   ASSERT_NE(call, nullptr);
 
+  IntraBlockNode *callerNode = icfg.getIntraBlockNode(&caller->getEntryBlock());
   CallRetBlockNode *retSite = icfg.getRetICFGNode(call);
   IntraBlockNode *thenNode = icfg.getIntraBlockNode(findBlock(caller, "then"));
   IntraBlockNode *elseNode = icfg.getIntraBlockNode(findBlock(caller, "else"));
+  ASSERT_NE(callerNode, nullptr);
   ASSERT_NE(retSite, nullptr);
   ASSERT_NE(thenNode, nullptr);
   ASSERT_NE(elseNode, nullptr);
 
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, thenNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, elseNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(callerNode, retSite, ICFGEdge::IntraCF), nullptr);
   EXPECT_NE(icfg.getICFGEdge(retSite, thenNode, ICFGEdge::IntraCF), nullptr);
   EXPECT_NE(icfg.getICFGEdge(retSite, elseNode, ICFGEdge::IntraCF), nullptr);
+}
+
+TEST_F(ICFGTest, InternalInvokeUsesDedicatedNormalAndUnwindContinuations) {
+  const char *source = R"(
+    declare i32 @__gxx_personality_v0(...)
+
+    define i32 @callee() {
+    entry:
+      ret i32 7
+    }
+
+    define i32 @caller() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %r = invoke i32 @callee()
+              to label %normal unwind label %lpad
+    normal:
+      ret i32 %r
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      ret i32 1
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *caller = module->getFunction("caller");
+  Function *callee = module->getFunction("callee");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  const auto *invoke = dyn_cast<InvokeInst>(findCall(caller, "callee"));
+  ASSERT_NE(invoke, nullptr);
+
+  IntraBlockNode *callerNode = icfg.getIntraBlockNode(&caller->getEntryBlock());
+  IntraBlockNode *normalNode = icfg.getIntraBlockNode(findBlock(caller, "normal"));
+  IntraBlockNode *lpadNode = icfg.getIntraBlockNode(findBlock(caller, "lpad"));
+  FunEntryBlockNode *calleeEntry = icfg.getFunEntryICFGNode(callee);
+  FunExitBlockNode *calleeExit = icfg.getFunExitICFGNode(callee);
+  CallRetBlockNode *retSite = icfg.getRetICFGNode(invoke);
+  CallUnwindBlockNode *unwindSite = icfg.getUnwindICFGNode(invoke);
+
+  ASSERT_NE(callerNode, nullptr);
+  ASSERT_NE(normalNode, nullptr);
+  ASSERT_NE(lpadNode, nullptr);
+  ASSERT_NE(calleeEntry, nullptr);
+  ASSERT_NE(calleeExit, nullptr);
+  ASSERT_NE(retSite, nullptr);
+  ASSERT_NE(unwindSite, nullptr);
+
+  EXPECT_NE(icfg.getICFGEdge(callerNode, calleeEntry, ICFGEdge::CallCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, normalNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, lpadNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(calleeExit, retSite, ICFGEdge::RetCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(retSite, normalNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(unwindSite, lpadNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, unwindSite, ICFGEdge::IntraCF), nullptr);
+}
+
+TEST_F(ICFGTest, InternalInvokeExceptionalResumeUsesExceptionalReturnEdge) {
+  const char *source = R"(
+    declare i32 @__gxx_personality_v0(...)
+    declare i32 @may_throw()
+
+    define i32 @callee() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %v = invoke i32 @may_throw()
+              to label %cont unwind label %lpad
+    cont:
+      ret i32 %v
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      resume { i8*, i32 } %lp
+    }
+
+    define i32 @caller() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %r = invoke i32 @callee()
+              to label %normal unwind label %outer_lpad
+    normal:
+      ret i32 %r
+    outer_lpad:
+      %outer = landingpad { i8*, i32 } cleanup
+      ret i32 1
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *caller = module->getFunction("caller");
+  Function *callee = module->getFunction("callee");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  const auto *invoke = dyn_cast<InvokeInst>(findCall(caller, "callee"));
+  ASSERT_NE(invoke, nullptr);
+
+  IntraBlockNode *callerNode = icfg.getIntraBlockNode(&caller->getEntryBlock());
+  IntraBlockNode *normalNode =
+      icfg.getIntraBlockNode(findBlock(caller, "normal"));
+  IntraBlockNode *outerLpadNode =
+      icfg.getIntraBlockNode(findBlock(caller, "outer_lpad"));
+  FunUnwindExitBlockNode *calleeUnwindExit =
+      icfg.getFunUnwindExitICFGNode(callee);
+  CallUnwindBlockNode *unwindSite = icfg.getUnwindICFGNode(invoke);
+
+  ASSERT_NE(callerNode, nullptr);
+  ASSERT_NE(normalNode, nullptr);
+  ASSERT_NE(outerLpadNode, nullptr);
+  ASSERT_NE(calleeUnwindExit, nullptr);
+  ASSERT_NE(unwindSite, nullptr);
+
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, normalNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, outerLpadNode, ICFGEdge::IntraCF),
+            nullptr);
+  EXPECT_NE(
+      icfg.getICFGEdge(calleeUnwindExit, unwindSite, ICFGEdge::ExcRetCF),
+      nullptr);
+  EXPECT_NE(icfg.getICFGEdge(unwindSite, outerLpadNode, ICFGEdge::IntraCF),
+            nullptr);
+}
+
+TEST_F(ICFGTest, ExternalInvokeUsesSummaryEdgesToContinuationNodes) {
+  const char *source = R"(
+    declare i32 @__gxx_personality_v0(...)
+    declare i32 @may_throw()
+
+    define i32 @caller() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %r = invoke i32 @may_throw()
+              to label %normal unwind label %lpad
+    normal:
+      ret i32 %r
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      ret i32 1
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *caller = module->getFunction("caller");
+  ASSERT_NE(caller, nullptr);
+
+  const auto *invoke = dyn_cast<InvokeInst>(findCall(caller, "may_throw"));
+  ASSERT_NE(invoke, nullptr);
+
+  IntraBlockNode *callerNode = icfg.getIntraBlockNode(&caller->getEntryBlock());
+  IntraBlockNode *normalNode = icfg.getIntraBlockNode(findBlock(caller, "normal"));
+  IntraBlockNode *lpadNode = icfg.getIntraBlockNode(findBlock(caller, "lpad"));
+  CallRetBlockNode *retSite = icfg.getRetICFGNode(invoke);
+  CallUnwindBlockNode *unwindSite = icfg.getUnwindICFGNode(invoke);
+
+  ASSERT_NE(callerNode, nullptr);
+  ASSERT_NE(normalNode, nullptr);
+  ASSERT_NE(lpadNode, nullptr);
+  ASSERT_NE(retSite, nullptr);
+  ASSERT_NE(unwindSite, nullptr);
+
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, normalNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, lpadNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(callerNode, retSite, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(callerNode, unwindSite, ICFGEdge::IntraCF),
+            nullptr);
+  EXPECT_NE(icfg.getICFGEdge(retSite, normalNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(unwindSite, lpadNode, ICFGEdge::IntraCF),
+            nullptr);
+}
+
+TEST_F(ICFGTest, InterproceduralDistanceSkipsExceptionalReturnEdges) {
+  const char *source = R"(
+    declare i32 @__gxx_personality_v0(...)
+    declare i32 @may_throw()
+
+    define i32 @callee() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %v = invoke i32 @may_throw()
+              to label %cont unwind label %lpad
+    cont:
+      ret i32 %v
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      resume { i8*, i32 } %lp
+    }
+
+    define i32 @caller() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %r = invoke i32 @callee()
+              to label %normal unwind label %outer_lpad
+    normal:
+      ret i32 %r
+    outer_lpad:
+      %outer = landingpad { i8*, i32 } cleanup
+      ret i32 1
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *caller = module->getFunction("caller");
+  ASSERT_NE(caller, nullptr);
+
+  IntraBlockNode *callerNode = icfg.getIntraBlockNode(&caller->getEntryBlock());
+  IntraBlockNode *outerLpadNode =
+      icfg.getIntraBlockNode(findBlock(caller, "outer_lpad"));
+  ASSERT_NE(callerNode, nullptr);
+  ASSERT_NE(outerLpadNode, nullptr);
+
+  auto distanceMap = calculateDistanceMapInterICFG(&icfg, callerNode);
+  EXPECT_EQ(distanceMap[outerLpadNode], 999999999999ULL);
 }
 
 // Test 9: Loop in control flow
@@ -753,6 +992,63 @@ TEST_F(ICFGTest, RemoveDedicatedNodesClearsSideMaps) {
   EXPECT_NE(icfg.getFunEntryICFGNode(callee)->getId(), entryId);
   EXPECT_NE(icfg.getFunExitICFGNode(callee)->getId(), exitId);
   EXPECT_NE(icfg.getRetICFGNode(call)->getId(), retId);
+}
+
+TEST_F(ICFGTest, RemoveDedicatedUnwindNodesClearsSideMaps) {
+  const char *source = R"(
+    declare i32 @__gxx_personality_v0(...)
+    declare i32 @may_throw()
+
+    define i32 @callee() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %v = invoke i32 @may_throw()
+              to label %cont unwind label %lpad
+    cont:
+      ret i32 %v
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      resume { i8*, i32 } %lp
+    }
+
+    define i32 @caller() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %r = invoke i32 @callee()
+              to label %normal unwind label %outer_lpad
+    normal:
+      ret i32 %r
+    outer_lpad:
+      %outer = landingpad { i8*, i32 } cleanup
+      ret i32 1
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder builder(&icfg);
+  builder.build(module.get());
+
+  Function *caller = module->getFunction("caller");
+  Function *callee = module->getFunction("callee");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  const auto *invoke = dyn_cast<InvokeInst>(findCall(caller, "callee"));
+  ASSERT_NE(invoke, nullptr);
+
+  FunUnwindExitBlockNode *unwindExit = icfg.getFunUnwindExitICFGNode(callee);
+  CallUnwindBlockNode *unwindNode = icfg.getUnwindICFGNode(invoke);
+  ASSERT_NE(unwindExit, nullptr);
+  ASSERT_NE(unwindNode, nullptr);
+  NodeID unwindExitId = unwindExit->getId();
+  NodeID unwindNodeId = unwindNode->getId();
+
+  icfg.removeICFGNode(unwindExit);
+  icfg.removeICFGNode(unwindNode);
+
+  EXPECT_NE(icfg.getFunUnwindExitICFGNode(callee)->getId(), unwindExitId);
+  EXPECT_NE(icfg.getUnwindICFGNode(invoke)->getId(), unwindNodeId);
 }
 
 TEST_F(ICFGTest, RemovingSelfLoopNodeDoesNotDoubleDeleteEdges) {

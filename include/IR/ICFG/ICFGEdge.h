@@ -40,6 +40,7 @@ public:
     IntraCF, ///< Intraprocedural control flow
     CallCF,  ///< Call edge (caller -> callee entry)
     RetCF,   ///< Return edge (callee exit -> caller)
+    ExcRetCF ///< Exceptional return edge (callee unwind -> caller unwind site)
   };
 
 public:
@@ -57,7 +58,7 @@ public:
   /// @return True for all ICFG edges.
   inline bool isCFGEdge() const {
     return getEdgeKind() == IntraCF || getEdgeKind() == CallCF ||
-           getEdgeKind() == RetCF;
+           getEdgeKind() == RetCF || getEdgeKind() == ExcRetCF;
   }
 
   /// @brief Checks if this is a call edge.
@@ -67,6 +68,15 @@ public:
   /// @brief Checks if this is a return edge.
   /// @return True if this edge represents a function return.
   inline bool isRetCFGEdge() const { return getEdgeKind() == RetCF; }
+
+  /// @brief Checks if this is an exceptional return edge.
+  /// @return True if this edge represents EH unwinding to the caller.
+  inline bool isExcRetCFGEdge() const { return getEdgeKind() == ExcRetCF; }
+
+  /// @brief Checks if this is any interprocedural return edge.
+  inline bool isInterRetCFGEdge() const {
+    return isRetCFGEdge() || isExcRetCFGEdge();
+  }
 
   /// @brief Checks if this is an intraprocedural edge.
   /// @return True if this edge is within a single function.
@@ -178,5 +188,29 @@ public:
 
   /// @brief Returns a string representation of this return edge.
   /// @return String description.
+  std::string toString() const override;
+};
+
+/// @brief Exceptional return edge from callee unwind exit to caller unwind site.
+class ExcRetCFGEdge : public ICFGEdge {
+
+private:
+  const llvm::Instruction
+      *cs; ///< Call instruction that this unwind corresponds to.
+
+public:
+  ExcRetCFGEdge(ICFGNode *s, ICFGNode *d, const llvm::Instruction *c)
+      : ICFGEdge(s, d, ExcRetCF), cs(c) {}
+
+  inline const llvm::Instruction *getCallSite() const override { return cs; }
+
+  static inline bool classof(const ExcRetCFGEdge *) { return true; }
+  static inline bool classof(const ICFGEdge *edge) {
+    return edge->getEdgeKind() == ExcRetCF;
+  }
+  static inline bool classof(const GenericICFGEdgeTy *edge) {
+    return edge->getEdgeKind() == ExcRetCF;
+  }
+
   std::string toString() const override;
 };

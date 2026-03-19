@@ -193,7 +193,7 @@ void findFunctionBackedgesInterICFG(ICFG *icfg, const llvm::Function *func,
       ICFGEdge *Edge = *I++;
 
       // Skip return edges — we only follow call/intra edges.
-      if (Edge->isRetCFGEdge())
+      if (Edge->isInterRetCFGEdge())
         continue;
 
       Node = Edge->getDstNode();
@@ -318,7 +318,7 @@ void calculateDistanceMapInterICFGWithDistanceMap(
       ICFGEdge *edge = *I;
       ICFGNode *adjBB = edge->getDstNode();
 
-      if (edge->isRetCFGEdge())
+      if (edge->isInterRetCFGEdge())
         continue;
 
       uint64_t distanceToAdj = 1;
@@ -380,7 +380,7 @@ calculateDistanceMapInterICFG(ICFG *icfg, ICFGNode *sourceBB) {
       ICFGEdge *edge = *I;
       ICFGNode *adjBB = edge->getDstNode();
 
-      if (edge->isRetCFGEdge())
+      if (edge->isInterRetCFGEdge())
         continue;
 
       uint64_t distanceToAdj = 1;
