@@ -5,3 +5,4 @@ add_lotus_test(nullpointer_api_test NullPointerAPITest.cpp)
 add_lotus_test(context_sensitive_nullcheck_analysis_test
                ContextSensitiveNullCheckAnalysisTest.cpp)
 add_lotus_test(spectre_analysis_test SpectreAnalysisTest.cpp)
+add_lotus_test(crypto_analysis_test CryptoAnalysisTest.cpp)
