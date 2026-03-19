@@ -66,7 +66,11 @@ public:
                                      std::unordered_set<const llvm::Value *> &roots);
 
 private:
+  enum class CandidateCountKind { Zero, One, Many };
+
   void collectForksAndJoins();
+  CandidateCountKind
+  classifyJoinForks(const std::vector<const llvm::Instruction *> &forks) const;
 
   llvm::Module &m_module;
   ThreadAPI *m_threadAPI;
@@ -74,6 +78,8 @@ private:
 
   std::vector<const llvm::Instruction *> m_forkInsts;
   std::vector<const llvm::Instruction *> m_joinInsts;
+  std::unordered_map<const llvm::Instruction *, const llvm::Value *>
+      m_forkToRoot;
   std::unordered_map<const llvm::Instruction *, std::vector<const llvm::Instruction *>>
       m_joinToForks;
 };

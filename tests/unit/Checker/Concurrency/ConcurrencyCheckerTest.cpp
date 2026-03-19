@@ -703,6 +703,48 @@ TEST_F(ConcurrencyCheckerTest, TracksOpenMPSummaryInCheckerStatistics) {
   EXPECT_EQ(stats.openMPSummary.flush_count, 1u);
 }
 
+TEST_F(ConcurrencyCheckerTest, StaticVectorClockBackendRunsAnalyses) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      store i32 2, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @worker1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @worker2, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::ConcurrencyChecker checker(*module);
+  checker.setMHPBackend(
+      concurrency::ConcurrencyChecker::MHPBackendKind::StaticVectorClock);
+  checker.enableOpenMPCheck(false);
+  checker.enableMPICheck(false);
+  EXPECT_NO_THROW(checker.runAnalyses());
+
+  auto stats = checker.getStatistics();
+  EXPECT_GT(stats.mhpPairs, 0u);
+}
+
 TEST_F(ConcurrencyCheckerTest, ConditionalMayLockDoesNotSuppressRealRace) {
   const char *source = R"(
     @lock = global i8 0

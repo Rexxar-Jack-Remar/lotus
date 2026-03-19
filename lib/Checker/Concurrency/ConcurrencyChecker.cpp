@@ -98,6 +98,19 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
 }
 
 void ConcurrencyChecker::runAnalyses() {
+  m_mhpAnalysis = nullptr;
+  m_mhpAnalysisStorage.reset();
+  m_locksetAnalysis.reset();
+  m_locksetAnalysisView = nullptr;
+  m_escapeAnalysis.reset();
+  m_happensBeforeAnalysis.reset();
+  m_openMPTaskGraph.reset();
+  m_mpiAnalysis.reset();
+  m_stats.mhpPairs = 0;
+  m_stats.locksAnalyzed = 0;
+  m_stats.openMPSummary = OpenMP::OpenMPTaskGraph::AnalysisSummary{};
+  m_stats.mpiSummary = ConcurrencyFacade::MPISummary{};
+
   // Config-driven activation: run only analyses required by enabled checks
   // (Goblint-style)
   bool needMHP = m_checkDataRaces || m_checkDeadlocks ||
@@ -111,18 +124,29 @@ void ConcurrencyChecker::runAnalyses() {
   bool needMPI = m_checkMPI;
 
   if (needMHP) {
-    m_mhpAnalysis = std::make_unique<MHPAnalysis>(m_module);
-    m_mhpAnalysis->enableLockSetAnalysis();
-    m_mhpAnalysis->analyze();
-    m_stats.mhpPairs = m_mhpAnalysis->getStatistics().num_mhp_pairs;
+    if (m_mhpBackend == MHPBackendKind::StaticVectorClock) {
+      auto svc = std::make_unique<StaticVectorClockMHP>(m_module);
+      svc->analyze();
+      m_stats.mhpPairs = svc->getMhpPairCount();
+      m_mhpAnalysis = svc.get();
+      m_mhpAnalysisStorage = std::move(svc);
+    } else {
+      auto mhp = std::make_unique<MHPAnalysis>(m_module);
+      mhp->enableLockSetAnalysis();
+      mhp->analyze();
+      m_stats.mhpPairs = mhp->getMhpPairCount();
+      m_mhpAnalysis = mhp.get();
+      m_mhpAnalysisStorage = std::move(mhp);
+    }
   }
+
+  auto *regionMHP = dynamic_cast<MHPAnalysis *>(m_mhpAnalysis);
 
   // Prefer reusing the lockset computed inside MHPAnalysis (avoids duplicate
   // work).
   m_locksetAnalysisView = nullptr;
-  if (needMHP && needLockSet && m_mhpAnalysis &&
-      m_mhpAnalysis->getLockSetAnalysis()) {
-    m_locksetAnalysisView = m_mhpAnalysis->getLockSetAnalysis();
+  if (needMHP && needLockSet && regionMHP && regionMHP->getLockSetAnalysis()) {
+    m_locksetAnalysisView = regionMHP->getLockSetAnalysis();
     m_stats.locksAnalyzed = m_locksetAnalysisView->getStatistics().num_locks;
   } else if (needLockSet) {
     m_locksetAnalysis = std::make_unique<LockSetAnalysis>(m_module);
@@ -140,12 +164,12 @@ void ConcurrencyChecker::runAnalyses() {
     m_escapeAnalysis->analyze();
   }
 
-  if (needHappensBefore && m_mhpAnalysis) {
+  if (needHappensBefore && regionMHP) {
     m_happensBeforeAnalysis =
-        std::make_unique<HappensBeforeAnalysis>(m_module, *m_mhpAnalysis);
+        std::make_unique<HappensBeforeAnalysis>(m_module, *regionMHP);
     lotus::AliasAnalysisWrapper *aa = m_aliasAnalysis;
     if (!aa)
-      aa = m_mhpAnalysis->getAliasAnalysis();
+      aa = regionMHP->getAliasAnalysis();
     if (aa)
       m_happensBeforeAnalysis->setAliasAnalysis(aa);
     m_happensBeforeAnalysis->analyze();
@@ -200,16 +224,17 @@ void ConcurrencyChecker::runAnalyses() {
   }
 
   lotus::AliasAnalysisWrapper *aa = m_aliasAnalysis;
-  if (!aa && m_mhpAnalysis)
-    aa = m_mhpAnalysis->getAliasAnalysis();
+  if (!aa && regionMHP)
+    aa = regionMHP->getAliasAnalysis();
 
   m_dataRaceChecker = std::make_unique<DataRaceChecker>(
-      m_module, m_mhpAnalysis.get(), m_locksetAnalysisView,
+      m_module, m_mhpAnalysis, m_locksetAnalysisView,
       m_escapeAnalysis.get(), aa, m_happensBeforeAnalysis.get());
   m_deadlockChecker = std::make_unique<DeadlockChecker>(
-      m_module, m_locksetAnalysisView, m_mhpAnalysis.get(), m_threadAPI);
+      m_module, m_locksetAnalysisView, m_mhpAnalysis,
+      m_happensBeforeAnalysis.get(), m_threadAPI);
   m_atomicityChecker = std::make_unique<AtomicityChecker>(
-      m_module, m_mhpAnalysis.get(), m_locksetAnalysisView, m_threadAPI, aa);
+      m_module, m_mhpAnalysis, m_locksetAnalysisView, m_threadAPI, aa);
   m_condVarChecker = std::make_unique<ConditionVariableChecker>(
       m_module, m_threadAPI, m_locksetAnalysisView);
   m_lockMismatchChecker = std::make_unique<LockMismatchChecker>(
@@ -463,7 +488,7 @@ void ConcurrencyChecker::dumpAnalysisResults(raw_ostream &os,
           "enabled).\n";
     return;
   }
-  ConcurrencyAnalysisDumper dumper(m_module, m_mhpAnalysis.get(),
+  ConcurrencyAnalysisDumper dumper(m_module, m_mhpAnalysis,
                                    m_locksetAnalysisView,
                                    m_escapeAnalysis.get(), m_threadAPI);
   dumper.dump(os, jsonFormat);

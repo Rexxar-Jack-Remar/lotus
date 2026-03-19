@@ -6,17 +6,15 @@
  * instructions may execute concurrently.
  *
  * Soundness Properties:
- * - Default Safety: The analysis is conservative (safe) for race detection.
- *   It assumes two instructions MHP unless a Happens-Before (HB) relation is
- * proven.
+ * - Default Safety: The analysis is a conservative overlap oracle.
+ *   It assumes two instructions may be concurrent unless structural
+ *   non-overlap is proven.
  * - Synchronization:
  *   - Fork/Join: Precisely models ancestor relationships.
- *   - Locks: Uses LockSet analysis (if enabled) to rule out parallelism guarded
- * by common locks.
  *   - Condition Variables: Treats wait/signal/broadcast as synchronization
- *     boundaries, but does not synthesize definite inter-thread HB edges
- *     without waiter-state analysis.
- *   - Barriers: Enforces program order across barriers.
+ *     boundaries, but does not synthesize inter-thread ordering.
+ *   - Barriers/OpenMP waits: Enforces structural non-overlap when the runtime
+ *     primitive guarantees it.
  * - Thread Instances: Conservatively assumes spawned threads may have multiple
  * instances.
  *
@@ -24,8 +22,6 @@
  */
 
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
-
-#include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
 
 #include <deque>
 
@@ -345,7 +341,6 @@ MHPAnalysis::MHPAnalysis(Module &module)
   m_tfg = std::make_unique<ThreadFlowGraph>();
   m_alias_analysis = lotus::AliasAnalysisFactory::create(
       m_module, lotus::AAConfig::SparrowAA_NoCtx());
-  m_tls_analysis = std::make_unique<ThreadLocal::ThreadLocalAnalysis>(m_module);
   m_call_graph = std::make_unique<CallGraph>(m_module);
 }
 
@@ -354,7 +349,7 @@ MHPAnalysis::~MHPAnalysis() = default;
 void MHPAnalysis::analyze() {
   errs() << "Starting MHP Analysis...\n";
 
-  m_hb_cache.clear();
+  m_order_cache.clear();
   m_mhp_cache.clear();
   m_mhp_pairs.clear();
   m_inst_to_thread.clear();
@@ -374,27 +369,18 @@ void MHPAnalysis::analyze() {
   m_thread_entry_candidates.clear();
   m_has_unresolved_fork = false;
   m_has_multi_context_nodes = false;
-  m_hb_transitive_closure.clear();
-  m_hb_closure_computed = false;
   m_multi_instance_threads.clear();
-  m_atomic_instructions.clear();
-  m_atomic_hb_pairs.clear();
-  m_atomic_sync_witnesses.clear();
   m_openmp_task_threads.clear();
   m_openmp_task_exclusions.clear();
   m_openmp_semantics = std::make_unique<OpenMP::OpenMPSemantics>(m_module);
   m_openmp_semantics->analyze();
   m_next_thread_id = 1;
-  m_next_call_context_id = 1;
   m_region_analysis.reset();
   m_lockset.reset();
   m_tfg = std::make_unique<ThreadFlowGraph>();
   m_call_graph = std::make_unique<CallGraph>(m_module);
   m_join_target_analysis =
       std::make_unique<JoinTargetAnalysis>(m_module, m_alias_analysis.get());
-
-  // Run TLS analysis first
-  m_tls_analysis->analyze();
 
   buildThreadFlowGraph();
 
@@ -403,12 +389,8 @@ void MHPAnalysis::analyze() {
     analyzeLockSets();
   }
 
-  computeAtomicHappensBefore();
   analyzeThreadRegions();
   if (m_precompute_mhp_pairs) {
-    // Optionally compute transitive closure for faster HB queries
-    // (only beneficial if we'll do many MHP queries)
-    computeHappensBeforeTransitiveClosure();
     computeMHPPairs();
   }
 
@@ -438,7 +420,7 @@ void MHPAnalysis::buildThreadFlowGraph() {
     lowerOpenMPTasks(*m_openmp_semantics);
   }
 
-  // Build reachability index for faster HB queries
+  // Build reachability index for faster structural-order queries
   m_tfg->buildReachabilityIndex();
 
   errs() << "Thread Flow Graph built with " << m_tfg->getAllNodes().size()
@@ -971,9 +953,9 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
   }
 
   if (!found_thread && m_join_target_analysis) {
-    std::vector<const Instruction *> possible_forks =
-        m_join_target_analysis->getPossibleJoinedForks(join_inst);
-    if (possible_forks.size() == 1) {
+    if (m_join_target_analysis->isUnambiguousJoin(join_inst)) {
+      std::vector<const Instruction *> possible_forks =
+          m_join_target_analysis->getPossibleJoinedForks(join_inst);
       auto it = m_fork_to_thread.find(possible_forks.front());
       if (it != m_fork_to_thread.end()) {
         joined_tid = it->second;
@@ -991,7 +973,7 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
       m_join_to_thread[join_inst] = joined_tid;
     }
   } else {
-    // Ambiguous joins must not create definite HB edges.
+    // Ambiguous joins must not create structural non-overlap edges.
     (void)parent_tid;
   }
 }
@@ -1015,9 +997,7 @@ void MHPAnalysis::handleCondWait(const Instruction *wait_inst, SyncNode *node) {
   node->setCondValue(cond);
   node->setLockValue(mutex);
 
-  // Track the wait as a region boundary. We intentionally avoid adding a
-  // definite signal->wait HB edge here: without waiter queue / phase analysis
-  // we cannot prove that this wait is the one resumed by a later signal.
+  // Track the wait as a region boundary only.
   m_condvar_waits[cond].push_back(node);
 }
 
@@ -1027,9 +1007,7 @@ void MHPAnalysis::handleCondSignal(const Instruction *signal_inst,
   // getLockVal asserts isTDAcquire||isTDRelease and would crash on a signal.
   const Value *cond = m_thread_api->getCondVal(signal_inst);
   node->setCondValue(cond);
-  // Record the signal/broadcast as a region boundary only. A single signal does
-  // not yield a definite HB edge to every matching wait, and even broadcast
-  // requires waiter-state reasoning to avoid ordering waits that occur later.
+  // Record the signal/broadcast as a region boundary only.
   m_condvar_signals[cond].push_back(node);
 }
 
@@ -1101,6 +1079,33 @@ void MHPAnalysis::computeMHPPairs() {
 
   const auto &regions = m_region_analysis->getAllRegions();
   size_t num_regions = regions.size();
+  auto is_always_pre_fork_main = [this](const Instruction *inst) {
+    std::vector<SyncNode *> nodes = m_tfg->getNodes(inst, 0);
+    if (nodes.empty()) {
+      return false;
+    }
+    for (SyncNode *node : nodes) {
+      if (!m_pre_fork_main_nodes.count(node)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  std::vector<bool> region_prefork_main(num_regions, false);
+  for (size_t i = 0; i < num_regions; ++i) {
+    const auto &region = regions[i];
+    if (region->thread_id != 0 || region->instructions.empty()) {
+      continue;
+    }
+    bool all_prefork = true;
+    for (const Instruction *inst : region->instructions) {
+      if (!is_always_pre_fork_main(inst)) {
+        all_prefork = false;
+        break;
+      }
+    }
+    region_prefork_main[i] = all_prefork;
+  }
 
   // Phase 1: Compute MHP region pairs using bitvector operations
   std::vector<std::pair<size_t, size_t>> mhp_region_pairs;
@@ -1119,6 +1124,15 @@ void MHPAnalysis::computeMHPPairs() {
         continue;
       }
 
+      if (m_openmp_task_exclusions.count(normalizeThreadPair(tid_i, tid_j))) {
+        continue;
+      }
+
+      if ((region_prefork_main[i] && tid_j != 0) ||
+          (region_prefork_main[j] && tid_i != 0)) {
+        continue;
+      }
+
       // Use bitvector test for O(1) check
       if (region_i->may_be_parallel_bits.test(j)) {
         mhp_region_pairs.push_back({i, j});
@@ -1128,30 +1142,39 @@ void MHPAnalysis::computeMHPPairs() {
 
   errs() << "Found " << mhp_region_pairs.size() << " MHP region pairs\n";
 
-  // Phase 3: Expand region-level MHP to instruction-level MHP
-  // Uses the original isOrderedByLocks for correct handling of read/write locks
+  // Phase 3: Expand region-level MHP to instruction-level MHP using only
+  // structural overlap constraints. Mutual exclusion and memory ordering are
+  // checker/HB concerns, not part of pure MHP.
   size_t num_pairs = 0;
-  size_t lock_filtered = 0;
-  size_t hb_filtered = 0;
+  size_t ordered_filtered = 0;
 
   for (const auto &pair : mhp_region_pairs) {
     size_t ri = pair.first, rj = pair.second;
     const auto &region_i = regions[ri];
     const auto &region_j = regions[rj];
+    const Instruction *region_i_end =
+        region_i->end_node ? region_i->end_node->getInstruction() : nullptr;
+    const Instruction *region_i_start =
+        region_i->start_node ? region_i->start_node->getInstruction() : nullptr;
+    const Instruction *region_j_end =
+        region_j->end_node ? region_j->end_node->getInstruction() : nullptr;
+    const Instruction *region_j_start =
+        region_j->start_node ? region_j->start_node->getInstruction() : nullptr;
+
+    if ((region_i_end && region_j_start &&
+         hasStructuralOrderRelation(region_i_end, region_j_start)) ||
+        (region_j_end && region_i_start &&
+         hasStructuralOrderRelation(region_j_end, region_i_start))) {
+      ordered_filtered += region_i->instructions.size() *
+                          region_j->instructions.size();
+      continue;
+    }
 
     for (const Instruction *inst_i : region_i->instructions) {
       for (const Instruction *inst_j : region_j->instructions) {
-        // Check if lock-protected using the original method
-        // which correctly handles read/write lock semantics
-        if (isOrderedByLocks(inst_i, inst_j)) {
-          lock_filtered++;
-          continue;
-        }
-
-        // Check happens-before
-        if (hasHappenBeforeRelation(inst_i, inst_j) ||
-            hasHappenBeforeRelation(inst_j, inst_i)) {
-          hb_filtered++;
+        if (hasStructuralOrderRelation(inst_i, inst_j) ||
+            hasStructuralOrderRelation(inst_j, inst_i)) {
+          ordered_filtered++;
           continue;
         }
 
@@ -1165,8 +1188,7 @@ void MHPAnalysis::computeMHPPairs() {
   }
 
   errs() << "Expanded to " << num_pairs << " MHP instruction pairs "
-         << "(filtered " << lock_filtered << " by locks, " << hb_filtered
-         << " by HB)\n";
+         << "(filtered " << ordered_filtered << " by structural ordering)\n";
 }
 
 void MHPAnalysis::computeMHPPairsInstructionLevel() {
@@ -1190,9 +1212,8 @@ void MHPAnalysis::computeMHPPairsInstructionLevel() {
         continue;
       }
 
-      // Check if they may happen in parallel
-      if (!hasHappenBeforeRelation(i1, i2) &&
-          !hasHappenBeforeRelation(i2, i1)) {
+      if (!hasStructuralOrderRelation(i1, i2) &&
+          !hasStructuralOrderRelation(i2, i1)) {
         // Store in canonical (pointer-sorted) order for O(1) symmetric lookup.
         const Instruction *ca = i1 < i2 ? i1 : i2;
         const Instruction *cb = i1 < i2 ? i2 : i1;
@@ -1251,21 +1272,14 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
 
   // Special case: if both instructions are from the same multi-instance thread,
   // they can run in parallel (different instances) unless explicitly ordered
-  // by inter-thread synchronization
+  // by structural non-overlap facts.
   if (t1 == t2 && t1 != 0 && m_multi_instance_threads.count(t1)) {
-    // For multi-instance threads, intra-thread program order does not prevent
-    // parallelism between different dynamic thread instances.
-    // However, mutual exclusion via locks still applies.
-    bool r = !isOrderedByLocks(i1, i2);
+    bool r = true;
     return (a && b) ? (m_mhp_cache[{a, b}] = r) : r;
   }
 
-  // Soundness: This is the core conservative check.
-  // If we cannot PROVE a happens-before relation, and we cannot PROVE they are
-  // mutually exclusive (via locks), we MUST assume they can run in parallel.
-  // This ensures we don't miss any potential races (over-approximation).
-  bool r = !hasHappenBeforeRelation(i1, i2) &&
-           !hasHappenBeforeRelation(i2, i1) && !isOrderedByLocks(i1, i2);
+  bool r = !hasStructuralOrderRelation(i1, i2) &&
+           !hasStructuralOrderRelation(i2, i1);
   return (a && b) ? (m_mhp_cache[{a, b}] = r) : r;
 }
 
@@ -1284,11 +1298,9 @@ MHPAnalysis::getParallelInstructions(const Instruction *inst) const {
 
   for (const auto &pair : m_mhp_pairs) {
     if (pair.a == inst) {
-      if (mayHappenInParallel(inst, pair.b))
-        result.insert(pair.b);
+      result.insert(pair.b);
     } else if (pair.b == inst) {
-      if (mayHappenInParallel(inst, pair.a))
-        result.insert(pair.a);
+      result.insert(pair.a);
     }
   }
 
@@ -1298,11 +1310,6 @@ MHPAnalysis::getParallelInstructions(const Instruction *inst) const {
 bool MHPAnalysis::mustBeSequential(const Instruction *i1,
                                    const Instruction *i2) const {
   return !mayHappenInParallel(i1, i2);
-}
-
-bool MHPAnalysis::mustPrecede(const Instruction *i1,
-                              const Instruction *i2) const {
-  return hasHappenBeforeRelation(i1, i2);
 }
 
 ThreadID MHPAnalysis::getThreadID(const Instruction *inst) const {
@@ -1330,10 +1337,6 @@ std::set<LockID> MHPAnalysis::getLocksHeldAt(const Instruction *inst) const {
 }
 
 ThreadID MHPAnalysis::allocateThreadID() { return m_next_thread_id++; }
-
-CallContextID MHPAnalysis::allocateCallContextID() {
-  return m_next_call_context_id++;
-}
 
 void MHPAnalysis::mapInstructionToThread(const Instruction *inst,
                                          ThreadID tid) {
@@ -1372,59 +1375,21 @@ bool MHPAnalysis::isInstructionThreadAmbiguous(const Instruction *inst) const {
   return it->second == kUnknownThread;
 }
 
-bool MHPAnalysis::isMustIntraThreadEdge(const SyncNode *from,
-                                        const SyncNode *to) const {
-  if (!from || !to) {
-    return false;
-  }
-  if (from->getThreadID() != to->getThreadID()) {
-    return false;
-  }
-
-  const Instruction *from_inst = from->getInstruction();
-  const Instruction *to_inst = to->getInstruction();
-  if (!from_inst || !to_inst) {
-    return false;
-  }
-
-  if (from_inst->getParent() == to_inst->getParent()) {
-    return from_inst->getNextNode() == to_inst;
-  }
-
-  const Function *func = from_inst->getFunction();
-  if (!func || func != to_inst->getFunction()) {
-    return false;
-  }
-
-  const PostDominatorTree &PDT = getPostDomTree(func);
-  return PDT.dominates(to_inst->getParent(), from_inst->getParent());
-}
-
-bool MHPAnalysis::hasHappenBeforeRelation(const Instruction *i1,
-                                          const Instruction *i2) const {
+bool MHPAnalysis::hasStructuralOrderRelation(const Instruction *i1,
+                                             const Instruction *i2) const {
   if (isInstructionThreadAmbiguous(i1) || isInstructionThreadAmbiguous(i2)) {
     return false;
   }
 
-  auto it = m_hb_cache.find({i1, i2});
-  if (it != m_hb_cache.end())
+  auto it = m_order_cache.find({i1, i2});
+  if (it != m_order_cache.end())
     return it->second;
-
-  // Fast path: use transitive closure if available and instruction nodes are
-  // not cloned across multiple call contexts.
-  if (m_hb_closure_computed && !m_has_multi_context_nodes) {
-    auto closure_it = m_hb_transitive_closure.find(i1);
-    if (closure_it != m_hb_transitive_closure.end()) {
-      bool result = closure_it->second.count(i2) > 0;
-      return (m_hb_cache[{i1, i2}] = result);
-    }
-  }
 
   std::vector<SyncNode *> start_nodes = m_tfg->getNodes(i1, getThreadID(i1));
   std::vector<SyncNode *> end_nodes = m_tfg->getNodes(i2, getThreadID(i2));
 
   if (start_nodes.empty() || end_nodes.empty() || i1 == i2) {
-    return (m_hb_cache[{i1, i2}] = false);
+    return (m_order_cache[{i1, i2}] = false);
   }
 
   auto can_reach = [this](SyncNode *start, SyncNode *end) -> bool {
@@ -1458,23 +1423,6 @@ bool MHPAnalysis::hasHappenBeforeRelation(const Instruction *i1,
     return false;
   };
 
-  auto instructionOrders = [&](const Instruction *lhs,
-                               const Instruction *rhs) -> bool {
-    std::vector<SyncNode *> lhs_nodes = m_tfg->getNodes(lhs, getThreadID(lhs));
-    std::vector<SyncNode *> rhs_nodes = m_tfg->getNodes(rhs, getThreadID(rhs));
-    if (lhs_nodes.empty() || rhs_nodes.empty()) {
-      return false;
-    }
-    for (SyncNode *lhs_node : lhs_nodes) {
-      for (SyncNode *rhs_node : rhs_nodes) {
-        if (!can_reach(lhs_node, rhs_node)) {
-          return false;
-        }
-      }
-    }
-    return true;
-  };
-
   bool tfg_orders_pair = true;
   for (SyncNode *start_node : start_nodes) {
     for (SyncNode *end_node : end_nodes) {
@@ -1489,19 +1437,9 @@ bool MHPAnalysis::hasHappenBeforeRelation(const Instruction *i1,
   }
 
   if (tfg_orders_pair) {
-    return (m_hb_cache[{i1, i2}] = true);
+    return (m_order_cache[{i1, i2}] = true);
   }
-
-  for (const auto &pair : m_atomic_hb_pairs) {
-    const Instruction *from = pair.a;
-    const Instruction *to = pair.b;
-    if ((i1 == from || instructionOrders(i1, from)) &&
-        (i2 == to || instructionOrders(to, i2))) {
-      return (m_hb_cache[{i1, i2}] = true);
-    }
-  }
-
-  return (m_hb_cache[{i1, i2}] = false);
+  return (m_order_cache[{i1, i2}] = false);
 }
 
 bool MHPAnalysis::isInSameThread(const Instruction *i1,
@@ -1525,14 +1463,6 @@ bool MHPAnalysis::isInSameThread(const Instruction *i1,
   }
 
   return true;
-}
-
-bool MHPAnalysis::isOrderedByLocks(const Instruction *i1,
-                                   const Instruction *i2) const {
-  if (!m_lockset) {
-    return false;
-  }
-  return m_lockset->mustHoldCommonLock(i1, i2);
 }
 
 // ============================================================================
@@ -1680,259 +1610,9 @@ const DominatorTree &MHPAnalysis::getDomTree(const Function *func) const {
   return *dtPtr;
 }
 
-const PostDominatorTree &
-MHPAnalysis::getPostDomTree(const Function *func) const {
-  auto it = m_post_dom_cache.find(func);
-  if (it != m_post_dom_cache.end()) {
-    return *(it->second);
-  }
-  auto PDT = std::make_unique<PostDominatorTree>();
-  PDT->recalculate(*const_cast<Function *>(func));
-  auto *pdtPtr = PDT.get();
-  m_post_dom_cache[func] = std::move(PDT);
-  return *pdtPtr;
-}
-
-bool MHPAnalysis::dominates(const Instruction *a, const Instruction *b) const {
-  if (!a || !b)
-    return false;
-  const Function *fa = a->getFunction();
-  const Function *fb = b->getFunction();
-  if (fa != fb)
-    return false;
-  const DominatorTree &DT = getDomTree(fa);
-  return DT.dominates(a, b);
-}
-
 // =========================================================================
 // Program Order Helpers (Precise Happens-Before for Same Thread)
 // =========================================================================
-
-bool MHPAnalysis::isBackEdge(const BasicBlock *from, const BasicBlock *to,
-                             const DominatorTree &DT) const {
-  // A back edge is an edge from 'from' to 'to' where 'to' dominates 'from'
-  // This captures loop back edges
-  return DT.dominates(to, from);
-}
-
-bool MHPAnalysis::isReachableWithoutBackEdges(const Instruction *from,
-                                              const Instruction *to) const {
-  // Checks reachability in the CFG ignoring back-edges (loops).
-  // This essentially checks "program text order" (lexical/topological order).
-  //
-  // Why ignore back-edges?
-  // - We want to know if 'from' *must* precede 'to' in a single linear
-  // execution trace.
-  // - With loops, 'to' might execute before 'from' in a subsequent iteration
-  // (cross-iteration),
-  //   but for defining a "happens-before" relation that rules out parallelism
-  //   within the same conceptual thread instance, we focus on the acyclic
-  //   backbone.
-  // - This is a conservative approximation for "program order" to avoid cycles
-  // in HB graph.
-
-  if (!from || !to)
-    return false;
-
-  if (from == to)
-    return false;
-
-  const Function *func = from->getFunction();
-  if (func != to->getFunction())
-    return false;
-
-  const BasicBlock *fromBB = from->getParent();
-  const BasicBlock *toBB = to->getParent();
-
-  // Quick check: if in same basic block, check instruction order
-  if (fromBB == toBB) {
-    // Check if 'from' appears before 'to' in the basic block
-    for (const Instruction &inst : *fromBB) {
-      if (&inst == from)
-        return true; // from comes first
-      if (&inst == to)
-        return false; // to comes first
-    }
-    return false;
-  }
-
-  // Different basic blocks: perform BFS without following back edges
-  const DominatorTree &DT = getDomTree(func);
-
-  std::unordered_set<const BasicBlock *> visited;
-  std::vector<const BasicBlock *> worklist;
-
-  // Start from the basic block containing 'from'
-  // But only consider successors after 'from' in that block
-  worklist.push_back(fromBB);
-  visited.insert(fromBB);
-
-  while (!worklist.empty()) {
-    const BasicBlock *current = worklist.back();
-    worklist.pop_back();
-
-    // Check successors
-    for (const BasicBlock *succ : successors(current)) {
-      // Skip back edges (loop back edges)
-      if (isBackEdge(current, succ, DT)) {
-        continue;
-      }
-
-      // If we reached the target block, check if we can reach 'to'
-      if (succ == toBB) {
-        return true;
-      }
-
-      // Continue exploring if not visited
-      if (visited.find(succ) == visited.end()) {
-        visited.insert(succ);
-        worklist.push_back(succ);
-      }
-    }
-  }
-
-  return false;
-}
-
-void MHPAnalysis::computeAtomicHappensBefore() {
-  errs() << "Computing Atomic Happens-Before...\n";
-
-  m_atomic_instructions.clear();
-  m_atomic_hb_pairs.clear();
-  m_atomic_sync_witnesses.clear();
-
-  for (Function &F : m_module) {
-    for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
-      if (CppAtomics::isAtomic(&*I)) {
-        m_atomic_instructions.push_back(&*I);
-      }
-    }
-  }
-
-  // Conservative fence-pair witness inference:
-  // We still avoid plain release/acquire HB without reads-from evidence, but a
-  // release fence followed by an acquire fence can establish a useful definite
-  // ordering when both are bracketed by same-location release/acquire atomic
-  // operations that serve as a witness chain.
-  std::vector<const llvm::Instruction *> release_fences;
-  std::vector<const llvm::Instruction *> acquire_fences;
-  for (const llvm::Instruction *inst : m_atomic_instructions) {
-    if (CppAtomics::isFenceRelease(inst) || CppAtomics::isFenceAcqRel(inst) ||
-        CppAtomics::isFenceSeqCst(inst)) {
-      release_fences.push_back(inst);
-    }
-    if (CppAtomics::isFenceAcquire(inst) || CppAtomics::isFenceAcqRel(inst) ||
-        CppAtomics::isFenceSeqCst(inst)) {
-      acquire_fences.push_back(inst);
-    }
-  }
-
-  for (const llvm::Instruction *release_fence : release_fences) {
-    std::vector<const llvm::Instruction *> release_witnesses =
-        collectFenceWitnesses(release_fence,
-                              /*require_release_semantics=*/true);
-    if (release_witnesses.empty()) {
-      continue;
-    }
-
-    for (const llvm::Instruction *acquire_fence : acquire_fences) {
-      std::vector<const llvm::Instruction *> acquire_witnesses =
-          collectFenceWitnesses(acquire_fence,
-                                /*require_release_semantics=*/false);
-      if (acquire_witnesses.empty()) {
-        continue;
-      }
-
-      bool matched = false;
-      for (const llvm::Instruction *release_inst : release_witnesses) {
-        for (const llvm::Instruction *acquire_inst : acquire_witnesses) {
-          if (!CppAtomics::hasReleaseSemantics(release_inst) ||
-              !CppAtomics::hasAcquireSemantics(acquire_inst)) {
-            continue;
-          }
-          if (!atomicLocationsMayAlias(release_inst, acquire_inst)) {
-            continue;
-          }
-          m_atomic_hb_pairs.insert({release_fence, acquire_fence});
-          AtomicSyncWitness witness;
-          witness.release = release_inst;
-          witness.acquire = acquire_inst;
-          witness.location = CppAtomics::getAtomicPointer(release_inst);
-          m_atomic_sync_witnesses.push_back(witness);
-          matched = true;
-          break;
-        }
-        if (matched) {
-          break;
-        }
-      }
-    }
-  }
-
-  errs() << "Recorded " << m_atomic_hb_pairs.size()
-         << " atomic HB edges from fence witnesses.\n";
-}
-
-std::vector<const Instruction *>
-MHPAnalysis::collectFenceWitnesses(const Instruction *fence,
-                                   bool require_release_semantics) const {
-  std::vector<const Instruction *> witnesses;
-  if (!fence) {
-    return witnesses;
-  }
-
-  ThreadID fence_tid = getThreadID(fence);
-  for (const Instruction *inst : m_atomic_instructions) {
-    if (inst == fence || CppAtomics::isFence(inst)) {
-      continue;
-    }
-    if (getThreadID(inst) != fence_tid) {
-      continue;
-    }
-
-    if (require_release_semantics) {
-      if (!CppAtomics::hasReleaseSemantics(inst) ||
-          !CppAtomics::isStore(inst)) {
-        continue;
-      }
-      if (!hasHappenBeforeRelation(inst, fence)) {
-        continue;
-      }
-    } else {
-      if (!CppAtomics::hasAcquireSemantics(inst) || !CppAtomics::isLoad(inst)) {
-        continue;
-      }
-      if (!hasHappenBeforeRelation(fence, inst)) {
-        continue;
-      }
-    }
-
-    if (!CppAtomics::getAtomicPointer(inst)) {
-      continue;
-    }
-    witnesses.push_back(inst);
-  }
-
-  return witnesses;
-}
-
-bool MHPAnalysis::atomicLocationsMayAlias(const Instruction *lhs,
-                                          const Instruction *rhs) const {
-  const Value *lhs_ptr = CppAtomics::getAtomicPointer(lhs);
-  const Value *rhs_ptr = CppAtomics::getAtomicPointer(rhs);
-  if (!lhs_ptr || !rhs_ptr) {
-    return false;
-  }
-  lhs_ptr = lhs_ptr->stripPointerCasts();
-  rhs_ptr = rhs_ptr->stripPointerCasts();
-  if (lhs_ptr == rhs_ptr) {
-    return true;
-  }
-  if (m_alias_analysis) {
-    return m_alias_analysis->mayAlias(lhs_ptr, rhs_ptr);
-  }
-  return false;
-}
 
 std::vector<SyncNode *>
 MHPAnalysis::getBarrierContinuations(const Instruction *barrier_inst) const {
@@ -1968,178 +1648,4 @@ MHPAnalysis::getBarrierContinuations(const Instruction *barrier_inst) const {
   }
 
   return continuations;
-}
-
-void MHPAnalysis::computeFenceBasedHappensBefore() {
-  errs() << "Skipped fence HB edges without a proven atomic witness.\n";
-}
-
-void MHPAnalysis::computeSeqCstTotalOrder() {
-  errs() << "Skipped synthetic seq-cst total-order edges.\n";
-}
-
-bool MHPAnalysis::mayRace(const Instruction *i1, const Instruction *i2) const {
-  // Two instructions may race if:
-  // 1. They may happen in parallel
-  // 2. At least one is a write
-  // 3. They access the same memory location
-  // 4. They don't access thread-local storage
-
-  // Check MHP
-  if (!mayHappenInParallel(i1, i2)) {
-    return false;
-  }
-
-  // Check if either accesses thread-local storage (can't race)
-  if (m_tls_analysis) {
-    if (m_tls_analysis->accessesThreadLocalStorage(i1) ||
-        m_tls_analysis->accessesThreadLocalStorage(i2)) {
-      return false;
-    }
-  }
-
-  // Check if at least one is a write
-  bool is_write1 = isa<StoreInst>(i1) || isa<AtomicRMWInst>(i1) ||
-                   isa<AtomicCmpXchgInst>(i1);
-  bool is_write2 = isa<StoreInst>(i2) || isa<AtomicRMWInst>(i2) ||
-                   isa<AtomicCmpXchgInst>(i2);
-
-  if (!is_write1 && !is_write2) {
-    return false; // Read-read: no race
-  }
-
-  // Check if they access the same memory location (via alias analysis)
-  const Value *ptr1 = nullptr;
-  const Value *ptr2 = nullptr;
-
-  if (const LoadInst *load = dyn_cast<LoadInst>(i1)) {
-    ptr1 = load->getPointerOperand();
-  } else if (const StoreInst *store = dyn_cast<StoreInst>(i1)) {
-    ptr1 = store->getPointerOperand();
-  } else if (const AtomicRMWInst *rmw = dyn_cast<AtomicRMWInst>(i1)) {
-    ptr1 = rmw->getPointerOperand();
-  } else if (const AtomicCmpXchgInst *cmpxchg =
-                 dyn_cast<AtomicCmpXchgInst>(i1)) {
-    ptr1 = cmpxchg->getPointerOperand();
-  }
-
-  if (const LoadInst *load = dyn_cast<LoadInst>(i2)) {
-    ptr2 = load->getPointerOperand();
-  } else if (const StoreInst *store = dyn_cast<StoreInst>(i2)) {
-    ptr2 = store->getPointerOperand();
-  } else if (const AtomicRMWInst *rmw = dyn_cast<AtomicRMWInst>(i2)) {
-    ptr2 = rmw->getPointerOperand();
-  } else if (const AtomicCmpXchgInst *cmpxchg =
-                 dyn_cast<AtomicCmpXchgInst>(i2)) {
-    ptr2 = cmpxchg->getPointerOperand();
-  }
-
-  if (!ptr1 || !ptr2) {
-    return false; // Not memory operations
-  }
-
-  // Check for aliasing
-  if (m_alias_analysis) {
-    return m_alias_analysis->mayAlias(ptr1, ptr2);
-  }
-
-  // Conservative: assume may alias
-  return true;
-}
-
-void MHPAnalysis::computeHappensBeforeTransitiveClosure() const {
-  if (m_hb_closure_computed) {
-    return; // Already computed
-  }
-
-  if (m_has_multi_context_nodes) {
-    errs()
-        << "Skipping HB transitive closure for context-cloned call graphs.\n";
-    m_hb_closure_computed = true;
-    return;
-  }
-
-  errs() << "Computing happens-before transitive closure...\n";
-
-  // Collect all instructions that have TFG nodes
-  std::vector<const Instruction *> all_insts;
-  for (const auto &entry : m_inst_to_thread) {
-    if (!m_tfg->getNodes(entry.first, entry.second).empty()) {
-      all_insts.push_back(entry.first);
-    }
-  }
-
-  // Initialize: each instruction can reach itself (reflexive)
-  for (const Instruction *inst : all_insts) {
-    m_hb_transitive_closure[inst].insert(inst);
-  }
-
-  // Add direct edges from TFG
-  for (SyncNode *node : m_tfg->getAllNodes()) {
-    const Instruction *from_inst = node->getInstruction();
-    if (!from_inst)
-      continue;
-
-    for (SyncNode *succ : node->getSuccessors()) {
-      const Instruction *to_inst = succ->getInstruction();
-      if (!to_inst)
-        continue;
-
-      // Skip edges to thread-ambiguous instructions
-      if (isInstructionThreadAmbiguous(to_inst)) {
-        continue;
-      }
-
-      m_hb_transitive_closure[from_inst].insert(to_inst);
-    }
-  }
-
-  // Floyd-Warshall-style transitive closure
-  // For each instruction k, for each pair (i, j):
-  //   if i->k and k->j, then add i->j
-  //
-  // This is O(N^3) but only needs to be done once and can be amortized
-  // over many HB queries. For large programs, enable selectively.
-
-  size_t num_insts = all_insts.size();
-  if (num_insts > 10000) {
-    errs() << "Warning: Large program (" << num_insts
-           << " insts), skipping full transitive closure computation\n";
-    m_hb_closure_computed = true;
-    return;
-  }
-
-  for (const Instruction *k : all_insts) {
-    auto k_it = m_hb_transitive_closure.find(k);
-    if (k_it == m_hb_transitive_closure.end()) {
-      continue;
-    }
-
-    const auto &k_reachable = k_it->second;
-
-    for (const Instruction *i : all_insts) {
-      // Check if i can reach k
-      auto i_it = m_hb_transitive_closure.find(i);
-      if (i_it == m_hb_transitive_closure.end()) {
-        continue;
-      }
-
-      if (i_it->second.count(k) == 0) {
-        continue; // i cannot reach k
-      }
-
-      // i can reach k; add all of k's reachable nodes to i's reachable set
-      i_it->second.insert(k_reachable.begin(), k_reachable.end());
-    }
-  }
-
-  m_hb_closure_computed = true;
-
-  size_t total_edges = 0;
-  for (const auto &entry : m_hb_transitive_closure) {
-    total_edges += entry.second.size();
-  }
-
-  errs() << "Transitive closure computed: " << total_edges
-         << " total reachability edges\n";
 }

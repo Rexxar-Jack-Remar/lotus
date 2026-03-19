@@ -159,6 +159,89 @@ TEST_F(StaticVectorClockMHPTest, StdThreadJoinCreatesJoinLikeHB) {
   EXPECT_FALSE(svc.mayHappenInParallel(worker_inst, post));
 }
 
+TEST_F(StaticVectorClockMHPTest, JoinTargetThroughLoadCreatesJoinLikeHB) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 1, 2
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      %slot = alloca i8*
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      store i8* %tid, i8** %slot
+      %join_tid = load i8*, i8** %slot
+      call i32 @pthread_join(i8* %join_tid, i8* null)
+      %post = add i32 3, 4
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Instruction *worker_inst =
+      findInstructionByName(*module->getFunction("worker"), "w");
+  const Instruction *post =
+      findInstructionByName(*module->getFunction("main"), "post");
+  ASSERT_NE(worker_inst, nullptr);
+  ASSERT_NE(post, nullptr);
+  EXPECT_FALSE(svc.mayHappenInParallel(worker_inst, post));
+}
+
+TEST_F(StaticVectorClockMHPTest, ParallelInstructionsMatchesQueries) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w1 = add i32 10, 20
+      %w2 = add i32 %w1, 1
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      br label %loop
+
+    loop:
+      %i = phi i32 [0, %entry], [%inc, %loop]
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      %inc = add i32 %i, 1
+      %cond = icmp slt i32 %inc, 2
+      br i1 %cond, label %loop, label %exit
+
+    exit:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Instruction *w1 = findInstructionByName(*module->getFunction("worker"), "w1");
+  const Instruction *w2 = findInstructionByName(*module->getFunction("worker"), "w2");
+  ASSERT_NE(w1, nullptr);
+  ASSERT_NE(w2, nullptr);
+
+  InstructionSet parallel = svc.getParallelInstructions(w1);
+  EXPECT_EQ(parallel.count(w2), 1u);
+  EXPECT_TRUE(svc.mayHappenInParallel(w1, w2));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

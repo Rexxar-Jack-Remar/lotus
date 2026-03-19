@@ -1,3 +1,4 @@
+#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
@@ -8,6 +9,7 @@
 
 using namespace llvm;
 using namespace mhp;
+using namespace lotus;
 
 class AtomicHappensBeforeTest : public ::testing::Test {
 protected:
@@ -107,11 +109,13 @@ TEST_F(AtomicHappensBeforeTest, ReleaseAcquireOrdering) {
   
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   // Without a reads-from witness, release/acquire on @flag is not enough for
   // the analysis to prove a definite HB edge for the non-atomic accesses.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(mhp.mustPrecede(store_data, load_data));
+  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, SequentialConsistency) {
@@ -168,11 +172,13 @@ TEST_F(AtomicHappensBeforeTest, SequentialConsistency) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   // Seq-cst alone does not let the analysis prove a cross-thread HB edge
   // without a concrete reads-from witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(mhp.mustPrecede(store_data, load_data));
+  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, RelaxedAtomicsNoSynchronization) {
@@ -229,6 +235,8 @@ TEST_F(AtomicHappensBeforeTest, RelaxedAtomicsNoSynchronization) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   // Relaxed/monotonic atomics don't provide synchronization
   // The store and load may happen in parallel (data race)
@@ -309,13 +317,15 @@ TEST_F(AtomicHappensBeforeTest, AcquireReleaseOrdering) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   // These atomic pairs are synchronization candidates, but the analysis no
   // longer turns them into definite HB edges without reads-from evidence.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data1, load_data1));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data2, load_data2));
-  EXPECT_FALSE(mhp.mustPrecede(store_data1, load_data1));
-  EXPECT_FALSE(mhp.mustPrecede(store_data2, load_data2));
+  EXPECT_FALSE(hb.mustPrecede(store_data1, load_data1));
+  EXPECT_FALSE(hb.mustPrecede(store_data2, load_data2));
 }
 
 TEST_F(AtomicHappensBeforeTest, MultipleAtomicVariables) {
@@ -399,13 +409,15 @@ TEST_F(AtomicHappensBeforeTest, MultipleAtomicVariables) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   // Same-location release/acquire operations are not upgraded to definite HB
   // edges without a reads-from witness, so both non-atomic pairs remain MHP.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_x, load_x));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_y, load_y));
-  EXPECT_FALSE(mhp.mustPrecede(store_x, load_x));
-  EXPECT_FALSE(mhp.mustPrecede(store_y, load_y));
+  EXPECT_FALSE(hb.mustPrecede(store_x, load_x));
+  EXPECT_FALSE(hb.mustPrecede(store_y, load_y));
 }
 
 TEST_F(AtomicHappensBeforeTest, AtomicChain) {
@@ -479,11 +491,13 @@ TEST_F(AtomicHappensBeforeTest, AtomicChain) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   // The analysis does not build transitive HB through atomic chains without
   // concrete reads-from evidence at each synchronization step.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(mhp.mustPrecede(store_data, load_data));
+  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, CompareAndSwap) {
@@ -541,11 +555,13 @@ TEST_F(AtomicHappensBeforeTest, CompareAndSwap) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   // Even with CAS/RMW, the analysis now requires a definite reads-from witness
   // before proving a cross-thread HB edge.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(mhp.mustPrecede(store_data, load_data));
+  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, NoSynchronizationWithoutMatchingOrdering) {
@@ -602,6 +618,8 @@ TEST_F(AtomicHappensBeforeTest, NoSynchronizationWithoutMatchingOrdering) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   // Monotonic ordering doesn't provide synchronization
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
@@ -849,9 +867,11 @@ TEST_F(AtomicHappensBeforeTest, MatchingFencesCreateHappensBefore) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
-  EXPECT_TRUE(mhp.mustPrecede(store_data, load_data));
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, MatchingFencesWithAliasedAtomicPointersCreateHB) {
@@ -904,9 +924,11 @@ TEST_F(AtomicHappensBeforeTest, MatchingFencesWithAliasedAtomicPointersCreateHB)
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
-  EXPECT_TRUE(mhp.mustPrecede(store_data, load_data));
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
 // Main function for tests

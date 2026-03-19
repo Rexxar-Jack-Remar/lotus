@@ -2,7 +2,7 @@
 #define ATOMICITY_CHECKER_H
 
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
-#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
@@ -40,7 +40,7 @@ struct CriticalSection {
 class AtomicityChecker {
 public:
   explicit AtomicityChecker(
-      llvm::Module &module, mhp::MHPAnalysis *mhpAnalysis,
+      llvm::Module &module, mhp::IMHPAnalysis *mhpAnalysis,
       mhp::LockSetAnalysis *locksetAnalysis, ThreadAPI *threadAPI,
       lotus::AliasAnalysisWrapper *aliasAnalysis = nullptr);
 
@@ -53,7 +53,7 @@ public:
 private:
   // Analysis components
   llvm::Module &m_module;
-  mhp::MHPAnalysis *m_mhpAnalysis;
+  mhp::IMHPAnalysis *m_mhpAnalysis;
   mhp::LockSetAnalysis *m_locksetAnalysis;
   ThreadAPI *m_threadAPI;
   lotus::AliasAnalysisWrapper *m_aliasAnalysis;

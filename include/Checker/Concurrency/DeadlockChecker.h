@@ -2,7 +2,8 @@
 #define DEADLOCK_CHECKER_H
 
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
-#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
@@ -30,7 +31,9 @@ class DeadlockChecker {
 public:
   explicit DeadlockChecker(llvm::Module &module,
                            mhp::LockSetAnalysis *locksetAnalysis,
-                           mhp::MHPAnalysis *mhpAnalysis, ThreadAPI *threadAPI);
+                           mhp::IMHPAnalysis *mhpAnalysis,
+                           lotus::HappensBeforeAnalysis *hbAnalysis,
+                           ThreadAPI *threadAPI);
 
   /**
    * @brief Check for deadlocks in the module
@@ -42,7 +45,8 @@ private:
   // Analysis components
   llvm::Module &m_module;
   mhp::LockSetAnalysis *m_locksetAnalysis;
-  mhp::MHPAnalysis *m_mhpAnalysis;
+  mhp::IMHPAnalysis *m_mhpAnalysis;
+  lotus::HappensBeforeAnalysis *m_hbAnalysis;
   ThreadAPI *m_threadAPI;
 
   // Goblint-style: lock-order graph with events (from_lock -> [(to_lock,

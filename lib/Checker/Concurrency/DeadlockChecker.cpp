@@ -25,9 +25,12 @@ namespace concurrency {
 
 DeadlockChecker::DeadlockChecker(Module &module,
                                  LockSetAnalysis *locksetAnalysis,
-                                 MHPAnalysis *mhpAnalysis, ThreadAPI *threadAPI)
+                                 IMHPAnalysis *mhpAnalysis,
+                                 lotus::HappensBeforeAnalysis *hbAnalysis,
+                                 ThreadAPI *threadAPI)
     : m_module(module), m_locksetAnalysis(locksetAnalysis),
-      m_mhpAnalysis(mhpAnalysis), m_threadAPI(threadAPI) {}
+      m_mhpAnalysis(mhpAnalysis), m_hbAnalysis(hbAnalysis),
+      m_threadAPI(threadAPI) {}
 
 void DeadlockChecker::buildLockOrderGraph(LockOrderGraph &graph) const {
   for (Function &F : m_module) {
@@ -208,7 +211,7 @@ DeadlockChecker::findMatchingUnlock(const Instruction *lockInst) const {
 
   // Find the next release after this acquire
   for (const Instruction *release : releases) {
-    if (m_mhpAnalysis->mustPrecede(lockInst, release)) {
+    if (m_hbAnalysis && m_hbAnalysis->mustPrecede(lockInst, release)) {
       return release;
     }
   }
@@ -259,9 +262,12 @@ std::vector<ConcurrencyBugReport> DeadlockChecker::detectLostWakeups() const {
         if (m_mhpAnalysis) {
           bool parallel =
               m_mhpAnalysis->mayHappenInParallel(waitInst, signalInst);
-          bool orderedAfter = m_mhpAnalysis->mustPrecede(waitInst, signalInst);
+          bool orderedAfter =
+              m_hbAnalysis && m_hbAnalysis->mustPrecede(waitInst, signalInst);
           canWake = parallel || orderedAfter;
-          if (!canWake && !m_mhpAnalysis->mustPrecede(signalInst, waitInst)) {
+          if (!canWake &&
+              !(m_hbAnalysis &&
+                m_hbAnalysis->mustPrecede(signalInst, waitInst))) {
             // If ordering is unknown, still treat as a potential wakeup to
             // avoid false positives.
             canWake = true;

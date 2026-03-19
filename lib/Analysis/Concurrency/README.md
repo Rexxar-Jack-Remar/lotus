@@ -24,8 +24,8 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 
 ## Analyses 
 - **LockSetAnalysis**: Performs may/must lock set analysis to track which locks are held at each program point.
-- **HappensBeforeAnalysis**: Determines happens-before relationships between instructions using MHP analysis.
-- **MHPAnalysis**: Implements may-happen-in-parallel analysis to determine which instructions can execute concurrently.
+- **HappensBeforeAnalysis**: Determines happens-before relationships between instructions from TFG program order plus synchronizes-with edges.
+- **MHPAnalysis**: Implements pure may-happen-in-parallel overlap analysis to determine which instructions can execute concurrently.
 - **StaticVectorClockMHP**: Implements a static vector clock-based approach for MHP analysis.
 - **StaticThreadSharingAnalysis**: Analyzes which memory locations are shared between threads using static analysis.
 - **MemUseDefAnalysis**: Performs memory use-def analysis based on MemorySSA to track memory dependencies.

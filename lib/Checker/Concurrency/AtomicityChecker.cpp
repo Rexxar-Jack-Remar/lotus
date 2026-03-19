@@ -58,7 +58,7 @@ static std::string formatLoc(const Instruction &I) {
 //  Construction
 // ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
-AtomicityChecker::AtomicityChecker(Module &M, MHPAnalysis *MHP,
+AtomicityChecker::AtomicityChecker(Module &M, IMHPAnalysis *MHP,
                                    LockSetAnalysis *LSA, ThreadAPI *TAPI,
                                    lotus::AliasAnalysisWrapper *AA)
     : m_module(M), m_mhpAnalysis(MHP), m_locksetAnalysis(LSA),

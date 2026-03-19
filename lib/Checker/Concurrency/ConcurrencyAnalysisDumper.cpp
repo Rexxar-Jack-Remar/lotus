@@ -22,7 +22,7 @@ using namespace lotus;
 namespace concurrency {
 
 ConcurrencyAnalysisDumper::ConcurrencyAnalysisDumper(
-    Module &module, MHPAnalysis *mhpAnalysis, LockSetAnalysis *locksetAnalysis,
+    Module &module, IMHPAnalysis *mhpAnalysis, LockSetAnalysis *locksetAnalysis,
     EscapeAnalysis *escapeAnalysis, ThreadAPI *threadAPI)
     : m_module(module), m_mhpAnalysis(mhpAnalysis),
       m_locksetAnalysis(locksetAnalysis), m_escapeAnalysis(escapeAnalysis),
@@ -68,14 +68,10 @@ void ConcurrencyAnalysisDumper::dumpText(raw_ostream &os,
   os << "========================================\n\n";
 
   // Print overall statistics
-  auto mhpStats = m_mhpAnalysis->getStatistics();
   auto locksetStats = m_locksetAnalysis->getStatistics();
 
   os << "=== Analysis Statistics ===\n";
-  os << "Total Threads: " << mhpStats.num_threads << "\n";
-  os << "Thread Forks: " << mhpStats.num_forks << "\n";
-  os << "Thread Joins: " << mhpStats.num_joins << "\n";
-  os << "MHP Pairs: " << mhpStats.num_mhp_pairs << "\n";
+  os << "MHP Pairs: " << m_mhpAnalysis->getMhpPairCount() << "\n";
   os << "Total Locks: " << locksetStats.num_locks << "\n";
   os << "Lock Acquires: " << locksetStats.num_acquires << "\n";
   os << "Lock Releases: " << locksetStats.num_releases << "\n";
@@ -434,14 +430,10 @@ void ConcurrencyAnalysisDumper::dumpJSON(raw_ostream &os,
   os << "  \"module\": \"" << m_module.getModuleIdentifier() << "\",\n";
 
   // Statistics
-  auto mhpStats = m_mhpAnalysis->getStatistics();
   auto locksetStats = m_locksetAnalysis->getStatistics();
 
   os << "  \"statistics\": {\n";
-  os << "    \"total_threads\": " << mhpStats.num_threads << ",\n";
-  os << "    \"thread_forks\": " << mhpStats.num_forks << ",\n";
-  os << "    \"thread_joins\": " << mhpStats.num_joins << ",\n";
-  os << "    \"mhp_pairs\": " << mhpStats.num_mhp_pairs << ",\n";
+  os << "    \"mhp_pairs\": " << m_mhpAnalysis->getMhpPairCount() << ",\n";
   os << "    \"total_locks\": " << locksetStats.num_locks << ",\n";
   os << "    \"lock_acquires\": " << locksetStats.num_acquires << ",\n";
   os << "    \"lock_releases\": " << locksetStats.num_releases << "\n";

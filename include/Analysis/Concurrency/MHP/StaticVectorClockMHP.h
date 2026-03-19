@@ -13,6 +13,7 @@
 #define STATIC_VECTOR_CLOCK_MHP_H
 
 #include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
+#include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 
@@ -46,26 +47,43 @@ using StaticThreadID = size_t;
  *   bool parallel = svc.mayHappenInParallel(instA, instB);
  *   svc.printResults(errs());
  */
-class StaticVectorClockMHP {
+class StaticVectorClockMHP : public IMHPAnalysis {
 public:
   explicit StaticVectorClockMHP(llvm::Module &module);
 
   /// Run the SVC-MHP analysis.
-  void analyze();
+  void analyze() override;
 
   /// Query whether two instructions may execute in parallel.
   bool mayHappenInParallel(const llvm::Instruction *i1,
-                           const llvm::Instruction *i2) const;
+                           const llvm::Instruction *i2) const override;
+
+  bool isPrecomputedMHP(const llvm::Instruction *i1,
+                        const llvm::Instruction *i2) const override;
+
+  InstructionSet
+  getParallelInstructions(const llvm::Instruction *inst) const override;
+
+  bool mustBeSequential(const llvm::Instruction *i1,
+                        const llvm::Instruction *i2) const override {
+    return !mayHappenInParallel(i1, i2);
+  }
+
+  ThreadID getThreadID(const llvm::Instruction *inst) const override;
+
+  InstructionSet getInstructionsInThread(ThreadID tid) const override;
+
+  size_t getMhpPairCount() const override { return m_mhp_pairs.size(); }
 
   /// Query happens-before using static vector clocks.
   bool happensBefore(const llvm::Instruction *i1,
                      const llvm::Instruction *i2) const;
 
   /// Print a compact statistics summary.
-  void printStatistics(llvm::raw_ostream &os) const;
+  void printStatistics(llvm::raw_ostream &os) const override;
 
   /// Print debug information about the computed clocks and pairs.
-  void printResults(llvm::raw_ostream &os) const;
+  void printResults(llvm::raw_ostream &os) const override;
 
   static constexpr unsigned kCallContextLimit = 2; // k-limiting for call strings
 
@@ -175,6 +193,9 @@ private:
 
   std::set<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
       m_mhp_pairs;
+  mutable std::unordered_map<ThreadID, InstructionSet> m_thread_instruction_cache;
+  mutable std::unordered_map<const llvm::Instruction *, InstructionSet>
+      m_parallel_instruction_cache;
 
   // Construction
   void buildThreadFlowGraph();

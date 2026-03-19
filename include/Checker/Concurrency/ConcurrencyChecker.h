@@ -4,7 +4,9 @@
 #include "Analysis/Concurrency/ConcurrencyFacade.h"
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/MHP/StaticVectorClockMHP.h"
 #include "Analysis/Concurrency/MPI/MPIAnalysis.h"
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 #include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
@@ -47,6 +49,8 @@ namespace concurrency {
  */
 class ConcurrencyChecker {
 public:
+  enum class MHPBackendKind { Region, StaticVectorClock };
+
   explicit ConcurrencyChecker(llvm::Module &module);
   ~ConcurrencyChecker() = default;
 
@@ -123,6 +127,7 @@ public:
   void enableLockMismatchCheck(bool enable) { m_checkLockMismatches = enable; }
   void enableOpenMPCheck(bool enable) { m_checkOpenMP = enable; }
   void enableMPICheck(bool enable) { m_checkMPI = enable; }
+  void setMHPBackend(MHPBackendKind backend) { m_mhpBackend = backend; }
 
   /**
    * @brief Get statistics about the analysis
@@ -160,7 +165,8 @@ public:
 
 private:
   llvm::Module &m_module;
-  std::unique_ptr<mhp::MHPAnalysis> m_mhpAnalysis;
+  std::unique_ptr<mhp::IMHPAnalysis> m_mhpAnalysisStorage;
+  mhp::IMHPAnalysis *m_mhpAnalysis = nullptr;
   std::unique_ptr<mhp::LockSetAnalysis> m_locksetAnalysis;
   mhp::LockSetAnalysis *m_locksetAnalysisView = nullptr;
   std::unique_ptr<lotus::EscapeAnalysis> m_escapeAnalysis;
@@ -187,6 +193,7 @@ private:
   bool m_checkLockMismatches = true;
   bool m_checkOpenMP = true;
   bool m_checkMPI = true;
+  MHPBackendKind m_mhpBackend = MHPBackendKind::Region;
 
   // Bug type IDs (registered with BugReportMgr)
   int m_dataRaceTypeId;

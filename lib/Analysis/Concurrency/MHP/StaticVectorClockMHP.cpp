@@ -31,6 +31,8 @@ void StaticVectorClockMHP::analyze() {
   m_inst_to_static_thread.clear();
   m_node_clocks.clear();
   m_mhp_pairs.clear();
+  m_thread_instruction_cache.clear();
+  m_parallel_instruction_cache.clear();
   m_reachable_from_cs.clear();
   m_node_id_to_node.clear();
   m_ret_to_call.clear();
@@ -711,6 +713,57 @@ bool StaticVectorClockMHP::mayHappenInParallel(const Instruction *i1,
   return !happensBefore(i1, i2) && !happensBefore(i2, i1);
 }
 
+bool StaticVectorClockMHP::isPrecomputedMHP(const Instruction *i1,
+                                            const Instruction *i2) const {
+  if (!i1 || !i2) {
+    return false;
+  }
+  return m_mhp_pairs.count({i1, i2}) || m_mhp_pairs.count({i2, i1});
+}
+
+InstructionSet
+StaticVectorClockMHP::getParallelInstructions(const Instruction *inst) const {
+  auto cache_it = m_parallel_instruction_cache.find(inst);
+  if (cache_it != m_parallel_instruction_cache.end()) {
+    return cache_it->second;
+  }
+
+  InstructionSet result;
+  for (const auto &pair : m_mhp_pairs) {
+    if (pair.first == inst) {
+      result.insert(pair.second);
+    } else if (pair.second == inst) {
+      result.insert(pair.first);
+    }
+  }
+  if (inst) {
+    m_parallel_instruction_cache[inst] = result;
+  }
+  return result;
+}
+
+ThreadID StaticVectorClockMHP::getThreadID(const Instruction *inst) const {
+  auto it = m_inst_to_thread.find(inst);
+  return it != m_inst_to_thread.end() ? it->second : kUnknownThread;
+}
+
+InstructionSet
+StaticVectorClockMHP::getInstructionsInThread(ThreadID tid) const {
+  auto cache_it = m_thread_instruction_cache.find(tid);
+  if (cache_it != m_thread_instruction_cache.end()) {
+    return cache_it->second;
+  }
+
+  InstructionSet result;
+  for (const auto &entry : m_inst_to_thread) {
+    if (entry.second == tid) {
+      result.insert(entry.first);
+    }
+  }
+  m_thread_instruction_cache[tid] = result;
+  return result;
+}
+
 void StaticVectorClockMHP::printStatistics(raw_ostream &os) const {
   size_t num_static_threads = m_static_threads.size();
   size_t num_nodes = m_node_clocks.size();
@@ -1091,9 +1144,9 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
   }
 
   if (!found && m_join_target_analysis) {
-    std::vector<const Instruction *> possible_forks =
-        m_join_target_analysis->getPossibleJoinedForks(join_inst);
-    if (possible_forks.size() == 1) {
+    if (m_join_target_analysis->isUnambiguousJoin(join_inst)) {
+      std::vector<const Instruction *> possible_forks =
+          m_join_target_analysis->getPossibleJoinedForks(join_inst);
       auto it = m_fork_to_thread.find(possible_forks.front());
       if (it != m_fork_to_thread.end()) {
         joined_tid = it->second;

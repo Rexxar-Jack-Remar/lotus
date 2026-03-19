@@ -201,6 +201,65 @@ TEST_F(HappensBeforeAnalysisTest, PromiseFutureTracksSharedState) {
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
 
+TEST_F(HappensBeforeAnalysisTest, PromiseFutureRepeatedQueriesRemainStable) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+    @promise_obj = global i8 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i8* @_ZNSt7promise10get_futureEv(i8*)
+    declare void @_ZNSt7promise9set_valueEv(i8*)
+    declare void @_ZNSt6future3getEv(i8*)
+
+    define i8* @producer(i8* %unused) {
+    entry:
+      store i32 99, i32* @shared, align 4
+      call void @_ZNSt7promise9set_valueEv(i8* @promise_obj)
+      ret i8* null
+    }
+
+    define i8* @consumer(i8* %unused) {
+    entry:
+      %future = call i8* @_ZNSt7promise10get_futureEv(i8* @promise_obj)
+      call void @_ZNSt6future3getEv(i8* %future)
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @producer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @consumer, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *producer = module->getFunction("producer");
+  const Function *consumer = module->getFunction("consumer");
+  ASSERT_NE(producer, nullptr);
+  ASSERT_NE(consumer, nullptr);
+
+  const Instruction *store_shared = &producer->getEntryBlock().front();
+  const Instruction *load_shared = findInstructionByName(*consumer, "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+  EXPECT_FALSE(hb.happensBefore(load_shared, store_shared));
+}
+
 TEST_F(HappensBeforeAnalysisTest, OpenMPTaskDependenciesContributeToHB) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }

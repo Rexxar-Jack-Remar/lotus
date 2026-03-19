@@ -125,7 +125,7 @@ const Value *resolveRegionKey(const Value *value, const DataLayout &DL,
 
 } // namespace
 
-DataRaceChecker::DataRaceChecker(Module &module, MHPAnalysis *mhpAnalysis,
+DataRaceChecker::DataRaceChecker(Module &module, IMHPAnalysis *mhpAnalysis,
                                  LockSetAnalysis *locksetAnalysis,
                                  EscapeAnalysis *escapeAnalysis,
                                  AliasAnalysisWrapper *aliasAnalysis,
@@ -489,7 +489,11 @@ bool DataRaceChecker::isOpenMPPrivateLikeAccess(const Instruction *inst,
   if (!inst || !loc || !m_mhpAnalysis) {
     return false;
   }
-  const OpenMP::OpenMPSemantics *semantics = m_mhpAnalysis->getOpenMPSemantics();
+  auto *regionMHP = dynamic_cast<const MHPAnalysis *>(m_mhpAnalysis);
+  if (!regionMHP) {
+    return false;
+  }
+  const OpenMP::OpenMPSemantics *semantics = regionMHP->getOpenMPSemantics();
   if (!semantics) {
     return false;
   }
@@ -539,23 +543,35 @@ bool DataRaceChecker::isOpenMPPrivateLikeAccess(const Instruction *inst,
 // alias_ptr points to shared_var).
 bool DataRaceChecker::mayAccessSameLocation(const Instruction *inst1,
                                             const Instruction *inst2) const {
+  const Instruction *a = inst1 < inst2 ? inst1 : inst2;
+  const Instruction *b = inst1 < inst2 ? inst2 : inst1;
+  if (a && b) {
+    auto cache_it = m_location_overlap_cache.find({a, b});
+    if (cache_it != m_location_overlap_cache.end()) {
+      return cache_it->second;
+    }
+  }
+
   const Value *ptr1 = getMemoryLocation(inst1);
   const Value *ptr2 = getMemoryLocation(inst2);
-  if (mayAlias(ptr1, ptr2))
-    return true;
+  if (mayAlias(ptr1, ptr2)) {
+    return (a && b) ? (m_location_overlap_cache[{a, b}] = true) : true;
+  }
   // Points-to: if one pointer may point to the other's object, they may access
   // same location.
   std::vector<const Value *> pts1, pts2;
   if (m_aliasAnalysis && m_aliasAnalysis->getPointsToSet(ptr1, pts1)) {
     for (const Value *target : pts1) {
-      if (target == ptr2 || (m_aliasAnalysis->mayAlias(target, ptr2)))
-        return true;
+      if (target == ptr2 || (m_aliasAnalysis->mayAlias(target, ptr2))) {
+        return (a && b) ? (m_location_overlap_cache[{a, b}] = true) : true;
+      }
     }
   }
   if (m_aliasAnalysis && m_aliasAnalysis->getPointsToSet(ptr2, pts2)) {
     for (const Value *target : pts2) {
-      if (target == ptr1 || (m_aliasAnalysis->mayAlias(target, ptr1)))
-        return true;
+      if (target == ptr1 || (m_aliasAnalysis->mayAlias(target, ptr1))) {
+        return (a && b) ? (m_location_overlap_cache[{a, b}] = true) : true;
+      }
     }
   }
   // Conservative fallback: two globals where one is pointer-typed (e.g.
@@ -566,9 +582,9 @@ bool DataRaceChecker::mayAccessSameLocation(const Instruction *inst1,
     const auto *g2 = dyn_cast<GlobalValue>(ptr2);
     if (g1 && g2 &&
         (ptr1->getType()->isPointerTy() || ptr2->getType()->isPointerTy()))
-      return true;
+      return (a && b) ? (m_location_overlap_cache[{a, b}] = true) : true;
   }
-  return false;
+  return (a && b) ? (m_location_overlap_cache[{a, b}] = false) : false;
 }
 
 // Returns true if two values may alias (point to overlapping memory).

@@ -22,8 +22,7 @@ class AliasAnalysisWrapper;
  * - Synchronizes-with (m_sync_with): promise/future and OpenMP task
  *   dependency edges. Plain same-location release/acquire atomics are
  *   deferred without witness evidence.
- * - MHP's computeAtomicHappensBefore contributes witness-backed fence
- *   atomic HB edges used by mustPrecede/hasHappenBeforeRelation.
+ * - Witness-backed fence atomic HB edges computed directly by this analysis.
  */
 class HappensBeforeAnalysis {
 public:
@@ -59,8 +58,41 @@ public:
   bool happensBefore(const llvm::Instruction *A,
                      const llvm::Instruction *B) const;
 
+  bool mustPrecede(const llvm::Instruction *A,
+                   const llvm::Instruction *B) const {
+    return happensBefore(A, B);
+  }
+
 private:
+  struct InstPairHash {
+    size_t operator()(const std::pair<const llvm::Instruction *,
+                                      const llvm::Instruction *> &p) const {
+      return std::hash<const llvm::Instruction *>()(p.first) ^
+             std::hash<const llvm::Instruction *>()(p.second);
+    }
+  };
+
+  struct AtomicSyncWitness {
+    const llvm::Instruction *release = nullptr;
+    const llvm::Instruction *acquire = nullptr;
+    const llvm::Value *location = nullptr;
+  };
+
   void buildSynchronizesWith();
+  void computeAtomicHappensBefore();
+  std::vector<const llvm::Instruction *>
+  collectFenceWitnesses(const llvm::Instruction *fence,
+                        bool require_release_semantics) const;
+  bool atomicLocationsMayAlias(const llvm::Instruction *lhs,
+                               const llvm::Instruction *rhs) const;
+  bool hasProgramOrder(const llvm::Instruction *A,
+                       const llvm::Instruction *B) const;
+  bool canReach(const mhp::SyncNode *start, const mhp::SyncNode *end) const;
+  bool canReachWithHB(const mhp::SyncNode *start,
+                      const mhp::SyncNode *end) const;
+  bool isInstructionThreadAmbiguous(const llvm::Instruction *inst) const;
+  void addExtraHBEdge(const llvm::Instruction *from,
+                      const llvm::Instruction *to);
 
   bool sameAtomicLocation(const llvm::Instruction *store_inst,
                           const llvm::Instruction *load_inst) const;
@@ -96,19 +128,20 @@ private:
   lotus::AliasAnalysisWrapper *m_alias_analysis = nullptr;
   std::unordered_map<const llvm::Value *, const llvm::Value *>
       m_future_shared_state;
+  mutable std::unordered_map<const llvm::Value *, const llvm::Value *>
+      m_shared_state_trace_cache;
   std::unordered_map<std::string, size_t> m_deferred_sync_counts;
+  std::vector<const llvm::Instruction *> m_atomic_instructions;
+  std::vector<AtomicSyncWitness> m_atomic_sync_witnesses;
+  std::unordered_set<std::pair<const llvm::Instruction *,
+                               const llvm::Instruction *>, InstPairHash>
+      m_atomic_hb_pairs;
+  std::unordered_map<const mhp::SyncNode *, std::vector<const mhp::SyncNode *>>
+      m_extra_hb_successors;
 
   /// Synchronizes-with pairs proven by non-atomic witness mechanisms.
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
       m_sync_with;
-
-  struct InstPairHash {
-    size_t operator()(const std::pair<const llvm::Instruction *,
-                                      const llvm::Instruction *> &p) const {
-      return std::hash<const llvm::Instruction *>()(p.first) ^
-             std::hash<const llvm::Instruction *>()(p.second);
-    }
-  };
   mutable std::unordered_map<
       std::pair<const llvm::Instruction *, const llvm::Instruction *>, bool,
       InstPairHash>

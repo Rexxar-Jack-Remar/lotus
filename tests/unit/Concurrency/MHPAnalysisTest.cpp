@@ -3,6 +3,7 @@
  * @brief Simplified unit tests for MHP Analysis
  */
 
+#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 
 #include <gtest/gtest.h>
@@ -13,6 +14,7 @@
 
 using namespace llvm;
 using namespace mhp;
+using namespace lotus;
 
 static const Instruction *findInstructionByName(const Function &func,
                                                 StringRef name) {
@@ -201,6 +203,8 @@ TEST_F(MHPAnalysisTest, OpenMPTaskBodyMustPrecedeTaskwaitContinuation) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   const Function *task_body = module->getFunction("task_body");
   const Function *main_func = module->getFunction("main");
@@ -212,7 +216,8 @@ TEST_F(MHPAnalysisTest, OpenMPTaskBodyMustPrecedeTaskwaitContinuation) {
   ASSERT_NE(task_store, nullptr);
   ASSERT_NE(after, nullptr);
 
-  EXPECT_TRUE(mhp.mustPrecede(task_store, after));
+  EXPECT_TRUE(hb.mustPrecede(task_store, after));
+  EXPECT_FALSE(mhp.mayHappenInParallel(task_store, after));
 }
 
 TEST_F(MHPAnalysisTest, JoinStatistics) {
@@ -424,15 +429,14 @@ TEST_F(MHPAnalysisTest, MutexSerializesCriticalSections) {
   ASSERT_NE(m_in, nullptr);
   ASSERT_NE(w_in, nullptr);
 
-  // With lockset enabled, instructions inside the same mutex critical section
-  // should be considered non-parallel.
+  // Pure MHP tracks overlap only; the common mutex is a separate exclusion.
   auto *lockset = mhp.getLockSetAnalysis();
   ASSERT_NE(lockset, nullptr);
   auto stats = lockset->getStatistics();
   EXPECT_EQ(stats.num_locks, 1u);
   EXPECT_GE(stats.num_acquires, 2u);
   EXPECT_GE(stats.num_releases, 2u);
-  EXPECT_FALSE(mhp.mayHappenInParallel(m_in, w_in));
+  EXPECT_TRUE(mhp.mayHappenInParallel(m_in, w_in));
 }
 
 TEST_F(MHPAnalysisTest, BarrierOrdersPreAndPostRegions) {
@@ -481,8 +485,10 @@ TEST_F(MHPAnalysisTest, BarrierOrdersPreAndPostRegions) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
-  EXPECT_TRUE(mhp.mustPrecede(store_shared, load_shared));
+  EXPECT_TRUE(hb.mustPrecede(store_shared, load_shared));
   EXPECT_FALSE(mhp.mayHappenInParallel(store_shared, load_shared));
 }
 
@@ -548,9 +554,11 @@ TEST_F(MHPAnalysisTest, CondSignalDoesNotCreateDefiniteHBToAllWaiters) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
-  EXPECT_FALSE(mhp.mustPrecede(store_shared, load1));
-  EXPECT_FALSE(mhp.mustPrecede(store_shared, load2));
+  EXPECT_FALSE(hb.mustPrecede(store_shared, load1));
+  EXPECT_FALSE(hb.mustPrecede(store_shared, load2));
 }
 
 TEST_F(MHPAnalysisTest, IncludedOpenMPTaskRunsInlineWithParentContinuation) {
@@ -643,6 +651,47 @@ TEST_F(MHPAnalysisTest, JoinTargetThroughPhiResolves) {
   EXPECT_TRUE(mhp.mustBeSequential(worker_inst, post));
 }
 
+TEST_F(MHPAnalysisTest, JoinTargetThroughLoadRemainsNonMHP) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 1, 2
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      %join_tid = bitcast i8* %tid to i8*
+      call i32 @pthread_join(i8* %join_tid, i8* null)
+      %post = add i32 3, 4
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *main_func = module->getFunction("main");
+  const Function *worker_func = module->getFunction("worker");
+  ASSERT_NE(main_func, nullptr);
+  ASSERT_NE(worker_func, nullptr);
+
+  const Instruction *worker_inst = findInstructionByName(*worker_func, "w");
+  const Instruction *post = findInstructionByName(*main_func, "post");
+  ASSERT_NE(worker_inst, nullptr);
+  ASSERT_NE(post, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  EXPECT_TRUE(mhp.mustBeSequential(worker_inst, post));
+}
+
 TEST_F(MHPAnalysisTest, AmbiguousJoinDoesNotCreateDefiniteHB) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
@@ -693,8 +742,10 @@ TEST_F(MHPAnalysisTest, AmbiguousJoinDoesNotCreateDefiniteHB) {
   ASSERT_NE(w1, nullptr);
   ASSERT_NE(w2, nullptr);
 
-  EXPECT_FALSE(mhp.mustPrecede(w1, post));
-  EXPECT_FALSE(mhp.mustPrecede(w2, post));
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+  EXPECT_FALSE(hb.mustPrecede(w1, post));
+  EXPECT_FALSE(hb.mustPrecede(w2, post));
 }
 
 TEST_F(MHPAnalysisTest, RegionPartitionDoesNotOverlapAcrossBranchMerge) {
@@ -793,7 +844,6 @@ TEST_F(MHPAnalysisTest, HelperCalledBeforeAndAfterForkIsNotGloballyPrefork) {
   mhp.analyze();
 
   EXPECT_EQ(mhp.getThreadFlowGraph().getNodes(helper_inst).size(), 2u);
-  EXPECT_FALSE(mhp.mustPrecede(helper_inst, worker_inst));
   EXPECT_TRUE(mhp.mayHappenInParallel(helper_inst, worker_inst));
 }
 
@@ -884,6 +934,8 @@ TEST_F(MHPAnalysisTest, OpenMPTargetDataBoundaryOrdersTaskContinuation) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
 
   const Function *producer = module->getFunction("producer_task");
   const Function *consumer = module->getFunction("consumer_task");
@@ -895,7 +947,7 @@ TEST_F(MHPAnalysisTest, OpenMPTargetDataBoundaryOrdersTaskContinuation) {
   ASSERT_NE(store_shared, nullptr);
   ASSERT_NE(load_shared, nullptr);
 
-  EXPECT_TRUE(mhp.mustPrecede(store_shared, load_shared));
+  EXPECT_TRUE(hb.mustPrecede(store_shared, load_shared));
   EXPECT_FALSE(mhp.mayHappenInParallel(store_shared, load_shared));
 }
 

@@ -2,12 +2,13 @@
 #define DATA_RACE_CHECKER_H
 
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
-#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -33,7 +34,7 @@ namespace concurrency {
 class DataRaceChecker {
 public:
   explicit DataRaceChecker(
-      llvm::Module &module, mhp::MHPAnalysis *mhpAnalysis,
+      llvm::Module &module, mhp::IMHPAnalysis *mhpAnalysis,
       mhp::LockSetAnalysis *locksetAnalysis = nullptr,
       lotus::EscapeAnalysis *escapeAnalysis = nullptr,
       lotus::AliasAnalysisWrapper *aliasAnalysis = nullptr,
@@ -61,8 +62,16 @@ public:
                            const llvm::Instruction *inst2) const;
 
 private:
+  struct InstPairHash {
+    size_t operator()(const std::pair<const llvm::Instruction *,
+                                      const llvm::Instruction *> &p) const {
+      return std::hash<const llvm::Instruction *>()(p.first) ^
+             (std::hash<const llvm::Instruction *>()(p.second) << 1U);
+    }
+  };
+
   llvm::Module &m_module;
-  mhp::MHPAnalysis *m_mhpAnalysis;
+  mhp::IMHPAnalysis *m_mhpAnalysis;
   mhp::LockSetAnalysis *m_locksetAnalysis;
   lotus::EscapeAnalysis *m_escapeAnalysis;
   lotus::AliasAnalysisWrapper *m_aliasAnalysis;
@@ -88,6 +97,10 @@ private:
 
   ThreadAPI *m_threadAPI;
   std::unordered_set<const llvm::Value *> m_syncObjects;
+  mutable std::unordered_map<
+      std::pair<const llvm::Instruction *, const llvm::Instruction *>, bool,
+      InstPairHash>
+      m_location_overlap_cache;
 };
 
 } // namespace concurrency

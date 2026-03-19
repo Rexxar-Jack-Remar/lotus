@@ -12,7 +12,7 @@
 #define CONCURRENCY_ANALYSIS_DUMPER_H
 
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
-#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
@@ -42,7 +42,8 @@ public:
    * @param escapeAnalysis Escape analysis results
    * @param threadAPI Thread API for identifying lock operations
    */
-  ConcurrencyAnalysisDumper(llvm::Module &module, mhp::MHPAnalysis *mhpAnalysis,
+  ConcurrencyAnalysisDumper(llvm::Module &module,
+                            mhp::IMHPAnalysis *mhpAnalysis,
                             mhp::LockSetAnalysis *locksetAnalysis,
                             lotus::EscapeAnalysis *escapeAnalysis,
                             ThreadAPI *threadAPI);
@@ -74,7 +75,7 @@ private:
                               const std::string &funcName) const;
 
   llvm::Module &m_module;
-  mhp::MHPAnalysis *m_mhpAnalysis;
+  mhp::IMHPAnalysis *m_mhpAnalysis;
   mhp::LockSetAnalysis *m_locksetAnalysis;
   lotus::EscapeAnalysis *m_escapeAnalysis;
   ThreadAPI *m_threadAPI;
