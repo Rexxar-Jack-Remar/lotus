@@ -1,7 +1,3 @@
-#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Core/IFDSFramework.h>
-#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
-#include <gtest/gtest.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
@@ -12,6 +8,10 @@
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
+#include <gtest/gtest.h>
+#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Core/IFDSFramework.h>
+#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
 
 using namespace ifds;
 using namespace llvm;

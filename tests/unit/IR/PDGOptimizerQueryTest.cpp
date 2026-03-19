@@ -250,7 +250,7 @@ TEST_F(PDGOptimizerQueryTest, ThinSliceExcludesPointerFlowForStoreAndLoad) {
   auto *func = module->getFunction("f");
   ASSERT_NE(func, nullptr);
 
-  auto arg_it = func->arg_begin();
+  auto *arg_it = func->arg_begin();
   llvm::Argument &ptr_arg = *arg_it++;
   llvm::Argument &val_arg = *arg_it;
   auto *gep = findInstruction<llvm::GetElementPtrInst>(*func, "ptr");

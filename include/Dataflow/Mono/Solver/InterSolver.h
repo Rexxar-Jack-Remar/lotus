@@ -140,6 +140,8 @@ public:
   const ResultTy *getResults() const { return Result.get(); }
 
   /// Returns the IN facts at \p Stmt merged across all call-string contexts.
+  /// This is a convenience query; use the raw IN/OUT maps below when checking
+  /// context-sensitive behaviour because they preserve the per-context split.
   /// Uses the problem's merge to combine per-context facts. Returns an empty
   /// container if no results or \p Stmt has no entries.
   mono_container_t getResultsAt(llvm::Instruction *Stmt) const {
@@ -313,8 +315,9 @@ private:
             }
           }
         } else {
-          // For K>0, an empty context is an explicit seeded state, not a
-          // context-insensitive caller summary.
+          // For K>0, [] is the ordinary root call string. Only K=0 collapses
+          // caller histories into the empty context, so there is no return-flow
+          // edge here unless the current context names the matching call site.
           Incoming = Problem.allTop();
         }
       } else {
@@ -366,9 +369,9 @@ private:
           }
         }
       } else {
-        // For K>0, an empty context is an explicit seeded state, not a caller
-        // summary. Return-flow only happens when the predecessor context names
-        // the call site exactly.
+        // For K>0, [] is the ordinary root call string. Return-flow only
+        // happens when the predecessor context still names the matching call
+        // site exactly; only K=0 treats [] as a collapsed caller summary.
         Incoming = Problem.allTop();
       }
     } else if (llvm::isa<llvm::CallBase>(PredInst) &&

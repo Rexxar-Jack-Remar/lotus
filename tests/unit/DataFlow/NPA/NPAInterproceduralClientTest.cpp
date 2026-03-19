@@ -14,12 +14,12 @@
 #include <string>
 #include <vector>
 
-#include <gtest/gtest.h>
 #include <llvm/ADT/APInt.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
+#include <gtest/gtest.h>
 
 namespace {
 
@@ -1284,7 +1284,7 @@ TEST(NPAInterproceduralClients, AffineEqualitiesTransferSymbolicRelations) {
   ASSERT_NE(Sink, nullptr);
   ASSERT_NE(Caller, nullptr);
   auto *X = &*Sink->arg_begin();
-  auto YIt = Sink->arg_begin();
+  auto *YIt = Sink->arg_begin();
   ++YIt;
   auto *Y = &*YIt;
   auto *A = &*Caller->arg_begin();

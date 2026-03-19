@@ -7,8 +7,8 @@
  */
 
 #include "IR/ICFG/ICFG.h"
-#include "IR/ICFG/ICFGBuilder.h"
 #include "IR/ICFG/GraphAnalysis.h"
+#include "IR/ICFG/ICFGBuilder.h"
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/AsmParser/Parser.h>

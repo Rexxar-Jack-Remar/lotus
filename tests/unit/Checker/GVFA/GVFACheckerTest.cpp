@@ -9,16 +9,16 @@
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/DyckAA/DyckModRefAnalysis.h"
 #include "Alias/DyckAA/DyckVFG.h"
+#include "Analysis/GVFA/GlobalValueFlowAnalysis.h"
+#include "Checker/GVFA/GVFAVulnerabilityChecker.h"
 #include "Checker/GVFA/NullPointerChecker.h"
 #include "Checker/GVFA/UseAfterFreeChecker.h"
 #include "Checker/GVFA/UseOfUninitializedVariableChecker.h"
-#include "Checker/GVFA/GVFAVulnerabilityChecker.h"
-#include "Analysis/GVFA/GlobalValueFlowAnalysis.h"
 
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>

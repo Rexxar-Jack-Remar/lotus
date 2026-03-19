@@ -1,7 +1,3 @@
-#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
-#include <Dataflow/IFDS/Solvers/PathAwareIFDSSolver.h>
-#include <gtest/gtest.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -9,6 +5,10 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <gtest/gtest.h>
+#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
+#include <Dataflow/IFDS/Solvers/PathAwareIFDSSolver.h>
 #include <set>
 
 namespace ifds {

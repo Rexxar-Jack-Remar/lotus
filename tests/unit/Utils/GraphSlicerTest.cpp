@@ -1,8 +1,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <gtest/gtest.h>
 #include "Utils/ADT/GraphSlicer.h"
+#include <gtest/gtest.h>
 
 using namespace lotus;
 

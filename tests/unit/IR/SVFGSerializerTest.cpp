@@ -9,7 +9,6 @@
 #include <fstream>
 #include <sstream>
 
-#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
@@ -17,6 +16,7 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/SourceMgr.h>
+#include <gtest/gtest.h>
 #include <unistd.h>
 
 using namespace llvm;

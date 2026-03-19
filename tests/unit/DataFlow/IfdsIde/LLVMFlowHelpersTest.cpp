@@ -1,8 +1,6 @@
 #include <memory>
 #include <set>
 
-#include <Dataflow/IFDS/Utils/LLVMFlowHelpers.h>
-#include <gtest/gtest.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -13,6 +11,8 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/Support/Casting.h>
+#include <gtest/gtest.h>
+#include <Dataflow/IFDS/Utils/LLVMFlowHelpers.h>
 
 namespace {
 

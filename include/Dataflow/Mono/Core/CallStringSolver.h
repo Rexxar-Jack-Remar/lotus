@@ -35,10 +35,13 @@
  * **What is a call string?**
  * A call string is a sequence of call sites that led to the current program
  * point:
- *   - Empty context: [] (context-insensitive)
+ *   - Empty context: [] (the root call string)
  *   - 1-call-string: [call_1]
  *   - 2-call-string: [call_1, call_2]
  *   - K-call-string: [call_1, ..., call_K]
+ *
+ * For K>0, [] is an ordinary root context, not a collapsed caller summary.
+ * Only K=0 is context-insensitive.
  *
  * **Example:**
  * ```
@@ -925,7 +928,10 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
             Result.push_back({Cont, CallerCtx});
           }
         }
-      } else if (ICF != nullptr) {
+      } else if (K == 0 && ICF != nullptr) {
+        // Only K=0 collapses caller histories into the empty context. For
+        // positive K, [] is the ordinary root call string and does not
+        // enumerate caller continuations at callee exits.
         for (auto *CallInst : ICF->getCallersOf(Inst->getFunction())) {
           for (auto *Cont : ICF->getReturnSitesOfCallAt(CallInst)) {
             if (Cont != nullptr) {

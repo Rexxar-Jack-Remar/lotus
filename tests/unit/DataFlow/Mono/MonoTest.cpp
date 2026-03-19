@@ -14,12 +14,12 @@
 
 #include <vector>
 
-#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
+#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace mono;
@@ -1438,6 +1438,134 @@ TEST_F(MonoTest, InterMonoSolverK2TruncatesDeepCallStrings) {
   EXPECT_FALSE(SawUnexpectedCtx);
 }
 
+TEST_F(MonoTest, InterMonoSolverK2ReturnFlowReachesTruncatedOuterContexts) {
+  const char *source = R"(
+    define i32 @leaf(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @level2(i32 %b) {
+    entry:
+      %r2 = call i32 @leaf(i32 %b)
+      ret i32 %r2
+    }
+
+    define i32 @level1(i32 %a) {
+    entry:
+      %r1 = call i32 @level2(i32 %a)
+      ret i32 %r1
+    }
+
+    define i32 @main(i32 %m) {
+    entry:
+      %r0 = call i32 @level1(i32 %m)
+      ret i32 %r0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  auto *Main = module->getFunction("main");
+  auto *Level1 = module->getFunction("level1");
+  auto *Level2 = module->getFunction("level2");
+  auto *Leaf = module->getFunction("leaf");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Level1, nullptr);
+  ASSERT_NE(Level2, nullptr);
+  ASSERT_NE(Leaf, nullptr);
+
+  struct Domain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+  class ProblemT : public InterMonoProblem<Domain> {
+  public:
+    explicit ProblemT(Function *Entry) : InterMonoProblem<Domain>({Entry}) {}
+
+    mono_container_t normalFlow(Instruction *,
+                                const mono_container_t &In) override {
+      return In;
+    }
+
+    mono_container_t merge(const mono_container_t &Lhs,
+                           const mono_container_t &Rhs) override {
+      mono_container_t Out = Lhs;
+      Out.insert(Rhs.begin(), Rhs.end());
+      return Out;
+    }
+
+    bool equal_to(const mono_container_t &Lhs,
+                  const mono_container_t &Rhs) override {
+      return Lhs == Rhs;
+    }
+
+    mono_container_t callFlow(Instruction *CallSite, Function *,
+                              const mono_container_t &In) override {
+      mono_container_t Out = In;
+      if (CallSite != nullptr) {
+        Out.insert(CallSite);
+      }
+      return Out;
+    }
+
+    mono_container_t returnFlow(Instruction *, Function *, Instruction *,
+                                Instruction *,
+                                const mono_container_t &In) override {
+      return In;
+    }
+
+    mono_container_t callToRetFlow(Instruction *, Instruction *,
+                                   ArrayRef<Function *>,
+                                   const mono_container_t &) override {
+      return {};
+    }
+
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
+      std::unordered_map<Instruction *, mono_container_t> Seeds;
+      Seeds[&getEntryPoints().front()->getEntryBlock().front()] = {};
+      return Seeds;
+    }
+  };
+
+  auto *MainToLevel1 = findFirst<CallInst>(Main);
+  auto *Level1ToLevel2 = findFirst<CallInst>(Level1);
+  auto *Level2ToLeaf = findFirst<CallInst>(Level2);
+  auto *Level2Ret = findFirst<ReturnInst>(Level2);
+  auto *Level1Ret = findFirst<ReturnInst>(Level1);
+  ASSERT_NE(MainToLevel1, nullptr);
+  ASSERT_NE(Level1ToLevel2, nullptr);
+  ASSERT_NE(Level2ToLeaf, nullptr);
+  ASSERT_NE(Level2Ret, nullptr);
+  ASSERT_NE(Level1Ret, nullptr);
+
+  ProblemT Problem(Main);
+  InterMonoSolver<Domain, 2> Solver(Problem);
+  Solver.solve();
+
+  using K2Result =
+      dataflow::ContextSensitiveDataFlowResult<2, std::set<Value *>>;
+  using K2Context = K2Result::Context;
+
+  const auto *InMap = Solver.getAnalysisINMap();
+  ASSERT_NE(InMap, nullptr);
+
+  bool SawLevel2ReturnCtx = false;
+  bool SawLevel1ReturnRootCtx = false;
+  for (const auto &Cell : *InMap) {
+    if (Cell.first.Inst == Level2Ret &&
+        Cell.first.Ctx == K2Context{Level1ToLevel2}) {
+      SawLevel2ReturnCtx = true;
+      EXPECT_EQ(Cell.second.count(Level2ToLeaf), 1u);
+    }
+    if (Cell.first.Inst == Level1Ret && Cell.first.Ctx.empty()) {
+      SawLevel1ReturnRootCtx = true;
+      EXPECT_EQ(Cell.second.count(Level2ToLeaf), 1u);
+    }
+  }
+
+  EXPECT_TRUE(SawLevel2ReturnCtx);
+  EXPECT_TRUE(SawLevel1ReturnRootCtx);
+}
+
 TEST_F(MonoTest,
        InterMonoSolverBackwardEmptyContextSeedStaysLocalForPositiveK) {
   const char *source = R"(
@@ -1529,21 +1657,33 @@ TEST_F(MonoTest,
   Solver.solve();
 
   const auto *InMap = Solver.getAnalysisINMap();
+  const auto *OutMap = Solver.getAnalysisOUTMap();
   ASSERT_NE(InMap, nullptr);
+  ASSERT_NE(OutMap, nullptr);
   bool FoundSeedCtx = false;
   bool SeedReachedCaller = false;
+  bool CallerContinuationMaterialized = false;
   for (const auto &Cell : *InMap) {
     if (Cell.first.Inst == CalleeRet && Cell.first.Ctx.empty() &&
         Cell.second.count(CalleeRet) == 1u) {
       FoundSeedCtx = true;
+    }
+    if (Cell.first.Inst == MainCall || Cell.first.Inst == MainRet) {
+      CallerContinuationMaterialized = true;
     }
     if ((Cell.first.Inst == MainCall || Cell.first.Inst == MainRet) &&
         Cell.second.count(CalleeRet) == 1u) {
       SeedReachedCaller = true;
     }
   }
+  for (const auto &Cell : *OutMap) {
+    if (Cell.first.Inst == MainCall || Cell.first.Inst == MainRet) {
+      CallerContinuationMaterialized = true;
+    }
+  }
   EXPECT_TRUE(FoundSeedCtx);
   EXPECT_FALSE(SeedReachedCaller);
+  EXPECT_FALSE(CallerContinuationMaterialized);
 }
 
 TEST_F(MonoTest, InterMonoSolverContextInsensitiveK0CollapsesCallers) {

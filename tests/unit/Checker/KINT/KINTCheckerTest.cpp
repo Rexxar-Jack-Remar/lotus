@@ -4,8 +4,8 @@
 #include "Checker/KINT/SmtMemory.h"
 
 #include <llvm/ADT/MapVector.h>
-#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/SetVector.h>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
