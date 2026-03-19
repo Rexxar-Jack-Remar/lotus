@@ -537,7 +537,55 @@ void MPIRankAnalysis::propagateRankInfo() {
   }
 }
 
-void MPIRankAnalysis::analyzeRankBranches() {}
+void MPIRankAnalysis::analyzeRankBranches() {
+  auto intersectPredicate = [&](const MPIRankPredicate &lhs,
+                                const MPIRankPredicate &rhs) {
+    if (lhs.unknown) {
+      return rhs;
+    }
+    if (rhs.unknown) {
+      return lhs;
+    }
+    MPIRankPredicate refined = lhs;
+    refined.communicator =
+        lhs.communicator ? lhs.communicator : rhs.communicator;
+    refined.unknown = false;
+    refined.universal = lhs.universal && rhs.universal;
+    refined.min_rank = std::max(lhs.min_rank, rhs.min_rank);
+    refined.max_rank = std::min(predicateUpperBound(lhs), predicateUpperBound(rhs));
+    refined.excluded_ranks.insert(rhs.excluded_ranks.begin(),
+                                  rhs.excluded_ranks.end());
+    if (refined.max_rank < refined.min_rank) {
+      refined.max_rank = refined.min_rank;
+    }
+    return refined;
+  };
+
+  for (Function &func : m_module) {
+    for (BasicBlock &bb : func) {
+      const auto *br = dyn_cast<BranchInst>(bb.getTerminator());
+      if (!br || !br->isConditional()) {
+        continue;
+      }
+      MPIRankPredicate current =
+          bb.empty() ? MPIRankPredicate::makeUnknown()
+                     : getRankPredicateAtInstruction(&bb.back());
+      for (unsigned succ_idx = 0; succ_idx < br->getNumSuccessors(); ++succ_idx) {
+        MPIRankPredicate refined;
+        if (!refinePredicateFromBranch(br, succ_idx, current, refined)) {
+          continue;
+        }
+        BasicBlock *succ = br->getSuccessor(succ_idx);
+        for (Instruction &inst : *succ) {
+          MPIRankPredicate existing = getRankPredicateAtInstruction(&inst);
+          MPIRankPredicate tightened = intersectPredicate(existing, refined);
+          m_inst_predicate[&inst] = tightened;
+          m_inst_rank[&inst] = predicateToRankExpr(tightened);
+        }
+      }
+    }
+  }
+}
 
 void MPIRankAnalysis::canonicalizePredicateClasses() {
   m_inst_predicate_class.clear();
@@ -546,8 +594,7 @@ void MPIRankAnalysis::canonicalizePredicateClasses() {
   std::map<MPIRankPredicate, size_t> predicate_ids;
   size_t next_predicate_id = 1;
 
-  typedef std::pair<const Function *, MPIRankPredicate> ParticipantKey;
-  std::map<ParticipantKey, size_t> participant_ids;
+  std::map<MPIRankPredicate, size_t> participant_ids;
   size_t next_participant_id = 1;
 
   for (const auto &entry : m_inst_predicate) {
@@ -559,10 +606,9 @@ void MPIRankAnalysis::canonicalizePredicateClasses() {
     }
     m_inst_predicate_class[inst] = pred_it->second;
 
-    ParticipantKey key(inst ? inst->getFunction() : nullptr, predicate);
-    auto part_it = participant_ids.find(key);
+    auto part_it = participant_ids.find(predicate);
     if (part_it == participant_ids.end()) {
-      part_it = participant_ids.emplace(key, next_participant_id++).first;
+      part_it = participant_ids.emplace(predicate, next_participant_id++).first;
     }
     m_inst_participant_class[inst] = part_it->second;
   }
@@ -1010,4 +1056,22 @@ bool MPIRankAnalysis::tryEvaluateIntRange(const Value *val, int &min_value,
   default:
     return false;
   }
+}
+
+bool MPIRankAnalysis::getCommunicatorSizeRange(const Value *communicator,
+                                               int &min_value,
+                                               int &max_value) const {
+  const Value *canonical = canonicalCommunicator(communicator);
+  auto it = m_comm_size.find(canonical);
+  if (it != m_comm_size.end()) {
+    min_value = it->second;
+    max_value = it->second;
+    return true;
+  }
+  if (!canonical) {
+    return false;
+  }
+  min_value = 1;
+  max_value = defaultCommSizeUpperBound();
+  return true;
 }

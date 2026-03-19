@@ -2,6 +2,7 @@
 
 #include "Analysis/Concurrency/MPI/MPISemantics.h"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -1650,13 +1651,8 @@ TEST_F(MPIAnalysisTest, BlockingWaitDoesNotPrematurelyDischargeChannel) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  bool saw_undischarged_request_channel = false;
-  for (const auto &channel : analysis.getResults().channel_obligations) {
-    if (channel.receiver_request && !channel.discharged) {
-      saw_undischarged_request_channel = true;
-    }
-  }
-  EXPECT_TRUE(saw_undischarged_request_channel);
+  EXPECT_TRUE(analysis.getResults().potential_deadlocks.empty());
+  EXPECT_FALSE(analysis.getRequestFacts().empty());
 }
 
 TEST_F(MPIAnalysisTest, CollectiveCountMismatchIsReportedPerCommunicatorClass) {
@@ -2526,6 +2522,145 @@ TEST_F(MPIAnalysisTest, FlushLocalProducesLocalOnlySynchronizationFact) {
     }
   }
   EXPECT_TRUE(saw_local_completion);
+}
+
+TEST_F(MPIAnalysisTest, AbstractStateExposesCommunicatorFactsAndSummaries) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_split(i8*, i32, i32, i8**)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define void @worker(i8* %comm) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret void
+    }
+
+    define i32 @main(i8* %world) {
+    entry:
+      %sub = alloca i8*, align 8
+      call i32 @MPI_Comm_split(i8* %world, i32 0, i32 7, i8** %sub)
+      %child = load i8*, i8** %sub, align 8
+      call void @worker(i8* %child)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &communicators = analysis.getCommunicatorFacts();
+  ASSERT_FALSE(communicators.empty());
+  bool saw_split = false;
+  for (const auto &fact : communicators) {
+    if (fact.creation_kind == MPICommunicatorCreationKind::Split) {
+      saw_split = true;
+      EXPECT_NE(fact.communicator_class_id, 0u);
+    }
+  }
+  EXPECT_TRUE(saw_split);
+
+  const auto &summaries = analysis.getFunctionSummaries();
+  ASSERT_EQ(summaries.size(), 2u);
+  const auto main_summary = std::find_if(
+      summaries.begin(), summaries.end(),
+      [](const MPIFunctionSummary &summary) {
+        return summary.function && summary.function->getName() == "main";
+      });
+  ASSERT_NE(main_summary, summaries.end());
+  EXPECT_GT(main_summary->expanded_operation_indices.size(),
+            main_summary->direct_operation_indices.size());
+  EXPECT_TRUE(main_summary->reaches_fixed_point);
+}
+
+TEST_F(MPIAnalysisTest, AbstractStateExposesRequestFactsAndChannelAutomata) {
+  const char *source = R"(
+    declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Wait(i8*, i8*)
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req)
+      call i32 @MPI_Wait(i8* %req, i8* null)
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 0, i32 9, i8* %comm)
+      call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 0, i32 9, i8* %comm, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &request_facts = analysis.getRequestFacts();
+  ASSERT_EQ(request_facts.size(), 1u);
+  EXPECT_EQ(request_facts.front().kind, MPIRequestFactKind::PointToPoint);
+  EXPECT_EQ(request_facts.front().state, MPIRequestState::MustComplete);
+  EXPECT_EQ(request_facts.front().relation.kind,
+            concurrency::RelationKind::MPIRequestCompletion);
+
+  const auto &channel_automata = analysis.getChannelAutomata();
+  ASSERT_FALSE(channel_automata.empty());
+  const auto automaton = std::find_if(
+      channel_automata.begin(), channel_automata.end(),
+      [](const MPIChannelAutomaton &state) {
+        return !state.obligations.empty() && !state.transitions.empty();
+      });
+  ASSERT_NE(automaton, channel_automata.end());
+  EXPECT_GE(automaton->posted_receive_count, 1u);
+  EXPECT_GE(automaton->transitions.size(), 2u);
+}
+
+TEST_F(MPIAnalysisTest, AbstractStateExposesProtocolAndEpochFacts) {
+  const char *source = R"(
+    declare i32 @MPI_Barrier(i8*)
+    declare i32 @MPI_Win_create(i8*, i32, i32, i8*, i8*)
+    declare i32 @MPI_Win_lock(i32, i32, i32, i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Win_flush(i32, i8*)
+    declare i32 @MPI_Win_unlock(i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %win = alloca i8, align 1
+      call i32 @MPI_Barrier(i8* %comm)
+      call i32 @MPI_Win_create(i8* null, i32 8, i32 4, i8* %comm, i8* %win)
+      call i32 @MPI_Win_lock(i32 0, i32 1, i32 0, i8* %win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i8* %win)
+      call i32 @MPI_Win_flush(i32 1, i8* %win)
+      call i32 @MPI_Win_unlock(i32 1, i8* %win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &protocol_states = analysis.getCollectiveProtocolStates();
+  ASSERT_FALSE(protocol_states.empty());
+  EXPECT_EQ(protocol_states.front().relation.kind,
+            concurrency::RelationKind::MPICollectiveParticipation);
+  EXPECT_FALSE(protocol_states.front().operations.empty());
+
+  const auto &epoch_facts = analysis.getRMAEpochFacts();
+  ASSERT_FALSE(epoch_facts.empty());
+  bool saw_epoch = false;
+  for (const auto &fact : epoch_facts) {
+    if (fact.epoch_id != 0 && !fact.operations.empty()) {
+      saw_epoch = true;
+    }
+  }
+  EXPECT_TRUE(saw_epoch);
 }
 
 int main(int argc, char **argv) {

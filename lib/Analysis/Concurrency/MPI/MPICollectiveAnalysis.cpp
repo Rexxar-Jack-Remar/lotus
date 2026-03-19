@@ -76,6 +76,7 @@ void MPICollectiveAnalysis::analyzeCollectives() {
   std::map<FrontierScopeKey, size_t> frontier_ids;
   size_t next_frontier_id = 1;
   std::map<size_t, size_t> frontier_indices;
+  const MPI::MPIRankAnalysis *rank_analysis = process_model_.getRankAnalysis();
 
   for (const MPIEvent &event : process_model_.getSemanticEvents()) {
     if (!event.has_collective_semantics) {
@@ -134,6 +135,24 @@ void MPICollectiveAnalysis::analyzeCollectives() {
     protocol_diagnostics_["collective_slots_tracked"]++;
     if (call.reachability != ProtocolReachability::AllRanks) {
       protocol_diagnostics_["collective_partial_reachability"]++;
+    }
+    if (call.reachability == ProtocolReachability::SomeRanks) {
+      protocol_diagnostics_["collective_rank_filtered"]++;
+    } else if (call.reachability == ProtocolReachability::Unknown &&
+               rank_analysis) {
+      bool rank_guarded = false;
+      for (const BasicBlock *pred : predecessors(call.inst->getParent())) {
+        const auto *br = dyn_cast_or_null<BranchInst>(pred->getTerminator());
+        if (br && br->isConditional() &&
+            rank_analysis->dependsOnRank(br->getCondition())) {
+          rank_guarded = true;
+          break;
+        }
+      }
+      if (rank_guarded) {
+        protocol_diagnostics_["collective_rank_filtered"]++;
+        protocol_diagnostics_["collective_rank_guarded_branch"]++;
+      }
     }
     if (call.participants.unknown) {
       protocol_diagnostics_["collective_frontier_model_gap"]++;

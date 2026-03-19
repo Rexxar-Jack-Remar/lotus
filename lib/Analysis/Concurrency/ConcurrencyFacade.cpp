@@ -118,7 +118,11 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
     if (op.td_type == ThreadAPI::TD_MPI_REQUEST_START) {
       ++summary.request_start_count;
     }
-    if (op.protocol_reachability == mpi::ProtocolReachability::SomeRanks) {
+    if (op.protocol_reachability == mpi::ProtocolReachability::SomeRanks &&
+        (op.kind == mpi::MPIOpKind::BARRIER_BLOCKING ||
+         op.kind == mpi::MPIOpKind::BARRIER_NONBLOCKING ||
+         op.kind == mpi::MPIOpKind::COLLECTIVE_BLOCKING ||
+         op.kind == mpi::MPIOpKind::COLLECTIVE_NONBLOCKING)) {
       ++summary.rank_restricted_operation_count;
     }
     if (op.kind == mpi::MPIOpKind::SEND_BLOCKING ||

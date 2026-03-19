@@ -24,7 +24,7 @@ using namespace llvm;
 namespace mpi {
 
 size_t MPIAnalysis::getProtocolDiagnosticCount(StringRef key) const {
-  const auto &diagnostics = collective_analysis_.getProtocolDiagnostics();
+  const auto &diagnostics = abstract_state_.protocol_diagnostics;
   auto it = diagnostics.find(key.str());
   return it != diagnostics.end() ? it->second : 0;
 }
@@ -36,23 +36,25 @@ size_t MPIAnalysis::getOperationCount(MPIOpKind kind) const {
 }
 
 size_t MPIAnalysis::getTrackedWindowCount() const {
-  return rma_analysis_.getTrackedWindowCount();
+  return abstract_state_.tracked_window_count;
 }
 
 void MPIAnalysis::runAnalysis() {
   process_model_.analyzeModule();
   collective_analysis_.analyzeCollectives();
   rma_analysis_.analyzeRMA();
+  abstract_state_ =
+      MPIAbstractStateBuilder(module_, process_model_, collective_analysis_,
+                              rma_analysis_)
+          .build();
 
   results_.orphaned_requests = process_model_.findOrphanedNonBlockingOps();
-  results_.potential_deadlocks = process_model_.findPotentialDeadlocks();
-  results_.mismatched_collectives =
-      collective_analysis_.findMismatchedCollectives();
-  results_.conditional_collectives =
-      collective_analysis_.findConditionalCollectives();
-  results_.unsynchronized_rma = rma_analysis_.findUnsynchronizedRMAOps();
-  results_.rma_races = rma_analysis_.findRMARaces();
-  results_.leaked_windows = rma_analysis_.findLeakedWindows();
+  results_.potential_deadlocks = abstract_state_.potential_deadlocks;
+  results_.mismatched_collectives.clear();
+  results_.conditional_collectives = abstract_state_.conditional_collective_insts;
+  results_.unsynchronized_rma.clear();
+  results_.rma_races.clear();
+  results_.leaked_windows = abstract_state_.leaked_windows;
 
   const MPIOperation *first_finalize = nullptr;
   bool has_init = false;
@@ -79,7 +81,7 @@ void MPIAnalysis::runAnalysis() {
   results_.rank_out_of_bounds = process_model_.findRankOutOfBounds();
   results_.persistent_request_leaks =
       process_model_.findPersistentRequestLeaks();
-  results_.wrong_root_ranks = collective_analysis_.findWrongRootRanks();
+  results_.wrong_root_ranks.clear();
   results_.cancel_without_wait = process_model_.findCancelWithoutWait();
   results_.buffer_overlaps = process_model_.findBufferOverlaps();
   results_.wildcard_in_collective = process_model_.findWildcardInCollective();
@@ -92,15 +94,60 @@ void MPIAnalysis::runAnalysis() {
   results_.destroy_null_comm = process_model_.findDestroyNullComm();
   results_.request_free_after_wait = process_model_.findRequestFreeAfterWait();
   results_.in_place_wrong_op = process_model_.findInPlaceWrongOp();
-  results_.invalid_rma_transitions =
-      rma_analysis_.findInvalidEpochTransitions();
-  results_.use_after_free_windows = rma_analysis_.findUseAfterFreeWindows();
-  results_.double_window_free = rma_analysis_.findDoubleWindowFree();
-  results_.participant_sets = process_model_.getParticipantSets();
-  results_.channel_obligations = process_model_.getChannelObligations();
-  results_.protocol_frontiers = collective_analysis_.getProtocolFrontiers();
-  results_.rma_synchronization_facts = rma_analysis_.getSynchronizationFacts();
-  results_.model_gaps = process_model_.getModelGaps();
+  results_.invalid_rma_transitions = abstract_state_.invalid_epoch_transitions;
+  results_.use_after_free_windows = abstract_state_.use_after_free_windows;
+  results_.double_window_free = abstract_state_.double_window_free;
+  results_.participant_sets = abstract_state_.participant_sets;
+  results_.channel_obligations = abstract_state_.channel_obligations;
+  results_.protocol_frontiers = abstract_state_.protocol_frontiers;
+  results_.rma_synchronization_facts = abstract_state_.rma_synchronization_facts;
+  results_.model_gaps = abstract_state_.model_gaps;
+
+  std::unordered_map<const Instruction *, MPICollectiveAnalysis::CollectiveCall>
+      collective_call_by_inst;
+  for (const auto &call : collective_analysis_.getProtocolRelations()) {
+    if (call.inst) {
+      collective_call_by_inst[call.inst] = call;
+    }
+  }
+  for (const auto &pair : abstract_state_.mismatched_collective_insts) {
+    auto lhs_it = collective_call_by_inst.find(pair.first);
+    auto rhs_it = collective_call_by_inst.find(pair.second);
+    if (lhs_it != collective_call_by_inst.end() &&
+        rhs_it != collective_call_by_inst.end()) {
+      results_.mismatched_collectives.emplace_back(lhs_it->second, rhs_it->second);
+    }
+  }
+  for (const auto &pair : abstract_state_.wrong_root_inst_pairs) {
+    auto lhs_it = collective_call_by_inst.find(pair.first);
+    auto rhs_it = collective_call_by_inst.find(pair.second);
+    if (lhs_it != collective_call_by_inst.end() &&
+        rhs_it != collective_call_by_inst.end()) {
+      results_.wrong_root_ranks.emplace_back(lhs_it->second, rhs_it->second);
+    }
+  }
+
+  std::unordered_map<const Instruction *, MPIRMAAnalysis::RMAOperation>
+      rma_relation_by_inst;
+  for (const auto &relation : rma_analysis_.getSynchronizationRelations()) {
+    if (relation.inst && !rma_relation_by_inst.count(relation.inst)) {
+      rma_relation_by_inst[relation.inst] = relation;
+    }
+  }
+  for (const Instruction *inst : abstract_state_.unsynchronized_rma_insts) {
+    auto it = rma_relation_by_inst.find(inst);
+    if (it != rma_relation_by_inst.end()) {
+      results_.unsynchronized_rma.push_back(it->second);
+    }
+  }
+  for (const auto &pair : abstract_state_.rma_race_insts) {
+    auto lhs_it = rma_relation_by_inst.find(pair.first);
+    auto rhs_it = rma_relation_by_inst.find(pair.second);
+    if (lhs_it != rma_relation_by_inst.end() &&
+        rhs_it != rma_relation_by_inst.end()) {
+      results_.rma_races.emplace_back(lhs_it->second, rhs_it->second);
+    }
+  }
 
   results_.diagnostics.clear();
   for (const MPIModelGap &gap : results_.model_gaps) {

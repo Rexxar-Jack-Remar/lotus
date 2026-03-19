@@ -19,6 +19,7 @@ set(Concurrency_SOURCES
   Memory/MemUseDefAnalysis.cpp
   JoinTarget/JoinTargetAnalysis.cpp
   MPI/MPIAnalysis.cpp
+  MPI/MPIAbstractState.cpp
   MPI/MPISemantics.cpp
   MPI/MPIProcessModel.cpp
   MPI/MPIProtocolAutomaton.cpp

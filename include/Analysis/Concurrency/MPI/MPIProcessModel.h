@@ -14,6 +14,7 @@
 #define MPI_PROCESS_MODEL_H
 
 #include "Analysis/Concurrency/MPI/MPINormalization.h"
+#include "Analysis/Concurrency/MPI/MPIAbstractState.h"
 #include "Analysis/Concurrency/MPI/MPIOperation.h"
 #include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
 #include "Analysis/Concurrency/MPI/MPISemanticEvent.h"
@@ -90,6 +91,9 @@ public:
   }
 
   const std::vector<MPIModelGap> &getModelGaps() const { return model_gaps_; }
+  const std::vector<MPICommunicatorFact> &getCommunicatorFacts() const {
+    return communicator_facts_;
+  }
 
   const std::map<RequestID, MPIRequestStateSummary> &
   getRequestStateSummaries() const {
@@ -188,6 +192,7 @@ private:
   std::vector<MPIChannelObligation> channel_obligations_;
   std::vector<MPIParticipantSet> participant_sets_;
   std::vector<MPIModelGap> model_gaps_;
+  std::vector<MPICommunicatorFact> communicator_facts_;
   std::unordered_map<MPIOpKind, size_t> operation_kind_counts_;
   std::unordered_map<const llvm::Value *, CommunicatorID>
       canonical_communicators_;
@@ -195,6 +200,15 @@ private:
   mutable size_t next_communicator_class_id_ = 1;
   mutable size_t next_communicator_subgroup_id_ = 1;
   std::unordered_map<const llvm::Value *, size_t> communicator_subgroup_ids_;
+  std::unordered_map<const llvm::Value *, CommunicatorID> communicator_parents_;
+  std::unordered_map<const llvm::Value *, MPICommunicatorCreationKind>
+      communicator_creation_kinds_;
+  std::unordered_map<const llvm::Value *, std::string> communicator_topologies_;
+  std::unordered_map<const llvm::Value *, MPI::MPIRankPredicate>
+      communicator_subgroups_;
+  std::unordered_map<const llvm::Value *, std::pair<int, int>>
+      communicator_size_ranges_;
+  std::unordered_set<const llvm::Value *> intercommunicators_;
   std::unique_ptr<MPI::MPIRankAnalysis> rank_analysis_;
 
   MPIOpKind classifyOperation(const llvm::Instruction *inst,
@@ -239,8 +253,15 @@ private:
   void registerCommunicatorSubgroup(const llvm::Value *alias,
                                     const llvm::Value *root,
                                     int subgroup_token);
+  void recordCommunicatorCreation(const llvm::Value *alias,
+                                  const llvm::Value *root,
+                                  MPICommunicatorCreationKind creation_kind,
+                                  const MPI::MPIRankPredicate *subgroup = nullptr,
+                                  llvm::StringRef topology = "",
+                                  bool is_intercommunicator = false);
   size_t assignCommunicatorClass(CommunicatorID canonical);
   size_t getCommunicatorSubgroupID(const llvm::Value *communicator) const;
+  void buildCommunicatorFacts();
   void annotateRankConstraints(MPIOperation &op) const;
   int64_t getDatatypeExtent(const llvm::Value *datatype_arg,
                             const llvm::Instruction *context) const;

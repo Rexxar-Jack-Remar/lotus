@@ -1188,7 +1188,7 @@ public:
   }
 
   inline bool isBarrierLike(const llvm::Instruction *inst) const {
-    return isBarrierOp(inst) || isMPICollective(inst) || isOMPTaskOp(inst);
+    return isBarrierOp(inst) || isBlockingMPIBarrier(inst) || isOMPTaskOp(inst);
   }
 
   inline bool isLockLike(const llvm::Instruction *inst) const {

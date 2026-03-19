@@ -16,6 +16,11 @@ enum class RelationKind {
   MayHappenBefore,
   MutuallyExclusive,
   MatchedCommunication,
+  MPICollectiveParticipation,
+  MPICollectiveLocalCompletion,
+  MPIGlobalBarrier,
+  MPIRequestCompletion,
+  MPICommunicatorProvenance,
   SameSynchronizationEpoch,
   SameCollectiveFrontier,
   SameProtocolSlot,
@@ -39,6 +44,16 @@ inline int relationPriority(RelationKind kind) {
   case RelationKind::MutuallyExclusive:
     return 4;
   case RelationKind::MatchedCommunication:
+    return 4;
+  case RelationKind::MPICollectiveParticipation:
+    return 4;
+  case RelationKind::MPICollectiveLocalCompletion:
+    return 4;
+  case RelationKind::MPIGlobalBarrier:
+    return 4;
+  case RelationKind::MPIRequestCompletion:
+    return 4;
+  case RelationKind::MPICommunicatorProvenance:
     return 4;
   case RelationKind::SameSynchronizationEpoch:
     return 3;

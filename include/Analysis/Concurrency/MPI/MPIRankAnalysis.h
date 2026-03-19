@@ -233,6 +233,8 @@ public:
    */
   bool tryEvaluateIntRange(const llvm::Value *val, int &min_value,
                            int &max_value) const;
+  bool getCommunicatorSizeRange(const llvm::Value *communicator, int &min_value,
+                                int &max_value) const;
 
 private:
   llvm::Module &m_module;

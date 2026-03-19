@@ -442,6 +442,40 @@ void MPIProcessModel::registerCommunicatorAlias(const Value *alias,
   assignCommunicatorClass(canonical_root);
 }
 
+void MPIProcessModel::recordCommunicatorCreation(
+    const Value *alias, const Value *root,
+    MPICommunicatorCreationKind creation_kind,
+    const MPI::MPIRankPredicate *subgroup, StringRef topology,
+    bool is_intercommunicator) {
+  if (!alias) {
+    return;
+  }
+
+  registerCommunicatorAlias(alias, root);
+  const Value *alias_key = alias->stripPointerCasts();
+  if (const Value *underlying = getUnderlyingObject(alias_key)) {
+    alias_key = underlying->stripPointerCasts();
+  }
+
+  CommunicatorID canonical_alias = canonicalizeCommunicator(alias_key);
+  CommunicatorID canonical_root = root ? canonicalizeCommunicator(root) : nullptr;
+  if (canonical_alias && canonical_root && canonical_alias != canonical_root) {
+    communicator_parents_[canonical_alias] = canonical_root;
+  }
+  if (canonical_alias) {
+    communicator_creation_kinds_[canonical_alias] = creation_kind;
+    if (!topology.empty()) {
+      communicator_topologies_[canonical_alias] = topology.str();
+    }
+    if (subgroup) {
+      communicator_subgroups_[canonical_alias] = *subgroup;
+    }
+    if (is_intercommunicator) {
+      intercommunicators_.insert(canonical_alias);
+    }
+  }
+}
+
 void MPIProcessModel::registerCommunicatorSubgroup(const Value *alias,
                                                    const Value *root,
                                                    int subgroup_token) {
@@ -509,6 +543,62 @@ MPIProcessModel::getCommunicatorSubgroupID(const Value *communicator) const {
   }
   auto it = communicator_subgroup_ids_.find(key);
   return it != communicator_subgroup_ids_.end() ? it->second : 0;
+}
+
+void MPIProcessModel::buildCommunicatorFacts() {
+  communicator_facts_.clear();
+  std::set<size_t> seen_classes;
+
+  for (const auto &entry : communicator_class_ids_) {
+    const Value *canonical = entry.first;
+    size_t class_id = entry.second;
+    if (!canonical || !seen_classes.insert(class_id).second) {
+      continue;
+    }
+
+    MPICommunicatorFact fact;
+    fact.canonical = canonical;
+    fact.communicator_class_id = class_id;
+    auto parent_it = communicator_parents_.find(canonical);
+    if (parent_it != communicator_parents_.end()) {
+      fact.parent = parent_it->second;
+    }
+    auto creation_it = communicator_creation_kinds_.find(canonical);
+    if (creation_it != communicator_creation_kinds_.end()) {
+      fact.creation_kind = creation_it->second;
+    } else if (class_id == 1) {
+      fact.creation_kind = MPICommunicatorCreationKind::World;
+    }
+    auto subgroup_it = communicator_subgroups_.find(canonical);
+    if (subgroup_it != communicator_subgroups_.end()) {
+      fact.subgroup = MPIParticipantSet::fromPredicate(
+          subgroup_it->second, 0, getCommunicatorSubgroupID(canonical));
+    }
+    auto topology_it = communicator_topologies_.find(canonical);
+    if (topology_it != communicator_topologies_.end()) {
+      fact.topology_kind = topology_it->second;
+    }
+    fact.is_intercommunicator = intercommunicators_.count(canonical) != 0;
+
+    if (rank_analysis_) {
+      int min_size = 0;
+      int max_size = 0;
+      if (rank_analysis_->getCommunicatorSizeRange(canonical, min_size, max_size)) {
+        fact.has_known_size = true;
+        fact.size_min = min_size;
+        fact.size_max = max_size;
+      }
+    }
+
+    if (!fact.parent && fact.creation_kind == MPICommunicatorCreationKind::World) {
+      fact.detail = "world";
+    } else if (fact.parent) {
+      fact.detail = "derived";
+    } else {
+      fact.detail = "standalone";
+    }
+    communicator_facts_.push_back(fact);
+  }
 }
 
 void MPIProcessModel::annotateRankConstraints(MPIOperation &op) const {
@@ -1158,12 +1248,19 @@ void MPIProcessModel::analyzeModule() {
   channel_obligations_.clear();
   participant_sets_.clear();
   model_gaps_.clear();
+  communicator_facts_.clear();
   operation_kind_counts_.clear();
   canonical_communicators_.clear();
   communicator_class_ids_.clear();
   next_communicator_class_id_ = 1;
   communicator_subgroup_ids_.clear();
   next_communicator_subgroup_id_ = 1;
+  communicator_parents_.clear();
+  communicator_creation_kinds_.clear();
+  communicator_topologies_.clear();
+  communicator_subgroups_.clear();
+  communicator_size_ranges_.clear();
+  intercommunicators_.clear();
   deferred_lowering_stats_.clear();
   datatype_extent_bytes_.clear();
   normalization_confidence_counts_.clear();
@@ -1304,23 +1401,47 @@ void MPIProcessModel::analyzeModule() {
               cb->arg_size() >= 1 ? cb->getArgOperand(0) : nullptr;
 
           if (kind == MPIOpKind::INTERCOMM_CREATION && cb->arg_size() >= 1) {
+            recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
+                                       MPICommunicatorCreationKind::IntercommCreate,
+                                       nullptr, "", true);
             registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
                                       root);
           } else if (type == ThreadAPI::TD_MPI_COMM_DUP &&
                      cb->arg_size() >= 2) {
+            recordCommunicatorCreation(cb->getArgOperand(1), root,
+                                       MPICommunicatorCreationKind::Dup);
             registerCommunicatorAlias(cb->getArgOperand(1), root);
           } else if (type == ThreadAPI::TD_MPI_COMM_SPLIT &&
                      cb->arg_size() >= 4) {
             int color = 0;
             if (tryReadScalarInt(cb->getArgOperand(1), color, I)) {
+              MPI::MPIRankPredicate subgroup =
+                  MPI::MPIRankPredicate::makeConcrete(color, root);
+              recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
+                                         MPICommunicatorCreationKind::Split,
+                                         &subgroup);
               registerCommunicatorSubgroup(
                   cb->getArgOperand(cb->arg_size() - 1), root, color);
             } else {
+              recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
+                                         MPICommunicatorCreationKind::Split);
               registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
                                         root);
             }
           } else if (type == ThreadAPI::TD_MPI_COMM_CREATE &&
                      cb->arg_size() >= 3) {
+            std::string semantic_tag_storage = thread_api_->getSemanticTag(callee);
+            StringRef semantic_tag = semantic_tag_storage;
+            MPICommunicatorCreationKind creation_kind =
+                semantic_tag.startswith("topology-")
+                    ? MPICommunicatorCreationKind::Topology
+                    : MPICommunicatorCreationKind::Create;
+            recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
+                                       creation_kind, nullptr,
+                                       creation_kind ==
+                                               MPICommunicatorCreationKind::Topology
+                                           ? semantic_tag
+                                           : "");
             registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
                                       root);
           }
@@ -1341,6 +1462,8 @@ void MPIProcessModel::analyzeModule() {
       participant_sets_.push_back(op.participant_set);
     }
   }
+
+  buildCommunicatorFacts();
 
   buildSemanticEvents();
   analyzeRequestStateDomain();

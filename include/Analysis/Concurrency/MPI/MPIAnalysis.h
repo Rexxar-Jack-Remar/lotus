@@ -15,6 +15,7 @@
 #define MPI_ANALYSIS_H
 
 #include "Analysis/Concurrency/MPI/MPICollectiveAnalysis.h"
+#include "Analysis/Concurrency/MPI/MPIAbstractState.h"
 #include "Analysis/Concurrency/MPI/MPIModel.h"
 #include "Analysis/Concurrency/MPI/MPINormalization.h"
 #include "Analysis/Concurrency/MPI/MPIOperation.h"
@@ -108,6 +109,25 @@ public:
   };
 
   const AnalysisResults &getResults() const { return results_; }
+  const MPIAbstractState &getAbstractState() const { return abstract_state_; }
+  const std::vector<MPICommunicatorFact> &getCommunicatorFacts() const {
+    return abstract_state_.communicator_facts;
+  }
+  const std::vector<MPIFunctionSummary> &getFunctionSummaries() const {
+    return abstract_state_.function_summaries;
+  }
+  const std::vector<MPIRequestFact> &getRequestFacts() const {
+    return abstract_state_.request_facts;
+  }
+  const std::vector<MPIChannelAutomaton> &getChannelAutomata() const {
+    return abstract_state_.channel_automata;
+  }
+  const std::vector<MPICollectiveProtocolState> &getCollectiveProtocolStates() const {
+    return abstract_state_.collective_protocol_states;
+  }
+  const std::vector<MPIRMAEpochFact> &getRMAEpochFacts() const {
+    return abstract_state_.rma_epoch_facts;
+  }
 
   size_t getProtocolDiagnosticCount(llvm::StringRef key) const;
   size_t getOperationCount(MPIOpKind kind) const;
@@ -126,6 +146,7 @@ private:
   MPIProcessModel process_model_;
   MPICollectiveAnalysis collective_analysis_;
   MPIRMAAnalysis rma_analysis_;
+  MPIAbstractState abstract_state_;
 
   AnalysisResults results_;
 };
