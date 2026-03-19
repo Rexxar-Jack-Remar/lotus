@@ -49,6 +49,7 @@ bool disablesDeterministicMPIOrdering(int provided_level) {
 }
 
 using ProtocolScopeKey = std::tuple<size_t, size_t, size_t, size_t>;
+using FrontierScopeKey = std::tuple<size_t, size_t, size_t, size_t, size_t>;
 
 ProtocolScopeKey
 getProtocolScopeKey(const MPICollectiveAnalysis::CollectiveCall &call) {
@@ -57,12 +58,24 @@ getProtocolScopeKey(const MPICollectiveAnalysis::CollectiveCall &call) {
       call.collective_protocol_class_id, call.protocol_sequence_id);
 }
 
+FrontierScopeKey
+getFrontierScopeKey(const MPICollectiveAnalysis::CollectiveCall &call) {
+  return std::make_tuple(
+      call.communicator_class_id, call.communicator_subgroup_id,
+      call.participant_class_id, call.collective_protocol_class_id,
+      call.protocol_sequence_id);
+}
+
 } // namespace
 
 void MPICollectiveAnalysis::analyzeCollectives() {
   collective_calls_.clear();
+  protocol_frontiers_.clear();
   protocol_automaton_ = MPIProtocolAutomaton();
   protocol_diagnostics_.clear();
+  std::map<FrontierScopeKey, size_t> frontier_ids;
+  size_t next_frontier_id = 1;
+  std::map<size_t, size_t> frontier_indices;
 
   for (const MPIEvent &event : process_model_.getSemanticEvents()) {
     if (!event.has_collective_semantics) {
@@ -78,9 +91,11 @@ void MPICollectiveAnalysis::analyzeCollectives() {
     call.communicator_class_id = event.collective.scope.communicator_class_id;
     call.communicator_subgroup_id =
         event.collective.scope.communicator_subgroup_id;
+    call.participant_class_id = event.collective.scope.participant_class_id;
     call.collective_protocol_class_id =
         event.collective.scope.protocol_class_id;
     call.function = op.function;
+    call.participants = op.participant_set;
     call.reachability = event.collective.reachability;
     call.root_rank = event.collective.root_rank;
     call.count = event.collective.count;
@@ -120,6 +135,9 @@ void MPICollectiveAnalysis::analyzeCollectives() {
     if (call.reachability != ProtocolReachability::AllRanks) {
       protocol_diagnostics_["collective_partial_reachability"]++;
     }
+    if (call.participants.unknown) {
+      protocol_diagnostics_["collective_frontier_model_gap"]++;
+    }
 
     MPIProtocolTransition transition;
     transition.slot_id = slot;
@@ -150,6 +168,38 @@ void MPICollectiveAnalysis::analyzeCollectives() {
         process_model_.getMutableOperations()[event.operation_index];
     mutable_op.protocol_sequence_id = slot;
     mutable_op.semantic_relation = call.protocol_relation;
+
+    const FrontierScopeKey scope_key = getFrontierScopeKey(call);
+    auto frontier_it = frontier_ids.find(scope_key);
+    if (frontier_it == frontier_ids.end()) {
+      frontier_it = frontier_ids.emplace(scope_key, next_frontier_id++).first;
+      CollectiveProtocolFrontier frontier;
+      frontier.communicator_class_id = call.communicator_class_id;
+      frontier.communicator_subgroup_id = call.communicator_subgroup_id;
+      frontier.participant_class_id = call.participant_class_id;
+      frontier.protocol_class_id = call.collective_protocol_class_id;
+      frontier.frontier_id = frontier_it->second;
+      frontier.frontier_position = call.protocol_sequence_id;
+      frontier.participants = call.participants;
+      frontier.relation.kind = concurrency::RelationKind::SameCollectiveFrontier;
+      frontier.relation.proof = call.protocol_relation.proof;
+      frontier.relation.reason = call.protocol_relation.reason;
+      frontier_indices[frontier.frontier_id] = protocol_frontiers_.size();
+      protocol_frontiers_.push_back(frontier);
+    }
+    auto frontier_index_it = frontier_indices.find(frontier_it->second);
+    if (frontier_index_it != frontier_indices.end()) {
+      CollectiveProtocolFrontier &frontier =
+          protocol_frontiers_[frontier_index_it->second];
+      frontier.transitions.push_back(call.inst);
+      if (!call.participants.mustEqual(frontier.participants)) {
+        frontier.relation.proof = concurrency::ProofStrength::May;
+        frontier.diagnostics.push_back("mpi_collective_frontier_partial_participants");
+      }
+      if (call.protocol_relation.proof == concurrency::ProofStrength::May) {
+        frontier.relation.proof = concurrency::ProofStrength::May;
+      }
+    }
     collective_calls_.push_back(call);
   }
 }
@@ -226,14 +276,32 @@ std::vector<std::pair<MPICollectiveAnalysis::CollectiveCall,
                       MPICollectiveAnalysis::CollectiveCall>>
 MPICollectiveAnalysis::findMismatchedCollectives() const {
   std::vector<std::pair<CollectiveCall, CollectiveCall>> mismatches;
-
-  std::map<ProtocolScopeKey, std::vector<const CollectiveCall *>> by_scope;
-  for (const CollectiveCall &call : collective_calls_) {
-    by_scope[getProtocolScopeKey(call)].push_back(&call);
+  std::map<ProtocolScopeKey, std::vector<const CollectiveProtocolFrontier *>>
+      frontiers_by_scope;
+  for (const CollectiveProtocolFrontier &frontier : protocol_frontiers_) {
+    frontiers_by_scope[std::make_tuple(frontier.communicator_class_id,
+                                       frontier.communicator_subgroup_id,
+                                       frontier.protocol_class_id,
+                                       frontier.frontier_position)]
+        .push_back(&frontier);
   }
 
-  for (const auto &entry : by_scope) {
-    const auto &calls = entry.second;
+  for (const auto &entry : frontiers_by_scope) {
+    std::vector<const CollectiveCall *> calls;
+    std::set<const CollectiveCall *> unique_calls;
+    for (const CollectiveProtocolFrontier *frontier : entry.second) {
+      for (const CollectiveCall &call : collective_calls_) {
+        if (call.communicator_class_id != frontier->communicator_class_id ||
+            call.communicator_subgroup_id != frontier->communicator_subgroup_id ||
+            call.collective_protocol_class_id != frontier->protocol_class_id ||
+            call.protocol_sequence_id != frontier->frontier_position) {
+          continue;
+        }
+        if (unique_calls.insert(&call).second) {
+          calls.push_back(&call);
+        }
+      }
+    }
     for (size_t i = 0; i < calls.size(); ++i) {
       for (size_t j = i + 1; j < calls.size(); ++j) {
         const CollectiveCall &c1 = *calls[i];
@@ -312,17 +380,35 @@ std::vector<std::pair<MPICollectiveAnalysis::CollectiveCall,
                       MPICollectiveAnalysis::CollectiveCall>>
 MPICollectiveAnalysis::findWrongRootRanks() const {
   std::vector<std::pair<CollectiveCall, CollectiveCall>> wrong_roots;
-
-  std::map<ProtocolScopeKey, std::vector<const CollectiveCall *>> by_scope;
-  for (const CollectiveCall &call : collective_calls_) {
-    if (call.root_rank < 0) {
-      continue;
-    }
-    by_scope[getProtocolScopeKey(call)].push_back(&call);
+  std::map<ProtocolScopeKey, std::vector<const CollectiveProtocolFrontier *>>
+      frontiers_by_scope;
+  for (const CollectiveProtocolFrontier &frontier : protocol_frontiers_) {
+    frontiers_by_scope[std::make_tuple(frontier.communicator_class_id,
+                                       frontier.communicator_subgroup_id,
+                                       frontier.protocol_class_id,
+                                       frontier.frontier_position)]
+        .push_back(&frontier);
   }
 
-  for (auto &entry : by_scope) {
-    auto &calls = entry.second;
+  for (const auto &entry : frontiers_by_scope) {
+    std::vector<const CollectiveCall *> calls;
+    std::set<const CollectiveCall *> unique_calls;
+    for (const CollectiveProtocolFrontier *frontier : entry.second) {
+      for (const CollectiveCall &call : collective_calls_) {
+        if (call.root_rank < 0) {
+          continue;
+        }
+        if (call.communicator_class_id != frontier->communicator_class_id ||
+            call.communicator_subgroup_id != frontier->communicator_subgroup_id ||
+            call.collective_protocol_class_id != frontier->protocol_class_id ||
+            call.protocol_sequence_id != frontier->frontier_position) {
+          continue;
+        }
+        if (unique_calls.insert(&call).second) {
+          calls.push_back(&call);
+        }
+      }
+    }
     for (size_t i = 0; i < calls.size(); ++i) {
       for (size_t j = i + 1; j < calls.size(); ++j) {
         if (calls[i]->type != calls[j]->type) {

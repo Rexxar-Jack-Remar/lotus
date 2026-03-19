@@ -96,8 +96,24 @@ void MPIAnalysis::runAnalysis() {
       rma_analysis_.findInvalidEpochTransitions();
   results_.use_after_free_windows = rma_analysis_.findUseAfterFreeWindows();
   results_.double_window_free = rma_analysis_.findDoubleWindowFree();
+  results_.participant_sets = process_model_.getParticipantSets();
+  results_.channel_obligations = process_model_.getChannelObligations();
+  results_.protocol_frontiers = collective_analysis_.getProtocolFrontiers();
+  results_.rma_synchronization_facts = rma_analysis_.getSynchronizationFacts();
+  results_.model_gaps = process_model_.getModelGaps();
 
   results_.diagnostics.clear();
+  for (const MPIModelGap &gap : results_.model_gaps) {
+    MPIAnalysis::MPIDiagnostic diagnostic;
+    diagnostic.inst = gap.inst;
+    diagnostic.relation = gap.relation;
+    diagnostic.model_gap_domain = gap.domain;
+    diagnostic.communicator_class_id = gap.communicator_class_id;
+    diagnostic.participant_class_id = gap.participant_class_id;
+    diagnostic.code = gap.code;
+    diagnostic.detail = gap.detail;
+    results_.diagnostics.push_back(diagnostic);
+  }
   for (const MPIOperation &op : process_model_.getAllOperations()) {
     if (op.semantic_relation.kind ==
             concurrency::RelationKind::UnknownDueToModelGap &&
@@ -108,9 +124,16 @@ void MPIAnalysis::runAnalysis() {
     diagnostic.inst = op.inst;
     diagnostic.relation = op.semantic_relation;
     diagnostic.confidence = op.normalization_confidence;
+    diagnostic.model_gap_domain =
+        op.semantic_relation.kind == concurrency::RelationKind::UnknownDueToModelGap
+            ? MPIModelGapDomain::Unknown
+            : MPIModelGapDomain::None;
+    diagnostic.communicator_class_id = op.communicator_class_id;
+    diagnostic.participant_class_id = op.participant_class_id;
     diagnostic.code = op.semantic_relation.reason.empty()
                           ? "mpi_relation"
                           : op.semantic_relation.reason;
+    diagnostic.detail = op.rank_path_summary;
     results_.diagnostics.push_back(diagnostic);
   }
 }
@@ -122,19 +145,19 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
   auto countRequestStates = [&](RequestCompletionState state) {
     auto requestStatePriority = [](RequestCompletionState value) {
       switch (value) {
-      case RequestCompletionState::Created:
+      case RequestCompletionState::Unbound:
         return 0;
-      case RequestCompletionState::Active:
+      case RequestCompletionState::PersistentTemplate:
         return 1;
-      case RequestCompletionState::Pending:
+      case RequestCompletionState::InactivePersistent:
         return 2;
-      case RequestCompletionState::MayComplete:
+      case RequestCompletionState::Active:
         return 3;
-      case RequestCompletionState::MustComplete:
+      case RequestCompletionState::MayComplete:
         return 4;
-      case RequestCompletionState::Terminal:
+      case RequestCompletionState::MustComplete:
         return 5;
-      case RequestCompletionState::Consumed:
+      case RequestCompletionState::Canceled:
         return 6;
       case RequestCompletionState::Freed:
         return 7;
@@ -167,7 +190,7 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
     size_t count = 0;
     for (const auto &entry : request_states) {
       if (entry.second == state ||
-          (state == RequestCompletionState::Terminal &&
+          (state == RequestCompletionState::Canceled &&
            entry.second == RequestCompletionState::Freed)) {
         ++count;
       }
@@ -237,12 +260,21 @@ void MPIAnalysis::printResults(raw_ostream &OS) const {
   OS << "RMA sync ops: " << getOperationCount(MPIOpKind::RMA_SYNC) << "\n";
   OS << "Collective protocol slots tracked: "
      << getProtocolDiagnosticCount("collective_slots_tracked") << "\n";
+  OS << "Collective protocol frontiers tracked: "
+     << results_.protocol_frontiers.size() << "\n";
   OS << "Collective partial-reachability observations: "
      << getProtocolDiagnosticCount("collective_partial_reachability") << "\n";
+  OS << "Participant sets tracked: " << results_.participant_sets.size()
+     << "\n";
+  OS << "Point-to-point channel obligations: "
+     << results_.channel_obligations.size() << "\n";
+  OS << "RMA synchronization facts: "
+     << results_.rma_synchronization_facts.size() << "\n";
+  OS << "Structured model gaps: " << results_.model_gaps.size() << "\n";
   OS << "Requests with may-complete status: "
      << countRequestStates(RequestCompletionState::MayComplete) << "\n";
   OS << "Requests with terminal status: "
-     << countRequestStates(RequestCompletionState::Terminal) << "\n";
+     << countRequestStates(RequestCompletionState::Canceled) << "\n";
   OS << "Requests with freed status: "
      << countRequestStates(RequestCompletionState::Freed) << "\n";
   const auto &normalization_counts =

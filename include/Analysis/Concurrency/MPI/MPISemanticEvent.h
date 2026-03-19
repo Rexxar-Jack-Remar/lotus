@@ -43,6 +43,7 @@ enum class MPIRMAEpochProofKind { Must, May, Unknown };
 struct MPICollectiveScope {
   size_t communicator_class_id = 0;
   size_t communicator_subgroup_id = 0;
+  size_t participant_class_id = 0;
   size_t protocol_class_id = 0;
 
   bool operator<(const MPICollectiveScope &other) const {
@@ -52,6 +53,9 @@ struct MPICollectiveScope {
     if (communicator_subgroup_id != other.communicator_subgroup_id) {
       return communicator_subgroup_id < other.communicator_subgroup_id;
     }
+    if (participant_class_id != other.participant_class_id) {
+      return participant_class_id < other.participant_class_id;
+    }
     return protocol_class_id < other.protocol_class_id;
   }
 };
@@ -59,6 +63,8 @@ struct MPICollectiveScope {
 struct MPICollectiveEventState {
   MPICollectiveScope scope;
   ThreadAPI::TD_TYPE type = ThreadAPI::TD_DUMMY;
+  MPICollectiveVariant variant = MPICollectiveVariant::Unknown;
+  MPICollectiveShape shape = MPICollectiveShape::Unknown;
   ProtocolReachability reachability = ProtocolReachability::Unknown;
   size_t protocol_slot = 0;
   int root_rank = -1;
@@ -79,6 +85,7 @@ struct MPIRequestTransition {
 
 struct MPIRequestEventState {
   MPIRequestActionKind action = MPIRequestActionKind::None;
+  MPIRequestArity arity = MPIRequestArity::None;
   std::vector<RequestID> requests;
   std::vector<int> completed_indices;
   bool completion_flag_known = false;
@@ -98,6 +105,7 @@ struct MPIRequestStateSummary {
   int peer_rank = -1;
   int tag = -1;
   CommunicatorID communicator = nullptr;
+  MPISendMode send_mode = MPISendMode::Unknown;
   std::vector<MPIRequestTransition> history;
 };
 
@@ -105,6 +113,10 @@ struct MPIPointToPointEventState {
   bool is_send = false;
   bool is_recv = false;
   bool is_probe = false;
+  MPISendMode send_mode = MPISendMode::Unknown;
+  MPIBlockingMode blocking_mode = MPIBlockingMode::Unknown;
+  size_t participant_class_id = 0;
+  size_t peer_class_id = 0;
   int local_rank = -1;
   int peer_rank = -1;
   int peer_rank_min = -1;
@@ -112,6 +124,7 @@ struct MPIPointToPointEventState {
   int tag = -1;
   size_t communicator_class_id = 0;
   ProtocolReachability reachability = ProtocolReachability::Unknown;
+  int64_t datatype_size = -1;
 };
 
 struct MPIPointToPointObligation {
@@ -120,9 +133,16 @@ struct MPIPointToPointObligation {
   const llvm::Instruction *lhs_inst = nullptr;
   const llvm::Instruction *rhs_inst = nullptr;
   size_t communicator_class_id = 0;
+  size_t send_participant_class_id = 0;
+  size_t recv_participant_class_id = 0;
   int send_rank = -1;
   int recv_rank = -1;
   int tag = -1;
+  int64_t send_datatype_size = -1;
+  int64_t recv_datatype_size = -1;
+  MPISendMode send_mode = MPISendMode::Unknown;
+  bool send_is_blocking = false;
+  bool recv_is_blocking = false;
   MPIMatchProofKind proof = MPIMatchProofKind::Unknown;
   concurrency::Relation relation;
 };
@@ -132,6 +152,9 @@ struct MPIRMAEventState {
   bool is_window_lifecycle = false;
   bool is_data_operation = false;
   bool is_sync_operation = false;
+  MPIRMAAccessKind access_kind = MPIRMAAccessKind::None;
+  MPIRMASyncKind sync_kind = MPIRMASyncKind::None;
+  size_t participant_class_id = 0;
   int target_rank = -1;
   int target_rank_min = -1;
   int target_rank_max = -1;
@@ -168,19 +191,19 @@ struct MPIEvent {
 
 inline int requestStatePriority(MPIRequestState state) {
   switch (state) {
-  case MPIRequestState::Created:
+  case MPIRequestState::Unbound:
     return 0;
-  case MPIRequestState::Active:
+  case MPIRequestState::PersistentTemplate:
     return 1;
-  case MPIRequestState::Pending:
+  case MPIRequestState::InactivePersistent:
     return 2;
-  case MPIRequestState::MayComplete:
+  case MPIRequestState::Active:
     return 3;
-  case MPIRequestState::MustComplete:
+  case MPIRequestState::MayComplete:
     return 4;
-  case MPIRequestState::Terminal:
+  case MPIRequestState::MustComplete:
     return 5;
-  case MPIRequestState::Consumed:
+  case MPIRequestState::Canceled:
     return 6;
   case MPIRequestState::Freed:
     return 7;
@@ -194,6 +217,40 @@ inline int requestStatePriority(MPIRequestState state) {
 
 inline MPIRequestState joinRequestState(MPIRequestState lhs,
                                         MPIRequestState rhs) {
+  if (lhs == MPIRequestState::Unknown || rhs == MPIRequestState::Unknown) {
+    return MPIRequestState::Unknown;
+  }
+  if (lhs == rhs) {
+    return lhs;
+  }
+  if (lhs == MPIRequestState::Freed || rhs == MPIRequestState::Freed) {
+    return MPIRequestState::Freed;
+  }
+  if (lhs == MPIRequestState::Escaped || rhs == MPIRequestState::Escaped) {
+    return MPIRequestState::Escaped;
+  }
+  if (lhs == MPIRequestState::Canceled || rhs == MPIRequestState::Canceled) {
+    return MPIRequestState::Canceled;
+  }
+  if (lhs == MPIRequestState::MustComplete ||
+      rhs == MPIRequestState::MustComplete) {
+    return MPIRequestState::MustComplete;
+  }
+  if (lhs == MPIRequestState::MayComplete ||
+      rhs == MPIRequestState::MayComplete) {
+    return MPIRequestState::MayComplete;
+  }
+  if (lhs == MPIRequestState::Active || rhs == MPIRequestState::Active) {
+    return MPIRequestState::Active;
+  }
+  if (lhs == MPIRequestState::InactivePersistent ||
+      rhs == MPIRequestState::InactivePersistent) {
+    return MPIRequestState::InactivePersistent;
+  }
+  if (lhs == MPIRequestState::PersistentTemplate ||
+      rhs == MPIRequestState::PersistentTemplate) {
+    return MPIRequestState::PersistentTemplate;
+  }
   return requestStatePriority(lhs) >= requestStatePriority(rhs) ? lhs : rhs;
 }
 

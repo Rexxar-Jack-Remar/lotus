@@ -145,19 +145,19 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
   summary.rma_sync_count = analysis.getOperationCount(mpi::MPIOpKind::RMA_SYNC);
   auto requestStatePriority = [](mpi::RequestCompletionState state) {
     switch (state) {
-    case mpi::RequestCompletionState::Created:
+    case mpi::RequestCompletionState::Unbound:
       return 0;
-    case mpi::RequestCompletionState::Active:
+    case mpi::RequestCompletionState::PersistentTemplate:
       return 1;
-    case mpi::RequestCompletionState::Pending:
+    case mpi::RequestCompletionState::InactivePersistent:
       return 2;
-    case mpi::RequestCompletionState::MayComplete:
+    case mpi::RequestCompletionState::Active:
       return 3;
-    case mpi::RequestCompletionState::MustComplete:
+    case mpi::RequestCompletionState::MayComplete:
       return 4;
-    case mpi::RequestCompletionState::Terminal:
+    case mpi::RequestCompletionState::MustComplete:
       return 5;
-    case mpi::RequestCompletionState::Consumed:
+    case mpi::RequestCompletionState::Canceled:
       return 6;
     case mpi::RequestCompletionState::Freed:
       return 7;
@@ -190,7 +190,7 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
     if (entry.second == mpi::RequestCompletionState::MayComplete) {
       ++summary.may_complete_request_count;
     }
-    if (entry.second == mpi::RequestCompletionState::Terminal ||
+    if (entry.second == mpi::RequestCompletionState::Canceled ||
         entry.second == mpi::RequestCompletionState::Freed) {
       ++summary.terminal_request_count;
     }

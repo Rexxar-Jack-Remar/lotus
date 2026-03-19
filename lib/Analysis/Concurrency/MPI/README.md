@@ -13,6 +13,19 @@ communication structure in the SPMD model rather than shared-memory threading.
   RMA races.
 - `MPIRankAnalysis`: symbolic rank reasoning used by the collective checker.
 
+## Authoritative Facts
+
+The following internal facts are the primary reasoning surfaces for the MPI
+subsystem:
+
+- `MPIParticipantSet`: canonical participant/rank scope facts
+- `MPIChannelObligation`: point-to-point and request/discharge facts
+- `CollectiveProtocolFrontier`: collective grouping/proof state
+- `RMASynchronizationFact`: RMA epoch, completion, and synchronization facts
+
+Legacy result buckets and summary counters are projected from these facts for
+compatibility.
+
 ## Entry Point
 
 Use [MPIAnalysis.h](lotus/include/Analysis/Concurrency/MPI/MPIAnalysis.h):
@@ -47,13 +60,13 @@ The top-level results include:
 
 ## Limitations
 
-- Deadlock detection is intentionally lightweight and targets simple blocking
-  cycles.
-- Collective checking is sequence-based, not a full path-sensitive protocol
-  proof.
+- Deadlock detection is static and conservative; unresolved request/channel
+  facts degrade to explicit model gaps.
+- Collective checking is frontier-based but still intraprocedural and
+  conservative when communicator or participant scopes are unresolved.
 - Unknown ranks, tags, or communicators are handled conservatively.
-- PSCW RMA synchronization is recognized but not treated as a supported proof
-  of synchronization.
+- PSCW RMA synchronization is modeled, but unresolved access/exposure scopes
+  still degrade to model gaps rather than strong proofs.
 
 ## Tests
 

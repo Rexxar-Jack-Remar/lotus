@@ -11,6 +11,260 @@ namespace {
 
 using TD = ThreadAPI::TD_TYPE;
 
+MPISendMode classifySendMode(llvm::StringRef canonical_name) {
+  if (canonical_name.contains("Ssend")) {
+    return MPISendMode::Synchronous;
+  }
+  if (canonical_name.contains("Bsend")) {
+    return MPISendMode::Buffered;
+  }
+  if (canonical_name.contains("Rsend")) {
+    return MPISendMode::Ready;
+  }
+  if (canonical_name.startswith("MPI_Send") ||
+      canonical_name.startswith("MPI_Isend")) {
+    return MPISendMode::Standard;
+  }
+  return MPISendMode::Unknown;
+}
+
+MPIBlockingMode classifyBlockingMode(TD type, llvm::StringRef canonical_name) {
+  switch (type) {
+  case TD::TD_MPI_ISEND:
+  case TD::TD_MPI_IRECV:
+  case TD::TD_MPI_IPROBE:
+  case TD::TD_MPI_MPROBE:
+  case TD::TD_MPI_IMPROBE:
+    return MPIBlockingMode::NonBlocking;
+  case TD::TD_MPI_WAIT:
+  case TD::TD_MPI_WAITALL:
+  case TD::TD_MPI_WAITANY:
+  case TD::TD_MPI_WAITSOME:
+  case TD::TD_MPI_TEST:
+  case TD::TD_MPI_TESTALL:
+  case TD::TD_MPI_TESTANY:
+  case TD::TD_MPI_TESTSOME:
+    return MPIBlockingMode::Completion;
+  case TD::TD_MPI_WIN_FLUSH:
+    return canonical_name.contains("local")
+               ? MPIBlockingMode::LocalCompletion
+               : MPIBlockingMode::Completion;
+  case TD::TD_MPI_BARRIER:
+  case TD::TD_MPI_BCAST:
+  case TD::TD_MPI_SCATTER:
+  case TD::TD_MPI_GATHER:
+  case TD::TD_MPI_ALLGATHER:
+  case TD::TD_MPI_ALLTOALL:
+  case TD::TD_MPI_REDUCE:
+  case TD::TD_MPI_ALLREDUCE:
+  case TD::TD_MPI_REDUCE_SCATTER:
+  case TD::TD_MPI_SCAN:
+    return canonical_name.startswith("MPI_I")
+               ? MPIBlockingMode::NonBlocking
+               : MPIBlockingMode::Blocking;
+  default:
+    break;
+  }
+
+  return MPIBlockingMode::Blocking;
+}
+
+MPIRequestArity classifyRequestArity(TD type) {
+  switch (type) {
+  case TD::TD_MPI_WAIT:
+  case TD::TD_MPI_TEST:
+  case TD::TD_MPI_REQUEST_START:
+  case TD::TD_MPI_REQUEST_FREE:
+  case TD::TD_MPI_CANCEL:
+    return MPIRequestArity::Single;
+  case TD::TD_MPI_WAITALL:
+  case TD::TD_MPI_WAITANY:
+  case TD::TD_MPI_WAITSOME:
+  case TD::TD_MPI_TESTALL:
+  case TD::TD_MPI_TESTANY:
+  case TD::TD_MPI_TESTSOME:
+    return MPIRequestArity::Array;
+  default:
+    return MPIRequestArity::None;
+  }
+}
+
+MPICollectiveVariant classifyCollectiveVariant(TD type,
+                                              llvm::StringRef semantic_tag) {
+  switch (type) {
+  case TD::TD_MPI_BARRIER:
+    return MPICollectiveVariant::Barrier;
+  case TD::TD_MPI_BCAST:
+    return semantic_tag.startswith("intercomm-")
+               ? MPICollectiveVariant::IntercommBcast
+               : MPICollectiveVariant::Bcast;
+  case TD::TD_MPI_SCATTER:
+    return semantic_tag.contains("scatterv") ? MPICollectiveVariant::Scatterv
+                                             : MPICollectiveVariant::Scatter;
+  case TD::TD_MPI_GATHER:
+    return semantic_tag.contains("gatherv") ? MPICollectiveVariant::Gatherv
+                                            : MPICollectiveVariant::Gather;
+  case TD::TD_MPI_ALLGATHER:
+    return semantic_tag.contains("gatherv")
+               ? MPICollectiveVariant::Allgatherv
+               : MPICollectiveVariant::Allgather;
+  case TD::TD_MPI_ALLTOALL:
+    if (semantic_tag.contains("alltoallw")) {
+      return MPICollectiveVariant::Alltoallw;
+    }
+    return semantic_tag.contains("alltoallv")
+               ? MPICollectiveVariant::Alltoallv
+               : MPICollectiveVariant::Alltoall;
+  case TD::TD_MPI_REDUCE:
+    return MPICollectiveVariant::Reduce;
+  case TD::TD_MPI_ALLREDUCE:
+    return MPICollectiveVariant::Allreduce;
+  case TD::TD_MPI_REDUCE_SCATTER:
+    return semantic_tag.contains("block")
+               ? MPICollectiveVariant::ReduceScatterBlock
+               : MPICollectiveVariant::ReduceScatter;
+  case TD::TD_MPI_SCAN:
+    return semantic_tag.contains("exscan") ? MPICollectiveVariant::Exscan
+                                           : MPICollectiveVariant::Scan;
+  default:
+    break;
+  }
+
+  if (semantic_tag.startswith("neighbor-") || semantic_tag.startswith("ineighbor-")) {
+    if (semantic_tag.contains("allgatherv")) {
+      return MPICollectiveVariant::NeighborAllgatherv;
+    }
+    if (semantic_tag.contains("allgather")) {
+      return MPICollectiveVariant::NeighborAllgather;
+    }
+    if (semantic_tag.contains("alltoallw")) {
+      return MPICollectiveVariant::NeighborAlltoallw;
+    }
+    if (semantic_tag.contains("alltoallv")) {
+      return MPICollectiveVariant::NeighborAlltoallv;
+    }
+    if (semantic_tag.contains("alltoall")) {
+      return MPICollectiveVariant::NeighborAlltoall;
+    }
+  }
+
+  return MPICollectiveVariant::Unknown;
+}
+
+MPICollectiveShape classifyCollectiveShape(MPICollectiveVariant variant,
+                                           llvm::StringRef semantic_tag) {
+  if (semantic_tag.startswith("intercomm-")) {
+    return MPICollectiveShape::Intercommunicator;
+  }
+  if (semantic_tag.startswith("neighbor-") || semantic_tag.startswith("ineighbor-")) {
+    return MPICollectiveShape::Neighbor;
+  }
+
+  switch (variant) {
+  case MPICollectiveVariant::Barrier:
+    return MPICollectiveShape::Barrier;
+  case MPICollectiveVariant::Bcast:
+  case MPICollectiveVariant::Gather:
+  case MPICollectiveVariant::Gatherv:
+  case MPICollectiveVariant::Scatter:
+  case MPICollectiveVariant::Scatterv:
+  case MPICollectiveVariant::IntercommBcast:
+    return MPICollectiveShape::Rooted;
+  case MPICollectiveVariant::Allgather:
+  case MPICollectiveVariant::Allgatherv:
+  case MPICollectiveVariant::Alltoall:
+  case MPICollectiveVariant::Alltoallv:
+  case MPICollectiveVariant::Alltoallw:
+    return MPICollectiveShape::AllToAll;
+  case MPICollectiveVariant::Reduce:
+  case MPICollectiveVariant::Allreduce:
+  case MPICollectiveVariant::ReduceScatter:
+  case MPICollectiveVariant::ReduceScatterBlock:
+    return MPICollectiveShape::Reduction;
+  case MPICollectiveVariant::Scan:
+  case MPICollectiveVariant::Exscan:
+    return MPICollectiveShape::Scan;
+  case MPICollectiveVariant::NeighborAllgather:
+  case MPICollectiveVariant::NeighborAllgatherv:
+  case MPICollectiveVariant::NeighborAlltoall:
+  case MPICollectiveVariant::NeighborAlltoallv:
+  case MPICollectiveVariant::NeighborAlltoallw:
+    return MPICollectiveShape::Neighbor;
+  case MPICollectiveVariant::Unknown:
+    return MPICollectiveShape::Unknown;
+  }
+  return MPICollectiveShape::Unknown;
+}
+
+MPIRMAAccessKind classifyRMAAccessKind(llvm::StringRef canonical_name) {
+  if (canonical_name.equals("MPI_Put") || canonical_name.equals("MPI_Rput")) {
+    return MPIRMAAccessKind::Put;
+  }
+  if (canonical_name.equals("MPI_Get") || canonical_name.equals("MPI_Rget")) {
+    return MPIRMAAccessKind::Get;
+  }
+  if (canonical_name.equals("MPI_Accumulate") ||
+      canonical_name.equals("MPI_Raccumulate")) {
+    return MPIRMAAccessKind::Accumulate;
+  }
+  if (canonical_name.equals("MPI_Get_accumulate") ||
+      canonical_name.equals("MPI_Rget_accumulate") ||
+      canonical_name.equals("MPI_Fetch_and_op") ||
+      canonical_name.equals("MPI_Compare_and_swap")) {
+    return MPIRMAAccessKind::Atomic;
+  }
+  return MPIRMAAccessKind::None;
+}
+
+MPIRMASyncKind classifyRMASyncKind(llvm::StringRef canonical_name) {
+  if (canonical_name.equals("MPI_Win_fence")) {
+    return MPIRMASyncKind::Fence;
+  }
+  if (canonical_name.equals("MPI_Win_lock")) {
+    return MPIRMASyncKind::Lock;
+  }
+  if (canonical_name.equals("MPI_Win_lock_all")) {
+    return MPIRMASyncKind::LockAll;
+  }
+  if (canonical_name.equals("MPI_Win_unlock")) {
+    return MPIRMASyncKind::Unlock;
+  }
+  if (canonical_name.equals("MPI_Win_unlock_all")) {
+    return MPIRMASyncKind::UnlockAll;
+  }
+  if (canonical_name.equals("MPI_Win_flush")) {
+    return MPIRMASyncKind::Flush;
+  }
+  if (canonical_name.equals("MPI_Win_flush_all")) {
+    return MPIRMASyncKind::FlushAll;
+  }
+  if (canonical_name.equals("MPI_Win_flush_local")) {
+    return MPIRMASyncKind::FlushLocal;
+  }
+  if (canonical_name.equals("MPI_Win_flush_local_all")) {
+    return MPIRMASyncKind::FlushLocalAll;
+  }
+  if (canonical_name.equals("MPI_Win_sync")) {
+    return MPIRMASyncKind::Sync;
+  }
+  if (canonical_name.equals("MPI_Win_post")) {
+    return MPIRMASyncKind::PSCWPost;
+  }
+  if (canonical_name.equals("MPI_Win_start")) {
+    return MPIRMASyncKind::PSCWStart;
+  }
+  if (canonical_name.equals("MPI_Win_complete")) {
+    return MPIRMASyncKind::PSCWComplete;
+  }
+  if (canonical_name.equals("MPI_Win_wait")) {
+    return MPIRMASyncKind::PSCWWait;
+  }
+  if (canonical_name.equals("MPI_Win_test")) {
+    return MPIRMASyncKind::PSCWTest;
+  }
+  return MPIRMASyncKind::None;
+}
+
 constexpr MPISemanticDescriptor
 makeDesc(TD type, MPIOpKind kind, MPISemanticFamily family,
          int communicator_arg = -1, int request_arg = -1, int count_arg = -1,
@@ -286,6 +540,7 @@ MPIEffect buildMPIEffect(const llvm::Instruction *inst, ThreadAPI *api) {
   MPISymbolNormalization normalization = normalizeMPISymbol(callee->getName());
   effect.confidence = normalization.confidence;
   effect.semantic_tag = api->getSemanticTag(callee);
+  const llvm::StringRef canonical_name = normalization.canonical_name;
   effect.type = api->getType(callee);
   effect.descriptor = lookupMPISemantic(effect.type);
   if (!effect.descriptor) {
@@ -332,6 +587,19 @@ MPIEffect buildMPIEffect(const llvm::Instruction *inst, ThreadAPI *api) {
     effect.effect_kind = MPIEffectKind::Unknown;
     break;
   }
+
+  effect.send_mode = classifySendMode(canonical_name);
+  effect.blocking_mode = classifyBlockingMode(effect.type, canonical_name);
+  effect.request_arity = classifyRequestArity(effect.type);
+  effect.collective_variant =
+      classifyCollectiveVariant(effect.type, effect.semantic_tag);
+  effect.collective_shape =
+      classifyCollectiveShape(effect.collective_variant, effect.semantic_tag);
+  effect.rma_access_kind = classifyRMAAccessKind(canonical_name);
+  effect.rma_sync_kind = classifyRMASyncKind(canonical_name);
+  effect.rma_local_completion_only =
+      effect.rma_sync_kind == MPIRMASyncKind::FlushLocal ||
+      effect.rma_sync_kind == MPIRMASyncKind::FlushLocalAll;
 
   return effect;
 }

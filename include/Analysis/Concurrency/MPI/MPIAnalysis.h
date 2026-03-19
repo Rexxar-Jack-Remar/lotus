@@ -42,7 +42,11 @@ public:
     concurrency::Relation relation;
     NormalizationConfidence confidence =
         NormalizationConfidence::UnknownVendorInternal;
+    MPIModelGapDomain model_gap_domain = MPIModelGapDomain::None;
+    size_t communicator_class_id = 0;
+    size_t participant_class_id = 0;
     std::string code;
+    std::string detail;
   };
 
   MPIAnalysis(llvm::Module &M)
@@ -95,6 +99,11 @@ public:
     std::vector<const llvm::Instruction *> invalid_rma_transitions;
     std::vector<const llvm::Instruction *> use_after_free_windows;
     std::vector<const llvm::Instruction *> double_window_free;
+    std::vector<MPIParticipantSet> participant_sets;
+    std::vector<MPIChannelObligation> channel_obligations;
+    std::vector<CollectiveProtocolFrontier> protocol_frontiers;
+    std::vector<RMASynchronizationFact> rma_synchronization_facts;
+    std::vector<MPIModelGap> model_gaps;
     std::vector<MPIDiagnostic> diagnostics;
   };
 

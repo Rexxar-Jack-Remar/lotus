@@ -36,12 +36,14 @@ public:
     CommunicatorID comm;
     size_t communicator_class_id = 0;
     size_t communicator_subgroup_id = 0;
+    size_t participant_class_id = 0;
     size_t collective_protocol_class_id = 0;
     const llvm::Function *function;
     size_t sequence_index = 0;
     size_t protocol_sequence_id = 0;
     ProtocolReachability reachability = ProtocolReachability::Unknown;
     concurrency::Relation protocol_relation;
+    MPIParticipantSet participants;
 
     int root_rank = -1;
     int count = -1;
@@ -74,11 +76,15 @@ public:
   const std::vector<CollectiveCall> &getProtocolRelations() const {
     return collective_calls_;
   }
+  const std::vector<CollectiveProtocolFrontier> &getProtocolFrontiers() const {
+    return protocol_frontiers_;
+  }
   size_t getProtocolRelationCount(concurrency::RelationKind kind) const;
 
 private:
   MPIProcessModel &process_model_;
   std::vector<CollectiveCall> collective_calls_;
+  std::vector<CollectiveProtocolFrontier> protocol_frontiers_;
   MPIProtocolAutomaton protocol_automaton_;
   mutable std::unordered_map<std::string, size_t> protocol_diagnostics_;
 

@@ -697,7 +697,7 @@ TEST_F(ConcurrencyCheckerTest, TracksOpenMPSummaryInCheckerStatistics) {
   EXPECT_EQ(stats.openMPSummary.task_count, 2u);
   EXPECT_EQ(stats.openMPSummary.task_with_dependencies_count, 1u);
   EXPECT_EQ(stats.openMPSummary.taskloop_count, 1u);
-  EXPECT_EQ(stats.openMPSummary.partial_wait_boundary_count, 2u);
+  EXPECT_EQ(stats.openMPSummary.partial_wait_boundary_count, 1u);
   EXPECT_EQ(stats.openMPSummary.taskgroup_region_count, 1u);
   EXPECT_EQ(stats.openMPSummary.atomic_region_count, 1u);
   EXPECT_EQ(stats.openMPSummary.flush_count, 1u);

@@ -12,7 +12,6 @@
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 using namespace MPI;
@@ -29,11 +28,86 @@ bool sameRange(const std::pair<int, int> &lhs, const std::pair<int, int> &rhs) {
   return lhs.first == rhs.first && lhs.second == rhs.second;
 }
 
+const Value *canonicalCommunicator(const Value *value) {
+  return value ? value->stripPointerCasts() : nullptr;
+}
+
+int predicateUpperBound(const MPIRankPredicate &predicate) {
+  if (predicate.max_rank >= 0) {
+    return predicate.max_rank;
+  }
+  return MPIRankAnalysis::defaultCommSizeUpperBound() - 1;
+}
+
 } // namespace
+
+bool MPIRankPredicate::contains(int rank) const {
+  if (unknown) {
+    return true;
+  }
+  if (rank < min_rank) {
+    return false;
+  }
+  if (!universal && max_rank >= 0 && rank > max_rank) {
+    return false;
+  }
+  if (universal && max_rank >= 0 && rank > max_rank) {
+    return false;
+  }
+  return excluded_ranks.count(rank) == 0;
+}
+
+bool MPIRankPredicate::mayOverlap(const MPIRankPredicate &other) const {
+  if (unknown || other.unknown) {
+    return true;
+  }
+  const int lhs_upper = predicateUpperBound(*this);
+  const int rhs_upper = predicateUpperBound(other);
+  const int overlap_min = std::max(min_rank, other.min_rank);
+  const int overlap_max = std::min(lhs_upper, rhs_upper);
+  if (overlap_min > overlap_max) {
+    return false;
+  }
+  for (int rank = overlap_min; rank <= overlap_max; ++rank) {
+    if (contains(rank) && other.contains(rank)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool MPIRankPredicate::mustEqual(const MPIRankPredicate &other) const {
+  if (unknown || other.unknown) {
+    return false;
+  }
+  return isConcrete() && other.isConcrete() && min_rank == other.min_rank &&
+         communicator == other.communicator;
+}
+
+std::string MPIRankPredicate::toKey() const {
+  if (unknown) {
+    return "rank:unknown";
+  }
+  std::string key = universal ? "rank:universal" : "rank:bounded";
+  key += ":min=" + std::to_string(min_rank);
+  key += ":max=" + std::to_string(max_rank);
+  if (!excluded_ranks.empty()) {
+    key += ":exclude=";
+    bool first = true;
+    for (int value : excluded_ranks) {
+      if (!first) {
+        key += ",";
+      }
+      first = false;
+      key += std::to_string(value);
+    }
+  }
+  return key;
+}
 
 bool RankExpr::mayEqual(const RankExpr &other) const {
   if (kind == Unknown || other.kind == Unknown) {
-    return true; // Conservative
+    return true;
   }
 
   if (kind == Concrete && other.kind == Concrete) {
@@ -51,11 +125,9 @@ bool RankExpr::mayEqual(const RankExpr &other) const {
   }
 
   if (kind == Range && other.kind == Range) {
-    // Ranges overlap
     return !(range_max < other.range_min || other.range_max < range_min);
   }
 
-  // Symbolic ranks may be equal
   return true;
 }
 
@@ -63,18 +135,18 @@ bool RankExpr::mustEqual(const RankExpr &other) const {
   if (kind == Concrete && other.kind == Concrete) {
     return concrete_value == other.concrete_value;
   }
-
-  // Cannot prove must-equality for symbolic/range/unknown
   return false;
 }
 
 MPIRankAnalysis::MPIRankAnalysis(Module &module) : m_module(module) {}
 
 void MPIRankAnalysis::analyze() {
-  errs() << "Starting MPI Rank Analysis...\n";
-
   m_value_to_rank.clear();
+  m_value_to_predicate.clear();
   m_inst_rank.clear();
+  m_inst_predicate.clear();
+  m_inst_predicate_class.clear();
+  m_inst_participant_class.clear();
   m_comm_size.clear();
   m_value_to_size_range.clear();
 
@@ -82,47 +154,46 @@ void MPIRankAnalysis::analyze() {
   propagateValueFacts();
   propagateRankInfo();
   analyzeRankBranches();
-
-  errs() << "MPI Rank Analysis Complete!\n";
+  canonicalizePredicateClasses();
 }
 
 void MPIRankAnalysis::identifyRankQueries() {
-  // Find all MPI_Comm_rank and MPI_Comm_size calls
-
   for (Function &func : m_module) {
     for (BasicBlock &bb : func) {
       for (Instruction &inst : bb) {
         if (CallBase *call = dyn_cast<CallBase>(&inst)) {
           Function *callee = call->getCalledFunction();
-          if (!callee)
+          if (!callee) {
             continue;
+          }
 
           std::string normalized_name =
               mpi::normalizeMPISymbolName(callee->getName());
           StringRef name = normalized_name;
 
-          // MPI_Comm_rank(MPI_Comm comm, int *rank)
           if (mpi::equalsCaseInsensitiveASCII(name, "MPI_Comm_rank")) {
             if (call->arg_size() >= 2) {
               const Value *rank_ptr = call->getArgOperand(1);
-              const Value *comm = call->getArgOperand(0);
+              const Value *comm = canonicalCommunicator(call->getArgOperand(0));
               m_value_to_rank[rank_ptr] = RankExpr::makeSymbolic(comm);
+              m_value_to_predicate[rank_ptr] =
+                  MPIRankPredicate::makeUniversal(comm);
 
-              // Track loads from the output slot as symbolic rank values.
               for (const Use &use : rank_ptr->uses()) {
                 if (LoadInst *load = dyn_cast<LoadInst>(use.getUser())) {
                   if (load->getPointerOperand() == rank_ptr) {
                     m_value_to_rank[load] = RankExpr::makeSymbolic(comm);
+                    m_value_to_predicate[load] =
+                        MPIRankPredicate::makeUniversal(comm);
                   }
                 }
               }
             }
           }
 
-          // MPI_Comm_size(MPI_Comm comm, int *size)
           if (mpi::equalsCaseInsensitiveASCII(name, "MPI_Comm_size")) {
             if (call->arg_size() >= 2) {
-              const Value *comm = call->getArgOperand(0);
+              const Value *comm = canonicalCommunicator(call->getArgOperand(0));
               const Value *size_ptr = call->getArgOperand(1);
 
               m_comm_size[comm] = defaultCommSizeUpperBound();
@@ -160,6 +231,17 @@ void MPIRankAnalysis::propagateValueFacts() {
             changed = true;
           };
 
+          auto updatePredicate = [&](const Value *value,
+                                     const MPIRankPredicate &predicate) {
+            auto it = m_value_to_predicate.find(value);
+            if (it != m_value_to_predicate.end() && !(it->second < predicate) &&
+                !(predicate < it->second)) {
+              return;
+            }
+            m_value_to_predicate[value] = predicate;
+            changed = true;
+          };
+
           auto updateSizeRange = [&](const Value *value,
                                      const std::pair<int, int> &range) {
             auto it = m_value_to_size_range.find(value);
@@ -172,26 +254,33 @@ void MPIRankAnalysis::propagateValueFacts() {
           };
 
           if (const auto *store = dyn_cast<StoreInst>(&inst)) {
+            const Value *pointer = store->getPointerOperand()->stripPointerCasts();
             RankExpr expr = getRankExpr(store->getValueOperand());
             if (expr.kind != RankExpr::Unknown) {
-              updateRank(store->getPointerOperand()->stripPointerCasts(), expr);
+              updateRank(pointer, expr);
+            }
+            MPIRankPredicate predicate = getRankPredicate(store->getValueOperand());
+            if (!predicate.unknown) {
+              updatePredicate(pointer, predicate);
             }
             auto size_it = m_value_to_size_range.find(store->getValueOperand());
             if (size_it != m_value_to_size_range.end()) {
-              updateSizeRange(store->getPointerOperand()->stripPointerCasts(),
-                              size_it->second);
+              updateSizeRange(pointer, size_it->second);
             }
             continue;
           }
 
           if (const auto *load = dyn_cast<LoadInst>(&inst)) {
-            RankExpr expr =
-                getRankExpr(load->getPointerOperand()->stripPointerCasts());
+            const Value *pointer = load->getPointerOperand()->stripPointerCasts();
+            RankExpr expr = getRankExpr(pointer);
             if (expr.kind != RankExpr::Unknown) {
               updateRank(load, expr);
             }
-            auto size_it = m_value_to_size_range.find(
-                load->getPointerOperand()->stripPointerCasts());
+            MPIRankPredicate predicate = getRankPredicate(pointer);
+            if (!predicate.unknown) {
+              updatePredicate(load, predicate);
+            }
+            auto size_it = m_value_to_size_range.find(pointer);
             if (size_it != m_value_to_size_range.end()) {
               updateSizeRange(load, size_it->second);
             }
@@ -201,14 +290,23 @@ void MPIRankAnalysis::propagateValueFacts() {
           if (const auto *phi = dyn_cast<PHINode>(&inst)) {
             bool saw_rank = false;
             RankExpr merged_rank;
+            bool saw_predicate = false;
+            MPIRankPredicate merged_predicate;
             bool saw_size = false;
             std::pair<int, int> merged_size{0, 0};
             for (const Value *incoming : phi->incoming_values()) {
               RankExpr expr = getRankExpr(incoming);
               if (expr.kind != RankExpr::Unknown) {
-                merged_rank =
-                    saw_rank ? mergeRankExpr(merged_rank, expr) : expr;
+                merged_rank = saw_rank ? mergeRankExpr(merged_rank, expr) : expr;
                 saw_rank = true;
+              }
+              MPIRankPredicate predicate = getRankPredicate(incoming);
+              if (!predicate.unknown) {
+                merged_predicate = saw_predicate
+                                       ? mergePredicate(merged_predicate,
+                                                        predicate)
+                                       : predicate;
+                saw_predicate = true;
               }
               auto size_it = m_value_to_size_range.find(incoming);
               if (size_it != m_value_to_size_range.end()) {
@@ -226,6 +324,9 @@ void MPIRankAnalysis::propagateValueFacts() {
             if (saw_rank) {
               updateRank(phi, merged_rank);
             }
+            if (saw_predicate) {
+              updatePredicate(phi, merged_predicate);
+            }
             if (saw_size) {
               updateSizeRange(phi, merged_size);
             }
@@ -235,9 +336,13 @@ void MPIRankAnalysis::propagateValueFacts() {
           if (const auto *select = dyn_cast<SelectInst>(&inst)) {
             RankExpr lhs = getRankExpr(select->getTrueValue());
             RankExpr rhs = getRankExpr(select->getFalseValue());
-            if (lhs.kind != RankExpr::Unknown ||
-                rhs.kind != RankExpr::Unknown) {
+            if (lhs.kind != RankExpr::Unknown || rhs.kind != RankExpr::Unknown) {
               updateRank(select, mergeRankExpr(lhs, rhs));
+            }
+            MPIRankPredicate lhs_pred = getRankPredicate(select->getTrueValue());
+            MPIRankPredicate rhs_pred = getRankPredicate(select->getFalseValue());
+            if (!lhs_pred.unknown || !rhs_pred.unknown) {
+              updatePredicate(select, mergePredicate(lhs_pred, rhs_pred));
             }
             auto lhs_size = m_value_to_size_range.find(select->getTrueValue());
             auto rhs_size = m_value_to_size_range.find(select->getFalseValue());
@@ -256,6 +361,10 @@ void MPIRankAnalysis::propagateValueFacts() {
             RankExpr expr = getRankExpr(cast->getOperand(0));
             if (expr.kind != RankExpr::Unknown) {
               updateRank(cast, expr);
+            }
+            MPIRankPredicate predicate = getRankPredicate(cast->getOperand(0));
+            if (!predicate.unknown) {
+              updatePredicate(cast, predicate);
             }
             auto size_it = m_value_to_size_range.find(cast->getOperand(0));
             if (size_it != m_value_to_size_range.end()) {
@@ -279,6 +388,11 @@ void MPIRankAnalysis::propagateValueFacts() {
                 updateRank(cb->getArgOperand(arg_idx)->stripPointerCasts(),
                            formal_rank);
               }
+              MPIRankPredicate formal_predicate = getRankPredicate(formal);
+              if (!formal_predicate.unknown) {
+                updatePredicate(cb->getArgOperand(arg_idx)->stripPointerCasts(),
+                                formal_predicate);
+              }
               auto formal_size = m_value_to_size_range.find(formal);
               if (formal_size != m_value_to_size_range.end()) {
                 updateSizeRange(cb->getArgOperand(arg_idx)->stripPointerCasts(),
@@ -288,11 +402,12 @@ void MPIRankAnalysis::propagateValueFacts() {
 
             RankExpr returned_rank;
             bool saw_returned_rank = false;
+            MPIRankPredicate returned_predicate;
+            bool saw_returned_predicate = false;
             std::pair<int, int> returned_size{0, 0};
             bool saw_returned_size = false;
             for (const BasicBlock &callee_bb : *callee) {
-              if (const auto *ret =
-                      dyn_cast<ReturnInst>(callee_bb.getTerminator())) {
+              if (const auto *ret = dyn_cast<ReturnInst>(callee_bb.getTerminator())) {
                 const Value *ret_val = ret->getReturnValue();
                 if (!ret_val) {
                   continue;
@@ -303,6 +418,14 @@ void MPIRankAnalysis::propagateValueFacts() {
                                       ? mergeRankExpr(returned_rank, ret_expr)
                                       : ret_expr;
                   saw_returned_rank = true;
+                }
+                MPIRankPredicate ret_predicate = getRankPredicate(ret_val);
+                if (!ret_predicate.unknown) {
+                  returned_predicate =
+                      saw_returned_predicate
+                          ? mergePredicate(returned_predicate, ret_predicate)
+                          : ret_predicate;
+                  saw_returned_predicate = true;
                 }
                 auto ret_size = m_value_to_size_range.find(ret_val);
                 if (ret_size != m_value_to_size_range.end()) {
@@ -321,6 +444,9 @@ void MPIRankAnalysis::propagateValueFacts() {
             if (saw_returned_rank) {
               updateRank(cb, returned_rank);
             }
+            if (saw_returned_predicate) {
+              updatePredicate(cb, returned_predicate);
+            }
             if (saw_returned_size) {
               updateSizeRange(cb, returned_size);
             }
@@ -333,18 +459,19 @@ void MPIRankAnalysis::propagateValueFacts() {
 
 void MPIRankAnalysis::propagateRankInfo() {
   m_inst_rank.clear();
+  m_inst_predicate.clear();
 
   for (Function &func : m_module) {
     if (func.isDeclaration() || func.empty()) {
       continue;
     }
 
-    std::map<const BasicBlock *, RankExpr> in_rank;
+    std::map<const BasicBlock *, MPIRankPredicate> in_predicate;
     std::deque<const BasicBlock *> worklist;
     std::set<const BasicBlock *> queued;
 
     const BasicBlock *entry = &func.getEntryBlock();
-    in_rank[entry] = RankExpr::makeSymbolic();
+    in_predicate[entry] = MPIRankPredicate::makeUniversal();
     worklist.push_back(entry);
     queued.insert(entry);
 
@@ -353,8 +480,10 @@ void MPIRankAnalysis::propagateRankInfo() {
       worklist.pop_front();
       queued.erase(bb);
 
-      RankExpr current_rank = in_rank[bb];
+      MPIRankPredicate current_predicate = in_predicate[bb];
+      RankExpr current_rank = predicateToRankExpr(current_predicate);
       for (const Instruction &inst : *bb) {
+        m_inst_predicate[&inst] = current_predicate;
         m_inst_rank[&inst] = current_rank;
       }
 
@@ -364,25 +493,23 @@ void MPIRankAnalysis::propagateRankInfo() {
         for (unsigned succ_idx = 0; succ_idx < br->getNumSuccessors();
              ++succ_idx) {
           const BasicBlock *succ = br->getSuccessor(succ_idx);
-          RankExpr propagated = current_rank;
-          RankExpr refined = current_rank;
-          if (refineRankFromBranch(br, succ_idx, current_rank, refined)) {
+          MPIRankPredicate propagated = current_predicate;
+          MPIRankPredicate refined = current_predicate;
+          if (refinePredicateFromBranch(br, succ_idx, current_predicate,
+                                        refined)) {
             propagated = refined;
           }
 
-          auto it = in_rank.find(succ);
-          RankExpr merged = it == in_rank.end()
-                                ? propagated
-                                : mergeRankExpr(it->second, propagated);
-          bool changed = it == in_rank.end() ||
-                         merged.kind != it->second.kind ||
-                         merged.concrete_value != it->second.concrete_value ||
-                         merged.range_min != it->second.range_min ||
-                         merged.range_max != it->second.range_max;
+          auto it = in_predicate.find(succ);
+          MPIRankPredicate merged =
+              it == in_predicate.end() ? propagated
+                                       : mergePredicate(it->second, propagated);
+          bool changed = it == in_predicate.end() || (it->second < merged) ||
+                         (merged < it->second);
           if (!changed) {
             continue;
           }
-          in_rank[succ] = merged;
+          in_predicate[succ] = merged;
           if (queued.insert(succ).second) {
             worklist.push_back(succ);
           }
@@ -391,18 +518,17 @@ void MPIRankAnalysis::propagateRankInfo() {
       }
 
       for (const BasicBlock *succ : successors(bb)) {
-        auto it = in_rank.find(succ);
-        RankExpr merged = it == in_rank.end()
-                              ? current_rank
-                              : mergeRankExpr(it->second, current_rank);
-        bool changed = it == in_rank.end() || merged.kind != it->second.kind ||
-                       merged.concrete_value != it->second.concrete_value ||
-                       merged.range_min != it->second.range_min ||
-                       merged.range_max != it->second.range_max;
+        auto it = in_predicate.find(succ);
+        MPIRankPredicate merged =
+            it == in_predicate.end() ? current_predicate
+                                     : mergePredicate(it->second,
+                                                      current_predicate);
+        bool changed = it == in_predicate.end() || (it->second < merged) ||
+                       (merged < it->second);
         if (!changed) {
           continue;
         }
-        in_rank[succ] = merged;
+        in_predicate[succ] = merged;
         if (queued.insert(succ).second) {
           worklist.push_back(succ);
         }
@@ -411,9 +537,35 @@ void MPIRankAnalysis::propagateRankInfo() {
   }
 }
 
-void MPIRankAnalysis::analyzeRankBranches() {
-  // Analyze branches that depend on rank values
-  // This enables precise analysis of rank-specific code paths
+void MPIRankAnalysis::analyzeRankBranches() {}
+
+void MPIRankAnalysis::canonicalizePredicateClasses() {
+  m_inst_predicate_class.clear();
+  m_inst_participant_class.clear();
+
+  std::map<MPIRankPredicate, size_t> predicate_ids;
+  size_t next_predicate_id = 1;
+
+  typedef std::pair<const Function *, MPIRankPredicate> ParticipantKey;
+  std::map<ParticipantKey, size_t> participant_ids;
+  size_t next_participant_id = 1;
+
+  for (const auto &entry : m_inst_predicate) {
+    const Instruction *inst = entry.first;
+    const MPIRankPredicate &predicate = entry.second;
+    auto pred_it = predicate_ids.find(predicate);
+    if (pred_it == predicate_ids.end()) {
+      pred_it = predicate_ids.emplace(predicate, next_predicate_id++).first;
+    }
+    m_inst_predicate_class[inst] = pred_it->second;
+
+    ParticipantKey key(inst ? inst->getFunction() : nullptr, predicate);
+    auto part_it = participant_ids.find(key);
+    if (part_it == participant_ids.end()) {
+      part_it = participant_ids.emplace(key, next_participant_id++).first;
+    }
+    m_inst_participant_class[inst] = part_it->second;
+  }
 }
 
 RankExpr MPIRankAnalysis::getRankExpr(const Value *val) const {
@@ -421,7 +573,36 @@ RankExpr MPIRankAnalysis::getRankExpr(const Value *val) const {
   if (it != m_value_to_rank.end()) {
     return it->second;
   }
-  return RankExpr(); // Unknown
+  MPIRankPredicate predicate = getRankPredicate(val);
+  if (!predicate.unknown) {
+    return predicateToRankExpr(predicate);
+  }
+  return RankExpr();
+}
+
+MPIRankPredicate MPIRankAnalysis::getRankPredicate(const Value *val) const {
+  auto it = m_value_to_predicate.find(val);
+  if (it != m_value_to_predicate.end()) {
+    return it->second;
+  }
+  RankExpr expr = RankExpr();
+  auto rank_it = m_value_to_rank.find(val);
+  if (rank_it != m_value_to_rank.end()) {
+    expr = rank_it->second;
+    switch (expr.kind) {
+    case RankExpr::Concrete:
+      return MPIRankPredicate::makeConcrete(expr.concrete_value,
+                                            expr.communicator);
+    case RankExpr::Range:
+      return MPIRankPredicate::makeRange(expr.range_min, expr.range_max,
+                                         expr.communicator);
+    case RankExpr::Symbolic:
+      return MPIRankPredicate::makeUniversal(expr.communicator);
+    case RankExpr::Unknown:
+      break;
+    }
+  }
+  return MPIRankPredicate::makeUnknown();
 }
 
 RankExpr MPIRankAnalysis::getRankAtInstruction(const Instruction *inst) const {
@@ -429,48 +610,64 @@ RankExpr MPIRankAnalysis::getRankAtInstruction(const Instruction *inst) const {
   if (it != m_inst_rank.end()) {
     return it->second;
   }
-  return RankExpr::makeSymbolic(); // Conservative: any rank
+  MPIRankPredicate predicate = getRankPredicateAtInstruction(inst);
+  if (!predicate.unknown) {
+    return predicateToRankExpr(predicate);
+  }
+  return RankExpr::makeSymbolic();
+}
+
+MPIRankPredicate
+MPIRankAnalysis::getRankPredicateAtInstruction(const Instruction *inst) const {
+  auto it = m_inst_predicate.find(inst);
+  if (it != m_inst_predicate.end()) {
+    return it->second;
+  }
+  return MPIRankPredicate::makeUniversal();
 }
 
 MPIRankAnalysis::ReachabilityKind
 MPIRankAnalysis::getReachabilityAtInstruction(const Instruction *inst) const {
-  RankExpr rank = getRankAtInstruction(inst);
-  switch (rank.kind) {
-  case RankExpr::Concrete:
-  case RankExpr::Range:
-    return ReachabilityKind::SomeRanks;
-  case RankExpr::Symbolic:
-    return ReachabilityKind::AllRanks;
-  case RankExpr::Unknown:
+  MPIRankPredicate predicate = getRankPredicateAtInstruction(inst);
+  if (predicate.unknown) {
     return ReachabilityKind::Unknown;
   }
-  return ReachabilityKind::Unknown;
+  return predicate.constrainsParticipants() ? ReachabilityKind::SomeRanks
+                                            : ReachabilityKind::AllRanks;
+}
+
+size_t MPIRankAnalysis::getPredicateClassAtInstruction(
+    const Instruction *inst) const {
+  auto it = m_inst_predicate_class.find(inst);
+  return it == m_inst_predicate_class.end() ? 0 : it->second;
+}
+
+size_t MPIRankAnalysis::getParticipantClassAtInstruction(
+    const Instruction *inst) const {
+  auto it = m_inst_participant_class.find(inst);
+  return it == m_inst_participant_class.end() ? 0 : it->second;
 }
 
 bool MPIRankAnalysis::sameRank(const Instruction *i1,
                                const Instruction *i2) const {
-  RankExpr rank1 = getRankAtInstruction(i1);
-  RankExpr rank2 = getRankAtInstruction(i2);
-
-  return rank1.mustEqual(rank2);
+  return getRankPredicateAtInstruction(i1).mustEqual(
+      getRankPredicateAtInstruction(i2));
 }
 
 std::set<int> MPIRankAnalysis::getPossibleRanks(const Instruction *inst) const {
   std::set<int> ranks;
 
-  RankExpr rank = getRankAtInstruction(inst);
-
-  if (rank.kind == RankExpr::Concrete) {
-    ranks.insert(rank.concrete_value);
-  } else if (rank.kind == RankExpr::Range) {
-    for (int r = rank.range_min; r <= rank.range_max; ++r) {
-      ranks.insert(r);
-    }
-  } else {
-    // Symbolic or Unknown: conservatively return empty set
-    // Caller should interpret this as "any rank"
+  MPIRankPredicate predicate = getRankPredicateAtInstruction(inst);
+  if (predicate.unknown) {
+    return ranks;
   }
 
+  const int upper = predicateUpperBound(predicate);
+  for (int rank = predicate.min_rank; rank <= upper; ++rank) {
+    if (predicate.contains(rank)) {
+      ranks.insert(rank);
+    }
+  }
   return ranks;
 }
 
@@ -493,6 +690,12 @@ bool MPIRankAnalysis::dependsOnRank(const Value *val) const {
     auto rank_it = m_value_to_rank.find(current);
     if (rank_it != m_value_to_rank.end() &&
         rank_it->second.kind != RankExpr::Unknown) {
+      return true;
+    }
+
+    auto predicate_it = m_value_to_predicate.find(current);
+    if (predicate_it != m_value_to_predicate.end() &&
+        !predicate_it->second.unknown) {
       return true;
     }
 
@@ -531,8 +734,10 @@ RankExpr MPIRankAnalysis::mergeRankExpr(const RankExpr &lhs,
     if (lhs.concrete_value == rhs.concrete_value) {
       return lhs;
     }
-    return RankExpr::makeSymbolic(lhs.communicator ? lhs.communicator
-                                                   : rhs.communicator);
+    return RankExpr::makeRange(std::min(lhs.concrete_value, rhs.concrete_value),
+                               std::max(lhs.concrete_value, rhs.concrete_value),
+                               lhs.communicator ? lhs.communicator
+                                                : rhs.communicator);
   }
   if (lhs.kind == RankExpr::Range && rhs.kind == RankExpr::Range) {
     return RankExpr::makeRange(std::min(lhs.range_min, rhs.range_min),
@@ -541,10 +746,6 @@ RankExpr MPIRankAnalysis::mergeRankExpr(const RankExpr &lhs,
                                                 : rhs.communicator);
   }
   if (lhs.kind == RankExpr::Range && rhs.kind == RankExpr::Concrete) {
-    if (rhs.concrete_value >= lhs.range_min &&
-        rhs.concrete_value <= lhs.range_max) {
-      return lhs;
-    }
     return RankExpr::makeRange(std::min(lhs.range_min, rhs.concrete_value),
                                std::max(lhs.range_max, rhs.concrete_value),
                                lhs.communicator ? lhs.communicator
@@ -557,9 +758,80 @@ RankExpr MPIRankAnalysis::mergeRankExpr(const RankExpr &lhs,
                                                  : rhs.communicator);
 }
 
+MPIRankPredicate MPIRankAnalysis::mergePredicate(
+    const MPIRankPredicate &lhs, const MPIRankPredicate &rhs) const {
+  if (lhs.unknown) {
+    return rhs;
+  }
+  if (rhs.unknown) {
+    return lhs;
+  }
+
+  MPIRankPredicate merged;
+  merged.communicator = lhs.communicator ? lhs.communicator : rhs.communicator;
+  merged.unknown = false;
+  merged.universal = lhs.universal || rhs.universal;
+  merged.min_rank = std::min(lhs.min_rank, rhs.min_rank);
+  merged.max_rank = std::max(predicateUpperBound(lhs), predicateUpperBound(rhs));
+
+  std::set_intersection(lhs.excluded_ranks.begin(), lhs.excluded_ranks.end(),
+                        rhs.excluded_ranks.begin(), rhs.excluded_ranks.end(),
+                        std::inserter(merged.excluded_ranks,
+                                      merged.excluded_ranks.begin()));
+
+  if (!merged.universal && merged.max_rank < merged.min_rank) {
+    merged.max_rank = merged.min_rank;
+  }
+  return merged;
+}
+
+RankExpr MPIRankAnalysis::predicateToRankExpr(
+    const MPIRankPredicate &predicate) const {
+  if (predicate.unknown) {
+    return RankExpr();
+  }
+  if (predicate.isConcrete()) {
+    return RankExpr::makeConcrete(predicate.min_rank, predicate.communicator);
+  }
+  if (predicate.universal && predicate.excluded_ranks.empty() &&
+      predicate.max_rank < 0) {
+    return RankExpr::makeSymbolic(predicate.communicator);
+  }
+  return RankExpr::makeRange(predicate.min_rank, predicateUpperBound(predicate),
+                             predicate.communicator);
+}
+
 bool MPIRankAnalysis::refineRankFromBranch(const BranchInst *br,
                                            unsigned succ_idx, RankExpr current,
                                            RankExpr &refined) const {
+  MPIRankPredicate predicate;
+  switch (current.kind) {
+  case RankExpr::Concrete:
+    predicate = MPIRankPredicate::makeConcrete(current.concrete_value,
+                                               current.communicator);
+    break;
+  case RankExpr::Range:
+    predicate = MPIRankPredicate::makeRange(current.range_min, current.range_max,
+                                            current.communicator);
+    break;
+  case RankExpr::Symbolic:
+    predicate = MPIRankPredicate::makeUniversal(current.communicator);
+    break;
+  case RankExpr::Unknown:
+    predicate = MPIRankPredicate::makeUnknown(current.communicator);
+    break;
+  }
+  MPIRankPredicate refined_predicate;
+  if (!refinePredicateFromBranch(br, succ_idx, predicate, refined_predicate)) {
+    return false;
+  }
+  refined = predicateToRankExpr(refined_predicate);
+  return true;
+}
+
+bool MPIRankAnalysis::refinePredicateFromBranch(
+    const BranchInst *br, unsigned succ_idx, MPIRankPredicate current,
+    MPIRankPredicate &refined) const {
   if (!br || !br->isConditional()) {
     return false;
   }
@@ -585,74 +857,102 @@ bool MPIRankAnalysis::refineRankFromBranch(const BranchInst *br,
   }
 
   const bool takes_edge = succ_idx == 0;
-  refined =
-      current.kind == RankExpr::Unknown ? RankExpr::makeSymbolic() : current;
+  refined = current.unknown ? MPIRankPredicate::makeUniversal() : current;
+  if (!refined.communicator) {
+    RankExpr rank_expr = getRankExpr(rank_val);
+    refined.communicator = rank_expr.communicator;
+  }
+
   int bound_min = 0;
-  int bound_max = defaultCommSizeUpperBound();
+  int bound_max = defaultCommSizeUpperBound() - 1;
   if (!tryEvaluateIntRange(bound_val, bound_min, bound_max)) {
     return false;
   }
 
-  int current_max = current.kind == RankExpr::Range
-                        ? current.range_max
-                        : defaultCommSizeUpperBound();
-  if (current_max < 0) {
-    current_max = defaultCommSizeUpperBound();
-  }
+  int current_upper = predicateUpperBound(refined);
+
+  auto clampLower = [&](int lower) {
+    refined.unknown = false;
+    refined.universal = false;
+    refined.min_rank = std::max(refined.min_rank, lower);
+    refined.max_rank = std::max(refined.min_rank, current_upper);
+    for (auto it = refined.excluded_ranks.begin(); it != refined.excluded_ranks.end();) {
+      if (*it < refined.min_rank || *it > refined.max_rank) {
+        it = refined.excluded_ranks.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  };
+  auto clampUpper = [&](int upper) {
+    refined.unknown = false;
+    refined.universal = false;
+    refined.max_rank = std::min(current_upper, upper);
+    if (refined.max_rank < refined.min_rank) {
+      refined.max_rank = refined.min_rank;
+    }
+    for (auto it = refined.excluded_ranks.begin(); it != refined.excluded_ranks.end();) {
+      if (*it < refined.min_rank || *it > refined.max_rank) {
+        it = refined.excluded_ranks.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  };
 
   switch (pred) {
   case CmpInst::ICMP_EQ:
     if (takes_edge && bound_min == bound_max) {
-      refined = RankExpr::makeConcrete(bound_min, current.communicator);
+      refined = MPIRankPredicate::makeConcrete(bound_min, refined.communicator);
+      return true;
+    }
+    if (!takes_edge && bound_min == bound_max) {
+      refined.unknown = false;
+      refined.excluded_ranks.insert(bound_min);
       return true;
     }
     return false;
   case CmpInst::ICMP_NE:
+    if (takes_edge && bound_min == bound_max) {
+      refined.unknown = false;
+      refined.excluded_ranks.insert(bound_min);
+      return true;
+    }
     if (!takes_edge && bound_min == bound_max) {
-      refined = RankExpr::makeConcrete(bound_min, current.communicator);
+      refined = MPIRankPredicate::makeConcrete(bound_min, refined.communicator);
       return true;
     }
     return false;
   case CmpInst::ICMP_SLT:
   case CmpInst::ICMP_ULT:
     if (takes_edge) {
-      if (bound_max <= 0) {
-        return false;
-      }
-      refined = RankExpr::makeRange(0, bound_max - 1, current.communicator);
+      clampUpper(bound_max - 1);
     } else {
-      refined = RankExpr::makeRange(std::max(0, bound_min), current_max,
-                                    current.communicator);
+      clampLower(std::max(0, bound_min));
     }
     return true;
   case CmpInst::ICMP_SLE:
   case CmpInst::ICMP_ULE:
     if (takes_edge) {
-      refined = RankExpr::makeRange(0, bound_max, current.communicator);
+      clampUpper(bound_max);
     } else {
-      refined = RankExpr::makeRange(std::max(0, bound_min + 1), current_max,
-                                    current.communicator);
+      clampLower(std::max(0, bound_min + 1));
     }
     return true;
   case CmpInst::ICMP_SGT:
   case CmpInst::ICMP_UGT:
     if (takes_edge) {
-      refined = RankExpr::makeRange(std::max(0, bound_min + 1), current_max,
-                                    current.communicator);
+      clampLower(std::max(0, bound_min + 1));
     } else {
-      refined = RankExpr::makeRange(0, bound_max, current.communicator);
+      clampUpper(bound_max);
     }
     return true;
   case CmpInst::ICMP_SGE:
   case CmpInst::ICMP_UGE:
     if (takes_edge) {
-      refined = RankExpr::makeRange(std::max(0, bound_min), current_max,
-                                    current.communicator);
+      clampLower(std::max(0, bound_min));
     } else {
-      if (bound_max <= 0) {
-        return false;
-      }
-      refined = RankExpr::makeRange(0, bound_max - 1, current.communicator);
+      clampUpper(bound_max - 1);
     }
     return true;
   default:
@@ -689,7 +989,10 @@ bool MPIRankAnalysis::tryEvaluateIntRange(const Value *val, int &min_value,
     return false;
   }
 
-  int lhs_min = 0, lhs_max = 0, rhs_min = 0, rhs_max = 0;
+  int lhs_min = 0;
+  int lhs_max = 0;
+  int rhs_min = 0;
+  int rhs_max = 0;
   if (!tryEvaluateIntRange(binop->getOperand(0), lhs_min, lhs_max) ||
       !tryEvaluateIntRange(binop->getOperand(1), rhs_min, rhs_max)) {
     return false;

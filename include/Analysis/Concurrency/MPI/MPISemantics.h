@@ -57,6 +57,11 @@ struct MPISemanticDescriptor {
   int window_arg = -1;
   int target_rank_arg = -1;
   int target_disp_arg = -1;
+  int result_handle_arg = -1;
+  int recv_count_arg = -1;
+  int recv_datatype_arg = -1;
+  int root_arg = -1;
+  int reduction_op_arg = -1;
   bool peer_rank_is_dest = false;
 
   int collective_nonblocking_comm_arg = -1;
@@ -72,6 +77,14 @@ struct MPIEffect {
       NormalizationConfidence::UnknownVendorInternal;
   std::string semantic_tag;
   const MPISemanticDescriptor *descriptor = nullptr;
+  MPISendMode send_mode = MPISendMode::Unknown;
+  MPIBlockingMode blocking_mode = MPIBlockingMode::Unknown;
+  MPIRequestArity request_arity = MPIRequestArity::None;
+  MPICollectiveVariant collective_variant = MPICollectiveVariant::Unknown;
+  MPICollectiveShape collective_shape = MPICollectiveShape::Unknown;
+  MPIRMAAccessKind rma_access_kind = MPIRMAAccessKind::None;
+  MPIRMASyncKind rma_sync_kind = MPIRMASyncKind::None;
+  bool rma_local_completion_only = false;
 };
 
 const MPISemanticDescriptor *lookupMPISemantic(ThreadAPI::TD_TYPE type);

@@ -15,8 +15,12 @@ enum class RelationKind {
   SelectiveHappenBefore,
   MayHappenBefore,
   MutuallyExclusive,
+  MatchedCommunication,
   SameSynchronizationEpoch,
+  SameCollectiveFrontier,
   SameProtocolSlot,
+  DisjointParticipants,
+  LocalOnlySynchronizationCompletion,
   UnknownDueToModelGap
 };
 
@@ -34,9 +38,17 @@ inline int relationPriority(RelationKind kind) {
     return 5;
   case RelationKind::MutuallyExclusive:
     return 4;
+  case RelationKind::MatchedCommunication:
+    return 4;
   case RelationKind::SameSynchronizationEpoch:
     return 3;
+  case RelationKind::SameCollectiveFrontier:
+    return 3;
   case RelationKind::SameProtocolSlot:
+    return 3;
+  case RelationKind::DisjointParticipants:
+    return 3;
+  case RelationKind::LocalOnlySynchronizationCompletion:
     return 3;
   case RelationKind::MayHappenBefore:
     return 2;

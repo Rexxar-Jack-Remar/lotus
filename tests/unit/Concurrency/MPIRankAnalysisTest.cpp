@@ -215,6 +215,47 @@ TEST_F(MPIRankAnalysisTest, WrapperPropagatesRankInformationToCaller) {
   EXPECT_EQ(analysis.getRankAtInstruction(on_root).concrete_value, 0);
 }
 
+TEST_F(MPIRankAnalysisTest,
+       InequalityBranchProducesExcludedParticipantPredicate) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_rank(i8*, i32*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %rank = alloca i32, align 4
+      call i32 @MPI_Comm_rank(i8* %comm, i32* %rank)
+      %loaded = load i32, i32* %rank, align 4
+      %not_root = icmp ne i32 %loaded, 0
+      br i1 %not_root, label %then, label %else
+
+    then:
+      %non_root = add i32 1, 2
+      ret i32 %non_root
+
+    else:
+      %root = add i32 3, 4
+      ret i32 %root
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIRankAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Instruction *non_root =
+      findInstructionByName(*module->getFunction("main"), "non_root");
+  ASSERT_NE(non_root, nullptr);
+
+  MPIRankPredicate predicate = analysis.getRankPredicateAtInstruction(non_root);
+  EXPECT_FALSE(predicate.unknown);
+  EXPECT_TRUE(predicate.universal);
+  EXPECT_EQ(predicate.excluded_ranks.count(0), 1u);
+  EXPECT_NE(analysis.getPredicateClassAtInstruction(non_root), 0u);
+  EXPECT_NE(analysis.getParticipantClassAtInstruction(non_root), 0u);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

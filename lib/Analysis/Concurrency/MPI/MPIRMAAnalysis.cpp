@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
@@ -78,6 +79,25 @@ MPIRMAEpochProofKind toSemanticEpochProof(MPIRMAAnalysis::EpochProof proof) {
   return MPIRMAEpochProofKind::Unknown;
 }
 
+bool isPSCWSyncKind(MPIRMASyncKind kind) {
+  return kind == MPIRMASyncKind::PSCWPost || kind == MPIRMASyncKind::PSCWStart ||
+         kind == MPIRMASyncKind::PSCWComplete || kind == MPIRMASyncKind::PSCWWait ||
+         kind == MPIRMASyncKind::PSCWTest;
+}
+
+bool isRMAWriteAccess(MPIRMAAccessKind kind) {
+  return kind == MPIRMAAccessKind::Put || kind == MPIRMAAccessKind::Accumulate ||
+         kind == MPIRMAAccessKind::Atomic;
+}
+
+bool participantsMayOverlap(const MPIParticipantSet &lhs,
+                            const MPIParticipantSet &rhs) {
+  if (lhs.unknown || rhs.unknown) {
+    return true;
+  }
+  return lhs.mayOverlap(rhs);
+}
+
 } // namespace
 
 void MPIRMAAnalysis::annotateOperationsInMachine(
@@ -109,7 +129,10 @@ void MPIRMAAnalysis::annotateOperationsInMachine(
     } else {
       rma_op.epoch_proof = MPIRMAAnalysis::EpochProof::Unknown;
     }
-    rma_op.relation.kind = concurrency::RelationKind::SameSynchronizationEpoch;
+    rma_op.relation.kind =
+        machine.local_completion_only
+            ? concurrency::RelationKind::LocalOnlySynchronizationCompletion
+            : concurrency::RelationKind::SameSynchronizationEpoch;
     rma_op.relation.proof = proof;
     rma_op.relation.reason = reason.str();
   }
@@ -239,6 +262,7 @@ bool MPIRMAAnalysis::transitionEpochMachine(EpochMachine &machine,
 void MPIRMAAnalysis::analyzeRMA() {
   windows_.clear();
   rma_operations_.clear();
+  synchronization_facts_.clear();
   invalid_epoch_transitions_.clear();
   use_after_free_windows_.clear();
   double_window_free_.clear();
@@ -291,7 +315,7 @@ void MPIRMAAnalysis::analyzeRMA() {
     }
   }
 
-  std::map<std::pair<const Function *, WindowID>, EpochMachine> epoch_machines;
+  std::map<std::pair<size_t, WindowID>, EpochMachine> epoch_machines;
   size_t next_epoch_id = 1;
 
   for (const MPIOperation &op : process_model_.getAllOperations()) {
@@ -321,7 +345,7 @@ void MPIRMAAnalysis::analyzeRMA() {
       size_t op_index = rma_operations_.size();
       rma_operations_.push_back(rma_op);
 
-      auto key = std::make_pair(op.function, op.window);
+      auto key = std::make_pair(op.participant_class_id, op.window);
       auto &machine = epoch_machines[key];
       if (machine.state != EpochState::Idle) {
         machine.op_indices.push_back(op_index);
@@ -351,7 +375,7 @@ void MPIRMAAnalysis::analyzeRMA() {
         }
       }
 
-      auto key = std::make_pair(op.function, op.window);
+      auto key = std::make_pair(op.participant_class_id, op.window);
       auto &machine = epoch_machines[key];
       if (transitionEpochMachine(machine, op, next_epoch_id)) {
         if (machine.epoch_id == next_epoch_id) {
@@ -405,6 +429,93 @@ void MPIRMAAnalysis::analyzeRMA() {
       break;
     }
   }
+
+  for (const MPIOperation &op : process_model_.getAllOperations()) {
+    if (op.kind != MPIOpKind::RMA_DATA && op.kind != MPIOpKind::RMA_SYNC) {
+      continue;
+    }
+    RMASynchronizationFact fact;
+    fact.inst = op.inst;
+    fact.window = op.window;
+    fact.participant_class_id = op.participant_class_id;
+    fact.participants = op.participant_set;
+    fact.target_rank = op.target_rank;
+    fact.target_rank_min = op.target_rank_min;
+    fact.target_rank_max = op.target_rank_max;
+    fact.target_disp = op.target_disp;
+    fact.byte_length = op.byte_length;
+    fact.access_kind = op.rma_access_kind;
+    fact.sync_kind = op.rma_sync_kind;
+    fact.access_epoch_kind = op.kind == MPIOpKind::RMA_DATA ? RMAEpochKind::Access
+                                                            : op.rma_epoch_kind;
+    fact.exposure_epoch_kind =
+        op.rma_sync_kind == MPIRMASyncKind::PSCWPost ||
+                op.rma_sync_kind == MPIRMASyncKind::PSCWWait ||
+                op.rma_sync_kind == MPIRMASyncKind::PSCWTest
+            ? RMAEpochKind::Exposure
+            : op.rma_epoch_kind;
+    fact.relation = op.semantic_relation;
+    fact.code = op.semantic_relation.reason;
+    for (const RMAOperation &rma_op : rma_operations_) {
+      if (rma_op.inst != op.inst) {
+        continue;
+      }
+      fact.epoch_id = rma_op.epoch_id;
+      if (rma_op.epoch_completion == EpochCompletion::LocalOnly) {
+        fact.completion = MPIRMACompletionStrength::Local;
+      } else if (rma_op.epoch_completion == EpochCompletion::RemoteGuaranteed) {
+        fact.completion = MPIRMACompletionStrength::Remote;
+      }
+      fact.relation = rma_op.relation;
+      fact.code = rma_op.relation.reason;
+      break;
+    }
+    synchronization_facts_.push_back(fact);
+  }
+
+  for (RMASynchronizationFact &fact : synchronization_facts_) {
+    if (!isPSCWSyncKind(fact.sync_kind) && fact.access_kind == MPIRMAAccessKind::None) {
+      continue;
+    }
+    if (!StringRef(fact.code).startswith("mpi_rma_pscw_")) {
+      continue;
+    }
+
+    bool has_complementary_scope = false;
+    for (const RMASynchronizationFact &other : synchronization_facts_) {
+      if (&fact == &other || fact.window != other.window) {
+        continue;
+      }
+      if (!StringRef(other.code).startswith("mpi_rma_pscw_")) {
+        continue;
+      }
+      if (!participantsMayOverlap(fact.participants, other.participants)) {
+        continue;
+      }
+      const bool fact_is_access = fact.access_epoch_kind == RMAEpochKind::Access ||
+                                  fact.sync_kind == MPIRMASyncKind::PSCWStart ||
+                                  fact.sync_kind == MPIRMASyncKind::PSCWComplete;
+      const bool other_is_access =
+          other.access_epoch_kind == RMAEpochKind::Access ||
+          other.sync_kind == MPIRMASyncKind::PSCWStart ||
+          other.sync_kind == MPIRMASyncKind::PSCWComplete;
+      if (fact_is_access == other_is_access) {
+        continue;
+      }
+      if (!rangesOverlap(fact.target_rank, fact.target_rank, other.target_rank,
+                         other.target_rank) &&
+          !rangesOverlap(fact.target_rank_min, fact.target_rank_max,
+                         other.target_rank_min, other.target_rank_max)) {
+        continue;
+      }
+      has_complementary_scope = true;
+      break;
+    }
+
+    if (!has_complementary_scope) {
+      fact.code = "mpi_rma_pscw_group_unresolved";
+    }
+  }
 }
 
 std::vector<const Instruction *>
@@ -428,20 +539,43 @@ MPIRMAAnalysis::determineSyncModel(const RMAOperation &op) const {
 
 bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation &op1,
                                           const RMAOperation &op2) const {
+  const RMASynchronizationFact *fact1 = nullptr;
+  const RMASynchronizationFact *fact2 = nullptr;
+  for (const RMASynchronizationFact &fact : synchronization_facts_) {
+    if (fact.inst == op1.inst && !fact1) {
+      fact1 = &fact;
+    }
+    if (fact.inst == op2.inst && !fact2) {
+      fact2 = &fact;
+    }
+  }
   if (op1.window != op2.window)
     return false;
-  if (!rangesOverlap(op1.target_rank, op1.target_rank, op2.target_rank,
-                     op2.target_rank) &&
-      !rangesOverlap(op1.target_rank_min, op1.target_rank_max,
-                     op2.target_rank_min, op2.target_rank_max)) {
+  if (fact1 && fact2 &&
+      !participantsMayOverlap(fact1->participants, fact2->participants)) {
     return false;
   }
-  if (op1.target_disp != -1 && op2.target_disp != -1) {
-    int64_t len1 = op1.byte_length > 0 ? op1.byte_length : 1;
-    int64_t len2 = op2.byte_length > 0 ? op2.byte_length : 1;
-    int64_t end1 = op1.target_disp + len1;
-    int64_t end2 = op2.target_disp + len2;
-    if (!(op1.target_disp < end2 && op2.target_disp < end1)) {
+  const int lhs_target = fact1 ? fact1->target_rank : op1.target_rank;
+  const int rhs_target = fact2 ? fact2->target_rank : op2.target_rank;
+  const int lhs_target_min = fact1 ? fact1->target_rank_min : op1.target_rank_min;
+  const int lhs_target_max = fact1 ? fact1->target_rank_max : op1.target_rank_max;
+  const int rhs_target_min = fact2 ? fact2->target_rank_min : op2.target_rank_min;
+  const int rhs_target_max = fact2 ? fact2->target_rank_max : op2.target_rank_max;
+  if (!rangesOverlap(lhs_target, lhs_target, rhs_target, rhs_target) &&
+      !rangesOverlap(lhs_target_min, lhs_target_max, rhs_target_min,
+                     rhs_target_max)) {
+    return false;
+  }
+  const int64_t lhs_disp = fact1 ? fact1->target_disp : op1.target_disp;
+  const int64_t rhs_disp = fact2 ? fact2->target_disp : op2.target_disp;
+  const int64_t lhs_len = fact1 && fact1->byte_length > 0 ? fact1->byte_length
+                                                          : (op1.byte_length > 0 ? op1.byte_length : 1);
+  const int64_t rhs_len = fact2 && fact2->byte_length > 0 ? fact2->byte_length
+                                                          : (op2.byte_length > 0 ? op2.byte_length : 1);
+  if (lhs_disp != -1 && rhs_disp != -1) {
+    int64_t end1 = lhs_disp + lhs_len;
+    int64_t end2 = rhs_disp + rhs_len;
+    if (!(lhs_disp < end2 && rhs_disp < end1)) {
       return false;
     }
   }
@@ -459,12 +593,32 @@ bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation &op1,
   ThreadAPI::TD_TYPE t1 = thread_api_->getType(F1);
   ThreadAPI::TD_TYPE t2 = thread_api_->getType(F2);
   bool op1_is_write =
-      (t1 == ThreadAPI::TD_MPI_PUT || t1 == ThreadAPI::TD_MPI_ACCUMULATE);
+      isRMAWriteAccess(fact1 ? fact1->access_kind
+                             : (t1 == ThreadAPI::TD_MPI_GET ? MPIRMAAccessKind::Get
+                                                            : MPIRMAAccessKind::Put));
   bool op2_is_write =
-      (t2 == ThreadAPI::TD_MPI_PUT || t2 == ThreadAPI::TD_MPI_ACCUMULATE);
+      isRMAWriteAccess(fact2 ? fact2->access_kind
+                             : (t2 == ThreadAPI::TD_MPI_GET ? MPIRMAAccessKind::Get
+                                                            : MPIRMAAccessKind::Put));
 
   if (!op1_is_write && !op2_is_write)
     return false;
+
+  if (fact1 && fact2) {
+    if (fact1->completion == MPIRMACompletionStrength::Remote &&
+        fact2->completion == MPIRMACompletionStrength::Remote &&
+        fact1->epoch_id != 0 && fact1->epoch_id == fact2->epoch_id) {
+      return false;
+    }
+    if (fact1->completion == MPIRMACompletionStrength::Local ||
+        fact2->completion == MPIRMACompletionStrength::Local) {
+      return true;
+    }
+    if ((fact1->code == "mpi_rma_pscw_group_unresolved" ||
+         fact2->code == "mpi_rma_pscw_group_unresolved")) {
+      return true;
+    }
+  }
 
   if (op1.sync_model == SyncModel::NONE || op2.sync_model == SyncModel::NONE) {
     return true;
@@ -484,8 +638,19 @@ bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation &op1,
 std::vector<MPIRMAAnalysis::RMAOperation>
 MPIRMAAnalysis::findUnsynchronizedRMAOps() const {
   std::vector<RMAOperation> unsync;
+  std::set<const Instruction *> synchronized_insts;
+  for (const RMASynchronizationFact &fact : synchronization_facts_) {
+    if (fact.access_kind == MPIRMAAccessKind::None) {
+      continue;
+    }
+    if (fact.relation.kind == concurrency::RelationKind::SameSynchronizationEpoch ||
+        fact.relation.kind ==
+            concurrency::RelationKind::LocalOnlySynchronizationCompletion) {
+      synchronized_insts.insert(fact.inst);
+    }
+  }
   for (const RMAOperation &op : rma_operations_) {
-    if (op.sync_model == SyncModel::NONE) {
+    if (!synchronized_insts.count(op.inst) || op.sync_model == SyncModel::NONE) {
       unsync.push_back(op);
     }
   }

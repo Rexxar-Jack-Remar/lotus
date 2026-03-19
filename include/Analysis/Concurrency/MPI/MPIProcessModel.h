@@ -81,6 +81,16 @@ public:
     return point_to_point_obligations_;
   }
 
+  const std::vector<MPIChannelObligation> &getChannelObligations() const {
+    return channel_obligations_;
+  }
+
+  const std::vector<MPIParticipantSet> &getParticipantSets() const {
+    return participant_sets_;
+  }
+
+  const std::vector<MPIModelGap> &getModelGaps() const { return model_gaps_; }
+
   const std::map<RequestID, MPIRequestStateSummary> &
   getRequestStateSummaries() const {
     return request_state_summaries_;
@@ -175,6 +185,9 @@ private:
   std::map<RequestID, MPIRequestStateSummary> request_state_summaries_;
   std::vector<MPIEvent> semantic_events_;
   std::vector<MPIPointToPointObligation> point_to_point_obligations_;
+  std::vector<MPIChannelObligation> channel_obligations_;
+  std::vector<MPIParticipantSet> participant_sets_;
+  std::vector<MPIModelGap> model_gaps_;
   std::unordered_map<MPIOpKind, size_t> operation_kind_counts_;
   std::unordered_map<const llvm::Value *, CommunicatorID>
       canonical_communicators_;
