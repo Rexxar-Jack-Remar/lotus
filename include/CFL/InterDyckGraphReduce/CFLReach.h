@@ -102,7 +102,7 @@ public:
     cout << LTerm << " -> " << RTerm1;
     if (termNum == 3)
       cout << " " << RTerm2;
-    cout << endl;
+    cout << '\n';
   }
 
 private:

@@ -741,7 +741,10 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::successors(
         if (CallInst != nullptr) {
           Result.push_back({CallInst, CallerCtx});
         }
-      } else if (ICF != nullptr) {
+      } else if (K == 0 && ICF != nullptr) {
+        // K=0 is the only context-insensitive mode: entry facts may come from
+        // any caller because the empty call string intentionally identifies the
+        // collapsed caller summary.
         for (auto *CallInst : ICF->getCallersOf(Inst->getFunction())) {
           if (CallInst != nullptr) {
             Result.push_back({CallInst, Ctx});
@@ -804,7 +807,10 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::successors(
       for (auto *PredInst : ICF->getPredsOf(
                Inst, dataflow::controlflow::FlowDirection::Forward)) {
         if (PredInst != nullptr && PredInst != CallInstFromCtx) {
-          Result.push_back({PredInst, ContCtx});
+          // Stay in the current callee context while moving backward within the
+          // function. The caller frame is only popped when we cross the callee
+          // entry/start-point boundary.
+          Result.push_back({PredInst, Ctx});
         }
       }
       return Result;
@@ -828,8 +834,8 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::successors(
           Result.push_back({Cont, CallerCtx});
         }
       }
-    } else if (ICF != nullptr) {
-      // Phasar-like: empty context at an exit propagates to all callers.
+    } else if (K == 0 && ICF != nullptr) {
+      // K=0 is context-insensitive, so a callee exit flows to all callers.
       for (auto *CallInst : ICF->getCallersOf(Ret->getFunction())) {
         for (auto *Cont : ICF->getReturnSitesOfCallAt(CallInst)) {
           if (Cont != nullptr) {
@@ -947,10 +953,9 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
       if (CallInst != nullptr) {
         Result.push_back({CallInst, CallerCtx});
       }
-    } else if (ICF != nullptr) {
-      // Context-insensitive entry: merge call-flow facts from all callers.
-      // Without this, K=0 loses every interprocedural call edge because the
-      // empty call string cannot name a single caller.
+    } else if (K == 0 && ICF != nullptr) {
+      // K=0 is context-insensitive, so the empty call string summarizes all
+      // callers at the callee entry.
       for (auto *CallInst : ICF->getCallersOf(Inst->getFunction())) {
         if (CallInst != nullptr) {
           Result.push_back({CallInst, Ctx});
@@ -973,15 +978,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
         if (RetInst == nullptr) {
           continue;
         }
-        // When Ctx is empty, RetCtx == Ctx (push+pop of the same
-        // call site on an empty deque yields the same empty deque), so the
-        // two pushes below would add the same entry twice.  Only add the
-        // empty-context entry when it is genuinely different from RetCtx.
         Result.push_back({RetInst, RetCtx});
-        if (Ctx.empty() && !(RetCtx == Ctx)) {
-          // Phasar-like: allow returns to flow back even for empty contexts.
-          Result.push_back({RetInst, Ctx});
-        }
       }
     }
   }
@@ -1151,7 +1148,8 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::applyForwardFromSeeds(
     Enqueue(Seed.first);
   }
 
-  // Inject explicit IN seeds at empty context (Phasar-like).
+  // Inject explicit boundary facts for the exact seeded (instruction, context)
+  // pairs before fixpoint iteration starts.
   for (const auto &Seed : SeedIns) {
     ensureInitialized(Seed.first, initializeIN, initializeOUT, DF.get());
     DF->IN(Seed.first) = Seed.second;

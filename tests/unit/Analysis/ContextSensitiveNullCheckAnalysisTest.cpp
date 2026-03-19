@@ -449,6 +449,87 @@ TEST(ContextSensitiveNullCheckAnalysisTest,
 }
 
 TEST(ContextSensitiveNullCheckAnalysisTest,
+     KOneRestoresCallerContextsAfterTruncatedNestedReturn) {
+  ScopedContextDepthOverride DepthOverride(1);
+
+  llvm::LLVMContext ContextStorage;
+  auto Module = parseModule(ContextStorage, R"(
+    define i8* @leaf(i8* %p) {
+    entry:
+      ret i8* %p
+    }
+
+    define void @middle(i8* %p) {
+    entry:
+      %retptr = call i8* @leaf(i8* %p)
+      %load = load i8, i8* %retptr, align 1
+      ret void
+    }
+
+    define void @outer_nonnull() {
+    entry:
+      %stack = alloca i8, align 1
+      call void @middle(i8* %stack)
+      ret void
+    }
+
+    define void @outer_nullable(i8* %arg) {
+    entry:
+      call void @middle(i8* %arg)
+      ret void
+    }
+  )");
+  ASSERT_NE(Module, nullptr);
+
+  auto Harness = runContextSensitiveNCA(*Module);
+  auto *Analysis = Harness.Analysis;
+  auto *Leaf = Module->getFunction("leaf");
+  auto *Middle = Module->getFunction("middle");
+  auto *OuterNonNull = Module->getFunction("outer_nonnull");
+  auto *OuterNullable = Module->getFunction("outer_nullable");
+  auto *Load = findInstructionByName(Middle, "load");
+  auto *LeafRet = Leaf ? Leaf->getEntryBlock().getTerminator() : nullptr;
+  ASSERT_NE(Analysis, nullptr);
+  ASSERT_NE(Leaf, nullptr);
+  ASSERT_NE(Middle, nullptr);
+  ASSERT_NE(OuterNonNull, nullptr);
+  ASSERT_NE(OuterNullable, nullptr);
+  ASSERT_NE(Load, nullptr);
+  ASSERT_NE(LeafRet, nullptr);
+
+  auto OuterNonNullToMiddle = findCallsTo(OuterNonNull, "middle");
+  auto OuterNullableToMiddle = findCallsTo(OuterNullable, "middle");
+  auto MiddleToLeaf = findCallsTo(Middle, "leaf");
+  ASSERT_EQ(OuterNonNullToMiddle.size(), 1u);
+  ASSERT_EQ(OuterNullableToMiddle.size(), 1u);
+  ASSERT_EQ(MiddleToLeaf.size(), 1u);
+
+  auto LeafReachable = Analysis->getReachableContexts(LeafRet);
+  ASSERT_EQ(LeafReachable.size(), 1u);
+  EXPECT_TRUE(contextEquals(LeafReachable.front(), {MiddleToLeaf.front()}));
+
+  auto Reachable = Analysis->getReachableContexts(Load);
+  ASSERT_EQ(Reachable.size(), 2u);
+
+  const Context *NonNullCtx = nullptr;
+  const Context *NullableCtx = nullptr;
+  for (const auto &Ctx : Reachable) {
+    if (contextEquals(Ctx, {OuterNonNullToMiddle.front()})) {
+      NonNullCtx = &Ctx;
+    }
+    if (contextEquals(Ctx, {OuterNullableToMiddle.front()})) {
+      NullableCtx = &Ctx;
+    }
+  }
+
+  ASSERT_NE(NonNullCtx, nullptr);
+  ASSERT_NE(NullableCtx, nullptr);
+  EXPECT_FALSE(Analysis->mayNull(Middle->getArg(0), Load, *NonNullCtx));
+  EXPECT_TRUE(Analysis->mayNull(Middle->getArg(0), Load, *NullableCtx));
+  EXPECT_TRUE(Analysis->mayNull(Middle->getArg(0), Load));
+}
+
+TEST(ContextSensitiveNullCheckAnalysisTest,
      MatchesReturnedNonNullFactsToTheCorrectCallSite) {
   llvm::LLVMContext ContextStorage;
   auto Module = parseModule(ContextStorage, R"(

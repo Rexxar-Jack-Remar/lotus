@@ -293,22 +293,12 @@ private:
           auto *CallSite = ExitCtx.pop_back();
           Incoming = Problem.returnFlow(CallSite, Inst->getFunction(), Inst,
                                         PredInst, PredOut);
-        } else {
+        } else if (K == 0) {
           Incoming = Problem.allTop();
           if (ICF != nullptr) {
             bool FirstCaller = true;
             mono_container_t Merged;
             for (auto *Caller : ICF->getCallersOf(Inst->getFunction())) {
-              bool ReachesPred = false;
-              for (auto *RetSite : ICF->getReturnSitesOfCallAt(Caller)) {
-                if (RetSite == PredInst) {
-                  ReachesPred = true;
-                  break;
-                }
-              }
-              if (!ReachesPred) {
-                continue;
-              }
               auto RetFacts = Problem.returnFlow(Caller, Inst->getFunction(),
                                                  Inst, PredInst, PredOut);
               if (FirstCaller) {
@@ -322,6 +312,10 @@ private:
               Incoming = Merged;
             }
           }
+        } else {
+          // For K>0, an empty context is an explicit seeded state, not a
+          // context-insensitive caller summary.
+          Incoming = Problem.allTop();
         }
       } else {
         Incoming = PredOut;
@@ -350,28 +344,14 @@ private:
         auto *CallSite = CallerCtx.pop_back();
         Incoming = Problem.returnFlow(CallSite, PredInst->getFunction(),
                                       PredInst, Inst, PredOut);
-      } else {
-        // Empty context: merge return-flow facts only from callers whose
-        // concrete continuation actually reaches this return site.
-        //
-        // Without this filter, K=0 (or explicit empty-context seeds inside a
-        // callee) causes facts from every caller of the callee to flow into
-        // every return site of that callee.
+      } else if (K == 0) {
+        // In K=0 mode the empty call string intentionally collapses all caller
+        // contexts, so return-flow merges across every caller.
         Incoming = Problem.allTop();
         if (ICF != nullptr) {
           bool FirstCaller = true;
           mono_container_t Merged;
           for (auto *Caller : ICF->getCallersOf(PredInst->getFunction())) {
-            bool ReachesInst = false;
-            for (auto *RetSite : ICF->getReturnSitesOfCallAt(Caller)) {
-              if (RetSite == Inst) {
-                ReachesInst = true;
-                break;
-              }
-            }
-            if (!ReachesInst) {
-              continue;
-            }
             auto RetFacts = Problem.returnFlow(Caller, PredInst->getFunction(),
                                                PredInst, Inst, PredOut);
             if (FirstCaller) {
@@ -385,6 +365,11 @@ private:
             Incoming = Merged;
           }
         }
+      } else {
+        // For K>0, an empty context is an explicit seeded state, not a caller
+        // summary. Return-flow only happens when the predecessor context names
+        // the call site exactly.
+        Incoming = Problem.allTop();
       }
     } else if (llvm::isa<llvm::CallBase>(PredInst) &&
                isContinuationOfCall(Inst, PredInst)) {

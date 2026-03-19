@@ -9,6 +9,12 @@
 namespace lotus {
 namespace nullpointer {
 
+/// Suffix-bounded call-string context.
+///
+/// When the configured limit is exceeded, the oldest call site is dropped.
+/// Analyses using this context must therefore track explicit caller
+/// provenance for return matching instead of reconstructing caller contexts by
+/// simply popping a truncated callee context.
 class CallStringContext {
 public:
   CallStringContext() = default;

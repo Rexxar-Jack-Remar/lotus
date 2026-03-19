@@ -101,6 +101,30 @@ bool isKnownMemoryIntrinsic(const CallBase *CB) {
          ID <= Intrinsic::memset_element_unordered_atomic;
 }
 
+struct ReturnProvenanceKey {
+  Function *Callee = nullptr;
+  lotus::nullpointer::CallStringContext Ctx;
+
+  bool operator<(const ReturnProvenanceKey &Other) const {
+    if (Callee != Other.Callee) {
+      return Callee < Other.Callee;
+    }
+    return Ctx < Other.Ctx;
+  }
+};
+
+struct CallerContinuation {
+  CallBase *Call = nullptr;
+  lotus::nullpointer::CallStringContext CallerCtx;
+
+  bool operator<(const CallerContinuation &Other) const {
+    if (Call != Other.Call) {
+      return Call < Other.Call;
+    }
+    return CallerCtx < Other.CallerCtx;
+  }
+};
+
 } // namespace
 
 char ContextSensitiveNullFlowAnalysis::ID = 0;
@@ -463,6 +487,7 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
 
   std::deque<ContextKey> Queue;
   std::set<ContextKey> InQueue;
+  std::map<ReturnProvenanceKey, std::set<CallerContinuation>> ReturnProvenance;
 
   auto MergeState = [&](const ContextKey &Key, const BitVector &Incoming) {
     auto It = InFacts.find(Key);
@@ -484,6 +509,41 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
       Queue.push_back(Key);
       InQueue.insert(Key);
     }
+  };
+
+  auto RecordReturnProvenance = [&](Function *Callee, const Context &CalleeCtx,
+                                    CallBase *Call,
+                                    const Context &CallerCtx) -> bool {
+    if (!Callee || !Call) {
+      return false;
+    }
+
+    auto &Continuations = ReturnProvenance[{Callee, CalleeCtx}];
+    bool Inserted =
+        Continuations.insert(CallerContinuation{Call, CallerCtx}).second;
+    if (!Inserted) {
+      return false;
+    }
+
+    for (auto *Exit : ICFG.getExitPointsOf(Callee)) {
+      if (!Exit) {
+        continue;
+      }
+
+      auto ReachableIt = ReachableContexts.find(Exit);
+      if (ReachableIt == ReachableContexts.end() ||
+          !ReachableIt->second.count(CalleeCtx)) {
+        continue;
+      }
+
+      ContextKey ExitKey{Exit, CalleeCtx};
+      if (!InQueue.count(ExitKey)) {
+        Queue.push_back(ExitKey);
+        InQueue.insert(ExitKey);
+      }
+    }
+
+    return true;
   };
 
   for (auto *Entry : EntryFunctions) {
@@ -550,6 +610,7 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
         HasDefinedCallee = true;
         Context CalleeCtx = Key.Ctx;
         CalleeCtx.append(CB, MaxContextDepth);
+        RecordReturnProvenance(Callee, CalleeCtx, CB, Key.Ctx);
         BitVector CalleeFacts = FilterGlobals(LocalOut);
         for (unsigned I = 0; I < CB->arg_size() && I < Callee->arg_size(); ++I) {
           auto *Actual = CB->getArgOperand(I);
@@ -576,13 +637,15 @@ bool ContextSensitiveNullFlowAnalysis::runOnModule(Module &M) {
     }
 
     if (auto *Ret = dyn_cast<ReturnInst>(Key.Inst)) {
-      if (!Key.Ctx.empty()) {
-        Context CallerCtx = Key.Ctx;
-        auto *Call = CallerCtx.popBack();
-        if (Call != nullptr) {
-          PropagateReturnToCall(Ret, Call, CallerCtx);
+      auto ProvIt = ReturnProvenance.find({Ret->getFunction(), Key.Ctx});
+      if (ProvIt != ReturnProvenance.end()) {
+        for (const auto &Continuation : ProvIt->second) {
+          PropagateReturnToCall(Ret, Continuation.Call,
+                                Continuation.CallerCtx);
         }
-      } else {
+      } else if (Key.Ctx.empty()) {
+        // Empty-context returns without recorded caller provenance correspond
+        // to top-level or externally initiated execution.
         for (auto *CallerInst : ICFG.getCallersOf(Ret->getFunction())) {
           auto *Caller = dyn_cast<CallBase>(CallerInst);
           if (Caller == nullptr) {
