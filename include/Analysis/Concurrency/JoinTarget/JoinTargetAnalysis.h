@@ -18,8 +18,8 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
 
-#include <unordered_set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace lotus {

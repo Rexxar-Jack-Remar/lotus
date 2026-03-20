@@ -28,6 +28,51 @@
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
 
+namespace {
+
+bool allIncomingEdgesUnreachable(Function *F, Instruction *Inst,
+                                 const std::set<Edge> &UnreachableEdges) {
+  if (Inst != &Inst->getParent()->front()) {
+    return UnreachableEdges.count({Inst->getPrevNode(), 0});
+  }
+
+  if (Inst->getParent() == &F->getEntryBlock()) {
+    return false;
+  }
+
+  bool AllPredUnreachable = true;
+  for (auto PIt = pred_begin(Inst->getParent()), PE = pred_end(Inst->getParent());
+       PIt != PE; ++PIt) {
+    auto *PredTerm = (*PIt)->getTerminator();
+    for (unsigned J = 0; J < PredTerm->getNumSuccessors(); ++J) {
+      if (PredTerm->getSuccessor(J) != Inst->getParent())
+        continue;
+      if (!UnreachableEdges.count({PredTerm, J})) {
+        AllPredUnreachable = false;
+        break;
+      }
+    }
+    if (!AllPredUnreachable)
+      break;
+  }
+  return AllPredUnreachable;
+}
+
+} // namespace
+
+namespace lotus {
+namespace nullpointer {
+namespace testing {
+
+bool allIncomingEdgesUnreachableForTesting(Function *F, Instruction *Inst,
+                                           const std::set<Edge> &Unreachable) {
+  return ::allIncomingEdgesUnreachable(F, Inst, Unreachable);
+}
+
+} // namespace testing
+} // namespace nullpointer
+} // namespace lotus
+
 LocalNullCheckAnalysis::LocalNullCheckAnalysis(NullFlowAnalysis *NFA,
                                                Function *F)
     : F(F), NEA(F), NFA(NFA), DT(*F) {
@@ -77,27 +122,7 @@ bool LocalNullCheckAnalysis::mayNull(Value *Ptr, Instruction *Inst) {
     return false;
 
   // ptrs in unreachable blocks are considered nonnull
-  bool AllPredUnreachable = true;
-  if (Inst == &Inst->getParent()->front()) {
-    for (auto PIt = pred_begin(Inst->getParent()),
-              PE = pred_end(Inst->getParent());
-         PIt != PE; ++PIt) {
-      auto *PredTerm = (*PIt)->getTerminator();
-      for (unsigned J = 0; J < PredTerm->getNumSuccessors(); ++J) {
-        if (PredTerm->getSuccessor(J) != Inst->getParent())
-          continue;
-        if (!UnreachableEdges.count({PredTerm, J})) {
-          AllPredUnreachable = false;
-          break;
-        }
-      }
-      if (!AllPredUnreachable)
-        break;
-    }
-  } else {
-    AllPredUnreachable = UnreachableEdges.count({Inst->getPrevNode(), 0});
-  }
-  if (AllPredUnreachable)
+  if (allIncomingEdgesUnreachable(F, Inst, UnreachableEdges))
     return false;
 
   // check nca results
@@ -281,7 +306,8 @@ void LocalNullCheckAnalysis::transfer(Edge E, const BitVector &In,
             continue;
           Set(Op);
         }
-      } else if (API::isMemoryAllocate(CI))
+      } else if (lotus::nullpointer::testing::
+                     isContextInsensitiveGuaranteedNonNullValueForTesting(CI))
         Set(Inst);
     } else {
       Set(CI->getCalledOperand());

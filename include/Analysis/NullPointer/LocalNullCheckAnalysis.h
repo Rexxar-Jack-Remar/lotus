@@ -90,4 +90,16 @@ private:
   void label(Edge);
 };
 
+namespace lotus {
+namespace nullpointer {
+namespace testing {
+
+bool allIncomingEdgesUnreachableForTesting(llvm::Function *F,
+                                           llvm::Instruction *Inst,
+                                           const std::set<Edge> &Unreachable);
+
+} // namespace testing
+} // namespace nullpointer
+} // namespace lotus
+
 #endif // NULLPOINTER_LOCALNULLCHECKANALYSIS_H
