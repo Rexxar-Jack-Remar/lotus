@@ -8,7 +8,7 @@
  *
  * Key design decisions:
  * - Per-function caching: Each function's EquivDB is built once and reused
- * - Intra-procedural only: Cross-function queries return NoAlias (conservative)
+ * - Intra-procedural only: Cross-function queries remain MayAlias/unknown
  * - Sound under-approximation: Returns MustAlias only when guaranteed
  * - Optional MemorySSA: Store-load forwarding for more precision (sound)
  * - Optional DominatorTree: Single-store alloca forwarding for more precision
@@ -169,6 +169,10 @@ AliasResult UnderApproxAA::alias(const MemoryLocation &L1,
   }
 
   return AliasResult::MustAlias;
+}
+
+AliasResult UnderApproxAA::query(const Value *V1, const Value *V2) {
+  return mustAlias(V1, V2) ? AliasResult::MustAlias : AliasResult::MayAlias;
 }
 
 bool UnderApproxAA::mustAlias(const Value *V1, const Value *V2) {

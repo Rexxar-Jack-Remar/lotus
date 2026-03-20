@@ -310,4 +310,369 @@ TEST_F(UnderApproxAATest, UnderApproxAACacheRefreshesAfterIRMutation) {
   EXPECT_TRUE(AA.mustAlias(S, P));
 }
 
+TEST_F(UnderApproxAATest, QueryReturnsMayAliasForUnknown) {
+  const char *Source = R"(
+    define void @test(i8* %p, i8* %q) {
+    entry:
+      ret void
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  UnderApproxAA AA(*M);
+  EXPECT_EQ(AA.query(F->getArg(0), F->getArg(1)), AliasResult::MayAlias);
+}
+
+TEST_F(UnderApproxAATest, DirectCallSummaryReturnsArgumentPath) {
+  const char *Source = R"(
+    define i8** @ret_field([2 x i8*]* %arr) {
+    entry:
+      %elt = getelementptr inbounds [2 x i8*], [2 x i8*]* %arr, i64 0, i64 1
+      ret i8** %elt
+    }
+
+    define void @test() {
+    entry:
+      %arr = alloca [2 x i8*]
+      %elt = getelementptr inbounds [2 x i8*], [2 x i8*]* %arr, i64 0, i64 1
+      %ret = call i8** @ret_field([2 x i8*]* %arr)
+      ret void
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *Elt = findInst(F, "elt");
+  auto *Ret = findInst(F, "ret");
+  ASSERT_NE(Elt, nullptr);
+  ASSERT_NE(Ret, nullptr);
+
+  EquivDB DB(*F);
+  EXPECT_TRUE(DB.mustAlias(Elt, Ret));
+}
+
+TEST_F(UnderApproxAATest, DirectCallSummaryAppliesStrongStoreEffect) {
+  const char *Source = R"(
+    define void @write_arg(i8** %slot, i8* %v) {
+    entry:
+      store i8* %v, i8** %slot
+      ret void
+    }
+
+    define i8* @test(i8* %a) {
+    entry:
+      %slot = alloca i8*
+      call void @write_arg(i8** %slot, i8* %a)
+      %l = load i8*, i8** %slot
+      ret i8* %l
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *L = findInst(F, "l");
+  auto *A = F->getArg(0);
+  ASSERT_NE(L, nullptr);
+  ASSERT_NE(A, nullptr);
+
+  EquivDB DB(*F);
+  EXPECT_TRUE(DB.mustAlias(L, A));
+}
+
+TEST_F(UnderApproxAATest, UnknownCallKillsSingletonStoreFact) {
+  const char *Source = R"(
+    declare void @opaque(i8**)
+
+    define i8* @test(i8* %a) {
+    entry:
+      %slot = alloca i8*
+      store i8* %a, i8** %slot
+      call void @opaque(i8** %slot)
+      %l = load i8*, i8** %slot
+      ret i8* %l
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *L = findInst(F, "l");
+  auto *A = F->getArg(0);
+  ASSERT_NE(L, nullptr);
+  ASSERT_NE(A, nullptr);
+
+  EquivDB DB(*F);
+  EXPECT_FALSE(DB.mustAlias(L, A));
+}
+
+TEST_F(UnderApproxAATest, ReadonlyCallPreservesSingletonStoreFact) {
+  const char *Source = R"(
+    declare void @reader(i8**) readonly
+
+    define i8* @test(i8* %a) {
+    entry:
+      %slot = alloca i8*
+      store i8* %a, i8** %slot
+      call void @reader(i8** %slot)
+      %l = load i8*, i8** %slot
+      ret i8* %l
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *L = findInst(F, "l");
+  auto *A = F->getArg(0);
+  ASSERT_NE(L, nullptr);
+  ASSERT_NE(A, nullptr);
+
+  EquivDB DB(*F);
+  EXPECT_TRUE(DB.mustAlias(L, A));
+}
+
+TEST_F(UnderApproxAATest, UnknownCallPreservesUnrelatedLocalSlot) {
+  const char *Source = R"(
+    declare void @opaque(i8**)
+
+    define i8* @test(i8* %a, i8* %b) {
+    entry:
+      %slot0 = alloca i8*
+      %slot1 = alloca i8*
+      store i8* %a, i8** %slot0
+      store i8* %b, i8** %slot1
+      call void @opaque(i8** %slot1)
+      %l0 = load i8*, i8** %slot0
+      ret i8* %l0
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *L0 = findInst(F, "l0");
+  auto *A = F->getArg(0);
+  ASSERT_NE(L0, nullptr);
+  ASSERT_NE(A, nullptr);
+
+  EquivDB DB(*F);
+  EXPECT_TRUE(DB.mustAlias(L0, A));
+}
+
+TEST_F(UnderApproxAATest, UnknownCallDoesNotPreserveGlobalSlot) {
+  const char *Source = R"(
+    @G = global i8* null
+    declare void @opaque()
+
+    define i8* @test(i8* %a) {
+    entry:
+      store i8* %a, i8** @G
+      call void @opaque()
+      %l = load i8*, i8** @G
+      ret i8* %l
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *L = findInst(F, "l");
+  auto *A = F->getArg(0);
+  ASSERT_NE(L, nullptr);
+  ASSERT_NE(A, nullptr);
+
+  EquivDB DB(*F);
+  EXPECT_FALSE(DB.mustAlias(L, A));
+}
+
+TEST_F(UnderApproxAATest, ArgMemOnlyCallKillsOnlyReachableSlots) {
+  const char *Source = R"(
+    declare void @argonly(i8**) argmemonly
+
+    define void @test(i8* %a, i8* %b) {
+    entry:
+      %slot0 = alloca i8*
+      %slot1 = alloca i8*
+      store i8* %a, i8** %slot0
+      store i8* %b, i8** %slot1
+      call void @argonly(i8** %slot1)
+      %l0 = load i8*, i8** %slot0
+      %l1 = load i8*, i8** %slot1
+      ret void
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *L0 = findInst(F, "l0");
+  auto *L1 = findInst(F, "l1");
+  auto *A = F->getArg(0);
+  auto *B = F->getArg(1);
+  ASSERT_NE(L0, nullptr);
+  ASSERT_NE(L1, nullptr);
+  ASSERT_NE(A, nullptr);
+  ASSERT_NE(B, nullptr);
+
+  EquivDB DB(*F);
+  EXPECT_TRUE(DB.mustAlias(L0, A));
+  EXPECT_FALSE(DB.mustAlias(L1, B));
+}
+
+TEST_F(UnderApproxAATest, DirectCallSummaryIntersectsReturnAcrossExits) {
+  const char *Source = R"(
+    define i8* @ret_arg(i1 %c, i8* %p) {
+    entry:
+      br i1 %c, label %then, label %else
+    then:
+      ret i8* %p
+    else:
+      %q = bitcast i8* %p to i8*
+      ret i8* %q
+    }
+
+    define i8* @test(i1 %c, i8* %p) {
+    entry:
+      %r = call i8* @ret_arg(i1 %c, i8* %p)
+      ret i8* %r
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *R = findInst(F, "r");
+  auto *P = F->getArg(1);
+  ASSERT_NE(R, nullptr);
+  ASSERT_NE(P, nullptr);
+
+  EquivDB DB(*F);
+  EXPECT_TRUE(DB.mustAlias(R, P));
+}
+
+TEST_F(UnderApproxAATest, DirectCallSummaryDropsConflictingStoreEffectsButKeepsReturn) {
+  const char *Source = R"(
+    define i8* @writer(i1 %c, i8** %slot, i8* %v) {
+    entry:
+      br i1 %c, label %then, label %else
+    then:
+      store i8* %v, i8** %slot
+      br label %merge
+    else:
+      store i8* null, i8** %slot
+      br label %merge
+    merge:
+      ret i8* %v
+    }
+
+    define i8* @test(i1 %c, i8* %v) {
+    entry:
+      %slot = alloca i8*
+      %ret = call i8* @writer(i1 %c, i8** %slot, i8* %v)
+      %l = load i8*, i8** %slot
+      ret i8* %ret
+    }
+  )";
+
+  auto M = parseModule(Source);
+  ASSERT_NE(M, nullptr);
+
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *Ret = findInst(F, "ret");
+  auto *L = findInst(F, "l");
+  auto *V = F->getArg(1);
+  ASSERT_NE(Ret, nullptr);
+  ASSERT_NE(L, nullptr);
+  ASSERT_NE(V, nullptr);
+
+  EquivDB DB(*F);
+  EXPECT_TRUE(DB.mustAlias(Ret, V));
+  EXPECT_FALSE(DB.mustAlias(L, V));
+}
+
+TEST_F(UnderApproxAATest, SummaryCacheIsSafeAcrossMultipleModules) {
+  const char *First = R"(
+    define i8* @id(i8* %p) {
+    entry:
+      ret i8* %p
+    }
+
+    define i8* @test(i8* %p) {
+    entry:
+      %r = call i8* @id(i8* %p)
+      ret i8* %r
+    }
+  )";
+
+  const char *Second = R"(
+    define i8* @id(i8* %p) {
+    entry:
+      ret i8* null
+    }
+
+    define i8* @test(i8* %p) {
+    entry:
+      %r = call i8* @id(i8* %p)
+      ret i8* %r
+    }
+  )";
+
+  auto M1 = parseModule(First);
+  auto M2 = parseModule(Second);
+  ASSERT_NE(M1, nullptr);
+  ASSERT_NE(M2, nullptr);
+
+  Function *F1 = M1->getFunction("test");
+  Function *F2 = M2->getFunction("test");
+  ASSERT_NE(F1, nullptr);
+  ASSERT_NE(F2, nullptr);
+
+  auto *R1 = findInst(F1, "r");
+  auto *R2 = findInst(F2, "r");
+  auto *P1 = F1->getArg(0);
+  auto *P2 = F2->getArg(0);
+  ASSERT_NE(R1, nullptr);
+  ASSERT_NE(R2, nullptr);
+  ASSERT_NE(P1, nullptr);
+  ASSERT_NE(P2, nullptr);
+
+  EquivDB DB1(*F1);
+  EquivDB DB2(*F2);
+  EXPECT_TRUE(DB1.mustAlias(R1, P1));
+  EXPECT_FALSE(DB2.mustAlias(R2, P2));
+}
+
 } // namespace

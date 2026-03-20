@@ -1,31 +1,33 @@
 /**
  * @file UnderApproxAA.h
- * @brief Under-approximation alias analysis using union-find with congruence
- * closure
+ * @brief Under-approximation alias analysis using an access-path fixed-point
+ * solver
  *
- * This file provides an under-approximation alias analysis that uses union-find
- * data structures with congruence closure to identify definite (must-alias)
- * relationships between pointers. The analysis is sound but incomplete: it only
- * reports MustAlias when it can guarantee the relationship, otherwise returns
- * NoAlias (conservative under-approximation).
+ * This file provides an under-approximation alias analysis for definite
+ * must-alias relationships. The implementation uses a forward fixed-point over
+ * three domains:
+ * - an access-path alias graph
+ * - a value environment of exact pointer references
+ * - a singleton-slot memory map
+ *
+ * The analysis is sound but incomplete: it only reports MustAlias when it can
+ * guarantee the relationship, otherwise returns MayAlias in the LLVM AA
+ * interface.
  *
  * Key Features:
  * - Sound: Never produces false positives (if MustAlias, they definitely alias)
- * - Fast: O(α(N)) query time after construction (effectively constant)
+ * - Fast queries after per-function construction
  * - Intra-procedural: Analyzes within a single function at a time
  * - Per-function caching: Equivalence databases are reused until the function
  *   IR fingerprint changes
- * - Optional MemorySSA: Store-load forwarding when available (sound)
- * - Optional DominatorTree: Single-store singleton-slot forwarding when
- *   available
+ * - Optional MemorySSA: recovers exact load values through unique clobbers
+ * - Optional DominatorTree: fallback recovery for unique dominating stores
  *
  * Algorithm Overview:
  * The analysis uses a three-phase approach:
- * 1. Seed: Apply atomic (syntactic) rules to find initial must-alias pairs
- * 2. Propagate: Use normalized term congruence to discover additional
- * equivalences
- * 3. Refine: Apply external analyses (MemorySSA, DominatorTree) for more
- * precision
+ * 1. Build canonical pointer references for SSA values and access paths
+ * 2. Solve a forward dataflow problem where block joins are intersections
+ * 3. Refine load precision with optional MemorySSA / DominatorTree queries
  *
  * This analysis is useful when:
  * - A lightweight, fast alias analysis is needed
@@ -56,35 +58,27 @@ namespace UnderApprox {
  * @class UnderApproxAA
  * @brief Under-approximation alias analysis implementation
  *
- * This class implements a conservative alias analysis that uses union-find with
- * congruence closure to identify definite (MustAlias) relationships. It
- * recognizes patterns such as:
- * - Identity: same SSA value
- * - Cast equivalence: bitcasts, no-op address space casts
- * - GEP patterns: zero-offset GEPs, constant-offset equivalence
- * - Round-trip casts: inttoptr(ptrtoint(X)) ≡ X (and enhanced with no-op
- * arithmetic)
- * - Trivial PHI/Select: all operands identical
- * - Same underlying object: derived from same alloca/global/allocation
- * - Singleton-slot forwarding: loads/stores on allocas, globals, and direct
- *   allocation results at constant offsets
+ * This class implements a conservative alias analysis that reasons over exact
+ * canonical pointer references. It recognizes patterns such as:
+ * - identity, casts, zero-GEPs, and round-trip pointer/integer casts
+ * - structural GEP access paths
+ * - closed PHI/select nodes after predecessor intersection
+ * - singleton-slot loads/stores on allocas, globals, and allocation results
  *
  * With optional MemorySSA:
- * - Store-load forwarding: load after store to same location = stored value
+ * - load recovery through unique clobbering stores or MemoryPhi collapse
  *
  * With optional DominatorTree:
- * - Single-store singleton-slot forwarding: load-after-dominating-store
- *   precision
+ * - fallback recovery through a unique dominating singleton-slot store
  *
  * The analysis is an under-approximation: it only reports MustAlias when
- * certain, otherwise returns NoAlias. It never reports MayAlias, making it
- * suitable for optimizations that require definite knowledge (e.g., redundant
- * load elimination).
+ * certain. Unknown cases remain MayAlias in the LLVM AA interface, making it
+ * suitable for optimizations that require definite knowledge without claiming
+ * NoAlias spuriously.
  *
  * Performance:
- * - Construction: O(N·M·α(N)) where N = number of values, M = instructions
- * - Query: O(α(N)) ≈ O(1) amortized (effectively constant)
- * - Memory: O(N) for union-find structures and watch lists
+ * - Construction is per-function and dominated by the fixed-point solver
+ * - Query is a fast lookup in the finalized function database
  */
 class UnderApproxAA {
 public:
@@ -118,7 +112,7 @@ public:
    * @param v1 First value (must be pointer type)
    * @param v2 Second value (must be pointer type)
    * @return AliasResult indicating the alias relationship
-   *         (either MustAlias or NoAlias, never MayAlias)
+   *         (MustAlias when proven, MayAlias otherwise)
    *
    * @deprecated Use alias(MemoryLocation, MemoryLocation) instead
    */
@@ -136,7 +130,7 @@ public:
    *
    * @param loc1 First memory location
    * @param loc2 Second memory location
-   * @return AliasResult::MustAlias if pointers must alias, NoAlias otherwise
+   * @return AliasResult::MustAlias if pointers must alias, MayAlias otherwise
    */
   llvm::AliasResult alias(const llvm::MemoryLocation &loc1,
                           const llvm::MemoryLocation &loc2);
@@ -167,8 +161,8 @@ public:
   /**
    * @brief Set MemorySSA provider for enhanced analysis
    *
-   * When set, store-load forwarding will be enabled using MemorySSA.
-   * This provides more precise must-alias detection.
+   * When set, singleton-slot loads may recover exact values through unique
+   * MemorySSA clobbers or collapsed MemoryPhi nodes.
    *
    * @param Provider A function that returns MemorySSA for a given function
    */
@@ -180,8 +174,8 @@ public:
   /**
    * @brief Set DominatorTree provider for enhanced analysis
    *
-   * When set, DominatorTree-based single-store alloca forwarding is enabled.
-   * This provides additional precise must-alias facts for load/store patterns.
+   * When set, singleton-slot loads may fall back to a unique dominating store
+   * when MemorySSA is unavailable.
    *
    * @param Provider A function that returns DominatorTree for a given function
    */
