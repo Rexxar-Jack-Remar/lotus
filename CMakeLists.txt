@@ -32,6 +32,8 @@ include(cmake/FindZ3.cmake)
 option(ENABLE_CLAM "Enable CLAM abstract interpretation framework" ON)
 option(ENABLE_SEAHORN "Enable SeaHorn" ON)
 option(LOTUS_USE_CCLYZER "Enable optional cclyzer++ alias analysis backend" OFF)
+option(ENABLE_TYPE_QUALIFIER
+       "Enable the opt-in TypeQualifier uninitialized-data checker" OFF)
 
 # Configure Boost only if modules that require it are enabled
 # Sea-DSA no longer requires Boost, so Boost is only needed for:

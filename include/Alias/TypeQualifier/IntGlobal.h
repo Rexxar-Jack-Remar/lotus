@@ -210,10 +210,16 @@ struct GlobalContext {
   std::set<std::string> CopyFuncs;
   std::set<std::string> TransferFuncs;
   std::set<std::string> ObjSizeFuncs;
+  bool functionModelsInitialized = false;
 
   std::map<std::string, std::set<llvm::Function *>> nameFuncs;
 
   ModuleList Modules;
+  std::unordered_map<const llvm::StructType *, std::set<int>> usedField;
+  bool incAnalysis = false;
+  std::string jsonInc;
+  std::string jsonfile;
+  std::string heapWarning;
 
   // Function to warnings mapping (function -> map of warning id to message)
   std::map<llvm::Function *, std::map<int, std::string>> fToWarns;
