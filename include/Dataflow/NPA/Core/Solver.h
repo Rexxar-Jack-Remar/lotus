@@ -12,7 +12,11 @@
  *   The correction is Δ^(i) = least solution of Df|ν^(i)(X) + δ^(i) = X
  *   (Eqn. (2), (13)); then ν^(i+1) = ν^(i) ⊕ Δ^(i) (idempotent) or
  *   ν^(i+1) = ν^(i) + Δ^(i) (non-idempotent). The linear system is solved
- *   by Naive, SCC, or TensorProduct (LinearStrategy).
+ *   by Naive, SCC, AdaptiveScc, or TensorProduct (LinearStrategy).
+ *   AdaptiveScc keeps Newton's outer iteration unchanged, but chooses the
+ *   inner linear solver independently for each linearized SCC: direct for
+ *   singleton acyclic SCCs, SCC worklist for ordinary recursive SCCs, and
+ *   tensor solving for tensor-eligible cyclic LCFL SCCs.
  *
  * Exact-vs-approximate status:
  * - `Stat::converged` means theorem-faithful convergence: equality stabilized
@@ -20,6 +24,9 @@
  * - `used_approx_equal`, `hit_outer_limit`, `hit_linear_limit`, and
  *   `hit_fixpoint_limit` record the approximation sources explicitly.
  * - `hit_limit` remains the aggregate of the bounding hooks only.
+ * - `adaptive_scc_*` counters aggregate the SCC-local solver choices made
+ *   across all adaptive linear solves in the Newton run, not just the final
+ *   converged round.
  *
  * References: Esparza et al. (JACM); Reps et al. (TOPLAS 2016).
  */
@@ -192,8 +199,10 @@ build_newton_initial_values(
   std::vector<std::future<void>> tasks;
   tasks.reserve(eqns.size());
   ThreadPool *pool = ThreadPool::get();
+  const auto execution_context = capture_execution_context<D>();
   for (std::size_t i = 0; i < eqns.size(); ++i) {
     tasks.emplace_back(pool->enqueue([&, i] {
+      ScopedExecutionContext<D> context_scope(execution_context);
       try {
         require_newton_compatible_expr<D>(eqns[i].second);
         values[i] = I0<D>::eval(false, nu0, eqns[i].second);
@@ -227,7 +236,8 @@ NewtonRoundSetup<D> build_newton_round_setup(
     nu[b.first] = b.second;
 
   NewtonRoundSetup<D> setup;
-  setup.tensor_requested = linStrat == LinearStrategy::TensorProduct;
+  setup.tensor_requested = linStrat == LinearStrategy::TensorProduct ||
+                           linStrat == LinearStrategy::AdaptiveScc;
   setup.tensor_available = setup.tensor_requested && TensorTraits::available();
   setup.tensor_admissible =
       setup.tensor_available && TensorTraits::paper_admissible();
@@ -290,8 +300,10 @@ NewtonRoundSetup<D> build_newton_round_setup(
   std::vector<std::future<void>> tasks;
   tasks.reserve(eqns.size());
   ThreadPool *pool = ThreadPool::get();
+  const auto execution_context = capture_execution_context<D>();
   for (std::size_t i = 0; i < eqns.size(); ++i) {
     tasks.emplace_back(pool->enqueue([&, i] {
+      ScopedExecutionContext<D> context_scope(execution_context);
       try {
         build_eqn_rhs(i, false, records[i]);
       } catch (...) {
@@ -314,6 +326,250 @@ NewtonRoundSetup<D> build_newton_round_setup(
 }
 
 template <class D>
+bool tensor_expr_is_projection_sensitive(
+    const E1<typename TensorSemiringTraits<D>::tensor_domain> &expr) {
+  using TD = typename TensorSemiringTraits<D>::tensor_domain;
+  return ExprFeatureDetector<TD>::has_project(expr) &&
+         !Exp1ConstEval<TD>::eval(expr).has_value();
+}
+
+template <class D>
+void annotate_adaptive_scc_plan(
+    detail::LinearSccPlan<D> &plan,
+    const std::vector<std::pair<Symbol, E1<D>>> &rhs,
+    const std::vector<
+        std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
+        &rhs_tensor,
+    const NewtonRoundSetup<D> &setup) {
+  const bool projection_fragment_supported =
+      tensor_supports_projection_equations<D>();
+  for (std::size_t sid = 0; sid < plan.infos.size(); ++sid) {
+    auto &info = plan.infos[sid];
+    info.tensor_available = setup.tensor_available;
+    info.tensor_admissible = setup.tensor_admissible;
+    info.tensor_laws_validated = setup.tensor_laws_validated;
+    info.tensor_projection_fragment_supported = projection_fragment_supported;
+    for (int idx : info.members) {
+      info.has_lcfl_structure =
+          info.has_lcfl_structure ||
+          LCFLDetector<D>::has_lcfl_structure(rhs[static_cast<std::size_t>(idx)]
+                                                  .second);
+      if (setup.tensor_laws_validated) {
+        info.tensor_projection_sensitive =
+            info.tensor_projection_sensitive ||
+            tensor_expr_is_projection_sensitive<D>(
+                rhs_tensor[static_cast<std::size_t>(idx)].second);
+      }
+    }
+
+    const bool tensor_candidate = info.is_cyclic && info.has_lcfl_structure;
+    if (tensor_candidate) {
+      if (!setup.tensor_available) {
+        info.tensor_fallback = true;
+        info.tensor_fallback_reason =
+            detail::TensorFallbackReason::TensorUnavailable;
+      } else if (!setup.tensor_admissible) {
+        info.tensor_fallback = true;
+        info.tensor_fallback_reason =
+            detail::TensorFallbackReason::TensorNotPaperAdmissible;
+      } else if (!setup.tensor_laws_validated) {
+        info.tensor_fallback = true;
+        info.tensor_fallback_reason =
+            detail::TensorFallbackReason::TensorLawsNotValidated;
+      } else if (info.tensor_projection_sensitive &&
+                 !projection_fragment_supported) {
+        info.tensor_fallback = true;
+        info.tensor_fallback_reason =
+            detail::TensorFallbackReason::ProjectionFragmentUnsupported;
+      } else {
+        info.tensor_eligible = true;
+      }
+    }
+
+    if (info.members.size() == 1 && !info.has_self_loop) {
+      info.strategy = detail::SccStrategy::Direct;
+    } else if (info.tensor_eligible) {
+      info.strategy = detail::SccStrategy::Tensor;
+    } else {
+      info.strategy = detail::SccStrategy::Worklist;
+    }
+  }
+}
+
+template <class D>
+void solve_linear_direct_component(
+    const std::vector<std::pair<Symbol, E1<D>>> &rhs, const int idx,
+    const std::unordered_map<Symbol, DomVal<D>> &base_env,
+    std::atomic<long> &shared_steps, detail::LinearSccTaskResult<D> &result) {
+  result.values.clear();
+  const Symbol &sym = rhs[static_cast<std::size_t>(idx)].first;
+  if (!detail::try_claim_linear_step(shared_steps, domain_max_linear_steps<D>())) {
+    result.hit_limit = true;
+    result.values.push_back(base_env.at(sym));
+    return;
+  }
+  ++result.steps;
+  result.values.push_back(I1<D>::eval(
+      false, base_env, rhs[static_cast<std::size_t>(idx)].second));
+}
+
+template <class D>
+void solve_linear_tensor_component(
+    bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
+    const std::vector<
+        std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
+        &rhs_tensor,
+    const std::vector<int> &scc,
+    const std::unordered_map<Symbol, DomVal<D>> &base_env,
+    detail::LinearSccTaskResult<D> &result) {
+  using TD = typename TensorSemiringTraits<D>::tensor_domain;
+  std::vector<std::pair<Symbol, E1<D>>> local_rhs;
+  std::vector<std::pair<Symbol, E1<TD>>> local_rhs_tensor;
+  std::vector<DomVal<D>> init;
+  local_rhs.reserve(scc.size());
+  local_rhs_tensor.reserve(scc.size());
+  init.reserve(scc.size());
+  for (int idx : scc) {
+    local_rhs.push_back(rhs[static_cast<std::size_t>(idx)]);
+    local_rhs_tensor.push_back(rhs_tensor[static_cast<std::size_t>(idx)]);
+    const Symbol &sym = rhs[static_cast<std::size_t>(idx)].first;
+    init.push_back(base_env.at(sym));
+  }
+  result.values =
+      solve_linear_tensor_paper_impl<D>(verbose, local_rhs, local_rhs_tensor,
+                                        std::move(init));
+}
+
+template <class D>
+std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
+    bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
+    const std::vector<
+        std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
+        &rhs_tensor,
+    std::vector<DomVal<D>> init, const detail::LinearSccPlan<D> &plan) {
+  using V = DomVal<D>;
+  std::unordered_map<Symbol, V> env;
+  for (int i = 0; i < static_cast<int>(rhs.size()); ++i)
+    env[rhs[static_cast<std::size_t>(i)].first] = init[static_cast<std::size_t>(i)];
+
+  std::atomic<long> shared_steps(0);
+  ThreadPool *pool = ThreadPool::get();
+  const bool parallelize = detail::should_parallelize_linear_scc(verbose, plan);
+  const auto execution_context = capture_execution_context<D>();
+
+  auto note_layer_stats = [&](const std::vector<int> &layer) {
+    int direct_count = 0;
+    int worklist_count = 0;
+    int tensor_count = 0;
+    int tensor_fallback_count = 0;
+    for (int sid : layer) {
+      const auto &info = plan.infos[static_cast<std::size_t>(sid)];
+      switch (info.strategy) {
+      case detail::SccStrategy::Direct:
+        ++direct_count;
+        break;
+      case detail::SccStrategy::Worklist:
+        ++worklist_count;
+        break;
+      case detail::SccStrategy::Tensor:
+        ++tensor_count;
+        break;
+      }
+      if (info.tensor_fallback)
+        ++tensor_fallback_count;
+    }
+    npa_note_adaptive_scc_used();
+    npa_note_adaptive_scc_direct(direct_count);
+    npa_note_adaptive_scc_worklist(worklist_count);
+    npa_note_adaptive_scc_tensor(tensor_count);
+    npa_note_adaptive_scc_tensor_fallback(tensor_fallback_count);
+  };
+
+  auto solve_component = [&](int sid, detail::LinearSccTaskResult<D> &result) {
+    const auto &info = plan.infos[static_cast<std::size_t>(sid)];
+    const auto &scc = plan.sccs[static_cast<std::size_t>(sid)];
+    switch (info.strategy) {
+    case detail::SccStrategy::Direct:
+      solve_linear_direct_component<D>(rhs, scc.front(), env, shared_steps,
+                                       result);
+      break;
+    case detail::SccStrategy::Tensor:
+      solve_linear_tensor_component<D>(verbose, rhs, rhs_tensor, scc, env,
+                                       result);
+      break;
+    case detail::SccStrategy::Worklist:
+      detail::solve_linear_scc_parallel_component<D>(
+          rhs, scc, plan.intra_scc_users, env, shared_steps, result);
+      break;
+    }
+  };
+
+  for (const auto &layer : plan.layers) {
+    std::vector<detail::LinearSccTaskResult<D>> results(layer.size());
+    if (parallelize && layer.size() > 1) {
+      std::vector<std::future<void>> tasks;
+      tasks.reserve(layer.size());
+      for (std::size_t pos = 0; pos < layer.size(); ++pos) {
+        const int sid = layer[pos];
+        tasks.emplace_back(pool->enqueue([&, pos, sid] {
+          ScopedExecutionContext<D> context_scope(execution_context);
+          try {
+            solve_component(sid, results[pos]);
+          } catch (...) {
+            results[pos].error = std::current_exception();
+          }
+        }));
+      }
+      for (auto &task : tasks)
+        task.get();
+    } else {
+      for (std::size_t pos = 0; pos < layer.size(); ++pos) {
+        try {
+          solve_component(layer[pos], results[pos]);
+        } catch (...) {
+          results[pos].error = std::current_exception();
+        }
+      }
+    }
+
+    bool hit_limit = false;
+    for (std::size_t pos = 0; pos < layer.size(); ++pos) {
+      if (results[pos].error)
+        std::rethrow_exception(results[pos].error);
+      const int sid = layer[pos];
+      const auto &scc = plan.sccs[static_cast<std::size_t>(sid)];
+      for (std::size_t value_pos = 0; value_pos < scc.size(); ++value_pos) {
+        const int idx = scc[value_pos];
+        env[rhs[static_cast<std::size_t>(idx)].first] =
+            results[pos].values[value_pos];
+        init[static_cast<std::size_t>(idx)] = results[pos].values[value_pos];
+      }
+      hit_limit = hit_limit || results[pos].hit_limit;
+    }
+    note_layer_stats(layer);
+    if (hit_limit) {
+      npa_note_linear_limit_hit();
+      return init;
+    }
+  }
+
+  return init;
+}
+
+template <class D>
+std::vector<DomVal<D>> solve_linear_adaptive_scc_impl(
+    bool verbose, const std::vector<std::pair<Symbol, E1<D>>> &rhs,
+    const std::vector<
+        std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
+        &rhs_tensor,
+    std::vector<DomVal<D>> init, const NewtonRoundSetup<D> &setup) {
+  auto plan = detail::build_linear_scc_plan<D>(rhs);
+  annotate_adaptive_scc_plan<D>(plan, rhs, rhs_tensor, setup);
+  return solve_linear_adaptive_scc_from_plan<D>(verbose, rhs, rhs_tensor,
+                                                std::move(init), plan);
+}
+
+template <class D>
 std::vector<std::pair<Symbol, DomVal<D>>> run_newton_iteration(
     bool verbose, const std::vector<std::pair<Symbol, E0<D>>> &eqns,
     const std::vector<std::pair<Symbol, DomVal<D>>> &binds,
@@ -323,7 +579,7 @@ std::vector<std::pair<Symbol, DomVal<D>>> run_newton_iteration(
   auto setup = build_newton_round_setup<D>(verbose, eqns, binds, linStrat, mode);
   const bool use_tensor =
       setup.tensor_laws_validated && setup.has_lcfl_structure;
-  if (setup.tensor_requested && verbose) {
+  if (linStrat == LinearStrategy::TensorProduct && verbose) {
     if (!TensorSemiringTraits<D>::available()) {
       std::cerr << "[tensor] tensor traits unavailable for domain; "
                    "falling back to SCC\n";
@@ -355,6 +611,9 @@ std::vector<std::pair<Symbol, DomVal<D>>> run_newton_iteration(
     });
   } else if (linStrat == LinearStrategy::SCC) {
     delta = solve_linear_scc_impl<D>(verbose, setup.rhs, init);
+  } else if (linStrat == LinearStrategy::AdaptiveScc) {
+    delta = solve_linear_adaptive_scc_impl<D>(verbose, setup.rhs,
+                                              setup.rhs_tensor, init, setup);
   } else if (use_tensor) {
     delta = solve_linear_tensor_paper_impl<D>(verbose, setup.rhs,
                                               setup.rhs_tensor, init);
@@ -381,7 +640,12 @@ template <class D, class ITER> struct Solver {
         LinearStrategy linStrat = LinearStrategy::SCC,
         DomainContractMode contractMode = DomainContractMode::Off) {
     NPA_REQUIRE_DOMAIN(D);
+    ApproximationSourceCollector approximation_collector;
+    ScopedApproximationSourceCollector collector_scope(approximation_collector);
+    AdaptiveSccSolveCollector adaptive_scc_collector;
+    ScopedAdaptiveSccSolveCollector adaptive_scc_scope(adaptive_scc_collector);
     npa_reset_limit_hit();
+    npa_reset_adaptive_scc_stats();
     bool contractOk = true;
     const bool checksRun = contractMode == DomainContractMode::BasicChecks;
     if (checksRun) {
@@ -427,6 +691,13 @@ template <class D, class ITER> struct Solver {
     st.effective_max_iters = max;
     st.linear_strategy = linStrat;
     st.used_approx_equal = DomainHasApproxEqual<D>::value;
+    const auto adaptive_stats = npa_adaptive_scc_solve_stats();
+    st.adaptive_scc_used = adaptive_stats.used;
+    st.adaptive_scc_direct_count = adaptive_stats.direct_count;
+    st.adaptive_scc_worklist_count = adaptive_stats.worklist_count;
+    st.adaptive_scc_tensor_count = adaptive_stats.tensor_count;
+    st.adaptive_scc_tensor_fallback_count =
+        adaptive_stats.tensor_fallback_count;
     st.converged = converged && !st.hit_limit && !st.used_approx_equal;
     st.domain_contract_checks_run = checksRun;
     st.domain_contract_checks_failed = checksRun && !contractOk;

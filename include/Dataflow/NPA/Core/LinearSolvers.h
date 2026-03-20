@@ -29,12 +29,45 @@ namespace npa {
 
 namespace detail {
 
+enum class SccStrategy {
+  Direct,
+  Worklist,
+  Tensor,
+};
+
+enum class TensorFallbackReason {
+  None,
+  TensorUnavailable,
+  TensorNotPaperAdmissible,
+  TensorLawsNotValidated,
+  ProjectionFragmentUnsupported,
+};
+
+struct LinearSccInfo {
+  std::vector<int> members;
+  bool has_self_loop = false;
+  bool is_cyclic = false;
+  std::size_t edge_count = 0;
+  double density = 0.0;
+  bool has_lcfl_structure = false;
+  bool tensor_available = false;
+  bool tensor_admissible = false;
+  bool tensor_laws_validated = false;
+  bool tensor_projection_sensitive = false;
+  bool tensor_projection_fragment_supported = false;
+  bool tensor_eligible = false;
+  bool tensor_fallback = false;
+  TensorFallbackReason tensor_fallback_reason = TensorFallbackReason::None;
+  SccStrategy strategy = SccStrategy::Worklist;
+};
+
 template <class D> struct LinearSccPlan {
   std::unordered_map<Symbol, int> sym_to_idx;
   std::vector<std::vector<int>> out_edges;
   std::vector<std::vector<int>> intra_scc_users;
   std::vector<int> scc_id;
   std::vector<std::vector<int>> sccs;
+  std::vector<LinearSccInfo> infos;
   std::vector<std::vector<int>> cond_successors;
   std::vector<std::vector<int>> cond_predecessors;
   std::vector<std::vector<int>> layers;
@@ -105,6 +138,28 @@ build_linear_scc_plan(const std::vector<std::pair<Symbol, E1<D>>> &rhs) {
   for (int i = 0; i < n; ++i)
     plan.sccs[static_cast<std::size_t>(plan.scc_id[static_cast<std::size_t>(i)])]
         .push_back(i);
+  plan.infos.assign(static_cast<std::size_t>(scc_count), {});
+  for (int sid = 0; sid < scc_count; ++sid)
+    plan.infos[static_cast<std::size_t>(sid)].members =
+        plan.sccs[static_cast<std::size_t>(sid)];
+
+  for (int sid = 0; sid < scc_count; ++sid) {
+    auto &info = plan.infos[static_cast<std::size_t>(sid)];
+    for (int idx : info.members) {
+      for (int dep : plan.out_edges[static_cast<std::size_t>(idx)]) {
+        if (plan.scc_id[static_cast<std::size_t>(dep)] != sid)
+          continue;
+        ++info.edge_count;
+        if (dep == idx)
+          info.has_self_loop = true;
+      }
+    }
+    info.is_cyclic = info.members.size() > 1 || info.has_self_loop;
+    const double denom =
+        static_cast<double>(info.members.size() * info.members.size());
+    info.density = denom > 0.0 ? static_cast<double>(info.edge_count) / denom
+                               : 0.0;
+  }
 
   plan.intra_scc_users.assign(static_cast<std::size_t>(n), {});
   for (int user = 0; user < n; ++user) {
@@ -327,6 +382,7 @@ solve_linear_scc_parallel_from_plan(
 
   std::atomic<long> shared_steps(0);
   ThreadPool *pool = ThreadPool::get();
+  const auto execution_context = capture_execution_context<D>();
   for (const auto &layer : plan.layers) {
     if (layer.size() == 1) {
       const int sid = layer.front();
@@ -353,6 +409,7 @@ solve_linear_scc_parallel_from_plan(
     for (std::size_t pos = 0; pos < layer.size(); ++pos) {
       const int sid = layer[pos];
       tasks.emplace_back(pool->enqueue([&, pos, sid] {
+        ScopedExecutionContext<D> context_scope(execution_context);
         try {
           solve_linear_scc_parallel_component<D>(
               rhs, plan.sccs[static_cast<std::size_t>(sid)],

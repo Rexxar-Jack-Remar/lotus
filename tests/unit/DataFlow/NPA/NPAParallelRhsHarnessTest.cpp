@@ -50,6 +50,10 @@ struct LimitedBoolSemiring : BoolSemiring {
   static constexpr long max_linear_steps = 1;
 };
 
+struct LimitedFixpointBoolSemiring : BoolSemiring {
+  static constexpr int max_fixpoint_iters = 0;
+};
+
 std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &ctx,
                                           const std::string &ir) {
   llvm::SMDiagnostic err;
@@ -141,6 +145,16 @@ void expectAnalysisStatusEquivalent(const npa::AnalysisStatus &lhs,
             rhs.summary_solve.used_auto_n_cap);
   EXPECT_EQ(lhs.summary_solve.retried_without_auto_n_cap,
             rhs.summary_solve.retried_without_auto_n_cap);
+  EXPECT_EQ(lhs.summary_solve.adaptive_scc_used,
+            rhs.summary_solve.adaptive_scc_used);
+  EXPECT_EQ(lhs.summary_solve.adaptive_scc_direct_count,
+            rhs.summary_solve.adaptive_scc_direct_count);
+  EXPECT_EQ(lhs.summary_solve.adaptive_scc_worklist_count,
+            rhs.summary_solve.adaptive_scc_worklist_count);
+  EXPECT_EQ(lhs.summary_solve.adaptive_scc_tensor_count,
+            rhs.summary_solve.adaptive_scc_tensor_count);
+  EXPECT_EQ(lhs.summary_solve.adaptive_scc_tensor_fallback_count,
+            rhs.summary_solve.adaptive_scc_tensor_fallback_count);
   EXPECT_EQ(lhs.propagation_steps, rhs.propagation_steps);
   EXPECT_EQ(lhs.propagation_converged, rhs.propagation_converged);
   EXPECT_EQ(lhs.propagation_hit_limit, rhs.propagation_hit_limit);
@@ -287,6 +301,31 @@ TEST(NPAParallelRhsHarness, NewtonRunMatchesAcrossSetupModes) {
          npa::detail::NewtonSetupExecutionMode::ForceParallel);
 
   EXPECT_EQ(toMap<D>(serial), toMap<D>(parallel));
+}
+
+TEST(NPAParallelRhsHarness, NewtonSolverPropagatesFixpointLimitFromSetupTasks) {
+  using D = LimitedFixpointBoolSemiring;
+  using E0 = npa::E0<D>;
+  using Exp0 = npa::Exp0<D>;
+
+  std::vector<std::pair<npa::Symbol, E0>> eqns;
+  for (unsigned i = 0; i < kSafeCoreChainDepth; ++i) {
+    eqns.emplace_back(
+        "X" + std::to_string(i),
+        Exp0::star(Exp0::ndet(Exp0::bound("b"), Exp0::term(D::one())), "b"));
+  }
+
+  auto result = npa::NewtonSolver<D>::solve(eqns, false, -1,
+                                            npa::LinearStrategy::SCC);
+  auto solved = toMap<D>(result.first);
+
+  EXPECT_FALSE(result.second.converged);
+  EXPECT_TRUE(result.second.hit_limit);
+  EXPECT_FALSE(result.second.hit_outer_limit);
+  EXPECT_FALSE(result.second.hit_linear_limit);
+  EXPECT_TRUE(result.second.hit_fixpoint_limit);
+  for (const auto &entry : solved)
+    EXPECT_TRUE(entry.second);
 }
 
 TEST(NPAParallelRhsHarness, VerboseModeDisablesAutomaticParallelSetup) {
@@ -646,6 +685,51 @@ TEST(NPAParallelRhsHarness,
 }
 
 TEST(NPAParallelRhsHarness,
+     ConstantPropagationAdaptiveSccMatchesSccAndReportsStats) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, buildScalarIdentityChainIR(kSafeCoreChainDepth));
+  ASSERT_NE(module, nullptr);
+
+  auto scc = npa::InterproceduralConstantPropagation::run(
+      *module, false, npa::LinearStrategy::SCC);
+  auto adaptive = npa::InterproceduralConstantPropagation::run(
+      *module, false, npa::LinearStrategy::AdaptiveScc);
+
+  expectSummariesEqual(scc.summaries, adaptive.summaries,
+                       [](const auto &lhs, const auto &rhs) {
+                         return lhs == rhs;
+                       });
+  expectBlockFactsEqual(scc.blockFacts, adaptive.blockFacts,
+                        [](const auto &lhs, const auto &rhs) {
+                          return lhs == rhs;
+                        });
+  EXPECT_TRUE(adaptive.status.summary_solve.adaptive_scc_used);
+  EXPECT_GE(adaptive.status.summary_solve.adaptive_scc_direct_count, 1);
+}
+
+TEST(NPAParallelRhsHarness, IntervalAdaptiveSccMatchesSccAndReportsStats) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, buildScalarIdentityChainIR(kSafeCoreChainDepth));
+  ASSERT_NE(module, nullptr);
+
+  auto scc = npa::InterproceduralIntervalAnalysis::run(
+      *module, false, npa::LinearStrategy::SCC);
+  auto adaptive = npa::InterproceduralIntervalAnalysis::run(
+      *module, false, npa::LinearStrategy::AdaptiveScc);
+
+  expectSummariesEqual(scc.summaries, adaptive.summaries,
+                       [](const auto &lhs, const auto &rhs) {
+                         return lhs == rhs;
+                       });
+  expectBlockFactsEqual(scc.blockFacts, adaptive.blockFacts,
+                        [](const auto &lhs, const auto &rhs) {
+                          return lhs == rhs;
+                        });
+  EXPECT_TRUE(adaptive.status.summary_solve.adaptive_scc_used);
+  EXPECT_GE(adaptive.status.summary_solve.adaptive_scc_direct_count, 1);
+}
+
+TEST(NPAParallelRhsHarness,
      PredicateTensorSolverProducesDeterministicSummaryAcrossWorkerCounts) {
   using D = npa::PredicateRelationDomain;
   using E0 = npa::E0<D>;
@@ -698,6 +782,188 @@ TEST(NPAParallelRhsHarness,
   ASSERT_EQ(tensor.first.size(), 1u);
   ASSERT_EQ(scc.first.size(), 1u);
   EXPECT_TRUE(D::equal(tensor.first[0].second, scc.first[0].second));
+}
+
+TEST(NPAParallelRhsHarness, AdaptiveSccPlanChoosesDirectForAcyclicSingletons) {
+  using D = BoolSemiring;
+  using Exp1 = npa::Exp1<D>;
+  using E1 = npa::E1<D>;
+  using TD = typename npa::TensorSemiringTraits<D>::tensor_domain;
+
+  std::vector<std::pair<npa::Symbol, E1>> rhs;
+  rhs.emplace_back("A", Exp1::term(true));
+  rhs.emplace_back("B", Exp1::hole("A"));
+
+  std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
+  auto plan = npa::detail::build_linear_scc_plan<D>(rhs);
+  npa::detail::NewtonRoundSetup<D> setup;
+  npa::detail::annotate_adaptive_scc_plan<D>(plan, rhs, rhs_tensor, setup);
+
+  ASSERT_EQ(plan.infos.size(), 2u);
+  for (const auto &info : plan.infos) {
+    EXPECT_EQ(info.strategy, npa::detail::SccStrategy::Direct);
+    EXPECT_FALSE(info.is_cyclic);
+    EXPECT_FALSE(info.tensor_fallback);
+  }
+}
+
+TEST(NPAParallelRhsHarness, AdaptiveSccPlanChoosesWorklistForNonLcflCycle) {
+  using D = BoolSemiring;
+  using Exp1 = npa::Exp1<D>;
+  using E1 = npa::E1<D>;
+  using TD = typename npa::TensorSemiringTraits<D>::tensor_domain;
+
+  std::vector<std::pair<npa::Symbol, E1>> rhs;
+  rhs.emplace_back("X", Exp1::hole("Y"));
+  rhs.emplace_back("Y", Exp1::add(Exp1::term(true), Exp1::hole("X")));
+
+  std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
+  auto plan = npa::detail::build_linear_scc_plan<D>(rhs);
+  npa::detail::NewtonRoundSetup<D> setup;
+  npa::detail::annotate_adaptive_scc_plan<D>(plan, rhs, rhs_tensor, setup);
+
+  ASSERT_EQ(plan.infos.size(), 1u);
+  EXPECT_EQ(plan.infos.front().strategy, npa::detail::SccStrategy::Worklist);
+  EXPECT_TRUE(plan.infos.front().is_cyclic);
+  EXPECT_FALSE(plan.infos.front().has_lcfl_structure);
+  EXPECT_FALSE(plan.infos.front().tensor_fallback);
+}
+
+TEST(NPAParallelRhsHarness, AdaptiveSccPlanChoosesTensorForLcflCycle) {
+  using D = npa::PredicateRelationDomain;
+  using E0 = npa::E0<D>;
+  using Exp0 = npa::Exp0<D>;
+
+  D::configure(2, 1);
+  E0 set_global_true = Exp0::term(D::assignConst(0, true));
+  E0 set_local_true = Exp0::term(D::assignConst(1, true));
+  E0 id = Exp0::term(D::one());
+  E0 rhs = Exp0::project(
+      Exp0::ndet(id, Exp0::concat(set_global_true, "X", set_local_true)));
+
+  std::vector<std::pair<npa::Symbol, E0>> eqns;
+  eqns.emplace_back("X", rhs);
+  auto binds = npa::detail::build_newton_initial_values<D>(eqns);
+  auto setup = npa::detail::build_newton_round_setup<D>(
+      false, eqns, binds, npa::LinearStrategy::AdaptiveScc);
+  auto plan = npa::detail::build_linear_scc_plan<D>(setup.rhs);
+  npa::detail::annotate_adaptive_scc_plan<D>(plan, setup.rhs, setup.rhs_tensor,
+                                             setup);
+
+  ASSERT_EQ(plan.infos.size(), 1u);
+  EXPECT_EQ(plan.infos.front().strategy, npa::detail::SccStrategy::Tensor);
+  EXPECT_TRUE(plan.infos.front().is_cyclic);
+  EXPECT_TRUE(plan.infos.front().has_lcfl_structure);
+  EXPECT_TRUE(plan.infos.front().tensor_eligible);
+}
+
+TEST(NPAParallelRhsHarness, AdaptiveSccPlanTracksTensorFallbackWhenUnavailable) {
+  using D = BoolSemiring;
+  using Exp1 = npa::Exp1<D>;
+  using E1 = npa::E1<D>;
+  using TD = typename npa::TensorSemiringTraits<D>::tensor_domain;
+
+  std::vector<std::pair<npa::Symbol, E1>> rhs;
+  rhs.emplace_back(
+      "X", Exp1::add(Exp1::term(true),
+                     Exp1::concat(Exp1::term(true), "X", Exp1::term(true))));
+
+  std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
+  auto plan = npa::detail::build_linear_scc_plan<D>(rhs);
+  npa::detail::NewtonRoundSetup<D> setup;
+  npa::detail::annotate_adaptive_scc_plan<D>(plan, rhs, rhs_tensor, setup);
+
+  ASSERT_EQ(plan.infos.size(), 1u);
+  EXPECT_EQ(plan.infos.front().strategy, npa::detail::SccStrategy::Worklist);
+  EXPECT_TRUE(plan.infos.front().has_lcfl_structure);
+  EXPECT_TRUE(plan.infos.front().tensor_fallback);
+  EXPECT_EQ(plan.infos.front().tensor_fallback_reason,
+            npa::detail::TensorFallbackReason::TensorUnavailable);
+}
+
+TEST(NPAParallelRhsHarness,
+     AdaptiveSccMatchesSccOnMixedOrdinarySystemAndReportsCounts) {
+  using D = BoolSemiring;
+  using E0 = npa::E0<D>;
+  using Exp0 = npa::Exp0<D>;
+
+  std::vector<std::pair<npa::Symbol, E0>> eqns;
+  eqns.emplace_back("A", Exp0::term(true));
+  eqns.emplace_back("X", Exp0::hole("Y"));
+  eqns.emplace_back("Y", Exp0::ndet(Exp0::term(true), Exp0::hole("X")));
+
+  auto scc =
+      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
+  auto adaptive = npa::NewtonSolver<D>::solve(eqns, false, -1,
+                                              npa::LinearStrategy::AdaptiveScc);
+
+  EXPECT_EQ(toMap<D>(scc.first), toMap<D>(adaptive.first));
+  EXPECT_TRUE(adaptive.second.converged);
+  EXPECT_TRUE(adaptive.second.adaptive_scc_used);
+  EXPECT_GE(adaptive.second.adaptive_scc_direct_count, 1);
+  EXPECT_GE(adaptive.second.adaptive_scc_worklist_count, 1);
+  EXPECT_EQ(adaptive.second.adaptive_scc_tensor_count, 0);
+  EXPECT_EQ(adaptive.second.adaptive_scc_tensor_fallback_count, 0);
+}
+
+TEST(NPAParallelRhsHarness,
+     AdaptiveSccMatchesTensorOnTensorEligibleSystemAndReportsCounts) {
+  using D = npa::PredicateRelationDomain;
+  using E0 = npa::E0<D>;
+  using Exp0 = npa::Exp0<D>;
+
+  D::configure(2, 1);
+  E0 set_global_true = Exp0::term(D::assignConst(0, true));
+  E0 set_local_true = Exp0::term(D::assignConst(1, true));
+  E0 id = Exp0::term(D::one());
+  E0 rhs = Exp0::project(
+      Exp0::ndet(id, Exp0::concat(set_global_true, "X", set_local_true)));
+
+  std::vector<std::pair<npa::Symbol, E0>> eqns;
+  eqns.emplace_back("X", rhs);
+
+  auto tensor = npa::NewtonSolver<D>::solve(eqns, false, -1,
+                                            npa::LinearStrategy::TensorProduct);
+  auto adaptive = npa::NewtonSolver<D>::solve(eqns, false, -1,
+                                              npa::LinearStrategy::AdaptiveScc);
+
+  ASSERT_EQ(tensor.first.size(), 1u);
+  ASSERT_EQ(adaptive.first.size(), 1u);
+  EXPECT_TRUE(D::equal(tensor.first[0].second, adaptive.first[0].second));
+  EXPECT_TRUE(adaptive.second.adaptive_scc_used);
+  EXPECT_EQ(adaptive.second.adaptive_scc_direct_count, 0);
+  EXPECT_EQ(adaptive.second.adaptive_scc_worklist_count, 0);
+  EXPECT_GE(adaptive.second.adaptive_scc_tensor_count, 1);
+  EXPECT_EQ(adaptive.second.adaptive_scc_tensor_fallback_count, 0);
+}
+
+TEST(NPAParallelRhsHarness,
+     AdaptiveSccMatchesSccOnMixedTensorAndDirectSystemAndReportsCounts) {
+  using D = npa::PredicateRelationDomain;
+  using E0 = npa::E0<D>;
+  using Exp0 = npa::Exp0<D>;
+
+  D::configure(2, 1);
+  E0 set_global_true = Exp0::term(D::assignConst(0, true));
+  E0 set_local_true = Exp0::term(D::assignConst(1, true));
+  E0 id = Exp0::term(D::one());
+  E0 tensor_rhs = Exp0::project(
+      Exp0::ndet(id, Exp0::concat(set_global_true, "X", set_local_true)));
+
+  std::vector<std::pair<npa::Symbol, E0>> eqns;
+  eqns.emplace_back("A", id);
+  eqns.emplace_back("X", tensor_rhs);
+
+  auto scc =
+      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
+  auto adaptive = npa::NewtonSolver<D>::solve(eqns, false, -1,
+                                              npa::LinearStrategy::AdaptiveScc);
+
+  ASSERT_EQ(scc.first.size(), adaptive.first.size());
+  for (std::size_t i = 0; i < scc.first.size(); ++i)
+    EXPECT_TRUE(D::equal(scc.first[i].second, adaptive.first[i].second));
+  EXPECT_GE(adaptive.second.adaptive_scc_direct_count, 1);
+  EXPECT_GE(adaptive.second.adaptive_scc_tensor_count, 1);
 }
 
 int main(int argc, char **argv) {
