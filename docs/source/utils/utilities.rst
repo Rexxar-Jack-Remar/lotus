@@ -216,7 +216,7 @@ Multi-threading
 **Usage**:
 .. code-block:: cpp
 
-   #include "Utils/LLVM/ThreadPool.h"
+   #include "Utils/Parallel/ThreadPool.h"
    ThreadPool* pool = ThreadPool::get();
    auto future = pool->enqueue([]() { return compute(); });
    auto result = future.get();
@@ -252,7 +252,7 @@ Common Usage Patterns
 **Thread Pool**:
 .. code-block:: cpp
 
-   #include "Utils/LLVM/ThreadPool.h"
+   #include "Utils/Parallel/ThreadPool.h"
    ThreadPool* pool = ThreadPool::get();
    std::vector<std::future<Result>> futures;
    for (auto& item : items) {

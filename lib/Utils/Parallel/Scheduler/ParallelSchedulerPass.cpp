@@ -1,6 +1,6 @@
-#include "Utils/LLVM/Scheduler/ParallelSchedulerPass.h"
+#include "Utils/Parallel/Scheduler/ParallelSchedulerPass.h"
 
-#include "Utils/LLVM/Scheduler/PipelineScheduler.h"
+#include "Utils/Parallel/Scheduler/PipelineScheduler.h"
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Support/CommandLine.h>

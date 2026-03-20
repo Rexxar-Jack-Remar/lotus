@@ -19,7 +19,7 @@
 #include "Dataflow/NPA/Core/Diff.h"
 #include "Dataflow/NPA/Core/Eval.h"
 #include "Dataflow/NPA/Core/LCFLDetector.h"
-#include "Utils/LLVM/ThreadPool.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <atomic>
 #include <exception>

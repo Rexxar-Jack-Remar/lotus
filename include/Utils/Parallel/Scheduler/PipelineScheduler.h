@@ -1,10 +1,11 @@
 #ifndef LLVMUTILS_SCHEDULER_PIPELINESCHEDULER_H
 #define LLVMUTILS_SCHEDULER_PIPELINESCHEDULER_H
 
-#include "Utils/LLVM/Scheduler/Task.h"
+#include "Utils/Parallel/Scheduler/Task.h"
 #include "Utils/Platform/ProgressBar.h"
 
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -85,6 +86,10 @@ private:
   std::condition_variable FTVecCond;
   /// @}
 
+  /// The first task failure observed on a worker thread.
+  std::exception_ptr TaskFailure;
+  std::mutex FailureMutex;
+
   /// Progress bar for user feedback
   ProgressBar Prog;
 
@@ -108,6 +113,12 @@ private:
 
   /// Called when a task is finished
   void finishTask(std::shared_ptr<Task> T);
+
+  /// Record the first task failure for later rethrow on the main thread.
+  void recordTaskFailure(std::exception_ptr Failure);
+
+  /// Return the first worker failure, if any.
+  std::exception_ptr getTaskFailure();
 
   /// Post-process a FunctionTask after completion
   int postProcessFunctionTask(std::shared_ptr<FunctionTask> T);

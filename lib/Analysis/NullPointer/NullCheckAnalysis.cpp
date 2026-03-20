@@ -21,7 +21,7 @@
 #include "Analysis/NullPointer/LocalNullCheckAnalysis.h"
 #include "Analysis/NullPointer/NullFlowAnalysis.h"
 #include "Utils/LLVM/RecursiveTimer.h"
-#include "Utils/LLVM/ThreadPool.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>

@@ -24,7 +24,7 @@
 #include "Alias/DyckAA/DyckModRefAnalysis.h"
 #include "Analysis/CFG/CFGReachability.h"
 #include "Utils/LLVM/RecursiveTimer.h"
-#include "Utils/LLVM/ThreadPool.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <mutex>
 

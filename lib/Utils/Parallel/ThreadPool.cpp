@@ -17,12 +17,12 @@
 /// - Wait synchronization for task completion
 ///===----------------------------------------------------------------------===//
 
-#include "Utils/LLVM/ThreadPool.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <mutex>
 
 #include <llvm/Support/CommandLine.h>
-#include <unistd.h>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 
@@ -55,12 +55,9 @@ ThreadPool::ThreadPool() : IsStop(false) {
   if (NumWorkers == 0) {
     // We do not fork any threads, just use the main thread
   } else if (NumWorkers > NCores) {
-    // Set default value
-    NumWorkers.setValue(NCores <= 10 ? (NCores >= 2 ? NCores - 1 : 1) : 10);
-  }
-
-  for (auto &Worker : Workers) {
-    ThreadLocals[Worker.get_id()] = nullptr;
+    errs() << "Warning: requested " << NumWorkers
+           << " workers but only detected " << NCores
+           << " hardware threads; oversubscription may degrade performance.\n";
   }
 
   NumRunningTask = 0;
@@ -98,27 +95,30 @@ ThreadPool::ThreadPool() : IsStop(false) {
         {
           std::unique_lock<std::mutex> Lock(this->QueueMutex);
           NumRunningTask--;
+          if (TaskQueue.empty() && NumRunningTask == 0)
+            Condition.notify_all();
         }
       }
     });
+
+    ThreadLocals[Workers.back().get_id()] = nullptr;
   }
 }
 
 // Waits for all tasks to complete.
 void ThreadPool::wait() {
-  while (true) {
-    {
-      std::unique_lock<std::mutex> Lock(this->QueueMutex);
-      if (TaskQueue.empty() && NumRunningTask == 0) {
-        break;
-      }
-    }
-    usleep(10000);
-  }
+  std::unique_lock<std::mutex> Lock(this->QueueMutex);
+  if (Workers.empty())
+    return;
+
+  Condition.wait(Lock, [this] {
+    return TaskQueue.empty() && NumRunningTask == 0;
+  });
 }
 
 // Destructor joins all worker threads.
 ThreadPool::~ThreadPool() {
+  wait();
   {
     std::unique_lock<std::mutex> Lock(QueueMutex);
     IsStop = true;

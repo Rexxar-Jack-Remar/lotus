@@ -28,7 +28,6 @@ Abstract data structures:
 - `PushPopCache.h` – Push/pop cache
 - `SortedVector.h` – Sorted vector
 - `TarjanScc.h` – Tarjan's SCC algorithm
-- `ThreadSafe.h` – Thread-safe wrappers
 - `TwoLevelWorkList.h` – Two-level worklist
 - `VectorMap.h` – Vector-based map
 - `VectorSet.h` – Vector-based set
@@ -95,7 +94,6 @@ LLVM-specific utilities:
 - `Statistics.cpp/.h` – Statistics collection
 - `StringUtils.cpp/.h` – String manipulation
 - `SystemHeaders.h` – System header includes
-- `ThreadPool.cpp/.h` – Thread pool
 
 ### IO
 
@@ -104,17 +102,16 @@ LLVM-specific utilities:
 - `ReadIR.cpp/.h` – LLVM IR reading
 - `WriteIR.cpp/.h` – LLVM IR writing
 
-### Scheduler
-
-- `ParallelSchedulerPass.cpp/.h` – Parallel pass scheduling
-- `PipelineScheduler.cpp/.h` – Pass pipeline scheduling
-- `Task.cpp/.h` – Task representation
-
 ## Parallel
 
 Multi-threading support:
 
 - `MultiThreading.cpp/.h` – Thread management
+- `ThreadSafe.h` – Thread-safe wrappers
+- `ThreadPool.cpp/.h` – Thread pool
+- `Scheduler/ParallelSchedulerPass.cpp/.h` – Parallel pass scheduling
+- `Scheduler/PipelineScheduler.cpp/.h` – Pass pipeline scheduling
+- `Scheduler/Task.cpp/.h` – Task representation
 - `lockfree/` – Lock-free data structures
 
 ### lockfree

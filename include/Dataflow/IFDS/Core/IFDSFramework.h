@@ -7,7 +7,7 @@
 #pragma once
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Utils/ADT/ThreadSafe.h"
+#include "Utils/Parallel/ThreadSafe.h"
 
 #include <functional>
 #include <memory>

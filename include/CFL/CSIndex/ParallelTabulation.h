@@ -6,58 +6,13 @@
 #include "CFL/CSIndex/Graph.h"
 
 #include <future>
-#include <memory>
-#include <mutex>
 #include <set>
 #include <vector>
-
-// Thread-safe wrapper for sets using thread-local storage
-class ThreadSafeVisitedSet {
-private:
-  std::vector<std::set<int>> local_visited_sets;
-  std::mutex mutex;
-
-public:
-  ThreadSafeVisitedSet(size_t num_threads) : local_visited_sets(num_threads) {}
-
-  void clear(size_t thread_id) {
-    std::lock_guard<std::mutex> lock(mutex);
-    if (thread_id < local_visited_sets.size()) {
-      local_visited_sets[thread_id].clear();
-    }
-  }
-
-  void insert(size_t thread_id, int value) {
-    std::lock_guard<std::mutex> lock(mutex);
-    if (thread_id < local_visited_sets.size()) {
-      local_visited_sets[thread_id].insert(value);
-    }
-  }
-
-  bool count(size_t thread_id, int value) {
-    std::lock_guard<std::mutex> lock(mutex);
-    if (thread_id < local_visited_sets.size()) {
-      return local_visited_sets[thread_id].count(value) > 0;
-    }
-    return false;
-  }
-
-  std::set<int> &get_set(size_t thread_id) {
-    std::lock_guard<std::mutex> lock(mutex);
-    if (thread_id < local_visited_sets.size()) {
-      return local_visited_sets[thread_id];
-    }
-    static std::set<int> empty_set;
-    return empty_set;
-  }
-};
 
 class ParallelTabulation : public AbstractQuery {
 private:
   Graph &vfg;
   size_t num_threads;
-  std::unique_ptr<ThreadSafeVisitedSet> visited_sets;
-  std::unique_ptr<ThreadSafeVisitedSet> func_visited_sets;
 
 public:
   /**
@@ -86,10 +41,10 @@ public:
    * vertices
    * @param s Source vertex ID
    * @param t Target vertex ID
-   * @param thread_id Thread ID for thread-local storage
+   * @param visited Reachability-local visited set for function-body traversal
    * @return true if reachable, false otherwise
    */
-  bool reach_func(int s, int t, size_t thread_id);
+  bool reach_func(int s, int t, std::set<int> &visited);
 
   /**
    * @brief Check if edge represents a function call
@@ -125,27 +80,27 @@ public:
    * @param start Start vertex index
    * @param end End vertex index
    * @param results Vector to store results
-   * @param results_mutex Mutex for thread-safe result storage
    */
   void process_vertex_range(int start, int end,
-                            std::vector<std::set<int>> &results,
-                            std::mutex &results_mutex);
+                            std::vector<std::set<int>> &results);
 
   /**
    * @brief Parallel traversal from source vertex
    * @param s Source vertex ID
    * @param tc Set to store reachable vertices
-   * @param thread_id Thread ID for thread-local storage
+   * @param visited Reachability-local visited set for interprocedural traversal
+   * @param func_visited Reachability-local visited set for function-body traversal
    */
-  void traverse_parallel(int s, std::set<int> &tc, size_t thread_id);
+  void traverse_parallel(int s, std::set<int> &tc, std::set<int> &visited,
+                         std::set<int> &func_visited);
 
   /**
    * @brief Parallel traversal within function body from source vertex
    * @param s Source vertex ID
    * @param tc Set to store reachable vertices
-   * @param thread_id Thread ID for thread-local storage
+   * @param visited Reachability-local visited set for function-body traversal
    */
-  void traverse_func_parallel(int s, std::set<int> &tc, size_t thread_id);
+  void traverse_func_parallel(int s, std::set<int> &tc, std::set<int> &visited);
 
   /**
    * @brief Get the method name

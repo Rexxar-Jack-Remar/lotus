@@ -6,8 +6,8 @@
 #include "Analysis/Concurrency/MHP/StaticVectorClockMHP.h"
 
 #include <llvm/Analysis/LoopInfo.h>
-#include <llvm/IR/Dominators.h>
 #include <llvm/IR/CFG.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>

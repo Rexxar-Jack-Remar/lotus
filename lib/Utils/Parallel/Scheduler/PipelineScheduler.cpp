@@ -1,8 +1,9 @@
-#include "Utils/LLVM/Scheduler/PipelineScheduler.h"
+#include "Utils/Parallel/Scheduler/PipelineScheduler.h"
 
-#include "Utils/LLVM/ThreadPool.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <chrono>
+#include <functional>
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Function.h>
@@ -23,6 +24,16 @@ static cl::opt<int>
 static inline bool shouldAnalyzeFunction(const Function *Func) {
   return Func && !Func->isIntrinsic() && !Func->isDeclaration();
 }
+
+namespace {
+
+enum class VisitState {
+  Unseen,
+  Active,
+  Done,
+};
+
+} // namespace
 
 PipelineScheduler::PipelineScheduler(Module &M, CallGraph &CG, AnalysisType AT)
     : M(M), CG(CG), AType(AT),
@@ -93,6 +104,20 @@ void PipelineScheduler::finishTask(std::shared_ptr<Task> T) {
   FTVecCond.notify_one();
 }
 
+void PipelineScheduler::recordTaskFailure(std::exception_ptr Failure) {
+  if (!Failure)
+    return;
+
+  std::lock_guard<std::mutex> Lock(FailureMutex);
+  if (!TaskFailure)
+    TaskFailure = Failure;
+}
+
+std::exception_ptr PipelineScheduler::getTaskFailure() {
+  std::lock_guard<std::mutex> Lock(FailureMutex);
+  return TaskFailure;
+}
+
 void PipelineScheduler::run() {
   if (!TaskCallback) {
     errs() << "Error: TaskCallback not set! Call setTaskCallback() before "
@@ -126,12 +151,19 @@ void PipelineScheduler::run() {
   waitTask();
   ThreadPool::get()->wait();
 
+  if (std::exception_ptr Failure = getTaskFailure())
+    std::rethrow_exception(Failure);
+
   llvm::outs() << "\nPipeline scheduler completed!\n";
 }
 
 void PipelineScheduler::executeTask(std::shared_ptr<Task> T) {
   ThreadPool::get()->enqueue([T, this]() {
-    T->run();
+    try {
+      T->run();
+    } catch (...) {
+      recordTaskFailure(std::current_exception());
+    }
     this->finishTask(T);
   });
 }
@@ -144,6 +176,11 @@ void PipelineScheduler::waitTask() {
   while (NumUnfinishedTasks || NumGCTasks) {
     LLVM_DEBUG(dbgs() << "[PipelineScheduler] Unfinished tasks: "
                       << NumUnfinishedTasks << "\n");
+
+    if (getTaskFailure()) {
+      errs() << "\nError: task execution failed; stopping scheduler.\n";
+      break;
+    }
 
     std::shared_ptr<Task> T(nullptr);
     {
@@ -167,6 +204,11 @@ void PipelineScheduler::waitTask() {
     if (isa<GCTask>(T.get())) {
       NumGCTasks--;
     } else if (isa<FunctionTask>(T.get())) {
+      if (getTaskFailure()) {
+        --NumUnfinishedTasks;
+        continue;
+      }
+
       int NumGCTasksAdded =
           postProcessFunctionTask(std::static_pointer_cast<FunctionTask>(T));
       NumGCTasks += NumGCTasksAdded;
@@ -178,6 +220,12 @@ void PipelineScheduler::waitTask() {
       else
         Prog.showProgress(1);
     }
+  }
+
+  if (!getTaskFailure() && EnableGC && GCCallback && !FunctionToRelease.empty()) {
+    GCTask TrailingGC(FunctionToRelease, GCCallback, ClientContext);
+    TrailingGC.run();
+    FunctionToRelease.clear();
   }
 
   llvm::outs() << "\n";
@@ -251,53 +299,65 @@ int PipelineScheduler::computeBottomUpDeps(size_t NumEdges) {
   memset(NextEdge, -1, NumEdges * sizeof(int));
 
   int EdgeIndex = 0;
+  std::map<const Function *, VisitState> VisitStates;
+  std::function<void(const Function *)> BuildDeps =
+      [&](const Function *Caller) {
+        VisitStates[Caller] = VisitState::Active;
+
+        int CallerIndex = FunctionIndexMap[Caller];
+        CallGraphNode *CallerNode = CG[Caller];
+        if (!CallerNode) {
+          VisitStates[Caller] = VisitState::Done;
+          return;
+        }
+
+        auto &VisitedCallees = FunctionCalleeIndexVec[CallerIndex];
+        for (auto &CallRecord : *CallerNode) {
+          Function *Callee = CallRecord.second->getFunction();
+          if (!shouldAnalyzeFunction(Callee))
+            continue;
+
+          auto CalleeStateIt = VisitStates.find(Callee);
+          VisitState CalleeState = CalleeStateIt == VisitStates.end()
+                                       ? VisitState::Unseen
+                                       : CalleeStateIt->second;
+
+          if (CalleeState == VisitState::Active) {
+            LLVM_DEBUG(dbgs()
+                       << "[PipelineScheduler] Ignoring back edge "
+                       << Caller->getName() << " -> " << Callee->getName()
+                       << "\n");
+            continue;
+          }
+
+          if (CalleeState == VisitState::Unseen)
+            BuildDeps(Callee);
+
+          int CalleeIndex = FunctionIndexMap[Callee];
+
+          LLVM_DEBUG(dbgs() << "[PipelineScheduler] Edge: " << CalleeIndex
+                            << " -> " << CallerIndex << "\n");
+
+          Callees[EdgeIndex] = CalleeIndex;
+          Callers[EdgeIndex] = CallerIndex;
+          NextEdge[EdgeIndex] = FirstEdge[CalleeIndex];
+          FirstEdge[CalleeIndex] = EdgeIndex;
+          OutDegree[CallerIndex]++;
+
+          if (!VisitedCallees.count(CalleeIndex)) {
+            InDegree[CalleeIndex]++;
+            VisitedCallees.insert(CalleeIndex);
+          }
+
+          EdgeIndex++;
+        }
+
+        VisitStates[Caller] = VisitState::Done;
+      };
 
   for (const auto *Caller : Functions) {
-    if (!shouldAnalyzeFunction(Caller))
-      continue;
-
-    int CallerIndex = FunctionIndexMap[Caller];
-    CallGraphNode *CallerNode = CG[Caller];
-
-    if (!CallerNode)
-      continue;
-
-    auto &VisitedCallees = FunctionCalleeIndexVec[CallerIndex];
-
-    // Iterate over callees
-    for (auto &CallRecord : *CallerNode) {
-      Function *Callee = CallRecord.second->getFunction();
-
-      if (!shouldAnalyzeFunction(Callee))
-        continue;
-
-      // Skip recursive calls (back edges)
-      if (Callee == Caller)
-        continue;
-
-      int CalleeIndex = FunctionIndexMap[Callee];
-
-      LLVM_DEBUG(dbgs() << "[PipelineScheduler] Edge: " << CalleeIndex << " -> "
-                        << CallerIndex << "\n");
-
-      // Add edge: Callee -> Caller
-      Callees[EdgeIndex] = CalleeIndex;
-      Callers[EdgeIndex] = CallerIndex;
-
-      // Link into adjacency list
-      NextEdge[EdgeIndex] = FirstEdge[CalleeIndex];
-      FirstEdge[CalleeIndex] = EdgeIndex;
-
-      // Update degrees
-      OutDegree[CallerIndex]++;
-
-      if (!VisitedCallees.count(CalleeIndex)) {
-        InDegree[CalleeIndex]++;
-        VisitedCallees.insert(CalleeIndex);
-      }
-
-      EdgeIndex++;
-    }
+    if (VisitStates[Caller] == VisitState::Unseen)
+      BuildDeps(Caller);
   }
 
   return EdgeIndex;

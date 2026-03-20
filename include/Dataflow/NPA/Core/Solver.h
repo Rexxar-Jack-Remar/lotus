@@ -32,7 +32,7 @@
  */
 
 #include "Dataflow/NPA/Core/TensorLinearSolve.h"
-#include "Utils/LLVM/ThreadPool.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <exception>
 
