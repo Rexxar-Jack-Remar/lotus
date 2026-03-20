@@ -589,7 +589,7 @@ TEST(LotusAA, BranchNegationKeepsSiblingEdgeIdentity) {
   EXPECT_TRUE(containsBranchAtom(negated, Entry, Else));
 }
 
-TEST(LotusAA, DifferentBranchControllersDoNotCollapseAsNegations) {
+TEST(LotusAA, SameBooleanGuardAcrossControllersUsesFalconContradictions) {
   const char *IR = R"(
     define void @main(i1 %cond) {
     entry:
@@ -625,8 +625,69 @@ TEST(LotusAA, DifferentBranchControllersDoNotCollapseAsNegations) {
   path_cond_t combined = PTG->findOrCreateAndRegion(entry_true, left_false);
 
   ASSERT_NE(combined, nullptr);
-  EXPECT_TRUE(PTG->isSatisfiable(combined));
-  EXPECT_NE(combined->getKind(), PathCond::Kind::False);
+  EXPECT_FALSE(PTG->isSatisfiable(combined));
+}
+
+TEST(LotusAA, SelectAndPhiRejectImpossibleBooleanMixes) {
+  const char *IR = R"(
+    define i8* @main(i1 %cond, i8* %a, i8* %b, i8* %c) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      %sel = select i1 %cond, i8* %a, i8* %b
+      br label %merge
+    else:
+      br label %merge
+    merge:
+      %p = phi i8* [ %sel, %then ], [ %c, %else ]
+      ret i8* %p
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  Value *Phi = findValueByName(*Main, "p");
+  Value *A = findValueByName(*Main, "a");
+  Value *B = findValueByName(*Main, "b");
+  Value *C = findValueByName(*Main, "c");
+  ASSERT_NE(Phi, nullptr);
+  ASSERT_NE(A, nullptr);
+  ASSERT_NE(B, nullptr);
+  ASSERT_NE(C, nullptr);
+
+  PTResult *PhiPts = PTG->findPTResult(Phi, false);
+  ASSERT_NE(PhiPts, nullptr);
+
+  path_cond_t cond_a = nullptr;
+  path_cond_t cond_b = nullptr;
+  path_cond_t cond_c = nullptr;
+
+  PTResultIterator iter(PhiPts, PTG);
+  for (auto &pt_item : iter) {
+    Value *alloc_site = pt_item.first->getObj()->getAllocSite();
+    if (alloc_site == A)
+      cond_a = pt_item.second;
+    else if (alloc_site == B)
+      cond_b = pt_item.second;
+    else if (alloc_site == C)
+      cond_c = pt_item.second;
+  }
+
+  ASSERT_NE(cond_a, nullptr);
+  ASSERT_NE(cond_b, nullptr);
+  ASSERT_NE(cond_c, nullptr);
+  EXPECT_TRUE(PTG->isSatisfiable(cond_a));
+  EXPECT_FALSE(PTG->isSatisfiable(cond_b));
+  EXPECT_TRUE(PTG->isSatisfiable(cond_c));
 }
 
 TEST(LotusAA, PhiMergingSamePointerKeepsBothSiblingPathContributions) {
@@ -665,13 +726,8 @@ TEST(LotusAA, PhiMergingSamePointerKeepsBothSiblingPathContributions) {
   ASSERT_EQ(iter.size(), 1);
   path_cond_t cond = iter.begin()->second;
   EXPECT_TRUE(PTG->isSatisfiable(cond));
-  EXPECT_FALSE(PTG->isAlwaysSatisfied(cond));
-
-  BasicBlock *Entry = &Main->getEntryBlock();
-  BasicBlock *Then = Entry->getTerminator()->getSuccessor(0);
-  BasicBlock *Else = Entry->getTerminator()->getSuccessor(1);
-  EXPECT_TRUE(containsBranchAtom(cond, Entry, Then));
-  EXPECT_TRUE(containsBranchAtom(cond, Entry, Else));
+  EXPECT_TRUE(PTG->isAlwaysSatisfied(cond));
+  EXPECT_EQ(cond, PTG->getEmptyCond());
 }
 
 TEST(LotusAA, ComplementaryBranchOrMatchesFalconSimpleSolver) {
@@ -707,8 +763,8 @@ TEST(LotusAA, ComplementaryBranchOrMatchesFalconSimpleSolver) {
 
   ASSERT_NE(combined, nullptr);
   EXPECT_TRUE(PTG->isSatisfiable(combined));
-  EXPECT_FALSE(PTG->isAlwaysSatisfied(combined));
-  EXPECT_EQ(combined->getKind(), PathCond::Kind::Or);
+  EXPECT_TRUE(PTG->isAlwaysSatisfied(combined));
+  EXPECT_EQ(combined, PTG->getEmptyCond());
 }
 
 TEST(LotusAA, ReturnOutputsPreserveConditionalReturnSensitivity) {
@@ -1192,6 +1248,54 @@ TEST(LotusAA, PointerCompatibleIndirectTargetsAreAccepted) {
   EXPECT_TRUE(PTG->func_arg[Call].count(Good));
 }
 
+TEST(LotusAA, CallTargetConditionsAreExclusiveForSameIndirectCall) {
+  const char *IR = R"(
+    define i8* @foo(i8* %x) {
+    entry:
+      ret i8* %x
+    }
+
+    define i8* @bar(i8* %x) {
+    entry:
+      ret i8* %x
+    }
+
+    define i8* @main(i8* %arg, i8* (i8*)* %fp) {
+    entry:
+      %res = call i8* %fp(i8* %arg)
+      ret i8* %res
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  Function *Foo = M->getFunction("foo");
+  Function *Bar = M->getFunction("bar");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Foo, nullptr);
+  ASSERT_NE(Bar, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  auto Calls = getIndirectCalls(*Main);
+  ASSERT_EQ(Calls.size(), 1u);
+  CallBase *Call = Calls.front();
+
+  path_cond_t foo_cond = PTG->getCallTargetCond(Call->getCalledOperand(), Foo);
+  path_cond_t bar_cond = PTG->getCallTargetCond(Call->getCalledOperand(), Bar);
+  path_cond_t combined = PTG->findOrCreateAndRegion(foo_cond, bar_cond);
+
+  ASSERT_NE(combined, nullptr);
+  EXPECT_TRUE(PTG->isSatisfiable(foo_cond));
+  EXPECT_TRUE(PTG->isSatisfiable(bar_cond));
+  EXPECT_FALSE(PTG->isSatisfiable(combined));
+}
+
 TEST(LotusAA, PseudoOutputFunctionPointerFlowsToCallerIndirectCall) {
   const char *IR = R"(
     define i32 @foo(i32 %x) {
@@ -1629,6 +1733,9 @@ TEST(LotusAA, CallerCgInliningResolvesTransitiveIndirectSetterTargets) {
 }
 
 TEST(LotusAA, PthreadCreateThreadArgCgInliningResolvesWorkerIndirectCall) {
+  LotusConfigScope ConfigScope;
+  IntraLotusAAConfig::lotus_restrict_inline_depth = 2;
+
   const char *IR = R"(
     declare i32 @pthread_create(i64*, i8*, i8* (i8*)*, i8*)
 
@@ -1830,7 +1937,7 @@ TEST(LotusAA, OutputPseudoPointsToMergesDuplicateEntries) {
   auto &pseudo_pts = PTG->outputs.front()->getPseudoPointTo();
   ASSERT_EQ(pseudo_pts.size(), 1u);
   EXPECT_TRUE(PTG->isSatisfiable(pseudo_pts.front().first));
-  EXPECT_FALSE(PTG->isAlwaysSatisfied(pseudo_pts.front().first));
+  EXPECT_TRUE(PTG->isAlwaysSatisfied(pseudo_pts.front().first));
 }
 
 TEST(LotusAA, PseudoOutputNodesPreserveNonFirstClassTypes) {
@@ -2038,6 +2145,64 @@ TEST(LotusAA, RightValueTrackingRespectsConfiguredLimit) {
   PTG->trackPtrRightValue(Fp, values);
   PTG->refineResult(values);
   EXPECT_EQ(values.size(), 1u);
+}
+
+TEST(LotusAA, RightValueTrackingUsesFalconOuterRefinementTiming) {
+  LotusConfigScope ConfigScope;
+  IntraLotusAAConfig::lotus_restrict_right_value_count = 2;
+
+  const char *IR = R"(
+    define i32 @foo(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @bar(i32 %x) {
+    entry:
+      %inc = add i32 %x, 1
+      ret i32 %inc
+    }
+
+    define i32 @main(i1 %outer, i1 %inner) {
+    entry:
+      br i1 %outer, label %left, label %right
+    left:
+      br i1 %inner, label %then, label %mid
+    then:
+      br label %merge
+    mid:
+      br label %merge
+    right:
+      br label %merge
+    merge:
+      %fp = phi i32 (i32)* [ @foo, %then ], [ @foo, %mid ], [ @bar, %right ]
+      %res = call i32 %fp(i32 7)
+      ret i32 %res
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  auto *Main = M->getFunction("main");
+  auto *Foo = M->getFunction("foo");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Foo, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  Value *Fp = findValueByName(*Main, "fp");
+  ASSERT_NE(Fp, nullptr);
+
+  mem_value_t values;
+  PTG->trackPtrRightValue(Fp, values);
+  PTG->refineResult(values);
+
+  ASSERT_EQ(values.size(), 1u);
+  EXPECT_EQ(values.front().val, Foo);
 }
 
 #ifndef NDEBUG

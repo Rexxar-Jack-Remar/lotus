@@ -186,6 +186,7 @@ protected:
   path_cond_t true_cond_;
   path_cond_t false_cond_;
   std::vector<std::unique_ptr<PathCond>> cond_nodes_;
+  std::map<PathCond::ConstraintSummary, path_cond_t> formula_cond_cache_;
   std::map<std::pair<Value *, bool>, path_cond_t> value_cond_cache_;
   std::map<BasicBlock *, path_cond_t, llvm_cmp> block_cond_cache_;
   std::map<std::pair<Value *, Function *>, path_cond_t> call_target_cond_cache_;
@@ -236,6 +237,7 @@ protected:
   path_cond_t getCFGEdgeCond(BasicBlock *src_bb, BasicBlock *succ_bb);
   path_cond_t localizePathCond(path_cond_t cond);
   path_cond_t getComplementaryBranchCond(path_cond_t cond);
+  path_cond_t internCond(std::unique_ptr<PathCond> cond);
   path_cond_t importPathCond(path_cond_t cond, Value *callsite,
                              Function *callee);
 

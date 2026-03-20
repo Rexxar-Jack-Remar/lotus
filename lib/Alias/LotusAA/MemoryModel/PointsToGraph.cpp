@@ -251,7 +251,6 @@ raw_ostream &operator<<(raw_ostream &out, PTResultIterator &pt_it) {
 PTGraph::PTGraph(Function *F, LotusAA *lotus_aa)
     : analyzed_func(F), lotus_aa(lotus_aa), pt_index(0), obj_index(0),
       load_load_match_performed(false), control_dep_ready_(false) {
-
   // Get dominance information
   dom_tree = lotus_aa->getDomTree(F);
   post_dom_tree = new PostDominatorTree(*F);
@@ -370,6 +369,7 @@ void PTGraph::refineResult(mem_value_t &to_refine) {
 
 void PTGraph::trackPtrRightValue(Value *ptr, mem_value_t &res) {
   trackPtrRightValueUnderCondition(ptr, res, getEmptyCond(), 1.0f);
+  refineResult(res);
 }
 
 void PTGraph::trackPtrRightValueUnderCondition(Value *ptr, mem_value_t &res,
@@ -418,8 +418,6 @@ void PTGraph::trackPtrRightValueUnderCondition(Value *ptr, mem_value_t &res,
     res.push_back(mem_value_item_t(base_cond, dyn_cast<Instruction>(ptr), ptr,
                                    base_confidence));
   }
-
-  refineResult(res);
 }
 
 void PTGraph::getLoadValues(Value *ptr, Instruction *from_loc, mem_value_t &res,
@@ -728,18 +726,29 @@ int PTGraph::getObjectToCallApDepth(MemObject *obj, CallInst *call) {
 
 const DataLayout &PTGraph::getDL() { return lotus_aa->getDataLayout(); }
 
+path_cond_t PTGraph::internCond(std::unique_ptr<PathCond> cond) {
+  const auto &summary = cond->getConstraintSummary();
+  auto it = formula_cond_cache_.find(summary);
+  if (it != formula_cond_cache_.end())
+    return it->second;
+
+  path_cond_t raw = cond.get();
+  formula_cond_cache_.emplace(summary, raw);
+  cond_nodes_.push_back(std::move(cond));
+  return raw;
+}
+
 path_cond_t PTGraph::getEmptyCond() {
   if (!true_cond_) {
-    cond_nodes_.emplace_back(PathCond::createTrue());
-    true_cond_ = cond_nodes_.back().get();
+    true_cond_ = internCond(std::unique_ptr<PathCond>(PathCond::createTrue()));
   }
   return true_cond_;
 }
 
 path_cond_t PTGraph::getFalseCond() {
   if (!false_cond_) {
-    cond_nodes_.emplace_back(PathCond::createFalse());
-    false_cond_ = cond_nodes_.back().get();
+    false_cond_ =
+        internCond(std::unique_ptr<PathCond>(PathCond::createFalse()));
   }
   return false_cond_;
 }
@@ -774,8 +783,8 @@ path_cond_t PTGraph::getValueCond(Value *value, bool sense) {
   if (it != value_cond_cache_.end())
     return it->second;
 
-  cond_nodes_.emplace_back(PathCond::createValueAtom(value, sense));
-  path_cond_t cond = cond_nodes_.back().get();
+  path_cond_t cond =
+      internCond(std::unique_ptr<PathCond>(PathCond::createValueAtom(value, sense)));
   value_cond_cache_[key] = cond;
   return cond;
 }
@@ -838,26 +847,25 @@ path_cond_t PTGraph::getCFGEdgeCond(BasicBlock *src_bb, BasicBlock *succ_bb) {
   if (auto *br = dyn_cast<BranchInst>(term)) {
     if (br->isConditional()) {
       bool sense = succ_bb == br->getSuccessor(0);
-      cond_nodes_.emplace_back(PathCond::createBranchAtom(
-          src_bb, succ_bb, br->getCondition(), sense));
-      cond = cond_nodes_.back().get();
+      cond = internCond(std::unique_ptr<PathCond>(
+          PathCond::createBranchAtom(src_bb, succ_bb, br->getCondition(), sense)));
     }
   } else if (auto *sw = dyn_cast<SwitchInst>(term)) {
     path_cond_t edge_cond = nullptr;
     for (const auto &case_it : sw->cases()) {
       if (case_it.getCaseSuccessor() != succ_bb)
         continue;
-      cond_nodes_.emplace_back(PathCond::createSwitchCaseAtom(
-          src_bb, succ_bb, sw->getCondition(), case_it.getCaseValue()));
-      path_cond_t case_cond = cond_nodes_.back().get();
+      path_cond_t case_cond = internCond(std::unique_ptr<PathCond>(
+          PathCond::createSwitchCaseAtom(src_bb, succ_bb, sw->getCondition(),
+                                         case_it.getCaseValue())));
       edge_cond =
           edge_cond ? findOrCreateOrRegion(edge_cond, case_cond) : case_cond;
     }
 
     if (sw->getDefaultDest() == succ_bb) {
-      cond_nodes_.emplace_back(PathCond::createSwitchDefaultAtom(
-          src_bb, succ_bb, sw->getCondition()));
-      path_cond_t default_cond = cond_nodes_.back().get();
+      path_cond_t default_cond = internCond(std::unique_ptr<PathCond>(
+          PathCond::createSwitchDefaultAtom(src_bb, succ_bb,
+                                            sw->getCondition())));
       edge_cond = edge_cond ? findOrCreateOrRegion(edge_cond, default_cond)
                             : default_cond;
     }
@@ -865,13 +873,11 @@ path_cond_t PTGraph::getCFGEdgeCond(BasicBlock *src_bb, BasicBlock *succ_bb) {
     cond = edge_cond ? edge_cond : getFalseCond();
   } else if (auto *invoke = dyn_cast<InvokeInst>(term)) {
     if (invoke->getNormalDest() == succ_bb) {
-      cond_nodes_.emplace_back(
-          PathCond::createInvokeNormalAtom(src_bb, succ_bb));
-      cond = cond_nodes_.back().get();
+      cond = internCond(std::unique_ptr<PathCond>(
+          PathCond::createInvokeNormalAtom(src_bb, succ_bb)));
     } else if (invoke->getUnwindDest() == succ_bb) {
-      cond_nodes_.emplace_back(
-          PathCond::createInvokeUnwindAtom(src_bb, succ_bb));
-      cond = cond_nodes_.back().get();
+      cond = internCond(std::unique_ptr<PathCond>(
+          PathCond::createInvokeUnwindAtom(src_bb, succ_bb)));
     } else {
       cond = getFalseCond();
     }
@@ -991,8 +997,8 @@ path_cond_t PTGraph::importPathCond(path_cond_t cond, Value *callsite,
   if (it != imported_cond_cache_.end())
     return it->second;
 
-  cond_nodes_.emplace_back(PathCond::createImportedAtom(analyzed_func, cond));
-  path_cond_t imported = cond_nodes_.back().get();
+  path_cond_t imported = internCond(std::unique_ptr<PathCond>(
+      PathCond::createImportedAtom(analyzed_func, cond)));
   imported_cond_cache_[cond] = imported;
   return imported;
 }
@@ -1006,9 +1012,8 @@ path_cond_t PTGraph::getCallTargetCond(Value *called_value, Function *callee) {
   if (it != call_target_cond_cache_.end())
     return it->second;
 
-  cond_nodes_.emplace_back(
-      PathCond::createCallTargetAtom(called_value, callee));
-  path_cond_t cond = cond_nodes_.back().get();
+  path_cond_t cond = internCond(std::unique_ptr<PathCond>(
+      PathCond::createCallTargetAtom(called_value, callee)));
   call_target_cond_cache_[key] = cond;
   return cond;
 }
@@ -1034,8 +1039,8 @@ path_cond_t PTGraph::findOrCreateAndRegion(path_cond_t lhs, path_cond_t rhs) {
   if (it != and_cond_cache_.end())
     return it->second;
 
-  cond_nodes_.emplace_back(PathCond::createAnd(key.first, key.second));
-  path_cond_t cond = cond_nodes_.back().get();
+  path_cond_t cond =
+      internCond(std::unique_ptr<PathCond>(PathCond::createAnd(key.first, key.second)));
   and_cond_cache_[key] = cond;
   return cond;
 }
@@ -1061,8 +1066,8 @@ path_cond_t PTGraph::findOrCreateOrRegion(path_cond_t lhs, path_cond_t rhs) {
   if (it != or_cond_cache_.end())
     return it->second;
 
-  cond_nodes_.emplace_back(PathCond::createOr(key.first, key.second));
-  path_cond_t cond = cond_nodes_.back().get();
+  path_cond_t cond =
+      internCond(std::unique_ptr<PathCond>(PathCond::createOr(key.first, key.second)));
   or_cond_cache_[key] = cond;
   return cond;
 }
@@ -1088,8 +1093,8 @@ path_cond_t PTGraph::findOrCreateNotRegion(path_cond_t cond) {
   if (it != not_cond_cache_.end())
     return it->second;
 
-  cond_nodes_.emplace_back(PathCond::createNot(cond));
-  path_cond_t neg = cond_nodes_.back().get();
+  path_cond_t neg =
+      internCond(std::unique_ptr<PathCond>(PathCond::createNot(cond)));
   not_cond_cache_[cond] = neg;
   return neg;
 }

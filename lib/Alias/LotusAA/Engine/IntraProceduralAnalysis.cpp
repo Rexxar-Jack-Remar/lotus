@@ -227,7 +227,6 @@ IntraLotusAA::IntraLotusAA(Function *F, LotusAA *lotus_aa)
       is_considered_as_library(false), is_timeout_found(false),
       inline_ap_depth(0), pts_setting(IntraLotusAAConfig::pts_setting),
       timer(nullptr) {
-
   getReturnInst();
 
   if (IntraLotusAAConfig::lotus_restrict_summary_ap_depth < 0) {

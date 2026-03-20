@@ -11,7 +11,7 @@
 /// ```
 /// LotusAA::runOnModule(Module)
 ///   ├── Initialize global structures (NullObj, UnknownObj, sentinel values)
-///   ├── computeGlobalHeuristic() - Analyze global initializers
+///   ├── computeGlobalHeuristic() - Cache constant stores into globals
 ///   ├── computePtsCgIteratively() - Main fixpoint algorithm
 ///   │   ├── initFuncProcessingSeq() - Build call graph, topological sort
 ///   │   ├── For each function (bottom-up):
@@ -56,7 +56,7 @@
 /// - `--lotus-restrict-cg-iter`: Max CG iterations (default: 5)
 /// - `--lotus-print-pts`: Print points-to results
 /// - `--lotus-print-cg`: Print resolved call graph
-/// - `--lotus-enable-global-heuristic`: Analyze global initializers
+/// - `--lotus-enable-global-heuristic`: Cache constant stores into globals
 ///
 /// **Registered Pass:**
 /// - Pass ID: "lotus-aa"
@@ -214,19 +214,24 @@ bool LotusAA::runOnModule(Module &M) {
 }
 
 void LotusAA::computeGlobalHeuristic(Module &M) {
-  // Pre-populate the function pointer results with direct calls to global
-  // function pointers that are initialized at the global scope.  This seeds
-  // the on-the-fly call graph so that the first iteration already has some
-  // indirect-call targets for common patterns like:
-  //   void (*fp)(void) = &foo;   // global initializer
-  //   fp();                      // indirect call resolved on first pass
-  for (GlobalVariable &GV : M.globals()) {
-    if (!GV.hasInitializer())
-      continue;
-    Constant *init = GV.getInitializer();
-    // Strip bitcasts to find the underlying function
-    if (Function *F = dyn_cast<Function>(init->stripPointerCasts())) {
-      globalValuesCache_[&GV].insert(F);
+  // Cache constant values that are explicitly
+  // stored into global pointers while scanning the module. This is a passive
+  // cache and does not synthesize new points-to or call-graph facts by itself.
+  globalValuesCache_.clear();
+
+  for (Function &F : M) {
+    for (BasicBlock &BB : F) {
+      for (Instruction &I : BB) {
+        auto *store = dyn_cast<StoreInst>(&I);
+        if (!store)
+          continue;
+
+        Value *store_ptr = store->getPointerOperand();
+        Value *store_value = store->getValueOperand();
+        if (isa<GlobalValue>(store_ptr) && isa<Constant>(store_value)) {
+          globalValuesCache_[store_ptr].insert(store_value);
+        }
+      }
     }
   }
 }
@@ -288,9 +293,9 @@ void LotusAA::initFuncProcessingSeq(Module &M,
   }
 
   std::vector<Function *> worklist;
-  for (auto &pair : in_degree) {
-    if (pair.second == 0)
-      worklist.push_back(pair.first);
+  for (Function *F : allFunctions) {
+    if (in_degree[F] == 0)
+      worklist.push_back(F);
   }
 
   func_seq.clear();
