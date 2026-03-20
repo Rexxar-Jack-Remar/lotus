@@ -64,6 +64,101 @@ static Value *tracebackPointerCastChain(Value *ptr) {
   return ptr;
 }
 
+static Type *getSequentialElementType(Type *type) {
+  if (auto *array_ty = dyn_cast<ArrayType>(type))
+    return array_ty->getElementType();
+  if (auto *vector_ty = dyn_cast<VectorType>(type))
+    return vector_ty->getElementType();
+  return nullptr;
+}
+
+static int64_t getElementTypeSizeInBits(Type *type, const DataLayout &DL) {
+  return type ? static_cast<int64_t>(DL.getTypeSizeInBits(type)) : 0;
+}
+
+static int64_t getFalconLikeInboundOffset(GEPOperator *gep, unsigned start_idx,
+                                          Type *start_type,
+                                          const DataLayout &DL) {
+  int64_t offset = 0;
+  Type *type = start_type;
+
+  for (unsigned idx = start_idx; idx < gep->getNumOperands(); ++idx) {
+    Value *index_val = gep->getOperand(idx);
+    if (auto *const_idx = dyn_cast<ConstantInt>(index_val)) {
+      int64_t field_idx = const_idx->getSExtValue();
+
+      if (Type *elem_type = getSequentialElementType(type)) {
+        type = elem_type;
+        offset += field_idx * getElementTypeSizeInBits(type, DL);
+        continue;
+      }
+
+      if (auto *struct_ty = dyn_cast<StructType>(type)) {
+        if (field_idx < 0 ||
+            static_cast<unsigned>(field_idx) >= struct_ty->getNumElements()) {
+          return PTGraph::UNKNOWN_OFFSET;
+        }
+
+        const StructLayout *layout = DL.getStructLayout(struct_ty);
+        offset += static_cast<int64_t>(
+            layout->getElementOffsetInBits(static_cast<unsigned>(field_idx)));
+        type = struct_ty->getElementType(static_cast<unsigned>(field_idx));
+        continue;
+      }
+
+      return PTGraph::UNKNOWN_OFFSET;
+    }
+
+    // Match Falcon: symbolic sequential indices collapse to field 0, but
+    // symbolic struct indices force the whole access path to unknown.
+    if (Type *elem_type = getSequentialElementType(type)) {
+      type = elem_type;
+      continue;
+    }
+
+    return PTGraph::UNKNOWN_OFFSET;
+  }
+
+  return offset;
+}
+
+static int64_t getFalconLikeGepOffset(GEPOperator *gep, const DataLayout &DL) {
+  Type *base_type = gep->getSourceElementType();
+  if (!base_type)
+    return PTGraph::UNKNOWN_OFFSET;
+
+  int64_t pointer_offset = 0;
+  if (gep->getNumOperands() >= 2) {
+    Value *outer_index = gep->getOperand(1);
+    if (auto *const_idx = dyn_cast<ConstantInt>(outer_index)) {
+      pointer_offset = const_idx->getSExtValue() *
+                       getElementTypeSizeInBits(base_type, DL);
+    }
+  }
+
+  int64_t inbound_offset = 0;
+  if (isa<StructType>(base_type)) {
+    inbound_offset = getFalconLikeInboundOffset(gep, 2, base_type, DL);
+  } else if (Type *elem_type = getSequentialElementType(base_type)) {
+    if (gep->getNumOperands() >= 3) {
+      Value *inner_index = gep->getOperand(2);
+      if (auto *const_idx = dyn_cast<ConstantInt>(inner_index)) {
+        inbound_offset = const_idx->getSExtValue() *
+                         getElementTypeSizeInBits(elem_type, DL);
+      } else {
+        // Match Falcon: symbolic array/vector indices collapse to element 0.
+        inbound_offset = 0;
+      }
+    }
+  } else {
+    // Match Falcon: symbolic pointer arithmetic over non-composite element
+    // types also collapses to offset 0 rather than a distinct unknown field.
+    inbound_offset = 0;
+  }
+
+  return PTGraph::composeOffset(pointer_offset, inbound_offset);
+}
+
 static std::pair<Value *, int64_t> trackPointerOffset(Value *ptr,
                                                       const DataLayout &DL) {
   if (!ptr)
@@ -84,13 +179,7 @@ static std::pair<Value *, int64_t> trackPointerOffset(Value *ptr,
 
     while (auto *gep = dyn_cast<GEPOperator>(ptr)) {
       if (!PTGraph::isUnknownOffset(offset)) {
-        APInt ap_offset(DL.getIndexTypeSizeInBits(gep->getPointerOperandType()),
-                        0, true);
-        if (gep->accumulateConstantOffset(DL, ap_offset)) {
-          offset = PTGraph::composeOffset(offset, ap_offset.getSExtValue() * 8);
-        } else {
-          offset = PTGraph::UNKNOWN_OFFSET;
-        }
+        offset = PTGraph::composeOffset(offset, getFalconLikeGepOffset(gep, DL));
       }
       ptr = gep->getPointerOperand();
     }

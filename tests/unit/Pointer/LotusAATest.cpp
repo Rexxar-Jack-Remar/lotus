@@ -998,6 +998,60 @@ TEST(LotusAA, UnknownLibraryCallPreservesLikelyThisReceiver) {
   EXPECT_FALSE(saw_b);
 }
 
+TEST(LotusAA, SymbolicSequentialGepCollapsesToFalconBaseField) {
+  const char *IR = R"(
+    define i8* @main(i64 %idx, i8* %a, i8* %b) {
+    entry:
+      %arr = alloca [4 x i8*]
+      %slot0 = getelementptr inbounds [4 x i8*], [4 x i8*]* %arr, i64 0, i64 0
+      store i8* %a, i8** %slot0
+      %sloti = getelementptr inbounds [4 x i8*], [4 x i8*]* %arr, i64 0, i64 %idx
+      store i8* %b, i8** %sloti
+      %loaded = load i8*, i8** %slot0
+      ret i8* %loaded
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  auto *SlotI = findValueByName(*Main, "sloti");
+  ASSERT_NE(SlotI, nullptr);
+  PTResult *SlotPts = PTG->findPTResult(SlotI, false);
+  ASSERT_NE(SlotPts, nullptr);
+
+  PTResultIterator slot_iter(SlotPts, PTG);
+  ASSERT_EQ(slot_iter.size(), 1u);
+  EXPECT_EQ(slot_iter.begin()->first->getOffset(), 0);
+
+  auto *Load = dyn_cast<LoadInst>(findValueByName(*Main, "loaded"));
+  ASSERT_NE(Load, nullptr);
+
+  mem_value_t loaded_values;
+  PTG->getLoadValues(Load->getPointerOperand(), Load, loaded_values);
+  PTG->refineResult(loaded_values);
+
+  bool saw_a = false;
+  bool saw_b = false;
+  for (const auto &item : loaded_values) {
+    if (item.val == findValueByName(*Main, "a"))
+      saw_a = true;
+    if (item.val == findValueByName(*Main, "b"))
+      saw_b = true;
+  }
+
+  EXPECT_FALSE(saw_a);
+  EXPECT_TRUE(saw_b);
+}
+
 TEST(LotusAA, DisabledLibraryHeuristicPreservesPointerArgumentValues) {
   LotusConfigScope ConfigScope;
   IntraLotusAAConfig::lotus_disable_library_heuristic = true;
@@ -1039,6 +1093,60 @@ TEST(LotusAA, DisabledLibraryHeuristicPreservesPointerArgumentValues) {
       saw_b = true;
   }
   EXPECT_TRUE(saw_b);
+}
+
+TEST(LotusAA, PthreadCreateUnknownLibraryCallStillClobbersThreadArg) {
+  const char *IR = R"(
+    declare i32 @pthread_create(i64*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %ctx) {
+    entry:
+      ret i8* %ctx
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i64
+      %slot = alloca i8*
+      store i8* bitcast (i8* (i8*)* @worker to i8*), i8** %slot
+      %ctx = bitcast i8** %slot to i8*
+      %rc = call i32 @pthread_create(i64* %tid, i8* null, i8* (i8*)* @worker, i8* %ctx)
+      %loaded = load i8*, i8** %slot
+      ret i32 %rc
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  auto *Load = dyn_cast<LoadInst>(findValueByName(*Main, "loaded"));
+  ASSERT_NE(Load, nullptr);
+
+  mem_value_t loaded_values;
+  PTG->getLoadValues(Load->getPointerOperand(), Load, loaded_values);
+  PTG->refineResult(loaded_values);
+
+  bool saw_worker_ptr = false;
+  for (const auto &item : loaded_values) {
+    if (item.val == findValueByName(*Main, "ctx"))
+      continue;
+    if (auto *ce = dyn_cast<ConstantExpr>(item.val)) {
+      if (ce->getOpcode() == Instruction::BitCast &&
+          ce->getOperand(0) == M->getFunction("worker")) {
+        saw_worker_ptr = true;
+      }
+    }
+  }
+
+  EXPECT_FALSE(saw_worker_ptr);
 }
 
 TEST(LotusAA, TopologicalTraversalDropsCyclicBlocksLikeFalcon) {

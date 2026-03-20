@@ -94,15 +94,6 @@ void IntraLotusAA::processUnknownLibraryCall(CallBase *call) {
     if (!pointer_arg_type)
       continue;
 
-    if (!IntraLotusAAConfig::lotus_disable_thread_heuristic) {
-      if (Function *callee = call->getCalledFunction()) {
-        if (callee->getName() == "pthread_create" && call->arg_size() == 4 &&
-            i == 3) {
-          continue;
-        }
-      }
-    }
-
     if (i == 0 &&
         pointer_arg_type->getPointerElementType()->isAggregateType()) {
       // Preserve the library heuristic for likely <this> receivers.
