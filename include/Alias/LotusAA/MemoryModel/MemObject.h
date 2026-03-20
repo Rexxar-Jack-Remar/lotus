@@ -45,7 +45,7 @@ void lotus_clear_hash(T *to_clear) {
   to_clear->swap(empty);
 }
 
-// Memory value item with Falcon-compatible path conditions and confidence.
+// Memory value item with path conditions and confidence.
 struct mem_value_item_t {
   path_cond_t cond;
   Instruction *pos;  // Where value was assigned (nullptr = from caller)
@@ -227,7 +227,7 @@ public:
   LocValue *storeValue(Value *val, Instruction *inst, path_cond_t cond,
                        int function_level = FUNC_LEVEL_UNDEFINED);
   
-  // Get values from locator with Falcon-style path and summary bookkeeping.
+  // Get values from locator with path and summary bookkeeping.
   Argument *getValues(Instruction *pos_inst, path_cond_t pre_cond,
                       mem_value_t &res,
                       Type *symbol_type = nullptr,

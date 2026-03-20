@@ -64,6 +64,7 @@ void IntraLotusAA::collectEscapedObjects(
   map<ObjectLocator *, set<MemObject *, mem_obj_cmp>, obj_loc_cmp>
       single_pointed_objects;
   map<MemObject *, ObjectLocator *, mem_obj_cmp> obj_pointers;
+  set<Type *> large_structure_type;
 
   // Worklist of reachable objects
   std::vector<MemObject *> reachable_worklist;
@@ -123,10 +124,20 @@ void IntraLotusAA::collectEscapedObjects(
   while (!reachable_worklist.empty()) {
     MemObject *cur_obj = reachable_worklist.back();
     Value *cur_obj_source = cur_obj->getAllocSite();
+    Type *parent_type = cur_obj->guessType();
     reachable_worklist.pop_back();
 
     for (auto &ptr_offset_pair : cur_obj->getUpdatedOffset()) {
       int64_t ptr_offset = ptr_offset_pair.first;
+      Type *child_type = ptr_offset_pair.second;
+
+      if (IntraLotusAAConfig::lotus_restrict_inter_structure != -1 &&
+          child_type == parent_type) {
+        if (auto *pointer_type = dyn_cast<PointerType>(child_type)) {
+          if (pointer_type->getPointerElementType()->isStructTy())
+            large_structure_type.insert(child_type);
+        }
+      }
 
       mem_value_t res;
       for (auto &ret_pair : ret_insts) {
@@ -233,6 +244,38 @@ void IntraLotusAA::collectEscapedObjects(
     }
 
     escape_objs.insert(pseudo_obj);
+  }
+
+  if (IntraLotusAAConfig::lotus_restrict_inter_structure != -1) {
+    map<Type *, MemObject *> pseudo_objs_for_type;
+    std::vector<MemObject *> merged;
+
+    for (MemObject *esc_obj : escape_objs) {
+      Type *esc_obj_type = esc_obj->guessType();
+      if (large_structure_type.count(esc_obj_type) == 0)
+        continue;
+
+      merged.push_back(esc_obj);
+      MemObject *pseudo_obj = nullptr;
+      auto it = pseudo_objs_for_type.find(esc_obj_type);
+      if (it != pseudo_objs_for_type.end()) {
+        pseudo_obj = it->second;
+      } else {
+        pseudo_obj = newObject(esc_obj->getAllocSite(), MemObject::CONCRETE);
+        pseudo_objs_for_type[esc_obj_type] = pseudo_obj;
+      }
+
+      pseudo_to_real_map[pseudo_obj].insert(esc_obj);
+      real_to_pseudo_map[esc_obj] = pseudo_obj;
+    }
+
+    for (MemObject *obj : merged) {
+      escape_objs.erase(obj);
+    }
+
+    for (auto &type_pair : pseudo_objs_for_type) {
+      escape_objs.insert(type_pair.second);
+    }
   }
 
   // Record escape sources
@@ -451,6 +494,11 @@ void IntraLotusAA::collectInputs() {
   for (auto &obj_pair : mem_objs) {
     MemObject *obj = obj_pair.first;
 
+    if (IntraLotusAAConfig::lotus_restrict_inter_structure != -1 &&
+        real_to_pseudo_map.count(obj) != 0) {
+      continue;
+    }
+
     if (obj->getKind() == MemObject::SYMBOLIC) {
       SymbolicMemObject *sobj = cast<SymbolicMemObject>(obj);
 
@@ -516,7 +564,7 @@ void IntraLotusAA::finalizeInterface() {
              IntraLotusAAConfig::lotus_restrict_inline_size) {
     lotus_restrict_ap_level_adjust = 0;
   } else {
-    // Keep Falcon's exact self-adjusting interface pruning heuristic.
+    // Keep the exact self-adjusting interface pruning heuristic.
     const int CACHE_SIZE = 10;
     int cache_input[CACHE_SIZE] = {0};
     int cache_output[CACHE_SIZE] = {0};

@@ -67,27 +67,7 @@ using namespace llvm;
 using namespace std;
 
 static bool isCallsiteFunctionCompatible(CallBase *call, Function *callee) {
-  if (!call || !callee)
-    return false;
-
-  FunctionType *call_ty = call->getFunctionType();
-  FunctionType *callee_ty = callee->getFunctionType();
-  if (!call_ty || !callee_ty)
-    return false;
-
-  if (call_ty->isVarArg() != callee_ty->isVarArg())
-    return false;
-  if (call->arg_size() < callee->arg_size())
-    return false;
-  if (call_ty->getReturnType() != callee_ty->getReturnType())
-    return false;
-
-  unsigned shared_args = std::min<unsigned>(call->arg_size(), callee->arg_size());
-  for (unsigned i = 0; i < shared_args; i++) {
-    if (call->getArgOperand(i)->getType() != callee_ty->getParamType(i))
-      return false;
-  }
-  return true;
+  return isPointerAnalysisCallsiteCompatible(call, callee);
 }
 
 /// Conservatively handles unknown library calls by invalidating pointer
@@ -97,6 +77,9 @@ static bool isCallsiteFunctionCompatible(CallBase *call, Function *callee) {
 /// @note Treats all pointer arguments as potentially modified (weak update with
 /// NO_VALUE)
 void IntraLotusAA::processUnknownLibraryCall(CallBase *call) {
+  if (IntraLotusAAConfig::lotus_disable_library_heuristic)
+    return;
+
   if (Function *func = call->getCalledFunction()) {
     if (lotus_aa->getSpecManager().isNoEffect(func))
       return;
@@ -111,9 +94,18 @@ void IntraLotusAA::processUnknownLibraryCall(CallBase *call) {
     if (!pointer_arg_type)
       continue;
 
+    if (!IntraLotusAAConfig::lotus_disable_thread_heuristic) {
+      if (Function *callee = call->getCalledFunction()) {
+        if (callee->getName() == "pthread_create" && call->arg_size() == 4 &&
+            i == 3) {
+          continue;
+        }
+      }
+    }
+
     if (i == 0 &&
         pointer_arg_type->getPointerElementType()->isAggregateType()) {
-      // Match Falcon's library heuristic for likely <this> receivers.
+      // Preserve the library heuristic for likely <this> receivers.
       continue;
     }
 
@@ -179,8 +171,7 @@ void IntraLotusAA::processCall(CallBase *call) {
       if (call->getType()->isPointerTy() &&
           (unsigned)callee_idx == callees->size() - 1 &&
           !pt_results.count(call)) {
-        addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
-                    callee_cond);
+        addPointsTo(call, newObject(call, MemObject::CONCRETE), 0, callee_cond);
       }
       continue;
     }
@@ -189,8 +180,7 @@ void IntraLotusAA::processCall(CallBase *call) {
       if (call->getType()->isPointerTy() &&
           (unsigned)callee_idx == callees->size() - 1 &&
           !pt_results.count(call)) {
-        addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
-                    callee_cond);
+        addPointsTo(call, newObject(call, MemObject::CONCRETE), 0, callee_cond);
       }
       continue;
     }
@@ -210,8 +200,7 @@ void IntraLotusAA::processCall(CallBase *call) {
       if (call->getType()->isPointerTy() &&
           static_cast<unsigned>(callee_idx) == callees->size() - 1 &&
           !pt_results.count(call)) {
-        addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
-                    callee_cond);
+        addPointsTo(call, newObject(call, MemObject::CONCRETE), 0, callee_cond);
       }
 
       processUnknownLibraryCall(call);
@@ -406,23 +395,17 @@ IntraLotusAA::createPseudoOutputNodes(std::vector<OutputItem *> &callee_output,
     OutputItem *output = callee_output[idx];
     Type *output_type = output->getType();
 
-    // LLVM Arguments must have first-class types or be void
-    Type *actual_type = output_type;
-    if (!output_type->isFirstClassType() && !output_type->isVoidTy()) {
-      actual_type = output_type->getPointerTo();
-    }
-
     // LLVM doesn't allow naming void-typed values, so use empty name for void
     // types
     string name_str;
-    if (!actual_type->isVoidTy()) {
+    if (!output_type->isVoidTy()) {
       raw_string_ostream ss(name_str);
       ss << "LPseudoCallSiteOutput_" << callsite << "_" << callee << "_#"
          << idx;
       ss.flush();
     }
 
-    Argument *new_arg = new Argument(actual_type, name_str);
+    Argument *new_arg = new Argument(output_type, name_str);
     out_values.push_back(new_arg);
     func_pseudo_ret_cache[new_arg] = make_pair(callsite, idx);
   }
@@ -451,22 +434,16 @@ void IntraLotusAA::createEscapedObjects(
     }
     Type *obj_ptr_type = alloca_site->getType();
 
-    // LLVM Arguments must have first-class types or be void
-    Type *actual_type = obj_ptr_type;
-    if (!obj_ptr_type->isFirstClassType() && !obj_ptr_type->isVoidTy()) {
-      actual_type = obj_ptr_type->getPointerTo();
-    }
-
     // LLVM doesn't allow naming void-typed values, so use empty name for void
     // types
     string name_str;
-    if (!actual_type->isVoidTy()) {
+    if (!obj_ptr_type->isVoidTy()) {
       raw_string_ostream ss(name_str);
       ss << "LCallSiteEscapedObject_" << callsite << "_#" << escape_obj_idx++;
       ss.flush();
     }
 
-    Argument *new_arg = new Argument(actual_type, name_str);
+    Argument *new_arg = new Argument(obj_ptr_type, name_str);
     func_pseudo_ret_cache[new_arg] = make_pair(callsite, PTR_TO_ESC_OBJ);
     MemObject::ObjKind obj_kind = MemObject::CONCRETE;
     MemObject *escaped_obj_to = newObject(new_arg, obj_kind);
@@ -569,8 +546,16 @@ void IntraLotusAA::linkOutputValues(
     MemObject *curr_obj = escape_object_map[output_parent];
     ObjectLocator *locator = curr_obj->findLocator(output_offset, true);
     locator->storeValue(curr_output, callsite, getEmptyCond(),
-                       output->getFuncLevel() + 1);
+                        output->getFuncLevel() + 1);
   } else {
+    if (!callee_func_arg.count(output_parent) &&
+        isa<GlobalValue>(output_parent)) {
+      if (!pre_cond)
+        pre_cond = getEmptyCond();
+      callee_func_arg[output_parent].push_back(
+          mem_value_item_t(pre_cond, nullptr, output_parent));
+    }
+
     if (!callee_func_arg.count(output_parent))
       return;
 

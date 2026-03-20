@@ -29,6 +29,7 @@
 
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 
+#include <llvm/ADT/APInt.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Operator.h>
@@ -37,33 +38,69 @@ using namespace llvm;
 
 namespace {
 
+static Value *tracebackPointerCastChain(Value *ptr) {
+  while (ptr) {
+    if (auto *cast = dyn_cast<CastInst>(ptr)) {
+      Value *src = cast->getOperand(0);
+      if (!src->getType()->isPointerTy())
+        break;
+      ptr = src;
+      continue;
+    }
+
+    if (auto *ce = dyn_cast<ConstantExpr>(ptr)) {
+      if (!Instruction::isCast(ce->getOpcode()))
+        break;
+      Value *src = ce->getOperand(0);
+      if (!src->getType()->isPointerTy())
+        break;
+      ptr = src;
+      continue;
+    }
+
+    break;
+  }
+
+  return ptr;
+}
+
 static std::pair<Value *, int64_t> trackPointerOffset(Value *ptr,
                                                       const DataLayout &DL) {
   if (!ptr)
     return {nullptr, 0};
 
-  if (auto *gep = dyn_cast<GEPOperator>(ptr)) {
-    Value *base = gep->getPointerOperand();
-    auto base_off = trackPointerOffset(base, DL);
-    if (base_off.first != base)
-      base = base_off.first;
-
-    APInt ap_offset(DL.getIndexTypeSizeInBits(gep->getType()), 0, true);
-    if (gep->accumulateConstantOffset(DL, ap_offset))
-      return {base, base_off.second + ap_offset.getSExtValue()};
-
-    return {base, base_off.second};
+  APInt ap_offset(DL.getIndexTypeSizeInBits(ptr->getType()), 0, true);
+  if (const Value *base =
+          ptr->stripAndAccumulateConstantOffsets(DL, ap_offset,
+                                                 /*AllowNonInbounds=*/true)) {
+    if (base != ptr)
+      return {const_cast<Value *>(base), ap_offset.getSExtValue() * 8};
   }
 
-  if (auto *ce = dyn_cast<ConstantExpr>(ptr)) {
-    if (Instruction::isCast(ce->getOpcode()))
-      return trackPointerOffset(ce->getOperand(0), DL);
+  int64_t offset = 0;
+
+  while (true) {
+    Value *ptr_start = ptr;
+
+    while (auto *gep = dyn_cast<GEPOperator>(ptr)) {
+      if (!PTGraph::isUnknownOffset(offset)) {
+        APInt ap_offset(DL.getIndexTypeSizeInBits(gep->getPointerOperandType()),
+                        0, true);
+        if (gep->accumulateConstantOffset(DL, ap_offset)) {
+          offset = PTGraph::composeOffset(offset, ap_offset.getSExtValue() * 8);
+        } else {
+          offset = PTGraph::UNKNOWN_OFFSET;
+        }
+      }
+      ptr = gep->getPointerOperand();
+    }
+
+    ptr = tracebackPointerCastChain(ptr);
+    if (ptr == ptr_start)
+      break;
   }
 
-  if (auto *cast = dyn_cast<CastInst>(ptr))
-    return trackPointerOffset(cast->getOperand(0), DL);
-
-  return {ptr, 0};
+  return {ptr, offset};
 }
 
 } // namespace
@@ -209,8 +246,8 @@ PTResult *IntraLotusAA::processPhi(PHINode *phi) {
     Value *val_i = phi->getIncomingValue(i);
     PTResult *in_pts = processBasePointer(val_i);
     assert(in_pts && "PHI incoming value not processed");
-    path_cond_t phi_cond = findOrCreateUnitPhiRegion(phi->getParent(),
-                                                     phi->getIncomingBlock(i));
+    path_cond_t phi_cond =
+        findOrCreateUnitPhiRegion(phi->getParent(), phi->getIncomingBlock(i));
     phi_pts->add_derived_target(phi_cond, in_pts, 0);
   }
 

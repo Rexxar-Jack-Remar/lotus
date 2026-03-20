@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -188,8 +189,7 @@ protected:
   std::map<std::pair<Value *, bool>, path_cond_t> value_cond_cache_;
   std::map<BasicBlock *, path_cond_t, llvm_cmp> block_cond_cache_;
   std::map<std::pair<Value *, Function *>, path_cond_t> call_target_cond_cache_;
-  std::map<std::tuple<Value *, Function *, path_cond_t>, path_cond_t>
-      imported_cond_cache_;
+  std::map<path_cond_t, path_cond_t> imported_cond_cache_;
   std::map<path_cond_t, path_cond_t> not_cond_cache_;
   std::map<std::pair<path_cond_t, path_cond_t>, path_cond_t> and_cond_cache_;
   std::map<std::pair<path_cond_t, path_cond_t>, path_cond_t> or_cond_cache_;
@@ -234,6 +234,8 @@ protected:
   bool cacheLoadCategory(LoadInst *load_inst);
   void buildControlDependenceInfo();
   path_cond_t getCFGEdgeCond(BasicBlock *src_bb, BasicBlock *succ_bb);
+  path_cond_t localizePathCond(path_cond_t cond);
+  path_cond_t getComplementaryBranchCond(path_cond_t cond);
   path_cond_t importPathCond(path_cond_t cond, Value *callsite,
                              Function *callee);
 
@@ -299,6 +301,17 @@ public:
 
   static Type *DEFAULT_POINTER_TYPE;
   static Type *DEFAULT_NON_POINTER_TYPE;
+  static constexpr int64_t UNKNOWN_OFFSET = std::numeric_limits<int64_t>::max();
+
+  static bool isUnknownOffset(int64_t offset) {
+    return offset == UNKNOWN_OFFSET;
+  }
+
+  static int64_t composeOffset(int64_t base, int64_t delta) {
+    if (isUnknownOffset(base) || isUnknownOffset(delta))
+      return UNKNOWN_OFFSET;
+    return base + delta;
+  }
 };
 
 } // namespace llvm

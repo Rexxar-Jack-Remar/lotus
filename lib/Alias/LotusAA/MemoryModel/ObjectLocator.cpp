@@ -70,8 +70,8 @@
 /// @see getValues() for flow-sensitive value retrieval
 /// @see placePhi() for SSA-style φ-placement algorithm
 
-#include "Alias/LotusAA/MemoryModel/MemObject.h"
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
+#include "Alias/LotusAA/MemoryModel/MemObject.h"
 #include "Alias/LotusAA/MemoryModel/PointsToGraph.h"
 #include "Alias/LotusAA/Support/LotusConfig.h"
 
@@ -175,7 +175,7 @@ ObjectLocator::~ObjectLocator() {
 PTGraph *ObjectLocator::getPTG() { return object->getPTG(); }
 
 ObjectLocator *ObjectLocator::offsetBy(int64_t extra_off) {
-  return object->findLocator(offset + extra_off, true);
+  return object->findLocator(PTGraph::composeOffset(offset, extra_off), true);
 }
 
 void ObjectLocator::dump() {
@@ -193,8 +193,7 @@ std::vector<LocValue *> *ObjectLocator::getValueList(BasicBlock *bb) {
 }
 
 LocValue *ObjectLocator::storeValue(Value *val, Instruction *source,
-                                    path_cond_t cond,
-                                    int function_level) {
+                                    path_cond_t cond, int function_level) {
   if (object->isNull() || object->isUnknown())
     return nullptr;
 
@@ -225,9 +224,10 @@ LocValue *ObjectLocator::storeValue(Value *val, Instruction *source,
   loc_values[src_bb].push_back(loc_val);
   placePhi(loc_val, src_bb);
 
-
   if (val != LocValue::FREE_VARIABLE) {
     Type *val_type = val->getType();
+    if (val_type->isVoidTy())
+      val_type = Type::getInt8Ty(val->getContext());
     object->getUpdatedOffset()[offset] = val_type;
     object->getStoredValues()[offset].insert(val);
 
@@ -289,30 +289,21 @@ LocValue *ObjectLocator::getVersion(Instruction *pos_inst) {
       int end_pos = (int)lv_list->size();
 
       if (bb == startBB) {
-        // Find the last LocValue whose defining instruction comes strictly
-        // before pos_inst in program order.  We must reset the reverse
-        // iterator on every candidate check so that we always scan from the
-        // end of the BB rather than continuing from where a previous
-        // iteration left off (the original code shared `it` across the outer
-        // while loop, causing it to advance past the target).
+        auto it = bb->rbegin(), ie = bb->rend();
+
         while (end_pos > 0) {
           Instruction *last_loc = lv_list->at(end_pos - 1)->getPos();
-          // Walk the BB in reverse to determine relative order.
-          bool pos_comes_first = false;
-          for (auto it = bb->rbegin(), ie = bb->rend(); it != ie; ++it) {
-            Instruction *inst = &(*it);
-            if (inst == pos_inst) {
-              pos_comes_first = true;
+          Instruction *inst = nullptr;
+
+          for (; it != ie; ++it) {
+            inst = &(*it);
+            if (inst == pos_inst || inst == last_loc)
               break;
-            }
-            if (inst == last_loc) {
-              // last_loc comes before pos_inst in reverse order → it is
-              // after pos_inst in forward order → skip it.
-              break;
-            }
           }
-          if (pos_comes_first)
-            break; // last_loc is before pos_inst; keep end_pos
+
+          if (inst == pos_inst)
+            break;
+
           --end_pos;
         }
       }
@@ -332,7 +323,6 @@ LocValue *ObjectLocator::getVersion(Instruction *pos_inst) {
 
   return nullptr;
 }
-
 
 // Forward declaration for helper
 static Value *get_constant_from_aggregate(Constant *val, int64_t offset,
@@ -354,8 +344,8 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, path_cond_t pre_cond,
       if (gv->isConstant()) {
         Value *constant_global = getInitializerForGlobalValue();
         if (constant_global) {
-          res.push_back(mem_value_item_t(pre_cond, nullptr,
-                                         constant_global, 1.0f));
+          res.push_back(
+              mem_value_item_t(pre_cond, nullptr, constant_global, 1.0f));
           return nullptr;
         } else {
           return nullptr; // Constant with no initializer
@@ -365,7 +355,8 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, path_cond_t pre_cond,
   }
 
   mem_value_t *possible_updating_callsite =
-      (is_include_func_summary && IntraLotusAAConfig::lotus_enable_summary_value)
+      (is_include_func_summary &&
+       IntraLotusAAConfig::lotus_enable_summary_value)
           ? &res
           : nullptr;
 
@@ -536,7 +527,8 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, path_cond_t pre_cond,
           }
 
           curr_confidence *= no_effect_confidence;
-          res.push_back(mem_value_item_t(final_cond, pos, val, curr_confidence));
+          res.push_back(
+              mem_value_item_t(final_cond, pos, val, curr_confidence));
           value_loaded++;
         }
 
@@ -581,11 +573,11 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, path_cond_t pre_cond,
     if (base_func->getName() == "main") {
       // Main function - try to get global initializer
       Value *init_val = getInitializerForGlobalValue();
-        if (init_val) {
-          res.push_back(mem_value_item_t(default_cond, nullptr,
-                                         init_val, curr_confidence));
-          return nullptr;
-        }
+      if (init_val) {
+        res.push_back(
+            mem_value_item_t(default_cond, nullptr, init_val, curr_confidence));
+        return nullptr;
+      }
     } else {
       // Non-main function - create pseudo-argument
       Argument *pseudo_arg = sym_obj->findCreatePseudoArg(this, symbol_type);
@@ -594,8 +586,8 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, path_cond_t pre_cond,
           if (function_level != FUNC_LEVEL_UNDEFINED)
             load_level = function_level;
         }
-        res.push_back(mem_value_item_t(default_cond, nullptr,
-                                       pseudo_arg, curr_confidence));
+        res.push_back(mem_value_item_t(default_cond, nullptr, pseudo_arg,
+                                       curr_confidence));
         return pseudo_arg;
       }
     }
@@ -603,8 +595,8 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, path_cond_t pre_cond,
 
   // Return appropriate default value
   if (object->isReallyAllocated()) {
-    res.push_back(mem_value_item_t(default_cond, nullptr,
-                                   LocValue::UNDEF_VALUE, curr_confidence));
+    res.push_back(mem_value_item_t(default_cond, nullptr, LocValue::UNDEF_VALUE,
+                                   curr_confidence));
   } else {
     res.push_back(mem_value_item_t(default_cond, nullptr,
                                    LocValue::FREE_VARIABLE, curr_confidence));
@@ -617,11 +609,6 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, path_cond_t pre_cond,
 // Constant Extraction Helper
 //===----------------------------------------------------------------------===//
 
-/// Extract constant from aggregate type (arrays, structs) at given byte offset.
-///
-/// @param val    The constant aggregate to index into.
-/// @param offset Byte offset into the aggregate (NOT bits).
-/// @param DL     Data layout used to compute element sizes in bytes.
 static Value *get_constant_from_aggregate(Constant *val, int64_t offset,
                                           const DataLayout *DL) {
   if (!val)
@@ -631,9 +618,7 @@ static Value *get_constant_from_aggregate(Constant *val, int64_t offset,
 
   if (ConstantDataArray *array_global = dyn_cast<ConstantDataArray>(val)) {
     Type *elem_type = array_global->getElementType();
-    // Use byte size to match the byte-offset convention used throughout the
-    // analysis (ObjectLocator offsets are in bytes, not bits).
-    int64_t element_size = (int64_t)DL->getTypeStoreSize(elem_type);
+    int64_t element_size = (int64_t)DL->getTypeSizeInBits(elem_type);
     if (element_size != 0) {
       int64_t idx = offset / element_size;
       int64_t remainder = offset % element_size;
@@ -645,7 +630,7 @@ static Value *get_constant_from_aggregate(Constant *val, int64_t offset,
     }
   } else if (ConstantArray *array_global = dyn_cast<ConstantArray>(val)) {
     Type *elem_type = array_global->getType()->getElementType();
-    int64_t element_size = (int64_t)DL->getTypeStoreSize(elem_type);
+    int64_t element_size = (int64_t)DL->getTypeSizeInBits(elem_type);
     if (element_size != 0) {
       int64_t idx = offset / element_size;
       int64_t remainder = offset % element_size;
@@ -657,25 +642,32 @@ static Value *get_constant_from_aggregate(Constant *val, int64_t offset,
     }
   } else if (ConstantStruct *struct_global = dyn_cast<ConstantStruct>(val)) {
     StructType *st = struct_global->getType();
-    const StructLayout *SL = DL->getStructLayout(st);
-    unsigned n_elem = st->getNumContainedTypes();
+    int n_elem = st->getNumContainedTypes();
+    int cur_size = 0;
+    int last_size = 0;
+    int idx;
+    for (idx = 0; idx < n_elem; idx++) {
+      if (cur_size >= offset) {
+        break;
+      }
 
-    // Find the struct element that contains the requested byte offset using
-    // the data-layout-aware struct layout (handles padding correctly).
-    // Previously this used getTypeSizeInBits() which produced bit offsets
-    // instead of byte offsets, causing wrong field selection.
-    unsigned idx = SL->getElementContainingOffset((uint64_t)offset);
-    if (idx < n_elem) {
-      int64_t field_offset = (int64_t)SL->getElementOffset(idx);
+      Type *t = st->getContainedType(idx);
+      last_size = cur_size;
+      cur_size += (int)DL->getTypeSizeInBits(t);
+    }
+
+    if (cur_size == offset && idx < n_elem) {
       Constant *elem_val = struct_global->getAggregateElement(idx);
-      result = get_constant_from_aggregate(elem_val, offset - field_offset, DL);
+      result = get_constant_from_aggregate(elem_val, 0, DL);
+    } else if (cur_size > offset && last_size < offset) {
+      Constant *elem_val = struct_global->getAggregateElement(idx - 1);
+      result = get_constant_from_aggregate(elem_val, offset - last_size, DL);
     }
   } else {
     // Scalar constant
     if (offset == 0)
       result = val;
   }
-
 
   // Strip casts from result
   if (result) {
@@ -709,7 +701,11 @@ Value *ObjectLocator::getInitializerForGlobalValue() {
 namespace llvm {
 
 raw_ostream &operator<<(raw_ostream &out, ObjectLocator &locator) {
-  out << "[" << locator.getObj()->getName() << "]." << locator.getOffset();
+  out << "[" << locator.getObj()->getName() << "].";
+  if (PTGraph::isUnknownOffset(locator.getOffset()))
+    out << "unknown";
+  else
+    out << locator.getOffset();
   return out;
 }
 

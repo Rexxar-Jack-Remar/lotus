@@ -84,6 +84,26 @@
 using namespace llvm;
 using namespace std;
 
+namespace {
+
+static bool hasSameTargetMembership(const CallTargetSet *oldTargets,
+                                    const CallTargetSet &newTargets) {
+  if (!oldTargets)
+    return newTargets.empty();
+
+  if (oldTargets->size() != newTargets.size())
+    return false;
+
+  for (const auto &newTarget : newTargets) {
+    if (oldTargets->count(newTarget.first) == 0)
+      return false;
+  }
+
+  return true;
+}
+
+} // namespace
+
 // Command-line options
 static cl::opt<bool>
     lotus_cg("lotus-cg", cl::desc("Use LotusAA to build call graph"),
@@ -341,11 +361,12 @@ void LotusAA::computePtsCgIteratively(Module &M,
     initFuncProcessingSeq(M, func_seq);
     changed = false;
 
-    // Sequential analysis: process functions in bottom-up order
-    for (Function *func : func_seq) {
+    // Sequential analysis: process functions in bottom-up order.
+    // func_seq is caller-first, so walk it in reverse to analyze callees first.
+    for (int i = (int)func_seq.size() - 1; i >= 0; i--) {
+      Function *func = func_seq[i];
       bool needsAnalysis =
-          (iteration == 0) || iteration >= lotus_restrict_cg_iter ||
-          changed_func.count(func);
+          (iteration >= lotus_restrict_cg_iter) || changed_func.count(func);
 
       if (!needsAnalysis)
         continue;
@@ -356,37 +377,32 @@ void LotusAA::computePtsCgIteratively(Module &M,
       if (lotus_cg)
         new_result->computeCG();
 
-      bool interface_changed =
-          old_result ? !old_result->isSameInterface(new_result) : true;
-
       // Update results
       intraResults_[func] = new_result;
       if (old_result && old_result != new_result)
         delete old_result;
 
-      // Propagate changes to callers
-      if (interface_changed) {
-        changed = true;
-        for (Function *caller : callGraphState_.getCallers(func)) {
-          if (!callGraphState_.isBackEdge(caller, func)) {
-            changed_func.insert(caller);
-          }
+      // Use conservative invalidation: any analyzed callee can
+      // require its callers to be revisited later in the same bottom-up pass.
+      for (Function *caller : callGraphState_.getCallers(func)) {
+        if (!callGraphState_.isBackEdge(caller, func)) {
+          changed_func.insert(caller);
         }
       }
     }
 
     outs() << "\n";
 
+    // Caller reprocessing markers are only relevant within the current
+    // bottom-up pass. Cross-iteration progress is driven by call-target
+    // membership changes.
+    changed_func.clear();
+
     // Update CG if enabled
     if (iteration >= lotus_restrict_cg_iter)
       break;
 
     if (lotus_cg) {
-      // Save callers that need reanalysis before clearing changed_func
-      // These are functions whose callees had interface changes
-      set<Function *> callersNeedingReanalysis = changed_func;
-      changed_func.clear();
-
       for (int i = (int)func_seq.size() - 1; i >= 0; i--) {
         Function *func = func_seq[i];
 
@@ -406,24 +422,9 @@ void LotusAA::computePtsCgIteratively(Module &M,
           CallTargetSet *oldTargets =
               functionPointerResults_.getTargets(func, callsite);
 
-          // Check if changed
-          bool targetsChanged = false;
-          if (!oldTargets) {
-            targetsChanged = !newTargets.empty();
-          } else {
-            if (oldTargets->size() != newTargets.size()) {
-              targetsChanged = true;
-            } else {
-              for (const auto &newTarget : newTargets) {
-                auto old_target_it = oldTargets->find(newTarget.first);
-                if (old_target_it == oldTargets->end() ||
-                    old_target_it->second != newTarget.second) {
-                  targetsChanged = true;
-                  break;
-                }
-              }
-            }
-          }
+          // Target membership, not path-condition deltas, drives
+          // fixpoint iteration. Conditions are still updated in the database.
+          bool targetsChanged = !hasSameTargetMembership(oldTargets, newTargets);
 
           if (targetsChanged) {
             changed_func.insert(func);
@@ -442,10 +443,6 @@ void LotusAA::computePtsCgIteratively(Module &M,
 
       // Detect back edges in updated call graph
       callGraphState_.detectBackEdges(changed_func);
-
-      // Merge back callers that need reanalysis due to interface changes
-      changed_func.insert(callersNeedingReanalysis.begin(),
-                          callersNeedingReanalysis.end());
 
       if (!changed_func.empty())
         changed = true;
@@ -487,9 +484,6 @@ void LotusAA::finalizeCg(std::vector<Function *> &func_seq) {
 
 bool LotusAA::computePTA(Function *F) {
   assert(intraResults_.count(F));
-  // FIXME: it seems that we almost re-run the analysis in each round of the
-  // on-the-fly callgraph construction?? Maybe this is due partly to the
-  // flow-sensitive nature of our analysis?
 
   IntraLotusAA *old_result = intraResults_[F];
   IntraLotusAA *new_result = new IntraLotusAA(F, this);
@@ -499,14 +493,13 @@ bool LotusAA::computePTA(Function *F) {
   if (lotus_cg)
     new_result->computeCG();
 
-  bool interface_changed = true;
-  if (old_result) {
-    interface_changed = !old_result->isSameInterface(new_result);
+  if (old_result)
     delete old_result;
-  }
 
   intraResults_[F] = new_result;
-  return interface_changed;
+  // Conservative behavior: a recomputed function is treated as having
+  // potentially changed interface semantics.
+  return true;
 }
 
 IntraLotusAA *LotusAA::getPtGraph(Function *F) {

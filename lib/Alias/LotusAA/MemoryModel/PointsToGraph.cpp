@@ -83,8 +83,8 @@ using namespace std;
 
 static cl::opt<int> lotus_restrict_pts_count(
     "lotus-restrict-pts-count",
-    cl::desc("Maximum number of locators a pointer may point to"),
-    cl::init(3), cl::Hidden);
+    cl::desc("Maximum number of locators a pointer may point to"), cl::init(3),
+    cl::Hidden);
 
 static cl::opt<int> lotus_restrict_obj_ap_depth(
     "lotus-restrict-obj-ap-depth",
@@ -93,8 +93,7 @@ static cl::opt<int> lotus_restrict_obj_ap_depth(
 
 namespace {
 
-template <typename T>
-static pair<T, T> canonicalCondPair(T lhs, T rhs) {
+template <typename T> static pair<T, T> canonicalCondPair(T lhs, T rhs) {
   return (lhs < rhs) ? make_pair(lhs, rhs) : make_pair(rhs, lhs);
 }
 
@@ -113,11 +112,11 @@ static bool isCompositeCond(path_cond_t cond) {
 
 static Type *getFieldTypeAtOffset(Type *type, int64_t offset,
                                   const DataLayout &DL) {
-  if (!type || offset <= 0)
+  if (!type || PTGraph::isUnknownOffset(offset) || offset <= 0)
     return type;
 
   if (auto *array_ty = dyn_cast<ArrayType>(type)) {
-    uint64_t elem_size = DL.getTypeStoreSize(array_ty->getElementType());
+    uint64_t elem_size = DL.getTypeSizeInBits(array_ty->getElementType());
     if (elem_size == 0)
       return type;
     uint64_t idx = static_cast<uint64_t>(offset) / elem_size;
@@ -129,22 +128,32 @@ static Type *getFieldTypeAtOffset(Type *type, int64_t offset,
   }
 
   if (auto *struct_ty = dyn_cast<StructType>(type)) {
-    const StructLayout *layout = DL.getStructLayout(struct_ty);
-    if (static_cast<uint64_t>(offset) >= layout->getSizeInBytes())
-      return type;
-    unsigned idx = layout->getElementContainingOffset(
-        static_cast<uint64_t>(offset));
-    if (idx >= struct_ty->getNumElements())
-      return type;
-    uint64_t field_offset = layout->getElementOffset(idx);
-    return getFieldTypeAtOffset(struct_ty->getElementType(idx),
-                                offset - static_cast<int64_t>(field_offset),
-                                DL);
+    int n_elem = struct_ty->getNumContainedTypes();
+    int cur_size = 0;
+    int last_size = 0;
+    int idx;
+    for (idx = 0; idx < n_elem; idx++) {
+      if ((uint64_t)cur_size >= (uint64_t)offset)
+        break;
+
+      Type *t = struct_ty->getContainedType(idx);
+      last_size = cur_size;
+      cur_size += (int)DL.getTypeSizeInBits(t);
+    }
+
+    if ((uint64_t)cur_size == (uint64_t)offset && idx < n_elem)
+      return getFieldTypeAtOffset(struct_ty->getContainedType(idx), 0, DL);
+    if ((uint64_t)cur_size > (uint64_t)offset &&
+        (uint64_t)last_size < (uint64_t)offset) {
+      return getFieldTypeAtOffset(struct_ty->getContainedType(idx - 1),
+                                  offset - last_size, DL);
+    }
+    return type;
   }
 
   if (auto *vec_ty = dyn_cast<VectorType>(type)) {
     Type *elem_type = vec_ty->getElementType();
-    uint64_t elem_size = DL.getTypeStoreSize(elem_type);
+    uint64_t elem_size = DL.getTypeSizeInBits(elem_type);
     if (elem_size == 0)
       return type;
     uint64_t idx = static_cast<uint64_t>(offset) / elem_size;
@@ -155,30 +164,6 @@ static Type *getFieldTypeAtOffset(Type *type, int64_t offset,
   }
 
   return type;
-}
-
-static bool areNegations(path_cond_t lhs, path_cond_t rhs) {
-  if (!lhs || !rhs)
-    return false;
-  if (lhs == rhs)
-    return false;
-
-  auto is_value_sense_atom = [](PathCond::Kind kind) {
-    return kind == PathCond::Kind::ValueAtom ||
-           kind == PathCond::Kind::BranchAtom;
-  };
-
-  if (is_value_sense_atom(lhs->getKind()) &&
-      is_value_sense_atom(rhs->getKind())) {
-    return lhs->getValue() == rhs->getValue() &&
-           lhs->getSense() != rhs->getSense();
-  }
-
-  if (lhs->getKind() == PathCond::Kind::Not && lhs->getLhs() == rhs)
-    return true;
-  if (rhs->getKind() == PathCond::Kind::Not && rhs->getLhs() == lhs)
-    return true;
-  return false;
 }
 
 } // namespace
@@ -198,6 +183,7 @@ PTResultIterator::PTResultIterator(PTResult *target, PTGraph *parent_graph)
 
   // Optimize: cache results in target
   if (!target->is_optimized) {
+    target->derived_list.clear();
     target->pt_list.clear();
     int count = 0;
     for (auto &item : res) {
@@ -230,8 +216,7 @@ void PTResultIterator::visit(PTResult *target, int64_t off, path_cond_t cond,
     ObjectLocator *locator = item.locator->offsetBy(off);
     if (!locator)
       continue;
-    path_cond_t new_cond =
-        parent_graph->findOrCreateAndRegion(cond, item.cond);
+    path_cond_t new_cond = parent_graph->findOrCreateAndRegion(cond, item.cond);
     auto it = res.find(locator);
     if (it == res.end()) {
       res.insert(make_pair(locator, new_cond));
@@ -244,8 +229,7 @@ void PTResultIterator::visit(PTResult *target, int64_t off, path_cond_t cond,
   for (PTResult::DerivedPtItem &item : target->derived_list) {
     if (!item.src_pts)
       continue;
-    path_cond_t new_cond =
-        parent_graph->findOrCreateAndRegion(cond, item.cond);
+    path_cond_t new_cond = parent_graph->findOrCreateAndRegion(cond, item.cond);
     visit(item.src_pts, off + item.offset, new_cond, visited);
   }
 
@@ -343,7 +327,6 @@ PTResult *PTGraph::derivePtsFrom(Value *ptr, PTResult *other_pts,
   return pts;
 }
 
-
 PTResult *PTGraph::assignPts(Value *ptr, PTResult *pts) {
   pt_results[ptr] = pts;
   return pts;
@@ -392,7 +375,9 @@ void PTGraph::trackPtrRightValue(Value *ptr, mem_value_t &res) {
 void PTGraph::trackPtrRightValueUnderCondition(Value *ptr, mem_value_t &res,
                                                path_cond_t base_cond,
                                                float base_confidence) {
-  if ((int)res.size() >= 100)
+  if (IntraLotusAAConfig::lotus_restrict_right_value_count != -1 &&
+      static_cast<int>(res.size()) >=
+          IntraLotusAAConfig::lotus_restrict_right_value_count)
     return;
 
   if (Argument *arg = dyn_cast<Argument>(ptr)) {
@@ -401,8 +386,7 @@ void PTGraph::trackPtrRightValueUnderCondition(Value *ptr, mem_value_t &res,
     mem_value_t load_result;
     getLoadValues(load->getPointerOperand(), load, load_result);
     for (auto &item : load_result) {
-      path_cond_t final_cond =
-          findOrCreateAndRegion(base_cond, item.cond);
+      path_cond_t final_cond = findOrCreateAndRegion(base_cond, item.cond);
       float final_confidence = mem_value_item_t::compute_and_confidence(
           base_confidence, item.confidence);
       trackPtrRightValueUnderCondition(item.val, res, final_cond,
@@ -421,14 +405,12 @@ void PTGraph::trackPtrRightValueUnderCondition(Value *ptr, mem_value_t &res,
   } else if (SelectInst *sel = dyn_cast<SelectInst>(ptr)) {
     path_cond_t true_cond = getValueCond(sel->getCondition(), true);
     path_cond_t false_cond = getValueCond(sel->getCondition(), false);
-    trackPtrRightValueUnderCondition(sel->getTrueValue(), res,
-                                     findOrCreateAndRegion(base_cond,
-                                                           true_cond),
-                                     base_confidence);
-    trackPtrRightValueUnderCondition(sel->getFalseValue(), res,
-                                     findOrCreateAndRegion(base_cond,
-                                                           false_cond),
-                                     base_confidence);
+    trackPtrRightValueUnderCondition(
+        sel->getTrueValue(), res, findOrCreateAndRegion(base_cond, true_cond),
+        base_confidence);
+    trackPtrRightValueUnderCondition(
+        sel->getFalseValue(), res, findOrCreateAndRegion(base_cond, false_cond),
+        base_confidence);
   } else if (CastInst *cast = dyn_cast<CastInst>(ptr)) {
     trackPtrRightValueUnderCondition(cast->getOperand(0), res, base_cond,
                                      base_confidence);
@@ -507,7 +489,8 @@ void PTGraph::loadPtrAtImpl(
 
     // Adjust offset if query_offset provided
     if (query_offset != 0) {
-      loc = obj->findLocator(offset + query_offset, true);
+      loc =
+          obj->findLocator(PTGraph::composeOffset(offset, query_offset), true);
     }
 
     // Get values from this locator
@@ -520,7 +503,7 @@ void PTGraph::loadPtrAtImpl(
       // No program point: fall back to the coarse per-object stored-value cache
       // at this offset. This is conservative and avoids requiring dominance
       // info.
-      const int64_t off_key = offset + query_offset;
+      const int64_t off_key = PTGraph::composeOffset(offset, query_offset);
       auto &stored = obj->getStoredValues();
       auto it = stored.find(off_key);
       if (it != stored.end()) {
@@ -532,10 +515,10 @@ void PTGraph::loadPtrAtImpl(
 
       // If nothing known was stored, mirror ObjectLocator::getValues() default.
       if (tmp_result.empty()) {
-        tmp_result.push_back(mem_value_item_t(
-            point_to_item.second, nullptr,
-            obj->isReallyAllocated() ? LocValue::UNDEF_VALUE
-                                     : LocValue::FREE_VARIABLE));
+        tmp_result.push_back(mem_value_item_t(point_to_item.second, nullptr,
+                                              obj->isReallyAllocated()
+                                                  ? LocValue::UNDEF_VALUE
+                                                  : LocValue::FREE_VARIABLE));
       }
     }
 
@@ -547,7 +530,8 @@ void PTGraph::loadPtrAtImpl(
       Value *val = from_loc;
       if (isa<LoadInst>(from_loc))
         val = from_loc;
-      obj->getLoadedValues()[offset + query_offset].insert(val);
+      obj->getLoadedValues()[PTGraph::composeOffset(offset, query_offset)]
+          .insert(val);
     }
   }
 }
@@ -763,63 +747,13 @@ path_cond_t PTGraph::getFalseCond() {
 bool PTGraph::isAlwaysSatisfied(path_cond_t cond) const {
   if (!cond)
     return true;
-  switch (cond->getKind()) {
-  case PathCond::Kind::True:
-    return true;
-  case PathCond::Kind::False:
-  case PathCond::Kind::ValueAtom:
-  case PathCond::Kind::BranchAtom:
-  case PathCond::Kind::SwitchCaseAtom:
-  case PathCond::Kind::SwitchDefaultAtom:
-  case PathCond::Kind::InvokeNormalAtom:
-  case PathCond::Kind::InvokeUnwindAtom:
-  case PathCond::Kind::BlockAtom:
-  case PathCond::Kind::CallTargetAtom:
-  case PathCond::Kind::ImportedAtom:
-    return false;
-  case PathCond::Kind::Not:
-    return cond->getLhs() && !isSatisfiable(cond->getLhs());
-  case PathCond::Kind::And:
-    return cond->getLhs() && cond->getRhs() &&
-           isAlwaysSatisfied(cond->getLhs()) &&
-           isAlwaysSatisfied(cond->getRhs());
-  case PathCond::Kind::Or:
-    return (cond->getLhs() && isAlwaysSatisfied(cond->getLhs())) ||
-           (cond->getRhs() && isAlwaysSatisfied(cond->getRhs())) ||
-           areNegations(cond->getLhs(), cond->getRhs());
-  }
-  return false;
+  return cond->getConstraintSummary().always_true;
 }
 
 bool PTGraph::isSatisfiable(path_cond_t cond) const {
   if (!cond)
     return true;
-  switch (cond->getKind()) {
-  case PathCond::Kind::True:
-    return true;
-  case PathCond::Kind::False:
-    return false;
-  case PathCond::Kind::ValueAtom:
-  case PathCond::Kind::BranchAtom:
-  case PathCond::Kind::SwitchCaseAtom:
-  case PathCond::Kind::SwitchDefaultAtom:
-  case PathCond::Kind::InvokeNormalAtom:
-  case PathCond::Kind::InvokeUnwindAtom:
-  case PathCond::Kind::BlockAtom:
-  case PathCond::Kind::CallTargetAtom:
-  case PathCond::Kind::ImportedAtom:
-    return true;
-  case PathCond::Kind::Not:
-    return cond->getLhs() ? !isAlwaysSatisfied(cond->getLhs()) : true;
-  case PathCond::Kind::And:
-    return cond->getLhs() && cond->getRhs() &&
-           isSatisfiable(cond->getLhs()) && isSatisfiable(cond->getRhs()) &&
-           !areNegations(cond->getLhs(), cond->getRhs());
-  case PathCond::Kind::Or:
-    return (cond->getLhs() && isSatisfiable(cond->getLhs())) ||
-           (cond->getRhs() && isSatisfiable(cond->getRhs()));
-  }
-  return true;
+  return !cond->getConstraintSummary().always_false;
 }
 
 bool PTGraph::isNoEffectFunction(Function *F) const {
@@ -846,9 +780,7 @@ path_cond_t PTGraph::getValueCond(Value *value, bool sense) {
   return cond;
 }
 
-path_cond_t PTGraph::getBlockCond(BasicBlock *BB) {
-  return getUnitRegion(BB);
-}
+path_cond_t PTGraph::getBlockCond(BasicBlock *BB) { return getUnitRegion(BB); }
 
 void PTGraph::buildControlDependenceInfo() {
   if (control_dep_ready_)
@@ -882,8 +814,8 @@ void PTGraph::buildControlDependenceInfo() {
       while (succ_node && succ_node != controller_node) {
         BasicBlock *curr = succ_node->getBlock();
         path_cond_t &curr_cond = control_dep_cache_[curr][controller];
-        curr_cond = curr_cond ? findOrCreateOrRegion(curr_cond, edge_cond)
-                              : edge_cond;
+        curr_cond =
+            curr_cond ? findOrCreateOrRegion(curr_cond, edge_cond) : edge_cond;
         succ_node = succ_node->getIDom();
       }
     }
@@ -906,9 +838,8 @@ path_cond_t PTGraph::getCFGEdgeCond(BasicBlock *src_bb, BasicBlock *succ_bb) {
   if (auto *br = dyn_cast<BranchInst>(term)) {
     if (br->isConditional()) {
       bool sense = succ_bb == br->getSuccessor(0);
-      cond_nodes_.emplace_back(
-          PathCond::createBranchAtom(src_bb, succ_bb, br->getCondition(),
-                                     sense));
+      cond_nodes_.emplace_back(PathCond::createBranchAtom(
+          src_bb, succ_bb, br->getCondition(), sense));
       cond = cond_nodes_.back().get();
     }
   } else if (auto *sw = dyn_cast<SwitchInst>(term)) {
@@ -924,9 +855,8 @@ path_cond_t PTGraph::getCFGEdgeCond(BasicBlock *src_bb, BasicBlock *succ_bb) {
     }
 
     if (sw->getDefaultDest() == succ_bb) {
-      cond_nodes_.emplace_back(
-          PathCond::createSwitchDefaultAtom(src_bb, succ_bb,
-                                            sw->getCondition()));
+      cond_nodes_.emplace_back(PathCond::createSwitchDefaultAtom(
+          src_bb, succ_bb, sw->getCondition()));
       path_cond_t default_cond = cond_nodes_.back().get();
       edge_cond = edge_cond ? findOrCreateOrRegion(edge_cond, default_cond)
                             : default_cond;
@@ -951,6 +881,32 @@ path_cond_t PTGraph::getCFGEdgeCond(BasicBlock *src_bb, BasicBlock *succ_bb) {
   return cond;
 }
 
+path_cond_t PTGraph::localizePathCond(path_cond_t cond) {
+  if (!cond)
+    return getEmptyCond();
+  if (cond->getOwnerFunc() == nullptr || cond->getOwnerFunc() == analyzed_func)
+    return cond;
+  return importPathCond(cond, nullptr, nullptr);
+}
+
+path_cond_t PTGraph::getComplementaryBranchCond(path_cond_t cond) {
+  if (!cond || cond->getKind() != PathCond::Kind::BranchAtom)
+    return nullptr;
+
+  BasicBlock *block = cond->getBlock();
+  BasicBlock *succ = cond->getSuccessor();
+  auto *br =
+      block ? dyn_cast_or_null<BranchInst>(block->getTerminator()) : nullptr;
+  if (!br || !br->isConditional() || br->getNumSuccessors() != 2)
+    return nullptr;
+
+  BasicBlock *other_succ =
+      (succ == br->getSuccessor(0)) ? br->getSuccessor(1) : br->getSuccessor(0);
+  if (!other_succ || other_succ == succ)
+    return nullptr;
+  return getCFGEdgeCond(block, other_succ);
+}
+
 path_cond_t PTGraph::getUnitRegion(BasicBlock *BB) {
   if (!BB)
     return getEmptyCond();
@@ -967,8 +923,7 @@ path_cond_t PTGraph::getUnitRegion(BasicBlock *BB) {
     bool has_dep = false;
     for (auto &dep_item : dep_it->second) {
       path_cond_t dep_region = getUnitRegion(dep_item.first);
-      path_cond_t dep_cond =
-          findOrCreateAndRegion(dep_region, dep_item.second);
+      path_cond_t dep_cond = findOrCreateAndRegion(dep_region, dep_item.second);
       result = has_dep ? findOrCreateOrRegion(result, dep_cond) : dep_cond;
       has_dep = true;
     }
@@ -1008,10 +963,10 @@ path_cond_t PTGraph::findOrCreateBBRegion(BasicBlock *src_bb,
       if (dep_bb != src_bb && dom_tree && !dom_tree->dominates(src_bb, dep_bb))
         continue;
 
-      path_cond_t dep_region =
-          (dep_bb == src_bb) ? getEmptyCond() : findOrCreateBBRegion(src_bb, dep_bb);
-      path_cond_t dep_cond =
-          findOrCreateAndRegion(dep_region, dep_item.second);
+      path_cond_t dep_region = (dep_bb == src_bb)
+                                   ? getEmptyCond()
+                                   : findOrCreateBBRegion(src_bb, dep_bb);
+      path_cond_t dep_cond = findOrCreateAndRegion(dep_region, dep_item.second);
       result = has_dep ? findOrCreateOrRegion(result, dep_cond) : dep_cond;
       has_dep = true;
     }
@@ -1025,37 +980,20 @@ path_cond_t PTGraph::importPathCond(path_cond_t cond, Value *callsite,
                                     Function *callee) {
   if (!cond)
     return getEmptyCond();
+  if (cond->getOwnerFunc() == analyzed_func || cond->getOwnerFunc() == nullptr)
+    return cond;
   if (isAlwaysSatisfied(cond))
     return getEmptyCond();
   if (!isSatisfiable(cond))
     return getFalseCond();
 
-  switch (cond->getKind()) {
-  case PathCond::Kind::True:
-    return getEmptyCond();
-  case PathCond::Kind::False:
-    return getFalseCond();
-  case PathCond::Kind::Not:
-    return findOrCreateNotRegion(
-        importPathCond(cond->getLhs(), callsite, callee));
-  case PathCond::Kind::And:
-    return findOrCreateAndRegion(importPathCond(cond->getLhs(), callsite, callee),
-                                 importPathCond(cond->getRhs(), callsite, callee));
-  case PathCond::Kind::Or:
-    return findOrCreateOrRegion(importPathCond(cond->getLhs(), callsite, callee),
-                                importPathCond(cond->getRhs(), callsite, callee));
-  default:
-    break;
-  }
-
-  auto key = make_tuple(callsite, callee, cond);
-  auto it = imported_cond_cache_.find(key);
+  auto it = imported_cond_cache_.find(cond);
   if (it != imported_cond_cache_.end())
     return it->second;
 
-  cond_nodes_.emplace_back(PathCond::createImportedAtom(callsite, callee, cond));
+  cond_nodes_.emplace_back(PathCond::createImportedAtom(analyzed_func, cond));
   path_cond_t imported = cond_nodes_.back().get();
-  imported_cond_cache_[key] = imported;
+  imported_cond_cache_[cond] = imported;
   return imported;
 }
 
@@ -1068,7 +1006,8 @@ path_cond_t PTGraph::getCallTargetCond(Value *called_value, Function *callee) {
   if (it != call_target_cond_cache_.end())
     return it->second;
 
-  cond_nodes_.emplace_back(PathCond::createCallTargetAtom(called_value, callee));
+  cond_nodes_.emplace_back(
+      PathCond::createCallTargetAtom(called_value, callee));
   path_cond_t cond = cond_nodes_.back().get();
   call_target_cond_cache_[key] = cond;
   return cond;
@@ -1079,6 +1018,8 @@ path_cond_t PTGraph::findOrCreateAndRegion(path_cond_t lhs, path_cond_t rhs) {
     lhs = getEmptyCond();
   if (!rhs)
     rhs = getEmptyCond();
+  lhs = localizePathCond(lhs);
+  rhs = localizePathCond(rhs);
   if (!isSatisfiable(lhs) || !isSatisfiable(rhs))
     return getFalseCond();
   if (isAlwaysSatisfied(lhs))
@@ -1087,8 +1028,6 @@ path_cond_t PTGraph::findOrCreateAndRegion(path_cond_t lhs, path_cond_t rhs) {
     return lhs;
   if (lhs == rhs)
     return lhs;
-  if (areNegations(lhs, rhs))
-    return getFalseCond();
 
   auto key = canonicalCondPair(lhs, rhs);
   auto it = and_cond_cache_.find(key);
@@ -1106,6 +1045,8 @@ path_cond_t PTGraph::findOrCreateOrRegion(path_cond_t lhs, path_cond_t rhs) {
     lhs = getEmptyCond();
   if (!rhs)
     rhs = getEmptyCond();
+  lhs = localizePathCond(lhs);
+  rhs = localizePathCond(rhs);
   if (isAlwaysSatisfied(lhs) || isAlwaysSatisfied(rhs))
     return getEmptyCond();
   if (!isSatisfiable(lhs))
@@ -1114,8 +1055,6 @@ path_cond_t PTGraph::findOrCreateOrRegion(path_cond_t lhs, path_cond_t rhs) {
     return lhs;
   if (lhs == rhs)
     return lhs;
-  if (areNegations(lhs, rhs))
-    return getEmptyCond();
 
   auto key = canonicalCondPair(lhs, rhs);
   auto it = or_cond_cache_.find(key);
@@ -1131,13 +1070,17 @@ path_cond_t PTGraph::findOrCreateOrRegion(path_cond_t lhs, path_cond_t rhs) {
 path_cond_t PTGraph::findOrCreateNotRegion(path_cond_t cond) {
   if (!cond)
     return getFalseCond();
+  cond = localizePathCond(cond);
   if (isAlwaysSatisfied(cond))
     return getFalseCond();
   if (!isSatisfiable(cond))
     return getEmptyCond();
-  if (cond->getKind() == PathCond::Kind::ValueAtom ||
-      cond->getKind() == PathCond::Kind::BranchAtom)
+  if (cond->getKind() == PathCond::Kind::ValueAtom)
     return getValueCond(cond->getValue(), !cond->getSense());
+  if (cond->getKind() == PathCond::Kind::BranchAtom) {
+    if (path_cond_t complement = getComplementaryBranchCond(cond))
+      return complement;
+  }
   if (cond->getKind() == PathCond::Kind::Not)
     return cond->getLhs() ? cond->getLhs() : getEmptyCond();
 

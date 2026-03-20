@@ -74,43 +74,65 @@ static cl::opt<bool>
 ///
 /// @see computeCG() for the main call graph computation algorithm
 /// @see trackPtrRightValue() for value tracking implementation
-void IntraLotusAA::resolveCallValue(Value *val, cg_result_t &target) {
+void IntraLotusAA::resolveCallValue(Value *val, cg_result_t &target,
+                                    path_cond_t pre_cond) {
+  if (!pre_cond)
+    pre_cond = getEmptyCond();
+
   mem_value_t resolved_tmp;
   trackPtrRightValue(val, resolved_tmp);
 
   for (auto &item : resolved_tmp) {
     Value *resolved_val = item.val;
-    path_cond_t pre_cond = item.cond;
 
     if (Function *func = dyn_cast<Function>(resolved_val)) {
       // Direct function pointer
+      path_cond_t final_cond = findOrCreateAndRegion(item.cond, pre_cond);
       if (target.count(func)) {
-        target[func] = findOrCreateOrRegion(target[func], pre_cond);
+        target[func] = findOrCreateOrRegion(target[func], final_cond);
       } else {
-        target[func] = pre_cond;
+        target[func] = final_cond;
       }
-    } else if (CallBase *call = dyn_cast<CallBase>(resolved_val)) {
-      // Function returned from call
-      Instruction *callsite_inst = call;
+    } else if (isa<CallBase>(resolved_val) ||
+               func_pseudo_ret_cache.count(resolved_val)) {
+      // Function returned from call or pseudo-output.
+      Instruction *callsite_inst = nullptr;
+      int output_idx = 0;
 
-      // Get the callee's return value functions
-      if (Function *called_func = call->getCalledFunction()) {
-        IntraLotusAA *callee_PTG = lotus_aa->getPtGraph(called_func);
-        if (callee_PTG && !callee_PTG->is_considered_as_library) {
-          // Get output CG summary (index 0 = return value)
-          if (!callee_PTG->output_cg_summary.empty()) {
-            cg_result_t &out_values = callee_PTG->output_cg_summary[0];
-            for (auto &value_item : out_values) {
-              path_cond_t final_cond =
-                  findOrCreateAndRegion(value_item.second, pre_cond);
-              if (target.count(value_item.first)) {
-                target[value_item.first] =
-                    findOrCreateOrRegion(target[value_item.first], final_cond);
-              } else {
-                target[value_item.first] = final_cond;
-              }
-            }
-          }
+      if (CallBase *call = dyn_cast<CallBase>(resolved_val)) {
+        callsite_inst = call;
+      } else {
+        auto ret_it = func_pseudo_ret_cache.find(resolved_val);
+        assert(ret_it != func_pseudo_ret_cache.end() &&
+               "Unexpected pseudo return in CG resolution");
+        callsite_inst = ret_it->second.first;
+        output_idx = ret_it->second.second;
+      }
+
+      CallBase *item_call = dyn_cast_or_null<CallBase>(callsite_inst);
+      if (!item_call || output_idx < 0)
+        continue;
+
+      Function *called_func = item_call->getCalledFunction();
+      if (!called_func)
+        continue;
+
+      IntraLotusAA *callee_PTG = lotus_aa->getPtGraph(called_func);
+      if (!callee_PTG || callee_PTG->is_considered_as_library ||
+          static_cast<size_t>(output_idx) >= callee_PTG->output_cg_summary.size())
+        continue;
+
+      cg_result_t &out_values = callee_PTG->output_cg_summary[output_idx];
+      for (auto &value_item : out_values) {
+        path_cond_t imported_cond =
+            importPathCond(value_item.second, callsite_inst, called_func);
+        path_cond_t final_cond =
+            findOrCreateAndRegion(imported_cond, pre_cond);
+        if (target.count(value_item.first)) {
+          target[value_item.first] =
+              findOrCreateOrRegion(target[value_item.first], final_cond);
+        } else {
+          target[value_item.first] = final_cond;
         }
       }
     } else if (Argument *resolved_arg = dyn_cast<Argument>(resolved_val)) {
@@ -176,25 +198,41 @@ void IntraLotusAA::computeCG() {
 
         if (callees && IntraLotusAAConfig::lotus_restrict_inline_depth != 0) {
           // Inline input summaries from callees
-          int callee_idx = 0;
+          int callee_idx = -1;
           for (auto &callee_item : *callees) {
+            callee_idx++;
             Function *callee = callee_item.first;
             if (callee_idx >= IntraLotusAAConfig::lotus_restrict_cg_size)
               break;
 
-            if (!callee || lotus_aa->isBackEdge(base_func, callee)) {
-              callee_idx++;
+            if (!callee || !isPointerAnalysisCallsiteCompatible(call, callee) ||
+                lotus_aa->isBackEdge(base_func, callee)) {
               continue;
             }
 
-            if (!func_arg.count(call) || !func_arg[call].count(callee)) {
-              callee_idx++;
-              continue;
+            IntraLotusAA *callee_PTG = nullptr;
+            func_arg_t *caller_args = nullptr;
+
+            if (func_arg.count(call) && func_arg[call].count(callee)) {
+              callee_PTG = lotus_aa->getPtGraph(callee);
+              if (callee_PTG && !callee_PTG->is_considered_as_library) {
+                caller_args = &func_arg[call][callee];
+              }
+            } else if (!IntraLotusAAConfig::lotus_disable_thread_heuristic &&
+                       callee->getName() == "pthread_create" &&
+                       call->arg_size() == 4 &&
+                       isa<Function>(call->getArgOperand(2)) &&
+                       call->getArgOperand(3)->getType()->isPointerTy() &&
+                       thread_arg.count(call)) {
+              Function *thread_func =
+                  dyn_cast<Function>(call->getArgOperand(2));
+              callee_PTG = lotus_aa->getPtGraph(thread_func);
+              if (callee_PTG && !callee_PTG->is_considered_as_library) {
+                caller_args = &thread_arg[call];
+              }
             }
 
-            IntraLotusAA *callee_PTG = lotus_aa->getPtGraph(callee);
-            if (callee_PTG && !callee_PTG->is_considered_as_library) {
-              func_arg_t *caller_args = &func_arg[call][callee];
+            if (callee_PTG && caller_args) {
 
               // Process input CG summaries
               map<Argument *, map<cg_result_t *, path_cond_t>, llvm_cmp>
@@ -215,23 +253,23 @@ void IntraLotusAA::computeCG() {
                   path_cond_t inline_pre_cond = callee_summary_item.second;
 
                   for (auto &caller_arg_value : caller_arg_values) {
+                    path_cond_t imported_inline_cond =
+                        importPathCond(inline_pre_cond, call, callee);
+                    path_cond_t final_cond = findOrCreateAndRegion(
+                        caller_arg_value.cond, imported_inline_cond);
                     Value *caller_arg_value_val = caller_arg_value.val;
-                    resolveCallValue(caller_arg_value_val, *inline_target);
-                    for (auto &target_item : *inline_target) {
-                      target_item.second = findOrCreateAndRegion(
-                          target_item.second, inline_pre_cond);
-                    }
+                    resolveCallValue(caller_arg_value_val, *inline_target,
+                                     final_cond);
                   }
                 }
               }
             }
-            callee_idx++;
           }
         }
 
         // Resolve the call value itself
         Value *called_value = call->getCalledOperand();
-        resolveCallValue(called_value, cg_resolve_result[call]);
+        resolveCallValue(called_value, cg_resolve_result[call], getEmptyCond());
       }
     }
   }
@@ -253,7 +291,7 @@ void IntraLotusAA::computeCG() {
         mem_value_t &src = src_item.second;
         for (mem_value_item_t &value_item : src) {
           Value *src_value = value_item.val;
-          resolveCallValue(src_value, target);
+          resolveCallValue(src_value, target, value_item.cond);
         }
       }
     }

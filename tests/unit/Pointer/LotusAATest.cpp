@@ -1,10 +1,9 @@
-#include <gtest/gtest.h>
-
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/Support/SourceMgr.h>
+#include <gtest/gtest.h>
 
 #define private public
 #define protected public
@@ -54,6 +53,18 @@ std::vector<CallBase *> getIndirectCalls(Function &F) {
   return Calls;
 }
 
+CallBase *findCallByCallee(Function &F, StringRef Name) {
+  for (Instruction &I : instructions(F)) {
+    auto *CB = dyn_cast<CallBase>(&I);
+    if (!CB)
+      continue;
+    Function *Callee = CB->getCalledFunction();
+    if (Callee && Callee->getName() == Name)
+      return CB;
+  }
+  return nullptr;
+}
+
 Value *findValueByName(Function &F, StringRef Name) {
   for (Argument &Arg : F.args()) {
     if (Arg.getName() == Name)
@@ -79,16 +90,16 @@ bool containsValueAtom(path_cond_t cond, Value *value, bool sense) {
          containsValueAtom(cond->getRhs(), value, sense);
 }
 
-bool containsImportedAtom(path_cond_t cond, Value *callsite, Function *callee) {
+bool containsImportedAtom(path_cond_t cond) {
   if (!cond)
     return false;
 
   if (cond->getKind() == PathCond::Kind::ImportedAtom) {
-    return cond->getValue() == callsite && cond->getCallee() == callee;
+    return true;
   }
 
-  return containsImportedAtom(cond->getLhs(), callsite, callee) ||
-         containsImportedAtom(cond->getRhs(), callsite, callee);
+  return containsImportedAtom(cond->getLhs()) ||
+         containsImportedAtom(cond->getRhs());
 }
 
 bool containsSwitchCaseAtom(path_cond_t cond, Value *value,
@@ -98,8 +109,7 @@ bool containsSwitchCaseAtom(path_cond_t cond, Value *value,
 
   if (cond->getKind() == PathCond::Kind::SwitchCaseAtom) {
     ConstantInt *CI = cond->getCaseValue();
-    return cond->getValue() == value && CI &&
-           CI->getValue() == case_value;
+    return cond->getValue() == value && CI && CI->getValue() == case_value;
   }
 
   return containsSwitchCaseAtom(cond->getLhs(), value, case_value) ||
@@ -126,6 +136,19 @@ bool containsSummaryValue(const mem_value_t &values) {
   return false;
 }
 
+bool containsBranchAtom(path_cond_t cond, BasicBlock *block,
+                        BasicBlock *successor) {
+  if (!cond)
+    return false;
+
+  if (cond->getKind() == PathCond::Kind::BranchAtom) {
+    return cond->getBlock() == block && cond->getSuccessor() == successor;
+  }
+
+  return containsBranchAtom(cond->getLhs(), block, successor) ||
+         containsBranchAtom(cond->getRhs(), block, successor);
+}
+
 IntraLotusAA::OutputItem *findOutputItem(IntraLotusAA *PTG, Value *parent,
                                          int64_t offset) {
   for (auto *output : PTG->outputs) {
@@ -142,12 +165,17 @@ struct LotusConfigScope {
   int inline_size = IntraLotusAAConfig::lotus_restrict_inline_size;
   int ap_level = IntraLotusAAConfig::lotus_restrict_ap_level;
   int cg_size = IntraLotusAAConfig::lotus_restrict_cg_size;
+  bool disable_library_heuristic =
+      IntraLotusAAConfig::lotus_disable_library_heuristic;
   bool use_full_phi_cond = IntraLotusAAConfig::lotus_use_full_phi_cond;
   bool enable_score_computation =
       IntraLotusAAConfig::lotus_enable_score_computation;
   bool enable_summary_value = IntraLotusAAConfig::lotus_enable_summary_value;
   int restrict_output_pts = IntraLotusAAConfig::lotus_restrict_output_pts;
   int max_passing_func = IntraLotusAAConfig::lotus_memory_max_passing_func;
+  int right_value_count = IntraLotusAAConfig::lotus_restrict_right_value_count;
+  int restrict_inter_structure =
+      IntraLotusAAConfig::lotus_restrict_inter_structure;
 
   ~LotusConfigScope() {
     IntraLotusAAConfig::lotus_restrict_inline_depth = inline_depth;
@@ -155,12 +183,17 @@ struct LotusConfigScope {
     IntraLotusAAConfig::lotus_restrict_inline_size = inline_size;
     IntraLotusAAConfig::lotus_restrict_ap_level = ap_level;
     IntraLotusAAConfig::lotus_restrict_cg_size = cg_size;
+    IntraLotusAAConfig::lotus_disable_library_heuristic =
+        disable_library_heuristic;
     IntraLotusAAConfig::lotus_use_full_phi_cond = use_full_phi_cond;
     IntraLotusAAConfig::lotus_enable_score_computation =
         enable_score_computation;
     IntraLotusAAConfig::lotus_enable_summary_value = enable_summary_value;
     IntraLotusAAConfig::lotus_restrict_output_pts = restrict_output_pts;
     IntraLotusAAConfig::lotus_memory_max_passing_func = max_passing_func;
+    IntraLotusAAConfig::lotus_restrict_right_value_count = right_value_count;
+    IntraLotusAAConfig::lotus_restrict_inter_structure =
+        restrict_inter_structure;
   }
 };
 
@@ -215,6 +248,125 @@ TEST(LotusAA, PhiMergeResolvesBothIndirectTargets) {
   EXPECT_TRUE(Targets.count(M->getFunction("bar")));
 }
 
+TEST(LotusAA, ReturnedFunctionPointerReachesCallerIndirectCall) {
+  const char *IR = R"(
+    define i32 @foo(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @bar(i32 %x) {
+    entry:
+      %inc = add i32 %x, 1
+      ret i32 %inc
+    }
+
+    define i32 (i32)* @choose(i1 %cond) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      ret i32 (i32)* @foo
+    else:
+      ret i32 (i32)* @bar
+    }
+
+    define i32 @main(i1 %cond, i32 %x) {
+    entry:
+      %fp = call i32 (i32)* @choose(i1 %cond)
+      %res = call i32 %fp(i32 %x)
+      ret i32 %res
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  computeAllFunctionCgs(*M, *Pass);
+
+  auto Calls = getIndirectCalls(*Main);
+  ASSERT_EQ(Calls.size(), 1u);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+  auto It = PTG->cg_resolve_result.find(Calls.front());
+  ASSERT_NE(It, PTG->cg_resolve_result.end());
+  const auto &Targets = It->second;
+  EXPECT_EQ(Targets.size(), 2u);
+  EXPECT_TRUE(Targets.count(M->getFunction("foo")));
+  EXPECT_TRUE(Targets.count(M->getFunction("bar")));
+}
+
+TEST(LotusAA, ReturnedFunctionPointerImportsCallerLocalGuards) {
+  const char *IR = R"(
+    define i32 @foo(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @bar(i32 %x) {
+    entry:
+      %inc = add i32 %x, 1
+      ret i32 %inc
+    }
+
+    define i32 (i32)* @choose(i1 %cond) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      ret i32 (i32)* @foo
+    else:
+      ret i32 (i32)* @bar
+    }
+
+    define i32 @main(i1 %cond, i32 %x) {
+    entry:
+      %fp = call i32 (i32)* @choose(i1 %cond)
+      %res = call i32 %fp(i32 %x)
+      ret i32 %res
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  Function *Choose = M->getFunction("choose");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Choose, nullptr);
+  computeAllFunctionCgs(*M, *Pass);
+
+  auto *ChooseCall = findCallByCallee(*Main, "choose");
+  ASSERT_NE(ChooseCall, nullptr);
+
+  auto Calls = getIndirectCalls(*Main);
+  ASSERT_EQ(Calls.size(), 1u);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+  auto It = PTG->cg_resolve_result.find(Calls.front());
+  ASSERT_NE(It, PTG->cg_resolve_result.end());
+  const auto &Targets = It->second;
+
+  Value *ChooseCond = findValueByName(*Choose, "cond");
+  ASSERT_NE(ChooseCond, nullptr);
+
+  auto FooIt = Targets.find(M->getFunction("foo"));
+  auto BarIt = Targets.find(M->getFunction("bar"));
+  ASSERT_NE(FooIt, Targets.end());
+  ASSERT_NE(BarIt, Targets.end());
+
+  EXPECT_TRUE(containsImportedAtom(FooIt->second));
+  EXPECT_TRUE(containsImportedAtom(BarIt->second));
+  EXPECT_FALSE(containsValueAtom(FooIt->second, ChooseCond, true));
+  EXPECT_FALSE(containsValueAtom(BarIt->second, ChooseCond, false));
+}
+
 TEST(LotusAA, StructFieldGepKeepsNonZeroOffsetPrecision) {
   const char *IR = R"(
     %struct.S = type { i32 (i32)*, i32 (i32)* }
@@ -262,6 +414,56 @@ TEST(LotusAA, StructFieldGepKeepsNonZeroOffsetPrecision) {
   const auto &Targets = It->second;
   EXPECT_EQ(Targets.size(), 1u);
   EXPECT_TRUE(Targets.count(M->getFunction("bar")));
+}
+
+TEST(LotusAA, VariableIndexGepUsesUnknownOffsetBucket) {
+  const char *IR = R"(
+    define void @main(i64 %idx) {
+    entry:
+      %arr = alloca [2 x i8*]
+      %f0 = getelementptr inbounds [2 x i8*], [2 x i8*]* %arr, i64 0, i64 0
+      %f1 = getelementptr inbounds [2 x i8*], [2 x i8*]* %arr, i64 0, i64 1
+      %dyn = getelementptr inbounds [2 x i8*], [2 x i8*]* %arr, i64 0, i64 %idx
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  auto *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  Value *F0 = findValueByName(*Main, "f0");
+  Value *F1 = findValueByName(*Main, "f1");
+  Value *Dyn = findValueByName(*Main, "dyn");
+  ASSERT_NE(F0, nullptr);
+  ASSERT_NE(F1, nullptr);
+  ASSERT_NE(Dyn, nullptr);
+
+  PTResult *F0Pts = PTG->findPTResult(F0, false);
+  PTResult *F1Pts = PTG->findPTResult(F1, false);
+  PTResult *DynPts = PTG->findPTResult(Dyn, false);
+  ASSERT_NE(F0Pts, nullptr);
+  ASSERT_NE(F1Pts, nullptr);
+  ASSERT_NE(DynPts, nullptr);
+
+  PTResultIterator f0_iter(F0Pts, PTG);
+  PTResultIterator f1_iter(F1Pts, PTG);
+  PTResultIterator dyn_iter(DynPts, PTG);
+  ASSERT_EQ(f0_iter.size(), 1);
+  ASSERT_EQ(f1_iter.size(), 1);
+  ASSERT_EQ(dyn_iter.size(), 1);
+
+  EXPECT_EQ(f0_iter.begin()->first->getOffset(), 0);
+  EXPECT_NE(f1_iter.begin()->first->getOffset(), 0);
+  EXPECT_FALSE(PTGraph::isUnknownOffset(f1_iter.begin()->first->getOffset()));
+  EXPECT_TRUE(PTGraph::isUnknownOffset(dyn_iter.begin()->first->getOffset()));
+  EXPECT_NE(dyn_iter.begin()->first, f0_iter.begin()->first);
 }
 
 TEST(LotusAA, PrunedInterfaceSpillsIntoSummaryBuckets) {
@@ -351,6 +553,82 @@ TEST(LotusAA, WeakUpdateKeepsComplementaryPathConditions) {
   EXPECT_TRUE(containsValueAtom(cond_b, Cond, true));
 }
 
+TEST(LotusAA, BranchNegationKeepsSiblingEdgeIdentity) {
+  const char *IR = R"(
+    define void @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      ret void
+    else:
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  BasicBlock *Entry = &Main->getEntryBlock();
+  BasicBlock *Then = Entry->getTerminator()->getSuccessor(0);
+  BasicBlock *Else = Entry->getTerminator()->getSuccessor(1);
+  path_cond_t then_cond = PTG->getCFGEdgeCond(Entry, Then);
+  path_cond_t else_cond = PTG->getCFGEdgeCond(Entry, Else);
+  path_cond_t negated = PTG->findOrCreateNotRegion(then_cond);
+
+  ASSERT_NE(negated, nullptr);
+  EXPECT_EQ(negated->getKind(), PathCond::Kind::BranchAtom);
+  EXPECT_EQ(negated, else_cond);
+  EXPECT_TRUE(containsBranchAtom(negated, Entry, Else));
+}
+
+TEST(LotusAA, DifferentBranchControllersDoNotCollapseAsNegations) {
+  const char *IR = R"(
+    define void @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %left, label %right
+    left:
+      br i1 %cond, label %left_then, label %left_else
+    left_then:
+      ret void
+    left_else:
+      ret void
+    right:
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  BasicBlock *Entry = &Main->getEntryBlock();
+  BasicBlock *Left = Entry->getTerminator()->getSuccessor(0);
+  BasicBlock *LeftElse = Left->getTerminator()->getSuccessor(1);
+
+  path_cond_t entry_true = PTG->getCFGEdgeCond(Entry, Left);
+  path_cond_t left_false = PTG->getCFGEdgeCond(Left, LeftElse);
+  path_cond_t combined = PTG->findOrCreateAndRegion(entry_true, left_false);
+
+  ASSERT_NE(combined, nullptr);
+  EXPECT_TRUE(PTG->isSatisfiable(combined));
+  EXPECT_NE(combined->getKind(), PathCond::Kind::False);
+}
+
 TEST(LotusAA, PhiMergingSamePointerKeepsBothSiblingPathContributions) {
   const char *IR = R"(
     define i8* @main(i1 %cond) {
@@ -386,7 +664,51 @@ TEST(LotusAA, PhiMergingSamePointerKeepsBothSiblingPathContributions) {
   PTResultIterator iter(PhiPts, PTG);
   ASSERT_EQ(iter.size(), 1);
   path_cond_t cond = iter.begin()->second;
-  EXPECT_TRUE(PTG->isAlwaysSatisfied(cond));
+  EXPECT_TRUE(PTG->isSatisfiable(cond));
+  EXPECT_FALSE(PTG->isAlwaysSatisfied(cond));
+
+  BasicBlock *Entry = &Main->getEntryBlock();
+  BasicBlock *Then = Entry->getTerminator()->getSuccessor(0);
+  BasicBlock *Else = Entry->getTerminator()->getSuccessor(1);
+  EXPECT_TRUE(containsBranchAtom(cond, Entry, Then));
+  EXPECT_TRUE(containsBranchAtom(cond, Entry, Else));
+}
+
+TEST(LotusAA, ComplementaryBranchOrMatchesFalconSimpleSolver) {
+  const char *IR = R"(
+    define void @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      ret void
+    else:
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  BasicBlock *Entry = &Main->getEntryBlock();
+  BasicBlock *Then = Entry->getTerminator()->getSuccessor(0);
+  BasicBlock *Else = Entry->getTerminator()->getSuccessor(1);
+
+  path_cond_t then_cond = PTG->getCFGEdgeCond(Entry, Then);
+  path_cond_t else_cond = PTG->getCFGEdgeCond(Entry, Else);
+  path_cond_t combined = PTG->findOrCreateOrRegion(then_cond, else_cond);
+
+  ASSERT_NE(combined, nullptr);
+  EXPECT_TRUE(PTG->isSatisfiable(combined));
+  EXPECT_FALSE(PTG->isAlwaysSatisfied(combined));
+  EXPECT_EQ(combined->getKind(), PathCond::Kind::Or);
 }
 
 TEST(LotusAA, ReturnOutputsPreserveConditionalReturnSensitivity) {
@@ -432,12 +754,13 @@ TEST(LotusAA, ReturnOutputsPreserveConditionalReturnSensitivity) {
   EXPECT_FALSE(PTG->isAlwaysSatisfied(cond_b));
   EXPECT_NE(cond_a, cond_b);
 
-  Value *Cond = findValueByName(*Main, "cond");
-  ASSERT_NE(Cond, nullptr);
+  BasicBlock *Entry = &Main->getEntryBlock();
+  BasicBlock *Then = Entry->getTerminator()->getSuccessor(0);
+  BasicBlock *Else = Entry->getTerminator()->getSuccessor(1);
   EXPECT_FALSE(PTG->isSatisfiable(
-      PTG->findOrCreateAndRegion(cond_a, PTG->getValueCond(Cond, false))));
+      PTG->findOrCreateAndRegion(cond_a, PTG->getCFGEdgeCond(Entry, Else))));
   EXPECT_FALSE(PTG->isSatisfiable(
-      PTG->findOrCreateAndRegion(cond_b, PTG->getValueCond(Cond, true))));
+      PTG->findOrCreateAndRegion(cond_b, PTG->getCFGEdgeCond(Entry, Then))));
 }
 
 TEST(LotusAA, PhiConditionsRetainNestedBranchPredicates) {
@@ -554,7 +877,8 @@ TEST(LotusAA, InterproceduralSideEffectWritesKeepCallerFunctionLevel) {
   PTResultIterator iter(ArgPts, PTG);
   ASSERT_EQ(iter.size(), 1);
 
-  ObjectLocator *field_loc = iter.begin()->first->getObj()->findLocator(0, true);
+  ObjectLocator *field_loc =
+      iter.begin()->first->getObj()->findLocator(0, true);
   ASSERT_NE(field_loc, nullptr);
   EXPECT_EQ(field_loc->getStoreFunctionLevel(), 1);
 }
@@ -618,6 +942,155 @@ TEST(LotusAA, UnknownLibraryCallPreservesLikelyThisReceiver) {
   EXPECT_FALSE(saw_b);
 }
 
+TEST(LotusAA, DisabledLibraryHeuristicPreservesPointerArgumentValues) {
+  LotusConfigScope ConfigScope;
+  IntraLotusAAConfig::lotus_disable_library_heuristic = true;
+
+  const char *IR = R"(
+    declare void @ext(i8**)
+
+    define i8* @main(i8* %b) {
+    entry:
+      %slot = alloca i8*
+      store i8* %b, i8** %slot
+      call void @ext(i8** %slot)
+      %loaded = load i8*, i8** %slot
+      ret i8* %loaded
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  auto *Load = dyn_cast<LoadInst>(findValueByName(*Main, "loaded"));
+  ASSERT_NE(Load, nullptr);
+
+  mem_value_t loaded_values;
+  PTG->getLoadValues(Load->getPointerOperand(), Load, loaded_values);
+  PTG->refineResult(loaded_values);
+
+  bool saw_b = false;
+  for (const auto &item : loaded_values) {
+    if (item.val == findValueByName(*Main, "b"))
+      saw_b = true;
+  }
+  EXPECT_TRUE(saw_b);
+}
+
+TEST(LotusAA, TopologicalTraversalDropsCyclicBlocksLikeFalcon) {
+  const char *IR = R"(
+    define void @main(i1 %cond) {
+    entry:
+      br label %loop
+    loop:
+      br i1 %cond, label %loop, label %exit
+    exit:
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+  EXPECT_EQ(PTG->topBBs.size(), 1u);
+  EXPECT_EQ(PTG->topBBs.front(), &Main->getEntryBlock());
+}
+
+TEST(LotusAA, NoValueStoresUseFalconSentinelType) {
+  const char *IR = R"(
+    declare void @ext(i8**)
+
+    define void @main(i8** %slot) {
+    entry:
+      call void @ext(i8** %slot)
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  auto *Slot = dyn_cast<Argument>(findValueByName(*Main, "slot"));
+  ASSERT_NE(Slot, nullptr);
+  PTResult *slot_pts = PTG->findPTResult(Slot, false);
+  ASSERT_NE(slot_pts, nullptr);
+
+  PTResultIterator iter(slot_pts, PTG);
+  ASSERT_EQ(iter.size(), 1);
+  MemObject *obj = iter.begin()->first->getObj();
+  auto updated_it = obj->getUpdatedOffset().find(0);
+  ASSERT_NE(updated_it, obj->getUpdatedOffset().end());
+  EXPECT_TRUE(updated_it->second->isIntegerTy(8));
+}
+
+TEST(LotusAA, GlobalSideEffectOutputReplaysIntoCaller) {
+  const char *IR = R"(
+    @slot = global i8* null
+
+    define void @set_global(i8* %p) {
+    entry:
+      store i8* %p, i8** @slot
+      ret void
+    }
+
+    define i8* @main(i8* %a) {
+    entry:
+      call void @set_global(i8* %a)
+      %loaded = load i8*, i8** @slot
+      ret i8* %loaded
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  auto *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+
+  auto *Load = dyn_cast<LoadInst>(findValueByName(*Main, "loaded"));
+  ASSERT_NE(Load, nullptr);
+  Value *ArgA = findValueByName(*Main, "a");
+  ASSERT_NE(ArgA, nullptr);
+
+  PTResult *LoadPts = PTG->findPTResult(Load, false);
+  PTResult *ArgPts = PTG->findPTResult(ArgA, false);
+  ASSERT_NE(LoadPts, nullptr);
+  ASSERT_NE(ArgPts, nullptr);
+
+  PTResultIterator load_iter(LoadPts, PTG);
+  PTResultIterator arg_iter(ArgPts, PTG);
+  ASSERT_EQ(load_iter.size(), 1);
+  ASSERT_EQ(arg_iter.size(), 1);
+  EXPECT_EQ(load_iter.begin()->first, arg_iter.begin()->first);
+}
+
 TEST(LotusAA, IncompatibleIndirectTargetsDoNotConsumeCalleeIndexTwice) {
   LotusConfigScope ConfigScope;
   IntraLotusAAConfig::lotus_restrict_cg_size = 3;
@@ -678,7 +1151,104 @@ TEST(LotusAA, IncompatibleIndirectTargetsDoNotConsumeCalleeIndexTwice) {
   EXPECT_TRUE(PTG->func_arg[Call].count(Good));
 }
 
-TEST(LotusAA, FullyInlineInterfaceCapsDepthAtFalconMaximum) {
+TEST(LotusAA, PointerCompatibleIndirectTargetsAreAccepted) {
+  const char *IR = R"(
+    define i8* @good(i8* %x) {
+    entry:
+      ret i8* %x
+    }
+
+    define i32* @main(i32* %arg, i32* (i32*)* %fp) {
+    entry:
+      %res = call i32* %fp(i32* %arg)
+      ret i32* %res
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  Function *Good = M->getFunction("good");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Good, nullptr);
+
+  auto Calls = getIndirectCalls(*Main);
+  ASSERT_EQ(Calls.size(), 1u);
+  CallBase *Call = Calls.front();
+
+  CallTargetSet targets;
+  targets[Good] = nullptr;
+  Pass->getFunctionPointerResults().setTargets(Main, Call, targets);
+
+  Pass->computePTA(Good);
+  Pass->computePTA(Main);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+  ASSERT_TRUE(PTG->func_arg.count(Call));
+  EXPECT_TRUE(PTG->func_arg[Call].count(Good));
+}
+
+TEST(LotusAA, PseudoOutputFunctionPointerFlowsToCallerIndirectCall) {
+  const char *IR = R"(
+    define i32 @foo(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @bar(i32 %x) {
+    entry:
+      %inc = add i32 %x, 1
+      ret i32 %inc
+    }
+
+    define void @setfp(i1 %cond, i32 (i32)** %slot) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      store i32 (i32)* @foo, i32 (i32)** %slot
+      ret void
+    else:
+      store i32 (i32)* @bar, i32 (i32)** %slot
+      ret void
+    }
+
+    define i32 @main(i1 %cond, i32 %x) {
+    entry:
+      %slot = alloca i32 (i32)*
+      call void @setfp(i1 %cond, i32 (i32)** %slot)
+      %fp = load i32 (i32)*, i32 (i32)** %slot
+      %res = call i32 %fp(i32 %x)
+      ret i32 %res
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  computeAllFunctionCgs(*M, *Pass);
+
+  auto Calls = getIndirectCalls(*Main);
+  ASSERT_EQ(Calls.size(), 1u);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+  auto It = PTG->cg_resolve_result.find(Calls.front());
+  ASSERT_NE(It, PTG->cg_resolve_result.end());
+  const auto &Targets = It->second;
+  EXPECT_EQ(Targets.size(), 2u);
+  EXPECT_TRUE(Targets.count(M->getFunction("foo")));
+  EXPECT_TRUE(Targets.count(M->getFunction("bar")));
+}
+
+TEST(LotusAA, FullyInlineInterfaceCapsDepthAtConfiguredMaximum) {
   LotusConfigScope ConfigScope;
   IntraLotusAAConfig::lotus_restrict_inline_depth = 2;
   IntraLotusAAConfig::lotus_restrict_summary_ap_depth = 10;
@@ -823,12 +1393,286 @@ TEST(LotusAA, ImportedSummaryGuardsStayCallerLocal) {
   ASSERT_NE(callee_cond_b, nullptr);
   path_cond_t cond_a = MainPTG->importPathCond(callee_cond_a, Call, Choose);
   path_cond_t cond_b = MainPTG->importPathCond(callee_cond_b, Call, Choose);
-  EXPECT_TRUE(containsImportedAtom(cond_a, Call, Choose));
-  EXPECT_TRUE(containsImportedAtom(cond_b, Call, Choose));
+  EXPECT_TRUE(containsImportedAtom(cond_a));
+  EXPECT_TRUE(containsImportedAtom(cond_b));
   Value *Inner = findValueByName(*Main, "inner");
   ASSERT_NE(Inner, nullptr);
   EXPECT_FALSE(containsValueAtom(cond_a, Inner, true));
   EXPECT_FALSE(containsValueAtom(cond_b, Inner, false));
+}
+
+TEST(LotusAA, CompositeImportedSummaryGuardStaysOpaque) {
+  const char *IR = R"(
+    define i8* @choose(i1 %outer, i1 %inner, i8* %a, i8* %b, i8* %c) {
+    entry:
+      br i1 %outer, label %left, label %right
+    left:
+      br i1 %inner, label %then, label %else
+    then:
+      ret i8* %a
+    else:
+      ret i8* %b
+    right:
+      ret i8* %c
+    }
+
+    define i8* @main(i1 %outer, i1 %inner, i8* %a, i8* %b, i8* %c) {
+    entry:
+      %call = call i8* @choose(i1 %outer, i1 %inner, i8* %a, i8* %b, i8* %c)
+      ret i8* %call
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  Function *Choose = M->getFunction("choose");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Choose, nullptr);
+
+  auto *MainPTG = Pass->getPtGraph(Main);
+  auto *ChoosePTG = Pass->getPtGraph(Choose);
+  ASSERT_NE(MainPTG, nullptr);
+  ASSERT_NE(ChoosePTG, nullptr);
+
+  auto *Call = dyn_cast<CallBase>(findValueByName(*Main, "call"));
+  ASSERT_NE(Call, nullptr);
+
+  path_cond_t callee_cond_a = nullptr;
+  for (const auto &ret_pair : ChoosePTG->outputs.front()->getVal()) {
+    for (const auto &item : ret_pair.second) {
+      if (item.val == findValueByName(*Choose, "a"))
+        callee_cond_a = item.cond;
+    }
+  }
+
+  ASSERT_NE(callee_cond_a, nullptr);
+  ASSERT_EQ(callee_cond_a->getKind(), PathCond::Kind::And);
+
+  path_cond_t imported = MainPTG->importPathCond(callee_cond_a, Call, Choose);
+  ASSERT_NE(imported, nullptr);
+  EXPECT_EQ(imported->getKind(), PathCond::Kind::ImportedAtom);
+  EXPECT_EQ(imported->getImportedSource(), callee_cond_a);
+  EXPECT_TRUE(containsImportedAtom(imported));
+
+  Value *Outer = findValueByName(*Choose, "outer");
+  Value *Inner = findValueByName(*Choose, "inner");
+  ASSERT_NE(Outer, nullptr);
+  ASSERT_NE(Inner, nullptr);
+  EXPECT_FALSE(containsValueAtom(imported, Outer, true));
+  EXPECT_FALSE(containsValueAtom(imported, Inner, true));
+}
+
+TEST(LotusAA, CompositeImportedFunctionSummaryStillResolvesIndirectTargets) {
+  const char *IR = R"(
+    define i32 @foo(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @bar(i32 %x) {
+    entry:
+      %inc = add i32 %x, 1
+      ret i32 %inc
+    }
+
+    define i32 @baz(i32 %x) {
+    entry:
+      %dec = sub i32 %x, 1
+      ret i32 %dec
+    }
+
+    define i32 (i32)* @choose(i1 %outer, i1 %inner) {
+    entry:
+      br i1 %outer, label %left, label %right
+    left:
+      br i1 %inner, label %then, label %else
+    then:
+      ret i32 (i32)* @foo
+    else:
+      ret i32 (i32)* @bar
+    right:
+      ret i32 (i32)* @baz
+    }
+
+    define i32 @main(i1 %outer, i1 %inner, i32 %x) {
+    entry:
+      %fp = call i32 (i32)* @choose(i1 %outer, i1 %inner)
+      %res = call i32 %fp(i32 %x)
+      ret i32 %res
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  Function *Choose = M->getFunction("choose");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Choose, nullptr);
+  computeAllFunctionCgs(*M, *Pass);
+
+  auto *ChooseCall = findCallByCallee(*Main, "choose");
+  ASSERT_NE(ChooseCall, nullptr);
+
+  auto Calls = getIndirectCalls(*Main);
+  ASSERT_EQ(Calls.size(), 1u);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+  auto It = PTG->cg_resolve_result.find(Calls.front());
+  ASSERT_NE(It, PTG->cg_resolve_result.end());
+  const auto &Targets = It->second;
+
+  auto FooIt = Targets.find(M->getFunction("foo"));
+  auto BarIt = Targets.find(M->getFunction("bar"));
+  auto BazIt = Targets.find(M->getFunction("baz"));
+  ASSERT_NE(FooIt, Targets.end());
+  ASSERT_NE(BarIt, Targets.end());
+  ASSERT_NE(BazIt, Targets.end());
+
+  EXPECT_TRUE(containsImportedAtom(FooIt->second));
+  EXPECT_TRUE(containsImportedAtom(BarIt->second));
+  EXPECT_TRUE(containsImportedAtom(BazIt->second));
+}
+
+TEST(LotusAA, CallerCgInliningResolvesTransitiveIndirectSetterTargets) {
+  const char *IR = R"(
+    define i32 @foo(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @bar(i32 %x) {
+    entry:
+      %inc = add i32 %x, 1
+      ret i32 %inc
+    }
+
+    define void @setfoo(i32 (i32)** %slot) {
+    entry:
+      store i32 (i32)* @foo, i32 (i32)** %slot
+      ret void
+    }
+
+    define void @setbar(i32 (i32)** %slot) {
+    entry:
+      store i32 (i32)* @bar, i32 (i32)** %slot
+      ret void
+    }
+
+    define void @apply(i1 %cond,
+                       void (i32 (i32)**)* %setter_true,
+                       void (i32 (i32)**)* %setter_false,
+                       i32 (i32)** %slot) {
+    entry:
+      %setter = select i1 %cond,
+                       void (i32 (i32)**)* %setter_true,
+                       void (i32 (i32)**)* %setter_false
+      call void %setter(i32 (i32)** %slot)
+      ret void
+    }
+
+    define i32 @main(i1 %cond, i32 %x) {
+    entry:
+      %slot = alloca i32 (i32)*
+      call void @apply(i1 %cond,
+                       void (i32 (i32)**)* @setfoo,
+                       void (i32 (i32)**)* @setbar,
+                       i32 (i32)** %slot)
+      %fp = load i32 (i32)*, i32 (i32)** %slot
+      %res = call i32 %fp(i32 %x)
+      ret i32 %res
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Apply = M->getFunction("apply");
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Apply, nullptr);
+  ASSERT_NE(Main, nullptr);
+  auto ApplyCalls = getIndirectCalls(*Apply);
+  ASSERT_EQ(ApplyCalls.size(), 1u);
+
+  auto *ApplyPTG = Pass->getPtGraph(Apply);
+  ASSERT_NE(ApplyPTG, nullptr);
+  ApplyPTG->computeCG();
+  auto ApplyIt = ApplyPTG->cg_resolve_result.find(ApplyCalls.front());
+  ASSERT_NE(ApplyIt, ApplyPTG->cg_resolve_result.end());
+  EXPECT_TRUE(ApplyIt->second.empty());
+
+  auto MainCalls = getIndirectCalls(*Main);
+  ASSERT_EQ(MainCalls.size(), 1u);
+
+  auto *MainPTG = Pass->getPtGraph(Main);
+  ASSERT_NE(MainPTG, nullptr);
+  MainPTG->computeCG();
+
+  ApplyIt = ApplyPTG->cg_resolve_result.find(ApplyCalls.front());
+  ASSERT_NE(ApplyIt, ApplyPTG->cg_resolve_result.end());
+  EXPECT_EQ(ApplyIt->second.size(), 2u);
+  EXPECT_TRUE(ApplyIt->second.count(M->getFunction("setfoo")));
+  EXPECT_TRUE(ApplyIt->second.count(M->getFunction("setbar")));
+
+  auto MainIt = MainPTG->cg_resolve_result.find(MainCalls.front());
+  ASSERT_NE(MainIt, MainPTG->cg_resolve_result.end());
+  EXPECT_TRUE(MainIt->second.empty());
+}
+
+TEST(LotusAA, PthreadCreateThreadArgCgInliningResolvesWorkerIndirectCall) {
+  const char *IR = R"(
+    declare i32 @pthread_create(i64*, i8*, i8* (i8*)*, i8*)
+
+    define void @foo() {
+    entry:
+      ret void
+    }
+
+    define i8* @worker(i8* %ctx) {
+    entry:
+      %slot = bitcast i8* %ctx to void ()**
+      %fp = load void ()*, void ()** %slot
+      call void %fp()
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i64
+      %slot = alloca void ()*
+      store void ()* @foo, void ()** %slot
+      %ctx = bitcast void ()** %slot to i8*
+      %rc = call i32 @pthread_create(i64* %tid, i8* null, i8* (i8*)* @worker, i8* %ctx)
+      ret i32 %rc
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  computeAllFunctionCgs(*M, *Pass);
+
+  auto *Worker = M->getFunction("worker");
+  ASSERT_NE(Worker, nullptr);
+  auto Calls = getIndirectCalls(*Worker);
+  ASSERT_EQ(Calls.size(), 1u);
+
+  auto *PTG = Pass->getPtGraph(Worker);
+  ASSERT_NE(PTG, nullptr);
+  auto It = PTG->cg_resolve_result.find(Calls.front());
+  ASSERT_NE(It, PTG->cg_resolve_result.end());
+  EXPECT_TRUE(It->second.count(M->getFunction("foo")));
 }
 
 TEST(LotusAA, DefaultSummaryCollectionDoesNotEmitSummaryValue) {
@@ -985,7 +1829,89 @@ TEST(LotusAA, OutputPseudoPointsToMergesDuplicateEntries) {
 
   auto &pseudo_pts = PTG->outputs.front()->getPseudoPointTo();
   ASSERT_EQ(pseudo_pts.size(), 1u);
-  EXPECT_TRUE(PTG->isAlwaysSatisfied(pseudo_pts.front().first));
+  EXPECT_TRUE(PTG->isSatisfiable(pseudo_pts.front().first));
+  EXPECT_FALSE(PTG->isAlwaysSatisfied(pseudo_pts.front().first));
+}
+
+TEST(LotusAA, PseudoOutputNodesPreserveNonFirstClassTypes) {
+  const char *IR = R"(
+    define void @callee() {
+    entry:
+      ret void
+    }
+
+    define void @caller() {
+    entry:
+      call void @callee()
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Caller = M->getFunction("caller");
+  Function *Callee = M->getFunction("callee");
+  ASSERT_NE(Caller, nullptr);
+  ASSERT_NE(Callee, nullptr);
+
+  auto *PTG = Pass->getPtGraph(Caller);
+  ASSERT_NE(PTG, nullptr);
+
+  Instruction *SyntheticCallsite = Caller->getEntryBlock().getTerminator();
+  ASSERT_NE(SyntheticCallsite, nullptr);
+
+  auto *RetItem = new IntraLotusAA::OutputItem;
+  RetItem->setType(Type::getVoidTy(Ctx));
+
+  auto *AggregateItem = new IntraLotusAA::OutputItem;
+  auto *StructTy = StructType::create(Ctx, "lotus.synthetic.output");
+  StructTy->setBody({Type::getInt8PtrTy(Ctx), Type::getInt8PtrTy(Ctx)});
+  AggregateItem->setType(StructTy);
+
+  std::vector<IntraLotusAA::OutputItem *> Outputs = {RetItem, AggregateItem};
+  std::vector<Value *> &PseudoValues =
+      PTG->createPseudoOutputNodes(Outputs, SyntheticCallsite, Callee);
+
+  ASSERT_EQ(PseudoValues.size(), 2u);
+  EXPECT_EQ(PseudoValues[1]->getType(), StructTy);
+}
+
+TEST(LotusAA, RestrictInterStructureMergesRecursiveEscapes) {
+  LotusConfigScope ConfigScope;
+  IntraLotusAAConfig::lotus_restrict_inter_structure = 0;
+
+  const char *IR = R"(
+    %node = type { %node* }
+
+    define %node* @main(i1 %cond, %node* %arg) {
+    entry:
+      %a = alloca %node
+      %b = alloca %node
+      %a.next = getelementptr inbounds %node, %node* %a, i32 0, i32 0
+      %b.next = getelementptr inbounds %node, %node* %b, i32 0, i32 0
+      store %node* %arg, %node** %a.next
+      store %node* %arg, %node** %b.next
+      br i1 %cond, label %then, label %else
+    then:
+      ret %node* %a
+    else:
+      ret %node* %b
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  auto *PTG = Pass->getPtGraph(M->getFunction("main"));
+  ASSERT_NE(PTG, nullptr);
+
+  EXPECT_EQ(PTG->escape_objs.size(), 1u);
+  EXPECT_GE(PTG->real_to_pseudo_map.size(), 2u);
 }
 
 TEST(LotusAA, OutputPseudoPointsToRespectsConfiguredLimit) {
@@ -1016,6 +1942,102 @@ TEST(LotusAA, OutputPseudoPointsToRespectsConfiguredLimit) {
   ASSERT_FALSE(PTG->outputs.empty());
 
   EXPECT_TRUE(PTG->outputs.front()->getPseudoPointTo().empty());
+}
+
+TEST(LotusAA, PtResultOptimizationKeepsConfiguredTruncationSticky) {
+  LotusConfigScope ConfigScope;
+  const char *IR = R"(
+    define i8* @main(i1 %cond) {
+    entry:
+      %x = alloca i8
+      %y = alloca i8
+      %z = alloca i8
+      %w = alloca i8
+      br i1 %cond, label %left, label %right
+    left:
+      br i1 %cond, label %then, label %mid
+    then:
+      br label %merge
+    mid:
+      br label %merge
+    right:
+      br i1 %cond, label %else, label %last
+    else:
+      br label %merge
+    last:
+      br label %merge
+    merge:
+      %p = phi i8* [ %x, %then ], [ %y, %mid ], [ %z, %else ], [ %w, %last ]
+      ret i8* %p
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  auto *PTG = Pass->getPtGraph(M->getFunction("main"));
+  ASSERT_NE(PTG, nullptr);
+
+  Value *Phi = findValueByName(*M->getFunction("main"), "p");
+  ASSERT_NE(Phi, nullptr);
+  PTResult *PhiPts = PTG->findPTResult(Phi, false);
+  ASSERT_NE(PhiPts, nullptr);
+
+  PTResultIterator first_iter(PhiPts, PTG);
+  ASSERT_EQ(first_iter.size(), 3);
+  EXPECT_TRUE(PhiPts->derived_list.empty());
+
+  PTResultIterator second_iter(PhiPts, PTG);
+  EXPECT_EQ(second_iter.size(), 3);
+}
+
+TEST(LotusAA, RightValueTrackingRespectsConfiguredLimit) {
+  LotusConfigScope ConfigScope;
+  IntraLotusAAConfig::lotus_restrict_right_value_count = 1;
+
+  const char *IR = R"(
+    define i32 @foo(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @bar(i32 %x) {
+    entry:
+      %inc = add i32 %x, 1
+      ret i32 %inc
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      br label %merge
+    else:
+      br label %merge
+    merge:
+      %fp = phi i32 (i32)* [ @foo, %then ], [ @bar, %else ]
+      %res = call i32 %fp(i32 7)
+      ret i32 %res
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  auto *PTG = Pass->getPtGraph(M->getFunction("main"));
+  ASSERT_NE(PTG, nullptr);
+
+  Value *Fp = findValueByName(*M->getFunction("main"), "fp");
+  ASSERT_NE(Fp, nullptr);
+
+  mem_value_t values;
+  PTG->trackPtrRightValue(Fp, values);
+  PTG->refineResult(values);
+  EXPECT_EQ(values.size(), 1u);
 }
 
 #ifndef NDEBUG
