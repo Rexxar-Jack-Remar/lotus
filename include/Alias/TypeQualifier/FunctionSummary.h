@@ -86,7 +86,7 @@ public:
     }
     return nextIdx;
   }
-  NodeIndex getValueNodeFor(const llvm::Value *val) {
+  NodeIndex getValueNodeFor(const llvm::Value *val) const {
     auto itr = valueNodeMap.find(val);
     if (itr == valueNodeMap.end()) {
       return InvalidIndex;
@@ -94,7 +94,7 @@ public:
       return itr->second;
     }
   }
-  const llvm::Value *getValueForNode(NodeIndex i) {
+  const llvm::Value *getValueForNode(NodeIndex i) const {
     const SumAndersNode &n = nodes.at(i);
     if (n.getValue() != nullptr)
       return n.getValue();
@@ -115,7 +115,7 @@ public:
     return nextIdx;
   }
 
-  NodeIndex getObjectNodeFor(const llvm::Value *val) {
+  NodeIndex getObjectNodeFor(const llvm::Value *val) const {
     auto itr = objNodeMap.find(val);
     if (itr == objNodeMap.end())
       return InvalidIndex;
@@ -261,11 +261,17 @@ public:
   void setRequiredState(NodeIndex idx, QualifierState state) {
     reqVec.at(idx) = state;
   }
+  QualifierState requiredInputState(NodeIndex idx) const {
+    return requiredState(idx);
+  }
   QualifierState updatedState(NodeIndex idx) const { return updateVec.at(idx); }
   void setUpdatedState(NodeIndex idx, QualifierState state) {
     updateVec.at(idx) = state;
   }
   QualifierState returnState() const { return updateVec.at(getRetNodes()); }
+  QualifierState returnObjectState(NodeIndex idx) const {
+    return updatedState(idx);
+  }
   Summary() {
     noNodes = 0;
     retSize = 0;

@@ -10,6 +10,8 @@
 #include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
+#include <limits>
+
 namespace {
 
 std::unique_ptr<llvm::Module> parseAssembly(llvm::LLVMContext &ctx,
@@ -142,4 +144,105 @@ TEST(TypeQualifier, FuncAnalysisRunsOnIndirectModeledCopyTargets) {
 
   FuncAnalysis analysis(mainFn, &gc, false);
   EXPECT_FALSE(analysis.run());
+}
+
+TEST(TypeQualifier, BackwardRequirednessMarksLoadedArgumentRequiredAtEntry) {
+  const char *ir = R"IR(
+    define i32 @read_arg(i32* %p) {
+    entry:
+      %x = load i32, i32* %p
+      ret i32 %x
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  auto module = parseAssembly(ctx, ir);
+  ASSERT_NE(module, nullptr);
+
+  auto *func = module->getFunction("read_arg");
+  ASSERT_NE(func, nullptr);
+
+  GlobalContext gc;
+  FuncAnalysis analysis(func, &gc, false);
+  EXPECT_FALSE(analysis.run());
+
+  llvm::Argument *arg = func->getArg(0);
+  const Summary &summary = analysis.getSummary();
+  NodeIndex sumArgNode = summary.sumNodeFactory.getValueNodeFor(arg);
+  ASSERT_NE(sumArgNode, std::numeric_limits<unsigned int>::max());
+  EXPECT_EQ(summary.requiredInputState(sumArgNode), QualifierState::Initialized);
+
+  NodeIndex sumArgObj = summary.sumNodeFactory.getObjectNodeFor(arg);
+  ASSERT_NE(sumArgObj, std::numeric_limits<unsigned int>::max());
+  EXPECT_EQ(summary.requiredInputState(sumArgObj), QualifierState::Initialized);
+}
+
+TEST(TypeQualifier, BackwardRequirednessMarksBranchConditionRequired) {
+  const char *ir = R"IR(
+    define i32 @branch_on_arg(i1 %cond) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      ret i32 1
+    else:
+      ret i32 0
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  auto module = parseAssembly(ctx, ir);
+  ASSERT_NE(module, nullptr);
+
+  auto *func = module->getFunction("branch_on_arg");
+  ASSERT_NE(func, nullptr);
+
+  GlobalContext gc;
+  FuncAnalysis analysis(func, &gc, false);
+  EXPECT_FALSE(analysis.run());
+
+  llvm::Argument *arg = func->getArg(0);
+  NodeIndex entryArgNode = analysis.getSummary().sumNodeFactory.getValueNodeFor(arg);
+  ASSERT_NE(entryArgNode, std::numeric_limits<unsigned int>::max());
+  EXPECT_EQ(analysis.getSummary().requiredInputState(entryArgNode),
+            QualifierState::Initialized);
+}
+
+TEST(TypeQualifier, InterproceduralRequirednessPropagatesThroughSummary) {
+  const char *ir = R"IR(
+    define void @sink(i32* %p) {
+    entry:
+      %x = load i32, i32* %p
+      ret void
+    }
+
+    define void @caller(i32* %p) {
+    entry:
+      call void @sink(i32* %p)
+      ret void
+    }
+  )IR";
+
+  llvm::LLVMContext ctx;
+  auto module = parseAssembly(ctx, ir);
+  ASSERT_NE(module, nullptr);
+
+  GlobalContext gc;
+  auto *sink = module->getFunction("sink");
+  auto *caller = module->getFunction("caller");
+  ASSERT_NE(sink, nullptr);
+  ASSERT_NE(caller, nullptr);
+
+  FuncAnalysis sinkAnalysis(sink, &gc, false);
+  EXPECT_FALSE(sinkAnalysis.run());
+
+  FuncAnalysis callerAnalysis(caller, &gc, false);
+  EXPECT_FALSE(callerAnalysis.run());
+
+  llvm::Argument *arg = caller->getArg(0);
+  EXPECT_TRUE(callerAnalysis.isArgumentRequiredAtEntry(arg));
+  NodeIndex sumArgNode =
+      callerAnalysis.getSummary().sumNodeFactory.getValueNodeFor(arg);
+  ASSERT_NE(sumArgNode, std::numeric_limits<unsigned int>::max());
+  EXPECT_EQ(callerAnalysis.getSummary().requiredInputState(sumArgNode),
+            QualifierState::Initialized);
 }

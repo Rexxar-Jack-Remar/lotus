@@ -266,8 +266,8 @@ bool FuncAnalysis::run() {
   buildPtsGraph();
   initSummary();
   computeAASet();
-  NodeIndex numNodes = nodeFactory.getNumNodes();
-  qualiInference();
+  runBackwardRequirednessAnalysis();
+  runForwardQualifierAnalysis();
 #ifdef CAL_STACKVAR
   calStackVar();
 #endif

@@ -36,6 +36,9 @@ typedef std::map<NodeIndex, AndersPtsSet> PtsGraph;
 typedef std::map<const llvm::Instruction *, PtsGraph> NodeToPtsGraph;
 typedef std::map<const llvm::Instruction *, QualifierArray> NodeToQualifier;
 typedef std::map<const llvm::BasicBlock *, QualifierArray> BBToQualifier;
+typedef std::map<const llvm::Instruction *, RequirednessArray>
+    NodeToRequiredness;
+typedef std::map<const llvm::BasicBlock *, RequirednessArray> BBToRequiredness;
 
 // alias set
 typedef std::set<NodeIndex> NodeSet;
@@ -99,7 +102,11 @@ private:
 
   NodeToQualifier nQualiArray;
   NodeToQualifier nQualiUpdate;
-  QualifierArray qualiReq;
+  NodeToRequiredness nRequiredIn;
+  NodeToRequiredness nRequiredOut;
+  BBToRequiredness inRequiredArray;
+  BBToRequiredness outRequiredArray;
+  RequirednessArray requiredAtEntry;
   BBToQualifier inQualiArray;
   BBToQualifier outQualiArray;
 
@@ -122,6 +129,9 @@ private:
 
   void buildPtsGraph();
   void qualiInference();
+  void runBackwardRequirednessAnalysis();
+  void runForwardQualifierAnalysis();
+  void buildFunctionSummary(llvm::ReturnInst *);
   void QualifierCheck();
   void computeAASet();
   void calStackVar();
@@ -153,11 +163,19 @@ private:
   void addTerminationBB(llvm::BasicBlock *bb);
   bool isTerminationBB(llvm::BasicBlock *bb) { return terminationBB.count(bb); }
   // Used by qualifier inference
+  void computeRequiredness(llvm::Instruction *, const RequirednessArray &,
+                           RequirednessArray &);
   void computeQualifier(llvm::Instruction *, QualifierArray &,
                         QualifierArray &);
   void setGlobalQualies(QualifierArray &);
   void qualiJoin(QualifierArray &, QualifierArray &, unsigned);
   void updateJoin(QualifierArray &, QualifierArray &, unsigned);
+  void requiredJoin(RequirednessArray &, const RequirednessArray &, unsigned);
+  void markRequired(NodeIndex, RequirednessArray &);
+  void markRequiredForValue(const llvm::Instruction *, const llvm::Value *,
+                            RequirednessArray &);
+  void materializeRequiredState(const llvm::Instruction *,
+                                QualifierArray &) const;
   void insertUninit(const llvm::Instruction *, NodeIndex,
                     std::set<NodeIndex> &);
   // used for manually summaries functions
@@ -180,10 +198,10 @@ private:
                                QualifierArray &out, bool memsetUse);
   void DFS(llvm::Instruction *, NodeIndex);
   void summarizeFuncs(llvm::ReturnInst *);
-  void propInitFuncs(llvm::Instruction *, QualifierState *);
-  void propCopyFuncs(llvm::Instruction *, QualifierState *);
-  void propTransferFuncs(llvm::Instruction *, QualifierState *);
-  void propFuncs(llvm::Instruction *, llvm::Function *, QualifierState *);
+  void propInitFuncs(llvm::Instruction *, RequirednessArray &);
+  void propCopyFuncs(llvm::Instruction *, RequirednessArray &);
+  void propTransferFuncs(llvm::Instruction *, RequirednessArray &);
+  void propFuncs(llvm::Instruction *, llvm::Function *, RequirednessArray &);
   // used for function checking.
   void checkCopyFuncs(llvm::Instruction *, llvm::Function *);
   void checkTransferFuncs(llvm::Instruction *, llvm::Function *);
@@ -225,6 +243,13 @@ public:
   int getUninitArg() { return uninitArg.size(); }
   int getUninitOutArg() { return uninitOutArg.size(); }
   int getIgnoreOutArg() { return ignoreOutArg.size(); }
+  const RequirednessArray &getRequiredAtEntry() const { return requiredAtEntry; }
+  const Summary &getSummary() const { return fSummary; }
+  bool isArgumentRequiredAtEntry(const llvm::Argument *arg) {
+    NodeIndex idx = nodeFactory.getValueNodeFor(arg);
+    return idx != AndersNodeFactory::InvalidIndex &&
+           requiredAtEntry.at(idx) == RequirednessState::Required;
+  }
 };
 class Tarjan {
 private:

@@ -44,7 +44,9 @@ QualifierState getQualiForConstant(const ConstantExpr *, AndersNodeFactory &,
                                    const QualifierArray &);
 // bug 1: the length of the argument could be 0, so, we need to check the
 // FSummary.len each time we use relavent information
-void FuncAnalysis::qualiInference() {
+void FuncAnalysis::qualiInference() { runForwardQualifierAnalysis(); }
+
+void FuncAnalysis::runForwardQualifierAnalysis() {
 // dbg information
 #ifdef DEBUG_TITLE
   OP << "Inside qualifier inference:\n";
@@ -53,8 +55,6 @@ void FuncAnalysis::qualiInference() {
   // The length of the qualifier array, the total number of the nodes
   const unsigned numNodes = nodeFactory.getNumNodes();
   QualifierArray initArray;
-
-  qualiReq.resize(numNodes);
   initArray.resize(numNodes);
   // OP<<"numNodes = "<<numNodes<<"\n";
   VisitIns.clear();
@@ -63,7 +63,6 @@ void FuncAnalysis::qualiInference() {
   // program; Ex:%11 = phi %1, %2, but %1 and %2 comes from different block let
   // the %11 always be QualifierState::Uninitialized;
   for (NodeIndex i = 0; i < numNodes; i++) {
-    qualiReq.at(i) = QualifierState::Unknown;
     initArray.at(i) = QualifierState::Unknown;
   }
 
@@ -104,7 +103,7 @@ void FuncAnalysis::qualiInference() {
     nQualiArray[&*inst].resize(numNodes);
     nQualiArray[&*inst].assign(initArray.begin(), initArray.end());
     nQualiUpdate[&*inst].resize(numNodes);
-    nQualiUpdate[&*inst].assign(qualiReq.begin(), qualiReq.end());
+    nQualiUpdate[&*inst].assign(numNodes, QualifierState::Unknown);
   }
   // OP<<"==stat: inscount = "<<inscount<<"\n";
   for (Function::iterator iter = F->begin(); iter != F->end(); iter++) {
@@ -166,6 +165,7 @@ void FuncAnalysis::qualiInference() {
         in.assign(nQualiArray[I->getPrevNode()].begin(),
                   nQualiArray[I->getPrevNode()].end());
       }
+      materializeRequiredState(I, in);
       // infcount++;
       // clock_t sTime, eTime;
       // sTime = clock();
@@ -385,7 +385,7 @@ void FuncAnalysis::qualiInference() {
   }
 #endif
   OP << "begin to summarize funcs.\n";
-  summarizeFuncs(RI);
+  buildFunctionSummary(RI);
 // The list of the node
 #ifdef ListsForNode
   OP << "Lists for each node:\n";
@@ -402,6 +402,283 @@ void FuncAnalysis::qualiInference() {
     }
   }
 #endif
+}
+
+void FuncAnalysis::requiredJoin(RequirednessArray &required,
+                                const RequirednessArray &other,
+                                unsigned len) {
+  for (unsigned i = 0; i < len; ++i) {
+    required[i] = RequirednessDomain::join(required[i], other[i]);
+  }
+}
+
+void FuncAnalysis::markRequired(NodeIndex idx, RequirednessArray &required) {
+  if (idx == AndersNodeFactory::InvalidIndex)
+    return;
+  if (idx > nodeFactory.getConstantIntNode() && idx < required.size())
+    required[idx] = RequirednessState::Required;
+}
+
+void FuncAnalysis::markRequiredForValue(const llvm::Instruction *I,
+                                        const llvm::Value *Val,
+                                        RequirednessArray &required) {
+  NodeIndex valNode = nodeFactory.getValueNodeFor(Val);
+  if (valNode == AndersNodeFactory::InvalidIndex)
+    return;
+  markRequired(valNode, required);
+  auto aaIt = nAAMap.find(I);
+  if (aaIt == nAAMap.end())
+    return;
+  auto nodeIt = aaIt->second.find(valNode);
+  if (nodeIt == aaIt->second.end())
+    return;
+  for (NodeIndex alias : nodeIt->second)
+    markRequired(alias, required);
+}
+
+void FuncAnalysis::materializeRequiredState(const llvm::Instruction *I,
+                                            QualifierArray &state) const {
+  auto reqIt = nRequiredIn.find(I);
+  if (reqIt == nRequiredIn.end())
+    return;
+  for (unsigned i = 0; i < state.size() && i < reqIt->second.size(); ++i) {
+    if (reqIt->second[i] == RequirednessState::Required &&
+        state[i] == QualifierState::Unknown) {
+      state[i] = QualifierState::Initialized;
+    }
+  }
+}
+
+void FuncAnalysis::computeRequiredness(llvm::Instruction *I,
+                                       const RequirednessArray &after,
+                                       RequirednessArray &before) {
+  before = after;
+
+  auto clearDefinedValue = [&](const llvm::Value *V) -> bool {
+    NodeIndex idx = nodeFactory.getValueNodeFor(V);
+    if (idx == AndersNodeFactory::InvalidIndex || idx >= before.size())
+      return false;
+    const bool required = before[idx] == RequirednessState::Required;
+    before[idx] = RequirednessState::NotRequired;
+    return required;
+  };
+
+  const bool resultRequired =
+      !I->getType()->isVoidTy() ? clearDefinedValue(I) : false;
+
+  switch (I->getOpcode()) {
+  case Instruction::Load: {
+    markRequiredForValue(I, I->getOperand(0), before);
+    if (resultRequired) {
+      NodeIndex ptrNode = nodeFactory.getValueNodeFor(I->getOperand(0));
+      for (auto obj : nPtsGraph[I][ptrNode])
+        markRequired(obj, before);
+    }
+    break;
+  }
+  case Instruction::Store: {
+    markRequiredForValue(I, I->getOperand(1), before);
+    NodeIndex dstNode = nodeFactory.getValueNodeFor(I->getOperand(1));
+    bool requireSrc = false;
+    for (auto obj : nPtsGraph[I][dstNode]) {
+      if (obj < before.size() && after[obj] == RequirednessState::Required) {
+        requireSrc = true;
+        break;
+      }
+    }
+    if (requireSrc)
+      markRequiredForValue(I, I->getOperand(0), before);
+    break;
+  }
+  case Instruction::GetElementPtr: {
+    markRequiredForValue(I, I->getOperand(0), before);
+    for (unsigned op = 1; op < I->getNumOperands(); ++op) {
+      if (!isa<ConstantInt>(I->getOperand(op)))
+        markRequiredForValue(I, I->getOperand(op), before);
+    }
+    break;
+  }
+  case Instruction::Add:
+  case Instruction::FAdd:
+  case Instruction::Sub:
+  case Instruction::FSub:
+  case Instruction::Mul:
+  case Instruction::FMul:
+  case Instruction::SDiv:
+  case Instruction::UDiv:
+  case Instruction::FDiv:
+  case Instruction::SRem:
+  case Instruction::URem:
+  case Instruction::And:
+  case Instruction::Or:
+  case Instruction::Xor:
+  case Instruction::LShr:
+  case Instruction::AShr:
+  case Instruction::Shl:
+  case Instruction::ICmp:
+    if (resultRequired) {
+      markRequiredForValue(I, I->getOperand(0), before);
+      markRequiredForValue(I, I->getOperand(1), before);
+    }
+    break;
+  case Instruction::SExt:
+  case Instruction::ZExt:
+  case Instruction::BitCast:
+  case Instruction::Trunc:
+  case Instruction::IntToPtr:
+  case Instruction::PtrToInt:
+  case Instruction::ExtractValue:
+    if (resultRequired)
+      markRequiredForValue(I, I->getOperand(0), before);
+    break;
+  case Instruction::PHI: {
+    if (resultRequired) {
+      auto *phi = cast<PHINode>(I);
+      for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i)
+        markRequiredForValue(I, phi->getIncomingValue(i), before);
+    }
+    break;
+  }
+  case Instruction::Select:
+    if (resultRequired) {
+      markRequiredForValue(I, I->getOperand(0), before);
+      markRequiredForValue(I, I->getOperand(1), before);
+      markRequiredForValue(I, I->getOperand(2), before);
+    }
+    break;
+  case Instruction::Br: {
+    auto *br = cast<BranchInst>(I);
+    if (br->isConditional())
+      markRequiredForValue(I, br->getCondition(), before);
+    break;
+  }
+  case Instruction::Switch:
+    markRequiredForValue(I, I->getOperand(0), before);
+    break;
+  case Instruction::Ret:
+    if (I->getNumOperands() > 0)
+      markRequiredForValue(I, I->getOperand(0), before);
+    break;
+  case Instruction::Call: {
+    auto *CI = cast<CallInst>(I);
+    if (isa<DbgInfoIntrinsic>(I))
+      break;
+    if (CI->isInlineAsm()) {
+      InlineAsm *ASM = dyn_cast<InlineAsm>(CI->getCalledOperand());
+      InlineAsm::ConstraintInfoVector CIV = ASM->ParseConstraints();
+      for (int argNo = 0; argNo < (int)CI->arg_size(); ++argNo) {
+        if (CIV.at(argNo).Type == InlineAsm::isInput)
+          markRequiredForValue(I, CI->getArgOperand(argNo), before);
+      }
+      break;
+    }
+
+    const std::vector<llvm::Function *> targets = resolveCallTargets(CI);
+    for (llvm::Function *Func : targets) {
+      const FunctionModel model = FunctionModelRegistry::lookup(Func->getName());
+      switch (model.kind) {
+      case FunctionModelKind::Init:
+        propInitFuncs(I, before);
+        break;
+      case FunctionModelKind::Copy:
+        propCopyFuncs(I, before);
+        break;
+      case FunctionModelKind::Transfer:
+        propTransferFuncs(I, before);
+        break;
+      case FunctionModelKind::ObjectSize:
+        if (CI->arg_size() > 0)
+          markRequiredForValue(I, CI->getArgOperand(0), before);
+        break;
+      case FunctionModelKind::Passthrough:
+      case FunctionModelKind::Unknown:
+        propFuncs(I, Func, before);
+        for (unsigned argNo = 0; argNo < CI->arg_size(); ++argNo)
+          markRequiredForValue(I, CI->getArgOperand(argNo), before);
+        break;
+      case FunctionModelKind::Allocator:
+      case FunctionModelKind::ZeroAllocator:
+      case FunctionModelKind::Ignore:
+        break;
+      }
+    }
+    break;
+  }
+  default:
+    break;
+  }
+}
+
+void FuncAnalysis::runBackwardRequirednessAnalysis() {
+  const unsigned numNodes = nodeFactory.getNumNodes();
+  const RequirednessArray empty(numNodes, RequirednessState::NotRequired);
+
+  requiredAtEntry.assign(numNodes, RequirednessState::NotRequired);
+  for (inst_iterator itr = inst_begin(*F), ite = inst_end(*F); itr != ite;
+       ++itr) {
+    auto *I = &*itr;
+    nRequiredIn[I] = empty;
+    nRequiredOut[I] = empty;
+  }
+  for (Function::iterator bb = F->begin(), be = F->end(); bb != be; ++bb) {
+    inRequiredArray[&*bb] = empty;
+    outRequiredArray[&*bb] = empty;
+  }
+
+  std::deque<BasicBlock *> worklist;
+  for (Function::iterator bb = F->begin(), be = F->end(); bb != be; ++bb)
+    worklist.push_back(&*bb);
+
+  const unsigned threshold = 40 * std::max<size_t>(1, worklist.size());
+  unsigned count = 0;
+  while (!worklist.empty()) {
+    if (count++ > threshold) {
+      OP << "Requiredness analysis did not converge within threshold.\n";
+      break;
+    }
+
+    BasicBlock *BB = worklist.front();
+    worklist.pop_front();
+
+    RequirednessArray after(numNodes, RequirednessState::NotRequired);
+    for (auto si = succ_begin(BB), se = succ_end(BB); si != se; ++si) {
+      requiredJoin(after, inRequiredArray[*si], numNodes);
+    }
+    outRequiredArray[BB] = after;
+
+    RequirednessArray current = after;
+    bool changed = false;
+    for (auto it = BB->rbegin(), ie = BB->rend(); it != ie; ++it) {
+      Instruction *I = &*it;
+      nRequiredOut[I] = current;
+      RequirednessArray before = current;
+      computeRequiredness(I, current, before);
+      if (before != nRequiredIn[I])
+        changed = true;
+      nRequiredIn[I] = before;
+      current = before;
+    }
+
+    if (current != inRequiredArray[BB]) {
+      changed = true;
+      inRequiredArray[BB] = current;
+    }
+
+    if (changed) {
+      for (auto pi = pred_begin(BB), pe = pred_end(BB); pi != pe; ++pi) {
+        BasicBlock *pred = *pi;
+        if (std::find(worklist.begin(), worklist.end(), pred) == worklist.end())
+          worklist.push_back(pred);
+      }
+    }
+  }
+
+  if (!F->empty())
+    requiredAtEntry = inRequiredArray[&F->front()];
+}
+
+void FuncAnalysis::buildFunctionSummary(llvm::ReturnInst *RI) {
+  summarizeFuncs(RI);
 }
 
 std::vector<llvm::Function *>
@@ -1418,182 +1695,6 @@ void FuncAnalysis::computeQualifier(llvm::Instruction *I, QualifierArray &in,
   } // I -> getOpcode()
   // OP<<"4.5\n";
 }
-void FuncAnalysis::backPropagateReq(llvm::Instruction *currentIns,
-                                    llvm::Value *Val, QualifierArray &out) {
-  NodeIndex valNode = nodeFactory.getValueNodeFor(Val);
-  // DFS(currentIns, valNode);
-  for (auto aa : nAAMap[currentIns][valNode]) {
-    if (out.at(aa) == QualifierState::Unknown) {
-      // DFS(currentIns, aa);
-    }
-  }
-  // OP<<"back propagate : for "<<*Val<<" : "<<valNode<<"\n";
-
-  if (Instruction *I = dyn_cast<Instruction>(Val)) {
-    if (isa<LoadInst>(I)) {
-      NodeIndex srcIndex = nodeFactory.getValueNodeFor(I->getOperand(0));
-      for (auto obj : nPtsGraph[I][srcIndex]) {
-        if (nQualiArray[I].at(obj) == QualifierState::Unknown) {
-          nQualiArray[I].at(obj) = QualifierState::Initialized;
-          // DFS(I, obj);
-        }
-      }
-    }
-    for (Use &U : I->operands()) {
-      if (Instruction *Ins = dyn_cast<Instruction>(U)) {
-        // OP<<"Def: "<<*Ins<<"\n";
-        switch (Ins->getOpcode()) {
-        case Instruction::Alloca: {
-          NodeIndex node = nodeFactory.getObjectNodeFor(Ins);
-          break;
-        }
-        case Instruction::GetElementPtr: {
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          // OP<<"inside gep, srcIndex =  "<<srcIndex<<" :
-          // "<<out[srcIndex]<<"\n";
-
-          if (out.at(srcIndex) == QualifierState::Unknown) {
-            out.at(srcIndex) = QualifierState::Initialized;
-            nQualiArray[Ins].at(srcIndex) = QualifierState::Initialized;
-            backPropagateReq(Ins, Ins->getOperand(0), out);
-          }
-          break;
-        }
-        case Instruction::Add:
-        case Instruction::FAdd:
-        case Instruction::Sub:
-        case Instruction::FSub:
-        case Instruction::Mul:
-        case Instruction::FMul:
-        case Instruction::SDiv:
-        case Instruction::UDiv:
-        case Instruction::FDiv:
-        case Instruction::SRem:
-        case Instruction::URem:
-        case Instruction::And:
-        case Instruction::Or:
-        case Instruction::Xor:
-        case Instruction::LShr:
-        case Instruction::AShr:
-        case Instruction::Shl:
-        case Instruction::ICmp: {
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(Ins);
-          NodeIndex op0Index = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          NodeIndex op1Index = nodeFactory.getValueNodeFor(Ins->getOperand(1));
-          if (out.at(op0Index) == QualifierState::Unknown) {
-            out.at(op0Index) = QualifierState::Initialized;
-            nQualiArray[Ins].at(op0Index) = QualifierState::Initialized;
-            backPropagateReq(Ins, Ins->getOperand(0), out);
-          }
-          if (out.at(op1Index) == QualifierState::Unknown) {
-            out.at(op1Index) = QualifierState::Initialized;
-            nQualiArray[Ins].at(op1Index) = QualifierState::Initialized;
-            backPropagateReq(Ins, Ins->getOperand(1), out);
-          }
-          break;
-        }
-        case Instruction::SExt:
-        case Instruction::ZExt:
-        case Instruction::BitCast:
-        case Instruction::Trunc:
-        case Instruction::IntToPtr:
-        case Instruction::PtrToInt: {
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          if (out.at(srcIndex) == QualifierState::Unknown) {
-            out.at(srcIndex) = QualifierState::Initialized;
-            nQualiArray[Ins].at(srcIndex) = QualifierState::Initialized;
-            backPropagateReq(Ins, Ins->getOperand(0), out);
-          }
-          break;
-        }
-        case Instruction::Load: {
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(Ins);
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          // OP<<"Def :"<<*Ins<<" , load from "<<srcIndex<<"\n";
-          for (auto obj : nPtsGraph[Ins][srcIndex]) {
-            // OP<<"obj = "<<obj<<"\n";
-            for (auto aa : nAAMap[Ins][obj]) {
-              // OP<<"aa = "<<aa<<": "<<nQualiArray[Ins][aa]<<"\n";
-              if (nQualiArray[Ins].at(aa) == QualifierState::Unknown) {
-                nQualiArray[Ins].at(aa) = QualifierState::Initialized;
-                // DFS(Ins, aa);
-                backPropagateReq(Ins, Ins->getOperand(0), out);
-              }
-            }
-          }
-          break;
-        }
-        case Instruction::PHI: {
-          const PHINode *phiInst = cast<PHINode>(Ins);
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(phiInst);
-          for (unsigned i = 0; i < phiInst->getNumIncomingValues(); i++) {
-            NodeIndex srcIndex =
-                nodeFactory.getValueNodeFor(phiInst->getIncomingValue(i));
-            if (out.at(srcIndex) == QualifierState::Unknown) {
-              out.at(srcIndex) = QualifierState::Initialized;
-              nQualiArray[Ins].at(srcIndex) = QualifierState::Initialized;
-              backPropagateReq(Ins, phiInst->getIncomingValue(i), out);
-            }
-          }
-          break;
-        }
-        case Instruction::Select: {
-          NodeIndex conditionIndex =
-              nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          NodeIndex srcIndex1 = nodeFactory.getValueNodeFor(Ins->getOperand(1));
-          NodeIndex srcIndex2 = nodeFactory.getValueNodeFor(Ins->getOperand(2));
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(Ins);
-          if (out.at(conditionIndex) == QualifierState::Unknown) {
-            out.at(conditionIndex) = QualifierState::Initialized;
-            nQualiArray[Ins].at(conditionIndex) = QualifierState::Initialized;
-            backPropagateReq(Ins, Ins->getOperand(0), out);
-          }
-          if (out.at(srcIndex1) == QualifierState::Unknown) {
-            out.at(srcIndex1) = QualifierState::Initialized;
-            nQualiArray[Ins].at(srcIndex1) = QualifierState::Initialized;
-            backPropagateReq(Ins, Ins->getOperand(1), out);
-          }
-          if (out.at(srcIndex2) == QualifierState::Unknown) {
-            out.at(srcIndex2) = QualifierState::Initialized;
-            nQualiArray[Ins].at(srcIndex2) = QualifierState::Initialized;
-            backPropagateReq(Ins, Ins->getOperand(2), out);
-          }
-          break;
-        }
-        case Instruction::ExtractValue: {
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(Ins);
-          if (out[srcIndex] == QualifierState::Unknown) {
-            out.at(srcIndex) = QualifierState::Initialized;
-            nQualiArray[Ins].at(srcIndex) = QualifierState::Initialized;
-            backPropagateReq(Ins, Ins->getOperand(0), out);
-          }
-          break;
-        }
-        case Instruction::Br: {
-          const BranchInst *brInst = cast<BranchInst>(Ins);
-          if (I->getNumOperands() == 3) {
-            NodeIndex condIndex =
-                nodeFactory.getValueNodeFor(brInst->getCondition());
-            if (out.at(condIndex) == QualifierState::Unknown) {
-              out.at(condIndex) = QualifierState::Initialized;
-              nQualiArray[Ins].at(condIndex) = QualifierState::Initialized;
-              backPropagateReq(Ins, brInst->getCondition(), out);
-            }
-          }
-          break;
-        }
-        default: {
-          return;
-        }
-        } // switch Opcode
-      }
-    }
-  } else {
-    out.at(valNode) = QualifierState::Initialized;
-  }
-  return;
-}
 void FuncAnalysis::summarizeFuncs(llvm::ReturnInst *RI) {
   OP << "inside summarize Funcs:\n";
   // 1.set the eequirement argument
@@ -1608,7 +1709,7 @@ void FuncAnalysis::summarizeFuncs(llvm::ReturnInst *RI) {
     NodeIndex argIndex = nodeFactory.getValueNodeFor(arg);
     NodeIndex sumArgIndex = fSummary.sumNodeFactory.getValueNodeFor(arg);
     // OP<<"argIndex = "<<argIndex<<", sumArgIndex = "<<sumArgIndex<<"\n";
-    if (qualiReq.at(argIndex) == QualifierState::Initialized) {
+    if (requiredAtEntry.at(argIndex) == RequirednessState::Required) {
       fSummary.reqVec.at(sumArgIndex) = QualifierState::Initialized;
     }
     NodeIndex sumArgObjIndex = fSummary.sumNodeFactory.getObjectNodeFor(arg);
@@ -1623,7 +1724,8 @@ void FuncAnalysis::summarizeFuncs(llvm::ReturnInst *RI) {
       for (unsigned i = 0; i < sumObjSize; i++) {
         // OP<<"i = "<<i<<", obj - sumObjOffset + i ="<<obj - sumObjOffset
         // +i<<"\n"; copy the requirement
-        if (qualiReq.at(obj - sumObjOffset + i) == QualifierState::Initialized) {
+        if (requiredAtEntry.at(obj - sumObjOffset + i) ==
+            RequirednessState::Required) {
           // OP<<"sumArgObjIndex - sumObjOffset + i = "<<sumArgObjIndex -
           // sumObjOffset + i<<"\n";
           fSummary.reqVec.at(sumArgObjIndex - sumObjOffset + i) = QualifierState::Initialized;
@@ -1952,195 +2054,26 @@ void FuncAnalysis::setReqFor(const llvm::Instruction *I, const llvm::Value *Val,
     return;
   reqVisit.insert(Val);
   NodeIndex valNode = nodeFactory.getValueNodeFor(Val);
-  for (auto aa : nAAMap[I][valNode]) {
-    if (aa <= nodeFactory.getConstantIntNode() || qualiReq.at(aa) == QualifierState::Initialized)
-      continue;
-    qualiReq.at(aa) = QualifierState::Initialized;
-    out.at(aa) = QualifierState::Initialized;
-    // OP<<"aualiReq.at"<<aa<<" = "<<qualiReq.at(aa)<<"\n";
+  if (valNode == AndersNodeFactory::InvalidIndex)
+    return;
+  if (nRequiredIn.find(I) == nRequiredIn.end())
+    return;
+  auto markIfRequired = [&](NodeIndex idx) {
+    if (idx <= nodeFactory.getConstantIntNode() || idx >= out.size())
+      return;
+    if (nRequiredIn.at(I).at(idx) == RequirednessState::Required &&
+        out.at(idx) == QualifierState::Unknown) {
+      out.at(idx) = QualifierState::Initialized;
+    }
+  };
+  markIfRequired(valNode);
+  for (auto aa : nAAMap[I][valNode])
+    markIfRequired(aa);
+  for (auto item : relatedNode[valNode])
+    markIfRequired(item);
+}
 
-    const llvm::Value *aaVal = nodeFactory.getValueForNode(aa);
-    if (!aaVal)
-      continue;
-    if (const llvm::Instruction *aaIns = dyn_cast<Instruction>(aaVal))
-      setReqFor(aaIns, aaVal, out, reqVisit);
-  }
-  for (auto item : relatedNode[valNode]) {
-    if (item <= nodeFactory.getConstantIntNode() || qualiReq.at(item) == QualifierState::Initialized)
-      continue;
-    qualiReq.at(item) = QualifierState::Initialized;
-    out.at(item) = QualifierState::Initialized;
-  }
-
-  if (const Instruction *Inst = dyn_cast<Instruction>(Val)) {
-    if (isa<LoadInst>(Inst)) {
-      NodeIndex srcIndex = nodeFactory.getValueNodeFor(Inst->getOperand(0));
-      setReqFor(Inst, Inst->getOperand(0), out, reqVisit);
-
-      for (auto obj : nPtsGraph[I][srcIndex]) {
-        for (auto aa : nAAMap[I][obj]) {
-          qualiReq.at(aa) = QualifierState::Initialized;
-          // out.at(aa) = QualifierState::Initialized;
-        }
-      }
-    } // isa<LoadInst>(I)
-    for (const Use &U : Inst->operands()) {
-      if (const Instruction *Ins = dyn_cast<Instruction>(U)) {
-        switch (Ins->getOpcode()) {
-        case Instruction::GetElementPtr: {
-          const GEPOperator *gepValue = dyn_cast<GEPOperator>(Ins);
-          // set requirement for base
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          if (out.at(srcIndex) == QualifierState::Unknown) {
-            qualiReq.at(srcIndex) = QualifierState::Initialized;
-            setReqFor(Ins, Ins->getOperand(0), out, reqVisit);
-            out.at(srcIndex) = QualifierState::Initialized;
-          }
-
-          // Make sure all indices are constants
-          for (unsigned i = 1; i < Ins->getNumOperands(); ++i) {
-            if (!isa<ConstantInt>(Ins->getOperand(i))) {
-              NodeIndex offsetIndex =
-                  nodeFactory.getValueNodeFor(Ins->getOperand(i));
-              if (out.at(srcIndex) == QualifierState::Unknown) {
-                qualiReq.at(srcIndex) = QualifierState::Initialized;
-                setReqFor(Ins, Ins->getOperand(0), out, reqVisit);
-                out.at(srcIndex) = QualifierState::Initialized;
-              }
-            }
-          }
-
-          break;
-        } // case Instruction::GetElementPtr
-        case Instruction::Add:
-        case Instruction::FAdd:
-        case Instruction::Sub:
-        case Instruction::FSub:
-        case Instruction::Mul:
-        case Instruction::FMul:
-        case Instruction::SDiv:
-        case Instruction::UDiv:
-        case Instruction::FDiv:
-        case Instruction::SRem:
-        case Instruction::URem:
-        case Instruction::And:
-        case Instruction::Or:
-        case Instruction::Xor:
-        case Instruction::LShr:
-        case Instruction::AShr:
-        case Instruction::Shl:
-        case Instruction::ICmp: {
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(Ins);
-          NodeIndex op0Index = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          NodeIndex op1Index = nodeFactory.getValueNodeFor(Ins->getOperand(1));
-          if (out.at(op0Index) == QualifierState::Unknown) {
-            out.at(op0Index) = QualifierState::Initialized;
-            qualiReq.at(op0Index) = QualifierState::Initialized;
-            setReqFor(Ins, Ins->getOperand(0), out, reqVisit);
-          }
-          if (out.at(op1Index) == QualifierState::Unknown) {
-            out.at(op1Index) = QualifierState::Initialized;
-            qualiReq.at(op1Index) = QualifierState::Initialized;
-            setReqFor(Ins, Ins->getOperand(1), out, reqVisit);
-          }
-          break;
-        } // case Add
-        case Instruction::SExt:
-        case Instruction::ZExt:
-        case Instruction::BitCast:
-        case Instruction::Trunc:
-        case Instruction::IntToPtr:
-        case Instruction::PtrToInt: {
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          if (out.at(srcIndex) == QualifierState::Unknown) {
-            out.at(srcIndex) = QualifierState::Initialized;
-            qualiReq.at(srcIndex) = QualifierState::Initialized;
-            setReqFor(Ins, Ins->getOperand(0), out, reqVisit);
-          }
-          break;
-        } // case SExt
-        case Instruction::Load: {
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(Ins);
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          // OP<<"Def :"<<*Ins<<" , load from "<<srcIndex<<"\n";
-          for (auto obj : nPtsGraph[Ins][srcIndex]) {
-            // OP<<"obj = "<<obj<<"\n";
-            for (auto aa : nAAMap[Ins][obj]) {
-              // OP<<"aa = "<<aa<<": "<<nQualiArray[Ins][aa]<<"\n";
-              if (nQualiArray[Ins].at(aa) == QualifierState::Unknown) {
-                qualiReq.at(aa) = QualifierState::Initialized;
-                setReqFor(Ins, Ins->getOperand(0), out, reqVisit);
-              }
-            }
-          }
-          break;
-        } // case Load
-        case Instruction::PHI: {
-          const PHINode *phiInst = cast<PHINode>(Ins);
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(phiInst);
-          for (unsigned i = 0; i < phiInst->getNumIncomingValues(); i++) {
-            NodeIndex srcIndex =
-                nodeFactory.getValueNodeFor(phiInst->getIncomingValue(i));
-            if (out.at(srcIndex) == QualifierState::Unknown) {
-              qualiReq.at(srcIndex) = QualifierState::Initialized;
-              setReqFor(Ins, phiInst->getIncomingValue(i), out, reqVisit);
-              out.at(srcIndex) = QualifierState::Initialized;
-            }
-          }
-          break;
-        } // case PHI
-        case Instruction::Select: {
-          NodeIndex conditionIndex =
-              nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          NodeIndex srcIndex1 = nodeFactory.getValueNodeFor(Ins->getOperand(1));
-          NodeIndex srcIndex2 = nodeFactory.getValueNodeFor(Ins->getOperand(2));
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(Ins);
-          if (out.at(conditionIndex) == QualifierState::Unknown) {
-            out.at(conditionIndex) = QualifierState::Initialized;
-            qualiReq.at(conditionIndex) = QualifierState::Initialized;
-            setReqFor(Ins, Ins->getOperand(0), out, reqVisit);
-          }
-          if (out.at(srcIndex1) == QualifierState::Unknown) {
-            out.at(srcIndex1) = QualifierState::Initialized;
-            qualiReq.at(srcIndex1) = QualifierState::Initialized;
-            setReqFor(Ins, Ins->getOperand(1), out, reqVisit);
-          }
-          if (out.at(srcIndex2) == QualifierState::Unknown) {
-            out.at(srcIndex2) = QualifierState::Initialized;
-            qualiReq.at(srcIndex2) = QualifierState::Initialized;
-            setReqFor(Ins, Ins->getOperand(2), out, reqVisit);
-          }
-          break;
-        } // case Select
-        case Instruction::ExtractValue: {
-          NodeIndex srcIndex = nodeFactory.getValueNodeFor(Ins->getOperand(0));
-          NodeIndex dstIndex = nodeFactory.getValueNodeFor(Ins);
-          if (out[srcIndex] == QualifierState::Unknown) {
-            out.at(srcIndex) = QualifierState::Initialized;
-            qualiReq.at(srcIndex) = QualifierState::Initialized;
-            setReqFor(Ins, Ins->getOperand(0), out, reqVisit);
-          }
-          break;
-        } // case ExtractValue
-        case Instruction::Br: {
-          const BranchInst *brInst = cast<BranchInst>(Ins);
-          if (I->getNumOperands() == 3) {
-            NodeIndex condIndex =
-                nodeFactory.getValueNodeFor(brInst->getCondition());
-            if (out.at(condIndex) == QualifierState::Unknown) {
-              out.at(condIndex) = QualifierState::Initialized;
-              qualiReq.at(condIndex) = QualifierState::Initialized;
-              setReqFor(Ins, brInst->getCondition(), out, reqVisit);
-            }
-          }
-          break;
-        } // case Br
-        default: {
-          return;
-        }
-
-        } // switch (Ins->getOpcode())
-      } // if (Instruction *Ins = dyn_cast<Instruction>(U))
-    } // for (Use &U : I->operands())
-  }
+void FuncAnalysis::backPropagateReq(llvm::Instruction *currentIns,
+                                    llvm::Value *Val, QualifierArray &out) {
+  materializeRequiredState(currentIns, out);
 }

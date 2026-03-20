@@ -8,6 +8,8 @@ generic implementation of Foster, Terauchi, and Aiken's PLDI 2002 framework.
 Current scope:
 
 - Tracks `Initialized`, `Uninitialized`, and `Unknown` qualifier states
+- Computes requiredness in a separate backward pass before forward qualifier
+  propagation
 - Uses the existing points-to and alias facts built in this subtree
 - Applies table-driven function models for allocators, init/copy helpers, and
   debug-only intrinsics
