@@ -578,10 +578,8 @@ public:
 
   NullabilityAnalysis(llvm::Module &M, lotus::AliasAnalysisWrapper &aa,
                       const InterproceduralNullability::Options &opts)
-      : module(M), info(M, aa), options(opts) {
-    D::setBitWidth(info.getBitWidth());
-    bitWidth = info.getBitWidth();
-    entryFacts = llvm::APInt(bitWidth, 0);
+      : module(M), info(M, aa), options(opts), bitWidth(info.getBitWidth()),
+        widthScope(bitWidth), entryFacts(bitWidth, 0) {
     initializeEntryFacts();
   }
 
@@ -819,6 +817,7 @@ private:
   NullabilityInfo info;
   InterproceduralNullability::Options options;
   unsigned bitWidth = 1;
+  D::WidthScope widthScope;
   FactType entryFacts;
 
   struct SourceInfo {

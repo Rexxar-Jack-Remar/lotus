@@ -30,9 +30,7 @@ BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F,
                                              LinearStrategy linearStrategy,
                                              bool verbose) {
   // 1. Setup Domain
-  // Note: This sets global state for BitSetDomain (bitvector fact domain).
-  // Ensure this is not run concurrently with different widths.
-  BitSetDomain::setBitWidth(info.getBitWidth());
+  BitSetDomain::WidthScope width_scope(info.getBitWidth());
 
   bool forward = info.isForward();
   llvm::APInt boundary = info.getBoundaryVal();

@@ -1,6 +1,8 @@
 #ifndef NPA_GEN_KILL_DOMAIN_H
 #define NPA_GEN_KILL_DOMAIN_H
 
+#include "Dataflow/NPA/Core/NPACommon.h"
+
 #include <utility>
 
 #include <llvm/ADT/APInt.h>
@@ -24,21 +26,26 @@ public:
   using value_type = std::pair<llvm::APInt, llvm::APInt>;
   using test_type = bool;
   static constexpr bool idempotent = true;
-
-  // V1 single-run parallelism contract: configure the width before solving and
-  // keep it frozen for the duration of that run. The hot path stays lock-free;
-  // concurrent independent runs remain out of scope.
-  static void setBitWidth(unsigned W) { BitWidth = W; }
-  static unsigned getBitWidth() { return BitWidth; }
+  using width_context = DomainWidthContext<GenKillTransferDomain>;
+  using RunState = typename width_context::state_type;
+  using WidthScope = typename width_context::scope_type;
 
   // Additive identity (no paths): f(x) = 0  => Kill=all, Gen=0
   static value_type zero() {
-    return {llvm::APInt::getAllOnes(BitWidth), llvm::APInt(BitWidth, 0)};
+    return zero(requireBitWidth());
+  }
+
+  static value_type zero(unsigned bit_width) {
+    return {llvm::APInt::getAllOnes(bit_width), llvm::APInt(bit_width, 0)};
   }
 
   // Multiplicative identity (no-op): f(x) = x  => Kill=0, Gen=0
   static value_type one() {
-    return {llvm::APInt(BitWidth, 0), llvm::APInt(BitWidth, 0)};
+    return one(requireBitWidth());
+  }
+
+  static value_type one(unsigned bit_width) {
+    return {llvm::APInt(bit_width, 0), llvm::APInt(bit_width, 0)};
   }
 
   static bool equal(const value_type &a, const value_type &b) {
@@ -84,12 +91,26 @@ public:
   }
 
 private:
-  static unsigned BitWidth;
+  static unsigned requireBitWidth() {
+    return width_context::require(
+        "GenKillTransferDomain width must be installed via WidthScope");
+  }
 };
 
 /// Backwards-compatible alias: older code may still refer to GenKillDomain.
 using GenKillDomain = GenKillTransferDomain;
 
+} // namespace npa
+
+namespace npa {
+template <> struct DomainExecutionStateTraits<GenKillTransferDomain> {
+  using state_type = GenKillTransferDomain::width_context::state_type;
+  using scope_type = GenKillTransferDomain::width_context::scope_type;
+
+  static state_type capture() {
+    return GenKillTransferDomain::width_context::capture();
+  }
+};
 } // namespace npa
 
 #endif

@@ -582,23 +582,24 @@ private:
 class TaintAnalysis {
 public:
   using FactType = llvm::APInt;
+  using D = TaintTransferDomain;
   using Engine = InterproceduralEngine<TaintTransferDomain, TaintAnalysis>;
+
+  static unsigned normalizeBitWidth(unsigned bit_width) {
+    return bit_width == 0 ? 1u : bit_width;
+  }
 
   TaintAnalysis(llvm::Module &M, lotus::AliasAnalysisWrapper &aa,
                 const InterproceduralTaint::Options &opts)
-      : module(M), info(M, aa), aliasAnalysis(aa), options(opts) {
-    bitWidth = info.getBitWidth();
-    if (bitWidth == 0)
-      bitWidth = 1;
-    TaintTransferDomain::setBitWidth(bitWidth);
-    entryFacts = llvm::APInt(bitWidth, 0);
+      : module(M), info(M, aa), aliasAnalysis(aa),
+        bitWidth(normalizeBitWidth(info.getBitWidth())), widthScope(bitWidth),
+        entryFacts(bitWidth, 0), options(opts) {
     initializeEntryFacts();
     scanUnsupportedSpecs();
   }
 
   FactType getEntryValue() const { return entryFacts; }
 
-  using D = TaintTransferDomain;
   using Exp = Exp0<D>;
   using E = E0<D>;
 
@@ -1335,6 +1336,7 @@ private:
   TaintInfo info;
   lotus::AliasAnalysisWrapper &aliasAnalysis;
   unsigned bitWidth = 1;
+  D::WidthScope widthScope;
   FactType entryFacts;
   InterproceduralTaint::Options options;
   bool unsupportedSpecsEncountered = false;

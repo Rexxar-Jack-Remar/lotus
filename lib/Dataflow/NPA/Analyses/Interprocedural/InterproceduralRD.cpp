@@ -22,6 +22,7 @@ private:
 
   std::unordered_map<const llvm::Value *, unsigned> valToBit;
   unsigned bitWidth;
+  D::WidthScope widthScope;
 
 public:
   RDAnalysis(llvm::Module &M) {
@@ -37,7 +38,7 @@ public:
       }
     }
     bitWidth = (bit == 0) ? 1 : bit;
-    GenKillTransferDomain::setBitWidth(bitWidth);
+    widthScope.reset(bitWidth);
   }
 
   FactType getEntryValue() const {

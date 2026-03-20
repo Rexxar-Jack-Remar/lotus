@@ -67,10 +67,9 @@ public:
   using Exp = Exp0<D>;
   using E = E0<D>;
 
-  explicit InterproceduralLiveAnalysis(llvm::Module &M) : info(M) {
-    D::setBitWidth(info.getBitWidth());
-    bitWidth = info.getBitWidth();
-  }
+  explicit InterproceduralLiveAnalysis(llvm::Module &M)
+      : info(M), bitWidth(info.getBitWidth()),
+        widthScope(bitWidth) {}
 
   FactType getExitValue(const llvm::Function &) const {
     return llvm::APInt(bitWidth, 0);
@@ -178,6 +177,7 @@ public:
 private:
   LiveVariablesInfo info;
   unsigned bitWidth = 1;
+  D::WidthScope widthScope;
 
   void clearInput(D::value_type &transfer, unsigned inputBit) const {
     if (inputBit == LiveVariablesInfo::invalidBit() ||

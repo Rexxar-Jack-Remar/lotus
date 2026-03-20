@@ -6,6 +6,4 @@
 
 namespace npa {
 
-unsigned BitSetDomain::BitWidth = 1;
-
 } // namespace npa

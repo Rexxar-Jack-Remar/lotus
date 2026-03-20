@@ -97,10 +97,9 @@ public:
   using Exp = Exp0<D>;
   using E = E0<D>;
 
-  explicit MaybeUninitializedAnalysis(llvm::Module &M) : info(M) {
-    D::setBitWidth(info.getBitWidth());
-    bitWidth = info.getBitWidth();
-  }
+  explicit MaybeUninitializedAnalysis(llvm::Module &M)
+      : info(M), bitWidth(info.getBitWidth()),
+        widthScope(bitWidth) {}
 
   FactType getEntryValue() const { return llvm::APInt(bitWidth, 0); }
 
@@ -235,6 +234,7 @@ public:
 private:
   UninitializedInfo info;
   unsigned bitWidth = 1;
+  D::WidthScope widthScope;
 
   void clearDestination(D::value_type &transfer, unsigned destBit) const {
     if (destBit == UninitializedInfo::invalidBit())

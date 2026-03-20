@@ -6,6 +6,4 @@
 
 namespace npa {
 
-unsigned GenKillTransferDomain::BitWidth = 1;
-
 } // namespace npa
