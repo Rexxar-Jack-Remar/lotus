@@ -43,9 +43,9 @@ void pdg::FunctionWrapper::addInst(Instruction &i) {
     _load_insts.push_back(li);
   if (DbgDeclareInst *dbi = dyn_cast<DbgDeclareInst>(&i))
     _dbg_declare_insts.push_back(dbi);
-  if (CallInst *ci = dyn_cast<CallInst>(&i)) {
+  if (CallBase *cb = dyn_cast<CallBase>(&i)) {
     if (!isa<DbgDeclareInst>(&i))
-      _call_insts.push_back(ci);
+      _call_insts.push_back(cb);
   }
   if (ReturnInst *reti = dyn_cast<ReturnInst>(&i))
     _return_insts.push_back(reti);

@@ -361,6 +361,266 @@ TEST_F(PDGQueryTest, TransformQueryRejectsMemoryMotionWithoutMemorySSA) {
   EXPECT_NE(motion.reason.find("MemorySSA"), std::string::npos);
 }
 
+TEST_F(PDGQueryTest, BindDITypeToNodesSkipsUnsupportedInstructionsWithoutCrash) {
+  constexpr const char *IR = R"(
+    define i32 @f(i32 %x) {
+    entry:
+      %sum = add i32 %x, 1
+      ret i32 %sum
+    }
+  )";
+
+  ASSERT_TRUE(loadModule(IR));
+  Function *function = module->getFunction("f");
+  ASSERT_NE(function, nullptr);
+  BinaryOperator *sum = findInstruction<BinaryOperator>(*function, "sum");
+  ASSERT_NE(sum, nullptr);
+
+  graph.build(*module);
+  graph.bindDITypeToNodes(*module);
+
+  Node *sum_node = graph.getNode(*sum);
+  ASSERT_NE(sum_node, nullptr);
+  EXPECT_EQ(sum_node->getDIType(), nullptr);
+}
+
+TEST_F(PDGQueryTest, TreeCopyPreservesParameterFieldEdges) {
+  constexpr const char *IR = R"(
+    define void @f() {
+    entry:
+      ret void
+    }
+  )";
+
+  ASSERT_TRUE(loadModule(IR));
+  Function *function = module->getFunction("f");
+  ASSERT_NE(function, nullptr);
+
+  Tree original;
+  TreeNode *root = new TreeNode(*function, nullptr, 0, nullptr, &original,
+                                GraphNodeType::PARAM_FORMALIN);
+  TreeNode *child = new TreeNode(*function, nullptr, 1, root, &original,
+                                 GraphNodeType::PARAM_FORMALIN);
+  root->insertChildNode(child);
+  root->addNeighbor(*child, EdgeType::PARAMETER_FIELD);
+  original.setRootNode(*root);
+  original.setSize(2);
+
+  Tree copied(original);
+  TreeNode *copied_root = copied.getRootNode();
+  ASSERT_NE(copied_root, nullptr);
+  ASSERT_EQ(copied_root->numOfChild(), 1);
+  TreeNode *copied_child = copied_root->getChildNodes().front();
+  ASSERT_NE(copied_child, nullptr);
+  EXPECT_TRUE(
+      copied_root->hasOutNeighborWithEdgeType(*copied_child, EdgeType::PARAMETER_FIELD));
+}
+
+TEST_F(PDGQueryTest, ProgramGraphBuildCreatesCallWrapperForInvoke) {
+  constexpr const char *IR = R"(
+    declare i32 @__gxx_personality_v0(...)
+
+    define void @callee() {
+    entry:
+      ret void
+    }
+
+    define void @caller() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      invoke void @callee()
+              to label %cont unwind label %lpad
+
+    cont:
+      ret void
+
+    lpad:
+      %lp = landingpad { i8*, i32 }
+              cleanup
+      resume { i8*, i32 } %lp
+    }
+  )";
+
+  ASSERT_TRUE(loadModule(IR));
+  Function *caller = module->getFunction("caller");
+  Function *callee = module->getFunction("callee");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  graph.build(*module);
+
+  InvokeInst *invoke = findInstruction<InvokeInst>(*caller);
+  ASSERT_NE(invoke, nullptr);
+  Node *invoke_node = graph.getNode(*invoke);
+  ASSERT_NE(invoke_node, nullptr);
+  EXPECT_EQ(invoke_node->getNodeType(), GraphNodeType::INST_FUNCALL);
+  EXPECT_TRUE(graph.hasCallWrapper(*invoke));
+  CallWrapper *wrapper = graph.getCallWrapper(*invoke);
+  ASSERT_NE(wrapper, nullptr);
+  EXPECT_EQ(wrapper->getCallInst(), invoke);
+  EXPECT_EQ(wrapper->getCalledFunc(), callee);
+}
+
+TEST_F(PDGQueryTest, ProgramDependencyGraphConnectsActualTreesToCallerValues) {
+  constexpr const char *IR = R"(
+    source_filename = "pdg-actual-tree.c"
+
+    declare void @llvm.dbg.declare(metadata, metadata, metadata)
+
+    define void @callee(i32 %x) !dbg !9 {
+    entry:
+      %x.addr = alloca i32, align 4
+      store i32 %x, i32* %x.addr, align 4
+      call void @llvm.dbg.declare(metadata i32* %x.addr, metadata !13, metadata !DIExpression()), !dbg !14
+      ret void, !dbg !15
+    }
+
+    define void @caller(i32 %n) {
+    entry:
+      %a = add i32 %n, 1
+      call void @callee(i32 %a)
+      ret void
+    }
+
+    !llvm.dbg.cu = !{!0}
+    !llvm.module.flags = !{!3, !4}
+    !0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, producer: "clang", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !2, retainedTypes: !2, globals: !2, imports: !2)
+    !1 = !DIFile(filename: "pdg-actual-tree.c", directory: "/tmp")
+    !2 = !{}
+    !3 = !{i32 7, !"Dwarf Version", i32 4}
+    !4 = !{i32 2, !"Debug Info Version", i32 3}
+    !9 = distinct !DISubprogram(name: "callee", scope: !1, file: !1, line: 1, type: !10, scopeLine: 1, spFlags: DISPFlagDefinition, unit: !0, retainedNodes: !2)
+    !10 = !DISubroutineType(types: !11)
+    !11 = !{null, !12}
+    !12 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
+    !13 = !DILocalVariable(name: "x", arg: 1, scope: !9, file: !1, line: 1, type: !12)
+    !14 = !DILocation(line: 1, column: 1, scope: !9)
+    !15 = !DILocation(line: 2, column: 1, scope: !9)
+  )";
+
+  ASSERT_TRUE(loadModule(IR));
+
+  auto &registry = *PassRegistry::getPassRegistry();
+  initializeCore(registry);
+  initializeAnalysis(registry);
+  initializeTransformUtils(registry);
+  legacy::PassManager pm;
+  pm.add(new DataDependencyGraph());
+  pm.add(new ControlDependencyGraph());
+  pm.add(new ProgramDependencyGraph());
+  pm.run(*module);
+
+  Function *caller = module->getFunction("caller");
+  ASSERT_NE(caller, nullptr);
+  BinaryOperator *arg_value = findInstruction<BinaryOperator>(*caller, "a");
+  CallInst *call = findInstruction<CallInst>(*caller);
+  ASSERT_NE(arg_value, nullptr);
+  ASSERT_NE(call, nullptr);
+
+  Node *arg_node = graph.getNode(*arg_value);
+  ASSERT_NE(arg_node, nullptr);
+  CallWrapper *wrapper = graph.getCallWrapper(*call);
+  ASSERT_NE(wrapper, nullptr);
+
+  Tree *actual_in_tree = wrapper->getArgActualInTree(*arg_value);
+  Tree *actual_out_tree = wrapper->getArgActualOutTree(*arg_value);
+  ASSERT_NE(actual_in_tree, nullptr);
+  ASSERT_NE(actual_out_tree, nullptr);
+  TreeNode *actual_in_root = actual_in_tree->getRootNode();
+  TreeNode *actual_out_root = actual_out_tree->getRootNode();
+  ASSERT_NE(actual_in_root, nullptr);
+  ASSERT_NE(actual_out_root, nullptr);
+
+  EXPECT_TRUE(
+      actual_in_root->hasInNeighborWithEdgeType(*arg_node, EdgeType::PARAMETER_IN));
+  EXPECT_TRUE(actual_out_root->hasOutNeighborWithEdgeType(
+      *arg_node, EdgeType::PARAMETER_OUT));
+}
+
+TEST_F(PDGQueryTest, CallWrapperCanRebuildActualTreesForDifferentCallees) {
+  constexpr const char *IR = R"(
+    source_filename = "pdg-rebuild.c"
+
+    declare void @llvm.dbg.declare(metadata, metadata, metadata)
+
+    define void @callee_plain(i32 %x) {
+    entry:
+      ret void
+    }
+
+    define void @callee_debug(i32 %x) !dbg !9 {
+    entry:
+      %x.addr = alloca i32, align 4
+      store i32 %x, i32* %x.addr, align 4
+      call void @llvm.dbg.declare(metadata i32* %x.addr, metadata !13, metadata !DIExpression()), !dbg !14
+      ret void, !dbg !15
+    }
+
+    define void @caller(i32 %n) {
+    entry:
+      %a = add i32 %n, 1
+      call void @callee_plain(i32 %a)
+      ret void
+    }
+
+    !llvm.dbg.cu = !{!0}
+    !llvm.module.flags = !{!3, !4}
+    !0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, producer: "clang", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !2, retainedTypes: !2, globals: !2, imports: !2)
+    !1 = !DIFile(filename: "pdg-rebuild.c", directory: "/tmp")
+    !2 = !{}
+    !3 = !{i32 7, !"Dwarf Version", i32 4}
+    !4 = !{i32 2, !"Debug Info Version", i32 3}
+    !9 = distinct !DISubprogram(name: "callee_debug", scope: !1, file: !1, line: 1, type: !10, scopeLine: 1, spFlags: DISPFlagDefinition, unit: !0, retainedNodes: !2)
+    !10 = !DISubroutineType(types: !11)
+    !11 = !{null, !12}
+    !12 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
+    !13 = !DILocalVariable(name: "x", arg: 1, scope: !9, file: !1, line: 1, type: !12)
+    !14 = !DILocation(line: 1, column: 1, scope: !9)
+    !15 = !DILocation(line: 2, column: 1, scope: !9)
+  )";
+
+  ASSERT_TRUE(loadModule(IR));
+  Function *caller = module->getFunction("caller");
+  Function *callee_plain = module->getFunction("callee_plain");
+  Function *callee_debug = module->getFunction("callee_debug");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee_plain, nullptr);
+  ASSERT_NE(callee_debug, nullptr);
+
+  CallInst *call = findInstruction<CallInst>(*caller);
+  BinaryOperator *arg_value = findInstruction<BinaryOperator>(*caller, "a");
+  ASSERT_NE(call, nullptr);
+  ASSERT_NE(arg_value, nullptr);
+
+  FunctionWrapper plain_wrapper(callee_plain);
+  FunctionWrapper debug_wrapper(callee_debug);
+  for (auto inst_iter = inst_begin(*callee_debug); inst_iter != inst_end(*callee_debug);
+       ++inst_iter) {
+    debug_wrapper.addInst(*inst_iter);
+  }
+  plain_wrapper.buildFormalTreeForArgs();
+  debug_wrapper.buildFormalTreeForArgs();
+
+  ASSERT_EQ(plain_wrapper.getArgFormalInTree(*callee_plain->arg_begin()), nullptr);
+  ASSERT_NE(debug_wrapper.getArgFormalInTree(*callee_debug->arg_begin()), nullptr);
+
+  CallWrapper wrapper(*call);
+  wrapper.buildActualTreeForArgs(plain_wrapper);
+  EXPECT_EQ(wrapper.getArgActualInTree(*arg_value), nullptr);
+
+  wrapper.setHasParamTrees();
+  wrapper.clearParamTrees();
+  EXPECT_FALSE(wrapper.hasParamTrees());
+
+  wrapper.buildActualTreeForArgs(debug_wrapper);
+  wrapper.setHasParamTrees();
+  EXPECT_NE(wrapper.getArgActualInTree(*arg_value), nullptr);
+  EXPECT_NE(wrapper.getArgActualOutTree(*arg_value), nullptr);
+
+  wrapper.releaseTrees();
+  EXPECT_EQ(wrapper.getArgActualInTree(*arg_value), nullptr);
+  EXPECT_EQ(wrapper.getArgActualOutTree(*arg_value), nullptr);
+}
+
 TEST_F(PDGQueryTest, DiffQueryReportsFunctionImpactSummary) {
   constexpr const char *IR = R"(
     define i32 @f(i32 %x) {

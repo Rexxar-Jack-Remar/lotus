@@ -46,29 +46,29 @@ public:
   }
 
   ~FunctionWrapper() {
-    for (auto &entry : _arg_formal_in_tree_map) {
-      delete entry.second;
-    }
-    for (auto &entry : _arg_formal_out_tree_map) {
-      delete entry.second;
-    }
-    delete _ret_val_formal_in_tree;
-    delete _ret_val_formal_out_tree;
+    releaseTrees();
   }
 
   /**
    * @brief Release (null out) all Tree pointers without deleting them.
    *
-   * Called by ProgramGraph::reset() before GenericGraph::reset() so that
-   * the FunctionWrapper destructor does not double-free TreeNode objects
-   * that are already owned by the graph's _node_set.
+   * Trees are heap-allocated wrapper objects; their TreeNode contents are owned
+   * by the PDG node set and are deleted separately by ProgramGraph::reset().
+   * Releasing here frees only the wrapper objects and clears the stored
+   * pointers, which avoids leaking Trees across rebuilds.
    */
   void releaseTrees() {
-    for (auto &entry : _arg_formal_in_tree_map)
+    for (auto &entry : _arg_formal_in_tree_map) {
+      delete entry.second;
       entry.second = nullptr;
-    for (auto &entry : _arg_formal_out_tree_map)
+    }
+    for (auto &entry : _arg_formal_out_tree_map) {
+      delete entry.second;
       entry.second = nullptr;
+    }
+    delete _ret_val_formal_in_tree;
     _ret_val_formal_in_tree = nullptr;
+    delete _ret_val_formal_out_tree;
     _ret_val_formal_out_tree = nullptr;
   }
 
@@ -173,7 +173,7 @@ public:
   }
   std::vector<llvm::LoadInst *> &getLoadInsts() { return _load_insts; }
   std::vector<llvm::StoreInst *> &getStoreInsts() { return _store_insts; }
-  std::vector<llvm::CallInst *> &getCallInsts() { return _call_insts; }
+  std::vector<llvm::CallBase *> &getCallInsts() { return _call_insts; }
   std::vector<llvm::ReturnInst *> &getReturnInsts() { return _return_insts; }
   std::vector<llvm::Argument *> &getArgList() { return _arg_list; }
 
@@ -192,7 +192,7 @@ private:
   std::vector<llvm::DbgDeclareInst *> _dbg_declare_insts;
   std::vector<llvm::LoadInst *> _load_insts;
   std::vector<llvm::StoreInst *> _store_insts;
-  std::vector<llvm::CallInst *> _call_insts;
+  std::vector<llvm::CallBase *> _call_insts;
   std::vector<llvm::ReturnInst *> _return_insts;
   std::vector<llvm::Argument *> _arg_list;
   ArgTreeMap _arg_formal_in_tree_map;

@@ -59,7 +59,7 @@ public:
    * @param M The module to search in
    * @return Set of candidate functions
    */
-  std::set<llvm::Function *> getIndirectCallCandidates(llvm::CallInst &ci,
+  std::set<llvm::Function *> getIndirectCallCandidates(llvm::CallBase &ci,
                                                        llvm::Module &M);
 
   /**
@@ -68,7 +68,7 @@ public:
    * @param f The Function to check against
    * @return True if signatures match
    */
-  bool isFuncSignatureMatch(llvm::CallInst &ci, llvm::Function &f);
+  bool isFuncSignatureMatch(llvm::CallBase &ci, llvm::Function &f);
 
   /**
    * @brief Check if two LLVM types are structurally equal

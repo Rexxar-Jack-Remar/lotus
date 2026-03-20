@@ -185,7 +185,7 @@ class ProgramGraph : public GenericGraph {
 public:
   using FuncWrapperMap =
       std::unordered_map<llvm::Function *, FunctionWrapper *>;
-  using CallWrapperMap = std::unordered_map<llvm::CallInst *, CallWrapper *>;
+  using CallWrapperMap = std::unordered_map<llvm::CallBase *, CallWrapper *>;
   using ClassNodeMap = std::unordered_map<std::string, Node *>;
   using NodeDIMap = std::unordered_map<Node *, llvm::DIType *>;
 
@@ -244,7 +244,7 @@ public:
   /// @brief Checks if a call wrapper exists for a call instruction
   /// @param ci The call instruction to check
   /// @return True if a wrapper exists
-  bool hasCallWrapper(llvm::CallInst &ci) {
+  bool hasCallWrapper(llvm::CallBase &ci) {
     return _call_wrapper_map.find(&ci) != _call_wrapper_map.end();
   }
 
@@ -252,14 +252,20 @@ public:
   /// @param F The function
   /// @return Pointer to the function wrapper
   FunctionWrapper *getFuncWrapper(llvm::Function &F) {
-    return _func_wrapper_map[&F];
+    auto it = _func_wrapper_map.find(&F);
+    if (it == _func_wrapper_map.end())
+      return nullptr;
+    return it->second;
   }
 
   /// @brief Gets the call wrapper for a call instruction
   /// @param ci The call instruction
   /// @return Pointer to the call wrapper
-  CallWrapper *getCallWrapper(llvm::CallInst &ci) {
-    return _call_wrapper_map[&ci];
+  CallWrapper *getCallWrapper(llvm::CallBase &ci) {
+    auto it = _call_wrapper_map.find(&ci);
+    if (it == _call_wrapper_map.end())
+      return nullptr;
+    return it->second;
   }
 
   /// @brief Binds debug information types to nodes in the graph
@@ -299,16 +305,12 @@ public:
 
   /// @brief Resets the graph and all its mappings
   ///
-  /// Ownership of TreeNode objects is shared between the Tree objects inside
-  /// FunctionWrapper/CallWrapper and the _node_set in GenericGraph.
-  /// To avoid double-free we must release the Tree objects (which own their
-  /// TreeNodes via their destructors) BEFORE GenericGraph::reset() deletes
-  /// every node in _node_set.  We do this by calling releaseTrees() on every
-  /// wrapper first, which nulls out the tree pointers without deleting the
-  /// nodes (the nodes will be deleted by GenericGraph::reset()).
+  /// Tree wrapper objects are owned by FunctionWrapper/CallWrapper, while the
+  /// TreeNode objects they reference are also inserted into GenericGraph's
+  /// _node_set and deleted there. Releasing the wrapper Trees first prevents
+  /// leaking them across rebuilds without affecting node ownership.
   void reset() {
-    // Step 1: release Tree objects from wrappers so their destructors do NOT
-    // delete TreeNodes that are still referenced by _node_set.
+    // Step 1: release Tree wrapper objects from wrappers.
     for (auto &entry : _func_wrapper_map) {
       if (entry.second)
         entry.second->releaseTrees();

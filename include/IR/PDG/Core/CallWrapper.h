@@ -13,7 +13,7 @@ namespace pdg {
 /**
  * @brief Wrapper class for LLVM CallInst in the PDG
  *
- * This class encapsulates a function call site (CallInst) and manages the
+ * This class encapsulates a function call site (CallBase) and manages the
  * mapping between actual arguments at the call site and the formal parameters
  * of the callee. It handles:
  * - Construction of "actual in" and "actual out" trees for arguments and return
@@ -28,7 +28,7 @@ private:
       std::map<llvm::Value *, Tree *, std::less<llvm::Value *>,
                std::allocator<std::pair<llvm::Value *const, Tree *>>>;
 
-  llvm::CallInst *_call_inst;
+  llvm::CallBase *_call_inst;
   llvm::Function *_called_func;
   std::vector<llvm::Value *> _arg_list;
   ValueTreeMap _arg_actual_in_tree_map;
@@ -40,9 +40,9 @@ private:
 public:
   /**
    * @brief Constructor
-   * @param ci The CallInst to wrap
+   * @param ci The CallBase to wrap
    */
-  CallWrapper(llvm::CallInst &ci) {
+  CallWrapper(llvm::CallBase &ci) {
     _call_inst = &ci;
     _called_func = pdgutils::getCalledFunc(ci);
     _ret_val_actual_in_tree = nullptr;
@@ -54,30 +54,39 @@ public:
   }
 
   ~CallWrapper() {
-    for (auto &entry : _arg_actual_in_tree_map) {
-      delete entry.second;
-    }
-    for (auto &entry : _arg_actual_out_tree_map) {
-      delete entry.second;
-    }
-    delete _ret_val_actual_in_tree;
-    delete _ret_val_actual_out_tree;
+    releaseTrees();
   }
 
   /**
    * @brief Release (null out) all Tree pointers without deleting them.
    *
-   * Called by ProgramGraph::reset() before GenericGraph::reset() so that
-   * the CallWrapper destructor does not double-free TreeNode objects that
-   * are already owned by the graph's _node_set.
+   * Trees are heap-allocated wrapper objects; their TreeNode contents are owned
+   * by the PDG node set and are deleted separately by ProgramGraph::reset().
+   * Releasing here frees only the wrapper objects and clears the stored
+   * pointers.
    */
   void releaseTrees() {
-    for (auto &entry : _arg_actual_in_tree_map)
+    for (auto &entry : _arg_actual_in_tree_map) {
+      delete entry.second;
       entry.second = nullptr;
-    for (auto &entry : _arg_actual_out_tree_map)
+    }
+    for (auto &entry : _arg_actual_out_tree_map) {
+      delete entry.second;
       entry.second = nullptr;
+    }
+    delete _ret_val_actual_in_tree;
     _ret_val_actual_in_tree = nullptr;
+    delete _ret_val_actual_out_tree;
     _ret_val_actual_out_tree = nullptr;
+    _has_param_trees = false;
+  }
+
+  /// @brief Discard cached actual trees so they can be rebuilt for another
+  /// callee candidate.
+  void clearParamTrees() {
+    releaseTrees();
+    _arg_actual_in_tree_map.clear();
+    _arg_actual_out_tree_map.clear();
   }
 
   /**
@@ -92,7 +101,7 @@ public:
    */
   void buildActualTreesForRetVal(FunctionWrapper &callee_fw);
 
-  llvm::CallInst *getCallInst() { return _call_inst; }
+  llvm::CallBase *getCallInst() { return _call_inst; }
   llvm::Function *getCalledFunc() { return _called_func; }
   std::vector<llvm::Value *> &getArgList() { return _arg_list; }
 

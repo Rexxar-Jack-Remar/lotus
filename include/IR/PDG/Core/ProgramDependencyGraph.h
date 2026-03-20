@@ -57,14 +57,14 @@ public:
   /// @param F The function to look up
   /// @return Pointer to the function wrapper
   FunctionWrapper *getFuncWrapper(llvm::Function &F) {
-    return _PDG->getFuncWrapperMap()[&F];
+    return _PDG->getFuncWrapper(F);
   }
 
   /// @brief Gets the call wrapper for a call instruction
   /// @param call_inst The call instruction to look up
   /// @return Pointer to the call wrapper
-  CallWrapper *getCallWrapper(llvm::CallInst &call_inst) {
-    return _PDG->getCallWrapperMap()[&call_inst];
+  CallWrapper *getCallWrapper(llvm::CallBase &call_inst) {
+    return _PDG->getCallWrapper(call_inst);
   }
 
   /// @brief Connects global variables with their uses
@@ -113,13 +113,13 @@ public:
   /// @param actual_in_tree The actual input tree to connect
   /// @param ci The call instruction
   void connectActualInTreeWithAddrVars(Tree &actual_in_tree,
-                                       llvm::CallInst &ci);
+                                       llvm::CallBase &ci);
 
   /// @brief Connects actual out-tree nodes with address-taken variables
   /// @param actual_out_tree The actual output tree to connect
   /// @param ci The call instruction
   void connectActualOutTreeWithAddrVars(Tree &actual_out_tree,
-                                        llvm::CallInst &ci);
+                                        llvm::CallBase &ci);
 
   /// @brief Checks if dst is reachable from src
   /// @param src Source node

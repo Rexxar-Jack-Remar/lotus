@@ -191,7 +191,7 @@ void pdg::ProgramGraph::build(Module &M) {
           node_type = GraphNodeType::ANNO_VAR;
         if (isa<ReturnInst>(&*inst_iter))
           node_type = GraphNodeType::INST_RET;
-        if (isa<CallInst>(&*inst_iter))
+        if (isa<CallBase>(&*inst_iter))
           node_type = GraphNodeType::INST_FUNCALL;
         if (isa<BranchInst>(&*inst_iter))
           node_type = GraphNodeType::INST_BR;
@@ -255,7 +255,7 @@ void pdg::ProgramGraph::bindDITypeToNodes(Module &M) {
   for (auto &F : M) {
     if (F.isDeclaration())
       continue;
-    FunctionWrapper *fw = _func_wrapper_map[&F];
+    FunctionWrapper *fw = getFuncWrapper(F);
     if (!fw)
       continue;
     auto dbg_declare_insts = fw->getDbgDeclareInsts();
@@ -308,7 +308,8 @@ void pdg::ProgramGraph::bindDITypeToNodes(Module &M) {
       Node *n = getNode(i);
       assert(n != nullptr && "cannot compute node di type for null node!\n");
       DIType *node_di_type = computeNodeDIType(*n);
-      n->setDIType(*node_di_type);
+      if (node_di_type != nullptr)
+        n->setDIType(*node_di_type);
     }
   }
 
@@ -316,7 +317,8 @@ void pdg::ProgramGraph::bindDITypeToNodes(Module &M) {
     Node *global_node = getNode(global_var);
     if (global_node != nullptr) {
       auto *dt = dbgutils::getGlobalVarDIType(global_var);
-      global_node->setDIType(*dt);
+      if (dt != nullptr)
+        global_node->setDIType(*dt);
     }
   }
 }
@@ -427,15 +429,15 @@ void pdg::ProgramGraph::addFormalTreeNodesToGraph(FunctionWrapper &func_w) {
   for (auto *arg : func_w.getArgList()) {
     Tree *formal_in_tree = func_w.getArgFormalInTree(*arg);
     Tree *formal_out_tree = func_w.getArgFormalOutTree(*arg);
-    if (!formal_in_tree || !formal_out_tree)
-      return;
-    addTreeNodesToGraph(*formal_in_tree);
-    addTreeNodesToGraph(*formal_out_tree);
+    if (formal_in_tree)
+      addTreeNodesToGraph(*formal_in_tree);
+    if (formal_out_tree)
+      addTreeNodesToGraph(*formal_out_tree);
   }
 }
 
 bool pdg::ProgramGraph::isAnnotationCallInst(Instruction &inst) {
-  if (CallInst *ci = dyn_cast<CallInst>(&inst)) {
+  if (CallBase *ci = dyn_cast<CallBase>(&inst)) {
     Function *f = pdgutils::getCalledFunc(*ci);
     if (f == nullptr)
       return false;

@@ -196,6 +196,7 @@ pdg::Tree::Tree(const Tree &src_tree)
         new_child->addAddrVar(*addr_var);
       }
       dst_node->insertChildNode(new_child);
+      dst_node->addNeighbor(*new_child, EdgeType::PARAMETER_FIELD);
       node_queue.push(std::make_pair(src_child, new_child));
     }
   }

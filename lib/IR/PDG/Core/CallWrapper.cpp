@@ -73,8 +73,8 @@ void pdg::CallWrapper::buildActualTreeForArgs(FunctionWrapper &callee_fw) {
     actual_out_root_node->addAddrVar(**actual_arg_iter);
     _arg_actual_out_tree_map.insert(
         std::make_pair(*actual_arg_iter, arg_actual_out_tree));
-    actual_arg_iter++;
-    formal_arg_iter++;
+    ++actual_arg_iter;
+    ++formal_arg_iter;
   }
 }
 

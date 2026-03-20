@@ -19,8 +19,26 @@
  */
 
 #include "IR/PDG/Support/PDGUtils.h"
+#include "IR/PDG/Support/PDGCommandLineOptions.h"
 
 using namespace llvm;
+
+namespace {
+void emitSupportWarning(const Twine &message) {
+  if (pdg::DEBUG)
+    errs() << "pdg-support: " << message << "\n";
+}
+
+void recordAddrTakenValue(Value *value, std::vector<Value *> &worklist,
+                          std::set<Value *> &visited,
+                          std::set<Value *> &addr_taken_vars) {
+  if (!value)
+    return;
+  addr_taken_vars.insert(value);
+  if (visited.insert(value).second)
+    worklist.push_back(value);
+}
+} // namespace
 
 /**
  * @brief Extract the struct type from a GetElementPtr instruction
@@ -69,8 +87,8 @@ int64_t pdg::pdgutils::getGEPOffsetInBits(Module &M, StructType &struct_type,
 
   // Check for out-of-bounds access
   if (gep_offset >= static_cast<int>(struct_type.getNumElements())) {
-    errs() << "dubious gep access outof bound: " << gep << " in func "
-           << gep.getFunction()->getName() << "\n";
+    emitSupportWarning(Twine("dubious GEP access out of bounds in function ") +
+                       gep.getFunction()->getName());
     return INT_MIN;
   }
 
@@ -186,7 +204,7 @@ bool pdg::pdgutils::isNodeBitOffsetMatchGEPBitOffset(Node &n,
 }
 
 // a wrapper func that strip pointer casts
-Function *pdg::pdgutils::getCalledFunc(CallInst &call_inst) {
+Function *pdg::pdgutils::getCalledFunc(CallBase &call_inst) {
   auto *called_val = call_inst.getCalledOperand();
   if (!called_val)
     return nullptr;
@@ -295,6 +313,8 @@ bool pdg::pdgutils::isStaticGlobalVar(llvm::GlobalVariable &gv) {
  */
 inst_iterator pdg::pdgutils::getInstIter(Instruction &i) {
   Function *f = i.getFunction();
+  if (!f)
+    return {};
   for (auto inst_iter = inst_begin(f); inst_iter != inst_end(f); inst_iter++) {
     if (&*inst_iter == &i)
       return inst_iter;
@@ -312,6 +332,8 @@ inst_iterator pdg::pdgutils::getInstIter(Instruction &i) {
 std::set<Instruction *>
 pdg::pdgutils::getInstructionBeforeInst(Instruction &i) {
   Function *f = i.getFunction();
+  if (!f)
+    return {};
   auto stop = getInstIter(i);
   std::set<Instruction *> insts_before;
   for (auto inst_iter = inst_begin(f); inst_iter != inst_end(f); inst_iter++) {
@@ -331,6 +353,8 @@ pdg::pdgutils::getInstructionBeforeInst(Instruction &i) {
  */
 std::set<Instruction *> pdg::pdgutils::getInstructionAfterInst(Instruction &i) {
   Function *f = i.getFunction();
+  if (!f)
+    return {};
   std::set<Instruction *> insts_after;
   auto start = getInstIter(i);
   if (start == inst_end(f))
@@ -389,18 +413,14 @@ std::set<Value *> pdg::pdgutils::computeAddrTakenVarsFromAlloc(AllocaInst &ai) {
       if (auto *li = dyn_cast<LoadInst>(user)) {
         if (li->getPointerOperand() == tracked &&
             li->getType()->isPointerTy()) {
-          addr_taken_vars.insert(li);
-          if (visited.insert(li).second)
-            worklist.push_back(li);
+          recordAddrTakenValue(li, worklist, visited, addr_taken_vars);
         }
         continue;
       }
 
       if (isa<GetElementPtrInst>(user) || isa<BitCastInst>(user) ||
           isa<PHINode>(user) || isa<SelectInst>(user)) {
-        addr_taken_vars.insert(user);
-        if (visited.insert(user).second)
-          worklist.push_back(user);
+        recordAddrTakenValue(user, worklist, visited, addr_taken_vars);
       }
     }
   }
@@ -444,7 +464,7 @@ std::string pdg::pdgutils::computeTreeNodeID(TreeNode &tree_node) {
   std::string parent_type_name = "";
   std::string node_field_name = "";
   TreeNode *parent_node = tree_node.getParentNode();
-  if (parent_node != nullptr) {
+  if (parent_node != nullptr && parent_node->getDIType() != nullptr) {
     auto *parent_di_type = dbgutils::stripMemberTag(*parent_node->getDIType());
     if (parent_di_type != nullptr)
       parent_type_name = dbgutils::getSourceLevelTypeName(*parent_di_type);
@@ -580,6 +600,11 @@ std::string pdg::pdgutils::getEdgeTypeStr(EdgeType edge_type) {
 }
 
 std::string &pdg::pdgutils::rtrim(std::string &s, const char *t) {
-  s.erase(s.find_last_not_of(t) + 1);
+  const auto pos = s.find_last_not_of(t);
+  if (pos == std::string::npos) {
+    s.clear();
+    return s;
+  }
+  s.erase(pos + 1);
   return s;
 }

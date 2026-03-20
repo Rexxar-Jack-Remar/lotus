@@ -261,6 +261,7 @@ void pdg::ProgramDependencyGraph::connectCallerAndCallee(
       errs() << "tree size compare: " << actual_in_tree->size() << " - "
              << formal_in_tree->size() << "\n";
     _PDG->addTreeNodesToGraph(*actual_in_tree);
+    connectActualInTreeWithAddrVars(*actual_in_tree, *cw.getCallInst());
     connectInTrees(actual_in_tree, formal_in_tree, EdgeType::PARAMETER_IN);
     // step 3: connect actual out -> formal out
     auto *actual_out_tree = cw.getArgActualOutTree(*actual_arg);
@@ -269,6 +270,7 @@ void pdg::ProgramDependencyGraph::connectCallerAndCallee(
       continue;
     _PDG->addTreeNodesToGraph(*actual_out_tree);
     connectOutTrees(formal_out_tree, actual_out_tree, EdgeType::PARAMETER_OUT);
+    connectActualOutTreeWithAddrVars(*actual_out_tree, *cw.getCallInst());
   }
 
   // step3: connect return value actual in -> formal in, formal out -> actual
@@ -278,12 +280,18 @@ void pdg::ProgramDependencyGraph::connectCallerAndCallee(
     Tree *ret_formal_out_tree = fw.getRetFormalOutTree();
     Tree *ret_actual_in_tree = cw.getRetActualInTree();
     Tree *ret_actual_out_tree = cw.getRetActualOutTree();
-    if (ret_formal_in_tree && ret_actual_in_tree)
+    if (ret_formal_in_tree && ret_actual_in_tree) {
+      _PDG->addTreeNodesToGraph(*ret_actual_in_tree);
+      connectActualInTreeWithAddrVars(*ret_actual_in_tree, *cw.getCallInst());
       connectInTrees(ret_actual_in_tree, ret_formal_in_tree,
                      EdgeType::PARAMETER_IN);
-    if (ret_formal_out_tree && ret_actual_out_tree)
+    }
+    if (ret_formal_out_tree && ret_actual_out_tree) {
+      _PDG->addTreeNodesToGraph(*ret_actual_out_tree);
       connectOutTrees(ret_formal_out_tree, ret_actual_out_tree,
                       EdgeType::PARAMETER_OUT);
+      connectActualOutTreeWithAddrVars(*ret_actual_out_tree, *cw.getCallInst());
+    }
   }
 
   // step4: connect both control/data return edges of callee to the call site
@@ -374,8 +382,11 @@ void pdg::ProgramDependencyGraph::connectInterprocDependencies(Function &F) {
       if (!call_site_node)
         continue;
 
-      auto connectToCallee = [&](FunctionWrapper &callee_fw,
-                                 EdgeType callEdgeType) {
+      auto connectToCallee = [&](FunctionWrapper &callee_fw, EdgeType callEdgeType,
+                                 bool rebuildParamTrees) {
+        if (rebuildParamTrees) {
+          call_w->clearParamTrees();
+        }
         if (!call_w->hasParamTrees()) {
           call_w->buildActualTreeForArgs(callee_fw);
           call_w->buildActualTreesForRetVal(callee_fw);
@@ -386,7 +397,7 @@ void pdg::ProgramDependencyGraph::connectInterprocDependencies(Function &F) {
 
       if (auto *direct = call_w->getCalledFunc()) {
         if (auto *callee_fw = getFuncWrapper(*direct)) {
-          connectToCallee(*callee_fw, EdgeType::CONTROLDEP_CALLINV);
+          connectToCallee(*callee_fw, EdgeType::CONTROLDEP_CALLINV, false);
         }
         continue;
       }
@@ -399,7 +410,7 @@ void pdg::ProgramDependencyGraph::connectInterprocDependencies(Function &F) {
         if (!cand)
           continue;
         if (auto *callee_fw = getFuncWrapper(*cand)) {
-          connectToCallee(*callee_fw, EdgeType::IND_CALL);
+          connectToCallee(*callee_fw, EdgeType::IND_CALL, true);
         }
       }
     }
@@ -503,7 +514,7 @@ void pdg::ProgramDependencyGraph::connectFormalOutTreeWithAddrVars(
 }
 
 void pdg::ProgramDependencyGraph::connectActualInTreeWithAddrVars(
-    Tree &actual_in_tree, CallInst &ci) {
+    Tree &actual_in_tree, CallBase &ci) {
   // Fix (B5): The original code called pdgutils::getInstructionBeforeInst(ci)
   // inside the tree traversal, which scans the entire function from the start
   // for every tree node of every argument.  For a function with N instructions
@@ -564,7 +575,7 @@ void pdg::ProgramDependencyGraph::connectActualInTreeWithAddrVars(
  * @param ci The CallInst associated with the tree.
  */
 void pdg::ProgramDependencyGraph::connectActualOutTreeWithAddrVars(
-    Tree &actual_out_tree, CallInst &ci) {
+    Tree &actual_out_tree, CallBase &ci) {
   TreeNode *root_node = actual_out_tree.getRootNode();
   // std::set<Instruction *> insts_after_ci =
   // pdgutils::getInstructionAfterInst(ci);

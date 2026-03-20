@@ -43,7 +43,7 @@ void pdg::PDGCallGraph::build(Module &M) {
 
     for (auto inst_i = inst_begin(F); inst_i != inst_end(F); inst_i++) {
       try {
-        if (CallInst *ci = dyn_cast<CallInst>(&*inst_i)) {
+        if (CallBase *ci = dyn_cast<CallBase>(&*inst_i)) {
           auto *called_func = pdgutils::getCalledFunc(*ci);
           // direct calls
           if (called_func != nullptr) {
@@ -73,7 +73,7 @@ void pdg::PDGCallGraph::build(Module &M) {
   _is_build = true;
 }
 
-bool pdg::PDGCallGraph::isFuncSignatureMatch(CallInst &ci, llvm::Function &f) {
+bool pdg::PDGCallGraph::isFuncSignatureMatch(CallBase &ci, llvm::Function &f) {
   // don't handle varadic function at the moment
   if (f.isVarArg())
     return false;
@@ -88,7 +88,7 @@ bool pdg::PDGCallGraph::isFuncSignatureMatch(CallInst &ci, llvm::Function &f) {
     return false;
 
   for (unsigned i = 0; i < actual_arg_list_size; i++) {
-    auto *actual_arg = ci.getOperand(i);
+    auto *actual_arg = ci.getArgOperand(i);
     auto *formal_arg = f.getArg(i);
     if (!isTypeEqual(*actual_arg->getType(), *formal_arg->getType()))
       return false;
@@ -147,7 +147,7 @@ bool pdg::PDGCallGraph::isTypeEqual(Type &t1, Type &t2) {
   return (t1_pointed_ty == t2_pointed_ty);
 }
 
-std::set<Function *> pdg::PDGCallGraph::getIndirectCallCandidates(CallInst &ci,
+std::set<Function *> pdg::PDGCallGraph::getIndirectCallCandidates(CallBase &ci,
                                                                   Module &M) {
   Type *call_func_ty = ci.getFunctionType();
   assert(call_func_ty != nullptr &&

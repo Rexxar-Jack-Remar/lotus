@@ -17,77 +17,103 @@ struct DOTGraphTraits<pdg::ProgramDependencyGraph *>
 
   // Return graph name;
   static std::string getGraphName(pdg::ProgramDependencyGraph *) {
-    return "Program Dependency  Graph";
+    return "Program Dependency Graph";
   }
 
-  std::string getCDGNodeLabel(pdg::Node *node) {
-    pdg::GraphNodeType node_type = node->getNodeType();
-    Function *func = node->getFunc();
-    Value *node_val = node->getValue();
-    std::string str;
-    raw_string_ostream OS(str);
+  static std::string renderInstructionLabel(Value *node_val) {
+    if (Instruction *i = dyn_cast<Instruction>(node_val)) {
+      std::string str;
+      raw_string_ostream OS(str);
+      OS << *i;
+      return OS.str();
+    }
     return "";
   }
 
-  std::string getDDGNodeLabel(pdg::Node *node) {
+  static std::string renderPrefixedValueLabel(StringRef prefix, Value *node_val) {
+    if (!node_val)
+      return prefix.str();
+    std::string str;
+    raw_string_ostream OS(str);
+    OS << prefix << *node_val;
+    return OS.str();
+  }
+
+  std::string getCommonNodeLabel(pdg::Node *node, bool include_param_nodes) {
     pdg::GraphNodeType node_type = node->getNodeType();
     Function *func = node->getFunc();
     Value *node_val = node->getValue();
-    std::string str;
-    raw_string_ostream OS(str);
 
     switch (node_type) {
     case pdg::GraphNodeType::FUNC_ENTRY:
-      return "<<ENTRY>> " + func->getName().str();
-    case pdg::GraphNodeType::INST_OTHER: {
-      if (Instruction *i = dyn_cast<Instruction>(node_val)) {
-        OS << *i;
-        return OS.str(); // print the instruction literal
+      return func ? "<<ENTRY>> " + func->getName().str() : "<<ENTRY>>";
+    case pdg::GraphNodeType::PARAM_FORMALIN:
+      if (include_param_nodes) {
+        std::string str;
+        raw_string_ostream OS(str);
+        pdg::pdgutils::printTreeNodesLabel(node, OS, "FORMAL_IN");
+        return OS.str();
       }
-    }
-    case pdg::GraphNodeType::INST_FUNCALL: {
-      if (Instruction *i = dyn_cast<Instruction>(node_val)) {
-        OS << *i;
-        return OS.str(); // print the instruction literal
+      break;
+    case pdg::GraphNodeType::PARAM_FORMALOUT:
+      if (include_param_nodes) {
+        std::string str;
+        raw_string_ostream OS(str);
+        pdg::pdgutils::printTreeNodesLabel(node, OS, "FORMAL_OUT");
+        return OS.str();
       }
-    }
-    case pdg::GraphNodeType::INST_RET: {
-      if (Instruction *i = dyn_cast<Instruction>(node_val)) {
-        OS << *i;
-        return OS.str(); // print the instruction literal
+      break;
+    case pdg::GraphNodeType::PARAM_ACTUALIN:
+      if (include_param_nodes) {
+        std::string str;
+        raw_string_ostream OS(str);
+        pdg::pdgutils::printTreeNodesLabel(node, OS, "ACTUAL_IN");
+        return OS.str();
       }
-    }
-    case pdg::GraphNodeType::INST_BR: {
-      if (Instruction *i = dyn_cast<Instruction>(node_val)) {
-        OS << *i;
-        return OS.str(); // print the instruction literal
+      break;
+    case pdg::GraphNodeType::PARAM_ACTUALOUT:
+      if (include_param_nodes) {
+        std::string str;
+        raw_string_ostream OS(str);
+        pdg::pdgutils::printTreeNodesLabel(node, OS, "ACTUAL_OUT");
+        return OS.str();
       }
-    }
-    case pdg::GraphNodeType::ANNO_VAR: {
-      OS << "Local Anno: " << *node_val;
-      return OS.str();
-    }
-    case pdg::GraphNodeType::ANNO_GLOBAL: {
-      OS << "Global Anno: " << *node_val;
-      return OS.str();
-    }
-    case pdg::GraphNodeType::VAR_STATICALLOCGLOBALSCOPE: {
-      OS << "global var: " << *node_val;
-      return OS.str();
-    }
-    case pdg::GraphNodeType::VAR_STATICALLOCMODULESCOPE: {
-      OS << "static global var: " << *node_val;
-      return OS.str();
-    }
-    case pdg::GraphNodeType::VAR_STATICALLOCFUNCTIONSCOPE: {
-      OS << "static func var: " << *node_val;
-      return OS.str();
+      break;
+    case pdg::GraphNodeType::INST_OTHER:
+    case pdg::GraphNodeType::INST_FUNCALL:
+    case pdg::GraphNodeType::INST_RET:
+    case pdg::GraphNodeType::INST_BR:
+      return renderInstructionLabel(node_val);
+    case pdg::GraphNodeType::ANNO_VAR:
+      return renderPrefixedValueLabel("Local Anno: ", node_val);
+    case pdg::GraphNodeType::ANNO_GLOBAL:
+      return renderPrefixedValueLabel("Global Anno: ", node_val);
+    case pdg::GraphNodeType::VAR_STATICALLOCGLOBALSCOPE:
+      return renderPrefixedValueLabel("global var: ", node_val);
+    case pdg::GraphNodeType::VAR_STATICALLOCMODULESCOPE:
+      return renderPrefixedValueLabel("static global var: ", node_val);
+    case pdg::GraphNodeType::VAR_STATICALLOCFUNCTIONSCOPE:
+      return renderPrefixedValueLabel("static func var: ", node_val);
+    case pdg::GraphNodeType::CLASS: {
+      auto *node_di_type = node->getDIType();
+      std::string class_type_name = "unknown";
+      if (node_di_type != nullptr)
+        class_type_name = pdg::dbgutils::getSourceLevelTypeName(*node_di_type);
+      return class_type_name;
     }
     default:
       break;
     }
 
-    return "style=invis";
+    return "";
+  }
+
+  std::string getCDGNodeLabel(pdg::Node *node) {
+    return getCommonNodeLabel(node, false);
+  }
+
+  std::string getDDGNodeLabel(pdg::Node *node) {
+    return getCommonNodeLabel(node, false);
   }
 
   std::string getNodeLabel(pdg::Node *node, pdg::ProgramDependencyGraph *G) {
@@ -95,88 +121,7 @@ struct DOTGraphTraits<pdg::ProgramDependencyGraph *>
       return getDDGNodeLabel(node);
     if (pdg::DOTONLYCDG)
       return getCDGNodeLabel(node);
-
-    pdg::GraphNodeType node_type = node->getNodeType();
-    Function *func = node->getFunc();
-    Value *node_val = node->getValue();
-    std::string str;
-    raw_string_ostream OS(str);
-
-    switch (node_type) {
-    case pdg::GraphNodeType::FUNC_ENTRY:
-      return "<<ENTRY>> " + func->getName().str();
-    case pdg::GraphNodeType::PARAM_FORMALIN: {
-      pdg::pdgutils::printTreeNodesLabel(node, OS, "FORMAL_IN");
-      return OS.str();
-    }
-    case pdg::GraphNodeType::PARAM_FORMALOUT: {
-      pdg::pdgutils::printTreeNodesLabel(node, OS, "FORMAL_OUT");
-      return OS.str();
-    }
-    case pdg::GraphNodeType::PARAM_ACTUALIN: {
-      pdg::pdgutils::printTreeNodesLabel(node, OS, "ACTUAL_IN");
-      return OS.str();
-    }
-    case pdg::GraphNodeType::PARAM_ACTUALOUT: {
-      pdg::pdgutils::printTreeNodesLabel(node, OS, "ACTUAL_OUT");
-      return OS.str();
-    }
-    case pdg::GraphNodeType::INST_OTHER: {
-      if (Instruction *i = dyn_cast<Instruction>(node_val)) {
-        OS << *i;
-        return OS.str(); // print the instruction literal
-      }
-    }
-    case pdg::GraphNodeType::INST_FUNCALL: {
-      if (Instruction *i = dyn_cast<Instruction>(node_val)) {
-        OS << *i;
-        return OS.str(); // print the instruction literal
-      }
-    }
-    case pdg::GraphNodeType::INST_RET: {
-      if (Instruction *i = dyn_cast<Instruction>(node_val)) {
-        OS << *i;
-        return OS.str(); // print the instruction literal
-      }
-    }
-    case pdg::GraphNodeType::INST_BR: {
-      if (Instruction *i = dyn_cast<Instruction>(node_val)) {
-        OS << *i;
-        return OS.str(); // print the instruction literal
-      }
-    }
-    case pdg::GraphNodeType::ANNO_VAR: {
-      OS << "Local Anno: " << *node_val;
-      return OS.str();
-    }
-    case pdg::GraphNodeType::ANNO_GLOBAL: {
-      OS << "Global Anno: " << *node_val;
-      return OS.str();
-    }
-    case pdg::GraphNodeType::VAR_STATICALLOCGLOBALSCOPE: {
-      OS << "global var: " << *node_val;
-      return OS.str();
-    }
-    case pdg::GraphNodeType::VAR_STATICALLOCMODULESCOPE: {
-      OS << "static global var: " << *node_val;
-      return OS.str();
-    }
-    case pdg::GraphNodeType::VAR_STATICALLOCFUNCTIONSCOPE: {
-      OS << "static func var: " << *node_val;
-      return OS.str();
-    }
-    case pdg::GraphNodeType::CLASS: {
-      auto *node_di_type = node->getDIType();
-      std::string class_type_name = "unkown";
-      if (node_di_type != nullptr)
-        class_type_name = pdg::dbgutils::getSourceLevelTypeName(*node_di_type);
-      OS << class_type_name;
-      return OS.str();
-    }
-    default:
-      break;
-    }
-    return "";
+    return getCommonNodeLabel(node, true);
   }
 
   std::string getDDGEdgeAttributes(pdg::Node::iterator edge_iter) {
@@ -249,7 +194,7 @@ struct ProgramDependencyPrinter
     : public llvm::DOTGraphTraitsPrinter<ProgramDependencyGraph, false> {
   static char ID;
   ProgramDependencyPrinter()
-      : llvm::DOTGraphTraitsPrinter<ProgramDependencyGraph, false>("pdgragh",
+      : llvm::DOTGraphTraitsPrinter<ProgramDependencyGraph, false>("pdggraph",
                                                                    ID) {}
 };
 

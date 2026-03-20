@@ -27,7 +27,7 @@ bool isNodeBitOffsetMatchGEPBitOffset(Node &n, llvm::GetElementPtrInst &gep);
 bool isGEPOffsetMatchDIOffset(llvm::DIType &dt, llvm::GetElementPtrInst &gep);
 
 // Call handling
-llvm::Function *getCalledFunc(llvm::CallInst &call_inst);
+llvm::Function *getCalledFunc(llvm::CallBase &call_inst);
 
 // Access analysis
 bool hasReadAccess(llvm::Value &v);
@@ -38,6 +38,10 @@ bool isStaticFuncVar(llvm::GlobalVariable &gv, llvm::Module &M);
 bool isStaticGlobalVar(llvm::GlobalVariable &gv);
 
 // Instruction traversal
+//
+// These helpers perform full function scans and should be treated as
+// compatibility/non-hot-path utilities. Prefer local scans or O(1) lookup
+// structures in performance-sensitive call sites.
 llvm::inst_iterator getInstIter(llvm::Instruction &i);
 std::set<llvm::Instruction *> getInstructionBeforeInst(llvm::Instruction &i);
 std::set<llvm::Instruction *> getInstructionAfterInst(llvm::Instruction &i);
