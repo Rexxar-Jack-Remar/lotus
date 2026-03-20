@@ -249,8 +249,8 @@ static void buildCGWithLotusAA(llvm::Module &M, llvm::CallGraph &CG) {
         }
       }
       if (CB) {
-        for (auto *Callee : Targets) {
-          addCallEdge(CG, Caller, CB, Callee);
+        for (const auto &TargetItem : Targets) {
+          addCallEdge(CG, Caller, CB, TargetItem.first);
         }
       }
     }

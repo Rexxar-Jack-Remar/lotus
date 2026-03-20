@@ -80,10 +80,15 @@ void IntraLotusAA::resolveCallValue(Value *val, cg_result_t &target) {
 
   for (auto &item : resolved_tmp) {
     Value *resolved_val = item.val;
+    path_cond_t pre_cond = item.cond;
 
     if (Function *func = dyn_cast<Function>(resolved_val)) {
       // Direct function pointer
-      target.insert(func);
+      if (target.count(func)) {
+        target[func] = findOrCreateOrRegion(target[func], pre_cond);
+      } else {
+        target[func] = pre_cond;
+      }
     } else if (CallBase *call = dyn_cast<CallBase>(resolved_val)) {
       // Function returned from call
       Instruction *callsite_inst = call;
@@ -95,8 +100,15 @@ void IntraLotusAA::resolveCallValue(Value *val, cg_result_t &target) {
           // Get output CG summary (index 0 = return value)
           if (!callee_PTG->output_cg_summary.empty()) {
             cg_result_t &out_values = callee_PTG->output_cg_summary[0];
-            for (Function *func : out_values) {
-              target.insert(func);
+            for (auto &value_item : out_values) {
+              path_cond_t final_cond =
+                  findOrCreateAndRegion(value_item.second, pre_cond);
+              if (target.count(value_item.first)) {
+                target[value_item.first] =
+                    findOrCreateOrRegion(target[value_item.first], final_cond);
+              } else {
+                target[value_item.first] = final_cond;
+              }
             }
           }
         }
@@ -104,8 +116,14 @@ void IntraLotusAA::resolveCallValue(Value *val, cg_result_t &target) {
     } else if (Argument *resolved_arg = dyn_cast<Argument>(resolved_val)) {
       if (resolved_arg->getParent() || inputs.count(resolved_val)) {
         // Real argument or pseudo-argument
-        map<cg_result_t *, bool> &in_summary = input_cg_summary[resolved_arg];
-        in_summary[&target] = true;
+        map<cg_result_t *, path_cond_t> &in_summary =
+            input_cg_summary[resolved_arg];
+        if (in_summary.count(&target)) {
+          in_summary[&target] =
+              findOrCreateOrRegion(in_summary[&target], pre_cond);
+        } else {
+          in_summary[&target] = pre_cond;
+        }
       }
     }
   }
@@ -159,7 +177,8 @@ void IntraLotusAA::computeCG() {
         if (callees && IntraLotusAAConfig::lotus_restrict_inline_depth != 0) {
           // Inline input summaries from callees
           int callee_idx = 0;
-          for (auto *callee : *callees) {
+          for (auto &callee_item : *callees) {
+            Function *callee = callee_item.first;
             if (callee_idx >= IntraLotusAAConfig::lotus_restrict_cg_size)
               break;
 
@@ -178,12 +197,12 @@ void IntraLotusAA::computeCG() {
               func_arg_t *caller_args = &func_arg[call][callee];
 
               // Process input CG summaries
-              map<Argument *, map<cg_result_t *, bool>, llvm_cmp>
+              map<Argument *, map<cg_result_t *, path_cond_t>, llvm_cmp>
                   &callee_input_cg_summary = callee_PTG->input_cg_summary;
 
               for (auto &arg_summary_pair : callee_input_cg_summary) {
                 Argument *callee_arg = arg_summary_pair.first;
-                map<cg_result_t *, bool> &callee_arg_summary =
+                map<cg_result_t *, path_cond_t> &callee_arg_summary =
                     arg_summary_pair.second;
 
                 if (!caller_args->count(callee_arg))
@@ -193,10 +212,15 @@ void IntraLotusAA::computeCG() {
 
                 for (auto &callee_summary_item : callee_arg_summary) {
                   cg_result_t *inline_target = callee_summary_item.first;
+                  path_cond_t inline_pre_cond = callee_summary_item.second;
 
                   for (auto &caller_arg_value : caller_arg_values) {
                     Value *caller_arg_value_val = caller_arg_value.val;
                     resolveCallValue(caller_arg_value_val, *inline_target);
+                    for (auto &target_item : *inline_target) {
+                      target_item.second = findOrCreateAndRegion(
+                          target_item.second, inline_pre_cond);
+                    }
                   }
                 }
               }
@@ -276,8 +300,8 @@ void IntraLotusAA::showFunctionPointers() {
     outs() << "\n";
 
     cg_result_t &result = cg_item.second;
-    for (Function *resolved_func : result) {
-      outs() << "    -> " << resolved_func->getName() << "\n";
+    for (auto &resolved_item : result) {
+      outs() << "    -> " << resolved_item.first->getName() << "\n";
     }
   }
 

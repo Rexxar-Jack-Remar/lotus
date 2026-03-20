@@ -43,20 +43,23 @@ class PTResult {
 public:
   // Direct points-to target
   struct PtItem {
+    path_cond_t cond;
     ObjectLocator *locator;
-    PtItem(ObjectLocator *loc) : locator(loc) {}
-    PtItem(const PtItem &item) : locator(item.locator) {}
+    PtItem(path_cond_t cond, ObjectLocator *loc) : cond(cond), locator(loc) {}
+    PtItem(const PtItem &item) : cond(item.cond), locator(item.locator) {}
   };
 
   // Derived points-to target  
   struct DerivedPtItem {
+    path_cond_t cond;
     PTResult *src_pts;
     int64_t offset;
 
-    DerivedPtItem(PTResult *other_pts, int64_t off)
-        : src_pts(other_pts), offset(off) {}
+    DerivedPtItem(path_cond_t cond, PTResult *other_pts, int64_t off)
+        : cond(cond), src_pts(other_pts), offset(off) {}
     DerivedPtItem(const DerivedPtItem &itemset)
-        : src_pts(itemset.src_pts), offset(itemset.offset) {}
+        : cond(itemset.cond), src_pts(itemset.src_pts),
+          offset(itemset.offset) {}
   };
 
 private:
@@ -72,14 +75,14 @@ public:
 
   Value *get_ptr() { return ptr; }
 
-  void add_target(MemObject *obj, int64_t offset) {
+  void add_target(path_cond_t cond, MemObject *obj, int64_t offset) {
     ObjectLocator *locator = obj->findLocator(offset, true);
-    pt_list.push_back({locator});
+    pt_list.push_back({cond, locator});
     is_optimized = false;
   }
 
-  void add_derived_target(PTResult *src_pts, int64_t offset) {
-    derived_list.push_back({src_pts, offset});
+  void add_derived_target(path_cond_t cond, PTResult *src_pts, int64_t offset) {
+    derived_list.push_back({cond, src_pts, offset});
     is_optimized = false;
   }
 };
@@ -89,14 +92,15 @@ public:
  */
 class PTResultIterator {
 public:
-  using iterator = std::set<ObjectLocator *, obj_loc_cmp>::iterator;
-  using size_type = std::set<ObjectLocator *, obj_loc_cmp>::size_type;
+  using iterator = std::map<ObjectLocator *, path_cond_t, obj_loc_cmp>::iterator;
+  using size_type = std::map<ObjectLocator *, path_cond_t, obj_loc_cmp>::size_type;
 
 private:
-  std::set<ObjectLocator *, obj_loc_cmp> res;
+  std::map<ObjectLocator *, path_cond_t, obj_loc_cmp> res;
   PTGraph *parent_graph;
 
-  void visit(PTResult *target, int64_t off, std::set<PTResult *> &visited);
+  void visit(PTResult *target, int64_t off, path_cond_t cond,
+             std::set<PTResult *> &visited);
 
 public:
   PTResultIterator(PTResult *target, PTGraph *parent_graph);
@@ -104,6 +108,10 @@ public:
   iterator begin() { return res.begin(); }
   iterator end() { return res.end(); }
   size_type count(ObjectLocator *loc) { return res.count(loc); }
+  path_cond_t get(ObjectLocator *loc) {
+    assert(res.count(loc) && "The result does not contain the queried locator");
+    return res[loc];
+  }
   int size() { return res.size(); }
 
   friend raw_ostream &operator<<(raw_ostream &out, PTResultIterator &pt_it);
@@ -158,6 +166,10 @@ protected:
   std::map<Value *, std::set<MemObject *, mem_obj_cmp>, llvm_cmp>
       object_call_ap_depth_frontier;
 
+  std::map<BasicBlock *,
+           std::map<BasicBlock *, path_cond_t, llvm_cmp>, llvm_cmp>
+      phi_region_cache;
+
   // Constants
   static const int VALUE_SEQ_UNDEF;
   static const int VALUE_SEQ_INFINITE;
@@ -168,8 +180,10 @@ protected:
   MemObject *newObject(Value *alloc_site,
                        MemObject::ObjKind obj_type = MemObject::CONCRETE);
 
-  PTResult *addPointsTo(Value *ptr, MemObject *obj, int64_t offset);
-  PTResult *derivePtsFrom(Value *ptr, PTResult *other_pts, int64_t offset);
+  PTResult *addPointsTo(Value *ptr, MemObject *obj, int64_t offset,
+                        path_cond_t cond);
+  PTResult *derivePtsFrom(Value *ptr, PTResult *other_pts, int64_t offset,
+                          path_cond_t cond);
   PTResult *assignPts(Value *ptr, PTResult *pts);
 
   void refineResult(mem_value_t &to_refine);
@@ -181,8 +195,9 @@ protected:
                      std::set<std::tuple<Value *, Instruction *, int64_t>> &visited);
 
   void trackPtrRightValue(Value *ptr, mem_value_t &res);
-  void trackPtrRightValueImpl(Value *ptr, mem_value_t &res,
-                               std::set<Value *, llvm_cmp> &visited);
+  void trackPtrRightValueUnderCondition(Value *ptr, mem_value_t &res,
+                                        path_cond_t base_cond,
+                                        float base_confidence);
 
   void performLoadLoadMatch();
   bool cacheLoadCategory(LoadInst *load_inst);
@@ -227,6 +242,16 @@ public:
 
   void dumpMemObjs();
 
+  path_cond_t getEmptyCond();
+  path_cond_t getFalseCond();
+  bool isAlwaysSatisfied(path_cond_t cond) const;
+  bool isSatisfiable(path_cond_t cond) const;
+  bool isNoEffectFunction(Function *F) const;
+  path_cond_t findOrCreateAndRegion(path_cond_t lhs, path_cond_t rhs);
+  path_cond_t findOrCreateOrRegion(path_cond_t lhs, path_cond_t rhs);
+  path_cond_t findOrCreateUnitPhiRegion(BasicBlock *cur_bb,
+                                        BasicBlock *incoming_bb);
+
   friend class MemObject;
   friend class ObjectLocator;
   friend class PTResultIterator;
@@ -236,4 +261,3 @@ public:
 };
 
 } // namespace llvm
-

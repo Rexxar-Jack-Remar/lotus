@@ -16,12 +16,14 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Value.h>
 #include <map>
+#include <list>
 #include <set>
 #include <unordered_map>
 
 #include "Alias/LotusAA/Engine/InterProceduralPass.h"
 #include "Alias/LotusAA/MemoryModel/PointsToGraph.h"
 #include "Alias/LotusAA/MemoryModel/Types.h"
+#include "Utils/Platform/Timer.h"
 
 namespace llvm {
 
@@ -31,9 +33,13 @@ namespace llvm {
 class IntraLotusAAConfig {
 public:
   static int lotus_restrict_inline_depth;
+  static int lotus_restrict_summary_ap_depth;
   static double lotus_timeout;
   static int lotus_restrict_cg_size;
+  static int pts_setting;
   static bool lotus_test_correctness;
+  static bool lotus_disable_thread_heuristic;
+  static bool lotus_use_valuetostring;
   static int lotus_restrict_inline_size;
   static int lotus_restrict_ap_level;
 
@@ -83,12 +89,14 @@ public:
     AccessPath symbolic_info;
     std::map<ReturnInst *, mem_value_t, llvm_cmp> val;
     Type *output_ty;
-    std::vector<AccessPath> pseudo_pts;  // Simplified (no conditions)
+    std::list<std::pair<path_cond_t, AccessPath>> pseudo_pts;
     int func_level;
 
   public:
     AccessPath &getSymbolicInfo() { return symbolic_info; }
-    std::vector<AccessPath> &getPseudoPointTo() { return pseudo_pts; }
+    std::list<std::pair<path_cond_t, AccessPath>> &getPseudoPointTo() {
+      return pseudo_pts;
+    }
     std::map<ReturnInst *, mem_value_t, llvm_cmp> &getVal() { return val; }
     void setType(Type *type) { output_ty = type; }
     Type *getType() { return output_ty; }
@@ -99,7 +107,7 @@ public:
 
 private:
   using func_arg_t = std::map<Value *, mem_value_t, llvm_cmp>;
-  using cg_result_t = std::set<Function *, llvm_cmp>;
+  using cg_result_t = std::map<Function *, path_cond_t, llvm_cmp>;
 
   // Function interface
   std::map<Value *, AccessPath, llvm_cmp> inputs;
@@ -109,10 +117,11 @@ private:
   std::set<Value *, llvm_cmp> escape_source;
 
   // Return instructions
-  std::map<ReturnInst *, bool, llvm_cmp> ret_insts;
+  std::map<ReturnInst *, path_cond_t, llvm_cmp> ret_insts;
 
   // Call information
   std::map<Value *, std::map<Function *, func_arg_t, llvm_cmp>, llvm_cmp> func_arg;
+  std::map<Value *, func_arg_t, llvm_cmp> thread_arg;
   std::map<Instruction *, std::map<Function *, std::vector<Value *>, llvm_cmp>, llvm_cmp> func_ret;
   std::map<Value *, std::pair<Instruction *, int>, llvm_cmp> func_pseudo_ret_cache;
 
@@ -121,7 +130,8 @@ private:
   
   // CG summaries
   std::vector<cg_result_t> output_cg_summary;
-  std::map<Argument *, std::map<cg_result_t *, bool>, llvm_cmp> input_cg_summary;
+  std::map<Argument *, std::map<cg_result_t *, path_cond_t>, llvm_cmp>
+      input_cg_summary;
 
   // Escaped object mapping
   using escapedMap = std::map<MemObject *, MemObject *, mem_obj_cmp>;
@@ -141,6 +151,9 @@ private:
   // Special objects
   MemObject *func_obj;
   Argument *func_new;
+  std::vector<mem_value_t *> summary_outputs;
+  std::vector<std::set<Value *, llvm_cmp> *> summary_inputs;
+  std::map<Value *, int, llvm_cmp> summary_inputs_idx;
 
   // Value sequence
   std::map<Value *, int, llvm_cmp> value_seq;
@@ -152,6 +165,8 @@ private:
   bool is_timeout_found;
 
   int inline_ap_depth;
+  int &pts_setting;
+  Timer *timer;
 
   // Index for escaped object pointers
   static const int PTR_TO_ESC_OBJ;
@@ -263,9 +278,10 @@ public:
   // Interface check
   bool isPseudoInterface(Value *target);
 
+  void onTimeOut();
+  void setTimer(unsigned duration);
+
   friend class LotusAA;
 };
 
 } // namespace llvm
-
-

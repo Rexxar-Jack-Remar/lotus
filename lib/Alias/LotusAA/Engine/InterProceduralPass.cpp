@@ -241,7 +241,8 @@ void LotusAA::initFuncProcessingSeq(Module &M,
   for (const auto &callerResults : fpResults) {
     Function *caller = callerResults.first;
     for (const auto &callsiteResults : callerResults.second) {
-      for (Function *callee : callsiteResults.second) {
+      for (const auto &callee_item : callsiteResults.second) {
+        Function *callee = callee_item.first;
         if (callee && !callee->isDeclaration())
           callGraphState_.addEdge(caller, callee);
       }
@@ -333,7 +334,7 @@ void LotusAA::computePtsCgIteratively(Module &M,
   // Always use sequential analysis to avoid concurrency bugs
   const unsigned poolMax = 1;
 
-  while (changed && iteration < lotus_restrict_cg_iter) {
+  while (changed) {
     outs() << "[LotusAA] Iteration " << (iteration + 1) << " using " << poolMax
            << " thread(s)\n";
 
@@ -342,7 +343,9 @@ void LotusAA::computePtsCgIteratively(Module &M,
 
     // Sequential analysis: process functions in bottom-up order
     for (Function *func : func_seq) {
-      bool needsAnalysis = (iteration == 0) || changed_func.count(func);
+      bool needsAnalysis =
+          (iteration == 0) || iteration >= lotus_restrict_cg_iter ||
+          changed_func.count(func);
 
       if (!needsAnalysis)
         continue;
@@ -375,6 +378,9 @@ void LotusAA::computePtsCgIteratively(Module &M,
     outs() << "\n";
 
     // Update CG if enabled
+    if (iteration >= lotus_restrict_cg_iter)
+      break;
+
     if (lotus_cg) {
       // Save callers that need reanalysis before clearing changed_func
       // These are functions whose callees had interface changes
@@ -408,8 +414,10 @@ void LotusAA::computePtsCgIteratively(Module &M,
             if (oldTargets->size() != newTargets.size()) {
               targetsChanged = true;
             } else {
-              for (Function *newTarget : newTargets) {
-                if (oldTargets->count(newTarget) == 0) {
+              for (const auto &newTarget : newTargets) {
+                auto old_target_it = oldTargets->find(newTarget.first);
+                if (old_target_it == oldTargets->end() ||
+                    old_target_it->second != newTarget.second) {
                   targetsChanged = true;
                   break;
                 }
@@ -426,8 +434,8 @@ void LotusAA::computePtsCgIteratively(Module &M,
           functionPointerResults_.setTargets(func, callsite, newTargets);
 
           // Update call graph edges
-          for (Function *target : newTargets) {
-            callGraphState_.addEdge(func, target);
+          for (const auto &target_item : newTargets) {
+            callGraphState_.addEdge(func, target_item.first);
           }
         }
       }
@@ -443,6 +451,12 @@ void LotusAA::computePtsCgIteratively(Module &M,
         changed = true;
     } else {
       break; // No CG updates, single iteration
+    }
+
+    if (!changed) {
+      changed = true;
+      iteration = lotus_restrict_cg_iter;
+      continue;
     }
 
     iteration++;

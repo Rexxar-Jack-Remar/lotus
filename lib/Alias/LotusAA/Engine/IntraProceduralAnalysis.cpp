@@ -42,6 +42,7 @@
 /// implementations
 
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
+#include "Alias/LotusAA/Support/Config.h"
 
 #include <llvm/ADT/PostOrderIterator.h>
 #include <llvm/IR/CFG.h>
@@ -56,9 +57,13 @@ using namespace std;
 
 // Configuration
 int IntraLotusAAConfig::lotus_restrict_inline_depth = 2;
+int IntraLotusAAConfig::lotus_restrict_summary_ap_depth = 10;
 double IntraLotusAAConfig::lotus_timeout = 10.0;
 int IntraLotusAAConfig::lotus_restrict_cg_size = 5;
+int IntraLotusAAConfig::pts_setting = 0;
 bool IntraLotusAAConfig::lotus_test_correctness = false;
+bool IntraLotusAAConfig::lotus_disable_thread_heuristic = false;
+bool IntraLotusAAConfig::lotus_use_valuetostring = false;
 int IntraLotusAAConfig::lotus_restrict_inline_size = 100;
 int IntraLotusAAConfig::lotus_restrict_ap_level = 2;
 
@@ -72,11 +77,37 @@ static cl::opt<int> lotus_restrict_cg_size_cl(
     cl::desc("Maximum indirect call targets to process"), cl::init(5),
     cl::Hidden);
 
+static cl::opt<int> lotus_restrict_summary_ap_depth_cl(
+    "lotus-restrict-summary-ap-depth",
+    cl::desc("Restrict the AP-depth of summary nodes for interfaces"),
+    cl::init(10), cl::Hidden);
+
+static cl::opt<double> lotus_timeout_cl(
+    "lotus-timeout", cl::desc("Restrict per-function LotusAA time in seconds"),
+    cl::init(10.0), cl::Hidden);
+
+static cl::opt<int> lotus_pts_setting_cl(
+    "lotus-pts-setting", cl::desc("Set LotusAA points-to choice"),
+    cl::init(0), cl::Hidden);
+
+static cl::opt<bool> lotus_disable_thread_heuristic_cl(
+    "lotus-disable-thread-heuristic",
+    cl::desc("Disable thread heuristic processing in LotusAA"),
+    cl::init(false), cl::Hidden);
+
 void IntraLotusAAConfig::setParam() {
   if (lotus_restrict_inline_depth_cl.getNumOccurrences() > 0)
     lotus_restrict_inline_depth = lotus_restrict_inline_depth_cl;
   if (lotus_restrict_cg_size_cl.getNumOccurrences() > 0)
     lotus_restrict_cg_size = lotus_restrict_cg_size_cl;
+  if (lotus_restrict_summary_ap_depth_cl.getNumOccurrences() > 0)
+    lotus_restrict_summary_ap_depth = lotus_restrict_summary_ap_depth_cl;
+  if (lotus_timeout_cl.getNumOccurrences() > 0)
+    lotus_timeout = lotus_timeout_cl;
+  if (lotus_pts_setting_cl.getNumOccurrences() > 0)
+    pts_setting = lotus_pts_setting_cl;
+  if (lotus_disable_thread_heuristic_cl.getNumOccurrences() > 0)
+    lotus_disable_thread_heuristic = lotus_disable_thread_heuristic_cl;
 }
 
 // IntraLotusAA implementation
@@ -86,9 +117,24 @@ IntraLotusAA::IntraLotusAA(Function *F, LotusAA *lotus_aa)
     : PTGraph(F, lotus_aa), func_obj(nullptr), func_new(nullptr),
       is_PTA_computed(false), is_CG_computed(false),
       is_considered_as_library(false), is_timeout_found(false),
-      inline_ap_depth(0) {
+      inline_ap_depth(0), pts_setting(IntraLotusAAConfig::pts_setting),
+      timer(nullptr) {
 
   getReturnInst();
+
+  if (IntraLotusAAConfig::lotus_restrict_summary_ap_depth < 0) {
+    IntraLotusAAConfig::lotus_restrict_summary_ap_depth = 0;
+  } else if (IntraLotusAAConfig::lotus_restrict_summary_ap_depth >
+             ::LotusConfig::MAXIMAL_SUMMARY_AP_DEPTH) {
+    IntraLotusAAConfig::lotus_restrict_summary_ap_depth =
+        ::LotusConfig::MAXIMAL_SUMMARY_AP_DEPTH;
+  }
+
+  for (int i = 0; i <= IntraLotusAAConfig::lotus_restrict_summary_ap_depth;
+       i++) {
+    summary_inputs.push_back(new set<Value *, llvm_cmp>);
+    summary_outputs.push_back(new mem_value_t);
+  }
 
   // Build a topological (reverse post-order) traversal of the CFG so that
   // instructions are processed before their uses wherever possible.
@@ -123,12 +169,27 @@ IntraLotusAA::~IntraLotusAA() {
     kv.first->deleteValue();
   }
   func_pseudo_ret_cache.clear();
+
+  if (func_new)
+    func_new->deleteValue();
+
+  for (mem_value_t *vals : summary_outputs) {
+    delete vals;
+  }
+  for (set<Value *, llvm_cmp> *vals : summary_inputs) {
+    delete vals;
+  }
+
+  if (timer)
+    delete timer;
 }
 
 
 void IntraLotusAA::computePTA() {
   if (is_considered_as_library || is_PTA_computed)
     return;
+
+  setTimer((unsigned)IntraLotusAAConfig::lotus_timeout);
 
   // Cache instruction sequence
   int seq_num = 0;
@@ -143,6 +204,13 @@ void IntraLotusAA::computePTA() {
   // Process instructions
   for (BasicBlock *bb : topBBs) {
     for (Instruction &inst : *bb) {
+      if (is_timeout_found)
+        return;
+      if (timer)
+        timer->check();
+      if (is_timeout_found)
+        return;
+
       switch (inst.getOpcode()) {
       case Instruction::Store:
         processStore(cast<StoreInst>(&inst));

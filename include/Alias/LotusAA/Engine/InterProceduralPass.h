@@ -58,7 +58,7 @@ public:
   // Check if call is a back-edge
   bool isBackEdge(Function *caller, Function *callee);
 
-  // Get possible callees for indirect call
+  // Get possible callees for indirect call, keyed by target function.
   CallTargetSet *getCallees(Function *func, Value *callsite);
 
 public:
@@ -110,5 +110,4 @@ private:
 };
 
 } // namespace llvm
-
 

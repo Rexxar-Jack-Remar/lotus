@@ -69,6 +69,7 @@
 #include <tuple>
 
 #include <llvm/Analysis/DominanceFrontier.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/Support/CommandLine.h>
 
 using namespace llvm;
@@ -77,7 +78,7 @@ using namespace std;
 static cl::opt<int> lotus_restrict_pts_count(
     "lotus-restrict-pts-count",
     cl::desc("Maximum number of locators a pointer may point to"),
-    cl::init(100), cl::Hidden);
+    cl::init(3), cl::Hidden);
 
 static cl::opt<int> lotus_restrict_obj_ap_depth(
     "lotus-restrict-obj-ap-depth",
@@ -95,23 +96,23 @@ const int PTGraph::FUNC_OBJ_UNREACHABLE = -1;
 PTResultIterator::PTResultIterator(PTResult *target, PTGraph *parent_graph)
     : parent_graph(parent_graph) {
   set<PTResult *> visited;
-  visit(target, 0, visited);
+  visit(target, 0, parent_graph->getEmptyCond(), visited);
 
   // Optimize: cache results in target
   if (!target->is_optimized) {
     target->pt_list.clear();
     int count = 0;
-    for (auto *loc : res) {
+    for (auto &item : res) {
       count++;
       if (lotus_restrict_pts_count != -1 && count > lotus_restrict_pts_count)
         break;
-      target->pt_list.push_back(PTResult::PtItem(loc));
+      target->pt_list.push_back(PTResult::PtItem(item.second, item.first));
     }
     target->is_optimized = true;
   }
 }
 
-void PTResultIterator::visit(PTResult *target, int64_t off,
+void PTResultIterator::visit(PTResult *target, int64_t off, path_cond_t cond,
                              set<PTResult *> &visited) {
   // In fuzzing / partially-built summaries we can see null derived targets.
   // Don't crash in release builds; just treat them as empty.
@@ -131,14 +132,23 @@ void PTResultIterator::visit(PTResult *target, int64_t off,
     ObjectLocator *locator = item.locator->offsetBy(off);
     if (!locator)
       continue;
-    res.insert(locator);
+    path_cond_t new_cond =
+        parent_graph->findOrCreateAndRegion(cond, item.cond);
+    auto it = res.find(locator);
+    if (it == res.end()) {
+      res.insert(make_pair(locator, new_cond));
+    } else {
+      it->second = parent_graph->findOrCreateOrRegion(it->second, new_cond);
+    }
   }
 
   // Derived targets
   for (PTResult::DerivedPtItem &item : target->derived_list) {
     if (!item.src_pts)
       continue;
-    visit(item.src_pts, off + item.offset, visited);
+    path_cond_t new_cond =
+        parent_graph->findOrCreateAndRegion(cond, item.cond);
+    visit(item.src_pts, off + item.offset, new_cond, visited);
   }
 
   // Don't erase from visited - we want to prevent cycles
@@ -148,7 +158,7 @@ namespace llvm {
 
 raw_ostream &operator<<(raw_ostream &out, PTResultIterator &pt_it) {
   for (auto it = pt_it.begin(); it != pt_it.end(); ++it) {
-    out << "  " << **it << "\n";
+    out << "  " << *it->first << "\n";
   }
   return out;
 }
@@ -164,7 +174,7 @@ PTGraph::PTGraph(Function *F, LotusAA *lotus_aa)
   dom_tree = lotus_aa->getDomTree(F);
 
   // Create NULL points-to result
-  NullPTS = addPointsTo(nullptr, MemObject::NullObj, 0);
+  NullPTS = addPointsTo(nullptr, MemObject::NullObj, 0, getEmptyCond());
 }
 
 PTGraph::~PTGraph() {
@@ -211,7 +221,8 @@ MemObject *PTGraph::newObject(Value *alloc_site, MemObject::ObjKind obj_type) {
   return obj;
 }
 
-PTResult *PTGraph::addPointsTo(Value *ptr, MemObject *obj, int64_t offset) {
+PTResult *PTGraph::addPointsTo(Value *ptr, MemObject *obj, int64_t offset,
+                               path_cond_t cond) {
   // In SSA form each value should be assigned exactly once.  However,
   // inter-procedural summary application (processArg, processGlobal) may be
   // called on the same value from multiple call sites or from both the
@@ -219,15 +230,15 @@ PTResult *PTGraph::addPointsTo(Value *ptr, MemObject *obj, int64_t offset) {
   // asserting and crashing, we merge the new target into the existing result
   // so that the analysis remains sound (over-approximate).
   PTResult *pts = findPTResult(ptr, true);
-  pts->add_target(obj, offset);
+  pts->add_target(cond, obj, offset);
   return pts;
 }
 
 PTResult *PTGraph::derivePtsFrom(Value *ptr, PTResult *other_pts,
-                                 int64_t offset) {
+                                 int64_t offset, path_cond_t cond) {
   // Same rationale as addPointsTo: merge rather than assert on re-processing.
   PTResult *pts = findPTResult(ptr, true);
-  pts->add_derived_target(other_pts, offset);
+  pts->add_derived_target(cond, other_pts, offset);
   return pts;
 }
 
@@ -243,53 +254,86 @@ Type *PTGraph::normalizeType(Type *type) {
 }
 
 void PTGraph::refineResult(mem_value_t &to_refine) {
-  map<pair<Value *, Instruction *>, bool> seen;
-  mem_value_t refined;
-
-  for (auto &item : to_refine) {
-    auto key = make_pair(item.val, item.pos);
-    if (!seen.count(key)) {
-      seen[key] = true;
-      refined.push_back(item);
+  map<Value *, map<Instruction *, pair<path_cond_t, float>, llvm_cmp>, llvm_cmp>
+      tmp_to_merge_values;
+  for (auto &val_struct : to_refine) {
+    path_cond_t cond = val_struct.cond;
+    Value *val = val_struct.val;
+    Instruction *pos = val_struct.pos;
+    float confidence = val_struct.confidence;
+    if (tmp_to_merge_values.count(val) == 0 ||
+        tmp_to_merge_values[val].count(pos) == 0) {
+      tmp_to_merge_values[val][pos] = make_pair(cond, confidence);
+    } else {
+      path_cond_t pre_cond = tmp_to_merge_values[val][pos].first;
+      float pre_confidence = tmp_to_merge_values[val][pos].second;
+      tmp_to_merge_values[val][pos].first =
+          findOrCreateOrRegion(pre_cond, cond);
+      tmp_to_merge_values[val][pos].second =
+          mem_value_item_t::compute_or_confidence(pre_confidence, confidence);
     }
   }
 
-  to_refine = std::move(refined);
+  to_refine.clear();
+  for (auto &val_pair : tmp_to_merge_values) {
+    for (auto &pos_cond_pair : val_pair.second) {
+      to_refine.push_back(mem_value_item_t(pos_cond_pair.second.first,
+                                           pos_cond_pair.first, val_pair.first,
+                                           pos_cond_pair.second.second));
+    }
+  }
 }
 
 void PTGraph::trackPtrRightValue(Value *ptr, mem_value_t &res) {
-  set<Value *, llvm_cmp> visited;
-  trackPtrRightValueImpl(ptr, res, visited);
+  trackPtrRightValueUnderCondition(ptr, res, getEmptyCond(), 1.0f);
 }
 
-void PTGraph::trackPtrRightValueImpl(Value *ptr, mem_value_t &res,
-                                     set<Value *, llvm_cmp> &visited) {
-  // Cycle detection - prevent infinite recursion
-  if (visited.count(ptr))
+void PTGraph::trackPtrRightValueUnderCondition(Value *ptr, mem_value_t &res,
+                                               path_cond_t base_cond,
+                                               float base_confidence) {
+  if ((int)res.size() >= 100)
     return;
 
-  visited.insert(ptr);
-
   if (Argument *arg = dyn_cast<Argument>(ptr)) {
-    res.push_back(mem_value_item_t(nullptr, arg));
+    res.push_back(mem_value_item_t(base_cond, nullptr, arg, base_confidence));
   } else if (LoadInst *load = dyn_cast<LoadInst>(ptr)) {
     mem_value_t load_result;
     getLoadValues(load->getPointerOperand(), load, load_result);
     for (auto &item : load_result) {
-      trackPtrRightValueImpl(item.val, res, visited);
+      path_cond_t final_cond =
+          findOrCreateAndRegion(base_cond, item.cond);
+      float final_confidence = mem_value_item_t::compute_and_confidence(
+          base_confidence, item.confidence);
+      trackPtrRightValueUnderCondition(item.val, res, final_cond,
+                                       final_confidence);
     }
   } else if (PHINode *phi = dyn_cast<PHINode>(ptr)) {
     for (unsigned i = 0; i < phi->getNumIncomingValues(); i++) {
-      trackPtrRightValueImpl(phi->getIncomingValue(i), res, visited);
+      Value *incoming_val = phi->getIncomingValue(i);
+      BasicBlock *incoming_bb = phi->getIncomingBlock(i);
+      path_cond_t phi_cond =
+          findOrCreateUnitPhiRegion(phi->getParent(), incoming_bb);
+      trackPtrRightValueUnderCondition(
+          incoming_val, res, findOrCreateAndRegion(base_cond, phi_cond),
+          base_confidence);
     }
   } else if (SelectInst *sel = dyn_cast<SelectInst>(ptr)) {
-    trackPtrRightValueImpl(sel->getTrueValue(), res, visited);
-
-    trackPtrRightValueImpl(sel->getFalseValue(), res, visited);
+    path_cond_t true_cond = sel->getCondition();
+    path_cond_t false_cond = getEmptyCond();
+    trackPtrRightValueUnderCondition(sel->getTrueValue(), res,
+                                     findOrCreateAndRegion(base_cond,
+                                                           true_cond),
+                                     base_confidence);
+    trackPtrRightValueUnderCondition(sel->getFalseValue(), res,
+                                     findOrCreateAndRegion(base_cond,
+                                                           false_cond),
+                                     base_confidence);
   } else if (CastInst *cast = dyn_cast<CastInst>(ptr)) {
-    trackPtrRightValueImpl(cast->getOperand(0), res, visited);
+    trackPtrRightValueUnderCondition(cast->getOperand(0), res, base_cond,
+                                     base_confidence);
   } else {
-    res.push_back(mem_value_item_t(nullptr, ptr));
+    res.push_back(mem_value_item_t(base_cond, dyn_cast<Instruction>(ptr), ptr,
+                                   base_confidence));
   }
 
   refineResult(res);
@@ -346,7 +390,8 @@ void PTGraph::loadPtrAtImpl(
   if (lotus_restrict_pts_count != -1 && iter.size() > lotus_restrict_pts_count)
     return;
 
-  for (auto *loc : iter) {
+  for (auto &point_to_item : iter) {
+    ObjectLocator *loc = point_to_item.first;
     int64_t offset = loc->getOffset();
     MemObject *obj = loc->getObj();
 
@@ -373,15 +418,16 @@ void PTGraph::loadPtrAtImpl(
       auto it = stored.find(off_key);
       if (it != stored.end()) {
         for (Value *v : it->second) {
-          tmp_result.push_back(mem_value_item_t(nullptr, v));
+          tmp_result.push_back(mem_value_item_t(getEmptyCond(), nullptr, v));
         }
       }
 
       // If nothing known was stored, mirror ObjectLocator::getValues() default.
       if (tmp_result.empty()) {
         tmp_result.push_back(mem_value_item_t(
-            nullptr, obj->isReallyAllocated() ? LocValue::UNDEF_VALUE
-                                              : LocValue::FREE_VARIABLE));
+            getEmptyCond(), nullptr,
+            obj->isReallyAllocated() ? LocValue::UNDEF_VALUE
+                                     : LocValue::FREE_VARIABLE));
       }
     }
 
@@ -462,10 +508,10 @@ bool PTGraph::isSameValue(Value *ptr1, Instruction *pos1, Value *ptr2,
 
   // Check if all locations match
   set<ObjectLocator *, obj_loc_cmp> locs1, locs2;
-  for (auto *loc : iter1)
-    locs1.insert(loc->offsetBy(offset1));
-  for (auto *loc : iter2)
-    locs2.insert(loc->offsetBy(offset2));
+  for (auto &item : iter1)
+    locs1.insert(item.first->offsetBy(offset1));
+  for (auto &item : iter2)
+    locs2.insert(item.first->offsetBy(offset2));
 
   if (locs1 != locs2)
     return false;
@@ -512,8 +558,8 @@ int PTGraph::getObjectToCallApDepth(MemObject *obj, CallInst *call) {
       PTResult *pts_result = findPTResult(arg, false);
       if (pts_result) {
         PTResultIterator result_iter(pts_result, this);
-        for (auto *pt_loc : result_iter) {
-          MemObject *pt_obj = pt_loc->getObj();
+        for (auto &pt_item : result_iter) {
+          MemObject *pt_obj = pt_item.first->getObj();
           if (!cache.count(pt_obj)) {
             cache[pt_obj] = 1;
             frontier.insert(pt_obj);
@@ -556,8 +602,8 @@ int PTGraph::getObjectToCallApDepth(MemObject *obj, CallInst *call) {
             PTResult *pts_result = findPTResult(val, false);
             if (pts_result) {
               PTResultIterator result_iter(pts_result, this);
-              for (auto *pt_loc : result_iter) {
-                MemObject *pt_obj = pt_loc->getObj();
+              for (auto &pt_item : result_iter) {
+                MemObject *pt_obj = pt_item.first->getObj();
                 if (!cache.count(pt_obj)) {
                   cache[pt_obj] = frontier_depth + 1;
                   new_frontier.insert(pt_obj);
@@ -588,3 +634,77 @@ int PTGraph::getObjectToCallApDepth(MemObject *obj, CallInst *call) {
 }
 
 const DataLayout &PTGraph::getDL() { return lotus_aa->getDataLayout(); }
+
+path_cond_t PTGraph::getEmptyCond() {
+  return ConstantInt::getTrue(analyzed_func->getContext());
+}
+
+path_cond_t PTGraph::getFalseCond() {
+  return ConstantInt::getFalse(analyzed_func->getContext());
+}
+
+bool PTGraph::isAlwaysSatisfied(path_cond_t cond) const {
+  if (!cond)
+    return true;
+  if (auto *CI = dyn_cast<ConstantInt>(cond))
+    return CI->isOne();
+  return false;
+}
+
+bool PTGraph::isSatisfiable(path_cond_t cond) const {
+  if (!cond)
+    return true;
+  if (auto *CI = dyn_cast<ConstantInt>(cond))
+    return !CI->isZero();
+  return true;
+}
+
+bool PTGraph::isNoEffectFunction(Function *F) const {
+  return lotus_aa && F && lotus_aa->getSpecManager().isNoEffect(F);
+}
+
+path_cond_t PTGraph::findOrCreateAndRegion(path_cond_t lhs, path_cond_t rhs) {
+  if (!lhs)
+    lhs = getEmptyCond();
+  if (!rhs)
+    rhs = getEmptyCond();
+  if (!isSatisfiable(lhs) || !isSatisfiable(rhs))
+    return getFalseCond();
+  if (isAlwaysSatisfied(lhs))
+    return rhs;
+  if (isAlwaysSatisfied(rhs))
+    return lhs;
+  if (lhs == rhs)
+    return lhs;
+  return rhs;
+}
+
+path_cond_t PTGraph::findOrCreateOrRegion(path_cond_t lhs, path_cond_t rhs) {
+  if (!lhs)
+    lhs = getEmptyCond();
+  if (!rhs)
+    rhs = getEmptyCond();
+  if (isAlwaysSatisfied(lhs) || isAlwaysSatisfied(rhs))
+    return getEmptyCond();
+  if (!isSatisfiable(lhs))
+    return rhs;
+  if (!isSatisfiable(rhs))
+    return lhs;
+  if (lhs == rhs)
+    return lhs;
+  return getEmptyCond();
+}
+
+path_cond_t PTGraph::findOrCreateUnitPhiRegion(BasicBlock *cur_bb,
+                                               BasicBlock *incoming_bb) {
+  auto cache_it = phi_region_cache.find(cur_bb);
+  if (cache_it != phi_region_cache.end()) {
+    auto cond_it = cache_it->second.find(incoming_bb);
+    if (cond_it != cache_it->second.end())
+      return cond_it->second;
+  }
+
+  path_cond_t cond = incoming_bb ? incoming_bb->getTerminator() : getEmptyCond();
+  phi_region_cache[cur_bb][incoming_bb] = cond;
+  return cond;
+}

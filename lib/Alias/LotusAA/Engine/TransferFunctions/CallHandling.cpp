@@ -66,6 +66,30 @@
 using namespace llvm;
 using namespace std;
 
+static bool isCallsiteFunctionCompatible(CallBase *call, Function *callee) {
+  if (!call || !callee)
+    return false;
+
+  FunctionType *call_ty = call->getFunctionType();
+  FunctionType *callee_ty = callee->getFunctionType();
+  if (!call_ty || !callee_ty)
+    return false;
+
+  if (call_ty->isVarArg() != callee_ty->isVarArg())
+    return false;
+  if (call->arg_size() < callee->arg_size())
+    return false;
+  if (call_ty->getReturnType() != callee_ty->getReturnType())
+    return false;
+
+  unsigned shared_args = std::min<unsigned>(call->arg_size(), callee->arg_size());
+  for (unsigned i = 0; i < shared_args; i++) {
+    if (call->getArgOperand(i)->getType() != callee_ty->getParamType(i))
+      return false;
+  }
+  return true;
+}
+
 /// Conservatively handles unknown library calls by invalidating pointer
 /// arguments.
 ///
@@ -73,6 +97,11 @@ using namespace std;
 /// @note Treats all pointer arguments as potentially modified (weak update with
 /// NO_VALUE)
 void IntraLotusAA::processUnknownLibraryCall(CallBase *call) {
+  if (Function *func = call->getCalledFunction()) {
+    if (lotus_aa->getSpecManager().isNoEffect(func))
+      return;
+  }
+
   // Mark all pointer arguments as potentially modified
   // TODO: this operation may lead to imprecision in the analysis;
   // Another choicse is to treat UnknownLibraryCall a "noop" (does nothing?)
@@ -88,8 +117,8 @@ void IntraLotusAA::processUnknownLibraryCall(CallBase *call) {
       continue;
 
     PTResultIterator iter(pt_result, this);
-    for (auto *loc : iter) {
-      loc->storeValue(LocValue::NO_VALUE, call, 0);
+    for (auto &pt_item : iter) {
+      pt_item.first->storeValue(LocValue::NO_VALUE, call, pt_item.second, 0);
     }
   }
 }
@@ -105,7 +134,8 @@ void IntraLotusAA::processUnknownLibraryCall(CallBase *call) {
 void IntraLotusAA::processCall(CallBase *call) {
   if (IntraLotusAAConfig::lotus_restrict_inline_depth == 0) {
     if (call->getType()->isPointerTy()) {
-      addPointsTo(call, newObject(call, MemObject::CONCRETE), 0);
+      addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
+                  getEmptyCond());
     }
     return;
   }
@@ -120,19 +150,77 @@ void IntraLotusAA::processCall(CallBase *call) {
 
   // Process each possible callee
   int callee_idx = 0;
-  for (auto *callee : *callees) {
+  for (auto &callee_item : *callees) {
+    Function *callee = callee_item.first;
+    path_cond_t callee_cond = callee_item.second;
     if (callee_idx >= IntraLotusAAConfig::lotus_restrict_cg_size)
       break;
 
-    if (!callee || lotus_aa->isBackEdge(base_func, callee)) {
+    if (!callee || !isCallsiteFunctionCompatible(call, callee)) {
       callee_idx++;
       continue;
+    }
+
+    if (callee_idx == 0) {
+      callee_cond = getEmptyCond();
+    }
+
+    if (!callee || lotus_aa->isBackEdge(base_func, callee)) {
+      if (call->getType()->isPointerTy() &&
+          (unsigned)callee_idx == callees->size() - 1 &&
+          !pt_results.count(call)) {
+        addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
+                    callee_cond);
+      }
+      callee_idx++;
+      continue;
+    }
+
+    if (lotus_aa->getSpecManager().isAllocator(callee) && callee->empty()) {
+      if (call->getType()->isPointerTy() &&
+          (unsigned)callee_idx == callees->size() - 1 &&
+          !pt_results.count(call)) {
+        addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
+                    callee_cond);
+      }
+      callee_idx++;
+      continue;
+    }
+
+    auto return_alias = lotus_aa->getSpecManager().getReturnAliasInfo(callee);
+    if (!call->getType()->isPointerTy() && !return_alias.empty()) {
+      if (!func_new) {
+        func_new = new Argument(PTGraph::DEFAULT_POINTER_TYPE);
+      }
+      addPointsTo(func_new, newObject(call, MemObject::CONCRETE), 0,
+                  callee_cond);
     }
 
     IntraLotusAA *callee_result = lotus_aa->getPtGraph(callee);
 
     if (!callee_result || callee_result->is_considered_as_library) {
       processUnknownLibraryCall(call);
+
+      if (!IntraLotusAAConfig::lotus_disable_thread_heuristic &&
+          callee->getName() == "pthread_create" && call->arg_size() == 4 &&
+          isa<Function>(call->getArgOperand(2)) &&
+          call->getArgOperand(3)->getType()->isPointerTy()) {
+        Function *thread_func = dyn_cast<Function>(call->getArgOperand(2));
+        IntraLotusAA *thread_pta = lotus_aa->getPtGraph(thread_func);
+        if (thread_pta && !thread_pta->is_considered_as_library) {
+          Value *arg = call->getArgOperand(3);
+          func_arg_t &arg_result = thread_arg[call];
+          vector<Value *> real_args, formal_args;
+          real_args.push_back(arg);
+          for (Argument &arg_val : thread_func->args()) {
+            formal_args.push_back(&arg_val);
+          }
+          processCalleeInput(thread_pta->getInputs(),
+                             thread_pta->inputs_func_level, real_args,
+                             formal_args, call, arg_result);
+        }
+      }
+
       callee_idx++;
       continue;
     }
@@ -163,7 +251,8 @@ void IntraLotusAA::processCall(CallBase *call) {
   // points-to result was produced (e.g., all callees were back-edges or
   // library functions), create a conservative fallback object.
   if (call->getType()->isPointerTy() && !pt_results.count(call)) {
-    addPointsTo(call, newObject(call, MemObject::CONCRETE), 0);
+    addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
+                getEmptyCond());
   }
 
 }
@@ -182,9 +271,11 @@ void IntraLotusAA::processCall(CallBase *call) {
 /// @param result Output map binding callee inputs to caller values
 void IntraLotusAA::processCalleeInput(
     map<Value *, AccessPath, llvm_cmp> &callee_input,
-    map<Value *, int, llvm_cmp> & /*callee_input_func_level*/,
+    map<Value *, int, llvm_cmp> &callee_input_func_level,
     std::vector<Value *> &real_args, std::vector<Value *> &formal_args,
     CallBase *callsite, func_arg_t &result) {
+
+  path_cond_t pre_cond = getEmptyCond();
 
   // (1) Collect the real arguments and link the values to pseudo-arguments
   size_t real_size = real_args.size();
@@ -193,7 +284,7 @@ void IntraLotusAA::processCalleeInput(
     Value *formal_arg = formal_args[idx];
     Value *real_arg = real_args[idx];
 
-    mem_value_item_t mem_val_item(nullptr, real_arg);
+    mem_value_item_t mem_val_item(pre_cond, nullptr, real_arg, 1.0f);
     result[formal_arg].push_back(mem_val_item);
 
     if (real_arg->getType()->isPointerTy()) {
@@ -242,7 +333,7 @@ void IntraLotusAA::processCalleeInput(
         processBasePointer(parent_arg);
         if (isa<GlobalValue>(parent_arg)) {
           // Process the global values on demand
-          mem_value_item_t mem_value_item(nullptr, parent_arg);
+          mem_value_item_t mem_value_item(pre_cond, nullptr, parent_arg, 1.0f);
           parent_arg_values.push_back(mem_value_item);
         } else if (isa<Argument>(parent_arg)) {
           // Arguments are processed before
@@ -277,7 +368,11 @@ void IntraLotusAA::processCalleeInput(
         loadPtrAt(parent_value, callsite, tmp_values, true, offset);
 
         for (auto &tmp_val : tmp_values) {
-          mem_value_item_t mem_value_item(nullptr, tmp_val.val);
+          path_cond_t new_cond =
+              findOrCreateAndRegion(tmp_val.cond, parent_value_pair.cond);
+          path_cond_t final_cond = findOrCreateAndRegion(new_cond, pre_cond);
+          mem_value_item_t mem_value_item(final_cond, tmp_val.pos, tmp_val.val,
+                                          tmp_val.confidence);
           arg_values.push_back(mem_value_item);
         }
       }
@@ -363,7 +458,7 @@ void IntraLotusAA::createEscapedObjects(
     func_pseudo_ret_cache[new_arg] = make_pair(callsite, PTR_TO_ESC_OBJ);
     MemObject::ObjKind obj_kind = MemObject::CONCRETE;
     MemObject *escaped_obj_to = newObject(new_arg, obj_kind);
-    addPointsTo(new_arg, escaped_obj_to, 0);
+    addPointsTo(new_arg, escaped_obj_to, 0, getEmptyCond());
     escape_object_map[alloca_site] = escaped_obj_to;
 
     // Cache the escape mapping
@@ -386,7 +481,9 @@ void IntraLotusAA::linkOutputPointsToResults(
   }
 
   // Link the pointer-result and the values
-  for (auto &callee_point_to_item_info : callee_point_to) {
+  for (auto &callee_point_to_item : callee_point_to) {
+    path_cond_t interface_cond = callee_point_to_item.first;
+    AccessPath callee_point_to_item_info = callee_point_to_item.second;
     Value *callee_point_to_item_parent_ptr =
         callee_point_to_item_info.getParentPtr();
     int64_t callee_point_to_item_offset = callee_point_to_item_info.getOffset();
@@ -395,21 +492,22 @@ void IntraLotusAA::linkOutputPointsToResults(
       // Pointer pointing to null or unknown object
       curr_output_pts =
           curr_output_pts ? curr_output_pts : findPTResult(curr_output, true);
-      curr_output_pts->add_target(MemObject::UnknownObj,
+      curr_output_pts->add_target(interface_cond, MemObject::UnknownObj,
                                   callee_point_to_item_offset);
     } else if (isa<GlobalValue>(callee_point_to_item_parent_ptr)) {
       PTResult *linked_pts =
           processBasePointer(callee_point_to_item_parent_ptr);
       curr_output_pts =
           curr_output_pts ? curr_output_pts : findPTResult(curr_output, true);
-      curr_output_pts->add_derived_target(linked_pts,
+      curr_output_pts->add_derived_target(interface_cond, linked_pts,
                                           callee_point_to_item_offset);
     } else if (escape_object_map.count(callee_point_to_item_parent_ptr)) {
       // Escaped_obj from callee
       MemObject *curr_obj = escape_object_map[callee_point_to_item_parent_ptr];
       curr_output_pts =
           curr_output_pts ? curr_output_pts : findPTResult(curr_output, true);
-      curr_output_pts->add_target(curr_obj, callee_point_to_item_offset);
+      curr_output_pts->add_target(interface_cond, curr_obj,
+                                  callee_point_to_item_offset);
     } else {
       // The point-to object is from the analyzed function (caller function)
       if (!callee_func_arg.count(callee_point_to_item_parent_ptr))
@@ -423,10 +521,13 @@ void IntraLotusAA::linkOutputPointsToResults(
         visited.emplace(curr_output_pts);
       }
       for (auto &arg_point_to : callee_arg_vals) {
+        path_cond_t pointer_val_cond = arg_point_to.cond;
         Value *pointer = arg_point_to.val;
 
         PTResult *linked_pts = processBasePointer(pointer);
-        curr_output_pts->add_derived_target(linked_pts,
+        path_cond_t final_cond_point_to =
+            findOrCreateAndRegion(pointer_val_cond, interface_cond);
+        curr_output_pts->add_derived_target(final_cond_point_to, linked_pts,
                                             callee_point_to_item_offset);
       }
     }
@@ -452,7 +553,7 @@ void IntraLotusAA::linkOutputValues(
     // Escaped_obj from callee
     MemObject *curr_obj = escape_object_map[output_parent];
     ObjectLocator *locator = curr_obj->findLocator(output_offset, true);
-    locator->storeValue(curr_output, callsite, 0);
+    locator->storeValue(curr_output, callsite, getEmptyCond(), 0);
   } else {
     if (!callee_func_arg.count(output_parent))
       return;
@@ -460,11 +561,12 @@ void IntraLotusAA::linkOutputValues(
     auto &callee_arg_vals = callee_func_arg[output_parent];
 
     if (callee_arg_vals.empty() && isa<GlobalValue>(output_parent)) {
-      mem_value_item_t global_value(nullptr, output_parent);
+      mem_value_item_t global_value(getEmptyCond(), nullptr, output_parent);
       callee_arg_vals.push_back(global_value);
     }
 
     for (auto &arg_point_to : callee_arg_vals) {
+      path_cond_t pointer_val_cond = arg_point_to.cond;
       Value *pointer = arg_point_to.val;
       if (pointer == LocValue::FREE_VARIABLE) {
         continue;
@@ -488,9 +590,13 @@ void IntraLotusAA::linkOutputValues(
         pt_result_cache.emplace(pt_res, std::move(pt_iter));
       }
 
-      for (auto *loc : pt_result_cache.at(pt_res)) {
+      for (auto &pt_item : pt_result_cache.at(pt_res)) {
+        ObjectLocator *loc = pt_item.first;
+        path_cond_t pt_cond = pt_item.second;
         ObjectLocator *revised_locator = loc->offsetBy(output_offset);
-        revised_locator->storeValue(curr_output, callsite, 0);
+        path_cond_t final_cond_val =
+            findOrCreateAndRegion(pointer_val_cond, pt_cond);
+        revised_locator->storeValue(curr_output, callsite, final_cond_val, 0);
       }
     }
   }
@@ -558,7 +664,7 @@ void IntraLotusAA::cacheFunctionCallInfo() {
           if (called->isIntrinsic())
             continue;
         }
-        loc->storeValue(call, call, 0);
+        loc->storeValue(call, call, getEmptyCond(), 0);
       }
     }
   }

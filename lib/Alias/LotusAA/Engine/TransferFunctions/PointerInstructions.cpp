@@ -83,7 +83,7 @@ void IntraLotusAA::processLoad(LoadInst *load_inst) {
       continue;
 
     PTResult *fld_pts = processBasePointer(fld_val);
-    load_pts->add_derived_target(fld_pts, 0);
+    load_pts->add_derived_target(load_pair.cond, fld_pts, 0);
   }
 
   PTResultIterator iter(load_pts, this);
@@ -122,12 +122,14 @@ void IntraLotusAA::processStore(StoreInst *store) {
 
   PTResultIterator iter(res, this);
 
-  for (auto *loc : iter) {
+  for (auto &pt_item : iter) {
+    ObjectLocator *loc = pt_item.first;
+    path_cond_t cond = pt_item.second;
     MemObject *obj = loc->getObj();
     if (obj->isNull() || obj->isUnknown())
       continue;
 
-    loc->storeValue(store_value, store, 0);
+    loc->storeValue(store_value, store, cond, 0);
   }
 
   if (store_value->getType()->isPointerTy()) {
@@ -174,7 +176,9 @@ PTResult *IntraLotusAA::processPhi(PHINode *phi) {
     Value *val_i = phi->getIncomingValue(i);
     PTResult *in_pts = processBasePointer(val_i);
     assert(in_pts && "PHI incoming value not processed");
-    phi_pts->add_derived_target(in_pts, 0);
+    path_cond_t phi_cond = findOrCreateUnitPhiRegion(phi->getParent(),
+                                                     phi->getIncomingBlock(i));
+    phi_pts->add_derived_target(phi_cond, in_pts, 0);
   }
 
   PTResultIterator iter(phi_pts, this);
@@ -207,8 +211,8 @@ PTResult *IntraLotusAA::processSelect(SelectInst *select) {
   PTResult *pts_false = processBasePointer(false_val);
 
   PTResult *select_pts = findPTResult(select, true);
-  select_pts->add_derived_target(pts_true, 0);
-  select_pts->add_derived_target(pts_false, 0);
+  select_pts->add_derived_target(select->getCondition(), pts_true, 0);
+  select_pts->add_derived_target(getEmptyCond(), pts_false, 0);
 
   PTResultIterator iter(select_pts, this);
   return select_pts;
@@ -264,11 +268,12 @@ PTResult *IntraLotusAA::processGepBitcast(Value *ptr) {
   }
 
   if (base_ptr == ptr) {
-    return addPointsTo(ptr, newObject(ptr, MemObject::CONCRETE), 0);
+    return addPointsTo(ptr, newObject(ptr, MemObject::CONCRETE), 0,
+                       getEmptyCond());
   }
 
   PTResult *pts = processBasePointer(base_ptr);
-  PTResult *ret = derivePtsFrom(ptr, pts, offset);
+  PTResult *ret = derivePtsFrom(ptr, pts, offset, getEmptyCond());
   PTResultIterator iter(ret, this);
   return ret;
 }
@@ -288,7 +293,7 @@ PTResult *IntraLotusAA::processGepBitcast(Value *ptr) {
 PTResult *IntraLotusAA::processCast(CastInst *cast) {
   Value *base_ptr = cast->getOperand(0);
   PTResult *pts = processBasePointer(base_ptr);
-  PTResult *ret = derivePtsFrom(cast, pts, 0);
+  PTResult *ret = derivePtsFrom(cast, pts, 0, getEmptyCond());
   PTResultIterator iter(ret, this);
   return ret;
 }

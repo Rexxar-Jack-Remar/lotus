@@ -48,7 +48,7 @@ void IntraLotusAA::getReturnInst() {
 
   for (BasicBlock &bb : *F) {
     if (ReturnInst *ret = dyn_cast<ReturnInst>(bb.getTerminator())) {
-      ret_insts[ret] = true;
+      ret_insts[ret] = getEmptyCond();
     }
   }
 }
@@ -75,6 +75,7 @@ void IntraLotusAA::clearIntermediatePtsResult() {
 void IntraLotusAA::clearIntermediateCgResult() {
   // Clear temporary CG data
   lotus_clear_hash(&func_arg);
+  lotus_clear_hash(&thread_arg);
 }
 
 void IntraLotusAA::clearGlobalCgResult() {
@@ -104,11 +105,19 @@ void IntraLotusAA::clearInterfaceResult() {
   lotus_clear_hash(&inputs_func_level);
   lotus_clear_hash(&escape_obj_path);
   lotus_clear_hash(&escape_ret_path);
+  lotus_clear_hash(&summary_inputs_idx);
 
   for (OutputItem *item : outputs) {
     delete item;
   }
   outputs.clear();
+
+  for (mem_value_t *vals : summary_outputs) {
+    vals->clear();
+  }
+  for (set<Value *, llvm_cmp> *vals : summary_inputs) {
+    vals->clear();
+  }
 }
 
 // Access path utilities
@@ -134,6 +143,26 @@ bool IntraLotusAA::isPseudoInterface(Value *target) {
       return true;
   }
   return false;
+}
+
+void IntraLotusAA::onTimeOut() {
+  if (timer) {
+    timer->suspend();
+  }
+  is_timeout_found = true;
+  is_considered_as_library = true;
+  clearIntermediatePtsResult();
+  clearIntermediateCgResult();
+  clearGlobalCgResult();
+  clearInterfaceResult();
+}
+
+void IntraLotusAA::setTimer(unsigned duration) {
+  if (is_timeout_found)
+    return;
+  if (timer)
+    delete timer;
+  timer = new Timer(duration, [this]() { onTimeOut(); }, 5);
 }
 
 void IntraLotusAA::getFullAccessPath(
@@ -223,7 +252,8 @@ void IntraLotusAA::getCallerObj(
 
     PTResultIterator ptr_iter(pts, this);
 
-    for (auto *loc : ptr_iter) {
+    for (auto &point_to_item : ptr_iter) {
+      ObjectLocator *loc = point_to_item.first;
       MemObject *obj = loc->getObj();
       if (!obj->isValid())
         continue;

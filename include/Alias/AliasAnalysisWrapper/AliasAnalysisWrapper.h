@@ -16,16 +16,20 @@ namespace llvm {
 class CFLAndersAAWrapperPass;
 class CFLSteensAAWrapperPass;
 } // namespace llvm
+
 namespace seadsa {
 class SeaDsaAAResult;
-}
+} // namespace seadsa
+
 namespace UnderApprox {
 class UnderApproxAA;
-}
+} // namespace UnderApprox
+
 namespace tpa {
 class SemiSparsePointerAnalysis;
 class SemiSparseProgram;
 } // namespace tpa
+
 namespace lotus {
 namespace analysis {
 class FlowDDA;

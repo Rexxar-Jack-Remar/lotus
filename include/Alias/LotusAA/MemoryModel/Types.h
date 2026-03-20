@@ -16,6 +16,8 @@
 
 namespace llvm {
 
+using path_cond_t = Value *;
+
 // LLVM value comparator for map/set ordering
 struct llvm_cmp {
   bool operator()(const Value *A, const Value *B) const {
@@ -45,4 +47,3 @@ public:
 };
 
 } // namespace llvm
-
