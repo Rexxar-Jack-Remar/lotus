@@ -679,8 +679,7 @@ std::vector<DomVal<D>> solve_linear_tensorized_impl(
   auto delta_tensor = solve_linear_tensor_tarjan_impl<TD>(
       verbose, rhs_tensor, init_tensor, allow_project_pushdown);
   if (!delta_tensor.has_value())
-    delta_tensor =
-        solve_linear_worklist_impl<TD>(verbose, rhs_tensor, init_tensor);
+    delta_tensor = solve_linear_scc_impl<TD>(verbose, rhs_tensor, init_tensor);
   std::vector<DomVal<D>> delta;
   delta.reserve((*delta_tensor).size());
   for (const auto &p : *delta_tensor)
@@ -706,8 +705,8 @@ std::vector<DomVal<D>> solve_linear_tensor_paper_impl(
   if (projection_sensitive && !projection_fragment_supported) {
     if (verbose)
       std::cerr << "[tensor] domain does not claim the paper-backed "
-                   "projection-equation laws; falling back to worklist\n";
-    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+                   "projection-equation laws; falling back to SCC\n";
+    return solve_linear_scc_impl<D>(verbose, rhs, init);
   }
 
   if (projection_sensitive) {
@@ -737,20 +736,20 @@ solve_linear_tensor_impl(bool verbose,
   if (!Traits::available()) {
     if (verbose)
       std::cerr << "[tensor] tensor traits unavailable for domain; "
-                   "falling back to worklist\n";
-    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+                   "falling back to SCC\n";
+    return solve_linear_scc_impl<D>(verbose, rhs, init);
   }
   if (!Traits::paper_admissible()) {
     if (verbose)
       std::cerr << "[tensor] tensor traits are not paper-admissible; "
-                   "falling back to worklist\n";
-    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+                   "falling back to SCC\n";
+    return solve_linear_scc_impl<D>(verbose, rhs, init);
   }
   if (!npa::tensor_paper_laws_validated<D>()) {
     if (verbose)
       std::cerr << "[tensor] tensor traits did not pass/declare paper-law "
-                   "validation; falling back to worklist\n";
-    return solve_linear_worklist_impl<D>(verbose, rhs, init);
+                   "validation; falling back to SCC\n";
+    return solve_linear_scc_impl<D>(verbose, rhs, init);
   }
   for (const auto &p : rhs) {
     if (ExprFeatureDetector<D>::has_mu(p.second))
@@ -761,8 +760,8 @@ solve_linear_tensor_impl(bool verbose,
     if (!Exp1ToTensor<D>::is_tensor_convertible(p.second)) {
       if (verbose)
         std::cerr
-            << "[tensor] not tensor-convertible; falling back to worklist\n";
-      return solve_linear_worklist_impl<D>(verbose, rhs, init);
+            << "[tensor] not tensor-convertible; falling back to SCC\n";
+      return solve_linear_scc_impl<D>(verbose, rhs, init);
     }
   }
   std::vector<std::pair<Symbol, E1<TD>>> rhs_tensor;

@@ -46,6 +46,16 @@ public:
     std::map<BlockKey, Fact> blockEntryFacts;
   };
 
+private:
+  struct ApproximationFlags {
+    // V1 contract: one analysis run at a time. The engine owns these
+    // run-local flags so clients can keep propagation hooks side-effect free
+    // after construction without adding synchronization to hot paths.
+    bool used_summary_overflow = false;
+    bool used_fact_widening = false;
+  };
+
+public:
   static std::string getBlockSymbol(const llvm::BasicBlock *BB) {
     std::string s;
     s.reserve(1 + sizeof(BB));
@@ -97,7 +107,6 @@ public:
     return matches;
   }
 
-private:
   static bool typesAreCompatible(const llvm::Type *lhs, const llvm::Type *rhs) {
     if (lhs == rhs)
       return true;
@@ -187,12 +196,19 @@ private:
   }
 
   template <typename A>
-  static auto usedSummaryOverflow(const A &analysis, int)
-      -> decltype(analysis.usedSummaryOverflow()) {
-    return analysis.usedSummaryOverflow();
+  static auto applySummaryWithReporting(A &analysis, const Val &summary,
+                                        const Fact &fact,
+                                        ApproximationFlags &flags, int)
+      -> decltype(analysis.applySummary(summary, fact,
+                                        &flags.used_summary_overflow)) {
+    return analysis.applySummary(summary, fact, &flags.used_summary_overflow);
   }
 
-  static bool usedSummaryOverflow(const Analysis &, long) { return false; }
+  static Fact applySummaryWithReporting(Analysis &analysis, const Val &summary,
+                                        const Fact &fact,
+                                        ApproximationFlags &, long) {
+    return analysis.applySummary(summary, fact);
+  }
 
   template <typename A>
   static auto factIsApproximate(const A &analysis, const Fact &fact, int)
@@ -205,12 +221,28 @@ private:
   }
 
   template <typename A>
-  static auto usedFactWidening(const A &analysis, int)
-      -> decltype(analysis.usedFactWidening()) {
-    return analysis.usedFactWidening();
+  static auto widenFactsWithReporting(A &analysis, const Fact &oldFact,
+                                      const Fact &newFact, size_t updates,
+                                      ApproximationFlags &flags, int)
+      -> decltype(analysis.widenFacts(oldFact, newFact, updates,
+                                      &flags.used_fact_widening)) {
+    return analysis.widenFacts(oldFact, newFact, updates,
+                               &flags.used_fact_widening);
   }
 
-  static bool usedFactWidening(const Analysis &, long) { return false; }
+  template <typename A>
+  static auto widenFactsWithReporting(A &analysis, const Fact &oldFact,
+                                      const Fact &newFact, size_t updates,
+                                      ApproximationFlags &, long)
+      -> decltype(analysis.widenFacts(oldFact, newFact, updates)) {
+    return analysis.widenFacts(oldFact, newFact, updates);
+  }
+
+  static Fact widenFactsWithReporting(Analysis &, const Fact &,
+                                      const Fact &newFact, size_t,
+                                      ApproximationFlags &, ...) {
+    return newFact;
+  }
 
   template <typename A>
   static auto getCallEntryTransfer(A &analysis, const llvm::CallBase &call,
@@ -633,7 +665,7 @@ public:
   }
 
   static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    LinearStrategy linearStrategy = LinearStrategy::SCC,
                     IndirectCallResolutionMode callResolutionMode =
                         IndirectCallResolutionMode::ClosedWorldTypeCompatible) {
     std::vector<std::pair<Symbol, E>> eqns;
@@ -699,6 +731,7 @@ public:
     std::unordered_map<std::string, size_t> funcUpdates;
     const long maxPropagationSteps = getMaxPropagationSteps(analysis, 0);
     long propagationSteps = 0;
+    ApproximationFlags approx_flags;
 
     for (llvm::Function *Entry : entries) {
       std::string sym = getFuncSymbol(Entry);
@@ -748,8 +781,8 @@ public:
               I0<D>::eval(false, solvedMap, blockExprIt->second);
         }
 
-        auto blockEntryFact =
-            analysis.applySummary(entryToBlockStart, inputVal);
+        auto blockEntryFact = applySummaryWithReporting(
+            analysis, entryToBlockStart, inputVal, approx_flags, 0);
         if (factIsApproximate(analysis, blockEntryFact, 0))
           res.status.approximated = true;
         res.blockEntryFacts[{&BB}] = blockEntryFact;
@@ -780,8 +813,8 @@ public:
                                 currentPathVal);
                   Val totalToCall = D::extend(callEntry, entryToBlockStart);
 
-                  auto factAtCall =
-                      analysis.applySummary(totalToCall, inputVal);
+                  auto factAtCall = applySummaryWithReporting(
+                      analysis, totalToCall, inputVal, approx_flags, 0);
 
                   if (!funcInput.count(calleeFSym)) {
                     funcInput[calleeFSym] = factAtCall;
@@ -792,8 +825,9 @@ public:
                     auto newVal = analysis.joinFacts(oldVal, factAtCall);
                     if (!analysis.factsEqual(oldVal, newVal)) {
                       size_t updateCount = ++funcUpdates[calleeFSym];
-                      Fact widened =
-                          widenFacts(analysis, oldVal, newVal, updateCount, 0);
+                      Fact widened = widenFactsWithReporting(
+                          analysis, oldVal, newVal, updateCount, approx_flags,
+                          0);
                       if (hasCustomWidenFacts(analysis, 0))
                         res.status.approximated = true;
                       if (!analysis.factsEqual(oldVal, widened)) {
@@ -848,11 +882,11 @@ public:
         }
       }
     }
-    if (usedSummaryOverflow(analysis, 0)) {
+    if (approx_flags.used_summary_overflow) {
       res.status.used_summary_overflow = true;
       res.status.approximated = true;
     }
-    if (usedFactWidening(analysis, 0)) {
+    if (approx_flags.used_fact_widening) {
       res.status.used_fact_widening = true;
       res.status.approximated = true;
     }

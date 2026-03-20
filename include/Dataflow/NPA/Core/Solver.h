@@ -12,7 +12,7 @@
  *   The correction is Δ^(i) = least solution of Df|ν^(i)(X) + δ^(i) = X
  *   (Eqn. (2), (13)); then ν^(i+1) = ν^(i) ⊕ Δ^(i) (idempotent) or
  *   ν^(i+1) = ν^(i) + Δ^(i) (non-idempotent). The linear system is solved
- *   by Naive, Worklist, SCC, or TensorProduct (LinearStrategy).
+ *   by Naive, SCC, or TensorProduct (LinearStrategy).
  *
  * Exact-vs-approximate status:
  * - `Stat::converged` means theorem-faithful convergence: equality stabilized
@@ -25,10 +25,86 @@
  */
 
 #include "Dataflow/NPA/Core/TensorLinearSolve.h"
+#include "Utils/LLVM/ThreadPool.h"
+
+#include <exception>
 
 namespace npa {
 
 namespace detail {
+enum class NewtonSetupExecutionMode {
+  Auto,
+  ForceSerial,
+  ForceParallel,
+};
+
+inline std::size_t newton_parallel_setup_min_equations() {
+  return 4;
+}
+
+inline bool
+should_parallelize_newton_setup(bool verbose, std::size_t equation_count,
+                                NewtonSetupExecutionMode mode =
+                                    NewtonSetupExecutionMode::Auto) {
+  // Phase 2 contract: RHS assembly is parallelized only for non-verbose,
+  // single-run setup work. Auto mode preserves the existing zero/one-worker
+  // fast path; tests may force either branch through the internal mode knob.
+  if (verbose)
+    return false;
+  if (mode == NewtonSetupExecutionMode::ForceSerial)
+    return false;
+  if (mode == NewtonSetupExecutionMode::ForceParallel)
+    return true;
+  if (equation_count < newton_parallel_setup_min_equations())
+    return false;
+  return !ThreadPool::get()->Workers.empty();
+}
+
+template <class D>
+void collect_polynomial_expr_nodes(const E0<D> &expr,
+                                   std::unordered_set<const void *> &nodes) {
+  if (!expr)
+    return;
+  if (!nodes.insert(expr.get()).second)
+    return;
+  using K = typename Exp0<D>::K;
+  switch (expr->k) {
+  case K::Seq:
+  case K::Call:
+  case K::Project:
+  case K::Star:
+  case K::Mu:
+    collect_polynomial_expr_nodes<D>(expr->t, nodes);
+    break;
+  case K::Mul:
+  case K::Cond:
+  case K::Ndet:
+  case K::Concat:
+    collect_polynomial_expr_nodes<D>(expr->t1, nodes);
+    collect_polynomial_expr_nodes<D>(expr->t2, nodes);
+    break;
+  default:
+    break;
+  }
+}
+
+template <class D>
+bool equations_share_polynomial_nodes(
+    const std::vector<std::pair<Symbol, E0<D>>> &eqns) {
+  std::unordered_set<const void *> global_nodes;
+  global_nodes.reserve(eqns.size() * 4U);
+  for (const auto &eqn : eqns) {
+    std::unordered_set<const void *> local_nodes;
+    collect_polynomial_expr_nodes<D>(eqn.second, local_nodes);
+    for (const void *node : local_nodes) {
+      if (global_nodes.count(node))
+        return true;
+    }
+    global_nodes.insert(local_nodes.begin(), local_nodes.end());
+  }
+  return false;
+}
+
 /// C++14-friendly dispatch for delta: avoid if constexpr (DomainHasChooseDelta,
 /// idempotent) → choose_delta(v, nu) or v; else subtract(v, nu) or v.
 template <class D>
@@ -65,6 +141,236 @@ template <class D> inline void require_newton_compatible_expr(const E0<D> &e) {
       !domain_project_newton_safe<D>())
     throw UnsafeNewtonProjectError{};
 }
+
+template <class D> struct NewtonRoundSetup {
+  using tensor_domain = typename TensorSemiringTraits<D>::tensor_domain;
+  std::vector<std::pair<Symbol, E1<D>>> rhs;
+  std::vector<std::pair<Symbol, E1<tensor_domain>>> rhs_tensor;
+  bool has_lcfl_structure = false;
+  bool tensor_requested = false;
+  bool tensor_available = false;
+  bool tensor_admissible = false;
+  bool tensor_laws_validated = false;
+};
+
+template <class D> struct NewtonRhsTaskRecord {
+  using tensor_domain = typename TensorSemiringTraits<D>::tensor_domain;
+  E1<D> rhs;
+  E1<tensor_domain> rhs_tensor;
+  bool has_lcfl_structure = false;
+  std::exception_ptr error;
+};
+
+template <class D>
+std::vector<std::pair<Symbol, DomVal<D>>>
+build_newton_initial_values(
+    const std::vector<std::pair<Symbol, E0<D>>> &eqns,
+    NewtonSetupExecutionMode mode = NewtonSetupExecutionMode::Auto) {
+  using V = DomVal<D>;
+  std::unordered_map<Symbol, V> nu0;
+  for (auto &e : eqns)
+    nu0[e.first] = D::zero();
+
+  bool parallelize = should_parallelize_newton_setup(false, eqns.size(), mode);
+  // I0 evaluation caches into expression nodes. If equations share AST nodes,
+  // stay on the serial path to preserve correctness without synchronization.
+  if (parallelize && equations_share_polynomial_nodes<D>(eqns))
+    parallelize = false;
+
+  std::vector<std::pair<Symbol, V>> cur;
+  cur.reserve(eqns.size());
+  if (!parallelize) {
+    for (auto &e : eqns) {
+      require_newton_compatible_expr<D>(e.second);
+      cur.emplace_back(e.first, I0<D>::eval(false, nu0, e.second));
+    }
+    return cur;
+  }
+
+  std::vector<Optional<V>> values(eqns.size());
+  std::vector<std::exception_ptr> errors(eqns.size());
+  std::vector<std::future<void>> tasks;
+  tasks.reserve(eqns.size());
+  ThreadPool *pool = ThreadPool::get();
+  for (std::size_t i = 0; i < eqns.size(); ++i) {
+    tasks.emplace_back(pool->enqueue([&, i] {
+      try {
+        require_newton_compatible_expr<D>(eqns[i].second);
+        values[i] = I0<D>::eval(false, nu0, eqns[i].second);
+      } catch (...) {
+        errors[i] = std::current_exception();
+      }
+    }));
+  }
+  for (auto &task : tasks)
+    task.get();
+  for (std::size_t i = 0; i < eqns.size(); ++i) {
+    if (errors[i])
+      std::rethrow_exception(errors[i]);
+    cur.emplace_back(eqns[i].first, *values[i]);
+  }
+  return cur;
+}
+
+template <class D>
+NewtonRoundSetup<D> build_newton_round_setup(
+    bool verbose, const std::vector<std::pair<Symbol, E0<D>>> &eqns,
+    const std::vector<std::pair<Symbol, DomVal<D>>> &binds,
+    LinearStrategy linStrat = LinearStrategy::SCC,
+    NewtonSetupExecutionMode mode = NewtonSetupExecutionMode::Auto) {
+  using V = DomVal<D>;
+  using TensorTraits = TensorSemiringTraits<D>;
+  using TD = typename TensorTraits::tensor_domain;
+
+  std::unordered_map<Symbol, V> nu;
+  for (auto &b : binds)
+    nu[b.first] = b.second;
+
+  NewtonRoundSetup<D> setup;
+  setup.tensor_requested = linStrat == LinearStrategy::TensorProduct;
+  setup.tensor_available = setup.tensor_requested && TensorTraits::available();
+  setup.tensor_admissible =
+      setup.tensor_available && TensorTraits::paper_admissible();
+  setup.tensor_laws_validated =
+      setup.tensor_admissible && tensor_paper_laws_validated<D>();
+
+  bool parallelize = should_parallelize_newton_setup(verbose, eqns.size(), mode);
+  // The Newton setup path assumes per-equation AST ownership during cached
+  // evaluation. Shared polynomial nodes force a conservative serial fallback.
+  if (parallelize && equations_share_polynomial_nodes<D>(eqns))
+    parallelize = false;
+
+  setup.rhs.reserve(eqns.size());
+  if (setup.tensor_laws_validated)
+    setup.rhs_tensor.reserve(eqns.size());
+
+  auto build_eqn_rhs = [&](std::size_t index, bool eval_verbose,
+                           NewtonRhsTaskRecord<D> &record) {
+    const auto &eqn = eqns[index];
+    require_newton_compatible_expr<D>(eqn.second);
+    V v = I0<D>::eval(eval_verbose, nu, eqn.second);
+    V delta0 = compute_delta<D>(
+        v, nu[eqn.first],
+        std::integral_constant<bool, DomainHasChooseDelta<D>::value>{},
+        std::integral_constant<bool, D::idempotent>{});
+    if (!D::idempotent)
+      require_valid_newton_delta<D>(v, nu[eqn.first], delta0);
+    auto d = Diff<D>::build(nu, eqn.second);
+    record.has_lcfl_structure = LCFLDetector<D>::has_lcfl_structure(d);
+    record.rhs = Exp1<D>::add(Exp1<D>::term(delta0), d);
+    if (setup.tensor_laws_validated) {
+      auto tensor_d = TensorDiff<D>::build(nu, eqn.second);
+      E1<TD> tensor_rhs = Exp1<TD>::add(
+          Exp1<TD>::term(TensorTraits::right_constant(delta0)), tensor_d);
+      if (tensor_supports_projection_equations<D>() && eqn.second &&
+          eqn.second->k == Exp0<D>::Project && tensor_d &&
+          tensor_d->k == Exp1<TD>::Project) {
+        tensor_rhs = Exp1<TD>::project(Exp1<TD>::add(
+            Exp1<TD>::term(TensorTraits::right_constant(delta0)),
+            tensor_d->t));
+      }
+      record.rhs_tensor = tensor_rhs;
+    }
+  };
+
+  if (!parallelize) {
+    for (std::size_t i = 0; i < eqns.size(); ++i) {
+      NewtonRhsTaskRecord<D> record;
+      build_eqn_rhs(i, verbose, record);
+      setup.has_lcfl_structure =
+          setup.has_lcfl_structure || record.has_lcfl_structure;
+      setup.rhs.emplace_back(eqns[i].first, record.rhs);
+      if (setup.tensor_laws_validated)
+        setup.rhs_tensor.emplace_back(eqns[i].first, record.rhs_tensor);
+    }
+    return setup;
+  }
+
+  std::vector<NewtonRhsTaskRecord<D>> records(eqns.size());
+  std::vector<std::future<void>> tasks;
+  tasks.reserve(eqns.size());
+  ThreadPool *pool = ThreadPool::get();
+  for (std::size_t i = 0; i < eqns.size(); ++i) {
+    tasks.emplace_back(pool->enqueue([&, i] {
+      try {
+        build_eqn_rhs(i, false, records[i]);
+      } catch (...) {
+        records[i].error = std::current_exception();
+      }
+    }));
+  }
+  for (auto &task : tasks)
+    task.get();
+  for (std::size_t i = 0; i < eqns.size(); ++i) {
+    if (records[i].error)
+      std::rethrow_exception(records[i].error);
+    setup.has_lcfl_structure =
+        setup.has_lcfl_structure || records[i].has_lcfl_structure;
+    setup.rhs.emplace_back(eqns[i].first, records[i].rhs);
+    if (setup.tensor_laws_validated)
+      setup.rhs_tensor.emplace_back(eqns[i].first, records[i].rhs_tensor);
+  }
+  return setup;
+}
+
+template <class D>
+std::vector<std::pair<Symbol, DomVal<D>>> run_newton_iteration(
+    bool verbose, const std::vector<std::pair<Symbol, E0<D>>> &eqns,
+    const std::vector<std::pair<Symbol, DomVal<D>>> &binds,
+    LinearStrategy linStrat = LinearStrategy::SCC,
+    NewtonSetupExecutionMode mode = NewtonSetupExecutionMode::Auto) {
+  using V = DomVal<D>;
+  auto setup = build_newton_round_setup<D>(verbose, eqns, binds, linStrat, mode);
+  const bool use_tensor =
+      setup.tensor_laws_validated && setup.has_lcfl_structure;
+  if (setup.tensor_requested && verbose) {
+    if (!TensorSemiringTraits<D>::available()) {
+      std::cerr << "[tensor] tensor traits unavailable for domain; "
+                   "falling back to SCC\n";
+    } else if (!setup.has_lcfl_structure) {
+      std::cerr << "[tensor] linearized system is already left-linear; "
+                   "falling back to SCC\n";
+    } else if (!TensorSemiringTraits<D>::paper_admissible()) {
+      std::cerr << "[tensor] tensor traits are not paper-admissible; "
+                   "falling back to SCC\n";
+    } else if (!tensor_paper_laws_validated<D>()) {
+      std::cerr << "[tensor] tensor traits did not pass/declare paper-law "
+                   "validation; falling back to SCC\n";
+    }
+  }
+
+  std::vector<V> init(use_tensor ? setup.rhs_tensor.size() : setup.rhs.size(),
+                      D::zero()),
+      delta;
+  if (linStrat == LinearStrategy::Naive) {
+    delta = fix_vec<D>(verbose, init, [&](const std::vector<V> &cur) {
+      std::unordered_map<Symbol, V> env;
+      for (size_t i = 0; i < cur.size(); ++i)
+        env[setup.rhs[i].first] = cur[i];
+      std::vector<V> nxt;
+      nxt.reserve(setup.rhs.size());
+      for (auto &p : setup.rhs)
+        nxt.push_back(I1<D>::eval(false, env, p.second));
+      return nxt;
+    });
+  } else if (linStrat == LinearStrategy::SCC) {
+    delta = solve_linear_scc_impl<D>(verbose, setup.rhs, init);
+  } else if (use_tensor) {
+    delta = solve_linear_tensor_paper_impl<D>(verbose, setup.rhs,
+                                              setup.rhs_tensor, init);
+  } else {
+    delta = solve_linear_scc_impl<D>(verbose, setup.rhs, init);
+  }
+
+  std::vector<std::pair<Symbol, V>> out;
+  out.reserve(binds.size());
+  for (size_t i = 0; i < binds.size(); ++i) {
+    V upd = delta[i];
+    V nxt = D::idempotent ? upd : D::combine(binds[i].second, upd);
+    out.emplace_back(binds[i].first, nxt);
+  }
+  return out;
+}
 } // namespace detail
 
 template <class D, class ITER> struct Solver {
@@ -72,7 +378,7 @@ template <class D, class ITER> struct Solver {
   using Eqn = std::pair<Symbol, E0<D>>;
   static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
   solve(const std::vector<Eqn> &eqns, bool verbose = false, int max = -1,
-        LinearStrategy linStrat = LinearStrategy::Worklist,
+        LinearStrategy linStrat = LinearStrategy::SCC,
         DomainContractMode contractMode = DomainContractMode::Off) {
     NPA_REQUIRE_DOMAIN(D);
     npa_reset_limit_hit();
@@ -143,7 +449,7 @@ template <class D> struct KleeneIter {
   static std::vector<std::pair<Symbol, V>>
   run(bool verbose, const std::vector<Eqn> &eqns,
       const std::vector<std::pair<Symbol, V>> &binds,
-      LinearStrategy = LinearStrategy::Worklist) {
+      LinearStrategy = LinearStrategy::SCC) {
     std::unordered_map<Symbol, V> nu;
     for (auto &b : binds)
       nu[b.first] = b.second;
@@ -167,104 +473,13 @@ template <class D> struct NewtonIter {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
   static std::vector<std::pair<Symbol, V>> init(const std::vector<Eqn> &eqns) {
-    std::unordered_map<Symbol, V> nu0;
-    for (auto &e : eqns)
-      nu0[e.first] = D::zero();
-    std::vector<std::pair<Symbol, V>> cur;
-    cur.reserve(eqns.size());
-    for (auto &e : eqns) {
-      detail::require_newton_compatible_expr<D>(e.second);
-      cur.emplace_back(e.first, I0<D>::eval(false, nu0, e.second));
-    }
-    return cur;
+    return detail::build_newton_initial_values<D>(eqns);
   }
   static std::vector<std::pair<Symbol, V>>
   run(bool verbose, const std::vector<Eqn> &eqns,
       const std::vector<std::pair<Symbol, V>> &binds,
-      LinearStrategy linStrat = LinearStrategy::Worklist) {
-    std::unordered_map<Symbol, V> nu;
-    for (auto &b : binds)
-      nu[b.first] = b.second;
-    std::vector<std::pair<Symbol, E1<D>>> rhs;
-    using TensorTraits = TensorSemiringTraits<D>;
-    using TD = typename TensorTraits::tensor_domain;
-    std::vector<std::pair<Symbol, E1<TD>>> rhs_tensor;
-    bool has_lcfl_structure = false;
-    const bool tensor_requested = linStrat == LinearStrategy::TensorProduct;
-    const bool tensor_available = tensor_requested && TensorTraits::available();
-    const bool tensor_admissible =
-        tensor_available && TensorTraits::paper_admissible();
-    const bool tensor_laws_validated =
-        tensor_admissible && tensor_paper_laws_validated<D>();
-    for (auto &e : eqns) {
-      detail::require_newton_compatible_expr<D>(e.second);
-      V v = I0<D>::eval(verbose, nu, e.second);
-      V delta0 = detail::compute_delta<D>(
-          v, nu[e.first],
-          std::integral_constant<bool, DomainHasChooseDelta<D>::value>{},
-          std::integral_constant<bool, D::idempotent>{});
-      if (!D::idempotent)
-        require_valid_newton_delta<D>(v, nu[e.first], delta0);
-      auto d = Diff<D>::build(nu, e.second);
-      has_lcfl_structure =
-          has_lcfl_structure || LCFLDetector<D>::has_lcfl_structure(d);
-      rhs.emplace_back(e.first, Exp1<D>::add(Exp1<D>::term(delta0), d));
-      if (tensor_laws_validated) {
-        auto tensor_d = TensorDiff<D>::build(nu, e.second);
-        E1<TD> tensor_rhs = Exp1<TD>::add(
-            Exp1<TD>::term(TensorTraits::right_constant(delta0)), tensor_d);
-        if (tensor_supports_projection_equations<D>() && e.second &&
-            e.second->k == Exp0<D>::Project && tensor_d &&
-            tensor_d->k == Exp1<TD>::Project) {
-          tensor_rhs = Exp1<TD>::project(Exp1<TD>::add(
-              Exp1<TD>::term(TensorTraits::right_constant(delta0)),
-              tensor_d->t));
-        }
-        rhs_tensor.emplace_back(e.first, tensor_rhs);
-      }
-    }
-    const bool use_tensor = tensor_laws_validated && has_lcfl_structure;
-    if (tensor_requested && verbose) {
-      if (!TensorTraits::available()) {
-        std::cerr << "[tensor] tensor traits unavailable for domain; "
-                     "falling back to worklist\n";
-      } else if (!has_lcfl_structure) {
-        std::cerr << "[tensor] linearized system is already left-linear; "
-                     "falling back to worklist\n";
-      } else if (!TensorTraits::paper_admissible()) {
-        std::cerr << "[tensor] tensor traits are not paper-admissible; "
-                     "falling back to worklist\n";
-      } else if (!tensor_paper_laws_validated<D>()) {
-        std::cerr << "[tensor] tensor traits did not pass/declare paper-law "
-                     "validation; falling back to worklist\n";
-      }
-    }
-    std::vector<V> init(use_tensor ? rhs_tensor.size() : rhs.size(), D::zero()),
-        delta;
-    if (linStrat == LinearStrategy::Naive) {
-      delta = fix_vec<D>(verbose, init, [&](const std::vector<V> &cur) {
-        std::unordered_map<Symbol, V> env;
-        for (size_t i = 0; i < cur.size(); ++i)
-          env[rhs[i].first] = cur[i];
-        std::vector<V> nxt;
-        for (auto &p : rhs)
-          nxt.push_back(I1<D>::eval(false, env, p.second));
-        return nxt;
-      });
-    } else if (linStrat == LinearStrategy::SCC) {
-      delta = solve_linear_scc_impl<D>(verbose, rhs, init);
-    } else if (use_tensor) {
-      delta = solve_linear_tensor_paper_impl<D>(verbose, rhs, rhs_tensor, init);
-    } else {
-      delta = solve_linear_worklist_impl<D>(verbose, rhs, init);
-    }
-    std::vector<std::pair<Symbol, V>> out;
-    for (size_t i = 0; i < binds.size(); ++i) {
-      V upd = delta[i];
-      V nxt = D::idempotent ? upd : D::combine(binds[i].second, upd);
-      out.emplace_back(binds[i].first, nxt);
-    }
-    return out;
+      LinearStrategy linStrat = LinearStrategy::SCC) {
+    return detail::run_newton_iteration<D>(verbose, eqns, binds, linStrat);
   }
 };
 
@@ -274,7 +489,7 @@ template <class D> struct NewtonSolver {
   using Eqn = std::pair<Symbol, E0<D>>;
   static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
   solve(const std::vector<Eqn> &eqns, bool verbose = false, int max = -1,
-        LinearStrategy linStrat = LinearStrategy::Worklist,
+        LinearStrategy linStrat = LinearStrategy::SCC,
         DomainContractMode contractMode = DomainContractMode::Off) {
     // JACM (Esparza et al.) shows: for idempotent + commutative semirings,
     // Newton terminates after at most n iterations for a system of n equations.

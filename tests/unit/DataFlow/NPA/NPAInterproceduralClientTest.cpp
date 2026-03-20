@@ -11,6 +11,7 @@
 #include <iterator>
 #include <limits>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -512,7 +513,7 @@ TEST(NPAInterproceduralClients,
   EntryHookAnalysis analysis;
   auto result =
       npa::InterproceduralEngine<EntryHookDomain, EntryHookAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::Worklist);
+          *module, analysis, false, npa::LinearStrategy::SCC);
 
   auto *Main = module->getFunction("main");
   ASSERT_NE(Main, nullptr);
@@ -547,7 +548,7 @@ TEST(NPAInterproceduralClients,
   LimitedBoolAnalysis analysis;
   auto result =
       npa::InterproceduralEngine<LimitedBoolDomain, LimitedBoolAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::Worklist);
+          *module, analysis, false, npa::LinearStrategy::SCC);
 
   EXPECT_FALSE(result.status.summary_solve.converged);
   EXPECT_TRUE(result.status.summary_solve.hit_limit);
@@ -581,7 +582,7 @@ TEST(NPAInterproceduralClients,
   auto result =
       npa::InterproceduralEngine<RecursiveSummaryDomain,
                                  RecursivePropagationLimitedForwardAnalysis>::
-          run(*module, analysis, false, npa::LinearStrategy::Worklist);
+          run(*module, analysis, false, npa::LinearStrategy::SCC);
 
   auto *Recur = module->getFunction("recur");
   ASSERT_NE(Recur, nullptr);
@@ -624,6 +625,43 @@ TEST(NPAInterproceduralClients,
   auto It = states.front()->values.find(Arg);
   ASSERT_NE(It, states.front()->values.end());
   expectConstValue(It->second, signedAPInt(32, 5));
+}
+
+TEST(NPAInterproceduralClients, ConstantPropagationReportsSummaryOverflow) {
+  llvm::LLVMContext ctx;
+  std::ostringstream ir;
+  ir << "define i32 @chain(i32 %x) {\n";
+  ir << "entry:\n";
+  ir << "  br label %b0\n";
+  std::string current = "%x";
+  for (unsigned i = 0; i < 321; ++i) {
+    ir << "b" << i << ":\n";
+    const std::string next = "%v" + std::to_string(i);
+    ir << "  " << next << " = add i32 " << current << ", 1\n";
+    ir << "  br label %" << (i == 320 ? "exit" : "b" + std::to_string(i + 1))
+       << "\n";
+    current = next;
+  }
+  ir << "exit:\n";
+  ir << "  ret i32 " << current << "\n";
+  ir << "}\n\n";
+  ir << "define i32 @main() {\n";
+  ir << "entry:\n";
+  ir << "  %r = call i32 @chain(i32 0)\n";
+  ir << "  ret i32 %r\n";
+  ir << "}\n";
+
+  const std::string moduleText = ir.str();
+  auto module = parseModule(ctx, moduleText.c_str());
+  ASSERT_NE(module, nullptr);
+
+  auto result = npa::InterproceduralConstantPropagation::run(*module);
+
+  EXPECT_TRUE(result.status.summary_solve.converged);
+  EXPECT_TRUE(result.status.used_summary_overflow);
+  EXPECT_FALSE(result.status.used_fact_widening);
+  EXPECT_TRUE(result.status.approximated);
+  EXPECT_FALSE(result.status.overall_converged);
 }
 
 TEST(NPAInterproceduralClients,
@@ -683,7 +721,7 @@ TEST(NPAInterproceduralClients,
   auto result = npa::InterproceduralEngine<
       ProjectedStringDomain,
       ProjectedSummaryAnalysis>::run(*module, analysis, false,
-                                     npa::LinearStrategy::Worklist);
+                                     npa::LinearStrategy::SCC);
 
   auto *Callee = module->getFunction("callee");
   ASSERT_NE(Callee, nullptr);
@@ -713,7 +751,7 @@ TEST(NPAInterproceduralClients,
   auto result = npa::InterproceduralEngine<
       ProjectedStringDomain,
       ProjectedSummaryAnalysis>::run(*module, analysis, false,
-                                     npa::LinearStrategy::Worklist);
+                                     npa::LinearStrategy::SCC);
 
   auto *Main = module->getFunction("main");
   auto *Callee = module->getFunction("callee");
@@ -759,7 +797,7 @@ TEST(NPAInterproceduralClients,
   auto worklist = npa::InterproceduralEngine<
       npa::PredicateRelationDomain,
       PredicateProjectedLoopAnalysis>::run(*module, analysis, false,
-                                           npa::LinearStrategy::Worklist);
+                                           npa::LinearStrategy::SCC);
 
   auto tensor = npa::InterproceduralEngine<
       npa::PredicateRelationDomain,
@@ -1018,11 +1056,11 @@ TEST(NPAInterproceduralClients,
   EntryHookAnalysis analysis;
   auto closedWorld =
       npa::InterproceduralEngine<EntryHookDomain, EntryHookAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::Worklist,
+          *module, analysis, false, npa::LinearStrategy::SCC,
           npa::IndirectCallResolutionMode::ClosedWorldTypeCompatible);
   auto fallbackOnly =
       npa::InterproceduralEngine<EntryHookDomain, EntryHookAnalysis>::run(
-          *module, analysis, false, npa::LinearStrategy::Worklist,
+          *module, analysis, false, npa::LinearStrategy::SCC,
           npa::IndirectCallResolutionMode::DeclaredOnlyFallback);
 
   EXPECT_EQ(closedWorld.status.call_resolution_mode,
@@ -1061,7 +1099,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(module, nullptr);
 
   auto result = npa::InterproceduralConstantPropagation::run(
-      *module, false, npa::LinearStrategy::Worklist,
+      *module, false, npa::LinearStrategy::SCC,
       npa::IndirectCallResolutionMode::DeclaredOnlyFallback);
   EXPECT_EQ(result.status.call_resolution_mode,
             npa::IndirectCallResolutionMode::DeclaredOnlyFallback);
@@ -1367,7 +1405,7 @@ TEST(NPAInterproceduralClients,
   RecursivePropagationLimitedBackwardAnalysis analysis;
   auto result = npa::BackwardInterproceduralEngine<
       RecursiveSummaryDomain, RecursivePropagationLimitedBackwardAnalysis>::
-      run(*module, analysis, false, npa::LinearStrategy::Worklist);
+      run(*module, analysis, false, npa::LinearStrategy::SCC);
 
   auto *Recur = module->getFunction("recur");
   ASSERT_NE(Recur, nullptr);

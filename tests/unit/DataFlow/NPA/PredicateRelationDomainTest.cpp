@@ -77,7 +77,7 @@ TEST(NPA, PredicateRelationTensorRegularizationMatchesWorklist) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
 
   ASSERT_EQ(wl.size(), 1u);
@@ -318,7 +318,7 @@ TEST(NPA, PredicateTensorRegularizationSupportsProjectedLinearEquations) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
 
   ASSERT_EQ(wl.size(), 1u);
@@ -346,7 +346,7 @@ TEST(NPA, PredicateTensorTarjanSupportsProjectedLinearEquations) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
 
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
   rhs_tensor.emplace_back("X", npa::Exp1ToTensor<D>::convert(rhs));
@@ -407,7 +407,7 @@ TEST(
   eqns.emplace_back("X", rhs);
 
   auto wl = npa::NewtonSolver<D>::solve(eqns, false, -1,
-                                        npa::LinearStrategy::Worklist);
+                                        npa::LinearStrategy::SCC);
 
   testing::internal::CaptureStderr();
   auto tp = npa::NewtonSolver<D>::solve(eqns, true, -1,

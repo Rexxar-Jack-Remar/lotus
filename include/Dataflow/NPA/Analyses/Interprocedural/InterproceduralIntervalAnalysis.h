@@ -115,7 +115,7 @@ public:
   };
 
   static Result run(llvm::Module &M, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    LinearStrategy linearStrategy = LinearStrategy::SCC,
                     IndirectCallResolutionMode callResolutionMode =
                         IndirectCallResolutionMode::ClosedWorldTypeCompatible);
 };

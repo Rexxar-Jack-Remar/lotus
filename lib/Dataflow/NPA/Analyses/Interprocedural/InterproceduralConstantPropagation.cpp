@@ -219,11 +219,12 @@ public:
     return D::singleton(op);
   }
 
-  FactType applySummary(const D::value_type &summary, const FactType &fact) {
+  FactType applySummary(const D::value_type &summary, const FactType &fact,
+                        bool *used_summary_overflow) const {
     if (!fact.reachable)
       return {false, {}};
-    if (summary.overflow)
-      used_summary_overflow_ = true;
+    if (summary.overflow && used_summary_overflow)
+      *used_summary_overflow = true;
 
     bool first = true;
     FactType joined;
@@ -249,6 +250,11 @@ public:
     if (first)
       return overflow;
     return joinFacts(joined, overflow);
+  }
+
+  FactType applySummary(const D::value_type &summary,
+                        const FactType &fact) const {
+    return applySummary(summary, fact, nullptr);
   }
 
   FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
@@ -277,8 +283,6 @@ public:
     return summary.overflow;
   }
 
-  bool usedSummaryOverflow() const { return used_summary_overflow_; }
-
 private:
   FactType overflowFact(const D::value_type &summary,
                         const FactType &fact) const {
@@ -289,8 +293,6 @@ private:
         out.values.insert(entry);
     return out;
   }
-
-  mutable bool used_summary_overflow_ = false;
 
   D::value_type buildAssign(const llvm::Value *dest,
                             const llvm::APInt &value) const {

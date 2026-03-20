@@ -44,9 +44,8 @@ using Symbol = std::string;
 enum class LinearStrategy {
   /// Vector fixpoint: update all variables each round (chaotic iteration).
   Naive,
-  /// Dependency-driven worklist (chaotic iteration with dependency graph).
-  Worklist,
-  /// SCC-based: Tarjan SCCs, solve in topological order, fixpoint per SCC.
+  /// Global SCC scheduling with dependency-driven worklist solving inside each
+  /// SCC. Independent SCC layers may execute in parallel.
   SCC,
   /// Tensor-product (TOPLAS 2016): lift LCFL system to paired semiring,
   /// solve as left-linear (regular) system, then project back. Only used when
@@ -80,7 +79,7 @@ struct Stat {
   int equation_count = 0;
   int requested_max_iters = -1;
   int effective_max_iters = -1;
-  LinearStrategy linear_strategy = LinearStrategy::Worklist;
+  LinearStrategy linear_strategy = LinearStrategy::SCC;
   bool used_approx_equal = false;
   bool used_auto_n_cap = false;
   bool retried_without_auto_n_cap = false;

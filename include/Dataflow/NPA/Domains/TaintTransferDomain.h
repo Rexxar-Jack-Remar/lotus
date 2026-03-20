@@ -21,6 +21,10 @@ public:
   using test_type = bool;
   static constexpr bool idempotent = true;
 
+  // V1 single-run parallelism contract: configure the domain once before the
+  // solve starts, then treat the width as frozen for the lifetime of that run.
+  // The width is process-wide on purpose so future worker threads observe the
+  // configured value without hot-path synchronization.
   static void setBitWidth(unsigned W) { BitWidth = W; }
   static unsigned getBitWidth() { return BitWidth; }
 
@@ -44,7 +48,7 @@ private:
   static llvm::APInt applyRel(const std::vector<llvm::APInt> &rel,
                               const llvm::APInt &in);
   static std::vector<llvm::APInt> identityRel();
-  thread_local static unsigned BitWidth;
+  static unsigned BitWidth;
 };
 
 } // namespace npa

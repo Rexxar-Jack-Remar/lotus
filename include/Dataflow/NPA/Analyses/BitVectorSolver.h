@@ -33,7 +33,7 @@ public:
    */
   static Result run(llvm::Function &F, const BitVectorInfo &info,
                     SolverStrategy strategy = SolverStrategy::Newton,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    LinearStrategy linearStrategy = LinearStrategy::SCC,
                     bool verbose = false);
 };
 

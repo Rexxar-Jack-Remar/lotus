@@ -31,6 +31,14 @@ public:
   };
 
 private:
+  struct ApproximationFlags {
+    // V1 contract: one analysis run at a time. The engine owns these
+    // run-local flags so clients can keep propagation hooks side-effect free
+    // after construction without adding synchronization to hot paths.
+    bool used_summary_overflow = false;
+    bool used_fact_widening = false;
+  };
+
   template <typename A>
   static auto getMaxPropagationSteps(const A &analysis, int)
       -> decltype(analysis.getMaxPropagationSteps()) {
@@ -73,12 +81,19 @@ private:
   }
 
   template <typename A>
-  static auto usedSummaryOverflow(const A &analysis, int)
-      -> decltype(analysis.usedSummaryOverflow()) {
-    return analysis.usedSummaryOverflow();
+  static auto applySummaryWithReporting(A &analysis, const Val &summary,
+                                        const Fact &fact,
+                                        ApproximationFlags &flags, int)
+      -> decltype(analysis.applySummary(summary, fact,
+                                        &flags.used_summary_overflow)) {
+    return analysis.applySummary(summary, fact, &flags.used_summary_overflow);
   }
 
-  static bool usedSummaryOverflow(const Analysis &, long) { return false; }
+  static Fact applySummaryWithReporting(Analysis &analysis, const Val &summary,
+                                        const Fact &fact,
+                                        ApproximationFlags &, long) {
+    return analysis.applySummary(summary, fact);
+  }
 
   template <typename A>
   static auto factIsApproximate(const A &analysis, const Fact &fact, int)
@@ -91,12 +106,28 @@ private:
   }
 
   template <typename A>
-  static auto usedFactWidening(const A &analysis, int)
-      -> decltype(analysis.usedFactWidening()) {
-    return analysis.usedFactWidening();
+  static auto widenFactsWithReporting(A &analysis, const Fact &oldFact,
+                                      const Fact &newFact, size_t updates,
+                                      ApproximationFlags &flags, int)
+      -> decltype(analysis.widenFacts(oldFact, newFact, updates,
+                                      &flags.used_fact_widening)) {
+    return analysis.widenFacts(oldFact, newFact, updates,
+                               &flags.used_fact_widening);
   }
 
-  static bool usedFactWidening(const Analysis &, long) { return false; }
+  template <typename A>
+  static auto widenFactsWithReporting(A &analysis, const Fact &oldFact,
+                                      const Fact &newFact, size_t updates,
+                                      ApproximationFlags &, long)
+      -> decltype(analysis.widenFacts(oldFact, newFact, updates)) {
+    return analysis.widenFacts(oldFact, newFact, updates);
+  }
+
+  static Fact widenFactsWithReporting(Analysis &, const Fact &,
+                                      const Fact &newFact, size_t,
+                                      ApproximationFlags &, ...) {
+    return newFact;
+  }
 
   template <typename A>
   static auto getCallEntryTransfer(A &analysis, const llvm::CallBase &call,
@@ -388,7 +419,7 @@ public:
   }
 
   static Result run(llvm::Module &M, Analysis &analysis, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    LinearStrategy linearStrategy = LinearStrategy::SCC,
                     IndirectCallResolutionMode callResolutionMode =
                         IndirectCallResolutionMode::ClosedWorldTypeCompatible) {
     std::vector<std::pair<Symbol, E>> eqns;
@@ -451,6 +482,7 @@ public:
     std::unordered_map<std::string, size_t> funcUpdates;
     const long maxPropagationSteps = getMaxPropagationSteps(analysis, 0);
     long propagationSteps = 0;
+    ApproximationFlags approx_flags;
 
     for (llvm::Function *Entry : entries) {
       std::string sym =
@@ -485,8 +517,8 @@ public:
         if (SolvedBlockIt == solvedMap.end())
           continue;
 
-        res.blockEntryFacts[{&BB}] =
-            analysis.applySummary(SolvedBlockIt->second, exitFact);
+        res.blockEntryFacts[{&BB}] = applySummaryWithReporting(
+            analysis, SolvedBlockIt->second, exitFact, approx_flags, 0);
         if (factIsApproximate(analysis, res.blockEntryFacts[{&BB}], 0))
           res.status.approximated = true;
 
@@ -532,8 +564,8 @@ public:
                 Val calleeExitToExit =
                     D::extend(getCallReturnTransfer(analysis, *CI, *Callee, 0),
                               afterCallToExit);
-                Fact calleeExitFact =
-                    analysis.applySummary(calleeExitToExit, exitFact);
+                Fact calleeExitFact = applySummaryWithReporting(
+                    analysis, calleeExitToExit, exitFact, approx_flags, 0);
 
                 auto Existing = funcExitFacts.find(calleeSym);
                 if (Existing == funcExitFacts.end()) {
@@ -545,8 +577,9 @@ public:
                       analysis.joinFacts(Existing->second, calleeExitFact);
                   if (!analysis.factsEqual(joined, Existing->second)) {
                     size_t updateCount = ++funcUpdates[calleeSym];
-                    Fact widened = widenFacts(analysis, Existing->second,
-                                              joined, updateCount, 0);
+                    Fact widened = widenFactsWithReporting(
+                        analysis, Existing->second, joined, updateCount,
+                        approx_flags, 0);
                     if (hasCustomWidenFacts(analysis, 0))
                       res.status.approximated = true;
                     if (!analysis.factsEqual(widened, Existing->second)) {
@@ -585,11 +618,11 @@ public:
         }
       }
     }
-    if (usedSummaryOverflow(analysis, 0)) {
+    if (approx_flags.used_summary_overflow) {
       res.status.used_summary_overflow = true;
       res.status.approximated = true;
     }
-    if (usedFactWidening(analysis, 0)) {
+    if (approx_flags.used_fact_widening) {
       res.status.used_fact_widening = true;
       res.status.approximated = true;
     }

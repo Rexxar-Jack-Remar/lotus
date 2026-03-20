@@ -107,7 +107,7 @@ TEST(NPA, SolverReportsWhenOuterIterationCapReturnsApproximation) {
   EXPECT_EQ(capped.second.equation_count, 2);
   EXPECT_EQ(capped.second.requested_max_iters, 1);
   EXPECT_EQ(capped.second.effective_max_iters, 1);
-  EXPECT_EQ(capped.second.linear_strategy, npa::LinearStrategy::Worklist);
+  EXPECT_EQ(capped.second.linear_strategy, npa::LinearStrategy::SCC);
 }
 
 TEST(NPA, ExactModeNewtonReportsNoApproximationSources) {
@@ -210,7 +210,7 @@ TEST(NPA, NewtonIdempotentUpdateMatchesSolvedLinearizedSystem) {
   }
 
   std::vector<npa::DomVal<D>> init(rhs.size(), D::zero());
-  auto delta = npa::solve_linear_worklist_impl<D>(false, rhs, init);
+  auto delta = npa::solve_linear_scc_impl<D>(false, rhs, init);
   auto nu1 = npa::NewtonIter<D>::run(false, eqns, nu0);
 
   for (size_t i = 0; i < nu1.size(); ++i)
@@ -562,7 +562,7 @@ TEST(NPA, SolverCanReportDomainContractCheckFailures) {
   eqns.emplace_back("x", Exp::term(D::one()));
 
   auto result =
-      npa::NewtonSolver<D>::solve(eqns, false, 1, npa::LinearStrategy::Worklist,
+      npa::NewtonSolver<D>::solve(eqns, false, 1, npa::LinearStrategy::SCC,
                                   npa::DomainContractMode::BasicChecks);
 
   EXPECT_TRUE(result.second.domain_contract_checks_run);
@@ -579,7 +579,7 @@ TEST(NPA, LinearStepLimitMarksNewtonResultAsApproximate) {
   eqns.emplace_back("y", Exp::term(D::one()));
 
   auto result = npa::NewtonSolver<D>::solve(eqns, false, 1,
-                                            npa::LinearStrategy::Worklist);
+                                            npa::LinearStrategy::SCC);
 
   EXPECT_FALSE(result.second.converged);
   EXPECT_TRUE(result.second.hit_limit);

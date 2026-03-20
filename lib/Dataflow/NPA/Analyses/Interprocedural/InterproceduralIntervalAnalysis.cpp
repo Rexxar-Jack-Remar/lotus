@@ -426,11 +426,12 @@ public:
     return D::singleton(op);
   }
 
-  FactType applySummary(const D::value_type &summary, const FactType &fact) {
+  FactType applySummary(const D::value_type &summary, const FactType &fact,
+                        bool *used_summary_overflow) const {
     if (!fact.reachable)
       return {false, {}};
-    if (summary.overflow)
-      used_summary_overflow_ = true;
+    if (summary.overflow && used_summary_overflow)
+      *used_summary_overflow = true;
 
     bool first = true;
     FactType joined;
@@ -458,6 +459,11 @@ public:
     return joinFacts(joined, overflow);
   }
 
+  FactType applySummary(const D::value_type &summary,
+                        const FactType &fact) const {
+    return applySummary(summary, fact, nullptr);
+  }
+
   FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
     if (!lhs.reachable)
       return rhs;
@@ -478,13 +484,14 @@ public:
   }
 
   FactType widenFacts(const FactType &oldFact, const FactType &newFact,
-                      size_t updates) const {
+                      size_t updates, bool *used_fact_widening) const {
     if (updates < 2 || !oldFact.reachable)
       return newFact;
     if (!newFact.reachable)
       return oldFact;
 
-    used_fact_widening_ = true;
+    if (used_fact_widening)
+      *used_fact_widening = true;
     FactType widened;
     widened.reachable = true;
     for (const auto &entry : newFact.values) {
@@ -500,6 +507,11 @@ public:
     return widened;
   }
 
+  FactType widenFacts(const FactType &oldFact, const FactType &newFact,
+                      size_t updates) const {
+    return widenFacts(oldFact, newFact, updates, nullptr);
+  }
+
   bool factsEqual(const FactType &lhs, const FactType &rhs) const {
     return lhs == rhs;
   }
@@ -507,10 +519,6 @@ public:
   bool summaryIsApproximate(const D::value_type &summary) const {
     return summary.overflow;
   }
-
-  bool usedSummaryOverflow() const { return used_summary_overflow_; }
-
-  bool usedFactWidening() const { return used_fact_widening_; }
 
 private:
   FactType overflowFact(const D::value_type &summary,
@@ -915,9 +923,6 @@ private:
       return;
     }
   }
-
-  mutable bool used_summary_overflow_ = false;
-  mutable bool used_fact_widening_ = false;
 };
 
 } // namespace

@@ -1781,7 +1781,7 @@ TEST(NPA, InterproceduralTaintHandlesCyclicConstantBackedIndirectTargets) {
   EXPECT_FALSE(result.isMemoryTainted(after, p0));
 }
 
-TEST(NPA, InterproceduralTaintTensorStrategyFallsBackToWorklist) {
+TEST(NPA, InterproceduralTaintTensorStrategyFallsBackToScc) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     declare i32 @getchar()

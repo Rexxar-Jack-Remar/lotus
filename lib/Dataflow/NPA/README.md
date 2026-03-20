@@ -25,8 +25,8 @@ This generalizes:
 
 The engine supports **TOPLAS 2016**-style algorithms for LCFL (linear context-free) linear sub-problems:
 
-- **LinearStrategy**: `Naive`, `Worklist`, `SCC`, `TensorProduct`
-- **SCC**: Solve in topological order of strongly connected components; fixpoint per SCC.
+- **LinearStrategy**: `Naive`, `SCC`, `TensorProduct`
+- **SCC**: Solve in topological order of strongly connected components, using a local dependency-driven worklist within each SCC.
 - **TensorProduct**: Rewrite LCFL terms into a tensorized left-linear system, solve there via Tarjan path expressions when extractable to a left-linear graph, and otherwise fall back to tensor-space worklist iteration.
 - **TensorDiff**: Direct tensor-side differential builder used by the Newton tensor path.
 - **TensorSemiringTraits**: Optional specialization point for domains that want to supply a custom tensor semiring/readout instead of the default exact-correlated tensor domain.

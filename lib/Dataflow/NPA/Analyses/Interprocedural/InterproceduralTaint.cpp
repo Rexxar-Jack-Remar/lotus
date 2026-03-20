@@ -1845,10 +1845,10 @@ InterproceduralTaint::Result InterproceduralTaint::run(
 
   LinearStrategy strategy = linearStrategy;
   if (strategy == LinearStrategy::TensorProduct) {
-    strategy = LinearStrategy::Worklist;
+    strategy = LinearStrategy::SCC;
     if (verbose)
       llvm::errs() << "[npa-taint] tensor strategy is unsupported for "
-                      "TaintTransferDomain; using worklist\n";
+                      "TaintTransferDomain; using SCC\n";
   }
 
   TaintAnalysis analysis(M, aliasAnalysis, options);

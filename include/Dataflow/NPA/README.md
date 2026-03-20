@@ -18,7 +18,7 @@ For numeric semirings where exact equality is too strong, a domain may optionall
    The differential \( D\vec{f}|_{\vec{\nu}} \) linearizes \( \vec{f} \) at \( \vec{\nu} \); when ⊗ is non-commutative, this system is an **LCFL equation system** (coefficients on both sides of variables).
 
 4. **Solving the linear system** (each Newton round):
-   - **Worklist / SCC**: Chaotic iteration (or SCC-ordered fixpoint) on the linear RHS.
+   - **SCC**: Global SCC scheduling with dependency-driven local worklists on the linear RHS.
    - **Tensor product** (Reps et al., Alg. 3.4): Convert LCFL system to a tensorized left-linear system, solve there as a regular path problem, then apply tensor-side readout to project back to the base semiring. The implementation uses Tarjan path expressions when the tensorized system can be extracted into a left-linear labeled graph, and otherwise falls back to tensor-space worklist iteration.
 
 ## Implementation alignment with the papers
@@ -47,7 +47,7 @@ For numeric semirings where exact equality is too strong, a domain may optionall
 ### Deliberate non-paper fallbacks and boundaries
 
 - Domains may specialize `TensorSemiringTraits<D>` for experimental or utility tensor domains. These can still be useful in low-level tests, but only `paper_admissible()` traits participate in the high-level `TensorProduct` solver path.
-- When tensor regularization cannot be applied cleanly, the implementation falls back to base-domain worklist/SCC solving rather than attempting a partial paper construction.
+- When tensor regularization cannot be applied cleanly, the implementation falls back to the base-domain SCC solver rather than attempting a partial paper construction.
 - Interprocedural constant propagation and interval analysis use the abstract-summary path (`SummaryTransformerDomain`) instead of `ProgramTransferDomain` in their public APIs; these clients are deliberately approximate and surface summary-overflow / widening in `AnalysisStatus`.
 - The interprocedural engines use a closed-world, whole-module assumption for indirect calls: unknown call targets are approximated by type-compatible defined functions in the current LLVM module unless a stronger resolver is supplied outside NPA.
 - Non-idempotent Newton support exists at the core API level through `subtract` / `choose_delta`, but the current in-tree analyses are still centered on idempotent domains.
@@ -96,7 +96,7 @@ include/Dataflow/NPA/
 │   ├── Diff.h                 # Differential Df|ν
 │   ├── TensorDiff.h           # Tensor-side differential
 │   ├── LCFLDetector.h         # LCFL structure (Concat/Star)
-│   ├── LinearSolvers.h        # Worklist, SCC, tensor solvers
+│   ├── LinearSolvers.h        # SCC-based and tensor solvers
 │   ├── TensorSemiring.h       # Tensor semiring/readout traits
 │   ├── TensorLinearSolve.h    # Tensor-product solver (Alg. 3.4)
 │   └── Solver.h               # KleeneIter / NewtonIter
@@ -131,7 +131,7 @@ include/Dataflow/NPA/
 - **Intraprocedural**: local clients such as `BitVectorSolver` can use conventional worklist/Kleene-style solving.
 - **Interprocedural (forward)**: `InterproceduralEngine<Domain, Analysis>` builds recursive procedure-summary equations and reports merged valid-path facts at blocks.
 - **Interprocedural (backward)**: `BackwardInterproceduralEngine<Domain, Analysis>` provides the analogous backward summary-based engine for clients such as liveness.
-- **Linear strategy** (Newton only): `LinearStrategy::Worklist`, `SCC`, or `TensorProduct` (when LCFL).
+- **Linear strategy** (Newton only): `LinearStrategy::SCC` or `TensorProduct` (when LCFL).
 - **Subdistributive summaries**: constant propagation and interval analysis use `SummaryTransformerDomain`, a first-class abstract-summary path for the current Section 8-style in-tree clients.
 - **Developer note**: JACM core Newton lives in `Core/Solver.h`, `Core/Diff.h`, and the linear solvers; TOPLAS tensor regularization lives in `Core/Tensor*`; the Section 8-style in-tree clients are the bounded abstract-summary CP/interval analyses, which are deliberately approximate rather than exact restatements of the paper.
 - **Legacy explicit summaries**: `ProgramTransferDomain` remains available for tests and older utility clients that want explicit path sets.
@@ -145,5 +145,5 @@ include/Dataflow/NPA/
 - `static constexpr bool project_newton_safe`: If declared and true, the domain opts into using `Project` on Newton/tensor paths. Domains that merely implement `project()` remain evaluable in plain fixpoint evaluation but are rejected on Newton/tensor paths.
 - `static value_type choose_delta(value_type f_nu, value_type nu)`: If declared, used to pick the Newton δ(i) term for **non-idempotent** domains (instead of requiring `subtract`). The solver validates the required invariant `combine(nu, delta) == f_nu` using exact domain equality (`equal`, not `approx_equal`) and throws `InvalidNewtonDeltaError` if the domain violates it.
 - `static constexpr int max_fixpoint_iters`: If declared (≥0), caps generic fixpoint iteration (used by `Star`, `Mu`, and the naive linear solver). This intentionally turns the result into a bounded approximation; `Stat::hit_fixpoint_limit` records the source.
-- `static constexpr long max_linear_steps`: If declared (≥0), caps worklist/SCC steps when solving the linearized system (useful for numeric semirings). This also yields a bounded approximation rather than the paper's least solution; `Stat::hit_linear_limit` records the source.
+- `static constexpr long max_linear_steps`: If declared (≥0), caps linear-solver steps when solving the linearized system (useful for numeric semirings). This also yields a bounded approximation rather than the paper's least solution; `Stat::hit_linear_limit` records the source.
 - Domains that opt into `project_newton_safe` are responsible for the proof obligations used by the Newton path: monotonicity, compatibility with `combine`, compatibility with the summary/linearized equations, and any tensor-side readout restrictions required by the domain.

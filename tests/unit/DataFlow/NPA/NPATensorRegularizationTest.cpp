@@ -225,7 +225,7 @@ TEST(NPA, TensorRegularizationMatchesWorklistOnConstantConcat) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
 
   ASSERT_EQ(wl.size(), 1u);
@@ -274,7 +274,7 @@ TEST(NPA, TensorRegularizationPreservesCorrelationAcrossAlternatives) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
 
   ASSERT_EQ(wl.size(), 1u);
@@ -298,7 +298,7 @@ TEST(NPA, TensorRegularizationPreservesNonZeroInitialSeeds) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {singleton("x")};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = solve_with_unchecked_tensorized_helper<D>(eqns, init);
 
   ASSERT_EQ(wl.size(), 1u);
@@ -381,7 +381,7 @@ TEST(NPA, TensorTarjanExtractsSelfContainedStar) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = solve_with_unchecked_tensorized_helper<D>(eqns, init);
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
   rhs_tensor.emplace_back("X", npa::Exp1ToTensor<D>::convert(rhs));
@@ -420,7 +420,7 @@ TEST(NPA, TensorRegularizationSupportsNonConstantStarViaTensorizedFallback) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {singleton("x")};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = solve_with_unchecked_tensorized_helper<D>(eqns, init);
 
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
@@ -448,7 +448,7 @@ TEST(NPA, TensorRegularizationRejectsSubExpressions) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = npa::solve_linear_tensor_impl<D>(false, eqns, init);
 
   ASSERT_EQ(wl.size(), 1u);
@@ -475,7 +475,7 @@ TEST(NPA, TensorTarjanSupportsProjectedLeftLinearFragments) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = solve_with_unchecked_tensorized_helper<D>(eqns, init);
 
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
@@ -510,7 +510,7 @@ TEST(NPA, HighLevelTensorKeepsProjectedLeftLinearFragmentsOnTensorPath) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
 
   testing::internal::CaptureStderr();
   auto tp = npa::solve_linear_tensor_impl<D>(true, eqns, init);
@@ -533,7 +533,7 @@ TEST(NPA, TensorRegularizationSupportsCallTerms) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {singleton("x")};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = solve_with_unchecked_tensorized_helper<D>(eqns, init);
 
   ASSERT_EQ(wl.size(), 1u);
@@ -550,7 +550,7 @@ TEST(NPA, TensorRegularizationPreservesZeroRhsWithNonZeroSeed) {
   eqns.emplace_back("X", Exp::term(D::zero()));
 
   std::vector<npa::DomVal<D>> init = {singleton("x")};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = solve_with_unchecked_tensorized_helper<D>(eqns, init);
 
   ASSERT_EQ(wl.size(), 1u);
@@ -573,7 +573,7 @@ TEST(NPA, TensorRegularizationSupportsCustomTensorTraits) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
   auto tp = solve_with_unchecked_tensorized_helper<D>(eqns, init);
 
   ASSERT_EQ(wl.size(), 1u);
@@ -595,7 +595,7 @@ TEST(NPA, HighLevelTensorEntryFallsBackForUncheckedUtilityTraits) {
   eqns.emplace_back("X", rhs);
 
   std::vector<npa::DomVal<D>> init = {D::zero()};
-  auto wl = npa::solve_linear_worklist_impl<D>(false, eqns, init);
+  auto wl = npa::solve_linear_scc_impl<D>(false, eqns, init);
 
   testing::internal::CaptureStderr();
   auto tp = npa::solve_linear_tensor_impl<D>(true, eqns, init);

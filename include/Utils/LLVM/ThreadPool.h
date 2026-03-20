@@ -41,7 +41,7 @@ public:
   /// add new work item to the pool
   template <class F, class... Args>
   auto enqueue(F &&, Args &&...)
-      -> std::future<typename std::result_of<F(Args...)>::type>;
+      -> std::future<decltype(std::declval<F>()(std::declval<Args>()...))>;
 
   /// Wait until no tasks remain
   void wait();
@@ -110,9 +110,8 @@ public:
 
 template <class F, class... Args>
 auto ThreadPool::enqueue(F &&Func, Args &&...Arguments)
-    -> std::future<typename std::result_of<F(Args...)>::type> {
-  using return_type =
-      typename std::result_of<F(Args...)>::type; // The return type
+    -> std::future<decltype(std::declval<F>()(std::declval<Args>()...))> {
+  using return_type = decltype(std::declval<F>()(std::declval<Args>()...));
 
   auto Task = std::make_shared<std::packaged_task<return_type()>>(
       std::bind(std::forward<F>(Func), std::forward<Args>(Arguments)...));

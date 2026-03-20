@@ -21,8 +21,9 @@ public:
   static constexpr bool idempotent = true;
   static constexpr bool commutative_extend = true;
 
-  // The width is determined at runtime but stored in a static so that the
-  // zero() factory can create well-sized vectors.
+  // V1 single-run parallelism contract: configure the width before solving and
+  // keep it frozen for the duration of that run. The hot path stays lock-free;
+  // concurrent independent runs remain out of scope.
   static void setBitWidth(unsigned W) { BitWidth = W; }
   static unsigned getBitWidth() { return BitWidth; }
 

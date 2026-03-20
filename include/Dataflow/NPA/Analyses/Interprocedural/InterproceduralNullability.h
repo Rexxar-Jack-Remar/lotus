@@ -43,17 +43,17 @@ public:
 
   static Result run(llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis,
                     const Options &options, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
+                    LinearStrategy linearStrategy = LinearStrategy::SCC);
   static Result run(llvm::Module &M, lotus::AliasAnalysisWrapper &aliasAnalysis,
                     bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    LinearStrategy linearStrategy = LinearStrategy::SCC,
                     IndirectCallResolutionMode callResolutionMode =
                         IndirectCallResolutionMode::ClosedWorldTypeCompatible);
   static Result run(llvm::Module &M, const Options &options,
                     bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist);
+                    LinearStrategy linearStrategy = LinearStrategy::SCC);
   static Result run(llvm::Module &M, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::Worklist,
+                    LinearStrategy linearStrategy = LinearStrategy::SCC,
                     IndirectCallResolutionMode callResolutionMode =
                         IndirectCallResolutionMode::ClosedWorldTypeCompatible);
 };
