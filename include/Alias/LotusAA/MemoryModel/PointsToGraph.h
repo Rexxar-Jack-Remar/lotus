@@ -13,9 +13,12 @@
 #pragma once
 
 #include <map>
+#include <memory>
 #include <set>
+#include <tuple>
 #include <vector>
 
+#include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Function.h>
@@ -139,6 +142,7 @@ protected:
 
   // Dominance information for SSA construction
   DominatorTree *dom_tree;
+  PostDominatorTree *post_dom_tree;
 
   // Special NULL result
   PTResult *NullPTS;
@@ -169,6 +173,27 @@ protected:
   std::map<BasicBlock *,
            std::map<BasicBlock *, path_cond_t, llvm_cmp>, llvm_cmp>
       phi_region_cache;
+  std::map<BasicBlock *,
+           std::map<BasicBlock *, path_cond_t, llvm_cmp>, llvm_cmp>
+      bb_region_cache;
+  std::map<BasicBlock *, path_cond_t, llvm_cmp> unit_region_cache_;
+  std::map<BasicBlock *,
+           std::map<BasicBlock *, path_cond_t, llvm_cmp>, llvm_cmp>
+      control_dep_cache_;
+  std::map<std::pair<BasicBlock *, BasicBlock *>, path_cond_t> edge_cond_cache_;
+
+  path_cond_t true_cond_;
+  path_cond_t false_cond_;
+  std::vector<std::unique_ptr<PathCond>> cond_nodes_;
+  std::map<std::pair<Value *, bool>, path_cond_t> value_cond_cache_;
+  std::map<BasicBlock *, path_cond_t, llvm_cmp> block_cond_cache_;
+  std::map<std::pair<Value *, Function *>, path_cond_t> call_target_cond_cache_;
+  std::map<std::tuple<Value *, Function *, path_cond_t>, path_cond_t>
+      imported_cond_cache_;
+  std::map<path_cond_t, path_cond_t> not_cond_cache_;
+  std::map<std::pair<path_cond_t, path_cond_t>, path_cond_t> and_cond_cache_;
+  std::map<std::pair<path_cond_t, path_cond_t>, path_cond_t> or_cond_cache_;
+  bool control_dep_ready_;
 
   // Constants
   static const int VALUE_SEQ_UNDEF;
@@ -189,9 +214,15 @@ protected:
   void refineResult(mem_value_t &to_refine);
 
   void loadPtrAt(Value *ptr, Instruction *from_loc, mem_value_t &res,
-                 bool create_symbol = false, int64_t offset = 0);
+                 bool create_symbol = false, int64_t offset = 0,
+                 int func_level = ObjectLocator::FUNC_LEVEL_UNDEFINED,
+                 ObjectLocator *func_call_cache = nullptr,
+                 bool is_include_func_summary = false,
+                 bool is_maintain_load_map = true);
   void loadPtrAtImpl(Value *ptr, Instruction *from_loc, mem_value_t &result,
-                     bool create_symbol, int64_t query_offset,
+                     bool create_symbol, int64_t query_offset, int func_level,
+                     ObjectLocator *func_call_cache,
+                     bool is_include_func_summary, bool is_maintain_load_map,
                      std::set<std::tuple<Value *, Instruction *, int64_t>> &visited);
 
   void trackPtrRightValue(Value *ptr, mem_value_t &res);
@@ -201,6 +232,10 @@ protected:
 
   void performLoadLoadMatch();
   bool cacheLoadCategory(LoadInst *load_inst);
+  void buildControlDependenceInfo();
+  path_cond_t getCFGEdgeCond(BasicBlock *src_bb, BasicBlock *succ_bb);
+  path_cond_t importPathCond(path_cond_t cond, Value *callsite,
+                             Function *callee);
 
   virtual int getSequenceNum(Value *val) = 0;
   virtual int getInlineApDepth() = 0;
@@ -247,8 +282,14 @@ public:
   bool isAlwaysSatisfied(path_cond_t cond) const;
   bool isSatisfiable(path_cond_t cond) const;
   bool isNoEffectFunction(Function *F) const;
+  path_cond_t getValueCond(Value *value, bool sense = true);
+  path_cond_t getBlockCond(BasicBlock *BB);
+  path_cond_t getUnitRegion(BasicBlock *BB);
+  path_cond_t getCallTargetCond(Value *called_value, Function *callee);
+  path_cond_t findOrCreateBBRegion(BasicBlock *src_bb, BasicBlock *target_bb);
   path_cond_t findOrCreateAndRegion(path_cond_t lhs, path_cond_t rhs);
   path_cond_t findOrCreateOrRegion(path_cond_t lhs, path_cond_t rhs);
+  path_cond_t findOrCreateNotRegion(path_cond_t cond);
   path_cond_t findOrCreateUnitPhiRegion(BasicBlock *cur_bb,
                                         BasicBlock *incoming_bb);
 

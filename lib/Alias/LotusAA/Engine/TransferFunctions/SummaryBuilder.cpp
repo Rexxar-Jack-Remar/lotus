@@ -131,8 +131,9 @@ void IntraLotusAA::collectEscapedObjects(
       mem_value_t res;
       for (auto &ret_pair : ret_insts) {
         ReturnInst *ret = ret_pair.first;
+        path_cond_t cond = ret_pair.second;
         ObjectLocator *locator = cur_obj->findLocator(ptr_offset, true);
-        locator->getValues(ret, res, nullptr,
+        locator->getValues(ret, cond, res, nullptr,
                            ObjectLocator::FUNC_LEVEL_UNDEFINED, true,
                            func_obj ? func_obj->findLocator(0, false) : nullptr,
                            true);
@@ -292,8 +293,9 @@ void IntraLotusAA::collectOutputs() {
 
           for (auto &ret_pair : ret_insts) {
             ReturnInst *ret = ret_pair.first;
+            path_cond_t cond = ret_pair.second;
             mem_value_t &res = output_item->getVal()[ret];
-            locator->getValues(ret, res, normalized_type,
+            locator->getValues(ret, cond, res, normalized_type,
                                ObjectLocator::FUNC_LEVEL_UNDEFINED, true,
                                func_obj ? func_obj->findLocator(0, false)
                                         : nullptr,
@@ -306,8 +308,9 @@ void IntraLotusAA::collectOutputs() {
 
           for (auto &ret_pair : ret_insts) {
             ReturnInst *ret = ret_pair.first;
+            path_cond_t cond = ret_pair.second;
             mem_value_t &res = output_item->getVal()[ret];
-            locator->getValues(ret, res, normalized_type,
+            locator->getValues(ret, cond, res, normalized_type,
                                ObjectLocator::FUNC_LEVEL_UNDEFINED, true,
                                func_obj ? func_obj->findLocator(0, false)
                                         : nullptr,
@@ -344,8 +347,9 @@ void IntraLotusAA::collectOutputs() {
 
         for (auto &ret_pair : ret_insts) {
           ReturnInst *ret = ret_pair.first;
+          path_cond_t cond = ret_pair.second;
           mem_value_t &res = output_item->getVal()[ret];
-          locator->getValues(ret, res, normalized_type,
+          locator->getValues(ret, cond, res, normalized_type,
                              ObjectLocator::FUNC_LEVEL_UNDEFINED, true,
                              func_obj ? func_obj->findLocator(0, false)
                                       : nullptr,
@@ -361,6 +365,45 @@ void IntraLotusAA::collectOutputs() {
       }
     }
   }
+
+  auto refine_output_value = [this](std::vector<OutputItem *> &output_items) {
+    std::map<std::pair<Value *, Instruction *>, std::pair<path_cond_t, float>>
+        merged_values;
+
+    for (auto *out : output_items) {
+      for (auto &ret_mem_pair : out->getVal()) {
+        mem_value_t &mem_vals = ret_mem_pair.second;
+        for (auto &mem : mem_vals) {
+          auto key = std::make_pair(mem.val, mem.pos);
+          auto it = merged_values.find(key);
+          if (it == merged_values.end()) {
+            merged_values.emplace(key, std::make_pair(mem.cond, mem.confidence));
+          } else {
+            it->second.first =
+                findOrCreateOrRegion(it->second.first, mem.cond);
+            it->second.second = mem_value_item_t::compute_or_confidence(
+                it->second.second, mem.confidence);
+          }
+        }
+      }
+    }
+
+    for (auto *out : output_items) {
+      for (auto &ret_mem_pair : out->getVal()) {
+        mem_value_t &mem_vals = ret_mem_pair.second;
+        mem_value_t refined_mem_vals;
+        refined_mem_vals.reserve(mem_vals.size());
+        for (auto &mem : mem_vals) {
+          auto merged = merged_values[std::make_pair(mem.val, mem.pos)];
+          refined_mem_vals.emplace_back(merged.first, mem.pos, mem.val,
+                                        merged.second);
+        }
+        mem_vals = std::move(refined_mem_vals);
+      }
+    }
+  };
+
+  refine_output_value(outputs);
 
   // Record point-to changes for outputs
   for (auto &output_item : outputs) {
@@ -473,36 +516,13 @@ void IntraLotusAA::finalizeInterface() {
              IntraLotusAAConfig::lotus_restrict_inline_size) {
     lotus_restrict_ap_level_adjust = 0;
   } else {
-    // Self-adjusting heuristic: find the largest AP depth that keeps the
-    // interface size below lotus_restrict_inline_size.
-    //
-    // We count outputs/inputs at each depth level and accumulate until the
-    // limit is exceeded.  The loop variable tracks the *candidate* depth; we
-    // stop at the depth that first exceeds the limit and then use the
-    // *previous* depth as the effective limit.
-    //
-    // Bug fix: the original code used a sliding CACHE_SIZE window with the
-    // formula `cache_idx = level - (next_cache_start - CACHE_SIZE)`.  When
-    // `level == next_cache_start` (i.e., the cache was just rebuilt and
-    // `next_cache_start` was already incremented), the formula gives
-    // `cache_idx = next_cache_start - (next_cache_start) = 0`, which is
-    // correct.  However, the final `lotus_restrict_ap_level_adjust--` was
-    // applied unconditionally *after* the loop, including when the loop
-    // exited normally (without breaking), making the effective limit one less
-    // than the configured maximum.  We now track the last *valid* depth
-    // explicitly and avoid the unconditional decrement.
-
+    // Keep Falcon's exact self-adjusting interface pruning heuristic.
     const int CACHE_SIZE = 10;
     int cache_input[CACHE_SIZE] = {0};
     int cache_output[CACHE_SIZE] = {0};
     int input_sum = 0;
     int output_sum = 0;
     int next_cache_start = 0;
-    // last_valid_level: the highest depth at which the cumulative interface
-    // size was still within the limit.  Initialised to -1 (no valid level yet,
-    // meaning we should use the full configured depth).
-    int last_valid_level = -1;
-    bool limit_exceeded = false;
 
     for (lotus_restrict_ap_level_adjust = 0;
          lotus_restrict_ap_level_adjust <=
@@ -545,40 +565,19 @@ void IntraLotusAA::finalizeInterface() {
 
       if (input_sum >= IntraLotusAAConfig::lotus_restrict_inline_size ||
           output_sum >= IntraLotusAAConfig::lotus_restrict_inline_size) {
-        // This depth exceeds the limit; use last_valid_level.
-        limit_exceeded = true;
         break;
       }
-
-      last_valid_level = lotus_restrict_ap_level_adjust;
 
       if (cache_input[cache_idx] == 0 && cache_output[cache_idx] == 0 &&
           lotus_restrict_ap_level_adjust != 0) {
-        // No new interface items at this depth — the interface is already
-        // fully captured; allow all depths.
         lotus_restrict_ap_level_adjust =
             LotusConfig::MAXIMAL_SUMMARY_AP_DEPTH + 1;
-        last_valid_level = lotus_restrict_ap_level_adjust;
         break;
       }
     }
-
-    if (limit_exceeded) {
-      // Use the last depth that was within the limit.
-      lotus_restrict_ap_level_adjust = last_valid_level;
-    } else if (lotus_restrict_ap_level_adjust >
-                   IntraLotusAAConfig::lotus_restrict_ap_level &&
-               last_valid_level >= 0 &&
-               last_valid_level <= IntraLotusAAConfig::lotus_restrict_ap_level) {
-      lotus_restrict_ap_level_adjust = last_valid_level;
-    }
-    // If the loop completed without exceeding the limit, lotus_restrict_ap_level_adjust
-    // already holds the configured maximum (or MAXIMAL_SUMMARY_AP_DEPTH+1 for
-    // the "fully inline" case) — no adjustment needed.
   }
 
-  // No unconditional decrement here (that was the off-by-one bug).
-
+  lotus_restrict_ap_level_adjust--;
 
   // Filter outputs by AP level and function level
   std::vector<OutputItem *> new_outputs;
@@ -650,24 +649,43 @@ void IntraLotusAA::finalizeInterface() {
   for (OutputItem *output_item : outputs) {
     auto &point_to = output_item->getPseudoPointTo();
 
-    // Filter point-to information
-    list<pair<path_cond_t, AccessPath>> filtered_pts;
+    if (IntraLotusAAConfig::lotus_restrict_output_pts != -1 &&
+        static_cast<int>(point_to.size()) >
+            IntraLotusAAConfig::lotus_restrict_output_pts) {
+      point_to.clear();
+      continue;
+    }
+
+    map<Value *, map<int64_t, pair<path_cond_t, AccessPath>, less<int64_t>>,
+        llvm_cmp>
+        should_exist;
 
     for (auto &point_to_item : point_to) {
       AccessPath &ap = point_to_item.second;
       Value *parent_val = ap.getParentPtr();
+      int64_t offset = ap.getOffset();
 
-      if (!parent_val || isa<GlobalValue>(parent_val) ||
-          inputs.count(parent_val) || escape_source.count(parent_val)) {
-        filtered_pts.push_back(point_to_item);
-      } else if (Argument *parent_arg = dyn_cast<Argument>(parent_val)) {
-        if (parent_arg->getParent()) {
-          filtered_pts.push_back(point_to_item);
+      if (parent_val == nullptr || isa<GlobalValue>(parent_val) ||
+          inputs.count(parent_val) || escape_source.count(parent_val) ||
+          (isa<Argument>(parent_val) &&
+           cast<Argument>(parent_val)->getParent() != nullptr)) {
+        if (should_exist.count(parent_val) &&
+            should_exist[parent_val].count(offset)) {
+          path_cond_t prev_cond = should_exist[parent_val][offset].first;
+          should_exist[parent_val][offset] = std::make_pair(
+              findOrCreateOrRegion(prev_cond, point_to_item.first), ap);
+        } else {
+          should_exist[parent_val][offset] = point_to_item;
         }
       }
     }
 
-    point_to = std::move(filtered_pts);
+    point_to.clear();
+    for (auto &value_offsets : should_exist) {
+      for (auto &offset_item : value_offsets.second) {
+        point_to.push_back(offset_item.second);
+      }
+    }
   }
 
   // Record inline depth

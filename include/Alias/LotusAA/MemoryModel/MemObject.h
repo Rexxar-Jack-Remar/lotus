@@ -20,8 +20,8 @@
 #include <string>
 #include <vector>
 
-#include <llvm/IR/Constants.h>
 #include <llvm/IR/Argument.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
@@ -228,7 +228,8 @@ public:
                        int function_level = FUNC_LEVEL_UNDEFINED);
   
   // Get values from locator with Falcon-style path and summary bookkeeping.
-  Argument *getValues(Instruction *pos_inst, mem_value_t &res, 
+  Argument *getValues(Instruction *pos_inst, path_cond_t pre_cond,
+                      mem_value_t &res,
                       Type *symbol_type = nullptr,
                       int function_level = FUNC_LEVEL_UNDEFINED,
                       bool enable_strong_update = true,

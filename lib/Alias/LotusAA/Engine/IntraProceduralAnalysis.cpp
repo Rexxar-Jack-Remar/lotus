@@ -66,6 +66,11 @@ bool IntraLotusAAConfig::lotus_disable_thread_heuristic = false;
 bool IntraLotusAAConfig::lotus_use_valuetostring = false;
 int IntraLotusAAConfig::lotus_restrict_inline_size = 100;
 int IntraLotusAAConfig::lotus_restrict_ap_level = 2;
+bool IntraLotusAAConfig::lotus_use_full_phi_cond = false;
+bool IntraLotusAAConfig::lotus_enable_score_computation = false;
+bool IntraLotusAAConfig::lotus_enable_summary_value = false;
+int IntraLotusAAConfig::lotus_restrict_output_pts = 10;
+int IntraLotusAAConfig::lotus_memory_max_passing_func = 50;
 
 static cl::opt<int> lotus_restrict_inline_depth_cl(
     "lotus-restrict-inline-depth",
@@ -95,6 +100,31 @@ static cl::opt<bool> lotus_disable_thread_heuristic_cl(
     cl::desc("Disable thread heuristic processing in LotusAA"),
     cl::init(false), cl::Hidden);
 
+static cl::opt<bool> lotus_use_full_phi_cond_cl(
+    "lotus-use-full-phi-cond",
+    cl::desc("Use full unit block conditions for phi guards"),
+    cl::init(false), cl::Hidden);
+
+static cl::opt<bool> lotus_enable_score_computation_cl(
+    "lotus-enable-score-computation",
+    cl::desc("Enable Falcon-compatible call barrier confidence computation"),
+    cl::init(false), cl::Hidden);
+
+static cl::opt<bool> lotus_enable_summary_value_cl(
+    "lotus-enable-summary-value",
+    cl::desc("Emit Falcon-compatible summary-value memory effects"),
+    cl::init(false), cl::Hidden);
+
+static cl::opt<int> lotus_restrict_output_pts_cl(
+    "lotus-restrict-output-pts",
+    cl::desc("Restrict pseudo output points-to entries"),
+    cl::init(10), cl::Hidden);
+
+static cl::opt<int> lotus_memory_max_passing_func_cl(
+    "lotus-restrict-memory-max-passing-func",
+    cl::desc("Maximum calls considered by score computation"),
+    cl::init(50), cl::Hidden);
+
 void IntraLotusAAConfig::setParam() {
   if (lotus_restrict_inline_depth_cl.getNumOccurrences() > 0)
     lotus_restrict_inline_depth = lotus_restrict_inline_depth_cl;
@@ -108,6 +138,16 @@ void IntraLotusAAConfig::setParam() {
     pts_setting = lotus_pts_setting_cl;
   if (lotus_disable_thread_heuristic_cl.getNumOccurrences() > 0)
     lotus_disable_thread_heuristic = lotus_disable_thread_heuristic_cl;
+  if (lotus_use_full_phi_cond_cl.getNumOccurrences() > 0)
+    lotus_use_full_phi_cond = lotus_use_full_phi_cond_cl;
+  if (lotus_enable_score_computation_cl.getNumOccurrences() > 0)
+    lotus_enable_score_computation = lotus_enable_score_computation_cl;
+  if (lotus_enable_summary_value_cl.getNumOccurrences() > 0)
+    lotus_enable_summary_value = lotus_enable_summary_value_cl;
+  if (lotus_restrict_output_pts_cl.getNumOccurrences() > 0)
+    lotus_restrict_output_pts = lotus_restrict_output_pts_cl;
+  if (lotus_memory_max_passing_func_cl.getNumOccurrences() > 0)
+    lotus_memory_max_passing_func = lotus_memory_max_passing_func_cl;
 }
 
 // IntraLotusAA implementation

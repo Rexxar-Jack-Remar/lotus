@@ -15,8 +15,8 @@
 
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Value.h>
-#include <map>
 #include <list>
+#include <map>
 #include <set>
 #include <unordered_map>
 
@@ -42,6 +42,11 @@ public:
   static bool lotus_use_valuetostring;
   static int lotus_restrict_inline_size;
   static int lotus_restrict_ap_level;
+  static bool lotus_use_full_phi_cond;
+  static bool lotus_enable_score_computation;
+  static bool lotus_enable_summary_value;
+  static int lotus_restrict_output_pts;
+  static int lotus_memory_max_passing_func;
 
   static void setParam();
 };
@@ -193,11 +198,13 @@ private:
   void processCalleeInput(std::map<Value *, AccessPath, llvm_cmp> &callee_input,
                           std::map<Value *, int, llvm_cmp> &inputs_func_level,
                           std::vector<Value *> &real_args, std::vector<Value *> &formal_args,
-                          CallBase *callsite, func_arg_t &result);
+                          CallBase *callsite, func_arg_t &result,
+                          path_cond_t pre_cond = nullptr);
 
   void processCalleeOutput(std::vector<OutputItem *> &callee_output,
                            std::set<MemObject *, mem_obj_cmp> &callee_escape,
-                           Instruction *callsite, Function *callee);
+                           Instruction *callsite, Function *callee,
+                           path_cond_t pre_cond = nullptr);
 
   // Helper functions for processCalleeOutput
   std::vector<Value *> &createPseudoOutputNodes(std::vector<OutputItem *> &callee_output,
@@ -210,13 +217,15 @@ private:
   void linkOutputPointsToResults(OutputItem *output, Value *curr_output,
                                   std::map<Value *, MemObject *, llvm_cmp> &escape_object_map,
                                   func_arg_t &callee_func_arg,
+                                  Instruction *callsite, Function *callee,
                                   std::set<PTResult *> &visited);
   
   void linkOutputValues(OutputItem *output, Value *curr_output, size_t idx,
                         std::map<Value *, MemObject *, llvm_cmp> &escape_object_map,
                         func_arg_t &callee_func_arg,
                         Instruction *callsite,
-                        std::unordered_map<PTResult *, PTResultIterator> &pt_result_cache);
+                        std::unordered_map<PTResult *, PTResultIterator> &pt_result_cache,
+                        path_cond_t pre_cond);
 
   void collectOutputs();
   void collectInputs();

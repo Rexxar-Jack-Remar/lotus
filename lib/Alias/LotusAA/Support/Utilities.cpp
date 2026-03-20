@@ -48,7 +48,7 @@ void IntraLotusAA::getReturnInst() {
 
   for (BasicBlock &bb : *F) {
     if (ReturnInst *ret = dyn_cast<ReturnInst>(bb.getTerminator())) {
-      ret_insts[ret] = getEmptyCond();
+      ret_insts[ret] = getUnitRegion(ret->getParent());
     }
   }
 }

@@ -71,6 +71,7 @@
 /// @see placePhi() for SSA-style φ-placement algorithm
 
 #include "Alias/LotusAA/MemoryModel/MemObject.h"
+#include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "Alias/LotusAA/MemoryModel/PointsToGraph.h"
 #include "Alias/LotusAA/Support/LotusConfig.h"
 
@@ -106,6 +107,10 @@ static cl::opt<int> lotus_memory_store_depth(
     cl::desc("Maximum BBs to track for store operations"),
     cl::init(LotusConfig::MemoryLimits::DEFAULT_STORE_DEPTH), cl::Hidden);
 
+static int getLotusMemoryMaxPassingFunc() {
+  return IntraLotusAAConfig::lotus_memory_max_passing_func;
+}
+
 //===----------------------------------------------------------------------===//
 // LocValue Implementation
 //===----------------------------------------------------------------------===//
@@ -131,15 +136,10 @@ void LocValue::dump() {
     val->print(outs());
 
   outs() << " cond=";
-  if (!cond) {
+  if (!cond)
     outs() << "<null>";
-  } else if (auto *CI = dyn_cast<ConstantInt>(cond)) {
-    outs() << (CI->isOne() ? "true" : "false");
-  } else if (cond->hasName()) {
-    outs() << cond->getName();
-  } else {
+  else
     cond->print(outs());
-  }
 
   outs() << " @";
   if (pos_inst && pos_inst->getParent())
@@ -265,8 +265,7 @@ void ObjectLocator::placePhi(LocValue *loc_value, BasicBlock *bb_start) {
 
   for (int i = 0; i < num_blocks; i++) {
     BasicBlock *processing_bb = Frontier[i];
-    path_cond_t phi_cond =
-        pt_graph->findOrCreateUnitPhiRegion(processing_bb, bb_start);
+    path_cond_t phi_cond = pt_graph->getUnitRegion(bb_start);
     path_cond_t processing_cond =
         pt_graph->findOrCreateAndRegion(loc_value->getCond(), phi_cond);
     LocValue *phi_lv = new LocValue(loc_value->getVal(), loc_value->getPos(),
@@ -339,11 +338,15 @@ LocValue *ObjectLocator::getVersion(Instruction *pos_inst) {
 static Value *get_constant_from_aggregate(Constant *val, int64_t offset,
                                           const DataLayout *DL);
 
-Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
-                                   Type *symbol_type, int function_level,
+Argument *ObjectLocator::getValues(Instruction *from_loc, path_cond_t pre_cond,
+                                   mem_value_t &res, Type *symbol_type,
+                                   int function_level,
                                    bool enable_strong_update,
                                    ObjectLocator *func_call_cache,
                                    bool is_include_func_summary) {
+  if (!pre_cond)
+    pre_cond = getPTG()->getEmptyCond();
+
   // Check for constant global initializer
   Value *alloc_site = object->getAllocSite();
   if (alloc_site) {
@@ -351,7 +354,7 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
       if (gv->isConstant()) {
         Value *constant_global = getInitializerForGlobalValue();
         if (constant_global) {
-          res.push_back(mem_value_item_t(getPTG()->getEmptyCond(), nullptr,
+          res.push_back(mem_value_item_t(pre_cond, nullptr,
                                          constant_global, 1.0f));
           return nullptr;
         } else {
@@ -362,11 +365,13 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
   }
 
   mem_value_t *possible_updating_callsite =
-      is_include_func_summary ? &res : nullptr;
+      (is_include_func_summary && IntraLotusAAConfig::lotus_enable_summary_value)
+          ? &res
+          : nullptr;
 
   mem_value_t func_in_path;
   if (func_call_cache) {
-    func_call_cache->getValues(from_loc, func_in_path, nullptr,
+    func_call_cache->getValues(from_loc, pre_cond, func_in_path, nullptr,
                                FUNC_LEVEL_UNDEFINED, false);
   }
 
@@ -375,6 +380,85 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
   DominatorTree *DT = getPTG()->getDomTree();
   if (!DT)
     return nullptr;
+
+  auto get_confidence_with_no_call_barrier =
+      [&](int val_seq, path_cond_t current_pre_cond,
+          mem_value_t *func_detailed_res) -> float {
+    float result = 1.0f;
+    int max_passing_func = getLotusMemoryMaxPassingFunc();
+
+    if (val_seq == PTGraph::VALUE_SEQ_UNDEF)
+      return result;
+
+    while (func_idx < func_in_path.size()) {
+      if (max_passing_func != -1 &&
+          static_cast<int>(func_idx) > max_passing_func) {
+        return 0.1f;
+      }
+
+      mem_value_item_t &mem_item = func_in_path[func_idx];
+      Value *func_val = mem_item.pos;
+      int func_seq = getPTG()->getSequenceNum(func_val);
+      if (val_seq == PTGraph::VALUE_SEQ_INFINITE || func_seq <= val_seq)
+        break;
+
+      ++func_idx;
+
+      if (func_seq == PTGraph::VALUE_SEQ_UNDEF)
+        continue;
+
+      CallBase *call = dyn_cast<CallBase>(func_val);
+      if (!call)
+        continue;
+
+      if (Function *func = call->getCalledFunction()) {
+        if (getPTG()->isNoEffectFunction(func))
+          continue;
+      }
+
+      path_cond_t func_cond = mem_item.cond;
+      float func_exec_confidence = 1.0f;
+      if (!getPTG()->isAlwaysSatisfied(func_cond)) {
+        path_cond_t func_final_cond =
+            getPTG()->findOrCreateAndRegion(current_pre_cond, func_cond);
+        if (!getPTG()->isSatisfiable(func_final_cond)) {
+          func_exec_confidence = 0.0f;
+        } else {
+          func_exec_confidence =
+              llvm::LotusConfig::Heuristics::COND_SAT_PROBABILITY;
+        }
+      }
+
+      int ap_depth = PTGraph::FUNC_OBJ_UNREACHABLE;
+      if (CallInst *call_inst = dyn_cast<CallInst>(call)) {
+        ap_depth = getPTG()->getObjectToCallApDepth(getObj(), call_inst);
+      }
+      if (ap_depth == PTGraph::FUNC_OBJ_UNREACHABLE)
+        continue;
+
+      if (Function *callee = call->getCalledFunction()) {
+        if (PTGraph *callee_graph = getPTG()->getPtGraph(callee)) {
+          if (callee_graph->getInlineApDepth() >= ap_depth)
+            continue;
+        }
+      }
+
+      float func_affect_confidence =
+          llvm::LotusConfig::Heuristics::MEM_CHANGE_PROBABILITY[ap_depth] *
+          func_exec_confidence;
+      result *= (1.0f - func_affect_confidence);
+
+      if (func_detailed_res && IntraLotusAAConfig::lotus_enable_summary_value) {
+        if (Instruction *func_inst = dyn_cast<Instruction>(func_val)) {
+          func_detailed_res->push_back(mem_value_item_t(
+              getPTG()->findOrCreateAndRegion(current_pre_cond, func_cond),
+              func_inst, LocValue::SUMMARY_VALUE, func_affect_confidence));
+        }
+      }
+    }
+
+    return result;
+  };
 
   path_cond_t curr_anti_cond = getPTG()->getEmptyCond();
   float curr_confidence = 1.0f;
@@ -440,51 +524,15 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
         Value *val = curr_lv->getVal();
         Instruction *pos = curr_lv->getPos();
         path_cond_t final_cond =
-            getPTG()->findOrCreateAndRegion(getPTG()->getEmptyCond(),
-                                           mem_val_cond);
+            getPTG()->findOrCreateAndRegion(pre_cond, mem_val_cond);
 
         if (getPTG()->isSatisfiable(final_cond) && val != LocValue::NO_VALUE) {
           float no_effect_confidence = 1.0f;
-          while (func_idx < func_in_path.size()) {
-            mem_value_item_t &func_item = func_in_path[func_idx];
-            if (!func_item.pos)
-              break;
-            int func_seq = getPTG()->getSequenceNum(func_item.pos);
+          if (IntraLotusAAConfig::lotus_enable_score_computation) {
             int val_seq = pos ? getPTG()->getSequenceNum(pos)
                               : PTGraph::VALUE_SEQ_INFINITE;
-            if (val_seq == PTGraph::VALUE_SEQ_INFINITE || func_seq <= val_seq)
-              break;
-            func_idx++;
-
-            CallBase *call = dyn_cast<CallBase>(func_item.pos);
-            if (!call)
-              continue;
-            Function *callee = call->getCalledFunction();
-            if (callee && getPTG()->isNoEffectFunction(callee))
-              continue;
-
-            int ap_depth = 1;
-            if (auto *call_inst = dyn_cast<CallInst>(call)) {
-              ap_depth = getPTG()->getObjectToCallApDepth(getObj(), call_inst);
-            }
-            if (ap_depth == PTGraph::FUNC_OBJ_UNREACHABLE)
-              continue;
-
-            float func_exec_confidence =
-                getPTG()->isAlwaysSatisfied(func_item.cond)
-                    ? 1.0f
-                    : llvm::LotusConfig::Heuristics::COND_SAT_PROBABILITY;
-            float func_affect_confidence =
-                llvm::LotusConfig::Heuristics::MEM_CHANGE_PROBABILITY[ap_depth] *
-                func_exec_confidence;
-            no_effect_confidence *= (1.0f - func_affect_confidence);
-
-            if (possible_updating_callsite) {
-              possible_updating_callsite->push_back(mem_value_item_t(
-                  getPTG()->findOrCreateAndRegion(final_cond, func_item.cond),
-                  func_item.pos, LocValue::SUMMARY_VALUE,
-                  func_affect_confidence));
-            }
+            no_effect_confidence = get_confidence_with_no_call_barrier(
+                val_seq, final_cond, possible_updating_callsite);
           }
 
           curr_confidence *= no_effect_confidence;
@@ -497,8 +545,9 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
             // Stop at strong update
             return nullptr;
           }
+          path_cond_t anti_cond = getPTG()->findOrCreateNotRegion(cond);
           curr_anti_cond =
-              getPTG()->findOrCreateAndRegion(curr_anti_cond, getPTG()->getEmptyCond());
+              getPTG()->findOrCreateAndRegion(curr_anti_cond, anti_cond);
         }
       }
     }
@@ -514,6 +563,17 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
     bb_tracked++;
   }
 
+  path_cond_t default_cond =
+      getPTG()->findOrCreateAndRegion(curr_anti_cond, pre_cond);
+  if (!getPTG()->isSatisfiable(default_cond))
+    return nullptr;
+
+  if (IntraLotusAAConfig::lotus_enable_score_computation) {
+    float no_effect_confidence = get_confidence_with_no_call_barrier(
+        0, default_cond, possible_updating_callsite);
+    curr_confidence *= no_effect_confidence;
+  }
+
   // No explicit stores found - check what to return
   if (SymbolicMemObject *sym_obj = dyn_cast<SymbolicMemObject>(object)) {
     // Symbolic object - create pseudo-argument
@@ -522,8 +582,8 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
       // Main function - try to get global initializer
       Value *init_val = getInitializerForGlobalValue();
         if (init_val) {
-          res.push_back(mem_value_item_t(getPTG()->getEmptyCond(), nullptr,
-                                         init_val, 1.0f));
+          res.push_back(mem_value_item_t(default_cond, nullptr,
+                                         init_val, curr_confidence));
           return nullptr;
         }
     } else {
@@ -534,8 +594,8 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
           if (function_level != FUNC_LEVEL_UNDEFINED)
             load_level = function_level;
         }
-        res.push_back(mem_value_item_t(getPTG()->getEmptyCond(), nullptr,
-                                       pseudo_arg, 1.0f));
+        res.push_back(mem_value_item_t(default_cond, nullptr,
+                                       pseudo_arg, curr_confidence));
         return pseudo_arg;
       }
     }
@@ -543,11 +603,11 @@ Argument *ObjectLocator::getValues(Instruction *from_loc, mem_value_t &res,
 
   // Return appropriate default value
   if (object->isReallyAllocated()) {
-    res.push_back(mem_value_item_t(getPTG()->getEmptyCond(), nullptr,
-                                   LocValue::UNDEF_VALUE, 1.0f));
+    res.push_back(mem_value_item_t(default_cond, nullptr,
+                                   LocValue::UNDEF_VALUE, curr_confidence));
   } else {
-    res.push_back(mem_value_item_t(getPTG()->getEmptyCond(), nullptr,
-                                   LocValue::FREE_VARIABLE, 1.0f));
+    res.push_back(mem_value_item_t(default_cond, nullptr,
+                                   LocValue::FREE_VARIABLE, curr_confidence));
   }
 
   return nullptr;

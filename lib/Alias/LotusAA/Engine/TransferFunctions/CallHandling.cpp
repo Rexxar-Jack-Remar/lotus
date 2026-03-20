@@ -107,8 +107,15 @@ void IntraLotusAA::processUnknownLibraryCall(CallBase *call) {
   // Another choicse is to treat UnknownLibraryCall a "noop" (does nothing?)
   for (unsigned i = 0; i < call->arg_size(); i++) {
     Value *arg = call->getArgOperand(i);
-    if (!arg->getType()->isPointerTy())
+    PointerType *pointer_arg_type = dyn_cast<PointerType>(arg->getType());
+    if (!pointer_arg_type)
       continue;
+
+    if (i == 0 &&
+        pointer_arg_type->getPointerElementType()->isAggregateType()) {
+      // Match Falcon's library heuristic for likely <this> receivers.
+      continue;
+    }
 
     processBasePointer(arg);
 
@@ -149,20 +156,23 @@ void IntraLotusAA::processCall(CallBase *call) {
   }
 
   // Process each possible callee
-  int callee_idx = 0;
+  int callee_idx = -1;
   for (auto &callee_item : *callees) {
+    callee_idx++;
     Function *callee = callee_item.first;
     path_cond_t callee_cond = callee_item.second;
     if (callee_idx >= IntraLotusAAConfig::lotus_restrict_cg_size)
       break;
 
     if (!callee || !isCallsiteFunctionCompatible(call, callee)) {
-      callee_idx++;
       continue;
     }
 
     if (callee_idx == 0) {
       callee_cond = getEmptyCond();
+    } else {
+      callee_cond = findOrCreateAndRegion(
+          callee_cond, getCallTargetCond(call->getCalledOperand(), callee));
     }
 
     if (!callee || lotus_aa->isBackEdge(base_func, callee)) {
@@ -172,7 +182,6 @@ void IntraLotusAA::processCall(CallBase *call) {
         addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
                     callee_cond);
       }
-      callee_idx++;
       continue;
     }
 
@@ -183,7 +192,6 @@ void IntraLotusAA::processCall(CallBase *call) {
         addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
                     callee_cond);
       }
-      callee_idx++;
       continue;
     }
 
@@ -199,6 +207,13 @@ void IntraLotusAA::processCall(CallBase *call) {
     IntraLotusAA *callee_result = lotus_aa->getPtGraph(callee);
 
     if (!callee_result || callee_result->is_considered_as_library) {
+      if (call->getType()->isPointerTy() &&
+          static_cast<unsigned>(callee_idx) == callees->size() - 1 &&
+          !pt_results.count(call)) {
+        addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
+                    callee_cond);
+      }
+
       processUnknownLibraryCall(call);
 
       if (!IntraLotusAAConfig::lotus_disable_thread_heuristic &&
@@ -217,11 +232,10 @@ void IntraLotusAA::processCall(CallBase *call) {
           }
           processCalleeInput(thread_pta->getInputs(),
                              thread_pta->inputs_func_level, real_args,
-                             formal_args, call, arg_result);
+                             formal_args, call, arg_result, callee_cond);
         }
       }
 
-      callee_idx++;
       continue;
     }
 
@@ -229,6 +243,11 @@ void IntraLotusAA::processCall(CallBase *call) {
     auto &callee_inputs = callee_result->getInputs();
     auto &callee_outputs = callee_result->getOutputs();
     auto &callee_escape = callee_result->getEscapeObjs();
+
+    if (callee_inputs.empty() && callee_outputs.size() == 1 &&
+        callee_result->getInlineApDepth() == 0) {
+      processUnknownLibraryCall(call);
+    }
 
     func_arg_t &arg_result = func_arg[call][callee];
 
@@ -241,20 +260,10 @@ void IntraLotusAA::processCall(CallBase *call) {
     }
 
     processCalleeInput(callee_inputs, callee_result->inputs_func_level,
-                       real_args, formal_args, call, arg_result);
-    processCalleeOutput(callee_outputs, callee_escape, call, callee);
-
-    callee_idx++;
+                       real_args, formal_args, call, arg_result, callee_cond);
+    processCalleeOutput(callee_outputs, callee_escape, call, callee,
+                        callee_cond);
   }
-
-  // After processing all callees, if the call returns a pointer and no
-  // points-to result was produced (e.g., all callees were back-edges or
-  // library functions), create a conservative fallback object.
-  if (call->getType()->isPointerTy() && !pt_results.count(call)) {
-    addPointsTo(call, newObject(call, MemObject::CONCRETE), 0,
-                getEmptyCond());
-  }
-
 }
 
 /// Binds actual arguments to callee's formal parameters and side-effect inputs.
@@ -273,9 +282,10 @@ void IntraLotusAA::processCalleeInput(
     map<Value *, AccessPath, llvm_cmp> &callee_input,
     map<Value *, int, llvm_cmp> &callee_input_func_level,
     std::vector<Value *> &real_args, std::vector<Value *> &formal_args,
-    CallBase *callsite, func_arg_t &result) {
+    CallBase *callsite, func_arg_t &result, path_cond_t pre_cond) {
 
-  path_cond_t pre_cond = getEmptyCond();
+  if (!pre_cond)
+    pre_cond = getEmptyCond();
 
   // (1) Collect the real arguments and link the values to pseudo-arguments
   size_t real_size = real_args.size();
@@ -365,7 +375,9 @@ void IntraLotusAA::processCalleeInput(
             continue;
           }
         }
-        loadPtrAt(parent_value, callsite, tmp_values, true, offset);
+        loadPtrAt(parent_value, callsite, tmp_values, true, offset,
+                  callee_input_func_level[curr_arg_val] + 1,
+                  func_obj ? func_obj->findLocator(0, false) : nullptr, true);
 
         for (auto &tmp_val : tmp_values) {
           path_cond_t new_cond =
@@ -469,7 +481,8 @@ void IntraLotusAA::createEscapedObjects(
 void IntraLotusAA::linkOutputPointsToResults(
     OutputItem *output, Value *curr_output,
     map<Value *, MemObject *, llvm_cmp> &escape_object_map,
-    func_arg_t &callee_func_arg, std::set<PTResult *> &visited) {
+    func_arg_t &callee_func_arg, Instruction *callsite, Function *callee,
+    std::set<PTResult *> &visited) {
 
   auto &callee_point_to = output->getPseudoPointTo();
   PTResult *curr_output_pts = nullptr;
@@ -482,7 +495,8 @@ void IntraLotusAA::linkOutputPointsToResults(
 
   // Link the pointer-result and the values
   for (auto &callee_point_to_item : callee_point_to) {
-    path_cond_t interface_cond = callee_point_to_item.first;
+    path_cond_t interface_cond =
+        importPathCond(callee_point_to_item.first, callsite, callee);
     AccessPath callee_point_to_item_info = callee_point_to_item.second;
     Value *callee_point_to_item_parent_ptr =
         callee_point_to_item_info.getParentPtr();
@@ -538,7 +552,8 @@ void IntraLotusAA::linkOutputValues(
     OutputItem *output, Value *curr_output, size_t idx,
     map<Value *, MemObject *, llvm_cmp> &escape_object_map,
     func_arg_t &callee_func_arg, Instruction *callsite,
-    std::unordered_map<PTResult *, PTResultIterator> &pt_result_cache) {
+    std::unordered_map<PTResult *, PTResultIterator> &pt_result_cache,
+    path_cond_t pre_cond) {
 
   if (idx == 0) {
     // idx=0 means that the real return value, which do not need special linkage
@@ -553,7 +568,8 @@ void IntraLotusAA::linkOutputValues(
     // Escaped_obj from callee
     MemObject *curr_obj = escape_object_map[output_parent];
     ObjectLocator *locator = curr_obj->findLocator(output_offset, true);
-    locator->storeValue(curr_output, callsite, getEmptyCond(), 0);
+    locator->storeValue(curr_output, callsite, getEmptyCond(),
+                       output->getFuncLevel() + 1);
   } else {
     if (!callee_func_arg.count(output_parent))
       return;
@@ -561,7 +577,9 @@ void IntraLotusAA::linkOutputValues(
     auto &callee_arg_vals = callee_func_arg[output_parent];
 
     if (callee_arg_vals.empty() && isa<GlobalValue>(output_parent)) {
-      mem_value_item_t global_value(getEmptyCond(), nullptr, output_parent);
+      if (!pre_cond)
+        pre_cond = getEmptyCond();
+      mem_value_item_t global_value(pre_cond, nullptr, output_parent);
       callee_arg_vals.push_back(global_value);
     }
 
@@ -596,7 +614,8 @@ void IntraLotusAA::linkOutputValues(
         ObjectLocator *revised_locator = loc->offsetBy(output_offset);
         path_cond_t final_cond_val =
             findOrCreateAndRegion(pointer_val_cond, pt_cond);
-        revised_locator->storeValue(curr_output, callsite, final_cond_val, 0);
+        revised_locator->storeValue(curr_output, callsite, final_cond_val,
+                                    output->getFuncLevel() + 1);
       }
     }
   }
@@ -605,7 +624,7 @@ void IntraLotusAA::linkOutputValues(
 void IntraLotusAA::processCalleeOutput(
     std::vector<OutputItem *> &callee_output,
     set<MemObject *, mem_obj_cmp> &callee_escape, Instruction *callsite,
-    Function *callee) {
+    Function *callee, path_cond_t pre_cond) {
 
   auto &func_arg_all = func_arg[callsite];
 
@@ -634,7 +653,7 @@ void IntraLotusAA::processCalleeOutput(
 
     // Link the point-to results for pseudo outputs
     linkOutputPointsToResults(output, curr_output, escape_object_map,
-                              callee_func_arg, visited);
+                              callee_func_arg, callsite, callee, visited);
 
     // Cache PT result iterators
     for (PTResult *visited_item : visited) {
@@ -646,7 +665,7 @@ void IntraLotusAA::processCalleeOutput(
 
     // Link the value
     linkOutputValues(output, curr_output, idx, escape_object_map,
-                     callee_func_arg, callsite, pt_result_cache);
+                     callee_func_arg, callsite, pt_result_cache, pre_cond);
   }
 }
 

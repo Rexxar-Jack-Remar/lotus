@@ -35,6 +35,39 @@
 
 using namespace llvm;
 
+namespace {
+
+static std::pair<Value *, int64_t> trackPointerOffset(Value *ptr,
+                                                      const DataLayout &DL) {
+  if (!ptr)
+    return {nullptr, 0};
+
+  if (auto *gep = dyn_cast<GEPOperator>(ptr)) {
+    Value *base = gep->getPointerOperand();
+    auto base_off = trackPointerOffset(base, DL);
+    if (base_off.first != base)
+      base = base_off.first;
+
+    APInt ap_offset(DL.getIndexTypeSizeInBits(gep->getType()), 0, true);
+    if (gep->accumulateConstantOffset(DL, ap_offset))
+      return {base, base_off.second + ap_offset.getSExtValue()};
+
+    return {base, base_off.second};
+  }
+
+  if (auto *ce = dyn_cast<ConstantExpr>(ptr)) {
+    if (Instruction::isCast(ce->getOpcode()))
+      return trackPointerOffset(ce->getOperand(0), DL);
+  }
+
+  if (auto *cast = dyn_cast<CastInst>(ptr))
+    return trackPointerOffset(cast->getOperand(0), DL);
+
+  return {ptr, 0};
+}
+
+} // namespace
+
 //===----------------------------------------------------------------------===//
 // Memory Access Operations
 //===----------------------------------------------------------------------===//
@@ -211,8 +244,10 @@ PTResult *IntraLotusAA::processSelect(SelectInst *select) {
   PTResult *pts_false = processBasePointer(false_val);
 
   PTResult *select_pts = findPTResult(select, true);
-  select_pts->add_derived_target(select->getCondition(), pts_true, 0);
-  select_pts->add_derived_target(getEmptyCond(), pts_false, 0);
+  select_pts->add_derived_target(getValueCond(select->getCondition(), true),
+                                 pts_true, 0);
+  select_pts->add_derived_target(getValueCond(select->getCondition(), false),
+                                 pts_false, 0);
 
   PTResultIterator iter(select_pts, this);
   return select_pts;
@@ -251,21 +286,9 @@ PTResult *IntraLotusAA::processSelect(SelectInst *select) {
 ///
 /// @see ObjectLocator for field-level memory modeling
 PTResult *IntraLotusAA::processGepBitcast(Value *ptr) {
-  // Track pointer through GEP/bitcast operations
-  int64_t offset = 0;
-  Value *base_ptr = ptr;
-
-  // For GEP, extract base pointer
-  // Note: Offset tracking is intentionally simplified to 0
-  // Field-sensitivity is handled through ObjectLocator field tracking,
-  // not through offset arithmetic in points-to results
-  if (GEPOperator *gep = dyn_cast<GEPOperator>(ptr)) {
-    base_ptr = gep->getPointerOperand();
-    offset = 0; // Field offsets handled by ObjectLocator
-  } else if (BitCastInst *bc = dyn_cast<BitCastInst>(ptr)) {
-    base_ptr = bc->getOperand(0);
-    offset = 0;
-  }
+  auto base_off = trackPointerOffset(ptr, getDL());
+  Value *base_ptr = base_off.first;
+  int64_t offset = base_off.second;
 
   if (base_ptr == ptr) {
     return addPointsTo(ptr, newObject(ptr, MemObject::CONCRETE), 0,
