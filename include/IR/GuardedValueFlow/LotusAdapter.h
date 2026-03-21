@@ -6,7 +6,7 @@
 #include <llvm/Pass.h>
 
 namespace llvm {
-namespace gvg {
+namespace gvfg {
 
 class LotusGuardedValueFlowAdapterPass : public ModulePass {
 public:
@@ -35,5 +35,5 @@ private:
 
 ModulePass *createLotusGuardedValueFlowAdapterPass();
 
-} // namespace gvg
+} // namespace gvfg
 } // namespace llvm

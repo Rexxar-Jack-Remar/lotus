@@ -15,9 +15,9 @@
 #include <llvm/Support/Debug.h>
 
 using namespace llvm;
-using namespace llvm::gvg;
+using namespace llvm::gvfg;
 
-#define DEBUG_TYPE "gvg-lotus-adapter"
+#define DEBUG_TYPE "gvfg-lotus-adapter"
 
 namespace {
 
@@ -129,7 +129,7 @@ static GuardedValueFlowNode *resolveOriginConditionNode(
 static GuardedValueFlowNode *resolveProducerValueNode(
     GuardedValueFlowGraph &graph, Value *value, Type *type, BasicBlock *bb);
 
-static void setAccessPathFromSegments(llvm::gvg::AccessPath &path,
+static void setAccessPathFromSegments(llvm::gvfg::AccessPath &path,
                                       ArrayRef<std::pair<Value *, int64_t>> segments,
                                       bool is_from_return) {
   path.reset(nullptr);
@@ -179,6 +179,11 @@ static mem_value_t makeFallbackValues(Value *value, Instruction *pos = nullptr,
 enum class SummaryDirection {
   Input,
   Output,
+};
+
+enum class SummaryValueMode {
+  CallsiteProducer,
+  OpaqueProducer,
 };
 
 struct SummarySentinelProvenance {
@@ -272,6 +277,39 @@ static GuardedValueFlowNode *createSummaryProducerNode(
       provenance.direction == SummaryDirection::Input ? "summary.input.value"
                                                       : "summary.output.value");
   return summary_node;
+}
+
+static GuardedValueFlowNode *createOpaqueSummaryProducerNode(
+    GuardedValueFlowGraph &graph, Type *type, BasicBlock *bb,
+    Instruction *inst = nullptr) {
+  auto *summary_node = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, type, &graph, bb, nullptr, inst);
+  summary_node->setDescription("summary.value");
+  return summary_node;
+}
+
+static GuardedValueFlowNode *detachReusableLoadMemoryChild(
+    GuardedValueFlowNode *node, StringRef description) {
+  if (!node)
+    return nullptr;
+
+  GuardedValueFlowNode *load_mem = nullptr;
+  if (node->children().size() == 1) {
+    auto *candidate = node->children().front().target;
+    if (candidate &&
+        candidate->getKind() == GuardedValueFlowNode::Kind::LoadMemory) {
+      load_mem = candidate;
+    }
+  }
+
+  node->clearChildren();
+  if (!load_mem)
+    return nullptr;
+
+  load_mem->clearChildren();
+  load_mem->clearMatchingRegions();
+  load_mem->setDescription(description.str());
+  return load_mem;
 }
 
 static BasicBlock *getValueBlockOrEntry(GuardedValueFlowGraph &graph, Value *value) {
@@ -390,6 +428,8 @@ static GuardedValueFlowRegionNode *translatePathCondToRegion(
 static GuardedValueFlowNode *
 ensureStoreMemoryNode(GuardedValueFlowGraph &graph, Value *value,
                       Instruction *inst, Type *memory_type, BasicBlock *bb,
+                      SummaryValueMode summary_value_mode =
+                          SummaryValueMode::CallsiteProducer,
                       const SummarySentinelProvenance *summary_provenance =
                           nullptr) {
   if (value == LocValue::FREE_VARIABLE || value == LocValue::NO_VALUE)
@@ -414,12 +454,16 @@ ensureStoreMemoryNode(GuardedValueFlowGraph &graph, Value *value,
         createSpecialProducerNode(graph, GuardedValueFlowNode::Kind::UndefValue,
                                   memory_type, bb, inst, "undef.value"));
   } else if (value == LocValue::SUMMARY_VALUE) {
-    SummarySentinelProvenance fallback_provenance;
-    fallback_provenance.callsite = inst;
-    const SummarySentinelProvenance &provenance =
-        summary_provenance ? *summary_provenance : fallback_provenance;
-    GuardedValueFlowNode *summary_node =
-        createSummaryProducerNode(graph, memory_type, bb, provenance);
+    GuardedValueFlowNode *summary_node = nullptr;
+    if (summary_value_mode == SummaryValueMode::OpaqueProducer) {
+      summary_node = createOpaqueSummaryProducerNode(graph, memory_type, bb, inst);
+    } else {
+      SummarySentinelProvenance fallback_provenance;
+      fallback_provenance.callsite = inst;
+      const SummarySentinelProvenance &provenance =
+          summary_provenance ? *summary_provenance : fallback_provenance;
+      summary_node = createSummaryProducerNode(graph, memory_type, bb, provenance);
+    }
     (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node,
                                                      summary_node);
   } else {
@@ -446,6 +490,8 @@ static void linkMemoryValue(GuardedValueFlowGraph &graph,
                             GuardedValueFlowNode *load_mem_node,
                             const mem_value_item_t &item, BasicBlock *bb,
                             GuardedValueFlowGraphBuilderPass &builder,
+                            SummaryValueMode summary_value_mode =
+                                SummaryValueMode::CallsiteProducer,
                             const SummarySentinelProvenance *summary_provenance =
                                 nullptr) {
   Value *value = item.val;
@@ -454,6 +500,7 @@ static void linkMemoryValue(GuardedValueFlowGraph &graph,
   Instruction *producer_inst = item.pos;
   auto *producer_mem = ensureStoreMemoryNode(graph, value, producer_inst,
                                              load_mem_node->getType(), bb,
+                                             summary_value_mode,
                                              summary_provenance);
   if (!producer_mem)
     return;
@@ -470,12 +517,15 @@ static void populateLoadMemoryNode(GuardedValueFlowGraph &graph,
                                    GuardedValueFlowNode *load_mem_node,
                                    const mem_value_t &values, BasicBlock *bb,
                                    GuardedValueFlowGraphBuilderPass &builder,
+                                   SummaryValueMode summary_value_mode =
+                                       SummaryValueMode::CallsiteProducer,
                                    const SummarySentinelProvenance *summary_provenance =
                                        nullptr) {
   load_mem_node->clearChildren();
   load_mem_node->clearMatchingRegions();
   for (const auto &item : values)
     linkMemoryValue(graph, load_mem_node, item, bb, builder,
+                    summary_value_mode,
                     item.val == LocValue::SUMMARY_VALUE ? summary_provenance
                                                         : nullptr);
 }
@@ -531,6 +581,49 @@ resolveProducerValueNode(GuardedValueFlowGraph &graph, Value *value, Type *type,
     return existing;
   return ensureValueNode(graph, value, type ? type : value->getType(), bb,
                          GuardedValueFlowNode::Kind::SimpleOperand, "producer");
+}
+
+static GuardedValueFlowNode *
+resolveFunctionSummarySourceNode(GuardedValueFlowGraph &graph, Value *value) {
+  if (!value)
+    return nullptr;
+  if (auto *pseudo_arg = graph.findPseudoArgumentBySource(value))
+    return pseudo_arg;
+  if (auto *interface_node = graph.findInterfaceNode(value))
+    return interface_node;
+  return graph.findNode(value);
+}
+
+static GuardedValueFlowNode *findOrCreateFunctionSummaryArgumentNode(
+    GuardedValueFlowGraph &graph, unsigned ap_depth, Value *source, Type *type,
+    BasicBlock *entry_block) {
+  auto *summary_node = graph.findFunctionSummaryArgumentNode(ap_depth, source);
+  if (!summary_node) {
+    summary_node = graph.createNode<GuardedValueFlowNode>(
+        GuardedValueFlowNode::Kind::SimpleOperand, type, &graph, entry_block,
+        nullptr, nullptr);
+    summary_node->setDescription(
+        (Twine("summary.arg.") + Twine(ap_depth)).str());
+    graph.mapFunctionSummaryArgumentNode(ap_depth, source, summary_node);
+  } else {
+    summary_node->clearChildren();
+  }
+  return summary_node;
+}
+
+static GuardedValueFlowNode *findOrCreateFunctionSummaryReturnNode(
+    GuardedValueFlowGraph &graph, unsigned ap_depth, Type *type,
+    BasicBlock *entry_block) {
+  auto *summary_node = graph.findFunctionSummaryReturnNode(ap_depth);
+  if (!summary_node) {
+    summary_node = graph.createNode<GuardedValueFlowNode>(
+        GuardedValueFlowNode::Kind::SimpleOperand, type, &graph, entry_block,
+        nullptr, nullptr);
+    summary_node->setDescription(
+        (Twine("summary.ret.") + Twine(ap_depth)).str());
+    graph.mapFunctionSummaryReturnNode(ap_depth, summary_node);
+  }
+  return summary_node;
 }
 
 static SmallVector<Function *, 4>
@@ -620,6 +713,55 @@ static void materializeStoreParity(GuardedValueFlowGraph &graph,
         graph, store->getValueOperand(), store->getValueOperand()->getType(),
         store->getParent());
     (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node, value_node);
+  }
+}
+
+static void materializeFunctionSummaryInterface(
+    GuardedValueFlowGraph &graph, IntraLotusAA &pta,
+    GuardedValueFlowGraphBuilderPass &builder) {
+  BasicBlock *entry_block = getEntryBlockOrNull(graph);
+  Type *summary_type = getStableSummaryNodeType(pta.getFunc()->getContext());
+  graph.resetFunctionSummaryInterface();
+
+  const auto &summary_inputs = pta.getSummaryInputs();
+  for (unsigned bucket = 0; bucket < summary_inputs.size(); ++bucket) {
+    const auto *summary_bucket = summary_inputs[bucket];
+    if (!summary_bucket || summary_bucket->empty())
+      continue;
+
+    for (Value *source : *summary_bucket) {
+      auto *summary_node = findOrCreateFunctionSummaryArgumentNode(
+          graph, bucket, source, summary_type, entry_block);
+      auto *source_node = resolveFunctionSummarySourceNode(graph, source);
+      if (source_node)
+        (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, source_node,
+                                                         summary_node);
+      graph.registerSummaryArgumentNode(bucket, summary_node);
+    }
+  }
+
+  const auto &summary_outputs = pta.getSummaryOutputs();
+  for (unsigned bucket = 0; bucket < summary_outputs.size(); ++bucket) {
+    const mem_value_t *summary_bucket = summary_outputs[bucket];
+    if (!summary_bucket || summary_bucket->empty())
+      continue;
+
+    auto *summary_node = findOrCreateFunctionSummaryReturnNode(
+        graph, bucket, summary_type, entry_block);
+    auto *load_mem = detachReusableLoadMemoryChild(
+        summary_node, (Twine("summary.ret.mem.") + Twine(bucket)).str());
+    if (!load_mem) {
+      load_mem = graph.createNode<GuardedValueFlowNode>(
+          GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
+          entry_block, nullptr, nullptr);
+      load_mem->setDescription(
+          (Twine("summary.ret.mem.") + Twine(bucket)).str());
+    }
+
+    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node, load_mem);
+    populateLoadMemoryNode(graph, load_mem, *summary_bucket, entry_block, builder,
+                           SummaryValueMode::OpaqueProducer);
+    graph.registerSummaryReturnNode(bucket, summary_node);
   }
 }
 
@@ -734,8 +876,6 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
           summary_node->setDescription(
               (Twine("call.input.summary.") + Twine(bucket)).str());
           site->setInputSummaryNode(callee, bucket, summary_node);
-        } else {
-          summary_node->clearChildren();
         }
 
         mem_value_t aggregated;
@@ -755,16 +895,23 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
           aggregated.emplace_back(nullptr, nullptr, LocValue::SUMMARY_VALUE, 1.0f);
         SummarySentinelProvenance summary_provenance{
             call, callee, bucket, SummaryDirection::Input};
-        auto *load_mem = graph.createNode<GuardedValueFlowNode>(
-            GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
-            entry_block, nullptr, call);
-        load_mem->setDescription(
-            (Twine("call.input.summary.mem.") + Twine(bucket)).str());
+        auto *load_mem = detachReusableLoadMemoryChild(
+            summary_node, (Twine("call.input.summary.mem.") + Twine(bucket)).str());
+        if (static_cast<int>(bucket) <= callee_graph->getInlineApDepth())
+          continue;
+
+        if (!load_mem) {
+          load_mem = graph.createNode<GuardedValueFlowNode>(
+              GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
+              entry_block, nullptr, call);
+          load_mem->setDescription(
+              (Twine("call.input.summary.mem.") + Twine(bucket)).str());
+        }
         (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
                                                          load_mem);
-        populateLoadMemoryNode(graph, load_mem, aggregated, entry_block,
-                               builder, &summary_provenance);
-        graph.registerSummaryArgumentNode(bucket, summary_node);
+        populateLoadMemoryNode(graph, load_mem, aggregated, entry_block, builder,
+                               SummaryValueMode::CallsiteProducer,
+                               &summary_provenance);
       }
 
       const auto &summary_outputs = callee_graph->getSummaryOutputs();
@@ -783,15 +930,17 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
           summary_node->setDescription(
               (Twine("call.output.summary.") + Twine(bucket)).str());
           site->setOutputSummaryNode(callee, bucket, summary_node);
-        } else {
-          summary_node->clearChildren();
         }
 
-        auto *load_mem = graph.createNode<GuardedValueFlowNode>(
-            GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
-            entry_block, nullptr, call);
-        load_mem->setDescription(
-            (Twine("call.output.summary.mem.") + Twine(bucket)).str());
+        auto *load_mem = detachReusableLoadMemoryChild(
+            summary_node, (Twine("call.output.summary.mem.") + Twine(bucket)).str());
+        if (!load_mem) {
+          load_mem = graph.createNode<GuardedValueFlowNode>(
+              GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
+              entry_block, nullptr, call);
+          load_mem->setDescription(
+              (Twine("call.output.summary.mem.") + Twine(bucket)).str());
+        }
         (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
                                                          load_mem);
 
@@ -801,9 +950,9 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
           imported.emplace_back(nullptr, nullptr, LocValue::SUMMARY_VALUE, 1.0f);
         SummarySentinelProvenance summary_provenance{
             call, callee, bucket, SummaryDirection::Output};
-        populateLoadMemoryNode(graph, load_mem, imported, entry_block,
-                               builder, &summary_provenance);
-        graph.registerSummaryReturnNode(bucket, summary_node);
+        populateLoadMemoryNode(graph, load_mem, imported, entry_block, builder,
+                               SummaryValueMode::CallsiteProducer,
+                               &summary_provenance);
       }
     }
   }
@@ -851,7 +1000,7 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
             static_cast<size_t>(raw_pseudo_input_index) >=
                 ordered_pseudo_inputs.size() ||
             ordered_pseudo_inputs[raw_pseudo_input_index].first) {
-          LLVM_DEBUG(dbgs() << "[gvg-adapter] Missing pseudo-input index for "
+          LLVM_DEBUG(dbgs() << "[gvfg-adapter] Missing pseudo-input index for "
                             << *formal_value << " in callee "
                             << callee->getName() << "\n");
           break;
@@ -998,7 +1147,7 @@ static void materializeCallsiteBackEdges(GuardedValueFlowGraph &graph,
 
 char LotusGuardedValueFlowAdapterPass::ID = 0;
 static RegisterPass<LotusGuardedValueFlowAdapterPass>
-    Y("gvg-lotus-adapter", "LotusAA to GuardedValueFlowGraph adapter", false,
+    Y("gvfg-lotus-adapter", "LotusAA to GuardedValueFlowGraph adapter", false,
       true);
 
 LotusGuardedValueFlowAdapterPass::LotusGuardedValueFlowAdapterPass()
@@ -1022,22 +1171,11 @@ GuardedValueFlowNode *LotusGuardedValueFlowAdapterPass::safeLink(
 
   auto opcode_kind = chooseCastOpcode(src_ty, dst_ty);
   if (opcode_kind == GuardedValueFlowOpcodeNode::OpcodeKind::Invalid) {
-    LLVM_DEBUG(dbgs() << "[gvg-adapter] Unable to cast-link "
+    LLVM_DEBUG(dbgs() << "[gvfg-adapter] Unable to cast-link "
                       << parent->getDescription() << " <- "
                       << child->getDescription() << " in "
                       << graph.getBaseFunction()->getName() << "\n");
-    BasicBlock *bridge_block =
-        parent->getParentBasicBlock()
-            ? parent->getParentBasicBlock()
-            : (child->getParentBasicBlock() ? child->getParentBasicBlock()
-                                            : getEntryBlockOrNull(graph));
-    auto *bridge_node = graph.createNode<GuardedValueFlowNode>(
-        GuardedValueFlowNode::Kind::Unknown, dst_ty, &graph, bridge_block,
-        nullptr, nullptr);
-    bridge_node->setDescription("adapter.bridge");
-    bridge_node->addChild(child);
-    parent->addChild(bridge_node, confidence, condition);
-    return bridge_node;
+    return nullptr;
   }
 
   BasicBlock *cast_block =
@@ -1103,6 +1241,7 @@ void LotusGuardedValueFlowAdapterPass::adaptFunction(
 
   materializeStoreParity(graph, pta);
   materializeLoadParity(graph, pta, builder);
+  materializeFunctionSummaryInterface(graph, pta, builder);
   materializeFunctionOutputs(graph, pta, builder);
   materializeCallTargetConditions(graph, pta, builder);
   materializeCallsiteSummaryNodes(graph, pta, builder);
@@ -1110,6 +1249,6 @@ void LotusGuardedValueFlowAdapterPass::adaptFunction(
   materializeCallsiteBackEdges(graph, lotus);
 }
 
-ModulePass *llvm::gvg::createLotusGuardedValueFlowAdapterPass() {
+ModulePass *llvm::gvfg::createLotusGuardedValueFlowAdapterPass() {
   return new LotusGuardedValueFlowAdapterPass();
 }

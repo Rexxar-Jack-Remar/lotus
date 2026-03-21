@@ -15,7 +15,7 @@
 #include <gtest/gtest.h>
 
 using namespace llvm;
-using namespace llvm::gvg;
+using namespace llvm::gvfg;
 
 namespace {
 
@@ -668,10 +668,17 @@ TEST(GuardedValueFlowAdapterShape,
   auto *summary_site = graph.findCallSite(summary_call);
   ASSERT_NE(summary_site, nullptr);
   bool saw_entry_summary_mem = false;
+  auto *summary_ptg = pipeline.lotus->getPtGraph(callee);
+  ASSERT_NE(summary_ptg, nullptr);
+  int inline_ap_depth = summary_ptg->getInlineApDepth();
   for (unsigned idx = 0; idx < 4; ++idx) {
     auto *summary_node = summary_site->getInputSummaryNode(callee, idx);
     if (!summary_node)
       continue;
+    if (static_cast<int>(idx) <= inline_ap_depth) {
+      EXPECT_TRUE(summary_node->children().empty());
+      continue;
+    }
     ASSERT_EQ(summary_node->children().size(), 1u);
     auto *summary_mem = summary_node->children().front().target;
     ASSERT_NE(summary_mem, nullptr);
@@ -744,6 +751,7 @@ TEST(GuardedValueFlowAdapterShape,
   EXPECT_TRUE(containsChild(pseudo_output_mem, pseudo_output));
 
   if (auto *callee_ptg = pipeline.lotus->getPtGraph(F)) {
+    int inline_ap_depth = callee_ptg->getInlineApDepth();
     for (unsigned bucket = 0; bucket < callee_ptg->getSummaryInputs().size();
          ++bucket) {
       const auto *summary_inputs = callee_ptg->getSummaryInputs()[bucket];
@@ -752,6 +760,10 @@ TEST(GuardedValueFlowAdapterShape,
 
       auto *summary_node = site->getInputSummaryNode(F, bucket);
       ASSERT_NE(summary_node, nullptr);
+      if (static_cast<int>(bucket) <= inline_ap_depth) {
+        EXPECT_TRUE(summary_node->children().empty());
+        continue;
+      }
       ASSERT_EQ(summary_node->children().size(), 1u);
       auto *summary_mem = summary_node->children().front().target;
       ASSERT_NE(summary_mem, nullptr);

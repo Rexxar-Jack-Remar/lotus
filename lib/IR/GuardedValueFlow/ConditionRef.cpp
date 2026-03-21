@@ -3,7 +3,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
-using namespace llvm::gvg;
+using namespace llvm::gvfg;
 
 std::string ConditionRef::render() const {
   std::string buffer;

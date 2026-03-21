@@ -3,9 +3,9 @@
 #include "IR/GuardedValueFlow/GuardedValueFlowGraph.h"
 
 namespace llvm {
-namespace gvg {
+namespace gvfg {
 
 using GuardedValueFlowBuilderPass = GuardedValueFlowGraphBuilderPass;
 
-} // namespace gvg
+} // namespace gvfg
 } // namespace llvm

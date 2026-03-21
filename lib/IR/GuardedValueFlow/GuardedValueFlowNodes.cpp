@@ -4,7 +4,7 @@
 #include <algorithm>
 
 using namespace llvm;
-using namespace llvm::gvg;
+using namespace llvm::gvfg;
 
 namespace {
 

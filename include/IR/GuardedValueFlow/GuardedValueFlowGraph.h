@@ -14,7 +14,7 @@
 #include <unordered_map>
 
 namespace llvm {
-namespace gvg {
+namespace gvfg {
 
 class GuardedValueFlowGraph {
 public:
@@ -110,6 +110,14 @@ public:
   }
   GuardedValueFlowNode *getPseudoArgument(unsigned idx) const;
   GuardedValueFlowReturnNode *getPseudoReturn(unsigned idx) const;
+  GuardedValueFlowNode *findFunctionSummaryArgumentNode(unsigned ap_depth,
+                                                       Value *source) const;
+  void mapFunctionSummaryArgumentNode(unsigned ap_depth, Value *source,
+                                      GuardedValueFlowNode *node);
+  GuardedValueFlowNode *findFunctionSummaryReturnNode(unsigned ap_depth) const;
+  void mapFunctionSummaryReturnNode(unsigned ap_depth,
+                                    GuardedValueFlowNode *node);
+  void resetFunctionSummaryInterface();
   void registerSummaryArgumentNode(unsigned ap_depth, GuardedValueFlowNode *node);
   void registerSummaryReturnNode(unsigned ap_depth, GuardedValueFlowNode *node);
   ArrayRef<GuardedValueFlowNode *> getSummaryArgumentNodes(unsigned ap_depth) const;
@@ -159,6 +167,9 @@ private:
   DenseMap<path_cond_t, GuardedValueFlowNode *> semantic_condition_nodes_;
   std::vector<GuardedValueFlowNode *> pseudo_arguments_;
   std::vector<GuardedValueFlowReturnNode *> pseudo_returns_;
+  std::map<std::pair<unsigned, Value *>, GuardedValueFlowNode *>
+      function_summary_argument_nodes_;
+  std::map<unsigned, GuardedValueFlowNode *> function_summary_return_nodes_;
   std::map<unsigned, std::vector<GuardedValueFlowNode *>> summary_argument_nodes_;
   std::map<unsigned, std::vector<GuardedValueFlowNode *>> summary_return_nodes_;
   std::map<std::pair<Value *, Instruction *>, GuardedValueFlowNode *,
@@ -194,7 +205,7 @@ public:
     return "GuardedValueFlowGraphBuilderPass";
   }
 
-  // This pass builds the structural intra-procedural GVG only.
+  // This pass builds the structural intra-procedural GVFG only.
   bool hasGraphFor(const Function &F) const;
   GuardedValueFlowGraph &getGraph(const Function &F);
 
@@ -206,5 +217,5 @@ private:
 
 ModulePass *createGuardedValueFlowGraphBuilderPass();
 
-} // namespace gvg
+} // namespace gvfg
 } // namespace llvm

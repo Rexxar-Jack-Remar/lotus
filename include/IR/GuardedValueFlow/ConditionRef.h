@@ -9,7 +9,7 @@
 #include <string>
 
 namespace llvm {
-namespace gvg {
+namespace gvfg {
 
 class ConditionRef {
 public:
@@ -74,5 +74,5 @@ private:
   path_cond_t path_cond_{nullptr};
 };
 
-} // namespace gvg
+} // namespace gvfg
 } // namespace llvm

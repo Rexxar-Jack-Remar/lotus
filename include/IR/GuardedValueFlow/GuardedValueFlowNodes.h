@@ -18,7 +18,7 @@
 #include <cassert>
 
 namespace llvm {
-namespace gvg {
+namespace gvfg {
 
 class GuardedValueFlowGraph;
 class GuardedValueFlowSite;
@@ -521,5 +521,5 @@ private:
   unsigned summary_index_{0};
 };
 
-} // namespace gvg
+} // namespace gvfg
 } // namespace llvm

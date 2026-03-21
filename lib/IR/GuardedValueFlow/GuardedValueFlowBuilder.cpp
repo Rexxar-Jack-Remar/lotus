@@ -14,7 +14,7 @@
 #include <algorithm>
 
 using namespace llvm;
-using namespace llvm::gvg;
+using namespace llvm::gvfg;
 
 namespace {
 
@@ -428,7 +428,7 @@ static GuardedValueFlowNode *modelConstantExpr(ConstantExpr *CE,
     break;
   default:
     failed = true;
-    errs() << "[gvg-builder] Unsupported constant expression in function "
+    errs() << "[gvfg-builder] Unsupported constant expression in function "
            << F.getName() << ": " << *CE << "\n";
     break;
   }
@@ -443,7 +443,7 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
                                               GuardedValueFlowGEPReferenceSite *gep_site) {
   if (GEP->getType()->isVectorTy()) {
     failed = true;
-    errs() << "[gvg-builder] Unsupported vector GEP in function " << F.getName()
+    errs() << "[gvfg-builder] Unsupported vector GEP in function " << F.getName()
            << ": " << *GEP << "\n";
     return nullptr;
   }
@@ -754,7 +754,7 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *br = dyn_cast<BranchInst>(&I);
     if (!br) {
       failed = true;
-      errs() << "[gvg-builder] Expected branch instruction in function "
+      errs() << "[gvfg-builder] Expected branch instruction in function "
              << F.getName() << ": " << I << "\n";
       return false;
     }
@@ -810,7 +810,7 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   case Instruction::AtomicCmpXchg:
   case Instruction::Fence:
     failed = true;
-    errs() << "[gvg-builder] Unsupported instruction in function " << F.getName()
+    errs() << "[gvfg-builder] Unsupported instruction in function " << F.getName()
            << ": " << I << "\n";
     return false;
   case Instruction::URem:
@@ -938,7 +938,7 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *gep_inst = dyn_cast<GetElementPtrInst>(&I);
     if (!gep_inst) {
       failed = true;
-      errs() << "[gvg-builder] Expected GEP instruction in function "
+      errs() << "[gvfg-builder] Expected GEP instruction in function "
              << F.getName() << ": " << I << "\n";
       return false;
     }
@@ -971,7 +971,7 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *cmp = dyn_cast<CmpInst>(&I);
     if (!cmp) {
       failed = true;
-      errs() << "[gvg-builder] Expected compare instruction in function "
+      errs() << "[gvfg-builder] Expected compare instruction in function "
              << F.getName() << ": " << I << "\n";
       return false;
     }
@@ -993,7 +993,7 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *phi = dyn_cast<PHINode>(&I);
     if (!phi_node || !phi) {
       failed = true;
-      errs() << "[gvg-builder] Expected phi instruction in function "
+      errs() << "[gvfg-builder] Expected phi instruction in function "
              << F.getName() << ": " << I << "\n";
       return false;
     }
@@ -1032,7 +1032,7 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *call = dyn_cast<CallBase>(&I);
     if (!call) {
       failed = true;
-      errs() << "[gvg-builder] Expected call instruction in function "
+      errs() << "[gvfg-builder] Expected call instruction in function "
              << F.getName() << ": " << I << "\n";
       return false;
     }
@@ -1076,7 +1076,7 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   }
   default:
     failed = true;
-    errs() << "[gvg-builder] Unsupported instruction in function " << F.getName()
+    errs() << "[gvfg-builder] Unsupported instruction in function " << F.getName()
            << ": " << I << "\n";
     return false;
   }
@@ -1086,7 +1086,7 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
 
 char GuardedValueFlowGraphBuilderPass::ID = 0;
 static RegisterPass<GuardedValueFlowGraphBuilderPass>
-    X("gvg-builder", "GuardedValueFlowGraph builder", false, true);
+    X("gvfg-builder", "GuardedValueFlowGraph builder", false, true);
 
 GuardedValueFlowGraphBuilderPass::GuardedValueFlowGraphBuilderPass()
     : ModulePass(ID) {}
@@ -1168,6 +1168,6 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
   return graph;
 }
 
-ModulePass *llvm::gvg::createGuardedValueFlowGraphBuilderPass() {
+ModulePass *llvm::gvfg::createGuardedValueFlowGraphBuilderPass() {
   return new GuardedValueFlowGraphBuilderPass();
 }

@@ -10,7 +10,7 @@
 #include <gtest/gtest.h>
 
 using namespace llvm;
-using namespace llvm::gvg;
+using namespace llvm::gvfg;
 
 namespace {
 
@@ -324,7 +324,7 @@ TEST_F(GuardedValueFlowTest, StoresSummaryNodesPerCalleeWithoutOverwrite) {
 }
 
 TEST_F(GuardedValueFlowTest,
-       UsesBridgeNodeWhenAdapterCannotCastBetweenLinkedTypes) {
+       DropsLinkWhenAdapterCannotCastBetweenLinkedTypes) {
   const char *source = R"(
     define void @test() {
     entry:
@@ -351,14 +351,9 @@ TEST_F(GuardedValueFlowTest,
 
   auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
       graph, parent, child, 0.5f, ConditionRef::none());
-  ASSERT_NE(linked, nullptr);
-  EXPECT_EQ(linked->getKind(), GuardedValueFlowNode::Kind::Unknown);
-  EXPECT_EQ(linked->getDescription(), "adapter.bridge");
-  ASSERT_EQ(parent->children().size(), 1u);
-  EXPECT_EQ(parent->children().front().target, linked);
-  EXPECT_FLOAT_EQ(parent->children().front().confidence, 0.5f);
-  ASSERT_EQ(linked->children().size(), 1u);
-  EXPECT_EQ(linked->children().front().target, child);
+  EXPECT_EQ(linked, nullptr);
+  EXPECT_TRUE(parent->children().empty());
+  EXPECT_TRUE(child->parents().empty());
 }
 
 TEST_F(GuardedValueFlowTest,

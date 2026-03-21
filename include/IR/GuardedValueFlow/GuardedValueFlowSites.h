@@ -13,7 +13,7 @@
 #include <vector>
 
 namespace llvm {
-namespace gvg {
+namespace gvfg {
 
 class GuardedValueFlowGraph;
 class GuardedValueFlowNode;
@@ -207,5 +207,5 @@ private:
   GuardedValueFlowNode *rhs_operand_{nullptr};
 };
 
-} // namespace gvg
+} // namespace gvfg
 } // namespace llvm

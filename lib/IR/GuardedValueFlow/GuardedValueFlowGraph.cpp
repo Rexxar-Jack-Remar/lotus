@@ -6,7 +6,7 @@
 #include <algorithm>
 
 using namespace llvm;
-using namespace llvm::gvg;
+using namespace llvm::gvfg;
 
 namespace {
 
@@ -568,6 +568,42 @@ GuardedValueFlowGraph::getPseudoArgument(unsigned idx) const {
 GuardedValueFlowReturnNode *
 GuardedValueFlowGraph::getPseudoReturn(unsigned idx) const {
   return idx < pseudo_returns_.size() ? pseudo_returns_[idx] : nullptr;
+}
+
+GuardedValueFlowNode *GuardedValueFlowGraph::findFunctionSummaryArgumentNode(
+    unsigned ap_depth, Value *source) const {
+  auto it =
+      function_summary_argument_nodes_.find(std::make_pair(ap_depth, source));
+  return it == function_summary_argument_nodes_.end() ? nullptr : it->second;
+}
+
+void GuardedValueFlowGraph::mapFunctionSummaryArgumentNode(
+    unsigned ap_depth, Value *source, GuardedValueFlowNode *node) {
+  function_summary_argument_nodes_[std::make_pair(ap_depth, source)] = node;
+}
+
+GuardedValueFlowNode *
+GuardedValueFlowGraph::findFunctionSummaryReturnNode(unsigned ap_depth) const {
+  auto it = function_summary_return_nodes_.find(ap_depth);
+  return it == function_summary_return_nodes_.end() ? nullptr : it->second;
+}
+
+void GuardedValueFlowGraph::mapFunctionSummaryReturnNode(
+    unsigned ap_depth, GuardedValueFlowNode *node) {
+  function_summary_return_nodes_[ap_depth] = node;
+}
+
+void GuardedValueFlowGraph::resetFunctionSummaryInterface() {
+  for (const auto &entry : function_summary_argument_nodes_) {
+    if (entry.second)
+      entry.second->clearChildren();
+  }
+  for (const auto &entry : function_summary_return_nodes_) {
+    if (entry.second)
+      entry.second->clearChildren();
+  }
+  summary_argument_nodes_.clear();
+  summary_return_nodes_.clear();
 }
 
 void GuardedValueFlowGraph::registerSummaryArgumentNode(

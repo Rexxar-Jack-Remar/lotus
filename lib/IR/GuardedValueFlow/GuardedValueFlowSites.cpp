@@ -3,7 +3,7 @@
 #include "IR/GuardedValueFlow/GuardedValueFlowGraph.h"
 
 using namespace llvm;
-using namespace llvm::gvg;
+using namespace llvm::gvfg;
 
 void GuardedValueFlowCallSite::addCommonInput(GuardedValueFlowNode *node) {
   common_inputs_.push_back(node);
