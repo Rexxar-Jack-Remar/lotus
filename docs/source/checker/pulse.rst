@@ -356,5 +356,4 @@ See Also
 --------
 
 - :doc:`index` – Checker Framework overview
-- :doc:`gvfa` – GVFA vulnerability checkers (alternative approach)
 - :doc:`../alias/index` – Alias analysis for pointer information

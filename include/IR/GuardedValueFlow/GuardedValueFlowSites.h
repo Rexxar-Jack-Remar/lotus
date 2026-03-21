@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace llvm {
@@ -75,19 +76,30 @@ public:
 
   void addPseudoInput(Function *callee, GuardedValueFlowNode *node);
   void addPseudoOutput(Function *callee, GuardedValueFlowNode *node);
-  void setInputSummaryNode(unsigned summary_index, GuardedValueFlowNode *node) {
-    input_summary_nodes_[summary_index] = node;
+  void setInputSummaryNode(Function *callee, unsigned summary_index,
+                           GuardedValueFlowNode *node) {
+    input_summary_nodes_[std::make_pair(callee, summary_index)] = node;
   }
-  GuardedValueFlowNode *getInputSummaryNode(unsigned summary_index) const {
-    auto it = input_summary_nodes_.find(summary_index);
+  GuardedValueFlowNode *getInputSummaryNode(Function *callee,
+                                            unsigned summary_index) const {
+    auto it = input_summary_nodes_.find(std::make_pair(callee, summary_index));
     return it == input_summary_nodes_.end() ? nullptr : it->second;
   }
-  void setOutputSummaryNode(unsigned summary_index, GuardedValueFlowNode *node) {
-    output_summary_nodes_[summary_index] = node;
+  void setOutputSummaryNode(Function *callee, unsigned summary_index,
+                            GuardedValueFlowNode *node) {
+    output_summary_nodes_[std::make_pair(callee, summary_index)] = node;
   }
-  GuardedValueFlowNode *getOutputSummaryNode(unsigned summary_index) const {
-    auto it = output_summary_nodes_.find(summary_index);
+  GuardedValueFlowNode *getOutputSummaryNode(Function *callee,
+                                             unsigned summary_index) const {
+    auto it = output_summary_nodes_.find(std::make_pair(callee, summary_index));
     return it == output_summary_nodes_.end() ? nullptr : it->second;
+  }
+  void setBackEdge(Function *callee) {
+    if (callee)
+      back_edge_callees_.insert(callee);
+  }
+  bool isBackEdge(Function *callee) const {
+    return callee && back_edge_callees_.count(callee) != 0;
   }
   void setCalleeCondition(Function *callee, ConditionRef condition,
                           GuardedValueFlowRegionNode *region = nullptr);
@@ -114,8 +126,11 @@ private:
   GuardedValueFlowNode *common_output_{nullptr};
   std::map<Function *, std::vector<GuardedValueFlowNode *>> pseudo_inputs_;
   std::map<Function *, std::vector<GuardedValueFlowNode *>> pseudo_outputs_;
-  std::map<unsigned, GuardedValueFlowNode *> input_summary_nodes_;
-  std::map<unsigned, GuardedValueFlowNode *> output_summary_nodes_;
+  std::map<std::pair<Function *, unsigned>, GuardedValueFlowNode *>
+      input_summary_nodes_;
+  std::map<std::pair<Function *, unsigned>, GuardedValueFlowNode *>
+      output_summary_nodes_;
+  std::set<Function *> back_edge_callees_;
   std::map<Function *, ConditionRef> callee_conditions_;
   std::map<Function *, GuardedValueFlowRegionNode *> callee_condition_regions_;
 };

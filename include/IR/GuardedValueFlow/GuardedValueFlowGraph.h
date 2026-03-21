@@ -70,8 +70,9 @@ public:
   GuardedValueFlowRegionNode *getAlwaysTrueRegion();
   GuardedValueFlowRegionNode *getAlwaysFalseRegion();
   GuardedValueFlowRegionNode *findSemanticRegion(path_cond_t path_cond) const;
-  GuardedValueFlowRegionNode *findOrCreateSemanticRegion(path_cond_t path_cond,
-                                                         BasicBlock *block);
+  GuardedValueFlowRegionNode *findOrCreateSemanticRegion(
+      path_cond_t path_cond, BasicBlock *block,
+      GuardedValueFlowNode *origin_condition_node = nullptr);
   GuardedValueFlowNode *findSemanticConditionNode(path_cond_t path_cond) const;
 
   void addBlockCondition(BasicBlock *block, BlockCondition condition);
@@ -86,6 +87,9 @@ public:
                           GuardedValueFlowNode *node);
   GuardedValueFlowNode *findOrCreateStoreMemoryNode(
       Value *value, Instruction *inst, Type *type, BasicBlock *block,
+      StringRef description = "store.mem");
+  GuardedValueFlowNode *createAnonymousStoreMemoryNode(
+      Type *type, BasicBlock *block, Instruction *inst,
       StringRef description = "store.mem");
 
   GuardedValueFlowReturnSite *findReturnSite(Instruction *inst) const;
@@ -181,6 +185,9 @@ public:
     return "GuardedValueFlowGraphBuilderPass";
   }
 
+  // This pass builds the structural intra-procedural GVG only.
+  // Prior SEG memory/interface semantics are completed by running
+  // LotusGuardedValueFlowAdapterPass on top of the builder output.
   bool hasGraphFor(const Function &F) const;
   GuardedValueFlowGraph &getGraph(const Function &F);
 

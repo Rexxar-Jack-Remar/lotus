@@ -396,9 +396,9 @@ static GuardedValueFlowNode *modelConstantExpr(ConstantExpr *CE,
   case Instruction::InsertValue:
   case Instruction::ExtractValue:
   case Instruction::ShuffleVector:
-    failed = true;
-    errs() << "[gvg-builder] Unsupported constant expression in function "
-           << F.getName() << ": " << *CE << "\n";
+    // The previous implementation tolerated these constant-expression forms by
+    // leaving the result
+    // partially modeled instead of dropping the whole graph.
     break;
   case Instruction::URem:
   case Instruction::FRem:
@@ -476,9 +476,16 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
       int64_t const_index = CI->getSExtValue();
       if (agg_or_ptr_ty->isStructTy()) {
         auto *struct_ty = cast<StructType>(agg_or_ptr_ty);
-        const StructLayout *layout = DL.getStructLayout(struct_ty);
-        accumulated_offset += static_cast<int64_t>(
-            layout->getElementOffsetInBits(static_cast<unsigned>(const_index)));
+        if (const_index >= 0 &&
+            static_cast<unsigned>(const_index) < struct_ty->getNumElements()) {
+          for (int64_t field_idx = 0; field_idx < const_index; ++field_idx) {
+            Type *field_ty =
+                struct_ty->getElementType(static_cast<unsigned>(field_idx));
+            if (field_ty->isSized())
+              accumulated_offset +=
+                  static_cast<int64_t>(DL.getTypeSizeInBits(field_ty));
+          }
+        }
       } else {
         accumulated_offset += const_index *
                               static_cast<int64_t>(DL.getTypeSizeInBits(element_ty));
@@ -509,8 +516,13 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
     if (base_ptr_ty->isPointerTy() && index_value->getType()->isSized() &&
         base_ptr_ty->isSized() &&
         DL.getTypeSizeInBits(base_ptr_ty) != DL.getTypeSizeInBits(index_value->getType())) {
+      auto opcode_kind =
+          DL.getTypeSizeInBits(base_ptr_ty) <
+                  DL.getTypeSizeInBits(index_value->getType())
+              ? GuardedValueFlowOpcodeNode::OpcodeKind::Trunc
+              : GuardedValueFlowOpcodeNode::OpcodeKind::SExt;
       auto *cast_node = createOpcodeNode(
-          graph, GuardedValueFlowOpcodeNode::OpcodeKind::SExt, base_ptr_ty, block,
+          graph, opcode_kind, base_ptr_ty, block,
           GuardedValueFlowNode::Kind::CastOpcode, "gep.index.cast");
       cast_node->addChild(non_const_index);
       cast_node->setCastWidths(DL.getTypeSizeInBits(index_value->getType()),
@@ -829,7 +841,6 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
       auto *site = graph.createSite<GuardedValueFlowDivSite>(&graph, &I);
       site->setLhsOperand(lhs);
       site->setRhsOperand(rhs);
-      lhs->addUseSite(site);
       rhs->addUseSite(site);
     }
     return true;
@@ -890,7 +901,6 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
         getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
     ptr_node->addUseSite(site);
     site->setPointerOperand(ptr_node);
-    result->addUseSite(site);
     return true;
   }
   case Instruction::Store: {

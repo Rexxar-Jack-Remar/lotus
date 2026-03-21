@@ -16,7 +16,7 @@
 
 /**
  * BugReportMgr - Centralized manager for all bug reports.
- * Follows Clearblue's architecture pattern.
+ * Follows the shared reporting architecture pattern.
  *
  * Responsibilities:
  * - Register bug types with IDs

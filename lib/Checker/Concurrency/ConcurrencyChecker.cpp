@@ -24,7 +24,7 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
     : m_module(module), m_aliasAnalysis(nullptr),
       m_threadAPI(ThreadAPI::getThreadAPI()), m_stats{} {
 
-  // Register bug types with BugReportMgr (Clearblue pattern)
+  // Register bug types with BugReportMgr (shared pattern)
   BugReportMgr &mgr = BugReportMgr::get_instance();
   m_dataRaceTypeId =
       mgr.register_bug_type("Data Race", BugDescription::BI_HIGH,
@@ -386,7 +386,7 @@ void ConcurrencyChecker::checkMPIBugs() {
 
 void ConcurrencyChecker::reportBug(const ConcurrencyBugReport &bug_report,
                                    int bug_type_id) {
-  // Create a new BugReport following Clearblue pattern
+  // Create a new BugReport following the shared reporting pattern
   BugReport *report = new BugReport(bug_type_id);
 
   // Add diagnostic steps showing the concurrency bug trace

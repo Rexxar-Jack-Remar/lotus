@@ -1,5 +1,5 @@
 // Use debug info to better report bugs, e.g., line number, function name, etc.
-// Adapted from Clearblue's DebugInfoAnalysis for LLVM 14+
+// Adapted from a prior DebugInfoAnalysis implementation for LLVM 14+
 
 #pragma once
 

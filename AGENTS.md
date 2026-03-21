@@ -16,7 +16,7 @@ lotus/
 │   ├── Alias/         # Alias analysis (DyckAA, AserPTA, LotusAA, SparrowAA, etc.)
 │   ├── Analysis/      # Analysis utilities (NullPointer, Concurrency, CFG, etc.)
 │   ├── CFL/           # CFL reachability
-│   ├── Checker/       # Bug checkers (Concurrency, FiTx, GVFA, KINT, Pulse)
+│   ├── Checker/       # Bug checkers (Concurrency, FiTx, KINT, Pulse, etc.)
 │   ├── Dataflow/      # APA, IFDS/IDE, Mono, NPA, WPDS
 │   ├── IR/            # GSA, ICFG, MemorySSA, PDG, SSI, SVFG, vSSA
 │   ├── Solvers/       # SMT
@@ -38,7 +38,7 @@ lotus/
 
 - **CMake**: Root `CMakeLists.txt` configures LLVM, Z3, optional Boost/CLAM/SeaHorn
 - **Libraries**: Static libs prefixed `Canary*` (e.g., `CanaryDyckAA`, `CanaryPDG`) — legacy naming
-- **Tools**: Binaries go to `build/bin/` (e.g., `lotus-gvfa`, `lotus-aa`, `lotus-kint`, `clam`)
+- **Tools**: Binaries go to `build/bin/` (e.g., `lotus-aa`, `lotus-kint`, `clam`)
 - **Tests**: Use `add_lotus_test()` / `add_lotus_pdg_test()`; run from `build/` with `ctest`
 
 ```bash
@@ -68,7 +68,7 @@ Custom LLVM path: `cmake .. -DLLVM_BUILD_PATH=/path/to/llvm/lib/cmake/llvm`
 ## Architecture
 
 ```
-Tools (aser-aa, dyck-aa, lotus-gvfa, lotus-kint, clam, etc.)
+Tools (aser-aa, dyck-aa, lotus-kint, clam, etc.)
     ↓
 Analysis Applications (Checkers, Optimization, Verification, etc.)
     ↓
@@ -91,7 +91,7 @@ LLVM (Module, Function, BasicBlock, Instruction) | Solvers
 
 1. Add `include/Checker/MyChecker/` and `lib/Checker/MyChecker/`
 2. Extend `llvm::ModulePass` (or a checker base); use `BugReportMgr` for reporting
-3. Add to `tools/checker/` and wire into existing tools (e.g., `lotus-gvfa`)
+3. Add to `tools/checker/` and wire into existing tools
 
 ### New Pass / Analysis
 

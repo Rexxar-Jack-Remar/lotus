@@ -130,7 +130,7 @@ MKintPass::MKintPass()
   m_taint_analysis = std::make_unique<TaintAnalysis>();
   m_bug_detection = std::make_unique<BugDetection>();
 
-  // Register bug types with BugReportMgr (Clearblue pattern)
+  // Register bug types with BugReportMgr (shared pattern)
   BugReportMgr &mgr = BugReportMgr::get_instance();
   m_intOverflowTypeId =
       mgr.register_bug_type("Integer Overflow", BugDescription::BI_HIGH,
@@ -377,7 +377,7 @@ PreservedAnalyses MKintPass::run(Module &M, ModuleAnalysisManager &MAM) {
                                m_overflow_insts, m_bad_shift_insts,
                                m_div_zero_insts);
 
-  // Report bugs to BugReportMgr (Clearblue pattern)
+  // Report bugs to BugReportMgr (shared pattern)
   reportBugsToManager();
 
   // Note: SARIF/JSON output is now handled centrally by BugReportMgr

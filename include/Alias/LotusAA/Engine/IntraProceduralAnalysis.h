@@ -131,6 +131,7 @@ private:
   std::vector<OutputItem *> outputs;
   std::set<MemObject *, mem_obj_cmp> escape_objs;
   std::set<Value *, llvm_cmp> escape_source;
+  std::map<Value *, unsigned, llvm_cmp> pseudo_input_indices;
 
   // Return instructions
   std::map<ReturnInst *, path_cond_t, llvm_cmp> ret_insts;
@@ -311,6 +312,11 @@ public:
   }
   const std::vector<std::set<Value *, llvm_cmp> *> &getSummaryInputs() const {
     return summary_inputs;
+  }
+  int getPseudoInputIndex(Value *value) const {
+    auto it = pseudo_input_indices.find(value);
+    return it == pseudo_input_indices.end() ? -1
+                                            : static_cast<int>(it->second);
   }
   int getSummaryInputIndex(Value *value) const {
     auto it = summary_inputs_idx.find(value);

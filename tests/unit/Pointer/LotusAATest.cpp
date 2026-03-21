@@ -149,6 +149,37 @@ bool containsBranchAtom(path_cond_t cond, BasicBlock *block,
          containsBranchAtom(cond->getRhs(), block, successor);
 }
 
+TEST(LotusAATest, AssignsDenseExplicitPseudoInputIndices) {
+  const char *IR = R"(
+    define void @callee(i32** %p, i32** %q) {
+    entry:
+      %a = load i32*, i32** %p
+      %b = load i32*, i32** %q
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  std::unique_ptr<LotusAA> Pass(runLotusAA(*M));
+  Function *F = M->getFunction("callee");
+  ASSERT_NE(F, nullptr);
+
+  IntraLotusAA *PTG = Pass->getPtGraph(F);
+  ASSERT_NE(PTG, nullptr);
+  ASSERT_EQ(PTG->getInputs().size(), 2u);
+
+  unsigned expected_index = 0;
+  for (const auto &input_item : PTG->getInputs()) {
+    EXPECT_TRUE(PTG->isPseudoInput(input_item.first));
+    EXPECT_EQ(PTG->getPseudoInputIndex(input_item.first),
+              static_cast<int>(expected_index));
+    ++expected_index;
+  }
+}
+
 IntraLotusAA::OutputItem *findOutputItem(IntraLotusAA *PTG, Value *parent,
                                          int64_t offset) {
   for (auto *output : PTG->outputs) {
@@ -589,7 +620,7 @@ TEST(LotusAA, BranchNegationKeepsSiblingEdgeIdentity) {
   EXPECT_TRUE(containsBranchAtom(negated, Entry, Else));
 }
 
-TEST(LotusAA, SameBooleanGuardAcrossControllersUsesFalconContradictions) {
+TEST(LotusAA, SameBooleanGuardAcrossControllersUsesLegacyContradictions) {
   const char *IR = R"(
     define void @main(i1 %cond) {
     entry:
@@ -730,7 +761,7 @@ TEST(LotusAA, PhiMergingSamePointerKeepsBothSiblingPathContributions) {
   EXPECT_EQ(cond, PTG->getEmptyCond());
 }
 
-TEST(LotusAA, ComplementaryBranchOrMatchesFalconSimpleSolver) {
+TEST(LotusAA, ComplementaryBranchOrMatchesLegacySimpleSolver) {
   const char *IR = R"(
     define void @main(i1 %cond) {
     entry:
@@ -998,7 +1029,7 @@ TEST(LotusAA, UnknownLibraryCallPreservesLikelyThisReceiver) {
   EXPECT_FALSE(saw_b);
 }
 
-TEST(LotusAA, SymbolicSequentialGepCollapsesToFalconBaseField) {
+TEST(LotusAA, SymbolicSequentialGepCollapsesToLegacyBaseField) {
   const char *IR = R"(
     define i8* @main(i64 %idx, i8* %a, i8* %b) {
     entry:
@@ -1149,7 +1180,7 @@ TEST(LotusAA, PthreadCreateUnknownLibraryCallStillClobbersThreadArg) {
   EXPECT_FALSE(saw_worker_ptr);
 }
 
-TEST(LotusAA, TopologicalTraversalDropsCyclicBlocksLikeFalcon) {
+TEST(LotusAA, TopologicalTraversalDropsCyclicBlocksLikeLegacyTraversal) {
   const char *IR = R"(
     define void @main(i1 %cond) {
     entry:
@@ -1175,7 +1206,7 @@ TEST(LotusAA, TopologicalTraversalDropsCyclicBlocksLikeFalcon) {
   EXPECT_EQ(PTG->topBBs.front(), &Main->getEntryBlock());
 }
 
-TEST(LotusAA, NoValueStoresUseFalconSentinelType) {
+TEST(LotusAA, NoValueStoresUseLegacySentinelType) {
   const char *IR = R"(
     declare void @ext(i8**)
 
@@ -2255,7 +2286,7 @@ TEST(LotusAA, RightValueTrackingRespectsConfiguredLimit) {
   EXPECT_EQ(values.size(), 1u);
 }
 
-TEST(LotusAA, RightValueTrackingUsesFalconOuterRefinementTiming) {
+TEST(LotusAA, RightValueTrackingUsesLegacyOuterRefinementTiming) {
   LotusConfigScope ConfigScope;
   IntraLotusAAConfig::lotus_restrict_right_value_count = 2;
 

@@ -1,5 +1,5 @@
 // Implementation of bug reporting methods for MKintPass
-// This file adds Clearblue-style bug reporting to BugReportMgr
+// This file adds shared bug reporting integration to BugReportMgr
 
 #include "Checker/KINT/Log.h"
 #include "Checker/KINT/MKintPass.h"

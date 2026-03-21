@@ -8,11 +8,23 @@
 #include <llvm/PassRegistry.h>
 #include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
+#include <algorithm>
 
 using namespace llvm;
 using namespace llvm::gvg;
 
 namespace {
+
+static bool containsUseSite(GuardedValueFlowNode *node,
+                            GuardedValueFlowSite *site) {
+  if (!node || !site)
+    return false;
+  for (GuardedValueFlowSite *use_site : node->useSites()) {
+    if (use_site == site)
+      return true;
+  }
+  return false;
+}
 
 class GuardedValueFlowParityTest : public ::testing::Test {
 protected:
@@ -55,6 +67,74 @@ protected:
     return pipeline;
   }
 };
+
+TEST_F(GuardedValueFlowParityTest,
+       TracksReverseParentsAndPriorValueFlowFiltering) {
+  const char *source = R"(
+    define void @test() {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  GuardedValueFlowGraph graph(F);
+  BasicBlock *entry = &F->getEntryBlock();
+  auto *cond = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt1Ty(context_),
+      &graph, entry);
+  auto *lhs = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context_),
+      &graph, entry);
+  auto *rhs = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context_),
+      &graph, entry);
+
+  auto *add = graph.createNode<GuardedValueFlowOpcodeNode>(
+      GuardedValueFlowNode::Kind::SimpleOpcode, Type::getInt32Ty(context_),
+      &graph, entry, GuardedValueFlowOpcodeNode::OpcodeKind::Add);
+  add->addChild(lhs);
+  add->addChild(rhs);
+
+  auto *cast = graph.createNode<GuardedValueFlowOpcodeNode>(
+      GuardedValueFlowNode::Kind::CastOpcode, Type::getInt64Ty(context_), &graph,
+      entry, GuardedValueFlowOpcodeNode::OpcodeKind::SExt);
+  cast->addChild(lhs);
+
+  auto *select = graph.createNode<GuardedValueFlowOpcodeNode>(
+      GuardedValueFlowNode::Kind::SimpleOpcode, Type::getInt32Ty(context_),
+      &graph, entry, GuardedValueFlowOpcodeNode::OpcodeKind::Select);
+  select->addChild(cond);
+  select->addChild(lhs);
+  select->addChild(rhs);
+
+  auto *region = graph.findOrCreateUnitRegion(cond, true, entry,
+                                              ConditionRef::none());
+  ASSERT_NE(region, nullptr);
+
+  EXPECT_TRUE(lhs->containsParent(add));
+  EXPECT_TRUE(lhs->containsParent(cast));
+  EXPECT_TRUE(lhs->containsParent(select));
+  EXPECT_EQ(lhs->getNumParents(), 3u);
+
+  auto lhs_vflow = lhs->getValueFlowParents();
+  EXPECT_EQ(lhs_vflow.size(), 3u);
+  EXPECT_NE(find(lhs_vflow.begin(), lhs_vflow.end(), add), lhs_vflow.end());
+  EXPECT_NE(find(lhs_vflow.begin(), lhs_vflow.end(), cast), lhs_vflow.end());
+  EXPECT_NE(find(lhs_vflow.begin(), lhs_vflow.end(), select), lhs_vflow.end());
+
+  EXPECT_EQ(cond->getNumParents(), 2u);
+  auto cond_vflow = cond->getValueFlowParents();
+  EXPECT_TRUE(cond_vflow.empty());
+
+  add->clearChildren();
+  EXPECT_FALSE(lhs->containsParent(add));
+  EXPECT_EQ(lhs->getNumParents(), 2u);
+}
 
 TEST_F(GuardedValueFlowParityTest, ModelsReturnPhiSelectAndOperationalSites) {
   const char *source = R"(
@@ -211,6 +291,65 @@ TEST_F(GuardedValueFlowParityTest, BuildsCompoundRegionsForNestedControlDependen
   ASSERT_NE(inner_opcode, nullptr);
   EXPECT_EQ(inner_opcode->getOpcodeKind(),
             GuardedValueFlowOpcodeNode::OpcodeKind::And);
+}
+
+TEST_F(GuardedValueFlowParityTest,
+       UsesPriorDereferenceAndDivideUseSiteSemantics) {
+  const char *source = R"(
+    define i32 @test(i32* %p, i32 %lhs, i32 %rhs) {
+    entry:
+      %v = load i32, i32* %p
+      %q = sdiv i32 %lhs, %rhs
+      %sum = add i32 %v, %q
+      ret i32 %sum
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  LoadInst *load = nullptr;
+  BinaryOperator *div = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *LI = dyn_cast<LoadInst>(&I))
+      load = LI;
+    if (I.getOpcode() == Instruction::SDiv)
+      div = cast<BinaryOperator>(&I);
+  }
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(div, nullptr);
+
+  auto *ptr_node = graph.findNode(F->getArg(0));
+  auto *load_value = graph.findNode(load);
+  auto *lhs_node = graph.findNode(F->getArg(1));
+  auto *rhs_node = graph.findNode(F->getArg(2));
+  ASSERT_NE(ptr_node, nullptr);
+  ASSERT_NE(load_value, nullptr);
+  ASSERT_NE(lhs_node, nullptr);
+  ASSERT_NE(rhs_node, nullptr);
+
+  GuardedValueFlowDereferenceSite *deref_site = nullptr;
+  GuardedValueFlowDivSite *div_site = nullptr;
+  for (const auto &site_ptr : graph.sites()) {
+    if (site_ptr->getInstruction() == load)
+      deref_site = dynamic_cast<GuardedValueFlowDereferenceSite *>(site_ptr.get());
+    if (site_ptr->getInstruction() == div)
+      div_site = dynamic_cast<GuardedValueFlowDivSite *>(site_ptr.get());
+  }
+
+  ASSERT_NE(deref_site, nullptr);
+  EXPECT_TRUE(containsUseSite(ptr_node, deref_site));
+  EXPECT_FALSE(containsUseSite(load_value, deref_site));
+
+  ASSERT_NE(div_site, nullptr);
+  EXPECT_TRUE(containsUseSite(rhs_node, div_site));
+  EXPECT_FALSE(containsUseSite(lhs_node, div_site));
 }
 
 TEST_F(GuardedValueFlowParityTest,
@@ -403,6 +542,121 @@ TEST_F(GuardedValueFlowParityTest,
   ASSERT_NE(cast_node, nullptr);
   EXPECT_EQ(cast_node->getOpcodeKind(),
             GuardedValueFlowOpcodeNode::OpcodeKind::BitCast);
+}
+
+TEST_F(GuardedValueFlowParityTest,
+       ToleratesPartiallyModeledConstantExprOperands) {
+  const char *source = R"(
+    define i32 @test() {
+    entry:
+      ret i32 extractvalue ({ i32, i32 } { i32 1, i32 2 }, 0)
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  auto *ret = cast<ReturnInst>(F->getEntryBlock().getTerminator());
+  auto *const_expr_node = graph.findNode(ret->getReturnValue());
+  ASSERT_NE(const_expr_node, nullptr);
+  EXPECT_TRUE(const_expr_node->children().empty());
+}
+
+TEST_F(GuardedValueFlowParityTest,
+       UsesPriorStructFieldSizeOffsetsForGEP) {
+  const char *source = R"(
+    %pair = type { i8, i32 }
+
+    define i32* @test(%pair* %p) {
+    entry:
+      %field = getelementptr %pair, %pair* %p, i64 0, i32 1
+      ret i32* %field
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  GetElementPtrInst *gep = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *GEP = dyn_cast<GetElementPtrInst>(&I)) {
+      gep = GEP;
+      break;
+    }
+  }
+  ASSERT_NE(gep, nullptr);
+
+  auto *gep_node = graph.findNode(gep);
+  ASSERT_NE(gep_node, nullptr);
+  ASSERT_EQ(gep_node->children().size(), 1u);
+  auto *gep_opcode =
+      dyn_cast<GuardedValueFlowOpcodeNode>(gep_node->children().front().target);
+  ASSERT_NE(gep_opcode, nullptr);
+  ASSERT_EQ(gep_opcode->children().size(), 2u);
+
+  auto *offset_base = gep_opcode->children()[1].target;
+  ASSERT_NE(offset_base, nullptr);
+  ASSERT_EQ(offset_base->children().size(), 1u);
+  auto *offset_opcode =
+      dyn_cast<GuardedValueFlowOpcodeNode>(offset_base->children().front().target);
+  ASSERT_NE(offset_opcode, nullptr);
+  EXPECT_TRUE(offset_opcode->hasIntConstant());
+  EXPECT_EQ(offset_opcode->getIntConstant(), 8);
+}
+
+TEST_F(GuardedValueFlowParityTest, UsesTruncForWiderDynamicGEPIndices) {
+  const char *source = R"(
+    define i32* @test(i32* %p, i128 %idx) {
+    entry:
+      %elt = getelementptr i32, i32* %p, i128 %idx
+      ret i32* %elt
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  GetElementPtrInst *gep = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *GEP = dyn_cast<GetElementPtrInst>(&I))
+      gep = GEP;
+  }
+  ASSERT_NE(gep, nullptr);
+
+  GuardedValueFlowOpcodeNode *index_cast = nullptr;
+  for (const auto &node_ptr : graph.nodes()) {
+    auto *opcode = dyn_cast<GuardedValueFlowOpcodeNode>(node_ptr.get());
+    if (!opcode || opcode->getKind() != GuardedValueFlowNode::Kind::CastOpcode)
+      continue;
+    if (opcode->getDescription() == "gep.index.cast") {
+      index_cast = opcode;
+      break;
+    }
+  }
+
+  ASSERT_NE(index_cast, nullptr);
+  EXPECT_EQ(index_cast->getOpcodeKind(),
+            GuardedValueFlowOpcodeNode::OpcodeKind::Trunc);
 }
 
 TEST_F(GuardedValueFlowParityTest, RejectsUnsupportedSwitchFunctions) {

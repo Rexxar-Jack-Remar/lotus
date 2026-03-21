@@ -181,7 +181,7 @@ static const DIFile *getDIFileFromIR(const Value *V) {
 }
 
 //===----------------------------------------------------------------------===//
-// Source File Handling (adapted from Clearblue)
+// Source File Handling (adapted from prior implementation)
 //===----------------------------------------------------------------------===//
 
 bool DebugInfoAnalysis::loadSourceFile(const std::string &filepath) {

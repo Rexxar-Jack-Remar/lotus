@@ -1,21 +1,9 @@
-# Bug checking tools: gvfa, kint, taint, and concur
+# Bug checking tools: kint, taint, concur, pulse, fitx, saber, and ae
 
 llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
   Coroutines
   Target
   #Passes
-)
-
-# Global Value Flow Analysis Tool (unified, includes null pointer analysis)
-add_executable(lotus-gvfa lotus_gvfa.cpp)
-target_link_libraries(lotus-gvfa PRIVATE
-  GVFAChecker
-  CanaryReport
-  CanaryFuzzing
-  Annotation
-  CanaryDyckAA
-  CanaryNullPointer
-  ${LLVM_LINK_COMPONENTS}
 )
 
 # Kint: A Bug-Finding Tool for C Programs

@@ -126,8 +126,13 @@ public:
 
   void addChild(GuardedValueFlowNode *child, float confidence = 1.0f,
                 ConditionRef condition = ConditionRef::none());
-  void clearChildren() { children_.clear(); }
+  void clearChildren();
   ArrayRef<Edge> children() const { return children_; }
+  ArrayRef<Edge> parents() const { return parents_; }
+  unsigned getNumParents() const { return static_cast<unsigned>(parents_.size()); }
+  bool containsParent(const GuardedValueFlowNode *parent) const;
+  std::vector<GuardedValueFlowNode *>
+  getValueFlowParents(bool enable_arithmetic_flow = false) const;
 
   void addUseSite(GuardedValueFlowSite *site);
   ArrayRef<GuardedValueFlowSite *> useSites() const { return use_sites_; }
@@ -168,6 +173,7 @@ protected:
   AccessPath access_path_;
   GuardedValueFlowRegionNode *region_{nullptr};
   std::vector<Edge> children_;
+  std::vector<Edge> parents_;
   std::vector<GuardedValueFlowSite *> use_sites_;
   std::vector<MatchingRegion> matching_regions_;
 

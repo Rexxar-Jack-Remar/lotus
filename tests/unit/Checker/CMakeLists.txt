@@ -2,8 +2,6 @@
 
 add_lotus_test(pulse_checker_test Pulse/PulseCheckerTest.cpp)
 target_link_libraries(pulse_checker_test PulseChecker)
-add_lotus_test(gvfa_checker_test GVFA/GVFACheckerTest.cpp)
-target_link_libraries(gvfa_checker_test GVFAChecker)
 add_lotus_test(concurrency_checker_test Concurrency/ConcurrencyCheckerTest.cpp)
 target_link_libraries(concurrency_checker_test ConcurrencyChecker)
 add_lotus_test(ae_checker_test AE/AECheckerTest.cpp)

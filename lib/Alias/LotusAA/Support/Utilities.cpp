@@ -103,6 +103,7 @@ void IntraLotusAA::clearMemObjectResult() {
 void IntraLotusAA::clearInterfaceResult() {
   lotus_clear_hash(&inputs);
   lotus_clear_hash(&inputs_func_level);
+  lotus_clear_hash(&pseudo_input_indices);
   lotus_clear_hash(&escape_obj_path);
   lotus_clear_hash(&escape_ret_path);
   lotus_clear_hash(&summary_inputs_idx);

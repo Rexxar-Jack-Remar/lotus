@@ -227,7 +227,7 @@ int main(int argc, char **argv) {
   // 2. Final deduplication (enhanced algorithm)
   mgr.deduplicate_reports(true);
 
-  // 3. Print bug report summary (Clearblue pattern - applies to all checkers)
+  // 3. Print bug report summary (shared pattern - applies to all checkers)
   mgr.print_summary(outs());
 
   // 4. Handle centralized output formats (applies to all checkers)

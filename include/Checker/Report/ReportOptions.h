@@ -11,7 +11,7 @@ namespace report_options {
  * Centralized options for bug report output formats.
  * These options apply to all checkers using BugReportMgr.
  *
- * Following Clearblue pattern: Individual checkers should NOT
+ * Following the shared pattern: individual checkers should NOT
  * maintain their own output format options.
  */
 

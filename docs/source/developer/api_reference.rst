@@ -651,35 +651,6 @@ Use programmatically:
        errs() << "Description: " << bug.description << "\n";
    }
 
-GVFA API
-~~~~~~~~
-
-Include headers:
-
-.. code-block:: cpp
-
-   #include "Analysis/GVFA/GlobalValueFlowAnalysis.h"
-
-Detect null pointer bugs:
-
-.. code-block:: cpp
-
-   // Create GVFA
-   GlobalValueFlowAnalysis gvfa(module);
-   
-   // Run null pointer analysis
-   gvfa.detectNullPointerBugs();
-   
-   // Get vulnerable dereferences
-   std::vector<NullDerefBug> bugs = gvfa.getNullPointerBugs();
-   
-   for (auto &bug : bugs) {
-       errs() << "Potential null dereference:\n";
-       errs() << "  Instruction: " << *bug.instruction << "\n";
-       errs() << "  Pointer: " << *bug.pointer << "\n";
-       errs() << "  Null source: " << *bug.nullSource << "\n";
-   }
-
 Utility APIs
 ------------
 
@@ -841,4 +812,3 @@ See Also
 - :doc:`../user_guide/architecture` - Understanding the framework architecture
 - :doc:`../user_guide/tutorials` - Practical usage examples
 - :doc:`developer_guide` - Extending Lotus
-

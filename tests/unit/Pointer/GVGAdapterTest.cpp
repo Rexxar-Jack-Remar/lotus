@@ -1,21 +1,33 @@
 #include <llvm/AsmParser/Parser.h>
-#include <llvm/InitializePasses.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LegacyPassManager.h>
+#include <llvm/InitializePasses.h>
 #include <llvm/PassRegistry.h>
 #include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 #include "Alias/LotusAA/Engine/InterProceduralPass.h"
+#define private public
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "IR/GSA/GSA.h"
 #include "IR/GuardedValueFlow/GuardedValueFlowBuilder.h"
 #include "IR/GuardedValueFlow/LotusAdapter.h"
+#undef private
 
 using namespace llvm;
 using namespace llvm::gvg;
 
 namespace {
+
+static bool containsChild(GuardedValueFlowNode *node, GuardedValueFlowNode *child) {
+  if (!node || !child)
+    return false;
+  for (const auto &edge : node->children()) {
+    if (edge.target == child)
+      return true;
+  }
+  return false;
+}
 
 void initializePassInfra() {
   static bool initialized = false;
@@ -56,6 +68,22 @@ PipelineResult runPipeline(Module &M) {
   result.pm->add(result.lotus);
   result.pm->add(result.builder);
   result.pm->add(new LotusGuardedValueFlowAdapterPass());
+  result.pm->run(M);
+  return result;
+}
+
+PipelineResult runPipelineWithoutAdapter(Module &M) {
+  initializePassInfra();
+
+  PipelineResult result;
+  result.pm = std::make_unique<legacy::PassManager>();
+  result.lotus = new LotusAA();
+  result.builder = new GuardedValueFlowGraphBuilderPass();
+
+  result.pm->add(new gsa::ControlDependenceAnalysisPass());
+  result.pm->add(new gsa::GateAnalysisPass());
+  result.pm->add(result.lotus);
+  result.pm->add(result.builder);
   result.pm->run(M);
   return result;
 }
@@ -144,7 +172,8 @@ TEST(GVGAdapter, MaterializesPseudoCallInterfaceNodes) {
   EXPECT_EQ(pseudo_input->getIndex(), 0u);
   EXPECT_EQ(pseudo_input->getAccessPath().getBase(),
             load_input_it->second.getParentPtr());
-  EXPECT_EQ(pseudo_input->getAccessPath().getOffset(),
+  ASSERT_EQ(pseudo_input->getAccessPath().getDepth(), 1);
+  EXPECT_EQ(pseudo_input->getAccessPath().getOffset(0),
             load_input_it->second.getOffset());
   ASSERT_EQ(pseudo_input->children().size(), 1u);
   EXPECT_EQ(pseudo_input->children().front().target->getKind(),
@@ -156,11 +185,14 @@ TEST(GVGAdapter, MaterializesPseudoCallInterfaceNodes) {
   EXPECT_EQ(pseudo_output->getIndex(), 0u);
   EXPECT_EQ(pseudo_output->getAccessPath().getBase(),
             store_ptg->getOutputs()[1]->getSymbolicInfo().getParentPtr());
-  EXPECT_EQ(pseudo_output->getAccessPath().getOffset(),
+  ASSERT_EQ(pseudo_output->getAccessPath().getDepth(), 1);
+  EXPECT_EQ(pseudo_output->getAccessPath().getOffset(0),
             store_ptg->getOutputs()[1]->getSymbolicInfo().getOffset());
-  ASSERT_EQ(pseudo_output->children().size(), 1u);
-  EXPECT_EQ(pseudo_output->children().front().target->getKind(),
-            GuardedValueFlowNode::Kind::StoreMemory);
+  EXPECT_TRUE(pseudo_output->children().empty());
+  auto *pseudo_output_mem =
+      graph.findStoreMemoryNode(pseudo_output->getLLVMValue(), store_call_inst);
+  ASSERT_NE(pseudo_output_mem, nullptr);
+  EXPECT_TRUE(containsChild(pseudo_output_mem, pseudo_output));
 }
 
 TEST(GVGAdapter, ConditionalLoadPreservesTwoMatchingConditions) {
@@ -213,7 +245,7 @@ TEST(GVGAdapter, ConditionalLoadPreservesTwoMatchingConditions) {
   }
 }
 
-TEST(GVGAdapter, EquivalentLoadsKeepDistinctLoadMemoryNodes) {
+TEST(GVGAdapter, EquivalentLoadsReuseCanonicalLoadMemoryNode) {
   const char *IR = R"(
     define i32* @test(i32** %p) {
     entry:
@@ -257,7 +289,8 @@ TEST(GVGAdapter, EquivalentLoadsKeepDistinctLoadMemoryNodes) {
   ASSERT_EQ(second_value->children().size(), 1u);
   EXPECT_EQ(first_value->children().front().target, first_mem);
   EXPECT_EQ(second_value->children().front().target, second_mem);
-  EXPECT_NE(first_mem, second_mem);
+  EXPECT_EQ(first_mem, second_mem);
+  EXPECT_EQ(first_mem->getMatchingRegions().size(), second_mem->getMatchingRegions().size());
 }
 
 TEST(GVGAdapter, NonPointerLoadsAlsoReceiveMatchedStoreMemoryNodes) {
@@ -465,7 +498,7 @@ TEST(GVGAdapter, MaterializesSummaryNodesAndPseudoOutputIndices) {
     if (!summary_inputs || summary_inputs->empty())
       continue;
     saw_input_summary = true;
-    auto *node = site->getInputSummaryNode(bucket);
+    auto *node = site->getInputSummaryNode(Callee, bucket);
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->getKind(), GuardedValueFlowNode::Kind::CallSiteArgumentSummary);
     auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
@@ -482,7 +515,7 @@ TEST(GVGAdapter, MaterializesSummaryNodesAndPseudoOutputIndices) {
     if (!summary_outputs || summary_outputs->empty())
       continue;
     saw_output_summary = true;
-    auto *node = site->getOutputSummaryNode(bucket);
+    auto *node = site->getOutputSummaryNode(Callee, bucket);
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->getKind(), GuardedValueFlowNode::Kind::CallSiteReturnSummary);
     auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
@@ -495,6 +528,324 @@ TEST(GVGAdapter, MaterializesSummaryNodesAndPseudoOutputIndices) {
 
   EXPECT_EQ(saw_input_summary, has_any_summary_input);
   EXPECT_EQ(saw_output_summary, has_any_summary_output);
+}
+
+TEST(GVGAdapter, DropsSummaryInputNodesWhenBindingsAreIncomplete) {
+  int old_ap_level = IntraLotusAAConfig::lotus_restrict_ap_level;
+  int old_inline_size = IntraLotusAAConfig::lotus_restrict_inline_size;
+  IntraLotusAAConfig::lotus_restrict_ap_level = 0;
+  IntraLotusAAConfig::lotus_restrict_inline_size = -1;
+
+  const char *IR = R"(
+    define void @callee(i32*** %p, i32* %v) {
+    entry:
+      %slot = load i32**, i32*** %p
+      store i32* %v, i32** %slot
+      ret void
+    }
+
+    define void @caller(i32*** %p, i32* %v) {
+    entry:
+      call void @callee(i32*** %p, i32* %v)
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipelineWithoutAdapter(*M);
+  IntraLotusAAConfig::lotus_restrict_ap_level = old_ap_level;
+  IntraLotusAAConfig::lotus_restrict_inline_size = old_inline_size;
+
+  Function *caller = M->getFunction("caller");
+  Function *callee = M->getFunction("callee");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_TRUE(result.builder->hasGraphFor(*caller));
+  ASSERT_NE(result.lotus, nullptr);
+
+  auto *caller_ptg = result.lotus->getPtGraph(caller);
+  auto *callee_ptg = result.lotus->getPtGraph(callee);
+  ASSERT_NE(caller_ptg, nullptr);
+  ASSERT_NE(callee_ptg, nullptr);
+
+  CallBase *call = nullptr;
+  for (Instruction &I : instructions(*caller)) {
+    if (auto *CB = dyn_cast<CallBase>(&I)) {
+      call = CB;
+      break;
+    }
+  }
+  ASSERT_NE(call, nullptr);
+
+  Value *missing_binding = nullptr;
+  for (const auto *bucket : callee_ptg->getSummaryInputs()) {
+    if (bucket && !bucket->empty()) {
+      missing_binding = *bucket->begin();
+      break;
+    }
+  }
+  if (!missing_binding)
+    GTEST_SKIP() << "LotusAA did not materialize summary input buckets for this synthetic case";
+
+  auto call_it = caller_ptg->func_arg.find(call);
+  ASSERT_NE(call_it, caller_ptg->func_arg.end());
+  auto callee_it = call_it->second.find(callee);
+  ASSERT_NE(callee_it, call_it->second.end());
+  callee_it->second.erase(missing_binding);
+
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*caller);
+  LotusGuardedValueFlowAdapterPass adapter;
+  adapter.adaptFunction(graph, *caller_ptg, *result.lotus, *result.builder);
+
+  auto *site = graph.findCallSite(call);
+  ASSERT_NE(site, nullptr);
+  for (unsigned bucket = 0; bucket < callee_ptg->getSummaryInputs().size(); ++bucket) {
+    const auto *summary_inputs = callee_ptg->getSummaryInputs()[bucket];
+    if (!summary_inputs || summary_inputs->empty())
+      continue;
+    EXPECT_EQ(site->getInputSummaryNode(callee, bucket), nullptr);
+  }
+}
+
+TEST(GVGAdapter, DropsPseudoInputInterfaceWhenBindingIsRemoved) {
+  const char *IR = R"(
+    define void @callee(i32** %p, i32** %q) {
+    entry:
+      %a = load i32*, i32** %p
+      %b = load i32*, i32** %q
+      ret void
+    }
+
+    define void @caller(i32** %p, i32** %q) {
+    entry:
+      call void @callee(i32** %p, i32** %q)
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipelineWithoutAdapter(*M);
+  Function *caller = M->getFunction("caller");
+  Function *callee = M->getFunction("callee");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_TRUE(result.builder->hasGraphFor(*caller));
+  ASSERT_NE(result.lotus, nullptr);
+
+  auto *callee_ptg = result.lotus->getPtGraph(callee);
+  auto *caller_ptg = result.lotus->getPtGraph(caller);
+  ASSERT_NE(callee_ptg, nullptr);
+  ASSERT_NE(caller_ptg, nullptr);
+  ASSERT_EQ(callee_ptg->getInputs().size(), 2u);
+
+  SmallVector<Value *, 2> pseudo_inputs;
+  for (const auto &input_item : callee_ptg->getInputs())
+    pseudo_inputs.push_back(input_item.first);
+  ASSERT_EQ(pseudo_inputs.size(), 2u);
+  ASSERT_EQ(callee_ptg->getPseudoInputIndex(pseudo_inputs[0]), 0);
+  ASSERT_EQ(callee_ptg->getPseudoInputIndex(pseudo_inputs[1]), 1);
+
+  CallBase *call = nullptr;
+  for (Instruction &I : instructions(*caller)) {
+    if (auto *CB = dyn_cast<CallBase>(&I)) {
+      call = CB;
+      break;
+    }
+  }
+  ASSERT_NE(call, nullptr);
+
+  auto call_it = caller_ptg->func_arg.find(call);
+  ASSERT_NE(call_it, caller_ptg->func_arg.end());
+  auto callee_it = call_it->second.find(callee);
+  ASSERT_NE(callee_it, call_it->second.end());
+  callee_it->second.erase(pseudo_inputs[0]);
+
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*caller);
+  LotusGuardedValueFlowAdapterPass adapter;
+  adapter.adaptFunction(graph, *caller_ptg, *result.lotus, *result.builder);
+
+  auto *site = graph.findCallSite(call);
+  ASSERT_NE(site, nullptr);
+  EXPECT_EQ(site->getPseudoInput(callee, 0), nullptr);
+  EXPECT_EQ(site->getPseudoInput(callee, 1), nullptr);
+  EXPECT_EQ(site->getNumPseudoInputs(callee), 0u);
+}
+
+TEST(GVGAdapter, DropsPseudoOutputInterfaceWhenBindingIsRemoved) {
+  const char *IR = R"(
+    define void @callee(i32** %p, i32* %v) {
+    entry:
+      store i32* %v, i32** %p
+      ret void
+    }
+
+    define void @caller(i32** %p, i32* %v) {
+    entry:
+      call void @callee(i32** %p, i32* %v)
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipelineWithoutAdapter(*M);
+  Function *caller = M->getFunction("caller");
+  Function *callee = M->getFunction("callee");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_TRUE(result.builder->hasGraphFor(*caller));
+  ASSERT_NE(result.lotus, nullptr);
+
+  auto *caller_ptg = result.lotus->getPtGraph(caller);
+  auto *callee_ptg = result.lotus->getPtGraph(callee);
+  ASSERT_NE(caller_ptg, nullptr);
+  ASSERT_NE(callee_ptg, nullptr);
+  ASSERT_GT(callee_ptg->getOutputs().size(), 1u);
+
+  CallBase *call = nullptr;
+  for (Instruction &I : instructions(*caller)) {
+    if (auto *CB = dyn_cast<CallBase>(&I)) {
+      call = CB;
+      break;
+    }
+  }
+  ASSERT_NE(call, nullptr);
+
+  auto call_it = caller_ptg->func_ret.find(call);
+  ASSERT_NE(call_it, caller_ptg->func_ret.end());
+  auto callee_it = call_it->second.find(callee);
+  ASSERT_NE(callee_it, call_it->second.end());
+  ASSERT_GT(callee_it->second.size(), 1u);
+  callee_it->second[1] = nullptr;
+
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*caller);
+  LotusGuardedValueFlowAdapterPass adapter;
+  adapter.adaptFunction(graph, *caller_ptg, *result.lotus, *result.builder);
+
+  auto *site = graph.findCallSite(call);
+  ASSERT_NE(site, nullptr);
+  EXPECT_EQ(site->getPseudoOutput(callee, 0), nullptr);
+  EXPECT_EQ(site->getNumPseudoOutputs(callee), 0u);
+}
+
+TEST(GVGAdapter, KeepsPseudoArgumentsDistinctWhenInterfaceOverlapsFormal) {
+  const char *IR = R"(
+    @g = global i8 0
+
+    define void @test(i32** %p) {
+    entry:
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipelineWithoutAdapter(*M);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  ASSERT_TRUE(result.builder->hasGraphFor(*F));
+  ASSERT_NE(result.lotus, nullptr);
+
+  auto *ptg = result.lotus->getPtGraph(F);
+  ASSERT_NE(ptg, nullptr);
+  Argument *formal = F->arg_empty() ? nullptr : &*F->arg_begin();
+  GlobalVariable *global = M->getNamedGlobal("g");
+  ASSERT_NE(formal, nullptr);
+  ASSERT_NE(global, nullptr);
+  ptg->getInputs()[formal] = IntraLotusAA::AccessPath(global, 0);
+
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*F);
+  auto *common_arg = graph.findNode(formal);
+  ASSERT_NE(common_arg, nullptr);
+  EXPECT_EQ(common_arg->getKind(), GuardedValueFlowNode::Kind::CommonArgument);
+
+  LotusGuardedValueFlowAdapterPass adapter;
+  adapter.adaptFunction(graph, *ptg, *result.lotus, *result.builder);
+
+  GuardedValueFlowNode *pseudo_arg = nullptr;
+  for (GuardedValueFlowNode *node : graph.pseudoArguments()) {
+    if (node && node->getLLVMValue() == formal) {
+      pseudo_arg = node;
+      break;
+    }
+  }
+
+  ASSERT_NE(pseudo_arg, nullptr);
+  EXPECT_EQ(pseudo_arg->getKind(), GuardedValueFlowNode::Kind::PseudoArgument);
+  EXPECT_NE(pseudo_arg, common_arg);
+}
+
+TEST(GVGAdapter, SafeLinkUsesEffectiveChildForMatchingAndRejectsInvalidTypes) {
+  const char *IR = R"(
+    define void @test() {
+    entry:
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  GuardedValueFlowGraph graph(F);
+  BasicBlock *entry = &F->getEntryBlock();
+  auto *ret = cast<ReturnInst>(entry->getTerminator());
+
+  auto *load_mem = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt64Ty(Ctx), &graph,
+      entry, nullptr, ret);
+  auto *store_mem = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::StoreMemory, Type::getInt32Ty(Ctx), &graph,
+      entry, nullptr, ret);
+  auto *cond = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt1Ty(Ctx), &graph,
+      entry, nullptr, ret);
+  auto *region =
+      graph.findOrCreateUnitRegion(cond, true, entry, ConditionRef::none());
+  ASSERT_NE(region, nullptr);
+
+  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+      graph, load_mem, store_mem, 0.75f, ConditionRef::none());
+  ASSERT_NE(linked, nullptr);
+  EXPECT_NE(linked, store_mem);
+  EXPECT_EQ(linked->getKind(), GuardedValueFlowNode::Kind::CastOpcode);
+  ASSERT_EQ(load_mem->children().size(), 1u);
+  EXPECT_EQ(load_mem->children().front().target, linked);
+  EXPECT_FLOAT_EQ(load_mem->children().front().confidence, 0.75f);
+  ASSERT_EQ(linked->children().size(), 1u);
+  EXPECT_EQ(linked->children().front().target, store_mem);
+  EXPECT_TRUE(linked->containsParent(load_mem));
+  EXPECT_TRUE(store_mem->containsParent(linked));
+  EXPECT_FALSE(store_mem->containsParent(load_mem));
+
+  load_mem->addMatchingRegion(linked, region, ConditionRef::none());
+  EXPECT_EQ(load_mem->getMatchingRegion(linked), region);
+  EXPECT_EQ(load_mem->getMatchingRegion(store_mem), nullptr);
+
+  auto *aggregate_parent = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand,
+      StructType::get(Ctx, {Type::getInt32Ty(Ctx), Type::getInt32Ty(Ctx)}),
+      &graph,
+      entry, nullptr, ret);
+  auto *scalar_child = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(Ctx), &graph,
+      entry, nullptr, ret);
+  EXPECT_EQ(LotusGuardedValueFlowAdapterPass::safeLink(graph, aggregate_parent,
+                                                       scalar_child),
+            nullptr);
+  EXPECT_TRUE(aggregate_parent->children().empty());
 }
 
 } // namespace

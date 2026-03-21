@@ -67,38 +67,6 @@ The tool detects various integer-related bugs:
    # Quiet mode with output to file
    ./build/bin/lotus-kint -quiet -log-to-file=analysis.log input.ll
 
-lotus-gvfa – Global Value Flow Analysis
-----------------------------------------
-
-Interprocedural value-flow-based bug detector for memory safety and taint-style
-issues.
-
-**Binary**: ``lotus-gvfa``  
-**Location**: ``tools/checker/lotus_gvfa.cpp``
-
-**Detects**:
-
-- Null pointer dereferences
-- Use-after-free (via value-flow modeling)
-- Taint-style flows (when configured)
-
-**Usage**:
-
-.. code-block:: bash
-
-   ./build/bin/lotus-gvfa [options] input.bc
-
-Key options:
-
-- ``-vuln-type=nullpointer`` – Null pointer analysis (default)
-- ``-vuln-type=taint`` – Taint-style vulnerability detection
-- ``-test-cfl-reachability`` – Use CFL reachability for higher precision
-- ``-dump-stats`` – Print analysis statistics
-- ``-verbose`` – Detailed per-bug output
-
-See :doc:`../../user_guide/bug_detection` and :doc:`../../analysis/gvfa` for
-complete examples.
-
 lotus-taint – Taint Analysis
 ----------------------------
 
@@ -168,4 +136,3 @@ Typical workflow:
 
 Detailed concurrency examples and recommended patterns are in
 :doc:`../../user_guide/bug_detection`.
-

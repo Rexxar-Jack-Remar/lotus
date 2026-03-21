@@ -516,6 +516,11 @@ void IntraLotusAA::collectInputs() {
     }
   }
 
+  pseudo_input_indices.clear();
+  unsigned next_index = 0;
+  for (const auto &input_item : inputs)
+    pseudo_input_indices[input_item.first] = next_index++;
+
   // Verify completeness (if testing enabled)
   if (IntraLotusAAConfig::lotus_test_correctness) {
     for (size_t i = 0; i < outputs.size(); i++) {
@@ -692,6 +697,11 @@ void IntraLotusAA::finalizeInterface() {
   for (Value *arg : to_remove) {
     inputs.erase(arg);
   }
+
+  pseudo_input_indices.clear();
+  unsigned next_pseudo_input_index = 0;
+  for (const auto &input_item : inputs)
+    pseudo_input_indices[input_item.first] = next_pseudo_input_index++;
 
   // Finalize point-to info for outputs
   for (OutputItem *output_item : outputs) {

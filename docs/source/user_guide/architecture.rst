@@ -17,7 +17,7 @@ Lotus is organized into several major subsystems that work together to provide a
                     │
    ┌────────────────┴─────────────────────────────────────────────┐
    │                    Analysis Applications                      │
-   │  - Bug Checkers (Kint, GVFA, Taint, Concurrency)            │
+   │  - Bug Checkers (Kint, Taint, Concurrency, Pulse)           │
    │  - Abstract Interpreters (CLAM, SymAbsAI)                               │
    │  - Fuzzing Support (Titan)                                   │
    └────┬────────────┬────────────┬────────────┬─────────────────┘
@@ -64,8 +64,6 @@ Core Components
    
    - **Taint Analysis**: Tracks tainted data from sources to sinks
    - **Reaching Definitions**: Identifies definition-use chains
-   - **GVFA (Global Value Flow Analysis)**: Tracks value propagation globally
-
 4. **Constraint Solving** (``lib/Solvers/``, ``include/Solvers/``)
    
    Multiple solver backends for different analysis needs:
@@ -95,7 +93,6 @@ Core Components
    Security and safety bug detection:
    
    - **Kint**: Integer overflow, division by zero, array bounds checking
-   - **GVFA**: Null pointer dereference, use-after-free detection
    - **Taint**: Information flow and taint-style vulnerabilities
    - **Concurrency**: Race conditions and deadlock detection
 
@@ -311,7 +308,7 @@ Standalone Tools
 Each major component has standalone command-line tools:
 
 - ``aser-aa``, ``dyck-aa``, ``lotus-aa``: Alias analysis
-- ``lotus-kint``, ``lotus-gvfa``, ``lotus-taint``: Bug detection
+- ``lotus-kint``, ``lotus-taint``, ``lotus-concur``, ``lotus-pulse``: Bug detection
 - ``clam``, ``clam-pp``, ``clam-diff``: Abstract interpretation
 - ``pdg-query``: PDG queries
 
@@ -364,4 +361,3 @@ Adding New Abstract Domains
 4. Add command-line option
 
 See :doc:`../developer/developer_guide` for detailed instructions.
-

@@ -76,9 +76,9 @@ static int64_t getElementTypeSizeInBits(Type *type, const DataLayout &DL) {
   return type ? static_cast<int64_t>(DL.getTypeSizeInBits(type)) : 0;
 }
 
-static int64_t getFalconLikeInboundOffset(GEPOperator *gep, unsigned start_idx,
-                                          Type *start_type,
-                                          const DataLayout &DL) {
+static int64_t getLegacyStyleInboundOffset(GEPOperator *gep, unsigned start_idx,
+                                           Type *start_type,
+                                           const DataLayout &DL) {
   int64_t offset = 0;
   Type *type = start_type;
 
@@ -109,7 +109,7 @@ static int64_t getFalconLikeInboundOffset(GEPOperator *gep, unsigned start_idx,
       return PTGraph::UNKNOWN_OFFSET;
     }
 
-    // Match Falcon: symbolic sequential indices collapse to field 0, but
+    // Symbolic sequential indices collapse to field 0, but
     // symbolic struct indices force the whole access path to unknown.
     if (Type *elem_type = getSequentialElementType(type)) {
       type = elem_type;
@@ -122,7 +122,8 @@ static int64_t getFalconLikeInboundOffset(GEPOperator *gep, unsigned start_idx,
   return offset;
 }
 
-static int64_t getFalconLikeGepOffset(GEPOperator *gep, const DataLayout &DL) {
+static int64_t getLegacyStyleGepOffset(GEPOperator *gep,
+                                       const DataLayout &DL) {
   Type *base_type = gep->getSourceElementType();
   if (!base_type)
     return PTGraph::UNKNOWN_OFFSET;
@@ -138,7 +139,7 @@ static int64_t getFalconLikeGepOffset(GEPOperator *gep, const DataLayout &DL) {
 
   int64_t inbound_offset = 0;
   if (isa<StructType>(base_type)) {
-    inbound_offset = getFalconLikeInboundOffset(gep, 2, base_type, DL);
+    inbound_offset = getLegacyStyleInboundOffset(gep, 2, base_type, DL);
   } else if (Type *elem_type = getSequentialElementType(base_type)) {
     if (gep->getNumOperands() >= 3) {
       Value *inner_index = gep->getOperand(2);
@@ -146,12 +147,12 @@ static int64_t getFalconLikeGepOffset(GEPOperator *gep, const DataLayout &DL) {
         inbound_offset = const_idx->getSExtValue() *
                          getElementTypeSizeInBits(elem_type, DL);
       } else {
-        // Match Falcon: symbolic array/vector indices collapse to element 0.
+        // Symbolic array/vector indices collapse to element 0.
         inbound_offset = 0;
       }
     }
   } else {
-    // Match Falcon: symbolic pointer arithmetic over non-composite element
+    // Symbolic pointer arithmetic over non-composite element
     // types also collapses to offset 0 rather than a distinct unknown field.
     inbound_offset = 0;
   }
@@ -179,7 +180,7 @@ static std::pair<Value *, int64_t> trackPointerOffset(Value *ptr,
 
     while (auto *gep = dyn_cast<GEPOperator>(ptr)) {
       if (!PTGraph::isUnknownOffset(offset)) {
-        offset = PTGraph::composeOffset(offset, getFalconLikeGepOffset(gep, DL));
+        offset = PTGraph::composeOffset(offset, getLegacyStyleGepOffset(gep, DL));
       }
       ptr = gep->getPointerOperand();
     }

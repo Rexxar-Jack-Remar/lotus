@@ -19,8 +19,6 @@ At a glance:
   multi-threaded code (MHP, lock sets, thread modeling). See :doc:`concurrency`.
 - **Crypto** (``lib/Analysis/Crypto``): Constant-time programming analysis for
   cryptographic code. See :doc:`crypto`.
-- **GVFA** (``lib/Analysis/GVFA``): Global value-flow engine for interprocedural
-  data-flow reasoning. See :doc:`gvfa`.
 - **NullPointer** (``lib/Analysis/NullPointer``): A family of nullness and
   null-flow analyses. See :doc:`null_pointer`.
 - **Spectre** (``lib/Analysis/Spectre``): Cache speculation analysis for
@@ -37,6 +35,5 @@ details.
    cfg
    concurrency
    crypto
-   gvfa
    null_pointer
    spectre

@@ -97,7 +97,7 @@ struct BugReportExtras {
 
 /**
  * BugReport represents a complete bug with diagnostic trace.
- * Follows Clearblue's pattern of reporting bugs as sequences of steps.
+ * Follows the shared pattern of reporting bugs as sequences of steps.
  * Enhanced with Infer-inspired features for better reporting.
  */
 class BugReport {

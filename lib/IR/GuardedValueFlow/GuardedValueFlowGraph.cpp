@@ -380,7 +380,8 @@ GuardedValueFlowGraph::findSemanticConditionNode(path_cond_t path_cond) const {
 
 GuardedValueFlowRegionNode *
 GuardedValueFlowGraph::findOrCreateSemanticRegion(path_cond_t path_cond,
-                                                  BasicBlock *block) {
+                                                  BasicBlock *block,
+                                                  GuardedValueFlowNode *origin_condition_node) {
   if (!path_cond)
     return getAlwaysTrueRegion();
 
@@ -390,11 +391,14 @@ GuardedValueFlowGraph::findOrCreateSemanticRegion(path_cond_t path_cond,
   auto condition = ConditionRef::fromPathCond(path_cond);
   auto *condition_node = findSemanticConditionNode(path_cond);
   if (!condition_node) {
-    condition_node = createNode<GuardedValueFlowNode>(
-        GuardedValueFlowNode::Kind::InterfaceCondition,
-        Type::getInt1Ty(base_function_->getContext()), this, nullptr, nullptr,
-        nullptr);
-    condition_node->setDescription("iface.cond:" + renderPathCond(path_cond));
+    condition_node = origin_condition_node;
+    if (!condition_node) {
+      condition_node = createNode<GuardedValueFlowNode>(
+          GuardedValueFlowNode::Kind::InterfaceCondition,
+          Type::getInt1Ty(base_function_->getContext()), this, nullptr, nullptr,
+          nullptr);
+      condition_node->setDescription("iface.cond:" + renderPathCond(path_cond));
+    }
     semantic_condition_nodes_[path_cond] = condition_node;
   }
 
@@ -410,8 +414,10 @@ GuardedValueFlowGraph::findOrCreateSemanticRegion(path_cond_t path_cond,
   state.assignments[region] = true;
   state.assignments[condition_node] = true;
   region->setConstraintState(std::move(state));
-  region->addChild(condition_node, 1.0f, condition);
-  condition_node->region_ = region;
+  if (condition_node->getGraph() == this) {
+    region->addChild(condition_node, 1.0f, condition);
+    condition_node->region_ = region;
+  }
   semantic_regions_[path_cond] = region;
   return region;
 }
@@ -464,6 +470,14 @@ GuardedValueFlowNode *GuardedValueFlowGraph::findOrCreateStoreMemoryNode(
       GuardedValueFlowNode::Kind::StoreMemory, type, this, block, nullptr, inst);
   node->setDescription(description.str());
   mapStoreMemoryNode(value, inst, node);
+  return node;
+}
+
+GuardedValueFlowNode *GuardedValueFlowGraph::createAnonymousStoreMemoryNode(
+    Type *type, BasicBlock *block, Instruction *inst, StringRef description) {
+  auto *node = createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::StoreMemory, type, this, block, nullptr, inst);
+  node->setDescription(description.str());
   return node;
 }
 
