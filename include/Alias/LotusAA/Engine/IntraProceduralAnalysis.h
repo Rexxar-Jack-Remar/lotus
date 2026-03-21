@@ -306,6 +306,20 @@ public:
   const CallResolutionMap &getResolvedCallTargets() const {
     return cg_resolve_result;
   }
+  const std::vector<mem_value_t *> &getSummaryOutputs() const {
+    return summary_outputs;
+  }
+  const std::vector<std::set<Value *, llvm_cmp> *> &getSummaryInputs() const {
+    return summary_inputs;
+  }
+  int getSummaryInputIndex(Value *value) const {
+    auto it = summary_inputs_idx.find(value);
+    return it == summary_inputs_idx.end() ? -1 : it->second;
+  }
+  path_cond_t importSummaryCond(path_cond_t cond, Value *callsite,
+                                Function *callee) {
+    return importPathCond(cond, callsite, callee);
+  }
 
   void getReturnInst();
 

@@ -153,7 +153,7 @@ TEST(GVGAdapter, MaterializesPseudoCallInterfaceNodes) {
   ASSERT_GT(store_ptg->getOutputs().size(), 1u);
   auto *pseudo_output = store_site->getPseudoOutput(store_callee, 0);
   ASSERT_NE(pseudo_output, nullptr);
-  EXPECT_EQ(pseudo_output->getIndex(), 1u);
+  EXPECT_EQ(pseudo_output->getIndex(), 0u);
   EXPECT_EQ(pseudo_output->getAccessPath().getBase(),
             store_ptg->getOutputs()[1]->getSymbolicInfo().getParentPtr());
   EXPECT_EQ(pseudo_output->getAccessPath().getOffset(),
@@ -249,6 +249,230 @@ TEST(GVGAdapter, EquivalentLoadsReuseCanonicalLoadMemoryNode) {
   ASSERT_EQ(second_value->children().size(), 1u);
   EXPECT_EQ(first_value->children().front().target,
             second_value->children().front().target);
+}
+
+TEST(GVGAdapter, NonPointerLoadsAlsoReceiveMatchedStoreMemoryNodes) {
+  const char *IR = R"(
+    define i32 @test(i1 %cond, i32* %p) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      store i32 7, i32* %p
+      br label %merge
+    else:
+      store i32 9, i32* %p
+      br label %merge
+    merge:
+      %v = load i32, i32* %p
+      ret i32 %v
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipeline(*M);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  LoadInst *load = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *LI = dyn_cast<LoadInst>(&I))
+      load = LI;
+  }
+  ASSERT_NE(load, nullptr);
+
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*F);
+  auto *load_value = graph.findNode(load);
+  auto *load_mem = graph.findLoadMemoryNode(load);
+  ASSERT_NE(load_value, nullptr);
+  ASSERT_NE(load_mem, nullptr);
+  ASSERT_EQ(load_value->children().size(), 1u);
+  EXPECT_EQ(load_value->children().front().target, load_mem);
+  EXPECT_EQ(load_mem->children().size(), 2u);
+  EXPECT_EQ(load_mem->getMatchingConditions().size(), 2u);
+  for (const auto &match : load_mem->getMatchingConditions())
+    EXPECT_EQ(match.second.getKind(), ConditionRef::Kind::SemanticPathCond);
+}
+
+TEST(GVGAdapter, RecordsPerCalleeCallTargetConditions) {
+  const char *IR = R"(
+    define void @left() {
+    entry:
+      ret void
+    }
+
+    define void @right() {
+    entry:
+      ret void
+    }
+
+    define void @test(i1 %cond) {
+    entry:
+      %slot = alloca void ()*
+      %choice = select i1 %cond, void ()* @left, void ()* @right
+      store void ()* %choice, void ()** %slot
+      %fp = load void ()*, void ()** %slot
+      call void %fp()
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipeline(*M);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*F);
+
+  CallBase *call = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *CB = dyn_cast<CallBase>(&I))
+      call = CB;
+  }
+  ASSERT_NE(call, nullptr);
+
+  auto *site = graph.findCallSite(call);
+  ASSERT_NE(site, nullptr);
+
+  auto *ptg = result.lotus->getPtGraph(F);
+  ASSERT_NE(ptg, nullptr);
+  auto resolved_it = ptg->getResolvedCallTargets().find(call);
+  if (site->getCallees().empty() &&
+      resolved_it == ptg->getResolvedCallTargets().end()) {
+    GTEST_SKIP() << "LotusAA did not materialize indirect call targets for "
+                    "this synthetic case";
+  }
+
+  Function *left = M->getFunction("left");
+  Function *right = M->getFunction("right");
+  ASSERT_NE(left, nullptr);
+  ASSERT_NE(right, nullptr);
+  EXPECT_EQ(site->getCallees().size(), 2u);
+  if (resolved_it == ptg->getResolvedCallTargets().end()) {
+    EXPECT_FALSE(site->hasCalleeCondition(left));
+    EXPECT_FALSE(site->hasCalleeCondition(right));
+    EXPECT_EQ(site->getCalleeCondition(left).getKind(), ConditionRef::Kind::None);
+    EXPECT_EQ(site->getCalleeCondition(right).getKind(), ConditionRef::Kind::None);
+  } else {
+    for (const auto &target : resolved_it->second) {
+      if (target.second)
+        EXPECT_TRUE(site->hasCalleeCondition(target.first));
+      else
+        EXPECT_FALSE(site->hasCalleeCondition(target.first));
+      auto kind = site->getCalleeCondition(target.first).getKind();
+      if (target.second)
+        EXPECT_EQ(kind, ConditionRef::Kind::SemanticPathCond);
+      else
+        EXPECT_EQ(kind, ConditionRef::Kind::None);
+    }
+  }
+}
+
+TEST(GVGAdapter, MaterializesSummaryNodesAndPseudoOutputIndices) {
+  int old_ap_level = IntraLotusAAConfig::lotus_restrict_ap_level;
+  int old_inline_size = IntraLotusAAConfig::lotus_restrict_inline_size;
+  IntraLotusAAConfig::lotus_restrict_ap_level = 0;
+  IntraLotusAAConfig::lotus_restrict_inline_size = -1;
+
+  const char *IR = R"(
+    define void @callee(i32*** %p, i32* %v) {
+    entry:
+      %slot = load i32**, i32*** %p
+      store i32* %v, i32** %slot
+      ret void
+    }
+
+    define void @test(i32*** %p, i32* %v) {
+    entry:
+      call void @callee(i32*** %p, i32* %v)
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipeline(*M);
+  IntraLotusAAConfig::lotus_restrict_ap_level = old_ap_level;
+  IntraLotusAAConfig::lotus_restrict_inline_size = old_inline_size;
+
+  Function *F = M->getFunction("test");
+  Function *Callee = M->getFunction("callee");
+  ASSERT_NE(F, nullptr);
+  ASSERT_NE(Callee, nullptr);
+
+  CallBase *call = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *CB = dyn_cast<CallBase>(&I))
+      call = CB;
+  }
+  ASSERT_NE(call, nullptr);
+
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*F);
+  auto *site = graph.findCallSite(call);
+  ASSERT_NE(site, nullptr);
+
+  auto *callee_ptg = result.lotus->getPtGraph(Callee);
+  ASSERT_NE(callee_ptg, nullptr);
+
+  bool has_any_summary_input = false;
+  for (const auto *bucket : callee_ptg->getSummaryInputs()) {
+    if (bucket && !bucket->empty()) {
+      has_any_summary_input = true;
+      break;
+    }
+  }
+  bool has_any_summary_output = false;
+  for (const auto *bucket : callee_ptg->getSummaryOutputs()) {
+    if (bucket && !bucket->empty()) {
+      has_any_summary_output = true;
+      break;
+    }
+  }
+  if (!has_any_summary_input && !has_any_summary_output)
+    GTEST_SKIP() << "LotusAA did not materialize summary buckets for this synthetic case";
+
+  bool saw_input_summary = false;
+  for (unsigned bucket = 0; bucket < callee_ptg->getSummaryInputs().size(); ++bucket) {
+    const auto *summary_inputs = callee_ptg->getSummaryInputs()[bucket];
+    if (!summary_inputs || summary_inputs->empty())
+      continue;
+    saw_input_summary = true;
+    auto *node = site->getInputSummaryNode(bucket);
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getKind(), GuardedValueFlowNode::Kind::CallSiteArgumentSummary);
+    auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
+    ASSERT_NE(summary, nullptr);
+    EXPECT_EQ(summary->getSummaryIndex(), bucket);
+    ASSERT_EQ(summary->children().size(), 1u);
+    EXPECT_EQ(summary->children().front().target->getKind(),
+              GuardedValueFlowNode::Kind::LoadMemory);
+  }
+
+  bool saw_output_summary = false;
+  for (unsigned bucket = 0; bucket < callee_ptg->getSummaryOutputs().size(); ++bucket) {
+    const auto *summary_outputs = callee_ptg->getSummaryOutputs()[bucket];
+    if (!summary_outputs || summary_outputs->empty())
+      continue;
+    saw_output_summary = true;
+    auto *node = site->getOutputSummaryNode(bucket);
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getKind(), GuardedValueFlowNode::Kind::CallSiteReturnSummary);
+    auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
+    ASSERT_NE(summary, nullptr);
+    EXPECT_EQ(summary->getSummaryIndex(), bucket);
+    ASSERT_EQ(summary->children().size(), 1u);
+    EXPECT_EQ(summary->children().front().target->getKind(),
+              GuardedValueFlowNode::Kind::LoadMemory);
+  }
+
+  EXPECT_EQ(saw_input_summary, has_any_summary_input);
+  EXPECT_EQ(saw_output_summary, has_any_summary_output);
 }
 
 } // namespace

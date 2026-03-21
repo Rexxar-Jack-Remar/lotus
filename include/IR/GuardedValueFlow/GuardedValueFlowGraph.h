@@ -16,6 +16,14 @@ namespace gvg {
 
 class GuardedValueFlowGraph {
 public:
+  struct BlockCondition {
+    GuardedValueFlowNode *condition_node{nullptr};
+    BasicBlock *control_block{nullptr};
+    BasicBlock *guard_successor{nullptr};
+    ConditionRef condition;
+    bool sense{true};
+  };
+
   explicit GuardedValueFlowGraph(Function *base_function);
   ~GuardedValueFlowGraph() = default;
 
@@ -44,6 +52,24 @@ public:
 
   GuardedValueFlowRegionNode *findRegion(BasicBlock *block) const;
   void mapRegion(BasicBlock *block, GuardedValueFlowRegionNode *node);
+  GuardedValueFlowRegionNode *findUnitRegion(GuardedValueFlowNode *condition,
+                                             bool sense) const;
+  GuardedValueFlowRegionNode *
+  findOrCreateUnitRegion(GuardedValueFlowNode *condition, bool sense,
+                         BasicBlock *block, ConditionRef condition_ref);
+  GuardedValueFlowRegionNode *
+  findOrCreateAndRegion(GuardedValueFlowRegionNode *lhs,
+                        GuardedValueFlowRegionNode *rhs, BasicBlock *block);
+  GuardedValueFlowRegionNode *
+  findOrCreateOrRegion(GuardedValueFlowRegionNode *lhs,
+                       GuardedValueFlowRegionNode *rhs, BasicBlock *block);
+  GuardedValueFlowRegionNode *
+  findOrCreateNotRegion(GuardedValueFlowRegionNode *input, BasicBlock *block);
+  GuardedValueFlowRegionNode *getAlwaysTrueRegion();
+  GuardedValueFlowRegionNode *getAlwaysFalseRegion();
+
+  void addBlockCondition(BasicBlock *block, BlockCondition condition);
+  ArrayRef<BlockCondition> getBlockConditions(BasicBlock *block) const;
 
   GuardedValueFlowNode *findLoadMemoryNode(Instruction *inst) const;
   void mapLoadMemoryNode(Instruction *inst, GuardedValueFlowNode *node);
@@ -52,6 +78,9 @@ public:
                                             Instruction *inst) const;
   void mapStoreMemoryNode(Value *value, Instruction *inst,
                           GuardedValueFlowNode *node);
+
+  GuardedValueFlowReturnSite *findReturnSite(Instruction *inst) const;
+  void mapReturnSite(Instruction *inst, GuardedValueFlowReturnSite *site);
 
   ArrayRef<std::unique_ptr<GuardedValueFlowNode>> nodes() const { return nodes_; }
   ArrayRef<std::unique_ptr<GuardedValueFlowSite>> sites() const { return sites_; }
@@ -64,17 +93,48 @@ private:
     }
   };
 
+  struct NodeBoolPairLess {
+    bool operator()(const std::pair<GuardedValueFlowNode *, bool> &lhs,
+                    const std::pair<GuardedValueFlowNode *, bool> &rhs) const {
+      return lhs < rhs;
+    }
+  };
+
+  struct RegionPairLess {
+    bool operator()(const std::pair<GuardedValueFlowRegionNode *,
+                                    GuardedValueFlowRegionNode *> &lhs,
+                    const std::pair<GuardedValueFlowRegionNode *,
+                                    GuardedValueFlowRegionNode *> &rhs) const {
+      return lhs < rhs;
+    }
+  };
+
   Function *base_function_;
   unsigned next_node_id_{0};
   std::vector<std::unique_ptr<GuardedValueFlowNode>> nodes_;
   std::vector<std::unique_ptr<GuardedValueFlowSite>> sites_;
   DenseMap<Value *, GuardedValueFlowNode *> value_nodes_;
   DenseMap<Instruction *, GuardedValueFlowCallSite *> call_sites_;
+  DenseMap<Instruction *, GuardedValueFlowReturnSite *> return_sites_;
   DenseMap<BasicBlock *, GuardedValueFlowRegionNode *> regions_;
   DenseMap<Instruction *, GuardedValueFlowNode *> load_memory_nodes_;
+  DenseMap<BasicBlock *, std::vector<BlockCondition>> block_conditions_;
   std::map<std::pair<Value *, Instruction *>, GuardedValueFlowNode *,
            PointerPairLess>
       store_memory_nodes_;
+  std::map<std::pair<GuardedValueFlowNode *, bool>, GuardedValueFlowRegionNode *,
+           NodeBoolPairLess>
+      unit_regions_;
+  std::map<std::pair<GuardedValueFlowRegionNode *, GuardedValueFlowRegionNode *>,
+           GuardedValueFlowRegionNode *, RegionPairLess>
+      and_regions_;
+  std::map<std::pair<GuardedValueFlowRegionNode *, GuardedValueFlowRegionNode *>,
+           GuardedValueFlowRegionNode *, RegionPairLess>
+      or_regions_;
+  DenseMap<GuardedValueFlowRegionNode *, GuardedValueFlowRegionNode *>
+      not_regions_;
+  GuardedValueFlowRegionNode *always_true_region_{nullptr};
+  GuardedValueFlowRegionNode *always_false_region_{nullptr};
 };
 
 class GuardedValueFlowGraphBuilderPass : public ModulePass {
