@@ -11,6 +11,14 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -frtti")
 # -fno-rtti #we need RTTI.
 
+if(APPLE)
+  # BSD `ar` appends duplicate members when invoked with `q` against an
+  # existing archive. Use `r` so repeated static-library link steps replace
+  # members instead of corrupting the archive with duplicate objects.
+  set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> cr <TARGET> <LINK_FLAGS> <OBJECTS>")
+  set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> cr <TARGET> <LINK_FLAGS> <OBJECTS>")
+endif()
+
 # Set output directories
 # Libraries and archives go to lib/
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)

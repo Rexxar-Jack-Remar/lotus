@@ -134,12 +134,11 @@ Usage
 Parallel Utilities
 ------------------
 
-Multi-threading and lock-free data structures in ``lib/Utils/Parallel/`` and ``include/Utils/Parallel/``:
+Multi-threading utilities in ``lib/Utils/Parallel/`` and ``include/Utils/Parallel/``:
 
 * **ThreadPool.h** - Thread pool and task group utilities
 * **ThreadSafe.h** - Thread-safe container wrappers
 * **Cancellation.h** - Cooperative cancellation tokens for parallel work
-* **lockfree/** - Lock-free queues and hash tables (SPSC, MPMC)
 
 Recommended ThreadPool patterns
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

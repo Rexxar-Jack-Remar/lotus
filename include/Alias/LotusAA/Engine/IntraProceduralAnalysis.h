@@ -60,7 +60,7 @@ public:
  */
 class IntraLotusAA : public PTGraph {
 public:
-  PTGType getKind() const { return IntraLotusAATy; }
+  PTGType getKind() const override { return IntraLotusAATy; }
 
   static bool classof(const PTGraph *G) {
     return G->getKind() == IntraLotusAATy;
@@ -87,8 +87,8 @@ public:
       offset = off;
     }
 
-    int64_t getOffset() { return offset; }
-    Value *getParentPtr() { return parent; }
+    int64_t getOffset() const { return offset; }
+    Value *getParentPtr() const { return parent; }
 
     friend class IntraLotusAA;
   };
@@ -103,13 +103,20 @@ public:
 
   public:
     AccessPath &getSymbolicInfo() { return symbolic_info; }
+    const AccessPath &getSymbolicInfo() const { return symbolic_info; }
     std::list<std::pair<path_cond_t, AccessPath>> &getPseudoPointTo() {
       return pseudo_pts;
     }
+    const std::list<std::pair<path_cond_t, AccessPath>> &getPseudoPointTo() const {
+      return pseudo_pts;
+    }
     std::map<ReturnInst *, mem_value_t, llvm_cmp> &getVal() { return val; }
+    const std::map<ReturnInst *, mem_value_t, llvm_cmp> &getVal() const {
+      return val;
+    }
     void setType(Type *type) { output_ty = type; }
-    Type *getType() { return output_ty; }
-    int getFuncLevel() { return func_level; }
+    Type *getType() const { return output_ty; }
+    int getFuncLevel() const { return func_level; }
 
     friend class IntraLotusAA;
   };
@@ -252,6 +259,16 @@ private:
   void resolveCallValue(Value *val, cg_result_t &target, path_cond_t pre_cond);
 
 public:
+  using FuncArgBindingMap =
+      std::map<Value *, std::map<Function *, func_arg_t, llvm_cmp>, llvm_cmp>;
+  using ThreadArgBindingMap = std::map<Value *, func_arg_t, llvm_cmp>;
+  using CallReturnBindingMap =
+      std::map<Instruction *, std::map<Function *, std::vector<Value *>, llvm_cmp>,
+               llvm_cmp>;
+  using PseudoReturnOriginMap =
+      std::map<Value *, std::pair<Instruction *, int>, llvm_cmp>;
+  using CallResolutionMap = std::map<Value *, cg_result_t, llvm_cmp>;
+
   IntraLotusAA(Function *F, LotusAA *lotus_aa);
   ~IntraLotusAA();
 
@@ -271,8 +288,24 @@ public:
   PTGraph *getPtGraph(Function *F) override;
 
   std::map<Value *, AccessPath, llvm_cmp> &getInputs() { return inputs; }
+  const std::map<Value *, AccessPath, llvm_cmp> &getInputs() const {
+    return inputs;
+  }
   std::vector<OutputItem *> &getOutputs() { return outputs; }
+  const std::vector<OutputItem *> &getOutputs() const { return outputs; }
   std::set<MemObject *, mem_obj_cmp> &getEscapeObjs() { return escape_objs; }
+  const std::set<MemObject *, mem_obj_cmp> &getEscapeObjs() const {
+    return escape_objs;
+  }
+  const FuncArgBindingMap &getCallArgBindings() const { return func_arg; }
+  const ThreadArgBindingMap &getThreadArgBindings() const { return thread_arg; }
+  const CallReturnBindingMap &getCallReturnBindings() const { return func_ret; }
+  const PseudoReturnOriginMap &getPseudoReturnOrigins() const {
+    return func_pseudo_ret_cache;
+  }
+  const CallResolutionMap &getResolvedCallTargets() const {
+    return cg_resolve_result;
+  }
 
   void getReturnInst();
 

@@ -11,6 +11,8 @@ add_lotus_test(underapprox_aa_test UnderApproxAATest.cpp)
 add_lotus_test(alias_graph_test AliasGraphTest.cpp)
 add_lotus_test(dfpa_test DFPATest.cpp)
 add_lotus_test(lotus_aa_test LotusAATest.cpp)
+add_lotus_test(gvg_lotus_adapter_test GVGAdapterTest.cpp)
+target_link_libraries(gvg_lotus_adapter_test CanaryGuardedValueFlow)
 
 if(TARGET TypeQualifier)
   add_executable(type_qualifier_test ${CMAKE_CURRENT_SOURCE_DIR}/TypeQualifierTest.cpp)

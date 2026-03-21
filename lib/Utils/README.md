@@ -111,15 +111,6 @@ Multi-threading support:
 - `Scheduler/ParallelSchedulerPass.cpp/.h` – Parallel pass scheduling
 - `Scheduler/PipelineScheduler.cpp/.h` – Pass pipeline scheduling
 - `Scheduler/Task.cpp/.h` – Task representation
-- `lockfree/` – Lock-free data structures
-
-### lockfree
-
-Lock-free implementations:
-
-- `lockfree_hash_table.cpp/.h` – Lock-free hash table
-- `mpmc/` – Multi-producer multi-consumer queues
-- `spsc/` – Single-producer single-consumer queues (ring buffer, priority queue)
 
 ## Platform
 

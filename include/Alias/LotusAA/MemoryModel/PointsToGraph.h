@@ -128,7 +128,7 @@ class PTGraph {
 public:
   enum PTGType { PTGBegin, PTGraphTy, IntraLotusAATy, PTGEnd };
 
-  PTGType getKind() const { return PTGraphTy; }
+  virtual PTGType getKind() const { return PTGraphTy; }
 
   static bool classof(const PTGraph *G) {
     return G->getKind() >= PTGBegin && G->getKind() <= PTGEnd;

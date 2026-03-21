@@ -1,6 +1,7 @@
 add_subdirectory(PDG)
 add_subdirectory(SSI)
 add_subdirectory(GSA)
+add_subdirectory(GuardedValueFlow)
 add_subdirectory(ICFG)
 add_subdirectory(MemorySSA)
 add_subdirectory(SVFG)

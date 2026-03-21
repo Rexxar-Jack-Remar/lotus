@@ -570,6 +570,8 @@ void PTGraph::performLoadLoadMatch() {
 
 const set<LoadInst *, llvm_cmp> &
 PTGraph::getAllLoadWithSameValue(LoadInst *load_inst) {
+  if (!load_category.count(load_inst))
+    performLoadLoadMatch();
   assert(load_category.count(load_inst));
   int idx = load_category[load_inst];
   return *load_category_collection[idx];
