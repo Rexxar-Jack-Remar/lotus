@@ -90,6 +90,7 @@ TEST_F(GuardedValueFlowParityTest, ModelsReturnPhiSelectAndOperationalSites) {
   GuardedValueFlowReturnNode *common_return = nullptr;
   GuardedValueFlowPhiNode *phi_node = nullptr;
   GuardedValueFlowNode *select_node = nullptr;
+  StoreInst *store_inst = nullptr;
   for (const auto &node_ptr : graph.nodes()) {
     if (node_ptr->getKind() == GuardedValueFlowNode::Kind::CommonReturn)
       common_return = dyn_cast<GuardedValueFlowReturnNode>(node_ptr.get());
@@ -100,6 +101,8 @@ TEST_F(GuardedValueFlowParityTest, ModelsReturnPhiSelectAndOperationalSites) {
   for (Instruction &I : instructions(*F)) {
     if (isa<SelectInst>(&I))
       select_node = graph.findNode(&I);
+    if (auto *SI = dyn_cast<StoreInst>(&I))
+      store_inst = SI;
   }
 
   ASSERT_NE(common_return, nullptr);
@@ -108,6 +111,7 @@ TEST_F(GuardedValueFlowParityTest, ModelsReturnPhiSelectAndOperationalSites) {
   ASSERT_EQ(common_return->children().size(), 1u);
   EXPECT_EQ(common_return->children().front().target, phi_node);
   EXPECT_NE(common_return->getReturnSite(phi_node), nullptr);
+  EXPECT_EQ(common_return->getRegion(), graph.findRegion(&F->getEntryBlock()));
 
   ASSERT_EQ(phi_node->incoming().size(), 2u);
   EXPECT_NE(phi_node->incoming()[0].value_node, nullptr);
@@ -122,6 +126,13 @@ TEST_F(GuardedValueFlowParityTest, ModelsReturnPhiSelectAndOperationalSites) {
   EXPECT_EQ(select_opcode->getOpcodeKind(),
             GuardedValueFlowOpcodeNode::OpcodeKind::Select);
   EXPECT_EQ(select_opcode->children().size(), 3u);
+  ASSERT_NE(store_inst, nullptr);
+  auto *store_mem = graph.findStoreMemoryNode(store_inst->getValueOperand(), store_inst);
+  ASSERT_NE(store_mem, nullptr);
+  EXPECT_EQ(store_mem->getRegion(), graph.findRegion(store_inst->getParent()));
+  EXPECT_EQ(select_node->getRegion(), graph.findRegion(select_node->getParentBasicBlock()));
+  EXPECT_EQ(graph.findNode(F->getArg(0))->getRegion(),
+            graph.findRegion(&F->getEntryBlock()));
 
   bool saw_compare_site = false;
   bool saw_div_site = false;
@@ -308,6 +319,25 @@ TEST_F(GuardedValueFlowParityTest, RejectsUnsupportedSwitchFunctions) {
       ret i32 1
     default:
       ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  EXPECT_FALSE(pipeline.builder->hasGraphFor(*F));
+}
+
+TEST_F(GuardedValueFlowParityTest, RejectsUnsupportedFNegFunctions) {
+  const char *source = R"(
+    define float @test(float %x) {
+    entry:
+      %neg = fneg float %x
+      ret float %neg
     }
   )";
 

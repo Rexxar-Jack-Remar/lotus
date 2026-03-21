@@ -5,6 +5,7 @@
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/Pass.h>
 
 #include <map>
@@ -34,6 +35,7 @@ public:
     NodeT *raw = node.get();
     raw->node_id_ = next_node_id_++;
     nodes_.push_back(std::move(node));
+    assignNodeRegion(raw);
     return raw;
   }
 
@@ -67,6 +69,10 @@ public:
   findOrCreateNotRegion(GuardedValueFlowRegionNode *input, BasicBlock *block);
   GuardedValueFlowRegionNode *getAlwaysTrueRegion();
   GuardedValueFlowRegionNode *getAlwaysFalseRegion();
+  GuardedValueFlowRegionNode *findSemanticRegion(path_cond_t path_cond) const;
+  GuardedValueFlowRegionNode *findOrCreateSemanticRegion(path_cond_t path_cond,
+                                                         BasicBlock *block);
+  GuardedValueFlowNode *findSemanticConditionNode(path_cond_t path_cond) const;
 
   void addBlockCondition(BasicBlock *block, BlockCondition condition);
   ArrayRef<BlockCondition> getBlockConditions(BasicBlock *block) const;
@@ -78,9 +84,13 @@ public:
                                             Instruction *inst) const;
   void mapStoreMemoryNode(Value *value, Instruction *inst,
                           GuardedValueFlowNode *node);
+  GuardedValueFlowNode *findOrCreateStoreMemoryNode(
+      Value *value, Instruction *inst, Type *type, BasicBlock *block,
+      StringRef description = "store.mem");
 
   GuardedValueFlowReturnSite *findReturnSite(Instruction *inst) const;
   void mapReturnSite(Instruction *inst, GuardedValueFlowReturnSite *site);
+  void refreshNodeRegions();
 
   ArrayRef<std::unique_ptr<GuardedValueFlowNode>> nodes() const { return nodes_; }
   ArrayRef<std::unique_ptr<GuardedValueFlowSite>> sites() const { return sites_; }
@@ -119,6 +129,8 @@ private:
   DenseMap<BasicBlock *, GuardedValueFlowRegionNode *> regions_;
   DenseMap<Instruction *, GuardedValueFlowNode *> load_memory_nodes_;
   DenseMap<BasicBlock *, std::vector<BlockCondition>> block_conditions_;
+  DenseMap<path_cond_t, GuardedValueFlowRegionNode *> semantic_regions_;
+  DenseMap<path_cond_t, GuardedValueFlowNode *> semantic_condition_nodes_;
   std::map<std::pair<Value *, Instruction *>, GuardedValueFlowNode *,
            PointerPairLess>
       store_memory_nodes_;
@@ -135,6 +147,8 @@ private:
       not_regions_;
   GuardedValueFlowRegionNode *always_true_region_{nullptr};
   GuardedValueFlowRegionNode *always_false_region_{nullptr};
+
+  void assignNodeRegion(GuardedValueFlowNode *node);
 };
 
 class GuardedValueFlowGraphBuilderPass : public ModulePass {

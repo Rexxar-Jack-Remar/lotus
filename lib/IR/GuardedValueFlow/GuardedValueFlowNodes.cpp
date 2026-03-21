@@ -25,9 +25,36 @@ void GuardedValueFlowNode::addUseSite(GuardedValueFlowSite *site) {
   use_sites_.push_back(site);
 }
 
-void GuardedValueFlowNode::addMatchingCondition(GuardedValueFlowNode *producer,
-                                                ConditionRef condition) {
-  matching_conditions_.emplace(producer, condition);
+void GuardedValueFlowNode::addMatchingRegion(GuardedValueFlowNode *producer,
+                                             GuardedValueFlowRegionNode *region,
+                                             ConditionRef provenance) {
+  for (auto &existing : matching_regions_) {
+    if (existing.producer == producer) {
+      existing.region = region;
+      existing.provenance = provenance;
+      return;
+    }
+  }
+  matching_regions_.push_back({producer, region, provenance});
+}
+
+GuardedValueFlowRegionNode *
+GuardedValueFlowNode::getMatchingRegion(
+    const GuardedValueFlowNode *producer) const {
+  for (const auto &entry : matching_regions_) {
+    if (entry.producer == producer)
+      return entry.region;
+  }
+  return nullptr;
+}
+
+ConditionRef GuardedValueFlowNode::getMatchingCondition(
+    const GuardedValueFlowNode *producer) const {
+  for (const auto &entry : matching_regions_) {
+    if (entry.producer == producer)
+      return entry.provenance;
+  }
+  return ConditionRef::none();
 }
 
 void GuardedValueFlowPhiNode::addIncoming(GuardedValueFlowNode *value_node,

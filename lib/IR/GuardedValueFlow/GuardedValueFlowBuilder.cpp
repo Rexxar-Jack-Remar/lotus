@@ -400,8 +400,30 @@ static GuardedValueFlowNode *modelConstantExpr(ConstantExpr *CE,
     errs() << "[gvg-builder] Unsupported constant expression in function "
            << F.getName() << ": " << *CE << "\n";
     break;
-  default:
+  case Instruction::URem:
+  case Instruction::FRem:
+  case Instruction::SRem:
+  case Instruction::UDiv:
+  case Instruction::SDiv:
+  case Instruction::FDiv:
+  case Instruction::And:
+  case Instruction::Or:
+  case Instruction::Xor:
+  case Instruction::Shl:
+  case Instruction::LShr:
+  case Instruction::AShr:
+  case Instruction::Mul:
+  case Instruction::FMul:
+  case Instruction::FAdd:
+  case Instruction::FSub:
+  case Instruction::Add:
+  case Instruction::Sub:
     addBinaryExpr(CE->getOpcode());
+    break;
+  default:
+    failed = true;
+    errs() << "[gvg-builder] Unsupported constant expression in function "
+           << F.getName() << ": " << *CE << "\n";
     break;
   }
 
@@ -704,19 +726,6 @@ static bool modelIntrinsicCall(CallBase &call, GuardedValueFlowGraph &graph,
   }
 }
 
-static GuardedValueFlowNode *findOrCreateStoreMemoryNode(
-    GuardedValueFlowGraph &graph, Value *value, Instruction *inst, Type *type,
-    BasicBlock *block) {
-  if (auto *existing = graph.findStoreMemoryNode(value, inst))
-    return existing;
-  auto *node = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::StoreMemory, type, &graph, block, nullptr,
-      inst);
-  node->setDescription("store.mem");
-  graph.mapStoreMemoryNode(value, inst, node);
-  return node;
-}
-
 static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
                              Function &F, bool &failed) {
   auto *block = I.getParent();
@@ -884,9 +893,9 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   case Instruction::Store: {
     auto *stored =
         getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
-    auto *mem_node = findOrCreateStoreMemoryNode(graph, I.getOperand(0), &I,
-                                                 I.getOperand(0)->getType(),
-                                                 block);
+    auto *mem_node = graph.findOrCreateStoreMemoryNode(I.getOperand(0), &I,
+                                                       I.getOperand(0)->getType(),
+                                                       block);
     mem_node->addChild(stored);
     auto *site = graph.createSite<GuardedValueFlowDereferenceSite>(&graph, &I);
     auto *ptr_node =
@@ -1046,9 +1055,10 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     return true;
   }
   default:
-    if (!I.getType()->isVoidTy())
-      (void)findOrCreateValueNode(graph, &I, F);
-    return true;
+    failed = true;
+    errs() << "[gvg-builder] Unsupported instruction in function " << F.getName()
+           << ": " << I << "\n";
+    return false;
   }
 }
 
@@ -1114,6 +1124,7 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
   buildRegions(*graph, F, cda, failed);
   if (failed)
     return nullptr;
+  graph->refreshNodeRegions();
 
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
@@ -1126,6 +1137,8 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
 
   if (failed)
     return nullptr;
+
+  graph->refreshNodeRegions();
 
   return graph;
 }

@@ -16,6 +16,7 @@ namespace gvg {
 
 class GuardedValueFlowGraph;
 class GuardedValueFlowNode;
+class GuardedValueFlowRegionNode;
 
 class GuardedValueFlowSite {
 public:
@@ -64,7 +65,7 @@ public:
   }
   ArrayRef<Function *> getCallees() const { return callees_; }
 
-  void addCommonInput(GuardedValueFlowNode *node) { common_inputs_.push_back(node); }
+  void addCommonInput(GuardedValueFlowNode *node);
   ArrayRef<GuardedValueFlowNode *> getCommonInputs() const {
     return common_inputs_;
   }
@@ -88,16 +89,18 @@ public:
     auto it = output_summary_nodes_.find(summary_index);
     return it == output_summary_nodes_.end() ? nullptr : it->second;
   }
-  void setCalleeCondition(Function *callee, ConditionRef condition) {
-    if (callee)
-      callee_conditions_[callee] = condition;
-  }
+  void setCalleeCondition(Function *callee, ConditionRef condition,
+                          GuardedValueFlowRegionNode *region = nullptr);
   bool hasCalleeCondition(Function *callee) const {
     return callee && callee_conditions_.find(callee) != callee_conditions_.end();
   }
   ConditionRef getCalleeCondition(Function *callee) const {
     auto it = callee_conditions_.find(callee);
     return it == callee_conditions_.end() ? ConditionRef::none() : it->second;
+  }
+  GuardedValueFlowRegionNode *getCalleeConditionRegion(Function *callee) const {
+    auto it = callee_condition_regions_.find(callee);
+    return it == callee_condition_regions_.end() ? nullptr : it->second;
   }
 
   GuardedValueFlowNode *getPseudoInput(Function *callee, unsigned idx) const;
@@ -114,6 +117,7 @@ private:
   std::map<unsigned, GuardedValueFlowNode *> input_summary_nodes_;
   std::map<unsigned, GuardedValueFlowNode *> output_summary_nodes_;
   std::map<Function *, ConditionRef> callee_conditions_;
+  std::map<Function *, GuardedValueFlowRegionNode *> callee_condition_regions_;
 };
 
 class GuardedValueFlowDereferenceSite : public GuardedValueFlowSite {

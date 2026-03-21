@@ -4,6 +4,7 @@
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
@@ -19,6 +20,7 @@ namespace gvg {
 class GuardedValueFlowGraph;
 class GuardedValueFlowSite;
 class GuardedValueFlowReturnSite;
+class GuardedValueFlowRegionNode;
 
 class AccessPath {
 public:
@@ -53,6 +55,7 @@ public:
     CallSitePseudoInput,
     CallSiteArgumentSummary,
     CallSiteReturnSummary,
+    InterfaceCondition,
     SimpleOpcode,
     CastOpcode,
     Unknown,
@@ -62,6 +65,12 @@ public:
     GuardedValueFlowNode *target{nullptr};
     float confidence{1.0f};
     ConditionRef condition;
+  };
+
+  struct MatchingRegion {
+    GuardedValueFlowNode *producer{nullptr};
+    GuardedValueFlowRegionNode *region{nullptr};
+    ConditionRef provenance;
   };
 
   GuardedValueFlowNode(Kind kind, Type *type, GuardedValueFlowGraph *graph,
@@ -85,6 +94,8 @@ public:
   void addUseSite(GuardedValueFlowSite *site);
   ArrayRef<GuardedValueFlowSite *> useSites() const { return use_sites_; }
 
+  GuardedValueFlowRegionNode *getRegion() const { return region_; }
+
   void setDescription(std::string desc) { description_ = std::move(desc); }
   const std::string &getDescription() const { return description_; }
 
@@ -94,11 +105,15 @@ public:
   void setIndex(unsigned idx) { index_ = idx; }
   unsigned getIndex() const { return index_; }
 
-  void addMatchingCondition(GuardedValueFlowNode *producer,
-                            ConditionRef condition);
-  const std::multimap<GuardedValueFlowNode *, ConditionRef> &
-  getMatchingConditions() const {
-    return matching_conditions_;
+  void addMatchingRegion(GuardedValueFlowNode *producer,
+                         GuardedValueFlowRegionNode *region,
+                         ConditionRef provenance = ConditionRef::none());
+  GuardedValueFlowRegionNode *
+  getMatchingRegion(const GuardedValueFlowNode *producer) const;
+  ConditionRef
+  getMatchingCondition(const GuardedValueFlowNode *producer) const;
+  ArrayRef<MatchingRegion> getMatchingRegions() const {
+    return matching_regions_;
   }
 
 protected:
@@ -112,9 +127,10 @@ protected:
   unsigned index_{0};
   std::string description_;
   AccessPath access_path_;
+  GuardedValueFlowRegionNode *region_{nullptr};
   std::vector<Edge> children_;
   std::vector<GuardedValueFlowSite *> use_sites_;
-  std::multimap<GuardedValueFlowNode *, ConditionRef> matching_conditions_;
+  std::vector<MatchingRegion> matching_regions_;
 
   friend class GuardedValueFlowGraph;
 };
@@ -140,6 +156,7 @@ public:
     AlwaysTrue,
     AlwaysFalse,
     Unit,
+    Interface,
     And,
     Or,
     Not,
@@ -157,18 +174,38 @@ public:
   Form getForm() const { return form_; }
   bool isAlwaysTrue() const { return form_ == Form::AlwaysTrue; }
   bool isAlwaysFalse() const { return form_ == Form::AlwaysFalse; }
+  bool isInterfaceRegion() const { return form_ == Form::Interface; }
+  bool isSemantic() const { return isInterfaceRegion(); }
   bool isCompound() const {
     return form_ == Form::And || form_ == Form::Or || form_ == Form::Not;
   }
   GuardedValueFlowNode *getConditionNode() const { return condition_node_; }
   bool getConditionSense() const { return condition_sense_; }
   const ConditionRef &getRegionCondition() const { return region_condition_; }
+  Function *getInterfaceOwnerFunction() const { return interface_owner_function_; }
+  Function *getInterfaceOriginFunction() const {
+    return interface_origin_function_;
+  }
+  path_cond_t getInterfacePathCondition() const { return interface_path_condition_; }
+  path_cond_t getImportedSourceCondition() const { return imported_source_condition_; }
+  void setInterfaceMetadata(Function *owner_function, Function *origin_function,
+                            path_cond_t interface_path_condition,
+                            path_cond_t imported_source_condition) {
+    interface_owner_function_ = owner_function;
+    interface_origin_function_ = origin_function;
+    interface_path_condition_ = interface_path_condition;
+    imported_source_condition_ = imported_source_condition;
+  }
 
 private:
   Form form_;
   GuardedValueFlowNode *condition_node_{nullptr};
   bool condition_sense_{true};
   ConditionRef region_condition_;
+  Function *interface_owner_function_{nullptr};
+  Function *interface_origin_function_{nullptr};
+  path_cond_t interface_path_condition_{nullptr};
+  path_cond_t imported_source_condition_{nullptr};
 
 public:
   static bool classof(const GuardedValueFlowNode *node) {

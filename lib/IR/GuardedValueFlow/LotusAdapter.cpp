@@ -3,6 +3,7 @@
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "IR/GuardedValueFlow/ConditionRef.h"
 
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/Twine.h>
@@ -82,11 +83,8 @@ ensureStoreMemoryNode(GuardedValueFlowGraph &graph, Value *value,
   if (auto *existing = graph.findStoreMemoryNode(value, inst))
     return existing;
 
-  auto *mem_node = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::StoreMemory, memory_type, &graph, bb, nullptr,
-      inst);
-  mem_node->setDescription("store.mem.adapter");
-  graph.mapStoreMemoryNode(value, inst, mem_node);
+  auto *mem_node = graph.findOrCreateStoreMemoryNode(
+      value, inst, memory_type, bb, "store.mem.adapter");
 
   if (value == LocValue::UNDEF_VALUE) {
     mem_node->addChild(createSpecialProducerNode(
@@ -110,6 +108,19 @@ ensureStoreMemoryNode(GuardedValueFlowGraph &graph, Value *value,
   return mem_node;
 }
 
+static GuardedValueFlowRegionNode *resolveMatchingRegion(
+    GuardedValueFlowGraph &graph, GuardedValueFlowNode *producer_mem,
+    const mem_value_item_t &item) {
+  if (item.cond)
+    return graph.findOrCreateSemanticRegion(item.cond,
+                                            producer_mem
+                                                ? producer_mem->getParentBasicBlock()
+                                                : nullptr);
+  if (producer_mem && producer_mem->getRegion())
+    return producer_mem->getRegion();
+  return graph.getAlwaysTrueRegion();
+}
+
 static void linkMemoryValue(GuardedValueFlowGraph &graph,
                             GuardedValueFlowNode *load_mem_node,
                             const mem_value_item_t &item, BasicBlock *bb) {
@@ -123,7 +134,8 @@ static void linkMemoryValue(GuardedValueFlowGraph &graph,
   auto *producer_mem = ensureStoreMemoryNode(graph, value, producer_inst,
                                              load_mem_node->getType(), bb);
   load_mem_node->addChild(producer_mem, item.confidence, cond);
-  load_mem_node->addMatchingCondition(producer_mem, cond);
+  load_mem_node->addMatchingRegion(
+      producer_mem, resolveMatchingRegion(graph, producer_mem, item), cond);
 }
 
 static void populateLoadMemoryNode(GuardedValueFlowGraph &graph,
@@ -204,7 +216,7 @@ collectCallees(const GuardedValueFlowCallSite &site, CallBase &call,
 
 static void materializeLoadParity(GuardedValueFlowGraph &graph,
                                   IntraLotusAA &pta) {
-  SmallPtrSet<LoadInst *, 16> processed_reps;
+  DenseMap<LoadInst *, mem_value_t> rep_values;
 
   for (Instruction &inst : instructions(*pta.getFunc())) {
     auto *load = dyn_cast<LoadInst>(&inst);
@@ -218,20 +230,18 @@ static void materializeLoadParity(GuardedValueFlowGraph &graph,
 
     const auto &equivalent_loads = pta.getAllLoadWithSameValue(load);
     LoadInst *rep = equivalent_loads.empty() ? load : *equivalent_loads.begin();
-    auto *rep_mem_node = graph.findLoadMemoryNode(rep);
-    if (!rep_mem_node)
-      rep_mem_node = load_mem_node;
 
     value_node->clearChildren();
-    value_node->addChild(rep_mem_node);
+    value_node->addChild(load_mem_node);
 
-    if (processed_reps.contains(rep))
-      continue;
-    processed_reps.insert(rep);
+    auto rep_it = rep_values.find(rep);
+    if (rep_it == rep_values.end()) {
+      mem_value_t load_values;
+      pta.getLoadValues(rep->getPointerOperand(), rep, load_values);
+      rep_it = rep_values.try_emplace(rep, std::move(load_values)).first;
+    }
 
-    mem_value_t load_values;
-    pta.getLoadValues(rep->getPointerOperand(), rep, load_values);
-    populateLoadMemoryNode(graph, rep_mem_node, load_values, rep->getParent());
+    populateLoadMemoryNode(graph, load_mem_node, rep_it->second, load->getParent());
   }
 }
 
@@ -552,8 +562,9 @@ static void materializeCallTargetConditions(GuardedValueFlowGraph &graph,
     for (const auto &target : cg_item.second) {
       site->addCallee(target.first);
       if (target.second)
-        site->setCalleeCondition(target.first,
-                                 ConditionRef::fromPathCond(target.second));
+        site->setCalleeCondition(
+            target.first, ConditionRef::fromPathCond(target.second),
+            graph.findOrCreateSemanticRegion(target.second, call->getParent()));
     }
   }
 }

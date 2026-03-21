@@ -203,13 +203,17 @@ TEST(GVGAdapter, ConditionalLoadPreservesTwoMatchingConditions) {
   auto *load_mem = graph.findLoadMemoryNode(load);
   ASSERT_NE(load_mem, nullptr);
   EXPECT_EQ(load_mem->children().size(), 2u);
-  EXPECT_EQ(load_mem->getMatchingConditions().size(), 2u);
-  for (const auto &match : load_mem->getMatchingConditions()) {
-    EXPECT_EQ(match.second.getKind(), ConditionRef::Kind::SemanticPathCond);
+  EXPECT_EQ(load_mem->getMatchingRegions().size(), 2u);
+  for (const auto &match : load_mem->getMatchingRegions()) {
+    EXPECT_EQ(match.provenance.getKind(), ConditionRef::Kind::SemanticPathCond);
+    EXPECT_NE(match.region, nullptr);
+    EXPECT_TRUE(match.region->isInterfaceRegion());
+    ASSERT_NE(match.region->getConditionNode(), nullptr);
+    EXPECT_EQ(match.region->getConditionNode()->getRegion(), match.region);
   }
 }
 
-TEST(GVGAdapter, EquivalentLoadsReuseCanonicalLoadMemoryNode) {
+TEST(GVGAdapter, EquivalentLoadsKeepDistinctLoadMemoryNodes) {
   const char *IR = R"(
     define i32* @test(i32** %p) {
     entry:
@@ -243,12 +247,17 @@ TEST(GVGAdapter, EquivalentLoadsReuseCanonicalLoadMemoryNode) {
   GuardedValueFlowGraph &graph = result.builder->getGraph(*F);
   auto *first_value = graph.findNode(first);
   auto *second_value = graph.findNode(second);
+  auto *first_mem = graph.findLoadMemoryNode(first);
+  auto *second_mem = graph.findLoadMemoryNode(second);
   ASSERT_NE(first_value, nullptr);
   ASSERT_NE(second_value, nullptr);
+  ASSERT_NE(first_mem, nullptr);
+  ASSERT_NE(second_mem, nullptr);
   ASSERT_EQ(first_value->children().size(), 1u);
   ASSERT_EQ(second_value->children().size(), 1u);
-  EXPECT_EQ(first_value->children().front().target,
-            second_value->children().front().target);
+  EXPECT_EQ(first_value->children().front().target, first_mem);
+  EXPECT_EQ(second_value->children().front().target, second_mem);
+  EXPECT_NE(first_mem, second_mem);
 }
 
 TEST(GVGAdapter, NonPointerLoadsAlsoReceiveMatchedStoreMemoryNodes) {
@@ -291,9 +300,14 @@ TEST(GVGAdapter, NonPointerLoadsAlsoReceiveMatchedStoreMemoryNodes) {
   ASSERT_EQ(load_value->children().size(), 1u);
   EXPECT_EQ(load_value->children().front().target, load_mem);
   EXPECT_EQ(load_mem->children().size(), 2u);
-  EXPECT_EQ(load_mem->getMatchingConditions().size(), 2u);
-  for (const auto &match : load_mem->getMatchingConditions())
-    EXPECT_EQ(match.second.getKind(), ConditionRef::Kind::SemanticPathCond);
+  EXPECT_EQ(load_mem->getMatchingRegions().size(), 2u);
+  for (const auto &match : load_mem->getMatchingRegions()) {
+    EXPECT_EQ(match.provenance.getKind(), ConditionRef::Kind::SemanticPathCond);
+    EXPECT_NE(match.region, nullptr);
+    EXPECT_TRUE(match.region->isInterfaceRegion());
+    ASSERT_NE(match.region->getConditionNode(), nullptr);
+    EXPECT_EQ(match.region->getConditionNode()->getRegion(), match.region);
+  }
 }
 
 TEST(GVGAdapter, RecordsPerCalleeCallTargetConditions) {
@@ -364,10 +378,18 @@ TEST(GVGAdapter, RecordsPerCalleeCallTargetConditions) {
       else
         EXPECT_FALSE(site->hasCalleeCondition(target.first));
       auto kind = site->getCalleeCondition(target.first).getKind();
-      if (target.second)
+      auto *region = site->getCalleeConditionRegion(target.first);
+      if (target.second) {
         EXPECT_EQ(kind, ConditionRef::Kind::SemanticPathCond);
-      else
+        ASSERT_NE(region, nullptr);
+        EXPECT_TRUE(region->isInterfaceRegion());
+        ASSERT_NE(region->getConditionNode(), nullptr);
+        EXPECT_EQ(region->getConditionNode()->getRegion(), region);
+        EXPECT_EQ(region->getInterfacePathCondition(), target.second);
+      } else {
         EXPECT_EQ(kind, ConditionRef::Kind::None);
+        EXPECT_EQ(region, nullptr);
+      }
     }
   }
 }

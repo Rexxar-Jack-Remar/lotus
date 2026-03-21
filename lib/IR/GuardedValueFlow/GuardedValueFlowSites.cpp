@@ -57,14 +57,31 @@ findPseudoNode(const GuardedValueFlowGraph *graph, Instruction *call_site,
 
 } // namespace
 
+void GuardedValueFlowCallSite::addCommonInput(GuardedValueFlowNode *node) {
+  common_inputs_.push_back(node);
+  if (node)
+    node->addUseSite(this);
+}
+
 void GuardedValueFlowCallSite::addPseudoInput(Function *callee,
                                               GuardedValueFlowNode *node) {
   pseudo_inputs_[callee].push_back(node);
+  if (node)
+    node->addUseSite(this);
 }
 
 void GuardedValueFlowCallSite::addPseudoOutput(Function *callee,
                                                GuardedValueFlowNode *node) {
   pseudo_outputs_[callee].push_back(node);
+}
+
+void GuardedValueFlowCallSite::setCalleeCondition(
+    Function *callee, ConditionRef condition, GuardedValueFlowRegionNode *region) {
+  if (!callee)
+    return;
+  callee_conditions_[callee] = condition;
+  if (region)
+    callee_condition_regions_[callee] = region;
 }
 
 GuardedValueFlowNode *

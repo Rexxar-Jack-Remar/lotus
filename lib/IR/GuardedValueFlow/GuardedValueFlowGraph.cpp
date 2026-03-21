@@ -1,10 +1,70 @@
 #include "IR/GuardedValueFlow/GuardedValueFlowGraph.h"
 
+#include <llvm/Support/raw_ostream.h>
+
 using namespace llvm;
 using namespace llvm::gvg;
 
+namespace {
+
+static path_cond_t getImportedSource(path_cond_t cond) {
+  if (!cond)
+    return nullptr;
+  if (cond->getKind() == PathCond::Kind::ImportedAtom)
+    return cond->getImportedSource();
+  return nullptr;
+}
+
+static Function *getInterfaceOriginFunction(path_cond_t cond) {
+  if (!cond)
+    return nullptr;
+
+  if (path_cond_t imported = getImportedSource(cond))
+    return imported->getOwnerFunc();
+
+  if (cond->getKind() == PathCond::Kind::Not)
+    return getInterfaceOriginFunction(cond->getLhs());
+
+  if (cond->getKind() == PathCond::Kind::And || cond->getKind() == PathCond::Kind::Or) {
+    Function *lhs_origin = getInterfaceOriginFunction(cond->getLhs());
+    Function *rhs_origin = getInterfaceOriginFunction(cond->getRhs());
+    return lhs_origin == rhs_origin ? lhs_origin : nullptr;
+  }
+
+  return nullptr;
+}
+
+static std::string renderPathCond(path_cond_t cond) {
+  if (!cond)
+    return "<null>";
+  std::string buffer;
+  raw_string_ostream os(buffer);
+  cond->print(os);
+  return os.str();
+}
+
+} // namespace
+
 GuardedValueFlowGraph::GuardedValueFlowGraph(Function *base_function)
     : base_function_(base_function) {}
+
+void GuardedValueFlowGraph::assignNodeRegion(GuardedValueFlowNode *node) {
+  if (!node || node->getKind() == GuardedValueFlowNode::Kind::Region)
+    return;
+
+  BasicBlock *block = node->getParentBasicBlock();
+  if (!block)
+    return;
+
+  GuardedValueFlowRegionNode *region = findRegion(block);
+  if (!region && base_function_ && !base_function_->empty() &&
+      block == &base_function_->getEntryBlock()) {
+    region = getAlwaysTrueRegion();
+  }
+
+  if (region)
+    node->region_ = region;
+}
 
 GuardedValueFlowNode *GuardedValueFlowGraph::findNode(Value *value) const {
   auto it = value_nodes_.find(value);
@@ -180,6 +240,52 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::getAlwaysFalseRegion() {
   return always_false_region_;
 }
 
+GuardedValueFlowRegionNode *
+GuardedValueFlowGraph::findSemanticRegion(path_cond_t path_cond) const {
+  auto it = semantic_regions_.find(path_cond);
+  return it == semantic_regions_.end() ? nullptr : it->second;
+}
+
+GuardedValueFlowNode *
+GuardedValueFlowGraph::findSemanticConditionNode(path_cond_t path_cond) const {
+  auto it = semantic_condition_nodes_.find(path_cond);
+  return it == semantic_condition_nodes_.end() ? nullptr : it->second;
+}
+
+GuardedValueFlowRegionNode *
+GuardedValueFlowGraph::findOrCreateSemanticRegion(path_cond_t path_cond,
+                                                  BasicBlock *block) {
+  if (!path_cond)
+    return getAlwaysTrueRegion();
+
+  if (auto *existing = findSemanticRegion(path_cond))
+    return existing;
+
+  auto condition = ConditionRef::fromPathCond(path_cond);
+  auto *condition_node = findSemanticConditionNode(path_cond);
+  if (!condition_node) {
+    condition_node = createNode<GuardedValueFlowNode>(
+        GuardedValueFlowNode::Kind::InterfaceCondition,
+        Type::getInt1Ty(base_function_->getContext()), this, nullptr, nullptr,
+        nullptr);
+    condition_node->setDescription("iface.cond:" + renderPathCond(path_cond));
+    semantic_condition_nodes_[path_cond] = condition_node;
+  }
+
+  auto *region = createNode<GuardedValueFlowRegionNode>(
+      Type::getInt1Ty(base_function_->getContext()), this, block,
+      GuardedValueFlowRegionNode::Form::Interface, condition_node, true,
+      condition);
+  region->setDescription("region.interface");
+  region->setInterfaceMetadata(path_cond->getOwnerFunc(),
+                               getInterfaceOriginFunction(path_cond), path_cond,
+                               getImportedSource(path_cond));
+  region->addChild(condition_node, 1.0f, condition);
+  condition_node->region_ = region;
+  semantic_regions_[path_cond] = region;
+  return region;
+}
+
 void GuardedValueFlowGraph::addBlockCondition(BasicBlock *block,
                                               BlockCondition condition) {
   if (!block)
@@ -218,6 +324,19 @@ void GuardedValueFlowGraph::mapStoreMemoryNode(Value *value, Instruction *inst,
   store_memory_nodes_[std::make_pair(value, inst)] = node;
 }
 
+GuardedValueFlowNode *GuardedValueFlowGraph::findOrCreateStoreMemoryNode(
+    Value *value, Instruction *inst, Type *type, BasicBlock *block,
+    StringRef description) {
+  if (auto *existing = findStoreMemoryNode(value, inst))
+    return existing;
+
+  auto *node = createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::StoreMemory, type, this, block, nullptr, inst);
+  node->setDescription(description.str());
+  mapStoreMemoryNode(value, inst, node);
+  return node;
+}
+
 GuardedValueFlowReturnSite *
 GuardedValueFlowGraph::findReturnSite(Instruction *inst) const {
   auto it = return_sites_.find(inst);
@@ -228,4 +347,9 @@ void GuardedValueFlowGraph::mapReturnSite(Instruction *inst,
                                           GuardedValueFlowReturnSite *site) {
   if (inst)
     return_sites_[inst] = site;
+}
+
+void GuardedValueFlowGraph::refreshNodeRegions() {
+  for (const auto &node_ptr : nodes_)
+    assignNodeRegion(node_ptr.get());
 }
