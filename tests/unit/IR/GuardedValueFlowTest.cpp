@@ -111,4 +111,45 @@ TEST_F(GuardedValueFlowTest, BuildsCallLoadStoreAndRegionNodes) {
   EXPECT_EQ(phi_node->children().size(), 2u);
 }
 
+TEST_F(GuardedValueFlowTest, CountsOnlyRealPseudoInterfaceNodes) {
+  const char *source = R"(
+    define void @test() {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  auto *ret_inst = cast<ReturnInst>(F->getEntryBlock().getTerminator());
+  auto *site = graph.createSite<GuardedValueFlowCallSite>(&graph, ret_inst);
+
+  auto *pseudo_input0 = graph.createNode<GuardedValueFlowCallOutputNode>(
+      GuardedValueFlowNode::Kind::CallSitePseudoInput,
+      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), nullptr, ret_inst,
+      F);
+  pseudo_input0->setIndex(0);
+  site->addPseudoInput(F, pseudo_input0);
+
+  auto *pseudo_input2 = graph.createNode<GuardedValueFlowCallOutputNode>(
+      GuardedValueFlowNode::Kind::CallSitePseudoInput,
+      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), nullptr, ret_inst,
+      F);
+  pseudo_input2->setIndex(2);
+  site->addPseudoInput(F, pseudo_input2);
+
+  EXPECT_EQ(site->getNumPseudoInputs(F), 2u);
+  EXPECT_EQ(site->getPseudoInput(F, 0), pseudo_input0);
+  EXPECT_EQ(site->getPseudoInput(F, 1), nullptr);
+  EXPECT_EQ(site->getPseudoInput(F, 2), pseudo_input2);
+}
+
 } // namespace

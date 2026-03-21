@@ -70,6 +70,8 @@ void GuardedValueFlowPhiNode::addIncoming(GuardedValueFlowNode *value_node,
 void GuardedValueFlowReturnNode::addReturnValueSitePair(
     GuardedValueFlowNode *value_node, GuardedValueFlowReturnSite *site) {
   return_sites_[value_node] = site;
+  if (site)
+    addUseSite(site);
 }
 
 GuardedValueFlowReturnSite *

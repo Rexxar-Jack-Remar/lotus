@@ -90,6 +90,20 @@ public:
 
   GuardedValueFlowReturnSite *findReturnSite(Instruction *inst) const;
   void mapReturnSite(Instruction *inst, GuardedValueFlowReturnSite *site);
+  void registerPseudoArgument(GuardedValueFlowNode *node);
+  void registerPseudoReturn(GuardedValueFlowReturnNode *node);
+  ArrayRef<GuardedValueFlowNode *> pseudoArguments() const {
+    return pseudo_arguments_;
+  }
+  ArrayRef<GuardedValueFlowReturnNode *> pseudoReturns() const {
+    return pseudo_returns_;
+  }
+  GuardedValueFlowNode *getPseudoArgument(unsigned idx) const;
+  GuardedValueFlowReturnNode *getPseudoReturn(unsigned idx) const;
+  void registerSummaryArgumentNode(unsigned ap_depth, GuardedValueFlowNode *node);
+  void registerSummaryReturnNode(unsigned ap_depth, GuardedValueFlowNode *node);
+  ArrayRef<GuardedValueFlowNode *> getSummaryArgumentNodes(unsigned ap_depth) const;
+  ArrayRef<GuardedValueFlowNode *> getSummaryReturnNodes(unsigned ap_depth) const;
   void refreshNodeRegions();
 
   ArrayRef<std::unique_ptr<GuardedValueFlowNode>> nodes() const { return nodes_; }
@@ -131,6 +145,10 @@ private:
   DenseMap<BasicBlock *, std::vector<BlockCondition>> block_conditions_;
   DenseMap<path_cond_t, GuardedValueFlowRegionNode *> semantic_regions_;
   DenseMap<path_cond_t, GuardedValueFlowNode *> semantic_condition_nodes_;
+  std::vector<GuardedValueFlowNode *> pseudo_arguments_;
+  std::vector<GuardedValueFlowReturnNode *> pseudo_returns_;
+  std::map<unsigned, std::vector<GuardedValueFlowNode *>> summary_argument_nodes_;
+  std::map<unsigned, std::vector<GuardedValueFlowNode *>> summary_return_nodes_;
   std::map<std::pair<Value *, Instruction *>, GuardedValueFlowNode *,
            PointerPairLess>
       store_memory_nodes_;

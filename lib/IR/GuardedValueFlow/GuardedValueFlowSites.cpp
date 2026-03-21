@@ -37,7 +37,6 @@ findPseudoNode(const GuardedValueFlowGraph *graph, Instruction *call_site,
   if (!graph)
     return nullptr;
 
-  unsigned curr = 0;
   for (const auto &node_ptr : graph->nodes()) {
     auto *call_node =
         dynamic_cast<GuardedValueFlowCallOutputNode *>(node_ptr.get());
@@ -49,7 +48,7 @@ findPseudoNode(const GuardedValueFlowGraph *graph, Instruction *call_site,
       continue;
     if (call_node->getCallee() != callee)
       continue;
-    if (curr++ == idx)
+    if (call_node->getIndex() == idx)
       return call_node;
   }
   return nullptr;
@@ -65,14 +64,22 @@ void GuardedValueFlowCallSite::addCommonInput(GuardedValueFlowNode *node) {
 
 void GuardedValueFlowCallSite::addPseudoInput(Function *callee,
                                               GuardedValueFlowNode *node) {
-  pseudo_inputs_[callee].push_back(node);
+  auto &inputs = pseudo_inputs_[callee];
+  unsigned index = node ? node->getIndex() : static_cast<unsigned>(inputs.size());
+  if (inputs.size() <= index)
+    inputs.resize(index + 1, nullptr);
+  inputs[index] = node;
   if (node)
     node->addUseSite(this);
 }
 
 void GuardedValueFlowCallSite::addPseudoOutput(Function *callee,
                                                GuardedValueFlowNode *node) {
-  pseudo_outputs_[callee].push_back(node);
+  auto &outputs = pseudo_outputs_[callee];
+  unsigned index = node ? node->getIndex() : static_cast<unsigned>(outputs.size());
+  if (outputs.size() <= index)
+    outputs.resize(index + 1, nullptr);
+  outputs[index] = node;
 }
 
 void GuardedValueFlowCallSite::setCalleeCondition(
@@ -106,8 +113,14 @@ GuardedValueFlowCallSite::getPseudoOutput(Function *callee,
 unsigned
 GuardedValueFlowCallSite::getNumPseudoInputs(Function *callee) const {
   auto it = pseudo_inputs_.find(callee);
-  if (it != pseudo_inputs_.end())
-    return static_cast<unsigned>(it->second.size());
+  if (it != pseudo_inputs_.end()) {
+    unsigned count = 0;
+    for (GuardedValueFlowNode *node : it->second) {
+      if (node)
+        ++count;
+    }
+    return count;
+  }
   return countPseudoNodes(getGraph(), getInstruction(), callee,
                           GuardedValueFlowNode::Kind::CallSitePseudoInput);
 }
@@ -115,8 +128,14 @@ GuardedValueFlowCallSite::getNumPseudoInputs(Function *callee) const {
 unsigned
 GuardedValueFlowCallSite::getNumPseudoOutputs(Function *callee) const {
   auto it = pseudo_outputs_.find(callee);
-  if (it != pseudo_outputs_.end())
-    return static_cast<unsigned>(it->second.size());
+  if (it != pseudo_outputs_.end()) {
+    unsigned count = 0;
+    for (GuardedValueFlowNode *node : it->second) {
+      if (node)
+        ++count;
+    }
+    return count;
+  }
   return countPseudoNodes(getGraph(), getInstruction(), callee,
                           GuardedValueFlowNode::Kind::CallSitePseudoOutput);
 }

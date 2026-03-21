@@ -270,4 +270,132 @@ TEST(GuardedValueFlowAdapterShape, ModelsSemanticMatchingRegionsForConditionalLo
   EXPECT_EQ(matched_regions.size(), 2u);
 }
 
+TEST(GuardedValueFlowAdapterShape,
+     KeepsCommonReturnSSAOnlyAndBuildsPerReturnPseudoInterfaces) {
+  const char *IR = R"(
+    define i32* @test(i1 %cond, i32** %p, i32* %a, i32* %b) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      store i32* %a, i32** %p
+      ret i32* %a
+    else:
+      store i32* %b, i32** %p
+      ret i32* %b
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseModule(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto pipeline = runPipeline(*M);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  GuardedValueFlowReturnNode *common_return = nullptr;
+  for (const auto &node_ptr : graph.nodes()) {
+    if (node_ptr->getKind() == GuardedValueFlowNode::Kind::CommonReturn) {
+      common_return = dyn_cast<GuardedValueFlowReturnNode>(node_ptr.get());
+      break;
+    }
+  }
+  ASSERT_NE(common_return, nullptr);
+  ASSERT_EQ(common_return->children().size(), 2u);
+  for (const auto &edge : common_return->children())
+    EXPECT_NE(edge.target->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
+
+  auto *pseudo_return = graph.getPseudoReturn(0);
+  ASSERT_NE(pseudo_return, nullptr);
+  EXPECT_EQ(pseudo_return->getIndex(), 0u);
+  ASSERT_EQ(pseudo_return->children().size(), 2u);
+  EXPECT_GE(pseudo_return->getAccessPath().getDepth(), 1);
+
+  for (const auto &edge : pseudo_return->children()) {
+    ASSERT_NE(edge.target, nullptr);
+    EXPECT_EQ(edge.target->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
+    EXPECT_NE(pseudo_return->getReturnSite(edge.target), nullptr);
+  }
+}
+
+TEST(GuardedValueFlowAdapterShape,
+     PreservesIndexedPseudoArgumentsAndNestedAccessPaths) {
+  const char *IR = R"(
+    define void @deep(i32**** %root, i32* %value) {
+    entry:
+      %ppp = load i32***, i32**** %root
+      %pp = load i32**, i32*** %ppp
+      store i32* %value, i32** %pp
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseModule(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto pipeline = runPipeline(*M);
+  Function *F = M->getFunction("deep");
+  ASSERT_NE(F, nullptr);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  bool saw_nested_path = false;
+  for (unsigned idx = 0; idx < graph.pseudoArguments().size(); ++idx) {
+    auto *pseudo_arg = graph.getPseudoArgument(idx);
+    if (!pseudo_arg)
+      continue;
+    EXPECT_EQ(pseudo_arg->getIndex(), idx);
+    EXPECT_GE(pseudo_arg->getAccessPath().getDepth(), 1);
+    if (pseudo_arg->getAccessPath().getDepth() > 1)
+      saw_nested_path = true;
+  }
+
+  EXPECT_TRUE(saw_nested_path);
+}
+
+TEST(GuardedValueFlowAdapterShape,
+     DoesNotFabricateRecursivePseudoInterfacesWithoutBindings) {
+  const char *IR = R"(
+    define void @recur(i32** %p, i32* %v, i1 %cond) {
+    entry:
+      br i1 %cond, label %rec, label %exit
+    rec:
+      call void @recur(i32** %p, i32* %v, i1 false)
+      ret void
+    exit:
+      store i32* %v, i32** %p
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseModule(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto pipeline = runPipeline(*M);
+  Function *F = M->getFunction("recur");
+  ASSERT_NE(F, nullptr);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  CallBase *recursive_call = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *CB = dyn_cast<CallBase>(&I)) {
+      recursive_call = CB;
+      break;
+    }
+  }
+  ASSERT_NE(recursive_call, nullptr);
+
+  auto *site = graph.findCallSite(recursive_call);
+  ASSERT_NE(site, nullptr);
+  EXPECT_EQ(site->getNumPseudoInputs(F), 0u);
+  EXPECT_EQ(site->getNumPseudoOutputs(F), 0u);
+}
+
 } // namespace

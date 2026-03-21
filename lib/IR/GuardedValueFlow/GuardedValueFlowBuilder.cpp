@@ -754,6 +754,11 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     return true;
   }
   case Instruction::Ret: {
+    auto *site = graph.findReturnSite(&I);
+    if (!site) {
+      site = graph.createSite<GuardedValueFlowReturnSite>(&graph, &I);
+      graph.mapReturnSite(&I, site);
+    }
     if (I.getNumOperands() == 0)
       return true;
     GuardedValueFlowReturnNode *common_return = nullptr;
@@ -767,8 +772,6 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
       return true;
     auto *value_node =
         getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
-    auto *site = graph.createSite<GuardedValueFlowReturnSite>(&graph, &I);
-    graph.mapReturnSite(&I, site);
     common_return->addChild(value_node);
     common_return->addReturnValueSitePair(value_node, site);
     value_node->addUseSite(site);

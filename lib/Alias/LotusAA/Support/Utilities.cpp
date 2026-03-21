@@ -166,20 +166,26 @@ void IntraLotusAA::setTimer(unsigned duration) {
 }
 
 void IntraLotusAA::getFullAccessPath(
-    Value *target_val, std::vector<std::pair<Value *, int64_t>> &result) {
+    Value *target_val, std::vector<std::pair<Value *, int64_t>> &result,
+    bool *is_from_return) {
   result.clear();
+  if (is_from_return)
+    *is_from_return = false;
 
   if (inputs.count(target_val)) {
     AccessPath ap = inputs[target_val];
-    getFullAccessPath(ap, result);
+    getFullAccessPath(ap, result, is_from_return);
   } else {
     result.push_back({target_val, 0});
   }
 }
 
 void IntraLotusAA::getFullAccessPath(
-    AccessPath &ap, std::vector<std::pair<Value *, int64_t>> &result) {
+    AccessPath &ap, std::vector<std::pair<Value *, int64_t>> &result,
+    bool *is_from_return) {
   result.clear();
+  if (is_from_return)
+    *is_from_return = false;
   AccessPath curr_ap = ap;
 
   while (true) {
@@ -194,6 +200,8 @@ void IntraLotusAA::getFullAccessPath(
     } else if (escape_ret_path.count(base_ptr)) {
       auto &ret_path = escape_ret_path[base_ptr];
       result.push_back({ret_path.first, ret_path.second});
+      if (is_from_return)
+        *is_from_return = true;
       return;
     } else if (escape_obj_path.count(base_ptr)) {
       auto &obj_path = escape_obj_path[base_ptr];
@@ -215,8 +223,11 @@ void IntraLotusAA::getFullAccessPath(
 }
 
 void IntraLotusAA::getFullOutputAccessPath(
-    int output_index, std::vector<std::pair<Value *, int64_t>> &result) {
+    int output_index, std::vector<std::pair<Value *, int64_t>> &result,
+    bool *is_from_return) {
   result.clear();
+  if (is_from_return)
+    *is_from_return = false;
 
   if (output_index <= 0 || (unsigned)output_index >= outputs.size()) {
     return; // Invalid index or common return
@@ -224,7 +235,7 @@ void IntraLotusAA::getFullOutputAccessPath(
 
   OutputItem *output = outputs[output_index];
   AccessPath ap = output->getSymbolicInfo();
-  getFullAccessPath(ap, result);
+  getFullAccessPath(ap, result, is_from_return);
 }
 
 // Get caller object mapping

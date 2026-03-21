@@ -12,7 +12,10 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include <cassert>
 
 namespace llvm {
 namespace gvg {
@@ -25,15 +28,50 @@ class GuardedValueFlowRegionNode;
 class AccessPath {
 public:
   AccessPath() = default;
-  AccessPath(Value *base, int64_t offset) : base_(base), offset_(offset) {}
+  AccessPath(Value *base, int64_t offset, bool is_from_return = false) {
+    addLevel(base, offset, is_from_return);
+  }
 
   Value *getBase() const { return base_; }
-  int64_t getOffset() const { return offset_; }
-  bool empty() const { return base_ == nullptr && offset_ == 0; }
+  int getDepth() const { return static_cast<int>(offsets_reversed_.size()); }
+  int64_t getOffset(int idx) const {
+    assert(idx >= 0 && idx < getDepth() && "Invalid access path offset index");
+    return offsets_reversed_[offsets_reversed_.size() - idx - 1];
+  }
+  bool isFromReturn() const { return is_from_return_; }
+  bool empty() const { return base_ == nullptr && offsets_reversed_.empty(); }
+
+  void addLevel(Value *base, int64_t offset, bool is_from_return = false) {
+    base_ = base;
+    offsets_reversed_.push_back(offset);
+    is_from_return_ = is_from_return;
+  }
+
+  void reset(Value *base = nullptr, bool is_from_return = false) {
+    offsets_reversed_.clear();
+    base_ = base;
+    is_from_return_ = is_from_return;
+  }
+
+  void resetCurrentLevel(Value *base, int64_t offset,
+                         bool is_from_return = false) {
+    if (!offsets_reversed_.empty()) {
+      base_ = base;
+      offsets_reversed_.back() -= offset;
+      is_from_return_ = is_from_return;
+    }
+  }
+
+  void reset(const AccessPath &other) {
+    offsets_reversed_ = other.offsets_reversed_;
+    base_ = other.base_;
+    is_from_return_ = other.is_from_return_;
+  }
 
 private:
   Value *base_{nullptr};
-  int64_t offset_{0};
+  std::vector<int64_t> offsets_reversed_;
+  bool is_from_return_{false};
 };
 
 class GuardedValueFlowNode {
@@ -100,6 +138,7 @@ public:
   const std::string &getDescription() const { return description_; }
 
   void setAccessPath(AccessPath path) { access_path_ = path; }
+  AccessPath &getAccessPath() { return access_path_; }
   const AccessPath &getAccessPath() const { return access_path_; }
 
   void setIndex(unsigned idx) { index_ = idx; }
@@ -152,6 +191,10 @@ public:
 
 class GuardedValueFlowRegionNode : public GuardedValueFlowNode {
 public:
+  struct ConstraintState {
+    std::map<const GuardedValueFlowNode *, bool> assignments;
+  };
+
   enum class Form {
     AlwaysTrue,
     AlwaysFalse,
@@ -169,7 +212,48 @@ public:
       : GuardedValueFlowNode(Kind::Region, type, graph, block, nullptr,
                              block ? block->getTerminator() : nullptr),
         form_(form), condition_node_(condition_node),
-        condition_sense_(condition_sense), region_condition_(condition) {}
+        condition_sense_(condition_sense), region_condition_(condition) {
+    if (form_ == Form::AlwaysTrue) {
+      setAlwaysTrue();
+      return;
+    }
+    if (form_ == Form::AlwaysFalse) {
+      setAlwaysFalse();
+      return;
+    }
+
+    if (form_ == Form::Unit) {
+      if (!condition_node_) {
+        if (condition_sense_)
+          setAlwaysTrue();
+        else
+          setAlwaysFalse();
+        return;
+      }
+
+      if (auto *condition_region =
+              dyn_cast<GuardedValueFlowRegionNode>(condition_node_)) {
+        if (condition_region->isAlwaysTrue()) {
+          if (condition_sense_)
+            setAlwaysTrue();
+          else
+            setAlwaysFalse();
+          return;
+        }
+        if (condition_region->isAlwaysFalse()) {
+          if (condition_sense_)
+            setAlwaysFalse();
+          else
+            setAlwaysTrue();
+          return;
+        }
+      }
+
+      constraint_state_.assignments[this] = true;
+      constraint_state_.assignments[condition_node_] = condition_sense_;
+      is_satisfiable_ = true;
+    }
+  }
 
   Form getForm() const { return form_; }
   bool isAlwaysTrue() const { return form_ == Form::AlwaysTrue; }
@@ -188,6 +272,8 @@ public:
   }
   path_cond_t getInterfacePathCondition() const { return interface_path_condition_; }
   path_cond_t getImportedSourceCondition() const { return imported_source_condition_; }
+  bool isSatisfiable() const { return is_satisfiable_; }
+  const ConstraintState &getConstraintState() const { return constraint_state_; }
   void setInterfaceMetadata(Function *owner_function, Function *origin_function,
                             path_cond_t interface_path_condition,
                             path_cond_t imported_source_condition) {
@@ -202,10 +288,35 @@ private:
   GuardedValueFlowNode *condition_node_{nullptr};
   bool condition_sense_{true};
   ConditionRef region_condition_;
+  bool is_satisfiable_{true};
+  ConstraintState constraint_state_;
   Function *interface_owner_function_{nullptr};
   Function *interface_origin_function_{nullptr};
   path_cond_t interface_path_condition_{nullptr};
   path_cond_t imported_source_condition_{nullptr};
+
+public:
+  void setAlwaysFalse() {
+    form_ = Form::AlwaysFalse;
+    is_satisfiable_ = false;
+    constraint_state_.assignments.clear();
+  }
+
+  void setAlwaysTrue() {
+    form_ = Form::AlwaysTrue;
+    is_satisfiable_ = true;
+    constraint_state_.assignments.clear();
+  }
+
+  void setConstraintState(ConstraintState state) {
+    constraint_state_ = std::move(state);
+    is_satisfiable_ = true;
+  }
+
+  void markUnsatisfiable() {
+    is_satisfiable_ = false;
+    constraint_state_.assignments.clear();
+  }
 
 public:
   static bool classof(const GuardedValueFlowNode *node) {

@@ -1,5 +1,6 @@
 #include "IR/GuardedValueFlow/GuardedValueFlowGraph.h"
 
+#include <llvm/IR/Constants.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
@@ -41,6 +42,106 @@ static std::string renderPathCond(path_cond_t cond) {
   raw_string_ostream os(buffer);
   cond->print(os);
   return os.str();
+}
+
+static bool mergeConstraintStatesForAnd(
+    const GuardedValueFlowRegionNode::ConstraintState &lhs,
+    const GuardedValueFlowRegionNode::ConstraintState &rhs,
+    GuardedValueFlowRegionNode::ConstraintState &out) {
+  out.assignments = lhs.assignments;
+  for (const auto &entry : rhs.assignments) {
+    auto it = out.assignments.find(entry.first);
+    if (it != out.assignments.end() && it->second != entry.second)
+      return false;
+    out.assignments[entry.first] = entry.second;
+  }
+  return true;
+}
+
+static GuardedValueFlowRegionNode::ConstraintState
+intersectConstraintStatesForOr(
+    const GuardedValueFlowRegionNode::ConstraintState &lhs,
+    const GuardedValueFlowRegionNode::ConstraintState &rhs) {
+  GuardedValueFlowRegionNode::ConstraintState out;
+  for (const auto &entry : lhs.assignments) {
+    auto it = rhs.assignments.find(entry.first);
+    if (it != rhs.assignments.end() && it->second == entry.second)
+      out.assignments[entry.first] = entry.second;
+  }
+  return out;
+}
+
+static bool areComplementaryRegions(const GuardedValueFlowRegionNode *lhs,
+                                    const GuardedValueFlowRegionNode *rhs) {
+  if (!lhs || !rhs)
+    return false;
+
+  if (lhs->getForm() == GuardedValueFlowRegionNode::Form::Unit &&
+      rhs->getForm() == GuardedValueFlowRegionNode::Form::Unit &&
+      lhs->getConditionNode() == rhs->getConditionNode() &&
+      lhs->getConditionSense() != rhs->getConditionSense())
+    return true;
+
+  if (lhs->getForm() == GuardedValueFlowRegionNode::Form::Unit &&
+      lhs->getConditionNode() == rhs && !lhs->getConditionSense())
+    return true;
+
+  if (rhs->getForm() == GuardedValueFlowRegionNode::Form::Unit &&
+      rhs->getConditionNode() == lhs && !rhs->getConditionSense())
+    return true;
+
+  return false;
+}
+
+static BasicBlock *getRegionHelperBlock(GuardedValueFlowGraph &graph,
+                                        BasicBlock *block) {
+  if (block)
+    return block;
+  Function *base = graph.getBaseFunction();
+  return (base && !base->empty()) ? &base->getEntryBlock() : nullptr;
+}
+
+static GuardedValueFlowNode *findOrCreateBooleanLiteralNode(
+    GuardedValueFlowGraph &graph, bool value, BasicBlock *block) {
+  auto *literal = ConstantInt::get(Type::getInt1Ty(graph.getBaseFunction()->getContext()),
+                                   value);
+  if (auto *existing = graph.findNode(literal))
+    return existing;
+
+  auto *node = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, literal->getType(), &graph,
+      getRegionHelperBlock(graph, block), literal, nullptr);
+  node->setDescription(value ? "true" : "false");
+  graph.mapValueNode(literal, node);
+  return node;
+}
+
+static GuardedValueFlowOpcodeNode *createRegionBinaryOpcode(
+    GuardedValueFlowGraph &graph,
+    GuardedValueFlowOpcodeNode::OpcodeKind opcode_kind, BasicBlock *block,
+    GuardedValueFlowNode *lhs, GuardedValueFlowNode *rhs,
+    StringRef description) {
+  auto *opcode = graph.createNode<GuardedValueFlowOpcodeNode>(
+      GuardedValueFlowNode::Kind::SimpleOpcode,
+      Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+      getRegionHelperBlock(graph, block), opcode_kind);
+  opcode->setDescription(description.str());
+  opcode->addChild(lhs);
+  opcode->addChild(rhs);
+  return opcode;
+}
+
+static GuardedValueFlowOpcodeNode *createRegionNotOpcode(
+    GuardedValueFlowGraph &graph, BasicBlock *block, GuardedValueFlowNode *input) {
+  auto *opcode = graph.createNode<GuardedValueFlowOpcodeNode>(
+      GuardedValueFlowNode::Kind::SimpleOpcode,
+      Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+      getRegionHelperBlock(graph, block),
+      GuardedValueFlowOpcodeNode::OpcodeKind::Xor);
+  opcode->setDescription("region.not");
+  opcode->setIntConstant(-1);
+  opcode->addChild(input);
+  return opcode;
 }
 
 } // namespace
@@ -115,6 +216,12 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::findOrCreateUnitRegion(
     return getAlwaysTrueRegion();
   if (!condition && !sense)
     return getAlwaysFalseRegion();
+  if (auto *condition_region = dyn_cast_or_null<GuardedValueFlowRegionNode>(condition)) {
+    if (condition_region->isAlwaysTrue())
+      return sense ? getAlwaysTrueRegion() : getAlwaysFalseRegion();
+    if (condition_region->isAlwaysFalse())
+      return sense ? getAlwaysFalseRegion() : getAlwaysTrueRegion();
+  }
 
   if (auto *existing = findUnitRegion(condition, sense))
     return existing;
@@ -122,8 +229,14 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::findOrCreateUnitRegion(
   auto *region = createNode<GuardedValueFlowRegionNode>(
       Type::getInt1Ty(base_function_->getContext()), this, block,
       GuardedValueFlowRegionNode::Form::Unit, condition, sense, condition_ref);
-  if (condition)
-    region->addChild(condition, 1.0f, condition_ref);
+  if (condition) {
+    if (sense) {
+      region->addChild(condition, 1.0f, condition_ref);
+    } else {
+      auto *not_opcode = createRegionNotOpcode(*this, block, condition);
+      region->addChild(not_opcode, 1.0f, condition_ref);
+    }
+  }
   unit_regions_[std::make_pair(condition, sense)] = region;
   return region;
 }
@@ -145,6 +258,8 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::findOrCreateAndRegion(
     return lhs;
   if (rhs->isAlwaysFalse())
     return rhs;
+  if (areComplementaryRegions(lhs, rhs))
+    return getAlwaysFalseRegion();
 
   auto key = std::minmax(lhs, rhs);
   auto it = and_regions_.find(key);
@@ -155,8 +270,18 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::findOrCreateAndRegion(
       Type::getInt1Ty(base_function_->getContext()), this, block,
       GuardedValueFlowRegionNode::Form::And, nullptr, true,
       ConditionRef::none());
-  region->addChild(lhs);
-  region->addChild(rhs);
+  GuardedValueFlowRegionNode::ConstraintState merged_state;
+  if (!mergeConstraintStatesForAnd(lhs->getConstraintState(),
+                                   rhs->getConstraintState(), merged_state)) {
+    and_regions_[key] = getAlwaysFalseRegion();
+    return getAlwaysFalseRegion();
+  }
+  merged_state.assignments[region] = true;
+  region->setConstraintState(std::move(merged_state));
+  auto *and_opcode = createRegionBinaryOpcode(
+      *this, GuardedValueFlowOpcodeNode::OpcodeKind::And, block, lhs, rhs,
+      "region.and");
+  region->addChild(and_opcode);
   and_regions_[key] = region;
   return region;
 }
@@ -178,6 +303,8 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::findOrCreateOrRegion(
     return rhs;
   if (rhs->isAlwaysFalse())
     return lhs;
+  if (areComplementaryRegions(lhs, rhs))
+    return getAlwaysTrueRegion();
 
   auto key = std::minmax(lhs, rhs);
   auto it = or_regions_.find(key);
@@ -188,8 +315,15 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::findOrCreateOrRegion(
       Type::getInt1Ty(base_function_->getContext()), this, block,
       GuardedValueFlowRegionNode::Form::Or, nullptr, true,
       ConditionRef::none());
-  region->addChild(lhs);
-  region->addChild(rhs);
+  auto merged_state =
+      intersectConstraintStatesForOr(lhs->getConstraintState(),
+                                     rhs->getConstraintState());
+  merged_state.assignments[region] = true;
+  region->setConstraintState(std::move(merged_state));
+  auto *or_opcode = createRegionBinaryOpcode(
+      *this, GuardedValueFlowOpcodeNode::OpcodeKind::Or, block, lhs, rhs,
+      "region.or");
+  region->addChild(or_opcode);
   or_regions_[key] = region;
   return region;
 }
@@ -206,18 +340,7 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::findOrCreateNotRegion(
     return findOrCreateUnitRegion(input->getConditionNode(),
                                   !input->getConditionSense(), block,
                                   input->getRegionCondition());
-
-  auto it = not_regions_.find(input);
-  if (it != not_regions_.end())
-    return it->second;
-
-  auto *region = createNode<GuardedValueFlowRegionNode>(
-      Type::getInt1Ty(base_function_->getContext()), this, block,
-      GuardedValueFlowRegionNode::Form::Not, nullptr, true,
-      ConditionRef::none());
-  region->addChild(input);
-  not_regions_[input] = region;
-  return region;
+  return findOrCreateUnitRegion(input, false, block, ConditionRef::none());
 }
 
 GuardedValueFlowRegionNode *GuardedValueFlowGraph::getAlwaysTrueRegion() {
@@ -226,6 +349,7 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::getAlwaysTrueRegion() {
         Type::getInt1Ty(base_function_->getContext()), this, nullptr,
         GuardedValueFlowRegionNode::Form::AlwaysTrue, nullptr, true,
         ConditionRef::none());
+    always_true_region_->addChild(findOrCreateBooleanLiteralNode(*this, true, nullptr));
   }
   return always_true_region_;
 }
@@ -236,6 +360,8 @@ GuardedValueFlowRegionNode *GuardedValueFlowGraph::getAlwaysFalseRegion() {
         Type::getInt1Ty(base_function_->getContext()), this, nullptr,
         GuardedValueFlowRegionNode::Form::AlwaysFalse, nullptr, false,
         ConditionRef::none());
+    always_false_region_->addChild(
+        findOrCreateBooleanLiteralNode(*this, false, nullptr));
   }
   return always_false_region_;
 }
@@ -280,6 +406,10 @@ GuardedValueFlowGraph::findOrCreateSemanticRegion(path_cond_t path_cond,
   region->setInterfaceMetadata(path_cond->getOwnerFunc(),
                                getInterfaceOriginFunction(path_cond), path_cond,
                                getImportedSource(path_cond));
+  GuardedValueFlowRegionNode::ConstraintState state;
+  state.assignments[region] = true;
+  state.assignments[condition_node] = true;
+  region->setConstraintState(std::move(state));
   region->addChild(condition_node, 1.0f, condition);
   condition_node->region_ = region;
   semantic_regions_[path_cond] = region;
@@ -347,6 +477,64 @@ void GuardedValueFlowGraph::mapReturnSite(Instruction *inst,
                                           GuardedValueFlowReturnSite *site) {
   if (inst)
     return_sites_[inst] = site;
+}
+
+void GuardedValueFlowGraph::registerPseudoArgument(
+    GuardedValueFlowNode *node) {
+  if (!node)
+    return;
+  if (pseudo_arguments_.size() <= node->getIndex())
+    pseudo_arguments_.resize(node->getIndex() + 1, nullptr);
+  pseudo_arguments_[node->getIndex()] = node;
+}
+
+void GuardedValueFlowGraph::registerPseudoReturn(
+    GuardedValueFlowReturnNode *node) {
+  if (!node)
+    return;
+  if (pseudo_returns_.size() <= node->getIndex())
+    pseudo_returns_.resize(node->getIndex() + 1, nullptr);
+  pseudo_returns_[node->getIndex()] = node;
+}
+
+GuardedValueFlowNode *
+GuardedValueFlowGraph::getPseudoArgument(unsigned idx) const {
+  return idx < pseudo_arguments_.size() ? pseudo_arguments_[idx] : nullptr;
+}
+
+GuardedValueFlowReturnNode *
+GuardedValueFlowGraph::getPseudoReturn(unsigned idx) const {
+  return idx < pseudo_returns_.size() ? pseudo_returns_[idx] : nullptr;
+}
+
+void GuardedValueFlowGraph::registerSummaryArgumentNode(
+    unsigned ap_depth, GuardedValueFlowNode *node) {
+  if (node)
+    summary_argument_nodes_[ap_depth].push_back(node);
+}
+
+void GuardedValueFlowGraph::registerSummaryReturnNode(
+    unsigned ap_depth, GuardedValueFlowNode *node) {
+  if (node)
+    summary_return_nodes_[ap_depth].push_back(node);
+}
+
+ArrayRef<GuardedValueFlowNode *>
+GuardedValueFlowGraph::getSummaryArgumentNodes(unsigned ap_depth) const {
+  static const std::vector<GuardedValueFlowNode *> empty;
+  auto it = summary_argument_nodes_.find(ap_depth);
+  return it == summary_argument_nodes_.end()
+             ? ArrayRef<GuardedValueFlowNode *>(empty)
+             : ArrayRef<GuardedValueFlowNode *>(it->second);
+}
+
+ArrayRef<GuardedValueFlowNode *>
+GuardedValueFlowGraph::getSummaryReturnNodes(unsigned ap_depth) const {
+  static const std::vector<GuardedValueFlowNode *> empty;
+  auto it = summary_return_nodes_.find(ap_depth);
+  return it == summary_return_nodes_.end()
+             ? ArrayRef<GuardedValueFlowNode *>(empty)
+             : ArrayRef<GuardedValueFlowNode *>(it->second);
 }
 
 void GuardedValueFlowGraph::refreshNodeRegions() {

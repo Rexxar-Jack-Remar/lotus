@@ -326,12 +326,15 @@ public:
   // Access path utilities
   int getArgLevel(AccessPath &path);
   void getFullAccessPath(Value *target_val,
-                         std::vector<std::pair<Value *, int64_t>> &result);
+                         std::vector<std::pair<Value *, int64_t>> &result,
+                         bool *is_from_return = nullptr);
   void getFullAccessPath(AccessPath &ap,
-                         std::vector<std::pair<Value *, int64_t>> &result);
+                         std::vector<std::pair<Value *, int64_t>> &result,
+                         bool *is_from_return = nullptr);
   void
   getFullOutputAccessPath(int output_index,
-                          std::vector<std::pair<Value *, int64_t>> &result);
+                          std::vector<std::pair<Value *, int64_t>> &result,
+                          bool *is_from_return = nullptr);
 
   // Caller-callee object mapping
   void getCallerObj(Value *call, Function *callee, SymbolicMemObject *calleeObj,

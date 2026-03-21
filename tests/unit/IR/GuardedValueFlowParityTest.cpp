@@ -205,7 +205,12 @@ TEST_F(GuardedValueFlowParityTest, BuildsCompoundRegionsForNestedControlDependen
   ASSERT_NE(inner_region, nullptr);
   EXPECT_FALSE(outer_region->isAlwaysTrue());
   EXPECT_TRUE(inner_region->isCompound());
-  EXPECT_EQ(inner_region->children().size(), 2u);
+  ASSERT_EQ(inner_region->children().size(), 1u);
+  auto *inner_opcode =
+      dyn_cast<GuardedValueFlowOpcodeNode>(inner_region->children().front().target);
+  ASSERT_NE(inner_opcode, nullptr);
+  EXPECT_EQ(inner_opcode->getOpcodeKind(),
+            GuardedValueFlowOpcodeNode::OpcodeKind::And);
 }
 
 TEST_F(GuardedValueFlowParityTest,
@@ -255,6 +260,96 @@ TEST_F(GuardedValueFlowParityTest,
   EXPECT_NE(block_conditions.front().condition_node, nullptr);
   EXPECT_EQ(block_conditions.front().condition.getKind(),
             ConditionRef::Kind::StructuralGuard);
+}
+
+TEST_F(GuardedValueFlowParityTest,
+       SimplifiesContradictoryAndTautologicalRegions) {
+  const char *source = R"(
+    define void @test(i1 %cond, i1 %other) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      ret void
+    else:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  auto *cond_node = graph.findNode(F->getArg(0));
+  auto *other_node = graph.findNode(F->getArg(1));
+  ASSERT_NE(cond_node, nullptr);
+  ASSERT_NE(other_node, nullptr);
+
+  auto *true_region = graph.findUnitRegion(cond_node, true);
+  auto *false_region = graph.findUnitRegion(cond_node, false);
+  ASSERT_NE(true_region, nullptr);
+  ASSERT_NE(false_region, nullptr);
+
+  ASSERT_EQ(false_region->children().size(), 1u);
+  auto *not_opcode =
+      dyn_cast<GuardedValueFlowOpcodeNode>(false_region->children().front().target);
+  ASSERT_NE(not_opcode, nullptr);
+  EXPECT_EQ(not_opcode->getOpcodeKind(),
+            GuardedValueFlowOpcodeNode::OpcodeKind::Xor);
+  EXPECT_TRUE(not_opcode->hasIntConstant());
+  EXPECT_EQ(not_opcode->getIntConstant(), -1);
+
+  auto *not_true = graph.findOrCreateNotRegion(true_region, &F->getEntryBlock());
+  EXPECT_EQ(not_true, false_region);
+
+  auto *other_true = graph.findOrCreateUnitRegion(
+      other_node, true, &F->getEntryBlock(), ConditionRef::none());
+  ASSERT_NE(other_true, nullptr);
+
+  auto *nontrivial_and =
+      graph.findOrCreateAndRegion(true_region, other_true, &F->getEntryBlock());
+  ASSERT_EQ(nontrivial_and->children().size(), 1u);
+  auto *and_opcode = dyn_cast<GuardedValueFlowOpcodeNode>(
+      nontrivial_and->children().front().target);
+  ASSERT_NE(and_opcode, nullptr);
+  EXPECT_EQ(and_opcode->getOpcodeKind(),
+            GuardedValueFlowOpcodeNode::OpcodeKind::And);
+
+  auto *nontrivial_or =
+      graph.findOrCreateOrRegion(true_region, other_true, &F->getEntryBlock());
+  ASSERT_EQ(nontrivial_or->children().size(), 1u);
+  auto *or_opcode = dyn_cast<GuardedValueFlowOpcodeNode>(
+      nontrivial_or->children().front().target);
+  ASSERT_NE(or_opcode, nullptr);
+  EXPECT_EQ(or_opcode->getOpcodeKind(),
+            GuardedValueFlowOpcodeNode::OpcodeKind::Or);
+
+  auto *contradiction =
+      graph.findOrCreateAndRegion(true_region, false_region, &F->getEntryBlock());
+  EXPECT_TRUE(contradiction->isAlwaysFalse());
+  EXPECT_FALSE(contradiction->isSatisfiable());
+  ASSERT_EQ(contradiction->children().size(), 1u);
+  auto *false_literal = contradiction->children().front().target;
+  ASSERT_NE(false_literal, nullptr);
+  auto *false_value = dyn_cast_or_null<ConstantInt>(false_literal->getLLVMValue());
+  ASSERT_NE(false_value, nullptr);
+  EXPECT_FALSE(false_value->isOne());
+
+  auto *tautology =
+      graph.findOrCreateOrRegion(true_region, false_region, &F->getEntryBlock());
+  EXPECT_TRUE(tautology->isAlwaysTrue());
+  EXPECT_TRUE(tautology->isSatisfiable());
+  ASSERT_EQ(tautology->children().size(), 1u);
+  auto *true_literal = tautology->children().front().target;
+  ASSERT_NE(true_literal, nullptr);
+  auto *true_value = dyn_cast_or_null<ConstantInt>(true_literal->getLLVMValue());
+  ASSERT_NE(true_value, nullptr);
+  EXPECT_TRUE(true_value->isOne());
 }
 
 TEST_F(GuardedValueFlowParityTest,
