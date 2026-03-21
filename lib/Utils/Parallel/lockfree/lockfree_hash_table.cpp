@@ -7,14 +7,16 @@
 #define R           25
 
 // Inline bit twiddling functions
-inline Count_ptr make_pointer(Hash_entry *e, std::uint16_t count,
+inline Count_ptr make_pointer(Hash_entry *e, Count_ptr::counter_type count,
                               bool marked = false) {
-  return Count_ptr{e, count, marked, {0, 0, 0, 0, 0}};
+  return Count_ptr{e, count, marked, {0, 0, 0}};
 }
 
 inline Hash_entry *get_pointer(const Count_ptr &ptr) { return ptr.ptr; }
 
-inline std::uint16_t get_counter(const Count_ptr &ptr) { return ptr.counter; }
+inline Count_ptr::counter_type get_counter(const Count_ptr &ptr) {
+  return ptr.counter;
+}
 
 inline bool get_marked(const Count_ptr &ptr) { return ptr.marked; }
 
@@ -30,6 +32,11 @@ inline bool operator==(const Count_ptr &lhs, const Count_ptr &rhs) {
 
 inline bool operator!=(const Count_ptr &lhs, const Count_ptr &rhs) {
   return !(lhs == rhs);
+}
+
+inline Count_ptr::counter_type counter_advance(Count_ptr::counter_type from,
+                                               Count_ptr::counter_type to) {
+  return static_cast<Count_ptr::counter_type>(to - from);
 }
 
 Lockfree_hash_table::Lockfree_hash_table(int capacity, int thread_count) {
@@ -162,8 +169,13 @@ int Lockfree_hash_table::hash2(int key) {
   return static_cast<int>(value % static_cast<uint32_t>(size2));
 }
 
-bool Lockfree_hash_table::check_counter(int ts1, int ts2, int ts1x, int ts2x) {
-  return (ts1x >= ts1 + 2) && (ts2x >= ts2 + 2) && (ts2x >= ts1 + 3);
+bool Lockfree_hash_table::check_counter(Count_ptr::counter_type ts1,
+                                        Count_ptr::counter_type ts2,
+                                        Count_ptr::counter_type ts1x,
+                                        Count_ptr::counter_type ts2x) {
+  return counter_advance(ts1, ts1x) >= 2U &&
+         counter_advance(ts2, ts2x) >= 2U &&
+         counter_advance(ts1, ts2x) >= 3U;
 }
 
 Find_result Lockfree_hash_table::find(int key, Count_ptr &ptr1, Count_ptr &ptr2, int tid) {
@@ -174,7 +186,7 @@ Find_result Lockfree_hash_table::find(int key, Count_ptr &ptr1, Count_ptr &ptr2,
     Find_result result = NIL;
     //std::cout << "Find inf loop" << std::endl;
     ptr1 = loadTable(0, h1);
-    int ts1 = get_counter(ptr1);
+    const Count_ptr::counter_type ts1 = get_counter(ptr1);
     
     publishHazard(tid, 0, get_pointer(ptr1));
     if (get_pointer(ptr1) != get_pointer(loadTable(0, h1)))
@@ -191,7 +203,7 @@ Find_result Lockfree_hash_table::find(int key, Count_ptr &ptr1, Count_ptr &ptr2,
     }
 
     ptr2 = loadTable(1, h2);
-    int ts2 = get_counter(ptr2);
+    const Count_ptr::counter_type ts2 = get_counter(ptr2);
 
     publishHazard(tid, 1, get_pointer(ptr2));
     if (get_pointer(ptr2) != get_pointer(loadTable(1, h2)))
@@ -359,12 +371,12 @@ void Lockfree_hash_table::help_relocate(int which, int index, bool initiator, in
     if (ptr2 != loadTable(1-which, hd))
       continue;
 
-    uint16_t ts1 = get_counter(ptr1);
-    uint16_t ts2 = get_counter(ptr2);
+    const Count_ptr::counter_type ts1 = get_counter(ptr1);
+    const Count_ptr::counter_type ts2 = get_counter(ptr2);
 
     if (dst == nullptr)
     {
-      int nCnt = ts1 > ts2 ? ts1 + 1 : ts2 + 1;
+      const Count_ptr::counter_type nCnt = (ts1 > ts2 ? ts1 : ts2) + 1U;
       
       if (ptr1 != loadTable(which, index))
         continue;
@@ -427,7 +439,7 @@ std::pair<int, bool> Lockfree_hash_table::search(int key, int tid) {
     if (ptr1 != loadTable(0, h1))
       continue;
 
-    int ts1 = get_counter(ptr1);
+    const Count_ptr::counter_type ts1 = get_counter(ptr1);
 
     if (e1 && e1->key == key) {
       auto Result =
@@ -443,7 +455,7 @@ std::pair<int, bool> Lockfree_hash_table::search(int key, int tid) {
     if (ptr2 != loadTable(1, h2))
       continue;
 
-    int ts2 = get_counter(ptr2);
+    const Count_ptr::counter_type ts2 = get_counter(ptr2);
 
     if (e2 && e2->key == key) {
       auto Result =
@@ -452,8 +464,8 @@ std::pair<int, bool> Lockfree_hash_table::search(int key, int tid) {
       return Result;
     }
 
-    int ts1x = get_counter(loadTable(0, h1));
-    int ts2x = get_counter(loadTable(1, h2));
+    const Count_ptr::counter_type ts1x = get_counter(loadTable(0, h1));
+    const Count_ptr::counter_type ts2x = get_counter(loadTable(1, h2));
 
     if (check_counter(ts1, ts2, ts1x, ts2x))
       continue;

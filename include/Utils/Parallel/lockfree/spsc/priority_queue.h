@@ -49,7 +49,7 @@
 #include <optional>
 #endif
 
-#include "queue.hpp"
+#include "queue.h"
 
 namespace lockfree {
 namespace spsc {

@@ -17,10 +17,12 @@ struct Hash_entry {
 };
 
 struct Count_ptr {
+  using counter_type = std::uint32_t;
+
   Hash_entry *ptr;
-  std::uint16_t counter;
+  counter_type counter;
   bool marked;
-  std::uint8_t reserved[5];
+  std::uint8_t reserved[3];
 };
 
 static_assert(std::is_trivially_copyable<Count_ptr>::value,
@@ -58,7 +60,9 @@ private:
 
   int hash1(int key);
   int hash2(int key);
-  bool check_counter(int ts1, int ts2, int ts1x, int ts2x);
+  bool check_counter(Count_ptr::counter_type ts1, Count_ptr::counter_type ts2,
+                     Count_ptr::counter_type ts1x,
+                     Count_ptr::counter_type ts2x);
   std::size_t getThreadIndex(int tid) const;
   Count_ptr loadTable(int which, int index) const;
   bool compareExchangeTable(int which, int index, Count_ptr &expected,

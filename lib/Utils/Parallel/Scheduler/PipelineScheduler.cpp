@@ -240,7 +240,7 @@ void PipelineScheduler::waitTask() {
   std::size_t NumUnfinishedTasks = NumAllTasks;
   std::size_t NumGCTasks = 0;
   const auto WaitTimeout = std::chrono::milliseconds(
-      TaskTimeout <= 0 ? 1LL : static_cast<long long>(TaskTimeout) * 2000LL);
+      TaskTimeout <= 0 ? 1LL : static_cast<long long>(TaskTimeout) * 1000LL);
 
   while (NumUnfinishedTasks || NumGCTasks) {
     LLVM_DEBUG(dbgs() << "[PipelineScheduler] Unfinished tasks: "

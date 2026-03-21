@@ -540,11 +540,16 @@ void ThreadPool::parallelForEach(Range &&R, std::size_t GrainSize,
                                  Body &&Fn) {
   auto Begin = std::begin(R);
   auto End = std::end(R);
-  using Element = typename std::remove_reference<decltype(*Begin)>::type;
+  using Iterator = decltype(Begin);
+  using IteratorCategory =
+      typename std::iterator_traits<Iterator>::iterator_category;
 
-  std::vector<Element *> Elements;
+  static_assert(std::is_base_of<std::forward_iterator_tag, IteratorCategory>::value,
+                "parallelForEach requires at least forward iterators");
+
+  std::vector<Iterator> Elements;
   for (auto It = Begin; It != End; ++It)
-    Elements.push_back(std::addressof(*It));
+    Elements.push_back(It);
 
   parallelFor<std::size_t>(0, Elements.size(), GrainSize, Token,
                            [&](std::size_t Index) { Fn(*Elements[Index]); });

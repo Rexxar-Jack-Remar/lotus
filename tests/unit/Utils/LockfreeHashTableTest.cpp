@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -12,7 +13,7 @@
 
 namespace {
 
-std::uint16_t slotVersion(Count_ptr ptr) {
+Count_ptr::counter_type slotVersion(Count_ptr ptr) {
   return ptr.counter;
 }
 
@@ -93,13 +94,21 @@ TEST(LockfreeHashTableTest, InsertAndRemoveAdvanceSlotVersionCounters) {
   ASSERT_NE(slotPointer(inserted), nullptr);
   EXPECT_EQ(slotPointer(inserted)->key, key);
   EXPECT_EQ(slotVersion(inserted),
-            static_cast<std::uint16_t>(slotVersion(initial) + 1));
+            static_cast<Count_ptr::counter_type>(slotVersion(initial) + 1U));
 
   table.remove(key, 0);
   const Count_ptr removed = table.loadTable(0, first_slot);
   EXPECT_EQ(slotPointer(removed), nullptr);
   EXPECT_EQ(slotVersion(removed),
-            static_cast<std::uint16_t>(slotVersion(inserted) + 1));
+            static_cast<Count_ptr::counter_type>(slotVersion(inserted) + 1U));
+}
+
+TEST(LockfreeHashTableTest, CheckCounterHandlesVersionWraparound) {
+  Lockfree_hash_table table(32, 1);
+  const auto max_counter = std::numeric_limits<Count_ptr::counter_type>::max();
+
+  EXPECT_TRUE(
+      table.check_counter(max_counter - 1U, max_counter - 2U, 1U, 2U));
 }
 
 TEST(LockfreeHashTableTest, ConcurrentSameKeyUpdatesRemainReachable) {

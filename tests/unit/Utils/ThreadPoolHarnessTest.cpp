@@ -156,6 +156,16 @@ TEST(ThreadPoolHarnessTest, ParallelForEachPreservesCoverageOnUnevenRanges) {
     EXPECT_EQ(entry.load(std::memory_order_relaxed), 1);
 }
 
+TEST(ThreadPoolHarnessTest, ParallelForEachSupportsProxyReferenceRanges) {
+  ThreadPool *pool = ThreadPool::get();
+  std::vector<bool> values(19, false);
+
+  pool->parallelForEach(values, 4, [](auto bit) { bit = true; });
+
+  for (bool value : values)
+    EXPECT_TRUE(value);
+}
+
 TEST(ThreadPoolHarnessTest,
      TypedThreadLocalCreatesPerThreadInstancesAndDestroysThemWhenOwnedSlotDies) {
   ThreadPool *pool = ThreadPool::get();
