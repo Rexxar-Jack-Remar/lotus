@@ -1,6 +1,8 @@
 #include "IR/GuardedValueFlow/GuardedValueFlowBuilder.h"
+#include "IR/GuardedValueFlow/LotusAdapter.h"
 
 #include <llvm/AsmParser/Parser.h>
+#include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/InitializePasses.h>
 #include <llvm/PassRegistry.h>
@@ -111,6 +113,32 @@ TEST_F(GuardedValueFlowTest, BuildsCallLoadStoreAndRegionNodes) {
   EXPECT_EQ(phi_node->children().size(), 2u);
 }
 
+TEST_F(GuardedValueFlowTest, AssignsDenseCommonArgumentIndices) {
+  const char *source = R"(
+    define void @test(i32 %a, i8* %b, i64 %c) {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  for (unsigned idx = 0; idx < F->arg_size(); ++idx) {
+    auto *arg_node = graph.findNode(F->getArg(idx));
+    ASSERT_NE(arg_node, nullptr);
+    EXPECT_EQ(arg_node->getKind(), GuardedValueFlowNode::Kind::CommonArgument);
+    EXPECT_EQ(arg_node->getIndex(), idx);
+  }
+}
+
 TEST_F(GuardedValueFlowTest, UsesDensePseudoInterfaceIndices) {
   const char *source = R"(
     define void @test() {
@@ -152,6 +180,50 @@ TEST_F(GuardedValueFlowTest, UsesDensePseudoInterfaceIndices) {
   EXPECT_EQ(site->getPseudoInput(F, 2), nullptr);
   EXPECT_EQ(pseudo_input0->getIndex(), 0u);
   EXPECT_EQ(pseudo_input2->getIndex(), 1u);
+}
+
+TEST_F(GuardedValueFlowTest, KeepsCanonicalAndInterfaceLookupsSeparate) {
+  const char *source = R"(
+    define void @test(i32* %p) {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  GuardedValueFlowGraph graph(F);
+  BasicBlock *entry = &F->getEntryBlock();
+  auto *formal = &*F->arg_begin();
+  auto *common_arg = graph.createNode<GuardedValueFlowArgumentNode>(
+      GuardedValueFlowNode::Kind::CommonArgument, formal->getType(), &graph,
+      entry, formal);
+  graph.mapValueNode(formal, common_arg);
+
+  auto *pseudo_arg = graph.createNode<GuardedValueFlowArgumentNode>(
+      GuardedValueFlowNode::Kind::PseudoArgument, formal->getType(), &graph,
+      entry, formal);
+  pseudo_arg->setIndex(0);
+  graph.registerPseudoArgument(pseudo_arg);
+  graph.mapPseudoArgumentSource(formal, pseudo_arg);
+
+  auto *ret_inst = cast<ReturnInst>(entry->getTerminator());
+  auto *interface_value =
+      graph.createSyntheticInterfaceValue(Type::getInt32Ty(context_),
+                                         "pseudo.interface");
+  auto *interface_node = graph.createNode<GuardedValueFlowCallOutputNode>(
+      GuardedValueFlowNode::Kind::CallSitePseudoInput,
+      interface_value->getType(), &graph, entry, interface_value, ret_inst, F);
+  graph.mapInterfaceNode(interface_value, interface_node);
+
+  EXPECT_EQ(graph.findNode(formal), common_arg);
+  EXPECT_EQ(graph.findPseudoArgumentBySource(formal), pseudo_arg);
+  EXPECT_EQ(graph.findInterfaceNode(interface_value), interface_node);
+  EXPECT_EQ(graph.findNode(interface_value), nullptr);
 }
 
 TEST_F(GuardedValueFlowTest,
@@ -249,6 +321,81 @@ TEST_F(GuardedValueFlowTest, StoresSummaryNodesPerCalleeWithoutOverwrite) {
   EXPECT_EQ(site->getInputSummaryNode(callee_b, 1), input_b);
   EXPECT_EQ(site->getOutputSummaryNode(callee_a, 2), output_a);
   EXPECT_EQ(site->getOutputSummaryNode(callee_b, 2), output_b);
+}
+
+TEST_F(GuardedValueFlowTest,
+       UsesBridgeNodeWhenAdapterCannotCastBetweenLinkedTypes) {
+  const char *source = R"(
+    define void @test() {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  GuardedValueFlowGraph graph(F);
+  BasicBlock *entry = &F->getEntryBlock();
+  auto *parent = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context_), &graph,
+      entry);
+  StructType *aggregate_ty =
+      StructType::get(context_, {Type::getInt32Ty(context_),
+                                Type::getInt32Ty(context_)});
+  auto *child = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, aggregate_ty, &graph, entry);
+
+  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+      graph, parent, child, 0.5f, ConditionRef::none());
+  ASSERT_NE(linked, nullptr);
+  EXPECT_EQ(linked->getKind(), GuardedValueFlowNode::Kind::Unknown);
+  EXPECT_EQ(linked->getDescription(), "adapter.bridge");
+  ASSERT_EQ(parent->children().size(), 1u);
+  EXPECT_EQ(parent->children().front().target, linked);
+  EXPECT_FLOAT_EQ(parent->children().front().confidence, 0.5f);
+  ASSERT_EQ(linked->children().size(), 1u);
+  EXPECT_EQ(linked->children().front().target, child);
+}
+
+TEST_F(GuardedValueFlowTest,
+       LeavesUnknownNonVoidIntrinsicsAsPlainValueNodesWithoutCallSites) {
+  const char *source = R"(
+    declare i32 @llvm.ctpop.i32(i32)
+
+    define i32 @test(i32 %x) {
+    entry:
+      %v = call i32 @llvm.ctpop.i32(i32 %x)
+      ret i32 %v
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  CallBase *intrinsic_call = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *CB = dyn_cast<CallBase>(&I)) {
+      intrinsic_call = CB;
+      break;
+    }
+  }
+  ASSERT_NE(intrinsic_call, nullptr);
+
+  auto *value_node = graph.findNode(intrinsic_call);
+  ASSERT_NE(value_node, nullptr);
+  EXPECT_EQ(value_node->getKind(), GuardedValueFlowNode::Kind::SimpleOperand);
+  EXPECT_EQ(graph.findCallSite(intrinsic_call), nullptr);
 }
 
 TEST_F(GuardedValueFlowTest, PreservesImportedSemanticConditionIdentity) {

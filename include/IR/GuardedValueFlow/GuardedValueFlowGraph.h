@@ -6,6 +6,7 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/StringRef.h>
+#include <llvm/IR/Argument.h>
 #include <llvm/Pass.h>
 
 #include <map>
@@ -26,7 +27,7 @@ public:
   };
 
   explicit GuardedValueFlowGraph(Function *base_function);
-  ~GuardedValueFlowGraph() = default;
+  ~GuardedValueFlowGraph();
 
   Function *getBaseFunction() const { return base_function_; }
 
@@ -48,6 +49,11 @@ public:
 
   GuardedValueFlowNode *findNode(Value *value) const;
   void mapValueNode(Value *value, GuardedValueFlowNode *node);
+  GuardedValueFlowNode *findInterfaceNode(Value *value) const;
+  void mapInterfaceNode(Value *value, GuardedValueFlowNode *node);
+  GuardedValueFlowNode *findPseudoArgumentBySource(Value *value) const;
+  void mapPseudoArgumentSource(Value *value, GuardedValueFlowNode *node);
+  Argument *createSyntheticInterfaceValue(Type *type, StringRef name);
 
   GuardedValueFlowCallSite *findCallSite(Instruction *inst) const;
   void mapCallSite(Instruction *inst, GuardedValueFlowCallSite *site);
@@ -142,6 +148,8 @@ private:
   std::vector<std::unique_ptr<GuardedValueFlowNode>> nodes_;
   std::vector<std::unique_ptr<GuardedValueFlowSite>> sites_;
   DenseMap<Value *, GuardedValueFlowNode *> value_nodes_;
+  DenseMap<Value *, GuardedValueFlowNode *> interface_nodes_;
+  DenseMap<Value *, GuardedValueFlowNode *> pseudo_argument_sources_;
   DenseMap<Instruction *, GuardedValueFlowCallSite *> call_sites_;
   DenseMap<Instruction *, GuardedValueFlowReturnSite *> return_sites_;
   DenseMap<BasicBlock *, GuardedValueFlowRegionNode *> regions_;
@@ -169,6 +177,7 @@ private:
       not_regions_;
   GuardedValueFlowRegionNode *always_true_region_{nullptr};
   GuardedValueFlowRegionNode *always_false_region_{nullptr};
+  std::vector<Value *> owned_synthetic_values_;
 
   void assignNodeRegion(GuardedValueFlowNode *node);
 };
@@ -186,8 +195,6 @@ public:
   }
 
   // This pass builds the structural intra-procedural GVG only.
-  // Prior SEG memory/interface semantics are completed by running
-  // LotusGuardedValueFlowAdapterPass on top of the builder output.
   bool hasGraphFor(const Function &F) const;
   GuardedValueFlowGraph &getGraph(const Function &F);
 

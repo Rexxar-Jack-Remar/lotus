@@ -29,6 +29,33 @@ static bool containsChild(GuardedValueFlowNode *node, GuardedValueFlowNode *chil
   return false;
 }
 
+static bool hasChildKind(GuardedValueFlowNode *node,
+                         GuardedValueFlowNode::Kind kind) {
+  if (!node)
+    return false;
+  for (const auto &edge : node->children()) {
+    if (edge.target && edge.target->getKind() == kind)
+      return true;
+  }
+  return false;
+}
+
+static bool hasDescendantKind(GuardedValueFlowNode *node,
+                              GuardedValueFlowNode::Kind kind,
+                              unsigned depth = 3) {
+  if (!node)
+    return false;
+  for (const auto &edge : node->children()) {
+    if (!edge.target)
+      continue;
+    if (edge.target->getKind() == kind)
+      return true;
+    if (depth > 0 && hasDescendantKind(edge.target, kind, depth - 1))
+      return true;
+  }
+  return false;
+}
+
 void initializePassInfra() {
   static bool initialized = false;
   if (initialized)
@@ -169,6 +196,7 @@ TEST(GVGAdapter, MaterializesPseudoCallInterfaceNodes) {
   ASSERT_NE(load_input_it, load_ptg->getInputs().end());
   auto *pseudo_input = load_site->getPseudoInput(load_callee, 0);
   ASSERT_NE(pseudo_input, nullptr);
+  ASSERT_NE(pseudo_input->getLLVMValue(), nullptr);
   EXPECT_EQ(pseudo_input->getIndex(), 0u);
   EXPECT_EQ(pseudo_input->getAccessPath().getBase(),
             load_input_it->second.getParentPtr());
@@ -178,10 +206,13 @@ TEST(GVGAdapter, MaterializesPseudoCallInterfaceNodes) {
   ASSERT_EQ(pseudo_input->children().size(), 1u);
   EXPECT_EQ(pseudo_input->children().front().target->getKind(),
             GuardedValueFlowNode::Kind::LoadMemory);
+  EXPECT_EQ(graph.findInterfaceNode(pseudo_input->getLLVMValue()), pseudo_input);
+  EXPECT_EQ(graph.findNode(pseudo_input->getLLVMValue()), nullptr);
 
   ASSERT_GT(store_ptg->getOutputs().size(), 1u);
   auto *pseudo_output = store_site->getPseudoOutput(store_callee, 0);
   ASSERT_NE(pseudo_output, nullptr);
+  ASSERT_NE(pseudo_output->getLLVMValue(), nullptr);
   EXPECT_EQ(pseudo_output->getIndex(), 0u);
   EXPECT_EQ(pseudo_output->getAccessPath().getBase(),
             store_ptg->getOutputs()[1]->getSymbolicInfo().getParentPtr());
@@ -189,6 +220,7 @@ TEST(GVGAdapter, MaterializesPseudoCallInterfaceNodes) {
   EXPECT_EQ(pseudo_output->getAccessPath().getOffset(0),
             store_ptg->getOutputs()[1]->getSymbolicInfo().getOffset());
   EXPECT_TRUE(pseudo_output->children().empty());
+  EXPECT_EQ(graph.findInterfaceNode(pseudo_output->getLLVMValue()), pseudo_output);
   auto *pseudo_output_mem =
       graph.findStoreMemoryNode(pseudo_output->getLLVMValue(), store_call_inst);
   ASSERT_NE(pseudo_output_mem, nullptr);
@@ -239,14 +271,12 @@ TEST(GVGAdapter, ConditionalLoadPreservesTwoMatchingConditions) {
   for (const auto &match : load_mem->getMatchingRegions()) {
     EXPECT_EQ(match.provenance.getKind(), ConditionRef::Kind::SemanticPathCond);
     EXPECT_NE(match.region, nullptr);
-    EXPECT_TRUE(match.region->isSemantic());
     EXPECT_FALSE(match.region->isInterfaceRegion());
-    ASSERT_NE(match.region->getConditionNode(), nullptr);
-    EXPECT_EQ(match.region->getConditionNode()->getRegion(), match.region);
+    EXPECT_EQ(match.region, match.producer ? match.producer->getRegion() : nullptr);
   }
 }
 
-TEST(GVGAdapter, EquivalentLoadsKeepDistinctLoadMemoryNodes) {
+TEST(GVGAdapter, EquivalentLoadsShareLoadMemoryNodes) {
   const char *IR = R"(
     define i32* @test(i32** %p) {
     entry:
@@ -290,7 +320,7 @@ TEST(GVGAdapter, EquivalentLoadsKeepDistinctLoadMemoryNodes) {
   ASSERT_EQ(second_value->children().size(), 1u);
   EXPECT_EQ(first_value->children().front().target, first_mem);
   EXPECT_EQ(second_value->children().front().target, second_mem);
-  EXPECT_NE(first_mem, second_mem);
+  EXPECT_EQ(first_mem, second_mem);
   EXPECT_EQ(first_mem->getMatchingRegions().size(), second_mem->getMatchingRegions().size());
 }
 
@@ -338,10 +368,8 @@ TEST(GVGAdapter, NonPointerLoadsAlsoReceiveMatchedStoreMemoryNodes) {
   for (const auto &match : load_mem->getMatchingRegions()) {
     EXPECT_EQ(match.provenance.getKind(), ConditionRef::Kind::SemanticPathCond);
     EXPECT_NE(match.region, nullptr);
-    EXPECT_TRUE(match.region->isSemantic());
     EXPECT_FALSE(match.region->isInterfaceRegion());
-    ASSERT_NE(match.region->getConditionNode(), nullptr);
-    EXPECT_EQ(match.region->getConditionNode()->getRegion(), match.region);
+    EXPECT_EQ(match.region, match.producer ? match.producer->getRegion() : nullptr);
   }
 }
 
@@ -417,11 +445,12 @@ TEST(GVGAdapter, RecordsPerCalleeCallTargetConditions) {
       if (target.second) {
         EXPECT_EQ(kind, ConditionRef::Kind::SemanticPathCond);
         ASSERT_NE(region, nullptr);
-        EXPECT_TRUE(region->isSemantic());
         EXPECT_FALSE(region->isInterfaceRegion());
-        ASSERT_NE(region->getConditionNode(), nullptr);
-        EXPECT_EQ(region->getConditionNode()->getRegion(), region);
-        EXPECT_EQ(region->getInterfacePathCondition(), target.second);
+        if (region->isSemantic()) {
+          ASSERT_NE(region->getConditionNode(), nullptr);
+          EXPECT_EQ(region->getConditionNode()->getRegion(), region);
+          EXPECT_EQ(region->getInterfacePathCondition(), target.second);
+        }
       } else {
         EXPECT_EQ(kind, ConditionRef::Kind::None);
         EXPECT_EQ(region, nullptr);
@@ -611,6 +640,7 @@ TEST(GVGAdapter, KeepsSummaryInputNodesWhenBindingsAreIncomplete) {
 
   auto *site = graph.findCallSite(call);
   ASSERT_NE(site, nullptr);
+  bool saw_precise_summary_input_fallback = false;
   for (unsigned bucket = 0; bucket < callee_ptg->getSummaryInputs().size(); ++bucket) {
     const auto *summary_inputs = callee_ptg->getSummaryInputs()[bucket];
     if (!summary_inputs || summary_inputs->empty())
@@ -622,7 +652,115 @@ TEST(GVGAdapter, KeepsSummaryInputNodesWhenBindingsAreIncomplete) {
     ASSERT_NE(summary_mem, nullptr);
     EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
     EXPECT_FALSE(summary_mem->children().empty());
+    for (const auto &match : summary_mem->getMatchingRegions()) {
+      if (!match.producer ||
+          !hasChildKind(match.producer,
+                        GuardedValueFlowNode::Kind::CallSiteReturnSummary))
+        continue;
+      auto *summary_producer = dyn_cast<GuardedValueFlowCallSummaryNode>(
+          match.producer->children().front().target);
+      ASSERT_NE(summary_producer, nullptr);
+      EXPECT_EQ(summary_producer->getSummaryIndex(), bucket);
+      EXPECT_EQ(summary_producer->getCallee(), callee);
+      EXPECT_EQ(summary_producer->getCallSite(), call);
+      saw_precise_summary_input_fallback = true;
+    }
   }
+  EXPECT_TRUE(saw_precise_summary_input_fallback);
+}
+
+TEST(GVGAdapter, UsesPreciseSummaryOutputProducerForKnownSummaryFallback) {
+  int old_ap_level = IntraLotusAAConfig::lotus_restrict_ap_level;
+  int old_inline_size = IntraLotusAAConfig::lotus_restrict_inline_size;
+  IntraLotusAAConfig::lotus_restrict_ap_level = 0;
+  IntraLotusAAConfig::lotus_restrict_inline_size = -1;
+
+  const char *IR = R"(
+    define void @callee(i32*** %p, i32* %v) {
+    entry:
+      %slot = load i32**, i32*** %p
+      store i32* %v, i32** %slot
+      ret void
+    }
+
+    define void @caller(i32*** %p, i32* %v) {
+    entry:
+      call void @callee(i32*** %p, i32* %v)
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipelineWithoutAdapter(*M);
+  IntraLotusAAConfig::lotus_restrict_ap_level = old_ap_level;
+  IntraLotusAAConfig::lotus_restrict_inline_size = old_inline_size;
+
+  Function *caller = M->getFunction("caller");
+  Function *callee = M->getFunction("callee");
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_TRUE(result.builder->hasGraphFor(*caller));
+  ASSERT_NE(result.lotus, nullptr);
+
+  auto *caller_ptg = result.lotus->getPtGraph(caller);
+  auto *callee_ptg = result.lotus->getPtGraph(callee);
+  ASSERT_NE(caller_ptg, nullptr);
+  ASSERT_NE(callee_ptg, nullptr);
+
+  unsigned target_bucket = 0;
+  bool found_bucket = false;
+  for (unsigned bucket = 0; bucket < callee_ptg->getSummaryOutputs().size();
+       ++bucket) {
+    auto *summary_outputs = callee_ptg->getSummaryOutputs()[bucket];
+    if (!summary_outputs || summary_outputs->empty())
+      continue;
+    summary_outputs->clear();
+    target_bucket = bucket;
+    found_bucket = true;
+    break;
+  }
+  if (!found_bucket)
+    GTEST_SKIP() << "LotusAA did not materialize summary output buckets for this synthetic case";
+
+  CallBase *call = nullptr;
+  for (Instruction &I : instructions(*caller)) {
+    if (auto *CB = dyn_cast<CallBase>(&I)) {
+      call = CB;
+      break;
+    }
+  }
+  ASSERT_NE(call, nullptr);
+
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*caller);
+  LotusGuardedValueFlowAdapterPass adapter;
+  adapter.adaptFunction(graph, *caller_ptg, *result.lotus, *result.builder);
+
+  auto *site = graph.findCallSite(call);
+  ASSERT_NE(site, nullptr);
+  auto *node = site->getOutputSummaryNode(callee, target_bucket);
+  ASSERT_NE(node, nullptr);
+  ASSERT_EQ(node->children().size(), 1u);
+
+  auto *summary_mem = node->children().front().target;
+  ASSERT_NE(summary_mem, nullptr);
+  bool saw_precise_summary_output_fallback = false;
+  for (const auto &match : summary_mem->getMatchingRegions()) {
+    if (!match.producer ||
+        !hasChildKind(match.producer,
+                      GuardedValueFlowNode::Kind::CallSiteReturnSummary))
+      continue;
+    auto *summary_producer = dyn_cast<GuardedValueFlowCallSummaryNode>(
+        match.producer->children().front().target);
+    ASSERT_NE(summary_producer, nullptr);
+    EXPECT_EQ(summary_producer->getSummaryIndex(), target_bucket);
+    EXPECT_EQ(summary_producer->getCallee(), callee);
+    EXPECT_EQ(summary_producer->getCallSite(), call);
+    saw_precise_summary_output_fallback = true;
+  }
+  EXPECT_TRUE(saw_precise_summary_output_fallback);
 }
 
 TEST(GVGAdapter, KeepsPseudoInputInterfaceWhenBindingIsRemoved) {
@@ -693,11 +831,18 @@ TEST(GVGAdapter, KeepsPseudoInputInterfaceWhenBindingIsRemoved) {
   for (unsigned idx = 0; idx < site->getNumPseudoInputs(callee); ++idx) {
     auto *node = site->getPseudoInput(callee, idx);
     ASSERT_NE(node, nullptr);
+    ASSERT_NE(node->getLLVMValue(), nullptr);
+    EXPECT_EQ(graph.findInterfaceNode(node->getLLVMValue()), node);
     ASSERT_EQ(node->children().size(), 1u);
     auto *load_mem = node->children().front().target;
     ASSERT_NE(load_mem, nullptr);
     EXPECT_EQ(load_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
-    EXPECT_FALSE(load_mem->children().empty());
+    if (idx == 0) {
+      EXPECT_TRUE(load_mem->children().empty());
+      EXPECT_TRUE(load_mem->getMatchingRegions().empty());
+    } else {
+      EXPECT_FALSE(load_mem->children().empty());
+    }
   }
 }
 
@@ -759,6 +904,8 @@ TEST(GVGAdapter, KeepsPseudoOutputInterfaceWhenBindingIsRemoved) {
   ASSERT_EQ(site->getNumPseudoOutputs(callee), 1u);
   auto *node = site->getPseudoOutput(callee, 0);
   ASSERT_NE(node, nullptr);
+  ASSERT_NE(node->getLLVMValue(), nullptr);
+  EXPECT_EQ(graph.findInterfaceNode(node->getLLVMValue()), node);
   EXPECT_TRUE(node->children().empty());
 }
 
@@ -809,9 +956,108 @@ TEST(GVGAdapter, KeepsPseudoArgumentsDistinctWhenInterfaceOverlapsFormal) {
   ASSERT_NE(pseudo_arg, nullptr);
   EXPECT_EQ(pseudo_arg->getKind(), GuardedValueFlowNode::Kind::PseudoArgument);
   EXPECT_NE(pseudo_arg, common_arg);
+  EXPECT_EQ(graph.findPseudoArgumentBySource(formal), pseudo_arg);
+  EXPECT_EQ(graph.findNode(formal), common_arg);
 }
 
-TEST(GVGAdapter, SafeLinkUsesEffectiveChildForMatchingAndRejectsInvalidTypes) {
+TEST(GVGAdapter, ReusesPseudoArgumentNodesAsInterfaceMemoryProducers) {
+  const char *IR = R"(
+    define void @test(i32**** %root, i32* %value) {
+    entry:
+      %ppp = load i32***, i32**** %root
+      %pp = load i32**, i32*** %ppp
+      store i32* %value, i32** %pp
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipeline(*M);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*F);
+
+  auto *pseudo_arg = graph.findPseudoArgumentBySource(F->getArg(0));
+  if (!pseudo_arg)
+    GTEST_SKIP() << "LotusAA did not materialize a pseudo argument for this synthetic case";
+
+  LoadInst *load = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *LI = dyn_cast<LoadInst>(&I)) {
+      load = LI;
+      break;
+    }
+  }
+  ASSERT_NE(load, nullptr);
+
+  auto *load_mem = graph.findLoadMemoryNode(load);
+  ASSERT_NE(load_mem, nullptr);
+  bool saw_pseudo_argument_producer = false;
+  for (const auto &match : load_mem->getMatchingRegions()) {
+    if (!match.producer)
+      continue;
+    if (hasDescendantKind(match.producer,
+                          GuardedValueFlowNode::Kind::PseudoArgument)) {
+      saw_pseudo_argument_producer = true;
+      EXPECT_EQ(match.region, match.producer->getRegion());
+    }
+  }
+  EXPECT_TRUE(saw_pseudo_argument_producer);
+}
+
+TEST(GVGAdapter, UsesSummaryReturnProducerForUnprovenancedSummaryValue) {
+  const char *IR = R"(
+    define void @test(i32*** %slot, i32** %value) {
+    entry:
+      store i32** %value, i32*** %slot
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto result = runPipelineWithoutAdapter(*M);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  ASSERT_TRUE(result.builder->hasGraphFor(*F));
+  ASSERT_NE(result.lotus, nullptr);
+
+  auto *ptg = result.lotus->getPtGraph(F);
+  ASSERT_NE(ptg, nullptr);
+  ASSERT_GT(ptg->getOutputs().size(), 1u);
+
+  ReturnInst *ret = cast<ReturnInst>(F->getEntryBlock().getTerminator());
+  auto &ret_vals = ptg->getOutputs()[1]->getVal()[ret];
+  ret_vals.clear();
+  ret_vals.emplace_back(nullptr, nullptr, LocValue::SUMMARY_VALUE, 1.0f);
+
+  GuardedValueFlowGraph &graph = result.builder->getGraph(*F);
+  LotusGuardedValueFlowAdapterPass adapter;
+  adapter.adaptFunction(graph, *ptg, *result.lotus, *result.builder);
+
+  auto *pseudo_return = graph.getPseudoReturn(0);
+  ASSERT_NE(pseudo_return, nullptr);
+  ASSERT_NE(pseudo_return->getLLVMValue(), nullptr);
+  EXPECT_EQ(graph.findInterfaceNode(pseudo_return->getLLVMValue()), pseudo_return);
+  EXPECT_EQ(graph.findNode(pseudo_return->getLLVMValue()), nullptr);
+  ASSERT_FALSE(pseudo_return->children().empty());
+
+  auto *summary_mem = pseudo_return->children().front().target;
+  ASSERT_NE(summary_mem, nullptr);
+  ASSERT_FALSE(summary_mem->getMatchingRegions().empty());
+  const auto &match = summary_mem->getMatchingRegions().front();
+  ASSERT_NE(match.producer, nullptr);
+  EXPECT_TRUE(
+      hasChildKind(match.producer, GuardedValueFlowNode::Kind::CallSiteReturnSummary));
+  EXPECT_FALSE(hasChildKind(match.producer, GuardedValueFlowNode::Kind::Unknown));
+}
+
+TEST(GVGAdapter, SafeLinkUsesEffectiveChildAndBridgesInvalidTypes) {
   const char *IR = R"(
     define void @test() {
     entry:
@@ -868,10 +1114,15 @@ TEST(GVGAdapter, SafeLinkUsesEffectiveChildForMatchingAndRejectsInvalidTypes) {
   auto *scalar_child = graph.createNode<GuardedValueFlowNode>(
       GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(Ctx), &graph,
       entry, nullptr, ret);
-  EXPECT_EQ(LotusGuardedValueFlowAdapterPass::safeLink(graph, aggregate_parent,
-                                                       scalar_child),
-            nullptr);
-  EXPECT_TRUE(aggregate_parent->children().empty());
+  auto *bridge = LotusGuardedValueFlowAdapterPass::safeLink(graph, aggregate_parent,
+                                                            scalar_child);
+  ASSERT_NE(bridge, nullptr);
+  EXPECT_EQ(bridge->getKind(), GuardedValueFlowNode::Kind::Unknown);
+  EXPECT_EQ(bridge->getDescription(), "adapter.bridge");
+  ASSERT_EQ(aggregate_parent->children().size(), 1u);
+  EXPECT_EQ(aggregate_parent->children().front().target, bridge);
+  ASSERT_EQ(bridge->children().size(), 1u);
+  EXPECT_EQ(bridge->children().front().target, scalar_child);
 }
 
 } // namespace

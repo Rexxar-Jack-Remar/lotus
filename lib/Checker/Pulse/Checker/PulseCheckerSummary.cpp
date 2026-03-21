@@ -168,30 +168,6 @@ void PulseChecker::createSummary(
   if (exit_states.empty() && latent_exit_states.empty())
     return;
 
-  auto computeReturnValue =
-      [&](const AbductiveDomain &astate) -> llvm::Optional<AbstractValue> {
-    for (const auto &BB : *F) {
-      if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
-        if (RI->getNumOperands() == 0)
-          continue;
-        const llvm::Value *ret_v = RI->getReturnValue();
-        if (!ret_v || !ret_v->getType()->isPointerTy())
-          continue;
-        const auto *ret_addr = astate.getPostStack().find(ret_v);
-        if (ret_addr) {
-          return astate.getCanonical(ret_addr->addr);
-        }
-        // Handle null constants: they are not in post_stack but have an AV in
-        // factory
-        if (factory_.has(ret_v)) {
-          AbstractValue av = factory_.get(ret_v);
-          return astate.getCanonical(av);
-        }
-      }
-    }
-    return llvm::None;
-  };
-
   PulseSummary summary(F);
 
   unsigned latent_added = 0;
@@ -258,7 +234,10 @@ void PulseChecker::createSummary(
 
     has_any_entry = true;
     const PulseFormula formula = astate->getPathFormula().clone();
-    const llvm::Optional<AbstractValue> ret_val = computeReturnValue(*astate);
+    llvm::Optional<AbstractValue> ret_val = llvm::None;
+    if (exit_state.isStopped()) {
+      ret_val = exit_state.getStoppedExecution().return_value;
+    }
 
     const unsigned normal_entries =
         static_cast<unsigned>(summary.getPrePostList().size()) - latent_added;

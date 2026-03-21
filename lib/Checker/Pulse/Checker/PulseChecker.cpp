@@ -759,25 +759,8 @@ PulseChecker::runCallee(const llvm::Function *callee,
     for (auto &st : states) {
       if (st.isStopped()) {
         if (st.isExitProgram()) {
-          llvm::Optional<AbstractValue> ret_av;
-          const AbductiveDomain *a = st.getAstate();
-          if (a && !callee->getReturnType()->isVoidTy()) {
-            // Best effort: find the return value in the stack.
-            for (const auto &BB2 : *callee) {
-              if (auto *RI =
-                      llvm::dyn_cast<llvm::ReturnInst>(BB2.getTerminator())) {
-                if (RI->getNumOperands() > 0 &&
-                    RI->getReturnValue()->getType()->isPointerTy()) {
-                  if (auto *addr =
-                          a->getPostStack().find(RI->getReturnValue())) {
-                    ret_av = addr->addr;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-          result.push_back({st.clone(), ret_av});
+          result.push_back({st.clone(),
+                            st.getStoppedExecution().return_value});
         }
         continue;
       }

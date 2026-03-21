@@ -40,6 +40,17 @@ static bool containsChild(GuardedValueFlowNode *node, GuardedValueFlowNode *chil
   return false;
 }
 
+static bool hasChildKind(GuardedValueFlowNode *node,
+                         GuardedValueFlowNode::Kind kind) {
+  if (!node)
+    return false;
+  for (const auto &edge : node->children()) {
+    if (edge.target && edge.target->getKind() == kind)
+      return true;
+  }
+  return false;
+}
+
 void initializePassInfra() {
   static bool initialized = false;
   if (initialized)
@@ -166,15 +177,20 @@ TEST(GuardedValueFlowAdapterShape, BuildsMemoryAndPseudoInterfaceShape) {
   ASSERT_GT(load_site->getNumPseudoInputs(load_callee), 0u);
   auto *pseudo_input = load_site->getPseudoInput(load_callee, 0);
   ASSERT_NE(pseudo_input, nullptr);
+  ASSERT_NE(pseudo_input->getLLVMValue(), nullptr);
   EXPECT_TRUE(containsUseSite(pseudo_input, load_site));
   EXPECT_EQ(pseudo_input->getRegion(), caller_region);
   EXPECT_EQ(pseudo_input->getIndex(), 0u);
+  EXPECT_EQ(graph.findInterfaceNode(pseudo_input->getLLVMValue()), pseudo_input);
+  EXPECT_EQ(graph.findNode(pseudo_input->getLLVMValue()), nullptr);
 
   ASSERT_GT(store_site->getNumPseudoOutputs(store_callee), 0u);
   auto *pseudo_output = store_site->getPseudoOutput(store_callee, 0);
   ASSERT_NE(pseudo_output, nullptr);
+  ASSERT_NE(pseudo_output->getLLVMValue(), nullptr);
   EXPECT_EQ(pseudo_output->getRegion(), caller_region);
   EXPECT_TRUE(pseudo_output->children().empty());
+  EXPECT_EQ(graph.findInterfaceNode(pseudo_output->getLLVMValue()), pseudo_output);
   auto *pseudo_output_mem =
       graph.findStoreMemoryNode(pseudo_output->getLLVMValue(), store_call);
   ASSERT_NE(pseudo_output_mem, nullptr);
@@ -182,7 +198,8 @@ TEST(GuardedValueFlowAdapterShape, BuildsMemoryAndPseudoInterfaceShape) {
   EXPECT_TRUE(containsChild(pseudo_output_mem, pseudo_output));
 }
 
-TEST(GuardedValueFlowAdapterShape, KeepsEquivalentLoadsOnDistinctMemoryNodes) {
+TEST(GuardedValueFlowAdapterShape,
+     SharesRepresentativeLoadMemoryNodesForEquivalentLoads) {
   const char *IR = R"(
     define i32 @test(i32* %p, i32 %v) {
     entry:
@@ -216,7 +233,7 @@ TEST(GuardedValueFlowAdapterShape, KeepsEquivalentLoadsOnDistinctMemoryNodes) {
   auto *second_load_mem = graph.findLoadMemoryNode(loads[1]);
   ASSERT_NE(first_load_mem, nullptr);
   ASSERT_NE(second_load_mem, nullptr);
-  EXPECT_NE(first_load_mem, second_load_mem);
+  EXPECT_EQ(first_load_mem, second_load_mem);
 
   auto *first_value_node = graph.findNode(loads[0]);
   auto *second_value_node = graph.findNode(loads[1]);
@@ -229,11 +246,164 @@ TEST(GuardedValueFlowAdapterShape, KeepsEquivalentLoadsOnDistinctMemoryNodes) {
 
   EXPECT_FALSE(first_load_mem->getMatchingRegions().empty());
   EXPECT_FALSE(second_load_mem->getMatchingRegions().empty());
-  EXPECT_NE(first_load_mem->getMatchingRegions().data(),
-            second_load_mem->getMatchingRegions().data());
+  EXPECT_EQ(first_load_mem->getMatchingRegions().size(),
+            second_load_mem->getMatchingRegions().size());
+
+  bool first_matches_store = false;
+  for (const auto &match : first_load_mem->getMatchingRegions()) {
+    ASSERT_NE(match.producer, nullptr);
+    if (match.producer->getKind() == GuardedValueFlowNode::Kind::StoreMemory)
+      first_matches_store = true;
+  }
+  EXPECT_TRUE(first_matches_store);
+
+  bool second_matches_store = false;
+  for (const auto &match : second_load_mem->getMatchingRegions()) {
+    ASSERT_NE(match.producer, nullptr);
+    if (match.producer->getKind() == GuardedValueFlowNode::Kind::StoreMemory)
+      second_matches_store = true;
+  }
+  EXPECT_TRUE(second_matches_store);
 }
 
-TEST(GuardedValueFlowAdapterShape, ModelsSemanticMatchingRegionsForConditionalLoad) {
+TEST(GuardedValueFlowAdapterShape,
+     FallsBackToReachableExactPointerStoresWhenLotusAALoadsAreEmpty) {
+  const char *IR = R"(
+    define i32 @test() {
+    entry:
+      store i32 7, i32* inttoptr (i64 42 to i32*)
+      %v = load i32, i32* inttoptr (i64 42 to i32*)
+      ret i32 %v
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseModule(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto pipeline = runPipeline(*M);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  LoadInst *load = nullptr;
+  StoreInst *store = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *LI = dyn_cast<LoadInst>(&I))
+      load = LI;
+    else if (auto *SI = dyn_cast<StoreInst>(&I))
+      store = SI;
+  }
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(store, nullptr);
+
+  auto *load_value = graph.findNode(load);
+  auto *load_mem = graph.findLoadMemoryNode(load);
+  ASSERT_NE(load_value, nullptr);
+  ASSERT_NE(load_mem, nullptr);
+  ASSERT_EQ(load_value->children().size(), 1u);
+  EXPECT_EQ(load_value->children().front().target, load_mem);
+
+  ASSERT_EQ(load_mem->getMatchingRegions().size(), 1u);
+  const auto &match = load_mem->getMatchingRegions().front();
+  ASSERT_NE(match.producer, nullptr);
+  EXPECT_EQ(match.producer->getKind(), GuardedValueFlowNode::Kind::StoreMemory);
+  EXPECT_EQ(match.producer->getDebugInstruction(), store);
+  EXPECT_EQ(match.region, graph.findRegion(store->getParent()));
+  EXPECT_EQ(match.provenance.getKind(), ConditionRef::Kind::None);
+  EXPECT_FALSE(hasChildKind(match.producer, GuardedValueFlowNode::Kind::Unknown));
+}
+
+TEST(GuardedValueFlowAdapterShape,
+     LeavesFreeVariableLoadsWithoutSyntheticProducerChain) {
+  const char *IR = R"(
+    define i32 @test() {
+    entry:
+      %v = load i32, i32* inttoptr (i64 42 to i32*)
+      ret i32 %v
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseModule(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto pipeline = runPipeline(*M);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  LoadInst *load = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *LI = dyn_cast<LoadInst>(&I)) {
+      load = LI;
+      break;
+    }
+  }
+  ASSERT_NE(load, nullptr);
+
+  auto *load_mem = graph.findLoadMemoryNode(load);
+  ASSERT_NE(load_mem, nullptr);
+  EXPECT_TRUE(load_mem->children().empty());
+  EXPECT_TRUE(load_mem->getMatchingRegions().empty());
+}
+
+TEST(GuardedValueFlowAdapterShape,
+     IgnoresFreeVariableContributorsWhenConcreteProducerExists) {
+  const char *IR = R"(
+    define i32 @test(i1 %cond, i32* %p, i32 %v) {
+    entry:
+      br i1 %cond, label %store, label %merge
+    store:
+      store i32 %v, i32* %p
+      br label %merge
+    merge:
+      %loaded = load i32, i32* %p
+      ret i32 %loaded
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseModule(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto pipeline = runPipeline(*M);
+  Function *F = M->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  LoadInst *load = nullptr;
+  StoreInst *store = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *LI = dyn_cast<LoadInst>(&I))
+      load = LI;
+    else if (auto *SI = dyn_cast<StoreInst>(&I))
+      store = SI;
+  }
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(store, nullptr);
+
+  auto *load_mem = graph.findLoadMemoryNode(load);
+  ASSERT_NE(load_mem, nullptr);
+  EXPECT_FALSE(load_mem->children().empty());
+  EXPECT_FALSE(load_mem->getMatchingRegions().empty());
+
+  bool saw_concrete_store = false;
+  for (const auto &edge : load_mem->children()) {
+    ASSERT_NE(edge.target, nullptr);
+    if (edge.target->getKind() == GuardedValueFlowNode::Kind::StoreMemory &&
+        edge.target->getDebugInstruction() == store) {
+      saw_concrete_store = true;
+      EXPECT_FALSE(hasChildKind(edge.target, GuardedValueFlowNode::Kind::Unknown));
+    }
+  }
+  EXPECT_TRUE(saw_concrete_store);
+}
+
+TEST(GuardedValueFlowAdapterShape, ReusesStructuralMatchingRegionsForConditionalLoad) {
   const char *IR = R"(
     define i32* @test(i1 %cond, i32** %p, i32* %a, i32* %b) {
     entry:
@@ -278,13 +448,9 @@ TEST(GuardedValueFlowAdapterShape, ModelsSemanticMatchingRegionsForConditionalLo
     EXPECT_NE(match.producer, nullptr);
     EXPECT_NE(match.region, nullptr);
     EXPECT_EQ(match.provenance.getKind(), ConditionRef::Kind::SemanticPathCond);
-    EXPECT_TRUE(match.region->isSemantic());
     EXPECT_FALSE(match.region->isInterfaceRegion());
-    EXPECT_TRUE(match.region->isLocalSemanticRegion());
-    ASSERT_NE(match.region->getConditionNode(), nullptr);
-    EXPECT_EQ(match.region->getConditionNode()->getRegion(), match.region);
-    EXPECT_EQ(match.region->getInterfacePathCondition(),
-              match.provenance.getPathCond());
+    EXPECT_FALSE(match.region->isSemantic());
+    EXPECT_EQ(match.region, match.producer ? match.producer->getRegion() : nullptr);
     matched_regions.insert(match.region);
   }
   EXPECT_EQ(matched_regions.size(), 2u);
@@ -330,9 +496,12 @@ TEST(GuardedValueFlowAdapterShape,
 
   auto *pseudo_return = graph.getPseudoReturn(0);
   ASSERT_NE(pseudo_return, nullptr);
+  ASSERT_NE(pseudo_return->getLLVMValue(), nullptr);
   EXPECT_EQ(pseudo_return->getIndex(), 0u);
   ASSERT_EQ(pseudo_return->children().size(), 2u);
   EXPECT_GE(pseudo_return->getAccessPath().getDepth(), 1);
+  EXPECT_EQ(graph.findInterfaceNode(pseudo_return->getLLVMValue()), pseudo_return);
+  EXPECT_EQ(graph.findNode(pseudo_return->getLLVMValue()), nullptr);
 
   for (const auto &edge : pseudo_return->children()) {
     ASSERT_NE(edge.target, nullptr);
@@ -419,6 +588,8 @@ TEST(GuardedValueFlowAdapterShape,
                     "direct formal in this synthetic case";
   EXPECT_EQ(pseudo_arg->getKind(), GuardedValueFlowNode::Kind::PseudoArgument);
   EXPECT_NE(pseudo_arg, common_arg);
+  EXPECT_EQ(graph.findPseudoArgumentBySource(root_arg), pseudo_arg);
+  EXPECT_EQ(graph.findNode(root_arg), common_arg);
 }
 
 TEST(GuardedValueFlowAdapterShape,
@@ -499,8 +670,9 @@ TEST(GuardedValueFlowAdapterShape,
   bool saw_entry_summary_mem = false;
   for (unsigned idx = 0; idx < 4; ++idx) {
     auto *summary_node = summary_site->getInputSummaryNode(callee, idx);
-    if (!summary_node || summary_node->children().empty())
+    if (!summary_node)
       continue;
+    ASSERT_EQ(summary_node->children().size(), 1u);
     auto *summary_mem = summary_node->children().front().target;
     ASSERT_NE(summary_mem, nullptr);
     EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
@@ -515,17 +687,17 @@ TEST(GuardedValueFlowAdapterShape,
 }
 
 TEST(GuardedValueFlowAdapterShape,
-     DoesNotFabricateRecursivePseudoInterfacesWithoutBindings) {
+     MaterializesConservativeRecursivePseudoInterfacesForBackEdges) {
   const char *IR = R"(
-    define void @recur(i32** %p, i32* %v, i1 %cond) {
+    define i32* @recur(i32** %p, i32* %v, i1 %cond) {
     entry:
       br i1 %cond, label %rec, label %exit
     rec:
-      call void @recur(i32** %p, i32* %v, i1 false)
-      ret void
+      %rv = call i32* @recur(i32** %p, i32* %v, i1 false)
+      ret i32* %rv
     exit:
       store i32* %v, i32** %p
-      ret void
+      ret i32* %v
     }
   )";
 
@@ -551,8 +723,55 @@ TEST(GuardedValueFlowAdapterShape,
   auto *site = graph.findCallSite(recursive_call);
   ASSERT_NE(site, nullptr);
   EXPECT_TRUE(site->isBackEdge(F));
-  EXPECT_EQ(site->getNumPseudoInputs(F), 0u);
-  EXPECT_EQ(site->getNumPseudoOutputs(F), 0u);
+
+  ASSERT_GT(site->getNumPseudoInputs(F), 0u);
+  auto *pseudo_input = site->getPseudoInput(F, 0);
+  ASSERT_NE(pseudo_input, nullptr);
+  EXPECT_TRUE(containsUseSite(pseudo_input, site));
+  ASSERT_EQ(pseudo_input->children().size(), 1u);
+  auto *pseudo_input_mem = pseudo_input->children().front().target;
+  ASSERT_NE(pseudo_input_mem, nullptr);
+  EXPECT_EQ(pseudo_input_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
+  EXPECT_TRUE(pseudo_input_mem->children().empty());
+  EXPECT_TRUE(pseudo_input_mem->getMatchingRegions().empty());
+
+  ASSERT_GT(site->getNumPseudoOutputs(F), 0u);
+  auto *pseudo_output = site->getPseudoOutput(F, 0);
+  ASSERT_NE(pseudo_output, nullptr);
+  auto *pseudo_output_mem =
+      graph.findStoreMemoryNode(pseudo_output->getLLVMValue(), recursive_call);
+  ASSERT_NE(pseudo_output_mem, nullptr);
+  EXPECT_TRUE(containsChild(pseudo_output_mem, pseudo_output));
+
+  if (auto *callee_ptg = pipeline.lotus->getPtGraph(F)) {
+    for (unsigned bucket = 0; bucket < callee_ptg->getSummaryInputs().size();
+         ++bucket) {
+      const auto *summary_inputs = callee_ptg->getSummaryInputs()[bucket];
+      if (!summary_inputs || summary_inputs->empty())
+        continue;
+
+      auto *summary_node = site->getInputSummaryNode(F, bucket);
+      ASSERT_NE(summary_node, nullptr);
+      ASSERT_EQ(summary_node->children().size(), 1u);
+      auto *summary_mem = summary_node->children().front().target;
+      ASSERT_NE(summary_mem, nullptr);
+      EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
+    }
+
+    for (unsigned bucket = 0; bucket < callee_ptg->getSummaryOutputs().size();
+         ++bucket) {
+      const auto *summary_outputs = callee_ptg->getSummaryOutputs()[bucket];
+      if (!summary_outputs || summary_outputs->empty())
+        continue;
+
+      auto *summary_node = site->getOutputSummaryNode(F, bucket);
+      ASSERT_NE(summary_node, nullptr);
+      ASSERT_EQ(summary_node->children().size(), 1u);
+      auto *summary_mem = summary_node->children().front().target;
+      ASSERT_NE(summary_mem, nullptr);
+      EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
+    }
+  }
 }
 
 TEST(GuardedValueFlowAdapterShape,

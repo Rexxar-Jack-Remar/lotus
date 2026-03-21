@@ -522,6 +522,114 @@ PulseFormula::applySubstitution(const Substitution &substitution) const {
   return out;
 }
 
+bool PulseFormula::equivalentTo(const PulseFormula &other) const {
+  auto normalize_value_set = [](const PulseFormula &formula,
+                                const std::set<AbstractValue> &values) {
+    std::set<AbstractValue> normalized;
+    for (AbstractValue v : values) {
+      normalized.insert(formula.findRepReadOnly(v));
+    }
+    return normalized;
+  };
+
+  auto normalize_pairs = [](const PulseFormula &formula,
+                            const std::set<std::pair<AbstractValue,
+                                                     AbstractValue>> &pairs) {
+    std::set<std::pair<AbstractValue, AbstractValue>> normalized;
+    for (const auto &p : pairs) {
+      normalized.insert(normalizePair(formula.findRepReadOnly(p.first),
+                                      formula.findRepReadOnly(p.second)));
+    }
+    return normalized;
+  };
+
+  auto normalize_bounds =
+      [](const PulseFormula &formula,
+         const std::map<AbstractValue, int64_t> &bounds) {
+        std::map<AbstractValue, int64_t> normalized;
+        for (const auto &kv : bounds) {
+          normalized[formula.findRepReadOnly(kv.first)] = kv.second;
+        }
+        return normalized;
+      };
+
+  auto normalize_linear_constraints = [](const PulseFormula &formula) {
+    std::multiset<std::string> normalized;
+    for (const auto &constraint : formula.linear_constraints_) {
+      std::vector<LinearTerm> terms = constraint.terms;
+      for (auto &term : terms) {
+        term.var = formula.findRepReadOnly(term.var);
+      }
+      std::sort(terms.begin(), terms.end());
+
+      std::string sig;
+      sig.reserve(64);
+      sig += std::to_string(static_cast<int>(constraint.kind));
+      sig += ":";
+      sig += std::to_string(constraint.constant);
+      for (const auto &term : terms) {
+        sig += "|";
+        sig += std::to_string(term.var.getId());
+        sig += ",";
+        sig += std::to_string(term.coefficient);
+      }
+      normalized.insert(std::move(sig));
+    }
+    return normalized;
+  };
+
+  auto normalize_arithmetic_ops = [](const PulseFormula &formula) {
+    std::multiset<std::string> normalized;
+    for (const auto &op : formula.arithmetic_ops_) {
+      std::string sig;
+      sig.reserve(48);
+      sig += std::to_string(formula.findRepReadOnly(op.result).getId());
+      sig += ":";
+      sig += std::to_string(formula.findRepReadOnly(op.op1).getId());
+      sig += ":";
+      sig += std::to_string(formula.findRepReadOnly(op.op2).getId());
+      sig += ":";
+      sig += op.op;
+      normalized.insert(std::move(sig));
+    }
+    return normalized;
+  };
+
+  auto normalize_equalities = [](const PulseFormula &formula) {
+    std::set<std::pair<AbstractValue, AbstractValue>> normalized;
+    std::set<AbstractValue> values;
+    for (const auto &eq : formula.equalities_) {
+      values.insert(eq.first);
+      values.insert(eq.second);
+    }
+    for (AbstractValue value : values) {
+      AbstractValue rep = formula.findRepReadOnly(value);
+      if (!(value == rep)) {
+        normalized.insert(normalizePair(value, rep));
+      }
+    }
+    return normalized;
+  };
+
+  return is_contradiction_ == other.is_contradiction_ &&
+         normalize_equalities(*this) == normalize_equalities(other) &&
+         normalize_pairs(*this, disequalities_) ==
+             normalize_pairs(other, other.disequalities_) &&
+         normalize_value_set(*this, null_values_) ==
+             normalize_value_set(other, other.null_values_) &&
+         normalize_value_set(*this, non_null_values_) ==
+             normalize_value_set(other, other.non_null_values_) &&
+         normalize_bounds(*this, lower_bounds_) ==
+             normalize_bounds(other, other.lower_bounds_) &&
+         normalize_bounds(*this, upper_bounds_) ==
+             normalize_bounds(other, other.upper_bounds_) &&
+         normalize_value_set(*this, integer_values_) ==
+             normalize_value_set(other, other.integer_values_) &&
+         normalize_linear_constraints(*this) ==
+             normalize_linear_constraints(other) &&
+         normalize_arithmetic_ops(*this) == normalize_arithmetic_ops(other);
+}
+
 void PulseFormula::addIntegerConstraint(AbstractValue v) {
   if (is_contradiction_) {
     return;

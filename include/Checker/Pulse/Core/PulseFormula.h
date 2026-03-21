@@ -201,6 +201,13 @@ public:
   PulseFormula applySubstitution(const Substitution &substitution) const;
 
   /**
+   * Compare two formulas after canonical normalization.
+   * Used by loop handling to detect real convergence rather than matching only
+   * a coarse shape.
+   */
+  bool equivalentTo(const PulseFormula &other) const;
+
+  /**
    * Add integer constraint: mark value as integer type
    */
   void addIntegerConstraint(AbstractValue v);

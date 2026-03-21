@@ -235,19 +235,9 @@ bool LoopAbstraction::hasPreviousIterationSamePathStamp(
   }
 
   const auto &stack = it->second.iteration_stack;
-  const auto &current = stack[0];
-
-  // Check if any previous iteration has the same path stamp
-  for (size_t i = 1; i < stack.size(); ++i) {
-    // Compare path stamps (simplified - full implementation would use proper
-    // comparison)
-    if (current.path_stamp.isEmptyOrTrivial() ==
-        stack[i].path_stamp.isEmptyOrTrivial()) {
-      return true;
-    }
-  }
-
-  return false;
+  const auto &current = stack.back();
+  const auto &previous = stack[stack.size() - 2];
+  return current.path_stamp.equivalentTo(previous.path_stamp);
 }
 
 bool LoopAbstraction::isCurrentIterationEmptyPathStamp(

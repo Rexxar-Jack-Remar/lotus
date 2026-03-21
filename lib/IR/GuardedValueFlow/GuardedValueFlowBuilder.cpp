@@ -699,17 +699,16 @@ static bool modelIntrinsicCall(CallBase &call, GuardedValueFlowGraph &graph,
   if (!callee || !callee->isIntrinsic())
     return false;
 
-  auto *site = graph.findCallSite(&call);
-  if (!site) {
-    site = graph.createSite<GuardedValueFlowCallSite>(&graph, &call);
-    graph.mapCallSite(&call, site);
-  }
-  site->addCallee(callee);
-
   switch (callee->getIntrinsicID()) {
   case Intrinsic::memset:
   case Intrinsic::memmove:
   case Intrinsic::memcpy: {
+    auto *site = graph.findCallSite(&call);
+    if (!site) {
+      site = graph.createSite<GuardedValueFlowCallSite>(&graph, &call);
+      graph.mapCallSite(&call, site);
+    }
+    site->addCallee(callee);
     for (Value *arg : call.args()) {
       auto *arg_node = getOrCreateOperandRepresentation(graph, arg, F, failed);
       arg_node->addUseSite(site);
@@ -724,6 +723,12 @@ static bool modelIntrinsicCall(CallBase &call, GuardedValueFlowGraph &graph,
     return true;
   }
   case Intrinsic::bswap: {
+    auto *site = graph.findCallSite(&call);
+    if (!site) {
+      site = graph.createSite<GuardedValueFlowCallSite>(&graph, &call);
+      graph.mapCallSite(&call, site);
+    }
+    site->addCallee(callee);
     for (Value *arg : call.args()) {
       auto *arg_node = getOrCreateOperandRepresentation(graph, arg, F, failed);
       arg_node->addUseSite(site);
@@ -734,12 +739,8 @@ static bool modelIntrinsicCall(CallBase &call, GuardedValueFlowGraph &graph,
     return true;
   }
   default:
-    for (Value *arg : call.args()) {
-      auto *arg_node = getOrCreateOperandRepresentation(graph, arg, F, failed);
-      site->addCommonInput(arg_node);
-    }
     if (!call.getType()->isVoidTy())
-      (void)findOrCreateCallOutputNode(graph, call, F);
+      (void)findOrCreateValueNode(graph, &call, F);
     return true;
   }
 }
@@ -1130,8 +1131,13 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
       getAnalysis<gsa::ControlDependenceAnalysisPass>().getControlDependenceAnalysis(F);
   bool failed = false;
 
-  for (Argument &arg : F.args())
-    (void)findOrCreateValueNode(*graph, &arg, F);
+  unsigned common_arg_index = 0;
+  for (Argument &arg : F.args()) {
+    auto *arg_node = findOrCreateValueNode(*graph, &arg, F);
+    if (arg_node &&
+        arg_node->getKind() == GuardedValueFlowNode::Kind::CommonArgument)
+      arg_node->setIndex(common_arg_index++);
+  }
 
   if (!F.getReturnType()->isVoidTy()) {
     auto *ret_node = graph->createNode<GuardedValueFlowReturnNode>(

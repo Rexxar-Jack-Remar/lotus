@@ -9,10 +9,13 @@
  */
 
 #include "Checker/Pulse/Checker/PulseChecker.h"
+#include "Checker/Pulse/Domain/PulseLoopAbstraction.h"
 #include "Checker/Pulse/Report/PulseReport.h"
 #include "Checker/Report/BugReportMgr.h"
 
+#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/AsmParser/Parser.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
@@ -525,6 +528,217 @@ TEST_F(PulseCheckerTest, NonReallocAssignmentDoesNotInvalidatePreviousValue) {
 
   EXPECT_FALSE(
       astate->getPostAttrs().has(old_value, pulse::Attribute::Invalid));
+}
+
+TEST_F(PulseCheckerTest, SummaryKeepsReturnValueFromMatchingExitPath) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+
+    define i8* @choose_ret(i8* %p) {
+    entry:
+      %isnull = icmp eq i8* %p, null
+      br i1 %isnull, label %ret_null, label %ret_arg
+
+    ret_null:
+      ret i8* null
+
+    ret_arg:
+      ret i8* %p
+    }
+
+    define void @caller() {
+    entry:
+      %p = call i8* @malloc(i64 1)
+      %q = call i8* @choose_ret(i8* %p)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *caller = module->getFunction("caller");
+  ASSERT_NE(caller, nullptr);
+
+  CallInst *malloc_call = nullptr;
+  CallInst *choose_call = nullptr;
+  for (auto &I : caller->getEntryBlock()) {
+    auto *CI = dyn_cast<CallInst>(&I);
+    if (!CI)
+      continue;
+    auto *callee = CI->getCalledFunction();
+    if (!callee)
+      continue;
+    if (callee->getName() == "malloc") {
+      malloc_call = CI;
+    } else if (callee->getName() == "choose_ret") {
+      choose_call = CI;
+    }
+  }
+
+  ASSERT_NE(malloc_call, nullptr);
+  ASSERT_NE(choose_call, nullptr);
+
+  DiagnosticManager::getInstance().clear();
+  PulseChecker checker(module.get());
+  checker.analyze();
+
+  ExecutionDomain state = executeEntryBlock(checker, caller, choose_call);
+  auto *astate = state.getAstate();
+  ASSERT_NE(astate, nullptr);
+
+  const Address *malloc_addr = astate->getPostStack().find(malloc_call);
+  const Address *call_addr = astate->getPostStack().find(choose_call);
+  ASSERT_NE(malloc_addr, nullptr);
+  ASSERT_NE(call_addr, nullptr);
+
+  EXPECT_EQ(astate->getCanonical(malloc_addr->addr),
+            astate->getCanonical(call_addr->addr));
+  EXPECT_FALSE(astate->getPostAttrs().has(astate->getCanonical(call_addr->addr),
+                                          pulse::Attribute::Null));
+}
+
+TEST_F(PulseCheckerTest, RejectedMultiEntrySummaryFallsBackToUnknownCall) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+
+    define i8* @pick_first(i8* %a, i8* %b, i1 %flag) {
+    entry:
+      %distinct = icmp ne i8* %a, %b
+      br i1 %distinct, label %ok, label %reject
+
+    ok:
+      br i1 %flag, label %ret1, label %ret2
+
+    ret1:
+      ret i8* %a
+
+    ret2:
+      ret i8* %a
+
+    reject:
+      unreachable
+    }
+
+    define void @caller_same_ptr() {
+    entry:
+      %p = call i8* @malloc(i64 1)
+      %q = call i8* @pick_first(i8* %p, i8* %p, i1 false)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *caller = module->getFunction("caller_same_ptr");
+  ASSERT_NE(caller, nullptr);
+
+  CallInst *pick_call = nullptr;
+  for (auto &I : caller->getEntryBlock()) {
+    auto *CI = dyn_cast<CallInst>(&I);
+    if (CI && CI->getCalledFunction() &&
+        CI->getCalledFunction()->getName() == "pick_first") {
+      pick_call = CI;
+      break;
+    }
+  }
+  ASSERT_NE(pick_call, nullptr);
+
+  DiagnosticManager::getInstance().clear();
+  PulseChecker checker(module.get());
+  checker.analyze();
+
+  ExecutionDomain state = executeEntryBlock(checker, caller, pick_call);
+  auto *astate = state.getAstate();
+  ASSERT_NE(astate, nullptr);
+  EXPECT_TRUE(astate->hasSkippedCall("pick_first"));
+}
+
+TEST_F(PulseCheckerTest, LoopConvergenceRequiresEquivalentPathStamp) {
+  const char *source = R"(
+    define void @test_loop(i32 %n) {
+    entry:
+      br label %loop
+
+    loop:
+      %i = phi i32 [ 0, %entry ], [ %next, %loop ]
+      %next = add i32 %i, 1
+      %cmp = icmp slt i32 %next, %n
+      br i1 %cmp, label %loop, label %exit
+
+    exit:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test_loop");
+  ASSERT_NE(F, nullptr);
+
+  DominatorTree DT(*F);
+  LoopInfo LI;
+  LI.analyze(DT);
+
+  LoopAbstraction loop_abs;
+  loop_abs.initialize(LI);
+
+  BasicBlock *header = nullptr;
+  for (auto &BB : *F) {
+    if (BB.getName() == "loop") {
+      header = &BB;
+      break;
+    }
+  }
+  ASSERT_NE(header, nullptr);
+
+  ExecutionDomain first_state;
+  ExecutionDomain second_state;
+  ExecutionDomain third_state;
+
+  AbstractValue a(nullptr, 1);
+  AbstractValue b(nullptr, 2);
+  ASSERT_TRUE(second_state.getAstate()->getPathFormula().addNull(a));
+  ASSERT_TRUE(third_state.getAstate()->getPathFormula().addNull(b));
+
+  EXPECT_FALSE(loop_abs.visitHeader(header, first_state));
+  EXPECT_TRUE(loop_abs.visitHeader(header, second_state));
+  EXPECT_TRUE(loop_abs.visitHeader(header, third_state));
+  EXPECT_FALSE(loop_abs.hasPreviousIterationSamePathStamp(header));
+}
+
+TEST_F(PulseCheckerTest, ReallocAssignmentInvalidatesOldAliases) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+    declare i8* @realloc(i8*, i64)
+
+    define void @realloc_alias_uaf() {
+    entry:
+      %slot = alloca i8*
+      %p0 = call i8* @malloc(i64 1)
+      store i8* %p0, i8** %slot
+      %alias = load i8*, i8** %slot
+      %p1 = call i8* @realloc(i8* %p0, i64 2)
+      store i8* %p1, i8** %slot
+      %v = load i8, i8* %alias
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  DiagnosticManager::getInstance().clear();
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const int reports_before = mgr.get_total_reports();
+  {
+    PulseChecker checker(module.get());
+    checker.analyze();
+  }
+
+  EXPECT_GT(mgr.get_total_reports(), reports_before);
 }
 
 int main(int argc, char **argv) {

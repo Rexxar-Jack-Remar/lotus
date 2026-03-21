@@ -16,8 +16,7 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnModule(Module &M) override;
-  // This adapter turns the structural builder graph into the canonical
-  // SEG-faithful GuardedValueFlowGraph by materializing LotusAA memory and
+  // This adapter turns the structural builder graph into the GuardedValueFlowGraph by materializing LotusAA memory and
   // interprocedural interface semantics.
   static GuardedValueFlowNode *safeLink(GuardedValueFlowGraph &graph,
                                         GuardedValueFlowNode *parent,

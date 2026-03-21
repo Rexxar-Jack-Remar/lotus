@@ -666,6 +666,15 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
       astate->getPostAttrs().remove(canon_var, Attribute::Invalid);
     }
 
+    if (astate->getPostAttrs().has(canon_value, Attribute::Allocated) &&
+        !astate->getPostAttrs().has(canon_value, Attribute::Invalid) &&
+        isReallocResult(*value_opt)) {
+      if (auto *old_addr = astate->getPostStack().find(AI)) {
+        ops_.invalidate(*astate, *old_addr, SI, InvalidationKind::Realloc);
+      }
+      astate->getPostAttrs().remove(canon_var, Attribute::Invalid);
+    }
+
     // Update stack with new value
     // Add Store event to history so isNullConstantSource can detect null
     // constants stored via CallInst
@@ -1040,12 +1049,6 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
     if (!summary_results.empty()) {
       return summary_results;
     }
-    // Fall back to legacy summary application if the improved engine cannot
-    // apply any entry.
-    auto legacy_results = applySummary(F, exec_state, CI, pred);
-    if (!legacy_results.empty()) {
-      return legacy_results;
-    }
   }
 
   // No summary could be applied. Conservatively treat the call as unknown.
@@ -1092,12 +1095,14 @@ ExecutionDomain PulseChecker::handleAlloca(const llvm::AllocaInst *AI,
 ExecutionDomain PulseChecker::handleReturn(const llvm::ReturnInst *RI,
                                            ExecutionDomain exec_state) {
   auto *astate = exec_state.getAstate();
+  llvm::Optional<AbstractValue> returned_value = llvm::None;
   if (RI && astate && RI->getNumOperands() > 0) {
     const llvm::Value *ret_v = RI->getReturnValue();
     if (ret_v && ret_v->getType()->isPointerTy()) {
       auto ret_opt = ops_.eval(*astate, ret_v, RI, nullptr);
       if (ret_opt) {
         AbstractValue canon_ret = astate->getCanonical(ret_opt->addr);
+        returned_value = canon_ret;
         if (astate->getPostAttrs().has(canon_ret, Attribute::Stack)) {
           Trace trace = Trace::fromValueHistory(ret_opt->history);
           trace.addEvent(RI, "Returning address derived from stack allocation");
@@ -1114,7 +1119,8 @@ ExecutionDomain PulseChecker::handleReturn(const llvm::ReturnInst *RI,
   // Convert to ExitProgram variant
   if (exec_state.isContinueProgram() && exec_state.getAstate()) {
     return ExecutionDomain::exitProgram(
-        std::make_unique<AbductiveDomain>(exec_state.getAstate()->clone()));
+        std::make_unique<AbductiveDomain>(exec_state.getAstate()->clone()),
+        returned_value);
   }
   return exec_state;
 }

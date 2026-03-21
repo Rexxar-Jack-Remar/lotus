@@ -1,4 +1,6 @@
+#include "Alias/LotusAA/Engine/InterProceduralPass.h"
 #include "IR/GuardedValueFlow/GuardedValueFlowBuilder.h"
+#include "IR/GuardedValueFlow/LotusAdapter.h"
 
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
@@ -35,6 +37,12 @@ protected:
     GuardedValueFlowGraphBuilderPass *builder{nullptr};
   };
 
+  struct AdapterPipeline {
+    std::unique_ptr<legacy::PassManager> pm;
+    LotusAA *lotus{nullptr};
+    GuardedValueFlowGraphBuilderPass *builder{nullptr};
+  };
+
   static void initializePassInfra() {
     static bool initialized = false;
     if (initialized)
@@ -63,6 +71,21 @@ protected:
     pipeline.pm->add(new gsa::ControlDependenceAnalysisPass());
     pipeline.pm->add(new gsa::GateAnalysisPass());
     pipeline.pm->add(pipeline.builder);
+    pipeline.pm->run(M);
+    return pipeline;
+  }
+
+  AdapterPipeline runAdapterPipeline(Module &M) {
+    initializePassInfra();
+    AdapterPipeline pipeline;
+    pipeline.pm = std::make_unique<legacy::PassManager>();
+    pipeline.lotus = new LotusAA();
+    pipeline.builder = new GuardedValueFlowGraphBuilderPass();
+    pipeline.pm->add(new gsa::ControlDependenceAnalysisPass());
+    pipeline.pm->add(new gsa::GateAnalysisPass());
+    pipeline.pm->add(pipeline.lotus);
+    pipeline.pm->add(pipeline.builder);
+    pipeline.pm->add(new LotusGuardedValueFlowAdapterPass());
     pipeline.pm->run(M);
     return pipeline;
   }
@@ -241,6 +264,52 @@ TEST_F(GuardedValueFlowParityTest, ModelsReturnPhiSelectAndOperationalSites) {
   EXPECT_TRUE(saw_compare_site);
   EXPECT_TRUE(saw_div_site);
   EXPECT_TRUE(saw_gep_site);
+}
+
+TEST_F(GuardedValueFlowParityTest,
+       SharesRepresentativeLoadMemoryNodesForEquivalentLoads) {
+  const char *source = R"(
+    define i32 @test(i32* %p, i32 %v) {
+    entry:
+      store i32 %v, i32* %p
+      %a = load i32, i32* %p
+      %b = load i32, i32* %p
+      %sum = add i32 %a, %b
+      ret i32 %sum
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runAdapterPipeline(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  SmallVector<LoadInst *, 2> loads;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *LI = dyn_cast<LoadInst>(&I))
+      loads.push_back(LI);
+  }
+  ASSERT_EQ(loads.size(), 2u);
+
+  auto *first_mem = graph.findLoadMemoryNode(loads[0]);
+  auto *second_mem = graph.findLoadMemoryNode(loads[1]);
+  ASSERT_NE(first_mem, nullptr);
+  ASSERT_NE(second_mem, nullptr);
+  EXPECT_EQ(first_mem, second_mem);
+
+  auto *first_load_node = graph.findNode(loads[0]);
+  auto *second_load_node = graph.findNode(loads[1]);
+  ASSERT_NE(first_load_node, nullptr);
+  ASSERT_NE(second_load_node, nullptr);
+  ASSERT_EQ(first_load_node->children().size(), 1u);
+  ASSERT_EQ(second_load_node->children().size(), 1u);
+  EXPECT_EQ(first_load_node->children().front().target, first_mem);
+  EXPECT_EQ(second_load_node->children().front().target, second_mem);
 }
 
 TEST_F(GuardedValueFlowParityTest, BuildsCompoundRegionsForNestedControlDependence) {

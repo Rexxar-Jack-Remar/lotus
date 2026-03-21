@@ -58,6 +58,7 @@ public:
   struct StoppedExecution {
     StoppedExecutionKind kind;
     std::unique_ptr<AbductiveDomain> astate; // Full state
+    llvm::Optional<AbstractValue> return_value;
 
     // For AbortProgram
     OperationResult diagnostic;
@@ -85,6 +86,7 @@ public:
           astate(other.astate
                      ? std::make_unique<AbductiveDomain>(other.astate->clone())
                      : nullptr),
+          return_value(other.return_value),
           diagnostic(other.diagnostic),
           trace_to_issue(other.trace_to_issue.clone()),
           latent_issue(other.latent_issue), // Pointer, not owned
@@ -102,6 +104,7 @@ public:
         astate = other.astate
                      ? std::make_unique<AbductiveDomain>(other.astate->clone())
                      : nullptr;
+        return_value = other.return_value;
         diagnostic = other.diagnostic;
         trace_to_issue = other.trace_to_issue.clone();
         latent_issue = other.latent_issue; // Pointer, not owned
@@ -129,6 +132,7 @@ public:
     void reset() {
       kind = StoppedExecutionKind::ExitProgram;
       astate.reset();
+      return_value = llvm::None;
       latent_issue = nullptr;
       diagnostic = OperationResult::Success;
       trace_to_issue = Trace();
@@ -171,6 +175,7 @@ public:
         stopped_execution_.astate = std::make_unique<AbductiveDomain>(
             other.stopped_execution_.astate->clone());
       }
+      stopped_execution_.return_value = other.stopped_execution_.return_value;
       stopped_execution_.diagnostic = other.stopped_execution_.diagnostic;
       stopped_execution_.trace_to_issue =
           other.stopped_execution_.trace_to_issue.clone();
@@ -204,6 +209,7 @@ public:
           stopped_execution_.astate = std::make_unique<AbductiveDomain>(
               other.stopped_execution_.astate->clone());
         }
+        stopped_execution_.return_value = other.stopped_execution_.return_value;
         stopped_execution_.diagnostic = other.stopped_execution_.diagnostic;
         stopped_execution_.trace_to_issue =
             other.stopped_execution_.trace_to_issue.clone();
@@ -242,11 +248,14 @@ public:
     return d;
   }
 
-  static ExecutionDomain exitProgram(std::unique_ptr<AbductiveDomain> astate) {
+  static ExecutionDomain exitProgram(std::unique_ptr<AbductiveDomain> astate,
+                                     llvm::Optional<AbstractValue> ret_val =
+                                         llvm::None) {
     ExecutionDomain d;
     d.variant_ = Variant::Stopped;
     d.stopped_execution_.kind = StoppedExecutionKind::ExitProgram;
     d.stopped_execution_.astate = std::move(astate);
+    d.stopped_execution_.return_value = ret_val;
     return d;
   }
 
@@ -362,6 +371,7 @@ public:
     } else {
       variant_ = Variant::Stopped;
       stopped_execution_.kind = StoppedExecutionKind::ExitProgram;
+      stopped_execution_.return_value = llvm::None;
     }
   }
 
@@ -380,6 +390,7 @@ public:
           std::make_unique<AbductiveDomain>(stopped_execution_.astate->clone());
     }
     c.stopped_execution_.kind = stopped_execution_.kind;
+    c.stopped_execution_.return_value = stopped_execution_.return_value;
     c.stopped_execution_.diagnostic = stopped_execution_.diagnostic;
     c.stopped_execution_.trace_to_issue =
         stopped_execution_.trace_to_issue.clone();

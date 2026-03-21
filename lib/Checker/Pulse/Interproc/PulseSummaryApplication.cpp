@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <set>
 
-#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 
 namespace pulse {
@@ -29,26 +28,6 @@ namespace pulse {
 // propagate invalidation/nullness facts precisely enough for actionable
 // reports.
 //===----------------------------------------------------------------------===//
-
-namespace {
-static bool isNullPointerConstantValue(const llvm::Value *v) {
-  if (!v)
-    return false;
-  if (llvm::isa<llvm::ConstantPointerNull>(v))
-    return true;
-  if (auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(v)) {
-    if (CE->getOpcode() == llvm::Instruction::IntToPtr) {
-      if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(CE->getOperand(0)))
-        return CI->isZero();
-    }
-  }
-  if (auto *I2P = llvm::dyn_cast<llvm::IntToPtrInst>(v)) {
-    if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(I2P->getOperand(0)))
-      return CI->isZero();
-  }
-  return false;
-}
-} // namespace
 
 /**
  * Materialize pre-condition: recursively explore the pre-condition subgraph
@@ -572,6 +551,19 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
       continue;
     }
 
+    llvm::Optional<AbstractValue> caller_ret = llvm::None;
+    if (entry.getReturnValue()) {
+      AbstractValue formal_ret = post->getCanonical(*entry.getReturnValue());
+      auto caller_ret_opt = substitution.substitute(formal_ret);
+      if (caller_ret_opt) {
+        caller_ret = new_astate->getCanonical(*caller_ret_opt);
+      } else {
+        AbstractValue fresh_ret = factory_.createFresh(CI);
+        substitution.add(formal_ret, fresh_ret);
+        caller_ret = new_astate->getCanonical(fresh_ret);
+      }
+    }
+
     // Apply post condition - this propagates Invalid attributes from callee to
     // caller The substitution should already map formal parameters to actual
     // arguments
@@ -629,64 +621,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
     }
 
     if (entry.getReturnValue()) {
-      AbstractValue formal_ret = *entry.getReturnValue();
-      AbstractValue caller_ret = substitution.substituteOrIdentity(formal_ret);
-
-      if (caller_ret == formal_ret && !substitution.substitute(formal_ret)) {
-        // Check if the function returns a null constant
-        const llvm::Function *callee = summary.getFunction();
-        const llvm::Value *null_constant_ret = nullptr;
-
-        // Check if any ReturnInst in the function returns a null constant
-        for (const auto &BB : *callee) {
-          if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
-            if (RI->getNumOperands() > 0) {
-              const llvm::Value *ret_val = RI->getReturnValue();
-              if (ret_val && ret_val->getType()->isPointerTy()) {
-                if (isNullPointerConstantValue(ret_val)) {
-                  null_constant_ret = ret_val;
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        // Create return value: use null constant as source if function returns
-        // null
-        if (null_constant_ret) {
-          caller_ret = factory_.createFresh(null_constant_ret);
-        } else {
-          caller_ret = factory_.createFresh(CI);
-        }
-
-        const auto &ret_attrs = post->getPostAttrs().get(formal_ret);
-        for (Attribute attr : ret_attrs) {
-          new_astate->getPostAttrs().add(caller_ret, attr);
-
-          // Propagate Invalid to aliases
-          if (attr == Attribute::Invalid) {
-            for (auto &stack_kv : new_astate->getPostStack().getMap()) {
-              AbstractValue stack_canon =
-                  new_astate->getCanonical(stack_kv.second.addr);
-              if (stack_canon == caller_ret) {
-                new_astate->getPostAttrs().add(stack_canon, Attribute::Invalid);
-                new_astate->getPostAttrs().remove(stack_canon,
-                                                  Attribute::Allocated);
-              }
-            }
-          }
-        }
-
-        // If function returns null constant, also set Null attribute and path
-        // formula
-        if (null_constant_ret) {
-          new_astate->getPostAttrs().add(caller_ret, Attribute::Null);
-          new_astate->getPathFormula().addNull(caller_ret);
-        }
-      }
-
-      Address ret_addr(caller_ret);
+      Address ret_addr(*caller_ret);
       // Add FunctionCall event to history so isNullConstantSource can detect it
       ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI,
                                 CI->getFunction());

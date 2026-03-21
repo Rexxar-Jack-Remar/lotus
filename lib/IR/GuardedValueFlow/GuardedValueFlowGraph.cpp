@@ -3,6 +3,8 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <algorithm>
+
 using namespace llvm;
 using namespace llvm::gvg;
 
@@ -149,6 +151,13 @@ static GuardedValueFlowOpcodeNode *createRegionNotOpcode(
 GuardedValueFlowGraph::GuardedValueFlowGraph(Function *base_function)
     : base_function_(base_function) {}
 
+GuardedValueFlowGraph::~GuardedValueFlowGraph() {
+  for (Value *value : owned_synthetic_values_) {
+    if (value)
+      value->deleteValue();
+  }
+}
+
 void GuardedValueFlowGraph::assignNodeRegion(GuardedValueFlowNode *node) {
   if (!node || node->getKind() == GuardedValueFlowNode::Kind::Region)
     return;
@@ -176,6 +185,37 @@ void GuardedValueFlowGraph::mapValueNode(Value *value,
                                          GuardedValueFlowNode *node) {
   if (value)
     value_nodes_[value] = node;
+}
+
+GuardedValueFlowNode *
+GuardedValueFlowGraph::findInterfaceNode(Value *value) const {
+  auto it = interface_nodes_.find(value);
+  return it == interface_nodes_.end() ? nullptr : it->second;
+}
+
+void GuardedValueFlowGraph::mapInterfaceNode(Value *value,
+                                             GuardedValueFlowNode *node) {
+  if (value)
+    interface_nodes_[value] = node;
+}
+
+GuardedValueFlowNode *
+GuardedValueFlowGraph::findPseudoArgumentBySource(Value *value) const {
+  auto it = pseudo_argument_sources_.find(value);
+  return it == pseudo_argument_sources_.end() ? nullptr : it->second;
+}
+
+void GuardedValueFlowGraph::mapPseudoArgumentSource(
+    Value *value, GuardedValueFlowNode *node) {
+  if (value)
+    pseudo_argument_sources_[value] = node;
+}
+
+Argument *GuardedValueFlowGraph::createSyntheticInterfaceValue(Type *type,
+                                                               StringRef name) {
+  auto *value = new Argument(type, name);
+  owned_synthetic_values_.push_back(value);
+  return value;
 }
 
 GuardedValueFlowCallSite *
@@ -532,14 +572,20 @@ GuardedValueFlowGraph::getPseudoReturn(unsigned idx) const {
 
 void GuardedValueFlowGraph::registerSummaryArgumentNode(
     unsigned ap_depth, GuardedValueFlowNode *node) {
-  if (node)
-    summary_argument_nodes_[ap_depth].push_back(node);
+  if (!node)
+    return;
+  auto &nodes = summary_argument_nodes_[ap_depth];
+  if (std::find(nodes.begin(), nodes.end(), node) == nodes.end())
+    nodes.push_back(node);
 }
 
 void GuardedValueFlowGraph::registerSummaryReturnNode(
     unsigned ap_depth, GuardedValueFlowNode *node) {
-  if (node)
-    summary_return_nodes_[ap_depth].push_back(node);
+  if (!node)
+    return;
+  auto &nodes = summary_return_nodes_[ap_depth];
+  if (std::find(nodes.begin(), nodes.end(), node) == nodes.end())
+    nodes.push_back(node);
 }
 
 ArrayRef<GuardedValueFlowNode *>

@@ -156,6 +156,7 @@ public:
   getMatchingRegion(const GuardedValueFlowNode *producer) const;
   ConditionRef
   getMatchingCondition(const GuardedValueFlowNode *producer) const;
+  void clearMatchingRegions() { matching_regions_.clear(); }
   ArrayRef<MatchingRegion> getMatchingRegions() const {
     return matching_regions_;
   }
