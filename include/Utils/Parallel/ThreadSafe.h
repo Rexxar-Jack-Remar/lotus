@@ -38,13 +38,11 @@ public:
   }
   SimpleOptional &operator=(const SimpleOptional &other) {
     if (this != &other) {
+      T *new_value = other.m_has_value ? new T(*other.m_value) : nullptr;
       if (m_value)
         delete m_value;
+      m_value = new_value;
       m_has_value = other.m_has_value;
-      if (m_has_value)
-        m_value = new T(*other.m_value);
-      else
-        m_value = nullptr;
     }
     return *this;
   }

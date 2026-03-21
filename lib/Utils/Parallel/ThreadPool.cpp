@@ -149,9 +149,8 @@ void ThreadPool::wait() {
 
   if (!isWorkerThread()) {
     std::unique_lock<std::mutex> Lock(this->QueueMutex);
-    Condition.wait(Lock, [this] {
-      return TaskQueue.empty() && NumRunningTask == 0;
-    });
+    Condition.wait(Lock,
+                   [this] { return TaskQueue.empty() && NumRunningTask == 0; });
     return;
   }
 

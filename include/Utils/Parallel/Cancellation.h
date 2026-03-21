@@ -14,7 +14,7 @@ public:
 
 class CancellationToken {
 private:
-  std::weak_ptr<std::atomic<bool>> m_state;
+  std::shared_ptr<std::atomic<bool>> m_state;
 
   explicit CancellationToken(const std::shared_ptr<std::atomic<bool>> &State)
       : m_state(State) {}
@@ -25,11 +25,10 @@ public:
   CancellationToken() = default;
 
   bool isCancelled() const {
-    auto State = m_state.lock();
-    return State && State->load(std::memory_order_acquire);
+    return m_state && m_state->load(std::memory_order_acquire);
   }
 
-  explicit operator bool() const { return !m_state.expired(); }
+  explicit operator bool() const { return static_cast<bool>(m_state); }
 };
 
 class CancellationSource {
@@ -37,8 +36,7 @@ private:
   std::shared_ptr<std::atomic<bool>> m_state;
 
 public:
-  CancellationSource()
-      : m_state(std::make_shared<std::atomic<bool>>(false)) {}
+  CancellationSource() : m_state(std::make_shared<std::atomic<bool>>(false)) {}
 
   void cancel() const {
     if (m_state)

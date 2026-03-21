@@ -49,6 +49,16 @@ struct SlotValue {
   }
 };
 
+struct ThrowingBinderTask {
+  ThrowingBinderTask() = default;
+  ThrowingBinderTask(const ThrowingBinderTask &) {
+    throw std::runtime_error("bind copy failed");
+  }
+  ThrowingBinderTask(ThrowingBinderTask &&) noexcept = default;
+
+  void operator()() const {}
+};
+
 TEST(ThreadPoolHarnessTest, WorkerIntrospectionMatchesPoolState) {
   ThreadPool *pool = ThreadPool::get();
   EXPECT_EQ(pool->hasWorkers(), pool->workerCount() != 0u);
@@ -95,6 +105,23 @@ TEST(ThreadPoolHarnessTest, TaskGroupRethrowsFirstWorkerException) {
   auto group = pool->makeTaskGroup();
   group.async([]() { throw std::runtime_error("boom"); });
   EXPECT_THROW(group.wait(), std::runtime_error);
+}
+
+TEST(ThreadPoolHarnessTest, TaskGroupSetupFailureDoesNotLeavePhantomPendingWork) {
+  ThreadPool *pool = ThreadPool::get();
+
+  {
+    auto group = pool->makeTaskGroup();
+    ThrowingBinderTask task;
+    EXPECT_THROW(group.async(task), std::runtime_error);
+  }
+
+  {
+    auto group = pool->makeTaskGroup();
+    lotus::CancellationSource cancel;
+    ThrowingBinderTask task;
+    EXPECT_THROW(group.async(cancel.token(), task), std::runtime_error);
+  }
 }
 
 TEST(ThreadPoolHarnessTest, ParallelForCoversEachIndexExactlyOnce) {
@@ -220,12 +247,45 @@ TEST(ThreadPoolHarnessTest, PreCancelledTaskGroupReturnsDefaultFutureValue) {
   EXPECT_THROW(group.wait(), lotus::TaskCancelledError);
 }
 
+TEST(ThreadPoolHarnessTest,
+     CancelledTokenRemainsCancelledAfterSourceDestruction) {
+  ThreadPool *pool = ThreadPool::get();
+  lotus::CancellationToken token;
+  {
+    lotus::CancellationSource cancel;
+    token = cancel.token();
+    cancel.cancel();
+  }
+
+  EXPECT_TRUE(static_cast<bool>(token));
+  EXPECT_TRUE(token.isCancelled());
+
+  std::atomic<int> runs(0);
+  pool->parallelFor<int>(0, 16, 4, token, [&](int) {
+    runs.fetch_add(1, std::memory_order_relaxed);
+  });
+  EXPECT_EQ(runs.load(std::memory_order_relaxed), 0);
+
+  auto group = pool->makeTaskGroup();
+  auto future = group.async(token, []() { return 7; });
+  EXPECT_THROW(future.get(), lotus::TaskCancelledError);
+  EXPECT_THROW(group.wait(), lotus::TaskCancelledError);
+}
+
 TEST(ThreadPoolHarnessTest, ParallelReduceMatchesSequentialSum) {
   ThreadPool *pool = ThreadPool::get();
   const int reduced = pool->parallelReduce<int>(
       0, 100, 7, 0, [](int index) { return index + 1; },
       [](int acc, int value) { return acc + value; });
   EXPECT_EQ(reduced, 5050);
+}
+
+TEST(ThreadPoolHarnessTest, ParallelReduceAppliesInitialAccumulatorOnce) {
+  ThreadPool *pool = ThreadPool::get();
+  const int reduced = pool->parallelReduce<int>(
+      0, 10, 3, 100, [](int index) { return index; },
+      [](int acc, int value) { return acc + value; });
+  EXPECT_EQ(reduced, 145);
 }
 
 TEST(ThreadPoolHarnessTest,

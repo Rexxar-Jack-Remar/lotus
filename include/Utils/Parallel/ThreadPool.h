@@ -16,8 +16,8 @@
 #ifndef SUPPORT_THREADPOOL_H
 #define SUPPORT_THREADPOOL_H
 
-#include "Utils/Parallel/Cancellation.h"
 #include "Utils/ADT/MapIterators.h"
+#include "Utils/Parallel/Cancellation.h"
 
 #include <cassert>
 #include <chrono>
@@ -125,8 +125,8 @@ public:
           if (!Owner->runOnePendingTaskOrWait()) {
             std::unique_lock<std::mutex> Lock(GroupState->Mutex);
             if (GroupState->PendingTasks != 0)
-              GroupState->Condition.wait_for(
-                  Lock, std::chrono::milliseconds(1));
+              GroupState->Condition.wait_for(Lock,
+                                             std::chrono::milliseconds(1));
           }
           continue;
         }
@@ -315,7 +315,7 @@ private:
   std::mutex QueueMutex;             ///< The lock
   std::condition_variable Condition; ///< the wait cond
 
-  bool IsStop;       ///< identifying if the thread pool is running
+  bool IsStop;        ///< identifying if the thread pool is running
   int NumRunningTask; /// < number of running task
 
   std::map<std::thread::id, void *> ThreadLocals;
@@ -360,11 +360,6 @@ auto ThreadPool::TaskGroup::async(F &&Func, Args &&...Arguments)
   assert(Owner && GroupState && "scheduling work on a moved-from TaskGroup");
 
   auto State = GroupState;
-  {
-    std::lock_guard<std::mutex> Lock(State->Mutex);
-    ++State->PendingTasks;
-  }
-
   auto BoundTask =
       std::bind(std::forward<F>(Func), std::forward<Args>(Arguments)...);
   auto Task = std::make_shared<std::packaged_task<return_type()>>(
@@ -380,14 +375,27 @@ auto ThreadPool::TaskGroup::async(F &&Func, Args &&...Arguments)
       });
 
   std::future<return_type> Res = Task->get_future();
-  Owner->enqueue([State, Task]() mutable {
-    (*Task)();
+  {
+    std::lock_guard<std::mutex> Lock(State->Mutex);
+    ++State->PendingTasks;
+  }
 
+  try {
+    Owner->enqueue([State, Task]() mutable {
+      (*Task)();
+
+      std::lock_guard<std::mutex> Lock(State->Mutex);
+      assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
+      --State->PendingTasks;
+      State->Condition.notify_all();
+    });
+  } catch (...) {
     std::lock_guard<std::mutex> Lock(State->Mutex);
     assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
     --State->PendingTasks;
     State->Condition.notify_all();
-  });
+    throw;
+  }
   return Res;
 }
 
@@ -405,11 +413,6 @@ auto ThreadPool::TaskGroup::async(const lotus::CancellationToken &Token,
   assert(Owner && GroupState && "scheduling work on a moved-from TaskGroup");
 
   auto State = GroupState;
-  {
-    std::lock_guard<std::mutex> Lock(State->Mutex);
-    ++State->PendingTasks;
-  }
-
   auto BoundTask =
       std::bind(std::forward<F>(Func), std::forward<Args>(Arguments)...);
   auto Task = std::make_shared<std::packaged_task<return_type()>>(
@@ -427,23 +430,35 @@ auto ThreadPool::TaskGroup::async(const lotus::CancellationToken &Token,
       });
 
   std::future<return_type> Res = Task->get_future();
-  Owner->enqueue([State, Task]() mutable {
-    (*Task)();
+  {
+    std::lock_guard<std::mutex> Lock(State->Mutex);
+    ++State->PendingTasks;
+  }
 
+  try {
+    Owner->enqueue([State, Task]() mutable {
+      (*Task)();
+
+      std::lock_guard<std::mutex> Lock(State->Mutex);
+      assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
+      --State->PendingTasks;
+      State->Condition.notify_all();
+    });
+  } catch (...) {
     std::lock_guard<std::mutex> Lock(State->Mutex);
     assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
     --State->PendingTasks;
     State->Condition.notify_all();
-  });
+    throw;
+  }
   return Res;
 }
 
 template <class T, class Factory>
 auto ThreadPool::makeThreadLocal(Factory &&FactoryFn) -> ThreadLocalSlot<T> {
   using SlotState = typename ThreadPool::ThreadLocalSlot<T>::SharedState;
-  auto State =
-      std::make_shared<SlotState>(std::function<T()>(std::forward<Factory>(
-          FactoryFn)));
+  auto State = std::make_shared<SlotState>(
+      std::function<T()>(std::forward<Factory>(FactoryFn)));
   ThreadLocalSlot<T> Slot(State);
   (void)Slot.get();
   return Slot;
@@ -478,17 +493,15 @@ void ThreadPool::parallelFor(Index Begin, Index End, std::size_t GrainSize,
 
 template <class Index, class Body>
 void ThreadPool::parallelFor(Index Begin, Index End, std::size_t GrainSize,
-                             const lotus::CancellationToken &Token,
-                             Body &&Fn) {
+                             const lotus::CancellationToken &Token, Body &&Fn) {
   static_assert(std::is_integral<Index>::value,
                 "parallelFor requires an integral index type");
 
   if (End <= Begin || Token.isCancelled())
     return;
 
-  const std::size_t Total =
-      static_cast<std::size_t>(static_cast<long long>(End) -
-                               static_cast<long long>(Begin));
+  const std::size_t Total = static_cast<std::size_t>(
+      static_cast<long long>(End) - static_cast<long long>(Begin));
   if (GrainSize == 0)
     GrainSize = 1;
 
@@ -500,9 +513,8 @@ void ThreadPool::parallelFor(Index Begin, Index End, std::size_t GrainSize,
 
   TaskGroup Group = makeTaskGroup();
   for (Index ChunkBegin = Begin; ChunkBegin < End;) {
-    const std::size_t Remaining =
-        static_cast<std::size_t>(static_cast<long long>(End) -
-                                 static_cast<long long>(ChunkBegin));
+    const std::size_t Remaining = static_cast<std::size_t>(
+        static_cast<long long>(End) - static_cast<long long>(ChunkBegin));
     const std::size_t ChunkSize = std::min(GrainSize, Remaining);
     const Index ChunkEnd = static_cast<Index>(
         static_cast<long long>(ChunkBegin) + static_cast<long long>(ChunkSize));
@@ -540,18 +552,18 @@ void ThreadPool::parallelForEach(Range &&R, std::size_t GrainSize,
 
 template <class Index, class Accumulator, class MapFn, class ReduceFn>
 Accumulator ThreadPool::parallelReduce(Index Begin, Index End,
-                                       std::size_t GrainSize,
-                                       Accumulator Init, MapFn &&Map,
-                                       ReduceFn &&Reduce) {
+                                       std::size_t GrainSize, Accumulator Init,
+                                       MapFn &&Map, ReduceFn &&Reduce) {
   static_assert(std::is_integral<Index>::value,
                 "parallelReduce requires an integral index type");
+  using MappedTy = typename std::decay<
+      decltype(std::declval<MapFn &>()(std::declval<Index>()))>::type;
 
   if (End <= Begin)
     return Init;
 
-  const std::size_t Total =
-      static_cast<std::size_t>(static_cast<long long>(End) -
-                               static_cast<long long>(Begin));
+  const std::size_t Total = static_cast<std::size_t>(
+      static_cast<long long>(End) - static_cast<long long>(Begin));
   if (GrainSize == 0)
     GrainSize = 1;
 
@@ -562,26 +574,25 @@ Accumulator ThreadPool::parallelReduce(Index Begin, Index End,
   }
 
   const std::size_t ChunkCount = (Total + GrainSize - 1) / GrainSize;
-  std::vector<std::unique_ptr<Accumulator>> Partials(ChunkCount);
+  std::vector<std::unique_ptr<std::vector<MappedTy>>> Partials(ChunkCount);
   std::mutex ErrorMutex;
   std::exception_ptr Error;
   TaskGroup Group = makeTaskGroup();
   std::size_t ChunkIndex = 0;
   for (Index ChunkBegin = Begin; ChunkBegin < End; ++ChunkIndex) {
-    const std::size_t Remaining =
-        static_cast<std::size_t>(static_cast<long long>(End) -
-                                 static_cast<long long>(ChunkBegin));
+    const std::size_t Remaining = static_cast<std::size_t>(
+        static_cast<long long>(End) - static_cast<long long>(ChunkBegin));
     const std::size_t ChunkSize = std::min(GrainSize, Remaining);
     const Index ChunkEnd = static_cast<Index>(
         static_cast<long long>(ChunkBegin) + static_cast<long long>(ChunkSize));
-    Group.async([ChunkBegin, ChunkEnd, ChunkIndex, Init, &Partials, &Error,
-                 &ErrorMutex, &Map, &Reduce]() mutable {
+    Group.async([ChunkBegin, ChunkEnd, ChunkIndex, ChunkSize, &Partials, &Error,
+                 &ErrorMutex, &Map]() mutable {
       try {
-        Accumulator Local = Init;
+        auto Local = std::make_unique<std::vector<MappedTy>>();
+        Local->reserve(ChunkSize);
         for (Index I = ChunkBegin; I < ChunkEnd; ++I)
-          Local = Reduce(std::move(Local), Map(I));
-        Partials[ChunkIndex] =
-            std::make_unique<Accumulator>(std::move(Local));
+          Local->emplace_back(Map(I));
+        Partials[ChunkIndex] = std::move(Local);
       } catch (...) {
         std::lock_guard<std::mutex> Lock(ErrorMutex);
         if (!Error)
@@ -597,8 +608,14 @@ Accumulator ThreadPool::parallelReduce(Index Begin, Index End,
     std::rethrow_exception(Error);
 
   for (std::size_t PartialIndex = 0; PartialIndex < Partials.size();
-       ++PartialIndex)
-    Init = Reduce(std::move(Init), *Partials[PartialIndex]);
+       ++PartialIndex) {
+    assert(Partials[PartialIndex] && "parallelReduce partial chunk missing");
+    for (std::size_t ValueIndex = 0; ValueIndex < Partials[PartialIndex]->size();
+         ++ValueIndex) {
+      MappedTy Value = std::move((*Partials[PartialIndex])[ValueIndex]);
+      Init = Reduce(std::move(Init), std::move(Value));
+    }
+  }
   return Init;
 }
 

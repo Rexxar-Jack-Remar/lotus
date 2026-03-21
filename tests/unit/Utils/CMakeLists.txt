@@ -7,6 +7,7 @@ add_lotus_test(egraph_test EGraphTest.cpp)
 add_lotus_test(string_utils_test StringUtilsTest.cpp)
 add_lotus_test(path_expressions_test PathExpressionsTest.cpp)
 add_lotus_test(pipeline_scheduler_test PipelineSchedulerTest.cpp)
+add_lotus_test(lockfree_hash_table_test LockfreeHashTableTest.cpp)
 add_lotus_test(thread_safe_test ThreadSafeTest.cpp)
 
 set(THREAD_POOL_HARNESS_LIBS ${COMMON_LIBS})

@@ -6,7 +6,9 @@
 #include "Utils/Parallel/ThreadPool.h"
 #include "Utils/Platform/ProgressBar.h"
 
+#include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <map>
@@ -44,7 +46,7 @@ public:
   enum AnalysisType {
     AT_Local,    // Local analysis - all functions can run in parallel
     AT_BottomUp, // Bottom-up analysis - respect call graph dependencies
-    AT_TopDown   // Top-down analysis - TODO: not yet implemented
+    AT_TopDown   // Top-down analysis - respect caller dependencies
   };
 
 private:
@@ -69,7 +71,8 @@ private:
     std::vector<int> Callers;
     std::vector<int> Callees;
     unsigned RemainingScheduleDeps = 0;
-    unsigned RemainingCallersForGC = 0;
+    unsigned RemainingGCDeps = 0;
+    bool Executed = false;
   };
 
   std::vector<SCCNode> SCCs;
@@ -80,6 +83,8 @@ private:
   std::vector<std::set<int>> FunctionCalleeIndexVec;
   /// Recording the functions to release memory
   std::set<const Function *> FunctionToRelease;
+  std::atomic<std::uint32_t> PendingReleaseCountForDump{0};
+  std::atomic<std::uint32_t> SCCCountForDump{0};
   /// @}
 
   /// The finished task vector - pipe between workers and master
@@ -88,6 +93,8 @@ private:
   std::vector<std::shared_ptr<Task>> FinishedTaskVec;
   std::mutex FTVecMutex;
   std::condition_variable FTVecCond;
+  std::atomic<std::uint32_t> ActiveTaskCount{0};
+  std::atomic<std::uint32_t> FinishedTaskCountForDump{0};
   /// @}
 
   /// The first task failure observed on a worker thread.
@@ -126,8 +133,11 @@ private:
   /// Return the first worker failure, if any.
   std::exception_ptr getTaskFailure();
 
+  /// Reset per-run scheduler state so the scheduler can be reused.
+  void resetRunState();
+
   /// Post-process an SCC task after completion
-  int postProcessSCCFunctionTask(std::shared_ptr<SCCFunctionTask> T);
+  std::size_t postProcessSCCFunctionTask(std::shared_ptr<SCCFunctionTask> T);
 
   /// Wait for tasks and schedule new ones
   void waitTask();
@@ -145,10 +155,13 @@ private:
   std::vector<const Function *> getOrderedSCCFunctions(int SCCIndex) const;
 
   /// Add an SCC to the pending GC batch and schedule a batch task if needed.
-  void maybeReleaseSCC(int SCCIndex, int &NumGCTasksAdded);
+  void maybeReleaseSCC(int SCCIndex, std::size_t &NumGCTasksAdded);
+
+  /// Add a local-analysis function to the pending GC batch.
+  void maybeReleaseFunction(const Function *F, std::size_t &NumGCTasksAdded);
 
   /// Schedule a GC batch for the current release set, if it is non-empty.
-  void scheduleGCBatch(int &NumGCTasksAdded);
+  void scheduleGCBatch(std::size_t &NumGCTasksAdded);
 
 public:
   PipelineScheduler(Module &M, CallGraph &CG, AnalysisType AT = AT_BottomUp);
@@ -173,7 +186,8 @@ public:
   /// Set the batch size for garbage collection
   void setGCBatchSize(unsigned Size) { GCBatchSize = Size; }
 
-  /// Set task timeout in seconds
+  /// Set the timeout used to detect stalled scheduling.
+  /// Running callbacks are not preempted; they are allowed to finish.
   void setTaskTimeout(int Seconds) { TaskTimeout = Seconds; }
 
   /// Start scheduling tasks

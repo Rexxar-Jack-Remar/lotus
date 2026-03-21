@@ -2,8 +2,17 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <stdexcept>
+
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Function.h>
@@ -27,6 +36,46 @@ public:
   explicit SchedulerTimeoutError(const std::string &Message)
       : std::runtime_error(Message) {}
 };
+
+static_assert(sizeof(std::uint32_t) == sizeof(unsigned int),
+              "PipelineScheduler::dumpStatus assumes 32-bit unsigned ints");
+static_assert(ATOMIC_INT_LOCK_FREE == 2,
+              "PipelineScheduler::dumpStatus requires lock-free counters");
+
+char *appendLiteral(char *Out, const char *End, const char *Text) {
+  while (Out != End && *Text != '\0')
+    *Out++ = *Text++;
+  return Out;
+}
+
+char *appendUnsigned(char *Out, const char *End, std::uint32_t Value) {
+  char Digits[16];
+  unsigned Count = 0;
+  do {
+    Digits[Count++] = static_cast<char>('0' + (Value % 10));
+    Value /= 10;
+  } while (Value != 0 && Count < sizeof(Digits));
+
+  while (Count != 0 && Out != End)
+    *Out++ = Digits[--Count];
+  return Out;
+}
+
+void writeStatusLine(const char *Buffer, std::size_t Length) {
+  while (Length != 0) {
+#if defined(_WIN32)
+    const unsigned Chunk =
+        static_cast<unsigned>(std::min<std::size_t>(Length, INT_MAX));
+    const int Written = _write(2, Buffer, Chunk);
+#else
+    const ssize_t Written = ::write(STDERR_FILENO, Buffer, Length);
+#endif
+    if (Written <= 0)
+      return;
+    Buffer += static_cast<std::size_t>(Written);
+    Length -= static_cast<std::size_t>(Written);
+  }
+}
 
 } // namespace
 
@@ -57,6 +106,9 @@ PipelineScheduler::PipelineScheduler(Module &M, CallGraph &CG, AnalysisType AT)
     computeSCCs();
     buildSCCDAG();
   }
+
+  SCCCountForDump.store(static_cast<std::uint32_t>(SCCs.size()),
+                        std::memory_order_relaxed);
 }
 
 PipelineScheduler::~PipelineScheduler() = default;
@@ -67,7 +119,11 @@ void PipelineScheduler::finishTask(std::shared_ptr<Task> T) {
   {
     std::unique_lock<std::mutex> Lock(FTVecMutex);
     FinishedTaskVec.push_back(std::move(T));
+    FinishedTaskCountForDump.store(
+        static_cast<std::uint32_t>(FinishedTaskVec.size()),
+        std::memory_order_relaxed);
   }
+  ActiveTaskCount.fetch_sub(1, std::memory_order_relaxed);
   FTVecCond.notify_one();
 }
 
@@ -85,6 +141,31 @@ std::exception_ptr PipelineScheduler::getTaskFailure() {
   return TaskFailure;
 }
 
+void PipelineScheduler::resetRunState() {
+  {
+    std::lock_guard<std::mutex> Lock(FTVecMutex);
+    FinishedTaskVec.clear();
+  }
+  FinishedTaskCountForDump.store(0, std::memory_order_relaxed);
+  ActiveTaskCount.store(0, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> Lock(FailureMutex);
+    TaskFailure = nullptr;
+  }
+
+  FunctionToRelease.clear();
+  PendingReleaseCountForDump.store(0, std::memory_order_relaxed);
+  ExecutionGroup.reset();
+  ExecutionCancellation = lotus::CancellationSource();
+  Prog.reset();
+
+  if (AType != AT_Local)
+    buildSCCDAG();
+
+  SCCCountForDump.store(static_cast<std::uint32_t>(SCCs.size()),
+                        std::memory_order_relaxed);
+}
+
 void PipelineScheduler::run() {
   if (!TaskCallback) {
     errs() << "Error: TaskCallback not set! Call setTaskCallback() before "
@@ -93,9 +174,9 @@ void PipelineScheduler::run() {
   }
 
   llvm::outs() << "Starting pipeline scheduler...\n";
-  ExecutionCancellation = lotus::CancellationSource();
-  ExecutionGroup =
-      std::make_unique<ThreadPool::TaskGroup>(ThreadPool::get()->makeTaskGroup());
+  resetRunState();
+  ExecutionGroup = std::make_unique<ThreadPool::TaskGroup>(
+      ThreadPool::get()->makeTaskGroup());
 
   if (AType == AT_Local) {
     for (const auto *F : Functions) {
@@ -135,6 +216,7 @@ void PipelineScheduler::executeTask(std::shared_ptr<Task> T) {
   assert(ExecutionGroup && "scheduler execution group must be initialized");
   const lotus::CancellationToken Token = ExecutionCancellation.token();
   ExecutionGroup->async(Token, [T, this, Token]() {
+    ActiveTaskCount.fetch_add(1, std::memory_order_relaxed);
     if (Token.isCancelled()) {
       finishTask(T);
       return;
@@ -157,6 +239,8 @@ void PipelineScheduler::waitTask() {
       (AType == AT_Local) ? Functions.size() : SCCs.size();
   std::size_t NumUnfinishedTasks = NumAllTasks;
   std::size_t NumGCTasks = 0;
+  const auto WaitTimeout = std::chrono::milliseconds(
+      TaskTimeout <= 0 ? 1LL : static_cast<long long>(TaskTimeout) * 2000LL);
 
   while (NumUnfinishedTasks || NumGCTasks) {
     LLVM_DEBUG(dbgs() << "[PipelineScheduler] Unfinished tasks: "
@@ -165,10 +249,12 @@ void PipelineScheduler::waitTask() {
     std::shared_ptr<Task> T;
     {
       std::unique_lock<std::mutex> Lock(FTVecMutex);
-      FTVecCond.wait_for(Lock, std::chrono::seconds(TaskTimeout * 2),
+      FTVecCond.wait_for(Lock, WaitTimeout,
                          [this] { return !FinishedTaskVec.empty(); });
 
       if (FinishedTaskVec.empty()) {
+        if (ActiveTaskCount.load(std::memory_order_relaxed) != 0)
+          continue;
         Prog.showProgress(1);
         ExecutionCancellation.cancel();
         recordTaskFailure(std::make_exception_ptr(SchedulerTimeoutError(
@@ -180,21 +266,40 @@ void PipelineScheduler::waitTask() {
 
       T = FinishedTaskVec.back();
       FinishedTaskVec.pop_back();
+      FinishedTaskCountForDump.store(
+          static_cast<std::uint32_t>(FinishedTaskVec.size()),
+          std::memory_order_relaxed);
     }
 
     if (isa<GCTask>(T.get())) {
       assert(NumGCTasks != 0 && "GC task accounting underflow");
       --NumGCTasks;
+      if (getTaskFailure()) {
+        ExecutionCancellation.cancel();
+        break;
+      }
       continue;
     }
 
     assert(NumUnfinishedTasks != 0 && "task accounting underflow");
     --NumUnfinishedTasks;
 
-    if (!getTaskFailure()) {
-      if (auto *SCCTask = dyn_cast<SCCFunctionTask>(T.get()))
-        NumGCTasks += postProcessSCCFunctionTask(
-            std::static_pointer_cast<SCCFunctionTask>(T));
+    if (getTaskFailure()) {
+      ExecutionCancellation.cancel();
+      break;
+    }
+
+    if (AType == AT_Local) {
+      if (auto *FTask = dyn_cast<FunctionTask>(T.get()))
+        maybeReleaseFunction(FTask->getFunction(), NumGCTasks);
+    } else if (auto *SCCTask = dyn_cast<SCCFunctionTask>(T.get())) {
+      NumGCTasks += postProcessSCCFunctionTask(
+          std::static_pointer_cast<SCCFunctionTask>(T));
+    }
+
+    if (getTaskFailure()) {
+      ExecutionCancellation.cancel();
+      break;
     }
 
     if (NumAllTasks != 0)
@@ -207,22 +312,27 @@ void PipelineScheduler::waitTask() {
   if (getTaskFailure())
     ExecutionCancellation.cancel();
 
-  if (!getTaskFailure() && EnableGC && GCCallback && !FunctionToRelease.empty()) {
+  if (!getTaskFailure() && EnableGC && GCCallback &&
+      !FunctionToRelease.empty()) {
     GCTask TrailingGC(FunctionToRelease, GCCallback, ClientContext);
     TrailingGC.run();
     FunctionToRelease.clear();
+    PendingReleaseCountForDump.store(0, std::memory_order_relaxed);
   }
 
   llvm::outs() << "\n";
 }
 
-int PipelineScheduler::postProcessSCCFunctionTask(
+std::size_t PipelineScheduler::postProcessSCCFunctionTask(
     std::shared_ptr<SCCFunctionTask> T) {
   const int SCCIndex = T->getSCCIndex();
-  int NumGCTasksAdded = 0;
+  auto &Current = SCCs[static_cast<std::size_t>(SCCIndex)];
+  std::size_t NumGCTasksAdded = 0;
+
+  Current.Executed = true;
 
   if (AType == AT_BottomUp) {
-    for (int CallerSCC : SCCs[SCCIndex].Callers) {
+    for (int CallerSCC : Current.Callers) {
       auto &Caller = SCCs[CallerSCC];
       assert(Caller.RemainingScheduleDeps != 0 &&
              "bottom-up dependency underflow");
@@ -235,7 +345,7 @@ int PipelineScheduler::postProcessSCCFunctionTask(
       }
     }
   } else if (AType == AT_TopDown) {
-    for (int CalleeSCC : SCCs[SCCIndex].Callees) {
+    for (int CalleeSCC : Current.Callees) {
       auto &Callee = SCCs[CalleeSCC];
       assert(Callee.RemainingScheduleDeps != 0 &&
              "top-down dependency underflow");
@@ -250,15 +360,25 @@ int PipelineScheduler::postProcessSCCFunctionTask(
   }
 
   if (EnableGC && GCCallback) {
-    if (SCCs[SCCIndex].RemainingCallersForGC == 0)
+    if (Current.RemainingGCDeps == 0)
       maybeReleaseSCC(SCCIndex, NumGCTasksAdded);
 
-    for (int CalleeSCC : SCCs[SCCIndex].Callees) {
-      auto &Callee = SCCs[CalleeSCC];
-      assert(Callee.RemainingCallersForGC != 0 && "GC dependency underflow");
-      --Callee.RemainingCallersForGC;
-      if (Callee.RemainingCallersForGC == 0)
-        maybeReleaseSCC(CalleeSCC, NumGCTasksAdded);
+    if (AType == AT_BottomUp) {
+      for (int CalleeSCC : Current.Callees) {
+        auto &Callee = SCCs[CalleeSCC];
+        assert(Callee.RemainingGCDeps != 0 && "GC dependency underflow");
+        --Callee.RemainingGCDeps;
+        if (Callee.RemainingGCDeps == 0 && Callee.Executed)
+          maybeReleaseSCC(CalleeSCC, NumGCTasksAdded);
+      }
+    } else if (AType == AT_TopDown) {
+      for (int CallerSCC : Current.Callers) {
+        auto &Caller = SCCs[CallerSCC];
+        assert(Caller.RemainingGCDeps != 0 && "GC dependency underflow");
+        --Caller.RemainingGCDeps;
+        if (Caller.RemainingGCDeps == 0 && Caller.Executed)
+          maybeReleaseSCC(CallerSCC, NumGCTasksAdded);
+      }
     }
   }
 
@@ -303,8 +423,7 @@ void PipelineScheduler::computeSCCs() {
     const Function *RF = Functions[static_cast<std::size_t>(RHS)];
     if (LF->hasName() != RF->hasName())
       return LF->hasName() && !RF->hasName();
-    if (LF->hasName() && RF->hasName() &&
-        LF->getName() != RF->getName()) {
+    if (LF->hasName() && RF->hasName() && LF->getName() != RF->getName()) {
       return LF->getName() < RF->getName();
     }
     return FunctionIndexMap.at(LF) < FunctionIndexMap.at(RF);
@@ -360,7 +479,8 @@ void PipelineScheduler::buildSCCDAG() {
        ++CallerIndex) {
     const int CallerSCC = FunctionToSCC[CallerIndex];
     for (int CalleeIndex : FunctionCalleeIndexVec[CallerIndex]) {
-      const int CalleeSCC = FunctionToSCC[static_cast<std::size_t>(CalleeIndex)];
+      const int CalleeSCC =
+          FunctionToSCC[static_cast<std::size_t>(CalleeIndex)];
       if (CallerSCC == CalleeSCC)
         continue;
       SCCCallees[CallerSCC].insert(CalleeSCC);
@@ -370,11 +490,15 @@ void PipelineScheduler::buildSCCDAG() {
 
   for (std::size_t SCCIndex = 0; SCCIndex < SCCs.size(); ++SCCIndex) {
     auto &Node = SCCs[SCCIndex];
-    Node.Callers.assign(SCCCallers[SCCIndex].begin(), SCCCallers[SCCIndex].end());
-    Node.Callees.assign(SCCCallees[SCCIndex].begin(), SCCCallees[SCCIndex].end());
-    Node.RemainingCallersForGC = Node.Callers.size();
+    Node.Callers.assign(SCCCallers[SCCIndex].begin(),
+                        SCCCallers[SCCIndex].end());
+    Node.Callees.assign(SCCCallees[SCCIndex].begin(),
+                        SCCCallees[SCCIndex].end());
+    Node.RemainingGCDeps =
+        (AType == AT_BottomUp) ? Node.Callers.size() : Node.Callees.size();
     Node.RemainingScheduleDeps =
         (AType == AT_BottomUp) ? Node.Callees.size() : Node.Callers.size();
+    Node.Executed = false;
   }
 }
 
@@ -382,19 +506,35 @@ std::vector<const Function *>
 PipelineScheduler::getOrderedSCCFunctions(int SCCIndex) const {
   std::vector<const Function *> OrderedFunctions;
   for (int FunctionIndex : SCCs[static_cast<std::size_t>(SCCIndex)].Members)
-    OrderedFunctions.push_back(Functions[static_cast<std::size_t>(FunctionIndex)]);
+    OrderedFunctions.push_back(
+        Functions[static_cast<std::size_t>(FunctionIndex)]);
   return OrderedFunctions;
 }
 
-void PipelineScheduler::maybeReleaseSCC(int SCCIndex, int &NumGCTasksAdded) {
+void PipelineScheduler::maybeReleaseSCC(int SCCIndex,
+                                        std::size_t &NumGCTasksAdded) {
   for (int FunctionIndex : SCCs[static_cast<std::size_t>(SCCIndex)].Members)
-    FunctionToRelease.insert(Functions[static_cast<std::size_t>(FunctionIndex)]);
+    FunctionToRelease.insert(
+        Functions[static_cast<std::size_t>(FunctionIndex)]);
 
+  PendingReleaseCountForDump.store(
+      static_cast<std::uint32_t>(FunctionToRelease.size()),
+      std::memory_order_relaxed);
   if (FunctionToRelease.size() >= GCBatchSize)
     scheduleGCBatch(NumGCTasksAdded);
 }
 
-void PipelineScheduler::scheduleGCBatch(int &NumGCTasksAdded) {
+void PipelineScheduler::maybeReleaseFunction(
+    const Function *F, std::size_t &NumGCTasksAdded) {
+  FunctionToRelease.insert(F);
+  PendingReleaseCountForDump.store(
+      static_cast<std::uint32_t>(FunctionToRelease.size()),
+      std::memory_order_relaxed);
+  if (FunctionToRelease.size() >= GCBatchSize)
+    scheduleGCBatch(NumGCTasksAdded);
+}
+
+void PipelineScheduler::scheduleGCBatch(std::size_t &NumGCTasksAdded) {
   if (FunctionToRelease.empty())
     return;
 
@@ -402,15 +542,28 @@ void PipelineScheduler::scheduleGCBatch(int &NumGCTasksAdded) {
       std::make_shared<GCTask>(FunctionToRelease, GCCallback, ClientContext);
   executeTask(GTask);
   FunctionToRelease.clear();
+  PendingReleaseCountForDump.store(0, std::memory_order_relaxed);
   ++NumGCTasksAdded;
 }
 
 void PipelineScheduler::dumpStatus() {
-  std::unique_lock<std::mutex> Lock(FTVecMutex);
-  llvm::outs() << "\n[PipelineScheduler Status]\n";
-  llvm::outs() << "  Finished tasks in queue: " << FinishedTaskVec.size()
-               << "\n";
-  llvm::outs() << "  Functions to release: " << FunctionToRelease.size()
-               << "\n";
-  llvm::outs() << "  SCCs tracked: " << SCCs.size() << "\n";
+  char Buffer[192];
+  char *Out = Buffer;
+  const char *End = Buffer + sizeof(Buffer);
+
+  Out = appendLiteral(Out, End, "\n[PipelineScheduler Status]\n");
+  Out = appendLiteral(Out, End, "  Finished tasks in queue: ");
+  Out = appendUnsigned(
+      Out, End,
+      FinishedTaskCountForDump.load(std::memory_order_relaxed));
+  Out = appendLiteral(Out, End, "\n  Functions to release: ");
+  Out = appendUnsigned(
+      Out, End,
+      PendingReleaseCountForDump.load(std::memory_order_relaxed));
+  Out = appendLiteral(Out, End, "\n  SCCs tracked: ");
+  Out = appendUnsigned(Out, End,
+                       SCCCountForDump.load(std::memory_order_relaxed));
+  Out = appendLiteral(Out, End, "\n");
+
+  writeStatusLine(Buffer, static_cast<std::size_t>(Out - Buffer));
 }

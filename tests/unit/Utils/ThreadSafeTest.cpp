@@ -1,6 +1,7 @@
 #include "Utils/Parallel/ThreadSafe.h"
 
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -12,6 +13,47 @@ namespace {
 using lotus::ThreadSafeMap;
 using lotus::ThreadSafeSet;
 using lotus::ThreadSafeVector;
+
+struct ThrowingOptionalValue {
+  static bool ThrowOnCopy;
+  static int DoubleDeleteCount;
+  static std::set<void *> DeletedPointers;
+
+  int value = 0;
+
+  ThrowingOptionalValue() = default;
+  explicit ThrowingOptionalValue(int V) : value(V) {}
+
+  ThrowingOptionalValue(const ThrowingOptionalValue &Other) : value(Other.value) {
+    if (ThrowOnCopy)
+      throw std::runtime_error("copy boom");
+  }
+
+  static void resetTracking() {
+    ThrowOnCopy = false;
+    DoubleDeleteCount = 0;
+    DeletedPointers.clear();
+  }
+
+  static void *operator new(std::size_t Size) { return ::operator new(Size); }
+
+  static void operator delete(void *Ptr) noexcept {
+    if (Ptr == nullptr)
+      return;
+    if (!DeletedPointers.insert(Ptr).second) {
+      ++DoubleDeleteCount;
+      return;
+    }
+  }
+
+  static void operator delete(void *Ptr, std::size_t) noexcept {
+    operator delete(Ptr);
+  }
+};
+
+bool ThrowingOptionalValue::ThrowOnCopy = false;
+int ThrowingOptionalValue::DoubleDeleteCount = 0;
+std::set<void *> ThrowingOptionalValue::DeletedPointers;
 
 TEST(ThreadSafeTest, SetSnapshotAndEraseReflectContents) {
   ThreadSafeSet<int> values;
@@ -53,6 +95,24 @@ TEST(ThreadSafeTest, VectorSnapshotPreservesInsertionOrder) {
   values.push_back(6);
 
   EXPECT_EQ(values.snapshot(), (std::vector<int>{4, 5, 6}));
+}
+
+TEST(ThreadSafeTest, SimpleOptionalAssignmentPreservesStateOnCopyFailure) {
+  ThrowingOptionalValue::resetTracking();
+
+  {
+    lotus::SimpleOptional<ThrowingOptionalValue> source(
+        ThrowingOptionalValue(7));
+    lotus::SimpleOptional<ThrowingOptionalValue> dest(ThrowingOptionalValue(3));
+
+    ThrowingOptionalValue::ThrowOnCopy = true;
+    EXPECT_THROW(dest = source, std::runtime_error);
+
+    EXPECT_TRUE(dest.has_value());
+    EXPECT_EQ(dest.value().value, 3);
+  }
+
+  EXPECT_EQ(ThrowingOptionalValue::DoubleDeleteCount, 0);
 }
 
 } // namespace
