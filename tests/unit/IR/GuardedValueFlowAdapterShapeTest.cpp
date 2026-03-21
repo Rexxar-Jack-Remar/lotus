@@ -694,7 +694,7 @@ TEST(GuardedValueFlowAdapterShape,
 }
 
 TEST(GuardedValueFlowAdapterShape,
-     MaterializesConservativeRecursivePseudoInterfacesForBackEdges) {
+     SkipsRecursivePseudoInterfacesAndSummariesForBackEdges) {
   const char *IR = R"(
     define i32* @recur(i32** %p, i32* %v, i1 %cond) {
     entry:
@@ -731,27 +731,10 @@ TEST(GuardedValueFlowAdapterShape,
   ASSERT_NE(site, nullptr);
   EXPECT_TRUE(site->isBackEdge(F));
 
-  ASSERT_GT(site->getNumPseudoInputs(F), 0u);
-  auto *pseudo_input = site->getPseudoInput(F, 0);
-  ASSERT_NE(pseudo_input, nullptr);
-  EXPECT_TRUE(containsUseSite(pseudo_input, site));
-  ASSERT_EQ(pseudo_input->children().size(), 1u);
-  auto *pseudo_input_mem = pseudo_input->children().front().target;
-  ASSERT_NE(pseudo_input_mem, nullptr);
-  EXPECT_EQ(pseudo_input_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
-  EXPECT_TRUE(pseudo_input_mem->children().empty());
-  EXPECT_TRUE(pseudo_input_mem->getMatchingRegions().empty());
-
-  ASSERT_GT(site->getNumPseudoOutputs(F), 0u);
-  auto *pseudo_output = site->getPseudoOutput(F, 0);
-  ASSERT_NE(pseudo_output, nullptr);
-  auto *pseudo_output_mem =
-      graph.findStoreMemoryNode(pseudo_output->getLLVMValue(), recursive_call);
-  ASSERT_NE(pseudo_output_mem, nullptr);
-  EXPECT_TRUE(containsChild(pseudo_output_mem, pseudo_output));
+  EXPECT_EQ(site->getNumPseudoInputs(F), 0u);
+  EXPECT_EQ(site->getNumPseudoOutputs(F), 0u);
 
   if (auto *callee_ptg = pipeline.lotus->getPtGraph(F)) {
-    int inline_ap_depth = callee_ptg->getInlineApDepth();
     for (unsigned bucket = 0; bucket < callee_ptg->getSummaryInputs().size();
          ++bucket) {
       const auto *summary_inputs = callee_ptg->getSummaryInputs()[bucket];
@@ -759,15 +742,7 @@ TEST(GuardedValueFlowAdapterShape,
         continue;
 
       auto *summary_node = site->getInputSummaryNode(F, bucket);
-      ASSERT_NE(summary_node, nullptr);
-      if (static_cast<int>(bucket) <= inline_ap_depth) {
-        EXPECT_TRUE(summary_node->children().empty());
-        continue;
-      }
-      ASSERT_EQ(summary_node->children().size(), 1u);
-      auto *summary_mem = summary_node->children().front().target;
-      ASSERT_NE(summary_mem, nullptr);
-      EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
+      EXPECT_EQ(summary_node, nullptr);
     }
 
     for (unsigned bucket = 0; bucket < callee_ptg->getSummaryOutputs().size();
@@ -777,17 +752,89 @@ TEST(GuardedValueFlowAdapterShape,
         continue;
 
       auto *summary_node = site->getOutputSummaryNode(F, bucket);
-      ASSERT_NE(summary_node, nullptr);
-      ASSERT_EQ(summary_node->children().size(), 1u);
-      auto *summary_mem = summary_node->children().front().target;
-      ASSERT_NE(summary_mem, nullptr);
-      EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
+      EXPECT_EQ(summary_node, nullptr);
     }
   }
 }
 
 TEST(GuardedValueFlowAdapterShape,
-     AnchorsSummaryOutputMemoryToEntryRegion) {
+     UsesCallsiteReturnSummaryNodesForFunctionSummarySentinels) {
+  const char *IR = R"(
+    define i32* @recur(i32** %p, i32* %v, i1 %cond) {
+    entry:
+      br i1 %cond, label %rec, label %exit
+    rec:
+      %rv = call i32* @recur(i32** %p, i32* %v, i1 false)
+      ret i32* %rv
+    exit:
+      store i32* %v, i32** %p
+      ret i32* %v
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseModule(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  auto pipeline = runPipeline(*M);
+  Function *F = M->getFunction("recur");
+  ASSERT_NE(F, nullptr);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  ASSERT_NE(pipeline.lotus, nullptr);
+
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  auto *pta = pipeline.lotus->getPtGraph(F);
+  ASSERT_NE(pta, nullptr);
+
+  unsigned summary_bucket = 0;
+  bool saw_summary_sentinel = false;
+  for (unsigned bucket = 0; bucket < pta->getSummaryOutputs().size(); ++bucket) {
+    const auto *summary_outputs = pta->getSummaryOutputs()[bucket];
+    if (!summary_outputs)
+      continue;
+    for (const auto &item : *summary_outputs) {
+      if (item.val == LocValue::SUMMARY_VALUE) {
+        summary_bucket = bucket;
+        saw_summary_sentinel = true;
+        break;
+      }
+    }
+    if (saw_summary_sentinel)
+      break;
+  }
+
+  if (!saw_summary_sentinel)
+    GTEST_SKIP() << "LotusAA did not materialize summary sentinels for this recursive case";
+
+  bool saw_callsite_return_summary = false;
+  for (GuardedValueFlowNode *summary_node : graph.getSummaryReturnNodes(summary_bucket)) {
+    if (!summary_node)
+      continue;
+    for (const auto &mem_edge : summary_node->children()) {
+      auto *summary_mem = mem_edge.target;
+      if (!summary_mem)
+        continue;
+      for (const auto &producer_edge : summary_mem->children()) {
+        auto *producer_mem = producer_edge.target;
+        if (!producer_mem)
+          continue;
+        for (const auto &value_edge : producer_mem->children()) {
+          auto *producer_value = value_edge.target;
+          if (producer_value &&
+              producer_value->getKind() ==
+                  GuardedValueFlowNode::Kind::CallSiteReturnSummary) {
+            saw_callsite_return_summary = true;
+          }
+        }
+      }
+    }
+  }
+
+  EXPECT_TRUE(saw_callsite_return_summary);
+}
+
+TEST(GuardedValueFlowAdapterShape,
+     DoesNotMaterializeCallsiteOutputSummaryWrappers) {
   int old_ap_level = IntraLotusAAConfig::lotus_restrict_ap_level;
   int old_inline_size = IntraLotusAAConfig::lotus_restrict_inline_size;
   IntraLotusAAConfig::lotus_restrict_ap_level = 0;
@@ -839,30 +886,18 @@ TEST(GuardedValueFlowAdapterShape,
   auto *callee_ptg = pipeline.lotus->getPtGraph(callee);
   ASSERT_NE(callee_ptg, nullptr);
 
-  bool saw_output_summary = false;
+  bool saw_summary_bucket = false;
   for (unsigned bucket = 0; bucket < callee_ptg->getSummaryOutputs().size(); ++bucket) {
     const auto *summary_outputs = callee_ptg->getSummaryOutputs()[bucket];
     if (!summary_outputs || summary_outputs->empty())
       continue;
+    saw_summary_bucket = true;
 
     auto *node = site->getOutputSummaryNode(callee, bucket);
-    ASSERT_NE(node, nullptr);
-    EXPECT_EQ(node->getKind(), GuardedValueFlowNode::Kind::CallSiteReturnSummary);
-    auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
-    ASSERT_NE(summary, nullptr);
-    ASSERT_EQ(summary->children().size(), 1u);
-
-    auto *summary_mem = summary->children().front().target;
-    ASSERT_NE(summary_mem, nullptr);
-    EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
-    EXPECT_EQ(summary_mem->getParentBasicBlock(), &F->getEntryBlock());
-    EXPECT_EQ(summary_mem->getRegion(), graph.findRegion(&F->getEntryBlock()));
-    EXPECT_EQ(summary->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
-    EXPECT_EQ(summary_mem->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
-    saw_output_summary = true;
+    EXPECT_EQ(node, nullptr);
   }
 
-  if (!saw_output_summary)
+  if (!saw_summary_bucket)
     GTEST_SKIP() << "LotusAA did not materialize summary output buckets for this synthetic case";
 }
 

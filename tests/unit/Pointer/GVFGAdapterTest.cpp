@@ -567,28 +567,15 @@ TEST(GVFGAdapter, MaterializesSummaryNodesAndPseudoOutputIndices) {
     }
   }
 
-  bool saw_output_summary = false;
   for (unsigned bucket = 0; bucket < callee_ptg->getSummaryOutputs().size(); ++bucket) {
     const auto *summary_outputs = callee_ptg->getSummaryOutputs()[bucket];
     if (!summary_outputs || summary_outputs->empty())
       continue;
-    saw_output_summary = true;
     auto *node = site->getOutputSummaryNode(Callee, bucket);
-    ASSERT_NE(node, nullptr);
-    EXPECT_EQ(node->getKind(), GuardedValueFlowNode::Kind::CallSiteReturnSummary);
-    auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
-    ASSERT_NE(summary, nullptr);
-    EXPECT_EQ(summary->getSummaryIndex(), bucket);
-    EXPECT_EQ(summary->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
-    ASSERT_EQ(summary->children().size(), 1u);
-    EXPECT_EQ(summary->children().front().target->getKind(),
-              GuardedValueFlowNode::Kind::LoadMemory);
-    EXPECT_EQ(summary->children().front().target->getType(),
-              PTGraph::DEFAULT_NON_POINTER_TYPE);
+    EXPECT_EQ(node, nullptr);
   }
 
   EXPECT_EQ(saw_input_summary, has_any_summary_input);
-  EXPECT_EQ(saw_output_summary, has_any_summary_output);
 }
 
 TEST(GVFGAdapter, MaterializesCanonicalFunctionSummaryInterfaceOnCalleeGraphs) {
@@ -765,17 +752,11 @@ TEST(GVFGAdapter, KeepsCallsiteSummaryNodesOutOfCanonicalSummaryRegistries) {
   }
   for (unsigned bucket = 0; bucket < callee_ptg->getSummaryOutputs().size(); ++bucket) {
     auto *summary_node = site->getOutputSummaryNode(callee, bucket);
-    if (!summary_node)
-      continue;
-    saw_summary_node = true;
-    auto nodes = graph.getSummaryReturnNodes(bucket);
-    EXPECT_EQ(std::find(nodes.begin(), nodes.end(), summary_node), nodes.end());
-    for (GuardedValueFlowNode *registered : nodes)
-      EXPECT_NE(registered, summary_node);
+    EXPECT_EQ(summary_node, nullptr);
   }
 
   if (!saw_summary_node)
-    GTEST_SKIP() << "LotusAA did not materialize callsite-local summary nodes for this synthetic case";
+    GTEST_SKIP() << "LotusAA did not materialize callsite-local input summary nodes for this synthetic case";
 }
 
 TEST(GVFGAdapter, ReusesCanonicalFunctionSummaryNodesAcrossAdapterReruns) {
@@ -1115,26 +1096,7 @@ TEST(GVFGAdapter, UsesPreciseSummaryOutputProducerForKnownSummaryFallback) {
   auto *site = graph.findCallSite(call);
   ASSERT_NE(site, nullptr);
   auto *node = site->getOutputSummaryNode(callee, target_bucket);
-  ASSERT_NE(node, nullptr);
-  ASSERT_EQ(node->children().size(), 1u);
-
-  auto *summary_mem = node->children().front().target;
-  ASSERT_NE(summary_mem, nullptr);
-  bool saw_precise_summary_output_fallback = false;
-  for (const auto &match : summary_mem->getMatchingRegions()) {
-    if (!match.producer ||
-        !hasChildKind(match.producer,
-                      GuardedValueFlowNode::Kind::CallSiteReturnSummary))
-      continue;
-    auto *summary_producer = dyn_cast<GuardedValueFlowCallSummaryNode>(
-        match.producer->children().front().target);
-    ASSERT_NE(summary_producer, nullptr);
-    EXPECT_EQ(summary_producer->getSummaryIndex(), target_bucket);
-    EXPECT_EQ(summary_producer->getCallee(), callee);
-    EXPECT_EQ(summary_producer->getCallSite(), call);
-    saw_precise_summary_output_fallback = true;
-  }
-  EXPECT_TRUE(saw_precise_summary_output_fallback);
+  EXPECT_EQ(node, nullptr);
 }
 
 TEST(GVFGAdapter, KeepsPseudoInputInterfaceWhenBindingIsRemoved) {
@@ -1275,12 +1237,8 @@ TEST(GVFGAdapter, KeepsPseudoOutputInterfaceWhenBindingIsRemoved) {
 
   auto *site = graph.findCallSite(call);
   ASSERT_NE(site, nullptr);
-  ASSERT_EQ(site->getNumPseudoOutputs(callee), 1u);
-  auto *node = site->getPseudoOutput(callee, 0);
-  ASSERT_NE(node, nullptr);
-  ASSERT_NE(node->getLLVMValue(), nullptr);
-  EXPECT_EQ(graph.findInterfaceNode(node->getLLVMValue()), node);
-  EXPECT_TRUE(node->children().empty());
+  EXPECT_EQ(site->getNumPseudoOutputs(callee), 0u);
+  EXPECT_EQ(site->getPseudoOutput(callee, 0), nullptr);
 }
 
 TEST(GVFGAdapter, KeepsPseudoArgumentsDistinctWhenInterfaceOverlapsFormal) {

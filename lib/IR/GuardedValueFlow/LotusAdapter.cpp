@@ -269,22 +269,33 @@ createSpecialProducerNode(GuardedValueFlowGraph &graph,
 
 static GuardedValueFlowNode *createSummaryProducerNode(
     GuardedValueFlowGraph &graph, Type *type, BasicBlock *bb,
-    const SummarySentinelProvenance &provenance) {
+    Instruction *producer_inst, SummaryValueMode summary_value_mode,
+    const SummarySentinelProvenance *provenance = nullptr) {
+  Instruction *callsite = producer_inst;
+  Function *callee = nullptr;
+  unsigned bucket = 0;
+  SummaryDirection direction = SummaryDirection::Output;
+  if (provenance) {
+    if (!callsite)
+      callsite = provenance->callsite;
+    callee = provenance->callee;
+    bucket = provenance->bucket;
+    direction = provenance->direction;
+  }
+  if (!callee) {
+    if (auto *call = dyn_cast_or_null<CallBase>(callsite))
+      callee = call->getCalledFunction();
+  }
+
   auto *summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
       GuardedValueFlowNode::Kind::CallSiteReturnSummary, type, &graph, bb,
-      provenance.callsite, provenance.callee, provenance.bucket);
+      callsite, callee, bucket);
   summary_node->setDescription(
-      provenance.direction == SummaryDirection::Input ? "summary.input.value"
-                                                      : "summary.output.value");
-  return summary_node;
-}
-
-static GuardedValueFlowNode *createOpaqueSummaryProducerNode(
-    GuardedValueFlowGraph &graph, Type *type, BasicBlock *bb,
-    Instruction *inst = nullptr) {
-  auto *summary_node = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::SimpleOperand, type, &graph, bb, nullptr, inst);
-  summary_node->setDescription("summary.value");
+      direction == SummaryDirection::Input
+          ? "summary.input.value"
+          : (summary_value_mode == SummaryValueMode::OpaqueProducer
+                 ? "summary.value"
+                 : "summary.output.value"));
   return summary_node;
 }
 
@@ -454,16 +465,8 @@ ensureStoreMemoryNode(GuardedValueFlowGraph &graph, Value *value,
         createSpecialProducerNode(graph, GuardedValueFlowNode::Kind::UndefValue,
                                   memory_type, bb, inst, "undef.value"));
   } else if (value == LocValue::SUMMARY_VALUE) {
-    GuardedValueFlowNode *summary_node = nullptr;
-    if (summary_value_mode == SummaryValueMode::OpaqueProducer) {
-      summary_node = createOpaqueSummaryProducerNode(graph, memory_type, bb, inst);
-    } else {
-      SummarySentinelProvenance fallback_provenance;
-      fallback_provenance.callsite = inst;
-      const SummarySentinelProvenance &provenance =
-          summary_provenance ? *summary_provenance : fallback_provenance;
-      summary_node = createSummaryProducerNode(graph, memory_type, bb, provenance);
-    }
+    auto *summary_node = createSummaryProducerNode(
+        graph, memory_type, bb, inst, summary_value_mode, summary_provenance);
     (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node,
                                                      summary_node);
   } else {
@@ -833,10 +836,11 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
 }
 
 static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
-                                            IntraLotusAA &pta,
+                                            IntraLotusAA &pta, LotusAA &lotus,
                                             GuardedValueFlowGraphBuilderPass &builder) {
   const auto &call_arg_bindings = pta.getCallArgBindings();
   BasicBlock *entry_block = getEntryBlockOrNull(graph);
+  Function *caller = graph.getBaseFunction();
 
   for (const auto &site_ptr : graph.sites()) {
     auto *site = dynamic_cast<GuardedValueFlowCallSite *>(site_ptr.get());
@@ -849,6 +853,9 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
 
     SmallVector<Function *, 4> callees = collectCallees(*site, *call, pta);
     for (Function *callee : callees) {
+      if (caller && lotus.isBackEdge(caller, callee))
+        continue;
+
       auto *callee_graph = dyn_cast_or_null<IntraLotusAA>(pta.getPtGraph(callee));
       if (!callee_graph)
         continue;
@@ -914,46 +921,6 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
                                &summary_provenance);
       }
 
-      const auto &summary_outputs = callee_graph->getSummaryOutputs();
-      for (unsigned bucket = 0; bucket < summary_outputs.size(); ++bucket) {
-        const mem_value_t *summary_bucket = summary_outputs[bucket];
-        if (!summary_bucket || summary_bucket->empty())
-          continue;
-
-        Type *summary_type = getStableSummaryNodeType(call->getContext());
-        auto *summary_node = dyn_cast_or_null<GuardedValueFlowCallSummaryNode>(
-            site->getOutputSummaryNode(callee, bucket));
-        if (!summary_node) {
-          summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
-              GuardedValueFlowNode::Kind::CallSiteReturnSummary, summary_type,
-              &graph, call->getParent(), call, callee, bucket);
-          summary_node->setDescription(
-              (Twine("call.output.summary.") + Twine(bucket)).str());
-          site->setOutputSummaryNode(callee, bucket, summary_node);
-        }
-
-        auto *load_mem = detachReusableLoadMemoryChild(
-            summary_node, (Twine("call.output.summary.mem.") + Twine(bucket)).str());
-        if (!load_mem) {
-          load_mem = graph.createNode<GuardedValueFlowNode>(
-              GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
-              entry_block, nullptr, call);
-          load_mem->setDescription(
-              (Twine("call.output.summary.mem.") + Twine(bucket)).str());
-        }
-        (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
-                                                         load_mem);
-
-        mem_value_t imported =
-            importSummaryValues(pta, call, callee, *summary_bucket);
-        if (imported.empty())
-          imported.emplace_back(nullptr, nullptr, LocValue::SUMMARY_VALUE, 1.0f);
-        SummarySentinelProvenance summary_provenance{
-            call, callee, bucket, SummaryDirection::Output};
-        populateLoadMemoryNode(graph, load_mem, imported, entry_block, builder,
-                               SummaryValueMode::CallsiteProducer,
-                               &summary_provenance);
-      }
     }
   }
 }
@@ -964,6 +931,7 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
   const auto &call_arg_bindings = pta.getCallArgBindings();
   const auto &call_ret_bindings = pta.getCallReturnBindings();
   BasicBlock *entry_block = getEntryBlockOrNull(graph);
+  Function *caller = graph.getBaseFunction();
 
   for (const auto &site_ptr : graph.sites()) {
     auto *site = dynamic_cast<GuardedValueFlowCallSite *>(site_ptr.get());
@@ -976,6 +944,9 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
 
     SmallVector<Function *, 4> callees = collectCallees(*site, *call, pta);
     for (Function *callee : callees) {
+      if (caller && lotus.isBackEdge(caller, callee))
+        continue;
+
       site->addCallee(callee);
 
       auto *callee_graph = dyn_cast_or_null<IntraLotusAA>(pta.getPtGraph(callee));
@@ -993,6 +964,7 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
       using PseudoInputBinding = std::pair<Value *, const mem_value_t *>;
       std::vector<PseudoInputBinding> ordered_pseudo_inputs(
           callee_graph->getInputs().size(), {nullptr, nullptr});
+      bool has_complete_pseudo_input_mapping = true;
       for (const auto &input_item : callee_graph->getInputs()) {
         Value *formal_value = input_item.first;
         int raw_pseudo_input_index = callee_graph->getPseudoInputIndex(formal_value);
@@ -1003,6 +975,7 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
           LLVM_DEBUG(dbgs() << "[gvfg-adapter] Missing pseudo-input index for "
                             << *formal_value << " in callee "
                             << callee->getName() << "\n");
+          has_complete_pseudo_input_mapping = false;
           break;
         }
         const mem_value_t *binding_values = nullptr;
@@ -1014,6 +987,19 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         ordered_pseudo_inputs[raw_pseudo_input_index] =
             {formal_value, binding_values};
       }
+      if (!has_complete_pseudo_input_mapping)
+        continue;
+      for (const auto &ordered_input : ordered_pseudo_inputs) {
+        if (!ordered_input.first) {
+          LLVM_DEBUG(dbgs() << "[gvfg-adapter] Incomplete pseudo-input mapping for "
+                            << callee->getName() << " at call " << *call
+                            << "\n");
+          has_complete_pseudo_input_mapping = false;
+          break;
+        }
+      }
+      if (!has_complete_pseudo_input_mapping)
+        continue;
 
       for (size_t raw_index = 0; raw_index < ordered_pseudo_inputs.size();
            ++raw_index) {
@@ -1067,20 +1053,32 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
       }
 
       const auto &outputs = callee_graph->getOutputs();
+      if (outputs.size() > 1) {
+        bool has_complete_pseudo_output_mapping =
+            pseudo_outputs && pseudo_outputs->size() == outputs.size();
+        if (has_complete_pseudo_output_mapping) {
+          for (size_t idx = 1; idx < outputs.size(); ++idx) {
+            if (!(*pseudo_outputs)[idx]) {
+              has_complete_pseudo_output_mapping = false;
+              break;
+            }
+          }
+        }
+        if (!has_complete_pseudo_output_mapping) {
+          LLVM_DEBUG(dbgs() << "[gvfg-adapter] Incomplete pseudo-output mapping for "
+                            << callee->getName() << " at call " << *call
+                            << "\n");
+          continue;
+        }
+      }
       for (size_t idx = 1; idx < outputs.size(); ++idx) {
         auto *pseudo_output = dyn_cast_or_null<GuardedValueFlowCallOutputNode>(
             site->getPseudoOutput(callee, static_cast<unsigned>(idx - 1)));
         Value *pseudo_value = pseudo_output ? pseudo_output->getLLVMValue() : nullptr;
-        if (!pseudo_value) {
-          pseudo_value =
-              (pseudo_outputs && idx < pseudo_outputs->size()) ? (*pseudo_outputs)[idx]
-                                                               : nullptr;
-        }
-        if (!pseudo_value) {
-          pseudo_value = graph.createSyntheticInterfaceValue(
-              outputs[idx]->getType(),
-              (Twine("pseudo.output.") + Twine(idx - 1)).str());
-        }
+        if (!pseudo_value && pseudo_outputs && idx < pseudo_outputs->size())
+          pseudo_value = (*pseudo_outputs)[idx];
+        if (!pseudo_value)
+          continue;
         if (!pseudo_output) {
           pseudo_output = graph.createNode<GuardedValueFlowCallOutputNode>(
               GuardedValueFlowNode::Kind::CallSitePseudoOutput,
@@ -1244,7 +1242,7 @@ void LotusGuardedValueFlowAdapterPass::adaptFunction(
   materializeFunctionSummaryInterface(graph, pta, builder);
   materializeFunctionOutputs(graph, pta, builder);
   materializeCallTargetConditions(graph, pta, builder);
-  materializeCallsiteSummaryNodes(graph, pta, builder);
+  materializeCallsiteSummaryNodes(graph, pta, lotus, builder);
   materializeCallsiteInterfaces(graph, pta, lotus, builder);
   materializeCallsiteBackEdges(graph, lotus);
 }
