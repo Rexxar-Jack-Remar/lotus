@@ -239,13 +239,14 @@ TEST(GVGAdapter, ConditionalLoadPreservesTwoMatchingConditions) {
   for (const auto &match : load_mem->getMatchingRegions()) {
     EXPECT_EQ(match.provenance.getKind(), ConditionRef::Kind::SemanticPathCond);
     EXPECT_NE(match.region, nullptr);
-    EXPECT_TRUE(match.region->isInterfaceRegion());
+    EXPECT_TRUE(match.region->isSemantic());
+    EXPECT_FALSE(match.region->isInterfaceRegion());
     ASSERT_NE(match.region->getConditionNode(), nullptr);
     EXPECT_EQ(match.region->getConditionNode()->getRegion(), match.region);
   }
 }
 
-TEST(GVGAdapter, EquivalentLoadsReuseCanonicalLoadMemoryNode) {
+TEST(GVGAdapter, EquivalentLoadsKeepDistinctLoadMemoryNodes) {
   const char *IR = R"(
     define i32* @test(i32** %p) {
     entry:
@@ -289,7 +290,7 @@ TEST(GVGAdapter, EquivalentLoadsReuseCanonicalLoadMemoryNode) {
   ASSERT_EQ(second_value->children().size(), 1u);
   EXPECT_EQ(first_value->children().front().target, first_mem);
   EXPECT_EQ(second_value->children().front().target, second_mem);
-  EXPECT_EQ(first_mem, second_mem);
+  EXPECT_NE(first_mem, second_mem);
   EXPECT_EQ(first_mem->getMatchingRegions().size(), second_mem->getMatchingRegions().size());
 }
 
@@ -337,7 +338,8 @@ TEST(GVGAdapter, NonPointerLoadsAlsoReceiveMatchedStoreMemoryNodes) {
   for (const auto &match : load_mem->getMatchingRegions()) {
     EXPECT_EQ(match.provenance.getKind(), ConditionRef::Kind::SemanticPathCond);
     EXPECT_NE(match.region, nullptr);
-    EXPECT_TRUE(match.region->isInterfaceRegion());
+    EXPECT_TRUE(match.region->isSemantic());
+    EXPECT_FALSE(match.region->isInterfaceRegion());
     ASSERT_NE(match.region->getConditionNode(), nullptr);
     EXPECT_EQ(match.region->getConditionNode()->getRegion(), match.region);
   }
@@ -415,7 +417,8 @@ TEST(GVGAdapter, RecordsPerCalleeCallTargetConditions) {
       if (target.second) {
         EXPECT_EQ(kind, ConditionRef::Kind::SemanticPathCond);
         ASSERT_NE(region, nullptr);
-        EXPECT_TRUE(region->isInterfaceRegion());
+        EXPECT_TRUE(region->isSemantic());
+        EXPECT_FALSE(region->isInterfaceRegion());
         ASSERT_NE(region->getConditionNode(), nullptr);
         EXPECT_EQ(region->getConditionNode()->getRegion(), region);
         EXPECT_EQ(region->getInterfacePathCondition(), target.second);
@@ -504,9 +507,12 @@ TEST(GVGAdapter, MaterializesSummaryNodesAndPseudoOutputIndices) {
     auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
     ASSERT_NE(summary, nullptr);
     EXPECT_EQ(summary->getSummaryIndex(), bucket);
+    EXPECT_EQ(summary->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
     ASSERT_EQ(summary->children().size(), 1u);
     EXPECT_EQ(summary->children().front().target->getKind(),
               GuardedValueFlowNode::Kind::LoadMemory);
+    EXPECT_EQ(summary->children().front().target->getType(),
+              PTGraph::DEFAULT_NON_POINTER_TYPE);
   }
 
   bool saw_output_summary = false;
@@ -521,16 +527,19 @@ TEST(GVGAdapter, MaterializesSummaryNodesAndPseudoOutputIndices) {
     auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
     ASSERT_NE(summary, nullptr);
     EXPECT_EQ(summary->getSummaryIndex(), bucket);
+    EXPECT_EQ(summary->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
     ASSERT_EQ(summary->children().size(), 1u);
     EXPECT_EQ(summary->children().front().target->getKind(),
               GuardedValueFlowNode::Kind::LoadMemory);
+    EXPECT_EQ(summary->children().front().target->getType(),
+              PTGraph::DEFAULT_NON_POINTER_TYPE);
   }
 
   EXPECT_EQ(saw_input_summary, has_any_summary_input);
   EXPECT_EQ(saw_output_summary, has_any_summary_output);
 }
 
-TEST(GVGAdapter, DropsSummaryInputNodesWhenBindingsAreIncomplete) {
+TEST(GVGAdapter, KeepsSummaryInputNodesWhenBindingsAreIncomplete) {
   int old_ap_level = IntraLotusAAConfig::lotus_restrict_ap_level;
   int old_inline_size = IntraLotusAAConfig::lotus_restrict_inline_size;
   IntraLotusAAConfig::lotus_restrict_ap_level = 0;
@@ -606,11 +615,17 @@ TEST(GVGAdapter, DropsSummaryInputNodesWhenBindingsAreIncomplete) {
     const auto *summary_inputs = callee_ptg->getSummaryInputs()[bucket];
     if (!summary_inputs || summary_inputs->empty())
       continue;
-    EXPECT_EQ(site->getInputSummaryNode(callee, bucket), nullptr);
+    auto *node = site->getInputSummaryNode(callee, bucket);
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->children().size(), 1u);
+    auto *summary_mem = node->children().front().target;
+    ASSERT_NE(summary_mem, nullptr);
+    EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
+    EXPECT_FALSE(summary_mem->children().empty());
   }
 }
 
-TEST(GVGAdapter, DropsPseudoInputInterfaceWhenBindingIsRemoved) {
+TEST(GVGAdapter, KeepsPseudoInputInterfaceWhenBindingIsRemoved) {
   const char *IR = R"(
     define void @callee(i32** %p, i32** %q) {
     entry:
@@ -672,12 +687,21 @@ TEST(GVGAdapter, DropsPseudoInputInterfaceWhenBindingIsRemoved) {
 
   auto *site = graph.findCallSite(call);
   ASSERT_NE(site, nullptr);
-  EXPECT_EQ(site->getPseudoInput(callee, 0), nullptr);
-  EXPECT_EQ(site->getPseudoInput(callee, 1), nullptr);
-  EXPECT_EQ(site->getNumPseudoInputs(callee), 0u);
+  ASSERT_EQ(site->getNumPseudoInputs(callee), 2u);
+  ASSERT_NE(site->getPseudoInput(callee, 0), nullptr);
+  ASSERT_NE(site->getPseudoInput(callee, 1), nullptr);
+  for (unsigned idx = 0; idx < site->getNumPseudoInputs(callee); ++idx) {
+    auto *node = site->getPseudoInput(callee, idx);
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->children().size(), 1u);
+    auto *load_mem = node->children().front().target;
+    ASSERT_NE(load_mem, nullptr);
+    EXPECT_EQ(load_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
+    EXPECT_FALSE(load_mem->children().empty());
+  }
 }
 
-TEST(GVGAdapter, DropsPseudoOutputInterfaceWhenBindingIsRemoved) {
+TEST(GVGAdapter, KeepsPseudoOutputInterfaceWhenBindingIsRemoved) {
   const char *IR = R"(
     define void @callee(i32** %p, i32* %v) {
     entry:
@@ -732,8 +756,10 @@ TEST(GVGAdapter, DropsPseudoOutputInterfaceWhenBindingIsRemoved) {
 
   auto *site = graph.findCallSite(call);
   ASSERT_NE(site, nullptr);
-  EXPECT_EQ(site->getPseudoOutput(callee, 0), nullptr);
-  EXPECT_EQ(site->getNumPseudoOutputs(callee), 0u);
+  ASSERT_EQ(site->getNumPseudoOutputs(callee), 1u);
+  auto *node = site->getPseudoOutput(callee, 0);
+  ASSERT_NE(node, nullptr);
+  EXPECT_TRUE(node->children().empty());
 }
 
 TEST(GVGAdapter, KeepsPseudoArgumentsDistinctWhenInterfaceOverlapsFormal) {

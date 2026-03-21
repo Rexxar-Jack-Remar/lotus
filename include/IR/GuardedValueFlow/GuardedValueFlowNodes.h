@@ -205,7 +205,8 @@ public:
     AlwaysTrue,
     AlwaysFalse,
     Unit,
-    Interface,
+    Semantic,
+    ImportedInterface,
     And,
     Or,
     Not,
@@ -264,8 +265,14 @@ public:
   Form getForm() const { return form_; }
   bool isAlwaysTrue() const { return form_ == Form::AlwaysTrue; }
   bool isAlwaysFalse() const { return form_ == Form::AlwaysFalse; }
-  bool isInterfaceRegion() const { return form_ == Form::Interface; }
-  bool isSemantic() const { return isInterfaceRegion(); }
+  bool isInterfaceRegion() const { return form_ == Form::ImportedInterface; }
+  bool isSemantic() const {
+    return form_ == Form::Semantic || form_ == Form::ImportedInterface;
+  }
+  bool isLocalSemanticRegion() const { return form_ == Form::Semantic; }
+  bool isImportedSemanticRegion() const {
+    return form_ == Form::ImportedInterface;
+  }
   bool isCompound() const {
     return form_ == Form::And || form_ == Form::Or || form_ == Form::Not;
   }

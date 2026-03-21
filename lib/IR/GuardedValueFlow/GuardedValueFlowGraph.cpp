@@ -389,32 +389,41 @@ GuardedValueFlowGraph::findOrCreateSemanticRegion(path_cond_t path_cond,
     return existing;
 
   auto condition = ConditionRef::fromPathCond(path_cond);
+  Function *origin_function = getInterfaceOriginFunction(path_cond);
+  bool is_imported_region =
+      origin_function && origin_function != path_cond->getOwnerFunc();
   auto *condition_node = findSemanticConditionNode(path_cond);
   if (!condition_node) {
-    condition_node = origin_condition_node;
-    if (!condition_node) {
+    if (is_imported_region && origin_condition_node) {
+      condition_node = origin_condition_node;
+    } else if (!is_imported_region && origin_condition_node &&
+               origin_condition_node->getGraph() == this) {
+      condition_node = origin_condition_node;
+    } else {
       condition_node = createNode<GuardedValueFlowNode>(
           GuardedValueFlowNode::Kind::InterfaceCondition,
           Type::getInt1Ty(base_function_->getContext()), this, nullptr, nullptr,
           nullptr);
-      condition_node->setDescription("iface.cond:" + renderPathCond(path_cond));
+      condition_node->setDescription("semantic.cond:" + renderPathCond(path_cond));
     }
     semantic_condition_nodes_[path_cond] = condition_node;
   }
 
   auto *region = createNode<GuardedValueFlowRegionNode>(
       Type::getInt1Ty(base_function_->getContext()), this, block,
-      GuardedValueFlowRegionNode::Form::Interface, condition_node, true,
+      is_imported_region ? GuardedValueFlowRegionNode::Form::ImportedInterface
+                         : GuardedValueFlowRegionNode::Form::Semantic,
+      condition_node, true,
       condition);
-  region->setDescription("region.interface");
+  region->setDescription(is_imported_region ? "region.interface"
+                                            : "region.semantic");
   region->setInterfaceMetadata(path_cond->getOwnerFunc(),
-                               getInterfaceOriginFunction(path_cond), path_cond,
-                               getImportedSource(path_cond));
+                               origin_function, path_cond, getImportedSource(path_cond));
   GuardedValueFlowRegionNode::ConstraintState state;
   state.assignments[region] = true;
   state.assignments[condition_node] = true;
   region->setConstraintState(std::move(state));
-  if (condition_node->getGraph() == this) {
+  if (!is_imported_region && condition_node->getGraph() == this) {
     region->addChild(condition_node, 1.0f, condition);
     condition_node->region_ = region;
   }

@@ -27,6 +27,10 @@ static BasicBlock *getValueBlock(Value *V, Function &F) {
 static void setValueDescription(GuardedValueFlowNode *node, Value *value) {
   if (!node || !value)
     return;
+  if (isa<ConstantPointerNull>(value) || isa<ConstantAggregateZero>(value)) {
+    node->setDescription("0");
+    return;
+  }
   if (value->hasName()) {
     node->setDescription(value->getName().str());
     return;
@@ -248,6 +252,8 @@ static GuardedValueFlowNode *getOrCreateOperandRepresentation(
     GuardedValueFlowGraph &graph, Value *V, Function &F, bool &failed) {
   if (!V)
     return nullptr;
+  if (isa<ConstantPointerNull>(V) || isa<ConstantAggregateZero>(V))
+    return findOrCreateValueNode(graph, V, F);
   if (isa<ConstantExpr>(V))
     return modelConstantExpr(cast<ConstantExpr>(V), graph, F, failed);
   if (isa<ConstantArray>(V) || isa<ConstantStruct>(V) || isa<ConstantVector>(V) ||

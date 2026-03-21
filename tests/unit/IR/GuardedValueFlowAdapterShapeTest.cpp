@@ -182,7 +182,7 @@ TEST(GuardedValueFlowAdapterShape, BuildsMemoryAndPseudoInterfaceShape) {
   EXPECT_TRUE(containsChild(pseudo_output_mem, pseudo_output));
 }
 
-TEST(GuardedValueFlowAdapterShape, CanonicalizesEquivalentLoadsToSharedMemoryNode) {
+TEST(GuardedValueFlowAdapterShape, KeepsEquivalentLoadsOnDistinctMemoryNodes) {
   const char *IR = R"(
     define i32 @test(i32* %p, i32 %v) {
     entry:
@@ -216,7 +216,7 @@ TEST(GuardedValueFlowAdapterShape, CanonicalizesEquivalentLoadsToSharedMemoryNod
   auto *second_load_mem = graph.findLoadMemoryNode(loads[1]);
   ASSERT_NE(first_load_mem, nullptr);
   ASSERT_NE(second_load_mem, nullptr);
-  EXPECT_EQ(first_load_mem, second_load_mem);
+  EXPECT_NE(first_load_mem, second_load_mem);
 
   auto *first_value_node = graph.findNode(loads[0]);
   auto *second_value_node = graph.findNode(loads[1]);
@@ -229,8 +229,8 @@ TEST(GuardedValueFlowAdapterShape, CanonicalizesEquivalentLoadsToSharedMemoryNod
 
   EXPECT_FALSE(first_load_mem->getMatchingRegions().empty());
   EXPECT_FALSE(second_load_mem->getMatchingRegions().empty());
-  EXPECT_EQ(first_load_mem->getMatchingRegions().size(),
-            second_load_mem->getMatchingRegions().size());
+  EXPECT_NE(first_load_mem->getMatchingRegions().data(),
+            second_load_mem->getMatchingRegions().data());
 }
 
 TEST(GuardedValueFlowAdapterShape, ModelsSemanticMatchingRegionsForConditionalLoad) {
@@ -278,7 +278,9 @@ TEST(GuardedValueFlowAdapterShape, ModelsSemanticMatchingRegionsForConditionalLo
     EXPECT_NE(match.producer, nullptr);
     EXPECT_NE(match.region, nullptr);
     EXPECT_EQ(match.provenance.getKind(), ConditionRef::Kind::SemanticPathCond);
-    EXPECT_TRUE(match.region->isInterfaceRegion());
+    EXPECT_TRUE(match.region->isSemantic());
+    EXPECT_FALSE(match.region->isInterfaceRegion());
+    EXPECT_TRUE(match.region->isLocalSemanticRegion());
     ASSERT_NE(match.region->getConditionNode(), nullptr);
     EXPECT_EQ(match.region->getConditionNode()->getRegion(), match.region);
     EXPECT_EQ(match.region->getInterfacePathCondition(),
@@ -504,6 +506,8 @@ TEST(GuardedValueFlowAdapterShape,
     EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
     EXPECT_EQ(summary_mem->getParentBasicBlock(), &F->getEntryBlock());
     EXPECT_EQ(summary_mem->getRegion(), graph.findRegion(&F->getEntryBlock()));
+    EXPECT_EQ(summary_node->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
+    EXPECT_EQ(summary_mem->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
     saw_entry_summary_mem = true;
   }
   if (!saw_entry_summary_mem)
@@ -622,6 +626,8 @@ TEST(GuardedValueFlowAdapterShape,
     EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
     EXPECT_EQ(summary_mem->getParentBasicBlock(), &F->getEntryBlock());
     EXPECT_EQ(summary_mem->getRegion(), graph.findRegion(&F->getEntryBlock()));
+    EXPECT_EQ(summary->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
+    EXPECT_EQ(summary_mem->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
     saw_output_summary = true;
   }
 

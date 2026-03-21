@@ -6,6 +6,7 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/IR/Argument.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/IR/InstIterator.h>
@@ -152,6 +153,24 @@ static void setNodeAccessPathFromOutputIndex(GuardedValueFlowNode *node,
   setAccessPathFromSegments(node->getAccessPath(), segments, is_from_return);
 }
 
+static Type *getStableSummaryNodeType(LLVMContext &ctx) {
+  return PTGraph::DEFAULT_NON_POINTER_TYPE
+             ? PTGraph::DEFAULT_NON_POINTER_TYPE
+             : Type::getInt64Ty(ctx);
+}
+
+static mem_value_t makeFallbackValues(Value *value, Instruction *pos = nullptr,
+                                      float confidence = 1.0f,
+                                      path_cond_t cond = nullptr) {
+  mem_value_t fallback;
+  fallback.emplace_back(cond, pos, value, confidence);
+  return fallback;
+}
+
+static Value *createSyntheticInterfaceValue(Type *type, StringRef name) {
+  return new Argument(type, name);
+}
+
 static GuardedValueFlowReturnSite *
 findOrCreateReturnSite(GuardedValueFlowGraph &graph, ReturnInst *ret) {
   if (!ret)
@@ -235,9 +254,6 @@ static void linkMemoryValue(GuardedValueFlowGraph &graph,
                             const mem_value_item_t &item, BasicBlock *bb,
                             GuardedValueFlowGraphBuilderPass &builder) {
   Value *value = item.val;
-  if (value == LocValue::FREE_VARIABLE || value == LocValue::NO_VALUE)
-    return;
-
   auto cond = item.cond ? ConditionRef::fromPathCond(item.cond)
                         : ConditionRef::none();
   Instruction *producer_inst = item.pos;
@@ -259,38 +275,6 @@ static void populateLoadMemoryNode(GuardedValueFlowGraph &graph,
   load_mem_node->clearChildren();
   for (const auto &item : values)
     linkMemoryValue(graph, load_mem_node, item, bb, builder);
-}
-
-static Type *chooseSummaryNodeType(LLVMContext &ctx,
-                                   const std::set<Value *, llvm_cmp> *values) {
-  if (!values || values->empty())
-    return Type::getVoidTy(ctx);
-  Type *chosen = nullptr;
-  for (Value *value : *values) {
-    if (!value)
-      continue;
-    if (!chosen)
-      chosen = value->getType();
-    else if (chosen != value->getType())
-      return Type::getVoidTy(ctx);
-  }
-  return chosen ? chosen : Type::getVoidTy(ctx);
-}
-
-static Type *chooseSummaryNodeType(LLVMContext &ctx, const mem_value_t *values) {
-  if (!values || values->empty())
-    return Type::getVoidTy(ctx);
-  Type *chosen = nullptr;
-  for (const auto &item : *values) {
-    if (!item.val)
-      continue;
-    Type *curr = item.val->getType();
-    if (!chosen)
-      chosen = curr;
-    else if (chosen != curr)
-      return Type::getVoidTy(ctx);
-  }
-  return chosen ? chosen : Type::getVoidTy(ctx);
 }
 
 static mem_value_t importSummaryValues(IntraLotusAA &pta, Instruction *callsite,
@@ -354,36 +338,24 @@ collectCallees(const GuardedValueFlowCallSite &site, CallBase &call,
 static void materializeLoadParity(GuardedValueFlowGraph &graph,
                                   IntraLotusAA &pta,
                                   GuardedValueFlowGraphBuilderPass &builder) {
-  DenseMap<LoadInst *, mem_value_t> rep_values;
-  SmallPtrSet<LoadInst *, 16> populated_reps;
-
   for (Instruction &inst : instructions(*pta.getFunc())) {
     auto *load = dyn_cast<LoadInst>(&inst);
     if (!load)
       continue;
 
     auto *value_node = graph.findNode(load);
-    const auto &equivalent_loads = pta.getAllLoadWithSameValue(load);
-    LoadInst *rep = equivalent_loads.empty() ? load : *equivalent_loads.begin();
-    auto *load_mem_node = graph.findLoadMemoryNode(rep);
+    auto *load_mem_node = graph.findLoadMemoryNode(load);
     if (!value_node || !load_mem_node)
       continue;
 
-    graph.mapLoadMemoryNode(load, load_mem_node);
     value_node->clearChildren();
     value_node->addChild(load_mem_node);
 
-    if (!populated_reps.insert(rep).second)
-      continue;
-
-    auto rep_it = rep_values.find(rep);
-    if (rep_it == rep_values.end()) {
-      mem_value_t load_values;
-      pta.getLoadValues(rep->getPointerOperand(), rep, load_values);
-      rep_it = rep_values.try_emplace(rep, std::move(load_values)).first;
-    }
-
-    populateLoadMemoryNode(graph, load_mem_node, rep_it->second, rep->getParent(),
+    mem_value_t load_values;
+    pta.getLoadValues(load->getPointerOperand(), load, load_values);
+    if (load_values.empty())
+      load_values = makeFallbackValues(LocValue::FREE_VARIABLE, load);
+    populateLoadMemoryNode(graph, load_mem_node, load_values, load->getParent(),
                            builder);
   }
 }
@@ -424,7 +396,20 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
                                      static_cast<unsigned>(idx));
     graph.registerPseudoReturn(pseudo_return);
 
-    for (const auto &ret_vals : output->getVal()) {
+    const auto &ret_val_map = output->getVal();
+    if (ret_val_map.empty()) {
+      auto *load_mem = graph.createNode<GuardedValueFlowNode>(
+          GuardedValueFlowNode::Kind::LoadMemory, output->getType(), &graph,
+          pseudo_return->getParentBasicBlock(), nullptr, nullptr);
+      load_mem->setDescription((Twine("return.mem.") + Twine(idx) + ".entry").str());
+      (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, pseudo_return, load_mem);
+      mem_value_t fallback = makeFallbackValues(LocValue::FREE_VARIABLE);
+      populateLoadMemoryNode(graph, load_mem, fallback,
+                             pseudo_return->getParentBasicBlock(), builder);
+      continue;
+    }
+
+    for (const auto &ret_vals : ret_val_map) {
       auto *ret_inst = ret_vals.first;
       auto *site = findOrCreateReturnSite(graph, ret_inst);
       auto *load_mem = graph.createNode<GuardedValueFlowNode>(
@@ -441,7 +426,10 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
         pseudo_return->addReturnValueSitePair(linked_ret, site);
       if (site)
         load_mem->addUseSite(site);
-      populateLoadMemoryNode(graph, load_mem, ret_vals.second,
+      mem_value_t values = ret_vals.second;
+      if (values.empty())
+        values = makeFallbackValues(LocValue::FREE_VARIABLE, ret_inst);
+      populateLoadMemoryNode(graph, load_mem, values,
                              ret_inst ? ret_inst->getParent()
                                       : pseudo_return->getParentBasicBlock(),
                              builder);
@@ -480,64 +468,45 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
       }
 
       const auto &summary_inputs = callee_graph->getSummaryInputs();
-      bool incomplete_summary_inputs = false;
       for (unsigned bucket = 0; bucket < summary_inputs.size(); ++bucket) {
         const auto *summary_bucket = summary_inputs[bucket];
         if (!summary_bucket || summary_bucket->empty())
           continue;
-        if (!callee_input_bindings) {
-          incomplete_summary_inputs = true;
-          break;
-        }
-        for (Value *summary_input : *summary_bucket) {
-          if (callee_input_bindings->find(summary_input) ==
-              callee_input_bindings->end()) {
-            incomplete_summary_inputs = true;
-            break;
-          }
-        }
-        if (incomplete_summary_inputs)
-          break;
-      }
+        Type *summary_type = getStableSummaryNodeType(call->getContext());
+        auto *summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
+            GuardedValueFlowNode::Kind::CallSiteArgumentSummary, summary_type,
+            &graph, call->getParent(), call, callee, bucket);
+        summary_node->setDescription(
+            (Twine("call.input.summary.") + Twine(bucket)).str());
 
-      if (!incomplete_summary_inputs) {
-        for (unsigned bucket = 0; bucket < summary_inputs.size(); ++bucket) {
-          const auto *summary_bucket = summary_inputs[bucket];
-          if (!summary_bucket || summary_bucket->empty())
-            continue;
-
-          Type *summary_type =
-              chooseSummaryNodeType(call->getContext(), summary_bucket);
-          auto *summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
-              GuardedValueFlowNode::Kind::CallSiteArgumentSummary, summary_type,
-              &graph, call->getParent(), call, callee, bucket);
-          summary_node->setDescription(
-              (Twine("call.input.summary.") + Twine(bucket)).str());
-
-          mem_value_t aggregated;
+        mem_value_t aggregated;
+        bool has_missing_binding = !callee_input_bindings;
+        if (callee_input_bindings) {
           for (Value *summary_input : *summary_bucket) {
             auto binding_it = callee_input_bindings->find(summary_input);
+            if (binding_it == callee_input_bindings->end()) {
+              has_missing_binding = true;
+              continue;
+            }
             aggregated.insert(aggregated.end(), binding_it->second.begin(),
                               binding_it->second.end());
           }
-          if (static_cast<int>(bucket) > start_ap_depth) {
-            auto *load_mem = graph.createNode<GuardedValueFlowNode>(
-                GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
-                entry_block, nullptr, call);
-            load_mem->setDescription(
-                (Twine("call.input.summary.mem.") + Twine(bucket)).str());
-            (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
-                                                             load_mem);
-            populateLoadMemoryNode(graph, load_mem, aggregated, entry_block,
-                                   builder);
-          }
-          site->setInputSummaryNode(callee, bucket, summary_node);
-          graph.registerSummaryArgumentNode(bucket, summary_node);
         }
-      } else {
-        LLVM_DEBUG(dbgs() << "[gvg-adapter] Incomplete summary-input bindings at "
-                          << *call << " for callee " << callee->getName()
-                          << "\n");
+        if (aggregated.empty() || has_missing_binding)
+          aggregated.emplace_back(nullptr, nullptr, LocValue::SUMMARY_VALUE, 1.0f);
+        if (static_cast<int>(bucket) > start_ap_depth) {
+          auto *load_mem = graph.createNode<GuardedValueFlowNode>(
+              GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
+              entry_block, nullptr, call);
+          load_mem->setDescription(
+              (Twine("call.input.summary.mem.") + Twine(bucket)).str());
+          (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
+                                                           load_mem);
+          populateLoadMemoryNode(graph, load_mem, aggregated, entry_block,
+                                 builder);
+        }
+        site->setInputSummaryNode(callee, bucket, summary_node);
+        graph.registerSummaryArgumentNode(bucket, summary_node);
       }
 
       const auto &summary_outputs = callee_graph->getSummaryOutputs();
@@ -546,8 +515,7 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
         if (!summary_bucket || summary_bucket->empty())
           continue;
 
-        Type *summary_type =
-            chooseSummaryNodeType(call->getContext(), summary_bucket);
+        Type *summary_type = getStableSummaryNodeType(call->getContext());
         auto *summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
             GuardedValueFlowNode::Kind::CallSiteReturnSummary, summary_type,
             &graph, call->getParent(), call, callee, bucket);
@@ -564,6 +532,8 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
 
         mem_value_t imported =
             importSummaryValues(pta, call, callee, *summary_bucket);
+        if (imported.empty())
+          imported.emplace_back(nullptr, nullptr, LocValue::SUMMARY_VALUE, 1.0f);
         populateLoadMemoryNode(graph, load_mem, imported, entry_block,
                                builder);
         site->setOutputSummaryNode(callee, bucket, summary_node);
@@ -610,7 +580,6 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
       using PseudoInputBinding = std::pair<Value *, const mem_value_t *>;
       std::vector<PseudoInputBinding> ordered_pseudo_inputs(
           callee_graph->getInputs().size(), {nullptr, nullptr});
-      bool complete_pseudo_inputs = true;
       for (const auto &input_item : callee_graph->getInputs()) {
         Value *formal_value = input_item.first;
         int raw_pseudo_input_index = callee_graph->getPseudoInputIndex(formal_value);
@@ -618,68 +587,48 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
             static_cast<size_t>(raw_pseudo_input_index) >=
                 ordered_pseudo_inputs.size() ||
             ordered_pseudo_inputs[raw_pseudo_input_index].first) {
-          complete_pseudo_inputs = false;
           LLVM_DEBUG(dbgs() << "[gvg-adapter] Missing pseudo-input index for "
                             << *formal_value << " in callee "
                             << callee->getName() << "\n");
           break;
         }
-        if (!callee_input_bindings) {
-          complete_pseudo_inputs = false;
-          break;
-        }
-        auto binding_it = callee_input_bindings->find(formal_value);
-        if (binding_it == callee_input_bindings->end()) {
-          complete_pseudo_inputs = false;
-          LLVM_DEBUG(dbgs() << "[gvg-adapter] Incomplete pseudo-input binding at "
-                            << *call << " for callee " << callee->getName()
-                            << ", slot " << raw_pseudo_input_index << "\n");
-          break;
+        const mem_value_t *binding_values = nullptr;
+        if (callee_input_bindings) {
+          auto binding_it = callee_input_bindings->find(formal_value);
+          if (binding_it != callee_input_bindings->end())
+            binding_values = &binding_it->second;
         }
         ordered_pseudo_inputs[raw_pseudo_input_index] =
-            {formal_value, &binding_it->second};
+            {formal_value, binding_values};
       }
 
-      if (complete_pseudo_inputs) {
-        for (const auto &binding : ordered_pseudo_inputs) {
-          if (!binding.first || !binding.second) {
-            complete_pseudo_inputs = false;
-            break;
-          }
-        }
-      }
+      for (size_t raw_index = 0; raw_index < ordered_pseudo_inputs.size();
+           ++raw_index) {
+        Value *formal_value = ordered_pseudo_inputs[raw_index].first;
+        if (!formal_value)
+          continue;
+        const mem_value_t *binding_values = ordered_pseudo_inputs[raw_index].second;
 
-      if (complete_pseudo_inputs) {
-        for (size_t raw_index = 0; raw_index < ordered_pseudo_inputs.size();
-             ++raw_index) {
-          Value *formal_value = ordered_pseudo_inputs[raw_index].first;
-          const mem_value_t *binding_values =
-              ordered_pseudo_inputs[raw_index].second;
+        auto *pseudo_input = graph.createNode<GuardedValueFlowCallOutputNode>(
+            GuardedValueFlowNode::Kind::CallSitePseudoInput,
+            formal_value->getType(), &graph, call->getParent(), formal_value, call,
+            callee);
+        pseudo_input->setDescription((Twine("call.input.") + Twine(raw_index)).str());
+        setNodeAccessPathFromValue(pseudo_input, *callee_graph, formal_value);
 
-          auto *pseudo_input = graph.createNode<GuardedValueFlowCallOutputNode>(
-              GuardedValueFlowNode::Kind::CallSitePseudoInput,
-              formal_value->getType(), &graph, call->getParent(), formal_value,
-              call, callee);
-          pseudo_input->setDescription(
-              (Twine("call.input.") + Twine(raw_index)).str());
-          setNodeAccessPathFromValue(pseudo_input, *callee_graph, formal_value);
-
-          auto *load_mem = graph.createNode<GuardedValueFlowNode>(
-              GuardedValueFlowNode::Kind::LoadMemory, formal_value->getType(),
-              &graph, call->getParent(), nullptr, call);
-          load_mem->setDescription(
-              (Twine("call.input.mem.") + Twine(raw_index)).str());
-          (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, pseudo_input,
-                                                           load_mem);
-          populateLoadMemoryNode(graph, load_mem, *binding_values,
-                                 call->getParent(), builder);
-          site->addPseudoInput(callee, pseudo_input);
-        }
-      }
-      if (!complete_pseudo_inputs && !ordered_pseudo_inputs.empty()) {
-        LLVM_DEBUG(dbgs() << "[gvg-adapter] Dropping pseudo-input interface at "
-                          << *call << " for callee " << callee->getName()
-                          << " due to incomplete bindings\n");
+        auto *load_mem = graph.createNode<GuardedValueFlowNode>(
+            GuardedValueFlowNode::Kind::LoadMemory, formal_value->getType(), &graph,
+            call->getParent(), nullptr, call);
+        load_mem->setDescription(
+            (Twine("call.input.mem.") + Twine(raw_index)).str());
+        (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, pseudo_input,
+                                                         load_mem);
+        mem_value_t values = binding_values ? *binding_values
+                                            : makeFallbackValues(LocValue::FREE_VARIABLE);
+        if (values.empty())
+          values = makeFallbackValues(LocValue::FREE_VARIABLE);
+        populateLoadMemoryNode(graph, load_mem, values, call->getParent(), builder);
+        site->addPseudoInput(callee, pseudo_input);
       }
 
       auto ret_bind_it = call_ret_bindings.find(call);
@@ -691,23 +640,14 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
       }
 
       const auto &outputs = callee_graph->getOutputs();
-      bool complete_pseudo_outputs = true;
-      if (outputs.size() > 1) {
-        if (!pseudo_outputs || pseudo_outputs->size() < outputs.size()) {
-          complete_pseudo_outputs = false;
-        } else {
-          for (size_t idx = 1; idx < outputs.size(); ++idx) {
-            if (!(*pseudo_outputs)[idx]) {
-              complete_pseudo_outputs = false;
-              break;
-            }
-          }
-        }
-      }
-
-      if (complete_pseudo_outputs) {
-        for (size_t idx = 1; idx < outputs.size(); ++idx) {
-          Value *pseudo_value = (*pseudo_outputs)[idx];
+      for (size_t idx = 1; idx < outputs.size(); ++idx) {
+        Value *pseudo_value =
+            (pseudo_outputs && idx < pseudo_outputs->size()) ? (*pseudo_outputs)[idx]
+                                                             : nullptr;
+        if (!pseudo_value)
+          pseudo_value = createSyntheticInterfaceValue(
+              outputs[idx]->getType(),
+              (Twine("pseudo.output.") + Twine(idx - 1)).str());
         auto *pseudo_output = graph.createNode<GuardedValueFlowCallOutputNode>(
             GuardedValueFlowNode::Kind::CallSitePseudoOutput,
             outputs[idx]->getType(), &graph, entry_block, pseudo_value, call,
@@ -725,12 +665,6 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, store_mem,
                                                          pseudo_output);
         site->addPseudoOutput(callee, pseudo_output);
-      }
-      }
-      if (!complete_pseudo_outputs && outputs.size() > 1) {
-        LLVM_DEBUG(dbgs() << "[gvg-adapter] Dropping pseudo-output interface at "
-                          << *call << " for callee " << callee->getName()
-                          << " due to incomplete bindings\n");
       }
     }
   }
