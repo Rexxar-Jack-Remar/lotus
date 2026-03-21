@@ -206,6 +206,142 @@ TEST(PipelineSchedulerHarnessTest,
   EXPECT_TRUE(ReleasedFunctions.count("leaf") != 0);
 }
 
+TEST(PipelineSchedulerHarnessTest, QueuedTasksDoNotTimeoutBeforeWorkersPickThemUp) {
+  ThreadPool *pool = ThreadPool::get();
+  if (pool->workerCount() < 2)
+    GTEST_SKIP() << "This regression requires at least two worker threads.";
+
+  static constexpr const char *IR = R"IR(
+    define void @leaf() {
+    entry:
+      ret void
+    }
+
+    define void @mid() {
+    entry:
+      call void @leaf()
+      ret void
+    }
+
+    define void @root() {
+    entry:
+      call void @mid()
+      ret void
+    }
+  )IR";
+
+  llvm::LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_TRUE(M);
+
+  llvm::CallGraph CG(*M);
+  PipelineScheduler Scheduler(*M, CG, PipelineScheduler::AT_Local);
+  Scheduler.setTaskTimeout(1);
+
+  std::promise<void> ReleaseWorkers;
+  auto ReleaseFuture = ReleaseWorkers.get_future().share();
+  std::atomic<unsigned> BlockedWorkers(0);
+
+  auto blocker_group = pool->makeTaskGroup();
+  for (unsigned i = 0; i < pool->workerCount(); ++i) {
+    blocker_group.async([&]() {
+      BlockedWorkers.fetch_add(1, std::memory_order_release);
+      ReleaseFuture.wait();
+    });
+  }
+
+  for (int spin = 0;
+       spin < 200 &&
+       BlockedWorkers.load(std::memory_order_acquire) != pool->workerCount();
+       ++spin) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_EQ(BlockedWorkers.load(std::memory_order_acquire), pool->workerCount());
+
+  std::atomic<int> Executed(0);
+  Scheduler.setTaskCallback([&](const llvm::Function *) {
+    Executed.fetch_add(1, std::memory_order_relaxed);
+  });
+
+  auto RunFuture = std::async(std::launch::async, [&]() { Scheduler.run(); });
+
+  EXPECT_EQ(RunFuture.wait_for(std::chrono::milliseconds(50)),
+            std::future_status::timeout);
+
+  ReleaseWorkers.set_value();
+  blocker_group.wait();
+  EXPECT_NO_THROW(RunFuture.get());
+  EXPECT_EQ(Executed.load(std::memory_order_relaxed), 3);
+}
+
+TEST(PipelineSchedulerHarnessTest, QueuedTasksTimeoutWhenWorkersNeverFreeUp) {
+  ThreadPool *pool = ThreadPool::get();
+  if (pool->workerCount() < 2)
+    GTEST_SKIP() << "This regression requires at least two worker threads.";
+
+  static constexpr const char *IR = R"IR(
+    define void @leaf() {
+    entry:
+      ret void
+    }
+
+    define void @mid() {
+    entry:
+      call void @leaf()
+      ret void
+    }
+
+    define void @root() {
+    entry:
+      call void @mid()
+      ret void
+    }
+  )IR";
+
+  llvm::LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_TRUE(M);
+
+  llvm::CallGraph CG(*M);
+  PipelineScheduler Scheduler(*M, CG, PipelineScheduler::AT_Local);
+  Scheduler.setTaskTimeout(0);
+  Scheduler.setTaskCallback([](const llvm::Function *) {});
+
+  std::promise<void> ReleaseWorkers;
+  auto ReleaseFuture = ReleaseWorkers.get_future().share();
+  std::atomic<unsigned> BlockedWorkers(0);
+
+  auto blocker_group = pool->makeTaskGroup();
+  for (unsigned i = 0; i < pool->workerCount(); ++i) {
+    blocker_group.async([&]() {
+      BlockedWorkers.fetch_add(1, std::memory_order_release);
+      ReleaseFuture.wait();
+    });
+  }
+
+  for (int spin = 0;
+       spin < 200 &&
+       BlockedWorkers.load(std::memory_order_acquire) != pool->workerCount();
+       ++spin) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_EQ(BlockedWorkers.load(std::memory_order_acquire), pool->workerCount());
+
+  auto RunFuture = std::async(std::launch::async, [&]() { Scheduler.run(); });
+  EXPECT_EQ(RunFuture.wait_for(std::chrono::milliseconds(500)),
+            std::future_status::ready);
+
+  try {
+    RunFuture.get();
+    FAIL() << "scheduler should time out when queued tasks never start";
+  } catch (const std::runtime_error &Err) {
+    EXPECT_NE(std::string(Err.what()).find("timed out"), std::string::npos);
+  }
+
+  ReleaseWorkers.set_value();
+  blocker_group.wait();
+}
+
 } // namespace
 
 int main(int argc, char **argv) {

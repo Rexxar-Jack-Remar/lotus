@@ -111,6 +111,28 @@ TEST(LockfreeHashTableTest, CheckCounterHandlesVersionWraparound) {
       table.check_counter(max_counter - 1U, max_counter - 2U, 1U, 2U));
 }
 
+TEST(LockfreeHashTableTest, HelpRelocatePreservesFullWidthVersionCounters) {
+  Lockfree_hash_table table(32, 1);
+  const int key = 7;
+  const int first_slot = table.hash1(key);
+  const int second_slot = table.hash2(key);
+  const Count_ptr::counter_type large_counter = 70000U;
+
+  auto *src = new Hash_entry(key, 11);
+  auto *dst = new Hash_entry(key + 1, 17);
+  table.table[0][first_slot].store(Count_ptr{src, large_counter, true, {0, 0, 0}},
+                                   std::memory_order_seq_cst);
+  table.table[1][second_slot].store(Count_ptr{dst, 3U, false, {0, 0, 0}},
+                                    std::memory_order_seq_cst);
+
+  table.help_relocate(0, first_slot, true, 0);
+
+  const Count_ptr after = table.loadTable(0, first_slot);
+  EXPECT_EQ(slotPointer(after), src);
+  EXPECT_FALSE(after.marked);
+  EXPECT_EQ(slotVersion(after), large_counter + 1U);
+}
+
 TEST(LockfreeHashTableTest, ConcurrentSameKeyUpdatesRemainReachable) {
   Lockfree_hash_table table(32, 2);
   std::atomic<bool> start(false);

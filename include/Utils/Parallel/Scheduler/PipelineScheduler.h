@@ -93,6 +93,7 @@ private:
   std::vector<std::shared_ptr<Task>> FinishedTaskVec;
   std::mutex FTVecMutex;
   std::condition_variable FTVecCond;
+  std::atomic<std::uint32_t> OutstandingTaskCount{0};
   std::atomic<std::uint32_t> ActiveTaskCount{0};
   std::atomic<std::uint32_t> FinishedTaskCountForDump{0};
   /// @}

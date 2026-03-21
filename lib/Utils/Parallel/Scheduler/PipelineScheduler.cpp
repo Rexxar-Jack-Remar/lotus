@@ -123,6 +123,7 @@ void PipelineScheduler::finishTask(std::shared_ptr<Task> T) {
         static_cast<std::uint32_t>(FinishedTaskVec.size()),
         std::memory_order_relaxed);
   }
+  OutstandingTaskCount.fetch_sub(1, std::memory_order_relaxed);
   ActiveTaskCount.fetch_sub(1, std::memory_order_relaxed);
   FTVecCond.notify_one();
 }
@@ -147,6 +148,7 @@ void PipelineScheduler::resetRunState() {
     FinishedTaskVec.clear();
   }
   FinishedTaskCountForDump.store(0, std::memory_order_relaxed);
+  OutstandingTaskCount.store(0, std::memory_order_relaxed);
   ActiveTaskCount.store(0, std::memory_order_relaxed);
   {
     std::lock_guard<std::mutex> Lock(FailureMutex);
@@ -215,23 +217,30 @@ void PipelineScheduler::run() {
 void PipelineScheduler::executeTask(std::shared_ptr<Task> T) {
   assert(ExecutionGroup && "scheduler execution group must be initialized");
   const lotus::CancellationToken Token = ExecutionCancellation.token();
-  ExecutionGroup->async(Token, [T, this, Token]() {
-    ActiveTaskCount.fetch_add(1, std::memory_order_relaxed);
-    if (Token.isCancelled()) {
-      finishTask(T);
-      return;
-    }
+  OutstandingTaskCount.fetch_add(1, std::memory_order_relaxed);
+  try {
+    ExecutionGroup->async(Token, [T, this, Token]() {
+      ActiveTaskCount.fetch_add(1, std::memory_order_relaxed);
+      if (Token.isCancelled()) {
+        finishTask(T);
+        return;
+      }
 
-    try {
-      T->run();
-    } catch (...) {
-      recordTaskFailure(std::current_exception());
-      ExecutionCancellation.cancel();
+      try {
+        T->run();
+      } catch (...) {
+        recordTaskFailure(std::current_exception());
+        ExecutionCancellation.cancel();
+        ThreadPool::get()->cancelPendingTasks();
+        finishTask(T);
+        throw;
+      }
       finishTask(T);
-      throw;
-    }
-    finishTask(T);
-  });
+    });
+  } catch (...) {
+    OutstandingTaskCount.fetch_sub(1, std::memory_order_relaxed);
+    throw;
+  }
 }
 
 void PipelineScheduler::waitTask() {
@@ -241,6 +250,12 @@ void PipelineScheduler::waitTask() {
   std::size_t NumGCTasks = 0;
   const auto WaitTimeout = std::chrono::milliseconds(
       TaskTimeout <= 0 ? 1LL : static_cast<long long>(TaskTimeout) * 1000LL);
+  std::chrono::steady_clock::time_point QueuedIdleSince;
+  bool TrackingQueuedIdle = false;
+  auto CancelOutstandingWork = [this]() {
+    ExecutionCancellation.cancel();
+    ThreadPool::get()->cancelPendingTasks();
+  };
 
   while (NumUnfinishedTasks || NumGCTasks) {
     LLVM_DEBUG(dbgs() << "[PipelineScheduler] Unfinished tasks: "
@@ -249,14 +264,52 @@ void PipelineScheduler::waitTask() {
     std::shared_ptr<Task> T;
     {
       std::unique_lock<std::mutex> Lock(FTVecMutex);
-      FTVecCond.wait_for(Lock, WaitTimeout,
+      auto RemainingWait = WaitTimeout;
+      if (FinishedTaskVec.empty()) {
+        const auto Active = ActiveTaskCount.load(std::memory_order_relaxed);
+        const auto Outstanding =
+            OutstandingTaskCount.load(std::memory_order_relaxed);
+        if (Outstanding != 0 && Active == 0) {
+          const auto Now = std::chrono::steady_clock::now();
+          if (!TrackingQueuedIdle) {
+            QueuedIdleSince = Now;
+            TrackingQueuedIdle = true;
+          } else {
+            const auto Elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    Now - QueuedIdleSince);
+            if (Elapsed >= WaitTimeout) {
+              Prog.showProgress(1);
+              CancelOutstandingWork();
+              recordTaskFailure(std::make_exception_ptr(SchedulerTimeoutError(
+                  "PipelineScheduler timed out waiting for queued tasks to "
+                  "start")));
+              errs() << "\nError: Timeout waiting for queued tasks to start; "
+                        "cancelling outstanding work.\n";
+              break;
+            }
+            RemainingWait = WaitTimeout - Elapsed;
+          }
+        } else if (Active != 0) {
+          TrackingQueuedIdle = false;
+        }
+      }
+
+      FTVecCond.wait_for(Lock, RemainingWait,
                          [this] { return !FinishedTaskVec.empty(); });
 
       if (FinishedTaskVec.empty()) {
-        if (ActiveTaskCount.load(std::memory_order_relaxed) != 0)
+        const auto Active = ActiveTaskCount.load(std::memory_order_relaxed);
+        const auto Outstanding =
+            OutstandingTaskCount.load(std::memory_order_relaxed);
+        if (Active != 0) {
+          TrackingQueuedIdle = false;
+          continue;
+        }
+        if (Outstanding != 0)
           continue;
         Prog.showProgress(1);
-        ExecutionCancellation.cancel();
+        CancelOutstandingWork();
         recordTaskFailure(std::make_exception_ptr(SchedulerTimeoutError(
             "PipelineScheduler timed out waiting for tasks")));
         errs() << "\nError: Timeout waiting for tasks; cancelling "
@@ -269,13 +322,14 @@ void PipelineScheduler::waitTask() {
       FinishedTaskCountForDump.store(
           static_cast<std::uint32_t>(FinishedTaskVec.size()),
           std::memory_order_relaxed);
+      TrackingQueuedIdle = false;
     }
 
     if (isa<GCTask>(T.get())) {
       assert(NumGCTasks != 0 && "GC task accounting underflow");
       --NumGCTasks;
       if (getTaskFailure()) {
-        ExecutionCancellation.cancel();
+        CancelOutstandingWork();
         break;
       }
       continue;
@@ -285,7 +339,7 @@ void PipelineScheduler::waitTask() {
     --NumUnfinishedTasks;
 
     if (getTaskFailure()) {
-      ExecutionCancellation.cancel();
+      CancelOutstandingWork();
       break;
     }
 
@@ -298,7 +352,7 @@ void PipelineScheduler::waitTask() {
     }
 
     if (getTaskFailure()) {
-      ExecutionCancellation.cancel();
+      CancelOutstandingWork();
       break;
     }
 
@@ -310,7 +364,7 @@ void PipelineScheduler::waitTask() {
   }
 
   if (getTaskFailure())
-    ExecutionCancellation.cancel();
+    CancelOutstandingWork();
 
   if (!getTaskFailure() && EnableGC && GCCallback &&
       !FunctionToRelease.empty()) {

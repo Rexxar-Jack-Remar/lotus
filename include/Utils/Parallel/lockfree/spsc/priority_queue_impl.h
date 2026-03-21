@@ -39,8 +39,6 @@
 
 /************************** INCLUDE ***************************/
 
-#include <cassert>
-
 namespace lockfree {
 namespace spsc {
 /********************** PUBLIC METHODS ************************/
@@ -48,7 +46,9 @@ namespace spsc {
 template <typename T, size_t size, size_t priority_count>
 bool PriorityQueue<T, size, priority_count>::Push(const T &element,
                                                   const size_t priority) {
-    assert(priority < priority_count);
+    if (priority >= priority_count) {
+        return false;
+    }
 
     return _subqueue[priority].Push(element);
 }

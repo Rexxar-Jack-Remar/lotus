@@ -70,7 +70,7 @@ ThreadPool::ThreadPool() : IsStop(false) {
         before_thread_start_hook();
 
       for (;;) {
-        std::function<void()> Task;
+        PendingTask Task;
 
         {
           std::unique_lock<std::mutex> Lock(this->QueueMutex);
@@ -86,13 +86,13 @@ ThreadPool::ThreadPool() : IsStop(false) {
           }
           if (!this->TaskQueue.empty()) {
             Task = std::move(this->TaskQueue.front());
-            this->TaskQueue.pop();
+            this->TaskQueue.pop_front();
           }
 
           NumRunningTask++;
         }
 
-        Task();
+        Task.Run();
 
         {
           std::unique_lock<std::mutex> Lock(this->QueueMutex);
@@ -109,7 +109,7 @@ ThreadPool::ThreadPool() : IsStop(false) {
 }
 
 bool ThreadPool::runOnePendingTaskOrWait() {
-  std::function<void()> Task;
+  PendingTask Task;
   {
     std::unique_lock<std::mutex> Lock(QueueMutex);
     if (TaskQueue.empty()) {
@@ -124,11 +124,11 @@ bool ThreadPool::runOnePendingTaskOrWait() {
     }
 
     Task = std::move(TaskQueue.front());
-    TaskQueue.pop();
+    TaskQueue.pop_front();
     ++NumRunningTask;
   }
 
-  Task();
+  Task.Run();
 
   {
     std::unique_lock<std::mutex> Lock(QueueMutex);
@@ -140,6 +140,39 @@ bool ThreadPool::runOnePendingTaskOrWait() {
   }
 
   return true;
+}
+
+void ThreadPool::enqueuePendingTask(PendingTask Task) {
+  if (!hasWorkers()) {
+    Task.Run();
+    return;
+  }
+
+  {
+    std::unique_lock<std::mutex> Lock(QueueMutex);
+    if (IsStop)
+      llvm_unreachable("enqueue on stopped ThreadPool");
+    TaskQueue.push_back(std::move(Task));
+  }
+  Condition.notify_one();
+}
+
+void ThreadPool::cancelPendingTasks() {
+  bool RemovedTask = false;
+  {
+    std::unique_lock<std::mutex> Lock(QueueMutex);
+    for (auto It = TaskQueue.begin(); It != TaskQueue.end();) {
+      if (It->TryCancel && It->TryCancel()) {
+        It = TaskQueue.erase(It);
+        RemovedTask = true;
+      } else {
+        ++It;
+      }
+    }
+  }
+
+  if (RemovedTask)
+    Condition.notify_all();
 }
 
 // Waits for all tasks to complete.

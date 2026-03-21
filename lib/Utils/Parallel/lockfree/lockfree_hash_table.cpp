@@ -401,7 +401,7 @@ void Lockfree_hash_table::help_relocate(int which, int index, bool initiator, in
 
     Count_ptr Expected = ptr1;
     compareExchangeTable(which, index, Expected,
-                         make_pointer(src, static_cast<std::uint16_t>(ts1 + 1)));
+                         make_pointer(src, ts1 + 1U));
     return;
     
   }

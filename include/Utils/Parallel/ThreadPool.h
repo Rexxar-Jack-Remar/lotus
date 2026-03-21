@@ -22,6 +22,7 @@
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <future>
 #include <iterator>
@@ -264,6 +265,10 @@ public:
   /// Wait until no tasks remain
   void wait();
 
+  /// Execute and remove any queued tasks whose cancellation predicates now
+  /// report that they can be completed without a worker thread.
+  void cancelPendingTasks();
+
   /// Legacy raw thread-local support. New code should prefer makeThreadLocal()
   /// and makeThreadLocalReducer().
   template <class LocalTy> void initThreadLocal() {
@@ -305,12 +310,19 @@ public:
   }
 
 private:
+  struct PendingTask {
+    std::function<void()> Run;
+    std::function<bool()> TryCancel;
+  };
+
+  void enqueuePendingTask(PendingTask Task);
+
   /// We need to keep track of threads so we can join them recording the
   /// workers of the thread pool.
   std::vector<std::thread> Workers;
 
   /// The task queue containing tasks.
-  std::queue<std::function<void()>> TaskQueue;
+  std::deque<PendingTask> TaskQueue;
 
   std::mutex QueueMutex;             ///< The lock
   std::condition_variable Condition; ///< the wait cond
@@ -339,16 +351,7 @@ auto ThreadPool::enqueue(F &&Func, Args &&...Arguments)
     return Res;
   }
 
-  {
-    std::unique_lock<std::mutex> Lock(QueueMutex); // acquiring lock
-
-    // don't allow to enqueue after stopping the pool
-    if (IsStop)
-      llvm_unreachable("enqueue on stopped ThreadPool");
-
-    TaskQueue.emplace([Task]() { (*Task)(); });
-  }
-  Condition.notify_one();
+  enqueuePendingTask(PendingTask{[Task]() { (*Task)(); }, {}});
   return Res;
 }
 
@@ -381,14 +384,15 @@ auto ThreadPool::TaskGroup::async(F &&Func, Args &&...Arguments)
   }
 
   try {
-    Owner->enqueue([State, Task]() mutable {
+    auto CompleteTask = [State, Task]() mutable {
       (*Task)();
 
       std::lock_guard<std::mutex> Lock(State->Mutex);
       assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
       --State->PendingTasks;
       State->Condition.notify_all();
-    });
+    };
+    Owner->enqueuePendingTask(PendingTask{CompleteTask, {}});
   } catch (...) {
     std::lock_guard<std::mutex> Lock(State->Mutex);
     assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
@@ -436,14 +440,22 @@ auto ThreadPool::TaskGroup::async(const lotus::CancellationToken &Token,
   }
 
   try {
-    Owner->enqueue([State, Task]() mutable {
+    auto CompleteTask = [State, Task]() mutable {
       (*Task)();
 
       std::lock_guard<std::mutex> Lock(State->Mutex);
       assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
       --State->PendingTasks;
       State->Condition.notify_all();
-    });
+    };
+    Owner->enqueuePendingTask(PendingTask{
+        CompleteTask,
+        [Token, CompleteTask]() mutable {
+          if (!Token.isCancelled())
+            return false;
+          CompleteTask();
+          return true;
+        }});
   } catch (...) {
     std::lock_guard<std::mutex> Lock(State->Mutex);
     assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");

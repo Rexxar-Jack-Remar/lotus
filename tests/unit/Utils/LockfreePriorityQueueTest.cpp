@@ -39,4 +39,20 @@ TEST(LockfreePriorityQueueTest, MpmcPriorityQueuePopsHighestPriorityFirst) {
   EXPECT_FALSE(queue.Pop(value));
 }
 
+TEST(LockfreePriorityQueueTest, SpscPriorityQueueRejectsOutOfRangePriority) {
+  lockfree::spsc::PriorityQueue<int, 8, 3> queue;
+
+  EXPECT_FALSE(queue.Push(99, 3));
+  int value = 0;
+  EXPECT_FALSE(queue.Pop(value));
+}
+
+TEST(LockfreePriorityQueueTest, MpmcPriorityQueueRejectsOutOfRangePriority) {
+  lockfree::mpmc::PriorityQueue<int, 8, 3> queue;
+
+  EXPECT_FALSE(queue.Push(99, 3));
+  int value = 0;
+  EXPECT_FALSE(queue.Pop(value));
+}
+
 } // namespace
