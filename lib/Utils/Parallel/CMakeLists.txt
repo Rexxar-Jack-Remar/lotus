@@ -1,5 +1,4 @@
 add_library(CanaryParallel STATIC
-    MultiThreading.cpp
     ThreadPool.cpp
     Scheduler/Task.cpp
     Scheduler/PipelineScheduler.cpp

@@ -14,6 +14,15 @@ std::string FunctionTask::toString() {
   return Oss.str();
 }
 
+std::string SCCFunctionTask::toString() {
+  std::ostringstream Oss;
+  Oss << "SCCFunctionTask[" << Funcs.size() << " functions";
+  if (!Funcs.empty() && Funcs.front() && Funcs.front()->hasName())
+    Oss << ", first=" << Funcs.front()->getName().str();
+  Oss << "]";
+  return Oss.str();
+}
+
 std::string GCTask::toString() {
   std::ostringstream Oss;
   Oss << "GCTask[" << FuncSet.size() << " functions]";

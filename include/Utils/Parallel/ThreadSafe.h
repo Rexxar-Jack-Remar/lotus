@@ -73,6 +73,11 @@ public:
     return m_set.insert(value).second;
   }
 
+  bool erase(const T &value) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_set.erase(value) != 0;
+  }
+
   bool contains(const T &value) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_set.find(value) != m_set.end();
@@ -88,7 +93,13 @@ public:
     m_set.clear();
   }
 
-  // For iteration (read-only operations)
+  std::vector<T> snapshot() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return std::vector<T>(m_set.begin(), m_set.end());
+  }
+
+  // For iteration (read-only operations). The callback executes while the set
+  // remains locked.
   template <typename Func> void for_each(Func func) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     for (const auto &item : m_set) {
@@ -119,6 +130,11 @@ public:
     }
   }
 
+  bool erase(const K &key) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_map.erase(key) != 0;
+  }
+
   SimpleOptional<V> get(const K &key) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_map.find(key);
@@ -141,7 +157,22 @@ public:
     m_map.clear();
   }
 
-  // For iteration (read-only operations)
+  std::unordered_map<K, V> snapshot() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_map;
+  }
+
+  template <typename Func> bool update(const K &key, Func func) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_map.find(key);
+    if (it == m_map.end())
+      return false;
+    func(it->second);
+    return true;
+  }
+
+  // For iteration (read-only operations). The callback executes while the map
+  // remains locked.
   template <typename Func> void for_each(Func func) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     for (const auto &item : m_map) {
@@ -220,6 +251,11 @@ public:
   void clear() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_vector.clear();
+  }
+
+  std::vector<T> snapshot() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_vector;
   }
 };
 

@@ -334,7 +334,7 @@ TEST(NPAParallelRhsHarness, VerboseModeDisablesAutomaticParallelSetup) {
       true, min_eqns, npa::detail::NewtonSetupExecutionMode::Auto));
   EXPECT_EQ(npa::detail::should_parallelize_newton_setup(
                 false, min_eqns, npa::detail::NewtonSetupExecutionMode::Auto),
-            !ThreadPool::get()->Workers.empty());
+            ThreadPool::get()->hasWorkers());
 }
 
 TEST(NPAParallelRhsHarness, TensorNewtonSetupMatchesAcrossSetupModes) {
@@ -381,7 +381,7 @@ TEST(NPAParallelRhsHarness, SccPlanCapturesIndependentParallelLayer) {
   ASSERT_EQ(plan.layers.front().size(), 2u);
   EXPECT_TRUE(plan.has_nontrivial_parallelism);
   EXPECT_EQ(npa::detail::should_parallelize_linear_scc(false, plan),
-            !ThreadPool::get()->Workers.empty());
+            ThreadPool::get()->hasWorkers());
 
   auto serial =
       npa::detail::solve_linear_scc_serial_from_plan<D>(false, rhs, init, plan);

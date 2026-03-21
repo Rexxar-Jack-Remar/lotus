@@ -232,7 +232,7 @@ bool should_parallelize_linear_scc(bool verbose, const LinearSccPlan<D> &plan) {
     return false;
   if (!plan.has_nontrivial_parallelism)
     return false;
-  return !ThreadPool::get()->Workers.empty();
+  return ThreadPool::get()->hasWorkers();
 }
 
 inline bool try_claim_linear_step(std::atomic<long> &shared_steps,
@@ -404,25 +404,18 @@ solve_linear_scc_parallel_from_plan(
     }
 
     std::vector<LinearSccTaskResult<D>> results(layer.size());
-    std::vector<std::future<void>> tasks;
-    tasks.reserve(layer.size());
-    for (std::size_t pos = 0; pos < layer.size(); ++pos) {
+    pool->parallelFor<std::size_t>(0, layer.size(), 1, [&](std::size_t pos) {
       const int sid = layer[pos];
-      tasks.emplace_back(pool->enqueue([&, pos, sid] {
-        ScopedExecutionContext<D> context_scope(execution_context);
-        try {
-          solve_linear_scc_parallel_component<D>(
-              rhs, plan.sccs[static_cast<std::size_t>(sid)],
-              plan.intra_scc_users, env, shared_steps, results[pos]);
-        } catch (...) {
-          results[pos].error = std::current_exception();
-        }
-      }));
-    }
-    for (auto &task : tasks)
-      task.get();
+      ScopedExecutionContext<D> context_scope(execution_context);
+      try {
+        solve_linear_scc_parallel_component<D>(
+            rhs, plan.sccs[static_cast<std::size_t>(sid)],
+            plan.intra_scc_users, env, shared_steps, results[pos]);
+      } catch (...) {
+        results[pos].error = std::current_exception();
+      }
+    });
 
-    bool hit_limit = false;
     for (std::size_t pos = 0; pos < layer.size(); ++pos) {
       if (results[pos].error)
         std::rethrow_exception(results[pos].error);
@@ -434,8 +427,11 @@ solve_linear_scc_parallel_from_plan(
             results[pos].values[value_pos];
         init[static_cast<std::size_t>(idx)] = results[pos].values[value_pos];
       }
-      hit_limit = hit_limit || results[pos].hit_limit;
     }
+    const bool hit_limit = pool->parallelReduce<std::size_t>(
+        0, results.size(), 1, false,
+        [&results](std::size_t pos) { return results[pos].hit_limit; },
+        [](bool acc, bool value) { return acc || value; });
     if (hit_limit) {
       npa_note_linear_limit_hit();
       return init;

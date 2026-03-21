@@ -1,15 +1,19 @@
 #ifndef LLVMUTILS_SCHEDULER_PIPELINESCHEDULER_H
 #define LLVMUTILS_SCHEDULER_PIPELINESCHEDULER_H
 
+#include "Utils/Parallel/Cancellation.h"
 #include "Utils/Parallel/Scheduler/Task.h"
+#include "Utils/Parallel/ThreadPool.h"
 #include "Utils/Platform/ProgressBar.h"
 
 #include <condition_variable>
 #include <exception>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
+#include <string>
 #include <vector>
 
 #include <llvm/Analysis/CallGraph.h>
@@ -57,21 +61,21 @@ private:
   /// @{
   std::vector<const Function *> Functions;
   std::map<const Function *, int> FunctionIndexMap;
+  std::vector<int> FunctionToSCC;
   /// @}
 
-  /// Dependency tracking utilities for task scheduling
-  /// @{
-  int *Callees;
-  int *Callers;
-  int *FirstEdge;
-  int *NextEdge;
-  int *OutDegree;
-  /// @}
+  struct SCCNode {
+    std::vector<int> Members;
+    std::vector<int> Callers;
+    std::vector<int> Callees;
+    unsigned RemainingScheduleDeps = 0;
+    unsigned RemainingCallersForGC = 0;
+  };
+
+  std::vector<SCCNode> SCCs;
 
   /// Memory management utilities
   /// @{
-  /// Recording the indegree of each function in the call graph
-  int *InDegree;
   /// Recording the callees of each function
   std::vector<std::set<int>> FunctionCalleeIndexVec;
   /// Recording the functions to release memory
@@ -89,6 +93,8 @@ private:
   /// The first task failure observed on a worker thread.
   std::exception_ptr TaskFailure;
   std::mutex FailureMutex;
+  std::unique_ptr<ThreadPool::TaskGroup> ExecutionGroup;
+  lotus::CancellationSource ExecutionCancellation;
 
   /// Progress bar for user feedback
   ProgressBar Prog;
@@ -120,23 +126,29 @@ private:
   /// Return the first worker failure, if any.
   std::exception_ptr getTaskFailure();
 
-  /// Post-process a FunctionTask after completion
-  int postProcessFunctionTask(std::shared_ptr<FunctionTask> T);
+  /// Post-process an SCC task after completion
+  int postProcessSCCFunctionTask(std::shared_ptr<SCCFunctionTask> T);
 
   /// Wait for tasks and schedule new ones
   void waitTask();
 
-  /// Compute function dependencies for bottom-up analysis
-  int computeBottomUpDeps(size_t ExtraEdges);
+  /// Build the function-level call graph restricted to analyzable functions.
+  void buildFunctionGraph();
 
-  /// Compute function dependencies for top-down analysis
-  int computeTopDownDeps(size_t ExtraEdges);
+  /// Compute SCCs from the function-level call graph.
+  void computeSCCs();
 
-  /// Check if there is a dependency chain from F1 to F2
-  bool reachable(int F1, int F2);
+  /// Build the SCC condensation DAG and initialize scheduler counters.
+  void buildSCCDAG();
 
-  /// Check if a function should be scheduled
-  bool shouldScheduleFunction(const Function *F);
+  /// Return the SCC functions in deterministic execution order.
+  std::vector<const Function *> getOrderedSCCFunctions(int SCCIndex) const;
+
+  /// Add an SCC to the pending GC batch and schedule a batch task if needed.
+  void maybeReleaseSCC(int SCCIndex, int &NumGCTasksAdded);
+
+  /// Schedule a GC batch for the current release set, if it is non-empty.
+  void scheduleGCBatch(int &NumGCTasksAdded);
 
 public:
   PipelineScheduler(Module &M, CallGraph &CG, AnalysisType AT = AT_BottomUp);

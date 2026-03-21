@@ -61,34 +61,37 @@ bool NullCheckAnalysis::runOnModule(Module &M) {
 
   // allocate space for each function for thread safety
   std::set<Function *> Funcs;
+  std::vector<Function *> OrderedFuncs;
   for (auto &F : M)
     if (!F.empty()) {
       AnalysisMap[&F] = nullptr;
       Funcs.insert(&F);
+      OrderedFuncs.push_back(&F);
     }
 
   unsigned Count = 1;
   do {
     RecursiveTimer Iteration("NCA Iteration " + std::to_string(Count));
-    for (auto &F : M) {
-      if (!Funcs.count(&F))
-        continue;
-      ThreadPool::get()->enqueue([this, NFA, &F]() {
-        LocalNullCheckAnalysis *LNCA = nullptr;
-        {
-          std::lock_guard<std::mutex> lock(AnalysisMapMutex);
-          auto it = AnalysisMap.find(&F);
-          if (it != AnalysisMap.end())
-            LNCA = it->second;
-          if (!LNCA) {
-            LNCA = new LocalNullCheckAnalysis(NFA, &F);
-            AnalysisMap[&F] = LNCA;
-          }
-        }
-        LNCA->run();
-      });
-    }
-    ThreadPool::get()->wait(); // wait for all tasks to finish
+    ThreadPool::get()->parallelForEach(OrderedFuncs, 1,
+                                       [this, NFA, &Funcs](Function *F) {
+                                         if (!Funcs.count(F))
+                                           return;
+
+                                         LocalNullCheckAnalysis *LNCA = nullptr;
+                                         {
+                                           std::lock_guard<std::mutex> lock(
+                                               AnalysisMapMutex);
+                                           auto it = AnalysisMap.find(F);
+                                           if (it != AnalysisMap.end())
+                                             LNCA = it->second;
+                                           if (!LNCA) {
+                                             LNCA = new LocalNullCheckAnalysis(
+                                                 NFA, F);
+                                             AnalysisMap[F] = LNCA;
+                                           }
+                                         }
+                                         LNCA->run();
+                                       });
     Funcs.clear();
   } while (Count++ < Round.getValue() && NFA->recompute(Funcs));
 

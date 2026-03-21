@@ -29,7 +29,6 @@
 #include <algorithm>
 #include <atomic>
 #include <csignal>
-#include <future>
 #include <vector>
 
 #include <unistd.h>
@@ -38,6 +37,15 @@ static std::atomic<bool> timeout{false};
 
 static void alarm_handler(int) {
   timeout.store(true, std::memory_order_relaxed);
+}
+
+static std::size_t compute_parallel_tabulation_grain_size(int num_vertices,
+                                                          std::size_t threads) {
+  const std::size_t safe_threads = std::max<std::size_t>(1, threads);
+  const std::size_t scaled_threads = std::max<std::size_t>(1, safe_threads * 4);
+  const std::size_t vertex_count =
+      std::max<std::size_t>(1, static_cast<std::size_t>(num_vertices));
+  return std::max<std::size_t>(1, vertex_count / scaled_threads);
 }
 
 ParallelTabulation::ParallelTabulation(Graph &g)
@@ -110,33 +118,6 @@ bool ParallelTabulation::is_call(int s, int t) { return vfg.label(s, t) > 0; }
 
 bool ParallelTabulation::is_return(int s, int t) { return vfg.label(s, t) < 0; }
 
-/**
- * @brief Worker function for parallel processing of a vertex range.
- *
- * Processes vertices in the range [start, end) in parallel. Each thread
- * maintains its own visited sets to avoid synchronization overhead.
- * Results are written directly into disjoint slots of the shared results vector.
- *
- * @param start Starting vertex index (inclusive)
- * @param end Ending vertex index (exclusive)
- * @param results Shared results vector for storing reachable sets
- */
-void ParallelTabulation::process_vertex_range(int start, int end,
-                                              std::vector<std::set<int>> &results) {
-  for (int i = start; i < end; ++i) {
-    if (timeout.load(std::memory_order_relaxed)) {
-      break;
-    }
-
-    // Compute reachable set for vertex i
-    std::set<int> local_tc;
-    std::set<int> visited;
-    std::set<int> func_visited;
-    traverse_parallel(i, local_tc, visited, func_visited);
-    results[i] = std::move(local_tc);
-  }
-}
-
 void ParallelTabulation::traverse_parallel(int s, std::set<int> &tc,
                                            std::set<int> &visited,
                                            std::set<int> &func_visited) {
@@ -194,86 +175,40 @@ double ParallelTabulation::tc() {
 
   double total_memory = 0;
   std::vector<std::set<int>> results(vfg.num_vertices());
+  ThreadPool *pool = ThreadPool::get();
 
-  // Use parallel processing for the main computation
-  if (num_threads > 1) {
-    // Divide work among threads
-    int vertices_per_thread = vfg.num_vertices() / num_threads;
-    int remainder = vfg.num_vertices() % num_threads;
+  auto compute_vertex_tc = [this, &results](int vertex) {
+    if (timeout.load(std::memory_order_relaxed))
+      return;
 
-    std::vector<std::future<void>> tasks;
-    int current_start = 0;
+    std::set<int> local_tc;
+    std::set<int> visited;
+    std::set<int> func_visited;
+    traverse_parallel(vertex, local_tc, visited, func_visited);
+    results[static_cast<std::size_t>(vertex)] = std::move(local_tc);
+  };
 
-    for (size_t i = 0; i < num_threads; ++i) {
-      int chunk_size = vertices_per_thread + (i < remainder ? 1 : 0);
-      int start = current_start;
-      int end = start + chunk_size;
-
-      if (start >= vfg.num_vertices())
-        break;
-
-      tasks.emplace_back(ThreadPool::get()->enqueue(
-          [this, start, end, &results]() {
-            process_vertex_range(start, end, results);
-          }));
-
-      current_start = end;
-    }
-
-    for (auto &task : tasks)
-      task.get();
+  if (num_threads > 1 && pool->hasWorkers()) {
+    const std::size_t grain_size =
+        compute_parallel_tabulation_grain_size(vfg.num_vertices(), num_threads);
+    pool->parallelFor<int>(0, vfg.num_vertices(), grain_size, compute_vertex_tc);
   } else {
-    // Single-threaded fallback
-    process_vertex_range(0, vfg.num_vertices(), results);
+    for (int i = 0; i < vfg.num_vertices(); ++i)
+      compute_vertex_tc(i);
   }
 
-  // Calculate memory usage
-  for (const auto &tc_set : results) {
-    total_memory += tc_set.size() * sizeof(int);
-  }
+  total_memory =
+      pool->parallelReduce<std::size_t>(0, results.size(), 16, 0.0,
+                                        [&results](std::size_t index) {
+                                          return static_cast<double>(
+                                              results[index].size() *
+                                              sizeof(int));
+                                        },
+                                        [](double acc, double value) {
+                                          return acc + value;
+                                        });
 
   bar.update();
-
-  return total_memory / 1024.0 / 1024.0;
-}
-
-// Alternative implementation using async/future for better load balancing
-double ParallelTabulation::tc_async() {
-  signal(SIGALRM, alarm_handler);
-  timeout.store(false, std::memory_order_relaxed);
-  alarm(3600 * 6);
-
-  CSProgressBar bar(vfg.num_vertices());
-
-  double total_memory = 0;
-  std::vector<std::future<std::set<int>>> futures;
-
-  // Launch asynchronous tasks for each vertex
-  for (int i = 0; i < vfg.num_vertices(); ++i) {
-    if (timeout.load(std::memory_order_relaxed))
-      break;
-
-    futures.emplace_back(ThreadPool::get()->enqueue([this, i]() -> std::set<int> {
-      std::set<int> local_tc;
-      std::set<int> visited;
-      std::set<int> func_visited;
-      traverse_parallel(i, local_tc, visited, func_visited);
-      return local_tc;
-    }));
-  }
-
-  // Collect results
-  std::vector<std::set<int>> results(vfg.num_vertices());
-  for (size_t i = 0; i < futures.size(); ++i) {
-    if (timeout.load(std::memory_order_relaxed))
-      break;
-
-    results[i] = futures[i].get();
-
-    // Update progress and memory calculation
-    total_memory += results[i].size() * sizeof(int);
-    bar.update();
-  }
 
   return total_memory / 1024.0 / 1024.0;
 }

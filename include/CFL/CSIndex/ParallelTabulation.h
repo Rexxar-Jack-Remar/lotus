@@ -5,7 +5,6 @@
 #include "CFL/CSIndex/AbstractQuery.h"
 #include "CFL/CSIndex/Graph.h"
 
-#include <future>
 #include <set>
 #include <vector>
 
@@ -67,22 +66,6 @@ public:
    * @return Memory usage in MB
    */
   double tc();
-
-  /**
-   * @brief Compute transitive closure using async/future pattern (alternative
-   * implementation)
-   * @return Memory usage in MB
-   */
-  double tc_async();
-
-  /**
-   * @brief Process a range of vertices in parallel
-   * @param start Start vertex index
-   * @param end End vertex index
-   * @param results Vector to store results
-   */
-  void process_vertex_range(int start, int end,
-                            std::vector<std::set<int>> &results);
 
   /**
    * @brief Parallel traversal from source vertex

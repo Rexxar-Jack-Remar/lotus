@@ -106,7 +106,6 @@ LLVM-specific utilities:
 
 Multi-threading support:
 
-- `MultiThreading.cpp/.h` – Thread management
 - `ThreadSafe.h` – Thread-safe wrappers
 - `ThreadPool.cpp/.h` – Thread pool
 - `Scheduler/ParallelSchedulerPass.cpp/.h` – Parallel pass scheduling

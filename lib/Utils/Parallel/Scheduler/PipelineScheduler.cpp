@@ -1,9 +1,9 @@
 #include "Utils/Parallel/Scheduler/PipelineScheduler.h"
 
-#include "Utils/Parallel/ThreadPool.h"
-
+#include <algorithm>
 #include <chrono>
 #include <functional>
+#include <stdexcept>
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Function.h>
@@ -20,86 +20,53 @@ static cl::opt<int>
                 cl::desc("Timeout for avoiding deadlock (in seconds)"),
                 cl::ValueOptional, cl::init(60), cl::ReallyHidden);
 
-/// Determine if a function should be analyzed
-static inline bool shouldAnalyzeFunction(const Function *Func) {
-  return Func && !Func->isIntrinsic() && !Func->isDeclaration();
-}
-
 namespace {
 
-enum class VisitState {
-  Unseen,
-  Active,
-  Done,
+class SchedulerTimeoutError : public std::runtime_error {
+public:
+  explicit SchedulerTimeoutError(const std::string &Message)
+      : std::runtime_error(Message) {}
 };
 
 } // namespace
+
+static inline bool shouldAnalyzeFunction(const Function *Func) {
+  return Func && !Func->isIntrinsic() && !Func->isDeclaration();
+}
 
 PipelineScheduler::PipelineScheduler(Module &M, CallGraph &CG, AnalysisType AT)
     : M(M), CG(CG), AType(AT),
       Prog("[Pipeline Scheduler]", ProgressBar::PBS_CharacterStyle),
       ClientContext(nullptr), TaskTimeout(::TaskTimeout.getValue()),
       EnableGC(true), GCBatchSize(100) {
-
-  // Build mapping between functions and integers
   int FuncIndex = 0;
   for (auto &F : M) {
-    if (shouldAnalyzeFunction(&F)) {
-      Functions.push_back(&F);
-      FunctionIndexMap[&F] = FuncIndex++;
-    }
-  }
-  FunctionCalleeIndexVec.resize(FuncIndex);
-
-  LLVM_DEBUG(dbgs() << "[PipelineScheduler] Total functions: " << FuncIndex
-                    << "\n");
-
-  // Count edges for dependency graph
-  size_t NumEdges = 0;
-  for (auto &F : M) {
-    if (shouldAnalyzeFunction(&F)) {
-      CallGraphNode *Node = CG[&F];
-      if (Node) {
-        NumEdges += Node->size();
-      }
-    }
+    if (!shouldAnalyzeFunction(&F))
+      continue;
+    Functions.push_back(&F);
+    FunctionIndexMap[&F] = FuncIndex++;
   }
 
-  // Initialize dependency tracking structures
-  if (AType == AT_BottomUp) {
-    computeBottomUpDeps(NumEdges);
-  } else if (AType == AT_TopDown) {
-    llvm_unreachable("Top-down analysis not yet implemented!");
-  } else {
-    // Local analysis - initialize to zeros
-    int NumFuncs = Functions.size();
-    Callees = new int[NumEdges];
-    Callers = new int[NumEdges];
-    FirstEdge = new int[NumFuncs];
-    NextEdge = new int[NumEdges];
-    OutDegree = new int[NumFuncs];
-    InDegree = new int[NumFuncs];
-    memset(OutDegree, 0, NumFuncs * sizeof(int));
-    memset(InDegree, 0, NumFuncs * sizeof(int));
-    memset(FirstEdge, -1, NumFuncs * sizeof(int));
+  FunctionCalleeIndexVec.resize(Functions.size());
+
+  LLVM_DEBUG(dbgs() << "[PipelineScheduler] Total functions: "
+                    << Functions.size() << "\n");
+
+  if (AType != AT_Local) {
+    buildFunctionGraph();
+    computeSCCs();
+    buildSCCDAG();
   }
 }
 
-PipelineScheduler::~PipelineScheduler() {
-  delete[] OutDegree;
-  delete[] InDegree;
-  delete[] Callees;
-  delete[] Callers;
-  delete[] FirstEdge;
-  delete[] NextEdge;
-}
+PipelineScheduler::~PipelineScheduler() = default;
 
 void PipelineScheduler::finishTask(std::shared_ptr<Task> T) {
   LLVM_DEBUG(dbgs() << "[PipelineScheduler] Task " << T->toString()
                     << " finished\n");
   {
-    std::unique_lock<std::mutex> Lock(this->FTVecMutex);
-    FinishedTaskVec.push_back(T);
+    std::unique_lock<std::mutex> Lock(FTVecMutex);
+    FinishedTaskVec.push_back(std::move(T));
   }
   FTVecCond.notify_one();
 }
@@ -126,30 +93,37 @@ void PipelineScheduler::run() {
   }
 
   llvm::outs() << "Starting pipeline scheduler...\n";
+  ExecutionCancellation = lotus::CancellationSource();
+  ExecutionGroup =
+      std::make_unique<ThreadPool::TaskGroup>(ThreadPool::get()->makeTaskGroup());
 
-  // Schedule initial tasks
-  for (const auto *F : Functions) {
-    if (AType == AT_Local) {
-      // Local analysis: schedule all functions immediately
+  if (AType == AT_Local) {
+    for (const auto *F : Functions) {
       auto FTask =
           std::make_shared<FunctionTask>(F, TaskCallback, ClientContext);
-      this->executeTask(FTask);
-    } else if (AType == AT_BottomUp) {
-      // Bottom-up: schedule leaf functions (no callees)
-      int FIdx = FunctionIndexMap[F];
-      if (OutDegree[FIdx] == 0) {
-        auto FTask =
-            std::make_shared<FunctionTask>(F, TaskCallback, ClientContext);
-        this->executeTask(FTask);
-      }
-    } else {
-      llvm_unreachable("Top-down analysis not yet implemented!");
+      executeTask(FTask);
+    }
+  } else {
+    for (std::size_t SCCIndex = 0; SCCIndex < SCCs.size(); ++SCCIndex) {
+      if (SCCs[SCCIndex].RemainingScheduleDeps != 0)
+        continue;
+      auto SCCTask = std::make_shared<SCCFunctionTask>(
+          static_cast<int>(SCCIndex), getOrderedSCCFunctions(SCCIndex),
+          TaskCallback, ClientContext);
+      executeTask(SCCTask);
     }
   }
 
-  // Wait for tasks to complete and schedule new ones
   waitTask();
-  ThreadPool::get()->wait();
+
+  if (ExecutionGroup) {
+    try {
+      ExecutionGroup->wait();
+    } catch (...) {
+      recordTaskFailure(std::current_exception());
+    }
+    ExecutionGroup.reset();
+  }
 
   if (std::exception_ptr Failure = getTaskFailure())
     std::rethrow_exception(Failure);
@@ -158,69 +132,80 @@ void PipelineScheduler::run() {
 }
 
 void PipelineScheduler::executeTask(std::shared_ptr<Task> T) {
-  ThreadPool::get()->enqueue([T, this]() {
+  assert(ExecutionGroup && "scheduler execution group must be initialized");
+  const lotus::CancellationToken Token = ExecutionCancellation.token();
+  ExecutionGroup->async(Token, [T, this, Token]() {
+    if (Token.isCancelled()) {
+      finishTask(T);
+      return;
+    }
+
     try {
       T->run();
     } catch (...) {
       recordTaskFailure(std::current_exception());
+      ExecutionCancellation.cancel();
+      finishTask(T);
+      throw;
     }
-    this->finishTask(T);
+    finishTask(T);
   });
 }
 
 void PipelineScheduler::waitTask() {
-  size_t NumUnfinishedTasks = Functions.size();
-  size_t NumAllTasks = NumUnfinishedTasks;
-  size_t NumGCTasks = 0;
+  const std::size_t NumAllTasks =
+      (AType == AT_Local) ? Functions.size() : SCCs.size();
+  std::size_t NumUnfinishedTasks = NumAllTasks;
+  std::size_t NumGCTasks = 0;
 
   while (NumUnfinishedTasks || NumGCTasks) {
     LLVM_DEBUG(dbgs() << "[PipelineScheduler] Unfinished tasks: "
                       << NumUnfinishedTasks << "\n");
 
-    if (getTaskFailure()) {
-      errs() << "\nError: task execution failed; stopping scheduler.\n";
-      break;
-    }
-
-    std::shared_ptr<Task> T(nullptr);
+    std::shared_ptr<Task> T;
     {
-      std::unique_lock<std::mutex> Lock(this->FTVecMutex);
-
-      // Wait for a finished task with timeout
+      std::unique_lock<std::mutex> Lock(FTVecMutex);
       FTVecCond.wait_for(Lock, std::chrono::seconds(TaskTimeout * 2),
                          [this] { return !FinishedTaskVec.empty(); });
 
       if (FinishedTaskVec.empty()) {
         Prog.showProgress(1);
-        errs() << "\nWarning: Timeout waiting for tasks!\n";
+        ExecutionCancellation.cancel();
+        recordTaskFailure(std::make_exception_ptr(SchedulerTimeoutError(
+            "PipelineScheduler timed out waiting for tasks")));
+        errs() << "\nError: Timeout waiting for tasks; cancelling "
+                  "outstanding work.\n";
         break;
       }
 
-      // Pop a task
       T = FinishedTaskVec.back();
       FinishedTaskVec.pop_back();
     }
 
     if (isa<GCTask>(T.get())) {
-      NumGCTasks--;
-    } else if (isa<FunctionTask>(T.get())) {
-      if (getTaskFailure()) {
-        --NumUnfinishedTasks;
-        continue;
-      }
-
-      int NumGCTasksAdded =
-          postProcessFunctionTask(std::static_pointer_cast<FunctionTask>(T));
-      NumGCTasks += NumGCTasksAdded;
-
-      --NumUnfinishedTasks;
-      if (NumAllTasks)
-        Prog.showProgress((float)(NumAllTasks - NumUnfinishedTasks) /
-                          (float)NumAllTasks);
-      else
-        Prog.showProgress(1);
+      assert(NumGCTasks != 0 && "GC task accounting underflow");
+      --NumGCTasks;
+      continue;
     }
+
+    assert(NumUnfinishedTasks != 0 && "task accounting underflow");
+    --NumUnfinishedTasks;
+
+    if (!getTaskFailure()) {
+      if (auto *SCCTask = dyn_cast<SCCFunctionTask>(T.get()))
+        NumGCTasks += postProcessSCCFunctionTask(
+            std::static_pointer_cast<SCCFunctionTask>(T));
+    }
+
+    if (NumAllTasks != 0)
+      Prog.showProgress(static_cast<float>(NumAllTasks - NumUnfinishedTasks) /
+                        static_cast<float>(NumAllTasks));
+    else
+      Prog.showProgress(1);
   }
+
+  if (getTaskFailure())
+    ExecutionCancellation.cancel();
 
   if (!getTaskFailure() && EnableGC && GCCallback && !FunctionToRelease.empty()) {
     GCTask TrailingGC(FunctionToRelease, GCCallback, ClientContext);
@@ -231,179 +216,201 @@ void PipelineScheduler::waitTask() {
   llvm::outs() << "\n";
 }
 
-int PipelineScheduler::postProcessFunctionTask(
-    std::shared_ptr<FunctionTask> T) {
-  auto *F = T->getFunction();
+int PipelineScheduler::postProcessSCCFunctionTask(
+    std::shared_ptr<SCCFunctionTask> T) {
+  const int SCCIndex = T->getSCCIndex();
   int NumGCTasksAdded = 0;
 
   if (AType == AT_BottomUp) {
-    // For bottom-up analysis, schedule callers whose callees are all done
-    int FunctionIndex = FunctionIndexMap[F];
-
-    // Check each caller of the finished function
-    int Edge = FirstEdge[FunctionIndex];
-    while (Edge != -1) {
-      int CallerIndex = Callers[Edge];
-      if (--(OutDegree[CallerIndex]) == 0) {
-        // All callees done, schedule this caller
-        auto FTask = std::make_shared<FunctionTask>(
-            Functions[CallerIndex], TaskCallback, ClientContext);
-        this->executeTask(FTask);
+    for (int CallerSCC : SCCs[SCCIndex].Callers) {
+      auto &Caller = SCCs[CallerSCC];
+      assert(Caller.RemainingScheduleDeps != 0 &&
+             "bottom-up dependency underflow");
+      --Caller.RemainingScheduleDeps;
+      if (Caller.RemainingScheduleDeps == 0) {
+        auto ReadyTask = std::make_shared<SCCFunctionTask>(
+            CallerSCC, getOrderedSCCFunctions(CallerSCC), TaskCallback,
+            ClientContext);
+        executeTask(ReadyTask);
       }
-      Edge = NextEdge[Edge];
     }
-
-    // Memory management: release functions no longer needed
-    if (EnableGC && GCCallback) {
-      if (InDegree[FunctionIndex] == 0) {
-        FunctionToRelease.insert(F);
-      }
-
-      auto &FunctionCallees = FunctionCalleeIndexVec[FunctionIndex];
-      for (int CalleeIndex : FunctionCallees) {
-        if (--(InDegree[CalleeIndex]) == 0) {
-          FunctionToRelease.insert(Functions[CalleeIndex]);
-
-          if (FunctionToRelease.size() >= GCBatchSize) {
-            auto GTask = std::make_shared<GCTask>(FunctionToRelease, GCCallback,
-                                                  ClientContext);
-            this->executeTask(GTask);
-            FunctionToRelease.clear();
-            NumGCTasksAdded++;
-          }
-        }
+  } else if (AType == AT_TopDown) {
+    for (int CalleeSCC : SCCs[SCCIndex].Callees) {
+      auto &Callee = SCCs[CalleeSCC];
+      assert(Callee.RemainingScheduleDeps != 0 &&
+             "top-down dependency underflow");
+      --Callee.RemainingScheduleDeps;
+      if (Callee.RemainingScheduleDeps == 0) {
+        auto ReadyTask = std::make_shared<SCCFunctionTask>(
+            CalleeSCC, getOrderedSCCFunctions(CalleeSCC), TaskCallback,
+            ClientContext);
+        executeTask(ReadyTask);
       }
     }
   }
-  // Local analysis: no post-processing needed
+
+  if (EnableGC && GCCallback) {
+    if (SCCs[SCCIndex].RemainingCallersForGC == 0)
+      maybeReleaseSCC(SCCIndex, NumGCTasksAdded);
+
+    for (int CalleeSCC : SCCs[SCCIndex].Callees) {
+      auto &Callee = SCCs[CalleeSCC];
+      assert(Callee.RemainingCallersForGC != 0 && "GC dependency underflow");
+      --Callee.RemainingCallersForGC;
+      if (Callee.RemainingCallersForGC == 0)
+        maybeReleaseSCC(CalleeSCC, NumGCTasksAdded);
+    }
+  }
 
   return NumGCTasksAdded;
 }
 
-int PipelineScheduler::computeBottomUpDeps(size_t NumEdges) {
-  // Build inverse call graph for bottom-up scheduling
-  int NumFuncs = Functions.size();
-
-  Callees = new int[NumEdges];
-  Callers = new int[NumEdges];
-  FirstEdge = new int[NumFuncs];
-  NextEdge = new int[NumEdges];
-  OutDegree = new int[NumFuncs];
-  InDegree = new int[NumFuncs];
-
-  memset(OutDegree, 0, NumFuncs * sizeof(int));
-  memset(InDegree, 0, NumFuncs * sizeof(int));
-  memset(FirstEdge, -1, NumFuncs * sizeof(int));
-  memset(Callees, 0, NumEdges * sizeof(int));
-  memset(Callers, 0, NumEdges * sizeof(int));
-  memset(NextEdge, -1, NumEdges * sizeof(int));
-
-  int EdgeIndex = 0;
-  std::map<const Function *, VisitState> VisitStates;
-  std::function<void(const Function *)> BuildDeps =
-      [&](const Function *Caller) {
-        VisitStates[Caller] = VisitState::Active;
-
-        int CallerIndex = FunctionIndexMap[Caller];
-        CallGraphNode *CallerNode = CG[Caller];
-        if (!CallerNode) {
-          VisitStates[Caller] = VisitState::Done;
-          return;
-        }
-
-        auto &VisitedCallees = FunctionCalleeIndexVec[CallerIndex];
-        for (auto &CallRecord : *CallerNode) {
-          Function *Callee = CallRecord.second->getFunction();
-          if (!shouldAnalyzeFunction(Callee))
-            continue;
-
-          auto CalleeStateIt = VisitStates.find(Callee);
-          VisitState CalleeState = CalleeStateIt == VisitStates.end()
-                                       ? VisitState::Unseen
-                                       : CalleeStateIt->second;
-
-          if (CalleeState == VisitState::Active) {
-            LLVM_DEBUG(dbgs()
-                       << "[PipelineScheduler] Ignoring back edge "
-                       << Caller->getName() << " -> " << Callee->getName()
-                       << "\n");
-            continue;
-          }
-
-          if (CalleeState == VisitState::Unseen)
-            BuildDeps(Callee);
-
-          int CalleeIndex = FunctionIndexMap[Callee];
-
-          LLVM_DEBUG(dbgs() << "[PipelineScheduler] Edge: " << CalleeIndex
-                            << " -> " << CallerIndex << "\n");
-
-          Callees[EdgeIndex] = CalleeIndex;
-          Callers[EdgeIndex] = CallerIndex;
-          NextEdge[EdgeIndex] = FirstEdge[CalleeIndex];
-          FirstEdge[CalleeIndex] = EdgeIndex;
-          OutDegree[CallerIndex]++;
-
-          if (!VisitedCallees.count(CalleeIndex)) {
-            InDegree[CalleeIndex]++;
-            VisitedCallees.insert(CalleeIndex);
-          }
-
-          EdgeIndex++;
-        }
-
-        VisitStates[Caller] = VisitState::Done;
-      };
-
-  for (const auto *Caller : Functions) {
-    if (VisitStates[Caller] == VisitState::Unseen)
-      BuildDeps(Caller);
-  }
-
-  return EdgeIndex;
-}
-
-int PipelineScheduler::computeTopDownDeps(size_t NumEdges) {
-  // TODO: Implement top-down dependency computation
-  return 0;
-}
-
-bool PipelineScheduler::reachable(int F1, int F2) {
-  std::vector<int> Stack;
-  Stack.push_back(F2);
-  std::set<int> Visited;
-
-  while (!Stack.empty()) {
-    int F = Stack.back();
-    Stack.pop_back();
-
-    if (Visited.count(F))
+void PipelineScheduler::buildFunctionGraph() {
+  for (std::size_t CallerIndex = 0; CallerIndex < Functions.size();
+       ++CallerIndex) {
+    const Function *Caller = Functions[CallerIndex];
+    CallGraphNode *CallerNode = CG[const_cast<Function *>(Caller)];
+    if (!CallerNode)
       continue;
-    if (F == F1)
-      return true;
-    Visited.insert(F);
 
-    int Edge = FirstEdge[F];
-    while (Edge != -1) {
-      int CallerIndex = Callers[Edge];
-      if (!Visited.count(CallerIndex)) {
-        Stack.push_back(CallerIndex);
-      }
-      Edge = NextEdge[Edge];
+    auto &Callees = FunctionCalleeIndexVec[CallerIndex];
+    for (auto &CallRecord : *CallerNode) {
+      Function *Callee = CallRecord.second->getFunction();
+      if (!shouldAnalyzeFunction(Callee))
+        continue;
+
+      auto CalleeIt = FunctionIndexMap.find(Callee);
+      if (CalleeIt == FunctionIndexMap.end())
+        continue;
+
+      Callees.insert(CalleeIt->second);
     }
   }
-  return false;
 }
 
-bool PipelineScheduler::shouldScheduleFunction(const Function *F) {
-  return shouldAnalyzeFunction(F);
+void PipelineScheduler::computeSCCs() {
+  SCCs.clear();
+  FunctionToSCC.assign(Functions.size(), -1);
+
+  std::vector<int> Indices(Functions.size(), -1);
+  std::vector<int> LowLinks(Functions.size(), -1);
+  std::vector<int> Stack;
+  std::vector<bool> OnStack(Functions.size(), false);
+  int NextIndex = 0;
+
+  auto FunctionOrder = [this](int LHS, int RHS) {
+    const Function *LF = Functions[static_cast<std::size_t>(LHS)];
+    const Function *RF = Functions[static_cast<std::size_t>(RHS)];
+    if (LF->hasName() != RF->hasName())
+      return LF->hasName() && !RF->hasName();
+    if (LF->hasName() && RF->hasName() &&
+        LF->getName() != RF->getName()) {
+      return LF->getName() < RF->getName();
+    }
+    return FunctionIndexMap.at(LF) < FunctionIndexMap.at(RF);
+  };
+
+  std::function<void(int)> StrongConnect = [&](int V) {
+    Indices[V] = NextIndex;
+    LowLinks[V] = NextIndex;
+    ++NextIndex;
+    Stack.push_back(V);
+    OnStack[V] = true;
+
+    for (int W : FunctionCalleeIndexVec[static_cast<std::size_t>(V)]) {
+      if (Indices[W] == -1) {
+        StrongConnect(W);
+        LowLinks[V] = std::min(LowLinks[V], LowLinks[W]);
+      } else if (OnStack[W]) {
+        LowLinks[V] = std::min(LowLinks[V], Indices[W]);
+      }
+    }
+
+    if (LowLinks[V] != Indices[V])
+      return;
+
+    SCCNode Node;
+    const int SCCIndex = static_cast<int>(SCCs.size());
+    while (true) {
+      int W = Stack.back();
+      Stack.pop_back();
+      OnStack[W] = false;
+      Node.Members.push_back(W);
+      FunctionToSCC[static_cast<std::size_t>(W)] = SCCIndex;
+      if (W == V)
+        break;
+    }
+
+    std::sort(Node.Members.begin(), Node.Members.end(), FunctionOrder);
+    SCCs.push_back(std::move(Node));
+  };
+
+  for (std::size_t FunctionIndex = 0; FunctionIndex < Functions.size();
+       ++FunctionIndex) {
+    if (Indices[FunctionIndex] == -1)
+      StrongConnect(static_cast<int>(FunctionIndex));
+  }
+}
+
+void PipelineScheduler::buildSCCDAG() {
+  std::vector<std::set<int>> SCCCallers(SCCs.size());
+  std::vector<std::set<int>> SCCCallees(SCCs.size());
+
+  for (std::size_t CallerIndex = 0; CallerIndex < Functions.size();
+       ++CallerIndex) {
+    const int CallerSCC = FunctionToSCC[CallerIndex];
+    for (int CalleeIndex : FunctionCalleeIndexVec[CallerIndex]) {
+      const int CalleeSCC = FunctionToSCC[static_cast<std::size_t>(CalleeIndex)];
+      if (CallerSCC == CalleeSCC)
+        continue;
+      SCCCallees[CallerSCC].insert(CalleeSCC);
+      SCCCallers[CalleeSCC].insert(CallerSCC);
+    }
+  }
+
+  for (std::size_t SCCIndex = 0; SCCIndex < SCCs.size(); ++SCCIndex) {
+    auto &Node = SCCs[SCCIndex];
+    Node.Callers.assign(SCCCallers[SCCIndex].begin(), SCCCallers[SCCIndex].end());
+    Node.Callees.assign(SCCCallees[SCCIndex].begin(), SCCCallees[SCCIndex].end());
+    Node.RemainingCallersForGC = Node.Callers.size();
+    Node.RemainingScheduleDeps =
+        (AType == AT_BottomUp) ? Node.Callees.size() : Node.Callers.size();
+  }
+}
+
+std::vector<const Function *>
+PipelineScheduler::getOrderedSCCFunctions(int SCCIndex) const {
+  std::vector<const Function *> OrderedFunctions;
+  for (int FunctionIndex : SCCs[static_cast<std::size_t>(SCCIndex)].Members)
+    OrderedFunctions.push_back(Functions[static_cast<std::size_t>(FunctionIndex)]);
+  return OrderedFunctions;
+}
+
+void PipelineScheduler::maybeReleaseSCC(int SCCIndex, int &NumGCTasksAdded) {
+  for (int FunctionIndex : SCCs[static_cast<std::size_t>(SCCIndex)].Members)
+    FunctionToRelease.insert(Functions[static_cast<std::size_t>(FunctionIndex)]);
+
+  if (FunctionToRelease.size() >= GCBatchSize)
+    scheduleGCBatch(NumGCTasksAdded);
+}
+
+void PipelineScheduler::scheduleGCBatch(int &NumGCTasksAdded) {
+  if (FunctionToRelease.empty())
+    return;
+
+  auto GTask =
+      std::make_shared<GCTask>(FunctionToRelease, GCCallback, ClientContext);
+  executeTask(GTask);
+  FunctionToRelease.clear();
+  ++NumGCTasksAdded;
 }
 
 void PipelineScheduler::dumpStatus() {
-  std::unique_lock<std::mutex> Lock(this->FTVecMutex);
+  std::unique_lock<std::mutex> Lock(FTVecMutex);
   llvm::outs() << "\n[PipelineScheduler Status]\n";
   llvm::outs() << "  Finished tasks in queue: " << FinishedTaskVec.size()
                << "\n";
   llvm::outs() << "  Functions to release: " << FunctionToRelease.size()
                << "\n";
+  llvm::outs() << "  SCCs tracked: " << SCCs.size() << "\n";
 }

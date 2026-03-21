@@ -136,8 +136,71 @@ Parallel Utilities
 
 Multi-threading and lock-free data structures in ``lib/Utils/Parallel/`` and ``include/Utils/Parallel/``:
 
-* **MultiThreading.h** - Multi-threading utilities and helpers
+* **ThreadPool.h** - Thread pool and task group utilities
+* **ThreadSafe.h** - Thread-safe container wrappers
+* **Cancellation.h** - Cooperative cancellation tokens for parallel work
 * **lockfree/** - Lock-free queues and hash tables (SPSC, MPMC)
+
+Recommended ThreadPool patterns
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``ThreadPool`` is the preferred entry point for analysis parallelism.
+
+* Use ``parallelFor()`` for index-based parallel loops.
+* Use ``parallelForEach()`` for container traversal when order does not matter.
+* Use ``parallelReduce()`` for parallel aggregation followed by deterministic merge on the caller thread.
+* Use ``makeThreadLocal()`` or ``makeThreadLocalReducer()`` for per-worker scratch state instead of raw ``void*`` thread locals.
+* Use ``CancellationSource`` / ``CancellationToken`` for cooperative cancellation.
+* ``TaskGroup::wait()`` is safe to call from worker tasks; workers help drain the pool instead of purely blocking.
+
+**Usage**:
+.. code-block:: cpp
+
+   #include "Utils/Parallel/ThreadPool.h"
+   ThreadPool* pool = ThreadPool::get();
+
+   pool->parallelFor<int>(0, work_items, 8, [&](int i) {
+     analyze(i);
+   });
+
+   auto total = pool->parallelReduce<std::size_t>(
+       0, values.size(), 16, 0ULL,
+       [&](std::size_t i) { return values[i]; },
+       [](unsigned long long acc, unsigned long long value) {
+         return acc + value;
+       });
+
+   auto reducer = pool->makeThreadLocalReducer<std::set<int>>(
+       [](std::set<int> acc, const std::set<int>& local) {
+         acc.insert(local.begin(), local.end());
+         return acc;
+       });
+
+   pool->parallelFor<int>(0, 32, 4, [&](int i) {
+     reducer.local().insert(i);
+   });
+
+   auto all_ids = reducer.reduce({});
+
+Cancellation
+~~~~~~~~~~~~
+
+Parallel work uses cooperative cancellation rather than thread interruption.
+Pass a token to ``TaskGroup::async()``, ``parallelFor()``, or ``parallelForEach()``
+when the work should stop early once a scheduler or caller decides to cancel.
+
+.. code-block:: cpp
+
+   #include "Utils/Parallel/Cancellation.h"
+   #include "Utils/Parallel/ThreadPool.h"
+
+   lotus::CancellationSource cancel;
+   ThreadPool* pool = ThreadPool::get();
+   pool->parallelFor<int>(0, tasks, 4, cancel.token(), [&](int i) {
+     if (cancel.token().isCancelled())
+       return;
+     process(i);
+   });
 
 LLVM Utilities
 --------------

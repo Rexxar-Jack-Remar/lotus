@@ -35,27 +35,25 @@ DyckVFG::DyckVFG(DyckAliasAnalysis *DAA, DyckModRefAnalysis *DMRA, Module *M) {
   // create a VFG for each function
   std::map<Function *, CFGReachabilityRef> LocalCFGMap;
   std::mutex LocalCFGMapMutex;
+  std::vector<Function *> NonEmptyFunctions;
   for (auto &F : *M) {
     if (F.empty())
       continue;
     LocalCFGMap[&F] = nullptr;
+    NonEmptyFunctions.push_back(&F);
     buildLocalVFG(F);
   }
 
-  for (auto &F : *M) {
-    if (F.empty())
-      continue;
-    ThreadPool::get()->enqueue(
-        [this, DAA, &F, &LocalCFGMap, &LocalCFGMapMutex]() {
-          auto LocalCFG = std::make_shared<CFGReachability>(&F);
-          {
-            std::lock_guard<std::mutex> lock(LocalCFGMapMutex);
-            LocalCFGMap.at(&F) = LocalCFG;
-          }
-          buildLocalVFG(DAA, LocalCFG.get(), &F);
-        });
-  }
-  ThreadPool::get()->wait();
+  ThreadPool::get()->parallelForEach(
+      NonEmptyFunctions, 1,
+      [this, DAA, &LocalCFGMap, &LocalCFGMapMutex](Function *F) {
+        auto LocalCFG = std::make_shared<CFGReachability>(F);
+        {
+          std::lock_guard<std::mutex> lock(LocalCFGMapMutex);
+          LocalCFGMap.at(F) = LocalCFG;
+        }
+        buildLocalVFG(DAA, LocalCFG.get(), F);
+      });
 
   // connect local VFGs
   auto *DyckCG = DAA->getDyckCallGraph();

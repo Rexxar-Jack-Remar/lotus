@@ -64,7 +64,7 @@ should_parallelize_newton_setup(bool verbose, std::size_t equation_count,
     return true;
   if (equation_count < newton_parallel_setup_min_equations())
     return false;
-  return !ThreadPool::get()->Workers.empty();
+  return ThreadPool::get()->hasWorkers();
 }
 
 template <class D>
@@ -196,23 +196,17 @@ build_newton_initial_values(
 
   std::vector<Optional<V>> values(eqns.size());
   std::vector<std::exception_ptr> errors(eqns.size());
-  std::vector<std::future<void>> tasks;
-  tasks.reserve(eqns.size());
   ThreadPool *pool = ThreadPool::get();
   const auto execution_context = capture_execution_context<D>();
-  for (std::size_t i = 0; i < eqns.size(); ++i) {
-    tasks.emplace_back(pool->enqueue([&, i] {
-      ScopedExecutionContext<D> context_scope(execution_context);
-      try {
-        require_newton_compatible_expr<D>(eqns[i].second);
-        values[i] = I0<D>::eval(false, nu0, eqns[i].second);
-      } catch (...) {
-        errors[i] = std::current_exception();
-      }
-    }));
-  }
-  for (auto &task : tasks)
-    task.get();
+  pool->parallelFor<std::size_t>(0, eqns.size(), 1, [&](std::size_t i) {
+    ScopedExecutionContext<D> context_scope(execution_context);
+    try {
+      require_newton_compatible_expr<D>(eqns[i].second);
+      values[i] = I0<D>::eval(false, nu0, eqns[i].second);
+    } catch (...) {
+      errors[i] = std::current_exception();
+    }
+  });
   for (std::size_t i = 0; i < eqns.size(); ++i) {
     if (errors[i])
       std::rethrow_exception(errors[i]);
@@ -297,27 +291,29 @@ NewtonRoundSetup<D> build_newton_round_setup(
   }
 
   std::vector<NewtonRhsTaskRecord<D>> records(eqns.size());
-  std::vector<std::future<void>> tasks;
-  tasks.reserve(eqns.size());
   ThreadPool *pool = ThreadPool::get();
   const auto execution_context = capture_execution_context<D>();
-  for (std::size_t i = 0; i < eqns.size(); ++i) {
-    tasks.emplace_back(pool->enqueue([&, i] {
-      ScopedExecutionContext<D> context_scope(execution_context);
-      try {
-        build_eqn_rhs(i, false, records[i]);
-      } catch (...) {
-        records[i].error = std::current_exception();
-      }
-    }));
-  }
-  for (auto &task : tasks)
-    task.get();
+  pool->parallelFor<std::size_t>(0, eqns.size(), 1, [&](std::size_t i) {
+    ScopedExecutionContext<D> context_scope(execution_context);
+    try {
+      build_eqn_rhs(i, false, records[i]);
+    } catch (...) {
+      records[i].error = std::current_exception();
+    }
+  });
+
+  setup.has_lcfl_structure = pool->parallelReduce<std::size_t>(
+      0, records.size(), 1, false,
+      [&records](std::size_t i) {
+        return records[i].has_lcfl_structure;
+      },
+      [](bool has_lcfl, bool local_has_lcfl) {
+        return has_lcfl || local_has_lcfl;
+      });
+
   for (std::size_t i = 0; i < eqns.size(); ++i) {
     if (records[i].error)
       std::rethrow_exception(records[i].error);
-    setup.has_lcfl_structure =
-        setup.has_lcfl_structure || records[i].has_lcfl_structure;
     setup.rhs.emplace_back(eqns[i].first, records[i].rhs);
     if (setup.tensor_laws_validated)
       setup.rhs_tensor.emplace_back(eqns[i].first, records[i].rhs_tensor);
@@ -458,31 +454,47 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
   const auto execution_context = capture_execution_context<D>();
 
   auto note_layer_stats = [&](const std::vector<int> &layer) {
-    int direct_count = 0;
-    int worklist_count = 0;
-    int tensor_count = 0;
-    int tensor_fallback_count = 0;
-    for (int sid : layer) {
-      const auto &info = plan.infos[static_cast<std::size_t>(sid)];
-      switch (info.strategy) {
-      case detail::SccStrategy::Direct:
-        ++direct_count;
-        break;
-      case detail::SccStrategy::Worklist:
-        ++worklist_count;
-        break;
-      case detail::SccStrategy::Tensor:
-        ++tensor_count;
-        break;
-      }
-      if (info.tensor_fallback)
-        ++tensor_fallback_count;
-    }
+    struct AdaptiveSccStats {
+      int direct_count = 0;
+      int worklist_count = 0;
+      int tensor_count = 0;
+      int tensor_fallback_count = 0;
+    };
+
+    AdaptiveSccStats stats = pool->parallelReduce<std::size_t>(
+        0, layer.size(), 1, AdaptiveSccStats(),
+        [&](std::size_t pos) {
+          AdaptiveSccStats local;
+          const auto &info =
+              plan.infos[static_cast<std::size_t>(layer[pos])];
+          switch (info.strategy) {
+          case detail::SccStrategy::Direct:
+            ++local.direct_count;
+            break;
+          case detail::SccStrategy::Worklist:
+            ++local.worklist_count;
+            break;
+          case detail::SccStrategy::Tensor:
+            ++local.tensor_count;
+            break;
+          }
+          if (info.tensor_fallback)
+            ++local.tensor_fallback_count;
+          return local;
+        },
+        [](AdaptiveSccStats acc, const AdaptiveSccStats &value) {
+          acc.direct_count += value.direct_count;
+          acc.worklist_count += value.worklist_count;
+          acc.tensor_count += value.tensor_count;
+          acc.tensor_fallback_count += value.tensor_fallback_count;
+          return acc;
+        });
+
     npa_note_adaptive_scc_used();
-    npa_note_adaptive_scc_direct(direct_count);
-    npa_note_adaptive_scc_worklist(worklist_count);
-    npa_note_adaptive_scc_tensor(tensor_count);
-    npa_note_adaptive_scc_tensor_fallback(tensor_fallback_count);
+    npa_note_adaptive_scc_direct(stats.direct_count);
+    npa_note_adaptive_scc_worklist(stats.worklist_count);
+    npa_note_adaptive_scc_tensor(stats.tensor_count);
+    npa_note_adaptive_scc_tensor_fallback(stats.tensor_fallback_count);
   };
 
   auto solve_component = [&](int sid, detail::LinearSccTaskResult<D> &result) {
@@ -507,21 +519,16 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
   for (const auto &layer : plan.layers) {
     std::vector<detail::LinearSccTaskResult<D>> results(layer.size());
     if (parallelize && layer.size() > 1) {
-      std::vector<std::future<void>> tasks;
-      tasks.reserve(layer.size());
-      for (std::size_t pos = 0; pos < layer.size(); ++pos) {
+      pool->parallelFor<std::size_t>(0, layer.size(), 1,
+                                     [&](std::size_t pos) {
         const int sid = layer[pos];
-        tasks.emplace_back(pool->enqueue([&, pos, sid] {
-          ScopedExecutionContext<D> context_scope(execution_context);
-          try {
-            solve_component(sid, results[pos]);
-          } catch (...) {
-            results[pos].error = std::current_exception();
-          }
-        }));
-      }
-      for (auto &task : tasks)
-        task.get();
+        ScopedExecutionContext<D> context_scope(execution_context);
+        try {
+          solve_component(sid, results[pos]);
+        } catch (...) {
+          results[pos].error = std::current_exception();
+        }
+      });
     } else {
       for (std::size_t pos = 0; pos < layer.size(); ++pos) {
         try {
@@ -532,7 +539,6 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
       }
     }
 
-    bool hit_limit = false;
     for (std::size_t pos = 0; pos < layer.size(); ++pos) {
       if (results[pos].error)
         std::rethrow_exception(results[pos].error);
@@ -544,8 +550,11 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
             results[pos].values[value_pos];
         init[static_cast<std::size_t>(idx)] = results[pos].values[value_pos];
       }
-      hit_limit = hit_limit || results[pos].hit_limit;
     }
+    const bool hit_limit = pool->parallelReduce<std::size_t>(
+        0, results.size(), 1, false,
+        [&results](std::size_t pos) { return results[pos].hit_limit; },
+        [](bool acc, bool value) { return acc || value; });
     note_layer_stats(layer);
     if (hit_limit) {
       npa_note_linear_limit_hit();

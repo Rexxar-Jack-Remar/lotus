@@ -19,6 +19,7 @@ class Task {
 public:
   enum TaskKind {
     TK_Function, // Function-level analysis task
+    TK_SCC,      // SCC-level analysis task
     TK_GC,       // Garbage collection task
     TK_Custom,   // Custom task
   };
@@ -73,6 +74,40 @@ public:
 
 public:
   static bool classof(const Task *T) { return T->getTaskKind() == TK_Function; }
+};
+
+/**
+ * SCCFunctionTask represents an SCC-level unit of work.
+ * Functions inside the SCC are executed serially in a deterministic order.
+ */
+class SCCFunctionTask : public Task {
+private:
+  int SCCIndex;
+  std::vector<const Function *> Funcs;
+  std::function<void(const Function *)> Callback;
+  void *Context;
+
+public:
+  SCCFunctionTask(int SCCIdx, std::vector<const Function *> Functions,
+                  std::function<void(const Function *)> CB, void *Ctx = nullptr)
+      : Task(TK_SCC), SCCIndex(SCCIdx), Funcs(std::move(Functions)),
+        Callback(CB), Context(Ctx) {}
+
+  virtual void run() override {
+    for (const Function *F : Funcs)
+      Callback(F);
+  }
+
+  int getSCCIndex() const { return SCCIndex; }
+
+  const std::vector<const Function *> &getFunctions() const { return Funcs; }
+
+  void *getContext() const { return Context; }
+
+  virtual std::string toString() override;
+
+public:
+  static bool classof(const Task *T) { return T->getTaskKind() == TK_SCC; }
 };
 
 /**

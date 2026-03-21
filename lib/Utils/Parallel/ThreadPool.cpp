@@ -19,6 +19,7 @@
 
 #include "Utils/Parallel/ThreadPool.h"
 
+#include <chrono>
 #include <mutex>
 
 #include <llvm/Support/CommandLine.h>
@@ -30,7 +31,8 @@ using namespace llvm;
 static cl::opt<unsigned>
     NumWorkers("nworkers",
                cl::desc("Specify the number of workers to perform analysis. "
-                        "Default is min(the number of hardware cores, 10)."),
+                        "Default is 0, which runs tasks on the main thread "
+                        "without launching worker threads."),
                cl::value_desc("num of workers"), cl::init(0));
 
 // Global thread pool instance and thread-safe initialization.
@@ -102,18 +104,71 @@ ThreadPool::ThreadPool() : IsStop(false) {
     });
 
     ThreadLocals[Workers.back().get_id()] = nullptr;
+    WorkerIds.insert(Workers.back().get_id());
   }
+}
+
+bool ThreadPool::runOnePendingTaskOrWait() {
+  std::function<void()> Task;
+  {
+    std::unique_lock<std::mutex> Lock(QueueMutex);
+    if (TaskQueue.empty()) {
+      if (NumRunningTask == 0 || IsStop)
+        return false;
+      Condition.wait_for(Lock, std::chrono::milliseconds(1), [this] {
+        return IsStop || !TaskQueue.empty() ||
+               (TaskQueue.empty() && NumRunningTask == 0);
+      });
+      if (TaskQueue.empty() || IsStop)
+        return false;
+    }
+
+    Task = std::move(TaskQueue.front());
+    TaskQueue.pop();
+    ++NumRunningTask;
+  }
+
+  Task();
+
+  {
+    std::unique_lock<std::mutex> Lock(QueueMutex);
+    --NumRunningTask;
+    if (TaskQueue.empty() && NumRunningTask == 0)
+      Condition.notify_all();
+    else
+      Condition.notify_one();
+  }
+
+  return true;
 }
 
 // Waits for all tasks to complete.
 void ThreadPool::wait() {
-  std::unique_lock<std::mutex> Lock(this->QueueMutex);
-  if (Workers.empty())
+  if (!hasWorkers())
     return;
 
-  Condition.wait(Lock, [this] {
-    return TaskQueue.empty() && NumRunningTask == 0;
-  });
+  if (!isWorkerThread()) {
+    std::unique_lock<std::mutex> Lock(this->QueueMutex);
+    Condition.wait(Lock, [this] {
+      return TaskQueue.empty() && NumRunningTask == 0;
+    });
+    return;
+  }
+
+  while (true) {
+    {
+      std::unique_lock<std::mutex> Lock(this->QueueMutex);
+      if (TaskQueue.empty() && NumRunningTask == 0)
+        return;
+    }
+
+    if (!runOnePendingTaskOrWait()) {
+      std::unique_lock<std::mutex> Lock(this->QueueMutex);
+      if (TaskQueue.empty() && NumRunningTask == 0)
+        return;
+      Condition.wait_for(Lock, std::chrono::milliseconds(1));
+    }
+  }
 }
 
 // Destructor joins all worker threads.
