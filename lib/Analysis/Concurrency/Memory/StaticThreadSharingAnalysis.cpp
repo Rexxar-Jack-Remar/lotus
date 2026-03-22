@@ -24,6 +24,7 @@ shared data.
 
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -79,6 +80,13 @@ std::vector<const Value *> collectAccessKeys(const Value *Ptr, Node *N,
   }
 
   return std::vector<const Value *>(keys.begin(), keys.end());
+}
+
+bool isPerInstanceThreadLocalAllocSite(const Value *alloc_site) {
+  if (!alloc_site) {
+    return false;
+  }
+  return isa<AllocaInst>(alloc_site->stripPointerCasts());
 }
 
 } // namespace
@@ -276,6 +284,7 @@ StaticThreadSharingAnalysis::classify(const Value *AllocSite) const {
     std::set<const Function *> allThreads = info.Readers;
     allThreads.insert(info.Writers.begin(), info.Writers.end());
     bool multi_run_writer =
+        !isPerInstanceThreadLocalAllocSite(AllocSite) &&
         std::any_of(info.Writers.begin(), info.Writers.end(),
                     [this](const Function *F) { return isMultiRunThread(F); });
 

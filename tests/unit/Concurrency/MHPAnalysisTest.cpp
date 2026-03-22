@@ -890,6 +890,97 @@ TEST_F(MHPAnalysisTest, HelperCalledBeforeAndAfterForkIsNotGloballyPrefork) {
   EXPECT_TRUE(mhp.mayHappenInParallel(helper_inst, worker_inst));
 }
 
+TEST_F(MHPAnalysisTest, HelperHiddenFirstForkDoesNotMakeCallerContinuationPrefork) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      store i32 7, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define void @spawn_helper(i8* %tid) {
+    entry:
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call void @spawn_helper(i8* %tid)
+      %after = load i32, i32* @shared, align 4
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Instruction *worker_store =
+      &module->getFunction("worker")->getEntryBlock().front();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  ASSERT_NE(worker_store, nullptr);
+  ASSERT_NE(after, nullptr);
+
+  EXPECT_TRUE(mhp.mayHappenInParallel(worker_store, after));
+}
+
+TEST_F(MHPAnalysisTest, HelperHiddenForkStillHonorsJoinOrderingAtCaller) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      store i32 9, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define void @spawn_helper(i8* %tid) {
+    entry:
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call void @spawn_helper(i8* %tid)
+      call i32 @pthread_join(i8* %tid, i8* null)
+      %after = load i32, i32* @shared, align 4
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *worker_store =
+      &module->getFunction("worker")->getEntryBlock().front();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  ASSERT_NE(worker_store, nullptr);
+  ASSERT_NE(after, nullptr);
+
+  EXPECT_FALSE(mhp.mayHappenInParallel(worker_store, after));
+  EXPECT_TRUE(hb.mustPrecede(worker_store, after));
+}
+
 TEST_F(MHPAnalysisTest, LoopCreateJoinDoesNotAutoSelfParallelizeWorkerBody) {
   const char *source = R"(
     @x = global i32 0, align 4

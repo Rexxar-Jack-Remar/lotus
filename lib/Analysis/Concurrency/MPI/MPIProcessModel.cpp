@@ -85,26 +85,25 @@ bool rangesOverlap(int lhs_min, int lhs_max, int rhs_min, int rhs_max) {
   return !(lhs_max < rhs_min || rhs_max < lhs_min);
 }
 
-bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) {
-  if (!lhs || !rhs) {
-    return false;
-  }
-  if (lhs == rhs) {
-    return true;
-  }
+struct CommunicatorTraceResult;
+bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs,
+                           const Module *module);
 
-  const auto *lhs_arg = dyn_cast<Argument>(lhs);
-  const auto *rhs_arg = dyn_cast<Argument>(rhs);
-  if (lhs_arg && rhs_arg && lhs_arg->getParent() == rhs_arg->getParent() &&
-      lhs_arg->getArgNo() == rhs_arg->getArgNo()) {
-    return true;
-  }
-  return false;
+bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) {
+  return communicatorsMayAlias(lhs, rhs, nullptr);
 }
 
-const Value *traceCommunicatorRoot(const Value *value) {
+enum class CommunicatorTraceState { Unresolved, Resolved, Ambiguous };
+
+struct CommunicatorTraceResult {
+  CommunicatorTraceState state = CommunicatorTraceState::Unresolved;
+  const Value *root = nullptr;
+};
+
+CommunicatorTraceResult traceCommunicatorValue(const Value *value,
+                                               const Module *module) {
   if (!value) {
-    return nullptr;
+    return {};
   }
 
   std::deque<const Value *> worklist;
@@ -145,6 +144,37 @@ const Value *traceCommunicatorRoot(const Value *value) {
       continue;
     }
 
+    if (const auto *arg = dyn_cast<Argument>(current)) {
+      const Function *parent = arg->getParent();
+      bool expanded = false;
+      if (parent && module) {
+        for (const Use &use : parent->uses()) {
+          const auto *cb = dyn_cast<CallBase>(use.getUser());
+          if (cb && arg->getArgNo() < cb->arg_size()) {
+            worklist.push_back(cb->getArgOperand(arg->getArgNo()));
+            expanded = true;
+          }
+        }
+
+        for (const Function &function : *module) {
+          for (const Instruction &inst : instructions(function)) {
+            const auto *cb = dyn_cast<CallBase>(&inst);
+            if (!cb || arg->getArgNo() >= cb->arg_size()) {
+              continue;
+            }
+            const Value *called = cb->getCalledOperand();
+            if (called && called->stripPointerCasts() == parent) {
+              worklist.push_back(cb->getArgOperand(arg->getArgNo()));
+              expanded = true;
+            }
+          }
+        }
+      }
+      if (expanded) {
+        continue;
+      }
+    }
+
     if (const Value *underlying = getUnderlyingObject(current)) {
       current = underlying->stripPointerCasts();
     }
@@ -152,20 +182,54 @@ const Value *traceCommunicatorRoot(const Value *value) {
     if (!resolved) {
       resolved = current;
     } else if (resolved != current) {
-      return nullptr;
+      return {CommunicatorTraceState::Ambiguous, nullptr};
     }
   }
 
-  return resolved ? resolved : value->stripPointerCasts();
+  if (resolved) {
+    return {CommunicatorTraceState::Resolved, resolved};
+  }
+  return {};
+}
+
+bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs,
+                           const Module *module) {
+  if (!lhs || !rhs) {
+    return false;
+  }
+
+  const CommunicatorTraceResult lhs_trace = traceCommunicatorValue(lhs, module);
+  const CommunicatorTraceResult rhs_trace = traceCommunicatorValue(rhs, module);
+  if (lhs_trace.state == CommunicatorTraceState::Ambiguous ||
+      rhs_trace.state == CommunicatorTraceState::Ambiguous) {
+    return false;
+  }
+  if (lhs_trace.state == CommunicatorTraceState::Resolved &&
+      rhs_trace.state == CommunicatorTraceState::Resolved &&
+      lhs_trace.root == rhs_trace.root) {
+    return true;
+  }
+  if (lhs == rhs) {
+    return true;
+  }
+
+  const auto *lhs_arg = dyn_cast<Argument>(lhs);
+  const auto *rhs_arg = dyn_cast<Argument>(rhs);
+  if (lhs_arg && rhs_arg && lhs_arg->getParent() == rhs_arg->getParent() &&
+      lhs_arg->getArgNo() == rhs_arg->getArgNo()) {
+    return true;
+  }
+  return false;
 }
 
 bool sameCommunicatorForProof(const MPIOperation &lhs,
-                              const MPIOperation &rhs) {
+                              const MPIOperation &rhs,
+                              const Module *module) {
   if (lhs.communicator_class_id != 0 && rhs.communicator_class_id != 0 &&
       lhs.communicator_class_id == rhs.communicator_class_id) {
     return true;
   }
-  return communicatorsMayAlias(lhs.communicator, rhs.communicator);
+  return communicatorsMayAlias(lhs.communicator, rhs.communicator, module);
 }
 
 const Value *canonicalMemoryBase(const Value *value) {
@@ -393,7 +457,8 @@ MPIRequestCompletionScopeKind completionScopeForAction(const MPIOperation &op,
   return MPIRequestCompletionScopeKind::Unknown;
 }
 
-bool isPotentialChannelPair(const MPIOperation &send, const MPIOperation &recv) {
+bool isPotentialChannelPair(const MPIOperation &send, const MPIOperation &recv,
+                            const Module *module) {
   if (!isSendOperationKind(send.kind) || !isRecvOperationKind(recv.kind)) {
     return false;
   }
@@ -406,8 +471,77 @@ bool isPotentialChannelPair(const MPIOperation &send, const MPIOperation &recv) 
       send.communicator_class_id == recv.communicator_class_id) {
     return true;
   }
-  return communicatorsMayAlias(send.communicator, recv.communicator) ||
+  return communicatorsMayAlias(send.communicator, recv.communicator, module) ||
          (!send.communicator && !recv.communicator);
+}
+
+bool isKnownWorldCommunicatorHandle(const Value *value) {
+  if (!value) {
+    return false;
+  }
+  std::deque<const Value *> worklist;
+  worklist.push_back(value);
+  std::set<const Value *> visited;
+  while (!worklist.empty()) {
+    const Value *current = worklist.back();
+    worklist.pop_back();
+    if (!current || !visited.insert(current).second) {
+      continue;
+    }
+    current = current->stripPointerCasts();
+    if (const auto *alias = dyn_cast<GlobalAlias>(current)) {
+      worklist.push_back(alias->getAliasee());
+      continue;
+    }
+    const auto *global = dyn_cast<GlobalValue>(current);
+    if (!global) {
+      continue;
+    }
+    StringRef name = global->getName();
+    if (name.equals("MPI_COMM_WORLD") ||
+        name.equals("ompi_mpi_comm_world") ||
+        name.equals("__imp_MPI_COMM_WORLD")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const Value *getCommunicatorOperand(const CallBase *cb,
+                                    const MPIEffect &effect) {
+  if (!cb || !effect.descriptor) {
+    return nullptr;
+  }
+  const MPISemanticDescriptor &descriptor = *effect.descriptor;
+  switch (effect.family) {
+  case MPISemanticFamily::PointToPoint:
+  case MPISemanticFamily::Probe:
+    return getOperandBySignedIndex(cb, descriptor.communicator_arg);
+  case MPISemanticFamily::Request:
+    if (effect.type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT ||
+        effect.type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT) {
+      return getOperandBySignedIndex(cb, descriptor.communicator_arg);
+    }
+    return nullptr;
+  case MPISemanticFamily::Collective: {
+    int comm_index = descriptor.communicator_arg;
+    if ((effect.kind == MPIOpKind::BARRIER_NONBLOCKING ||
+         effect.kind == MPIOpKind::COLLECTIVE_NONBLOCKING) &&
+        descriptor.collective_nonblocking_comm_arg != -1) {
+      comm_index = descriptor.collective_nonblocking_comm_arg;
+    }
+    return getOperandBySignedIndex(cb, comm_index);
+  }
+  case MPISemanticFamily::RMAWindow:
+    if (effect.semantic_tag == "win-create" ||
+        effect.semantic_tag == "win-allocate" ||
+        effect.semantic_tag == "win-allocate-shared") {
+      return getOperandBySignedIndex(cb, -2);
+    }
+    return nullptr;
+  default:
+    return nullptr;
+  }
 }
 
 const Function *getInstructionCallee(const Instruction *inst) {
@@ -513,7 +647,13 @@ MPIProcessModel::canonicalizeCommunicator(const Value *communicator) const {
     return nullptr;
   }
 
-  const Value *canonical = traceCommunicatorRoot(communicator);
+  const CommunicatorTraceResult trace =
+      traceCommunicatorValue(communicator, &module_);
+  if (trace.state == CommunicatorTraceState::Ambiguous) {
+    return nullptr;
+  }
+
+  const Value *canonical = trace.root;
   if (!canonical) {
     canonical = communicator->stripPointerCasts();
   }
@@ -620,16 +760,6 @@ size_t MPIProcessModel::assignCommunicatorClass(CommunicatorID canonical) {
   }
   canonical = canonical->stripPointerCasts();
 
-  if (const auto *arg = dyn_cast<Argument>(canonical)) {
-    for (const auto &entry : communicator_class_ids_) {
-      const auto *other_arg = dyn_cast<Argument>(entry.first);
-      if (other_arg && other_arg->getArgNo() == arg->getArgNo()) {
-        communicator_class_ids_[canonical] = entry.second;
-        return entry.second;
-      }
-    }
-  }
-
   auto it = communicator_class_ids_.find(canonical);
   if (it != communicator_class_ids_.end()) {
     return it->second;
@@ -654,7 +784,12 @@ MPIProcessModel::getCommunicatorSubgroupID(const Value *communicator) const {
   if (!communicator) {
     return 0;
   }
-  const Value *key = traceCommunicatorRoot(communicator);
+  const CommunicatorTraceResult trace =
+      traceCommunicatorValue(communicator, &module_);
+  if (trace.state == CommunicatorTraceState::Ambiguous) {
+    return 0;
+  }
+  const Value *key = trace.root;
   if (!key) {
     key = communicator->stripPointerCasts();
   }
@@ -668,7 +803,12 @@ MPIProcessModel::getCommunicatorSubgroupTokenKind(
   if (!communicator) {
     return MPICommunicatorSubgroupTokenKind::None;
   }
-  const Value *key = traceCommunicatorRoot(communicator);
+  const CommunicatorTraceResult trace =
+      traceCommunicatorValue(communicator, &module_);
+  if (trace.state == CommunicatorTraceState::Ambiguous) {
+    return MPICommunicatorSubgroupTokenKind::None;
+  }
+  const Value *key = trace.root;
   if (!key) {
     key = communicator->stripPointerCasts();
   }
@@ -700,7 +840,7 @@ void MPIProcessModel::buildCommunicatorFacts() {
     auto creation_it = communicator_creation_kinds_.find(canonical);
     if (creation_it != communicator_creation_kinds_.end()) {
       fact.creation_kind = creation_it->second;
-    } else if (class_id == 1) {
+    } else if (isKnownWorldCommunicatorHandle(canonical)) {
       fact.creation_kind = MPICommunicatorCreationKind::World;
     }
     auto subgroup_it = communicator_process_sets_.find(canonical);
@@ -727,7 +867,8 @@ void MPIProcessModel::buildCommunicatorFacts() {
       }
     }
 
-    if (!fact.parent && fact.creation_kind == MPICommunicatorCreationKind::World) {
+    if (!fact.parent &&
+        fact.creation_kind == MPICommunicatorCreationKind::World) {
       fact.detail = "world";
     } else if (fact.parent) {
       fact.detail = "derived";
@@ -1753,6 +1894,12 @@ void MPIProcessModel::analyzeModule() {
       if (type == ThreadAPI::TD_DUMMY)
         continue;
       normalization_confidence_counts_[effect.confidence]++;
+      const auto *cb = dyn_cast<CallBase>(I);
+      const Value *communicator_operand = getCommunicatorOperand(cb, effect);
+      const bool communicator_identity_ambiguous =
+          communicator_operand &&
+          traceCommunicatorValue(communicator_operand, &module_).state ==
+              CommunicatorTraceState::Ambiguous;
 
       const MPISemanticDescriptor *descriptor = effect.descriptor;
       if (descriptor && descriptor->split_into_sendrecv) {
@@ -1781,6 +1928,17 @@ void MPIProcessModel::analyzeModule() {
         }
         all_operations_.push_back(send_op);
         ++operation_kind_counts_[send_op.kind];
+        if (communicator_identity_ambiguous) {
+          MPIModelGap gap;
+          gap.domain = MPIModelGapDomain::Communicator;
+          gap.inst = send_op.inst;
+          gap.relation.kind = concurrency::RelationKind::UnknownDueToModelGap;
+          gap.relation.proof = concurrency::ProofStrength::Unknown;
+          gap.relation.reason = "mpi_communicator_identity_ambiguous";
+          gap.code = gap.relation.reason;
+          gap.detail = send_op.function ? send_op.function->getName().str() : "";
+          model_gaps_.push_back(gap);
+        }
 
         MPIOperation recv_op(I, MPIOpKind::RECV_BLOCKING, type);
         recv_op.normalization_confidence = effect.confidence;
@@ -1807,6 +1965,17 @@ void MPIProcessModel::analyzeModule() {
         }
         all_operations_.push_back(recv_op);
         ++operation_kind_counts_[recv_op.kind];
+        if (communicator_identity_ambiguous) {
+          MPIModelGap gap;
+          gap.domain = MPIModelGapDomain::Communicator;
+          gap.inst = recv_op.inst;
+          gap.relation.kind = concurrency::RelationKind::UnknownDueToModelGap;
+          gap.relation.proof = concurrency::ProofStrength::Unknown;
+          gap.relation.reason = "mpi_communicator_identity_ambiguous";
+          gap.code = gap.relation.reason;
+          gap.detail = recv_op.function ? recv_op.function->getName().str() : "";
+          model_gaps_.push_back(gap);
+        }
         continue;
       }
 
@@ -1870,9 +2039,12 @@ void MPIProcessModel::analyzeModule() {
         gap.participant_class_id = op.participant_class_id;
         gap.relation.kind = concurrency::RelationKind::UnknownDueToModelGap;
         gap.relation.proof = concurrency::ProofStrength::Unknown;
-        gap.relation.reason = !op.communicator
-                                  ? "mpi_communicator_identity_unresolved"
-                                  : "mpi_participant_scope_unresolved";
+        gap.relation.reason =
+            !op.communicator
+                ? (communicator_identity_ambiguous
+                       ? "mpi_communicator_identity_ambiguous"
+                       : "mpi_communicator_identity_unresolved")
+                : "mpi_participant_scope_unresolved";
         gap.code = gap.relation.reason;
         gap.detail = op.rank_path_summary;
         model_gaps_.push_back(gap);
@@ -1897,7 +2069,9 @@ void MPIProcessModel::analyzeModule() {
             registerCommunicatorAlias(cb->getArgOperand(1), root);
             size_t subgroup_id = getCommunicatorSubgroupID(root);
             if (subgroup_id != 0) {
-              const Value *alias_key = traceCommunicatorRoot(cb->getArgOperand(1));
+              const CommunicatorTraceResult alias_trace =
+                  traceCommunicatorValue(cb->getArgOperand(1), &module_);
+              const Value *alias_key = alias_trace.root;
               if (!alias_key) {
                 alias_key = cb->getArgOperand(1)->stripPointerCasts();
               }
@@ -2556,7 +2730,7 @@ void MPIProcessModel::buildPointToPointObligations() {
     for (size_t receiver_endpoint_index : recv_endpoint_indices) {
       const MPIOperation &recv =
           all_operations_[channel_endpoint_obligations_[receiver_endpoint_index].operation_index];
-      if (!isPotentialChannelPair(send, recv)) {
+      if (!isPotentialChannelPair(send, recv, &module_)) {
         continue;
       }
       MPICommunicationMatch base_match = classifyCommunicationMatch(send, recv);
@@ -3281,7 +3455,8 @@ MPIProcessModel::classifyCommunicationMatch(const MPIOperation &op1,
   if (send.communicator_class_id != 0 && recv.communicator_class_id != 0 &&
       send.communicator_class_id == recv.communicator_class_id) {
   } else if (send.communicator && recv.communicator &&
-             !communicatorsMayAlias(send.communicator, recv.communicator)) {
+             !communicatorsMayAlias(send.communicator, recv.communicator,
+                                    &module_)) {
     return MPICommunicationMatch::NoMatch;
   } else {
     model_gap = true;
@@ -3535,10 +3710,8 @@ MPIProcessModel::findPotentialDeadlocks() const {
     if (!isSendOperationKind(send.kind) || !isRecvOperationKind(recv.kind)) {
       return MPICommunicationMatch::NoMatch;
     }
-    if (!sameCommunicatorForProof(send, recv)) {
-      return (!send.communicator || !recv.communicator)
-                 ? MPICommunicationMatch::Unknown
-                 : MPICommunicationMatch::NoMatch;
+    if (!sameCommunicatorForProof(send, recv, &module_)) {
+      return MPICommunicationMatch::NoMatch;
     }
     if (!isMPIWildcardValue(send.dest_rank) &&
         !opMayExecuteOnRank(recv, send.dest_rank)) {
@@ -4052,7 +4225,7 @@ MPIProcessModel::findTypeSizeMismatches() const {
           recv_op.kind != MPIOpKind::RECV_NONBLOCKING) {
         continue;
       }
-      if (!sameCommunicatorForProof(send_op, recv_op)) {
+      if (!sameCommunicatorForProof(send_op, recv_op, &module_)) {
         continue;
       }
       if (!rangesOverlap(send_op.dest_rank_min, send_op.dest_rank_max,

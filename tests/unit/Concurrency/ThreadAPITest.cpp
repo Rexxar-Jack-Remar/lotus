@@ -164,6 +164,27 @@ TEST_F(ThreadAPITest, MatchesSpecificOpenMPTargetDataBeforeGenericTarget) {
             ThreadAPI::TD_OMP_TARGET_DATA_END);
 }
 
+TEST_F(ThreadAPITest, PreservesMangledCppAsyncNamesDuringClassification) {
+  const char *source = R"(
+    declare void @_ZNSt5async12launch_asyncEv(i32)
+
+    define void @main() {
+    entry:
+      call void @_ZNSt5async12launch_asyncEv(i32 1)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *async_func = module->getFunction("_ZNSt5async12launch_asyncEv");
+  ASSERT_NE(async_func, nullptr);
+  EXPECT_EQ(api->getType(async_func), ThreadAPI::TD_ASYNC);
+}
+
 TEST_F(ThreadAPITest, RecognizesExtendedOpenMPTargetDataVariantsAndHelpers) {
   const char *source = R"(
     declare void @__tgt_target_data_update(i64, i8*)

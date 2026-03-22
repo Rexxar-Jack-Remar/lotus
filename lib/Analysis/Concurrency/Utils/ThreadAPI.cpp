@@ -27,6 +27,8 @@
 #include <set>
 #include <sstream>
 
+#include <llvm/ADT/STLExtras.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h> // for StringMap
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstIterator.h>
@@ -51,8 +53,69 @@ struct ei_pair {
   ThreadAPI::TD_TYPE t; ///< Thread API type
 };
 
+static StringRef stripAPIGlobalPrefix(StringRef name) {
+  while (name.startswith("\01")) {
+    name = name.drop_front();
+  }
+  return name;
+}
+
+static bool looksLikeMPISymbol(StringRef name) {
+  name = stripAPIGlobalPrefix(name);
+  return name.startswith("MPI_") || name.startswith("PMPI_") ||
+         name.startswith("mpi_") || name.startswith("pmpi_") ||
+         name.startswith("ompi_mpi_") || name.startswith("__wrap_MPI_") ||
+         name.startswith("__wrap_PMPI_");
+}
+
+static std::string normalizeGenericAPIName(StringRef name) {
+  return stripAPIGlobalPrefix(name).str();
+}
+
+static std::string normalizeConfiguredAPIName(StringRef name) {
+  name = stripAPIGlobalPrefix(name);
+  if (looksLikeMPISymbol(name)) {
+    return mpi::normalizeMPISymbolName(name);
+  }
+  return name.str();
+}
+
+static std::string normalizeLegacyUnderscoreAlias(StringRef name) {
+  name = stripAPIGlobalPrefix(name);
+  if (name.startswith("_") && !name.startswith("__wrap_")) {
+    return name.drop_front().str();
+  }
+  return name.str();
+}
+
+static bool appendLookupName(SmallVectorImpl<std::string> &names,
+                             const std::string &candidate) {
+  if (candidate.empty()) {
+    return false;
+  }
+  if (llvm::is_contained(names, candidate)) {
+    return false;
+  }
+  names.push_back(candidate);
+  return true;
+}
+
+static SmallVector<std::string, 4> getConfiguredLookupNames(StringRef name) {
+  SmallVector<std::string, 4> names;
+  const std::string generic = normalizeGenericAPIName(name);
+  appendLookupName(names, generic);
+
+  const std::string legacy_alias = normalizeLegacyUnderscoreAlias(name);
+  appendLookupName(names, legacy_alias);
+
+  if (looksLikeMPISymbol(name)) {
+    appendLookupName(names, mpi::normalizeMPISymbolName(stripAPIGlobalPrefix(name)));
+  }
+  return names;
+}
+
 static std::string normalizeAPIName(StringRef name) {
-  return mpi::normalizeMPISymbolName(name);
+  return normalizeGenericAPIName(name);
 }
 
 static ThreadAPI::RuntimeLibrary parseRuntimeLibrary(StringRef value) {
@@ -166,18 +229,18 @@ void ThreadAPI::init() {
 }
 
 void ThreadAPI::addEntry(const std::string &name, TD_TYPE type) {
-  tdAPIMap[normalizeAPIName(name)] = type;
+  tdAPIMap[normalizeConfiguredAPIName(name)] = type;
 }
 
 void ThreadAPI::addDescription(const std::string &name,
                                const APIDescription &description) {
-  m_api_descriptions[normalizeAPIName(name)] = description;
+  m_api_descriptions[normalizeConfiguredAPIName(name)] = description;
 }
 
 void ThreadAPI::addMatchRule(const std::string &pattern, MatchKind kind,
                              const APIDescription &description) {
   MatchRule rule;
-  rule.pattern = normalizeAPIName(pattern);
+  rule.pattern = normalizeConfiguredAPIName(pattern);
   rule.kind = kind;
   rule.description = description;
   m_match_rules.push_back(std::move(rule));
@@ -187,8 +250,12 @@ bool ThreadAPI::hasMappedAPIEntry(const Function *F) const {
   if (!F)
     return false;
 
-  std::string name = normalizeAPIName(F->getName());
-  return tdAPIMap.count(name) != 0;
+  for (const std::string &name : getConfiguredLookupNames(F->getName())) {
+    if (tdAPIMap.count(name) != 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool ThreadAPI::isCppThreadLikeFork(const Function *F) const {
@@ -307,14 +374,15 @@ void ThreadAPI::loadConfig(const std::string &filename) {
       TD_TYPE type = ThreadAPI::stringToType(typeStr);
       if (type != TD_DUMMY) {
         addEntry(name, type);
+        const std::string normalized_name = normalizeConfiguredAPIName(name);
         if (type == TD_FORK) {
           unsigned t = 0, s = 2, a = 3;
           if (ss >> t >> s >> a)
-            m_fork_args[name] = ForkArgIndices{t, s, a};
+            m_fork_args[normalized_name] = ForkArgIndices{t, s, a};
         } else if (type == TD_JOIN) {
           unsigned t = 0, r = 1;
           if (ss >> t >> r)
-            m_join_args[name] = JoinArgIndices{t, r};
+            m_join_args[normalized_name] = JoinArgIndices{t, r};
         }
       }
     }
@@ -590,8 +658,13 @@ ThreadAPI::lookupDescription(const Function *F) const {
   if (!F) {
     return nullptr;
   }
-  auto it = m_api_descriptions.find(normalizeAPIName(F->getName()));
-  return it != m_api_descriptions.end() ? &it->second : nullptr;
+  for (const std::string &name : getConfiguredLookupNames(F->getName())) {
+    auto it = m_api_descriptions.find(name);
+    if (it != m_api_descriptions.end()) {
+      return &it->second;
+    }
+  }
+  return nullptr;
 }
 
 const ThreadAPI::MatchRule *
@@ -616,34 +689,40 @@ ThreadAPI::lookupMatchRule(StringRef normalized_name) const {
 
 ThreadAPI::TD_TYPE
 ThreadAPI::getConfiguredType(StringRef normalized_name) const {
-  TDAPIMap::const_iterator it = tdAPIMap.find(normalized_name);
-  if (it != tdAPIMap.end()) {
-    auto desc_it = m_api_descriptions.find(normalized_name.str());
-    if (desc_it == m_api_descriptions.end() ||
-        isLibraryEnabled(desc_it->second.library)) {
-      return it->second;
+  for (const std::string &lookup_name : getConfiguredLookupNames(normalized_name)) {
+    TDAPIMap::const_iterator it = tdAPIMap.find(lookup_name);
+    if (it != tdAPIMap.end()) {
+      auto desc_it = m_api_descriptions.find(lookup_name);
+      if (desc_it == m_api_descriptions.end() ||
+          isLibraryEnabled(desc_it->second.library)) {
+        return it->second;
+      }
+      return TD_DUMMY;
     }
-    return TD_DUMMY;
-  }
-  if (const MatchRule *rule = lookupMatchRule(normalized_name)) {
-    return isLibraryEnabled(rule->description.library) ? rule->description.type
-                                                       : TD_DUMMY;
+    if (const MatchRule *rule = lookupMatchRule(lookup_name)) {
+      return isLibraryEnabled(rule->description.library)
+                 ? rule->description.type
+                 : TD_DUMMY;
+    }
   }
 
-  if (normalized_name.startswith("MPI_")) {
+  if (looksLikeMPISymbol(normalized_name)) {
+    const std::string normalized_mpi =
+        mpi::normalizeMPISymbolName(stripAPIGlobalPrefix(normalized_name));
     for (const auto &entry : tdAPIMap) {
       StringRef configured = entry.first();
       if (!configured.startswith("MPI_")) {
         continue;
       }
-      if (mpi::equalsCaseInsensitiveASCII(configured, normalized_name)) {
-        auto desc_it = m_api_descriptions.find(configured.str());
-        if (desc_it == m_api_descriptions.end() ||
-            isLibraryEnabled(desc_it->second.library)) {
-          return entry.second;
-        }
-        return TD_DUMMY;
+      if (!mpi::equalsCaseInsensitiveASCII(configured, normalized_mpi)) {
+        continue;
       }
+      auto desc_it = m_api_descriptions.find(configured.str());
+      if (desc_it == m_api_descriptions.end() ||
+          isLibraryEnabled(desc_it->second.library)) {
+        return entry.second;
+      }
+      return TD_DUMMY;
     }
   }
 
@@ -658,9 +737,10 @@ ThreadAPI::APIDescription ThreadAPI::describe(const Function *F) const {
   if (const APIDescription *configured = lookupDescription(F)) {
     return *configured;
   }
-  std::string normalized_name = normalizeAPIName(F->getName());
-  if (const MatchRule *rule = lookupMatchRule(normalized_name)) {
-    return rule->description;
+  for (const std::string &lookup_name : getConfiguredLookupNames(F->getName())) {
+    if (const MatchRule *rule = lookupMatchRule(lookup_name)) {
+      return rule->description;
+    }
   }
   description.type = getType(F);
   description.library = inferLibrary(description.type);

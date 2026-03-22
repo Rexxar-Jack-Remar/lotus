@@ -236,6 +236,9 @@ MPIAbstractState MPIAbstractStateBuilder::build() const {
   state.process_set_facts = process_model_.getProcessSetFacts();
   state.participant_sets = process_model_.getParticipantSets();
   state.model_gaps = process_model_.getModelGaps();
+  const auto &rma_model_gaps = rma_analysis_.getModelGaps();
+  state.model_gaps.insert(state.model_gaps.end(), rma_model_gaps.begin(),
+                          rma_model_gaps.end());
   state.function_summaries = process_model_.getFunctionSummaries();
   state.request_set_facts = process_model_.getRequestSetFacts();
   std::unordered_map<const Function *, size_t> function_summary_index;

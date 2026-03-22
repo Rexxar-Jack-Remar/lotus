@@ -7,6 +7,8 @@
  */
 
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
+
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Instructions.h>
 
 namespace CppAtomics {
@@ -19,6 +21,10 @@ static MemoryOrder fromLLVMOrdering(llvm::AtomicOrdering ordering) {
         case llvm::AtomicOrdering::Unordered: // Map Unordered to Relaxed
         case llvm::AtomicOrdering::Monotonic: // Map Monotonic to Relaxed
             return MemoryOrder::Relaxed;
+#if LLVM_VERSION_MAJOR >= 15
+        case llvm::AtomicOrdering::Consume:
+            return MemoryOrder::Acquire;
+#endif
         case llvm::AtomicOrdering::Acquire:
             return MemoryOrder::Acquire;
         case llvm::AtomicOrdering::Release:

@@ -415,7 +415,7 @@ void MHPAnalysis::buildThreadFlowGraph() {
 
   // Main thread (thread 0)
   m_tfg->addThread(0, main_func);
-  processFunction(main_func, 0, 0, true);
+  processFunction(main_func, 0, 0);
   finalizeBarrierPhases();
   if (m_openmp_semantics) {
     lowerOpenMPTasks(*m_openmp_semantics);
@@ -423,6 +423,7 @@ void MHPAnalysis::buildThreadFlowGraph() {
 
   // Build reachability index for faster structural-order queries
   m_tfg->buildReachabilityIndex();
+  recomputePreForkMainNodes();
 
   errs() << "Thread Flow Graph built with " << m_tfg->getAllNodes().size()
          << " nodes\n";
@@ -440,12 +441,9 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
       return;
     }
 
-    const bool in_prefork_main_phase =
-        parent_tid == 0 && m_pre_fork_main_nodes.count(create_node) > 0;
     CallContextID callee_ctx = create_node->getNodeID();
     m_has_multi_context_nodes = true;
-    processFunction(task->task_function, parent_tid, callee_ctx,
-                    in_prefork_main_phase);
+    processFunction(task->task_function, parent_tid, callee_ctx);
 
     if (SyncNode *task_entry = m_tfg->getNode(
             &task->task_function->front().front(), parent_tid, callee_ctx)) {
@@ -609,7 +607,7 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
 }
 
 void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
-                                  CallContextID ctx, bool inPreForkMainPhase) {
+                                  CallContextID ctx) {
   if (!func || func->isDeclaration())
     return;
 
@@ -620,7 +618,6 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
   m_visited_functions_by_thread[tid][ctx].insert(func);
 
   // --- Pass 1: Create all nodes for this function ---
-  bool preForkMainPhasePass1 = inPreForkMainPhase && (tid == 0);
   for (const BasicBlock &bb : *func) {
     for (const Instruction &inst : bb) {
       mapInstructionToThread(&inst, tid);
@@ -630,11 +627,6 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
         (void)cb;
         if (m_thread_api->isTDFork(&inst)) {
           node_type = SyncNodeType::THREAD_FORK;
-          // After the first fork in thread 0, subsequent instructions are no
-          // longer in initialization phase.
-          if (tid == 0) {
-            preForkMainPhasePass1 = false;
-          }
         } else if (m_thread_api->isTDJoin(&inst)) {
           node_type = SyncNodeType::THREAD_JOIN;
         } else if (m_thread_api->isTDAcquire(&inst)) {
@@ -653,10 +645,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
           node_type = SyncNodeType::BARRIER_WAIT;
         }
       }
-      SyncNode *created = m_tfg->createNode(&inst, node_type, tid, ctx);
-      if (preForkMainPhasePass1 && created) {
-        m_pre_fork_main_nodes.insert(created);
-      }
+      m_tfg->createNode(&inst, node_type, tid, ctx);
     }
   }
 
@@ -672,7 +661,6 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
 
   SyncNode *exit_node = nullptr;
 
-  bool preForkMainPhasePass2 = inPreForkMainPhase && (tid == 0);
   for (const BasicBlock &bb : *func) {
     for (const Instruction &inst : bb) {
       SyncNode *node = m_tfg->getNode(&inst, tid, ctx);
@@ -707,9 +695,6 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
         if (m_thread_api->isTDFork(&inst)) {
           handleThreadFork(&inst, node, tid);
-          if (tid == 0) {
-            preForkMainPhasePass2 = false;
-          }
         } else if (m_thread_api->isTDJoin(&inst)) {
           handleThreadJoin(&inst, node, tid);
         } else if (m_thread_api->isTDAcquire(&inst)) {
@@ -732,7 +717,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
             }
             CallContextID callee_ctx = node->getNodeID();
             m_has_multi_context_nodes = true;
-            processFunction(target, tid, callee_ctx, preForkMainPhasePass2);
+            processFunction(target, tid, callee_ctx);
             SyncNode *callee_entry =
                 m_tfg->getNode(&target->front().front(), tid, callee_ctx);
             if (callee_entry) {
@@ -793,8 +778,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
                         CallContextID callee_ctx = node->getNodeID();
                         m_has_multi_context_nodes = true;
                         // Process this possible callee
-                        processFunction(possibleCallee, tid, callee_ctx,
-                                        preForkMainPhasePass2);
+                        processFunction(possibleCallee, tid, callee_ctx);
                         SyncNode *callee_entry = m_tfg->getNode(
                             &possibleCallee->front().front(), tid, callee_ctx);
                         if (callee_entry) {
@@ -1120,18 +1104,6 @@ void MHPAnalysis::computeMHPPairs() {
 
   const auto &regions = m_region_analysis->getAllRegions();
   size_t num_regions = regions.size();
-  auto is_always_pre_fork_main = [this](const Instruction *inst) {
-    std::vector<SyncNode *> nodes = m_tfg->getNodes(inst, 0);
-    if (nodes.empty()) {
-      return false;
-    }
-    for (SyncNode *node : nodes) {
-      if (!m_pre_fork_main_nodes.count(node)) {
-        return false;
-      }
-    }
-    return true;
-  };
   std::vector<bool> region_prefork_main(num_regions, false);
   for (size_t i = 0; i < num_regions; ++i) {
     const auto &region = regions[i];
@@ -1140,7 +1112,7 @@ void MHPAnalysis::computeMHPPairs() {
     }
     bool all_prefork = true;
     for (const Instruction *inst : region->instructions) {
-      if (!is_always_pre_fork_main(inst)) {
+      if (!isAlwaysPreForkMain(inst)) {
         all_prefork = false;
         break;
       }
@@ -1284,26 +1256,15 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
     return (a && b) ? (m_mhp_cache[{a, b}] = false) : false;
 
   // Initialization phase in main is single-threaded: instructions observed
-  // before the first pthread_create in thread 0 cannot race with child threads.
+  // before the first reachable thread/task creation in thread 0 cannot race
+  // with child-thread nodes.
   ThreadID t1 = getThreadID(i1);
   ThreadID t2 = getThreadID(i2);
   if (m_openmp_task_exclusions.count(normalizeThreadPair(t1, t2))) {
     return (a && b) ? (m_mhp_cache[{a, b}] = false) : false;
   }
-  auto is_always_pre_fork_main = [this](const Instruction *inst) {
-    std::vector<SyncNode *> nodes = m_tfg->getNodes(inst, 0);
-    if (nodes.empty()) {
-      return false;
-    }
-    for (SyncNode *node : nodes) {
-      if (!m_pre_fork_main_nodes.count(node)) {
-        return false;
-      }
-    }
-    return true;
-  };
-  const bool i1PreForkMain = is_always_pre_fork_main(i1);
-  const bool i2PreForkMain = is_always_pre_fork_main(i2);
+  const bool i1PreForkMain = isAlwaysPreForkMain(i1);
+  const bool i2PreForkMain = isAlwaysPreForkMain(i2);
   if ((i1PreForkMain && t2 != 0) || (i2PreForkMain && t1 != 0))
     return (a && b) ? (m_mhp_cache[{a, b}] = false) : false;
 
@@ -1406,6 +1367,79 @@ bool MHPAnalysis::isInstructionThreadAmbiguous(const Instruction *inst) const {
     return true;
   }
   return it->second == kUnknownThread;
+}
+
+bool MHPAnalysis::isMainThreadSpawnNode(const SyncNode *node) const {
+  if (!node || !m_tfg || node->getThreadID() != 0) {
+    return false;
+  }
+
+  for (SyncNode *succ : node->getSuccessors()) {
+    if (succ->getThreadID() == 0) {
+      continue;
+    }
+    if (m_tfg->getEdgeKind(node, succ) == EdgeKind::Create) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void MHPAnalysis::recomputePreForkMainNodes() {
+  m_pre_fork_main_nodes.clear();
+  if (!m_tfg) {
+    return;
+  }
+
+  SyncNode *main_entry = m_tfg->getThreadEntryNode(0);
+  if (!main_entry) {
+    return;
+  }
+
+  std::vector<SyncNode *> thread_zero_nodes = m_tfg->getNodesInThread(0);
+  std::vector<SyncNode *> spawn_nodes;
+  spawn_nodes.reserve(thread_zero_nodes.size());
+  for (SyncNode *node : thread_zero_nodes) {
+    if (isMainThreadSpawnNode(node)) {
+      spawn_nodes.push_back(node);
+    }
+  }
+
+  for (SyncNode *node : thread_zero_nodes) {
+    if (node != main_entry && !m_tfg->canReach(main_entry, node)) {
+      continue;
+    }
+
+    bool reachable_from_spawn = false;
+    for (SyncNode *spawn_node : spawn_nodes) {
+      if (spawn_node == node || m_tfg->canReach(spawn_node, node)) {
+        reachable_from_spawn = true;
+        break;
+      }
+    }
+
+    if (!reachable_from_spawn) {
+      m_pre_fork_main_nodes.insert(node);
+    }
+  }
+}
+
+bool MHPAnalysis::isAlwaysPreForkMain(const Instruction *inst) const {
+  if (!inst || !m_tfg) {
+    return false;
+  }
+
+  std::vector<SyncNode *> nodes = m_tfg->getNodes(inst, 0);
+  if (nodes.empty()) {
+    return false;
+  }
+  for (SyncNode *node : nodes) {
+    if (!m_pre_fork_main_nodes.count(node)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool MHPAnalysis::hasStructuralOrderRelation(const Instruction *i1,

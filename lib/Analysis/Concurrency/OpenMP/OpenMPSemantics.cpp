@@ -797,6 +797,7 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
   };
   auto popRegion = [&](WaitBoundaryInfo::Kind kind, const Instruction *anchor) {
     if (state.region_stack.empty()) {
+      ++m_deferred_reason_counts["omp_region_end_unmatched"];
       return TraversalState::RegionFrame{};
     }
     if (state.region_stack.back().kind == kind) {
@@ -807,15 +808,29 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
                currentPhaseToken());
       return frame;
     }
-    for (auto it = state.region_stack.rbegin(); it != state.region_stack.rend();
-         ++it) {
-      if (it->kind == kind) {
-        addEvent(SemanticEventKind::RegionEnd, anchor, it->entity_id,
-                 state.scheduling_context_id, state.sequence_index, it->id,
-                 currentPhaseToken());
-        return *it;
+    for (size_t idx = state.region_stack.size(); idx > 0; --idx) {
+      if (state.region_stack[idx - 1].kind != kind) {
+        continue;
       }
+      ++m_deferred_reason_counts["omp_region_mismatched_end"];
+      const size_t stale_frames = state.region_stack.size() - idx;
+      if (stale_frames != 0) {
+        m_deferred_reason_counts["omp_region_stale_frames_dropped"] +=
+            stale_frames;
+      }
+      for (size_t stale_idx = state.region_stack.size(); stale_idx > idx - 1;
+           --stale_idx) {
+        const TraversalState::RegionFrame &frame = state.region_stack[stale_idx - 1];
+        addEvent(SemanticEventKind::RegionEnd, anchor, frame.entity_id,
+                 state.scheduling_context_id, state.sequence_index, frame.id,
+                 currentPhaseToken());
+      }
+      TraversalState::RegionFrame frame = state.region_stack[idx - 1];
+      state.region_stack.erase(state.region_stack.begin() + (idx - 1),
+                               state.region_stack.end());
+      return frame;
     }
+    ++m_deferred_reason_counts["omp_region_end_unmatched"];
     return TraversalState::RegionFrame{};
   };
   auto recordBoundary = [&](const CallBase *call, WaitBoundaryInfo::Kind kind,
@@ -1012,13 +1027,13 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         continue;
       }
       if (type == ThreadAPI::TD_OMP_MASTER_START) {
-        pushRegion(WaitBoundaryInfo::Kind::SingleEnd,
+        pushRegion(WaitBoundaryInfo::Kind::MasterEnd,
                    SemanticEntityKind::MasterRegion, call);
         ++m_summary.master_region_count;
         continue;
       }
       if (type == ThreadAPI::TD_OMP_ORDERED_START) {
-        pushRegion(WaitBoundaryInfo::Kind::SingleEnd,
+        pushRegion(WaitBoundaryInfo::Kind::OrderedEnd,
                    SemanticEntityKind::OrderedRegion, call);
         ++m_summary.ordered_region_count;
         continue;
@@ -1172,7 +1187,10 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
 
       if (type == ThreadAPI::TD_OMP_MASTER_END ||
           type == ThreadAPI::TD_OMP_ORDERED_END) {
-        popRegion(WaitBoundaryInfo::Kind::SingleEnd, call);
+        popRegion(type == ThreadAPI::TD_OMP_MASTER_END
+                      ? WaitBoundaryInfo::Kind::MasterEnd
+                      : WaitBoundaryInfo::Kind::OrderedEnd,
+                  call);
         continue;
       }
 
@@ -1194,7 +1212,17 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
           kind = WaitBoundaryInfo::Kind::Reduce;
         }
         WaitBoundaryInfo info = recordBoundary(call, kind);
-        TraversalState::RegionFrame frame = popRegion(kind, call);
+        TraversalState::RegionFrame frame;
+        const bool should_pop_region =
+            type == ThreadAPI::TD_OMP_SINGLE_END ||
+            type == ThreadAPI::TD_OMP_FOR_STATIC_FINI ||
+            type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI;
+        if (should_pop_region) {
+          frame = popRegion(kind, call);
+        } else {
+          frame.id = currentRegionId();
+          frame.entity_id = currentRegionEntityId();
+        }
         addTaskEvent(kind == WaitBoundaryInfo::Kind::Barrier
                          ? OpenMPTaskEvent::Kind::Barrier
                          : OpenMPTaskEvent::Kind::Taskwait,

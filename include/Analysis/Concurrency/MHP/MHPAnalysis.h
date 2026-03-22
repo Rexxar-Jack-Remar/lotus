@@ -388,8 +388,9 @@ private:
                      std::unordered_map<CallContextID,
                                         std::unordered_set<const llvm::Function *>>>
       m_visited_functions_by_thread;
-  // Context-sensitive nodes in thread 0 before the first fork in main's
-  // execution phase. These cannot run in parallel with child-thread nodes.
+  // Context-sensitive nodes in thread 0 that are proven to execute before any
+  // reachable thread/task creation from main. These cannot run in parallel
+  // with child-thread nodes.
   std::unordered_set<const SyncNode *> m_pre_fork_main_nodes;
 
   // Indirect fork handling (conservative)
@@ -451,14 +452,16 @@ private:
   getBarrierContinuations(const llvm::Instruction *barrier_inst) const;
   void finalizeBarrierPhases();
   void lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics);
+  void recomputePreForkMainNodes();
+  bool isMainThreadSpawnNode(const SyncNode *node) const;
+  bool isAlwaysPreForkMain(const llvm::Instruction *inst) const;
 
   // ========================================================================
   // Helper Methods
   // ========================================================================
 
   void processFunction(const llvm::Function *func, ThreadID tid,
-                       CallContextID ctx = 0,
-                       bool inPreForkMainPhase = false);
+                       CallContextID ctx = 0);
   void processInstruction(const llvm::Instruction *inst, ThreadID tid,
                           SyncNode *&current_node);
 

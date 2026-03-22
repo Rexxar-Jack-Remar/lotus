@@ -2137,6 +2137,96 @@ TEST_F(MPIAnalysisTest, OperationBeforeWindowFreeIsNotUseAfterFree) {
   EXPECT_TRUE(analysis.getResults().use_after_free_windows.empty());
 }
 
+TEST_F(MPIAnalysisTest, BranchSeparatedWindowFreeDoesNotReportUseAfterFree) {
+  const char *source = R"(
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_free(i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+
+    define i32 @main(i8* %comm, i1 %cond) {
+    entry:
+      %win = alloca i8, align 1
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* %win)
+      br i1 %cond, label %free_path, label %use_path
+
+    free_path:
+      call i32 @MPI_Win_free(i8* %win)
+      br label %join
+
+    use_path:
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 0, i64 0, i32 1, i32 0, i8* %win)
+      br label %join
+
+    join:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_TRUE(analysis.getResults().use_after_free_windows.empty());
+}
+
+TEST_F(MPIAnalysisTest,
+       CrossFunctionWindowFreeWithoutOrderingProducesModelGap) {
+  const char *source = R"(
+    @win = global i8 0, align 1
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_free(i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+
+    define void @free_win() {
+    entry:
+      call i32 @MPI_Win_free(i8* @win)
+      ret void
+    }
+
+    define void @use_win() {
+    entry:
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 0, i64 0, i32 1, i32 0,
+                        i8* @win)
+      ret void
+    }
+
+    define i32 @main(i8* %comm, i1 %cond) {
+    entry:
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* @win)
+      br i1 %cond, label %free_path, label %use_path
+
+    free_path:
+      call void @free_win()
+      br label %join
+
+    use_path:
+      call void @use_win()
+      br label %join
+
+    join:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_TRUE(analysis.getResults().use_after_free_windows.empty());
+  bool saw_gap = false;
+  for (const auto &gap : analysis.getResults().model_gaps) {
+    if (gap.code == "mpi_rma_use_after_free_order_unresolved") {
+      saw_gap = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(saw_gap);
+}
+
 TEST_F(MPIAnalysisTest, RMAEpochRelationFlowsIntoDiagnostics) {
   const char *source = R"(
     declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
@@ -2310,6 +2400,173 @@ TEST_F(MPIAnalysisTest, CommunicatorDupPreservesSplitSubgroupFacts) {
   EXPECT_EQ(collectives[0].communicator_class_id, collectives[1].communicator_class_id);
   EXPECT_EQ(collectives[0].communicator_subgroup_id,
             collectives[1].communicator_subgroup_id);
+}
+
+TEST_F(MPIAnalysisTest, UnrelatedCommunicatorArgumentsDoNotCollapseByPosition) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define void @left(i8* %comm_left) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm_left)
+      ret void
+    }
+
+    define void @right(i8* %comm_right) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm_right)
+      ret void
+    }
+
+    define i32 @main(i8* %comm0, i8* %comm1) {
+    entry:
+      call void @left(i8* %comm0)
+      call void @right(i8* %comm1)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto collectives = analysis.getProcessModel().getOperationsByKind(
+      MPIOpKind::COLLECTIVE_BLOCKING);
+  ASSERT_EQ(collectives.size(), 2u);
+  EXPECT_NE(collectives[0].communicator_class_id, 0u);
+  EXPECT_NE(collectives[1].communicator_class_id, 0u);
+  EXPECT_NE(collectives[0].communicator_class_id,
+            collectives[1].communicator_class_id);
+}
+
+TEST_F(MPIAnalysisTest,
+       AmbiguousHelperCommunicatorDoesNotCollapseAndEmitsModelGap) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define void @helper(i8* %comm) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret void
+    }
+
+    define i32 @main(i8* %comm0, i8* %comm1) {
+    entry:
+      call void @helper(i8* %comm0)
+      call void @helper(i8* %comm1)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto collectives = analysis.getProcessModel().getOperationsByKind(
+      MPIOpKind::COLLECTIVE_BLOCKING);
+  ASSERT_EQ(collectives.size(), 1u);
+  EXPECT_EQ(collectives[0].communicator_class_id, 0u);
+
+  size_t gap_count = 0;
+  for (const auto &gap : analysis.getResults().model_gaps) {
+    if (gap.code == "mpi_communicator_identity_ambiguous") {
+      ++gap_count;
+    }
+  }
+  EXPECT_GE(gap_count, 1u);
+}
+
+TEST_F(MPIAnalysisTest, HelperCommunicatorReusedFromSameRootStillUnifies) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define void @helper(i8* %comm) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret void
+    }
+
+    define i32 @main(i8* %comm0) {
+    entry:
+      call void @helper(i8* %comm0)
+      call void @helper(i8* %comm0)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto collectives = analysis.getProcessModel().getOperationsByKind(
+      MPIOpKind::COLLECTIVE_BLOCKING);
+  ASSERT_EQ(collectives.size(), 1u);
+  EXPECT_NE(collectives[0].communicator_class_id, 0u);
+  bool saw_ambiguous_gap = false;
+  for (const auto &gap : analysis.getResults().model_gaps) {
+    if (gap.code == "mpi_communicator_identity_ambiguous") {
+      saw_ambiguous_gap = true;
+      break;
+    }
+  }
+  EXPECT_FALSE(saw_ambiguous_gap);
+}
+
+TEST_F(MPIAnalysisTest, NonWorldCommunicatorIsNotMarkedAsWorldByClassOrder) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  for (const auto &fact : analysis.getCommunicatorFacts()) {
+    EXPECT_NE(fact.creation_kind, MPICommunicatorCreationKind::World);
+  }
+}
+
+TEST_F(MPIAnalysisTest, KnownWorldHandleStillMapsToWorldFact) {
+  const char *source = R"(
+    @MPI_COMM_WORLD = external global i8
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main() {
+    entry:
+      %world = load i8, i8* @MPI_COMM_WORLD, align 1
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0,
+                          i8* @MPI_COMM_WORLD)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_world = false;
+  for (const auto &fact : analysis.getCommunicatorFacts()) {
+    if (fact.creation_kind == MPICommunicatorCreationKind::World) {
+      saw_world = true;
+    }
+  }
+  EXPECT_TRUE(saw_world);
 }
 
 TEST_F(MPIAnalysisTest, WildcardReceiveWithKnownCommunicatorRemainsMayMatch) {

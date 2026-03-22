@@ -181,6 +181,36 @@ TEST_F(LockSetAnalysisTest, CountingSemaphoreDoesNotCreateMutualExclusion) {
   EXPECT_FALSE(lsa.mustHoldCommonLock(store1, store2));
 }
 
+TEST_F(LockSetAnalysisTest, CountingSemaphoreDoesNotPopulateLocksets) {
+  const char *source = R"(
+    declare i32 @sem_wait(i8*)
+
+    @sem = global i8 0
+
+    define i32 @main() {
+    entry:
+      call i32 @sem_wait(i8* @sem)
+      %after = add i32 1, 2
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *sem = module->getNamedGlobal("sem");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(sem, nullptr);
+
+  EXPECT_FALSE(lsa.mayHoldLock(after, sem));
+  EXPECT_FALSE(lsa.mustHoldLock(after, sem));
+}
+
 TEST_F(LockSetAnalysisTest, BinarySemaphoreTraitOptInPreservesExclusion) {
   const char *source = R"(
     declare i32 @binary_sem_wait(i8*)
@@ -221,6 +251,62 @@ TEST_F(LockSetAnalysisTest, BinarySemaphoreTraitOptInPreservesExclusion) {
   EXPECT_TRUE(lsa.mayHoldLock(store2, sem));
   EXPECT_TRUE(lsa.mayHoldCommonLock(store1, store2));
   EXPECT_TRUE(lsa.mustHoldCommonLock(store1, store2));
+}
+
+TEST_F(LockSetAnalysisTest,
+       SemaphorePolicyRemainsConsistentAcrossInterproceduralSummaries) {
+  const char *source = R"(
+    declare i32 @sem_wait(i8*)
+    declare i32 @binary_sem_wait(i8*)
+
+    @sem = global i8 0
+    @binary = global i8 0
+
+    define void @counting_helper() {
+    entry:
+      call i32 @sem_wait(i8* @sem)
+      ret void
+    }
+
+    define void @binary_helper() {
+    entry:
+      call i32 @binary_sem_wait(i8* @binary)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @counting_helper()
+      %after_counting = add i32 1, 2
+      call void @binary_helper()
+      %after_binary = add i32 3, 4
+      ret i32 %after_binary
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *after_counting =
+      findInstructionByName(*main_func, "after_counting");
+  const Instruction *after_binary =
+      findInstructionByName(*main_func, "after_binary");
+  const GlobalVariable *sem = module->getNamedGlobal("sem");
+  const GlobalVariable *binary = module->getNamedGlobal("binary");
+  ASSERT_NE(after_counting, nullptr);
+  ASSERT_NE(after_binary, nullptr);
+  ASSERT_NE(sem, nullptr);
+  ASSERT_NE(binary, nullptr);
+
+  EXPECT_FALSE(lsa.mayHoldLock(after_counting, sem));
+  EXPECT_FALSE(lsa.mustHoldLock(after_counting, sem));
+  EXPECT_TRUE(lsa.mayHoldLock(after_binary, binary));
+  EXPECT_FALSE(lsa.mustHoldLock(after_binary, binary));
 }
 
 TEST_F(LockSetAnalysisTest, ScopedLockTracksAllUnderlyingMutexes) {

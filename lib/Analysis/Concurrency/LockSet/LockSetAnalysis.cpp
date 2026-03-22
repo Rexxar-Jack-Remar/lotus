@@ -37,6 +37,16 @@
 using namespace llvm;
 using namespace mhp;
 
+namespace {
+
+bool isNonBinarySemaphoreOp(const ThreadAPI *thread_api,
+                            const Instruction *inst) {
+  return thread_api && inst && thread_api->isSemaphoreOp(inst) &&
+         !thread_api->isBinarySemaphoreOp(inst);
+}
+
+} // namespace
+
 // ============================================================================
 // Construction and Analysis
 // ============================================================================
@@ -870,6 +880,9 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
   const CallBase *call = dyn_cast<CallBase>(inst);
   ThreadAPI::TD_TYPE call_type =
       call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
+  if (isNonBinarySemaphoreOp(m_thread_api, inst)) {
+    return out_set;
+  }
   const bool raw_lock_api = call_type == ThreadAPI::TD_ACQUIRE ||
                             call_type == ThreadAPI::TD_TRY_ACQUIRE ||
                             call_type == ThreadAPI::TD_RWLOCK_RDLOCK ||
@@ -1238,6 +1251,9 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
   const CallBase *call = dyn_cast<CallBase>(inst);
   ThreadAPI::TD_TYPE call_type =
       call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
+  if (isNonBinarySemaphoreOp(m_thread_api, inst)) {
+    return;
+  }
   const bool raw_lock_api = call_type == ThreadAPI::TD_ACQUIRE ||
                             call_type == ThreadAPI::TD_TRY_ACQUIRE ||
                             call_type == ThreadAPI::TD_RWLOCK_RDLOCK ||
@@ -1542,6 +1558,10 @@ void LockSetAnalysis::identifyLocks() {
       const ThreadAPI::TD_TYPE type =
           call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
 
+      if (isNonBinarySemaphoreOp(m_thread_api, inst)) {
+        continue;
+      }
+
       std::vector<LockID> raii_releases = getRAIILocksReleasedAt(inst);
       for (LockID lock : raii_releases) {
         if (!lock) {
@@ -1806,6 +1826,9 @@ LockID LockSetAnalysis::getCppWrapperLockValue(const Instruction *inst) const {
 }
 
 bool LockSetAnalysis::isLockOperation(const Instruction *inst) const {
+  if (isNonBinarySemaphoreOp(m_thread_api, inst)) {
+    return false;
+  }
   if (m_thread_api->isTDAcquire(inst) || m_thread_api->isTDRelease(inst)) {
     return true;
   }

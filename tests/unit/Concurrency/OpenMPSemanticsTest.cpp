@@ -251,6 +251,70 @@ TEST_F(OpenMPSemanticsTest, MasterAndOrderedEndsDoNotBecomeWaitBoundaries) {
   EXPECT_EQ(semantics.getSummary().ordered_region_count, 1u);
 }
 
+TEST_F(OpenMPSemanticsTest, MismatchedNestedRegionEndsAreDeferredExplicitly) {
+  const char *source = R"(
+    declare i32 @__kmpc_master(i8*, i32)
+    declare void @__kmpc_end_master(i8*, i32)
+    declare void @__kmpc_ordered(i8*, i32)
+    declare void @__kmpc_end_ordered(i8*, i32)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_master(i8* null, i32 0)
+      call void @__kmpc_ordered(i8* null, i32 0)
+      call void @__kmpc_end_master(i8* null, i32 0)
+      call void @__kmpc_end_ordered(i8* null, i32 0)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  const auto &reasons = semantics.getDeferredReasonCounts();
+  auto mismatch_it = reasons.find("omp_region_mismatched_end");
+  ASSERT_NE(mismatch_it, reasons.end());
+  EXPECT_GT(mismatch_it->second, 0u);
+  auto unmatched_it = reasons.find("omp_region_end_unmatched");
+  ASSERT_NE(unmatched_it, reasons.end());
+  EXPECT_GT(unmatched_it->second, 0u);
+}
+
+TEST_F(OpenMPSemanticsTest, ValidSectionsAndReduceDoNotTriggerMalformedRegionCounters) {
+  const char *source = R"(
+    declare i32 @__kmpc_sections_init(i8*, i32)
+    declare void @__kmpc_end_sections(i8*, i32)
+    declare i32 @__kmpc_reduce(i8*, i32, i32, i64, i8*, i8*, i8*)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_sections_init(i8* null, i32 0)
+      call void @__kmpc_end_sections(i8* null, i32 0)
+      call i32 @__kmpc_reduce(i8* null, i32 0, i32 1, i64 4, i8* null, i8* null, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  const auto &reasons = semantics.getDeferredReasonCounts();
+  auto mismatch_it = reasons.find("omp_region_mismatched_end");
+  if (mismatch_it != reasons.end()) {
+    EXPECT_EQ(mismatch_it->second, 0u);
+  }
+  auto unmatched_it = reasons.find("omp_region_end_unmatched");
+  if (unmatched_it != reasons.end()) {
+    EXPECT_EQ(unmatched_it->second, 0u);
+  }
+}
+
 TEST_F(OpenMPSemanticsTest, AtomicRuntimeFallbackIsReportedExplicitly) {
   const char *source = R"(
     declare void @__kmpc_atomic_start()

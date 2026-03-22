@@ -80,6 +80,8 @@ struct WaitBoundaryInfo {
     TaskwaitDeps,
     TaskgroupEnd,
     SingleEnd,
+    MasterEnd,
+    OrderedEnd,
     SectionsEnd,
     ForFini,
     DispatchFini,

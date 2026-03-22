@@ -88,6 +88,9 @@ private:
                                const llvm::Instruction *acquire_inst) const;
   bool hasConcreteDirectAtomicWitness(const llvm::Instruction *release_inst,
                                       const llvm::Instruction *acquire_inst) const;
+  bool hasConcreteReleaseSequenceWitness(
+      const llvm::Instruction *release_inst,
+      const llvm::Instruction *acquire_inst) const;
   bool atomicLocationsMustAlias(const llvm::Instruction *lhs,
                                 const llvm::Instruction *rhs) const;
   size_t countConcreteAtomicWitnesses(const llvm::Instruction *inst) const;

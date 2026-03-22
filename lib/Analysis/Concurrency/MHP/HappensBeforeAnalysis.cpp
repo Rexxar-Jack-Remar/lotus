@@ -405,6 +405,65 @@ bool HappensBeforeAnalysis::hasConcreteDirectAtomicWitness(
   return hasBranchWitness(acquire_inst);
 }
 
+bool HappensBeforeAnalysis::hasConcreteReleaseSequenceWitness(
+    const Instruction *release_inst, const Instruction *acquire_inst) const {
+  if (!release_inst || !acquire_inst) {
+    return false;
+  }
+
+  if (!atomicLocationsMustAlias(release_inst, acquire_inst)) {
+    return false;
+  }
+
+  auto isReleaseHead = [](const Instruction *inst) {
+    return inst && CppAtomics::hasReleaseSemantics(inst) &&
+           (CppAtomics::isStore(inst) || CppAtomics::isReadModifyWrite(inst));
+  };
+
+  auto isAcquireUse = [](const Instruction *inst) {
+    return inst && CppAtomics::hasAcquireSemantics(inst) &&
+           (CppAtomics::isLoad(inst) || CppAtomics::isReadModifyWrite(inst));
+  };
+
+  if (!isReleaseHead(release_inst) || !isAcquireUse(acquire_inst) ||
+      CppAtomics::isFence(release_inst) || CppAtomics::isFence(acquire_inst) ||
+      !CppAtomics::getAtomicPointer(release_inst) ||
+      !CppAtomics::getAtomicPointer(acquire_inst)) {
+    return false;
+  }
+
+  // Keep this soundness-first: a release sequence edge is emitted only when
+  // there is a single concrete release head for the location and every other
+  // cross-thread write on that location is an RMW that could participate in
+  // that release sequence. This avoids adding HB when a competing plain store
+  // could satisfy the acquire without being in the sequence.
+  size_t release_sequence_rmw = 0;
+  for (const Instruction *candidate : m_atomic_instructions) {
+    if (candidate == release_inst || CppAtomics::isFence(candidate) ||
+        !CppAtomics::getAtomicPointer(candidate) ||
+        !atomicLocationsMustAlias(release_inst, candidate) ||
+        m_mhp.getThreadID(candidate) == m_mhp.getThreadID(release_inst)) {
+      continue;
+    }
+
+    if (CppAtomics::isReadModifyWrite(candidate)) {
+      ++release_sequence_rmw;
+      continue;
+    }
+
+    if (CppAtomics::isStore(candidate) &&
+        !CppAtomics::isReadModifyWrite(candidate)) {
+      return false;
+    }
+  }
+
+  if (release_sequence_rmw == 0) {
+    return false;
+  }
+
+  return hasBranchWitness(acquire_inst);
+}
+
 void HappensBeforeAnalysis::buildSynchronizesWith() {
   using namespace CppAtomics;
 
@@ -521,11 +580,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         latch_waits.push_back(inst);
         break;
       case ThreadAPI::TD_BARRIER_ARRIVE:
-      case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
         barrier_arrives.push_back(inst);
-        if (type == ThreadAPI::TD_BARRIER_ARRIVE_WAIT) {
-          barrier_waits.push_back(inst);
-        }
         break;
       case ThreadAPI::TD_BARRIER_WAIT_CPP20:
         barrier_waits.push_back(inst);
@@ -573,6 +628,10 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
   size_t direct_atomic_edges = 0;
   size_t deferred_direct_atomic_relations = 0;
+  size_t mixed_fence_atomic_edges = 0;
+  size_t deferred_mixed_fence_relations = 0;
+  size_t release_sequence_edges = 0;
+  size_t deferred_release_sequence_relations = 0;
   for (const Instruction *release : release_ops) {
     for (const Instruction *acquire : acquire_ops) {
       if (release == acquire) {
@@ -588,30 +647,89 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
                collectFenceWitnesses(release, /*require_release_semantics=*/true)) {
             for (const Instruction *acquire_witness : collectFenceWitnesses(
                      acquire, /*require_release_semantics=*/false)) {
-              if (!hasConcreteFenceWitness(release_witness, acquire_witness)) {
+              if (!hasConcreteFenceWitness(release_witness, acquire_witness) &&
+                  !hasConcreteReleaseSequenceWitness(release_witness,
+                                                    acquire_witness)) {
                 continue;
               }
               size_t before = m_sync_with.size();
               addSyncEdge(release_witness, acquire_witness);
               if (m_sync_with.size() != before) {
                 ++direct_atomic_edges;
+                if (hasConcreteReleaseSequenceWitness(release_witness,
+                                                     acquire_witness)) {
+                  ++release_sequence_edges;
+                }
               }
               emitted = true;
             }
           }
+        } else if (CppAtomics::isFence(release)) {
+          for (const Instruction *release_witness :
+               collectFenceWitnesses(release, /*require_release_semantics=*/true)) {
+            if (!sameAtomicLocation(release_witness, acquire) ||
+                (!hasConcreteFenceWitness(release_witness, acquire) &&
+                 !hasConcreteReleaseSequenceWitness(release_witness,
+                                                    acquire))) {
+              continue;
+            }
+            size_t before = m_sync_with.size();
+            addSyncEdge(release_witness, acquire);
+            if (m_sync_with.size() != before) {
+              ++direct_atomic_edges;
+              ++mixed_fence_atomic_edges;
+              if (hasConcreteReleaseSequenceWitness(release_witness,
+                                                   acquire)) {
+                ++release_sequence_edges;
+              }
+            }
+            emitted = true;
+          }
+        } else {
+          for (const Instruction *acquire_witness : collectFenceWitnesses(
+                   acquire, /*require_release_semantics=*/false)) {
+            if (!sameAtomicLocation(release, acquire_witness) ||
+                (!hasConcreteFenceWitness(release, acquire_witness) &&
+                 !hasConcreteReleaseSequenceWitness(release,
+                                                    acquire_witness))) {
+              continue;
+            }
+            size_t before = m_sync_with.size();
+            addSyncEdge(release, acquire_witness);
+            if (m_sync_with.size() != before) {
+              ++direct_atomic_edges;
+              ++mixed_fence_atomic_edges;
+              if (hasConcreteReleaseSequenceWitness(release,
+                                                   acquire_witness)) {
+                ++release_sequence_edges;
+              }
+            }
+            emitted = true;
+          }
         }
       } else if (sameAtomicLocation(release, acquire) &&
-                 hasConcreteDirectAtomicWitness(release, acquire)) {
+                 (hasConcreteDirectAtomicWitness(release, acquire) ||
+                  hasConcreteReleaseSequenceWitness(release, acquire))) {
         size_t before = m_sync_with.size();
         addSyncEdge(release, acquire);
         if (m_sync_with.size() != before) {
           ++direct_atomic_edges;
+          if (hasConcreteReleaseSequenceWitness(release, acquire)) {
+            ++release_sequence_edges;
+          }
         }
         emitted = true;
       }
       if (!emitted && !CppAtomics::isFence(release) &&
           !CppAtomics::isFence(acquire) && sameAtomicLocation(release, acquire)) {
         ++deferred_direct_atomic_relations;
+        if (CppAtomics::hasReleaseSemantics(release) &&
+            CppAtomics::hasAcquireSemantics(acquire)) {
+          ++deferred_release_sequence_relations;
+        }
+      } else if (!emitted &&
+                 (CppAtomics::isFence(release) || CppAtomics::isFence(acquire))) {
+        ++deferred_mixed_fence_relations;
       }
     }
   }
@@ -682,12 +800,47 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
   size_t barrier_edges = 0;
   size_t deferred_barrier_relations = 0;
+  auto hasAmbiguousSplitPhaseBarrier = [&](const Instruction *inst) {
+    std::unordered_map<mhp::ThreadID, size_t> arrive_counts;
+    std::unordered_map<mhp::ThreadID, size_t> wait_counts;
+    for (const Instruction *candidate : barrier_arrives) {
+      if (sameBarrier(inst, candidate)) {
+        ++arrive_counts[m_mhp.getThreadID(candidate)];
+      }
+    }
+    for (const Instruction *candidate : barrier_waits) {
+      if (sameBarrier(inst, candidate)) {
+        ++wait_counts[m_mhp.getThreadID(candidate)];
+      }
+    }
+    for (const auto &entry : arrive_counts) {
+      if (entry.second > 1) {
+        return true;
+      }
+    }
+    for (const auto &entry : wait_counts) {
+      if (entry.second > 1) {
+        return true;
+      }
+    }
+    return false;
+  };
   for (const Instruction *arrive : barrier_arrives) {
     for (const Instruction *wait : barrier_waits) {
-      if (!sameBarrier(arrive, wait)) {
+      if (!sameBarrier(arrive, wait) ||
+          m_mhp.getThreadID(arrive) == m_mhp.getThreadID(wait)) {
         continue;
       }
-      ++deferred_barrier_relations;
+      if (!hasAmbiguousSplitPhaseBarrier(arrive) &&
+          !hasAmbiguousSplitPhaseBarrier(wait)) {
+        size_t before = m_sync_with.size();
+        addSyncEdge(arrive, wait);
+        if (m_sync_with.size() != before) {
+          ++barrier_edges;
+        }
+      } else {
+        ++deferred_barrier_relations;
+      }
     }
   }
 
@@ -734,6 +887,14 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   m_deferred_sync_counts["atomic_direct_sync_edges"] = direct_atomic_edges;
   m_deferred_sync_counts["atomic_direct_relations_deferred"] =
       deferred_direct_atomic_relations;
+  m_deferred_sync_counts["atomic_release_sequence_sync_edges"] =
+      release_sequence_edges;
+  m_deferred_sync_counts["atomic_release_sequence_relations_deferred"] =
+      deferred_release_sequence_relations;
+  m_deferred_sync_counts["atomic_mixed_fence_sync_edges"] =
+      mixed_fence_atomic_edges;
+  m_deferred_sync_counts["atomic_mixed_fence_relations_deferred"] =
+      deferred_mixed_fence_relations;
   m_deferred_sync_counts["call_once_ops"] = call_once_ops.size();
   m_deferred_sync_counts["call_once_sync_edges"] = call_once_edges;
   m_deferred_sync_counts["call_once_relations_deferred"] =

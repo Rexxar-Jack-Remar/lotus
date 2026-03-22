@@ -1,5 +1,7 @@
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Analysis/Concurrency/Utils/CppAtomics.h"
+#include <llvm/Config/llvm-config.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
@@ -114,6 +116,158 @@ TEST_F(AtomicHappensBeforeTest, ReleaseAcquireOrdering) {
   hb.analyze();
 
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
+}
+
+TEST_F(AtomicHappensBeforeTest, ConsumeOrderingIsTreatedAsAcquire) {
+#if LLVM_VERSION_MAJOR < 15
+  GTEST_SKIP() << "LLVM does not expose AtomicOrdering::Consume in this build";
+#else
+  const char *source = R"(
+    @flag = global i8 0, align 1
+
+    define void @reader() {
+    entry:
+      %flag_load = load atomic i8, i8* @flag monotonic, align 1
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *reader = module->getFunction("reader");
+  ASSERT_NE(reader, nullptr);
+  auto *load = dyn_cast<LoadInst>(const_cast<Instruction *>(
+      findInstructionByName(*reader, "flag_load")));
+  ASSERT_NE(load, nullptr);
+  load->setOrdering(AtomicOrdering::Consume);
+
+  EXPECT_EQ(CppAtomics::getMemoryOrder(load),
+            CppAtomics::MemoryOrder::Acquire);
+  EXPECT_TRUE(CppAtomics::hasAcquireSemantics(load));
+#endif
+}
+
+TEST_F(AtomicHappensBeforeTest, ReleaseStoreBeforeAcquireFenceSynchronizes) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 7, i32* @data, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      fence acquire
+      %flag_load = load atomic i32, i32* @flag acquire, align 4
+      %cond = icmp eq i32 %flag_load, 1
+      br i1 %cond, label %ready, label %done
+
+    ready:
+      %data_load = load i32, i32* @data, align 4
+      br label %done
+
+    done:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer = module->getFunction("writer");
+  const Function *reader = module->getFunction("reader");
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+
+  const Instruction *store_data = findStoreToGlobal(*writer, "data");
+  const Instruction *load_data = findInstructionByName(*reader, "data_load");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.setAliasAnalysis(mhp.getAliasAnalysis());
+  hb.analyze();
+
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
+}
+
+TEST_F(AtomicHappensBeforeTest, ReleaseFenceBeforeAcquireLoadSynchronizes) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 9, i32* @data, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      fence release
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %flag_load = load atomic i32, i32* @flag acquire, align 4
+      %cond = icmp eq i32 %flag_load, 1
+      br i1 %cond, label %ready, label %done
+
+    ready:
+      %data_load = load i32, i32* @data, align 4
+      br label %done
+
+    done:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer = module->getFunction("writer");
+  const Function *reader = module->getFunction("reader");
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+
+  const Instruction *store_data = findStoreToGlobal(*writer, "data");
+  const Instruction *load_data = findInstructionByName(*reader, "data_load");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.setAliasAnalysis(mhp.getAliasAnalysis());
+  hb.analyze();
+
   EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
@@ -992,6 +1146,74 @@ TEST_F(AtomicHappensBeforeTest,
   hb.analyze();
 
   EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+}
+
+TEST_F(AtomicHappensBeforeTest, ReleaseSequenceThroughRmwSynchronizes) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 55, i32* @data, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @updater(i8* %arg) {
+    entry:
+      %old = atomicrmw add i32* @flag, i32 1 monotonic
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      %tid3 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @updater, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer_func = module->getFunction("writer");
+  const Function *reader_func = module->getFunction("reader");
+  ASSERT_NE(writer_func, nullptr);
+  ASSERT_NE(reader_func, nullptr);
+
+  const Instruction *store_data = findStoreToGlobal(*writer_func, "data");
+  const Instruction *load_data = findInstructionByName(*reader_func, "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 

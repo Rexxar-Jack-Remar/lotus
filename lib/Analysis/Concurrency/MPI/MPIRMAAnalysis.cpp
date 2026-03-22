@@ -18,6 +18,9 @@
 #include <utility>
 #include <vector>
 
+#include <llvm/Analysis/CFG.h>
+#include <llvm/Analysis/LoopInfo.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
@@ -134,6 +137,39 @@ bool participantsMayOverlap(const MPIParticipantSet &lhs,
     return true;
   }
   return lhs.mayOverlap(rhs);
+}
+
+bool isBeforeInBlock(const Instruction *lhs, const Instruction *rhs) {
+  if (!lhs || !rhs || lhs->getParent() != rhs->getParent()) {
+    return false;
+  }
+  for (const Instruction &inst : *lhs->getParent()) {
+    if (&inst == lhs) {
+      return true;
+    }
+    if (&inst == rhs) {
+      return false;
+    }
+  }
+  return false;
+}
+
+bool mustHappenBefore(const Instruction *lhs, const Instruction *rhs) {
+  if (!lhs || !rhs || lhs == rhs || lhs->getFunction() != rhs->getFunction()) {
+    return false;
+  }
+  if (lhs->getParent() == rhs->getParent()) {
+    return isBeforeInBlock(lhs, rhs);
+  }
+
+  Function *func = const_cast<Function *>(lhs->getFunction());
+  DominatorTree DT(*func);
+  if (!DT.dominates(lhs, rhs)) {
+    return false;
+  }
+
+  LoopInfo LI(DT);
+  return !isPotentiallyReachable(rhs, lhs, nullptr, &DT, &LI);
 }
 
 } // namespace
@@ -301,30 +337,19 @@ void MPIRMAAnalysis::analyzeRMA() {
   windows_.clear();
   rma_operations_.clear();
   synchronization_facts_.clear();
+  model_gaps_.clear();
   invalid_epoch_transitions_.clear();
   use_after_free_windows_.clear();
   double_window_free_.clear();
-
-  std::unordered_map<const Instruction *, size_t> instruction_position;
-  size_t next_position = 0;
-  for (const MPIOperation &op : process_model_.getAllOperations()) {
-    if (!op.inst) {
-      continue;
-    }
-    instruction_position.emplace(op.inst, next_position++);
-  }
 
   auto happensAfter = [&](const Instruction *lhs, const Instruction *rhs) {
     if (!lhs || !rhs) {
       return false;
     }
-    auto lhs_it = instruction_position.find(lhs);
-    auto rhs_it = instruction_position.find(rhs);
-    if (lhs_it == instruction_position.end() ||
-        rhs_it == instruction_position.end()) {
+    if (lhs->getFunction() != rhs->getFunction()) {
       return false;
     }
-    return lhs_it->second > rhs_it->second;
+    return mustHappenBefore(rhs, lhs);
   };
 
   for (const MPIOperation &op : process_model_.getAllOperations()) {
@@ -343,13 +368,12 @@ void MPIRMAAnalysis::analyzeRMA() {
       }
     } else if (op.kind == MPIOpKind::RMA_WINDOW && op.window &&
                op.td_type == ThreadAPI::TD_MPI_WIN_FREE) {
-      auto it = windows_.find(op.window);
-      if (it != windows_.end()) {
-        if (it->second.free_inst) {
-          double_window_free_.push_back(op.inst);
-        }
-        it->second.free_inst = op.inst;
+      RMAWindow &tracked = windows_[op.window];
+      tracked.window = op.window;
+      if (tracked.free_inst) {
+        double_window_free_.push_back(op.inst);
       }
+      tracked.free_inst = op.inst;
     }
   }
 
@@ -363,6 +387,22 @@ void MPIRMAAnalysis::analyzeRMA() {
       if (win_it != windows_.end() && win_it->second.free_inst &&
           happensAfter(op.inst, win_it->second.free_inst)) {
         use_after_free_windows_.push_back(op.inst);
+      } else if (win_it != windows_.end() && win_it->second.free_inst &&
+                 op.inst && win_it->second.free_inst &&
+                 op.inst->getFunction() != win_it->second.free_inst->getFunction()) {
+        MPIModelGap gap;
+        gap.domain = MPIModelGapDomain::RMAEpoch;
+        gap.inst = op.inst;
+        gap.participant_class_id = op.participant_class_id;
+        gap.relation.kind = concurrency::RelationKind::UnknownDueToModelGap;
+        gap.relation.proof = concurrency::ProofStrength::Unknown;
+        gap.relation.reason = "mpi_rma_use_after_free_order_unresolved";
+        gap.code = gap.relation.reason;
+        gap.provenance = "rma_analysis";
+        gap.detail = op.window && win_it->second.free_inst->getFunction()
+                         ? win_it->second.free_inst->getFunction()->getName().str()
+                         : "cross-function";
+        model_gaps_.push_back(std::move(gap));
       }
     }
 

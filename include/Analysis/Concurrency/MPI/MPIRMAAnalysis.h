@@ -110,6 +110,7 @@ public:
   const std::vector<RMASynchronizationFact> &getSynchronizationFacts() const {
     return synchronization_facts_;
   }
+  const std::vector<MPIModelGap> &getModelGaps() const { return model_gaps_; }
 
 private:
   struct EpochMachine {
@@ -129,6 +130,7 @@ private:
   std::map<WindowID, RMAWindow> windows_;
   std::vector<RMAOperation> rma_operations_;
   std::vector<RMASynchronizationFact> synchronization_facts_;
+  std::vector<MPIModelGap> model_gaps_;
   std::vector<const llvm::Instruction *> invalid_epoch_transitions_;
   std::vector<const llvm::Instruction *> use_after_free_windows_;
   std::vector<const llvm::Instruction *> double_window_free_;

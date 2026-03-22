@@ -893,6 +893,144 @@ TEST_F(ConcurrencyCheckerTest, ThreadLocalGlobalIsPrunedFromRaceCandidates) {
   EXPECT_FALSE(checker.wouldReportDataRace(store1, store2));
 }
 
+TEST_F(ConcurrencyCheckerTest,
+       CountingSemaphoreDoesNotSuppressEndToEndRaceReports) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+    @sem = global i8 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @sem_wait(i8*)
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      call i32 @sem_wait(i8* @sem)
+      store i32 1, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      call i32 @sem_wait(i8* @sem)
+      store i32 2, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @worker1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @worker2, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  mhp::MHPAnalysis mhp(*module);
+  mhp.enableLockSetAnalysis();
+  mhp.analyze();
+
+  lotus::EscapeAnalysis escape(*module);
+  escape.analyze();
+
+  concurrency::DataRaceChecker checker(*module, &mhp, mhp.getLockSetAnalysis(),
+                                       &escape, nullptr, nullptr,
+                                       mhp.getAliasAnalysis(), nullptr);
+
+  const Instruction *store1 = nullptr;
+  const Instruction *store2 = nullptr;
+  for (const Instruction &inst :
+       instructions(*module->getFunction("worker1"))) {
+    if (isa<StoreInst>(&inst)) {
+      store1 = &inst;
+      break;
+    }
+  }
+  for (const Instruction &inst :
+       instructions(*module->getFunction("worker2"))) {
+    if (isa<StoreInst>(&inst)) {
+      store2 = &inst;
+      break;
+    }
+  }
+
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+  EXPECT_TRUE(checker.wouldReportDataRace(store1, store2));
+}
+
+TEST_F(ConcurrencyCheckerTest,
+       BinarySemaphoreStillSuppressesEndToEndRaceReports) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+    @sem = global i8 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @binary_sem_wait(i8*)
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      call i32 @binary_sem_wait(i8* @sem)
+      store i32 1, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      call i32 @binary_sem_wait(i8* @sem)
+      store i32 2, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @worker1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @worker2, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  mhp::MHPAnalysis mhp(*module);
+  mhp.enableLockSetAnalysis();
+  mhp.analyze();
+
+  lotus::EscapeAnalysis escape(*module);
+  escape.analyze();
+
+  concurrency::DataRaceChecker checker(*module, &mhp, mhp.getLockSetAnalysis(),
+                                       &escape, nullptr, nullptr,
+                                       mhp.getAliasAnalysis(), nullptr);
+
+  const Instruction *store1 = nullptr;
+  const Instruction *store2 = nullptr;
+  for (const Instruction &inst :
+       instructions(*module->getFunction("worker1"))) {
+    if (isa<StoreInst>(&inst)) {
+      store1 = &inst;
+      break;
+    }
+  }
+  for (const Instruction &inst :
+       instructions(*module->getFunction("worker2"))) {
+    if (isa<StoreInst>(&inst)) {
+      store2 = &inst;
+      break;
+    }
+  }
+
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+  EXPECT_FALSE(checker.wouldReportDataRace(store1, store2));
+}
+
 TEST_F(ConcurrencyCheckerTest, FenceWithoutConcreteWitnessDoesNotSuppressRace) {
   const char *source = R"(
     @shared = global i32 0, align 4

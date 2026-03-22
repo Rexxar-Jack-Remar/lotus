@@ -236,6 +236,97 @@ TEST_F(StaticThreadSharingAnalysisTest,
 }
 
 TEST_F(StaticThreadSharingAnalysisTest,
+       MultiSpawnWorkerLocalAllocaRemainsThreadLocal) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %local_slot = alloca i32, align 4
+      store i32 7, i32* %local_slot, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid1, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::MaybeShared;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass("worker", "local_slot",
+                                    StaticSharingProbePass::QueryKind::Value,
+                                    &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(observed, StaticThreadSharingAnalysis::SharingClassification::
+                          DefinitelyThreadLocal);
+}
+
+TEST_F(StaticThreadSharingAnalysisTest,
+       MultiSpawnWorkerGlobalAccessStillClassifiesShared) {
+  const char *source = R"(
+    @g = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %load = load i32, i32* @g, align 4
+      store i32 %load, i32* @g, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid1, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::MaybeShared;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass("worker", "load",
+                                    StaticSharingProbePass::QueryKind::Instruction,
+                                    &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(
+      observed,
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared);
+}
+
+TEST_F(StaticThreadSharingAnalysisTest,
        AtomicWriteIsTreatedAsSharedAccess) {
   const char *source = R"(
     @g = global i32 0, align 4
