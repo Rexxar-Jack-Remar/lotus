@@ -325,6 +325,33 @@ TEST_F(OpenMPSemanticsTest, AtomicRuntimeFallbackIsReportedExplicitly) {
   EXPECT_EQ(it->second, 1u);
 }
 
+TEST_F(OpenMPSemanticsTest,
+       TargetDataUpdateDoesNotCreateTaskOrderingBoundary) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__tgt_target_data_update(i8*, i32)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      call i32 @__tgt_target_data_update(i8* null, i32 0)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  ASSERT_EQ(semantics.getTasks().size(), 2u);
+  EXPECT_TRUE(semantics.getWaitBoundaryInfos().empty());
+  EXPECT_EQ(semantics.getTaskEvents().size(), 2u);
+  EXPECT_TRUE(semantics.getRelations().empty());
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

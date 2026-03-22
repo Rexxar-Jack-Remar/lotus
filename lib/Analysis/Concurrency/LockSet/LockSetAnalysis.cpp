@@ -1145,28 +1145,6 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
     // other calls.
     if (!m_thread_api->isTDAcquire(call) && !m_thread_api->isTDRelease(call) &&
         !m_thread_api->isTDCondWait(call)) {
-      auto applyCalleeBodyFallback = [&](const Function *callee) {
-        for (const Instruction &I : instructions(callee)) {
-          if (m_thread_api->isTDAcquire(&I)) {
-            if (LockID L = getLockValue(&I))
-              out_set.insert(L);
-          } else if (m_thread_api->isTDRelease(&I)) {
-            if (LockID L = getLockValue(&I)) {
-              out_set.erase(L);
-              if (is_must && m_alias_analysis) {
-                LockSet to_remove;
-                for (const auto *held : out_set) {
-                  if (mayAlias(held, L))
-                    to_remove.insert(held);
-                }
-                for (const auto *held : to_remove)
-                  out_set.erase(held);
-              }
-            }
-          }
-        }
-      };
-
       auto applySummaryIfPresent = [&](const Function *callee) -> bool {
         auto it = m_function_summaries.find(callee);
         if (it == m_function_summaries.end() || !it->second.is_analyzed)
@@ -1197,11 +1175,7 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
       for (Function *callee : callees) {
         if (!callee || callee->isDeclaration())
           continue;
-        if (!applySummaryIfPresent(callee)) {
-          // Fallback for helper wrappers when summaries are unavailable or too
-          // imprecise at a given call site.
-          applyCalleeBodyFallback(callee);
-        }
+        (void)applySummaryIfPresent(callee);
       }
     }
   }
@@ -1517,7 +1491,39 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       break;
     }
 
-    if (getCallees(call).empty() && is_must &&
+    auto applySummaryToReadWrite = [&](const Function *callee) -> bool {
+      auto it = m_function_summaries.find(callee);
+      if (it == m_function_summaries.end() || !it->second.is_analyzed) {
+        return false;
+      }
+
+      const FunctionSummary &summary = it->second;
+      if (!is_must) {
+        out_write.insert(summary.may_acquire_delta.begin(),
+                         summary.may_acquire_delta.end());
+        for (LockID lock : summary.may_release_delta) {
+          out_read.erase(lock);
+          out_write.erase(lock);
+        }
+      }
+
+      for (LockID lock : summary.must_release_delta) {
+        out_read.erase(lock);
+        out_write.erase(lock);
+      }
+      return true;
+    };
+
+    auto callees = getCallees(call);
+    bool applied_summary = false;
+    for (Function *callee : callees) {
+      if (!callee || callee->isDeclaration()) {
+        continue;
+      }
+      applied_summary |= applySummaryToReadWrite(callee);
+    }
+
+    if (!applied_summary && callees.empty() && is_must &&
         shouldInvalidateMustLockState(call)) {
       out_read.clear();
       out_write.clear();
@@ -1979,10 +1985,9 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   // Run intraprocedural analysis to get flow-sensitive results
   computeIntraproceduralLockSets(func);
 
-  summary.may_acquire.clear();
-  summary.must_acquire.clear();
-  summary.may_release.clear();
-  summary.must_release.clear();
+  summary.may_acquire_delta.clear();
+  summary.may_release_delta.clear();
+  summary.must_release_delta.clear();
 
   // Collect return instructions
   std::vector<const ReturnInst *> returns;
@@ -1993,64 +1998,42 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   }
 
   if (!returns.empty()) {
-    // Compute must_acquire (Intersection of exit sets)
-    auto it = m_must_locksets_exit.find(returns[0]);
-    if (it != m_must_locksets_exit.end()) {
-      summary.must_acquire = it->second;
-    }
-
-    for (size_t i = 1; i < returns.size(); ++i) {
-      auto it = m_must_locksets_exit.find(returns[i]);
-      if (it != m_must_locksets_exit.end()) {
-        LockSet intersection;
-        std::set_intersection(
-            summary.must_acquire.begin(), summary.must_acquire.end(),
-            it->second.begin(), it->second.end(),
-            std::inserter(intersection, intersection.begin()));
-        summary.must_acquire = intersection;
-      } else {
-        summary.must_acquire.clear();
-      }
-    }
-
-    // Compute may_acquire (Union of exit sets)
+    // Compute may-acquire delta using the locks that may be held at return.
     for (const auto *ret : returns) {
       auto it = m_may_locksets_exit.find(ret);
       if (it != m_may_locksets_exit.end()) {
-        summary.may_acquire.insert(it->second.begin(), it->second.end());
+        summary.may_acquire_delta.insert(it->second.begin(), it->second.end());
       }
     }
   }
 
-  // Handle releases
-  // summary.must_release (used to update caller's must_locks) should contain
-  // MayReleased locks summary.may_release (used to update caller's may_locks)
-  // should contain MustReleased locks
-
-  // We scan for all releases to populate summary.must_release (MayReleased)
+  // We currently only compute maybe-released deltas soundly enough to clear
+  // caller must-lock certainty. A precise "definitely released on all exits"
+  // delta requires entry-sensitive summaries and is intentionally left empty.
   for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
     Instruction *inst = &*I;
     std::vector<LockID> released = getRAIILocksReleasedAt(inst);
     if (!released.empty()) {
-      summary.must_release.insert(released.begin(), released.end());
+      summary.must_release_delta.insert(released.begin(), released.end());
       continue;
     }
-    if (m_thread_api->isTDRelease(inst)) {
+    if (isNonBinarySemaphoreOp(m_thread_api, inst)) {
+      continue;
+    }
+    if (m_thread_api->isTDRelease(inst) && !m_thread_api->isTDAcquire(inst)) {
       if (LockID lock = getLockValue(inst)) {
-        summary.must_release.insert(lock);
+        summary.must_release_delta.insert(lock);
       }
     }
   }
 
-  // We leave summary.may_release empty (MustReleased) as we can't compute it
-  // safely This is safe for may-analysis (we won't remove locks that might
-  // still be held)
-
   summary.is_analyzed = true;
 
-  errs() << "  May acquire (at exit): " << summary.may_acquire.size()
+  errs() << "  May acquire delta: " << summary.may_acquire_delta.size()
          << " locks\n";
-  errs() << "  Must acquire (at exit): " << summary.must_acquire.size()
+  errs() << "  May release delta: " << summary.may_release_delta.size()
+         << " locks\n";
+  errs() << "  Must release delta: " << summary.must_release_delta.size()
          << " locks\n";
 }
 
@@ -2070,21 +2053,11 @@ void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
   const FunctionSummary &summary = it->second;
 
   // Apply lock acquisitions
-  may_locks.insert(summary.may_acquire.begin(), summary.may_acquire.end());
-
-  // Soundness fix:
-  // Do NOT blindly add callee-held exit locks into the caller's must-set.
-  // A callee summary computed in isolation does not encode whether those locks
-  // were already held on entry, adopted through wrapper state, or only held on
-  // a subset of dynamically reachable paths at this call site.  Injecting such
-  // locks into the caller's must-set can unsoundly suppress races.
-  //
-  // We therefore only use summaries to *remove* locks from the caller's
-  // must-set when the callee may release them, and keep must-acquire
-  // propagation disabled until entry->exit delta summaries are available.
+  may_locks.insert(summary.may_acquire_delta.begin(),
+                   summary.may_acquire_delta.end());
 
   // Apply lock releases (remove from locksets)
-  for (LockID lock : summary.may_release) {
+  for (LockID lock : summary.may_release_delta) {
     may_locks.erase(lock);
 
     // Also remove aliases if alias analysis is available
@@ -2101,7 +2074,7 @@ void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
     }
   }
 
-  for (LockID lock : summary.must_release) {
+  for (LockID lock : summary.must_release_delta) {
     must_locks.erase(lock);
 
     // Also remove aliases if alias analysis is available

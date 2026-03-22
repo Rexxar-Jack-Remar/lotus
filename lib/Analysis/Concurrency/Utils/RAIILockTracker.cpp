@@ -203,16 +203,6 @@ RAIILockTracker::findDestructorsForLockObject(
     }
   }
 
-  for (llvm::const_inst_iterator I = inst_begin(F), E = inst_end(F); I != E;
-       ++I) {
-    const llvm::Instruction *inst = &*I;
-    if (llvm::isa<llvm::ResumeInst>(inst) ||
-        llvm::isa<llvm::CleanupReturnInst>(inst) ||
-        llvm::isa<llvm::CatchReturnInst>(inst)) {
-      addIfMissing(inst);
-    }
-  }
-
   // If no explicit destructors found, look for lifetime.end intrinsics
   // or function exits as implicit destructor locations
   if (!hasExplicitDestructor) {
@@ -229,12 +219,10 @@ RAIILockTracker::findDestructorsForLockObject(
         }
       }
 
-      // Function exits are implicit destructor points on both normal and EH
-      // paths.
-      if (llvm::isa<llvm::ReturnInst>(inst) ||
-          llvm::isa<llvm::ResumeInst>(inst) ||
-          llvm::isa<llvm::CleanupReturnInst>(inst) ||
-          llvm::isa<llvm::CatchReturnInst>(inst)) {
+      // Function returns are implicit destructor points when no explicit
+      // lifetime end or destructor call is visible. We intentionally do not
+      // treat every unwind edge as an object-specific destructor site.
+      if (llvm::isa<llvm::ReturnInst>(inst)) {
         addIfMissing(inst);
       }
     }

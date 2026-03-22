@@ -799,3 +799,40 @@ TEST_F(ThreadAPITest, WrapperOperationsShareAnalysisLockIdentity) {
   EXPECT_EQ(identity, api->getAnalysisLockIdentity(lock));
   EXPECT_EQ(identity, api->getAnalysisLockIdentity(dtor));
 }
+
+TEST_F(ThreadAPITest, ReportsExplicitSemanticLoweringStatus) {
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  auto async = api->getSemanticLoweringInfo(ThreadAPI::TD_ASYNC);
+  auto future_get = api->getSemanticLoweringInfo(ThreadAPI::TD_FUTURE_GET);
+  auto omp_atomic = api->getSemanticLoweringInfo(ThreadAPI::TD_OMP_ATOMIC_START);
+
+  EXPECT_EQ(async.kind, ThreadAPI::SemanticLoweringKind::Deferred);
+  EXPECT_STREQ(async.reason, "async-launch-policy-witness");
+  EXPECT_EQ(future_get.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_STREQ(future_get.reason, "modeled");
+  EXPECT_EQ(omp_atomic.kind,
+            ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
+  EXPECT_STREQ(omp_atomic.reason, "openmp-atomic-runtime-unmodeled");
+}
+
+TEST_F(ThreadAPITest, LongestPrefixRuleWinsForOpenMPDoacross) {
+  const char *source = R"(
+    declare void @__kmpc_doacross_wait_4(i8*, i32, i64*)
+    declare void @__kmpc_doacross_submit_4(i8*, i32, i64*)
+    declare void @__kmpc_doacross_init_4(i8*, i32, i64*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_doacross_wait_4")),
+            ThreadAPI::TD_OMP_DOACROSS_WAIT);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_doacross_submit_4")),
+            ThreadAPI::TD_OMP_DOACROSS_SUBMIT);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_doacross_init_4")),
+            ThreadAPI::TD_OMP_DOACROSS_INIT);
+}

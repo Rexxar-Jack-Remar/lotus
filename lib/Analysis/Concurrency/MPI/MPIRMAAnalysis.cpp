@@ -18,13 +18,15 @@
 #include <utility>
 #include <vector>
 
+#include <llvm/ADT/StringRef.h>
 #include <llvm/Analysis/CFG.h>
 #include <llvm/Analysis/LoopInfo.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Dominators.h>
-#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Operator.h>
 
 using namespace llvm;
 
@@ -137,6 +139,46 @@ bool participantsMayOverlap(const MPIParticipantSet &lhs,
     return true;
   }
   return lhs.mayOverlap(rhs);
+}
+
+enum class GroupAliasResult { MustAlias, NoAlias, Unknown };
+
+const Value *canonicalGroupValue(const Value *value) {
+  if (!value) {
+    return nullptr;
+  }
+  value = value->stripPointerCasts();
+  if (const auto *load = dyn_cast<LoadInst>(value)) {
+    value = load->getPointerOperand()->stripPointerCasts();
+  }
+  if (const auto *gep = dyn_cast<GEPOperator>(value)) {
+    value = gep->getPointerOperand()->stripPointerCasts();
+  }
+  if (const Value *underlying = getUnderlyingObject(value)) {
+    value = underlying->stripPointerCasts();
+  }
+  return value;
+}
+
+GroupAliasResult classifyGroupAlias(GroupID lhs, GroupID rhs) {
+  if (!lhs || !rhs) {
+    return GroupAliasResult::Unknown;
+  }
+  lhs = canonicalGroupValue(lhs);
+  rhs = canonicalGroupValue(rhs);
+  if (lhs == rhs) {
+    return GroupAliasResult::MustAlias;
+  }
+  const auto *lhs_arg = dyn_cast<Argument>(lhs);
+  const auto *rhs_arg = dyn_cast<Argument>(rhs);
+  if (lhs_arg && rhs_arg && lhs_arg->getParent() == rhs_arg->getParent() &&
+      lhs_arg->getArgNo() == rhs_arg->getArgNo()) {
+    return GroupAliasResult::MustAlias;
+  }
+  if (lhs && rhs) {
+    return GroupAliasResult::NoAlias;
+  }
+  return GroupAliasResult::Unknown;
 }
 
 bool isBeforeInBlock(const Instruction *lhs, const Instruction *rhs) {
@@ -411,6 +453,7 @@ void MPIRMAAnalysis::analyzeRMA() {
       rma_op.inst = op.inst;
       rma_op.function = op.function;
       rma_op.window = op.window;
+      rma_op.group = op.group;
       rma_op.target_rank = op.target_rank;
       rma_op.target_rank_min = op.target_rank_min;
       rma_op.target_rank_max = op.target_rank_max;
@@ -560,6 +603,7 @@ void MPIRMAAnalysis::analyzeRMA() {
     RMASynchronizationFact fact;
     fact.inst = op.inst;
     fact.window = op.window;
+    fact.group = op.group;
     fact.participant_class_id = op.participant_class_id;
     fact.participants = op.participant_set;
     fact.target_rank = op.target_rank;
@@ -605,6 +649,7 @@ void MPIRMAAnalysis::analyzeRMA() {
     }
 
     bool has_complementary_scope = false;
+    bool complementary_scope_group_unknown = false;
     for (const RMASynchronizationFact &other : synchronization_facts_) {
       if (&fact == &other || fact.window != other.window) {
         continue;
@@ -625,18 +670,31 @@ void MPIRMAAnalysis::analyzeRMA() {
       if (fact_is_access == other_is_access) {
         continue;
       }
+      GroupAliasResult group_alias = classifyGroupAlias(fact.group, other.group);
+      if (group_alias == GroupAliasResult::NoAlias) {
+        continue;
+      }
       if (!rangesOverlap(fact.target_rank, fact.target_rank, other.target_rank,
                          other.target_rank) &&
           !rangesOverlap(fact.target_rank_min, fact.target_rank_max,
                          other.target_rank_min, other.target_rank_max)) {
         continue;
       }
+      if (group_alias == GroupAliasResult::Unknown) {
+        complementary_scope_group_unknown = true;
+        continue;
+      }
       has_complementary_scope = true;
       break;
     }
 
-    if (!has_complementary_scope) {
+    if (!has_complementary_scope || complementary_scope_group_unknown) {
       fact.code = "mpi_rma_pscw_group_unresolved";
+      fact.relation.kind = concurrency::RelationKind::UnknownDueToModelGap;
+      fact.relation.proof = complementary_scope_group_unknown
+                                ? concurrency::ProofStrength::May
+                                : concurrency::ProofStrength::Unknown;
+      fact.relation.reason = fact.code;
     }
   }
 }

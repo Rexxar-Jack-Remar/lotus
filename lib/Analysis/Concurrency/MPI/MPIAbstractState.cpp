@@ -151,6 +151,21 @@ bool areCollectivesCompatible(const MPICollectiveAnalysis::CollectiveCall &lhs,
   if (lhs.type != rhs.type) {
     return false;
   }
+  if (lhs.blocking_mode != MPIBlockingMode::Unknown &&
+      rhs.blocking_mode != MPIBlockingMode::Unknown &&
+      lhs.blocking_mode != rhs.blocking_mode) {
+    return false;
+  }
+  if (lhs.collective_variant != MPICollectiveVariant::Unknown &&
+      rhs.collective_variant != MPICollectiveVariant::Unknown &&
+      lhs.collective_variant != rhs.collective_variant) {
+    return false;
+  }
+  if (lhs.collective_shape != MPICollectiveShape::Unknown &&
+      rhs.collective_shape != MPICollectiveShape::Unknown &&
+      lhs.collective_shape != rhs.collective_shape) {
+    return false;
+  }
   if (lhs.root_rank >= 0 && rhs.root_rank >= 0 && lhs.root_rank != rhs.root_rank) {
     return false;
   }

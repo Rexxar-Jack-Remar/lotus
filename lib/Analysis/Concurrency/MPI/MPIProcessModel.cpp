@@ -1611,22 +1611,28 @@ void MPIProcessModel::extractRMADataDetails(
     window_idx = 11;
   } else if (StringRef(semantic_tag).equals("fetch-and-op")) {
     count_idx = -1;
-    datatype_idx = -1;
+    datatype_idx = 2;
     rank_idx = 3;
     disp_idx = 4;
     window_idx = 6;
-    op.byte_length = 1;
   } else if (StringRef(semantic_tag).equals("compare-and-swap")) {
     count_idx = -1;
-    datatype_idx = -1;
+    datatype_idx = 3;
     rank_idx = 4;
     disp_idx = 5;
     window_idx = 6;
-    op.byte_length = 1;
   }
 
   if (count_idx >= 0 && datatype_idx >= 0) {
     setByteLength(count_idx, datatype_idx);
+  } else if (datatype_idx >= 0) {
+    const Value *datatype_value = getOperandBySignedIndex(cb, datatype_idx);
+    int64_t extent = getDatatypeExtent(datatype_value, op.inst);
+    if (extent > 0) {
+      op.byte_length = extent;
+    } else {
+      op.byte_length = 1;
+    }
   }
 
   const Value *target_rank_arg = getOperandBySignedIndex(cb, rank_idx);
@@ -1712,10 +1718,14 @@ void MPIProcessModel::extractRMASyncDetails(
   }
 
   if (tag.equals("win-post") || tag.equals("win-start")) {
+    op.group = getOperandBySignedIndex(cb, 0);
     op.window = getOperandBySignedIndex(cb, 2);
     return;
   }
 
+  if (descriptor.group_arg != -1) {
+    op.group = getOperandBySignedIndex(cb, descriptor.group_arg);
+  }
   if (descriptor.window_arg != -1) {
     op.window = getOperandBySignedIndex(cb, descriptor.window_arg);
   }
@@ -2059,6 +2069,9 @@ void MPIProcessModel::analyzeModule() {
         if (const auto *cb = dyn_cast<CallBase>(I)) {
           const Value *root =
               cb->arg_size() >= 1 ? cb->getArgOperand(0) : nullptr;
+          std::string semantic_tag_storage =
+              callee ? thread_api_->getSemanticTag(callee) : std::string();
+          StringRef semantic_tag = semantic_tag_storage;
 
           if (kind == MPIOpKind::INTERCOMM_CREATION && cb->arg_size() >= 1) {
             recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
@@ -2068,16 +2081,20 @@ void MPIProcessModel::analyzeModule() {
                                       root);
           } else if (type == ThreadAPI::TD_MPI_COMM_DUP &&
                      cb->arg_size() >= 2) {
-            recordCommunicatorCreation(cb->getArgOperand(1), root,
+            unsigned newcomm_idx =
+                semantic_tag.equals("comm-dup-with-info")
+                    ? static_cast<unsigned>(cb->arg_size() - 1)
+                    : 1U;
+            recordCommunicatorCreation(cb->getArgOperand(newcomm_idx), root,
                                        MPICommunicatorCreationKind::Dup);
-            registerCommunicatorAlias(cb->getArgOperand(1), root);
+            registerCommunicatorAlias(cb->getArgOperand(newcomm_idx), root);
             size_t subgroup_id = getCommunicatorSubgroupID(root);
             if (subgroup_id != 0) {
               const CommunicatorTraceResult alias_trace =
-                  traceCommunicatorValue(cb->getArgOperand(1), &module_);
+                  traceCommunicatorValue(cb->getArgOperand(newcomm_idx), &module_);
               const Value *alias_key = alias_trace.root;
               if (!alias_key) {
-                alias_key = cb->getArgOperand(1)->stripPointerCasts();
+                alias_key = cb->getArgOperand(newcomm_idx)->stripPointerCasts();
               }
               communicator_subgroup_ids_[alias_key] = subgroup_id;
               communicator_subgroup_token_kinds_[alias_key] =
@@ -2085,6 +2102,39 @@ void MPIProcessModel::analyzeModule() {
             }
           } else if (type == ThreadAPI::TD_MPI_COMM_SPLIT &&
                      cb->arg_size() >= 4) {
+            if (semantic_tag.equals("comm-split-type")) {
+              registerCommunicatorSubgroup(
+                  cb->getArgOperand(cb->arg_size() - 1), root,
+                  MPICommunicatorSubgroupTokenKind::SplitColorUnknown);
+              MPIProcessSetFact subgroup;
+              subgroup.communicator = canonicalizeCommunicator(root);
+              subgroup.communicator_class_id =
+                  assignCommunicatorClass(subgroup.communicator);
+              subgroup.unknown = true;
+              subgroup.universal = true;
+              subgroup.scope_kind = MPIProcessSetScopeKind::Unknown;
+              subgroup.provenance = "comm-split-type";
+              subgroup.subgroup_token_kind =
+                  MPICommunicatorSubgroupTokenKind::SplitColorUnknown;
+              subgroup.subgroup_id = getCommunicatorSubgroupID(
+                  cb->getArgOperand(cb->arg_size() - 1));
+              recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
+                                         MPICommunicatorCreationKind::Split,
+                                         &subgroup);
+              MPIModelGap gap;
+              gap.domain = MPIModelGapDomain::Communicator;
+              gap.inst = I;
+              gap.communicator = canonicalizeCommunicator(root);
+              gap.communicator_class_id =
+                  assignCommunicatorClass(gap.communicator);
+              gap.subgroup_id = subgroup.subgroup_id;
+              gap.relation.kind = concurrency::RelationKind::UnknownDueToModelGap;
+              gap.relation.proof = concurrency::ProofStrength::Unknown;
+              gap.relation.reason = "mpi_subgroup_identity_unresolved";
+              gap.code = "mpi_subgroup_identity_unresolved";
+              gap.detail = "MPI_Comm_split_type subgroup identity is not modeled";
+              model_gaps_.push_back(gap);
+            } else {
             int color = 0;
             MPIProcessSetFact subgroup;
             subgroup.communicator = canonicalizeCommunicator(root);
@@ -2129,10 +2179,9 @@ void MPIProcessModel::analyzeModule() {
               gap.detail = "MPI_Comm_split color is not constant";
               model_gaps_.push_back(gap);
             }
+            }
           } else if (type == ThreadAPI::TD_MPI_COMM_CREATE &&
                      cb->arg_size() >= 3) {
-            std::string semantic_tag_storage = thread_api_->getSemanticTag(callee);
-            StringRef semantic_tag = semantic_tag_storage;
             MPICommunicatorCreationKind creation_kind =
                 semantic_tag.startswith("topology-")
                     ? MPICommunicatorCreationKind::Topology
@@ -2143,6 +2192,17 @@ void MPIProcessModel::analyzeModule() {
                                                MPICommunicatorCreationKind::Topology
                                            ? semantic_tag
                                            : "");
+            registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
+                                      root);
+          } else if ((type == ThreadAPI::TD_MPI_CART_CREATE ||
+                      type == ThreadAPI::TD_MPI_CART_SUB ||
+                      type == ThreadAPI::TD_MPI_DIST_GRAPH_CREATE ||
+                      type == ThreadAPI::TD_MPI_DIST_GRAPH_CREATE_ADJACENT ||
+                      type == ThreadAPI::TD_MPI_GRAPH_CREATE) &&
+                     cb->arg_size() >= 2) {
+            recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
+                                       MPICommunicatorCreationKind::Topology,
+                                       nullptr, semantic_tag);
             registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
                                       root);
           }

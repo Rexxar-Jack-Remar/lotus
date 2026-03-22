@@ -908,6 +908,56 @@ TEST_F(MHPAnalysisTest, ForeignJoinHandleDoesNotOrderLocalWorker) {
   EXPECT_FALSE(hb.mustPrecede(worker_inst, post));
 }
 
+TEST_F(MHPAnalysisTest, ReusedHandleJoinDoesNotOrderLaterCreatePhase) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      %w1 = add i32 1, 2
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      %w2 = add i32 3, 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker1, i8* null)
+      call i32 @pthread_join(i8* %tid, i8* null)
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker2, i8* null)
+      %post = add i32 5, 6
+      ret i32 %post
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *w1 = findInstructionByName(*module->getFunction("worker1"), "w1");
+  const Instruction *w2 = findInstructionByName(*module->getFunction("worker2"), "w2");
+  const Instruction *post = findInstructionByName(*module->getFunction("main"), "post");
+  ASSERT_NE(w1, nullptr);
+  ASSERT_NE(w2, nullptr);
+  ASSERT_NE(post, nullptr);
+
+  EXPECT_TRUE(hb.mustPrecede(w1, post));
+  EXPECT_TRUE(mhp.mayHappenInParallel(w2, post));
+  EXPECT_FALSE(hb.mustPrecede(w2, post));
+}
+
 TEST_F(MHPAnalysisTest, RegionPartitionDoesNotOverlapAcrossBranchMerge) {
   const char *source = R"(
     declare i32 @pthread_mutex_lock(i8*)

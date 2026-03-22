@@ -41,6 +41,7 @@ using ProcessID = int;
 using CommunicatorID = const llvm::Value *;
 using RequestID = const llvm::Value *;
 using WindowID = const llvm::Value *;
+using GroupID = const llvm::Value *;
 
 enum class MPICommunicationMatch { NoMatch, MustMatch, MayMatch, Unknown };
 
@@ -510,6 +511,7 @@ struct CollectiveProtocolFrontier {
 struct RMASynchronizationFact {
   const llvm::Instruction *inst = nullptr;
   WindowID window = nullptr;
+  GroupID group = nullptr;
   size_t participant_class_id = 0;
   MPIParticipantSet participants;
   int target_rank = -1;
@@ -574,6 +576,7 @@ struct MPIOperation {
   bool matched_message = false;
 
   WindowID window = nullptr;
+  GroupID group = nullptr;
   int target_rank = -1;
   int target_rank_min = -1;
   int target_rank_max = -1;

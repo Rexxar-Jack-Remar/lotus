@@ -4,11 +4,13 @@
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
 
@@ -22,9 +24,9 @@ class AliasAnalysisWrapper;
  * - Synchronizes-with (m_sync_with): promise/future and selected modeled
  *   library/runtime edges.
  *
- * Atomic and fence synchronization candidates are tracked in deferred counters,
- * but no synchronizes-with edges are emitted for them until the analysis has a
- * defensible reads-from / release-sequence model.
+ * Atomic and fence synchronization edges are emitted only when the analysis can
+ * prove a witness strong enough to avoid inventing reads-from relationships.
+ * Remaining candidates are left in deferred counters with explicit reasons.
  */
 class HappensBeforeAnalysis {
 public:
@@ -80,6 +82,8 @@ private:
   bool canReach(const mhp::SyncNode *start, const mhp::SyncNode *end) const;
   bool canReachWithHB(const mhp::SyncNode *start,
                       const mhp::SyncNode *end) const;
+  bool canReachExplicitHB(const llvm::Instruction *from,
+                          const llvm::Instruction *to) const;
   bool isInstructionThreadAmbiguous(const llvm::Instruction *inst) const;
   void addExtraHBEdge(const llvm::Instruction *from,
                       const llvm::Instruction *to);
@@ -91,9 +95,25 @@ private:
   collectThreadPrefixInstructions(const llvm::Instruction *inst) const;
   std::vector<const llvm::Instruction *>
   collectThreadSuffixInstructions(const llvm::Instruction *inst) const;
+  std::vector<const llvm::Instruction *>
+  collectHBRelevantSuffixInstructions(const llvm::Instruction *inst) const;
+  bool isPostSyncInstruction(const llvm::Instruction *sync_inst,
+                             const llvm::Instruction *candidate) const;
+  const llvm::Instruction *
+  findNearestAtomicInBlock(const llvm::Instruction *inst, bool search_backward,
+                           bool require_load_like,
+                           bool require_store_like) const;
+  bool isFenceAnchorCompatibleInstruction(const llvm::Instruction *inst) const;
+  const llvm::PostDominatorTree &
+  getPostDominatorTree(const llvm::Function *func) const;
 
   bool sameAtomicLocation(const llvm::Instruction *store_inst,
                           const llvm::Instruction *load_inst) const;
+  const llvm::Instruction *
+  getSinglePrecedingAtomicLoad(const llvm::Instruction *inst) const;
+  const llvm::Instruction *
+  getSingleFollowingAcquireFence(const llvm::Instruction *inst) const;
+  bool hasSupportedAtomicWitness(const llvm::Instruction *inst) const;
 
   /**
    * @brief Check if promise and future operate on the same shared state
@@ -132,6 +152,9 @@ private:
   std::vector<const llvm::Instruction *> m_atomic_instructions;
   std::unordered_map<const mhp::SyncNode *, std::vector<const mhp::SyncNode *>>
       m_extra_hb_successors;
+  mutable std::unordered_map<const llvm::Function *,
+                             std::unique_ptr<llvm::PostDominatorTree>>
+      m_post_dom_cache;
 
   /// Synchronizes-with pairs proven by non-atomic witness mechanisms.
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>

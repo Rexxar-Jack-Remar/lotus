@@ -44,4 +44,3 @@ TEST(PulseFormulaTest, InconsistentWhenUnionViolatesDisequality) {
 }
 
 } // namespace pulse
-

@@ -55,6 +55,7 @@ struct MPISemanticDescriptor {
   int peer_rank_arg = -1;
   int tag_arg = -1;
   int window_arg = -1;
+  int group_arg = -1;
   int target_rank_arg = -1;
   int target_disp_arg = -1;
   int result_handle_arg = -1;

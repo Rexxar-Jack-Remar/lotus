@@ -1088,8 +1088,7 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
           type == ThreadAPI::TD_OMP_TARGET_DATA_END ||
           type == ThreadAPI::TD_OMP_TARGET_DATA_UPDATE) {
         ++m_summary.target_data_region_count;
-        if (type == ThreadAPI::TD_OMP_TARGET_DATA_END ||
-            type == ThreadAPI::TD_OMP_TARGET_DATA_UPDATE) {
+        if (type == ThreadAPI::TD_OMP_TARGET_DATA_END) {
           WaitBoundaryInfo::Kind kind = is_nowait_variant
                                             ? WaitBoundaryInfo::Kind::TargetDataNowait
                                             : WaitBoundaryInfo::Kind::TargetData;

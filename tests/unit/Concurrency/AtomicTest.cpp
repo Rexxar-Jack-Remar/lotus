@@ -94,7 +94,7 @@ TEST_F(AtomicHappensBeforeTest, ReleaseAcquireOrdering) {
   hb.analyze();
 
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, ConsumeOrderingIsTreatedAsAcquire) {
@@ -185,7 +185,7 @@ TEST_F(AtomicHappensBeforeTest, ReleaseStoreBeforeAcquireFenceSynchronizes) {
   hb.setAliasAnalysis(mhp.getAliasAnalysis());
   hb.analyze();
 
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, ReleaseFenceBeforeAcquireLoadSynchronizes) {
@@ -246,7 +246,7 @@ TEST_F(AtomicHappensBeforeTest, ReleaseFenceBeforeAcquireLoadSynchronizes) {
   hb.setAliasAnalysis(mhp.getAliasAnalysis());
   hb.analyze();
 
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, SequentialConsistency) {
@@ -308,7 +308,7 @@ TEST_F(AtomicHappensBeforeTest, SequentialConsistency) {
   hb.analyze();
 
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, RelaxedAtomicsNoSynchronization) {
@@ -452,8 +452,8 @@ TEST_F(AtomicHappensBeforeTest, AcquireReleaseOrdering) {
 
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data1, load_data1));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data2, load_data2));
-  EXPECT_FALSE(hb.mustPrecede(store_data1, load_data1));
-  EXPECT_FALSE(hb.mustPrecede(store_data2, load_data2));
+  EXPECT_TRUE(hb.mustPrecede(store_data1, load_data1));
+  EXPECT_TRUE(hb.mustPrecede(store_data2, load_data2));
 }
 
 TEST_F(AtomicHappensBeforeTest, MultipleAtomicVariables) {
@@ -542,8 +542,8 @@ TEST_F(AtomicHappensBeforeTest, MultipleAtomicVariables) {
 
   EXPECT_TRUE(mhp.mayHappenInParallel(store_x, load_x));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_y, load_y));
-  EXPECT_FALSE(hb.mustPrecede(store_x, load_x));
-  EXPECT_FALSE(hb.mustPrecede(store_y, load_y));
+  EXPECT_TRUE(hb.mustPrecede(store_x, load_x));
+  EXPECT_TRUE(hb.mustPrecede(store_y, load_y));
 }
 
 TEST_F(AtomicHappensBeforeTest, AtomicChain) {
@@ -621,7 +621,7 @@ TEST_F(AtomicHappensBeforeTest, AtomicChain) {
   hb.analyze();
 
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, CompareAndSwap) {
@@ -1001,7 +1001,7 @@ TEST_F(AtomicHappensBeforeTest, MatchingFencesEstablishHB) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
@@ -1066,7 +1066,7 @@ TEST_F(AtomicHappensBeforeTest,
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
@@ -1191,7 +1191,7 @@ TEST_F(AtomicHappensBeforeTest, ReleaseSequenceThroughRmwSynchronizes) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
@@ -1253,7 +1253,7 @@ TEST_F(AtomicHappensBeforeTest, AtomicRmwFenceWitnessEstablishesHB) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 

@@ -467,6 +467,17 @@ public:
     bool from_config = false;
   };
 
+  enum class SemanticLoweringKind {
+    Modeled,
+    Deferred,
+    RecognizedButUnmodeled
+  };
+
+  struct SemanticLoweringInfo {
+    SemanticLoweringKind kind = SemanticLoweringKind::RecognizedButUnmodeled;
+    const char *reason = "unclassified";
+  };
+
   enum class MatchKind { Exact, Prefix };
 
   /// Map type for API name to TD_TYPE conversion
@@ -572,6 +583,59 @@ public:
   }
   std::string getSemanticTag(const llvm::Function *F) const {
     return describe(F).semantic_tag;
+  }
+  SemanticLoweringInfo getSemanticLoweringInfo(TD_TYPE type) const {
+    switch (type) {
+    case TD_DUMMY:
+      return {SemanticLoweringKind::RecognizedButUnmodeled, "unknown-api"};
+    case TD_ASYNC:
+      return {SemanticLoweringKind::Deferred, "async-launch-policy-witness"};
+    case TD_OMP_ATOMIC_START:
+    case TD_OMP_ATOMIC_END:
+      return {SemanticLoweringKind::RecognizedButUnmodeled,
+              "openmp-atomic-runtime-unmodeled"};
+    case TD_MPI_SESSION_GET_INFO:
+    case TD_MPI_SESSION_GET_NUM_ERRCODES:
+    case TD_MPI_SESSION_GET_ERRHANDLER:
+    case TD_MPI_SESSION_SET_ERRHANDLER:
+    case TD_MPI_ERRHANDLER_CREATE:
+    case TD_MPI_ERRHANDLER_FREE:
+    case TD_MPI_COMM_GET_ERRHANDLER:
+    case TD_MPI_COMM_SET_ERRHANDLER:
+    case TD_MPI_COMM_CALL_ERRHANDLER:
+    case TD_MPI_WIN_GET_ERRHANDLER:
+    case TD_MPI_WIN_SET_ERRHANDLER:
+    case TD_MPI_FILE_GET_ERRHANDLER:
+    case TD_MPI_FILE_SET_ERRHANDLER:
+    case TD_MPI_ERROR_CLASS:
+    case TD_MPI_ERROR_STRING:
+    case TD_MPI_INFO_CREATE:
+    case TD_MPI_INFO_DUP:
+    case TD_MPI_INFO_FREE:
+    case TD_MPI_INFO_GET:
+    case TD_MPI_INFO_GET_VALUELEN:
+    case TD_MPI_INFO_GET_NKEYS:
+    case TD_MPI_INFO_GET_NTHKEY:
+    case TD_MPI_INFO_GET_KEYVAL:
+    case TD_MPI_INFO_SET:
+    case TD_MPI_INFO_DELETE:
+    case TD_MPI_INFO_C2F:
+    case TD_MPI_INFO_CREATE_ENV:
+    case TD_MPI_INFO_FREE_ENV:
+    case TD_MPI_GET_COUNT:
+    case TD_MPI_GET_ELEMENTS:
+    case TD_MPI_GET_ELEMENTS_X:
+    case TD_MPI_STATUS_SIZE:
+    case TD_MPI_STATUS_SET_ELEMENTS:
+    case TD_MPI_STATUS_SET_ELEMENTS_X:
+      return {SemanticLoweringKind::RecognizedButUnmodeled,
+              "metadata-only-mpi-api"};
+    default:
+      return {SemanticLoweringKind::Modeled, "modeled"};
+    }
+  }
+  SemanticLoweringInfo getSemanticLoweringInfo(const llvm::Function *F) const {
+    return getSemanticLoweringInfo(getType(F));
   }
   bool hasSemanticTag(const llvm::Function *F, llvm::StringRef tag) const {
     return describe(F).semantic_tag == tag;

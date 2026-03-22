@@ -37,6 +37,9 @@ public:
     const llvm::Instruction *inst;
     ThreadAPI::TD_TYPE type;
     CommunicatorID comm;
+    MPIBlockingMode blocking_mode = MPIBlockingMode::Unknown;
+    MPICollectiveVariant collective_variant = MPICollectiveVariant::Unknown;
+    MPICollectiveShape collective_shape = MPICollectiveShape::Unknown;
     size_t communicator_class_id = 0;
     size_t communicator_subgroup_id = 0;
     size_t participant_class_id = 0;

@@ -6,6 +6,7 @@
 #include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 
@@ -238,6 +239,7 @@ void JoinTargetAnalysis::analyze() {
   collectForksAndJoins();
   m_forkToRoot.clear();
   m_joinToForks.clear();
+  m_joinToFeasibleForks.clear();
   m_unambiguousJoins.clear();
 
   auto mayAlias = [this](const Value *a, const Value *b) {
@@ -310,15 +312,25 @@ void JoinTargetAnalysis::analyze() {
       }
       if (add) forks.push_back(forkInst);
     }
+    std::vector<const Instruction *> feasible_forks =
+        filterTemporallyFeasibleForks(joinInst, forks);
+    std::vector<const Instruction *> feasible_exact_matches =
+        filterTemporallyFeasibleForks(joinInst, exact_root_matches);
+    std::vector<const Instruction *> feasible_definite_matches =
+        filterTemporallyFeasibleForks(joinInst, definite_matches);
+
     if (joinRoots.size() == 1 &&
-        classifyJoinForks(exact_root_matches) == CandidateCountKind::One) {
-      forks = std::move(exact_root_matches);
+        classifyJoinForks(feasible_exact_matches) == CandidateCountKind::One) {
+      feasible_forks = std::move(feasible_exact_matches);
       m_unambiguousJoins.insert(joinInst);
-    } else if (classifyJoinForks(definite_matches) == CandidateCountKind::One) {
-      forks = std::move(definite_matches);
+    } else if (classifyJoinForks(feasible_definite_matches) ==
+               CandidateCountKind::One) {
+      feasible_forks = std::move(feasible_definite_matches);
       m_unambiguousJoins.insert(joinInst);
     }
+
     m_joinToForks[joinInst] = std::move(forks);
+    m_joinToFeasibleForks[joinInst] = std::move(feasible_forks);
   }
 }
 
@@ -345,6 +357,15 @@ JoinTargetAnalysis::getPossibleJoinedForks(const Instruction *joinInst) const {
   return {};
 }
 
+std::vector<const Instruction *>
+JoinTargetAnalysis::getFeasibleJoinedForks(const Instruction *joinInst) const {
+  auto it = m_joinToFeasibleForks.find(joinInst);
+  if (it != m_joinToFeasibleForks.end()) {
+    return it->second;
+  }
+  return {};
+}
+
 bool JoinTargetAnalysis::isUnambiguousJoin(const Instruction *joinInst) const {
   return m_unambiguousJoins.count(joinInst) != 0;
 }
@@ -359,6 +380,142 @@ JoinTargetAnalysis::classifyJoinForks(
     return CandidateCountKind::One;
   }
   return CandidateCountKind::Many;
+}
+
+std::vector<const Instruction *>
+JoinTargetAnalysis::filterTemporallyFeasibleForks(
+    const Instruction *joinInst,
+    const std::vector<const Instruction *> &forks) const {
+  std::vector<const Instruction *> feasible;
+  for (const Instruction *forkInst : forks) {
+    if (!forkInst || !joinInst) {
+      continue;
+    }
+    if (forkInst->getFunction() != joinInst->getFunction()) {
+      feasible.push_back(forkInst);
+      continue;
+    }
+    if (!forkMayReachJoinInFunction(forkInst, joinInst)) {
+      continue;
+    }
+    if (joinMayReachForkInFunction(joinInst, forkInst)) {
+      continue;
+    }
+    feasible.push_back(forkInst);
+  }
+  return feasible;
+}
+
+bool JoinTargetAnalysis::forkMayReachJoinInFunction(
+    const Instruction *forkInst, const Instruction *joinInst) const {
+  if (!forkInst || !joinInst || forkInst->getFunction() != joinInst->getFunction()) {
+    return false;
+  }
+  if (forkInst == joinInst) {
+    return false;
+  }
+
+  std::deque<const BasicBlock *> worklist;
+  std::unordered_set<const BasicBlock *> visited;
+  const BasicBlock *start_bb = forkInst->getParent();
+  const BasicBlock *goal_bb = joinInst->getParent();
+  worklist.push_back(start_bb);
+  visited.insert(start_bb);
+
+  while (!worklist.empty()) {
+    const BasicBlock *current = worklist.front();
+    worklist.pop_front();
+
+    if (current == goal_bb) {
+      if (current != start_bb) {
+        return true;
+      }
+      for (const Instruction &inst : *current) {
+        if (&inst == forkInst) {
+          continue;
+        }
+        if (&inst == joinInst) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    for (const BasicBlock *succ : successors(current)) {
+      if (visited.insert(succ).second) {
+        worklist.push_back(succ);
+      }
+    }
+  }
+
+  return false;
+}
+
+bool JoinTargetAnalysis::joinMayReachForkInFunction(
+    const Instruction *joinInst, const Instruction *forkInst) const {
+  if (!forkInst || !joinInst || forkInst->getFunction() != joinInst->getFunction()) {
+    return false;
+  }
+  if (joinInst == forkInst) {
+    return false;
+  }
+
+  std::deque<const BasicBlock *> worklist;
+  std::unordered_set<const BasicBlock *> visited;
+  const BasicBlock *start_bb = joinInst->getParent();
+  const BasicBlock *goal_bb = forkInst->getParent();
+  worklist.push_back(start_bb);
+  visited.insert(start_bb);
+
+  while (!worklist.empty()) {
+    const BasicBlock *current = worklist.front();
+    worklist.pop_front();
+
+    if (current == goal_bb) {
+      if (current != start_bb) {
+        return true;
+      }
+      bool seen_join = false;
+      for (const Instruction &inst : *current) {
+        if (&inst == joinInst) {
+          seen_join = true;
+          continue;
+        }
+        if (&inst == forkInst && seen_join) {
+          return true;
+        }
+      }
+      if (seen_join) {
+        for (const BasicBlock *succ : successors(current)) {
+          if (succ == goal_bb) {
+            return true;
+          }
+        }
+      }
+    }
+
+    for (const BasicBlock *succ : successors(current)) {
+      if (visited.insert(succ).second) {
+        worklist.push_back(succ);
+      }
+    }
+  }
+
+  return false;
+}
+
+const PostDominatorTree &
+JoinTargetAnalysis::getPostDominatorTree(const Function *func) const {
+  auto it = m_postDomCache.find(func);
+  if (it != m_postDomCache.end()) {
+    return *(it->second);
+  }
+
+  auto pdt = std::make_unique<PostDominatorTree>();
+  pdt->recalculate(*const_cast<Function *>(func));
+  auto *pdt_ptr = pdt.get();
+  m_postDomCache[func] = std::move(pdt);
+  return *pdt_ptr;
 }
 
 } // namespace mhp

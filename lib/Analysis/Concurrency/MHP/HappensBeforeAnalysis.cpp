@@ -8,9 +8,10 @@
 #include <limits>
 #include <set>
 
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/Analysis/ValueTracking.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
@@ -24,20 +25,156 @@ bool hasBranchWitness(const Instruction *inst) {
     return false;
   }
 
-  for (const User *user : inst->users()) {
-    const auto *cmp = dyn_cast<ICmpInst>(user);
-    if (!cmp) {
-      continue;
-    }
-    for (const User *cmp_user : cmp->users()) {
-      const auto *branch = dyn_cast<BranchInst>(cmp_user);
-      if (branch && branch->isConditional()) {
-        return true;
+  std::deque<const Value *> worklist;
+  std::unordered_set<const Value *> visited;
+  worklist.push_back(inst);
+  visited.insert(inst);
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+    for (const User *user : current->users()) {
+      if (!visited.insert(user).second) {
+        continue;
+      }
+      if (const auto *cmp = dyn_cast<ICmpInst>(user)) {
+        for (const User *cmp_user : cmp->users()) {
+          const auto *branch = dyn_cast<BranchInst>(cmp_user);
+          if (branch && branch->isConditional()) {
+            return true;
+          }
+        }
+        continue;
+      }
+      if (isa<CastInst>(user) || isa<BinaryOperator>(user) ||
+          isa<SelectInst>(user) || isa<PHINode>(user)) {
+        worklist.push_back(user);
       }
     }
   }
 
   return false;
+}
+
+const BranchInst *getBranchWitness(const Instruction *inst) {
+  if (!inst) {
+    return nullptr;
+  }
+
+  std::deque<const Value *> worklist;
+  std::unordered_set<const Value *> visited;
+  worklist.push_back(inst);
+  visited.insert(inst);
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+    for (const User *user : current->users()) {
+      if (!visited.insert(user).second) {
+        continue;
+      }
+      if (const auto *cmp = dyn_cast<ICmpInst>(user)) {
+        for (const User *cmp_user : cmp->users()) {
+          const auto *branch = dyn_cast<BranchInst>(cmp_user);
+          if (branch && branch->isConditional()) {
+            return branch;
+          }
+        }
+        continue;
+      }
+      if (isa<CastInst>(user) || isa<BinaryOperator>(user) ||
+          isa<SelectInst>(user) || isa<PHINode>(user)) {
+        worklist.push_back(user);
+      }
+    }
+  }
+
+  return nullptr;
+}
+
+const BasicBlock *getWitnessSuccessor(const Instruction *inst) {
+  const auto *branch = getBranchWitness(inst);
+  if (!branch) {
+    return nullptr;
+  }
+
+  const auto *cmp = dyn_cast<ICmpInst>(branch->getCondition());
+  if (!cmp) {
+    return branch->getSuccessor(0);
+  }
+
+  const Value *lhs = cmp->getOperand(0);
+  const Value *rhs = cmp->getOperand(1);
+  const auto *lhs_const = dyn_cast<ConstantInt>(lhs);
+  const auto *rhs_const = dyn_cast<ConstantInt>(rhs);
+  const auto predicate = cmp->getPredicate();
+
+  auto choose = [&](bool sync_on_true) -> const BasicBlock * {
+    return branch->getSuccessor(sync_on_true ? 0 : 1);
+  };
+
+  const ConstantInt *constant = lhs_const ? lhs_const : rhs_const;
+  if (!constant) {
+    return choose(predicate == ICmpInst::ICMP_EQ || predicate == ICmpInst::ICMP_NE);
+  }
+
+  const bool is_zero = constant->isZero();
+  switch (predicate) {
+  case ICmpInst::ICMP_NE:
+    return choose(is_zero);
+  case ICmpInst::ICMP_EQ:
+    return choose(!is_zero);
+  default:
+    return branch->getSuccessor(0);
+  }
+}
+
+struct AtomicLocationKey {
+  const Value *base = nullptr;
+  int64_t offset = 0;
+  bool has_precise_offset = false;
+
+  bool operator==(const AtomicLocationKey &other) const {
+    return base == other.base && offset == other.offset &&
+           has_precise_offset == other.has_precise_offset;
+  }
+};
+
+struct AtomicLocationKeyHash {
+  size_t operator()(const AtomicLocationKey &key) const {
+    size_t seed = std::hash<const Value *>{}(key.base);
+    seed ^= std::hash<int64_t>{}(key.offset) + 0x9e3779b9 + (seed << 6) +
+            (seed >> 2);
+    seed ^= std::hash<bool>{}(key.has_precise_offset) + 0x9e3779b9 +
+            (seed << 6) + (seed >> 2);
+    return seed;
+  }
+};
+
+AtomicLocationKey getExactAtomicLocation(const Instruction *inst) {
+  AtomicLocationKey key;
+  const Value *ptr = CppAtomics::getAtomicPointer(inst);
+  if (!ptr) {
+    return key;
+  }
+
+  ptr = ptr->stripPointerCasts();
+  int64_t offset = 0;
+  if (const Value *base =
+          GetPointerBaseWithConstantOffset(ptr, offset,
+                                           inst->getModule()->getDataLayout())) {
+    key.base = base->stripPointerCasts();
+    key.offset = offset;
+    key.has_precise_offset = true;
+    return key;
+  }
+
+  if (const Value *base = getUnderlyingObject(ptr)) {
+    key.base = base->stripPointerCasts();
+    return key;
+  }
+  key.base = ptr;
+  return key;
 }
 
 } // namespace
@@ -171,10 +308,86 @@ HappensBeforeAnalysis::collectThreadSuffixInstructions(
   return ordered;
 }
 
+std::vector<const Instruction *>
+HappensBeforeAnalysis::collectHBRelevantSuffixInstructions(
+    const Instruction *inst) const {
+  std::vector<const Instruction *> ordered;
+  if (!inst || isInstructionThreadAmbiguous(inst)) {
+    return ordered;
+  }
+
+  std::set<const Instruction *> collected;
+  if (const BasicBlock *sync_successor = getWitnessSuccessor(inst)) {
+    std::deque<const BasicBlock *> worklist;
+    std::unordered_set<const BasicBlock *> visited;
+    worklist.push_back(sync_successor);
+    visited.insert(sync_successor);
+
+    while (!worklist.empty()) {
+      const BasicBlock *current = worklist.front();
+      worklist.pop_front();
+      for (const Instruction &candidate : *current) {
+        collected.insert(&candidate);
+      }
+      for (const BasicBlock *succ : successors(current)) {
+        if (visited.insert(succ).second) {
+          worklist.push_back(succ);
+        }
+      }
+    }
+  } else {
+    mhp::ThreadID tid = m_mhp.getThreadID(inst);
+    const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
+    for (const Instruction *candidate : collectThreadSuffixInstructions(inst)) {
+      if (!candidate || candidate == inst) {
+        continue;
+      }
+      if (!isPostSyncInstruction(inst, candidate)) {
+        continue;
+      }
+      if (tfg.getNodes(candidate, tid).empty()) {
+        continue;
+      }
+      collected.insert(candidate);
+    }
+  }
+
+  ordered.assign(collected.begin(), collected.end());
+  return ordered;
+}
+
+bool HappensBeforeAnalysis::isPostSyncInstruction(
+    const Instruction *sync_inst, const Instruction *candidate) const {
+  if (!sync_inst || !candidate || sync_inst == candidate) {
+    return false;
+  }
+  if (sync_inst->getFunction() != candidate->getFunction()) {
+    return true;
+  }
+  if (sync_inst->getParent() == candidate->getParent()) {
+    bool seen_sync = false;
+    for (const Instruction &inst : *sync_inst->getParent()) {
+      if (&inst == sync_inst) {
+        seen_sync = true;
+        continue;
+      }
+      if (&inst == candidate) {
+        return seen_sync;
+      }
+    }
+    return false;
+  }
+
+  const llvm::PostDominatorTree &pdt =
+      getPostDominatorTree(sync_inst->getFunction());
+  return pdt.dominates(candidate->getParent(), sync_inst->getParent());
+}
+
 void HappensBeforeAnalysis::addExplicitHBClosure(const Instruction *from,
                                                  const Instruction *to) {
   for (const Instruction *prefix : collectThreadPrefixInstructions(from)) {
-    for (const Instruction *suffix : collectThreadSuffixInstructions(to)) {
+    addExplicitHBPair(prefix, to);
+    for (const Instruction *suffix : collectHBRelevantSuffixInstructions(to)) {
       addExplicitHBPair(prefix, suffix);
     }
   }
@@ -195,11 +408,29 @@ void HappensBeforeAnalysis::computeAtomicHappensBefore() {
   }
 
   errs() << "Deferred " << m_atomic_instructions.size()
-         << " atomic/fence operations pending reads-from-aware lowering.\n";
+         << " atomic/fence operations for witness-aware lowering.\n";
 }
 
 void HappensBeforeAnalysis::buildSynchronizesWith() {
   using namespace CppAtomics;
+
+  struct AtomicEvent {
+    const Instruction *inst = nullptr;
+    AtomicLocationKey location;
+    mhp::ThreadID tid = std::numeric_limits<mhp::ThreadID>::max();
+    bool is_store_like = false;
+    bool is_load_like = false;
+    bool is_rmw = false;
+    bool has_release = false;
+    bool has_acquire = false;
+    bool is_fence = false;
+  };
+
+  struct AtomicTarget {
+    const Instruction *anchor = nullptr;
+    const Instruction *target = nullptr;
+    bool is_fence_target = false;
+  };
 
   std::vector<const Instruction *> release_ops;
   std::vector<const Instruction *> acquire_ops;
@@ -211,6 +442,14 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   std::vector<const Instruction *> barrier_arrives;
   std::vector<const Instruction *> barrier_waits;
   std::vector<const Instruction *> omp_task_ops;
+  std::vector<AtomicEvent> atomic_events;
+  std::unordered_map<AtomicLocationKey, std::vector<size_t>,
+                     AtomicLocationKeyHash>
+      events_by_location;
+  std::unordered_map<const Instruction *, const Instruction *>
+      release_fence_anchor;
+  std::unordered_map<const Instruction *, const Instruction *>
+      acquire_fence_anchor;
 
   std::set<std::pair<const Instruction *, const Instruction *>> seen_sync_edges;
   auto addSyncEdge = [&](const Instruction *from, const Instruction *to) {
@@ -219,7 +458,6 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
     if (seen_sync_edges.emplace(from, to).second) {
       m_sync_with.emplace_back(from, to);
-      addExtraHBEdge(from, to);
       addExplicitHBClosure(from, to);
     }
   };
@@ -262,6 +500,21 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       const Instruction *inst = &*I;
 
       if (isAtomic(inst)) {
+        AtomicEvent event;
+        event.inst = inst;
+        event.location = getExactAtomicLocation(inst);
+        event.tid = m_mhp.getThreadID(inst);
+        event.is_store_like = isStore(inst);
+        event.is_load_like = isLoad(inst);
+        event.is_rmw = isReadModifyWrite(inst);
+        event.has_release = hasReleaseSemantics(inst);
+        event.has_acquire = hasAcquireSemantics(inst);
+        event.is_fence = false;
+        atomic_events.push_back(event);
+        if (event.location.base) {
+          events_by_location[event.location].push_back(atomic_events.size() - 1);
+        }
+
         if (hasReleaseSemantics(inst) &&
             (isStore(inst) || isReadModifyWrite(inst))) {
           release_ops.push_back(inst);
@@ -369,25 +622,201 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   size_t deferred_mixed_fence_relations = 0;
   size_t release_sequence_edges = 0;
   size_t deferred_release_sequence_relations = 0;
-  for (const Instruction *release : release_ops) {
-    for (const Instruction *acquire : acquire_ops) {
-      if (release == acquire) {
-        continue;
-      }
-      if (m_mhp.getThreadID(release) == m_mhp.getThreadID(acquire)) {
-        continue;
-      }
-      const bool same_location = sameAtomicLocation(release, acquire);
-      const bool is_fence_relation =
-          CppAtomics::isFence(release) || CppAtomics::isFence(acquire);
-      if (!is_fence_relation && same_location) {
-        ++deferred_direct_atomic_relations;
-        if (CppAtomics::hasReleaseSemantics(release) &&
-            CppAtomics::hasAcquireSemantics(acquire)) {
-          ++deferred_release_sequence_relations;
+  for (const AtomicEvent &event : atomic_events) {
+    if (!event.location.base || isInstructionThreadAmbiguous(event.inst)) {
+      continue;
+    }
+
+    if (event.is_store_like) {
+      const Instruction *cursor = event.inst->getPrevNode();
+      while (cursor) {
+        if (CppAtomics::isFence(cursor)) {
+          if (CppAtomics::isFenceRelease(cursor) ||
+              CppAtomics::isFenceAcqRel(cursor) ||
+              CppAtomics::isFenceSeqCst(cursor)) {
+            release_fence_anchor[cursor] = event.inst;
+          }
+          break;
         }
-      } else if (is_fence_relation) {
+        if (!isFenceAnchorCompatibleInstruction(cursor)) {
+          break;
+        }
+        cursor = cursor->getPrevNode();
+      }
+    }
+
+    if (event.is_load_like) {
+      const Instruction *cursor = event.inst->getNextNode();
+      while (cursor) {
+        if (CppAtomics::isFence(cursor)) {
+          if (CppAtomics::isFenceAcquire(cursor) ||
+              CppAtomics::isFenceAcqRel(cursor) ||
+              CppAtomics::isFenceSeqCst(cursor)) {
+            acquire_fence_anchor[cursor] = event.inst;
+          }
+          break;
+        }
+        if (!isFenceAnchorCompatibleInstruction(cursor)) {
+          break;
+        }
+        cursor = cursor->getNextNode();
+      }
+    }
+  }
+
+  auto getReleaseCandidates = [&](const AtomicLocationKey &location) {
+    std::vector<std::pair<const Instruction *, const Instruction *>> candidates;
+    if (!location.base) {
+      return candidates;
+    }
+
+    auto loc_it = events_by_location.find(location);
+    if (loc_it == events_by_location.end()) {
+      return candidates;
+    }
+
+    const AtomicEvent *release_head = nullptr;
+    std::vector<const AtomicEvent *> rmw_candidates;
+    for (size_t idx : loc_it->second) {
+      const AtomicEvent &event = atomic_events[idx];
+      if (!event.is_store_like || event.tid == std::numeric_limits<mhp::ThreadID>::max()) {
+        continue;
+      }
+      if (!event.has_release) {
+        continue;
+      }
+      if (event.is_rmw) {
+        rmw_candidates.push_back(&event);
+        continue;
+      }
+      if (release_head) {
+        candidates.clear();
+        return candidates;
+      }
+      release_head = &event;
+    }
+
+    if (release_head) {
+      for (const AtomicEvent *rmw_candidate : rmw_candidates) {
+        if (hasProgramOrder(rmw_candidate->inst, release_head->inst)) {
+          candidates.clear();
+          return candidates;
+        }
+      }
+    } else if (rmw_candidates.size() == 1) {
+      candidates.emplace_back(rmw_candidates.front()->inst,
+                              rmw_candidates.front()->inst);
+    } else if (rmw_candidates.size() > 1) {
+      candidates.clear();
+      return candidates;
+    }
+
+    for (const auto &entry : release_fence_anchor) {
+      if (!(getExactAtomicLocation(entry.second) == location)) {
+        continue;
+      }
+      if (release_head || !candidates.empty()) {
+        candidates.clear();
+        return candidates;
+      }
+      candidates.emplace_back(entry.first, entry.second);
+    }
+
+    if (release_head) {
+      candidates.emplace_back(release_head->inst, release_head->inst);
+    }
+
+    return candidates;
+  };
+
+  auto getAcquireTargets = [&](const AtomicLocationKey &location) {
+    std::vector<AtomicTarget> targets;
+    auto loc_it = events_by_location.find(location);
+    if (loc_it == events_by_location.end()) {
+      return targets;
+    }
+
+    for (size_t idx : loc_it->second) {
+      const AtomicEvent &event = atomic_events[idx];
+      if (!event.is_load_like || !event.has_acquire ||
+          event.tid == std::numeric_limits<mhp::ThreadID>::max()) {
+        continue;
+      }
+      if (!event.is_rmw && !hasBranchWitness(event.inst)) {
+        ++deferred_direct_atomic_relations;
+        ++m_deferred_sync_counts["atomic_direct_missing_branch_witness"];
+        continue;
+      }
+      targets.push_back({event.inst, event.inst, false});
+    }
+
+    for (const auto &entry : acquire_fence_anchor) {
+      if (!(getExactAtomicLocation(entry.second) == location)) {
+        continue;
+      }
+      if (!hasBranchWitness(entry.second)) {
         ++deferred_mixed_fence_relations;
+        ++m_deferred_sync_counts["atomic_mixed_fence_missing_branch_witness"];
+        continue;
+      }
+      targets.push_back({entry.second, entry.second, true});
+    }
+
+    return targets;
+  };
+
+  for (const auto &entry : events_by_location) {
+    const AtomicLocationKey &location = entry.first;
+    auto release_candidates = getReleaseCandidates(location);
+    if (release_candidates.size() != 1) {
+      ++m_deferred_sync_counts["atomic_release_candidate_unresolved"];
+      for (size_t idx : entry.second) {
+        const AtomicEvent &event = atomic_events[idx];
+        if (event.is_load_like && event.has_acquire) {
+          ++deferred_direct_atomic_relations;
+        }
+      }
+      continue;
+    }
+
+    bool has_release_sequence = false;
+    for (size_t idx : entry.second) {
+      const AtomicEvent &event = atomic_events[idx];
+      if (event.inst != release_candidates.front().second && event.is_store_like &&
+          event.is_rmw) {
+        has_release_sequence = true;
+        break;
+      }
+    }
+
+    std::vector<AtomicTarget> targets = getAcquireTargets(location);
+    for (const AtomicTarget &target : targets) {
+      const Instruction *sync_target =
+          target.is_fence_target ? target.anchor : target.target;
+      if (!sync_target) {
+        continue;
+      }
+      if (m_mhp.getThreadID(release_candidates.front().first) ==
+          m_mhp.getThreadID(sync_target)) {
+        continue;
+      }
+      size_t before = m_sync_with.size();
+      addSyncEdge(release_candidates.front().first, sync_target);
+      bool modeled = m_sync_with.size() != before;
+      if (!modeled) {
+        ++m_deferred_sync_counts["atomic_release_candidate_unresolved"];
+        continue;
+      }
+      if (has_release_sequence) {
+        ++release_sequence_edges;
+        ++m_deferred_sync_counts["atomic_release_sequence_edges_modeled"];
+      } else if (target.is_fence_target ||
+                 CppAtomics::isFence(release_candidates.front().first)) {
+        ++mixed_fence_atomic_edges;
+        ++m_deferred_sync_counts["atomic_mixed_fence_edges_modeled"];
+      } else {
+        ++direct_atomic_edges;
+        ++m_deferred_sync_counts["atomic_direct_edges_modeled"];
       }
     }
   }
@@ -668,6 +1097,37 @@ bool HappensBeforeAnalysis::canReachWithHB(const mhp::SyncNode *start,
   return false;
 }
 
+bool HappensBeforeAnalysis::canReachExplicitHB(const Instruction *from,
+                                               const Instruction *to) const {
+  if (!from || !to || from == to) {
+    return false;
+  }
+
+  std::deque<const Instruction *> worklist;
+  std::unordered_set<const Instruction *> visited;
+  worklist.push_back(from);
+  visited.insert(from);
+
+  while (!worklist.empty()) {
+    const Instruction *current = worklist.front();
+    worklist.pop_front();
+    if (current == to) {
+      return true;
+    }
+
+    for (const auto &pair : m_explicit_hb_pairs) {
+      if (pair.first != current) {
+        continue;
+      }
+      if (visited.insert(pair.second).second) {
+        worklist.push_back(pair.second);
+      }
+    }
+  }
+
+  return false;
+}
+
 bool HappensBeforeAnalysis::hasProgramOrder(const Instruction *A,
                                             const Instruction *B) const {
   if (!A || !B || A == B) {
@@ -725,6 +1185,103 @@ bool HappensBeforeAnalysis::sameAtomicLocation(
     return true;
   }
   return m_alias_analysis && m_alias_analysis->mayAlias(p1, p2);
+}
+
+bool HappensBeforeAnalysis::isFenceAnchorCompatibleInstruction(
+    const Instruction *inst) const {
+  if (!inst) {
+    return false;
+  }
+  if (isa<DbgInfoIntrinsic>(inst) || isa<PHINode>(inst)) {
+    return true;
+  }
+  if (const auto *cb = dyn_cast<CallBase>(inst)) {
+    return cb->doesNotAccessMemory();
+  }
+  return !inst->mayReadOrWriteMemory();
+}
+
+const Instruction *HappensBeforeAnalysis::findNearestAtomicInBlock(
+    const Instruction *inst, bool search_backward, bool require_load_like,
+    bool require_store_like) const {
+  if (!inst) {
+    return nullptr;
+  }
+  if (!inst->getParent()) {
+    return nullptr;
+  }
+
+  const Instruction *cursor = inst;
+  while (true) {
+    cursor = search_backward ? cursor->getPrevNode() : cursor->getNextNode();
+    if (!cursor) {
+      return nullptr;
+    }
+    if (CppAtomics::isFence(cursor)) {
+      return nullptr;
+    }
+    if (CppAtomics::isAtomic(cursor)) {
+      if (require_load_like && !CppAtomics::isLoad(cursor)) {
+        return nullptr;
+      }
+      if (require_store_like && !CppAtomics::isStore(cursor)) {
+        return nullptr;
+      }
+      return cursor;
+    }
+    if (!isFenceAnchorCompatibleInstruction(cursor)) {
+      return nullptr;
+    }
+  }
+}
+
+const Instruction *
+HappensBeforeAnalysis::getSinglePrecedingAtomicLoad(const Instruction *inst) const {
+  return findNearestAtomicInBlock(inst, true, true, false);
+}
+
+const Instruction *
+HappensBeforeAnalysis::getSingleFollowingAcquireFence(const Instruction *inst) const {
+  const Instruction *next = inst ? inst->getNextNode() : nullptr;
+  while (next && isFenceAnchorCompatibleInstruction(next)) {
+    if (CppAtomics::isFence(next)) {
+      break;
+    }
+    next = next->getNextNode();
+  }
+  if (!next || !CppAtomics::isFence(next)) {
+    return nullptr;
+  }
+  if (!(CppAtomics::isFenceAcquire(next) || CppAtomics::isFenceAcqRel(next) ||
+        CppAtomics::isFenceSeqCst(next))) {
+    return nullptr;
+  }
+  return next;
+}
+
+const PostDominatorTree &
+HappensBeforeAnalysis::getPostDominatorTree(const Function *func) const {
+  auto it = m_post_dom_cache.find(func);
+  if (it != m_post_dom_cache.end()) {
+    return *(it->second);
+  }
+
+  auto pdt = std::make_unique<PostDominatorTree>();
+  pdt->recalculate(*const_cast<Function *>(func));
+  auto *pdt_ptr = pdt.get();
+  m_post_dom_cache[func] = std::move(pdt);
+  return *pdt_ptr;
+}
+
+bool HappensBeforeAnalysis::hasSupportedAtomicWitness(
+    const Instruction *inst) const {
+  if (!inst) {
+    return false;
+  }
+  if (hasBranchWitness(inst)) {
+    return true;
+  }
+  return getSingleFollowingAcquireFence(inst) != nullptr && hasBranchWitness(inst);
 }
 
 bool HappensBeforeAnalysis::samePromiseFuturePair(
@@ -946,6 +1503,10 @@ bool HappensBeforeAnalysis::happensBefore(const Instruction *A,
   }
 
   if (m_explicit_hb_pairs.count(key) != 0) {
+    m_hb_cache[key] = true;
+    return true;
+  }
+  if (canReachExplicitHB(A, B)) {
     m_hb_cache[key] = true;
     return true;
   }

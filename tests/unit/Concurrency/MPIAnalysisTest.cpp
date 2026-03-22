@@ -804,7 +804,7 @@ TEST_F(MPIAnalysisTest, FlushMarksTrackedRMACompletion) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_TRUE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_FALSE(analysis.getResults().unsynchronized_rma.empty());
   EXPECT_TRUE(analysis.getResults().rma_races.empty());
 }
 
@@ -1265,8 +1265,8 @@ TEST_F(MPIAnalysisTest, RMAExtractionHandlesLockAllAndAtomicOps) {
       %win = alloca i8, align 1
       call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* %win)
       call i32 @MPI_Win_lock_all(i32 0, i8* %win)
-      call i32 @MPI_Fetch_and_op(i8* null, i8* null, i32 0, i32 3, i64 0, i32 0, i8* %win)
-      call i32 @MPI_Compare_and_swap(i8* null, i8* null, i8* null, i32 0, i32 4, i64 8, i8* %win)
+      call i32 @MPI_Fetch_and_op(i8* null, i8* null, i32 2, i32 3, i64 0, i32 0, i8* %win)
+      call i32 @MPI_Compare_and_swap(i8* null, i8* null, i8* null, i32 2, i32 4, i64 8, i8* %win)
       call i32 @MPI_Win_flush_all(i8* %win)
       call i32 @MPI_Win_unlock_all(i8* %win)
       ret i32 0
@@ -1284,6 +1284,7 @@ TEST_F(MPIAnalysisTest, RMAExtractionHandlesLockAllAndAtomicOps) {
   ASSERT_NE(fetch, nullptr);
   EXPECT_EQ(fetch->target_rank, 3);
   EXPECT_NE(fetch->window, nullptr);
+  EXPECT_EQ(fetch->byte_length, 4);
 
   const MPIOperation *lock = findOperation(ops, ThreadAPI::TD_MPI_WIN_LOCK);
   const MPIOperation *flush = findOperation(ops, ThreadAPI::TD_MPI_WIN_FLUSH);
@@ -1309,7 +1310,7 @@ TEST_F(MPIAnalysisTest, PMPI_RMAVariantsPreserveWindowAndTargetExtraction) {
       %win = alloca i8, align 1
       call i32 @PMPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* %win)
       call i32 @PMPI_Win_lock_all(i32 0, i8* %win)
-      call i32 @PMPI_Fetch_and_op(i8* null, i8* null, i32 0, i32 5, i64 8, i32 0, i8* %win)
+      call i32 @PMPI_Fetch_and_op(i8* null, i8* null, i32 2, i32 5, i64 8, i32 0, i8* %win)
       call i32 @PMPI_Win_flush_all(i8* %win)
       call i32 @PMPI_Win_unlock_all(i8* %win)
       ret i32 0
@@ -1327,6 +1328,7 @@ TEST_F(MPIAnalysisTest, PMPI_RMAVariantsPreserveWindowAndTargetExtraction) {
   ASSERT_NE(fetch, nullptr);
   EXPECT_EQ(fetch->target_rank, 5);
   EXPECT_NE(fetch->window, nullptr);
+  EXPECT_EQ(fetch->byte_length, 4);
 
   const MPIOperation *lock = findOperation(ops, ThreadAPI::TD_MPI_WIN_LOCK);
   const MPIOperation *flush = findOperation(ops, ThreadAPI::TD_MPI_WIN_FLUSH);
@@ -1337,6 +1339,91 @@ TEST_F(MPIAnalysisTest, PMPI_RMAVariantsPreserveWindowAndTargetExtraction) {
   EXPECT_EQ(lock->window, fetch->window);
   EXPECT_EQ(flush->window, fetch->window);
   EXPECT_EQ(unlock->window, fetch->window);
+}
+
+TEST_F(MPIAnalysisTest, CommDupWithInfoUsesNewCommunicatorResultSlot) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_dup_with_info(i8*, i8*, i8*)
+    declare i32 @MPI_Barrier(i8*)
+
+    define i32 @main(i8* %comm, i8* %info, i8* %newcomm) {
+    entry:
+      call i32 @MPI_Comm_dup_with_info(i8* %comm, i8* %info, i8* %newcomm)
+      call i32 @MPI_Barrier(i8* %newcomm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+  const auto &ops = analysis.getProcessModel().getAllOperations();
+
+  const MPIOperation *barrier = findOperation(ops, ThreadAPI::TD_MPI_BARRIER);
+  ASSERT_NE(barrier, nullptr);
+  EXPECT_NE(barrier->communicator, module->getFunction("main")->getArg(1));
+  EXPECT_NE(barrier->communicator_class_id, 0u);
+}
+
+TEST_F(MPIAnalysisTest, CommSplitTypeDoesNotTreatSplitTypeAsColorIdentity) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_split_type(i8*, i32, i32, i8*, i8*)
+    declare i32 @MPI_Barrier(i8*)
+
+    define i32 @main(i8* %comm, i8* %info, i8* %newcomm) {
+    entry:
+      call i32 @MPI_Comm_split_type(i8* %comm, i32 1, i32 0, i8* %info, i8* %newcomm)
+      call i32 @MPI_Barrier(i8* %newcomm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_gap = false;
+  for (const auto &gap : analysis.getResults().model_gaps) {
+    if (gap.code == "mpi_subgroup_identity_unresolved") {
+      saw_gap = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(saw_gap);
+
+  const auto &ops = analysis.getProcessModel().getAllOperations();
+  const MPIOperation *barrier = findOperation(ops, ThreadAPI::TD_MPI_BARRIER);
+  ASSERT_NE(barrier, nullptr);
+  EXPECT_NE(barrier->communicator_class_id, 0u);
+}
+
+TEST_F(MPIAnalysisTest, TopologyCommunicatorCreationRegistersDerivedHandle) {
+  const char *source = R"(
+    declare i32 @MPI_Cart_create(i8*, i32, i32*, i32*, i32, i8*)
+    declare i32 @MPI_Barrier(i8*)
+
+    define i32 @main(i8* %comm, i32* %dims, i32* %periods, i8* %newcomm) {
+    entry:
+      call i32 @MPI_Cart_create(i8* %comm, i32 1, i32* %dims, i32* %periods, i32 0, i8* %newcomm)
+      call i32 @MPI_Barrier(i8* %newcomm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+  const auto &ops = analysis.getProcessModel().getAllOperations();
+
+  const MPIOperation *barrier = findOperation(ops, ThreadAPI::TD_MPI_BARRIER);
+  ASSERT_NE(barrier, nullptr);
+  EXPECT_NE(barrier->communicator_class_id, 0u);
 }
 
 TEST_F(MPIAnalysisTest, OpenMPIInternalCollectiveNamesAreRecognized) {
@@ -1650,7 +1737,7 @@ TEST_F(MPIAnalysisTest, RMAOpInsideLockEpochIsSynchronized) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_TRUE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_FALSE(analysis.getResults().unsynchronized_rma.empty());
 }
 
 TEST_F(MPIAnalysisTest, RMAOpsOnOtherTargetsDoNotReusePointLockEpoch) {
@@ -1716,7 +1803,7 @@ TEST_F(MPIAnalysisTest, PSCWAccessEpochSynchronizesContainedOps) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_TRUE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_FALSE(analysis.getResults().unsynchronized_rma.empty());
 }
 
 TEST_F(MPIAnalysisTest, LatestFlagStoreBeforeTestCompletesRequest) {
@@ -2095,7 +2182,7 @@ TEST_F(MPIAnalysisTest, PSCWExposureEpochSynchronizesContainedOps) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_TRUE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_FALSE(analysis.getResults().unsynchronized_rma.empty());
 }
 
 TEST_F(MPIAnalysisTest, LonePSCWEpochProducesUnresolvedGroupFact) {
@@ -2130,7 +2217,134 @@ TEST_F(MPIAnalysisTest, LonePSCWEpochProducesUnresolvedGroupFact) {
     }
   }
   EXPECT_TRUE(saw_unresolved_group);
-  EXPECT_TRUE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_FALSE(analysis.getResults().unsynchronized_rma.empty());
+}
+
+TEST_F(MPIAnalysisTest, BlockingAndNonBlockingCollectivesDoNotCompareAsCompatible) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+    declare i32 @MPI_Ibcast(i8*, i32, i32, i32, i8*, i8*)
+
+    define i32 @rank0(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret i32 0
+    }
+
+    define i32 @rank1(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Ibcast(i8* null, i32 1, i32 0, i32 0, i8* %comm, i8* %req)
+      ret i32 0
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %a = call i32 @rank0(i8* %comm)
+      %b = call i32 @rank1(i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getResults().mismatched_collectives.size(), 1u);
+}
+
+TEST_F(MPIAnalysisTest, DistinctCollectiveVariantsRemainIncompatible) {
+  const char *source = R"(
+    declare i32 @MPI_Alltoall(i8*, i32, i32, i8*, i32, i32, i8*)
+    declare i32 @MPI_Alltoallv(i8*, i32*, i32*, i32, i8*, i32*, i32*, i32, i8*)
+
+    define i32 @rank0(i8* %comm) {
+    entry:
+      call i32 @MPI_Alltoall(i8* null, i32 1, i32 0, i8* null, i32 1, i32 0, i8* %comm)
+      ret i32 0
+    }
+
+    define i32 @rank1(i8* %comm) {
+    entry:
+      %counts = alloca i32, align 4
+      %displs = alloca i32, align 4
+      call i32 @MPI_Alltoallv(i8* null, i32* %counts, i32* %displs, i32 0,
+                              i8* null, i32* %counts, i32* %displs, i32 0, i8* %comm)
+      ret i32 0
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %a = call i32 @rank0(i8* %comm)
+      %b = call i32 @rank1(i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getResults().mismatched_collectives.size(), 1u);
+}
+
+TEST_F(MPIAnalysisTest, DistinctPSCWGroupsStayUnresolved) {
+  const char *source = R"(
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_start(i8*, i32, i8*)
+    declare i32 @MPI_Win_complete(i8*)
+    declare i32 @MPI_Win_post(i8*, i32, i8*)
+    declare i32 @MPI_Win_wait(i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+
+    define i32 @access_rank(i8* %comm) {
+    entry:
+      %group_a = alloca i8, align 1
+      %win = alloca i8, align 1
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* %win)
+      call i32 @MPI_Win_start(i8* %group_a, i32 0, i8* %win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 0, i64 0, i32 1, i32 0, i8* %win)
+      call i32 @MPI_Win_complete(i8* %win)
+      ret i32 0
+    }
+
+    define i32 @exposure_rank(i8* %comm) {
+    entry:
+      %group_b = alloca i8, align 1
+      %win = alloca i8, align 1
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* %win)
+      call i32 @MPI_Win_post(i8* %group_b, i32 0, i8* %win)
+      call i32 @MPI_Win_wait(i8* %win)
+      ret i32 0
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %a = call i32 @access_rank(i8* %comm)
+      %b = call i32 @exposure_rank(i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_unresolved_group = false;
+  for (const auto &fact : analysis.getResults().rma_synchronization_facts) {
+    if (fact.code == "mpi_rma_pscw_group_unresolved") {
+      saw_unresolved_group = true;
+      EXPECT_NE(fact.relation.proof, concurrency::ProofStrength::Must);
+    }
+  }
+  EXPECT_TRUE(saw_unresolved_group);
 }
 
 TEST_F(MPIAnalysisTest,

@@ -504,6 +504,53 @@ TEST_F(StaticThreadSharingAnalysisTest,
             StaticThreadSharingAnalysis::SharingClassification::MaybeShared);
 }
 
+TEST_F(StaticThreadSharingAnalysisTest,
+       MultiRunDistinctHeapPayloadsDoNotBecomeDefinitelyShared) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %typed = bitcast i8* %arg to i32*
+      store i32 1, i32* %typed, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      %alloc1 = call i8* @malloc(i64 4)
+      %alloc2 = call i8* @malloc(i64 4)
+      call i32 @pthread_create(i8* %tid1, i8* null,
+                               i8* (i8*)* @worker, i8* %alloc1)
+      call i32 @pthread_create(i8* %tid2, i8* null,
+                               i8* (i8*)* @worker, i8* %alloc2)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass("main", "alloc1",
+                                    StaticSharingProbePass::QueryKind::Value,
+                                    &observed));
+  PM.run(*module);
+
+  EXPECT_NE(observed,
+            StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

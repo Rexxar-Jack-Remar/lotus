@@ -351,10 +351,9 @@ private:
 
   // Interprocedural analysis data structures
   struct FunctionSummary {
-    LockSet may_acquire;  ///< Locks that may be acquired
-    LockSet may_release;  ///< Locks that may be released
-    LockSet must_acquire; ///< Locks that must be acquired
-    LockSet must_release; ///< Locks that must be released
+    LockSet may_acquire_delta;  ///< Locks newly held on some exit path
+    LockSet may_release_delta;  ///< Locks definitely absent on all exits
+    LockSet must_release_delta; ///< Locks maybe released by the callee
     bool is_analyzed;     ///< Whether function has been analyzed
 
     FunctionSummary() : is_analyzed(false) {}

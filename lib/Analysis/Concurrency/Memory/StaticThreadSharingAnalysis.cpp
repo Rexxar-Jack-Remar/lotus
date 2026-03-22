@@ -89,6 +89,14 @@ bool isPerInstanceThreadLocalAllocSite(const Value *alloc_site) {
   return isa<AllocaInst>(alloc_site->stripPointerCasts());
 }
 
+bool isStableSharedStorageAllocSite(const Value *alloc_site) {
+  if (!alloc_site) {
+    return false;
+  }
+  alloc_site = alloc_site->stripPointerCasts();
+  return isa<GlobalValue>(alloc_site);
+}
+
 } // namespace
 
 namespace lotus {
@@ -294,8 +302,13 @@ StaticThreadSharingAnalysis::classify(const Value *AllocSite) const {
       // shared only if there is at least one write. "thread-shared but
       // immutable data... our algorithm also distinguishes between reads and
       // writes"
-      if (writerCount > 0)
+      if (writerCount > 0) {
+        if (multi_run_writer && allThreads.size() <= 1 &&
+            !isStableSharedStorageAllocSite(AllocSite)) {
+          return SharingClassification::MaybeShared;
+        }
         return SharingClassification::DefinitelyShared;
+      }
     }
   }
   return SharingClassification::DefinitelyThreadLocal;

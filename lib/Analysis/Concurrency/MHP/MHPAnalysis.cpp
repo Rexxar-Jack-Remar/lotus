@@ -976,11 +976,13 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
   if (!found_thread && joined_roots.size() <= 1 && m_join_target_analysis) {
     if (m_join_target_analysis->isUnambiguousJoin(join_inst)) {
       std::vector<const Instruction *> possible_forks =
-          m_join_target_analysis->getPossibleJoinedForks(join_inst);
-      auto it = m_fork_to_thread.find(possible_forks.front());
-      if (it != m_fork_to_thread.end()) {
-        joined_tid = it->second;
-        found_thread = true;
+          m_join_target_analysis->getFeasibleJoinedForks(join_inst);
+      if (possible_forks.size() == 1) {
+        auto it = m_fork_to_thread.find(possible_forks.front());
+        if (it != m_fork_to_thread.end()) {
+          joined_tid = it->second;
+          found_thread = true;
+        }
       }
     }
   }

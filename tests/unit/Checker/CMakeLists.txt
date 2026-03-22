@@ -2,6 +2,9 @@
 
 add_lotus_test(pulse_checker_test Pulse/PulseCheckerTest.cpp)
 target_link_libraries(pulse_checker_test PulseChecker)
+add_lotus_test(pulse_formula_test Pulse/PulseFormulaTest.cpp)
+target_link_libraries(pulse_formula_test PulseChecker)
+set_target_properties(pulse_formula_test PROPERTIES CXX_STANDARD 17)
 add_lotus_test(concurrency_checker_test Concurrency/ConcurrencyCheckerTest.cpp)
 target_link_libraries(concurrency_checker_test ConcurrencyChecker)
 add_lotus_test(ae_checker_test AE/AECheckerTest.cpp)

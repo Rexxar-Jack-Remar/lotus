@@ -149,6 +149,9 @@ void MPICollectiveAnalysis::analyzeCollectives() {
     call.inst = op.inst;
     call.type = op.td_type;
     call.comm = op.communicator;
+    call.blocking_mode = op.blocking_mode;
+    call.collective_variant = op.collective_variant;
+    call.collective_shape = op.collective_shape;
     call.communicator_class_id = event.collective.scope.communicator_class_id;
     call.communicator_subgroup_id =
         event.collective.scope.communicator_subgroup_id;
@@ -412,6 +415,21 @@ bool MPICollectiveAnalysis::areCollectivesCompatible(
 
   if (c1.type != c2.type)
     return false;
+  if (c1.blocking_mode != MPIBlockingMode::Unknown &&
+      c2.blocking_mode != MPIBlockingMode::Unknown &&
+      c1.blocking_mode != c2.blocking_mode) {
+    return false;
+  }
+  if (c1.collective_variant != MPICollectiveVariant::Unknown &&
+      c2.collective_variant != MPICollectiveVariant::Unknown &&
+      c1.collective_variant != c2.collective_variant) {
+    return false;
+  }
+  if (c1.collective_shape != MPICollectiveShape::Unknown &&
+      c2.collective_shape != MPICollectiveShape::Unknown &&
+      c1.collective_shape != c2.collective_shape) {
+    return false;
+  }
 
   if (c1.root_rank != -1 && c2.root_rank != -1 &&
       c1.root_rank != c2.root_rank) {

@@ -65,6 +65,7 @@ public:
     const llvm::Instruction *inst;
     const llvm::Function *function = nullptr;
     WindowID window;
+    GroupID group = nullptr;
     int target_rank = -1;
     int target_rank_min = -1;
     int target_rank_max = -1;

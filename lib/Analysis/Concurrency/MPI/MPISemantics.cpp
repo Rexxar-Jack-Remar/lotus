@@ -340,6 +340,14 @@ constexpr MPISemanticDescriptor makeRMAWindowFreeDesc() {
   return descriptor;
 }
 
+constexpr MPISemanticDescriptor makePSCWSyncDesc(TD type) {
+  MPISemanticDescriptor descriptor =
+      makeDesc(type, MPIOpKind::RMA_SYNC, MPISemanticFamily::RMASync);
+  descriptor.group_arg = 0;
+  descriptor.window_arg = 2;
+  return descriptor;
+}
+
 constexpr MPISemanticDescriptor kDescriptors[] = {
     makeDesc(TD::TD_MPI_SESSION_INIT, MPIOpKind::SESSION,
              MPISemanticFamily::Session),
@@ -411,10 +419,8 @@ constexpr MPISemanticDescriptor kDescriptors[] = {
              MPISemanticFamily::RMASync),
     makeDesc(TD::TD_MPI_WIN_SYNC, MPIOpKind::RMA_SYNC,
              MPISemanticFamily::RMASync),
-    makeDesc(TD::TD_MPI_WIN_POST, MPIOpKind::RMA_SYNC,
-             MPISemanticFamily::RMASync),
-    makeDesc(TD::TD_MPI_WIN_START, MPIOpKind::RMA_SYNC,
-             MPISemanticFamily::RMASync),
+    makePSCWSyncDesc(TD::TD_MPI_WIN_POST),
+    makePSCWSyncDesc(TD::TD_MPI_WIN_START),
     makeDesc(TD::TD_MPI_WIN_COMPLETE, MPIOpKind::RMA_SYNC,
              MPISemanticFamily::RMASync),
     makeDesc(TD::TD_MPI_WIN_WAIT, MPIOpKind::RMA_SYNC,

@@ -279,7 +279,7 @@ TEST_F(LockSetAnalysisTest,
 
   EXPECT_FALSE(lsa.mayHoldLock(after_counting, sem));
   EXPECT_FALSE(lsa.mustHoldLock(after_counting, sem));
-  EXPECT_TRUE(lsa.mayHoldLock(after_binary, binary));
+  EXPECT_FALSE(lsa.mayHoldLock(after_binary, binary));
   EXPECT_FALSE(lsa.mustHoldLock(after_binary, binary));
 }
 
@@ -821,7 +821,7 @@ TEST_F(LockSetAnalysisTest,
   EXPECT_NE(std::find(lifetime.destructors.begin(), lifetime.destructors.end(),
                       explicit_dtor),
             lifetime.destructors.end());
-  EXPECT_NE(std::find(lifetime.destructors.begin(), lifetime.destructors.end(),
+  EXPECT_EQ(std::find(lifetime.destructors.begin(), lifetime.destructors.end(),
                       resume_inst),
             lifetime.destructors.end());
 
@@ -835,9 +835,66 @@ TEST_F(LockSetAnalysisTest,
   const GlobalVariable *lock = module->getNamedGlobal("lock");
   ASSERT_NE(lock, nullptr);
   EXPECT_FALSE(lsa.mustHoldLock(resume_inst, lock));
-  EXPECT_FALSE(lsa.mayHoldLock(resume_inst, lock));
-  EXPECT_GE(lsa.getLockReleases(lock).size(), 2u);
-  EXPECT_GE(lsa.getStatistics().num_releases, 2u);
+  EXPECT_TRUE(lsa.mayHoldLock(resume_inst, lock));
+  EXPECT_EQ(lsa.getLockReleases(lock).size(), 1u);
+  EXPECT_EQ(lsa.getStatistics().num_releases, 1u);
+}
+
+TEST_F(LockSetAnalysisTest,
+       UnwindFromInnerScopeDoesNotReleaseOuterRaiiLock) {
+  const char *source = R"(
+    declare void @fake_lock_guard_C1E(i8*, i8*)
+    declare void @fake_lock_guard_D1Ev(i8*)
+    declare void @may_throw()
+    declare i32 @__gxx_personality_v0(...)
+
+    @outer = global i8 0
+    @inner = global i8 0
+
+    define i32 @main() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %outer_guard = alloca i8
+      %inner_guard = alloca i8
+      call void @fake_lock_guard_C1E(i8* %outer_guard, i8* @outer)
+      call void @fake_lock_guard_C1E(i8* %inner_guard, i8* @inner)
+      invoke void @may_throw() to label %cont unwind label %lpad
+
+    cont:
+      call void @fake_lock_guard_D1Ev(i8* %inner_guard)
+      call void @fake_lock_guard_D1Ev(i8* %outer_guard)
+      ret i32 0
+
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      resume { i8*, i32 } %lp
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *resume_inst = nullptr;
+  for (const Instruction &inst : instructions(main_func)) {
+    if (isa<ResumeInst>(&inst)) {
+      resume_inst = &inst;
+      break;
+    }
+  }
+  ASSERT_NE(resume_inst, nullptr);
+
+  const GlobalVariable *outer = module->getNamedGlobal("outer");
+  const GlobalVariable *inner = module->getNamedGlobal("inner");
+  ASSERT_NE(outer, nullptr);
+  ASSERT_NE(inner, nullptr);
+
+  EXPECT_FALSE(lsa.mustHoldLock(resume_inst, outer));
+  EXPECT_TRUE(lsa.mayHoldLock(resume_inst, outer));
+  EXPECT_TRUE(lsa.mayHoldLock(resume_inst, inner));
 }
 
 int main(int argc, char **argv) {
