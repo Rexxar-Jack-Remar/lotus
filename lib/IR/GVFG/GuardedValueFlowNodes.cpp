@@ -1,10 +1,10 @@
-#include "IR/GuardedValueFlow/GuardedValueFlowNodes.h"
-#include "IR/GuardedValueFlow/GuardedValueFlowSites.h"
+#include "IR/GVFG/GuardedValueFlowNodes.h"
+#include "IR/GVFG/GuardedValueFlowSites.h"
 
 #include <algorithm>
 
 using namespace llvm;
-using namespace llvm::gvfg;
+using namespace lotus::gvfg;
 
 namespace {
 

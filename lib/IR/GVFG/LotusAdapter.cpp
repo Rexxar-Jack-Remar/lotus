@@ -1,7 +1,7 @@
-#include "IR/GuardedValueFlow/LotusAdapter.h"
+#include "IR/GVFG/LotusAdapter.h"
 
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
-#include "IR/GuardedValueFlow/ConditionRef.h"
+#include "IR/GVFG/ConditionRef.h"
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallPtrSet.h>
@@ -17,7 +17,7 @@
 #include <string>
 
 using namespace llvm;
-using namespace llvm::gvfg;
+using namespace lotus::gvfg;
 
 #define DEBUG_TYPE "gvfg-lotus-adapter"
 
@@ -93,6 +93,9 @@ static GuardedValueFlowNode *ensureValueNode(GuardedValueFlowGraph &graph,
   if (auto *existing = graph.findInterfaceNode(value))
     return existing;
 
+  // The adapter may need to materialize values that were never created by the
+  // structural builder, for example imported producers and synthetic interface
+  // placeholders. Reuse either namespace if the value was already claimed.
   GuardedValueFlowNode *node = nullptr;
   if (kind == GuardedValueFlowNode::Kind::PseudoArgument ||
       kind == GuardedValueFlowNode::Kind::CommonArgument ||
@@ -131,7 +134,7 @@ static GuardedValueFlowNode *resolveOriginConditionNode(
 static GuardedValueFlowNode *resolveProducerValueNode(
     GuardedValueFlowGraph &graph, Value *value, Type *type, BasicBlock *bb);
 
-static void setAccessPathFromSegments(llvm::gvfg::AccessPath &path,
+static void setAccessPathFromSegments(lotus::gvfg::AccessPath &path,
                                       ArrayRef<std::pair<Value *, int64_t>> segments,
                                       bool is_from_return) {
   path.reset(nullptr);
@@ -297,6 +300,9 @@ static GuardedValueFlowNode *createSummaryProducerNode(
   auto *summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
       GuardedValueFlowNode::Kind::CallSiteReturnSummary, type, &graph, bb,
       callsite, callee, bucket);
+  // Summary sentinels stand in for imported or intentionally opaque producers.
+  // They are separate from ordinary value nodes so later consumers can tell
+  // exact interface channels from summarized channels.
   summary_node->setDescription(
       direction == SummaryDirection::Input
           ? "summary.input.value"
@@ -360,6 +366,9 @@ translateLocalPathCondToRegion(GuardedValueFlowGraph &graph, path_cond_t cond,
   if (owner && owner != graph.getBaseFunction())
     return nullptr;
 
+  // Rebuild local path conditions out of structural region algebra when
+  // possible. This preserves the same region identity that the structural
+  // builder would have produced for in-function guards.
   switch (cond->getKind()) {
   case PathCond::Kind::True:
     return graph.getAlwaysTrueRegion();
@@ -439,6 +448,8 @@ static GuardedValueFlowRegionNode *translatePathCondToRegion(
           translateLocalPathCondToRegion(graph, cond, fallback_block)) {
     return structural;
   }
+  // Fall back to a semantic/interface region when the path condition cannot be
+  // reconstructed as a purely local structural guard.
   return graph.findOrCreateSemanticRegion(
       cond, fallback_block, resolveOriginConditionNode(builder, cond));
 }
@@ -466,6 +477,9 @@ ensureStoreMemoryNode(GuardedValueFlowGraph &graph, Value *value,
                        : graph.findOrCreateStoreMemoryNode(
                              value, inst, memory_type, bb, "store.mem.adapter");
 
+  // Each store-memory node owns the producer chain for one memory fact. Special
+  // values use anonymous memory nodes so multiple imported sentinels do not
+  // overwrite one another in the keyed store-memory map.
   if (value == LocValue::UNDEF_VALUE) {
     (void)LotusGuardedValueFlowAdapterPass::safeLink(
         graph, mem_node,
@@ -518,6 +532,8 @@ static void linkMemoryValue(GuardedValueFlowGraph &graph,
       graph, load_mem_node, producer_mem, item.confidence, cond);
   if (!linked_producer)
     return;
+  // Matching regions are recorded on the load-memory node even when the actual
+  // incoming edge has to pass through an adapter-inserted cast.
   load_mem_node->addMatchingRegion(
       linked_producer, resolveMatchingRegion(builder, graph, producer_mem, item),
       cond);
@@ -683,6 +699,9 @@ static void materializeLoadParity(GuardedValueFlowGraph &graph,
       load_value_node->addChild(load_mem_node);
       graph.mapLoadMemoryNode(load, load_mem_node);
     } else {
+      // LotusAA may classify several loads as reading the same abstract value.
+      // Reuse one representative memory node so the adapted graph exposes one
+      // shared producer set for that equivalence class.
       for (LoadInst *equivalent_load : equivalent_loads) {
         if (auto *equivalent_value_node = graph.findNode(equivalent_load)) {
           equivalent_value_node->clearChildren();
@@ -734,6 +753,9 @@ static void materializeFunctionSummaryInterface(
   graph.resetFunctionSummaryInterface();
 
   const auto &summary_inputs = pta.getSummaryInputs();
+  // Summary arguments are value-only sentinels keyed by access-path depth.
+  // Summary returns are value -> load-memory chains so they can still carry
+  // imported producer facts and matching regions.
   for (unsigned bucket = 0; bucket < summary_inputs.size(); ++bucket) {
     const auto *summary_bucket = summary_inputs[bucket];
     if (!summary_bucket || summary_bucket->empty())
@@ -779,6 +801,9 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
                                        IntraLotusAA &pta,
                                        GuardedValueFlowGraphBuilderPass &builder) {
   const auto &outputs = pta.getOutputs();
+  // Output index 0 is the direct SSA return channel and stays on CommonReturn.
+  // Remaining outputs are modeled as pseudo returns with per-return memory
+  // nodes so indirect side effects remain explicit.
   for (size_t idx = 1; idx < outputs.size(); ++idx) {
     const auto *output = outputs[idx];
     auto *pseudo_return = graph.getPseudoReturn(static_cast<unsigned>(idx - 1));
@@ -866,6 +891,8 @@ static bool materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
       }
 
       const auto &summary_inputs = callee_graph->getSummaryInputs();
+      // Only input-side callsite summary wrappers are materialized here. Output
+      // summaries stay function-level in the current adapter contract.
       for (unsigned bucket = 0; bucket < summary_inputs.size(); ++bucket) {
         const auto *summary_bucket = summary_inputs[bucket];
         if (!summary_bucket || summary_bucket->empty())
@@ -1039,6 +1066,8 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         pseudo_input->clearChildren();
         setNodeAccessPathFromValue(pseudo_input, *callee_graph, formal_value);
 
+        // Pseudo inputs behave like a callsite-local value whose only child is
+        // a load-memory node populated from the caller-to-callee binding.
         auto *load_mem = graph.createNode<GuardedValueFlowNode>(
             GuardedValueFlowNode::Kind::LoadMemory, formal_value->getType(), &graph,
             call->getParent(), nullptr, call);
@@ -1101,6 +1130,9 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         setNodeAccessPathFromOutputIndex(pseudo_output, *callee_graph,
                                          static_cast<unsigned>(idx));
 
+        // Pseudo outputs mirror the function-output shape: the interface node is
+        // anchored at entry, while the backing store-memory node is anchored at
+        // the callsite that materializes the effect.
         auto *store_mem = ensureStoreMemoryNode(graph, pseudo_value, call,
                                                 outputs[idx]->getType(),
                                                 call->getParent());
@@ -1177,6 +1209,8 @@ GuardedValueFlowNode *LotusGuardedValueFlowAdapterPass::safeLink(
     return child;
   }
 
+  // Preserve the intended dependency even when the adapter has to bridge a
+  // type mismatch introduced by imported memory or interface facts.
   auto opcode_kind = chooseCastOpcode(src_ty, dst_ty);
   if (opcode_kind == GuardedValueFlowOpcodeNode::OpcodeKind::Invalid) {
     LLVM_DEBUG(dbgs() << "[gvfg-adapter] Unable to cast-link "
@@ -1268,6 +1302,6 @@ bool LotusGuardedValueFlowAdapterPass::adaptFunction(
   return true;
 }
 
-ModulePass *llvm::gvfg::createLotusGuardedValueFlowAdapterPass() {
+ModulePass *lotus::gvfg::createLotusGuardedValueFlowAdapterPass() {
   return new LotusGuardedValueFlowAdapterPass();
 }

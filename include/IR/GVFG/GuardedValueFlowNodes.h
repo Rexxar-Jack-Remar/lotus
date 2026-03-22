@@ -1,6 +1,6 @@
 #pragma once
 
-#include "IR/GuardedValueFlow/ConditionRef.h"
+#include "IR/GVFG/ConditionRef.h"
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/IR/BasicBlock.h>
@@ -17,14 +17,27 @@
 
 #include <cassert>
 
-namespace llvm {
+namespace lotus {
 namespace gvfg {
+
+using llvm::ArrayRef;
+using llvm::BasicBlock;
+using llvm::dyn_cast;
+using llvm::dyn_cast_or_null;
+using llvm::Function;
+using llvm::Instruction;
+using llvm::Type;
+using llvm::Value;
+using llvm::path_cond_t;
 
 class GuardedValueFlowGraph;
 class GuardedValueFlowSite;
 class GuardedValueFlowReturnSite;
 class GuardedValueFlowRegionNode;
 
+// AccessPath records the abstract field path attached to interface nodes and
+// summary nodes. Offsets are stored from leaf to root so the adapter can append
+// newly discovered outer segments without rebuilding the whole path.
 class AccessPath {
 public:
   AccessPath() = default;
@@ -74,6 +87,9 @@ private:
   bool is_from_return_{false};
 };
 
+// GuardedValueFlowNode is the common node type for both SSA values and
+// structural helper nodes. Edges are directed from a result/consumer to the
+// value, memory node, or expression node it depends on.
 class GuardedValueFlowNode {
 public:
   enum class Kind {
@@ -102,10 +118,14 @@ public:
   struct Edge {
     GuardedValueFlowNode *target{nullptr};
     float confidence{1.0f};
+    // Non-empty when the dependency only holds under a structural or imported
+    // path condition.
     ConditionRef condition;
   };
 
   struct MatchingRegion {
+    // `producer` is the node reachable from a load-memory node, while `region`
+    // records the path condition under which that producer is valid.
     GuardedValueFlowNode *producer{nullptr};
     GuardedValueFlowRegionNode *region{nullptr};
     ConditionRef provenance;
@@ -196,6 +216,9 @@ public:
   }
 };
 
+// Region nodes summarize control/path conditions for blocks, imported path
+// facts, and composed boolean guards. Non-region nodes inherit the region of
+// their parent block unless the adapter later places them elsewhere.
 class GuardedValueFlowRegionNode : public GuardedValueFlowNode {
 public:
   struct ConstraintState {
@@ -424,6 +447,9 @@ public:
   struct Incoming {
     GuardedValueFlowNode *value_node{nullptr};
     BasicBlock *incoming_block{nullptr};
+    // Immediate edge-local guard for this incoming value. This is narrower than
+    // the enclosing block region and is what downstream path-sensitive code
+    // should consult first for PHI semantics.
     GuardedValueFlowNode *condition_node{nullptr};
     bool condition_sense{true};
     ConditionRef condition;
@@ -472,6 +498,10 @@ public:
   }
 };
 
+// Call output nodes cover three interface roles:
+// - CommonOutput: direct non-void call result
+// - PseudoInput: per-callee incoming side-effect channel at a callsite
+// - PseudoOutput: per-callee outgoing side-effect channel at a callsite
 class GuardedValueFlowCallOutputNode : public GuardedValueFlowNode {
 public:
   GuardedValueFlowCallOutputNode(Kind kind, Type *type,
@@ -497,6 +527,9 @@ public:
   }
 };
 
+// Summary nodes model access-path buckets that are intentionally coarser than
+// direct pseudo interfaces. They remain separate so callers can distinguish
+// exact interface channels from summary-only channels.
 class GuardedValueFlowCallSummaryNode : public GuardedValueFlowNode {
 public:
   GuardedValueFlowCallSummaryNode(Kind kind, Type *type,
@@ -522,4 +555,4 @@ private:
 };
 
 } // namespace gvfg
-} // namespace llvm
+} // namespace lotus

@@ -8,8 +8,13 @@
 
 #include <string>
 
-namespace llvm {
+namespace lotus {
 namespace gvfg {
+
+using llvm::BasicBlock;
+using llvm::ConstantInt;
+using llvm::Value;
+using llvm::path_cond_t;
 
 class ConditionRef {
 public:
@@ -75,4 +80,4 @@ private:
 };
 
 } // namespace gvfg
-} // namespace llvm
+} // namespace lotus

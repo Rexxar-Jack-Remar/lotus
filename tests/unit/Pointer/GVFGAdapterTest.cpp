@@ -12,12 +12,12 @@
 #define private public
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "IR/GSA/GSA.h"
-#include "IR/GuardedValueFlow/GuardedValueFlowBuilder.h"
-#include "IR/GuardedValueFlow/LotusAdapter.h"
+#include "IR/GVFG/GuardedValueFlowGraph.h"
+#include "IR/GVFG/LotusAdapter.h"
 #undef private
 
 using namespace llvm;
-using namespace llvm::gvfg;
+using namespace lotus::gvfg;
 
 namespace {
 

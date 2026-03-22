@@ -1,9 +1,9 @@
-#include "IR/GuardedValueFlow/GuardedValueFlowSites.h"
+#include "IR/GVFG/GuardedValueFlowSites.h"
 
-#include "IR/GuardedValueFlow/GuardedValueFlowGraph.h"
+#include "IR/GVFG/GuardedValueFlowGraph.h"
 
 using namespace llvm;
-using namespace llvm::gvfg;
+using namespace lotus::gvfg;
 
 void GuardedValueFlowCallSite::addCommonInput(GuardedValueFlowNode *node) {
   common_inputs_.push_back(node);

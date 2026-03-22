@@ -1,6 +1,6 @@
 #include "Alias/LotusAA/Engine/InterProceduralPass.h"
-#include "IR/GuardedValueFlow/GuardedValueFlowBuilder.h"
-#include "IR/GuardedValueFlow/LotusAdapter.h"
+#include "IR/GVFG/GuardedValueFlowGraph.h"
+#include "IR/GVFG/LotusAdapter.h"
 
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
@@ -13,7 +13,7 @@
 #include <algorithm>
 
 using namespace llvm;
-using namespace llvm::gvfg;
+using namespace lotus::gvfg;
 
 namespace {
 

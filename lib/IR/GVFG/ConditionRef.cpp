@@ -1,9 +1,9 @@
-#include "IR/GuardedValueFlow/ConditionRef.h"
+#include "IR/GVFG/ConditionRef.h"
 
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
-using namespace llvm::gvfg;
+using namespace lotus::gvfg;
 
 std::string ConditionRef::render() const {
   std::string buffer;

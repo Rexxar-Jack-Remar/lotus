@@ -1,8 +1,8 @@
 #include "Alias/LotusAA/Engine/InterProceduralPass.h"
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "IR/GSA/GSA.h"
-#include "IR/GuardedValueFlow/GuardedValueFlowBuilder.h"
-#include "IR/GuardedValueFlow/LotusAdapter.h"
+#include "IR/GVFG/GuardedValueFlowGraph.h"
+#include "IR/GVFG/LotusAdapter.h"
 
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
@@ -15,7 +15,7 @@
 #include <gtest/gtest.h>
 
 using namespace llvm;
-using namespace llvm::gvfg;
+using namespace lotus::gvfg;
 
 namespace {
 

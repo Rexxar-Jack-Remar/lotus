@@ -1,6 +1,6 @@
 #pragma once
 
-#include "IR/GuardedValueFlow/ConditionRef.h"
+#include "IR/GVFG/ConditionRef.h"
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/IR/BasicBlock.h>
@@ -12,13 +12,20 @@
 #include <set>
 #include <vector>
 
-namespace llvm {
+namespace lotus {
 namespace gvfg {
+
+using llvm::ArrayRef;
+using llvm::Function;
+using llvm::Instruction;
 
 class GuardedValueFlowGraph;
 class GuardedValueFlowNode;
 class GuardedValueFlowRegionNode;
 
+// Sites annotate instructions that are semantically important to later
+// analyses. Nodes carry the value-flow graph; sites carry the original program
+// operation and the operands that made that operation interesting.
 class GuardedValueFlowSite {
 public:
   enum class Kind {
@@ -71,6 +78,9 @@ public:
     return common_inputs_;
   }
 
+  // CommonOutput is the direct non-void call result. Pseudo inputs/outputs are
+  // keyed by callee because different resolved callees may expose different
+  // side-effect channels.
   void setCommonOutput(GuardedValueFlowNode *node) { common_output_ = node; }
   GuardedValueFlowNode *getCommonOutput() const { return common_output_; }
 
@@ -146,6 +156,8 @@ public:
   GuardedValueFlowNode *getValueOperand() const { return value_operand_; }
 
 private:
+  // For loads only the pointer operand is populated. For stores both pointer
+  // and value are recorded.
   GuardedValueFlowNode *pointer_operand_{nullptr};
   GuardedValueFlowNode *value_operand_{nullptr};
 };
@@ -172,6 +184,8 @@ public:
   GuardedValueFlowNode *getResultNode() const { return result_node_; }
 
 private:
+  // Offset operands stay aligned with the original IR indices even when the
+  // lowering inserts temporary cast/add nodes internally.
   GuardedValueFlowNode *pointer_operand_{nullptr};
   GuardedValueFlowNode *result_node_{nullptr};
   std::vector<GuardedValueFlowNode *> offset_operands_;
@@ -208,4 +222,4 @@ private:
 };
 
 } // namespace gvfg
-} // namespace llvm
+} // namespace lotus

@@ -1,12 +1,19 @@
 #pragma once
 
 #include "Alias/LotusAA/Engine/InterProceduralPass.h"
-#include "IR/GuardedValueFlow/GuardedValueFlowGraph.h"
+#include "IR/GVFG/GuardedValueFlowGraph.h"
 
 #include <llvm/Pass.h>
 
-namespace llvm {
+namespace lotus {
 namespace gvfg {
+
+using llvm::AnalysisUsage;
+using llvm::IntraLotusAA;
+using llvm::LotusAA;
+using llvm::Module;
+using llvm::ModulePass;
+using llvm::StringRef;
 
 class LotusGuardedValueFlowAdapterPass : public ModulePass {
 public:
@@ -16,8 +23,9 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnModule(Module &M) override;
-  // This adapter turns the structural builder graph into the GuardedValueFlowGraph by materializing LotusAA memory and
-  // interprocedural interface semantics.
+  // Replaces placeholder memory edges with LotusAA-backed producers and
+  // materializes call-boundary interface nodes, summary nodes, imported path
+  // conditions, and back-edge metadata.
   static GuardedValueFlowNode *safeLink(GuardedValueFlowGraph &graph,
                                         GuardedValueFlowNode *parent,
                                         GuardedValueFlowNode *child,
@@ -36,4 +44,4 @@ private:
 ModulePass *createLotusGuardedValueFlowAdapterPass();
 
 } // namespace gvfg
-} // namespace llvm
+} // namespace lotus

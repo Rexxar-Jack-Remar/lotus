@@ -1,4 +1,4 @@
-#include "IR/GuardedValueFlow/GuardedValueFlowBuilder.h"
+#include "IR/GVFG/GuardedValueFlowGraph.h"
 
 #include "IR/GSA/GSA.h"
 
@@ -14,7 +14,7 @@
 #include <algorithm>
 
 using namespace llvm;
-using namespace llvm::gvfg;
+using namespace lotus::gvfg;
 
 namespace {
 
@@ -187,6 +187,9 @@ findOrCreateValueNode(GuardedValueFlowGraph &graph, Value *V, Function &F) {
   if (auto *existing = graph.findNode(V))
     return existing;
 
+  // Calls do not materialize as plain SSA operands. The callsite owns the
+  // direct result channel so later interprocedural code can distinguish direct
+  // returns from pseudo side-effect channels.
   if (auto *CB = dyn_cast<CallBase>(V)) {
     if (!CB->getType()->isVoidTy() &&
         !(CB->getCalledFunction() && CB->getCalledFunction()->isIntrinsic()))
@@ -252,6 +255,10 @@ static GuardedValueFlowNode *getOrCreateOperandRepresentation(
     GuardedValueFlowGraph &graph, Value *V, Function &F, bool &failed) {
   if (!V)
     return nullptr;
+  // Constants that behave like fully materialized values stay as ordinary
+  // operand nodes. Aggregate constants and constant expressions are expanded so
+  // downstream users can traverse through the same value-flow interface they
+  // use for instructions.
   if (isa<ConstantPointerNull>(V) || isa<ConstantAggregateZero>(V))
     return findOrCreateValueNode(graph, V, F);
   if (isa<ConstantExpr>(V))
@@ -455,6 +462,8 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
   int64_t accumulated_offset = 0;
   Type *current_type = GEP->getSourceElementType();
 
+  // Lower address arithmetic into explicit add/mul/cast nodes while preserving
+  // a stable site view of the original GEP operands.
   for (unsigned idx = 0; idx < GEP->getNumIndices(); ++idx) {
     Value *index_value = GEP->getOperand(idx + 1);
     Type *agg_or_ptr_ty = current_type;
@@ -676,6 +685,9 @@ static void buildRegions(GuardedValueFlowGraph &graph, Function &F,
 
   for (BasicBlock *BB : blocks) {
     GuardedValueFlowRegionNode *region = nullptr;
+    // A block region is the disjunction of each controlling branch path that
+    // can reach the block. Each branch path is the local branch choice AND the
+    // region of the controlling block.
     for (const auto &block_cond : graph.getBlockConditions(BB)) {
       auto *unit = graph.findOrCreateUnitRegion(block_cond.condition_node,
                                                 block_cond.sense, BB,
@@ -896,6 +908,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   }
   case Instruction::Load: {
     auto *result = findOrCreateValueNode(graph, &I, F);
+    // The builder only creates a placeholder memory node here. The adapter
+    // later replaces its incoming producers using LotusAA memory facts.
     auto *mem_node = graph.createNode<GuardedValueFlowNode>(
         GuardedValueFlowNode::Kind::LoadMemory, I.getType(), &graph, block,
         nullptr, &I);
@@ -913,6 +927,9 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   case Instruction::Store: {
     auto *stored =
         getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
+    // Store-memory nodes are keyed by the stored value and producing
+    // instruction. Later adaptation may repopulate the producer chain, but the
+    // structural location of the store remains anchored here.
     auto *mem_node = graph.findOrCreateStoreMemoryNode(I.getOperand(0), &I,
                                                        I.getOperand(0)->getType(),
                                                        block);
@@ -1024,6 +1041,9 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
       }
       if (cond_value)
         cond_node = getOrCreateOperandRepresentation(graph, cond_value, F, failed);
+      // PHI incoming metadata keeps the immediate edge-local guard in addition
+      // to the enclosing block region, which is what downstream path-sensitive
+      // users need for precise merge semantics.
       phi_node->addIncoming(incoming_value, incoming_bb, cond_node, sense, cond);
     }
     return true;
@@ -1150,6 +1170,8 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
     ret_node->setDescription("return.common");
   }
 
+  // Regions are built before instructions so nodes created during instruction
+  // modeling inherit their block-level path condition immediately.
   buildRegions(*graph, F, cda, failed);
   if (failed)
     return nullptr;
@@ -1172,6 +1194,6 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
   return graph;
 }
 
-ModulePass *llvm::gvfg::createGuardedValueFlowGraphBuilderPass() {
+ModulePass *lotus::gvfg::createGuardedValueFlowGraphBuilderPass() {
   return new GuardedValueFlowGraphBuilderPass();
 }

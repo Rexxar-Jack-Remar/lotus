@@ -1,4 +1,4 @@
-#include "IR/GuardedValueFlow/GuardedValueFlowGraph.h"
+#include "IR/GVFG/GuardedValueFlowGraph.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/Support/raw_ostream.h>
@@ -6,7 +6,7 @@
 #include <algorithm>
 
 using namespace llvm;
-using namespace llvm::gvfg;
+using namespace lotus::gvfg;
 
 namespace {
 

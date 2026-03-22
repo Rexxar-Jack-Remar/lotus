@@ -1,7 +1,7 @@
 #pragma once
 
-#include "IR/GuardedValueFlow/GuardedValueFlowNodes.h"
-#include "IR/GuardedValueFlow/GuardedValueFlowSites.h"
+#include "IR/GVFG/GuardedValueFlowNodes.h"
+#include "IR/GVFG/GuardedValueFlowSites.h"
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
@@ -13,12 +13,30 @@
 #include <memory>
 #include <unordered_map>
 
-namespace llvm {
+namespace lotus {
 namespace gvfg {
 
+using llvm::AnalysisUsage;
+using llvm::Argument;
+using llvm::ArrayRef;
+using llvm::BasicBlock;
+using llvm::DenseMap;
+using llvm::Function;
+using llvm::Instruction;
+using llvm::Module;
+using llvm::ModulePass;
+using llvm::StringRef;
+using llvm::Type;
+using llvm::Value;
+using llvm::path_cond_t;
+
+// GuardedValueFlowGraph stores one function's value, memory, and path-sensitive
+// structure after the structural builder and optional LotusAA adapter have run.
 class GuardedValueFlowGraph {
 public:
   struct BlockCondition {
+    // `control_block` contributes a guard to `block`; `guard_successor` names
+    // the successor that makes `sense` true for `condition_node`.
     GuardedValueFlowNode *condition_node{nullptr};
     BasicBlock *control_block{nullptr};
     BasicBlock *guard_successor{nullptr};
@@ -49,6 +67,8 @@ public:
 
   GuardedValueFlowNode *findNode(Value *value) const;
   void mapValueNode(Value *value, GuardedValueFlowNode *node);
+  // Interface nodes live in a separate namespace so synthetic call-boundary
+  // values do not collide with ordinary SSA values.
   GuardedValueFlowNode *findInterfaceNode(Value *value) const;
   void mapInterfaceNode(Value *value, GuardedValueFlowNode *node);
   GuardedValueFlowNode *findPseudoArgumentBySource(Value *value) const;
@@ -87,6 +107,9 @@ public:
   GuardedValueFlowNode *findLoadMemoryNode(Instruction *inst) const;
   void mapLoadMemoryNode(Instruction *inst, GuardedValueFlowNode *node);
 
+  // Store-memory nodes are keyed by the value being materialized together with
+  // the producing instruction. Anonymous producers are used for imported
+  // summary/undef cases where no stable source value exists.
   GuardedValueFlowNode *findStoreMemoryNode(Value *value,
                                             Instruction *inst) const;
   void mapStoreMemoryNode(Value *value, Instruction *inst,
@@ -205,7 +228,9 @@ public:
     return "GuardedValueFlowGraphBuilderPass";
   }
 
-  // This pass builds the structural intra-procedural GVFG only.
+  // This pass only builds the structural intra-procedural graph. LotusAA memory
+  // matches, imported path conditions, and interprocedural interface nodes are
+  // layered on later by LotusGuardedValueFlowAdapterPass.
   bool hasGraphFor(const Function &F) const;
   GuardedValueFlowGraph &getGraph(const Function &F);
   void invalidateGraph(const Function &F);
@@ -219,4 +244,4 @@ private:
 ModulePass *createGuardedValueFlowGraphBuilderPass();
 
 } // namespace gvfg
-} // namespace llvm
+} // namespace lotus
