@@ -163,9 +163,16 @@ bool ThreadLocalAnalysis::escapesThread(const Value *val) const {
         const bool is_call_arg = op_no < call->arg_size();
         const bool no_capture = is_call_arg && call->doesNotCapture(op_no);
 
-        // Passing an address to thread creation APIs is a direct cross-thread escape.
+        // Passing an address as thread payload is a direct cross-thread escape.
         if (thread_api && thread_api->isTDFork(call)) {
-          return true;
+          for (const Value *payload : thread_api->getForkPayloadArgs(call)) {
+            if (payload == current ||
+                (payload && payload->stripPointerCasts() ==
+                                current->stripPointerCasts())) {
+              return true;
+            }
+          }
+          continue;
         }
 
         const Function *callee = thread_api ? thread_api->getCallee(call) : nullptr;

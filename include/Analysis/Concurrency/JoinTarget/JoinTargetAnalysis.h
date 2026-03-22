@@ -82,6 +82,7 @@ private:
       m_forkToRoot;
   std::unordered_map<const llvm::Instruction *, std::vector<const llvm::Instruction *>>
       m_joinToForks;
+  std::unordered_set<const llvm::Instruction *> m_unambiguousJoins;
 };
 
 } // namespace mhp

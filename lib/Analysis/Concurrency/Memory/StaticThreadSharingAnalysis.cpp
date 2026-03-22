@@ -181,9 +181,15 @@ void StaticThreadSharingAnalysis::visitMethod(
     Graph &G = m_dsa->getGraph(*F);
     for (const BasicBlock &BB : *F) {
       for (const Instruction &I : BB) {
-        if (isa<LoadInst>(I) || isa<AtomicCmpXchgInst>(I)) {
+        if (isa<LoadInst>(I)) {
           recordAccess(&I, false, ThreadEntry, G);
         } else if (isa<StoreInst>(I) || isa<AtomicRMWInst>(I)) {
+          recordAccess(&I, true, ThreadEntry, G);
+        } else if (isa<AtomicCmpXchgInst>(I)) {
+          // CAS both observes and updates shared state. Treating it as a
+          // read-only access can incorrectly classify CAS-only synchronization
+          // objects as immutable thread-local data.
+          recordAccess(&I, false, ThreadEntry, G);
           recordAccess(&I, true, ThreadEntry, G);
         }
       }
@@ -287,7 +293,7 @@ StaticThreadSharingAnalysis::classify(const Value *AllocSite) const {
 }
 
 bool StaticThreadSharingAnalysis::isShared(const Value *AllocSite) const {
-  return classify(AllocSite) == SharingClassification::DefinitelyShared;
+  return classify(AllocSite) != SharingClassification::DefinitelyThreadLocal;
 }
 
 StaticThreadSharingAnalysis::SharingClassification
@@ -335,7 +341,7 @@ StaticThreadSharingAnalysis::classify(const Instruction *Inst) const {
 }
 
 bool StaticThreadSharingAnalysis::isShared(const Instruction *Inst) const {
-  return classify(Inst) == SharingClassification::DefinitelyShared;
+  return classify(Inst) != SharingClassification::DefinitelyThreadLocal;
 }
 
 } // namespace lotus

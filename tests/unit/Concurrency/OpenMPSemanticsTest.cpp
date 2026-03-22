@@ -251,6 +251,32 @@ TEST_F(OpenMPSemanticsTest, MasterAndOrderedEndsDoNotBecomeWaitBoundaries) {
   EXPECT_EQ(semantics.getSummary().ordered_region_count, 1u);
 }
 
+TEST_F(OpenMPSemanticsTest, AtomicRuntimeFallbackIsReportedExplicitly) {
+  const char *source = R"(
+    declare void @__kmpc_atomic_start()
+    declare void @__kmpc_atomic_end()
+
+    define i32 @main() {
+    entry:
+      call void @__kmpc_atomic_start()
+      call void @__kmpc_atomic_end()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  EXPECT_EQ(semantics.getSummary().atomic_region_count, 1u);
+  const auto &reasons = semantics.getDeferredReasonCounts();
+  auto it = reasons.find("omp_atomic_runtime_unmodeled");
+  ASSERT_NE(it, reasons.end());
+  EXPECT_EQ(it->second, 1u);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

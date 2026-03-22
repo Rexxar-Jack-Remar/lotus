@@ -449,6 +449,7 @@ private:
 
   std::vector<SyncNode *>
   getBarrierContinuations(const llvm::Instruction *barrier_inst) const;
+  void finalizeBarrierPhases();
   void lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics);
 
   // ========================================================================

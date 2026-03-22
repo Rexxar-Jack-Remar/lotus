@@ -547,6 +547,11 @@ private:
   TD_TYPE getConfiguredType(llvm::StringRef normalized_name) const;
 
 public:
+  inline bool isSemaphoreType(TD_TYPE type) const {
+    return type == TD_SEMAPHORE_ACQUIRE || type == TD_SEMAPHORE_RELEASE ||
+           type == TD_SEMAPHORE_TRY_ACQUIRE;
+  }
+
   /// Get the function type if it is a threadAPI function
   TD_TYPE getType(const llvm::Function *F) const;
   TD_TYPE getType(const llvm::CallBase *cb) const {
@@ -667,7 +672,10 @@ public:
       return getCppThreadCallable(inst);
 
     if (hasSemanticTag(callee, "fork")) {
-      if (const llvm::Value *arg = getCallArg(inst, 2)) {
+      unsigned idx = hasMappedAPIEntry(callee)
+                         ? getForkArgIndices(callee).start_routine_arg
+                         : 2;
+      if (const llvm::Value *arg = getCallArg(inst, idx)) {
         arg = arg->stripPointerCasts();
         if (const auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(arg)) {
           if (ce->isCast())
@@ -704,6 +712,56 @@ public:
   inline const llvm::Value *
   getActualParmAtForkSite(const llvm::CallBase *cb) const {
     return getActualParmAtForkSite(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
+  /// Return thread payload arguments that may be observed by the spawned task.
+  /// For pthread-style forks this is the user data argument; for std::thread-
+  /// style forks these are the arguments after the callable.
+  inline llvm::SmallVector<const llvm::Value *, 4>
+  getForkPayloadArgs(const llvm::Instruction *inst) const {
+    llvm::SmallVector<const llvm::Value *, 4> payload_args;
+    if (!isForkLike(inst)) {
+      return payload_args;
+    }
+
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    const llvm::Function *callee = getCallee(inst);
+    if (!cb || !callee) {
+      return payload_args;
+    }
+
+    if (!isCppThreadLikeFork(callee)) {
+      if (const llvm::Value *arg = getActualParmAtForkSite(inst)) {
+        payload_args.push_back(arg);
+      }
+      return payload_args;
+    }
+
+    unsigned callable_idx = 1;
+    if (getType(callee) == TD_ASYNC) {
+      callable_idx = isDefiniteAsyncLaunch(inst) ? 1 : 0;
+    }
+
+    bool saw_callable = false;
+    for (unsigned idx = callable_idx; idx < cb->arg_size(); ++idx) {
+      const llvm::Value *arg = cb->getArgOperand(idx);
+      if (!saw_callable) {
+        const llvm::Value *stripped = arg ? arg->stripPointerCasts() : nullptr;
+        if (llvm::isa<llvm::Function>(stripped)) {
+          saw_callable = true;
+          continue;
+        }
+      } else {
+        payload_args.push_back(arg);
+      }
+    }
+
+    return payload_args;
+  }
+
+  inline llvm::SmallVector<const llvm::Value *, 4>
+  getForkPayloadArgs(const llvm::CallBase *cb) const {
+    return getForkPayloadArgs(llvm::dyn_cast<llvm::Instruction>(cb));
   }
   //@}
 
@@ -764,8 +822,6 @@ public:
     const llvm::CallBase *cb = getLLVMCallSite(inst);
     unsigned idx = getJoinArgIndices(getCallee(inst)).thread_arg;
     llvm::Value *join = cb->getArgOperand(idx);
-    if (llvm::isa<llvm::LoadInst>(join))
-      return llvm::cast<llvm::LoadInst>(join)->getPointerOperand();
     llvm::Value *stripped = join->stripPointerCasts();
     if (llvm::isa<llvm::Argument>(stripped) ||
         llvm::isa<llvm::AllocaInst>(stripped))
@@ -1104,12 +1160,18 @@ public:
   // ========================================================================
 
   inline bool isExclusiveLockAcquire(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
-    return t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RWLOCK_WRLOCK ||
-           t == TD_SHARED_WRLOCK || t == TD_OMP_ORDERED_START ||
+    const llvm::Function *callee = getCallee(inst);
+    TD_TYPE t = getType(callee);
+    const bool binary_semaphore =
+        callee && hasTrait(callee, "binary-semaphore") && isSemaphoreOp(inst);
+    return ((t == TD_ACQUIRE || t == TD_TRY_ACQUIRE) &&
+            !(callee && hasTrait(callee, "semaphore"))) ||
+           t == TD_RWLOCK_WRLOCK || t == TD_SHARED_WRLOCK ||
+           t == TD_OMP_ORDERED_START ||
            t == TD_LOCK_GUARD_CTOR || t == TD_UNIQUE_LOCK_CTOR ||
            t == TD_UNIQUE_LOCK_LOCK || t == TD_SCOPED_LOCK_CTOR ||
-           t == TD_SEMAPHORE_ACQUIRE || t == TD_SEMAPHORE_TRY_ACQUIRE ||
+           ((isSemaphoreType(t) || (callee && hasTrait(callee, "semaphore"))) &&
+            binary_semaphore) ||
            t == TD_KERNEL_SPIN_LOCK || t == TD_KERNEL_SPIN_TRYLOCK ||
            t == TD_KERNEL_MUTEX_LOCK || t == TD_KERNEL_MUTEX_TRYLOCK ||
            t == TD_KERNEL_DOWN || t == TD_KERNEL_WRITE_LOCK ||
@@ -1121,11 +1183,17 @@ public:
   }
 
   inline bool isExclusiveLockRelease(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
-    return t == TD_RELEASE || t == TD_OMP_ORDERED_END ||
+    const llvm::Function *callee = getCallee(inst);
+    TD_TYPE t = getType(callee);
+    const bool binary_semaphore =
+        callee && hasTrait(callee, "binary-semaphore") && isSemaphoreOp(inst);
+    return (t == TD_RELEASE && !(callee && hasTrait(callee, "semaphore"))) ||
+           t == TD_OMP_ORDERED_END ||
            t == TD_LOCK_GUARD_DTOR || t == TD_UNIQUE_LOCK_DTOR ||
            t == TD_UNIQUE_LOCK_UNLOCK || t == TD_SCOPED_LOCK_DTOR ||
-           t == TD_SEMAPHORE_RELEASE || t == TD_KERNEL_SPIN_UNLOCK ||
+           ((isSemaphoreType(t) || (callee && hasTrait(callee, "semaphore"))) &&
+            binary_semaphore) ||
+           t == TD_KERNEL_SPIN_UNLOCK ||
            t == TD_KERNEL_MUTEX_UNLOCK || t == TD_KERNEL_UP ||
            t == TD_KERNEL_WRITE_UNLOCK || t == TD_KERNEL_UP_WRITE;
   }
@@ -1166,9 +1234,30 @@ public:
 
   /// True for any semaphore acquire/release operation.
   inline bool isSemaphoreOp(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
-    return t == TD_SEMAPHORE_ACQUIRE || t == TD_SEMAPHORE_RELEASE ||
-           t == TD_SEMAPHORE_TRY_ACQUIRE;
+    const llvm::Function *callee = getCallee(inst);
+    if (!callee) {
+      return false;
+    }
+    TD_TYPE t = getType(callee);
+    if (isSemaphoreType(t)) {
+      return true;
+    }
+    return hasTrait(callee, "semaphore") &&
+           (t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RELEASE);
+  }
+
+  inline bool isSemaphoreOp(const llvm::CallBase *cb) const {
+    return isSemaphoreOp(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
+  inline bool isBinarySemaphoreOp(const llvm::Instruction *inst) const {
+    const llvm::Function *callee = getCallee(inst);
+    return callee && hasTrait(callee, "binary-semaphore") &&
+           isSemaphoreOp(inst);
+  }
+
+  inline bool isBinarySemaphoreOp(const llvm::CallBase *cb) const {
+    return isBinarySemaphoreOp(llvm::dyn_cast<llvm::Instruction>(cb));
   }
 
   inline bool isLatchLike(const llvm::Instruction *inst) const {

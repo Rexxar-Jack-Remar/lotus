@@ -162,6 +162,36 @@ TEST_F(EscapeAnalysisTest, CppThreadLikeForkEscapesPointerPayload) {
   EXPECT_TRUE(analysis.isEscaped(payload));
 }
 
+TEST_F(EscapeAnalysisTest, ThreadHandleStorageDoesNotEscapeAtForkSite) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  EscapeAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const auto *tid = dyn_cast<AllocaInst>(&main_func->getEntryBlock().front());
+  ASSERT_NE(tid, nullptr);
+  EXPECT_FALSE(analysis.isEscaped(tid));
+}
+
 TEST_F(EscapeAnalysisTest, ReturnedButUnsharedPointerStaysThreadLocal) {
   const char *source = R"(
     define i8* @identity(i8* %arg) {

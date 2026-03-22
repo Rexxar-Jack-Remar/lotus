@@ -863,17 +863,6 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
       ThreadAPI::RuntimeLibrary library = api->getRuntimeLibrary(callee);
       bool is_nowait_variant = callee && callee->getName().contains("nowait");
 
-      if (library == ThreadAPI::RuntimeLibrary::OpenMP && callee) {
-        StringRef callee_name = callee->getName();
-        if (callee_name.startswith("__kmpc_doacross_wait")) {
-          type = ThreadAPI::TD_OMP_DOACROSS_WAIT;
-        } else if (callee_name.startswith("__kmpc_doacross_submit")) {
-          type = ThreadAPI::TD_OMP_DOACROSS_SUBMIT;
-        } else if (callee_name.startswith("__kmpc_doacross")) {
-          type = ThreadAPI::TD_OMP_DOACROSS_INIT;
-        }
-      }
-
       if (library == ThreadAPI::RuntimeLibrary::OpenMP) {
         if (type == ThreadAPI::TD_FORK) {
           ++m_summary.parallel_region_count;
@@ -1055,6 +1044,7 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
       }
       if (type == ThreadAPI::TD_OMP_ATOMIC_START) {
         ++m_summary.atomic_region_count;
+        ++m_deferred_reason_counts["omp_atomic_runtime_unmodeled"];
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TARGET) {

@@ -76,4 +76,6 @@ __kmpc_taskloop_simd TD_OMP_TASKLOOP_SIMD library=openmp semantic=taskloop-simd 
 __kmpc_taskloop_fini TD_OMP_TASKLOOP_FINI library=openmp semantic=taskloop-fini match=prefix
 __kmpc_interop TD_OMP_INTEROP_INIT library=openmp semantic=interop-init match=prefix
 __kmpc_interop_fini TD_OMP_INTEROP_FINI library=openmp semantic=interop-fini match=prefix
+__kmpc_doacross_wait TD_OMP_DOACROSS_WAIT library=openmp semantic=doacross-wait match=prefix
+__kmpc_doacross_submit TD_OMP_DOACROSS_SUBMIT library=openmp semantic=doacross-submit match=prefix
 __kmpc_doacross TD_OMP_DOACROSS_INIT library=openmp semantic=doacross-init match=prefix

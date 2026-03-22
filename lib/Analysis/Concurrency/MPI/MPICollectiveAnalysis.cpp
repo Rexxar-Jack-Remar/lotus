@@ -39,7 +39,8 @@ bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) {
 
   const auto *lhs_arg = dyn_cast<Argument>(lhs);
   const auto *rhs_arg = dyn_cast<Argument>(rhs);
-  if (lhs_arg && rhs_arg && lhs_arg->getArgNo() == rhs_arg->getArgNo()) {
+  if (lhs_arg && rhs_arg && lhs_arg->getParent() == rhs_arg->getParent() &&
+      lhs_arg->getArgNo() == rhs_arg->getArgNo()) {
     return true;
   }
   return false;

@@ -9,6 +9,7 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 
+#include <algorithm>
 #include <deque>
 #include <set>
 #include <unordered_set>
@@ -47,7 +48,18 @@ const Value *JoinTargetAnalysis::traceThreadHandleRoot(const Value *value,
     }
 
     if (const auto *load = dyn_cast<LoadInst>(stripped)) {
-      worklist.push_back(load->getPointerOperand());
+      bool found_store = false;
+      for (const User *user : load->getPointerOperand()->users()) {
+        if (const auto *store = dyn_cast<StoreInst>(user)) {
+          if (store->getPointerOperand() == load->getPointerOperand()) {
+            worklist.push_back(store->getValueOperand());
+            found_store = true;
+          }
+        }
+      }
+      if (!found_store) {
+        worklist.push_back(load->getPointerOperand());
+      }
       continue;
     }
 
@@ -154,7 +166,18 @@ void JoinTargetAnalysis::traceThreadHandleRoots(
     }
 
     if (const auto *load = dyn_cast<LoadInst>(stripped)) {
-      worklist.push_back(load->getPointerOperand());
+      bool found_store = false;
+      for (const User *user : load->getPointerOperand()->users()) {
+        if (const auto *store = dyn_cast<StoreInst>(user)) {
+          if (store->getPointerOperand() == load->getPointerOperand()) {
+            worklist.push_back(store->getValueOperand());
+            found_store = true;
+          }
+        }
+      }
+      if (!found_store) {
+        worklist.push_back(load->getPointerOperand());
+      }
       continue;
     }
     if (const auto *store = dyn_cast<StoreInst>(stripped)) {
@@ -215,12 +238,13 @@ void JoinTargetAnalysis::analyze() {
   collectForksAndJoins();
   m_forkToRoot.clear();
   m_joinToForks.clear();
+  m_unambiguousJoins.clear();
 
   auto mayAlias = [this](const Value *a, const Value *b) {
     if (!a || !b) return false;
     if (a->stripPointerCasts() == b->stripPointerCasts()) return true;
     if (m_aliasAnalysis) return m_aliasAnalysis->mayAlias(a, b);
-    return true;
+    return false;
   };
 
   for (const Instruction *forkInst : m_forkInsts) {
@@ -243,6 +267,13 @@ void JoinTargetAnalysis::analyze() {
 
     std::vector<const Instruction *> forks;
     std::vector<const Instruction *> exact_root_matches;
+    std::vector<const Instruction *> definite_matches;
+    auto pushUnique = [](std::vector<const Instruction *> &out,
+                         const Instruction *forkInst) {
+      if (std::find(out.begin(), out.end(), forkInst) == out.end()) {
+        out.push_back(forkInst);
+      }
+    };
     for (const Instruction *forkInst : m_forkInsts) {
       const Value *forkArg0 = nullptr;
       auto root_it = m_forkToRoot.find(forkInst);
@@ -254,9 +285,13 @@ void JoinTargetAnalysis::analyze() {
       if (!joinRoots.empty()) {
         for (const Value *jr : joinRoots) {
           if (jr->stripPointerCasts() == forkArg0->stripPointerCasts()) {
-            exact_root_matches.push_back(forkInst);
+            pushUnique(exact_root_matches, forkInst);
+            pushUnique(definite_matches, forkInst);
             add = true;
             break;
+          }
+          if (m_aliasAnalysis && m_aliasAnalysis->mustAlias(jr, forkArg0)) {
+            pushUnique(definite_matches, forkInst);
           }
           if (mayAlias(jr, forkArg0)) {
             add = true;
@@ -264,6 +299,13 @@ void JoinTargetAnalysis::analyze() {
           }
         }
       } else {
+        if (joinArg0 && joinArg0->stripPointerCasts() == forkArg0->stripPointerCasts()) {
+          pushUnique(exact_root_matches, forkInst);
+          pushUnique(definite_matches, forkInst);
+        } else if (joinArg0 && m_aliasAnalysis &&
+                   m_aliasAnalysis->mustAlias(joinArg0, forkArg0)) {
+          pushUnique(definite_matches, forkInst);
+        }
         add = mayAlias(joinArg0, forkArg0);
       }
       if (add) forks.push_back(forkInst);
@@ -271,6 +313,10 @@ void JoinTargetAnalysis::analyze() {
     if (joinRoots.size() == 1 &&
         classifyJoinForks(exact_root_matches) == CandidateCountKind::One) {
       forks = std::move(exact_root_matches);
+      m_unambiguousJoins.insert(joinInst);
+    } else if (classifyJoinForks(definite_matches) == CandidateCountKind::One) {
+      forks = std::move(definite_matches);
+      m_unambiguousJoins.insert(joinInst);
     }
     m_joinToForks[joinInst] = std::move(forks);
   }
@@ -300,8 +346,7 @@ JoinTargetAnalysis::getPossibleJoinedForks(const Instruction *joinInst) const {
 }
 
 bool JoinTargetAnalysis::isUnambiguousJoin(const Instruction *joinInst) const {
-  return classifyJoinForks(getPossibleJoinedForks(joinInst)) ==
-         CandidateCountKind::One;
+  return m_unambiguousJoins.count(joinInst) != 0;
 }
 
 JoinTargetAnalysis::CandidateCountKind

@@ -228,6 +228,49 @@ TEST_F(JoinTargetAnalysisTest, ExactRootsBeatAliasFallbackAmbiguity) {
   EXPECT_EQ(analysis.getPossibleJoinedForks(join_inst).size(), 1u);
 }
 
+TEST_F(JoinTargetAnalysisTest, ForeignJoinHandleDoesNotInventSingleTarget) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define i32 @main(i8* %foreign_tid) {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      %joined = call i32 @pthread_join(i8* %foreign_tid, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  JoinTargetAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *join_inst = nullptr;
+  for (const Instruction &inst : instructions(main_func)) {
+    if (const auto *cb = dyn_cast<CallBase>(&inst)) {
+      if (cb->getCalledFunction() &&
+          cb->getCalledFunction()->getName() == "pthread_join") {
+        join_inst = &inst;
+        break;
+      }
+    }
+  }
+
+  ASSERT_NE(join_inst, nullptr);
+  EXPECT_FALSE(analysis.isUnambiguousJoin(join_inst));
+  EXPECT_TRUE(analysis.getPossibleJoinedForks(join_inst).empty());
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

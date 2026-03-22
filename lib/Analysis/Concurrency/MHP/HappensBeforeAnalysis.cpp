@@ -55,6 +55,7 @@ void HappensBeforeAnalysis::analyze() {
   m_atomic_sync_witnesses.clear();
   m_atomic_hb_pairs.clear();
   m_sync_with.clear();
+  m_explicit_hb_pairs.clear();
   m_extra_hb_successors.clear();
 
   computeAtomicHappensBefore();
@@ -69,15 +70,18 @@ void HappensBeforeAnalysis::addExtraHBEdge(const Instruction *from,
 
   mhp::ThreadID from_tid = m_mhp.getThreadID(from);
   mhp::ThreadID to_tid = m_mhp.getThreadID(to);
-  if (from_tid == std::numeric_limits<mhp::ThreadID>::max() ||
-      to_tid == std::numeric_limits<mhp::ThreadID>::max()) {
-    return;
-  }
-
   const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
-  for (mhp::SyncNode *from_node : tfg.getNodes(from, from_tid)) {
+  std::vector<mhp::SyncNode *> from_nodes =
+      from_tid == std::numeric_limits<mhp::ThreadID>::max()
+          ? tfg.getNodes(from)
+          : tfg.getNodes(from, from_tid);
+  std::vector<mhp::SyncNode *> to_nodes =
+      to_tid == std::numeric_limits<mhp::ThreadID>::max()
+          ? tfg.getNodes(to)
+          : tfg.getNodes(to, to_tid);
+  for (mhp::SyncNode *from_node : from_nodes) {
     auto &succs = m_extra_hb_successors[from_node];
-    for (mhp::SyncNode *to_node : tfg.getNodes(to, to_tid)) {
+    for (mhp::SyncNode *to_node : to_nodes) {
       if (std::find(succs.begin(), succs.end(), to_node) == succs.end()) {
         succs.push_back(to_node);
       }
@@ -85,74 +89,115 @@ void HappensBeforeAnalysis::addExtraHBEdge(const Instruction *from,
   }
 }
 
+void HappensBeforeAnalysis::addExplicitHBPair(const Instruction *from,
+                                              const Instruction *to) {
+  if (!from || !to || from == to) {
+    return;
+  }
+  m_explicit_hb_pairs.insert({from, to});
+}
+
+std::vector<const Instruction *>
+HappensBeforeAnalysis::collectThreadPrefixInstructions(
+    const Instruction *inst) const {
+  std::vector<const Instruction *> ordered;
+  if (!inst || isInstructionThreadAmbiguous(inst)) {
+    return ordered;
+  }
+
+  mhp::ThreadID tid = m_mhp.getThreadID(inst);
+  const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
+  std::deque<const mhp::SyncNode *> worklist;
+  std::unordered_set<const mhp::SyncNode *> visited;
+  for (mhp::SyncNode *node : tfg.getNodes(inst, tid)) {
+    worklist.push_back(node);
+    visited.insert(node);
+  }
+
+  std::set<const Instruction *> collected;
+  while (!worklist.empty()) {
+    const mhp::SyncNode *current = worklist.front();
+    worklist.pop_front();
+    if (const Instruction *current_inst = current->getInstruction()) {
+      collected.insert(current_inst);
+    }
+    for (mhp::SyncNode *pred : current->getPredecessors()) {
+      if (pred->getThreadID() != tid) {
+        continue;
+      }
+      if (visited.insert(pred).second) {
+        worklist.push_back(pred);
+      }
+    }
+  }
+
+  ordered.assign(collected.begin(), collected.end());
+  return ordered;
+}
+
+std::vector<const Instruction *>
+HappensBeforeAnalysis::collectThreadSuffixInstructions(
+    const Instruction *inst) const {
+  std::vector<const Instruction *> ordered;
+  if (!inst || isInstructionThreadAmbiguous(inst)) {
+    return ordered;
+  }
+
+  mhp::ThreadID tid = m_mhp.getThreadID(inst);
+  const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
+  std::deque<const mhp::SyncNode *> worklist;
+  std::unordered_set<const mhp::SyncNode *> visited;
+  for (mhp::SyncNode *node : tfg.getNodes(inst, tid)) {
+    worklist.push_back(node);
+    visited.insert(node);
+  }
+
+  std::set<const Instruction *> collected;
+  while (!worklist.empty()) {
+    const mhp::SyncNode *current = worklist.front();
+    worklist.pop_front();
+    if (const Instruction *current_inst = current->getInstruction()) {
+      collected.insert(current_inst);
+    }
+    for (mhp::SyncNode *succ : current->getSuccessors()) {
+      if (succ->getThreadID() != tid) {
+        continue;
+      }
+      if (visited.insert(succ).second) {
+        worklist.push_back(succ);
+      }
+    }
+  }
+
+  ordered.assign(collected.begin(), collected.end());
+  return ordered;
+}
+
+void HappensBeforeAnalysis::addExplicitHBClosure(const Instruction *from,
+                                                 const Instruction *to) {
+  for (const Instruction *prefix : collectThreadPrefixInstructions(from)) {
+    for (const Instruction *suffix : collectThreadSuffixInstructions(to)) {
+      addExplicitHBPair(prefix, suffix);
+    }
+  }
+}
+
 void HappensBeforeAnalysis::computeAtomicHappensBefore() {
   errs() << "Computing Atomic Happens-Before...\n";
-
-  using namespace CppAtomics;
 
   for (Function &F : m_module) {
     if (F.isDeclaration()) {
       continue;
     }
     for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
-      if (isAtomic(&*I)) {
+      if (CppAtomics::isAtomic(&*I)) {
         m_atomic_instructions.push_back(&*I);
       }
     }
   }
 
-  std::vector<const Instruction *> release_fences;
-  std::vector<const Instruction *> acquire_fences;
-  for (const Instruction *inst : m_atomic_instructions) {
-    if (isFenceRelease(inst) || isFenceAcqRel(inst) || isFenceSeqCst(inst)) {
-      release_fences.push_back(inst);
-    }
-    if (isFenceAcquire(inst) || isFenceAcqRel(inst) || isFenceSeqCst(inst)) {
-      acquire_fences.push_back(inst);
-    }
-  }
-
-  for (const Instruction *release_fence : release_fences) {
-    std::vector<const Instruction *> release_witnesses =
-        collectFenceWitnesses(release_fence,
-                              /*require_release_semantics=*/true);
-    if (release_witnesses.empty()) {
-      continue;
-    }
-
-    for (const Instruction *acquire_fence : acquire_fences) {
-      std::vector<const Instruction *> acquire_witnesses =
-          collectFenceWitnesses(acquire_fence,
-                                /*require_release_semantics=*/false);
-      if (acquire_witnesses.empty()) {
-        continue;
-      }
-
-      for (const Instruction *release_inst : release_witnesses) {
-        for (const Instruction *acquire_inst : acquire_witnesses) {
-          if (!hasReleaseSemantics(release_inst) ||
-              !hasAcquireSemantics(acquire_inst)) {
-            continue;
-          }
-          if (!hasConcreteFenceWitness(release_inst, acquire_inst)) {
-            continue;
-          }
-          if (m_atomic_hb_pairs.emplace(release_inst, acquire_inst).second) {
-            AtomicSyncWitness witness;
-            witness.release = release_inst;
-            witness.acquire = acquire_inst;
-            witness.location = CppAtomics::getAtomicPointer(release_inst);
-            m_atomic_sync_witnesses.push_back(witness);
-            addExtraHBEdge(release_inst, acquire_inst);
-          }
-          break;
-        }
-      }
-    }
-  }
-
-  errs() << "Recorded " << m_atomic_hb_pairs.size()
-         << " atomic HB edges from fence witnesses.\n";
+  errs() << "Deferred " << m_atomic_instructions.size()
+         << " atomic/fence operations pending witness-based lowering.\n";
 }
 
 std::vector<const Instruction *>
@@ -280,6 +325,45 @@ size_t HappensBeforeAnalysis::countConcreteAtomicWitnesses(
   return count;
 }
 
+size_t HappensBeforeAnalysis::countDirectAtomicPartners(
+    const Instruction *inst, bool require_release_partner) const {
+  if (!inst || CppAtomics::isFence(inst) || !CppAtomics::getAtomicPointer(inst)) {
+    return 0;
+  }
+
+  size_t count = 0;
+  for (const Instruction *candidate : m_atomic_instructions) {
+    if (candidate == inst || CppAtomics::isFence(candidate) ||
+        !CppAtomics::getAtomicPointer(candidate)) {
+      continue;
+    }
+    if (m_mhp.getThreadID(candidate) == m_mhp.getThreadID(inst)) {
+      continue;
+    }
+    if (!atomicLocationsMustAlias(inst, candidate)) {
+      continue;
+    }
+
+    if (require_release_partner) {
+      if (!CppAtomics::hasReleaseSemantics(candidate) ||
+          !(CppAtomics::isStore(candidate) ||
+            CppAtomics::isReadModifyWrite(candidate))) {
+        continue;
+      }
+    } else {
+      if (!CppAtomics::hasAcquireSemantics(candidate) ||
+          !(CppAtomics::isLoad(candidate) ||
+            CppAtomics::isReadModifyWrite(candidate))) {
+        continue;
+      }
+    }
+
+    ++count;
+  }
+
+  return count;
+}
+
 bool HappensBeforeAnalysis::hasConcreteFenceWitness(
     const Instruction *release_inst, const Instruction *acquire_inst) const {
   if (!release_inst || !acquire_inst) {
@@ -295,6 +379,26 @@ bool HappensBeforeAnalysis::hasConcreteFenceWitness(
   // broader may-alias pairing creates over-strong HB edges.
   if (countConcreteAtomicWitnesses(release_inst) != 0 ||
       countConcreteAtomicWitnesses(acquire_inst) != 0) {
+    return false;
+  }
+
+  return hasBranchWitness(acquire_inst);
+}
+
+bool HappensBeforeAnalysis::hasConcreteDirectAtomicWitness(
+    const Instruction *release_inst, const Instruction *acquire_inst) const {
+  if (!release_inst || !acquire_inst) {
+    return false;
+  }
+
+  if (!atomicLocationsMustAlias(release_inst, acquire_inst)) {
+    return false;
+  }
+
+  if (countDirectAtomicPartners(release_inst,
+                                /*require_release_partner=*/false) != 1 ||
+      countDirectAtomicPartners(acquire_inst,
+                                /*require_release_partner=*/true) != 1) {
     return false;
   }
 
@@ -323,10 +427,39 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     if (seen_sync_edges.emplace(from, to).second) {
       m_sync_with.emplace_back(from, to);
       addExtraHBEdge(from, to);
+      addExplicitHBClosure(from, to);
     }
   };
 
   ThreadAPI *threadAPI = ThreadAPI::getThreadAPI();
+  auto findCallOnceCallable = [&](const CallBase *call) -> const Function * {
+    if (!call) {
+      return nullptr;
+    }
+    for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
+      const Value *arg = call->getArgOperand(idx);
+      if (!arg) {
+        continue;
+      }
+      arg = arg->stripPointerCasts();
+      if (const auto *func = dyn_cast<Function>(arg)) {
+        return func->isDeclaration() ? nullptr : func;
+      }
+    }
+    return nullptr;
+  };
+  auto getFunctionReturns = [](const Function *func) {
+    std::vector<const Instruction *> exits;
+    if (!func || func->isDeclaration()) {
+      return exits;
+    }
+    for (const BasicBlock &bb : *func) {
+      if (const auto *ret = dyn_cast<ReturnInst>(bb.getTerminator())) {
+        exits.push_back(ret);
+      }
+    }
+    return exits;
+  };
 
   for (Function &F : m_module) {
     if (F.isDeclaration()) {
@@ -441,20 +574,45 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   size_t direct_atomic_edges = 0;
   size_t deferred_direct_atomic_relations = 0;
   for (const Instruction *release : release_ops) {
-    if (CppAtomics::isFence(release)) {
-      continue;
-    }
     for (const Instruction *acquire : acquire_ops) {
-      if (CppAtomics::isFence(acquire) || release == acquire) {
+      if (release == acquire) {
         continue;
       }
       if (m_mhp.getThreadID(release) == m_mhp.getThreadID(acquire)) {
         continue;
       }
-      if (!sameAtomicLocation(release, acquire)) {
-        continue;
+      bool emitted = false;
+      if (CppAtomics::isFence(release) || CppAtomics::isFence(acquire)) {
+        if (CppAtomics::isFence(release) && CppAtomics::isFence(acquire)) {
+          for (const Instruction *release_witness :
+               collectFenceWitnesses(release, /*require_release_semantics=*/true)) {
+            for (const Instruction *acquire_witness : collectFenceWitnesses(
+                     acquire, /*require_release_semantics=*/false)) {
+              if (!hasConcreteFenceWitness(release_witness, acquire_witness)) {
+                continue;
+              }
+              size_t before = m_sync_with.size();
+              addSyncEdge(release_witness, acquire_witness);
+              if (m_sync_with.size() != before) {
+                ++direct_atomic_edges;
+              }
+              emitted = true;
+            }
+          }
+        }
+      } else if (sameAtomicLocation(release, acquire) &&
+                 hasConcreteDirectAtomicWitness(release, acquire)) {
+        size_t before = m_sync_with.size();
+        addSyncEdge(release, acquire);
+        if (m_sync_with.size() != before) {
+          ++direct_atomic_edges;
+        }
+        emitted = true;
       }
-      ++deferred_direct_atomic_relations;
+      if (!emitted && !CppAtomics::isFence(release) &&
+          !CppAtomics::isFence(acquire) && sameAtomicLocation(release, acquire)) {
+        ++deferred_direct_atomic_relations;
+      }
     }
   }
 
@@ -465,18 +623,60 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       if (!sameOnceFlag(call_once_ops[i], call_once_ops[j])) {
         continue;
       }
-      ++deferred_call_once_relations;
+      bool emitted = false;
+      for (const Instruction *call_once :
+           {call_once_ops[i], call_once_ops[j]}) {
+        const auto *cb = dyn_cast<CallBase>(call_once);
+        const Function *callable = findCallOnceCallable(cb);
+        if (!callable) {
+          continue;
+        }
+        for (const Instruction &callback_inst : instructions(*callable)) {
+          for (const Instruction *suffix :
+               collectThreadSuffixInstructions(call_once)) {
+            if (suffix == call_once) {
+              continue;
+            }
+            addExplicitHBPair(&callback_inst, suffix);
+            emitted = true;
+          }
+        }
+      }
+      if (emitted) {
+        ++call_once_edges;
+      } else {
+        ++deferred_call_once_relations;
+      }
     }
   }
 
   size_t latch_edges = 0;
   size_t deferred_latch_relations = 0;
+  auto countMatchingLatches = [&](const Instruction *inst,
+                                  const std::vector<const Instruction *> &candidates) {
+    size_t count = 0;
+    for (const Instruction *candidate : candidates) {
+      if (sameLatch(inst, candidate)) {
+        ++count;
+      }
+    }
+    return count;
+  };
   for (const Instruction *countdown : latch_countdowns) {
     for (const Instruction *wait : latch_waits) {
       if (!sameLatch(countdown, wait)) {
         continue;
       }
-      ++deferred_latch_relations;
+      if (countMatchingLatches(countdown, latch_countdowns) == 1 &&
+          countMatchingLatches(wait, latch_waits) == 1) {
+        size_t before = m_sync_with.size();
+        addSyncEdge(countdown, wait);
+        if (m_sync_with.size() != before) {
+          ++latch_edges;
+        }
+      } else {
+        ++deferred_latch_relations;
+      }
     }
   }
 
@@ -602,10 +802,6 @@ bool HappensBeforeAnalysis::canReach(const mhp::SyncNode *start,
       return true;
     }
     for (mhp::SyncNode *succ : current->getSuccessors()) {
-      const Instruction *succ_inst = succ->getInstruction();
-      if (succ_inst && isInstructionThreadAmbiguous(succ_inst)) {
-        continue;
-      }
       if (visited.insert(succ).second) {
         worklist.push_back(succ);
       }
@@ -634,10 +830,6 @@ bool HappensBeforeAnalysis::canReachWithHB(const mhp::SyncNode *start,
     }
 
     for (mhp::SyncNode *succ : current->getSuccessors()) {
-      const Instruction *succ_inst = succ->getInstruction();
-      if (succ_inst && isInstructionThreadAmbiguous(succ_inst)) {
-        continue;
-      }
       if (visited.insert(succ).second) {
         worklist.push_back(succ);
       }
@@ -648,10 +840,6 @@ bool HappensBeforeAnalysis::canReachWithHB(const mhp::SyncNode *start,
       continue;
     }
     for (const mhp::SyncNode *succ : extra_it->second) {
-      const Instruction *succ_inst = succ->getInstruction();
-      if (succ_inst && isInstructionThreadAmbiguous(succ_inst)) {
-        continue;
-      }
       if (visited.insert(succ).second) {
         worklist.push_back(succ);
       }
@@ -663,16 +851,19 @@ bool HappensBeforeAnalysis::canReachWithHB(const mhp::SyncNode *start,
 
 bool HappensBeforeAnalysis::hasProgramOrder(const Instruction *A,
                                             const Instruction *B) const {
-  if (!A || !B || A == B || isInstructionThreadAmbiguous(A) ||
-      isInstructionThreadAmbiguous(B)) {
+  if (!A || !B || A == B) {
     return false;
   }
 
   mhp::ThreadID a_tid = m_mhp.getThreadID(A);
   mhp::ThreadID b_tid = m_mhp.getThreadID(B);
   const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
-  std::vector<mhp::SyncNode *> start_nodes = tfg.getNodes(A, a_tid);
-  std::vector<mhp::SyncNode *> end_nodes = tfg.getNodes(B, b_tid);
+  std::vector<mhp::SyncNode *> start_nodes =
+      a_tid == std::numeric_limits<mhp::ThreadID>::max() ? tfg.getNodes(A)
+                                                         : tfg.getNodes(A, a_tid);
+  std::vector<mhp::SyncNode *> end_nodes =
+      b_tid == std::numeric_limits<mhp::ThreadID>::max() ? tfg.getNodes(B)
+                                                         : tfg.getNodes(B, b_tid);
   if (start_nodes.empty() || end_nodes.empty()) {
     return false;
   }
@@ -801,6 +992,7 @@ const Value *HappensBeforeAnalysis::traceSharedState(const Value *value) const {
   std::vector<const Value *> worklist = {value};
   std::unordered_set<const Value *> visited;
   const Value *resolved = nullptr;
+  bool ambiguous = false;
 
   while (!worklist.empty()) {
     const Value *current = worklist.back();
@@ -811,8 +1003,17 @@ const Value *HappensBeforeAnalysis::traceSharedState(const Value *value) const {
 
     auto mapped = m_future_shared_state.find(current);
     if (mapped != m_future_shared_state.end()) {
-      resolved = mapped->second;
-      break;
+      const Value *candidate = mapped->second
+                                   ? mapped->second->stripPointerCasts()
+                                   : nullptr;
+      if (!resolved) {
+        resolved = candidate;
+      } else if (candidate && resolved != candidate &&
+                 !(m_alias_analysis &&
+                   m_alias_analysis->mustAlias(resolved, candidate))) {
+        ambiguous = true;
+      }
+      continue;
     }
 
     const Value *stripped = current->stripPointerCasts();
@@ -821,8 +1022,15 @@ const Value *HappensBeforeAnalysis::traceSharedState(const Value *value) const {
     }
 
     if (isa<AllocaInst>(current) || isa<GlobalValue>(current)) {
-      resolved = current;
-      break;
+      const Value *candidate = current->stripPointerCasts();
+      if (!resolved) {
+        resolved = candidate;
+      } else if (resolved != candidate &&
+                 !(m_alias_analysis &&
+                   m_alias_analysis->mustAlias(resolved, candidate))) {
+        ambiguous = true;
+      }
+      continue;
     }
 
     if (const auto *arg = dyn_cast<Argument>(current)) {
@@ -854,8 +1062,14 @@ const Value *HappensBeforeAnalysis::traceSharedState(const Value *value) const {
         }
       }
       if (!expanded) {
-        resolved = current;
-        break;
+        const Value *candidate = current->stripPointerCasts();
+        if (!resolved) {
+          resolved = candidate;
+        } else if (resolved != candidate &&
+                   !(m_alias_analysis &&
+                     m_alias_analysis->mustAlias(resolved, candidate))) {
+          ambiguous = true;
+        }
       }
       continue;
     }
@@ -890,6 +1104,10 @@ const Value *HappensBeforeAnalysis::traceSharedState(const Value *value) const {
     }
   }
 
+  if (ambiguous) {
+    resolved = nullptr;
+  }
+
   m_shared_state_trace_cache[cache_key] = resolved;
   return resolved;
 }
@@ -900,23 +1118,28 @@ bool HappensBeforeAnalysis::happensBefore(const Instruction *A,
     return false;
   }
   if (A == B) {
-    return true;
-  }
-  if (isInstructionThreadAmbiguous(A) || isInstructionThreadAmbiguous(B)) {
     return false;
   }
-
   auto key = std::make_pair(A, B);
   auto cache_it = m_hb_cache.find(key);
   if (cache_it != m_hb_cache.end()) {
     return cache_it->second;
   }
 
+  if (m_explicit_hb_pairs.count(key) != 0) {
+    m_hb_cache[key] = true;
+    return true;
+  }
+
   mhp::ThreadID a_tid = m_mhp.getThreadID(A);
   mhp::ThreadID b_tid = m_mhp.getThreadID(B);
   const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
-  std::vector<mhp::SyncNode *> start_nodes = tfg.getNodes(A, a_tid);
-  std::vector<mhp::SyncNode *> end_nodes = tfg.getNodes(B, b_tid);
+  std::vector<mhp::SyncNode *> start_nodes =
+      a_tid == std::numeric_limits<mhp::ThreadID>::max() ? tfg.getNodes(A)
+                                                         : tfg.getNodes(A, a_tid);
+  std::vector<mhp::SyncNode *> end_nodes =
+      b_tid == std::numeric_limits<mhp::ThreadID>::max() ? tfg.getNodes(B)
+                                                         : tfg.getNodes(B, b_tid);
   if (start_nodes.empty() || end_nodes.empty()) {
     m_hb_cache[key] = false;
     return false;

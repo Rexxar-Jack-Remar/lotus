@@ -4,6 +4,8 @@
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 #include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
+#include "Analysis/Concurrency/Memory/StaticThreadSharingAnalysis.h"
+#include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
@@ -31,9 +33,8 @@ namespace concurrency {
  * Uses optional HappensBeforeAnalysis (C11 synchronizes-with) and explicit
  * independence (non-aliasing) to reduce false positives.
  *
- * Shared-memory pruning is currently checker-facing only through
- * EscapeAnalysis. Other concurrency memory analyses remain standalone until
- * they are explicitly wired here with checker-level contracts.
+ * Shared-memory pruning composes thread-local, escape, and static sharing
+ * filters conservatively before expensive pairwise race checks.
  */
 class DataRaceChecker {
 public:
@@ -41,6 +42,8 @@ public:
       llvm::Module &module, mhp::IMHPAnalysis *mhpAnalysis,
       mhp::LockSetAnalysis *locksetAnalysis = nullptr,
       lotus::EscapeAnalysis *escapeAnalysis = nullptr,
+      ThreadLocal::ThreadLocalAnalysis *threadLocalAnalysis = nullptr,
+      lotus::StaticThreadSharingAnalysis *staticThreadSharingAnalysis = nullptr,
       lotus::AliasAnalysisWrapper *aliasAnalysis = nullptr,
       lotus::HappensBeforeAnalysis *happensBeforeAnalysis = nullptr);
 
@@ -78,6 +81,8 @@ private:
   mhp::IMHPAnalysis *m_mhpAnalysis;
   mhp::LockSetAnalysis *m_locksetAnalysis;
   lotus::EscapeAnalysis *m_escapeAnalysis;
+  ThreadLocal::ThreadLocalAnalysis *m_threadLocalAnalysis;
+  lotus::StaticThreadSharingAnalysis *m_staticThreadSharingAnalysis;
   lotus::AliasAnalysisWrapper *m_aliasAnalysis;
   lotus::HappensBeforeAnalysis *m_happensBeforeAnalysis;
 

@@ -75,9 +75,6 @@ void LockSetAnalysis::analyze() {
   m_raii_locks.clear();
   m_function_summaries.clear();
 
-  // Identify all locks in the program
-  identifyLocks();
-
   if (m_module) {
     if (!m_call_graph) {
       m_owned_call_graph = std::make_unique<CallGraph>(*m_module);
@@ -94,6 +91,9 @@ void LockSetAnalysis::analyze() {
     // Single function analysis
     analyzeFunction(m_single_function);
   }
+
+  // Identify locks after RAII lifetimes and final summaries have been computed.
+  identifyLocks();
 
   // Track lock ordering for deadlock detection
   trackLockOrdering();
@@ -875,6 +875,9 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
                             call_type == ThreadAPI::TD_RWLOCK_RDLOCK ||
                             call_type == ThreadAPI::TD_RWLOCK_WRLOCK ||
                             call_type == ThreadAPI::TD_RELEASE ||
+                            call_type == ThreadAPI::TD_SEMAPHORE_ACQUIRE ||
+                            call_type == ThreadAPI::TD_SEMAPHORE_RELEASE ||
+                            call_type == ThreadAPI::TD_SEMAPHORE_TRY_ACQUIRE ||
                             call_type == ThreadAPI::TD_KERNEL_SPIN_LOCK ||
                             call_type == ThreadAPI::TD_KERNEL_SPIN_TRYLOCK ||
                             call_type == ThreadAPI::TD_KERNEL_MUTEX_LOCK ||
@@ -1104,32 +1107,6 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
       }
       return out_set;
 
-    // C++20 semaphores
-    case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
-      if (call->arg_size() >= 1) {
-        LockID sem = getCanonicalLock(call->getArgOperand(0));
-        if (sem)
-          out_set.insert(sem);
-      }
-      return out_set;
-
-    case ThreadAPI::TD_SEMAPHORE_RELEASE:
-      if (call->arg_size() >= 1) {
-        LockID sem = getCanonicalLock(call->getArgOperand(0));
-        if (sem) {
-          out_set.erase(sem);
-          if (is_must && m_alias_analysis) {
-            LockSet to_remove;
-            for (const auto *l : out_set)
-              if (mayAlias(l, sem))
-                to_remove.insert(l);
-            for (const auto *l : to_remove)
-              out_set.erase(l);
-          }
-        }
-      }
-      return out_set;
-
     // Synchronization primitives (don't hold locks, but create sync edges)
     case ThreadAPI::TD_CALL_ONCE:
     case ThreadAPI::TD_FUTURE_GET:
@@ -1266,6 +1243,9 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
                             call_type == ThreadAPI::TD_RWLOCK_RDLOCK ||
                             call_type == ThreadAPI::TD_RWLOCK_WRLOCK ||
                             call_type == ThreadAPI::TD_RELEASE ||
+                            call_type == ThreadAPI::TD_SEMAPHORE_ACQUIRE ||
+                            call_type == ThreadAPI::TD_SEMAPHORE_RELEASE ||
+                            call_type == ThreadAPI::TD_SEMAPHORE_TRY_ACQUIRE ||
                             call_type == ThreadAPI::TD_KERNEL_SPIN_LOCK ||
                             call_type == ThreadAPI::TD_KERNEL_SPIN_TRYLOCK ||
                             call_type == ThreadAPI::TD_KERNEL_MUTEX_LOCK ||
@@ -1558,9 +1538,43 @@ void LockSetAnalysis::identifyLocks() {
   auto process_func = [this](Function &func) {
     for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
       Instruction *inst = &*I;
+      const auto *call = dyn_cast<CallBase>(inst);
+      const ThreadAPI::TD_TYPE type =
+          call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
 
-      if (m_thread_api->isTDAcquire(inst)) {
+      std::vector<LockID> raii_releases = getRAIILocksReleasedAt(inst);
+      for (LockID lock : raii_releases) {
+        if (!lock) {
+          continue;
+        }
+        m_all_locks.insert(lock);
+        m_lock_releases[lock].push_back(inst);
+      }
+      if (!raii_releases.empty()) {
+        continue;
+      }
+
+      const bool is_acquire =
+          m_thread_api->isTDAcquire(inst) || type == ThreadAPI::TD_SHARED_RDLOCK ||
+          type == ThreadAPI::TD_SHARED_WRLOCK ||
+          type == ThreadAPI::TD_LOCK_GUARD_CTOR ||
+          type == ThreadAPI::TD_UNIQUE_LOCK_CTOR ||
+          type == ThreadAPI::TD_SCOPED_LOCK_CTOR ||
+          type == ThreadAPI::TD_SHARED_LOCK_CTOR ||
+          type == ThreadAPI::TD_UNIQUE_LOCK_LOCK;
+      const bool is_release =
+          m_thread_api->isTDRelease(inst) || type == ThreadAPI::TD_SHARED_UNLOCK ||
+          type == ThreadAPI::TD_LOCK_GUARD_DTOR ||
+          type == ThreadAPI::TD_UNIQUE_LOCK_DTOR ||
+          type == ThreadAPI::TD_SCOPED_LOCK_DTOR ||
+          type == ThreadAPI::TD_SHARED_LOCK_DTOR ||
+          type == ThreadAPI::TD_UNIQUE_LOCK_UNLOCK;
+
+      if (is_acquire) {
         LockID lock = getLockValue(inst);
+        if (!lock) {
+          lock = getCppWrapperLockValue(inst);
+        }
         if (lock) {
           m_all_locks.insert(lock);
           m_lock_acquires[lock].push_back(inst);
@@ -1569,8 +1583,11 @@ void LockSetAnalysis::identifyLocks() {
           if (m_thread_api->isTryLock(inst))
             m_lock_try_acquires[lock].push_back(inst);
         }
-      } else if (m_thread_api->isTDRelease(inst)) {
+      } else if (is_release) {
         LockID lock = getLockValue(inst);
+        if (!lock) {
+          lock = getCppWrapperLockValue(inst);
+        }
         if (lock) {
           m_all_locks.insert(lock);
           m_lock_releases[lock].push_back(inst);
@@ -1752,9 +1769,6 @@ LockID LockSetAnalysis::getCppWrapperLockValue(const Instruction *inst) const {
   case ThreadAPI::TD_SHARED_RDLOCK:
   case ThreadAPI::TD_SHARED_WRLOCK:
   case ThreadAPI::TD_SHARED_UNLOCK:
-  case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
-  case ThreadAPI::TD_SEMAPHORE_RELEASE:
-  case ThreadAPI::TD_SEMAPHORE_TRY_ACQUIRE:
     if (call->arg_size() >= 1) {
       return getCanonicalLock(call->getArgOperand(0));
     }
@@ -1815,9 +1829,6 @@ bool LockSetAnalysis::isLockOperation(const Instruction *inst) const {
   case ThreadAPI::TD_SCOPED_LOCK_DTOR:
   case ThreadAPI::TD_SHARED_LOCK_CTOR:
   case ThreadAPI::TD_SHARED_LOCK_DTOR:
-  case ThreadAPI::TD_SEMAPHORE_ACQUIRE:
-  case ThreadAPI::TD_SEMAPHORE_RELEASE:
-  case ThreadAPI::TD_SEMAPHORE_TRY_ACQUIRE:
     return true;
   default:
     return false;

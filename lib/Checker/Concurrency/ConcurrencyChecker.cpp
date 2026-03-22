@@ -7,11 +7,15 @@
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyAnalysisDumper.h"
 
+#include "Alias/seadsa/DsaAnalysis.hh"
+#include "Alias/seadsa/InitializePasses.hh"
+
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Operator.h>
+#include <llvm/PassRegistry.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
@@ -103,7 +107,10 @@ void ConcurrencyChecker::runAnalyses() {
   m_locksetAnalysis.reset();
   m_locksetAnalysisView = nullptr;
   m_escapeAnalysis.reset();
+  m_threadLocalAnalysis.reset();
   m_happensBeforeAnalysis.reset();
+  m_staticThreadSharingPM.reset();
+  m_staticThreadSharingAnalysis = nullptr;
   m_openMPTaskGraph.reset();
   m_mpiAnalysis.reset();
   m_stats.mhpPairs = 0;
@@ -119,6 +126,8 @@ void ConcurrencyChecker::runAnalyses() {
                      m_checkAtomicityViolations || m_checkCondVars ||
                      m_checkLockMismatches;
   bool needEscape = m_checkDataRaces;
+  bool needThreadLocal = m_checkDataRaces;
+  bool needStaticSharing = m_checkDataRaces;
   bool needHappensBefore = m_checkDataRaces;
   bool needOpenMP = m_checkOpenMP;
   bool needMPI = m_checkMPI;
@@ -152,8 +161,6 @@ void ConcurrencyChecker::runAnalyses() {
     m_locksetAnalysis = std::make_unique<LockSetAnalysis>(m_module);
     if (m_aliasAnalysis)
       m_locksetAnalysis->setAliasAnalysis(m_aliasAnalysis);
-    llvm::CallGraph cg(m_module);
-    m_locksetAnalysis->setCallGraph(&cg);
     m_locksetAnalysis->analyze();
     m_locksetAnalysisView = m_locksetAnalysis.get();
     m_stats.locksAnalyzed = m_locksetAnalysisView->getStatistics().num_locks;
@@ -162,6 +169,29 @@ void ConcurrencyChecker::runAnalyses() {
   if (needEscape) {
     m_escapeAnalysis = std::make_unique<EscapeAnalysis>(m_module);
     m_escapeAnalysis->analyze();
+  }
+
+  if (needThreadLocal) {
+    m_threadLocalAnalysis =
+        std::make_unique<ThreadLocal::ThreadLocalAnalysis>(m_module);
+    m_threadLocalAnalysis->analyze();
+  }
+
+  if (needStaticSharing) {
+    static bool passes_initialized = false;
+    if (!passes_initialized) {
+      llvm::PassRegistry &registry = *llvm::PassRegistry::getPassRegistry();
+      seadsa::initializeAnalysisPasses(registry);
+      llvm::initializeDsaAnalysisPass(registry);
+      passes_initialized = true;
+    }
+
+    m_staticThreadSharingPM = std::make_unique<llvm::legacy::PassManager>();
+    m_staticThreadSharingPM->add(new seadsa::DsaAnalysis());
+    auto *sharing = new lotus::StaticThreadSharingAnalysis();
+    m_staticThreadSharingAnalysis = sharing;
+    m_staticThreadSharingPM->add(sharing);
+    m_staticThreadSharingPM->run(m_module);
   }
 
   if (needHappensBefore && regionMHP) {
@@ -229,7 +259,8 @@ void ConcurrencyChecker::runAnalyses() {
 
   m_dataRaceChecker = std::make_unique<DataRaceChecker>(
       m_module, m_mhpAnalysis, m_locksetAnalysisView,
-      m_escapeAnalysis.get(), aa, m_happensBeforeAnalysis.get());
+      m_escapeAnalysis.get(), m_threadLocalAnalysis.get(),
+      m_staticThreadSharingAnalysis, aa, m_happensBeforeAnalysis.get());
   m_deadlockChecker = std::make_unique<DeadlockChecker>(
       m_module, m_locksetAnalysisView, m_mhpAnalysis,
       m_happensBeforeAnalysis.get(), m_threadAPI);

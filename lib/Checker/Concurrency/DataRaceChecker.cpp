@@ -128,10 +128,14 @@ const Value *resolveRegionKey(const Value *value, const DataLayout &DL,
 DataRaceChecker::DataRaceChecker(Module &module, IMHPAnalysis *mhpAnalysis,
                                  LockSetAnalysis *locksetAnalysis,
                                  EscapeAnalysis *escapeAnalysis,
+                                 ThreadLocal::ThreadLocalAnalysis *threadLocalAnalysis,
+                                 lotus::StaticThreadSharingAnalysis *staticThreadSharingAnalysis,
                                  AliasAnalysisWrapper *aliasAnalysis,
                                  HappensBeforeAnalysis *happensBeforeAnalysis)
     : m_module(module), m_mhpAnalysis(mhpAnalysis),
       m_locksetAnalysis(locksetAnalysis), m_escapeAnalysis(escapeAnalysis),
+      m_threadLocalAnalysis(threadLocalAnalysis),
+      m_staticThreadSharingAnalysis(staticThreadSharingAnalysis),
       m_aliasAnalysis(aliasAnalysis),
       m_happensBeforeAnalysis(happensBeforeAnalysis),
       m_threadAPI(ThreadAPI::getThreadAPI()) {}
@@ -215,6 +219,27 @@ static bool isIgnorableTypeForRace(const Type *ty) {
 // from Goblint MCP idea).
 bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
                                           const Instruction *inst2) const {
+  auto isDefinitelyThreadLocalAccess = [this](const Instruction *inst) {
+    if (!inst) {
+      return false;
+    }
+    if (m_threadLocalAnalysis &&
+        m_threadLocalAnalysis->accessesThreadLocalStorage(inst)) {
+      return true;
+    }
+    if (m_staticThreadSharingAnalysis &&
+        m_staticThreadSharingAnalysis->classify(inst) ==
+            lotus::StaticThreadSharingAnalysis::SharingClassification::
+                DefinitelyThreadLocal) {
+      return true;
+    }
+    return false;
+  };
+
+  if (isDefinitelyThreadLocalAccess(inst1) ||
+      isDefinitelyThreadLocalAccess(inst2)) {
+    return false;
+  }
   if (isAtomicOperation(inst1) || isAtomicOperation(inst2))
     return false;
   if (!isWriteAccess(inst1) && !isWriteAccess(inst2))
@@ -460,6 +485,16 @@ void DataRaceChecker::collectVariableAccesses(
       if (isMemoryAccess(&*I)) {
         const Value *memLoc = getMemoryLocation(&*I);
         if (memLoc) {
+          if (m_threadLocalAnalysis &&
+              m_threadLocalAnalysis->accessesThreadLocalStorage(&*I)) {
+            continue;
+          }
+          if (m_staticThreadSharingAnalysis &&
+              m_staticThreadSharingAnalysis->classify(&*I) ==
+                  lotus::StaticThreadSharingAnalysis::SharingClassification::
+                      DefinitelyThreadLocal) {
+            continue;
+          }
           if (isOpenMPPrivateLikeAccess(&*I, memLoc))
             continue;
           if (isSyncObjectAccess(memLoc))

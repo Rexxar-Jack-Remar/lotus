@@ -139,6 +139,90 @@ TEST_F(LockSetAnalysisTest, TryLockIsMayOnly) {
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
+TEST_F(LockSetAnalysisTest, CountingSemaphoreDoesNotCreateMutualExclusion) {
+  const char *source = R"(
+    declare i32 @sem_wait(i8*)
+
+    @sem = global i8 0
+
+    define void @worker1() {
+    entry:
+      call i32 @sem_wait(i8* @sem)
+      %store1 = add i32 1, 2
+      ret void
+    }
+
+    define void @worker2() {
+    entry:
+      call i32 @sem_wait(i8* @sem)
+      %store2 = add i32 3, 4
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *store1 =
+      findInstructionByName(*module->getFunction("worker1"), "store1");
+  const Instruction *store2 =
+      findInstructionByName(*module->getFunction("worker2"), "store2");
+  const GlobalVariable *sem = module->getNamedGlobal("sem");
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+  ASSERT_NE(sem, nullptr);
+
+  EXPECT_FALSE(lsa.mayHoldLock(store1, sem));
+  EXPECT_FALSE(lsa.mayHoldLock(store2, sem));
+  EXPECT_FALSE(lsa.mayHoldCommonLock(store1, store2));
+  EXPECT_FALSE(lsa.mustHoldCommonLock(store1, store2));
+}
+
+TEST_F(LockSetAnalysisTest, BinarySemaphoreTraitOptInPreservesExclusion) {
+  const char *source = R"(
+    declare i32 @binary_sem_wait(i8*)
+
+    @sem = global i8 0
+
+    define void @worker1() {
+    entry:
+      call i32 @binary_sem_wait(i8* @sem)
+      %store1 = add i32 1, 2
+      ret void
+    }
+
+    define void @worker2() {
+    entry:
+      call i32 @binary_sem_wait(i8* @sem)
+      %store2 = add i32 3, 4
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *store1 =
+      findInstructionByName(*module->getFunction("worker1"), "store1");
+  const Instruction *store2 =
+      findInstructionByName(*module->getFunction("worker2"), "store2");
+  const GlobalVariable *sem = module->getNamedGlobal("sem");
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+  ASSERT_NE(sem, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(store1, sem));
+  EXPECT_TRUE(lsa.mayHoldLock(store2, sem));
+  EXPECT_TRUE(lsa.mayHoldCommonLock(store1, store2));
+  EXPECT_TRUE(lsa.mustHoldCommonLock(store1, store2));
+}
+
 TEST_F(LockSetAnalysisTest, ScopedLockTracksAllUnderlyingMutexes) {
   const char *source = R"(
     declare void @fake_scoped_lock_C1E(i8*, i8*, i8*)
@@ -692,6 +776,8 @@ TEST_F(LockSetAnalysisTest,
   ASSERT_NE(lock, nullptr);
   EXPECT_FALSE(lsa.mustHoldLock(resume_inst, lock));
   EXPECT_FALSE(lsa.mayHoldLock(resume_inst, lock));
+  EXPECT_GE(lsa.getLockReleases(lock).size(), 2u);
+  EXPECT_GE(lsa.getStatistics().num_releases, 2u);
 }
 
 int main(int argc, char **argv) {

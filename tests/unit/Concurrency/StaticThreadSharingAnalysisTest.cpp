@@ -77,6 +77,56 @@ private:
 
 char StaticSharingProbePass::ID = 0;
 
+class StaticSharingBoolProbePass : public ModulePass {
+public:
+  enum class QueryKind { Instruction, Value };
+
+  static char ID;
+
+  StaticSharingBoolProbePass(std::string functionName, std::string symbolName,
+                             QueryKind queryKind, bool *result)
+      : ModulePass(ID), m_function_name(std::move(functionName)),
+        m_symbol_name(std::move(symbolName)), m_query_kind(queryKind),
+        m_result(result) {}
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<StaticThreadSharingAnalysis>();
+    AU.setPreservesAll();
+  }
+
+  bool runOnModule(Module &M) override {
+    if (!m_result) {
+      return false;
+    }
+
+    const Function *F = M.getFunction(m_function_name);
+    if (!F) {
+      return false;
+    }
+
+    const Instruction *target = findInstructionByName(*F, m_symbol_name);
+    if (!target) {
+      return false;
+    }
+
+    auto &sharing = getAnalysis<StaticThreadSharingAnalysis>();
+    if (m_query_kind == QueryKind::Instruction) {
+      *m_result = sharing.isShared(target);
+    } else {
+      *m_result = sharing.isShared(static_cast<const Value *>(target));
+    }
+    return false;
+  }
+
+private:
+  std::string m_function_name;
+  std::string m_symbol_name;
+  QueryKind m_query_kind;
+  bool *m_result;
+};
+
+char StaticSharingBoolProbePass::ID = 0;
+
 class StaticThreadSharingAnalysisTest : public ::testing::Test {
 protected:
   LLVMContext context;
@@ -229,6 +279,49 @@ TEST_F(StaticThreadSharingAnalysisTest,
 }
 
 TEST_F(StaticThreadSharingAnalysisTest,
+       CompareExchangeIsTreatedAsSharedWrite) {
+  const char *source = R"(
+    @g = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %cas = cmpxchg i32* @g, i32 0, i32 1 monotonic monotonic
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %spawn = call i32 @pthread_create(i8* null, i8* null,
+                                        i8* (i8*)* @worker, i8* null)
+      %main_load = load i32, i32* @g, align 4
+      ret i32 %main_load
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::MaybeShared;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass(
+      "worker", "cas", StaticSharingProbePass::QueryKind::Instruction,
+      &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(
+      observed,
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared);
+}
+
+TEST_F(StaticThreadSharingAnalysisTest,
        UnknownThreadEntryLeavesClassificationConservative) {
   const char *source = R"(
     @g = global i32 0, align 4
@@ -264,6 +357,42 @@ TEST_F(StaticThreadSharingAnalysisTest,
 
   EXPECT_EQ(observed,
             StaticThreadSharingAnalysis::SharingClassification::MaybeShared);
+}
+
+TEST_F(StaticThreadSharingAnalysisTest,
+       UnknownThreadEntryMakesBooleanSharedPredicateConservative) {
+  const char *source = R"(
+    @g = global i32 0, align 4
+    @fp = external global i8*
+
+    declare i32 @pthread_create(i8*, i8*, i8*, i8*)
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8, align 1
+      %start = load i8*, i8** @fp
+      call i32 @pthread_create(i8* %tid, i8* null, i8* %start, i8* null)
+      %main_load = load i32, i32* @g, align 4
+      ret i32 %main_load
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  bool observed = false;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingBoolProbePass(
+      "main", "main_load", StaticSharingBoolProbePass::QueryKind::Instruction,
+      &observed));
+  PM.run(*module);
+
+  EXPECT_TRUE(observed);
 }
 
 int main(int argc, char **argv) {

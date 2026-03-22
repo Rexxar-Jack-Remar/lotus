@@ -12,7 +12,11 @@ Function *getCalledFunction(const CallInst &CI) {
   auto *CalledF = CI.getCalledFunction();
   if (EXISTSinMap(MemUseDefGlobalAnalysis::IndirectCallsMap, &CI)) {
     // If this call is an indirect call, then get the actual function called.
-    auto Iter = MemUseDefGlobalAnalysis::IndirectCallsMap[&CI].begin();
+    const auto &targets = MemUseDefGlobalAnalysis::IndirectCallsMap[&CI];
+    if (targets.size() != 1) {
+      return nullptr;
+    }
+    auto Iter = targets.begin();
     CalledF = Iter->second->getParent();
   }
   return CalledF;
@@ -442,6 +446,10 @@ void MemoryLdStMapClass::FuncParamInfoClass::setValuesAlias(
 std::map<ConstInstrPtr, const CallInst *> MemoryLdStMapClass::MemdefToCall;
 MemoryLdStMapClass::FuncParamInfoClass MemoryLdStMapClass::FuncParamInfo;
 
+void MemoryLdStMapClass::resetGlobalState() {
+  MemdefToCall.clear();
+}
+
 void MemoryLdStMapClass::insertEntry(ConstInstrPtr LdSt, ConstValuePtr Mem) {
   if (LdSt == nullptr || Mem == nullptr)
     return;
@@ -518,37 +526,13 @@ bool MemoryLdStMapClass::isMalloc(ConstInstrPtr LdSt) const {
 }
 
 bool MemoryLdStMapClass::filterLoadOfAddress(ConstInstrPtr Ld) const {
-  if (const auto *L = dyn_cast<LoadInst>(Ld)) {
-    if (L->getType()->isPointerTy()) {
-      auto LoadLineNum = OmpDiagnosticsLocationInfo.getDebugLocSeq(L);
-      std::queue<const Value *> UsersQ;
-      UsersQ.push(L);
-      // Keep scanning the users of this load of pointer, to find if this is used
-      // in a function call. We keep scanning till the line numbers are same,
-      // that is the load and the call are at the same line.
-      while (!UsersQ.empty()) {
-        auto *Def = UsersQ.front();
-        UsersQ.pop();
-        for (const auto *U : Def->users()) {
-          if (const auto *I = dyn_cast<Instruction>(U)) {
-            // If the address load is used in the call, then preserve the load
-            // as memuse.
-            if (isa<CallInst>(I))
-              return false;
-            // If the user instruction is still on the same line, then add to
-            // Queue.
-            if (OmpDiagnosticsLocationInfo.getDebugLocSeq(I) == LoadLineNum) {
-              UsersQ.push(I);
-            }
-          }
-        }
-      }
-      // If we could not find a call instr that uses the loaded address, then
-      // ignore the mem use. TODO: Other than a store, which other instruction
-      // can use the address?
-      return true;
-    }
-  }
+  // Soundness-first policy: keep pointer-typed loads unless we can prove they
+  // are irrelevant address materializations. The old debug-line heuristic
+  // dropped ordinary pointer-indirection patterns such as:
+  //   %p = load T*, T** %slot
+  //   %v = load T, T* %p
+  // which caused valid memory identities to disappear from the use-def graph.
+  (void)Ld;
   return false;
 }
 
@@ -2011,6 +1995,9 @@ MemUseDefGlobalAnalysis::Result
 MemUseDefGlobalAnalysis::run(Module &M, ModuleAnalysisManager &AM) {
   // OmpDiagnosticsGlobalInfo result;
   ThisModule = &M;
+  FuncNameMap.clear();
+  IndirectCallsMap.clear();
+  MemoryLdStMapClass::resetGlobalState();
   // FunctionAM =
   // &AnalysisManager->getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
   AnalysisManager = &AM;

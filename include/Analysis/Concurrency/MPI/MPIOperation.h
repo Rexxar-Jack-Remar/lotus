@@ -571,6 +571,7 @@ struct MPIOperation {
   RequestID request = nullptr;
   const llvm::Instruction *completion_inst = nullptr;
   MPIRequestState request_state = MPIRequestState::Unbound;
+  bool matched_message = false;
 
   WindowID window = nullptr;
   int target_rank = -1;

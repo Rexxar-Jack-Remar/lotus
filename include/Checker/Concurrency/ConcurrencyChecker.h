@@ -9,7 +9,9 @@
 #include "Analysis/Concurrency/MHP/StaticVectorClockMHP.h"
 #include "Analysis/Concurrency/MPI/MPIAnalysis.h"
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
+#include "Analysis/Concurrency/Memory/StaticThreadSharingAnalysis.h"
 #include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
+#include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
 #include "Checker/Concurrency/AtomicityChecker.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 #include "Checker/Concurrency/ConditionVariableChecker.h"
@@ -28,6 +30,7 @@
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 
 namespace lotus {
@@ -170,7 +173,10 @@ private:
   std::unique_ptr<mhp::LockSetAnalysis> m_locksetAnalysis;
   mhp::LockSetAnalysis *m_locksetAnalysisView = nullptr;
   std::unique_ptr<lotus::EscapeAnalysis> m_escapeAnalysis;
+  std::unique_ptr<ThreadLocal::ThreadLocalAnalysis> m_threadLocalAnalysis;
   std::unique_ptr<lotus::HappensBeforeAnalysis> m_happensBeforeAnalysis;
+  std::unique_ptr<llvm::legacy::PassManager> m_staticThreadSharingPM;
+  lotus::StaticThreadSharingAnalysis *m_staticThreadSharingAnalysis = nullptr;
   std::unique_ptr<OpenMP::OpenMPTaskGraph> m_openMPTaskGraph;
   std::unique_ptr<mpi::MPIAnalysis> m_mpiAnalysis;
   lotus::AliasAnalysisWrapper *m_aliasAnalysis;

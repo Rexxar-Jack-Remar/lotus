@@ -255,6 +255,83 @@ TEST_F(ThreadAPITest, RecognizesOpenMPLockLifecycleAndTryLockRoutines) {
   EXPECT_TRUE(api->isTryLock(test_nest_lock));
 }
 
+TEST_F(ThreadAPITest, DefaultSemaphoresAreNotLockExclusionOps) {
+  const char *source = R"(
+    declare i32 @sem_wait(i8*)
+    declare i32 @sem_post(i8*)
+    declare void @fake_counting_semaphore_acquireEv(i8*)
+    declare void @fake_counting_semaphore_releaseEv(i8*)
+
+    define void @main(i8* %sem) {
+    entry:
+      call i32 @sem_wait(i8* %sem)
+      call i32 @sem_post(i8* %sem)
+      call void @fake_counting_semaphore_acquireEv(i8* %sem)
+      call void @fake_counting_semaphore_releaseEv(i8* %sem)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *sem_wait_call = &*it++;
+  const Instruction *sem_post_call = &*it++;
+  const Instruction *cpp_acquire = &*it++;
+  const Instruction *cpp_release = &*it++;
+
+  EXPECT_TRUE(api->isSemaphoreOp(sem_wait_call));
+  EXPECT_TRUE(api->isSemaphoreOp(sem_post_call));
+  EXPECT_TRUE(api->isSemaphoreOp(cpp_acquire));
+  EXPECT_TRUE(api->isSemaphoreOp(cpp_release));
+
+  EXPECT_FALSE(api->isBinarySemaphoreOp(sem_wait_call));
+  EXPECT_FALSE(api->isBinarySemaphoreOp(cpp_acquire));
+  EXPECT_FALSE(api->isTDAcquire(sem_wait_call));
+  EXPECT_FALSE(api->isTDRelease(sem_post_call));
+  EXPECT_FALSE(api->isTDAcquire(cpp_acquire));
+  EXPECT_FALSE(api->isTDRelease(cpp_release));
+}
+
+TEST_F(ThreadAPITest, ConfigTaggedBinarySemaphoresRemainExclusionCapable) {
+  const char *source = R"(
+    declare i32 @binary_sem_wait(i8*)
+    declare i32 @binary_sem_post(i8*)
+
+    define void @main(i8* %sem) {
+    entry:
+      call i32 @binary_sem_wait(i8* %sem)
+      call i32 @binary_sem_post(i8* %sem)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *binary_wait = &*it++;
+  const Instruction *binary_post = &*it++;
+
+  EXPECT_TRUE(api->isSemaphoreOp(binary_wait));
+  EXPECT_TRUE(api->isSemaphoreOp(binary_post));
+  EXPECT_TRUE(api->isBinarySemaphoreOp(binary_wait));
+  EXPECT_TRUE(api->isBinarySemaphoreOp(binary_post));
+  EXPECT_TRUE(api->isTDAcquire(binary_wait));
+  EXPECT_TRUE(api->isTDRelease(binary_post));
+}
+
 TEST_F(ThreadAPITest, RecognizesAdditionalMPICommunicatorManagementAPIs) {
   const char *source = R"(
     declare i32 @MPI_Intercomm_create(i8*, i32, i8*, i32, i32, i8**)
@@ -412,6 +489,29 @@ TEST_F(ThreadAPITest, RecognizesLibcxxJoinDetachManglings) {
             ThreadAPI::TD_DETACH);
 }
 
+TEST_F(ThreadAPITest, StdJthreadMoveConstructorIsNotFork) {
+  const char *source = R"(
+    declare void @_ZNSt7jthreadC1EOS_(i8*, i8*)
+
+    define void @main() {
+    entry:
+      %dst = alloca i8
+      %src = alloca i8
+      call void @_ZNSt7jthreadC1EOS_(i8* %dst, i8* %src)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *move_ctor = module->getFunction("_ZNSt7jthreadC1EOS_");
+  ASSERT_NE(move_ctor, nullptr);
+  EXPECT_EQ(api->getType(move_ctor), ThreadAPI::TD_DUMMY);
+}
+
 TEST_F(ThreadAPITest, MapsOpenMPTaskwaitWithDepsVariants) {
   const char *source = R"(
     declare i32 @__kmpc_omp_taskwait(i8*, i32)
@@ -541,6 +641,23 @@ TEST_F(ThreadAPITest, MapsOpenMPTaskRuntimeVariants) {
   EXPECT_EQ(
       api->getSemanticTag(module->getFunction("__kmpc_omp_task_with_deps_51")),
       "task-with-deps");
+}
+
+TEST_F(ThreadAPITest, DistinguishesOpenMPDoacrossRuntimeVariants) {
+  const char *source = R"(
+    declare void @__kmpc_doacross_wait(i8*, i32, i64*)
+    declare void @__kmpc_doacross_submit(i8*, i32, i64*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_doacross_wait")),
+            ThreadAPI::TD_OMP_DOACROSS_WAIT);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_doacross_submit")),
+            ThreadAPI::TD_OMP_DOACROSS_SUBMIT);
 }
 
 TEST_F(ThreadAPITest, MapsOpenMPRegionRuntimeVariants) {

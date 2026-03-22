@@ -416,6 +416,7 @@ void MHPAnalysis::buildThreadFlowGraph() {
   // Main thread (thread 0)
   m_tfg->addThread(0, main_func);
   processFunction(main_func, 0, 0, true);
+  finalizeBarrierPhases();
   if (m_openmp_semantics) {
     lowerOpenMPTasks(*m_openmp_semantics);
   }
@@ -725,6 +726,54 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
         } else {
           // Handle both direct and indirect calls
           const Function *callee = m_thread_api->getCallee(cb);
+          auto wireDirectCall = [&](const Function *target) {
+            if (!target || target->isDeclaration()) {
+              return;
+            }
+            CallContextID callee_ctx = node->getNodeID();
+            m_has_multi_context_nodes = true;
+            processFunction(target, tid, callee_ctx, preForkMainPhasePass2);
+            SyncNode *callee_entry =
+                m_tfg->getNode(&target->front().front(), tid, callee_ctx);
+            if (callee_entry) {
+              m_tfg->addCallEdge(node, callee_entry);
+            }
+            SyncNode *callee_exit =
+                m_tfg->getFunctionExitNode(tid, target, callee_ctx);
+            if (!callee_exit) {
+              return;
+            }
+            const Instruction *next_inst = inst.getNextNode();
+            if (next_inst) {
+              if (SyncNode *return_site = m_tfg->getNode(next_inst, tid, ctx)) {
+                m_tfg->addRetEdge(callee_exit, return_site);
+              }
+            } else if (inst.isTerminator()) {
+              for (const BasicBlock *succ : successors(inst.getParent())) {
+                if (succ->empty()) {
+                  continue;
+                }
+                if (SyncNode *return_site =
+                        m_tfg->getNode(&succ->front(), tid, ctx)) {
+                  m_tfg->addRetEdge(callee_exit, return_site);
+                }
+              }
+            }
+          };
+
+          if (m_thread_api->getType(cb) == ThreadAPI::TD_CALL_ONCE) {
+            for (unsigned idx = 1; idx < cb->arg_size(); ++idx) {
+              const Value *arg = cb->getArgOperand(idx);
+              if (!arg) {
+                continue;
+              }
+              if (const auto *callable =
+                      dyn_cast<Function>(arg->stripPointerCasts())) {
+                wireDirectCall(callable);
+                break;
+              }
+            }
+          }
 
           if (!callee) {
             bool resolved_indirect_target = false;
@@ -787,35 +836,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
             }
           } else if (!callee->isDeclaration()) {
             // Direct call to a defined function
-            CallContextID callee_ctx = node->getNodeID();
-            m_has_multi_context_nodes = true;
-            processFunction(callee, tid, callee_ctx, preForkMainPhasePass2);
-            SyncNode *callee_entry =
-                m_tfg->getNode(&callee->front().front(), tid, callee_ctx);
-            if (callee_entry) {
-              m_tfg->addCallEdge(node, callee_entry);
-            }
-            SyncNode *callee_exit =
-                m_tfg->getFunctionExitNode(tid, callee, callee_ctx);
-            if (callee_exit) {
-              const Instruction *next_inst = inst.getNextNode();
-              if (next_inst) {
-                if (SyncNode *return_site =
-                        m_tfg->getNode(next_inst, tid, ctx)) {
-                  m_tfg->addRetEdge(callee_exit, return_site);
-                }
-              } else if (inst.isTerminator()) {
-                for (const BasicBlock *succ : successors(inst.getParent())) {
-                  if (succ->empty()) {
-                    continue;
-                  }
-                  if (SyncNode *return_site =
-                          m_tfg->getNode(&succ->front(), tid, ctx)) {
-                    m_tfg->addRetEdge(callee_exit, return_site);
-                  }
-                }
-              }
-            }
+            wireDirectCall(callee);
           }
         }
       }
@@ -941,8 +962,11 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
   const Value *joined_thread_val = m_thread_api->getJoinedThread(join_inst);
   ThreadID joined_tid = 0;
   bool found_thread = false;
+  std::unordered_set<const Value *> joined_roots;
 
   if (joined_thread_val) {
+    JoinTargetAnalysis::traceThreadHandleRoots(joined_thread_val, &m_module,
+                                               joined_roots);
     // Use the improved tracing function to find the origin of the pthread_t
     // value.
     const Value *pthread_t_origin = tracePthreadT(joined_thread_val);
@@ -960,7 +984,7 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
     }
   }
 
-  if (!found_thread && m_join_target_analysis) {
+  if (!found_thread && joined_roots.size() <= 1 && m_join_target_analysis) {
     if (m_join_target_analysis->isUnambiguousJoin(join_inst)) {
       std::vector<const Instruction *> possible_forks =
           m_join_target_analysis->getPossibleJoinedForks(join_inst);
@@ -1032,27 +1056,36 @@ void MHPAnalysis::handleBarrier(const Instruction *barrier_inst,
   current.continuations = getBarrierContinuations(barrier_inst);
 
   size_t phase = m_barrier_phase_by_thread[barrier][node->getThreadID()]++;
-  auto &participants = m_barrier_waits[barrier][phase];
-  for (const BarrierParticipant &previous : participants) {
-    if (!previous.arrival ||
-        previous.arrival->getThreadID() == node->getThreadID()) {
-      continue;
-    }
+  m_barrier_waits[barrier][phase].push_back(std::move(current));
+}
 
-    for (SyncNode *cont : current.continuations) {
-      if (cont) {
-        m_tfg->addInterThreadEdge(previous.arrival, cont);
-      }
-    }
-
-    for (SyncNode *cont : previous.continuations) {
-      if (cont) {
-        m_tfg->addInterThreadEdge(node, cont);
+void MHPAnalysis::finalizeBarrierPhases() {
+  for (const auto &barrier_entry : m_barrier_waits) {
+    for (const auto &phase_entry : barrier_entry.second) {
+      const std::vector<BarrierParticipant> &participants = phase_entry.second;
+      for (size_t i = 0; i < participants.size(); ++i) {
+        const BarrierParticipant &lhs = participants[i];
+        if (!lhs.arrival) {
+          continue;
+        }
+        for (size_t j = 0; j < participants.size(); ++j) {
+          if (i == j) {
+            continue;
+          }
+          const BarrierParticipant &rhs = participants[j];
+          if (!rhs.arrival ||
+              lhs.arrival->getThreadID() == rhs.arrival->getThreadID()) {
+            continue;
+          }
+          for (SyncNode *cont : rhs.continuations) {
+            if (cont) {
+              m_tfg->addInterThreadEdge(lhs.arrival, cont);
+            }
+          }
+        }
       }
     }
   }
-
-  participants.push_back(std::move(current));
 }
 
 void MHPAnalysis::analyzeLockSets() {
@@ -1277,14 +1310,6 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
   // Fast path: check precomputed MHP pairs
   if (isPrecomputedMHP(i1, i2))
     return (a && b) ? (m_mhp_cache[{a, b}] = true) : true;
-
-  // Special case: if both instructions are from the same multi-instance thread,
-  // they can run in parallel (different instances) unless explicitly ordered
-  // by structural non-overlap facts.
-  if (t1 == t2 && t1 != 0 && m_multi_instance_threads.count(t1)) {
-    bool r = true;
-    return (a && b) ? (m_mhp_cache[{a, b}] = r) : r;
-  }
 
   bool r = !hasStructuralOrderRelation(i1, i2) &&
            !hasStructuralOrderRelation(i2, i1);

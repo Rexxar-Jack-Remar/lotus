@@ -218,7 +218,14 @@ inline bool isAsync(const llvm::StringRef& funcName) {
 
 // C++20 std::jthread
 inline bool isJthreadConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("jthread") && containsCtorCode(funcName);
+  if (!funcName.contains("jthread") || !containsCtorCode(funcName)) {
+    return false;
+  }
+  if (funcName.contains("EOS_") || funcName.contains("ERKS_") ||
+      funcName.contains("C1Ev") || funcName.contains("C2Ev")) {
+    return false;
+  }
+  return funcName.contains("jthreadC") || funcName.contains("jthreadIC");
 }
 
 inline bool isJthreadJoin(const llvm::StringRef& funcName) {

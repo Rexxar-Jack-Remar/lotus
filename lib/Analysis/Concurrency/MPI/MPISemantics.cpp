@@ -5,6 +5,8 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 
+#include <limits>
+
 namespace mpi {
 
 namespace {
@@ -33,9 +35,12 @@ MPIBlockingMode classifyBlockingMode(TD type, llvm::StringRef canonical_name) {
   case TD::TD_MPI_ISEND:
   case TD::TD_MPI_IRECV:
   case TD::TD_MPI_IPROBE:
-  case TD::TD_MPI_MPROBE:
   case TD::TD_MPI_IMPROBE:
+  case TD::TD_MPI_IMRECV:
     return MPIBlockingMode::NonBlocking;
+  case TD::TD_MPI_MPROBE:
+  case TD::TD_MPI_MRECV:
+    return MPIBlockingMode::Blocking;
   case TD::TD_MPI_WAIT:
   case TD::TD_MPI_WAITALL:
   case TD::TD_MPI_WAITANY:
@@ -76,6 +81,7 @@ MPIRequestArity classifyRequestArity(TD type) {
   case TD::TD_MPI_REQUEST_START:
   case TD::TD_MPI_REQUEST_FREE:
   case TD::TD_MPI_CANCEL:
+  case TD::TD_MPI_IMRECV:
     return MPIRequestArity::Single;
   case TD::TD_MPI_WAITALL:
   case TD::TD_MPI_WAITANY:
@@ -284,10 +290,21 @@ makeDesc(TD type, MPIOpKind kind, MPISemanticFamily family,
   return descriptor;
 }
 
+constexpr int kArgAbsent = std::numeric_limits<int>::min();
+
 constexpr MPISemanticDescriptor makeSendRecvDesc(TD type) {
   MPISemanticDescriptor descriptor =
       makeDesc(type, MPIOpKind::UNKNOWN, MPISemanticFamily::PointToPoint);
   descriptor.split_into_sendrecv = true;
+  return descriptor;
+}
+
+constexpr MPISemanticDescriptor makeMatchedRecvDesc(TD type,
+                                                    MPIOpKind kind,
+                                                    int request_arg = kArgAbsent) {
+  MPISemanticDescriptor descriptor =
+      makeDesc(type, kind, MPISemanticFamily::PointToPoint, kArgAbsent,
+               request_arg, 1, 2, kArgAbsent, kArgAbsent, false);
   return descriptor;
 }
 
@@ -434,14 +451,12 @@ constexpr MPISemanticDescriptor kDescriptors[] = {
              MPISemanticFamily::Request),
     makeDesc(TD::TD_MPI_STATUS_SET_ELEMENTS_X, MPIOpKind::REQUEST_MANAGEMENT,
              MPISemanticFamily::Request),
-    makeDesc(TD::TD_MPI_MPROBE, MPIOpKind::PROBE_NONBLOCKING,
+    makeDesc(TD::TD_MPI_MPROBE, MPIOpKind::PROBE_BLOCKING,
              MPISemanticFamily::Probe, 2, -1, -1, -1, 0, 1, false),
     makeDesc(TD::TD_MPI_IMPROBE, MPIOpKind::PROBE_NONBLOCKING,
              MPISemanticFamily::Probe, 2, -1, -1, -1, 0, 1, false),
-    makeDesc(TD::TD_MPI_IMRECV, MPIOpKind::PROBE_NONBLOCKING,
-             MPISemanticFamily::Probe),
-    makeDesc(TD::TD_MPI_MRECV, MPIOpKind::PROBE_NONBLOCKING,
-             MPISemanticFamily::Probe),
+    makeMatchedRecvDesc(TD::TD_MPI_IMRECV, MPIOpKind::RECV_NONBLOCKING, 4),
+    makeMatchedRecvDesc(TD::TD_MPI_MRECV, MPIOpKind::RECV_BLOCKING),
     makeDesc(TD::TD_MPI_TYPE_CONTIGUOUS, MPIOpKind::DATATYPE_CREATE,
              MPISemanticFamily::Datatype),
     makeDesc(TD::TD_MPI_TYPE_VECTOR, MPIOpKind::DATATYPE_CREATE,
@@ -532,7 +547,7 @@ MPIEffect buildMPIEffect(const llvm::Instruction *inst, ThreadAPI *api) {
     return effect;
   }
 
-  const llvm::Function *callee = cb->getCalledFunction();
+  const llvm::Function *callee = api->getCallee(inst);
   if (!callee) {
     return effect;
   }

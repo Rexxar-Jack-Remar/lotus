@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <set>
 #include <string>
 
@@ -32,6 +33,9 @@ namespace {
 
 const Value *getOperandBySignedIndex(const CallBase *cb, int index) {
   if (!cb) {
+    return nullptr;
+  }
+  if (index == std::numeric_limits<int>::min()) {
     return nullptr;
   }
   int resolved = index;
@@ -91,7 +95,8 @@ bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) {
 
   const auto *lhs_arg = dyn_cast<Argument>(lhs);
   const auto *rhs_arg = dyn_cast<Argument>(rhs);
-  if (lhs_arg && rhs_arg && lhs_arg->getArgNo() == rhs_arg->getArgNo()) {
+  if (lhs_arg && rhs_arg && lhs_arg->getParent() == rhs_arg->getParent() &&
+      lhs_arg->getArgNo() == rhs_arg->getArgNo()) {
     return true;
   }
   return false;
@@ -1160,6 +1165,9 @@ void MPIProcessModel::extractPointToPointDetails(
     return;
   }
 
+  op.matched_message = op.td_type == ThreadAPI::TD_MPI_IMRECV ||
+                       op.td_type == ThreadAPI::TD_MPI_MRECV;
+
   const Value *datatype = getOperandBySignedIndex(cb, descriptor.datatype_arg);
   op.datatype = datatype;
   op.datatype_size = getDatatypeExtent(op.datatype, op.inst);
@@ -1850,7 +1858,8 @@ void MPIProcessModel::analyzeModule() {
             MPIParticipantSet::fromProcessSetFact(op.process_set_fact);
       }
 
-      if (op.protocol_reachability == ProtocolReachability::Unknown) {
+      if (!op.matched_message &&
+          op.protocol_reachability == ProtocolReachability::Unknown) {
         MPIModelGap gap;
         gap.domain = !op.communicator ? MPIModelGapDomain::Communicator
                                       : MPIModelGapDomain::ParticipantSet;
@@ -2488,6 +2497,9 @@ void MPIProcessModel::buildPointToPointObligations() {
   std::vector<size_t> recv_endpoint_indices;
   for (size_t op_index = 0; op_index < all_operations_.size(); ++op_index) {
     const MPIOperation &op = all_operations_[op_index];
+    if (op.matched_message) {
+      continue;
+    }
     if (!isSendOperationKind(op.kind) && !isRecvOperationKind(op.kind)) {
       continue;
     }
@@ -3980,7 +3992,15 @@ std::vector<const Instruction *> MPIProcessModel::findInvalidTags() const {
       continue;
     }
 
-    if (op.tag < 0) {
+    if ((op.kind == MPIOpKind::SEND_BLOCKING ||
+         op.kind == MPIOpKind::SEND_NONBLOCKING)) {
+      if (op.tag < 0) {
+        issues.push_back(op.inst);
+      }
+      continue;
+    }
+
+    if (op.tag < -1) {
       issues.push_back(op.inst);
     }
   }

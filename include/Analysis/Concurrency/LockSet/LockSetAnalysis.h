@@ -73,7 +73,7 @@ using LockSet = std::set<LockID>;
  * dataflow analysis. Handles:
  * - pthread_mutex_lock/unlock
  * - pthread_rwlock operations
- * - sem_wait/post
+ * - binary semaphores only when explicitly tagged as exclusion-capable
  * - Reentrant locks
  * - Try-lock operations
  *

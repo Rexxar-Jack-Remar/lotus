@@ -339,7 +339,7 @@ TEST_F(MHPAnalysisTest, ForkJoinOrdering) {
   EXPECT_TRUE(mhp.mustBeSequential(post, w1));
 }
 
-TEST_F(MHPAnalysisTest, LoopForkCreatesMultiInstanceThread) {
+TEST_F(MHPAnalysisTest, LoopForkDoesNotAutoSelfParallelizeWorkerBody) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
 
@@ -381,7 +381,7 @@ TEST_F(MHPAnalysisTest, LoopForkCreatesMultiInstanceThread) {
   ASSERT_NE(w1, nullptr);
   ASSERT_NE(w2, nullptr);
 
-  EXPECT_TRUE(mhp.mayHappenInParallel(w1, w2));
+  EXPECT_FALSE(mhp.mayHappenInParallel(w1, w2));
 }
 
 TEST_F(MHPAnalysisTest, MutexSerializesCriticalSections) {
@@ -748,6 +748,49 @@ TEST_F(MHPAnalysisTest, AmbiguousJoinDoesNotCreateDefiniteHB) {
   EXPECT_FALSE(hb.mustPrecede(w2, post));
 }
 
+TEST_F(MHPAnalysisTest, ForeignJoinHandleDoesNotOrderLocalWorker) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 1, 2
+      ret i8* null
+    }
+
+    define i32 @main(i8* %foreign_tid) {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      call i32 @pthread_join(i8* %foreign_tid, i8* null)
+      %post = add i32 3, 4
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *main_func = module->getFunction("main");
+  const Function *worker_func = module->getFunction("worker");
+  ASSERT_NE(main_func, nullptr);
+  ASSERT_NE(worker_func, nullptr);
+
+  const Instruction *worker_inst = findInstructionByName(*worker_func, "w");
+  const Instruction *post = findInstructionByName(*main_func, "post");
+  ASSERT_NE(worker_inst, nullptr);
+  ASSERT_NE(post, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  EXPECT_TRUE(mhp.mayHappenInParallel(worker_inst, post));
+  EXPECT_FALSE(hb.mustPrecede(worker_inst, post));
+}
+
 TEST_F(MHPAnalysisTest, RegionPartitionDoesNotOverlapAcrossBranchMerge) {
   const char *source = R"(
     declare i32 @pthread_mutex_lock(i8*)
@@ -847,7 +890,7 @@ TEST_F(MHPAnalysisTest, HelperCalledBeforeAndAfterForkIsNotGloballyPrefork) {
   EXPECT_TRUE(mhp.mayHappenInParallel(helper_inst, worker_inst));
 }
 
-TEST_F(MHPAnalysisTest, MultiInstanceThread_InstructionsMayHappenInParallel) {
+TEST_F(MHPAnalysisTest, LoopCreateJoinDoesNotAutoSelfParallelizeWorkerBody) {
   const char *source = R"(
     @x = global i32 0, align 4
 
@@ -892,7 +935,7 @@ TEST_F(MHPAnalysisTest, MultiInstanceThread_InstructionsMayHappenInParallel) {
   ASSERT_NE(inst_a, nullptr);
   ASSERT_NE(inst_b, nullptr);
 
-  EXPECT_TRUE(mhp.mayHappenInParallel(inst_a, inst_b));
+  EXPECT_FALSE(mhp.mayHappenInParallel(inst_a, inst_b));
 }
 
 TEST_F(MHPAnalysisTest, OpenMPTargetDataBoundaryOrdersTaskContinuation) {

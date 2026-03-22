@@ -104,7 +104,8 @@ bool isLoad(const llvm::Instruction *inst) {
 
 bool isReadModifyWrite(const llvm::Instruction *inst) {
     if (!isAtomic(inst)) return false;
-    return llvm::isa<llvm::AtomicRMWInst>(inst);
+    return llvm::isa<llvm::AtomicRMWInst>(inst) ||
+           llvm::isa<llvm::AtomicCmpXchgInst>(inst);
 }
 
 bool isCompareExchange(const llvm::Instruction *inst) {

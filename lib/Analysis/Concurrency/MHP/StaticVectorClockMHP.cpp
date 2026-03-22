@@ -190,21 +190,6 @@ void StaticVectorClockMHP::buildStaticThreads() {
         StaticThreadID child_stid =
             getOrCreateStaticThread(child_ctx, succ->getThreadID(), succ);
         worklist.push_back({child_stid, succ, {}});
-      } else if (kind == EdgeKind::Join || kind == EdgeKind::Signal ||
-                 kind == EdgeKind::Barrier) {
-        ThreadID succ_tid = succ->getThreadID();
-        StaticThreadID succ_stid = 0;
-        if (m_node_to_static_thread.count(succ)) {
-          succ_stid = m_node_to_static_thread[succ];
-        } else {
-          for (const auto &s : m_static_threads) {
-            if (s.base_tid == succ_tid) {
-              succ_stid = s.id;
-              break;
-            }
-          }
-        }
-        worklist.push_back({succ_stid, succ, {}});
       }
     }
   }
@@ -650,6 +635,9 @@ bool StaticVectorClockMHP::happensBefore(const Instruction *i1,
       if (it2 == m_node_clocks.end()) {
         return false;
       }
+      if (!m_tfg->canReach(n1, n2)) {
+        return false;
+      }
       if (!(svcLeq(it1->second, it2->second) &&
             !svcLeq(it2->second, it1->second))) {
         return false;
@@ -677,15 +665,6 @@ void StaticVectorClockMHP::computeMHPPairs() {
       const Instruction *a = all_insts[i];
       const Instruction *b = all_insts[j];
 
-      auto tid_it_a = m_inst_to_thread.find(a);
-      auto tid_it_b = m_inst_to_thread.find(b);
-      if (tid_it_a != m_inst_to_thread.end() && tid_it_b != m_inst_to_thread.end() &&
-          tid_it_a->second == tid_it_b->second &&
-          m_multi_instance_threads.count(tid_it_a->second)) {
-        m_mhp_pairs.insert({a, b});
-        continue;
-      }
-
       if (happensBefore(a, b) || happensBefore(b, a)) {
         continue;
       }
@@ -699,14 +678,6 @@ bool StaticVectorClockMHP::mayHappenInParallel(const Instruction *i1,
                                                const Instruction *i2) const {
   if (!i1 || !i2 || i1 == i2)
     return false;
-
-  auto tid1 = m_inst_to_thread.find(i1);
-  auto tid2 = m_inst_to_thread.find(i2);
-  if (tid1 != m_inst_to_thread.end() && tid2 != m_inst_to_thread.end() &&
-      tid1->second == tid2->second &&
-      m_multi_instance_threads.count(tid1->second)) {
-    return true;
-  }
 
   if (m_mhp_pairs.count({i1, i2}) || m_mhp_pairs.count({i2, i1}))
     return true;
@@ -1140,8 +1111,11 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
   const Value *joined_thread_val = m_thread_api->getJoinedThread(join_inst);
   ThreadID joined_tid = 0;
   bool found = false;
+  std::unordered_set<const Value *> joined_roots;
 
   if (joined_thread_val) {
+    JoinTargetAnalysis::traceThreadHandleRoots(joined_thread_val, &m_module,
+                                               joined_roots);
     const Value *root =
         JoinTargetAnalysis::traceThreadHandleRoot(joined_thread_val, &m_module);
     auto it = m_pthread_value_to_thread.find(root ? root : joined_thread_val);
@@ -1151,7 +1125,7 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
     }
   }
 
-  if (!found && m_join_target_analysis) {
+  if (!found && joined_roots.size() <= 1 && m_join_target_analysis) {
     if (m_join_target_analysis->isUnambiguousJoin(join_inst)) {
       std::vector<const Instruction *> possible_forks =
           m_join_target_analysis->getPossibleJoinedForks(join_inst);

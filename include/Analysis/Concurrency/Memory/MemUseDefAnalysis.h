@@ -134,6 +134,8 @@ class MemoryLdStMapClass {
   Type *getType(ConstInstrPtr LdSt);
 
 public:
+  static void resetGlobalState();
+
   /// Record the call instructions that reach this basic block. It is updated
   /// whenever a memdef is generated in a basic block that is a call
   /// instruction. And whenever a memdef is added at a phi operator at the join

@@ -113,9 +113,8 @@ TEST_F(AtomicHappensBeforeTest, ReleaseAcquireOrdering) {
   hb.setAliasAnalysis(mhp.getAliasAnalysis());
   hb.analyze();
 
-  // Same-location release/acquire stays deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, SequentialConsistency) {
@@ -176,9 +175,8 @@ TEST_F(AtomicHappensBeforeTest, SequentialConsistency) {
   hb.setAliasAnalysis(mhp.getAliasAnalysis());
   hb.analyze();
 
-  // Seq-cst stays deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, RelaxedAtomicsNoSynchronization) {
@@ -320,11 +318,10 @@ TEST_F(AtomicHappensBeforeTest, AcquireReleaseOrdering) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  // Matching release/acquire pairs stay deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data1, load_data1));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data2, load_data2));
-  EXPECT_FALSE(hb.mustPrecede(store_data1, load_data1));
-  EXPECT_FALSE(hb.mustPrecede(store_data2, load_data2));
+  EXPECT_TRUE(hb.mustPrecede(store_data1, load_data1));
+  EXPECT_TRUE(hb.mustPrecede(store_data2, load_data2));
 }
 
 TEST_F(AtomicHappensBeforeTest, MultipleAtomicVariables) {
@@ -411,11 +408,10 @@ TEST_F(AtomicHappensBeforeTest, MultipleAtomicVariables) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  // Each same-location pair stays deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_x, load_x));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_y, load_y));
-  EXPECT_FALSE(hb.mustPrecede(store_x, load_x));
-  EXPECT_FALSE(hb.mustPrecede(store_y, load_y));
+  EXPECT_TRUE(hb.mustPrecede(store_x, load_x));
+  EXPECT_TRUE(hb.mustPrecede(store_y, load_y));
 }
 
 TEST_F(AtomicHappensBeforeTest, AtomicChain) {
@@ -492,9 +488,8 @@ TEST_F(AtomicHappensBeforeTest, AtomicChain) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  // Direct atomic hand-off stays deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, CompareAndSwap) {
@@ -816,7 +811,7 @@ TEST_F(AtomicHappensBeforeTest, SeqCstDifferentLocationsStayParallel) {
   EXPECT_TRUE(mhp.mayHappenInParallel(store_x, load_x));
 }
 
-TEST_F(AtomicHappensBeforeTest, MatchingFencesCreateHappensBefore) {
+TEST_F(AtomicHappensBeforeTest, MatchingFencesEstablishHB) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -878,7 +873,8 @@ TEST_F(AtomicHappensBeforeTest, MatchingFencesCreateHappensBefore) {
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
-TEST_F(AtomicHappensBeforeTest, MatchingFencesWithAliasedAtomicPointersCreateHB) {
+TEST_F(AtomicHappensBeforeTest,
+       MatchingFencesWithAliasedAtomicPointersEstablishHB) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag_storage = global [1 x i32] zeroinitializer, align 4
@@ -999,7 +995,7 @@ TEST_F(AtomicHappensBeforeTest,
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
-TEST_F(AtomicHappensBeforeTest, AtomicRmwFenceWitnessCreatesHB) {
+TEST_F(AtomicHappensBeforeTest, AtomicRmwFenceWitnessEstablishesHB) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -1058,6 +1054,7 @@ TEST_F(AtomicHappensBeforeTest, AtomicRmwFenceWitnessCreatesHB) {
   hb.analyze();
 
   EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
 // Main function for tests

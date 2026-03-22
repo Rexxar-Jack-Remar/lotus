@@ -155,6 +155,116 @@ TEST_F(MPIAnalysisTest, IprobeDoesNotEnterRequestLifecycle) {
   EXPECT_EQ(analysis.getResults().orphaned_requests.size(), 1u);
 }
 
+TEST_F(MPIAnalysisTest, MatchedMessageOperationsUseReceiveSemantics) {
+  const char *source = R"(
+    declare i32 @MPI_Mprobe(i32, i32, i8*, i8*, i8*)
+    declare i32 @MPI_Improbe(i32, i32, i8*, i32*, i8*, i8*)
+    declare i32 @MPI_Mrecv(i8*, i32, i32, i8*, i8*)
+    declare i32 @MPI_Imrecv(i8*, i32, i32, i8*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %flag = alloca i32, align 4
+      %msg1 = alloca i8, align 1
+      %msg2 = alloca i8, align 1
+      %status = alloca i8, align 1
+      %req = alloca i8, align 1
+      call i32 @MPI_Mprobe(i32 1, i32 7, i8* %comm, i8* %msg1, i8* %status)
+      call i32 @MPI_Improbe(i32 1, i32 7, i8* %comm, i32* %flag, i8* %msg2, i8* %status)
+      call i32 @MPI_Mrecv(i8* null, i32 4, i32 0, i8* %msg1, i8* %status)
+      call i32 @MPI_Imrecv(i8* null, i32 4, i32 0, i8* %msg2, i8* %req)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &ops = analysis.getProcessModel().getAllOperations();
+  auto findOp = [&](auto predicate) -> const MPIOperation * {
+    for (const auto &op : ops) {
+      if (predicate(op)) {
+        return &op;
+      }
+    }
+    return nullptr;
+  };
+  const MPIOperation *mprobe = findOp([](const MPIOperation &op) {
+    return op.kind == MPIOpKind::PROBE_BLOCKING;
+  });
+  const MPIOperation *improbe = findOp([](const MPIOperation &op) {
+    return op.td_type == ThreadAPI::TD_MPI_IMPROBE;
+  });
+  const MPIOperation *mrecv = findOp([](const MPIOperation &op) {
+    return op.td_type == ThreadAPI::TD_MPI_MRECV;
+  });
+  const MPIOperation *imrecv = findOp([](const MPIOperation &op) {
+    return op.td_type == ThreadAPI::TD_MPI_IMRECV;
+  });
+  ASSERT_NE(mprobe, nullptr);
+  ASSERT_NE(improbe, nullptr);
+  ASSERT_NE(mrecv, nullptr);
+  ASSERT_NE(imrecv, nullptr);
+
+  EXPECT_EQ(mprobe->kind, MPIOpKind::PROBE_BLOCKING);
+  EXPECT_EQ(mprobe->blocking_mode, MPIBlockingMode::Blocking);
+  EXPECT_EQ(improbe->kind, MPIOpKind::PROBE_NONBLOCKING);
+  EXPECT_EQ(improbe->blocking_mode, MPIBlockingMode::NonBlocking);
+
+  EXPECT_EQ(mrecv->kind, MPIOpKind::RECV_BLOCKING);
+  EXPECT_EQ(mrecv->blocking_mode, MPIBlockingMode::Blocking);
+  EXPECT_TRUE(mrecv->matched_message);
+  EXPECT_EQ(imrecv->kind, MPIOpKind::RECV_NONBLOCKING);
+  EXPECT_EQ(imrecv->blocking_mode, MPIBlockingMode::NonBlocking);
+  EXPECT_TRUE(imrecv->matched_message);
+  EXPECT_NE(imrecv->request, nullptr);
+}
+
+TEST_F(MPIAnalysisTest, BitcastedMPICallStillLowersIntoOperation) {
+  const char *source = R"(
+    declare i32 @MPI_Barrier(i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %bar = call i32 bitcast (i32 (i8*)* @MPI_Barrier to i32 (i8*)*)(i8* %comm)
+      ret i32 %bar
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getOperationCount(MPIOpKind::BARRIER_BLOCKING), 1u);
+}
+
+TEST_F(MPIAnalysisTest, ReceiveAnyTagIsNotReportedAsInvalidTag) {
+  const char *source = R"(
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %status = alloca i8, align 1
+      %recv = call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 1, i32 -1,
+                                 i8* %comm, i8* %status)
+      ret i32 %recv
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_TRUE(analysis.getResults().invalid_tags.empty());
+}
+
 TEST_F(MPIAnalysisTest, TestWithFalseFlagKeepsRequestPending) {
   const char *source = R"(
     declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
@@ -1459,6 +1569,44 @@ TEST_F(MPIAnalysisTest, RMAOpInsideLockEpochIsSynchronized) {
   analysis.runAnalysis();
 
   EXPECT_TRUE(analysis.getResults().unsynchronized_rma.empty());
+}
+
+TEST_F(MPIAnalysisTest, RMAOpsOnOtherTargetsDoNotReusePointLockEpoch) {
+  const char *source = R"(
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_lock(i32, i32, i32, i8*)
+    declare i32 @MPI_Win_flush(i32, i8*)
+    declare i32 @MPI_Win_unlock(i32, i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %win = alloca i8, align 1
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* %win)
+      call i32 @MPI_Win_lock(i32 0, i32 0, i32 0, i8* %win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 0, i64 0, i32 1, i32 0, i8* %win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 1, i64 0, i32 1, i32 0, i8* %win)
+      call i32 @MPI_Win_flush(i32 0, i8* %win)
+      call i32 @MPI_Win_unlock(i32 0, i8* %win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  ASSERT_EQ(analysis.getResults().unsynchronized_rma.size(), 1u);
+  const Instruction *unsync_inst = analysis.getResults().unsynchronized_rma.front().inst;
+  ASSERT_NE(unsync_inst, nullptr);
+  const auto *cb = dyn_cast<CallBase>(unsync_inst);
+  ASSERT_NE(cb, nullptr);
+  ASSERT_EQ(cb->arg_size(), 8u);
+  const auto *rank = dyn_cast<ConstantInt>(cb->getArgOperand(3));
+  ASSERT_NE(rank, nullptr);
+  EXPECT_EQ(rank->getSExtValue(), 1);
 }
 
 TEST_F(MPIAnalysisTest, PSCWAccessEpochSynchronizesContainedOps) {

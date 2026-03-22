@@ -506,6 +506,10 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_MPI_ISEND:
   case TD_MPI_IRECV:
   case TD_MPI_IPROBE:
+  case TD_MPI_MPROBE:
+  case TD_MPI_IMPROBE:
+  case TD_MPI_IMRECV:
+  case TD_MPI_MRECV:
   case TD_MPI_PERSISTENT_SEND_INIT:
   case TD_MPI_PERSISTENT_RECV_INIT:
   case TD_MPI_REQUEST_START:
@@ -592,6 +596,7 @@ ThreadAPI::lookupDescription(const Function *F) const {
 
 const ThreadAPI::MatchRule *
 ThreadAPI::lookupMatchRule(StringRef normalized_name) const {
+  const MatchRule *best_prefix = nullptr;
   for (const MatchRule &rule : m_match_rules) {
     if (rule.kind == MatchKind::Exact) {
       if (normalized_name.equals(rule.pattern)) {
@@ -599,11 +604,14 @@ ThreadAPI::lookupMatchRule(StringRef normalized_name) const {
       }
       continue;
     }
-    if (normalized_name.startswith(rule.pattern)) {
-      return &rule;
+    if (!normalized_name.startswith(rule.pattern)) {
+      continue;
+    }
+    if (!best_prefix || rule.pattern.size() > best_prefix->pattern.size()) {
+      best_prefix = &rule;
     }
   }
-  return nullptr;
+  return best_prefix;
 }
 
 ThreadAPI::TD_TYPE
@@ -1318,6 +1326,14 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_MPI_IRECV";
   case TD_MPI_IPROBE:
     return "TD_MPI_IPROBE";
+  case TD_MPI_MPROBE:
+    return "TD_MPI_MPROBE";
+  case TD_MPI_IMPROBE:
+    return "TD_MPI_IMPROBE";
+  case TD_MPI_IMRECV:
+    return "TD_MPI_IMRECV";
+  case TD_MPI_MRECV:
+    return "TD_MPI_MRECV";
   case TD_MPI_PERSISTENT_SEND_INIT:
     return "TD_MPI_PERSISTENT_SEND_INIT";
   case TD_MPI_PERSISTENT_RECV_INIT:

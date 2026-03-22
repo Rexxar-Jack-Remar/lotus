@@ -131,6 +131,37 @@ TEST_F(ThreadLocalAnalysisTest, LoadFromTlsSlotDoesNotMakeSharedPointeeThreadLoc
   EXPECT_FALSE(tla.accessesThreadLocalStorage(loaded_val));
 }
 
+TEST_F(ThreadLocalAnalysisTest, PthreadHandleStorageRemainsThreadLocal) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadLocalAnalysis tla(*module);
+  tla.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const auto *tid = dyn_cast<AllocaInst>(&main_func->getEntryBlock().front());
+  ASSERT_NE(tid, nullptr);
+
+  EXPECT_TRUE(tla.isThreadLocal(tid));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

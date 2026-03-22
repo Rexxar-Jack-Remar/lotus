@@ -55,33 +55,18 @@ void EscapeAnalysis::runEscapeAnalysis() {
 
       // Check for thread creation
       if (threadAPI->isTDFork(inst)) {
-        // The argument passed to the thread function escapes
-        if (const Value *arg = threadAPI->getActualParmAtForkSite(inst)) {
+        for (const Value *arg : threadAPI->getForkPayloadArgs(inst)) {
+          if (!arg || !arg->getType()->isPointerTy()) {
+            continue;
+          }
+
+          Type *pointee = arg->getType()->getPointerElementType();
+          if (pointee && pointee->isFunctionTy()) {
+            continue;
+          }
+
           if (m_escaped_values.insert(arg).second) {
             worklist.push_back(arg);
-          }
-        } else if (const auto *cb = dyn_cast<CallBase>(inst)) {
-          unsigned first_payload_idx = 0;
-          const ThreadAPI::TD_TYPE forkType = threadAPI->getType(cb);
-          if (forkType == ThreadAPI::TD_JTHREAD_FORK) {
-            first_payload_idx = 1;
-          }
-
-          for (unsigned arg_idx = first_payload_idx; arg_idx < cb->arg_size();
-               ++arg_idx) {
-            const Value *arg = cb->getArgOperand(arg_idx);
-            if (!arg || !arg->getType()->isPointerTy()) {
-              continue;
-            }
-
-            Type *pointee = arg->getType()->getPointerElementType();
-            if (pointee && pointee->isFunctionTy()) {
-              continue;
-            }
-
-            if (m_escaped_values.insert(arg).second) {
-              worklist.push_back(arg);
-            }
           }
         }
       }
@@ -102,6 +87,10 @@ void EscapeAnalysis::runEscapeAnalysis() {
         if (!callee) {
           callee =
               dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+        }
+
+        if (threadAPI->isTDFork(inst)) {
+          continue;
         }
 
         for (unsigned arg_idx = 0; arg_idx < call->arg_size(); ++arg_idx) {

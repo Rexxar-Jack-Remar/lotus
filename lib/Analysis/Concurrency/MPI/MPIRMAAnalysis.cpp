@@ -40,6 +40,44 @@ bool isLockAllOperation(const MPIOperation &op) {
   return op.td_type == ThreadAPI::TD_MPI_WIN_LOCK && op.target_rank < 0;
 }
 
+struct EpochKey {
+  size_t participant_class_id = 0;
+  WindowID window = nullptr;
+  int target_rank_min = -1;
+  int target_rank_max = -1;
+  bool all_targets = false;
+
+  bool operator<(const EpochKey &other) const {
+    return std::tie(participant_class_id, window, target_rank_min,
+                    target_rank_max, all_targets) <
+           std::tie(other.participant_class_id, other.window,
+                    other.target_rank_min, other.target_rank_max,
+                    other.all_targets);
+  }
+};
+
+std::pair<int, int> normalizedTargetRange(const MPIOperation &op) {
+  if (op.target_rank >= 0) {
+    return {op.target_rank, op.target_rank};
+  }
+  if (op.target_rank_min >= 0 || op.target_rank_max >= 0) {
+    return {op.target_rank_min, op.target_rank_max};
+  }
+  return {-1, -1};
+}
+
+EpochKey makeEpochKey(const MPIOperation &op, bool all_targets) {
+  EpochKey key;
+  key.participant_class_id = op.participant_class_id;
+  key.window = op.window;
+  key.all_targets = all_targets;
+  if (!all_targets) {
+    std::tie(key.target_rank_min, key.target_rank_max) =
+        normalizedTargetRange(op);
+  }
+  return key;
+}
+
 MPIRMASyncModel toSemanticSyncModel(MPIRMAAnalysis::SyncModel model) {
   switch (model) {
   case MPIRMAAnalysis::SyncModel::FENCE:
@@ -315,7 +353,7 @@ void MPIRMAAnalysis::analyzeRMA() {
     }
   }
 
-  std::map<std::pair<size_t, WindowID>, EpochMachine> epoch_machines;
+  std::map<EpochKey, EpochMachine> epoch_machines;
   size_t next_epoch_id = 1;
 
   for (const MPIOperation &op : process_model_.getAllOperations()) {
@@ -345,10 +383,20 @@ void MPIRMAAnalysis::analyzeRMA() {
       size_t op_index = rma_operations_.size();
       rma_operations_.push_back(rma_op);
 
-      auto key = std::make_pair(op.participant_class_id, op.window);
-      auto &machine = epoch_machines[key];
-      if (machine.state != EpochState::Idle) {
-        machine.op_indices.push_back(op_index);
+      bool attached = false;
+      auto exact_it = epoch_machines.find(makeEpochKey(op, /*all_targets=*/false));
+      if (exact_it != epoch_machines.end() &&
+          exact_it->second.state != EpochState::Idle) {
+        exact_it->second.op_indices.push_back(op_index);
+        attached = true;
+      }
+      if (!attached) {
+        auto all_targets_it =
+            epoch_machines.find(makeEpochKey(op, /*all_targets=*/true));
+        if (all_targets_it != epoch_machines.end() &&
+            all_targets_it->second.state != EpochState::Idle) {
+          all_targets_it->second.op_indices.push_back(op_index);
+        }
       }
 
       auto it = windows_.find(op.window);
@@ -375,22 +423,57 @@ void MPIRMAAnalysis::analyzeRMA() {
         }
       }
 
-      auto key = std::make_pair(op.participant_class_id, op.window);
-      auto &machine = epoch_machines[key];
-      if (transitionEpochMachine(machine, op, next_epoch_id)) {
-        if (machine.epoch_id == next_epoch_id) {
-          ++next_epoch_id;
+      const bool all_targets =
+          op.td_type == ThreadAPI::TD_MPI_WIN_FENCE ||
+          op.td_type == ThreadAPI::TD_MPI_WIN_START ||
+          op.td_type == ThreadAPI::TD_MPI_WIN_COMPLETE ||
+          op.td_type == ThreadAPI::TD_MPI_WIN_POST ||
+          op.td_type == ThreadAPI::TD_MPI_WIN_WAIT ||
+          op.td_type == ThreadAPI::TD_MPI_WIN_TEST ||
+          op.td_type == ThreadAPI::TD_MPI_WIN_SYNC || isLockAllOperation(op) ||
+          ((op.td_type == ThreadAPI::TD_MPI_WIN_UNLOCK ||
+            op.td_type == ThreadAPI::TD_MPI_WIN_FLUSH) &&
+           op.target_rank < 0 && op.target_rank_min < 0 &&
+           op.target_rank_max < 0);
+
+      std::vector<EpochMachine *> candidate_machines;
+      if (all_targets) {
+        for (auto &entry : epoch_machines) {
+          if (entry.first.participant_class_id != op.participant_class_id ||
+              entry.first.window != op.window ||
+              entry.second.state == EpochState::Idle) {
+            continue;
+          }
+          candidate_machines.push_back(&entry.second);
+        }
+        if (candidate_machines.empty()) {
+          candidate_machines.push_back(
+              &epoch_machines[makeEpochKey(op, /*all_targets=*/true)]);
         }
       } else {
+        candidate_machines.push_back(
+            &epoch_machines[makeEpochKey(op, /*all_targets=*/false)]);
+      }
+
+      for (EpochMachine *machine : candidate_machines) {
+        if (!machine) {
+          continue;
+        }
+        if (transitionEpochMachine(*machine, op, next_epoch_id)) {
+          if (machine->epoch_id == next_epoch_id) {
+            ++next_epoch_id;
+          }
+          continue;
+        }
         invalid_epoch_transitions_.push_back(op.inst);
-        for (size_t idx : machine.op_indices) {
+        for (size_t idx : machine->op_indices) {
           rma_operations_[idx].relation.kind =
               concurrency::RelationKind::UnknownDueToModelGap;
           rma_operations_[idx].relation.proof = concurrency::ProofStrength::May;
           rma_operations_[idx].relation.reason =
               "mpi_rma_invalid_epoch_transition";
         }
-        machine = EpochMachine{};
+        *machine = EpochMachine{};
       }
     }
   }
