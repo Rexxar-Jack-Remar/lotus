@@ -2,7 +2,7 @@
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/Config/llvm-config.h>
 
@@ -682,10 +682,10 @@ TEST_F(AtomicHappensBeforeTest, CompareAndSwap) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  // Compare-exchange participation alone stays deferred without a concrete
-  // witness.
+  // The cmpxchg itself stays witness-sensitive, but the trailing release store
+  // provides a concrete synchronization candidate for the reader's acquire.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 TEST_F(AtomicHappensBeforeTest, NoSynchronizationWithoutMatchingOrdering) {

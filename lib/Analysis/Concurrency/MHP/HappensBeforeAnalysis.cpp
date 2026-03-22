@@ -238,6 +238,7 @@ void HappensBeforeAnalysis::analyze() {
   m_sync_with.clear();
   m_explicit_hb_pairs.clear();
   m_extra_hb_successors.clear();
+  m_post_dom_cache.clear();
 
   computeAtomicHappensBefore();
   buildSynchronizesWith();
@@ -726,34 +727,55 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
 
     auto loc_it = events_by_location.find(location);
-    if (loc_it == events_by_location.end()) {
+    if (loc_it == events_by_location.end() || loc_it->second.empty()) {
       return candidates;
     }
+    const Instruction *representative = atomic_events[loc_it->second.front()].inst;
 
     const AtomicEvent *release_head = nullptr;
     std::vector<const AtomicEvent *> rmw_candidates;
-    for (size_t idx : loc_it->second) {
-      const AtomicEvent &event = atomic_events[idx];
-      if (!event.is_store_like || event.tid == std::numeric_limits<mhp::ThreadID>::max()) {
+    bool has_non_release_store_like = false;
+    for (const auto &bucket : events_by_location) {
+      if (bucket.second.empty()) {
         continue;
       }
-      if (!event.has_release) {
+      const Instruction *bucket_rep = atomic_events[bucket.second.front()].inst;
+      if (representative != bucket_rep &&
+          !sameAtomicLocation(representative, bucket_rep)) {
         continue;
       }
-      if (event.is_cmpxchg && !event.has_success_witness) {
-        ++deferred_direct_atomic_relations;
-        ++m_deferred_sync_counts["atomic_cmpxchg_release_missing_success_witness"];
-        continue;
+      for (size_t idx : bucket.second) {
+        const AtomicEvent &event = atomic_events[idx];
+        if (!event.is_store_like ||
+            event.tid == std::numeric_limits<mhp::ThreadID>::max()) {
+          continue;
+        }
+        if (!event.has_release) {
+          has_non_release_store_like = true;
+          continue;
+        }
+        if (event.is_cmpxchg && !event.has_success_witness) {
+          ++deferred_direct_atomic_relations;
+          ++m_deferred_sync_counts["atomic_cmpxchg_release_missing_success_witness"];
+          continue;
+        }
+        if (event.is_rmw) {
+          rmw_candidates.push_back(&event);
+          continue;
+        }
+        if (release_head) {
+          candidates.clear();
+          return candidates;
+        }
+        release_head = &event;
       }
-      if (event.is_rmw) {
-        rmw_candidates.push_back(&event);
-        continue;
-      }
-      if (release_head) {
-        candidates.clear();
-        return candidates;
-      }
-      release_head = &event;
+    }
+
+    if (has_non_release_store_like &&
+        (release_head != nullptr || !rmw_candidates.empty())) {
+      ++m_deferred_sync_counts["atomic_nonrelease_store_competes_with_release"];
+      candidates.clear();
+      return candidates;
     }
 
     if (release_head) {
@@ -772,7 +794,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
 
     for (const auto &entry : release_fence_anchor) {
-      if (!(getExactAtomicLocation(entry.second) == location)) {
+      if (!sameAtomicLocation(entry.second, representative)) {
         continue;
       }
       if (release_head || !candidates.empty()) {
@@ -792,31 +814,42 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   auto getAcquireTargets = [&](const AtomicLocationKey &location) {
     std::vector<AtomicTarget> targets;
     auto loc_it = events_by_location.find(location);
-    if (loc_it == events_by_location.end()) {
+    if (loc_it == events_by_location.end() || loc_it->second.empty()) {
       return targets;
     }
+    const Instruction *representative = atomic_events[loc_it->second.front()].inst;
 
-    for (size_t idx : loc_it->second) {
-      const AtomicEvent &event = atomic_events[idx];
-      if (!event.is_load_like || !event.has_acquire ||
-          event.tid == std::numeric_limits<mhp::ThreadID>::max()) {
+    for (const auto &bucket : events_by_location) {
+      if (bucket.second.empty()) {
         continue;
       }
-      if (event.is_cmpxchg && !event.has_success_witness) {
-        ++deferred_direct_atomic_relations;
-        ++m_deferred_sync_counts["atomic_cmpxchg_acquire_missing_success_witness"];
+      const Instruction *bucket_rep = atomic_events[bucket.second.front()].inst;
+      if (representative != bucket_rep &&
+          !sameAtomicLocation(representative, bucket_rep)) {
         continue;
       }
-      if (!event.is_rmw && !hasBranchWitness(event.inst)) {
-        ++deferred_direct_atomic_relations;
-        ++m_deferred_sync_counts["atomic_direct_missing_branch_witness"];
-        continue;
+      for (size_t idx : bucket.second) {
+        const AtomicEvent &event = atomic_events[idx];
+        if (!event.is_load_like || !event.has_acquire ||
+            event.tid == std::numeric_limits<mhp::ThreadID>::max()) {
+          continue;
+        }
+        if (event.is_cmpxchg && !event.has_success_witness) {
+          ++deferred_direct_atomic_relations;
+          ++m_deferred_sync_counts["atomic_cmpxchg_acquire_missing_success_witness"];
+          continue;
+        }
+        if (!event.is_rmw && !hasBranchWitness(event.inst)) {
+          ++deferred_direct_atomic_relations;
+          ++m_deferred_sync_counts["atomic_direct_missing_branch_witness"];
+          continue;
+        }
+        targets.push_back({event.inst, event.inst, false});
       }
-      targets.push_back({event.inst, event.inst, false});
     }
 
     for (const auto &entry : acquire_fence_anchor) {
-      if (!(getExactAtomicLocation(entry.second) == location)) {
+      if (!sameAtomicLocation(entry.second, representative)) {
         continue;
       }
       if (!hasBranchWitness(entry.second)) {
@@ -1230,6 +1263,22 @@ bool HappensBeforeAnalysis::isInstructionThreadAmbiguous(
 
 bool HappensBeforeAnalysis::sameAtomicLocation(
     const Instruction *store_inst, const Instruction *load_inst) const {
+  if (!store_inst || !load_inst) {
+    return false;
+  }
+
+  const AtomicLocationKey lhs = getExactAtomicLocation(store_inst);
+  const AtomicLocationKey rhs = getExactAtomicLocation(load_inst);
+  if (!lhs.base || !rhs.base) {
+    return false;
+  }
+  if (lhs == rhs) {
+    return true;
+  }
+  if (lhs.base == rhs.base && lhs.has_precise_offset && rhs.has_precise_offset) {
+    return false;
+  }
+
   const Value *p1 = CppAtomics::getAtomicPointer(store_inst);
   const Value *p2 = CppAtomics::getAtomicPointer(load_inst);
   if (!p1 || !p2) {
@@ -1237,15 +1286,6 @@ bool HappensBeforeAnalysis::sameAtomicLocation(
   }
   p1 = p1->stripPointerCasts();
   p2 = p2->stripPointerCasts();
-  if (p1 == p2) {
-    return true;
-  }
-  if (const Value *base1 = getUnderlyingObject(p1)) {
-    p1 = base1->stripPointerCasts();
-  }
-  if (const Value *base2 = getUnderlyingObject(p2)) {
-    p2 = base2->stripPointerCasts();
-  }
   if (p1 == p2) {
     return true;
   }

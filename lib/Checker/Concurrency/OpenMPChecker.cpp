@@ -187,7 +187,8 @@ std::vector<ConcurrencyBugReport> OpenMPChecker::checkDetachedTaskLeak() const {
   }
 
   const auto &summary = m_taskGraph->getSummary();
-  if (summary.detached_task_count > summary.detach_completion_count) {
+  if (summary.detached_task_count != 0 &&
+      summary.detached_task_count > summary.detach_completion_count) {
     ConcurrencyBugReport report(
         ConcurrencyBugType::OPENMP_DETACHED_TASK_LEAK,
         "OpenMP detached task may not be properly completed",

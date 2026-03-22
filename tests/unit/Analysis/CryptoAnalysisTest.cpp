@@ -1,6 +1,6 @@
 #include "Analysis/Crypto/ctllvm.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/PassManager.h>
 #include <llvm/Passes/PassBuilder.h>

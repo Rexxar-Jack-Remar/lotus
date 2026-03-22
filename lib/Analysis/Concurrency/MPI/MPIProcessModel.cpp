@@ -3463,6 +3463,29 @@ MPIProcessModel::getOperationsByKind(MPIOpKind kind) const {
 MPICommunicationMatch
 MPIProcessModel::classifyCommunicationMatch(const MPIOperation &op1,
                                             const MPIOperation &op2) const {
+  auto subgroupsDefinitelyDisjoint = [](const MPIOperation &lhs,
+                                        const MPIOperation &rhs) {
+    if (lhs.communicator_subgroup_id == 0 || rhs.communicator_subgroup_id == 0) {
+      return false;
+    }
+    if (lhs.communicator_subgroup_id == rhs.communicator_subgroup_id) {
+      return false;
+    }
+    if (lhs.process_set_fact.subgroup_token_kind ==
+            MPICommunicatorSubgroupTokenKind::None ||
+        rhs.process_set_fact.subgroup_token_kind ==
+            MPICommunicatorSubgroupTokenKind::None) {
+      return false;
+    }
+    if (lhs.process_set_fact.subgroup_token_kind ==
+            MPICommunicatorSubgroupTokenKind::SplitColorUnknown ||
+        rhs.process_set_fact.subgroup_token_kind ==
+            MPICommunicatorSubgroupTokenKind::SplitColorUnknown) {
+      return false;
+    }
+    return true;
+  };
+
   auto participantSetMayContainRank = [](const MPIParticipantSet &participants,
                                          int rank) {
     return participants.unknown || participants.contains(rank);
@@ -3565,6 +3588,9 @@ MPIProcessModel::classifyCommunicationMatch(const MPIOperation &op1,
 
   if (send.communicator_class_id != 0 && recv.communicator_class_id != 0 &&
       send.communicator_class_id == recv.communicator_class_id) {
+    if (subgroupsDefinitelyDisjoint(send, recv)) {
+      return MPICommunicationMatch::NoMatch;
+    }
   } else if (send.communicator && recv.communicator) {
     const CommunicatorAliasResult communicator_alias =
         classifyCommunicatorAlias(send.communicator, recv.communicator,

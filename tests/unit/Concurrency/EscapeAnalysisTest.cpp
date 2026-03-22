@@ -1,6 +1,6 @@
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 using namespace llvm;
 using namespace lotus;

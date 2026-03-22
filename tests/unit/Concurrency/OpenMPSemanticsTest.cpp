@@ -1,6 +1,6 @@
 #include "Analysis/Concurrency/OpenMP/OpenMPSemantics.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 using namespace llvm;
 using namespace OpenMP;
@@ -350,6 +350,149 @@ TEST_F(OpenMPSemanticsTest,
   EXPECT_TRUE(semantics.getWaitBoundaryInfos().empty());
   EXPECT_EQ(semantics.getTaskEvents().size(), 2u);
   EXPECT_TRUE(semantics.getRelations().empty());
+}
+
+TEST_F(OpenMPSemanticsTest, ReusedTaskFunctionGetsDistinctSchedulingContexts) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__kmpc_omp_taskwait(i8*, i32)
+
+    define internal void @.omp_child_body() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0,
+          i8* bitcast (void ()* @.omp_grandchild to i8*))
+      call i32 @__kmpc_omp_taskwait(i8* null, i32 0)
+      ret void
+    }
+
+    define internal void @.omp_grandchild() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0,
+          i8* bitcast (void ()* @.omp_child_body to i8*))
+      call i32 @__kmpc_omp_task(i8* null, i32 0,
+          i8* bitcast (void ()* @.omp_child_body to i8*))
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  ASSERT_EQ(semantics.getTasks().size(), 4u);
+  std::vector<const Task *> child_tasks;
+  std::vector<const Task *> grandchild_tasks;
+  for (const auto &task_uptr : semantics.getTasks()) {
+    const Task *task = task_uptr.get();
+    ASSERT_NE(task, nullptr);
+    const Function *task_fn = task->task_function;
+    ASSERT_NE(task_fn, nullptr);
+    if (task_fn->getName().equals(".omp_child_body")) {
+      child_tasks.push_back(task);
+    } else if (task_fn->getName().equals(".omp_grandchild")) {
+      grandchild_tasks.push_back(task);
+    }
+  }
+
+  ASSERT_EQ(child_tasks.size(), 2u);
+  ASSERT_EQ(grandchild_tasks.size(), 2u);
+  EXPECT_NE(grandchild_tasks[0]->scheduling_context_id, 0u);
+  EXPECT_NE(grandchild_tasks[1]->scheduling_context_id, 0u);
+  EXPECT_NE(grandchild_tasks[0]->scheduling_context_id,
+            grandchild_tasks[1]->scheduling_context_id);
+  for (const Task *child : child_tasks) {
+    for (const Task *grandchild : grandchild_tasks) {
+      EXPECT_NE(child->scheduling_context_id, grandchild->scheduling_context_id);
+    }
+  }
+
+  size_t nested_taskwaits = 0;
+  for (const WaitBoundaryInfo &info : semantics.getWaitBoundaryInfos()) {
+    if (info.kind == WaitBoundaryInfo::Kind::Taskwait) {
+      ++nested_taskwaits;
+    }
+  }
+  EXPECT_EQ(nested_taskwaits, 2u);
+}
+
+TEST_F(OpenMPSemanticsTest, TaskAllocFlagsPopulateExecutionModeSummary) {
+  const char *source = R"(
+    declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare void @__kmpc_omp_task_complete_if0(i8*, i32, i8*)
+
+    define internal void @untied_body() {
+    entry:
+      ret void
+    }
+
+    define internal void @final_body() {
+    entry:
+      ret void
+    }
+
+    define internal void @detached_body() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %untied = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 0, i64 32, i64 0, void ()* @untied_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %untied)
+
+      %final = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 3, i64 32, i64 0, void ()* @final_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %final)
+
+      %detached = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 65, i64 32, i64 0, void ()* @detached_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %detached)
+      call void @__kmpc_omp_task_complete_if0(i8* null, i32 0, i8* %detached)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  const auto &summary = semantics.getSummary();
+  EXPECT_EQ(summary.task_count, 3u);
+  EXPECT_EQ(summary.final_task_count, 1u);
+  EXPECT_EQ(summary.untied_task_count, 1u);
+  EXPECT_EQ(summary.detached_task_count, 1u);
+  EXPECT_EQ(summary.detach_completion_count, 1u);
+
+  ASSERT_EQ(semantics.getTasks().size(), 3u);
+  bool saw_untied = false;
+  bool saw_final = false;
+  bool saw_detached = false;
+  for (const auto &task_uptr : semantics.getTasks()) {
+    const Task *task = task_uptr.get();
+    ASSERT_NE(task, nullptr);
+    ASSERT_NE(task->task_function, nullptr);
+    if (task->task_function->getName().equals("untied_body")) {
+      saw_untied = task->is_untied;
+    } else if (task->task_function->getName().equals("final_body")) {
+      saw_final = task->is_final;
+    } else if (task->task_function->getName().equals("detached_body")) {
+      saw_detached = task->is_detached;
+    }
+  }
+  EXPECT_TRUE(saw_untied);
+  EXPECT_TRUE(saw_final);
+  EXPECT_TRUE(saw_detached);
 }
 
 int main(int argc, char **argv) {

@@ -1,45 +1,24 @@
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralTaint.h"
+#include "TestUtils/LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
-#include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
 
 namespace {
 
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &ctx,
-                                          const char *ir) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(ir, err, ctx);
-  if (!module)
-    err.print("NPAInterproceduralTaintTest", llvm::errs());
-  return module;
-}
-
-const llvm::Instruction *findInstructionByName(const llvm::Function &function,
-                                               llvm::StringRef name) {
-  for (const auto &block : function) {
-    for (const auto &inst : block) {
-      if (inst.hasName() && inst.getName() == name)
-        return &inst;
-    }
-  }
-  return nullptr;
-}
+using lotus::unittest::findBlock;
+using lotus::unittest::findInstructionByName;
+using lotus::unittest::parseModule;
 
 const llvm::BasicBlock *findBlockByName(const llvm::Function &function,
                                         llvm::StringRef name) {
-  for (const auto &block : function) {
-    if (block.hasName() && block.getName() == name)
-      return &block;
-  }
-  return nullptr;
+  return findBlock(function, name);
 }
 
 std::string writeTempTaintConfig(llvm::StringRef content) {
@@ -106,7 +85,7 @@ TEST(NPA, InterproceduralTaintDirectSourceSpecTaintsReturnValue) {
 
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *after = findBlock(*mainFn, "after");
   const auto *p = findInstructionByName(*mainFn, "p");
   ASSERT_NE(after, nullptr);
   ASSERT_NE(p, nullptr);

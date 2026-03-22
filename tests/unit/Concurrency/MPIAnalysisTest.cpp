@@ -2,7 +2,7 @@
 
 #include "Analysis/Concurrency/MPI/MPISemantics.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>
 #include <fstream>
@@ -639,6 +639,61 @@ TEST_F(MPIAnalysisTest, StartallActivatesPersistentRequestArrays) {
   analysis.runAnalysis();
 
   EXPECT_EQ(analysis.getResults().orphaned_requests.size(), 2u);
+}
+
+TEST_F(MPIAnalysisTest,
+       PointToPointDoesNotMatchAcrossDisjointSplitCommunicators) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_split(i8*, i32, i32, i8**)
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+
+    define i32 @rank0(i8* %comm) {
+    entry:
+      %split = alloca i8*, align 8
+      call i32 @MPI_Comm_split(i8* %comm, i32 0, i32 0, i8** %split)
+      %sub = load i8*, i8** %split, align 8
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %sub)
+      ret i32 0
+    }
+
+    define i32 @rank1(i8* %comm) {
+    entry:
+      %split = alloca i8*, align 8
+      %status = alloca i8, align 1
+      call i32 @MPI_Comm_split(i8* %comm, i32 1, i32 0, i8** %split)
+      %sub = load i8*, i8** %split, align 8
+      call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 0, i32 7, i8* %sub, i8* %status)
+      ret i32 0
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %a = call i32 @rank0(i8* %comm)
+      %b = call i32 @rank1(i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto sends =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::SEND_BLOCKING);
+  auto recvs =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::RECV_BLOCKING);
+  ASSERT_EQ(sends.size(), 1u);
+  ASSERT_EQ(recvs.size(), 1u);
+  EXPECT_NE(sends.front().communicator_subgroup_id, 0u);
+  EXPECT_NE(recvs.front().communicator_subgroup_id, 0u);
+  EXPECT_NE(sends.front().communicator_subgroup_id,
+            recvs.front().communicator_subgroup_id);
+  EXPECT_EQ(analysis.getProcessModel().classifyCommunicationMatch(
+                sends.front(), recvs.front()),
+            MPICommunicationMatch::NoMatch);
 }
 
 TEST_F(MPIAnalysisTest, CancelTerminatesOutstandingRequest) {

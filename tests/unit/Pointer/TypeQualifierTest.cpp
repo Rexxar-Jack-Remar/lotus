@@ -2,7 +2,7 @@
 #include "Alias/TypeQualifier/FunctionSummary.h"
 #include "Alias/TypeQualifier/QualifierAnalysis.h"
 #include "Alias/TypeQualifier/QualifierTypes.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
 #include <gtest/gtest.h>

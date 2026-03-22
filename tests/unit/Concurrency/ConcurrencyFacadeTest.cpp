@@ -1,6 +1,6 @@
 #include "Analysis/Concurrency/ConcurrencyFacade.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 using namespace llvm;
 

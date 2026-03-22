@@ -165,7 +165,8 @@ inline const CallBase *findCallTo(const Function *func, StringRef callee_name) {
 inline std::vector<CallBase *> getIndirectCalls(Function &func) {
   std::vector<CallBase *> calls;
   for (Instruction &inst : instructions(func)) {
-    if (auto *call = dyn_cast<CallBase>(&inst); call && call->isIndirectCall()) {
+    auto *call = dyn_cast<CallBase>(&inst);
+    if (call && call->isIndirectCall()) {
       calls.push_back(call);
     }
   }
@@ -175,7 +176,8 @@ inline std::vector<CallBase *> getIndirectCalls(Function &func) {
 inline std::vector<const CallBase *> getIndirectCalls(const Function &func) {
   std::vector<const CallBase *> calls;
   for (const Instruction &inst : instructions(func)) {
-    if (auto *call = dyn_cast<CallBase>(&inst); call && call->isIndirectCall()) {
+    auto *call = dyn_cast<CallBase>(&inst);
+    if (call && call->isIndirectCall()) {
       calls.push_back(call);
     }
   }
@@ -278,21 +280,27 @@ inline Function *findFunctionByName(Module &module, StringRef name) {
 
 template <typename InstTy>
 InstTy *findInstruction(Function &F, StringRef name = "") {
-  for (auto &BB : F)
-    for (auto &I : BB)
-      if (auto *inst = dyn_cast<InstTy>(&I))
-        if (name.empty() || I.getName() == name)
-          return inst;
+  for (auto &BB : F) {
+    for (auto &I : BB) {
+      auto *inst = dyn_cast<InstTy>(&I);
+      if (inst && (name.empty() || I.getName() == name)) {
+        return inst;
+      }
+    }
+  }
   return nullptr;
 }
 
 template <typename InstTy>
 const InstTy *findInstruction(const Function &F, StringRef name = "") {
-  for (const auto &BB : F)
-    for (const auto &I : BB)
-      if (auto *inst = dyn_cast<InstTy>(&I))
-        if (name.empty() || I.getName() == name)
-          return inst;
+  for (const auto &BB : F) {
+    for (const auto &I : BB) {
+      auto *inst = dyn_cast<InstTy>(&I);
+      if (inst && (name.empty() || I.getName() == name)) {
+        return inst;
+      }
+    }
+  }
   return nullptr;
 }
 

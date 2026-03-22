@@ -7,7 +7,7 @@
 
 #include "Analysis/Concurrency/Utils/RAIILockTracker.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>
 
@@ -984,6 +984,82 @@ TEST_F(LockSetAnalysisTest,
   ASSERT_NE(lock, nullptr);
 
   EXPECT_TRUE(lsa.mustHoldLock(after, lock));
+}
+
+TEST_F(LockSetAnalysisTest,
+       LeadingNonCallBeforeHelperAcquireStillAppliesSummary) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+
+    @lock = global i8 0
+
+    define void @lock_helper() {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %seed = add i32 0, 1
+      call void @lock_helper()
+      %after = add i32 %seed, 2
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+}
+
+TEST_F(LockSetAnalysisTest,
+       LeadingNonCallBeforeHelperReleaseClearsCallerMustState) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @pthread_mutex_unlock(i8*)
+
+    @lock = global i8 0
+
+    define void @unlock_helper() {
+    entry:
+      call i32 @pthread_mutex_unlock(i8* @lock)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      %seed = add i32 0, 1
+      call void @unlock_helper()
+      %after = add i32 %seed, 2
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
 int main(int argc, char **argv) {

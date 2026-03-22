@@ -1,6 +1,6 @@
 #include "Analysis/Concurrency/MHP/StaticVectorClockMHP.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 using namespace llvm;
 using namespace mhp;
@@ -192,6 +192,59 @@ TEST_F(StaticVectorClockMHPTest, SplitPhaseBarrierOrdersPostBarrierContinuation)
   ASSERT_NE(load_shared, nullptr);
   EXPECT_TRUE(svc.happensBefore(store_shared, load_shared));
   EXPECT_FALSE(svc.mayHappenInParallel(store_shared, load_shared));
+}
+
+TEST_F(StaticVectorClockMHPTest,
+       SplitPhaseBarrierArriveDoesNotOrderPostArriveCode) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @std_barrier_arriveEv(i8*)
+    declare void @std_barrier_waitEv(i8*)
+
+    @barrier = global i8 0
+    @lhs = global i32 0
+    @rhs = global i32 0
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      call void @std_barrier_arriveEv(i8* @barrier)
+      %after_arrive = load i32, i32* @lhs, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %before_wait = load i32, i32* @rhs, align 4
+      call void @std_barrier_waitEv(i8* @barrier)
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Instruction *after_arrive =
+      findInstructionByName(*module->getFunction("writer"), "after_arrive");
+  const Instruction *before_wait =
+      findInstructionByName(*module->getFunction("reader"), "before_wait");
+  ASSERT_NE(after_arrive, nullptr);
+  ASSERT_NE(before_wait, nullptr);
+
+  EXPECT_TRUE(svc.mayHappenInParallel(after_arrive, before_wait));
+  EXPECT_FALSE(svc.happensBefore(after_arrive, before_wait));
+  EXPECT_FALSE(svc.happensBefore(before_wait, after_arrive));
 }
 
 TEST_F(StaticVectorClockMHPTest, LatchArriveAndWaitCreatesBarrierWaitNode) {
@@ -395,6 +448,51 @@ TEST_F(StaticVectorClockMHPTest, ReusedThreadHandleStorageKeepsJoinAmbiguous) {
 
   EXPECT_TRUE(svc.mayHappenInParallel(w1, post));
   EXPECT_TRUE(svc.mayHappenInParallel(w2, post));
+}
+
+TEST_F(StaticVectorClockMHPTest,
+       RepeatedHelperForksOnSameHandleKeepJoinAmbiguous) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 1, 2
+      ret i8* null
+    }
+
+    define void @spawn_helper(i8* %tid) {
+    entry:
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call void @spawn_helper(i8* %tid)
+      call void @spawn_helper(i8* %tid)
+      call i32 @pthread_join(i8* %tid, i8* null)
+      %post = add i32 3, 4
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Instruction *worker_inst =
+      findInstructionByName(*module->getFunction("worker"), "w");
+  const Instruction *post =
+      findInstructionByName(*module->getFunction("main"), "post");
+  ASSERT_NE(worker_inst, nullptr);
+  ASSERT_NE(post, nullptr);
+
+  EXPECT_TRUE(svc.mayHappenInParallel(worker_inst, post));
 }
 
 TEST_F(StaticVectorClockMHPTest, ParallelInstructionsMatchesQueries) {

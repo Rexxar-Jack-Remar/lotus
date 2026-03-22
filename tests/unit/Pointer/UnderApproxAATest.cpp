@@ -5,7 +5,7 @@
 
 #include "Alias/UnderApproxAA/EquivDB.h"
 #include "Alias/UnderApproxAA/UnderApproxAA.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <memory>
 

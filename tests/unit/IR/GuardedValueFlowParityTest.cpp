@@ -1,7 +1,7 @@
 #include "Alias/LotusAA/Engine/InterProceduralPass.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/LotusAdapter.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>

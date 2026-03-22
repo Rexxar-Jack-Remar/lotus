@@ -15,7 +15,7 @@
 #include "Alias/AserPTA/PreProcessing/Passes/InsertGlobalCtorCallPass.h"
 #include "Alias/AserPTA/PreProcessing/Passes/LoweringMemCpyPass.h"
 #include "Alias/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
 #include <gtest/gtest.h>

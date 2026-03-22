@@ -1,6 +1,6 @@
 #include "Analysis/Concurrency/Memory/MemUseDefAnalysis.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/BasicAliasAnalysis.h>

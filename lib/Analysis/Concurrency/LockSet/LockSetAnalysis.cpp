@@ -623,6 +623,29 @@ void LockSetAnalysis::analyzeFunction(Function *func) {
 }
 
 void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
+  auto clearFunctionFacts = [&](Function *target) {
+    if (!target) {
+      return;
+    }
+    for (Instruction &inst : instructions(target)) {
+      const Instruction *key = &inst;
+      m_may_locksets_entry.erase(key);
+      m_may_locksets_exit.erase(key);
+      m_must_locksets_entry.erase(key);
+      m_must_locksets_exit.erase(key);
+      m_may_read_locks_entry.erase(key);
+      m_may_read_locks_exit.erase(key);
+      m_may_write_locks_entry.erase(key);
+      m_may_write_locks_exit.erase(key);
+      m_must_read_locks_entry.erase(key);
+      m_must_read_locks_exit.erase(key);
+      m_must_write_locks_entry.erase(key);
+      m_must_write_locks_exit.erase(key);
+    }
+  };
+
+  clearFunctionFacts(func);
+
   // Standard forward dataflow analysis using a worklist algorithm.
   //
   // Lattice: Sets of LockIDs.
@@ -2012,6 +2035,24 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     return false;
   };
 
+  auto isBinarySemaphoreOnlyLockInFunction = [&](LockID lock) {
+    bool saw_binary_semaphore = false;
+    for (const Instruction &inst : instructions(*func)) {
+      if (!m_thread_api->isTDAcquire(&inst)) {
+        continue;
+      }
+      LockID inst_lock = getLockValue(&inst);
+      if (!inst_lock || !matchesLock(inst_lock, lock)) {
+        continue;
+      }
+      if (!m_thread_api->isBinarySemaphoreOp(&inst)) {
+        return false;
+      }
+      saw_binary_semaphore = true;
+    }
+    return saw_binary_semaphore;
+  };
+
   // Collect return instructions
   std::vector<const ReturnInst *> returns;
   for (const BasicBlock &bb : *func) {
@@ -2025,7 +2066,11 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     for (const auto *ret : returns) {
       auto it = m_may_locksets_exit.find(ret);
       if (it != m_may_locksets_exit.end()) {
-        summary.may_acquire_delta.insert(it->second.begin(), it->second.end());
+        for (LockID lock : it->second) {
+          if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
+            summary.may_acquire_delta.insert(lock);
+          }
+        }
       }
     }
   }

@@ -4,7 +4,7 @@
 #include "Alias/seadsa/InitializePasses.hh"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/LegacyPassManager.h>
 

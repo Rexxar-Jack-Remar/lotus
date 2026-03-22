@@ -1,6 +1,6 @@
 #include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 using namespace llvm;
 using namespace OpenMP;

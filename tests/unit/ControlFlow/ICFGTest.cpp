@@ -9,7 +9,7 @@
 #include "IR/ICFG/ICFG.h"
 #include "IR/ICFG/GraphAnalysis.h"
 #include "IR/ICFG/ICFGBuilder.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
 #include <gtest/gtest.h>

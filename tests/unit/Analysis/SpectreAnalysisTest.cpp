@@ -1,5 +1,5 @@
 #include "Analysis/Spectre/CacheSpecuAnalysis.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <gtest/gtest.h>

@@ -8,7 +8,7 @@
 #include "Alias/TPA/PointerAnalysis/FrontEnd/SemiSparseProgramBuilder.h"
 #include "Alias/TPA/PointerAnalysis/Support/PtsSet.h"
 #include "Alias/TPA/Transforms/RunPrepass.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
 #include <gtest/gtest.h>

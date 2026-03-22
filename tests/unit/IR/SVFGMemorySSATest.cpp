@@ -4,7 +4,7 @@
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBuilder.h"
 #include "IR/SVFG/SVFGNode.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
 #include <gtest/gtest.h>

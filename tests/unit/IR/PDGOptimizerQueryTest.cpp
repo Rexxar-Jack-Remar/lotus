@@ -3,7 +3,7 @@
 #include "IR/PDG/Analysis/SchedulingQuery.h"
 #include "IR/PDG/Analysis/ThinSlicing.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <memory>
 

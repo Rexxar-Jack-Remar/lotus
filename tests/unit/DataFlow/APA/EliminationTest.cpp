@@ -7,6 +7,7 @@
 #include "Dataflow/APA/Clients/LLVM/Intra/ConstantPropagation.h"
 #include "Dataflow/APA/Clients/LLVM/Intra/LiveVariables.h"
 #include "Dataflow/APA/Clients/LLVM/Intra/Reachability.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <set>
 #include <string>
@@ -14,12 +15,10 @@
 #include <utility>
 #include <vector>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 namespace {
@@ -29,24 +28,12 @@ protected:
   llvm::LLVMContext Context;
 
   std::unique_ptr<llvm::Module> parseModule(const char *Source) {
-    llvm::SMDiagnostic Err;
-    auto Module = llvm::parseAssemblyString(Source, Err, Context);
-    if (!Module) {
-      Err.print("APATest", llvm::errs());
-    }
-    return Module;
+    return lotus::unittest::parseModule(Context, Source, "APATest");
   }
 
   llvm::Instruction *findInstructionByName(llvm::Function *F,
                                            llvm::StringRef Name) {
-    for (auto &BB : *F) {
-      for (auto &I : BB) {
-        if (I.getName() == Name) {
-          return &I;
-        }
-      }
-    }
-    return nullptr;
+    return lotus::unittest::findInstructionByName(F, Name);
   }
 
   template <typename InstT> InstT *findFirst(llvm::Function *F) {

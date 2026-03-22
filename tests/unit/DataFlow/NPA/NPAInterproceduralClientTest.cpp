@@ -6,6 +6,7 @@
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralMaybeUninitialized.h"
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <cctype>
 #include <iterator>
@@ -16,33 +17,14 @@
 #include <vector>
 
 #include <llvm/ADT/APInt.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 namespace {
 
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &ctx,
-                                          const char *ir) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(ir, err, ctx);
-  if (!module)
-    err.print("NPAInterproceduralClientTest", llvm::errs());
-  return module;
-}
-
-const llvm::Instruction *findInstructionByName(const llvm::Function &function,
-                                               llvm::StringRef name) {
-  for (const auto &block : function) {
-    for (const auto &inst : block) {
-      if (inst.hasName() && inst.getName() == name)
-        return &inst;
-    }
-  }
-  return nullptr;
-}
+using lotus::unittest::findInstructionByName;
+using lotus::unittest::parseModule;
 
 template <typename T>
 std::vector<const T *> statesForBlock(const std::map<npa::BlockKey, T> &facts,

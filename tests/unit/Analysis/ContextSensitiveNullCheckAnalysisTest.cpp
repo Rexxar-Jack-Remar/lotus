@@ -1,7 +1,7 @@
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/DyckAA/DyckModRefAnalysis.h"
 #include "Analysis/NullPointer/ContextSensitiveNullCheckAnalysis.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LegacyPassManager.h>

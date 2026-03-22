@@ -10,14 +10,13 @@
 #include "IR/ICFG/ICFGBuilder.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGNode.h"
+#include "TestUtils/LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
@@ -26,11 +25,8 @@ using namespace lotus::analysis;
 namespace {
 
 std::unique_ptr<Module> parseModule(LLVMContext &context, const char *source) {
-  SMDiagnostic err;
-  auto module = parseAssemblyString(source, err, context);
-  if (!module)
-    err.print("SaberConditionAllocatorTest", errs());
-  return module;
+  return lotus::unittest::parseModule(context, source,
+                                      "SaberConditionAllocatorTest");
 }
 
 const BasicBlock *getBlock(const Module &module, StringRef functionName,

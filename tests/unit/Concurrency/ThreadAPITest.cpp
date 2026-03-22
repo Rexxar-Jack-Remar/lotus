@@ -1,6 +1,6 @@
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 using namespace llvm;
 
@@ -851,6 +851,27 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
       ThreadAPI::TD_ASYNC,
       ThreadAPI::TD_OMP_ATOMIC_START,
       ThreadAPI::TD_OMP_ATOMIC_END,
+      ThreadAPI::TD_OMP_TASK_COMPLETE,
+      ThreadAPI::TD_OMP_CANCEL,
+      ThreadAPI::TD_OMP_TARGET_DATA_UPDATE,
+      ThreadAPI::TD_OMP_TEAMS,
+      ThreadAPI::TD_OMP_TEAMS_HOST,
+      ThreadAPI::TD_OMP_TEAMS_DISTRIBUTE,
+      ThreadAPI::TD_OMP_DISTRIBUTE,
+      ThreadAPI::TD_OMP_DISTRIBUTE_STATIC,
+      ThreadAPI::TD_OMP_DISTRIBUTE_DYNAMIC,
+      ThreadAPI::TD_OMP_DISTRIBUTE_GUIDANCE,
+      ThreadAPI::TD_OMP_LOOP_STATIC_INIT,
+      ThreadAPI::TD_OMP_LOOP_DYNAMIC_INIT,
+      ThreadAPI::TD_OMP_LOOP_GUIDANCE_INIT,
+      ThreadAPI::TD_OMP_AFFINITY,
+      ThreadAPI::TD_OMP_SCOPE_START,
+      ThreadAPI::TD_OMP_SCOPE_END,
+      ThreadAPI::TD_OMP_TASKLOOP_SIMD,
+      ThreadAPI::TD_OMP_TASKLOOP_FINI,
+      ThreadAPI::TD_OMP_INTEROP_INIT,
+      ThreadAPI::TD_OMP_INTEROP_FINI,
+      ThreadAPI::TD_OMP_DOACROSS_SUBMIT,
       ThreadAPI::TD_MPI_SESSION_GET_INFO,
       ThreadAPI::TD_MPI_SESSION_GET_NUM_ERRCODES,
       ThreadAPI::TD_MPI_SESSION_GET_ERRHANDLER,
@@ -924,4 +945,71 @@ TEST_F(ThreadAPITest, LongestPrefixRuleWinsForOpenMPDoacross) {
             ThreadAPI::TD_OMP_DOACROSS_SUBMIT);
   EXPECT_EQ(api->getType(module->getFunction("__kmpc_doacross_init_4")),
             ThreadAPI::TD_OMP_DOACROSS_INIT);
+}
+
+TEST_F(ThreadAPITest, RecognizesGOMPTaskAndBarrierRuntimeAliases) {
+  const char *source = R"(
+    declare void @GOMP_barrier()
+    declare void @GOMP_taskwait()
+    declare void @GOMP_taskgroup_start()
+    declare void @GOMP_taskgroup_end()
+    declare void @GOMP_task(void ()*, i8*, i8*, i64, i64, i1, i32, i8*, i32)
+
+    define void @worker() {
+    entry:
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @GOMP_task(void ()* @worker, i8* null, i8* null, i64 0, i64 0,
+                           i1 true, i32 0, i8* null, i32 0)
+      call void @GOMP_taskwait()
+      call void @GOMP_taskgroup_start()
+      call void @GOMP_taskgroup_end()
+      call void @GOMP_barrier()
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("GOMP_task")),
+            ThreadAPI::TD_OMP_TASK);
+  EXPECT_EQ(api->getType(module->getFunction("GOMP_taskwait")),
+            ThreadAPI::TD_OMP_TASKWAIT);
+  EXPECT_EQ(api->getType(module->getFunction("GOMP_taskgroup_start")),
+            ThreadAPI::TD_OMP_TASKGROUP_START);
+  EXPECT_EQ(api->getType(module->getFunction("GOMP_taskgroup_end")),
+            ThreadAPI::TD_OMP_TASKGROUP_END);
+  EXPECT_EQ(api->getType(module->getFunction("GOMP_barrier")),
+            ThreadAPI::TD_BAR_WAIT);
+}
+
+TEST_F(ThreadAPITest, RecognizesCriticalWithHintAsCriticalEntry) {
+  const char *source = R"(
+    declare void @__kmpc_critical_with_hint(i8*, i32, i8*, i64)
+
+    define void @main(i8* %lock) {
+    entry:
+      call void @__kmpc_critical_with_hint(i8* null, i32 0, i8* %lock, i64 1)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_critical_with_hint")),
+            ThreadAPI::TD_ACQUIRE);
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *call = &main_func->getEntryBlock().front();
+  EXPECT_EQ(api->getAnalysisLockIdentity(call),
+            cast<CallBase>(call)->getArgOperand(2));
 }

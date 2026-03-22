@@ -10,12 +10,11 @@
  */
 
 #include "Checker/Concurrency/ConcurrencyChecker.h"
+#include "TestUtils/LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
@@ -24,12 +23,8 @@ class ConcurrencyCheckerTest : public ::testing::Test {
 protected:
   LLVMContext context;
   std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("ConcurrencyCheckerTest", errs());
-    }
-    return module;
+    return lotus::unittest::parseModule(context, source,
+                                        "ConcurrencyCheckerTest");
   }
 };
 
@@ -894,6 +889,83 @@ TEST_F(ConcurrencyCheckerTest, ThreadLocalGlobalIsPrunedFromRaceCandidates) {
 }
 
 TEST_F(ConcurrencyCheckerTest,
+       HelperSpawnedStackPayloadIsNotPrunedAsThreadLocal) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      %typed = bitcast i8* %arg to i32*
+      store i32 1, i32* %typed, align 4
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      %typed = bitcast i8* %arg to i32*
+      store i32 2, i32* %typed, align 4
+      ret i8* null
+    }
+
+    define void @spawn_helper(i8* %tid, i32* %payload, i8* (i8*)* %fn) {
+    entry:
+      %payload_raw = bitcast i32* %payload to i8*
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* %fn,
+                               i8* %payload_raw)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %shared_slot = alloca i32, align 4
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      call void @spawn_helper(i8* %tid1, i32* %shared_slot,
+                              i8* (i8*)* @worker1)
+      call void @spawn_helper(i8* %tid2, i32* %shared_slot,
+                              i8* (i8*)* @worker2)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  mhp::MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  lotus::EscapeAnalysis escape(*module);
+  escape.analyze();
+  ThreadLocal::ThreadLocalAnalysis threadLocal(*module);
+  threadLocal.analyze();
+
+  concurrency::DataRaceChecker checker(*module, &mhp, mhp.getLockSetAnalysis(),
+                                       &escape, &threadLocal, nullptr,
+                                       mhp.getAliasAnalysis(), nullptr);
+
+  const Instruction *store1 = nullptr;
+  const Instruction *store2 = nullptr;
+  for (const Instruction &inst :
+       instructions(*module->getFunction("worker1"))) {
+    if (isa<StoreInst>(&inst)) {
+      store1 = &inst;
+      break;
+    }
+  }
+  for (const Instruction &inst :
+       instructions(*module->getFunction("worker2"))) {
+    if (isa<StoreInst>(&inst)) {
+      store2 = &inst;
+      break;
+    }
+  }
+
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+  EXPECT_TRUE(checker.wouldReportDataRace(store1, store2));
+}
+
+TEST_F(ConcurrencyCheckerTest,
        CountingSemaphoreDoesNotSuppressEndToEndRaceReports) {
   const char *source = R"(
     @shared = global i32 0, align 4
@@ -1177,6 +1249,159 @@ TEST_F(ConcurrencyCheckerTest,
   ASSERT_NE(store1, nullptr);
   ASSERT_NE(store2, nullptr);
   EXPECT_FALSE(checker.wouldReportDataRace(store1, store2));
+}
+
+TEST_F(ConcurrencyCheckerTest,
+       LaterNonReleaseStoreDoesNotSuppressRaceThroughReleaseHB) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @overwriter(i8* %arg) {
+    entry:
+      store atomic i32 2, i32* @flag monotonic, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %write, label %exit
+
+    write:
+      store i32 %seen, i32* @shared, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      %tid3 = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @overwriter, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  mhp::MHPAnalysis mhp(*module);
+  mhp.enableLockSetAnalysis();
+  mhp.analyze();
+
+  lotus::EscapeAnalysis escape(*module);
+  escape.analyze();
+  lotus::HappensBeforeAnalysis hb(*module, mhp);
+  hb.setAliasAnalysis(mhp.getAliasAnalysis());
+  hb.analyze();
+
+  concurrency::DataRaceChecker checker(*module, &mhp, mhp.getLockSetAnalysis(),
+                                       &escape, nullptr, nullptr,
+                                       mhp.getAliasAnalysis(), &hb);
+
+  const Instruction *store1 = nullptr;
+  const Instruction *store2 = nullptr;
+  for (const Instruction &inst : instructions(*module->getFunction("writer"))) {
+    if (isa<StoreInst>(&inst)) {
+      store1 = &inst;
+      break;
+    }
+  }
+  for (const Instruction &inst : instructions(*module->getFunction("reader"))) {
+    if (isa<StoreInst>(&inst)) {
+      store2 = &inst;
+      break;
+    }
+  }
+
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+  EXPECT_TRUE(checker.wouldReportDataRace(store1, store2));
+}
+
+TEST_F(ConcurrencyCheckerTest,
+       PthreadGetspecificDerivedPointersAreNotPrunedAsThreadLocal) {
+  const char *source = R"(
+    declare i8* @pthread_getspecific(i32)
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      %tls = call i8* @pthread_getspecific(i32 0)
+      %typed = bitcast i8* %tls to i32*
+      store i32 1, i32* %typed, align 4
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      %tls = call i8* @pthread_getspecific(i32 0)
+      %typed = bitcast i8* %tls to i32*
+      store i32 2, i32* %typed, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @worker1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @worker2, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  mhp::MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  lotus::EscapeAnalysis escape(*module);
+  escape.analyze();
+  ThreadLocal::ThreadLocalAnalysis threadLocal(*module);
+  threadLocal.analyze();
+
+  concurrency::DataRaceChecker checker(*module, &mhp, mhp.getLockSetAnalysis(),
+                                       &escape, &threadLocal, nullptr,
+                                       mhp.getAliasAnalysis(), nullptr);
+
+  const Instruction *store1 = nullptr;
+  const Instruction *store2 = nullptr;
+  for (const Instruction &inst :
+       instructions(*module->getFunction("worker1"))) {
+    if (isa<StoreInst>(&inst)) {
+      store1 = &inst;
+      break;
+    }
+  }
+  for (const Instruction &inst :
+       instructions(*module->getFunction("worker2"))) {
+    if (isa<StoreInst>(&inst)) {
+      store2 = &inst;
+      break;
+    }
+  }
+
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+  EXPECT_TRUE(checker.wouldReportDataRace(store1, store2));
 }
 
 TEST_F(ConcurrencyCheckerTest,

@@ -6,8 +6,10 @@
 #include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
+#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/CFG.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 
@@ -263,6 +265,7 @@ void JoinTargetAnalysis::analyze() {
   m_joinToForks.clear();
   m_joinToFeasibleForks.clear();
   m_unambiguousJoins.clear();
+  m_postDomCache.clear();
 
   auto mayAlias = [this](const Value *a, const Value *b) {
     if (!a || !b) return false;
@@ -271,9 +274,14 @@ void JoinTargetAnalysis::analyze() {
     return false;
   };
 
+  std::vector<const Instruction *> unresolvedForks;
   for (const Instruction *forkInst : m_forkInsts) {
-    m_forkToRoot[forkInst] =
+    const Value *root =
         traceThreadHandleRoot(m_threadAPI->getForkedThread(forkInst), &m_module);
+    m_forkToRoot[forkInst] = root;
+    if (!root) {
+      unresolvedForks.push_back(forkInst);
+    }
   }
 
   for (const Instruction *joinInst : m_joinInsts) {
@@ -334,6 +342,11 @@ void JoinTargetAnalysis::analyze() {
       }
       if (add) forks.push_back(forkInst);
     }
+
+    for (const Instruction *forkInst : unresolvedForks) {
+      pushUnique(forks, forkInst);
+    }
+
     std::vector<const Instruction *> feasible_forks =
         filterTemporallyFeasibleForks(joinInst, forks);
     std::vector<const Instruction *> feasible_exact_matches =
@@ -341,11 +354,13 @@ void JoinTargetAnalysis::analyze() {
     std::vector<const Instruction *> feasible_definite_matches =
         filterTemporallyFeasibleForks(joinInst, definite_matches);
 
-    if (joinRoots.size() == 1 &&
+    if (classifyJoinForks(feasible_forks) == CandidateCountKind::One &&
+        joinRoots.size() == 1 &&
         classifyJoinForks(feasible_exact_matches) == CandidateCountKind::One) {
       feasible_forks = std::move(feasible_exact_matches);
       m_unambiguousJoins.insert(joinInst);
-    } else if (classifyJoinForks(feasible_definite_matches) ==
+    } else if (classifyJoinForks(feasible_forks) == CandidateCountKind::One &&
+               classifyJoinForks(feasible_definite_matches) ==
                CandidateCountKind::One) {
       feasible_forks = std::move(feasible_definite_matches);
       m_unambiguousJoins.insert(joinInst);
@@ -409,12 +424,105 @@ JoinTargetAnalysis::filterTemporallyFeasibleForks(
     const Instruction *joinInst,
     const std::vector<const Instruction *> &forks) const {
   std::vector<const Instruction *> feasible;
+  if (!joinInst) {
+    return feasible;
+  }
+
+  const Function *joinFunc = joinInst->getFunction();
+  std::unordered_set<const Value *> joinRoots;
+  traceThreadHandleRoots(m_threadAPI->getJoinedThread(joinInst), &m_module,
+                         joinRoots);
+  const Value *singleJoinRoot =
+      joinRoots.empty()
+          ? traceThreadHandleRoot(m_threadAPI->getJoinedThread(joinInst),
+                                  &m_module)
+          : nullptr;
+
+  auto rootsMatch = [this](const Value *lhs, const Value *rhs) {
+    if (!lhs || !rhs) {
+      return false;
+    }
+    lhs = lhs->stripPointerCasts();
+    rhs = rhs->stripPointerCasts();
+    if (lhs == rhs) {
+      return true;
+    }
+    return m_aliasAnalysis && m_aliasAnalysis->mustAlias(lhs, rhs);
+  };
+
+  auto actualMatchesJoin = [&](const Value *actual) {
+    if (!actual) {
+      return false;
+    }
+    std::unordered_set<const Value *> actualRoots;
+    traceThreadHandleRoots(actual, &m_module, actualRoots);
+    if (!joinRoots.empty()) {
+      for (const Value *actualRoot : actualRoots) {
+        for (const Value *joinRoot : joinRoots) {
+          if (rootsMatch(actualRoot, joinRoot)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+    return rootsMatch(traceThreadHandleRoot(actual, &m_module), singleJoinRoot);
+  };
+
+  auto callSiteMayRepeat = [](const Instruction *callSite) {
+    if (!callSite || !callSite->getFunction()) {
+      return true;
+    }
+    DominatorTree DT(const_cast<Function &>(*callSite->getFunction()));
+    LoopInfo LI;
+    LI.analyze(DT);
+    return LI.getLoopFor(callSite->getParent()) != nullptr;
+  };
+
   for (const Instruction *forkInst : forks) {
     if (!forkInst || !joinInst) {
       continue;
     }
-    if (forkInst->getFunction() != joinInst->getFunction()) {
-      feasible.push_back(forkInst);
+    if (forkInst->getFunction() != joinFunc) {
+      const Function *helperFunc = forkInst->getFunction();
+      const Value *forkHandleRoot =
+          traceThreadHandleRoot(m_threadAPI->getForkedThread(forkInst));
+      const auto *forkArg = dyn_cast_or_null<Argument>(
+          forkHandleRoot ? forkHandleRoot->stripPointerCasts() : nullptr);
+      if (!helperFunc || !forkArg || forkArg->getParent() != helperFunc) {
+        continue;
+      }
+
+      std::vector<const Instruction *> matchingCallSites;
+      for (const Instruction &inst : instructions(*joinFunc)) {
+        const auto *cb = dyn_cast<CallBase>(&inst);
+        if (!cb) {
+          continue;
+        }
+        const Value *called = cb->getCalledOperand();
+        if (!called || called->stripPointerCasts() != helperFunc) {
+          continue;
+        }
+        if (forkArg->getArgNo() >= cb->arg_size()) {
+          continue;
+        }
+        if (!actualMatchesJoin(cb->getArgOperand(forkArg->getArgNo()))) {
+          continue;
+        }
+        if (!forkMayReachJoinInFunction(&inst, joinInst) ||
+            joinMayReachForkInFunction(joinInst, &inst)) {
+          continue;
+        }
+        if (callSiteMayRepeat(&inst)) {
+          matchingCallSites.clear();
+          break;
+        }
+        matchingCallSites.push_back(&inst);
+      }
+
+      if (matchingCallSites.size() == 1) {
+        feasible.push_back(forkInst);
+      }
       continue;
     }
     if (!forkMayReachJoinInFunction(forkInst, joinInst)) {

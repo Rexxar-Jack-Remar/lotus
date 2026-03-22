@@ -3,7 +3,7 @@
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/InitializePasses.h"

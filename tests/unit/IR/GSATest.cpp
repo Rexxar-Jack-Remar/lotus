@@ -1,5 +1,5 @@
 #include "IR/GSA/GSA.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LegacyPassManager.h>

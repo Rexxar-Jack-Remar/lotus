@@ -1,4 +1,4 @@
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>

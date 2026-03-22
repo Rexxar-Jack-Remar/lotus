@@ -28,6 +28,7 @@ __kmpc_taskloop TD_OMP_TASKLOOP library=openmp semantic=taskloop traits=omp-task
 __kmpc_taskloop_nowait TD_OMP_TASKLOOP library=openmp semantic=taskloop-nowait traits=omp-task-op
 __kmpc_omp_task_complete TD_OMP_TASK_COMPLETE library=openmp semantic=task-complete traits=omp-task-op
 __kmpc_omp_task_complete_if0 TD_OMP_TASK_COMPLETE library=openmp semantic=task-complete-inline traits=omp-task-op
+__kmpc_critical_with_hint TD_ACQUIRE library=openmp semantic=critical-enter
 __kmpc_single TD_OMP_SINGLE_START library=openmp semantic=single-start traits=omp-task-op
 __kmpc_end_single TD_OMP_SINGLE_END library=openmp semantic=single-end traits=omp-task-op,barrier-wait-like
 __kmpc_master TD_OMP_MASTER_START library=openmp semantic=master-start traits=omp-task-op
@@ -56,6 +57,11 @@ __tgt_target_data_update_nowait TD_OMP_TARGET_DATA_UPDATE library=openmp semanti
 __tgt_target_enter_data TD_OMP_TARGET_DATA_BEGIN library=openmp semantic=target-enter-data traits=omp-target-op,omp-target-data-op
 __tgt_target_exit_data TD_OMP_TARGET_DATA_END library=openmp semantic=target-exit-data traits=omp-target-op,omp-target-data-op
 __tgt_target_update TD_OMP_TARGET_DATA_UPDATE library=openmp semantic=target-update traits=omp-target-op,omp-target-data-op
+GOMP_barrier TD_BAR_WAIT library=openmp semantic=barrier traits=omp-task-op,barrier-wait-like
+GOMP_taskwait TD_OMP_TASKWAIT library=openmp semantic=taskwait traits=omp-task-op
+GOMP_taskgroup_start TD_OMP_TASKGROUP_START library=openmp semantic=taskgroup-start traits=omp-task-op
+GOMP_taskgroup_end TD_OMP_TASKGROUP_END library=openmp semantic=taskgroup-end traits=omp-task-op
+GOMP_task TD_OMP_TASK library=openmp semantic=task traits=omp-task-op
 
 # OpenMP prefix matches
 __kmpc_omp_task_with_deps TD_OMP_TASK_WITH_DEPS library=openmp semantic=task-with-deps traits=omp-task-op match=prefix

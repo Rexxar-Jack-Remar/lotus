@@ -1197,7 +1197,12 @@ void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
 
   BarrierParticipant current;
   current.arrival = node;
-  current.continuations = getBarrierContinuations(barrier_inst);
+  const auto *call = dyn_cast<CallBase>(barrier_inst);
+  const ThreadAPI::TD_TYPE type =
+      call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
+  if (type != ThreadAPI::TD_BARRIER_ARRIVE) {
+    current.continuations = getBarrierContinuations(barrier_inst);
+  }
   size_t phase = m_barrier_phase_by_thread[barrier][node->getThreadID()]++;
   auto &participants = m_barrier_waits[barrier][phase];
   for (const BarrierParticipant &previous : participants) {

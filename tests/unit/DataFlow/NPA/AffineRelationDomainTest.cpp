@@ -1,25 +1,17 @@
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralAffineEqualities.h"
 #include "Dataflow/NPA/Domains/AffineRelationDomain.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 
 #include <set>
 
 namespace {
 
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &ctx,
-                                          const char *ir) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(ir, err, ctx);
-  if (!module)
-    err.print("AffineRelationDomainTest", llvm::errs());
-  return module;
-}
+using lotus::unittest::parseModule;
 
 npa::AffineRelationVocabulary buildVocabulary(const llvm::Module &M) {
   npa::AffineRelationVocabulary vocab;

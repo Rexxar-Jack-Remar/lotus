@@ -185,6 +185,16 @@ bool ThreadLocalAnalysis::escapesThread(const Value *val) const {
           continue;
         }
 
+        if (!callee->isDeclaration()) {
+          if (is_call_arg && op_no < callee->arg_size()) {
+            const Argument *formal = callee->getArg(op_no);
+            if (formal && visited.insert(formal).second) {
+              worklist.push_back(formal);
+            }
+          }
+          continue;
+        }
+
         StringRef name = callee->getName();
 
         // Known thread/task creation functions = escape
@@ -208,9 +218,29 @@ bool ThreadLocalAnalysis::escapesThread(const Value *val) const {
         }
       }
       else if (const ReturnInst *ret = dyn_cast<ReturnInst>(user)) {
-        // Returning the value = potential escape
-        (void)ret;
-        return true;
+        const Function *parent = ret->getFunction();
+        if (!parent) {
+          return true;
+        }
+
+        bool propagated_to_caller = false;
+        for (const User *function_user : parent->users()) {
+          const auto *cb = dyn_cast<CallBase>(function_user);
+          if (!cb) {
+            continue;
+          }
+          if (thread_api && thread_api->getCallee(cb) != parent) {
+            continue;
+          }
+          propagated_to_caller = true;
+          if (visited.insert(cb).second) {
+            worklist.push_back(cb);
+          }
+        }
+
+        if (!propagated_to_caller && !parent->hasLocalLinkage()) {
+          return true;
+        }
       }
       else if (const Instruction *inst = dyn_cast<Instruction>(user)) {
         // Continue tracking through casts, GEPs, etc.
@@ -266,49 +296,42 @@ bool ThreadLocalAnalysis::isThreadLocal(const Value *val) const {
   return false;
 }
 
-namespace {
-bool isPthreadSpecificStoragePointer(const Value *val) {
-  if (!val) {
-    return false;
-  }
-  val = val->stripPointerCasts();
-  if (const auto *call = dyn_cast<CallBase>(val)) {
-    const Function *callee = call->getCalledFunction();
-    if (!callee) {
-      callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
-    }
-    return callee && callee->getName().equals("pthread_getspecific");
-  }
-  if (const auto *gep = dyn_cast<GetElementPtrInst>(val)) {
-    return isPthreadSpecificStoragePointer(gep->getPointerOperand());
-  }
-  if (const auto *bitcast = dyn_cast<BitCastInst>(val)) {
-    return isPthreadSpecificStoragePointer(bitcast->getOperand(0));
-  }
-  return false;
-}
-} // namespace
-
 bool ThreadLocalAnalysis::accessesThreadLocalStorage(const Instruction *inst) const {
-  // Check if a load/store accesses thread-local storage
+  auto accessesKnownThreadLocalBase = [this](const Value *ptr) {
+    if (!ptr) {
+      return false;
+    }
+    ptr = ptr->stripPointerCasts();
+    if (const Value *base = getUnderlyingObject(ptr)) {
+      ptr = base->stripPointerCasts();
+    }
+    if (const auto *gv = dyn_cast<GlobalVariable>(ptr)) {
+      return m_tls_globals.count(gv) > 0;
+    }
+    if (const auto *alloca = dyn_cast<AllocaInst>(ptr)) {
+      return m_tls_allocas.count(alloca) > 0;
+    }
+    return false;
+  };
+
+  // Only accesses to known thread-local storage bases are pruned here.
+  // Values returned by pthread_getspecific may themselves point to shared
+  // memory, so deriving an address from that result is not enough to prove
+  // the dereference thread-local.
   if (const LoadInst *load = dyn_cast<LoadInst>(inst)) {
-    return isThreadLocal(load->getPointerOperand()) ||
-           isPthreadSpecificStoragePointer(load->getPointerOperand());
+    return accessesKnownThreadLocalBase(load->getPointerOperand());
   }
   
   if (const StoreInst *store = dyn_cast<StoreInst>(inst)) {
-    return isThreadLocal(store->getPointerOperand()) ||
-           isPthreadSpecificStoragePointer(store->getPointerOperand());
+    return accessesKnownThreadLocalBase(store->getPointerOperand());
   }
   
   if (const AtomicRMWInst *rmw = dyn_cast<AtomicRMWInst>(inst)) {
-    return isThreadLocal(rmw->getPointerOperand()) ||
-           isPthreadSpecificStoragePointer(rmw->getPointerOperand());
+    return accessesKnownThreadLocalBase(rmw->getPointerOperand());
   }
   
   if (const AtomicCmpXchgInst *cmpxchg = dyn_cast<AtomicCmpXchgInst>(inst)) {
-    return isThreadLocal(cmpxchg->getPointerOperand()) ||
-           isPthreadSpecificStoragePointer(cmpxchg->getPointerOperand());
+    return accessesKnownThreadLocalBase(cmpxchg->getPointerOperand());
   }
   
   return false;

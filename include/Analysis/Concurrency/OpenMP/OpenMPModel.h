@@ -122,7 +122,7 @@ inline bool isNoEffect(const llvm::StringRef &funcName) {
 
 // Used only for debug to try and catch unhandled OpenMP calls
 inline bool isOpenMP(const llvm::StringRef &funcName) {
-  return funcName.startswith("__kmpc");
+  return funcName.startswith("__kmpc") || funcName.startswith("GOMP_");
 }
 
 // Matches any OpenMP outlined functions, including the outer debug outlined

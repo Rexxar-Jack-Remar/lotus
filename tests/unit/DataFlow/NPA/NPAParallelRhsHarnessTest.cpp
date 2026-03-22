@@ -5,6 +5,7 @@
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralRD.h"
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/NPA.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>
 #include <memory>
@@ -14,14 +15,15 @@
 #include <vector>
 
 #include <llvm/ADT/APInt.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 namespace {
+
+using lotus::unittest::findInstructionByName;
+using lotus::unittest::parseModule;
 
 struct BoolSemiring {
   using value_type = bool;
@@ -53,15 +55,6 @@ struct LimitedBoolSemiring : BoolSemiring {
 struct LimitedFixpointBoolSemiring : BoolSemiring {
   static constexpr int max_fixpoint_iters = 0;
 };
-
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &ctx,
-                                          const std::string &ir) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(ir, err, ctx);
-  if (!module)
-    err.print("NPAParallelRhsHarnessTest", llvm::errs());
-  return module;
-}
 
 template <class D>
 std::unordered_map<npa::Symbol, npa::DomVal<D>>
@@ -173,17 +166,6 @@ void expectAnalysisStatusEquivalent(const npa::AnalysisStatus &lhs,
   EXPECT_EQ(lhs.requires_external_callee_resolver,
             rhs.requires_external_callee_resolver);
   EXPECT_EQ(lhs.open_world_unsound_mode, rhs.open_world_unsound_mode);
-}
-
-const llvm::Instruction *findInstructionByName(const llvm::Function &function,
-                                               llvm::StringRef name) {
-  for (const auto &block : function) {
-    for (const auto &inst : block) {
-      if (inst.hasName() && inst.getName() == name)
-        return &inst;
-    }
-  }
-  return nullptr;
 }
 
 llvm::APInt signedAPInt(unsigned bit_width, int64_t value) {

@@ -7,7 +7,7 @@
  */
 
 #include "Alias/SparrowAA/AndersenAA.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>
 #include <set>

@@ -11,7 +11,7 @@
  */
 
 #include "Alias/AllocAA/AllocAA.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/LoopInfo.h>

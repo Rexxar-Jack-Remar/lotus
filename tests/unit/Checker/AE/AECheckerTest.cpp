@@ -11,16 +11,15 @@
 #include "Checker/AE/AbstractState.h"
 #include "Checker/AE/IntervalValue.h"
 #include "Checker/Report/BugReportMgr.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #ifndef GTEST_INTERNAL_CPLUSPLUS_LANG
 #define GTEST_INTERNAL_CPLUSPLUS_LANG 201703L
 #endif
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -46,12 +45,7 @@ protected:
 
   LLVMContext context;
   std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("AECheckerTest", errs());
-    }
-    return module;
+    return lotus::unittest::parseModule(context, source, "AECheckerTest");
   }
 
   AEResult runAE(

@@ -1,5 +1,5 @@
 #include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>
 
@@ -136,6 +136,46 @@ TEST_F(ThreadLocalAnalysisTest, PthreadHandleStorageRemainsThreadLocal) {
   ASSERT_NE(tid, nullptr);
 
   EXPECT_TRUE(tla.isThreadLocal(tid));
+}
+
+TEST_F(ThreadLocalAnalysisTest, HelperMediatedThreadPayloadIsNotThreadLocal) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define void @spawn_helper(i8* %tid, i32* %payload, i8* (i8*)* %fn) {
+    entry:
+      %payload_raw = bitcast i32* %payload to i8*
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* %fn,
+                               i8* %payload_raw)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %slot = alloca i32, align 4
+      %tid = alloca i8, align 1
+      call void @spawn_helper(i8* %tid, i32* %slot, i8* (i8*)* @worker)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadLocalAnalysis tla(*module);
+  tla.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const auto *slot = dyn_cast<AllocaInst>(&main_func->getEntryBlock().front());
+  ASSERT_NE(slot, nullptr);
+
+  EXPECT_FALSE(tla.isThreadLocal(slot));
 }
 
 int main(int argc, char **argv) {

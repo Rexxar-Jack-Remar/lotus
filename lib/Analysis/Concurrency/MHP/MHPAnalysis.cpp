@@ -370,6 +370,7 @@ void MHPAnalysis::analyze() {
   m_has_unresolved_fork = false;
   m_has_multi_context_nodes = false;
   m_multi_instance_threads.clear();
+  m_dom_cache.clear();
   m_openmp_task_threads.clear();
   m_openmp_task_exclusions.clear();
   m_openmp_semantics = std::make_unique<OpenMP::OpenMPSemantics>(m_module);

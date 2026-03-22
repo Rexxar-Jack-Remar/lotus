@@ -594,6 +594,29 @@ public:
     case TD_OMP_ATOMIC_END:
       return {SemanticLoweringKind::RecognizedButUnmodeled,
               "openmp-atomic-runtime-unmodeled"};
+    case TD_OMP_TASK_COMPLETE:
+    case TD_OMP_TARGET_DATA_UPDATE:
+    case TD_OMP_CANCEL:
+    case TD_OMP_TEAMS:
+    case TD_OMP_TEAMS_HOST:
+    case TD_OMP_TEAMS_DISTRIBUTE:
+    case TD_OMP_DISTRIBUTE:
+    case TD_OMP_DISTRIBUTE_STATIC:
+    case TD_OMP_DISTRIBUTE_DYNAMIC:
+    case TD_OMP_DISTRIBUTE_GUIDANCE:
+    case TD_OMP_LOOP_STATIC_INIT:
+    case TD_OMP_LOOP_DYNAMIC_INIT:
+    case TD_OMP_LOOP_GUIDANCE_INIT:
+    case TD_OMP_AFFINITY:
+    case TD_OMP_SCOPE_START:
+    case TD_OMP_SCOPE_END:
+    case TD_OMP_TASKLOOP_SIMD:
+    case TD_OMP_TASKLOOP_FINI:
+    case TD_OMP_INTEROP_INIT:
+    case TD_OMP_INTEROP_FINI:
+    case TD_OMP_DOACROSS_SUBMIT:
+      return {SemanticLoweringKind::RecognizedButUnmodeled,
+              "recognized-openmp-runtime-unmodeled"};
     case TD_MPI_SESSION_GET_INFO:
     case TD_MPI_SESSION_GET_NUM_ERRCODES:
     case TD_MPI_SESSION_GET_ERRHANDLER:

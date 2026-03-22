@@ -5,7 +5,7 @@
 #include "Alias/AserPTA/PreProcessing/Passes/RemoveASMInstPass.h"
 #include "Alias/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
 #include "Alias/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>

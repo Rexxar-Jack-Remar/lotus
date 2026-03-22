@@ -240,6 +240,12 @@ const Instruction *taskOrderingSite(const Task *task) {
                                   : task->task_create;
 }
 
+constexpr uint64_t kLibompTaskTiednessMask = 0x1ULL;
+constexpr uint64_t kLibompTaskFinalMask = 0x2ULL;
+constexpr uint64_t kLibompTaskMergedIf0Mask = 0x4ULL;
+constexpr uint64_t kLibompTaskProxyMask = 0x10ULL;
+constexpr uint64_t kLibompTaskDetachableMask = 0x40ULL;
+
 } // namespace
 
 OpenMPSemantics::OpenMPSemantics(Module &module) : m_module(module) {}
@@ -452,6 +458,15 @@ void OpenMPSemantics::identifySemanticStructure() {
                   dyn_cast_or_null<Function>(api->getForkedFun(call))) {
             if (!fork_target->isDeclaration()) {
               directly_called.insert(fork_target);
+            }
+          }
+        }
+        ThreadAPI::TD_TYPE type = api->getType(call);
+        if (type == ThreadAPI::TD_OMP_TASK_WITH_DEPS ||
+            type == ThreadAPI::TD_OMP_TASK || type == ThreadAPI::TD_OMP_TASKLOOP) {
+          if (const Function *task_function = extractTaskFunction(call)) {
+            if (!task_function->isDeclaration()) {
+              directly_called.insert(task_function);
             }
           }
         }
@@ -1289,10 +1304,7 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         auto task = std::make_unique<Task>();
         task->task_create = call;
         task->task_function = extractTaskFunction(call);
-        if (callee && callee->hasName() &&
-            callee->getName().equals("__kmpc_omp_task_begin_if0")) {
-          task->execution_mode = TaskExecutionMode::Included;
-        }
+        applyTaskExecutionHints(*task, call);
         task->parent_context = func;
         task->generating_context = state.anchor_inst ? state.anchor_inst : call;
         task->scheduling_context_id = state.scheduling_context_id;
@@ -1331,8 +1343,31 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         if (task->execution_mode == TaskExecutionMode::Included) {
           ++m_summary.included_task_count;
         }
+        if (task->is_final) {
+          ++m_summary.final_task_count;
+        }
+        if (task->is_untied) {
+          ++m_summary.untied_task_count;
+        }
+        if (task->is_detached) {
+          ++m_summary.detached_task_count;
+        }
 
         m_inst_to_task[call] = task.get();
+        if (task->task_function && !task->task_function->isDeclaration()) {
+          TraversalState task_state;
+          task_state.scheduling_context_id = m_next_scheduling_context_id++;
+          task_state.scheduling_context_entity_id =
+              addEntity(SemanticEntityKind::SchedulingContext, call,
+                        task->task_function, task_state.scheduling_context_id,
+                        task->semantic_entity_id, currentRegionId(),
+                        currentPhaseToken(), task->taskgroup_id);
+          task_state.phase_stack.push_back(0);
+          task_state.anchor_inst = call;
+          std::set<const Function *> nested_call_stack = call_stack;
+          scanSchedulingContext(task->task_function, task_state,
+                                nested_call_stack);
+        }
         m_tasks.push_back(std::move(task));
         continue;
       }
@@ -1493,15 +1528,95 @@ std::vector<Dependency> OpenMPSemantics::extractRuntimeDependencies(
   return deps;
 }
 
+const CallBase *OpenMPSemantics::findTaskAllocCall(const Value *task_value) const {
+  if (!task_value) {
+    return nullptr;
+  }
+
+  std::deque<const Value *> worklist;
+  std::set<const Value *> visited;
+  worklist.push_back(task_value);
+
+  auto isTaskAllocCall = [](const Value *value) -> const CallBase * {
+    const auto *cb = dyn_cast<CallBase>(value);
+    if (!cb) {
+      return nullptr;
+    }
+    const Function *callee = cb->getCalledFunction();
+    return callee && OpenMPModel::isTaskAlloc(callee->getName()) ? cb : nullptr;
+  };
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+    if (!current || !visited.insert(current).second) {
+      continue;
+    }
+
+    current = current->stripPointerCasts();
+    if (const CallBase *alloc = isTaskAllocCall(current)) {
+      return alloc;
+    }
+    if (const auto *load = dyn_cast<LoadInst>(current)) {
+      worklist.push_back(load->getPointerOperand());
+      continue;
+    }
+    if (const auto *phi = dyn_cast<PHINode>(current)) {
+      for (const Value *incoming : phi->incoming_values()) {
+        worklist.push_back(incoming);
+      }
+      continue;
+    }
+    if (const auto *select = dyn_cast<SelectInst>(current)) {
+      worklist.push_back(select->getTrueValue());
+      worklist.push_back(select->getFalseValue());
+      continue;
+    }
+    if (const auto *gep = dyn_cast<GEPOperator>(current)) {
+      worklist.push_back(gep->getPointerOperand());
+      continue;
+    }
+
+    for (const User *user : current->users()) {
+      if (const auto *store = dyn_cast<StoreInst>(user)) {
+        if (store->getPointerOperand()->stripPointerCasts() == current) {
+          worklist.push_back(store->getValueOperand());
+        }
+      }
+    }
+  }
+
+  return nullptr;
+}
+
 const Function *
 OpenMPSemantics::extractTaskFunction(const CallBase *task_call) {
   if (!task_call || task_call->arg_size() < 3) {
     return nullptr;
   }
 
+  if (const Function *callee = task_call->getCalledFunction()) {
+    if (callee->hasName() && callee->getName().equals("GOMP_task") &&
+        task_call->arg_size() >= 1) {
+      if (const auto *direct =
+              dyn_cast<Function>(task_call->getArgOperand(0)->stripPointerCasts())) {
+        return direct;
+      }
+    }
+  }
+
   const Value *task_arg = task_call->getArgOperand(2)->stripPointerCasts();
   if (const auto *direct = dyn_cast<Function>(task_arg)) {
     return direct;
+  }
+
+  if (const CallBase *task_alloc = findTaskAllocCall(task_arg)) {
+    if (task_alloc->arg_size() >= 6) {
+      const Value *entry = task_alloc->getArgOperand(5)->stripPointerCasts();
+      if (const auto *direct = dyn_cast<Function>(entry)) {
+        return direct;
+      }
+    }
   }
 
   const Value *task_base = getUnderlyingObject(task_arg);
@@ -1556,6 +1671,47 @@ OpenMPSemantics::extractTaskFunction(const CallBase *task_call) {
     }
   }
   return nullptr;
+}
+
+void OpenMPSemantics::applyTaskExecutionHints(Task &task,
+                                              const CallBase *task_call) {
+  if (!task_call) {
+    return;
+  }
+
+  const Function *callee = task_call->getCalledFunction();
+  if (callee && callee->hasName() &&
+      callee->getName().equals("__kmpc_omp_task_begin_if0")) {
+    task.execution_mode = TaskExecutionMode::Included;
+  }
+
+  const CallBase *task_alloc = findTaskAllocCall(task_call->getArgOperand(2));
+  if (!task_alloc || task_alloc->arg_size() < 3) {
+    return;
+  }
+
+  const auto *flags = dyn_cast<ConstantInt>(task_alloc->getArgOperand(2));
+  if (!flags) {
+    ++m_deferred_reason_counts["omp_task_flags_unresolved"];
+    return;
+  }
+
+  const uint64_t value = flags->getZExtValue();
+  if ((value & kLibompTaskMergedIf0Mask) != 0) {
+    task.execution_mode = TaskExecutionMode::Included;
+  }
+  task.is_final = (value & kLibompTaskFinalMask) != 0;
+  task.is_detached = (value & kLibompTaskDetachableMask) != 0 ||
+                     (value & kLibompTaskProxyMask) != 0;
+  task.is_untied = (value & kLibompTaskTiednessMask) == 0;
+
+  if (task.is_detached) {
+    task.execution_mode = TaskExecutionMode::Detached;
+  } else if (task.is_final) {
+    task.execution_mode = TaskExecutionMode::Final;
+  } else if (task.is_untied) {
+    task.execution_mode = TaskExecutionMode::Untied;
+  }
 }
 
 bool OpenMPSemantics::dependenciesConflict(const Dependency &d1,

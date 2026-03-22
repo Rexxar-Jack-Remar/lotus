@@ -57,6 +57,9 @@ struct Task {
   const llvm::Instruction *task_create;
   const llvm::Function *task_function;
   TaskExecutionMode execution_mode = TaskExecutionMode::Deferred;
+  bool is_final = false;
+  bool is_untied = false;
+  bool is_detached = false;
   const llvm::Function *parent_context = nullptr;
   const llvm::Instruction *generating_context = nullptr;
   size_t scheduling_context_id = 0;
@@ -346,7 +349,9 @@ private:
   std::vector<Dependency> extractRuntimeDependencies(const llvm::CallBase *call,
                                                      unsigned ndeps_arg_idx,
                                                      unsigned dep_arg_idx);
+  const llvm::CallBase *findTaskAllocCall(const llvm::Value *task_value) const;
   const llvm::Function *extractTaskFunction(const llvm::CallBase *task_call);
+  void applyTaskExecutionHints(Task &task, const llvm::CallBase *task_call);
   size_t addEntity(SemanticEntityKind kind, const llvm::Instruction *anchor_inst,
                    const llvm::Function *func, size_t scheduling_context_id,
                    size_t parent_id, size_t region_id, size_t phase_id,

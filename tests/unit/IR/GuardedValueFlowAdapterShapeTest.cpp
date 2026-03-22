@@ -3,7 +3,7 @@
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/LotusAdapter.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>

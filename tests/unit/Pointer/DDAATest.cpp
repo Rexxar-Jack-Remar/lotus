@@ -7,10 +7,10 @@
 #include "Alias/DDA/CxtDPItem.h"
 #include "Alias/DDA/DDAPass.h"
 #include "Alias/DDA/FlowDDA.h"
-#include "LLVMHelpers.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGStats.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>
 #include <set>

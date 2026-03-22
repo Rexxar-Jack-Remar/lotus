@@ -2,7 +2,7 @@
 #include "IR/PDG/Support/DebugInfoUtils.h"
 #include "IR/PDG/Support/PDGUtils.h"
 
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <climits>
 #include <memory>
@@ -22,10 +22,8 @@ constexpr const char *kDataLayout =
 class PDGSupportUtilsTest : public ::testing::Test {
 protected:
   std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic error;
-    auto module = parseAssemblyString(source, error, context_);
-    if (!module)
-      error.print("PDGSupportUtilsTest", errs());
+    auto module =
+        lotus::unittest::parseModule(context_, source, "PDGSupportUtilsTest");
     if (module)
       module->setDataLayout(kDataLayout);
     return module;

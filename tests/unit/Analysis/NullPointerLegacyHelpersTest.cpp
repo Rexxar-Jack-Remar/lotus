@@ -1,6 +1,6 @@
 #include "Analysis/NullPointer/LocalNullCheckAnalysis.h"
 #include "Analysis/NullPointer/NullFlowAnalysis.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <climits>
 #include <cstdint>

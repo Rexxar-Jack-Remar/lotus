@@ -8,7 +8,7 @@
  */
 
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include "LLVMHelpers.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
 #include <gtest/gtest.h>

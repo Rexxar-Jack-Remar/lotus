@@ -1,42 +1,21 @@
 #include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralNullability.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 
 namespace {
 
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &ctx,
-                                          const char *ir) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(ir, err, ctx);
-  if (!module)
-    err.print("NPAInterproceduralNullabilityTest", llvm::errs());
-  return module;
-}
+using lotus::unittest::findBlock;
+using lotus::unittest::findInstructionByName;
+using lotus::unittest::parseModule;
 
 const llvm::BasicBlock *findBlockByName(const llvm::Function &function,
                                         llvm::StringRef name) {
-  for (const auto &block : function) {
-    if (block.hasName() && block.getName() == name)
-      return &block;
-  }
-  return nullptr;
-}
-
-const llvm::Instruction *findInstructionByName(const llvm::Function &function,
-                                               llvm::StringRef name) {
-  for (const auto &block : function) {
-    for (const auto &inst : block) {
-      if (inst.hasName() && inst.getName() == name)
-        return &inst;
-    }
-  }
-  return nullptr;
+  return findBlock(function, name);
 }
 
 } // namespace
@@ -60,7 +39,7 @@ TEST(NPA, InterproceduralNullabilityTracksNullStoreAndLoad) {
   auto result = npa::InterproceduralNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *after = findBlock(*mainFn, "after");
   const auto *slot = findInstructionByName(*mainFn, "slot");
   const auto *p = findInstructionByName(*mainFn, "p");
   ASSERT_NE(after, nullptr);
@@ -87,7 +66,7 @@ TEST(NPA, InterproceduralNullabilityUsesBlockExitFactsForQueries) {
   auto result = npa::InterproceduralNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const auto *entry = findBlockByName(*mainFn, "entry");
+  const auto *entry = findBlock(*mainFn, "entry");
   const auto *slot = findInstructionByName(*mainFn, "slot");
   const auto *p = findInstructionByName(*mainFn, "p");
   ASSERT_NE(entry, nullptr);
@@ -115,7 +94,7 @@ TEST(NPA, InterproceduralNullabilityTreatsAllocaPointersAsNonNull) {
   auto result = npa::InterproceduralNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const auto *after = findBlockByName(*mainFn, "after");
+  const auto *after = findBlock(*mainFn, "after");
   const auto *p = findInstructionByName(*mainFn, "p");
   ASSERT_NE(after, nullptr);
   ASSERT_NE(p, nullptr);
