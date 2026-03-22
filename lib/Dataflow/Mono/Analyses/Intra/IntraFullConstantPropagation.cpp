@@ -41,21 +41,23 @@ joinStates(const FullConstantPropagationState &Lhs,
   FullConstantPropagationState Out;
   Out.Unreachable = false;
 
-  // Start with all keys from Lhs.
   Out.Values = Lhs.Values;
 
-  // Merge keys from Rhs: update existing keys and add new ones.
-  // Bug fix: the old code only updated existing keys from Lhs but never
-  // added keys that were present only in Rhs.  A key absent in Lhs means
-  // Bottom on that path, so join(Bottom, Rhs_val) = Rhs_val — the key
-  // must be added to Out.
+  // For reachable states, an absent key means Top (unknown), not Bottom.
+  // Bottom remains reserved for unreachable/error values only.
   for (const auto &Entry : Rhs.Values) {
     auto It = Out.Values.find(Entry.first);
     if (It == Out.Values.end()) {
-      // Key only in Rhs: join(Bottom, Rhs_val) = Rhs_val.
-      Out.Values.insert(Entry);
+      Out.Values[Entry.first] =
+          joinValues(FullConstantValue::top(), Entry.second);
     } else {
       It->second = joinValues(It->second, Entry.second);
+    }
+  }
+  for (const auto &Entry : Lhs.Values) {
+    if (Rhs.Values.find(Entry.first) == Rhs.Values.end()) {
+      Out.Values[Entry.first] =
+          joinValues(Entry.second, FullConstantValue::top());
     }
   }
   return Out;
@@ -77,6 +79,36 @@ FullConstantValue resolveValue(const FullConstantPropagationState &In,
   }
 
   return FullConstantValue::top();
+}
+
+FullConstantValue lookupOrTop(const FullConstantPropagationState &State,
+                              const Value *V) {
+  auto It = State.Values.find(V);
+  if (It != State.Values.end()) {
+    return It->second;
+  }
+  return FullConstantValue::top();
+}
+
+bool equalStatesSemantically(const FullConstantPropagationState &Lhs,
+                             const FullConstantPropagationState &Rhs) {
+  if (Lhs.Unreachable != Rhs.Unreachable) {
+    return false;
+  }
+  if (Lhs.Unreachable) {
+    return true;
+  }
+  for (const auto &Entry : Lhs.Values) {
+    if (!(Entry.second == lookupOrTop(Rhs, Entry.first))) {
+      return false;
+    }
+  }
+  for (const auto &Entry : Rhs.Values) {
+    if (!(lookupOrTop(Lhs, Entry.first) == Entry.second)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 FullConstantValue evalBinaryOp(unsigned Opcode, const FullConstantValue &Lhs,
@@ -191,10 +223,7 @@ public:
 
   bool equal_to(const mono_container_t &Lhs,
                 const mono_container_t &Rhs) override {
-    if (Lhs.Unreachable != Rhs.Unreachable) {
-      return false;
-    }
-    return Lhs.Values == Rhs.Values;
+    return equalStatesSemantically(Lhs, Rhs);
   }
 
   std::unordered_map<Instruction *, mono_container_t> initialSeeds() override {

@@ -259,6 +259,9 @@ void IFDSSolver<Problem>::process_call_edge(const PathEdgeType& current_edge,
                         return_facts.insert(m_problem.zero_fact());
                     }
                     for (const auto& rf : return_facts) {
+                        SummaryEdgeType summary_edge(call, return_site,
+                                                     current_edge.target_fact, rf);
+                        m_state.add_summary_edge(summary_edge);
                         on_summary_transition(Node(call, current_edge.target_fact),
                                               Node(return_site, rf));
                         on_return_transition(Node(summary.exit_inst, summary.exit_fact),
@@ -302,13 +305,10 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
             // breaks analyses that use call_fact to decide what to propagate
             // back (e.g. taint analysis killing non-tainted return paths).
             // SummaryEdge records (call_site, caller_fact_at_call, callee_exit_fact).
-            // Use edge_info.call_fact (the caller's fact at the call site) rather
-            // than start_fact (the callee's entry fact) so that the summary edge
-            // correctly reflects the caller's context.
+            // Use edge_info.call_fact (the caller's fact at the call site) and
+            // the computed caller-side return_fact so that the exposed summary-edge
+            // reporting reflects the actual summary mapping observed at the caller.
             for (const llvm::Instruction* return_site : get_return_sites(edge_info.call_node)) {
-                SummaryEdgeType new_summary(edge_info.call_node, return_site,
-                                            edge_info.call_fact, exit_fact);
-                m_state.add_summary_edge(new_summary);
                 FactSet return_facts = m_problem.return_flow(
                     edge_info.call_node, ret, return_site, func, exit_fact,
                     edge_info.call_fact);
@@ -317,6 +317,9 @@ void IFDSSolver<Problem>::process_return_edge(const PathEdgeType& current_edge,
                     return_facts.insert(m_problem.zero_fact());
                 }
                 for (const Fact& return_fact : return_facts) {
+                    SummaryEdgeType new_summary(edge_info.call_node, return_site,
+                                                edge_info.call_fact, return_fact);
+                    m_state.add_summary_edge(new_summary);
                     on_summary_transition(Node(edge_info.call_node, edge_info.call_fact),
                                           Node(return_site, return_fact));
                     on_return_transition(Node(ret, exit_fact),

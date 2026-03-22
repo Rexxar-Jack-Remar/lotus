@@ -137,59 +137,62 @@ GuardedValueFlowSolver::GuardedValueFlowSolver(SMTFactory &factory,
 GuardedValueFlowSolver::~GuardedValueFlowSolver() {}
 
 SMTExprVec GuardedValueFlowSolver::getCtrlDeps(const GuardedValueFlowNode *node,
-                                               void *args) {
+                                               const QueryContext *context) {
   assert(node && "Expected a modeled node.");
   BasicBlock *block = node->getParentBasicBlock();
   assert(block && "Expected node to belong to a block.");
   auto *graph = node->getGraph();
   assert(graph && "Expected node to belong to a graph.");
-  return getCtrlDeps(block, graph, args);
+  return getCtrlDeps(block, graph, context);
 }
 
 SMTExprVec GuardedValueFlowSolver::getCtrlDeps(BasicBlock *block,
                                                const GuardedValueFlowGraph *graph,
-                                               void *args) {
-  (void)args;
-  auto pair = _getCtrlDeps(block, graph);
+                                               const QueryContext *context) {
+  auto pair = getCtrlDepsPair(block, graph, context);
   return SMTExprVec::merge(pair.first.copy(), pair.second);
+}
+
+std::pair<SMTExprVec, SMTExprVec>
+GuardedValueFlowSolver::getCtrlDepsPair(BasicBlock *block,
+                                        const GuardedValueFlowGraph *graph,
+                                        const QueryContext *context) {
+  return computeCtrlDepsPair(block, graph, context);
 }
 
 SMTExprVec GuardedValueFlowSolver::getPhiGated(
     const GuardedValueFlowPhiNode *phi_node,
-    GuardedValueFlowPhiNode::Incoming incoming, void *args) {
-  (void)args;
-  auto pair = _getPhiGated(phi_node, incoming);
+    GuardedValueFlowPhiNode::Incoming incoming, const QueryContext *context) {
+  auto pair = computePhiGatedPair(phi_node, incoming, context);
   return SMTExprVec::merge(pair.first.copy(), pair.second);
 }
 
 SMTExprVec GuardedValueFlowSolver::getPhiGated(
     const GuardedValueFlowPhiNode *phi_node, const GuardedValueFlowNode *value,
-    BasicBlock *block, void *args) {
+    BasicBlock *block, const QueryContext *context) {
   for (const auto &incoming : phi_node->incoming()) {
     if (incoming.incoming_block == block && incoming.value_node == value)
-      return getPhiGated(phi_node, incoming, args);
+      return getPhiGated(phi_node, incoming, context);
   }
   llvm_unreachable("Requested PHI gating for a non-incoming value/block pair");
 }
 
 SMTExprVec GuardedValueFlowSolver::getPhiGated(
     const GuardedValueFlowPhiNode *phi_node, const GuardedValueFlowNode *value,
-    void *args) {
-  (void)args;
+    const QueryContext *context) {
   SMTExprVec gated = Factory->createEmptySMTExprVec();
   SMTExprVec ors = Factory->createEmptySMTExprVec();
   for (const auto &incoming : phi_node->incoming()) {
     if (incoming.value_node == value)
-      ors.push_back(getPhiGated(phi_node, incoming).toAndExpr());
+      ors.push_back(getPhiGated(phi_node, incoming, context).toAndExpr());
   }
   gated.push_back(ors.toOrExpr());
   return gated;
 }
 
 SMTExprVec GuardedValueFlowSolver::getDataDeps(const GuardedValueFlowNode *node,
-                                               void *args) {
-  (void)args;
-  return _getDataDeps(node);
+                                               const QueryContext *context) {
+  return computeDataDeps(node, context);
 }
 
 SMTExpr GuardedValueFlowSolver::getOrInsertExpr(
@@ -608,6 +611,29 @@ std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getPhiGated(
   return {gated_ctrl, gated_data};
 }
 
+std::pair<SMTExprVec, SMTExprVec>
+GuardedValueFlowSolver::computeCtrlDepsPair(
+    BasicBlock *block, const GuardedValueFlowGraph *graph,
+    const QueryContext *context) {
+  (void)context;
+  return _getCtrlDeps(block, graph);
+}
+
+std::pair<SMTExprVec, SMTExprVec>
+GuardedValueFlowSolver::computePhiGatedPair(
+    const GuardedValueFlowPhiNode *phi_node,
+    GuardedValueFlowPhiNode::Incoming incoming, const QueryContext *context) {
+  (void)context;
+  return _getPhiGated(phi_node, incoming);
+}
+
+SMTExprVec
+GuardedValueFlowSolver::computeDataDeps(const GuardedValueFlowNode *node,
+                                        const QueryContext *context) {
+  (void)context;
+  return _getDataDeps(node);
+}
+
 std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getCtrlDeps(
     BasicBlock *block, const GuardedValueFlowGraph *graph, size_t depth) {
   assert(block && graph);
@@ -905,23 +931,27 @@ GuardedValueFlowSolver::SMTResultType GuardedValueFlowSolver::check() {
   return SMTSolver::check();
 }
 
-SMTExprVec DTGuardedValueFlowSolver::getCtrlDeps(
-    BasicBlock *block, const GuardedValueFlowGraph *graph, void *args) {
-  auto *prev_block = static_cast<BasicBlock *>(args);
-  auto pair = _getCtrlDepsWrapper(block, graph, prev_block);
-  return SMTExprVec::merge(pair.first.copy(), pair.second);
+std::pair<SMTExprVec, SMTExprVec>
+DTGuardedValueFlowSolver::computeCtrlDepsPair(
+    BasicBlock *block, const GuardedValueFlowGraph *graph,
+    const QueryContext *context) {
+  BasicBlock *prev_block = context ? context->previous_block : nullptr;
+  return _getCtrlDepsWrapper(block, graph, prev_block);
 }
 
-SMTExprVec DTGuardedValueFlowSolver::getPhiGated(
+std::pair<SMTExprVec, SMTExprVec>
+DTGuardedValueFlowSolver::computePhiGatedPair(
     const GuardedValueFlowPhiNode *phi_node,
-    GuardedValueFlowPhiNode::Incoming incoming, void *args) {
-  auto pair = _getPhiGated(phi_node, incoming, static_cast<BasicBlock *>(args));
-  return SMTExprVec::merge(pair.first.copy(), pair.second);
+    GuardedValueFlowPhiNode::Incoming incoming, const QueryContext *context) {
+  assert(context && context->previous_block);
+  return _getPhiGated(phi_node, incoming, context->previous_block);
 }
 
-SMTExprVec DTGuardedValueFlowSolver::getDataDeps(const GuardedValueFlowNode *node,
-                                                 void *args) {
-  return _getDataDeps(node, static_cast<BasicBlock *>(args));
+SMTExprVec
+DTGuardedValueFlowSolver::computeDataDeps(const GuardedValueFlowNode *node,
+                                          const QueryContext *context) {
+  assert(context && context->previous_block);
+  return _getDataDeps(node, context->previous_block);
 }
 
 std::pair<SMTExprVec, SMTExprVec>

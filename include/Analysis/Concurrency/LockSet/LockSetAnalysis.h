@@ -431,6 +431,8 @@ private:
                                const llvm::Value *lock_obj) const;
   std::vector<LockID> getUnderlyingRAIILocks(const llvm::Instruction *inst,
                                              const llvm::Value *lock_obj) const;
+  std::vector<LockID>
+  getRAIILocksReleasedAt(const llvm::Instruction *inst) const;
 
   /**
    * @brief Resolve the lock identity for explicit C++ wrapper operations
@@ -463,6 +465,7 @@ private:
    * @brief Get callees at a call site using CallGraph
    */
   std::set<llvm::Function *> getCallees(const llvm::CallBase *call) const;
+  bool shouldInvalidateMustLockState(const llvm::CallBase *call) const;
 
   /**
    * @brief Perform bottom-up call graph traversal for interprocedural analysis

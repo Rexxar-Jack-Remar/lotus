@@ -1180,17 +1180,19 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         continue;
       }
 
+      if (type == ThreadAPI::TD_OMP_MASTER_END ||
+          type == ThreadAPI::TD_OMP_ORDERED_END) {
+        popRegion(WaitBoundaryInfo::Kind::SingleEnd, call);
+        continue;
+      }
+
       if (type == ThreadAPI::TD_OMP_SINGLE_END ||
-          type == ThreadAPI::TD_OMP_MASTER_END ||
-          type == ThreadAPI::TD_OMP_ORDERED_END ||
           type == ThreadAPI::TD_OMP_SECTIONS_END ||
           type == ThreadAPI::TD_OMP_FOR_STATIC_FINI ||
           type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI ||
           type == ThreadAPI::TD_OMP_REDUCE_START) {
         WaitBoundaryInfo::Kind kind = WaitBoundaryInfo::Kind::Unknown;
-        if (type == ThreadAPI::TD_OMP_SINGLE_END ||
-            type == ThreadAPI::TD_OMP_MASTER_END ||
-            type == ThreadAPI::TD_OMP_ORDERED_END) {
+        if (type == ThreadAPI::TD_OMP_SINGLE_END) {
           kind = WaitBoundaryInfo::Kind::SingleEnd;
         } else if (type == ThreadAPI::TD_OMP_SECTIONS_END) {
           kind = WaitBoundaryInfo::Kind::SectionsEnd;

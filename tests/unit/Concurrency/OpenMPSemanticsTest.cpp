@@ -222,6 +222,35 @@ TEST_F(OpenMPSemanticsTest, NormalizesPartialBoundaryEventsAcrossKinds) {
   EXPECT_TRUE(saw_reduce);
 }
 
+TEST_F(OpenMPSemanticsTest, MasterAndOrderedEndsDoNotBecomeWaitBoundaries) {
+  const char *source = R"(
+    declare i32 @__kmpc_master(i8*, i32)
+    declare void @__kmpc_end_master(i8*, i32)
+    declare void @__kmpc_ordered(i8*, i32)
+    declare void @__kmpc_end_ordered(i8*, i32)
+
+    define i32 @main() {
+    entry:
+      %m = call i32 @__kmpc_master(i8* null, i32 0)
+      call void @__kmpc_end_master(i8* null, i32 0)
+      call void @__kmpc_ordered(i8* null, i32 0)
+      call void @__kmpc_end_ordered(i8* null, i32 0)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  EXPECT_EQ(semantics.getWaitBoundaryInfos().size(), 0u);
+  EXPECT_EQ(semantics.getTaskEvents().size(), 0u);
+  EXPECT_EQ(semantics.getSummary().master_region_count, 1u);
+  EXPECT_EQ(semantics.getSummary().ordered_region_count, 1u);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

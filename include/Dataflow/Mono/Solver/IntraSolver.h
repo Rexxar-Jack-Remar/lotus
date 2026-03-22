@@ -26,7 +26,9 @@ public:
   using CFGTy = typename AnalysisDomainTy::c_t;
 
   explicit IntraMonoSolver(ProblemTy &Problem)
-      : Problem(Problem), CFG(selectCFG()) {}
+      : Problem(Problem), CFG(selectCFG()) {
+    MissingResultFallback = this->Problem.allTop();
+  }
 
   void setDebugConfig(const DebugConfig &Config) { DebugCfg = Config; }
 
@@ -250,7 +252,7 @@ public:
     if (It != AnalysisIn.end()) {
       return It->second;
     }
-    return DefaultValue;
+    return MissingResultFallback;
   }
 
   const mono_container_t &getOutResultsAt(n_t Stmt) const {
@@ -258,7 +260,7 @@ public:
     if (It != AnalysisOut.end()) {
       return It->second;
     }
-    return DefaultValue;
+    return MissingResultFallback;
   }
 
   const std::unordered_map<n_t, mono_container_t> &getInResults() const {
@@ -322,6 +324,7 @@ private:
     AnalysisOut.clear();
     SeedFacts.clear();
     NodeIterCount.clear();
+    MissingResultFallback = Problem.allTop();
     Stats = SolverStatistics{};
   }
 
@@ -386,7 +389,7 @@ private:
   std::unordered_map<n_t, mono_container_t> AnalysisIn;
   std::unordered_map<n_t, mono_container_t> AnalysisOut;
   std::unordered_map<n_t, mono_container_t> SeedFacts;
-  mono_container_t DefaultValue{};
+  mono_container_t MissingResultFallback{};
   DebugConfig DebugCfg;
   SolverStatistics Stats;
   /// L1 fix: per-node re-processing counter used by the widening logic.

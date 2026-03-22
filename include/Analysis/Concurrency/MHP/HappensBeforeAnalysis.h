@@ -19,9 +19,8 @@ class AliasAnalysisWrapper;
 /**
  * Happens-before relation for race detection. HB is the union of:
  * - Program order (TFG): intra-thread and fork/join/lock/barrier edges.
- * - Synchronizes-with (m_sync_with): promise/future and OpenMP task
- *   dependency edges. Plain same-location release/acquire atomics are
- *   deferred without witness evidence.
+ * - Synchronizes-with (m_sync_with): atomics, promise/future, selected C++20
+ *   primitives, and OpenMP task dependency edges.
  * - Witness-backed fence atomic HB edges computed directly by this analysis.
  */
 class HappensBeforeAnalysis {
@@ -83,6 +82,11 @@ private:
   std::vector<const llvm::Instruction *>
   collectFenceWitnesses(const llvm::Instruction *fence,
                         bool require_release_semantics) const;
+  bool hasConcreteFenceWitness(const llvm::Instruction *release_inst,
+                               const llvm::Instruction *acquire_inst) const;
+  bool atomicLocationsMustAlias(const llvm::Instruction *lhs,
+                                const llvm::Instruction *rhs) const;
+  size_t countConcreteAtomicWitnesses(const llvm::Instruction *inst) const;
   bool atomicLocationsMayAlias(const llvm::Instruction *lhs,
                                const llvm::Instruction *rhs) const;
   bool hasProgramOrder(const llvm::Instruction *A,

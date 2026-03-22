@@ -162,6 +162,34 @@ TEST_F(EscapeAnalysisTest, CppThreadLikeForkEscapesPointerPayload) {
   EXPECT_TRUE(analysis.isEscaped(payload));
 }
 
+TEST_F(EscapeAnalysisTest, ReturnedButUnsharedPointerStaysThreadLocal) {
+  const char *source = R"(
+    define i8* @identity(i8* %arg) {
+    entry:
+      ret i8* %arg
+    }
+
+    define void @main() {
+    entry:
+      %slot = alloca i8, align 1
+      %ret = call i8* @identity(i8* %slot)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  EscapeAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const auto *slot = dyn_cast<AllocaInst>(&main_func->getEntryBlock().front());
+  ASSERT_NE(slot, nullptr);
+  EXPECT_FALSE(analysis.isEscaped(slot));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

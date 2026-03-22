@@ -369,7 +369,8 @@ TEST_F(GuardedValueFlowSolverTest, ExcludesSummarySentinelChainsFromDTSolver) {
   DominatorTree dt(*F);
   SMTFactory factory;
   DTGuardedValueFlowSolver solver(factory, module->getDataLayout(), &dt);
-  SMTExprVec deps = solver.getDataDeps(chain.summary_mem, &F->getEntryBlock());
+  GuardedValueFlowSolver::QueryContext context{&F->getEntryBlock()};
+  SMTExprVec deps = solver.getDataDeps(chain.summary_mem, &context);
 
   std::string deps_str;
   ASSERT_TRUE(deps.SMTExprVecToStream(deps_str));

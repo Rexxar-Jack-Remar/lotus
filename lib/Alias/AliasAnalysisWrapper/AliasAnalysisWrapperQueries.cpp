@@ -255,6 +255,28 @@ void AliasAnalysisWrapper::getIndirectCallTargets(CallBase *call,
     }
     return;
   }
+  if (_dyck_aa) {
+    auto *Caller = call->getFunction();
+    auto *CallGraph = _dyck_aa->getDyckCallGraph();
+    if (!Caller || !CallGraph) {
+      return;
+    }
+    auto *CallerNode = CallGraph->getFunction(Caller);
+    if (!CallerNode) {
+      return;
+    }
+    auto *DyckCall = CallerNode->getCall(call);
+    auto *PtrCall = dyn_cast_or_null<PointerCall>(DyckCall);
+    if (!PtrCall) {
+      return;
+    }
+    for (auto *F : *PtrCall) {
+      if (F != nullptr) {
+        targets.push_back(F);
+      }
+    }
+    return;
+  }
   if (_tpa_aa) {
     std::vector<const llvm::Function *> tpaCallees = _tpa_aa->getCallees(call, nullptr);
     targets.assign(tpaCallees.begin(), tpaCallees.end());

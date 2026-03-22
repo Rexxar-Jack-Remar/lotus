@@ -57,6 +57,48 @@ ConstantPropagationValue resolveValue(const ConstantPropagationMap &In,
   return makeTop();
 }
 
+ConstantPropagationValue lookupOrTop(const ConstantPropagationMap &Map,
+                                     const llvm::Value *V) {
+  auto It = Map.find(V);
+  if (It != Map.end()) {
+    return It->second;
+  }
+  return makeTop();
+}
+
+bool equalMapSemantically(const ConstantPropagationMap &Lhs,
+                          const ConstantPropagationMap &Rhs) {
+  for (const auto &Entry : Lhs) {
+    if (!equalValue(Entry.second, lookupOrTop(Rhs, Entry.first))) {
+      return false;
+    }
+  }
+  for (const auto &Entry : Rhs) {
+    if (!equalValue(lookupOrTop(Lhs, Entry.first), Entry.second)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+ConstantPropagationMap buildTopUniverse(const llvm::Module &M) {
+  ConstantPropagationMap TopFacts;
+  for (const auto &G : M.globals()) {
+    TopFacts[&G] = makeTop();
+  }
+  for (const auto &F : M) {
+    for (const auto &Arg : F.args()) {
+      TopFacts[&Arg] = makeTop();
+    }
+    for (const auto &BB : F) {
+      for (const auto &I : BB) {
+        TopFacts[&I] = makeTop();
+      }
+    }
+  }
+  return TopFacts;
+}
+
 ConstantPropagationValue evalBinaryOp(unsigned Opcode,
                                       const ConstantPropagationValue &Lhs,
                                       const ConstantPropagationValue &Rhs) {
@@ -117,7 +159,10 @@ class IntraMonoConstantPropagation
 public:
   explicit IntraMonoConstantPropagation(llvm::Function *F,
                                         lotus::AliasAnalysisWrapper *AA)
-      : IntraMonoProblem<ConstantPropagationDomain>({F}, AA), AA(AA) {}
+      : IntraMonoProblem<ConstantPropagationDomain>({F}, AA), AA(AA),
+        TopFacts(buildTopUniverse(*F->getParent())) {}
+
+  ConstantPropagationMap allTop() override { return TopFacts; }
 
   ConstantPropagationMap normalFlow(llvm::Instruction *Inst,
                                     const ConstantPropagationMap &In) override {
@@ -166,20 +211,18 @@ public:
 
   // merge() is the join operator at control-flow merge points.
   //
-  // The per-variable lattice is:  Bottom < Const(n) < Top
+  // The per-variable lattice is: Bottom < Const(n) < Top.
   //
-  // Absence from the map means Bottom (unreachable / not yet analyzed).
-  // This is the standard convention for forward may-analyses: a variable
-  // that has not been assigned on a path contributes nothing (Bottom) to
-  // the join.
+  // For reachable states, an absent key is interpreted as Top (unknown),
+  // not Bottom. Bottom is reserved for unreachable/error values only.
   //
   // Join rules:
   //   join(x, x)            = x          (same value → keep it)
   //   join(Const(a), Const(b)) = Top     (different constants → unknown)
-  //   join(Const, Top)      = Top         (one path unknown → unknown)
+  //   join(Const, Top)      = Top        (one path unknown → unknown)
   //   join(Top, Const)      = Top
-  //   join(Bottom/absent, x) = x         (unreachable path contributes nothing)
-  //   join(x, Bottom/absent) = x
+  //   join(Bottom, x)       = x          (unreachable path contributes nothing)
+  //   join(x, Bottom)       = x
   //   join(Top, Top)        = Top
   ConstantPropagationMap merge(const ConstantPropagationMap &Lhs,
                                const ConstantPropagationMap &Rhs) override {
@@ -199,21 +242,14 @@ public:
       return makeTop();
     };
 
-    // Process all keys in Lhs.
     for (const auto &Entry : Lhs) {
-      auto It = Rhs.find(Entry.first);
-      if (It == Rhs.end()) {
-        // Key absent in Rhs → treat Rhs as Bottom → join = Lhs value.
-        Out[Entry.first] = Entry.second;
-      } else {
-        Out[Entry.first] = joinValues(Entry.second, It->second);
-      }
+      Out[Entry.first] =
+          joinValues(Entry.second, lookupOrTop(Rhs, Entry.first));
     }
 
-    // Process keys only in Rhs (absent in Lhs → treat Lhs as Bottom).
     for (const auto &Entry : Rhs) {
       if (Lhs.find(Entry.first) == Lhs.end()) {
-        Out[Entry.first] = Entry.second;
+        Out[Entry.first] = joinValues(makeTop(), Entry.second);
       }
     }
 
@@ -222,7 +258,7 @@ public:
 
   bool equal_to(const ConstantPropagationMap &Lhs,
                 const ConstantPropagationMap &Rhs) override {
-    return Lhs == Rhs;
+    return equalMapSemantically(Lhs, Rhs);
   }
 
   std::unordered_map<llvm::Instruction *, ConstantPropagationMap>
@@ -264,6 +300,7 @@ public:
 
 private:
   lotus::AliasAnalysisWrapper *AA;
+  ConstantPropagationMap TopFacts;
 
   // weakJoin is used for may-aliased pointers: if the old and new values
   // agree, keep the value; otherwise the result is unknown (Top), not

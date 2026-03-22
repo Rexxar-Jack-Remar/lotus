@@ -185,6 +185,87 @@ TEST_F(StaticThreadSharingAnalysisTest,
                           DefinitelyThreadLocal);
 }
 
+TEST_F(StaticThreadSharingAnalysisTest,
+       AtomicWriteIsTreatedAsSharedAccess) {
+  const char *source = R"(
+    @g = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %rmw = atomicrmw add i32* @g, i32 1 monotonic
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %spawn = call i32 @pthread_create(i8* null, i8* null,
+                                        i8* (i8*)* @worker, i8* null)
+      %main_load = load i32, i32* @g, align 4
+      ret i32 %main_load
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::MaybeShared;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass(
+      "worker", "rmw", StaticSharingProbePass::QueryKind::Instruction,
+      &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(
+      observed,
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared);
+}
+
+TEST_F(StaticThreadSharingAnalysisTest,
+       UnknownThreadEntryLeavesClassificationConservative) {
+  const char *source = R"(
+    @g = global i32 0, align 4
+    @fp = external global i8*
+
+    declare i32 @pthread_create(i8*, i8*, i8*, i8*)
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8, align 1
+      %start = load i8*, i8** @fp
+      call i32 @pthread_create(i8* %tid, i8* null, i8* %start, i8* null)
+      %main_load = load i32, i32* @g, align 4
+      ret i32 %main_load
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyThreadLocal;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass(
+      "main", "main_load", StaticSharingProbePass::QueryKind::Instruction,
+      &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(observed,
+            StaticThreadSharingAnalysis::SharingClassification::MaybeShared);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

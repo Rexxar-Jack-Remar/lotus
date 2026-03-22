@@ -4,7 +4,10 @@
  */
 
 #include "Dataflow/Mono/Analyses/Inter/InterTaintAnalysis.h"
+#include "Dataflow/Mono/Analyses/Inter/InterConstantPropagation.h"
+#include "Dataflow/Mono/Analyses/Inter/InterFullConstantPropagation.h"
 #include "Dataflow/Mono/Analyses/Intra/IntraConstantPropagation.h"
+#include "Dataflow/Mono/Analyses/Intra/IntraFullConstantPropagation.h"
 #include "Dataflow/Mono/Analyses/Intra/IntraLiveVariables.h"
 #include "Dataflow/Mono/Analyses/Intra/IntraUninitVariables.h"
 #include "Dataflow/Mono/Core/CallStringSolver.h"
@@ -483,6 +486,316 @@ TEST_F(MonoTest, InterMonoTaintStrongWeakUpdate) {
   EXPECT_TRUE(FoundLeak);
 }
 
+TEST_F(MonoTest, InterMonoTaintReportsAliasedSinkLeak) {
+  const char *source = R"(
+    define void @sink(i32* %p) { ret void }
+    define i32 @source() { ret i32 7 }
+
+    define void @test(i32* %p) {
+    entry:
+      %alias = bitcast i32* %p to i32*
+      %t = call i32 @source()
+      store i32 %t, i32* %p
+      call void @sink(i32* %alias)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto *Alias = findFirst<BitCastInst>(F);
+  ASSERT_NE(Alias, nullptr);
+
+  InterMonoTaintConfig Config;
+  Config.SourceFunctions.insert("source");
+  Config.SinkFunctions.insert("sink");
+
+  auto Result = runInterMonoTaintAnalysis(F, Config);
+  ASSERT_NE(Result.Results, nullptr);
+
+  bool FoundAliasLeak = false;
+  for (const auto &Cell : Result.Report.Leaks) {
+    if (Cell.second.count(Alias) == 1u) {
+      FoundAliasLeak = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(FoundAliasLeak);
+}
+
+TEST_F(MonoTest, InterMonoTaintIndirectCallUsesAAResolution) {
+  const char *source = R"(
+    define i32 @source() {
+    entry:
+      ret i32 7
+    }
+
+    define i32 @producer() {
+    entry:
+      %x = call i32 @source()
+      ret i32 %x
+    }
+
+    define void @sink(i32* %p) { ret void }
+
+    define void @test(i32* %p) {
+    entry:
+      %slot = alloca i32 ()*
+      store i32 ()* @producer, i32 ()** %slot
+      %fp = load i32 ()*, i32 ()** %slot
+      %t = call i32 %fp()
+      store i32 %t, i32* %p
+      call void @sink(i32* %p)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  InterMonoTaintConfig Config;
+  Config.SourceFunctions.insert("source");
+  Config.SinkFunctions.insert("sink");
+
+  auto Result = runInterMonoTaintAnalysis(F, Config);
+  ASSERT_NE(Result.Results, nullptr);
+
+  bool FoundLeak = false;
+  for (const auto &Cell : Result.Report.Leaks) {
+    for (auto *V : Cell.second) {
+      if (auto *Arg = dyn_cast<Argument>(V)) {
+        if (Arg->getArgNo() == 0) {
+          FoundLeak = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(FoundLeak);
+}
+
+TEST_F(MonoTest, InterMonoConstantPropagationIndirectCallUsesAAResolution) {
+  const char *source = R"(
+    define i32 @producer() {
+    entry:
+      ret i32 7
+    }
+
+    define i32 @test() {
+    entry:
+      %slot = alloca i32 ()*
+      store i32 ()* @producer, i32 ()** %slot
+      %fp = load i32 ()*, i32 ()** %slot
+      %t = call i32 %fp()
+      ret i32 %t
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto Result = runInterMonoConstantPropagation(F);
+  ASSERT_NE(Result.Results, nullptr);
+
+  auto *Ret = findFirst<ReturnInst>(F);
+  ASSERT_NE(Ret, nullptr);
+
+  CallBase *IndirectCall = nullptr;
+  for (auto &BB : *F) {
+    for (auto &I : BB) {
+      if (auto *Call = dyn_cast<CallBase>(&I)) {
+        if (Call->getCalledFunction() == nullptr) {
+          IndirectCall = Call;
+          break;
+        }
+      }
+    }
+  }
+  ASSERT_NE(IndirectCall, nullptr);
+
+  bool FoundConst = false;
+  for (const auto &Cell : Result.Results->getINMap()) {
+    if (Cell.first.Inst != Ret) {
+      continue;
+    }
+    auto It = Cell.second.find(IndirectCall);
+    if (It != Cell.second.end() &&
+        It->second.Tag == ConstantPropagationTag::Const &&
+        It->second.ConstValue == 7) {
+      FoundConst = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(FoundConst);
+}
+
+TEST_F(MonoTest, InterMonoConstantPropagationMultiCalleeSameConstantRemainsConstant) {
+  const char *source = R"(
+    define i32 @foo() {
+    entry:
+      ret i32 7
+    }
+
+    define i32 @bar() {
+    entry:
+      ret i32 7
+    }
+
+    define i32 @test(i1 %c) {
+    entry:
+      %fp = select i1 %c, i32 ()* @foo, i32 ()* @bar
+      %t = call i32 %fp()
+      ret i32 %t
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto Result = runInterMonoConstantPropagation(F);
+  ASSERT_NE(Result.Results, nullptr);
+
+  auto *Ret = findFirst<ReturnInst>(F);
+  ASSERT_NE(Ret, nullptr);
+  auto *Call = findFirst<CallInst>(F);
+  ASSERT_NE(Call, nullptr);
+
+  bool FoundConst = false;
+  for (const auto &Cell : Result.Results->getINMap()) {
+    if (Cell.first.Inst != Ret) {
+      continue;
+    }
+    auto It = Cell.second.find(Call);
+    if (It != Cell.second.end() &&
+        It->second.Tag == ConstantPropagationTag::Const &&
+        It->second.ConstValue == 7) {
+      FoundConst = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(FoundConst);
+}
+
+TEST_F(MonoTest, InterMonoFullConstantPropagationIndirectCallUsesAAResolution) {
+  const char *source = R"(
+    define i32 @producer() {
+    entry:
+      ret i32 7
+    }
+
+    define i32 @test() {
+    entry:
+      %slot = alloca i32 ()*
+      store i32 ()* @producer, i32 ()** %slot
+      %fp = load i32 ()*, i32 ()** %slot
+      %t = call i32 %fp()
+      ret i32 %t
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto Result = runInterMonoFullConstantPropagation(F);
+  ASSERT_NE(Result.Results, nullptr);
+
+  auto *Ret = findFirst<ReturnInst>(F);
+  ASSERT_NE(Ret, nullptr);
+
+  CallBase *IndirectCall = nullptr;
+  for (auto &BB : *F) {
+    for (auto &I : BB) {
+      if (auto *Call = dyn_cast<CallBase>(&I)) {
+        if (Call->getCalledFunction() == nullptr) {
+          IndirectCall = Call;
+          break;
+        }
+      }
+    }
+  }
+  ASSERT_NE(IndirectCall, nullptr);
+
+  bool FoundConst = false;
+  for (const auto &Cell : Result.Results->getINMap()) {
+    if (Cell.first.Inst != Ret) {
+      continue;
+    }
+    auto It = Cell.second.Values.find(IndirectCall);
+    if (It != Cell.second.Values.end() &&
+        It->second.Tag == FullConstantTag::Const &&
+        It->second.ConstValue == 7) {
+      FoundConst = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(FoundConst);
+}
+
+TEST_F(MonoTest, InterMonoFullConstantPropagationMultiCalleeSameConstantRemainsConstant) {
+  const char *source = R"(
+    define i32 @foo() {
+    entry:
+      ret i32 7
+    }
+
+    define i32 @bar() {
+    entry:
+      ret i32 7
+    }
+
+    define i32 @test(i1 %c) {
+    entry:
+      %fp = select i1 %c, i32 ()* @foo, i32 ()* @bar
+      %t = call i32 %fp()
+      ret i32 %t
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto Result = runInterMonoFullConstantPropagation(F);
+  ASSERT_NE(Result.Results, nullptr);
+
+  auto *Ret = findFirst<ReturnInst>(F);
+  ASSERT_NE(Ret, nullptr);
+  auto *Call = findFirst<CallInst>(F);
+  ASSERT_NE(Call, nullptr);
+
+  bool FoundConst = false;
+  for (const auto &Cell : Result.Results->getINMap()) {
+    if (Cell.first.Inst != Ret) {
+      continue;
+    }
+    auto It = Cell.second.Values.find(Call);
+    if (It != Cell.second.Values.end() &&
+        It->second.Tag == FullConstantTag::Const &&
+        It->second.ConstValue == 7) {
+      FoundConst = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(FoundConst);
+}
+
 TEST_F(MonoTest, InterMonoSolverUsesIndirectCallResolverHook) {
   const char *source = R"(
     define void @callee(i32* %p) {
@@ -603,6 +916,85 @@ TEST_F(MonoTest, InterMonoSolverUsesIndirectCallResolverHook) {
     }
   }
   EXPECT_TRUE(SawCallFact);
+}
+
+TEST_F(MonoTest, IntraConstantPropagationJoinMissingBindingIsTop) {
+  const char *source = R"(
+    define i32 @test(i32* %p, i1 %c) {
+    entry:
+      br i1 %c, label %then, label %else
+    then:
+      store i32 7, i32* %p
+      br label %merge
+    else:
+      br label %merge
+    merge:
+      %v = load i32, i32* %p
+      ret i32 %v
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto Result = runIntraMonoConstantPropagation(F);
+  ASSERT_FALSE(Result.empty());
+
+  auto *Ret = findFirst<ReturnInst>(F);
+  auto *Load = findFirst<LoadInst>(F);
+  ASSERT_NE(Ret, nullptr);
+  ASSERT_NE(Load, nullptr);
+
+  auto It = Result.find(Ret);
+  ASSERT_NE(It, Result.end());
+  auto FactIt = It->second.find(Load);
+  if (FactIt == It->second.end()) {
+    SUCCEED() << "Absent binding semantically represents Top";
+  } else {
+    EXPECT_EQ(FactIt->second.Tag, ConstantPropagationTag::Top);
+  }
+}
+
+TEST_F(MonoTest, IntraFullConstantPropagationAliasLoadFromPartiallyInitializedStateIsTop) {
+  const char *source = R"(
+    define i32 @test(i32* %p, i1 %c) {
+    entry:
+      %q = bitcast i32* %p to i32*
+      br i1 %c, label %then, label %else
+    then:
+      store i32 7, i32* %p
+      br label %merge
+    else:
+      br label %merge
+    merge:
+      %v = load i32, i32* %q
+      ret i32 %v
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto Result = runIntraMonoFullConstantPropagation(F);
+  ASSERT_FALSE(Result.empty());
+
+  auto *Ret = findFirst<ReturnInst>(F);
+  auto *Load = findFirst<LoadInst>(F);
+  ASSERT_NE(Ret, nullptr);
+  ASSERT_NE(Load, nullptr);
+
+  auto It = Result.find(Ret);
+  ASSERT_NE(It, Result.end());
+  auto FactIt = It->second.Values.find(Load);
+  ASSERT_NE(FactIt, It->second.Values.end());
+  EXPECT_FALSE(It->second.Unreachable);
+  EXPECT_EQ(FactIt->second.Tag, FullConstantTag::Top);
 }
 
 TEST_F(MonoTest, CallBrContinuation) {
@@ -1883,6 +2275,85 @@ TEST_F(MonoTest, InterMonoSolverMissingNodeQueryReturnsAllTopForMustAnalysis) {
   auto Facts = Solver.getResultsAt(OtherRet);
   EXPECT_EQ(Facts.size(), 1u);
   EXPECT_EQ(Facts.count(G), 1u);
+}
+
+TEST_F(MonoTest, IntraMonoSolverMissingNodeQueryReturnsAllTopForMustAnalysis) {
+  const char *source = R"(
+    @g = global i32 0
+
+    define void @entry() {
+    entry:
+      ret void
+    }
+
+    define void @other() {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  auto *Entry = module->getFunction("entry");
+  auto *Other = module->getFunction("other");
+  auto *G = module->getNamedGlobal("g");
+  ASSERT_NE(Entry, nullptr);
+  ASSERT_NE(Other, nullptr);
+  ASSERT_NE(G, nullptr);
+
+  struct Domain : LLVMMonoAnalysisDomain<std::set<Value *>> {};
+  class ProblemT : public IntraMonoProblem<Domain> {
+  public:
+    ProblemT(Function *Entry, Value *TopFact)
+        : IntraMonoProblem<Domain>({Entry}), TopFact(TopFact) {}
+
+    mono_container_t allTop() override { return {TopFact}; }
+
+    mono_container_t normalFlow(Instruction *,
+                                const mono_container_t &In) override {
+      return In;
+    }
+
+    mono_container_t merge(const mono_container_t &Lhs,
+                           const mono_container_t &Rhs) override {
+      mono_container_t Out;
+      for (auto *V : Lhs) {
+        if (Rhs.count(V) == 1u) {
+          Out.insert(V);
+        }
+      }
+      return Out;
+    }
+
+    bool equal_to(const mono_container_t &Lhs,
+                  const mono_container_t &Rhs) override {
+      return Lhs == Rhs;
+    }
+
+    std::unordered_map<Instruction *, mono_container_t>
+    initialSeeds() override {
+      std::unordered_map<Instruction *, mono_container_t> Seeds;
+      Seeds[&getEntryPoints().front()->getEntryBlock().front()] = allTop();
+      return Seeds;
+    }
+
+  private:
+    Value *TopFact;
+  };
+
+  ProblemT Problem(Entry, G);
+  IntraMonoSolver<Domain> Solver(Problem);
+  Solver.solve();
+
+  auto *OtherRet = findFirst<ReturnInst>(Other);
+  ASSERT_NE(OtherRet, nullptr);
+
+  const auto &InFacts = Solver.getInResultsAt(OtherRet);
+  const auto &OutFacts = Solver.getOutResultsAt(OtherRet);
+  EXPECT_EQ(InFacts.size(), 1u);
+  EXPECT_EQ(InFacts.count(G), 1u);
+  EXPECT_EQ(OutFacts.size(), 1u);
+  EXPECT_EQ(OutFacts.count(G), 1u);
 }
 
 int main(int argc, char **argv) {

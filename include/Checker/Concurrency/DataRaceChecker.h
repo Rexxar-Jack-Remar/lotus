@@ -30,6 +30,10 @@ namespace concurrency {
  * memory accesses that may happen in parallel without proper synchronization.
  * Uses optional HappensBeforeAnalysis (C11 synchronizes-with) and explicit
  * independence (non-aliasing) to reduce false positives.
+ *
+ * Shared-memory pruning is currently checker-facing only through
+ * EscapeAnalysis. Other concurrency memory analyses remain standalone until
+ * they are explicitly wired here with checker-level contracts.
  */
 class DataRaceChecker {
 public:

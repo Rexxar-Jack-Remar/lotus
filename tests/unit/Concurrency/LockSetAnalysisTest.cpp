@@ -500,6 +500,42 @@ TEST_F(LockSetAnalysisTest, SharedLockCountsAsReadLockOnly) {
   EXPECT_TRUE(lsa.getMayWriteLockSetAt(after).count(lock) == 0);
 }
 
+TEST_F(LockSetAnalysisTest, OpenMPCriticalUsesNamedAnalysisIdentity) {
+  const char *source = R"(
+    @crit = global [8 x i32] zeroinitializer
+
+    declare void @__kmpc_critical(i8*, i32, [8 x i32]*)
+    declare void @__kmpc_end_critical(i8*, i32, [8 x i32]*)
+
+    define i32 @main() {
+    entry:
+      call void @__kmpc_critical(i8* null, i32 0, [8 x i32]* @crit)
+      %inside = add i32 1, 2
+      call void @__kmpc_end_critical(i8* null, i32 0, [8 x i32]* @crit)
+      ret i32 %inside
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *inside = findInstructionByName(*main_func, "inside");
+  ASSERT_NE(inside, nullptr);
+
+  const GlobalVariable *crit = module->getNamedGlobal("crit");
+  ASSERT_NE(crit, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(inside, crit));
+  EXPECT_TRUE(lsa.mustHoldLock(inside, crit));
+  EXPECT_EQ(lsa.getLockAcquires(crit).size(), 1u);
+  EXPECT_EQ(lsa.getLockReleases(crit).size(), 1u);
+}
+
 TEST_F(LockSetAnalysisTest, CalleeHeldExitLocksDoNotBecomeCallerMustLocks) {
   const char *source = R"(
     declare i32 @pthread_mutex_lock(i8*)
@@ -533,6 +569,47 @@ TEST_F(LockSetAnalysisTest, CalleeHeldExitLocksDoNotBecomeCallerMustLocks) {
   ASSERT_NE(lock, nullptr);
 
   EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+  EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
+TEST_F(LockSetAnalysisTest,
+       UnresolvedIndirectCallClearsMustLockStateConservatively) {
+  const char *source = R"(
+    @hook = external global void ()*
+
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @pthread_mutex_unlock(i8*)
+
+    @lock = global i8 0
+
+    define void @unlock_helper() {
+    entry:
+      call i32 @pthread_mutex_unlock(i8* @lock)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      %fn = load void ()*, void ()** @hook
+      call void %fn()
+      %after = add i32 1, 2
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
@@ -607,6 +684,14 @@ TEST_F(LockSetAnalysisTest,
   for (const Instruction *inst : lifetime.destructors) {
     EXPECT_FALSE(isa<ReturnInst>(inst));
   }
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(lock, nullptr);
+  EXPECT_FALSE(lsa.mustHoldLock(resume_inst, lock));
+  EXPECT_FALSE(lsa.mayHoldLock(resume_inst, lock));
 }
 
 int main(int argc, char **argv) {

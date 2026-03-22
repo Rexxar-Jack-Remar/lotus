@@ -951,6 +951,48 @@ TEST_F(MHPAnalysisTest, OpenMPTargetDataBoundaryOrdersTaskContinuation) {
   EXPECT_FALSE(mhp.mayHappenInParallel(store_shared, load_shared));
 }
 
+TEST_F(MHPAnalysisTest, UnresolvedIndirectCallEnablesConservativeForkFallback) {
+  const char *source = R"(
+    @hook = external global void ()*
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 1, 2
+      ret i8* null
+    }
+
+    define void @fork_helper() {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %fn = load void ()*, void ()** @hook
+      call void %fn()
+      %post = add i32 3, 4
+      ret i32 %post
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Function *worker = module->getFunction("worker");
+  ASSERT_NE(worker, nullptr);
+  const Instruction *worker_inst = findInstructionByName(*worker, "w");
+  ASSERT_NE(worker_inst, nullptr);
+
+  EXPECT_EQ(mhp.getThreadID(worker_inst), std::numeric_limits<ThreadID>::max());
+}
+
 // Main function for tests
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

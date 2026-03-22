@@ -727,6 +727,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
           const Function *callee = m_thread_api->getCallee(cb);
 
           if (!callee) {
+            bool resolved_indirect_target = false;
             // Indirect call: use call graph to find possible callees
             if (m_call_graph) {
               CallGraphNode *cgNode = (*m_call_graph)[cb->getFunction()];
@@ -739,6 +740,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
                     if (calleeNode) {
                       Function *possibleCallee = calleeNode->getFunction();
                       if (possibleCallee && !possibleCallee->isDeclaration()) {
+                        resolved_indirect_target = true;
                         CallContextID callee_ctx = node->getNodeID();
                         m_has_multi_context_nodes = true;
                         // Process this possible callee
@@ -776,6 +778,12 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
                   }
                 }
               }
+            }
+            if (!resolved_indirect_target) {
+              // Conservatively assume an unresolved indirect call could hide a
+              // thread entry and avoid proving non-overlap through optimistic
+              // single-thread reasoning.
+              enableIndirectForkConservatism();
             }
           } else if (!callee->isDeclaration()) {
             // Direct call to a defined function

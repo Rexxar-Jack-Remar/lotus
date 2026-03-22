@@ -7,6 +7,7 @@
 #include "Dataflow/Mono/Core/Domain.h"
 #include "Dataflow/Mono/Solver/InterSolver.h"
 
+#include <algorithm>
 #include <memory>
 
 using namespace llvm;
@@ -15,6 +16,30 @@ namespace mono {
 namespace {
 
 using TaintDomain = LLVMMonoAnalysisDomain<SetContainer<Value *>>;
+
+std::vector<Function *>
+resolveIndirectCalleesWithAA(Instruction *CallSite,
+                             lotus::AliasAnalysisWrapper *AA) {
+  std::vector<Function *> Callees;
+  auto *Call = dyn_cast_or_null<CallBase>(CallSite);
+  if (Call == nullptr || AA == nullptr || !AA->isInitialized()) {
+    return Callees;
+  }
+
+  std::vector<const Function *> Targets;
+  AA->getIndirectCallTargets(Call, Targets);
+  for (const auto *Target : Targets) {
+    if (Target == nullptr) {
+      continue;
+    }
+    auto *MutableTarget = const_cast<Function *>(Target);
+    if (std::find(Callees.begin(), Callees.end(), MutableTarget) ==
+        Callees.end()) {
+      Callees.push_back(MutableTarget);
+    }
+  }
+  return Callees;
+}
 
 class InterMonoTaintProblem : public InterMonoProblem<TaintDomain> {
 public:
@@ -148,6 +173,11 @@ public:
     return Seeds;
   }
 
+  std::vector<Function *>
+  resolve_indirect_callees(Instruction *CallSite) const override {
+    return resolveIndirectCalleesWithAA(CallSite, AA);
+  }
+
   const InterMonoTaintReport &getReport() const { return Report; }
 
 private:
@@ -273,7 +303,7 @@ private:
       return;
     }
     for (auto &Arg : Call->args()) {
-      if (In.count(Arg.get())) {
+      if (isTaintedValue(Arg.get(), In)) {
         Report.Leaks[Call].insert(Arg.get());
       }
     }

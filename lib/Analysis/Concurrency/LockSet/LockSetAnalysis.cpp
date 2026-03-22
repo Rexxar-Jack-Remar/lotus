@@ -107,6 +107,12 @@ void LockSetAnalysis::analyze() {
 // ============================================================================
 
 LockSet LockSetAnalysis::getMayLockSetAt(const Instruction *inst) const {
+  if (inst && !isa<CallBase>(inst) && !getRAIILocksReleasedAt(inst).empty()) {
+    auto it_exit = m_may_locksets_exit.find(inst);
+    if (it_exit != m_may_locksets_exit.end()) {
+      return it_exit->second;
+    }
+  }
   // Entry map is authoritative when present and non-empty.
   auto it = m_may_locksets_entry.find(inst);
   if (it != m_may_locksets_entry.end() && !it->second.empty())
@@ -195,6 +201,12 @@ LockSet LockSetAnalysis::getMayWriteLockSetAt(const Instruction *inst) const {
 }
 
 LockSet LockSetAnalysis::getMustLockSetAt(const Instruction *inst) const {
+  if (inst && !isa<CallBase>(inst) && !getRAIILocksReleasedAt(inst).empty()) {
+    auto it_exit = m_must_locksets_exit.find(inst);
+    if (it_exit != m_must_locksets_exit.end()) {
+      return it_exit->second;
+    }
+  }
   auto it = m_must_locksets_entry.find(inst);
   if (it != m_must_locksets_entry.end())
     return it->second;
@@ -832,6 +844,29 @@ void LockSetAnalysis::computeInterproceduralLockSets() {
 LockSet LockSetAnalysis::transfer(const Instruction *inst,
                                   const LockSet &in_set, bool is_must) const {
   LockSet out_set = in_set;
+  auto eraseReleasedLocks = [&](const std::vector<LockID> &locks) {
+    for (LockID lock : locks) {
+      out_set.erase(lock);
+      if (is_must && m_alias_analysis) {
+        LockSet to_remove;
+        for (const auto *held : out_set) {
+          if (mayAlias(held, lock)) {
+            to_remove.insert(held);
+          }
+        }
+        for (const auto *held : to_remove) {
+          out_set.erase(held);
+        }
+      }
+    }
+  };
+
+  std::vector<LockID> raii_releases = getRAIILocksReleasedAt(inst);
+  if (!raii_releases.empty()) {
+    eraseReleasedLocks(raii_releases);
+    return out_set;
+  }
+
   const CallBase *call = dyn_cast<CallBase>(inst);
   ThreadAPI::TD_TYPE call_type =
       call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
@@ -1163,6 +1198,12 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
 
       // Handle regular function calls with interprocedural summaries.
       auto callees = getCallees(call);
+      if (callees.empty()) {
+        if (is_must && shouldInvalidateMustLockState(call)) {
+          out_set.clear();
+        }
+        return out_set;
+      }
       for (Function *callee : callees) {
         if (!callee || callee->isDeclaration())
           continue;
@@ -1185,6 +1226,38 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
                                         bool is_must) const {
   out_read = in_read;
   out_write = in_write;
+  auto eraseReleasedLocks = [&](const std::vector<LockID> &locks) {
+    for (LockID lock : locks) {
+      out_read.erase(lock);
+      out_write.erase(lock);
+      if (is_must && m_alias_analysis) {
+        LockSet to_remove_r, to_remove_w;
+        for (const auto *held : out_read) {
+          if (mayAlias(held, lock)) {
+            to_remove_r.insert(held);
+          }
+        }
+        for (const auto *held : out_write) {
+          if (mayAlias(held, lock)) {
+            to_remove_w.insert(held);
+          }
+        }
+        for (const auto *held : to_remove_r) {
+          out_read.erase(held);
+        }
+        for (const auto *held : to_remove_w) {
+          out_write.erase(held);
+        }
+      }
+    }
+  };
+
+  std::vector<LockID> raii_releases = getRAIILocksReleasedAt(inst);
+  if (!raii_releases.empty()) {
+    eraseReleasedLocks(raii_releases);
+    return;
+  }
+
   const CallBase *call = dyn_cast<CallBase>(inst);
   ThreadAPI::TD_TYPE call_type =
       call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
@@ -1269,7 +1342,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         if (lock)
           out_read.insert(lock);
       }
-      break;
+      return;
 
     case ThreadAPI::TD_SHARED_WRLOCK:
       // std::shared_mutex::lock - acquire write lock
@@ -1284,7 +1357,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
           }
         }
       }
-      break;
+      return;
 
     case ThreadAPI::TD_SHARED_UNLOCK:
       // std::shared_mutex::unlock[_shared] - release lock
@@ -1308,7 +1381,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
           }
         }
       }
-      break;
+      return;
 
     case ThreadAPI::TD_SHARED_LOCK_CTOR:
       // std::shared_lock constructor - acquire read lock
@@ -1347,7 +1420,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
           out_read.insert(lock);
         }
       }
-      break;
+      return;
 
     case ThreadAPI::TD_LOCK_GUARD_CTOR:
     case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
@@ -1391,7 +1464,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
           out_write.insert(lock);
         }
       }
-      break;
+      return;
 
     case ThreadAPI::TD_SHARED_LOCK_DTOR:
     case ThreadAPI::TD_LOCK_GUARD_DTOR:
@@ -1427,7 +1500,8 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
             out_write.erase(l);
         }
       }
-    } break;
+      return;
+    }
 
     case ThreadAPI::TD_UNIQUE_LOCK_LOCK: {
       std::vector<LockID> locks =
@@ -1440,10 +1514,17 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       for (LockID lock : locks) {
         out_write.insert(lock);
       }
-    } break;
+      return;
+    }
 
     default:
       break;
+    }
+
+    if (getCallees(call).empty() && is_must &&
+        shouldInvalidateMustLockState(call)) {
+      out_read.clear();
+      out_write.clear();
     }
   }
 }
@@ -1631,6 +1712,36 @@ LockSetAnalysis::getUnderlyingRAIILocks(const Instruction *inst,
   return locks;
 }
 
+std::vector<LockID>
+LockSetAnalysis::getRAIILocksReleasedAt(const Instruction *inst) const {
+  std::vector<LockID> locks;
+  if (!inst) {
+    return locks;
+  }
+
+  const Function *parent_func = inst->getFunction();
+  auto raii_it = m_raii_locks.find(parent_func);
+  if (raii_it == m_raii_locks.end()) {
+    return locks;
+  }
+
+  for (const auto &entry : raii_it->second) {
+    const RAIILock::LockLifetime &lifetime = entry.second;
+    if (std::find(lifetime.destructors.begin(), lifetime.destructors.end(),
+                  inst) == lifetime.destructors.end()) {
+      continue;
+    }
+
+    for (const Value *lock : lifetime.underlyingLocks) {
+      if (LockID canonical = getCanonicalLock(lock)) {
+        locks.push_back(canonical);
+      }
+    }
+  }
+
+  return locks;
+}
+
 LockID LockSetAnalysis::getCppWrapperLockValue(const Instruction *inst) const {
   const auto *call = dyn_cast<CallBase>(inst);
   if (!call) {
@@ -1715,7 +1826,27 @@ bool LockSetAnalysis::isLockOperation(const Instruction *inst) const {
 
 LockID LockSetAnalysis::getLockValue(const Instruction *inst) const {
   if (m_thread_api->isTDAcquire(inst) || m_thread_api->isTDRelease(inst)) {
-    return getCanonicalLock(m_thread_api->getLockVal(inst));
+    const auto *call = dyn_cast<CallBase>(inst);
+    ThreadAPI::TD_TYPE type =
+        call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
+    switch (type) {
+    case ThreadAPI::TD_LOCK_GUARD_CTOR:
+    case ThreadAPI::TD_LOCK_GUARD_DTOR:
+    case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+    case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+    case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+    case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+    case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+    case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+    case ThreadAPI::TD_SHARED_LOCK_CTOR:
+    case ThreadAPI::TD_SHARED_LOCK_DTOR:
+      return getCanonicalLock(m_thread_api->getLockVal(inst));
+    default:
+      if (const Value *identity = m_thread_api->getAnalysisLockIdentity(inst)) {
+        return getCanonicalLock(identity);
+      }
+      return getCanonicalLock(m_thread_api->getLockVal(inst));
+    }
   }
   return getCppWrapperLockValue(inst);
 }
@@ -1768,6 +1899,27 @@ std::set<Function *> LockSetAnalysis::getCallees(const CallBase *call) const {
   }
 
   return callees;
+}
+
+bool LockSetAnalysis::shouldInvalidateMustLockState(
+    const CallBase *call) const {
+  if (!call) {
+    return false;
+  }
+
+  const Function *direct = call->getCalledFunction();
+  if (direct && direct->isIntrinsic()) {
+    return false;
+  }
+
+  if (call->doesNotAccessMemory() || call->onlyReadsMemory()) {
+    return false;
+  }
+
+  // If we could not resolve a definition or summarize the call, keep
+  // may-locks unchanged but drop must-lock certainty to avoid suppressing
+  // races after hidden unlocks or helper-mediated lock state changes.
+  return getCallees(call).empty();
 }
 
 void LockSetAnalysis::computeFunctionSummary(Function *func) {
@@ -1844,9 +1996,13 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   // We scan for all releases to populate summary.must_release (MayReleased)
   for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
     Instruction *inst = &*I;
+    std::vector<LockID> released = getRAIILocksReleasedAt(inst);
+    if (!released.empty()) {
+      summary.must_release.insert(released.begin(), released.end());
+      continue;
+    }
     if (m_thread_api->isTDRelease(inst)) {
-      LockID lock = getLockValue(inst);
-      if (lock) {
+      if (LockID lock = getLockValue(inst)) {
         summary.must_release.insert(lock);
       }
     }

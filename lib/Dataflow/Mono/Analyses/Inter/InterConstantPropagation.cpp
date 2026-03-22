@@ -7,6 +7,7 @@
 #include "Dataflow/Mono/Core/Problem.h"
 #include "Dataflow/Mono/Solver/InterSolver.h"
 
+#include <algorithm>
 #include <memory>
 
 using namespace llvm;
@@ -51,6 +52,68 @@ ConstantPropagationValue resolveValue(const ConstantPropagationMap &In,
   }
 
   return makeTop();
+}
+
+ConstantPropagationValue lookupOrTop(const ConstantPropagationMap &Map,
+                                     const Value *V) {
+  auto It = Map.find(V);
+  if (It != Map.end()) {
+    return It->second;
+  }
+  return makeTop();
+}
+
+bool equalMapSemantically(const ConstantPropagationMap &Lhs,
+                          const ConstantPropagationMap &Rhs) {
+  for (const auto &Entry : Lhs) {
+    if (Entry.first == nullptr) {
+      continue;
+    }
+    if (!equalValue(Entry.second, lookupOrTop(Rhs, Entry.first))) {
+      return false;
+    }
+  }
+  for (const auto &Entry : Rhs) {
+    if (Entry.first == nullptr) {
+      continue;
+    }
+    if (!equalValue(lookupOrTop(Lhs, Entry.first), Entry.second)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+ConstantPropagationMap makeMergeIdentity() {
+  return {{nullptr, makeBottom()}};
+}
+
+bool isMergeIdentity(const ConstantPropagationMap &Map) {
+  return Map.size() == 1 && Map.count(nullptr) == 1u;
+}
+
+std::vector<Function *>
+resolveIndirectCalleesWithAA(Instruction *CallSite,
+                             lotus::AliasAnalysisWrapper *AA) {
+  std::vector<Function *> Callees;
+  auto *Call = dyn_cast_or_null<CallBase>(CallSite);
+  if (Call == nullptr || AA == nullptr || !AA->isInitialized()) {
+    return Callees;
+  }
+
+  std::vector<const Function *> Targets;
+  AA->getIndirectCallTargets(Call, Targets);
+  for (const auto *Target : Targets) {
+    if (Target == nullptr) {
+      continue;
+    }
+    auto *MutableTarget = const_cast<Function *>(Target);
+    if (std::find(Callees.begin(), Callees.end(), MutableTarget) ==
+        Callees.end()) {
+      Callees.push_back(MutableTarget);
+    }
+  }
+  return Callees;
 }
 
 ConstantPropagationValue evalBinaryOp(unsigned Opcode,
@@ -110,6 +173,8 @@ public:
             std::vector<Function *>{Entry}, AA),
         AA(AA) {}
 
+  ConstantPropagationMap allTop() override { return makeMergeIdentity(); }
+
   ConstantPropagationMap normalFlow(Instruction *Inst,
                                     const ConstantPropagationMap &In) override {
     ConstantPropagationMap Out = In;
@@ -157,15 +222,22 @@ public:
 
   // merge() is the join operator at control-flow merge points.
   //
-  // Absence from the map means Bottom (unreachable / not yet analyzed).
-  // join(Bottom/absent, x) = x  (unreachable path contributes nothing)
-  // join(x, Bottom/absent) = x
+  // For reachable states, an absent key means Top (unknown), not Bottom.
+  // join(Bottom, x) = x  (unreachable path contributes nothing)
+  // join(x, Bottom) = x
   // join(x, x)             = x
   // join(Const(a), Const(b)) = Top  (different constants → unknown)
   // join(Const, Top)       = Top
   // join(Top, Top)         = Top
   ConstantPropagationMap merge(const ConstantPropagationMap &Lhs,
                                const ConstantPropagationMap &Rhs) override {
+    if (isMergeIdentity(Lhs)) {
+      return isMergeIdentity(Rhs) ? ConstantPropagationMap{} : Rhs;
+    }
+    if (isMergeIdentity(Rhs)) {
+      return Lhs;
+    }
+
     ConstantPropagationMap Out;
 
     auto joinValues =
@@ -181,19 +253,19 @@ public:
     };
 
     for (const auto &Entry : Lhs) {
-      auto It = Rhs.find(Entry.first);
-      if (It == Rhs.end()) {
-        // Absent in Rhs → treat as Bottom → join = Lhs value.
-        Out[Entry.first] = Entry.second;
-      } else {
-        Out[Entry.first] = joinValues(Entry.second, It->second);
+      if (Entry.first == nullptr) {
+        continue;
       }
+      Out[Entry.first] =
+          joinValues(Entry.second, lookupOrTop(Rhs, Entry.first));
     }
 
     for (const auto &Entry : Rhs) {
+      if (Entry.first == nullptr) {
+        continue;
+      }
       if (Lhs.find(Entry.first) == Lhs.end()) {
-        // Absent in Lhs → treat as Bottom → join = Rhs value.
-        Out[Entry.first] = Entry.second;
+        Out[Entry.first] = joinValues(makeTop(), Entry.second);
       }
     }
 
@@ -202,7 +274,7 @@ public:
 
   bool equal_to(const ConstantPropagationMap &Lhs,
                 const ConstantPropagationMap &Rhs) override {
-    return Lhs == Rhs;
+    return equalMapSemantically(Lhs, Rhs);
   }
 
   ConstantPropagationMap callFlow(Instruction *CallSite, Function *Callee,
@@ -231,7 +303,7 @@ public:
 
     // Preserve globals (very conservative).
     for (const auto &Entry : In) {
-      if (isa<GlobalValue>(Entry.first)) {
+      if (Entry.first != nullptr && isa<GlobalValue>(Entry.first)) {
         Out.insert(Entry);
       }
     }
@@ -247,7 +319,7 @@ public:
 
     ConstantPropagationMap Out;
     for (const auto &Entry : In) {
-      if (isa<GlobalValue>(Entry.first)) {
+      if (Entry.first != nullptr && isa<GlobalValue>(Entry.first)) {
         Out.insert(Entry);
       }
     }
@@ -285,18 +357,28 @@ public:
       return Out;
     }
 
-    // Unknown/indirect call: return value is unknown (Top), not unreachable.
     if (Callees.empty()) {
       Out[CallSite] = makeTop();
       return Out;
     }
 
-    // Multiple potential callees: conservatively mark return as unknown (Top).
-    // The precise constant, if any, will be re-established by returnFlow +
-    // merge.
-    if (Callees.size() > 1) {
-      Out[CallSite] = makeTop();
+    bool AllDefined = true;
+    for (auto *Callee : Callees) {
+      if (Callee == nullptr || Callee->isDeclaration() || Callee->empty()) {
+        AllDefined = false;
+        break;
+      }
     }
+    if (AllDefined) {
+      // The call-to-return edge bypasses the callee body, so the call result
+      // fact itself must contribute nothing here. Use Bottom so returnFlow can
+      // establish the precise value without being overwritten by implicit Top.
+      Out[CallSite] = makeBottom();
+      return Out;
+    }
+
+    // Unknown/external path: the return value is unknown (Top).
+    Out[CallSite] = makeTop();
     return Out;
   }
 
@@ -311,6 +393,11 @@ public:
     }
     Seeds[&F->getEntryBlock().front()] = ConstantPropagationMap{};
     return Seeds;
+  }
+
+  std::vector<Function *>
+  resolve_indirect_callees(Instruction *CallSite) const override {
+    return resolveIndirectCalleesWithAA(CallSite, AA);
   }
 
 private:

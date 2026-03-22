@@ -49,6 +49,9 @@ bool hasSequentialConsistency(const llvm::Instruction *inst);
 bool isRelaxed(const llvm::Instruction *inst);
 
 // Synchronizes-with relationship helpers
+// Direct atomic synchronization is exact-location only here; callers that want
+// alias-aware matching should perform that separately before relying on the
+// result. Fence-based synchronization remains witness-driven.
 bool canSynchronizeWith(const llvm::Instruction *release, const llvm::Instruction *acquire);
 bool participatesInReleaseSequence(const llvm::Instruction *inst);
 

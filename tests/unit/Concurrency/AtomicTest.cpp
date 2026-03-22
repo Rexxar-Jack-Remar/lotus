@@ -110,10 +110,10 @@ TEST_F(AtomicHappensBeforeTest, ReleaseAcquireOrdering) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
   HappensBeforeAnalysis hb(*module, mhp);
+  hb.setAliasAnalysis(mhp.getAliasAnalysis());
   hb.analyze();
 
-  // Without a reads-from witness, release/acquire on @flag is not enough for
-  // the analysis to prove a definite HB edge for the non-atomic accesses.
+  // Same-location release/acquire stays deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
   EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
 }
@@ -173,10 +173,10 @@ TEST_F(AtomicHappensBeforeTest, SequentialConsistency) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
   HappensBeforeAnalysis hb(*module, mhp);
+  hb.setAliasAnalysis(mhp.getAliasAnalysis());
   hb.analyze();
 
-  // Seq-cst alone does not let the analysis prove a cross-thread HB edge
-  // without a concrete reads-from witness.
+  // Seq-cst stays deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
   EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
 }
@@ -320,8 +320,7 @@ TEST_F(AtomicHappensBeforeTest, AcquireReleaseOrdering) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  // These atomic pairs are synchronization candidates, but the analysis no
-  // longer turns them into definite HB edges without reads-from evidence.
+  // Matching release/acquire pairs stay deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data1, load_data1));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data2, load_data2));
   EXPECT_FALSE(hb.mustPrecede(store_data1, load_data1));
@@ -412,8 +411,7 @@ TEST_F(AtomicHappensBeforeTest, MultipleAtomicVariables) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  // Same-location release/acquire operations are not upgraded to definite HB
-  // edges without a reads-from witness, so both non-atomic pairs remain MHP.
+  // Each same-location pair stays deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_x, load_x));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_y, load_y));
   EXPECT_FALSE(hb.mustPrecede(store_x, load_x));
@@ -494,8 +492,7 @@ TEST_F(AtomicHappensBeforeTest, AtomicChain) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  // The analysis does not build transitive HB through atomic chains without
-  // concrete reads-from evidence at each synchronization step.
+  // Direct atomic hand-off stays deferred without a concrete witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
   EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
 }
@@ -558,8 +555,8 @@ TEST_F(AtomicHappensBeforeTest, CompareAndSwap) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  // Even with CAS/RMW, the analysis now requires a definite reads-from witness
-  // before proving a cross-thread HB edge.
+  // Compare-exchange participation alone stays deferred without a concrete
+  // witness.
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
   EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
 }
@@ -838,7 +835,14 @@ TEST_F(AtomicHappensBeforeTest, MatchingFencesCreateHappensBefore) {
     entry:
       fence acquire
       %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %read, label %exit
+
+    read:
       %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
       ret i8* null
     }
 
@@ -895,7 +899,14 @@ TEST_F(AtomicHappensBeforeTest, MatchingFencesWithAliasedAtomicPointersCreateHB)
       %flag_alias = bitcast [1 x i32]* @flag_storage to i32*
       fence acquire
       %seen = load atomic i32, i32* %flag_alias acquire, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %read, label %exit
+
+    read:
       %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
       ret i8* null
     }
 
@@ -929,6 +940,124 @@ TEST_F(AtomicHappensBeforeTest, MatchingFencesWithAliasedAtomicPointersCreateHB)
 
   EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+}
+
+TEST_F(AtomicHappensBeforeTest,
+       DirectAliasedReleaseAcquireWithAliasAnalysisStaysDeferred) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag_storage = global [1 x i32] zeroinitializer, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      %flag_ptr = getelementptr inbounds [1 x i32], [1 x i32]* @flag_storage, i64 0, i64 0
+      store i32 7, i32* @data, align 4
+      store atomic i32 1, i32* %flag_ptr release, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %flag_alias = bitcast [1 x i32]* @flag_storage to i32*
+      %seen = load atomic i32, i32* %flag_alias acquire, align 4
+      %val = load i32, i32* @data, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer_func = module->getFunction("writer");
+  const Function *reader_func = module->getFunction("reader");
+  ASSERT_NE(writer_func, nullptr);
+  ASSERT_NE(reader_func, nullptr);
+
+  const Instruction *store_data = findStoreToGlobal(*writer_func, "data");
+  const Instruction *load_data = findInstructionByName(*reader_func, "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.setAliasAnalysis(mhp.getAliasAnalysis());
+  hb.analyze();
+
+  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+}
+
+TEST_F(AtomicHappensBeforeTest, AtomicRmwFenceWitnessCreatesHB) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 77, i32* @data, align 4
+      %old = atomicrmw xchg i32* @flag, i32 1 acq_rel
+      fence release
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      fence acquire
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer_func = module->getFunction("writer");
+  const Function *reader_func = module->getFunction("reader");
+  ASSERT_NE(writer_func, nullptr);
+  ASSERT_NE(reader_func, nullptr);
+
+  const Instruction *store_data = findStoreToGlobal(*writer_func, "data");
+  const Instruction *load_data = findInstructionByName(*reader_func, "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 
 // Main function for tests

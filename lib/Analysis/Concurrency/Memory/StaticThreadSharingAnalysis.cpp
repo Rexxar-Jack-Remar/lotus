@@ -181,9 +181,9 @@ void StaticThreadSharingAnalysis::visitMethod(
     Graph &G = m_dsa->getGraph(*F);
     for (const BasicBlock &BB : *F) {
       for (const Instruction &I : BB) {
-        if (isa<LoadInst>(I)) {
+        if (isa<LoadInst>(I) || isa<AtomicCmpXchgInst>(I)) {
           recordAccess(&I, false, ThreadEntry, G);
-        } else if (isa<StoreInst>(I)) {
+        } else if (isa<StoreInst>(I) || isa<AtomicRMWInst>(I)) {
           recordAccess(&I, true, ThreadEntry, G);
         }
       }
@@ -215,6 +215,10 @@ void StaticThreadSharingAnalysis::recordAccess(const Instruction *Inst,
     Ptr = LI->getPointerOperand();
   else if (const StoreInst *SI = dyn_cast<StoreInst>(Inst))
     Ptr = SI->getPointerOperand();
+  else if (const AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(Inst))
+    Ptr = RMW->getPointerOperand();
+  else if (const AtomicCmpXchgInst *CmpXchg = dyn_cast<AtomicCmpXchgInst>(Inst))
+    Ptr = CmpXchg->getPointerOperand();
 
   if (!Ptr)
     return;
@@ -302,6 +306,10 @@ StaticThreadSharingAnalysis::classify(const Instruction *Inst) const {
     Ptr = LI->getPointerOperand();
   else if (const StoreInst *SI = dyn_cast<StoreInst>(Inst))
     Ptr = SI->getPointerOperand();
+  else if (const AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(Inst))
+    Ptr = RMW->getPointerOperand();
+  else if (const AtomicCmpXchgInst *CmpXchg = dyn_cast<AtomicCmpXchgInst>(Inst))
+    Ptr = CmpXchg->getPointerOperand();
 
   if (!Ptr || !G.hasCell(*Ptr))
     return SharingClassification::MaybeShared;

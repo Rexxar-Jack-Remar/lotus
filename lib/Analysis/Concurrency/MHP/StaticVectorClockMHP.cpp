@@ -149,7 +149,8 @@ void StaticVectorClockMHP::buildStaticThreads() {
   std::deque<WorkItem> worklist;
   worklist.push_back({root_id, main_entry, {}});
 
-  std::set<std::pair<StaticThreadID, const SyncNode *>> visited;
+  using VisitKey = std::tuple<StaticThreadID, const SyncNode *, CallString>;
+  std::set<VisitKey> visited;
   while (!worklist.empty()) {
     StaticThreadID stid;
     const SyncNode *node;
@@ -157,7 +158,7 @@ void StaticVectorClockMHP::buildStaticThreads() {
     std::tie(stid, node, call_sites) = worklist.front();
     worklist.pop_front();
 
-    if (!node || !visited.insert({stid, node}).second)
+    if (!node || !visited.insert({stid, node, call_sites}).second)
       continue;
 
     StaticThread &st = m_static_threads[stid];
@@ -953,6 +954,7 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
           if (const Function *direct = m_thread_api->getCallee(cb)) {
             processCallee(direct);
           } else if (m_call_graph) {
+            bool resolved_indirect_target = false;
             if (CallGraphNode *cgNode = (*m_call_graph)[cb->getFunction()]) {
               for (auto &callRecord : *cgNode) {
                 if (!callRecord.first.hasValue() ||
@@ -960,10 +962,16 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
                   continue;
                 }
                 if (CallGraphNode *calleeNode = callRecord.second) {
+                  resolved_indirect_target = true;
                   processCallee(calleeNode->getFunction());
                 }
               }
             }
+            if (!resolved_indirect_target) {
+              enableIndirectForkConservatism();
+            }
+          } else {
+            enableIndirectForkConservatism();
           }
         }
       }

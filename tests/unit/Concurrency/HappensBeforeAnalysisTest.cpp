@@ -260,6 +260,116 @@ TEST_F(HappensBeforeAnalysisTest, PromiseFutureRepeatedQueriesRemainStable) {
   EXPECT_FALSE(hb.happensBefore(load_shared, store_shared));
 }
 
+TEST_F(HappensBeforeAnalysisTest, LatchWaitWithoutConcreteWitnessStaysDeferred) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+    @latch = global i8 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @fake_latch_count_down(i8*)
+    declare void @fake_latch_waitEv(i8*)
+
+    define i8* @producer(i8* %unused) {
+    entry:
+      store i32 5, i32* @shared, align 4
+      call void @fake_latch_count_down(i8* @latch)
+      ret i8* null
+    }
+
+    define i8* @consumer(i8* %unused) {
+    entry:
+      call void @fake_latch_waitEv(i8* @latch)
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @producer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @consumer, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *producer = module->getFunction("producer");
+  const Function *consumer = module->getFunction("consumer");
+  ASSERT_NE(producer, nullptr);
+  ASSERT_NE(consumer, nullptr);
+
+  const Instruction *store_shared = &producer->getEntryBlock().front();
+  const Instruction *load_shared = findInstructionByName(*consumer, "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       BarrierWaitWithoutConcreteWitnessStaysDeferred) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+    @barrier = global i8 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @fake_barrier_arrive_and_wait(i8*)
+
+    define i8* @writer(i8* %unused) {
+    entry:
+      store i32 8, i32* @shared, align 4
+      call void @fake_barrier_arrive_and_wait(i8* @barrier)
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %unused) {
+    entry:
+      call void @fake_barrier_arrive_and_wait(i8* @barrier)
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *writer = module->getFunction("writer");
+  const Function *reader = module->getFunction("reader");
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+
+  const Instruction *store_shared = &writer->getEntryBlock().front();
+  const Instruction *load_shared = findInstructionByName(*reader, "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
 TEST_F(HappensBeforeAnalysisTest, OpenMPTaskDependenciesContributeToHB) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }
@@ -521,8 +631,7 @@ TEST_F(HappensBeforeAnalysisTest, OpenMPFlushRelationFeedsHBAnalysis) {
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
 
-TEST_F(HappensBeforeAnalysisTest,
-       PlainReleaseAcquireWithoutWitnessDoesNotCreateHB) {
+TEST_F(HappensBeforeAnalysisTest, PlainReleaseAcquireWithoutWitnessStaysDeferred) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -595,7 +704,14 @@ TEST_F(HappensBeforeAnalysisTest, FenceWitnessStillContributesToHB) {
     entry:
       fence acquire
       %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %read, label %exit
+
+    read:
       %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
       ret i8* null
     }
 

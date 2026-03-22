@@ -10,15 +10,41 @@
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 
 namespace lotus {
 
+namespace {
+
+bool hasBranchWitness(const Instruction *inst) {
+  if (!inst) {
+    return false;
+  }
+
+  for (const User *user : inst->users()) {
+    const auto *cmp = dyn_cast<ICmpInst>(user);
+    if (!cmp) {
+      continue;
+    }
+    for (const User *cmp_user : cmp->users()) {
+      const auto *branch = dyn_cast<BranchInst>(cmp_user);
+      if (branch && branch->isConditional()) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+} // namespace
+
 HappensBeforeAnalysis::HappensBeforeAnalysis(Module &module,
                                              mhp::MHPAnalysis &mhp)
-    : m_module(module), m_mhp(mhp) {}
+    : m_module(module), m_mhp(mhp), m_alias_analysis(mhp.getAliasAnalysis()) {}
 
 void HappensBeforeAnalysis::analyze() {
   m_hb_cache.clear();
@@ -102,28 +128,23 @@ void HappensBeforeAnalysis::computeAtomicHappensBefore() {
         continue;
       }
 
-      bool matched = false;
       for (const Instruction *release_inst : release_witnesses) {
         for (const Instruction *acquire_inst : acquire_witnesses) {
           if (!hasReleaseSemantics(release_inst) ||
               !hasAcquireSemantics(acquire_inst)) {
             continue;
           }
-          if (!atomicLocationsMayAlias(release_inst, acquire_inst)) {
+          if (!hasConcreteFenceWitness(release_inst, acquire_inst)) {
             continue;
           }
-          if (m_atomic_hb_pairs.emplace(release_fence, acquire_fence).second) {
+          if (m_atomic_hb_pairs.emplace(release_inst, acquire_inst).second) {
             AtomicSyncWitness witness;
             witness.release = release_inst;
             witness.acquire = acquire_inst;
             witness.location = CppAtomics::getAtomicPointer(release_inst);
             m_atomic_sync_witnesses.push_back(witness);
-            addExtraHBEdge(release_fence, acquire_fence);
+            addExtraHBEdge(release_inst, acquire_inst);
           }
-          matched = true;
-          break;
-        }
-        if (matched) {
           break;
         }
       }
@@ -193,7 +214,91 @@ bool HappensBeforeAnalysis::atomicLocationsMayAlias(
   if (lhs_ptr == rhs_ptr) {
     return true;
   }
+  if (const Value *lhs_base = getUnderlyingObject(lhs_ptr)) {
+    lhs_ptr = lhs_base->stripPointerCasts();
+  }
+  if (const Value *rhs_base = getUnderlyingObject(rhs_ptr)) {
+    rhs_ptr = rhs_base->stripPointerCasts();
+  }
+  if (lhs_ptr == rhs_ptr) {
+    return true;
+  }
   return m_alias_analysis && m_alias_analysis->mayAlias(lhs_ptr, rhs_ptr);
+}
+
+bool HappensBeforeAnalysis::atomicLocationsMustAlias(
+    const Instruction *lhs, const Instruction *rhs) const {
+  const Value *lhs_ptr = CppAtomics::getAtomicPointer(lhs);
+  const Value *rhs_ptr = CppAtomics::getAtomicPointer(rhs);
+  if (!lhs_ptr || !rhs_ptr) {
+    return false;
+  }
+  lhs_ptr = lhs_ptr->stripPointerCasts();
+  rhs_ptr = rhs_ptr->stripPointerCasts();
+  if (lhs_ptr == rhs_ptr) {
+    return true;
+  }
+  return m_alias_analysis && m_alias_analysis->mustAlias(lhs_ptr, rhs_ptr);
+}
+
+size_t HappensBeforeAnalysis::countConcreteAtomicWitnesses(
+    const Instruction *inst) const {
+  if (!inst || CppAtomics::isFence(inst) || !CppAtomics::getAtomicPointer(inst)) {
+    return 0;
+  }
+
+  size_t count = 0;
+  for (const Instruction *candidate : m_atomic_instructions) {
+    if (candidate == inst || CppAtomics::isFence(candidate) ||
+        !CppAtomics::getAtomicPointer(candidate)) {
+      continue;
+    }
+    if (!atomicLocationsMustAlias(inst, candidate)) {
+      continue;
+    }
+    if (CppAtomics::hasReleaseSemantics(inst) &&
+        (CppAtomics::isStore(inst) || CppAtomics::isReadModifyWrite(inst))) {
+      if (!CppAtomics::hasReleaseSemantics(candidate) ||
+          !(CppAtomics::isStore(candidate) ||
+            CppAtomics::isReadModifyWrite(candidate))) {
+        continue;
+      }
+    } else if (CppAtomics::hasAcquireSemantics(inst) &&
+               (CppAtomics::isLoad(inst) ||
+                CppAtomics::isReadModifyWrite(inst))) {
+      if (!CppAtomics::hasAcquireSemantics(candidate) ||
+          !(CppAtomics::isLoad(candidate) ||
+            CppAtomics::isReadModifyWrite(candidate))) {
+        continue;
+      }
+    }
+    if (m_mhp.getThreadID(candidate) != m_mhp.getThreadID(inst)) {
+      continue;
+    }
+    ++count;
+  }
+  return count;
+}
+
+bool HappensBeforeAnalysis::hasConcreteFenceWitness(
+    const Instruction *release_inst, const Instruction *acquire_inst) const {
+  if (!release_inst || !acquire_inst) {
+    return false;
+  }
+
+  if (!atomicLocationsMustAlias(release_inst, acquire_inst)) {
+    return false;
+  }
+
+  // Soundness-first policy: only keep fence-derived witness pairs when the
+  // atomic object is unique on both sides. Without reads-from reasoning,
+  // broader may-alias pairing creates over-strong HB edges.
+  if (countConcreteAtomicWitnesses(release_inst) != 0 ||
+      countConcreteAtomicWitnesses(acquire_inst) != 0) {
+    return false;
+  }
+
+  return hasBranchWitness(acquire_inst);
 }
 
 void HappensBeforeAnalysis::buildSynchronizesWith() {
@@ -333,6 +438,59 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
   }
 
+  size_t direct_atomic_edges = 0;
+  size_t deferred_direct_atomic_relations = 0;
+  for (const Instruction *release : release_ops) {
+    if (CppAtomics::isFence(release)) {
+      continue;
+    }
+    for (const Instruction *acquire : acquire_ops) {
+      if (CppAtomics::isFence(acquire) || release == acquire) {
+        continue;
+      }
+      if (m_mhp.getThreadID(release) == m_mhp.getThreadID(acquire)) {
+        continue;
+      }
+      if (!sameAtomicLocation(release, acquire)) {
+        continue;
+      }
+      ++deferred_direct_atomic_relations;
+    }
+  }
+
+  size_t call_once_edges = 0;
+  size_t deferred_call_once_relations = 0;
+  for (size_t i = 0; i < call_once_ops.size(); ++i) {
+    for (size_t j = i + 1; j < call_once_ops.size(); ++j) {
+      if (!sameOnceFlag(call_once_ops[i], call_once_ops[j])) {
+        continue;
+      }
+      ++deferred_call_once_relations;
+    }
+  }
+
+  size_t latch_edges = 0;
+  size_t deferred_latch_relations = 0;
+  for (const Instruction *countdown : latch_countdowns) {
+    for (const Instruction *wait : latch_waits) {
+      if (!sameLatch(countdown, wait)) {
+        continue;
+      }
+      ++deferred_latch_relations;
+    }
+  }
+
+  size_t barrier_edges = 0;
+  size_t deferred_barrier_relations = 0;
+  for (const Instruction *arrive : barrier_arrives) {
+    for (const Instruction *wait : barrier_waits) {
+      if (!sameBarrier(arrive, wait)) {
+        continue;
+      }
+      ++deferred_barrier_relations;
+    }
+  }
+
   size_t omp_task_dependency_edges = 0;
   size_t omp_task_exclusion_relations = 0;
   size_t omp_task_unknown_relations = 0;
@@ -373,11 +531,23 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
   m_deferred_sync_counts["atomic_release_candidates"] = release_ops.size();
   m_deferred_sync_counts["atomic_acquire_candidates"] = acquire_ops.size();
+  m_deferred_sync_counts["atomic_direct_sync_edges"] = direct_atomic_edges;
+  m_deferred_sync_counts["atomic_direct_relations_deferred"] =
+      deferred_direct_atomic_relations;
   m_deferred_sync_counts["call_once_ops"] = call_once_ops.size();
+  m_deferred_sync_counts["call_once_sync_edges"] = call_once_edges;
+  m_deferred_sync_counts["call_once_relations_deferred"] =
+      deferred_call_once_relations;
   m_deferred_sync_counts["latch_ops"] =
       latch_countdowns.size() + latch_waits.size();
+  m_deferred_sync_counts["latch_sync_edges"] = latch_edges;
+  m_deferred_sync_counts["latch_relations_deferred"] =
+      deferred_latch_relations;
   m_deferred_sync_counts["barrier_ops"] =
       barrier_arrives.size() + barrier_waits.size();
+  m_deferred_sync_counts["barrier_sync_edges"] = barrier_edges;
+  m_deferred_sync_counts["barrier_relations_deferred"] =
+      deferred_barrier_relations;
   m_deferred_sync_counts["omp_task_api_ops"] = omp_task_ops.size();
   m_deferred_sync_counts["omp_task_dependency_edges"] =
       omp_task_dependency_edges;
@@ -396,9 +566,15 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   errs() << "HB deferred sync candidates: atomics="
          << m_deferred_sync_counts["atomic_release_candidates"] +
                 m_deferred_sync_counts["atomic_acquire_candidates"]
+         << ", atomic_sync_edges="
+         << m_deferred_sync_counts["atomic_direct_sync_edges"]
          << ", call_once=" << m_deferred_sync_counts["call_once_ops"]
+         << ", call_once_edges="
+         << m_deferred_sync_counts["call_once_sync_edges"]
          << ", latches=" << m_deferred_sync_counts["latch_ops"]
+         << ", latch_edges=" << m_deferred_sync_counts["latch_sync_edges"]
          << ", barriers=" << m_deferred_sync_counts["barrier_ops"]
+         << ", barrier_edges=" << m_deferred_sync_counts["barrier_sync_edges"]
          << ", omp_task_ops=" << m_deferred_sync_counts["omp_task_api_ops"]
          << ", omp_task_edges=" << omp_task_dependency_edges << "\n";
 }
@@ -524,7 +700,18 @@ bool HappensBeforeAnalysis::sameAtomicLocation(
   if (!p1 || !p2) {
     return false;
   }
-  if (p1->stripPointerCasts() == p2->stripPointerCasts()) {
+  p1 = p1->stripPointerCasts();
+  p2 = p2->stripPointerCasts();
+  if (p1 == p2) {
+    return true;
+  }
+  if (const Value *base1 = getUnderlyingObject(p1)) {
+    p1 = base1->stripPointerCasts();
+  }
+  if (const Value *base2 = getUnderlyingObject(p2)) {
+    p2 = base2->stripPointerCasts();
+  }
+  if (p1 == p2) {
     return true;
   }
   return m_alias_analysis && m_alias_analysis->mayAlias(p1, p2);

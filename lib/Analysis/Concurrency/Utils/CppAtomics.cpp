@@ -144,6 +144,7 @@ bool isRelaxed(const llvm::Instruction *inst) {
 // Synchronizes-with relationship helpers
 bool canSynchronizeWith(const llvm::Instruction *release, const llvm::Instruction *acquire) {
     if (!release || !acquire) return false;
+    if (isFence(release) || isFence(acquire)) return false;
 
     // Release operation must have release semantics
     if (!hasReleaseSemantics(release)) return false;
@@ -157,8 +158,9 @@ bool canSynchronizeWith(const llvm::Instruction *release, const llvm::Instructio
 
     if (!relPtr || !acqPtr) return false;
 
-    // Simple pointer equality check (alias analysis would be more precise)
-    return relPtr == acqPtr;
+    // Direct atomic synchronization is exact-location only here. Callers that
+    // want alias-aware matching should add that policy at a higher layer.
+    return relPtr->stripPointerCasts() == acqPtr->stripPointerCasts();
 }
 
 bool participatesInReleaseSequence(const llvm::Instruction *inst) {

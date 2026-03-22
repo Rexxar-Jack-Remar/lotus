@@ -2,6 +2,7 @@
 
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "Solvers/SMT/LIBSMT/SMTFactory.h"
+#include "Solvers/SMT/LIBSMT/SMTSolver.h"
 #include "Utils/ADT/PushPopCache.h"
 
 #include <llvm/IR/BasicBlock.h>
@@ -9,10 +10,8 @@
 
 #include <string>
 #include <unordered_map>
-
-class SMTExpr;
-class SMTExprVec;
-class SMTSolver;
+#include <unordered_set>
+#include <vector>
 
 namespace lotus {
 namespace gvfg {
@@ -28,6 +27,11 @@ using llvm::DominatorTree;
 // - gated predicates for PHI incoming values
 // - combined dependencies for one assignment edge
 class GuardedValueFlowSolver : public SMTSolver {
+public:
+  struct QueryContext {
+    BasicBlock *previous_block{nullptr};
+  };
+
 protected:
   std::unordered_map<const GuardedValueFlowNode *, SMTExpr> NodeExprMap;
   std::unordered_map<std::string, const GuardedValueFlowNode *> NodeSymbolNameMap;
@@ -38,29 +42,26 @@ public:
   explicit GuardedValueFlowSolver(SMTFactory &factory, const DataLayout &dl);
   virtual ~GuardedValueFlowSolver();
 
-  SMTExprVec getCtrlDeps(const GuardedValueFlowNode *node, void *args = nullptr);
-  virtual SMTExprVec getCtrlDeps(BasicBlock *block,
-                                 const GuardedValueFlowGraph *graph,
-                                 void *args = nullptr);
-
-  virtual std::pair<SMTExprVec, SMTExprVec>
+  SMTExprVec getCtrlDeps(const GuardedValueFlowNode *node,
+                        const QueryContext *context = nullptr);
+  SMTExprVec getCtrlDeps(BasicBlock *block, const GuardedValueFlowGraph *graph,
+                        const QueryContext *context = nullptr);
+  std::pair<SMTExprVec, SMTExprVec>
   getCtrlDepsPair(BasicBlock *block, const GuardedValueFlowGraph *graph,
-                  void *args = nullptr) {
-    return _getCtrlDeps(block, graph);
-  }
+                  const QueryContext *context = nullptr);
 
-  virtual SMTExprVec getDataDeps(const GuardedValueFlowNode *node,
-                                 void *args = nullptr);
+  SMTExprVec getDataDeps(const GuardedValueFlowNode *node,
+                        const QueryContext *context = nullptr);
 
-  virtual SMTExprVec getPhiGated(const GuardedValueFlowPhiNode *phi_node,
-                                 GuardedValueFlowPhiNode::Incoming incoming,
-                                 void *args = nullptr);
+  SMTExprVec getPhiGated(const GuardedValueFlowPhiNode *phi_node,
+                        GuardedValueFlowPhiNode::Incoming incoming,
+                        const QueryContext *context = nullptr);
   SMTExprVec getPhiGated(const GuardedValueFlowPhiNode *phi_node,
                         const GuardedValueFlowNode *value, BasicBlock *block,
-                        void *args = nullptr);
+                        const QueryContext *context = nullptr);
   SMTExprVec getPhiGated(const GuardedValueFlowPhiNode *phi_node,
                         const GuardedValueFlowNode *value,
-                        void *args = nullptr);
+                        const QueryContext *context = nullptr);
 
   virtual SMTExprVec getDeps(const GuardedValueFlowNode *node,
                              const GuardedValueFlowNode *child);
@@ -107,6 +108,16 @@ protected:
   PushPopCache<const GuardedValueFlowNode *> ConstraintCache;
   PushPopCache<BasicBlock *> BBCache;
 
+  virtual std::pair<SMTExprVec, SMTExprVec>
+  computeCtrlDepsPair(BasicBlock *block, const GuardedValueFlowGraph *graph,
+                      const QueryContext *context);
+  virtual std::pair<SMTExprVec, SMTExprVec>
+  computePhiGatedPair(const GuardedValueFlowPhiNode *phi_node,
+                      GuardedValueFlowPhiNode::Incoming incoming,
+                      const QueryContext *context);
+  virtual SMTExprVec
+  computeDataDeps(const GuardedValueFlowNode *node, const QueryContext *context);
+
 private:
   PushPopCache<const GuardedValueFlowNode *> FunctionArgumentCache;
   PushPopCache<const GuardedValueFlowCallOutputNode *> CallSiteOutputCache;
@@ -138,26 +149,22 @@ public:
   DTGuardedValueFlowSolver(SMTFactory &factory, const DataLayout &dl,
                            const DominatorTree *dt)
       : GuardedValueFlowSolver(factory, dl), DT(dt) {}
-
-  virtual SMTExprVec getCtrlDeps(BasicBlock *block,
-                                 const GuardedValueFlowGraph *graph,
-                                 void *args = nullptr) override;
-  virtual std::pair<SMTExprVec, SMTExprVec>
-  getCtrlDepsPair(BasicBlock *block, const GuardedValueFlowGraph *graph,
-                  void *args = nullptr) override {
-    auto *prev_block = static_cast<BasicBlock *>(args);
-    return _getCtrlDepsWrapper(block, graph, prev_block);
-  }
-
-  virtual SMTExprVec getDataDeps(const GuardedValueFlowNode *node,
-                                 void *args = nullptr) override;
-  virtual SMTExprVec getPhiGated(const GuardedValueFlowPhiNode *phi_node,
-                                 GuardedValueFlowPhiNode::Incoming incoming,
-                                 void *args = nullptr) override;
   virtual SMTExprVec getDeps(const GuardedValueFlowNode *node,
                              const GuardedValueFlowNode *child) override;
 
   virtual void reset() override;
+
+protected:
+  std::pair<SMTExprVec, SMTExprVec>
+  computeCtrlDepsPair(BasicBlock *block, const GuardedValueFlowGraph *graph,
+                      const QueryContext *context) override;
+  std::pair<SMTExprVec, SMTExprVec>
+  computePhiGatedPair(const GuardedValueFlowPhiNode *phi_node,
+                      GuardedValueFlowPhiNode::Incoming incoming,
+                      const QueryContext *context) override;
+  SMTExprVec
+  computeDataDeps(const GuardedValueFlowNode *node,
+                  const QueryContext *context) override;
 
 private:
   std::pair<SMTExprVec, SMTExprVec>

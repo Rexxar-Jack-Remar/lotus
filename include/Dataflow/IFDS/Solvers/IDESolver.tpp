@@ -279,16 +279,17 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
                                              : identity_func;
 
         for (const llvm::Instruction* ret_site : get_return_sites(incoming.call)) {
-            SummaryEdge<Fact> summary_edge(incoming.call, ret_site,
-                                           incoming.call_fact, exit_fact);
-            if (m_config.record_edges() && m_summary_edges.insert(summary_edge).second) {
-                on_summary_edge_added(summary_edge);
-            }
             FactSet return_facts = m_problem.return_flow(
                 incoming.call, exit_inst, ret_site, callee, exit_fact,
                 incoming.call_fact);
             preserve_zero(return_facts, exit_fact);
             for (const auto& ret_fact : return_facts) {
+                SummaryEdge<Fact> summary_edge(incoming.call, ret_site,
+                                               incoming.call_fact, ret_fact);
+                if (m_config.record_edges() &&
+                    m_summary_edges.insert(summary_edge).second) {
+                    on_summary_edge_added(summary_edge);
+                }
                 auto ret_ef = m_problem.return_edge_function(
                     incoming.call, callee, exit_inst, ret_site, exit_fact,
                     ret_fact);

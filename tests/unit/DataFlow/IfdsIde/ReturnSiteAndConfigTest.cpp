@@ -372,6 +372,65 @@ TEST(ReturnSiteAwareSolverTest, SummaryEdgesRetainReturnSiteIdentity) {
   EXPECT_TRUE(saw_unwind_site);
 }
 
+TEST(ReturnSiteAwareSolverTest, IFDSSummaryEdgesUseCallerReturnFact) {
+  auto fixture = buildInternalInvokeFixture();
+  SummaryReturnSiteIFDSProblem problem;
+  IFDSSolver<SummaryReturnSiteIFDSProblem> solver(problem);
+  solver.solve(*fixture.module);
+
+  std::vector<SummaryEdge<ReturnSiteFact>> summaries;
+  solver.get_summary_edges(summaries);
+
+  bool saw_normal_fact = false;
+  bool saw_exceptional_fact = false;
+  for (const auto &summary : summaries) {
+    if (summary.call_site != fixture.invoke) {
+      continue;
+    }
+    if (summary.return_site == fixture.normal_site) {
+      saw_normal_fact |= summary.return_fact == ReturnSiteFact::normal();
+    }
+    if (summary.return_site == fixture.unwind_site) {
+      saw_exceptional_fact |=
+          summary.return_fact == ReturnSiteFact::exceptional();
+    }
+  }
+
+  EXPECT_TRUE(saw_normal_fact);
+  EXPECT_TRUE(saw_exceptional_fact);
+}
+
+TEST(ReturnSiteAwareSolverTest, IDESummaryEdgesUseCallerReturnFact) {
+  auto fixture = buildInternalInvokeFixture();
+  ReturnSiteIDEProblem problem;
+  IDESolver<ReturnSiteIDEProblem> solver(problem);
+  auto config = solver.get_solver_config();
+  config.set_record_edges(true);
+  solver.set_solver_config(config);
+  solver.solve(*fixture.module);
+
+  std::vector<SummaryEdge<ReturnSiteFact>> summaries;
+  solver.get_summary_edges(summaries);
+
+  bool saw_normal_fact = false;
+  bool saw_exceptional_fact = false;
+  for (const auto &summary : summaries) {
+    if (summary.call_site != fixture.invoke) {
+      continue;
+    }
+    if (summary.return_site == fixture.normal_site) {
+      saw_normal_fact |= summary.return_fact == ReturnSiteFact::normal();
+    }
+    if (summary.return_site == fixture.unwind_site) {
+      saw_exceptional_fact |=
+          summary.return_fact == ReturnSiteFact::exceptional();
+    }
+  }
+
+  EXPECT_TRUE(saw_normal_fact);
+  EXPECT_TRUE(saw_exceptional_fact);
+}
+
 TEST(IDEConfigTest, ComputeValuesFalseSkipsValueMaterialization) {
   llvm::LLVMContext ctx;
   auto module = std::make_unique<llvm::Module>("compute_values_disabled", ctx);
