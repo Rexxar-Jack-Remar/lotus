@@ -32,8 +32,8 @@
 // Example:
 //   int x = 5;           // AddrNode (defines x)
 //   int *p = &x;         // CopyNode (p = &x)
-//   int y = *p;          // LoadNode with LoadMu (reads memory)
-//   *p = 10;             // StoreNode with StoreChi (writes memory)
+//   int *y = *p;         // LoadNode reads a reaching memory version
+//   *p = 10;             // StoreNode defines the next memory version
 //
 // == Key Features ==
 //
@@ -86,6 +86,7 @@
 
 #pragma once
 
+#include "IR/ICFG/CallGraph.h"
 #include "IR/SVFG/SVFGBase.h"
 #include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFGEdge.h"
@@ -153,11 +154,11 @@ using FuncToFormalParmMap =
 using FuncToFormalRetMap =
     std::unordered_map<const llvm::Function *, SVFGNodeSet>;
 
-/// @brief LoadInst to LoadMu SVFG nodes (Memory SSA)
+/// @brief Legacy import index for LoadMu nodes (V6 text format only)
 using LoadInstToMuMap =
     std::unordered_map<const llvm::LoadInst *, SVFGNodeSet>;
 
-/// @brief StoreInst to StoreChi SVFG nodes (Memory SSA)
+/// @brief Legacy import index for StoreChi nodes (V6 text format only)
 using StoreInstToChiMap =
     std::unordered_map<const llvm::StoreInst *, SVFGNodeSet>;
 
@@ -212,6 +213,13 @@ private:
     
     /// @brief Value mapping: LLVM Value -> SVFGNode ID (top-level pointers)
     ValueToNodeMap valueToNodeMap;
+    /// @brief Stable defining node per top-level value ID.
+    ///
+    /// Auxiliary nodes such as ActualParm/ActualRet may reuse an existing
+    /// valueId, so DDA cannot recover the canonical defining node by scanning
+    /// all SVFG nodes. This map records the defining node chosen by the
+    /// builder's `setValueNode()` binding.
+    std::unordered_map<uint32_t, uint32_t> valueIdToDefNodeMap;
     
     /// @brief Memory SSA mapping: Memory region version -> SVFGNode ID
     MRVerToNodeMap mssaVerToNodeMap;
@@ -254,7 +262,8 @@ private:
     /// @brief Indirect-callsite indices used by DDA for on-the-fly call graph refinement.
     ///
     /// `funPtrToIndCallSites` indexes unresolved indirect callsites by the
-    /// defining function-pointer node ID.
+    /// defining function-pointer's stable top-level value ID (falling back to
+    /// node ID only when a value ID is unavailable).
     std::unordered_map<uint32_t, std::unordered_set<const llvm::CallBase *>>
         funPtrToIndCallSites;
     std::unordered_map<const llvm::CallBase *,
@@ -281,6 +290,7 @@ private:
     std::unordered_map<CallSiteCalleeKey, uint32_t, CallSiteCalleeKeyHash>
         callSiteCalleeToId;
     uint32_t nextCallSiteId = 1;
+    std::unique_ptr<LTCallGraph> refinedCallGraph;
 
 public:
     /// @brief Constructor
@@ -372,9 +382,31 @@ public:
         auto it = valueToNodeMap.find(val);
         return (it != valueToNodeMap.end()) ? getNode(it->second) : nullptr;
     }
+
+    inline const ValueToNodeMap &getValueNodeMap() const { return valueToNodeMap; }
+
+    inline SVFGNode* getValueIdNode(uint32_t valueId) const {
+        auto it = valueIdToDefNodeMap.find(valueId);
+        return (it != valueIdToDefNodeMap.end()) ? getNode(it->second) : nullptr;
+    }
+
+    /// @brief Resolve a DDA abstract id to its canonical SVFG definition node.
+    ///
+    /// DDA ids live in the abstract value/object-id namespaces, not the raw
+    /// SVFG node-id namespace:
+    /// - value ids map to top-level defining nodes via getValueIdNode()
+    /// - object ids map to the canonical defining Addr/value node for the
+    ///   underlying allocation-site value
+    ///
+    /// Returns nullptr if the id is unknown to the current graph.
+    SVFGNode* getCanonicalDefNodeForDDAId(uint32_t ddaId) const;
     
     inline void setValueNode(const llvm::Value* val, uint32_t nodeId) {
         valueToNodeMap[val] = nodeId;
+        if (SVFGNode *node = getNode(nodeId)) {
+            if (node->hasValueId())
+                valueIdToDefNodeMap[node->getValueId()] = nodeId;
+        }
     }
 
     //===------------------------------------------------------------------===
@@ -474,22 +506,6 @@ public:
     }
 
     //===------------------------------------------------------------------===
-    // Memory SSA instruction indices (LoadMu / StoreChi)
-    //===------------------------------------------------------------------===
-
-    inline const SVFGNodeSet &getLoadMus(const llvm::LoadInst *li) const {
-        static SVFGNodeSet empty;
-        auto it = loadInstToMuMap.find(li);
-        return (it != loadInstToMuMap.end()) ? it->second : empty;
-    }
-
-    inline const SVFGNodeSet &getStoreChis(const llvm::StoreInst *si) const {
-        static SVFGNodeSet empty;
-        auto it = storeInstToChiMap.find(si);
-        return (it != storeInstToChiMap.end()) ? it->second : empty;
-    }
-
-    //===------------------------------------------------------------------===
     // ICFG integration
     //===------------------------------------------------------------------===
     
@@ -556,7 +572,11 @@ public:
     }
 
     /// @brief Return all indirect call sites that may invoke \p callee.
-    /// Mirrors SVF's CallGraph::getIndCallSitesInvokingCallee().
+    ///
+    /// This is a potential-callee index, not just the subset whose inter edges
+    /// have already been materialized. DDA uses it to proactively refine other
+    /// unresolved callsites when entering a callee, mirroring SVF's call-graph
+    /// side index.
     inline const std::unordered_set<const llvm::CallBase *> &
     getIndCallSitesInvokingCallee(const llvm::Function *callee) const {
         static const std::unordered_set<const llvm::CallBase *> empty;
@@ -574,15 +594,24 @@ public:
                                     const llvm::Function *callee) {
         if (!cs || !callee) return false;
         auto &s = callSiteToConnectedCallees[cs];
-        if (!s.insert(callee).second)
-            return false;
+        const bool inserted = s.insert(callee).second;
         CallSiteCalleeKey key{cs, callee};
         if (callSiteCalleeToId.find(key) == callSiteCalleeToId.end())
             callSiteCalleeToId.emplace(key, nextCallSiteId++);
         // Populate reverse index: callee -> indirect call sites.
         if (!cs->getCalledFunction())
             calleeToIndCallSites[callee].insert(cs);
-        return true;
+        if (!refinedCallGraph) {
+            if (const llvm::Function *caller = cs->getFunction()) {
+                if (const llvm::Module *M = caller->getParent())
+                    initializeRefinedCallGraph(*const_cast<llvm::Module *>(M));
+            }
+        }
+        if (refinedCallGraph) {
+            if (const llvm::Function *caller = cs->getFunction())
+                refinedCallGraph->addResolvedCallEdge(cs, caller, callee);
+        }
+        return inserted;
     }
 
     inline bool hasConnectedCallee(const llvm::CallBase *cs,
@@ -598,6 +627,12 @@ public:
         static const std::unordered_set<const llvm::Function *> empty;
         auto it = callSiteToConnectedCallees.find(cs);
         return (it != callSiteToConnectedCallees.end()) ? it->second : empty;
+    }
+
+    void initializeRefinedCallGraph(llvm::Module &M);
+
+    inline const LTCallGraph *getRefinedCallGraph() const {
+        return refinedCallGraph.get();
     }
 
     /// @brief Return callsite ID for (cs, callee); 0 if not connected.

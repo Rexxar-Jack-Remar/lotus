@@ -20,7 +20,9 @@ static cl::OptionCategory
 
 // Define options
 cl::opt<bool> SaberFullSVFG("saber-full-svfg",
-                            cl::desc("Use full SVFG (vs pointer-only)"),
+                            cl::desc("Use the full, unoptimized SABER SVFG "
+                                     "(default uses the optimized "
+                                     "compatibility graph)"),
                             cl::init(false), cl::cat(SaberCategory));
 
 cl::opt<unsigned>

@@ -32,6 +32,7 @@ static constexpr const char *kHeaderV3 = "SVFG-TEXT-V3";
 static constexpr const char *kHeaderV4 = "SVFG-TEXT-V4";
 static constexpr const char *kHeaderV5 = "SVFG-TEXT-V5";
 static constexpr const char *kHeaderV6 = "SVFG-TEXT-V6";
+static constexpr const char *kHeaderV7 = "SVFG-TEXT-V7";
 
 namespace {
 
@@ -362,8 +363,25 @@ static void registerNodeBindings(SVFG &graph, SVFGNode *node) {
   if (!node)
     return;
 
-  if (const Value *V = node->getValue())
-    graph.setValueNode(V, node->getId());
+  if (const Value *V = node->getValue()) {
+    switch (node->getNodeKind()) {
+    case SVFGK::Addr:
+    case SVFGK::Copy:
+    case SVFGK::Load:
+    case SVFGK::Gep:
+    case SVFGK::BinaryOp:
+    case SVFGK::UnaryOp:
+    case SVFGK::Cmp:
+    case SVFGK::Phi:
+    case SVFGK::IntraPhi:
+    case SVFGK::InterPhi:
+    case SVFGK::FormalParm:
+      graph.setValueNode(V, node->getId());
+      break;
+    default:
+      break;
+    }
+  }
 
   if ((node->isStmtNode() || node->isPhiNode()) && node->getInstruction())
     graph.setDef(node->getInstruction(), node->getId());
@@ -497,7 +515,9 @@ static SVFGNode *createNodeForKind(const ParsedNode &parsed,
     case SVFGK::VarArg:
     case SVFGK::FormalIn:
     case SVFGK::EntryChi:
-      if (resolvedFunction && !resolvedFunction->isDeclaration())
+      if (parsed.kind == SVFGK::EntryChi && !resolvedFunction)
+        icfgNode = mutableICFG->getGlobalInitICFGNode();
+      else if (resolvedFunction && !resolvedFunction->isDeclaration())
         icfgNode = mutableICFG->getFunEntryICFGNode(resolvedFunction);
       break;
     case SVFGK::FormalRet:
@@ -528,104 +548,151 @@ static SVFGNode *createNodeForKind(const ParsedNode &parsed,
     }
   }
 
+  SVFGNode *node = nullptr;
   switch (parsed.kind) {
   case SVFGK::Stmt:
-    return new StmtSVFGNode(parsed.id, SVFGK::Stmt, icfgNode, resolvedValue);
+    node = new StmtSVFGNode(parsed.id, SVFGK::Stmt, icfgNode, resolvedValue);
+    break;
   case SVFGK::Addr:
-    return new AddrSVFGNode(parsed.id, icfgNode, resolvedValue, parsed.aux0);
+    node = new AddrSVFGNode(parsed.id, icfgNode, resolvedValue, parsed.aux0);
+    break;
   case SVFGK::Copy:
-    return new CopySVFGNode(parsed.id, icfgNode, resolvedValue);
+    node = new CopySVFGNode(parsed.id, icfgNode, resolvedValue);
+    break;
   case SVFGK::Load:
-    return new LoadSVFGNode(parsed.id, icfgNode, resolvedValue, parsed.aux0);
+    node = new LoadSVFGNode(parsed.id, icfgNode, resolvedValue, parsed.aux0);
+    break;
   case SVFGK::Store:
-    return new StoreSVFGNode(parsed.id, icfgNode, resolvedValue, parsed.aux0);
+    node = new StoreSVFGNode(parsed.id, icfgNode, resolvedValue, parsed.aux0);
+    break;
   case SVFGK::Gep:
-    return new GepSVFGNode(parsed.id, icfgNode, resolvedValue);
+    node = new GepSVFGNode(parsed.id, icfgNode, resolvedValue);
+    break;
   case SVFGK::BinaryOp:
-    return new BinaryOpSVFGNode(parsed.id, icfgNode, resolvedValue);
+    node = new BinaryOpSVFGNode(parsed.id, icfgNode, resolvedValue);
+    break;
   case SVFGK::UnaryOp:
-    return new UnaryOpSVFGNode(parsed.id, icfgNode, resolvedValue);
+    node = new UnaryOpSVFGNode(parsed.id, icfgNode, resolvedValue);
+    break;
   case SVFGK::Cmp:
-    return new CmpSVFGNode(parsed.id, icfgNode, resolvedValue);
+    node = new CmpSVFGNode(parsed.id, icfgNode, resolvedValue);
+    break;
   case SVFGK::Branch:
-    return new BranchSVFGNode(parsed.id, icfgNode, resolvedValue);
+    node = new BranchSVFGNode(parsed.id, icfgNode, resolvedValue);
+    break;
   case SVFGK::Phi:
-    return new PhiSVFGNode(parsed.id, SVFGK::Phi, icfgNode,
-                           dyn_cast_or_null<PHINode>(resolvedInst));
+    node = new PhiSVFGNode(parsed.id, SVFGK::Phi, icfgNode,
+                           resolvedValue ? resolvedValue : resolvedInst);
+    break;
   case SVFGK::IntraPhi:
-    return new IntraPhiSVFGNode(parsed.id, icfgNode,
-                                dyn_cast_or_null<PHINode>(resolvedInst));
+    node = new IntraPhiSVFGNode(parsed.id, icfgNode,
+                                resolvedValue ? resolvedValue : resolvedInst);
+    break;
   case SVFGK::InterPhi:
     if (resolvedCall)
-      return new InterPhiSVFGNode(parsed.id, icfgNode, resolvedCall);
-    return new InterPhiSVFGNode(parsed.id, icfgNode, resolvedFunction);
+      node =
+          new InterPhiSVFGNode(parsed.id, icfgNode, resolvedCall, resolvedValue);
+    else
+      node = new InterPhiSVFGNode(parsed.id, icfgNode, resolvedFunction,
+                                  resolvedValue);
+    break;
   case SVFGK::MPhi:
-    return new MSSAPhiSVFGNode(parsed.id, SVFGK::MPhi, icfgNode, parsed.memReg,
+    node = new MSSAPhiSVFGNode(parsed.id, SVFGK::MPhi, icfgNode, parsed.memReg,
                                parsed.pts);
+    break;
   case SVFGK::MIntraPhi:
-    return new IntraMSSAPhiSVFGNode(parsed.id, icfgNode, parsed.memReg,
+    node = new IntraMSSAPhiSVFGNode(parsed.id, icfgNode, parsed.memReg,
                                     parsed.version, parsed.pts);
+    break;
   case SVFGK::MInterPhi:
-    return createLegacyInterMSSAPhiNode(parsed.id, icfgNode, resolvedCall,
+    node = createLegacyInterMSSAPhiNode(parsed.id, icfgNode, resolvedCall,
                                         resolvedFunction, parsed.memReg,
                                         parsed.pts);
+    break;
   case SVFGK::FormalIn:
-    return new FormalInSVFGNode(parsed.id, icfgNode, resolvedFunction,
+    node = new FormalInSVFGNode(parsed.id, icfgNode, resolvedFunction,
                                 parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::FormalOut:
-    return new FormalOutSVFGNode(parsed.id, icfgNode, resolvedFunction,
+    node = new FormalOutSVFGNode(parsed.id, icfgNode, resolvedFunction,
                                  parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::ActualIn:
-    return new ActualInSVFGNode(parsed.id, icfgNode, resolvedCall,
+    node = new ActualInSVFGNode(parsed.id, icfgNode, resolvedCall,
                                 parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::ActualOut:
-    return new ActualOutSVFGNode(parsed.id, icfgNode, resolvedCall,
+    node = new ActualOutSVFGNode(parsed.id, icfgNode, resolvedCall,
                                  parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::LoadMu:
-    return new LoadMuSVFGNode(parsed.id, icfgNode,
+    node = new LoadMuSVFGNode(parsed.id, icfgNode,
                               dyn_cast_or_null<LoadInst>(resolvedInst),
                               parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::StoreChi:
-    return new StoreChiSVFGNode(parsed.id, icfgNode,
+    node = new StoreChiSVFGNode(parsed.id, icfgNode,
                                 dyn_cast_or_null<StoreInst>(resolvedInst),
                                 parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::CallMu:
-    return new ActualInSVFGNode(parsed.id, icfgNode, resolvedCall,
+    node = new ActualInSVFGNode(parsed.id, icfgNode, resolvedCall,
                                 parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::CallChi:
-    return new ActualOutSVFGNode(parsed.id, icfgNode, resolvedCall,
+    node = new ActualOutSVFGNode(parsed.id, icfgNode, resolvedCall,
                                  parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::RetMu:
-    return new FormalOutSVFGNode(parsed.id, icfgNode, resolvedFunction,
+    node = new FormalOutSVFGNode(parsed.id, icfgNode, resolvedFunction,
                                  parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::EntryChi:
-    return new FormalInSVFGNode(parsed.id, icfgNode, resolvedFunction,
+    node = new EntryChiSVFGNode(parsed.id, icfgNode, resolvedFunction,
                                 parsed.memReg, parsed.pts, parsed.version);
+    break;
   case SVFGK::FormalParm:
-    return new FormalParmSVFGNode(parsed.id, icfgNode, resolvedFunction,
-                                  parsed.aux0);
+    node = new FormalParmSVFGNode(parsed.id, icfgNode, resolvedFunction,
+                                  parsed.aux0,
+                                  dyn_cast_or_null<Argument>(resolvedValue));
+    break;
   case SVFGK::ActualParm:
-    return new ActualParmSVFGNode(parsed.id, icfgNode, resolvedCall,
-                                  parsed.aux0);
+    node = new ActualParmSVFGNode(parsed.id, icfgNode, resolvedCall,
+                                  parsed.aux0, resolvedValue);
+    break;
   case SVFGK::FormalRet:
-    return new FormalRetSVFGNode(parsed.id, icfgNode, resolvedFunction);
+    node = new FormalRetSVFGNode(parsed.id, icfgNode, resolvedFunction,
+                                 resolvedValue);
+    break;
   case SVFGK::ActualRet:
-    return new ActualRetSVFGNode(parsed.id, icfgNode, resolvedCall);
+    node = new ActualRetSVFGNode(parsed.id, icfgNode, resolvedCall);
+    break;
   case SVFGK::VarArg:
-    return new VarArgSVFGNode(parsed.id, icfgNode, resolvedFunction);
+    node = new VarArgSVFGNode(parsed.id, icfgNode, resolvedFunction);
+    break;
   case SVFGK::NullPtr:
-    return new NullPtrSVFGNode(parsed.id, icfgNode);
+    node = new NullPtrSVFGNode(parsed.id, icfgNode);
+    break;
   case SVFGK::Dummy:
-    return new DummySVFGNode(parsed.id, icfgNode);
+    node = new DummySVFGNode(parsed.id, icfgNode);
+    break;
   case SVFGK::DummyVProp:
-    return new DummyVersionPropSVFGNode(parsed.id, icfgNode, parsed.memReg,
+    node = new DummyVersionPropSVFGNode(parsed.id, icfgNode, parsed.memReg,
                                         parsed.version);
+    break;
   case SVFGK::Variant:
   case SVFGK::Total:
     break;
   }
 
-  return new DummySVFGNode(parsed.id, icfgNode);
+  if (!node)
+    node = new DummySVFGNode(parsed.id, icfgNode);
+  node->setValueId(parsed.aux1);
+  if (auto *loadNode = dyn_cast<LoadSVFGNode>(node))
+    loadNode->setMemoryUse(parsed.memReg, parsed.version, parsed.pts);
+  else if (auto *storeNode = dyn_cast<StoreSVFGNode>(node))
+    storeNode->setMemoryDef(parsed.memReg, parsed.version, parsed.pts);
+  return node;
 }
 
 static void applyValueOperands(SVFGNode *node, const ParsedNodeMeta &meta,
@@ -721,7 +788,7 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
   if (!file.is_open())
     return false;
 
-  file << kHeaderV6 << "\n";
+  file << kHeaderV7 << "\n";
 
   // Persist object debug labels to preserve points-to identity across reloads.
   for (const auto &pair : graph.getObjectDebugMap()) {
@@ -841,6 +908,7 @@ bool SVFGSerializer::writeText(const SVFG &graph, const std::string &filename) {
     default:
       break;
     }
+    aux1 = node->getValueId();
 
     SVFGNodeBS pts;
     if (const auto *p = node->getPointsTo()) {
@@ -889,7 +957,6 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
   std::vector<ParsedIndCallSite> indCallSites;
   std::string line;
   bool sawV5 = false;
-  bool sawV6 = false;
   while (std::getline(file, line)) {
     if (line.empty())
       continue;
@@ -908,7 +975,10 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
     }
     if (line == kHeaderV6) {
       sawV5 = true;
-      sawV6 = true;
+      continue;
+    }
+    if (line == kHeaderV7) {
+      sawV5 = true;
       continue;
     }
     std::istringstream iss(line);
@@ -1073,11 +1143,9 @@ bool SVFGSerializer::readText(SVFG &graph, const std::string &filename) {
       graph.setObjectValue(object.objId, V);
   }
 
-  if (sawV6) {
-    for (const ParsedIndCallSite &entry : indCallSites) {
-      if (const CallBase *cs = resolveCallAnchor(module, entry.callAnchor))
-        graph.addIndCallSite(entry.funPtrNodeId, cs);
-    }
+  for (const ParsedIndCallSite &entry : indCallSites) {
+    if (const CallBase *cs = resolveCallAnchor(module, entry.callAnchor))
+      graph.addIndCallSite(entry.funPtrNodeId, cs);
   }
 
   for (const auto &edgeInfo : edges) {

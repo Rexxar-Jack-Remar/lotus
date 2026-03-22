@@ -38,7 +38,8 @@ namespace analysis {
 
 /// Value-flow backward solver template. Derived must define:
 /// - CVar, CPtSet, DPIm (types)
-/// - getSVFG(), getSVFGBuilder(), getDefNodeForValue(), getObjectIdsForValue()
+/// - getSVFG(), getSVFGBuilder(), getDefNodeForValue(), getTopLevelValueId(),
+///   getObjectIdsForValue()
 /// - isDirectEdge(), isIndirectEdge(), handleBKCondition(),
 /// getConservativeCPts()
 /// - handleAddr(), processGepPts(), isStrongUpdate(), getPtrNodeID(),
@@ -220,9 +221,9 @@ protected:
       if (!derived().isDirectEdge(edge))
         continue;
       SVFGNode *src = edge->getSrcNode();
-      SVFGNode *lhs = svfg->getLHSTopLevPtr(src);
-      if (lhs)
-        backwardPropDpm(pts, lhs->getId(), oldDpm, edge);
+      const uint32_t topLevelId = derived().getTopLevelValueId(src);
+      if (topLevelId != 0)
+        backwardPropDpm(pts, topLevelId, oldDpm, edge);
     }
   }
 
@@ -302,9 +303,15 @@ protected:
     SVFG *svfg = derived().getSVFG();
     if (!svfg)
       return;
-    uint32_t ptrNodeId = load->getLoadFromPtr();
-    SVFGNode *loadSrc = svfg->getNode(ptrNodeId);
+    const llvm::LoadInst *loadInst =
+        llvm::dyn_cast_or_null<llvm::LoadInst>(load->getValue());
+    if (!loadInst)
+      return;
+    SVFGNode *loadSrc = derived().getDefNodeForValue(loadInst->getPointerOperand());
     if (!loadSrc)
+      return;
+    const uint32_t ptrNodeId = derived().getTopLevelValueId(loadSrc);
+    if (ptrNodeId == 0)
       return;
     // Bug 2 fix: the SVFG builder connects the load-pointer operand to the
     // LoadSVFGNode with IntraCopy (not IntraDirect). Using IntraDirect caused
@@ -324,9 +331,16 @@ protected:
     SVFG *svfg = derived().getSVFG();
     if (!svfg)
       return;
-    uint32_t ptrNodeId = store->getStoreToPtr();
-    SVFGNode *storeDst = svfg->getNode(ptrNodeId);
+    const llvm::StoreInst *storeInst =
+        llvm::dyn_cast_or_null<llvm::StoreInst>(store->getValue());
+    if (!storeInst)
+      return;
+    SVFGNode *storeDst =
+        derived().getDefNodeForValue(storeInst->getPointerOperand());
     if (!storeDst)
+      return;
+    const uint32_t ptrNodeId = derived().getTopLevelValueId(storeDst);
+    if (ptrNodeId == 0)
       return;
     // Bug 2 fix (store side): same as load — try IntraCopy first.
     SVFGEdge *edge =
@@ -344,6 +358,9 @@ protected:
     SVFGNode *storeSrc = derived().getDefNodeForValue(valueOperand);
     if (!storeSrc)
       return;
+    const uint32_t storeSrcId = derived().getTopLevelValueId(storeSrc);
+    if (storeSrcId == 0)
+      return;
     SVFG *svfg = derived().getSVFG();
     if (!svfg)
       return;
@@ -351,7 +368,7 @@ protected:
         svfg->getIntraVFGEdge(storeSrc, store, SVFGEdgeK::IntraDirect);
     if (!edge)
       return;
-    backwardPropDpm(pts, storeSrc->getId(), oldDpm, edge);
+    backwardPropDpm(pts, storeSrcId, oldDpm, edge);
   }
 
   /// Re-evaluate dependents when `dpm` got new points-to facts.

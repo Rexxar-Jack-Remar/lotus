@@ -36,16 +36,6 @@ static void appendPathConditionEvents(BugReport *report,
   }
 }
 
-static const llvm::Value *getReportValueForNode(const SVFGNode *node) {
-  if (!node)
-    return nullptr;
-  if (const Instruction *inst = node->getInstruction())
-    return inst;
-  if (const auto *actualParm = dyn_cast<ActualParmSVFGNode>(node))
-    return actualParm->getCallSite();
-  return nullptr;
-}
-
 void FileChecker::reportBug(ProgSlice *slice) {
   const SVFGNode *source = slice->getSource();
   if (!source)
@@ -76,13 +66,6 @@ void FileChecker::reportBug(ProgSlice *slice) {
   }
   if (!neverClose)
     appendPathConditionEvents(report, slice);
-
-  for (auto it = slice->sinksBegin(), et = slice->sinksEnd(); it != et; ++it) {
-    const SVFGNode *snk = *it;
-    if (const Value *sinkValue = getReportValueForNode(snk)) {
-      report->append_step(const_cast<Value *>(sinkValue), "File closed here", 1);
-    }
-  }
 
   mgr.insert_report(bugTypeId, report, false);
 

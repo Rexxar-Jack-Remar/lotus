@@ -7,6 +7,9 @@
 
 #include "Checker/Saber/SaberCheckerAPI.h"
 
+#include "Alias/TypeQualifier/Config.h"
+
+#include <array>
 #include <cassert>
 #include <cstdio>
 #include <set>
@@ -22,6 +25,31 @@ struct ei_pair {
   const char *n;
   SaberCheckerAPI::CHECKER_TYPE t;
 };
+
+static bool isModeledExternalSummaryName(llvm::StringRef name) {
+  if (FunctionModelRegistry::lookup(name).kind != FunctionModelKind::Unknown)
+    return true;
+
+  static const std::array<const char *, 39> kAdditionalSummaryNames = {{
+      "realloc",      "strlen",      "scanf",      "fprintf",
+      "sprintf",      "snprintf",    "vprintf",    "vfprintf",
+      "vsprintf",     "vsnprintf",   "recv",       "recvfrom",
+      "itoa",         "strtok",      "strchr",     "strstr",
+      "strpbrk",      "fgets",       "fread",      "fwrite",
+      "time",         "getenv",      "strtod",     "strtof",
+      "strtold",      "strtol",      "strtoll",    "strtoul",
+      "strtoull",     "atoi",        "atol",       "atoll",
+      "strdup",       "strndup",     "reallocarray",
+      "posix_memalign", "asprintf",  "vasprintf",  "strtok_r",
+  }};
+
+  for (const char *candidate : kAdditionalSummaryNames) {
+    if (name == candidate)
+      return true;
+  }
+
+  return false;
+}
 
 } // namespace
 
@@ -134,6 +162,27 @@ void SaberCheckerAPI::init() {
     }
     tdAPIMap[p->n] = p->t;
   }
+}
+
+bool SaberCheckerAPI::isExtCall(const llvm::Function *fun) const {
+  if (!fun)
+    return false;
+
+  // Match SVF's ExtAPI behavior used by SABER:
+  //   - declarations and intrinsics are external
+  //   - modeled summary functions are external even if a body is available
+  //   - available_externally bodies should still be analyzed like ordinary code
+  if (fun->hasAvailableExternallyLinkage())
+    return false;
+
+  if (fun->isIntrinsic() || fun->isDeclaration())
+    return true;
+
+  const std::string funName = fun->getName().str();
+  if (tdAPIMap.find(funName) != tdAPIMap.end())
+    return true;
+
+  return isModeledExternalSummaryName(fun->getName());
 }
 
 } // namespace analysis

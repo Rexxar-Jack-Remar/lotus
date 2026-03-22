@@ -208,6 +208,7 @@ public:
   // This pass builds the structural intra-procedural GVFG only.
   bool hasGraphFor(const Function &F) const;
   GuardedValueFlowGraph &getGraph(const Function &F);
+  void invalidateGraph(const Function &F);
 
 private:
   DenseMap<const Function *, std::unique_ptr<GuardedValueFlowGraph>> graphs_;

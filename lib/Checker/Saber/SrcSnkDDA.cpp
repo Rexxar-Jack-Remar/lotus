@@ -43,6 +43,12 @@ SrcSnkDDA::~SrcSnkDDA() {
 }
 
 void SrcSnkDDA::setModule(llvm::Module *M) {
+  if (module_ && module_ != M) {
+    // Shared SVFG/ICFG and imported source/sink state are module-specific.
+    // Reusing them across modules would make initialize() skip a required
+    // rebuild and silently analyze the wrong IR.
+    resetAnalysisState(false, false);
+  }
   module_ = M;
 }
 
@@ -96,19 +102,12 @@ void SrcSnkDDA::initialize() {
       RecursiveTimer timer("SVFG build");
       memSSA.setModule(module_);
       memSSA.setSaberCondAllocator(getSaberCondAllocator());
-      SVFGBuilderConfig buildCfg;
-      // Upstream SABER builds on top of Andersen's resolved call graph. Keep
-      // indirect-call refinement enabled so source/sink reachability across
-      // function pointers is preserved.
-      buildCfg.resolveIndirectCalls = true;
-      buildCfg.buildMSSA = SaberOptions::fullSVFG();
-      SVFG *built = memSSA.build(icfg_.get(), buildCfg);
-      if (!built) {
+      svfg_ = memSSA.buildForSaber(icfg_.get(), SaberOptions::fullSVFG());
+      if (!svfg_) {
         icfg_.reset();
         icfgBuilder_.reset();
         return;
       }
-      svfg_.reset(built);
       this->svfg = svfg_.get();
       setGraph(this->svfg);
       memSSA.setCurrentSVFG(this->svfg);
@@ -179,9 +178,9 @@ void SrcSnkDDA::analyze() {
 
   initialize();
 
-  if (sources.empty() || sinks.empty()) {
+  if (sources.empty()) {
     if (SaberOptions::verbose()) {
-      outs() << "No sources or sinks found, skipping analysis\n";
+      outs() << "No sources found, skipping analysis\n";
     }
     finalize();
     return;
@@ -404,8 +403,8 @@ void SrcSnkDDA::FWProcessOutgoingEdge(const DPIm &item, SVFGEdge *edge) {
     const llvm::Function *callee = dstNode ? dstNode->getFunction() : nullptr;
     if (cs && g) {
       uint32_t csId = g->getCallSiteId(cs, callee);
-      if (csId != 0 && !newItem.pushContext(csId))
-        return;
+      if (csId != 0)
+        (void)newItem.pushContext(csId);
     }
   } else if (edge->isRetEdge()) {
     const llvm::CallBase *cs = edge->getCallSite();

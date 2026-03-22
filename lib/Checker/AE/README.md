@@ -4,6 +4,11 @@
 
 The Abstract Execution (AE) engine is a static analysis tool that detects memory safety bugs in C/C++ programs through abstract interpretation. It was migrated from SVF's AE implementation and adapted to work with Lotus's infrastructure.
 
+SVF-faithful parity in Lotus targets the original AE core: buffer overflow and
+null pointer dereference detection over the migrated abstract-execution engine.
+`UseAfterFreeDetector`, `InvalidFreeDetector`, and `MemLeakDetector` are
+Lotus-specific extensions layered on top of that migrated core.
+
 **Based on the paper:**
 *"Precise Sparse Abstract Execution via Cross-Domain Interaction"*
 Xiao Cheng, Jiawei Wang, Yulei Sui. ICSE 2024.
@@ -150,7 +155,7 @@ ae.runOnModule(module);
 
 Controls how many iterations to perform before applying widening:
 - `0` - Apply widening immediately (fastest convergence)
-- `2` - Default, allows 2 iterations before widening
+- `3` - Default, matches SVF's AE widening delay
 - Higher values increase precision but may slow convergence
 
 ## Implementation Details

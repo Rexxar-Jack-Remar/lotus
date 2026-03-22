@@ -45,6 +45,8 @@ void DDAPass::addQuery(const llvm::Value *v) {
 }
 
 bool DDAPass::mayAlias(const llvm::Value *v1, const llvm::Value *v2) const {
+  if (kind_ == DDAKind::Cxt_DDA && contextDDA_)
+    return contextDDA_->mayAlias(v1, v2);
   if (!flowDDA_)
     return true;
   return flowDDA_->mayAlias(v1, v2);
@@ -76,6 +78,8 @@ void DDAPass::runPointerAnalysis(Module &M, DDAKind k) {
   case DDAKind::Cxt_DDA:
     // Context-sensitive layer on top of the same flow-sensitive SVFG.
     contextDDA_ = std::make_unique<ContextDDA>(flowDDA_.get(), client_.get());
+    contextDDA_->setInsensitiveRecursion(insensitiveRecursion_);
+    contextDDA_->setInsensitiveCycle(insensitiveCycle_);
     contextDDA_->run(M);
     contextDDA_->answerQueries();
     break;

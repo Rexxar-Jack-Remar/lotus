@@ -32,8 +32,8 @@ static bool isProgExitCall(const llvm::CallBase *cs) {
     return false;
   if (const llvm::Function *callee = getDirectCallee(cs)) {
     llvm::StringRef name = callee->getName();
-    return name == "exit" || name == "_exit" || name == "abort" ||
-           name == "quick_exit" || name == "__cxa_abort";
+    return name == "exit" || name == "__assert_rtn" ||
+           name == "__assert_fail";
   }
   return false;
 }
@@ -392,8 +392,6 @@ SaberCondAllocator::evaluateLoopExitBranch(const llvm::BasicBlock *bb,
     if (!isBBCallsProgExit(exitBB))
       filtered.insert(exitBB);
   }
-  if (filtered.empty())
-    return Condition::nullExpr();
   bool allPostDom = true;
   for (const llvm::BasicBlock *e : filtered) {
     if (!postDominate(dst, e)) {

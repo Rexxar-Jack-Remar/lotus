@@ -112,13 +112,22 @@ ContextDDA::ContextDDA(FlowDDA *flowDDA, DDAClient *client)
 
 ContextDDA::~ContextDDA() = default;
 
+uint32_t ContextDDA::getTopLevelValueId(const SVFGNode *node) const {
+  if (!node)
+    return 0;
+  if (node->hasValueId())
+    return node->getValueId();
+  return node->getId();
+}
+
 bool ContextDDA::run(llvm::Module &M) {
   if (!flowDDA_ || !flowDDA_->run(M))
     return false;
   buildRecursionInfo();
-  // Ensure ContextDDA is fully initialized even when used directly (outside
-  // DDAPass).
-  initInsensitiveEdges();
+  // Upstream SVF only weakens context sensitivity on recursion/value-flow
+  // cycles when explicitly requested. Keep the default fully context-sensitive.
+  if (insensitiveRecursion_ || insensitiveCycle_)
+    initInsensitiveEdges();
   return true;
 }
 
@@ -253,6 +262,9 @@ void ContextDDA::buildRecursionInfo() {
           const auto &connected = svfg->getConnectedCallees(cb);
           for (const llvm::Function *callee : connected)
             callees.push_back(callee);
+          if (callees.empty() && flowDDA_ && flowDDA_->getSVFGBuilder()) {
+            callees = flowDDA_->getSVFGBuilder()->getIndirectCallTargets(cb);
+          }
         }
         for (const llvm::Function *callee : callees) {
           if (!callee || callee->isDeclaration())
@@ -624,7 +636,7 @@ bool ContextDDA::propagateViaObj(const CxtVar &storeObj,
 void ContextDDA::initInsensitiveEdges() {
   insensitveEdges_.clear();
   SVFG *svfg = getSVFG();
-  if (!svfg)
+  if (!svfg || (!insensitiveRecursion_ && !insensitiveCycle_))
     return;
 
   // Bug 6 fix: performSCCAnalysis takes the set of already-known insensitive
@@ -640,35 +652,59 @@ void ContextDDA::initInsensitiveEdges() {
   //   3. Second pass: add any remaining call/ret edges that are in an SVFG SCC.
   CxtLocDPItem dummy(CxtVar(ContextCond(), 0), nullptr);
 
-  // Step 1: collect recursion-based insensitive edges.
   SVFGStats::SVFGEdgeSet recursionInsensitive;
-  for (const auto &pair : *svfg) {
-    SVFGNode *node = pair.second;
-    if (!node)
-      continue;
-    for (SVFGEdge *edge : node->getInEdges()) {
-      if (!edge)
+  if (insensitiveRecursion_) {
+    for (const auto &pair : *svfg) {
+      SVFGNode *node = pair.second;
+      if (!node)
         continue;
-      if (!isCallEdge(edge) && !isRetEdge(edge))
-        continue;
-      uint32_t csId = 0;
-      if (isCallEdge(edge))
-        csId = getCSIDAtCall(dummy, edge);
-      else
-        csId = getCSIDAtRet(dummy, edge);
-      if (csId != 0 && isEdgeInRecursion(csId))
-        recursionInsensitive.insert(edge);
+      for (SVFGEdge *edge : node->getInEdges()) {
+        if (!edge)
+          continue;
+        if (!isCallEdge(edge) && !isRetEdge(edge))
+          continue;
+        uint32_t csId = 0;
+        if (isCallEdge(edge))
+          csId = getCSIDAtCall(dummy, edge);
+        else
+          csId = getCSIDAtRet(dummy, edge);
+        if (csId != 0 && isEdgeInRecursion(csId))
+          recursionInsensitive.insert(edge);
+      }
     }
+    for (const SVFGEdge *e : recursionInsensitive)
+      insensitveEdges_.insert(const_cast<SVFGEdge *>(e));
   }
-  // Mark recursion edges as insensitive immediately.
-  for (const SVFGEdge *e : recursionInsensitive)
-    insensitveEdges_.insert(const_cast<SVFGEdge *>(e));
+
+  if (!insensitiveCycle_)
+    return;
 
   // Step 2: run SCC analysis with the recursion edges excluded.
   SVFGStats stats(svfg);
   stats.performSCCAnalysis(recursionInsensitive);
 
-  // Step 3: add any remaining call/ret edges that lie within an SVFG SCC.
+  // Step 3: collect function pairs that participate in a value-flow cycle.
+  //
+  // Upstream SVF does not stop at "edge is in an SVFG SCC". It first records
+  // all caller/callee function pairs that appear on such cycle edges, then
+  // treats every call/ret edge between those function pairs as insensitive.
+  //
+  // This closure matters when a cycle only touches one inter edge of a given
+  // caller/callee pair. Restricting insensitivity to the specific SCC edge can
+  // still leave sibling call/ret edges context-sensitive, which diverges from
+  // SVF and can reintroduce spurious context pruning on the same recursive
+  // value-flow pair.
+  struct FunctionPairHash {
+    size_t operator()(
+        const std::pair<const llvm::Function *, const llvm::Function *> &p)
+        const noexcept {
+      return std::hash<const llvm::Function *>()(p.first) ^
+             (std::hash<const llvm::Function *>()(p.second) << 1);
+    }
+  };
+  using FunctionPair = std::pair<const llvm::Function *, const llvm::Function *>;
+  std::unordered_set<FunctionPair, FunctionPairHash> insensitiveFunPairs;
+
   for (const auto &pair : *svfg) {
     SVFGNode *node = pair.second;
     if (!node)
@@ -680,7 +716,39 @@ void ContextDDA::initInsensitiveEdges() {
         continue;
       if (insensitveEdges_.count(edge))
         continue; // already marked by recursion pass
-      if (stats.isEdgeInSVFGSCC(edge))
+      if (!stats.isEdgeInSVFGSCC(edge))
+        continue;
+      const llvm::Function *srcFun =
+          edge->getSrcNode() ? edge->getSrcNode()->getFunction() : nullptr;
+      const llvm::Function *dstFun =
+          edge->getDstNode() ? edge->getDstNode()->getFunction() : nullptr;
+      if (!srcFun || !dstFun)
+        continue;
+      insensitiveFunPairs.emplace(srcFun, dstFun);
+      insensitiveFunPairs.emplace(dstFun, srcFun);
+    }
+  }
+
+  // Step 4: mark every call/ret edge between the collected function pairs as
+  // insensitive, matching SVF DDAPass::collectCxtInsenEdgeForVFCycle.
+  for (const auto &pair : *svfg) {
+    SVFGNode *node = pair.second;
+    if (!node)
+      continue;
+    for (SVFGEdge *edge : node->getInEdges()) {
+      if (!edge)
+        continue;
+      if (!isCallEdge(edge) && !isRetEdge(edge))
+        continue;
+      if (insensitveEdges_.count(edge))
+        continue;
+      const llvm::Function *srcFun =
+          edge->getSrcNode() ? edge->getSrcNode()->getFunction() : nullptr;
+      const llvm::Function *dstFun =
+          edge->getDstNode() ? edge->getDstNode()->getFunction() : nullptr;
+      if (!srcFun || !dstFun)
+        continue;
+      if (insensitiveFunPairs.count(FunctionPair(srcFun, dstFun)) != 0)
         insensitveEdges_.insert(edge);
     }
   }
@@ -705,30 +773,24 @@ void ContextDDA::resolveFunPtr(const CxtLocDPItem &dpm) {
   if (!node)
     return;
 
-  // SVF case 1: at a call-site return node, resolve the function pointer.
-  if (const ActualRetSVFGNode *retNode = dyn_cast<ActualRetSVFGNode>(node)) {
-    const llvm::CallBase *cs = retNode->getCallSite();
-    if (cs && !cs->getCalledFunction()) {
+  // Match SVF DDAVFSolver::resolveFunPtr: trigger on any callsite-ret node
+  // (ActualRet/ActualOut/InterPhi/MInterPhi) and any function-entry node
+  // (FormalParm/FormalIn/InterPhi/MInterPhi), preserving the current context.
+  if (const llvm::CallBase *cs = svfg->isCallSiteRetSVFGNode(node)) {
+    if (!cs->getCalledFunction()) {
       const Value *calledOp = cs->getCalledOperand();
       if (calledOp && calledOp->getType()->isPointerTy()) {
         SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
         if (funPtrNode) {
-          // SVF ContextDDA preserves context when resolving function pointers.
-          CxtVar funptrVar(dpm.getCondVar().get_cond(), funPtrNode->getId());
+          CxtVar funptrVar(dpm.getCondVar().get_cond(),
+                           getTopLevelValueId(funPtrNode));
           CxtLocDPItem funPtrDpm(funptrVar, funPtrNode);
           findPT(funPtrDpm);
         }
       }
     }
-  }
-
-  // SVF case 2: at a function entry node (FormalParmSVFGNode), find indirect
-  // call sites that may invoke this function using SVFG's callee index
-  // (mirrors SVF's CallGraph::getIndCallSitesInvokingCallee).
-  if (const FormalParmSVFGNode *formalParm =
-          dyn_cast<FormalParmSVFGNode>(node)) {
-    const llvm::Function *fun = formalParm->getFunction();
-    if (fun && !fun->isDeclaration()) {
+  } else if (const llvm::Function *fun = svfg->isFunEntrySVFGNode(node)) {
+    if (!fun->isDeclaration()) {
       const auto &indCS = svfg->getIndCallSitesInvokingCallee(fun);
       for (const llvm::CallBase *cs : indCS) {
         if (!cs || cs->getCalledFunction())
@@ -738,7 +800,8 @@ void ContextDDA::resolveFunPtr(const CxtLocDPItem &dpm) {
           continue;
         SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
         if (funPtrNode) {
-          CxtVar funptrVar(dpm.getCondVar().get_cond(), funPtrNode->getId());
+          CxtVar funptrVar(dpm.getCondVar().get_cond(),
+                           getTopLevelValueId(funPtrNode));
           CxtLocDPItem funPtrDpm(funptrVar, funPtrNode);
           findPT(funPtrDpm);
         }
@@ -771,16 +834,15 @@ CxtLocDPItem ContextDDA::getDPImWithOldCond(const CxtLocDPItem &oldDpm,
 void ContextDDA::handleAddr(CxtPtSet &pts, const CxtLocDPItem &dpm,
                             const AddrSVFGNode *addr) {
   ContextCond cond = dpm.getCond();
-  if (!addr)
-    return;
-
-  // Query PTA for the value's object IDs (same strategy as FlowDDA).
-  const Value *v = addr->getValue();
-  if (!v || !flowDDA_)
+  if (!addr || !flowDDA_)
     return;
   SVFGBuilder *builder = flowDDA_->getSVFGBuilder();
   SVFG *svfg = getSVFG();
-  SVFGNodeBS objIds = flowDDA_->getObjectIdsForValue(v);
+  SVFGNodeBS objIds;
+  if (const uint32_t canonicalObjId = addr->getObjectId())
+    objIds.insert(canonicalObjId);
+  else if (const Value *v = addr->getValue())
+    objIds = flowDDA_->getObjectIdsForValue(v);
   for (uint32_t id : objIds) {
     // SVF field-insensitivity check
     if (svfg && svfg->isFieldInsensitiveObject(id) && builder) {
@@ -812,9 +874,10 @@ CxtPtSet ContextDDA::processGepPts(const GepSVFGNode *gep,
     }
     uint32_t newObjId = 0;
     if (builder) {
-      newObjId = builder->getGepObjectId(ptd.get_id(), gi);
-      if (isVariantFieldGep && newObjId == 0)
+      if (isVariantFieldGep)
         newObjId = builder->getOrCreateFIObjId(ptd.get_id());
+      else
+        newObjId = builder->getGepObjectId(ptd.get_id(), gi);
     }
     if (newObjId == 0)
       newObjId = ptd.get_id();
@@ -881,14 +944,10 @@ const CxtPtSet &ContextDDA::computeDDAPts(const CxtVar &cxtVar) {
     static const CxtPtSet empty;
     return empty;
   }
-  SVFGNode *defNode = svfg->getNode(cxtVar.get_id());
+  SVFGNode *defNode = svfg->getCanonicalDefNodeForDDAId(cxtVar.get_id());
   if (!defNode) {
-    if (const llvm::Value *v = svfg->getObjectValue(cxtVar.get_id()))
-      defNode = getDefNodeForValue(v);
-    if (!defNode) {
-      static const CxtPtSet empty;
-      return empty;
-    }
+    static const CxtPtSet empty;
+    return empty;
   }
   CxtLocDPItem dpm(cxtVar, defNode);
   (void)findPT(dpm);
@@ -914,18 +973,33 @@ CxtPtSet ContextDDA::computeDDAPts(const llvm::Value *ptr) {
       return CxtPtSet{};
   }
   ContextCond cxt;
-  CxtVar cxtVar(cxt, defNode->getId());
+  CxtVar cxtVar(cxt, getTopLevelValueId(defNode));
   return computeDDAPts(cxtVar);
 }
 
 void ContextDDA::answerQueries() {
   if (!client_ || !flowDDA_ || !getSVFG())
     return;
-  client_->setSVFG(getSVFG());
-  if (flowDDA_->getModule())
-    client_->setModule(flowDDA_->getModule());
-  client_->collectCandidateQueries();
-  for (const llvm::Value *ptr : client_->getCandidateQueries())
-    (void)computeDDAPts(ptr);
-  client_->performStat(flowDDA_);
+  client_->answerQueries(this);
+}
+
+bool ContextDDA::mayAlias(const llvm::Value *v1, const llvm::Value *v2) {
+  if (!getSVFG() || !v1 || !v2)
+    return true;
+  const llvm::Value *p1 = v1->stripPointerCasts();
+  const llvm::Value *p2 = v2->stripPointerCasts();
+  if (!p1->getType()->isPointerTy() || !p2->getType()->isPointerTy())
+    return false;
+  if (p1 == p2)
+    return true;
+
+  const CxtPtSet pts1 = computeDDAPts(p1);
+  const CxtPtSet pts2 = computeDDAPts(p2);
+  for (const CxtVar &lhs : pts1) {
+    for (const CxtVar &rhs : pts2) {
+      if (propagateViaObj(lhs, rhs))
+        return true;
+    }
+  }
+  return false;
 }

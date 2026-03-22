@@ -149,6 +149,7 @@ class SVFGNode {
 private:
   uint32_t id;
   SVFGK kind;
+  uint32_t valueId = 0;
 
 protected:
   const ICFGNode *icfgNode;
@@ -172,8 +173,11 @@ public:
 
   inline uint32_t getId() const { return id; }
   inline SVFGK getNodeKind() const { return kind; }
+  inline uint32_t getValueId() const { return valueId; }
+  inline bool hasValueId() const { return valueId != 0; }
   inline const ICFGNode *getICFGNode() const { return icfgNode; }
   inline void setICFGNode(const ICFGNode *icfg) { icfgNode = icfg; }
+  inline void setValueId(uint32_t id_) { valueId = id_; }
 
   //===------------------------------------------------------------------===
   // Edge access
@@ -237,6 +241,9 @@ public:
 
   /// @brief Get defined SVF variables (for analysis clients)
   virtual SVFGNodeBS getDefSVFVars() const {
+    if (valueId != 0) {
+      return SVFGNodeBS{valueId};
+    }
     if (const auto *pts = getPointsTo()) {
       return *pts;
     }
@@ -268,10 +275,9 @@ public:
 
 /// @brief Address-taking instruction (alloca, malloc, address-of)
 ///
-/// Carries an optional abstract object ID (from the SVFG builder / PTA) so
-/// that DDA can directly read which memory object this Addr creates, matching
-/// SVF's `addr->getPAGSrcNodeID()`.  When `objectId_` is 0 the caller should
-/// fall back to PTA-based object lookup.
+/// Carries the canonical abstract object ID used by DDA and guarded memory
+/// edges, matching SVF's `addr->getPAGSrcNodeID()`. When `objectId_` is 0 the
+/// caller should fall back to builder/PTA-based object lookup.
 class AddrSVFGNode : public StmtSVFGNode {
 private:
   uint32_t objectId_ = 0;
@@ -302,6 +308,9 @@ public:
 class LoadSVFGNode : public StmtSVFGNode {
 private:
   uint32_t loadFrom; // Pointer being loaded from
+  uint32_t memReg = 0;
+  uint32_t ssaVersion = 0;
+  SVFGNodeBS memPointsTo;
 
 public:
   LoadSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Value *v,
@@ -309,6 +318,19 @@ public:
       : StmtSVFGNode(id, SVFGK::Load, icfg, v), loadFrom(ptr) {}
 
   inline uint32_t getLoadFromPtr() const { return loadFrom; }
+  inline void setLoadFromPtr(uint32_t ptr) { loadFrom = ptr; }
+  inline void setMemoryUse(uint32_t reg, uint32_t version,
+                           const SVFGNodeBS &pts) {
+    memReg = reg;
+    ssaVersion = version;
+    memPointsTo = pts;
+  }
+  const SVFGNodeBS *getPointsTo() const override { return &memPointsTo; }
+  uint32_t getMemReg() const override { return memReg; }
+  uint32_t getSSAVersion() const override { return ssaVersion; }
+  inline uint32_t getMemoryUseReg() const { return memReg; }
+  inline uint32_t getMemoryUseVersion() const { return ssaVersion; }
+  inline const SVFGNodeBS &getMemoryPointsTo() const { return memPointsTo; }
 
   SVFG_NODE_KIND(Load)
 };
@@ -317,6 +339,9 @@ public:
 class StoreSVFGNode : public StmtSVFGNode {
 private:
   uint32_t storeTo; // Pointer being stored to
+  uint32_t memReg = 0;
+  uint32_t ssaVersion = 0;
+  SVFGNodeBS memPointsTo;
 
 public:
   StoreSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Value *v,
@@ -324,6 +349,25 @@ public:
       : StmtSVFGNode(id, SVFGK::Store, icfg, v), storeTo(ptr) {}
 
   inline uint32_t getStoreToPtr() const { return storeTo; }
+  inline void setStoreToPtr(uint32_t ptr) { storeTo = ptr; }
+  inline void setMemoryDef(uint32_t reg, uint32_t version,
+                           const SVFGNodeBS &pts) {
+    memReg = reg;
+    ssaVersion = version;
+    memPointsTo = pts;
+  }
+  const SVFGNodeBS *getPointsTo() const override { return &memPointsTo; }
+  uint32_t getMemReg() const override { return memReg; }
+  uint32_t getSSAVersion() const override { return ssaVersion; }
+  inline uint32_t getMemoryDefReg() const { return memReg; }
+  inline uint32_t getMemoryDefVersion() const { return ssaVersion; }
+  inline const SVFGNodeBS &getMemoryPointsTo() const { return memPointsTo; }
+  SVFGNodeBS getDefSVFVars() const override {
+    if (!memPointsTo.empty()) {
+      return memPointsTo;
+    }
+    return SVFGNode::getDefSVFVars();
+  }
 
   SVFG_NODE_KIND(Store)
 };
@@ -449,17 +493,25 @@ public:
   using OPVers = std::map<uint32_t, const llvm::Value *>;
 
 protected:
+  const llvm::Value *value;
   const llvm::PHINode *phiNode;
   OPVers opVers;
 
 public:
   PhiSVFGNode(uint32_t id, SVFGK k, const ICFGNode *icfg,
               const llvm::PHINode *phi)
-      : SVFGNode(id, k, icfg), phiNode(phi) {}
+      : SVFGNode(id, k, icfg), value(phi), phiNode(phi) {}
+
+  PhiSVFGNode(uint32_t id, SVFGK k, const ICFGNode *icfg,
+              const llvm::Value *v)
+      : SVFGNode(id, k, icfg), value(v),
+        phiNode(llvm::dyn_cast_or_null<llvm::PHINode>(v)) {}
 
   const llvm::PHINode *getPHINode() const { return phiNode; }
-  const llvm::Value *getValue() const override { return phiNode; }
-  const llvm::Instruction *getInstruction() const override { return phiNode; }
+  const llvm::Value *getValue() const override { return value; }
+  const llvm::Instruction *getInstruction() const override {
+    return llvm::dyn_cast_or_null<llvm::Instruction>(value);
+  }
 
   /// Operand access (position -> Value*)
   inline void setOpVer(uint32_t pos, const llvm::Value *val) {
@@ -484,6 +536,9 @@ public:
   IntraPhiSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::PHINode *phi)
       : PhiSVFGNode(id, SVFGK::IntraPhi, icfg, phi) {}
 
+  IntraPhiSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Value *v)
+      : PhiSVFGNode(id, SVFGK::IntraPhi, icfg, v) {}
+
   SVFG_NODE_KIND(IntraPhi)
 };
 
@@ -492,22 +547,31 @@ class InterPhiSVFGNode : public PhiSVFGNode {
 private:
   const llvm::Function *func;     // For formal parameter PHI
   const llvm::CallBase *callSite; // For actual return PHI
+  const llvm::Value *resultValue;
 
 public:
   /// @brief Construct for formal parameter PHI
-  InterPhiSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Function *f)
-      : PhiSVFGNode(id, SVFGK::InterPhi, icfg, nullptr), func(f),
-        callSite(nullptr) {}
+  InterPhiSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Function *f,
+                   const llvm::Value *result = nullptr)
+      : PhiSVFGNode(id, SVFGK::InterPhi, icfg,
+                    static_cast<const llvm::Value *>(nullptr)),
+        func(f),
+        callSite(nullptr), resultValue(result) {}
 
   /// @brief Construct for actual return PHI
-  InterPhiSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::CallBase *cs)
-      : PhiSVFGNode(id, SVFGK::InterPhi, icfg, nullptr), func(nullptr),
-        callSite(cs) {}
+  InterPhiSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::CallBase *cs,
+                   const llvm::Value *result = nullptr)
+      : PhiSVFGNode(id, SVFGK::InterPhi, icfg,
+                    static_cast<const llvm::Value *>(nullptr)),
+        func(nullptr),
+        callSite(cs), resultValue(result ? result : cs) {}
 
   inline bool isFormalParmPHI() const { return func != nullptr; }
   inline bool isActualRetPHI() const { return callSite != nullptr; }
   const llvm::Function *getFunction() const override { return func; }
   const llvm::CallBase *getCallSite() const override { return callSite; }
+  const llvm::Value *getValue() const override { return resultValue; }
+  inline void setResultValue(const llvm::Value *value) { resultValue = value; }
 
   SVFG_NODE_KIND(InterPhi)
 };
@@ -763,10 +827,8 @@ public:
   SVFG_NODE_KIND(RetMu)
 };
 
-/// @brief Entry memory chi (function entry point)
-class LOTUS_SVFG_LEGACY_NODE(
-    "Serializer-only legacy node; canonical runtime node is FormalIn")
-    EntryChiSVFGNode : public MSSASVFGNode {
+/// @brief Entry memory chi (module-global state before root functions).
+class EntryChiSVFGNode : public MSSASVFGNode {
 private:
   const llvm::Function *func;
 
@@ -784,14 +846,18 @@ public:
 class FormalParmSVFGNode : public SVFGNode {
 private:
   const llvm::Function *func;
+  const llvm::Argument *arg;
   unsigned paramIdx;
 
 public:
-  FormalParmSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Function *f,
-                     unsigned idx)
-      : SVFGNode(id, SVFGK::FormalParm, icfg), func(f), paramIdx(idx) {}
+  FormalParmSVFGNode(uint32_t id, const ICFGNode *icfg,
+                     const llvm::Function *f, unsigned idx,
+                     const llvm::Argument *a = nullptr)
+      : SVFGNode(id, SVFGK::FormalParm, icfg), func(f), arg(a), paramIdx(idx) {}
 
   const llvm::Function *getFunction() const override { return func; }
+  const llvm::Value *getValue() const override { return arg; }
+  inline const llvm::Argument *getArgument() const { return arg; }
   inline unsigned getParamIndex() const { return paramIdx; }
 
   SVFG_NODE_KIND(FormalParm)
@@ -801,14 +867,19 @@ public:
 class ActualParmSVFGNode : public SVFGNode {
 private:
   const llvm::CallBase *callSite;
+  const llvm::Value *argValue;
   unsigned paramIdx;
 
 public:
   ActualParmSVFGNode(uint32_t id, const ICFGNode *icfg,
-                     const llvm::CallBase *cs, unsigned idx)
-      : SVFGNode(id, SVFGK::ActualParm, icfg), callSite(cs), paramIdx(idx) {}
+                     const llvm::CallBase *cs, unsigned idx,
+                     const llvm::Value *arg = nullptr)
+      : SVFGNode(id, SVFGK::ActualParm, icfg), callSite(cs), argValue(arg),
+        paramIdx(idx) {}
 
   const llvm::CallBase *getCallSite() const override { return callSite; }
+  const llvm::Value *getValue() const override { return argValue; }
+  inline const llvm::Value *getArgumentValue() const { return argValue; }
   inline unsigned getParamIndex() const { return paramIdx; }
 
   SVFG_NODE_KIND(ActualParm)
@@ -818,12 +889,16 @@ public:
 class FormalRetSVFGNode : public SVFGNode {
 private:
   const llvm::Function *func;
+  const llvm::Value *retAnchor;
 
 public:
-  FormalRetSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Function *f)
-      : SVFGNode(id, SVFGK::FormalRet, icfg), func(f) {}
+  FormalRetSVFGNode(uint32_t id, const ICFGNode *icfg, const llvm::Function *f,
+                    const llvm::Value *anchor = nullptr)
+      : SVFGNode(id, SVFGK::FormalRet, icfg), func(f), retAnchor(anchor) {}
 
   const llvm::Function *getFunction() const override { return func; }
+  const llvm::Value *getValue() const override { return retAnchor; }
+  inline const llvm::Value *getReturnAnchor() const { return retAnchor; }
 
   SVFG_NODE_KIND(FormalRet)
 };
@@ -838,6 +913,7 @@ public:
       : SVFGNode(id, SVFGK::ActualRet, icfg), callSite(cs) {}
 
   const llvm::CallBase *getCallSite() const override { return callSite; }
+  const llvm::Value *getValue() const override { return callSite; }
 
   SVFG_NODE_KIND(ActualRet)
 };
@@ -864,6 +940,7 @@ public:
       : SVFGNode(id, SVFGK::VarArg, icfg), func(f) {}
 
   const llvm::Function *getFunction() const override { return func; }
+  const llvm::Value *getValue() const override { return func; }
 
   /// @brief Vararg nodes are always pointer-typed (they receive pointer args)
   inline bool isPointer() const { return true; }

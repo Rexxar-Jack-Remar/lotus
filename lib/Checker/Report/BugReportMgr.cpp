@@ -51,6 +51,45 @@ const BugReportMgr::BugType &BugReportMgr::get_bug_type_info(int ty_id) const {
   return bug_types[ty_id];
 }
 
+void BugReportMgr::clear_reports_for_types(const std::vector<int> &ty_ids) {
+  if (ty_ids.empty()) {
+    return;
+  }
+
+  std::unordered_set<int> ids(ty_ids.begin(), ty_ids.end());
+  for (int ty_id : ids) {
+    auto it = reports.find(ty_id);
+    if (it == reports.end()) {
+      continue;
+    }
+    for (BugReport *report : it->second) {
+      delete report;
+    }
+    reports.erase(it);
+  }
+
+  report_hashes.clear();
+  for (const auto &pair : reports) {
+    for (BugReport *report : pair.second) {
+      if (!report) {
+        continue;
+      }
+      report_hashes[report->compute_hash(true)] = report;
+    }
+  }
+}
+
+void BugReportMgr::clear_all_reports() {
+  std::vector<int> ty_ids;
+  ty_ids.reserve(reports.size());
+  for (const auto &pair : reports) {
+    ty_ids.push_back(pair.first);
+  }
+  clear_reports_for_types(ty_ids);
+  src_file_ids.clear();
+  src_files.clear();
+}
+
 bool BugReportMgr::insert_report(int ty_id, BugReport *report,
                                  bool deduplicate_by_trace) {
   assert(ty_id >= 0 && ty_id < (int)bug_types.size() && "Invalid bug type ID");

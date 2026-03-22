@@ -15,10 +15,59 @@
 #include <algorithm>
 
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Operator.h>
 #include <llvm/Support/raw_ostream.h>
 
 namespace lotus {
 namespace analysis {
+
+namespace {
+
+int64_t clampFieldOffset(int64_t offset) {
+  if (offset < -static_cast<int64_t>(MaxFieldLimit))
+    return -static_cast<int64_t>(MaxFieldLimit);
+  if (offset > static_cast<int64_t>(MaxFieldLimit))
+    return static_cast<int64_t>(MaxFieldLimit);
+  return offset;
+}
+
+int64_t clampFieldOffset(const BoundedInt &bound) {
+  if (bound.is_minus_infinity())
+    return -static_cast<int64_t>(MaxFieldLimit);
+  if (bound.is_plus_infinity())
+    return static_cast<int64_t>(MaxFieldLimit);
+  return clampFieldOffset(bound.getIntNumeral());
+}
+
+std::pair<uint32_t, int64_t>
+resolvePointerBaseAndOffset(AbstractState &as, const llvm::Value *value,
+                            uint32_t fallbackId) {
+  const llvm::Value *base = value;
+  int64_t byteOffset = 0;
+
+  while (base) {
+    if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(base)) {
+      int64_t step = clampFieldOffset(as.getByteOffset(gep).ub());
+      byteOffset = clampFieldOffset(byteOffset + step);
+      base = gep->getPointerOperand();
+      continue;
+    }
+    if (const auto *op = llvm::dyn_cast<llvm::Operator>(base)) {
+      if (op->getOpcode() == llvm::Instruction::BitCast ||
+          op->getOpcode() == llvm::Instruction::AddrSpaceCast) {
+        base = op->getOperand(0);
+        continue;
+      }
+    }
+    break;
+  }
+
+  uint32_t baseId =
+      base ? AbstractInterpretation::getValueIdStatic(base) : fallbackId;
+  return std::make_pair(baseId, byteOffset);
+}
+
+} // namespace
 
 /// Widen interval to ensure termination of analysis
 AbstractState AbstractState::widening(const AbstractState &other) {
@@ -47,6 +96,7 @@ AbstractState AbstractState::widening(const AbstractState &other) {
   }
   // Preserve may-freed facts monotonically.
   result._freedAddrs.insert(other._freedAddrs.begin(), other._freedAddrs.end());
+  result._heapObjs.insert(other._heapObjs.begin(), other._heapObjs.end());
   // Conservatively keep the smallest known object size per object so potential
   // OOB is not hidden on merges.
   for (const auto &entry : other._objToSize) {
@@ -87,6 +137,7 @@ AbstractState AbstractState::narrowing(const AbstractState &other) {
   }
   // Narrowing keeps may-freed facts monotone.
   result._freedAddrs.insert(other._freedAddrs.begin(), other._freedAddrs.end());
+  result._heapObjs.insert(other._heapObjs.begin(), other._heapObjs.end());
   // Keep conservative (smallest) known object size.
   for (const auto &entry : other._objToSize) {
     auto it = result._objToSize.find(entry.first);
@@ -124,6 +175,7 @@ void AbstractState::joinWith(const AbstractState &other) {
   }
   // Union of freed addresses (matching SVF)
   _freedAddrs.insert(other._freedAddrs.begin(), other._freedAddrs.end());
+  _heapObjs.insert(other._heapObjs.begin(), other._heapObjs.end());
   // Merge object sizes conservatively (min size surfaces potential OOB).
   for (const auto &entry : other._objToSize) {
     auto it = _objToSize.find(entry.first);
@@ -157,6 +209,13 @@ void AbstractState::meetWith(const AbstractState &other) {
     }
   }
   _freedAddrs = std::move(intersection);
+  std::unordered_set<uint32_t> heapIntersection;
+  for (uint32_t objId : _heapObjs) {
+    if (other._heapObjs.find(objId) != other._heapObjs.end()) {
+      heapIntersection.insert(objId);
+    }
+  }
+  _heapObjs = std::move(heapIntersection);
   // Meet object sizes by requiring presence in both and taking max.
   std::unordered_map<uint32_t, uint32_t> objIntersection;
   for (const auto &entry : _objToSize) {
@@ -185,7 +244,8 @@ void AbstractState::printAbstractState() const {
 bool AbstractState::equals(const AbstractState &other) const {
   return eqVarToValMap(_varToAbsVal, other._varToAbsVal) &&
          eqVarToValMap(_addrToAbsVal, other._addrToAbsVal) &&
-         _freedAddrs == other._freedAddrs && _objToSize == other._objToSize;
+         _freedAddrs == other._freedAddrs && _heapObjs == other._heapObjs &&
+         _objToSize == other._objToSize;
 }
 
 uint32_t AbstractState::hash() const {
@@ -209,11 +269,16 @@ uint32_t AbstractState::hash() const {
   for (const auto &addr : _freedAddrs) {
     h3 = szudzik(h3, hf(addr));
   }
-  size_t h4 = szudzik(_objToSize.size() * 2, 0);
-  for (const auto &item : _objToSize) {
-    h4 = szudzik(h4, szudzik(hf(item.first), hf(item.second)));
+  size_t h4 = szudzik(_heapObjs.size() * 2, 0);
+  for (const auto &objId : _heapObjs) {
+    h4 = szudzik(h4, hf(objId));
   }
-  return static_cast<uint32_t>(szudzik(szudzik(h, h2), szudzik(h3, h4)));
+  size_t h5 = szudzik(_objToSize.size() * 2, 0);
+  for (const auto &item : _objToSize) {
+    h5 = szudzik(h5, szudzik(hf(item.first), hf(item.second)));
+  }
+  return static_cast<uint32_t>(
+      szudzik(szudzik(h, h2), szudzik(szudzik(h3, h4), h5)));
 }
 
 AbstractValue AbstractState::loadValue(uint32_t varId) {
@@ -229,6 +294,27 @@ AbstractValue AbstractState::loadValue(uint32_t varId) {
         continue;
       }
       result.join_with(load(addr));
+    }
+  }
+
+  // Resolve field-sensitive loads through the original base pointer when the
+  // pointer value is a GEP/cast chain and the direct address-set lookup did not
+  // recover a value.
+  if (result.getAddrs().isBottom() && result.getInterval().isBottom()) {
+    const llvm::Value *ptrVal =
+        AbstractInterpretation::getAEInstance().getValueFromIdStatic(varId);
+    if (ptrVal && ptrVal->getType()->isPointerTy()) {
+      std::pair<uint32_t, int64_t> resolved =
+          resolvePointerBaseAndOffset(*this, ptrVal, varId);
+      AddressValue derivedAddrs =
+          getGepObjAddrs(resolved.first, IntervalValue(resolved.second));
+      for (uint32_t addr : derivedAddrs) {
+        if (!AddressValue::isVirtualMemAddress(addr) || isFreedMem(addr))
+          continue;
+        uint32_t objId = getIDFromAddr(addr);
+        if (inAddrToValTable(objId) || inAddrToAddrsTable(objId))
+          result.join_with(load(addr));
+      }
     }
   }
 
@@ -270,6 +356,20 @@ void AbstractState::storeValue(uint32_t varId, uint32_t valId) {
   // Store to addresses in abstract state
   if (inVarToAddrsTable(varId)) {
     for (auto addr : _varToAbsVal[varId].getAddrs()) {
+      if (!AddressValue::isVirtualMemAddress(addr) || isFreedMem(addr))
+        continue;
+      store(addr, val);
+    }
+  }
+
+  const llvm::Value *valPtr =
+      AbstractInterpretation::getAEInstance().getValueFromIdStatic(varId);
+  if (valPtr && valPtr->getType()->isPointerTy()) {
+    std::pair<uint32_t, int64_t> resolved =
+        resolvePointerBaseAndOffset(*this, valPtr, varId);
+    AddressValue derivedAddrs =
+        getGepObjAddrs(resolved.first, IntervalValue(resolved.second));
+    for (uint32_t addr : derivedAddrs) {
       if (!AddressValue::isVirtualMemAddress(addr) || isFreedMem(addr))
         continue;
       store(addr, val);
@@ -319,44 +419,35 @@ AddressValue AbstractState::getGepObjAddrs(uint32_t pointer,
   if (!inVarToAddrsTable(pointer))
     return result;
 
-  // Clamp offset bounds to MaxFieldLimit (align with SVF: getIntNumeral returns
-  // INT64_MIN/MAX for infinity, which we clamp to 0/MaxFieldLimit)
-  int64_t lb = offset.lb().getIntNumeral() < static_cast<int64_t>(MaxFieldLimit)
-                   ? offset.lb().getIntNumeral()
-                   : static_cast<int64_t>(MaxFieldLimit);
-  int64_t ub = offset.ub().getIntNumeral() < static_cast<int64_t>(MaxFieldLimit)
-                   ? offset.ub().getIntNumeral()
-                   : static_cast<int64_t>(MaxFieldLimit);
-  if (lb < 0)
-    lb = 0;
-  if (ub > static_cast<int64_t>(MaxFieldLimit))
-    ub = MaxFieldLimit;
-  if (lb > static_cast<int64_t>(MaxFieldLimit))
-    lb = MaxFieldLimit;
+  // Preserve finite negative offsets while still bounding infinities and very
+  // large intervals to keep field-object expansion finite.
+  int64_t lb = clampFieldOffset(offset.lb());
+  int64_t ub = clampFieldOffset(offset.ub());
 
   for (auto addr : _varToAbsVal[pointer].getAddrs()) {
     uint32_t baseObjId = getIDFromAddr(addr);
 
     // Handle offset interval - create field-sensitive GEP nodes similar to SVF
     if (offset.is_numeral()) {
-      int64_t offsetVal = offset.getIntNumeral();
-      if (offsetVal >= 0 && offsetVal <= static_cast<int64_t>(MaxFieldLimit)) {
-        // Create field-sensitive GEP object ID (matching SVF's getGepObjVar)
-        uint32_t gepObjId = getGepFieldObjId(baseObjId, offsetVal);
-        uint32_t gepAddr = getVirtualMemAddress(gepObjId);
-        // Initialize the GEP object with its address
-        _addrToAbsVal[gepObjId] = AddressValue(gepAddr);
-        result.insert(gepAddr);
+      int64_t offsetVal = clampFieldOffset(offset.getIntNumeral());
+      // Create field-sensitive GEP object ID (matching SVF's getGepObjVar)
+      uint32_t gepObjId = getGepFieldObjId(baseObjId, offsetVal);
+      uint32_t gepAddr = getVirtualMemAddress(gepObjId);
+      uint32_t objSize = getObjSize(baseObjId);
+      if (objSize > 0) {
+        setObjSize(gepObjId, objSize);
       }
+      result.insert(gepAddr);
     } else {
       // For interval offset, iterate over the range (limited to MaxFieldLimit)
-      for (int64_t i = lb; i <= ub && i <= static_cast<int64_t>(MaxFieldLimit);
-           ++i) {
+      for (int64_t i = lb; i <= ub; ++i) {
         // Create field-sensitive GEP object ID for each offset
         uint32_t gepObjId = getGepFieldObjId(baseObjId, i);
         uint32_t gepAddr = getVirtualMemAddress(gepObjId);
-        // Initialize the GEP object with its address
-        _addrToAbsVal[gepObjId] = AddressValue(gepAddr);
+        uint32_t objSize = getObjSize(baseObjId);
+        if (objSize > 0) {
+          setObjSize(gepObjId, objSize);
+        }
         result.insert(gepAddr);
       }
     }
@@ -785,18 +876,34 @@ uint32_t AbstractState::getObjectSize(const llvm::Value *obj) const {
   if (!svfir_ || !svfir_->isPTAReady())
     return 0;
 
-  // Use PTA to get object size (matching SVF's
-  // svfir->getBaseObject()->getByteSizeOfObj())
-  if (obj && obj->getType()->isPointerTy()) {
-    // Get the pointed-to type from PTA
-    const llvm::Type *pointeeType = svfir_->getObjectType(obj);
-    if (pointeeType) {
-      // Get DataLayout from the module
-      llvm::Module *mod = svfir_->getModule();
-      if (mod) {
-        const llvm::DataLayout &dl = mod->getDataLayout();
-        return dl.getTypeAllocSize(const_cast<llvm::Type *>(pointeeType));
-      }
+  if (!obj || !obj->getType()->isPointerTy())
+    return 0;
+
+  // Match SVF semantics: size belongs to the resolved base object, not merely
+  // to the queried pointer's pointee type.
+  std::vector<void *> pts;
+  svfir_->getPointsTo(obj, pts);
+
+  uint32_t bestSize = 0;
+  for (void *target : pts) {
+    uint32_t targetSize = svfir_->getByteSizeOfObj(target);
+    if (targetSize == 0)
+      continue;
+    if (bestSize == 0 || targetSize < bestSize) {
+      bestSize = targetSize;
+    }
+  }
+
+  if (bestSize != 0) {
+    return bestSize;
+  }
+
+  const llvm::Type *pointeeType = svfir_->getObjectType(obj);
+  if (pointeeType) {
+    llvm::Module *mod = svfir_->getModule();
+    if (mod && pointeeType->isSized()) {
+      const llvm::DataLayout &dl = mod->getDataLayout();
+      return dl.getTypeAllocSize(const_cast<llvm::Type *>(pointeeType));
     }
   }
   return 0;

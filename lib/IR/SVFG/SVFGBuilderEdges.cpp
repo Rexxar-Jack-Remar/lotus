@@ -106,6 +106,7 @@ void SVFGBuilder::buildCopyEdges() {
 
         if (isa<LoadInst>(&inst) || isa<StoreInst>(&inst) ||
             isa<GetElementPtrInst>(&inst) || isa<PHINode>(&inst) ||
+            isa<SelectInst>(&inst) || isa<CallBase>(&inst) ||
             isa<CmpInst>(&inst) || isa<BranchInst>(&inst) ||
             isa<BinaryOperator>(&inst)) {
           continue;
@@ -209,20 +210,23 @@ void SVFGBuilder::buildPhiEdges() {
     if (!bb)
       continue;
 
-    for (const PHINode &phi : bb->phis()) {
-      auto dstIt = valueToNode.find(&phi);
-      if (dstIt == valueToNode.end())
-        continue;
-
-      SVFGNode *dstNode = svfg->getNode(dstIt->second);
-      if (!dstNode || !dstNode->isPhiNode())
-        continue;
-
-      for (unsigned i = 0; i < phi.getNumIncomingValues(); ++i) {
-        const Value *incomingVal = phi.getIncomingValue(i);
-        auto srcIt = valueToNode.find(incomingVal);
-        if (srcIt == valueToNode.end())
+      for (const Instruction &inst : *bb) {
+        if (!isa<PHINode>(&inst) && !isa<SelectInst>(&inst))
           continue;
+
+        auto dstIt = valueToNode.find(&inst);
+        if (dstIt == valueToNode.end())
+          continue;
+
+        SVFGNode *dstNode = svfg->getNode(dstIt->second);
+        if (!dstNode || !dstNode->isPhiNode())
+          continue;
+
+        for (const Use &op : inst.operands()) {
+          const Value *incomingVal = op.get();
+          auto srcIt = valueToNode.find(incomingVal);
+          if (srcIt == valueToNode.end())
+            continue;
 
         SVFGNode *srcNode = svfg->getNode(srcIt->second);
         if (srcNode) {

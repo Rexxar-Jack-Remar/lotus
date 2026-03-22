@@ -91,6 +91,16 @@ public:
   const std::vector<BugReport *> *get_reports_for_type(int ty_id) const;
 
   /**
+   * Clear reports for a subset of bug types and rebuild deduplication state.
+   */
+  void clear_reports_for_types(const std::vector<int> &ty_ids);
+
+  /**
+   * Clear all stored reports and deduplication state.
+   */
+  void clear_all_reports();
+
+  /**
    * Deduplicate reports based on location or trace
    * Enhanced with Infer-inspired location-based sorting and preference
    */

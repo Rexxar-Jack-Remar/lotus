@@ -27,7 +27,7 @@ static cl::opt<std::string> InputFilename(cl::Positional,
 static cl::opt<bool> MemoryLeakCheck(
     "leak",
     cl::desc("Check for memory leaks (alloc never freed or partial leak)"),
-    cl::init(true));
+    cl::init(false));
 
 static cl::opt<bool>
     FileCheck("file",
@@ -74,12 +74,21 @@ int main(int argc, char **argv) {
   }
 
   // Determine which checkers to run
-  bool runLeak = MemoryLeakCheck || AllChecks;
-  bool runDoubleFree = DFreeCheck || AllChecks;
-  bool runFile = FileCheck || AllChecks;
-
-  // If no specific checkers are enabled and --all is not set, default to leak
-  if (!runLeak && !runDoubleFree && !runFile) {
+  const bool anyExplicitChecker =
+      MemoryLeakCheck.getNumOccurrences() != 0 ||
+      DFreeCheck.getNumOccurrences() != 0 || FileCheck.getNumOccurrences() != 0;
+  bool runLeak = false;
+  bool runDoubleFree = false;
+  bool runFile = false;
+  if (AllChecks) {
+    runLeak = true;
+    runDoubleFree = true;
+    runFile = true;
+  } else if (anyExplicitChecker) {
+    runLeak = MemoryLeakCheck;
+    runDoubleFree = DFreeCheck;
+    runFile = FileCheck;
+  } else {
     runLeak = true;
   }
 
@@ -95,6 +104,7 @@ int main(int argc, char **argv) {
   // If running multiple checkers, build SVFG/ICFG once and share them
   std::unique_ptr<lotus::analysis::SVFG> shared_svfg;
   std::unique_ptr<::ICFG> shared_icfg;
+  lotus::analysis::SrcSnkDDA::RemovedSUVFEdges shared_removed_su_vfg_edges;
 
   if (checkerCount > 1) {
     // Build SVFG/ICFG once using a temporary checker
@@ -102,6 +112,7 @@ int main(int argc, char **argv) {
     lotus::analysis::LeakChecker builderChecker;
     builderChecker.setModule(M.get());
     builderChecker.initialize();
+    builderChecker.exportRemovedSUVFEdges(shared_removed_su_vfg_edges);
 
     // Extract SVFG/ICFG to share (ownership moves to shared_svfg/shared_icfg)
     auto extracted = builderChecker.extractSVFGAndICFG();
@@ -121,11 +132,13 @@ int main(int argc, char **argv) {
       // Move shared graphs into this checker.
       leakChecker.setSharedSVFGAndICFG(std::move(shared_svfg),
                                        std::move(shared_icfg));
+      leakChecker.importRemovedSUVFEdges(shared_removed_su_vfg_edges);
     }
     leakChecker.setModule(M.get());
     leakChecker.runOnModule(*M);
     if (checkerCount > 1) {
       // Hand graphs to the next checker only after this one has finished.
+      leakChecker.exportRemovedSUVFEdges(shared_removed_su_vfg_edges);
       auto extracted = leakChecker.extractSVFGAndICFG();
       shared_svfg = std::move(extracted.first);
       shared_icfg = std::move(extracted.second);
@@ -142,12 +155,14 @@ int main(int argc, char **argv) {
     if (checkerCount > 1 && shared_svfg && shared_icfg) {
       dfChecker.setSharedSVFGAndICFG(std::move(shared_svfg),
                                      std::move(shared_icfg));
+      dfChecker.importRemovedSUVFEdges(shared_removed_su_vfg_edges);
     }
     // Note: Double-free checker uses free() calls as both sources and sinks,
     // so it doesn't share source/sink state with leak checker.
     dfChecker.setModule(M.get());
     dfChecker.runOnModule(*M);
     if (checkerCount > 1) {
+      dfChecker.exportRemovedSUVFEdges(shared_removed_su_vfg_edges);
       auto extracted = dfChecker.extractSVFGAndICFG();
       shared_svfg = std::move(extracted.first);
       shared_icfg = std::move(extracted.second);
@@ -164,6 +179,7 @@ int main(int argc, char **argv) {
     if (checkerCount > 1 && shared_svfg && shared_icfg) {
       fileChecker.setSharedSVFGAndICFG(std::move(shared_svfg),
                                        std::move(shared_icfg));
+      fileChecker.importRemovedSUVFEdges(shared_removed_su_vfg_edges);
     }
     fileChecker.setModule(M.get());
     fileChecker.runOnModule(*M);

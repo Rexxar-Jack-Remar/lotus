@@ -146,6 +146,8 @@ void SVFG::addNode(SVFGNode *node) {
   if (node->getId() >= nextNodeId) {
     nextNodeId = node->getId() + 1;
   }
+  if (node->hasValueId())
+    valueIdToDefNodeMap.emplace(node->getValueId(), node->getId());
   if (node->isMemNode() && node->getMemReg() != 0 &&
       isMemDefSVFGNode(node->getNodeKind())) {
     setMSSADef(node->getMemReg(), node, node->getSSAVersion());
@@ -233,8 +235,8 @@ void SVFG::setObjectValue(uint32_t objId, const llvm::Value *v) {
   if (objId == 0 || !v)
     return;
   objIdToValue[objId] = v;
-  // Preserve the first mapping to avoid clobbering base objects with field
-  // objects.
+  // Preserve the first reverse mapping to avoid clobbering a canonical base
+  // object with a later refined alias to the same abstract object.
   if (valueToObjId.find(v) == valueToObjId.end())
     valueToObjId[v] = objId;
 }
@@ -251,6 +253,23 @@ uint32_t SVFG::getObjectId(const llvm::Value *v) const {
   return (it != valueToObjId.end()) ? it->second : 0;
 }
 
+SVFGNode *SVFG::getCanonicalDefNodeForDDAId(uint32_t ddaId) const {
+  if (SVFGNode *valueNode = getValueIdNode(ddaId))
+    return valueNode;
+
+  const llvm::Value *objValue = getObjectValue(ddaId);
+  if (!objValue)
+    return nullptr;
+
+  if (SVFGNode *valueNode = getValueNode(objValue))
+    return valueNode;
+
+  if (const auto *inst = llvm::dyn_cast<llvm::Instruction>(objValue))
+    return getDef(inst);
+
+  return nullptr;
+}
+
 uint32_t SVFG::getCallSiteId(const llvm::CallBase *cs,
                              const llvm::Function *callee) const {
   if (!cs || !callee)
@@ -260,6 +279,10 @@ uint32_t SVFG::getCallSiteId(const llvm::CallBase *cs,
   CallSiteCalleeKey key{cs, callee};
   auto it = callSiteCalleeToId.find(key);
   return (it != callSiteCalleeToId.end()) ? it->second : 0;
+}
+
+void SVFG::initializeRefinedCallGraph(Module &M) {
+  refinedCallGraph = std::make_unique<LTCallGraph>(M);
 }
 
 void SVFG::removeNode(SVFGNode *node) {
@@ -284,6 +307,12 @@ void SVFG::removeNode(SVFGNode *node) {
     if (it != valueToNodeMap.end() && it->second == nodeId) {
       valueToNodeMap.erase(it);
     }
+  }
+
+  if (node->hasValueId()) {
+    auto it = valueIdToDefNodeMap.find(node->getValueId());
+    if (it != valueIdToDefNodeMap.end() && it->second == nodeId)
+      valueIdToDefNodeMap.erase(it);
   }
 
   if (inst) {
@@ -697,6 +726,7 @@ void SVFG::swapWith(SVFG &other) {
   swap(nodeMap, other.nodeMap);
   swap(instToDefMap, other.instToDefMap);
   swap(valueToNodeMap, other.valueToNodeMap);
+  swap(valueIdToDefNodeMap, other.valueIdToDefNodeMap);
   swap(mssaVerToNodeMap, other.mssaVerToNodeMap);
   swap(callSiteToActualInMap, other.callSiteToActualInMap);
   swap(callSiteToActualOutMap, other.callSiteToActualOutMap);
@@ -724,6 +754,7 @@ void SVFG::swapWith(SVFG &other) {
   swap(callSiteCalleeToId, other.callSiteCalleeToId);
   swap(globalStoreNodes, other.globalStoreNodes);
   swap(nextCallSiteId, other.nextCallSiteId);
+  swap(refinedCallGraph, other.refinedCallGraph);
 }
 
 void SVFG::markForUpdate(SVFGNode *node) {

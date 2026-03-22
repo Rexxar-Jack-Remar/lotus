@@ -9,6 +9,7 @@
 
 #include "Alias/DDA/DDAClient.h"
 
+#include "Alias/DDA/ContextDDA.h"
 #include "Alias/DDA/FlowDDA.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBase.h"
@@ -18,6 +19,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
@@ -28,11 +30,18 @@ using namespace llvm;
 void DDAClient::addCandidate(const llvm::Value *v) {
   if (!v || !v->getType()->isPointerTy())
     return;
+  if (!candidateQuerySet_.insert(v).second)
+    return;
   candidateQueries_.push_back(v);
 }
 
-std::vector<const llvm::Value *> &DDAClient::collectCandidateQueries() {
+void DDAClient::resetCandidateQueries() {
   candidateQueries_.clear();
+  candidateQuerySet_.clear();
+}
+
+std::vector<const llvm::Value *> &DDAClient::collectCandidateQueries() {
+  resetCandidateQueries();
   if (!svfg_)
     return candidateQueries_;
   if (!solveAll_) {
@@ -41,13 +50,27 @@ std::vector<const llvm::Value *> &DDAClient::collectCandidateQueries() {
       addCandidate(v);
     return candidateQueries_;
   }
-  // Default mode: query all top-level pointer-like SVFG statements.
+  // Match SVF's "all valid pointers" intent more closely by collecting every
+  // pointer-typed value bound in the SVFG value index, including aliases that
+  // share a canonical node (e.g. bitcast constant expressions). Fall back to
+  // node scanning as a compatibility path for graphs without a populated value
+  // index.
+  for (const auto &entry : svfg_->getValueNodeMap()) {
+    const llvm::Value *v = entry.first;
+    if (!v || llvm::isa<llvm::ConstantPointerNull>(v))
+      continue;
+    addCandidate(v);
+  }
+  if (!candidateQueries_.empty())
+    return candidateQueries_;
+
   for (auto it = svfg_->begin(), e = svfg_->end(); it != e; ++it) {
     SVFGNode *node = it->second;
     if (!node)
       continue;
     const llvm::Value *v = node->getValue();
-    if (!v || !v->getType()->isPointerTy())
+    if (!v || !v->getType()->isPointerTy() ||
+        llvm::isa<llvm::ConstantPointerNull>(v))
       continue;
     if (node->isStmtNode() || node->isPhiNode() || node->isParamNode())
       addCandidate(v);
@@ -66,8 +89,28 @@ void DDAClient::answerQueries(FlowDDA *dda) {
   performStat(dda);
 }
 
+void DDAClient::answerQueries(ContextDDA *dda) {
+  if (!dda || !dda->getSVFG())
+    return;
+  setSVFG(dda->getSVFG());
+  if (FlowDDA *flow = dda->getFlowDDA()) {
+    if (const llvm::Module *M = flow->getModule())
+      setModule(M);
+  }
+  collectCandidateQueries();
+  for (const llvm::Value *ptr : candidateQueries_)
+    (void)dda->computeDDAPts(ptr);
+  performStat(dda);
+}
+
+void DDAClient::performStat(ContextDDA *dda) {
+  if (!dda)
+    return;
+  performStat(dda->getFlowDDA());
+}
+
 std::vector<const llvm::Value *> &FunptrDDAClient::collectCandidateQueries() {
-  candidateQueries_.clear();
+  resetCandidateQueries();
   if (!solveAll_ && !userQueries_.empty()) {
     for (const llvm::Value *v : userQueries_)
       addCandidate(v);
@@ -160,7 +203,7 @@ void FunptrDDAClient::performStat(FlowDDA *dda) {
 }
 
 std::vector<const llvm::Value *> &AliasDDAClient::collectCandidateQueries() {
-  candidateQueries_.clear();
+  resetCandidateQueries();
   if (!solveAll_ && !userQueries_.empty()) {
     for (const llvm::Value *v : userQueries_)
       addCandidate(v);

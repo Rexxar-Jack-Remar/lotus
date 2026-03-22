@@ -104,7 +104,17 @@ uint32_t SVFIRWrapper::getByteSizeOfObj(const void *obj) const {
 
   // For allocations (alloca, malloc, etc.), use the allocated type
   if (const auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(allocSite)) {
-    return dl.getTypeAllocSize(alloca->getAllocatedType());
+    uint64_t elemSize = dl.getTypeAllocSize(alloca->getAllocatedType());
+    if (!alloca->isArrayAllocation()) {
+      return static_cast<uint32_t>(elemSize);
+    }
+
+    if (const auto *arraySize =
+            llvm::dyn_cast<llvm::ConstantInt>(alloca->getArraySize())) {
+      return static_cast<uint32_t>(elemSize * arraySize->getZExtValue());
+    }
+
+    return 0;
   }
 
   // For global variables, use the value type

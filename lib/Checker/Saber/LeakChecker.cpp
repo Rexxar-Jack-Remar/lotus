@@ -17,13 +17,9 @@
 
 #include <cassert>
 #include <deque>
-#include <functional>
-#include <unordered_map>
 #include <unordered_set>
 
-#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -57,16 +53,6 @@ static const llvm::Function *getDirectCallee(const llvm::CallBase *call) {
   return llvm::dyn_cast<llvm::Function>(called->stripPointerCasts());
 }
 
-static const llvm::Value *getReportValueForNode(const SVFGNode *node) {
-  if (!node)
-    return nullptr;
-  if (const Instruction *inst = node->getInstruction())
-    return inst;
-  if (const auto *actualParm = dyn_cast<ActualParmSVFGNode>(node))
-    return actualParm->getCallSite();
-  return nullptr;
-}
-
 static std::vector<const llvm::Function *>
 collectResolvedCallees(const llvm::CallBase *call, SaberSVFGBuilder &builder) {
   std::vector<const llvm::Function *> callees;
@@ -79,116 +65,73 @@ collectResolvedCallees(const llvm::CallBase *call, SaberSVFGBuilder &builder) {
   return builder.getIndirectCallTargets(call);
 }
 
-using FuncSet = std::unordered_set<const Function *>;
-using FuncGraph = std::unordered_map<const Function *, FuncSet>;
-
-static bool isModuleCtorOrDtor(StringRef name) {
-  return name == "llvm.global_ctors" || name == "llvm.global_dtors";
+static bool isProgEntryFunction(const Function *fun) {
+  return fun && fun->getName() == "main";
 }
 
-static void addFunctionSeedsFromGlobalArray(const GlobalVariable *gv,
-                                            FuncSet &seeds) {
-  if (!gv || !gv->hasInitializer())
-    return;
-  const Constant *init = gv->getInitializer();
-  const auto *arr = dyn_cast<ConstantArray>(init);
-  if (!arr)
-    return;
-  for (unsigned i = 0; i < arr->getNumOperands(); ++i) {
-    const auto *elt = dyn_cast<ConstantStruct>(arr->getOperand(i));
-    if (!elt || elt->getNumOperands() < 2)
-      continue;
-    const Value *op = elt->getOperand(1)->stripPointerCasts();
-    if (const auto *fn = dyn_cast<Function>(op)) {
-      if (!fn->isDeclaration())
-        seeds.insert(fn);
-    }
+static bool isUncalledFunction(const Function *fun) {
+  if (!fun)
+    return true;
+  if (fun->hasAddressTaken())
+    return false;
+  if (isProgEntryFunction(fun))
+    return false;
+  for (const User *user : fun->users()) {
+    if (isa<CallBase>(user))
+      return false;
   }
+  return true;
 }
 
-static FuncSet
-computeReachableFunctions(const Module *M,
-                          const std::function<std::vector<const Function *>(
-                              const CallBase *)> &resolveIndirectTargets) {
-  FuncSet reachable;
-  FuncSet seeds;
-  FuncGraph graph;
-  if (!M)
-    return reachable;
+static void collectForwardedPointerLoads(
+    const llvm::Value *root,
+    llvm::SmallVectorImpl<const llvm::LoadInst *> &loads) {
+  if (!root || !root->getType()->isPointerTy())
+    return;
 
-  for (const Function &F : *M) {
-    if (F.isDeclaration())
-      continue;
-    graph.emplace(&F, FuncSet{});
+  std::deque<const llvm::Value *> worklist;
+  std::unordered_set<const llvm::Value *> visited;
+  worklist.push_back(root);
 
-    if (F.getName() == "main" || !F.hasLocalLinkage() || F.hasAddressTaken())
-      seeds.insert(&F);
-  }
-
-  for (const GlobalVariable &GV : M->globals()) {
-    if (!isModuleCtorOrDtor(GV.getName()))
-      continue;
-    addFunctionSeedsFromGlobalArray(&GV, seeds);
-  }
-
-  for (const Function &F : *M) {
-    if (F.isDeclaration())
-      continue;
-    auto it = graph.find(&F);
-    if (it == graph.end())
+  while (!worklist.empty()) {
+    const llvm::Value *cur = worklist.front();
+    worklist.pop_front();
+    if (!visited.insert(cur).second)
       continue;
 
-    for (const BasicBlock &BB : F) {
-      for (const Instruction &I : BB) {
-        const auto *CB = dyn_cast<CallBase>(&I);
-        if (!CB)
-          continue;
-        const Function *callee = getDirectCallee(CB);
-        if (callee) {
-          if (!callee->isDeclaration())
-            it->second.insert(callee);
-          continue;
-        }
-        for (const Function *target : resolveIndirectTargets(CB)) {
-          if (target && !target->isDeclaration())
-            it->second.insert(target);
-        }
+    for (const llvm::User *user : cur->users()) {
+      if (const auto *load = dyn_cast<LoadInst>(user)) {
+        if (load->getPointerOperand() == cur)
+          loads.push_back(load);
+        continue;
+      }
+      if (const auto *cast = dyn_cast<CastInst>(user)) {
+        if (cast->getType()->isPointerTy())
+          worklist.push_back(cast);
+        continue;
+      }
+      if (const auto *gep = dyn_cast<GetElementPtrInst>(user)) {
+        if (gep->getType()->isPointerTy())
+          worklist.push_back(gep);
+        continue;
+      }
+      if (const auto *phi = dyn_cast<PHINode>(user)) {
+        if (phi->getType()->isPointerTy())
+          worklist.push_back(phi);
+        continue;
+      }
+      if (const auto *sel = dyn_cast<SelectInst>(user)) {
+        if (sel->getType()->isPointerTy())
+          worklist.push_back(sel);
+        continue;
       }
     }
   }
-
-  if (seeds.empty()) {
-    for (const auto &kv : graph)
-      seeds.insert(kv.first);
-  }
-
-  std::deque<const Function *> worklist(seeds.begin(), seeds.end());
-  while (!worklist.empty()) {
-    const Function *F = worklist.front();
-    worklist.pop_front();
-    if (!reachable.insert(F).second)
-      continue;
-    auto it = graph.find(F);
-    if (it == graph.end())
-      continue;
-    for (const Function *callee : it->second) {
-      if (callee && !callee->isDeclaration())
-        worklist.push_back(callee);
-    }
-  }
-
-  return reachable;
 }
 
 void LeakChecker::initSrcs() {
   if (!module_ || !svfg)
     return;
-
-  // SVF parity: skip sources in dead/uncalled functions.
-  const FuncSet reachableFunctions =
-      computeReachableFunctions(module_, [this](const CallBase *call) {
-        return memSSA.getIndirectCallTargets(call);
-      });
 
   CSWorkList worklist;
   SVFGNodeBS visited;
@@ -199,6 +142,8 @@ void LeakChecker::initSrcs() {
     for (auto &BB : F) {
       for (auto &I : BB) {
         if (auto *CI = dyn_cast<CallBase>(&I)) {
+          if (isUncalledFunction(CI->getCaller()))
+            continue;
           if (!CI->getType()->isPointerTy())
             continue;
           bool sourceLike = false;
@@ -221,7 +166,8 @@ void LeakChecker::initSrcs() {
 
     if (!cs->getCaller())
       continue;
-    if (cs->getCaller()->isDeclaration())
+    const llvm::Function *caller = cs->getCaller();
+    if (!caller || caller->isDeclaration())
       continue;
 
     SVFGNode *node = svfg->getDef(cs);
@@ -238,8 +184,7 @@ void LeakChecker::initSrcs() {
       for (const llvm::CallBase *c : csSet)
         worklist.push_back(c);
     } else {
-      const llvm::Function *caller = cs->getCaller();
-      if (!caller->isDeclaration() && reachableFunctions.count(caller) &&
+      if (!isUncalledFunction(caller) &&
           !SaberCheckerAPI::getCheckerAPI()->isExtCall(caller)) {
         addToSources(node);
         addSrcToCSID(node, cs);
@@ -306,10 +251,9 @@ void LeakChecker::initSnks() {
                 addToSinks(snkNode);
               if (multiLevelSink &&
                   arg->getType()->getPointerElementType()->isPointerTy()) {
-                for (const User *user : arg.get()->users()) {
-                  const auto *load = dyn_cast<LoadInst>(user);
-                  if (!load || load->getPointerOperand() != arg.get())
-                    continue;
+                llvm::SmallVector<const LoadInst *, 4> forwardedLoads;
+                collectForwardedPointerLoads(arg.get(), forwardedLoads);
+                for (const LoadInst *load : forwardedLoads) {
                   if (SVFGNode *loadNode = svfg->getDef(load)) {
                     addToSinks(loadNode);
                   } else if (SVFGNode *loadNode = svfg->getValueNode(load)) {
@@ -358,14 +302,6 @@ void LeakChecker::reportBug(ProgSlice *slice) {
   }
   if (!neverFree)
     appendPathConditionEvents(report, slice);
-
-  for (auto it = slice->sinksBegin(), et = slice->sinksEnd(); it != et; ++it) {
-    const SVFGNode *snk = *it;
-    if (const Value *sinkValue = getReportValueForNode(snk)) {
-      std::string tip = "Memory deallocated here";
-      report->append_step(const_cast<Value *>(sinkValue), tip, 1);
-    }
-  }
 
   mgr.insert_report(bugTypeId, report, false);
 

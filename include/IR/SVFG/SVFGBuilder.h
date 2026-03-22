@@ -123,6 +123,10 @@ struct SVFGBuilderConfig {
 ///   SVFG *svfg = builder.build(icfg);
 class SVFGBuilder {
 public:
+  /// Value-symbol IDs live in a disjoint namespace from both SVFG node IDs and
+  /// abstract object IDs.
+  static constexpr uint32_t kValueIdBase = 1u << 29;
+
   /// Object IDs live in a disjoint namespace from SVFG node IDs.
   /// This avoids accidental collisions in DDA where `DPItem::cur` can hold
   /// either a pointer (SVFG node ID) or an abstract object ID.
@@ -188,8 +192,16 @@ private:
   /// @brief Next memory region ID (separate from node IDs)
   uint32_t nextMemRegId;
 
+  /// @brief Next top-level value-symbol ID.
+  uint32_t nextValueId = kValueIdBase;
+
   /// @brief Value to SVFG node mapping
   std::unordered_map<const llvm::Value *, uint32_t> valueToNode;
+  /// @brief LLVM value to canonical top-level value-symbol ID.
+  std::unordered_map<const llvm::Value *, uint32_t> valueToValueId;
+  /// @brief Synthetic value-symbol IDs for formal returns and varargs.
+  std::unordered_map<const llvm::Function *, uint32_t> formalRetValueIds;
+  std::unordered_map<const llvm::Function *, uint32_t> varArgValueIds;
 
   /// @brief PTA object to SVFG node mapping (for points-to set conversion)
   std::unordered_map<const void *, uint32_t> ptaObjectToObjId;
@@ -210,6 +222,7 @@ private:
   /// @brief Object ID to memory region mapping (one memReg per abstract object).
   std::unordered_map<uint32_t, uint32_t> objIdToMemReg;
   std::unordered_map<uint32_t, uint32_t> memRegToObjId;
+  std::unordered_map<uint32_t, SVFGNodeBS> memRegToPts;
 
   /// @brief Canonical memory-region IDs keyed by points-to set.
   ///
@@ -233,16 +246,6 @@ private:
   /// @brief Store instruction to top-level Store SVFG node mapping
   std::unordered_map<const llvm::StoreInst *, uint32_t> storeToStoreNode;
 
-  /// @brief Load instruction to MemorySSA LoadMu nodes (one per accessed memReg).
-  std::unordered_map<const llvm::LoadInst *, std::vector<uint32_t>> loadToMuNodes;
-
-  /// @brief Store instruction to MemorySSA StoreChi nodes (one per accessed memReg).
-  std::unordered_map<const llvm::StoreInst *, std::vector<uint32_t>> storeToChiNodes;
-
-  /// @brief Atomic instruction to memory use/def nodes (one per accessed memReg).
-  std::unordered_map<const llvm::Instruction *, std::vector<uint32_t>> atomicToMuNodes;
-  std::unordered_map<const llvm::Instruction *, std::vector<uint32_t>> atomicToChiNodes;
-
   /// @brief Memory region version mapping
   std::unordered_map<MemRegVer, uint32_t, MemRegVerHash> memRegVerToNode;
 
@@ -256,6 +259,9 @@ private:
   /// duplicate nodes.
   std::unordered_map<const llvm::Function *,
                      std::unordered_set<uint32_t>> funcEntryChiMemRegs;
+
+  /// @brief Module-global memory regions seeded from the synthetic global-init node.
+  std::unordered_map<uint32_t, SVFGNodeBS> globalEntryRegions;
 
   /// @brief Function exit mu nodes
   std::unordered_map<const llvm::Function *, std::vector<uint32_t>> funcExitMu;
@@ -293,8 +299,10 @@ private:
   /// inter-procedural edges when points-to information changes.
   std::unordered_set<SVFGEdge *> vfEdgesAtIndCallSite;
 
-  /// @brief Explicit call graph snapshot kept in sync with SVFG refinements.
-  std::unique_ptr<LTCallGraph> refinedCallGraph;
+  /// @brief Last graph returned by build(); used for compatibility accessors.
+  SVFG *lastBuiltSVFG = nullptr;
+
+  SVFG *getActiveSVFG() const { return svfg ? svfg.get() : lastBuiltSVFG; }
 
 public:
   /// @brief Constructor
@@ -379,7 +387,7 @@ public:
   /// Direct-call edges come from the initial module scan; resolved indirect
   /// callees are appended as SVFG refinement materializes them.
   const LTCallGraph *getRefinedCallGraph() const {
-    return refinedCallGraph.get();
+    return lastBuiltSVFG ? lastBuiltSVFG->getRefinedCallGraph() : nullptr;
   }
 
   /// @brief SVF-style on-the-fly connection of an indirect callsite to a callee.
@@ -425,6 +433,7 @@ private:
   void buildActualParmNodes();
   void buildFormalRetNodes();
   void buildActualRetNodes();
+  void refreshStmtPointerNodeIds();
 
   //===------------------------------------------------------------------===
   // Edge building
@@ -448,6 +457,9 @@ private:
 
   /// @brief Get or create node ID for a value
   uint32_t getOrCreateNode(const llvm::Value *val);
+  uint32_t getOrCreateValueId(const llvm::Value *val);
+  uint32_t getOrCreateFormalRetValueId(const llvm::Function *F);
+  uint32_t getOrCreateVarArgValueId(const llvm::Function *F);
 
   /// @brief Get or create memory region for an alloca
   uint32_t getOrCreateMemReg(const llvm::AllocaInst *alloca);
@@ -521,6 +533,10 @@ private:
   bool callArgMayReadMemory(const llvm::CallBase *call, unsigned argNo) const;
   bool callArgMayModifyMemory(const llvm::CallBase *call,
                               unsigned argNo) const;
+  std::vector<const llvm::Function *> getRootFunctionsFromICFG() const;
+  uint32_t getOrCreateCanonicalObjectIdForValue(const llvm::Value *v,
+                                                SVFG::ObjectInfo info);
+  uint32_t getCanonicalBaseObjId(uint32_t objId) const;
   uint32_t nextVersion(const llvm::Function *F, uint32_t memReg);
 
   /// @brief Get next node ID

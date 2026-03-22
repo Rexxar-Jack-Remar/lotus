@@ -70,6 +70,8 @@ public:
   enum DetectorKind {
     BUF_OVERFLOW,
     NULL_DEREF,
+    DIV_ZERO,
+    INT_OVERFLOW,
     USE_AFTER_FREE,
     INVALID_FREE,
     MEMORY_LEAK,
@@ -133,7 +135,8 @@ public:
   size_t getBugCount() const override { return instToBugInfo.size(); }
   void reset() override;
 
-  void detectExtAPI(AbstractState &as, const llvm::CallBase *call);
+  void detectExtAPI(AbstractState &as, const llvm::CallBase *call,
+                    const llvm::Function *callee = nullptr);
   bool canSafelyAccessMemory(AbstractState &as, uint32_t ptrId,
                              const IntervalValue &len);
   IntervalValue getAccessOffset(AbstractState &as, uint32_t objId,
@@ -148,8 +151,10 @@ public:
 
 private:
   void initExtAPIBufOverflowCheckRules();
-  bool detectStrcpy(AbstractState &as, const llvm::CallBase *call);
-  bool detectStrcat(AbstractState &as, const llvm::CallBase *call);
+  bool detectStrcpy(AbstractState &as, const llvm::CallBase *call,
+                    const llvm::Function *callee = nullptr);
+  bool detectStrcat(AbstractState &as, const llvm::CallBase *call,
+                    const llvm::Function *callee = nullptr);
   void addBugToReporter(const AEException &e, const llvm::Instruction *inst);
 
   std::map<std::string, std::vector<std::pair<uint32_t, uint32_t>>>
@@ -178,7 +183,8 @@ public:
   size_t getBugCount() const override { return instToBugInfo.size(); }
   void reset() override;
 
-  void detectExtAPI(AbstractState &as, const llvm::CallBase *call);
+  void detectExtAPI(AbstractState &as, const llvm::CallBase *call,
+                    const llvm::Function *callee = nullptr);
   bool canSafelyDerefPtr(AbstractState &as, uint32_t ptrId);
 
   bool isUninit(const AbstractValue &v) {
@@ -189,6 +195,58 @@ public:
 
 private:
   void addBugToReporter(const AEException &e, const llvm::Instruction *inst);
+
+  std::set<std::string> bugLoc;
+  std::map<const llvm::Instruction *, std::string> instToBugInfo;
+};
+
+/// Detector for divide-by-zero operations and checkpoints.
+class DivZeroDetector : public AEDetector {
+  friend class AbstractInterpretation;
+
+public:
+  DivZeroDetector() { kind = DIV_ZERO; }
+  ~DivZeroDetector() = default;
+
+  static bool classof(const AEDetector *detector) {
+    return detector->getKind() == AEDetector::DIV_ZERO;
+  }
+
+  void detect(AbstractState &as, const llvm::Instruction *inst) override;
+  void handleStubFunctions(const llvm::CallBase *call) override;
+  void reportBug() override;
+  size_t getBugCount() const override { return instToBugInfo.size(); }
+  void reset() override;
+
+private:
+  void addBugToReporter(const AEException &e, const llvm::Instruction *inst);
+  bool mayDivideByZero(AbstractState &as, const llvm::Value *divisor) const;
+
+  std::set<std::string> bugLoc;
+  std::map<const llvm::Instruction *, std::string> instToBugInfo;
+};
+
+/// Detector for integer-overflow operations and checkpoints.
+class OverflowDetector : public AEDetector {
+  friend class AbstractInterpretation;
+
+public:
+  OverflowDetector() { kind = INT_OVERFLOW; }
+  ~OverflowDetector() = default;
+
+  static bool classof(const AEDetector *detector) {
+    return detector->getKind() == AEDetector::INT_OVERFLOW;
+  }
+
+  void detect(AbstractState &as, const llvm::Instruction *inst) override;
+  void handleStubFunctions(const llvm::CallBase *call) override;
+  void reportBug() override;
+  size_t getBugCount() const override { return instToBugInfo.size(); }
+  void reset() override;
+
+private:
+  void addBugToReporter(const AEException &e, const llvm::Instruction *inst);
+  bool mayOverflow(AbstractState &as, const llvm::Instruction *inst) const;
 
   std::set<std::string> bugLoc;
   std::map<const llvm::Instruction *, std::string> instToBugInfo;

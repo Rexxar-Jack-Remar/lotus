@@ -40,6 +40,14 @@ static void addDefinedFunction(FuncGraph &graph, const Function *F) {
     graph.emplace(F, FuncSet{});
 }
 
+static void appendUniqueDefinedCallee(std::vector<const Function *> &targets,
+                                      const Function *F) {
+  if (!F || F->isDeclaration())
+    return;
+  if (std::find(targets.begin(), targets.end(), F) == targets.end())
+    targets.push_back(F);
+}
+
 static const Function *getDirectCallee(const CallBase *call) {
   if (!call)
     return nullptr;
@@ -49,6 +57,28 @@ static const Function *getDirectCallee(const CallBase *call) {
   if (!called)
     return nullptr;
   return dyn_cast<Function>(called->stripPointerCasts());
+}
+
+static const ICFGNode *getCallSiteICFGNode(const SVFG *g, const CallBase *call) {
+  if (!g || !call)
+    return nullptr;
+  if (const ICFG *icfg = g->getICFG()) {
+    return const_cast<ICFG *>(icfg)->getIntraBlockNode(call->getParent());
+  }
+  return nullptr;
+}
+
+static ActualParmSVFGNode *findActualParmNode(SVFG *g, const CallBase *cs,
+                                              unsigned idx) {
+  if (!g || !cs)
+    return nullptr;
+  const auto &parms = g->getActualParms(cs);
+  for (SVFGNode *n : parms) {
+    auto *ap = dyn_cast<ActualParmSVFGNode>(n);
+    if (ap && ap->getParamIndex() == idx)
+      return ap;
+  }
+  return nullptr;
 }
 
 static void buildResolvedCallGraph(
@@ -84,6 +114,33 @@ static void buildResolvedCallGraph(
             it->second.insert(target);
         }
       }
+    }
+  }
+}
+
+static void buildResolvedCallGraph(const LTCallGraph *callGraph,
+                                   FuncGraph &graph) {
+  if (!callGraph)
+    return;
+
+  for (const auto &entry : *callGraph)
+    addDefinedFunction(graph, entry.first);
+
+  for (const auto &entry : *callGraph) {
+    const Function *caller = entry.first;
+    const auto *callerNode = entry.second.get();
+    if (!caller || !callerNode)
+      continue;
+
+    auto git = graph.find(caller);
+    if (git == graph.end())
+      continue;
+
+    for (const auto &record : *callerNode) {
+      const auto *calleeNode = record.second;
+      const Function *callee = calleeNode ? calleeNode->getFunction() : nullptr;
+      if (callee && !callee->isDeclaration())
+        git->second.insert(callee);
     }
   }
 }
@@ -151,6 +208,24 @@ computeRecursiveFunctions(const FuncGraph &graph) {
   return recursive;
 }
 
+static const Function *getOwningFunctionForObjectValue(const Value *value) {
+  if (!value)
+    return nullptr;
+
+  if (const auto *inst = dyn_cast<Instruction>(value))
+    return inst->getFunction();
+  if (const auto *arg = dyn_cast<Argument>(value))
+    return arg->getParent();
+  if (const auto *ce = dyn_cast<ConstantExpr>(value)) {
+    if (ce->isCast())
+      return getOwningFunctionForObjectValue(ce->getOperand(0));
+    if (ce->getOpcode() == Instruction::GetElementPtr)
+      return getOwningFunctionForObjectValue(ce->getOperand(0));
+  }
+
+  return nullptr;
+}
+
 } // namespace
 
 SVFG *SaberSVFGBuilder::buildSVFG(const ICFG *icfg) {
@@ -168,6 +243,42 @@ SVFG *SaberSVFGBuilder::buildSVFG(const ICFG *icfg) {
   }
 
   return svfg;
+}
+
+std::unique_ptr<SVFG>
+SaberSVFGBuilder::buildCompatSVFGForSaber(std::unique_ptr<SVFG> graph) {
+  if (!graph)
+    return nullptr;
+
+  auto optimized = std::make_unique<SVFGOPT>();
+  if (!optimized->adoptAndOptimize(std::move(graph)))
+    return nullptr;
+
+  currentSVFG_ = optimized.get();
+  // Rebuild sink-specific callsite parameter nodes that generic SVFGOPT
+  // intentionally discards but SABER relies on for per-call sink identity.
+  AddExtActualParmSVFGNodes();
+  return optimized;
+}
+
+std::unique_ptr<SVFG> SaberSVFGBuilder::buildForSaber(const ICFG *icfg,
+                                                      bool fullSVFG) {
+  SVFGBuilderConfig cfg;
+  cfg.resolveIndirectCalls = true;
+  cfg.buildMSSA = true;
+
+  std::unique_ptr<SVFG> built(build(icfg, cfg));
+  if (!built)
+    return nullptr;
+
+  if (fullSVFG) {
+    currentSVFG_ = built.get();
+    return built;
+  }
+
+  // SABER defaults to a compact compatibility graph, but it must preserve
+  // per-call sink modeling rather than inheriting generic SVFGOPT semantics.
+  return buildCompatSVFGForSaber(std::move(built));
 }
 
 void SaberSVFGBuilder::reset() {
@@ -282,29 +393,32 @@ void SaberSVFGBuilder::AddExtActualParmSVFGNodes() {
           if (!arg->getType()->isPointerTy())
             continue;
           SVFGNode *defNode = g->getValueNode(arg);
+          if (!defNode) {
+            if (const auto *inst = dyn_cast<Instruction>(arg))
+              defNode = g->getDef(inst);
+          }
           if (!defNode)
             continue;
-          const auto &parms = g->getActualParms(cs);
-          SVFGNode *actualParmNode = nullptr;
-          for (SVFGNode *n : parms) {
-            if (!n)
-              continue;
-            if (n->getNodeKind() != SVFGK::ActualParm)
-              continue;
-            auto *ap = llvm::dyn_cast<ActualParmSVFGNode>(n);
-            if (!ap)
-              continue;
-            if (ap->getParamIndex() == idx) {
-              actualParmNode = n;
-              break;
-            }
+
+          ActualParmSVFGNode *actualParmNode = findActualParmNode(g, cs, idx);
+          if (!actualParmNode) {
+            uint32_t nodeId = g->getNextNodeId();
+            actualParmNode = new ActualParmSVFGNode(
+                nodeId, getCallSiteICFGNode(g, cs), cs, idx, arg);
+            if (defNode->hasValueId())
+              actualParmNode->setValueId(defNode->getValueId());
+            g->addNode(actualParmNode);
+            g->addActualParm(cs, actualParmNode);
           }
-          if (!actualParmNode)
-            continue;
-          if (g->getIntraVFGEdge(defNode, actualParmNode,
-                                 SVFGEdgeK::IntraDirect))
-            continue;
-          g->addEdge(defNode, actualParmNode, SVFGEdgeK::IntraDirect);
+
+          if (SVFGEdge *copyEdge =
+                  g->getIntraVFGEdge(defNode, actualParmNode, SVFGEdgeK::IntraCopy)) {
+            g->removeEdge(copyEdge);
+          }
+          if (!g->getIntraVFGEdge(defNode, actualParmNode,
+                                  SVFGEdgeK::IntraDirect)) {
+            g->addEdge(defNode, actualParmNode, SVFGEdgeK::IntraDirect);
+          }
         }
       }
     }
@@ -443,6 +557,18 @@ void SaberSVFGBuilder::recomputeGlobalSVFGNodes() {
     if (!node)
       continue;
     const SVFGK k = node->getNodeKind();
+    if (k == SVFGK::EntryChi) {
+      bool touchesGlobal = false;
+      for (uint32_t objId : node->getDefSVFVars()) {
+        if (globs.count(objId) != 0) {
+          touchesGlobal = true;
+          break;
+        }
+      }
+      if (touchesGlobal)
+        globSVFGNodes.insert(node);
+      continue;
+    }
     if (k != SVFGK::Store && k != SVFGK::Load)
       continue;
     const Value *ptr = getPointerOperandForStmt(node);
@@ -454,6 +580,13 @@ void SaberSVFGBuilder::recomputeGlobalSVFGNodes() {
 bool SaberSVFGBuilder::accessGlobal(const SVFGNode *node) {
   if (!node || !currentSVFG_)
     return false;
+  if (node->getNodeKind() == SVFGK::EntryChi) {
+    for (uint32_t objId : node->getDefSVFVars()) {
+      if (globs.count(objId) != 0)
+        return true;
+    }
+    return false;
+  }
   const Value *ptr = getPointerOperandForStmt(node);
   if (ptr)
     return accessGlobal(ptr);
@@ -500,24 +633,51 @@ bool SaberSVFGBuilder::isStrongUpdate(const SVFGNode *node,
       if (!info->isFieldInsensitive) {
         // Match SVF SABER: avoid SU for local variables in recursive functions.
         // SVF checks PTA::isLocalVarInRecursiveFun(singleton). In Lotus we
-        // approximate via object metadata + direct-call SCC recursion.
+        // conservatively approximate via a module-level call graph built from
+        // direct calls, already-materialized indirect callees, and current PTA
+        // targets for unresolved indirect calls.
         if (!recursiveFunctionsReady_) {
           recursiveFunctionsReady_ = true;
           recursiveFunctionsCache_.clear();
           FuncGraph callGraph;
-          buildResolvedCallGraph(
-              module_, callGraph, [this](const CallBase *call) {
-                return this->getIndirectCallTargets(call);
-              });
+          if (module_) {
+            buildResolvedCallGraph(module_, callGraph,
+                                   [this](const CallBase *call) {
+                                     std::vector<const Function *> targets;
+                                     if (currentSVFG_) {
+                                       for (const Function *callee :
+                                            currentSVFG_->getConnectedCallees(
+                                                call)) {
+                                         appendUniqueDefinedCallee(targets,
+                                                                   callee);
+                                       }
+                                     }
+                                     for (const Function *callee :
+                                          this->getIndirectCallTargets(call)) {
+                                       appendUniqueDefinedCallee(targets,
+                                                                 callee);
+                                     }
+                                     return targets;
+                                   });
+          } else if (currentSVFG_ && currentSVFG_->getRefinedCallGraph()) {
+            buildResolvedCallGraph(currentSVFG_->getRefinedCallGraph(),
+                                   callGraph);
+          }
           recursiveFunctionsCache_ = computeRecursiveFunctions(callGraph);
         }
         if (currentSVFG_->isStackObject(objId)) {
           const Value *objVal = currentSVFG_->getObjectValue(objId);
-          const Function *owningFun = nullptr;
-          if (const auto *inst = dyn_cast_or_null<Instruction>(objVal))
-            owningFun = inst->getFunction();
-          else if (const auto *arg = dyn_cast_or_null<Argument>(objVal))
-            owningFun = arg->getParent();
+          const Function *owningFun = getOwningFunctionForObjectValue(objVal);
+          if (!owningFun) {
+            if (const auto *objInfo = currentSVFG_->getObjectInfo(objId)) {
+              if (objInfo->baseObjId != 0 && objInfo->baseObjId != objId) {
+                owningFun = getOwningFunctionForObjectValue(
+                    currentSVFG_->getObjectValue(objInfo->baseObjId));
+              }
+            }
+          }
+          if (!owningFun)
+            return false;
           if (owningFun && recursiveFunctionsCache_.count(owningFun))
             return false;
         }

@@ -74,6 +74,7 @@ public:
   /// Set of freed memory object IDs (for use-after-free detection)
   std::unordered_set<uint32_t> _freedAddrs;
   std::unordered_set<uint32_t> _pendingFreedAddrs;
+  std::unordered_set<uint32_t> _heapObjs;
 
   /// Maps SSA value IDs to their abstract values (intervals or addresses)
   VarToAbsValMap _varToAbsVal;
@@ -94,9 +95,12 @@ public:
   /// Copy constructor - performs deep copy of all state components
   AbstractState(const AbstractState &rhs)
       : _freedAddrs(rhs._freedAddrs), _varToAbsVal(rhs._varToAbsVal),
-        _pendingFreedAddrs(rhs._pendingFreedAddrs),
+        _pendingFreedAddrs(rhs._pendingFreedAddrs), _heapObjs(rhs._heapObjs),
         _addrToAbsVal(rhs._addrToAbsVal), svfir_(rhs.svfir_),
-        _objToSize(rhs._objToSize) {}
+        _objToSize(rhs._objToSize),
+        _gepObjOffsetFromBase(rhs._gepObjOffsetFromBase),
+        _gepFieldObjMap(rhs._gepFieldObjMap),
+        _nextGepFieldId(rhs._nextGepFieldId) {}
 
   virtual ~AbstractState() = default;
 
@@ -107,7 +111,11 @@ public:
       _addrToAbsVal = rhs._addrToAbsVal;
       _freedAddrs = rhs._freedAddrs;
       _pendingFreedAddrs = rhs._pendingFreedAddrs;
+      _heapObjs = rhs._heapObjs;
       _objToSize = rhs._objToSize;
+      _gepObjOffsetFromBase = rhs._gepObjOffsetFromBase;
+      _gepFieldObjMap = rhs._gepFieldObjMap;
+      _nextGepFieldId = rhs._nextGepFieldId;
       svfir_ = rhs.svfir_;
     }
     return *this;
@@ -117,9 +125,13 @@ public:
   AbstractState(AbstractState &&rhs)
       : _freedAddrs(std::move(rhs._freedAddrs)),
         _pendingFreedAddrs(std::move(rhs._pendingFreedAddrs)),
+        _heapObjs(std::move(rhs._heapObjs)),
         _varToAbsVal(std::move(rhs._varToAbsVal)),
         _addrToAbsVal(std::move(rhs._addrToAbsVal)), svfir_(rhs.svfir_),
-        _objToSize(std::move(rhs._objToSize)) {}
+        _objToSize(std::move(rhs._objToSize)),
+        _gepObjOffsetFromBase(std::move(rhs._gepObjOffsetFromBase)),
+        _gepFieldObjMap(std::move(rhs._gepFieldObjMap)),
+        _nextGepFieldId(rhs._nextGepFieldId) {}
 
   /// Move assignment operator
   AbstractState &operator=(AbstractState &&rhs) {
@@ -128,7 +140,11 @@ public:
       _addrToAbsVal = std::move(rhs._addrToAbsVal);
       _freedAddrs = std::move(rhs._freedAddrs);
       _pendingFreedAddrs = std::move(rhs._pendingFreedAddrs);
+      _heapObjs = std::move(rhs._heapObjs);
       _objToSize = std::move(rhs._objToSize);
+      _gepObjOffsetFromBase = std::move(rhs._gepObjOffsetFromBase);
+      _gepFieldObjMap = std::move(rhs._gepFieldObjMap);
+      _nextGepFieldId = rhs._nextGepFieldId;
       svfir_ = rhs.svfir_;
     }
     return *this;
@@ -240,6 +256,12 @@ public:
   }
 
   void clearPendingFrees() { _pendingFreedAddrs.clear(); }
+
+  void addHeapObject(uint32_t objId) { _heapObjs.insert(objId); }
+
+  bool isHeapObject(uint32_t objId) const {
+    return _heapObjs.find(objId) != _heapObjs.end();
+  }
 
   /// Check if a memory address has been freed
   /// @param addr Memory object ID to check

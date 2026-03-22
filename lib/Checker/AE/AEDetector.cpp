@@ -13,6 +13,7 @@
 #include "Checker/Report/BugTypes.h"
 
 #include <algorithm>
+#include <limits>
 
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/DebugInfo.h>
@@ -22,6 +23,111 @@ namespace lotus {
 namespace analysis {
 
 namespace {
+const llvm::Value *stripPointerProjections(const llvm::Value *value) {
+  while (value) {
+    if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(value)) {
+      value = gep->getPointerOperand();
+      continue;
+    }
+    if (const auto *bitcast = llvm::dyn_cast<llvm::BitCastOperator>(value)) {
+      value = bitcast->getOperand(0);
+      continue;
+    }
+    if (const auto *addrspaceCast =
+            llvm::dyn_cast<llvm::AddrSpaceCastOperator>(value)) {
+      value = addrspaceCast->getOperand(0);
+      continue;
+    }
+    break;
+  }
+  return value;
+}
+
+IntervalValue byteCountToMaxAccessOffset(const IntervalValue &byteCount) {
+  return byteCount - IntervalValue(1);
+}
+
+uint32_t getRemainingByteCapacity(
+    AbstractState &as, uint32_t ptrId,
+    const std::map<uint32_t, IntervalValue> &offsetFromBaseByObjId) {
+  if (!as.inVarToAddrsTable(ptrId))
+    return 0;
+
+  bool foundConcreteTarget = false;
+  uint32_t minRemaining = std::numeric_limits<uint32_t>::max();
+
+  for (uint32_t addr : as[ptrId].getAddrs()) {
+    if (AbstractState::isInvalidMem(addr) || AbstractState::isNullMem(addr)) {
+      return 0;
+    }
+
+    const uint32_t objId = as.getIDFromAddr(addr);
+    const uint32_t objSize = as.getObjSize(objId);
+    if (objSize == 0)
+      continue;
+
+    int64_t offset = 0;
+    auto offsetIt = offsetFromBaseByObjId.find(objId);
+    if (offsetIt != offsetFromBaseByObjId.end()) {
+      const IntervalValue &baseOffset = offsetIt->second;
+      if (baseOffset.is_infinite()) {
+        return 0;
+      }
+      offset = std::max<int64_t>(0, baseOffset.ub().getIntNumeralOrZero());
+    }
+
+    uint32_t remaining = objSize;
+    if (offsetIt != offsetFromBaseByObjId.end() &&
+        offset < static_cast<int64_t>(objSize)) {
+      remaining = objSize - static_cast<uint32_t>(offset);
+    }
+    minRemaining = std::min(minRemaining, remaining);
+    foundConcreteTarget = true;
+  }
+
+  if (!foundConcreteTarget)
+    return 0;
+  return minRemaining;
+}
+
+std::vector<uint32_t> getExtAPIPointerArgIndices(
+    const llvm::CallBase *call, const llvm::Function *callee,
+    AEExtAPI *utils) {
+  std::vector<uint32_t> pointerArgs;
+  if (!call || !callee || !utils) {
+    return pointerArgs;
+  }
+
+  const std::string funcName = callee->getName().str();
+  const bool isIconvLike = funcName == "iconv" || funcName == "libiconv";
+
+  for (const std::string &annotation : utils->getExtFuncAnnotations(callee)) {
+    if (annotation.find("MEMCPY") != std::string::npos) {
+      if (isIconvLike) {
+        pointerArgs.insert(pointerArgs.end(), {1, 2, 3, 4});
+      } else {
+        if (call->arg_size() > 0 && call->getArgOperand(0)->getType()->isPointerTy()) {
+          pointerArgs.push_back(0);
+        }
+        if (call->arg_size() > 1 && call->getArgOperand(1)->getType()->isPointerTy()) {
+          pointerArgs.push_back(1);
+        }
+      }
+    } else if (annotation.find("MEMSET") != std::string::npos) {
+      pointerArgs.push_back(0);
+    } else if (annotation.find("STRCPY") != std::string::npos ||
+               annotation.find("STRCAT") != std::string::npos) {
+      pointerArgs.push_back(0);
+      pointerArgs.push_back(1);
+    }
+  }
+
+  std::sort(pointerArgs.begin(), pointerArgs.end());
+  pointerArgs.erase(std::unique(pointerArgs.begin(), pointerArgs.end()),
+                    pointerArgs.end());
+  return pointerArgs;
+}
+
 int getOrRegisterAEBugType(AEDetector::DetectorKind kind) {
   BugReportMgr &mgr = BugReportMgr::get_instance();
   switch (kind) {
@@ -39,6 +145,23 @@ int getOrRegisterAEBugType(AEDetector::DetectorKind kind) {
     if (id < 0) {
       id = mgr.register_bug_type("AE Null Dereference", BugDescription::BI_HIGH,
                                  BugDescription::BC_SECURITY, "CWE-476");
+    }
+    return id;
+  }
+  case AEDetector::DIV_ZERO: {
+    int id = mgr.find_bug_type("AE Divide By Zero");
+    if (id < 0) {
+      id = mgr.register_bug_type("AE Divide By Zero", BugDescription::BI_HIGH,
+                                 BugDescription::BC_SECURITY, "CWE-369");
+    }
+    return id;
+  }
+  case AEDetector::INT_OVERFLOW: {
+    int id = mgr.find_bug_type("AE Integer Overflow");
+    if (id < 0) {
+      id = mgr.register_bug_type("AE Integer Overflow",
+                                 BugDescription::BI_HIGH,
+                                 BugDescription::BC_SECURITY, "CWE-190");
     }
     return id;
   }
@@ -164,7 +287,7 @@ void BufOverflowDetector::detect(AbstractState &as,
            utils->getExtAPIType(direct) == AEExtAPI::MEMSET ||
            utils->getExtAPIType(direct) == AEExtAPI::STRCPY ||
            utils->getExtAPIType(direct) == AEExtAPI::STRCAT)) {
-        detectExtAPI(as, call);
+        detectExtAPI(as, call, direct);
         return;
       }
     }
@@ -181,7 +304,7 @@ void BufOverflowDetector::detect(AbstractState &as,
         AEExtAPI::ExtAPIType extType = utils->getExtAPIType(callee);
         if (extType == AEExtAPI::MEMCPY || extType == AEExtAPI::MEMSET ||
             extType == AEExtAPI::STRCPY || extType == AEExtAPI::STRCAT) {
-          detectExtAPI(as, call);
+          detectExtAPI(as, call, callee);
           break;
         }
       } else {
@@ -194,7 +317,7 @@ void BufOverflowDetector::detect(AbstractState &as,
             funName.find("strcat") != std::string::npos ||
             funName.find("strncpy") != std::string::npos ||
             funName.find("strncat") != std::string::npos) {
-          detectExtAPI(as, call);
+          detectExtAPI(as, call, callee);
           break;
         }
       }
@@ -313,6 +436,61 @@ void BufOverflowDetector::addBugToReporter(const AEException &e,
 bool BufOverflowDetector::canSafelyAccessMemory(AbstractState &as,
                                                 uint32_t ptrId,
                                                 const IntervalValue &len) {
+  auto checkAccessAgainstBase = [&](uint32_t basePtrId,
+                                    const IntervalValue &accessOffset) {
+    if (!as.inVarToAddrsTable(basePtrId))
+      return true;
+
+    const AbstractValue &baseVal = as[basePtrId];
+    if (!baseVal.isAddr())
+      return true;
+
+    for (uint32_t addr : baseVal.getAddrs()) {
+      if (AbstractState::isInvalidMem(addr) || AbstractState::isNullMem(addr))
+        return false;
+
+      uint32_t objId = as.getIDFromAddr(addr);
+      uint32_t objSize = as.getObjSize(objId);
+      if (objSize > 0 &&
+          accessOffset.ub().getIntNumeral() >= static_cast<int64_t>(objSize)) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const llvm::Value *ptrVal =
+      AbstractInterpretation::getAEInstance().getValueFromIdStatic(ptrId);
+  if (ptrVal) {
+    const llvm::Value *baseVal = ptrVal;
+    IntervalValue accumulatedOffset(0);
+    bool hasExplicitOffset = false;
+
+    while (baseVal) {
+      if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(baseVal)) {
+        accumulatedOffset = accumulatedOffset + as.getByteOffset(gep);
+        baseVal = gep->getPointerOperand();
+        hasExplicitOffset = true;
+        continue;
+      }
+      if (const auto *bitcast = llvm::dyn_cast<llvm::BitCastOperator>(baseVal)) {
+        baseVal = bitcast->getOperand(0);
+        continue;
+      }
+      if (const auto *addrspaceCast =
+              llvm::dyn_cast<llvm::AddrSpaceCastOperator>(baseVal)) {
+        baseVal = addrspaceCast->getOperand(0);
+        continue;
+      }
+      break;
+    }
+
+    if (hasExplicitOffset && baseVal) {
+      uint32_t basePtrId = AbstractInterpretation::getValueIdStatic(baseVal);
+      return checkAccessAgainstBase(basePtrId, accumulatedOffset + len);
+    }
+  }
+
   if (!as.inVarToAddrsTable(ptrId))
     return true;
 
@@ -328,9 +506,18 @@ bool BufOverflowDetector::canSafelyAccessMemory(AbstractState &as,
 
     uint32_t objId = as.getIDFromAddr(addr);
     uint32_t objSize = as.getObjSize(objId);
+    uint32_t effectiveCapacity = objSize;
+    auto offsetIt = gepObjOffsetFromBaseByObjId.find(objId);
+    if (offsetIt != gepObjOffsetFromBaseByObjId.end()) {
+      int64_t baseOffset =
+          std::max<int64_t>(0, offsetIt->second.ub().getIntNumeralOrZero());
+      if (baseOffset < static_cast<int64_t>(objSize)) {
+        effectiveCapacity = objSize - static_cast<uint32_t>(baseOffset);
+      }
+    }
 
-    if (objSize > 0 &&
-        len.ub().getIntNumeral() > static_cast<int64_t>(objSize)) {
+    if (effectiveCapacity > 0 &&
+        len.ub().getIntNumeral() >= static_cast<int64_t>(effectiveCapacity)) {
       return false;
     }
   }
@@ -398,11 +585,12 @@ void BufOverflowDetector::initExtAPIBufOverflowCheckRules() {
 }
 
 void BufOverflowDetector::detectExtAPI(AbstractState &as,
-                                       const llvm::CallBase *call) {
-  if (!call->getCalledFunction())
+                                       const llvm::CallBase *call,
+                                       const llvm::Function *callee) {
+  callee = callee ? callee : call->getCalledFunction();
+  if (!callee)
     return;
 
-  const llvm::Function *callee = call->getCalledFunction();
   std::string funcName = callee->getName().str();
 
   // First, check for BUF_CHECK annotations from AEExtAPI
@@ -435,7 +623,8 @@ void BufOverflowDetector::detectExtAPI(AbstractState &as,
                   continue;
                 len = as[lenId].getInterval();
               }
-              if (!canSafelyAccessMemory(as, bufId, len)) {
+              if (!canSafelyAccessMemory(as, bufId,
+                                         byteCountToMaxAccessOffset(len))) {
                 AEException bug("Buffer overflow in " + funcName +
                                 ": access length " + len.toString() +
                                 " may exceed buffer bounds");
@@ -477,7 +666,7 @@ void BufOverflowDetector::detectExtAPI(AbstractState &as,
         continue;
       len = as[lenId].getInterval();
     }
-    if (!canSafelyAccessMemory(as, bufId, len)) {
+    if (!canSafelyAccessMemory(as, bufId, byteCountToMaxAccessOffset(len))) {
       AEException bug("Buffer overflow in " + funcName + ": access length " +
                       len.toString() + " may exceed buffer bounds");
       addBugToReporter(bug, call);
@@ -486,14 +675,16 @@ void BufOverflowDetector::detectExtAPI(AbstractState &as,
 
   // Check for string functions
   if (funcName.find("strcpy") != std::string::npos) {
-    detectStrcpy(as, call);
+    detectStrcpy(as, call, callee);
   } else if (funcName.find("strcat") != std::string::npos) {
-    detectStrcat(as, call);
+    detectStrcat(as, call, callee);
   }
 }
 
 bool BufOverflowDetector::detectStrcpy(AbstractState &as,
-                                       const llvm::CallBase *call) {
+                                       const llvm::CallBase *call,
+                                       const llvm::Function *callee) {
+  (void)callee;
   if (call->arg_size() < 2)
     return true;
 
@@ -511,13 +702,8 @@ bool BufOverflowDetector::detectStrcpy(AbstractState &as,
   if (!utils) {
     // Fallback to conservative estimate if utils not available
     IntervalValue srcLen(0, 1024);
-    uint32_t dstSize = 0;
-    for (auto addr : as[dstId].getAddrs()) {
-      uint32_t objId = as.getIDFromAddr(addr);
-      uint32_t size = as.getObjSize(objId);
-      if (size > dstSize)
-        dstSize = size;
-    }
+    uint32_t dstSize =
+        getRemainingByteCapacity(as, dstId, gepObjOffsetFromBaseByObjId);
     if (dstSize > 0 &&
         srcLen.ub().getIntNumeral() > static_cast<int64_t>(dstSize)) {
       AEException bug("Buffer overflow in strcpy: source string length may "
@@ -530,14 +716,8 @@ bool BufOverflowDetector::detectStrcpy(AbstractState &as,
 
   IntervalValue srcLen = utils->getStrlen(as, srcId);
 
-  // Get destination buffer size
-  uint32_t dstSize = 0;
-  for (auto addr : as[dstId].getAddrs()) {
-    uint32_t objId = as.getIDFromAddr(addr);
-    uint32_t size = as.getObjSize(objId);
-    if (size > dstSize)
-      dstSize = size;
-  }
+  uint32_t dstSize =
+      getRemainingByteCapacity(as, dstId, gepObjOffsetFromBaseByObjId);
 
   // Check if source string length exceeds destination buffer size
   // Account for null terminator: need dstSize >= srcLen + 1
@@ -558,7 +738,8 @@ bool BufOverflowDetector::detectStrcpy(AbstractState &as,
 }
 
 bool BufOverflowDetector::detectStrcat(AbstractState &as,
-                                       const llvm::CallBase *call) {
+                                       const llvm::CallBase *call,
+                                       const llvm::Function *callee) {
   if (call->arg_size() < 2)
     return true;
 
@@ -577,13 +758,8 @@ bool BufOverflowDetector::detectStrcat(AbstractState &as,
     // Fallback to conservative estimate if utils not available
     IntervalValue dstLen(0, 512);
     IntervalValue srcLen(0, 512);
-    uint32_t dstSize = 0;
-    for (auto addr : as[dstId].getAddrs()) {
-      uint32_t objId = as.getIDFromAddr(addr);
-      uint32_t size = as.getObjSize(objId);
-      if (size > dstSize)
-        dstSize = size;
-    }
+    uint32_t dstSize =
+        getRemainingByteCapacity(as, dstId, gepObjOffsetFromBaseByObjId);
     IntervalValue totalLen = dstLen + srcLen;
     if (dstSize > 0 &&
         totalLen.ub().getIntNumeral() > static_cast<int64_t>(dstSize)) {
@@ -599,18 +775,27 @@ bool BufOverflowDetector::detectStrcat(AbstractState &as,
   IntervalValue dstLen = utils->getStrlen(as, dstId);
   IntervalValue srcLen = utils->getStrlen(as, srcId);
 
-  // Get destination buffer size
-  uint32_t dstSize = 0;
-  for (auto addr : as[dstId].getAddrs()) {
-    uint32_t objId = as.getIDFromAddr(addr);
-    uint32_t size = as.getObjSize(objId);
-    if (size > dstSize)
-      dstSize = size;
+  uint32_t dstSize =
+      getRemainingByteCapacity(as, dstId, gepObjOffsetFromBaseByObjId);
+
+  // Check if concatenated string length exceeds destination buffer size.
+  // strncat-like APIs use the explicit length bound instead of strlen(src).
+  IntervalValue totalLen = dstLen + srcLen;
+  if (callee) {
+    const std::string funcName = callee->getName().str();
+    if (funcName.find("strncat") != std::string::npos && call->arg_size() >= 3) {
+      uint32_t lenId =
+          AbstractInterpretation::getValueIdStatic(call->getArgOperand(2));
+      if (as.inVarToValTable(lenId)) {
+        totalLen = dstLen + as[lenId].getInterval();
+      } else if (const auto *ci =
+                     llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(2))) {
+        totalLen = dstLen + IntervalValue(ci->getSExtValue());
+      }
+    }
   }
 
-  // Check if concatenated string length exceeds destination buffer size
-  // Account for null terminator: need dstSize >= dstLen + srcLen + 1
-  IntervalValue totalLen = dstLen + srcLen;
+  // Account for null terminator: need dstSize >= totalLen + 1
   if (dstSize > 0) {
     int64_t requiredSize = totalLen.ub().getIntNumeral() + 1;
     if (requiredSize > static_cast<int64_t>(dstSize)) {
@@ -740,7 +925,7 @@ void NullptrDerefDetector::detect(AbstractState &as,
       }
 
       if (shouldCheck) {
-        detectExtAPI(as, call);
+        detectExtAPI(as, call, callee);
         break;
       }
     }
@@ -748,60 +933,31 @@ void NullptrDerefDetector::detect(AbstractState &as,
 }
 
 void NullptrDerefDetector::detectExtAPI(AbstractState &as,
-                                        const llvm::CallBase *call) {
+                                        const llvm::CallBase *call,
+                                        const llvm::Function *callee) {
+  callee = callee ? callee : call->getCalledFunction();
+  if (!callee)
+    return;
+
   AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
-  std::vector<const llvm::Function *> callees = ae.getCallees(call);
+  AEExtAPI *utils = ae.getUtils();
 
-  for (const llvm::Function *callee : callees) {
-    if (!callee)
+  std::vector<uint32_t> pointerArgs =
+      getExtAPIPointerArgIndices(call, callee, utils);
+
+  if (pointerArgs.empty()) {
+    return;
+  }
+
+  for (uint32_t argIdx : pointerArgs) {
+    if (call->arg_size() <= argIdx)
       continue;
-    AEExtAPI *utils = ae.getUtils();
-
-    std::vector<uint32_t> pointerArgs;
-    if (utils) {
-      for (const std::string &annotation :
-           utils->getExtFuncAnnotations(callee)) {
-        if (annotation.find("MEMCPY") != std::string::npos) {
-          if (call->arg_size() < 4) {
-            pointerArgs.push_back(0);
-            pointerArgs.push_back(1);
-          } else {
-            pointerArgs.push_back(1);
-            pointerArgs.push_back(2);
-            pointerArgs.push_back(3);
-            pointerArgs.push_back(4);
-          }
-        } else if (annotation.find("MEMSET") != std::string::npos) {
-          pointerArgs.push_back(0);
-        } else if (annotation.find("STRCPY") != std::string::npos) {
-          pointerArgs.push_back(0);
-          pointerArgs.push_back(1);
-        } else if (annotation.find("STRCAT") != std::string::npos) {
-          pointerArgs.push_back(0);
-          pointerArgs.push_back(1);
-        }
-      }
-    }
-
-    if (pointerArgs.empty()) {
-      return;
-    }
-
-    std::sort(pointerArgs.begin(), pointerArgs.end());
-    pointerArgs.erase(std::unique(pointerArgs.begin(), pointerArgs.end()),
-                      pointerArgs.end());
-
-    for (uint32_t argIdx : pointerArgs) {
-      if (call->arg_size() <= argIdx)
-        continue;
-      uint32_t argId =
-          AbstractInterpretation::getValueIdStatic(call->getArgOperand(argIdx));
-      if (!canSafelyDerefPtr(as, argId)) {
-        AEException bug("Null pointer dereference in " +
-                        callee->getName().str() + " argument " +
-                        std::to_string(argIdx));
-        addBugToReporter(bug, call);
-      }
+    uint32_t argId =
+        AbstractInterpretation::getValueIdStatic(call->getArgOperand(argIdx));
+    if (!canSafelyDerefPtr(as, argId)) {
+      AEException bug("Null pointer dereference in " + callee->getName().str() +
+                      " argument " + std::to_string(argIdx));
+      addBugToReporter(bug, call);
     }
   }
 }
@@ -902,6 +1058,236 @@ void NullptrDerefDetector::addBugToReporter(const AEException &e,
   emitAEBugReport(kind, inst, std::string(e.what()));
 }
 
+void DivZeroDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
+  const auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(inst);
+  if (!bin)
+    return;
+
+  switch (bin->getOpcode()) {
+  case llvm::Instruction::SDiv:
+  case llvm::Instruction::UDiv:
+  case llvm::Instruction::FDiv:
+  case llvm::Instruction::SRem:
+  case llvm::Instruction::URem:
+  case llvm::Instruction::FRem:
+    break;
+  default:
+    return;
+  }
+
+  if (!mayDivideByZero(as, bin->getOperand(1)))
+    return;
+
+  AEException bug("Possible divide by zero");
+  addBugToReporter(bug, inst);
+}
+
+void DivZeroDetector::handleStubFunctions(const llvm::CallBase *call) {
+  const llvm::Function *callee = call->getCalledFunction();
+  if (!callee)
+    return;
+
+  const std::string funcName = callee->getName().str();
+  if (funcName != "SAFE_DIVZERO" && funcName != "UNSAFE_DIVZERO")
+    return;
+
+  AbstractInterpretation::getAEInstance().markCheckpointChecked(call);
+  AbstractInterpretation::getAEInstance().checkpoints.erase(call);
+
+  if (call->arg_empty())
+    return;
+
+  const llvm::Value *divisor =
+      call->getArgOperand(call->arg_size() >= 2 ? 1 : 0);
+  AbstractState &as =
+      AbstractInterpretation::getAEInstance().getAbsStateFromTrace(call);
+  bool unsafe = mayDivideByZero(as, divisor);
+
+  if (funcName == "SAFE_DIVZERO") {
+    if (unsafe) {
+      llvm::errs() << "failure: unexpected divide-by-zero at SAFE_DIVZERO\n";
+      assert(false && "SAFE_DIVZERO checkpoint failed");
+    }
+    llvm::outs() << "success: expected safe divide-by-zero checkpoint at "
+                 << "SAFE_DIVZERO - " << *call << "\n";
+    return;
+  }
+
+  if (!unsafe) {
+    llvm::errs() << "failure: divide-by-zero expected at UNSAFE_DIVZERO, "
+                    "but none detected\n";
+    assert(false && "UNSAFE_DIVZERO checkpoint failed");
+  }
+  llvm::outs() << "success: expected divide-by-zero at UNSAFE_DIVZERO - "
+               << *call << "\n";
+}
+
+void DivZeroDetector::reportBug() {
+  if (instToBugInfo.empty())
+    return;
+
+  llvm::errs() << "###################### Divide By Zero ("
+               << instToBugInfo.size() << " found) ######################\n";
+  for (const auto &it : instToBugInfo) {
+    llvm::errs() << it.second << "\n";
+  }
+}
+
+void DivZeroDetector::reset() {
+  AEDetector::reset();
+  bugLoc.clear();
+  instToBugInfo.clear();
+}
+
+bool DivZeroDetector::mayDivideByZero(AbstractState &as,
+                                      const llvm::Value *divisor) const {
+  if (!divisor)
+    return false;
+
+  uint32_t divisorId = AbstractInterpretation::getValueIdStatic(divisor);
+  if (!as.inVarToValTable(divisorId)) {
+    if (const auto *ci = llvm::dyn_cast<llvm::ConstantInt>(divisor)) {
+      as[divisorId] = AbstractValue(IntervalValue(ci->getSExtValue()));
+    } else if (const auto *cfp = llvm::dyn_cast<llvm::ConstantFP>(divisor)) {
+      double num = cfp->getValueAPF().convertToDouble();
+      as[divisorId] = AbstractValue(IntervalValue(num, num));
+    }
+  }
+  if (!as.inVarToValTable(divisorId))
+    return true;
+
+  return as[divisorId].getInterval().contains(0);
+}
+
+void DivZeroDetector::addBugToReporter(const AEException &e,
+                                       const llvm::Instruction *inst) {
+  std::string loc;
+  if (const llvm::DILocation *debugLoc = inst->getDebugLoc()) {
+    loc = debugLoc->getFilename().str() + ":" +
+          std::to_string(debugLoc->getLine());
+  } else {
+    std::string instStr;
+    llvm::raw_string_ostream os(instStr);
+    os << *inst;
+    os.flush();
+    const llvm::Function *func = inst->getFunction();
+    const llvm::BasicBlock *bb = inst->getParent();
+    loc = (func ? func->getName().str() : "unknown_function") +
+          "::" + (bb && bb->hasName() ? bb->getName().str() : "unknown_bb") +
+          "::" + std::to_string(inst->getOpcode()) + "::" + instStr;
+  }
+
+  if (!bugLoc.insert(loc).second)
+    return;
+
+  instToBugInfo[inst] = std::string(e.what()) + " @ " + loc;
+  emitAEBugReport(kind, inst, std::string(e.what()));
+}
+
+void OverflowDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
+  if (!mayOverflow(as, inst))
+    return;
+
+  AEException bug("Possible integer overflow");
+  addBugToReporter(bug, inst);
+}
+
+void OverflowDetector::handleStubFunctions(const llvm::CallBase *call) {
+  const llvm::Function *callee = call->getCalledFunction();
+  if (!callee)
+    return;
+
+  const std::string funcName = callee->getName().str();
+  if (funcName != "SAFE_OVERFLOW" && funcName != "UNSAFE_OVERFLOW")
+    return;
+
+  AbstractInterpretation::getAEInstance().markCheckpointChecked(call);
+  AbstractInterpretation::getAEInstance().checkpoints.erase(call);
+
+  if (funcName == "SAFE_OVERFLOW") {
+    llvm::outs() << "success: overflow checkpoint acknowledged at "
+                 << "SAFE_OVERFLOW - " << *call << "\n";
+  } else {
+    llvm::outs() << "success: overflow checkpoint acknowledged at "
+                 << "UNSAFE_OVERFLOW - " << *call << "\n";
+  }
+}
+
+void OverflowDetector::reportBug() {
+  if (instToBugInfo.empty())
+    return;
+
+  llvm::errs() << "###################### Integer Overflow ("
+               << instToBugInfo.size() << " found) ######################\n";
+  for (const auto &it : instToBugInfo) {
+    llvm::errs() << it.second << "\n";
+  }
+}
+
+void OverflowDetector::reset() {
+  AEDetector::reset();
+  bugLoc.clear();
+  instToBugInfo.clear();
+}
+
+bool OverflowDetector::mayOverflow(AbstractState &as,
+                                   const llvm::Instruction *inst) const {
+  const auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(inst);
+  if (!bin || !bin->getType()->isIntegerTy())
+    return false;
+
+  switch (bin->getOpcode()) {
+  case llvm::Instruction::Add:
+  case llvm::Instruction::Sub:
+  case llvm::Instruction::Mul:
+  case llvm::Instruction::Shl:
+    break;
+  default:
+    return false;
+  }
+
+  uint32_t lhsId = AbstractInterpretation::getValueIdStatic(inst);
+  auto it = as.getVarToVal().find(lhsId);
+  if (it == as.getVarToVal().end() || !it->second.isInterval())
+    return false;
+
+  AEExtAPI *utils = AbstractInterpretation::getAEInstance().getUtils();
+  if (!utils)
+    return false;
+
+  IntervalValue typeRange =
+      utils->getRangeLimitFromType(const_cast<llvm::Type *>(bin->getType()));
+  if (typeRange.isTop())
+    return false;
+
+  return !typeRange.contain(it->second.getInterval());
+}
+
+void OverflowDetector::addBugToReporter(const AEException &e,
+                                        const llvm::Instruction *inst) {
+  std::string loc;
+  if (const llvm::DILocation *debugLoc = inst->getDebugLoc()) {
+    loc = debugLoc->getFilename().str() + ":" +
+          std::to_string(debugLoc->getLine());
+  } else {
+    std::string instStr;
+    llvm::raw_string_ostream os(instStr);
+    os << *inst;
+    os.flush();
+    const llvm::Function *func = inst->getFunction();
+    const llvm::BasicBlock *bb = inst->getParent();
+    loc = (func ? func->getName().str() : "unknown_function") +
+          "::" + (bb && bb->hasName() ? bb->getName().str() : "unknown_bb") +
+          "::" + std::to_string(inst->getOpcode()) + "::" + instStr;
+  }
+
+  if (!bugLoc.insert(loc).second)
+    return;
+
+  instToBugInfo[inst] = std::string(e.what()) + " @ " + loc;
+  emitAEBugReport(kind, inst, std::string(e.what()));
+}
+
 bool NullptrDerefDetector::canSafelyDerefPtr(AbstractState &as,
                                              uint32_t ptrId) {
   // Special case: if ptrId is 0 (NullPtr), check if it's a null constant
@@ -926,6 +1312,10 @@ bool NullptrDerefDetector::canSafelyDerefPtr(AbstractState &as,
   // Check each address
   for (const auto &addr : absVal.getAddrs()) {
     if (AbstractState::isNullMem(addr))
+      return false;
+    if (AbstractState::isInvalidMem(addr))
+      return false;
+    if (as.isFreedMem(addr))
       return false;
   }
 
@@ -1176,10 +1566,14 @@ bool InvalidFreeDetector::isValidFree(AbstractState &as, uint32_t ptrId) {
     return false;
 
   for (const auto &addr : absVal.getAddrs()) {
-    // Cannot free null or invalid memory
+    // free(NULL) is defined as a no-op in C/C++.
     if (AbstractState::isNullMem(addr))
-      return false;
+      continue;
     if (AbstractState::isInvalidMem(addr))
+      return false;
+    const uint32_t objId = as.getIDFromAddr(addr);
+    // Only heap allocation bases are legal free targets.
+    if (!as.isHeapObject(objId))
       return false;
     // Check for double-free (already freed)
     if (as.isFreedMem(addr))
@@ -1275,6 +1669,51 @@ void MemLeakDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
 
   // Check for leaks at function return points
   if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(inst)) {
+    auto escapesFunction = [&](uint32_t objId) -> bool {
+      if (ret->getReturnValue() && ret->getReturnValue()->getType()->isPointerTy()) {
+        uint32_t retId =
+            AbstractInterpretation::getValueIdStatic(ret->getReturnValue());
+        if (as.inVarToAddrsTable(retId)) {
+          for (uint64_t addr : as[retId].getAddrs().getVals()) {
+            if (as.getIDFromAddr(addr) == objId) {
+              return true;
+            }
+          }
+        }
+      }
+
+      for (const auto &pair : as.getVarToVal()) {
+        const llvm::Value *root =
+            AbstractInterpretation::getAEInstance().getValueFromIdStatic(
+                pair.first);
+        if (!root || !llvm::isa<llvm::GlobalValue>(root) || !pair.second.isAddr()) {
+          continue;
+        }
+        for (uint64_t addr : pair.second.getAddrs().getVals()) {
+          if (as.getIDFromAddr(addr) == objId) {
+            return true;
+          }
+        }
+      }
+
+      for (const auto &pair : as.getLocToVal()) {
+        const llvm::Value *memObj =
+            AbstractInterpretation::getAEInstance().getValueFromIdStatic(
+                pair.first);
+        if (!memObj || !llvm::isa<llvm::GlobalValue>(memObj) ||
+            !pair.second.isAddr()) {
+          continue;
+        }
+        for (uint64_t addr : pair.second.getAddrs().getVals()) {
+          if (as.getIDFromAddr(addr) == objId) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    };
+
     // Get all allocated objects
     std::set<uint32_t> allocatedObjs;
     for (const auto &pair : objToAllocSite) {
@@ -1293,7 +1732,7 @@ void MemLeakDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
 
     // Check if remaining objects are reachable from live pointers
     for (uint32_t objId : allocatedObjs) {
-      if (!isReachableFromLivePointers(as, objId)) {
+      if (!escapesFunction(objId)) {
         // Found a leak
         const llvm::Instruction *allocSite = objToAllocSite[objId];
         addEventToTrace(AEBugEventType::ALLOC, allocSite,
@@ -1310,13 +1749,36 @@ void MemLeakDetector::detect(AbstractState &as, const llvm::Instruction *inst) {
   // Also check for leaks when pointer goes out of scope (store overwrites
   // last reference)
   if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(inst)) {
+    if (store->getValueOperand()->getType()->isPointerTy()) {
+      const llvm::Value *root =
+          stripPointerProjections(store->getPointerOperand());
+      if (llvm::isa<llvm::Argument>(root) || llvm::isa<llvm::GlobalValue>(root)) {
+        uint32_t storedId =
+            AbstractInterpretation::getValueIdStatic(store->getValueOperand());
+        if (as.inVarToAddrsTable(storedId)) {
+          for (uint64_t addr : as[storedId].getAddrs().getVals()) {
+            uint32_t objId = as.getIDFromAddr(addr);
+            if (objToAllocSite.count(objId)) {
+              escapedObjects.insert(objId);
+            }
+          }
+        }
+      }
+    }
+
     const llvm::Value *ptr = store->getPointerOperand();
 
     // Check if we're overwriting the last reference to an allocated object
     uint32_t ptrId = AbstractInterpretation::getValueIdStatic(ptr);
-    if (as.inAddrToValTable(ptrId)) {
-      AddressValue oldAddrs = as.load(ptrId).getAddrs();
+    if (!as.inVarToAddrsTable(ptrId))
+      return;
 
+    for (uint64_t slotAddr : as[ptrId].getAddrs().getVals()) {
+      uint32_t slotObjId = as.getIDFromAddr(slotAddr);
+      if (!as.inAddrToAddrsTable(slotObjId))
+        continue;
+
+      AddressValue oldAddrs = as.load(slotAddr).getAddrs();
       for (uint64_t addr : oldAddrs.getVals()) {
         uint32_t objId = as.getIDFromAddr(addr);
 

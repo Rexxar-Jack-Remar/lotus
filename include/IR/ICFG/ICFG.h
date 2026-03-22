@@ -59,6 +59,7 @@ private:
   functionToUnwindExitNodeMapTy functionToUnwindExitNodeMap;
   callToRetNodeMapTy callToRetNodeMap;
   callToUnwindNodeMapTy callToUnwindNodeMap;
+  GlobalInitBlockNode *globalInitNode = nullptr;
 
 public:
   /// @brief Constructs an empty ICFG.
@@ -146,6 +147,8 @@ public:
         functionToEntryIntraNodeMap.erase(it);
     } else if (auto *entry = llvm::dyn_cast<FunEntryBlockNode>(node)) {
       functionToEntryNodeMap.erase(entry->getFunction());
+    } else if (llvm::isa<GlobalInitBlockNode>(node)) {
+      globalInitNode = nullptr;
     } else if (auto *exit = llvm::dyn_cast<FunExitBlockNode>(node)) {
       functionToExitNodeMap.erase(exit->getFunction());
     } else if (auto *unwindExit =
@@ -241,6 +244,9 @@ public:
   /// @brief Gets or creates the dedicated function-entry node.
   FunEntryBlockNode *getFunEntryICFGNode(const llvm::Function *F);
 
+  /// @brief Gets or creates the dedicated module-global initialization node.
+  GlobalInitBlockNode *getGlobalInitICFGNode();
+
   /// @brief Gets or creates the dedicated function-exit node.
   FunExitBlockNode *getFunExitICFGNode(const llvm::Function *F);
 
@@ -279,6 +285,8 @@ private:
     return it == functionToEntryNodeMap.end() ? nullptr : it->second;
   }
 
+  inline GlobalInitBlockNode *getGlobalInitNode() { return globalInitNode; }
+
   inline FunExitBlockNode *getFunExitNode(const llvm::Function *F) {
     auto it = functionToExitNodeMap.find(F);
     return it == functionToExitNodeMap.end() ? nullptr : it->second;
@@ -302,6 +310,7 @@ private:
   }
 
   FunEntryBlockNode *addFunEntryICFGNode(const llvm::Function *F);
+  GlobalInitBlockNode *addGlobalInitICFGNode();
   FunExitBlockNode *addFunExitICFGNode(const llvm::Function *F);
   FunUnwindExitBlockNode *addFunUnwindExitICFGNode(const llvm::Function *F);
   CallRetBlockNode *addRetICFGNode(const llvm::Instruction *callInst);

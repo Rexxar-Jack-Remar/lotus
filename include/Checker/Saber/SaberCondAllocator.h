@@ -112,6 +112,9 @@ public:
   void setCurEvalSVFGNode(const SVFGNode *node) { curEvalSVFGNode = node; }
 
   SVFGNodeToSVFGNodeSetMap &getRemovedSUVFEdges() { return removedSUVFEdges; }
+  const SVFGNodeToSVFGNodeSetMap &getRemovedSUVFEdges() const {
+    return removedSUVFEdges;
+  }
 
   void setCFCond(const llvm::BasicBlock *bb, const Condition &cond);
   const Condition &getCFCond(const llvm::BasicBlock *bb) const;

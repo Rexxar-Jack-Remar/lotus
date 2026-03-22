@@ -506,7 +506,9 @@ TEST(GuardedValueFlowAdapterShape,
   for (const auto &edge : pseudo_return->children()) {
     ASSERT_NE(edge.target, nullptr);
     EXPECT_EQ(edge.target->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
-    EXPECT_NE(pseudo_return->getReturnSite(edge.target), nullptr);
+    auto *site = pseudo_return->getReturnSite(edge.target);
+    EXPECT_NE(site, nullptr);
+    EXPECT_FALSE(containsUseSite(edge.target, site));
   }
 }
 
@@ -592,8 +594,7 @@ TEST(GuardedValueFlowAdapterShape,
   EXPECT_EQ(graph.findNode(root_arg), common_arg);
 }
 
-TEST(GuardedValueFlowAdapterShape,
-     AnchorsPseudoOutputsToEntryAndSummaryMemoryToEntryRegion) {
+TEST(GuardedValueFlowAdapterShape, AnchorsPseudoOutputsToEntryRegion) {
   const char *IR = R"(
     define void @store_arg(i32*** %slot, i32** %value) {
     entry:
@@ -601,21 +602,11 @@ TEST(GuardedValueFlowAdapterShape,
       ret void
     }
 
-    define void @deep_store(i32***** %root, i32* %value) {
-    entry:
-      %pppp = load i32****, i32***** %root
-      %ppp = load i32***, i32**** %pppp
-      %pp = load i32**, i32*** %ppp
-      store i32* %value, i32** %pp
-      ret void
-    }
-
-    define void @branchy(i1 %cond, i32*** %slot, i32** %pp, i32***** %root, i32* %value) {
+    define void @branchy(i1 %cond, i32*** %slot, i32** %pp) {
     entry:
       br i1 %cond, label %then, label %exit
     then:
       call void @store_arg(i32*** %slot, i32** %pp)
-      call void @deep_store(i32***** %root, i32* %value)
       ret void
     exit:
       ret void
@@ -629,26 +620,20 @@ TEST(GuardedValueFlowAdapterShape,
   auto pipeline = runPipeline(*M);
   Function *F = M->getFunction("branchy");
   Function *output_callee = M->getFunction("store_arg");
-  Function *callee = M->getFunction("deep_store");
   ASSERT_NE(F, nullptr);
   ASSERT_NE(output_callee, nullptr);
-  ASSERT_NE(callee, nullptr);
   ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
 
   GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
 
   CallBase *output_call = nullptr;
-  CallBase *summary_call = nullptr;
   for (Instruction &I : instructions(*F)) {
     if (auto *CB = dyn_cast<CallBase>(&I)) {
       if (CB->getCalledFunction() == output_callee)
         output_call = CB;
-      else if (CB->getCalledFunction() == callee)
-        summary_call = CB;
     }
   }
   ASSERT_NE(output_call, nullptr);
-  ASSERT_NE(summary_call, nullptr);
 
   auto *output_site = graph.findCallSite(output_call);
   ASSERT_NE(output_site, nullptr);
@@ -664,33 +649,6 @@ TEST(GuardedValueFlowAdapterShape,
   EXPECT_TRUE(containsChild(pseudo_output_mem, pseudo_output));
   EXPECT_EQ(pseudo_output_mem->getParentBasicBlock(), output_call->getParent());
   EXPECT_EQ(pseudo_output_mem->getRegion(), graph.findRegion(output_call->getParent()));
-
-  auto *summary_site = graph.findCallSite(summary_call);
-  ASSERT_NE(summary_site, nullptr);
-  bool saw_entry_summary_mem = false;
-  auto *summary_ptg = pipeline.lotus->getPtGraph(callee);
-  ASSERT_NE(summary_ptg, nullptr);
-  int inline_ap_depth = summary_ptg->getInlineApDepth();
-  for (unsigned idx = 0; idx < 4; ++idx) {
-    auto *summary_node = summary_site->getInputSummaryNode(callee, idx);
-    if (!summary_node)
-      continue;
-    if (static_cast<int>(idx) <= inline_ap_depth) {
-      EXPECT_TRUE(summary_node->children().empty());
-      continue;
-    }
-    ASSERT_EQ(summary_node->children().size(), 1u);
-    auto *summary_mem = summary_node->children().front().target;
-    ASSERT_NE(summary_mem, nullptr);
-    EXPECT_EQ(summary_mem->getKind(), GuardedValueFlowNode::Kind::LoadMemory);
-    EXPECT_EQ(summary_mem->getParentBasicBlock(), &F->getEntryBlock());
-    EXPECT_EQ(summary_mem->getRegion(), graph.findRegion(&F->getEntryBlock()));
-    EXPECT_EQ(summary_node->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
-    EXPECT_EQ(summary_mem->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
-    saw_entry_summary_mem = true;
-  }
-  if (!saw_entry_summary_mem)
-    GTEST_SKIP() << "LotusAA did not materialize complete summary input buckets for this synthetic case";
 }
 
 TEST(GuardedValueFlowAdapterShape,

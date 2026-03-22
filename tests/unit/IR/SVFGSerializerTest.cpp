@@ -132,20 +132,17 @@ TEST_F(SVFGSerializerTest, RoundTripsSemanticBindings) {
   EXPECT_EQ(loadNode->getNodeKind(), SVFGK::Load);
   EXPECT_EQ(loadNode->getInstruction(), load);
   ASSERT_NE(loadNode->getICFGNode(), nullptr);
+  auto *loadStmt = dyn_cast<LoadSVFGNode>(loadNode);
+  ASSERT_NE(loadStmt, nullptr);
+  EXPECT_NE(loadStmt->getMemoryUseReg(), 0u);
+  EXPECT_FALSE(loadStmt->getMemoryPointsTo().empty());
 
-  const auto &loadMus = reloaded.getLoadMus(load);
-  ASSERT_FALSE(loadMus.empty());
-  auto *loadMu = dyn_cast<LoadMuSVFGNode>(*loadMus.begin());
-  ASSERT_NE(loadMu, nullptr);
-  EXPECT_EQ(loadMu->getLoadInst(), load);
-  ASSERT_NE(loadMu->getICFGNode(), nullptr);
-
-  const auto &storeChis = reloaded.getStoreChis(store);
-  ASSERT_FALSE(storeChis.empty());
-  auto *storeChi = dyn_cast<StoreChiSVFGNode>(*storeChis.begin());
-  ASSERT_NE(storeChi, nullptr);
-  EXPECT_EQ(storeChi->getStoreInst(), store);
-  ASSERT_NE(storeChi->getICFGNode(), nullptr);
+  SVFGNode *storeNode = reloaded.getDef(store);
+  ASSERT_NE(storeNode, nullptr);
+  auto *storeStmt = dyn_cast<StoreSVFGNode>(storeNode);
+  ASSERT_NE(storeStmt, nullptr);
+  EXPECT_NE(storeStmt->getMemoryDefReg(), 0u);
+  EXPECT_FALSE(storeStmt->getMemoryPointsTo().empty());
 
   const auto &actualParms = reloaded.getActualParms(call);
   ASSERT_FALSE(actualParms.empty());
@@ -153,6 +150,7 @@ TEST_F(SVFGSerializerTest, RoundTripsSemanticBindings) {
   ASSERT_NE(actualParm, nullptr);
   EXPECT_EQ(actualParm->getCallSite(), call);
   ASSERT_NE(actualParm->getICFGNode(), nullptr);
+  EXPECT_NE(actualParm->getValueId(), 0u);
 
   const auto &actualIns = reloaded.getActualIns(call);
   ASSERT_FALSE(actualIns.empty());
@@ -165,9 +163,20 @@ TEST_F(SVFGSerializerTest, RoundTripsSemanticBindings) {
   auto *formalParm = dyn_cast<FormalParmSVFGNode>(*formalParms.begin());
   ASSERT_NE(formalParm, nullptr);
   EXPECT_EQ(formalParm->getFunction(), idFn);
+  EXPECT_NE(formalParm->getValueId(), 0u);
 
   const Argument &arg0 = *idFn->arg_begin();
   EXPECT_EQ(reloaded.getValueNode(&arg0), formalParm);
+
+  bool sawStoreToLoadFlow = false;
+  for (SVFGEdge *edge : loadStmt->getInEdges()) {
+    if (edge && edge->getSrcNode() == storeStmt &&
+        edge->getEdgeKind() == SVFGEdgeK::IntraIndirect) {
+      sawStoreToLoadFlow = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(sawStoreToLoadFlow);
 
   std::vector<SVFGEdge *> interEdges;
   reloaded.getInterVFEdgesForIndirectCallSite(call, idFn, interEdges);
@@ -187,7 +196,7 @@ TEST_F(SVFGSerializerTest, RoundTripsSemanticBindings) {
   }
   ASSERT_NE(allocaX, nullptr);
 
-  auto *addrNode = dyn_cast<AddrSVFGNode>(reloaded.getValueNode(allocaX));
+  auto *addrNode = dyn_cast_or_null<AddrSVFGNode>(reloaded.getValueNode(allocaX));
   ASSERT_NE(addrNode, nullptr);
   ASSERT_NE(addrNode->getObjectId(), 0u);
   const auto *info = reloaded.getObjectInfo(addrNode->getObjectId());
@@ -537,7 +546,9 @@ TEST_F(SVFGSerializerTest, RoundTripsDeferredIndirectCallState) {
   const Argument *fpArg = &*applyFn->arg_begin();
   SVFGNode *fpNode = reloaded.getValueNode(fpArg);
   ASSERT_NE(fpNode, nullptr);
-  EXPECT_EQ(reloaded.getIndCallSites(fpNode->getId()).count(indCall), 1u);
+  const uint32_t funPtrKey = fpNode->hasValueId() ? fpNode->getValueId()
+                                                  : fpNode->getId();
+  EXPECT_EQ(reloaded.getIndCallSites(funPtrKey).count(indCall), 1u);
 
   std::vector<SVFGEdge *> newEdges;
   EXPECT_TRUE(builder.connectCallSiteToCalleeOnTheFly(&reloaded, indCall,

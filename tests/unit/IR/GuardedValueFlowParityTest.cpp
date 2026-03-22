@@ -213,7 +213,9 @@ TEST_F(GuardedValueFlowParityTest, ModelsReturnPhiSelectAndOperationalSites) {
   ASSERT_NE(select_node, nullptr);
   ASSERT_EQ(common_return->children().size(), 1u);
   EXPECT_EQ(common_return->children().front().target, phi_node);
-  EXPECT_NE(common_return->getReturnSite(phi_node), nullptr);
+  auto *common_return_site = common_return->getReturnSite(phi_node);
+  EXPECT_NE(common_return_site, nullptr);
+  EXPECT_FALSE(containsUseSite(phi_node, common_return_site));
   EXPECT_EQ(common_return->getRegion(), graph.findRegion(&F->getEntryBlock()));
 
   ASSERT_EQ(phi_node->incoming().size(), 2u);
@@ -726,6 +728,50 @@ TEST_F(GuardedValueFlowParityTest, UsesTruncForWiderDynamicGEPIndices) {
   ASSERT_NE(index_cast, nullptr);
   EXPECT_EQ(index_cast->getOpcodeKind(),
             GuardedValueFlowOpcodeNode::OpcodeKind::Trunc);
+}
+
+TEST_F(GuardedValueFlowParityTest,
+       UsesOriginalIndexOperandExactlyOnceForGEPSiteOffsets) {
+  const char *source = R"(
+    define i32* @test(i32* %p, i128 %idx) {
+    entry:
+      %elt = getelementptr i32, i32* %p, i128 %idx
+      ret i32* %elt
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  auto *ptr_node = graph.findNode(F->getArg(0));
+  auto *idx_node = graph.findNode(F->getArg(1));
+  ASSERT_NE(ptr_node, nullptr);
+  ASSERT_NE(idx_node, nullptr);
+
+  GuardedValueFlowGEPReferenceSite *gep_site = nullptr;
+  for (const auto &site_ptr : graph.sites()) {
+    auto *candidate =
+        dynamic_cast<GuardedValueFlowGEPReferenceSite *>(site_ptr.get());
+    if (!candidate)
+      continue;
+    gep_site = candidate;
+    break;
+  }
+
+  ASSERT_NE(gep_site, nullptr);
+  EXPECT_EQ(gep_site->getPointerOperand(), ptr_node);
+  ASSERT_EQ(gep_site->getOffsetOperands().size(), 1u);
+  EXPECT_EQ(gep_site->getOffsetOperands().front(), idx_node);
+  EXPECT_EQ(std::count(gep_site->getOffsetOperands().begin(),
+                       gep_site->getOffsetOperands().end(), idx_node),
+            1);
 }
 
 TEST_F(GuardedValueFlowParityTest, RejectsUnsupportedSwitchFunctions) {

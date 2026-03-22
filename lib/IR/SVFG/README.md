@@ -7,17 +7,17 @@ Production-ready implementation of the Sparse Value-Flow Graph (SVFG) for whole-
 ## What is SVFG?
 
 SVFG represents value flow in a program as a directed graph where:
-- **Nodes** represent definitions (assignments, loads, stores, parameters)
-- **Edges** represent value-flow relationships (def-use chains)
-- **Memory SSA** tracks memory versions through MU/CHI nodes
+- **Nodes** represent definitions and uses (assignments, loads, stores, parameters, Memory SSA defs)
+- **Edges** represent direct or guarded value-flow relationships
+- **Memory SSA** tracks canonical memory-region versions and connects them to statement nodes
 
 ### Example
 
 ```c
 int x = 5;           // AddrNode (defines x)
 int *p = &x;         // CopyNode (p = &x)
-int y = *p;          // LoadNode with LoadMu (reads memory)
-*p = 10;             // StoreNode with StoreChi (writes memory)
+int *y = *p;         // LoadNode reads a reaching memory version
+*p = 10;             // StoreNode defines the next memory version
 ```
 
 SVFG representation:
@@ -25,10 +25,10 @@ SVFG representation:
 AddrNode(x) --> CopyNode(p) --> LoadNode(y)
                                     ^
                                     |
-                                LoadMu(mem_1)
+                           IntraIndirect(mem_1)
                                     ^
                                     |
-StoreNode(*p) --> StoreChi(mem_1 -> mem_2)
+                               StoreNode(*p)
 ```
 
 ## Key Features
@@ -39,9 +39,9 @@ StoreNode(*p) --> StoreChi(mem_1 -> mem_2)
   - Reduces graph size while preserving essential def-use information
 
 - **Memory SSA integration** for precise alias tracking
-  - Extends SSA to memory locations using MU (use) and CHI (def) nodes
-  - Each memory region has versioned definitions (e.g., mem_1, mem_2)
-  - Enables precise tracking of memory dependencies
+  - Canonical memory regions are keyed by full points-to sets
+  - Memory defs are carried by `FormalIn`, `ActualOut`, `IntraMSSAPhi`, and store statements
+  - Loads and stores are linked by guarded `IntraIndirect` edges
 
 - **Interprocedural value-flow** through calls and returns
   - FormalIN/FormalOUT: Parameter/return value definitions in callee
@@ -70,9 +70,20 @@ Lotus DDA (`lib/Alias/DDA`) consumes SVFG with a few strict assumptions:
 - **Object metadata is available via SVFG**.
   - `isConstant`, `isUnknown`, `isFunction`, `isHeap`, etc.
   - DDA uses this to prune immutable objects and keep fallback sound.
+- **Object IDs are single-namespace and canonical across producers/consumers**.
+  - `AddrSVFGNode::getObjectId()` stores the same canonical object ID used in
+    guarded indirect edges.
+  - `SVFG::getObjectId(value)` and `SVFGBuilder::getObjectIdsForValue(value)`
+    must agree on those canonical IDs.
+  - Field-object IDs produced by GEPs stay in that same namespace; FI fallback
+    is explicit via separate FI object IDs.
 - **Indirect callsite indices are maintained**.
   - DDA can discover function-pointer targets and add call/ret edges on demand.
   - Reverse mapping (callee -> invoking indirect callsites) is tracked too.
+- **Global memory is rooted at a synthetic module-global entry**.
+  - ICFG provides one `GlobalInitBlockNode` per module.
+  - SVFG emits `EntryChi` defs at that node and connects them to root-function
+    `FormalIn` nodes instead of using `main`/direct-user heuristics.
 
 ## Build Pipeline
 
@@ -82,10 +93,10 @@ Lotus DDA (`lib/Alias/DDA`) consumes SVFG with a few strict assumptions:
 2. **Node construction**:
    - Top-level statement nodes (`Addr/Copy/Load/Store/Gep/Phi/...`)
    - Inter-procedural nodes (`Actual*/Formal*`)
-   - Memory SSA nodes (`Mu/Chi/Phi/EntryChi/CallMu/CallChi/...`)
+   - Canonical Memory SSA defs (`FormalIn/ActualOut/IntraMSSAPhi`)
 3. **Edge construction**:
    - Direct value-flow edges (copy/gep/phi/param/ret etc.)
-   - Guarded indirect/memory edges (object-sensitive)
+   - Guarded indirect memory edges from reaching defs to statement/call sites
 4. **Inter-procedural refinement**:
    - Direct-call edges always connected
    - Indirect-call edges optionally deferred for on-the-fly DDA refinement
@@ -104,8 +115,8 @@ Unknown object is created lazily and used as a **wildcard** object ID:
 When modifying SVFG, keep these contracts stable:
 
 - `SVFG::getObjectValue(objId)` and `SVFG::getObjectInfo(objId)` must remain valid.
-- `SVFGBuilder::getObjectIdsForValue(value)` should return PTA-backed IDs
-  compatible with edge guard IDs.
+- `SVFGBuilder::getObjectIdsForValue(value)` must return canonical IDs from the
+  same namespace used by `AddrSVFGNode::getObjectId()` and edge guards.
 - `SVFG::getIndCallSites`, `getConnectedCallees`, and callsite-ID mappings must
   stay consistent when edges are added on-the-fly.
 - Guarded edges should use the same unknown-object convention as fallback paths.
@@ -162,7 +173,7 @@ if (svfg->hasPath(srcNode, dstNode)) {
     // Value flows from src to dst
 }
 
-// Get points-to set for a memory node
+// Get the guarded memory region attached to a load/store statement
 if (auto *load = llvm::dyn_cast<LoadSVFGNode>(node)) {
     const SVFGNodeBS *pts = load->getPointsTo();
     for (uint32_t objId : *pts) {
@@ -178,24 +189,19 @@ if (auto *load = llvm::dyn_cast<LoadSVFGNode>(node)) {
 // Find all memory definitions reaching a load
 if (auto *load = llvm::dyn_cast<LoadSVFGNode>(node)) {
     for (SVFGEdge *edge : load->getInEdges()) {
-        if (auto *muEdge = llvm::dyn_cast<MUEdge>(edge)) {
-            SVFGNode *def = muEdge->getSrcNode();
-            // def is a memory definition (StoreChi, CallChi, etc.)
+        if (edge->getEdgeKind() == SVFGEdgeK::IntraIndirect) {
+            SVFGNode *def = edge->getSrcNode();
+            // def is a memory definition (store, ActualOut, FormalIn, phi)
         }
     }
 }
 
-// Find all uses of a memory definition
+// Find all uses of a memory definition carried by a store statement
 if (auto *store = llvm::dyn_cast<StoreSVFGNode>(node)) {
-    // Get the StoreChi node
     for (SVFGEdge *edge : store->getOutEdges()) {
-        if (auto *chiEdge = llvm::dyn_cast<CHIEdge>(edge)) {
-            SVFGNode *chi = chiEdge->getDstNode();
-            // chi is a StoreChi node
-            for (SVFGEdge *useEdge : chi->getOutEdges()) {
-                SVFGNode *use = useEdge->getDstNode();
-                // use is a memory use (LoadMu, CallMu, etc.)
-            }
+        if (edge->getEdgeKind() == SVFGEdgeK::IntraIndirect) {
+            SVFGNode *use = edge->getDstNode();
+            // use is a memory user (load/store/call/formal-out)
         }
     }
 }
@@ -222,13 +228,13 @@ if (auto *store = llvm::dyn_cast<StoreSVFGNode>(node)) {
   - Represent direct value definitions from LLVM instructions
   - Example: `x = y` creates a CopySVFGNode
 
-- **PHI nodes**: IntraPhi, InterPhi, MemPhi, MemInterPhi
+- **PHI nodes**: IntraPhi, InterPhi, IntraMSSAPhi
   - Merge values at control-flow join points
   - IntraPhi: Within a function (loop/branch merge)
   - InterPhi: Across functions (call/return merge)
 
-- **Memory SSA nodes**: FormalIN/OUT, ActualIN/OUT, LoadMu, StoreChi, CallMu, CallChi
-  - Track memory versions through MU (use) and CHI (def)
+- **Memory SSA nodes**: FormalIN/OUT, ActualIN/OUT, IntraMSSAPhi
+  - Track canonical memory-region versions at function boundaries and CFG joins
   - Enable precise memory dependence analysis
 
 - **Parameter nodes**: FormalParm, ActualParm, FormalRet, ActualRet
@@ -247,9 +253,9 @@ if (auto *store = llvm::dyn_cast<StoreSVFGNode>(node)) {
   - Direct: Statically resolved calls
   - Indirect: Function pointer calls (resolved via PTA)
 
-- **Memory edges**: MU, CHI, MHP
-  - MU: Memory use (read) edge
-  - CHI: Memory def (write) edge
+- **Memory edges**: guarded indirect flow and interprocedural memory connectors
+  - `IntraIndirect`: Reaching def to load/store/formal-out within a function
+  - `CallAIn` / `RetAOut`: Caller/callee memory connectors
   - MHP: May-happen-in-parallel (threading)
 
 ## Dependencies

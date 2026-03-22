@@ -65,6 +65,7 @@ public:
   const CxtPtSet &computeDDAPts(const CxtVar &cxtVar);
   /// Run DDA for each candidate from the client.
   void answerQueries();
+  bool mayAlias(const llvm::Value *v1, const llvm::Value *v2);
 
   /// Handle call-string on call/ret edges; return false to prune.
   bool handleBKCondition(CxtLocDPItem &dpm, SVFGEdge *edge);
@@ -83,6 +84,15 @@ public:
   /// Initialize context-insensitive edges (call/ret in recursion or SVFG SCC).
   /// Call after run(M) so recursion info and SVFG are available.
   void initInsensitiveEdges();
+  void setInsensitiveRecursion(bool enable) {
+    insensitiveRecursion_ = enable;
+  }
+  void setInsensitiveCycle(bool enable) { insensitiveCycle_ = enable; }
+  bool getInsensitiveRecursion() const { return insensitiveRecursion_; }
+  bool getInsensitiveCycle() const { return insensitiveCycle_; }
+  const std::unordered_set<const SVFGEdge *> &getInsensitiveEdgeSet() const {
+    return insensitveEdges_;
+  }
 
   static void setMaxCxtLen(uint32_t max) { ContextCond::setMaxCxtLen(max); }
   static void setMaxPathLen(uint32_t max) { ContextCond::setMaxPathLen(max); }
@@ -97,6 +107,7 @@ private:
 
   /// DDAVFSolver interface (CRTP).
   SVFGNode *getDefNodeForValue(const llvm::Value *v) const;
+  uint32_t getTopLevelValueId(const SVFGNode *node) const;
   SVFGNodeBS getObjectIdsForValue(const llvm::Value *v) const;
   static bool isDirectEdge(SVFGEdge *e);
   static bool isIndirectEdge(SVFGEdge *e);
@@ -148,6 +159,8 @@ private:
   /// Call/ret edges treated context-insensitively (recursion or value-flow
   /// cycle).
   std::unordered_set<const SVFGEdge *> insensitveEdges_;
+  bool insensitiveRecursion_ = false;
+  bool insensitiveCycle_ = false;
 };
 
 } // namespace analysis

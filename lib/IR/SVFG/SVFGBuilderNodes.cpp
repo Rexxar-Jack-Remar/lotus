@@ -67,12 +67,26 @@ static const ICFGNode *getReturnSiteICFGNode(const ICFG *icfg,
 }
 
 void SVFGBuilder::buildNodes() {
+  if (const Module *M = getModuleFromICFG(icfg)) {
+    for (const Function &F : *M) {
+      (void)getOrCreateCanonicalObjectIdForValue(
+          &F, SVFG::ObjectInfo{false, false, false, true, false, false, false,
+                               false, 0});
+    }
+    for (const GlobalVariable &GV : M->globals()) {
+      SVFG::ObjectInfo info;
+      info.isGlobal = true;
+      info.isConstant = GV.isConstant();
+      (void)getOrCreateCanonicalObjectIdForValue(&GV, info);
+    }
+  }
   buildTopLevelNodes();
   buildAddressTakenNodes();
   buildFormalParmNodes();
   buildActualParmNodes();
   buildFormalRetNodes();
   buildActualRetNodes();
+  refreshStmtPointerNodeIds();
 }
 
 void SVFGBuilder::buildTopLevelNodes() {
@@ -81,25 +95,7 @@ void SVFGBuilder::buildTopLevelNodes() {
 
   auto ensureBaseObjIdForValue = [&](const Value *v,
                                      SVFG::ObjectInfo info) -> uint32_t {
-    if (!svfg || !v)
-      return 0;
-    if (const uint32_t existing = svfg->getObjectId(v))
-      return existing;
-
-    const uint32_t objId = nextObjId++;
-    info.baseObjId = objId;
-    svfg->setObjectInfo(objId, info);
-    svfg->setObjectValue(objId, v);
-    if (const auto *F = dyn_cast<Function>(v))
-      svfg->setObjectDebug(objId, ("FUN:" + F->getName()).str());
-    else if (const auto *GV = dyn_cast<GlobalValue>(v))
-      svfg->setObjectDebug(objId, ("GV:" + GV->getName()).str());
-    else if (v->hasName())
-      svfg->setObjectDebug(objId, ("OBJ:" + v->getName()).str());
-    else
-      svfg->setObjectDebug(objId, "OBJ");
-    (void)getOrCreateMemRegForObject(objId);
-    return objId;
+    return getOrCreateCanonicalObjectIdForValue(v, info);
   };
 
   auto ensureAddrNodeForConstPtr = [&](const Value *v,
@@ -124,6 +120,7 @@ void SVFGBuilder::buildTopLevelNodes() {
 
     const uint32_t nodeId = nextNode();
     auto *addrNode = new AddrSVFGNode(nodeId, at, v);
+    addrNode->setValueId(getOrCreateValueId(v));
     // Set object ID on AddrSVFGNode (mirrors SVF's getPAGSrcNodeID).
     if (baseObjId != 0)
       addrNode->setObjectId(baseObjId);
@@ -144,26 +141,12 @@ void SVFGBuilder::buildTopLevelNodes() {
       continue;
 
     for (const Instruction &inst : *bb) {
-      const bool isStore = isa<StoreInst>(&inst);
-      const bool isPhi = isa<PHINode>(&inst);
-      const bool isCmp = isa<CmpInst>(&inst);
-      const bool isBranch = isa<BranchInst>(&inst);
-      const bool isBinary = isa<BinaryOperator>(&inst);
-      // UnaryOperator covers fneg; CastInst covers bitcast/trunc/zext/inttoptr
-      // etc.  Both can carry pointer-type results, so they must be considered.
-      const bool isUnary = isa<UnaryOperator>(&inst) || isa<CastInst>(&inst);
-      const bool hasPointerResult = inst.getType()->isPointerTy();
-      if (!hasPointerResult && !isStore && !isCmp && !isBranch && !isBinary &&
-          !isUnary)
-        continue;
-
-      // Create the singleton null node on-demand and map the (uniqued)
-      // constant.
+      // Always scan instruction operands for pointer constants/nulls so they
+      // get stable Addr/Null nodes even when the instruction itself does not
+      // produce a pointer result (e.g. `call void @caller(..., @fp)`).
       for (const Use &op : inst.operands()) {
         const Value *opVal = op.get();
         if (!isa<ConstantPointerNull>(opVal)) {
-          // Model constant function/global addresses (and their pointer casts)
-          // as address nodes so DDA can resolve function pointers and globals.
           if (opVal && opVal->getType()->isPointerTy()) {
             const Value *canon = opVal->stripPointerCasts();
             const uint32_t canonId =
@@ -184,9 +167,25 @@ void SVFGBuilder::buildTopLevelNodes() {
         svfg->setValueNode(opVal, nullPtrNodeId);
       }
 
+      const bool isStore = isa<StoreInst>(&inst);
+      const bool isPhi = isa<PHINode>(&inst);
+      const bool isSelect = isa<SelectInst>(&inst);
+      const bool isCmp = isa<CmpInst>(&inst);
+      const bool isBranch = isa<BranchInst>(&inst);
+      const bool isBinary = isa<BinaryOperator>(&inst);
+      const bool isCall = isa<CallBase>(&inst);
+      // UnaryOperator covers fneg; CastInst covers bitcast/trunc/zext/inttoptr
+      // etc.  Both can carry pointer-type results, so they must be considered.
+      const bool isUnary = isa<UnaryOperator>(&inst) || isa<CastInst>(&inst);
+      const bool hasPointerResult = inst.getType()->isPointerTy();
+      if (!hasPointerResult && !isStore && !isCmp && !isBranch && !isBinary &&
+          !isUnary)
+        continue;
+
       if (isa<AllocaInst>(&inst)) {
         uint32_t nodeId = nextNode();
         auto *addrNode = new AddrSVFGNode(nodeId, blockNode, &inst);
+        addrNode->setValueId(getOrCreateValueId(&inst));
         svfg->addNode(addrNode);
         svfg->setDef(&inst, nodeId);
         valueToNode[&inst] = nodeId;
@@ -204,6 +203,7 @@ void SVFGBuilder::buildTopLevelNodes() {
       } else if (isHeapAllocation(&inst)) {
         uint32_t nodeId = nextNode();
         auto *addrNode = new AddrSVFGNode(nodeId, blockNode, &inst);
+        addrNode->setValueId(getOrCreateValueId(&inst));
         svfg->addNode(addrNode);
         svfg->setDef(&inst, nodeId);
         valueToNode[&inst] = nodeId;
@@ -224,6 +224,7 @@ void SVFGBuilder::buildTopLevelNodes() {
                                  : std::numeric_limits<uint32_t>::max();
         uint32_t nodeId = nextNode();
         auto *loadNode = new LoadSVFGNode(nodeId, blockNode, &inst, ptrNodeId);
+        loadNode->setValueId(getOrCreateValueId(&inst));
         svfg->addNode(loadNode);
         svfg->setDef(&inst, nodeId);
         valueToNode[&inst] = nodeId;
@@ -241,7 +242,9 @@ void SVFGBuilder::buildTopLevelNodes() {
         svfg->setDef(&inst, nodeId);
         storeToStoreNode[store] = nodeId;
 
-        // Track stores to globals for connectFromGlobalToProgEntry
+        // Track ordinary stores to globals for clients such as SABER. These are
+        // no longer used to seed program entry; global initialization is modeled
+        // via the synthetic ICFG global-init node.
         const Value *ptrOp = store->getPointerOperand();
         if (isa<GlobalVariable>(ptrOp) ||
             (isa<GetElementPtrInst>(ptrOp) &&
@@ -252,6 +255,7 @@ void SVFGBuilder::buildTopLevelNodes() {
       } else if (isa<GetElementPtrInst>(&inst)) {
         uint32_t nodeId = nextNode();
         auto *gepNode = new GepSVFGNode(nodeId, blockNode, &inst);
+        gepNode->setValueId(getOrCreateValueId(&inst));
         svfg->addNode(gepNode);
         svfg->setDef(&inst, nodeId);
         valueToNode[&inst] = nodeId;
@@ -259,6 +263,7 @@ void SVFGBuilder::buildTopLevelNodes() {
       } else if (isa<BinaryOperator>(&inst)) {
         uint32_t nodeId = nextNode();
         auto *binaryNode = new BinaryOpSVFGNode(nodeId, blockNode, &inst);
+        binaryNode->setValueId(getOrCreateValueId(&inst));
         // Record operand values (matching SVF's OPVers).
         for (unsigned i = 0, e = inst.getNumOperands(); i < e; ++i) {
           binaryNode->setOpVer(i, inst.getOperand(i));
@@ -270,6 +275,7 @@ void SVFGBuilder::buildTopLevelNodes() {
       } else if (isa<CmpInst>(&inst)) {
         uint32_t nodeId = nextNode();
         auto *cmpNode = new CmpSVFGNode(nodeId, blockNode, &inst);
+        cmpNode->setValueId(getOrCreateValueId(&inst));
         // Record operand values (matching SVF's OPVers).
         for (unsigned i = 0, e = inst.getNumOperands(); i < e; ++i) {
           cmpNode->setOpVer(i, inst.getOperand(i));
@@ -293,15 +299,33 @@ void SVFGBuilder::buildTopLevelNodes() {
         svfg->setDef(&inst, nodeId);
         valueToNode[&inst] = nodeId;
         svfg->setValueNode(&inst, nodeId);
-      } else if (isPhi) {
+      } else if (isPhi || isSelect) {
         uint32_t nodeId = nextNode();
-        const auto *phi = cast<PHINode>(&inst);
-        auto *phiNode = new IntraPhiSVFGNode(nodeId, blockNode, phi);
-        // Record incoming values as operands (matching SVF's OPVers).
-        for (unsigned i = 0, e = phi->getNumIncomingValues(); i < e; ++i) {
-          phiNode->setOpVer(i, phi->getIncomingValue(i));
+        auto *phiNode = new IntraPhiSVFGNode(nodeId, blockNode, &inst);
+        phiNode->setValueId(getOrCreateValueId(&inst));
+        if (const auto *phi = dyn_cast<PHINode>(&inst)) {
+          // Record incoming values as operands (matching SVF's OPVers).
+          for (unsigned i = 0, e = phi->getNumIncomingValues(); i < e; ++i) {
+            phiNode->setOpVer(i, phi->getIncomingValue(i));
+          }
+        } else {
+          // Model `select` as a PHI-like merge, matching upstream VFG handling.
+          for (unsigned i = 0, e = inst.getNumOperands(); i < e; ++i) {
+            phiNode->setOpVer(i, inst.getOperand(i));
+          }
         }
         svfg->addNode(phiNode);
+        svfg->setDef(&inst, nodeId);
+        valueToNode[&inst] = nodeId;
+        svfg->setValueNode(&inst, nodeId);
+      } else if (isCall && hasPointerResult) {
+        // Calls produce value-flow through ActualRet/FormalRet; keep a result
+        // anchor node for the SSA value, but do not model the call as a generic
+        // operand-copy instruction.
+        uint32_t nodeId = nextNode();
+        auto *callResultNode = new CopySVFGNode(nodeId, blockNode, &inst);
+        callResultNode->setValueId(getOrCreateValueId(&inst));
+        svfg->addNode(callResultNode);
         svfg->setDef(&inst, nodeId);
         valueToNode[&inst] = nodeId;
         svfg->setValueNode(&inst, nodeId);
@@ -310,6 +334,7 @@ void SVFGBuilder::buildTopLevelNodes() {
         // inttoptr, ptrtoint, addrspacecast, fneg …).
         uint32_t nodeId = nextNode();
         auto *unaryNode = new UnaryOpSVFGNode(nodeId, blockNode, &inst);
+        unaryNode->setValueId(getOrCreateValueId(&inst));
         // Record single source operand at position 0 (matching SVF's OPVers).
         unaryNode->setOpVer(0, inst.getOperand(0));
         svfg->addNode(unaryNode);
@@ -320,6 +345,7 @@ void SVFGBuilder::buildTopLevelNodes() {
         // Generic copy/move for remaining instructions with pointer results.
         uint32_t nodeId = nextNode();
         auto *copyNode = new CopySVFGNode(nodeId, blockNode, &inst);
+        copyNode->setValueId(getOrCreateValueId(&inst));
         svfg->addNode(copyNode);
         svfg->setDef(&inst, nodeId);
         valueToNode[&inst] = nodeId;
@@ -369,10 +395,8 @@ void SVFGBuilder::buildAddressTakenNodes() {
               const uint32_t memReg = getOrCreateMemReg(alloca);
               funcEntryChiMemRegs[entryFunc].insert(memReg);
             } else {
-              for (uint32_t objId : objIds) {
-                const uint32_t memReg = getOrCreateMemRegForObject(objId);
-                funcEntryChiMemRegs[entryFunc].insert(memReg);
-              }
+              funcEntryChiMemRegs[entryFunc].insert(
+                  getOrCreateMemRegForPointsTo(objIds));
             }
           }
         }
@@ -404,64 +428,21 @@ void SVFGBuilder::buildAddressTakenNodes() {
         std::vector<const void *> ptsVoid = getPointsToSet(&gv);
         SVFGNodeBS objIds = convertPTAObjectsToObjIDs(ptsVoid);
 
-        // Global variable anchoring strategy (mirrors SVF's GlobalBlock
-        // approach):
-        //
-        // 1. Prefer `main` as the anchor (SVF uses a GlobalBlock ICFG node that
-        //    feeds into main's entry).
-        // 2. If no `main`, collect all functions that DIRECTLY USE the global –
-        //    these are plausible entry contexts.  This avoids the unsound
-        //    choice of an arbitrary first function in library/multi-entry
-        //    programs.
-        // 3. If the global has no direct instruction users (only ConstantExpr
-        //    users), fall back to all non-declaration functions.
-        //
-        // Note: proper GlobalBlock support requires ICFG changes; this is the
-        // best approximation with the current infrastructure.
-
-        // Gather direct-use functions for this global.
-        llvm::SmallVector<const Function *, 4> entryFuncs;
-        const Function *mainFunc = M->getFunction("main");
-        if (mainFunc && !mainFunc->isDeclaration()) {
-          entryFuncs.push_back(mainFunc);
+        if (objIds.empty()) {
+          const uint32_t memReg = getOrCreateMemReg(&gv);
+          globalEntryRegions[memReg] = SVFGNodeBS{getOrCreateUnknownObjId()};
         } else {
-          // Collect functions that directly use this global.
-          for (const User *user : gv.users()) {
-            if (const Instruction *userInst = dyn_cast<Instruction>(user)) {
-              const Function *F = userInst->getFunction();
-              if (F && !F->isDeclaration()) {
-                // Deduplicate.
-                bool found = false;
-                for (const Function *ef : entryFuncs) {
-                  if (ef == F) {
-                    found = true;
-                    break;
-                  }
-                }
-                if (!found)
-                  entryFuncs.push_back(F);
-              }
-            }
-          }
-          // If no direct users found, fall back to first non-declaration
-          // function set.
-          if (entryFuncs.empty()) {
-            for (const Function &F : *M) {
-              if (!F.isDeclaration())
-                entryFuncs.push_back(&F);
-            }
-          }
+          const uint32_t memReg = getOrCreateMemRegForPointsTo(objIds);
+          globalEntryRegions[memReg] = objIds;
         }
 
-        for (const Function *entryFunc : entryFuncs) {
+        for (const Function *entryFunc : getRootFunctionsFromICFG()) {
           if (objIds.empty()) {
             const uint32_t memReg = getOrCreateMemReg(&gv);
             funcEntryChiMemRegs[entryFunc].insert(memReg);
           } else {
-            for (uint32_t objId : objIds) {
-              const uint32_t memReg = getOrCreateMemRegForObject(objId);
-              funcEntryChiMemRegs[entryFunc].insert(memReg);
-            }
+            funcEntryChiMemRegs[entryFunc].insert(
+                getOrCreateMemRegForPointsTo(objIds));
           }
         }
       }
@@ -487,7 +468,8 @@ void SVFGBuilder::buildFormalParmNodes() {
 
       uint32_t nodeId = nextNode();
       auto *formalParm = new FormalParmSVFGNode(
-          nodeId, getFunctionEntryICFGNode(icfg, &F), &F, idx);
+          nodeId, getFunctionEntryICFGNode(icfg, &F), &F, idx, arg);
+      formalParm->setValueId(getOrCreateValueId(arg));
       svfg->addNode(formalParm);
       svfg->addFormalParm(&F, formalParm);
       valueToNode[arg] = nodeId;
@@ -507,9 +489,7 @@ void SVFGBuilder::buildFormalParmNodes() {
         continue;
       }
 
-      for (uint32_t objId : objIds) {
-        memRegsForArg.push_back(getOrCreateMemRegForObject(objId));
-      }
+      memRegsForArg.push_back(getOrCreateMemRegForPointsTo(objIds));
     }
 
     // Create VarArgSVFGNode for variadic functions
@@ -517,6 +497,7 @@ void SVFGBuilder::buildFormalParmNodes() {
       uint32_t varArgNodeId = nextNode();
       auto *varArgNode = new VarArgSVFGNode(
           varArgNodeId, getFunctionEntryICFGNode(icfg, &F), &F);
+      varArgNode->setValueId(getOrCreateVarArgValueId(&F));
       svfg->addNode(varArgNode);
       svfg->addFormalParm(&F, varArgNode); // Treat as a formal parameter
       // Note: valueToNode mapping is not needed here since vararg has no
@@ -552,10 +533,10 @@ void SVFGBuilder::buildActualParmNodes() {
         uint32_t funPtrNodeId = std::numeric_limits<uint32_t>::max();
         if (calledOp) {
           if (SVFGNode *vn = svfg->getValueNode(calledOp)) {
-            funPtrNodeId = vn->getId();
+            funPtrNodeId = vn->hasValueId() ? vn->getValueId() : vn->getId();
           } else if (const auto *ci = dyn_cast<Instruction>(calledOp)) {
             if (SVFGNode *dn = svfg->getDef(ci))
-              funPtrNodeId = dn->getId();
+              funPtrNodeId = dn->hasValueId() ? dn->getValueId() : dn->getId();
           }
         }
         if (funPtrNodeId != std::numeric_limits<uint32_t>::max())
@@ -571,7 +552,9 @@ void SVFGBuilder::buildActualParmNodes() {
           continue;
 
         uint32_t nodeId = nextNode();
-        auto *actualParm = new ActualParmSVFGNode(nodeId, blockNode, call, idx);
+        auto *actualParm =
+            new ActualParmSVFGNode(nodeId, blockNode, call, idx, argVal);
+        actualParm->setValueId(getOrCreateValueId(argVal));
         svfg->addNode(actualParm);
         svfg->addActualParm(call, actualParm);
         auto argNodeIt = valueToNode.find(argVal);
@@ -601,10 +584,22 @@ void SVFGBuilder::buildFormalRetNodes() {
     if (!F.getReturnType()->isPointerTy())
       continue;
 
+    const llvm::Value *formalRetAnchor = nullptr;
+    for (const BasicBlock &bb : F) {
+      if (const auto *ret = dyn_cast<ReturnInst>(bb.getTerminator())) {
+        const Value *retVal = ret->getReturnValue();
+        if (retVal && retVal->getType()->isPointerTy()) {
+          formalRetAnchor = retVal;
+          break;
+        }
+      }
+    }
+
     // Create formal return node (one per function, not per return statement)
     uint32_t nodeId = nextNode();
     auto *formalRet = new FormalRetSVFGNode(
-        nodeId, getFunctionExitICFGNode(icfg, &F), &F);
+        nodeId, getFunctionExitICFGNode(icfg, &F), &F, formalRetAnchor);
+    formalRet->setValueId(getOrCreateFormalRetValueId(&F));
     svfg->addNode(formalRet);
     svfg->addFormalRet(&F, formalRet);
 
@@ -645,9 +640,15 @@ void SVFGBuilder::buildActualRetNodes() {
 
       // Handle call return value (if call result is used)
       if (call->getType()->isPointerTy()) {
+        if (const Function *directCallee = call->getCalledFunction()) {
+          if (directCallee->isDeclaration())
+            continue;
+        }
+
         uint32_t nodeId = nextNode();
         auto *actualRet =
             new ActualRetSVFGNode(nodeId, getReturnSiteICFGNode(icfg, call), call);
+        actualRet->setValueId(getOrCreateValueId(call));
         svfg->addNode(actualRet);
         svfg->addActualRet(call, actualRet);
 
@@ -660,5 +661,33 @@ void SVFGBuilder::buildActualRetNodes() {
         }
       }
     }
+  }
+}
+
+void SVFGBuilder::refreshStmtPointerNodeIds() {
+  if (!svfg)
+    return;
+
+  for (const auto &entry : loadToLoadNode) {
+    const LoadInst *load = entry.first;
+    auto *loadNode = dyn_cast_or_null<LoadSVFGNode>(svfg->getNode(entry.second));
+    if (!loadNode)
+      continue;
+    const Value *ptr = load->getPointerOperand();
+    auto it = valueToNode.find(ptr);
+    if (it != valueToNode.end())
+      loadNode->setLoadFromPtr(it->second);
+  }
+
+  for (const auto &entry : storeToStoreNode) {
+    const StoreInst *store = entry.first;
+    auto *storeNode =
+        dyn_cast_or_null<StoreSVFGNode>(svfg->getNode(entry.second));
+    if (!storeNode)
+      continue;
+    const Value *ptr = store->getPointerOperand();
+    auto it = valueToNode.find(ptr);
+    if (it != valueToNode.end())
+      storeNode->setStoreToPtr(it->second);
   }
 }

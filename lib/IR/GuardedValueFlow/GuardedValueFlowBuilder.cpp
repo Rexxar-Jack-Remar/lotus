@@ -515,8 +515,9 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
 
     auto *non_const_index =
         getOrCreateOperandRepresentation(graph, index_value, F, failed);
-    if (gep_site)
-      gep_site->addOffsetOperand(non_const_index);
+    // Keep the GEP site aligned with the original IR operands. The lowering
+    // below may introduce cast/add temporaries, but those should not appear as
+    // structural site offsets.
 
     Type *base_ptr_ty = GEP->getPointerOperandType();
     if (base_ptr_ty->isPointerTy() && index_value->getType()->isSized() &&
@@ -793,7 +794,6 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
         getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
     common_return->addChild(value_node);
     common_return->addReturnValueSitePair(value_node, site);
-    value_node->addUseSite(site);
     return true;
   }
   case Instruction::Unreachable:
@@ -1122,6 +1122,10 @@ GuardedValueFlowGraphBuilderPass::getGraph(const Function &F) {
   auto it = graphs_.find(&F);
   assert(it != graphs_.end() && "Requested missing GuardedValueFlowGraph");
   return *it->second;
+}
+
+void GuardedValueFlowGraphBuilderPass::invalidateGraph(const Function &F) {
+  graphs_.erase(&F);
 }
 
 std::unique_ptr<GuardedValueFlowGraph>

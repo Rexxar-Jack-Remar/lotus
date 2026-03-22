@@ -36,6 +36,54 @@ bool blockHasReturningCall(const BasicBlock &bb) {
   return false;
 }
 
+SmallVector<const Function *, 8> collectRootFunctions(Module *module) {
+  SmallVector<const Function *, 8> roots;
+  if (!module)
+    return roots;
+
+  if (const Function *mainFunc = module->getFunction("main")) {
+    if (!mainFunc->isDeclaration()) {
+      roots.push_back(mainFunc);
+      return roots;
+    }
+  }
+
+  SmallPtrSet<const Function *, 16> definedFuncs;
+  SmallPtrSet<const Function *, 16> calledFuncs;
+  for (const Function &F : *module) {
+    if (F.isDeclaration() || F.isIntrinsic())
+      continue;
+    definedFuncs.insert(&F);
+  }
+
+  for (const Function &F : *module) {
+    if (F.isDeclaration() || F.isIntrinsic())
+      continue;
+    for (const BasicBlock &BB : F) {
+      for (const Instruction &I : BB) {
+        const auto *call = dyn_cast<CallBase>(&I);
+        if (!call)
+          continue;
+        const Function *callee = call->getCalledFunction();
+        if (!callee || callee->isDeclaration() || callee->isIntrinsic())
+          continue;
+        calledFuncs.insert(callee);
+      }
+    }
+  }
+
+  for (const Function *F : definedFuncs) {
+    if (!calledFuncs.count(F))
+      roots.push_back(F);
+  }
+  if (!roots.empty())
+    return roots;
+
+  for (const Function *F : definedFuncs)
+    roots.push_back(F);
+  return roots;
+}
+
 void connectNormalContinuation(ICFG *icfg, const CallBase *call,
                                ICFGNode *returnSiteNode) {
   if (!icfg || !call || !returnSiteNode)
@@ -110,6 +158,13 @@ void connectFunctionExceptionalExits(ICFG *icfg, const Function *callee) {
 
 /// @brief Builds the ICFG for all non-declaration functions in the module.
 void ICFGBuilder::build(llvm::Module *module) {
+  ICFGNode *globalInitNode = icfg->getGlobalInitICFGNode();
+  for (const Function *root : collectRootFunctions(module)) {
+    ICFGNode *entryNode = icfg->getFunEntryICFGNode(root);
+    if (globalInitNode && entryNode)
+      icfg->addIntraEdge(globalInitNode, entryNode);
+  }
+
   for (auto &func : *module) {
     if (func.isDeclaration() || func.isIntrinsic())
       continue;

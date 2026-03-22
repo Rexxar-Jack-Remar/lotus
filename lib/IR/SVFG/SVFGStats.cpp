@@ -132,6 +132,11 @@ void SVFGStats::performSCCAnalysis(const SVFGEdgeSet &insensitiveCalRetEdges) {
   cycleNodes.clear();
 
   // Tarjan SCC over node IDs using all edges.
+  //
+  // Use an explicit DFS stack rather than recursive calls: large SVFGs can
+  // contain long acyclic stretches between cycle entries, and the recursive
+  // version overflows the host stack when ContextDDA enables cycle-insensitive
+  // edge handling on those graphs.
   std::unordered_map<uint32_t, std::vector<uint32_t>> adj;
   adj.reserve(graph->getNumNodes());
   for (const auto &pair : *graph) {
@@ -156,30 +161,65 @@ void SVFGStats::performSCCAnalysis(const SVFGEdgeSet &insensitiveCalRetEdges) {
   stack.reserve(adj.size());
   int nextIndex = 0;
 
-  auto strongConnect = [&](auto &&self, uint32_t v) -> void {
-    index[v] = nextIndex;
-    lowlink[v] = nextIndex;
-    nextIndex++;
-    stack.push_back(v);
-    onStack.insert(v);
+  struct Frame {
+    uint32_t nodeId;
+    size_t nextSuccIdx = 0;
+    bool initialized = false;
+  };
+  std::vector<Frame> dfsStack;
+  dfsStack.reserve(adj.size());
+  static const std::vector<uint32_t> emptySuccs;
 
-    auto it = adj.find(v);
-    if (it != adj.end()) {
-      for (uint32_t w : it->second) {
-        if (index.find(w) == index.end()) {
-          self(self, w);
-          lowlink[v] = std::min(lowlink[v], lowlink[w]);
-        } else if (onStack.count(w)) {
-          lowlink[v] = std::min(lowlink[v], index[w]);
-        }
+  for (const auto &pair : *graph) {
+    const SVFGNode *node = pair.second;
+    if (!node)
+      continue;
+    const uint32_t id = node->getId();
+    if (index.find(id) != index.end())
+      continue;
+
+    dfsStack.push_back(Frame{id});
+    while (!dfsStack.empty()) {
+      Frame &frame = dfsStack.back();
+      const uint32_t v = frame.nodeId;
+
+      if (!frame.initialized) {
+        index[v] = nextIndex;
+        lowlink[v] = nextIndex;
+        nextIndex++;
+        stack.push_back(v);
+        onStack.insert(v);
+        frame.initialized = true;
       }
-    }
 
-    if (lowlink[v] == index[v]) {
-      // Pop SCC
+      const auto adjIt = adj.find(v);
+      const std::vector<uint32_t> &succs =
+          (adjIt != adj.end()) ? adjIt->second : emptySuccs;
+
+      if (frame.nextSuccIdx < succs.size()) {
+        const uint32_t w = succs[frame.nextSuccIdx++];
+        if (index.find(w) == index.end()) {
+          dfsStack.push_back(Frame{w});
+          continue;
+        }
+        if (onStack.count(w))
+          lowlink[v] = std::min(lowlink[v], index[w]);
+        continue;
+      }
+
+      dfsStack.pop_back();
+      if (!dfsStack.empty()) {
+        const uint32_t parent = dfsStack.back().nodeId;
+        lowlink[parent] = std::min(lowlink[parent], lowlink[v]);
+      }
+
+      if (lowlink[v] != index[v])
+        continue;
+
+      // Pop SCC rooted at v.
       std::vector<uint32_t> scc;
       while (!stack.empty()) {
-        uint32_t w = stack.back();
+        const uint32_t w = stack.back();
         stack.pop_back();
         onStack.erase(w);
         scc.push_back(w);
@@ -188,37 +228,26 @@ void SVFGStats::performSCCAnalysis(const SVFGEdgeSet &insensitiveCalRetEdges) {
       }
 
       uint32_t rep = scc.front();
-      for (uint32_t id : scc) {
-        rep = std::min(rep, id);
-      }
-      for (uint32_t id : scc) {
-        sccRep[id] = rep;
-      }
+      for (uint32_t member : scc)
+        rep = std::min(rep, member);
+      for (uint32_t member : scc)
+        sccRep[member] = rep;
 
       if (scc.size() > 1) {
         cycleNodes.insert(scc.begin(), scc.end());
-      } else {
-        // Single-node SCC: check self-loop.
-        const auto aIt = adj.find(rep);
-        if (aIt != adj.end()) {
-          for (uint32_t w : aIt->second) {
-            if (w == rep) {
-              cycleNodes.insert(rep);
-              break;
-            }
-          }
+        continue;
+      }
+
+      // Single-node SCC: check self-loop.
+      const auto repIt = adj.find(rep);
+      if (repIt == adj.end())
+        continue;
+      for (uint32_t succ : repIt->second) {
+        if (succ == rep) {
+          cycleNodes.insert(rep);
+          break;
         }
       }
-    }
-  };
-
-  for (const auto &pair : *graph) {
-    const SVFGNode *node = pair.second;
-    if (!node)
-      continue;
-    const uint32_t id = node->getId();
-    if (index.find(id) == index.end()) {
-      strongConnect(strongConnect, id);
     }
   }
 }

@@ -14,6 +14,8 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/Debug.h>
 
+#include <string>
+
 using namespace llvm;
 using namespace llvm::gvfg;
 
@@ -192,6 +194,11 @@ struct SummarySentinelProvenance {
   unsigned bucket{0};
   SummaryDirection direction{SummaryDirection::Output};
 };
+
+static bool setAdapterFailure(std::string &failure, const Twine &message) {
+  failure = message.str();
+  return false;
+}
 
 static bool instructionReachesInstruction(const Instruction *src,
                                           const Instruction *dst) {
@@ -795,17 +802,8 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
                                      static_cast<unsigned>(idx));
 
     const auto &ret_val_map = output->getVal();
-    if (ret_val_map.empty()) {
-      auto *load_mem = graph.createNode<GuardedValueFlowNode>(
-          GuardedValueFlowNode::Kind::LoadMemory, output->getType(), &graph,
-          pseudo_return->getParentBasicBlock(), nullptr, nullptr);
-      load_mem->setDescription((Twine("return.mem.") + Twine(idx) + ".entry").str());
-      (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, pseudo_return, load_mem);
-      mem_value_t fallback = makeFallbackValues(LocValue::FREE_VARIABLE);
-      populateLoadMemoryNode(graph, load_mem, fallback,
-                             pseudo_return->getParentBasicBlock(), builder);
+    if (ret_val_map.empty())
       continue;
-    }
 
     for (const auto &ret_vals : ret_val_map) {
       auto *ret_inst = ret_vals.first;
@@ -822,8 +820,6 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
           graph, pseudo_return, load_mem);
       if (linked_ret)
         pseudo_return->addReturnValueSitePair(linked_ret, site);
-      if (site)
-        load_mem->addUseSite(site);
       mem_value_t values = ret_vals.second;
       if (values.empty())
         values = makeFallbackValues(LocValue::FREE_VARIABLE, ret_inst);
@@ -835,9 +831,10 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
   }
 }
 
-static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
+static bool materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
                                             IntraLotusAA &pta, LotusAA &lotus,
-                                            GuardedValueFlowGraphBuilderPass &builder) {
+                                            GuardedValueFlowGraphBuilderPass &builder,
+                                            std::string &failure) {
   const auto &call_arg_bindings = pta.getCallArgBindings();
   BasicBlock *entry_block = getEntryBlockOrNull(graph);
   Function *caller = graph.getBaseFunction();
@@ -885,27 +882,34 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
           site->setInputSummaryNode(callee, bucket, summary_node);
         }
 
-        mem_value_t aggregated;
-        bool has_missing_binding = !callee_input_bindings;
-        if (callee_input_bindings) {
-          for (Value *summary_input : *summary_bucket) {
-            auto binding_it = callee_input_bindings->find(summary_input);
-            if (binding_it == callee_input_bindings->end()) {
-              has_missing_binding = true;
-              continue;
-            }
-            aggregated.insert(aggregated.end(), binding_it->second.begin(),
-                              binding_it->second.end());
-          }
+        if (static_cast<int>(bucket) <= callee_graph->getInlineApDepth())
+          continue;
+
+        if (!callee_input_bindings) {
+          return setAdapterFailure(
+              failure, Twine("Missing summary-input bindings for caller ") +
+                           caller->getName() + " -> " + callee->getName() +
+                           ", bucket " + Twine(bucket));
         }
-        if (aggregated.empty() || has_missing_binding)
-          aggregated.emplace_back(nullptr, nullptr, LocValue::SUMMARY_VALUE, 1.0f);
+
+        mem_value_t aggregated;
+        for (Value *summary_input : *summary_bucket) {
+          auto binding_it = callee_input_bindings->find(summary_input);
+          if (binding_it == callee_input_bindings->end()) {
+            return setAdapterFailure(
+                failure,
+                Twine("Missing summary-input binding for caller ") +
+                    caller->getName() + " -> " + callee->getName() +
+                    ", bucket " + Twine(bucket));
+          }
+          aggregated.insert(aggregated.end(), binding_it->second.begin(),
+                            binding_it->second.end());
+        }
+
         SummarySentinelProvenance summary_provenance{
             call, callee, bucket, SummaryDirection::Input};
         auto *load_mem = detachReusableLoadMemoryChild(
             summary_node, (Twine("call.input.summary.mem.") + Twine(bucket)).str());
-        if (static_cast<int>(bucket) <= callee_graph->getInlineApDepth())
-          continue;
 
         if (!load_mem) {
           load_mem = graph.createNode<GuardedValueFlowNode>(
@@ -923,11 +927,14 @@ static void materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
 
     }
   }
+
+  return true;
 }
 
-static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
+static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
                                           IntraLotusAA &pta, LotusAA &lotus,
-                                          GuardedValueFlowGraphBuilderPass &builder) {
+                                          GuardedValueFlowGraphBuilderPass &builder,
+                                          std::string &failure) {
   const auto &call_arg_bindings = pta.getCallArgBindings();
   const auto &call_ret_bindings = pta.getCallReturnBindings();
   BasicBlock *entry_block = getEntryBlockOrNull(graph);
@@ -961,10 +968,15 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
           callee_input_bindings = &callee_it->second;
       }
 
+      if (!callee_graph->getInputs().empty() && !callee_input_bindings) {
+        return setAdapterFailure(
+            failure, Twine("Missing pseudo-input bindings for caller ") +
+                         caller->getName() + " -> " + callee->getName());
+      }
+
       using PseudoInputBinding = std::pair<Value *, const mem_value_t *>;
       std::vector<PseudoInputBinding> ordered_pseudo_inputs(
           callee_graph->getInputs().size(), {nullptr, nullptr});
-      bool has_complete_pseudo_input_mapping = true;
       for (const auto &input_item : callee_graph->getInputs()) {
         Value *formal_value = input_item.first;
         int raw_pseudo_input_index = callee_graph->getPseudoInputIndex(formal_value);
@@ -972,11 +984,9 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
             static_cast<size_t>(raw_pseudo_input_index) >=
                 ordered_pseudo_inputs.size() ||
             ordered_pseudo_inputs[raw_pseudo_input_index].first) {
-          LLVM_DEBUG(dbgs() << "[gvfg-adapter] Missing pseudo-input index for "
-                            << *formal_value << " in callee "
-                            << callee->getName() << "\n");
-          has_complete_pseudo_input_mapping = false;
-          break;
+          return setAdapterFailure(
+              failure, Twine("Invalid pseudo-input index mapping for caller ") +
+                           caller->getName() + " -> " + callee->getName());
         }
         const mem_value_t *binding_values = nullptr;
         if (callee_input_bindings) {
@@ -987,19 +997,12 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         ordered_pseudo_inputs[raw_pseudo_input_index] =
             {formal_value, binding_values};
       }
-      if (!has_complete_pseudo_input_mapping)
-        continue;
       for (const auto &ordered_input : ordered_pseudo_inputs) {
-        if (!ordered_input.first) {
-          LLVM_DEBUG(dbgs() << "[gvfg-adapter] Incomplete pseudo-input mapping for "
-                            << callee->getName() << " at call " << *call
-                            << "\n");
-          has_complete_pseudo_input_mapping = false;
-          break;
-        }
+        if (!ordered_input.first)
+          return setAdapterFailure(
+              failure, Twine("Incomplete pseudo-input mapping for caller ") +
+                           caller->getName() + " -> " + callee->getName());
       }
-      if (!has_complete_pseudo_input_mapping)
-        continue;
 
       for (size_t raw_index = 0; raw_index < ordered_pseudo_inputs.size();
            ++raw_index) {
@@ -1007,6 +1010,12 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         if (!formal_value)
           continue;
         const mem_value_t *binding_values = ordered_pseudo_inputs[raw_index].second;
+        if (!binding_values) {
+          return setAdapterFailure(
+              failure, Twine("Missing pseudo-input binding for caller ") +
+                           caller->getName() + " -> " + callee->getName() +
+                           ", input index " + Twine(raw_index));
+        }
 
         auto *pseudo_input = dyn_cast_or_null<GuardedValueFlowCallOutputNode>(
             site->getPseudoInput(callee, static_cast<unsigned>(raw_index)));
@@ -1037,10 +1046,7 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
             (Twine("call.input.mem.") + Twine(raw_index)).str());
         (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, pseudo_input,
                                                          load_mem);
-        mem_value_t values = binding_values ? *binding_values
-                                            : makeFallbackValues(LocValue::FREE_VARIABLE);
-        if (values.empty())
-          values = makeFallbackValues(LocValue::FREE_VARIABLE);
+        mem_value_t values = *binding_values;
         populateLoadMemoryNode(graph, load_mem, values, call->getParent(), builder);
       }
 
@@ -1065,10 +1071,9 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
           }
         }
         if (!has_complete_pseudo_output_mapping) {
-          LLVM_DEBUG(dbgs() << "[gvfg-adapter] Incomplete pseudo-output mapping for "
-                            << callee->getName() << " at call " << *call
-                            << "\n");
-          continue;
+          return setAdapterFailure(
+              failure, Twine("Incomplete pseudo-output mapping for caller ") +
+                           caller->getName() + " -> " + callee->getName());
         }
       }
       for (size_t idx = 1; idx < outputs.size(); ++idx) {
@@ -1077,8 +1082,12 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         Value *pseudo_value = pseudo_output ? pseudo_output->getLLVMValue() : nullptr;
         if (!pseudo_value && pseudo_outputs && idx < pseudo_outputs->size())
           pseudo_value = (*pseudo_outputs)[idx];
-        if (!pseudo_value)
-          continue;
+        if (!pseudo_value) {
+          return setAdapterFailure(
+              failure, Twine("Missing pseudo-output binding for caller ") +
+                           caller->getName() + " -> " + callee->getName() +
+                           ", output index " + Twine(idx - 1));
+        }
         if (!pseudo_output) {
           pseudo_output = graph.createNode<GuardedValueFlowCallOutputNode>(
               GuardedValueFlowNode::Kind::CallSitePseudoOutput,
@@ -1095,12 +1104,13 @@ static void materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         auto *store_mem = ensureStoreMemoryNode(graph, pseudo_value, call,
                                                 outputs[idx]->getType(),
                                                 call->getParent());
-        store_mem->clearChildren();
         (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, store_mem,
                                                          pseudo_output);
       }
     }
   }
+
+  return true;
 }
 
 static void materializeCallTargetConditions(GuardedValueFlowGraph &graph,
@@ -1211,15 +1221,22 @@ bool LotusGuardedValueFlowAdapterPass::runOnModule(Module &M) {
     if (F.isDeclaration() || !builder.hasGraphFor(F))
       continue;
     if (IntraLotusAA *pta = lotus.getPtGraph(&F))
-      adaptFunction(builder.getGraph(F), *pta, lotus, builder);
+      (void)adaptFunction(builder.getGraph(F), *pta, lotus, builder);
   }
 
   return false;
 }
 
-void LotusGuardedValueFlowAdapterPass::adaptFunction(
+bool LotusGuardedValueFlowAdapterPass::adaptFunction(
     GuardedValueFlowGraph &graph, IntraLotusAA &pta, LotusAA &lotus,
     GuardedValueFlowGraphBuilderPass &builder) {
+  auto fail = [&](const std::string &reason) {
+    errs() << "[gvfg-adapter] Failed to adapt function "
+           << graph.getBaseFunction()->getName() << ": " << reason << "\n";
+    builder.invalidateGraph(*graph.getBaseFunction());
+    return false;
+  };
+
   unsigned pseudo_arg_index = 0;
   for (const auto &input_item : pta.getInputs()) {
     Value *value = input_item.first;
@@ -1242,9 +1259,13 @@ void LotusGuardedValueFlowAdapterPass::adaptFunction(
   materializeFunctionSummaryInterface(graph, pta, builder);
   materializeFunctionOutputs(graph, pta, builder);
   materializeCallTargetConditions(graph, pta, builder);
-  materializeCallsiteSummaryNodes(graph, pta, lotus, builder);
-  materializeCallsiteInterfaces(graph, pta, lotus, builder);
+  std::string failure;
+  if (!materializeCallsiteSummaryNodes(graph, pta, lotus, builder, failure))
+    return fail(failure);
+  if (!materializeCallsiteInterfaces(graph, pta, lotus, builder, failure))
+    return fail(failure);
   materializeCallsiteBackEdges(graph, lotus);
+  return true;
 }
 
 ModulePass *llvm::gvfg::createLotusGuardedValueFlowAdapterPass() {

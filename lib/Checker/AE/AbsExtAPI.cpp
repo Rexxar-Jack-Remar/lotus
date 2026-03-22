@@ -9,6 +9,7 @@
 #include "Checker/AE/AbstractInterpretation.h"
 #include "Checker/AE/AbstractState.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -16,6 +17,7 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Metadata.h>
+#include <llvm/IR/Operator.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -24,6 +26,22 @@ namespace analysis {
 
 namespace {
 
+int64_t clampFieldOffset(int64_t offset) {
+  if (offset < -static_cast<int64_t>(MaxFieldLimit))
+    return -static_cast<int64_t>(MaxFieldLimit);
+  if (offset > static_cast<int64_t>(MaxFieldLimit))
+    return static_cast<int64_t>(MaxFieldLimit);
+  return offset;
+}
+
+int64_t clampFieldOffset(const BoundedInt &bound) {
+  if (bound.is_minus_infinity())
+    return -static_cast<int64_t>(MaxFieldLimit);
+  if (bound.is_plus_infinity())
+    return static_cast<int64_t>(MaxFieldLimit);
+  return clampFieldOffset(bound.getIntNumeral());
+}
+
 bool containsAny(const std::string &name,
                  std::initializer_list<const char *> patterns) {
   for (const char *pattern : patterns) {
@@ -31,6 +49,282 @@ bool containsAny(const std::string &name,
       return true;
   }
   return false;
+}
+
+enum class IntegerSignedness { Unknown, Signed, Unsigned };
+
+static llvm::Module *getOwningModule(const llvm::Value *value) {
+  if (!value)
+    return nullptr;
+  if (const auto *inst = llvm::dyn_cast<llvm::Instruction>(value))
+    return const_cast<llvm::Module *>(inst->getModule());
+  if (const auto *arg = llvm::dyn_cast<llvm::Argument>(value))
+    return arg->getParent()
+               ? const_cast<llvm::Module *>(arg->getParent()->getParent())
+               : nullptr;
+  if (const auto *gv = llvm::dyn_cast<llvm::GlobalValue>(value))
+    return const_cast<llvm::Module *>(gv->getParent());
+  return nullptr;
+}
+
+static uint32_t getTypeByteSize(const llvm::Type *type,
+                                const llvm::DataLayout &dl) {
+  if (!type)
+    return 1;
+
+  if (const auto *arrayTy = llvm::dyn_cast<llvm::ArrayType>(type))
+    type = arrayTy->getElementType();
+  else if (const auto *vecTy = llvm::dyn_cast<llvm::VectorType>(type))
+    type = vecTy->getElementType();
+
+  if (!type || !type->isSized())
+    return 1;
+
+  uint64_t size = dl.getTypeAllocSize(const_cast<llvm::Type *>(type));
+  if (size == 0)
+    return 1;
+  if (size > MaxFieldLimit)
+    return MaxFieldLimit;
+  return static_cast<uint32_t>(size);
+}
+
+static uint32_t getElementByteSize(AbstractState &as, const llvm::Value *value) {
+  llvm::Module *module = getOwningModule(value);
+  if (!module)
+    return 1;
+
+  const llvm::DataLayout &dl = module->getDataLayout();
+  if (value && value->getType()->isArrayTy())
+    return getTypeByteSize(value->getType(), dl);
+
+  if (!value || !value->getType()->isPointerTy())
+    return 1;
+
+  uint32_t valueId = AbstractInterpretation::getValueIdStatic(value);
+  if (const llvm::Type *pointee = as.getPointeeElement(valueId))
+    return getTypeByteSize(pointee, dl);
+
+  return getTypeByteSize(value->getType()->getPointerElementType(), dl);
+}
+
+static uint32_t getTrackedByteCount(const IntervalValue &len,
+                                    bool useLowerBound) {
+  if (len.isBottom())
+    return 0;
+  if (len.is_infinite())
+    return MaxFieldLimit;
+
+  int64_t raw =
+      useLowerBound ? len.lb().getIntNumeralOrZero() : len.ub().getIntNumeralOrZero();
+  if (raw <= 0)
+    return 0;
+  if (raw > static_cast<int64_t>(MaxFieldLimit))
+    return MaxFieldLimit;
+  return static_cast<uint32_t>(raw);
+}
+
+static std::pair<uint32_t, int64_t>
+resolvePointerBaseAndOffset(AbstractState &as, const llvm::Value *value,
+                            uint32_t fallbackId) {
+  const llvm::Value *base = value;
+  int64_t byteOffset = 0;
+
+  while (base) {
+    if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(base)) {
+      int64_t step = clampFieldOffset(as.getByteOffset(gep).ub());
+      byteOffset = clampFieldOffset(byteOffset + step);
+      base = gep->getPointerOperand();
+      continue;
+    }
+    if (const auto *op = llvm::dyn_cast<llvm::Operator>(base)) {
+      if (op->getOpcode() == llvm::Instruction::BitCast ||
+          op->getOpcode() == llvm::Instruction::AddrSpaceCast) {
+        base = op->getOperand(0);
+        continue;
+      }
+    }
+    break;
+  }
+
+  uint32_t baseId =
+      base ? AbstractInterpretation::getValueIdStatic(base) : fallbackId;
+  return {baseId, byteOffset};
+}
+
+static IntervalValue getIntegerRangeForBitWidth(unsigned bits,
+                                                IntegerSignedness signHint) {
+  if (bits <= 1)
+    return IntervalValue(static_cast<int64_t>(0), static_cast<int64_t>(1));
+
+  unsigned cappedBits = std::min(bits, 64u);
+  auto signedRange = [cappedBits]() {
+    if (cappedBits >= 64) {
+      return IntervalValue(std::numeric_limits<int64_t>::min(),
+                           std::numeric_limits<int64_t>::max());
+    }
+    int64_t lb = -(int64_t(1) << (cappedBits - 1));
+    int64_t ub = (int64_t(1) << (cappedBits - 1)) - 1;
+    return IntervalValue(lb, ub);
+  };
+  auto unsignedRange = [cappedBits]() {
+    if (cappedBits >= 64)
+      return IntervalValue(int64_t(0), std::numeric_limits<int64_t>::max());
+    uint64_t ub = (uint64_t(1) << cappedBits) - 1;
+    return IntervalValue(int64_t(0), static_cast<int64_t>(ub));
+  };
+
+  switch (signHint) {
+  case IntegerSignedness::Signed:
+    return signedRange();
+  case IntegerSignedness::Unsigned:
+    return unsignedRange();
+  case IntegerSignedness::Unknown:
+  default: {
+    IntervalValue range = signedRange();
+    range.join_with(unsignedRange());
+    return range;
+  }
+  }
+}
+
+static IntervalValue getTypeRangeWithHint(llvm::Type *type,
+                                          IntegerSignedness signHint) {
+  if (!type)
+    return IntervalValue::top();
+  if (type->isIntegerTy())
+    return getIntegerRangeForBitWidth(type->getIntegerBitWidth(), signHint);
+  if (type->isFloatingPointTy()) {
+    return IntervalValue(std::numeric_limits<int32_t>::min(),
+                         std::numeric_limits<int32_t>::max());
+  }
+  return IntervalValue::top();
+}
+
+static void storeStringTerminator(AbstractState &as, uint32_t dstId,
+                                  uint32_t byteOffset) {
+  const llvm::Value *dstValue =
+      AbstractInterpretation::getAEInstance().getValueFromIdStatic(dstId);
+  const std::pair<uint32_t, int64_t> resolved =
+      resolvePointerBaseAndOffset(as, dstValue, dstId);
+  const uint32_t baseDstId = resolved.first;
+  const int64_t baseOffset = resolved.second;
+  AddressValue nullAddrs =
+      as.getGepObjAddrs(baseDstId, IntervalValue(baseOffset + byteOffset));
+  for (uint32_t addr : nullAddrs)
+    as.store(addr, AbstractValue(IntervalValue(0)));
+}
+
+static std::vector<IntegerSignedness>
+parseScanfSignednessHints(const std::string &format) {
+  std::vector<IntegerSignedness> hints;
+  for (size_t i = 0; i < format.size(); ++i) {
+    if (format[i] != '%')
+      continue;
+
+    ++i;
+    if (i >= format.size())
+      break;
+    if (format[i] == '%')
+      continue;
+
+    bool suppress = false;
+    if (format[i] == '*') {
+      suppress = true;
+      ++i;
+    }
+
+    while (i < format.size() &&
+           std::isdigit(static_cast<unsigned char>(format[i]))) {
+      ++i;
+    }
+
+    if (i + 1 < format.size() &&
+        ((format[i] == 'h' && format[i + 1] == 'h') ||
+         (format[i] == 'l' && format[i + 1] == 'l'))) {
+      i += 2;
+    } else if (i < format.size() &&
+               (format[i] == 'h' || format[i] == 'l' || format[i] == 'j' ||
+                format[i] == 'z' || format[i] == 't' || format[i] == 'L')) {
+      ++i;
+    }
+
+    if (i >= format.size())
+      break;
+
+    IntegerSignedness hint = IntegerSignedness::Unknown;
+    switch (format[i]) {
+    case 'd':
+    case 'i':
+    case 'n':
+      hint = IntegerSignedness::Signed;
+      break;
+    case 'u':
+    case 'o':
+    case 'x':
+    case 'X':
+      hint = IntegerSignedness::Unsigned;
+      break;
+    default:
+      hint = IntegerSignedness::Unknown;
+      break;
+    }
+
+    if (!suppress)
+      hints.push_back(hint);
+  }
+  return hints;
+}
+
+static IntegerSignedness getStrtoSignedness(llvm::StringRef funcName) {
+  if (funcName.startswith("strtou"))
+    return IntegerSignedness::Unsigned;
+  if (funcName.startswith("strtol"))
+    return IntegerSignedness::Signed;
+  return IntegerSignedness::Unknown;
+}
+
+static const llvm::Value *stripConstantAddressBase(const llvm::Value *value) {
+  while (value) {
+    if (const auto *alias = llvm::dyn_cast<llvm::GlobalAlias>(value)) {
+      value = alias->getAliasee();
+      continue;
+    }
+    if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(value)) {
+      value = gep->getPointerOperand();
+      continue;
+    }
+    if (const auto *op = llvm::dyn_cast<llvm::Operator>(value)) {
+      if (op->getOpcode() == llvm::Instruction::BitCast ||
+          op->getOpcode() == llvm::Instruction::AddrSpaceCast) {
+        value = op->getOperand(0);
+        continue;
+      }
+    }
+    if (const auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(value)) {
+      if (ce->getNumOperands() == 0)
+        break;
+      value = ce->getOperand(0);
+      continue;
+    }
+    break;
+  }
+  return value;
+}
+
+static bool tryExtractConstantString(const llvm::Value *value,
+                                     std::string &out) {
+  value = stripConstantAddressBase(value);
+  const auto *gv = llvm::dyn_cast_or_null<llvm::GlobalVariable>(value);
+  if (!gv || !gv->hasInitializer())
+    return false;
+
+  const auto *data =
+      llvm::dyn_cast<llvm::ConstantDataSequential>(gv->getInitializer());
+  if (!data || !data->isCString())
+    return false;
+
+  out = data->getAsCString().str();
+  return true;
 }
 
 bool isLikelyStdContainerSymbol(const std::string &funcName) {
@@ -662,8 +956,12 @@ void AEExtAPI::initExtFunMap() {
     if (callNode->arg_size() >= 1) {
       uint32_t sizeId = getValueId(callNode->getArgOperand(0));
       uint32_t objId = AddressValue::getInternalID(newAddr);
+      as.addHeapObject(objId);
 
-      if (as.inVarToValTable(sizeId)) {
+      if (const auto *csize =
+              llvm::dyn_cast<llvm::ConstantInt>(callNode->getArgOperand(0))) {
+        as.setObjSize(objId, static_cast<uint32_t>(csize->getZExtValue()));
+      } else if (as.inVarToValTable(sizeId)) {
         IntervalValue size = as[sizeId].getInterval();
         if (size.is_numeral()) {
           // Exact size known
@@ -697,6 +995,7 @@ void AEExtAPI::initExtFunMap() {
       uint32_t nmembId = getValueId(callNode->getArgOperand(0));
       uint32_t sizeId = getValueId(callNode->getArgOperand(1));
       uint32_t objId = AddressValue::getInternalID(newAddr);
+      as.addHeapObject(objId);
 
       IntervalValue nmemb(1, MaxFieldLimit);
       IntervalValue size(1, MaxFieldLimit);
@@ -721,7 +1020,10 @@ void AEExtAPI::initExtFunMap() {
 
   func_map["malloc"] = sse_malloc;
   func_map["calloc"] = sse_calloc;
-  func_map["realloc"] = sse_malloc; // realloc similar to malloc
+  auto sse_realloc = [this](const llvm::CallBase *callNode) {
+    handleExtRealloc(callNode);
+  };
+  func_map["realloc"] = sse_realloc;
 
   // Memory functions
   auto sse_memcpy = [this](const llvm::CallBase *callNode) {
@@ -805,15 +1107,7 @@ void AEExtAPI::initExtFunMap() {
   func_map["wmemset"] = sse_memset;
 
   auto sse_free = [this](const llvm::CallBase *callNode) {
-    if (callNode->arg_size() < 1)
-      return;
-    AbstractState &as = getAbsStateFromTrace(callNode);
-    uint32_t freePtr = getValueId(callNode->getArgOperand(0));
-    for (auto addr : as[freePtr].getAddrs()) {
-      if (!AbstractState::isInvalidMem(addr)) {
-        as.addToFreedAddrs(addr);
-      }
-    }
+    handleExtFree(callNode);
   };
   func_map["free"] = sse_free;
   func_map["cfree"] = sse_free;
@@ -839,42 +1133,11 @@ void AEExtAPI::initExtFunMap() {
 
   // Input functions (scanf, fscanf, sscanf)
   auto sse_scanf = [this](const llvm::CallBase *callNode) {
-    AbstractState &as = getAbsStateFromTrace(callNode);
-    if (callNode->arg_size() < 2)
-      return;
-
-    // scanf("%d", &data) - format string is arg 0, destination is arg 1
-    uint32_t dstId = getValueId(callNode->getArgOperand(1));
-
-    if (!as.inVarToAddrsTable(dstId))
-      return;
-
-    // Store a conservative range to the destination
-    AbstractValue range =
-        getRangeLimitFromType(callNode->getArgOperand(1)->getType());
-    for (auto addr : as[dstId].getAddrs()) {
-      as.store(addr, range);
-    }
+    handleExtScanf(callNode);
   };
 
   auto sse_fscanf = [this](const llvm::CallBase *callNode) {
-    AbstractState &as = getAbsStateFromTrace(callNode);
-    if (callNode->arg_size() < 3)
-      return;
-
-    // fscanf(file, "%d", &data) - file is arg 0, format is arg 1, destination
-    // is arg 2
-    uint32_t dstId = getValueId(callNode->getArgOperand(2));
-
-    if (!as.inVarToAddrsTable(dstId))
-      return;
-
-    // Store a conservative range to the destination
-    AbstractValue range =
-        getRangeLimitFromType(callNode->getArgOperand(2)->getType());
-    for (auto addr : as[dstId].getAddrs()) {
-      as.store(addr, range);
-    }
+    handleExtScanf(callNode);
   };
 
   func_map["scanf"] = sse_scanf;
@@ -1153,6 +1416,7 @@ void AEExtAPI::initExtFunMap() {
     if (callNode->arg_size() >= 1) {
       uint32_t sizeId = getValueId(callNode->getArgOperand(0));
       uint32_t objId = AddressValue::getInternalID(newAddr);
+      as.addHeapObject(objId);
       if (as.inVarToValTable(sizeId)) {
         IntervalValue size = as[sizeId].getInterval();
         if (size.is_numeral()) {
@@ -1171,15 +1435,15 @@ void AEExtAPI::initExtFunMap() {
   // Additional allocation functions
   func_map["xcalloc"] = sse_calloc;
   func_map["xmalloc"] = sse_malloc;
-  func_map["xrealloc"] = sse_malloc; // Similar to realloc
+  func_map["xrealloc"] = sse_realloc;
   func_map["safe_malloc"] = sse_malloc;
   func_map["safe_calloc"] = sse_calloc;
-  func_map["safe_realloc"] = sse_malloc;
+  func_map["safe_realloc"] = sse_realloc;
 
   // Memory allocation functions with size arguments
   auto sse_aligned_alloc = [this](const llvm::CallBase *callNode) {
     // aligned_alloc(alignment, size) - similar to malloc
-    if (callNode->arg_size() < 1)
+    if (callNode->arg_size() < 2)
       return;
     AbstractState &as = getAbsStateFromTrace(callNode);
     uint32_t lhsId = getValueId(callNode);
@@ -1187,10 +1451,11 @@ void AEExtAPI::initExtFunMap() {
     AddressValue addr(newAddr);
     AbstractValue addrVal = addr;
     as[lhsId] = addrVal;
-    if (callNode->arg_size() >= 1) {
+    if (callNode->arg_size() >= 2) {
       uint32_t sizeId =
           getValueId(callNode->getArgOperand(1)); // size is second arg
       uint32_t objId = AddressValue::getInternalID(newAddr);
+      as.addHeapObject(objId);
       if (as.inVarToValTable(sizeId)) {
         IntervalValue size = as[sizeId].getInterval();
         if (size.is_numeral()) {
@@ -1234,6 +1499,7 @@ void AEExtAPI::initExtFunMap() {
     // Track object size
     uint32_t sizeId = getValueId(callNode->getArgOperand(2));
     uint32_t objId = AddressValue::getInternalID(newAddr);
+    as.addHeapObject(objId);
     if (as.inVarToValTable(sizeId)) {
       IntervalValue size = as[sizeId].getInterval();
       if (size.is_numeral()) {
@@ -1241,6 +1507,8 @@ void AEExtAPI::initExtFunMap() {
       } else {
         as.setObjSize(objId, MaxFieldLimit);
       }
+    } else {
+      as.setObjSize(objId, MaxFieldLimit);
     }
   };
   func_map["posix_memalign"] = sse_posix_memalign;
@@ -1260,6 +1528,7 @@ void AEExtAPI::initExtFunMap() {
     uint32_t nmembId = getValueId(callNode->getArgOperand(1));
     uint32_t sizeId = getValueId(callNode->getArgOperand(2));
     uint32_t objId = AddressValue::getInternalID(newAddr);
+    as.addHeapObject(objId);
 
     IntervalValue nmemb(1, MaxFieldLimit);
     IntervalValue size(1, MaxFieldLimit);
@@ -1293,10 +1562,20 @@ void AEExtAPI::initExtFunMap() {
     if (callNode->arg_size() >= 1) {
       uint32_t srcId = getValueId(callNode->getArgOperand(0));
       uint32_t objId = AddressValue::getInternalID(newAddr);
+      as.addHeapObject(objId);
       // Estimate size from strlen of source
       IntervalValue len = getStrlen(as, srcId);
-      as.setObjSize(objId,
-                    static_cast<uint32_t>(len.ub().getIntNumeralOrZero()));
+      uint32_t elemSize = getElementByteSize(as, callNode->getArgOperand(0));
+      uint64_t totalSize =
+          static_cast<uint64_t>(len.ub().getIntNumeralOrZero()) + elemSize;
+      as.setObjSize(
+          objId,
+          totalSize > MaxFieldLimit ? MaxFieldLimit
+                                    : static_cast<uint32_t>(totalSize));
+    } else {
+      uint32_t objId = AddressValue::getInternalID(newAddr);
+      as.addHeapObject(objId);
+      as.setObjSize(objId, MaxFieldLimit);
     }
   };
   func_map["strdup"] = sse_strdup;
@@ -1339,10 +1618,7 @@ void AEExtAPI::initExtFunMap() {
 
   // String to number conversions
   auto sse_strtod = [this](const llvm::CallBase *callNode) {
-    // strtod returns double - we model conservatively
-    AbstractState &as = getAbsStateFromTrace(callNode);
-    uint32_t lhsId = getValueId(callNode);
-    as[lhsId] = AbstractValue(IntervalValue::top());
+    handleExtStrto(callNode);
   };
   func_map["strtod"] = sse_strtod;
   func_map["strtof"] = sse_strtod;
@@ -1355,16 +1631,26 @@ void AEExtAPI::initExtFunMap() {
   func_map["strtoll_l"] = sse_strtod;
 }
 
-void AEExtAPI::handleExtAPI(const llvm::CallBase *call) {
-  const llvm::Function *callee = call->getCalledFunction();
+void AEExtAPI::handleExtAPI(const llvm::CallBase *call,
+                            const llvm::Function *resolvedCallee) {
+  const llvm::Function *callee =
+      resolvedCallee ? resolvedCallee : call->getCalledFunction();
   if (!callee)
     return;
 
+  module_ = const_cast<llvm::Module *>(callee->getParent());
   std::string funcName = callee->getName().str();
+  auto funcIt = func_map.find(funcName);
+  if (funcIt != func_map.end()) {
+    funcIt->second(call);
+    return;
+  }
 
-  ExtAPIType extType = getExtAPIType(callee);
+  if (modelStdContainerCall(*this, call, funcName)) {
+    return;
+  }
 
-  switch (extType) {
+  switch (getExtAPIType(callee)) {
   case MEMCPY:
     handleExtMemcpy(call);
     break;
@@ -1427,11 +1713,7 @@ void AEExtAPI::handleExtAPI(const llvm::CallBase *call) {
     break;
   case UNCLASSIFIED:
   default:
-    if (func_map.find(funcName) != func_map.end()) {
-      func_map[funcName](call);
-    } else if (modelStdContainerCall(*this, call, funcName)) {
-      return;
-    } else {
+    {
       AbstractState &as = getAbsStateFromTrace(call);
       uint32_t lhsId = getValueId(call);
       as[lhsId] = AbstractValue(IntervalValue::top());
@@ -1506,6 +1788,7 @@ void AEExtAPI::handleExtAlloc(const llvm::CallBase *call) {
 
   uint32_t sizeId = getValueId(call->getArgOperand(0));
   uint32_t objId = AddressValue::getInternalID(newAddr);
+  as.addHeapObject(objId);
 
   if (const auto *csize =
           llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(0))) {
@@ -1541,6 +1824,7 @@ void AEExtAPI::handleExtRealloc(const llvm::CallBase *call) {
 
   uint32_t sizeId = getValueId(call->getArgOperand(1));
   uint32_t objId = AddressValue::getInternalID(newAddr);
+  as.addHeapObject(objId);
 
   if (const auto *csize =
           llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(1))) {
@@ -1571,8 +1855,10 @@ void AEExtAPI::handleExtFree(const llvm::CallBase *call) {
     return;
   AbstractState &as = getAbsStateFromTrace(call);
   uint32_t freePtr = getValueId(call->getArgOperand(0));
+  if (!as.inVarToAddrsTable(freePtr))
+    return;
   for (auto addr : as[freePtr].getAddrs()) {
-    if (!AbstractState::isInvalidMem(addr)) {
+    if (!AbstractState::isInvalidMem(addr) && !AbstractState::isNullMem(addr)) {
       as.addToPendingFreedAddrs(addr);
     }
   }
@@ -1598,13 +1884,26 @@ void AEExtAPI::handleExtScanf(const llvm::CallBase *call) {
 
   AbstractState &as = getAbsStateFromTrace(call);
 
-  // scanf/vscanf:         format @ arg1, outputs start at arg1
+  // scanf/vscanf:         format @ arg0, outputs start at arg1
   // fscanf/sscanf family: format @ arg1, outputs start at arg2
+  uint32_t formatIdx = 0;
   uint32_t dstStart = 1;
   const std::string calleeName = callee->getName().str();
   if (calleeName.find("fscanf") != std::string::npos ||
       calleeName.find("sscanf") != std::string::npos) {
+    formatIdx = 1;
     dstStart = 2;
+  }
+
+  std::vector<IntegerSignedness> signednessHints;
+  if (call->arg_size() > formatIdx) {
+    std::string format;
+    if (!tryExtractConstantString(call->getArgOperand(formatIdx), format)) {
+      uint32_t formatId = getValueId(call->getArgOperand(formatIdx));
+      format = strRead(as, formatId);
+    }
+    if (format != "???")
+      signednessHints = parseScanfSignednessHints(format);
   }
 
   for (uint32_t i = dstStart; i < call->arg_size(); ++i) {
@@ -1617,7 +1916,12 @@ void AEExtAPI::handleExtScanf(const llvm::CallBase *call) {
       continue;
 
     llvm::Type *pointeeTy = dstOp->getType()->getPointerElementType();
-    AbstractValue range = getRangeLimitFromType(pointeeTy);
+    IntegerSignedness signHint = IntegerSignedness::Unknown;
+    size_t hintIndex = i - dstStart;
+    if (hintIndex < signednessHints.size())
+      signHint = signednessHints[hintIndex];
+
+    AbstractValue range(getTypeRangeWithHint(pointeeTy, signHint));
     for (auto addr : as[dstId].getAddrs()) {
       as.store(addr, range);
     }
@@ -1690,11 +1994,9 @@ void AEExtAPI::handleStrcpy(const llvm::CallBase *call) {
   handleMemcpy(as, dstId, srcId, strLen, 0);
 
   // Add null terminator
-  for (auto dstAddr : as[dstId].getAddrs()) {
-    (void)as.getIDFromAddr(dstAddr); // Keep for potential future debugging
-    uint32_t nullTerminatorAddr =
-        dstAddr + static_cast<uint32_t>(strLen.ub().getIntNumeralOrZero());
-    as.store(nullTerminatorAddr, AbstractValue(IntervalValue(0, 0)));
+  if (strLen.is_numeral()) {
+    storeStringTerminator(as, dstId,
+                          static_cast<uint32_t>(strLen.getIntNumeralOrZero()));
   }
 }
 
@@ -1716,6 +2018,12 @@ void AEExtAPI::handleStrcat(const llvm::CallBase *call) {
   // Copy src to end of dst
   handleMemcpy(as, dstId, srcId, srcLen,
                static_cast<uint32_t>(dstLen.ub().getIntNumeralOrZero()));
+  if (dstLen.is_numeral() && srcLen.is_numeral()) {
+    storeStringTerminator(
+        as, dstId,
+        static_cast<uint32_t>(dstLen.getIntNumeralOrZero() +
+                              srcLen.getIntNumeralOrZero()));
+  }
 }
 
 IntervalValue AEExtAPI::getStrlen(AbstractState &as, uint32_t strId) {
@@ -1726,13 +2034,27 @@ IntervalValue AEExtAPI::getStrlen(AbstractState &as, uint32_t strId) {
     return IntervalValue(0, MaxStrLen);
   }
 
+  const llvm::Value *strValue =
+      AbstractInterpretation::getAEInstance().getValueFromIdStatic(strId);
+  uint32_t elemSize = getElementByteSize(as, strValue);
+  if (elemSize == 0)
+    elemSize = 1;
+  const std::pair<uint32_t, int64_t> strBase =
+      resolvePointerBaseAndOffset(as, strValue, strId);
+  const uint32_t baseStrId = strBase.first;
+  const int64_t baseOffset = strBase.second;
+  const uint32_t effectiveBaseOffset =
+      static_cast<uint32_t>(std::max<int64_t>(0, baseOffset));
+
   // Get the object size to limit our search
   uint32_t maxSize = MaxStrLen;
-  for (auto addr : as[strId].getAddrs()) {
+  for (auto addr : as[baseStrId].getAddrs()) {
     uint32_t objId = as.getIDFromAddr(addr);
     uint32_t objSize = as.getObjSize(objId);
-    if (objSize > 0 && objSize < maxSize) {
-      maxSize = objSize;
+    if (objSize > effectiveBaseOffset) {
+      uint32_t remaining = objSize - effectiveBaseOffset;
+      if (remaining < maxSize)
+        maxSize = remaining;
     }
   }
 
@@ -1741,8 +2063,12 @@ IntervalValue AEExtAPI::getStrlen(AbstractState &as, uint32_t strId) {
   bool foundNull = false;
   bool allNull = true;
 
-  for (uint32_t index = 0; index < maxSize && index < MaxStrLen; ++index) {
-    AddressValue gepAddrs = as.getGepObjAddrs(strId, IntervalValue(index));
+  uint32_t maxElems = std::max<uint32_t>(1, maxSize / elemSize);
+  for (uint32_t index = 0; index < maxElems && (index * elemSize) < MaxStrLen;
+       ++index) {
+    int64_t byteOffset = baseOffset + static_cast<int64_t>(index * elemSize);
+    AddressValue gepAddrs =
+        as.getGepObjAddrs(baseStrId, IntervalValue(byteOffset));
     AbstractValue val;
     bool hasValue = false;
 
@@ -1775,16 +2101,16 @@ IntervalValue AEExtAPI::getStrlen(AbstractState &as, uint32_t strId) {
       } else if (!interval.contains(0)) {
         // Definitely not null
         allNull = false;
-        len = index + 1;
+        len = (index + 1) * elemSize;
       } else {
         // Might be null, might not
         allNull = false;
-        len = index + 1;
+        len = (index + 1) * elemSize;
       }
     } else {
       // Not an interval value - assume non-null
       allNull = false;
-      len = index + 1;
+      len = (index + 1) * elemSize;
     }
   }
 
@@ -1806,42 +2132,40 @@ void AEExtAPI::handleMemcpy(AbstractState &as, uint32_t dstId, uint32_t srcId,
   if (!as.inVarToAddrsTable(dstId) || !as.inVarToAddrsTable(srcId))
     return;
 
-  // Determine element size (default to 1 byte)
-  uint32_t elemSize = 1;
+  const llvm::Value *dstValue =
+      AbstractInterpretation::getAEInstance().getValueFromIdStatic(dstId);
+  const llvm::Value *srcValue =
+      AbstractInterpretation::getAEInstance().getValueFromIdStatic(srcId);
+  uint32_t elemSize = getElementByteSize(as, dstValue);
+  if (elemSize == 0)
+    elemSize = 1;
+  const std::pair<uint32_t, int64_t> dstBase =
+      resolvePointerBaseAndOffset(as, dstValue, dstId);
+  const std::pair<uint32_t, int64_t> srcBase =
+      resolvePointerBaseAndOffset(as, srcValue, srcId);
+  const uint32_t baseDstId = dstBase.first;
+  const int64_t baseDstOffset = dstBase.second;
+  const uint32_t baseSrcId = srcBase.first;
+  const int64_t baseSrcOffset = srcBase.second;
 
-  // Try to determine element size from destination type
-  // This is a simplified approach - in practice, we'd need type information
-  // For now, assume byte-level copying
-
-  constexpr uint32_t MaxCopyLen = 10000; // Maximum length for copying
-
-  // Get the length bounds (handle infinite intervals conservatively)
-  int64_t lenLb = 0;
-  int64_t lenUb = MaxCopyLen;
-  if (!len.is_infinite()) {
-    lenLb = len.lb().getIntNumeralOrZero();
-    lenUb = len.ub().getIntNumeralOrZero();
-    if (lenLb < 0)
-      lenLb = 0;
-    if (lenUb > static_cast<int64_t>(MaxCopyLen))
-      lenUb = MaxCopyLen;
-  }
-
-  // Calculate number of elements to copy
-  uint32_t numElements = static_cast<uint32_t>(lenUb / elemSize);
-  if (numElements > MaxCopyLen)
-    numElements = MaxCopyLen;
+  uint32_t sizeBytes = getTrackedByteCount(len, /*useLowerBound=*/true);
+  uint32_t numElements =
+      std::min<uint32_t>(MaxFieldLimit, sizeBytes / elemSize);
 
   // Copy byte by byte (or element by element)
-  for (uint32_t i = 0; i < numElements && (i + start_idx) < MaxCopyLen; ++i) {
-    uint32_t srcOffset = i;
-    uint32_t dstOffset = i + start_idx;
+  for (uint32_t i = 0; i < numElements; ++i) {
+    int64_t srcOffset = baseSrcOffset + static_cast<int64_t>(i * elemSize);
+    int64_t dstOffset =
+        baseDstOffset + static_cast<int64_t>(start_idx) +
+        static_cast<int64_t>(i * elemSize);
 
     // Get source addresses at this offset
-    AddressValue srcAddrs = as.getGepObjAddrs(srcId, IntervalValue(srcOffset));
+    AddressValue srcAddrs =
+        as.getGepObjAddrs(baseSrcId, IntervalValue(srcOffset));
 
     // Get destination addresses at this offset
-    AddressValue dstAddrs = as.getGepObjAddrs(dstId, IntervalValue(dstOffset));
+    AddressValue dstAddrs =
+        as.getGepObjAddrs(baseDstId, IntervalValue(dstOffset));
 
     // Join all values from source addresses
     AbstractValue srcVal;
@@ -1886,33 +2210,27 @@ void AEExtAPI::handleMemset(AbstractState &as, uint32_t dstId,
   if (!as.inVarToAddrsTable(dstId))
     return;
 
-  // Determine element size (default to 1 byte)
-  uint32_t elemSize = 1;
+  const llvm::Value *dstValue =
+      AbstractInterpretation::getAEInstance().getValueFromIdStatic(dstId);
+  uint32_t elemSize = getElementByteSize(as, dstValue);
+  if (elemSize == 0)
+    elemSize = 1;
+  const std::pair<uint32_t, int64_t> dstBase =
+      resolvePointerBaseAndOffset(as, dstValue, dstId);
+  const uint32_t baseDstId = dstBase.first;
+  const int64_t baseDstOffset = dstBase.second;
 
-  constexpr uint32_t MaxSetLen = 10000; // Maximum length for setting
-
-  // Get the length bounds (handle infinite intervals conservatively)
-  int64_t lenLb = 0;
-  int64_t lenUb = MaxSetLen;
-  if (!len.is_infinite()) {
-    lenLb = len.lb().getIntNumeralOrZero();
-    lenUb = len.ub().getIntNumeralOrZero();
-    if (lenLb < 0)
-      lenLb = 0;
-    if (lenUb > static_cast<int64_t>(MaxSetLen))
-      lenUb = MaxSetLen;
-  }
-
-  // Calculate number of elements to set
-  uint32_t numElements = static_cast<uint32_t>(lenUb / elemSize);
-  if (numElements > MaxSetLen)
-    numElements = MaxSetLen;
+  uint32_t sizeBytes = getTrackedByteCount(len, /*useLowerBound=*/true);
+  uint32_t numElements =
+      std::min<uint32_t>(MaxFieldLimit, sizeBytes / elemSize);
 
   AbstractValue val(elem);
 
   // Set each byte (or element) to the element value
-  for (uint32_t i = 0; i < numElements && i < MaxSetLen; ++i) {
-    AddressValue dstAddrs = as.getGepObjAddrs(dstId, IntervalValue(i));
+  for (uint32_t i = 0; i < numElements; ++i) {
+    AddressValue dstAddrs = as.getGepObjAddrs(
+        baseDstId,
+        IntervalValue(baseDstOffset + static_cast<int64_t>(i * elemSize)));
 
     // Set all destination addresses at this offset to the element value
     for (auto dstAddr : dstAddrs) {
@@ -1931,24 +2249,7 @@ void AEExtAPI::handleMemset(AbstractState &as, uint32_t dstId,
 }
 
 IntervalValue AEExtAPI::getRangeLimitFromType(llvm::Type *type) {
-  if (!type)
-    return IntervalValue::top();
-
-  if (type->isIntegerTy()) {
-    unsigned bits = type->getIntegerBitWidth();
-    if (bits == 32) {
-      return IntervalValue(std::numeric_limits<int32_t>::min(),
-                           std::numeric_limits<int32_t>::max());
-    } else if (bits == 16) {
-      return IntervalValue(std::numeric_limits<int16_t>::min(),
-                           std::numeric_limits<int16_t>::max());
-    } else if (bits == 8) {
-      return IntervalValue(std::numeric_limits<int8_t>::min(),
-                           std::numeric_limits<int8_t>::max());
-    }
-  }
-
-  return IntervalValue::top();
+  return getTypeRangeWithHint(type, IntegerSignedness::Signed);
 }
 
 AbstractState &AEExtAPI::getAbsStateFromTrace(const llvm::Instruction *val) {
@@ -2043,36 +2344,37 @@ void AEExtAPI::handleExtAllocArg0(const llvm::CallBase *call) {
     return;
 
   AbstractState &as = getAbsStateFromTrace(call);
-  uint32_t argIdx = 0;
-  uint32_t ptrId = getValueId(call->getArgOperand(argIdx));
+  uint32_t ptrId = getValueId(call->getArgOperand(0));
 
   if (!as.inVarToAddrsTable(ptrId))
     return;
 
-  // Create a new address for the allocated object
-  uint32_t newAddr = AddressValue::getVirtualMemAddress(ptrId);
-  AddressValue addr(newAddr);
-  AbstractValue addrVal = addr;
+  uint32_t freshObjId = getValueId(call);
+  uint32_t newAddr = AddressValue::getVirtualMemAddress(freshObjId);
+  AbstractValue addrVal{AddressValue(newAddr)};
+  uint32_t objId = AddressValue::getInternalID(newAddr);
+  as.addHeapObject(objId);
 
-  // Store to the pointer argument
-  as[ptrId] = addrVal;
+  for (uint32_t slotAddr : as[ptrId].getAddrs())
+    as.store(slotAddr, addrVal);
 
-  // Track object size if size argument exists
-  if (call->arg_size() >= 2) {
-    uint32_t sizeId = getValueId(call->getArgOperand(1));
-    uint32_t objId = AddressValue::getInternalID(newAddr);
+  uint32_t sizeArgIndex = UINT32_MAX;
+  if (const llvm::Function *callee = call->getCalledFunction()) {
+    if (callee->getName() == "posix_memalign" && call->arg_size() >= 3)
+      sizeArgIndex = 2;
+  }
 
+  if (sizeArgIndex != UINT32_MAX) {
+    uint32_t sizeId = getValueId(call->getArgOperand(sizeArgIndex));
     if (as.inVarToValTable(sizeId)) {
       IntervalValue size = as[sizeId].getInterval();
       if (size.is_numeral()) {
         as.setObjSize(objId, static_cast<uint32_t>(size.getIntNumeralOrZero()));
-      } else {
-        as.setObjSize(objId, MaxFieldLimit);
+        return;
       }
-    } else {
-      as.setObjSize(objId, MaxFieldLimit);
     }
   }
+  as.setObjSize(objId, MaxFieldLimit);
 }
 
 void AEExtAPI::handleExtStrtok(const llvm::CallBase *call) {
@@ -2167,7 +2469,10 @@ void AEExtAPI::handleExtStrto(const llvm::CallBase *call) {
 
   // Get the result type and return appropriate range
   llvm::Type *retType = call->getType();
-  as[lhsId] = AbstractValue(getRangeLimitFromType(retType));
+  IntegerSignedness signHint = IntegerSignedness::Unknown;
+  if (const llvm::Function *callee = call->getCalledFunction())
+    signHint = getStrtoSignedness(callee->getName());
+  as[lhsId] = AbstractValue(getTypeRangeWithHint(retType, signHint));
 }
 
 } // namespace analysis

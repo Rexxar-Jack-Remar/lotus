@@ -59,7 +59,8 @@ public:
 
   std::string strRead(AbstractState &as, uint32_t strId);
 
-  void handleExtAPI(const llvm::CallBase *call);
+  void handleExtAPI(const llvm::CallBase *call,
+                    const llvm::Function *callee = nullptr);
 
   void handleStrcpy(const llvm::CallBase *call);
   void handleStrcat(const llvm::CallBase *call);

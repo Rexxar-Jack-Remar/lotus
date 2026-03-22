@@ -155,7 +155,8 @@ public:
   void analyse();
 
   /// Reset all analysis state for analyzing a new module
-  /// Prevents state leakage between module analyses
+  /// Prevents state leakage between module analyses and clears configured
+  /// detectors.
   void reset();
 
   /// Get the singleton instance of AbstractInterpretation
@@ -262,7 +263,7 @@ private:
   std::unordered_map<uint32_t, std::vector<const llvm::Function *>>
       recursiveSccMembers_;
   HandleRecur recursionMode_; // Recursion handling mode (default: WIDEN_NARROW)
-  uint32_t widenDelay_{0};
+  uint32_t widenDelay_{3};
   bool strictCheckpoint_{true};
 
   // Checkpoint enable flags (matching SVF's Options)
@@ -294,6 +295,8 @@ private:
   const llvm::Instruction *currentInstruction_{nullptr};
   // Functions reached during the current analysis traversal from entry.
   std::unordered_set<const llvm::Function *> analyzedFunctions_;
+
+  void resetAnalysisState();
 
   void handleGlobalNode();
   void initWTO();
@@ -345,10 +348,12 @@ private:
   const llvm::Instruction *getCurrentInstruction() const;
 
   bool isExtCall(const llvm::CallBase *callNode);
-  void handleExtCall(const llvm::CallBase *callNode);
+  void handleExtCall(const llvm::CallBase *callNode,
+                     const std::vector<const llvm::Function *> &callees);
   bool isRecursiveFun(const llvm::Function *fun) const;
   bool isRecursiveCall(const llvm::CallBase *callNode);
-  void handleFunCall(const llvm::CallBase *callNode);
+  void handleFunCall(const llvm::CallBase *callNode,
+                     const std::vector<const llvm::Function *> &callees);
   bool isRecursiveCallSite(const llvm::CallBase *callNode,
                            const llvm::Function *callee) const;
   bool skipRecursiveCall(const llvm::CallBase *callNode);
@@ -403,7 +408,7 @@ private:
         {llvm::CmpInst::ICMP_UGE, llvm::CmpInst::ICMP_ULT},
         {llvm::CmpInst::ICMP_SGT, llvm::CmpInst::ICMP_SLE},
         {llvm::CmpInst::ICMP_SLT, llvm::CmpInst::ICMP_SGE},
-        {llvm::CmpInst::ICMP_SGE, llvm::CmpInst::ICMP_SLE},
+        {llvm::CmpInst::ICMP_SGE, llvm::CmpInst::ICMP_SLT},
     };
     return _reverse_predicate;
   }

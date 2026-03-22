@@ -9,6 +9,7 @@
 #include "Checker/AE/AbsExtAPI.h"
 #include "Checker/AE/RelationSolver.h"
 #include "Checker/AE/SVFIRWrapper.h"
+#include "Checker/Report/BugReportMgr.h"
 #include "Solvers/SMT/LIBSMT/Z3Expr.h"
 
 // AserPTA includes
@@ -21,7 +22,9 @@
 #include "Alias/AserPTA/PointerAnalysis/Solver/WavePropagation.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <iomanip>
+#include <memory>
 #include <queue>
 #include <set>
 #include <stack>
@@ -41,7 +44,62 @@ namespace analysis {
 
 namespace {
 
-AbstractValue getGlobalInitializerValue(const llvm::Constant *init) {
+bool resolveGlobalAddress(const llvm::Constant *constant,
+                          const llvm::DataLayout &dl,
+                          const llvm::Value *&baseValue, int64_t &byteOffset) {
+  if (!constant)
+    return false;
+
+  if (const auto *alias = llvm::dyn_cast<llvm::GlobalAlias>(constant)) {
+    if (const llvm::Constant *aliasee = alias->getAliasee()) {
+      return resolveGlobalAddress(aliasee, dl, baseValue, byteOffset);
+    }
+    return false;
+  }
+
+  if (const auto *gv = llvm::dyn_cast<llvm::GlobalValue>(constant)) {
+    baseValue = gv;
+    byteOffset = 0;
+    return true;
+  }
+
+  const auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(constant);
+  if (!ce)
+    return false;
+
+  switch (ce->getOpcode()) {
+  case llvm::Instruction::BitCast:
+  case llvm::Instruction::AddrSpaceCast:
+    return resolveGlobalAddress(llvm::cast<llvm::Constant>(ce->getOperand(0)),
+                                dl, baseValue, byteOffset);
+  case llvm::Instruction::GetElementPtr: {
+    const llvm::Constant *baseConst =
+        llvm::cast<llvm::Constant>(ce->getOperand(0));
+    if (!resolveGlobalAddress(baseConst, dl, baseValue, byteOffset)) {
+      return false;
+    }
+
+    llvm::APInt offset(64, 0, /*isSigned=*/true);
+    llvm::Instruction *gepInst = ce->getAsInstruction();
+    const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(gepInst);
+    const bool ok = gep && gep->accumulateConstantOffset(dl, offset);
+    if (gepInst) {
+      gepInst->deleteValue();
+    }
+    if (!ok) {
+      return false;
+    }
+    byteOffset += offset.getSExtValue();
+    return true;
+  }
+  default:
+    return false;
+  }
+}
+
+AbstractValue evaluateConstantInitializer(AbstractState &state,
+                                          const llvm::Constant *init,
+                                          const llvm::DataLayout &dl) {
   if (!init) {
     return AbstractValue(IntervalValue::top());
   }
@@ -59,20 +117,146 @@ AbstractValue getGlobalInitializerValue(const llvm::Constant *init) {
     return AbstractValue(IntervalValue(val, val));
   }
 
-  const llvm::Value *base = init->stripPointerCasts();
-  if (const auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(init)) {
-    if (ce->getOpcode() == llvm::Instruction::GetElementPtr) {
-      base = ce->getOperand(0)->stripPointerCasts();
+  const llvm::Value *baseValue = nullptr;
+  int64_t byteOffset = 0;
+  if (resolveGlobalAddress(init, dl, baseValue, byteOffset)) {
+    uint32_t baseId = AbstractInterpretation::getValueIdStatic(baseValue);
+    if (byteOffset <= 0) {
+      return AbstractValue(
+          AddressValue(AddressValue::getVirtualMemAddress(baseId)));
     }
-  }
 
-  if (const auto *gv = llvm::dyn_cast<llvm::GlobalValue>(base)) {
-    uint32_t targetId = AbstractInterpretation::getValueIdStatic(gv);
+    AddressValue fieldAddrs = state.getGepObjAddrs(baseId, IntervalValue(byteOffset));
+    if (!fieldAddrs.isBottom()) {
+      uint32_t baseSize = state.getObjSize(baseId);
+      if (baseSize > static_cast<uint32_t>(byteOffset)) {
+        uint32_t remaining = baseSize - static_cast<uint32_t>(byteOffset);
+        for (uint32_t addr : fieldAddrs) {
+          state.setObjSize(state.getIDFromAddr(addr), remaining);
+        }
+      }
+      return AbstractValue(fieldAddrs);
+    }
     return AbstractValue(
-        AddressValue(AddressValue::getVirtualMemAddress(targetId)));
+        AddressValue(AddressValue::getVirtualMemAddress(baseId)));
   }
 
   return AbstractValue(IntervalValue::top());
+}
+
+void storeInitializerValue(AbstractState &state, uint32_t baseValueId,
+                           uint32_t byteOffset, bool useFieldObject,
+                           const AbstractValue &value) {
+  AddressValue targetAddrs;
+  if (useFieldObject || byteOffset != 0) {
+    targetAddrs = state.getGepObjAddrs(baseValueId, IntervalValue(byteOffset));
+  } else if (state.inVarToAddrsTable(baseValueId)) {
+    targetAddrs = state[baseValueId].getAddrs();
+  }
+
+  for (uint32_t addr : targetAddrs) {
+    state.store(addr, value);
+  }
+}
+
+void materializeGlobalInitializer(AbstractState &state, uint32_t baseValueId,
+                                  uint32_t byteOffset, bool useFieldObject,
+                                  const llvm::Constant *init,
+                                  const llvm::DataLayout &dl) {
+  if (!init)
+    return;
+
+  if (llvm::isa<llvm::ConstantAggregateZero>(init)) {
+    if (init->getType()->isAggregateType()) {
+      if (const auto *structTyConst =
+              llvm::dyn_cast<llvm::StructType>(init->getType())) {
+        auto *structTy = const_cast<llvm::StructType *>(structTyConst);
+        const llvm::StructLayout *layout =
+            dl.getStructLayout(structTy);
+        for (unsigned i = 0; i < structTy->getNumElements(); ++i) {
+          llvm::Constant *fieldInit =
+              llvm::Constant::getNullValue(structTy->getElementType(i));
+          materializeGlobalInitializer(state, baseValueId,
+                                       byteOffset + layout->getElementOffset(i),
+                                       true, fieldInit, dl);
+        }
+        return;
+      }
+      if (const auto *arrayTy =
+              llvm::dyn_cast<llvm::ArrayType>(init->getType())) {
+        llvm::Type *elemTy = arrayTy->getElementType();
+        uint64_t elemSize = elemTy->isSized() ? dl.getTypeAllocSize(elemTy) : 1;
+        for (uint64_t i = 0; i < arrayTy->getNumElements(); ++i) {
+          llvm::Constant *elemInit = llvm::Constant::getNullValue(elemTy);
+          materializeGlobalInitializer(
+              state, baseValueId,
+              byteOffset + static_cast<uint32_t>(i * elemSize), true, elemInit,
+              dl);
+        }
+        return;
+      }
+      if (const auto *vecTy =
+              llvm::dyn_cast<llvm::FixedVectorType>(init->getType())) {
+        llvm::Type *elemTy = vecTy->getElementType();
+        uint64_t elemSize = elemTy->isSized() ? dl.getTypeAllocSize(elemTy) : 1;
+        for (unsigned i = 0; i < vecTy->getNumElements(); ++i) {
+          llvm::Constant *elemInit = llvm::Constant::getNullValue(elemTy);
+          materializeGlobalInitializer(
+              state, baseValueId,
+              byteOffset + static_cast<uint32_t>(i * elemSize), true, elemInit,
+              dl);
+        }
+        return;
+      }
+    }
+    storeInitializerValue(state, baseValueId, byteOffset, useFieldObject,
+                          evaluateConstantInitializer(state, init, dl));
+    return;
+  }
+
+  if (const auto *structInit = llvm::dyn_cast<llvm::ConstantStruct>(init)) {
+    auto *structTy = const_cast<llvm::StructType *>(structInit->getType());
+    const llvm::StructLayout *layout = dl.getStructLayout(structTy);
+    for (unsigned i = 0; i < structInit->getNumOperands(); ++i) {
+      const llvm::Constant *fieldInit =
+          llvm::cast<llvm::Constant>(structInit->getOperand(i));
+      materializeGlobalInitializer(state, baseValueId,
+                                   byteOffset + layout->getElementOffset(i),
+                                   true, fieldInit, dl);
+    }
+    return;
+  }
+
+  if (const auto *arrayInit = llvm::dyn_cast<llvm::ConstantArray>(init)) {
+    llvm::Type *elemTy = arrayInit->getType()->getElementType();
+    uint64_t elemSize = elemTy->isSized() ? dl.getTypeAllocSize(elemTy) : 1;
+    for (unsigned i = 0; i < arrayInit->getNumOperands(); ++i) {
+      const llvm::Constant *elemInit =
+          llvm::cast<llvm::Constant>(arrayInit->getOperand(i));
+      materializeGlobalInitializer(state, baseValueId,
+                                   byteOffset +
+                                       static_cast<uint32_t>(i * elemSize),
+                                   true, elemInit, dl);
+    }
+    return;
+  }
+
+  if (const auto *vecInit = llvm::dyn_cast<llvm::ConstantVector>(init)) {
+    llvm::Type *elemTy = vecInit->getType()->getElementType();
+    uint64_t elemSize = elemTy->isSized() ? dl.getTypeAllocSize(elemTy) : 1;
+    for (unsigned i = 0; i < vecInit->getNumOperands(); ++i) {
+      const llvm::Constant *elemInit =
+          llvm::cast<llvm::Constant>(vecInit->getOperand(i));
+      materializeGlobalInitializer(state, baseValueId,
+                                   byteOffset +
+                                       static_cast<uint32_t>(i * elemSize),
+                                   true, elemInit, dl);
+    }
+    return;
+  }
+
+  storeInitializerValue(state, baseValueId, byteOffset, useFieldObject,
+                        evaluateConstantInitializer(state, init, dl));
 }
 
 void materializeConstantValue(AbstractState &as, const llvm::Value *val,
@@ -97,6 +281,28 @@ void materializeConstantValue(AbstractState &as, const llvm::Value *val,
   if (llvm::isa<llvm::ConstantPointerNull>(val)) {
     as[valueId] = AbstractValue(AddressValue(NullMemAddr));
   }
+}
+
+void clearAEBugReports() {
+  static constexpr const char *AEBugTypeNames[] = {
+      "AE Buffer Overflow", "AE Null Dereference", "AE Divide By Zero",
+      "AE Integer Overflow", "AE Use After Free", "AE Invalid Free",
+      "AE Memory Leak"};
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  std::vector<int> ids;
+  for (const char *name : AEBugTypeNames) {
+    int id = mgr.find_bug_type(name);
+    if (id >= 0) {
+      ids.push_back(id);
+    }
+  }
+  mgr.clear_reports_for_types(ids);
+}
+
+bool isAEQuietMode() {
+  const char *env = std::getenv("LOTUS_AE_QUIET");
+  return env != nullptr && env[0] != '\0' && env[0] != '0';
 }
 
 } // namespace
@@ -134,8 +340,9 @@ AbstractInterpretation::~AbstractInterpretation() {
   funcToWTO_.clear();
 }
 
-void AbstractInterpretation::reset() {
-  // Clear all state to prevent leakage between module analyses
+void AbstractInterpretation::resetAnalysisState() {
+  // Clear all state to prevent leakage between module analyses while
+  // preserving the configured detector set and user-selected options.
   abstractTrace.clear();
   globalState = AbstractState();
   checkpoints.clear();
@@ -182,7 +389,6 @@ void AbstractInterpretation::reset() {
     stat->nonExtCallSiteNum = 0;
   }
 
-  // Keep detector configuration but clear previous run results.
   for (auto &detector : detectors) {
     if (detector) {
       detector->reset();
@@ -190,6 +396,21 @@ void AbstractInterpretation::reset() {
   }
   // Note: pta_ is kept (can be reused)
   ptaReady_ = false;
+}
+
+void AbstractInterpretation::reset() {
+  resetAnalysisState();
+
+  recursionMode_ = WIDEN_NARROW;
+  widenDelay_ = 3;
+  strictCheckpoint_ = true;
+  enableBufOverflowCheck_ = false;
+  enableNullDerefCheck_ = false;
+  enableDivZeroCheck_ = false;
+  enableOverflowCheck_ = false;
+  enableMemLeakCheck_ = false;
+  analyzeAllFunctions_ = false;
+  detectors.clear();
 }
 
 void *AbstractInterpretation::getPTAPass() const {
@@ -200,10 +421,24 @@ void *AbstractInterpretation::getPTAPass() const {
 }
 
 void AbstractInterpretation::runOnModule(llvm::Module *module) {
-  // Reset state before analyzing new module
-  reset();
+  resetAnalysisState();
+  clearAEBugReports();
 
   module_ = module;
+
+  auto pruneDetector = [&](AEDetector::DetectorKind kind, bool enabled) {
+    if (enabled)
+      return;
+    detectors.erase(
+        std::remove_if(detectors.begin(), detectors.end(),
+                       [&](const std::unique_ptr<AEDetector> &detector) {
+                         return detector && detector->getKind() == kind;
+                       }),
+        detectors.end());
+  };
+  pruneDetector(AEDetector::DIV_ZERO, enableDivZeroCheck_);
+  pruneDetector(AEDetector::INT_OVERFLOW, enableOverflowCheck_);
+  pruneDetector(AEDetector::MEMORY_LEAK, enableMemLeakCheck_);
 
   // Always run pointer analysis (required for AE)
   pta_->pass->analyze(module);
@@ -221,6 +456,30 @@ void AbstractInterpretation::runOnModule(llvm::Module *module) {
   }
   utils = new AEExtAPI(abstractTrace);
 
+  auto hasDetectorKind = [&](AEDetector::DetectorKind kind) {
+    return std::any_of(
+        detectors.begin(), detectors.end(),
+        [&](const std::unique_ptr<AEDetector> &detector) {
+          return detector && detector->getKind() == kind;
+        });
+  };
+
+  if (enableDivZeroCheck_ && !hasDetectorKind(AEDetector::DIV_ZERO)) {
+    addDetector(std::make_unique<DivZeroDetector>());
+  }
+  if (enableOverflowCheck_ && !hasDetectorKind(AEDetector::INT_OVERFLOW)) {
+    addDetector(std::make_unique<OverflowDetector>());
+  }
+  if (enableBufOverflowCheck_ && !hasDetectorKind(AEDetector::BUF_OVERFLOW)) {
+    addDetector(std::make_unique<BufOverflowDetector>());
+  }
+  if (enableNullDerefCheck_ && !hasDetectorKind(AEDetector::NULL_DEREF)) {
+    addDetector(std::make_unique<NullptrDerefDetector>());
+  }
+  if (enableMemLeakCheck_ && !hasDetectorKind(AEDetector::MEMORY_LEAK)) {
+    addDetector(std::make_unique<MemLeakDetector>());
+  }
+
   stat->startClk();
   collectCheckPoint();
   analyse();
@@ -228,10 +487,14 @@ void AbstractInterpretation::runOnModule(llvm::Module *module) {
   stat->endClk();
 
   stat->finializeStat();
-  stat->performStat();
+  if (!isAEQuietMode()) {
+    stat->performStat();
 
-  for (auto &detector : detectors)
-    detector->reportBug();
+    for (auto &detector : detectors)
+      detector->reportBug();
+    llvm::outs().flush();
+    llvm::errs().flush();
+  }
 }
 
 /// Program entry
@@ -304,8 +567,9 @@ void AbstractInterpretation::handleGlobalNode() {
     }
 
     if (global.hasInitializer() && !global.isDeclaration()) {
-      globalState.store(globalAddr,
-                        getGlobalInitializerValue(global.getInitializer()));
+      materializeGlobalInitializer(globalState, globalId, 0,
+                                   global.getValueType()->isAggregateType(),
+                                   global.getInitializer(), dl);
     }
   }
 
@@ -735,7 +999,23 @@ void AbstractInterpretation::handleCycleWTO(const ICFGCycleWTO *cycle) {
         }
       }
       if (entersThisFunction) {
-        recursiveCallPass(callNode, func);
+        if (isRecursiveCallSite(callNode, func)) {
+          recursiveCallPass(callNode, func);
+          return;
+        }
+
+        // Entry calls into a recursive SCC should still execute the function
+        // body once. Only the inner recursive callsites are summarized to TOP.
+        handleSingletonWTO(cycleHead);
+        for (const ICFGWTOComp *comp : cycle->getComponents()) {
+          if (const ICFGSingletonWTO *singleton =
+                  llvm::dyn_cast<ICFGSingletonWTO>(comp)) {
+            handleSingletonWTO(singleton->getBlock());
+          } else if (const ICFGCycleWTO *subCycle =
+                         llvm::dyn_cast<ICFGCycleWTO>(comp)) {
+            handleCycleWTO(subCycle);
+          }
+        }
         return;
       }
     }
@@ -811,12 +1091,6 @@ void AbstractInterpretation::handleCycleWTO(const ICFGCycleWTO *cycle) {
           // Narrowing fixpoint reached, exit loop
           break;
         }
-      }
-    } else {
-      // Check for fixpoint (if not using widening/narrowing yet)
-      if (hadPrevState && curHeadState == prevHeadState) {
-        // Fixpoint reached without widening
-        break;
       }
     }
 
@@ -1129,6 +1403,9 @@ void AbstractInterpretation::updateStateOnBinary(
 
   AbstractState &as = abstractTrace[binary];
 
+  materializeConstantValue(as, binary->getOperand(0), op0Id);
+  materializeConstantValue(as, binary->getOperand(1), op1Id);
+
   // Initialize operands if not present
   if (!as.inVarToValTable(op0Id))
     as[op0Id] = AbstractValue(IntervalValue::top());
@@ -1370,6 +1647,7 @@ void AbstractInterpretation::updateStateOnStore(const llvm::StoreInst *store) {
   uint32_t valId = getValueId(store->getValueOperand());
 
   AbstractState &as = abstractTrace[store];
+  materializeConstantValue(as, store->getValueOperand(), valId);
   as.storeValue(ptrId, valId);
 }
 
@@ -1529,10 +1807,57 @@ void AbstractInterpretation::updateStateOnCast(const llvm::CastInst *cast) {
 }
 
 void AbstractInterpretation::updateStateOnCall(const llvm::CallBase *call) {
-  if (isExtCall(call)) {
-    handleExtCall(call);
+  std::vector<const llvm::Function *> callees = getCallees(call);
+  if (callees.empty()) {
+    if (const llvm::Function *direct = call->getCalledFunction()) {
+      callees.push_back(direct);
+    } else {
+      return;
+    }
+  }
+
+  std::vector<const llvm::Function *> extCallees;
+  std::vector<const llvm::Function *> intCallees;
+  for (const llvm::Function *callee : callees) {
+    if (!callee)
+      continue;
+    if (callee->isDeclaration()) {
+      extCallees.push_back(callee);
+    } else {
+      intCallees.push_back(callee);
+    }
+  }
+
+  auto callIt = abstractTrace.find(call);
+  if (callIt == abstractTrace.end())
+    return;
+
+  const AbstractState baseState = callIt->second;
+  AbstractState joinedState = baseState;
+  bool hasJoinedState = false;
+
+  if (!extCallees.empty()) {
+    callIt->second = baseState;
+    handleExtCall(call, extCallees);
+    joinedState = callIt->second;
+    hasJoinedState = true;
+  }
+
+  if (!intCallees.empty()) {
+    callIt->second = baseState;
+    handleFunCall(call, intCallees);
+    if (hasJoinedState) {
+      joinedState.joinWith(callIt->second);
+    } else {
+      joinedState = callIt->second;
+      hasJoinedState = true;
+    }
+  }
+
+  if (hasJoinedState) {
+    callIt->second = joinedState;
   } else {
-    handleFunCall(call);
+    callIt->second = baseState;
   }
 }
 
@@ -1998,15 +2323,54 @@ const llvm::Value *AbstractInterpretation::getValueFromId(uint32_t id) const {
 }
 
 bool AbstractInterpretation::isExtCall(const llvm::CallBase *callNode) {
-  const llvm::Function *callee = callNode->getCalledFunction();
-  if (!callee)
-    return false;
-  return callee->isDeclaration();
+  for (const llvm::Function *callee : getCallees(callNode)) {
+    if (callee && callee->isDeclaration()) {
+      return true;
+    }
+  }
+  return false;
 }
 
-void AbstractInterpretation::handleExtCall(const llvm::CallBase *callNode) {
+void AbstractInterpretation::handleExtCall(
+    const llvm::CallBase *callNode,
+    const std::vector<const llvm::Function *> &callees) {
+  auto traceIt = abstractTrace.find(callNode);
+  if (traceIt == abstractTrace.end())
+    return;
+
   callSiteStack.push_back(callNode);
-  utils->handleExtAPI(callNode);
+  const AbstractState baseState = traceIt->second;
+  AbstractState joinedState = baseState;
+  bool hasJoinedState = false;
+
+  if (callees.empty()) {
+    if (const llvm::Function *direct = callNode->getCalledFunction()) {
+      traceIt->second = baseState;
+      utils->handleExtAPI(callNode, direct);
+      joinedState = traceIt->second;
+      hasJoinedState = true;
+    }
+  } else {
+    for (const llvm::Function *callee : callees) {
+      if (!callee || !callee->isDeclaration())
+        continue;
+      traceIt->second = baseState;
+      utils->handleExtAPI(callNode, callee);
+      if (hasJoinedState) {
+        joinedState.joinWith(traceIt->second);
+      } else {
+        joinedState = traceIt->second;
+        hasJoinedState = true;
+      }
+    }
+  }
+
+  if (hasJoinedState) {
+    traceIt->second = joinedState;
+  } else {
+    traceIt->second = baseState;
+  }
+
   for (auto &detector : detectors) {
     detector->handleStubFunctions(callNode);
   }
@@ -2026,15 +2390,12 @@ bool AbstractInterpretation::isRecursiveCall(const llvm::CallBase *callNode) {
 }
 
 void AbstractInterpretation::handleCallSite(const llvm::CallBase *call) {
-  if (isExtCall(call)) {
-    handleExtCall(call);
-  } else {
-    handleFunCall(call);
-  }
+  updateStateOnCall(call);
 }
 
-void AbstractInterpretation::handleFunCall(const llvm::CallBase *callNode) {
-  std::vector<const llvm::Function *> callees = getCallees(callNode);
+void AbstractInterpretation::handleFunCall(
+    const llvm::CallBase *callNode,
+    const std::vector<const llvm::Function *> &callees) {
   if (callees.empty())
     return;
 
@@ -2046,6 +2407,8 @@ void AbstractInterpretation::handleFunCall(const llvm::CallBase *callNode) {
 
   bool gotReturn = false;
   AbstractValue joinedReturn;
+  bool gotPostState = false;
+  AbstractState joinedPostState;
 
   for (const llvm::Function *callee : callees) {
     if (!callee || callee->isDeclaration())
@@ -2090,12 +2453,6 @@ void AbstractInterpretation::handleFunCall(const llvm::CallBase *callNode) {
       continue;
     }
 
-    // Handle TOP mode for recursive functions reached from entry calls.
-    if (recursionMode_ == TOP && isRecursiveFun(callee)) {
-      recursiveCallPass(callNode, callee);
-      continue;
-    }
-
     // Analyze callee.
     if (isRecursiveFun(callee)) {
       handleRecursiveSCC(callee);
@@ -2110,6 +2467,32 @@ void AbstractInterpretation::handleFunCall(const llvm::CallBase *callNode) {
       if (!retInst || !retInst->getReturnValue())
         continue;
       updateStateOnRetPE(retInst, callNode, callIt->second);
+    }
+
+    for (const llvm::BasicBlock &bb : *callee) {
+      const auto *retInst =
+          llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator());
+      if (!retInst)
+        continue;
+      auto retIt = abstractTrace.find(retInst);
+      if (retIt == abstractTrace.end())
+        continue;
+
+      AbstractState postState = retIt->second;
+      if (!callNode->getType()->isVoidTy()) {
+        auto rvIt =
+            postState._varToAbsVal.find(AbstractInterpretation::ReturnValueId);
+        if (rvIt != postState._varToAbsVal.end()) {
+          postState[getValueId(callNode)] = rvIt->second;
+        }
+      }
+
+      if (!gotPostState) {
+        joinedPostState = postState;
+        gotPostState = true;
+      } else {
+        joinedPostState.joinWith(postState);
+      }
     }
 
     AbstractValue calleeReturn;
@@ -2133,10 +2516,14 @@ void AbstractInterpretation::handleFunCall(const llvm::CallBase *callNode) {
 
   if (!callSiteStack.empty() && callSiteStack.back() == callNode) {
     auto it = abstractTrace.find(callNode);
-    if (it != abstractTrace.end() && callNode->getType()->isVoidTy() == false &&
-        gotReturn) {
-      uint32_t lhsId = getValueId(callNode);
-      it->second[lhsId] = joinedReturn;
+    if (it != abstractTrace.end()) {
+      if (gotPostState) {
+        it->second = joinedPostState;
+      }
+      if (callNode->getType()->isVoidTy() == false && gotReturn) {
+        uint32_t lhsId = getValueId(callNode);
+        it->second[lhsId] = joinedReturn;
+      }
     }
   }
 
@@ -2179,22 +2566,34 @@ void AbstractInterpretation::handleRecursiveSCC(const llvm::Function *seed) {
     return;
   }
 
-  // Iterate all functions in the recursive SCC to a global interprocedural
-  // fixpoint.
-  bool changed = true;
-  while (changed) {
-    changed = false;
+  // Function-level WTOs do not capture interprocedural recursive cycles.
+  // Iterate over SCC entry summaries here so recursive summary propagation
+  // converges, while each function still uses its own WTO for intra-procedural
+  // cycles.
+  if (recursionMode_ == TOP) {
+    for (const llvm::Function *func : membersIt->second) {
+      if (!func || func->isDeclaration() || func->empty())
+        continue;
+      handleFunction(func);
+    }
+    return;
+  }
+
+  bool increasing = true;
+  for (uint32_t iter = 0;; ++iter) {
+    bool stable = true;
+
     for (const llvm::Function *func : membersIt->second) {
       if (!func || func->isDeclaration() || func->empty())
         continue;
 
       const llvm::Instruction *entryInst = &func->getEntryBlock().front();
-      AbstractState before;
-      bool hadBefore = false;
+      AbstractState prevEntry;
+      bool hadPrevEntry = false;
       auto beforeIt = abstractTrace.find(entryInst);
       if (beforeIt != abstractTrace.end()) {
-        before = beforeIt->second;
-        hadBefore = true;
+        prevEntry = beforeIt->second;
+        hadPrevEntry = true;
       }
 
       handleFunction(func);
@@ -2202,9 +2601,57 @@ void AbstractInterpretation::handleRecursiveSCC(const llvm::Function *seed) {
       auto afterIt = abstractTrace.find(entryInst);
       if (afterIt == abstractTrace.end())
         continue;
-      if (!hadBefore || afterIt->second != before) {
-        changed = true;
+
+      if (iter >= widenDelay_) {
+        if (increasing) {
+          if (hadPrevEntry) {
+            AbstractState widened = prevEntry.widening(afterIt->second);
+            afterIt->second = widened;
+            if (widened != prevEntry) {
+              stable = false;
+            }
+          } else {
+            stable = false;
+          }
+        } else {
+          if (!shouldApplyNarrowing(func)) {
+            continue;
+          }
+          if (hadPrevEntry) {
+            AbstractState narrowed = prevEntry.narrowing(afterIt->second);
+            afterIt->second = narrowed;
+            if (narrowed != prevEntry) {
+              stable = false;
+            }
+          } else {
+            stable = false;
+          }
+        }
+      } else if (!hadPrevEntry || afterIt->second != prevEntry) {
+        stable = false;
       }
+    }
+
+    if (iter < widenDelay_) {
+      if (stable) {
+        break;
+      }
+      continue;
+    }
+
+    if (increasing) {
+      if (!stable) {
+        continue;
+      }
+      if (shouldApplyNarrowing(seed)) {
+        increasing = false;
+        continue;
+      }
+      break;
+    }
+
+    if (stable) {
+      break;
     }
   }
 }
@@ -2240,11 +2687,58 @@ AbstractInterpretation::getCallees(const llvm::CallBase *callNode) const {
   if (!callNode)
     return result;
 
+  auto collectFunctionsFromValue =
+      [&](const llvm::Value *value, std::set<const llvm::Function *> &targets,
+          auto &&collectRef, std::set<const llvm::Value *> &visited) -> void {
+    if (!value || !visited.insert(value).second)
+      return;
+
+    value = value->stripPointerCasts();
+    if (const auto *fun = llvm::dyn_cast<llvm::Function>(value)) {
+      targets.insert(fun);
+      return;
+    }
+
+    if (const auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(value)) {
+      for (const llvm::Use &operand : ce->operands()) {
+        collectRef(operand.get(), targets, collectRef, visited);
+      }
+      return;
+    }
+
+    if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(value)) {
+      const llvm::Value *ptr = load->getPointerOperand()->stripPointerCasts();
+      if (const auto *gv = llvm::dyn_cast<llvm::GlobalVariable>(ptr)) {
+        if (gv->hasInitializer()) {
+          collectRef(gv->getInitializer(), targets, collectRef, visited);
+        }
+      }
+      for (const llvm::User *user : ptr->users()) {
+        if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(user)) {
+          if (store->getPointerOperand()->stripPointerCasts() == ptr) {
+            collectRef(store->getValueOperand(), targets, collectRef, visited);
+          }
+        }
+      }
+      return;
+    }
+
+    if (const auto *phi = llvm::dyn_cast<llvm::PHINode>(value)) {
+      for (const llvm::Value *incoming : phi->incoming_values()) {
+        collectRef(incoming, targets, collectRef, visited);
+      }
+      return;
+    }
+
+    if (const auto *select = llvm::dyn_cast<llvm::SelectInst>(value)) {
+      collectRef(select->getTrueValue(), targets, collectRef, visited);
+      collectRef(select->getFalseValue(), targets, collectRef, visited);
+    }
+  };
+
   // Direct call.
   if (const llvm::Function *direct = callNode->getCalledFunction()) {
-    if (!direct->isDeclaration()) {
-      result.push_back(direct);
-    }
+    result.push_back(direct);
     return result;
   }
 
@@ -2272,7 +2766,7 @@ AbstractInterpretation::getCallees(const llvm::CallBase *callNode) const {
         continue;
       if (const auto *targetFun = resolvedNode->getTargetFun()) {
         const llvm::Function *calleeFunc = targetFun->getFunction();
-        if (calleeFunc && !calleeFunc->isDeclaration()) {
+        if (calleeFunc) {
           uniqueTargets.insert(calleeFunc);
         }
       }
@@ -2285,11 +2779,17 @@ AbstractInterpretation::getCallees(const llvm::CallBase *callNode) const {
         continue;
       if (const auto *targetFun = calleeNode->getTargetFun()) {
         const llvm::Function *calleeFunc = targetFun->getFunction();
-        if (calleeFunc && !calleeFunc->isDeclaration()) {
+        if (calleeFunc) {
           uniqueTargets.insert(calleeFunc);
         }
       }
     }
+  }
+
+  if (uniqueTargets.empty()) {
+    std::set<const llvm::Value *> visited;
+    collectFunctionsFromValue(callNode->getCalledOperand(), uniqueTargets,
+                              collectFunctionsFromValue, visited);
   }
 
   result.assign(uniqueTargets.begin(), uniqueTargets.end());
@@ -2434,16 +2934,10 @@ void AbstractInterpretation::recursiveCallPass(const llvm::CallBase *callNode,
   // Set all stores in the recursive function to TOP
   setTopToObjInRecursion(callNode, callee);
 
-  // Set return value to TOP
-  uint32_t lhsId = getValueId(callNode);
-  callState[lhsId] = AbstractValue(IntervalValue::top());
-
-  // Also set all arguments passed to the recursive function to TOP
-  // (conservative approximation for recursive calls)
-  for (unsigned i = 0; i < callNode->arg_size() && i < callee->arg_size();
-       ++i) {
-    uint32_t argId = getValueId(callNode->getArgOperand(i));
-    callState[argId] = AbstractValue(IntervalValue::top());
+  if (!callNode->getType()->isVoidTy() && !callNode->getType()->isPointerTy() &&
+      !callNode->getType()->isAggregateType()) {
+    uint32_t lhsId = getValueId(callNode);
+    callState[lhsId] = AbstractValue(IntervalValue::top());
   }
 }
 
@@ -2453,45 +2947,64 @@ void AbstractInterpretation::setTopToObjInRecursion(
     return;
 
   AbstractState &callState = abstractTrace[callNode];
+  auto stripPointerProjections = [](const llvm::Value *value) {
+    while (value) {
+      if (const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(value)) {
+        value = gep->getPointerOperand();
+        continue;
+      }
+      if (const auto *bitcast = llvm::dyn_cast<llvm::BitCastOperator>(value)) {
+        value = bitcast->getOperand(0);
+        continue;
+      }
+      if (const auto *addrspaceCast =
+              llvm::dyn_cast<llvm::AddrSpaceCastOperator>(value)) {
+        value = addrspaceCast->getOperand(0);
+        continue;
+      }
+      break;
+    }
+    return value;
+  };
 
-  // Set all memory objects (addresses) accessed in the recursive function to
-  // TOP This includes:
-  // 1. All pointer arguments
-  // 2. All memory locations that might be stored to in the recursive function
-
-  // Set pointer arguments to TOP (conservative)
-  for (unsigned i = 0; i < callNode->arg_size() && i < callee->arg_size();
-       ++i) {
-    uint32_t argId = getValueId(callNode->getArgOperand(i));
-    if (callState.inVarToAddrsTable(argId)) {
-      // Get addresses pointed to by this argument
-      AddressValue addrs = callState[argId].getAddrs();
-      for (auto addr : addrs) {
-        uint32_t objId = callState.getIDFromAddr(addr);
-        // Set all values stored at these addresses to TOP
-        if (callState.inAddrToValTable(objId)) {
-          AbstractValue &val = callState.load(addr);
-          if (val.isInterval()) {
-            val.getInterval().set_to_top();
-          }
-        }
+  auto topifyReachableMemory = [&](const llvm::Value *actualPtr) {
+    uint32_t ptrId = getValueId(actualPtr);
+    if (!callState.inVarToAddrsTable(ptrId))
+      return;
+    for (uint32_t addr : callState[ptrId].getAddrs()) {
+      if (AbstractState::isNullMem(addr) || AbstractState::isInvalidMem(addr))
+        continue;
+      uint32_t objId = callState.getIDFromAddr(addr);
+      if (!callState.inAddrToValTable(objId))
+        continue;
+      AbstractValue &stored = callState.load(addr);
+      if (stored.isInterval()) {
+        stored.getInterval().set_to_top();
       }
     }
-  }
+  };
 
-  // Set all variables in the call state to TOP (conservative approximation)
-  // This ensures that any values that might be modified in the recursive
-  // function are set to TOP
-  for (auto &item : callState._varToAbsVal) {
-    if (item.second.isInterval()) {
-      item.second.getInterval().set_to_top();
-    }
-  }
+  for (const llvm::BasicBlock &bb : *callee) {
+    for (const llvm::Instruction &inst : bb) {
+      const auto *store = llvm::dyn_cast<llvm::StoreInst>(&inst);
+      if (!store)
+        continue;
 
-  // Set all memory locations to TOP
-  for (auto &item : callState._addrToAbsVal) {
-    if (item.second.isInterval()) {
-      item.second.getInterval().set_to_top();
+      const llvm::Value *storedVal = store->getValueOperand();
+      if (storedVal->getType()->isPointerTy() || storedVal->getType()->isVoidTy())
+        continue;
+
+      const llvm::Value *base = stripPointerProjections(store->getPointerOperand());
+      if (const auto *arg = llvm::dyn_cast<llvm::Argument>(base)) {
+        if (arg->getParent() == callee && arg->getArgNo() < callNode->arg_size()) {
+          topifyReachableMemory(callNode->getArgOperand(arg->getArgNo()));
+        }
+        continue;
+      }
+
+      if (const auto *global = llvm::dyn_cast<llvm::GlobalValue>(base)) {
+        topifyReachableMemory(global);
+      }
     }
   }
 }

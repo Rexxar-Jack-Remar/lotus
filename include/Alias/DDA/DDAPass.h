@@ -117,6 +117,14 @@ public:
   void setMaxBudget(uint32_t max) { maxBudget_ = max; }
   uint32_t getMaxBudget() const { return maxBudget_; }
 
+  void setInsensitiveRecursion(bool enable) {
+    insensitiveRecursion_ = enable;
+  }
+  bool getInsensitiveRecursion() const { return insensitiveRecursion_; }
+
+  void setInsensitiveCycle(bool enable) { insensitiveCycle_ = enable; }
+  bool getInsensitiveCycle() const { return insensitiveCycle_; }
+
   FlowDDA *getFlowDDA() const { return flowDDA_.get(); }
   ContextDDA *getContextDDA() const { return contextDDA_.get(); }
   /// Convenience alias query over the current FlowDDA results.
@@ -129,6 +137,8 @@ private:
   uint32_t maxContextLen_ = 3u;
   uint32_t maxPathLen_ = 0u;
   uint32_t maxBudget_ = 100000u;
+  bool insensitiveRecursion_ = false;
+  bool insensitiveCycle_ = false;
   std::unique_ptr<DDAClient> client_;
   std::unique_ptr<FlowDDA> flowDDA_;
   std::unique_ptr<ContextDDA> contextDDA_;

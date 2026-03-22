@@ -133,6 +133,14 @@ bool FlowDDA::run(Module &M) {
   return true;
 }
 
+uint32_t FlowDDA::getTopLevelValueId(const SVFGNode *node) const {
+  if (!node)
+    return 0;
+  if (node->hasValueId())
+    return node->getValueId();
+  return node->getId();
+}
+
 void FlowDDA::unionDDAPts(PtsSet &target, const PtsSet &source) {
   for (uint32_t id : source)
     target.insert(id);
@@ -213,23 +221,22 @@ void FlowDDA::resolveFunPtr(const LocDPItem &dpm) {
   const SVFGNode *node = dpm.getLoc();
   if (!node || !svfg_)
     return;
-  if (const ActualRetSVFGNode *retNode = dyn_cast<ActualRetSVFGNode>(node)) {
-    const llvm::CallBase *cs = retNode->getCallSite();
-    if (cs && !cs->getCalledFunction()) {
+  // Match SVF DDAVFSolver::resolveFunPtr: trigger on any callsite-ret node
+  // (ActualRet/ActualOut/InterPhi/MInterPhi) and any function-entry node
+  // (FormalParm/FormalIn/InterPhi/MInterPhi), not just ActualRet/FormalParm.
+  if (const llvm::CallBase *cs = svfg_->isCallSiteRetSVFGNode(node)) {
+    if (!cs->getCalledFunction()) {
       const Value *calledOp = cs->getCalledOperand();
       if (calledOp && calledOp->getType()->isPointerTy()) {
         SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
         if (funPtrNode) {
-          LocDPItem funPtrDpm(funPtrNode->getId(), funPtrNode);
+          LocDPItem funPtrDpm(getTopLevelValueId(funPtrNode), funPtrNode);
           findPT(funPtrDpm);
         }
       }
     }
-  }
-  if (const FormalParmSVFGNode *formalParm =
-          dyn_cast<FormalParmSVFGNode>(node)) {
-    const llvm::Function *fun = formalParm->getFunction();
-    if (fun && !fun->isDeclaration()) {
+  } else if (const llvm::Function *fun = svfg_->isFunEntrySVFGNode(node)) {
+    if (!fun->isDeclaration()) {
       const auto &indCS = svfg_->getIndCallSitesInvokingCallee(fun);
       for (const llvm::CallBase *cs : indCS) {
         if (!cs || cs->getCalledFunction())
@@ -239,7 +246,7 @@ void FlowDDA::resolveFunPtr(const LocDPItem &dpm) {
           continue;
         SVFGNode *funPtrNode = getDefNodeForValue(calledOp);
         if (funPtrNode) {
-          LocDPItem funPtrDpm(funPtrNode->getId(), funPtrNode);
+          LocDPItem funPtrDpm(getTopLevelValueId(funPtrNode), funPtrNode);
           findPT(funPtrDpm);
         }
       }
@@ -405,19 +412,11 @@ void FlowDDA::handleAddr(PtsSet &pts, const LocDPItem &,
                          const AddrSVFGNode *addr) {
   if (!addr)
     return;
-
-  // Query PTA for the value's object IDs.  This returns IDs from both the
-  // SVFG (ensureBaseObjIdForValue) and the pointer analysis, which is
-  // required because indirect-edge guards are populated from PTA IDs.
-  //
-  // Note: AddrSVFGNode also carries an optional objectId_ field (mirrors
-  // SVF's getPAGSrcNodeID) but it is only useful when the builder's object
-  // IDs are guaranteed to match PTA edge guards.  We always prefer the
-  // PTA-backed lookup to stay consistent with guard filtering.
-  const Value *v = addr->getValue();
-  if (!v)
-    return;
-  SVFGNodeBS objIds = getObjectIdsForValue(v);
+  SVFGNodeBS objIds;
+  if (const uint32_t canonicalObjId = addr->getObjectId())
+    objIds.insert(canonicalObjId);
+  else if (const Value *v = addr->getValue())
+    objIds = getObjectIdsForValue(v);
   for (uint32_t id : objIds) {
     // SVF field-insensitivity check: if isFieldInsensitive(srcID) srcID =
     // getFIObjVar(srcID)
@@ -449,9 +448,10 @@ FlowDDA::PtsSet FlowDDA::processGepPts(const GepSVFGNode *gep,
     }
     uint32_t gepObjId = 0;
     if (svfgBuilder_) {
-      gepObjId = svfgBuilder_->getGepObjectId(objId, gi);
-      if (isVariantFieldGep && gepObjId == 0)
+      if (isVariantFieldGep)
         gepObjId = svfgBuilder_->getOrCreateFIObjId(objId);
+      else
+        gepObjId = svfgBuilder_->getGepObjectId(objId, gi);
     }
     if (gepObjId == 0)
       gepObjId = objId;
@@ -505,7 +505,7 @@ FlowDDA::PtsSet FlowDDA::getPointsTo(const Value *ptr) {
   ptsCache_.clear();
   resetQuery();
   LocDPItem::setMaxBudget(defaultMaxBudget_);
-  LocDPItem dpm(defNode->getId(), defNode);
+  LocDPItem dpm(getTopLevelValueId(defNode), defNode);
   (void)findPT(dpm);
   if (isOutOfBudget()) {
     if (ddaStat_)
@@ -768,14 +768,16 @@ SVFGNodeBS FlowDDA::getObjectIdsForValue(const Value *v) const {
   SVFGNodeBS ids;
   if (!v || !v->getType()->isPointerTy())
     return ids;
+  if (svfgBuilder_) {
+    ids = svfgBuilder_->getObjectIdsForValue(v);
+    if (!ids.empty()) {
+      return ids;
+    }
+  }
   if (svfg_) {
     const uint32_t id = svfg_->getObjectId(v);
     if (id != 0)
       ids.insert(id);
-  }
-  if (svfgBuilder_) {
-    SVFGNodeBS ptaIds = svfgBuilder_->getObjectIdsForValue(v);
-    ids.insert(ptaIds.begin(), ptaIds.end());
   }
   return ids;
 }

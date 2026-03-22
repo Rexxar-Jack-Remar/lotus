@@ -26,7 +26,8 @@ extern llvm::cl::opt<bool> SaberVerbose;
 
 /// Saber-related options wrapper (for backward compatibility).
 struct SaberOptions {
-  /// Use full SVFG (vs pointer-only). Default true.
+  /// Use the full, unoptimized SABER SVFG. Default false uses the optimized
+  /// compatibility graph.
   static bool fullSVFG() { return SaberFullSVFG; }
 
   /// Max call-string context length (k-limit). Default 5.

@@ -12,6 +12,7 @@
 #include "IR/SVFG/SVFGBase.h"
 #include "IR/SVFG/SVFGBuilder.h"
 #include "IR/SVFG/SVFGNode.h"
+#include "IR/SVFG/SVFGOPT.h"
 
 #include <deque>
 #include <map>
@@ -34,6 +35,7 @@ public:
 
   virtual ~SaberSVFGBuilder() {}
 
+  std::unique_ptr<SVFG> buildForSaber(const ICFG *icfg, bool fullSVFG);
   SVFG *buildSVFG(const ICFG *icfg);
 
   inline bool isGlobalSVFGNode(const SVFGNode *node) const {
@@ -62,6 +64,9 @@ public:
   virtual void AddExtActualParmSVFGNodes();
 
 protected:
+  std::unique_ptr<SVFG>
+  buildCompatSVFGForSaber(std::unique_ptr<SVFG> graph);
+
   /// Get points-to set of an object (objects that this object, as a pointer,
   /// points to). Uses AserPTA via getObjectValue + getObjectIdsForValue.
   /// Returns empty if objId has no value.

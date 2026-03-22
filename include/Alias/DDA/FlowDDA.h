@@ -195,6 +195,7 @@ protected:
   // DDAVFSolver interface (CRTP). getSVFG/getSVFGBuilder/handleBKCondition are
   // public above.
   SVFGNode *getDefNodeForValue(const llvm::Value *v) const;
+  uint32_t getTopLevelValueId(const SVFGNode *node) const;
   static bool isDirectEdge(SVFGEdge *e);
   static bool isIndirectEdge(SVFGEdge *e);
   PtsSet getConservativeCPts(const LocDPItem &dpm) const;

@@ -64,6 +64,13 @@ std::string IntraBlockNode::toString() const {
   return rawstr.str();
 }
 
+std::string GlobalInitBlockNode::toString() const {
+  std::string str;
+  raw_string_ostream rawstr(str);
+  rawstr << "GlobalInitBlockNode ID: " << getId();
+  return rawstr.str();
+}
+
 std::string FunEntryBlockNode::toString() const {
   std::string str;
   raw_string_ostream rawstr(str);
@@ -275,6 +282,15 @@ FunEntryBlockNode *ICFG::addFunEntryICFGNode(const llvm::Function *F) {
   return node;
 }
 
+GlobalInitBlockNode *ICFG::addGlobalInitICFGNode() {
+  if (globalInitNode)
+    return globalInitNode;
+  auto *node = new GlobalInitBlockNode(totalICFGNode++);
+  addICFGNode(node);
+  globalInitNode = node;
+  return node;
+}
+
 FunExitBlockNode *ICFG::addFunExitICFGNode(const llvm::Function *F) {
   if (!F || F->isDeclaration())
     return nullptr;
@@ -339,6 +355,12 @@ FunEntryBlockNode *ICFG::getFunEntryICFGNode(const llvm::Function *F) {
   if (auto *node = getFunEntryNode(F))
     return node;
   return addFunEntryICFGNode(F);
+}
+
+GlobalInitBlockNode *ICFG::getGlobalInitICFGNode() {
+  if (auto *node = getGlobalInitNode())
+    return node;
+  return addGlobalInitICFGNode();
 }
 
 FunExitBlockNode *ICFG::getFunExitICFGNode(const llvm::Function *F) {

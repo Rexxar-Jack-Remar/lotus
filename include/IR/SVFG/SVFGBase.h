@@ -257,8 +257,13 @@ inline bool isIndirectVFGEdge(SVFGEdgeK k) {
   // In Lotus, several memory/call edges also carry points-to guards (e.g.,
   // ActualIn->FormalIn, FormalOut->ActualOut). Treat them as indirect to match
   // SVF's IndirectSVFGEdge semantics.
-  return k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::CallInd ||
-         k == SVFGEdgeK::RetInd || k == SVFGEdgeK::ThreadMHPIndirectVF ||
+  //
+  // Important SVF invariant: CallInd/RetInd are still top-level direct
+  // interprocedural value-flow edges, not memory/object-sensitive indirect
+  // edges. DDA traverses them like CallDir/RetDir. Keep them out of the
+  // indirect class so the builder can faithfully encode whether a refined edge
+  // came from a direct or indirect callsite.
+  return k == SVFGEdgeK::IntraIndirect || k == SVFGEdgeK::ThreadMHPIndirectVF ||
          k == SVFGEdgeK::IntraMu || k == SVFGEdgeK::IntraChi ||
          k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
          k == SVFGEdgeK::RetAOut || k == SVFGEdgeK::RetFOut ||
@@ -280,7 +285,8 @@ inline bool isDirectVFGEdge(SVFGEdgeK k) {
   return k == SVFGEdgeK::IntraDirect || k == SVFGEdgeK::IntraCopy ||
          k == SVFGEdgeK::IntraGep || k == SVFGEdgeK::IntraPhi ||
          k == SVFGEdgeK::IntraCmp || k == SVFGEdgeK::IntraBranch ||
-         k == SVFGEdgeK::CallDir || k == SVFGEdgeK::RetDir;
+         k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
+         k == SVFGEdgeK::RetDir || k == SVFGEdgeK::RetInd;
 }
 
 } // namespace analysis

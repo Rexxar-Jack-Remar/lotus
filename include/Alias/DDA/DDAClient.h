@@ -66,6 +66,7 @@
 
 #include "IR/SVFG/SVFGBase.h"
 
+#include <unordered_set>
 #include <vector>
 
 namespace llvm {
@@ -80,6 +81,7 @@ namespace analysis {
 class SVFG;
 class SVFGNode;
 class FlowDDA;
+class ContextDDA;
 
 /// Base DDA client: collects candidate pointers for demand-driven queries.
 class DDAClient {
@@ -101,6 +103,8 @@ public:
 
   /// Run DDA for each candidate (calls dda->getPointsTo for each).
   virtual void answerQueries(FlowDDA *dda);
+  /// Run context-sensitive DDA for each candidate.
+  virtual void answerQueries(ContextDDA *dda);
 
   /// Callback during backward traversal (optional).
   virtual void handleStatement(const SVFGNode *node, uint32_t curNodeId) {
@@ -110,6 +114,8 @@ public:
 
   /// Statistics after answerQueries (optional).
   virtual void performStat(FlowDDA *dda) { (void)dda; }
+  /// Statistics after context-sensitive answerQueries (optional).
+  virtual void performStat(ContextDDA *dda);
 
   void setSolveAll(bool v) { solveAll_ = v; }
   bool getSolveAll() const { return solveAll_; }
@@ -120,11 +126,13 @@ public:
 
 protected:
   void addCandidate(const llvm::Value *v);
+  void resetCandidateQueries();
 
   SVFG *svfg_ = nullptr;
   const llvm::Module *module_ = nullptr;
   std::vector<const llvm::Value *> candidateQueries_;
   std::vector<const llvm::Value *> userQueries_;
+  std::unordered_set<const llvm::Value *> candidateQuerySet_;
   bool solveAll_;
 };
 

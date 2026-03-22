@@ -57,6 +57,14 @@ SVFG *SVFGOPT::buildAndOptimize(const ICFG *icfg,
   return this;
 }
 
+bool SVFGOPT::adoptAndOptimize(std::unique_ptr<SVFG> graph) {
+  if (!graph)
+    return false;
+  swapWith(*graph);
+  optimize();
+  return true;
+}
+
 void SVFGOPT::readAndOptimize(const std::string &filename) {
   SVFGSerializer::readText(*this, filename);
   optimize();
@@ -192,10 +200,11 @@ void SVFGOPT::replaceARetWithPHI(PhiSVFGNode *phi, SVFGNode *svfgNode) {
     if (!fr)
       continue;
 
-    addPHIOperand(phi, 0, fr->getValue());
+    uint32_t operandPos = phi->getOpVerNum();
     for (SVFGEdge *frIn : fr->getInEdges()) {
       if (!frIn || !frIn->getSrcNode())
         continue;
+      addPHIOperand(phi, operandPos++, frIn->getSrcNode()->getValue());
       SVFGEdgeK kind = inEdge->getEdgeKind();
       if (!isRetLikeKind(kind)) {
         kind = SVFGEdgeK::IntraCopy;
@@ -592,7 +601,10 @@ SVFGOPT::addInterPHIForFormalParm(const FormalParmSVFGNode *formalParm) {
   auto *phi = new InterPhiSVFGNode(
       id, formalParm ? formalParm->getICFGNode() : nullptr,
       formalParm ? formalParm->getFunction()
-                 : static_cast<const llvm::Function *>(nullptr));
+                 : static_cast<const llvm::Function *>(nullptr),
+      formalParm ? formalParm->getValue() : static_cast<const llvm::Value *>(nullptr));
+  if (formalParm)
+    phi->setValueId(formalParm->getValueId());
   addNode(phi);
   return phi;
 }
@@ -603,7 +615,11 @@ SVFGOPT::addInterPHIForActualRet(const ActualRetSVFGNode *actualRet) {
   auto *phi = new InterPhiSVFGNode(
       id, actualRet ? actualRet->getICFGNode() : nullptr,
       actualRet ? actualRet->getCallSite()
-                : static_cast<const llvm::CallBase *>(nullptr));
+                : static_cast<const llvm::CallBase *>(nullptr),
+      actualRet ? actualRet->getValue()
+                : static_cast<const llvm::Value *>(nullptr));
+  if (actualRet)
+    phi->setValueId(actualRet->getValueId());
   addNode(phi);
   return phi;
 }

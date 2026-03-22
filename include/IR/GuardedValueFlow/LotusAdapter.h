@@ -29,7 +29,7 @@ public:
   }
 
 private:
-  void adaptFunction(GuardedValueFlowGraph &graph, IntraLotusAA &pta,
+  bool adaptFunction(GuardedValueFlowGraph &graph, IntraLotusAA &pta,
                      LotusAA &lotus, GuardedValueFlowGraphBuilderPass &builder);
 };
 

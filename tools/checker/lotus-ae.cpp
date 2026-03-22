@@ -62,7 +62,7 @@ static cl::opt<lotus::analysis::AbstractInterpretation::HandleRecur>
 
 static cl::opt<unsigned>
     WidenDelayOpt("widen-delay", cl::desc("Delay widening for loop iterations"),
-                  cl::init(0));
+                  cl::init(3));
 
 static cl::opt<bool>
     StrictCheckpointOpt("strict-checkpoint",

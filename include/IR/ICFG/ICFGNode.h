@@ -27,6 +27,7 @@ public:
   /// kinds of ICFG node
   enum ICFGNodeK {
     IntraBlock,
+    GlobalInitBlock,
     FunEntryBlock,
     FunExitBlock,
     FunUnwindExitBlock,
@@ -96,6 +97,25 @@ public:
 
   /// @brief Returns a string representation of this intra-block node.
   /// @return String description including block name.
+  std::string toString() const;
+};
+
+/// @brief Dedicated module-global initialization node.
+///
+/// This synthetic node anchors whole-program global state before any root
+/// function is entered. It has no owning function or basic block.
+class GlobalInitBlockNode : public ICFGNode {
+public:
+  explicit GlobalInitBlockNode(NodeID id) : ICFGNode(id, GlobalInitBlock) {}
+
+  static inline bool classof(const GlobalInitBlockNode *) { return true; }
+  static inline bool classof(const ICFGNode *node) {
+    return node->getNodeKind() == GlobalInitBlock;
+  }
+  static inline bool classof(const GenericICFGNodeTy *node) {
+    return node->getNodeKind() == GlobalInitBlock;
+  }
+
   std::string toString() const;
 };
 

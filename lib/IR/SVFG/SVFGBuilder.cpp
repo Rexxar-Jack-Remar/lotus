@@ -210,6 +210,7 @@ SVFG *SVFGBuilder::build(const ICFG *icfg, const SVFGBuilderConfig &cfg) {
     connectFromGlobalToProgEntry();
   }
 
+  lastBuiltSVFG = svfg.get();
   return svfg.release();
 }
 
@@ -218,24 +219,25 @@ void SVFGBuilder::initialize(const ICFG *cfg) {
   svfg = std::make_unique<SVFG>();
   svfg->setICFG(icfg);
   const Module *M = getModuleFromICFG(icfg);
-  refinedCallGraph =
-      M ? std::make_unique<LTCallGraph>(*const_cast<Module *>(M)) : nullptr;
+  if (M)
+    svfg->initializeRefinedCallGraph(*const_cast<Module *>(M));
+  lastBuiltSVFG = nullptr;
   nextNodeId = 0;
   nextMemRegId = 1;
+  nextValueId = kValueIdBase;
   // Clean up previous solver wrapper if exists
   ptaSolverWrapper.reset();
 
   valueToNode.clear();
+  valueToValueId.clear();
+  formalRetValueIds.clear();
+  varArgValueIds.clear();
   allocaToMemReg.clear();
   globalToMemReg.clear();
   heapAllocToMemReg.clear();
   ptrValToMemReg.clear();
   loadToLoadNode.clear();
   storeToStoreNode.clear();
-  loadToMuNodes.clear();
-  storeToChiNodes.clear();
-  atomicToMuNodes.clear();
-  atomicToChiNodes.clear();
   memRegVerToNode.clear();
   funcEntryChi.clear();
   funcExitMu.clear();
@@ -248,22 +250,21 @@ void SVFGBuilder::initialize(const ICFG *cfg) {
   nextObjId = kObjIdBase;
   objIdToMemReg.clear();
   memRegToObjId.clear();
+  memRegToPts.clear();
   ptsToMemReg.clear();
   memRegVersion.clear();
   bbToMemPhi.clear();
   argToMemRegs.clear();
   previousPTSets.clear();
   funcEntryChiMemRegs.clear();
+  globalEntryRegions.clear();
 }
 
 void SVFGBuilder::recordRefinedCallEdge(const CallBase *call,
                                         const Function *callee) {
-  if (!refinedCallGraph || !call || !callee)
+  if (!svfg || !call || !callee)
     return;
-  const Function *caller = call->getFunction();
-  if (!caller)
-    return;
-  refinedCallGraph->addResolvedCallEdge(call, caller, callee);
+  (void)svfg->markConnectedCallee(call, callee);
 }
 
 void SVFGBuilder::runPointerAnalysis() {
@@ -315,6 +316,39 @@ uint32_t SVFGBuilder::getOrCreateNode(const Value *val) {
   valueToNode[val] = id;
   if (svfg)
     svfg->setValueNode(val, id);
+  return id;
+}
+
+uint32_t SVFGBuilder::getOrCreateValueId(const Value *val) {
+  if (!val)
+    return 0;
+  auto it = valueToValueId.find(val);
+  if (it != valueToValueId.end())
+    return it->second;
+  const uint32_t id = nextValueId++;
+  valueToValueId.emplace(val, id);
+  return id;
+}
+
+uint32_t SVFGBuilder::getOrCreateFormalRetValueId(const Function *F) {
+  if (!F)
+    return 0;
+  auto it = formalRetValueIds.find(F);
+  if (it != formalRetValueIds.end())
+    return it->second;
+  const uint32_t id = nextValueId++;
+  formalRetValueIds.emplace(F, id);
+  return id;
+}
+
+uint32_t SVFGBuilder::getOrCreateVarArgValueId(const Function *F) {
+  if (!F)
+    return 0;
+  auto it = varArgValueIds.find(F);
+  if (it != varArgValueIds.end())
+    return it->second;
+  const uint32_t id = nextValueId++;
+  varArgValueIds.emplace(F, id);
   return id;
 }
 
@@ -399,6 +433,7 @@ uint32_t SVFGBuilder::getOrCreateMemRegForPointsTo(const SVFGNodeBS &pts) {
 
   const uint32_t memRegId = nextMemRegId++;
   ptsToMemReg.emplace(pts, memRegId);
+  memRegToPts.emplace(memRegId, pts);
   return memRegId;
 }
 
@@ -406,10 +441,9 @@ uint32_t SVFGBuilder::getOrCreateMemRegForObject(uint32_t objId) {
   if (objId == 0)
     return 0;
   auto it = objIdToMemReg.find(objId);
-  if (it != objIdToMemReg.end()) {
+  if (it != objIdToMemReg.end())
     return it->second;
-  }
-  const uint32_t memRegId = nextMemRegId++;
+  const uint32_t memRegId = getOrCreateMemRegForPointsTo(SVFGNodeBS{objId});
   objIdToMemReg.emplace(objId, memRegId);
   memRegToObjId.emplace(memRegId, objId);
   return memRegId;
@@ -492,27 +526,94 @@ SVFGNodeBS SVFGBuilder::convertPTAObjectsToObjIDs(
 
     // Register stable debug label and objId <-> Value* for DDA.
     if (svfg) {
+      SVFG::ObjectInfo info = buildInfoForObject(obj);
+      if (info.baseObjId == 0)
+        info.baseObjId = objId;
       svfg->setObjectDebug(objId, obj->toString(false));
       if (const Value *val = obj->getValue())
         svfg->setObjectValue(objId, val);
-      svfg->setObjectInfo(objId, buildInfoForObject(obj));
+      svfg->setObjectInfo(objId, info);
     }
   }
 
   return result;
 }
 
+uint32_t SVFGBuilder::getOrCreateCanonicalObjectIdForValue(
+    const Value *v, SVFG::ObjectInfo info) {
+  if (!svfg || !v)
+    return 0;
+  if (const uint32_t existing = svfg->getObjectId(v))
+    return existing;
+
+  if (config.usePointerAnalysis && ptaSolverWrapper && ptaSolverWrapper->solver &&
+      v->getType()->isPointerTy()) {
+    SVFGNodeBS canonicalIds = getObjectIdsForValue(v);
+    if (canonicalIds.size() == 1) {
+      const uint32_t objId = *canonicalIds.begin();
+      if (info.baseObjId == 0)
+        info.baseObjId = objId;
+      svfg->updateObjectInfo(objId, info);
+      svfg->setObjectValue(objId, v);
+      (void)getOrCreateMemRegForObject(objId);
+      return objId;
+    }
+  }
+
+  const uint32_t objId = nextObjId++;
+  if (info.baseObjId == 0)
+    info.baseObjId = objId;
+  svfg->setObjectInfo(objId, info);
+  svfg->setObjectValue(objId, v);
+  if (const auto *F = dyn_cast<Function>(v))
+    svfg->setObjectDebug(objId, ("FUN:" + F->getName()).str());
+  else if (const auto *GV = dyn_cast<GlobalValue>(v))
+    svfg->setObjectDebug(objId, ("GV:" + GV->getName()).str());
+  else if (v->hasName())
+    svfg->setObjectDebug(objId, ("OBJ:" + v->getName()).str());
+  else
+    svfg->setObjectDebug(objId, "OBJ");
+  (void)getOrCreateMemRegForObject(objId);
+  return objId;
+}
+
+uint32_t SVFGBuilder::getCanonicalBaseObjId(uint32_t objId) const {
+  SVFG *graph = getActiveSVFG();
+  if (objId == 0 || !graph)
+    return objId;
+  if (const auto *info = graph->getObjectInfo(objId)) {
+    if (info->baseObjId != 0)
+      return info->baseObjId;
+  }
+  return objId;
+}
+
 SVFGNodeBS SVFGBuilder::getObjectIdsForValue(const Value *ptr) {
   SVFGNodeBS result;
+  SVFG *graph = getActiveSVFG();
   if (!ptr)
     return result;
-  if (!config.usePointerAnalysis || !ptaSolverWrapper ||
-      !ptaSolverWrapper->solver)
-    return result;
-  if (!ptr->getType()->isPointerTy())
-    return result;
-  std::vector<const void *> ptsVoid = getPointsToSet(ptr);
-  result = convertPTAObjectsToObjIDs(ptsVoid, true);
+  if (config.usePointerAnalysis && ptaSolverWrapper && ptaSolverWrapper->solver &&
+      ptr->getType()->isPointerTy()) {
+    std::vector<const void *> ptsVoid = getPointsToSet(ptr);
+    result = convertPTAObjectsToObjIDs(ptsVoid, true);
+    auto isCanonicalObjectValue = [&](const Value *v) {
+      if (!v)
+        return false;
+      if (isa<Function, GlobalValue, GetElementPtrInst, AllocaInst>(v))
+        return true;
+      if (const auto *inst = dyn_cast<Instruction>(v))
+        return isHeapAllocation(inst);
+      return false;
+    };
+    if (result.size() == 1 && graph && isCanonicalObjectValue(ptr))
+      graph->setObjectValue(*result.begin(), ptr);
+  }
+  if (result.empty() && graph) {
+    const uint32_t objId = graph->getObjectId(ptr);
+    if (objId != 0)
+      result.insert(objId);
+  }
   return result;
 }
 
@@ -520,6 +621,8 @@ uint32_t SVFGBuilder::getGepObjectId(uint32_t baseObjId,
                                      const GetElementPtrInst *gep) {
   if (!gep || baseObjId == 0)
     return 0;
+  SVFG *graph = getActiveSVFG();
+  const uint32_t canonicalBaseObjId = getCanonicalBaseObjId(baseObjId);
 
   // Early return if PTA is unavailable
   if (!config.usePointerAnalysis || !ptaSolverWrapper ||
@@ -528,9 +631,10 @@ uint32_t SVFGBuilder::getGepObjectId(uint32_t baseObjId,
 
   // Check field-insensitivity markers (heap objects with unknown size, large
   // structs)
-  if (svfg && (svfg->isUnknownObject(baseObjId) ||
-               svfg->isFieldInsensitiveObject(baseObjId)))
+  if (graph && graph->isUnknownObject(baseObjId))
     return baseObjId;
+  if (graph && graph->isFieldInsensitiveObject(baseObjId))
+    return getOrCreateFIObjId(canonicalBaseObjId);
 
   // Field-insensitive memory model bypasses field analysis
   if (config.memModelType == SVFGBuilderConfig::MemModelType::FieldInsensitive)
@@ -546,11 +650,11 @@ uint32_t SVFGBuilder::getGepObjectId(uint32_t baseObjId,
     }
   }
   if (!hasConstantIndices) {
-    // Arrays: treat as field-insensitive when indices are symbolic
-    return baseObjId;
+    // Arrays: treat as field-insensitive when indices are symbolic.
+    return getOrCreateFIObjId(canonicalBaseObjId);
   }
 
-  auto it = objIdToPTAObject.find(baseObjId);
+  auto it = objIdToPTAObject.find(canonicalBaseObjId);
   if (it == objIdToPTAObject.end())
     return baseObjId;
 
@@ -596,32 +700,57 @@ uint32_t SVFGBuilder::getGepObjectId(uint32_t baseObjId,
     return 0;
 
   auto cached = ptaObjectToObjId.find(fieldObj);
-  if (cached != ptaObjectToObjId.end())
+  if (cached != ptaObjectToObjId.end()) {
+    if (graph)
+      graph->setObjectValue(cached->second, gep);
     return cached->second;
+  }
 
   // Create a new objId for the field object if needed.
   SVFGNodeBS tmp = convertPTAObjectsToObjIDs({fieldObj}, true);
-  return tmp.empty() ? 0 : *tmp.begin();
+  if (tmp.empty())
+    return 0;
+  const uint32_t objId = *tmp.begin();
+  if (graph)
+    graph->setObjectValue(objId, gep);
+  return objId;
 }
 
 uint32_t SVFGBuilder::getOrCreateFIObjId(uint32_t baseObjId) {
   if (baseObjId == 0)
     return 0;
-  auto it = baseObjToFIObjId.find(baseObjId);
+  SVFG *graph = getActiveSVFG();
+  if (graph && graph->isUnknownObject(baseObjId))
+    return baseObjId;
+
+  const uint32_t canonicalBaseObjId = getCanonicalBaseObjId(baseObjId);
+  auto it = baseObjToFIObjId.find(canonicalBaseObjId);
   if (it != baseObjToFIObjId.end())
     return it->second;
+  if (graph && graph->isFieldInsensitiveObject(baseObjId) &&
+      canonicalBaseObjId != baseObjId) {
+    baseObjToFIObjId[canonicalBaseObjId] = baseObjId;
+    return baseObjId;
+  }
   const uint32_t fiObjId = nextObjId++;
-  baseObjToFIObjId[baseObjId] = fiObjId;
-  if (svfg) {
+  baseObjToFIObjId[canonicalBaseObjId] = fiObjId;
+  if (graph) {
+    SVFG::ObjectInfo baseUpdate;
+    baseUpdate.isFieldInsensitive = true;
+    baseUpdate.baseObjId = canonicalBaseObjId;
+    graph->updateObjectInfo(canonicalBaseObjId, baseUpdate);
+
     SVFG::ObjectInfo info;
+    if (const auto *baseInfo = graph->getObjectInfo(canonicalBaseObjId))
+      info = *baseInfo;
     info.isFieldInsensitive = true;
-    info.baseObjId = baseObjId;
-    svfg->setObjectInfo(fiObjId, info);
-    const Value *val = svfg->getObjectValue(baseObjId);
+    info.baseObjId = canonicalBaseObjId;
+    graph->setObjectInfo(fiObjId, info);
+    const Value *val = graph->getObjectValue(canonicalBaseObjId);
     if (val)
-      svfg->setObjectValue(fiObjId, val);
-    std::string label = "FI_OBJ(" + std::to_string(baseObjId) + ")";
-    svfg->setObjectDebug(fiObjId, std::move(label));
+      graph->setObjectValue(fiObjId, val);
+    std::string label = "FI_OBJ(" + std::to_string(canonicalBaseObjId) + ")";
+    graph->setObjectDebug(fiObjId, std::move(label));
   }
   return fiObjId;
 }
@@ -630,11 +759,11 @@ uint32_t SVFGBuilder::getOrCreateUnknownObjId() {
   if (unknownObjId != 0)
     return unknownObjId;
   unknownObjId = nextObjId++;
-  if (svfg) {
-    svfg->setObjectDebug(unknownObjId, "ANY_OBJECT");
+  if (SVFG *graph = getActiveSVFG()) {
+    graph->setObjectDebug(unknownObjId, "ANY_OBJECT");
     SVFG::ObjectInfo info;
     info.isUnknown = true;
-    svfg->setObjectInfo(unknownObjId, info);
+    graph->setObjectInfo(unknownObjId, info);
   }
   return unknownObjId;
 }
@@ -720,89 +849,111 @@ SVFGBuilder::getIndirectCallTargets(const CallBase *call) {
       !ptaSolverWrapper->solver)
     return targets;
 
-  const Value *calledVal = call->getCalledOperand();
-  if (!calledVal || !calledVal->getType()->isPointerTy())
+  if (const Function *directCallee = call ? call->getCalledFunction() : nullptr) {
+    if (!directCallee->isDeclaration())
+      targets.push_back(directCallee);
     return targets;
-
-  // Get points-to set of the called value
-  std::vector<const void *> ptsVoid = getPointsToSet(calledVal);
-  std::vector<const FSObjectTy *> pts;
-  pts.reserve(ptsVoid.size());
-  for (const void *v : ptsVoid) {
-    pts.push_back(static_cast<const FSObjectTy *>(v));
   }
-
-  // Filter for Function pointers
-  // In AserPTA, function objects have getValue() that returns the Function*
-  for (const FSObjectTy *obj : pts) {
-    if (!obj)
-      continue;
-
-    // Get the allocation site value (for functions, this is the Function*)
-    const Value *val = obj->getValue();
-    if (!val)
-      continue;
-
-    // Check if it's a function
-    if (const Function *F = dyn_cast<Function>(val)) {
-      // Avoid duplicates
-      if (std::find(targets.begin(), targets.end(), F) == targets.end()) {
-        targets.push_back(F);
-      }
-    }
-
-    // Also check if the value type is a function pointer
-    if (val->getType()->isPointerTy()) {
-      if (const FunctionType *FTy =
-              dyn_cast<FunctionType>(val->getType()->getPointerElementType())) {
-        // This is a function pointer type, but we need the actual function
-        // Try to find it by checking if val itself is a function after
-        // stripping casts
-        if (const Function *F = dyn_cast<Function>(val->stripPointerCasts())) {
-          if (std::find(targets.begin(), targets.end(), F) == targets.end()) {
-            targets.push_back(F);
-          }
-        }
+  if (call) {
+    if (const Value *called = call->getCalledOperand()) {
+      if (const Function *directTarget =
+              dyn_cast<Function>(called->stripPointerCasts())) {
+        if (!directTarget->isDeclaration())
+          targets.push_back(directTarget);
+        return targets;
       }
     }
   }
 
-  // Enhanced handling: function pointers in structs/arrays
-  // If calledVal is a load from a struct field or array element, we need to
-  // handle field-sensitive points-to analysis
-  if (const LoadInst *load = dyn_cast<LoadInst>(calledVal)) {
-    const Value *srcPtr = load->getPointerOperand();
-    // Get points-to set of the source pointer (struct/array)
-    std::vector<const void *> srcPtsVoid = getPointsToSet(srcPtr);
-    for (const void *v : srcPtsVoid) {
-      const FSObjectTy *srcObj = static_cast<const FSObjectTy *>(v);
-      if (!srcObj)
+  auto addUniqueTarget = [&](const Function *F) {
+    if (!F)
+      return;
+    if (std::find(targets.begin(), targets.end(), F) == targets.end())
+      targets.push_back(F);
+  };
+
+  auto collectResolvedTargets = [&](auto *solver) {
+    if (!solver || !call)
+      return;
+    if (const auto *indCS =
+            solver->getInDirectCallSite(nullptr, cast<Instruction>(call))) {
+      for (const Function *F : indCS->getResolvedTarget())
+        addUniqueTarget(F);
+    }
+  };
+
+  switch (ptaSolverWrapper->kind) {
+  case SolverWrapper::SolverKind::Wave:
+    collectResolvedTargets(static_cast<CIWaveSolver *>(ptaSolverWrapper->solver));
+    break;
+  case SolverWrapper::SolverKind::Deep:
+    collectResolvedTargets(static_cast<CIDeepSolver *>(ptaSolverWrapper->solver));
+    break;
+  case SolverWrapper::SolverKind::Basic:
+    collectResolvedTargets(static_cast<CIBasicSolver *>(ptaSolverWrapper->solver));
+    break;
+  }
+
+  if (targets.empty()) {
+    const Value *calledVal = call->getCalledOperand();
+    if (!calledVal || !calledVal->getType()->isPointerTy())
+      return targets;
+
+    // Get points-to set of the called value
+    std::vector<const void *> ptsVoid = getPointsToSet(calledVal);
+    std::vector<const FSObjectTy *> pts;
+    pts.reserve(ptsVoid.size());
+    for (const void *v : ptsVoid) {
+      pts.push_back(static_cast<const FSObjectTy *>(v));
+    }
+
+    // Filter for Function pointers
+    // In AserPTA, function objects have getValue() that returns the Function*.
+    for (const FSObjectTy *obj : pts) {
+      if (!obj)
         continue;
 
-      // For field-sensitive analysis, the object might represent a struct field
-      // containing a function pointer. Try to get the function from the object.
-      const Value *srcVal = srcObj->getValue();
-      if (srcVal && srcVal->getType()->isPointerTy()) {
-        // Check if this points to a function pointer stored in a struct
-        // This is a conservative approximation - full field-sensitive handling
-        // would require tracking struct field offsets
-        if (const Function *F =
-                dyn_cast<Function>(srcVal->stripPointerCasts())) {
-          if (std::find(targets.begin(), targets.end(), F) == targets.end()) {
-            targets.push_back(F);
-          }
+      const Value *val = obj->getValue();
+      if (!val)
+        continue;
+
+      if (const Function *F = dyn_cast<Function>(val))
+        addUniqueTarget(F);
+
+      if (val->getType()->isPointerTy()) {
+        if (dyn_cast<FunctionType>(val->getType()->getPointerElementType())) {
+          if (const Function *F = dyn_cast<Function>(val->stripPointerCasts()))
+            addUniqueTarget(F);
         }
       }
     }
-  }
 
-  // Fallback: check if called value directly points to a function
-  // (handles direct function pointers that weren't captured in PTA)
-  if (targets.empty()) {
-    if (const Function *F =
-            dyn_cast<Function>(calledVal->stripPointerCasts())) {
-      targets.push_back(F);
+    // Conservative field-sensitive fallback for struct/array-held function
+    // pointers.
+    if (const LoadInst *load = dyn_cast<LoadInst>(calledVal)) {
+      const Value *srcPtr = load->getPointerOperand();
+      std::vector<const void *> srcPtsVoid = getPointsToSet(srcPtr);
+      for (const void *v : srcPtsVoid) {
+        const FSObjectTy *srcObj = static_cast<const FSObjectTy *>(v);
+        if (!srcObj)
+          continue;
+
+        const Value *srcVal = srcObj->getValue();
+        if (srcVal && srcVal->getType()->isPointerTy()) {
+          if (const Function *F = dyn_cast<Function>(srcVal->stripPointerCasts()))
+            addUniqueTarget(F);
+        }
+      }
     }
+
+    if (targets.empty()) {
+      if (const Function *F = dyn_cast<Function>(calledVal->stripPointerCasts()))
+        addUniqueTarget(F);
+    }
+  }
+  if (svfg && call && !call->getCalledFunction()) {
+    for (const Function *target : targets)
+      svfg->addCalleeToIndCallSite(target, call);
   }
 
   return targets;
@@ -1131,6 +1282,25 @@ bool SVFGBuilder::mayModifyMemory(
   }
 
   return false;
+}
+
+std::vector<const Function *> SVFGBuilder::getRootFunctionsFromICFG() const {
+  std::vector<const Function *> roots;
+  if (!icfg)
+    return roots;
+  const GlobalInitBlockNode *globalInit =
+      const_cast<ICFG *>(icfg)->getGlobalInitICFGNode();
+  if (!globalInit)
+    return roots;
+  std::unordered_set<const Function *> seen;
+  for (const ICFGEdge *edge : globalInit->getOutEdges()) {
+    const ICFGNode *dst = edge ? edge->getDstNode() : nullptr;
+    const auto *entry = dyn_cast_or_null<FunEntryBlockNode>(dst);
+    const Function *F = entry ? entry->getFunction() : nullptr;
+    if (F && seen.insert(F).second)
+      roots.push_back(F);
+  }
+  return roots;
 }
 
 bool SVFGBuilder::callMayReadMemory(const CallBase *call) {

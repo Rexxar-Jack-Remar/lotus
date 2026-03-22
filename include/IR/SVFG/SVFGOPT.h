@@ -42,6 +42,7 @@ public:
   }
 
   SVFG *buildAndOptimize(const ICFG *icfg, const SVFGBuilderConfig &config);
+  bool adoptAndOptimize(std::unique_ptr<SVFG> graph);
   void readAndOptimize(const std::string &filename);
   void buildAndWrite(const std::string &filename);
 

@@ -39,6 +39,7 @@ public:
   using SVFGNodeBS = std::set<uint32_t>;
   using WorkList = ProgSlice::VFWorkList;
   using CSWorkList = std::deque<const llvm::CallBase *>;
+  using RemovedSUVFEdges = SaberCondAllocator::SVFGNodeToSVFGNodeSetMap;
 
 private:
   ProgSlice *_curSlice = nullptr;
@@ -141,6 +142,14 @@ public:
   SVFGNodeSetIter sinksBegin() const { return sinks.begin(); }
   SVFGNodeSetIter sinksEnd() const { return sinks.end(); }
   void addToSinks(const SVFGNode *node) { sinks.insert(node); }
+
+  void importRemovedSUVFEdges(const RemovedSUVFEdges &removedEdges) {
+    getSaberCondAllocator()->getRemovedSUVFEdges() = removedEdges;
+  }
+
+  void exportRemovedSUVFEdges(RemovedSUVFEdges &outRemovedEdges) const {
+    outRemovedEdges = getSaberCondAllocator()->getRemovedSUVFEdges();
+  }
 
   SaberCondAllocator *getSaberCondAllocator() const {
     return saberCondAllocator.get();

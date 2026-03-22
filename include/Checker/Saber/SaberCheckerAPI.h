@@ -139,15 +139,7 @@ public:
     llvm::Function const *F = cs ? cs->getCalledFunction() : nullptr;
     return isFClose(F);
   }
-  inline bool isExtCall(llvm::Function const *fun) const {
-    if (!fun || fun->isIntrinsic())
-      return false;
-    // Closest Lotus analogue to SVF ExtAPI::is_ext(fun):
-    // declarations, available_externally summaries, and known modeled APIs.
-    if (fun->isDeclaration() || fun->hasAvailableExternallyLinkage())
-      return true;
-    return tdAPIMap.find(fun->getName().str()) != tdAPIMap.end();
-  }
+  bool isExtCall(llvm::Function const *fun) const;
 };
 
 } // namespace analysis
