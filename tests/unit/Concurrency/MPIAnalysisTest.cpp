@@ -804,7 +804,8 @@ TEST_F(MPIAnalysisTest, FlushMarksTrackedRMACompletion) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_FALSE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_TRUE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_FALSE(analysis.getResults().rma_synchronization_facts.empty());
   EXPECT_TRUE(analysis.getResults().rma_races.empty());
 }
 
@@ -1737,7 +1738,8 @@ TEST_F(MPIAnalysisTest, RMAOpInsideLockEpochIsSynchronized) {
   MPIAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  EXPECT_FALSE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_TRUE(analysis.getResults().unsynchronized_rma.empty());
+  EXPECT_FALSE(analysis.getResults().rma_synchronization_facts.empty());
 }
 
 TEST_F(MPIAnalysisTest, RMAOpsOnOtherTargetsDoNotReusePointLockEpoch) {

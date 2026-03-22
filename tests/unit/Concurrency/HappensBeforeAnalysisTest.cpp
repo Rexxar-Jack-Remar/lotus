@@ -704,6 +704,58 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_shared, nullptr);
   ASSERT_NE(load_shared, nullptr);
 
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       BarrierArriveAndWaitSynchronizesPostBarrierContinuation) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+    @barrier = global i8 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @fake_barrier_arrive_and_wait(i8*)
+
+    define i8* @writer(i8* %unused) {
+    entry:
+      store i32 41, i32* @shared, align 4
+      call void @fake_barrier_arrive_and_wait(i8* @barrier)
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %unused) {
+    entry:
+      call void @fake_barrier_arrive_and_wait(i8* @barrier)
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
 
@@ -1691,6 +1743,190 @@ TEST_F(HappensBeforeAnalysisTest, OpenMPTargetDataBoundaryFeedsHBAnalysis) {
 
   const Instruction *store_shared = &producer->getEntryBlock().front();
   const Instruction *load_shared = findInstructionByName(*consumer, "loaded");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       NonEqBranchWitnessDoesNotInventDefiniteAtomicHB) {
+  const char *source = R"(
+    @flag = global i32 0, align 4
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp sgt i32 %seen, 0
+      br i1 %ready, label %sync, label %exit
+
+    sync:
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       FailedCmpXchgDoesNotInventDefiniteAtomicHB) {
+  const char *source = R"(
+    @flag = global i32 0, align 4
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared, align 4
+      %res = cmpxchg i32* @flag, i32 0, i32 1 seq_cst monotonic
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag seq_cst, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %sync, label %exit
+
+    sync:
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       SuccessfulSeqCstCmpXchgWithWitnessCreatesHB) {
+  const char *source = R"(
+    @flag = global i32 0, align 4
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared, align 4
+      %res = cmpxchg i32* @flag, i32 0, i32 1 seq_cst monotonic
+      %ok = extractvalue { i32, i1 } %res, 1
+      br i1 %ok, label %success, label %fail
+
+    success:
+      br label %done
+
+    fail:
+      br label %done
+
+    done:
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag seq_cst, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %sync, label %exit
+
+    sync:
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "val");
   ASSERT_NE(store_shared, nullptr);
   ASSERT_NE(load_shared, nullptr);
 

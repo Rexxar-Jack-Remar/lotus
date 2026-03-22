@@ -117,6 +117,7 @@ bool StaticThreadSharingAnalysis::runOnModule(Module &M) {
   m_threads.clear();
   m_thread_spawn_counts.clear();
   m_threads_complete = true;
+  m_access_paths_complete = true;
 
   // Get SeaDSA analysis
   DsaAnalysis &dsaPass = getAnalysis<DsaAnalysis>();
@@ -197,6 +198,17 @@ void StaticThreadSharingAnalysis::visitMethod(
     Graph &G = m_dsa->getGraph(*F);
     for (const BasicBlock &BB : *F) {
       for (const Instruction &I : BB) {
+        if (const auto *CB = dyn_cast<CallBase>(&I)) {
+          const Value *called = CB->getCalledOperand();
+          const Function *direct =
+              CB->getCalledFunction()
+                  ? CB->getCalledFunction()
+                  : dyn_cast_or_null<Function>(
+                        called ? called->stripPointerCasts() : nullptr);
+          if (!direct) {
+            m_access_paths_complete = false;
+          }
+        }
         if (isa<LoadInst>(I)) {
           recordAccess(&I, false, ThreadEntry, G);
         } else if (isa<StoreInst>(I) || isa<AtomicRMWInst>(I)) {
@@ -280,8 +292,10 @@ StaticThreadSharingAnalysis::classify(const Value *AllocSite) const {
   }
 
   auto it = m_allocAccesses.find(AllocSite);
-  if (it == m_allocAccesses.end())
-    return SharingClassification::DefinitelyThreadLocal;
+  if (it == m_allocAccesses.end()) {
+    return m_access_paths_complete ? SharingClassification::DefinitelyThreadLocal
+                                   : SharingClassification::MaybeShared;
+  }
 
   // Check if any field is shared
   for (auto &pair : it->second) {
@@ -311,7 +325,8 @@ StaticThreadSharingAnalysis::classify(const Value *AllocSite) const {
       }
     }
   }
-  return SharingClassification::DefinitelyThreadLocal;
+  return m_access_paths_complete ? SharingClassification::DefinitelyThreadLocal
+                                 : SharingClassification::MaybeShared;
 }
 
 bool StaticThreadSharingAnalysis::isShared(const Value *AllocSite) const {
@@ -355,14 +370,19 @@ StaticThreadSharingAnalysis::classify(const Instruction *Inst) const {
     return SharingClassification::MaybeShared;
   }
 
+  SharingClassification strongest =
+      SharingClassification::DefinitelyThreadLocal;
   for (const Value *Alloc : accessKeys) {
     SharingClassification classification = classify(Alloc);
-    if (classification != SharingClassification::DefinitelyThreadLocal) {
+    if (classification == SharingClassification::DefinitelyShared) {
       return classification;
+    }
+    if (classification == SharingClassification::MaybeShared) {
+      strongest = SharingClassification::MaybeShared;
     }
   }
 
-  return SharingClassification::DefinitelyThreadLocal;
+  return strongest;
 }
 
 bool StaticThreadSharingAnalysis::isShared(const Instruction *Inst) const {

@@ -220,9 +220,12 @@ RAIILockTracker::findDestructorsForLockObject(
       }
 
       // Function returns are implicit destructor points when no explicit
-      // lifetime end or destructor call is visible. We intentionally do not
-      // treat every unwind edge as an object-specific destructor site.
+      // lifetime end or destructor call is visible. Treat exceptional exits
+      // conservatively as end-of-lifetime points as well so must-lock
+      // reasoning does not survive an unwind-only scope exit.
       if (llvm::isa<llvm::ReturnInst>(inst)) {
+        addIfMissing(inst);
+      } else if (llvm::isa<llvm::ResumeInst>(inst)) {
         addIfMissing(inst);
       }
     }

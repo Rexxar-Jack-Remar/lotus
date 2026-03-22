@@ -70,6 +70,7 @@ private:
   std::vector<const llvm::Function *> m_threads;
   std::unordered_map<const llvm::Function *, unsigned> m_thread_spawn_counts;
   bool m_threads_complete = true;
+  bool m_access_paths_complete = true;
 
   void findStaticThreads(llvm::Module &M);
   void visitThread(const llvm::Function *ThreadEntry);

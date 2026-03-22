@@ -56,6 +56,53 @@ bool hasBranchWitness(const Instruction *inst) {
   return false;
 }
 
+bool hasCmpXchgSuccessWitness(const Instruction *inst) {
+  if (!isa<AtomicCmpXchgInst>(inst)) {
+    return false;
+  }
+
+  std::deque<const Value *> worklist;
+  std::unordered_set<const Value *> visited;
+  worklist.push_back(inst);
+  visited.insert(inst);
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+    for (const User *user : current->users()) {
+      if (!visited.insert(user).second) {
+        continue;
+      }
+      if (const auto *extract = dyn_cast<ExtractValueInst>(user)) {
+        if (extract->getNumIndices() == 1 && extract->getIndices()[0] == 1) {
+          worklist.push_back(extract);
+        }
+        continue;
+      }
+      if (const auto *branch = dyn_cast<BranchInst>(user)) {
+        if (branch->isConditional() && branch->getCondition() == current) {
+          return true;
+        }
+        continue;
+      }
+      if (const auto *cmp = dyn_cast<ICmpInst>(user)) {
+        for (const User *cmp_user : cmp->users()) {
+          const auto *branch = dyn_cast<BranchInst>(cmp_user);
+          if (branch && branch->isConditional()) {
+            return true;
+          }
+        }
+        continue;
+      }
+      if (isa<CastInst>(user) || isa<SelectInst>(user) || isa<PHINode>(user)) {
+        worklist.push_back(user);
+      }
+    }
+  }
+
+  return false;
+}
+
 const BranchInst *getBranchWitness(const Instruction *inst) {
   if (!inst) {
     return nullptr;
@@ -100,33 +147,32 @@ const BasicBlock *getWitnessSuccessor(const Instruction *inst) {
 
   const auto *cmp = dyn_cast<ICmpInst>(branch->getCondition());
   if (!cmp) {
-    return branch->getSuccessor(0);
+    return nullptr;
+  }
+
+  if (cmp->getPredicate() != ICmpInst::ICMP_EQ &&
+      cmp->getPredicate() != ICmpInst::ICMP_NE) {
+    return nullptr;
   }
 
   const Value *lhs = cmp->getOperand(0);
   const Value *rhs = cmp->getOperand(1);
   const auto *lhs_const = dyn_cast<ConstantInt>(lhs);
   const auto *rhs_const = dyn_cast<ConstantInt>(rhs);
-  const auto predicate = cmp->getPredicate();
+  const ConstantInt *constant = lhs_const ? lhs_const : rhs_const;
+  if (!constant) {
+    return nullptr;
+  }
 
   auto choose = [&](bool sync_on_true) -> const BasicBlock * {
     return branch->getSuccessor(sync_on_true ? 0 : 1);
   };
 
-  const ConstantInt *constant = lhs_const ? lhs_const : rhs_const;
-  if (!constant) {
-    return choose(predicate == ICmpInst::ICMP_EQ || predicate == ICmpInst::ICMP_NE);
-  }
-
   const bool is_zero = constant->isZero();
-  switch (predicate) {
-  case ICmpInst::ICMP_NE:
+  if (cmp->getPredicate() == ICmpInst::ICMP_NE) {
     return choose(is_zero);
-  case ICmpInst::ICMP_EQ:
-    return choose(!is_zero);
-  default:
-    return branch->getSuccessor(0);
   }
+  return choose(!is_zero);
 }
 
 struct AtomicLocationKey {
@@ -421,6 +467,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     bool is_store_like = false;
     bool is_load_like = false;
     bool is_rmw = false;
+    bool is_cmpxchg = false;
+    bool has_success_witness = true;
     bool has_release = false;
     bool has_acquire = false;
     bool is_fence = false;
@@ -507,6 +555,9 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         event.is_store_like = isStore(inst);
         event.is_load_like = isLoad(inst);
         event.is_rmw = isReadModifyWrite(inst);
+        event.is_cmpxchg = isa<AtomicCmpXchgInst>(inst);
+        event.has_success_witness =
+            !event.is_cmpxchg || hasCmpXchgSuccessWitness(inst);
         event.has_release = hasReleaseSemantics(inst);
         event.has_acquire = hasAcquireSemantics(inst);
         event.is_fence = false;
@@ -568,6 +619,10 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         break;
       case ThreadAPI::TD_LATCH_WAIT:
         latch_waits.push_back(inst);
+        break;
+      case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
+        barrier_arrives.push_back(inst);
+        barrier_waits.push_back(inst);
         break;
       case ThreadAPI::TD_BARRIER_ARRIVE:
         barrier_arrives.push_back(inst);
@@ -685,6 +740,11 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       if (!event.has_release) {
         continue;
       }
+      if (event.is_cmpxchg && !event.has_success_witness) {
+        ++deferred_direct_atomic_relations;
+        ++m_deferred_sync_counts["atomic_cmpxchg_release_missing_success_witness"];
+        continue;
+      }
       if (event.is_rmw) {
         rmw_candidates.push_back(&event);
         continue;
@@ -742,6 +802,11 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
           event.tid == std::numeric_limits<mhp::ThreadID>::max()) {
         continue;
       }
+      if (event.is_cmpxchg && !event.has_success_witness) {
+        ++deferred_direct_atomic_relations;
+        ++m_deferred_sync_counts["atomic_cmpxchg_acquire_missing_success_witness"];
+        continue;
+      }
       if (!event.is_rmw && !hasBranchWitness(event.inst)) {
         ++deferred_direct_atomic_relations;
         ++m_deferred_sync_counts["atomic_direct_missing_branch_witness"];
@@ -783,7 +848,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     for (size_t idx : entry.second) {
       const AtomicEvent &event = atomic_events[idx];
       if (event.inst != release_candidates.front().second && event.is_store_like &&
-          event.is_rmw) {
+          event.is_rmw && (!event.is_cmpxchg || event.has_success_witness)) {
         has_release_sequence = true;
         break;
       }

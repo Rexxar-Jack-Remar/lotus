@@ -897,6 +897,95 @@ TEST_F(LockSetAnalysisTest,
   EXPECT_TRUE(lsa.mayHoldLock(resume_inst, inner));
 }
 
+TEST_F(LockSetAnalysisTest, ImplicitRaiiUnwindExitClearsMustLockState) {
+  const char *source = R"(
+    declare void @fake_unique_lock_C1E(i8*, i8*)
+    declare void @might_throw()
+    declare i32 @__gxx_personality_v0(...)
+
+    @lock = global i8 0
+
+    define void @test() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %ul = alloca i8
+      call void @fake_unique_lock_C1E(i8* %ul, i8* @lock)
+      invoke void @might_throw()
+              to label %cont unwind label %lpad
+
+    cont:
+      ret void
+
+    lpad:
+      %lp = landingpad { i8*, i32 } cleanup
+      resume { i8*, i32 } %lp
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Function *test_func = module->getFunction("test");
+  ASSERT_NE(test_func, nullptr);
+
+  const Instruction *resume_inst = nullptr;
+  for (const Instruction &inst : instructions(test_func)) {
+    if (isa<ResumeInst>(&inst)) {
+      resume_inst = &inst;
+      break;
+    }
+  }
+  ASSERT_NE(resume_inst, nullptr);
+
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_FALSE(lsa.mustHoldLock(resume_inst, lock));
+}
+
+TEST_F(LockSetAnalysisTest,
+       BalancedRaiiHelperDoesNotClearCallerMustLockState) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare void @fake_unique_lock_C1E(i8*, i8*)
+    declare void @fake_unique_lock_D1Ev(i8*)
+
+    @lock = global i8 0
+
+    define void @helper() {
+    entry:
+      %ul = alloca i8
+      call void @fake_unique_lock_C1E(i8* %ul, i8* @lock)
+      call void @fake_unique_lock_D1Ev(i8* %ul)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      call void @helper()
+      %after = add i32 1, 2
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mustHoldLock(after, lock));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

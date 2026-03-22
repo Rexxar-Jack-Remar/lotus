@@ -6,6 +6,7 @@
 #include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -19,6 +20,35 @@ using namespace llvm;
 using namespace lotus;
 
 namespace mhp {
+
+namespace {
+
+bool collectUniqueStoredValues(const Value *ptr,
+                               SmallVectorImpl<const Value *> &storedValues) {
+  if (!ptr) {
+    return false;
+  }
+
+  std::set<const Value *> uniqueValues;
+  for (const User *user : ptr->users()) {
+    const auto *store = dyn_cast<StoreInst>(user);
+    if (!store || store->getPointerOperand() != ptr) {
+      continue;
+    }
+    uniqueValues.insert(store->getValueOperand());
+    if (uniqueValues.size() > 1) {
+      storedValues.clear();
+      return false;
+    }
+  }
+
+  for (const Value *value : uniqueValues) {
+    storedValues.push_back(value);
+  }
+  return !storedValues.empty();
+}
+
+} // namespace
 
 const Value *JoinTargetAnalysis::traceThreadHandleRoot(const Value *value,
                                                        const Module *module) {
@@ -49,16 +79,12 @@ const Value *JoinTargetAnalysis::traceThreadHandleRoot(const Value *value,
     }
 
     if (const auto *load = dyn_cast<LoadInst>(stripped)) {
-      bool found_store = false;
-      for (const User *user : load->getPointerOperand()->users()) {
-        if (const auto *store = dyn_cast<StoreInst>(user)) {
-          if (store->getPointerOperand() == load->getPointerOperand()) {
-            worklist.push_back(store->getValueOperand());
-            found_store = true;
-          }
+      SmallVector<const Value *, 2> storedValues;
+      if (collectUniqueStoredValues(load->getPointerOperand(), storedValues)) {
+        for (const Value *stored : storedValues) {
+          worklist.push_back(stored);
         }
-      }
-      if (!found_store) {
+      } else {
         worklist.push_back(load->getPointerOperand());
       }
       continue;
@@ -167,16 +193,12 @@ void JoinTargetAnalysis::traceThreadHandleRoots(
     }
 
     if (const auto *load = dyn_cast<LoadInst>(stripped)) {
-      bool found_store = false;
-      for (const User *user : load->getPointerOperand()->users()) {
-        if (const auto *store = dyn_cast<StoreInst>(user)) {
-          if (store->getPointerOperand() == load->getPointerOperand()) {
-            worklist.push_back(store->getValueOperand());
-            found_store = true;
-          }
+      SmallVector<const Value *, 2> storedValues;
+      if (collectUniqueStoredValues(load->getPointerOperand(), storedValues)) {
+        for (const Value *stored : storedValues) {
+          worklist.push_back(stored);
         }
-      }
-      if (!found_store) {
+      } else {
         worklist.push_back(load->getPointerOperand());
       }
       continue;

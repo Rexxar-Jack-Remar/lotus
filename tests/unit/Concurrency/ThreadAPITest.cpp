@@ -817,6 +817,95 @@ TEST_F(ThreadAPITest, ReportsExplicitSemanticLoweringStatus) {
   EXPECT_STREQ(omp_atomic.reason, "openmp-atomic-runtime-unmodeled");
 }
 
+TEST_F(ThreadAPITest, OpenMPBarrierUsesSiteIdentityInsteadOfMetadataOperand) {
+  const char *source = R"(
+    declare void @__kmpc_barrier(i8*, i32)
+
+    define void @main() {
+    entry:
+      call void @__kmpc_barrier(i8* null, i32 0)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *barrier = &main_func->getEntryBlock().front();
+
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_barrier")),
+            ThreadAPI::TD_BAR_WAIT);
+  EXPECT_EQ(api->getBarrierVal(barrier), barrier);
+}
+
+TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  std::set<ThreadAPI::TD_TYPE> expected_non_modeled = {
+      ThreadAPI::TD_DUMMY,
+      ThreadAPI::TD_ASYNC,
+      ThreadAPI::TD_OMP_ATOMIC_START,
+      ThreadAPI::TD_OMP_ATOMIC_END,
+      ThreadAPI::TD_MPI_SESSION_GET_INFO,
+      ThreadAPI::TD_MPI_SESSION_GET_NUM_ERRCODES,
+      ThreadAPI::TD_MPI_SESSION_GET_ERRHANDLER,
+      ThreadAPI::TD_MPI_SESSION_SET_ERRHANDLER,
+      ThreadAPI::TD_MPI_ERRHANDLER_CREATE,
+      ThreadAPI::TD_MPI_ERRHANDLER_FREE,
+      ThreadAPI::TD_MPI_COMM_GET_ERRHANDLER,
+      ThreadAPI::TD_MPI_COMM_SET_ERRHANDLER,
+      ThreadAPI::TD_MPI_COMM_CALL_ERRHANDLER,
+      ThreadAPI::TD_MPI_WIN_GET_ERRHANDLER,
+      ThreadAPI::TD_MPI_WIN_SET_ERRHANDLER,
+      ThreadAPI::TD_MPI_FILE_GET_ERRHANDLER,
+      ThreadAPI::TD_MPI_FILE_SET_ERRHANDLER,
+      ThreadAPI::TD_MPI_ERROR_CLASS,
+      ThreadAPI::TD_MPI_ERROR_STRING,
+      ThreadAPI::TD_MPI_INFO_CREATE,
+      ThreadAPI::TD_MPI_INFO_DUP,
+      ThreadAPI::TD_MPI_INFO_FREE,
+      ThreadAPI::TD_MPI_INFO_GET,
+      ThreadAPI::TD_MPI_INFO_GET_VALUELEN,
+      ThreadAPI::TD_MPI_INFO_GET_NKEYS,
+      ThreadAPI::TD_MPI_INFO_GET_NTHKEY,
+      ThreadAPI::TD_MPI_INFO_GET_KEYVAL,
+      ThreadAPI::TD_MPI_INFO_SET,
+      ThreadAPI::TD_MPI_INFO_DELETE,
+      ThreadAPI::TD_MPI_INFO_C2F,
+      ThreadAPI::TD_MPI_INFO_CREATE_ENV,
+      ThreadAPI::TD_MPI_INFO_FREE_ENV,
+      ThreadAPI::TD_MPI_GET_COUNT,
+      ThreadAPI::TD_MPI_GET_ELEMENTS,
+      ThreadAPI::TD_MPI_GET_ELEMENTS_X,
+      ThreadAPI::TD_MPI_STATUS_SIZE,
+      ThreadAPI::TD_MPI_STATUS_SET_ELEMENTS,
+      ThreadAPI::TD_MPI_STATUS_SET_ELEMENTS_X,
+  };
+
+  for (int raw = static_cast<int>(ThreadAPI::TD_DUMMY);
+       raw <= static_cast<int>(ThreadAPI::TD_KERNEL_MEMORY_BARRIER); ++raw) {
+    ThreadAPI::TD_TYPE type = static_cast<ThreadAPI::TD_TYPE>(raw);
+    const char *name = ThreadAPI::tdTypeToString(type);
+    ASSERT_NE(name, nullptr);
+    ASSERT_NE(name[0], '\0');
+
+    ThreadAPI::SemanticLoweringInfo info = api->getSemanticLoweringInfo(type);
+    ASSERT_NE(info.reason, nullptr);
+    EXPECT_NE(info.reason[0], '\0') << name;
+
+    if (expected_non_modeled.count(type) != 0) {
+      EXPECT_NE(info.kind, ThreadAPI::SemanticLoweringKind::Modeled) << name;
+    } else {
+      EXPECT_EQ(info.kind, ThreadAPI::SemanticLoweringKind::Modeled) << name;
+    }
+  }
+}
+
 TEST_F(ThreadAPITest, LongestPrefixRuleWinsForOpenMPDoacross) {
   const char *source = R"(
     declare void @__kmpc_doacross_wait_4(i8*, i32, i64*)

@@ -1989,6 +1989,29 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   summary.may_release_delta.clear();
   summary.must_release_delta.clear();
 
+  auto matchesLock = [this](LockID lhs, LockID rhs) {
+    const LockID clhs = getCanonicalLock(lhs);
+    const LockID crhs = getCanonicalLock(rhs);
+    if (clhs && crhs && clhs == crhs) {
+      return true;
+    }
+    return m_alias_analysis && clhs && crhs &&
+           m_alias_analysis->mustAlias(clhs, crhs);
+  };
+
+  auto isDefinitelyHeldAt = [&](const Instruction *inst, LockID lock) {
+    auto it = m_must_locksets_entry.find(inst);
+    if (it == m_must_locksets_entry.end()) {
+      return false;
+    }
+    for (LockID held : it->second) {
+      if (matchesLock(held, lock)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   // Collect return instructions
   std::vector<const ReturnInst *> returns;
   for (const BasicBlock &bb : *func) {
@@ -2007,14 +2030,18 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
   }
 
-  // We currently only compute maybe-released deltas soundly enough to clear
-  // caller must-lock certainty. A precise "definitely released on all exits"
-  // delta requires entry-sensitive summaries and is intentionally left empty.
+  // Track only releases that are not definitely matched by an in-callee
+  // acquisition on all paths to the release site. Balanced internal
+  // acquire/release pairs should not destroy caller must-lock certainty.
   for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
     Instruction *inst = &*I;
     std::vector<LockID> released = getRAIILocksReleasedAt(inst);
     if (!released.empty()) {
-      summary.must_release_delta.insert(released.begin(), released.end());
+      for (LockID lock : released) {
+        if (!isDefinitelyHeldAt(inst, lock)) {
+          summary.must_release_delta.insert(lock);
+        }
+      }
       continue;
     }
     if (isNonBinarySemaphoreOp(m_thread_api, inst)) {
@@ -2022,7 +2049,9 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
     if (m_thread_api->isTDRelease(inst) && !m_thread_api->isTDAcquire(inst)) {
       if (LockID lock = getLockValue(inst)) {
-        summary.must_release_delta.insert(lock);
+        if (!isDefinitelyHeldAt(inst, lock)) {
+          summary.must_release_delta.insert(lock);
+        }
       }
     }
   }

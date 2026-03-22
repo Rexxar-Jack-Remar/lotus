@@ -642,7 +642,6 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
         } else if (m_thread_api->isTDCondSignal(&inst)) {
           node_type = SyncNodeType::COND_SIGNAL;
         } else if (type == ThreadAPI::TD_LATCH_ARRIVE_WAIT ||
-                   type == ThreadAPI::TD_BARRIER_ARRIVE ||
                    m_thread_api->isTDBarWait(&inst)) {
           node_type = SyncNodeType::BARRIER_WAIT;
         }
@@ -710,7 +709,6 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
                    m_thread_api->isTDCondBroadcast(&inst)) {
           handleCondSignal(&inst, node);
         } else if (type == ThreadAPI::TD_LATCH_ARRIVE_WAIT ||
-                   type == ThreadAPI::TD_BARRIER_ARRIVE ||
                    m_thread_api->isTDBarWait(&inst)) {
           handleBarrier(&inst, node);
         } else {

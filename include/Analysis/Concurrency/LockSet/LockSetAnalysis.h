@@ -353,7 +353,8 @@ private:
   struct FunctionSummary {
     LockSet may_acquire_delta;  ///< Locks newly held on some exit path
     LockSet may_release_delta;  ///< Locks definitely absent on all exits
-    LockSet must_release_delta; ///< Locks maybe released by the callee
+    LockSet must_release_delta; ///< Locks maybe released without a definitely
+                                ///< matched in-callee acquisition
     bool is_analyzed;     ///< Whether function has been analyzed
 
     FunctionSummary() : is_analyzed(false) {}

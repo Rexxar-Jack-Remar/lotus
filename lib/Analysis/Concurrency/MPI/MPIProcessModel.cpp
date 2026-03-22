@@ -3463,6 +3463,26 @@ MPIProcessModel::getOperationsByKind(MPIOpKind kind) const {
 MPICommunicationMatch
 MPIProcessModel::classifyCommunicationMatch(const MPIOperation &op1,
                                             const MPIOperation &op2) const {
+  auto participantSetMayContainRank = [](const MPIParticipantSet &participants,
+                                         int rank) {
+    return participants.unknown || participants.contains(rank);
+  };
+  auto participantSetMayOverlapRange = [](const MPIParticipantSet &participants,
+                                          int min_rank, int max_rank) {
+    if (participants.unknown) {
+      return true;
+    }
+    if (min_rank < 0 || max_rank < 0) {
+      return true;
+    }
+    for (int rank = min_rank; rank <= max_rank; ++rank) {
+      if (participants.contains(rank)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   bool op1_is_send = (op1.kind == MPIOpKind::SEND_BLOCKING ||
                       op1.kind == MPIOpKind::SEND_NONBLOCKING);
   bool op2_is_send = (op2.kind == MPIOpKind::SEND_BLOCKING ||
@@ -3482,29 +3502,56 @@ MPIProcessModel::classifyCommunicationMatch(const MPIOperation &op1,
     precise = false;
   }
 
-  if (!send.participant_set.unknown && !recv.participant_set.unknown &&
-      !send.participant_set.mayOverlap(recv.participant_set)) {
-    return MPICommunicationMatch::NoMatch;
-  }
   if (send.participant_set.unknown || recv.participant_set.unknown) {
     model_gap = true;
     precise = false;
   }
 
-  if (!isMPIWildcardValue(send.dest_rank) &&
-      !isMPIWildcardValue(recv.source_rank) &&
-      send.dest_rank != recv.source_rank) {
-    if (!rangesOverlap(send.dest_rank_min, send.dest_rank_max,
-                       recv.source_rank_min, recv.source_rank_max)) {
+  if (!send.participant_set.unknown && !recv.participant_set.unknown &&
+      send.participant_set.constrainsParticipants() &&
+      recv.participant_set.constrainsParticipants()) {
+    if (!isMPIWildcardValue(send.dest_rank)) {
+      if (!participantSetMayContainRank(recv.participant_set, send.dest_rank)) {
+        return MPICommunicationMatch::NoMatch;
+      }
+    } else if (!participantSetMayOverlapRange(recv.participant_set,
+                                              send.dest_rank_min,
+                                              send.dest_rank_max)) {
       return MPICommunicationMatch::NoMatch;
     }
-  } else if (!rangesOverlap(send.dest_rank_min, send.dest_rank_max,
-                            recv.source_rank_min, recv.source_rank_max)) {
-    return MPICommunicationMatch::NoMatch;
-  } else if (isMPIWildcardValue(send.dest_rank) ||
-             isMPIWildcardValue(recv.source_rank) || send.dest_rank < 0 ||
-             recv.source_rank < 0) {
-    precise = false;
+    if (isMPIWildcardValue(send.dest_rank) || send.dest_rank < 0) {
+      precise = false;
+    }
+
+    if (!isMPIWildcardValue(recv.source_rank)) {
+      if (!participantSetMayContainRank(send.participant_set,
+                                        recv.source_rank)) {
+        return MPICommunicationMatch::NoMatch;
+      }
+    } else if (!participantSetMayOverlapRange(send.participant_set,
+                                              recv.source_rank_min,
+                                              recv.source_rank_max)) {
+      return MPICommunicationMatch::NoMatch;
+    }
+    if (isMPIWildcardValue(recv.source_rank) || recv.source_rank < 0) {
+      precise = false;
+    }
+  } else {
+    if (!isMPIWildcardValue(send.dest_rank) &&
+        !isMPIWildcardValue(recv.source_rank) &&
+        send.dest_rank != recv.source_rank) {
+      if (send.function && recv.function && send.function == recv.function) {
+        return MPICommunicationMatch::NoMatch;
+      }
+      precise = false;
+    } else if (!rangesOverlap(send.dest_rank_min, send.dest_rank_max,
+                              recv.source_rank_min, recv.source_rank_max)) {
+      return MPICommunicationMatch::NoMatch;
+    } else if (isMPIWildcardValue(send.dest_rank) ||
+               isMPIWildcardValue(recv.source_rank) || send.dest_rank < 0 ||
+               recv.source_rank < 0) {
+      precise = false;
+    }
   }
 
   if (!isMPIWildcardValue(send.tag) && !isMPIWildcardValue(recv.tag) &&

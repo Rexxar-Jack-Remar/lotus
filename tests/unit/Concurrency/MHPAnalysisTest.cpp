@@ -606,7 +606,61 @@ TEST_F(MHPAnalysisTest, SplitPhaseBarrierOrdersPreAndPostRegions) {
   hb.analyze();
 
   EXPECT_TRUE(hb.mustPrecede(store_shared, load_shared));
-  EXPECT_FALSE(mhp.mayHappenInParallel(store_shared, load_shared));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_shared, load_shared));
+}
+
+TEST_F(MHPAnalysisTest, SplitPhaseBarrierArriveDoesNotOrderPostArriveCode) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @std_barrier_arriveEv(i8*)
+    declare void @std_barrier_waitEv(i8*)
+
+    @barrier = global i8 0
+    @lhs = global i32 0
+    @rhs = global i32 0
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      call void @std_barrier_arriveEv(i8* @barrier)
+      %after_arrive = load i32, i32* @lhs, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %before_wait = load i32, i32* @rhs, align 4
+      call void @std_barrier_waitEv(i8* @barrier)
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Instruction *after_arrive =
+      findInstructionByName(*module->getFunction("writer"), "after_arrive");
+  const Instruction *before_wait =
+      findInstructionByName(*module->getFunction("reader"), "before_wait");
+  ASSERT_NE(after_arrive, nullptr);
+  ASSERT_NE(before_wait, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  EXPECT_TRUE(mhp.mayHappenInParallel(after_arrive, before_wait));
+  EXPECT_FALSE(hb.mustPrecede(after_arrive, before_wait));
+  EXPECT_FALSE(hb.mustPrecede(before_wait, after_arrive));
 }
 
 TEST_F(MHPAnalysisTest, CondSignalDoesNotCreateDefiniteHBToAllWaiters) {

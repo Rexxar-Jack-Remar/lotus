@@ -1134,6 +1134,13 @@ public:
         t == TD_OMP_REDUCE_START) {
       return inst;
     }
+    const llvm::Function *callee = getCallee(inst);
+    if (t == TD_BAR_WAIT && callee &&
+        getRuntimeLibrary(callee) == RuntimeLibrary::OpenMP) {
+      // __kmpc_barrier commonly reuses/nulls its ident_t* operand. The static
+      // synchronization identity is the barrier site itself, not that metadata.
+      return inst;
+    }
     if (cb->arg_size() < 1) {
       return nullptr;
     }
