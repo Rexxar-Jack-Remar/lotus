@@ -355,8 +355,8 @@ private:
       m_join_to_thread; // Join inst -> joined thread
 
   // Value tracking for pthread_t variables
-  std::unordered_map<const llvm::Value *, ThreadID>
-      m_pthread_value_to_thread; // pthread_t value -> thread ID
+  std::unordered_map<const llvm::Value *, std::unordered_set<ThreadID>>
+      m_pthread_value_to_threads; // pthread_t value -> possible thread IDs
   std::unordered_map<ThreadID, const llvm::Value *>
       m_thread_to_pthread_value; // thread ID -> pthread_t value
 

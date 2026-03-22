@@ -358,7 +358,7 @@ void MHPAnalysis::analyze() {
   m_thread_children.clear();
   m_fork_to_thread.clear();
   m_join_to_thread.clear();
-  m_pthread_value_to_thread.clear();
+  m_pthread_value_to_threads.clear();
   m_thread_to_pthread_value.clear();
   m_condvar_signals.clear();
   m_condvar_waits.clear();
@@ -624,7 +624,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
       SyncNodeType node_type = SyncNodeType::REGULAR_INST;
 
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
-        (void)cb;
+        ThreadAPI::TD_TYPE type = m_thread_api->getType(cb);
         if (m_thread_api->isTDFork(&inst)) {
           node_type = SyncNodeType::THREAD_FORK;
         } else if (m_thread_api->isTDJoin(&inst)) {
@@ -641,7 +641,9 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
           node_type = SyncNodeType::COND_BROADCAST;
         } else if (m_thread_api->isTDCondSignal(&inst)) {
           node_type = SyncNodeType::COND_SIGNAL;
-        } else if (m_thread_api->isTDBarWait(&inst)) {
+        } else if (type == ThreadAPI::TD_LATCH_ARRIVE_WAIT ||
+                   type == ThreadAPI::TD_BARRIER_ARRIVE ||
+                   m_thread_api->isTDBarWait(&inst)) {
           node_type = SyncNodeType::BARRIER_WAIT;
         }
       }
@@ -693,6 +695,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
 
       // Handle synchronization logic for special instructions
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
+        ThreadAPI::TD_TYPE type = m_thread_api->getType(cb);
         if (m_thread_api->isTDFork(&inst)) {
           handleThreadFork(&inst, node, tid);
         } else if (m_thread_api->isTDJoin(&inst)) {
@@ -706,7 +709,9 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
         } else if (m_thread_api->isTDCondSignal(&inst) ||
                    m_thread_api->isTDCondBroadcast(&inst)) {
           handleCondSignal(&inst, node);
-        } else if (m_thread_api->isTDBarWait(&inst)) {
+        } else if (type == ThreadAPI::TD_LATCH_ARRIVE_WAIT ||
+                   type == ThreadAPI::TD_BARRIER_ARRIVE ||
+                   m_thread_api->isTDBarWait(&inst)) {
           handleBarrier(&inst, node);
         } else {
           // Handle both direct and indirect calls
@@ -877,7 +882,7 @@ void MHPAnalysis::handleThreadFork(const Instruction *fork_inst, SyncNode *node,
   if (pthread_ptr) {
     // Map this pthread_t pointer to the thread ID
     // We need to track both the pointer and any loads from it
-    m_pthread_value_to_thread[pthread_ptr] = new_tid;
+    m_pthread_value_to_threads[pthread_ptr].insert(new_tid);
     m_thread_to_pthread_value[new_tid] = pthread_ptr;
 
     // Also track the store if it exists (for later load tracking)
@@ -956,13 +961,13 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
     const Value *pthread_t_origin = tracePthreadT(joined_thread_val);
 
     if (pthread_t_origin) {
-      auto it = m_pthread_value_to_thread.find(pthread_t_origin);
-      if (it != m_pthread_value_to_thread.end()) {
-        joined_tid = it->second;
+      auto it = m_pthread_value_to_threads.find(pthread_t_origin);
+      if (it != m_pthread_value_to_threads.end() && it->second.size() == 1) {
+        joined_tid = *it->second.begin();
         found_thread = true;
-        // Cache the result for the original value to speed up future lookups.
+        // Cache only unambiguous results for the original value.
         if (pthread_t_origin != joined_thread_val) {
-          m_pthread_value_to_thread[joined_thread_val] = joined_tid;
+          m_pthread_value_to_threads[joined_thread_val] = it->second;
         }
       }
     }
@@ -1392,6 +1397,36 @@ void MHPAnalysis::recomputePreForkMainNodes() {
     return;
   }
 
+  auto canReachInMainThread = [](const SyncNode *from,
+                                 const SyncNode *to) -> bool {
+    if (!from || !to || from == to) {
+      return false;
+    }
+
+    std::deque<const SyncNode *> worklist;
+    std::unordered_set<const SyncNode *> visited;
+    worklist.push_back(from);
+    visited.insert(from);
+
+    while (!worklist.empty()) {
+      const SyncNode *current = worklist.front();
+      worklist.pop_front();
+      if (current == to) {
+        return true;
+      }
+      for (SyncNode *succ : current->getSuccessors()) {
+        if (succ->getThreadID() != 0) {
+          continue;
+        }
+        if (visited.insert(succ).second) {
+          worklist.push_back(succ);
+        }
+      }
+    }
+
+    return false;
+  };
+
   SyncNode *main_entry = m_tfg->getThreadEntryNode(0);
   if (!main_entry) {
     return;
@@ -1407,13 +1442,13 @@ void MHPAnalysis::recomputePreForkMainNodes() {
   }
 
   for (SyncNode *node : thread_zero_nodes) {
-    if (node != main_entry && !m_tfg->canReach(main_entry, node)) {
+    if (node != main_entry && !canReachInMainThread(main_entry, node)) {
       continue;
     }
 
     bool reachable_from_spawn = false;
     for (SyncNode *spawn_node : spawn_nodes) {
-      if (spawn_node == node || m_tfg->canReach(spawn_node, node)) {
+      if (spawn_node == node || canReachInMainThread(spawn_node, node)) {
         reachable_from_spawn = true;
         break;
       }

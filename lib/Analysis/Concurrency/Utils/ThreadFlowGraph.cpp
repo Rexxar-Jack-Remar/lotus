@@ -23,6 +23,41 @@
 using namespace llvm;
 using namespace mhp;
 
+namespace {
+
+bool bfsReachableSameThread(const SyncNode *from, const SyncNode *to) {
+  if (!from || !to || from == to) {
+    return false;
+  }
+
+  std::deque<const SyncNode *> worklist;
+  std::unordered_set<const SyncNode *> visited;
+  worklist.push_back(from);
+  visited.insert(from);
+
+  while (!worklist.empty()) {
+    const SyncNode *current = worklist.front();
+    worklist.pop_front();
+
+    if (current == to) {
+      return true;
+    }
+
+    for (SyncNode *succ : current->getSuccessors()) {
+      if (succ->getThreadID() != from->getThreadID()) {
+        continue;
+      }
+      if (visited.insert(succ).second) {
+        worklist.push_back(succ);
+      }
+    }
+  }
+
+  return false;
+}
+
+} // namespace
+
 // ============================================================================
 // SyncNode Implementation
 // ============================================================================
@@ -525,7 +560,7 @@ bool ThreadFlowGraph::canReachViaIndex(const SyncNode *from,
   auto to_it = m_topo_order.find(to->getNodeID());
 
   if (from_it == m_topo_order.end() || to_it == m_topo_order.end()) {
-    return canReach(from, to);
+    return bfsReachableSameThread(from, to);
   }
 
   if (from_it->second > to_it->second) {
@@ -535,7 +570,7 @@ bool ThreadFlowGraph::canReachViaIndex(const SyncNode *from,
     if (from_rep != m_scc_representative.end() &&
         to_rep != m_scc_representative.end() &&
         from_rep->second == to_rep->second) {
-      return canReach(from, to);
+      return bfsReachableSameThread(from, to);
     }
 
     return false;

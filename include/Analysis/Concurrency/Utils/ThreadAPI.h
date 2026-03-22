@@ -1058,9 +1058,9 @@ public:
 
   /// Return barrier value
   //@{
-  /// First argument of pthread_barrier_wait
+  /// First argument of barrier-style synchronization operations.
   inline const llvm::Value *getBarrierVal(const llvm::Instruction *inst) const {
-    assert(isTDBarWait(inst) && "not a barrier wait function");
+    assert(isBarrierLike(inst) && "not a barrier-like function");
     const llvm::CallBase *cb = getLLVMCallSite(inst);
     if (!cb)
       return nullptr;
@@ -1272,8 +1272,8 @@ public:
       return true;
     }
     TD_TYPE t = getType(callee);
-    return t == TD_BAR_WAIT || t == TD_BARRIER_ARRIVE_WAIT ||
-           t == TD_BARRIER_WAIT_CPP20;
+    return t == TD_BAR_WAIT || t == TD_LATCH_ARRIVE_WAIT ||
+           t == TD_BARRIER_ARRIVE_WAIT || t == TD_BARRIER_WAIT_CPP20;
   }
 
   inline bool isBarrierLike(const llvm::Instruction *inst) const {

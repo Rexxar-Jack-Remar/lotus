@@ -14,6 +14,20 @@ using namespace llvm;
 
 namespace lotus {
 
+namespace {
+
+const Function *resolveInternalCallee(const CallBase *call) {
+  if (!call) {
+    return nullptr;
+  }
+  if (Function *direct = call->getCalledFunction()) {
+    return direct;
+  }
+  return dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+}
+
+} // namespace
+
 EscapeAnalysis::EscapeAnalysis(Module &module) : m_module(module) {}
 
 void EscapeAnalysis::analyze() {
@@ -139,11 +153,20 @@ void EscapeAnalysis::runEscapeAnalysis() {
     if (auto *CB = dyn_cast<CallBase>(curr)) {
       if (!m_escaped_values.count(CB))
         continue;
-      Function *callee = CB->getCalledFunction();
+      const Function *callee = resolveInternalCallee(CB);
       if (callee && !callee->isDeclaration()) {
-        for (BasicBlock &BB : *callee) {
+        for (unsigned arg_idx = 0; arg_idx < CB->arg_size(); ++arg_idx) {
+          const Value *actual_arg = CB->getArgOperand(arg_idx);
+          if (!actual_arg || !actual_arg->getType()->isPointerTy()) {
+            continue;
+          }
+          if (m_escaped_values.insert(actual_arg).second) {
+            worklist.push_back(actual_arg);
+          }
+        }
+        for (const BasicBlock &BB : *callee) {
           if (auto *ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
-            if (Value *retVal = ret->getReturnValue()) {
+            if (const Value *retVal = ret->getReturnValue()) {
               if (m_escaped_values.insert(retVal).second) {
                 worklist.push_back(retVal);
               }
@@ -208,12 +231,13 @@ void EscapeAnalysis::runEscapeAnalysis() {
           }
         } else if (auto *call = dyn_cast<CallBase>(inst)) {
           // Propagate from Actual Argument -> Formal Argument
-          Function *callee = call->getCalledFunction();
+          const Function *callee = resolveInternalCallee(call);
           if (callee && !callee->isDeclaration()) {
             for (unsigned i = 0; i < call->arg_size(); ++i) {
               if (call->getArgOperand(i) == curr) {
                 if (i < callee->arg_size()) {
-                  Argument *formalArg = callee->getArg(i);
+                  Argument *formalArg =
+                      const_cast<Function *>(callee)->getArg(i);
                   if (m_escaped_values.insert(formalArg).second) {
                     worklist.push_back(formalArg);
                   }
@@ -226,7 +250,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
           const Function *F = ret->getFunction();
           for (const User *U : F->users()) {
             if (auto *CB = dyn_cast<CallBase>(U)) {
-              if (CB->getCalledFunction() == F) {
+              if (resolveInternalCallee(CB) == F) {
                 if (m_escaped_values.insert(CB).second) {
                   worklist.push_back(CB);
                 }

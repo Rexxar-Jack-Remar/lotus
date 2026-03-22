@@ -52,8 +52,6 @@ void HappensBeforeAnalysis::analyze() {
   m_shared_state_trace_cache.clear();
   m_deferred_sync_counts.clear();
   m_atomic_instructions.clear();
-  m_atomic_sync_witnesses.clear();
-  m_atomic_hb_pairs.clear();
   m_sync_with.clear();
   m_explicit_hb_pairs.clear();
   m_extra_hb_successors.clear();
@@ -197,271 +195,7 @@ void HappensBeforeAnalysis::computeAtomicHappensBefore() {
   }
 
   errs() << "Deferred " << m_atomic_instructions.size()
-         << " atomic/fence operations pending witness-based lowering.\n";
-}
-
-std::vector<const Instruction *>
-HappensBeforeAnalysis::collectFenceWitnesses(
-    const Instruction *fence, bool require_release_semantics) const {
-  std::vector<const Instruction *> witnesses;
-  if (!fence) {
-    return witnesses;
-  }
-
-  mhp::ThreadID fence_tid = m_mhp.getThreadID(fence);
-  if (fence_tid == std::numeric_limits<mhp::ThreadID>::max()) {
-    return witnesses;
-  }
-
-  for (const Instruction *inst : m_atomic_instructions) {
-    if (inst == fence || CppAtomics::isFence(inst)) {
-      continue;
-    }
-    if (m_mhp.getThreadID(inst) != fence_tid) {
-      continue;
-    }
-
-    if (require_release_semantics) {
-      if (!CppAtomics::hasReleaseSemantics(inst) ||
-          !CppAtomics::isStore(inst)) {
-        continue;
-      }
-      if (!hasProgramOrder(inst, fence)) {
-        continue;
-      }
-    } else {
-      if (!CppAtomics::hasAcquireSemantics(inst) || !CppAtomics::isLoad(inst)) {
-        continue;
-      }
-      if (!hasProgramOrder(fence, inst)) {
-        continue;
-      }
-    }
-
-    if (!CppAtomics::getAtomicPointer(inst)) {
-      continue;
-    }
-    witnesses.push_back(inst);
-  }
-
-  return witnesses;
-}
-
-bool HappensBeforeAnalysis::atomicLocationsMayAlias(
-    const Instruction *lhs, const Instruction *rhs) const {
-  const Value *lhs_ptr = CppAtomics::getAtomicPointer(lhs);
-  const Value *rhs_ptr = CppAtomics::getAtomicPointer(rhs);
-  if (!lhs_ptr || !rhs_ptr) {
-    return false;
-  }
-  lhs_ptr = lhs_ptr->stripPointerCasts();
-  rhs_ptr = rhs_ptr->stripPointerCasts();
-  if (lhs_ptr == rhs_ptr) {
-    return true;
-  }
-  if (const Value *lhs_base = getUnderlyingObject(lhs_ptr)) {
-    lhs_ptr = lhs_base->stripPointerCasts();
-  }
-  if (const Value *rhs_base = getUnderlyingObject(rhs_ptr)) {
-    rhs_ptr = rhs_base->stripPointerCasts();
-  }
-  if (lhs_ptr == rhs_ptr) {
-    return true;
-  }
-  return m_alias_analysis && m_alias_analysis->mayAlias(lhs_ptr, rhs_ptr);
-}
-
-bool HappensBeforeAnalysis::atomicLocationsMustAlias(
-    const Instruction *lhs, const Instruction *rhs) const {
-  const Value *lhs_ptr = CppAtomics::getAtomicPointer(lhs);
-  const Value *rhs_ptr = CppAtomics::getAtomicPointer(rhs);
-  if (!lhs_ptr || !rhs_ptr) {
-    return false;
-  }
-  lhs_ptr = lhs_ptr->stripPointerCasts();
-  rhs_ptr = rhs_ptr->stripPointerCasts();
-  if (lhs_ptr == rhs_ptr) {
-    return true;
-  }
-  return m_alias_analysis && m_alias_analysis->mustAlias(lhs_ptr, rhs_ptr);
-}
-
-size_t HappensBeforeAnalysis::countConcreteAtomicWitnesses(
-    const Instruction *inst) const {
-  if (!inst || CppAtomics::isFence(inst) || !CppAtomics::getAtomicPointer(inst)) {
-    return 0;
-  }
-
-  size_t count = 0;
-  for (const Instruction *candidate : m_atomic_instructions) {
-    if (candidate == inst || CppAtomics::isFence(candidate) ||
-        !CppAtomics::getAtomicPointer(candidate)) {
-      continue;
-    }
-    if (!atomicLocationsMustAlias(inst, candidate)) {
-      continue;
-    }
-    if (CppAtomics::hasReleaseSemantics(inst) &&
-        (CppAtomics::isStore(inst) || CppAtomics::isReadModifyWrite(inst))) {
-      if (!CppAtomics::hasReleaseSemantics(candidate) ||
-          !(CppAtomics::isStore(candidate) ||
-            CppAtomics::isReadModifyWrite(candidate))) {
-        continue;
-      }
-    } else if (CppAtomics::hasAcquireSemantics(inst) &&
-               (CppAtomics::isLoad(inst) ||
-                CppAtomics::isReadModifyWrite(inst))) {
-      if (!CppAtomics::hasAcquireSemantics(candidate) ||
-          !(CppAtomics::isLoad(candidate) ||
-            CppAtomics::isReadModifyWrite(candidate))) {
-        continue;
-      }
-    }
-    if (m_mhp.getThreadID(candidate) != m_mhp.getThreadID(inst)) {
-      continue;
-    }
-    ++count;
-  }
-  return count;
-}
-
-size_t HappensBeforeAnalysis::countDirectAtomicPartners(
-    const Instruction *inst, bool require_release_partner) const {
-  if (!inst || CppAtomics::isFence(inst) || !CppAtomics::getAtomicPointer(inst)) {
-    return 0;
-  }
-
-  size_t count = 0;
-  for (const Instruction *candidate : m_atomic_instructions) {
-    if (candidate == inst || CppAtomics::isFence(candidate) ||
-        !CppAtomics::getAtomicPointer(candidate)) {
-      continue;
-    }
-    if (m_mhp.getThreadID(candidate) == m_mhp.getThreadID(inst)) {
-      continue;
-    }
-    if (!atomicLocationsMustAlias(inst, candidate)) {
-      continue;
-    }
-
-    if (require_release_partner) {
-      if (!CppAtomics::hasReleaseSemantics(candidate) ||
-          !(CppAtomics::isStore(candidate) ||
-            CppAtomics::isReadModifyWrite(candidate))) {
-        continue;
-      }
-    } else {
-      if (!CppAtomics::hasAcquireSemantics(candidate) ||
-          !(CppAtomics::isLoad(candidate) ||
-            CppAtomics::isReadModifyWrite(candidate))) {
-        continue;
-      }
-    }
-
-    ++count;
-  }
-
-  return count;
-}
-
-bool HappensBeforeAnalysis::hasConcreteFenceWitness(
-    const Instruction *release_inst, const Instruction *acquire_inst) const {
-  if (!release_inst || !acquire_inst) {
-    return false;
-  }
-
-  if (!atomicLocationsMustAlias(release_inst, acquire_inst)) {
-    return false;
-  }
-
-  // Soundness-first policy: only keep fence-derived witness pairs when the
-  // atomic object is unique on both sides. Without reads-from reasoning,
-  // broader may-alias pairing creates over-strong HB edges.
-  if (countConcreteAtomicWitnesses(release_inst) != 0 ||
-      countConcreteAtomicWitnesses(acquire_inst) != 0) {
-    return false;
-  }
-
-  return hasBranchWitness(acquire_inst);
-}
-
-bool HappensBeforeAnalysis::hasConcreteDirectAtomicWitness(
-    const Instruction *release_inst, const Instruction *acquire_inst) const {
-  if (!release_inst || !acquire_inst) {
-    return false;
-  }
-
-  if (!atomicLocationsMustAlias(release_inst, acquire_inst)) {
-    return false;
-  }
-
-  if (countDirectAtomicPartners(release_inst,
-                                /*require_release_partner=*/false) != 1 ||
-      countDirectAtomicPartners(acquire_inst,
-                                /*require_release_partner=*/true) != 1) {
-    return false;
-  }
-
-  return hasBranchWitness(acquire_inst);
-}
-
-bool HappensBeforeAnalysis::hasConcreteReleaseSequenceWitness(
-    const Instruction *release_inst, const Instruction *acquire_inst) const {
-  if (!release_inst || !acquire_inst) {
-    return false;
-  }
-
-  if (!atomicLocationsMustAlias(release_inst, acquire_inst)) {
-    return false;
-  }
-
-  auto isReleaseHead = [](const Instruction *inst) {
-    return inst && CppAtomics::hasReleaseSemantics(inst) &&
-           (CppAtomics::isStore(inst) || CppAtomics::isReadModifyWrite(inst));
-  };
-
-  auto isAcquireUse = [](const Instruction *inst) {
-    return inst && CppAtomics::hasAcquireSemantics(inst) &&
-           (CppAtomics::isLoad(inst) || CppAtomics::isReadModifyWrite(inst));
-  };
-
-  if (!isReleaseHead(release_inst) || !isAcquireUse(acquire_inst) ||
-      CppAtomics::isFence(release_inst) || CppAtomics::isFence(acquire_inst) ||
-      !CppAtomics::getAtomicPointer(release_inst) ||
-      !CppAtomics::getAtomicPointer(acquire_inst)) {
-    return false;
-  }
-
-  // Keep this soundness-first: a release sequence edge is emitted only when
-  // there is a single concrete release head for the location and every other
-  // cross-thread write on that location is an RMW that could participate in
-  // that release sequence. This avoids adding HB when a competing plain store
-  // could satisfy the acquire without being in the sequence.
-  size_t release_sequence_rmw = 0;
-  for (const Instruction *candidate : m_atomic_instructions) {
-    if (candidate == release_inst || CppAtomics::isFence(candidate) ||
-        !CppAtomics::getAtomicPointer(candidate) ||
-        !atomicLocationsMustAlias(release_inst, candidate) ||
-        m_mhp.getThreadID(candidate) == m_mhp.getThreadID(release_inst)) {
-      continue;
-    }
-
-    if (CppAtomics::isReadModifyWrite(candidate)) {
-      ++release_sequence_rmw;
-      continue;
-    }
-
-    if (CppAtomics::isStore(candidate) &&
-        !CppAtomics::isReadModifyWrite(candidate)) {
-      return false;
-    }
-  }
-
-  if (release_sequence_rmw == 0) {
-    return false;
-  }
-
-  return hasBranchWitness(acquire_inst);
+         << " atomic/fence operations pending reads-from-aware lowering.\n";
 }
 
 void HappensBeforeAnalysis::buildSynchronizesWith() {
@@ -575,6 +309,9 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       case ThreadAPI::TD_LATCH_COUNT_DOWN:
       case ThreadAPI::TD_LATCH_ARRIVE_WAIT:
         latch_countdowns.push_back(inst);
+        if (type == ThreadAPI::TD_LATCH_ARRIVE_WAIT) {
+          latch_waits.push_back(inst);
+        }
         break;
       case ThreadAPI::TD_LATCH_WAIT:
         latch_waits.push_back(inst);
@@ -640,95 +377,16 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       if (m_mhp.getThreadID(release) == m_mhp.getThreadID(acquire)) {
         continue;
       }
-      bool emitted = false;
-      if (CppAtomics::isFence(release) || CppAtomics::isFence(acquire)) {
-        if (CppAtomics::isFence(release) && CppAtomics::isFence(acquire)) {
-          for (const Instruction *release_witness :
-               collectFenceWitnesses(release, /*require_release_semantics=*/true)) {
-            for (const Instruction *acquire_witness : collectFenceWitnesses(
-                     acquire, /*require_release_semantics=*/false)) {
-              if (!hasConcreteFenceWitness(release_witness, acquire_witness) &&
-                  !hasConcreteReleaseSequenceWitness(release_witness,
-                                                    acquire_witness)) {
-                continue;
-              }
-              size_t before = m_sync_with.size();
-              addSyncEdge(release_witness, acquire_witness);
-              if (m_sync_with.size() != before) {
-                ++direct_atomic_edges;
-                if (hasConcreteReleaseSequenceWitness(release_witness,
-                                                     acquire_witness)) {
-                  ++release_sequence_edges;
-                }
-              }
-              emitted = true;
-            }
-          }
-        } else if (CppAtomics::isFence(release)) {
-          for (const Instruction *release_witness :
-               collectFenceWitnesses(release, /*require_release_semantics=*/true)) {
-            if (!sameAtomicLocation(release_witness, acquire) ||
-                (!hasConcreteFenceWitness(release_witness, acquire) &&
-                 !hasConcreteReleaseSequenceWitness(release_witness,
-                                                    acquire))) {
-              continue;
-            }
-            size_t before = m_sync_with.size();
-            addSyncEdge(release_witness, acquire);
-            if (m_sync_with.size() != before) {
-              ++direct_atomic_edges;
-              ++mixed_fence_atomic_edges;
-              if (hasConcreteReleaseSequenceWitness(release_witness,
-                                                   acquire)) {
-                ++release_sequence_edges;
-              }
-            }
-            emitted = true;
-          }
-        } else {
-          for (const Instruction *acquire_witness : collectFenceWitnesses(
-                   acquire, /*require_release_semantics=*/false)) {
-            if (!sameAtomicLocation(release, acquire_witness) ||
-                (!hasConcreteFenceWitness(release, acquire_witness) &&
-                 !hasConcreteReleaseSequenceWitness(release,
-                                                    acquire_witness))) {
-              continue;
-            }
-            size_t before = m_sync_with.size();
-            addSyncEdge(release, acquire_witness);
-            if (m_sync_with.size() != before) {
-              ++direct_atomic_edges;
-              ++mixed_fence_atomic_edges;
-              if (hasConcreteReleaseSequenceWitness(release,
-                                                   acquire_witness)) {
-                ++release_sequence_edges;
-              }
-            }
-            emitted = true;
-          }
-        }
-      } else if (sameAtomicLocation(release, acquire) &&
-                 (hasConcreteDirectAtomicWitness(release, acquire) ||
-                  hasConcreteReleaseSequenceWitness(release, acquire))) {
-        size_t before = m_sync_with.size();
-        addSyncEdge(release, acquire);
-        if (m_sync_with.size() != before) {
-          ++direct_atomic_edges;
-          if (hasConcreteReleaseSequenceWitness(release, acquire)) {
-            ++release_sequence_edges;
-          }
-        }
-        emitted = true;
-      }
-      if (!emitted && !CppAtomics::isFence(release) &&
-          !CppAtomics::isFence(acquire) && sameAtomicLocation(release, acquire)) {
+      const bool same_location = sameAtomicLocation(release, acquire);
+      const bool is_fence_relation =
+          CppAtomics::isFence(release) || CppAtomics::isFence(acquire);
+      if (!is_fence_relation && same_location) {
         ++deferred_direct_atomic_relations;
         if (CppAtomics::hasReleaseSemantics(release) &&
             CppAtomics::hasAcquireSemantics(acquire)) {
           ++deferred_release_sequence_relations;
         }
-      } else if (!emitted &&
-                 (CppAtomics::isFence(release) || CppAtomics::isFence(acquire))) {
+      } else if (is_fence_relation) {
         ++deferred_mixed_fence_relations;
       }
     }

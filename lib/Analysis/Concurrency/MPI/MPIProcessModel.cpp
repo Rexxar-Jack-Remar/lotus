@@ -86,12 +86,8 @@ bool rangesOverlap(int lhs_min, int lhs_max, int rhs_min, int rhs_max) {
 }
 
 struct CommunicatorTraceResult;
-bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs,
-                           const Module *module);
 
-bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) {
-  return communicatorsMayAlias(lhs, rhs, nullptr);
-}
+enum class CommunicatorAliasResult { MustAlias, NoAlias, Unknown };
 
 enum class CommunicatorTraceState { Unresolved, Resolved, Ambiguous };
 
@@ -192,34 +188,39 @@ CommunicatorTraceResult traceCommunicatorValue(const Value *value,
   return {};
 }
 
-bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs,
-                           const Module *module) {
+CommunicatorAliasResult classifyCommunicatorAlias(CommunicatorID lhs,
+                                                  CommunicatorID rhs,
+                                                  const Module *module) {
   if (!lhs || !rhs) {
-    return false;
+    return CommunicatorAliasResult::Unknown;
   }
 
   const CommunicatorTraceResult lhs_trace = traceCommunicatorValue(lhs, module);
   const CommunicatorTraceResult rhs_trace = traceCommunicatorValue(rhs, module);
   if (lhs_trace.state == CommunicatorTraceState::Ambiguous ||
       rhs_trace.state == CommunicatorTraceState::Ambiguous) {
-    return false;
+    return CommunicatorAliasResult::Unknown;
   }
   if (lhs_trace.state == CommunicatorTraceState::Resolved &&
       rhs_trace.state == CommunicatorTraceState::Resolved &&
       lhs_trace.root == rhs_trace.root) {
-    return true;
+    return CommunicatorAliasResult::MustAlias;
   }
   if (lhs == rhs) {
-    return true;
+    return CommunicatorAliasResult::MustAlias;
   }
 
   const auto *lhs_arg = dyn_cast<Argument>(lhs);
   const auto *rhs_arg = dyn_cast<Argument>(rhs);
   if (lhs_arg && rhs_arg && lhs_arg->getParent() == rhs_arg->getParent() &&
       lhs_arg->getArgNo() == rhs_arg->getArgNo()) {
-    return true;
+    return CommunicatorAliasResult::MustAlias;
   }
-  return false;
+  if (lhs_trace.state == CommunicatorTraceState::Resolved &&
+      rhs_trace.state == CommunicatorTraceState::Resolved) {
+    return CommunicatorAliasResult::NoAlias;
+  }
+  return CommunicatorAliasResult::Unknown;
 }
 
 bool sameCommunicatorForProof(const MPIOperation &lhs,
@@ -229,7 +230,8 @@ bool sameCommunicatorForProof(const MPIOperation &lhs,
       lhs.communicator_class_id == rhs.communicator_class_id) {
     return true;
   }
-  return communicatorsMayAlias(lhs.communicator, rhs.communicator, module);
+  return classifyCommunicatorAlias(lhs.communicator, rhs.communicator, module) ==
+         CommunicatorAliasResult::MustAlias;
 }
 
 const Value *canonicalMemoryBase(const Value *value) {
@@ -471,7 +473,9 @@ bool isPotentialChannelPair(const MPIOperation &send, const MPIOperation &recv,
       send.communicator_class_id == recv.communicator_class_id) {
     return true;
   }
-  return communicatorsMayAlias(send.communicator, recv.communicator, module) ||
+  return classifyCommunicatorAlias(send.communicator, recv.communicator,
+                                   module) !=
+             CommunicatorAliasResult::NoAlias ||
          (!send.communicator && !recv.communicator);
 }
 
@@ -3454,10 +3458,17 @@ MPIProcessModel::classifyCommunicationMatch(const MPIOperation &op1,
 
   if (send.communicator_class_id != 0 && recv.communicator_class_id != 0 &&
       send.communicator_class_id == recv.communicator_class_id) {
-  } else if (send.communicator && recv.communicator &&
-             !communicatorsMayAlias(send.communicator, recv.communicator,
-                                    &module_)) {
-    return MPICommunicationMatch::NoMatch;
+  } else if (send.communicator && recv.communicator) {
+    const CommunicatorAliasResult communicator_alias =
+        classifyCommunicatorAlias(send.communicator, recv.communicator,
+                                  &module_);
+    if (communicator_alias == CommunicatorAliasResult::NoAlias) {
+      return MPICommunicationMatch::NoMatch;
+    }
+    if (communicator_alias == CommunicatorAliasResult::Unknown) {
+      model_gap = true;
+      precise = false;
+    }
   } else {
     model_gap = true;
     precise = false;

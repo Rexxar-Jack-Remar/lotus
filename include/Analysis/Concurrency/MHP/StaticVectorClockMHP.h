@@ -85,6 +85,8 @@ public:
   /// Print debug information about the computed clocks and pairs.
   void printResults(llvm::raw_ostream &os) const override;
 
+  const ThreadFlowGraph &getThreadFlowGraph() const { return *m_tfg; }
+
   static constexpr unsigned kCallContextLimit = 2; // k-limiting for call strings
 
 private:
@@ -250,7 +252,8 @@ private:
   std::unordered_map<ThreadID, std::vector<ThreadID>> m_thread_children;
   std::unordered_map<const llvm::Instruction *, ThreadID> m_fork_to_thread;
   std::unordered_map<const llvm::Instruction *, ThreadID> m_join_to_thread;
-  std::unordered_map<const llvm::Value *, ThreadID> m_pthread_value_to_thread;
+  std::unordered_map<const llvm::Value *, std::unordered_set<ThreadID>>
+      m_pthread_value_to_threads;
   std::unordered_map<ThreadID, const llvm::Value *> m_thread_to_pthread_value;
   std::unordered_map<ThreadID,
                      std::unordered_map<CallContextID,

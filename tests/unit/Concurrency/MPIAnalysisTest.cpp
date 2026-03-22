@@ -1054,6 +1054,105 @@ TEST_F(MPIAnalysisTest, UnknownDistinctCommunicatorsDoNotForceDeadlockProof) {
   EXPECT_TRUE(analysis.getResults().potential_deadlocks.empty());
 }
 
+TEST_F(MPIAnalysisTest,
+       AmbiguousPointToPointCommunicatorDoesNotDisproveCommunication) {
+  const char *source = R"(
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+
+    define i32 @rank0(i1 %cond, i8* %comm_a, i8* %comm_b) {
+    entry:
+      %comm = select i1 %cond, i8* %comm_a, i8* %comm_b
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 1, i32 9, i8* %comm)
+      ret i32 0
+    }
+
+    define i32 @rank1(i1 %cond, i8* %comm_a, i8* %comm_b) {
+    entry:
+      %comm = select i1 %cond, i8* %comm_a, i8* %comm_b
+      call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 0, i32 9, i8* %comm, i8* null)
+      ret i32 0
+    }
+
+    define i32 @main(i1 %cond, i8* %comm_a, i8* %comm_b) {
+    entry:
+      %a = call i32 @rank0(i1 %cond, i8* %comm_a, i8* %comm_b)
+      %b = call i32 @rank1(i1 %cond, i8* %comm_a, i8* %comm_b)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto sends =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::SEND_BLOCKING);
+  auto recvs =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::RECV_BLOCKING);
+  ASSERT_EQ(sends.size(), 1u);
+  ASSERT_EQ(recvs.size(), 1u);
+
+  EXPECT_NE(analysis.getProcessModel().classifyCommunicationMatch(
+                sends.front(), recvs.front()),
+            MPICommunicationMatch::NoMatch);
+}
+
+TEST_F(MPIAnalysisTest,
+       AmbiguousPointToPointCommunicatorEmitsModelGapAndKeepsChannel) {
+  const char *source = R"(
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+
+    define i32 @helper_send(i1 %cond, i8* %comm_a, i8* %comm_b) {
+    entry:
+      %comm = select i1 %cond, i8* %comm_a, i8* %comm_b
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 1, i32 5, i8* %comm)
+      ret i32 0
+    }
+
+    define i32 @helper_recv(i1 %cond, i8* %comm_a, i8* %comm_b) {
+    entry:
+      %comm = select i1 %cond, i8* %comm_a, i8* %comm_b
+      call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 0, i32 5, i8* %comm, i8* null)
+      ret i32 0
+    }
+
+    define i32 @main(i1 %cond, i8* %comm_a, i8* %comm_b) {
+    entry:
+      %a = call i32 @helper_send(i1 %cond, i8* %comm_a, i8* %comm_b)
+      %b = call i32 @helper_recv(i1 %cond, i8* %comm_a, i8* %comm_b)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_model_gap = false;
+  for (const auto &gap : analysis.getResults().model_gaps) {
+    if (gap.code == "mpi_channel_identity_unresolved") {
+      saw_model_gap = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(saw_model_gap);
+
+  bool saw_channel_relation = false;
+  for (const auto &diag : analysis.getResults().diagnostics) {
+    if (diag.code == "mpi_channel_identity_unresolved") {
+      saw_channel_relation = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(saw_channel_relation);
+}
+
 TEST_F(MPIAnalysisTest, CollectiveMatchingUsesPerCommunicatorSequenceSlots) {
   const char *source = R"(
     declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)

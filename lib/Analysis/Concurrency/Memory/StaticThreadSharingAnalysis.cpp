@@ -338,6 +338,9 @@ StaticThreadSharingAnalysis::classify(const Instruction *Inst) const {
   if (accessKeys.empty() && N->getNodeType().global) {
     return SharingClassification::MaybeShared;
   }
+  if (accessKeys.empty()) {
+    return SharingClassification::MaybeShared;
+  }
 
   for (const Value *Alloc : accessKeys) {
     SharingClassification classification = classify(Alloc);

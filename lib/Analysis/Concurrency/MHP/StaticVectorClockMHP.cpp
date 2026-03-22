@@ -42,7 +42,7 @@ void StaticVectorClockMHP::analyze() {
   m_thread_children.clear();
   m_fork_to_thread.clear();
   m_join_to_thread.clear();
-  m_pthread_value_to_thread.clear();
+  m_pthread_value_to_threads.clear();
   m_thread_to_pthread_value.clear();
   m_visited_functions_by_thread.clear();
   m_condvar_signals.clear();
@@ -800,7 +800,7 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
       SyncNodeType node_type = SyncNodeType::REGULAR_INST;
 
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
-        (void)cb;
+        ThreadAPI::TD_TYPE type = m_thread_api->getType(cb);
         if (m_thread_api->isTDFork(&inst)) {
           node_type = SyncNodeType::THREAD_FORK;
         } else if (m_thread_api->isTDJoin(&inst)) {
@@ -817,7 +817,9 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
           node_type = SyncNodeType::COND_SIGNAL;
         } else if (m_thread_api->isTDCondBroadcast(&inst)) {
           node_type = SyncNodeType::COND_BROADCAST;
-        } else if (m_thread_api->isTDBarWait(&inst)) {
+        } else if (type == ThreadAPI::TD_LATCH_ARRIVE_WAIT ||
+                   type == ThreadAPI::TD_BARRIER_ARRIVE ||
+                   m_thread_api->isTDBarWait(&inst)) {
           node_type = SyncNodeType::BARRIER_WAIT;
         }
       }
@@ -867,6 +869,7 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
       }
 
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
+        ThreadAPI::TD_TYPE type = m_thread_api->getType(cb);
         if (m_thread_api->isTDFork(&inst)) {
           handleThreadFork(&inst, node, tid);
         } else if (m_thread_api->isTDJoin(&inst)) {
@@ -881,7 +884,9 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
           handleCondSignal(&inst, node);
         } else if (m_thread_api->isTDCondBroadcast(&inst)) {
           handleCondSignal(&inst, node);
-        } else if (m_thread_api->isTDBarWait(&inst)) {
+        } else if (type == ThreadAPI::TD_LATCH_ARRIVE_WAIT ||
+                   type == ThreadAPI::TD_BARRIER_ARRIVE ||
+                   m_thread_api->isTDBarWait(&inst)) {
           handleBarrier(&inst, node);
         } else {
           auto processCallee = [&](const Function *callee) {
@@ -1089,7 +1094,7 @@ void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
 
   const Value *pthread_ptr = m_thread_api->getForkedThread(fork_inst);
   if (pthread_ptr) {
-    m_pthread_value_to_thread[pthread_ptr] = new_tid;
+    m_pthread_value_to_threads[pthread_ptr].insert(new_tid);
     m_thread_to_pthread_value[new_tid] = pthread_ptr;
   }
 
@@ -1118,9 +1123,9 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
                                                joined_roots);
     const Value *root =
         JoinTargetAnalysis::traceThreadHandleRoot(joined_thread_val, &m_module);
-    auto it = m_pthread_value_to_thread.find(root ? root : joined_thread_val);
-    if (it != m_pthread_value_to_thread.end()) {
-      joined_tid = it->second;
+    auto it = m_pthread_value_to_threads.find(root ? root : joined_thread_val);
+    if (it != m_pthread_value_to_threads.end() && it->second.size() == 1) {
+      joined_tid = *it->second.begin();
       found = true;
     }
   }

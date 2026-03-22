@@ -220,6 +220,38 @@ TEST_F(EscapeAnalysisTest, ReturnedButUnsharedPointerStaysThreadLocal) {
   EXPECT_FALSE(analysis.isEscaped(slot));
 }
 
+TEST_F(EscapeAnalysisTest, BitcastedInternalCallPropagatesEscape) {
+  const char *source = R"(
+    declare void @external_sink(i8*)
+
+    define i8* @id(i8* %arg) {
+    entry:
+      ret i8* %arg
+    }
+
+    define void @main() {
+    entry:
+      %slot = alloca i8, align 1
+      %callee = bitcast i8* (i8*)* @id to i8* (i8*)*
+      %ret = call i8* %callee(i8* %slot)
+      call void @external_sink(i8* %ret)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  EscapeAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const auto *slot = dyn_cast<AllocaInst>(&main_func->getEntryBlock().front());
+  ASSERT_NE(slot, nullptr);
+  EXPECT_TRUE(analysis.isEscaped(slot));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

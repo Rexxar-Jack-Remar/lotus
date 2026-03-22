@@ -486,6 +486,49 @@ TEST_F(StaticThreadSharingAnalysisTest,
   EXPECT_TRUE(observed);
 }
 
+TEST_F(StaticThreadSharingAnalysisTest,
+       UnknownMemoryIdentityStaysConservativeAtInstructionLevel) {
+  const char *source = R"(
+    @unknown_ptr = external global i32*
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %ptr = load i32*, i32** @unknown_ptr, align 8
+      %val = load i32, i32* %ptr, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyThreadLocal;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass("worker", "val",
+                                    StaticSharingProbePass::QueryKind::Instruction,
+                                    &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(observed,
+            StaticThreadSharingAnalysis::SharingClassification::MaybeShared);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

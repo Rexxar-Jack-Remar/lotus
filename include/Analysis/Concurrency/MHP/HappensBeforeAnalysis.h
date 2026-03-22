@@ -22,9 +22,9 @@ class AliasAnalysisWrapper;
  * - Synchronizes-with (m_sync_with): promise/future and selected modeled
  *   library/runtime edges.
  *
- * Atomic release/acquire edges are emitted only for narrowly witnessed,
- * single-partner cases. Broader atomic and fence patterns remain deferred until
- * the analysis has a defensible reads-from / release-sequence model.
+ * Atomic and fence synchronization candidates are tracked in deferred counters,
+ * but no synchronizes-with edges are emitted for them until the analysis has a
+ * defensible reads-from / release-sequence model.
  */
 class HappensBeforeAnalysis {
 public:
@@ -73,31 +73,8 @@ private:
     }
   };
 
-  struct AtomicSyncWitness {
-    const llvm::Instruction *release = nullptr;
-    const llvm::Instruction *acquire = nullptr;
-    const llvm::Value *location = nullptr;
-  };
-
   void buildSynchronizesWith();
   void computeAtomicHappensBefore();
-  std::vector<const llvm::Instruction *>
-  collectFenceWitnesses(const llvm::Instruction *fence,
-                        bool require_release_semantics) const;
-  bool hasConcreteFenceWitness(const llvm::Instruction *release_inst,
-                               const llvm::Instruction *acquire_inst) const;
-  bool hasConcreteDirectAtomicWitness(const llvm::Instruction *release_inst,
-                                      const llvm::Instruction *acquire_inst) const;
-  bool hasConcreteReleaseSequenceWitness(
-      const llvm::Instruction *release_inst,
-      const llvm::Instruction *acquire_inst) const;
-  bool atomicLocationsMustAlias(const llvm::Instruction *lhs,
-                                const llvm::Instruction *rhs) const;
-  size_t countConcreteAtomicWitnesses(const llvm::Instruction *inst) const;
-  size_t countDirectAtomicPartners(const llvm::Instruction *inst,
-                                   bool require_release_partner) const;
-  bool atomicLocationsMayAlias(const llvm::Instruction *lhs,
-                               const llvm::Instruction *rhs) const;
   bool hasProgramOrder(const llvm::Instruction *A,
                        const llvm::Instruction *B) const;
   bool canReach(const mhp::SyncNode *start, const mhp::SyncNode *end) const;
@@ -153,10 +130,6 @@ private:
       m_shared_state_trace_cache;
   std::unordered_map<std::string, size_t> m_deferred_sync_counts;
   std::vector<const llvm::Instruction *> m_atomic_instructions;
-  std::vector<AtomicSyncWitness> m_atomic_sync_witnesses;
-  std::unordered_set<std::pair<const llvm::Instruction *,
-                               const llvm::Instruction *>, InstPairHash>
-      m_atomic_hb_pairs;
   std::unordered_map<const mhp::SyncNode *, std::vector<const mhp::SyncNode *>>
       m_extra_hb_successors;
 
