@@ -106,6 +106,7 @@ LLVM (Module, Function, BasicBlock, Instruction) | Solvers
 - Use GTest: `add_lotus_test(name source.cpp)` or `add_lotus_pdg_test` for PDG-heavy tests
 - Tests link `lotus_test_utils` (includes common libs)
 - Run: `cd build && ctest --output-on-failure`
+- Clangd warning: ignore all "C++ versions less than C++17 are not supported" warnnings in the test files.
 
 
 ## Documentation

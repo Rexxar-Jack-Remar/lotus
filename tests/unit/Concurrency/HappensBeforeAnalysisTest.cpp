@@ -1,39 +1,17 @@
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
+#include "LLVMHelpers.h"
+
 #include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace mhp;
 using namespace lotus;
+using namespace lotus::unittest;
 
-static const Instruction *findInstructionByName(const Function &func,
-                                                StringRef name) {
-  for (const auto &bb : func) {
-    for (const auto &inst : bb) {
-      if (inst.getName() == name) {
-        return &inst;
-      }
-    }
-  }
-  return nullptr;
-}
-
-class HappensBeforeAnalysisTest : public ::testing::Test {
+class HappensBeforeAnalysisTest : public LlvmModuleTest {
 protected:
-  LLVMContext context;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("HappensBeforeAnalysisTest", errs());
-    }
-    return module;
-  }
+  using LlvmModuleTest::parseModule;
 };
 
 TEST_F(HappensBeforeAnalysisTest, TwoThreadsNoSync_NeitherHappensBefore) {
@@ -320,8 +298,7 @@ TEST_F(HappensBeforeAnalysisTest, PromiseFutureRepeatedQueriesRemainStable) {
   EXPECT_FALSE(hb.happensBefore(load_shared, store_shared));
 }
 
-TEST_F(HappensBeforeAnalysisTest,
-       AmbiguousPromiseFutureHandleDoesNotInventHB) {
+TEST_F(HappensBeforeAnalysisTest, AmbiguousPromiseFutureHandleDoesNotInventHB) {
   const char *source = R"(
     @shared = global i32 0, align 4
     @promise1 = global i8 0
@@ -498,8 +475,7 @@ TEST_F(HappensBeforeAnalysisTest, LatchArriveAndWaitSynchronizesAfterArrival) {
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
 
-TEST_F(HappensBeforeAnalysisTest,
-       BarrierWaitSynchronizesAfterArrival) {
+TEST_F(HappensBeforeAnalysisTest, BarrierWaitSynchronizesAfterArrival) {
   const char *source = R"(
     @shared = global i32 0, align 4
     @barrier = global i8 0
@@ -553,8 +529,7 @@ TEST_F(HappensBeforeAnalysisTest,
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
 
-TEST_F(HappensBeforeAnalysisTest,
-       SplitPhaseBarrierArriveSynchronizesWithWait) {
+TEST_F(HappensBeforeAnalysisTest, SplitPhaseBarrierArriveSynchronizesWithWait) {
   const char *source = R"(
     @shared = global i32 0, align 4
     @barrier = global i8 0
@@ -993,7 +968,8 @@ TEST_F(HappensBeforeAnalysisTest, OpenMPFlushRelationFeedsHBAnalysis) {
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
 
-TEST_F(HappensBeforeAnalysisTest, PlainReleaseAcquireWithoutWitnessStaysDeferred) {
+TEST_F(HappensBeforeAnalysisTest,
+       PlainReleaseAcquireWithoutWitnessStaysDeferred) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -1159,7 +1135,8 @@ TEST_F(HappensBeforeAnalysisTest,
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  const Instruction *store_data = &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *store_data =
+      &module->getFunction("writer")->getEntryBlock().front();
   const Instruction *load_data =
       findInstructionByName(*module->getFunction("reader"), "val");
   ASSERT_NE(store_data, nullptr);
@@ -1223,7 +1200,8 @@ TEST_F(HappensBeforeAnalysisTest, ReleaseSequenceThroughRmwStaysDeferred) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  const Instruction *store_data = &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *store_data =
+      &module->getFunction("writer")->getEntryBlock().front();
   const Instruction *load_data =
       findInstructionByName(*module->getFunction("reader"), "val");
   ASSERT_NE(store_data, nullptr);
@@ -1232,8 +1210,7 @@ TEST_F(HappensBeforeAnalysisTest, ReleaseSequenceThroughRmwStaysDeferred) {
   EXPECT_FALSE(hb.happensBefore(store_data, load_data));
 }
 
-TEST_F(HappensBeforeAnalysisTest,
-       DirectReleaseAcquireStaysDeferred) {
+TEST_F(HappensBeforeAnalysisTest, DirectReleaseAcquireStaysDeferred) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -1294,8 +1271,7 @@ TEST_F(HappensBeforeAnalysisTest,
   EXPECT_FALSE(hb.happensBefore(load_data, store_data));
 }
 
-TEST_F(HappensBeforeAnalysisTest,
-       CompetingReleaseStoresDoNotInventAtomicHB) {
+TEST_F(HappensBeforeAnalysisTest, CompetingReleaseStoresDoNotInventAtomicHB) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -1350,7 +1326,8 @@ TEST_F(HappensBeforeAnalysisTest,
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  const Instruction *store_data = &module->getFunction("writer1")->getEntryBlock().front();
+  const Instruction *store_data =
+      &module->getFunction("writer1")->getEntryBlock().front();
   const Instruction *load_data =
       findInstructionByName(*module->getFunction("reader"), "val");
   ASSERT_NE(store_data, nullptr);

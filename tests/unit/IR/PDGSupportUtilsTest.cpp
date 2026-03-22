@@ -2,20 +2,17 @@
 #include "IR/PDG/Support/DebugInfoUtils.h"
 #include "IR/PDG/Support/PDGUtils.h"
 
+#include "LLVMHelpers.h"
+
 #include <climits>
 #include <memory>
 #include <vector>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/BinaryFormat/Dwarf.h>
 #include <llvm/IR/DIBuilder.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
+using namespace lotus::unittest;
 
 namespace {
 
@@ -32,19 +29,6 @@ protected:
     if (module)
       module->setDataLayout(kDataLayout);
     return module;
-  }
-
-  template <typename InstTy>
-  InstTy *findInstruction(Function &function, StringRef name = "") {
-    for (BasicBlock &block : function)
-      for (Instruction &inst : block) {
-        auto *candidate = dyn_cast<InstTy>(&inst);
-        if (!candidate)
-          continue;
-        if (name.empty() || inst.getName() == name)
-          return candidate;
-      }
-    return nullptr;
   }
 
   template <typename InstTy>

@@ -1,39 +1,12 @@
 #include "Analysis/Concurrency/MHP/StaticVectorClockMHP.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
+#include "LLVMHelpers.h"
 
 using namespace llvm;
 using namespace mhp;
+using namespace lotus::unittest;
 
-static const Instruction *findInstructionByName(const Function &func,
-                                                StringRef name) {
-  for (const auto &bb : func) {
-    for (const auto &inst : bb) {
-      if (inst.getName() == name) {
-        return &inst;
-      }
-    }
-  }
-  return nullptr;
-}
-
-class StaticVectorClockMHPTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("StaticVectorClockMHPTest", errs());
-    }
-    return module;
-  }
-};
+class StaticVectorClockMHPTest : public lotus::unittest::LlvmModuleTest {};
 
 TEST_F(StaticVectorClockMHPTest, LoopForkDoesNotAutoSelfParallelizeWorkerBody) {
   const char *source = R"(

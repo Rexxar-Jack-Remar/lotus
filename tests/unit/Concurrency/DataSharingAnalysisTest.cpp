@@ -1,27 +1,11 @@
 #include "Analysis/Concurrency/OpenMP/DataSharingAnalysis.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
+#include "LLVMHelpers.h"
 
 using namespace llvm;
 using namespace OpenMP;
 
-class DataSharingAnalysisTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("DataSharingAnalysisTest", errs());
-    }
-    return module;
-  }
-};
+class DataSharingAnalysisTest : public lotus::unittest::LlvmModuleTest {};
 
 TEST_F(DataSharingAnalysisTest, OutlinedCapturesInferSharedAndFirstprivate) {
   const char *source = R"(

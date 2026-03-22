@@ -1,43 +1,16 @@
 #include "Analysis/Concurrency/Memory/MemUseDefAnalysis.h"
 
+#include "LLVMHelpers.h"
+
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/BasicAliasAnalysis.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Dominators.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
+using namespace lotus::unittest;
 
-static const Instruction *findInstructionByName(const Function &func,
-                                                StringRef name) {
-  for (const BasicBlock &bb : func) {
-    for (const Instruction &inst : bb) {
-      if (inst.getName() == name) {
-        return &inst;
-      }
-    }
-  }
-  return nullptr;
-}
-
-class MemUseDefAnalysisTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("MemUseDefAnalysisTest", errs());
-    }
-    return module;
-  }
-};
+class MemUseDefAnalysisTest : public lotus::unittest::LlvmModuleTest {};
 
 TEST_F(MemUseDefAnalysisTest, LocalLoadMapsBackToUnderlyingMemory) {
   const char *source = R"(

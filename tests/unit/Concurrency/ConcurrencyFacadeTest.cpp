@@ -1,27 +1,10 @@
 #include "Analysis/Concurrency/ConcurrencyFacade.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
-#include <gtest/gtest.h>
+#include "LLVMHelpers.h"
 
 using namespace llvm;
 
-class ConcurrencyFacadeTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("ConcurrencyFacadeTest", errs());
-    }
-    return module;
-  }
-};
+class ConcurrencyFacadeTest : public lotus::unittest::LlvmModuleTest {};
 
 TEST_F(ConcurrencyFacadeTest, SummarizesOpenMPTaskGraph) {
   const char *source = R"(

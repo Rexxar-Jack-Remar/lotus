@@ -5,13 +5,12 @@
 #include "Alias/AserPTA/PreProcessing/Passes/RemoveASMInstPass.h"
 #include "Alias/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
 #include "Alias/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IRReader/IRReader.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 #include <set>
@@ -20,16 +19,9 @@
 
 using namespace llvm;
 using namespace dfpa;
+using namespace lotus::unittest;
 
 namespace {
-
-std::unique_ptr<Module> parseAssembly(LLVMContext &Ctx, const char *IR) {
-  SMDiagnostic Err;
-  auto M = parseAssemblyString(IR, Err, Ctx);
-  if (!M)
-    Err.print("DFPATest", errs());
-  return M;
-}
 
 std::unique_ptr<Module> parseFile(LLVMContext &Ctx, const std::string &Path) {
   SMDiagnostic Err;
@@ -53,15 +45,6 @@ DFPAResult runDFPA(Module &M, DFPAConfig Config = DFPAConfig(),
   PM.add(Pass);
   PM.run(M);
   return Pass->getResult();
-}
-
-std::vector<CallBase *> getIndirectCalls(Function &F) {
-  std::vector<CallBase *> Calls;
-  for (Instruction &I : instructions(F))
-    if (auto *CB = dyn_cast<CallBase>(&I))
-      if (CB->isIndirectCall())
-        Calls.push_back(CB);
-  return Calls;
 }
 
 std::set<std::string> targetNames(const DFPAResult &Result, const CallBase *CB) {
@@ -94,7 +77,7 @@ TEST(DFPA, DirectFunctionPointerVariableAssignment) {
   )";
 
   LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = parseModule(Ctx, IR, "DFPATest");
   ASSERT_NE(M, nullptr);
 
   DFPAResult Result = runDFPA(*M);
@@ -125,7 +108,7 @@ TEST(DFPA, StructFieldLoadStore) {
   )";
 
   LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = parseModule(Ctx, IR, "DFPATest");
   ASSERT_NE(M, nullptr);
 
   DFPAResult Result = runDFPA(*M);
@@ -163,7 +146,7 @@ TEST(DFPA, PhiMergeStaysPreciseWithoutUnknowns) {
   )";
 
   LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = parseModule(Ctx, IR, "DFPATest");
   ASSERT_NE(M, nullptr);
 
   DFPAResult Result = runDFPA(*M);

@@ -1,16 +1,13 @@
 #include "Analysis/NullPointer/LocalNullCheckAnalysis.h"
 #include "Analysis/NullPointer/NullFlowAnalysis.h"
+#include "LLVMHelpers.h"
 
 #include <climits>
 #include <cstdint>
-#include <llvm/ADT/StringRef.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
+
+using namespace lotus::unittest;
 
 namespace lotus {
 namespace nullpointer {
@@ -40,28 +37,6 @@ public:
   }
 };
 
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &Context,
-                                          const char *Source) {
-  llvm::SMDiagnostic Err;
-  auto Module = llvm::parseAssemblyString(Source, Err, Context);
-  if (!Module) {
-    Err.print("NullPointerLegacyHelpersTest", llvm::errs());
-  }
-  return Module;
-}
-
-llvm::Instruction *findInstructionByName(llvm::Function *Function,
-                                         llvm::StringRef Name) {
-  for (auto &BB : *Function) {
-    for (auto &Inst : BB) {
-      if (Inst.getName() == Name) {
-        return &Inst;
-      }
-    }
-  }
-  return nullptr;
-}
-
 TEST(NullPointerLegacyHelpersTest, ZeroLimitMeansUnlimited) {
   ScopedLimitOverride LimitOverride(0);
   EXPECT_EQ(lotus::nullpointer::testing::
@@ -83,7 +58,7 @@ TEST(NullPointerLegacyHelpersTest,
       %contract = call i8* @returns_nonnull()
       ret void
     }
-  )");
+  )", "NullPointerLegacyHelpersTest");
   ASSERT_NE(Module, nullptr);
 
   auto *Function = Module->getFunction("example");
@@ -120,7 +95,7 @@ TEST(NullPointerLegacyHelpersTest,
     nonnull:
       ret void
     }
-  )");
+  )", "NullPointerLegacyHelpersTest");
   ASSERT_NE(Module, nullptr);
 
   auto *Function = Module->getFunction("example");

@@ -1,28 +1,11 @@
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
+#include "LLVMHelpers.h"
 
 using namespace llvm;
 using namespace lotus;
 
-class EscapeAnalysisTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("EscapeAnalysisTest", errs());
-    }
-    return module;
-  }
-};
+class EscapeAnalysisTest : public lotus::unittest::LlvmModuleTest {};
 
 TEST_F(EscapeAnalysisTest, GlobalIsEscaped) {
   const char *source = R"(

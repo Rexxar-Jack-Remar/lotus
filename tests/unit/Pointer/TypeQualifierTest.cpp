@@ -2,39 +2,14 @@
 #include "Alias/TypeQualifier/FunctionSummary.h"
 #include "Alias/TypeQualifier/QualifierAnalysis.h"
 #include "Alias/TypeQualifier/QualifierTypes.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 #include <limits>
 
-namespace {
-
-std::unique_ptr<llvm::Module> parseAssembly(llvm::LLVMContext &ctx,
-                                            const char *ir) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(ir, err, ctx);
-  if (!module)
-    err.print("TypeQualifierTest", llvm::errs());
-  return module;
-}
-
-const llvm::CallInst *findIndirectCall(const llvm::Function &F) {
-  for (const llvm::BasicBlock &BB : F) {
-    for (const llvm::Instruction &I : BB) {
-      auto *CI = llvm::dyn_cast<llvm::CallInst>(&I);
-      if (CI && !CI->getCalledFunction())
-        return CI;
-    }
-  }
-  return nullptr;
-}
-
-} // namespace
+using namespace lotus::unittest;
 
 TEST(TypeQualifier, DomainJoinPrefersUninitializedOverUnknown) {
   EXPECT_EQ(QualifierDomain::join(QualifierState::Initialized,
@@ -133,7 +108,7 @@ TEST(TypeQualifier, FuncAnalysisRunsOnIndirectModeledCopyTargets) {
 
   auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const llvm::CallInst *call = findIndirectCall(*mainFn);
+  auto *call = llvm::dyn_cast<llvm::CallInst>(findIndirectCall(*mainFn));
   ASSERT_NE(call, nullptr);
 
   GlobalContext gc;

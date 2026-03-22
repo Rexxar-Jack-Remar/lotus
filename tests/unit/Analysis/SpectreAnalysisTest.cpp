@@ -1,26 +1,15 @@
 #include "Analysis/Spectre/CacheSpecuAnalysis.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
+
+using namespace lotus::unittest;
 
 namespace {
 
 using spectre::CacheSpecuAnalysis;
 using spectre::SpectreAnalysisResult;
-
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &context,
-                                          const char *source) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(source, err, context);
-  if (!module) {
-    err.print("SpectreAnalysisTest", llvm::errs());
-  }
-  return module;
-}
 
 SpectreAnalysisResult analyzeModule(llvm::Module &module,
                                     llvm::StringRef functionName,
@@ -44,7 +33,7 @@ TEST(SpectreAnalysisTest, StraightLineCodeHasNoFindings) {
       %value = load i32, i32* @data, align 4
       ret i32 %value
     }
-  )");
+  )", "SpectreAnalysisTest");
   ASSERT_NE(module, nullptr);
 
   SpectreAnalysisResult result = analyzeModule(*module, "example");
@@ -73,7 +62,7 @@ TEST(SpectreAnalysisTest, ReportsBranchDependentCacheDivergence) {
       %phi = phi i32 [ %lhs, %then ], [ %rhs, %else ]
       ret i32 %phi
     }
-  )");
+  )", "SpectreAnalysisTest");
   ASSERT_NE(module, nullptr);
 
   SpectreAnalysisResult result = analyzeModule(*module, "example");
@@ -105,7 +94,7 @@ TEST(SpectreAnalysisTest, ReconvergingBranchProducesSingleFinding) {
       store i32 0, i32* @a, align 4
       ret void
     }
-  )");
+  )", "SpectreAnalysisTest");
   ASSERT_NE(module, nullptr);
 
   SpectreAnalysisResult result = analyzeModule(*module, "example");

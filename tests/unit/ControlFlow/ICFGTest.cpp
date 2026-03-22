@@ -9,70 +9,25 @@
 #include "IR/ICFG/ICFG.h"
 #include "IR/ICFG/GraphAnalysis.h"
 #include "IR/ICFG/ICFGBuilder.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/ADT/StringRef.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 #include <vector>
 
 using namespace llvm;
+using namespace lotus::unittest;
 
-class ICFGTest : public ::testing::Test {
+class ICFGTest : public LlvmModuleTest {
 protected:
-  LLVMContext context;
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("ICFGTest", errs());
-    }
-    return module;
-  }
-  
-  // Helper to find a basic block by name
-  const BasicBlock *findBlock(const Function *F, StringRef name) {
-    for (const auto &BB : *F) {
-      if (BB.getName() == name) {
-        return &BB;
-      }
-    }
-    return nullptr;
-  }
-  
   // Helper to find a call instruction
   const CallBase *findCall(const Function *F, StringRef calleeName) {
-    for (const auto &BB : *F) {
-      for (const auto &I : BB) {
-        if (auto *CB = dyn_cast<CallBase>(&I)) {
-          if (auto *callee = CB->getCalledFunction()) {
-            if (callee->getName() == calleeName) {
-              return CB;
-            }
-          }
-        }
-      }
-    }
-    return nullptr;
+    return findCallTo(F, calleeName);
   }
 
   std::vector<const CallBase *> findCalls(const Function *F, StringRef calleeName) {
-    std::vector<const CallBase *> calls;
-    for (const auto &BB : *F) {
-      for (const auto &I : BB) {
-        if (auto *CB = dyn_cast<CallBase>(&I)) {
-          if (auto *callee = CB->getCalledFunction()) {
-            if (callee->getName() == calleeName)
-              calls.push_back(CB);
-          }
-        }
-      }
-    }
-    return calls;
+    return findCallsTo(F, calleeName);
   }
 };
 

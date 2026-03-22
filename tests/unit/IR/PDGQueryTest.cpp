@@ -3,16 +3,11 @@
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
 
-#include "llvm/IR/LLVMContext.h"
+#include "LLVMHelpers.h"
+
 #include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IRReader/IRReader.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/PassRegistry.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/SourceMgr.h"
-
-#include <gtest/gtest.h>
 
 #include <array>
 #include <cstdio>
@@ -23,6 +18,7 @@
 
 using namespace llvm;
 using namespace pdg;
+using namespace lotus::unittest;
 
 namespace {
 
@@ -69,20 +65,6 @@ protected:
     module = parseIR(MemoryBuffer::getMemBuffer(ir)->getMemBufferRef(), error,
                      *context);
     return module != nullptr;
-  }
-
-  template <typename InstTy>
-  InstTy *findInstruction(Function &function, StringRef name = "") {
-    for (auto &block : function) {
-      for (auto &inst : block) {
-        InstTy *candidate = dyn_cast<InstTy>(&inst);
-        if (candidate == nullptr)
-          continue;
-        if (name.empty() || inst.getName() == name)
-          return candidate;
-      }
-    }
-    return nullptr;
   }
 
   LLVMQueryContext buildLLVMQueryContext(Function &function) {

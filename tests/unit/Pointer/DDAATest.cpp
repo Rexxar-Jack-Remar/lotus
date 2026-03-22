@@ -7,6 +7,7 @@
 #include "Alias/DDA/CxtDPItem.h"
 #include "Alias/DDA/DDAPass.h"
 #include "Alias/DDA/FlowDDA.h"
+#include "LLVMHelpers.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGStats.h"
@@ -14,28 +15,15 @@
 #include <algorithm>
 #include <set>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus::analysis;
+using namespace lotus::unittest;
 
-class DDAATest : public ::testing::Test {
+class DDAATest : public LlvmModuleTest {
 protected:
-  LLVMContext context;
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("DDAATest", errs());
-    }
-    return module;
-  }
-
   static bool pointsToSetContains(const std::vector<const Value *> &ptsSet,
                                   const Value *v) {
     return std::find(ptsSet.begin(), ptsSet.end(), v) != ptsSet.end();

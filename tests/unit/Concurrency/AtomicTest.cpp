@@ -1,42 +1,20 @@
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
+
+#include "LLVMHelpers.h"
+
 #include <llvm/Config/llvm-config.h>
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace mhp;
 using namespace lotus;
+using namespace lotus::unittest;
 
-class AtomicHappensBeforeTest : public ::testing::Test {
+class AtomicHappensBeforeTest : public lotus::unittest::LlvmModuleTest {
 protected:
-  LLVMContext context;
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("AtomicHappensBeforeTest", errs());
-    }
-    return module;
-  }
-
-  const Instruction *findInstructionByName(const Function &func, StringRef name) {
-      for (const auto &bb : func) {
-          for (const auto &inst : bb) {
-              if (inst.getName() == name) {
-                  return &inst;
-              }
-          }
-      }
-      return nullptr;
-  }
-
-  const Instruction *findStoreToGlobal(const Function &func, StringRef global_name) {
+  const Instruction *findStoreToGlobal(const Function &func,
+                                       StringRef global_name) {
     for (const auto &bb : func) {
       for (const auto &inst : bb) {
         const auto *store = dyn_cast<StoreInst>(&inst);

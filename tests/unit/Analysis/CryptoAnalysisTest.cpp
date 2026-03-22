@@ -1,25 +1,14 @@
 #include "Analysis/Crypto/ctllvm.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
+#include "LLVMHelpers.h"
+
 #include <llvm/IR/PassManager.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/Error.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
+
+using namespace lotus::unittest;
 
 namespace {
-
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &context,
-                                          const char *source) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(source, err, context);
-  if (!module) {
-    err.print("CryptoAnalysisTest", llvm::errs());
-  }
-  return module;
-}
 
 struct PassFixture {
   llvm::LoopAnalysisManager lam;

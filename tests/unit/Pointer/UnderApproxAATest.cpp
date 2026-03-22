@@ -5,6 +5,7 @@
 
 #include "Alias/UnderApproxAA/EquivDB.h"
 #include "Alias/UnderApproxAA/UnderApproxAA.h"
+#include "LLVMHelpers.h"
 
 #include <memory>
 
@@ -12,16 +13,13 @@
 #include <llvm/Analysis/BasicAliasAnalysis.h>
 #include <llvm/Analysis/MemorySSA.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace UnderApprox;
+using namespace lotus::unittest;
 
 namespace {
 
@@ -41,26 +39,7 @@ struct MemorySSAContext {
   }
 };
 
-class UnderApproxAATest : public ::testing::Test {
-protected:
-  LLVMContext Ctx;
-
-  std::unique_ptr<Module> parseModule(const char *Source) {
-    SMDiagnostic Err;
-    auto M = parseAssemblyString(Source, Err, Ctx);
-    if (!M)
-      Err.print("UnderApproxAATest", errs());
-    return M;
-  }
-
-  Instruction *findInst(Function *F, StringRef Name) {
-    for (BasicBlock &BB : *F)
-      for (Instruction &I : BB)
-        if (I.hasName() && I.getName() == Name)
-          return &I;
-    return nullptr;
-  }
-};
+class UnderApproxAATest : public LlvmModuleTest {};
 
 TEST_F(UnderApproxAATest, ConstantSelectMustAliasChosenArm) {
   const char *Source = R"(
@@ -77,7 +56,7 @@ TEST_F(UnderApproxAATest, ConstantSelectMustAliasChosenArm) {
   Function *F = M->getFunction("test");
   ASSERT_NE(F, nullptr);
 
-  Instruction *S = findInst(F, "s");
+  Instruction *S = findInstructionByName(*F, "s");
   Argument *P = F->getArg(0);
   ASSERT_NE(S, nullptr);
   ASSERT_NE(P, nullptr);
@@ -116,8 +95,8 @@ TEST_F(UnderApproxAATest, MemoryPhiForwardingUsesMustAliasValueClass) {
   Function *F = M->getFunction("test");
   ASSERT_NE(F, nullptr);
 
-  auto *X = findInst(F, "x");
-  auto *Q = findInst(F, "q");
+  auto *X = findInstructionByName(*F, "x");
+  auto *Q = findInstructionByName(*F, "q");
   ASSERT_NE(X, nullptr);
   ASSERT_NE(Q, nullptr);
 
@@ -149,7 +128,7 @@ TEST_F(UnderApproxAATest, SingleStoreAllocaIsSlotSensitive) {
   ASSERT_NE(F, nullptr);
 
   auto *A = F->getArg(0);
-  auto *L0 = findInst(F, "l0");
+  auto *L0 = findInstructionByName(*F, "l0");
   ASSERT_NE(A, nullptr);
   ASSERT_NE(L0, nullptr);
 
@@ -181,7 +160,7 @@ TEST_F(UnderApproxAATest, SingleStoreGlobalSlotIsForwarded) {
   ASSERT_NE(F, nullptr);
 
   auto *A = F->getArg(0);
-  auto *L0 = findInst(F, "l0");
+  auto *L0 = findInstructionByName(*F, "l0");
   ASSERT_NE(A, nullptr);
   ASSERT_NE(L0, nullptr);
 
@@ -303,7 +282,7 @@ TEST_F(UnderApproxAATest, UnderApproxAACacheRefreshesAfterIRMutation) {
   UnderApproxAA AA(*M);
   EXPECT_FALSE(AA.mustAlias(S, Q));
 
-  S->setCondition(ConstantInt::getTrue(Ctx));
+  S->setCondition(ConstantInt::getTrue(context));
   S->setTrueValue(P);
   S->setFalseValue(P);
 

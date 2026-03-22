@@ -4,38 +4,26 @@
 #include "IR/SVFG/SVFGBuilder.h"
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGOPT.h"
+#include "LLVMHelpers.h"
 
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
 
 using namespace llvm;
 using namespace lotus::analysis;
+using namespace lotus::unittest;
 
 namespace {
 
-class SVFGSerializerTest : public ::testing::Test {
+class SVFGSerializerTest : public LlvmModuleTest {
 protected:
-  LLVMContext context_;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context_);
-    if (!module)
-      err.print("SVFGSerializerTest", errs());
-    return module;
-  }
-
   static const CallBase *findDirectCall(const Function *F,
                                         StringRef calleeName) {
     for (const BasicBlock &BB : *F) {

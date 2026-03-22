@@ -7,41 +7,15 @@
 
 #include "Analysis/Concurrency/Utils/RAIILockTracker.h"
 
-#include <algorithm>
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
+#include <algorithm>
 
 using namespace llvm;
 using namespace mhp;
+using namespace lotus::unittest;
 
-static const Instruction *findInstructionByName(const Function &func,
-                                                StringRef name) {
-  for (const auto &bb : func) {
-    for (const auto &inst : bb) {
-      if (inst.getName() == name) {
-        return &inst;
-      }
-    }
-  }
-  return nullptr;
-}
-
-class LockSetAnalysisTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("LockSetAnalysisTest", errs());
-    }
-    return module;
-  }
-};
+class LockSetAnalysisTest : public lotus::unittest::LlvmModuleTest {};
 
 TEST_F(LockSetAnalysisTest, BranchingMustAndMayLockSets) {
   const char *source = R"(

@@ -3,19 +3,19 @@
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/LotusAdapter.h"
+#include "LLVMHelpers.h"
 
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/InitializePasses.h>
 #include <llvm/PassRegistry.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus::gvfg;
+using namespace lotus::unittest;
 
 namespace {
 
@@ -63,14 +63,6 @@ void initializePassInfra() {
   initialized = true;
 }
 
-std::unique_ptr<Module> parseModule(LLVMContext &Ctx, const char *IR) {
-  SMDiagnostic Err;
-  auto M = parseAssemblyString(IR, Err, Ctx);
-  if (!M)
-    Err.print("GuardedValueFlowAdapterShapeTest", errs());
-  return M;
-}
-
 struct Pipeline {
   std::unique_ptr<legacy::PassManager> pm;
   LotusAA *lotus{nullptr};
@@ -115,7 +107,7 @@ TEST(GuardedValueFlowAdapterShape, BuildsMemoryAndPseudoInterfaceShape) {
   )";
 
   LLVMContext Ctx;
-  auto M = parseModule(Ctx, IR);
+  auto M = parseModule(Ctx, IR, "GuardedValueFlowAdapterShapeTest");
   ASSERT_NE(M, nullptr);
 
   auto pipeline = runPipeline(*M);

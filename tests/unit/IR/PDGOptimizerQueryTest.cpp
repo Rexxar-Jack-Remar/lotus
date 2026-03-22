@@ -3,17 +3,12 @@
 #include "IR/PDG/Analysis/SchedulingQuery.h"
 #include "IR/PDG/Analysis/ThinSlicing.h"
 
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IRReader/IRReader.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/SourceMgr.h"
-
-#include <gtest/gtest.h>
+#include "LLVMHelpers.h"
 
 #include <memory>
 
 using namespace pdg;
+using namespace lotus::unittest;
 
 namespace {
 
@@ -55,20 +50,6 @@ protected:
     Node *n = nodes.back().get();
     graph.addNode(*n);
     return n;
-  }
-
-  template <typename InstTy>
-  InstTy *findInstruction(llvm::Function &F, llvm::StringRef name = "") {
-    for (auto &BB : F) {
-      for (auto &I : BB) {
-        auto *inst = llvm::dyn_cast<InstTy>(&I);
-        if (!inst)
-          continue;
-        if (name.empty() || I.getName() == name)
-          return inst;
-      }
-    }
-    return nullptr;
   }
 
   TestGraph graph;

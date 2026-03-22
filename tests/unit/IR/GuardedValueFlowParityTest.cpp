@@ -1,19 +1,19 @@
 #include "Alias/LotusAA/Engine/InterProceduralPass.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/LotusAdapter.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/InitializePasses.h>
 #include <llvm/PassRegistry.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 #include <algorithm>
 
 using namespace llvm;
 using namespace lotus::gvfg;
+using namespace lotus::unittest;
 
 namespace {
 
@@ -28,10 +28,8 @@ static bool containsUseSite(GuardedValueFlowNode *node,
   return false;
 }
 
-class GuardedValueFlowParityTest : public ::testing::Test {
+class GuardedValueFlowParityTest : public LlvmModuleTest {
 protected:
-  LLVMContext context_;
-
   struct Pipeline {
     std::unique_ptr<legacy::PassManager> pm;
     GuardedValueFlowGraphBuilderPass *builder{nullptr};
@@ -53,14 +51,6 @@ protected:
     initializeAnalysis(registry);
     initializeTransformUtils(registry);
     initialized = true;
-  }
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context_);
-    if (!module)
-      err.print("GuardedValueFlowParityTest", errs());
-    return module;
   }
 
   Pipeline runBuilder(Module &M) {
@@ -108,28 +98,28 @@ TEST_F(GuardedValueFlowParityTest,
   GuardedValueFlowGraph graph(F);
   BasicBlock *entry = &F->getEntryBlock();
   auto *cond = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt1Ty(context_),
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt1Ty(context),
       &graph, entry);
   auto *lhs = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context_),
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context),
       &graph, entry);
   auto *rhs = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context_),
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context),
       &graph, entry);
 
   auto *add = graph.createNode<GuardedValueFlowOpcodeNode>(
-      GuardedValueFlowNode::Kind::SimpleOpcode, Type::getInt32Ty(context_),
+      GuardedValueFlowNode::Kind::SimpleOpcode, Type::getInt32Ty(context),
       &graph, entry, GuardedValueFlowOpcodeNode::OpcodeKind::Add);
   add->addChild(lhs);
   add->addChild(rhs);
 
   auto *cast = graph.createNode<GuardedValueFlowOpcodeNode>(
-      GuardedValueFlowNode::Kind::CastOpcode, Type::getInt64Ty(context_), &graph,
+      GuardedValueFlowNode::Kind::CastOpcode, Type::getInt64Ty(context), &graph,
       entry, GuardedValueFlowOpcodeNode::OpcodeKind::SExt);
   cast->addChild(lhs);
 
   auto *select = graph.createNode<GuardedValueFlowOpcodeNode>(
-      GuardedValueFlowNode::Kind::SimpleOpcode, Type::getInt32Ty(context_),
+      GuardedValueFlowNode::Kind::SimpleOpcode, Type::getInt32Ty(context),
       &graph, entry, GuardedValueFlowOpcodeNode::OpcodeKind::Select);
   select->addChild(cond);
   select->addChild(lhs);

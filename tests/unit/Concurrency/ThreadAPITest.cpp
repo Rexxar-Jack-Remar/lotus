@@ -1,26 +1,10 @@
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
+#include "LLVMHelpers.h"
 
 using namespace llvm;
 
-class ThreadAPITest : public ::testing::Test {
-protected:
-  LLVMContext context;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("ThreadAPITest", errs());
-    }
-    return module;
-  }
-};
+class ThreadAPITest : public lotus::unittest::LlvmModuleTest {};
 
 TEST_F(ThreadAPITest, ParsesExtendedTypeNames) {
   EXPECT_EQ(ThreadAPI::stringToType("TD_CANCEL"), ThreadAPI::TD_CANCEL);

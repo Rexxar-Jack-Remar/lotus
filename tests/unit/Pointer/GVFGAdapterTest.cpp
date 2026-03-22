@@ -1,3 +1,5 @@
+#include "LLVMHelpers.h"
+
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -18,6 +20,7 @@
 
 using namespace llvm;
 using namespace lotus::gvfg;
+using namespace lotus::unittest;
 
 namespace {
 
@@ -91,14 +94,6 @@ struct PipelineResult {
   LotusAA *lotus{nullptr};
   GuardedValueFlowGraphBuilderPass *builder{nullptr};
 };
-
-std::unique_ptr<Module> parseAssembly(LLVMContext &Ctx, const char *IR) {
-  SMDiagnostic Err;
-  auto M = parseAssemblyString(IR, Err, Ctx);
-  if (!M)
-    Err.print("GVFGAdapterTest", errs());
-  return M;
-}
 
 PipelineResult runPipeline(Module &M) {
   initializePassInfra();

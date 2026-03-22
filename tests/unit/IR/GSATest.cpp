@@ -1,14 +1,11 @@
 #include "IR/GSA/GSA.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
-#include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/InitializePasses.h>
 #include <llvm/PassRegistry.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -16,6 +13,7 @@
 
 using namespace llvm;
 using namespace gsa;
+using namespace lotus::unittest;
 
 namespace {
 
@@ -32,10 +30,8 @@ struct MaterializationPipeline {
   GsaMaterializationPass *GM{nullptr};
 };
 
-class GSATest : public ::testing::Test {
+class GSATest : public LlvmModuleTest {
 protected:
-  LLVMContext context_;
-
   static void initializePassInfra() {
     static bool initialized = false;
     if (initialized)
@@ -46,14 +42,6 @@ protected:
     initializeAnalysis(registry);
     initializeTransformUtils(registry);
     initialized = true;
-  }
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context_);
-    if (!module)
-      err.print("GSATest", errs());
-    return module;
   }
 
   GatePipeline runGateAnalysis(Module &M, bool thinned = true) {
@@ -90,21 +78,6 @@ protected:
       for (auto &I : BB)
         if (auto *Match = dyn_cast<InstT>(&I))
           return Match;
-    return nullptr;
-  }
-
-  PHINode *findPhi(Function *F, StringRef name) {
-    for (auto &BB : *F)
-      for (auto &PN : BB.phis())
-        if (PN.getName() == name)
-          return &PN;
-    return nullptr;
-  }
-
-  BasicBlock *findBlock(Function *F, StringRef name) {
-    for (auto &BB : *F)
-      if (BB.getName() == name)
-        return &BB;
     return nullptr;
   }
 

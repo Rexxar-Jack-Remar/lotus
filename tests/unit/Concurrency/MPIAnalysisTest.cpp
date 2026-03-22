@@ -2,34 +2,17 @@
 
 #include "Analysis/Concurrency/MPI/MPISemantics.h"
 
+#include "LLVMHelpers.h"
+
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <vector>
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
-#include <gtest/gtest.h>
-
 using namespace llvm;
 using namespace mpi;
 
-class MPIAnalysisTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("MPIAnalysisTest", errs());
-    }
-    return module;
-  }
-};
+class MPIAnalysisTest : public lotus::unittest::LlvmModuleTest {};
 
 static const MPIOperation *findOperation(const std::vector<MPIOperation> &ops,
                                          ThreadAPI::TD_TYPE type) {

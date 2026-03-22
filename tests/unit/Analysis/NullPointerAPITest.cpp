@@ -1,37 +1,12 @@
 #include "Analysis/NullPointer/API.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/ADT/StringRef.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
 
+using namespace lotus::unittest;
+
 namespace {
-
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &context,
-                                          const char *source) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(source, err, context);
-  if (!module) {
-    err.print("NullPointerAPITest", llvm::errs());
-  }
-  return module;
-}
-
-llvm::Instruction *findInstructionByName(llvm::Function *function,
-                                         llvm::StringRef name) {
-  for (auto &bb : *function) {
-    for (auto &inst : bb) {
-      if (inst.getName() == name) {
-        return &inst;
-      }
-    }
-  }
-  return nullptr;
-}
 
 TEST(NullPointerAPITest, DistinguishesHeapAndStackAllocations) {
   llvm::LLVMContext context;
@@ -45,7 +20,7 @@ TEST(NullPointerAPITest, DistinguishesHeapAndStackAllocations) {
       store i32 0, i32* %stack, align 4
       ret i32 0
     }
-  )");
+  )", "NullPointerAPITest");
   ASSERT_NE(module, nullptr);
 
   auto *function = module->getFunction("example");
@@ -74,7 +49,7 @@ TEST(NullPointerAPITest, IgnoresNonAllocationCalls) {
       call void @free(i8* %ptr)
       ret void
     }
-  )");
+  )", "NullPointerAPITest");
   ASSERT_NE(module, nullptr);
 
   auto *function = module->getFunction("example");

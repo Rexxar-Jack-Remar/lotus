@@ -6,40 +6,14 @@
 #include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
+#include "LLVMHelpers.h"
 
 using namespace llvm;
 using namespace mhp;
 using namespace lotus;
+using namespace lotus::unittest;
 
-static const Instruction *findInstructionByName(const Function &func,
-                                                StringRef name) {
-  for (const auto &bb : func) {
-    for (const auto &inst : bb) {
-      if (inst.getName() == name) {
-        return &inst;
-      }
-    }
-  }
-  return nullptr;
-}
-
-class MHPAnalysisTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("MHPAnalysisTest", errs());
-    }
-    return module;
-  }
-};
+class MHPAnalysisTest : public lotus::unittest::LlvmModuleTest {};
 
 // Test 1: Simple main function
 TEST_F(MHPAnalysisTest, SimpleMain) {

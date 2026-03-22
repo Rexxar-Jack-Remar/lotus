@@ -1,23 +1,21 @@
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/LotusAdapter.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/InitializePasses.h>
 #include <llvm/PassRegistry.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus::gvfg;
+using namespace lotus::unittest;
 
 namespace {
 
-class GuardedValueFlowTest : public ::testing::Test {
+class GuardedValueFlowTest : public LlvmModuleTest {
 protected:
-  LLVMContext context_;
-
   struct Pipeline {
     std::unique_ptr<legacy::PassManager> pm;
     GuardedValueFlowGraphBuilderPass *builder{nullptr};
@@ -33,14 +31,6 @@ protected:
     initializeAnalysis(registry);
     initializeTransformUtils(registry);
     initialized = true;
-  }
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context_);
-    if (!module)
-      err.print("GuardedValueFlowTest", errs());
-    return module;
   }
 
   Pipeline runBuilder(Module &M) {
@@ -162,14 +152,14 @@ TEST_F(GuardedValueFlowTest, UsesDensePseudoInterfaceIndices) {
 
   auto *pseudo_input0 = graph.createNode<GuardedValueFlowCallOutputNode>(
       GuardedValueFlowNode::Kind::CallSitePseudoInput,
-      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), nullptr, ret_inst,
+      Type::getInt32Ty(context), &graph, &F->getEntryBlock(), nullptr, ret_inst,
       F);
   pseudo_input0->setIndex(0);
   site->addPseudoInput(F, pseudo_input0);
 
   auto *pseudo_input2 = graph.createNode<GuardedValueFlowCallOutputNode>(
       GuardedValueFlowNode::Kind::CallSitePseudoInput,
-      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), nullptr, ret_inst,
+      Type::getInt32Ty(context), &graph, &F->getEntryBlock(), nullptr, ret_inst,
       F);
   pseudo_input2->setIndex(2);
   site->addPseudoInput(F, pseudo_input2);
@@ -213,7 +203,7 @@ TEST_F(GuardedValueFlowTest, KeepsCanonicalAndInterfaceLookupsSeparate) {
 
   auto *ret_inst = cast<ReturnInst>(entry->getTerminator());
   auto *interface_value =
-      graph.createSyntheticInterfaceValue(Type::getInt32Ty(context_),
+      graph.createSyntheticInterfaceValue(Type::getInt32Ty(context),
                                          "pseudo.interface");
   auto *interface_node = graph.createNode<GuardedValueFlowCallOutputNode>(
       GuardedValueFlowNode::Kind::CallSitePseudoInput,
@@ -244,15 +234,15 @@ TEST_F(GuardedValueFlowTest,
   GuardedValueFlowGraph graph(F);
   auto *ret_inst = cast<ReturnInst>(F->getEntryBlock().getTerminator());
   auto *load_mem = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context_), &graph,
+      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context), &graph,
       &F->getEntryBlock(), nullptr, ret_inst);
   auto *producer_a = graph.createAnonymousStoreMemoryNode(
-      Type::getInt32Ty(context_), &F->getEntryBlock(), ret_inst, "anon.a");
+      Type::getInt32Ty(context), &F->getEntryBlock(), ret_inst, "anon.a");
   auto *producer_b = graph.createAnonymousStoreMemoryNode(
-      Type::getInt32Ty(context_), &F->getEntryBlock(), ret_inst, "anon.b");
+      Type::getInt32Ty(context), &F->getEntryBlock(), ret_inst, "anon.b");
 
   auto *cond_node = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt1Ty(context_),
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt1Ty(context),
       &graph, &F->getEntryBlock());
   auto *region_true = graph.findOrCreateUnitRegion(cond_node, true,
                                                    &F->getEntryBlock(),
@@ -297,19 +287,19 @@ TEST_F(GuardedValueFlowTest, StoresSummaryNodesPerCalleeWithoutOverwrite) {
 
   auto *input_a = graph.createNode<GuardedValueFlowCallSummaryNode>(
       GuardedValueFlowNode::Kind::CallSiteArgumentSummary,
-      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), ret_inst,
+      Type::getInt32Ty(context), &graph, &F->getEntryBlock(), ret_inst,
       callee_a, 1);
   auto *input_b = graph.createNode<GuardedValueFlowCallSummaryNode>(
       GuardedValueFlowNode::Kind::CallSiteArgumentSummary,
-      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), ret_inst,
+      Type::getInt32Ty(context), &graph, &F->getEntryBlock(), ret_inst,
       callee_b, 1);
   auto *output_a = graph.createNode<GuardedValueFlowCallSummaryNode>(
       GuardedValueFlowNode::Kind::CallSiteReturnSummary,
-      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), ret_inst,
+      Type::getInt32Ty(context), &graph, &F->getEntryBlock(), ret_inst,
       callee_a, 2);
   auto *output_b = graph.createNode<GuardedValueFlowCallSummaryNode>(
       GuardedValueFlowNode::Kind::CallSiteReturnSummary,
-      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), ret_inst,
+      Type::getInt32Ty(context), &graph, &F->getEntryBlock(), ret_inst,
       callee_b, 2);
 
   site->setInputSummaryNode(callee_a, 1, input_a);
@@ -341,11 +331,11 @@ TEST_F(GuardedValueFlowTest,
   GuardedValueFlowGraph graph(F);
   BasicBlock *entry = &F->getEntryBlock();
   auto *parent = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context_), &graph,
+      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context), &graph,
       entry);
   StructType *aggregate_ty =
-      StructType::get(context_, {Type::getInt32Ty(context_),
-                                Type::getInt32Ty(context_)});
+      StructType::get(context, {Type::getInt32Ty(context),
+                                Type::getInt32Ty(context)});
   auto *child = graph.createNode<GuardedValueFlowNode>(
       GuardedValueFlowNode::Kind::SimpleOperand, aggregate_ty, &graph, entry);
 

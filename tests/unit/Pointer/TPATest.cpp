@@ -8,27 +8,17 @@
 #include "Alias/TPA/PointerAnalysis/FrontEnd/SemiSparseProgramBuilder.h"
 #include "Alias/TPA/PointerAnalysis/Support/PtsSet.h"
 #include "Alias/TPA/Transforms/RunPrepass.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace tpa;
 using namespace transform;
+using namespace lotus::unittest;
 
 namespace {
-
-std::unique_ptr<Module> parseModule(LLVMContext &ctx, const char *ir) {
-  SMDiagnostic err;
-  auto M = parseAssemblyString(ir, err, ctx);
-  if (!M)
-    err.print("TPATest", errs());
-  return M;
-}
 
 bool mayAlias(const SemiSparsePointerAnalysis &pta, const Value *v1,
               const Value *v2) {
@@ -57,7 +47,7 @@ TEST_F(TPATest, NoAliasTwoAllocas) {
     }
   )";
 
-  auto module = parseModule(context, ir);
+  auto module = lotus::unittest::parseModule(context, ir, "TPATest");
   ASSERT_NE(module, nullptr);
 
   runPrepassOn(*module);
@@ -97,7 +87,7 @@ TEST_F(TPATest, AliasStoreLoad) {
     }
   )";
 
-  auto module = parseModule(context, ir);
+  auto module = lotus::unittest::parseModule(context, ir, "TPATest");
   ASSERT_NE(module, nullptr);
 
   runPrepassOn(*module);
@@ -139,7 +129,7 @@ TEST_F(TPATest, PointsToSetLoadContainsStoredAlloca) {
     }
   )";
 
-  auto module = parseModule(context, ir);
+  auto module = lotus::unittest::parseModule(context, ir, "TPATest");
   ASSERT_NE(module, nullptr);
 
   runPrepassOn(*module);

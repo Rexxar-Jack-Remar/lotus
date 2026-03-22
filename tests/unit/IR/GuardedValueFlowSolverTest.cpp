@@ -4,19 +4,19 @@
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/GuardedValueFlowSolver.h"
 #include "IR/GVFG/LotusAdapter.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/InitializePasses.h>
 #include <llvm/PassRegistry.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 #include <cctype>
 
 using namespace llvm;
 using namespace lotus::gvfg;
+using namespace lotus::unittest;
 
 namespace {
 
@@ -37,10 +37,8 @@ struct SummaryProducerChain {
   GuardedValueFlowNode *summary_sentinel{nullptr};
 };
 
-class GuardedValueFlowSolverTest : public ::testing::Test {
+class GuardedValueFlowSolverTest : public LlvmModuleTest {
 protected:
-  LLVMContext context_;
-
   struct BuilderPipeline {
     std::unique_ptr<legacy::PassManager> pm;
     GuardedValueFlowGraphBuilderPass *builder{nullptr};
@@ -62,14 +60,6 @@ protected:
     initializeAnalysis(registry);
     initializeTransformUtils(registry);
     initialized = true;
-  }
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context_);
-    if (!module)
-      err.print("GuardedValueFlowSolverTest", errs());
-    return module;
   }
 
   BuilderPipeline runBuilder(Module &M) {
@@ -295,17 +285,17 @@ TEST_F(GuardedValueFlowSolverTest, ExcludesSummarySentinelChainsFromBaseSolver) 
   GuardedValueFlowGraph graph(F);
   SummaryProducerChain chain;
   chain.summary_return = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context_),
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context),
       &graph, &F->getEntryBlock(), nullptr, ret_inst);
   chain.summary_mem = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context_), &graph,
+      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context), &graph,
       &F->getEntryBlock(), nullptr, ret_inst);
   chain.producer_mem = graph.createAnonymousStoreMemoryNode(
-      Type::getInt32Ty(context_), &F->getEntryBlock(), ret_inst,
+      Type::getInt32Ty(context), &F->getEntryBlock(), ret_inst,
       "summary.producer.mem");
   chain.summary_sentinel = graph.createNode<GuardedValueFlowCallSummaryNode>(
       GuardedValueFlowNode::Kind::CallSiteReturnSummary,
-      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), ret_inst, F, 0);
+      Type::getInt32Ty(context), &graph, &F->getEntryBlock(), ret_inst, F, 0);
   chain.summary_sentinel->setDescription("summary.output.value");
 
   chain.summary_return->addChild(chain.summary_mem);
@@ -347,17 +337,17 @@ TEST_F(GuardedValueFlowSolverTest, ExcludesSummarySentinelChainsFromDTSolver) {
   GuardedValueFlowGraph graph(F);
   SummaryProducerChain chain;
   chain.summary_return = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context_),
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(context),
       &graph, &F->getEntryBlock(), nullptr, ret_inst);
   chain.summary_mem = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context_), &graph,
+      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context), &graph,
       &F->getEntryBlock(), nullptr, ret_inst);
   chain.producer_mem = graph.createAnonymousStoreMemoryNode(
-      Type::getInt32Ty(context_), &F->getEntryBlock(), ret_inst,
+      Type::getInt32Ty(context), &F->getEntryBlock(), ret_inst,
       "summary.producer.mem");
   chain.summary_sentinel = graph.createNode<GuardedValueFlowCallSummaryNode>(
       GuardedValueFlowNode::Kind::CallSiteReturnSummary,
-      Type::getInt32Ty(context_), &graph, &F->getEntryBlock(), ret_inst, F, 0);
+      Type::getInt32Ty(context), &graph, &F->getEntryBlock(), ret_inst, F, 0);
   chain.summary_sentinel->setDescription("summary.output.value");
 
   chain.summary_return->addChild(chain.summary_mem);

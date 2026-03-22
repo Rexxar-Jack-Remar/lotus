@@ -7,32 +7,20 @@
  */
 
 #include "Alias/SparrowAA/AndersenAA.h"
+#include "LLVMHelpers.h"
 
 #include <algorithm>
 #include <set>
 
 #include <llvm/Analysis/MemoryLocation.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
+using namespace lotus::unittest;
 
-class SparrowAATest : public ::testing::Test {
+class SparrowAATest : public LlvmModuleTest {
 protected:
-  LLVMContext context;
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("SparrowAATest", errs());
-    }
-    return module;
-  }
-
   bool pointsToSetContains(const std::vector<const Value *> &ptsSet,
                            const Value *v) {
     return std::find(ptsSet.begin(), ptsSet.end(), v) != ptsSet.end();

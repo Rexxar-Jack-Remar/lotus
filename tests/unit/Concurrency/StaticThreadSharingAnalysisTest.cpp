@@ -4,27 +4,13 @@
 #include "Alias/seadsa/InitializePasses.hh"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
+#include "LLVMHelpers.h"
+
 #include <llvm/IR/LegacyPassManager.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus;
-
-static const Instruction *findInstructionByName(const Function &func,
-                                                StringRef name) {
-  for (const BasicBlock &bb : func) {
-    for (const Instruction &inst : bb) {
-      if (inst.getName() == name) {
-        return &inst;
-      }
-    }
-  }
-  return nullptr;
-}
+using namespace lotus::unittest;
 
 class StaticSharingProbePass : public ModulePass {
 public:
@@ -127,10 +113,8 @@ private:
 
 char StaticSharingBoolProbePass::ID = 0;
 
-class StaticThreadSharingAnalysisTest : public ::testing::Test {
+class StaticThreadSharingAnalysisTest : public lotus::unittest::LlvmModuleTest {
 protected:
-  LLVMContext context;
-
   static void ensurePassesInitialized() {
     static bool initialized = false;
     if (initialized) {
@@ -140,15 +124,6 @@ protected:
     seadsa::initializeAnalysisPasses(registry);
     llvm::initializeDsaAnalysisPass(registry);
     initialized = true;
-  }
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("StaticThreadSharingAnalysisTest", errs());
-    }
-    return module;
   }
 };
 

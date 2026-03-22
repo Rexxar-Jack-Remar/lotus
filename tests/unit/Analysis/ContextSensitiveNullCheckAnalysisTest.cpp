@@ -1,14 +1,13 @@
 #include "Alias/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/DyckAA/DyckModRefAnalysis.h"
 #include "Analysis/NullPointer/ContextSensitiveNullCheckAnalysis.h"
+#include "LLVMHelpers.h"
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
+
+using namespace lotus::unittest;
 
 namespace lotus {
 namespace nullpointer {
@@ -21,45 +20,6 @@ void setContextSensitiveNullContextDepthOverrideForTesting(int Depth);
 namespace {
 
 using Context = ContextSensitiveNullCheckAnalysis::Context;
-
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &Context,
-                                          const char *Source) {
-  llvm::SMDiagnostic Err;
-  auto Module = llvm::parseAssemblyString(Source, Err, Context);
-  if (!Module) {
-    Err.print("ContextSensitiveNullCheckAnalysisTest", llvm::errs());
-  }
-  return Module;
-}
-
-llvm::Instruction *findInstructionByName(llvm::Function *Function,
-                                         llvm::StringRef Name) {
-  for (auto &BB : *Function) {
-    for (auto &Inst : BB) {
-      if (Inst.getName() == Name) {
-        return &Inst;
-      }
-    }
-  }
-  return nullptr;
-}
-
-std::vector<llvm::CallBase *> findCallsTo(llvm::Function *Function,
-                                          llvm::StringRef CalleeName) {
-  std::vector<llvm::CallBase *> Calls;
-  for (auto &BB : *Function) {
-    for (auto &Inst : BB) {
-      auto *Call = llvm::dyn_cast<llvm::CallBase>(&Inst);
-      if (!Call || !Call->getCalledFunction()) {
-        continue;
-      }
-      if (Call->getCalledFunction()->getName() == CalleeName) {
-        Calls.push_back(Call);
-      }
-    }
-  }
-  return Calls;
-}
 
 bool contextEquals(const Context &Ctx,
                    std::initializer_list<llvm::CallBase *> Expected) {
@@ -134,7 +94,7 @@ TEST(ContextSensitiveNullCheckAnalysisTest,
       call void @caller_nullable(i8* null)
       ret i32 0
     }
-  )");
+  )", "ContextSensitiveNullCheckAnalysisTest");
   ASSERT_NE(Module, nullptr);
 
   auto Harness = runContextSensitiveNCA(*Module);

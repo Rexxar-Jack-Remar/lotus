@@ -1,27 +1,11 @@
 #include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
+#include "LLVMHelpers.h"
 
 using namespace llvm;
 using namespace OpenMP;
 
-class OpenMPTaskGraphTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("OpenMPTaskGraphTest", errs());
-    }
-    return module;
-  }
-};
+class OpenMPTaskGraphTest : public lotus::unittest::LlvmModuleTest {};
 
 TEST_F(OpenMPTaskGraphTest, ParsesStackBuiltDependencies) {
   const char *source = R"(
