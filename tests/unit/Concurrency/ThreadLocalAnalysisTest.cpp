@@ -178,6 +178,44 @@ TEST_F(ThreadLocalAnalysisTest, HelperMediatedThreadPayloadIsNotThreadLocal) {
   EXPECT_FALSE(tla.isThreadLocal(slot));
 }
 
+TEST_F(ThreadLocalAnalysisTest,
+       LocalPointerCarrierDoesNotHideThreadPayloadEscape) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* %arg
+    }
+
+    define i32 @main() {
+    entry:
+      %shared = alloca i32, align 4
+      %carrier = alloca i32*, align 8
+      %tid = alloca i8, align 1
+      store i32* %shared, i32** %carrier, align 8
+      %loaded = load i32*, i32** %carrier, align 8
+      %payload = bitcast i32* %loaded to i8*
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker,
+                               i8* %payload)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadLocalAnalysis tla(*module);
+  tla.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const auto *shared = dyn_cast<AllocaInst>(&main_func->getEntryBlock().front());
+  ASSERT_NE(shared, nullptr);
+
+  EXPECT_FALSE(tla.isThreadLocal(shared));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

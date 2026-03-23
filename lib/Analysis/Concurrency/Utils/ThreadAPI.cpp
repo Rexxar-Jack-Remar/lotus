@@ -682,6 +682,42 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
     return RuntimeLibrary::OpenMP;
   case TD_MPI_INIT:
   case TD_MPI_FINALIZE:
+  case TD_MPI_SESSION_INIT:
+  case TD_MPI_SESSION_FINALIZE:
+  case TD_MPI_SESSION_GET_INFO:
+  case TD_MPI_SESSION_GET_NUM_ERRCODES:
+  case TD_MPI_SESSION_GET_ERRHANDLER:
+  case TD_MPI_SESSION_SET_ERRHANDLER:
+  case TD_MPI_ERRHANDLER_CREATE:
+  case TD_MPI_ERRHANDLER_FREE:
+  case TD_MPI_COMM_GET_ERRHANDLER:
+  case TD_MPI_COMM_SET_ERRHANDLER:
+  case TD_MPI_COMM_CALL_ERRHANDLER:
+  case TD_MPI_WIN_GET_ERRHANDLER:
+  case TD_MPI_WIN_SET_ERRHANDLER:
+  case TD_MPI_FILE_GET_ERRHANDLER:
+  case TD_MPI_FILE_SET_ERRHANDLER:
+  case TD_MPI_ERROR_CLASS:
+  case TD_MPI_ERROR_STRING:
+  case TD_MPI_INFO_CREATE:
+  case TD_MPI_INFO_DUP:
+  case TD_MPI_INFO_FREE:
+  case TD_MPI_INFO_GET:
+  case TD_MPI_INFO_GET_VALUELEN:
+  case TD_MPI_INFO_GET_NKEYS:
+  case TD_MPI_INFO_GET_NTHKEY:
+  case TD_MPI_INFO_GET_KEYVAL:
+  case TD_MPI_INFO_SET:
+  case TD_MPI_INFO_DELETE:
+  case TD_MPI_INFO_C2F:
+  case TD_MPI_INFO_CREATE_ENV:
+  case TD_MPI_INFO_FREE_ENV:
+  case TD_MPI_GET_COUNT:
+  case TD_MPI_GET_ELEMENTS:
+  case TD_MPI_GET_ELEMENTS_X:
+  case TD_MPI_STATUS_SIZE:
+  case TD_MPI_STATUS_SET_ELEMENTS:
+  case TD_MPI_STATUS_SET_ELEMENTS_X:
   case TD_MPI_SEND:
   case TD_MPI_RECV:
   case TD_MPI_SENDRECV:
@@ -742,7 +778,32 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_MPI_TYPE_HINDEXED:
   case TD_MPI_TYPE_STRUCT:
   case TD_MPI_TYPE_CREATE_DLPACK:
+  case TD_MPI_TYPE_CREATE_SUBARRAY:
+  case TD_MPI_TYPE_CREATE_DARRAY:
+  case TD_MPI_TYPE_CREATE_RESIZED:
+  case TD_MPI_TYPE_CREATE_HINDEXED:
+  case TD_MPI_TYPE_CREATE_HVECTOR:
+  case TD_MPI_TYPE_GET_EXTENT:
+  case TD_MPI_TYPE_GET_TRUE_EXTENT:
+  case TD_MPI_TYPE_SIZE:
   case TD_MPI_TYPE_COMMIT:
+  case TD_MPI_CART_CREATE:
+  case TD_MPI_CART_DIMS_CREATE:
+  case TD_MPI_CART_GET:
+  case TD_MPI_CART_SHIFT:
+  case TD_MPI_CART_COORDS:
+  case TD_MPI_CART_RANK:
+  case TD_MPI_CART_SUB:
+  case TD_MPI_DIST_GRAPH_CREATE:
+  case TD_MPI_DIST_GRAPH_CREATE_ADJACENT:
+  case TD_MPI_DIST_GRAPH_NEIGHBORS:
+  case TD_MPI_DIST_GRAPH_NEIGHBORS_COUNT:
+  case TD_MPI_GRAPH_CREATE:
+  case TD_MPI_GRAPH_GET:
+  case TD_MPI_GRAPH_NEIGHBORS:
+  case TD_MPI_GRAPH_NEIGHBORS_COUNT:
+  case TD_MPI_GRAPH_DIMS_GET:
+  case TD_MPI_GRAPH_MAP:
     return RuntimeLibrary::MPI;
   default:
     return RuntimeLibrary::Unknown;
@@ -876,6 +937,12 @@ bool isLockLikeType(TD type) {
   }
 }
 
+bool isSemaphoreTypeForLowering(TD type) {
+  return type == TD::TD_SEMAPHORE_ACQUIRE ||
+         type == TD::TD_SEMAPHORE_RELEASE ||
+         type == TD::TD_SEMAPHORE_TRY_ACQUIRE;
+}
+
 bool isBarrierHBType(TD type) {
   switch (type) {
   case TD::TD_BAR_WAIT:
@@ -976,6 +1043,11 @@ LoweringInfo makeLoweringInfo(TD type, ThreadAPI::RuntimeLibrary library,
   if (type == TD::TD_ASYNC) {
     return {LoweringKind::Deferred, "async-launch-policy-witness",
             ownerMask(Owner::HB, Owner::MHP)};
+  }
+  if (isSemaphoreTypeForLowering(type)) {
+    return {LoweringKind::RecognizedButUnmodeled,
+            "counting-semaphore-runtime-unmodeled",
+            ownerMask(Owner::ExplicitFallback)};
   }
   if (type == TD::TD_OMP_ATOMIC_START || type == TD::TD_OMP_ATOMIC_END) {
     return {LoweringKind::RecognizedButUnmodeled,
@@ -1164,8 +1236,30 @@ ThreadAPI::getSemanticLoweringInfo(const Function *F) const {
     return getSemanticLoweringInfo(TD_DUMMY);
   }
   const APIDescription description = describe(F);
-  return makeLoweringInfo(description.type, description.library,
-                          description.semantic_tag);
+  SemanticLoweringInfo info =
+      makeLoweringInfo(description.type, description.library,
+                       description.semantic_tag);
+  const bool has_semaphore_trait =
+      llvm::is_contained(description.traits, std::string("semaphore"));
+  const bool is_binary_semaphore =
+      llvm::is_contained(description.traits, std::string("binary-semaphore")) ||
+      F->getName().contains("binary_semaphore");
+  if (isSemaphoreTypeForLowering(description.type) || has_semaphore_trait) {
+    if (is_binary_semaphore) {
+      info.kind = SemanticLoweringKind::Modeled;
+      info.reason = "modeled";
+      info.owners = semanticLoweringOwnerMask(SemanticLoweringOwner::LockSet,
+                                              SemanticLoweringOwner::MHP,
+                                              SemanticLoweringOwner::HB);
+    } else {
+      info.kind = SemanticLoweringKind::RecognizedButUnmodeled;
+      info.reason = "counting-semaphore-runtime-unmodeled";
+      info.owners = semanticLoweringOwnerMask(
+          SemanticLoweringOwner::ExplicitFallback,
+          SemanticLoweringOwner::HB);
+    }
+  }
+  return info;
 }
 
 ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
@@ -1809,6 +1903,78 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_OMP_DOACROSS_WAIT";
   case TD_OMP_DOACROSS_SUBMIT:
     return "TD_OMP_DOACROSS_SUBMIT";
+  case TD_MPI_SESSION_INIT:
+    return "TD_MPI_SESSION_INIT";
+  case TD_MPI_SESSION_FINALIZE:
+    return "TD_MPI_SESSION_FINALIZE";
+  case TD_MPI_SESSION_GET_INFO:
+    return "TD_MPI_SESSION_GET_INFO";
+  case TD_MPI_SESSION_GET_NUM_ERRCODES:
+    return "TD_MPI_SESSION_GET_NUM_ERRCODES";
+  case TD_MPI_SESSION_GET_ERRHANDLER:
+    return "TD_MPI_SESSION_GET_ERRHANDLER";
+  case TD_MPI_SESSION_SET_ERRHANDLER:
+    return "TD_MPI_SESSION_SET_ERRHANDLER";
+  case TD_MPI_ERRHANDLER_CREATE:
+    return "TD_MPI_ERRHANDLER_CREATE";
+  case TD_MPI_ERRHANDLER_FREE:
+    return "TD_MPI_ERRHANDLER_FREE";
+  case TD_MPI_COMM_GET_ERRHANDLER:
+    return "TD_MPI_COMM_GET_ERRHANDLER";
+  case TD_MPI_COMM_SET_ERRHANDLER:
+    return "TD_MPI_COMM_SET_ERRHANDLER";
+  case TD_MPI_COMM_CALL_ERRHANDLER:
+    return "TD_MPI_COMM_CALL_ERRHANDLER";
+  case TD_MPI_WIN_GET_ERRHANDLER:
+    return "TD_MPI_WIN_GET_ERRHANDLER";
+  case TD_MPI_WIN_SET_ERRHANDLER:
+    return "TD_MPI_WIN_SET_ERRHANDLER";
+  case TD_MPI_FILE_GET_ERRHANDLER:
+    return "TD_MPI_FILE_GET_ERRHANDLER";
+  case TD_MPI_FILE_SET_ERRHANDLER:
+    return "TD_MPI_FILE_SET_ERRHANDLER";
+  case TD_MPI_ERROR_CLASS:
+    return "TD_MPI_ERROR_CLASS";
+  case TD_MPI_ERROR_STRING:
+    return "TD_MPI_ERROR_STRING";
+  case TD_MPI_INFO_CREATE:
+    return "TD_MPI_INFO_CREATE";
+  case TD_MPI_INFO_DUP:
+    return "TD_MPI_INFO_DUP";
+  case TD_MPI_INFO_FREE:
+    return "TD_MPI_INFO_FREE";
+  case TD_MPI_INFO_GET:
+    return "TD_MPI_INFO_GET";
+  case TD_MPI_INFO_GET_VALUELEN:
+    return "TD_MPI_INFO_GET_VALUELEN";
+  case TD_MPI_INFO_GET_NKEYS:
+    return "TD_MPI_INFO_GET_NKEYS";
+  case TD_MPI_INFO_GET_NTHKEY:
+    return "TD_MPI_INFO_GET_NTHKEY";
+  case TD_MPI_INFO_GET_KEYVAL:
+    return "TD_MPI_INFO_GET_KEYVAL";
+  case TD_MPI_INFO_SET:
+    return "TD_MPI_INFO_SET";
+  case TD_MPI_INFO_DELETE:
+    return "TD_MPI_INFO_DELETE";
+  case TD_MPI_INFO_C2F:
+    return "TD_MPI_INFO_C2F";
+  case TD_MPI_INFO_CREATE_ENV:
+    return "TD_MPI_INFO_CREATE_ENV";
+  case TD_MPI_INFO_FREE_ENV:
+    return "TD_MPI_INFO_FREE_ENV";
+  case TD_MPI_GET_COUNT:
+    return "TD_MPI_GET_COUNT";
+  case TD_MPI_GET_ELEMENTS:
+    return "TD_MPI_GET_ELEMENTS";
+  case TD_MPI_GET_ELEMENTS_X:
+    return "TD_MPI_GET_ELEMENTS_X";
+  case TD_MPI_STATUS_SIZE:
+    return "TD_MPI_STATUS_SIZE";
+  case TD_MPI_STATUS_SET_ELEMENTS:
+    return "TD_MPI_STATUS_SET_ELEMENTS";
+  case TD_MPI_STATUS_SET_ELEMENTS_X:
+    return "TD_MPI_STATUS_SET_ELEMENTS_X";
   case TD_MPI_INIT:
     return "TD_MPI_INIT";
   case TD_MPI_FINALIZE:
@@ -1933,8 +2099,58 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_MPI_TYPE_STRUCT";
   case TD_MPI_TYPE_CREATE_DLPACK:
     return "TD_MPI_TYPE_CREATE_DLPACK";
+  case TD_MPI_TYPE_CREATE_SUBARRAY:
+    return "TD_MPI_TYPE_CREATE_SUBARRAY";
+  case TD_MPI_TYPE_CREATE_DARRAY:
+    return "TD_MPI_TYPE_CREATE_DARRAY";
+  case TD_MPI_TYPE_CREATE_RESIZED:
+    return "TD_MPI_TYPE_CREATE_RESIZED";
+  case TD_MPI_TYPE_CREATE_HINDEXED:
+    return "TD_MPI_TYPE_CREATE_HINDEXED";
+  case TD_MPI_TYPE_CREATE_HVECTOR:
+    return "TD_MPI_TYPE_CREATE_HVECTOR";
+  case TD_MPI_TYPE_GET_EXTENT:
+    return "TD_MPI_TYPE_GET_EXTENT";
+  case TD_MPI_TYPE_GET_TRUE_EXTENT:
+    return "TD_MPI_TYPE_GET_TRUE_EXTENT";
+  case TD_MPI_TYPE_SIZE:
+    return "TD_MPI_TYPE_SIZE";
   case TD_MPI_TYPE_COMMIT:
     return "TD_MPI_TYPE_COMMIT";
+  case TD_MPI_CART_CREATE:
+    return "TD_MPI_CART_CREATE";
+  case TD_MPI_CART_DIMS_CREATE:
+    return "TD_MPI_CART_DIMS_CREATE";
+  case TD_MPI_CART_GET:
+    return "TD_MPI_CART_GET";
+  case TD_MPI_CART_SHIFT:
+    return "TD_MPI_CART_SHIFT";
+  case TD_MPI_CART_COORDS:
+    return "TD_MPI_CART_COORDS";
+  case TD_MPI_CART_RANK:
+    return "TD_MPI_CART_RANK";
+  case TD_MPI_CART_SUB:
+    return "TD_MPI_CART_SUB";
+  case TD_MPI_DIST_GRAPH_CREATE:
+    return "TD_MPI_DIST_GRAPH_CREATE";
+  case TD_MPI_DIST_GRAPH_CREATE_ADJACENT:
+    return "TD_MPI_DIST_GRAPH_CREATE_ADJACENT";
+  case TD_MPI_DIST_GRAPH_NEIGHBORS:
+    return "TD_MPI_DIST_GRAPH_NEIGHBORS";
+  case TD_MPI_DIST_GRAPH_NEIGHBORS_COUNT:
+    return "TD_MPI_DIST_GRAPH_NEIGHBORS_COUNT";
+  case TD_MPI_GRAPH_CREATE:
+    return "TD_MPI_GRAPH_CREATE";
+  case TD_MPI_GRAPH_GET:
+    return "TD_MPI_GRAPH_GET";
+  case TD_MPI_GRAPH_NEIGHBORS:
+    return "TD_MPI_GRAPH_NEIGHBORS";
+  case TD_MPI_GRAPH_NEIGHBORS_COUNT:
+    return "TD_MPI_GRAPH_NEIGHBORS_COUNT";
+  case TD_MPI_GRAPH_DIMS_GET:
+    return "TD_MPI_GRAPH_DIMS_GET";
+  case TD_MPI_GRAPH_MAP:
+    return "TD_MPI_GRAPH_MAP";
   case TD_KERNEL_SPIN_LOCK_INIT:
     return "TD_KERNEL_SPIN_LOCK_INIT";
   case TD_KERNEL_SPIN_LOCK:

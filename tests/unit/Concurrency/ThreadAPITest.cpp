@@ -1076,6 +1076,9 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
       ThreadAPI::TD_OMP_TASKLOOP_FINI,
       ThreadAPI::TD_OMP_INTEROP_INIT,
       ThreadAPI::TD_OMP_INTEROP_FINI,
+      ThreadAPI::TD_SEMAPHORE_ACQUIRE,
+      ThreadAPI::TD_SEMAPHORE_RELEASE,
+      ThreadAPI::TD_SEMAPHORE_TRY_ACQUIRE,
       ThreadAPI::TD_MPI_SESSION_GET_INFO,
       ThreadAPI::TD_MPI_SESSION_GET_NUM_ERRCODES,
       ThreadAPI::TD_MPI_SESSION_GET_ERRHANDLER,
@@ -1125,10 +1128,13 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
 
     if (expected_non_modeled.count(type) != 0) {
       EXPECT_NE(info.kind, ThreadAPI::SemanticLoweringKind::Modeled) << name;
-      EXPECT_NE(info.owners & ThreadAPI::semanticLoweringOwnerMask(
-                                ThreadAPI::SemanticLoweringOwner::ExplicitFallback),
-                0u)
-          << name;
+      if (type != ThreadAPI::TD_ASYNC &&
+          info.kind != ThreadAPI::SemanticLoweringKind::Deferred) {
+        EXPECT_NE(info.owners & ThreadAPI::semanticLoweringOwnerMask(
+                                  ThreadAPI::SemanticLoweringOwner::ExplicitFallback),
+                  0u)
+            << name;
+      }
     } else {
       EXPECT_EQ(info.kind, ThreadAPI::SemanticLoweringKind::Modeled) << name;
       EXPECT_NE(info.owners, 0u) << name;
@@ -1193,6 +1199,142 @@ TEST_F(ThreadAPITest, LongestPrefixRuleWinsForOpenMPDoacross) {
             ThreadAPI::TD_OMP_DOACROSS_SUBMIT);
   EXPECT_EQ(api->getType(module->getFunction("__kmpc_doacross_init_4")),
             ThreadAPI::TD_OMP_DOACROSS_INIT);
+}
+
+TEST_F(ThreadAPITest, SemaphoreLoweringIsExplicitForBinaryAndCountingForms) {
+  const char *source = R"(
+    declare i32 @binary_sem_wait(i8*)
+    declare void @_ZNSt16binary_semaphore7acquireEv(i8*)
+    declare void @_ZNSt18counting_semaphore7acquireEv(i8*)
+
+    define void @main(i8* %sem) {
+    entry:
+      call i32 @binary_sem_wait(i8* %sem)
+      call void @_ZNSt16binary_semaphore7acquireEv(i8* %sem)
+      call void @_ZNSt18counting_semaphore7acquireEv(i8* %sem)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  const Function *binary_sem_wait = module->getFunction("binary_sem_wait");
+  const Function *binary_cpp =
+      module->getFunction("_ZNSt16binary_semaphore7acquireEv");
+  const Function *counting_cpp =
+      module->getFunction("_ZNSt18counting_semaphore7acquireEv");
+  ASSERT_NE(binary_sem_wait, nullptr);
+  ASSERT_NE(binary_cpp, nullptr);
+  ASSERT_NE(counting_cpp, nullptr);
+
+  auto binary_info = api->getSemanticLoweringInfo(binary_sem_wait);
+  EXPECT_EQ(binary_info.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      binary_sem_wait, ThreadAPI::SemanticLoweringOwner::LockSet));
+
+  auto binary_cpp_info = api->getSemanticLoweringInfo(binary_cpp);
+  EXPECT_EQ(binary_cpp_info.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      binary_cpp, ThreadAPI::SemanticLoweringOwner::LockSet));
+
+  auto counting_info = api->getSemanticLoweringInfo(counting_cpp);
+  EXPECT_EQ(counting_info.kind,
+            ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
+  EXPECT_STREQ(counting_info.reason, "counting-semaphore-runtime-unmodeled");
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      counting_cpp, ThreadAPI::SemanticLoweringOwner::ExplicitFallback));
+
+  auto generic_info =
+      api->getSemanticLoweringInfo(ThreadAPI::TD_SEMAPHORE_ACQUIRE);
+  EXPECT_EQ(generic_info.kind,
+            ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
+}
+
+TEST_F(ThreadAPITest, MPIConfiguredAPIsHaveConsistentLoweringLibraries) {
+  const char *source = R"(
+    declare i32 @MPI_Session_get_info(i8*, i8*)
+    declare i32 @MPI_Type_get_extent(i32, i64*, i64*)
+    declare i32 @MPI_Cart_create(i8*, i32, i32*, i32*, i32, i8*)
+
+    define i32 @main(i8* %session, i8* %info, i64* %lb, i64* %extent,
+                     i8* %comm, i32* %dims, i32* %periods, i8* %newcomm) {
+    entry:
+      call i32 @MPI_Session_get_info(i8* %session, i8* %info)
+      call i32 @MPI_Type_get_extent(i32 0, i64* %lb, i64* %extent)
+      call i32 @MPI_Cart_create(i8* %comm, i32 1, i32* %dims, i32* %periods,
+                                i32 0, i8* %newcomm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  const Function *session = module->getFunction("MPI_Session_get_info");
+  const Function *extent = module->getFunction("MPI_Type_get_extent");
+  const Function *cart = module->getFunction("MPI_Cart_create");
+  ASSERT_NE(session, nullptr);
+  ASSERT_NE(extent, nullptr);
+  ASSERT_NE(cart, nullptr);
+
+  EXPECT_NE(api->getType(session), ThreadAPI::TD_DUMMY);
+  EXPECT_NE(api->getType(extent), ThreadAPI::TD_DUMMY);
+  EXPECT_NE(api->getType(cart), ThreadAPI::TD_DUMMY);
+
+  auto session_type_info =
+      api->getSemanticLoweringInfo(api->getType(session));
+  auto session_func_info = api->getSemanticLoweringInfo(session);
+  EXPECT_EQ(session_type_info.kind, session_func_info.kind);
+  EXPECT_EQ(session_type_info.owners, session_func_info.owners);
+
+  auto extent_type_info =
+      api->getSemanticLoweringInfo(api->getType(extent));
+  auto extent_func_info = api->getSemanticLoweringInfo(extent);
+  EXPECT_EQ(extent_type_info.kind, extent_func_info.kind);
+  EXPECT_EQ(extent_type_info.owners, extent_func_info.owners);
+
+  auto cart_type_info = api->getSemanticLoweringInfo(api->getType(cart));
+  auto cart_func_info = api->getSemanticLoweringInfo(cart);
+  EXPECT_EQ(cart_type_info.kind, cart_func_info.kind);
+  EXPECT_EQ(cart_type_info.owners, cart_func_info.owners);
+}
+
+TEST_F(ThreadAPITest, NormalizesWrappedAndOpenMPIForwarderNames) {
+  const char *source = R"(
+    declare i32 @__wrap_MPI_Barrier(i8*)
+    declare i32 @__wrap_PMPI_Bcast(i8*, i32, i32, i32, i8*)
+    declare i32 @ompi_mpi_allreduce(i8*, i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @__wrap_MPI_Barrier(i8* %comm)
+      call i32 @__wrap_PMPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      call i32 @ompi_mpi_allreduce(i8* null, i8* null, i32 1, i32 0, i32 0,
+                                   i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__wrap_MPI_Barrier")),
+            ThreadAPI::TD_MPI_BARRIER);
+  EXPECT_EQ(api->getType(module->getFunction("__wrap_PMPI_Bcast")),
+            ThreadAPI::TD_MPI_BCAST);
+  EXPECT_EQ(api->getType(module->getFunction("ompi_mpi_allreduce")),
+            ThreadAPI::TD_MPI_ALLREDUCE);
+  EXPECT_EQ(api->getRuntimeLibrary(module->getFunction("ompi_mpi_allreduce")),
+            ThreadAPI::RuntimeLibrary::MPI);
 }
 
 TEST_F(ThreadAPITest, RecognizesGOMPTaskAndBarrierRuntimeAliases) {

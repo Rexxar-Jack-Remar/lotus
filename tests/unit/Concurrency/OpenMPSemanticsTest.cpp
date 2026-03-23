@@ -375,6 +375,47 @@ TEST_F(OpenMPSemanticsTest, ValidSectionsAndReduceDoNotTriggerMalformedRegionCou
   }
 }
 
+TEST_F(OpenMPSemanticsTest, CriticalRegionsCreateSemanticEntitiesAndEvents) {
+  const char *source = R"(
+    @crit = global [8 x i32] zeroinitializer
+
+    declare void @__kmpc_critical(i8*, i32, [8 x i32]*)
+    declare void @__kmpc_end_critical(i8*, i32, [8 x i32]*)
+
+    define i32 @main() {
+    entry:
+      call void @__kmpc_critical(i8* null, i32 0, [8 x i32]* @crit)
+      call void @__kmpc_end_critical(i8* null, i32 0, [8 x i32]* @crit)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  EXPECT_EQ(semantics.getSummary().critical_region_count, 1u);
+
+  size_t critical_entities = 0;
+  for (const SemanticEntity &entity : semantics.getSemanticEntities()) {
+    if (entity.kind == SemanticEntityKind::CriticalRegion) {
+      ++critical_entities;
+    }
+  }
+  EXPECT_EQ(critical_entities, 1u);
+
+  size_t critical_events = 0;
+  for (const SemanticEvent &event : semantics.getSemanticEvents()) {
+    if (event.kind == SemanticEventKind::RegionBegin ||
+        event.kind == SemanticEventKind::RegionEnd) {
+      ++critical_events;
+    }
+  }
+  EXPECT_GE(critical_events, 2u);
+}
+
 TEST_F(OpenMPSemanticsTest, AtomicRuntimeFallbackIsReportedExplicitly) {
   const char *source = R"(
     declare void @__kmpc_atomic_start()

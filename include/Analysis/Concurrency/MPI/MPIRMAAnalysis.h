@@ -81,6 +81,7 @@ public:
     bool flush_completed = false;
     bool local_completion_only = false;
     bool exposure_epoch_observed = false;
+    bool pscw_group_unresolved = false;
     EpochCompletion epoch_completion = EpochCompletion::None;
     EpochProof epoch_proof = EpochProof::Unknown;
 

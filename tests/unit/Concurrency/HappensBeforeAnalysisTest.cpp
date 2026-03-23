@@ -1672,7 +1672,7 @@ TEST_F(HappensBeforeAnalysisTest,
 }
 
 TEST_F(HappensBeforeAnalysisTest,
-       ReleaseSequenceWithoutReadsFromProofStaysDeferred) {
+       ReleaseSequenceWithWitnessedConstantCanNowSynchronize) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -1734,7 +1734,11 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);
 
-  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
+  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
+  const auto &deferred = hb.getDeferredSyncCounts();
+  auto it = deferred.find("atomic_release_sequence_edges_modeled");
+  ASSERT_NE(it, deferred.end());
+  EXPECT_GT(it->second, 0u);
 }
 
 TEST_F(HappensBeforeAnalysisTest,
@@ -2535,6 +2539,216 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(load_shared, nullptr);
 
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       ReleaseSequenceWithSingleRmwTailCreatesHBWhenWitnessExcludesInitial) {
+  const char *source = R"(
+    @flag = global i32 0, align 4
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 7, i32* @shared, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @tail(i8* %arg) {
+    entry:
+      %old = atomicrmw add i32* @flag, i32 1 acq_rel
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp eq i32 %seen, 2
+      br i1 %ready, label %sync, label %exit
+
+    sync:
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      %tid3 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @tail, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+  const auto &deferred = hb.getDeferredSyncCounts();
+  auto it = deferred.find("atomic_release_sequence_edges_modeled");
+  ASSERT_NE(it, deferred.end());
+  EXPECT_GT(it->second, 0u);
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       ReleaseSequenceCompetingStoreRemainsDeferred) {
+  const char *source = R"(
+    @flag = global i32 0, align 4
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 7, i32* @shared, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @compete(i8* %arg) {
+    entry:
+      store atomic i32 9, i32* @flag monotonic, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %sync, label %exit
+
+    sync:
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      %tid3 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @compete, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+  const auto &deferred = hb.getDeferredSyncCounts();
+  auto it = deferred.find("atomic_release_candidate_unresolved");
+  ASSERT_NE(it, deferred.end());
+  EXPECT_GT(it->second, 0u);
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       MultipleReleaseCandidatesKeepReleaseSequenceDeferred) {
+  const char *source = R"(
+    @flag = global i32 0, align 4
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer1(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @writer2(i8* %arg) {
+    entry:
+      store atomic i32 2, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %sync, label %exit
+
+    sync:
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      %tid3 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @writer2, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("writer1")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+  const auto &deferred = hb.getDeferredSyncCounts();
+  auto it = deferred.find("atomic_release_candidate_unresolved");
+  ASSERT_NE(it, deferred.end());
+  EXPECT_GT(it->second, 0u);
 }
 
 int main(int argc, char **argv) {

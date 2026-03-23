@@ -90,11 +90,11 @@ const llvm::Value *getAtomicPointer(const llvm::Instruction *inst) {
 }
 
 bool isLockFree(const llvm::Instruction *inst) {
-    // This is a simplification. A proper implementation would check the size
-    // and alignment of the atomic operation.
-    if (const auto *cmpxchg = llvm::dyn_cast<llvm::AtomicCmpXchgInst>(inst)) {
-        return cmpxchg->isVolatile();
-    }
+    // Lock-freedom is target- and type-dependent. The previous implementation
+    // incorrectly used volatility as a proxy, which is unrelated to
+    // lock-freedom and could silently mislead callers. Keep this helper
+    // conservative until a target-aware query is implemented.
+    (void)inst;
     return false;
 }
 

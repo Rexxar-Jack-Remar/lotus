@@ -2745,6 +2745,60 @@ TEST_F(MPIAnalysisTest, DistinctPSCWGroupsStayUnresolved) {
   EXPECT_TRUE(saw_unresolved_group);
 }
 
+TEST_F(MPIAnalysisTest, PSCWGroupDowngradeLeavesConflictingPutsUnsynchronized) {
+  const char *source = R"(
+    @shared_win = global i8 0, align 1
+
+    declare i32 @MPI_Win_start(i8*, i32, i8*)
+    declare i32 @MPI_Win_complete(i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+
+    define i32 @rank_a() {
+    entry:
+      %group = alloca i8, align 1
+      call i32 @MPI_Win_start(i8* %group, i32 0, i8* @shared_win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 0, i64 0, i32 1, i32 0,
+                        i8* @shared_win)
+      call i32 @MPI_Win_complete(i8* @shared_win)
+      ret i32 0
+    }
+
+    define i32 @rank_b() {
+    entry:
+      %group = alloca i8, align 1
+      call i32 @MPI_Win_start(i8* %group, i32 0, i8* @shared_win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 0, i64 0, i32 1, i32 0,
+                        i8* @shared_win)
+      call i32 @MPI_Win_complete(i8* @shared_win)
+      ret i32 0
+    }
+
+    define i32 @main() {
+    entry:
+      %a = call i32 @rank_a()
+      %b = call i32 @rank_b()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_GE(analysis.getResults().unsynchronized_rma.size(), 2u);
+  EXPECT_FALSE(analysis.getResults().rma_races.empty());
+
+  bool saw_unresolved_group = false;
+  for (const auto &fact : analysis.getResults().rma_synchronization_facts) {
+    if (fact.code == "mpi_rma_pscw_group_unresolved") {
+      saw_unresolved_group = true;
+    }
+  }
+  EXPECT_TRUE(saw_unresolved_group);
+}
+
 TEST_F(MPIAnalysisTest,
        InvalidRMAEpochTransitionLeavesOperationUnsynchronized) {
   const char *source = R"(

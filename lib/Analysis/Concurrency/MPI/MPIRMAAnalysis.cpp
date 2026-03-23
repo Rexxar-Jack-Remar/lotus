@@ -705,6 +705,23 @@ void MPIRMAAnalysis::analyzeRMA() {
                                 ? concurrency::ProofStrength::May
                                 : concurrency::ProofStrength::Unknown;
       fact.relation.reason = fact.code;
+      for (RMAOperation &rma_op : rma_operations_) {
+        if (rma_op.inst != fact.inst) {
+          continue;
+        }
+        rma_op.pscw_group_unresolved = true;
+        rma_op.relation = fact.relation;
+        rma_op.synchronization_proof = fact.relation.proof;
+        rma_op.epoch_id = 0;
+        rma_op.sync_model = SyncModel::NONE;
+        rma_op.sync_start = nullptr;
+        rma_op.sync_end = nullptr;
+        rma_op.flush_completed = false;
+        rma_op.local_completion_only = false;
+        rma_op.exposure_epoch_observed = false;
+        rma_op.epoch_completion = EpochCompletion::None;
+        rma_op.epoch_proof = EpochProof::Unknown;
+      }
     }
   }
 }
@@ -806,7 +823,8 @@ bool MPIRMAAnalysis::areRMAOpsConflicting(const RMAOperation &op1,
       return true;
     }
     if ((fact1->code == "mpi_rma_pscw_group_unresolved" ||
-         fact2->code == "mpi_rma_pscw_group_unresolved")) {
+         fact2->code == "mpi_rma_pscw_group_unresolved" ||
+         op1.pscw_group_unresolved || op2.pscw_group_unresolved)) {
       return true;
     }
   }
@@ -841,7 +859,8 @@ MPIRMAAnalysis::findUnsynchronizedRMAOps() const {
     }
   }
   for (const RMAOperation &op : rma_operations_) {
-    if (!synchronized_insts.count(op.inst) || op.sync_model == SyncModel::NONE) {
+    if (!synchronized_insts.count(op.inst) || op.sync_model == SyncModel::NONE ||
+        op.pscw_group_unresolved) {
       unsync.push_back(op);
     }
   }

@@ -1077,6 +1077,10 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
           if (api->semanticTagStartsWith(callee, "critical")) {
             if (type == ThreadAPI::TD_ACQUIRE) {
               ++m_summary.critical_region_count;
+              pushRegion(WaitBoundaryInfo::Kind::CriticalEnd,
+                         SemanticEntityKind::CriticalRegion, call);
+            } else if (type == ThreadAPI::TD_RELEASE) {
+              popRegion(WaitBoundaryInfo::Kind::CriticalEnd, call);
             }
           } else {
             ++m_summary.lock_api_count;

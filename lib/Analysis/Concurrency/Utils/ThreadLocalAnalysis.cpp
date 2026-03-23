@@ -10,9 +10,51 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
 #include <deque>
+#include <unordered_set>
+#include <vector>
 
 using namespace llvm;
 using namespace ThreadLocal;
+
+namespace {
+
+void collectLocalCarrierLoads(const Value *slot_base,
+                              std::vector<const Value *> &loads) {
+  if (!slot_base) {
+    return;
+  }
+
+  std::deque<const Value *> worklist;
+  std::unordered_set<const Value *> visited;
+  worklist.push_back(slot_base->stripPointerCasts());
+  visited.insert(slot_base->stripPointerCasts());
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+
+    for (const User *user : current->users()) {
+      const Value *derived = dyn_cast<Value>(user);
+      if (!derived || !visited.insert(derived).second) {
+        continue;
+      }
+
+      if (const auto *load = dyn_cast<LoadInst>(user)) {
+        if (load->getPointerOperand()->stripPointerCasts() == current) {
+          loads.push_back(load);
+        }
+        continue;
+      }
+
+      if (isa<BitCastInst>(user) || isa<GetElementPtrInst>(user) ||
+          isa<PHINode>(user) || isa<SelectInst>(user)) {
+        worklist.push_back(derived);
+      }
+    }
+  }
+}
+
+} // namespace
 
 ThreadLocalAnalysis::ThreadLocalAnalysis(Module &module) : m_module(module) {}
 
@@ -141,6 +183,20 @@ bool ThreadLocalAnalysis::escapesThread(const Value *val) const {
         const Value *ptr = store->getPointerOperand();
         const Value *base = getUnderlyingObject(ptr);
         base = base ? base->stripPointerCasts() : nullptr;
+
+        if (store->getValueOperand() == current) {
+          const Value *slot_base = base ? base : ptr->stripPointerCasts();
+          if (isa<AllocaInst>(slot_base)) {
+            std::vector<const Value *> forwarded_loads;
+            collectLocalCarrierLoads(slot_base, forwarded_loads);
+            for (const Value *load : forwarded_loads) {
+              if (visited.insert(load).second) {
+                worklist.push_back(load);
+              }
+            }
+            continue;
+          }
+        }
         
         // Storing to a global = escape
         if (base && isa<GlobalVariable>(base)) {

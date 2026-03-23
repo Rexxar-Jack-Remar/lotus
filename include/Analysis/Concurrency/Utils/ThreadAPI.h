@@ -1322,8 +1322,13 @@ public:
 
   inline bool isBinarySemaphoreOp(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
-    return callee && hasTrait(callee, "binary-semaphore") &&
-           isSemaphoreOp(inst);
+    if (!callee || !isSemaphoreOp(inst)) {
+      return false;
+    }
+    if (hasTrait(callee, "binary-semaphore")) {
+      return true;
+    }
+    return callee->getName().contains("binary_semaphore");
   }
 
   inline bool isBinarySemaphoreOp(const llvm::CallBase *cb) const {

@@ -716,8 +716,50 @@ TEST_F(LockSetAnalysisTest,
   ASSERT_NE(lock, nullptr);
 
   EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+  EXPECT_TRUE(lsa.mustHoldLock(after, lock));
   EXPECT_TRUE(lsa.getMayReadLockSetAt(after).count(lock) > 0);
   EXPECT_TRUE(lsa.getMayWriteLockSetAt(after).count(lock) == 0);
+  EXPECT_TRUE(lsa.getMustReadLockSetAt(after).count(lock) > 0);
+  EXPECT_TRUE(lsa.getMustWriteLockSetAt(after).count(lock) == 0);
+}
+
+TEST_F(LockSetAnalysisTest, ReaderWriterModesDoNotPretendExclusion) {
+  const char *source = R"(
+    declare i32 @pthread_rwlock_rdlock(i8*)
+    declare i32 @pthread_rwlock_wrlock(i8*)
+
+    @lock = global i8 0
+
+    define void @reader() {
+    entry:
+      call i32 @pthread_rwlock_rdlock(i8* @lock)
+      %read_access = add i32 1, 2
+      ret void
+    }
+
+    define void @writer() {
+    entry:
+      call i32 @pthread_rwlock_wrlock(i8* @lock)
+      %write_access = add i32 3, 4
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *read_access =
+      findInstructionByName(*module->getFunction("reader"), "read_access");
+  const Instruction *write_access =
+      findInstructionByName(*module->getFunction("writer"), "write_access");
+  ASSERT_NE(read_access, nullptr);
+  ASSERT_NE(write_access, nullptr);
+
+  EXPECT_FALSE(lsa.mayHoldCommonLock(read_access, write_access));
+  EXPECT_FALSE(lsa.mustHoldCommonLock(read_access, write_access));
 }
 
 TEST_F(LockSetAnalysisTest, AdoptLockDoesNotSynthesizeAcquisition) {
@@ -786,7 +828,8 @@ TEST_F(LockSetAnalysisTest, OpenMPCriticalUsesNamedAnalysisIdentity) {
   EXPECT_EQ(lsa.getLockReleases(crit).size(), 1u);
 }
 
-TEST_F(LockSetAnalysisTest, CalleeHeldExitLocksDoNotBecomeCallerMustLocks) {
+TEST_F(LockSetAnalysisTest,
+       CalleeHeldExitLocksBecomeCallerMustLocksWhenDefinitelyAcquired) {
   const char *source = R"(
     declare i32 @pthread_mutex_lock(i8*)
 
@@ -801,6 +844,53 @@ TEST_F(LockSetAnalysisTest, CalleeHeldExitLocksDoNotBecomeCallerMustLocks) {
     define i32 @main() {
     entry:
       call void @helper()
+      %after = add i32 1, 2
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+  EXPECT_TRUE(lsa.mustHoldLock(after, lock));
+}
+
+TEST_F(LockSetAnalysisTest,
+       HelperUnlockDropsCallerMustLockStateButPreservesMayWhenConditional) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @pthread_mutex_unlock(i8*)
+
+    @lock = global i8 0
+    @flag = external global i1
+
+    define void @maybe_unlock() {
+    entry:
+      %cond = load i1, i1* @flag
+      br i1 %cond, label %unlock, label %done
+
+    unlock:
+      call i32 @pthread_mutex_unlock(i8* @lock)
+      br label %done
+
+    done:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      call void @maybe_unlock()
       %after = add i32 1, 2
       ret i32 %after
     }

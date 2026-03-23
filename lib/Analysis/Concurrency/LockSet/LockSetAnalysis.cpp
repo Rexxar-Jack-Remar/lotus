@@ -27,6 +27,7 @@
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/MemoryLocation.h>
+#include <llvm/Analysis/PostDominators.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/InstIterator.h>
@@ -331,11 +332,7 @@ bool LockSetAnalysis::mayHoldCommonLock(const Instruction *i1,
   };
   LockSet r1 = getMayReadLockSetAt(i1), r2 = getMayReadLockSetAt(i2);
   LockSet w1 = getMayWriteLockSetAt(i1), w2 = getMayWriteLockSetAt(i2);
-  if (common(w1, w2) || common(r1, r2))
-    return true;
-  // Also check combined may-lock set (has block-head fallbacks for DCL pattern)
-  LockSet m1 = getMayLockSetAt(i1), m2 = getMayLockSetAt(i2);
-  return common(m1, m2);
+  return common(w1, w2) || common(r1, r2);
 }
 
 bool LockSetAnalysis::mustHoldCommonLock(const Instruction *i1,
@@ -348,32 +345,12 @@ bool LockSetAnalysis::mustHoldCommonLock(const Instruction *i1,
     return m_alias_analysis && ca && cb && m_alias_analysis->mustAlias(ca, cb);
   };
 
-  LockSet combined1 = getMustLockSetAt(i1);
-  LockSet combined2 = getMustLockSetAt(i2);
-  LockSet read1 = getMustReadLockSetAt(i1);
-  LockSet read2 = getMustReadLockSetAt(i2);
+  LockSet write1 = getMustWriteLockSetAt(i1);
+  LockSet write2 = getMustWriteLockSetAt(i2);
 
-  for (LockID lock1 : combined1) {
-    for (LockID lock2 : combined2) {
+  for (LockID lock1 : write1) {
+    for (LockID lock2 : write2) {
       if (!matches(lock1, lock2))
-        continue;
-
-      bool is_read1 = false;
-      bool is_read2 = false;
-      for (LockID read_lock : read1) {
-        if (matches(lock1, read_lock)) {
-          is_read1 = true;
-          break;
-        }
-      }
-      for (LockID read_lock : read2) {
-        if (matches(lock2, read_lock)) {
-          is_read2 = true;
-          break;
-        }
-      }
-
-      if (is_read1 && is_read2)
         continue;
       return true;
     }
@@ -1563,6 +1540,11 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
           out_read.erase(lock);
           out_write.erase(lock);
         }
+      } else {
+        out_read.insert(summary.must_read_acquire_delta.begin(),
+                        summary.must_read_acquire_delta.end());
+        out_write.insert(summary.must_write_acquire_delta.begin(),
+                         summary.must_write_acquire_delta.end());
       }
 
       for (LockID lock : summary.must_release_delta) {
@@ -2106,6 +2088,9 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   summary.may_acquire_delta.clear();
   summary.may_read_acquire_delta.clear();
   summary.may_write_acquire_delta.clear();
+  summary.must_acquire_delta.clear();
+  summary.must_read_acquire_delta.clear();
+  summary.must_write_acquire_delta.clear();
   summary.may_release_delta.clear();
   summary.must_release_delta.clear();
 
@@ -2162,6 +2147,17 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
     return saw_binary_semaphore;
   };
+  PostDominatorTree post_dom(*func);
+  auto isGuaranteedOnNormalExit = [&](const Instruction *inst) {
+    return inst && post_dom.dominates(inst->getParent(), &func->getEntryBlock());
+  };
+
+  auto intersectMustSets = [&](const LockSet &lhs, const LockSet &rhs) {
+    std::vector<LockSet> inputs;
+    inputs.push_back(lhs);
+    inputs.push_back(rhs);
+    return merge(inputs, true);
+  };
 
   // Collect return instructions
   std::vector<const ReturnInst *> returns;
@@ -2189,6 +2185,10 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   if (!returns.empty()) {
     // Preserve read-vs-write mode so callers do not accidentally turn a held
     // shared lock into an exclusive one.
+    bool seeded_must_read = false;
+    bool seeded_must_write = false;
+    LockSet must_read_intersection;
+    LockSet must_write_intersection;
     for (const auto *ret : returns) {
       auto it_read = m_may_read_locks_exit.find(ret);
       if (it_read != m_may_read_locks_exit.end()) {
@@ -2207,11 +2207,58 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
           }
         }
       }
+
+      auto it_must_read = m_must_read_locks_exit.find(ret);
+      if (it_must_read != m_must_read_locks_exit.end()) {
+        if (!seeded_must_read) {
+          must_read_intersection = it_must_read->second;
+          seeded_must_read = true;
+        } else {
+          must_read_intersection =
+              intersectMustSets(must_read_intersection, it_must_read->second);
+        }
+      } else {
+        must_read_intersection.clear();
+        seeded_must_read = true;
+      }
+
+      auto it_must_write = m_must_write_locks_exit.find(ret);
+      if (it_must_write != m_must_write_locks_exit.end()) {
+        if (!seeded_must_write) {
+          must_write_intersection = it_must_write->second;
+          seeded_must_write = true;
+        } else {
+          must_write_intersection = intersectMustSets(
+              must_write_intersection, it_must_write->second);
+        }
+      } else {
+        must_write_intersection.clear();
+        seeded_must_write = true;
+      }
     }
 
     summary.may_acquire_delta = summary.may_read_acquire_delta;
     summary.may_acquire_delta.insert(summary.may_write_acquire_delta.begin(),
                                      summary.may_write_acquire_delta.end());
+
+    if (seeded_must_read) {
+      for (LockID lock : must_read_intersection) {
+        if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
+          summary.must_read_acquire_delta.insert(lock);
+        }
+      }
+    }
+    if (seeded_must_write) {
+      for (LockID lock : must_write_intersection) {
+        if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
+          summary.must_write_acquire_delta.insert(lock);
+        }
+      }
+    }
+
+    summary.must_acquire_delta = summary.must_read_acquire_delta;
+    summary.must_acquire_delta.insert(summary.must_write_acquire_delta.begin(),
+                                      summary.must_write_acquire_delta.end());
   }
 
   // Track only releases that are not definitely matched by an in-callee
@@ -2222,7 +2269,8 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     std::vector<LockID> released = getRAIILocksReleasedAt(inst);
     if (!released.empty()) {
       for (LockID lock : released) {
-        if (!isPossiblyHeldAt(inst, lock) && !mayHoldOnExit(lock)) {
+        if (isGuaranteedOnNormalExit(inst) && !isPossiblyHeldAt(inst, lock) &&
+            !mayHoldOnExit(lock)) {
           summary.may_release_delta.insert(lock);
         }
         if (!isDefinitelyHeldAt(inst, lock)) {
@@ -2236,7 +2284,8 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
     if (m_thread_api->isTDRelease(inst) && !m_thread_api->isTDAcquire(inst)) {
       if (LockID lock = getLockValue(inst)) {
-        if (!isPossiblyHeldAt(inst, lock) && !mayHoldOnExit(lock)) {
+        if (isGuaranteedOnNormalExit(inst) && !isPossiblyHeldAt(inst, lock) &&
+            !mayHoldOnExit(lock)) {
           summary.may_release_delta.insert(lock);
         }
         if (!isDefinitelyHeldAt(inst, lock)) {
@@ -2249,6 +2298,8 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   summary.is_analyzed = true;
 
   errs() << "  May acquire delta: " << summary.may_acquire_delta.size()
+         << " locks\n";
+  errs() << "  Must acquire delta: " << summary.must_acquire_delta.size()
          << " locks\n";
   errs() << "  May release delta: " << summary.may_release_delta.size()
          << " locks\n";
@@ -2274,6 +2325,8 @@ void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
   // Apply lock acquisitions
   may_locks.insert(summary.may_acquire_delta.begin(),
                    summary.may_acquire_delta.end());
+  must_locks.insert(summary.must_acquire_delta.begin(),
+                    summary.must_acquire_delta.end());
 
   // Apply lock releases (remove from locksets)
   for (LockID lock : summary.may_release_delta) {

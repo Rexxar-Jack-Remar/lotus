@@ -6,6 +6,10 @@
 
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
+#include <deque>
+#include <unordered_set>
+#include <vector>
+
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -25,6 +29,78 @@ const Function *resolveInternalCallee(const CallBase *call) {
     return direct;
   }
   return dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+}
+
+void collectLocalCarrierLoads(const Value *slot_base,
+                              std::vector<const Value *> &loads) {
+  if (!slot_base) {
+    return;
+  }
+
+  std::deque<const Value *> worklist;
+  std::unordered_set<const Value *> visited;
+  worklist.push_back(slot_base->stripPointerCasts());
+  visited.insert(slot_base->stripPointerCasts());
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+
+    for (const User *user : current->users()) {
+      const Value *derived = dyn_cast<Value>(user);
+      if (!derived || !visited.insert(derived).second) {
+        continue;
+      }
+
+      if (const auto *load = dyn_cast<LoadInst>(user)) {
+        if (load->getPointerOperand()->stripPointerCasts() == current) {
+          loads.push_back(load);
+        }
+        continue;
+      }
+
+      if (isa<BitCastInst>(user) || isa<GetElementPtrInst>(user) ||
+          isa<PHINode>(user) || isa<SelectInst>(user)) {
+        worklist.push_back(derived);
+      }
+    }
+  }
+}
+
+void collectLocalCarrierStoredValues(const Value *slot_base,
+                                     std::vector<const Value *> &values) {
+  if (!slot_base) {
+    return;
+  }
+
+  std::deque<const Value *> worklist;
+  std::unordered_set<const Value *> visited;
+  worklist.push_back(slot_base->stripPointerCasts());
+  visited.insert(slot_base->stripPointerCasts());
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+
+    for (const User *user : current->users()) {
+      const Value *derived = dyn_cast<Value>(user);
+      if (!derived || !visited.insert(derived).second) {
+        continue;
+      }
+
+      if (const auto *store = dyn_cast<StoreInst>(user)) {
+        if (store->getPointerOperand()->stripPointerCasts() == current) {
+          values.push_back(store->getValueOperand());
+        }
+        continue;
+      }
+
+      if (isa<BitCastInst>(user) || isa<GetElementPtrInst>(user) ||
+          isa<PHINode>(user) || isa<SelectInst>(user)) {
+        worklist.push_back(derived);
+      }
+    }
+  }
 }
 
 } // namespace
@@ -161,6 +237,19 @@ void EscapeAnalysis::runEscapeAnalysis() {
     const Value *curr = worklist.back();
     worklist.pop_back();
 
+    if (const auto *load = dyn_cast<LoadInst>(curr)) {
+      const Value *slot_base = getUnderlyingObject(load->getPointerOperand());
+      slot_base = slot_base ? slot_base->stripPointerCasts()
+                            : load->getPointerOperand()->stripPointerCasts();
+      if (isa<AllocaInst>(slot_base)) {
+        std::vector<const Value *> stored_values;
+        collectLocalCarrierStoredValues(slot_base, stored_values);
+        for (const Value *stored : stored_values) {
+          enqueueEscaped(stored);
+        }
+      }
+    }
+
     // Handle Formal Argument -> Actual Argument (Callers)
     if (auto *arg = dyn_cast<Argument>(curr)) {
       const Function *F = arg->getParent();
@@ -228,15 +317,21 @@ void EscapeAnalysis::runEscapeAnalysis() {
 
         if (auto *store = dyn_cast<StoreInst>(inst)) {
           if (store->getValueOperand() == curr) {
-            // Storing an escaped value into a pointer doesn't make the pointer
-            // escape But storing INTO an escaped pointer makes the value escape
-            // (handled in initial scan + loop)
-            const Value *ptr = store->getPointerOperand();
-            // If we store an escaped value into a pointer, does the pointer
-            // escape? No. But if we store a value into an escaped pointer, the
-            // value escapes.
-            if (isEscaped(ptr)) {
-              // Already handled
+            const Value *slot_ptr = store->getPointerOperand();
+            const Value *slot_base = getUnderlyingObject(slot_ptr);
+            slot_base = slot_base ? slot_base->stripPointerCasts()
+                                  : slot_ptr->stripPointerCasts();
+
+            // Forward escape through local pointer carrier slots without
+            // marking the carrier storage itself as shared.
+            if (isa<AllocaInst>(slot_base)) {
+              std::vector<const Value *> forwarded_loads;
+              collectLocalCarrierLoads(slot_base, forwarded_loads);
+              for (const Value *load : forwarded_loads) {
+                enqueueEscaped(load);
+              }
+            } else if (isEscaped(slot_ptr)) {
+              // Already handled via escaped destination storage.
             }
           } else if (store->getPointerOperand() == curr) {
             // Storing into an escaped pointer -> value escapes
@@ -246,6 +341,16 @@ void EscapeAnalysis::runEscapeAnalysis() {
         } else if (auto *load = dyn_cast<LoadInst>(inst)) {
           // Loading from an escaped pointer -> result escapes
           enqueueEscaped(load);
+          const Value *slot_base = getUnderlyingObject(load->getPointerOperand());
+          slot_base = slot_base ? slot_base->stripPointerCasts()
+                                : load->getPointerOperand()->stripPointerCasts();
+          if (isa<AllocaInst>(slot_base)) {
+            std::vector<const Value *> stored_values;
+            collectLocalCarrierStoredValues(slot_base, stored_values);
+            for (const Value *stored : stored_values) {
+              enqueueEscaped(stored);
+            }
+          }
         } else if (auto *gep = dyn_cast<GetElementPtrInst>(inst)) {
           // GEP of escaped pointer -> result escapes
           enqueueEscaped(gep);

@@ -242,6 +242,85 @@ bool constantIntsEqual(const ConstantInt *lhs, const ConstantInt *rhs) {
   return lhs->getValue().zextOrTrunc(width) == rhs->getValue().zextOrTrunc(width);
 }
 
+const ConstantInt *getAtomicInitialConstant(const Instruction *inst) {
+  if (!inst) {
+    return nullptr;
+  }
+
+  const Value *ptr = CppAtomics::getAtomicPointer(inst);
+  ptr = ptr ? ptr->stripPointerCasts() : nullptr;
+  const Value *base = ptr ? getUnderlyingObject(ptr) : nullptr;
+  const auto *global = dyn_cast_or_null<GlobalVariable>(
+      base ? base->stripPointerCasts() : nullptr);
+  if (!global || !global->hasInitializer()) {
+    return nullptr;
+  }
+  return dyn_cast<ConstantInt>(global->getInitializer());
+}
+
+const ConstantInt *evaluateAtomicRMWValue(const AtomicRMWInst *rmw,
+                                          const ConstantInt *current_value) {
+  if (!rmw || !current_value) {
+    return nullptr;
+  }
+
+  const auto *operand = dyn_cast<ConstantInt>(rmw->getValOperand());
+  if (!operand) {
+    return nullptr;
+  }
+
+  const unsigned width = std::max(current_value->getBitWidth(),
+                                  operand->getBitWidth());
+  APInt lhs = current_value->getValue().zextOrTrunc(width);
+  APInt rhs = operand->getValue().zextOrTrunc(width);
+
+  switch (rmw->getOperation()) {
+  case AtomicRMWInst::Add:
+    return ConstantInt::get(rmw->getContext(), lhs + rhs);
+  case AtomicRMWInst::Sub:
+    return ConstantInt::get(rmw->getContext(), lhs - rhs);
+  case AtomicRMWInst::And:
+    return ConstantInt::get(rmw->getContext(), lhs & rhs);
+  case AtomicRMWInst::Or:
+    return ConstantInt::get(rmw->getContext(), lhs | rhs);
+  case AtomicRMWInst::Xor:
+    return ConstantInt::get(rmw->getContext(), lhs ^ rhs);
+  case AtomicRMWInst::Xchg:
+    return ConstantInt::get(rmw->getContext(), rhs);
+  default:
+    return nullptr;
+  }
+}
+
+bool candidateMatchesAcquireWitness(const ConstantInt *candidate,
+                                    const Instruction *acquire_anchor,
+                                    const ConstantInt *initial_value) {
+  if (!candidate || !acquire_anchor) {
+    return false;
+  }
+
+  if (!isa<LoadInst>(acquire_anchor)) {
+    return true;
+  }
+
+  const AtomicSyncWitness witness = getAtomicSyncWitness(acquire_anchor);
+  if (!witness.valid) {
+    return false;
+  }
+
+  if (witness.requires_nonzero) {
+    if (candidate->isZero()) {
+      return false;
+    }
+    return initial_value && initial_value->isZero();
+  }
+
+  if (!constantIntsEqual(candidate, witness.constant)) {
+    return false;
+  }
+  return !initial_value || !constantIntsEqual(initial_value, witness.constant);
+}
+
 bool releaseMatchesAcquireWitness(const Instruction *release_inst,
                                   const Instruction *acquire_anchor) {
   if (!release_inst || !acquire_anchor) {
@@ -1192,22 +1271,17 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
 
     bool has_release_sequence = false;
+    std::vector<const AtomicEvent *> release_sequence_events;
     for (size_t idx : entry.second) {
       const AtomicEvent &event = atomic_events[idx];
       if (event.inst != release_candidates.front().second && event.is_store_like &&
           event.is_rmw && (!event.is_cmpxchg || event.has_success_witness)) {
         has_release_sequence = true;
-        break;
+        release_sequence_events.push_back(&event);
       }
     }
 
     std::vector<AtomicTarget> targets = getAcquireTargets(location);
-    if (has_release_sequence) {
-      deferred_release_sequence_relations += targets.size();
-      m_deferred_sync_counts["atomic_release_sequence_requires_reads_from_proof"] +=
-          targets.size();
-      continue;
-    }
 
     for (const AtomicTarget &target : targets) {
       const Instruction *sync_target =
@@ -1219,13 +1293,39 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
           m_mhp.getThreadID(sync_target)) {
         continue;
       }
-      if (!target.is_fence_target &&
-          !releaseMatchesAcquireWitness(release_candidates.front().second,
-                                        target.target)) {
+
+      bool supported_release_sequence = false;
+      if (has_release_sequence) {
+        const ConstantInt *initial_value =
+            getAtomicInitialConstant(release_candidates.front().second);
+        const ConstantInt *sequence_value =
+            getAtomicStoredConstant(release_candidates.front().second);
+        for (const AtomicEvent *event : release_sequence_events) {
+          const auto *rmw = dyn_cast<AtomicRMWInst>(event->inst);
+          sequence_value = evaluateAtomicRMWValue(rmw, sequence_value);
+          if (!sequence_value) {
+            break;
+          }
+        }
+
+        if (!target.is_fence_target && sequence_value &&
+            candidateMatchesAcquireWitness(sequence_value, target.target,
+                                           initial_value)) {
+          supported_release_sequence = true;
+        } else {
+          ++deferred_release_sequence_relations;
+          ++m_deferred_sync_counts
+              ["atomic_release_sequence_requires_reads_from_proof"];
+          continue;
+        }
+      } else if (!target.is_fence_target &&
+                 !releaseMatchesAcquireWitness(release_candidates.front().second,
+                                               target.target)) {
         ++deferred_direct_atomic_relations;
         ++m_deferred_sync_counts["atomic_witness_value_incompatible"];
         continue;
       }
+
       size_t before = m_sync_with.size();
       addSyncEdge(release_candidates.front().first, sync_target,
                   target.is_fence_target ? target.target : nullptr);
@@ -1234,7 +1334,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         ++m_deferred_sync_counts["atomic_release_candidate_unresolved"];
         continue;
       }
-      if (has_release_sequence) {
+      if (supported_release_sequence) {
         ++release_sequence_edges;
         ++m_deferred_sync_counts["atomic_release_sequence_edges_modeled"];
       } else if (target.is_fence_target ||
