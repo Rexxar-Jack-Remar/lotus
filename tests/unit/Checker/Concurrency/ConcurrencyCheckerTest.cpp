@@ -1479,6 +1479,83 @@ TEST_F(ConcurrencyCheckerTest,
 }
 
 TEST_F(ConcurrencyCheckerTest,
+       InitialAtomicValueWitnessDoesNotSuppressPayloadRace) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+    @flag = global i32 1, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp eq i32 %seen, 1
+      br i1 %ready, label %write, label %exit
+
+    write:
+      store i32 %seen, i32* @shared, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8, align 1
+      %tid2 = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  mhp::MHPAnalysis mhp(*module);
+  mhp.enableLockSetAnalysis();
+  mhp.analyze();
+
+  lotus::EscapeAnalysis escape(*module);
+  escape.analyze();
+  lotus::HappensBeforeAnalysis hb(*module, mhp);
+  hb.setAliasAnalysis(mhp.getAliasAnalysis());
+  hb.analyze();
+
+  concurrency::DataRaceChecker checker(*module, &mhp, mhp.getLockSetAnalysis(),
+                                       &escape, nullptr, nullptr,
+                                       mhp.getAliasAnalysis(), &hb);
+
+  const Instruction *store1 = nullptr;
+  const Instruction *store2 = nullptr;
+  for (const Instruction &inst : instructions(*module->getFunction("writer"))) {
+    if (isa<StoreInst>(&inst)) {
+      store1 = &inst;
+      break;
+    }
+  }
+  for (const Instruction &inst : instructions(*module->getFunction("reader"))) {
+    if (const auto *store = dyn_cast<StoreInst>(&inst)) {
+      if (store->getPointerOperand() == module->getNamedGlobal("shared")) {
+        store2 = &inst;
+      }
+    }
+  }
+
+  ASSERT_NE(store1, nullptr);
+  ASSERT_NE(store2, nullptr);
+  EXPECT_TRUE(checker.wouldReportDataRace(store1, store2));
+}
+
+TEST_F(ConcurrencyCheckerTest,
        PthreadGetspecificDerivedPointersAreNotPrunedAsThreadLocal) {
   const char *source = R"(
     declare i8* @pthread_getspecific(i32)

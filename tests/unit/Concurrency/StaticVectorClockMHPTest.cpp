@@ -98,6 +98,36 @@ TEST_F(StaticVectorClockMHPTest,
   EXPECT_FALSE(svc.mayHappenInParallel(a, b));
 }
 
+TEST_F(StaticVectorClockMHPTest, RecursiveCallGraphDoesNotExplodeContexts) {
+  const char *source = R"(
+    define void @recur(i32 %n) {
+    entry:
+      %stop = icmp eq i32 %n, 0
+      br i1 %stop, label %exit, label %step
+
+    step:
+      %next = sub i32 %n, 1
+      call void @recur(i32 %next)
+      br label %exit
+
+    exit:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @recur(i32 2)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  EXPECT_NO_THROW(svc.analyze());
+}
+
 TEST_F(StaticVectorClockMHPTest, BarrierOrdersPostBarrierContinuation) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)

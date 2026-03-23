@@ -323,9 +323,9 @@ private:
   bool m_enable_lockset_analysis = false;
   bool m_precompute_mhp_pairs = false;
 
-  // MHP results — use unordered_set for O(1) average lookup instead of O(log N).
-  // Pairs are stored in canonical order (a <= b by pointer) to allow symmetric
-  // lookup with a single probe.
+  // MHP results — use unordered_set for O(1) average lookup instead of O(log
+  // N). Pairs are stored in canonical order (a <= b by pointer) to allow
+  // symmetric lookup with a single probe.
   std::unordered_set<InstPair, InstPairHash> m_mhp_pairs;
 
   // Instruction to thread mapping
@@ -366,12 +366,10 @@ private:
 
   // Condition variable tracking (region boundaries / structural bookkeeping)
   // Map condition variable -> list of signal/broadcast instructions
-  std::unordered_map<const llvm::Value *,
-                     std::vector<SyncNode *>>
+  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>>
       m_condvar_signals;
   // Map condition variable -> list of wait instructions
-  std::unordered_map<const llvm::Value *,
-                     std::vector<SyncNode *>>
+  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>>
       m_condvar_waits;
 
   // Barrier tracking (structural ordering between phases)
@@ -380,22 +378,23 @@ private:
     std::vector<SyncNode *> continuations;
   };
   // Map barrier object -> phase ordinal -> barrier participants seen so far.
-  std::unordered_map<const llvm::Value *,
-                     std::unordered_map<size_t, std::vector<BarrierParticipant>>>
+  std::unordered_map<
+      const llvm::Value *,
+      std::unordered_map<size_t, std::vector<BarrierParticipant>>>
       m_barrier_waits;
-  std::unordered_map<const llvm::Value *,
-                     std::unordered_map<ThreadID, size_t>>
+  std::unordered_map<const llvm::Value *, std::unordered_map<ThreadID, size_t>>
       m_barrier_phase_by_thread;
-  std::unordered_map<const llvm::Value *,
-                     std::unordered_map<ThreadID, size_t>>
+  std::unordered_map<const llvm::Value *, std::unordered_map<ThreadID, size_t>>
       m_pending_split_barrier_phase_by_thread;
   std::unordered_map<const llvm::Value *, size_t> m_barrier_expected_counts;
 
   // Per-thread set of functions already processed to avoid reprocessing
-  std::unordered_map<ThreadID,
-                     std::unordered_map<CallContextID,
-                                        std::unordered_set<const llvm::Function *>>>
+  std::unordered_map<
+      ThreadID, std::unordered_map<CallContextID,
+                                   std::unordered_set<const llvm::Function *>>>
       m_visited_functions_by_thread;
+  std::unordered_map<ThreadID, std::vector<const llvm::Function *>>
+      m_active_call_stack_by_thread;
   // Context-sensitive nodes in thread 0 that are proven to execute before any
   // reachable thread/task creation from main. These cannot run in parallel
   // with child-thread nodes.
@@ -520,6 +519,7 @@ private:
 
   static constexpr ThreadID kUnknownThread =
       std::numeric_limits<ThreadID>::max();
+  static constexpr unsigned kCallContextLimit = 2;
   std::unordered_map<const llvm::Instruction *, ThreadID> m_openmp_task_threads;
   std::unordered_set<std::pair<ThreadID, ThreadID>, ThreadPairHash>
       m_openmp_task_exclusions;

@@ -5,6 +5,7 @@
 
 #include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
 
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/Utils/RAIILockTracker.h"
 
 #include "TestUtils/LLVMHelpers.h"
@@ -763,6 +764,94 @@ TEST_F(LockSetAnalysisTest,
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
+TEST_F(LockSetAnalysisTest,
+       ResolvedIndirectAcquireUsesMayUnionAndMustIntersection) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+
+    @lock = global i8 0
+
+    define void @lock_helper(i8* %m) {
+    entry:
+      call i32 @pthread_mutex_lock(i8* %m)
+      ret void
+    }
+
+    define void @noop(i8* %m) {
+    entry:
+      ret void
+    }
+
+    define void @main(i1 %cond) {
+    entry:
+      %fn = select i1 %cond, void (i8*)* @lock_helper, void (i8*)* @noop
+      call void %fn(i8* @lock)
+      %after = add i32 1, 2
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+  EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
+TEST_F(LockSetAnalysisTest,
+       ResolvedIndirectReleaseUsesMayUnionAndMustIntersection) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @pthread_mutex_unlock(i8*)
+
+    @lock = global i8 0
+
+    define void @unlock_helper(i8* %m) {
+    entry:
+      call i32 @pthread_mutex_unlock(i8* %m)
+      ret void
+    }
+
+    define void @noop(i8* %m) {
+    entry:
+      ret void
+    }
+
+    define void @main(i1 %cond) {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      %fn = select i1 %cond, void (i8*)* @unlock_helper, void (i8*)* @noop
+      call void %fn(i8* @lock)
+      %after = add i32 1, 2
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+  EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
 TEST_F(LockSetAnalysisTest, UniqueLockDeferDoesNotAcquireAtConstruction) {
   const char *source = R"(
     declare void @fake_unique_lock_defer_lock_C1E(i8*, i8*, i8*)
@@ -1000,6 +1089,56 @@ TEST_F(LockSetAnalysisTest, OpenMPCriticalUsesNamedAnalysisIdentity) {
   EXPECT_EQ(lsa.getLockReleases(crit).size(), 1u);
 }
 
+TEST_F(LockSetAnalysisTest, DistinctLockFieldsDoNotCollapseToSharedBase) {
+  const char *source = R"(
+    %struct.Locks = type { i8, i8 }
+
+    declare i32 @pthread_mutex_lock(i8*)
+
+    @locks = global %struct.Locks zeroinitializer
+
+    define void @worker1() {
+    entry:
+      %lock1 = getelementptr inbounds %struct.Locks, %struct.Locks* @locks,
+                                   i32 0, i32 0
+      call i32 @pthread_mutex_lock(i8* %lock1)
+      %access1 = add i32 1, 2
+      ret void
+    }
+
+    define void @worker2() {
+    entry:
+      %lock2 = getelementptr inbounds %struct.Locks, %struct.Locks* @locks,
+                                   i32 0, i32 1
+      call i32 @pthread_mutex_lock(i8* %lock2)
+      %access2 = add i32 3, 4
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  lotus::AliasAnalysisWrapper aa(*module, lotus::AAConfig::SparrowAA_NoCtx());
+  LockSetAnalysis lsa(*module);
+  lsa.setAliasAnalysis(&aa);
+  lsa.analyze();
+
+  const Instruction *access1 =
+      findInstructionByName(*module->getFunction("worker1"), "access1");
+  const Instruction *access2 =
+      findInstructionByName(*module->getFunction("worker2"), "access2");
+  ASSERT_NE(access1, nullptr);
+  ASSERT_NE(access2, nullptr);
+
+  LockSet locks1 = lsa.getMayWriteLockSetAt(access1);
+  LockSet locks2 = lsa.getMayWriteLockSetAt(access2);
+  ASSERT_EQ(locks1.size(), 1u);
+  ASSERT_EQ(locks2.size(), 1u);
+  EXPECT_NE(*locks1.begin(), *locks2.begin());
+  EXPECT_FALSE(lsa.mustHoldCommonLock(access1, access2));
+}
+
 TEST_F(LockSetAnalysisTest,
        CalleeHeldExitLocksBecomeCallerMustLocksWhenDefinitelyAcquired) {
   const char *source = R"(
@@ -1063,6 +1202,52 @@ TEST_F(LockSetAnalysisTest,
     entry:
       call i32 @pthread_mutex_lock(i8* @lock)
       call void @maybe_unlock()
+      %after = add i32 1, 2
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+  EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
+TEST_F(LockSetAnalysisTest,
+       MixedBalancedAndBareUnlockStillDropsCallerMustLockState) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @pthread_mutex_unlock(i8*)
+
+    @lock = global i8 0
+
+    define void @helper(i1 %take_internal) {
+    entry:
+      br i1 %take_internal, label %take, label %release
+
+    take:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      br label %release
+
+    release:
+      call i32 @pthread_mutex_unlock(i8* @lock)
+      ret void
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      call void @helper(i1 %cond)
       %after = add i32 1, 2
       ret i32 %after
     }

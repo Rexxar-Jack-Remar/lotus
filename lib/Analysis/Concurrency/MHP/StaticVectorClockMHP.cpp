@@ -64,6 +64,7 @@ void StaticVectorClockMHP::analyze() {
   m_pthread_value_to_threads.clear();
   m_thread_to_pthread_value.clear();
   m_visited_functions_by_thread.clear();
+  m_active_call_stack_by_thread.clear();
   m_condvar_signals.clear();
   m_condvar_waits.clear();
   m_barrier_waits.clear();
@@ -901,9 +902,17 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
   if (!func || func->isDeclaration())
     return;
 
+  auto &active_stack = m_active_call_stack_by_thread[tid];
+  if (active_stack.size() >= kCallContextLimit ||
+      std::find(active_stack.begin(), active_stack.end(), func) !=
+          active_stack.end()) {
+    return;
+  }
+
   auto &visited = m_visited_functions_by_thread[tid][ctx];
   if (!visited.insert(func).second)
     return;
+  active_stack.push_back(func);
 
   // --- Pass 1: Create all nodes for this function ---
   for (const BasicBlock &bb : *func) {
@@ -1097,6 +1106,8 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
       }
     }
   }
+
+  active_stack.pop_back();
 }
 
 void StaticVectorClockMHP::mapInstructionToThread(const Instruction *inst,

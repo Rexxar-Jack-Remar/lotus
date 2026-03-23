@@ -2,6 +2,7 @@
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/OpenMP/OpenMPSemantics.h"
+#include "Analysis/Concurrency/Utils/ThreadMultiplicity.h"
 
 #include <algorithm>
 #include <deque>
@@ -439,11 +440,15 @@ bool releaseMatchesAcquireWitness(const Instruction *release_inst,
   if (!release_value) {
     return false;
   }
+  const ConstantInt *initial_value = getAtomicInitialConstant(release_inst);
 
   if (witness.requires_nonzero) {
-    return !release_value->isZero();
+    return !release_value->isZero() &&
+           (!initial_value || initial_value->isZero());
   }
-  return constantIntsEqual(release_value, witness.constant);
+  return constantIntsEqual(release_value, witness.constant) &&
+         (!initial_value ||
+          !constantIntsEqual(initial_value, witness.constant));
 }
 
 struct AtomicLocationKey {
@@ -821,6 +826,10 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   std::vector<const Instruction *> latch_waits;
   std::vector<const Instruction *> barrier_arrives;
   std::vector<const Instruction *> barrier_waits;
+  std::vector<const Instruction *> lock_acquires;
+  std::vector<const Instruction *> lock_releases;
+  std::vector<const Instruction *> cond_waits;
+  std::vector<const Instruction *> cond_signals;
   std::vector<const Instruction *> omp_task_ops;
   std::vector<AtomicEvent> atomic_events;
   std::unordered_map<AtomicLocationKey, std::vector<size_t>,
@@ -857,6 +866,55 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   };
 
   ThreadAPI *threadAPI = ThreadAPI::getThreadAPI();
+  auto hb_call_graph = std::make_unique<CallGraph>(m_module);
+  concurrency::ThreadMultiplicityAnalysis site_multiplicity(
+      m_module, hb_call_graph.get());
+  const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
+  auto isSingleExecutionSite = [&](const Instruction *inst) {
+    if (!inst || isInstructionThreadAmbiguous(inst) ||
+        site_multiplicity.instructionMayExecuteMultipleTimes(inst)) {
+      return false;
+    }
+    const mhp::ThreadID tid = m_mhp.getThreadID(inst);
+    if (tid == std::numeric_limits<mhp::ThreadID>::max()) {
+      return false;
+    }
+    return tfg.getNodes(inst, tid).size() == 1;
+  };
+  auto sameLockIdentity = [&](const Instruction *lhs,
+                              const Instruction *rhs) -> bool {
+    if (!lhs || !rhs) {
+      return false;
+    }
+    const Value *lhs_lock = threadAPI->getAnalysisLockIdentity(lhs);
+    const Value *rhs_lock = threadAPI->getAnalysisLockIdentity(rhs);
+    if (!lhs_lock || !rhs_lock) {
+      return false;
+    }
+    lhs_lock = lhs_lock->stripPointerCasts();
+    rhs_lock = rhs_lock->stripPointerCasts();
+    if (lhs_lock == rhs_lock) {
+      return true;
+    }
+    return m_alias_analysis && m_alias_analysis->mustAlias(lhs_lock, rhs_lock);
+  };
+  auto sameCondIdentity = [&](const Instruction *lhs,
+                              const Instruction *rhs) -> bool {
+    if (!lhs || !rhs) {
+      return false;
+    }
+    const Value *lhs_cond = threadAPI->getCondVal(lhs);
+    const Value *rhs_cond = threadAPI->getCondVal(rhs);
+    if (!lhs_cond || !rhs_cond) {
+      return false;
+    }
+    lhs_cond = lhs_cond->stripPointerCasts();
+    rhs_cond = rhs_cond->stripPointerCasts();
+    if (lhs_cond == rhs_cond) {
+      return true;
+    }
+    return m_alias_analysis && m_alias_analysis->mustAlias(lhs_cond, rhs_cond);
+  };
   auto findCallOnceCallable = [&](const CallBase *call) -> const Function * {
     if (!call) {
       return nullptr;
@@ -949,6 +1007,43 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       }
 
       switch (type) {
+      case ThreadAPI::TD_ACQUIRE:
+      case ThreadAPI::TD_RWLOCK_WRLOCK:
+      case ThreadAPI::TD_SHARED_WRLOCK:
+      case ThreadAPI::TD_LOCK_GUARD_CTOR:
+      case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+      case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+      case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+      case ThreadAPI::TD_KERNEL_SPIN_LOCK:
+      case ThreadAPI::TD_KERNEL_MUTEX_LOCK:
+      case ThreadAPI::TD_KERNEL_DOWN:
+      case ThreadAPI::TD_KERNEL_WRITE_LOCK:
+      case ThreadAPI::TD_KERNEL_DOWN_WRITE:
+        if (!threadAPI->isTryLock(inst) && !threadAPI->isSemaphoreOp(inst)) {
+          lock_acquires.push_back(inst);
+        }
+        break;
+      case ThreadAPI::TD_RELEASE:
+      case ThreadAPI::TD_LOCK_GUARD_DTOR:
+      case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+      case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+      case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+      case ThreadAPI::TD_KERNEL_SPIN_UNLOCK:
+      case ThreadAPI::TD_KERNEL_MUTEX_UNLOCK:
+      case ThreadAPI::TD_KERNEL_UP:
+      case ThreadAPI::TD_KERNEL_WRITE_UNLOCK:
+      case ThreadAPI::TD_KERNEL_UP_WRITE:
+        if (!threadAPI->isSemaphoreOp(inst)) {
+          lock_releases.push_back(inst);
+        }
+        break;
+      case ThreadAPI::TD_COND_WAIT:
+        cond_waits.push_back(inst);
+        break;
+      case ThreadAPI::TD_COND_SIGNAL:
+      case ThreadAPI::TD_COND_BROADCAST:
+        cond_signals.push_back(inst);
+        break;
       case ThreadAPI::TD_PROMISE_SET:
         promise_sets.push_back(inst);
         break;
@@ -1448,6 +1543,14 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       if (!sameOnceFlag(call_once_ops[i], call_once_ops[j])) {
         continue;
       }
+      const auto *source_cb_i = dyn_cast<CallBase>(call_once_ops[i]);
+      const auto *source_cb_j = dyn_cast<CallBase>(call_once_ops[j]);
+      const Function *callable_i = findCallOnceCallable(source_cb_i);
+      const Function *callable_j = findCallOnceCallable(source_cb_j);
+      if (!callable_i || !callable_j || callable_i != callable_j) {
+        ++deferred_call_once_relations;
+        continue;
+      }
       bool emitted = false;
       const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
       auto wireCallOnceSite = [&](const Instruction *source_call_once,
@@ -1620,6 +1723,135 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
   }
 
+  size_t mutex_handoff_edges = 0;
+  size_t deferred_mutex_relations = 0;
+  std::unordered_map<mhp::ThreadID,
+                     std::pair<mhp::ThreadID, const Instruction *>>
+      fork_parent_by_thread;
+  for (mhp::SyncNode *node : tfg.getAllNodes()) {
+    if (!node || node->getType() != mhp::SyncNodeType::THREAD_FORK ||
+        node->getForkedThread() == 0 || !node->getInstruction()) {
+      continue;
+    }
+    fork_parent_by_thread.emplace(
+        node->getForkedThread(),
+        std::make_pair(node->getThreadID(), node->getInstruction()));
+  }
+
+  for (const Instruction *acquire : lock_acquires) {
+    if (!isSingleExecutionSite(acquire)) {
+      continue;
+    }
+    const mhp::ThreadID child_tid = m_mhp.getThreadID(acquire);
+    auto fork_it = fork_parent_by_thread.find(child_tid);
+    if (fork_it == fork_parent_by_thread.end()) {
+      continue;
+    }
+
+    const mhp::ThreadID parent_tid = fork_it->second.first;
+    const Instruction *fork_inst = fork_it->second.second;
+    if (!fork_inst || !isSingleExecutionSite(fork_inst)) {
+      ++deferred_mutex_relations;
+      continue;
+    }
+
+    std::vector<const Instruction *> child_acquires;
+    std::vector<const Instruction *> parent_acquires;
+    std::vector<const Instruction *> parent_releases;
+    for (const Instruction *candidate : lock_acquires) {
+      if (!sameLockIdentity(candidate, acquire) ||
+          !isSingleExecutionSite(candidate)) {
+        continue;
+      }
+      const mhp::ThreadID candidate_tid = m_mhp.getThreadID(candidate);
+      if (candidate_tid == child_tid) {
+        child_acquires.push_back(candidate);
+      } else if (candidate_tid == parent_tid &&
+                 hasProgramOrder(candidate, fork_inst)) {
+        parent_acquires.push_back(candidate);
+      }
+    }
+    for (const Instruction *candidate : lock_releases) {
+      if (!sameLockIdentity(candidate, acquire) ||
+          !isSingleExecutionSite(candidate)) {
+        continue;
+      }
+      if (m_mhp.getThreadID(candidate) == parent_tid &&
+          hasProgramOrder(fork_inst, candidate)) {
+        parent_releases.push_back(candidate);
+      }
+    }
+
+    if (child_acquires.size() != 1 || parent_acquires.size() != 1 ||
+        parent_releases.size() != 1) {
+      ++deferred_mutex_relations;
+      continue;
+    }
+
+    bool parent_released_before_fork = false;
+    for (const Instruction *candidate : lock_releases) {
+      if (!sameLockIdentity(candidate, acquire) ||
+          m_mhp.getThreadID(candidate) != parent_tid) {
+        continue;
+      }
+      if (hasProgramOrder(parent_acquires.front(), candidate) &&
+          hasProgramOrder(candidate, fork_inst)) {
+        parent_released_before_fork = true;
+        break;
+      }
+    }
+    if (parent_released_before_fork) {
+      ++deferred_mutex_relations;
+      continue;
+    }
+
+    bool parent_reacquired_after_fork = false;
+    for (const Instruction *candidate : lock_acquires) {
+      if (candidate == parent_acquires.front() ||
+          !sameLockIdentity(candidate, acquire) ||
+          m_mhp.getThreadID(candidate) != parent_tid) {
+        continue;
+      }
+      if (hasProgramOrder(fork_inst, candidate) &&
+          hasProgramOrder(candidate, parent_releases.front())) {
+        parent_reacquired_after_fork = true;
+        break;
+      }
+    }
+    if (parent_reacquired_after_fork) {
+      ++deferred_mutex_relations;
+      continue;
+    }
+
+    size_t before = m_sync_with.size();
+    addSyncEdge(parent_releases.front(), acquire, acquire);
+    if (m_sync_with.size() != before) {
+      ++mutex_handoff_edges;
+    }
+  }
+
+  size_t condvar_edges = 0;
+  size_t deferred_condvar_relations = 0;
+  for (const Instruction *wait : cond_waits) {
+    if (!wait || !isSingleExecutionSite(wait)) {
+      continue;
+    }
+    bool has_matching_signal = false;
+    for (const Instruction *signal : cond_signals) {
+      if (!sameCondIdentity(wait, signal)) {
+        continue;
+      }
+      has_matching_signal = true;
+      if (!signal || !isSingleExecutionSite(signal) ||
+          m_mhp.getThreadID(signal) == m_mhp.getThreadID(wait)) {
+        continue;
+      }
+    }
+    if (has_matching_signal) {
+      ++deferred_condvar_relations;
+    }
+  }
+
   size_t omp_task_dependency_edges = 0;
   size_t omp_task_exclusion_relations = 0;
   size_t omp_task_unknown_relations = 0;
@@ -1684,6 +1916,15 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   m_deferred_sync_counts["barrier_sync_edges"] = barrier_edges;
   m_deferred_sync_counts["barrier_relations_deferred"] =
       deferred_barrier_relations;
+  m_deferred_sync_counts["mutex_ops"] =
+      lock_acquires.size() + lock_releases.size();
+  m_deferred_sync_counts["mutex_handoff_edges"] = mutex_handoff_edges;
+  m_deferred_sync_counts["mutex_relations_deferred"] = deferred_mutex_relations;
+  m_deferred_sync_counts["condvar_ops"] =
+      cond_waits.size() + cond_signals.size();
+  m_deferred_sync_counts["condvar_sync_edges"] = condvar_edges;
+  m_deferred_sync_counts["condvar_relations_deferred"] =
+      deferred_condvar_relations;
   m_deferred_sync_counts["omp_task_api_ops"] = omp_task_ops.size();
   m_deferred_sync_counts["omp_task_dependency_edges"] =
       omp_task_dependency_edges;
@@ -1711,6 +1952,10 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
          << ", latch_edges=" << m_deferred_sync_counts["latch_sync_edges"]
          << ", barriers=" << m_deferred_sync_counts["barrier_ops"]
          << ", barrier_edges=" << m_deferred_sync_counts["barrier_sync_edges"]
+         << ", mutex_ops=" << m_deferred_sync_counts["mutex_ops"]
+         << ", mutex_edges=" << m_deferred_sync_counts["mutex_handoff_edges"]
+         << ", condvar_ops=" << m_deferred_sync_counts["condvar_ops"]
+         << ", condvar_edges=" << m_deferred_sync_counts["condvar_sync_edges"]
          << ", omp_task_ops=" << m_deferred_sync_counts["omp_task_api_ops"]
          << ", omp_task_edges=" << omp_task_dependency_edges << "\n";
 }

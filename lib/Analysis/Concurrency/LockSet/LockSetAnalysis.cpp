@@ -29,9 +29,12 @@
 #include <llvm/Analysis/MemoryLocation.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/Analysis/ValueTracking.h>
+#include <llvm/ADT/APInt.h>
 #include <llvm/IR/CFG.h>
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Operator.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -79,6 +82,65 @@ void collectDefinedFunctionTargets(const Value *called,
       collectDefinedFunctionTargets(ce->getOperand(0), callees, visited);
     }
   }
+}
+
+bool getConstantOffsetPointerInfo(const Value *ptr, const Module *module,
+                                  const Value *&base, int64_t &offset,
+                                  uint64_t &size) {
+  if (!ptr || !module) {
+    return false;
+  }
+
+  ptr = ptr->stripPointerCasts();
+  const auto *gep = dyn_cast<GEPOperator>(ptr);
+  if (!gep) {
+    return false;
+  }
+
+  const DataLayout &dl = module->getDataLayout();
+  APInt ap_offset(dl.getIndexTypeSizeInBits(gep->getType()), 0, true);
+  if (!gep->accumulateConstantOffset(dl, ap_offset)) {
+    return false;
+  }
+
+  const Value *ptr_base = gep->getPointerOperand()->stripPointerCasts();
+  if (const Value *underlying = getUnderlyingObject(ptr_base, 32)) {
+    ptr_base = underlying->stripPointerCasts();
+  }
+
+  Type *pointee_ty = gep->getResultElementType();
+  if (!pointee_ty || !pointee_ty->isSized()) {
+    return false;
+  }
+
+  base = ptr_base;
+  offset = ap_offset.getSExtValue();
+  size = dl.getTypeStoreSize(pointee_ty);
+  return true;
+}
+
+bool areDisjointConstantOffsetPointers(const Value *lhs, const Value *rhs,
+                                       const Module *module) {
+  const Value *lhs_base = nullptr;
+  const Value *rhs_base = nullptr;
+  int64_t lhs_offset = 0;
+  int64_t rhs_offset = 0;
+  uint64_t lhs_size = 0;
+  uint64_t rhs_size = 0;
+  if (!getConstantOffsetPointerInfo(lhs, module, lhs_base, lhs_offset,
+                                    lhs_size) ||
+      !getConstantOffsetPointerInfo(rhs, module, rhs_base, rhs_offset,
+                                    rhs_size)) {
+    return false;
+  }
+
+  if (lhs_base != rhs_base) {
+    return false;
+  }
+
+  const int64_t lhs_end = lhs_offset + static_cast<int64_t>(lhs_size);
+  const int64_t rhs_end = rhs_offset + static_cast<int64_t>(rhs_size);
+  return lhs_end <= rhs_offset || rhs_end <= lhs_offset;
 }
 
 } // namespace
@@ -335,20 +397,29 @@ LockSetAnalysis::getInstructionsHoldingLock(LockID lock) const {
 
 bool LockSetAnalysis::mayHoldCommonLock(const Instruction *i1,
                                         const Instruction *i2) const {
-  auto common = [this](const LockSet &a, const LockSet &b) {
+  const Module *module =
+      m_module ? m_module
+               : (m_single_function ? m_single_function->getParent() : nullptr);
+  auto commonWithDisjointFields = [this, module](const LockSet &a,
+                                                 const LockSet &b) {
     for (const auto *lock : a) {
-      if (b.find(lock) != b.end())
+      if (b.find(lock) != b.end()) {
         return true;
+      }
       for (const auto *lock2 : b) {
-        if (mayAlias(lock, lock2))
+        if (areDisjointConstantOffsetPointers(lock, lock2, module)) {
+          continue;
+        }
+        if (mayAlias(lock, lock2)) {
           return true;
+        }
       }
     }
     return false;
   };
   LockSet r1 = getMayReadLockSetAt(i1), r2 = getMayReadLockSetAt(i2);
   LockSet w1 = getMayWriteLockSetAt(i1), w2 = getMayWriteLockSetAt(i2);
-  return common(w1, w2) || common(r1, r2);
+  return commonWithDisjointFields(w1, w2) || commonWithDisjointFields(r1, r2);
 }
 
 bool LockSetAnalysis::mustHoldCommonLock(const Instruction *i1,
@@ -1202,25 +1273,6 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
     // other calls.
     if (!m_thread_api->isTDAcquire(call) && !m_thread_api->isTDRelease(call) &&
         !m_thread_api->isTDCondWait(call)) {
-      auto applySummaryIfPresent = [&](const Function *callee) -> bool {
-        auto it = m_function_summaries.find(callee);
-        if (it == m_function_summaries.end() || !it->second.is_analyzed)
-          return false;
-        // Keep may- and must-lock flows independent to preserve soundness.
-        if (!is_must) {
-          LockSet may_only = out_set;
-          LockSet must_dummy = out_set;
-          applyFunctionSummary(call, callee, may_only, must_dummy);
-          out_set = std::move(may_only);
-        } else {
-          LockSet may_dummy = out_set;
-          LockSet must_only = out_set;
-          applyFunctionSummary(call, callee, may_dummy, must_only);
-          out_set = std::move(must_only);
-        }
-        return true;
-      };
-
       // Handle regular function calls with interprocedural summaries.
       auto callees = getCallees(call);
       if (callees.empty()) {
@@ -1229,10 +1281,29 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         }
         return out_set;
       }
+      std::vector<LockSet> callee_results;
       for (Function *callee : callees) {
         if (!callee || callee->isDeclaration())
           continue;
-        (void)applySummaryIfPresent(callee);
+        LockSet candidate = out_set;
+        auto it = m_function_summaries.find(callee);
+        if (it != m_function_summaries.end() && it->second.is_analyzed) {
+          if (!is_must) {
+            LockSet may_only = candidate;
+            LockSet must_dummy = candidate;
+            applyFunctionSummary(call, callee, may_only, must_dummy);
+            candidate = std::move(may_only);
+          } else {
+            LockSet may_dummy = candidate;
+            LockSet must_only = candidate;
+            applyFunctionSummary(call, callee, may_dummy, must_only);
+            candidate = std::move(must_only);
+          }
+        }
+        callee_results.push_back(std::move(candidate));
+      }
+      if (!callee_results.empty()) {
+        out_set = merge(callee_results, is_must);
       }
       if (is_must && shouldInvalidateMustLockState(call)) {
         out_set.clear();
@@ -1552,7 +1623,9 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       break;
     }
 
-    auto applySummaryToReadWrite = [&](const Function *callee) -> bool {
+    auto applySummaryToReadWrite = [&](const Function *callee,
+                                      LockSet &candidate_read,
+                                      LockSet &candidate_write) -> bool {
       auto it = m_function_summaries.find(callee);
       if (it == m_function_summaries.end() || !it->second.is_analyzed) {
         return false;
@@ -1560,34 +1633,45 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
 
       const FunctionSummary &summary = it->second;
       if (!is_must) {
-        out_read.insert(summary.may_read_acquire_delta.begin(),
-                        summary.may_read_acquire_delta.end());
-        out_write.insert(summary.may_write_acquire_delta.begin(),
-                         summary.may_write_acquire_delta.end());
+        candidate_read.insert(summary.may_read_acquire_delta.begin(),
+                              summary.may_read_acquire_delta.end());
+        candidate_write.insert(summary.may_write_acquire_delta.begin(),
+                               summary.may_write_acquire_delta.end());
       } else {
-        out_read.insert(summary.must_read_acquire_delta.begin(),
-                        summary.must_read_acquire_delta.end());
-        out_write.insert(summary.must_write_acquire_delta.begin(),
-                         summary.must_write_acquire_delta.end());
+        candidate_read.insert(summary.must_read_acquire_delta.begin(),
+                              summary.must_read_acquire_delta.end());
+        candidate_write.insert(summary.must_write_acquire_delta.begin(),
+                               summary.must_write_acquire_delta.end());
         for (LockID lock : summary.may_release_delta) {
-          out_read.erase(lock);
-          out_write.erase(lock);
+          candidate_read.erase(lock);
+          candidate_write.erase(lock);
         }
       }
 
       for (LockID lock : summary.must_release_delta) {
-        out_read.erase(lock);
-        out_write.erase(lock);
+        candidate_read.erase(lock);
+        candidate_write.erase(lock);
       }
       return true;
     };
 
     auto callees = getCallees(call);
+    std::vector<LockSet> read_results;
+    std::vector<LockSet> write_results;
     for (Function *callee : callees) {
       if (!callee || callee->isDeclaration()) {
         continue;
       }
-      (void)applySummaryToReadWrite(callee);
+      LockSet candidate_read = out_read;
+      LockSet candidate_write = out_write;
+      (void)applySummaryToReadWrite(callee, candidate_read, candidate_write);
+      read_results.push_back(std::move(candidate_read));
+      write_results.push_back(std::move(candidate_write));
+    }
+
+    if (!read_results.empty()) {
+      out_read = merge(read_results, is_must);
+      out_write = merge(write_results, is_must);
     }
 
     if (is_must && shouldInvalidateMustLockState(call)) {
@@ -1776,6 +1860,13 @@ void LockSetAnalysis::trackLockOrdering() {
 }
 
 bool LockSetAnalysis::mayAlias(LockID lock1, LockID lock2) const {
+  const Module *module =
+      m_module ? m_module
+               : (m_single_function ? m_single_function->getParent() : nullptr);
+  if (areDisjointConstantOffsetPointers(lock1, lock2, module)) {
+    return false;
+  }
+
   lock1 = getCanonicalLock(lock1);
   lock2 = getCanonicalLock(lock2);
   if (lock1 == lock2)
@@ -1797,17 +1888,28 @@ LockID LockSetAnalysis::getCanonicalLock(LockID lock) const {
   // Strip pointer casts first.
   lock = lock->stripPointerCasts();
 
-  // For loads like "w->mutex", canonicalize to the loaded-from address so
-  // repeated loads from the same field map to one lock identity.
+  // Preserve constant-offset subobjects so distinct lock fields are not
+  // collapsed to the same aggregate base.
   if (const auto *LI = dyn_cast<LoadInst>(lock)) {
-    lock = LI->getPointerOperand()->stripPointerCasts();
+    const Value *addr = LI->getPointerOperand()->stripPointerCasts();
+    if (const auto *GEP = dyn_cast<GetElementPtrInst>(addr)) {
+      if (GEP->hasAllConstantIndices()) {
+        return addr;
+      }
+      lock = GEP->getPointerOperand()->stripPointerCasts();
+    } else if (const Value *base = getUnderlyingObject(addr, 32)) {
+      lock = base->stripPointerCasts();
+    } else {
+      lock = addr;
+    }
   }
 
-  // Collapse simple pointer arithmetic to its base object.
   if (const auto *GEP = dyn_cast<GetElementPtrInst>(lock)) {
+    if (GEP->hasAllConstantIndices()) {
+      return lock;
+    }
     lock = GEP->getPointerOperand()->stripPointerCasts();
-  }
-  if (const Value *base = getUnderlyingObject(lock, 32)) {
+  } else if (const Value *base = getUnderlyingObject(lock, 32)) {
     lock = base->stripPointerCasts();
   }
 
@@ -2439,17 +2541,26 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
                                       summary.must_write_acquire_delta.end());
   }
 
-  // Track only releases that are not definitely matched by an in-callee
-  // acquisition on all paths to the release site. Balanced internal
-  // acquire/release pairs should not destroy caller must-lock certainty.
-  std::unordered_map<LockID, std::vector<const Instruction *>> unmatched_releases;
+  // Track releases that are caller-visible on some path versus all paths.
+  // A release is:
+  // - maybe caller-visible if the lock is not definitely held at the site
+  //   (there exists a path where the callee did not acquire it internally),
+  // - definitely caller-visible only if the lock is not even possibly held by
+  //   an internal callee acquisition at that site.
+  std::unordered_map<LockID, std::vector<const Instruction *>>
+      maybe_unmatched_releases;
+  std::unordered_map<LockID, std::vector<const Instruction *>>
+      must_unmatched_releases;
   for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
     Instruction *inst = &*I;
     std::vector<LockID> released = getRAIILocksReleasedAt(inst);
     if (!released.empty()) {
       for (LockID lock : released) {
+        if (!isDefinitelyHeldAt(inst, lock)) {
+          maybe_unmatched_releases[getCanonicalLock(lock)].push_back(inst);
+        }
         if (!isPossiblyHeldAt(inst, lock)) {
-          unmatched_releases[getCanonicalLock(lock)].push_back(inst);
+          must_unmatched_releases[getCanonicalLock(lock)].push_back(inst);
         }
       }
       continue;
@@ -2459,24 +2570,33 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
     if (m_thread_api->isTDRelease(inst) && !m_thread_api->isTDAcquire(inst)) {
       if (LockID lock = getLockValue(inst)) {
+        if (!isDefinitelyHeldAt(inst, lock)) {
+          maybe_unmatched_releases[getCanonicalLock(lock)].push_back(inst);
+        }
         if (!isPossiblyHeldAt(inst, lock)) {
-          unmatched_releases[getCanonicalLock(lock)].push_back(inst);
+          must_unmatched_releases[getCanonicalLock(lock)].push_back(inst);
         }
       }
     }
   }
 
-  for (const auto &entry : unmatched_releases) {
+  for (const auto &entry : maybe_unmatched_releases) {
     LockID lock = entry.first;
     bool reaches_any_return = false;
-    bool covers_all_returns = !returns.empty();
     for (const ReturnInst *ret : returns) {
       reaches_any_return |= returnMayObserveUnmatchedRelease(ret, entry.second);
-      covers_all_returns &=
-          returnMustObserveUnmatchedRelease(ret, entry.second);
     }
     if (reaches_any_return) {
       summary.may_release_delta.insert(lock);
+    }
+  }
+
+  for (const auto &entry : must_unmatched_releases) {
+    LockID lock = entry.first;
+    bool covers_all_returns = !returns.empty();
+    for (const ReturnInst *ret : returns) {
+      covers_all_returns &=
+          returnMustObserveUnmatchedRelease(ret, entry.second);
     }
     if (covers_all_returns) {
       summary.must_release_delta.insert(lock);

@@ -126,6 +126,254 @@ TEST_F(HappensBeforeAnalysisTest, MultiExitWorkerStillHappensBeforePostJoin) {
   EXPECT_TRUE(hb.happensBefore(right_work, post));
 }
 
+TEST_F(HappensBeforeAnalysisTest, MutexHandoffAcrossForkCreatesHB) {
+  const char *source = R"(
+    @lock = global i8 0
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @pthread_mutex_unlock(i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      %seen = load i32, i32* @shared, align 4
+      call i32 @pthread_mutex_unlock(i8* @lock)
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_mutex_lock(i8* @lock)
+      store i32 42, i32* @shared, align 4
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      call i32 @pthread_mutex_unlock(i8* @lock)
+      call i32 @pthread_join(i8* %tid, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  const Function *worker_func = module->getFunction("worker");
+  ASSERT_NE(main_func, nullptr);
+  ASSERT_NE(worker_func, nullptr);
+
+  const Instruction *store_shared = nullptr;
+  for (const Instruction &inst : instructions(*main_func)) {
+    if (isa<StoreInst>(&inst)) {
+      store_shared = &inst;
+      break;
+    }
+  }
+  const Instruction *load_shared = findInstructionByName(*worker_func, "seen");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       CompetingPeerMutexCriticalSectionsDoNotInventHB) {
+  const char *source = R"(
+    @lock = global i8 0
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @pthread_mutex_unlock(i8*)
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      store i32 1, i32* @shared, align 4
+      call i32 @pthread_mutex_unlock(i8* @lock)
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      %seen = load i32, i32* @shared, align 4
+      call i32 @pthread_mutex_unlock(i8* @lock)
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @worker1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @worker2, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared = nullptr;
+  for (const Instruction &inst : instructions(*module->getFunction("worker1"))) {
+    if (isa<StoreInst>(&inst)) {
+      store_shared = &inst;
+      break;
+    }
+  }
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("worker2"), "seen");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+  EXPECT_FALSE(hb.happensBefore(load_shared, store_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       UniqueConditionSignalRemainsDeferredWithoutWakeupProof) {
+  const char *source = R"(
+    @cond = global i8 0
+    @mutex = global i8 0
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_cond_wait(i8*, i8*)
+    declare i32 @pthread_cond_signal(i8*)
+
+    define i8* @waiter(i8* %arg) {
+    entry:
+      call i32 @pthread_cond_wait(i8* @cond, i8* @mutex)
+      %seen = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @signaler(i8* %arg) {
+    entry:
+      store i32 7, i32* @shared, align 4
+      call i32 @pthread_cond_signal(i8* @cond)
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @waiter, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @signaler, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("signaler")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("waiter"), "seen");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+  const auto &deferred = hb.getDeferredSyncCounts();
+  auto it = deferred.find("condvar_relations_deferred");
+  ASSERT_NE(it, deferred.end());
+  EXPECT_GT(it->second, 0u);
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       MultipleWaitersOnSameConditionRemainDeferred) {
+  const char *source = R"(
+    @cond = global i8 0
+    @mutex = global i8 0
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_cond_wait(i8*, i8*)
+    declare i32 @pthread_cond_signal(i8*)
+
+    define i8* @waiter1(i8* %arg) {
+    entry:
+      call i32 @pthread_cond_wait(i8* @cond, i8* @mutex)
+      %seen1 = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @waiter2(i8* %arg) {
+    entry:
+      call i32 @pthread_cond_wait(i8* @cond, i8* @mutex)
+      %seen2 = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @signaler(i8* %arg) {
+    entry:
+      store i32 7, i32* @shared, align 4
+      call i32 @pthread_cond_signal(i8* @cond)
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      %tid3 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @waiter1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @waiter2, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @signaler, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("signaler")->getEntryBlock().front();
+  const Instruction *load1 =
+      findInstructionByName(*module->getFunction("waiter1"), "seen1");
+  const Instruction *load2 =
+      findInstructionByName(*module->getFunction("waiter2"), "seen2");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load1, nullptr);
+  ASSERT_NE(load2, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load1));
+  EXPECT_FALSE(hb.happensBefore(store_shared, load2));
+  const auto &deferred = hb.getDeferredSyncCounts();
+  auto it = deferred.find("condvar_relations_deferred");
+  ASSERT_NE(it, deferred.end());
+  EXPECT_GT(it->second, 0u);
+}
+
 TEST_F(HappensBeforeAnalysisTest, CallOnceDoesNotCreateBidirectionalHB) {
   const char *source = R"(
     @flag = global i8 0
@@ -236,6 +484,70 @@ TEST_F(HappensBeforeAnalysisTest, CallOnceCallbackSynchronizesWithFollowers) {
   ASSERT_NE(load_shared, nullptr);
 
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       CallOnceWithDifferentCallbacksDoesNotInventCrossCallbackHB) {
+  const char *source = R"(
+    @flag = global i8 0
+    @a = global i32 0
+    @b = global i32 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @std_call_once(i8*, void ()*)
+
+    define void @init_a() {
+    entry:
+      store i32 7, i32* @a
+      ret void
+    }
+
+    define void @init_b() {
+    entry:
+      store i32 9, i32* @b
+      ret void
+    }
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      call void @std_call_once(i8* @flag, void ()* @init_a)
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      call void @std_call_once(i8* @flag, void ()* @init_b)
+      %v = load i32, i32* @a
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @worker1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @worker2, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_a =
+      &module->getFunction("init_a")->getEntryBlock().front();
+  const Instruction *load_a =
+      findInstructionByName(*module->getFunction("worker2"), "v");
+  ASSERT_NE(store_a, nullptr);
+  ASSERT_NE(load_a, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_a, load_a));
 }
 
 TEST_F(HappensBeforeAnalysisTest,
@@ -1836,6 +2148,69 @@ TEST_F(HappensBeforeAnalysisTest, BranchWitnessMustMatchConcreteReleaseValue) {
   ASSERT_NE(load_data, nullptr);
 
   EXPECT_FALSE(hb.happensBefore(store_data, load_data));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       InitialAtomicValueMatchingWitnessDoesNotInventHB) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 1, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 9, i32* @data, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp eq i32 %seen, 1
+      br i1 %ready, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_data =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_data =
+      findInstructionByName(*module->getFunction("reader"), "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
+
+  const auto &deferred = hb.getDeferredSyncCounts();
+  auto it = deferred.find("atomic_witness_value_incompatible");
+  ASSERT_NE(it, deferred.end());
+  EXPECT_GT(it->second, 0u);
 }
 
 TEST_F(HappensBeforeAnalysisTest,

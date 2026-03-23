@@ -45,8 +45,8 @@ public:
   const std::unordered_map<std::string, size_t> &getDeferredSyncCounts() const {
     return m_deferred_sync_counts;
   }
-  const std::vector<std::pair<const llvm::Instruction *,
-                              const llvm::Instruction *>> &
+  const std::vector<
+      std::pair<const llvm::Instruction *, const llvm::Instruction *>> &
   getSynchronizesWithEdges() const {
     return m_sync_with;
   }
@@ -160,8 +160,9 @@ private:
   /// Synchronizes-with pairs proven by non-atomic witness mechanisms.
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
       m_sync_with;
-  std::unordered_set<std::pair<const llvm::Instruction *,
-                               const llvm::Instruction *>, InstPairHash>
+  std::unordered_set<
+      std::pair<const llvm::Instruction *, const llvm::Instruction *>,
+      InstPairHash>
       m_explicit_hb_pairs;
   mutable std::unordered_map<
       std::pair<const llvm::Instruction *, const llvm::Instruction *>, bool,
