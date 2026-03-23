@@ -243,6 +243,16 @@ void ContextDDA::buildRecursionInfo() {
   SVFG *svfg = getSVFG();
   if (!module)
     return;
+  auto appendUniqueCallees =
+      [](std::vector<const llvm::Function *> &dst,
+         const std::vector<const llvm::Function *> &src) {
+        for (const llvm::Function *callee : src) {
+          if (!callee)
+            continue;
+          if (std::find(dst.begin(), dst.end(), callee) == dst.end())
+            dst.push_back(callee);
+        }
+      };
   std::unordered_map<const llvm::Function *,
                      std::vector<const llvm::Function *>>
       callGraph;
@@ -262,9 +272,9 @@ void ContextDDA::buildRecursionInfo() {
           const auto &connected = svfg->getConnectedCallees(cb);
           for (const llvm::Function *callee : connected)
             callees.push_back(callee);
-          if (callees.empty() && flowDDA_ && flowDDA_->getSVFGBuilder()) {
-            callees = flowDDA_->getSVFGBuilder()->getIndirectCallTargets(cb);
-          }
+          if (flowDDA_ && flowDDA_->getSVFGBuilder())
+            appendUniqueCallees(callees,
+                                flowDDA_->getSVFGBuilder()->getIndirectCallTargets(cb));
         }
         for (const llvm::Function *callee : callees) {
           if (!callee || callee->isDeclaration())
@@ -902,21 +912,12 @@ bool ContextDDA::isStrongUpdate(const CxtPtSet &dstPts,
   if (svfg->isUnknownObject(objId))
     return false;
   if (svfg->isHeapObject(objId)) {
-    if (!var.get_cond().isConcreteCxt())
-      return false;
-    const Value *allocV = svfg->getObjectValue(objId);
-    const Instruction *allocI = dyn_cast_or_null<Instruction>(allocV);
-    const StoreInst *storeI =
-        store ? dyn_cast_or_null<StoreInst>(store->getValue()) : nullptr;
-    const Function *allocF = allocI ? allocI->getFunction() : nullptr;
-    if (allocF && flowDDA_ && flowDDA_->isRecursiveFunction(allocF))
-      return false;
-    if (flowDDA_) {
-      if (allocI && flowDDA_->isInLoop(allocI))
-        return false;
-      if (storeI && flowDDA_->isInLoop(storeI))
-        return false;
-    }
+    // Lotus's SVFG object model does not currently distinguish SVF's
+    // DummyObjVar-style concrete heap cells from ordinary heap allocations.
+    // Upstream only allows the former to strong-update under additional
+    // context/loop checks; treating all heap objects as eligible would be
+    // unsound. Stay conservative until the SVFG carries that distinction.
+    return false;
   }
   if (svfg->isArrayObject(objId))
     return false;

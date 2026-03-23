@@ -11,10 +11,12 @@
 #include "Checker/Report/BugTypes.h"
 #include "Checker/Saber/SaberCheckerAPI.h"
 #include "Checker/Saber/SaberOptions.h"
+#include "IR/ICFG/CallGraph.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
+#include <algorithm>
 #include <cassert>
 #include <deque>
 #include <unordered_set>
@@ -53,20 +55,53 @@ static const llvm::Function *getDirectCallee(const llvm::CallBase *call) {
   return llvm::dyn_cast<llvm::Function>(called->stripPointerCasts());
 }
 
+static void appendUniqueCallee(std::vector<const llvm::Function *> &callees,
+                               const llvm::Function *callee) {
+  if (!callee)
+    return;
+  if (std::find(callees.begin(), callees.end(), callee) == callees.end())
+    callees.push_back(callee);
+}
+
 static std::vector<const llvm::Function *>
-collectResolvedCallees(const llvm::CallBase *call, SaberSVFGBuilder &builder) {
+collectResolvedCallees(const llvm::CallBase *call, const SVFG *graph,
+                       SaberSVFGBuilder &builder) {
   std::vector<const llvm::Function *> callees;
   if (!call)
     return callees;
   if (const llvm::Function *directCallee = getDirectCallee(call)) {
-    callees.push_back(directCallee);
+    appendUniqueCallee(callees, directCallee);
     return callees;
   }
-  return builder.getIndirectCallTargets(call);
-}
 
-static bool isProgEntryFunction(const Function *fun) {
-  return fun && fun->getName() == "main";
+  if (graph) {
+    for (const llvm::Function *callee : graph->getConnectedCallees(call))
+      appendUniqueCallee(callees, callee);
+
+    if (callees.empty()) {
+      if (const LTCallGraph *callGraph = graph->getRefinedCallGraph()) {
+        const llvm::Function *caller = call->getFunction();
+        if (caller) {
+          for (const auto &entry : *callGraph) {
+            if (entry.first != caller || !entry.second)
+              continue;
+            for (const auto &record : *entry.second) {
+              if (record.first != call || !record.second)
+                continue;
+              appendUniqueCallee(callees, record.second->getFunction());
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (callees.empty()) {
+    for (const llvm::Function *callee : builder.getIndirectCallTargets(call))
+      appendUniqueCallee(callees, callee);
+  }
+  return callees;
 }
 
 static bool isUncalledFunction(const Function *fun) {
@@ -74,7 +109,7 @@ static bool isUncalledFunction(const Function *fun) {
     return true;
   if (fun->hasAddressTaken())
     return false;
-  if (isProgEntryFunction(fun))
+  if (fun->getName() == "main")
     return false;
   for (const User *user : fun->users()) {
     if (isa<CallBase>(user))
@@ -83,7 +118,7 @@ static bool isUncalledFunction(const Function *fun) {
   return true;
 }
 
-static void collectForwardedPointerLoads(
+static void collectBitcastForwardedPointerLoads(
     const llvm::Value *root,
     llvm::SmallVectorImpl<const llvm::LoadInst *> &loads) {
   if (!root || !root->getType()->isPointerTy())
@@ -105,24 +140,14 @@ static void collectForwardedPointerLoads(
           loads.push_back(load);
         continue;
       }
-      if (const auto *cast = dyn_cast<CastInst>(user)) {
+      if (const auto *cast = dyn_cast<BitCastInst>(user)) {
         if (cast->getType()->isPointerTy())
           worklist.push_back(cast);
         continue;
       }
-      if (const auto *gep = dyn_cast<GetElementPtrInst>(user)) {
-        if (gep->getType()->isPointerTy())
-          worklist.push_back(gep);
-        continue;
-      }
-      if (const auto *phi = dyn_cast<PHINode>(user)) {
-        if (phi->getType()->isPointerTy())
-          worklist.push_back(phi);
-        continue;
-      }
-      if (const auto *sel = dyn_cast<SelectInst>(user)) {
-        if (sel->getType()->isPointerTy())
-          worklist.push_back(sel);
+      if (const auto *cast = dyn_cast<AddrSpaceCastInst>(user)) {
+        if (cast->getType()->isPointerTy())
+          worklist.push_back(cast);
         continue;
       }
     }
@@ -147,7 +172,8 @@ void LeakChecker::initSrcs() {
           if (!CI->getType()->isPointerTy())
             continue;
           bool sourceLike = false;
-          for (const llvm::Function *c : collectResolvedCallees(CI, memSSA)) {
+          for (const llvm::Function *c :
+               collectResolvedCallees(CI, svfg, memSSA)) {
             if (c && isSourceLikeFun(c->getName().str())) {
               sourceLike = true;
               break;
@@ -206,7 +232,8 @@ void LeakChecker::initSnks() {
         if (auto *CI = dyn_cast<CallBase>(&I)) {
           bool sinkLike = false;
           bool multiLevelSink = false;
-          for (const llvm::Function *c : collectResolvedCallees(CI, memSSA)) {
+          for (const llvm::Function *c :
+               collectResolvedCallees(CI, svfg, memSSA)) {
             if (!c)
               continue;
             if (isSinkLikeFun(c->getName().str())) {
@@ -252,7 +279,7 @@ void LeakChecker::initSnks() {
               if (multiLevelSink &&
                   arg->getType()->getPointerElementType()->isPointerTy()) {
                 llvm::SmallVector<const LoadInst *, 4> forwardedLoads;
-                collectForwardedPointerLoads(arg.get(), forwardedLoads);
+                collectBitcastForwardedPointerLoads(arg.get(), forwardedLoads);
                 for (const LoadInst *load : forwardedLoads) {
                   if (SVFGNode *loadNode = svfg->getDef(load)) {
                     addToSinks(loadNode);

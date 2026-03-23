@@ -115,7 +115,11 @@ private:
   void handleAddr(CxtPtSet &pts, const CxtLocDPItem &dpm,
                   const AddrSVFGNode *addr);
   CxtPtSet processGepPts(const GepSVFGNode *gep, const CxtPtSet &srcPts);
+
+protected:
   bool isStrongUpdate(const CxtPtSet &dstPts, const StoreSVFGNode *store);
+
+private:
   uint32_t getPtrNodeID(uint32_t var) const { return var; }
   void addDDAPts(CxtPtSet &pts, uint32_t var);
   void unionDDAPts(CxtPtSet &target, const CxtPtSet &source);

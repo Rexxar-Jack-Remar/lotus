@@ -524,6 +524,44 @@ TEST(SaberConditionAllocatorTest,
 }
 
 TEST(SaberConditionAllocatorTest,
+     SharedGraphInitializationPreservesIndirectSourceSinkResolution) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    declare i8* @malloc(i64)
+
+    define i8* @alloc_wrapper(i8* (i64)* %fp) {
+    entry:
+      %p = call i8* %fp(i64 4)
+      ret i8* %p
+    }
+
+    define i32 @main() {
+    entry:
+      %p = call i8* @alloc_wrapper(i8* (i64)* @malloc)
+      %isnull = icmp eq i8* %p, null
+      %ret = zext i1 %isnull to i32
+      ret i32 %ret
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  LeakChecker producer;
+  producer.setModule(module.get());
+  producer.initialize();
+  ASSERT_EQ(producer.getSources().size(), 1u);
+
+  auto extracted = producer.extractSVFGAndICFG();
+
+  LeakChecker consumer;
+  consumer.setSharedSVFGAndICFG(std::move(extracted.first),
+                                std::move(extracted.second));
+  consumer.setModule(module.get());
+  consumer.initialize();
+
+  EXPECT_EQ(consumer.getSources().size(), 1u);
+}
+
+TEST(SaberConditionAllocatorTest,
      LeakCheckerAddsExtraLoadSinkOnlyForMultiLevelFreeApis) {
   LLVMContext context;
   auto xfreeModule = parseModule(context, R"(
@@ -605,6 +643,46 @@ TEST(SaberConditionAllocatorTest,
   checker.initialize();
 
   EXPECT_EQ(checker.getSinks().size(), 2u);
+}
+
+TEST(SaberConditionAllocatorTest,
+     LeakCheckerDoesNotAddExtraLoadSinkThroughPhiForMultiLevelFreeApis) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    declare void @XFree(i8**)
+
+    define void @test(i1 %cond) {
+    entry:
+      %slot = alloca i8*
+      store i8* null, i8** %slot
+      br i1 %cond, label %left, label %right
+
+    left:
+      br label %merge
+
+    right:
+      br label %merge
+
+    merge:
+      %slot.phi = phi i8** [ %slot, %left ], [ %slot, %right ]
+      %loaded = load i8*, i8** %slot.phi
+      call void @XFree(i8** %slot)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @test(i1 true)
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  LeakChecker checker;
+  checker.setModule(module.get());
+  checker.initialize();
+
+  EXPECT_EQ(checker.getSinks().size(), 1u);
 }
 
 TEST(SaberConditionAllocatorTest,

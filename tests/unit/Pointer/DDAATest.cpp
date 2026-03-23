@@ -30,6 +30,17 @@ protected:
   }
 };
 
+class FlowDDATestHelper : public FlowDDA {
+public:
+  using FlowDDA::onIndirectEdgesAdded;
+};
+
+class ContextDDATestHelper : public ContextDDA {
+public:
+  using ContextDDA::ContextDDA;
+  using ContextDDA::isStrongUpdate;
+};
+
 TEST_F(DDAATest, ResolvesFunctionPointerFromConstant) {
   const char *source = R"(
     define void @foo() {
@@ -320,6 +331,104 @@ TEST_F(DDAATest, ContextCondUsesSlidingWindowWhenAtLimit) {
 
   EXPECT_TRUE(c.matchContext(40));
   EXPECT_FALSE(c.matchContext(10));
+}
+
+TEST_F(DDAATest, ContextDDAKeepsGenericHeapStoresWeak) {
+  const char *source = R"(
+    define i32 @main() {
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  FlowDDA flow;
+  ASSERT_TRUE(flow.run(*module));
+  ContextDDATestHelper ctx(&flow, nullptr);
+  ASSERT_TRUE(ctx.run(*module));
+
+  ASSERT_NE(flow.getSVFG(), nullptr);
+  constexpr uint32_t heapObjId = 424242;
+  SVFG::ObjectInfo info;
+  info.isHeap = true;
+  flow.getSVFG()->setObjectInfo(heapObjId, info);
+  EXPECT_TRUE(flow.getSVFG()->isHeapObject(heapObjId));
+
+  CxtPtSet pts;
+  pts.insert(CxtVar(ContextCond(), heapObjId));
+  EXPECT_FALSE(ctx.isStrongUpdate(pts, nullptr));
+}
+
+TEST_F(DDAATest, FlowDDARecursionInfoSurvivesPartialIndirectRefinement) {
+  const char *source = R"(
+    define void @B(i8* %ptr) {
+      ret void
+    }
+
+    define void @D(i8* %ptr) {
+    entry:
+      call void @A(i1 false, i8* %ptr)
+      br label %exit
+    exit:
+      ret void
+    }
+
+    define void @A(i1 %choose_b, i8* %ptr) {
+    entry:
+      %fp = select i1 %choose_b, void (i8*)* @B, void (i8*)* @D
+      call void %fp(i8* %ptr)
+      ret void
+    }
+
+    define i32 @main() {
+      %x = alloca i8
+      call void @A(i1 true, i8* %x)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  FlowDDATestHelper flow;
+  ASSERT_TRUE(flow.run(*module));
+  ASSERT_NE(flow.getSVFG(), nullptr);
+  ASSERT_NE(flow.getSVFGBuilder(), nullptr);
+
+  const Function *A = module->getFunction("A");
+  const Function *B = module->getFunction("B");
+  const Function *D = module->getFunction("D");
+  ASSERT_NE(A, nullptr);
+  ASSERT_NE(B, nullptr);
+  ASSERT_NE(D, nullptr);
+  EXPECT_TRUE(flow.isRecursiveFunction(A));
+  EXPECT_TRUE(flow.isRecursiveFunction(D));
+
+  const CallBase *indCall = nullptr;
+  for (const BasicBlock &BB : *A) {
+    for (const Instruction &I : BB) {
+      if (const auto *CB = dyn_cast<CallBase>(&I)) {
+        if (!CB->getCalledFunction()) {
+          indCall = CB;
+          break;
+        }
+      }
+    }
+    if (indCall)
+      break;
+  }
+  ASSERT_NE(indCall, nullptr);
+
+  std::vector<SVFGEdge *> newEdges;
+  EXPECT_TRUE(flow.getSVFGBuilder()->connectCallSiteToCalleeOnTheFly(
+      flow.getSVFG(), indCall, B, newEdges));
+  EXPECT_FALSE(newEdges.empty());
+
+  flow.onIndirectEdgesAdded();
+
+  EXPECT_TRUE(flow.isRecursiveFunction(A));
+  EXPECT_TRUE(flow.isRecursiveFunction(D));
 }
 
 TEST_F(DDAATest, SVFGSCCSkipsInsensitiveCallRetEdges) {

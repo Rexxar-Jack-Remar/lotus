@@ -486,6 +486,10 @@ FlowDDA::PtsSet FlowDDA::getPointsTo(const Value *ptr) {
     return result;
 
   const Value *v = ptr->stripPointerCasts();
+  auto cacheIt = ptsCache_.find(v);
+  if (cacheIt != ptsCache_.end())
+    return cacheIt->second;
+
   SVFGNode *defNode = svfg_->getValueNode(v);
   if (!defNode) {
     if (const Instruction *inst = dyn_cast<Instruction>(v))
@@ -494,15 +498,10 @@ FlowDDA::PtsSet FlowDDA::getPointsTo(const Value *ptr) {
       return result;
   }
 
-  // Bug 4 fix: resetQuery() clears the per-query DPM caches (dpmToTLPtsMap_,
-  // dpmToADPtsMap_), but ptsCache_ is a cross-query cache keyed by Value*.
-  // If we only erase the queried pointer (old code: ptsCache_.erase(v)), all
-  // other entries remain stale after the DPM caches are cleared. A subsequent
-  // getPointsToCached(alias) call returns the old cached result even though
-  // the underlying DPM caches were rebuilt, causing mayAlias to return
-  // incorrect results. The fix is to clear the entire ptsCache_ before every
-  // fresh solver run so it is always consistent with the DPM caches.
-  ptsCache_.clear();
+  // Keep cross-query memoization in sync with SVF's design: the DPM caches are
+  // preserved across queries, so a Value* query can also be memoized until the
+  // SVFG itself changes. SVFG mutations still invalidate ptsCache_ via
+  // onIndirectEdgesAdded().
   resetQuery();
   LocDPItem::setMaxBudget(defaultMaxBudget_);
   LocDPItem dpm(getTopLevelValueId(defNode), defNode);
@@ -513,6 +512,7 @@ FlowDDA::PtsSet FlowDDA::getPointsTo(const Value *ptr) {
     handleOutOfBudgetDpm(dpm);
   }
   result = getCachedPointsTo(dpm);
+  ptsCache_[v] = result;
   return result;
 }
 
@@ -542,6 +542,16 @@ void FlowDDA::buildRecursionInfo() {
   recursiveFunctions_.clear();
   if (!module_)
     return;
+  auto appendUniqueCallees =
+      [](std::vector<const llvm::Function *> &dst,
+         const std::vector<const llvm::Function *> &src) {
+        for (const llvm::Function *callee : src) {
+          if (!callee)
+            continue;
+          if (std::find(dst.begin(), dst.end(), callee) == dst.end())
+            dst.push_back(callee);
+        }
+      };
   std::unordered_map<const llvm::Function *,
                      std::vector<const llvm::Function *>>
       callGraph;
@@ -561,8 +571,8 @@ void FlowDDA::buildRecursionInfo() {
           const auto &connected = svfg_->getConnectedCallees(cb);
           for (const llvm::Function *callee : connected)
             callees.push_back(callee);
-          if (callees.empty() && svfgBuilder_)
-            callees = svfgBuilder_->getIndirectCallTargets(cb);
+          if (svfgBuilder_)
+            appendUniqueCallees(callees, svfgBuilder_->getIndirectCallTargets(cb));
         } else if (svfgBuilder_) {
           callees = svfgBuilder_->getIndirectCallTargets(cb);
         }
