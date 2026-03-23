@@ -95,7 +95,6 @@ const Value *JoinTargetAnalysis::traceThreadHandleRoot(const Value *value,
 
     if (const auto *store = dyn_cast<StoreInst>(stripped)) {
       worklist.push_back(store->getPointerOperand());
-      worklist.push_back(store->getValueOperand());
       continue;
     }
 
@@ -470,7 +469,10 @@ JoinTargetAnalysis::filterTemporallyFeasibleForks(
     return rootsMatch(traceThreadHandleRoot(actual, &m_module), singleJoinRoot);
   };
 
-  concurrency::ThreadMultiplicityAnalysis multiplicity(m_module);
+  if (!m_threadMultiplicity) {
+    m_threadMultiplicity =
+        std::make_unique<concurrency::ThreadMultiplicityAnalysis>(m_module);
+  }
 
   for (const Instruction *forkInst : forks) {
     if (!forkInst || !joinInst) {
@@ -506,7 +508,7 @@ JoinTargetAnalysis::filterTemporallyFeasibleForks(
             joinMayReachForkInFunction(joinInst, &inst)) {
           continue;
         }
-        if (multiplicity.instructionMayExecuteMultipleTimes(&inst)) {
+        if (m_threadMultiplicity->instructionMayExecuteMultipleTimes(&inst)) {
           matchingCallSites.clear();
           break;
         }

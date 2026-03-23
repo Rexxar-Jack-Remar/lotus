@@ -197,7 +197,8 @@ TEST_F(StaticVectorClockMHPTest,
   EXPECT_TRUE(svc.mayHappenInParallel(writer_store, reader_load));
 }
 
-TEST_F(StaticVectorClockMHPTest, SplitPhaseBarrierOrdersPostBarrierContinuation) {
+TEST_F(StaticVectorClockMHPTest,
+       SplitPhaseBarrierOrdersPostBarrierContinuation) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
     declare void @std_barrier_arriveEv(i8*)
@@ -312,7 +313,8 @@ TEST_F(StaticVectorClockMHPTest,
     }
   }
   const Instruction *first_load = findInstructionByName(*reader, "first_load");
-  const Instruction *second_load = findInstructionByName(*reader, "second_load");
+  const Instruction *second_load =
+      findInstructionByName(*reader, "second_load");
   ASSERT_NE(store_first, nullptr);
   ASSERT_NE(store_second, nullptr);
   ASSERT_NE(first_load, nullptr);
@@ -440,8 +442,10 @@ TEST_F(StaticVectorClockMHPTest, StdThreadJoinCreatesJoinLikeHB) {
   StaticVectorClockMHP svc(*module);
   svc.analyze();
 
-  const Instruction *worker_inst = findInstructionByName(*module->getFunction("worker"), "w");
-  const Instruction *post = findInstructionByName(*module->getFunction("main"), "post");
+  const Instruction *worker_inst =
+      findInstructionByName(*module->getFunction("worker"), "w");
+  const Instruction *post =
+      findInstructionByName(*module->getFunction("main"), "post");
   ASSERT_NE(worker_inst, nullptr);
   ASSERT_NE(post, nullptr);
   EXPECT_FALSE(svc.mayHappenInParallel(worker_inst, post));
@@ -486,7 +490,8 @@ TEST_F(StaticVectorClockMHPTest, JoinTargetThroughLoadCreatesJoinLikeHB) {
   EXPECT_FALSE(svc.mayHappenInParallel(worker_inst, post));
 }
 
-TEST_F(StaticVectorClockMHPTest, MultiExitWorkerStillOrdersPostJoinContinuation) {
+TEST_F(StaticVectorClockMHPTest,
+       MultiExitWorkerStillOrdersPostJoinContinuation) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
     declare i32 @pthread_join(i8*, i8*)
@@ -526,7 +531,8 @@ TEST_F(StaticVectorClockMHPTest, MultiExitWorkerStillOrdersPostJoinContinuation)
   ASSERT_NE(worker_func, nullptr);
   ASSERT_NE(main_func, nullptr);
 
-  const Instruction *left_work = findInstructionByName(*worker_func, "left_work");
+  const Instruction *left_work =
+      findInstructionByName(*worker_func, "left_work");
   const Instruction *right_work =
       findInstructionByName(*worker_func, "right_work");
   const Instruction *post = findInstructionByName(*main_func, "post");
@@ -676,6 +682,65 @@ TEST_F(StaticVectorClockMHPTest,
   EXPECT_TRUE(svc.mayHappenInParallel(worker_inst, post));
 }
 
+TEST_F(StaticVectorClockMHPTest,
+       DistinctHelperCallContextsKeepSecondSpawnUnjoined) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 1, 2
+      ret i8* null
+    }
+
+    define void @spawn_helper(i8* %tid) {
+    entry:
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      ret void
+    }
+
+    define void @spawn_from_left(i8* %tid) {
+    entry:
+      call void @spawn_helper(i8* %tid)
+      ret void
+    }
+
+    define void @spawn_from_right(i8* %tid) {
+    entry:
+      call void @spawn_helper(i8* %tid)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call void @spawn_from_left(i8* %tid1)
+      call i32 @pthread_join(i8* %tid1, i8* null)
+      call void @spawn_from_right(i8* %tid2)
+      %post = add i32 3, 4
+      ret i32 %post
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Instruction *worker_inst =
+      findInstructionByName(*module->getFunction("worker"), "w");
+  const Instruction *post =
+      findInstructionByName(*module->getFunction("main"), "post");
+  ASSERT_NE(worker_inst, nullptr);
+  ASSERT_NE(post, nullptr);
+
+  EXPECT_TRUE(svc.mayHappenInParallel(worker_inst, post));
+  EXPECT_FALSE(svc.happensBefore(worker_inst, post));
+}
+
 TEST_F(StaticVectorClockMHPTest, ParallelInstructionsMatchesQueries) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
@@ -710,8 +775,10 @@ TEST_F(StaticVectorClockMHPTest, ParallelInstructionsMatchesQueries) {
   StaticVectorClockMHP svc(*module);
   svc.analyze();
 
-  const Instruction *w1 = findInstructionByName(*module->getFunction("worker"), "w1");
-  const Instruction *w2 = findInstructionByName(*module->getFunction("worker"), "w2");
+  const Instruction *w1 =
+      findInstructionByName(*module->getFunction("worker"), "w1");
+  const Instruction *w2 =
+      findInstructionByName(*module->getFunction("worker"), "w2");
   ASSERT_NE(w1, nullptr);
   ASSERT_NE(w2, nullptr);
 
@@ -720,8 +787,7 @@ TEST_F(StaticVectorClockMHPTest, ParallelInstructionsMatchesQueries) {
   EXPECT_FALSE(svc.mayHappenInParallel(w1, w2));
 }
 
-TEST_F(StaticVectorClockMHPTest,
-       SameThreadExclusiveBranchesAreNotParallel) {
+TEST_F(StaticVectorClockMHPTest, SameThreadExclusiveBranchesAreNotParallel) {
   const char *source = R"(
     define i32 @main() {
     entry:

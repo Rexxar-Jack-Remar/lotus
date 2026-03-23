@@ -62,7 +62,7 @@ ThreadRegionAnalysis::getRegionContaining(const Instruction *inst) const {
 }
 
 // ============================================================================
-// CFG-based Region Analysis Helpers
+// Thread-flow-graph-based Region Analysis Helpers
 // ============================================================================
 
 bool ThreadRegionAnalysis::isSyncPoint(const Instruction *inst) const {
@@ -125,30 +125,38 @@ void ThreadRegionAnalysis::identifyRegionsForThread(ThreadID tid,
     return region;
   };
 
-  for (const BasicBlock &BB : *func) {
-    SyncNode *pending_start = nullptr;
-    std::unique_ptr<Region> region;
+  SyncNode *pending_start = nullptr;
+  std::unique_ptr<Region> region;
+  const std::vector<SyncNode *> &thread_nodes = m_tfg.getTopologicalOrderNodes(tid);
 
-    for (const Instruction &inst : BB) {
-      if (!region) {
-        region = make_region(pending_start);
-        pending_start = nullptr;
-      }
-
-      region->instructions.insert(&inst);
-
-      if (!isSyncPoint(&inst)) {
-        continue;
-      }
-
-      region->end_node = m_tfg.getNode(&inst, tid);
-      flush_region(region);
-      pending_start = m_tfg.getNode(&inst, tid);
+  for (SyncNode *node : thread_nodes) {
+    if (!node || node->getThreadID() != tid) {
+      continue;
+    }
+    const Instruction *inst = node->getInstruction();
+    if (!inst) {
+      continue;
     }
 
-    if (region) {
-      flush_region(region);
+    if (!region) {
+      region = make_region(pending_start);
+      pending_start = nullptr;
     }
+
+    region->instructions.insert(inst);
+
+    if (!(isSynchronizationNode(node->getType()) ||
+          isThreadBoundaryNode(node->getType()))) {
+      continue;
+    }
+
+    region->end_node = node;
+    flush_region(region);
+    pending_start = node;
+  }
+
+  if (region) {
+    flush_region(region);
   }
 }
 
@@ -341,8 +349,53 @@ MHPAnalysis::MHPAnalysis(Module &module)
   m_tfg = std::make_unique<ThreadFlowGraph>();
   m_alias_analysis = lotus::AliasAnalysisFactory::create(
       m_module, lotus::AAConfig::SparrowAA_NoCtx());
-  m_call_graph = std::make_unique<CallGraph>(m_module);
 }
+
+namespace {
+bool instructionCanonicalLess(const Instruction *lhs, const Instruction *rhs) {
+  if (lhs == rhs) {
+    return false;
+  }
+  if (!lhs || !rhs) {
+    return lhs < rhs;
+  }
+
+  const Function *lf = lhs->getFunction();
+  const Function *rf = rhs->getFunction();
+  if (lf != rf) {
+    StringRef ln = lf ? lf->getName() : StringRef();
+    StringRef rn = rf ? rf->getName() : StringRef();
+    if (ln != rn) {
+      return ln < rn;
+    }
+  }
+
+  if (lf && rf && lf == rf) {
+    for (const Instruction &inst : instructions(lf)) {
+      if (&inst == lhs) {
+        return true;
+      }
+      if (&inst == rhs) {
+        return false;
+      }
+    }
+  }
+
+  return lhs < rhs;
+}
+
+bool isLikelyThreadEntryCandidate(const Function &func) {
+  if (func.isDeclaration() || func.arg_size() > 1) {
+    return false;
+  }
+  if (func.arg_size() == 1 &&
+      !func.getFunctionType()->getParamType(0)->isPointerTy()) {
+    return false;
+  }
+  Type *retTy = func.getReturnType();
+  return retTy->isPointerTy() || retTy->isVoidTy() || retTy->isIntegerTy();
+}
+} // namespace
 
 MHPAnalysis::~MHPAnalysis() = default;
 
@@ -969,7 +1022,7 @@ void MHPAnalysis::enableIndirectForkConservatism() {
     if (func.isDeclaration()) {
       continue;
     }
-    if (!func.hasAddressTaken()) {
+    if (!func.hasAddressTaken() || !isLikelyThreadEntryCandidate(func)) {
       continue;
     }
 
@@ -1019,10 +1072,6 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
             !m_detached_threads.count(*it->second.begin())) {
         joined_tid = *it->second.begin();
         found_thread = true;
-        // Cache only unambiguous results for the original value.
-        if (pthread_t_origin != joined_thread_val) {
-          m_pthread_value_to_threads[joined_thread_val] = it->second;
-        }
       }
     }
   }
@@ -1328,8 +1377,9 @@ void MHPAnalysis::computeMHPPairs() {
         }
 
         // Store in canonical (pointer-sorted) order for O(1) symmetric lookup.
-        const Instruction *ca = inst_i < inst_j ? inst_i : inst_j;
-        const Instruction *cb = inst_i < inst_j ? inst_j : inst_i;
+        const Instruction *ca =
+            instructionCanonicalLess(inst_i, inst_j) ? inst_i : inst_j;
+        const Instruction *cb = ca == inst_i ? inst_j : inst_i;
         m_mhp_pairs.insert({ca, cb});
         num_pairs++;
       }
@@ -1364,8 +1414,9 @@ void MHPAnalysis::computeMHPPairsInstructionLevel() {
       if (!hasStructuralOrderRelation(i1, i2) &&
           !hasStructuralOrderRelation(i2, i1)) {
         // Store in canonical (pointer-sorted) order for O(1) symmetric lookup.
-        const Instruction *ca = i1 < i2 ? i1 : i2;
-        const Instruction *cb = i1 < i2 ? i2 : i1;
+        const Instruction *ca =
+            instructionCanonicalLess(i1, i2) ? i1 : i2;
+        const Instruction *cb = ca == i1 ? i2 : i1;
         m_mhp_pairs.insert({ca, cb});
         num_pairs++;
       }
@@ -1378,8 +1429,8 @@ void MHPAnalysis::computeMHPPairsInstructionLevel() {
 bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
                                       const Instruction *i2) const {
   // Symmetric memoization (keyed by pointer identity, order-independent).
-  const Instruction *a = i1 < i2 ? i1 : i2;
-  const Instruction *b = i1 < i2 ? i2 : i1;
+  const Instruction *a = instructionCanonicalLess(i1, i2) ? i1 : i2;
+  const Instruction *b = a == i1 ? i2 : i1;
   if (a && b) {
     auto it = m_mhp_cache.find({a, b});
     if (it != m_mhp_cache.end())
@@ -1417,8 +1468,8 @@ bool MHPAnalysis::isPrecomputedMHP(const Instruction *i1,
                                    const Instruction *i2) const {
   // Pairs are stored in canonical (pointer-sorted) order so a single probe
   // suffices for a symmetric lookup.
-  const Instruction *a = i1 < i2 ? i1 : i2;
-  const Instruction *b = i1 < i2 ? i2 : i1;
+  const Instruction *a = instructionCanonicalLess(i1, i2) ? i1 : i2;
+  const Instruction *b = a == i1 ? i2 : i1;
   return m_mhp_pairs.count({a, b}) != 0;
 }
 
@@ -1656,23 +1707,19 @@ bool MHPAnalysis::hasStructuralOrderRelation(const Instruction *i1,
     return false;
   };
 
-  bool tfg_orders_pair = true;
   for (SyncNode *start_node : start_nodes) {
+    bool reached = false;
     for (SyncNode *end_node : end_nodes) {
-      if (!can_reach(start_node, end_node)) {
-        tfg_orders_pair = false;
+      if (can_reach(start_node, end_node)) {
+        reached = true;
         break;
       }
     }
-    if (!tfg_orders_pair) {
-      break;
+    if (!reached) {
+      return (m_order_cache[{i1, i2}] = false);
     }
   }
-
-  if (tfg_orders_pair) {
-    return (m_order_cache[{i1, i2}] = true);
-  }
-  return (m_order_cache[{i1, i2}] = false);
+  return (m_order_cache[{i1, i2}] = true);
 }
 
 bool MHPAnalysis::isInSameThread(const Instruction *i1,

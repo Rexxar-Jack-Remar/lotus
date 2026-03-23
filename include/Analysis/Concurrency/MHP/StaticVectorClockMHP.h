@@ -18,18 +18,18 @@
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
 #include "Analysis/Concurrency/Utils/ThreadMultiplicity.h"
 
-#include <llvm/Analysis/CallGraph.h>
-#include <llvm/Analysis/PostDominators.h>
-#include <llvm/IR/Instruction.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/raw_ostream.h>
-
 #include <limits>
 #include <memory>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/Analysis/CallGraph.h>
+#include <llvm/Analysis/PostDominators.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace mhp {
 
@@ -88,12 +88,24 @@ public:
 
   const ThreadFlowGraph &getThreadFlowGraph() const { return *m_tfg; }
 
-  static constexpr unsigned kCallContextLimit = 2; // k-limiting for call strings
+  static constexpr unsigned kCallContextLimit =
+      2; // k-limiting for call strings
 
 private:
+  using CallString = std::vector<size_t>;
+
+  struct CallStringHash {
+    size_t operator()(const CallString &c) const {
+      size_t h = 0;
+      for (size_t v : c)
+        h ^= v + 0x9e3779b9 + (h << 6) + (h >> 2);
+      return h;
+    }
+  };
+
   struct Context {
     std::vector<size_t> call_sites; // call-string from thread entry (k-limited)
-    std::vector<size_t> fork_sites;  // sequence of SyncNode IDs (fork sites)
+    std::vector<size_t> fork_sites; // sequence of SyncNode IDs (fork sites)
 
     bool operator==(const Context &other) const {
       return call_sites == other.call_sites && fork_sites == other.fork_sites;
@@ -126,7 +138,8 @@ private:
 
   struct LogicClockElemHash {
     size_t operator()(const LogicClockElem &e) const {
-      return (static_cast<size_t>(e.kind) * 1315423911u) ^ (e.node_id + 0x9e3779b9 + (e.node_id << 6) + (e.node_id >> 2));
+      return (static_cast<size_t>(e.kind) * 1315423911u) ^
+             (e.node_id + 0x9e3779b9 + (e.node_id << 6) + (e.node_id >> 2));
     }
   };
 
@@ -142,47 +155,42 @@ private:
   struct StaticNodeKey {
     const SyncNode *node = nullptr;
     StaticThreadID stid = 0;
+    CallString call_sites;
 
     bool operator==(const StaticNodeKey &other) const {
-      return node == other.node && stid == other.stid;
+      return node == other.node && stid == other.stid &&
+             call_sites == other.call_sites;
     }
   };
 
   struct StaticNodeKeyHash {
     size_t operator()(const StaticNodeKey &key) const {
       size_t seed = std::hash<const SyncNode *>{}(key.node);
-      seed ^= std::hash<StaticThreadID>{}(key.stid) + 0x9e3779b9 +
-              (seed << 6) + (seed >> 2);
+      seed ^= std::hash<StaticThreadID>{}(key.stid) + 0x9e3779b9 + (seed << 6) +
+              (seed >> 2);
+      seed ^= CallStringHash{}(key.call_sites) + 0x9e3779b9 + (seed << 6) +
+              (seed >> 2);
       return seed;
     }
   };
 
   using StaticNodeList = std::vector<StaticNodeKey>;
 
-  // Paper partial order: ⊥ ≤ S ≤ n@c ≤ T. leq(LC_a, LC_b) and Max(LC, LC') for sets.
+  // Paper partial order: ⊥ ≤ S ≤ n@c ≤ T. leq(LC_a, LC_b) and Max(LC, LC') for
+  // sets.
   bool logicClockLeq(const LogicClockElem &a, const LogicClockElem &b,
                      StaticThreadID stid) const;
   void logicClockMax(const LogicClockSet &la, const LogicClockSet &lb,
                      StaticThreadID stid, LogicClockSet &out) const;
-  bool nodeReachesInStaticThread(const SyncNode *from, const SyncNode *to,
+  bool nodeReachesInStaticThread(size_t from_node_id, size_t to_node_id,
                                  StaticThreadID stid) const;
   void computeReachabilityPerStaticThread();
-
-  // Context-sensitive reachability: (node, call_string) -> set of nodes reachable
-  using CallString = std::vector<size_t>;
-  struct CallStringHash {
-    size_t operator()(const CallString &c) const {
-      size_t h = 0;
-      for (size_t v : c)
-        h ^= v + 0x9e3779b9 + (h << 6) + (h >> 2);
-      return h;
-    }
-  };
-  mutable std::unordered_map<StaticThreadID,
-      std::unordered_map<const SyncNode *,
-          std::unordered_map<CallString, std::unordered_set<const SyncNode *>, CallStringHash>>>
-      m_reachable_from_cs;
-  std::unordered_map<size_t, const SyncNode *> m_node_id_to_node;
+  mutable std::unordered_map<
+      StaticThreadID, std::unordered_map<size_t, std::unordered_set<size_t>>>
+      m_reachable_node_ids;
+  std::unordered_map<StaticNodeKey, size_t, StaticNodeKeyHash>
+      m_static_node_to_id;
+  std::vector<StaticNodeKey> m_static_node_by_id;
 
   // Return-site -> call-site mapping for context-sensitive Ret edge handling
   std::unordered_map<const SyncNode *, const SyncNode *> m_ret_to_call;
@@ -192,7 +200,7 @@ private:
     Context ctx;
     ThreadID base_tid;               // originating TFG thread
     const SyncNode *entry = nullptr; // entry node in this static thread
-    std::vector<const SyncNode *> nodes;
+    std::vector<StaticNodeKey> nodes;
   };
 
   llvm::Module &m_module;
@@ -209,7 +217,8 @@ private:
   std::unordered_map<Context, StaticThreadID, ContextHash> m_ctx_to_stid;
   std::vector<StaticThread> m_static_threads;
 
-  std::unordered_map<const SyncNode *, StaticNodeList> m_sync_node_to_static_nodes;
+  std::unordered_map<const SyncNode *, StaticNodeList>
+      m_sync_node_to_static_nodes;
   std::unordered_map<const llvm::Instruction *, StaticNodeList>
       m_inst_to_static_nodes;
   std::unordered_map<StaticNodeKey, StaticNodeList, StaticNodeKeyHash>
@@ -224,7 +233,8 @@ private:
 
   std::set<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
       m_mhp_pairs;
-  mutable std::unordered_map<ThreadID, InstructionSet> m_thread_instruction_cache;
+  mutable std::unordered_map<ThreadID, InstructionSet>
+      m_thread_instruction_cache;
   mutable std::unordered_map<const llvm::Instruction *, InstructionSet>
       m_parallel_instruction_cache;
 
@@ -263,7 +273,8 @@ private:
   StaticVectorClock mergePredecessorClocks(const StaticNodeKey &key) const;
   void addEventToClock(const StaticNodeKey &key, StaticVectorClock &sv) const;
   std::unordered_set<ThreadID> getDescendantThreadIDs(ThreadID tid) const;
-  bool happensBefore(const StaticVectorClock &lhs, const StaticVectorClock &rhs) const;
+  bool happensBefore(const StaticVectorClock &lhs,
+                     const StaticVectorClock &rhs) const;
   bool svcLeq(const StaticVectorClock &lhs, const StaticVectorClock &rhs) const;
   void computeSVMax(const StaticVectorClock &sv1, const StaticVectorClock &sv2,
                     StaticVectorClock &out) const;
@@ -273,7 +284,8 @@ private:
 
   bool isInstructionThreadAmbiguous(const llvm::Instruction *inst) const;
   bool isMustIntraThreadEdge(const SyncNode *from, const SyncNode *to) const;
-  const llvm::PostDominatorTree &getPostDomTree(const llvm::Function *func) const;
+  const llvm::PostDominatorTree &
+  getPostDomTree(const llvm::Function *func) const;
   void enableIndirectForkConservatism();
   bool isMultiInstanceThread(ThreadID tid) const;
 
@@ -289,23 +301,25 @@ private:
   std::unordered_map<const llvm::Value *, std::unordered_set<ThreadID>>
       m_pthread_value_to_threads;
   std::unordered_map<ThreadID, const llvm::Value *> m_thread_to_pthread_value;
-  std::unordered_map<ThreadID,
-                     std::unordered_map<CallContextID,
-                                        std::unordered_set<const llvm::Function *>>>
+  std::unordered_map<
+      ThreadID, std::unordered_map<CallContextID,
+                                   std::unordered_set<const llvm::Function *>>>
       m_visited_functions_by_thread;
-  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_condvar_signals;
-  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>> m_condvar_waits;
+  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>>
+      m_condvar_signals;
+  std::unordered_map<const llvm::Value *, std::vector<SyncNode *>>
+      m_condvar_waits;
   struct BarrierParticipant {
     SyncNode *arrival = nullptr;
     std::vector<SyncNode *> continuations;
   };
-  std::unordered_map<const llvm::Value *,
-                     std::unordered_map<size_t, std::vector<BarrierParticipant>>>
+  std::unordered_map<
+      const llvm::Value *,
+      std::unordered_map<size_t, std::vector<BarrierParticipant>>>
       m_barrier_waits;
-  std::unordered_map<const llvm::Value *,
-                     std::unordered_map<ThreadID, size_t>> m_barrier_phase_by_thread;
-  std::unordered_map<const llvm::Value *,
-                     std::unordered_map<ThreadID, size_t>>
+  std::unordered_map<const llvm::Value *, std::unordered_map<ThreadID, size_t>>
+      m_barrier_phase_by_thread;
+  std::unordered_map<const llvm::Value *, std::unordered_map<ThreadID, size_t>>
       m_pending_split_barrier_phase_by_thread;
   std::unordered_map<const llvm::Value *, size_t> m_barrier_expected_counts;
   std::unordered_set<ThreadID> m_multi_instance_threads;
@@ -314,7 +328,8 @@ private:
   bool m_has_unresolved_fork = false;
   std::unordered_set<const llvm::Function *> m_thread_entry_candidates;
 
-  mutable std::unordered_map<const llvm::Function *, std::unique_ptr<llvm::PostDominatorTree>>
+  mutable std::unordered_map<const llvm::Function *,
+                             std::unique_ptr<llvm::PostDominatorTree>>
       m_post_dom_cache;
 
   static constexpr ThreadID kUnknownThread =

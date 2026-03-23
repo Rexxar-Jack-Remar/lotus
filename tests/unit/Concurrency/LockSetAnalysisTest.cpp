@@ -1431,6 +1431,46 @@ TEST_F(LockSetAnalysisTest,
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
+TEST_F(LockSetAnalysisTest, HeapAllocatedUniqueLockKeepsUnderlyingMutex) {
+  const char *source = R"(
+    declare noalias i8* @malloc(i64)
+    declare void @fake_unique_lock_C1E(i8*, i8*)
+    declare void @fake_unique_lock_D1Ev(i8*)
+
+    @lock = global i8 0
+
+    define i32 @main() {
+    entry:
+      %ul = call i8* @malloc(i64 8)
+      call void @fake_unique_lock_C1E(i8* %ul, i8* @lock)
+      %inside = add i32 1, 2
+      call void @fake_unique_lock_D1Ev(i8* %ul)
+      %after = add i32 %inside, 3
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *inside =
+      findInstructionByName(*module->getFunction("main"), "inside");
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(inside, nullptr);
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(inside, lock));
+  EXPECT_TRUE(lsa.mustHoldLock(inside, lock));
+  EXPECT_FALSE(lsa.mayHoldLock(after, lock));
+  EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

@@ -39,7 +39,7 @@ enum class OwnershipKind {
  * and the lock object allocation site.
  */
 struct LockLifetime {
-  const llvm::AllocaInst *lockObject;     ///< The alloca for the lock object
+  const llvm::Value *lockObject;          ///< Canonical identity of the lock object
   const llvm::CallBase *constructor;      ///< Constructor call (acquire point)
   std::vector<const llvm::Instruction *> destructors; ///< Destructor calls (release points)
   std::vector<const llvm::Value *> underlyingLocks;   ///< Ordered mutexes protected by this RAII object
@@ -61,7 +61,7 @@ struct LockLifetime {
 class RAIILockTracker {
 private:
   /// Map from lock object allocation to its lifetime info
-  std::map<const llvm::AllocaInst *, LockLifetime> lockLifetimes;
+  std::map<const llvm::Value *, LockLifetime> lockLifetimes;
   
   /// Set of destructor calls we've already processed
   std::set<const llvm::Instruction *> processedDestructors;
@@ -80,7 +80,7 @@ public:
    * @param alloca The allocation site of the lock object
    * @return Pointer to LockLifetime if found, nullptr otherwise
    */
-  const LockLifetime *getLockLifetime(const llvm::AllocaInst *alloca) const;
+  const LockLifetime *getLockLifetime(const llvm::Value *lockObject) const;
 
   /**
    * @brief Check if an instruction is a RAII lock constructor
@@ -98,18 +98,18 @@ public:
 
   /**
    * @brief Get all lock lifetimes tracked in this function
-   * @return Map of alloca -> LockLifetime
+   * @return Map of lock-object identity -> LockLifetime
    */
-  const std::map<const llvm::AllocaInst *, LockLifetime> &getAllLockLifetimes() const {
+  const std::map<const llvm::Value *, LockLifetime> &getAllLockLifetimes() const {
     return lockLifetimes;
   }
 
   /**
    * @brief Find the lock object allocation for a constructor call
    * @param ctor Constructor call instruction
-   * @return The alloca for the lock object, or nullptr
+   * @return The canonical lock-object identity, or nullptr
    */
-  static const llvm::AllocaInst *findLockObjectForConstructor(const llvm::CallBase *ctor);
+  static const llvm::Value *findLockObjectForConstructor(const llvm::CallBase *ctor);
 
   /**
    * @brief Extract the underlying mutex/lock from a constructor call
@@ -132,12 +132,12 @@ public:
 
   /**
    * @brief Find all destructor calls for a lock object
-   * @param lockAlloca The allocation of the lock object
+   * @param lockObject The canonical lock-object identity
    * @param F The function containing the lock object
    * @return Vector of destructor call sites
    */
   static std::vector<const llvm::Instruction *> findDestructorsForLockObject(
-      const llvm::AllocaInst *lockAlloca, const llvm::Function *F);
+      const llvm::Value *lockObject, const llvm::Function *F);
 
 private:
   /**

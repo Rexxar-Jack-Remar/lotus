@@ -14,6 +14,7 @@
 #include <deque>
 #include <unordered_set>
 
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
@@ -23,9 +24,9 @@ namespace RAIILock {
 namespace {
 
 const llvm::Instruction *
-findImpreciseLifetimeBoundary(const llvm::AllocaInst *lockAlloca,
+findImpreciseLifetimeBoundary(const llvm::Value *lockObject,
                               const llvm::Function *F) {
-  if (!lockAlloca || !F) {
+  if (!lockObject || !F) {
     return nullptr;
   }
 
@@ -34,8 +35,8 @@ findImpreciseLifetimeBoundary(const llvm::AllocaInst *lockAlloca,
   std::unordered_set<const llvm::Instruction *> use_insts;
   const llvm::Instruction *last_use = nullptr;
 
-  worklist.push_back(lockAlloca);
-  visited.insert(lockAlloca);
+  worklist.push_back(lockObject);
+  visited.insert(lockObject);
 
   while (!worklist.empty()) {
     const llvm::Value *current = worklist.front();
@@ -154,7 +155,7 @@ OwnershipKind RAIILockTracker::getOwnershipKind(const llvm::CallBase *ctor) {
   return OwnershipKind::Immediate;
 }
 
-const llvm::AllocaInst *
+const llvm::Value *
 RAIILockTracker::findLockObjectForConstructor(const llvm::CallBase *ctor) {
   if (!ctor || ctor->getNumOperands() == 0)
     return nullptr;
@@ -164,22 +165,11 @@ RAIILockTracker::findLockObjectForConstructor(const llvm::CallBase *ctor) {
   if (!thisPtr)
     return nullptr;
 
-  // Strip casts to find the underlying alloca
   thisPtr = thisPtr->stripPointerCasts();
-
-  // Check if it's an alloca
-  if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(thisPtr)) {
-    return alloca;
+  if (const llvm::Value *base = llvm::getUnderlyingObject(thisPtr, 32)) {
+    return base->stripPointerCasts();
   }
-
-  // Sometimes the this pointer comes from a bitcast of an alloca
-  for (llvm::User *user : thisPtr->users()) {
-    if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(user)) {
-      return alloca;
-    }
-  }
-
-  return nullptr;
+  return thisPtr;
 }
 
 std::vector<const llvm::Value *>
@@ -215,12 +205,12 @@ RAIILockTracker::extractUnderlyingLocks(const llvm::CallBase *ctor) {
 
 std::vector<const llvm::Instruction *>
 RAIILockTracker::findDestructorsForLockObject(
-    const llvm::AllocaInst *lockAlloca, const llvm::Function *F) {
+    const llvm::Value *lockObject, const llvm::Function *F) {
   std::vector<const llvm::Instruction *> destructors;
   bool hasExplicitDestructor = false;
   bool hasLifetimeEnd = false;
 
-  if (!lockAlloca || !F)
+  if (!lockObject || !F)
     return destructors;
 
   auto addIfMissing = [&](const llvm::Instruction *inst) {
@@ -250,7 +240,10 @@ RAIILockTracker::findDestructorsForLockObject(
       llvm::Value *thisPtr = call->getArgOperand(0);
       thisPtr = thisPtr->stripPointerCasts();
 
-      if (thisPtr == lockAlloca) {
+      if (const llvm::Value *base = llvm::getUnderlyingObject(thisPtr, 32)) {
+        thisPtr = const_cast<llvm::Value *>(base->stripPointerCasts());
+      }
+      if (thisPtr == lockObject) {
         hasExplicitDestructor = true;
         addIfMissing(inst);
       }
@@ -267,7 +260,11 @@ RAIILockTracker::findDestructorsForLockObject(
       // Check for llvm.lifetime.end
       if (const auto *intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(inst)) {
         if (intrinsic->getIntrinsicID() == llvm::Intrinsic::lifetime_end) {
-          if (intrinsic->getArgOperand(1)->stripPointerCasts() == lockAlloca) {
+          llvm::Value *tracked = intrinsic->getArgOperand(1)->stripPointerCasts();
+          if (const llvm::Value *base = llvm::getUnderlyingObject(tracked, 32)) {
+            tracked = const_cast<llvm::Value *>(base->stripPointerCasts());
+          }
+          if (tracked == lockObject) {
             hasLifetimeEnd = true;
             addIfMissing(inst);
           }
@@ -281,15 +278,15 @@ RAIILockTracker::findDestructorsForLockObject(
 
 void RAIILockTracker::processConstructor(const llvm::CallBase *ctor,
                                          const llvm::Function *F) {
-  const llvm::AllocaInst *lockObj = findLockObjectForConstructor(ctor);
+  const llvm::Value *lockObj = findLockObjectForConstructor(ctor);
   if (!lockObj)
     return;
 
-  // Skip if we've already processed this lock object
-  if (lockLifetimes.find(lockObj) != lockLifetimes.end())
-    return;
-
   LockLifetime lifetime;
+  auto existing = lockLifetimes.find(lockObj);
+  if (existing != lockLifetimes.end()) {
+    lifetime = existing->second;
+  }
   lifetime.lockObject = lockObj;
   lifetime.constructor = ctor;
   lifetime.underlyingLocks = extractUnderlyingLocks(ctor);
@@ -341,8 +338,8 @@ void RAIILockTracker::analyzeFunction(const llvm::Function *F) {
 }
 
 const LockLifetime *
-RAIILockTracker::getLockLifetime(const llvm::AllocaInst *alloca) const {
-  auto it = lockLifetimes.find(alloca);
+RAIILockTracker::getLockLifetime(const llvm::Value *lockObject) const {
+  auto it = lockLifetimes.find(lockObject);
   if (it != lockLifetimes.end()) {
     return &it->second;
   }

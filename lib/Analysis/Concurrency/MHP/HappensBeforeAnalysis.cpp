@@ -140,6 +140,62 @@ const BranchInst *getBranchWitness(const Instruction *inst) {
   return nullptr;
 }
 
+const ICmpInst *getAssumeWitnessCmp(const Instruction *inst) {
+  if (!inst) {
+    return nullptr;
+  }
+
+  std::deque<const Value *> worklist;
+  std::unordered_set<const Value *> visited;
+  worklist.push_back(inst);
+  visited.insert(inst);
+
+  const ICmpInst *assume_cmp = nullptr;
+  while (!worklist.empty()) {
+    const Value *current = worklist.front();
+    worklist.pop_front();
+    for (const User *user : current->users()) {
+      if (!visited.insert(user).second) {
+        continue;
+      }
+
+      if (const auto *cmp = dyn_cast<ICmpInst>(user)) {
+        bool feeds_assume = false;
+        for (const User *cmp_user : cmp->users()) {
+          const auto *call = dyn_cast<CallBase>(cmp_user);
+          const auto *intrinsic = dyn_cast_or_null<IntrinsicInst>(call);
+          if (!intrinsic || intrinsic->getIntrinsicID() != Intrinsic::assume) {
+            continue;
+          }
+          if (call->arg_size() == 0 || call->getArgOperand(0) != cmp) {
+            continue;
+          }
+          feeds_assume = true;
+          if (!assume_cmp) {
+            assume_cmp = cmp;
+          } else if (assume_cmp != cmp) {
+            return nullptr;
+          }
+        }
+        if (feeds_assume) {
+          continue;
+        }
+      }
+
+      if (isa<CastInst>(user) || isa<BinaryOperator>(user) ||
+          isa<SelectInst>(user) || isa<PHINode>(user)) {
+        worklist.push_back(user);
+      }
+    }
+  }
+
+  return assume_cmp;
+}
+
+bool hasAssumeWitness(const Instruction *inst) {
+  return getAssumeWitnessCmp(inst) != nullptr;
+}
+
 const BasicBlock *getWitnessSuccessor(const Instruction *inst) {
   const auto *branch = getBranchWitness(inst);
   if (!branch) {
@@ -185,15 +241,42 @@ struct AtomicSyncWitness {
 
 AtomicSyncWitness getAtomicSyncWitness(const Instruction *inst) {
   AtomicSyncWitness witness;
-  const auto *branch = getBranchWitness(inst);
-  if (!branch) {
-    return witness;
+  const ICmpInst *cmp = nullptr;
+  bool sync_on_true = true;
+
+  if (const auto *branch = getBranchWitness(inst)) {
+    cmp = dyn_cast<ICmpInst>(branch->getCondition());
+    if (!cmp) {
+      return witness;
+    }
+
+    const Value *lhs = cmp->getOperand(0);
+    const Value *rhs = cmp->getOperand(1);
+    const auto *lhs_const = dyn_cast<ConstantInt>(lhs);
+    const auto *rhs_const = dyn_cast<ConstantInt>(rhs);
+    const ConstantInt *constant = lhs_const ? lhs_const : rhs_const;
+    if (!constant) {
+      return witness;
+    }
+
+    const bool is_zero = constant->isZero();
+    if (cmp->getPredicate() == ICmpInst::ICMP_NE) {
+      sync_on_true = is_zero;
+    } else {
+      sync_on_true = !is_zero;
+    }
+    witness.successor = branch->getSuccessor(sync_on_true ? 0 : 1);
+    if (!witness.successor) {
+      return witness;
+    }
+  } else {
+    cmp = getAssumeWitnessCmp(inst);
+    if (!cmp) {
+      return witness;
+    }
+    sync_on_true = true;
   }
 
-  const auto *cmp = dyn_cast<ICmpInst>(branch->getCondition());
-  if (!cmp) {
-    return witness;
-  }
   if (cmp->getPredicate() != ICmpInst::ICMP_EQ &&
       cmp->getPredicate() != ICmpInst::ICMP_NE) {
     return witness;
@@ -208,10 +291,25 @@ AtomicSyncWitness getAtomicSyncWitness(const Instruction *inst) {
     return witness;
   }
 
-  witness.successor = getWitnessSuccessor(inst);
+  bool witnesses_nonzero = false;
+  bool witnesses_exact_constant = false;
+  if (constant->isZero()) {
+    witnesses_nonzero =
+        (cmp->getPredicate() == ICmpInst::ICMP_NE && sync_on_true) ||
+        (cmp->getPredicate() == ICmpInst::ICMP_EQ && !sync_on_true);
+  } else {
+    witnesses_exact_constant =
+        (cmp->getPredicate() == ICmpInst::ICMP_EQ && sync_on_true) ||
+        (cmp->getPredicate() == ICmpInst::ICMP_NE && !sync_on_true);
+  }
+
+  if (!witnesses_nonzero && !witnesses_exact_constant) {
+    return witness;
+  }
+
   witness.constant = constant;
-  witness.requires_nonzero = constant->isZero();
-  witness.valid = witness.successor != nullptr;
+  witness.requires_nonzero = witnesses_nonzero;
+  witness.valid = true;
   return witness;
 }
 
@@ -239,7 +337,8 @@ bool constantIntsEqual(const ConstantInt *lhs, const ConstantInt *rhs) {
   }
   const unsigned width =
       std::max(lhs->getValue().getBitWidth(), rhs->getValue().getBitWidth());
-  return lhs->getValue().zextOrTrunc(width) == rhs->getValue().zextOrTrunc(width);
+  return lhs->getValue().zextOrTrunc(width) ==
+         rhs->getValue().zextOrTrunc(width);
 }
 
 const ConstantInt *getAtomicInitialConstant(const Instruction *inst) {
@@ -269,8 +368,8 @@ const ConstantInt *evaluateAtomicRMWValue(const AtomicRMWInst *rmw,
     return nullptr;
   }
 
-  const unsigned width = std::max(current_value->getBitWidth(),
-                                  operand->getBitWidth());
+  const unsigned width =
+      std::max(current_value->getBitWidth(), operand->getBitWidth());
   APInt lhs = current_value->getValue().zextOrTrunc(width);
   APInt rhs = operand->getValue().zextOrTrunc(width);
 
@@ -378,9 +477,8 @@ AtomicLocationKey getExactAtomicLocation(const Instruction *inst) {
 
   ptr = ptr->stripPointerCasts();
   int64_t offset = 0;
-  if (const Value *base =
-          GetPointerBaseWithConstantOffset(ptr, offset,
-                                           inst->getModule()->getDataLayout())) {
+  if (const Value *base = GetPointerBaseWithConstantOffset(
+          ptr, offset, inst->getModule()->getDataLayout())) {
     key.base = base->stripPointerCasts();
     key.offset = offset;
     key.has_precise_offset = true;
@@ -775,19 +873,6 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
     return nullptr;
   };
-  auto getFunctionReturns = [](const Function *func) {
-    std::vector<const Instruction *> exits;
-    if (!func || func->isDeclaration()) {
-      return exits;
-    }
-    for (const BasicBlock &bb : *func) {
-      if (const auto *ret = dyn_cast<ReturnInst>(bb.getTerminator())) {
-        exits.push_back(ret);
-      }
-    }
-    return exits;
-  };
-
   for (Function &F : m_module) {
     if (F.isDeclaration()) {
       continue;
@@ -811,7 +896,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         event.is_fence = false;
         atomic_events.push_back(event);
         if (event.location.base) {
-          events_by_location[event.location].push_back(atomic_events.size() - 1);
+          events_by_location[event.location].push_back(atomic_events.size() -
+                                                       1);
         }
 
         if (hasReleaseSemantics(inst) &&
@@ -841,14 +927,15 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
       if (type == ThreadAPI::TD_BAR_INIT && call->arg_size() >= 3) {
         if (const Value *barrier = threadAPI->getBarrierVal(inst)) {
-          if (const auto *count = dyn_cast<ConstantInt>(call->getArgOperand(2))) {
+          if (const auto *count =
+                  dyn_cast<ConstantInt>(call->getArgOperand(2))) {
             barrier_expected_counts[barrier->stripPointerCasts()] =
                 static_cast<size_t>(count->getZExtValue());
           }
         }
       }
 
-	      if (callee && callee->getName().contains("get_future") &&
+      if (callee && callee->getName().contains("get_future") &&
           call->arg_size() >= 1) {
         const Value *promise_obj = traceSharedState(call->getArgOperand(0));
         if (promise_obj) {
@@ -967,7 +1054,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       continue;
     }
 
-    std::vector<mhp::SyncNode *> async_exits = tfg.getThreadExitNodes(async_tid);
+    std::vector<mhp::SyncNode *> async_exits =
+        tfg.getThreadExitNodes(async_tid);
     if (async_exits.empty()) {
       continue;
     }
@@ -1016,20 +1104,9 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
 
     if (event.is_load_like) {
-      const Instruction *cursor = event.inst->getNextNode();
-      while (cursor) {
-        if (CppAtomics::isFence(cursor)) {
-          if (CppAtomics::isFenceAcquire(cursor) ||
-              CppAtomics::isFenceAcqRel(cursor) ||
-              CppAtomics::isFenceSeqCst(cursor)) {
-            acquire_fence_anchor[cursor] = event.inst;
-          }
-          break;
-        }
-        if (!isFenceAnchorCompatibleInstruction(cursor)) {
-          break;
-        }
-        cursor = cursor->getNextNode();
+      if (const Instruction *fence =
+              getSingleFollowingAcquireFence(event.inst)) {
+        acquire_fence_anchor[fence] = event.inst;
       }
     }
   }
@@ -1044,7 +1121,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     if (loc_it == events_by_location.end() || loc_it->second.empty()) {
       return candidates;
     }
-    const Instruction *representative = atomic_events[loc_it->second.front()].inst;
+    const Instruction *representative =
+        atomic_events[loc_it->second.front()].inst;
 
     const AtomicEvent *release_head = nullptr;
     std::vector<const AtomicEvent *> release_rmw_events;
@@ -1075,7 +1153,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         }
         if (event.is_cmpxchg && !event.has_success_witness) {
           ++deferred_direct_atomic_relations;
-          ++m_deferred_sync_counts["atomic_cmpxchg_release_missing_success_witness"];
+          ++m_deferred_sync_counts
+              ["atomic_cmpxchg_release_missing_success_witness"];
           continue;
         }
         if (event.is_rmw) {
@@ -1118,7 +1197,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
     if (effective_release_head) {
       for (const AtomicEvent *rmw_candidate : release_sequence_tails) {
-        if (hasProgramOrder(rmw_candidate->inst, effective_release_head->inst)) {
+        if (hasProgramOrder(rmw_candidate->inst,
+                            effective_release_head->inst)) {
           candidates.clear();
           return candidates;
         }
@@ -1150,7 +1230,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     if (loc_it == events_by_location.end() || loc_it->second.empty()) {
       return targets;
     }
-    const Instruction *representative = atomic_events[loc_it->second.front()].inst;
+    const Instruction *representative =
+        atomic_events[loc_it->second.front()].inst;
 
     for (const auto &bucket : events_by_location) {
       if (bucket.second.empty()) {
@@ -1169,10 +1250,11 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         }
         if (event.is_cmpxchg && !event.has_success_witness) {
           ++deferred_direct_atomic_relations;
-          ++m_deferred_sync_counts["atomic_cmpxchg_acquire_missing_success_witness"];
+          ++m_deferred_sync_counts
+              ["atomic_cmpxchg_acquire_missing_success_witness"];
           continue;
         }
-        if (!hasBranchWitness(event.inst)) {
+        if (!hasBranchWitness(event.inst) && !hasAssumeWitness(event.inst)) {
           ++deferred_direct_atomic_relations;
           ++m_deferred_sync_counts["atomic_direct_missing_branch_witness"];
           continue;
@@ -1185,7 +1267,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       if (!sameAtomicLocation(entry.second, representative)) {
         continue;
       }
-      if (!hasBranchWitness(entry.second)) {
+      if (!hasBranchWitness(entry.second) && !hasAssumeWitness(entry.second)) {
         ++deferred_mixed_fence_relations;
         ++m_deferred_sync_counts["atomic_mixed_fence_missing_branch_witness"];
         continue;
@@ -1200,7 +1282,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     auto getBarrierPhaseKey = [&](const Instruction *inst) {
       const Value *identity = threadAPI->getBarrierVal(inst);
       identity = identity ? identity->stripPointerCasts() : nullptr;
-      return std::make_pair(identity ? identity : static_cast<const Value *>(inst),
+      return std::make_pair(identity ? identity
+                                     : static_cast<const Value *>(inst),
                             m_mhp.getThreadID(inst));
     };
 
@@ -1275,8 +1358,9 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     std::vector<const AtomicEvent *> release_sequence_events;
     for (size_t idx : entry.second) {
       const AtomicEvent &event = atomic_events[idx];
-      if (event.inst != release_candidates.front().second && event.is_store_like &&
-          event.is_rmw && (!event.is_cmpxchg || event.has_success_witness)) {
+      if (event.inst != release_candidates.front().second &&
+          event.is_store_like && event.is_rmw &&
+          (!event.is_cmpxchg || event.has_success_witness)) {
         if (!release_sequence_events.empty()) {
           ambiguous_release_sequence = true;
         }
@@ -1328,8 +1412,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
           continue;
         }
       } else if (!target.is_fence_target &&
-                 !releaseMatchesAcquireWitness(release_candidates.front().second,
-                                               target.target)) {
+                 !releaseMatchesAcquireWitness(
+                     release_candidates.front().second, target.target)) {
         ++deferred_direct_atomic_relations;
         ++m_deferred_sync_counts["atomic_witness_value_incompatible"];
         continue;
@@ -1429,16 +1513,17 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
   size_t latch_edges = 0;
   size_t deferred_latch_relations = 0;
-  auto countMatchingLatches = [&](const Instruction *inst,
-                                  const std::vector<const Instruction *> &candidates) {
-    size_t count = 0;
-    for (const Instruction *candidate : candidates) {
-      if (sameLatch(inst, candidate)) {
-        ++count;
-      }
-    }
-    return count;
-  };
+  auto countMatchingLatches =
+      [&](const Instruction *inst,
+          const std::vector<const Instruction *> &candidates) {
+        size_t count = 0;
+        for (const Instruction *candidate : candidates) {
+          if (sameLatch(inst, candidate)) {
+            ++count;
+          }
+        }
+        return count;
+      };
   for (const Instruction *countdown : latch_countdowns) {
     for (const Instruction *wait : latch_waits) {
       if (!sameLatch(countdown, wait)) {
@@ -1593,8 +1678,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   m_deferred_sync_counts["latch_ops"] =
       latch_countdowns.size() + latch_waits.size();
   m_deferred_sync_counts["latch_sync_edges"] = latch_edges;
-  m_deferred_sync_counts["latch_relations_deferred"] =
-      deferred_latch_relations;
+  m_deferred_sync_counts["latch_relations_deferred"] = deferred_latch_relations;
   m_deferred_sync_counts["barrier_ops"] =
       barrier_arrives.size() + barrier_waits.size();
   m_deferred_sync_counts["barrier_sync_edges"] = barrier_edges;
@@ -1742,20 +1826,27 @@ bool HappensBeforeAnalysis::hasProgramOrder(const Instruction *A,
   mhp::ThreadID b_tid = m_mhp.getThreadID(B);
   const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
   std::vector<mhp::SyncNode *> start_nodes =
-      a_tid == std::numeric_limits<mhp::ThreadID>::max() ? tfg.getNodes(A)
-                                                         : tfg.getNodes(A, a_tid);
+      a_tid == std::numeric_limits<mhp::ThreadID>::max()
+          ? tfg.getNodes(A)
+          : tfg.getNodes(A, a_tid);
   std::vector<mhp::SyncNode *> end_nodes =
-      b_tid == std::numeric_limits<mhp::ThreadID>::max() ? tfg.getNodes(B)
-                                                         : tfg.getNodes(B, b_tid);
+      b_tid == std::numeric_limits<mhp::ThreadID>::max()
+          ? tfg.getNodes(B)
+          : tfg.getNodes(B, b_tid);
   if (start_nodes.empty() || end_nodes.empty()) {
     return false;
   }
 
   for (mhp::SyncNode *start : start_nodes) {
+    bool reached = false;
     for (mhp::SyncNode *end : end_nodes) {
-      if (!canReach(start, end)) {
-        return false;
+      if (canReach(start, end)) {
+        reached = true;
+        break;
       }
+    }
+    if (!reached) {
+      return false;
     }
   }
   return true;
@@ -1781,7 +1872,8 @@ bool HappensBeforeAnalysis::sameAtomicLocation(
   if (lhs == rhs) {
     return true;
   }
-  if (lhs.base == rhs.base && lhs.has_precise_offset && rhs.has_precise_offset) {
+  if (lhs.base == rhs.base && lhs.has_precise_offset &&
+      rhs.has_precise_offset) {
     return false;
   }
 
@@ -1846,28 +1938,66 @@ const Instruction *HappensBeforeAnalysis::findNearestAtomicInBlock(
   }
 }
 
-const Instruction *
-HappensBeforeAnalysis::getSinglePrecedingAtomicLoad(const Instruction *inst) const {
+const Instruction *HappensBeforeAnalysis::getSinglePrecedingAtomicLoad(
+    const Instruction *inst) const {
   return findNearestAtomicInBlock(inst, true, true, false);
 }
 
-const Instruction *
-HappensBeforeAnalysis::getSingleFollowingAcquireFence(const Instruction *inst) const {
-  const Instruction *next = inst ? inst->getNextNode() : nullptr;
-  while (next && isFenceAnchorCompatibleInstruction(next)) {
-    if (CppAtomics::isFence(next)) {
-      break;
+const Instruction *HappensBeforeAnalysis::getSingleFollowingAcquireFence(
+    const Instruction *inst) const {
+  if (!inst) {
+    return nullptr;
+  }
+
+  std::deque<const Instruction *> worklist;
+  std::unordered_set<const Instruction *> visited;
+  const Instruction *fence = nullptr;
+
+  auto enqueue = [&](const Instruction *candidate) {
+    if (candidate && visited.insert(candidate).second) {
+      worklist.push_back(candidate);
     }
-    next = next->getNextNode();
+  };
+
+  if (const Instruction *next = inst->getNextNode()) {
+    enqueue(next);
+  } else {
+    for (const BasicBlock *succ : successors(inst->getParent())) {
+      enqueue(&succ->front());
+    }
   }
-  if (!next || !CppAtomics::isFence(next)) {
-    return nullptr;
+
+  while (!worklist.empty()) {
+    const Instruction *current = worklist.front();
+    worklist.pop_front();
+
+    if (CppAtomics::isFence(current)) {
+      if (!(CppAtomics::isFenceAcquire(current) ||
+            CppAtomics::isFenceAcqRel(current) ||
+            CppAtomics::isFenceSeqCst(current))) {
+        return nullptr;
+      }
+      if (!fence) {
+        fence = current;
+      } else if (fence != current) {
+        return nullptr;
+      }
+      continue;
+    }
+
+    if (!isFenceAnchorCompatibleInstruction(current)) {
+      return nullptr;
+    }
+
+    if (const Instruction *next = current->getNextNode()) {
+      enqueue(next);
+    } else {
+      for (const BasicBlock *succ : successors(current->getParent())) {
+        enqueue(&succ->front());
+      }
+    }
   }
-  if (!(CppAtomics::isFenceAcquire(next) || CppAtomics::isFenceAcqRel(next) ||
-        CppAtomics::isFenceSeqCst(next))) {
-    return nullptr;
-  }
-  return next;
+  return fence;
 }
 
 const PostDominatorTree &
@@ -1892,7 +2022,10 @@ bool HappensBeforeAnalysis::hasSupportedAtomicWitness(
   if (hasBranchWitness(inst)) {
     return true;
   }
-  return getSingleFollowingAcquireFence(inst) != nullptr && hasBranchWitness(inst);
+  if (const Instruction *fence = getSingleFollowingAcquireFence(inst)) {
+    return hasBranchWitness(fence);
+  }
+  return false;
 }
 
 bool HappensBeforeAnalysis::samePromiseFuturePair(
@@ -1984,19 +2117,24 @@ const Value *HappensBeforeAnalysis::traceSharedState(const Value *value) const {
   std::unordered_set<const Value *> visited;
   const Value *resolved = nullptr;
   bool ambiguous = false;
+  size_t expansions = 0;
+  constexpr size_t kTraceExpansionLimit = 4096;
 
   while (!worklist.empty()) {
     const Value *current = worklist.back();
     worklist.pop_back();
+    if (++expansions > kTraceExpansionLimit) {
+      ambiguous = true;
+      break;
+    }
     if (!current || !visited.insert(current).second) {
       continue;
     }
 
     auto mapped = m_future_shared_state.find(current);
     if (mapped != m_future_shared_state.end()) {
-      const Value *candidate = mapped->second
-                                   ? mapped->second->stripPointerCasts()
-                                   : nullptr;
+      const Value *candidate =
+          mapped->second ? mapped->second->stripPointerCasts() : nullptr;
       if (!resolved) {
         resolved = candidate;
       } else if (candidate && resolved != candidate &&
@@ -2130,22 +2268,29 @@ bool HappensBeforeAnalysis::happensBefore(const Instruction *A,
   mhp::ThreadID b_tid = m_mhp.getThreadID(B);
   const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
   std::vector<mhp::SyncNode *> start_nodes =
-      a_tid == std::numeric_limits<mhp::ThreadID>::max() ? tfg.getNodes(A)
-                                                         : tfg.getNodes(A, a_tid);
+      a_tid == std::numeric_limits<mhp::ThreadID>::max()
+          ? tfg.getNodes(A)
+          : tfg.getNodes(A, a_tid);
   std::vector<mhp::SyncNode *> end_nodes =
-      b_tid == std::numeric_limits<mhp::ThreadID>::max() ? tfg.getNodes(B)
-                                                         : tfg.getNodes(B, b_tid);
+      b_tid == std::numeric_limits<mhp::ThreadID>::max()
+          ? tfg.getNodes(B)
+          : tfg.getNodes(B, b_tid);
   if (start_nodes.empty() || end_nodes.empty()) {
     m_hb_cache[key] = false;
     return false;
   }
 
   for (mhp::SyncNode *start : start_nodes) {
+    bool reached = false;
     for (mhp::SyncNode *end : end_nodes) {
-      if (!canReachWithHB(start, end)) {
-        m_hb_cache[key] = false;
-        return false;
+      if (canReachWithHB(start, end)) {
+        reached = true;
+        break;
       }
+    }
+    if (!reached) {
+      m_hb_cache[key] = false;
+      return false;
     }
   }
 

@@ -14,6 +14,7 @@
 #define JOIN_TARGET_ANALYSIS_H
 
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Analysis/Concurrency/Utils/ThreadMultiplicity.h"
 
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/Instruction.h>
@@ -109,6 +110,8 @@ private:
   mutable std::unordered_map<const llvm::Function *,
                              std::unique_ptr<llvm::PostDominatorTree>>
       m_postDomCache;
+  mutable std::unique_ptr<concurrency::ThreadMultiplicityAnalysis>
+      m_threadMultiplicity;
 };
 
 } // namespace mhp

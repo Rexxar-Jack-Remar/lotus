@@ -673,6 +673,7 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
   };
 
   clearFunctionFacts(func);
+  const LockSet all_locks_in_function = getAllLocksInFunction(func);
 
   // Standard forward dataflow analysis using a worklist algorithm.
   //
@@ -736,7 +737,7 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
                                      : LockSet());
             must_inputs.push_back(it_must != m_must_locksets_exit.end()
                                       ? it_must->second
-                                      : LockSet());
+                                      : all_locks_in_function);
             may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end()
                                           ? it_mr->second
                                           : LockSet());
@@ -745,10 +746,10 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
                                            : LockSet());
             must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end()
                                            ? it_ur->second
-                                           : LockSet());
+                                           : all_locks_in_function);
             must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end()
                                             ? it_uw->second
-                                            : LockSet());
+                                            : all_locks_in_function);
           }
         }
       } else {
@@ -898,6 +899,11 @@ void LockSetAnalysis::computeInterproceduralLockSets() {
       analyzeFunction(&func);
     }
   }
+
+  for (auto &entry : m_function_summaries) {
+    entry.second.is_analyzed = false;
+  }
+  bottomUpTraversal();
 
   errs() << "Interprocedural lock set analysis complete.\n";
 }
